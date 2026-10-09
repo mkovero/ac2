@@ -77,7 +77,7 @@ fn trace_data(meta: &TraceMeta) -> ConnEvent {
 }
 
 /// Live transfer frames of measurements `ids`.
-fn tf_frames(t: &mut T, ids: &[u32]) {
+pub(super) fn tf_frames(t: &mut T, ids: &[u32]) {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::FrameData;
     let mut latest = Latest::default();
@@ -120,11 +120,17 @@ fn loaded(s: State) -> T {
 }
 
 fn legend(t: &T) -> Vec<String> {
-    let mut v: Vec<String> = crate::scenes::transfer(&t.st, &Theme::dark(), SIZE, now())
-        .legend
-        .iter()
-        .map(|e| e.name.clone())
-        .collect();
+    let mut v: Vec<String> = crate::scenes::transfer(
+        &t.st,
+        t.pane(PaneKind::Transfer),
+        &Theme::dark(),
+        SIZE,
+        now(),
+    )
+    .legend
+    .iter()
+    .map(|e| e.name.clone())
+    .collect();
     v.sort();
     v
 }
@@ -138,14 +144,20 @@ fn the_transfer_pane_draws_its_measurements_group_only() {
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
     assert_eq!(t.st.transfer_group(), Some(MeasId(1)));
-    t.st.update(Msg::PaneShow(PaneKind::Transfer, MeasId(3)), &t.keys);
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(3))),
+        &t.keys,
+    );
     assert_eq!(legend(&t), ["Delay tower", "t11"]);
     // A trace selected brings its measurement's group with it.
     t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
     assert_eq!(t.st.transfer_group(), Some(MeasId(1)));
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
     // The math channel shown on the pane draws its owner's group.
-    t.st.update(Msg::PaneShow(PaneKind::Transfer, MeasId(6)), &t.keys);
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(6))),
+        &t.keys,
+    );
     assert_eq!(t.st.transfer_group(), Some(MeasId(1)));
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
     // A hidden measurement leaves its live curve out; its group stays.
@@ -254,17 +266,23 @@ fn a_sweeps_runs_show_when_the_sweep_is_the_panes() {
     s.traces = vec![run.clone()];
     let mut t = T::new();
     t.conn(mirror(s));
+    // A sweep pane beside the grid: the sweep selected goes there.
+    t.go(PaneKind::Distortion);
+    t.key("Alt+1");
     let (data, grid) = sweep_data(20);
     t.conn(ConnEvent::Trace(data, grid));
     tf_frames(&mut t, &[1]);
     // Selecting the sweep in the list leaves the transfer pane on the live measurement.
     t.st.update(Msg::SelectMeas(MeasId(5)), &t.keys);
     assert_eq!(
-        t.st.pane_meas(PaneKind::Transfer).map(|m| m.id),
+        t.st.kind_meas(PaneKind::Transfer).map(|m| m.id),
         Some(MeasId(1))
     );
     assert_eq!(legend(&t), ["Main L"]);
-    t.st.update(Msg::PaneShow(PaneKind::Transfer, MeasId(5)), &t.keys);
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(5))),
+        &t.keys,
+    );
     assert_eq!(legend(&t), [run.edit.name.as_str()]);
     // The IR pane keeps a transfer measurement.
     assert_eq!(
@@ -272,7 +290,10 @@ fn a_sweeps_runs_show_when_the_sweep_is_the_panes() {
         Some(MeasId(1))
     );
     assert!(t.key("S").is_empty());
-    t.st.update(Msg::PaneShow(PaneKind::Transfer, MeasId(1)), &t.keys);
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
+        &t.keys,
+    );
     assert_eq!(legend(&t), ["Main L"]);
     t.st.update(Msg::SelectTrace(TraceId(20)), &t.keys);
     assert_eq!(legend(&t), [run.edit.name.as_str()]);
@@ -280,18 +301,24 @@ fn a_sweeps_runs_show_when_the_sweep_is_the_panes() {
 
 /// The legend's `name · tags` lines, sorted.
 fn legend_text(t: &T) -> Vec<String> {
-    let mut v: Vec<String> = crate::scenes::transfer(&t.st, &Theme::dark(), SIZE, now())
-        .legend
-        .iter()
-        .map(|e| {
-            let mut s = e.name.clone();
-            for tag in &e.tags {
-                s.push_str(" · ");
-                s.push_str(tag);
-            }
-            s
-        })
-        .collect();
+    let mut v: Vec<String> = crate::scenes::transfer(
+        &t.st,
+        t.pane(PaneKind::Transfer),
+        &Theme::dark(),
+        SIZE,
+        now(),
+    )
+    .legend
+    .iter()
+    .map(|e| {
+        let mut s = e.name.clone();
+        for tag in &e.tags {
+            s.push_str(" · ");
+            s.push_str(tag);
+        }
+        s
+    })
+    .collect();
     v.sort();
     v
 }

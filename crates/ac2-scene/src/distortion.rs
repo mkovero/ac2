@@ -438,7 +438,7 @@ pub fn distortion_scene(
         &y_fundamental,
         false,
         FUNDAMENTAL_TITLE,
-        view.chrome.distortion,
+        view.chrome,
         theme,
     );
 
@@ -467,7 +467,7 @@ pub fn distortion_scene(
         &y_axis,
         true,
         title,
-        view.chrome.distortion,
+        view.chrome,
         theme,
     );
     let ym = y_axis.mapping;
@@ -629,7 +629,7 @@ pub fn distortion_scene(
         ));
     }
 
-    let cursor_hz = view.cursor_hz.filter(|_| view.chrome.distortion.cursor());
+    let cursor_hz = view.cursor_hz.filter(|_| view.chrome.cursor());
     let cursor = cursor_hz.zip(sweep).and_then(|(hz, (t, s))| {
         let i = nearest_column(t.freqs, hz)?;
         let f = t.freqs[i];
@@ -746,7 +746,7 @@ pub fn sweep_ir_scene(
         status,
         view,
         &view.distortion.ir,
-        view.chrome.distortion,
+        view.chrome,
         theme,
         ir_size,
     );

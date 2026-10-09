@@ -109,7 +109,7 @@ fn with_window(w: Window) -> T {
             open_dialog(&mut t, backends(true));
         }
         Window::PaneMenu => {
-            t.st.update(Msg::PaneMenu(PaneKind::Transfer), &t.keys);
+            t.st.update(Msg::PaneMenu(t.pane(PaneKind::Transfer)), &t.keys);
         }
         Window::Offer => {
             t.st.overlay = Overlay::Offer(Box::new(Offer {
@@ -283,9 +283,9 @@ fn help_scrolls_with_the_arrows_and_page_keys() {
     t.key("Home");
     assert_eq!(t.st.help_scroll, 0.0);
     // Other keys keep working with the keys shown: T steps the focused plot's grid.
-    let chrome = t.st.view.chrome;
+    let chrome = t.st.modes().chrome;
     t.key("T");
-    assert_ne!(t.st.view.chrome, chrome);
+    assert_ne!(t.st.modes().chrome, chrome);
     assert_eq!(t.st.overlay, Overlay::Help);
     // Opened again, it starts at the top.
     t.key("Down");
@@ -359,7 +359,11 @@ fn palette_and_lists_page_and_wheel() {
     };
     t.key("Home");
     assert_eq!(index(&t), 0);
-    let n = t.st.pane_candidates(PaneKind::Transfer).len();
+    let pane = match t.st.overlay {
+        Overlay::PaneMenu(m) => m.pane,
+        ref o => panic!("{o:?}"),
+    };
+    let n = t.st.pane_menu_rows(pane).len();
     t.st.update(Msg::Wheel { rows: 5 }, &t.keys);
     assert_eq!(index(&t), n - 1);
 }

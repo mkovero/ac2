@@ -301,8 +301,8 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
         st.prefs.spl_hold_ms,
         st.view.spectrum.spectrograph.span_s,
         crate::settings::PaneViews {
-            spectrum: st.view.spectrum.mode,
-            sweep: st.view.distortion.mode,
+            spectrum: st.kind_modes(crate::state::PaneKind::Spectrum).spectrum,
+            sweep: st.kind_modes(crate::state::PaneKind::Distortion).sweep,
         },
     );
     for (row, value) in rows {

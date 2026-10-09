@@ -133,7 +133,7 @@ fn the_ir_pane_zooms_and_pans_time_and_value() {
 
     // Log: the dB axis. Ctrl+wheel about −30 dB, Shift+wheel pans.
     t.key("G");
-    assert_eq!(t.st.view.ir.mode, IrMode::Log);
+    assert_eq!(t.st.kind_modes(PaneKind::Ir).ir, IrMode::Log);
     nav(
         &mut t,
         IrPane::Live,
@@ -175,10 +175,17 @@ fn the_ir_cursor_reads_time_and_value() {
     t.key("Alt+3");
     let cursor = |t: &T| axes(t, IrPane::Live).cursor_ms;
     let reading = |t: &T| {
-        crate::scenes::ir(&t.st, &t.keys, &Theme::dark(), SIZE, now())
-            .expect("scene")
-            .cursor
-            .map(|c| c.text())
+        crate::scenes::ir(
+            &t.st,
+            t.pane(PaneKind::Ir),
+            &t.keys,
+            &Theme::dark(),
+            SIZE,
+            now(),
+        )
+        .expect("scene")
+        .cursor
+        .map(|c| c.text())
     };
     t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
     assert_eq!(cursor(&t), Some(0.5));
@@ -214,7 +221,7 @@ fn sweep_with_ir(t: &mut T) {
 fn the_sweep_ir_view_has_its_own_navigation() {
     let mut t = T::new();
     sweep_with_ir(&mut t);
-    t.key("Alt+5");
+    t.go(PaneKind::Distortion);
     assert_eq!(t.st.ir_target(), None, "response & distortion first");
     let freq = t.st.nav.target;
     t.key("G");
@@ -226,7 +233,13 @@ fn the_sweep_ir_view_has_its_own_navigation() {
     assert_eq!(t.st.nav.target, freq);
     assert_eq!(axes(&t, IrPane::Live), IrAxes::default());
     t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
-    let s = crate::scenes::sweep(&t.st, &Theme::dark(), SIZE, now());
+    let s = crate::scenes::sweep(
+        &t.st,
+        t.pane(PaneKind::Distortion),
+        &Theme::dark(),
+        SIZE,
+        now(),
+    );
     let crate::scenes::SweepPane::Ir(ir) = s else {
         panic!("the IR view");
     };
@@ -246,10 +259,16 @@ fn the_sweep_ir_view_has_its_own_navigation() {
 fn the_distortion_cursor_reads_in_db_and_percent() {
     let mut t = T::new();
     sweep_with_ir(&mut t);
-    t.key("Alt+5");
+    t.go(PaneKind::Distortion);
     t.st.update(Msg::CursorAt(Some(1000.0)), &t.keys);
     let rows = |t: &T| {
-        let s = crate::scenes::sweep(&t.st, &Theme::dark(), SIZE, now());
+        let s = crate::scenes::sweep(
+            &t.st,
+            t.pane(PaneKind::Distortion),
+            &Theme::dark(),
+            SIZE,
+            now(),
+        );
         let crate::scenes::SweepPane::Distortion(d) = s else {
             panic!("the distortion view");
         };

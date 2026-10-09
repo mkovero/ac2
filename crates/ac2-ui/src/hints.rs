@@ -140,7 +140,7 @@ mod tests {
                 "Ctrl+I zoom level",
                 "Shift+Home fit",
                 "N next measurement",
-                "Shift+I hide pane",
+                "Ctrl+D close pane",
                 "W maximise",
                 "H all keys"
             ]
@@ -168,7 +168,7 @@ mod tests {
                 "G response/IR/room",
                 "Shift+G linear/log/ETC",
                 "W maximise",
-                "Shift+W hide pane",
+                "Ctrl+D close pane",
                 "H all keys"
             ]
         );

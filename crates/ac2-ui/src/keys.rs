@@ -369,13 +369,19 @@ commands! {
     StimulusOutputs => "stimulus_outputs", "Stimulus outputs: tick them in Settings › Inputs & outputs…", [Global];
     StimulusTakeOver => "stimulus_take_over", "Stimulus: take over the lease from another client and arm", [Global];
 
-    FocusTransfer => "focus_transfer", "Focus transfer-function pane", [Global];
-    FocusSpectrum => "focus_spectrum", "Focus spectrum / RTA pane", [Global];
-    FocusIr => "focus_ir", "Focus impulse-response pane", [Global];
-    FocusSpl => "focus_spl", "Focus SPL pane", [Global];
-    FocusDistortion => "focus_distortion", "Focus (and show) the sweep / distortion pane", [Global];
-    NextPane => "next_pane", "Focus next pane", [Global];
-    PrevPane => "prev_pane", "Focus previous pane", [Global];
+    FocusPane1 => "focus_pane_1", "Focus pane 1 (panes count in reading order)", [Global];
+    FocusPane2 => "focus_pane_2", "Focus pane 2", [Global];
+    FocusPane3 => "focus_pane_3", "Focus pane 3", [Global];
+    FocusPane4 => "focus_pane_4", "Focus pane 4", [Global];
+    FocusPane5 => "focus_pane_5", "Focus pane 5", [Global];
+    FocusPane6 => "focus_pane_6", "Focus pane 6", [Global];
+    FocusPane7 => "focus_pane_7", "Focus pane 7", [Global];
+    FocusPane8 => "focus_pane_8", "Focus pane 8", [Global];
+    FocusPane9 => "focus_pane_9", "Focus pane 9", [Global];
+    SplitPane => "split_pane", "Split the focused pane in two (along its longer side)", [Global];
+    ClosePane => "close_pane", "Close the focused pane", [Global];
+    NextPane => "next_pane", "Show next pane kind (transfer, spectrum, IR, SPL, sweep) in the focused pane", [Global];
+    PrevPane => "prev_pane", "Show previous pane kind in the focused pane", [Global];
     MaximizePane => "maximize_pane", "Layout: split → one pane → full screen", [Global];
     NextMeasurement => "next_measurement", "Select next measurement of the focused pane", [Global];
     PrevMeasurement => "prev_measurement", "Select previous measurement of the focused pane", [Global];
@@ -489,7 +495,6 @@ commands! {
     NudgeLater => "nudge_later", "Delay +0.1 ms of the measurement, or of the selected stored trace", [Transfer];
     PhaseReference => "phase_reference", "Make selected trace the phase reference", [Transfer];
     Target => "target", "Load a target curve file…", [Transfer];
-    ToggleIr => "toggle_ir", "Show / hide IR pane", [Transfer, Ir];
     CoherenceMask => "coherence_mask", "Coherence mask: off → 0.3 → 0.5 → 0.7 → 0.9", [Transfer];
     CoherencePlacement => "coherence_placement", "Coherence: own pane / over magnitude", [Transfer];
     LegendTopLeft => "legend_top_left", "Legend: top-left corner (drag it anywhere; its corner grip resizes)", [Transfer];
@@ -532,7 +537,6 @@ commands! {
     DistortionUnit => "distortion_unit", "Distortion in dB re fundamental / percent", [Distortion];
     SweepView => "sweep_view", "Sweep pane: response & distortion → impulse response → room parameters", [Distortion];
     SweepIr => "sweep_ir", "Sweep pane: impulse response (again: response & distortion)", [Distortion];
-    HideDistortion => "hide_distortion", "Hide the sweep / distortion pane", [Distortion];
 }
 
 /// One key in one scope.
@@ -596,11 +600,19 @@ pub fn defaults() -> Vec<Binding> {
         (C::Fullscreen, S::Global, k(K::F11)),
         (C::StimulusLevel, S::Global, k(K::L)),
         // Plain digits are the slots' (as in `ac`); panes take Alt+digit.
-        (C::FocusTransfer, S::Global, alt(K::Num1)),
-        (C::FocusSpectrum, S::Global, alt(K::Num2)),
-        (C::FocusIr, S::Global, alt(K::Num3)),
-        (C::FocusSpl, S::Global, alt(K::Num4)),
-        (C::FocusDistortion, S::Global, alt(K::Num5)),
+        (C::FocusPane1, S::Global, alt(K::Num1)),
+        (C::FocusPane2, S::Global, alt(K::Num2)),
+        (C::FocusPane3, S::Global, alt(K::Num3)),
+        (C::FocusPane4, S::Global, alt(K::Num4)),
+        (C::FocusPane5, S::Global, alt(K::Num5)),
+        (C::FocusPane6, S::Global, alt(K::Num6)),
+        (C::FocusPane7, S::Global, alt(K::Num7)),
+        (C::FocusPane8, S::Global, alt(K::Num8)),
+        (C::FocusPane9, S::Global, alt(K::Num9)),
+        // Ctrl+letter: plain N and D are the panes' own keys (next measurement, delay), and
+        // letters sit where they are on every layout.
+        (C::SplitPane, S::Global, cmd(K::N)),
+        (C::ClosePane, S::Global, cmd(K::D)),
         (C::SweepNew, S::Global, sh(K::S)),
         // Shift+M, a step on from M (average the shown traces): a math channel by name.
         (C::NewMath, S::Global, sh(K::M)),
@@ -704,8 +716,6 @@ pub fn defaults() -> Vec<Binding> {
         (C::PhaseReference, S::Transfer, k(K::E)),
         (C::Target, S::Transfer, k(K::Z)),
         // Shift+I shows or hides the impulse response wherever there is one (plain I zooms).
-        (C::ToggleIr, S::Transfer, sh(K::I)),
-        (C::ToggleIr, S::Ir, sh(K::I)),
         (C::CoherenceMask, S::Transfer, k(K::B)),
         (C::CoherencePlacement, S::Transfer, sh(K::C)),
         (C::Average, S::Transfer, k(K::M)),
@@ -752,8 +762,6 @@ pub fn defaults() -> Vec<Binding> {
         (C::IrMode, S::Distortion, sh(K::G)),
         (C::DistortionUnit, S::Distortion, k(K::U)),
         (C::SweepIr, S::Distortion, sh(K::I)),
-        // W is the layout key: maximise, and with Shift this pane away.
-        (C::HideDistortion, S::Distortion, sh(K::W)),
     ];
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
     v.into_iter()
@@ -831,7 +839,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::LevelZoomIn, "zoom level", 65),
                     hint(C::LevelFit, "fit", 55),
                     hint(C::NextMeasurement, "next measurement", 60),
-                    hint(C::ToggleIr, "hide pane", 70),
+                    hint(C::ClosePane, "close pane", 45),
                     hint(C::MaximizePane, "maximise", 50),
                 ]
             }
@@ -859,7 +867,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::SweepView, "response/IR/room", 75),
                     hint(C::IrMode, "linear/log/ETC", 70),
                     hint(C::MaximizePane, "maximise", 50),
-                    hint(C::HideDistortion, "hide pane", 40),
+                    hint(C::ClosePane, "close pane", 40),
                 ]
             }
         }
@@ -1210,7 +1218,6 @@ mod tests {
             ("U", CommandId::Invert),
             ("J", CommandId::Offset),
             ("Z", CommandId::Target),
-            ("Shift+I", CommandId::ToggleIr),
             ("B", CommandId::CoherenceMask),
             ("M", CommandId::Average),
             ("Shift+P", CommandId::GroupDelay),
@@ -1218,7 +1225,11 @@ mod tests {
             ("Ctrl+9", CommandId::Slot9),
             ("1", CommandId::ShowSlot1),
             ("9", CommandId::ShowSlot9),
-            ("Alt+2", CommandId::FocusSpectrum),
+            ("Alt+2", CommandId::FocusPane2),
+            ("Alt+9", CommandId::FocusPane9),
+            ("Ctrl+N", CommandId::SplitPane),
+            ("Ctrl+D", CommandId::ClosePane),
+            ("Ctrl+Tab", CommandId::NextPane),
             ("Space", CommandId::StimulusArm),
             ("Enter", CommandId::StimulusFire),
             ("Esc", CommandId::StimulusStop),
@@ -1251,7 +1262,6 @@ mod tests {
         for scope in Scope::ALL {
             assert_eq!(m.lookup(scope, c("H")), Some(CommandId::Help), "{scope:?}");
         }
-        assert_eq!(m.lookup(Scope::Ir, c("Shift+I")), Some(CommandId::ToggleIr));
         assert_eq!(
             m.lookup(Scope::Distortion, c("Shift+I")),
             Some(CommandId::SweepIr)
@@ -1496,14 +1506,56 @@ mod tests {
             Some("H · F1")
         );
         assert_eq!(
-            m.first_chord(CommandId::ToggleIr, Scope::Ir),
-            Chord::parse("Shift+I").ok()
+            m.first_chord(CommandId::ClosePane, Scope::Ir),
+            Chord::parse("Ctrl+D").ok()
         );
         assert_eq!(
             m.first_chord(CommandId::MaximizePane, Scope::Spl),
             Chord::parse("W").ok()
         );
-        assert_eq!(m.first_chord(CommandId::ToggleIr, Scope::Spl), None);
+        assert_eq!(m.first_chord(CommandId::SweepIr, Scope::Spl), None);
+    }
+
+    /// Ctrl+N splits and Ctrl+D closes in every pane: neither takes N (next measurement) or
+    /// D (the transfer pane's typed delay), nor a stimulus key, and both are a letter with
+    /// Ctrl, the same key on Nordic and every other layout (no AltGr, no dead key).
+    #[test]
+    fn split_and_close_are_ctrl_letters_everywhere() {
+        let m = Keymap::default();
+        let c = |s: &str| Chord::parse(s).expect(s);
+        for scope in Scope::ALL {
+            assert_eq!(
+                m.lookup(scope, c("Ctrl+N")),
+                Some(CommandId::SplitPane),
+                "{scope:?}"
+            );
+            assert_eq!(
+                m.lookup(scope, c("Ctrl+D")),
+                Some(CommandId::ClosePane),
+                "{scope:?}"
+            );
+            assert_ne!(m.lookup(scope, c("N")), Some(CommandId::SplitPane));
+            assert_ne!(m.lookup(scope, c("D")), Some(CommandId::ClosePane));
+        }
+        assert_eq!(
+            m.lookup(Scope::Transfer, c("D")),
+            Some(CommandId::TypeDelay)
+        );
+        assert_eq!(
+            m.lookup(Scope::Global, c("N")),
+            Some(CommandId::NextMeasurement)
+        );
+        for chord in [c("Ctrl+N"), c("Ctrl+D")] {
+            assert!(RESERVED.iter().all(|(r, _)| *r != chord), "{chord:?}");
+            assert!(chord.command && !chord.alt && !chord.shift, "{chord:?}");
+            assert!(
+                matches!(chord.key, Key::N | Key::D),
+                "a letter key: {chord:?}"
+            );
+        }
+        let bound = |cmd| m.bindings().iter().filter(|b| b.command == cmd).count();
+        assert_eq!(bound(CommandId::SplitPane), 1);
+        assert_eq!(bound(CommandId::ClosePane), 1);
     }
 
     #[test]

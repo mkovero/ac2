@@ -33,8 +33,10 @@ impl Driver {
             },
             Arc::new(|| {}),
         )?;
+        let mut st = AppState::default();
+        st.set_prefs(crate::common::grid_ui_prefs());
         Ok(Self {
-            st: AppState::default(),
+            st,
             keys: Keymap::default(),
             conn,
         })

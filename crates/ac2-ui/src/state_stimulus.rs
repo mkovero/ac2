@@ -63,7 +63,7 @@ impl AppState {
     /// The sweep view (the sweep pane focused, maximised or not): there the stimulus keys
     /// re-sweep; on every other view they drive the generator for live measuring.
     pub fn sweep_view(&self) -> bool {
-        self.layout.focus == PaneKind::Distortion
+        self.layout.focus_kind() == PaneKind::Distortion
     }
 
     /// What the stimulus keys start next, for the top bar: armed, what Enter fires; idle,
@@ -267,7 +267,7 @@ impl AppState {
                     .and_then(|(t, _)| owner_of(&t.meta))
                     .filter(is)
             })
-            .or_else(|| self.pane_meas(PaneKind::Distortion))
+            .or_else(|| self.kind_meas(PaneKind::Distortion))
     }
 
     pub(super) fn arm(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {
@@ -475,15 +475,30 @@ impl AppState {
                 self.sweep.fit = Some(trace);
                 self.fit_new_sweep();
                 self.release_after_sweep(out);
-                self.layout.shown[PaneKind::Distortion.index()] = true;
-                self.layout.focus = PaneKind::Distortion;
                 let of = self
                     .meas(r.meas)
                     .map_or_else(String::new, |m| format!(" of {}", m.config.name));
-                self.toast(format!(
-                    "{}{of} stored: U dB / %, Shift+I impulse response, Space runs it again",
-                    r.name
-                ));
+                // A sweep pane on screen shows the result; the layout is otherwise the
+                // operator's, and the toast says where the result is.
+                let laid = self.laid_out_panes();
+                match self
+                    .layout
+                    .lead(PaneKind::Distortion)
+                    .filter(|p| laid.contains(p))
+                {
+                    Some(p) => {
+                        self.layout.set_focus(p);
+                        self.toast(format!(
+                            "{}{of} stored: U dB / %, Shift+I impulse response, Space runs it again",
+                            r.name
+                        ));
+                    }
+                    None => self.toast(format!(
+                        "{}{of} stored: Ctrl+Tab to the {} pane to see it",
+                        r.name,
+                        PaneKind::Distortion.title()
+                    )),
+                }
             }
             SweepStatus::Failed { msg, .. } => {
                 self.sweep.run = None;

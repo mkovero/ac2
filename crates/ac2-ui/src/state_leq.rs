@@ -9,7 +9,7 @@ impl AppState {
     pub(super) fn spl_weightings(&mut self, c: CommandId, out: &mut Vec<Request>) {
         use CommandId as C;
         use ac2_proto::model::{TimeWeighting as T, Weighting as W};
-        let Some(mut m) = self.pane_meas(PaneKind::Spl).cloned() else {
+        let Some(mut m) = self.kind_meas(PaneKind::Spl).cloned() else {
             self.warn("no SPL meter: make one first (New SPL meter… in Ctrl+K)");
             return;
         };
@@ -47,7 +47,7 @@ impl AppState {
         // The pane keeps its view: the Leq windows do not follow the meter's weightings, so
         // switching to the meter would read as the windows having changed. The daemon's
         // reply names the new metric either way.
-        self.focus(PaneKind::Spl);
+        self.focus_kind(PaneKind::Spl);
         let (meas, config) = (m.id, m.config);
         self.call(out, Command::MeasUpdate { meas, config }, what);
     }
@@ -165,8 +165,9 @@ impl AppState {
             Ok(config) => {
                 let (meas, name) = (d.meas, d.name.clone());
                 self.overlay = Overlay::None;
-                self.view.spl.mode = self.view.spl.mode.with_leq();
-                self.focus(PaneKind::Spl);
+                self.focus_kind(PaneKind::Spl);
+                let m = self.modes_mut();
+                m.spl = m.spl.with_leq();
                 self.call(
                     out,
                     Command::MeasUpdate { meas, config },

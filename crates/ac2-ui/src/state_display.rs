@@ -143,11 +143,11 @@ impl AppState {
             }
             return Some(OffsetTarget::Trace(t));
         }
-        let pane = match self.layout.focus {
+        let pane = match self.layout.focus_kind() {
             PaneKind::Spectrum => PaneKind::Spectrum,
             _ => PaneKind::Transfer,
         };
-        match self.pane_meas(pane).cloned() {
+        match self.kind_meas(pane).cloned() {
             Some(m) => Some(OffsetTarget::Live(m)),
             None => {
                 self.warn(format!(
@@ -208,15 +208,14 @@ impl AppState {
 
     /// The pane the level keys act on (the focused one), or why not.
     fn level_target(&mut self) -> Option<PaneKind> {
-        let p = self.layout.focus;
+        let p = self.layout.focus_kind();
         let p = level_pane(p).filter(|p| {
-            *p != PaneKind::Distortion
-                || self.view.distortion.mode == ac2_scene::view::SweepMode::Response
+            *p != PaneKind::Distortion || self.modes().sweep == ac2_scene::view::SweepMode::Response
         });
         if p.is_none() {
             self.warn(format!(
                 "{} has no level axis to zoom",
-                self.layout.focus.title()
+                self.layout.focus_kind().title()
             ));
         }
         p
@@ -349,13 +348,12 @@ impl AppState {
             let g = d.grids.get(&f.frame.stamp.grid_id?)?;
             Some((f.frame.clone(), column_frequencies(g)))
         };
+        let shown = self.kind_meas(PaneKind::Transfer);
         match p {
             PaneKind::Transfer => {
-                for m in self
-                    .measurements()
-                    .into_iter()
-                    .filter(|m| self.live_on_transfer_pane(m) || self.live_compared_on_transfer(m))
-                {
+                for m in self.measurements().into_iter().filter(|m| {
+                    self.live_on_transfer_pane(m, shown) || self.live_compared_on_transfer(m, shown)
+                }) {
                     if let Some((f, freqs)) = live(Stream::Tf, m)
                         && let ac2_proto::FrameData::Tf(tf) = &f.data
                     {
@@ -363,7 +361,9 @@ impl AppState {
                     }
                 }
                 for (t, g) in self.traces.values() {
-                    if self.on_transfer_pane(&t.meta) || self.trace_compared_on_transfer(&t.meta) {
+                    if self.on_transfer_pane(&t.meta, shown)
+                        || self.trace_compared_on_transfer(&t.meta, shown)
+                    {
                         add(&column_frequencies(g), &t.mag_db, t.meta.edit.offset.0);
                     }
                 }
@@ -873,26 +873,38 @@ impl AppState {
 
     // ----- which pane a selection brings up ----------------------------------------------
 
-    /// After a measurement was picked (the list, a pane's chip): the pane that draws its
-    /// kind gets the focus unless the focused one draws it already, so a maximised layout
-    /// switches to it.
+    /// After a measurement was picked (the list, a pane's chip): unless the focused pane
+    /// draws it, the pane of its kind worked in last gets the focus; with none on screen the
+    /// focused pane turns into one, so a single or maximised pane switches to it.
     pub(super) fn reveal_meas(&mut self, id: MeasId) {
         let Some(kind) = self.meas(id).map(|m| m.config.kind.clone()) else {
             return;
         };
         // A sweep picked in the list is the sweep pane's: the transfer pane draws its runs
         // only when chosen there.
-        if !self.layout.focus.shows(&kind) || matches!(kind, MeasKind::Sweep { .. }) {
-            let p = PaneKind::for_kind(&kind);
-            self.layout.shown[p.index()] = true;
-            self.layout.focus = p;
+        let fk = self.layout.focus_kind();
+        if fk.shows(&kind)
+            && !(matches!(kind, MeasKind::Sweep { .. }) && fk != PaneKind::Distortion)
+        {
+            return;
         }
+        let home = PaneKind::for_kind(&kind);
+        let laid = self.laid_out_panes();
+        match self.layout.lead(home).filter(|p| laid.contains(p)) {
+            Some(p) => self.layout.set_focus(p),
+            None => {
+                let f = self.layout.focus;
+                self.set_pane_kind(f, home);
+            }
+        }
+        let f = self.layout.focus;
+        self.select_on(f, id);
     }
 
     /// After a stored trace was selected with the layout maximised, or with panes following
     /// the selection: the focus goes to a pane that draws it (the transfer pane draws sweeps
-    /// too; else a sweep's home is the sweep pane). The split layout of every pane keeps the
-    /// focus: every pane is on screen.
+    /// too; else a sweep's home is the sweep pane), the focused pane turning into one when
+    /// none is on screen. The split layout keeps the focus: every pane is on screen.
     pub(super) fn reveal_trace(&mut self) {
         if !self.layout.maximized && !self.prefs.panes_follow {
             return;
@@ -900,10 +912,17 @@ impl AppState {
         let Some(t) = self.selected_trace_meta().cloned() else {
             return;
         };
-        if !drawn_in(&t, self.layout.focus) {
-            let p = home_pane(t.kind);
-            self.layout.shown[p.index()] = true;
-            self.layout.focus = p;
+        if drawn_in(&t, self.layout.focus_kind()) {
+            return;
+        }
+        let p = home_pane(t.kind);
+        let laid = self.laid_out_panes();
+        match self.layout.lead(p).filter(|id| laid.contains(id)) {
+            Some(id) => self.layout.set_focus(id),
+            None => {
+                let f = self.layout.focus;
+                self.set_pane_kind(f, p);
+            }
         }
     }
 }

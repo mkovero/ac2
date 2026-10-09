@@ -24,6 +24,13 @@ channels…*), `ui.toml`, daemon flags. They are now pages of one view:
 Every page says whose its settings are: **this app** (kept in `ui.toml` on this computer)
 or **the rig — all clients** (kept by the daemon; every client sees the change).
 
+Views are per pane (the pane tree, PLAN §8.1): the Display page's spectrum-view and
+sweep-view rows set the view of the pane of that kind focused last, and with no such pane on
+screen say so instead of making one. The layout itself — the tree, each pane's kind, views
+and measurement by name — is this app's, kept in `ui.toml` under `[layout]` (`[layout.tree]`
+and one `[[layout.panes]]` per pane); a layout this version cannot read is dropped and the
+app starts with one pane.
+
 **Keys** (decision K9 holds: an open window owns the keyboard): `Ctrl+P` (palette
 *Settings…*, the ⚙ in the top bar) opens it at the page last shown; `Ctrl+PgUp / PgDn`
 (or `Ctrl+Tab`) step pages, `Alt+1…7` jump; ↑/↓ ←/→ Enter as in every window; Esc closes

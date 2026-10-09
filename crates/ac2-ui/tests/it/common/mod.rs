@@ -597,3 +597,107 @@ impl Rig {
             .push((FrameData::Spec(f), Some(SPEC_GRID.id())));
     }
 }
+
+/// The four panes most tests drive, as an operator would have saved them: transfer across
+/// the top, spectrum, impulse response and SPL side by side below it (Alt+1 … 4 in that
+/// order), the transfer pane focused.
+pub fn grid_prefs() -> ac2_ui::prefs::PanesPrefs {
+    use ac2_ui::state::PaneKind;
+    grid_of(&[PaneKind::Spectrum, PaneKind::Ir, PaneKind::Spl])
+}
+
+/// [`grid_prefs`] with the sweep / distortion pane last in the bottom row (Alt+5).
+pub fn grid_with_sweep_prefs() -> ac2_ui::prefs::PanesPrefs {
+    use ac2_ui::state::PaneKind;
+    grid_of(&[
+        PaneKind::Spectrum,
+        PaneKind::Ir,
+        PaneKind::Spl,
+        PaneKind::Distortion,
+    ])
+}
+
+/// Transfer across the top, `row` side by side below it in equal widths.
+fn grid_of(row: &[ac2_ui::state::PaneKind]) -> ac2_ui::prefs::PanesPrefs {
+    use ac2_ui::state::{Axis, PaneId, PaneKind, PaneModes, PaneNode};
+    fn bottom(first: u32, n: usize) -> PaneNode {
+        if n == 1 {
+            return PaneNode::Leaf(PaneId(first));
+        }
+        PaneNode::Split {
+            axis: Axis::Row,
+            ratio: 1.0 / n as f32,
+            a: Box::new(PaneNode::Leaf(PaneId(first))),
+            b: Box::new(bottom(first + 1, n - 1)),
+        }
+    }
+    let root = PaneNode::Split {
+        axis: Axis::Column,
+        ratio: 0.62,
+        a: Box::new(PaneNode::Leaf(PaneId(1))),
+        b: Box::new(bottom(2, row.len())),
+    };
+    let views = std::iter::once(PaneKind::Transfer)
+        .chain(row.iter().copied())
+        .zip(1..)
+        .map(|(kind, n)| ac2_ui::prefs::PanePrefs {
+            id: PaneId(n),
+            kind,
+            measurement: None,
+            modes: PaneModes::default(),
+        })
+        .collect();
+    ac2_ui::prefs::PanesPrefs {
+        root,
+        focus: PaneId(1),
+        views,
+    }
+}
+
+/// [`grid_prefs`] in a fresh app's preferences.
+pub fn grid_ui_prefs() -> ac2_ui::prefs::UiPrefs {
+    let mut p = ac2_ui::prefs::UiPrefs::default();
+    p.layout.panes = Some(grid_prefs());
+    p
+}
+
+/// The pane showing `kind` (the one focused last when several do).
+pub fn pane(st: &ac2_ui::state::AppState, kind: ac2_ui::state::PaneKind) -> ac2_ui::state::PaneId {
+    st.layout
+        .lead(kind)
+        .unwrap_or_else(|| panic!("no {kind:?} pane"))
+}
+
+/// What the panes drawn now show, in reading order.
+pub fn visible(st: &ac2_ui::state::AppState) -> Vec<ac2_ui::state::PaneKind> {
+    st.visible_panes()
+        .into_iter()
+        .map(|id| st.layout.kind(id))
+        .collect()
+}
+
+/// Pane of `kind` set to show measurement `id`, as a pick from its title chip would.
+pub fn show_on(
+    st: &mut ac2_ui::state::AppState,
+    kind: ac2_ui::state::PaneKind,
+    id: ac2_proto::units::MeasId,
+) {
+    let p = pane(st, kind);
+    if let Some(v) = st.layout.view_mut(p) {
+        v.meas = Some(id);
+    }
+}
+
+/// The layout `p` describes, as the app builds it from `ui.toml`.
+pub fn layout_of(p: &ac2_ui::prefs::PanesPrefs) -> ac2_ui::state::Layout {
+    let views = p
+        .views
+        .iter()
+        .map(|v| {
+            let mut view = ac2_ui::state::View::of(v.kind);
+            view.modes = v.modes;
+            (v.id, view)
+        })
+        .collect();
+    ac2_ui::state::Layout::of(p.root.clone(), views, p.focus)
+}

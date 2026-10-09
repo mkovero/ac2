@@ -280,26 +280,24 @@ fn opening_key_is_not_typed_into_the_prompt() {
 #[test]
 fn keys_follow_the_focused_pane() {
     let mut t = T::new();
-    assert!(t.st.layout.is_shown(PaneKind::Ir));
-    // Transfer pane: Shift+I hides the IR pane.
-    t.key("Shift+I");
-    assert!(!t.st.layout.is_shown(PaneKind::Ir));
-    t.key("Shift+I");
+    assert!(t.shown(PaneKind::Ir));
     // Spectrum pane: P is peak hold.
     t.key("Alt+2");
     assert_eq!(t.st.scope(), Scope::Spectrum);
     t.key("P");
     assert!(t.st.view.spectrum.peak_hold);
-    assert!(t.st.layout.is_shown(PaneKind::Ir));
+    assert!(t.shown(PaneKind::Ir));
     // X means nothing there.
     assert!(t.key("X").is_empty());
-    // Ctrl+Tab cycles panes; W maximizes.
+    // Ctrl+Tab changes what the focused pane shows, its keys with it; W maximizes.
+    let pane = t.st.layout.focus;
     t.key("Ctrl+Tab");
-    assert_eq!(t.st.layout.focus, PaneKind::Ir);
+    assert_eq!((t.st.layout.focus, t.focus_kind()), (pane, PaneKind::Ir));
+    assert_eq!(t.st.scope(), Scope::Ir);
     t.key("Ctrl+Shift+Tab");
-    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
+    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     t.key("W");
-    assert_eq!(t.st.layout.visible(), vec![PaneKind::Spectrum]);
+    assert_eq!(t.visible(), vec![PaneKind::Spectrum]);
 }
 
 #[test]
@@ -502,7 +500,7 @@ fn transfer_commands_need_a_transfer_measurement() {
     // command from the palette says what it needs.
     t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(2)));
-    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
+    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     assert!(t.key("X").is_empty());
     assert!(
         t.st.update(Msg::Command(CommandId::InsertDelay), &t.keys)
@@ -510,7 +508,7 @@ fn transfer_commands_need_a_transfer_measurement() {
     );
     assert!(t.last_toast().contains("transfer-function"));
     // N in the transfer pane only goes through transfer measurements.
-    t.st.layout.focus = PaneKind::Transfer;
+    t.put(PaneKind::Transfer);
     t.key("Shift+N");
     assert_eq!(t.st.selected, Some(MeasId(1)));
 }
@@ -548,7 +546,7 @@ const STIM_TOO: &str = "Main L stopped · stimulus stopped (no transfer measurem
 #[test]
 fn stopping_the_last_transfer_stops_the_stimulus() {
     let mut t = T::new();
-    t.st.layout.focus = PaneKind::Transfer;
+    t.put(PaneKind::Transfer);
     play_noise(&mut t, true);
     let r = t.key("S");
     assert_eq!(meas_stop(&r), (STIM_TOO.into(), true));
@@ -571,7 +569,7 @@ fn stopping_the_last_transfer_stops_the_stimulus() {
 #[test]
 fn stopping_the_last_transfer_disarms_an_armed_stimulus() {
     let mut t = T::new();
-    t.st.layout.focus = PaneKind::Transfer;
+    t.put(PaneKind::Transfer);
     play_noise(&mut t, false);
     assert_eq!(meas_stop(&t.key("S")), (STIM_TOO.into(), true));
 }
@@ -591,9 +589,9 @@ fn every_stop_path_of_a_transfer_stops_the_stimulus() {
         (PaneKind::Distortion, Via::Palette),
     ] {
         let mut t = T::new();
-        t.st.layout.focus = PaneKind::Transfer;
+        t.put(PaneKind::Transfer);
         play_noise(&mut t, true);
-        t.st.layout.focus = focus;
+        t.put(focus);
         t.st.selected = Some(MeasId(1));
         let r = match via {
             Via::Key => t.key("S"),
@@ -609,7 +607,7 @@ fn another_running_transfer_keeps_the_stimulus() {
     let mut s = daemon_state();
     s.measurements.push(meas(3, "Main R", transfer()));
     t.conn(mirror(s.clone()));
-    t.st.layout.focus = PaneKind::Transfer;
+    t.put(PaneKind::Transfer);
     t.st.selected = Some(MeasId(1));
     play_noise(&mut t, true);
     assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
@@ -623,9 +621,9 @@ fn another_running_transfer_keeps_the_stimulus() {
 #[test]
 fn stopping_a_spectrum_keeps_the_stimulus() {
     let mut t = T::new();
-    t.st.layout.focus = PaneKind::Transfer;
+    t.put(PaneKind::Transfer);
     play_noise(&mut t, true);
-    t.st.layout.focus = PaneKind::Spectrum;
+    t.put(PaneKind::Spectrum);
     assert_eq!(meas_stop(&t.key("S")), ("Sub stopped".into(), false));
     assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
 }
@@ -633,7 +631,7 @@ fn stopping_a_spectrum_keeps_the_stimulus() {
 #[test]
 fn a_stimulus_this_app_does_not_hold_keeps_playing() {
     let mut t = T::new();
-    t.st.layout.focus = PaneKind::Transfer;
+    t.put(PaneKind::Transfer);
     // Another client's noise: its lease is not this app's to end.
     let mut s = daemon_state();
     s.generator.owner = Some(ClientId("other".into()));
@@ -643,7 +641,7 @@ fn a_stimulus_this_app_does_not_hold_keeps_playing() {
     assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
     // Nothing playing at all.
     let mut t = T::new();
-    t.st.layout.focus = PaneKind::Transfer;
+    t.put(PaneKind::Transfer);
     assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
     // This client's lease as only the mirror shows it.
     s.generator.owner = Some(ClientId("c1".into()));
@@ -654,7 +652,7 @@ fn a_stimulus_this_app_does_not_hold_keeps_playing() {
 #[test]
 fn a_sweep_is_never_stopped_by_a_transfer_stop() {
     let mut t = T::new();
-    t.st.layout.focus = PaneKind::Transfer;
+    t.put(PaneKind::Transfer);
     play_noise(&mut t, true);
     t.st.sweep.run = Some(sweep_run(SweepStatus::Playing { repeat: 1 }).id);
     assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
@@ -669,13 +667,13 @@ fn a_sweep_is_never_stopped_by_a_transfer_stop() {
 fn the_stimulus_never_changes_the_layout() {
     for keys in [&[][..], &["W"], &["F11"], &["W", "W"]] {
         let mut t = T::new();
-        t.st.layout.focus = PaneKind::Transfer;
+        t.put(PaneKind::Transfer);
         for k in keys {
             t.key(k);
         }
         let seen = |t: &T| {
             (
-                t.st.layout,
+                t.st.layout.clone(),
                 t.st.fullscreen,
                 t.st.stage_view(),
                 t.st.key_hints_shown(),
@@ -738,7 +736,7 @@ fn meas_delete(r: &[Request]) -> (String, bool) {
 fn deleting_the_last_transfer_stops_the_stimulus() {
     // The plain confirmation: Main L owns nothing.
     let mut t = T::new();
-    t.st.layout.focus = PaneKind::Transfer;
+    t.put(PaneKind::Transfer);
     play_noise(&mut t, true);
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("Delete");
@@ -761,7 +759,7 @@ fn deleting_the_last_transfer_stops_the_stimulus() {
     // The three-answer question: Main L owns traces.
     let mut t = T::new();
     t.conn(mirror(tree_state()));
-    t.st.layout.focus = PaneKind::Transfer;
+    t.put(PaneKind::Transfer);
     play_noise(&mut t, false);
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("Delete");

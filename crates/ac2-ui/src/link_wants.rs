@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use ac2_proto::model::{MathDomain, MeasKind};
 use ac2_proto::topic::{Stream, Topic};
+use ac2_proto::units::MeasId;
 
 use crate::conn::{DISPLAY_PERIOD, Request};
 use crate::state::{AppState, PaneKind};
@@ -38,25 +39,27 @@ impl AppState {
     /// Per-measurement input levels are never drawn, so never received.
     pub fn wanted_topics(&self) -> HashSet<Topic> {
         let visible = self.visible_panes();
-        let shows = |p: PaneKind| visible.contains(&p);
-        let ir_of = shows(PaneKind::Ir)
-            .then(|| crate::scenes::focus_tf(self).map(|m| m.id))
-            .flatten();
-        let spectrum = shows(PaneKind::Spectrum)
-            || self.view.spectrum.peak_hold
-            || self.view.spectrum.mode.spectrograph();
+        let shows = |p: PaneKind| visible.iter().any(|id| self.layout.kind(*id) == p);
+        let ir_of: Vec<MeasId> = visible
+            .iter()
+            .filter(|id| self.layout.kind(**id) == PaneKind::Ir)
+            .filter_map(|id| self.pane_meas(*id).map(|m| m.id))
+            .collect();
+        let spectrum =
+            shows(PaneKind::Spectrum) || self.view.spectrum.peak_hold || self.spectrograph_shown();
         let mut out = HashSet::new();
         for m in self.measurements() {
             let streams: &[Stream] = match &m.config.kind {
-                MeasKind::Transfer { .. } => match (shows(PaneKind::Transfer), ir_of == Some(m.id))
-                {
-                    (true, true) => &[Stream::Tf, Stream::Ir],
-                    (true, false) => &[Stream::Tf],
-                    // The IR pane carries its transfer stream's banners (no reference, no
-                    // signal), which only the transfer frames say.
-                    (false, true) => &[Stream::Tf, Stream::Ir],
-                    (false, false) => &[],
-                },
+                MeasKind::Transfer { .. } => {
+                    match (shows(PaneKind::Transfer), ir_of.contains(&m.id)) {
+                        (true, true) => &[Stream::Tf, Stream::Ir],
+                        (true, false) => &[Stream::Tf],
+                        // The IR pane carries its transfer stream's banners (no reference, no
+                        // signal), which only the transfer frames say.
+                        (false, true) => &[Stream::Tf, Stream::Ir],
+                        (false, false) => &[],
+                    }
+                }
                 MeasKind::Spectrum { .. } if spectrum => &[Stream::Spec],
                 MeasKind::Rta { .. } if spectrum => &[Stream::Rta],
                 MeasKind::Spectrum { .. } | MeasKind::Rta { .. } => &[],
@@ -86,7 +89,7 @@ impl AppState {
     /// How often new frames may reach the UI: [`DISPLAY_PERIOD`], or [`SPL_ONLY_PERIOD`]
     /// when the SPL pane is all there is to see.
     pub fn display_period(&self) -> Duration {
-        if self.visible_panes() == [PaneKind::Spl] {
+        if self.visible_kinds() == [PaneKind::Spl] {
             SPL_ONLY_PERIOD
         } else {
             DISPLAY_PERIOD

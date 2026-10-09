@@ -271,7 +271,7 @@ fn a_restart_comes_back_to_the_same_pane() -> R {
     assert!(d.st.prefs_dirty);
     d.st.prefs.save(&path)?;
     let name =
-        d.st.pane_meas(PaneKind::Spl)
+        d.st.kind_meas(PaneKind::Spl)
             .map(|m| m.config.name.clone())
             .ok_or("meter")?;
     drop(d);
@@ -281,11 +281,11 @@ fn a_restart_comes_back_to_the_same_pane() -> R {
     let mut d = Driver::connect(ep, &daemon.describe())?;
     d.st.set_prefs(prefs);
     d.synced()?;
-    assert_eq!(d.st.layout.focus, PaneKind::Spl);
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
     assert!(d.st.layout.maximized && !d.st.fullscreen);
-    assert_eq!(d.st.layout.visible(), [PaneKind::Spl]);
+    assert_eq!(crate::common::visible(&d.st), [PaneKind::Spl]);
     assert_eq!(
-        d.st.pane_meas(PaneKind::Spl).map(|m| m.config.name.clone()),
+        d.st.kind_meas(PaneKind::Spl).map(|m| m.config.name.clone()),
         Some(name)
     );
     assert!(d.st.daemon().is_some_and(|s| !s.generator.armed));

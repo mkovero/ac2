@@ -522,7 +522,7 @@ pub fn transfer_scene(
             pi == last,
             &title,
             title_at,
-            view.chrome.transfer,
+            view.chrome,
             theme,
         );
         let ym = y_axis.mapping;
@@ -530,7 +530,7 @@ pub fn transfer_scene(
             canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
         }
         if let Some(o) = &band {
-            overlay_frame(&mut c, plot, o, view.chrome.transfer, theme);
+            overlay_frame(&mut c, plot, o, view.chrome, theme);
         }
 
         for t in &shown {
@@ -603,7 +603,7 @@ pub fn transfer_scene(
         .collect();
     let cursor = view
         .cursor_hz
-        .filter(|_| view.chrome.transfer.cursor())
+        .filter(|_| view.chrome.cursor())
         .and_then(|hz| readout::cursor_readout(&shown, hz, view.tf.phase));
     let delay = reference.as_ref().map(|r| {
         let name = shown
@@ -1026,13 +1026,11 @@ mod tests {
         use crate::view::PlotChrome;
         let a = cols(97);
         let draw = |chrome: PlotChrome| {
-            let mut view = ViewState {
+            let view = ViewState {
                 cursor_hz: Some(1000.0),
+                chrome,
                 ..ViewState::default()
             };
-            view.chrome.transfer = chrome;
-            // Another pane's step never reaches this one.
-            view.chrome.spectrum = PlotChrome::Bare;
             transfer_scene(
                 &[trace(&a, TraceKey::Live(MeasId(1)), 0.0)],
                 &DisplayCache::default(),

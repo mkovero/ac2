@@ -63,7 +63,7 @@ fn harness(dialog: ConnectDialog) -> Harness<'static, App> {
         theme: ThemeName::Dark,
         keymap: Keymap::default(),
         keymap_path: None,
-        prefs: ac2_ui::prefs::UiPrefs::default(),
+        prefs: crate::common::grid_ui_prefs(),
         prefs_path: None,
         notices: vec![],
         started: Instant::now(),

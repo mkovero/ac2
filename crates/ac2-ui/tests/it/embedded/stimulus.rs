@@ -24,11 +24,17 @@ fn legend_texts(s: &AppState) -> Vec<String> {
         width: 900.0,
         height: 500.0,
     };
-    ac2_ui::scenes::transfer(s, &Theme::dark(), size, now)
-        .legend
-        .into_iter()
-        .map(|e| e.text)
-        .collect()
+    ac2_ui::scenes::transfer(
+        s,
+        crate::common::pane(s, ac2_ui::state::PaneKind::Transfer),
+        &Theme::dark(),
+        size,
+        now,
+    )
+    .legend
+    .into_iter()
+    .map(|e| e.text)
+    .collect()
 }
 
 /// The banners every pane shows now.
@@ -189,7 +195,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
             && s.stimulus.phase == StimPhase::Idle
             && s.daemon().is_some_and(|x| x.generator.owner.is_none())
     })?;
-    assert_eq!(d.st.layout.focus, PaneKind::Distortion);
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
     let hint = |s: &AppState| {
         s.stimulus_next()
             .map(|(n, w)| ac2_scene::stimulus::hint(n, &w, "L").0)

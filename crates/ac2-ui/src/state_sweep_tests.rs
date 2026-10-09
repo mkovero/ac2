@@ -34,6 +34,11 @@ fn sweep_state() -> State {
 /// The dialog makes the sweep measurement (−50 dBFS, 3 s, out 1); the mirror lists it;
 /// Space on the sweep pane arms its run.
 fn sweep_armed(t: &mut T) {
+    // A sweep pane beside the grid, the transfer pane focused: the dialog goes there.
+    if !t.shown(PaneKind::Distortion) {
+        t.go(PaneKind::Distortion);
+        t.key("Alt+1");
+    }
     t.type_key("Shift+S", "S");
     let Overlay::Form(f) = &mut t.st.overlay else {
         panic!("no dialog");
@@ -62,10 +67,7 @@ fn sweep_armed(t: &mut T) {
 #[test]
 fn sweep_from_the_dialog_to_the_distortion_pane() {
     let mut t = T::new();
-    assert!(
-        !t.st.layout.is_shown(PaneKind::Distortion),
-        "hidden until a sweep"
-    );
+    assert!(!t.shown(PaneKind::Distortion), "hidden until a sweep");
     t.type_key("Shift+S", "S");
     let Overlay::Form(f) = &t.st.overlay else {
         panic!("no dialog: {:?}", t.st.overlay);
@@ -131,7 +133,7 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         "creating it arms nothing: {r:?}"
     );
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.layout.focus, PaneKind::Distortion);
+    assert_eq!(t.focus_kind(), PaneKind::Distortion);
     // Listed, it waits; Space on the sweep pane arms its run.
     assert_eq!(c.kind, sweep_measurement().config.kind);
     t.conn(ConnEvent::MeasCreated(Box::new(sweep_measurement())));
@@ -198,8 +200,8 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(7) }));
     let r = t.conn(mirror(s));
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
-    assert!(t.st.layout.is_shown(PaneKind::Distortion));
-    assert_eq!(t.st.layout.focus, PaneKind::Distortion);
+    assert!(t.shown(PaneKind::Distortion));
+    assert_eq!(t.focus_kind(), PaneKind::Distortion);
     assert!(t.st.sweep.plan.is_none());
     assert_eq!(t.st.stimulus.signal, Signal::Pink);
     assert!(
@@ -243,25 +245,46 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     // G steps the views: the impulse response, the room parameters, back; Shift+I goes
     // to the IR and back; Shift+G steps the IR's scale.
     use ac2_scene::view::SweepMode;
-    assert_eq!(t.st.view.distortion.mode, SweepMode::Response);
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Distortion).sweep,
+        SweepMode::Response
+    );
     t.key("G");
-    assert_eq!(t.st.view.distortion.mode, SweepMode::Ir);
+    assert_eq!(t.st.kind_modes(PaneKind::Distortion).sweep, SweepMode::Ir);
     t.key("G");
-    assert_eq!(t.st.view.distortion.mode, SweepMode::Room);
-    assert_eq!(t.st.layout_prefs().sweep_view, SweepMode::Room);
+    assert_eq!(t.st.kind_modes(PaneKind::Distortion).sweep, SweepMode::Room);
+    let prefs = t.st.layout_prefs().panes.expect("a layout");
+    assert!(
+        prefs
+            .views
+            .iter()
+            .any(|v| v.kind == PaneKind::Distortion && v.modes.sweep == SweepMode::Room)
+    );
     t.key("G");
-    assert_eq!(t.st.view.distortion.mode, SweepMode::Response);
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Distortion).sweep,
+        SweepMode::Response
+    );
     t.key("Shift+I");
-    assert_eq!(t.st.view.distortion.mode, SweepMode::Ir);
+    assert_eq!(t.st.kind_modes(PaneKind::Distortion).sweep, SweepMode::Ir);
     t.key("Shift+G");
-    assert_eq!(t.st.view.ir.mode, IrMode::Log);
+    assert_eq!(t.st.kind_modes(PaneKind::Distortion).ir, IrMode::Log);
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Ir).ir,
+        IrMode::Linear,
+        "the IR pane's own"
+    );
     t.key("Shift+I");
-    assert_eq!(t.st.view.distortion.mode, SweepMode::Response);
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Distortion).sweep,
+        SweepMode::Response
+    );
 
-    // Shift+W hides the pane again.
-    t.key("Shift+W");
-    assert!(!t.st.layout.is_shown(PaneKind::Distortion));
-    assert_eq!(t.st.layout.focus, PaneKind::Transfer);
+    // The dialog turned the focused transfer pane into the sweep pane; Ctrl+Tab turns it
+    // back.
+    t.key("Ctrl+Tab");
+    assert!(!t.shown(PaneKind::Distortion));
+    assert_eq!(t.focus_kind(), PaneKind::Transfer);
 }
 
 /// A sweep submitted right after Esc, while that stop is still on its way, arms once the
@@ -347,7 +370,7 @@ fn a_sweep_submitted_during_a_stop_arms_after_it() {
     assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
 
     t.conn(mirror(sweep_state()));
-    t.key("Alt+5");
+    t.go(PaneKind::Distortion);
     let r = t.key("Space");
     assert!(
         !r.iter().any(|x| matches!(x, Request::StimArm { .. })),
@@ -525,7 +548,7 @@ fn a_finished_sweep_fits_the_sweep_panes_level_axis() {
 fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
     let mut t = T::new();
     let first = sweep_once(&mut t);
-    assert_eq!(t.st.layout.focus, PaneKind::Distortion);
+    assert_eq!(t.focus_kind(), PaneKind::Distortion);
     assert!(t.st.sweep_view());
     assert_eq!(
         next_hint(&t).as_deref(),
@@ -595,7 +618,7 @@ fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
 fn space_on_the_sweep_view_without_a_sweep_opens_the_dialog() {
     let mut t = T::new();
     t.st.stimulus.level = Some(Dbfs(-40.0));
-    t.key("Alt+5");
+    t.go(PaneKind::Distortion);
     assert!(t.st.sweep_view(), "{:?}", t.st.layout.focus);
     assert_eq!(
         next_hint(&t).as_deref(),
@@ -622,7 +645,7 @@ fn space_on_the_live_views_drives_the_generator() {
     sweep_once(&mut t);
     for (key, pane) in [("Alt+1", PaneKind::Transfer), ("Alt+2", PaneKind::Spectrum)] {
         t.key(key);
-        assert_eq!(t.st.layout.focus, pane);
+        assert_eq!(t.focus_kind(), pane);
         assert_eq!(
             next_hint(&t).as_deref(),
             Some("Space arms: pink −50 dBFS → out 1"),
@@ -650,7 +673,7 @@ fn space_on_the_live_views_drives_the_generator() {
         Some("Enter fires: pink −50 dBFS → out 1")
     );
     // Over to the sweep view while armed and silent: Space there re-sets it to the re-sweep.
-    t.key("Alt+5");
+    t.go(PaneKind::Distortion);
     let r = t.key("Space");
     assert!(
         r.iter().any(|x| matches!(
@@ -694,34 +717,53 @@ fn g_steps_the_spectrum_panes_views() {
     use ac2_scene::view::SpectrumMode;
     let mut t = T::new();
     t.key("Alt+2");
-    assert_eq!(t.st.view.spectrum.mode, SpectrumMode::Spectrum);
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Spectrum).spectrum,
+        SpectrumMode::Spectrum
+    );
     t.key("G");
-    assert_eq!(t.st.view.spectrum.mode, SpectrumMode::Split);
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Spectrum).spectrum,
+        SpectrumMode::Split
+    );
     t.st.spectrographs.insert(
         MeasId(2),
         ac2_scene::spectrograph::SpectrographHistory::new(30),
     );
     t.key("G");
-    assert_eq!(t.st.view.spectrum.mode, SpectrumMode::Spectrograph);
-    assert!(!t.st.spectrographs.is_empty(), "the history stays");
-    t.key("W");
-    assert_eq!(t.st.layout.visible(), [PaneKind::Spectrum]);
     assert_eq!(
-        t.st.layout_prefs().spectrum_view,
+        t.st.kind_modes(PaneKind::Spectrum).spectrum,
         SpectrumMode::Spectrograph
     );
+    assert!(!t.st.spectrographs.is_empty(), "the history stays");
+    t.key("W");
+    assert_eq!(t.visible(), [PaneKind::Spectrum]);
+    let prefs = t.st.layout_prefs().panes.expect("a layout");
+    assert_eq!(
+        prefs
+            .views
+            .iter()
+            .find(|v| v.kind == PaneKind::Spectrum)
+            .map(|v| v.modes.spectrum),
+        Some(SpectrumMode::Spectrograph)
+    );
+    let saved = t.st.prefs.clone();
     t.key("W");
     t.key("G");
-    assert_eq!(t.st.view.spectrum.mode, SpectrumMode::Spectrum);
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Spectrum).spectrum,
+        SpectrumMode::Spectrum
+    );
     assert!(
         t.st.spectrographs.is_empty(),
         "nothing kept for a hidden one"
     );
 
     // Remembered: a new app on these preferences opens on the spectrograph.
-    let mut prefs = crate::prefs::UiPrefs::default();
-    prefs.layout.spectrum_view = SpectrumMode::Spectrograph;
     let mut u = T::new();
-    u.st.set_prefs(prefs);
-    assert_eq!(u.st.view.spectrum.mode, SpectrumMode::Spectrograph);
+    u.st.set_prefs(saved);
+    assert_eq!(
+        u.st.kind_modes(PaneKind::Spectrum).spectrum,
+        SpectrumMode::Spectrograph
+    );
 }

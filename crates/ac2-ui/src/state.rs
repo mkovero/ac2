@@ -28,8 +28,8 @@ use ac2_scene::stimulus::{Drive, Next as NextKey, Stimulus as NextStimulus};
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
 use ac2_scene::view::{
-    CoherencePlacement, DistortionUnit, FreqRange, IrMode, LeqStyle, PhaseView, SpectrumStyle,
-    SplMode, SweepMode, ViewState,
+    CoherencePlacement, DistortionUnit, FreqRange, IrMode, LeqStyle, PhaseView, PlotChrome,
+    SpectrumMode, SpectrumStyle, SplMode, SweepMode, ViewState,
 };
 use ac2_scene::{axis::Range, format};
 
@@ -71,12 +71,17 @@ mod keys;
 mod leq;
 #[path = "state_link.rs"]
 mod link;
+#[path = "state_panes.rs"]
+mod panes;
 #[path = "state_queries.rs"]
 mod queries;
 #[path = "state_stimulus.rs"]
 mod stimulus;
 #[path = "state_text.rs"]
 mod text;
+pub use panes::{
+    Axis, DEFAULT_PANE_AREA, Layout, PaneId, PaneMenuRow, PaneModes, PaneNode, PaneRect, View,
+};
 use text::{SELECT_TRACE_FIRST, drawn_in, offset_text, slot_of};
 pub use text::{
     curve_what, meas_input, mics_text, open_session_hint, parse_band, parse_mics, parse_number,
@@ -121,34 +126,6 @@ impl PaneKind {
             PaneKind::Ir => "Impulse response",
             PaneKind::Spl => "SPL",
             PaneKind::Distortion => "Sweep / distortion",
-        }
-    }
-
-    fn index(self) -> usize {
-        self as usize
-    }
-
-    /// This pane's grid, labels and cursor in `c`.
-    pub fn chrome(self, c: &ac2_scene::view::PaneChrome) -> ac2_scene::view::PlotChrome {
-        match self {
-            PaneKind::Transfer => c.transfer,
-            PaneKind::Spectrum => c.spectrum,
-            PaneKind::Ir => c.ir,
-            PaneKind::Spl => c.spl,
-            PaneKind::Distortion => c.distortion,
-        }
-    }
-
-    pub fn chrome_mut(
-        self,
-        c: &mut ac2_scene::view::PaneChrome,
-    ) -> &mut ac2_scene::view::PlotChrome {
-        match self {
-            PaneKind::Transfer => &mut c.transfer,
-            PaneKind::Spectrum => &mut c.spectrum,
-            PaneKind::Ir => &mut c.ir,
-            PaneKind::Spl => &mut c.spl,
-            PaneKind::Distortion => &mut c.distortion,
         }
     }
 
@@ -304,45 +281,8 @@ impl SmoothTarget {
 /// highlighted (Up/Down move, Enter shows it, Esc closes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PaneMenu {
-    pub pane: PaneKind,
+    pub pane: PaneId,
     pub index: usize,
-}
-
-/// Which panes are shown and which has the keyboard.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Layout {
-    pub focus: PaneKind,
-    pub shown: [bool; 5],
-    /// Only the focused pane.
-    pub maximized: bool,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        Self {
-            focus: PaneKind::Transfer,
-            // The sweep pane appears with the first sweep result.
-            shown: [true, true, true, true, false],
-            maximized: false,
-        }
-    }
-}
-
-impl Layout {
-    pub fn is_shown(&self, p: PaneKind) -> bool {
-        self.shown[p.index()]
-    }
-
-    /// Panes drawn now, in order.
-    pub fn visible(&self) -> Vec<PaneKind> {
-        if self.maximized {
-            return vec![self.focus];
-        }
-        PaneKind::ALL
-            .into_iter()
-            .filter(|p| self.is_shown(*p))
-            .collect()
-    }
 }
 
 /// Link status as shown in the top bar.
@@ -945,11 +885,12 @@ pub enum Msg {
         before_s: f64,
     },
     /// A click in a pane: focuses it and selects the measurement it shows.
-    FocusPane(PaneKind),
-    /// The pane title chip: opens (or closes) the pane's measurement list.
-    PaneMenu(PaneKind),
-    /// A measurement picked from a pane's list: the pane shows it, and it is selected.
-    PaneShow(PaneKind, MeasId),
+    FocusPane(PaneId),
+    /// The pane title chip: opens (or closes) the pane's list.
+    PaneMenu(PaneId),
+    /// A row picked from a pane's list: the pane shows that measurement (selected), or
+    /// turns into that kind of pane.
+    PanePick(PaneId, PaneMenuRow),
     /// Mouse wheel / pinch on a frequency axis.
     Zoom {
         about_hz: f64,
@@ -1102,9 +1043,9 @@ pub struct AppState {
     pub nav: FreqNav,
     pub layout: Layout,
     pub selected: Option<MeasId>,
-    /// The measurement each pane shows (keys act on it); a pane without a choice shows the
-    /// selected measurement if it fits, else its first one.
-    pub pane_meas: BTreeMap<PaneKind, MeasId>,
+    /// The size of the panes' area as last drawn (the view writes it): Ctrl+N splits the
+    /// focused pane along its longer side.
+    pub pane_area: (f32, f32),
     /// The stored trace selected (list, V, the sweep pane's N): the trace keys change it
     /// instead of the pane's measurement, and a selected sweep is what the sweep pane shows.
     /// Selecting a measurement clears it, so whichever of the two was selected last is what
@@ -1191,7 +1132,10 @@ pub struct AppState {
     pub spl_hold: BTreeMap<MeasId, ac2_scene::spl::SplHold>,
     /// The measurement each pane showed when the app last ran, by name, until the daemon's
     /// state is known.
-    pending_pane_meas: BTreeMap<PaneKind, String>,
+    pending_pane_meas: BTreeMap<PaneId, String>,
+    /// No layout was remembered: the one pane takes the kind of the first measurement once
+    /// the daemon's state is known.
+    pane_auto: bool,
     /// What the link was last asked to receive, and how often ([`crate::link_wants`]).
     pub(crate) link_wants: crate::link_wants::Sent,
     /// Spectrum / RTA measurements seen running, so a start is told from a run going on.
@@ -1241,7 +1185,7 @@ impl AppState {
             nav: FreqNav::new(FreqRange::default()),
             layout: Layout::default(),
             selected: None,
-            pane_meas: BTreeMap::new(),
+            pane_area: DEFAULT_PANE_AREA,
             selected_trace: None,
             edits: BTreeMap::new(),
             peaks: BTreeMap::new(),
@@ -1278,6 +1222,7 @@ impl AppState {
             leq_alarms_seen: BTreeMap::new(),
             spl_hold: BTreeMap::new(),
             pending_pane_meas: BTreeMap::new(),
+            pane_auto: true,
             hidden_meas: BTreeSet::new(),
             compared_meas: BTreeSet::new(),
             compared_traces: BTreeSet::new(),
@@ -1380,7 +1325,7 @@ impl AppState {
                 }
             }
             Msg::FocusPane(p) => {
-                self.focus(p);
+                self.focus_pane(p);
                 // A click in a pane is about what it shows live.
                 if self.pane_meas(p).is_some() {
                     self.selected_trace = None;
@@ -1392,7 +1337,7 @@ impl AppState {
                     _ => self.pane_menu(p),
                 };
             }
-            Msg::PaneShow(p, id) => self.pane_show(p, id),
+            Msg::PanePick(p, row) => self.pane_pick(p, row),
             Msg::Zoom { about_hz, factor } => {
                 let t = self.nav.target.zoom(about_hz, factor);
                 self.nav.set_target(t);

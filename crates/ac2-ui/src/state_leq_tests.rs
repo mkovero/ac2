@@ -83,15 +83,15 @@ fn leq_windows_from_the_keyboard() {
         [(1800.0, Some(DbSpl(99.0))), (3600.0, Some(DbSpl(100.0)))]
     );
     assert_eq!(config.input, 1);
-    assert_eq!(t.st.view.spl.mode, SplMode::MeterLeq);
-    assert_eq!(t.st.layout.focus, PaneKind::Spl);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::MeterLeq);
+    assert_eq!(t.focus_kind(), PaneKind::Spl);
     // G: the meter, the windows alone, both again.
     t.key("G");
-    assert_eq!(t.st.view.spl.mode, SplMode::Meter);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Meter);
     t.key("G");
-    assert_eq!(t.st.view.spl.mode, SplMode::Leq);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Leq);
     t.key("G");
-    assert_eq!(t.st.view.spl.mode, SplMode::MeterLeq);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::MeterLeq);
     // A refused value keeps the dialog open and says why.
     t.type_key("Shift+L", "L");
     t.key("ArrowDown");
@@ -201,14 +201,14 @@ fn leq_layout_keys_and_prefs() {
             history: false
         }
     );
-    assert_eq!(t.st.view.spl.mode, SplMode::MeterLeq);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::MeterLeq);
     t.key("Alt+4");
-    assert_eq!(t.st.layout.focus, PaneKind::Spl);
+    assert_eq!(t.focus_kind(), PaneKind::Spl);
     t.key("G");
-    assert_eq!(t.st.view.spl.mode, SplMode::Meter);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Meter);
     // B from the meter: the windows, as tiles, under the meter.
     t.key("B");
-    assert_eq!(t.st.view.spl.mode, SplMode::MeterLeq);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::MeterLeq);
     assert_eq!(t.st.view.spl.layout.style, LeqStyle::Tiles);
     assert!(t.st.prefs_dirty);
     assert_eq!(t.st.prefs.leq, t.st.view.spl.layout);
@@ -225,9 +225,9 @@ fn leq_layout_keys_and_prefs() {
     );
     // G still steps the views and leaves the layout alone.
     t.key("G");
-    assert_eq!(t.st.view.spl.mode, SplMode::Meter);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Meter);
     t.key("G");
-    assert_eq!(t.st.view.spl.mode, SplMode::Leq);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Leq);
     assert_eq!(t.st.prefs.leq.style, LeqStyle::Tiles);
     t.key("B");
     t.key("Shift+B");
@@ -251,7 +251,7 @@ fn leq_layout_keys_and_prefs() {
     assert_eq!(u.st.view.spl.layout, prefs.leq);
     // The stage view: full screen, the SPL pane maximised on its windows.
     t.key("Alt+4");
-    assert_eq!(t.st.view.spl.mode, SplMode::Leq);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Leq);
     assert!(!t.st.stage_view());
     t.key("W");
     assert!(!t.st.stage_view());
@@ -608,7 +608,7 @@ fn spl_keys_cycle_the_weightings() {
     t.key("Alt+4");
     t.key("G");
     t.key("G");
-    assert_eq!(t.st.view.spl.mode, SplMode::Leq);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Leq);
     let mut seen = Vec::new();
     for key in ["Shift+F", "Shift+F", "Shift+F", "Z", "Z", "Z"] {
         let (cfg, what) = spl_update(&t.key(key)).expect(key);
@@ -631,7 +631,7 @@ fn spl_keys_cycle_the_weightings() {
         ]
     );
     assert_eq!(
-        t.st.view.spl.mode,
+        t.st.kind_modes(PaneKind::Spl).spl,
         SplMode::Leq,
         "the Leq windows stay: they do not change"
     );
@@ -643,9 +643,13 @@ fn spl_keys_cycle_the_weightings() {
     assert_eq!(t.last_toast(), "FOH SPL: LCF");
     t.key("G");
     t.key("G");
-    assert_eq!(t.st.view.spl.mode, SplMode::Meter);
+    assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Meter);
     t.key("Shift+F");
-    assert_eq!(t.st.view.spl.mode, SplMode::Meter, "the meter stays");
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Spl).spl,
+        SplMode::Meter,
+        "the meter stays"
+    );
     for (c, want) in [
         (CommandId::SplSlow, "FOH SPL: LAS"),
         (CommandId::SplImpulse, "FOH SPL: LAI"),
@@ -657,7 +661,7 @@ fn spl_keys_cycle_the_weightings() {
         t.key("Alt+1");
         let r = t.st.update(Msg::Command(c), &t.keys);
         assert_eq!(spl_update(&r).map(|x| x.1).as_deref(), Some(want));
-        assert_eq!(t.st.layout.focus, PaneKind::Spl);
+        assert_eq!(t.focus_kind(), PaneKind::Spl);
     }
 }
 
@@ -693,7 +697,8 @@ fn spl_number_holds_for_the_display_period() {
             changes.push(k);
         }
         // The number is the held reading; the bar follows the newest frame.
-        let s = crate::scenes::spl(&t.st, &t.keys, &theme, size, now).expect("scene");
+        let s = crate::scenes::spl(&t.st, t.pane(PaneKind::Spl), &t.keys, &theme, size, now)
+            .expect("scene");
         let texts: Vec<&str> = s.scene.layers[2]
             .labels
             .iter()

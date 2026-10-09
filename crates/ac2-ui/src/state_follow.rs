@@ -2,7 +2,7 @@
 //! keeps only the panes that draw the selected measurement — its live curve, its math
 //! channels or its shown stored traces — or, for a selected stored trace, the panes that
 //! draw it and its measurement. Nothing selected, or no pane on screen drawing it, keeps
-//! every shown pane: the screen is never empty. W and Ctrl+Tab act on the panes it keeps.
+//! every pane: the screen is never empty. W and Alt+digit act on the panes it keeps.
 
 use ac2_proto::model::TraceOwner;
 
@@ -67,33 +67,42 @@ impl AppState {
         panes_drawing(&kinds, &traces)
     }
 
-    /// The panes laid out side by side (before W keeps only the focused one): the shown
-    /// panes, and with panes following the selection only those of them that draw it.
-    pub fn laid_out_panes(&self) -> Vec<PaneKind> {
-        let shown: Vec<PaneKind> = PaneKind::ALL
-            .into_iter()
-            .filter(|p| self.layout.is_shown(*p))
-            .collect();
-        match self.follow_set() {
-            Some(f) => {
-                let kept: Vec<PaneKind> = shown.iter().copied().filter(|p| f.contains(p)).collect();
-                if kept.is_empty() { shown } else { kept }
-            }
-            None => shown,
-        }
+    /// The tree laid out (before W keeps only the focused pane): every pane, and with
+    /// panes following the selection only those that draw it, each pane left out giving its
+    /// place to its neighbour.
+    pub fn laid_out_tree(&self) -> PaneNode {
+        let Some(f) = self.follow_set() else {
+            return self.layout.root.clone();
+        };
+        let keep = |id: PaneId| f.contains(&self.layout.kind(id));
+        self.layout
+            .root
+            .pruned(&keep)
+            .unwrap_or_else(|| self.layout.root.clone())
     }
 
-    /// Panes drawn now, in order: the laid-out panes, or the focused one alone when
-    /// maximised.
-    pub fn visible_panes(&self) -> Vec<PaneKind> {
+    /// The panes laid out, in reading order.
+    pub fn laid_out_panes(&self) -> Vec<PaneId> {
+        self.laid_out_tree().reading_order()
+    }
+
+    /// The tree drawn now: the laid-out one, or the focused pane alone when maximised.
+    pub fn visible_tree(&self) -> Option<PaneNode> {
+        let laid = self.laid_out_tree();
         if !self.layout.maximized {
-            return self.laid_out_panes();
+            return Some(laid);
         }
-        let laid = self.laid_out_panes();
-        if self.follow_set().is_none() || laid.contains(&self.layout.focus) {
-            return vec![self.layout.focus];
+        if laid.contains(self.layout.focus) {
+            return Some(PaneNode::Leaf(self.layout.focus));
         }
-        laid.into_iter().take(1).collect()
+        laid.reading_order().first().map(|id| PaneNode::Leaf(*id))
+    }
+
+    /// Panes drawn now, in reading order.
+    pub fn visible_panes(&self) -> Vec<PaneId> {
+        self.visible_tree()
+            .map(|t| t.reading_order())
+            .unwrap_or_default()
     }
 
     /// Keeps the keyboard on a pane that is drawn: a selection that hid the focused pane
@@ -106,7 +115,7 @@ impl AppState {
         if !laid.contains(&self.layout.focus)
             && let Some(p) = laid.first()
         {
-            self.layout.focus = *p;
+            self.layout.set_focus(*p);
         }
     }
 
@@ -116,7 +125,7 @@ impl AppState {
         let Some(f) = self.follow_set() else {
             return;
         };
-        if f.iter().any(|p| self.layout.is_shown(*p)) {
+        if self.layout.views.values().any(|v| f.contains(&v.kind)) {
             return;
         }
         let name = match self.selected_trace_meta() {

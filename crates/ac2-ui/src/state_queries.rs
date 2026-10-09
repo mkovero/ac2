@@ -44,24 +44,11 @@ impl AppState {
             .collect()
     }
 
-    /// The measurement pane `p` shows: its own choice, else the selected measurement if it
-    /// fits, else the first that fits. Unchosen, it leads with its own kind: the transfer
-    /// pane shows a sweep's runs only once picked for it, a live curve before that.
-    pub fn pane_meas(&self, p: PaneKind) -> Option<&Measurement> {
-        let c = self.pane_candidates(p);
-        let pick = |id: Option<MeasId>| id.and_then(|id| c.iter().find(|m| m.id == id).copied());
-        let home = |m: &Measurement| PaneKind::for_kind(&m.config.kind).owner() == p.owner();
-        pick(self.pane_meas.get(&p.owner()).copied())
-            .or_else(|| pick(self.selected).filter(|m| home(m)))
-            .or_else(|| c.iter().find(|m| home(m)).copied())
-            .or_else(|| c.first().copied())
-    }
-
     /// What a pane key (start/stop, reset) acts on: the measurement the focused pane shows,
     /// never one of another kind selected elsewhere (an SPL meter picked in the list must not
     /// stop when S is pressed on the transfer pane). Says what to create when there is none.
     pub(super) fn focused_pane_meas(&mut self) -> Option<Measurement> {
-        let p = self.layout.focus;
+        let p = self.layout.focus_kind();
         if p == PaneKind::Distortion {
             let m = self.selected_meas().cloned();
             if m.is_none() {
@@ -69,7 +56,7 @@ impl AppState {
             }
             return m;
         }
-        let m = self.pane_meas(p).cloned();
+        let m = self.pane_meas(self.layout.focus).cloned();
         if m.is_none() {
             self.warn(match p {
                 PaneKind::Transfer | PaneKind::Ir => {
@@ -111,18 +98,19 @@ impl AppState {
         if let Some(t) = self.selected_trace_meta() {
             return Some(SmoothTarget::Trace(t.clone()));
         }
-        let pane = match self.layout.focus {
+        let pane = match self.layout.focus_kind() {
             PaneKind::Spectrum => PaneKind::Spectrum,
             _ => PaneKind::Transfer,
         };
-        self.pane_meas(pane).map(|m| SmoothTarget::Meas(m.clone()))
+        self.kind_meas(pane).map(|m| SmoothTarget::Meas(m.clone()))
     }
 
     /// A pane's title caption: the selected stored trace with its smoothing when its curve
     /// is drawn there, else the smoothing of the pane's measurement — `smoothing 1/6 oct`,
     /// `slot 3 (Main L S3): smoothing off`, `Sweep 2: smoothing off`; a selected target
     /// curve is named alone. Nothing for other curves smoothing does not apply to.
-    pub fn smoothing_caption(&self, pane: PaneKind) -> Option<String> {
+    pub fn smoothing_caption(&self, id: PaneId) -> Option<String> {
+        let pane = self.layout.kind(id);
         if !matches!(pane, PaneKind::Transfer | PaneKind::Spectrum) {
             return None;
         }
@@ -130,7 +118,7 @@ impl AppState {
             Some(t) if SmoothTarget::Trace(t.clone()).pane() == pane => {
                 SmoothTarget::Trace(t.clone())
             }
-            _ => SmoothTarget::Meas(self.pane_meas(pane)?.clone()),
+            _ => SmoothTarget::Meas(self.pane_meas(id)?.clone()),
         };
         if let SmoothTarget::Trace(_) = &t
             && t.kind() == Smoothable::No
@@ -158,8 +146,9 @@ impl AppState {
     /// The mic-curve part of pane `pane`'s title caption: the selected stored trace's curve
     /// when the pane draws it, else the shown measurement's (from its newest frame), else
     /// the shown sweep's.
-    pub fn mic_curve_caption(&self, pane: PaneKind) -> Option<String> {
+    pub fn mic_curve_caption(&self, id: PaneId) -> Option<String> {
         use ac2_proto::topic::Topic;
+        let pane = self.layout.kind(id);
         let stored =
             |t: &TraceMeta| ac2_scene::trace::curve_note(t.mic.as_ref(), t.mic_curve.as_deref());
         match pane {
@@ -169,7 +158,7 @@ impl AppState {
                 {
                     return stored(t);
                 }
-                let m = self.pane_meas(pane)?;
+                let m = self.pane_meas(id)?;
                 let stream = m.config.kind.stream()?;
                 let applied = self
                     .data
@@ -190,16 +179,17 @@ impl AppState {
 
     /// The pane's title caption: smoothing and mic curve, `smoothing 1/6 oct · mic curve:
     /// MM1 34804 90°`.
-    pub fn pane_caption(&self, pane: PaneKind) -> Option<String> {
-        self.pane_caption_variants(pane).into_iter().next()
+    pub fn pane_caption(&self, id: PaneId) -> Option<String> {
+        self.pane_caption_variants(id).into_iter().next()
     }
 
     /// The pane's title caption from the longest to the shortest, for a narrow title: all
     /// of it, then without the mic curve, then the selected stored trace's name alone (the
     /// one thing the title must keep: which curve the keys act on).
-    pub fn pane_caption_variants(&self, pane: PaneKind) -> Vec<String> {
-        let smoothing = self.smoothing_caption(pane);
-        let curve = self.mic_curve_caption(pane);
+    pub fn pane_caption_variants(&self, id: PaneId) -> Vec<String> {
+        let pane = self.layout.kind(id);
+        let smoothing = self.smoothing_caption(id);
+        let curve = self.mic_curve_caption(id);
         let trace = self
             .selected_trace_meta()
             .filter(|t| {
@@ -222,7 +212,7 @@ impl AppState {
         // The pane's own measurement hidden: said first and kept longest, or an empty plot
         // would read as a fault.
         let hidden = self
-            .pane_meas(pane)
+            .pane_meas(id)
             .filter(|m| {
                 matches!(pane, PaneKind::Transfer | PaneKind::Spectrum) && self.meas_hidden(m)
             })
@@ -367,29 +357,6 @@ impl AppState {
         ac2_scene::trace_list::trace_rows(&self.trace_items(&colours), self.selected_trace)
     }
 
-    /// The rows of pane `p`'s measurement list (its title chip): `TF  Main L`, `TF  TF 2 ·
-    /// hidden`.
-    pub fn pane_menu_rows(&self, p: PaneKind) -> Vec<(MeasId, String)> {
-        self.pane_candidates(p)
-            .iter()
-            .map(|m| {
-                let hidden = if self.meas_hidden(m) {
-                    " · hidden"
-                } else {
-                    ""
-                };
-                (
-                    m.id,
-                    format!(
-                        "{}  {}{hidden}",
-                        ac2_scene::meas_list::kind_tag(&m.config.kind),
-                        m.config.name
-                    ),
-                )
-            })
-            .collect()
-    }
-
     /// The measurement list's rows, in list order: the selected one marked, as the one the
     /// keys act on unless a stored trace was selected after it.
     pub fn meas_rows(&self) -> Vec<ac2_scene::meas_list::MeasRow> {
@@ -421,7 +388,7 @@ impl AppState {
         let mut v: Vec<&TraceMeta> = self
             .stored_traces()
             .into_iter()
-            .filter(|t| self.on_transfer_pane(t))
+            .filter(|t| self.on_transfer_pane(t, self.kind_meas(PaneKind::Transfer)))
             .collect();
         v.sort_by_key(|t| (t.edit.slot.unwrap_or(u8::MAX), t.edit.order, t.id));
         v
@@ -494,8 +461,9 @@ impl AppState {
     /// Whether the transfer pane draws any stored curve (a shown capture, target or sweep
     /// of its group, or a compared one, whose data has arrived).
     pub fn transfer_shows_stored(&self) -> bool {
+        let tf = self.kind_meas(PaneKind::Transfer);
         self.traces.values().any(|(t, _)| {
-            self.on_transfer_pane(&t.meta) || self.trace_compared_on_transfer(&t.meta)
+            self.on_transfer_pane(&t.meta, tf) || self.trace_compared_on_transfer(&t.meta, tf)
         })
     }
 
@@ -503,36 +471,43 @@ impl AppState {
     /// of the math channel it shows. `None`: no measurement, or a math channel whose owner
     /// is gone (the pane then draws that channel alone).
     pub fn transfer_group(&self) -> Option<MeasId> {
-        let m = self.pane_meas(PaneKind::Transfer)?;
+        self.group_of_shown(self.kind_meas(PaneKind::Transfer))
+    }
+
+    /// The measurement whose group a transfer pane showing `shown` draws.
+    pub fn group_of_shown(&self, shown: Option<&Measurement>) -> Option<MeasId> {
+        let m = shown?;
         match ac2_scene::meas_list::meas_group(m, &self.measurements()) {
             TraceOwner::Meas { meas } => Some(meas),
             TraceOwner::Imported => None,
         }
     }
 
-    /// Whether the transfer pane draws stored trace `t`: a shown transfer-like curve of the
-    /// pane's group. Every other group's, Imported's too, waits until its measurement is the
-    /// pane's (or the trace is moved under it). With no measurement to show at all, the
-    /// pane's group is Imported: files looked at without a rig are drawn.
-    pub fn on_transfer_pane(&self, t: &TraceMeta) -> bool {
+    /// Whether a transfer pane showing `shown` draws stored trace `t`: a shown
+    /// transfer-like curve of the pane's group. Every other group's, Imported's too, waits
+    /// until its measurement is the pane's (or the trace is moved under it). With no
+    /// measurement to show at all, the pane's group is Imported: files looked at without a
+    /// rig are drawn.
+    pub fn on_transfer_pane(&self, t: &TraceMeta, shown: Option<&Measurement>) -> bool {
         transfer_kind_shown(t)
             && match ac2_scene::meas_list::group_of(t, &self.measurements()) {
-                TraceOwner::Meas { meas } => Some(meas) == self.transfer_group(),
-                TraceOwner::Imported => self.pane_meas(PaneKind::Transfer).is_none(),
+                TraceOwner::Meas { meas } => Some(meas) == self.group_of_shown(shown),
+                TraceOwner::Imported => shown.is_none(),
             }
     }
 
-    /// Whether the transfer pane draws measurement `m`'s live curve: it publishes one, is not
-    /// hidden, and is the pane's measurement or a math channel of the pane's group.
-    pub fn live_on_transfer_pane(&self, m: &Measurement) -> bool {
+    /// Whether a transfer pane showing `shown` draws measurement `m`'s live curve: it
+    /// publishes one, is not hidden, and is the pane's measurement or a math channel of the
+    /// pane's group.
+    pub fn live_on_transfer_pane(&self, m: &Measurement, shown: Option<&Measurement>) -> bool {
         if !m.config.kind.publishes_tf() || self.meas_hidden(m) {
             return false;
         }
-        if self.pane_meas(PaneKind::Transfer).map(|p| p.id) == Some(m.id) {
+        if shown.map(|p| p.id) == Some(m.id) {
             return true;
         }
         match ac2_scene::meas_list::meas_group(m, &self.measurements()) {
-            TraceOwner::Meas { meas } => Some(meas) == self.transfer_group(),
+            TraceOwner::Meas { meas } => Some(meas) == self.group_of_shown(shown),
             TraceOwner::Imported => false,
         }
     }
@@ -544,17 +519,19 @@ impl AppState {
 
     /// Whether the transfer pane draws `m`'s live curve for compare only: compared, not
     /// hidden, and not of the pane's group (drawn there anyway, once, unmarked).
-    pub fn live_compared_on_transfer(&self, m: &Measurement) -> bool {
+    pub fn live_compared_on_transfer(&self, m: &Measurement, shown: Option<&Measurement>) -> bool {
         m.config.kind.publishes_tf()
             && !self.meas_hidden(m)
             && self.meas_compared(m)
-            && !self.live_on_transfer_pane(m)
+            && !self.live_on_transfer_pane(m, shown)
     }
 
     /// Whether the transfer pane draws stored trace `t` for compare only: compared, shown,
     /// a transfer-like curve, and not of the pane's group.
-    pub fn trace_compared_on_transfer(&self, t: &TraceMeta) -> bool {
-        self.compared_traces.contains(&t.id) && transfer_kind_shown(t) && !self.on_transfer_pane(t)
+    pub fn trace_compared_on_transfer(&self, t: &TraceMeta, shown: Option<&Measurement>) -> bool {
+        self.compared_traces.contains(&t.id)
+            && transfer_kind_shown(t)
+            && !self.on_transfer_pane(t, shown)
     }
 
     /// The tree rows compared (C), for their mark.
@@ -592,8 +569,9 @@ impl AppState {
         let Some(d) = self.data.as_ref() else {
             return false;
         };
+        let tf = self.kind_meas(PaneKind::Transfer);
         self.measurements().into_iter().any(|m| {
-            (self.live_on_transfer_pane(m) || self.live_compared_on_transfer(m))
+            (self.live_on_transfer_pane(m, tf) || self.live_compared_on_transfer(m, tf))
                 && d.latest
                     .get(&Topic::Data {
                         meas: m.id,
@@ -609,7 +587,7 @@ impl AppState {
 
     /// Keys go to the focused pane's scope.
     pub fn scope(&self) -> Scope {
-        self.layout.focus.scope()
+        self.layout.focus_kind().scope()
     }
 
     /// Navigation still moving: the UI keeps repainting until it settles.
@@ -643,22 +621,45 @@ impl AppState {
 
     /// Once the daemon's state is known, each pane shows the measurement it showed when the
     /// app last ran, if one of that name (and kind) still exists; else the pane's usual
-    /// choice, quietly.
+    /// choice, quietly. With no layout remembered, the one pane shows the kind of the first
+    /// measurement (a transfer pane while there is none).
     pub(super) fn restore_pane_meas(&mut self) {
-        if self.pending_pane_meas.is_empty() || self.daemon().is_none() {
+        // A layout the operator changed is theirs from then on.
+        let fresh = Layout::default();
+        if self.layout.root != fresh.root || self.layout.views != fresh.views {
+            self.pane_auto = false;
+        }
+        if self.daemon().is_none() {
+            return;
+        }
+        // The first pane shows what the daemon measures: the kind of its first measurement.
+        if self.pane_auto
+            && let Some(kind) = self
+                .measurements()
+                .first()
+                .map(|m| PaneKind::for_kind(&m.config.kind))
+        {
+            self.pane_auto = false;
+            let f = self.layout.focus;
+            self.set_pane_kind(f, kind);
+        }
+        if self.pending_pane_meas.is_empty() {
             return;
         }
         let pending = std::mem::take(&mut self.pending_pane_meas);
         for (pane, name) in pending {
+            let kind = self.layout.kind(pane);
             let id = self
                 .measurements()
                 .iter()
-                .find(|m| m.config.name == name && pane.shows(&m.config.kind))
+                .find(|m| m.config.name == name && kind.shows(&m.config.kind))
                 .map(|m| m.id);
             if let Some(id) = id {
-                self.pane_meas.insert(pane, id);
-                if self.layout.focus.owner() == pane {
-                    self.select(id);
+                if let Some(v) = self.layout.view_mut(pane) {
+                    v.meas = Some(id);
+                }
+                if self.layout.focus == pane {
+                    self.select_on(pane, id);
                 }
             }
         }
@@ -666,19 +667,42 @@ impl AppState {
 
     /// The layout as it is now, as the preferences keep it.
     pub fn layout_prefs(&self) -> crate::prefs::LayoutPrefs {
-        let mut measurements = BTreeMap::new();
-        for p in [PaneKind::Transfer, PaneKind::Spectrum, PaneKind::Spl] {
-            // Unknown until the daemon's state is (and while a remembered one waits for
-            // it): keep what the preferences say.
-            let name = match (self.pending_pane_meas.get(&p), self.daemon()) {
-                (Some(n), _) => Some(n.clone()),
-                (None, None) => self.prefs.layout.measurements.get(&p).cloned(),
-                (None, Some(_)) => self.pane_meas(p).map(|m| m.config.name.clone()),
-            };
-            if let Some(n) = name {
-                measurements.insert(p, n);
-            }
-        }
+        let remembered = |id: PaneId| {
+            self.prefs
+                .layout
+                .panes
+                .as_ref()
+                .and_then(|p| p.views.iter().find(|v| v.id == id))
+                .and_then(|v| v.measurement.clone())
+        };
+        // Unknown until the daemon's state is (and while a remembered one waits for it):
+        // keep what the preferences say. No layout of the operator's yet: none is kept.
+        let panes = (!self.pane_auto).then(|| crate::prefs::PanesPrefs {
+            root: self.layout.root.clone(),
+            focus: self.layout.focus,
+            views: self
+                .layout
+                .root
+                .leaves()
+                .into_iter()
+                .filter_map(|id| {
+                    let v = self.layout.view(id)?;
+                    let measurement = match (self.pending_pane_meas.get(&id), self.daemon()) {
+                        (Some(n), _) => Some(n.clone()),
+                        (None, None) => remembered(id),
+                        // An IR pane following the transfer pane keeps following it.
+                        (None, Some(_)) if v.kind == PaneKind::Ir && v.meas.is_none() => None,
+                        (None, Some(_)) => self.pane_meas(id).map(|m| m.config.name.clone()),
+                    };
+                    Some(crate::prefs::PanePrefs {
+                        id,
+                        kind: v.kind,
+                        measurement,
+                        modes: v.modes,
+                    })
+                })
+                .collect(),
+        });
         // Names of measurements that exist (all of them until the daemon's state is known):
         // a deleted one's name must not hide a new one of that name in a later run.
         let existing = |set: &BTreeSet<String>| match self.daemon() {
@@ -693,16 +717,10 @@ impl AppState {
         let hidden = existing(&self.hidden_meas);
         let compared = existing(&self.compared_meas);
         crate::prefs::LayoutPrefs {
-            focus: self.layout.focus,
+            panes,
             maximized: self.layout.maximized,
             fullscreen: self.fullscreen,
-            spl_view: self.view.spl.mode,
-            spectrum_view: self.view.spectrum.mode,
-            sweep_view: self.view.distortion.mode,
-            ir_mode: self.view.ir.mode,
             distortion_unit: self.view.distortion.unit,
-            chrome: self.view.chrome,
-            measurements,
             hidden,
             compared,
         }
@@ -791,23 +809,47 @@ impl AppState {
     pub fn set_prefs(&mut self, prefs: UiPrefs) {
         self.view.spl.layout = prefs.leq;
         let l = &prefs.layout;
-        self.layout.shown[l.focus.index()] = true;
-        self.layout.focus = l.focus;
+        self.pending_pane_meas.clear();
+        match &l.panes {
+            Some(p) => {
+                let views = p
+                    .views
+                    .iter()
+                    .map(|v| {
+                        (
+                            v.id,
+                            View {
+                                kind: v.kind,
+                                meas: None,
+                                modes: v.modes,
+                            },
+                        )
+                    })
+                    .collect();
+                self.layout = Layout::of(p.root.clone(), views, p.focus);
+                for v in &p.views {
+                    if let Some(n) = &v.measurement
+                        && self.layout.views.contains_key(&v.id)
+                    {
+                        self.pending_pane_meas.insert(v.id, n.clone());
+                    }
+                }
+                self.pane_auto = false;
+            }
+            None => {
+                self.layout = Layout::default();
+                self.pane_auto = true;
+            }
+        }
         self.layout.maximized = l.maximized;
         self.fullscreen = l.fullscreen;
-        self.view.spl.mode = l.spl_view;
-        self.view.spectrum.mode = l.spectrum_view;
-        self.view.distortion.mode = l.sweep_view;
-        self.view.ir.mode = l.ir_mode;
         self.view.distortion.unit = l.distortion_unit;
-        self.view.chrome = l.chrome;
         // Before any frame: a spectrum that starts still fits its axis on its first one.
         prefs.levels.apply(&mut self.view);
         prefs.legend.apply(&mut self.view.tf.legend);
         if let Some(s) = prefs.spectrograph_span_s {
             self.view.spectrum.spectrograph.span_s = s;
         }
-        self.pending_pane_meas = l.measurements.clone();
         self.hidden_meas = l.hidden.clone();
         self.compared_meas = l.compared.clone();
         self.prefs = prefs;
@@ -849,7 +891,7 @@ impl AppState {
     pub fn key_hint_line(
         &self,
         keymap: &Keymap,
-        pane: PaneKind,
+        pane: PaneId,
         style: crate::keys::LabelStyle,
     ) -> Option<Vec<crate::hints::KeyHint>> {
         if !self.key_hints_shown() || self.layout.focus != pane {
@@ -862,10 +904,14 @@ impl AppState {
     pub fn pane_hints(
         &self,
         keymap: &Keymap,
-        pane: PaneKind,
+        id: PaneId,
         style: crate::keys::LabelStyle,
     ) -> Vec<crate::hints::KeyHint> {
-        let mode = self.view.distortion.mode;
+        let pane = self.layout.kind(id);
+        let mode = self
+            .layout
+            .view(id)
+            .map_or(SweepMode::Response, |v| v.modes.sweep);
         let mut line = crate::hints::line(keymap, pane.scope(), style, |c| {
             pane == PaneKind::Distortion
                 && match c {

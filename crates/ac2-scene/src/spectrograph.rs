@@ -372,7 +372,7 @@ pub fn spectrograph_scene(
     theme: &Theme,
     size: Viewport,
 ) -> SpectrographScene {
-    let chrome = view.chrome.spectrum;
+    let chrome = view.chrome;
     let cursor_hz = view.cursor_hz.filter(|_| chrome.cursor());
     let alone = view.spectrum.mode == SpectrumMode::Spectrograph;
     let (spectrum, mut layers, banners, top) = if alone {

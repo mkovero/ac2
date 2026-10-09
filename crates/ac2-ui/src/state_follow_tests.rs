@@ -48,7 +48,7 @@ fn panes_follow_the_selected_measurement() {
     t.conn(mirror(with_spl()));
     assert!(!t.st.prefs.panes_follow);
     select(&mut t, 2);
-    assert_eq!(t.st.visible_panes(), [Transfer, Spectrum, Ir, Spl]);
+    assert_eq!(t.visible(), [Transfer, Spectrum, Ir, Spl]);
 
     follow_on(&mut t);
     assert!(
@@ -56,34 +56,34 @@ fn panes_follow_the_selected_measurement() {
         "{}",
         t.last_toast()
     );
-    assert_eq!(t.st.visible_panes(), [Spectrum]);
-    assert_eq!(t.st.layout.focus, Spectrum);
+    assert_eq!(t.visible(), [Spectrum]);
+    assert_eq!(t.focus_kind(), Spectrum);
 
     select(&mut t, 1);
-    assert_eq!(t.st.visible_panes(), [Transfer, Ir]);
-    assert_eq!(t.st.layout.focus, Transfer);
-    // Ctrl+Tab walks the panes kept.
-    t.key("Ctrl+Tab");
-    assert_eq!(t.st.layout.focus, Ir);
-    t.key("Ctrl+Tab");
-    assert_eq!(t.st.layout.focus, Transfer);
+    assert_eq!(t.visible(), [Transfer, Ir]);
+    assert_eq!(t.focus_kind(), Transfer);
+    // Alt+number counts the panes kept.
+    t.key("Alt+2");
+    assert_eq!(t.focus_kind(), Ir);
+    t.key("Alt+1");
+    assert_eq!(t.focus_kind(), Transfer);
 
     // W: the focused pane alone; another selection maximises one of its own panes.
     t.key("W");
-    assert_eq!(t.st.visible_panes(), [Transfer]);
+    assert_eq!(t.visible(), [Transfer]);
     select(&mut t, 4);
-    assert_eq!(t.st.visible_panes(), [Spl]);
-    assert_eq!(t.st.layout.focus, Spl);
+    assert_eq!(t.visible(), [Spl]);
+    assert_eq!(t.focus_kind(), Spl);
     t.key("W");
     t.key("W");
     assert!(!t.st.layout.maximized);
-    assert_eq!(t.st.visible_panes(), [Spl]);
+    assert_eq!(t.visible(), [Spl]);
 
     // Off again: every pane.
     let keys = t.keys.clone();
     t.st.update(Msg::Command(CommandId::PanesFollow), &keys);
     assert!(!t.st.prefs.panes_follow);
-    assert_eq!(t.st.visible_panes(), [Transfer, Spectrum, Ir, Spl]);
+    assert_eq!(t.visible(), [Transfer, Spectrum, Ir, Spl]);
 }
 
 /// A selected stored trace keeps the panes drawing it and its measurement; an imported one
@@ -100,13 +100,13 @@ fn panes_follow_a_selected_trace() {
     t.conn(mirror(s));
     follow_on(&mut t);
     select(&mut t, 2);
-    assert_eq!(t.st.visible_panes(), [Spectrum]);
+    assert_eq!(t.visible(), [Spectrum]);
     select_trace(&mut t, 3);
-    assert_eq!(t.st.visible_panes(), [Transfer, Ir]);
-    assert_eq!(t.st.layout.focus, Transfer);
+    assert_eq!(t.visible(), [Transfer, Ir]);
+    assert_eq!(t.focus_kind(), Transfer);
     select_trace(&mut t, 9);
-    assert_eq!(t.st.visible_panes(), [Spectrum]);
-    assert_eq!(t.st.layout.focus, Spectrum);
+    assert_eq!(t.visible(), [Spectrum]);
+    assert_eq!(t.focus_kind(), Spectrum);
 }
 
 /// A sweep measurement keeps the sweep pane and, with runs, the panes drawing them.
@@ -132,34 +132,33 @@ fn panes_follow_a_sweep() {
         },
     ));
     t.conn(mirror(s.clone()));
+    t.go(Distortion);
+    t.key("Alt+1");
     follow_on(&mut t);
     select(&mut t, 5);
-    assert_eq!(t.st.visible_panes(), [Distortion]);
-    assert_eq!(t.st.layout.focus, Distortion);
+    assert_eq!(t.visible(), [Distortion]);
+    assert_eq!(t.focus_kind(), Distortion);
     s.traces = vec![sweep_meta(7)];
     t.conn(mirror(s));
-    assert_eq!(t.st.visible_panes(), [Transfer, Ir, Distortion]);
-    assert_eq!(t.st.layout.focus, Distortion);
+    assert_eq!(t.visible(), [Transfer, Ir, Distortion]);
+    assert_eq!(t.focus_kind(), Distortion);
 }
 
 /// Never an empty screen: no shown pane drawing the selection keeps every shown pane; a
-/// focus key to a pane the selection has nothing on goes back, saying why.
+/// focus key past the panes kept stays, saying why.
 #[test]
 fn panes_follow_never_empties_the_screen() {
     let mut t = T::new();
     follow_on(&mut t);
     select(&mut t, 1);
-    assert_eq!(t.st.visible_panes(), [Transfer, Ir]);
-    t.st.layout.shown = [false, true, false, true, false];
-    assert_eq!(t.st.laid_out_panes(), [Spectrum, Spl]);
-    t.st.layout.shown = [true, true, true, true, false];
+    assert_eq!(t.visible(), [Transfer, Ir]);
 
     t.key("Alt+4");
-    assert_eq!(t.st.layout.focus, Transfer);
+    assert_eq!(t.focus_kind(), Transfer);
     assert!(
-        t.last_toast().contains("no SPL measurement"),
+        t.last_toast().contains("no pane 4: 2 on screen"),
         "{}",
         t.last_toast()
     );
-    assert_eq!(t.st.visible_panes(), [Transfer, Ir]);
+    assert_eq!(t.visible(), [Transfer, Ir]);
 }

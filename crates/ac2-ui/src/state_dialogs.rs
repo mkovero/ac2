@@ -47,8 +47,8 @@ impl AppState {
                     };
                     out.push(req);
                     self.overlay = Overlay::None;
-                    self.layout.shown[PaneKind::Distortion.index()] = true;
-                    self.layout.focus = PaneKind::Distortion;
+                    // A sweep is run from the sweep pane.
+                    self.focus_kind(PaneKind::Distortion);
                 }
                 Err(e) => f.error = Some(e),
             }

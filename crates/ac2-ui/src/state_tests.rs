@@ -123,28 +123,127 @@ struct T {
     keys: Keymap,
 }
 
+/// Four panes the way most tests want them: transfer across the top, spectrum, impulse
+/// response and SPL side by side below it; Alt+1..4 focus them in that order.
+fn grid() -> Layout {
+    let leaf = |n| Box::new(PaneNode::Leaf(PaneId(n)));
+    let root = PaneNode::Split {
+        axis: Axis::Column,
+        ratio: 0.62,
+        a: leaf(1),
+        b: Box::new(PaneNode::Split {
+            axis: Axis::Row,
+            ratio: 1.0 / 3.0,
+            a: leaf(2),
+            b: Box::new(PaneNode::Split {
+                axis: Axis::Row,
+                ratio: 0.5,
+                a: leaf(3),
+                b: leaf(4),
+            }),
+        }),
+    };
+    let views = [
+        PaneKind::Transfer,
+        PaneKind::Spectrum,
+        PaneKind::Ir,
+        PaneKind::Spl,
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, k)| (PaneId(i as u32 + 1), View::of(k)))
+    .collect();
+    Layout::of(root, views, PaneId(1))
+}
+
 impl T {
+    /// The four-pane grid on the test daemon.
     fn new() -> Self {
-        // Texts the tests compare name keys the PC way on every OS (macOS would print `⇧H`).
-        crate::keys::set_label_style(crate::keys::LabelStyle::Pc);
-        let mut t = Self {
-            st: AppState::default(),
-            keys: Keymap::default(),
-        };
-        t.conn(ConnEvent::Connected {
-            target: "local daemon".into(),
-            server: "ac2d test".into(),
-            client_id: ClientId("c1".into()),
-        });
-        t.conn(mirror(daemon_state()));
+        let mut t = Self::fresh();
+        t.st.layout = grid();
+        t.st.pane_auto = false;
+        t.connect(daemon_state());
         t
     }
 
-    fn disconnected() -> Self {
+    /// The app as first started, with no layout saved, before a daemon is known.
+    fn fresh() -> Self {
+        // Texts the tests compare name keys the PC way on every OS (macOS would print `⇧H`).
+        crate::keys::set_label_style(crate::keys::LabelStyle::Pc);
         Self {
             st: AppState::default(),
             keys: Keymap::default(),
         }
+    }
+
+    fn connect(&mut self, state: State) {
+        self.conn(ConnEvent::Connected {
+            target: "local daemon".into(),
+            server: "ac2d test".into(),
+            client_id: ClientId("c1".into()),
+        });
+        self.conn(mirror(state));
+    }
+
+    /// The pane showing `kind` (the lead one when several do).
+    fn pane(&self, kind: PaneKind) -> PaneId {
+        self.st.layout.lead(kind).expect("a pane of the kind")
+    }
+
+    /// What the focused pane shows.
+    fn focus_kind(&self) -> PaneKind {
+        self.st.layout.focus_kind()
+    }
+
+    /// The focused pane turned into `kind` through its menu.
+    fn show(&mut self, kind: PaneKind) {
+        let f = self.st.layout.focus;
+        self.st
+            .update(Msg::PanePick(f, PaneMenuRow::Kind(kind)), &self.keys);
+    }
+
+    /// The focus set on the pane of `kind` without a message; with none, one added as
+    /// [`T::go`] does.
+    fn put(&mut self, kind: PaneKind) {
+        match self.st.layout.lead(kind) {
+            Some(id) => self.st.layout.set_focus(id),
+            None => self.go(kind),
+        }
+    }
+
+    /// What the panes drawn now show, in reading order.
+    fn visible(&self) -> Vec<PaneKind> {
+        let l = &self.st.layout;
+        self.st
+            .visible_panes()
+            .into_iter()
+            .map(|id| l.kind(id))
+            .collect()
+    }
+
+    /// Whether a pane shows `kind`.
+    fn shown(&self, kind: PaneKind) -> bool {
+        self.st.layout.lead(kind).is_some()
+    }
+
+    /// The pane of `kind` focused as a click would; with none, the last pane in reading
+    /// order split and the new half turned into it (so on the grid Alt+5 reaches it).
+    fn go(&mut self, kind: PaneKind) {
+        if let Some(id) = self.st.layout.lead(kind) {
+            self.st.update(Msg::FocusPane(id), &self.keys);
+            return;
+        }
+        let last = *self.st.layout.root.reading_order().last().expect("a pane");
+        self.st.update(Msg::FocusPane(last), &self.keys);
+        self.key("Ctrl+N");
+        self.show(kind);
+    }
+
+    fn disconnected() -> Self {
+        let mut t = Self::fresh();
+        t.st.layout = grid();
+        t.st.pane_auto = false;
+        t
     }
 
     fn conn(&mut self, e: ConnEvent) -> Vec<Request> {
@@ -766,3 +865,6 @@ mod follow;
 
 #[path = "state_tf_group_tests.rs"]
 mod tf_group;
+
+#[path = "state_panes_tests.rs"]
+mod panes;

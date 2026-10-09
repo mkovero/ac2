@@ -61,7 +61,9 @@ impl AppState {
                         .map(|m| m.id);
                 }
                 self.edits.retain(|k, _| ids.contains(k));
-                self.pane_meas.retain(|_, m| ids.contains(m));
+                for v in self.layout.views.values_mut() {
+                    v.meas = v.meas.filter(|m| ids.contains(m));
+                }
                 let metas: BTreeMap<TraceId, TraceMeta> = self
                     .daemon()
                     .map(|st| st.traces.iter().map(|t| (t.id, t.clone())).collect())
@@ -161,7 +163,7 @@ impl AppState {
                 if self.view.spectrum.peak_hold {
                     self.fold_peaks(&d);
                 }
-                if self.view.spectrum.mode.spectrograph() {
+                if self.spectrograph_shown() {
                     self.fold_spectrographs(&d);
                 }
                 // A new log clears the history before its first frame goes in.

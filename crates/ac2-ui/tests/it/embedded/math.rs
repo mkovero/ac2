@@ -22,12 +22,18 @@ fn tf_legend(s: &AppState, id: MeasId) -> String {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    ac2_ui::scenes::transfer(s, &Theme::dark(), size, now)
-        .legend
-        .iter()
-        .find(|e| e.key == ac2_scene::trace::TraceKey::Live(id))
-        .map(|e| e.text.clone())
-        .unwrap_or_default()
+    ac2_ui::scenes::transfer(
+        s,
+        crate::common::pane(s, ac2_ui::state::PaneKind::Transfer),
+        &Theme::dark(),
+        size,
+        now,
+    )
+    .legend
+    .iter()
+    .find(|e| e.key == ac2_scene::trace::TraceKey::Live(id))
+    .map(|e| e.text.clone())
+    .unwrap_or_default()
 }
 
 /// The math channel of the mirrored state, if there is one running.
@@ -239,8 +245,7 @@ fn math_channels_from_an_empty_daemon() -> R {
             .find(|m| m.id == second)
             .map(|m| m.config.name.clone())
             .unwrap_or_default();
-    d.st.pane_meas
-        .insert(ac2_ui::state::PaneKind::Transfer, avg);
+    crate::common::show_on(&mut d.st, ac2_ui::state::PaneKind::Transfer, avg);
     let size = ac2_scene::primitives::Viewport {
         width: 1200.0,
         height: 600.0,
@@ -249,7 +254,13 @@ fn math_channels_from_an_empty_daemon() -> R {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    let scene = ac2_ui::scenes::transfer(&d.st, &Theme::dark(), size, now);
+    let scene = ac2_ui::scenes::transfer(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Transfer),
+        &Theme::dark(),
+        size,
+        now,
+    );
     let banners: Vec<(String, Option<String>)> = scene
         .banners
         .iter()
@@ -338,8 +349,14 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
         wall: ac2_proto::units::WallNs(0),
     };
     let live = ac2_scene::trace::TraceKey::Live(id);
-    d.st.pane_meas.insert(ac2_ui::state::PaneKind::Spectrum, id);
-    let spec = ac2_ui::scenes::spectrum(&d.st, &Theme::dark(), size, now());
+    crate::common::show_on(&mut d.st, ac2_ui::state::PaneKind::Spectrum, id);
+    let spec = ac2_ui::scenes::spectrum(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spectrum),
+        &Theme::dark(),
+        size,
+        now(),
+    );
     assert!(
         spec.legend.iter().any(|e| e.key == live),
         "not on the spectrum pane"
@@ -351,7 +368,13 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
         "{}",
         spec.caption
     );
-    let tf = ac2_ui::scenes::transfer(&d.st, &Theme::dark(), size, now());
+    let tf = ac2_ui::scenes::transfer(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Transfer),
+        &Theme::dark(),
+        size,
+        now(),
+    );
     assert!(
         tf.legend.iter().all(|e| e.key != live),
         "spectrum math on the transfer pane"

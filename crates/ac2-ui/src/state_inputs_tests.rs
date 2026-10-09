@@ -78,7 +78,7 @@ fn ambiguous_first_arrival_opens_the_candidate_list() {
     let r = t.key("2");
     assert_eq!(inserted(&r), Some(DelayPick::Ranked { index: 1 }));
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.layout.focus, PaneKind::Transfer);
+    assert_eq!(t.focus_kind(), PaneKind::Transfer);
     // 1 is the rule's pre-selection.
     found(&mut t, DelayPick::FirstArrival, ambiguous());
     let r = t.key("1");
@@ -86,7 +86,7 @@ fn ambiguous_first_arrival_opens_the_candidate_list() {
     // Other keys keep working with the list up; Esc closes it.
     found(&mut t, DelayPick::FirstArrival, ambiguous());
     t.key("Alt+4");
-    assert_eq!(t.st.layout.focus, PaneKind::Spl);
+    assert_eq!(t.focus_kind(), PaneKind::Spl);
     assert!(matches!(t.st.overlay, Overlay::DelayPick(_)));
     t.key("Esc");
     assert_eq!(t.st.overlay, Overlay::None);

@@ -72,7 +72,7 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     d.fire()?;
     d.tf_frames(m.id, 240)?;
     d.until("the caption without a curve", |s| {
-        s.pane_caption(PaneKind::Transfer)
+        s.pane_caption(crate::common::pane(s, PaneKind::Transfer))
             .is_some_and(|c| c.contains("no mic curve stored for MM1 34804"))
     })?;
 
@@ -107,7 +107,7 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
         let (lp, cap) = (label_part.to_owned(), caption.to_owned());
         d.until(what, move |s| {
             meter_label(s, 1) == format!("MM1 34804 · {lp} · mic (in 2)")
-                && s.pane_caption(PaneKind::Transfer)
+                && s.pane_caption(crate::common::pane(s, PaneKind::Transfer))
                     .is_some_and(|c| c.contains(cap.as_str()))
         })
     };
@@ -310,8 +310,15 @@ fn slow_electrical_calibration_from_the_app() -> R {
     };
     let want = "electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB";
     let texts = |s: &AppState| {
-        ac2_ui::scenes::spl(s, &Keymap::default(), &Theme::dark(), size, now())
-            .map(|x| scene_texts(&x.scene))
+        ac2_ui::scenes::spl(
+            s,
+            crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
+            &Keymap::default(),
+            &Theme::dark(),
+            size,
+            now(),
+        )
+        .map(|x| scene_texts(&x.scene))
     };
     let r = d.until("the SPL meter in dB SPL, electrically calibrated", |s| {
         texts(s).is_some_and(|t| {
@@ -324,8 +331,14 @@ fn slow_electrical_calibration_from_the_app() -> R {
         return Err(format!("{r:?}; the meter shows {:?}", texts(&d.st)).into());
     }
     d.until("the Leq caption naming the electrical calibration", |s| {
-        ac2_ui::scenes::leq(s, &Theme::dark(), size, now())
-            .is_some_and(|x| scene_texts(&x.scene).iter().any(|l| l.contains(want)))
+        ac2_ui::scenes::leq(
+            s,
+            crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
+            &Theme::dark(),
+            size,
+            now(),
+        )
+        .is_some_and(|x| scene_texts(&x.scene).iter().any(|l| l.contains(want)))
     })?;
     // The Leq frames are in dB SPL and say what the calibration rests on: limits are
     // judged on them.
@@ -480,8 +493,15 @@ fn slow_acoustic_calibration_from_the_app() -> R {
         height: 720.0,
     };
     let texts = |s: &AppState| {
-        ac2_ui::scenes::spl(s, &Keymap::default(), &Theme::dark(), size, now())
-            .map(|x| scene_texts(&x.scene))
+        ac2_ui::scenes::spl(
+            s,
+            crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
+            &Keymap::default(),
+            &Theme::dark(),
+            size,
+            now(),
+        )
+        .map(|x| scene_texts(&x.scene))
     };
     let r = d.until("the SPL meter at the calibrator's 94.0 dB SPL", |s| {
         texts(s).is_some_and(|t| {

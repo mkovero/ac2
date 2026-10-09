@@ -56,7 +56,7 @@ fn options_at(endpoints: Option<ac2_client::Endpoints>) -> AppOptions {
         theme: ThemeName::Dark,
         keymap: Keymap::default(),
         keymap_path: Some("~/.config/ac2/keys.toml".into()),
-        prefs: ac2_ui::prefs::UiPrefs::default(),
+        prefs: common::grid_ui_prefs(),
         prefs_path: None,
         notices: vec![],
         started: Instant::now(),
@@ -242,6 +242,7 @@ fn transfer_view_two_traces_and_banner() {
         assert_eq!(st.selected, Some(MeasId(1)));
         let s = ac2_ui::scenes::transfer(
             st,
+            crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
             ac2_scene::primitives::Viewport {
                 width: 1000.0,
@@ -274,6 +275,7 @@ fn no_reference_reminds_of_the_stimulus_keys() {
     step_until(&mut h, "NO REFERENCE on the live frames", |a| {
         let s = ac2_ui::scenes::transfer(
             &a.state,
+            crate::common::pane(&a.state, ac2_ui::state::PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
             ac2_scene::primitives::Viewport {
                 width: 1000.0,
@@ -310,7 +312,7 @@ fn panes_follow_selection() {
     h.state_mut()
         .dispatch(ac2_ui::state::Msg::SelectMeas(MeasId(1)));
     step_until(&mut h, "the transfer and IR panes alone", |a| {
-        a.state.visible_panes() == [PaneKind::Transfer, PaneKind::Ir]
+        crate::common::visible(&a.state) == [PaneKind::Transfer, PaneKind::Ir]
     });
     h.state_mut().state.toasts.clear();
     h.step();
@@ -333,13 +335,14 @@ fn ir_pane_of_a_stopped_measurement() {
     step_until(&mut h, "the IR pane alone, its measurement stopped", |a| {
         let st = &a.state;
         st.layout.maximized
-            && st.layout.focus == PaneKind::Ir
+            && st.layout.focus_kind() == PaneKind::Ir
             && st.meas(MeasId(1)).is_some_and(|m| !m.running)
     });
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::ir(
             st,
+            crate::common::pane(st, ac2_ui::state::PaneKind::Ir),
             &h.state().keymap,
             &ac2_scene::theme::Theme::dark(),
             ac2_scene::primitives::Viewport {
@@ -434,15 +437,13 @@ fn math_average_legend_and_banner() {
         live_with(a, 6) && has_average(a)
     });
     // The transfer pane shows the average: its banner names the position left out.
-    h.state_mut()
-        .state
-        .pane_meas
-        .insert(PaneKind::Transfer, MeasId(6));
+    common::show_on(&mut h.state_mut().state, PaneKind::Transfer, MeasId(6));
     h.state_mut().state.selected = Some(MeasId(6));
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::transfer(
             st,
+            crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
             ac2_scene::primitives::Viewport {
                 width: 1000.0,
@@ -526,14 +527,12 @@ fn spectrum_math() {
     h.key_press_modifiers(Modifiers::ALT, Key::Num2);
     h.key_press(Key::W);
     // The pane shows the math channel: its caption is the expression and what it means.
-    h.state_mut()
-        .state
-        .pane_meas
-        .insert(PaneKind::Spectrum, MeasId(7));
+    common::show_on(&mut h.state_mut().state, PaneKind::Spectrum, MeasId(7));
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::spectrum(
             st,
+            crate::common::pane(st, ac2_ui::state::PaneKind::Spectrum),
             &ac2_scene::theme::Theme::dark(),
             ac2_scene::primitives::Viewport {
                 width: 1000.0,
@@ -942,7 +941,7 @@ fn the_stage_view_stays_the_pane_while_firing() {
     h.key_press(Key::W);
     h.key_press(Key::W);
     step_until(&mut h, "the stage view", |a| {
-        a.state.stage_view() && a.state.layout.focus == PaneKind::Transfer
+        a.state.stage_view() && a.state.layout.focus_kind() == PaneKind::Transfer
     });
     let quiet = |h: &mut Harness<'_, App>| {
         h.state_mut().state.toasts.clear();
@@ -1069,6 +1068,7 @@ fn stored_traces_and_target() {
         let st = &h.state().state;
         let s = ac2_ui::scenes::transfer(
             st,
+            crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
             ac2_scene::primitives::Viewport {
                 width: 1000.0,
@@ -1127,6 +1127,7 @@ fn trace_offset_spread() {
         let st = &h.state().state;
         let s = ac2_ui::scenes::transfer(
             st,
+            crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
             ac2_scene::primitives::Viewport {
                 width: 1000.0,
@@ -1174,7 +1175,7 @@ fn pane_measurement_chip_and_list() {
     step_until(
         &mut h,
         "list",
-        |a| matches!(a.state.overlay, Overlay::PaneMenu(m) if m.pane == PaneKind::Transfer),
+        |a| matches!(a.state.overlay, Overlay::PaneMenu(m) if m.pane == crate::common::pane(&a.state, PaneKind::Transfer)),
     );
     h.state_mut().state.toasts.clear();
     h.step();
@@ -1183,12 +1184,13 @@ fn pane_measurement_chip_and_list() {
     step_until(&mut h, "delay tower shown", |a| {
         a.state.overlay == Overlay::None
             && a.state.selected == Some(MeasId(2))
-            && a.state.pane_meas(PaneKind::Transfer).map(|m| m.id) == Some(MeasId(2))
+            && a.state.kind_meas(PaneKind::Transfer).map(|m| m.id) == Some(MeasId(2))
     });
     // The pane now leads with it: first legend row, IR of it.
     let st = &h.state().state;
     let s = ac2_ui::scenes::transfer(
         st,
+        crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
         &ac2_scene::theme::Theme::dark(),
         ac2_scene::primitives::Viewport {
             width: 1000.0,
@@ -1236,7 +1238,8 @@ fn slot_resmoothed() {
     let st = &h.state().state;
     assert_ne!(st.traces[&id].0.mag_db, before, "served at the new setting");
     assert_eq!(
-        st.smoothing_caption(PaneKind::Transfer).as_deref(),
+        st.smoothing_caption(crate::common::pane(st, PaneKind::Transfer))
+            .as_deref(),
         Some("slot 1 (Main L S1): smoothing 1/3 oct")
     );
     // The live measurement was not touched.
@@ -1272,7 +1275,13 @@ fn smoothed_phase_and_spectrum() {
             height: 450.0,
         };
         let theme = ac2_scene::theme::Theme::dark();
-        let s = ac2_ui::scenes::transfer(st, &theme, size, now);
+        let s = ac2_ui::scenes::transfer(
+            st,
+            crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
+            &theme,
+            size,
+            now,
+        );
         let raw = common::raw_tf_frame(1, 0.0, 0.0, 2000.0);
         let want = common::smoothed_tf_frame(&raw);
         let t = &s.traces[0];
@@ -1298,7 +1307,13 @@ fn smoothed_phase_and_spectrum() {
         }
         assert_eq!(s.legend[0].text, "Main L · ref · 1/6 oct");
 
-        let sp = ac2_ui::scenes::spectrum(st, &theme, size, now);
+        let sp = ac2_ui::scenes::spectrum(
+            st,
+            crate::common::pane(st, ac2_ui::state::PaneKind::Spectrum),
+            &theme,
+            size,
+            now,
+        );
         assert_eq!(sp.unit, "dBFS per 11.7 Hz bin (tone, 1/6 oct smoothed)");
         assert_eq!(sp.caption, "Hann window");
     }
@@ -1545,8 +1560,8 @@ fn session_dialog() {
     });
 
     // Shift+S: the sweep dialog, inputs and outputs by name, a typed level; Enter makes the
-    // sweep measurement (nothing armed), Space on the sweep pane arms its run, Enter plays
-    // it and the result opens the distortion pane.
+    // sweep measurement (nothing armed) and focuses the sweep pane, Space there arms its
+    // run, Enter plays it and the result shows on the pane.
     h.key_press_modifiers(Modifiers::SHIFT, Key::S);
     h.event(Event::Text("S".into()));
     step_until(
@@ -1566,10 +1581,12 @@ fn session_dialog() {
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "sweep_dialog");
+    // A sweep pane beside the others (as Ctrl+N, Ctrl+Tab make one): the sweep goes there.
+    h.state_mut().state.layout = common::layout_of(&common::grid_with_sweep_prefs());
     h.key_press(Key::Enter);
     step_until(&mut h, "the sweep measurement, nothing armed", |a| {
         a.state.sweep_meas().is_some()
-            && a.state.layout.focus == PaneKind::Distortion
+            && a.state.layout.focus_kind() == PaneKind::Distortion
             && a.state.daemon().is_some_and(|s| !s.generator.armed)
     });
     h.key_press(Key::Space);
@@ -1584,7 +1601,7 @@ fn session_dialog() {
     });
     h.key_press(Key::Enter);
     step_until(&mut h, "sweep stored and shown", |a| {
-        a.state.layout.focus == PaneKind::Distortion && a.state.shown_sweep().is_some()
+        a.state.layout.focus_kind() == PaneKind::Distortion && a.state.shown_sweep().is_some()
     });
     assert_eq!(fake.executions("sweep.run"), 1);
     // The sweep left nothing armed: the stimulus is off (STIM OFF) and the lease was given
@@ -1624,12 +1641,15 @@ fn session_dialog() {
     palette(&mut h, "comparison cursor");
     h.key_press_modifiers(Modifiers::SHIFT, Key::I);
     step_until(&mut h, "sweep IR", |a| {
-        a.state.view.distortion.mode == ac2_scene::view::SweepMode::Ir
+        a.state
+            .kind_modes(ac2_ui::state::PaneKind::Distortion)
+            .sweep
+            == ac2_scene::view::SweepMode::Ir
     });
     // Shift+G: the log view, where the harmonics' impulses read at their level.
     h.key_press_modifiers(Modifiers::SHIFT, Key::G);
     step_until(&mut h, "log IR", |a| {
-        a.state.view.ir.mode == ac2_scene::view::IrMode::Log
+        a.state.kind_modes(ac2_ui::state::PaneKind::Distortion).ir == ac2_scene::view::IrMode::Log
     });
     h.state_mut().state.toasts.clear();
     h.step();
@@ -1637,7 +1657,10 @@ fn session_dialog() {
     // G: the room parameters alone, the whole (maximised) pane.
     h.key_press(Key::G);
     step_until(&mut h, "room parameters", |a| {
-        a.state.view.distortion.mode == ac2_scene::view::SweepMode::Room
+        a.state
+            .kind_modes(ac2_ui::state::PaneKind::Distortion)
+            .sweep
+            == ac2_scene::view::SweepMode::Room
     });
     h.state_mut().state.toasts.clear();
     h.step();
@@ -2122,8 +2145,14 @@ fn leq_tiles_from_an_empty_daemon() {
             })
     });
     assert_eq!(fake.executions("meas.update"), 1);
-    assert!(h.state().state.view.spl.mode.shows_leq());
-    assert_eq!(h.state().state.layout.focus, PaneKind::Spl);
+    assert!(
+        h.state()
+            .state
+            .kind_modes(ac2_ui::state::PaneKind::Spl)
+            .spl
+            .shows_leq()
+    );
+    assert_eq!(h.state().state.layout.focus_kind(), PaneKind::Spl);
     assert_eq!(
         h.state().state.view.spl.layout,
         ac2_scene::view::LeqLayout::default()
@@ -2222,13 +2251,13 @@ fn leq_tiles_from_an_empty_daemon() {
     };
     // G twice: from meter + Leq (the default) past the meter alone to the windows alone.
     assert_eq!(
-        h.state().state.view.spl.mode,
+        h.state().state.kind_modes(ac2_ui::state::PaneKind::Spl).spl,
         ac2_scene::view::SplMode::MeterLeq
     );
     h.key_press(Key::G);
     h.key_press(Key::G);
     step_until(&mut h, "the windows alone", |a| {
-        a.state.view.spl.mode == ac2_scene::view::SplMode::Leq
+        a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::Leq
     });
     h.key_press(Key::W);
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
@@ -2319,7 +2348,7 @@ fn leq_tiles_from_an_empty_daemon() {
     leq.set_spl(spl_frame_at(meas, 101.84, cal_at));
     h.key_press(Key::G);
     let held = move |a: &ac2_ui::App| {
-        a.state.view.spl.mode == ac2_scene::view::SplMode::MeterLeq
+        a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::MeterLeq
             && a.state.spl_hold.contains_key(&meas)
             && first_is(true)(a)
     };
@@ -2480,7 +2509,10 @@ fn traces_list() {
             .is_some_and(|t| t.edit.name == "house_curve")
     });
     assert_eq!(
-        h.state().state.pane_caption(PaneKind::Transfer).as_deref(),
+        h.state()
+            .state
+            .pane_caption(crate::common::pane(&h.state().state, PaneKind::Transfer))
+            .as_deref(),
         Some("house_curve")
     );
     // The hidden trace's dot now offers to show it.
@@ -2509,7 +2541,10 @@ fn measurement_hidden_and_delete_confirm() {
     step_until(&mut h, "delay tower hidden", |a| {
         a.state.hidden_meas.contains("Delay tower")
     });
-    let caption = h.state().state.pane_caption(PaneKind::Transfer);
+    let caption = h
+        .state()
+        .state
+        .pane_caption(crate::common::pane(&h.state().state, PaneKind::Transfer));
     assert!(
         caption
             .as_deref()
@@ -2571,25 +2606,30 @@ fn key_hints() {
             },
         }]));
     }
-    let mut h = harness(options(Some(&rig)));
+    let mut opts = options(Some(&rig));
+    opts.prefs.layout.panes = Some(common::grid_with_sweep_prefs());
+    let mut h = harness(opts);
     step_until(&mut h, "live frames with the mic", |a| {
         live(a) && a.state.daemon().is_some_and(|s| !s.mics.is_empty())
     });
     // A capture of the transfer measurement.
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
     step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
-    // The sweep pane shown (focused by Alt+5), then the SPL meter focused.
+    // The sweep pane focused (Alt+5), then the SPL meter.
     h.key_press_modifiers(Modifiers::ALT, Key::Num5);
     h.key_press_modifiers(Modifiers::ALT, Key::Num4);
     step_until(&mut h, "five panes, SPL focused", |a| {
-        a.state.layout.visible().len() == 5 && a.state.layout.focus == PaneKind::Spl
+        crate::common::visible(&a.state).len() == 5 && a.state.layout.focus_kind() == PaneKind::Spl
     });
     // The capture selected (the focus stays): the transfer title names it.
     h.key_press(Key::V);
     step_until(&mut h, "slot 1 selected", |a| {
-        a.state.selected_trace_meta().is_some() && a.state.layout.focus == PaneKind::Spl
+        a.state.selected_trace_meta().is_some() && a.state.layout.focus_kind() == PaneKind::Spl
     });
-    let names = |a: &App| a.state.pane_caption_variants(PaneKind::Transfer);
+    let names = |a: &App| {
+        a.state
+            .pane_caption_variants(crate::common::pane(&a.state, PaneKind::Transfer))
+    };
     assert!(
         names(h.state())
             .last()
@@ -2601,7 +2641,11 @@ fn key_hints() {
     assert!(
         h.state()
             .state
-            .key_hint_line(&h.state().keymap, PaneKind::Spl, style)
+            .key_hint_line(
+                &h.state().keymap,
+                common::pane(&h.state().state, PaneKind::Spl),
+                style
+            )
             .is_some()
     );
     h.event(Event::PointerGone);
@@ -2632,9 +2676,9 @@ fn spl_meter_big_and_stage() {
     h.key_press(Key::G);
     h.key_press(Key::W);
     step_until(&mut h, "the meter maximised", |a| {
-        a.state.view.spl.mode == ac2_scene::view::SplMode::Meter
+        a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::Meter
             && a.state.layout.maximized
-            && a.state.layout.focus == PaneKind::Spl
+            && a.state.layout.focus_kind() == PaneKind::Spl
             && a.state.spl_hold.contains_key(&MeasId(4))
     });
     snapshot(&mut h, "spl_meter_big");
@@ -2714,8 +2758,9 @@ fn spectrograph() {
         |a| {
             let st = &a.state;
             st.layout.maximized
-                && st.layout.focus == PaneKind::Spectrum
-                && st.view.spectrum.mode == ac2_scene::view::SpectrumMode::Split
+                && st.layout.focus_kind() == PaneKind::Spectrum
+                && st.kind_modes(ac2_ui::state::PaneKind::Spectrum).spectrum
+                    == ac2_scene::view::SpectrumMode::Split
                 && st.meas(MeasId(3)).is_some_and(|m| !m.running)
         },
     );
@@ -2766,7 +2811,13 @@ fn spectrograph() {
             width: 1000.0,
             height: 600.0,
         };
-        let s = ac2_ui::scenes::spectrograph(st, &theme, size, now);
+        let s = ac2_ui::scenes::spectrograph(
+            st,
+            crate::common::pane(st, ac2_ui::state::PaneKind::Spectrum),
+            &theme,
+            size,
+            now,
+        );
         assert_eq!(s.caption, "Mic 1 FFT · last 30 s · dBFS · stopped");
         assert_eq!(
             s.cursor.expect("cursor").text,
@@ -2779,7 +2830,10 @@ fn spectrograph() {
     // spectrum's window.
     h.key_press(Key::G);
     step_until(&mut h, "the spectrograph alone", |a| {
-        a.state.view.spectrum.mode == ac2_scene::view::SpectrumMode::Spectrograph
+        a.state
+            .kind_modes(ac2_ui::state::PaneKind::Spectrum)
+            .spectrum
+            == ac2_scene::view::SpectrumMode::Spectrograph
     });
     {
         pin(h.state_mut());
@@ -2793,7 +2847,13 @@ fn spectrograph() {
             width: 1000.0,
             height: 600.0,
         };
-        let s = ac2_ui::scenes::spectrograph(st, &theme, size, now);
+        let s = ac2_ui::scenes::spectrograph(
+            st,
+            crate::common::pane(st, ac2_ui::state::PaneKind::Spectrum),
+            &theme,
+            size,
+            now,
+        );
         assert!(s.spectrum.is_none());
         assert_eq!(
             s.caption,
@@ -3305,7 +3365,7 @@ fn slow_band_leq_from_an_empty_daemon() {
     // G from meter + Leq (the default) on to the bands: the meter has a band meter now.
     h.key_press(Key::G);
     step_until(&mut h, "the bands", |a| {
-        a.state.view.spl.mode == ac2_scene::view::SplMode::Bands
+        a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::Bands
     });
     // With a band meter the G hint names the band view too.
     let hints = h
@@ -3313,7 +3373,7 @@ fn slow_band_leq_from_an_empty_daemon() {
         .state
         .key_hint_line(
             &h.state().keymap,
-            PaneKind::Spl,
+            common::pane(&h.state().state, PaneKind::Spl),
             ac2_ui::keys::LabelStyle::Pc,
         )
         .expect("the SPL pane focused");
@@ -3334,6 +3394,7 @@ fn slow_band_leq_from_an_empty_daemon() {
     let theme = ac2_scene::Theme::dark();
     let scene = ac2_ui::scenes::band_leq(
         &h.state().state,
+        crate::common::pane(&h.state().state, ac2_ui::state::PaneKind::Spl),
         &theme,
         ac2_scene::Viewport {
             width: 1200.0,
@@ -3522,7 +3583,7 @@ fn a_single_band_window_with_plus_and_minus() {
     });
     h.key_press(Key::G);
     step_until(&mut h, "the bands", |a| {
-        a.state.view.spl.mode == ac2_scene::view::SplMode::Bands
+        a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::Bands
     });
     step_until(&mut h, "the band frame", move |a| {
         a.state.data.as_ref().is_some_and(|d| {
@@ -3536,6 +3597,7 @@ fn a_single_band_window_with_plus_and_minus() {
     });
     let scene = ac2_ui::scenes::band_leq(
         &h.state().state,
+        crate::common::pane(&h.state().state, ac2_ui::state::PaneKind::Spl),
         &ac2_scene::Theme::dark(),
         ac2_scene::Viewport {
             width: 1200.0,
@@ -3834,7 +3896,7 @@ fn transfer_legend_many_curves() {
     settle(&mut h, 3);
     let legend = |h: &Harness<'_, App>| h.state().state.view.tf.legend;
     let (plate, _) = h.state().legend_rects().expect("legend drawn");
-    let pane = h.state().state.layout.focus;
+    let pane = h.state().state.layout.focus_kind();
     assert_eq!(pane, PaneKind::Transfer);
 
     // The wheel over it scrolls its rows (the frequency axis stays).

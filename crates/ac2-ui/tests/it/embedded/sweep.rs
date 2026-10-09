@@ -61,7 +61,9 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
     })?;
     d.key("Enter");
     d.until("the sweep stored and shown", |s| {
-        s.sweep.run.is_none() && s.layout.focus == PaneKind::Distortion && s.shown_sweep().is_some()
+        s.sweep.run.is_none()
+            && s.layout.focus_kind() == PaneKind::Distortion
+            && s.shown_sweep().is_some()
     })?;
     let (data, grid) = d.st.shown_sweep().ok_or("no sweep")?;
     let freqs = ac2_scene::grid::column_frequencies(grid);
@@ -90,7 +92,13 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
             width: 1100.0,
             height: 600.0,
         };
-        match ac2_ui::scenes::sweep(&d.st, &Theme::dark(), size, now) {
+        match ac2_ui::scenes::sweep(
+            &d.st,
+            crate::common::pane(&d.st, ac2_ui::state::PaneKind::Distortion),
+            &Theme::dark(),
+            size,
+            now,
+        ) {
             ac2_ui::scenes::SweepPane::Distortion(s) => {
                 Ok(s.cursor.ok_or("no distortion cursor")?.rows)
             }
@@ -203,10 +211,15 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     })?;
     d.key("Enter");
     d.until("the sweep stored and shown", |s| {
-        s.sweep.run.is_none() && s.layout.focus == PaneKind::Distortion && s.shown_sweep().is_some()
+        s.sweep.run.is_none()
+            && s.layout.focus_kind() == PaneKind::Distortion
+            && s.shown_sweep().is_some()
     })?;
     d.key("Shift+I");
-    assert_eq!(d.st.view.distortion.mode, ac2_scene::view::SweepMode::Ir);
+    assert_eq!(
+        d.st.kind_modes(ac2_ui::state::PaneKind::Distortion).sweep,
+        ac2_scene::view::SweepMode::Ir
+    );
     let theme = Theme::dark();
     let size = ac2_scene::primitives::Viewport {
         width: 1100.0,
@@ -216,7 +229,13 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    let ac2_ui::scenes::SweepPane::Ir(ir) = ac2_ui::scenes::sweep(&d.st, &theme, size, now) else {
+    let ac2_ui::scenes::SweepPane::Ir(ir) = ac2_ui::scenes::sweep(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Distortion),
+        &theme,
+        size,
+        now,
+    ) else {
         return Err("the sweep pane does not show the impulse response".into());
     };
     let t = ir.room.as_ref().ok_or("no room table")?;
@@ -245,9 +264,17 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
 
     // G: the room parameters alone, the whole pane, every band at a larger size.
     d.key("G");
-    assert_eq!(d.st.view.distortion.mode, ac2_scene::view::SweepMode::Room);
-    let ac2_ui::scenes::SweepPane::Room(room) = ac2_ui::scenes::sweep(&d.st, &theme, size, now)
-    else {
+    assert_eq!(
+        d.st.kind_modes(ac2_ui::state::PaneKind::Distortion).sweep,
+        ac2_scene::view::SweepMode::Room
+    );
+    let ac2_ui::scenes::SweepPane::Room(room) = ac2_ui::scenes::sweep(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Distortion),
+        &theme,
+        size,
+        now,
+    ) else {
         return Err("the sweep pane does not show the room parameters".into());
     };
     let rt = room.table.as_ref().ok_or("no room table")?;
@@ -440,13 +467,13 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     // the sweep pane shows whichever is selected.
     d.key("Escape");
     d.key("Alt+1");
-    assert_eq!(d.st.layout.focus, PaneKind::Transfer);
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
     assert_eq!(d.st.selected_trace, None);
     d.key("V");
     assert_eq!(d.st.selected_trace, Some(first));
     assert_eq!(shown(&d.st), Some(first));
     assert_eq!(
-        d.st.pane_caption(PaneKind::Transfer),
+        d.st.pane_caption(crate::common::pane(&d.st, PaneKind::Transfer)),
         Some(format!("{n1}: smoothing off"))
     );
     let theme = Theme::dark();
@@ -458,7 +485,13 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    let caption = |s: &AppState| match ac2_ui::scenes::sweep(s, &theme, size, now) {
+    let caption = |s: &AppState| match ac2_ui::scenes::sweep(
+        s,
+        crate::common::pane(s, ac2_ui::state::PaneKind::Distortion),
+        &theme,
+        size,
+        now,
+    ) {
         ac2_ui::scenes::SweepPane::Distortion(x) => x.caption.clone(),
         ac2_ui::scenes::SweepPane::Ir(_) | ac2_ui::scenes::SweepPane::Room(_) => String::new(),
     };
@@ -478,11 +511,17 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
                 .get(&second)
                 .is_some_and(|(t, _)| !t.meta.edit.visible)
     })?;
-    let legend: Vec<String> = ac2_ui::scenes::transfer(&d.st, &theme, size, now)
-        .legend
-        .iter()
-        .map(|e| e.name.clone())
-        .collect();
+    let legend: Vec<String> = ac2_ui::scenes::transfer(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Transfer),
+        &theme,
+        size,
+        now,
+    )
+    .legend
+    .iter()
+    .map(|e| e.name.clone())
+    .collect();
     assert!(legend.contains(&n1), "{legend:?}");
     assert!(!legend.contains(&n2), "{legend:?}");
     d.key("V");
@@ -498,7 +537,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
 
     // N on the sweep pane steps the sweeps and selects them for the transfer pane.
     d.key("Alt+5");
-    assert_eq!(d.st.layout.focus, PaneKind::Distortion);
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
     d.key("N");
     assert_eq!(d.st.selected_trace, Some(first));
     assert_eq!(shown(&d.st), Some(first));

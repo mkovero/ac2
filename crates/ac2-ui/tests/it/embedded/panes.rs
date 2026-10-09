@@ -16,12 +16,11 @@ use std::time::{Duration, Instant};
 
 /// The hint line of the focused pane, as the app draws it (PC labels).
 fn hint_line(s: &AppState) -> Vec<String> {
-    use ac2_ui::state::PaneKind;
     let focus = s.layout.focus;
     let keys = Keymap::default();
     let style = ac2_ui::keys::LabelStyle::Pc;
     // Only the focused pane has one.
-    for p in PaneKind::ALL.into_iter().filter(|p| *p != focus) {
+    for p in s.layout.panes().into_iter().filter(|p| *p != focus) {
         assert_eq!(s.key_hint_line(&keys, p, style), None);
     }
     s.key_hint_line(&keys, focus, style)
@@ -66,7 +65,13 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     d.key("Alt+4");
     let spl = hint_line(&d.st);
     assert_eq!(spl.first().map(String::as_str), Some("G meter/Leq/both"));
-    d.key("Alt+5");
+    // A fifth pane, Ctrl+Tab to the sweep pane (after SPL).
+    d.key("Ctrl+N");
+    d.key("Ctrl+Tab");
+    assert_eq!(
+        d.st.layout.focus_kind(),
+        ac2_ui::state::PaneKind::Distortion
+    );
     let sw = hint_line(&d.st);
     assert_eq!(sw.first().map(String::as_str), Some("Shift+S new sweep"));
     // Shift+I shows the sweep's IR: dB / % gives way to the IR mode.
@@ -140,36 +145,36 @@ fn panes_follow_the_selection_from_an_empty_daemon() -> R {
             .map(|m| m.id)
             .ok_or("spectrum")?;
     d.send(Msg::SelectMeas(tf));
-    assert_eq!(d.st.visible_panes(), [Transfer, Spectrum, Ir, Spl]);
+    assert_eq!(crate::common::visible(&d.st), [Transfer, Spectrum, Ir, Spl]);
 
     d.key("Ctrl+K");
     d.send(Msg::Text("panes follow".into()));
     d.key("Enter");
     assert!(d.st.prefs.panes_follow);
-    assert_eq!(d.st.visible_panes(), [Transfer, Ir]);
+    assert_eq!(crate::common::visible(&d.st), [Transfer, Ir]);
     d.send(Msg::SelectMeas(sp));
-    assert_eq!(d.st.visible_panes(), [Spectrum]);
-    assert_eq!(d.st.layout.focus, Spectrum);
+    assert_eq!(crate::common::visible(&d.st), [Spectrum]);
+    assert_eq!(d.st.layout.focus_kind(), Spectrum);
     // Only the spectrum pane drawn: the transfer stream is not received.
     assert!(!d.st.wanted_topics().contains(&Topic::Data {
         meas: tf,
         stream: Stream::Tf
     }));
     d.send(Msg::SelectMeas(tf));
-    assert_eq!(d.st.visible_panes(), [Transfer, Ir]);
-    assert_eq!(d.st.layout.focus, Transfer);
+    assert_eq!(crate::common::visible(&d.st), [Transfer, Ir]);
+    assert_eq!(d.st.layout.focus_kind(), Transfer);
     // W maximises within the kept panes.
     d.key("W");
-    assert_eq!(d.st.visible_panes(), [Transfer]);
+    assert_eq!(crate::common::visible(&d.st), [Transfer]);
     d.send(Msg::SelectMeas(sp));
-    assert_eq!(d.st.visible_panes(), [Spectrum]);
+    assert_eq!(crate::common::visible(&d.st), [Spectrum]);
     d.send(Msg::Command(CommandId::MaximizePane));
     d.send(Msg::Command(CommandId::MaximizePane));
     assert!(!d.st.layout.maximized);
 
     d.send(Msg::Command(CommandId::PanesFollow));
     assert!(!d.st.prefs.panes_follow);
-    assert_eq!(d.st.visible_panes(), [Transfer, Spectrum, Ir, Spl]);
+    assert_eq!(crate::common::visible(&d.st), [Transfer, Spectrum, Ir, Spl]);
     drop(d);
     drop(daemon);
     Ok(())
@@ -208,7 +213,13 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
         wall: ac2_proto::units::WallNs(0),
     };
     let curve = |s: &AppState, t: TraceId| {
-        let scene = ac2_ui::scenes::transfer(s, &theme, size, now());
+        let scene = ac2_ui::scenes::transfer(
+            s,
+            crate::common::pane(s, ac2_ui::state::PaneKind::Transfer),
+            &theme,
+            size,
+            now(),
+        );
         let legend = scene
             .legend
             .iter()
@@ -282,7 +293,13 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     })?;
     d.key("Alt+2");
     // Its levels are per FFT bin: the axis names the bin width, the tooltip what it means.
-    let pane = ac2_ui::scenes::spectrum(&d.st, &theme, size, now());
+    let pane = ac2_ui::scenes::spectrum(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spectrum),
+        &theme,
+        size,
+        now(),
+    );
     assert!(
         pane.unit.starts_with("dBFS per ") && pane.unit.ends_with(" Hz bin (tone)"),
         "{}",
@@ -307,12 +324,18 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     d.key("Ctrl+I");
     let r = level(&d.st);
     assert!(r.span() < start.span() && r.lo < -100.0, "{r:?}");
-    let labels: Vec<String> = ac2_ui::scenes::spectrum(&d.st, &theme, size, now())
-        .y_axis
-        .labels()
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
+    let labels: Vec<String> = ac2_ui::scenes::spectrum(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spectrum),
+        &theme,
+        size,
+        now(),
+    )
+    .y_axis
+    .labels()
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
     assert!(labels.contains(&"\u{2212}120".to_owned()), "{labels:?}");
     // Shift+Home frames what is shown; Ctrl+Home is the default again.
     d.key("Shift+Home");
@@ -347,10 +370,10 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     d.key("W");
     assert!(d.st.layout.maximized);
     d.send(Msg::SelectMeas(sp));
-    assert_eq!(d.st.layout.visible(), [PaneKind::Spectrum]);
-    assert_eq!(d.st.pane_meas(PaneKind::Spectrum).map(|m| m.id), Some(sp));
+    assert_eq!(crate::common::visible(&d.st), [PaneKind::Spectrum]);
+    assert_eq!(d.st.kind_meas(PaneKind::Spectrum).map(|m| m.id), Some(sp));
     d.send(Msg::SelectMeas(tf));
-    assert_eq!(d.st.layout.visible(), [PaneKind::Transfer]);
+    assert_eq!(crate::common::visible(&d.st), [PaneKind::Transfer]);
     assert!(d.st.layout.maximized);
     drop(d);
     drop(daemon);
@@ -406,11 +429,17 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
         wall: ac2_proto::units::WallNs(0),
     };
     let names = |s: &AppState| -> Vec<String> {
-        ac2_ui::scenes::transfer(s, &theme, size, now())
-            .legend
-            .iter()
-            .map(|e| e.name.clone())
-            .collect()
+        ac2_ui::scenes::transfer(
+            s,
+            crate::common::pane(s, ac2_ui::state::PaneKind::Transfer),
+            &theme,
+            size,
+            now(),
+        )
+        .legend
+        .iter()
+        .map(|e| e.name.clone())
+        .collect()
     };
     d.until("both curves", |s| names(s).len() == 2)?;
 
@@ -425,7 +454,7 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
             .ok_or("row")?;
     assert!(row.hidden && row.text.contains("hidden"), "{}", row.text);
     assert!(
-        d.st.pane_caption(PaneKind::Transfer)
+        d.st.pane_caption(crate::common::pane(&d.st, PaneKind::Transfer))
             .is_some_and(|c| c.starts_with(&format!("{} hidden", first.config.name)))
     );
     // Hidden, it keeps running and its frames keep coming.
@@ -480,7 +509,7 @@ fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     let remembered = ac2_scene::axis::Range::new(-160.0, -150.0);
-    let mut prefs = ac2_ui::prefs::UiPrefs::default();
+    let mut prefs = crate::common::grid_ui_prefs();
     prefs.levels.spectrum_dbfs = remembered;
     let prefs = ac2_ui::prefs::UiPrefs::from_toml(&prefs.to_toml())?;
     d.st.set_prefs(prefs);
@@ -661,7 +690,7 @@ fn streams_of(s: &AppState, meas: MeasId) -> Vec<Stream> {
 }
 
 /// From an empty daemon: the app receives the streams its panes draw and no others. The IR
-/// arrives while its pane is shown and stops when it is hidden (the daemon derives it only
+/// arrives while its pane is shown and stops when it is closed (the daemon derives it only
 /// for subscribers); a maximised spectrum pane drops the transfer function; the
 /// measurement's input levels, which no pane draws, never arrive.
 #[test]
@@ -681,8 +710,9 @@ fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
     })?;
     assert!(!has(&d.st, Stream::Levels));
 
-    d.key("Shift+I");
-    assert!(!d.st.layout.is_shown(ac2_ui::state::PaneKind::Ir));
+    d.key("Alt+3");
+    d.key("Ctrl+D");
+    assert!(d.st.layout.lead(ac2_ui::state::PaneKind::Ir).is_none());
     d.until("no IR, its pane hidden", |s| {
         has(s, Stream::Tf) && !has(s, Stream::Ir)
     })?;
@@ -706,8 +736,16 @@ fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
     d.key("W");
     d.key("W");
     assert!(!d.st.layout.maximized);
+    // A new pane beside the transfer pane, turned into an IR pane.
     d.key("Alt+1");
-    d.key("Shift+I");
+    d.key("Ctrl+N");
+    for _ in 0..5 {
+        if d.st.layout.focus_kind() == ac2_ui::state::PaneKind::Ir {
+            break;
+        }
+        d.key("Ctrl+Tab");
+    }
+    assert_eq!(d.st.layout.focus_kind(), ac2_ui::state::PaneKind::Ir);
     d.until("the TF and the IR again", |s| {
         has(s, Stream::Tf) && has(s, Stream::Ir)
     })?;
@@ -756,7 +794,10 @@ fn spectrograph_from_an_empty_daemon() -> R {
         hint_line(&d.st)
     );
     d.key("G");
-    assert_eq!(d.st.view.spectrum.mode, SpectrumMode::Split);
+    assert_eq!(
+        d.st.kind_modes(ac2_ui::state::PaneKind::Spectrum).spectrum,
+        SpectrumMode::Split
+    );
     // The level typed for the transfer measurement is still set: arm and fire.
     d.key("Space");
     d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
@@ -779,7 +820,13 @@ fn spectrograph_from_an_empty_daemon() -> R {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    let s = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
+    let s = ac2_ui::scenes::spectrograph(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spectrum),
+        &theme,
+        size,
+        now(),
+    );
     assert_eq!(s.caption, format!("{name} · last 30 s · dBFS"));
     assert_eq!(s.message, None);
     let history = s
@@ -798,7 +845,13 @@ fn spectrograph_from_an_empty_daemon() -> R {
         hz: 1000.0,
         before_s: 0.1,
     });
-    let s = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
+    let s = ac2_ui::scenes::spectrograph(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spectrum),
+        &theme,
+        size,
+        now(),
+    );
     let text = s.cursor.ok_or("cursor")?.text;
     assert!(
         text.starts_with("1.00 kHz · 0.1 s ago · ") && text.ends_with(" dBFS"),
@@ -813,7 +866,13 @@ fn spectrograph_from_an_empty_daemon() -> R {
     assert_eq!(d.st.view.spectrum.spectrograph.span_s, 60);
     assert!(!filled(&d.st, 1));
     d.until("frames in the minute", |s| filled(s, 10))?;
-    let s = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
+    let s = ac2_ui::scenes::spectrograph(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spectrum),
+        &theme,
+        size,
+        now(),
+    );
     assert!(s.caption.contains("last 60 s"), "{}", s.caption);
 
     // Stopped: the picture stays and says so.
@@ -822,16 +881,34 @@ fn spectrograph_from_an_empty_daemon() -> R {
     d.until("the spectrum stopped", |s| {
         s.measurements().iter().any(|m| m.id == sp && !m.running)
     })?;
-    let s = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
+    let s = ac2_ui::scenes::spectrograph(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spectrum),
+        &theme,
+        size,
+        now(),
+    );
     assert!(s.caption.ends_with(" · stopped"), "{}", s.caption);
     assert!(filled(&d.st, 10));
     // G: the spectrograph alone, its history kept; W makes it the only pane, full size.
     d.key("G");
-    assert_eq!(d.st.view.spectrum.mode, SpectrumMode::Spectrograph);
+    assert_eq!(
+        d.st.kind_modes(ac2_ui::state::PaneKind::Spectrum).spectrum,
+        SpectrumMode::Spectrograph
+    );
     assert!(filled(&d.st, 10));
     d.key("W");
-    assert_eq!(d.st.layout.visible(), [ac2_ui::state::PaneKind::Spectrum]);
-    let alone = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
+    assert_eq!(
+        crate::common::visible(&d.st),
+        [ac2_ui::state::PaneKind::Spectrum]
+    );
+    let alone = ac2_ui::scenes::spectrograph(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spectrum),
+        &theme,
+        size,
+        now(),
+    );
     assert!(alone.spectrum.is_none());
     assert!(
         alone.plot.h > s.plot.h * 1.5,
@@ -853,7 +930,10 @@ fn spectrograph_from_an_empty_daemon() -> R {
     d.key("W");
     // G again hides it and nothing is kept.
     d.key("G");
-    assert_eq!(d.st.view.spectrum.mode, SpectrumMode::Spectrum);
+    assert_eq!(
+        d.st.kind_modes(ac2_ui::state::PaneKind::Spectrum).spectrum,
+        SpectrumMode::Spectrum
+    );
     assert!(d.st.spectrographs.is_empty());
     drop(d);
     drop(daemon);
@@ -1018,16 +1098,16 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
         let (id, pane) = order[i % 3];
         assert_eq!(d.st.selected, Some(id), "Tab {i}");
         assert_eq!(d.st.selected_trace, None);
-        assert_eq!(d.st.layout.focus, pane, "Tab {i}");
+        assert_eq!(d.st.layout.focus_kind(), pane, "Tab {i}");
     }
     // On the spectrum now; back round once, by the SPL meter.
     for want in [tf, spl, sp] {
         d.key("Shift+Tab");
         assert_eq!(d.st.selected, Some(want));
     }
-    assert_eq!(d.st.layout.focus, Spectrum);
+    assert_eq!(d.st.layout.focus_kind(), Spectrum);
     d.key("Ctrl+Tab");
-    assert_ne!(d.st.layout.focus, Spectrum);
+    assert_ne!(d.st.layout.focus_kind(), Spectrum);
     drop(d);
     drop(daemon);
     Ok(())

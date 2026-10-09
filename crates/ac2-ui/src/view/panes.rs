@@ -1,5 +1,5 @@
-//! The pane grid: transfer function across the top, spectrum / IR / SPL below; one plot
-//! renderer slot per pane.
+//! The pane tree on screen: each pane's rectangle from the tree (`crate::state::PaneNode`),
+//! its frame, title and plot; one plot renderer slot per pane.
 
 use std::sync::Arc;
 
@@ -15,12 +15,11 @@ use crate::hints::{self, KeyHint};
 use crate::keys::{CommandId, Scope};
 use crate::plot::{self, PlotSlot};
 use crate::scenes;
-use crate::state::{HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneKind};
+use crate::state::{
+    HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow, PaneRect,
+};
 use crate::theme::Chrome;
-use ac2_proto::units::MeasId;
 
-/// Share of the height the transfer pane takes when other panes are shown below it.
-const TF_SHARE: f32 = 0.62;
 const GAP: f32 = 6.0;
 const TITLE_H: f32 = 20.0;
 /// The focused pane's key-hint line, under its plot.
@@ -30,39 +29,18 @@ const HINT_FONT: f32 = 11.5;
 /// Left and right inset of the hint line's text.
 const HINT_PAD: f32 = 8.0;
 
-/// Pane rectangles inside `area` for the visible panes.
-pub(crate) fn layout(visible: &[PaneKind], area: egui::Rect) -> Vec<(PaneKind, egui::Rect)> {
-    let has_tf = visible.contains(&PaneKind::Transfer);
-    let others: Vec<PaneKind> = visible
-        .iter()
-        .copied()
-        .filter(|p| *p != PaneKind::Transfer)
-        .collect();
-    let mut out = Vec::new();
-    let mut row = area;
-    if has_tf {
-        if others.is_empty() {
-            return vec![(PaneKind::Transfer, area)];
-        }
-        let h = (area.height() - GAP) * TF_SHARE;
-        out.push((
-            PaneKind::Transfer,
-            egui::Rect::from_min_size(area.min, egui::vec2(area.width(), h)),
-        ));
-        row = egui::Rect::from_min_max(egui::pos2(area.min.x, area.min.y + h + GAP), area.max);
-    }
-    let n = others.len() as f32;
-    if n > 0.0 {
-        let w = (row.width() - GAP * (n - 1.0)) / n;
-        for (i, p) in others.into_iter().enumerate() {
-            let x = row.min.x + i as f32 * (w + GAP);
-            out.push((
-                p,
-                egui::Rect::from_min_size(egui::pos2(x, row.min.y), egui::vec2(w, row.height())),
-            ));
-        }
-    }
-    out
+/// Pane rectangles inside `area` for the panes drawn now.
+pub(crate) fn layout(st: &crate::state::AppState, area: egui::Rect) -> Vec<(PaneId, egui::Rect)> {
+    let r = PaneRect::new(area.min.x, area.min.y, area.width(), area.height());
+    st.pane_rects(r, GAP)
+        .into_iter()
+        .map(|(id, r)| {
+            (
+                id,
+                egui::Rect::from_min_size(egui::pos2(r.x, r.y), egui::vec2(r.w, r.h)),
+            )
+        })
+        .collect()
 }
 
 /// Height of a plot's caption in the stage view.
@@ -70,14 +48,15 @@ const STAGE_CAPTION_H: f32 = 22.0;
 
 /// The stage view's caption of `pane`: `Transfer · Main L`; none for the SPL pane, whose
 /// meter and Leq windows name themselves.
-fn stage_caption(st: &crate::state::AppState, pane: PaneKind) -> Option<String> {
+fn stage_caption(st: &crate::state::AppState, id: PaneId) -> Option<String> {
+    let pane = st.layout.kind(id);
     if pane == PaneKind::Spl {
         return None;
     }
     let parts: Vec<String> = [
         Some(pane.title().to_owned()),
-        st.pane_meas(pane).map(|m| m.config.name.clone()),
-        st.pane_caption(pane),
+        st.pane_meas(id).map(|m| m.config.name.clone()),
+        st.pane_caption(id),
     ]
     .into_iter()
     .flatten()
@@ -85,8 +64,8 @@ fn stage_caption(st: &crate::state::AppState, pane: PaneKind) -> Option<String> 
     Some(parts.join(" · "))
 }
 
-fn slot(p: PaneKind) -> PlotSlot {
-    PlotSlot(p as u32)
+fn slot(p: PaneId) -> PlotSlot {
+    PlotSlot(p.0)
 }
 
 /// The axes of a pane's scene the mouse navigates: frequency, and level in dB (or, on a
@@ -105,11 +84,14 @@ struct Axes {
 /// Scene for `pane` at `size`, from the cache when nothing changed.
 fn scene_for(
     app: &mut App,
-    pane: PaneKind,
+    id: PaneId,
     size: egui::Vec2,
     theme: &Theme,
 ) -> Option<(Arc<ac2_plot::Scene>, Axes)> {
-    if let Some(c) = app.scenes.get(&pane)
+    let view = app.state.layout.view(id)?.to_owned();
+    let pane = view.kind;
+    if let Some(c) = app.scenes.get(&id)
+        && c.view == view
         && c.generation == app.pane_generation(pane)
         && c.size == size
         && c.theme == app.state.theme
@@ -132,7 +114,7 @@ fn scene_for(
     let mut legend = None;
     let (scene, axes) = match pane {
         PaneKind::Transfer => {
-            let s = scenes::transfer(st, theme, vp, now);
+            let s = scenes::transfer(st, id, theme, vp, now);
             legend = s.legend_box;
             let y = s
                 .panes
@@ -149,8 +131,8 @@ fn scene_for(
                 },
             )
         }
-        PaneKind::Spectrum if st.view.spectrum.mode.spectrograph() => {
-            let s = scenes::spectrograph(st, theme, vp, now);
+        PaneKind::Spectrum if view.modes.spectrum.spectrograph() => {
+            let s = scenes::spectrograph(st, id, theme, vp, now);
             if let Some(sp) = &s.spectrum {
                 let r = sp.unit_rect;
                 unit_tip = sp.unit_help.clone().map(|h| {
@@ -171,7 +153,7 @@ fn scene_for(
             )
         }
         PaneKind::Spectrum => {
-            let s = scenes::spectrum(st, theme, vp, now);
+            let s = scenes::spectrum(st, id, theme, vp, now);
             let r = s.unit_rect;
             unit_tip = s.unit_help.map(|h| {
                 (
@@ -190,7 +172,7 @@ fn scene_for(
             )
         }
         PaneKind::Ir => {
-            let s = scenes::ir(st, &app.keymap, theme, vp, now)?;
+            let s = scenes::ir(st, id, &app.keymap, theme, vp, now)?;
             // Navigation needs an IR: the empty pane's axes only frame its reason.
             let ir = st
                 .ir_extent(IrPane::Live)
@@ -204,11 +186,11 @@ fn scene_for(
             )
         }
         PaneKind::Spl => (
-            scenes::spl_pane(st, &app.keymap, theme, vp, now)?,
+            scenes::spl_pane(st, id, &app.keymap, theme, vp, now)?,
             Axes::default(),
         ),
         PaneKind::Distortion => {
-            let s = scenes::sweep(st, theme, vp, now);
+            let s = scenes::sweep(st, id, theme, vp, now);
             let axes = Axes {
                 x: s.x_axis(),
                 y_level: s.y_level(),
@@ -220,8 +202,9 @@ fn scene_for(
     };
     let scene = Arc::new(scene);
     app.scenes.insert(
-        pane,
+        id,
         CachedScene {
+            view,
             generation: app.pane_generation(pane),
             size,
             theme: app.state.theme,
@@ -237,18 +220,18 @@ fn scene_for(
     Some((scene, axes))
 }
 
-fn placeholder(pane: PaneKind, app: &App) -> &'static str {
+fn placeholder(id: PaneId, app: &App) -> &'static str {
+    let pane = app.state.layout.kind(id);
+    let spl = app.state.view_for(id).spl.mode;
     match pane {
         PaneKind::Ir => "no transfer measurement",
-        PaneKind::Spl if app.state.view.spl.mode == SplMode::Leq && scenes::has_spl(&app.state) => {
+        PaneKind::Spl if spl == SplMode::Leq && scenes::has_spl(&app.state) => {
             "no Leq windows yet: they show once the meter has measured a second"
         }
-        PaneKind::Spl
-            if app.state.view.spl.mode == SplMode::Bands && !scenes::has_band_meter(&app.state) =>
-        {
+        PaneKind::Spl if spl == SplMode::Bands && !scenes::has_band_meter(&app.state) => {
             "no band meter: turn it on in the SPL / Leq settings (or `ac2 spl bands set`)"
         }
-        PaneKind::Spl if app.state.view.spl.mode == SplMode::Bands => {
+        PaneKind::Spl if spl == SplMode::Bands => {
             "no band frame yet: the bands show once the meter has measured a second"
         }
         PaneKind::Spl if scenes::has_spl(&app.state) => "no SPL frame yet",
@@ -259,14 +242,18 @@ fn placeholder(pane: PaneKind, app: &App) -> &'static str {
 
 pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome) {
     let area = ui.available_rect_before_wrap();
-    let visible = app.state.visible_panes();
+    // The reducer splits along the longer side of the focused pane as drawn here.
+    app.state.pane_area = (area.width(), area.height());
     // The stage view is the pane's picture alone: no frame, no title.
     let stage = app.state.stage_view();
-    for (pane, rect) in layout(&visible, area) {
+    // Numbered in reading order, as Alt+1 … 9 count them.
+    let order = app.state.laid_out_panes();
+    for (id, rect) in layout(&app.state, area) {
+        let pane = app.state.layout.kind(id);
         if stage {
             // The SPL meter and its Leq windows carry their own captions; a plot gets a slim
             // one naming the pane and its measurement, and nothing else.
-            let rect = match stage_caption(&app.state, pane) {
+            let rect = match stage_caption(&app.state, id) {
                 Some(text) => {
                     let strip = egui::Rect::from_min_size(
                         rect.min,
@@ -288,22 +275,22 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             };
             let resp = ui.interact(
                 rect,
-                ui.id().with(("stage", pane as u32)),
+                ui.id().with(("stage", id.0)),
                 egui::Sense::click_and_drag(),
             );
             let built = if app.plots {
-                scene_for(app, pane, rect.size(), theme)
+                scene_for(app, id, rect.size(), theme)
             } else {
                 None
             };
             let axes = built.as_ref().map(|b| b.1).unwrap_or_default();
             match built {
-                Some((scene, _)) => plot::paint(ui, slot(pane), rect, scene),
+                Some((scene, _)) => plot::paint(ui, slot(id), rect, scene),
                 None => {
                     ui.painter().text(
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
-                        placeholder(pane, app),
+                        placeholder(id, app),
                         egui::FontId::proportional(13.0),
                         ch.dim,
                     );
@@ -311,11 +298,11 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             }
             // Full screen keeps the mouse: wheel zooms frequency, Ctrl/Shift+wheel the level
             // axis, as in the split layout.
-            let took = legend_mouse(app, ui, &resp, pane, rect);
-            navigate(app, ui, &resp, pane, rect, axes, took);
+            let took = legend_mouse(app, ui, &resp, id, rect);
+            navigate(app, ui, &resp, id, rect, axes, took);
             continue;
         }
-        let focused = app.state.layout.focus == pane;
+        let focused = app.state.layout.focus == id;
         let stroke = if focused {
             egui::Stroke::new(1.5, ch.focus)
         } else {
@@ -325,7 +312,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
         painter.rect_filled(rect, 4.0, ch.raised);
         painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
         let title = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), TITLE_H));
-        let n = PaneKind::ALL.iter().position(|p| *p == pane).unwrap_or(0) + 1;
+        let n = order.iter().position(|p| *p == id).unwrap_or(0) + 1;
         let label = painter.text(
             title.left_center() + egui::vec2(8.0, 0.0),
             egui::Align2::LEFT_CENTER,
@@ -334,7 +321,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             if focused { ch.text } else { ch.dim },
         );
         let style = crate::keys::label_style();
-        let line = app.state.key_hint_line(&app.keymap, pane, style);
+        let line = app.state.key_hint_line(&app.keymap, id, style);
         // The hint line takes its strip off the plot's bottom: it never covers a curve.
         let bottom = rect.max.y - 2.0 - if line.is_some() { HINT_H } else { 0.0 };
         let plot_rect = egui::Rect::from_min_max(
@@ -343,16 +330,16 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
         );
         let resp = ui.interact(
             rect,
-            ui.id().with(("pane", pane as u32)),
+            ui.id().with(("pane", id.0)),
             egui::Sense::click_and_drag(),
         );
         // After the pane's own response, so a hover or click there is theirs.
-        let all = app.state.pane_hints(&app.keymap, pane, style);
+        let all = app.state.pane_hints(&app.keymap, id, style);
         let name_rect =
             egui::Rect::from_min_max(title.min, egui::pos2(label.right() + 4.0, title.max.y));
         let name = ui.interact(
             name_rect,
-            ui.id().with(("pane-title", pane as u32)),
+            ui.id().with(("pane-title", id.0)),
             egui::Sense::hover(),
         );
         name.widget_info(|| {
@@ -372,7 +359,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             hint_line(ui, strip, items, ch);
             let line = ui.interact(
                 strip,
-                ui.id().with(("pane-hints", pane as u32)),
+                ui.id().with(("pane-hints", id.0)),
                 egui::Sense::hover(),
             );
             line.widget_info(|| {
@@ -385,27 +372,27 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             line.on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, &all, ch));
         }
         let mut x = label.right() + 10.0;
-        if let Some(chip) = title_chip(app, ui, pane, title, x, ch) {
+        if let Some(chip) = title_chip(app, ui, id, title, x, ch) {
             x = chip.right() + 10.0;
         }
         let mut right = title.right() - 8.0;
         if pane == PaneKind::Distortion
-            && app.state.view.distortion.mode == ac2_scene::view::SweepMode::Response
+            && app.state.view_for(id).distortion.mode == ac2_scene::view::SweepMode::Response
             && let Some(left) = unit_toggle(app, ui, title, x, ch)
         {
             right = left - 10.0;
         }
-        let caption_end = caption(app, ui, pane, title, x, right, ch);
+        let caption_end = caption(app, ui, id, title, x, right, ch);
         if plot_rect.width() < 8.0 || plot_rect.height() < 8.0 {
             continue;
         }
         let built = if app.plots {
-            scene_for(app, pane, plot_rect.size(), theme)
+            scene_for(app, id, plot_rect.size(), theme)
         } else {
             None
         };
         // What the level axis means, over its unit (a spectrum's per-bin levels).
-        let tip = app.scenes.get(&pane).and_then(|c| c.unit_tip.clone());
+        let tip = app.scenes.get(&id).and_then(|c| c.unit_tip.clone());
         let resp = match tip {
             Some((r, text))
                 if built.is_some()
@@ -418,10 +405,10 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             _ => resp,
         };
         match &built {
-            Some((scene, _)) => plot::paint(ui, slot(pane), plot_rect, scene.clone()),
+            Some((scene, _)) => plot::paint(ui, slot(id), plot_rect, scene.clone()),
             None => {
                 let text = if app.plots {
-                    placeholder(pane, app)
+                    placeholder(id, app)
                 } else {
                     "plots need the wgpu renderer"
                 };
@@ -444,12 +431,12 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                 HintPlace::Title => title_hint(ui, title, caption_end + 16.0, &hint.text, ch),
             }
         }
-        let took = legend_mouse(app, ui, &resp, pane, plot_rect);
+        let took = legend_mouse(app, ui, &resp, id, plot_rect);
         navigate(
             app,
             ui,
             &resp,
-            pane,
+            id,
             plot_rect,
             built.map(|b| b.1).unwrap_or_default(),
             took,
@@ -463,13 +450,14 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
 fn title_chip(
     app: &mut App,
     ui: &egui::Ui,
-    pane: PaneKind,
+    id: PaneId,
     title: egui::Rect,
     x: f32,
     ch: &Chrome,
 ) -> Option<egui::Rect> {
     let st = &app.state;
-    let m = st.pane_meas(pane)?;
+    let pane = st.layout.kind(id);
+    let m = st.pane_meas(id)?;
     let font = egui::FontId::proportional(12.0);
     let painter = ui.painter();
     let galley = painter.layout_no_wrap(m.config.name.clone(), font.clone(), ch.text);
@@ -477,11 +465,7 @@ fn title_chip(
         egui::pos2(x, title.min.y + 2.0),
         egui::vec2(galley.size().x + 24.0, TITLE_H - 3.0),
     );
-    let chip = ui.interact(
-        r,
-        ui.id().with(("pane-chip", pane as u32)),
-        egui::Sense::click(),
-    );
+    let chip = ui.interact(r, ui.id().with(("pane-chip", id.0)), egui::Sense::click());
     let name = m.config.name.clone();
     chip.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     let next = app
@@ -492,7 +476,7 @@ fn title_chip(
         Some(k) => format!("{name}: click to choose what this pane shows · {k} the next one"),
         None => format!("{name}: click to choose what this pane shows"),
     });
-    let open = matches!(st.overlay, Overlay::PaneMenu(pm) if pm.pane == pane);
+    let open = matches!(st.overlay, Overlay::PaneMenu(pm) if pm.pane == id);
     let fill = if open || chip.hovered() {
         ch.focus.gamma_multiply(0.35)
     } else {
@@ -523,12 +507,12 @@ fn title_chip(
         egui::Stroke::NONE,
     ));
     if chip.clicked() {
-        app.dispatch(Msg::PaneMenu(pane));
+        app.dispatch(Msg::PaneMenu(id));
     }
     pane_menu(
         app,
         ui,
-        pane,
+        id,
         r.left_bottom() + egui::vec2(0.0, 2.0),
         &chip,
         ch,
@@ -542,13 +526,13 @@ fn title_chip(
 fn caption(
     app: &App,
     ui: &egui::Ui,
-    pane: PaneKind,
+    id: PaneId,
     title: egui::Rect,
     left: f32,
     right: f32,
     ch: &Chrome,
 ) -> f32 {
-    let variants = app.state.pane_caption_variants(pane);
+    let variants = app.state.pane_caption_variants(id);
     let room = right - left;
     if variants.is_empty() || room < 24.0 {
         return left;
@@ -772,7 +756,7 @@ fn unit_toggle(
 fn pane_menu(
     app: &mut App,
     ui: &egui::Ui,
-    pane: PaneKind,
+    pane: PaneId,
     at: egui::Pos2,
     chip: &egui::Response,
     ch: &Chrome,
@@ -783,9 +767,9 @@ fn pane_menu(
     if menu.pane != pane {
         return;
     }
-    let rows: Vec<(MeasId, String)> = app.state.pane_menu_rows(pane);
+    let rows: Vec<(PaneMenuRow, String)> = app.state.pane_menu_rows(pane);
     let mut picked = None;
-    let area = egui::Area::new(ui.id().with(("pane-menu", pane as u32)))
+    let area = egui::Area::new(ui.id().with(("pane-menu", pane.0)))
         .order(egui::Order::Foreground)
         .fixed_pos(at)
         .show(ui.ctx(), |ui| {
@@ -811,8 +795,8 @@ fn pane_menu(
         .contains_pointer()
         .then(|| super::overlays::wheel_rows(ui.ctx()))
         .flatten();
-    if let Some(id) = picked {
-        app.dispatch(Msg::PaneShow(pane, id));
+    if let Some(row) = picked {
+        app.dispatch(Msg::PanePick(pane, row));
     } else if let Some(rows) = wheel {
         app.dispatch(Msg::Wheel { rows });
     } else if area.response.clicked_elsewhere() && !chip.clicked() {
@@ -884,14 +868,14 @@ fn legend_mouse(
     app: &mut App,
     ui: &egui::Ui,
     resp: &egui::Response,
-    pane: PaneKind,
+    id: PaneId,
     plot_rect: egui::Rect,
 ) -> LegendTook {
     use ac2_scene::legend::{LegendHover, ROW};
-    if pane != PaneKind::Transfer {
+    if app.state.layout.kind(id) != PaneKind::Transfer {
         return LegendTook::Nothing;
     }
-    let b = app.scenes.get(&pane).and_then(|c| c.legend.clone());
+    let b = app.scenes.get(&id).and_then(|c| c.legend.clone());
     let hover_now = app.state.view.tf.legend.hover;
     let origin = plot_rect.min.to_vec2();
     let screen = |r: ac2_scene::primitives::Rect| {
@@ -1006,18 +990,19 @@ fn navigate(
     app: &mut App,
     ui: &egui::Ui,
     resp: &egui::Response,
-    pane: PaneKind,
+    id: PaneId,
     plot_rect: egui::Rect,
     axes: Axes,
     legend: LegendTook,
 ) {
+    let pane = app.state.layout.kind(id);
     // A window over the panes owns the mouse: its wheel scrolls the window, never zooms a
     // plot behind it.
     if app.state.window_over_panes() {
         return;
     }
     if resp.clicked() || resp.drag_started() {
-        app.dispatch(Msg::FocusPane(pane));
+        app.dispatch(Msg::FocusPane(id));
     }
     // A click on the legend is not a cursor placed behind it, a drag on it not a pan; when
     // its rows scroll, the wheel over it is theirs.
@@ -1037,7 +1022,7 @@ fn navigate(
         )
         .is_some()
         && (pane != PaneKind::Distortion
-            || app.state.view.distortion.mode == ac2_scene::view::SweepMode::Response)
+            || app.state.view_for(id).distortion.mode == ac2_scene::view::SweepMode::Response)
     {
         // egui turns Ctrl+wheel into a zoom factor and Shift+wheel into horizontal scroll.
         let (zoom, shift, dx, pos) = ui.input(|i| {
@@ -1268,23 +1253,28 @@ mod tests {
         out.textures_delta.clear();
     }
 
+    /// One pane fills the area; two splits give a left half and a right half split top
+    /// and bottom, with the gap between and nothing past the area.
     #[test]
-    fn layout_tf_on_top() {
-        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 606.0));
-        let l = layout(&PaneKind::ALL, area);
-        assert_eq!(l.len(), 5);
-        assert_eq!(l[0].0, PaneKind::Transfer);
-        assert!((l[0].1.height() - 372.0).abs() < 1e-3);
-        // Bottom row splits evenly, no overlap.
-        for w in l[1..].windows(2) {
-            assert!(w[0].1.max.x <= w[1].1.min.x);
-            assert!((w[0].1.width() - w[1].1.width()).abs() < 1e-3);
+    fn layout_fills_the_area_with_the_tree() {
+        use crate::state::{AppState, Msg};
+        let keys = Keymap::default();
+        let area = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(1000.0, 600.0));
+        let mut st = AppState::default();
+        let one = layout(&st, area);
+        assert_eq!(one, vec![(st.layout.focus, area)]);
+        st.pane_area = (1000.0, 600.0);
+        for _ in 0..2 {
+            st.update(Msg::Command(crate::keys::CommandId::SplitPane), &keys);
         }
-        assert_eq!(
-            layout(&[PaneKind::Transfer], area),
-            vec![(PaneKind::Transfer, area)]
-        );
-        let only = layout(&[PaneKind::Spectrum, PaneKind::Spl], area);
-        assert_eq!(only[0].1.height(), area.height());
+        let l = layout(&st, area);
+        assert_eq!(l.len(), 3);
+        let half = (1000.0 - GAP) / 2.0;
+        assert!((l[0].1.width() - half).abs() < 1e-3 && l[0].1.height() == 600.0);
+        assert!((l[1].1.height() - (600.0 - GAP) / 2.0).abs() < 1e-3);
+        assert!((l[1].1.min.x - (10.0 + half + GAP)).abs() < 1e-3);
+        for (_, r) in &l {
+            assert!(area.contains_rect(*r), "{r:?}");
+        }
     }
 }

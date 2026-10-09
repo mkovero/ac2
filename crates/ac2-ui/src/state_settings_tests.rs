@@ -204,6 +204,9 @@ fn an_output_is_named_for_every_client_on_enter() {
 #[test]
 fn display_page_changes_apply_at_once_and_are_remembered() {
     let mut t = T::new();
+    // The sweep view row sets the view of a sweep pane: one on screen.
+    t.go(PaneKind::Distortion);
+    t.key("Alt+1");
     t.key("Ctrl+P");
     t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
     assert_eq!(page(&t), Page::Display);
@@ -232,12 +235,12 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Down");
     t.key("Right");
     assert_eq!(
-        t.st.view.spectrum.mode,
+        t.st.kind_modes(PaneKind::Spectrum).spectrum,
         ac2_scene::view::SpectrumMode::Split
     );
     t.key("Left");
     assert_eq!(
-        t.st.view.spectrum.mode,
+        t.st.kind_modes(PaneKind::Spectrum).spectrum,
         ac2_scene::view::SpectrumMode::Spectrum
     );
     t.key("Down");
@@ -246,9 +249,8 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     assert_eq!(t.st.prefs.spectrograph_span_s, Some(60));
     t.key("Down");
     t.key("Right");
-    assert_eq!(t.st.view.distortion.mode, ac2_scene::view::SweepMode::Ir);
     assert_eq!(
-        t.st.layout_prefs().sweep_view,
+        t.st.kind_modes(PaneKind::Distortion).sweep,
         ac2_scene::view::SweepMode::Ir
     );
     t.key("Down");

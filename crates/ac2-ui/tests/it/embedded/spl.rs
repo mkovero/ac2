@@ -64,15 +64,21 @@ fn columns(s: &AppState) -> Vec<(String, Color, Color)> {
         width: 1280.0,
         height: 720.0,
     };
-    ac2_ui::scenes::leq(s, &Theme::dark(), size, now)
-        .and_then(|x| x.columns)
-        .map(|k| {
-            k.columns
-                .into_iter()
-                .map(|c| (c.name, c.background, c.bar_color))
-                .collect()
-        })
-        .unwrap_or_default()
+    ac2_ui::scenes::leq(
+        s,
+        crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
+        &Theme::dark(),
+        size,
+        now,
+    )
+    .and_then(|x| x.columns)
+    .map(|k| {
+        k.columns
+            .into_iter()
+            .map(|c| (c.name, c.background, c.bar_color))
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// Leq windows with limits from an empty daemon, using the app: the session from its dialog,
@@ -149,10 +155,12 @@ fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
     d.key("Enter");
     assert_eq!(d.st.overlay, Overlay::None);
     assert!(
-        d.st.view.spl.mode.shows_leq(),
+        d.st.kind_modes(ac2_ui::state::PaneKind::Spl)
+            .spl
+            .shows_leq(),
         "the SPL pane shows the windows"
     );
-    assert_eq!(d.st.layout.focus, PaneKind::Spl);
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
     assert_eq!(d.st.view.spl.layout.style, LeqStyle::Columns);
     let th = Theme::dark();
     let red = th.banner_fault.background;
@@ -339,7 +347,14 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
         width: 1280.0,
         height: 720.0,
     };
-    let scene = ac2_ui::scenes::leq(&d.st, &Theme::dark(), size, now).ok_or("the Leq view")?;
+    let scene = ac2_ui::scenes::leq(
+        &d.st,
+        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spl),
+        &Theme::dark(),
+        size,
+        now,
+    )
+    .ok_or("the Leq view")?;
     let texts = scene_texts(&scene.scene);
     assert!(
         texts.iter().any(|t| t.contains("corrected +4.0 dB")),
@@ -413,7 +428,14 @@ fn leq_columns(s: &AppState) -> Option<ac2_scene::leq::LeqColumns> {
         width: 1280.0,
         height: 720.0,
     };
-    ac2_ui::scenes::leq(s, &Theme::dark(), size, now).and_then(|x| x.columns)
+    ac2_ui::scenes::leq(
+        s,
+        crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
+        &Theme::dark(),
+        size,
+        now,
+    )
+    .and_then(|x| x.columns)
 }
 
 /// Filling windows judged on their budgets, from an empty daemon, using the app: an SPL
@@ -466,7 +488,7 @@ fn slow_filling_windows_go_red_only_when_their_budget_is_spent() -> R {
     }
     d.key("Enter");
     assert_eq!(d.st.overlay, Overlay::None);
-    assert_eq!(d.st.layout.focus, PaneKind::Spl);
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
     d.until("five windows judged", |s| {
         (0..5).all(|i| {
             judgement(s, i).is_some_and(|j| {
@@ -595,7 +617,14 @@ fn run_caption(s: &AppState) -> Option<String> {
         width: 1280.0,
         height: 720.0,
     };
-    ac2_ui::scenes::leq(s, &Theme::dark(), size, now).and_then(|x| x.run)
+    ac2_ui::scenes::leq(
+        s,
+        crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
+        &Theme::dark(),
+        size,
+        now,
+    )
+    .and_then(|x| x.run)
 }
 
 /// Seconds on the caption's run clock (`running 0:01:05 …`).
@@ -640,8 +669,13 @@ fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     })?;
     // G: the windows; the run (clock, start, total, offline) only with the history on.
     d.key("Alt+4");
-    assert_eq!(d.st.layout.focus, PaneKind::Spl);
-    if !d.st.view.spl.mode.shows_leq() {
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
+    if !d
+        .st
+        .kind_modes(ac2_ui::state::PaneKind::Spl)
+        .spl
+        .shows_leq()
+    {
         d.key("G");
     }
     assert!(!d.st.view.spl.layout.history);
@@ -729,11 +763,17 @@ fn strip_line(s: &AppState) -> Vec<[f32; 2]> {
         width: 1280.0,
         height: 720.0,
     };
-    ac2_ui::scenes::leq(s, &Theme::dark(), size, now)
-        .and_then(|x| x.history)
-        .and_then(|h| h.lines.into_iter().next())
-        .map(|l| l.points)
-        .unwrap_or_default()
+    ac2_ui::scenes::leq(
+        s,
+        crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
+        &Theme::dark(),
+        size,
+        now,
+    )
+    .and_then(|x| x.history)
+    .and_then(|h| h.lines.into_iter().next())
+    .map(|l| l.points)
+    .unwrap_or_default()
 }
 
 /// The app restarted while an SPL meter runs: the history strip shows what the meter
@@ -780,8 +820,13 @@ fn slow_a_restarted_app_shows_the_history_from_the_log() -> R {
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     d.synced()?;
     d.key("Alt+4");
-    assert_eq!(d.st.layout.focus, PaneKind::Spl);
-    if !d.st.view.spl.mode.shows_leq() {
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
+    if !d
+        .st
+        .kind_modes(ac2_ui::state::PaneKind::Spl)
+        .spl
+        .shows_leq()
+    {
         d.key("G");
     }
     if !d.st.view.spl.layout.history {
@@ -968,7 +1013,7 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
             .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
     })?;
     d.key("Alt+4");
-    assert_eq!(d.st.layout.focus, PaneKind::Spl);
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
     let config = |s: &AppState| {
         s.measurements()
             .into_iter()
@@ -998,7 +1043,7 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
         })
     })?;
     assert_eq!(
-        d.st.view.spl.mode,
+        d.st.kind_modes(ac2_ui::state::PaneKind::Spl).spl,
         ac2_scene::view::SplMode::MeterLeq,
         "the view stays"
     );
@@ -1014,7 +1059,15 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
     };
     // The statistics under one heading: since when the meter runs, and its reset key.
     d.until("the meter labelled LCS, its statistics headed once", |s| {
-        ac2_ui::scenes::spl(s, &Keymap::default(), &Theme::dark(), size, now()).is_some_and(|x| {
+        ac2_ui::scenes::spl(
+            s,
+            crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
+            &Keymap::default(),
+            &Theme::dark(),
+            size,
+            now(),
+        )
+        .is_some_and(|x| {
             let t = scene_texts(&x.scene);
             t.iter().any(|l| l.starts_with("LCS · "))
                 && t.iter()
@@ -1092,8 +1145,12 @@ fn spl_pane_shows_meter_and_leq_from_an_empty_daemon() -> R {
             .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
     })?;
     d.key("Alt+4");
-    assert_eq!(d.st.layout.focus, PaneKind::Spl);
-    assert_eq!(d.st.view.spl.mode, SplMode::MeterLeq, "the default view");
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
+    assert_eq!(
+        d.st.kind_modes(ac2_ui::state::PaneKind::Spl).spl,
+        SplMode::MeterLeq,
+        "the default view"
+    );
     let now = || ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
@@ -1101,7 +1158,15 @@ fn spl_pane_shows_meter_and_leq_from_an_empty_daemon() -> R {
     let keys = Keymap::default();
     let both = |s: &AppState, width: f32, height: f32| {
         let size = Viewport { width, height };
-        ac2_ui::scenes::meter_leq(s, &keys, &Theme::dark(), size, now()).filter(|x| {
+        ac2_ui::scenes::meter_leq(
+            s,
+            crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
+            &keys,
+            &Theme::dark(),
+            size,
+            now(),
+        )
+        .filter(|x| {
             let t = scene_texts(&x.leq.scene);
             x.meter.form == MeterForm::Block
                 && x.leq.columns.as_ref().is_some_and(|k| k.columns.len() == 5)
@@ -1130,11 +1195,20 @@ fn spl_pane_shows_meter_and_leq_from_an_empty_daemon() -> R {
     );
     // G: the meter alone, the windows alone, both again.
     d.key("G");
-    assert_eq!(d.st.view.spl.mode, SplMode::Meter);
+    assert_eq!(
+        d.st.kind_modes(ac2_ui::state::PaneKind::Spl).spl,
+        SplMode::Meter
+    );
     d.key("G");
-    assert_eq!(d.st.view.spl.mode, SplMode::Leq);
+    assert_eq!(
+        d.st.kind_modes(ac2_ui::state::PaneKind::Spl).spl,
+        SplMode::Leq
+    );
     d.key("G");
-    assert_eq!(d.st.view.spl.mode, SplMode::MeterLeq);
+    assert_eq!(
+        d.st.kind_modes(ac2_ui::state::PaneKind::Spl).spl,
+        SplMode::MeterLeq
+    );
     drop(d);
     drop(daemon);
     Ok(())

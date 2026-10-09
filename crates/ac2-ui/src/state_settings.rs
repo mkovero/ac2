@@ -57,7 +57,7 @@ impl AppState {
         let cal = self
             .daemon()
             .map_or_else(CalView::default, |s| CalView::new(s, on));
-        let leq = self.pane_meas(PaneKind::Spl).cloned().and_then(|m| {
+        let leq = self.kind_meas(PaneKind::Spl).cloned().and_then(|m| {
             let calibrated = self.leq_calibrated(m.id);
             LeqDialog::new(&m, calibrated)
         });
@@ -266,20 +266,28 @@ impl AppState {
                     self.prefs_dirty = true;
                 }
             }
-            // The panes' G keys, so the spectrograph's history comes and goes as it does
-            // there; which panes show and which has the focus stay as they were.
+            // The G keys of the pane of that kind worked in last, so the spectrograph's
+            // history comes and goes as it does there; the focus stays where it was.
             DisplayRow::SpectrumView | DisplayRow::SweepView if d != 0 => {
-                let layout = self.layout;
-                let c = if row == DisplayRow::SpectrumView {
-                    CommandId::Spectrograph
+                let (c, kind) = if row == DisplayRow::SpectrumView {
+                    (CommandId::Spectrograph, PaneKind::Spectrum)
                 } else {
-                    CommandId::SweepView
+                    (CommandId::SweepView, PaneKind::Distortion)
                 };
+                let Some(pane) = self.layout.lead(kind) else {
+                    self.warn(format!(
+                        "no {} pane: Ctrl+Tab turns the focused pane into one",
+                        kind.title()
+                    ));
+                    return;
+                };
+                let focus = self.layout.focus;
+                self.layout.set_focus(pane);
                 // Three views: back one is forward two.
                 for _ in 0..if d > 0 { 1 } else { 2 } {
                     self.command(c, &Keymap::default(), out);
                 }
-                self.layout = layout;
+                self.layout.set_focus(focus);
             }
             DisplayRow::LevelAxes if d == 0 => {
                 crate::prefs::LevelPrefs::default().apply(&mut self.view);

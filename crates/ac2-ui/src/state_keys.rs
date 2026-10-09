@@ -5,7 +5,7 @@ use super::*;
 impl AppState {
     /// The wheel moves a list window's highlight; it never reaches what is behind it.
     pub(super) fn wheel(&mut self, rows: i32, keymap: &Keymap) {
-        let scope = self.layout.focus.scope();
+        let scope = self.layout.focus_kind().scope();
         match &mut self.overlay {
             Overlay::Palette(p) => {
                 let n = p.entries(keymap, scope).len();
@@ -13,7 +13,7 @@ impl AppState {
             }
             Overlay::PaneMenu(m) => {
                 let mut m = *m;
-                let n = self.pane_candidates(m.pane).len();
+                let n = self.pane_menu_rows(m.pane).len();
                 if n > 0 {
                     m.index = (m.index as i64 + i64::from(rows)).clamp(0, n as i64 - 1) as usize;
                     self.overlay = Overlay::PaneMenu(m);
@@ -99,7 +99,7 @@ impl AppState {
                 return;
             }
             Overlay::Palette(p) => {
-                let scope = self.layout.focus.scope();
+                let scope = self.layout.focus_kind().scope();
                 let n = p.entries(keymap, scope).len();
                 let page = crate::palette::PALETTE_ROWS as i32;
                 match chord.key {
@@ -231,7 +231,7 @@ impl AppState {
             }
             Overlay::PaneMenu(menu) => {
                 let mut menu = *menu;
-                let n = self.pane_candidates(menu.pane).len();
+                let n = self.pane_menu_rows(menu.pane).len();
                 match chord.key {
                     Key::ArrowDown | Key::ArrowUp if n > 0 => {
                         let d = if chord.key == Key::ArrowDown {
@@ -252,12 +252,12 @@ impl AppState {
                     }
                     Key::Enter => {
                         self.overlay = Overlay::None;
-                        let id = self
-                            .pane_candidates(menu.pane)
+                        let row = self
+                            .pane_menu_rows(menu.pane)
                             .get(menu.index)
-                            .map(|m| m.id);
-                        if let Some(id) = id {
-                            self.pane_show(menu.pane, id);
+                            .map(|(r, _)| *r);
+                        if let Some(row) = row {
+                            self.pane_pick(menu.pane, row);
                         }
                     }
                     _ => {}

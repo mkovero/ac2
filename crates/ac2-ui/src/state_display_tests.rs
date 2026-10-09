@@ -155,7 +155,7 @@ fn offsets_are_named_where_the_curves_are_drawn() {
     t.conn(data(&tf, vec![-10.0; 8]));
     t.conn(data(&sp, vec![-90.0; 8]));
     let theme = Theme::dark();
-    let s = crate::scenes::transfer(&t.st, &theme, SIZE, now());
+    let s = crate::scenes::transfer(&t.st, t.pane(PaneKind::Transfer), &theme, SIZE, now());
     let e = s
         .legend
         .iter()
@@ -164,7 +164,7 @@ fn offsets_are_named_where_the_curves_are_drawn() {
     assert!(e.tags.contains(&"+3.0 dB".to_owned()), "{e:?}");
     let d = s.traces.iter().find(|d| d.name == "t13").expect("trace");
     assert!(d.magnitude_db.iter().all(|m| *m == -7.0), "the curve moves");
-    let s = crate::scenes::spectrum(&t.st, &theme, SIZE, now());
+    let s = crate::scenes::spectrum(&t.st, t.pane(PaneKind::Spectrum), &theme, SIZE, now());
     let texts: Vec<&str> = s.legend.iter().map(|e| e.text.as_str()).collect();
     assert_eq!(texts, ["t16 · offset −6.0 dB"]);
 }
@@ -183,8 +183,8 @@ fn the_selected_trace_is_marked_in_its_legend() {
     t.conn(data(&sp, vec![-90.0; 8]));
     let theme = Theme::dark();
     let marked = |t: &T| {
-        let tf = crate::scenes::transfer(&t.st, &theme, SIZE, now());
-        let spec = crate::scenes::spectrum(&t.st, &theme, SIZE, now());
+        let tf = crate::scenes::transfer(&t.st, t.pane(PaneKind::Transfer), &theme, SIZE, now());
+        let spec = crate::scenes::spectrum(&t.st, t.pane(PaneKind::Spectrum), &theme, SIZE, now());
         tf.legend
             .iter()
             .chain(&spec.legend)
@@ -293,7 +293,7 @@ fn level_axis_zooms_pans_fits_and_resets_per_pane() {
     t.key("Ctrl+Home");
     assert_eq!(r(&t, PaneKind::Transfer), d.tf.magnitude_db);
     // The sweep pane's distortion axis.
-    t.key("Alt+5");
+    t.go(PaneKind::Distortion);
     t.key("Ctrl+I");
     assert!((r(&t, PaneKind::Distortion).span() - 100.0 / 1.5).abs() < 1e-9);
     // The IR pane without an IR: said, nothing changes.
@@ -480,11 +480,11 @@ fn picking_a_measurement_brings_up_its_pane() {
         }
         assert_eq!(t.st.layout.maximized, maximised);
         let shows = |t: &T, p: PaneKind, id: u32| {
-            assert_eq!(t.st.layout.focus, p, "maximised {maximised}");
-            assert_eq!(t.st.pane_meas(p).map(|m| m.id), Some(MeasId(id)));
+            assert_eq!(t.focus_kind(), p, "maximised {maximised}");
+            assert_eq!(t.st.kind_meas(p).map(|m| m.id), Some(MeasId(id)));
             assert_eq!(t.st.layout.maximized, maximised);
             if maximised {
-                assert_eq!(t.st.layout.visible(), [p]);
+                assert_eq!(t.visible(), [p]);
             }
         };
         // An RTA: the spectrum / RTA pane.
@@ -502,17 +502,20 @@ fn picking_a_measurement_brings_up_its_pane() {
         // The IR pane draws transfer measurements: it keeps the focus.
         t.key("Alt+3");
         t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
-        assert_eq!(t.st.layout.focus, PaneKind::Ir);
-        assert_eq!(t.st.pane_meas(PaneKind::Ir).map(|m| m.id), Some(MeasId(1)));
+        assert_eq!(t.focus_kind(), PaneKind::Ir);
+        assert_eq!(t.st.kind_meas(PaneKind::Ir).map(|m| m.id), Some(MeasId(1)));
         // The pane's chip list picks for that pane.
-        t.st.update(Msg::PaneShow(PaneKind::Spectrum, MeasId(4)), &t.keys);
+        t.st.update(
+            Msg::PanePick(t.pane(PaneKind::Spectrum), PaneMenuRow::Meas(MeasId(4))),
+            &t.keys,
+        );
         shows(&t, PaneKind::Spectrum, 4);
     }
 }
 
 /// A stored trace picked with the layout maximised: the pane that draws it comes up (a
-/// sweep stays on the transfer pane, which draws it too, else goes to the sweep pane). The
-/// split layout keeps its focus: every pane is on screen.
+/// sweep stays on the transfer pane, which draws it too, else the maximised pane turns into
+/// the sweep pane). The split layout keeps its focus: every pane is on screen.
 #[test]
 fn picking_a_trace_while_maximised_brings_up_its_pane() {
     let mut t = T::new();
@@ -523,28 +526,28 @@ fn picking_a_trace_while_maximised_brings_up_its_pane() {
     ]));
     t.key("W");
     t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
-    assert_eq!(t.st.layout.visible(), [PaneKind::Spectrum]);
+    assert_eq!(t.visible(), [PaneKind::Spectrum]);
     t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
-    assert_eq!(t.st.layout.visible(), [PaneKind::Transfer]);
+    assert_eq!(t.visible(), [PaneKind::Transfer]);
     t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
-    assert_eq!(t.st.layout.visible(), [PaneKind::Transfer]);
+    assert_eq!(t.visible(), [PaneKind::Transfer]);
     t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
     t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
-    assert_eq!(t.st.layout.visible(), [PaneKind::Distortion]);
+    assert_eq!(t.visible(), [PaneKind::Distortion]);
     // V steps the same way.
     t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
     t.key("Alt+2");
     t.key("V");
     assert_eq!(t.st.selected_trace, Some(TraceId(13)));
-    assert_eq!(t.st.layout.visible(), [PaneKind::Transfer]);
+    assert_eq!(t.visible(), [PaneKind::Transfer]);
     assert!(t.st.layout.maximized);
     // Split (W: full screen, W: split): the focus stays.
     t.key("W");
     t.key("W");
     assert!(!t.st.layout.maximized);
-    t.key("Alt+2");
+    t.key("Alt+3");
     t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
-    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
+    assert_eq!(t.focus_kind(), PaneKind::Ir);
 }
 
 /// The state with measurement `id` running or stopped.
@@ -753,13 +756,15 @@ fn the_ir_pane_says_why_there_is_no_ir() {
         s.banners.iter().map(|b| b.text.clone()).collect()
     };
     // Nothing yet from a running measurement.
-    let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+    let s = crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now())
+        .expect("scene");
     assert_eq!(s.note.as_deref(), Some("Main L: no IR frame yet"));
     // Its transfer stream says nothing drives the reference: banner and reason, which
     // follow this app's stimulus.
     t.conn(snapshot(vec![tf.clone()]));
     let ir_and_banner = |t: &T| {
-        let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+        let s = crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now())
+            .expect("scene");
         assert!(
             texts(&s).contains(&"NO REFERENCE".to_owned()),
             "{:?}",
@@ -801,7 +806,7 @@ fn the_ir_pane_says_why_there_is_no_ir() {
     t.key("Escape");
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     // On the sweep view Space arms a sweep: the noise is armed from a transfer pane.
-    t.st.layout.focus = PaneKind::Distortion;
+    t.put(PaneKind::Distortion);
     assert_eq!(
         ir_and_banner(&t),
         (
@@ -809,7 +814,7 @@ fn the_ir_pane_says_why_there_is_no_ir() {
             "stimulus off: arm it from a transfer pane".into()
         )
     );
-    t.st.layout.focus = PaneKind::Ir;
+    t.put(PaneKind::Ir);
     // Another client's stimulus, armed and silent: not this app's keys to press.
     let mut other = daemon_state();
     other.generator.owner = Some(ClientId("other".into()));
@@ -823,7 +828,8 @@ fn the_ir_pane_says_why_there_is_no_ir() {
     let mut st = daemon_state();
     st.measurements[1].running = false;
     t.conn(mirror(st.clone()));
-    let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+    let s = crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now())
+        .expect("scene");
     assert_eq!(s.note.as_deref(), Some("Main L stopped — S starts it"));
     assert!(!texts(&s).contains(&"NO REFERENCE".to_owned()));
     let r = t.key("S");
@@ -836,7 +842,8 @@ fn the_ir_pane_says_why_there_is_no_ir() {
     );
     // Its kept IR: drawn, tagged as its transfer curve is, never STALE.
     t.conn(snapshot(vec![tf, ir]));
-    let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+    let s = crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now())
+        .expect("scene");
     assert_eq!(s.note, None);
     assert_eq!(s.tag.as_deref(), Some("stopped"));
     assert!(texts(&s).iter().all(|b| !b.starts_with("STALE")));
@@ -1056,14 +1063,14 @@ fn a_hides_and_shows_the_selected_measurement() {
     live_frames(&mut t);
     let theme = Theme::dark();
     let tf_names = |t: &T| -> Vec<String> {
-        crate::scenes::transfer(&t.st, &theme, SIZE, now())
+        crate::scenes::transfer(&t.st, t.pane(PaneKind::Transfer), &theme, SIZE, now())
             .legend
             .iter()
             .map(|e| e.name.clone())
             .collect()
     };
     let spec_names = |t: &T| -> Vec<String> {
-        crate::scenes::spectrum(&t.st, &theme, SIZE, now())
+        crate::scenes::spectrum(&t.st, t.pane(PaneKind::Spectrum), &theme, SIZE, now())
             .legend
             .iter()
             .map(|e| e.name.clone())
@@ -1094,19 +1101,25 @@ fn a_hides_and_shows_the_selected_measurement() {
         row(&t, 1).text
     );
     assert!(!row(&t, 2).hidden);
-    let caption = t.st.pane_caption(PaneKind::Transfer).unwrap_or_default();
+    let caption =
+        t.st.pane_caption(t.pane(PaneKind::Transfer))
+            .unwrap_or_default();
     assert!(caption.starts_with("Main L hidden"), "{caption}");
     assert_eq!(
-        t.st.pane_caption_variants(PaneKind::Transfer)
+        t.st.pane_caption_variants(t.pane(PaneKind::Transfer))
             .last()
             .map(String::as_str),
         Some("Main L hidden")
     );
     assert_eq!(
-        t.st.pane_menu_rows(PaneKind::Transfer),
-        [(MeasId(1), "TF  Main L · hidden".to_owned())]
+        t.st.pane_menu_rows(t.pane(PaneKind::Transfer))[0],
+        (
+            PaneMenuRow::Meas(MeasId(1)),
+            "TF  Main L · hidden".to_owned()
+        )
     );
-    let ir = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+    let ir = crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now())
+        .expect("scene");
     assert_eq!(ir.note.as_deref(), Some("Main L hidden — A shows it"));
     // Remembered by name.
     assert_eq!(
@@ -1118,7 +1131,7 @@ fn a_hides_and_shows_the_selected_measurement() {
     assert!(t.key("A").is_empty());
     assert!(spec_names(&t).is_empty());
     assert!(
-        t.st.pane_caption(PaneKind::Spectrum)
+        t.st.pane_caption(t.pane(PaneKind::Spectrum))
             .is_some_and(|c| c.starts_with("Sub hidden"))
     );
     // A stored trace selected after it: A is about the trace (the daemon keeps that).

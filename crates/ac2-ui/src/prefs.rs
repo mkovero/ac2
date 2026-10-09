@@ -4,9 +4,9 @@
 //! names — the Leq view's layout, whether the panes show their key hints, whether the
 //! layout keeps only the panes that draw the selection, how long the SPL
 //! meter's number holds a reading, the theme, the record toggle's time limit, the
-//! spectrograph's history span, the layout and window as last left: the focused
-//! pane, maximised or full screen, what each pane shows and how much of its plot (grid,
-//! labels, cursor), the window's size and position,
+//! spectrograph's history span, the layout and window as last left: the pane tree, the
+//! focused pane, maximised or full screen, what each pane shows (its kind, measurement,
+//! modes and how much of its plot: grid, labels, cursor), the window's size and position,
 //! and each pane's level axis range (a fit made for one show is a fair start for the next),
 //! and where the transfer pane's legend sat and how large it may be.
 //!
@@ -34,24 +34,30 @@
 //! history = true
 //!
 //! [layout]
-//! focus = "spl"
+//! focus = 2
 //! maximized = true
 //! fullscreen = true
-//! spl_view = "meter_leq"
-//! spectrum_view = "spectrograph"
-//! sweep_view = "room"
-//! ir_mode = "etc"
 //! distortion_unit = "percent"
 //! hidden = ["TF 2"]
 //! compared = ["Main R"]
 //!
-//! [layout.chrome]
-//! transfer = "no_grid"
-//! ir = "traces_only"
+//! [layout.tree]
+//! split = "row"
+//! ratio = 0.5
+//! a = { pane = 1 }
+//! b = { pane = 2 }
 //!
-//! [layout.measurements]
-//! transfer = "Main L"
-//! spl = "FOH SPL"
+//! [[layout.panes]]
+//! id = 1
+//! kind = "transfer"
+//! measurement = "Main L"
+//!
+//! [[layout.panes]]
+//! id = 2
+//! kind = "spl"
+//! measurement = "FOH SPL"
+//! spl_view = "meter_leq"
+//! chrome = "no_grid"
 //!
 //! [levels]
 //! transfer = [-24.0, 12.0]
@@ -84,12 +90,12 @@ use std::path::Path;
 use ac2_scene::axis::Range;
 use ac2_scene::legend::LegendView;
 use ac2_scene::view::{
-    DistortionUnit, IrMode, LeqLayout, LeqStyle, PaneChrome, PlotChrome, SpectrumMode, SplMode,
-    SweepMode, ViewState, level,
+    DistortionUnit, IrMode, LeqLayout, LeqStyle, PlotChrome, SpectrumMode, SplMode, SweepMode,
+    ViewState, level,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::PaneKind;
+use crate::state::{Axis, PaneId, PaneKind, PaneModes, PaneNode};
 
 /// The session dialog's choices for one device (zero-based channels).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -112,50 +118,53 @@ pub struct DeviceRoles {
 }
 
 /// The layout as the operator left it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LayoutPrefs {
-    /// The focused pane.
-    pub focus: PaneKind,
+    /// The pane tree and what each pane shows; `None`: none remembered, the app starts with
+    /// one pane.
+    pub panes: Option<PanesPrefs>,
     /// Only the focused pane (W).
     pub maximized: bool,
     /// The window fills the screen (F or F11; with `maximized`, the full-screen pane).
     pub fullscreen: bool,
-    /// What the SPL pane shows: the meter, the Leq windows or both.
-    pub spl_view: SplMode,
-    /// What the spectrum pane shows: the spectrum, the spectrograph or both.
-    pub spectrum_view: SpectrumMode,
-    /// What the sweep pane shows: the response and distortion, the IR or the room table.
-    pub sweep_view: SweepMode,
-    pub ir_mode: IrMode,
     pub distortion_unit: DistortionUnit,
-    /// The measurement each pane shows, by name (transfer, spectrum, SPL).
-    pub measurements: BTreeMap<PaneKind, String>,
     /// Measurements whose live curves are hidden (A), by name.
     pub hidden: BTreeSet<String>,
     /// Measurements whose live curves every transfer pane draws besides its own group
     /// (compare, C), by name.
     pub compared: BTreeSet<String>,
-    /// Each pane's grid, labels and cursor (T).
-    pub chrome: PaneChrome,
 }
 
 impl Default for LayoutPrefs {
     fn default() -> Self {
         Self {
-            focus: PaneKind::Transfer,
+            panes: None,
             maximized: false,
             fullscreen: false,
-            spl_view: SplMode::MeterLeq,
-            spectrum_view: SpectrumMode::Spectrum,
-            sweep_view: SweepMode::Response,
-            ir_mode: IrMode::Linear,
             distortion_unit: DistortionUnit::Db,
-            measurements: BTreeMap::new(),
             hidden: BTreeSet::new(),
             compared: BTreeSet::new(),
-            chrome: PaneChrome::default(),
         }
     }
+}
+
+/// The pane tree as left.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PanesPrefs {
+    pub root: PaneNode,
+    pub focus: PaneId,
+    /// One per leaf.
+    pub views: Vec<PanePrefs>,
+}
+
+/// What one pane showed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PanePrefs {
+    pub id: PaneId,
+    pub kind: PaneKind,
+    /// The measurement it showed, by name.
+    pub measurement: Option<String>,
+    pub modes: PaneModes,
 }
 
 /// The level axis range of each pane, dB (the spectrum pane keeps one per scale).
@@ -345,7 +354,13 @@ struct File {
     sessions: BTreeMap<String, RolesFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     leq: Option<LeqFile>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// A layout this version cannot read (an older one's) is dropped: the app starts with
+    /// one pane instead of refusing the whole file.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_layout"
+    )]
     layout: Option<LayoutFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     levels: Option<LevelsFile>,
@@ -606,71 +621,72 @@ impl ChromeFile {
     }
 }
 
-/// Only the panes stepped away from the full plot are written.
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PaneChromeFile {
-    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
-    transfer: ChromeFile,
-    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
-    spectrum: ChromeFile,
-    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
-    ir: ChromeFile,
-    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
-    spl: ChromeFile,
-    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
-    distortion: ChromeFile,
-}
-
-impl PaneChromeFile {
-    fn of(c: &PaneChrome) -> Self {
-        Self {
-            transfer: ChromeFile::of(c.transfer),
-            spectrum: ChromeFile::of(c.spectrum),
-            ir: ChromeFile::of(c.ir),
-            spl: ChromeFile::of(c.spl),
-            distortion: ChromeFile::of(c.distortion),
-        }
-    }
-
-    fn chrome(&self) -> PaneChrome {
-        PaneChrome {
-            transfer: self.transfer.chrome(),
-            spectrum: self.spectrum.chrome(),
-            ir: self.ir.chrome(),
-            spl: self.spl.chrome(),
-            distortion: self.distortion.chrome(),
-        }
-    }
-
-    fn is_full(&self) -> bool {
-        self.chrome() == PaneChrome::default()
-    }
-}
-
 fn is_false(b: &bool) -> bool {
     !*b
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MeasurementsFile {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    transfer: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    spectrum: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    spl: Option<String>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AxisFile {
+    Row,
+    Column,
 }
 
+/// A node of the pane tree: a leaf names its pane, a split its two halves.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum NodeFile {
+    Leaf {
+        pane: u32,
+    },
+    Split {
+        split: AxisFile,
+        ratio: f32,
+        a: Box<NodeFile>,
+        b: Box<NodeFile>,
+    },
+}
+
+impl NodeFile {
+    fn of(n: &PaneNode) -> Self {
+        match n {
+            PaneNode::Leaf(id) => Self::Leaf { pane: id.0 },
+            PaneNode::Split { axis, ratio, a, b } => Self::Split {
+                split: match axis {
+                    Axis::Row => AxisFile::Row,
+                    Axis::Column => AxisFile::Column,
+                },
+                ratio: *ratio,
+                a: Box::new(Self::of(a)),
+                b: Box::new(Self::of(b)),
+            },
+        }
+    }
+
+    fn node(&self) -> PaneNode {
+        match self {
+            Self::Leaf { pane } => PaneNode::Leaf(PaneId(*pane)),
+            Self::Split { split, ratio, a, b } => PaneNode::Split {
+                axis: match split {
+                    AxisFile::Row => Axis::Row,
+                    AxisFile::Column => Axis::Column,
+                },
+                ratio: ratio.clamp(0.0, 1.0),
+                a: Box::new(a.node()),
+                b: Box::new(b.node()),
+            },
+        }
+    }
+}
+
+/// One pane: its kind, measurement and the modes of each kind it may show.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LayoutFile {
-    focus: PaneFile,
-    #[serde(default, skip_serializing_if = "is_false")]
-    maximized: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    fullscreen: bool,
+struct PaneEntryFile {
+    id: u32,
+    kind: PaneFile,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    measurement: Option<String>,
     #[serde(default = "spl_meter_leq")]
     spl_view: SplViewFile,
     #[serde(default)]
@@ -679,17 +695,96 @@ struct LayoutFile {
     sweep_view: SweepViewFile,
     #[serde(default = "ir_linear")]
     ir_mode: IrModeFile,
+    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
+    chrome: ChromeFile,
+}
+
+impl PaneEntryFile {
+    fn of(p: &PanePrefs) -> Self {
+        let m = &p.modes;
+        Self {
+            id: p.id.0,
+            kind: PaneFile::of(p.kind),
+            measurement: p.measurement.clone(),
+            spl_view: match m.spl {
+                SplMode::Meter => SplViewFile::Meter,
+                SplMode::Leq => SplViewFile::Leq,
+                SplMode::MeterLeq => SplViewFile::MeterLeq,
+                SplMode::Bands => SplViewFile::Bands,
+            },
+            spectrum_view: match m.spectrum {
+                SpectrumMode::Spectrum => SpectrumViewFile::Spectrum,
+                SpectrumMode::Split => SpectrumViewFile::SpectrumSpectrograph,
+                SpectrumMode::Spectrograph => SpectrumViewFile::Spectrograph,
+            },
+            sweep_view: match m.sweep {
+                SweepMode::Response => SweepViewFile::Response,
+                SweepMode::Ir => SweepViewFile::Ir,
+                SweepMode::Room => SweepViewFile::Room,
+            },
+            ir_mode: match m.ir {
+                IrMode::Linear => IrModeFile::Linear,
+                IrMode::Log => IrModeFile::Log,
+                IrMode::Etc => IrModeFile::Etc,
+            },
+            chrome: ChromeFile::of(m.chrome),
+        }
+    }
+
+    fn parse(&self) -> PanePrefs {
+        PanePrefs {
+            id: PaneId(self.id),
+            kind: self.kind.pane(),
+            measurement: self.measurement.clone(),
+            modes: PaneModes {
+                spl: match self.spl_view {
+                    SplViewFile::Meter => SplMode::Meter,
+                    SplViewFile::Leq => SplMode::Leq,
+                    SplViewFile::MeterLeq => SplMode::MeterLeq,
+                    SplViewFile::Bands => SplMode::Bands,
+                },
+                spectrum: match self.spectrum_view {
+                    SpectrumViewFile::Spectrum => SpectrumMode::Spectrum,
+                    SpectrumViewFile::SpectrumSpectrograph => SpectrumMode::Split,
+                    SpectrumViewFile::Spectrograph => SpectrumMode::Spectrograph,
+                },
+                sweep: match self.sweep_view {
+                    SweepViewFile::Response => SweepMode::Response,
+                    SweepViewFile::Ir => SweepMode::Ir,
+                    SweepViewFile::Room => SweepMode::Room,
+                },
+                ir: match self.ir_mode {
+                    IrModeFile::Linear => IrMode::Linear,
+                    IrModeFile::Log => IrMode::Log,
+                    IrModeFile::Etc => IrMode::Etc,
+                },
+                chrome: self.chrome.chrome(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LayoutFile {
+    /// The focused pane's id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    focus: Option<u32>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    maximized: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    fullscreen: bool,
     #[serde(default = "unit_db")]
     distortion_unit: UnitFile,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hidden: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     compared: Vec<String>,
-    /// Tables last.
-    #[serde(default, skip_serializing_if = "PaneChromeFile::is_full")]
-    chrome: PaneChromeFile,
-    #[serde(default)]
-    measurements: MeasurementsFile,
+    /// Last: tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tree: Option<NodeFile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    panes: Vec<PaneEntryFile>,
 }
 
 fn spl_meter_leq() -> SplViewFile {
@@ -704,93 +799,64 @@ fn unit_db() -> UnitFile {
     UnitFile::Db
 }
 
+/// The `[layout]` table if this version reads it, else none.
+fn lenient_layout<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<LayoutFile>, D::Error> {
+    let v = toml::Value::deserialize(d)?;
+    Ok(LayoutFile::deserialize(v).ok())
+}
+
 impl LayoutFile {
     fn parse(self) -> LayoutPrefs {
-        let mut measurements = BTreeMap::new();
-        for (p, name) in [
-            (PaneKind::Transfer, self.measurements.transfer),
-            (PaneKind::Spectrum, self.measurements.spectrum),
-            (PaneKind::Spl, self.measurements.spl),
-        ] {
-            if let Some(n) = name {
-                measurements.insert(p, n);
+        let panes = self.tree.as_ref().and_then(|t| {
+            let root = t.node();
+            let leaves = root.leaves();
+            let mut seen = BTreeSet::new();
+            // A pane twice in the tree has no place to be drawn: the tree is dropped.
+            if !leaves.iter().all(|id| seen.insert(*id)) {
+                return None;
             }
-        }
+            let views: Vec<PanePrefs> = self
+                .panes
+                .iter()
+                .map(PaneEntryFile::parse)
+                .filter(|p| leaves.contains(&p.id))
+                .collect();
+            Some(PanesPrefs {
+                focus: self.focus.map_or(leaves[0], PaneId),
+                root,
+                views,
+            })
+        });
         LayoutPrefs {
-            focus: self.focus.pane(),
+            panes,
             maximized: self.maximized,
             fullscreen: self.fullscreen,
-            spl_view: match self.spl_view {
-                SplViewFile::Meter => SplMode::Meter,
-                SplViewFile::Leq => SplMode::Leq,
-                SplViewFile::MeterLeq => SplMode::MeterLeq,
-                SplViewFile::Bands => SplMode::Bands,
-            },
-            spectrum_view: match self.spectrum_view {
-                SpectrumViewFile::Spectrum => SpectrumMode::Spectrum,
-                SpectrumViewFile::SpectrumSpectrograph => SpectrumMode::Split,
-                SpectrumViewFile::Spectrograph => SpectrumMode::Spectrograph,
-            },
-            sweep_view: match self.sweep_view {
-                SweepViewFile::Response => SweepMode::Response,
-                SweepViewFile::Ir => SweepMode::Ir,
-                SweepViewFile::Room => SweepMode::Room,
-            },
-            ir_mode: match self.ir_mode {
-                IrModeFile::Linear => IrMode::Linear,
-                IrModeFile::Log => IrMode::Log,
-                IrModeFile::Etc => IrMode::Etc,
-            },
             distortion_unit: match self.distortion_unit {
                 UnitFile::Db => DistortionUnit::Db,
                 UnitFile::Percent => DistortionUnit::Percent,
             },
-            measurements,
             hidden: self.hidden.into_iter().collect(),
             compared: self.compared.into_iter().collect(),
-            chrome: self.chrome.chrome(),
         }
     }
 
     fn from_prefs(l: &LayoutPrefs) -> Self {
-        let name = |p: PaneKind| l.measurements.get(&p).cloned();
         Self {
-            focus: PaneFile::of(l.focus),
+            focus: l.panes.as_ref().map(|p| p.focus.0),
             maximized: l.maximized,
             fullscreen: l.fullscreen,
-            spl_view: match l.spl_view {
-                SplMode::Meter => SplViewFile::Meter,
-                SplMode::Leq => SplViewFile::Leq,
-                SplMode::MeterLeq => SplViewFile::MeterLeq,
-                SplMode::Bands => SplViewFile::Bands,
-            },
-            spectrum_view: match l.spectrum_view {
-                SpectrumMode::Spectrum => SpectrumViewFile::Spectrum,
-                SpectrumMode::Split => SpectrumViewFile::SpectrumSpectrograph,
-                SpectrumMode::Spectrograph => SpectrumViewFile::Spectrograph,
-            },
-            sweep_view: match l.sweep_view {
-                SweepMode::Response => SweepViewFile::Response,
-                SweepMode::Ir => SweepViewFile::Ir,
-                SweepMode::Room => SweepViewFile::Room,
-            },
-            ir_mode: match l.ir_mode {
-                IrMode::Linear => IrModeFile::Linear,
-                IrMode::Log => IrModeFile::Log,
-                IrMode::Etc => IrModeFile::Etc,
-            },
             distortion_unit: match l.distortion_unit {
                 DistortionUnit::Db => UnitFile::Db,
                 DistortionUnit::Percent => UnitFile::Percent,
             },
             hidden: l.hidden.iter().cloned().collect(),
             compared: l.compared.iter().cloned().collect(),
-            chrome: PaneChromeFile::of(&l.chrome),
-            measurements: MeasurementsFile {
-                transfer: name(PaneKind::Transfer),
-                spectrum: name(PaneKind::Spectrum),
-                spl: name(PaneKind::Spl),
-            },
+            tree: l.panes.as_ref().map(|p| NodeFile::of(&p.root)),
+            panes: l
+                .panes
+                .as_ref()
+                .map(|p| p.views.iter().map(PaneEntryFile::of).collect())
+                .unwrap_or_default(),
         }
     }
 }
@@ -1183,6 +1249,40 @@ mod tests {
         assert!(UiPrefs::from_toml("key_hints = \"no\"\n").is_err());
     }
 
+    /// Two panes side by side: a transfer pane on `Main L` and an SPL pane on `FOH SPL`
+    /// showing the Leq windows, the SPL pane focused.
+    fn two_panes() -> PanesPrefs {
+        PanesPrefs {
+            root: PaneNode::Split {
+                axis: Axis::Row,
+                ratio: 0.5,
+                a: Box::new(PaneNode::Leaf(PaneId(1))),
+                b: Box::new(PaneNode::Leaf(PaneId(2))),
+            },
+            focus: PaneId(2),
+            views: vec![
+                PanePrefs {
+                    id: PaneId(1),
+                    kind: PaneKind::Transfer,
+                    measurement: Some("Main L".to_owned()),
+                    modes: PaneModes::default(),
+                },
+                PanePrefs {
+                    id: PaneId(2),
+                    kind: PaneKind::Spl,
+                    measurement: Some("FOH SPL".to_owned()),
+                    modes: PaneModes {
+                        spl: SplMode::Leq,
+                        spectrum: SpectrumMode::Spectrograph,
+                        sweep: SweepMode::Room,
+                        ir: IrMode::Etc,
+                        chrome: PlotChrome::Bare,
+                    },
+                },
+            ],
+        }
+    }
+
     #[test]
     fn layout_window_and_hold_round_trip() {
         let mut p = UiPrefs::default();
@@ -1193,26 +1293,12 @@ mod tests {
         );
         p.spl_hold_ms = Some(250);
         p.layout = LayoutPrefs {
-            focus: PaneKind::Spl,
+            panes: Some(two_panes()),
             maximized: true,
             fullscreen: true,
-            spl_view: SplMode::Leq,
-            spectrum_view: SpectrumMode::Spectrograph,
-            sweep_view: SweepMode::Room,
-            ir_mode: IrMode::Etc,
             distortion_unit: DistortionUnit::Percent,
-            measurements: [
-                (PaneKind::Transfer, "Main L".to_owned()),
-                (PaneKind::Spl, "FOH SPL".to_owned()),
-            ]
-            .into(),
             hidden: ["TF 2".to_owned()].into(),
             compared: ["Main R".to_owned()].into(),
-            chrome: PaneChrome {
-                transfer: PlotChrome::NoGrid,
-                ir: PlotChrome::Bare,
-                ..PaneChrome::default()
-            },
         };
         p.window = Some(WindowPrefs {
             width: 1600,
@@ -1223,20 +1309,21 @@ mod tests {
         for want in [
             "spl_hold_ms = 250",
             "[layout]",
-            "focus = \"spl\"",
+            "focus = 2",
             "fullscreen = true",
+            "distortion_unit = \"percent\"",
+            "hidden = [\"TF 2\"]",
+            "compared = [\"Main R\"]",
+            "[layout.tree]",
+            "split = \"row\"",
+            "[[layout.panes]]",
+            "kind = \"spl\"",
+            "measurement = \"FOH SPL\"",
             "spl_view = \"leq\"",
             "spectrum_view = \"spectrograph\"",
             "sweep_view = \"room\"",
             "ir_mode = \"etc\"",
-            "distortion_unit = \"percent\"",
-            "hidden = [\"TF 2\"]",
-            "compared = [\"Main R\"]",
-            "[layout.chrome]",
-            "transfer = \"no_grid\"",
-            "ir = \"traces_only\"",
-            "[layout.measurements]",
-            "spl = \"FOH SPL\"",
+            "chrome = \"traces_only\"",
             "[window]",
             "y = -20",
         ] {
@@ -1250,77 +1337,81 @@ mod tests {
             pos: None,
         });
         assert_eq!(UiPrefs::from_toml(&p.to_toml()), Ok(p));
-        // A layout with only a focus takes the defaults for the rest.
-        let q = UiPrefs::from_toml("[layout]\nfocus = \"ir\"\n").expect("parse");
-        assert_eq!(
-            q.layout,
-            LayoutPrefs {
-                focus: PaneKind::Ir,
-                ..LayoutPrefs::default()
-            }
-        );
         for bad in [
             "spl_hold_ms = 5\n",
             "spl_hold_ms = 20000\n",
-            "[layout]\nfocus = \"nowhere\"\n",
-            "[layout]\nfocus = \"spl\"\nspl_view = \"bars\"\n",
-            "[layout.measurements]\nir = \"x\"\n",
-            "[layout]\nfocus = \"spl\"\n[layout.chrome]\nspl = \"bare\"\n",
             "[window]\nwidth = 100\nheight = 100\n",
         ] {
             assert!(UiPrefs::from_toml(bad).is_err(), "{bad}");
         }
     }
 
-    /// A new layout shows the meter with the Leq windows under it; a remembered choice
-    /// stays, each one written as its name.
+    /// A layout this version cannot read — an older fixed grid's, a pane twice in the tree,
+    /// an unknown view — is dropped: the rest of the file stays and the app starts with one
+    /// pane.
     #[test]
-    fn spl_view_defaults_to_meter_and_leq_and_keeps_a_choice() {
-        assert_eq!(LayoutPrefs::default().spl_view, SplMode::MeterLeq);
-        let q = UiPrefs::from_toml("[layout]\nfocus = \"spl\"\n").expect("parse");
-        assert_eq!(q.layout.spl_view, SplMode::MeterLeq);
-        for (mode, name) in [
+    fn an_unreadable_layout_starts_with_one_pane() {
+        for old in [
+            "[layout]\nfocus = \"spl\"\nspl_view = \"leq\"\n\n[layout.measurements]\nspl = \"FOH\"\n",
+            "[layout]\nfocus = 1\n\n[layout.tree]\nsplit = \"row\"\nratio = 0.5\na = { pane = 1 }\nb = { pane = 1 }\n",
+            "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"spl\"\nspl_view = \"bars\"\n",
+            "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"spl\"\nchrome = \"bare\"\n",
+        ] {
+            let text = format!("spl_hold_ms = 250\n{old}");
+            let q = UiPrefs::from_toml(&text).expect(&text);
+            assert_eq!(q.layout.panes, None, "{old}");
+            assert_eq!(q.spl_hold_ms, Some(250));
+        }
+        // A pane of the tree without its entry shows a transfer pane: the tree stays.
+        let q =
+            UiPrefs::from_toml("[layout]\nfocus = 1\n\n[layout.tree]\npane = 1\n").expect("parse");
+        let panes = q.layout.panes.expect("tree");
+        assert_eq!(panes.root, PaneNode::Leaf(PaneId(1)));
+        assert!(panes.views.is_empty());
+    }
+
+    /// Each pane keeps its own views, written by name; a pane written without them takes
+    /// the defaults (the meter with the Leq windows, the spectrum).
+    #[test]
+    fn pane_views_default_and_keep_a_choice() {
+        assert_eq!(PaneModes::default().spl, SplMode::MeterLeq);
+        assert_eq!(PaneModes::default().spectrum, SpectrumMode::Spectrum);
+        let q = UiPrefs::from_toml(
+            "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"spl\"\n",
+        )
+        .expect("parse");
+        let v = &q.layout.panes.expect("tree").views[0];
+        assert_eq!((v.kind, v.modes), (PaneKind::Spl, PaneModes::default()));
+        for (spl, name) in [
             (SplMode::Meter, "meter"),
             (SplMode::Leq, "leq"),
             (SplMode::MeterLeq, "meter_leq"),
             (SplMode::Bands, "bands"),
         ] {
             let mut p = UiPrefs::default();
-            p.layout.spl_view = mode;
-            p.layout.focus = PaneKind::Spl;
+            let mut panes = two_panes();
+            panes.views[1].modes.spl = spl;
+            p.layout.panes = Some(panes);
             let text = p.to_toml();
             assert!(text.contains(&format!("spl_view = \"{name}\"")), "{text}");
-            assert_eq!(
-                UiPrefs::from_toml(&text).expect("parse").layout.spl_view,
-                mode
-            );
+            assert_eq!(UiPrefs::from_toml(&text).expect("parse"), p);
         }
-    }
-
-    /// The spectrum pane starts on the spectrum; a remembered view stays, by name.
-    #[test]
-    fn spectrum_view_defaults_to_the_spectrum_and_keeps_a_choice() {
-        assert_eq!(LayoutPrefs::default().spectrum_view, SpectrumMode::Spectrum);
         for (mode, name) in [
             (SpectrumMode::Spectrum, "spectrum"),
             (SpectrumMode::Split, "spectrum_spectrograph"),
             (SpectrumMode::Spectrograph, "spectrograph"),
         ] {
             let mut p = UiPrefs::default();
-            p.layout.spectrum_view = mode;
-            p.layout.focus = PaneKind::Spectrum;
+            let mut panes = two_panes();
+            panes.views[0].kind = PaneKind::Spectrum;
+            panes.views[0].modes.spectrum = mode;
+            p.layout.panes = Some(panes);
             let text = p.to_toml();
             assert!(
                 text.contains(&format!("spectrum_view = \"{name}\"")),
                 "{text}"
             );
-            assert_eq!(
-                UiPrefs::from_toml(&text)
-                    .expect("parse")
-                    .layout
-                    .spectrum_view,
-                mode
-            );
+            assert_eq!(UiPrefs::from_toml(&text).expect("parse"), p);
         }
     }
 

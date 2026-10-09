@@ -723,7 +723,7 @@ pub(crate) fn spectrum_scene_in(
         &y_axis,
         true,
         &unit,
-        view.chrome.spectrum,
+        view.chrome,
         theme,
     );
     c.base.labels.push(label(
@@ -847,7 +847,7 @@ pub(crate) fn spectrum_scene_in(
         }
     }
 
-    let cursor_hz = view.cursor_hz.filter(|_| view.chrome.spectrum.cursor());
+    let cursor_hz = view.cursor_hz.filter(|_| view.chrome.cursor());
     let cursor = cursor_hz.and_then(|hz| {
         let first = traces.first()?;
         let i = nearest_column(first.freqs, hz)?;

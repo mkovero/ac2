@@ -714,19 +714,6 @@ impl PlotChrome {
     }
 }
 
-/// Each pane's [`PlotChrome`]: a pane strips its plot without touching the others.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct PaneChrome {
-    pub transfer: PlotChrome,
-    /// The spectrum and the spectrograph.
-    pub spectrum: PlotChrome,
-    pub ir: PlotChrome,
-    /// The Leq history strip.
-    pub spl: PlotChrome,
-    /// The sweep pane: response, distortion and the sweep's IR.
-    pub distortion: PlotChrome,
-}
-
 /// Everything the operator chose about the view.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewState {
@@ -741,8 +728,8 @@ pub struct ViewState {
     pub cursor_hz: Option<f64>,
     /// Air temperature for the delay → distance readout (decision A).
     pub temperature_c: f64,
-    /// Grid, labels and cursor per pane.
-    pub chrome: PaneChrome,
+    /// Grid, labels and cursor of the pane being drawn.
+    pub chrome: PlotChrome,
 }
 
 impl Default for ViewState {
@@ -756,7 +743,7 @@ impl Default for ViewState {
             spl: SplView::default(),
             cursor_hz: None,
             temperature_c: 20.0,
-            chrome: PaneChrome::default(),
+            chrome: PlotChrome::Full,
         }
     }
 }

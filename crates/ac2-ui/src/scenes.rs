@@ -32,7 +32,7 @@ use ac2_scene::time::{ClockOffset, Freshness};
 use ac2_scene::trace::{TfTrace, TimeBase, TraceKey};
 use ac2_scene::view::SplMode;
 
-use crate::state::{AppState, PaneKind};
+use crate::state::{AppState, PaneId, PaneKind};
 
 /// Inputs that come from the clock, passed in so the assembly stays testable.
 #[derive(Clone, Copy, Debug)]
@@ -197,17 +197,19 @@ fn shown_math(
     Some((m.config.name.clone(), math_status(st, m, &f.frame.data)?))
 }
 
-/// The TF measurement the IR pane and the delay banner follow: the one the transfer pane
-/// shows; while that is a sweep (its runs drawn, no live curve), the IR pane's own choice.
+/// The TF measurement the IR keys and the delay banner follow: the one the transfer pane
+/// worked in last shows; while that is a sweep (its runs drawn, no live curve), what an IR
+/// pane would show.
 pub fn focus_tf(st: &AppState) -> Option<&Measurement> {
-    pane_tf(st).or_else(|| st.pane_meas(PaneKind::Ir))
+    st.kind_meas(PaneKind::Transfer)
+        .filter(|m| m.config.kind.publishes_tf())
+        .or_else(|| st.kind_meas(PaneKind::Ir))
 }
 
-/// The measurement with a live transfer curve the transfer pane shows (`None` while it
+/// The measurement with a live transfer curve transfer pane `pane` shows (`None` while it
 /// shows a sweep's runs).
-fn pane_tf(st: &AppState) -> Option<&Measurement> {
-    st.pane_meas(PaneKind::Transfer)
-        .filter(|m| m.config.kind.publishes_tf())
+fn pane_tf(st: &AppState, pane: PaneId) -> Option<&Measurement> {
+    st.pane_meas(pane).filter(|m| m.config.kind.publishes_tf())
 }
 
 /// The colour of measurement `id`'s live curve (or math result) in every pane: its colour
@@ -219,7 +221,7 @@ pub fn meas_color(st: &AppState, theme: &Theme, id: MeasId) -> ac2_scene::primit
 
 /// Measurements in list order with the one pane `p` shows first (its legend row and
 /// caption lead).
-fn pane_order(st: &AppState, p: PaneKind) -> Vec<(usize, &Measurement)> {
+fn pane_order(st: &AppState, p: PaneId) -> Vec<(usize, &Measurement)> {
     let shown = st.pane_meas(p).map(|m| m.id);
     let mut v: Vec<(usize, &Measurement)> = st.measurements().into_iter().enumerate().collect();
     v.sort_by_key(|(_, m)| Some(m.id) != shown);
@@ -235,15 +237,17 @@ struct LiveTf<'a> {
 /// The transfer view: the group of the measurement the pane shows — its live curve, the
 /// math channels made on it, its shown stored traces — and the curves compared (C), tagged
 /// so. Other groups (Imported too) wait until theirs is the pane's measurement.
-pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfScene {
+pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: Now) -> TfScene {
     let grids = st.data.as_ref().map(|d| &d.grids);
     let colours = st.curve_colours(theme);
+    let pane_shows = st.pane_meas(pane);
     let mut live = Vec::new();
-    for (_, m) in pane_order(st, PaneKind::Transfer) {
+    for (_, m) in pane_order(st, pane) {
         // The pane's group (its measurement and the math channels made on it), and what is
         // compared. A hidden measurement keeps its colour: showing it again brings back the
         // same curve.
-        if !(st.live_on_transfer_pane(m) || st.live_compared_on_transfer(m)) {
+        if !(st.live_on_transfer_pane(m, pane_shows) || st.live_compared_on_transfer(m, pane_shows))
+        {
             continue;
         }
         let Some(tf) = frame(st, m.id, Stream::Tf) else {
@@ -266,7 +270,10 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     let mut stored: Vec<(&Arc<ac2_proto::model::TraceData>, Arc<GridColumns>)> = st
         .traces
         .values()
-        .filter(|(t, _)| st.on_transfer_pane(&t.meta) || st.trace_compared_on_transfer(&t.meta))
+        .filter(|(t, _)| {
+            st.on_transfer_pane(&t.meta, pane_shows)
+                || st.trace_compared_on_transfer(&t.meta, pane_shows)
+        })
         .map(|(t, g)| (t, columns(g)))
         .collect();
     stored.sort_by_key(|(t, _)| (t.meta.edit.order, t.meta.id));
@@ -276,7 +283,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     let ms = st.measurements();
     // The group of the measurement the pane shows leads, as its curve does.
     let groups = ac2_scene::meas_list::group_order(&ms);
-    let lead = pane_tf(st).map(|m| match &m.config.kind {
+    let lead = pane_tf(st, pane).map(|m| match &m.config.kind {
         ac2_proto::model::MeasKind::Math { config } => config.owner,
         _ => ac2_proto::model::TraceOwner::Meas { meas: m.id },
     });
@@ -313,7 +320,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
             Polarity::Normal
         };
         t.note = math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag());
-        t.compared = st.live_compared_on_transfer(l.meas);
+        t.compared = st.live_compared_on_transfer(l.meas, pane_shows);
         // A ratio or cascade of operands without a shared time base has each operand's
         // own alignment in its phase, not a time base of this session.
         if f.meta
@@ -329,7 +336,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
         ranks.push(rank(ac2_scene::meas_list::group_of(&data.meta, &ms)));
         let mut t = TfTrace::stored(data, &cols.freqs, colours.trace(data.meta.id));
         t.selected = st.selected_trace == Some(data.meta.id);
-        t.compared = st.trace_compared_on_transfer(&data.meta);
+        t.compared = st.trace_compared_on_transfer(&data.meta, pane_shows);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (Some(epoch), Some(cur)) = (
             data.meta.source.shared_epoch(),
@@ -345,12 +352,19 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     let mut slots: Vec<Option<TfTrace<'_>>> = traces.into_iter().map(Some).collect();
     let traces: Vec<TfTrace<'_>> = order.iter().filter_map(|i| slots[*i].take()).collect();
     let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
-    let focus = pane_tf(st);
+    let focus = pane_tf(st, pane);
     let mut status = status(st, &shown, focus, now);
     // The shown math channel's operands.
     let frames: Vec<(MeasId, &TopicFrame)> = live.iter().map(|l| (l.meas.id, l.tf)).collect();
     status.math = shown_math(st, focus, &frames);
-    transfer_scene(&traces, &st.tf_display, &status, &st.view, theme, size)
+    transfer_scene(
+        &traces,
+        &st.tf_display,
+        &status,
+        &st.view_for(pane),
+        theme,
+        size,
+    )
 }
 
 /// The spectrum / RTA view.
@@ -358,7 +372,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
 /// and stored) is calibrated, else dBFS. Picks which of the pane's two level ranges applies.
 pub fn spectrum_scale(st: &AppState) -> LevelScale {
     let mut scales = Vec::new();
-    for (_, m) in pane_order(st, PaneKind::Spectrum) {
+    for m in st.measurements() {
         let Some(stream) = crate::state::spectrum_stream(m) else {
             continue;
         };
@@ -384,15 +398,27 @@ pub fn spectrum_scale(st: &AppState) -> LevelScale {
     }
 }
 
-pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SpectrumScene {
-    with_spectrum(st, theme, now, |traces, status, view| {
+pub fn spectrum(
+    st: &AppState,
+    pane: PaneId,
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> SpectrumScene {
+    with_spectrum(st, pane, theme, now, |traces, status, view| {
         spectrum_scene(traces, status, view, theme, size)
     })
 }
 
 /// The spectrum pane with the spectrograph of the pane's measurement under it.
-pub fn spectrograph(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SpectrographScene {
-    let shown = st.pane_meas(PaneKind::Spectrum).and_then(|m| {
+pub fn spectrograph(
+    st: &AppState,
+    pane: PaneId,
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> SpectrographScene {
+    let shown = st.pane_meas(pane).and_then(|m| {
         if st.meas_hidden(m) {
             return None;
         }
@@ -411,7 +437,7 @@ pub fn spectrograph(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> S
             freshness: frame(st, m.id, stream).map(|tf| freshness(st, tf)),
         }
     });
-    with_spectrum(st, theme, now, |traces, status, view| {
+    with_spectrum(st, pane, theme, now, |traces, status, view| {
         spectrograph_scene(traces, status, input.as_ref(), view, theme, size)
     })
 }
@@ -420,6 +446,7 @@ pub fn spectrograph(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> S
 /// the view on the level range of the scale its curves are in.
 pub(crate) fn with_spectrum<R>(
     st: &AppState,
+    pane: PaneId,
     theme: &Theme,
     now: Now,
     f: impl FnOnce(&[SpectrumTrace<'_>], &Status, &ac2_scene::ViewState) -> R,
@@ -432,7 +459,7 @@ pub(crate) fn with_spectrum<R>(
     }
     let colours = st.curve_colours(theme);
     let mut cols = Vec::new();
-    for (_, m) in pane_order(st, PaneKind::Spectrum) {
+    for (_, m) in pane_order(st, pane) {
         if st.meas_hidden(m) {
             continue;
         }
@@ -573,9 +600,9 @@ pub(crate) fn with_spectrum<R>(
     let shown: Vec<&TopicFrame> = cols.iter().map(|c| c.tf).collect();
     let mut status = status(st, &shown, None, now);
     let frames: Vec<(MeasId, &TopicFrame)> = cols.iter().map(|c| (c.meas.id, c.tf)).collect();
-    status.math = shown_math(st, st.pane_meas(PaneKind::Spectrum), &frames);
+    status.math = shown_math(st, st.pane_meas(pane), &frames);
     // The pane draws on the level range of the scale its curves are in.
-    let mut view = st.view;
+    let mut view = st.view_for(pane);
     view.spectrum.level = st.view.spectrum.range(spectrum_scale(st));
     f(&traces, &status, &view)
 }
@@ -586,13 +613,15 @@ pub(crate) fn with_spectrum<R>(
 /// measurement.
 pub fn ir(
     st: &AppState,
+    pane: PaneId,
     keymap: &crate::keys::Keymap,
     theme: &Theme,
     size: Viewport,
     now: Now,
 ) -> Option<IrScene> {
     use ac2_scene::ir::{IrMissing, missing_scene, missing_text};
-    let m = focus_tf(st)?;
+    let m = st.pane_meas(pane)?;
+    let view = st.view_for(pane);
     let tf = frame(st, m.id, Stream::Tf);
     let ir = frame(st, m.id, Stream::Ir);
     let shown: Vec<&TopicFrame> = [tf, ir].into_iter().flatten().collect();
@@ -605,9 +634,9 @@ pub fn ir(
             meas_color(st, theme, m.id),
             Some(freshness(st, ir)),
             &status,
-            &st.view,
-            &st.view.ir.axes,
-            st.view.chrome.ir,
+            &view,
+            &view.ir.axes,
+            view.chrome,
             theme,
             size,
         ));
@@ -640,8 +669,8 @@ pub fn ir(
     Some(missing_scene(
         missing_text(&m.config.name, why, &start),
         &status,
-        &st.view.ir.axes,
-        st.view.chrome.ir,
+        &view.ir.axes,
+        view.chrome,
         theme,
         size,
     ))
@@ -692,21 +721,22 @@ impl SweepPane {
 
 /// The sweep pane: the shown sweep trace's distortion, its impulse response or its room
 /// parameters.
-pub fn sweep(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SweepPane {
+pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: Now) -> SweepPane {
     let status = status(st, &[], None, now);
     let shown = st.shown_sweep();
-    if st.view.distortion.mode == ac2_scene::view::SweepMode::Room {
+    let pv = st.view_for(pane);
+    if pv.distortion.mode == ac2_scene::view::SweepMode::Room {
         let room = shown.and_then(|(d, _)| d.sweep.as_ref()?.room.as_ref());
         let name = shown.map(|(d, _)| d.meta.edit.name.as_str());
         return SweepPane::Room(Box::new(ac2_scene::room::room_scene(
             room, name, &status, theme, size,
         )));
     }
-    if st.view.distortion.mode == ac2_scene::view::SweepMode::Ir
+    if pv.distortion.mode == ac2_scene::view::SweepMode::Ir
         && let Some((d, _)) = shown
     {
         let color = st.curve_colours(theme).trace(d.meta.id);
-        if let Some(s) = sweep_ir_scene(d, color, &status, &st.view, theme, size) {
+        if let Some(s) = sweep_ir_scene(d, color, &status, &pv, theme, size) {
             return SweepPane::Ir(Box::new(s));
         }
     }
@@ -719,9 +749,7 @@ pub fn sweep(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SweepPan
         freqs: &freqs,
         color: colours.trace(d.meta.id),
     });
-    SweepPane::Distortion(Box::new(distortion_scene(
-        view, &status, &st.view, theme, size,
-    )))
+    SweepPane::Distortion(Box::new(distortion_scene(view, &status, &pv, theme, size)))
 }
 
 /// Calibration text of an SPL meter's input: the daemon's verdict with the input's mic.
@@ -828,22 +856,33 @@ fn band_view<'a>(
 }
 
 /// The band meter of the SPL meter the pane shows (else the first one with a band frame).
-pub fn band_leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<BandLeqScene> {
-    let (v, tf) = spl_meters(st).find_map(|m| band_view(st, m, now))?;
+pub fn band_leq(
+    st: &AppState,
+    pane: PaneId,
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> Option<BandLeqScene> {
+    let (v, tf) = spl_meters(st, pane).find_map(|m| band_view(st, m, now))?;
     let status = status(st, &[tf], None, now);
     Some(band_leq_scene(&v, &status, theme, size))
 }
 
 /// The SPL meters in the order the pane picks them: the one it shows first.
-fn spl_meters(st: &AppState) -> impl Iterator<Item = &Measurement> {
-    pane_order(st, PaneKind::Spl)
+fn spl_meters(st: &AppState, pane: PaneId) -> impl Iterator<Item = &Measurement> {
+    pane_order(st, pane)
         .into_iter()
         .map(|(_, m)| m)
         .filter(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
 }
 
 /// What the Leq view shows of meter `m`, with its `leq` frame.
-fn leq_view<'a>(st: &'a AppState, m: &'a Measurement, now: Now) -> Option<LeqView<'a>> {
+fn leq_view<'a>(
+    st: &'a AppState,
+    pane: PaneId,
+    m: &'a Measurement,
+    now: Now,
+) -> Option<LeqView<'a>> {
     let tf = frame(st, m.id, Stream::Leq)?;
     let FrameData::Leq(f) = &tf.frame.data else {
         return None;
@@ -873,7 +912,7 @@ fn leq_view<'a>(st: &'a AppState, m: &'a Measurement, now: Now) -> Option<LeqVie
             .run
             .map(|r| ac2_scene::leq::run_text(&r, cfg, |t| st.local_zone.offset_s(t))),
         stage: st.stage_view(),
-        chrome: st.view.chrome.spl,
+        chrome: st.view_for(pane).chrome,
     })
 }
 
@@ -919,8 +958,14 @@ fn spl_readout_of<'a>(
 }
 
 /// The Leq windows of the SPL meter the pane shows (else the first one with a `leq` frame).
-pub fn leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<LeqScene> {
-    let v = spl_meters(st).find_map(|m| leq_view(st, m, now))?;
+pub fn leq(
+    st: &AppState,
+    pane: PaneId,
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> Option<LeqScene> {
+    let v = spl_meters(st, pane).find_map(|m| leq_view(st, pane, m, now))?;
     let status = status(st, &[], None, now);
     Some(leq_scene(&v, &status, theme, size))
 }
@@ -929,12 +974,13 @@ pub fn leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Leq
 /// key that resets the meter's statistics.
 pub fn spl(
     st: &AppState,
+    pane: PaneId,
     keymap: &crate::keys::Keymap,
     theme: &Theme,
     size: Viewport,
     now: Now,
 ) -> Option<SplScene> {
-    let (r, tf) = spl_meters(st).find_map(|m| spl_readout_of(st, m, keymap, now))?;
+    let (r, tf) = spl_meters(st, pane).find_map(|m| spl_readout_of(st, m, keymap, now))?;
     let status = status(st, &[tf], None, now);
     Some(spl_scene(&r, st.stage_view(), &status, theme, size))
 }
@@ -943,14 +989,15 @@ pub fn spl(
 /// frames): its held number over its Leq windows.
 pub fn meter_leq(
     st: &AppState,
+    pane: PaneId,
     keymap: &crate::keys::Keymap,
     theme: &Theme,
     size: Viewport,
     now: Now,
 ) -> Option<MeterLeqScene> {
-    let (r, tf, v) = spl_meters(st).find_map(|m| {
+    let (r, tf, v) = spl_meters(st, pane).find_map(|m| {
         let (r, tf) = spl_readout_of(st, m, keymap, now)?;
-        Some((r, tf, leq_view(st, m, now)?))
+        Some((r, tf, leq_view(st, pane, m, now)?))
     })?;
     let status = status(st, &[tf], None, now);
     Some(meter_leq_scene(&r, &v, &status, theme, size))
@@ -960,18 +1007,19 @@ pub fn meter_leq(
 /// whichever part has frames until both have (the windows' first second).
 pub fn spl_pane(
     st: &AppState,
+    pane: PaneId,
     keymap: &crate::keys::Keymap,
     theme: &Theme,
     size: Viewport,
     now: Now,
 ) -> Option<Scene> {
-    match st.view.spl.mode {
-        SplMode::Meter => spl(st, keymap, theme, size, now).map(|s| s.scene),
-        SplMode::Leq => leq(st, theme, size, now).map(|s| s.scene),
-        SplMode::Bands => band_leq(st, theme, size, now).map(|s| s.scene),
-        SplMode::MeterLeq => meter_leq(st, keymap, theme, size, now)
+    match st.view_for(pane).spl.mode {
+        SplMode::Meter => spl(st, pane, keymap, theme, size, now).map(|s| s.scene),
+        SplMode::Leq => leq(st, pane, theme, size, now).map(|s| s.scene),
+        SplMode::Bands => band_leq(st, pane, theme, size, now).map(|s| s.scene),
+        SplMode::MeterLeq => meter_leq(st, pane, keymap, theme, size, now)
             .map(|s| s.leq.scene)
-            .or_else(|| spl(st, keymap, theme, size, now).map(|s| s.scene))
-            .or_else(|| leq(st, theme, size, now).map(|s| s.scene)),
+            .or_else(|| spl(st, pane, keymap, theme, size, now).map(|s| s.scene))
+            .or_else(|| leq(st, pane, theme, size, now).map(|s| s.scene)),
     }
 }

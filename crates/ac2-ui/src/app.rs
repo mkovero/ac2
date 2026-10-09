@@ -87,9 +87,10 @@ pub struct StartupTiming {
     pub first_frame: Option<Duration>,
 }
 
-/// Cached pane scene: rebuilt when its pane's generation ([`App::pane_generation`]), size or
-/// theme changes.
+/// Cached pane scene: rebuilt when what the pane shows, its kind's generation
+/// ([`App::pane_generation`]), size or theme changes.
 pub(crate) struct CachedScene {
+    pub view: crate::state::View,
     pub generation: u64,
     pub size: egui::Vec2,
     pub theme: ThemeName,
@@ -143,7 +144,7 @@ pub struct App {
     pane_generations: HashMap<PaneKind, u64>,
     /// The time-driven texts the panes were last built with ([`ClockTexts`]).
     clock: ClockTexts,
-    pub(crate) scenes: HashMap<PaneKind, CachedScene>,
+    pub(crate) scenes: HashMap<crate::state::PaneId, CachedScene>,
     pub(crate) legend_drag: Option<LegendDrag>,
     /// Where the transfer legend's plate and grip were last drawn, on screen.
     pub(crate) legend_screen: Option<(egui::Rect, egui::Rect)>,
@@ -610,7 +611,7 @@ impl ClockTexts {
         }
         // A calibration's age in the SPL readout counts in minutes: ten-second steps keep
         // it within a sixth of its last digit.
-        if st.visible_panes().contains(&PaneKind::Spl) {
+        if st.visible_kinds().contains(&PaneKind::Spl) {
             texts.push(format!(
                 "{}",
                 (st.now_s / SLOW_REFRESH.as_secs_f64()).floor()

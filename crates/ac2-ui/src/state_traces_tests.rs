@@ -6,7 +6,7 @@ use super::*;
 fn panes_show_and_select_their_measurement() {
     let mut t = T::new();
     t.conn(mirror(four()));
-    let shown = |t: &T, p: PaneKind| t.st.pane_meas(p).map(|m| m.id.0);
+    let shown = |t: &T, p: PaneKind| t.st.kind_meas(p).map(|m| m.id.0);
     assert_eq!(t.st.selected, Some(MeasId(1)));
     assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
     assert_eq!(shown(&t, PaneKind::Ir), Some(1));
@@ -14,8 +14,8 @@ fn panes_show_and_select_their_measurement() {
     assert_eq!(shown(&t, PaneKind::Spl), None);
 
     // A click in a pane focuses it and selects what it shows.
-    t.st.update(Msg::FocusPane(PaneKind::Spectrum), &t.keys);
-    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
+    t.st.update(Msg::FocusPane(t.pane(PaneKind::Spectrum)), &t.keys);
+    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     assert_eq!(t.st.selected, Some(MeasId(2)));
     // N / Shift+N go through the focused pane's kind only: spectrum and RTA here.
     t.key("N");
@@ -24,7 +24,7 @@ fn panes_show_and_select_their_measurement() {
     t.key("N");
     assert_eq!(t.st.selected, Some(MeasId(2)));
     // The transfer pane kept its own measurement.
-    t.st.update(Msg::FocusPane(PaneKind::Transfer), &t.keys);
+    t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(1)));
     t.key("N");
     assert_eq!(t.st.selected, Some(MeasId(3)));
@@ -45,54 +45,66 @@ fn panes_show_and_select_their_measurement() {
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
     assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
 
-    // The title chip: the pane's list with what it shows highlighted; Down Enter shows the
-    // next one.
-    t.st.update(Msg::FocusPane(PaneKind::Transfer), &t.keys);
-    t.st.update(Msg::PaneMenu(PaneKind::Transfer), &t.keys);
+    // The title chip: the pane's list with what it shows highlighted; Up Enter shows the
+    // one before it.
+    t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
+    t.st.update(Msg::PaneMenu(t.pane(PaneKind::Transfer)), &t.keys);
     assert_eq!(
         t.st.overlay,
         Overlay::PaneMenu(PaneMenu {
-            pane: PaneKind::Transfer,
+            pane: t.pane(PaneKind::Transfer),
             index: 1
         })
     );
     // Keys other than the list's do nothing while it is open.
     assert!(t.key("X").is_empty());
-    t.key("Down");
+    t.key("Up");
     t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.st.selected, Some(MeasId(1)));
     assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
     // A click on the chip again closes the list; a pick by mouse shows it.
-    t.st.update(Msg::PaneMenu(PaneKind::Spectrum), &t.keys);
+    t.st.update(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
     assert!(
-        matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == PaneKind::Spectrum && m.index == 1)
+        matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == t.pane(PaneKind::Spectrum) && m.index == 1)
     );
-    t.st.update(Msg::PaneMenu(PaneKind::Spectrum), &t.keys);
+    t.st.update(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
     assert_eq!(t.st.overlay, Overlay::None);
-    t.st.update(Msg::PaneMenu(PaneKind::Spectrum), &t.keys);
-    t.st.update(Msg::PaneShow(PaneKind::Spectrum, MeasId(2)), &t.keys);
+    t.st.update(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Spectrum), PaneMenuRow::Meas(MeasId(2))),
+        &t.keys,
+    );
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
+    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     assert_eq!(t.st.selected, Some(MeasId(2)));
     // A measurement the pane cannot show is ignored.
-    t.st.update(Msg::PaneShow(PaneKind::Spectrum, MeasId(3)), &t.keys);
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Spectrum), PaneMenuRow::Meas(MeasId(3))),
+        &t.keys,
+    );
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(2));
     // Palette entry for the keyboard: the focused pane's list.
     t.st.update(Msg::Command(CommandId::PaneMeasurement), &t.keys);
-    assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == PaneKind::Spectrum));
+    assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == t.pane(PaneKind::Spectrum)));
     t.key("Esc");
     assert_eq!(t.st.overlay, Overlay::None);
-    // Nothing to list: said, nothing opens.
-    t.st.update(Msg::PaneMenu(PaneKind::Spl), &t.keys);
-    assert_eq!(t.st.overlay, Overlay::None);
-    assert!(t.last_toast().contains("no SPL measurements"));
+    // No measurement of its kind: the list offers only the other kinds.
+    let spl = t.pane(PaneKind::Spl);
+    t.st.update(Msg::PaneMenu(spl), &t.keys);
+    assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == spl && m.index == 0));
+    assert!(
+        t.st.pane_menu_rows(spl)
+            .iter()
+            .all(|(r, _)| matches!(r, PaneMenuRow::Kind(k) if *k != PaneKind::Spl))
+    );
+    t.key("Esc");
     t.key("Alt+4");
     t.key("N");
     assert!(t.last_toast().contains("no SPL measurements"));
 
     // A deleted measurement leaves its pane showing the next one that fits.
-    t.st.update(Msg::FocusPane(PaneKind::Transfer), &t.keys);
+    t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
     t.key("N");
     assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
     let mut s = four();
@@ -134,7 +146,8 @@ fn smoothing_set(r: &[Request]) -> (String, Option<Smoothing>) {
 fn smoothing_keys_step_the_pane_measurement() {
     let mut t = T::new();
     assert_eq!(
-        t.st.smoothing_caption(PaneKind::Transfer).as_deref(),
+        t.st.smoothing_caption(t.pane(PaneKind::Transfer))
+            .as_deref(),
         Some("smoothing off")
     );
     // K coarser: off → 1/48 of magnitude and phase, with the measurement's config
@@ -181,7 +194,8 @@ fn smoothing_keys_step_the_pane_measurement() {
     }
     t.conn(mirror(s.clone()));
     assert_eq!(
-        t.st.smoothing_caption(PaneKind::Transfer).as_deref(),
+        t.st.smoothing_caption(t.pane(PaneKind::Transfer))
+            .as_deref(),
         Some("smoothing 1/6 oct mag only")
     );
     assert_eq!(
@@ -209,7 +223,8 @@ fn smoothing_keys_step_the_pane_measurement() {
     // In the spectrum pane K acts on its spectrum: power smoothing, no phase to name.
     t.key("Alt+2");
     assert_eq!(
-        t.st.smoothing_caption(PaneKind::Spectrum).as_deref(),
+        t.st.smoothing_caption(t.pane(PaneKind::Spectrum))
+            .as_deref(),
         Some("smoothing off")
     );
     let r = t.key("K");
@@ -226,7 +241,8 @@ fn smoothing_keys_step_the_pane_measurement() {
     }
     // The transfer pane's caption still speaks of its own measurement.
     assert_eq!(
-        t.st.smoothing_caption(PaneKind::Transfer).as_deref(),
+        t.st.smoothing_caption(t.pane(PaneKind::Transfer))
+            .as_deref(),
         Some("smoothing 1/3 oct mag only")
     );
 }
@@ -242,7 +258,7 @@ fn smoothing_keys_explain_rta() {
     };
     t.conn(mirror(s));
     t.key("Alt+2");
-    assert_eq!(t.st.smoothing_caption(PaneKind::Spectrum), None);
+    assert_eq!(t.st.smoothing_caption(t.pane(PaneKind::Spectrum)), None);
     assert!(t.key("K").is_empty());
     assert!(
         t.last_toast().contains("already are fractional-octave"),
@@ -265,7 +281,8 @@ fn smoothing_keys_change_a_selected_slot() {
     t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
     assert_eq!(t.st.selected_trace, Some(TraceId(10)));
     assert_eq!(
-        t.st.smoothing_caption(PaneKind::Transfer).as_deref(),
+        t.st.smoothing_caption(t.pane(PaneKind::Transfer))
+            .as_deref(),
         Some("slot 3 (t10): smoothing off")
     );
     let r = t.key("K");
@@ -297,11 +314,13 @@ fn smoothing_keys_change_a_selected_slot() {
     // A spectrum slot is power-smoothed; its caption goes to the spectrum pane.
     t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
     assert_eq!(
-        t.st.smoothing_caption(PaneKind::Spectrum).as_deref(),
+        t.st.smoothing_caption(t.pane(PaneKind::Spectrum))
+            .as_deref(),
         Some("slot 4 (t11): smoothing off")
     );
     assert_eq!(
-        t.st.smoothing_caption(PaneKind::Transfer).as_deref(),
+        t.st.smoothing_caption(t.pane(PaneKind::Transfer))
+            .as_deref(),
         Some("smoothing off")
     );
     assert_eq!(
@@ -321,7 +340,7 @@ fn smoothing_keys_change_a_selected_slot() {
     assert_eq!(smoothing_set(&t.key("K")).0, "m1");
     // Selecting a measurement (list, pane click, N) deselects the slot.
     t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
-    t.st.update(Msg::FocusPane(PaneKind::Transfer), &t.keys);
+    t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
     assert_eq!(t.st.selected_trace, None);
     // A selected trace that goes away is forgotten.
     t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
@@ -589,7 +608,7 @@ fn trace_keys_act_on_the_selected_trace() {
     t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
     t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
     assert_eq!(
-        t.st.pane_caption(PaneKind::Transfer).as_deref(),
+        t.st.pane_caption(t.pane(PaneKind::Transfer)).as_deref(),
         Some("t15")
     );
     // A spectrum trace is not on the transfer pane: the keys act on the live measurement.
@@ -626,7 +645,7 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
     assert_eq!(t.st.selected_trace, Some(TraceId(14)));
     assert_eq!(shown(&t), Some(14));
     assert_eq!(
-        t.st.pane_caption(PaneKind::Transfer).as_deref(),
+        t.st.pane_caption(t.pane(PaneKind::Transfer)).as_deref(),
         Some("t14: smoothing off")
     );
     // Back to live: the sweep pane keeps the sweep selected last.
@@ -634,8 +653,8 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
     assert_eq!(t.st.selected_trace, None);
     assert_eq!(shown(&t), Some(14));
     // N on the sweep pane steps the sweeps and selects them for the transfer pane.
-    t.key("Alt+5");
-    assert_eq!(t.st.layout.focus, PaneKind::Distortion);
+    t.go(PaneKind::Distortion);
+    assert_eq!(t.focus_kind(), PaneKind::Distortion);
     t.key("N");
     assert_eq!(shown(&t), Some(15));
     assert_eq!(t.st.selected_trace, Some(TraceId(15)));
@@ -836,14 +855,14 @@ fn digits_show_and_hide_slots_alt_digits_focus_panes() {
     assert_eq!(edit.slot, Some(3));
     assert_eq!(what, "slot 3 (t9) hidden");
     // The pane did not change focus.
-    assert_eq!(t.st.layout.focus, PaneKind::Transfer);
+    assert_eq!(t.focus_kind(), PaneKind::Transfer);
     // An empty slot says how to fill it.
     assert!(t.key("5").is_empty());
     assert!(t.last_toast().contains("slot 5 is empty"));
     t.key("Alt+2");
-    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
+    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     t.key("Alt+1");
-    assert_eq!(t.st.layout.focus, PaneKind::Transfer);
+    assert_eq!(t.focus_kind(), PaneKind::Transfer);
 }
 
 #[test]
@@ -1279,7 +1298,7 @@ fn the_notification_log_keeps_the_last_ones_and_opens_from_the_palette() {
     assert_eq!(t.st.notices.len(), ac2_scene::toast::LOG_LEN);
     // The palette finds it by name and opens the window; the keys scroll it, Esc closes.
     let keys = t.keys.clone();
-    let scope = t.st.layout.focus.scope();
+    let scope = t.focus_kind().scope();
     let mut p = crate::palette::Palette::default();
     p.type_text("recent notif");
     assert_eq!(
@@ -1301,7 +1320,7 @@ fn warning_toasts_off_keeps_warnings_in_the_log_only() {
     let mut t = T::new();
     assert!(t.st.prefs.warning_toasts);
     let keys = t.keys.clone();
-    let scope = t.st.layout.focus.scope();
+    let scope = t.focus_kind().scope();
     let mut p = crate::palette::Palette::default();
     p.type_text("warning toasts");
     assert_eq!(
