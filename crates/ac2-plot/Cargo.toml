@@ -15,7 +15,7 @@ workspace = true
 ac2-scene = { path = "../ac2-scene" }
 bytemuck = { version = "1", features = ["derive"] }
 glyphon = "0.12"
-pollster = "0.4"
+pollster = "1.0"
 wgpu = "30"
 
 [dev-dependencies]
