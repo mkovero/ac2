@@ -879,9 +879,6 @@ mod leq;
 #[path = "state_layout_tests.rs"]
 mod layout;
 
-#[path = "state_follow_tests.rs"]
-mod follow;
-
 #[path = "state_tf_group_tests.rs"]
 mod tf_group;
 

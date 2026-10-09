@@ -160,6 +160,80 @@ fn tab_puts_the_next_measurement_in_the_focused_pane() {
     assert_eq!(others(&t), before);
 }
 
+/// Two transfer panes and a spectrum measurement: Tab, a list pick and the pane's own list
+/// each put what is picked in the focused pane, which changes kind to draw it; the focus
+/// stays and the other pane keeps what it shows.
+#[test]
+fn the_focused_pane_takes_a_measurement_of_any_kind() {
+    let mut t = empty();
+    t.conn(mirror(four()));
+    let a = t.st.layout.focus;
+    t.key("N");
+    let b = t.st.layout.focus;
+    assert_eq!(kinds(&t), [PaneKind::Transfer, PaneKind::Transfer]);
+    t.key("Alt+1");
+    t.key("Alt+2");
+    assert_eq!(t.st.layout.focus, b);
+    let a_shows = shows(&t, a);
+    assert!(a_shows.is_some());
+    let a_view = t.st.layout.views[&a];
+    let is_spectrum = |t: &T| t.st.layout.kind(b) == PaneKind::Spectrum;
+    for _ in 0..t.st.tree_meas_order().len() {
+        if is_spectrum(&t) {
+            break;
+        }
+        t.key("Tab");
+    }
+    assert!(is_spectrum(&t), "{:?}", kinds(&t));
+    assert_eq!(t.st.layout.focus, b);
+    assert!(matches!(shows(&t, b), Some(2 | 4)), "{:?}", shows(&t, b));
+    assert_eq!(t.st.layout.views[&a], a_view);
+    assert_eq!(shows(&t, a), a_shows);
+    // Tab on to a transfer measurement: the same pane turns back, the focus does not jump
+    // to the transfer pane already on screen.
+    for _ in 0..t.st.tree_meas_order().len() {
+        if !is_spectrum(&t) {
+            break;
+        }
+        t.key("Tab");
+    }
+    assert_eq!(kinds(&t), [PaneKind::Transfer, PaneKind::Transfer]);
+    assert_eq!(t.st.layout.focus, b);
+    assert!(matches!(shows(&t, b), Some(1 | 3)), "{:?}", shows(&t, b));
+    assert_eq!(t.st.layout.views[&a], a_view);
+    // A pick from the list.
+    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    assert_eq!(kinds(&t), [PaneKind::Transfer, PaneKind::Spectrum]);
+    assert_eq!((t.st.layout.focus, shows(&t, b)), (b, Some(2)));
+    assert_eq!(t.st.layout.views[&a], a_view);
+    // The pane's list has every measurement, in the tree's order; a transfer one picked
+    // there turns the spectrum pane back.
+    let rows: Vec<MeasId> =
+        t.st.pane_menu_rows(b)
+            .into_iter()
+            .filter_map(|(r, _)| match r {
+                PaneMenuRow::Meas(m) => Some(m),
+                PaneMenuRow::Kind(_) => None,
+            })
+            .collect();
+    assert_eq!(rows, t.st.tree_meas_order());
+    t.st.update(Msg::PaneMenu(b), &t.keys);
+    let Overlay::PaneMenu(menu) = t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    let want = rows.iter().position(|m| *m == MeasId(3)).expect("listed");
+    t.key("Home");
+    for _ in 0..want {
+        t.key("Down");
+    }
+    assert_eq!(menu.pane, b);
+    t.key("Enter");
+    assert_eq!(kinds(&t), [PaneKind::Transfer, PaneKind::Transfer]);
+    assert_eq!((t.st.layout.focus, shows(&t, b)), (b, Some(3)));
+    assert_eq!(t.st.selected, Some(MeasId(3)));
+    assert_eq!(t.st.layout.views[&a], a_view);
+}
+
 /// G steps the focused transfer pane through response → phase → coherence → impulse
 /// response → response; the phase and coherence views are that plot alone, and the IR view
 /// has the IR's keys (Shift+G its mode).
@@ -405,42 +479,6 @@ fn closing_focuses_the_neighbour_along_the_split() {
     t.key("Alt+1");
     t.key("Q");
     assert_eq!(t.st.layout.focus, c);
-}
-
-/// The axis of the split whose `a` is leaf `id`.
-fn axis_before(n: &PaneNode, id: PaneId) -> Option<Axis> {
-    match n {
-        PaneNode::Leaf(_) => None,
-        PaneNode::Split { axis, a, b, .. } => {
-            if **a == PaneNode::Leaf(id) {
-                Some(*axis)
-            } else {
-                axis_before(a, id).or_else(|| axis_before(b, id))
-            }
-        }
-    }
-}
-
-/// A split measures the focused pane as it is laid out on screen: with a pane left out
-/// (panes following the selection), the pane it gave its place to is tall and stacks.
-#[test]
-fn a_split_measures_the_pane_as_laid_out() {
-    let mut t = empty();
-    t.conn(mirror(four()));
-    t.st.pane_area = (1280.0, 760.0);
-    let a = t.st.layout.focus;
-    t.key("N");
-    let b = t.st.layout.focus;
-    t.key("N");
-    t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
-    assert_eq!(kinds(&t)[2], PaneKind::Spectrum);
-    t.st.update(Msg::FocusPane(a), &t.keys);
-    t.st.prefs.panes_follow = true;
-    t.st.update(Msg::FocusPane(b), &t.keys);
-    assert_eq!(t.st.laid_out_panes(), [a, b]);
-    t.key("N");
-    // In the whole tree `b` is 640 × 380 and would split side by side.
-    assert_eq!(axis_before(&t.st.layout.root, b), Some(Axis::Column));
 }
 
 /// N refuses a split whose halves would be too small to read, saying so, and every pane

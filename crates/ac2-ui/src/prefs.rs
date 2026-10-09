@@ -1,8 +1,7 @@
 //! UI preferences kept between runs (`ui.toml` in the ac2 config directory): the stimulus
 //! outputs last used on each output device (decision K4), the session dialog's choices
 //! per device — which inputs and outputs were in the session, their roles and the mic
-//! names — the Leq view's layout, whether the panes show their key hints, whether the
-//! layout keeps only the panes that draw the selection, how long the SPL
+//! names — the Leq view's layout, whether the panes show their key hints, how long the SPL
 //! meter's number holds a reading, the theme, the record toggle's time limit, the
 //! spectrograph's history span, the layout and window as last left: the pane tree, the
 //! focused pane, maximised or full screen, what each pane shows (its kind, measurement,
@@ -12,7 +11,6 @@
 //!
 //! ```toml
 //! key_hints = false
-//! panes_follow = true
 //! spl_hold_ms = 250
 //! theme = "light"
 //! record_limit_min = 90
@@ -238,9 +236,6 @@ pub struct UiPrefs {
     pub leq: LeqLayout,
     /// The focused pane's line of its most used keys (on until the operator turns it off).
     pub key_hints: bool,
-    /// Only the panes that draw the selected measurement (or trace) are laid out
-    /// ([`crate::state::AppState::visible_panes`]); off by default.
-    pub panes_follow: bool,
     /// Warnings and Leq limit alarms pop up in the corner (on until the operator turns it
     /// off); off, they go only to the notification log.
     pub warning_toasts: bool,
@@ -276,7 +271,6 @@ impl Default for UiPrefs {
             sessions: BTreeMap::new(),
             leq: LeqLayout::default(),
             key_hints: true,
-            panes_follow: false,
             warning_toasts: true,
             spl_hold_ms: None,
             layout: LayoutPrefs::default(),
@@ -327,14 +321,10 @@ impl Default for LegendPrefs {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct File {
     /// Written only when off (the default is on). First: plain values precede tables.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     key_hints: Option<bool>,
-    /// Written only when on (the default is off).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    panes_follow: Option<bool>,
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     warning_toasts: Option<bool>,
@@ -369,6 +359,10 @@ struct File {
     legend: Option<LegendsFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window: Option<WindowFile>,
+    /// Top-level keys this version does not know: logged and left out of the next save, so
+    /// one stale or mistyped setting costs only itself, never the rest of the file.
+    #[serde(flatten, skip_serializing)]
+    unknown: BTreeMap<String, toml::Value>,
 }
 
 /// Legends per pane; only the transfer pane's moves.
@@ -1024,6 +1018,9 @@ impl UiPrefs {
     /// Parses `ui.toml`.
     pub fn from_toml(text: &str) -> Result<Self, String> {
         let f: File = toml::from_str(text).map_err(|e| format!("ui.toml: {e}"))?;
+        for key in f.unknown.keys() {
+            tracing::warn!("ui.toml: unknown setting `{key}` ignored");
+        }
         let mut outputs = BTreeMap::new();
         for (device, chans) in f.stimulus_outputs {
             match zeros(&chans) {
@@ -1099,7 +1096,6 @@ impl UiPrefs {
             sessions,
             leq,
             key_hints: f.key_hints.unwrap_or(true),
-            panes_follow: f.panes_follow.unwrap_or(false),
             warning_toasts: f.warning_toasts.unwrap_or(true),
             spl_hold_ms: f.spl_hold_ms,
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
@@ -1127,7 +1123,7 @@ impl UiPrefs {
     pub fn to_toml(&self) -> String {
         let f = File {
             key_hints: (!self.key_hints).then_some(false),
-            panes_follow: self.panes_follow.then_some(true),
+            unknown: BTreeMap::new(),
             warning_toasts: (!self.warning_toasts).then_some(false),
             spl_hold_ms: self.spl_hold_ms,
             theme: self.theme.map(ThemeFile::of),
@@ -1251,16 +1247,10 @@ mod tests {
     }
 
     #[test]
-    fn panes_follow_round_trip() {
-        let mut p = UiPrefs::default();
-        assert!(!p.panes_follow);
-        // Off is the default and is not written.
-        assert!(!p.to_toml().contains("panes_follow"));
-        p.panes_follow = true;
-        let text = p.to_toml();
-        assert!(text.contains("panes_follow = true"), "{text}");
-        assert_eq!(UiPrefs::from_toml(&text), Ok(p));
-        assert!(UiPrefs::from_toml("panes_follow = 1\n").is_err());
+    fn an_unknown_setting_is_dropped_and_the_rest_kept() {
+        let p = UiPrefs::from_toml("key_hints = false\nno_such_setting = true\n").expect("loads");
+        assert!(!p.key_hints);
+        assert!(!p.to_toml().contains("no_such_setting"));
     }
 
     #[test]
@@ -1471,7 +1461,6 @@ mod tests {
     fn bad_files_are_reported() {
         assert!(UiPrefs::from_toml("[stimulus_outputs]\nx = [0]\n").is_err());
         assert!(UiPrefs::from_toml("[stimulus_outputs]\nx = []\n").is_err());
-        assert!(UiPrefs::from_toml("colour = 1\n").is_err());
         assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\nmics = [0]\n").is_err());
         assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\nmic_names = { a = \"M\" }\n").is_err());
         assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\ncolour = 1\n").is_err());

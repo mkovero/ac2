@@ -242,7 +242,6 @@ impl CeilingEdit {
 pub enum DisplayRow {
     Theme,
     KeyHints,
-    PanesFollow,
     WarningToasts,
     SplHold,
     LeqStyle,
@@ -256,10 +255,9 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 13] = [
+    pub const ALL: [DisplayRow; 12] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
-        DisplayRow::PanesFollow,
         DisplayRow::WarningToasts,
         DisplayRow::SplHold,
         DisplayRow::LeqStyle,
@@ -276,7 +274,6 @@ impl DisplayRow {
         match self {
             DisplayRow::Theme => "Theme",
             DisplayRow::KeyHints => "Key hints",
-            DisplayRow::PanesFollow => "Panes follow selection",
             DisplayRow::WarningToasts => "Warning toasts",
             DisplayRow::SplHold => "SPL number holds",
             DisplayRow::LeqStyle => "Leq windows",
@@ -363,7 +360,6 @@ pub fn warning_toasts_text(on: bool) -> &'static str {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DisplaySwitches {
     pub key_hints: bool,
-    pub panes_follow: bool,
     pub warning_toasts: bool,
 }
 
@@ -385,13 +381,6 @@ pub fn display_rows(
                         "shown under the focused pane".into()
                     } else {
                         "hidden".into()
-                    }
-                }
-                DisplayRow::PanesFollow => {
-                    if switches.panes_follow {
-                        "on: only the panes that draw the selected measurement".into()
-                    } else {
-                        "off: every pane".into()
                     }
                 }
                 DisplayRow::WarningToasts => warning_toasts_text(switches.warning_toasts).into(),
@@ -1055,7 +1044,6 @@ mod tests {
         };
         let switches = DisplaySwitches {
             key_hints: false,
-            panes_follow: false,
             warning_toasts: false,
         };
         let rows = display_rows(ThemeName::Light, switches, Some(500), 30, views);
@@ -1065,7 +1053,6 @@ mod tests {
             vec![
                 "light",
                 "hidden",
-                "off: every pane",
                 "off: warnings and Leq limit alarms go only to the notification log",
                 "0.50 s",
                 "tiles",

@@ -249,7 +249,6 @@ impl AppState {
                 self.prefs.key_hints = !self.prefs.key_hints;
                 self.prefs_dirty = true;
             }
-            DisplayRow::PanesFollow if d != 0 => self.toggle_panes_follow(),
             DisplayRow::WarningToasts if d != 0 => self.toggle_warning_toasts(),
             DisplayRow::SplHold if d != 0 => {
                 self.prefs.spl_hold_ms = step_hold(self.prefs.spl_hold_ms, d);

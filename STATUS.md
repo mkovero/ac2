@@ -15,7 +15,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - Newest feature: band Leq per 1/3-octave band (STM 545/2015), `docs/design/band-leq.md`;
   its open items are in `docs/design/backlog.md`.
 - Panes are a tiling tree (one pane at first start, N split, Q close, Tab puts the next
-  measurement in the focused pane, G steps every pane's views, IR a transfer view): `PLAN.md` §8.1, `docs/user-guide.md` *Panes: split, close…*.
+  measurement in the focused pane, G steps every pane's views, IR a transfer view); the
+  focused pane shows any measurement picked (Tab, the list, its chip's list), changing kind: `PLAN.md` §8.1, `docs/user-guide.md` *Panes: split, close…*.
 - Open hardware gates: duplex check (`ac2 selftest duplex`) and 1 h run on macOS/Windows, keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
 

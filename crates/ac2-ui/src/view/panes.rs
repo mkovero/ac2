@@ -250,7 +250,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
     // The stage view is the pane's picture alone: no frame, no title.
     let stage = app.state.stage_view();
     // Numbered in reading order, as Alt+1 … 9 count them.
-    let order = app.state.laid_out_panes();
+    let order = app.state.layout.panes();
     for (id, rect) in layout(&app.state, area) {
         let pane = app.state.layout.kind(id);
         let pane_title = app

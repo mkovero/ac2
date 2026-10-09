@@ -879,12 +879,11 @@ impl AppState {
 
     // ----- which pane a selection brings up ----------------------------------------------
 
-    /// After a stored trace was selected with the layout maximised, or with panes following
-    /// the selection: the focus goes to a pane that draws it (the transfer pane draws sweeps
+    /// After a stored trace was selected with the layout maximised: the focus goes to a pane that draws it (the transfer pane draws sweeps
     /// too; else a sweep's home is the sweep pane), the focused pane turning into one when
     /// none is on screen. The split layout keeps the focus: every pane is on screen.
     pub(super) fn reveal_trace(&mut self) {
-        if !self.layout.maximized && !self.prefs.panes_follow {
+        if !self.layout.maximized {
             return;
         }
         let Some(t) = self.selected_trace_meta().cloned() else {
@@ -894,8 +893,7 @@ impl AppState {
             return;
         }
         let p = home_pane(t.kind);
-        let laid = self.laid_out_panes();
-        match self.layout.lead(p).filter(|id| laid.contains(id)) {
+        match self.layout.lead(p) {
             Some(id) => self.layout.set_focus(id),
             None => {
                 let f = self.layout.focus;

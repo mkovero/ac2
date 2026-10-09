@@ -218,12 +218,6 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Space");
     assert!(!t.st.prefs.key_hints);
     t.key("Down");
-    assert_eq!(settings(&t).display, DisplayRow::PanesFollow);
-    t.key("Right");
-    assert!(t.st.prefs.panes_follow);
-    t.key("Left");
-    assert!(!t.st.prefs.panes_follow);
-    t.key("Down");
     assert_eq!(settings(&t).display, DisplayRow::WarningToasts);
     t.key("Right");
     assert!(!t.st.prefs.warning_toasts);

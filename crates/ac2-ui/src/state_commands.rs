@@ -234,27 +234,13 @@ impl AppState {
     /// focused pane shows it, turning into the kind of pane that measurement belongs in. The
     /// operator's eyes are on the focused pane: the measurement goes where they look, and
     /// every other pane keeps what it shows.
-    ///
-    /// With panes following the selection the layout itself answers the selection: the
-    /// pane of its kind worked in last takes it and the focus, and only with none in the
-    /// layout does the focused pane turn into one.
     pub(super) fn select_meas_row(&mut self, id: MeasId) {
         let Some(kind) = self.meas(id).map(|m| PaneKind::for_kind(&m.config.kind)) else {
             return;
         };
         let f = self.layout.focus;
-        let lead = self
-            .prefs
-            .panes_follow
-            .then(|| self.layout.lead(kind))
-            .flatten();
-        match lead {
-            Some(p) => self.layout.set_focus(p),
-            None => self.set_pane_kind(f, kind),
-        }
-        let p = self.layout.focus;
-        self.select_on(p, id);
-        self.follow_selection_toast();
+        self.set_pane_kind(f, kind);
+        self.select_on(f, id);
     }
 
     /// Tab / Shift+Tab: the next / previous measurement in the tree, from the selected one
@@ -287,7 +273,9 @@ impl AppState {
         self.tree_reveal = true;
     }
 
-    /// Pane `p` shows `id`; it gets the focus and `id` is selected.
+    /// Pane `p` shows `id`; it gets the focus and `id` is selected. A pane that cannot draw
+    /// it turns into the kind of pane it belongs in; one that can keeps its kind (a sweep
+    /// picked on the transfer pane has its runs drawn there).
     pub(super) fn pane_show(&mut self, p: PaneId, id: MeasId) {
         if matches!(self.overlay, Overlay::PaneMenu(_)) {
             self.overlay = Overlay::None;
@@ -295,8 +283,12 @@ impl AppState {
         let Some(m) = self.meas(id) else {
             return;
         };
-        if !self.layout.kind(p).shows(&m.config.kind) {
+        if self.layout.view(p).is_none() {
             return;
+        }
+        if !self.layout.kind(p).shows(&m.config.kind) {
+            let kind = PaneKind::for_kind(&m.config.kind);
+            self.set_pane_kind(p, kind);
         }
         self.layout.set_focus(p);
         self.select_on(p, id);
@@ -565,7 +557,6 @@ impl AppState {
                 }
             }
 
-            C::PanesFollow => self.toggle_panes_follow(),
             C::WarningToasts => self.toggle_warning_toasts(),
 
             C::StimulusArm => self.space(false, keymap, out),

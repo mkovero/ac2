@@ -108,11 +108,10 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     Ok(())
 }
 
-/// From an empty daemon: a transfer measurement and a spectrum; with panes following the
-/// selection (the palette turns it on), selecting each lays out only the panes drawing it,
-/// the focus on one of them; off again, every pane.
+/// From an empty daemon: a transfer measurement and a spectrum; what is picked goes to the
+/// focused pane whatever its kind, the focus staying and every other pane as it was.
 #[test]
-fn panes_follow_the_selection_from_an_empty_daemon() -> R {
+fn the_focused_pane_takes_any_pick_from_an_empty_daemon() -> R {
     use ac2_ui::state::PaneKind::{Spectrum, Spl, Transfer};
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
@@ -158,37 +157,30 @@ fn panes_follow_the_selection_from_an_empty_daemon() -> R {
         [Transfer, Spectrum, Transfer, Spl]
     );
 
-    d.key("Ctrl+K");
-    d.send(Msg::Text("panes follow".into()));
-    d.key("Enter");
-    assert!(d.st.prefs.panes_follow);
-    assert_eq!(crate::common::visible(&d.st), [Transfer, Transfer]);
+    // The second transfer pane focused: the spectrum picked from the list turns it into a
+    // spectrum pane, the transfer pane before it unchanged.
+    d.key("Alt+3");
+    let f = d.st.layout.focus;
     d.send(Msg::SelectMeas(sp));
-    assert_eq!(crate::common::visible(&d.st), [Spectrum]);
-    assert_eq!(d.st.layout.focus_kind(), Spectrum);
-    // Only the spectrum pane drawn: the transfer stream is not received.
-    assert!(!d.st.wanted_topics().contains(&Topic::Data {
-        meas: tf,
-        stream: Stream::Tf
-    }));
-    d.send(Msg::SelectMeas(tf));
-    assert_eq!(crate::common::visible(&d.st), [Transfer, Transfer]);
-    assert_eq!(d.st.layout.focus_kind(), Transfer);
-    // W maximises within the kept panes.
-    d.key("W");
-    assert_eq!(crate::common::visible(&d.st), [Transfer]);
-    d.send(Msg::SelectMeas(sp));
-    assert_eq!(crate::common::visible(&d.st), [Spectrum]);
-    d.send(Msg::Command(CommandId::MaximizePane));
-    d.send(Msg::Command(CommandId::MaximizePane));
-    assert!(!d.st.layout.maximized);
-
-    d.send(Msg::Command(CommandId::PanesFollow));
-    assert!(!d.st.prefs.panes_follow);
+    assert_eq!(
+        crate::common::visible(&d.st),
+        [Transfer, Spectrum, Spectrum, Spl]
+    );
+    assert_eq!(d.st.layout.focus, f);
+    assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(sp));
+    // Tab on to the transfer measurement: the same pane turns back.
+    for _ in 0..d.st.tree_meas_order().len() {
+        if d.st.layout.kind(f) == Transfer {
+            break;
+        }
+        d.key("Tab");
+    }
     assert_eq!(
         crate::common::visible(&d.st),
         [Transfer, Spectrum, Transfer, Spl]
     );
+    assert_eq!(d.st.layout.focus, f);
+    assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(tf));
     drop(d);
     drop(daemon);
     Ok(())

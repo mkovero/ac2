@@ -183,24 +183,6 @@ impl PaneNode {
             None => a.remove(id).or_else(|| b.remove(id)),
         }
     }
-
-    /// The tree with only the leaves `keep` takes, each removed leaf's sibling in its
-    /// parent's place; `None` when none is kept.
-    pub fn pruned(&self, keep: &dyn Fn(PaneId) -> bool) -> Option<PaneNode> {
-        match self {
-            PaneNode::Leaf(id) => keep(*id).then_some(self.clone()),
-            PaneNode::Split { axis, ratio, a, b } => match (a.pruned(keep), b.pruned(keep)) {
-                (Some(a), Some(b)) => Some(PaneNode::Split {
-                    axis: *axis,
-                    ratio: *ratio,
-                    a: Box::new(a),
-                    b: Box::new(b),
-                }),
-                (Some(x), None) | (None, Some(x)) => Some(x),
-                (None, None) => None,
-            },
-        }
-    }
 }
 
 /// What a transfer pane draws of its measurement (G steps through them in this order).
@@ -470,7 +452,7 @@ impl Layout {
 /// measures the focused pane's longer side in until the view says.
 pub const DEFAULT_PANE_AREA: (f32, f32) = (1280.0, 760.0);
 
-/// A row of a pane's list (its title chip, `PaneMeasurement`): a measurement it can show, or
+/// A row of a pane's list (its title chip, `PaneMeasurement`): a measurement to show, or
 /// another kind of pane to turn into.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaneMenuRow {
@@ -560,6 +542,20 @@ impl AppState {
             .any(|v| v.kind == PaneKind::Spectrum && v.modes.spectrum.spectrograph())
     }
 
+    /// The tree drawn now: the whole layout, or the focused pane alone when maximised.
+    pub fn visible_tree(&self) -> PaneNode {
+        if self.layout.maximized {
+            PaneNode::Leaf(self.layout.focus)
+        } else {
+            self.layout.root.clone()
+        }
+    }
+
+    /// Panes drawn now, in reading order.
+    pub fn visible_panes(&self) -> Vec<PaneId> {
+        self.visible_tree().reading_order()
+    }
+
     /// The kinds of the panes drawn now.
     pub fn visible_kinds(&self) -> Vec<PaneKind> {
         self.visible_panes()
@@ -570,16 +566,15 @@ impl AppState {
 
     /// Where the panes drawn now go inside `area`.
     pub fn pane_rects(&self, area: PaneRect, gap: f32) -> Vec<(PaneId, PaneRect)> {
-        self.visible_tree()
-            .map(|t| t.rects(area, gap))
-            .unwrap_or_default()
+        self.visible_tree().rects(area, gap)
     }
 
     /// The focused pane's rectangle in the area last drawn, as the tree is laid out there
     /// (a split un-maximises, so the laid-out tree is what shows after it).
     fn focused_rect(&self) -> PaneRect {
         let (w, h) = self.pane_area;
-        self.laid_out_tree()
+        self.layout
+            .root
             .rects(PaneRect::new(0.0, 0.0, w, h), 0.0)
             .into_iter()
             .find(|(id, _)| *id == self.layout.focus)
@@ -635,7 +630,7 @@ impl AppState {
 
     /// Alt+1 … 9: focuses the `n`-th pane drawn now, in reading order (1-based).
     pub(super) fn focus_nth(&mut self, n: usize) {
-        let panes = self.laid_out_panes();
+        let panes = self.layout.panes();
         match panes.get(n.saturating_sub(1)) {
             Some(id) => {
                 let id = *id;
@@ -659,23 +654,13 @@ impl AppState {
         if keep.is_some() {
             self.selected_trace = keep;
         }
-        // Panes following a selection the pane cannot draw (no measurement of its kind):
-        // the focus goes back to a kept pane, so say why the key did not move it.
-        if self.follow_set().is_some() && !self.laid_out_panes().contains(&id) {
-            self.toast(format!(
-                "{}: no {} measurement to select · panes follow selection",
-                p.title(),
-                p.what()
-            ));
-        }
     }
 
     /// Brings up a pane of kind `p` (a command about that kind: the sweep's views, the SPL
     /// modes): the one of that kind on screen worked in last, else the focused pane turns
     /// into one.
     pub(super) fn focus_kind(&mut self, p: PaneKind) {
-        let laid = self.laid_out_panes();
-        let id = match self.layout.lead(p).filter(|id| laid.contains(id)) {
+        let id = match self.layout.lead(p) {
             Some(id) => id,
             None => {
                 let f = self.layout.focus;
@@ -702,12 +687,17 @@ impl AppState {
         }
     }
 
-    /// The rows of pane `id`'s list: the measurements it can show, then the other kinds of
-    /// pane it can turn into.
+    /// The rows of pane `id`'s list: every measurement in the tree's order (the pane turns
+    /// into the kind a picked one needs), then the kinds of pane no measurement brings, so
+    /// a pane can still be readied for a measurement not yet made.
     pub fn pane_menu_rows(&self, id: PaneId) -> Vec<(PaneMenuRow, String)> {
         let kind = self.layout.kind(id);
-        let mut v: Vec<(PaneMenuRow, String)> = self
-            .pane_candidates(kind)
+        let meas: Vec<&Measurement> = self
+            .tree_meas_order()
+            .into_iter()
+            .filter_map(|m| self.meas(m))
+            .collect();
+        let mut v: Vec<(PaneMenuRow, String)> = meas
             .iter()
             .map(|m| {
                 let hidden = if self.meas_hidden(m) {
@@ -728,7 +718,7 @@ impl AppState {
         v.extend(
             PaneKind::ALL
                 .into_iter()
-                .filter(|k| *k != kind)
+                .filter(|k| *k != kind && !meas.iter().any(|m| k.shows(&m.config.kind)))
                 .map(|k| (PaneMenuRow::Kind(k), format!("pane  {}", k.title()))),
         );
         v

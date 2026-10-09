@@ -229,7 +229,6 @@ mod tests {
             ("new log", CommandId::SplNewLog),
             ("full screen", CommandId::Fullscreen),
             ("key hints", CommandId::KeyHints),
-            ("panes follow", CommandId::PanesFollow),
             ("warning toasts", CommandId::WarningToasts),
         ] {
             let r = search(q, &k, Scope::Transfer);

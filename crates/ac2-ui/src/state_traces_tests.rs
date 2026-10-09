@@ -46,18 +46,31 @@ fn panes_show_and_select_their_measurement() {
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
     assert_eq!(t.st.pane_meas(PaneId(1)).map(|m| m.id.0), Some(3));
 
-    // The title chip: the pane's list with what it shows highlighted; Up Enter shows the
-    // one before it.
+    // The title chip: the pane's list (every measurement, in the tree's order) with what it
+    // shows highlighted; the arrows and Enter show another.
+    let row_of = |t: &T, p: PaneId, id: u32| {
+        t.st.pane_menu_rows(p)
+            .iter()
+            .position(|(r, _)| *r == PaneMenuRow::Meas(MeasId(id)))
+            .expect("listed")
+    };
     let tf = PaneId(1);
     t.st.update(Msg::FocusPane(tf), &t.keys);
     t.st.update(Msg::PaneMenu(tf), &t.keys);
+    let at = row_of(&t, tf, 3);
     assert_eq!(
         t.st.overlay,
-        Overlay::PaneMenu(PaneMenu { pane: tf, index: 1 })
+        Overlay::PaneMenu(PaneMenu {
+            pane: tf,
+            index: at
+        })
     );
     // Keys other than the list's do nothing while it is open.
     assert!(t.key("X").is_empty());
-    t.key("Up");
+    let to = row_of(&t, tf, 1);
+    for _ in 0..at.abs_diff(to) {
+        t.key(if to < at { "Up" } else { "Down" });
+    }
     t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.st.selected, Some(MeasId(1)));
@@ -65,7 +78,7 @@ fn panes_show_and_select_their_measurement() {
     // A click on the chip again closes the list; a pick by mouse shows it.
     t.st.update(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
     assert!(
-        matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == t.pane(PaneKind::Spectrum) && m.index == 1)
+        matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == t.pane(PaneKind::Spectrum) && m.index == row_of(&t, m.pane, 4))
     );
     t.st.update(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
     assert_eq!(t.st.overlay, Overlay::None);
@@ -77,26 +90,36 @@ fn panes_show_and_select_their_measurement() {
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     assert_eq!(t.st.selected, Some(MeasId(2)));
-    // A measurement the pane cannot show is ignored.
-    t.st.update(
-        Msg::PanePick(t.pane(PaneKind::Spectrum), PaneMenuRow::Meas(MeasId(3))),
-        &t.keys,
-    );
+    // A measurement the pane cannot draw turns it into the kind that does, and back.
+    let sp = t.pane(PaneKind::Spectrum);
+    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(3))), &t.keys);
+    assert_eq!(t.st.layout.kind(sp), PaneKind::Transfer);
+    assert_eq!(t.st.pane_meas(sp).map(|m| m.id.0), Some(3));
+    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    assert_eq!(t.st.layout.kind(sp), PaneKind::Spectrum);
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(2));
     // Palette entry for the keyboard: the focused pane's list.
     t.st.update(Msg::Command(CommandId::PaneMeasurement), &t.keys);
     assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == t.pane(PaneKind::Spectrum)));
     t.key("Esc");
     assert_eq!(t.st.overlay, Overlay::None);
-    // No measurement of its kind: the list offers only the other kinds.
+    // No measurement of its kind: the list offers every measurement, then the kinds of pane
+    // none of them needs (a sweep pane here).
     let spl = t.pane(PaneKind::Spl);
     t.st.update(Msg::PaneMenu(spl), &t.keys);
     assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == spl && m.index == 0));
-    assert!(
+    let mut want: Vec<PaneMenuRow> =
+        t.st.tree_meas_order()
+            .into_iter()
+            .map(PaneMenuRow::Meas)
+            .collect();
+    want.push(PaneMenuRow::Kind(PaneKind::Distortion));
+    let rows: Vec<PaneMenuRow> =
         t.st.pane_menu_rows(spl)
-            .iter()
-            .all(|(r, _)| matches!(r, PaneMenuRow::Kind(k) if *k != PaneKind::Spl))
-    );
+            .into_iter()
+            .map(|(r, _)| r)
+            .collect();
+    assert_eq!(rows, want);
     t.key("Esc");
 
     // A deleted measurement leaves its pane showing the next one that fits.
