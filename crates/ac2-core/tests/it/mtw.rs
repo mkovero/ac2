@@ -180,7 +180,8 @@ fn wrap_deg(d: f64) -> f64 {
 // ---------------------------------------------------------------------------------------
 
 /// Single-stage configuration with the golden set's Welch parameters reproduces scipy's
-/// Pxx, Pyy, Pxy, H1 and coherence; frame columns equal the ratio of summed golden spectra.
+/// Pxx, Pyy, Pxy, H1 and coherence; frame columns hold H1 as the ratio of summed golden
+/// spectra and γ² as the Pxx-weighted mean of the golden per-bin coherence.
 #[test]
 fn golden_transfer_h1_biquad_delay() {
     let g = GoldenSet::load("transfer_h1_biquad_delay").expect("golden");
@@ -234,7 +235,11 @@ fn golden_transfer_h1_biquad_delay() {
         let sxy: Complex64 = pxy[b.lo..b.hi].iter().sum();
         let h = sxy / sxx;
         assert!((f.h1[i] - h).norm() <= 1e-9 * h.norm(), "col {i}");
-        let c = sxy.norm_sqr() / (sxx * syy);
+        let c = (b.lo..b.hi)
+            .map(|k| pxy[k].norm_sqr() / pyy[k])
+            .sum::<f64>()
+            / sxx;
+        assert!(syy > 0.0);
         assert!((f.coherence[i] - c).abs() <= 1e-9, "col {i}");
         checked += 1;
     }
@@ -501,7 +506,7 @@ fn loopback_pure_delays() {
     push_chunked(&mut m, 0, &x, &y);
     let f = m.frame();
     let lo = m.layout().crossovers[0].hi_hz;
-    let (meas, floor, _) = coherence_vs_model(&f, lo, 20_000.0, 0.0);
+    let (meas, floor, _) = coherence_vs_model(&m, &f, lo, 20_000.0, 0.0);
     println!("misaligned: mean γ² {meas:.3}, floor model {floor:.3}");
     assert!(
         meas < 1.3 * floor,
@@ -509,16 +514,155 @@ fn loopback_pure_delays() {
     );
 }
 
-/// Mean γ̂² over a frequency range, and the mean of the model expectation
-/// γ² + (1 − γ²)² / N_eff (first-order bias of the coherence estimator).
-fn coherence_vs_model(f: &MtwFrame, lo: f64, hi: f64, gamma2: f64) -> (f64, f64, usize) {
+fn engine_ppo(sr: f64, averaging: Averaging, ppo: u32) -> Mtw {
+    Mtw::new(MtwConfig {
+        sample_rate_hz: sr,
+        ladder: Ladder::Standard,
+        averaging,
+        depth: DepthPolicy::EqualConfidence,
+        grid: LogGrid::covering(ppo, 20.0, 20_000.0),
+        delay_samples: 0.0,
+    })
+    .expect("engine")
+}
+
+/// |ΣGxy|² / (ΣGxx·ΣGyy) over a single-stage column's bins: the column-sum estimator, which
+/// cancels wherever the transfer phase turns across the column.
+fn column_sum_coherence(m: &Mtw, b: &StageBins) -> f64 {
+    let sp = m.stage_spectra(b.stage).expect("spectra");
+    let xx: f64 = sp.gxx[b.lo..b.hi].iter().sum();
+    let yy: f64 = sp.gyy[b.lo..b.hi].iter().sum();
+    let xy: Complex64 = sp.gxy[b.lo..b.hi].iter().sum();
+    xy.norm_sqr() / (xx * yy)
+}
+
+/// `y = x` delayed by 1 ms, left in the path (alignment 0): the phase turns by 360°·f·1 ms,
+/// so across a 1/3-octave column above a few kHz it turns more than a full cycle. Every bin
+/// is still coherent (the window misalignment is 48 of 4096 samples), so γ² stays ≈ 1 on
+/// every valid column at 3 and at 48 points per octave. The column-sum estimator is shown
+/// to collapse on the same averages, so the test is sensitive to the definition.
+#[test]
+fn coherence_does_not_drop_with_phase_turning_across_a_column() {
+    let sr = 48_000.0;
+    let delay = 48;
+    for ppo in [3u32, 12, 48] {
+        let mut m = engine_ppo(sr, Averaging::Fifo { blocks: 4 }, ppo);
+        let n = samples_to_fill(&m);
+        let lead = 1_000;
+        let s = Noise(31).vec(n + 2 * lead, 0.2);
+        let x = s[lead..lead + n].to_vec();
+        let y = delayed(&s, lead, delay, n);
+        push_chunked(&mut m, 0, &x, &y);
+        let f = m.frame();
+        let (mut min_coh, mut min_sum, mut count) = (1.0f64, 1.0f64, 0);
+        for i in valid(&f) {
+            min_coh = min_coh.min(f.coherence[i]);
+            if let ColumnSource::Stage(b) = f.columns[i].source {
+                min_sum = min_sum.min(column_sum_coherence(&m, &b));
+            }
+            count += 1;
+        }
+        println!("{ppo} ppo: {count} cols, γ² min {min_coh:.4}, column-sum min {min_sum:.4}");
+        assert!(count > 9 * ppo as usize, "{count}");
+        assert!(min_coh > 0.97, "{ppo} ppo: γ² {min_coh}");
+        if ppo == 3 {
+            assert!(
+                min_sum < 0.2,
+                "column-sum estimator {min_sum}: test not sensitive"
+            );
+        }
+    }
+}
+
+/// `y = x + n` with uncorrelated noise at 0 dB SNR (γ² = 0.5) and a 1 ms delay left in the
+/// path: the mean γ² over each stage's band, pooled over four noise seeds, matches
+/// γ² + (1 − γ²)²/N_eff at 3 and at 48 points per octave alike, so coherence does not depend
+/// on resolution. A 3-ppo band holds only 5–9 columns, hence the pooling.
+#[test]
+fn partial_coherence_is_independent_of_resolution() {
+    let sr = 48_000.0;
+    let gamma2 = 0.5;
+    let delay = 48;
+    let seeds = [41u64, 141, 241, 341];
+    let mut by_ppo = Vec::new();
+    for ppo in [3u32, 48] {
+        // [band] → (Σ measured, Σ model) over seeds.
+        let mut bands = [(0.0, 0.0); 3];
+        for seed in seeds {
+            let mut m = engine_ppo(sr, Averaging::Fifo { blocks: 16 }, ppo);
+            let n = samples_to_fill(&m);
+            let lead = 1_000;
+            let s = Noise(seed).vec(n + 2 * lead, 0.2);
+            let x = s[lead..lead + n].to_vec();
+            let e = Noise(seed + 1).vec(n, 0.2);
+            let y: Vec<f64> = delayed(&s, lead, delay, n)
+                .iter()
+                .zip(&e)
+                .map(|(a, b)| a + b)
+                .collect();
+            push_chunked(&mut m, 0, &x, &y);
+            let f = m.frame();
+            let l = m.layout();
+            let ranges = [
+                (25.0, l.crossovers[1].lo_hz),
+                (l.crossovers[1].hi_hz, l.crossovers[0].lo_hz),
+                (l.crossovers[0].hi_hz, 20_000.0),
+            ];
+            for (acc, (lo, hi)) in bands.iter_mut().zip(ranges) {
+                let (meas, model, cols) = coherence_vs_model(&m, &f, lo, hi, gamma2);
+                assert!(cols > 0);
+                acc.0 += meas / seeds.len() as f64;
+                acc.1 += model / seeds.len() as f64;
+            }
+        }
+        for (b, (meas, model)) in bands.iter().enumerate() {
+            println!("{ppo} ppo band {b}: γ² {meas:.4} model {model:.4}");
+            assert!(
+                (meas - model).abs() < 0.03,
+                "{ppo} ppo band {b}: {meas} vs {model}"
+            );
+        }
+        by_ppo.push(bands);
+    }
+    for ((coarse, _), (fine, _)) in by_ppo[0].iter().zip(&by_ppo[1]) {
+        assert!(
+            (coarse - fine).abs() < 0.03,
+            "3 ppo {coarse} vs 48 ppo {fine}"
+        );
+    }
+}
+
+/// Mean γ̂² over a frequency range, and the mean of the model expectation of each column.
+///
+/// One bin of N_eff averages reads γ² + (1 − γ²)²/N_eff (first-order bias of the
+/// coherence estimator). The column's Gxx-weighted mean over K independent bins tends to
+/// γ² + (1 − γ²)/N_eff as K grows: a bin whose reference read strong also reads more
+/// coherent, and the weight favours it. A Monte Carlo of the estimator puts K bins
+/// 1 − 1/K of the way between the two. K is the model's N_eff over the column's bins
+/// divided by its N_eff per bin, as adjacent Hann bins are partly correlated.
+fn coherence_vs_model(m: &Mtw, f: &MtwFrame, lo: f64, hi: f64, gamma2: f64) -> (f64, f64, usize) {
+    let stage_model = |b: &StageBins| {
+        let n = m.eff_avg(b.stage, 1);
+        let k = m.eff_avg(b.stage, b.count()) / n;
+        let one = gamma2 + (1.0 - gamma2).powi(2) / n;
+        let many = gamma2 + (1.0 - gamma2) / n;
+        one + (1.0 - 1.0 / k) * (many - one)
+    };
     let idx: Vec<usize> = valid(f)
         .filter(|&i| f.freq_hz[i] >= lo && f.freq_hz[i] < hi)
         .collect();
     let meas = idx.iter().map(|&i| f.coherence[i]).sum::<f64>() / idx.len() as f64;
     let model = idx
         .iter()
-        .map(|&i| gamma2 + (1.0 - gamma2).powi(2) / f.eff_avg[i])
+        .map(|&i| match &f.columns[i].source {
+            ColumnSource::Stage(b) => stage_model(b),
+            ColumnSource::Blend {
+                deep,
+                shallow,
+                shallow_weight: w,
+            } => (1.0 - w) * stage_model(deep) + w * stage_model(shallow),
+            ColumnSource::None => f64::NAN,
+        })
         .sum::<f64>()
         / idx.len() as f64;
     (meas, model, idx.len())
@@ -582,7 +726,7 @@ fn partial_coherence_matches_theory_and_large_delay_does_not_bias_it() {
             (l.crossovers[1].hi_hz, l.crossovers[0].lo_hz),
             (l.crossovers[0].hi_hz, 20_000.0),
         ] {
-            let (meas, model, cols) = coherence_vs_model(&f, lo, hi, gamma2);
+            let (meas, model, cols) = coherence_vs_model(&m, &f, lo, hi, gamma2);
             println!("{lo:.0}-{hi:.0} Hz: γ² {meas:.4} model {model:.4} ({cols} cols)");
             assert!((meas - model).abs() < 0.03, "{lo}-{hi}: {meas} vs {model}");
         }
@@ -614,7 +758,8 @@ fn partial_coherence_matches_theory_and_large_delay_does_not_bias_it() {
 
 /// Uncorrelated inputs: mean γ̂² equals 1/N_eff of the reported model, for FIFO and
 /// exponential averaging, pooled over four noise seeds. Checked per bin of each stage
-/// (block overlap and weighting) and per display column (adding adjacent-bin correlation).
+/// (block overlap and weighting) and per display column (a mean of per-bin γ̂², which keeps
+/// the per-bin floor however many bins the column holds).
 #[test]
 fn effective_averages_model_predicts_coherence_floor() {
     check_coherence_floor(DepthPolicy::EqualConfidence);
@@ -687,7 +832,7 @@ fn check_coherence_floor(depth: DepthPolicy) {
                 (l.crossovers[0].hi_hz, 20_000.0),
             ];
             for (acc, (lo, hi)) in per_col.iter_mut().zip(bands) {
-                let (meas, model, _) = coherence_vs_model(&f, lo, hi, 0.0);
+                let (meas, model, _) = coherence_vs_model(&m, &f, lo, hi, 0.0);
                 acc.0 += meas / seeds.len() as f64;
                 acc.1 += model / seeds.len() as f64;
             }
@@ -718,8 +863,10 @@ fn check_coherence_floor(depth: DepthPolicy) {
 
 /// White noise with γ² = 0.5: the mean coherence half an octave either side of each
 /// crossover, pooled over four noise seeds, differs by no more than 0.04, and the blend
-/// sits between its neighbours within the same tolerance. The residual step expected from
-/// the bin count dropping across the crossover is ≈ 0.25·(1/N_above − 1/N_below) ≈ 0.01.
+/// sits between its neighbours within the same tolerance. Equal confidence gives every
+/// stage the same per-bin N_eff, so the per-bin bias does not step; what remains is the Gxx
+/// weight's bias, which grows with the bins per column, and the deeper stage's columns hold
+/// more bins than the shallower stage's just above (model ≈ −0.005, measured ≈ −0.017).
 #[test]
 fn no_coherence_step_at_crossovers() {
     let sr = 48_000.0;
@@ -736,9 +883,9 @@ fn no_coherence_step_at_crossovers() {
         push_chunked(&mut m, 0, &x, &y);
         let f = m.frame();
         for (a, c) in acc.iter_mut().zip(&m.layout().crossovers) {
-            let (below, mb, _) = coherence_vs_model(&f, c.lo_hz / half, c.lo_hz, 0.5);
-            let (inside, _, _) = coherence_vs_model(&f, c.lo_hz, c.hi_hz, 0.5);
-            let (above, ma, _) = coherence_vs_model(&f, c.hi_hz, c.hi_hz * half, 0.5);
+            let (below, mb, _) = coherence_vs_model(&m, &f, c.lo_hz / half, c.lo_hz, 0.5);
+            let (inside, _, _) = coherence_vs_model(&m, &f, c.lo_hz, c.hi_hz, 0.5);
+            let (above, ma, _) = coherence_vs_model(&m, &f, c.hi_hz, c.hi_hz * half, 0.5);
             for (s, v) in a.iter_mut().zip([below, inside, above, mb, ma]) {
                 *s += v / seeds.len() as f64;
             }

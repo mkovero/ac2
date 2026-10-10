@@ -267,7 +267,9 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
   resolution, column aggregation or non-stationary signals. Effective N is reported per
   column and labelled as a model value; crossover behaviour is validated by test, not assumed.
 - H1 = Gxy/Gxx, γ² = |Gxy|²/(Gxx·Gyy). Time averaging is over spectra only, never H,
-  γ² or dB. Within a display column sum cross-spectra, divide once.
+  γ² or dB. Within a display column H1 sums cross-spectra and divides once; γ² is formed
+  per bin and averaged over the column weighted by Gxx (a complex sum cancels where the
+  phase turns across the column, so a column-sum γ² would fall with column width).
 - Crossovers: H1 blended complex over 1/3 oct; γ² in the overlap is a labelled display
   blend of per-stage estimates, not a new estimator.
 - Stage served band ≤ 0.45 × its rate. Grid 48 ppo base-2; columns thin rather than

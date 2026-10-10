@@ -392,6 +392,8 @@ steps them), and the **transfer stack** lays the three out one above the other:
   another client, the CLI or a restored session leave the panes as they are.
 
 - **Coherence (γ²)** is how much of the measured energy is explained by the reference. It is
+  worked out per FFT bin and averaged over each column, so it does not drop at a coarser
+  resolution or where the phase turns quickly (a delay or reflections). It is
   drawn as the transparency of the traces, as its own curve, or as a mask that blanks the
   traces where γ² is below a chosen threshold (`B` cycles through off, 0.3, 0.5, 0.7, 0.9).
 - **Averaging** accumulates the cross- and auto-spectra; **R** resets it. To keep a result,

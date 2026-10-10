@@ -23,11 +23,17 @@
 //!    model effective averages ([`estimator::OverlapModel`]) by default; [`DepthPolicy::FastLf`]
 //!    instead caps how long the decimated stages average, trading a higher (reported)
 //!    low-frequency coherence floor for faster settling.
-//! 5. **Columns** on the shared [`LogGrid`]: each column sums the cross- and auto-spectra of
-//!    the bins whose centres fall inside it and divides once. Columns that contain no bin are
-//!    thinned (NaN with a reason), never interpolated. Across each crossover H1 is blended
-//!    complex over 1/3 octave; γ² there is a labelled display blend of the two stages'
-//!    estimates.
+//! 5. **Columns** on the shared [`LogGrid`]: H1 sums the cross- and reference auto-spectra
+//!    of the bins whose centres fall inside the column and divides once. γ² is formed per
+//!    bin, γ²ₖ = |Gxyₖ|² / (Gxxₖ·Gyyₖ), and averaged over the column's bins weighted by
+//!    Gxxₖ. A complex sum of Gxy over a column cancels wherever the transfer phase turns
+//!    across it (a delay left in the path, reflections), so |ΣGxy|²/(ΣGxx·ΣGyy) would fall
+//!    with column width even when every bin is fully coherent. Per bin, γ² measures only
+//!    noise and nonlinearity, so the column value does not depend on resolution; the Gxx
+//!    weight keeps bins the stimulus does not excite from diluting it. Columns that contain
+//!    no bin are thinned (NaN with a reason), never interpolated. Across each crossover H1
+//!    is blended complex over 1/3 octave; γ² there is a labelled display blend of the two
+//!    stages' estimates.
 //!
 //! Absolute levels never come from this engine: decimated stages carry the decimator's
 //! response, which cancels in H1 and γ² but not in Gxx or Gyy.
@@ -277,11 +283,17 @@ pub struct MtwFrame {
     pub magnitude_db: Vec<f64>,
     /// arg H1 in degrees, wrapped to (−180, 180].
     pub phase_deg: Vec<f64>,
-    /// γ² = |ΣGxy|² / (ΣGxx·ΣGyy); a display blend inside crossovers.
+    /// γ² = Σₖ Gxxₖ·γ²ₖ / Σₖ Gxxₖ over the column's bins, with per-bin
+    /// γ²ₖ = |Gxyₖ|² / (Gxxₖ·Gyyₖ) (module doc, item 5); a display blend inside crossovers.
     pub coherence: Vec<f64>,
-    /// Model effective number of averages (stationary white-noise model of block overlap,
-    /// FIFO/exponential weights and adjacent-bin correlation). For blends, the smaller of
-    /// the two stages' values. A model value, not a measurement.
+    /// Model effective number of averages per bin of the serving stage (stationary
+    /// white-noise model of block overlap and FIFO/exponential weights). It sets γ²'s
+    /// estimator bias: each γ²ₖ reads ≈ (1 − γ²)²/N_eff high, and averaging over the column's
+    /// bins lowers the variance of γ² but not that bias. The Gxx weight adds some: a bin
+    /// whose reference happened to read strong also reads more coherent, so a column of many
+    /// independent bins tends to γ² + (1 − γ²)/N_eff. On uncorrelated input both read
+    /// 1/N_eff. For blends, the smaller of the two stages' values. A model value, not a
+    /// measurement.
     pub eff_avg: Vec<f64>,
     /// Validity and source per column.
     pub columns: Vec<ColumnInfo>,
@@ -356,18 +368,17 @@ pub struct Mtw {
     dec_y: Vec<f64>,
     deint_r: Vec<f64>,
     deint_m: Vec<f64>,
-    /// Per stage: model effective averages already worked out for the stage's current
-    /// block count, by column width in bins.
+    /// Per stage: per-bin model effective averages already worked out for the stage's
+    /// current block count.
     neff_memo: Vec<NeffMemo>,
 }
 
-/// The effective-averages model costs a few dozen `powf` per column, yet it depends only on
-/// the stage's block count and the column's width in bins, and a stage serves many columns
-/// of the same width: one evaluation per width per new block suffices.
+/// The effective-averages model costs a few dozen `powf`, yet it depends only on the stage's
+/// block count, and a stage serves many columns: one evaluation per new block suffices.
 #[derive(Debug, Default)]
 struct NeffMemo {
     held: u64,
-    by_bins: Vec<(usize, f64)>,
+    neff: Option<f64>,
 }
 
 impl Mtw {
@@ -838,7 +849,7 @@ impl Mtw {
             let held = s.est.held();
             if memo.held != held {
                 memo.held = held;
-                memo.by_bins.clear();
+                memo.neff = None;
             }
         }
         for i in 0..n {
@@ -891,28 +902,31 @@ impl Mtw {
             return Err(Validity::Settling);
         }
         let (sums, _) = s.est.sums();
-        let xx: f64 = sums.xx[b.lo..b.hi].iter().sum();
-        let yy: f64 = sums.yy[b.lo..b.hi].iter().sum();
-        let xy: Complex64 = sums.xy[b.lo..b.hi].iter().sum();
+        let (mut xx, mut yy, mut xy) = (0.0, 0.0, Complex64::new(0.0, 0.0));
+        // Σₖ Gxxₖ·γ²ₖ. The sums' common density scale cancels against Σ Gxx.
+        let mut xx_coh = 0.0;
+        for k in b.lo..b.hi {
+            let (bxx, byy, bxy) = (sums.xx[k], sums.yy[k], sums.xy[k]);
+            xx += bxx;
+            yy += byy;
+            xy += bxy;
+            // A bin without reference or measurement energy holds no coherent power
+            // (|Gxy|² ≤ Gxx·Gyy); rounding can push γ²ₖ a hair above 1.
+            if bxx > 0.0 && byy > 0.0 {
+                xx_coh += bxx * (bxy.norm_sqr() / (bxx * byy)).min(1.0);
+            }
+        }
         if !(xx > 0.0 && xx.is_finite()) {
             return Err(Validity::NoReference);
         }
         if !(yy > 0.0 && yy.is_finite()) {
             return Err(Validity::NoMeasurement);
         }
-        let bins = b.count();
-        let memo = &mut self.neff_memo[b.stage].by_bins;
-        let eff_avg = match memo.iter().find(|(k, _)| *k == bins) {
-            Some(&(_, v)) => v,
-            None => {
-                let v = s.est.neff(bins);
-                memo.push((bins, v));
-                v
-            }
-        };
+        let memo = &mut self.neff_memo[b.stage];
+        let eff_avg = *memo.neff.get_or_insert_with(|| s.est.neff(1));
         Ok(ColumnEstimate {
             h1: xy / xx,
-            coherence: (xy.norm_sqr() / (xx * yy)).min(1.0),
+            coherence: (xx_coh / xx).min(1.0),
             eff_avg,
         })
     }
