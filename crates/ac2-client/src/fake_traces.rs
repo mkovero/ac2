@@ -580,6 +580,10 @@ impl Shared {
                     .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
                 Ok((n, p))
             }
+            SessionRef::Upload { .. } => Err(err(
+                ErrorCode::Unsupported,
+                "the fake does not take session uploads",
+            )),
         }
     }
 
@@ -640,7 +644,61 @@ impl Shared {
             traces,
         };
         let m = session::save(&dir, &s).map_err(session_err)?;
+        self.working_clean(origin(r, &dir), m.saved_at);
         Ok(ReplyBody::SessionFile(Self::file_info(name, &dir, &m)))
+    }
+
+    /// `conflict` / `unsaved_changes` unless `discard` or clean.
+    pub(super) fn guard_unsaved(&self, discard: bool) -> Result<(), ProtoError> {
+        if discard || !self.state.working.dirty {
+            return Ok(());
+        }
+        Err(ProtoError {
+            code: ErrorCode::Conflict,
+            msg: "unsaved changes".into(),
+            detail: Some(ErrorDetail::UnsavedChanges {
+                origin: self.state.working.origin.clone(),
+            }),
+        })
+    }
+
+    fn working_clean(&mut self, origin: Option<SessionOrigin>, saved_at: WallNs) {
+        let w = WorkingSession {
+            origin,
+            dirty: false,
+            saved_at: Some(saved_at),
+            recover: None,
+        };
+        self.commit(Change::Working(w));
+    }
+
+    /// `file.new`: every measurement and trace deleted, untitled.
+    pub(super) fn file_new(&mut self, discard: bool) -> Result<ReplyBody, ProtoError> {
+        self.guard_unsaved(discard)?;
+        self.marking = false;
+        for id in self
+            .state
+            .measurements
+            .iter()
+            .map(|m| m.id)
+            .collect::<Vec<_>>()
+        {
+            if self.state.spl_logs.iter().any(|l| l.meas == id) {
+                self.commit(Change::SplLog(Patch::Deleted(id)));
+            }
+            self.commit(Change::Measurement(Patch::Deleted(id)));
+        }
+        for id in self.state.traces.iter().map(|t| t.id).collect::<Vec<_>>() {
+            self.commit(Change::Trace(Patch::Deleted(id)));
+        }
+        self.marking = true;
+        self.commit(Change::Working(WorkingSession {
+            origin: None,
+            dirty: false,
+            saved_at: None,
+            recover: None,
+        }));
+        Ok(ReplyBody::Ack { rev: self.rev })
     }
 
     pub(super) fn file_load(
@@ -651,6 +709,7 @@ impl Shared {
         let (name, dir) = self.session_path(r)?;
         let m = session::read_manifest(&dir).map_err(session_err)?;
         let s = session::load(&dir).map_err(session_err)?;
+        self.marking = false;
         self.lease = None;
         self.state.generator.owner = None;
         self.state.generator.armed = false;
@@ -744,6 +803,8 @@ impl Shared {
             self.traces.data.insert(t.meta.id, (t.grid, t.columns));
             self.commit(Change::Trace(Patch::Set(t.meta)));
         }
+        self.marking = true;
+        self.working_clean(origin(r, &dir), m.saved_at);
         Ok(ReplyBody::SessionFile(Self::file_info(name, &dir, &m)))
     }
 
@@ -950,4 +1011,14 @@ fn synthetic_room(f2: f64) -> RoomAcoustics {
         third: Vec::new(),
         span_end: Seconds(0.99),
     }
+}
+
+/// The origin a save to, or load from, `r` gives the working state.
+fn origin(r: &SessionRef, dir: &std::path::Path) -> Option<SessionOrigin> {
+    Some(match r {
+        SessionRef::Name { name } => SessionOrigin::Name { name: name.clone() },
+        _ => SessionOrigin::Path {
+            path: dir.to_string_lossy().into_owned(),
+        },
+    })
 }

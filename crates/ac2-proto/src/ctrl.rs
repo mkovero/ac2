@@ -17,12 +17,12 @@ use crate::model::{
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, Lease, LoopbackDetection,
     MeasConfig, Measurement, Mic, MicCurveId, OutputSetup, OwnedTraces, Preview, RecordRequest,
     RecordingFile, RecordingRef, RecordingRun, ReplayPace, ServerInfo, Session, SessionConfig,
-    SessionFile, SessionRef, SplHistory, SplLogPage, SplLogWhich, SweepRun, TraceData, TraceEdit,
-    TraceMeta,
+    SessionFile, SessionOrigin, SessionRef, SplHistory, SplLogPage, SplLogWhich, SweepRun,
+    TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, RequestId,
-    Rev, Seconds, SessionEpoch, TraceId, Volts,
+    Rev, Seconds, SessionEpoch, TraceId, TransferId, Volts, WallNs,
 };
 
 /// Largest ctrl message accepted, bytes (trace import / export bodies included).
@@ -534,22 +534,104 @@ pub enum Command {
         /// Grid.
         grid_id: GridId,
     },
-    /// Save measurements and traces to a session directory on the daemon host.
+    /// Save measurements and traces to a session on the daemon host; the working state then
+    /// belongs to it, with no unsaved changes. An existing session other than the working
+    /// state's own is refused (`conflict`, `session_exists`) unless `overwrite`.
     #[serde(rename = "file.save")]
     FileSave {
-        /// Where.
+        /// Where (`name` or `path`).
         session: SessionRef,
+        /// Replace an existing session the working state does not belong to.
+        overwrite: bool,
     },
     /// Replace measurements and traces with a saved session; always comes up disarmed with
-    /// no generator owner, in a new session epoch.
+    /// no generator owner, in a new session epoch. Refused (`conflict`, `unsaved_changes`)
+    /// while the working state has unsaved changes, unless `discard`; what it replaces is
+    /// then kept for `file.recover`.
     #[serde(rename = "file.load")]
     FileLoad {
+        /// Which.
+        session: SessionRef,
+        /// Replace unsaved changes.
+        discard: bool,
+    },
+    /// Start an untitled session: every measurement and trace deleted (the audio session
+    /// stays open). Guarded as `file.load`.
+    #[serde(rename = "file.new")]
+    FileNew {
+        /// Replace unsaved changes.
+        discard: bool,
+    },
+    /// Swap the working state with the one the last `file.new` / `file.load` replaced
+    /// (`working.recover`), disarmed as `file.load`.
+    #[serde(rename = "file.recover")]
+    FileRecover,
+    /// Import the trace files of a session — one of another format version too — into the
+    /// working state through `trace.import`'s reader, file by file.
+    #[serde(rename = "file.salvage")]
+    FileSalvage {
         /// Which.
         session: SessionRef,
     },
     /// Sessions in the daemon's session directory.
     #[serde(rename = "file.list")]
     FileList,
+    /// Start uploading a session archive (`.ac2session`) of at most 64 MiB.
+    #[serde(rename = "file.upload_begin")]
+    FileUploadBegin {
+        /// The archive (or session folder) as the client names it: its path on the
+        /// client's machine. A loaded upload's `working.origin` is `client` {this}.
+        file: String,
+        /// Size, bytes.
+        bytes: u64,
+        /// SHA-256 of the whole archive, hex; checked when the last byte arrives.
+        sha256: String,
+    },
+    /// The next chunk of an upload, in order.
+    #[serde(rename = "file.upload_chunk")]
+    FileUploadChunk {
+        /// Upload.
+        transfer: TransferId,
+        /// Where it starts: the bytes received so far.
+        offset: u64,
+        /// At most `chunk_bytes`.
+        data: Blob,
+    },
+    /// Store a complete upload as a session in the daemon's session directory, without
+    /// opening it. An existing one is refused (`session_exists`) unless `overwrite`.
+    #[serde(rename = "file.import")]
+    FileImport {
+        /// Upload.
+        transfer: TransferId,
+        /// Session name.
+        name: String,
+        /// Replace an existing session.
+        overwrite: bool,
+    },
+    /// Pack a session archive to download: the working state (`None`) or a saved session.
+    #[serde(rename = "file.download_begin")]
+    FileDownloadBegin {
+        /// Which (`name` or `path`); `None`: the working state.
+        session: Option<SessionRef>,
+    },
+    /// A chunk of a download: `chunk_bytes` from `offset` (less at the end).
+    #[serde(rename = "file.download_chunk")]
+    FileDownloadChunk {
+        /// Download.
+        transfer: TransferId,
+        /// Where it starts.
+        offset: u64,
+    },
+    /// Done with a download. `saved_as`: the client wrote the working state's archive to
+    /// that file, which the working state then belongs to (clean, unless it changed since
+    /// `file.download_begin`).
+    #[serde(rename = "file.download_end")]
+    FileDownloadEnd {
+        /// Download.
+        transfer: TransferId,
+        /// The file written, as the client names it.
+        saved_as: Option<String>,
+    },
 
     // -- rec ----------------------------------------------------------------------------
     /// Record inputs of the open session to a raw capture file (f32 WAV / RF64 and a JSON
@@ -659,6 +741,15 @@ impl Command {
             Self::FileSave { .. } => "file.save",
             Self::FileLoad { .. } => "file.load",
             Self::FileList => "file.list",
+            Self::FileNew { .. } => "file.new",
+            Self::FileRecover => "file.recover",
+            Self::FileSalvage { .. } => "file.salvage",
+            Self::FileUploadBegin { .. } => "file.upload_begin",
+            Self::FileUploadChunk { .. } => "file.upload_chunk",
+            Self::FileImport { .. } => "file.import",
+            Self::FileDownloadBegin { .. } => "file.download_begin",
+            Self::FileDownloadChunk { .. } => "file.download_chunk",
+            Self::FileDownloadEnd { .. } => "file.download_end",
             Self::RecStart { .. } => "rec.start",
             Self::RecStop => "rec.stop",
             Self::RecList => "rec.list",
@@ -687,7 +778,11 @@ impl Command {
                 | Self::StateSince { .. }
                 | Self::GridGet { .. }
                 | Self::DelayFind { .. }
-                | Self::FileSave { .. }
+                | Self::FileUploadBegin { .. }
+                | Self::FileUploadChunk { .. }
+                | Self::FileImport { .. }
+                | Self::FileDownloadBegin { .. }
+                | Self::FileDownloadChunk { .. }
                 | Self::SplLogGet { .. }
                 | Self::SplHistoryGet { .. }
                 | Self::SplBandLogGet { .. }
@@ -802,8 +897,14 @@ pub enum ReplyBody {
     Events(Vec<Event>),
     /// `grid.get`.
     Grid(GridDef),
-    /// `file.save` / `file.load`.
+    /// `file.save` / `file.load` / `file.import`.
     SessionFile(SessionFile),
+    /// `file.upload_begin` / `file.download_begin`.
+    Transfer(crate::model::Transfer),
+    /// `file.download_chunk`.
+    Chunk(Blob),
+    /// `file.salvage`.
+    Salvage(crate::model::Salvage),
     /// `file.list`.
     Sessions(Vec<SessionFile>),
     /// `rec.start` / `rec.stop`: the run.
@@ -870,6 +971,18 @@ pub enum ErrorDetail {
         line: Option<u32>,
         /// Problem.
         problem: ImportProblem,
+    },
+    /// `conflict` from `file.new` / `file.load`: the working state has unsaved changes.
+    UnsavedChanges {
+        /// Its session; `None`: untitled.
+        origin: Option<SessionOrigin>,
+    },
+    /// `conflict` from `file.save` / `file.import`: a session of that name exists.
+    SessionExists {
+        /// The session.
+        name: String,
+        /// When it was saved.
+        saved_at: WallNs,
     },
     /// `unsupported` from `file.load`: the session format version is not this build's.
     SessionVersion {

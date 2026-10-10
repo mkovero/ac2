@@ -60,7 +60,9 @@ pub(crate) mod rig;
 mod session_ctl;
 mod sweeps;
 mod traces;
+mod transfer;
 mod validate;
+mod working;
 
 use validate::{
     MAX_CAL_UNSETTLED_DB, MAX_DELAY_S, check_find, delay_samples, gen_err, lease_required,
@@ -314,6 +316,12 @@ pub(crate) struct Control {
     ceiling_set: Option<f64>,
     /// The recording a replay session plays (`session.replay`).
     replay_backend: Option<Arc<ac2_audio::ReplayBackend>>,
+    /// What the working state belongs to (`State.working`).
+    working: working::Persist,
+    /// The working state the last `file.new` / `file.load` replaced with unsaved changes.
+    recover: Option<working::Recover>,
+    /// Session archives being uploaded or downloaded.
+    transfers: transfer::Transfers,
 }
 
 impl Control {
@@ -403,6 +411,9 @@ impl Control {
             spl_prev_logs: HashMap::new(),
             recording: None,
             replay_backend: None,
+            working: working::Persist::untitled(),
+            recover: None,
+            transfers: transfer::Transfers::default(),
             rig,
             ceiling_set: saved.ceiling_dbfs,
             s,
@@ -577,6 +588,7 @@ impl Control {
             Err(e) => tracing::error!("event not encodable: {e}"),
         }
         if saved {
+            self.working_changed();
             self.autosave_changed();
         }
         ev.rev
@@ -993,9 +1005,36 @@ impl Control {
                 .cloned()
                 .map(ReplyBody::Grid)
                 .ok_or_else(|| perr(ErrorCode::NotFound, format!("no grid {grid_id}"))),
-            Command::FileSave { session } => self.file_save(&session),
-            Command::FileLoad { session } => self.file_load(client, &session),
+            Command::FileSave { session, overwrite } => self.file_save(&session, overwrite),
+            Command::FileLoad { session, discard } => self.file_load(client, &session, discard),
+            Command::FileNew { discard } => self.file_new(client, discard),
+            Command::FileRecover => self.file_recover(client),
+            Command::FileSalvage { session } => self.file_salvage(client, &session),
             Command::FileList => self.file_list(),
+            Command::FileUploadBegin {
+                file,
+                bytes,
+                sha256,
+            } => self.file_upload_begin(client, file, bytes, sha256),
+            Command::FileUploadChunk {
+                transfer,
+                offset,
+                data,
+            } => self.file_upload_chunk(client, transfer, offset, &data),
+            Command::FileImport {
+                transfer,
+                name,
+                overwrite,
+            } => self.file_import(client, transfer, &name, overwrite),
+            Command::FileDownloadBegin { session } => {
+                self.file_download_begin(client, session.as_ref())
+            }
+            Command::FileDownloadChunk { transfer, offset } => {
+                self.file_download_chunk(client, transfer, offset)
+            }
+            Command::FileDownloadEnd { transfer, saved_as } => {
+                self.file_download_end(client, transfer, saved_as)
+            }
             Command::RecStart { request } => self.rec_start(client, request),
             Command::RecStop => self.rec_stop(),
             Command::RecList => self.rec_list(),

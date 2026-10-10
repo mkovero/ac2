@@ -112,6 +112,11 @@ id_type!(
     SweepId(u32)
 );
 id_type!(
+    /// A session archive being uploaded or downloaded (`file.upload_begin`,
+    /// `file.download_begin`), per incarnation.
+    TransferId(u32)
+);
+id_type!(
     /// Request id, unique per client within the dedup window.
     RequestId(u64)
 );

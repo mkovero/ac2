@@ -40,6 +40,7 @@ fn apply(state: &mut State, e: &Event) {
         Change::Generator(g) => state.generator = g.clone(),
         Change::Session(s) => state.session = s.clone(),
         Change::Timing(t) => state.timing = *t,
+        Change::Working(w) => state.working = w.clone(),
         Change::SplLog(ac2_proto::Patch::Set(l)) => {
             match state.spl_logs.iter().position(|x| x.meas == l.meas) {
                 Some(i) => state.spl_logs[i] = l.clone(),
@@ -161,19 +162,19 @@ fn snapshot_events_missed_final_patch_and_expired_replay() {
         traces: ac2_proto::model::OwnedTraces::Keep,
     });
     let target = snapshot(&mut b);
-    // Three creates, the update (the meter's `spl_log` entity, then the measurement), the
-    // delete.
-    assert_eq!(target.1, Rev(r0.0 + 6));
+    // Three creates (the first also makes the working state unsaved: `working`), the
+    // update (the meter's `spl_log` entity, then the measurement), the delete.
+    assert_eq!(target.1, Rev(r0.0 + 7));
 
     // Apply live events, but lose the final one.
     let mut last = r0;
     let mut events = Vec::new();
-    while events.len() < 6 {
+    while events.len() < 7 {
         if let Some(DataMessage::Event(e)) = sub.next(T) {
             events.push(e);
         }
     }
-    for e in &events[..5] {
+    for e in &events[..6] {
         assert_eq!(e.rev, Rev(last.0 + 1), "events arrive in rev order");
         apply(&mut mirror, e);
         last = e.rev;
@@ -241,16 +242,17 @@ fn request_dedup_and_expect_rev() {
     assert_eq!(first, second);
     let (s, rev, _) = snapshot(&mut c);
     assert_eq!(s.measurements.len(), 1);
-    assert_eq!(rev, Rev(1));
+    // The create, then the working state unsaved.
+    assert_eq!(rev, Rev(2));
 
     // expect_rev: stale → conflict with the current rev; current → executes.
     let mut stale = Request::new(c.next_id(), Command::MeasStart { meas: MeasId(1) });
     stale.expect_rev = Some(Rev(0));
     let e = c.call_req(stale).result.unwrap_err();
     assert_eq!(e.code, ErrorCode::Conflict);
-    assert_eq!(e.detail, Some(ErrorDetail::Conflict { rev: Rev(1) }));
+    assert_eq!(e.detail, Some(ErrorDetail::Conflict { rev: Rev(2) }));
     let mut fresh = Request::new(c.next_id(), Command::MeasStop { meas: MeasId(1) });
-    fresh.expect_rev = Some(Rev(1));
+    fresh.expect_rev = Some(Rev(2));
     assert!(c.call_req(fresh).result.is_ok());
     // Reads ignore expect_rev.
     let mut read = Request::new(c.next_id(), Command::SessionStatus);

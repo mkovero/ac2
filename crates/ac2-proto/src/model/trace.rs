@@ -9,7 +9,7 @@ use super::{
 };
 use crate::grid::GridId;
 use crate::units::{
-    Db, Dbfs, Hz, MeasId, SampleIndex, Seconds, SessionEpoch, SweepId, TraceId, WallNs,
+    Db, Dbfs, Hz, MeasId, SampleIndex, Seconds, SessionEpoch, SweepId, TraceId, TransferId, WallNs,
 };
 
 /// Polarity.
@@ -434,7 +434,7 @@ pub struct SessionFile {
     pub traces: u32,
 }
 
-/// Which session directory `file.save` / `file.load` use.
+/// Which session `file.save` / `file.load` / `file.salvage` / `file.download_begin` use.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionRef {
@@ -448,6 +448,102 @@ pub enum SessionRef {
         /// Path.
         path: String,
     },
+    /// A session archive this client uploaded (`file.upload_begin`), complete; used up by
+    /// the command. `file.load` and `file.salvage` only.
+    Upload {
+        /// The upload.
+        transfer: TransferId,
+    },
+}
+
+/// What the working state (the measurements and traces the daemon holds) belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SessionOrigin {
+    /// A session in the daemon's session directory.
+    Name {
+        /// Name.
+        name: String,
+    },
+    /// A session directory on the daemon host, by path.
+    Path {
+        /// Path.
+        path: String,
+    },
+    /// A session archive on a client's machine (opened from or exported to it); only that
+    /// client can write it again.
+    Client {
+        /// The path as that client named it.
+        path: String,
+    },
+}
+
+/// The working state's session and whether it has unsaved changes (`file.*`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkingSession {
+    /// The session it was last opened from or saved to; `None`: untitled.
+    pub origin: Option<SessionOrigin>,
+    /// The measurements or traces differ from that save (untitled: it holds any).
+    pub dirty: bool,
+    /// When the content it was opened or saved as was saved; `None`: never.
+    pub saved_at: Option<WallNs>,
+    /// The working state the last `file.new` / `file.load` replaced while it had unsaved
+    /// changes, which `file.recover` brings back.
+    pub recover: Option<Recoverable>,
+}
+
+/// A replaced working state kept for `file.recover`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Recoverable {
+    /// When it was replaced.
+    pub replaced_at: WallNs,
+    /// Its session; `None`: untitled.
+    pub origin: Option<SessionOrigin>,
+    /// Measurements in it.
+    pub measurements: u32,
+    /// Traces in it.
+    pub traces: u32,
+}
+
+/// A session archive transfer under way (reply to `file.upload_begin`,
+/// `file.download_begin`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Transfer {
+    /// Id for the chunks.
+    pub transfer: TransferId,
+    /// Archive file name (download: suggested, `<session>.ac2session`).
+    pub file_name: String,
+    /// Archive size, bytes.
+    pub bytes: u64,
+    /// SHA-256 of the whole archive, lowercase hex.
+    pub sha256: String,
+    /// Largest chunk, bytes.
+    pub chunk_bytes: u32,
+}
+
+/// What `file.salvage` did with each trace file of a session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Salvage {
+    /// The session's format version.
+    pub version: Option<u32>,
+    /// Traces imported, in file order.
+    pub imported: Vec<TraceMeta>,
+    /// Files not imported.
+    pub refused: Vec<SalvageRefusal>,
+}
+
+/// A trace file `file.salvage` could not import.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SalvageRefusal {
+    /// File, relative to the session directory.
+    pub file: String,
+    /// Why, as `trace.import` would say.
+    pub reason: String,
 }
 
 /// Stored trace data (reply to `trace.get`): the stored columns with the trace's display

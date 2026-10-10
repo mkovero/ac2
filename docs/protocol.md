@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 37`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 38`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -121,9 +121,18 @@ Lease column: **L** = `lease_token` required (Q6).
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
 | `grid.get` | `grid_id` | `grid` | |
-| `file.save` | `session: SessionRef` | `session_file` | |
-| `file.load` | `session: SessionRef` | `session_file`; loads disarmed, no owner, new epoch | |
+| `file.save` | `session: SessionRef`, `overwrite: bool` | `session_file`; the working state belongs to it, clean | |
+| `file.load` | `session: SessionRef`, `discard: bool` | `session_file`; loads disarmed, no owner, new epoch | |
+| `file.new` | `discard: bool` | `ack`; every measurement and trace deleted, untitled | |
+| `file.recover` | — | `ack`; swaps in the replaced working state | |
+| `file.salvage` | `session: SessionRef` | `salvage` | |
 | `file.list` | — | `sessions` | |
+| `file.upload_begin` | `file` (its path on the client), `bytes: u64`, `sha256: string` | `transfer` | non-mutating |
+| `file.upload_chunk` | `transfer`, `offset: u64`, `data: bin` | `ack` | non-mutating |
+| `file.import` | `transfer`, `name`, `overwrite: bool` | `session_file` | non-mutating |
+| `file.download_begin` | `session: SessionRef \| nil` (nil: the working state) | `transfer` | non-mutating |
+| `file.download_chunk` | `transfer`, `offset: u64` | `chunk` (bin) | non-mutating |
+| `file.download_end` | `transfer`, `saved_as: string \| nil` | `ack` | |
 | `rec.start` | `request: RecordRequest` | `recording` (the run as started) | |
 | `rec.stop` | — | `recording` (the run, finished) | |
 | `rec.list` | — | `recordings` | |
@@ -855,23 +864,65 @@ analysed band; responses are reported from `start`. `name` nil names the trace `
 
 #### Sessions (`file.*`)
 
+Design: `docs/design/sessions.md`. The **working state** is the measurements and traces the
+daemon holds (autosaved, §7.3); a **session** is a saved copy of it — a directory in the
+daemon's session directory, a directory on the daemon host, or a session archive on a
+client's machine (`.ac2session`: the directory as a gzip-compressed tar, §7.2).
+
 `SessionRef` (tagged by `type`): `name` {`name`} — a directory in the daemon's session
-directory (letters, digits, space, `-`, `_`, `.`; not starting with `.`) — or `path`
+directory (letters, digits, space, `-`, `_`, `.`; not starting with `.`) — `path`
 {`path`} — an absolute directory on the daemon host, accepted from local transports only
-(`refused` in network mode). `SessionFile`: `name`, `path`, `saved_at`, `measurements`,
-`traces`.
+(`refused` in network mode) — or `upload` {`transfer`} — a complete upload of this
+client's (`file.load`, `file.salvage` only; used up by the command). `SessionFile`:
+`name`, `path`, `saved_at`, `measurements`, `traces`.
+
+The `working` entity (`WorkingSession`): `origin` (`SessionOrigin` | nil = untitled:
+`name` {name}, `path` {path}, `client` {path} — an archive on a client's machine, the path
+as that client named it), `dirty` (the saved content differs from the origin's last save
+or open: measurement configurations, delays — not a tracking delay's applied value —,
+trace metadata; not running/stopped or SPL logs;
+untitled: holds anything), `saved_at` (when the origin's content was saved), `recover`
+(`Recoverable` | nil: `replaced_at`, `origin`, `measurements`, `traces` of the state the
+last `file.new` / `file.load` replaced while it was dirty). It survives a daemon restart
+with the autosave (§7.3).
 
 - `file.save` writes measurement configurations (applied delay, tracking,
   running) and every trace with metadata, edits, slots and columns (format §7.2). Never
-  generator state; calibrations belong to the calibration store.
-- `file.load` checks the whole session first (a refusal changes nothing), then stops and
-  disarms the generator and drops its owner (the old lease is gone), deletes every
-  measurement and trace, starts a new session epoch newer than every epoch recorded in the
-  loaded traces (an open stream reopens without generator routes), and recreates the
-  measurements (same ids, restarted when they were running) and traces (same ids). Errors:
-  `not_found`; `invalid` (not a session, bad name, damaged files); `unsupported` with
-  `detail: {type: session_version, found, supported}` for another format version.
+  generator state; calibrations belong to the calibration store. An existing session other
+  than the working state's origin: `conflict` with `detail: {type: session_exists, name,
+  saved_at}` unless `overwrite`. Afterwards `working.origin` is that session, clean.
+- `file.load` with the working state dirty and `discard` false: `conflict` with `detail:
+  {type: unsaved_changes, origin}`, nothing changed. Otherwise it checks the whole session
+  first (a refusal changes nothing), keeps a dirty working state for `file.recover`, then
+  stops and disarms the generator and drops its owner (the old lease is gone), deletes
+  every measurement and trace, starts a new session epoch newer than every epoch recorded
+  in the loaded traces (an open stream reopens without generator routes), and recreates
+  the measurements (same ids, restarted when they were running) and traces (same ids).
+  `working.origin` becomes the session (`client` {file name} for an upload), clean. Errors:
+  `not_found`; `invalid` (not a session, bad name, damaged files or archive); `unsupported`
+  with `detail: {type: session_version, found, supported}` for another format version.
+- `file.new`: guarded as `file.load`; deletes every measurement and trace (generator
+  disarmed, the audio session stays open); untitled.
+- `file.recover`: swaps the working state with `working.recover` (which then holds the
+  state it replaced, so a second recover undoes the first); `not_found` without one.
+- `file.salvage`: imports each `traces/*.csv` of the session — any format version — into
+  the working state as `trace.import` of an ac2 CSV would (role from the file; a math
+  channel's trace becomes an imported trace), file by file. Reply `salvage` {`version`:
+  the manifest's version | nil, `imported`: [TraceMeta], `refused`: [{file, reason}]}.
 - `file.list`: the sessions in the session directory, by name.
+- Archives travel in chunks of at most `chunk_bytes` (1 MiB). Upload: `file.upload_begin`
+  (at most 64 MiB, else `invalid`) → `transfer` {`transfer`, `file_name`, `bytes`, `sha256`,
+  `chunk_bytes`}; `file.upload_chunk` in order (`offset` = bytes so far, else `invalid`);
+  after the last byte the SHA-256 is checked (`invalid` on a mismatch, the upload dropped).
+  Then `file.load` / `file.salvage` with `{type: upload}` or `file.import` (stores it as a
+  named session; `session_exists` unless `overwrite`). Download: `file.download_begin`
+  packs (`file_name` `<name>.ac2session`), `file.download_chunk` reads, and
+  `file.download_end` drops it; with `saved_as` after a working-state download, the
+  working state's origin becomes `client` {saved_as}, clean if it has not changed since
+  the download began. Unpacking accepts regular files at `session.json`,
+  `session.prev.json`, `traces/<file>`, `spl/<file>` only, at most 512 MiB and 20 000
+  entries. At most 4 transfers per daemon; one idle for 2 min is dropped (`not_found`
+  after). A transfer belongs to the client that began it.
 - The daemon also keeps an autosave of the same content (§7.3); its status is the
   `autosave` entity.
 
@@ -1045,7 +1096,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `export`, `calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`,
 `spl_log_page`, `spl_history`, `spl_band_log`,
 `snapshot`, `events`,
-`grid`, `session_file`, `sessions`, `sweep`, `recording`, `recordings`.
+`grid`, `session_file`, `sessions`, `transfer`, `chunk`, `salvage`, `sweep`, `recording`,
+`recordings`.
 
 ### 3.4 Errors
 
@@ -1055,7 +1107,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 
 `detail` (optional, tagged by `type`): `conflict` {rev}, `lease_held` {owner},
 `version` {daemon, client}, `resync` {oldest}, `import` {line, problem} (§3.2 traces),
-`session_version` {found, supported} (§3.2 sessions), `mic_curve_file` {line, reason} and
+`session_version` {found, supported}, `unsaved_changes` {origin}, `session_exists` {name,
+saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
 `cal_store` {path, reason} (§3.2 calibration).
 
 ## 4. State and events
@@ -1083,7 +1136,8 @@ meter: `meas`, `started_at`, `windows`, `peaks`, `alarms`; §3.2), `timing` (`Ti
 WallNs of the newest window; kept after the stimulus stops and for the rest of the session;
 committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `sweep` (`SweepRun` | nil: the latest `sweep.run` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
-nil`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2).
+nil`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2), `working`
+(`WorkingSession`: the working state's session and unsaved changes, §3.2 sessions).
 
 
 #### 4.1.1 Audio stopped and recovery
@@ -1112,7 +1166,7 @@ gap time), and the generator is disarmed (it was disarmed when the audio stopped
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`. `payload` is the entity's
+`generator`, `calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`, `working`. `payload` is the entity's
 full new value (`inputs`, `outputs`: the whole list); for keyed entities (`measurement`, `trace`,
 `calibration`, `mic` (keyed by name), `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
@@ -1387,6 +1441,9 @@ parameters on sweeps, version 9 held spatial averages where version 10 holds mat
 band meters — are refused). A directory that holds other files is never written
 into.
 
+A session archive (`.ac2session`) is that directory as a gzip-compressed POSIX tar, the
+entries at their relative paths (`session.json`, `traces/…`, `spl/…`), regular files only.
+
 ### 7.3 Autosave
 
 A daemon started with an autosave directory (`ac2d` by default: `autosave` in the data
@@ -1413,6 +1470,13 @@ on appending to the restored logs' files after their last whole line. An autosav
 another session format version is renamed to `<dir>.v<N>`, an unreadable one to
 `<dir>.damaged` (a name taken gets the time appended), with a warning; neither is deleted.
 `--no-restore` starts empty and moves the autosave to `<dir>.unrestored`.
+
+Beside the manifest the autosave keeps `working.json` (`{origin, saved_hash, saved_at}`),
+written with each autosave, so `working` (origin, dirty) is the same after a restart; an
+autosave without it restores untitled (dirty when it holds anything). The state a
+`file.new` / `file.load` replaces while dirty is written whole to `<dir>.replaced` (a
+session directory with its own `working.json`) for `file.recover`; without an autosave it
+is kept in memory.
 
 The `autosave` entity: `off` (no autosave directory), `saved` (the disk holds the current
 state; `saved_at` nil until the first write), `pending` (a change is waiting or being

@@ -429,6 +429,33 @@ fn files_of(m: &Manifest) -> Vec<String> {
         .collect()
 }
 
+/// What a manifest says about itself, whatever its version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Peek {
+    /// Its format version.
+    pub version: u32,
+    /// When it was saved, if it says so readably.
+    pub saved_at: Option<WallNs>,
+}
+
+/// The format version and save time of the session in `dir`, any version; `None` when it
+/// holds no readable `ac2-session` manifest. For a refusal to name, and to recognise a
+/// session before writing over it.
+pub fn peek(dir: &Path) -> Option<Peek> {
+    #[derive(Deserialize)]
+    struct Head {
+        format: String,
+        version: u32,
+        saved_at: Option<WallNs>,
+    }
+    let b = fs::read(dir.join(MANIFEST)).ok()?;
+    let h: Head = serde_json::from_slice(&b).ok()?;
+    (h.format == FORMAT).then_some(Peek {
+        version: h.version,
+        saved_at: h.saved_at,
+    })
+}
+
 /// Reads only the manifest of `dir`, checking format and version first.
 pub fn read_manifest(dir: &Path) -> Result<Manifest, SessionError> {
     read_manifest_named(dir, MANIFEST)

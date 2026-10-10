@@ -71,6 +71,9 @@ pub enum ClientError {
     /// Key material is missing or malformed.
     #[error("keys: {0}")]
     Keys(String),
+    /// A session archive could not be packed, checked or read.
+    #[error("{0}")]
+    Archive(ac2_archive::ArchiveError),
     /// A local file could not be read or written.
     #[error("{path}: {source}")]
     Io {

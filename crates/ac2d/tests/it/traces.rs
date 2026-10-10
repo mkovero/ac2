@@ -1029,6 +1029,7 @@ fn session_save_load_round_trip() {
         session: SessionRef::Name {
             name: "friday show".into(),
         },
+        overwrite: false,
     }) {
         ReplyBody::SessionFile(f) => f,
         other => panic!("{other:?}"),
@@ -1060,6 +1061,7 @@ fn session_save_load_round_trip() {
         session: SessionRef::Name {
             name: "friday show".into(),
         },
+        discard: true,
     }) {
         ReplyBody::SessionFile(f) => assert_eq!(f.traces, 2),
         other => panic!("{other:?}"),
@@ -1143,6 +1145,7 @@ fn session_save_load_round_trip() {
             session: SessionRef::Name {
                 name: "friday show".into(),
             },
+            discard: true,
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Unsupported);
@@ -1162,7 +1165,12 @@ fn session_save_load_round_trip() {
             path: "relative/dir".into(),
         },
     ] {
-        let e = c.call(Command::FileSave { session: bad }).unwrap_err();
+        let e = c
+            .call(Command::FileSave {
+                session: bad,
+                overwrite: false,
+            })
+            .unwrap_err();
         assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
     }
     let e = c
@@ -1170,6 +1178,7 @@ fn session_save_load_round_trip() {
             session: SessionRef::Name {
                 name: "missing".into(),
             },
+            discard: true,
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound);
@@ -1179,6 +1188,7 @@ fn session_save_load_round_trip() {
         session: SessionRef::Path {
             path: p.to_string_lossy().into_owned(),
         },
+        overwrite: false,
     }) {
         ReplyBody::SessionFile(f) => assert_eq!(f.name, "by-path"),
         other => panic!("{other:?}"),
@@ -1480,9 +1490,11 @@ fn mic_curve_on_a_stored_trace() {
     // Saved and loaded: the curve (with its points) comes back.
     c.ok(Command::FileSave {
         session: SessionRef::Name { name: "mic".into() },
+        overwrite: false,
     });
     c.ok(Command::FileLoad {
         session: SessionRef::Name { name: "mic".into() },
+        discard: true,
     });
     let reloaded = traces(c).into_iter().find(|x| x.id == raw.id).unwrap();
     assert_eq!(reloaded.mic_curve, t.mic_curve);

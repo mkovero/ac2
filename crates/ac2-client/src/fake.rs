@@ -98,6 +98,9 @@ pub struct Shared {
     pub replay_floor: Rev,
     /// Publish committed events on `evt`.
     pub publish_events: bool,
+    /// A command is editing the measurements and traces: its edits are unsaved changes.
+    /// Off for a load or new replacing them, and for changes a test commits directly.
+    pub(crate) marking: bool,
     /// Keepalives paused.
     pub ka_paused: bool,
     /// Ctrl requests are read and ignored (no execution, no reply).
@@ -178,6 +181,12 @@ pub fn empty_state() -> State {
             saved_at: None,
         },
         recording: None,
+        working: WorkingSession {
+            origin: None,
+            dirty: false,
+            saved_at: None,
+            recover: None,
+        },
     }
 }
 
@@ -361,6 +370,7 @@ impl Shared {
             replay: vec![],
             replay_floor: Rev(0),
             publish_events: true,
+            marking: false,
             ka_paused: false,
             mute: false,
             drop_reply_once: HashSet::new(),
@@ -507,6 +517,18 @@ impl Shared {
     /// Commits a change: bumps rev, applies it, records it for replay and (unless
     /// `publish_events` is off) publishes it on `evt`.
     pub fn commit(&mut self, change: Change) -> Rev {
+        let edits = matches!(change, Change::Measurement(_) | Change::Trace(_));
+        let rev = self.commit_one(change);
+        // The fake's unsaved changes: any edit by a command since the last save or load.
+        if edits && self.marking && !self.state.working.dirty {
+            let mut w = self.state.working.clone();
+            w.dirty = true;
+            return self.commit_one(Change::Working(w));
+        }
+        rev
+    }
+
+    fn commit_one(&mut self, change: Change) -> Rev {
         self.rev = Rev(self.rev.0 + 1);
         apply_change(&mut self.state, change.clone());
         let ev = Event {
@@ -1128,8 +1150,25 @@ impl Shared {
             } => self.trace_import(file_name, format, role, ir, &content.0)?,
             C::TraceExport { trace, format } => self.trace_export(trace, format)?,
             C::TraceMicCurve { trace, curve } => self.trace_mic_curve(trace, curve)?,
-            C::FileSave { session } => self.file_save(&session)?,
-            C::FileLoad { session } => self.file_load(client, &session)?,
+            C::FileSave { session, .. } => self.file_save(&session)?,
+            C::FileLoad { session, discard } => {
+                self.guard_unsaved(discard)?;
+                self.file_load(client, &session)?
+            }
+            C::FileNew { discard } => self.file_new(discard)?,
+            C::FileRecover
+            | C::FileSalvage { .. }
+            | C::FileUploadBegin { .. }
+            | C::FileUploadChunk { .. }
+            | C::FileImport { .. }
+            | C::FileDownloadBegin { .. }
+            | C::FileDownloadChunk { .. }
+            | C::FileDownloadEnd { .. } => {
+                return Err(err(
+                    ErrorCode::Unsupported,
+                    "the fake keeps sessions by name and path only",
+                ));
+            }
             C::FileList => self.file_list()?,
             C::RecStart { request } => self.rec_start(client, request)?,
             C::RecStop => self.rec_stop()?,
@@ -1723,7 +1762,10 @@ fn handle(shared: &Mutex<Shared>, rid: &[u8], body: &[u8]) -> Option<Vec<u8>> {
         }),
         _ => {
             *s.executions.entry(op).or_insert(0) += 1;
-            s.execute(&client, req.cmd)
+            s.marking = true;
+            let r = s.execute(&client, req.cmd);
+            s.marking = false;
+            r
         }
     };
     let bytes = encode_reply(&Reply::new(req.id, result)).ok()?;

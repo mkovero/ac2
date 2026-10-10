@@ -795,6 +795,7 @@ async fn traces_and_sessions_against_the_fake() -> R {
     let saved = c.view().state.clone().ok_or("no state")?;
     c.call(Command::FileSave {
         session: SessionRef::Name { name: "s1".into() },
+        overwrite: false,
     })
     .await?;
     c.call(Command::TraceDelete { trace: a.id }).await?;
@@ -804,6 +805,7 @@ async fn traces_and_sessions_against_the_fake() -> R {
     }
     c.call(Command::FileLoad {
         session: SessionRef::Name { name: "s1".into() },
+        discard: true,
     })
     .await?;
     until("loaded state mirrored", || {

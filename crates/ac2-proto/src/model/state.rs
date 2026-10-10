@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CalEntry, Generator, InputSetup, Measurement, Mic, OutputSetup, RecordingRun, Session, SplLog,
-    SweepRun, TraceMeta,
+    SweepRun, TraceMeta, WorkingSession,
 };
 use crate::units::{SampleIndex, Samples, Seconds, WallNs};
 
@@ -108,6 +108,8 @@ pub struct State {
     pub sweep: Option<SweepRun>,
     /// Autosave of the measurements and traces.
     pub autosave: Autosave,
+    /// The session the measurements and traces belong to, and unsaved changes.
+    pub working: WorkingSession,
     /// The latest recording, if any.
     pub recording: Option<RecordingRun>,
 }

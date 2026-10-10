@@ -732,6 +732,16 @@
   }
  },
  {
+  "kind": "working",
+  "rev": 67,
+  "payload": {
+   "origin": null,
+   "dirty": false,
+   "saved_at": null,
+   "recover": null
+  }
+ },
+ {
   "kind": "autosave",
   "rev": 57,
   "payload": {

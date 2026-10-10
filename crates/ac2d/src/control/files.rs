@@ -1,5 +1,6 @@
-//! `file.save` / `file.load` / `file.list`: sessions on the daemon host
-//! (format: `ac2_traces::session`).
+//! `file.save` / `file.load` / `file.list` / `file.salvage`: sessions on the daemon host
+//! (format: `ac2_traces::session`; the working state's session and recovery copy:
+//! [`super::working`]; archives from and to clients: [`super::transfer`]).
 //!
 //! A load replaces every measurement and trace, stops and disarms the generator and drops
 //! its owner, and starts a new session epoch newer than any epoch recorded in the loaded
@@ -12,7 +13,8 @@ use std::path::{Path, PathBuf};
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
-    DelayState, GenAction, MeasKind, Measurement, Session, SessionFile, SessionRef, SweepFailure,
+    DelayState, GenAction, ImportFormat, ImportRole, MeasKind, Measurement, Salvage,
+    SalvageRefusal, Session, SessionFile, SessionOrigin, SessionRef, SweepFailure, TraceKind,
     TraceOwner,
 };
 use ac2_proto::units::{ClientId, MeasId, Rev, Seconds, SessionEpoch, WallNs};
@@ -24,7 +26,7 @@ use ac2_traces::session::{
 use super::{Control, delay_samples, maths, static_grid, validate_meas};
 use crate::util::{perr, perr_detail, wall_ns};
 
-fn session_err(e: SessionError) -> ProtoError {
+pub(super) fn session_err(e: SessionError) -> ProtoError {
     let msg = e.to_string();
     match e {
         SessionError::NotFound(_) => perr(ErrorCode::NotFound, msg),
@@ -43,7 +45,7 @@ fn session_err(e: SessionError) -> ProtoError {
     }
 }
 
-fn info(name: &str, dir: &Path, m: &Manifest) -> SessionFile {
+pub(super) fn info(name: &str, dir: &Path, m: &Manifest) -> SessionFile {
     SessionFile {
         name: name.to_owned(),
         path: dir.to_string_lossy().into_owned(),
@@ -56,7 +58,7 @@ fn info(name: &str, dir: &Path, m: &Manifest) -> SessionFile {
 impl Control {
     /// The directory a reference names. Paths are refused in network mode: a remote client
     /// may only use the daemon's own session directory.
-    fn session_path(&self, r: &SessionRef) -> Result<(String, PathBuf), ProtoError> {
+    pub(super) fn session_path(&self, r: &SessionRef) -> Result<(String, PathBuf), ProtoError> {
         match r {
             SessionRef::Name { name } => {
                 session::validate_name(name).map_err(session_err)?;
@@ -80,6 +82,45 @@ impl Control {
                     .file_name()
                     .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
                 Ok((name, p))
+            }
+            SessionRef::Upload { .. } => Err(perr(
+                ErrorCode::Invalid,
+                "an upload is opened with file.load or salvaged with file.salvage only",
+            )),
+        }
+    }
+
+    /// The origin a save to, or load from, `r` gives the working state.
+    fn origin_of(r: &SessionRef, dir: &Path) -> SessionOrigin {
+        match r {
+            SessionRef::Name { name } => SessionOrigin::Name { name: name.clone() },
+            SessionRef::Path { .. } | SessionRef::Upload { .. } => SessionOrigin::Path {
+                path: dir.to_string_lossy().into_owned(),
+            },
+        }
+    }
+
+    /// The directory of `r` to read: a staging directory for an upload (removed by the
+    /// caller), with the client's path as the name.
+    fn read_dir_of(
+        &mut self,
+        client: &ClientId,
+        r: &SessionRef,
+    ) -> Result<(String, PathBuf, SessionOrigin, bool), ProtoError> {
+        match r {
+            SessionRef::Upload { transfer } => {
+                let (file, dir) = self.unpack_upload(client, *transfer)?;
+                Ok((
+                    file.clone(),
+                    dir,
+                    SessionOrigin::Client { path: file },
+                    true,
+                ))
+            }
+            _ => {
+                let (name, dir) = self.session_path(r)?;
+                let origin = Self::origin_of(r, &dir);
+                Ok((name, dir, origin, false))
             }
         }
     }
@@ -126,11 +167,26 @@ impl Control {
         })
     }
 
-    pub(super) fn file_save(&self, r: &SessionRef) -> Result<ReplyBody, ProtoError> {
+    pub(super) fn file_save(
+        &mut self,
+        r: &SessionRef,
+        overwrite: bool,
+    ) -> Result<ReplyBody, ProtoError> {
         let (name, dir) = self.session_path(r)?;
+        let origin = Self::origin_of(r, &dir);
+        if !overwrite
+            && self.working.origin.as_ref() != Some(&origin)
+            && let Some(p) = session::peek(&dir)
+        {
+            return Err(super::transfer::exists(
+                &name,
+                p.saved_at.unwrap_or_default(),
+            ));
+        }
         let data = self.session_data(true)?;
         let m = session::save(&dir, &data).map_err(session_err)?;
         tracing::info!("session saved to {}", dir.display());
+        self.mark_saved(Some(origin), m.saved_at);
         Ok(ReplyBody::SessionFile(info(&name, &dir, &m)))
     }
 
@@ -145,17 +201,120 @@ impl Control {
         &mut self,
         client: &ClientId,
         r: &SessionRef,
+        discard: bool,
     ) -> Result<ReplyBody, ProtoError> {
-        let (name, dir) = self.session_path(r)?;
-        let m = session::read_manifest(&dir).map_err(session_err)?;
-        let data = session::load(&dir).map_err(session_err)?;
+        self.guard_unsaved(discard)?;
+        let (name, dir, origin, staged) = self.read_dir_of(client, r)?;
+        let read = session::read_manifest(&dir).and_then(|m| session::load(&dir).map(|d| (m, d)));
+        if staged {
+            super::transfer::remove_dir(&dir);
+        }
+        let (m, data) = read.map_err(session_err)?;
+        self.keep_replaced()?;
         let epoch = self.replace_session(Some(client), data)?;
+        if let SessionRef::Upload { transfer } = r {
+            self.transfers.remove(*transfer);
+        }
+        let from = if staged {
+            name.clone()
+        } else {
+            dir.display().to_string()
+        };
+        tracing::info!("session loaded from {from} (epoch {}, disarmed)", epoch.0);
+        self.mark_saved(Some(origin), m.saved_at);
+        let shown = if staged {
+            super::transfer::file_part(&name).to_owned()
+        } else {
+            name.clone()
+        };
+        let mut f = info(&shown, &dir, &m);
+        if staged {
+            f.path = name;
+        }
+        Ok(ReplyBody::SessionFile(f))
+    }
+
+    /// `file.salvage`: each trace file of the session through `trace.import`'s reader.
+    pub(super) fn file_salvage(
+        &mut self,
+        client: &ClientId,
+        r: &SessionRef,
+    ) -> Result<ReplyBody, ProtoError> {
+        let (_, dir, _, staged) = self.read_dir_of(client, r)?;
+        let result = self.salvage_dir(&dir);
+        if staged {
+            super::transfer::remove_dir(&dir);
+            if result.is_ok()
+                && let SessionRef::Upload { transfer } = r
+            {
+                self.transfers.remove(*transfer);
+            }
+        }
+        result
+    }
+
+    fn salvage_dir(&mut self, dir: &Path) -> Result<ReplyBody, ProtoError> {
+        if !dir.join(session::MANIFEST).is_file() {
+            return Err(session_err(SessionError::NotASession(dir.to_owned())));
+        }
+        let version = session::peek(dir).map(|p| p.version);
+        let tdir = dir.join("traces");
+        let mut files: Vec<PathBuf> = match std::fs::read_dir(&tdir) {
+            Ok(rd) => rd
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.extension().is_some_and(|e| e.eq_ignore_ascii_case("csv")) && p.is_file()
+                })
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        files.sort();
+        let mut imported = Vec::new();
+        let mut refused = Vec::new();
+        for p in files {
+            let rel = format!(
+                "traces/{}",
+                p.file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default()
+            );
+            let content = match std::fs::read(&p) {
+                Ok(c) => c,
+                Err(e) => {
+                    refused.push(SalvageRefusal {
+                        file: rel,
+                        reason: e.to_string(),
+                    });
+                    continue;
+                }
+            };
+            // A target stays a target; everything else comes back as a measured trace.
+            let role = if ac2_traces::text::header_kind(&content) == Some(TraceKind::Target) {
+                ImportRole::Target
+            } else {
+                ImportRole::Trace
+            };
+            match self.trace_import(rel.clone(), ImportFormat::Ac2Csv, role, None, &content) {
+                Ok(ReplyBody::Trace(t)) => imported.push(t),
+                Ok(_) => {}
+                Err(e) => refused.push(SalvageRefusal {
+                    file: rel,
+                    reason: e.msg,
+                }),
+            }
+        }
         tracing::info!(
-            "session loaded from {} (epoch {}, disarmed)",
+            "salvaged {} traces from {} ({} refused)",
+            imported.len(),
             dir.display(),
-            epoch.0
+            refused.len()
         );
-        Ok(ReplyBody::SessionFile(info(&name, &dir, &m)))
+        Ok(ReplyBody::Salvage(Salvage {
+            version,
+            imported,
+            refused,
+        }))
     }
 
     /// Replaces every measurement and trace with `data`, disarmed (module docs). Returns the

@@ -20,6 +20,7 @@ mod recording;
 mod recovery;
 mod remote_stimulus;
 mod server;
+mod sessions;
 mod stimulus;
 mod sweep;
 mod sync;

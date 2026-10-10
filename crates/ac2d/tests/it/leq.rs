@@ -367,11 +367,13 @@ async fn slow_windows_go_over_and_recover_and_survive() {
     let path = dir.path().join("show").to_string_lossy().into_owned();
     c.call(Command::FileSave {
         session: SessionRef::Path { path: path.clone() },
+        overwrite: false,
     })
     .await
     .unwrap();
     c.call(Command::FileLoad {
         session: SessionRef::Path { path },
+        discard: true,
     })
     .await
     .unwrap();
@@ -558,11 +560,13 @@ async fn slow_a_new_log_starts_over_and_keeps_the_windows() {
     let path = dir.path().join("show").to_string_lossy().into_owned();
     c.call(Command::FileSave {
         session: SessionRef::Path { path: path.clone() },
+        overwrite: false,
     })
     .await
     .unwrap();
     c.call(Command::FileLoad {
         session: SessionRef::Path { path },
+        discard: true,
     })
     .await
     .unwrap();
@@ -885,6 +889,7 @@ async fn a_long_log_in_pages_and_its_history() {
         session: SessionRef::Path {
             path: path.to_string_lossy().into_owned(),
         },
+        discard: true,
     })
     .await
     .unwrap();

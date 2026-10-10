@@ -881,6 +881,18 @@ def requests():
             mutation=False,
         ),
         req(62, "meas.colour", {"meas": 3, "colour": {"type": "hue", "index": 2}}),
+        req(63, "file.new", {"discard": False}),
+        req(
+            67,
+            "file.upload_chunk",
+            {"transfer": 3, "offset": 1048576, "data": bytes([0x1F, 0x8B, 0x08, 0x00])},
+            mutation=False,
+        ),
+        req(
+            71,
+            "file.download_end",
+            {"transfer": 4, "saved_as": "/run/media/foh/STICK/friday show.ac2session"},
+        ),
     ]
 
 
@@ -964,6 +976,11 @@ def events():
                 "max_bytes": 1073741824,
                 "status": {"type": "ended", "reason": {"type": "duration_limit"}},
             },
+        },
+        {
+            "kind": "working",
+            "rev": 67,
+            "payload": {"origin": None, "dirty": False, "saved_at": None, "recover": None},
         },
         {
             "kind": "autosave",

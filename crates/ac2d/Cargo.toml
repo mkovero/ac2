@@ -19,6 +19,7 @@ name = "ac2d"
 path = "src/main.rs"
 
 [dependencies]
+ac2-archive = { path = "../ac2-archive" }
 ac2-audio = { path = "../ac2-audio" }
 ac2-core = { path = "../ac2-core" }
 ac2-discovery = { path = "../ac2-discovery" }

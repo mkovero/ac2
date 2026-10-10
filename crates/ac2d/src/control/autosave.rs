@@ -31,14 +31,19 @@ impl Control {
     /// with `--no-restore` moves it aside.
     pub(super) fn start_autosave(&mut self) {
         let Some(dir) = self.autosave.as_ref().map(|a| a.dir.clone()) else {
+            self.clear_staging();
+            self.start_working(false);
             return;
         };
+        self.clear_staging();
         if !self.restore {
             autosave::skip_restore(&dir);
+            self.start_working(false);
             return;
         }
         let Some(autosave::Restored { data, from, logs }) = autosave::restore(&dir) else {
             tracing::info!("autosave: nothing to restore in {}", dir.display());
+            self.start_working(false);
             return;
         };
         let (n_meas, n_traces, at) = (data.measurements.len(), data.traces.len(), data.saved_at);
@@ -60,6 +65,7 @@ impl Control {
                     a.restored(fp, specs);
                 }
                 self.set_autosave(AutosaveState::Saved, Some(at));
+                self.start_working(true);
             }
             Err(e) => {
                 let to = autosave::set_aside(&dir, "damaged");
@@ -69,6 +75,7 @@ impl Control {
                     e.msg,
                     to.map_or_else(|| "-".into(), |t| t.display().to_string())
                 );
+                self.start_working(false);
             }
         }
     }

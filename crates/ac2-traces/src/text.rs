@@ -587,6 +587,17 @@ fn kind_from_header(v: &str) -> Option<TraceKind> {
     })
 }
 
+/// The kind an ac2 CSV's header names (`# kind: target`), if it names one it reads: how a
+/// salvage tells a target file from a measured one before importing it.
+pub fn header_kind(content: &[u8]) -> Option<TraceKind> {
+    let text = std::str::from_utf8(content).ok()?;
+    text.lines()
+        .map(str::trim)
+        .take_while(|l| l.is_empty() || l.starts_with('#'))
+        .find_map(|l| l.strip_prefix("# kind: "))
+        .and_then(kind_from_header)
+}
+
 fn kind_header(k: TraceKind) -> &'static str {
     use ac2_proto::model::LevelScale;
     match k {

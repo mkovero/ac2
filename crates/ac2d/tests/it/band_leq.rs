@@ -376,6 +376,7 @@ async fn slow_two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_mo
         session: SessionRef::Path {
             path: path.to_string_lossy().into_owned(),
         },
+        overwrite: false,
     })
     .await
     .unwrap();
@@ -717,6 +718,7 @@ async fn slow_the_night_limits_take_over_at_22() {
         session: SessionRef::Path {
             path: path.to_string_lossy().into_owned(),
         },
+        overwrite: false,
     })
     .await
     .unwrap();

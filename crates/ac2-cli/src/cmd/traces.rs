@@ -421,11 +421,22 @@ pub(crate) async fn save_or_load(
     let session = session_ref(session, local)?;
     let (r, what) = if load {
         (
-            c.call(Command::FileLoad { session }).await?,
+            c.call(Command::FileLoad {
+                session,
+                discard: true,
+            })
+            .await?,
             "loaded (disarmed)",
         )
     } else {
-        (c.call(Command::FileSave { session }).await?, "saved")
+        (
+            c.call(Command::FileSave {
+                session,
+                overwrite: false,
+            })
+            .await?,
+            "saved",
+        )
     };
     let f = expect_body!("file", r, ReplyBody::SessionFile(f) => f)?;
     out.emit(&f, || {

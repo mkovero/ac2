@@ -307,11 +307,13 @@ pub fn commands() -> Vec<Command> {
             session: SessionRef::Name {
                 name: "friday show".into(),
             },
+            overwrite: false,
         },
         Command::FileLoad {
             session: SessionRef::Path {
                 path: "/tmp/show".into(),
             },
+            discard: true,
         },
         Command::FileList,
         Command::SessionInputs { inputs: inputs() },
@@ -422,7 +424,57 @@ pub fn commands() -> Vec<Command> {
             meas: MeasId(3),
             colour: Some(ColourFamily::Hue { index: 2 }),
         },
+        Command::FileNew { discard: false },
+        Command::FileRecover,
+        Command::FileSalvage {
+            session: SessionRef::Upload {
+                transfer: TransferId(3),
+            },
+        },
+        Command::FileUploadBegin {
+            file: "/run/media/foh/STICK/friday show.ac2session".into(),
+            bytes: 1_234_567,
+            sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".into(),
+        },
+        Command::FileUploadChunk {
+            transfer: TransferId(3),
+            offset: 1_048_576,
+            data: Blob(vec![0x1f, 0x8b, 0x08, 0x00]),
+        },
+        Command::FileImport {
+            transfer: TransferId(3),
+            name: "friday show".into(),
+            overwrite: true,
+        },
+        Command::FileDownloadBegin { session: None },
+        Command::FileDownloadChunk {
+            transfer: TransferId(4),
+            offset: 0,
+        },
+        Command::FileDownloadEnd {
+            transfer: TransferId(4),
+            saved_as: Some("/run/media/foh/STICK/friday show.ac2session".into()),
+        },
     ]
+}
+
+/// The working session of [`state`].
+pub fn working() -> WorkingSession {
+    WorkingSession {
+        origin: Some(SessionOrigin::Name {
+            name: "friday show".into(),
+        }),
+        dirty: true,
+        saved_at: Some(WallNs(1_789_990_000_000_000_000)),
+        recover: Some(Recoverable {
+            replaced_at: WallNs(1_789_995_000_000_000_000),
+            origin: Some(SessionOrigin::Client {
+                path: "/run/media/foh/STICK/thursday.ac2session".into(),
+            }),
+            measurements: 3,
+            traces: 12,
+        }),
+    }
 }
 
 /// A sweep measurement: settings only, never running.
@@ -1377,6 +1429,7 @@ pub fn state() -> State {
             status: RecordingStatus::Recording,
             ..recording_run()
         }),
+        working: working(),
     }
 }
 
@@ -1434,6 +1487,15 @@ pub fn events() -> Vec<Event> {
             }),
         ),
         ev(66, Change::Measurement(Patch::Set(sweep_measurement()))),
+        ev(
+            67,
+            Change::Working(WorkingSession {
+                origin: None,
+                dirty: false,
+                saved_at: None,
+                recover: None,
+            }),
+        ),
     ]
 }
 
@@ -1582,6 +1644,22 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::Grid(grids().remove(1))),
         Ok(ReplyBody::SessionFile(session_file())),
         Ok(ReplyBody::Sessions(vec![session_file()])),
+        Ok(ReplyBody::Transfer(Transfer {
+            transfer: TransferId(4),
+            file_name: "friday show.ac2session".into(),
+            bytes: 1_234_567,
+            sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".into(),
+            chunk_bytes: 1 << 20,
+        })),
+        Ok(ReplyBody::Chunk(Blob(vec![0x1f, 0x8b]))),
+        Ok(ReplyBody::Salvage(Salvage {
+            version: Some(19),
+            imported: vec![trace_meta()],
+            refused: vec![SalvageRefusal {
+                file: "traces/9-0a1b2c3d4e5f6071.csv".into(),
+                reason: "ac2 trace CSV version 3; this build reads version 4".into(),
+            }],
+        })),
         Ok(ReplyBody::Recording(recording_run())),
         Ok(ReplyBody::Recordings(vec![recording_file()])),
         Ok(ReplyBody::Outputs(outputs())),
@@ -1619,6 +1697,23 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             detail: Some(ErrorDetail::Import {
                 line: Some(12),
                 problem: ImportProblem::BadNumber,
+            }),
+        }),
+        Err(ProtoError {
+            code: ErrorCode::Conflict,
+            msg: "unsaved changes".into(),
+            detail: Some(ErrorDetail::UnsavedChanges {
+                origin: Some(SessionOrigin::Path {
+                    path: "/srv/shows/friday".into(),
+                }),
+            }),
+        }),
+        Err(ProtoError {
+            code: ErrorCode::Conflict,
+            msg: "session exists".into(),
+            detail: Some(ErrorDetail::SessionExists {
+                name: "friday show".into(),
+                saved_at: WallNs(1_790_000_000_000_000_000),
             }),
         }),
         Err(ProtoError {

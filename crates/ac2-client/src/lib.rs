@@ -23,6 +23,7 @@ mod io;
 pub mod keys;
 mod lease;
 pub mod mirror;
+pub mod sessions;
 
 #[cfg(feature = "test-support")]
 pub mod fake;

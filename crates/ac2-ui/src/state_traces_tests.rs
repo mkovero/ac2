@@ -1126,7 +1126,8 @@ fn sessions_from_the_palette() {
         r.as_slice(),
         [Request::Call {
             cmd: Command::FileSave {
-                session: SessionRef::Name { name }
+                session: SessionRef::Name { name },
+                overwrite: false,
             },
             ..
         }] if name == "friday show"
@@ -1141,6 +1142,7 @@ fn sessions_from_the_palette() {
             cmd:
                 Command::FileLoad {
                     session: SessionRef::Path { path },
+                    discard: true,
                 },
             ..
         },

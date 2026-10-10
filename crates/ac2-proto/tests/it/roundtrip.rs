@@ -107,7 +107,7 @@ fn every_event_roundtrips() {
             DataMessage::Event(e)
         );
     }
-    assert_eq!(kinds.len(), 13);
+    assert_eq!(kinds.len(), 14);
 }
 
 /// The input-meter kinds only travel on their own topics, with one channel per column.

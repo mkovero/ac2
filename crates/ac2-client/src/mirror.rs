@@ -457,6 +457,7 @@ pub fn apply_change(s: &mut State, c: Change) {
         Change::Timing(t) => s.timing = t,
         Change::Sweep(r) => s.sweep = Some(r),
         Change::Autosave(a) => s.autosave = a,
+        Change::Working(w) => s.working = w,
         Change::Recording(r) => s.recording = Some(r),
     }
 }

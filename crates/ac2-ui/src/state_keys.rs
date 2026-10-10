@@ -490,22 +490,29 @@ impl AppState {
                     let what = match &session {
                         SessionRef::Name { name } => name.clone(),
                         SessionRef::Path { path } => path.clone(),
+                        SessionRef::Upload { transfer } => format!("upload {}", transfer.0),
                     };
                     let (cmd, what) = if load {
                         (
-                            Command::FileLoad { session },
+                            Command::FileLoad {
+                                session,
+                                discard: true,
+                            },
                             format!("session {what:?} loaded (disarmed)"),
                         )
                     } else {
                         (
-                            Command::FileSave { session },
+                            Command::FileSave {
+                                session,
+                                overwrite: false,
+                            },
                             format!("session {what:?} saved"),
                         )
                     };
                     out.push(Request::Call { cmd, what });
                 })
             }
-            PromptKind::ReplayRecording => parse_session_ref(&text).map(|r| {
+            PromptKind::ReplayRecording => parse_session_ref(&text).and_then(|r| {
                 let (recording, what) = match r {
                     SessionRef::Name { name } => (
                         ac2_proto::model::RecordingRef::Name { name: name.clone() },
@@ -515,6 +522,9 @@ impl AppState {
                         ac2_proto::model::RecordingRef::Path { path: path.clone() },
                         path,
                     ),
+                    SessionRef::Upload { .. } => {
+                        return Err("a recording is a name or a path".to_string());
+                    }
                 };
                 out.push(Request::Call {
                     cmd: Command::SessionReplay {
@@ -523,6 +533,7 @@ impl AppState {
                     },
                     what: format!("replaying {what:?}"),
                 });
+                Ok(())
             }),
             PromptKind::InputMics => parse_mics(&text).map(|mics| {
                 let inputs: Vec<InputSetup> = mics
