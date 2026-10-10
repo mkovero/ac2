@@ -368,6 +368,7 @@ impl App {
     pub fn dispatch(&mut self, msg: Msg) {
         let what = Touches::of(&msg);
         let animating = self.state.animating();
+        let easing = self.state.bars_easing(Instant::now());
         let data = self.state.data.clone();
         let mirror = self.state.mirror.clone();
         let mut reqs = self.state.update(msg, &self.keymap);
@@ -376,6 +377,10 @@ impl App {
             // The frequency axis moves while navigation settles; the last step settles it.
             Touches::Tick if animating || self.state.animating() => {
                 vec![PaneKind::Transfer, PaneKind::Spectrum, PaneKind::Distortion]
+            }
+            // The Leq bars glide to their newest frame; the last step lands them on it.
+            Touches::Tick if easing || self.state.bars_easing(Instant::now()) => {
+                vec![PaneKind::Spl]
             }
             Touches::Tick | Touches::Toasts => Vec::new(),
             Touches::Data => data_touches(data.as_deref(), self.state.data.as_deref()),
@@ -795,7 +800,10 @@ impl eframe::App for App {
         if let Some(wait) = self.save_prefs(Instant::now()) {
             ctx.request_repaint_after(wait);
         }
-        if self.state.animating() || self.startup.first_frame.is_none() {
+        if self.state.animating()
+            || self.state.bars_easing(Instant::now())
+            || self.startup.first_frame.is_none()
+        {
             ctx.request_repaint();
         } else if self.state.overlay.session().is_some()
             || self

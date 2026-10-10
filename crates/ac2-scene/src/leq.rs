@@ -238,6 +238,9 @@ pub struct LeqTile {
     pub least_db: f64,
     pub on_course: bool,
     pub over_in_s: Option<f64>,
+    /// The bar's length while it eases to [`LeqTile::bar_db`] ([`crate::bar_ease`]), dB;
+    /// `None`: drawn at `bar_db`.
+    pub drawn_db: Option<f64>,
 }
 
 impl LeqTile {
@@ -328,6 +331,7 @@ fn peak_tile(
         least_db: p.level,
         on_course: false,
         over_in_s: None,
+        drawn_db: None,
     }
 }
 
@@ -454,6 +458,7 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                 least_db: f64::from(f.least[i]),
                 on_course,
                 over_in_s,
+                drawn_db: None,
             }
         })
         .collect();

@@ -109,6 +109,9 @@ pub struct BandBar {
     pub recover: Option<String>,
     /// Leq − limit, dB (positive: over), when judged and measured.
     pub over_db: Option<f64>,
+    /// The bar's length while it eases to `leq_db` ([`crate::bar_ease`]), dB; `None`:
+    /// drawn at `leq_db`.
+    pub drawn_db: Option<f64>,
 }
 
 impl BandBar {
@@ -348,6 +351,7 @@ fn bar(f: &BandLeqFrame, k: usize) -> BandBar {
         over_db: limit_db
             .filter(|_| leq_db.is_finite())
             .map(|l| rounded(leq_db - l)),
+        drawn_db: None,
     }
 }
 
@@ -1000,8 +1004,9 @@ fn draw_window(
             color: track,
             clip: None,
         });
-        if b.leq_db.is_finite() {
-            let top = to_y(b.leq_db);
+        let bar_db = b.drawn_db.unwrap_or(b.leq_db);
+        if bar_db.is_finite() {
+            let top = to_y(bar_db);
             c.data.rects.push(FillRect {
                 rect: Rect::new(x, top, cw, (area.bottom() - top).max(0.0)),
                 color: bar,
@@ -1030,7 +1035,7 @@ fn draw_window(
         }
         // The value, held low on the column: read up close, the bars read from afar.
         let vfs = (cw * 0.24).clamp(sfs * 0.8, fs * 1.4);
-        let value_ink = if b.leq_db.is_finite() && to_y(b.leq_db) < area.bottom() - vfs * 1.6 {
+        let value_ink = if bar_db.is_finite() && to_y(bar_db) < area.bottom() - vfs * 1.6 {
             readable_on(bar, theme)
         } else {
             theme.text

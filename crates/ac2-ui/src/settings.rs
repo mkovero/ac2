@@ -246,6 +246,7 @@ pub enum DisplayRow {
     SplHold,
     LeqStyle,
     LeqHistory,
+    LeqBars,
     SpectrumView,
     Spectrograph,
     SweepView,
@@ -256,13 +257,14 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 13] = [
+    pub const ALL: [DisplayRow; 14] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
         DisplayRow::SplHold,
         DisplayRow::LeqStyle,
         DisplayRow::LeqHistory,
+        DisplayRow::LeqBars,
         DisplayRow::SpectrumView,
         DisplayRow::Spectrograph,
         DisplayRow::SweepView,
@@ -280,6 +282,7 @@ impl DisplayRow {
             DisplayRow::SplHold => "SPL number holds",
             DisplayRow::LeqStyle => "Leq windows",
             DisplayRow::LeqHistory => "Leq history strip",
+            DisplayRow::LeqBars => "Leq bars",
             DisplayRow::SpectrumView => "Spectrum pane shows",
             DisplayRow::SweepView => "Sweep pane shows",
             DisplayRow::Spectrograph => "Spectrograph history",
@@ -370,12 +373,22 @@ pub fn resolution_marker_text(on: bool) -> &'static str {
     }
 }
 
+/// What the Leq bars setting says, on the Display page and in its toast.
+pub fn bar_ease_text(on: bool) -> &'static str {
+    if on {
+        "glide to each new reading"
+    } else {
+        "jump to each new reading"
+    }
+}
+
 /// The Display page's on / off lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DisplaySwitches {
     pub key_hints: bool,
     pub warning_toasts: bool,
     pub resolution_marker: bool,
+    pub bar_ease: bool,
 }
 
 /// What the Display page shows for each line: title, value, whose.
@@ -416,6 +429,7 @@ pub fn display_rows(
                         "hidden".into()
                     }
                 }
+                DisplayRow::LeqBars => bar_ease_text(switches.bar_ease).into(),
                 DisplayRow::Spectrograph => format!("last {span_s} s"),
                 DisplayRow::DistortionUnit => match views.distortion_unit {
                     DistortionUnit::Db => "dB re fundamental".into(),
@@ -1064,6 +1078,7 @@ mod tests {
             key_hints: false,
             warning_toasts: false,
             resolution_marker: false,
+            bar_ease: false,
         };
         let rows = display_rows(ThemeName::Light, switches, Some(500), 30, views);
         let texts: Vec<&str> = rows.iter().map(|(_, v)| v.as_str()).collect();
@@ -1076,6 +1091,7 @@ mod tests {
                 "0.50 s",
                 "tiles",
                 "hidden",
+                "jump to each new reading",
                 "the spectrum over its spectrograph",
                 "last 30 s",
                 "the room parameters",

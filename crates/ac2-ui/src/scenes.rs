@@ -6,11 +6,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use ac2_client::TopicFrame;
-use ac2_proto::FrameData;
+use ac2_proto::frame::BandLeqFrame;
 use ac2_proto::frame::ProtectionFlags;
 use ac2_proto::model::{LevelScale, MeasKind, Measurement, PhaseBasis, Polarity, TraceKind};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, WallNs};
+use ac2_proto::{Frame, FrameData};
 use ac2_scene::band_leq::{BandLeqScene, BandLeqView, band_leq_scene, band_leq_text};
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
@@ -847,6 +848,21 @@ pub fn has_band_meter(st: &AppState) -> bool {
         .any(|m| matches!(&m.config.kind, MeasKind::Spl { config } if config.bands.is_some()))
 }
 
+/// The frame `tf` replaced and the seconds since `tf` arrived, while its bars still ease
+/// from that one: the operator lets them, and the values are fresh (stale or stopped values
+/// are drawn as they are, so nothing moves on screen that is not being measured).
+fn easing_from<'a>(st: &'a AppState, tf: &TopicFrame, now: Now) -> Option<(&'a Frame, f64)> {
+    if !st.prefs.bar_ease || !matches!(freshness(st, tf), Freshness::Fresh { .. }) {
+        return None;
+    }
+    let since = now
+        .instant
+        .saturating_duration_since(tf.received)
+        .as_secs_f64();
+    let from = st.bar_from.get(&tf.topic)?;
+    ac2_scene::bar_ease::easing(since).then_some((from.as_ref(), since))
+}
+
 /// What the band view shows of meter `m`, with its `band_leq` frame.
 fn band_view<'a>(
     st: &'a AppState,
@@ -867,11 +883,21 @@ fn band_view<'a>(
         Freshness::AudioStopped { .. } => Some("AUDIO STOPPED".into()),
         Freshness::Fresh { .. } => None,
     };
+    let mut text = band_leq_text(bands, f);
+    if let Some((from, since)) = easing_from(st, tf, now)
+        && let FrameData::BandLeq(p) = &from.data
+    {
+        let levels = |f: &BandLeqFrame| f.leq.iter().map(|&l| f64::from(l)).collect::<Vec<_>>();
+        let drawn = ac2_scene::bar_ease::eased(&levels(p), &levels(f), since);
+        for b in text.rows.iter_mut().flat_map(|r| &mut r.bars) {
+            b.drawn_db = drawn.get(b.window).copied();
+        }
+    }
     Some((
         BandLeqView {
             meter: m.config.name.clone(),
             cal: spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now),
-            text: band_leq_text(bands, f),
+            text,
             stale,
         },
         tf,
@@ -916,11 +942,22 @@ fn leq_view<'a>(
     // The frame describes the windows of the configuration it was made under.
     let cfg = &config.leq;
     let fresh = freshness(st, tf);
+    let mut tiles = leq_tiles(cfg, f);
+    if let Some((from, since)) = easing_from(st, tf, now)
+        && let FrameData::Leq(p) = &from.data
+    {
+        let from: Vec<f64> = leq_tiles(cfg, p).iter().map(|t| t.bar_db()).collect();
+        let to: Vec<f64> = tiles.iter().map(|t| t.bar_db()).collect();
+        let drawn = ac2_scene::bar_ease::eased(&from, &to, since);
+        for (t, d) in tiles.iter_mut().zip(drawn) {
+            t.drawn_db = Some(d);
+        }
+    }
     Some(LeqView {
         meter: m.config.name.clone(),
         cal: spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now),
         cfg,
-        tiles: leq_tiles(cfg, f),
+        tiles,
         history: st.leq_history.get(&m.id).map(|(_, h)| h),
         stale: match fresh {
             Freshness::Stale { age_s } => Some(format!("STALE {}", format::age(age_s))),

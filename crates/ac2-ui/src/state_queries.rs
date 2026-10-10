@@ -600,6 +600,21 @@ impl AppState {
         !self.nav.settled()
     }
 
+    /// Some Leq or band Leq bars still ease to their newest frame at `now`.
+    pub fn bars_easing(&self, now: std::time::Instant) -> bool {
+        self.prefs.bar_ease
+            && self.bar_from.keys().any(|t| {
+                self.data
+                    .as_ref()
+                    .and_then(|d| d.latest.get(t))
+                    .is_some_and(|tf| {
+                        ac2_scene::bar_ease::easing(
+                            now.saturating_duration_since(tf.received).as_secs_f64(),
+                        )
+                    })
+            })
+    }
+
     /// Generator ceiling from the daemon.
     pub fn ceiling(&self) -> Option<Dbfs> {
         self.daemon().map(|s| s.generator.ceiling)

@@ -681,7 +681,7 @@ pub(super) fn draw_columns(
         }
         // While filling the bar is the budget spent: the Leq the window ends at if the
         // rest is silent, reaching the limit line when going over becomes certain.
-        let bar_db = t.bar_db();
+        let bar_db = t.drawn_db.unwrap_or_else(|| t.bar_db());
         let bar = bar_db.is_finite().then(|| {
             let y = to_y(bar_db);
             Rect::new(track.x, y, track.w, track.bottom() - y)

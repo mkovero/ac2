@@ -290,6 +290,7 @@ impl AppState {
             // The palette's commands without focusing a pane: the page stays in front.
             DisplayRow::LeqStyle if d != 0 => self.toggle_leq_layout(false),
             DisplayRow::LeqHistory if d != 0 => self.toggle_leq_layout(true),
+            DisplayRow::LeqBars if d != 0 => self.toggle_bar_ease(),
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
@@ -639,6 +640,16 @@ impl AppState {
         self.toast(format!(
             "warning toasts {}",
             crate::settings::warning_toasts_text(self.prefs.warning_toasts)
+        ));
+    }
+
+    /// The Display page's Leq bars line; remembered in the prefs.
+    pub(super) fn toggle_bar_ease(&mut self) {
+        self.prefs.bar_ease = !self.prefs.bar_ease;
+        self.prefs_dirty = true;
+        self.toast(format!(
+            "Leq bars {}",
+            crate::settings::bar_ease_text(self.prefs.bar_ease)
         ));
     }
 

@@ -1,5 +1,6 @@
-//! Spring animation for navigation only (zoom, pan). Measurement values, traces and faults
-//! are never animated (PLAN §4.4): they are drawn as received.
+//! Spring animation for navigation (zoom, pan). Measurement values, traces and faults are
+//! drawn as received (PLAN §4.4); the one exception, the Leq bars' length easing between
+//! fresh frames, is [`ac2_scene::bar_ease`].
 
 use ac2_scene::view::FreqRange;
 

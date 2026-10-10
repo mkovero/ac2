@@ -23,6 +23,7 @@ pub mod axis;
 pub mod band_leq;
 pub mod band_transfer;
 pub mod banner;
+pub mod bar_ease;
 pub mod cal;
 mod canvas;
 pub mod distortion;

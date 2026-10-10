@@ -697,3 +697,31 @@ fn windows_are_grouped_by_length_and_weighting_low_band_to_high() {
         ]
     );
 }
+
+#[test]
+fn an_easing_bar_moves_only_its_length() {
+    let theme = Theme::default();
+    let v = view(&cfg(), &frame());
+    let rects = |s: &BandLeqScene| -> Vec<Rect> {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| l.rects.iter().map(|r| r.rect))
+            .collect()
+    };
+    let as_received = band_leq_scene(&v, &Status::default(), &theme, SIZE);
+    let mut low = v.clone();
+    for b in low.text.rows.iter_mut().flat_map(|r| &mut r.bars) {
+        b.drawn_db = b.leq_db.is_finite().then_some(b.leq_db - 10.0);
+    }
+    let easing = band_leq_scene(&low, &Status::default(), &theme, SIZE);
+    // Every number, name and state reads the frame's; the scale stays put.
+    assert_eq!(texts(&easing), texts(&as_received));
+    assert_eq!(easing.ranges, as_received.ranges);
+    let (a, b) = (rects(&as_received), rects(&easing));
+    assert_eq!(a.len(), b.len());
+    // Lower everywhere (a bar already at the scale's floor stays there), never higher.
+    assert!(a.iter().zip(&b).all(|(a, b)| b.h <= a.h));
+    assert!(a.iter().zip(&b).any(|(a, b)| b.h < a.h));
+    assert!(a.iter().zip(&b).all(|(a, b)| a.bottom() == b.bottom()));
+}

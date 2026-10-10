@@ -240,6 +240,13 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     // A layout row leaves the pane's view and the focus as they were.
     assert_eq!(t.focus_kind(), focus);
     t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::LeqBars);
+    assert!(t.st.prefs.bar_ease);
+    t.key("Right");
+    assert!(!t.st.prefs.bar_ease);
+    t.key("Left");
+    assert!(t.st.prefs.bar_ease);
+    t.key("Down");
     t.key("Right");
     assert_eq!(
         t.st.kind_modes(PaneKind::Spectrum).spectrum,

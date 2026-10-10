@@ -8,7 +8,7 @@
 //! offsets, polarity, nudges, selection) and hands them with the received frames to
 //! `ac2-scene`, which does all display math.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use ac2_client::MirrorView;
@@ -1022,6 +1022,9 @@ pub struct AppState {
     pub conn: ConnState,
     pub mirror: Option<Arc<MirrorView>>,
     pub data: Option<Arc<DataSnapshot>>,
+    /// Per Leq and band Leq topic, the frame the newest one replaced: the bars ease from it
+    /// ([`ac2_scene::bar_ease`]).
+    pub bar_from: HashMap<Topic, Arc<ac2_proto::Frame>>,
     /// Stored traces' data, as fetched.
     pub traces: BTreeMap<TraceId, (Arc<TraceData>, Arc<GridDef>)>,
     /// The transfer view's stored-trace display math, kept between frames.
@@ -1168,6 +1171,7 @@ impl AppState {
             conn: ConnState::Connecting { target },
             mirror: None,
             data: None,
+            bar_from: HashMap::new(),
             traces: BTreeMap::new(),
             theme,
             view: ViewState::default(),

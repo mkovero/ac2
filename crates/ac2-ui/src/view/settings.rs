@@ -297,6 +297,7 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
             key_hints: st.prefs.key_hints,
             warning_toasts: st.prefs.warning_toasts,
             resolution_marker: st.view.unresolved,
+            bar_ease: st.prefs.bar_ease,
         },
         st.prefs.spl_hold_ms,
         st.view.spectrum.spectrograph.span_s,

@@ -170,6 +170,7 @@ impl AppState {
                 self.follow_leq_logs(Some(&d), out);
                 self.fold_leq(&d);
                 self.fold_spl(&d);
+                self.keep_bar_from(&d);
                 self.data = Some(d);
                 self.fit_started_spectra();
             }

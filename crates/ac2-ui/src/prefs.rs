@@ -242,6 +242,9 @@ pub struct UiPrefs {
     /// The transfer and sweep panes shade the ranges a curve's analysis does not resolve
     /// at its grid (on until the operator turns it off).
     pub resolution_marker: bool,
+    /// The Leq and band Leq bars glide to each new reading (on until the operator turns it
+    /// off); off, they jump to it as received.
+    pub bar_ease: bool,
     /// How long the SPL meter's number holds a reading; `None`: by its time weighting
     /// (`ac2_scene::spl::display_period_s`).
     pub spl_hold_ms: Option<u32>,
@@ -276,6 +279,7 @@ impl Default for UiPrefs {
             key_hints: true,
             warning_toasts: true,
             resolution_marker: true,
+            bar_ease: true,
             spl_hold_ms: None,
             layout: LayoutPrefs::default(),
             levels: LevelPrefs::default(),
@@ -335,6 +339,9 @@ struct File {
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     resolution_marker: Option<bool>,
+    /// Written only when off (the default is on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bar_ease: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spl_hold_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1093,6 +1100,7 @@ impl UiPrefs {
             key_hints: f.key_hints.unwrap_or(true),
             warning_toasts: f.warning_toasts.unwrap_or(true),
             resolution_marker: f.resolution_marker.unwrap_or(true),
+            bar_ease: f.bar_ease.unwrap_or(true),
             spl_hold_ms: f.spl_hold_ms,
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
             levels: f
@@ -1122,6 +1130,7 @@ impl UiPrefs {
             unknown: BTreeMap::new(),
             warning_toasts: (!self.warning_toasts).then_some(false),
             resolution_marker: (!self.resolution_marker).then_some(false),
+            bar_ease: (!self.bar_ease).then_some(false),
             spl_hold_ms: self.spl_hold_ms,
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,
@@ -1271,6 +1280,17 @@ mod tests {
         p.resolution_marker = false;
         let text = p.to_toml();
         assert!(text.contains("resolution_marker = false"), "{text}");
+        assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+    }
+
+    #[test]
+    fn bar_ease_round_trip() {
+        let mut p = UiPrefs::default();
+        assert!(p.bar_ease);
+        assert!(!p.to_toml().contains("bar_ease"));
+        p.bar_ease = false;
+        let text = p.to_toml();
+        assert!(text.contains("bar_ease = false"), "{text}");
         assert_eq!(UiPrefs::from_toml(&text), Ok(p));
     }
 

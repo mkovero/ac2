@@ -179,6 +179,38 @@ impl AppState {
     }
 
     /// Folds the newest `leq` frame of each SPL meter into its history.
+    /// Keeps, per Leq and band Leq topic, the frame a new one replaces, for its bars to
+    /// ease from. A frame from another session, daemon or configuration is not the same
+    /// bars moving: none is kept, and the new one is drawn as received.
+    pub(super) fn keep_bar_from(&mut self, d: &DataSnapshot) {
+        let old = self.data.as_deref();
+        self.bar_from.retain(|t, _| d.latest.get(t).is_some());
+        for tf in d.latest.frames.values() {
+            let Topic::Data {
+                stream: Stream::Leq | Stream::BandLeq,
+                ..
+            } = tf.topic
+            else {
+                continue;
+            };
+            let Some(prev) = old.and_then(|o| o.latest.get(&tf.topic)) else {
+                continue;
+            };
+            let (a, b) = (&prev.frame.stamp, &tf.frame.stamp);
+            if a.seq == b.seq {
+                continue;
+            }
+            if a.session_epoch == b.session_epoch
+                && a.daemon_incarnation == b.daemon_incarnation
+                && a.config_rev == b.config_rev
+            {
+                self.bar_from.insert(tf.topic, prev.frame.clone());
+            } else {
+                self.bar_from.remove(&tf.topic);
+            }
+        }
+    }
+
     pub(super) fn fold_leq(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
         // Without a synced daemon state (a resync, a short drop) the meter list is unknown,
