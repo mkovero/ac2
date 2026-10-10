@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 
 use ac2_proto::model::{
-    MeasKind, Measurement, SpecAveraging, SweepRun, TraceMeta, TraceOwner, TraceSource,
+    MeasKind, Measurement, Resolution, SpecAveraging, SweepRun, TraceMeta, TraceOwner, TraceSource,
 };
 use ac2_proto::units::{MeasId, TraceId};
 
@@ -117,6 +117,15 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
         } else if d.tracking {
             text.push_str(" · tracking");
         }
+    }
+    // A resolution other than the default is said: it changes what the curve can show.
+    let resolution = match &m.config.kind {
+        MeasKind::Transfer { config } => Some(config.resolution),
+        MeasKind::Sweep { config } => Some(config.resolution),
+        _ => None,
+    };
+    if let Some(r) = resolution.filter(|r| *r != Resolution::default()) {
+        text.push_str(&format!(" · res {}", format::resolution(r)));
     }
     match &m.config.kind {
         MeasKind::Transfer { config } if config.smoothing.is_some() => {
@@ -760,11 +769,7 @@ pub(crate) mod tests {
                         averaging: TfAveraging::Exponential {
                             time_constant: Seconds(1.0),
                         },
-                        grid: LogGridSpec {
-                            ppo: 48,
-                            k_min: -240,
-                            k_max: 216,
-                        },
+                        resolution: Resolution::FortyEighth,
                         smoothing: None,
                         depth: DepthPolicy::EqualConfidence,
                     },
@@ -822,6 +827,21 @@ pub(crate) mod tests {
         assert_eq!(
             meas_row(&item(&plain), None, true).text,
             "TF  TF 3\n     running"
+        );
+    }
+
+    #[test]
+    fn tf_rows_say_a_resolution_other_than_the_default() {
+        let mut m = tf(4, "Room");
+        let MeasKind::Transfer { config } = &mut m.config.kind else {
+            unreachable!()
+        };
+        config.resolution = Resolution::NinetySixth;
+        config.smoothing = Some(Smoothing::of(SmoothingFraction::Sixth));
+        let smoothing = format::smoothing(config.smoothing);
+        assert_eq!(
+            meas_row(&item(&m), None, true).text,
+            format!("TF  Room\n     running · res 1/96 oct · {smoothing}")
         );
     }
 
@@ -951,6 +971,7 @@ pub(crate) mod tests {
             gate: None,
             tail: None,
             lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+            resolution: ac2_proto::model::Resolution::FortyEighth,
         }
     }
 
@@ -1257,6 +1278,7 @@ pub(crate) mod tests {
             post_roll: Seconds(1.0),
             repeats: 2,
             gate: None,
+            resolution: ac2_proto::model::Resolution::FortyEighth,
             lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
             status: SweepStatus::Playing { repeat: 1 },
             started_at: WallNs(0),

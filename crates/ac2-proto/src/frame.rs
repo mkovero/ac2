@@ -17,7 +17,7 @@ use crate::grid::GridId;
 use crate::model::{
     BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale, Operand,
     PeakWeighting, PhaseBasis, PositionCorrection, Smoothing, SmoothingFraction, TimeWeighting,
-    TimingState, TimingStatus, Weighting, Window,
+    TimingState, TimingStatus, Unresolved, Weighting, Window,
 };
 use crate::topic::{Stream, Topic};
 use crate::units::{
@@ -305,6 +305,9 @@ pub struct TfMeta {
     pub mic_curve: bool,
     /// What a math channel combined; `None` for a transfer measurement.
     pub math: Option<Box<MathState>>,
+    /// Where the columns are finer than the analysis stage serving them resolves; `None`
+    /// for a math channel.
+    pub unresolved: Option<Unresolved>,
 }
 
 /// What a math channel's frame combined.

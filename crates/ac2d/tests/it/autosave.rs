@@ -140,6 +140,7 @@ fn traces_survive_a_restart() {
                 gate: None,
                 tail: None,
                 lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+                resolution: ac2_proto::model::Resolution::FortyEighth,
             },
         },
     };

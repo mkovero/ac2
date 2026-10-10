@@ -117,6 +117,10 @@ pub struct TfTrace<'a> {
     /// Drawn for compare only (another measurement's or an imported curve, not the pane's
     /// group): the legend tags it [`COMPARED`].
     pub compared: bool,
+    /// Ranges of the grid finer than the analysis behind the columns (the valid-resolution
+    /// marker, [`crate::unresolved`]); `None`: not known (math channels, stored transfer
+    /// curves).
+    pub unresolved: Option<crate::unresolved::Source<'a>>,
 }
 
 /// The legend tag of a compared curve, and the measurement tree's mark of a compared row.
@@ -156,6 +160,14 @@ impl<'a> TfTrace<'a> {
             stored: None,
             selected: false,
             compared: false,
+            unresolved: frame
+                .meta
+                .unresolved
+                .as_ref()
+                .map(|u| crate::unresolved::Source {
+                    unresolved: u,
+                    fill: crate::unresolved::Fill::Gaps,
+                }),
         }
     }
 
@@ -205,6 +217,14 @@ impl<'a> TfTrace<'a> {
             stored: Some(data),
             selected: false,
             compared: false,
+            unresolved: data
+                .sweep
+                .as_ref()
+                .and_then(|s| s.unresolved.as_ref())
+                .map(|u| crate::unresolved::Source {
+                    unresolved: &u.response,
+                    fill: crate::unresolved::Fill::Interpolated,
+                }),
         }
     }
 }
@@ -807,6 +827,7 @@ mod tests {
                 stored: None,
                 selected: false,
                 compared: false,
+                unresolved: None,
             }
         }
     }
@@ -1097,6 +1118,7 @@ mod tests {
                 smoothing: None,
                 mic_curve: false,
                 math: None,
+                unresolved: None,
             },
             mag: vec![0.0; n],
             phase: measured_phase(freqs, tau, applied),

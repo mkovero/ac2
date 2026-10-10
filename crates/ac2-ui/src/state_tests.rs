@@ -46,11 +46,7 @@ fn transfer() -> MeasKind {
             averaging: TfAveraging::Exponential {
                 time_constant: Seconds(1.0),
             },
-            grid: LogGridSpec {
-                ppo: 48,
-                k_min: -240,
-                k_max: 216,
-            },
+            resolution: Resolution::FortyEighth,
             smoothing: None,
             depth: ac2_proto::model::DepthPolicy::EqualConfidence,
         },
@@ -611,6 +607,7 @@ fn sweep_run(status: SweepStatus) -> SweepRun {
         repeats: 1,
         gate: None,
         lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+        resolution: ac2_proto::model::Resolution::FortyEighth,
         status,
         started_at: WallNs(0),
     }
@@ -659,6 +656,7 @@ fn sweep_data(id: u32) -> (Arc<TraceData>, Arc<GridDef>) {
         coherence: None,
         ir: None,
         sweep: Some(SweepData {
+            unresolved: None,
             harmonics: vec![HarmonicCurve {
                 order: 2,
                 curve: curve(-40.0),

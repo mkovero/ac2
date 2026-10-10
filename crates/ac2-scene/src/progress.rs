@@ -103,6 +103,7 @@ mod tests {
             repeats: 2,
             gate: None,
             lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+            resolution: ac2_proto::model::Resolution::FortyEighth,
             status,
             started_at: WallNs(0),
         }

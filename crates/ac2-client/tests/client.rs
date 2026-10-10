@@ -67,11 +67,7 @@ fn tf_config() -> MeasConfig {
                 reference_input: 0,
                 measurement_input: 1,
                 averaging: TfAveraging::Fifo { blocks: 8 },
-                grid: LogGridSpec {
-                    ppo: 24,
-                    k_min: -120,
-                    k_max: 119,
-                },
+                resolution: Resolution::TwentyFourth,
                 smoothing: None,
                 depth: DepthPolicy::EqualConfidence,
             },

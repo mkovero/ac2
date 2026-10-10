@@ -106,6 +106,21 @@ pub fn freq_readout(hz: f64) -> String {
     }
 }
 
+/// A frequency named only roughly, two significant digits: `68 Hz`, `410 Hz`, `1.6 kHz`.
+/// For edges that are themselves estimates (where a resolution runs out).
+pub fn freq_rough(hz: f64) -> String {
+    if !hz.is_finite() || hz <= 0.0 {
+        return NO_VALUE.to_string();
+    }
+    let r = round_sig(hz, 2);
+    if r >= 1000.0 {
+        let k = r / 1000.0;
+        format!("{} kHz", fixed(k, needed_decimals(k, 1)))
+    } else {
+        format!("{} Hz", fixed(r, needed_decimals(r, 1)))
+    }
+}
+
 /// Voltage, four significant digits (a bench meter's resolution) in µV, mV or V:
 /// `15.03 mV`, `1.500 V`, `250.0 µV`.
 pub fn volts(v: f64) -> String {
@@ -277,6 +292,12 @@ pub fn smoothing(s: Option<ac2_proto::model::Smoothing>) -> String {
             }
         },
     }
+}
+
+/// A measurement's stored points per octave: `1/48 oct`. Spelled like a smoothing width
+/// on purpose (both are 1/N octave); the labels around it say which one it is.
+pub fn resolution(r: ac2_proto::model::Resolution) -> String {
+    format!("1/{} oct", r.ppo())
 }
 
 /// `1/6 oct`.

@@ -112,13 +112,6 @@ pub(super) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
             if config.reference_input == config.measurement_input {
                 return inv("reference and measurement must be different inputs");
             }
-            let g = config.grid;
-            if g.ppo == 0 || g.ppo > 96 || g.k_min > g.k_max {
-                return inv("invalid grid");
-            }
-            if i64::from(g.k_max) - i64::from(g.k_min) + 1 > i64::from(ac2_proto::frame::MAX_N) {
-                return inv("grid too large");
-            }
             if conv::tf_averaging(config.averaging).is_none() {
                 return inv("invalid averaging");
             }
@@ -284,9 +277,9 @@ pub(super) fn not_a_sweep(m: &Measurement) -> Result<(), ProtoError> {
 pub(super) fn static_grid(kind: &MeasKind) -> Option<GridDef> {
     match kind {
         MeasKind::Transfer { config } => Some(GridDef::Log {
-            ppo: config.grid.ppo,
-            k_min: config.grid.k_min,
-            k_max: config.grid.k_max,
+            ppo: config.grid().ppo,
+            k_min: config.grid().k_min,
+            k_max: config.grid().k_max,
         }),
         _ => None,
     }

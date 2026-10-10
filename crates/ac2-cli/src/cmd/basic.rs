@@ -258,6 +258,13 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
             n.kind
         )));
     }
+    if n.resolution.is_some() && !matches!(n.kind, MeasKindArg::Tf | MeasKindArg::Sweep) {
+        return Err(CliError::Usage(format!(
+            "--resolution applies to tf and sweep, not {:?}",
+            n.kind
+        )));
+    }
+    let resolution = n.resolution.map(|r| r.0).unwrap_or_default();
     if n.average.is_some() && !matches!(n.kind, MeasKindArg::Spectrum | MeasKindArg::Rta) {
         return Err(CliError::Usage(format!(
             "--average applies to spectrum and rta, not {:?}{}",
@@ -301,14 +308,12 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                     gate: n.gate.map(|g| g.0),
                     tail: n.tail.map(|t| t.0),
                     lf_harmonics: n.lf_harmonics.unwrap_or_default().into(),
+                    resolution,
                 })?,
             }
         }
         MeasKindArg::Tf => {
             refuse(n.input, "input")?;
-            if n.ppo == 0 || n.ppo > 96 {
-                return Err(CliError::Usage("--ppo must be 1 … 96".into()));
-            }
             if n.blocks == 0 {
                 return Err(CliError::Usage("--blocks must be at least 1".into()));
             }
@@ -317,7 +322,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                     reference_input: need(n.reference, "ref")?,
                     measurement_input: need(n.measurement, "meas")?,
                     averaging: TfAveraging::Fifo { blocks: n.blocks },
-                    grid: LogGridSpec::ten_octaves(n.ppo),
+                    resolution,
                     smoothing: n
                         .smooth
                         .map(|f| {
@@ -413,15 +418,21 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
     })
 }
 
-/// `meas set`: `config` with the averaging changed.
-pub(crate) fn meas_set(
-    config: &MeasConfig,
-    average: Option<SpecAveraging>,
-    blocks: Option<u32>,
-) -> Result<MeasConfig, CliError> {
-    if average.is_none() && blocks.is_none() {
+/// What `meas set` changes.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct MeasSet {
+    pub(crate) average: Option<SpecAveraging>,
+    pub(crate) blocks: Option<u32>,
+    pub(crate) resolution: Option<Resolution>,
+}
+
+/// `meas set`: `config` with the averaging or Resolution changed.
+pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, CliError> {
+    if set.average.is_none() && set.blocks.is_none() && set.resolution.is_none() {
         return Err(CliError::Usage(
-            "say what changes: --average (spectrum, rta) or --blocks (tf)".into(),
+            "say what changes: --average (spectrum, rta), --blocks (tf) or --resolution \
+             (tf, sweep)"
+                .into(),
         ));
     }
     let mut config = config.clone();
@@ -434,24 +445,32 @@ pub(crate) fn meas_set(
         MeasKind::Math { .. } => "math",
         MeasKind::Sweep { .. } => "sweep",
     };
-    match (&mut config.kind, average, blocks) {
-        (MeasKind::Spectrum { config: c }, Some(a), None) => c.averaging = a,
-        (MeasKind::Rta { config: c }, Some(a), None) => c.averaging = a,
-        (MeasKind::Transfer { config: c }, None, Some(b)) => {
-            if b == 0 {
-                return Err(CliError::Usage("--blocks must be at least 1".into()));
-            }
-            c.averaging = TfAveraging::Fifo { blocks: b };
+    let not = |flag: &str, applies: &str| {
+        Err(CliError::Usage(format!(
+            "--{flag} applies to {applies}; {name} is a {kind} measurement"
+        )))
+    };
+    if let Some(a) = set.average {
+        match &mut config.kind {
+            MeasKind::Spectrum { config: c } => c.averaging = a,
+            MeasKind::Rta { config: c } => c.averaging = a,
+            _ => return not("average", "spectrum and rta"),
         }
-        (_, Some(_), _) => {
-            return Err(CliError::Usage(format!(
-                "--average applies to spectrum and rta; {name} is a {kind} measurement"
-            )));
+    }
+    if let Some(b) = set.blocks {
+        let MeasKind::Transfer { config: c } = &mut config.kind else {
+            return not("blocks", "tf");
+        };
+        if b == 0 {
+            return Err(CliError::Usage("--blocks must be at least 1".into()));
         }
-        (_, _, _) => {
-            return Err(CliError::Usage(format!(
-                "--blocks applies to tf; {name} is a {kind} measurement"
-            )));
+        c.averaging = TfAveraging::Fifo { blocks: b };
+    }
+    if let Some(r) = set.resolution {
+        match &mut config.kind {
+            MeasKind::Transfer { config: c } => c.resolution = r,
+            MeasKind::Sweep { config: c } => c.resolution = r,
+            _ => return not("resolution", "tf and sweep"),
         }
     }
     Ok(config)
@@ -486,10 +505,16 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             meas,
             average,
             blocks,
+            resolution,
         } => {
             let s = state(&c).await?;
             let m = find_meas(&s, meas)?;
-            let config = meas_set(&m.config, average.map(|a| a.0), *blocks)?;
+            let set = MeasSet {
+                average: average.map(|a| a.0),
+                blocks: *blocks,
+                resolution: resolution.map(|r| r.0),
+            };
+            let config = meas_set(&m.config, set)?;
             let m = meas_call(&c, Command::MeasUpdate { meas: m.id, config }).await?;
             out.emit(&m, || output::measurement(&m))?;
         }
@@ -994,22 +1019,98 @@ mod tests {
         .expect_err("refused");
         assert!(e.to_string().contains("tf averages over --blocks"), "{e}");
 
-        let set = meas_set(&rta, Some(SpecAveraging::Off), None).expect("set");
+        let avg = |a| MeasSet {
+            average: Some(a),
+            ..MeasSet::default()
+        };
+        let blocks = |b| MeasSet {
+            blocks: Some(b),
+            ..MeasSet::default()
+        };
+        let set = meas_set(&rta, avg(SpecAveraging::Off)).expect("set");
         assert!(matches!(
             set.kind,
             MeasKind::Rta { config } if config.averaging == SpecAveraging::Off
         ));
-        assert!(meas_set(&rta, None, None).is_err());
-        let e = meas_set(&rta, None, Some(4)).expect_err("refused");
+        assert!(meas_set(&rta, MeasSet::default()).is_err());
+        let e = meas_set(&rta, blocks(4)).expect_err("refused");
         assert!(e.to_string().contains("--blocks applies to tf"), "{e}");
         let tf = config(&["tf", "--name", "t", "--ref", "2", "--meas", "1"]).expect("tf");
-        let set = meas_set(&tf, None, Some(32)).expect("set");
+        let set = meas_set(&tf, blocks(32)).expect("set");
         assert!(matches!(
             set.kind,
             MeasKind::Transfer { config } if config.averaging == TfAveraging::Fifo { blocks: 32 }
         ));
-        let e = meas_set(&tf, Some(SpecAveraging::Off), None).expect_err("refused");
+        let e = meas_set(&tf, avg(SpecAveraging::Off)).expect_err("refused");
         assert!(e.to_string().contains("t is a tf measurement"), "{e}");
+    }
+
+    #[test]
+    fn tf_and_sweep_take_a_resolution_and_meas_set_changes_it() {
+        let tf = |extra: &[&str]| {
+            let base = ["tf", "--name", "t", "--ref", "2", "--meas", "1"];
+            let args: Vec<&str> = base.iter().chain(extra).copied().collect();
+            config(&args).map(|c| match c.kind {
+                MeasKind::Transfer { config } => config.resolution,
+                other => panic!("{other:?}"),
+            })
+        };
+        assert_eq!(tf(&[]).expect("default"), Resolution::FortyEighth);
+        assert_eq!(
+            tf(&["--resolution", "1/96"]).expect("1/96"),
+            Resolution::NinetySixth
+        );
+        assert_eq!(
+            tf(&["--resolution", "12"]).expect("12"),
+            Resolution::Twelfth
+        );
+        let e = tf(&["--resolution", "1/6"]).expect_err("refused");
+        assert!(e.to_string().contains("1/12, 1/24, 1/48 or 1/96"), "{e}");
+        assert!(tf(&["--ppo", "48"]).is_err());
+        let sweep = config(&[
+            "sweep",
+            "--name",
+            "s",
+            "--ref",
+            "2",
+            "--meas",
+            "1",
+            "--out",
+            "1,2",
+            "--level",
+            "-50dbfs",
+            "--resolution",
+            "1/24",
+        ])
+        .expect("sweep");
+        assert!(matches!(
+            &sweep.kind,
+            MeasKind::Sweep { config } if config.resolution == Resolution::TwentyFourth
+        ));
+        let e = config(&["rta", "--name", "r", "--input", "1", "--resolution", "1/48"])
+            .expect_err("refused");
+        assert!(
+            e.to_string()
+                .contains("--resolution applies to tf and sweep"),
+            "{e}"
+        );
+
+        let fine = MeasSet {
+            resolution: Some(Resolution::NinetySixth),
+            ..MeasSet::default()
+        };
+        let set = meas_set(&sweep, fine).expect("set");
+        assert!(matches!(
+            set.kind,
+            MeasKind::Sweep { config } if config.resolution == Resolution::NinetySixth
+        ));
+        let rta = config(&["rta", "--name", "r", "--input", "1"]).expect("rta");
+        let e = meas_set(&rta, fine).expect_err("refused");
+        assert!(
+            e.to_string()
+                .contains("--resolution applies to tf and sweep"),
+            "{e}"
+        );
     }
 
     /// A merged lobe lists one candidate: the text explains why and offers only `--pick 1`.

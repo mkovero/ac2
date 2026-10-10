@@ -76,6 +76,7 @@ pub(crate) fn data() -> TraceData {
         coherence: None,
         ir: None,
         sweep: Some(SweepData {
+            unresolved: None,
             harmonics: vec![
                 HarmonicCurve {
                     order: 2,
@@ -541,4 +542,81 @@ fn the_sweep_ir_has_its_own_axes_and_cursor() {
             .any(|l| l.text == cur.text()),
         "the readout is drawn"
     );
+}
+
+/// The response's unresolved ranges shade the fundamental's pane, the harmonics' (wider:
+/// a harmonic's cell on the fundamental's axis is its window's cell over its order) the
+/// distortion pane; the cursor names the one it is in.
+#[test]
+fn unresolved_ranges_mark_both_panes() {
+    let mut d = data();
+    let range = |lo: f64, hi: f64| FreqRange {
+        lo: Hz(lo),
+        hi: Hz(hi),
+    };
+    d.sweep.as_mut().unwrap().unresolved = Some(SweepUnresolved {
+        response: Unresolved {
+            resolution: Resolution::FortyEighth,
+            ranges: vec![range(30.0, 45.0)],
+        },
+        harmonics: Unresolved {
+            resolution: Resolution::FortyEighth,
+            ranges: vec![range(30.0, 140.0)],
+        },
+    });
+    let f = column_frequencies(&grid());
+    let theme = Theme::dark();
+    let view = ViewState {
+        cursor_hz: Some(100.0),
+        ..ViewState::default()
+    };
+    let scene = |view: &ViewState| {
+        distortion_scene(
+            Some(SweepView {
+                data: &d,
+                freqs: &f,
+                color: Color::from_rgba8([1, 2, 3, 255]),
+            }),
+            &status(),
+            view,
+            &theme,
+            SIZE,
+        )
+    };
+    let sc = scene(&view);
+    let text = |m: &[crate::unresolved::Mark]| -> Vec<String> {
+        m.iter().map(|m| m.text.clone()).collect()
+    };
+    assert_eq!(
+        text(&sc.unresolved_response),
+        ["below 45 Hz: coarser than 1/48 oct (interpolated)"]
+    );
+    assert_eq!(
+        text(&sc.unresolved_harmonics),
+        ["below 140 Hz: harmonics coarser than 1/48 oct (interpolated)"]
+    );
+    let cur = sc.cursor.as_ref().unwrap();
+    assert!(
+        cur.freq
+            .ends_with(" · harmonics coarser than 1/48 oct (interpolated)"),
+        "{}",
+        cur.freq
+    );
+    let shades: Vec<_> = sc.scene.layers[0]
+        .rects
+        .iter()
+        .filter(|r| r.color == theme.unresolved_shade)
+        .map(|r| r.rect)
+        .collect();
+    assert_eq!(shades.len(), 2);
+    assert!(shades[0].bottom() <= sc.fundamental.bottom() + 0.01);
+    assert!(shades[1].y >= sc.plot.y - 0.01);
+    assert!(shades[1].w > shades[0].w);
+
+    let off = scene(&ViewState {
+        unresolved: false,
+        ..view
+    });
+    assert!(off.unresolved_response.is_empty() && off.unresolved_harmonics.is_empty());
+    assert!(!off.cursor.unwrap().freq.contains("coarser"));
 }

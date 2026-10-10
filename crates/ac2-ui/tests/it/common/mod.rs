@@ -84,6 +84,7 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
             }),
             mic_curve: false,
             math: None,
+            unresolved: None,
         },
         mag,
         phase,
@@ -277,11 +278,7 @@ fn transfer(meas_in: u16) -> MeasKind {
             averaging: TfAveraging::Exponential {
                 time_constant: Seconds(1.0),
             },
-            grid: LogGridSpec {
-                ppo: 24,
-                k_min: -135,
-                k_max: 103,
-            },
+            resolution: Resolution::TwentyFourth,
             // As the frames say (`tf_frame`).
             smoothing: Some(Smoothing {
                 fraction: SmoothingFraction::Sixth,

@@ -53,6 +53,7 @@ fn request(level: f64) -> SweepConfig {
         gate: None,
         tail: None,
         lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+        resolution: ac2_proto::model::Resolution::FortyEighth,
     }
 }
 
@@ -523,6 +524,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         sweep: EssSpec::with_fades(Hz(100.0), Hz(10_000.0), Seconds(1.0)),
         tail: Some(Seconds(2.0)),
         lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+        resolution: ac2_proto::model::Resolution::NinetySixth,
         ..request(LEVEL)
     };
     let meas = create(&mut c, "hall", req);
@@ -539,7 +541,30 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         ReplyBody::TraceData(t) => *t,
         other => panic!("{other:?}"),
     };
+    // 100 Hz … 10 kHz at 96 points per octave.
+    assert!(data.mag_db.len() > 600, "{}", data.mag_db.len());
     let s = data.sweep.expect("sweep data");
+    // At 1/96 octave the harmonics' shared window (≤ 0.1 s, cells ≥ 5 Hz of fundamental for
+    // H2) is coarser than a column up to several hundred hertz; the response's window runs
+    // to the noise window (about a second): resolved from the sweep's start up.
+    let unresolved = s.unresolved.clone().expect("unresolved ranges");
+    assert_eq!(
+        unresolved.response.resolution,
+        ac2_proto::model::Resolution::NinetySixth
+    );
+    assert!(
+        unresolved.response.ranges.iter().all(|r| r.hi.0 < 200.0),
+        "{:?}",
+        unresolved.response
+    );
+    let top = unresolved
+        .harmonics
+        .ranges
+        .last()
+        .expect("harmonics range")
+        .hi
+        .0;
+    assert!(top > 300.0 && top < 2000.0, "{:?}", unresolved.harmonics);
     let room = s.room.clone().expect("room parameters");
     assert!(
         room.span_end.0 > 1.9 && room.span_end.0 < 2.0,
@@ -597,7 +622,9 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         ReplyBody::TraceData(t) => *t,
         other => panic!("{other:?}"),
     };
-    assert_eq!(again.sweep.and_then(|s| s.room), Some(room));
+    let again = again.sweep.expect("sweep data after import");
+    assert_eq!(again.room, Some(room));
+    assert_eq!(again.unresolved, Some(unresolved));
 }
 
 #[test]

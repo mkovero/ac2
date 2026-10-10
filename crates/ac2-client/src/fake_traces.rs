@@ -204,9 +204,10 @@ impl Shared {
         }
         let (reference, measurement) = (req.reference_input, req.measurement_input);
         let (f1, f2) = (req.sweep.start.0, req.sweep.end.0);
-        let k = |f: f64| (f / 1000.0).log2() * 48.0;
+        let ppo = req.resolution.ppo();
+        let k = |f: f64| (f / 1000.0).log2() * f64::from(ppo);
         let grid = GridDef::Log {
-            ppo: 48,
+            ppo,
             k_min: k(f1).floor() as i32,
             k_max: k(f2).ceil() as i32,
         };
@@ -228,6 +229,7 @@ impl Shared {
             repeats: req.repeats,
             gate: req.gate,
             lf_harmonics: req.lf_harmonics,
+            resolution: req.resolution,
             status: SweepStatus::Playing { repeat: 1 },
             started_at: WallNs(1_790_000_000_000_000_000),
         };
@@ -314,9 +316,9 @@ impl Shared {
             ));
         };
         let grid = GridDef::Log {
-            ppo: config.grid.ppo,
-            k_min: config.grid.k_min,
-            k_max: config.grid.k_max,
+            ppo: config.grid().ppo,
+            k_min: config.grid().k_min,
+            k_max: config.grid().k_max,
         };
         let id = self.alloc_trace();
         let mut t = Self::new_meta(
@@ -674,9 +676,9 @@ impl Shared {
             let grid_id = match &sm.config.kind {
                 MeasKind::Transfer { config } => {
                     let g = GridDef::Log {
-                        ppo: config.grid.ppo,
-                        k_min: config.grid.k_min,
-                        k_max: config.grid.k_max,
+                        ppo: config.grid().ppo,
+                        k_min: config.grid().k_min,
+                        k_max: config.grid().k_max,
                     };
                     let id = g.id();
                     self.grids.insert(id, g);
@@ -823,8 +825,43 @@ fn synthetic_sweep(grid: &GridDef, f2: f64, rate: f64, repeats: u8) -> (Columns,
             clipped: false,
         },
         room: Some(synthetic_room(f2)),
+        unresolved: None,
     };
-    (columns, sweep)
+    let unresolved = synthetic_unresolved(grid, &sweep.info);
+    (
+        columns,
+        SweepData {
+            unresolved,
+            ..sweep
+        },
+    )
+}
+
+/// Where a cell of `1/window` is wider than a column: below `κ(ppo) · cell`, with
+/// `κ(N) = 1/(2^(1/2N) − 2^(−1/2N))`; the response's linear window and H2's share of the
+/// harmonic window (the daemon's analysis works this out per column).
+fn synthetic_unresolved(grid: &GridDef, info: &SweepInfo) -> Option<SweepUnresolved> {
+    let GridDef::Log { ppo, k_min, .. } = *grid else {
+        return None;
+    };
+    let resolution = Resolution::from_ppo(ppo)?;
+    let h = 0.5 / f64::from(ppo);
+    let kappa = 1.0 / (2f64.powf(h) - 2f64.powf(-h));
+    let lo = 1000.0 * 2f64.powf((f64::from(k_min) - 0.5) / f64::from(ppo));
+    let below = |cell: f64| Unresolved {
+        resolution,
+        ranges: (kappa * cell > lo)
+            .then_some(FreqRange {
+                lo: Hz(lo),
+                hi: Hz(kappa * cell),
+            })
+            .into_iter()
+            .collect(),
+    };
+    Some(SweepUnresolved {
+        response: below(1.0 / (info.gate_pre.0 + info.gate.0)),
+        harmonics: below(1.0 / (2.0 * (info.window_pre.0 + info.window_post.0))),
+    })
 }
 
 /// Synthetic room parameters: a hall of T ≈ 1.1 s falling to 0.7 s at the top, 52 dB of

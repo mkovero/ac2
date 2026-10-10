@@ -56,7 +56,7 @@ use crate::text::{export_csv, import};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 19;
+pub const VERSION: u32 = 20;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].

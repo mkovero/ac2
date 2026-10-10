@@ -17,6 +17,7 @@ pub mod mic_curve;
 pub mod mtw;
 pub mod power_average;
 pub mod protection;
+pub mod resolution;
 pub mod room;
 pub mod rta;
 pub mod smoothing;

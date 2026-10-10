@@ -103,11 +103,7 @@ fn meas_config() -> MeasConfig {
                 reference_input: 0,
                 measurement_input: 1,
                 averaging: TfAveraging::Fifo { blocks: 8 },
-                grid: LogGridSpec {
-                    ppo: 48,
-                    k_min: -240,
-                    k_max: 239,
-                },
+                resolution: Resolution::NinetySixth,
                 smoothing: Some(Smoothing {
                     fraction: SmoothingFraction::Sixth,
                     mode: SmoothingMode::Magnitude,
@@ -163,6 +159,7 @@ fn sweep_config() -> SweepConfig {
         gate: Some(Seconds(0.005)),
         tail: Some(Seconds(3.0)),
         lf_harmonics: LfHarmonics::Fine,
+        resolution: Resolution::TwentyFourth,
     }
 }
 
@@ -678,6 +675,7 @@ fn sweep_run() -> SweepRun {
         repeats: 2,
         gate: None,
         lf_harmonics: LfHarmonics::Standard,
+        resolution: Resolution::FortyEighth,
         status: SweepStatus::Done { trace: TraceId(9) },
         started_at: WallNs(1_790_000_000_000_000_000),
     }
@@ -752,6 +750,19 @@ fn sweep_data() -> SweepData {
             octave: vec![room_band(Some(Hz(1000.0)))],
             third: Vec::new(),
             span_end: Seconds(0.98),
+        }),
+        unresolved: Some(SweepUnresolved {
+            response: Unresolved {
+                resolution: Resolution::FortyEighth,
+                ranges: Vec::new(),
+            },
+            harmonics: Unresolved {
+                resolution: Resolution::FortyEighth,
+                ranges: vec![FreqRange {
+                    lo: Hz(20.0),
+                    hi: Hz(212.5),
+                }],
+            },
         }),
     }
 }
@@ -1645,6 +1656,19 @@ pub fn tf_frame() -> Frame {
                     mode: SmoothingMode::Magnitude,
                 }),
                 mic_curve: true,
+                unresolved: Some(Unresolved {
+                    resolution: Resolution::NinetySixth,
+                    ranges: vec![
+                        FreqRange {
+                            lo: Hz(31.25),
+                            hi: Hz(135.5),
+                        },
+                        FreqRange {
+                            lo: Hz(1625.0),
+                            hi: Hz(3250.0),
+                        },
+                    ],
+                }),
                 math: Some(Box::new(MathState {
                     operands: vec![
                         OperandState {

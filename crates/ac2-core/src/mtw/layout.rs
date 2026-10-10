@@ -222,6 +222,29 @@ impl Layout {
         }
     }
 
+    /// Resolution cell of a column centred at `f`: the bin spacing of the coarsest stage
+    /// serving it (in a crossover blend, the shallow one); `None` above the served band.
+    pub fn cell_hz(&self, f: f64) -> Option<f64> {
+        if f > self.stages.first()?.served_hi_hz {
+            return None;
+        }
+        let serving = self
+            .crossovers
+            .iter()
+            .find(|c| f > c.lo_hz)
+            .map_or(self.stages.len() - 1, |c| c.shallow);
+        Some(self.stages[serving].bin_hz)
+    }
+
+    /// Ranges of `grid` where a column is narrower than the bin of the stage serving it
+    /// ([`crate::resolution::unresolved_ranges`]). On a grid at the design density only the
+    /// band below the deepest stage's validity edge; on a finer one also the band from each
+    /// crossover up to `κ(ppo) / κ(design)` times it, where the shallower stage serves
+    /// columns narrower than its bins.
+    pub fn unresolved_ranges(&self, grid: &crate::grid::LogGrid) -> Vec<(f64, f64)> {
+        crate::resolution::unresolved_ranges(grid, |f| self.cell_hz(f))
+    }
+
     fn standard(sr: f64) -> Result<Self, LayoutError> {
         let mut factors = vec![1usize];
         for target in DECIMATED_TARGET_RATES_HZ {
@@ -327,6 +350,67 @@ mod tests {
         assert_eq!(
             l.stages.iter().map(|s| s.hop).collect::<Vec<_>>(),
             vec![2048, 1024, 512]
+        );
+    }
+
+    fn ten_octaves(ppo: u32) -> crate::grid::LogGrid {
+        let p = ppo as i32;
+        crate::grid::LogGrid {
+            ppo,
+            k_min: -5 * p,
+            k_max: 5 * p - 1,
+        }
+    }
+
+    /// `want` within one column (`2^(1/ppo)`) of `got`.
+    fn near(got: f64, want: f64, ppo: u32) -> bool {
+        (got / want).log2().abs() <= 1.0 / f64::from(ppo)
+    }
+
+    #[test]
+    fn unresolved_at_96k() {
+        // Bins at 96 kHz: 96000/4096 = 23.44 Hz, /8 → 2.930 Hz, /24 → 0.9766 Hz. Crossovers
+        // at κ(48)·bin: 1623 Hz and 202.9 Hz; the deepest stage resolves 1/48 from
+        // κ(48)·0.9766 = 67.6 Hz and 1/96 from κ(96)·0.9766 = 135.3 Hz.
+        let l = Layout::new(96_000.0, Ladder::Standard).expect("layout");
+        let bins: Vec<f64> = l.stages.iter().map(|s| s.bin_hz).collect();
+        let r48 = l.unresolved_ranges(&ten_octaves(48));
+        assert_eq!(r48.len(), 1, "{r48:?}");
+        assert!(r48[0].0 < 32.0);
+        assert!(near(r48[0].1, 67.6, 48), "{r48:?}");
+        assert!(near(r48[0].1, validity_factor(48) * bins[2], 48));
+
+        let r96 = l.unresolved_ranges(&ten_octaves(96));
+        assert_eq!(r96.len(), 3, "{r96:?}");
+        let k96 = validity_factor(96);
+        assert!(near(r96[0].1, k96 * bins[2], 96), "{r96:?}");
+        assert!((k96 * bins[2] - 135.25).abs() < 0.05);
+        // Just above each crossover the shallower stage's bins are wider than 1/96.
+        assert!(near(r96[1].0, l.crossovers[1].lo_hz, 96), "{r96:?}");
+        assert!(near(r96[1].1, k96 * bins[1], 96), "{r96:?}");
+        assert!(near(r96[2].0, l.crossovers[0].lo_hz, 96), "{r96:?}");
+        assert!(near(r96[2].1, k96 * bins[0], 96), "{r96:?}");
+        assert!((k96 * bins[0] - 3246.0).abs() < 1.0);
+
+        // Coarser grids: only the bottom, and at 1/12 nothing within ten octaves.
+        let r24 = l.unresolved_ranges(&ten_octaves(24));
+        assert_eq!(r24.len(), 1);
+        assert!(near(r24[0].1, validity_factor(24) * bins[2], 24), "{r24:?}");
+        assert!(l.unresolved_ranges(&ten_octaves(12)).is_empty());
+        // Above the served band nothing is estimated, so nothing is marked.
+        assert!(l.cell_hz(0.46 * 96_000.0).is_none());
+    }
+
+    #[test]
+    fn unresolved_at_48k_starts_at_the_deepest_stage() {
+        // 48 kHz: deepest stage 4 kHz, bin 0.9766 Hz, the same LF edge as at 96 kHz; the
+        // full-rate stage's crossover moves down to 811.5 Hz.
+        let l = Layout::new(48_000.0, Ladder::Standard).expect("layout");
+        let r96 = l.unresolved_ranges(&ten_octaves(96));
+        assert_eq!(r96.len(), 3, "{r96:?}");
+        assert!(
+            near(r96[2].0, 811.5, 96) && near(r96[2].1, 1623.0, 96),
+            "{r96:?}"
         );
     }
 

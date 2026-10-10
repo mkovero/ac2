@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::{Seconds, TraceId};
+use crate::units::{Hz, Seconds, TraceId};
 
 /// Fractional-octave band designator for RTA bands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -69,6 +69,70 @@ impl SmoothingFraction {
             Self::FortyEighth => 48,
         }
     }
+}
+
+/// Points per octave a transfer function or sweep stores: its column grid. Not smoothing,
+/// which is a display edit over these columns; a finer resolution only adds columns where
+/// the analysis resolves them ([`Unresolved`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Resolution {
+    /// 12 points per octave.
+    Twelfth,
+    /// 24 points per octave.
+    TwentyFourth,
+    /// 48 points per octave.
+    #[default]
+    FortyEighth,
+    /// 96 points per octave.
+    NinetySixth,
+}
+
+impl Resolution {
+    /// Every resolution, coarsest first.
+    pub const ALL: [Resolution; 4] = [
+        Self::Twelfth,
+        Self::TwentyFourth,
+        Self::FortyEighth,
+        Self::NinetySixth,
+    ];
+
+    /// Points per octave.
+    pub fn ppo(self) -> u32 {
+        match self {
+            Self::Twelfth => 12,
+            Self::TwentyFourth => 24,
+            Self::FortyEighth => 48,
+            Self::NinetySixth => 96,
+        }
+    }
+
+    /// The resolution of `ppo` points per octave, if it is one.
+    pub fn from_ppo(ppo: u32) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.ppo() == ppo)
+    }
+}
+
+/// A frequency range, `lo < hi`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FreqRange {
+    /// Lower edge.
+    pub lo: Hz,
+    /// Upper edge.
+    pub hi: Hz,
+}
+
+/// Where a curve stored at `resolution` has columns closer together than its analysis
+/// resolves: there one estimate's resolution cell (the bandwidth its window sets) spans
+/// more than one column, so the extra columns are interpolation, not detail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Unresolved {
+    /// The grid the ranges were found on.
+    pub resolution: Resolution,
+    /// Column-edge ranges, ascending and disjoint; empty: every column is resolved.
+    pub ranges: Vec<FreqRange>,
 }
 
 /// What smoothing averages.

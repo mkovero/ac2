@@ -620,8 +620,8 @@ pub(crate) mod tests {
     #[test]
     fn no_delay_estimate_says_why() {
         use ac2_proto::model::{
-            DelayBand, DelayConfidence, DelayFinding, DelayOutcome, DelayState, LogGridSpec,
-            MeasConfig, TfAveraging, TransferConfig,
+            DelayBand, DelayConfidence, DelayFinding, DelayOutcome, DelayState, MeasConfig,
+            Resolution, TfAveraging, TransferConfig,
         };
         use ac2_proto::units::{MeasId, Rev, Seconds, WallNs};
         let refused = DelayFinding {
@@ -651,11 +651,7 @@ pub(crate) mod tests {
                         reference_input: 0,
                         measurement_input: 1,
                         averaging: TfAveraging::Fifo { blocks: 4 },
-                        grid: LogGridSpec {
-                            ppo: 12,
-                            k_min: -12,
-                            k_max: 12,
-                        },
+                        resolution: Resolution::Twelfth,
                         smoothing: None,
                         depth: ac2_proto::model::DepthPolicy::EqualConfidence,
                     },

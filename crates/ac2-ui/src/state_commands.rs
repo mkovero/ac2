@@ -951,13 +951,15 @@ impl AppState {
                     }
                     return;
                 }
-                // A spectrum or RTA selected edits its input, smoothing or bands, averaging.
+                // A transfer, spectrum or RTA selected edits its settings.
                 let spec = self
                     .selected_meas()
                     .filter(|m| {
                         matches!(
                             m.config.kind,
-                            MeasKind::Spectrum { .. } | MeasKind::Rta { .. }
+                            MeasKind::Transfer { .. }
+                                | MeasKind::Spectrum { .. }
+                                | MeasKind::Rta { .. }
                         )
                     })
                     .cloned();
@@ -987,7 +989,7 @@ impl AppState {
                     Some(Ok(f)) => self.overlay = Overlay::Form(Box::new(f)),
                     Some(Err(e)) => self.warn(e),
                     None => self.warn(
-                        "select a math channel, a sweep measurement, a spectrum or an RTA first",
+                        "select a measurement first (a transfer, sweep, spectrum, RTA or math channel)",
                     ),
                 }
             }

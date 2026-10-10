@@ -205,6 +205,11 @@ pub struct DistortionScene {
     /// nothing does).
     pub caption: String,
     pub cursor: Option<DistortionCursor>,
+    /// Ranges the sweep's response does not resolve at its grid (shaded in the fundamental's
+    /// pane) and those its harmonics do not (shaded in the distortion pane); empty when the
+    /// marker is off or the trace does not say.
+    pub unresolved_response: Vec<crate::unresolved::Mark>,
+    pub unresolved_harmonics: Vec<crate::unresolved::Mark>,
     /// Why nothing is drawn, when that is the case.
     pub note: Option<String>,
     pub strip: Rect,
@@ -413,6 +418,7 @@ pub fn distortion_scene(
     let x_axis = axis::freq_axis(view.freq.range(), plot.x, plot.right());
     let xm = x_axis.mapping;
     let sweep = t.and_then(|t| t.data.sweep.as_ref().map(|s| (t, s)));
+    let (unresolved_response, unresolved_harmonics) = unresolved_marks(sweep, view);
 
     // Fundamental: its own range, 40 dB under its maximum.
     let fund_max = sweep.map_or(f64::NAN, |(t, _)| {
@@ -439,6 +445,13 @@ pub fn distortion_scene(
         false,
         FUNDAMENTAL_TITLE,
         view.chrome,
+        theme,
+    );
+    crate::unresolved::draw(
+        &mut c,
+        fundamental,
+        &fund_x.mapping,
+        &unresolved_response,
         theme,
     );
 
@@ -470,6 +483,7 @@ pub fn distortion_scene(
         view.chrome,
         theme,
     );
+    crate::unresolved::draw(&mut c, plot, &xm, &unresolved_harmonics, theme);
     let ym = y_axis.mapping;
 
     let mut legend = Vec::new();
@@ -647,9 +661,16 @@ pub fn distortion_scene(
             "THD".to_string(),
             reading_text(reading(&s.thd, i, margin), unit),
         ));
+        // The harmonics' note first: the plate reads mostly harmonics.
+        let freq = match crate::unresolved::at(&unresolved_harmonics, f)
+            .or_else(|| crate::unresolved::at(&unresolved_response, f))
+        {
+            Some(m) => format!("{} · {}", format::freq_readout(f), m.note),
+            None => format::freq_readout(f),
+        };
         Some(DistortionCursor {
             freq_hz: f,
-            freq: format::freq_readout(f),
+            freq,
             rows,
         })
     });
@@ -687,10 +708,37 @@ pub fn distortion_scene(
         info,
         caption,
         cursor,
+        unresolved_response,
+        unresolved_harmonics,
         note,
         strip: strip.rect,
         banners: strip.rows,
     }
+}
+
+/// The valid-resolution marks of a sweep's response and of its harmonics.
+fn unresolved_marks(
+    sweep: Option<(SweepView<'_>, &SweepData)>,
+    view: &ViewState,
+) -> (Vec<crate::unresolved::Mark>, Vec<crate::unresolved::Mark>) {
+    use crate::unresolved::{Fill, Source, marks};
+    let Some((t, Some(u))) = sweep.map(|(t, s)| (t, s.unresolved.as_ref())) else {
+        return (Vec::new(), Vec::new());
+    };
+    let Some(&first) = t.freqs.first() else {
+        return (Vec::new(), Vec::new());
+    };
+    if !view.unresolved {
+        return (Vec::new(), Vec::new());
+    }
+    let src = |unresolved| Source {
+        unresolved,
+        fill: Fill::Interpolated,
+    };
+    (
+        marks(src(&u.response), first, None),
+        marks(src(&u.harmonics), first, Some("harmonics")),
+    )
 }
 
 /// The sweep's impulse response as an IR frame for [`crate::ir::ir_scene`]: time zero at

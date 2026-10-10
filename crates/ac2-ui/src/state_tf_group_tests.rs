@@ -266,6 +266,7 @@ fn a_sweeps_runs_show_when_the_sweep_is_the_panes() {
                 gate: None,
                 tail: Some(Seconds(1.0)),
                 lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+                resolution: ac2_proto::model::Resolution::FortyEighth,
             },
         },
     ));

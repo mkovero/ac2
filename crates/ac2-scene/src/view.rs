@@ -726,6 +726,9 @@ pub struct ViewState {
     pub temperature_c: f64,
     /// Grid, labels and cursor of the pane being drawn.
     pub chrome: PlotChrome,
+    /// Mark the frequency ranges a curve's analysis does not resolve at its grid
+    /// ([`crate::unresolved`]).
+    pub unresolved: bool,
 }
 
 impl Default for ViewState {
@@ -740,6 +743,7 @@ impl Default for ViewState {
             cursor_hz: None,
             temperature_c: 20.0,
             chrome: PlotChrome::Full,
+            unresolved: true,
         }
     }
 }

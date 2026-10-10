@@ -251,11 +251,12 @@ pub enum DisplayRow {
     SweepView,
     DistortionUnit,
     Coherence,
+    ResolutionMarker,
     LevelAxes,
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 12] = [
+    pub const ALL: [DisplayRow; 13] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -267,6 +268,7 @@ impl DisplayRow {
         DisplayRow::SweepView,
         DisplayRow::DistortionUnit,
         DisplayRow::Coherence,
+        DisplayRow::ResolutionMarker,
         DisplayRow::LevelAxes,
     ];
 
@@ -283,6 +285,7 @@ impl DisplayRow {
             DisplayRow::Spectrograph => "Spectrograph history",
             DisplayRow::DistortionUnit => "Distortion in",
             DisplayRow::Coherence => "Coherence",
+            DisplayRow::ResolutionMarker => "Resolution marker",
             DisplayRow::LevelAxes => "Level axes",
         }
     }
@@ -356,11 +359,21 @@ pub fn warning_toasts_text(on: bool) -> &'static str {
     }
 }
 
+/// What the Resolution marker setting says, on the Display page and in its toast.
+pub fn resolution_marker_text(on: bool) -> &'static str {
+    if on {
+        "on: shades where a curve is coarser than its resolution"
+    } else {
+        "off"
+    }
+}
+
 /// The Display page's on / off lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DisplaySwitches {
     pub key_hints: bool,
     pub warning_toasts: bool,
+    pub resolution_marker: bool,
 }
 
 /// What the Display page shows for each line: title, value, whose.
@@ -410,6 +423,9 @@ pub fn display_rows(
                     CoherencePlacement::Pane => "its own strip under the phase".into(),
                     CoherencePlacement::OverlayOnMagnitude => "over the magnitude".into(),
                 },
+                DisplayRow::ResolutionMarker => {
+                    resolution_marker_text(switches.resolution_marker).into()
+                }
                 DisplayRow::SpectrumView => spectrum_view_name(views.spectrum).to_owned(),
                 DisplayRow::SweepView => sweep_view_name(views.sweep).to_owned(),
                 DisplayRow::LevelAxes => {
@@ -1045,6 +1061,7 @@ mod tests {
         let switches = DisplaySwitches {
             key_hints: false,
             warning_toasts: false,
+            resolution_marker: false,
         };
         let rows = display_rows(ThemeName::Light, switches, Some(500), 30, views);
         let texts: Vec<&str> = rows.iter().map(|(_, v)| v.as_str()).collect();
@@ -1062,6 +1079,7 @@ mod tests {
                 "the room parameters",
                 "% of fundamental",
                 "over the magnitude",
+                "off",
                 "each pane's as last left · Enter resets them to the defaults",
             ]
         );

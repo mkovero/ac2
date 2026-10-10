@@ -25,6 +25,7 @@ guide explains the concepts and the everyday workflow.
   - [Choosing what a pane shows](#choosing-what-a-pane-shows)
   - [Zoom, pan and the level axis](#zoom-pan-and-the-level-axis)
   - [Spectrograph](#spectrograph)
+  - [Resolution and the resolution marker](#resolution-and-the-resolution-marker)
   - [Smoothing](#smoothing)
   - [Math channels](#math-channels)
 - [Delay finder](#delay-finder)
@@ -371,8 +372,9 @@ running)`.
 ## Transfer measurement
 
 The transfer pane shows **magnitude**, **phase** and **coherence** of measurement / reference
-on a log-frequency grid (48 points per octave), computed with a multi-time-window FFT ladder
-so low frequencies get long windows and high frequencies stay responsive.
+on a log-frequency grid (48 points per octave unless its [resolution](#resolution-and-the-resolution-marker)
+says otherwise), computed with a multi-time-window FFT ladder so low frequencies get long
+windows and high frequencies stay responsive.
 
 - **Coherence (γ²)** is how much of the measured energy is explained by the reference. It is
   drawn as the transparency of the traces, as its own curve, or as a mask that blanks the
@@ -757,6 +759,51 @@ the newest frame at the top, level as colour.
   starts the history over.
 - The history is kept by the app, from the frames it already receives: nothing extra on the
   wire, and nothing kept while the spectrograph is hidden.
+
+### Resolution and the resolution marker
+
+**Resolution** is how many points per octave a transfer or sweep curve has: **1/12, 1/24,
+1/48 (default) or 1/96 oct**. It is the grid the curve is computed on, not smoothing:
+smoothing averages over a band after the fact and can be changed on any curve at any time;
+resolution decides which frequencies are computed at all. A finer grid shows narrower
+features (a sharp notch, a comb's teeth) only where the analysis behind it resolves them.
+
+- **Setting it**: the *Resolution* field of the New and Edit dialogs of a transfer or sweep
+  measurement (**Edit the selected measurement…** in the palette), or
+  `ac2 meas new tf|sweep … --resolution 1/96` and `ac2 meas set <meas> --resolution 1/24`
+  (`ac2 ir capture --resolution` for a one-off sweep). The measurement list says a resolution
+  other than the default (`res 1/96 oct`).
+- **A transfer measurement** restarts its averaging when the resolution changes (it is a new
+  grid). **A sweep measurement** uses it from its next run; runs already stored keep the grid
+  they were made on.
+
+Every estimate has a **resolution cell**: the bandwidth of the window behind it (1/T for a
+window of T seconds). Where that cell is wider than the grid's column, neighbouring columns
+share one estimate: extra columns there are not extra detail. The **resolution marker**
+shows where: a faint grey shade with thin dashed edges over each such range, in every
+transfer plot, and the cursor's frequency line says it there
+(`52.0 Hz · coarser than 1/96 oct (gaps)`).
+
+- **Transfer**: the FFT ladder's windows are fixed, so where the grid outruns them depends
+  on the resolution (and the sample rate). At 96 kHz: 1/48 only below about 68 Hz; 1/96 below
+  about 135 Hz, about 200–410 Hz and 1.6–3.3 kHz (at 48 kHz the last range is 810 Hz–1.6 kHz);
+  1/24 only about 31–34 Hz; 1/12 nowhere. A live curve leaves out the columns without an
+  estimate of their own, so it shows **gaps** there.
+- **Sweep**: the response's window is the gate (or the room's response up to the noise).
+  Its edge is about 69/W Hz at 1/48 (138/W at 1/96) for a window of W seconds: an ungated
+  room response marks at most the lowest columns, a 10 ms gate everything below about 7 kHz.
+  The curve is **interpolated** there. The
+  sweep pane marks the fundamental's pane by the response and the distortion pane by the
+  **harmonics**: an order k read in a window of W seconds has cells 1/(k·W) wide on the
+  fundamental's axis, so the harmonics' edge sits higher than the response's. With
+  [LF harmonics: fine](#low-frequency-harmonics-lf-harmonics-fine) each order has its own
+  longer window and the edge moves down (to less than half the standard one).
+- Distortion is drawn 1/24-octave band-averaged whatever the resolution, so the marker in
+  the distortion pane says where the harmonic estimates themselves are coarser than the
+  grid, not the bands.
+- Stored transfer captures and math channels carry no marker; sweep runs do (exports
+  included).
+- **Settings › Display › Resolution marker** turns it off and on (on by default; remembered).
 
 ### Smoothing
 
@@ -1298,6 +1345,7 @@ measurement** in the palette) opens the dialog that makes one:
 | repeats | each doubling lowers the floor by 3 dB |
 | silence after | 1, 2, 4, 8 s: must hold the room's decay ([room parameters](#room-parameters-iso-3382-1)) |
 | LF harmonics | standard (default) or fine: [low-frequency harmonics](#low-frequency-harmonics-lf-harmonics-fine) |
+| resolution | 1/12, 1/24, 1/48 (default), 1/96 oct points per octave: [resolution](#resolution-and-the-resolution-marker) |
 | name | |
 
 **←/→** step a choice (→ longer / more) and stop at the ends; a text field's text is
@@ -1365,7 +1413,9 @@ LF distortion work:
 > A longer sweep lengthens every window and lowers the floor: 6 s or 12 s with fine gives
 > both the resolution and a usable floor at the bottom.
 
-A run made with it reads *… · LF harmonics fine* in the trace list.
+A run made with it reads *… · LF harmonics fine* in the trace list. The distortion pane's
+[resolution marker](#resolution-and-the-resolution-marker) shows where the harmonics are still
+coarser than the grid; with fine its edge sits lower.
 
 ### Progress strip
 

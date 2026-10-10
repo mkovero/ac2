@@ -5,7 +5,7 @@
 //! the light theme, darkened so every trace keeps at least 3:1 contrast against the plot
 //! background (WCAG non-text contrast) — tested below.
 
-use crate::primitives::{Color, Colormap, Stroke};
+use crate::primitives::{Color, Colormap, Dash, Stroke};
 
 /// How many measurement colour families a theme has before they repeat.
 pub const FAMILIES: usize = 8;
@@ -41,6 +41,11 @@ pub struct Theme {
     pub axis_text: Color,
     pub text: Color,
     pub text_dim: Color,
+    /// Faint shade over a frequency range a curve's analysis does not resolve at its grid
+    /// ([`crate::unresolved`]): visible, but quieter than the minor grid.
+    pub unresolved_shade: Color,
+    /// Dashed edge of such a range.
+    pub unresolved_edge: Stroke,
     pub banner_fault: BannerColors,
     pub banner_warning: BannerColors,
     pub banner_info: BannerColors,
@@ -94,6 +99,16 @@ impl Theme {
             axis_text: hex(0x9aa3ad),
             text: hex(0xe6e9ed),
             text_dim: hex(0x8a929c),
+            unresolved_shade: hex(0x8a929c).with_alpha(0.07),
+            unresolved_edge: Stroke {
+                color: hex(0x8a929c).with_alpha(0.55),
+                width: 1.0,
+                dash: Some(Dash {
+                    on: 4.0,
+                    off: 4.0,
+                    offset: 0.0,
+                }),
+            },
             banner_fault: BannerColors {
                 background: hex(0xc0392b),
                 text: hex(0xffffff),
@@ -152,6 +167,16 @@ impl Theme {
             axis_text: hex(0x4b525b),
             text: hex(0x16191d),
             text_dim: hex(0x5f6670),
+            unresolved_shade: hex(0x5f6670).with_alpha(0.06),
+            unresolved_edge: Stroke {
+                color: hex(0x5f6670).with_alpha(0.5),
+                width: 1.0,
+                dash: Some(Dash {
+                    on: 4.0,
+                    off: 4.0,
+                    offset: 0.0,
+                }),
+            },
             banner_fault: BannerColors {
                 background: hex(0xb3261e),
                 text: hex(0xffffff),
@@ -210,6 +235,16 @@ impl Theme {
             axis_text: hex(0xffffff),
             text: hex(0xffffff),
             text_dim: hex(0xd0d0d0),
+            unresolved_shade: hex(0xd0d0d0).with_alpha(0.12),
+            unresolved_edge: Stroke {
+                color: hex(0xd0d0d0).with_alpha(0.8),
+                width: 1.5,
+                dash: Some(Dash {
+                    on: 4.0,
+                    off: 4.0,
+                    offset: 0.0,
+                }),
+            },
             banner_fault: BannerColors {
                 background: hex(0xff3b30),
                 text: hex(0x000000),

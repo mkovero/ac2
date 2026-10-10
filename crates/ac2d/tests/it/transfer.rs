@@ -11,7 +11,7 @@ use ac2_audio::FakeDriver;
 use ac2_proto::frame::{Frame, FrameData, ProtectionFlags, TfFrame, ValidityMask};
 use ac2_proto::model::{
     DelayOutcome, DelayPick, DepthPolicy, FinderBand, GeneratorDesired, GeneratorSettings,
-    MeasKind, NoEstimateReason, Signal, TimingState,
+    MeasKind, NoEstimateReason, Resolution, Signal, TimingState,
 };
 use ac2_proto::units::{Dbfs, Hz, MeasId, Samples, Seconds};
 use ac2_proto::{Command, ErrorCode, ReplyBody};
@@ -95,6 +95,48 @@ fn depth_policy_is_validated_and_kept() {
         config: session(false),
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
+    h.shutdown();
+}
+
+/// Frames say where the grid is finer than the MTW stage serving it; a new resolution
+/// restarts the job on its own grid.
+#[test]
+fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
+    init_log();
+    let backend = manual_rig();
+    let mut cfg = config(backend.clone(), inproc("tf-resolution"));
+    cfg.lease_expiry = Duration::from_secs(60);
+    let h = Daemon::start(cfg).unwrap();
+    let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
+    c.ok(Command::SessionOpen {
+        config: session(true),
+    });
+    let mut m = transfer("main");
+    c.ok(Command::MeasCreate { config: m.clone() });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    let mut d = driver(&backend);
+    let f = run_tf(&mut d, &sub, 0.5, 0);
+    let u = tf(&f).meta.unresolved.clone().expect("unresolved");
+    assert_eq!(u.resolution, Resolution::FortyEighth);
+    // At 1/48 only below the deepest stage's edge (κ(48) · 0.977 Hz ≈ 68 Hz).
+    assert_eq!(u.ranges.len(), 1, "{u:?}");
+    assert!(u.ranges[0].hi.0 > 60.0 && u.ranges[0].hi.0 < 70.0, "{u:?}");
+    let rev = f.stamp.config_rev.0;
+
+    if let MeasKind::Transfer { config } = &mut m.kind {
+        config.resolution = Resolution::NinetySixth;
+    }
+    c.ok(Command::MeasUpdate {
+        meas: MeasId(1),
+        config: m,
+    });
+    let f = run_tf(&mut d, &sub, 0.5, rev + 1);
+    let t = tf(&f);
+    assert_eq!(t.mag.len(), 960);
+    let u = t.meta.unresolved.clone().expect("unresolved");
+    assert_eq!(u.resolution, Resolution::NinetySixth);
+    // The bottom, and the octave above each crossover.
+    assert_eq!(u.ranges.len(), 3, "{u:?}");
     h.shutdown();
 }
 

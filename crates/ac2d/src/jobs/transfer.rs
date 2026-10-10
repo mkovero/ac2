@@ -136,6 +136,8 @@ pub(crate) struct Transfer {
     guard: Guard,
     smoother: Option<(Smoother, SmoothingMode)>,
     grid_id: GridId,
+    /// Where the grid is finer than the stage serving it; fixed by the layout and grid.
+    unresolved: ac2_proto::model::Unresolved,
     delay_s: f64,
     /// Applied delay in samples, fractions included.
     delay_samples: f64,
@@ -228,9 +230,9 @@ impl Transfer {
     ) -> Result<Self, StartError> {
         let fs = f64::from(sample_rate);
         let grid = LogGrid {
-            ppo: cfg.grid.ppo,
-            k_min: cfg.grid.k_min,
-            k_max: cfg.grid.k_max,
+            ppo: cfg.grid().ppo,
+            k_min: cfg.grid().k_min,
+            k_max: cfg.grid().k_max,
         };
         let averaging = conv::tf_averaging(cfg.averaging).ok_or("invalid averaging")?;
         let mut mtw = Mtw::new(MtwConfig {
@@ -253,7 +255,10 @@ impl Transfer {
         finder.track(tracking, held(delay_samples, nudged_samples));
         finder.set_paused(awaiting_pick);
         let frame = mtw.frame();
+        let unresolved =
+            crate::sweep::unresolved(cfg.resolution, &mtw.layout().unresolved_ranges(&grid));
         Ok(Self {
+            unresolved,
             corr: correction.map(|c| column_correction(&grid, c)),
             generation: 0,
             tf_pace: Pace::new(Duration::ZERO),
@@ -415,6 +420,7 @@ impl Transfer {
                 smoothing: self.cfg.smoothing,
                 mic_curve: self.corr.is_some(),
                 math: None,
+                unresolved: Some(self.unresolved.clone()),
             },
             mag,
             phase,

@@ -274,7 +274,7 @@ async fn session_meas_delay_trace_flow() -> R {
             "reference_input": 0,
             "measurement_input": 1,
             "averaging": { "type": "fifo", "blocks": 8 },
-            "grid": { "ppo": 48, "k_min": -240, "k_max": 239 },
+            "resolution": "forty_eighth",
             "smoothing": { "fraction": "sixth", "mode": "magnitude_phase" },
             "depth": { "type": "equal_confidence" }
         }})
@@ -342,7 +342,7 @@ async fn session_meas_delay_trace_flow() -> R {
     assert_eq!(csv.code, 0);
     assert!(
         csv.stdout
-            .starts_with("# ac2 trace export v4\n# name: l-pre-eq\n# kind: transfer\n"),
+            .starts_with("# ac2 trace export v5\n# name: l-pre-eq\n# kind: transfer\n"),
         "{}",
         csv.stdout
     );

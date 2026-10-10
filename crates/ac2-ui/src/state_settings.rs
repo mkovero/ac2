@@ -295,6 +295,7 @@ impl AppState {
             DisplayRow::LeqHistory if d != 0 => self.toggle_leq_layout(true),
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
+            DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
             DisplayRow::LevelAxes if d == 0 => {
                 crate::prefs::LevelPrefs::default().apply(&mut self.view);
                 self.toast("every pane's level axis is back at its default");
@@ -641,6 +642,17 @@ impl AppState {
         self.toast(format!(
             "warning toasts {}",
             crate::settings::warning_toasts_text(self.prefs.warning_toasts)
+        ));
+    }
+
+    /// The Display page's Resolution marker line; remembered in the prefs.
+    pub(super) fn toggle_resolution_marker(&mut self) {
+        self.view.unresolved = !self.view.unresolved;
+        self.prefs.resolution_marker = self.view.unresolved;
+        self.prefs_dirty = true;
+        self.toast(format!(
+            "resolution marker {}",
+            crate::settings::resolution_marker_text(self.view.unresolved)
         ));
     }
 

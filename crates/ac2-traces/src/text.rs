@@ -3,7 +3,7 @@
 //! # ac2 CSV
 //!
 //! ```text
-//! # ac2 trace export v4
+//! # ac2 trace export v5
 //! # name: Main L pre EQ
 //! # kind: transfer
 //! # source: captured from "main-l" (measurement 1), session epoch 3, sample 480000
@@ -36,6 +36,8 @@
 //! Its ISO 3382-1 room parameters are one JSON header line (`# room_metrics: {…}`,
 //! [`RoomAcoustics`]) and, for reading, a table of comment lines after the impulse
 //! response (`# band_hz,edt_s,…`; a refused value reads `refused:<why>`).
+//! Where its columns are finer than its windows resolve is one JSON header line
+//! (`# sweep_unresolved: {…}`, [`SweepUnresolved`]).
 //! Such an export re-imports as the sweep trace it was.
 //!
 //! A transfer trace captured with an impulse response ([`TransferIr`]) writes it the same
@@ -43,7 +45,8 @@
 //! `t_s,linear,etc_db` table after the frequency rows, `t_s` re the trace's `delay_ms` (the
 //! inserted delay at capture). It re-imports with the trace.
 //!
-//! A version 3 export (written before transfer traces kept their impulse response) imports
+//! A version 4 export (written before sweeps said where their columns are finer than
+//! their windows resolve) imports as a sweep without that. A version 3 export (written before transfer traces kept their impulse response) imports
 //! as it was. A version 2 export (written before
 //! the room parameters were exported) imports as a sweep without them. A version 1 export
 //! (written before the analysis facts were exported) is still read: a sweep among them
@@ -69,8 +72,8 @@ use ac2_proto::frame::MAX_N;
 use ac2_proto::model::{
     CalState, DepthPolicy, DistortionCurve, HarmonicCurve, ImportFormat, ImportNote, ImportRole,
     LfHarmonics, MicState, Polarity, RoomAcoustics, RoomRefusal, RoomValue, SmoothingFraction,
-    SmoothingMode, SweepData, SweepInfo, TraceIr, TraceKind, TraceMicCurve, TraceSource,
-    TransferIr,
+    SmoothingMode, SweepData, SweepInfo, SweepUnresolved, TraceIr, TraceKind, TraceMicCurve,
+    TraceSource, TransferIr,
 };
 use ac2_proto::units::{Hz, Seconds};
 use serde::{Deserialize, Serialize};
@@ -78,7 +81,10 @@ use serde::{Deserialize, Serialize};
 use crate::columns::{Columns, StoredTrace, frequencies, resample, wrap_deg};
 
 /// First line of an ac2 CSV file of this format version.
-pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v4";
+pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v5";
+/// First line of the previous version, still read: no sweep in it says where its columns
+/// are finer than its windows resolve (and nothing else differs).
+const AC2_CSV_MAGIC_V4: &str = "# ac2 trace export v4";
 /// First line of the previous version, still read: no transfer trace in it has an impulse
 /// response (and nothing else differs).
 const AC2_CSV_MAGIC_V3: &str = "# ac2 trace export v3";
@@ -604,6 +610,7 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
     let magic = first.1.trim();
     if ![
         AC2_CSV_MAGIC,
+        AC2_CSV_MAGIC_V4,
         AC2_CSV_MAGIC_V3,
         AC2_CSV_MAGIC_V2,
         AC2_CSV_MAGIC_V1,
@@ -613,7 +620,7 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         let msg = if magic.starts_with(AC2_CSV_PREFIX) {
             format!(
                 "{magic:?}: another ac2 CSV version; this build reads {AC2_CSV_MAGIC:?}, \
-                 {AC2_CSV_MAGIC_V3:?}, {AC2_CSV_MAGIC_V2:?} and {AC2_CSV_MAGIC_V1:?}"
+                 {AC2_CSV_MAGIC_V4:?}, {AC2_CSV_MAGIC_V3:?}, {AC2_CSV_MAGIC_V2:?} and {AC2_CSV_MAGIC_V1:?}"
             )
         } else {
             format!("not an ac2 CSV file (expected {AC2_CSV_MAGIC:?})")
@@ -626,6 +633,7 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
     let mut delay = None;
     let mut info: Option<SweepInfo> = None;
     let mut room: Option<RoomAcoustics> = None;
+    let mut unresolved: Option<SweepUnresolved> = None;
     let mut ir_head: Option<(usize, IrAnnounce)> = None;
     let mut mic_curve = false;
     let mut header = None;
@@ -650,6 +658,9 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
                 delay = Some(Seconds(ms / 1000.0));
             } else if let Some(v) = m.strip_prefix("sweep_info: ") {
                 info = Some(serde_json::from_str(v).map_err(|e| bad(no, "sweep_info", &e))?);
+            } else if let Some(v) = m.strip_prefix("sweep_unresolved: ") {
+                unresolved =
+                    Some(serde_json::from_str(v).map_err(|e| bad(no, "sweep_unresolved", &e))?);
             } else if let Some(v) = m.strip_prefix("room_metrics: ") {
                 room = Some(serde_json::from_str(v).map_err(|e| bad(no, "room_metrics", &e))?);
             } else if let Some(v) = m.strip_prefix("sweep_ir: ") {
@@ -797,6 +808,7 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
                 ir,
                 info,
                 room,
+                unresolved,
             }),
             _ => {
                 notes.push(ImportNote::SweepWithoutAnalysis);
@@ -1155,6 +1167,12 @@ pub fn export_csv(t: &StoredTrace) -> String {
             "sweep_ir",
             serde_json::to_string(&IrHeader::of(&sw.ir)).unwrap_or_else(|_| "null".into()),
         );
+        if let Some(u) = &sw.unresolved {
+            line(
+                "sweep_unresolved",
+                serde_json::to_string(u).unwrap_or_else(|_| "null".into()),
+            );
+        }
         if let Some(r) = &sw.room {
             line(
                 "room_metrics",

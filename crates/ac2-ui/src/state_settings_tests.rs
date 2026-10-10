@@ -273,6 +273,13 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
         ac2_scene::view::CoherencePlacement::OverlayOnMagnitude
     );
     t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::ResolutionMarker);
+    assert!(t.st.view.unresolved);
+    t.key("Right");
+    assert!(!t.st.view.unresolved && !t.st.prefs.resolution_marker);
+    t.key("Left");
+    assert!(t.st.view.unresolved && t.st.prefs.resolution_marker);
+    t.key("Down");
     assert_eq!(settings(&t).display, DisplayRow::LevelAxes);
     t.st.view.tf.magnitude_db = ac2_scene::axis::Range { lo: -3.0, hi: 3.0 };
     t.key("Enter");

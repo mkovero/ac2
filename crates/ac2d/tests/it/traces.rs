@@ -331,7 +331,7 @@ fn capture_average_math_export_import() {
     assert_eq!(file_name, "aligned.csv");
     let csv = String::from_utf8(content.0.clone()).unwrap();
     assert!(
-        csv.starts_with("# ac2 trace export v4\n# name: aligned\n"),
+        csv.starts_with("# ac2 trace export v5\n# name: aligned\n"),
         "{csv}"
     );
     assert!(csv.contains("# source: captured from \"main\" (measurement 1)"));
@@ -943,6 +943,7 @@ fn session_save_load_round_trip() {
                     gate: None,
                     tail: Some(Seconds(2.0)),
                     lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+                    resolution: ac2_proto::model::Resolution::FortyEighth,
                 },
             },
         },
@@ -1058,7 +1059,7 @@ fn session_save_load_round_trip() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(
         &manifest,
-        text.replace("\"version\": 19", "\"version\": 20"),
+        text.replace("\"version\": 20", "\"version\": 21"),
     )
     .unwrap();
     let e = c
@@ -1072,8 +1073,8 @@ fn session_save_load_round_trip() {
     assert_eq!(
         e.detail,
         Some(ErrorDetail::SessionVersion {
-            found: 20,
-            supported: 19
+            found: 21,
+            supported: 20
         })
     );
     assert_eq!(traces(c).len(), n);

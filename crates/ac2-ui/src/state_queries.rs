@@ -842,6 +842,7 @@ impl AppState {
         if let Some(s) = prefs.spectrograph_span_s {
             self.view.spectrum.spectrograph.span_s = s;
         }
+        self.view.unresolved = prefs.resolution_marker;
         self.hidden_meas = l.hidden.clone();
         self.compared_meas = l.compared.clone();
         self.prefs = prefs;

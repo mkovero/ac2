@@ -1,7 +1,7 @@
 //! The new-measurement dialogs: a few fields that build a `meas.create` (a sweep
 //! measurement's too: its settings, run later with `sweep.run`), and the dialogs that edit
-//! a math channel, a sweep measurement, a spectrum or an RTA. Inputs and outputs are picked by name from the
-//! session's channels (inputs with their meters in the view), never typed as numbers. Pure
+//! a math channel, a transfer or sweep measurement, a spectrum or an RTA. Inputs and outputs
+//! are picked by name from the session's channels (inputs with their meters in the view), never typed as numbers. Pure
 //! data; the reducer routes keys here and the view draws them. Every default is the CLI's
 //! (`ac2 meas new`, `ac2 ir capture`), taken from the shared constructors in `ac2-proto`.
 //!
@@ -10,8 +10,8 @@
 
 use ac2_proto::model::{
     BandFraction, DepthPolicy, EssSpec, LfHarmonics, MeasConfig, MeasKind, Measurement,
-    OpenSession, Operand, RtaConfig, Smoothing, SmoothingFraction, SpecAveraging, SpectrumConfig,
-    SplConfig, SweepConfig, TimeWeighting, TransferConfig, Weighting,
+    OpenSession, Operand, Resolution, RtaConfig, Smoothing, SmoothingFraction, SpecAveraging,
+    SpectrumConfig, SplConfig, SweepConfig, TimeWeighting, TransferConfig, Weighting,
 };
 use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
@@ -34,6 +34,8 @@ pub enum FormKind {
     SpectrumEdit,
     /// An RTA's settings edited.
     RtaEdit,
+    /// A transfer measurement's settings edited (its averaging restarts).
+    TransferEdit,
 }
 
 impl FormKind {
@@ -49,6 +51,7 @@ impl FormKind {
             FormKind::SweepEdit => "Edit sweep measurement (its next run)",
             FormKind::SpectrumEdit => "Edit spectrum",
             FormKind::RtaEdit => "Edit RTA",
+            FormKind::TransferEdit => "Edit transfer measurement (averaging restarts)",
         }
     }
 
@@ -61,7 +64,8 @@ impl FormKind {
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
-            | FormKind::RtaEdit => "Enter applies",
+            | FormKind::RtaEdit
+            | FormKind::TransferEdit => "Enter applies",
             _ => "Enter creates and starts",
         }
     }
@@ -79,7 +83,8 @@ impl FormKind {
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
-            | FormKind::RtaEdit => "Apply",
+            | FormKind::RtaEdit
+            | FormKind::TransferEdit => "Apply",
             _ => "Create and start",
         }
     }
@@ -110,6 +115,8 @@ pub enum FieldId {
     Tail,
     /// Harmonic windows at a sweep's lowest columns.
     LfHarmonics,
+    /// Frequency points per octave of a transfer or sweep curve.
+    Resolution,
     /// Whether this operand is in a math channel's average.
     Member(Operand),
     /// How a math channel's average combines its operands.
@@ -256,6 +263,35 @@ const LF_HARMONICS: [(&str, LfHarmonics); 2] = [
     ("standard", LfHarmonics::Standard),
     ("fine", LfHarmonics::Fine),
 ];
+/// Points per octave of a transfer or sweep curve, coarsest first, the CLI's `--resolution`
+/// values; index [`DEFAULT_RESOLUTION`] is the default.
+const RESOLUTIONS: [(&str, Resolution); 4] = [
+    ("1/12 oct", Resolution::Twelfth),
+    ("1/24 oct", Resolution::TwentyFourth),
+    ("1/48 oct", Resolution::FortyEighth),
+    ("1/96 oct", Resolution::NinetySixth),
+];
+const DEFAULT_RESOLUTION: usize = 2;
+/// Under the Resolution choice: it is the grid, not smoothing, and below some frequency
+/// the analysis cannot fill a fine one (the plot marks where).
+pub const RESOLUTION_HINT: &str =
+    "points per octave, not smoothing; the plot shades where the analysis is coarser";
+
+fn resolution_field(r: Resolution) -> Field {
+    Field {
+        hint: RESOLUTION_HINT.into(),
+        ..Field::choice(
+            FieldId::Resolution,
+            "Resolution",
+            &RESOLUTIONS.map(|r| r.0),
+            RESOLUTIONS
+                .iter()
+                .position(|x| x.1 == r)
+                .unwrap_or(DEFAULT_RESOLUTION),
+        )
+    }
+}
+
 /// What `fine` trades, under the LF harmonics choice.
 pub const LF_HARMONICS_HINT: &str =
     "fine: finer low-frequency harmonics, higher floor there, longer silence after the sweep";
@@ -439,9 +475,13 @@ impl Form {
         }
     }
 
-    /// The dialog editing spectrum or RTA `m` over the session's captured `inputs`: its
-    /// input, name, smoothing or bands, and averaging.
+    /// The dialog editing transfer measurement, spectrum or RTA `m` over the session's
+    /// captured `inputs`: a transfer's inputs, name, smoothing, depth and resolution; a
+    /// spectrum's or RTA's input, name, smoothing or bands, and averaging.
     pub fn edit_spec(m: &Measurement, inputs: &[(u16, String)]) -> Result<Self, String> {
+        if let MeasKind::Transfer { config } = &m.config.kind {
+            return Ok(Self::edit_transfer(m, config, inputs));
+        }
         let (kind, input, averaging) = match &m.config.kind {
             MeasKind::Spectrum { config } => {
                 (FormKind::SpectrumEdit, config.input, config.averaging)
@@ -487,6 +527,49 @@ impl Form {
         Ok(f)
     }
 
+    fn edit_transfer(m: &Measurement, c: &TransferConfig, inputs: &[(u16, String)]) -> Self {
+        // Inputs the session no longer captures stay listed, as for a spectrum's.
+        let mut inputs = inputs.to_vec();
+        for i in [c.reference_input, c.measurement_input] {
+            if !inputs.iter().any(|(x, _)| *x == i) {
+                inputs.push((i, format!("In {} (not captured)", i + 1)));
+            }
+        }
+        let smoothing = SMOOTHING
+            .iter()
+            .position(|s| s.1 == c.smoothing.map(|s| s.fraction))
+            .unwrap_or(0);
+        let depth = usize::from(matches!(c.depth, DepthPolicy::FastLf { .. }));
+        let fields = vec![
+            Field::channel(
+                FieldId::Reference,
+                "Reference",
+                &inputs,
+                Some(c.reference_input),
+                "the loopback (stimulus copy)",
+            ),
+            Field::channel(
+                FieldId::Measurement,
+                "Measurement",
+                &inputs,
+                Some(c.measurement_input),
+                "the mic",
+            ),
+            Field::text(FieldId::Name, "Name", m.config.name.clone(), ""),
+            Field::choice(
+                FieldId::Smoothing,
+                "Smoothing",
+                &SMOOTHING.map(|s| s.0),
+                smoothing,
+            ),
+            Field::choice(FieldId::Depth, "Depth", &DEPTH, depth),
+            resolution_field(c.resolution),
+        ];
+        let mut f = Self::new(FormKind::TransferEdit, fields);
+        f.meas_edit = Some(Box::new(m.clone()));
+        f
+    }
+
     /// The measurement this dialog edits (a math channel, a spectrum or an RTA), if any.
     pub fn edits(&self) -> Option<MeasId> {
         self.math_edit().or(self.meas_edit.as_ref().map(|m| m.id))
@@ -528,7 +611,8 @@ impl Form {
             | FormKind::Math
             | FormKind::MathEdit
             | FormKind::SpectrumEdit
-            | FormKind::RtaEdit => Vec::new(),
+            | FormKind::RtaEdit
+            | FormKind::TransferEdit => Vec::new(),
             FormKind::Transfer => vec![
                 Field::channel(
                     FieldId::Reference,
@@ -547,6 +631,7 @@ impl Form {
                 name("TF"),
                 Field::choice(FieldId::Smoothing, "Smoothing", &SMOOTHING.map(|s| s.0), 0),
                 Field::choice(FieldId::Depth, "Depth", &DEPTH, 0),
+                resolution_field(Resolution::default()),
             ],
             FormKind::Spectrum => vec![
                 input_field,
@@ -660,6 +745,7 @@ impl Form {
                     0,
                 )
             },
+            resolution_field(Resolution::default()),
             Field::text(FieldId::Name, "Name", format!("Sweep {}", sweeps + 1), ""),
         ];
         Self::new(FormKind::Sweep, fields)
@@ -740,6 +826,12 @@ impl Form {
                         .iter()
                         .position(|l| l.1 == c.lf_harmonics)
                         .unwrap_or(0);
+                }
+                (FieldId::Resolution, Value::Choice { index, .. }) => {
+                    *index = RESOLUTIONS
+                        .iter()
+                        .position(|r| r.1 == c.resolution)
+                        .unwrap_or(DEFAULT_RESOLUTION);
                 }
                 (FieldId::Name, Value::Text(t)) => *t = m.config.name.clone(),
                 _ => {}
@@ -824,6 +916,7 @@ impl Form {
         let repeats = REPEATS[self.choice_index(FieldId::Repeats).unwrap_or(0)].1;
         let tail = TAILS[self.choice_index(FieldId::Tail).unwrap_or(0)].1;
         let lf_harmonics = LF_HARMONICS[self.choice_index(FieldId::LfHarmonics).unwrap_or(0)].1;
+        let resolution = self.resolution();
         let name = self.text(FieldId::Name).trim();
         if name.is_empty() {
             return Err("type a name".into());
@@ -841,9 +934,19 @@ impl Form {
                     gate: None,
                     tail: Some(Seconds(tail)),
                     lf_harmonics,
+                    resolution,
                 },
             },
         })
+    }
+
+    /// The Resolution field's choice (the default when the dialog has none).
+    fn resolution(&self) -> Resolution {
+        RESOLUTIONS[self
+            .choice_index(FieldId::Resolution)
+            .unwrap_or(DEFAULT_RESOLUTION)
+            .min(RESOLUTIONS.len() - 1)]
+        .1
     }
 
     fn field(&self, id: FieldId) -> Option<&Field> {
@@ -1011,7 +1114,7 @@ impl Form {
         let kind = match self.kind {
             FormKind::Sweep | FormKind::SweepEdit => return Err("a sweep dialog".into()),
             FormKind::Math | FormKind::MathEdit => return self.math_config(),
-            FormKind::Transfer => {
+            FormKind::Transfer | FormKind::TransferEdit => {
                 let r = input(FieldId::Reference, "reference input")?;
                 let m = input(FieldId::Measurement, "measurement input")?;
                 if r == m {
@@ -1021,13 +1124,27 @@ impl Form {
                             .into(),
                     );
                 }
-                let mut config = TransferConfig::with_inputs(r, m);
-                config.smoothing = smoothing.map(Smoothing::of);
-                if pick(FieldId::Depth) == 1 {
-                    config.depth = DepthPolicy::FastLf {
+                // An edit keeps what the dialog does not show (averaging, delay tracking).
+                let mut config = match base {
+                    Some(MeasKind::Transfer { config }) => TransferConfig {
+                        reference_input: r,
+                        measurement_input: m,
+                        ..config.clone()
+                    },
+                    _ => TransferConfig::with_inputs(r, m),
+                };
+                config.smoothing = smoothing.map(|f| Smoothing {
+                    fraction: f,
+                    ..config.smoothing.unwrap_or(Smoothing::of(f))
+                });
+                config.depth = match (pick(FieldId::Depth), config.depth) {
+                    (1, d @ DepthPolicy::FastLf { .. }) => d,
+                    (1, _) => DepthPolicy::FastLf {
                         max_settle_s: Seconds(DepthPolicy::DEFAULT_FAST_LF_S),
-                    };
-                }
+                    },
+                    _ => DepthPolicy::EqualConfidence,
+                };
+                config.resolution = self.resolution();
                 MeasKind::Transfer { config }
             }
             FormKind::Spectrum | FormKind::SpectrumEdit => {
@@ -1095,8 +1212,8 @@ fn form_kind(k: &MeasKind) -> FormKind {
 #[cfg(test)]
 mod tests {
     use ac2_proto::model::{
-        BackendKind, ClockRelation, DeviceId, DeviceSelector, LogGridSpec, LoopbackRoute,
-        PeakWeighting, SessionConfig, SpecAveraging, TfAveraging, Window,
+        BackendKind, ClockRelation, DeviceId, DeviceSelector, LoopbackRoute, PeakWeighting,
+        Resolution, SessionConfig, SpecAveraging, TfAveraging, Window,
     };
     use ac2_proto::units::{Hz, WallNs};
 
@@ -1166,11 +1283,7 @@ mod tests {
                     reference_input: 0,
                     measurement_input: 1,
                     averaging: TfAveraging::Fifo { blocks: 8 },
-                    grid: LogGridSpec {
-                        ppo: 48,
-                        k_min: -240,
-                        k_max: 239
-                    },
+                    resolution: Resolution::FortyEighth,
                     smoothing: None,
                     depth: DepthPolicy::EqualConfidence,
                 }
@@ -1436,6 +1549,93 @@ mod tests {
 
     /// Duration and repeats step in order from the 3 s / 1× defaults and stop at the ends:
     /// 6 s is one → away, and holding a key never wraps to the other end.
+    /// Transfer and sweep dialogs have a Resolution choice (1/48 by default); editing a
+    /// transfer measurement shows its settings and keeps what the dialog does not show.
+    #[test]
+    fn resolution_in_the_transfer_and_sweep_dialogs() {
+        let o = open(
+            vec![0, 1],
+            Some(LoopbackRoute {
+                output: 1,
+                input: 0,
+            }),
+        );
+        let at = |f: &Form, id| f.fields.iter().position(|x| x.id == id).expect("field");
+        let mut f = Form::measurement(FormKind::Transfer, Some(&o), &[], &names(&o), &[]);
+        let i = at(&f, FieldId::Resolution);
+        assert_eq!(f.fields[i].label, "Resolution");
+        assert_eq!(f.fields[i].display(), "1/48 oct");
+        assert_eq!(f.fields[i].hint, RESOLUTION_HINT);
+        f.focus = i;
+        f.cycle(1);
+        let c = f.meas_config(Some(&o)).expect("tf");
+        let MeasKind::Transfer { config } = &c.kind else {
+            panic!("kind");
+        };
+        assert_eq!(config.resolution, Resolution::NinetySixth);
+        let m = Measurement {
+            id: MeasId(3),
+            config: MeasConfig {
+                name: "Main".into(),
+                kind: MeasKind::Transfer {
+                    config: TransferConfig {
+                        averaging: TfAveraging::Fifo { blocks: 32 },
+                        resolution: Resolution::TwentyFourth,
+                        depth: DepthPolicy::FastLf {
+                            max_settle_s: Seconds(2.5),
+                        },
+                        ..config.clone()
+                    },
+                },
+            },
+            config_rev: ac2_proto::units::Rev(1),
+            running: true,
+            delay: None,
+            grid_id: None,
+        };
+        let mut e = Form::edit_spec(&m, &names(&o)).expect("edit");
+        assert_eq!(e.kind, FormKind::TransferEdit);
+        assert_eq!(e.kind.verb(), "Apply");
+        assert_eq!(e.edits(), Some(MeasId(3)));
+        let i = at(&e, FieldId::Resolution);
+        assert_eq!(e.fields[i].display(), "1/24 oct");
+        assert_eq!(e.meas_config(Some(&o)).expect("same"), m.config);
+        e.focus = i;
+        e.cycle(-1);
+        let MeasKind::Transfer { config: edited } = e.meas_config(Some(&o)).expect("tf").kind
+        else {
+            panic!("kind");
+        };
+        assert_eq!(edited.resolution, Resolution::Twelfth);
+        assert_eq!(edited.averaging, TfAveraging::Fifo { blocks: 32 });
+
+        let mut s = Form::sweep(Some(&o), 0, &names(&o), &outs(), &[], Some(Dbfs(-50.0)));
+        assert_eq!(
+            swept(&s, &o).expect("sweep").resolution,
+            Resolution::FortyEighth
+        );
+        focus(&mut s, FieldId::Resolution);
+        s.cycle(1);
+        let c = swept(&s, &o).expect("sweep");
+        assert_eq!(c.resolution, Resolution::NinetySixth);
+        let sm = Measurement {
+            id: MeasId(4),
+            config: MeasConfig {
+                name: "Sweep 1".into(),
+                kind: MeasKind::Sweep { config: c },
+            },
+            config_rev: ac2_proto::units::Rev(1),
+            running: false,
+            delay: None,
+            grid_id: None,
+        };
+        let se = Form::edit_sweep(&sm, Some(&o), &names(&o), &outs()).expect("edit");
+        assert_eq!(
+            se.fields[at(&se, FieldId::Resolution)].display(),
+            "1/96 oct"
+        );
+    }
+
     #[test]
     fn sweep_steppers_are_sorted_and_stop_at_the_ends() {
         let o = open(

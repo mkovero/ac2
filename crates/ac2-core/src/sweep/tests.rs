@@ -381,6 +381,31 @@ fn a_gate_shortens_the_linear_window() {
         .position(|&f| f >= 1000.0)
         .expect("column");
     assert!((r.magnitude_db[at_1k] - 20.0 * (MIC_GAIN / REF_GAIN).log10()).abs() < 0.1);
+    // The short window's cell `1/W` is wider than a 1/48-octave column below κ(48)/W
+    // (≈ 3.5 kHz for 20 ms): one range from the sweep's start up to there.
+    let w = r.linear_window_s.0 + r.linear_window_s.1;
+    let edge = crate::resolution::resolved_from_hz(1.0 / w, 48);
+    assert_eq!(
+        r.unresolved_response.len(),
+        1,
+        "{:?}",
+        r.unresolved_response
+    );
+    let (lo, hi) = r.unresolved_response[0];
+    let col = 2f64.powf(1.0 / 48.0);
+    assert!(lo >= 100.0 / col && lo <= 100.0 * col, "{lo}");
+    assert!(hi / edge < col && edge / hi < col, "{hi} vs {edge}");
+    // Ungated, the window runs to the noise window: under 100 Hz, at the sweep's start.
+    let ungated =
+        analyse_recording(&spec(ess(100.0, 10_000.0, 1.0)), &reference, &mic, 1).expect("analysis");
+    assert!(
+        ungated
+            .unresolved_response
+            .iter()
+            .all(|r| r.1 < 100.0 * col),
+        "{:?}",
+        ungated.unresolved_response
+    );
 }
 
 #[test]
@@ -1085,10 +1110,27 @@ fn own_windows_resolve_the_lowest_columns_finer() {
             err(20.0, 25.0),
             err(25.0, 30.0),
             r.harmonics[0].floor_db[at],
+            (
+                r.unresolved_harmonics.last().map_or(f64::NAN, |x| x.1),
+                r.harmonic_window_s.0 + r.harmonic_window_s.1,
+            ),
         )
     };
-    let (roll_s, low_s, e20_s, e25_s, floor_s) = run(LfHarmonics::Standard);
-    let (roll_f, low_f, e20_f, e25_f, floor_f) = run(LfHarmonics::Fine);
+    let (roll_s, low_s, e20_s, e25_s, floor_s, (edge_s, w_s)) = run(LfHarmonics::Standard);
+    let (roll_f, low_f, e20_f, e25_f, floor_f, (edge_f, _)) = run(LfHarmonics::Fine);
+    // The coarsest harmonic cell in the shared window is H2's, 1/(2W) of fundamental: the
+    // distortion curves resolve 1/48 octave from κ(48)/(2W) up (≈ 350 Hz for 0.1 s). Fine's
+    // own windows serve the low columns with cells several times narrower.
+    let col = 2f64.powf(1.0 / 48.0);
+    let want = crate::resolution::resolved_from_hz(1.0 / (2.0 * w_s), 48);
+    assert!(
+        edge_s / want < col && want / edge_s < col,
+        "{edge_s} vs {want}"
+    );
+    assert!(
+        edge_f < 0.5 * edge_s,
+        "harmonics resolved from {edge_s:.0} → {edge_f:.0} Hz"
+    );
     eprintln!(
         "standard: from {low_s:.1} Hz, 20–25 Hz {e20_s:.3} dB, 25–30 Hz {e25_s:.3}, H2 floor \
          {floor_s:.1} dBr at 25 Hz, post-roll {roll_s:.2} s; fine: from {low_f:.1} Hz, \

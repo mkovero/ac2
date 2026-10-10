@@ -91,6 +91,7 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
         stored: None,
         selected: false,
         compared: false,
+        unresolved: None,
     }
 }
 
@@ -150,4 +151,54 @@ fn transfer_view_coherence_overlay() {
         ..stale()
     };
     transfer_golden("transfer_view_coherence_overlay", view, status);
+}
+
+/// The valid-resolution marker of a 1/96-oct curve at 96 kHz: faint shade and dashed edges
+/// under the grid and the curves, in every pane, in the dark and the light theme.
+#[test]
+fn transfer_view_unresolved() {
+    use ac2_proto::model::{FreqRange, Resolution, Unresolved};
+    use ac2_proto::units::Hz;
+    let un = Unresolved {
+        resolution: Resolution::NinetySixth,
+        ranges: [(19.9, 135.4), (203.0, 406.0), (1625.0, 3250.0)]
+            .iter()
+            .map(|&(lo, hi)| FreqRange {
+                lo: Hz(lo),
+                hi: Hz(hi),
+            })
+            .collect(),
+    };
+    let a = cols(0.0, 0.0);
+    let mut t = trace(&a, 1, 0, 0.010);
+    t.unresolved = Some(ac2_scene::unresolved::Source {
+        unresolved: &un,
+        fill: ac2_scene::unresolved::Fill::Gaps,
+    });
+    for theme in [Theme::dark(), Theme::light()] {
+        let name = format!("transfer_view_unresolved_{:?}", theme.name).to_lowercase();
+        let Some(gpu) = gpu(&name) else {
+            return;
+        };
+        let view = ViewState {
+            cursor_hz: Some(300.0),
+            ..ViewState::default()
+        };
+        let size = Viewport {
+            width: 560.0,
+            height: 360.0,
+        };
+        let s = ac2_scene::tf::transfer_scene(
+            std::slice::from_ref(&t),
+            &ac2_scene::trace::DisplayCache::default(),
+            &Status::default(),
+            &view,
+            &theme,
+            size,
+        );
+        assert_eq!(s.unresolved.len(), 3);
+        let mut r = renderer(gpu);
+        let img = render_on(gpu, &mut r, &s.scene, 1.0, theme.background);
+        golden(&name, &img, TEXT);
+    }
 }

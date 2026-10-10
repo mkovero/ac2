@@ -17,11 +17,7 @@
         "type": "fifo",
         "blocks": 8
        },
-       "grid": {
-        "ppo": 48,
-        "k_min": -240,
-        "k_max": 239
-       },
+       "resolution": "ninety_sixth",
        "smoothing": {
         "fraction": "sixth",
         "mode": "magnitude"
@@ -649,6 +645,7 @@
    "repeats": 2,
    "gate": null,
    "lf_harmonics": "standard",
+   "resolution": "forty_eighth",
    "status": {
     "type": "done",
     "trace": 9
@@ -685,7 +682,8 @@
        "repeats": 2,
        "gate": 0.005,
        "tail": 3.0,
-       "lf_harmonics": "fine"
+       "lf_harmonics": "fine",
+       "resolution": "twenty_fourth"
       }
      }
     },

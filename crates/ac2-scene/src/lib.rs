@@ -54,6 +54,7 @@ pub mod time;
 pub mod toast;
 pub mod trace;
 pub mod trace_list;
+pub mod unresolved;
 pub mod view;
 
 pub use primitives::*;

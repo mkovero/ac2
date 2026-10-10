@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::EssSpec;
+use super::{EssSpec, Resolution, Unresolved};
 use crate::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId, WallNs};
 
 /// A sweep measurement's settings: what each `sweep.run` of it plays and records.
@@ -32,6 +32,9 @@ pub struct SweepConfig {
     /// Harmonic windows at the lowest columns; `fine` also lengthens the silence after
     /// each sweep, so it is part of the measurement, not only of its analysis.
     pub lf_harmonics: LfHarmonics,
+    /// Points per octave of the run's trace (its response and distortion curves); a
+    /// change applies to the next run, stored traces keep their grid.
+    pub resolution: Resolution,
 }
 
 /// Harmonic windows at the lowest columns (harmonics below about 1 kHz), where 1/24 octave
@@ -133,6 +136,8 @@ pub struct SweepRun {
     pub gate: Option<Seconds>,
     /// Harmonic windows at the lowest columns.
     pub lf_harmonics: LfHarmonics,
+    /// Points per octave of the trace it makes.
+    pub resolution: Resolution,
     /// Status.
     pub status: SweepStatus,
     /// When it started.
@@ -248,6 +253,20 @@ pub struct SweepData {
     /// ISO 3382-1 room parameters of the impulse response; `None` for a sweep imported from
     /// an export written without them.
     pub room: Option<RoomAcoustics>,
+    /// Where the curves have columns finer than their windows resolve; `None` for a sweep
+    /// imported from an export written without them.
+    pub unresolved: Option<SweepUnresolved>,
+}
+
+/// Where a sweep trace's columns are finer than its analysis windows resolve.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SweepUnresolved {
+    /// The response (magnitude, phase): cells of the linear window, set by the gate.
+    pub response: Unresolved,
+    /// The distortion curves, on the fundamental's axis: cells of the harmonic windows
+    /// (the shared one, or with [`LfHarmonics::Fine`] each order's own where it serves).
+    pub harmonics: Unresolved,
 }
 
 // ---------------------------------------------------------------------------------------

@@ -55,6 +55,7 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
                 smoothing: None,
                 mic_curve: false,
                 math: None,
+                unresolved: None,
             },
             mag: vec![db; f.len()],
             phase,

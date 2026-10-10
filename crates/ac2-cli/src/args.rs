@@ -587,8 +587,9 @@ pub enum MeasCmd {
         #[arg(long)]
         watch: bool,
     },
-    /// Change a measurement's averaging: `--average` (spectrum, rta), `--blocks` (tf). What
-    /// is not given stays as it is; a running measurement starts its average afresh.
+    /// Change a measurement's averaging (`--average`: spectrum, rta; `--blocks`: tf) or
+    /// Resolution (`--resolution`: tf, sweep). What is not given stays as it is; a running
+    /// measurement starts its average afresh, a sweep's Resolution applies to its next run.
     Set {
         /// Id or name.
         meas: MeasRef,
@@ -600,6 +601,10 @@ pub enum MeasCmd {
         /// tf averaging: FIFO blocks of the full-rate stage (≥ 1).
         #[arg(long)]
         blocks: Option<u32>,
+        /// tf and sweep: Resolution, points per octave stored: `1/12`, `1/24`, `1/48`,
+        /// `1/96` (not smoothing).
+        #[arg(long, value_name = "1/N")]
+        resolution: Option<ResolutionArg>,
     },
     /// Start a measurement.
     Start {
@@ -665,9 +670,12 @@ pub struct MeasNew {
     /// Input (spectrum, rta, spl).
     #[arg(long)]
     pub input: Option<Channel>,
-    /// Points per octave of the tf grid.
-    #[arg(long, default_value_t = ac2_proto::model::TransferConfig::DEFAULT_PPO)]
-    pub ppo: u32,
+    /// tf and sweep: Resolution, the points per octave stored, `1/12`, `1/24`, `1/48`
+    /// (default) or `1/96`. Not smoothing (a display edit, `--smooth`): a finer resolution
+    /// adds columns, and below a frequency set by the analysis window they are
+    /// interpolation, not detail (the plot marks where).
+    #[arg(long, value_name = "1/N")]
+    pub resolution: Option<ResolutionArg>,
     /// Display smoothing, 1/N octave (tf: magnitude and phase; spectrum: power, and the
     /// level then no longer reads as tone level).
     #[arg(long, value_enum)]
@@ -1658,6 +1666,25 @@ impl FromStr for TraceSlot {
     }
 }
 
+/// A Resolution argument: `1/N` or `N`, N one of 12, 24, 48, 96.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolutionArg(pub ac2_proto::model::Resolution);
+
+impl FromStr for ResolutionArg {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        let t = s.trim();
+        t.strip_prefix("1/")
+            .unwrap_or(t)
+            .parse::<u32>()
+            .ok()
+            .and_then(ac2_proto::model::Resolution::from_ppo)
+            .map(Self)
+            .ok_or_else(|| format!("{s:?}: Resolution is 1/12, 1/24, 1/48 or 1/96 octave"))
+    }
+}
+
 /// A trace smoothing argument: `1/N`, `N` or `none` (`off`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TraceSmoothing(pub Option<ac2_proto::model::SmoothingFraction>);
@@ -1809,6 +1836,9 @@ pub struct IrCaptureArgs {
     /// higher floor there and a longer silence after the sweep.
     #[arg(long, value_enum, default_value_t = LfHarmonicsArg::Standard)]
     pub lf_harmonics: LfHarmonicsArg,
+    /// Resolution of the stored run, points per octave: `1/12`, `1/24`, `1/48`, `1/96`.
+    #[arg(long, value_name = "1/N", default_value = "1/48")]
+    pub resolution: ResolutionArg,
     /// Name of the stored run (default: `Run <number>`).
     #[arg(long)]
     pub name: Option<String>,

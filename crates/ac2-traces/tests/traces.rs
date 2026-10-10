@@ -221,7 +221,7 @@ fn typed_refusals() {
     assert_eq!(e.problem, ImportProblem::NoData);
     let e = bad("20 1 0 1.5\n30 2 0 0.5\n");
     assert_eq!(e.problem, ImportProblem::BadCoherence);
-    let e = bad("# ac2 trace export v5\nfreq_hz,mag_db\n20,1\n30,2\n");
+    let e = bad("# ac2 trace export v6\nfreq_hz,mag_db\n20,1\n30,2\n");
     assert_eq!((e.line, e.problem), (Some(1), ImportProblem::BadHeader));
     let e = import(b"20 1\n30 2\n", ImportFormat::Ac2Csv, ImportRole::Trace).unwrap_err();
     assert_eq!(e.problem, ImportProblem::BadHeader);
@@ -238,7 +238,7 @@ fn ac2_csv_round_trips_bit_for_bit() {
     t.columns.mag_db[11] = -2.718_281_7e-3;
     t.meta.edit.name = "Main L, pre EQ".into();
     let csv = export_csv(&t);
-    assert!(csv.starts_with("# ac2 trace export v4\n# name: Main L, pre EQ\n"));
+    assert!(csv.starts_with("# ac2 trace export v5\n# name: Main L, pre EQ\n"));
     assert!(csv.contains("# delay_ms: 12\n"));
     assert!(csv.contains("freq_hz,mag_db,phase_deg,coherence\n"));
     let back = import(csv.as_bytes(), ImportFormat::Auto, ImportRole::Trace).unwrap();
@@ -710,11 +710,7 @@ fn session_sample() -> Session {
                             reference_input: 0,
                             measurement_input: 1,
                             averaging: TfAveraging::Fifo { blocks: 8 },
-                            grid: LogGridSpec {
-                                ppo: 48,
-                                k_min: -240,
-                                k_max: 239,
-                            },
+                            resolution: Resolution::FortyEighth,
                             smoothing: None,
                             depth: DepthPolicy::EqualConfidence,
                         },
@@ -928,16 +924,16 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format is refused with its version named, never read
     // best-effort.
-    std::fs::write(&m, text.replace("\"version\": 19", "\"version\": 18")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 20", "\"version\": 19")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 18
+            found: 19
         }
     );
-    assert!(e.to_string().contains("reads version 19 only"), "{e}");
+    assert!(e.to_string().contains("reads version 20 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))
@@ -1020,6 +1016,19 @@ fn sweep_trace(id: u32) -> StoredTrace {
                 clipped: false,
             },
             room: Some(room()),
+            unresolved: Some(SweepUnresolved {
+                response: Unresolved {
+                    resolution: Resolution::FortyEighth,
+                    ranges: Vec::new(),
+                },
+                harmonics: Unresolved {
+                    resolution: Resolution::FortyEighth,
+                    ranges: vec![FreqRange {
+                        lo: Hz(20.0),
+                        hi: Hz(350.5),
+                    }],
+                },
+            }),
         }),
         ir: None,
         mic_curve: None,
@@ -1104,9 +1113,23 @@ fn sweep_csv_and_session_round_trip() {
     assert_eq!(back.ir, s.ir);
     assert_eq!(back.info, s.info);
     assert_eq!(back.room, s.room);
+    assert!(s.unresolved.is_some());
+    assert_eq!(back.unresolved, s.unresolved);
+    // An export written before sweeps said where they are unresolved (v4) is the same
+    // sweep without that.
+    let v4: String = csv
+        .replacen("# ac2 trace export v5", "# ac2 trace export v4", 1)
+        .lines()
+        .filter(|l| !l.starts_with("# sweep_unresolved"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let old = import(v4.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
+    let old = old.sweep.unwrap();
+    assert!(old.unresolved.is_none());
+    assert_eq!(old.room, s.room);
     // An export written before the room parameters (v2) is the same sweep without them.
     let v2: String = csv
-        .replacen("# ac2 trace export v4", "# ac2 trace export v2", 1)
+        .replacen("# ac2 trace export v5", "# ac2 trace export v2", 1)
         .lines()
         .filter(|l| !l.starts_with("# room_metrics"))
         .map(|l| format!("{l}\n"))
@@ -1191,7 +1214,7 @@ fn transfer_with_ir(id: u32) -> StoredTrace {
 fn transfer_ir_csv_and_session_round_trip() {
     let t = transfer_with_ir(6);
     let csv = export_csv(&t);
-    assert!(csv.starts_with("# ac2 trace export v4\n"));
+    assert!(csv.starts_with("# ac2 trace export v5\n"));
     assert!(
         csv.contains("\n# transfer_ir: {\"sample_rate\":48000.0,\"t0\":-0.042666666666666665,"),
         "{}",
@@ -1212,7 +1235,7 @@ fn transfer_ir_csv_and_session_round_trip() {
     assert!(tgt.ir.is_none());
     // An export written before transfer traces kept their IR (v3) imports without one.
     let v3: String = csv[..csv.find("# impulse response").unwrap()]
-        .replacen("# ac2 trace export v4", "# ac2 trace export v3", 1)
+        .replacen("# ac2 trace export v5", "# ac2 trace export v3", 1)
         .lines()
         .filter(|l| !l.starts_with("# transfer_ir"))
         .map(|l| format!("{l}\n"))

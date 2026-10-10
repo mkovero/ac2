@@ -10,7 +10,7 @@ use ac2_audio::fake::{FakeDrive, FakePath, Pace};
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::frame::{Frame, FrameData};
 use ac2_proto::model::{
-    DeviceSelector, LogGridSpec, LoopbackRoute, MeasConfig, MeasKind, SessionConfig, SplConfig,
+    DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, Resolution, SessionConfig, SplConfig,
     TfAveraging, TransferConfig,
 };
 use ac2_proto::units::RequestId;
@@ -143,11 +143,7 @@ pub fn transfer(name: &str) -> MeasConfig {
                 reference_input: 0,
                 measurement_input: 1,
                 averaging: TfAveraging::Fifo { blocks: 4 },
-                grid: LogGridSpec {
-                    ppo: 48,
-                    k_min: -240,
-                    k_max: 239,
-                },
+                resolution: Resolution::FortyEighth,
                 smoothing: None,
                 depth: ac2_proto::model::DepthPolicy::EqualConfidence,
             },

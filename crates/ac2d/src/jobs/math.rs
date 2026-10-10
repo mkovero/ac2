@@ -529,6 +529,7 @@ pub(crate) fn combine(
                 smoothing: None,
                 mic_curve,
                 math: state,
+                unresolved: None,
             },
             mag,
             phase: phase_deg.unwrap_or_else(nan),

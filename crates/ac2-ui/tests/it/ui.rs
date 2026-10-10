@@ -1690,6 +1690,7 @@ fn sweep_progress_strip() {
             repeats: 2,
             gate: None,
             lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+            resolution: ac2_proto::model::Resolution::FortyEighth,
             status: SweepStatus::Playing { repeat: 1 },
             started_at: WallNs(0),
         }));

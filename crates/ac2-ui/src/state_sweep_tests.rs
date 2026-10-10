@@ -18,6 +18,7 @@ fn sweep_measurement() -> Measurement {
                 gate: None,
                 tail: Some(Seconds(1.0)),
                 lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+                resolution: ac2_proto::model::Resolution::FortyEighth,
             },
         },
     )

@@ -919,9 +919,9 @@ impl Shared {
                 let (delay, grid_id) = match &config.kind {
                     MeasKind::Transfer { config } => {
                         let g = GridDef::Log {
-                            ppo: config.grid.ppo,
-                            k_min: config.grid.k_min,
-                            k_max: config.grid.k_max,
+                            ppo: config.grid().ppo,
+                            k_min: config.grid().k_min,
+                            k_max: config.grid().k_max,
                         };
                         let gid = g.id();
                         self.grids.insert(gid, g);

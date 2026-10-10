@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 34`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 35`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -759,7 +759,8 @@ Design: `docs/design/sweep-distortion.md`. `sweep.run {lease_token, meas, name}`
 sweep measurement `meas` (`MeasKind::Sweep`, `SweepConfig` above) with its settings:
 `sweep: EssSpec` {`start: Hz`, `end: Hz`, `duration`, `fade_in`, `fade_out`}, `tail`
 (silence recorded after each sweep: the room's decay and its noise, at most 20 s; nil or
-shorter = the analysis minimum, ≥ 1 s), `lf_harmonics` (`LfHarmonics`, the harmonic windows
+shorter = the analysis minimum, ≥ 1 s), `resolution` (`Resolution`, the trace's grid, §3.2
+*Resolution*), `lf_harmonics` (`LfHarmonics`, the harmonic windows
 at the lowest columns, harmonics below about 1 kHz: `standard` puts every order in one shared
 window, short enough for H5 — the lowest floor; `fine` puts each order in the longest window
 between its neighbours' impulses, with the fundamental and the floor in that window — finer
@@ -788,7 +789,7 @@ analysed band; responses are reported from `start`. `name` nil names the trace `
 - Progress and outcome are the `sweep` entity (§4.1), `SweepRun`: `id`, `meas`, `owner`,
   `name`,
   `reference_input`, `measurement_input`, `outputs`, `level`, `sweep`, `sweep_duration`
-  (actual, of each emitted sweep), `post_roll`, `repeats`, `gate`, `lf_harmonics`, `started_at`, `status` (`SweepStatus`, tagged by
+  (actual, of each emitted sweep), `post_roll`, `repeats`, `gate`, `lf_harmonics`, `resolution`, `started_at`, `status` (`SweepStatus`, tagged by
   `type`): `playing` {`repeat`, 1-based} → `analysing` → `done` {`trace`} or `failed`
   {`reason`, `msg`}. `SweepFailure`: `stopped` (`gen.stop`, `gen.release`, forced takeover),
   `lease_expired`, `session_closed`, `dropout` (audio lost while recording), `no_reference`
@@ -803,7 +804,8 @@ analysed band; responses are reported from `start`. `name` nil names the trace `
   `sample_rate`, `rate` (L: harmonic k's impulse at −L·ln k), `duration`, `repeats`,
   `arrival`, `reference_level` (loopback gain), `window_pre`, `window_post`, `gate_pre`,
   `gate`, `floor_margin`, `clipped`); `room` (`RoomAcoustics | nil`, below; nil only for a
-  sweep imported from an export written without it). A distortion point is valid when
+  sweep imported from an export written without it); `unresolved` (`SweepUnresolved | nil`,
+  §3.2 *Resolution*; nil only for a sweep imported from an export written without it). A distortion point is valid when
   `level_db ≥ floor_db + floor_margin`; otherwise it reads "< floor".
 - `RoomAcoustics` (ISO 3382-1 room parameters of the full-rate impulse response, design
   `docs/design/room-metrics.md`): `broadband` (`RoomBand` of the IR as captured), `octave`
@@ -976,6 +978,28 @@ only that one; none when not chosen, off, or not stored — normalised to 0 dB a
 calibration's frequency in use (the calibrator's; 1 kHz for an electrical calibration and
 uncalibrated). The rules are
 the pure functions of `ac2_proto::cal`, which clients use to word what is in use.
+
+#### Resolution and unresolved ranges
+
+`TransferConfig.resolution` and `SweepConfig.resolution` (`Resolution`: `twelfth` \|
+`twenty_fourth` \| `forty_eighth` \| `ninety_sixth`, 12 … 96 points per octave; front ends
+default to `forty_eighth`) set the stored column grid: a transfer function's is ten octaves
+around 1 kHz (`{type: log, ppo, k_min: −5·ppo, k_max: 5·ppo − 1}`), a sweep's covers its
+`start … end`. It is not smoothing (a display edit over these columns). `meas.update` with a
+new transfer resolution restarts the job (new columns, averages start over); a sweep's
+applies to its next run, and stored traces keep their grid.
+
+`Unresolved` {`resolution`, `ranges`: [`FreqRange` {`lo`, `hi`: Hz}], ascending, disjoint,
+on column edges} lists where one estimate's resolution cell — the bandwidth its analysis
+window sets — is wider than one column at that resolution, so the columns there are
+interpolation, not detail. Transfer (`TfMeta.unresolved`; nil for a math channel): the cell
+is the bin spacing of the coarsest MTW stage serving the column (stages switch over where a
+bin fills a 1/48-octave column, so at 1/96 the band just above each crossover is
+unresolved too; at 96 kHz: below ≈ 135 Hz, ≈ 203–406 Hz and ≈ 1.62–3.25 kHz). Sweep
+(`SweepData.unresolved`: `SweepUnresolved` {`response`, `harmonics`} \| nil): the response's
+cell is 1/(its linear window), set by `gate`; a distortion point's is, on the fundamental's
+axis, 1/(k · its harmonic window) for every order k it reports, with `lf_harmonics: fine`
+each order's own window where it serves.
 
 #### Averaging depth
 
@@ -1160,7 +1184,7 @@ layout as code.
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below) |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil) |
@@ -1260,7 +1284,7 @@ columns) = `0x79ec3d16ae0e94d0`.
 ### 7.1 Trace text (`trace.import` / `trace.export`)
 
 **ac2 CSV** (`ac2_csv`, what `trace.export` writes): the first line is exactly
-`# ac2 trace export v4` (`v3`, `v2` and `v1` are read too; another version is `bad_header`); then
+`# ac2 trace export v5` (`v4`, `v3`, `v2` and `v1` are read too; another version is `bad_header`); then
 `# key: value` lines with every metadata field (`name`, `kind`, `source`, `time_base`,
 `delay_ms`, `delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not
 applied), `depth`, `cal`, `mic` (`name (curve: <label>, …; file …, hash …)`: in the
@@ -1268,7 +1292,8 @@ columns for a capture with a curve, or applied after capture as a display edit, 
 columns), `mic_curve` (the
 JSON `TraceMicCurve`, only when one is applied after capture), `created_ns`, `note`, `grid`
 as the JSON `GridDef`); a sweep trace adds `sweep_info` (the JSON `SweepInfo`),
-`sweep_ir` (JSON `{t0, dt, points}`) and `room_metrics` (the JSON `RoomAcoustics`); a transfer
+`sweep_ir` (JSON `{t0, dt, points}`), `sweep_unresolved` (the JSON `SweepUnresolved`) and
+`room_metrics` (the JSON `RoomAcoustics`); a transfer
 trace with an impulse response adds `transfer_ir` (JSON `{sample_rate, t0, dt, points}`). Then the
 header
 `freq_hz,mag_db[,phase_deg][,coherence]` and one row per grid column; a sweep trace
@@ -1285,7 +1310,7 @@ reads `name`, `kind`, `grid`, `delay_ms` and, for a sweep, `sweep_info`, `sweep_
 `room_metrics`, the distortion columns and the impulse response, for a transfer trace
 `transfer_ir` and its impulse response (`sweep_ir` on another kind than `sweep`, or
 `transfer_ir` on another than `transfer`, is `bad_header`; as a target, nothing of it is
-kept); a v3 export imports as written (no transfer trace in it has an IR); a v2 sweep export imports
+kept); a v4 sweep export imports without `unresolved`; a v3 export imports as written (no transfer trace in it has an IR); a v2 sweep export imports
 as a sweep without room parameters; a v1 sweep export (no `sweep_info`) imports as
 its transfer function (note `sweep_without_analysis`).
 

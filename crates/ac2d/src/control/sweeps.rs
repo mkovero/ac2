@@ -129,8 +129,15 @@ impl Control {
             ));
         }
         let fs = f64::from(rt.sample_rate);
-        let (spec, timing) =
-            sweep::spec(req.sweep, level.0, req.gate, req.tail, req.lf_harmonics, fs)?;
+        let (spec, timing) = sweep::spec(
+            req.sweep,
+            level.0,
+            req.gate,
+            req.tail,
+            req.lf_harmonics,
+            req.resolution,
+            fs,
+        )?;
         let sweeps = (0..req.repeats)
             .map(|_| {
                 CoreGenerator::new(&GeneratorConfig {
@@ -243,6 +250,7 @@ impl Control {
             repeats: req.repeats,
             gate: req.gate,
             lf_harmonics: req.lf_harmonics,
+            resolution: req.resolution,
             status: SweepStatus::Playing { repeat: 1 },
             started_at: WallNs(wall_ns()),
         };
@@ -383,7 +391,7 @@ impl Control {
         };
         let run = &active.run;
         let grid = sweep::grid(&active.spec);
-        let (columns, data) = sweep::trace_data(&a);
+        let (columns, data) = sweep::trace_data(&a, run.resolution);
         let tid = self.traces.alloc();
         let t = TraceMeta {
             id: tid,

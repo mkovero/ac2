@@ -1,7 +1,7 @@
 {
  "topic": "d/1/tf",
  "header": {
-  "v": 34,
+  "v": 35,
   "kind": "tf",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -85,6 +85,19 @@
       }
      ],
      "phase": "shared_time_base"
+    },
+    "unresolved": {
+     "resolution": "ninety_sixth",
+     "ranges": [
+      {
+       "lo": 31.25,
+       "hi": 135.5
+      },
+      {
+       "lo": 1625.0,
+       "hi": 3250.0
+      }
+     ]
     }
    }
   }

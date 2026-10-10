@@ -300,9 +300,7 @@ fn power_average_of_three_positions() {
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     let mut other_grid = tf_on("Seat 2", 2);
     if let MeasKind::Transfer { config } = &mut other_grid.kind {
-        config.grid.ppo = 24;
-        config.grid.k_min = -120;
-        config.grid.k_max = 119;
+        config.resolution = ac2_proto::model::Resolution::TwentyFourth;
     }
     let e = c
         .call(Command::MeasUpdate {

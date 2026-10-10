@@ -430,6 +430,13 @@ pub struct SweepAnalysis {
     pub room: RoomAnalysis,
     /// End of the IR the room parameters were computed from, s re the arrival.
     pub room_end_s: f64,
+    /// Ranges (Hz) where the response's columns are narrower than one cell of the linear
+    /// window ([`crate::resolution`]).
+    pub unresolved_response: Vec<(f64, f64)>,
+    /// Ranges (Hz, fundamental) where the distortion curves' columns are narrower than the
+    /// coarsest cell of a harmonic window that serves them: order k's cell `1/W` at `k·f`
+    /// spans `1/(k·W)` of fundamental.
+    pub unresolved_harmonics: Vec<(f64, f64)>,
 }
 
 /// Whether a distortion point counts: [`FLOOR_MARGIN_DB`] above its noise floor.
@@ -672,6 +679,8 @@ fn high_passed(spec: &[Complex64], bin_hz: f64, fc: f64) -> Vec<Complex64> {
 
 /// The spectra one harmonic column is read from: the shared window's or an order's own.
 struct Windowed<'a> {
+    /// Window length, s: its resolution cell is `1/window_s`.
+    window_s: f64,
     /// Lowest fundamental this window resolves (and the sweep plays at full level), Hz.
     f_lo: f64,
     /// Narrowest band a point averages over: [`DISTORTION_MIN_CELLS`] of this window.
@@ -686,6 +695,7 @@ struct Windowed<'a> {
 /// An order's own longest window ([`LfHarmonics::Fine`]), with the fundamental and the
 /// noise in the same window.
 struct OwnWindow {
+    window_s: f64,
     f_lo: f64,
     min_hz: f64,
     bin: f64,
@@ -697,6 +707,7 @@ struct OwnWindow {
 impl OwnWindow {
     fn view(&self) -> Windowed<'_> {
         Windowed {
+            window_s: self.window_s,
             f_lo: self.f_lo,
             min_hz: self.min_hz,
             bin: self.bin,
@@ -883,6 +894,7 @@ pub fn analyse_recording(
         .collect();
     let min_hz = DISTORTION_MIN_CELLS / timing.window_s();
     let shared = |k: u8| Windowed {
+        window_s: w_len as f64 / fs,
         f_lo,
         min_hz,
         bin: bin_w,
@@ -912,6 +924,7 @@ pub fn analyse_recording(
                 n,
             );
             Some(OwnWindow {
+                window_s: ws,
                 f_lo,
                 min_hz: DISTORTION_MIN_CELLS / ws,
                 bin: fs / nw as f64,
@@ -924,6 +937,9 @@ pub fn analyse_recording(
     let f_lo_any = own.iter().flatten().map(|x| x.f_lo).fold(f_lo, f64::min);
     let mut thd_db = vec![f64::NAN; freqs.len()];
     let mut thd_floor_db = vec![f64::NAN; freqs.len()];
+    // Per column, the widest cell (on the fundamental's axis) of a window a reported order
+    // was read from.
+    let mut harmonic_cell = vec![None::<f64>; freqs.len()];
     let half = 2f64.powf(DISTORTION_BAND_OCT / 2.0);
     for (i, &f) in freqs.iter().enumerate() {
         if f < f_lo_any {
@@ -959,6 +975,8 @@ pub fn analyse_recording(
                 continue;
             }
             let nk = band_power(x.noise, x.bin, kf, FLOOR_BAND_OCT, 2.0 * x.min_hz);
+            let cell = 1.0 / (k * x.window_s);
+            harmonic_cell[i] = Some(harmonic_cell[i].map_or(cell, |c: f64| c.max(cell)));
             hc.level_db[i] = db10(pk / p1);
             hc.floor_db[i] = db10(nk / p1);
             sum += pk / p1;
@@ -1008,6 +1026,12 @@ pub fn analyse_recording(
             phase_deg[i] = wrap_deg(z.arg().to_degrees());
         }
     }
+
+    // One cell of the linear window wherever the response is reported.
+    let lin_cell = fs / lin_len as f64;
+    let unresolved_response = crate::resolution::unresolved_ranges(&spec.grid, |f| {
+        (f1..=f2).contains(&f).then_some(lin_cell)
+    });
 
     // IR from the highest order's window to the end of the linear window.
     let ir_start = t_k(k_max) - pre_n as i64;
@@ -1074,6 +1098,10 @@ pub fn analyse_recording(
         clipped,
         room,
         room_end_s: re_arrival(room_end),
+        unresolved_response,
+        unresolved_harmonics: crate::resolution::unresolved_columns(&spec.grid, |i| {
+            harmonic_cell[i]
+        }),
     })
 }
 

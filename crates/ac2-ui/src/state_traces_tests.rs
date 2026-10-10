@@ -197,7 +197,7 @@ fn smoothing_keys_step_the_pane_measurement() {
                 unreachable!()
             };
             assert_eq!(config.averaging, was.averaging);
-            assert_eq!(config.grid, was.grid);
+            assert_eq!(config.resolution, was.resolution);
         }
         other => panic!("{other:?}"),
     }

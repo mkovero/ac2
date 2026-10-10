@@ -239,6 +239,9 @@ pub struct UiPrefs {
     /// Warnings and Leq limit alarms pop up in the corner (on until the operator turns it
     /// off); off, they go only to the notification log.
     pub warning_toasts: bool,
+    /// The transfer and sweep panes shade the ranges a curve's analysis does not resolve
+    /// at its grid (on until the operator turns it off).
+    pub resolution_marker: bool,
     /// How long the SPL meter's number holds a reading; `None`: by its time weighting
     /// (`ac2_scene::spl::display_period_s`).
     pub spl_hold_ms: Option<u32>,
@@ -272,6 +275,7 @@ impl Default for UiPrefs {
             leq: LeqLayout::default(),
             key_hints: true,
             warning_toasts: true,
+            resolution_marker: true,
             spl_hold_ms: None,
             layout: LayoutPrefs::default(),
             levels: LevelPrefs::default(),
@@ -328,6 +332,9 @@ struct File {
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     warning_toasts: Option<bool>,
+    /// Written only when off (the default is on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resolution_marker: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spl_hold_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1097,6 +1104,7 @@ impl UiPrefs {
             leq,
             key_hints: f.key_hints.unwrap_or(true),
             warning_toasts: f.warning_toasts.unwrap_or(true),
+            resolution_marker: f.resolution_marker.unwrap_or(true),
             spl_hold_ms: f.spl_hold_ms,
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
             levels: f
@@ -1125,6 +1133,7 @@ impl UiPrefs {
             key_hints: (!self.key_hints).then_some(false),
             unknown: BTreeMap::new(),
             warning_toasts: (!self.warning_toasts).then_some(false),
+            resolution_marker: (!self.resolution_marker).then_some(false),
             spl_hold_ms: self.spl_hold_ms,
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,
@@ -1264,6 +1273,17 @@ mod tests {
         assert!(text.contains("warning_toasts = false"), "{text}");
         assert_eq!(UiPrefs::from_toml(&text), Ok(p));
         assert!(UiPrefs::from_toml("warning_toasts = \"off\"\n").is_err());
+    }
+
+    #[test]
+    fn resolution_marker_round_trip() {
+        let mut p = UiPrefs::default();
+        assert!(p.resolution_marker);
+        assert!(!p.to_toml().contains("resolution_marker"));
+        p.resolution_marker = false;
+        let text = p.to_toml();
+        assert!(text.contains("resolution_marker = false"), "{text}");
+        assert_eq!(UiPrefs::from_toml(&text), Ok(p));
     }
 
     #[test]

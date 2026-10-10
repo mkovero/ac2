@@ -8,8 +8,9 @@ use ac2_core::sweep::{
     DEFAULT_MAX_ORDER, FLOOR_MARGIN_DB, SweepAnalysis, SweepError, SweepSpec, SweepTiming,
 };
 use ac2_proto::model::{
-    DistortionCurve, EssSpec, HarmonicCurve, LfHarmonics, RoomAcoustics, RoomBand, RoomRefusal,
-    RoomValue, SweepData, SweepFailure, SweepInfo, TraceIr,
+    DistortionCurve, EssSpec, FreqRange, HarmonicCurve, LfHarmonics, Resolution, RoomAcoustics,
+    RoomBand, RoomRefusal, RoomValue, SweepData, SweepFailure, SweepInfo, SweepUnresolved, TraceIr,
+    Unresolved,
 };
 use ac2_proto::units::{Db, Hz, Seconds};
 use ac2_proto::{ErrorCode, GridDef, ProtoError};
@@ -18,8 +19,6 @@ use ac2_traces::columns::Columns;
 use crate::conv;
 use crate::util::perr;
 
-/// Points per octave of a sweep trace's grid (the transfer function's default).
-pub(crate) const PPO: u32 = 48;
 /// Recorded before the first sweep can have arrived: the output → input latency allowance,
 /// seconds. A longer latency cuts the last sweep's silence and the analysis says so.
 pub(crate) const LEAD_S: f64 = 1.0;
@@ -38,6 +37,7 @@ pub(crate) fn spec(
     gate: Option<Seconds>,
     tail: Option<Seconds>,
     lf_harmonics: LfHarmonics,
+    resolution: Resolution,
     fs: f64,
 ) -> Result<(SweepSpec, SweepTiming), ProtoError> {
     let ess = conv::ess(sweep);
@@ -56,7 +56,7 @@ pub(crate) fn spec(
         max_order: DEFAULT_MAX_ORDER,
         gate_s: gate.map(|g| g.0),
         tail_s: tail.map(|t| t.0),
-        grid: LogGrid::covering(PPO, ess.start_hz, ess.end_hz),
+        grid: LogGrid::covering(resolution.ppo(), ess.start_hz, ess.end_hz),
         lf_harmonics: conv::lf_harmonics(lf_harmonics),
     };
     let timing = SweepTiming::new(&spec).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
@@ -93,7 +93,7 @@ fn finite(v: &[f64], floor: f32) -> Vec<f32> {
 }
 
 /// The trace columns and sweep data of an analysis.
-pub(crate) fn trace_data(a: &SweepAnalysis) -> (Columns, SweepData) {
+pub(crate) fn trace_data(a: &SweepAnalysis, resolution: Resolution) -> (Columns, SweepData) {
     let columns = Columns {
         mag_db: f32s(&a.magnitude_db),
         phase_deg: Some(f32s(&a.phase_deg)),
@@ -134,12 +134,30 @@ pub(crate) fn trace_data(a: &SweepAnalysis) -> (Columns, SweepData) {
             clipped: a.clipped,
         },
         room: Some(room(a)),
+        unresolved: Some(SweepUnresolved {
+            response: unresolved(resolution, &a.unresolved_response),
+            harmonics: unresolved(resolution, &a.unresolved_harmonics),
+        }),
     };
     (columns, data)
 }
 
 /// A finite number for the wire and the session's JSON (a value is never infinite; a
 /// defensive refusal keeps one from making a session unreadable).
+/// Core ranges (Hz) as the wire's.
+pub(crate) fn unresolved(resolution: Resolution, ranges: &[(f64, f64)]) -> Unresolved {
+    Unresolved {
+        resolution,
+        ranges: ranges
+            .iter()
+            .map(|&(lo, hi)| FreqRange {
+                lo: Hz(lo),
+                hi: Hz(hi),
+            })
+            .collect(),
+    }
+}
+
 fn room_value(m: Metric) -> RoomValue {
     match m {
         Ok(value) if value.is_finite() => RoomValue::Value { value },

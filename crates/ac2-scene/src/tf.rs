@@ -112,6 +112,39 @@ pub struct TfScene {
     /// Banner strip above the panes; zero height when no banner is up.
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
+    /// Ranges the marked curve does not resolve at its grid (the selected curve, else the
+    /// first of the pane's own), shaded in every pane; empty when the marker is off.
+    pub unresolved: Vec<crate::unresolved::Mark>,
+}
+
+/// The valid-resolution marks of the selected shown curve that knows its ranges, else of
+/// the first of the pane's own (not compared) that does: one curve's, so the shading
+/// stays one statement.
+fn unresolved_marks(
+    traces: &[TfTrace<'_>],
+    shown: &[DisplayTrace],
+    view: &ViewState,
+) -> Vec<crate::unresolved::Mark> {
+    if !view.unresolved {
+        return Vec::new();
+    }
+    let known = || {
+        traces
+            .iter()
+            .filter(|t| t.unresolved.is_some() && shown.iter().any(|d| d.key == t.key))
+    };
+    known()
+        .find(|t| t.selected)
+        .or_else(|| known().find(|t| !t.compared))
+        .and_then(|t| {
+            let src = t.unresolved?;
+            Some(crate::unresolved::marks(
+                src,
+                t.freqs.first().copied()?,
+                None,
+            ))
+        })
+        .unwrap_or_default()
 }
 
 /// `nudge_s`: a stored trace's delay from its arrival (its display nudge); `stepped_s`: a
@@ -461,6 +494,7 @@ pub fn transfer_scene(
     let x_axis = axis::freq_axis(view.freq.range(), plot_x, plot_x + plot_w);
     let xm = x_axis.mapping;
     let last = panes_at.len().saturating_sub(1);
+    let marks = unresolved_marks(traces, &shown, view);
 
     let mut panes = Vec::new();
     let mut coherence_overlay = None;
@@ -525,6 +559,7 @@ pub fn transfer_scene(
             view.chrome,
             theme,
         );
+        crate::unresolved::draw(&mut c, plot, &xm, &marks, theme);
         let ym = y_axis.mapping;
         if kind != TfPaneKind::Coherence {
             canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
@@ -601,10 +636,15 @@ pub fn transfer_scene(
         .zip(&nudges)
         .map(|(t, (n, s, c))| legend_entry(t, *n, *s, selected == Some(t.key), *c))
         .collect();
-    let cursor = view
+    let mut cursor = view
         .cursor_hz
         .filter(|_| view.chrome.cursor())
         .and_then(|hz| readout::cursor_readout(&shown, hz, view.tf.phase));
+    if let Some(cr) = cursor.as_mut()
+        && let Some(m) = crate::unresolved::at(&marks, cr.freq_hz)
+    {
+        cr.freq = format!("{} · {}", cr.freq, m.note);
+    }
     let delay = reference.as_ref().map(|r| {
         let name = shown
             .iter()
@@ -666,6 +706,7 @@ pub fn transfer_scene(
         coherence_overlay,
         strip: strip.rect,
         banners: strip.rows,
+        unresolved: marks,
     }
 }
 
@@ -733,6 +774,7 @@ mod tests {
             stored: None,
             selected: false,
             compared: false,
+            unresolved: None,
         }
     }
 
@@ -1603,5 +1645,103 @@ mod tests {
             "{labels:?}"
         );
         assert!(!labels.iter().any(|l| l.starts_with("m1 · ")), "{labels:?}");
+    }
+
+    /// The marker: one curve's unresolved ranges, shaded in every pane with dashed edges,
+    /// named in the scene and on the cursor's frequency line; off by the view switch.
+    #[test]
+    fn unresolved_ranges_are_shaded_and_named() {
+        use ac2_proto::model::{FreqRange, Resolution, Unresolved};
+        use ac2_proto::units::Hz;
+        let c = cols(100);
+        let un = Unresolved {
+            resolution: Resolution::NinetySixth,
+            ranges: [(50.0, 135.0), (1625.0, 3250.0)]
+                .iter()
+                .map(|&(lo, hi)| FreqRange {
+                    lo: Hz(lo),
+                    hi: Hz(hi),
+                })
+                .collect(),
+        };
+        let mut t = trace(&c, TraceKey::Live(MeasId(1)), 0.0);
+        t.unresolved = Some(crate::unresolved::Source {
+            unresolved: &un,
+            fill: crate::unresolved::Fill::Gaps,
+        });
+        let theme = Theme::dark();
+        let view = ViewState {
+            cursor_hz: Some(2000.0),
+            ..ViewState::default()
+        };
+        let s = transfer_scene(
+            std::slice::from_ref(&t),
+            &DisplayCache::default(),
+            &Status::default(),
+            &view,
+            &theme,
+            SIZE,
+        );
+        let texts: Vec<&str> = s.unresolved.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "below 140 Hz: coarser than 1/96 oct (gaps)",
+                "1.6 kHz–3.3 kHz: coarser than 1/96 oct (gaps)",
+            ]
+        );
+        let cur = s.cursor.as_ref().expect("cursor");
+        assert!(
+            cur.freq.ends_with(" · coarser than 1/96 oct (gaps)"),
+            "{}",
+            cur.freq
+        );
+        let shades = s.scene.layers[0]
+            .rects
+            .iter()
+            .filter(|r| r.color == theme.unresolved_shade)
+            .count();
+        assert_eq!(shades, 2 * s.panes.len());
+        // The lowest range has only its upper edge; the other both.
+        let edges = s.scene.layers[0]
+            .polylines
+            .iter()
+            .filter(|p| p.stroke == theme.unresolved_edge)
+            .count();
+        assert_eq!(edges, 3 * s.panes.len());
+        assert!(theme.unresolved_edge.dash.is_some());
+
+        // At 1 kHz the cursor line says nothing more; off, nothing is marked.
+        let at_1k = transfer_scene(
+            std::slice::from_ref(&t),
+            &DisplayCache::default(),
+            &Status::default(),
+            &ViewState {
+                cursor_hz: Some(1000.0),
+                ..ViewState::default()
+            },
+            &theme,
+            SIZE,
+        );
+        assert!(!at_1k.cursor.expect("cursor").freq.contains("coarser"));
+        let off = transfer_scene(
+            std::slice::from_ref(&t),
+            &DisplayCache::default(),
+            &Status::default(),
+            &ViewState {
+                unresolved: false,
+                ..view
+            },
+            &theme,
+            SIZE,
+        );
+        assert!(off.unresolved.is_empty());
+        assert!(!off.cursor.expect("cursor").freq.contains("coarser"));
+        assert!(
+            !off.scene.layers[0]
+                .rects
+                .iter()
+                .any(|r| r.color == theme.unresolved_shade)
+        );
     }
 }
