@@ -442,19 +442,25 @@ class OsmAnalysis:
         mean_g2o = float(np.nanmean(coh[okb] ** 2)) if okb.any() else None
         neff = welch_neff(n, round(0.08 * fs), OSM_COHERENCE_TICKS)
         if g2true is not None:
+            # In noise γ̂² reads high by its finite-average bias, so there the judged row is the
+            # one against E[γ̂²] below, as for OSM; the truth stays beside it as context.
             self.add(name, "ac2 γ² vs true γ², mean 1–20 kHz", None if mean_g2a is None else mean_g2a - g2true, "",
-                     "coh_ac2", f"ac2 shows γ² (true γ² = {g2true:.4f}: SNR/(1+SNR) of the fixture)")
-            # ac2's own finite-average expectation, column by column from its MTW model: the
-            # bias against the truth above is what this many averages must show.
+                     "coh_ac2" if snr is None else None,
+                     f"ac2 shows γ² (true γ² = {g2true:.4f}: SNR/(1+SNR) of the fixture)"
+                     + ("" if snr is None else "; its finite-average bias is judged on the expected-value row"),
+                     status=None if snr is None else "INFO")
+            # ac2's own finite-average expectation, column by column from its MTW model: its γ²
+            # is a Gxx-weighted mean of per-bin estimates (`coherence_study.ac2_column_g2`), and
+            # that bias against the truth is what this many averages must show.
             from .coherence_study import ac2_column_model, ac2_expected_g2
             ea = ac2_expected_g2(g2true, ac2_column_model(fs, int(settings["ac2_tf_blocks"]), fc[bias_band]))
             ga2 = g2a[bias_band]
             fin = np.isfinite(ga2) & np.isfinite(ea)
             if fin.any() and snr is not None:
                 self.add(name, "ac2 γ² vs its expected value, mean 1–20 kHz", float(np.mean(ga2[fin]) - np.mean(ea[fin])),
-                         "", None, f"E[γ̂²] = {np.mean(ea[fin]):.4f} at true {g2true:.4f} from ac2's model effective "
-                         "averages per column (bins per column, stage, crossover blend); context for the bias "
-                         "against the truth", status="INFO")
+                         "", "coh_ac2_model", f"E[γ̂²] = {np.mean(ea[fin]):.4f} at true {g2true:.4f} from ac2's model "
+                         "effective averages per bin and independent bins per column (stage, crossover blend; ac2's "
+                         "γ² is a Gxx-weighted mean of per-bin γ̂²)")
             model = expected_g2(g2true, neff)
             self.add(name, "OSM γ² vs its expected value, mean 1–20 kHz", None if mean_g2o is None else mean_g2o - model,
                      "", "coh_osm_model",

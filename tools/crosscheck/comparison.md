@@ -124,7 +124,7 @@ before them.
 | 1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy, largest \|difference\| | 4.106 dB [n 29] (INFO 1) |
 | 1/3-oct bands: ac2 RTA vs its own filters' response applied to the recording, worst band | −0.012 dB [n 29] (INFO 1) |
 
-### OSM stage (osm-20261010T172327Z, ac2 d08cc70, v1.5.2: PASS 86, INFO 77)
+### OSM stage (osm-c0244e4, ac2 c0244e4, v1.5.2: PASS 86, INFO 77)
 
 **Transfer: max over the gated columns; a rig take (not a planned fixture) shows the median over its columns**
 
@@ -135,10 +135,10 @@ before them.
 | delay48 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |  | 0.000 |
 | delay10_5 | 0.002 | 0.001 | 0.014 | 0.005 | 0.002 | 0.014 | 0.000 |  | 0.000 |
 | polarity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |  | 0.000 |
-| snr20 |  |  |  |  |  |  | 0.000 | 0.000 | 0.000 |
-| snr10 |  |  |  |  |  |  | +0.002 | +0.001 | +0.001 |
-| snr0 |  |  |  |  |  |  | +0.013 | −0.003 | −0.005 |
-| genelec-rig (median) |  |  |  |  | 0.119 | 0.723 |  |  |  |
+| snr20 |  |  |  |  |  |  | +0.001 | 0.000 | 0.000 |
+| snr10 |  |  |  |  |  |  | +0.008 | +0.001 | +0.001 |
+| snr0 |  |  |  |  |  |  | +0.049 | −0.003 | −0.005 |
+| genelec-rig (median) |  |  |  |  | 0.144 | 0.796 |  |  |  |
 | xone-rig (median) |  |  |  |  | 0.000 | 0.004 |  |  |  |
 
 **Delay (samples), noise and spectrum: signed**
@@ -167,9 +167,9 @@ before them.
 | delay10_5 | 412 | 0 | 3 | 0 | 0 |  |  |  |  |
 | polarity | 412 | 0 | 3 | 0 | 0 |  |  |  |  |
 | snr20 | 412 | 0 | 3 | 0 | 1 |  |  |  |  |
-| snr10 | 10 | 402 | 3 | 0 | 0 |  |  |  |  |
+| snr10 | 11 | 401 | 3 | 0 | 0 |  |  |  |  |
 | snr0 | 0 | 412 | 3 | 0 | 0 |  |  |  |  |
-| genelec-rig | 258 | 154 | 3 | 17 | 34 | 1.034 | 3.587 @ 69.1 Hz | 5.530 | 20.399 @ 54.9 Hz |
+| genelec-rig | 307 | 105 | 3 | 17 | 34 | 1.054 | 3.587 @ 69.1 Hz | 5.709 | 20.399 @ 54.9 Hz |
 | xone-rig | 412 | 0 | 3 | 17 | 1 | 0.002 | 0.005 @ 59.9 Hz | 0.033 | 0.134 @ 59.9 Hz |
 
 ### Digital DUT: harmonics H2–H5 against their exact values (dummy JACK)
@@ -193,7 +193,7 @@ before them.
 | quantity | ac2 | REW (imported sweep) | OSM v1.5.2 | how the suite compares |
 |---|---|---|---|---|
 | transfer | live H1 = G_rm/G_rr over a multi-time-window ladder; sweep meas ÷ measured loopback ref | each input deconvolved by REW's stimulus, meas ÷ ref | mean of \|M\|/\|R\| per 80 ms tick (not H1); phase a mean of unit phasors | magnitudes only where both γ² ≥ 0.95; in noise OSM against E\|1 + N/R\|, ac2 against 0 dB |
-| coherence | γ² from accumulated cross and auto spectra | none | γ over a fixed 21 overlapping ticks (≈ 5.4 independent averages) | OSM squared and judged against E[γ̂²]; ac2 against the true γ² |
+| coherence | γ² per bin from accumulated cross and auto spectra, Gxx-weighted mean over the column | none | γ over a fixed 21 overlapping ticks (≈ 5.4 independent averages) | both judged against their own E[γ̂²] (OSM squared); ac2 against the true γ² where that is 1 |
 | grid | 1/48-octave columns | native bins, unsmoothed | native bins; smoothing is display only | both power-averaged into ac2's columns |
 | delay finder | sub-sample (regularised H1, Hilbert IR) | removed by its timing markers | integer argmax of IFFT(M/R), not applied automatically | ac2 within 0.05 sample of truth, OSM ±0.5; in the delay cases and the speaker recording the harness inserts each finder's result (OSM's whole sample as `--delay`) and replays, as an operator would |
 | spectrum | dBFS peak convention, power mean of noise | not compared | RMS (a sine reads −3.01 dB); a linear mean of amplitudes | +3.01 dB added to OSM; on noise also +1.05 dB, the Rayleigh amplitude mean's √(π/4) under the power mean |
@@ -251,8 +251,8 @@ d08cc70 reads that floor and the cell is a bound.
 | Xone LF harmonics on the sweeps vs steady sine (bdc1bec: H2 at 22 Hz FAIL on the 10 Hz / 5.5 s sweep; H2/H3 at 35–40 Hz on the 3 Hz sweep missed by ac2 and REW, same sign) | +10.8 dB; −75…−77 dBr against a truth below −89 | hum bursts on the Xone's input (in 5): 35–95 Hz at −84…−92 dBFS for 0.25–0.75 s every 2–3 s over a quiet −118, the reference input clean at −127. A burst at the moment the sweep passes a fundamental lands in its harmonic windows; the post-roll noise windows read 0.5–1 s later. Its level in dBFS does not follow the drive (−50 … −20 dBFS records), an independent numpy separation of the same record reads the same (−82.0 vs −83.6 dBr) and linear twins read nothing (−160 dBr). d08cc70 reads each harmonic's floor beside its window, the noise of the same moment: these cells are now bounds, on ac2 and REW alike. [docs/rigs/pupu.md](../../docs/rigs/pupu.md) |
 | Genelec live TF 100–1000 Hz at 1/48 octave (WARN on 4 of 5 takes; on this take n 21 of 159 columns) | max(\|mean\|, spread) 0.09–0.18 dB | no material band-average offset shown by these five takes: signed band mean −0.001 ± 0.011 dB (mean ± sd over takes; phase +0.012 ± 0.078°). A stable frequency-dependent error can cancel in a band mean, so local error stays open (below). [reports/genelec-30-repeats.md](reports/genelec-30-repeats.md), 1/48 octave, "Live TF vs its direct estimate, per band" |
 | ac2 RTA vs numpy, ambient (WARN) | largest \|difference\| 1.797 dB over 29 bands | the filter definition: ac2's order-3 Butterworth bands (closed-form response, computed independently of ac2) applied to the same recording leave −0.012 dB in the worst band, so ac2 agrees with its designed filters within 0.013 dB over the 29 bands of this take and the gap is ideal edges vs real skirts. Ambient table, own-filters row |
-| ac2 γ² at low SNR | +0.002 / +0.013 over the true γ² at 10 / 0 dB SNR | the finite-average bias of ac2's own estimator: against E[γ̂²] for ac2's effective averages per column (7.6–48 over 1–20 kHz at 8 blocks) the residual is within 1.2 standard errors on 8 seeds at every SNR and two settings. [reports/coherence-study.md](reports/coherence-study.md) |
-| ac2 vs OSM on the Genelec rig take | median 0.12 dB / 0.72°, 95th pct 1.03 dB / 5.5°, max 3.59 dB @ 69 Hz / 20.4° @ 55 Hz | windows: OSM's one 0.68 s window and ac2's MTW ladder see different reflections; the tails sit at LF room modes. On the Xone path the same comparison is 0.005 dB / 0.13° at worst |
+| ac2 γ² at low SNR | +0.008 / +0.049 over the true γ² at 10 / 0 dB SNR | the finite-average bias of ac2's own estimator: γ² is a Gxx-weighted mean of per-bin γ̂² (7.6–8.1 effective averages per bin at 8 blocks), so it carries the per-bin bias plus the weight's own; against that expectation the residual is within 1.4 standard errors on 8 seeds at every SNR and two settings. [reports/coherence-study.md](reports/coherence-study.md) |
+| ac2 vs OSM on the Genelec rig take | median 0.14 dB / 0.80°, 95th pct 1.05 dB / 5.7°, max 3.59 dB @ 69 Hz / 20.4° @ 55 Hz over 307 columns above the γ² gate | windows: OSM's one 0.68 s window and ac2's MTW ladder see different reflections; the tails sit at LF room modes. On the Xone path the same comparison is 0.005 dB / 0.13° at worst |
 | ac2 sweep capture vs REW's recording, arrival | +1.4…+2.3 µs full band, ±0.2 µs in 200 Hz–10 kHz | two different stimuli: the IR peak moves with each sweep's top-octave content. Context only (INFO); each analyser's arrival is judged against its own capture |
 
 **By design** (a known difference of definition, not an error):
@@ -276,8 +276,9 @@ d08cc70 reads that floor and the cell is a bound.
 | REW RTA vs numpy | largest \|difference\| 4.106 dB over 29 bands (INFO) | REW's RTA averaging (Forever) consistent with averaging in dB; not verified |
 | Distortion coverage on the rig | harmonic × tone cells judged on any ac2 sweep: xone 0 of 30, genelec 8 of 26 | the rig's own harmonics sit near the floor at −30 dBFS; the DUT matrix carries the distortion evidence: of 448 judged ac2 sweep cells (two levels), the 384 quasi-static ones PASS within 0.19 dB, and the 64 cells where the sweep model cannot follow the DUT's pre-filter are reported apart (worst +0.42 dB). [reports/dut-coverage.md](reports/dut-coverage.md) |
 
-The OSM noise and coherence columns judge each analyser against a different question: ac2 against
-the physical truth (0 dB, true γ²), OSM against its own estimator's expected value.
+The OSM noise columns judge each analyser against a different question: ac2's H1 against the
+physical truth (0 dB), OSM's mean ratio against its expected bias. Both coherences are judged
+against their own estimator's expected value, ac2's beside its residual against the true γ².
 
 ## Refreshing
 

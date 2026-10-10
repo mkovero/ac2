@@ -454,9 +454,14 @@ noted and skipped.
   - So OSM's γ² is judged against the expected value of the estimator at that count
     (Carter, Knapp & Nuttall), not against the truth or ac2. At 0 dB SNR, E[γ̂²] = 0.555,
     against a truth of 0.5.
-  - ac2's γ² is judged against the truth.
-    Its residual against its own finite-average expectation is kept beside it (INFO): Carter
-    per column at ac2's model effective averages (bins per column, stage, crossover blend).
+  - ac2's γ² is judged against the truth where that is 1 (no noise), and in noise against
+    its own finite-average expectation, with the residual against the truth beside it
+    (INFO): Carter per column at ac2's model effective averages per bin (stage, crossover
+    blend), plus the column weight's bias. ac2 forms
+    γ² per bin and averages it over the column weighted by Gxx, so each column carries the
+    per-bin bias (averaging bins narrows the scatter, not the bias) plus the weight's own:
+    a bin whose reference read strong also reads more coherent. Over k independent bins the
+    expectation sits 1 − 1/k of the way from Carter's to γ² + (1 − γ²)/n.
   - `python -m crosscheck coherence-study [--seeds N]` repeats noise fixtures (SNR +20…−3 dB,
     two averaging settings) through both and tabulates mean ± sd against each model.
   - Mask counts and the judged-column count are INFO checks per case, so every agreement
@@ -500,7 +505,7 @@ OSM's LTW mode are also left out.
 | delay finder 48 / 10.5 | 48.000 / 10.500 | 48 / 10 | |
 | spectrum: sine / white noise per bin | −20.000 / +0.019 dB | −20.000 / +0.015 dB (converted) | |
 | xone rig take | | | median 0.000 dB / 0.004°, finder 0.502 vs 0 |
-| genelec rig take (aligned) | | | median 0.12 dB / 0.72° (max 3.6 dB / 20°), finder 348.45 vs 349 |
+| genelec rig take (aligned) | | | median 0.14 dB / 0.80° (max 3.6 dB / 20°), finder 348.45 vs 349 |
 
 Context from the uncompensated runs (INFO):
 - A 0.5 ms delay left in costs ac2 up to 0.42 dB and 4.3°, with γ² down to 0.92 at 5–20 kHz,

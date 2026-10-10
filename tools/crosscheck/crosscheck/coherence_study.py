@@ -4,9 +4,11 @@ finite-average expectation of each estimator.
 γ̂² from n averages reads above the true γ² by about (1 − γ²)²/n (Carter, Knapp & Nuttall),
 so a mean over a band is judged against E[γ̂²] at each analyser's effective average count,
 not against the truth. Two models are under test:
-- ac2: the MTW ladder's own model effective averages per column (`ac2_column_model`, a port
-  of ac2-core's `OverlapModel` with the ladder's stages, depth matching and column plan);
-  the count varies with the bins per column and the stage serving it.
+- ac2: the MTW ladder's own model effective averages (`ac2_column_model`, a port of
+  ac2-core's `OverlapModel` with the ladder's stages, depth matching and column plan).
+  ac2 forms γ² per bin and averages it over the column weighted by the estimated Gxx, so
+  averaging bins lowers the scatter of γ̂², not its bias (`ac2_column_g2`). The weight adds
+  bias of its own: a bin whose reference happened to read strong also reads more coherent.
 - OSM: 21 overlapped ticks as Welch's equivalent count (`osm.welch_neff`).
 Each condition runs over several independent noise seeds, so a residual is read against the
 seed-to-seed scatter, not one draw."""
@@ -108,10 +110,25 @@ def _bins(st: dict, lo: float, hi: float) -> int:
     return max(k_hi - k_lo, 0)
 
 
-def ac2_column_model(fs: float, blocks: int, fc: np.ndarray) -> list[list[tuple[float, float]]]:
-    """Per column (48 ppo centres `fc`): the (weight, effective averages) of each stage whose
-    γ² goes into it. Inside a crossover ac2 shows a weighted blend of two stages' γ², so its
-    expectation is the same blend of the two expectations."""
+def ac2_column_g2(g2: float, n: float, k: float) -> float:
+    """E[γ̂²] of ac2's column: Σ Gxxₖ·γ̂²ₖ / Σ Gxxₖ over k independent bins of n averages.
+
+    One bin is Carter's E[γ̂²]. For many bins the ratio of sums tends to the ratio of
+    expectations: writing x = βy + v with v uncorrelated with y, E[Gxx·γ̂²] = E[|Gxy|²/Gyy]
+    = |β|²·E[Gyy] + E[|Σv*y|²/Gyy] = n·γ²·σx² + (1 − γ²)·σx², so the limit is
+    γ² + (1 − γ²)/n, above Carter's ≈ γ² + (1 − γ²)²/n. A Monte Carlo of the estimator puts
+    k bins at the fraction 1 − 1/k of the way from one to the other (within 0.03 of that
+    fraction for n 4–16, γ² 0.33–0.9, k 2–64)."""
+    c = osm.expected_g2(g2, n)
+    return c + (1 - 1 / k) * (g2 + (1 - g2) / n - c)
+
+
+def ac2_column_model(fs: float, blocks: int, fc: np.ndarray) -> list[list[tuple[float, float, float]]]:
+    """Per column (48 ppo centres `fc`): the (weight, effective averages per bin, effective
+    independent bins) of each stage whose γ² goes into it. The bins count is the model's
+    N_eff over the column's bins divided by its N_eff per bin: Hann's adjacent bins are
+    partly correlated. Inside a crossover ac2 shows a weighted blend of two stages' γ², so
+    its expectation is the same blend of the two expectations."""
     st = ac2_ladder(fs, blocks)
     half = 2 ** (0.5 / DESIGN_PPO)
     out = []
@@ -130,21 +147,25 @@ def ac2_column_model(fs: float, blocks: int, fc: np.ndarray) -> list[list[tuple[
                 t = math.log(f / xlo) / math.log(xhi / xlo)
                 w = 0.5 - 0.5 * math.cos(math.pi * t)
                 kd, ks = _bins(st[b + 1], lo, hi), _bins(st[b], lo, hi)
-                parts = [(p, st[s]["model"].neff_fifo(st[s]["held"], k))
-                         for p, s, k in ((1 - w, b + 1, kd), (w, b, ks)) if k > 0]
+                parts = [(p, *_counts(st[s], k)) for p, s, k in ((1 - w, b + 1, kd), (w, b, ks)) if k > 0]
                 if len(parts) == 1:
-                    parts = [(1.0, parts[0][1])]
+                    parts = [(1.0, *parts[0][1:])]
                 break
             b += 1
         if parts is None:
             k = _bins(st[b], lo, hi)
-            parts = [(1.0, st[b]["model"].neff_fifo(st[b]["held"], k))] if k > 0 else []
+            parts = [(1.0, *_counts(st[b], k))] if k > 0 else []
         out.append(parts)
     return out
 
 
-def ac2_expected_g2(g2: float, parts: list[list[tuple[float, float]]]) -> np.ndarray:
-    return np.array([sum(w * osm.expected_g2(g2, n) for w, n in p) if p else np.nan for p in parts])
+def _counts(st: dict, k: int) -> tuple[float, float]:
+    n = st["model"].neff_fifo(st["held"], 1)
+    return n, st["model"].neff_fifo(st["held"], k) / n
+
+
+def ac2_expected_g2(g2: float, parts: list[list[tuple[float, float, float]]]) -> np.ndarray:
+    return np.array([sum(w * ac2_column_g2(g2, n, k) for w, n, k in p) if p else np.nan for p in parts])
 
 
 SNRS = (20.0, 10.0, 3.0, 0.0, -3.0)
@@ -202,7 +223,7 @@ def summarise(runs: list[dict], seeds: int) -> list[dict]:
         fc = np.array(rs[0]["fc"])
         parts = ac2_column_model(rs[0]["fs"], blocks, fc)
         e_col = ac2_expected_g2(g2, parts)
-        n_col = np.array([min(n for _, n in p) for p in parts])
+        n_col = np.array([min(n for _, n, _ in p) for p in parts])
         e_sub = [float(np.mean(e_col[(fc >= a) & (fc < b)])) for a, b in SUBBANDS]
         neff_o = osm.welch_neff(2 ** fft, round(0.08 * rs[0]["fs"]), osm.OSM_COHERENCE_TICKS)
         a = np.array([r["ac2"] for r in rs])
@@ -220,14 +241,14 @@ def summarise(runs: list[dict], seeds: int) -> list[dict]:
 
 def table(rows: list[dict]) -> str:
     """Residuals are mean − model; ±sem is the seed scatter of that mean (sd/√seeds)."""
-    h = ["| SNR dB | setting | true γ² | ac2 N_eff (cols) | ac2 E[γ̂²] | ac2 mean ± sd | ac2 resid ± sem | "
+    h = ["| SNR dB | setting | true γ² | ac2 N_eff per bin | ac2 E[γ̂²] | ac2 mean ± sd | ac2 resid ± sem | "
          "ac2 resid 1–2.1k / 2.1–20k | OSM N_eff | OSM E[γ̂²] | OSM mean ± sd | OSM resid ± sem |",
          "|" + "---|" * 12]
     for r in rows:
         sq = math.sqrt(r["seeds"])
         sub = " / ".join(f"{m - e:+.4f}" for m, e in zip(r["ac2_sub_mean"], r["ac2_sub_model"]))
         h.append(f"| {r['snr']:+g} | {r['setting']} (ac2 --blocks {r['blocks']}, OSM FFT{r['fft']}) | {r['g2']:.4f} | "
-                 f"{r['ac2_neff_range'][0]:.1f}–{r['ac2_neff_range'][1]:.0f} | {r['ac2_model']:.4f} | "
+                 f"{r['ac2_neff_range'][0]:.1f}–{r['ac2_neff_range'][1]:.1f} | {r['ac2_model']:.4f} | "
                  f"{r['ac2_mean']:.4f} ± {r['ac2_sd']:.4f} | {r['ac2_mean'] - r['ac2_model']:+.4f} ± {r['ac2_sd'] / sq:.4f} | "
                  f"{sub} | {r['osm_neff']:.1f} | {r['osm_model']:.4f} | {r['osm_mean']:.4f} ± {r['osm_sd']:.4f} | "
                  f"{r['osm_mean'] - r['osm_model']:+.4f} ± {r['osm_sd'] / sq:.4f} |")

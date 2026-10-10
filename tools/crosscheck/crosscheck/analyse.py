@@ -323,6 +323,7 @@ class Analysis:
                                                             coh=coh_of.get(id(raw)))
                     self.noise_rel[name] = cache[id(raw)]
         # The live TF's own noise from its coherence over its FIFO blocks: σ = √((1 − γ²) / (2 γ² n)).
+        # ac2's γ² is a per-bin coherence averaged over the column, so this is a bin's noise.
         # n = blocks counts every block as independent, though they overlap, so this is a lower
         # bound on the TF's noise and the gate leaves out too few columns rather than too many.
         if "ac2 TF" in self.coh and p.tf_blocks:

@@ -32,11 +32,30 @@ def test_columns_follow_bins_and_blend():
     fc = np.array([1000.0, 1800.0, 2500.0, 16000.0])
     parts = cs.ac2_column_model(96000.0, 8, fc)
     assert len(parts[0]) == 1 and len(parts[1]) == 2 and len(parts[2]) == 1
-    assert sum(w for w, _ in parts[1]) == pytest.approx(1.0)
-    # a wide column sums more bins, so it carries more averages
-    assert parts[3][0][1] > 3 * parts[2][0][1]
+    assert sum(w for w, _, _ in parts[1]) == pytest.approx(1.0)
+    # γ² is a mean of per-bin estimates: a wide column carries the per-bin count of its
+    # stage, and more independent bins
+    n0 = cs.ac2_ladder(96000.0, 8)[0]["model"].neff_fifo(8, 1)
+    assert parts[3][0][1] == pytest.approx(n0) and parts[2][0][1] == pytest.approx(n0)
+    assert parts[3][0][2] > 3 * parts[2][0][2] >= 3
     e = cs.ac2_expected_g2(0.5, parts)
-    assert np.all(e > 0.5) and e[3] < e[2]
+    # the Gxx weight's own bias grows with the bins it weighs
+    assert np.all(e > 0.5) and e[3] > e[2]
+
+
+@pytest.mark.parametrize("n,g2,k", [(8, 0.5, 1), (8, 0.5, 4), (8, 0.5, 64), (4, 0.334, 16), (16, 0.9, 2)])
+def test_column_g2_against_monte_carlo(n, g2, k):
+    # ac2's column: Σ Gxx·γ̂² / Σ Gxx over k independent bins of n averages each
+    rng = np.random.default_rng(5)
+    trials = max(80000 // k, 2000)
+    shape = (trials, k, n)
+    x = rng.standard_normal(shape) + 1j * rng.standard_normal(shape)
+    e = (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)) * np.sqrt(1 / g2 - 1)
+    y = x + e
+    gxx, gyy = np.sum(np.abs(x) ** 2, 2), np.sum(np.abs(y) ** 2, 2)
+    gxy = np.sum(np.conj(x) * y, 2)
+    est = np.sum(np.abs(gxy) ** 2 / gyy, 1) / np.sum(gxx, 1)
+    assert np.mean(est) == pytest.approx(cs.ac2_column_g2(g2, n, k), abs=0.003)
 
 
 def test_expected_g2_against_monte_carlo():

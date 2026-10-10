@@ -95,7 +95,8 @@ mag_osm_rig_db = { pass = 0.3, warn = 1.0 }     # ac2 vs OSM on a rig recording,
 phase_osm_rig_deg = { pass = 3.0, warn = 10.0 }
 mag_h1_noise_db = { pass = 0.1, warn = 0.3 }    # ac2's H1 in uncorrelated noise vs 0 dB, median 1-20 kHz
 mag_osm_bias_db = { pass = 0.2, warn = 0.5 }    # OSM's mean |M|/|R| vs its expected bias E|1 + N/R|
-coh_ac2 = { pass = 0.02, warn = 0.05 }          # ac2 γ² vs the fixture's true γ², mean 1-20 kHz
+coh_ac2 = { pass = 0.02, warn = 0.05 }          # ac2 γ² vs the fixture's true γ² (noise-free cases), mean 1-20 kHz
+coh_ac2_model = { pass = 0.02, warn = 0.05 }    # ac2 γ² vs E[γ̂²] for its per-bin, Gxx-weighted column estimate
 coh_osm_model = { pass = 0.02, warn = 0.05 }    # OSM γ² vs E[γ̂²] for its overlapped 21-tick estimate
 delay_osm_samples = { pass = 0.5, warn = 1.0 }  # OSM's whole-sample finder vs truth
 delay_ac2_samples = { pass = 0.05, warn = 0.5 } # ac2's sub-sample finder vs truth
