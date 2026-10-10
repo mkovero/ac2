@@ -70,4 +70,7 @@ def test_identity_case_end_to_end(tmp_path):
     ids = {c["id"]: c for c in res["checks"]}
     assert ids["osm.identity.ac2_vs_osm_h"]["status"] == "PASS"
     assert ids["osm.identity.osm_delay_finder_vs_analytic"]["value"] == 0
+    # the population behind every ac2 vs OSM figure, and what was masked out of it
+    assert ids["osm.identity.columns_judged"]["status"] == "INFO" and ids["osm.identity.columns_judged"]["value"] > 100
+    assert ids["osm.identity.masked_ac2_non_finite_columns"]["status"] == "INFO"
     assert (tmp_path / "run" / "report" / "report.md").exists()

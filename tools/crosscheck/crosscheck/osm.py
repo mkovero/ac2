@@ -351,8 +351,22 @@ class OsmAnalysis:
         inband = (fc >= BAND[0]) & (fc <= min(BAND[1], 0.45 * fs))
         have = inband & np.isfinite(Ha) & np.isfinite(Ho)
         ga = have & (g2a >= GATE_G2) & (g2o >= GATE_G2)
-        self.rows["masked"].append([name, int(floor[1:].sum()), nan_phase, int((inband & ~np.isfinite(Ha)).sum()),
-                                    int((have & ~ga).sum()), int(ga.sum())])
+        masked = [int(floor[1:].sum()), nan_phase, int((inband & ~np.isfinite(Ha)).sum()), int((have & ~ga).sum()),
+                  int(ga.sum())]
+        self.rows["masked"].append([name, *masked])
+        # The agreement figures hold only for what survived the masks, so the counts go with them.
+        for title, v, unit, meaning in (
+                ("Masked OSM bins below the reference floor", masked[0], "bins",
+                 f"OSM FFT bins whose reference is more than {REF_FLOOR_DB:g} dB below its strongest bin"),
+                ("Masked OSM NaN-phase bins", masked[1], "bins", "OSM's polar form is undefined on an exactly-zero bin"),
+                ("Masked ac2 non-finite columns", masked[2], "columns",
+                 f"ac2 columns {BAND[0]:g} Hz–{BAND[1] / 1000:g} kHz without a finite value"),
+                ("Masked columns below the coherence gate", masked[3], "columns",
+                 f"columns with both values where ac2's or OSM's γ² < {GATE_G2}"),
+                ("Columns judged, both above the coherence gate", masked[4], "columns",
+                 f"columns {BAND[0]:g} Hz–{BAND[1] / 1000:g} kHz where both γ² ≥ {GATE_G2}: the population of "
+                 "every ac2 vs OSM figure")):
+            self.add(name, title, v, unit, None, meaning, status="INFO")
         truth = case.truth(fc) if case is not None and case.kind == "tf" else None
         snr = case.snr_db if case is not None else None
 
@@ -402,6 +416,21 @@ class OsmAnalysis:
                          "mag_osm_rig_db", f"{int(ga.sum())} columns; max {_fmt(vd)} dB (windows see a room differently)")
                 self.add(name, "ac2 vs OSM phase, median |difference|", pm, "°", "phase_osm_rig_deg",
                          f"same columns; max {_fmt(pd, 1)}°")
+                # The local extremes the median hides: where the two windows see the room most
+                # differently, and how much of the band is near that.
+                for what, dv, unit, nd in (("|H|", np.abs(dsp.db(Ha[ga]) - dsp.db(Ho[ga])), "dB", 3),
+                                           ("phase", np.abs(phase_diff_deg(Ha[ga], Ho[ga])), "°", 1)):
+                    fin = np.isfinite(dv)
+                    if not fin.any():
+                        continue
+                    k = int(np.argmax(np.where(fin, dv, -np.inf)))
+                    self.add(name, f"ac2 vs OSM {what} max |difference|, same columns", float(dv[k]), unit, None,
+                             f"largest absolute difference over the {int(fin.sum())} judged columns", status="INFO")
+                    self.add(name, f"ac2 vs OSM {what} max |difference| frequency", float(fc[ga][k]), "Hz", None,
+                             "the column of that maximum", status="INFO")
+                    self.add(name, f"ac2 vs OSM {what} 95th percentile |difference|, same columns",
+                             float(np.percentile(dv[fin], 95)), unit, None,
+                             "95% of the judged columns differ by at most this much", status="INFO")
             row += [vd, pd]
         else:
             row += [None] * 6
@@ -415,6 +444,17 @@ class OsmAnalysis:
         if g2true is not None:
             self.add(name, "ac2 γ² vs true γ², mean 1–20 kHz", None if mean_g2a is None else mean_g2a - g2true, "",
                      "coh_ac2", f"ac2 shows γ² (true γ² = {g2true:.4f}: SNR/(1+SNR) of the fixture)")
+            # ac2's own finite-average expectation, column by column from its MTW model: the
+            # bias against the truth above is what this many averages must show.
+            from .coherence_study import ac2_column_model, ac2_expected_g2
+            ea = ac2_expected_g2(g2true, ac2_column_model(fs, int(settings["ac2_tf_blocks"]), fc[bias_band]))
+            ga2 = g2a[bias_band]
+            fin = np.isfinite(ga2) & np.isfinite(ea)
+            if fin.any() and snr is not None:
+                self.add(name, "ac2 γ² vs its expected value, mean 1–20 kHz", float(np.mean(ga2[fin]) - np.mean(ea[fin])),
+                         "", None, f"E[γ̂²] = {np.mean(ea[fin]):.4f} at true {g2true:.4f} from ac2's model effective "
+                         "averages per column (bins per column, stage, crossover blend); context for the bias "
+                         "against the truth", status="INFO")
             model = expected_g2(g2true, neff)
             self.add(name, "OSM γ² vs its expected value, mean 1–20 kHz", None if mean_g2o is None else mean_g2o - model,
                      "", "coh_osm_model",

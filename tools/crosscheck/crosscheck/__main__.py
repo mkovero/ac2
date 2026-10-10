@@ -1,4 +1,4 @@
-"""python -m crosscheck {preflight,run,analyse,baseline,compare,osm,comparison} — see README.md."""
+"""python -m crosscheck {preflight,run,analyse,baseline,compare,osm,coherence-study,comparison} — see README.md."""
 from __future__ import annotations
 
 import argparse
@@ -38,6 +38,11 @@ def main(argv=None) -> int:
     om.add_argument("--no-recordings", action="store_true", help="synthetic cases only")
     om.add_argument("--tolerances", type=Path, help="tolerances TOML (default: the suite's)")
     om.add_argument("--no-plots", action="store_true")
+
+    cs = sub.add_parser("coherence-study", help="γ² of ac2 and OSM over repeated noise seeds against each "
+                                                "estimator's finite-average expectation (offline, needs OSM_HARNESS)")
+    cs.add_argument("--out", type=Path, help="directory (default: runs/coherence-<UTC time>)")
+    cs.add_argument("--seeds", type=int, default=5, help="independent noise seeds per condition (default 5)")
 
     cm = sub.add_parser("comparison", help="rebuild the results tables of comparison.md from the baselines")
     cm.add_argument("--check", action="store_true", help="write nothing; exit 1 when the tables are stale")
@@ -97,6 +102,23 @@ def main(argv=None) -> int:
         rc, _, line = osm.run_stage(out, a.config, tol, cases, recordings=not a.no_recordings, plots=not a.no_plots)
         print(line)
         return rc
+    if a.cmd == "coherence-study":
+        import time
+        import warnings
+
+        import numpy as np
+        np.seterr(all="ignore")
+        warnings.simplefilter("ignore", RuntimeWarning)
+        from . import coherence_study, osm
+        out = a.out or Path("runs") / time.strftime("coherence-%Y%m%dT%H%M%SZ", time.gmtime())
+        try:
+            res = coherence_study.run(out, a.seeds)
+        except osm.Skip as e:
+            print(f"coherence-study: SKIP: {e}")
+            return 0
+        print(coherence_study.table(res["rows"]), end="")
+        print(f"wrote {out / 'coherence-study.json'}")
+        return 0
     if a.cmd == "baseline":
         from . import baseline
         try:
