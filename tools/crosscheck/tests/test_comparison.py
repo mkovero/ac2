@@ -92,6 +92,34 @@ def test_render_from_a_baseline_directory(tmp_path):
     assert C.update(doc, tmp_path, check=True)[0]
 
 
+def _parity(a_val, a_st, r_val, r_st, shared=False):
+    sh = {"shared": {"ac2": a_val, "REW": r_val, "diff": a_val - r_val, "agree": 3.0}} if shared else {}
+    b = {"checks": {"g.h3.ac2 sweep 20Hz-5.5s@500Hz": {**e(a_val, a_st, tol=(3, 6)), **sh},
+                    "g.h3.REW offline import@500Hz": {**e(r_val, r_st, tol=(3, 6)), **sh}}}
+    return C.parity_cell(b, *C.PARITY_ROWS[4][1:3], None)
+
+
+def test_parity_both_miss_alike_only_when_annotated():
+    # opposite signs: each analyser's own miss, never "alike"
+    out = _parity(7.0, "FAIL", -7.0, "FAIL")
+    assert out.startswith("ac2 FAIL, REW FAIL, not alike") and "alike at" not in out.replace("not alike", "")
+    # one sign, unequal size (no annotation from the analysis): not alike either
+    out = _parity(20.0, "FAIL", 4.0, "WARN")
+    assert out.startswith("ac2 FAIL, REW WARN, not alike")
+    # annotated: both miss alike, and the wording claims no cause
+    out = _parity(4.0, "WARN", 4.2, "WARN", shared=True)
+    assert out.startswith("as REW, both miss alike")
+    assert "ac2 and REW miss the truth alike (ac2 − REW within tolerance) at H3 500 Hz" in out
+    assert "stimulus" not in out and "device" not in out
+
+
+def test_annotated_misses_stay_in_the_worst_cell():
+    m = C.matches_for({"checks": {
+        "g.sine_mag.ac2 sweep 20Hz-5.5s@1000Hz": {**e(-0.32, "WARN", tol=(0.3, 1.0)), "shared": {"diff": 0.01}},
+        "g.sine_mag.ac2 sweep 20Hz-5.5s@100Hz": e(-0.019, tol=(0.3, 1.0))}}, C.RIG_ROWS[8][1])
+    assert C.cell(m) == "−0.320 dB @ 1000 Hz (WARN 1, PASS 1)"
+
+
 def test_missing_markers_refused(tmp_path):
     doc = tmp_path / "doc.md"
     doc.write_text("no markers\n")

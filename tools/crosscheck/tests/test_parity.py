@@ -1,11 +1,11 @@
-"""ac2 against REW: the arrival reference, ac2 − REW harmonics and the METHOD pass."""
+"""ac2 against REW: the arrival reference, ac2 − REW harmonics and the shared-miss annotation."""
 import tomllib
 from types import SimpleNamespace
 
 import numpy as np
 
 from crosscheck import dsp
-from crosscheck.analyse import TOLERANCES, Analysis, direct_ir_peak, method_pass
+from crosscheck.analyse import TOLERANCES, Analysis, direct_ir_peak, shared_pass
 from crosscheck.baseline import RANK, check_key
 from crosscheck.model import Raw
 
@@ -17,59 +17,67 @@ def _analysis():
     return a
 
 
-def _check(id_, status, value, analyser, key="p|h3|500", sign=None, claim=None):
-    twin = {"key": key, "analyser": analyser}
-    if sign is not None:
-        twin.update(sign=sign, claim=claim)
-    return {"id": id_, "title": id_, "status": status, "value": value, "unit": "dB",
+def _check(id_, status, value, analyser, key="p|h3|500", agree=3.0, truth=None, tol=(3.0, 6.0)):
+    twin = {"key": key, "analyser": analyser, "agree": agree}
+    if truth is not None:
+        twin["truth"] = truth
+    return {"id": id_, "title": id_, "status": status, "value": value, "unit": "dB", "tol": tol,
             "meaning": "m", "detail": {"twin": twin}}
 
 
-def test_method_both_miss_the_same_way():
+def test_shared_miss_is_annotated_and_keeps_its_verdict():
     a = _check("p.h3.ac2 sweep x.500", "WARN", 5.5, "ac2")
     r = _check("p.h3.REW.500", "FAIL", 6.1, "REW")
-    assert method_pass([a, r]) == 2
-    assert a["status"] == r["status"] == "METHOD"
-    assert a["detail"]["method_of"] == "WARN" and r["detail"]["method_of"] == "FAIL"
-    assert "+6.10 dB" in a["meaning"] and "+5.50 dB" in r["meaning"]
+    assert shared_pass([a, r]) == 2
+    assert (a["status"], r["status"]) == ("WARN", "FAIL")
+    sh = a["detail"]["shared"]
+    assert (sh["key"], sh["ac2"], sh["REW"]) == ("p|h3|500", 5.5, 6.1) and abs(sh["diff"] + 0.6) < 1e-12
+    assert r["detail"]["shared"]["twin"] == a["title"]
+    assert "miss the truth alike" in a["meaning"] and "stimulus" not in a["meaning"]
 
 
-def test_method_needs_the_same_direction_and_a_missing_twin():
+def test_unequal_same_sign_misses_are_not_shared():
+    # ac2 +20 dB FAIL, REW +4 dB WARN: one sign, but ac2 − REW is 16 dB, far beyond agreement
+    a = _check("a", "FAIL", 20.0, "ac2")
+    r = _check("r", "WARN", 4.0, "REW")
+    assert shared_pass([a, r]) == 0
+    assert "shared" not in a["detail"] and "shared" not in r["detail"]
+    assert (a["status"], r["status"]) == ("FAIL", "WARN")
+
+
+def test_shared_needs_one_sign_both_misses_and_the_same_tone():
     a = _check("a", "FAIL", 7.0, "ac2")
-    r = _check("r", "WARN", -4.0, "REW")
-    assert method_pass([a, r]) == 0 and a["status"] == "FAIL"
-    # ac2 broken where REW passes: stays FAIL
+    r = _check("r", "FAIL", -7.0, "REW")
+    assert shared_pass([a, r]) == 0
     a = _check("a", "FAIL", 7.0, "ac2")
     r = _check("r", "PASS", 1.0, "REW")
-    method_pass([a, r])
-    assert (a["status"], r["status"]) == ("FAIL", "PASS")
-    # REW off where ac2 passes: REW's row stays as it is
-    a = _check("a", "PASS", 1.0, "ac2")
-    r = _check("r", "FAIL", 7.0, "REW")
-    method_pass([a, r])
-    assert (a["status"], r["status"]) == ("PASS", "FAIL")
-    # a twin at another tone is no twin
+    assert shared_pass([a, r]) == 0
     a = _check("a", "FAIL", 7.0, "ac2")
     r = _check("r", "FAIL", 7.0, "REW", key="p|h3|1000")
-    method_pass([a, r])
-    assert a["status"] == r["status"] == "FAIL"
-
-
-def test_method_one_sided_bound_claims_carry_their_direction():
-    a = _check("a", "FAIL", None, "ac2", sign=1, claim="-40.0 dBr over the sine's bound -60.0")
-    r = _check("r", "FAIL", None, "REW", sign=1, claim="-41.0 dBr over the sine's bound -60.0")
-    method_pass([a, r])
-    assert a["status"] == r["status"] == "METHOD"
-    assert "-41.0 dBr over the sine's bound" in a["meaning"]
-    # no direction known: not paired
+    assert shared_pass([a, r]) == 0
+    # a one-sided claim has no residual to compare
     a = _check("a", "FAIL", None, "ac2")
     r = _check("r", "FAIL", None, "REW")
-    method_pass([a, r])
-    assert a["status"] == r["status"] == "FAIL"
+    assert shared_pass([a, r]) == 0
 
 
-def test_method_ranks_between_a_pass_and_a_warning():
-    assert RANK["PASS"] < RANK["METHOD"] < RANK["WARN"] < RANK["FAIL"]
+def test_harmonic_targets_must_compare():
+    # ac2's truth (net of the reference) and REW's (meas alone) 2 dB apart: more than half the
+    # 3 dB pass limit, so equal residuals answer different questions
+    a = _check("a", "WARN", 4.0, "ac2", truth=-60.0)
+    r = _check("r", "WARN", 4.2, "REW", truth=-62.0)
+    assert shared_pass([a, r]) == 0
+    a = _check("a", "WARN", 4.0, "ac2", truth=-60.0)
+    r = _check("r", "WARN", 4.2, "REW", truth=-61.0)
+    assert shared_pass([a, r]) == 2
+    # one target unknown: not comparable
+    a = _check("a", "WARN", 4.0, "ac2", truth=-60.0)
+    r = _check("r", "WARN", 4.2, "REW")
+    assert shared_pass([a, r]) == 0
+
+
+def test_no_shared_status():
+    assert "METHOD" not in RANK
 
 
 def test_cmp_h_rew_signed_and_inconclusive_on_a_bound():

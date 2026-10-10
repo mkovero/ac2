@@ -187,18 +187,40 @@ def test_every_baseline_unit_has_a_compare_step():
 
 def test_baseline_keeps_population_and_signed_parts():
     c = chk("xone.mag.a|b.100-1000", "magnitude", 0.12)
-    c["detail"] = {"mean": -0.1234567891, "spread": 0.12, "n": 37, "delay_removed_s": 1e-6}
+    c["detail"] = {"mean": -0.1234567891, "spread": 0.12, "n": 37, "of": 52, "delay_removed_s": 1e-6}
     nan = chk("xone.mag.a|b.20-100", "magnitude", 0.1)
     nan["detail"] = {"mean": float("nan"), "n": 4}
     b = B.make_baseline(B.annotate(results([c, nan, chk("xone.etc", "ETC", 1.0)]), {}), "xone", "r")
     e = b["checks"]["xone.mag.a|b.100-1000"]
-    assert e["n"] == 37 and e["mean"] == -0.123457 and e["spread"] == 0.12
+    assert e["n"] == 37 and e["of"] == 52 and e["mean"] == -0.123457 and e["spread"] == 0.12
     assert "delay_removed_s" not in e
     assert b["checks"]["xone.mag.a|b.20-100"] == {"status": "PASS", "value": 0.1, "unit": "dB",
                                                    "tol": [0.05, 0.2], "n": 4}
     assert set(b["checks"]["xone.etc"]) == {"status", "value", "unit", "tol"}
     # one line per check survives the extra fields
     assert json.loads(B.dumps(b)) == b
+
+
+def test_shared_miss_keeps_severity_and_a_growing_error_moves():
+    """A miss REW shares is stored with its verdict, value and annotation, and compared like any
+    judged value: a shared error that grows between baseline and run is a regression."""
+    def run(v_ac2, v_rew, st):
+        a = chk("genelec.h3.ac2 sweep 20Hz-5.5s.500", "harmonics", v_ac2, status=st, tol=(3.0, 6.0), path="genelec")
+        r = chk("genelec.h3.REW offline import.500", "harmonics", v_rew, status=st, tol=(3.0, 6.0), path="genelec")
+        for c, other in ((a, r), (r, a)):
+            c["detail"] = {"shared": {"key": "genelec|h3|500", "ac2": v_ac2, "REW": v_rew, "diff": v_ac2 - v_rew,
+                                      "agree": 3.0, "twin": other["id"]}}
+        return B.make_baseline(B.annotate(results([a, r], emit_speaker="-30dbfs"), {}), "genelec", "x")
+    base, cur = run(3.5, 3.9, "WARN"), run(5.5, 5.8, "WARN")
+    e = base["checks"]["genelec.h3.ac2 sweep 20Hz-5.5s@500Hz"]
+    assert e["status"] == "WARN" and e["value"] == 3.5
+    assert e["shared"] == {"ac2": 3.5, "REW": 3.9, "diff": -0.4, "agree": 3.0}
+    assert base["summary"] == {"WARN": 2}
+    d = B.diff(base, cur, TOL)
+    assert sorted(r["key"] for r in d["moved"]) == ["genelec.h3.REW offline import@500Hz",
+                                                    "genelec.h3.ac2 sweep 20Hz-5.5s@500Hz"]
+    assert B.gates(d)
+    assert json.loads(B.dumps(base)) == base
 
 
 def test_resolutions_are_kept_apart(tmp_path):

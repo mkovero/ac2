@@ -63,7 +63,7 @@ class Check:
     value: float | None
     unit: str
     tol: tuple[float, float] | None
-    status: str  # PASS WARN FAIL INCONCLUSIVE INFO METHOD
+    status: str  # PASS WARN FAIL INCONCLUSIVE INFO
     meaning: str
     detail: dict = field(default_factory=dict)
 
@@ -91,7 +91,7 @@ def judge_u(value, tol, u) -> str:
 
 
 def worst(*s: str) -> str:
-    order = ["PASS", "INFO", "METHOD", "WARN", "INCONCLUSIVE", "FAIL"]
+    order = ["PASS", "INFO", "WARN", "INCONCLUSIVE", "FAIL"]
     return max(s, key=order.index)
 
 
@@ -176,7 +176,7 @@ class Analysis:
             ambient.analyse(self, self.run)
         if self.dut_cells:
             self.dut_coverage()
-        method_pass([vars(c) for c in self.checks])
+        shared_pass([vars(c) for c in self.checks])
         return self.results()
 
     def results(self) -> dict:
@@ -439,6 +439,8 @@ class Analysis:
                                              "−10·log10 γ² of the direct estimate); too few left to judge")
                     continue
                 nm = int((self.mains_cols & (f >= lo) & (f < hi)).sum())
+                # the band's columns before any mask: n of these is the population judged
+                nall = int(((f >= lo) & (f < hi)).sum())
                 dm = dsp.db(ratio[m])
                 dp = np.rad2deg(np.angle(ratio[m]))
                 mean, spread = float(np.mean(dm)), float(np.max(np.abs(dm - np.mean(dm))))
@@ -458,13 +460,14 @@ class Analysis:
                                  + (f" ({int((null & (f >= lo) & (f < hi)).sum())} comb-null columns ≥ 10 dB below "
                                     "their 1/3-octave mean left out)" if (null & (f >= lo) & (f < hi)).any() else "")
                                  + ".",
-                         detail={"mean": mean, "spread": spread, "n": int(m.sum())})
+                         detail={"mean": mean, "spread": spread, "n": int(m.sum()), "of": nall})
                 self.add(id=f"{p.name}.phase.{a}|{b}.{lo}-{hi}", group="phase", path=p.name,
                          title=f"{a} − {b}, {lo}–{hi} Hz, phase", value=max(abs(pmean), pspread), unit="°", tol=tp,
                          status=st_p,
                          meaning=f"phase difference after removing a pure delay difference of {tau*1e6:+.2f} µs "
                                  f"(fitted 1–20 kHz); mean {pmean:+.3f}°, spread ±{pspread:.3f}°",
-                         detail={"mean": pmean, "spread": pspread, "n": int(m.sum()), "delay_removed_s": tau})
+                         detail={"mean": pmean, "spread": pspread, "n": int(m.sum()), "of": nall,
+                                 "delay_removed_s": tau})
                 rows.append([f"{a} − {b}", f"{lo}–{hi}", f"{mean:+.3f} ± {spread:.3f}", f"{pmean:+.2f} ± {pspread:.2f}",
                              f"{tau*1e6:+.2f}", int(m.sum())])
         self.table(f"{p.name}: magnitude and phase per band", ["pair", "band Hz", "Δ dB mean ± spread",
@@ -554,9 +557,13 @@ class Analysis:
                                          + ((f"; the narrow band's own noise (coherence) ±{up:.1f}°" if narrow_row else
                                              f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                              f"differ by {up:.1f}° in the direct estimate") if up else ""),
-                                 detail={"uncertainty": up, **_twin(p.name, "sine_phase", fc, name)})
+                                 detail={"uncertainty": up, **_twin(p.name, "sine_phase", fc, name, tp[0])})
                     if dmd is not None:
                         tm = _tol(self.tol["band"]["mag_lf" if elec else "mag_acoustic"])
+                        # ac2 and REW agree on a magnitude when they would pass against each
+                        # other in that band (the same limits as their band comparison)
+                        agree = _tol(self.tol["band"][(("mag_lf" if fc < 100 else "mag_mf" if fc < 1000 else "mag_hf")
+                                                       if elec else "mag_acoustic")])[0]
                         self.add(id=f"{p.name}.sine_mag.{name}.{fc:g}", group="magnitude vs sine", path=p.name,
                                  title=f"{name} magnitude at {fc:g} Hz vs steady sine", value=dmd, unit="dB", tol=tm,
                                  status=judge_u(dmd, tm, ud) if not (name.startswith("REW live") or info_only) else "INFO",
@@ -564,7 +571,7 @@ class Analysis:
                                          + ((f"; the narrow band's own noise (coherence) ±{ud:.2f} dB" if narrow_row else
                                              f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                              f"differ by {ud:.2f} dB in the direct estimate") if ud else ""),
-                                 detail={"uncertainty": ud, **_twin(p.name, "sine_mag", fc, name)})
+                                 detail={"uncertainty": ud, **_twin(p.name, "sine_mag", fc, name, agree)})
                     rows.append([f"{fc:g}", name, "" if dmd is None else f"{dmd:+.3f}", "" if dpd is None else f"{dpd:+.3f}"])
             self.table(f"{p.name}: against the steady sines", ["f Hz", "source", "Δ dB", "Δ°"], rows)
 
@@ -943,7 +950,7 @@ class Analysis:
                                  + ("; REW's per-bin derivative of its own exports, context only" if own else "")
                                  + (f"; ac2's displayed derivative takes −Δφ/Δω between neighbouring 1/{self.ppo}-oct columns"
                                     if "central" in name else ""),
-                         detail={"uncertainty_2sigma": float(u), **({} if own else _twin(p.name, "gd", c, name))})
+                         detail={"uncertainty_2sigma": float(u), **({} if own else _twin(p.name, "gd", c, name, tol[0]))})
             rows.append(row)
         self.series[p.name]["gd"] = {"fc": fc, "truth": truth, "ests": ests}
         self.table(f"{p.name}: group delay vs steady sine (µs)", ["f Hz", "sine ±2σ"] + list(ests), rows,
@@ -1069,7 +1076,10 @@ class Analysis:
 
     def _cmp_h(self, p, name, fc, k, ca, ct, th, who):
         line, half = self._mains_in_harmonic(fc, k)
-        twin = {"key": f"{p.name}|h{k}|{fc:g}", "analyser": who}
+        # ac2's truth is the sine net of the reference's harmonics, REW's the meas input's alone:
+        # the twin carries its own so the shared pass can tell whether the targets compare
+        twin = {"key": f"{p.name}|h{k}|{fc:g}", "analyser": who, "truth": ct.get("value"),
+                "agree": _tol(self.tol["harmonics"]["ac2_vs_rew_db"])[0]}
         if line is not None and ca["kind"] != "none":
             self.add(id=f"{p.name}.h{k}.{name}.{fc:g}", group="harmonics", path=p.name,
                      title=f"{name} H{k} at {fc:g} Hz vs steady sine", value=None, unit="dB", tol=th,
@@ -1091,8 +1101,6 @@ class Analysis:
             if ca["kind"] == "value" and ct["kind"] == "bound" and ca["value"] > ct["bound"] + th[1]:
                 claim = f"; {name} claims {ca['value']:.1f} dBr above the sine's bound {ct['bound']:.1f}"
                 st = "FAIL"
-                # the value is None (one side is a bound), so the claim's direction is carried
-                twin = {**twin, "sign": 1, "claim": f"{ca['value']:.1f} dBr over the sine's bound {ct['bound']:.1f}"}
             else:
                 st = "INCONCLUSIVE"
             self.add(id=f"{p.name}.h{k}.{name}.{fc:g}", group="harmonics", path=p.name,
@@ -1101,8 +1109,8 @@ class Analysis:
                      detail={"ac2_or_rew": ca, "sine": ct, "twin": twin})
 
     def _cmp_h_rew(self, p, name, label, fc, k, ca, cr):
-        """ac2's harmonic against REW's at the same tone, both sweeps of the same device: where
-        the two agree a miss against the sine is the method's or the device's, not ac2's."""
+        """ac2's harmonic against REW's at the same tone, both sweeps of the same device: the
+        agreement the shared pass needs before it calls a miss against the sine a shared one."""
         th = _tol(self.tol["harmonics"]["ac2_vs_rew_db"])
         base = dict(id=f"{p.name}.h{k}.{name}|{label}.{fc:g}", group="harmonics ac2 vs REW", path=p.name,
                     title=f"{name} H{k} at {fc:g} Hz vs {label}", unit="dB", tol=th)
@@ -1476,7 +1484,8 @@ class Analysis:
                                  status=judge(max(ex, 0.0), tl),
                                  meaning=f"ac2 H2 {hv:.1f} dBr (floor {hf:.1f}) against the sine truth interpolated in "
                                          f"log f ({truth:.1f} dBr): positive = ac2 overstates; seen on 10 Hz / 5.5 s sweeps",
-                                 detail={"twin": {"key": f"{p.name}|lf_h2|22", "analyser": "ac2"}})
+                                 detail={"twin": {"key": f"{p.name}|lf_h2|22", "analyser": "ac2", "truth": truth,
+                                                  "agree": _tol(self.tol["harmonics"]["ac2_vs_rew_db"])[0]}})
                     else:
                         self.add(id=f"{p.name}.lf_h2.{name}", group="LF H2", path=p.name,
                                  title=f"ac2 sweep {name}: H2 excess at 22 Hz", value=None, unit="dB", tol=tl,
@@ -1506,7 +1515,8 @@ class Analysis:
                          meaning=f"REW H2 {hv:.1f} dBr at {d.f[i]:.1f} Hz (noise {_fmt(c.get('floor'))}) against the "
                                  f"meas input's sine H2 interpolated in log f ({truth:.1f} dBr): positive = REW "
                                  "overstates",
-                         detail={"twin": {"key": f"{p.name}|lf_h2|22", "analyser": "REW"}})
+                         detail={"twin": {"key": f"{p.name}|lf_h2|22", "analyser": "REW", "truth": truth,
+                                          "agree": _tol(self.tol["harmonics"]["ac2_vs_rew_db"])[0]}})
             else:
                 self.add(**base, value=None, status="INCONCLUSIVE",
                          meaning=(f"REW's H2 at 22 Hz is a bound < {c['bound']:.1f} dBr (shortfall {c['shortfall']:.1f} dB)"
@@ -1589,7 +1599,8 @@ class Analysis:
                                  + ("" if curve_in_columns else " + the same curve correction (not in ac2's columns)")
                                  + (f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                     f"differ by {u:.2f} dB in the direct estimate" if u else ""),
-                         detail={"uncertainty": u, **_twin(p.name, "spl", fc, name)})
+                         detail={"uncertainty": u, **_twin(p.name, "spl", fc, name,
+                                                         _tol(self.tol["band"]["mag_acoustic"])[0])})
             rows.append(row)
         self.table(f"{p.name}: absolute response, dB SPL at the mic per 0 dBFS drive", ["f Hz", "sine",
                    "ac2 sweep", "ac2 TF × ref", "REW"], rows,
@@ -1639,57 +1650,61 @@ class Analysis:
                    "numpy: Schroeder integral after noise subtraction, simple truncation; approximate band filters")
 
 
-def _twin(path: str, kind: str, fc: float, source: str) -> dict:
-    """The METHOD pass's pairing of a check against the steady-sine truth: an ac2 sweep's and
-    REW's reading of the same quantity at the same tone share a key. Other sources (the live
-    TF, the direct estimates) are no sweep analyser and get none."""
+def _twin(path: str, kind: str, fc: float, source: str, agree: float) -> dict:
+    """The shared pass's pairing of a check against the steady-sine truth: an ac2 sweep's and
+    REW's reading of the same quantity at the same tone share a key. `agree` is the limit on
+    |ac2 − REW| within which the two read the same (the pass limit of their own comparison).
+    Other sources (the live TF, the direct estimates) are no sweep analyser and get none."""
     who = "ac2" if source.startswith("ac2 sweep") or source.startswith("ac2 as displayed") or \
         source.startswith("ac2 ±") else "REW" if source.startswith("REW") else None
-    return {"twin": {"key": f"{path}|{kind}|{fc:g}", "analyser": who}} if who else {}
+    return {"twin": {"key": f"{path}|{kind}|{fc:g}", "analyser": who, "agree": agree}} if who else {}
 
 
-def method_pass(checks: list[dict]) -> int:
-    """METHOD: an ac2 sweep misses the steady-sine truth (WARN or FAIL) and REW's twin misses it
-    the same way (same sign; a one-sided bound claim carries its sign). Two analysers on two
-    recordings agreeing on the miss show the sweep method or the device's sweep-versus-steady
-    behaviour, not an ac2 error, so both become METHOD. An ac2 miss with REW passing stays.
-    Works on check dicts (`vars(Check)` mutates the Check). Returns the number changed."""
-    def sign(c):
-        t = c["detail"]["twin"]
-        if t.get("sign") is not None:
-            return t["sign"]
-        v = c.get("value")
-        return None if v is None or not np.isfinite(v) or v == 0 else (1 if v > 0 else -1)
+def _finite(v) -> bool:
+    return v is not None and np.isfinite(v)
 
+
+def shared_pass(checks: list[dict]) -> int:
+    """Annotates, never re-judges: an ac2 sweep and REW's twin both miss the same truth (WARN or
+    FAIL) by residuals of one sign whose difference is within `agree` (the two analysers read
+    the same number), against targets that compare. A harmonic's targets differ by analyser
+    (ac2's net of the reference's harmonics, REW's the meas input alone), so they compare only
+    within half the vs-truth pass limit; otherwise the residuals answer different questions.
+    The annotation says the miss is shared, not why: a common stimulus, device, convention or
+    reference calculation would each produce it. Severity and value stay as judged, so a
+    shared error that grows is still a regression. Works on check dicts (`vars(Check)` mutates
+    the Check). Returns the number annotated."""
     groups: dict[str, dict[str, list]] = {}
     for c in checks:
         t = (c.get("detail") or {}).get("twin")
-        if t and t.get("analyser") and c["status"] in ("WARN", "FAIL"):
+        if t and t.get("analyser") and c["status"] in ("WARN", "FAIL") and _finite(c.get("value")):
             groups.setdefault(t["key"], {}).setdefault(t["analyser"], []).append(c)
-    pairs = []
-    for g in groups.values():
+    best: dict[int, tuple[float, dict, dict]] = {}
+    for key, g in groups.items():
         for a in g.get("ac2", []):
             for r in g.get("REW", []):
-                if sign(a) is not None and sign(a) == sign(r):
-                    pairs.append((a, r))
-    changed = {}
-    for a, r in pairs:
-        for me, other in ((a, r), (r, a)):
-            e = changed.setdefault(id(me), {"c": me, "was": me["status"], "twins": []})
-            e["twins"].append(f"{other['title']}: {_twin_value(other)} ({other['status']})")
-    for e in changed.values():
-        c = e["c"]
-        c["detail"] = {**c["detail"], "method_of": e["was"]}
-        c["meaning"] += ("; METHOD (was " + e["was"] + "): missed the same way by " + "; ".join(e["twins"]))
-    for e in changed.values():
-        e["c"]["status"] = "METHOD"
-    return len(changed)
-
-
-def _twin_value(c: dict) -> str:
-    if c.get("value") is not None:
-        return f"{c['value']:+.2f} {c.get('unit') or ''}".rstrip()
-    return c["detail"]["twin"].get("claim") or "a one-sided claim"
+                va, vr = a["value"], r["value"]
+                if va == 0 or vr == 0 or (va > 0) != (vr > 0):
+                    continue
+                ta, tr = a["detail"]["twin"], r["detail"]["twin"]
+                agree = min(ta["agree"], tr["agree"])
+                d = va - vr
+                if abs(d) > agree:
+                    continue
+                if _finite(ta.get("truth")) or _finite(tr.get("truth")):
+                    if not (_finite(ta.get("truth")) and _finite(tr.get("truth"))):
+                        continue
+                    if abs(ta["truth"] - tr["truth"]) > min(a["tol"][0], r["tol"][0]) / 2:
+                        continue
+                ann = {"key": key, "ac2": float(va), "REW": float(vr), "diff": float(d), "agree": float(agree)}
+                for me, other in ((a, r), (r, a)):
+                    if id(me) not in best or abs(d) < best[id(me)][0]:
+                        best[id(me)] = (abs(d), me, {**ann, "twin": other["title"]})
+    for _, c, ann in best.values():
+        c["detail"] = {**c["detail"], "shared": ann}
+        c["meaning"] += (f"; ac2 and REW miss the truth alike (ac2 − REW {ann['diff']:+.3g} {c.get('unit') or ''}"
+                         f" within {ann['agree']:g}; twin: {ann['twin']})")
+    return len(best)
 
 
 def _settle_lag_s(s, fc):

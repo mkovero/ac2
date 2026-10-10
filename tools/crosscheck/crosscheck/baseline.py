@@ -22,19 +22,17 @@ FREQ_GROUPS = {"phase vs sine", "magnitude vs sine", "group delay", "harmonics",
 _FREQ_TAIL = re.compile(r"\.(\d+(?:\.\d+)?)$")
 # `avoid_mains` moves a tone by at most 6 %; two nominal tones are never that close
 NEAREST_REL = 0.06
-# a verdict lost is worse than a pass; INFO is not judged, so it ranks with PASS. METHOD (ac2
-# and REW miss the truth the same way: the sweep method or the device) is no pass, yet no ac2
-# failure either: it ranks with a lost verdict, so a change to or from it is reported
-RANK = {"PASS": 0, "INFO": 0, "INCONCLUSIVE": 1, "METHOD": 1, "WARN": 2, "FAIL": 3}
+# a verdict lost is worse than a pass; INFO is not judged, so it ranks with PASS
+RANK = {"PASS": 0, "INFO": 0, "INCONCLUSIVE": 1, "WARN": 2, "FAIL": 3}
 # a value is held to its baseline only where both runs judged it: an INFO value is context, an
-# INCONCLUSIVE one is a bound or rests on noise wider than its pass limit, and a METHOD one
-# follows the device's own drift between takes, which both analysers read alike
+# INCONCLUSIVE one is a bound or rests on noise wider than its pass limit. A miss REW shares
+# (the `shared` annotation) is judged like any other: a shared error that grows still moves.
 JUDGED = {"PASS", "WARN", "FAIL"}
-STATUSES = ("FAIL", "WARN", "METHOD", "INCONCLUSIVE", "PASS", "INFO")
+STATUSES = ("FAIL", "WARN", "INCONCLUSIVE", "PASS", "INFO")
 # Kept from a check's detail: the population a statistic was taken over (`n` columns, bins or
-# bands) and, where the value folds a signed mean and a spread into one number, both parts: a
+# bands, `of` the band's columns before any mask) and, where the value folds a signed mean and a spread into one number, both parts: a
 # max(|mean|, spread) alone hides the sign a residual's direction needs across takes.
-DETAIL_KEPT = ("n", "mean", "spread")
+DETAIL_KEPT = ("n", "of", "mean", "spread")
 # A host stage needs no rig (it runs the analysers offline on files), so a run of it is one
 # stage whatever paths its checks carry (the OSM stage's paths are its cases), it plays nothing
 # (no level), and its baseline lives under `baselines/host/`.
@@ -197,7 +195,11 @@ def make_baseline(results: dict, stage: str, run_id: str) -> dict:
         for k in DETAIL_KEPT:
             v = det.get(k)
             if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
-                e[k] = v if k == "n" else _num(v)
+                e[k] = v if k in ("n", "of") else _num(v)
+        sh = det.get("shared")
+        if sh:
+            e["shared"] = {"ac2": _num(sh["ac2"]), "REW": _num(sh["REW"]), "diff": _num(sh["diff"]),
+                           "agree": _num(sh["agree"])}
         checks[c["key"]] = e
     summary = {}
     for e in checks.values():
