@@ -77,8 +77,14 @@ coherence`. An average carries the plain mean of its operands' γ², as `trace.a
 ## Levels: spectra and RTA bands
 
 Levels have no phase. `A − B` is the level difference in dB, `A + B` the power sum
-`10·lg(10^{a/10} + 10^{b/10})` (incoherent sources adding), the average the power mean. ÷ and
-× of levels are refused (a level ratio is a difference in dB: `A − B`). Operands share one
+`10·lg(10^{a/10} + 10^{b/10})` (incoherent sources adding), the average the power mean. Two
+levels do not multiply (a level ratio is a difference in dB: `A − B`), so `×` / `÷` of a level
+take B a stored transfer trace: a filter, what a level becomes through it (`×`) or without it
+(`÷`). A stationary signal's power spectrum through a linear filter is `|H|²` times it, so a
+spectrum bin gains `20·lg|H|` at its frequency (B's columns interpolated); an RTA band gains
+the power mean of `|H|²` over the band — exact for a signal of equal power per log-frequency
+step (pink noise, what an RTA is read against), an approximation for others. B's scale, mic
+curve and time base do not apply. Otherwise operands share one
 grid: band powers and FFT bins are not interpolated — one FFT length (at the session's rate),
 one band layout, one level scale (dBFS and dB SPL do not mix; an operand in another scale is
 left out as `mismatch`).

@@ -32,6 +32,7 @@ guide explains the concepts and the everyday workflow.
 - [The measurement tree](#the-measurement-tree)
 - [Traces and slots](#traces-and-slots)
   - [Export and import](#export-and-import)
+  - [Impulse responses as WAV files](#impulse-responses-as-wav-files)
   - [Mic curve on a stored trace](#mic-curve-on-a-stored-trace)
 - [Sweep measurement: response and harmonic distortion](#sweep-measurement-response-and-harmonic-distortion)
   - [Making and running a sweep (app)](#making-and-running-a-sweep-app)
@@ -980,9 +981,19 @@ Transfer functions combine as complex values — magnitude **and** phase togethe
 - **A − B** — the complex difference.
 
 Spectra and RTA bands are levels: **A − B** is the level difference in dB, **A + B** the power
-sum; their average is the power mean. A spectrum combines with a spectrum on the same FFT
-length, an RTA with an RTA on the same bands; the dialog only offers B of A's kind, and the
-daemon says why it refuses anything else.
+sum; their average is the power mean. **A × B** with B a stored transfer function — a
+speaker's imported impulse response, a captured transfer function — is A heard **through** B:
+each column of A gains B's magnitude (an RTA band the power mean of B over the band, what pink
+noise gains); **A ÷ B** takes B back out. Phase plays no part in a level. A spectrum combines with a spectrum on the same FFT
+length, an RTA with an RTA on the same bands; the dialog offers B of A's kind (for × and ÷ the
+stored transfer traces), and the daemon says why it refuses anything else.
+
+**What a speaker does to a measurement:** import its impulse response
+([Impulse responses as WAV files](#impulse-responses-as-wav-files)), then **Shift+M** with A
+the live transfer measurement (or the spectrum / RTA), operator **×**, B the import. The
+transfer result is the live response through the speaker, magnitude and phase (`delay` the
+sum of both; `phase: own alignments`, since the file has its own time base); the spectrum
+result is the live spectrum through it. A stored trace works as A too.
 
 What the legend says:
 
@@ -1318,9 +1329,10 @@ measurement):
 - **F2** (or **Rename the selected trace…** in the palette) renames the selected stored
   trace; a double click on a trace in the list selects it and asks for its name in one go.
   `ac2 trace rename <trace> <name>` does the same from the command line.
-- **Export the selected trace (ac2 CSV) to a file…** in the palette writes the selected
+- **Export the selected trace (CSV or IR WAV) to a file…** in the palette writes the selected
   stored trace as `ac2 trace export --csv` does: type a file path, or a folder to write it
-  under the trace's own name (`Main L S1.csv`). The prompt starts in the folder of the last
+  under the trace's own name (`Main L S1.csv`); a path ending in `.wav` writes its impulse
+  response instead ([Impulse responses as WAV files](#impulse-responses-as-wav-files)). The prompt starts in the folder of the last
   export (at first, the home directory), and a relative path is relative to it; the
   toast says where the file went. The file is written on this computer, also with a remote
   daemon.
@@ -1369,6 +1381,40 @@ with every metadata field, then one row per column.
 - A sweep exported by an older ac2 (no `# sweep_info:` line) imports as its transfer
   function with the delay; the distortion is dropped and the import says why (`note:` in the
   CLI output, and in `ac2 trace show`).
+
+### Impulse responses as WAV files
+
+**Import:** a WAV file is read as an impulse response — a speaker's from the manufacturer or
+another analyzer, or one ac2 exported. PCM 16, 24 or 32 bit or float, any sample rate, WAV or
+RF64:
+
+```
+ac2 trace import genelec-8030.wav                      # mono
+ac2 trace import ir-stereo.wav --channel 2             # channel 2 of a multi-channel file
+ac2 trace import room.wav --gate 10ms --gate-pre 1ms   # only 1 ms before … 10 ms after the peak
+ac2 trace import a.wav --keep-delay                    # phase re the file's first sample
+```
+
+In the app the palette's **Import a trace file (CSV, analyzer text, IR WAV)…** takes the path, `path #2` for channel 2.
+
+- The result is a **transfer** trace: the response on the transfer grid (1/48 octave by
+  default, `--resolution`), the impulse response itself in the IR views, no coherence.
+- **Delay:** by default the time zero is the IR's peak, found between samples: the trace's
+  delay is where the peak sits in the file, and its phase is the speaker's own (the file's
+  lead-in removed), as a measured transfer function's is after the delay finder.
+  `--keep-delay` keeps the file's first sample as time zero, for IRs exported against one
+  timing reference whose relative arrival matters.
+- **Window:** the whole file, unwindowed (an exported IR is usually windowed already).
+  `--gate` cuts it around the peak with soft edges, to keep a room out. The window length sets
+  what it can resolve: below that, the resolution marker shades the response.
+- A file longer than 65536 samples (1.37 s at 48 kHz) is cut around its peak (the import says so).
+- `ac2 trace show` and the import's output list the file facts: `IR · channel 2 of 2 · 48 kHz ·
+  16384 samples · peak at 2.71 ms · whole file · phase re peak`.
+
+**Export:** `ac2 trace export <trace> --wav out.wav` writes the impulse response of a sweep, a
+transfer capture or an imported IR as a mono 32-bit float WAV at its sample rate; in the app,
+the export prompt with a path ending in `.wav`. An imported file exports back sample for
+sample. A trace without an impulse response (an RTA, a text import) has nothing to export.
 
 ### Mic curve on a stored trace
 
@@ -2745,9 +2791,9 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Comparison cursor on / off (IR: a time cursor) | `toggle_cursor` |
 | Clear compare: no compared curves | `clear_compare` |
 | Move the selected trace to slot… (1 … 9, none frees its slot) | `trace_slot` |
-| Export the selected trace (ac2 CSV) to a file… | `trace_export` |
+| Export the selected trace (CSV or IR WAV) to a file… | `trace_export` |
 | Deselect the stored trace: keys act on the live measurement again | `select_live` |
-| Import a trace file (CSV / analyzer text)… | `import_trace` |
+| Import a trace file (CSV, analyzer text, IR WAV)… | `import_trace` |
 | Session: save (name or path)… | `session_save` |
 | Session: load, disarmed (name or path)… | `session_load` |
 | Reconnect to the daemon now | `reconnect` |
