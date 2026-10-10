@@ -14,7 +14,7 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 | genelec.sine_mag.REW offline@1000Hz | dB | 2 | -0.624 | 0.015 | -0.635 | -0.613 | no | no | 2/2 (>0.3) |  | 2×INCONCLUSIVE |
 | genelec.sine_mag.REW offline@100Hz | dB | 2 | -0.153 | 0.021 | -0.167 | -0.138 | no | no | 0/2 (>0.3) |  | 1×INCONCLUSIVE, 1×PASS |
 | genelec.sine_mag.REW offline@2000Hz | dB | 2 | -1.542 | 0.020 | -1.556 | -1.528 | no | no | 2/2 (>0.3) |  | 2×INCONCLUSIVE |
-| genelec.sine_mag.REW offline@200Hz | dB | 2 | +0.300 | 0.011 | +0.292 | +0.307 | no | no | 1/2 (>0.3) |  | 1×INCONCLUSIVE, 1×WARN |
+| genelec.sine_mag.REW offline@200Hz | dB | 2 | +0.300 | 0.011 | +0.292 | +0.307 | no | no | 1/2 (>0.3) |  | 1×INCONCLUSIVE, 1×METHOD |
 | genelec.sine_mag.REW offline@5000Hz | dB | 2 | -0.136 | 0.124 | -0.224 | -0.048 | no | yes | 0/2 (>0.3) |  | 2×PASS |
 | genelec.sine_mag.REW offline@500Hz | dB | 2 | +0.079 | 0.006 | +0.075 | +0.083 | no | no | 0/2 (>0.3) |  | 2×PASS |
 | genelec.sine_mag.REW offline@50Hz | dB | 2 | +0.244 | 0.020 | +0.230 | +0.258 | no | no | 0/2 (>0.3) |  | 2×INCONCLUSIVE |
@@ -25,7 +25,7 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@1000Hz | dB | 2 | -0.609 | 0.014 | -0.619 | -0.599 | no | no | 2/2 (>0.3) |  | 2×INCONCLUSIVE |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@100Hz | dB | 2 | -0.077 | 0.007 | -0.083 | -0.072 | no | no | 0/2 (>0.3) |  | 1×INCONCLUSIVE, 1×PASS |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@2000Hz | dB | 2 | -1.436 | 0.007 | -1.441 | -1.431 | no | no | 2/2 (>0.3) |  | 2×INCONCLUSIVE |
-| genelec.sine_mag.ac2 sweep 20Hz-5.5s@200Hz | dB | 2 | +0.306 | 0.002 | +0.305 | +0.307 | no | no | 2/2 (>0.3) |  | 1×INCONCLUSIVE, 1×WARN |
+| genelec.sine_mag.ac2 sweep 20Hz-5.5s@200Hz | dB | 2 | +0.306 | 0.002 | +0.305 | +0.307 | no | no | 2/2 (>0.3) |  | 1×INCONCLUSIVE, 1×METHOD |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@5000Hz | dB | 2 | +0.118 | 0.047 | +0.085 | +0.152 | no | no | 0/2 (>0.3) |  | 2×PASS |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@500Hz | dB | 2 | +0.080 | 0.006 | +0.076 | +0.085 | no | no | 0/2 (>0.3) |  | 2×PASS |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@50Hz | dB | 2 | +0.190 | 0.102 | +0.118 | +0.262 | no | no | 0/2 (>0.3) |  | 2×INCONCLUSIVE |
@@ -163,9 +163,12 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 
 | check | unit | takes | mean | sd | min | max | 0 in range | 0 in mean±2se | >pass | spread | statuses |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| genelec.delay.ac2_arrival.20Hz-5.5s | µs | 2 | +1.750 | 0.430 | +1.446 | +2.054 | no | no | 1/2 (>2) |  | 1×PASS, 1×WARN |
-| genelec.delay.ac2_arrival.dist | µs | 2 | +1.834 | 0.213 | +1.684 | +1.985 | no | no | 0/2 (>2) |  | 2×PASS |
-| genelec.delay.ac2_arrival.dist-probe | µs | 2 | +1.988 | 0.362 | +1.732 | +2.244 | no | no | 1/2 (>2) |  | 1×PASS, 1×WARN |
+| genelec.delay.ac2_arrival.20Hz-5.5s | µs | 2 | -0.068 | 0.517 | -0.434 | +0.298 | yes | yes | 0/2 (>2) |  | 2×PASS |
+| genelec.delay.ac2_arrival.dist | µs | 2 | +0.161 | 0.125 | +0.073 | +0.250 | no | yes | 0/2 (>2) |  | 2×PASS |
+| genelec.delay.ac2_arrival.dist-probe | µs | 2 | +0.086 | 0.052 | +0.049 | +0.123 | no | no | 0/2 (>2) |  | 2×PASS |
+| genelec.delay.capture_vs_rew_recording.20Hz-5.5s | µs | 2 | +1.818 | 0.088 | +1.756 | +1.880 | no | no |  |  | 2×INFO |
+| genelec.delay.capture_vs_rew_recording.dist | µs | 2 | +1.673 | 0.338 | +1.435 | +1.912 | no | no |  |  | 2×INFO |
+| genelec.delay.capture_vs_rew_recording.dist-probe | µs | 2 | +1.902 | 0.414 | +1.609 | +2.195 | no | no |  |  | 2×INFO |
 | genelec.delay.rew.REW offline import.IR peak | µs | 2 | -3641.495 | 0.219 | -3641.650 | -3641.340 | no | no |  |  | 2×INFO |
 | genelec.delay.rew.REW offline import.reported delay | µs | 2 | -3664.010 | 0.198 | -3664.150 | -3663.870 | no | no |  |  | 2×INFO |
 
@@ -225,7 +228,7 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 | check | unit | takes | mean | sd | min | max | 0 in range | 0 in mean±2se | >pass | spread | statuses |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | genelec.sine_mag.REW offline@10000Hz | dB | 3 | +0.575 | 0.594 | -0.097 | +1.029 | yes | yes | 2/3 (>0.3) |  | 2×INCONCLUSIVE, 1×PASS |
-| genelec.sine_mag.REW offline@1000Hz | dB | 3 | -0.309 | 0.025 | -0.337 | -0.289 | no | no | 2/3 (>0.3) |  | 1×PASS, 2×WARN |
+| genelec.sine_mag.REW offline@1000Hz | dB | 3 | -0.309 | 0.025 | -0.337 | -0.289 | no | no | 2/3 (>0.3) |  | 2×METHOD, 1×PASS |
 | genelec.sine_mag.REW offline@100Hz | dB | 3 | -0.073 | 0.027 | -0.100 | -0.047 | no | no | 0/3 (>0.3) |  | 2×INCONCLUSIVE, 1×PASS |
 | genelec.sine_mag.REW offline@2000Hz | dB | 3 | -0.667 | 0.011 | -0.677 | -0.655 | no | no | 3/3 (>0.3) |  | 3×INCONCLUSIVE |
 | genelec.sine_mag.REW offline@200Hz | dB | 3 | +0.028 | 0.017 | +0.008 | +0.039 | no | no | 0/3 (>0.3) |  | 3×PASS |
@@ -238,7 +241,7 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 | genelec.sine_mag.ac2 TF@500Hz | dB | 5 | +0.010 | 0.024 | -0.011 | +0.050 | yes | yes | 0/5 (>0.3) |  | 5×PASS |
 | genelec.sine_mag.ac2 TF@50Hz | dB | 1 | +0.042 |  | +0.042 | +0.042 |  |  | 0/1 (>0.3) |  | 1×INCONCLUSIVE |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@10000Hz | dB | 5 | +0.817 | 0.444 | +0.061 | +1.178 | no | no | 4/5 (>0.3) |  | 1×FAIL, 2×INCONCLUSIVE, 1×PASS, 1×WARN |
-| genelec.sine_mag.ac2 sweep 20Hz-5.5s@1000Hz | dB | 5 | -0.334 | 0.020 | -0.359 | -0.306 | no | no | 5/5 (>0.3) |  | 5×WARN |
+| genelec.sine_mag.ac2 sweep 20Hz-5.5s@1000Hz | dB | 5 | -0.334 | 0.020 | -0.359 | -0.306 | no | no | 5/5 (>0.3) |  | 2×METHOD, 3×WARN |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@100Hz | dB | 5 | -0.054 | 0.018 | -0.068 | -0.023 | no | no | 0/5 (>0.3) |  | 2×INCONCLUSIVE, 3×PASS |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@2000Hz | dB | 5 | -0.641 | 0.050 | -0.688 | -0.562 | no | no | 5/5 (>0.3) |  | 3×INCONCLUSIVE, 2×WARN |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@200Hz | dB | 5 | +0.017 | 0.013 | -0.001 | +0.036 | yes | no | 0/5 (>0.3) |  | 5×PASS |
@@ -383,9 +386,12 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 
 | check | unit | takes | mean | sd | min | max | 0 in range | 0 in mean±2se | >pass | spread | statuses |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| genelec.delay.ac2_arrival.20Hz-5.5s | µs | 3 | +1.864 | 0.161 | +1.703 | +2.025 | no | no | 1/3 (>2) |  | 2×PASS, 1×WARN |
-| genelec.delay.ac2_arrival.dist | µs | 3 | +1.937 | 0.098 | +1.867 | +2.049 | no | no | 1/3 (>2) |  | 2×PASS, 1×WARN |
-| genelec.delay.ac2_arrival.dist-probe | µs | 3 | +1.963 | 0.087 | +1.901 | +2.062 | no | no | 1/3 (>2) |  | 2×PASS, 1×WARN |
+| genelec.delay.ac2_arrival.20Hz-5.5s | µs | 5 | +0.173 | 0.377 | -0.395 | +0.553 | yes | yes | 0/5 (>2) |  | 5×PASS |
+| genelec.delay.ac2_arrival.dist | µs | 5 | +0.097 | 0.106 | -0.026 | +0.210 | yes | no | 0/5 (>2) |  | 5×PASS |
+| genelec.delay.ac2_arrival.dist-probe | µs | 5 | +0.248 | 0.468 | -0.325 | +0.780 | yes | yes | 0/5 (>2) |  | 5×PASS |
+| genelec.delay.capture_vs_rew_recording.20Hz-5.5s | µs | 3 | +1.759 | 0.451 | +1.386 | +2.260 | no | no |  |  | 3×INFO |
+| genelec.delay.capture_vs_rew_recording.dist | µs | 3 | +1.774 | 0.102 | +1.657 | +1.846 | no | no |  |  | 3×INFO |
+| genelec.delay.capture_vs_rew_recording.dist-probe | µs | 3 | +1.981 | 0.308 | +1.635 | +2.226 | no | no |  |  | 3×INFO |
 | genelec.delay.rew.REW offline import.IR peak | µs | 3 | -3640.023 | 2.199 | -3641.590 | -3637.510 | no | no |  |  | 3×INFO |
 | genelec.delay.rew.REW offline import.reported delay | µs | 3 | -3662.650 | 2.153 | -3664.240 | -3660.200 | no | no |  |  | 3×INFO |
 
@@ -605,9 +611,12 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 
 | check | unit | takes | mean | sd | min | max | 0 in range | 0 in mean±2se | >pass | spread | statuses |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| genelec.delay.ac2_arrival.20Hz-5.5s | µs | 2 | +1.706 | 0.008 | +1.700 | +1.712 | no | no | 0/2 (>2) |  | 2×PASS |
-| genelec.delay.ac2_arrival.dist | µs | 2 | +1.828 | 0.016 | +1.817 | +1.840 | no | no | 0/2 (>2) |  | 2×PASS |
-| genelec.delay.ac2_arrival.dist-probe | µs | 2 | +1.836 | 0.003 | +1.834 | +1.838 | no | no | 0/2 (>2) |  | 2×PASS |
+| genelec.delay.ac2_arrival.20Hz-5.5s | µs | 2 | +0.116 | 0.081 | +0.059 | +0.173 | no | no | 0/2 (>2) |  | 2×PASS |
+| genelec.delay.ac2_arrival.dist | µs | 2 | -0.017 | 0.006 | -0.021 | -0.012 | no | no | 0/2 (>2) |  | 2×PASS |
+| genelec.delay.ac2_arrival.dist-probe | µs | 2 | -0.336 | 0.206 | -0.481 | -0.190 | no | no | 0/2 (>2) |  | 2×PASS |
+| genelec.delay.capture_vs_rew_recording.20Hz-5.5s | µs | 2 | +1.591 | 0.072 | +1.540 | +1.642 | no | no |  |  | 2×INFO |
+| genelec.delay.capture_vs_rew_recording.dist | µs | 2 | +1.845 | 0.022 | +1.830 | +1.861 | no | no |  |  | 2×INFO |
+| genelec.delay.capture_vs_rew_recording.dist-probe | µs | 2 | +2.172 | 0.208 | +2.024 | +2.319 | no | no |  |  | 2×INFO |
 | genelec.delay.rew.REW offline import.IR peak | µs | 2 | -3641.345 | 0.120 | -3641.430 | -3641.260 | no | no |  |  | 2×INFO |
 | genelec.delay.rew.REW offline import.reported delay | µs | 2 | -3663.870 | 0.071 | -3663.920 | -3663.820 | no | no |  |  | 2×INFO |
 
