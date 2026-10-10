@@ -63,7 +63,7 @@ class Check:
     value: float | None
     unit: str
     tol: tuple[float, float] | None
-    status: str  # PASS WARN FAIL INCONCLUSIVE INFO
+    status: str  # PASS WARN FAIL INCONCLUSIVE INFO METHOD
     meaning: str
     detail: dict = field(default_factory=dict)
 
@@ -91,7 +91,7 @@ def judge_u(value, tol, u) -> str:
 
 
 def worst(*s: str) -> str:
-    order = ["PASS", "INFO", "WARN", "INCONCLUSIVE", "FAIL"]
+    order = ["PASS", "INFO", "METHOD", "WARN", "INCONCLUSIVE", "FAIL"]
     return max(s, key=order.index)
 
 
@@ -176,6 +176,7 @@ class Analysis:
             ambient.analyse(self, self.run)
         if self.dut_cells:
             self.dut_coverage()
+        method_pass([vars(c) for c in self.checks])
         return self.results()
 
     def results(self) -> dict:
@@ -553,7 +554,7 @@ class Analysis:
                                          + ((f"; the narrow band's own noise (coherence) ±{up:.1f}°" if narrow_row else
                                              f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                              f"differ by {up:.1f}° in the direct estimate") if up else ""),
-                                 detail={"uncertainty": up})
+                                 detail={"uncertainty": up, **_twin(p.name, "sine_phase", fc, name)})
                     if dmd is not None:
                         tm = _tol(self.tol["band"]["mag_lf" if elec else "mag_acoustic"])
                         self.add(id=f"{p.name}.sine_mag.{name}.{fc:g}", group="magnitude vs sine", path=p.name,
@@ -563,7 +564,7 @@ class Analysis:
                                          + ((f"; the narrow band's own noise (coherence) ±{ud:.2f} dB" if narrow_row else
                                              f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                              f"differ by {ud:.2f} dB in the direct estimate") if ud else ""),
-                                 detail={"uncertainty": ud})
+                                 detail={"uncertainty": ud, **_twin(p.name, "sine_mag", fc, name)})
                     rows.append([f"{fc:g}", name, "" if dmd is None else f"{dmd:+.3f}", "" if dpd is None else f"{dpd:+.3f}"])
             self.table(f"{p.name}: against the steady sines", ["f Hz", "source", "Δ dB", "Δ°"], rows)
 
@@ -691,6 +692,30 @@ class Analysis:
         for name, s in p.sweeps.items():
             info = s.trace.sweep_info or {}
             arr = _f(info.get("arrival"))
+            # A loudspeaker's IR peak moves with the stimulus's top octave and end taper (the
+            # peak is where the high band's energy lines up), so each sweep's arrival is judged
+            # against the IR peak of its own capture: the same samples ac2 analysed. The REW
+            # recording's peak stays the reference only where no capture was kept.
+            own_key = f"direct (ac2 capture {name})"
+            own_tau = self.direct_delay.get(own_key) if s.raw is not None else None
+            ref_tau, ref_slope, ref_what = truth_tau, slope_tau, "REW's recording" if p.rec is not None else "the documented delay"
+            if own_tau is not None:
+                ref_tau, ref_what = own_tau, "its own capture"
+                Hc = S.get(own_key)
+                if Hc is not None and np.isfinite(Hc).any():
+                    mc = np.isfinite(Hc)
+                    ref_slope = dsp.delay_from_phase(f[mc], Hc[mc], lo, hi)
+                rows.append([f"{own_key}: IR peak / phase slope",
+                             f"{own_tau*1e6:.3f} / " + ("—" if ref_slope is None else f"{ref_slope*1e6:.3f}"),
+                             f"the capture ac2 analysed; phase slope {lo}–{hi} Hz"])
+                if truth_tau is not None and p.rec is not None:
+                    dc = (own_tau - truth_tau) * 1e6
+                    self.add(id=f"{p.name}.delay.capture_vs_rew_recording.{name}", group="delay", path=p.name,
+                             title=f"IR peak: ac2 capture {name} vs REW's recording", value=dc, unit="µs", tol=None,
+                             status="INFO",
+                             meaning="the same IR-peak estimator on two recordings of the path with different "
+                                     "stimuli: the peak follows the sweep's top octave and end taper (a loudspeaker's "
+                                     "most), so the two differ by the stimulus, not by either analyser; context, not judged")
             H = S.get(f"ac2 sweep {name}")  # the arrival is back in this phase (see sources)
             in_phase = None
             total_phase = None
@@ -703,21 +728,22 @@ class Analysis:
             total = total_phase if elec and total_phase is not None else arr
             rows.append([f"ac2 sweep {name}: arrival / delay left in phase", f"{arr*1e6:.3f} / {(in_phase or 0)*1e6:.3f}",
                          "arrival re the reference; the phase is referred to it"])
-            if truth_tau is not None:
-                d = (arr - truth_tau) * 1e6
+            if ref_tau is not None:
+                d = (arr - ref_tau) * 1e6
                 self.add(id=f"{p.name}.delay.ac2_arrival.{name}", group="delay", path=p.name,
                          title=f"ac2 sweep {name}: reported arrival vs direct", value=d, unit="µs", tol=tl,
                          status=judge(d, tl),
-                         meaning="the arrival ac2 reports (sweep_info.arrival) against the direct cross-spectrum's "
-                                 "delay; whole-sample builds report 0 for the 3.7 µs Xone path (the delay then "
-                                 "stays inside the phase, see the next check)")
-                if elec and slope_tau is not None:
-                    d2 = (total - slope_tau) * 1e6
+                         meaning=f"the arrival ac2 reports (sweep_info.arrival) against the direct IR peak of "
+                                 f"{ref_what} ({ref_tau*1e6:.3f} µs); whole-sample builds report 0 for the 3.7 µs "
+                                 "Xone path (the delay then stays inside the phase, see the next check)")
+                if elec and ref_slope is not None:
+                    d2 = (total - ref_slope) * 1e6
                     self.add(id=f"{p.name}.delay.ac2_total.{name}", group="delay", path=p.name,
                              title=f"ac2 sweep {name}: arrival + delay in phase vs direct", value=d2, unit="µs", tol=tl,
                              status=judge(d2, tl),
                              meaning="the delay ac2's response carries in total (reported arrival + phase slope "
-                                     f"{lo}–{hi} Hz) against the direct response's phase slope over the same band")
+                                     f"{lo}–{hi} Hz) against the phase slope of the direct response of {ref_what} "
+                                     "over the same band")
         for rs in (p.rew, p.rew_live):
             if rs is None:
                 continue
@@ -917,7 +943,7 @@ class Analysis:
                                  + ("; REW's per-bin derivative of its own exports, context only" if own else "")
                                  + (f"; ac2's displayed derivative takes −Δφ/Δω between neighbouring 1/{self.ppo}-oct columns"
                                     if "central" in name else ""),
-                         detail={"uncertainty_2sigma": float(u)})
+                         detail={"uncertainty_2sigma": float(u), **({} if own else _twin(p.name, "gd", c, name))})
             rows.append(row)
         self.series[p.name]["gd"] = {"fc": fc, "truth": truth, "ests": ests}
         self.table(f"{p.name}: group delay vs steady sine (µs)", ["f Hz", "sine ±2σ"] + list(ests), rows,
@@ -989,9 +1015,11 @@ class Analysis:
                               "label": f"sine net of reference (meas alone {tv:.1f})"}
                     rows.append([f"{fc:g}", f"H{k}", "steady sine, net of reference", "—", _fmt_h(ct_net),
                                  _fmt(ct_net.get("floor")), _fmt(ct_net.get("margin")), ct_net["kind"]])
+                reads_ac2, reads_rew = {}, {}
                 for name, s in sources.items():
                     b = s.trace.freq
                     i = _nearest_finite(b["freq_hz"], b[f"h{k}_db"], fc)
+                    reads_ac2[name] = None
                     if i is None:
                         continue
                     hv, hf = b[f"h{k}_db"][i], b[f"h{k}_floor_db"][i]
@@ -1002,10 +1030,12 @@ class Analysis:
                         fund = s.level_dbfs + ri + b["mag_db"][i]
                     rows.append([f"{b['freq_hz'][i]:.1f}", f"H{k}", name, _fmt_lvl(fund), _fmt_h(ca), _fmt(ca.get("floor")),
                                  _fmt(ca.get("margin")), ca["kind"]])
-                    self._cmp_h(p, name, fc, k, ca, ct_net, th)
+                    reads_ac2[name] = ca
+                    self._cmp_h(p, name, fc, k, ca, ct_net, th, "ac2")
                 for rs in (p.rew, p.rew_live):
                     if rs is None or rs.meas_dist is None:
                         continue
+                    reads_rew[rs.label] = None
                     d = rs.meas_dist
                     i = int(np.argmin(np.abs(np.log(d.f / fc))))
                     if abs(np.log2(d.f[i] / fc)) > 1 / 6 or f"H{k}" not in d.cols:
@@ -1013,7 +1043,11 @@ class Analysis:
                     cr = dsp.classify(d.cols[f"H{k}"][i], d.cols.get("Noise", np.full(len(d.f), np.nan))[i], margin)
                     rows.append([f"{d.f[i]:g}", f"H{k}", rs.label, _fmt_lvl(d.cols.get("Fundamental", [np.nan] * len(d.f))[i]),
                                  _fmt_h(cr), _fmt(cr.get("floor")), _fmt(cr.get("margin")), cr["kind"]])
-                    self._cmp_h(p, rs.label, fc, k, cr, ct, th)
+                    reads_rew[rs.label] = cr
+                    self._cmp_h(p, rs.label, fc, k, cr, ct, th, "REW")
+                for name, ca in reads_ac2.items():
+                    for label, cr in reads_rew.items():
+                        self._cmp_h_rew(p, name, label, fc, k, ca, cr)
         self.table(f"{p.name}: harmonics vs floor (dBr)", ["f Hz", "H", "source", "fundamental", "reading", "floor",
                    "margin", "kind"], rows,
                    f"A reading counts as a value only at floor + {margin:g} dB or above; below, it is an upper bound "
@@ -1026,38 +1060,72 @@ class Analysis:
             self._floor_crosscheck(p, name, s)
         self._mains_flags(p)
 
-    def _cmp_h(self, p, name, fc, k, ca, ct, th):
+    def _mains_in_harmonic(self, fc, k):
         # A sweep reads harmonic k as the energy of a band around k·f at least ~30 Hz wide; a
         # mains line inside it is read as harmonic, while the steady sine resolves k·f alone.
         fk = k * fc
         half = dsp.sweep_harmonic_half_band(fk, MAINS_GUARD_HZ)
-        line = next((h for h in getattr(self, "mains_hz", []) if abs(h - fk) <= half), None)
+        return next((h for h in getattr(self, "mains_hz", []) if abs(h - fk) <= half), None), half
+
+    def _cmp_h(self, p, name, fc, k, ca, ct, th, who):
+        line, half = self._mains_in_harmonic(fc, k)
+        twin = {"key": f"{p.name}|h{k}|{fc:g}", "analyser": who}
         if line is not None and ca["kind"] != "none":
             self.add(id=f"{p.name}.h{k}.{name}.{fc:g}", group="harmonics", path=p.name,
                      title=f"{name} H{k} at {fc:g} Hz vs steady sine", value=None, unit="dB", tol=th,
                      status="INCONCLUSIVE",
                      meaning=f"the mains line at {line:g} Hz lies inside the band ±{half:.0f} Hz around H{k} = "
-                             f"{fk:.1f} Hz that a sweep reads as the harmonic",
-                     detail={"ac2_or_rew": ca, "sine": ct, "mains_hz": line})
+                             f"{k * fc:.1f} Hz that a sweep reads as the harmonic",
+                     detail={"ac2_or_rew": ca, "sine": ct, "mains_hz": line, "twin": twin})
             return
         if ca["kind"] == "value" and ct["kind"] == "value":
             d = ca["value"] - ct["value"]
             self.add(id=f"{p.name}.h{k}.{name}.{fc:g}", group="harmonics", path=p.name,
                      title=f"{name} H{k} at {fc:g} Hz vs steady sine", value=d, unit="dB", tol=th, status=judge(d, th),
                      meaning=f"{name} {ca['value']:.1f} dBr (floor {_fmt(ca.get('floor'))}), "
-                             f"{ct.get('label', 'sine')} {ct['value']:.1f} dBr")
+                             f"{ct.get('label', 'sine')} {ct['value']:.1f} dBr",
+                     detail={"twin": twin})
         elif ca["kind"] != "none" and ct["kind"] != "none":
             short = max(ca.get("shortfall") or 0, ct.get("shortfall") or 0)
             claim = ""
             if ca["kind"] == "value" and ct["kind"] == "bound" and ca["value"] > ct["bound"] + th[1]:
                 claim = f"; {name} claims {ca['value']:.1f} dBr above the sine's bound {ct['bound']:.1f}"
                 st = "FAIL"
+                # the value is None (one side is a bound), so the claim's direction is carried
+                twin = {**twin, "sign": 1, "claim": f"{ca['value']:.1f} dBr over the sine's bound {ct['bound']:.1f}"}
             else:
                 st = "INCONCLUSIVE"
             self.add(id=f"{p.name}.h{k}.{name}.{fc:g}", group="harmonics", path=p.name,
                      title=f"{name} H{k} at {fc:g} Hz vs steady sine", value=None, unit="dB", tol=th, status=st,
                      meaning=f"a bound on one side (shortfall {short:.1f} dB below floor + margin){claim}",
-                     detail={"ac2_or_rew": ca, "sine": ct})
+                     detail={"ac2_or_rew": ca, "sine": ct, "twin": twin})
+
+    def _cmp_h_rew(self, p, name, label, fc, k, ca, cr):
+        """ac2's harmonic against REW's at the same tone, both sweeps of the same device: where
+        the two agree a miss against the sine is the method's or the device's, not ac2's."""
+        th = _tol(self.tol["harmonics"]["ac2_vs_rew_db"])
+        base = dict(id=f"{p.name}.h{k}.{name}|{label}.{fc:g}", group="harmonics ac2 vs REW", path=p.name,
+                    title=f"{name} H{k} at {fc:g} Hz vs {label}", unit="dB", tol=th)
+        line, half = self._mains_in_harmonic(fc, k)
+        ka, kr = (ca or {}).get("kind", "none"), (cr or {}).get("kind", "none")
+        if ka == "none" and kr == "none":
+            return
+        if ka == "value" and kr == "value" and line is None:
+            d = ca["value"] - cr["value"]
+            self.add(**base, value=d, status=judge(d, th),
+                     meaning=f"{name} {ca['value']:.1f} dBr, {label} {cr['value']:.1f} dBr: positive = ac2 reads "
+                             "more; ac2 divides by the measured reference, REW's export is the meas input alone",
+                     detail={"ac2": ca, "rew": cr})
+            return
+        if line is not None:
+            why = f"the mains line at {line:g} Hz lies inside the band ±{half:.0f} Hz that a sweep reads as H{k}"
+        else:
+            def say(who, c):
+                return (f"{who} has no reading" if c is None or c["kind"] == "none" else
+                        f"{who} is a floor bound < {c['bound']:.1f} dBr" if c["kind"] == "bound" else
+                        f"{who} {c['value']:.1f} dBr")
+            why = f"{say(name, ca)}, {say(label, cr)}: a bound or a missing reading on one side"
+        self.add(**base, value=None, status="INCONCLUSIVE", meaning=why, detail={"ac2": ca, "rew": cr})
 
     def _floor_crosscheck(self, p, name, s: Sweep):
         info = s.trace.sweep_info or {}
@@ -1407,13 +1475,43 @@ class Analysis:
                                  title=f"ac2 sweep {name}: H2 excess at 22 Hz", value=ex, unit="dB", tol=tl,
                                  status=judge(max(ex, 0.0), tl),
                                  meaning=f"ac2 H2 {hv:.1f} dBr (floor {hf:.1f}) against the sine truth interpolated in "
-                                         f"log f ({truth:.1f} dBr): positive = ac2 overstates; seen on 10 Hz / 5.5 s sweeps")
+                                         f"log f ({truth:.1f} dBr): positive = ac2 overstates; seen on 10 Hz / 5.5 s sweeps",
+                                 detail={"twin": {"key": f"{p.name}|lf_h2|22", "analyser": "ac2"}})
                     else:
                         self.add(id=f"{p.name}.lf_h2.{name}", group="LF H2", path=p.name,
                                  title=f"ac2 sweep {name}: H2 excess at 22 Hz", value=None, unit="dB", tol=tl,
                                  status="INCONCLUSIVE", meaning=f"ac2's H2 at 22 Hz is a bound (shortfall {c.get('shortfall', 0):.1f} dB)")
             row.append(f"{onset:g}" if onset else "none")
             rows.append(row)
+        # REW's distortion export at the same frequency, against the meas input's own sine H2:
+        # REW's export is the meas channel alone, not divided by the reference
+        meas_pts = sorted((x["f"], x["h_dbr"]["2"]) for x in tones)
+        mf_, mv = np.array([a for a, _ in meas_pts]), np.array([b for _, b in meas_pts])
+        for rs in (p.rew, p.rew_live):
+            if rs is None or rs.meas_dist is None or "H2" not in rs.meas_dist.cols:
+                continue
+            d, fc = rs.meas_dist, 22.0
+            i = _nearest_finite(d.f, d.cols["H2"], fc)
+            if i is None or fc < mf_[0] or fc > mf_[-1]:
+                continue
+            truth = float(np.interp(np.log(fc), np.log(mf_), mv))
+            hv = float(d.cols["H2"][i])
+            hf = float(d.cols.get("Noise", np.full(len(d.f), np.nan))[i])
+            c = dsp.classify(hv, hf, margin)
+            base = dict(id=f"{p.name}.lf_h2.{rs.label}", group="LF H2", path=p.name,
+                        title=f"{rs.label}: H2 excess at 22 Hz", unit="dB", tol=tl)
+            if c["kind"] == "value":
+                ex = hv - truth
+                self.add(**base, value=ex, status=judge(max(ex, 0.0), tl),
+                         meaning=f"REW H2 {hv:.1f} dBr at {d.f[i]:.1f} Hz (noise {_fmt(c.get('floor'))}) against the "
+                                 f"meas input's sine H2 interpolated in log f ({truth:.1f} dBr): positive = REW "
+                                 "overstates",
+                         detail={"twin": {"key": f"{p.name}|lf_h2|22", "analyser": "REW"}})
+            else:
+                self.add(**base, value=None, status="INCONCLUSIVE",
+                         meaning=(f"REW's H2 at 22 Hz is a bound < {c['bound']:.1f} dBr (shortfall {c['shortfall']:.1f} dB)"
+                                  if c["kind"] == "bound" else "REW has no H2 reading at 22 Hz")
+                                 + f"; the meas input's sine H2 there {truth:.1f} dBr")
         self.table(f"{p.name}: LF H2 excess over the sine truth (dB) by sweep variant", ["sweep", "start / duration"]
                    + [f"{x:g}" for x in freqs] + ["overstates up to (Hz)"], rows,
                    f"truth points: {', '.join(f'{a:g} Hz {b:.0f}' for a, b in pts)} dBr (linear in log f between). "
@@ -1491,7 +1589,7 @@ class Analysis:
                                  + ("" if curve_in_columns else " + the same curve correction (not in ac2's columns)")
                                  + (f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                     f"differ by {u:.2f} dB in the direct estimate" if u else ""),
-                         detail={"uncertainty": u})
+                         detail={"uncertainty": u, **_twin(p.name, "spl", fc, name)})
             rows.append(row)
         self.table(f"{p.name}: absolute response, dB SPL at the mic per 0 dBFS drive", ["f Hz", "sine",
                    "ac2 sweep", "ac2 TF × ref", "REW"], rows,
@@ -1539,6 +1637,59 @@ class Analysis:
                          status=st, meaning=f"broadband; ac2 {av:.3f}, {other} {ov:.3f}" + why)
         self.table(f"{p.name}: room parameters, broadband", ["metric", "ac2", "REW", "numpy (REW IR)"], rows,
                    "numpy: Schroeder integral after noise subtraction, simple truncation; approximate band filters")
+
+
+def _twin(path: str, kind: str, fc: float, source: str) -> dict:
+    """The METHOD pass's pairing of a check against the steady-sine truth: an ac2 sweep's and
+    REW's reading of the same quantity at the same tone share a key. Other sources (the live
+    TF, the direct estimates) are no sweep analyser and get none."""
+    who = "ac2" if source.startswith("ac2 sweep") or source.startswith("ac2 as displayed") or \
+        source.startswith("ac2 ±") else "REW" if source.startswith("REW") else None
+    return {"twin": {"key": f"{path}|{kind}|{fc:g}", "analyser": who}} if who else {}
+
+
+def method_pass(checks: list[dict]) -> int:
+    """METHOD: an ac2 sweep misses the steady-sine truth (WARN or FAIL) and REW's twin misses it
+    the same way (same sign; a one-sided bound claim carries its sign). Two analysers on two
+    recordings agreeing on the miss show the sweep method or the device's sweep-versus-steady
+    behaviour, not an ac2 error, so both become METHOD. An ac2 miss with REW passing stays.
+    Works on check dicts (`vars(Check)` mutates the Check). Returns the number changed."""
+    def sign(c):
+        t = c["detail"]["twin"]
+        if t.get("sign") is not None:
+            return t["sign"]
+        v = c.get("value")
+        return None if v is None or not np.isfinite(v) or v == 0 else (1 if v > 0 else -1)
+
+    groups: dict[str, dict[str, list]] = {}
+    for c in checks:
+        t = (c.get("detail") or {}).get("twin")
+        if t and t.get("analyser") and c["status"] in ("WARN", "FAIL"):
+            groups.setdefault(t["key"], {}).setdefault(t["analyser"], []).append(c)
+    pairs = []
+    for g in groups.values():
+        for a in g.get("ac2", []):
+            for r in g.get("REW", []):
+                if sign(a) is not None and sign(a) == sign(r):
+                    pairs.append((a, r))
+    changed = {}
+    for a, r in pairs:
+        for me, other in ((a, r), (r, a)):
+            e = changed.setdefault(id(me), {"c": me, "was": me["status"], "twins": []})
+            e["twins"].append(f"{other['title']}: {_twin_value(other)} ({other['status']})")
+    for e in changed.values():
+        c = e["c"]
+        c["detail"] = {**c["detail"], "method_of": e["was"]}
+        c["meaning"] += ("; METHOD (was " + e["was"] + "): missed the same way by " + "; ".join(e["twins"]))
+    for e in changed.values():
+        e["c"]["status"] = "METHOD"
+    return len(changed)
+
+
+def _twin_value(c: dict) -> str:
+    if c.get("value") is not None:
+        return f"{c['value']:+.2f} {c.get('unit') or ''}".rstrip()
+    return c["detail"]["twin"].get("claim") or "a one-sided claim"
 
 
 def _settle_lag_s(s, fc):

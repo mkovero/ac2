@@ -280,6 +280,17 @@ calibration mapping, one table of checks per group, the data tables and the plot
     the recording's SNR, a room's fine structure) is wider than the pass limit. It FAILs only
     when it misses the warn limit by more than that uncertainty.
   - a truth or reading a mains line sits in (the sine GD pair, a sweep's harmonic band).
+- **METHOD**: an ac2 sweep misses the steady-sine truth (WARN or FAIL: magnitude, phase,
+  GD, H2–H5, absolute SPL, LF H2) and REW's reading of the same quantity at the same tone
+  misses it the same way (same sign; a bound claim carries its sign). Two analysers on two
+  recordings agreeing shows the sweep method or the device's sweep-versus-steady behaviour,
+  not ac2. Both rows become METHOD and name each other's value. ac2 FAIL with REW PASS stays
+  FAIL. Not a pass and not ac2's failure; a baseline comparison reports changes to or from it.
+- **ac2 vs REW harmonics** (`<path>.h<k>.ac2 sweep <name>|<REW label>@<f>Hz`): ac2's harmonic
+  minus REW's at each tone, both values; INCONCLUSIVE where either is a bound or missing.
+- **Arrival**: each ac2 sweep's reported arrival is judged against the IR peak of its own
+  capture. A loudspeaker's IR peak moves with the stimulus's top octave and end taper, so the
+  REW recording's peak (`delay.capture_vs_rew_recording.<sweep>`, INFO) differs by the stimulus.
 - **INFO** rows are context, not judged: REW's offline delays (gone by design), REW's own GD
   export, REW's RTA averaging, an electrical path's ETC skirts.
 - **One phase reference**: meas ÷ ref with the path's delay in it. ac2's reported arrival is

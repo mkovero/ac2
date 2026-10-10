@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-STATUS_ORDER = ["FAIL", "INCONCLUSIVE", "WARN", "PASS", "INFO"]
+STATUS_ORDER = ["FAIL", "INCONCLUSIVE", "WARN", "METHOD", "PASS", "INFO"]
 
 HOW_TO_READ = """\
 ## How to read this
@@ -17,6 +17,12 @@ HOW_TO_READ = """\
 - **INCONCLUSIVE**: the comparison rests on an upper bound — a harmonic reading below its
   floor + margin (`[distortion] margin_db`) — or a value is missing. The row gives the
   shortfall: how many dB more SNR would have made it a value. Never read it as a pass.
+- **METHOD**: an ac2 sweep misses the steady-sine truth (WARN or FAIL) and REW's twin at the
+  same tone and quantity misses it the same way (same sign; for a one-sided bound, both claim
+  above it). The two analysers agree, so the miss is the sweep method's or the device's
+  sweep-versus-steady-state behaviour (a speaker's or mixer's distortion and drift between
+  takes), not ac2's error. Both rows become METHOD and each names the other's value. Not a
+  pass, and not counted as an ac2 failure; ac2 FAIL with REW PASS stays FAIL.
 - **INFO**: printed for context, no tolerance.
 - Levels are dBFS in the full-scale-sine convention ac2 and REW share (a full-scale sine is
   0 dBFS, rms = 10^(L/20)/√2). Harmonics are dBr re the fundamental at the measurement input.
@@ -96,6 +102,11 @@ def write(results: dict, analysis, out: Path, plots: bool = True) -> Path:
                _md_table(["status", "check", "value", "pass / warn"],
                          [[c["status"], c["title"] + f" ({c['path']})", _val(c), _tol(c)]
                           for c in sorted(bad, key=lambda c: STATUS_ORDER.index(c["status"]))]), ""]
+    method = [c for c in results["checks"] if c["status"] == "METHOD"]
+    if method:
+        md += ["Missed the same way by ac2 and REW (METHOD: the sweep method or the device, not ac2):", "",
+               _md_table(["check", "value", "pass / warn", "what it means"],
+                         [[c["title"] + f" ({c['path']})", _val(c), _tol(c), c["meaning"]] for c in method]), ""]
     md += [HOW_TO_READ]
     stages = man.get("stages")
     if stages:

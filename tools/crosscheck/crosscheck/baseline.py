@@ -18,15 +18,19 @@ BASELINES = ROOT / "baselines"
 SCHEMA = 1
 
 # groups whose ids end in a tone frequency (`<...>.<f:g>`)
-FREQ_GROUPS = {"phase vs sine", "magnitude vs sine", "group delay", "harmonics", "absolute SPL"}
+FREQ_GROUPS = {"phase vs sine", "magnitude vs sine", "group delay", "harmonics", "harmonics ac2 vs REW", "absolute SPL"}
 _FREQ_TAIL = re.compile(r"\.(\d+(?:\.\d+)?)$")
 # `avoid_mains` moves a tone by at most 6 %; two nominal tones are never that close
 NEAREST_REL = 0.06
-# a verdict lost is worse than a pass; INFO is not judged, so it ranks with PASS
-RANK = {"PASS": 0, "INFO": 0, "INCONCLUSIVE": 1, "WARN": 2, "FAIL": 3}
-# a value is held to its baseline only where both runs judged it: an INFO value is context and
-# an INCONCLUSIVE one is a bound or rests on noise wider than its pass limit
+# a verdict lost is worse than a pass; INFO is not judged, so it ranks with PASS. METHOD (ac2
+# and REW miss the truth the same way: the sweep method or the device) is no pass, yet no ac2
+# failure either: it ranks with a lost verdict, so a change to or from it is reported
+RANK = {"PASS": 0, "INFO": 0, "INCONCLUSIVE": 1, "METHOD": 1, "WARN": 2, "FAIL": 3}
+# a value is held to its baseline only where both runs judged it: an INFO value is context, an
+# INCONCLUSIVE one is a bound or rests on noise wider than its pass limit, and a METHOD one
+# follows the device's own drift between takes, which both analysers read alike
 JUDGED = {"PASS", "WARN", "FAIL"}
+STATUSES = ("FAIL", "WARN", "METHOD", "INCONCLUSIVE", "PASS", "INFO")
 # Kept from a check's detail: the population a statistic was taken over (`n` columns, bins or
 # bands) and, where the value folds a signed mean and a spread into one number, both parts: a
 # max(|mean|, spread) alone hides the sign a residual's direction needs across takes.
