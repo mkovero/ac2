@@ -2034,7 +2034,12 @@ over is certain is ac2's choice for the time before.
   its limit (dashed), red where it was over. It holds the log's last 4 hours even when the
   app was not running: a restarted (or reconnected, or second) app gets it from the daemon,
   rebuilt from the meter's log as the meter computed it; a new log clears it.
-- The app remembers both.
+- **Settings › Display › Leq bars**: the Leq windows arrive once a second; by default each
+  column (and each band bar) **glides** to a new reading over 0.3 s instead of jumping. Only
+  the bar's length glides: the number, the colours and the limit lines are the new reading's
+  at once, and a stale, stopped or reset meter is drawn as it is. "jump to each new reading"
+  turns it off.
+- The app remembers all three.
 - **W** gives the pane the whole window, once more (or **F**) the whole screen: the
   **stage view**, nothing but the columns (in meter + Leq, the number above them). The grey
   caption line (the meter's name, its calibration) shows there only with the history on

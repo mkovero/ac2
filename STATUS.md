@@ -10,8 +10,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   client. macOS: a tester runs the disk image (`testing/macos/`); Windows: MSI in a VM,
   tester guide and dev.10 MSI in `testing/windows/`.
 - CI on push is Linux only; macOS/Windows run before a release or on dispatch
-  (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 684d610 on pupu,
-  ketunkolo and the Pi (`docs/rigs/pupu.md`, *Deploy of 684d610*).
+  (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 1e026209 on pupu,
+  ketunkolo and the Pi (`docs/rigs/pupu.md`, *Deploy of 1e026209*).
 - Newest features: per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
   with a grey resolution marker where the estimate is coarser than the grid (`docs/user-guide.md`
   *Resolution and the resolution marker*); mic curve applied to sweeps; settable spectrum/RTA

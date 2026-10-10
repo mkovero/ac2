@@ -356,6 +356,15 @@ recreating measurements 1–14 in id order, `trace import` of `autosave.vN/trace
   checkout once and failed on types the checkout no longer had; touching the sources
   (`find crates -name '*.rs' -exec touch {} +`) fixed it.
 
+## Deploy of 1e026209 (2026-10-10, all three hosts)
+
+Protocol 35, session format 20 (unchanged): the Leq and band Leq bars glide 0.3 s to each new
+reading (Settings › Display › Leq bars). Binary swap; the restarted ac2d restored 32
+measurements and 84 traces, the session reopened with the usual `session open` line; JACK
+left running, `--max-level -50` kept. The Pi kiosk reconnected. Earlier the same evening the
+host this repo lives on crashed: 34 loose objects of an unsynced commit were left 0-byte in
+the shared `.git` (`git fsck`; deleted, then committed again).
+
 ## Deploy of 684d610 (2026-10-10, all three hosts)
 
 Protocol 35, session format 20, text export v5: per-measurement Resolution (1/12 … 1/96
