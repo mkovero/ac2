@@ -1075,9 +1075,42 @@ fn z_loads_a_target_curve_file() {
     let r = t.key("Enter");
     assert!(matches!(
         r.as_slice(),
-        [Request::Import { path, role: ImportRole::Target }] if path == std::path::Path::new("/home/foh/house.txt")
+        [Request::Import { path, role: ImportRole::Target, channel: None }] if path == std::path::Path::new("/home/foh/house.txt")
     ));
     assert_eq!(t.st.overlay, Overlay::None);
+}
+
+#[test]
+fn an_impulse_response_channel_follows_the_path() {
+    use crate::state::keys::parse_import;
+    use std::path::Path;
+    assert_eq!(
+        parse_import(" /ir/genelec.wav #2 "),
+        (Path::new("/ir/genelec.wav").to_path_buf(), Some(1))
+    );
+    assert_eq!(
+        parse_import("/ir/genelec.wav"),
+        (Path::new("/ir/genelec.wav").to_path_buf(), None)
+    );
+    // Not a channel: #0, a word.
+    assert_eq!(parse_import("/ir/a.wav #0").1, None);
+    assert_eq!(parse_import("/ir/take #two").1, None);
+    // A file named with the suffix is that file.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let odd = dir.path().join("take #3");
+    std::fs::write(&odd, b"x").expect("write");
+    assert_eq!(parse_import(&odd.display().to_string()), (odd, None));
+}
+
+#[test]
+fn a_wav_export_path_asks_for_the_impulse_response() {
+    use crate::conn::export_format;
+    use ac2_proto::model::ExportFormat;
+    use std::path::Path;
+    assert_eq!(export_format(Path::new("/x/ir.wav")), ExportFormat::IrWav);
+    assert_eq!(export_format(Path::new("/x/IR.WAV")), ExportFormat::IrWav);
+    assert_eq!(export_format(Path::new("/x/ir.csv")), ExportFormat::Ac2Csv);
+    assert_eq!(export_format(Path::new("/x/ir")), ExportFormat::Ac2Csv);
 }
 
 #[test]

@@ -525,9 +525,14 @@ pub fn trace_meta(t: &TraceMeta) -> String {
     };
     let mic = ac2_scene::trace::mic_text(t.mic.as_ref(), t.mic_curve.as_deref());
     let notes: String = match &t.source {
-        TraceSource::Imported { notes, .. } => notes
+        TraceSource::Imported { notes, ir_file, .. } => ir_file
             .iter()
-            .map(|n| format!("\n  note        {}", ac2_scene::trace::import_note(*n)))
+            .map(|f| format!("\n  file        {}", ac2_scene::trace::ir_file_text(f)))
+            .chain(
+                notes
+                    .iter()
+                    .map(|n| format!("\n  note        {}", ac2_scene::trace::import_note(*n))),
+            )
             .collect(),
         _ => String::new(),
     };

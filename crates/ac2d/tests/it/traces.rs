@@ -339,6 +339,7 @@ fn capture_average_math_export_import() {
         file_name: file_name.clone(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
+        ir: None,
         content,
     }));
     assert_eq!(imp.grid_id, aligned.grid_id);
@@ -363,6 +364,7 @@ fn capture_average_math_export_import() {
         file_name: "house_curve.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,
+        ir: None,
         content: Blob(fixture("house_curve.txt")),
     }));
     assert_eq!(tgt.kind, TraceKind::Target);
@@ -407,6 +409,7 @@ fn capture_average_math_export_import() {
             file_name: "bad.txt".into(),
             format: ImportFormat::AnalyzerText,
             role: ImportRole::Trace,
+            ir: None,
             content: Blob(b"* REW\n20 1\n30 2\n25 3\n".to_vec()),
         })
         .unwrap_err();
@@ -661,6 +664,7 @@ fn live_smoothing_and_resmoothed_captures() {
         file_name: "house_curve.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,
+        ir: None,
         content: Blob(fixture("house_curve.txt")),
     }));
     let mut te = tgt.edit.clone();
@@ -966,6 +970,7 @@ fn session_save_load_round_trip() {
         file_name: "house_curve.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,
+        ir: None,
         content: Blob(fixture("house_curve.txt")),
     }));
     let mut e = tgt.edit.clone();
@@ -1127,7 +1132,10 @@ fn session_save_load_round_trip() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(
         &manifest,
-        text.replace("\"version\": 21", "\"version\": 22"),
+        text.replace(
+            &format!("\"version\": {}", ac2_traces::session::VERSION),
+            &format!("\"version\": {}", ac2_traces::session::VERSION + 1),
+        ),
     )
     .unwrap();
     let e = c
@@ -1141,8 +1149,8 @@ fn session_save_load_round_trip() {
     assert_eq!(
         e.detail,
         Some(ErrorDetail::SessionVersion {
-            found: 22,
-            supported: 21
+            found: ac2_traces::session::VERSION + 1,
+            supported: ac2_traces::session::VERSION
         })
     );
     assert_eq!(traces(c).len(), n);
@@ -1512,6 +1520,7 @@ fn old_sweep_export_imports_as_transfer_with_its_delay() {
         file_name: "ac2-v1-sweep1.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
+        ir: None,
         content: Blob(fixture("ac2-v1-sweep1.csv")),
     }));
     assert_eq!(t.kind, TraceKind::Transfer);
@@ -1591,6 +1600,7 @@ fn transfer_capture_keeps_its_ir() {
         file_name: "aligned.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
+        ir: None,
         content,
     }));
     assert_eq!(data(c, back.id).ir, Some(air));

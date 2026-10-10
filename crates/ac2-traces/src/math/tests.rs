@@ -377,3 +377,178 @@ fn level_math() {
         Err(MathError::PowerOnly)
     );
 }
+
+/// A live transfer function × an imported impulse response is the cascade of the two
+/// closed-form responses: a first-order low-pass (the live TF, its delay removed) times an
+/// RBJ peaking biquad sampled as an IR file `D` samples late, imported with time zero at
+/// the file start (so its phase keeps `−2πfD/fs`).
+#[test]
+fn a_transfer_function_through_an_imported_ir_is_the_analytic_product() {
+    use ac2_proto::model::{IrAlign, IrImport};
+    let fs = 48_000.0;
+    let (f0, gain_db, q) = (1000.0, 6.0, 2.0);
+    let amp = 10f64.powf(gain_db / 40.0);
+    let w0 = 2.0 * PI * f0 / fs;
+    let alpha = w0.sin() / (2.0 * q);
+    let a0 = 1.0 + alpha / amp;
+    let b = [
+        (1.0 + alpha * amp) / a0,
+        -2.0 * w0.cos() / a0,
+        (1.0 - alpha * amp) / a0,
+    ];
+    let a = [1.0, -2.0 * w0.cos() / a0, (1.0 - alpha / amp) / a0];
+    let lead = 64usize;
+    let mut h = vec![0.0f32; 32_768];
+    let (mut x1, mut x2, mut y1, mut y2) = (0.0, 0.0, 0.0, 0.0);
+    for (i, v) in h.iter_mut().enumerate() {
+        let x0 = if i == lead { 1.0 } else { 0.0 };
+        let y0 = b[0] * x0 + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2;
+        (x2, x1, y2, y1) = (x1, x0, y1, y0);
+        *v = y0 as f32;
+    }
+    let wav = crate::raw::wav::to_bytes(1, 48_000, &h);
+    let imp = crate::ir_wav::import(
+        &wav,
+        IrImport {
+            align: IrAlign::Start,
+            ..IrImport::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(imp.delay.unwrap().0, 0.0);
+    let g = imp.grid.clone();
+    let f = frequencies(&g);
+    let live = tf(&f, lowpass(2000.0), 0.95);
+    let r = transfer(
+        Combine::Binary(MathOp::Multiply),
+        &[input(&live, 0.004, EPOCH), input(&imp.columns, 0.0, None)],
+        &g,
+        &f,
+        DelayReference::Trace(0),
+    )
+    .unwrap();
+    assert_eq!(r.phase, PhaseBasis::OwnAlignments);
+    assert!((r.delay.0 - 0.004).abs() < 1e-12);
+    let biquad = |x: f64| {
+        let z1 = Complex64::from_polar(1.0, -2.0 * PI * x / fs);
+        let z2 = z1 * z1;
+        (b[0] + b[1] * z1 + b[2] * z2) / (a[0] + a[1] * z1 + a[2] * z2)
+            * Complex64::from_polar(1.0, -2.0 * PI * x * lead as f64 / fs)
+    };
+    for (i, x) in f.iter().enumerate() {
+        if !(40.0..=15_000.0).contains(x) {
+            continue;
+        }
+        let w = lowpass(2000.0)(*x) * biquad(*x);
+        let m = f64::from(r.columns.mag_db[i]);
+        assert!((m - 20.0 * w.norm().log10()).abs() < 0.02, "{x} Hz: {m}");
+        let p = r.columns.phase_deg.as_ref().unwrap()[i];
+        assert!(phase_err(p, w.arg().to_degrees()) < 0.5, "{x} Hz: {p}");
+        // The low coherence of the two is carried.
+        assert_eq!(r.columns.coherence.as_ref().unwrap()[i], 0.95);
+    }
+}
+
+fn level_trace(grid: GridDef, columns: Columns) -> StoredTrace {
+    use ac2_proto::model::{CalState, ImportFormat, TraceKind, TraceMeta, TraceOwner, TraceSource};
+    use ac2_proto::units::{TraceId, WallNs};
+    StoredTrace {
+        meta: TraceMeta {
+            id: TraceId(1),
+            edit: crate::meta::new_edit(TraceId(1), "h".into(), None, TraceOwner::Imported),
+            kind: TraceKind::Transfer,
+            source: TraceSource::Imported {
+                file_name: "h.wav".into(),
+                format: ImportFormat::IrWav,
+                notes: Vec::new(),
+                ir_file: None,
+            },
+            grid_id: grid.id(),
+            delay: Seconds(0.0),
+            depth: None,
+            cal: CalState::Uncalibrated,
+            mic: None,
+            mic_curve: None,
+            created_at: WallNs(0),
+        },
+        grid,
+        columns,
+        sweep: None,
+        ir: None,
+        mic_curve: None,
+    }
+}
+
+/// A spectrum through a filter reads `level + 20·lg|H|` at every bin the filter covers;
+/// taking the filter out (`÷`) returns the level.
+#[test]
+fn a_spectrum_through_a_filter_adds_its_gain_per_bin() {
+    let g = GridDef::Log {
+        ppo: 48,
+        k_min: -240,
+        k_max: 239,
+    };
+    let h = level_trace(g.clone(), tf(&frequencies(&g), lowpass(1000.0), 1.0));
+    let bins = GridDef::Linear {
+        fs: ac2_proto::units::Hz(48_000.0),
+        n: 8192,
+    };
+    let bf = frequencies(&bins);
+    let gain = filter_gain_on_grid(&h, &bins, &bf);
+    // Bin 0 (DC) and bins below the filter's first column have no gain.
+    assert!(gain[0].is_nan() && gain[1].is_nan());
+    let level = Columns {
+        mag_db: vec![-30.0; bf.len()],
+        phase_deg: None,
+        coherence: None,
+    };
+    let r = filtered(Filter::Through, &level, &gain).unwrap();
+    assert_eq!(r.phase, PhaseBasis::NoPhase);
+    for (i, f) in bf.iter().enumerate() {
+        if !(40.0..=20_000.0).contains(f) {
+            continue;
+        }
+        let want = -30.0 + 20.0 * lowpass(1000.0)(*f).norm().log10();
+        assert!(
+            (f64::from(r.columns.mag_db[i]) - want).abs() < 2e-3,
+            "{f} Hz"
+        );
+    }
+    let back = filtered(Filter::Out, &r.columns, &gain).unwrap();
+    for (i, f) in bf.iter().enumerate() {
+        if (40.0..=20_000.0).contains(f) {
+            assert!((back.columns.mag_db[i] + 30.0).abs() < 1e-4);
+        }
+    }
+}
+
+/// Over an RTA band the filter's gain is the mean of `|H|²` over log frequency across the
+/// band: for a first-order low-pass `[ln f − ½·ln(1 + (f/fc)²)] / ln(hi/lo)` between the
+/// band edges.
+#[test]
+fn an_rta_band_through_a_filter_takes_the_band_mean_of_its_power() {
+    use ac2_proto::model::BandFraction;
+    let g = GridDef::Log {
+        ppo: 96,
+        k_min: -480,
+        k_max: 479,
+    };
+    let fc = 1000.0;
+    let h = level_trace(g.clone(), tf(&frequencies(&g), lowpass(fc), 1.0));
+    let centres = ac2_core::grid::iec_band_centres(3, 40.0, 20_000.0);
+    let bands = GridDef::IecBands {
+        fraction: BandFraction::Third,
+        centres: centres.iter().map(|c| ac2_proto::units::Hz(*c)).collect(),
+    };
+    let gain = filter_gain_on_grid(&h, &bands, &centres);
+    let prim = |f: f64| f.ln() - 0.5 * (1.0 + (f / fc).powi(2)).ln();
+    for (i, fm) in centres.iter().enumerate() {
+        let (lo, hi) = ac2_core::grid::iec_band_edges(*fm, 3);
+        let want = 10.0 * ((prim(hi) - prim(lo)) / (hi / lo).ln()).log10();
+        assert!(
+            (f64::from(gain[i]) - want).abs() < 0.05,
+            "{fm} Hz: {} vs {want}",
+            gain[i]
+        );
+    }
+}

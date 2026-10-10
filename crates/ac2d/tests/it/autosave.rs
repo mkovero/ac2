@@ -235,6 +235,7 @@ fn slow_a_burst_of_edits_is_one_write() {
         file_name: "target.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,
+        ir: None,
         content: Blob(b"20 -3.0\n1000 0.0\n20000 -6.0\n".to_vec()),
     }) {
         ReplyBody::Trace(t) => t,

@@ -472,13 +472,14 @@ impl AppState {
                 Ok(())
             }),
             PromptKind::ImportFile(role) => {
-                let path = text.trim();
-                if path.is_empty() {
+                let (path, channel) = parse_import(&text);
+                if path.as_os_str().is_empty() {
                     Err("type a file path".to_string())
                 } else {
                     out.push(Request::Import {
-                        path: std::path::PathBuf::from(path),
+                        path,
                         role,
+                        channel,
                     });
                     Ok(())
                 }
@@ -575,4 +576,21 @@ impl AppState {
             }
         }
     }
+}
+
+/// An import prompt's text: a path, and for a multi-channel WAV impulse response the channel
+/// after it as ` #N` (1-based; returned 0-based). A file whose name itself ends so is read
+/// whole: the suffix counts only when the full text names no file.
+pub(crate) fn parse_import(text: &str) -> (std::path::PathBuf, Option<u16>) {
+    let t = text.trim();
+    let whole = std::path::PathBuf::from(t);
+    if whole.exists() {
+        return (whole, None);
+    }
+    if let Some((p, n)) = t.rsplit_once(" #")
+        && let Ok(n @ 1..) = n.trim().parse::<u16>()
+    {
+        return (std::path::PathBuf::from(p.trim_end()), Some(n - 1));
+    }
+    (whole, None)
 }

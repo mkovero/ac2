@@ -176,7 +176,11 @@ impl std::fmt::Display for ImportError {
 
 impl std::error::Error for ImportError {}
 
-fn fail(line: Option<usize>, problem: ImportProblem, msg: impl Into<String>) -> ImportError {
+pub(crate) fn fail(
+    line: Option<usize>,
+    problem: ImportProblem,
+    msg: impl Into<String>,
+) -> ImportError {
     ImportError {
         line: line.map(|l| u32::try_from(l).unwrap_or(u32::MAX)),
         problem,
@@ -209,6 +213,8 @@ pub struct Imported {
     pub ir: Option<TransferIr>,
     /// What the file held that the import does not keep.
     pub notes: Vec<ImportNote>,
+    /// An impulse-response file's facts ([`crate::ir_wav`]).
+    pub ir_file: Option<Box<ac2_proto::model::IrFile>>,
 }
 
 fn decode(content: &[u8]) -> Result<String, ImportError> {
@@ -832,6 +838,7 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         sweep,
         ir: transfer_ir,
         notes,
+        ir_file: None,
     })
 }
 
@@ -865,11 +872,11 @@ fn ir_table(lines: &[(usize, &str)], at: usize, a: IrAnnounce) -> Result<TraceIr
         };
         linear.push(v(f[1])?);
         etc_db.push(v(f[2])?);
-        if linear.len() > MAX_N as usize {
+        if linear.len() > TraceIr::MAX_POINTS as usize {
             return Err(fail(
                 Some(no),
                 ImportProblem::TooManyRows,
-                format!("more than {MAX_N} impulse-response rows"),
+                format!("more than {} impulse-response rows", TraceIr::MAX_POINTS),
             ));
         }
     }
@@ -928,6 +935,7 @@ fn import_text(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         sweep: None,
         ir: None,
         notes: Vec::new(),
+        ir_file: None,
     })
 }
 
@@ -952,6 +960,13 @@ pub fn import(
         ImportFormat::AnalyzerText => import_text(&lines)?,
         ImportFormat::Auto if ac2() => import_ac2(&lines)?,
         ImportFormat::Auto => import_text(&lines)?,
+        ImportFormat::IrWav => {
+            return Err(fail(
+                None,
+                ImportProblem::NotText,
+                "an impulse-response WAV file is not text (crate::import_file reads it)",
+            ));
+        }
     };
     if role == ImportRole::Target {
         // A target is a specified magnitude: nothing measured comes with it.
@@ -1004,12 +1019,27 @@ fn source_text(s: &TraceSource) -> String {
             file_name,
             format,
             notes,
+            ir_file,
         } => {
-            if notes.is_empty() {
-                format!("imported from {file_name:?} ({format:?})")
-            } else {
-                format!("imported from {file_name:?} ({format:?}), notes {notes:?}")
+            let mut t = format!("imported from {file_name:?} ({format:?})");
+            if !notes.is_empty() {
+                t += &format!(", notes {notes:?}");
             }
+            if let Some(f) = ir_file {
+                t += &format!(
+                    ", channel {} of {}, {} Hz, {} samples ({} kept from sample {}), peak at \
+                     {:.4} ms, {:?}",
+                    f.channel + 1,
+                    f.channels,
+                    f.sample_rate.0,
+                    f.frames,
+                    f.kept,
+                    f.first,
+                    f.peak.0 * 1e3,
+                    f.import
+                );
+            }
+            t
         }
         TraceSource::Average {
             traces,

@@ -198,10 +198,12 @@ pub enum Request {
         name: String,
         replace: Option<TraceId>,
     },
-    /// Read a local file and `trace.import` it.
+    /// Read a local file and `trace.import` it (`channel`: a WAV impulse response's,
+    /// 0-based).
     Import {
         path: std::path::PathBuf,
         role: ImportRole,
+        channel: Option<u16>,
     },
     /// Read a local mic-curve file and `cal.curve_import` it as a curve of `mic` (the label
     /// from the file), setting `input`'s mic name when given.
@@ -1123,11 +1125,15 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                 });
             });
         }
-        Request::Import { path, role } => {
+        Request::Import {
+            path,
+            role,
+            channel,
+        } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
                 let what = format!("import {}", path.display());
-                let result = import(&c, &path, role).await.map(|t| {
+                let result = import(&c, &path, role, channel).await.map(|t| {
                     o.send(ConnEvent::Reply {
                         what: format!("{} imported", t.edit.name),
                         result: Ok(()),
@@ -1358,7 +1364,12 @@ async fn capture(
     expect_body!("trace.capture", r, ReplyBody::Trace(t) => t)
 }
 
-async fn import(c: &Client, path: &std::path::Path, role: ImportRole) -> Result<TraceMeta, String> {
+async fn import(
+    c: &Client,
+    path: &std::path::Path,
+    role: ImportRole,
+    channel: Option<u16>,
+) -> Result<TraceMeta, String> {
     let content = tokio::task::spawn_blocking({
         let p = path.to_owned();
         move || std::fs::read(&p)
@@ -1375,6 +1386,10 @@ async fn import(c: &Client, path: &std::path::Path, role: ImportRole) -> Result<
             file_name,
             format: ImportFormat::Auto,
             role,
+            ir: channel.map(|c| ac2_proto::model::IrImport {
+                channel: Some(c),
+                ..Default::default()
+            }),
             content: ac2_proto::units::Blob(content),
         })
         .await
@@ -1382,8 +1397,23 @@ async fn import(c: &Client, path: &std::path::Path, role: ImportRole) -> Result<
     expect_body!("trace.import", r, ReplyBody::Trace(t) => t).map_err(|e| e.to_string())
 }
 
-/// `trace.export`s `trace` as ac2 CSV and writes it to `path` (into it, under the daemon's
-/// suggested name, when `path` is a folder); returns where it went and its size.
+/// `trace.export`s `trace` and writes it to `path` (into it, under the daemon's suggested
+/// name, when `path` is a folder); returns where it went and its size. A `.wav` path takes
+/// the trace's impulse response as WAV, anything else ac2 CSV.
+/// What a typed export path asks for: its impulse response for a `.wav` file, ac2 CSV
+/// otherwise (a folder too).
+pub fn export_format(path: &std::path::Path) -> ac2_proto::model::ExportFormat {
+    let wav = !path.is_dir()
+        && path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("wav"));
+    if wav {
+        ac2_proto::model::ExportFormat::IrWav
+    } else {
+        ac2_proto::model::ExportFormat::Ac2Csv
+    }
+}
+
 async fn export_trace(
     c: &Client,
     trace: TraceId,
@@ -1392,7 +1422,7 @@ async fn export_trace(
     let r = c
         .call(Command::TraceExport {
             trace,
-            format: ac2_proto::model::ExportFormat::Ac2Csv,
+            format: export_format(&path),
         })
         .await
         .map_err(|e| e.to_string())?;

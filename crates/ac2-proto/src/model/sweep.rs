@@ -208,6 +208,12 @@ pub struct TraceIr {
     pub etc_db: Vec<f32>,
 }
 
+impl TraceIr {
+    /// Most points a stored impulse response holds (1.37 s at 48 kHz; it keeps a trace's data within one ctrl reply): a sweep's longer
+    /// span is decimated to it, an imported file truncated.
+    pub const MAX_POINTS: u32 = 1 << 16;
+}
+
 /// What the analysis found and used.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

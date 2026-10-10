@@ -14,10 +14,11 @@ use crate::grid::{GridDef, GridId};
 use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, ColourFamily, DelayFinding,
     DelayPick, DelayReference, DeviceId, ElectricalConnection, ExportFormat, FinderBand, Generator,
-    GeneratorDesired, ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MeasConfig,
-    Measurement, Mic, MicCurveId, OutputSetup, OwnedTraces, Preview, RecordRequest, RecordingFile,
-    RecordingRef, RecordingRun, ReplayPace, ServerInfo, Session, SessionConfig, SessionFile,
-    SessionRef, SplHistory, SplLogPage, SplLogWhich, SweepRun, TraceData, TraceEdit, TraceMeta,
+    GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, Lease, LoopbackDetection,
+    MeasConfig, Measurement, Mic, MicCurveId, OutputSetup, OwnedTraces, Preview, RecordRequest,
+    RecordingFile, RecordingRef, RecordingRun, ReplayPace, ServerInfo, Session, SessionConfig,
+    SessionFile, SessionRef, SplHistory, SplLogPage, SplLogWhich, SweepRun, TraceData, TraceEdit,
+    TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, RequestId,
@@ -326,6 +327,9 @@ pub enum Command {
         format: ImportFormat,
         /// Measured trace or target curve.
         role: ImportRole,
+        /// How to read an impulse-response WAV file; `None` takes [`IrImport::default`].
+        /// Refused (`invalid`) with a text file.
+        ir: Option<IrImport>,
         /// File content.
         content: Blob,
     },
@@ -936,6 +940,16 @@ pub enum ImportProblem {
     BadHeader,
     /// Coherence outside 0…1.
     BadCoherence,
+    /// Not a WAV / RF64 file this build reads (16-, 24-, 32-bit integer or 32-bit float).
+    NotWav,
+    /// A multi-channel impulse response without a channel chosen, or a channel it does not
+    /// have.
+    PickChannel,
+    /// An impulse response with fewer than 2 samples, every sample zero, or a non-finite one.
+    NoImpulse,
+    /// Impulse-response options with a text file, or a gate that is not ≥ 0 before and > 0
+    /// after the peak.
+    BadOptions,
 }
 
 /// Error reply.

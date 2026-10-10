@@ -23,6 +23,8 @@ use super::{Shared, err};
 pub(super) struct FakeTraces {
     pub(super) data: HashMap<TraceId, (GridDef, Columns)>,
     pub(super) sweeps: HashMap<TraceId, SweepData>,
+    /// Impulse responses of transfer traces (imported IR files).
+    pub(super) irs: HashMap<TraceId, TransferIr>,
     pub(super) next_sweep: u32,
     /// Mic curves applied to traces after capture.
     pub(super) mic_curves: HashMap<TraceId, ac2_traces::mic::Correction>,
@@ -87,7 +89,7 @@ impl Shared {
             grid,
             columns,
             sweep: self.traces.sweeps.get(&id).cloned(),
-            ir: None,
+            ir: self.traces.irs.get(&id).cloned(),
             mic_curve: self.traces.mic_curves.get(&id).cloned(),
         })
     }
@@ -372,6 +374,7 @@ impl Shared {
         }
         self.traces.data.remove(&id);
         self.traces.sweeps.remove(&id);
+        self.traces.irs.remove(&id);
         self.traces.mic_curves.remove(&id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
         Ok(ReplyBody::Ack { rev })
@@ -431,9 +434,10 @@ impl Shared {
         file_name: String,
         format: ImportFormat,
         role: ImportRole,
+        ir: Option<IrImport>,
         content: &[u8],
     ) -> Result<ReplyBody, ProtoError> {
-        let imp = text::import(content, format, role).map_err(|e| ProtoError {
+        let imp = ac2_traces::import_file(content, format, role, ir).map_err(|e| ProtoError {
             code: ErrorCode::Invalid,
             msg: e.to_string(),
             detail: Some(ErrorDetail::Import {
@@ -456,12 +460,16 @@ impl Shared {
                 file_name,
                 format: imp.format,
                 notes: imp.notes,
+                ir_file: imp.ir_file,
             },
             &imp.grid,
             imp.delay.unwrap_or(Seconds(0.0)),
         );
         if let Some(sw) = imp.sweep {
             self.traces.sweeps.insert(id, sw);
+        }
+        if let Some(ir) = imp.ir {
+            self.traces.irs.insert(id, ir);
         }
         Ok(self.add_trace(t, imp.grid, imp.columns))
     }
@@ -533,11 +541,24 @@ impl Shared {
         Ok(ReplyBody::Trace(t))
     }
 
-    pub(super) fn trace_export(&self, id: TraceId) -> Result<ReplyBody, ProtoError> {
+    pub(super) fn trace_export(
+        &self,
+        id: TraceId,
+        format: ExportFormat,
+    ) -> Result<ReplyBody, ProtoError> {
         let t = self.trace(id)?;
-        Ok(ReplyBody::Export {
-            file_name: meta::file_name(&t.meta.edit.name, "csv"),
-            content: Blob(text::export_csv(&t).into_bytes()),
+        Ok(match format {
+            ExportFormat::Ac2Csv => ReplyBody::Export {
+                file_name: meta::file_name(&t.meta.edit.name, "csv"),
+                content: Blob(text::export_csv(&t).into_bytes()),
+            },
+            ExportFormat::IrWav => ReplyBody::Export {
+                file_name: meta::file_name(&t.meta.edit.name, "wav"),
+                content: Blob(
+                    ac2_traces::ir_wav::export(&t)
+                        .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?,
+                ),
+            },
         })
     }
 
@@ -656,6 +677,7 @@ impl Shared {
         }
         self.traces.data.clear();
         self.traces.sweeps.clear();
+        self.traces.irs.clear();
         self.traces.mic_curves.clear();
         let newest = s
             .traces
@@ -712,6 +734,9 @@ impl Shared {
             self.grids.insert(t.grid.id(), t.grid.clone());
             if let Some(sw) = t.sweep {
                 self.traces.sweeps.insert(t.meta.id, sw);
+            }
+            if let Some(ir) = t.ir {
+                self.traces.irs.insert(t.meta.id, ir);
             }
             if let Some(k) = t.mic_curve {
                 self.traces.mic_curves.insert(t.meta.id, k);

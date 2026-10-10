@@ -771,6 +771,7 @@ async fn traces_and_sessions_against_the_fake() -> R {
             file_name: "a.csv".into(),
             format: ImportFormat::Auto,
             role: ImportRole::Trace,
+            ir: None,
             content: csv,
         })
         .await?
@@ -785,6 +786,7 @@ async fn traces_and_sessions_against_the_fake() -> R {
             file_name: "x.txt".into(),
             format: ImportFormat::AnalyzerText,
             role: ImportRole::Trace,
+            ir: None,
             content: Blob(b"1 2\n".to_vec()),
         })
         .await;

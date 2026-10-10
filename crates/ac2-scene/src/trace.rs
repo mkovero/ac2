@@ -221,8 +221,15 @@ impl<'a> TfTrace<'a> {
                 .sweep
                 .as_ref()
                 .and_then(|s| s.unresolved.as_ref())
+                .map(|u| &u.response)
+                .or(match &m.source {
+                    ac2_proto::model::TraceSource::Imported {
+                        ir_file: Some(f), ..
+                    } => Some(&f.unresolved),
+                    _ => None,
+                })
                 .map(|u| crate::unresolved::Source {
-                    unresolved: &u.response,
+                    unresolved: u,
                     fill: crate::unresolved::Fill::Interpolated,
                 }),
         }
@@ -676,7 +683,41 @@ pub fn import_note(n: ImportNote) -> &'static str {
             "the export showed a mic curve applied after capture; the columns are without \
              it (apply it again: ac2 trace mic)"
         }
+        ImportNote::IrTruncated => {
+            "impulse response longer than the 131072 samples a trace keeps: cut from shortly \
+             before its peak"
+        }
     }
+}
+
+/// An imported impulse-response file in one line, the same in the app and the CLI:
+/// `IR · channel 2 of 2 · 48 kHz · 4096 samples · peak at 2.083 ms · whole file · phase re peak`.
+pub fn ir_file_text(f: &ac2_proto::model::IrFile) -> String {
+    use ac2_proto::model::{IrAlign, IrImportWindow};
+    let rate = format!("{} kHz", f.sample_rate.0 / 1000.0);
+    let samples = if u64::from(f.kept) == f.frames {
+        format!("{} samples", f.frames)
+    } else {
+        format!("{} of {} samples from {}", f.kept, f.frames, f.first)
+    };
+    let window = match f.import.window {
+        IrImportWindow::Whole => "whole file".to_owned(),
+        IrImportWindow::Gate { pre, post } => format!(
+            "gate {} before, {} after the peak",
+            crate::format::ms(pre.0, 1),
+            crate::format::ms(post.0, 1)
+        ),
+    };
+    let align = match f.import.align {
+        IrAlign::Peak => "phase re peak",
+        IrAlign::Start => "phase re file start",
+    };
+    format!(
+        "IR · channel {} of {} · {rate} · {samples} · peak at {} · {window} · {align}",
+        u32::from(f.channel) + 1,
+        f.channels,
+        crate::format::ms(f.peak.0, 3),
+    )
 }
 
 /// A trace's mic and curve, e.g. `MM1 34804 (curve 90° in the columns, file …)`,

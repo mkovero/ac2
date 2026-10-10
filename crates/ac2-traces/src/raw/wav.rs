@@ -123,6 +123,18 @@ fn header(channels: u16, sample_rate: u32, frames: u64, rf64_above: u64) -> [u8;
     h
 }
 
+/// A whole float WAV file in memory: the header [`WavWriter`] writes, then the samples.
+/// Past the 32-bit size limit it is RF64, as a recorded file would be.
+pub fn to_bytes(channels: u16, sample_rate: u32, interleaved: &[f32]) -> Vec<u8> {
+    let frames = (interleaved.len() / usize::from(channels.max(1))) as u64;
+    let mut out = Vec::with_capacity(HEADER_BYTES as usize + interleaved.len() * 4);
+    out.extend_from_slice(&header(channels, sample_rate, frames, RIFF_LIMIT));
+    for v in interleaved {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
 /// Appends interleaved `f32` frames to a new file and finishes its header.
 #[derive(Debug)]
 pub struct WavWriter {
@@ -290,8 +302,8 @@ impl Encoding {
 /// integer PCM file of 16, 24 or 32 bits (what a recorder writes) scaled to the same full
 /// scale, so a recorder's file can be imported ([`super::import_wav`]).
 #[derive(Debug)]
-pub struct WavReader {
-    input: BufReader<File>,
+pub struct WavReader<R = BufReader<File>> {
+    input: R,
     info: WavInfo,
     encoding: Encoding,
     /// Frames read so far.
@@ -318,7 +330,20 @@ impl WavReader {
     pub fn open(path: &Path) -> Result<Self, WavError> {
         let f = File::open(path)?;
         let len = f.metadata()?.len();
-        let mut input = BufReader::with_capacity(WRITE_BUFFER, f);
+        Self::from_reader(BufReader::with_capacity(WRITE_BUFFER, f), len)
+    }
+}
+
+impl<'a> WavReader<io::Cursor<&'a [u8]>> {
+    /// Reads the header of a file held in memory (one sent by a client).
+    pub fn from_bytes(b: &'a [u8]) -> Result<Self, WavError> {
+        Self::from_reader(io::Cursor::new(b), b.len() as u64)
+    }
+}
+
+impl<R: Read + Seek> WavReader<R> {
+    /// Reads the header of the `len`-byte file `input` is at the start of.
+    pub fn from_reader(mut input: R, len: u64) -> Result<Self, WavError> {
         let mut riff = [0u8; 12];
         input.read_exact(&mut riff).map_err(|_| WavError::NotWav)?;
         let rf64 = match &riff[0..4] {
@@ -414,7 +439,7 @@ impl WavReader {
                 _ => {
                     // Chunks are word aligned.
                     let skip = size + (size & 1);
-                    input.seek_relative(i64::try_from(skip).unwrap_or(i64::MAX))?;
+                    input.seek(SeekFrom::Current(i64::try_from(skip).unwrap_or(i64::MAX)))?;
                     at += skip;
                     continue;
                 }

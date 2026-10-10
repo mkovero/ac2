@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 36`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 37`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -102,8 +102,8 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.update` | `trace`, `edit: TraceEdit` (full replacement) | `trace` | |
 | `trace.delete` | `trace` | `ack` | |
 | `trace.average` | `traces`, `method`, `reference`, `name` | `trace` | |
-| `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| auto`, `role: trace \| target`, `content: bin` | `trace` | |
-| `trace.export` | `trace`, `format: ac2_csv` | `export` (`file_name`, `content: bin`) | |
+| `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| ir_wav \| auto`, `role: trace \| target`, `ir: IrImport \| nil`, `content: bin` | `trace` | |
+| `trace.export` | `trace`, `format: ac2_csv \| ir_wav` | `export` (`file_name`, `content: bin`) | |
 | `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
 | `cal.spl_electrical` | `input`, `mic`, `connection: in_line \| injected`, `volts: Volts`, `freq: Hz`, `mic_sensitivity: MvPerPa \| nil`, `uncertainty: Db \| nil`, `replace_acoustic: bool` | `calibration` | |
@@ -250,8 +250,14 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   - `op` (`MathOp`): `divide` (A ÷ B: A relative to B), `multiply` (A × B: the cascade),
     `add` (transfer: the complex sum, what A and B sum to acoustically; levels: the power
     sum `10·lg(10^{a/10} + 10^{b/10})`), `subtract` (transfer: the complex difference;
-    levels: the level difference in dB). Levels take `add` and `subtract` only, and average
-    on `power` only.
+    levels: the level difference in dB). Levels average on `power` only. A level's
+    `multiply` / `divide` is a level through a filter (or with it removed): B is a stored
+    `transfer` trace (a captured transfer function or an imported impulse response) and the
+    result is A ± B's magnitude in dB per column, phase none. On a spectrum B's magnitude is
+    interpolated at each bin; on an RTA each band takes the power mean of B's columns inside
+    the band edges (the gain pink noise sees through the filter; B interpolated at the
+    centre when no column falls inside, NaN outside B's range). B's scale, mic curve and
+    time base do not matter; a live B is `invalid`.
   - `reference` (`MathReference`, tagged by `type`): `operand` {`operand`} = the delay that
     operand was measured with (a live one's newest; kept while it is left out), or `fixed`
     {`delay`}: what the phase of a transfer sum, difference or average is referred to.
@@ -746,22 +752,36 @@ display edits and are never applied to the stored data.
   time base, or with an input without phase, keeps the magnitude only. Spectrum / RTA:
   `power` only, all on one grid. A column is valid only where every input is. The result is
   on the first trace's grid (others resampled).
-- `trace.import`: the file text is parsed by `format` (§7.1) and, unless it is an ac2 CSV
+- `trace.import`: a WAV / RF64 file (`format: ir_wav`, or `auto` on a `RIFF` / `RF64`
+  header) is an impulse response (§7.6); `ir` (`IrImport`) says how to read it and is
+  `invalid` (problem `bad_options`) on a text file or with `role: target`. Otherwise the
+  file text is parsed by `format` (§7.1) and, unless it is an ac2 CSV
   on a known grid, resampled onto a log grid (48 points per octave, 96 when the file is
   denser) — magnitude and coherence linear over log frequency, phase unwrapped first.
   `role: target` keeps the magnitude only and makes `kind: target`. The name is the ac2
   header's `name`, else the file name without extension; `delay` is the ac2 header's
   `delay_ms` (0 for other files). An ac2 sweep export with its analysis facts and impulse
-  response imports as a `sweep` trace. `source.imported` {`file_name`, `format`, `notes`}:
+  response imports as a `sweep` trace. `source.imported` {`file_name`, `format`, `notes`,
+  `ir_file`}:
   `notes` lists what the file held that the trace does not keep (`ImportNote`:
   `sweep_without_analysis` — a v1 sweep export, imported as its transfer function with the
   distortion dropped; `sweep_off_grid` — distortion is never resampled;
   `mic_curve_not_applied` — the export named a mic curve applied after capture, the
-  columns are without it). A refused file is `invalid` with
+  columns are without it; `ir_truncated` — an impulse response longer than 65536 samples,
+  cut around its peak). `ir_file` (`IrFile` \| nil) are the facts of an imported impulse
+  response (§7.6). A refused file is `invalid` with
   `detail: {type: import, line (1-based) | nil, problem: ImportProblem}`.
   `ImportProblem`: `not_text`, `no_data`, `bad_number`, `column_count`, `too_few_columns`,
-  `not_ascending`, `out_of_range`, `too_many_rows` (> 65536), `bad_header`,
-  `bad_coherence`.
+  `not_ascending`, `out_of_range`, `too_many_rows` (> 65536, IR rows too),
+  `bad_header`, `bad_coherence`, `not_wav` (not a readable WAV / RF64 file),
+  `pick_channel` (a multi-channel file without `ir.channel`, or a channel it lacks),
+  `no_impulse` (every sample zero or not finite, fewer than 2), `bad_options` (above, or
+  a gate not finite, `pre` < 0 or `post` ≤ 0).
+- `trace.export` `format: ir_wav`: the trace's impulse response (a transfer trace's `ir`,
+  else a sweep's) as a mono 32-bit float WAV at its sample rate, every stored sample as
+  stored (an imported file's samples come back bit-exact; `file_name` `<name>.wav`). A trace
+  without one, or with one stored decimated (one point per several samples, longer than
+  65536), is `invalid`.
 
 #### Sweep runs (`sweep.run`)
 
@@ -1461,6 +1481,32 @@ its samples as above (integer full scale is ±1.0) with a sidecar of `device.bac
 `buffer_frames` 0, `start` at the import's wall time and session sample 0, no timeline or
 discontinuities, and `end.reason` `stopped`. Calibrations of its replay are keyed by that
 device id, so `cal.spl` on a recorded calibrator tone calibrates it.
+
+### 7.6 Impulse response WAV (`ir_wav`)
+
+A RIFF or RF64 WAVE file: PCM 16, 24 or 32 bit or 32-bit float (`WAVE_FORMAT_EXTENSIBLE`
+too), any sample rate and channel count. One channel is read: `IrImport.channel`
+(0-based; required when the file has several). A file longer than 65536 samples keeps
+65536 from 4096 before the peak of `|h|` (note `ir_truncated`).
+
+`IrImport` {`channel: u16 | nil`, `window`, `align`, `resolution`}, nil = defaults:
+- `window` (`IrImportWindow`, tagged by `type`): `whole` (default: every sample,
+  unwindowed — an exported IR is often windowed already) or `gate` {`pre`, `post`}
+  (seconds before and after the peak; half-Hann rise over `pre`, half-Hann fall over the
+  last tenth of `post`).
+- `align` (`IrAlign`): `peak` (default: time zero is the peak of `|h|`, located between
+  samples on the band-limited interpolant; the trace's `delay` is that time re the file's
+  first sample, and its phase is the response's own, bulk delay removed) or `start` (time
+  zero is the first sample: `delay` 0, the phase carries the file's lead-in).
+- `resolution`: the ten-octave log grid of the trace (default `forty_eighth`).
+
+The result is a `transfer` trace: per column the mean over its edges of the zero-padded
+FFT's interpolant (power for the magnitude, complex for the phase), NaN above Nyquist; no
+coherence. Its `ir` holds every kept sample (`t0` = −the time zero re the first kept
+sample, `dt` = 1/fs) and the Hilbert envelope (ETC). `IrFile` {`sample_rate`, `channels`,
+`channel`, `frames` (the file's), `kept`, `first` (first kept frame), `peak` (seconds re
+the file's first frame), `import` (the `IrImport` used, `channel` filled), `unresolved`
+(`Unresolved`: columns narrower than the window's cell `fs / samples`)}.
 
 ## 8. Cross-language fixtures
 

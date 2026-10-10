@@ -340,6 +340,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
         file_name: "sweep.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
+        ir: None,
         content: Blob(csv.into_bytes()),
     }) {
         ReplyBody::Trace(t) => t,
@@ -613,6 +614,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         file_name: "hall.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
+        ir: None,
         content: Blob(csv.into_bytes()),
     }) {
         ReplyBody::Trace(t) => t,

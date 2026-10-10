@@ -1049,7 +1049,8 @@ async fn trace_commands_json() -> R {
             "type": "imported",
             "file_name": "rew_export.txt",
             "format": "analyzer_text",
-            "notes": []
+            "notes": [],
+            "ir_file": null
         })
     );
     let house = fixture("house_curve.txt");

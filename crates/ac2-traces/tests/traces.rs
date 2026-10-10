@@ -445,6 +445,7 @@ fn a_over_b_of_stored_traces() {
                 file_name: "house_curve.txt".into(),
                 format: ImportFormat::AnalyzerText,
                 notes: vec![],
+                ir_file: None,
             },
             0.0,
             TraceKind::Target,
@@ -926,16 +927,27 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format is refused with its version named, never read
     // best-effort.
-    std::fs::write(&m, text.replace("\"version\": 21", "\"version\": 20")).unwrap();
+    let (now, before) = (session::VERSION, session::VERSION - 1);
+    std::fs::write(
+        &m,
+        text.replace(
+            &format!("\"version\": {now}"),
+            &format!("\"version\": {before}"),
+        ),
+    )
+    .unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 20
+            found: before
         }
     );
-    assert!(e.to_string().contains("reads version 21 only"), "{e}");
+    assert!(
+        e.to_string().contains(&format!("reads version {now} only")),
+        "{e}"
+    );
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))

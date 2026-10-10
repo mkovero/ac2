@@ -750,10 +750,16 @@ def requests():
             26,
             "trace.import",
             {
-                "file_name": "sub.txt",
-                "format": "analyzer_text",
-                "role": "target",
-                "content": b"20 -3.0 10\n",
+                "file_name": "genelec.wav",
+                "format": "ir_wav",
+                "role": "trace",
+                "ir": {
+                    "channel": 1,
+                    "window": {"type": "gate", "pre": 0.001, "post": 0.01},
+                    "align": "peak",
+                    "resolution": "forty_eighth",
+                },
+                "content": b"RIFF",
             },
         ),
         req(

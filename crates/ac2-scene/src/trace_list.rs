@@ -286,6 +286,7 @@ mod tests {
             file_name: "house.txt".into(),
             format: ImportFormat::AnalyzerText,
             notes: vec![],
+            ir_file: None,
         }
     }
 

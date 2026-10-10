@@ -376,6 +376,19 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
     })
 }
 
+/// The math channel puts a level through a filter: a spectrum or RTA `A × B` or `A ÷ B`,
+/// `B` a stored transfer function (`ac2_traces::math::filtered`).
+pub(crate) fn is_filter(c: &MathConfig) -> bool {
+    c.domain != MathDomain::Transfer
+        && matches!(
+            c.expr,
+            MathExpr::Binary {
+                op: MathOp::Divide | MathOp::Multiply,
+                ..
+            }
+        )
+}
+
 /// Whether the expression combines phase across operands, so every operand must be in one
 /// time base: a transfer sum or difference, or a complex or coherence-weighted average.
 pub(crate) fn needs_shared_time_base(c: &MathConfig) -> bool {
@@ -407,6 +420,8 @@ pub(crate) fn combine(
     let n = freqs.len();
     let operands = cfg.expr.operands();
     let shared_needed = needs_shared_time_base(cfg);
+    // A level through a filter: operand 1 is the filter's gain, which has no level scale.
+    let filter = is_filter(cfg);
     let mut states = Vec::with_capacity(operands.len());
     let mut included: Vec<(usize, Value)> = Vec::new();
     for (k, (o, a)) in operands.iter().zip(answers).enumerate() {
@@ -419,8 +434,10 @@ pub(crate) fn combine(
                 // Levels combine only in one scale; phase-combining transfer math only in
                 // one time base (the first included operand's).
                 let first = included.first().map(|(_, f)| f);
+                let is_filter = filter && k == 1;
                 let mismatch = first.is_some_and(|f| {
-                    f.scale != v.scale || (shared_needed && f.time_base != v.time_base)
+                    (f.scale != v.scale && !is_filter)
+                        || (shared_needed && f.time_base != v.time_base)
                 }) || (shared_needed && v.time_base.is_none());
                 if mismatch {
                     OperandStatus::Mismatch
@@ -482,7 +499,14 @@ pub(crate) fn combine(
     let result = if enough {
         match cfg.domain {
             MathDomain::Transfer => math::transfer(combine_how, &inputs, grid, freqs, reference),
-            MathDomain::Spectrum | MathDomain::Rta => math::levels(combine_how, &inputs),
+            MathDomain::Spectrum | MathDomain::Rta => match (combine_how, &inputs[..]) {
+                (Combine::Binary(op), [level, gain]) if filter => math::filtered(
+                    math::Filter::of(op).unwrap_or(math::Filter::Through),
+                    level.columns,
+                    &gain.columns.mag_db,
+                ),
+                _ => math::levels(combine_how, &inputs),
+            },
         }
         .ok()
     } else {
@@ -505,7 +529,12 @@ pub(crate) fn combine(
         phase,
     }));
     let nan = || vec![f32::NAN; n];
-    let mic_curve = !included.is_empty() && included.iter().all(|(_, v)| v.mic_curve);
+    // A filter is no measurement: the result's mic curve is its level's.
+    let mic_curve = !included.is_empty()
+        && included
+            .iter()
+            .filter(|(k, _)| !(filter && *k == 1))
+            .all(|(_, v)| v.mic_curve);
     let first_frame = included.iter().find_map(|(_, v)| v.frame.as_ref());
     let fixed_delay = match reference {
         CoreReference::Fixed(d) => d,

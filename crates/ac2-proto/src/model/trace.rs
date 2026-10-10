@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AverageMethod, CalKey, DelayReference, DepthPolicy, EssSpec, LevelScale, LfHarmonics, MathExpr,
-    MathOp, MicCurveRef, Operand, PhaseBasis, Smoothing, SweepData, TraceIr, TraceOwner,
+    MathOp, MicCurveRef, Operand, PhaseBasis, Resolution, Smoothing, SweepData, TraceIr,
+    TraceOwner, Unresolved,
 };
 use crate::grid::GridId;
 use crate::units::{
@@ -30,8 +31,93 @@ pub enum ImportFormat {
     /// Analyzer text export: columns `freq mag [phase] [coherence]`, separated by commas,
     /// semicolons, tabs or spaces, with optional comment and header lines.
     AnalyzerText,
-    /// ac2 CSV when the file starts with the ac2 header, analyzer text otherwise.
+    /// An impulse response as a WAV / RF64 file: 16-, 24- or 32-bit integer or 32-bit float
+    /// samples at any rate, one channel of it ([`IrImport`]).
+    IrWav,
+    /// A WAV / RF64 impulse response when the file starts with `RIFF` or `RF64`; else ac2
+    /// CSV when it starts with the ac2 header, analyzer text otherwise.
     Auto,
+}
+
+/// How `trace.import` reads an impulse-response WAV file ([`ImportFormat::IrWav`]).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IrImport {
+    /// Channel to read, 0-based; `None` reads a mono file and refuses a multi-channel one
+    /// (`invalid`, [`ImportProblem::PickChannel`]).
+    pub channel: Option<u16>,
+    /// Window the frequency response is computed through.
+    pub window: IrImportWindow,
+    /// Time zero of the phase.
+    pub align: IrAlign,
+    /// Columns per octave of the response (ten octaves around 1 kHz, as a transfer
+    /// measurement's).
+    pub resolution: Resolution,
+}
+
+impl Default for IrImport {
+    fn default() -> Self {
+        Self {
+            channel: None,
+            window: IrImportWindow::Whole,
+            align: IrAlign::Peak,
+            resolution: Resolution::default(),
+        }
+    }
+}
+
+/// The part of an imported impulse response its frequency response is computed from.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum IrImportWindow {
+    /// Every sample as the file has it (an exported IR is often windowed already).
+    Whole,
+    /// `pre` before and `post` after the peak, half-Hann tapered (the rise over `pre`, the
+    /// fall over the last tenth of `post`): keeps later reflections out.
+    Gate {
+        /// Before the peak (≥ 0).
+        pre: Seconds,
+        /// After the peak (> 0).
+        post: Seconds,
+    },
+}
+
+/// Time zero of an imported impulse response's phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IrAlign {
+    /// The peak of |h|, found between samples: the bulk delay is removed and becomes the
+    /// trace's `delay`, so the phase shows the response's own shape.
+    Peak,
+    /// Sample 0 of the file: the phase keeps the whole delay (IRs exported against one
+    /// timing reference keep their relative arrival). The trace's `delay` is 0.
+    Start,
+}
+
+/// What an imported impulse-response file was and how it was read
+/// ([`TraceSource::Imported::ir_file`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IrFile {
+    /// Sample rate of the file.
+    pub sample_rate: Hz,
+    /// Channels in the file.
+    pub channels: u16,
+    /// Channel read, 0-based.
+    pub channel: u16,
+    /// Samples per channel in the file.
+    pub frames: u64,
+    /// Samples kept from `first` on (fewer than `frames` when the file was longer than
+    /// [`TraceIr::MAX_POINTS`]).
+    pub kept: u32,
+    /// First sample kept.
+    pub first: u64,
+    /// Peak of |h|, re the file's first sample.
+    pub peak: Seconds,
+    /// How the response was read.
+    pub import: IrImport,
+    /// Columns finer than the window resolves.
+    pub unresolved: Unresolved,
 }
 
 /// What an imported file becomes.
@@ -74,6 +160,9 @@ pub enum TraceKind {
 pub enum ExportFormat {
     /// ac2 CSV.
     Ac2Csv,
+    /// The trace's impulse response as a mono 32-bit float WAV at its sample rate, every
+    /// stored sample (refused for a trace without one, or one stored decimated).
+    IrWav,
 }
 
 /// Where a trace came from.
@@ -99,6 +188,8 @@ pub enum TraceSource {
         format: ImportFormat,
         /// What the file held that the trace does not keep.
         notes: Vec<ImportNote>,
+        /// An impulse-response file's facts ([`ImportFormat::IrWav`]); `None` for text.
+        ir_file: Option<Box<IrFile>>,
     },
     /// Captured from a math channel: the expression and the operands that went into it.
     Math {
@@ -203,6 +294,9 @@ pub enum ImportNote {
     /// The export showed a mic curve applied afterwards as a display edit; its columns are
     /// as measured, without the curve (apply it again with `trace.mic_curve`).
     MicCurveNotApplied,
+    /// An impulse response longer than [`TraceIr::MAX_POINTS`] samples: that many were
+    /// kept, from shortly before its peak ([`IrFile::first`]).
+    IrTruncated,
 }
 
 /// Display colour, 8-bit sRGB.

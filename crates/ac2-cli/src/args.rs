@@ -1567,7 +1567,9 @@ pub enum TraceCmd {
         #[arg(long, value_name = "TIME", allow_hyphen_values = true)]
         ref_delay: Option<Time>,
     },
-    /// Import a CSV / analyzer text export (freq, mag[, phase][, coherence]).
+    /// Import a CSV / analyzer text export (freq, mag[, phase][, coherence]), or an
+    /// impulse response as a WAV / RF64 file (16/24/32-bit integer or 32-bit float, any
+    /// rate): a transfer trace with the IR and its frequency response.
     Import {
         /// File.
         file: PathBuf,
@@ -1580,14 +1582,40 @@ pub enum TraceCmd {
         /// Name (default: from the file).
         #[arg(long)]
         name: Option<String>,
+        /// IR: the channel of a multi-channel WAV file, 1-based.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(1..))]
+        channel: Option<u16>,
+        /// IR: window the response is computed through, this long after the peak (default:
+        /// the whole file, unwindowed).
+        #[arg(long, value_name = "TIME")]
+        gate: Option<Time>,
+        /// IR: with `--gate`, this long before the peak.
+        #[arg(long, value_name = "TIME", default_value = "1ms", requires = "gate")]
+        gate_pre: Time,
+        /// IR: keep the file's first sample as time zero (the phase keeps the whole delay)
+        /// instead of removing the delay up to the peak.
+        #[arg(long)]
+        keep_delay: bool,
+        /// IR: columns per octave of the response: 1/12, 1/24, 1/48 (default) or 1/96.
+        #[arg(long)]
+        resolution: Option<ResolutionArg>,
     },
-    /// Export a trace.
+    /// Export a trace: its columns as ac2 CSV, or its impulse response as a mono 32-bit
+    /// float WAV (sweeps, transfer captures, imported IRs).
     Export {
         /// Trace id or name.
         trace: MeasRef,
         /// Write ac2 CSV to this file (`-` = stdout).
+        #[arg(
+            long,
+            value_name = "FILE",
+            required_unless_present = "wav",
+            conflicts_with = "wav"
+        )]
+        csv: Option<PathBuf>,
+        /// Write the impulse response as WAV to this file (`-` = stdout).
         #[arg(long, value_name = "FILE")]
-        csv: PathBuf,
+        wav: Option<PathBuf>,
     },
     /// Set a trace's display smoothing (transfer, sweep and spectrum traces): the stored
     /// columns stay as measured, so it can be changed or removed at any time.
@@ -1924,12 +1952,15 @@ pub enum AverageArg {
 /// Import file format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ImportFormatArg {
-    /// ac2 CSV when the file starts with its header, analyzer text otherwise.
+    /// A WAV impulse response when the file is WAV; ac2 CSV when it starts with its
+    /// header; analyzer text otherwise.
     Auto,
     /// ac2 CSV only.
     Ac2,
     /// Analyzer text (REW, Smaart, … exports).
     Text,
+    /// Impulse response, WAV / RF64.
+    Wav,
 }
 
 /// `state …`.

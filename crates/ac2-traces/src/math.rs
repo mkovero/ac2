@@ -35,6 +35,18 @@
 //! `10·lg(10^{a/10} + 10^{b/10})` (incoherent sources adding), the average the power mean.
 //! Ratios and cascades of levels are not defined here: a level difference is `A − B`.
 //!
+//! # A level through a filter
+//!
+//! `level × H` and `level ÷ H`, where `H` is a stored transfer function (an imported
+//! impulse response, a captured transfer function, a target curve), are what a spectrum or
+//! an RTA would read with the signal passed through `H` (or with `H` taken out):
+//! the level plus or minus `20·lg|H|` dB, power times or over `|H|²`. Phase plays no part in
+//! a level. `H` lives on its log grid and is a smooth function of frequency, so it is read
+//! onto the level's columns ([`filter_gain_on_grid`]): interpolated at a spectrum's bins,
+//! over each IEC band of an RTA the power mean across the band's log-spaced columns (the
+//! band power of pink noise through `H` relative to that without it; within one band the
+//! signal's own slope changes this by hundredths of a dB).
+//!
 //! A column has a value only where every operand has one: a gap stays a gap.
 
 use std::f64::consts::TAU;
@@ -122,7 +134,8 @@ impl MathError {
             }
             Self::NotForLevels(op) => format!(
                 "spectra and RTA bands are levels: they take − (level difference) and + \
-                 (power sum), not {}",
+                 (power sum), not {} of two levels (× and ÷ take a stored transfer function \
+                 as B: the level through that filter)",
                 op_symbol(*op)
             ),
             Self::PowerOnly => "spectra and RTA bands average on power only".into(),
@@ -159,6 +172,93 @@ pub fn trace_on_grid(t: &StoredTrace, grid: &GridDef, freqs: &[f64]) -> Columns 
     } else {
         resample(&frequencies(&t.grid), &t.columns, freqs)
     }
+}
+
+/// The magnitude of transfer trace `t` (applied mic curve baked in) as a gain in dB on the
+/// level grid `grid` (`freqs` its columns): over an IEC band the power mean of `|H|²` across
+/// the trace's columns inside the band (interpolated at the centre when none is), elsewhere
+/// `20·lg|H|` interpolated over log frequency. NaN where `t` does not cover the column (a
+/// band reaching past its first or last column, a bin outside it).
+pub fn filter_gain_on_grid(t: &StoredTrace, grid: &GridDef, freqs: &[f64]) -> Vec<f32> {
+    let t = crate::mic::bake(t);
+    let from = frequencies(&t.grid);
+    let point = resample(&from, &t.columns, freqs).mag_db;
+    let GridDef::IecBands { fraction, .. } = grid else {
+        return point;
+    };
+    let (Some(&lo_src), Some(&hi_src)) = (from.first(), from.last()) else {
+        return vec![f32::NAN; freqs.len()];
+    };
+    freqs
+        .iter()
+        .zip(point)
+        .map(|(&fm, at_centre)| {
+            let (lo, hi) = ac2_core::grid::iec_band_edges(fm, fraction.b());
+            if lo < lo_src || hi > hi_src {
+                return f32::NAN;
+            }
+            let inside: Vec<f64> = from
+                .iter()
+                .zip(&t.columns.mag_db)
+                .filter(|(f, _)| (lo..hi).contains(*f))
+                .map(|(_, m)| f64::from(*m))
+                .collect();
+            if inside.is_empty() {
+                return at_centre;
+            }
+            if inside.iter().any(|m| !m.is_finite()) {
+                return f32::NAN;
+            }
+            let p = inside.iter().map(|m| power(*m)).sum::<f64>() / inside.len() as f64;
+            power_db(p) as f32
+        })
+        .collect()
+}
+
+/// What a filter does to a level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Filter {
+    /// `level × H`: the level through `H` (its gain added).
+    Through,
+    /// `level ÷ H`: `H` taken out (its gain subtracted).
+    Out,
+}
+
+impl Filter {
+    /// `×` is through, `÷` out; `+` and `−` are no filter.
+    pub fn of(op: MathOp) -> Option<Self> {
+        match op {
+            MathOp::Multiply => Some(Self::Through),
+            MathOp::Divide => Some(Self::Out),
+            MathOp::Add | MathOp::Subtract => None,
+        }
+    }
+}
+
+/// A level through a filter: `level ± gain` dB per column.
+pub fn filtered(filter: Filter, level: &Columns, gain_db: &[f32]) -> Result<MathResult, MathError> {
+    let sign = match filter {
+        Filter::Through => 1.0,
+        Filter::Out => -1.0,
+    };
+    let mag: Vec<f32> = level
+        .mag_db
+        .iter()
+        .zip(gain_db.iter().chain(std::iter::repeat(&f32::NAN)))
+        .map(|(a, g)| a + sign * g)
+        .collect();
+    if mag.iter().all(|v| v.is_nan()) {
+        return Err(MathError::NoOverlap);
+    }
+    Ok(MathResult {
+        columns: Columns {
+            mag_db: mag,
+            phase_deg: None,
+            coherence: None,
+        },
+        delay: Seconds(0.0),
+        phase: PhaseBasis::NoPhase,
+    })
 }
 
 /// Transfer math on one grid (`freqs`). `reference` is the delay a sum, difference or

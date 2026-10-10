@@ -430,7 +430,7 @@ commands! {
     ToggleSelected => "toggle_selected", "Show / hide the selected curve", [Global];
     TraceSlot => "trace_slot", "Move the selected trace to slot… (1 … 9, none frees its slot)", [Global];
     TraceRename => "trace_rename", "Rename the selected trace…", [Global];
-    TraceExport => "trace_export", "Export the selected trace (ac2 CSV) to a file…", [Global];
+    TraceExport => "trace_export", "Export the selected trace (CSV or IR WAV) to a file…", [Global];
     SelectLive => "select_live", "Deselect the stored trace: keys act on the live measurement again", [Global];
     DeleteSelected => "delete_selected", "Delete selected measurement or trace…", [Global];
     OffsetUp => "offset_up", "Display offset +1 dB of the selected curve", [Global];
@@ -438,7 +438,7 @@ commands! {
     OffsetUpCoarse => "offset_up_coarse", "Display offset +3 dB of the selected curve", [Global];
     OffsetDownCoarse => "offset_down_coarse", "Display offset −3 dB of the selected curve", [Global];
     OffsetClear => "offset_clear", "Display offset of the selected curve back to 0", [Global];
-    ImportTrace => "import_trace", "Import a trace file (CSV / analyzer text)…", [Global];
+    ImportTrace => "import_trace", "Import a trace file (CSV, analyzer text, IR WAV)…", [Global];
     SessionSave => "session_save", "Session: save (name or path)…", [Global];
     SessionLoad => "session_load", "Session: load, disarmed (name or path)…", [Global];
     Reconnect => "reconnect", "Reconnect to the daemon now", [Global];

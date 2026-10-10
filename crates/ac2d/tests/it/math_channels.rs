@@ -493,6 +493,7 @@ fn ratio_edit_capture_and_summation() {
         file_name: "flat.txt".into(),
         format: ImportFormat::AnalyzerText,
         role: ImportRole::Trace,
+        ir: None,
         content: Blob(text.into_bytes()),
     }) {
         ReplyBody::Trace(t) => t,
@@ -577,7 +578,7 @@ fn spectrum_difference_on_the_spectrum_stream() {
         ),
     }));
     assert_eq!(id, MeasId(6));
-    for m in 4..=6 {
+    for m in [1, 4, 5, 6] {
         c.ok(Command::MeasStart { meas: MeasId(m) });
     }
     play(&mut r.d, c, r.tok, 4.0);
@@ -648,5 +649,148 @@ fn spectrum_difference_on_the_spectrum_stream() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
+    r.h.shutdown();
+}
+
+/// A mono float WAV of an impulse of `v` at sample `at`, `len` samples at the rig's rate.
+fn impulse_wav(len: usize, at: usize, v: f32) -> Vec<u8> {
+    let mut h = vec![0.0f32; len];
+    h[at] = v;
+    ac2_traces::raw::wav::to_bytes(1, FS, &h)
+}
+
+#[test]
+fn an_imported_impulse_response_filters_live_measurements() {
+    let mut r = rig("math-ir", &[b"d/1/tf", b"d/4/spec", b"d/5/spec", b"d/6/tf"]);
+    let c = &mut r.c;
+    c.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: "Spectrum 1".into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig::on_input(1),
+            },
+        },
+    });
+    let wav = impulse_wav(4096, 100, 0.5);
+    let ir = match c.ok(Command::TraceImport {
+        file_name: "speaker.wav".into(),
+        format: ImportFormat::Auto,
+        role: ImportRole::Trace,
+        ir: None,
+        content: Blob(wav.clone()),
+    }) {
+        ReplyBody::Trace(t) => t,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(ir.kind, TraceKind::Transfer);
+    assert!((ir.delay.0 - 100.0 / f64::from(FS)).abs() < 1e-9);
+    let TraceSource::Imported {
+        format, ir_file, ..
+    } = &ir.source
+    else {
+        panic!("{:?}", ir.source);
+    };
+    assert_eq!(*format, ImportFormat::IrWav);
+    assert_eq!(ir_file.as_ref().expect("facts").frames, 4096);
+    let h = Operand::Trace { trace: ir.id };
+    // A level trace or a live measurement is no filter.
+    let e = c
+        .call(Command::MeasCreate {
+            config: binary(
+                "x",
+                MathDomain::Spectrum,
+                meas(4),
+                MathOp::Multiply,
+                meas(1),
+            ),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
+    let through = created(c.ok(Command::MeasCreate {
+        config: binary(
+            "Spectrum 1 × speaker",
+            MathDomain::Spectrum,
+            meas(4),
+            MathOp::Multiply,
+            h,
+        ),
+    }));
+    let cascade = created(c.ok(Command::MeasCreate {
+        config: binary(
+            "Seat 1 × speaker",
+            MathDomain::Transfer,
+            meas(1),
+            MathOp::Multiply,
+            h,
+        ),
+    }));
+    assert_eq!((through, cascade), (MeasId(5), MeasId(6)));
+    for m in 4..=6 {
+        c.ok(Command::MeasStart { meas: MeasId(m) });
+    }
+    play(&mut r.d, c, r.tok, 4.0);
+
+    let level = |m: u32| {
+        let f = newest(&r.sub, &r.d, |f| of_meas(f, m));
+        let FrameData::Spec(s) = f.data else {
+            panic!("{f:?}");
+        };
+        s
+    };
+    let (plain, filtered) = (level(4), level(5));
+    assert_eq!(
+        filtered.meta.math.as_ref().expect("math").included(),
+        2,
+        "{:?}",
+        filtered.meta.math
+    );
+    let grid = ac2_proto::BinColumns::new(f64::from(FS), 65_536, 96);
+    let mut diffs: Vec<f32> = grid
+        .centres
+        .iter()
+        .zip(plain.level.iter().zip(&filtered.level))
+        .filter(|(f, (a, b))| (300.0..=5000.0).contains(*f) && a.is_finite() && b.is_finite())
+        .map(|(_, (a, b))| b - a)
+        .collect();
+    assert!(diffs.len() > 100, "{}", diffs.len());
+    diffs.sort_by(f32::total_cmp);
+    let median = diffs[diffs.len() / 2];
+    assert!((median + 6.02).abs() < 0.3, "median {median} dB");
+
+    // The spectrum reads above passed the transfer frames by: fresh ones.
+    play(&mut r.d, c, r.tok, 1.0);
+    let seat = newest(&r.sub, &r.d, |f| of_meas(f, 1));
+    let both = newest(&r.sub, &r.d, |f| of_meas(f, 6));
+    let (a, b) = (tf(&seat), tf(&both));
+    assert_eq!(
+        b.meta.math.as_ref().expect("math").phase,
+        PhaseBasis::OwnAlignments
+    );
+    let mut checked = 0;
+    for i in band(a) {
+        if !(b.mag[i].is_finite() && a.mag[i].is_finite()) {
+            continue;
+        }
+        assert!(
+            (b.mag[i] - a.mag[i] + 6.02).abs() < 0.3,
+            "{} Hz",
+            grid_freq(i)
+        );
+        let dp = (b.phase[i] - a.phase[i] + 540.0).rem_euclid(360.0) - 180.0;
+        assert!(dp.abs() < 5.0, "{} Hz: {dp}°", grid_freq(i));
+        checked += 1;
+    }
+    assert!(checked > 50, "{checked}");
+
+    // Out as it came in.
+    let (file_name, content) = match c.ok(Command::TraceExport {
+        trace: ir.id,
+        format: ac2_proto::model::ExportFormat::IrWav,
+    }) {
+        ReplyBody::Export { file_name, content } => (file_name, content),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(file_name, "speaker.wav");
+    assert_eq!(content.0, wav);
     r.h.shutdown();
 }

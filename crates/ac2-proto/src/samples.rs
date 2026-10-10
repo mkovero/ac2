@@ -255,14 +255,23 @@ pub fn commands() -> Vec<Command> {
             name: "avg".into(),
         },
         Command::TraceImport {
-            file_name: "sub.txt".into(),
-            format: ImportFormat::AnalyzerText,
-            role: ImportRole::Target,
-            content: Blob(b"20 -3.0 10\n".to_vec()),
+            file_name: "genelec.wav".into(),
+            format: ImportFormat::IrWav,
+            role: ImportRole::Trace,
+            ir: Some(IrImport {
+                channel: Some(1),
+                window: IrImportWindow::Gate {
+                    pre: Seconds(0.001),
+                    post: Seconds(0.01),
+                },
+                align: IrAlign::Peak,
+                resolution: Resolution::FortyEighth,
+            }),
+            content: Blob(b"RIFF".to_vec()),
         },
         Command::TraceExport {
-            trace: TraceId(7),
-            format: ExportFormat::Ac2Csv,
+            trace: TraceId(8),
+            format: ExportFormat::IrWav,
         },
         Command::CalSpl {
             input: 1,
@@ -651,7 +660,21 @@ fn imported_trace_meta() -> TraceMeta {
         source: TraceSource::Imported {
             file_name: "sweep1.csv".into(),
             format: ImportFormat::Ac2Csv,
-            notes: vec![ImportNote::SweepWithoutAnalysis],
+            notes: vec![ImportNote::SweepWithoutAnalysis, ImportNote::IrTruncated],
+            ir_file: Some(Box::new(IrFile {
+                sample_rate: Hz(48_000.0),
+                channels: 2,
+                channel: 1,
+                frames: 200_000,
+                kept: TraceIr::MAX_POINTS,
+                first: 1_200,
+                peak: Seconds(0.026),
+                import: IrImport::default(),
+                unresolved: Unresolved {
+                    resolution: Resolution::FortyEighth,
+                    ranges: Vec::new(),
+                },
+            })),
         },
         delay: Seconds(0.003_25),
         depth: None,

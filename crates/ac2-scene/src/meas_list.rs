@@ -1085,6 +1085,7 @@ pub(crate) mod tests {
                         file_name: "1083 94cm.txt".into(),
                         format: ImportFormat::AnalyzerText,
                         notes: vec![],
+                        ir_file: None,
                     },
                 ),
             ],

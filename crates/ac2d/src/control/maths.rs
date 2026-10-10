@@ -19,7 +19,7 @@ use ac2_traces::columns::frequencies;
 use ac2_traces::math::trace_on_grid;
 
 use super::{Control, static_grid};
-use crate::jobs::math::{Grids, Held, needs_shared_time_base};
+use crate::jobs::math::{Grids, Held, is_filter, needs_shared_time_base};
 use crate::util::perr;
 
 /// A stored operand's columns, or `None` for a live one.
@@ -29,6 +29,10 @@ fn invalid(m: impl Into<String>) -> ProtoError {
     perr(ErrorCode::Invalid, m.into())
 }
 
+const LEVEL_RATIO: &str = "spectra and RTA bands are levels: they take − (level difference) \
+    and + (power sum) of two levels; × and ÷ put a level through a filter, B a stored transfer \
+    function (an imported impulse response, a captured transfer function)";
+
 /// Checks of a math channel's configuration that need no other entity.
 pub(super) fn validate(c: &MathConfig) -> Result<(), ProtoError> {
     let operands = c.expr.operands();
@@ -37,11 +41,13 @@ pub(super) fn validate(c: &MathConfig) -> Result<(), ProtoError> {
             if a == b {
                 return Err(invalid("A and B are the same operand"));
             }
-            if c.domain != MathDomain::Transfer && matches!(op, MathOp::Divide | MathOp::Multiply) {
-                return Err(invalid(
-                    "spectra and RTA bands are levels: they take − (level difference) and + \
-                     (power sum); ÷ and × are for transfer functions",
-                ));
+            // × and ÷ of levels take a stored transfer function as B (a filter); whether B
+            // is one is checked against the state (`check_operands`).
+            if c.domain != MathDomain::Transfer
+                && matches!(op, MathOp::Divide | MathOp::Multiply)
+                && !matches!(b, Operand::Trace { .. })
+            {
+                return Err(invalid(LEVEL_RATIO));
             }
         }
         MathExpr::Average { of, method } => {
@@ -136,7 +142,8 @@ pub(super) fn check_operands(
             ..
         }
     );
-    for o in c.expr.operands() {
+    let filter = is_filter(c);
+    for (k, o) in c.expr.operands().into_iter().enumerate() {
         match o {
             Operand::Meas { meas } => {
                 if Some(meas) == own {
@@ -179,6 +186,13 @@ pub(super) fn check_operands(
                 let (t, g) = (l.trace)(trace)
                     .ok_or_else(|| perr(ErrorCode::NotFound, format!("no trace {trace}")))?;
                 let name = &t.edit.name;
+                if filter && k == 1 {
+                    // The filter: any stored transfer function, on its own grid.
+                    if trace_domain(t.kind) != Some(MathDomain::Transfer) {
+                        return Err(invalid(format!("{name}: {LEVEL_RATIO}")));
+                    }
+                    continue;
+                }
                 if trace_domain(t.kind) != Some(c.domain) {
                     return Err(invalid(format!(
                         "{name} is not one of the {want} this math channel combines"
@@ -345,6 +359,22 @@ impl Control {
                 continue;
             };
             let t = self.stored(*trace)?;
+            if is_filter(c) && operands.get(1) == Some(o) {
+                // The filter's gain on the level's columns; it has no level scale.
+                let mag_db = ac2_traces::math::filter_gain_on_grid(&t, &grid, &freqs);
+                stored.push(Some(Arc::new(Held {
+                    columns: ac2_traces::Columns {
+                        mag_db,
+                        phase_deg: None,
+                        coherence: None,
+                    },
+                    delay: 0.0,
+                    time_base: None,
+                    scale: None,
+                    mic_curve: false,
+                })));
+                continue;
+            }
             if c.domain != MathDomain::Transfer && t.grid != grid {
                 return Err(invalid(format!(
                     "{} is on another bin grid or band layout than the live operands (band \

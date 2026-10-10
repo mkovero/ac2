@@ -105,6 +105,14 @@ fn operators(domain: MathDomain) -> Vec<(&'static str, Choice)> {
         MathDomain::Spectrum | MathDomain::Rta => vec![
             ("−  level difference (dB)", Choice::Binary(MathOp::Subtract)),
             ("+  power sum", Choice::Binary(MathOp::Add)),
+            (
+                "×  through B (a stored transfer function or IR)",
+                Choice::Binary(MathOp::Multiply),
+            ),
+            (
+                "÷  B removed (a stored transfer function or IR)",
+                Choice::Binary(MathOp::Divide),
+            ),
             ("average of several (power)", Choice::Average),
         ],
     }
@@ -183,11 +191,20 @@ impl MathForm {
         o.and_then(|o| self.find(o)).map(|c| c.domain)
     }
 
-    /// B's choices: the other candidates of A's kind.
-    fn bs(&self, domain: MathDomain, a: Option<Operand>) -> Vec<&Candidate> {
+    /// B's choices: the other candidates of A's kind; for a level through (or with removed)
+    /// a filter, the stored transfer traces, whose magnitude is that filter's gain.
+    fn bs(&self, domain: MathDomain, choice: Choice, a: Option<Operand>) -> Vec<&Candidate> {
+        let filter = domain != MathDomain::Transfer
+            && matches!(choice, Choice::Binary(MathOp::Multiply | MathOp::Divide));
         self.candidates
             .iter()
-            .filter(|c| c.domain == domain && Some(c.operand) != a)
+            .filter(|c| {
+                if filter {
+                    c.domain == MathDomain::Transfer && matches!(c.operand, Operand::Trace { .. })
+                } else {
+                    c.domain == domain && Some(c.operand) != a
+                }
+            })
             .collect()
     }
 
@@ -226,7 +243,7 @@ impl Form {
         let picks = Picks {
             domain: a.domain,
             a: Some(a.operand),
-            choice: Choice::Binary(MathOp::Divide),
+            choice: operators(a.domain)[0].1,
             b,
             of: Vec::new(),
             method: AverageMethod::Power,
@@ -332,7 +349,7 @@ impl Form {
             .and_then(|(i, _)| ops.get(i).map(|o| o.1))
             .unwrap_or(Choice::Binary(MathOp::Divide));
         let b = choice_of(FieldId::OperandB)
-            .and_then(|(i, _)| m.bs(domain, a).get(i).map(|c| c.operand));
+            .and_then(|(i, _)| m.bs(domain, choice, a).get(i).map(|c| c.operand));
         let in_expr: Vec<Operand> = match choice {
             Choice::Binary(_) => [a, b].into_iter().flatten().collect(),
             Choice::Average => of.clone(),
@@ -366,8 +383,11 @@ impl Form {
         // A changed to another kind takes that kind.
         let domain = m.domain_of(p.a).unwrap_or(p.domain);
         let ops = operators(domain);
-        if !ops.iter().any(|o| o.1 == p.choice) {
+        // Another kind starts at its first operator: ÷ of two transfer functions is not a
+        // level with a filter removed.
+        if domain != p.domain || !ops.iter().any(|o| o.1 == p.choice) {
             p.choice = ops[0].1;
+            p.domain = domain;
         }
         let mut fields = Vec::new();
         let entering_average = !self
@@ -394,7 +414,7 @@ impl Form {
                     ai,
                 ));
                 fields.push(op_field);
-                let bs = m.bs(domain, p.a);
+                let bs = m.bs(domain, p.choice, p.a);
                 let bi =
                     p.b.and_then(|b| bs.iter().position(|c| c.operand == b))
                         .unwrap_or(0);
@@ -406,7 +426,14 @@ impl Form {
                     bi,
                 );
                 if bs.is_empty() {
-                    b.hint = "nothing of A's kind to combine with".into();
+                    b.hint = if domain != MathDomain::Transfer
+                        && matches!(p.choice, Choice::Binary(MathOp::Multiply | MathOp::Divide))
+                    {
+                        "no stored transfer trace: import an IR or capture a transfer function"
+                    } else {
+                        "nothing of A's kind to combine with"
+                    }
+                    .into();
                 }
                 fields.push(b);
             }
@@ -587,7 +614,11 @@ impl Form {
             return false;
         };
         let list: Vec<Operand> = match id {
-            FieldId::OperandB => m.bs(p.domain, p.a).iter().map(|c| c.operand).collect(),
+            FieldId::OperandB => m
+                .bs(p.domain, p.choice, p.a)
+                .iter()
+                .map(|c| c.operand)
+                .collect(),
             _ => m.candidates.iter().map(|c| c.operand).collect(),
         };
         let Some(i) = list.iter().position(|x| *x == o) else {
@@ -775,5 +806,47 @@ mod tests {
         let got = f.math_config().unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(got.name, "Main + Sub");
         assert_eq!(got.kind, MeasKind::Math { config: c });
+    }
+
+    /// A spectrum × or ÷ takes B among the stored transfer traces (a speaker's IR): a level
+    /// through a filter, or with it removed.
+    #[test]
+    fn a_level_goes_through_a_stored_transfer_trace() {
+        let mut cands = candidates();
+        cands.push(Candidate {
+            operand: Operand::Trace { trace: TraceId(7) },
+            name: "speaker".into(),
+            label: "speaker (stored)".into(),
+            domain: MathDomain::Transfer,
+        });
+        let mut f = Form::math(
+            cands,
+            Some(Operand::Meas { meas: MeasId(3) }),
+            TraceOwner::Imported,
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        focus(&mut f, FieldId::Operator);
+        f.cycle(2);
+        let c = math_of(&f);
+        assert_eq!(c.domain, MathDomain::Spectrum);
+        assert_eq!(
+            c.expr,
+            MathExpr::Binary {
+                a: Operand::Meas { meas: MeasId(3) },
+                op: MathOp::Multiply,
+                b: Operand::Trace { trace: TraceId(7) },
+            }
+        );
+        assert_eq!(f.text(FieldId::Name), "Spec 1 × speaker");
+        // A live transfer function is no filter: B offers the stored one only.
+        assert!(!f.pick_operand(FieldId::OperandB, Operand::Meas { meas: MeasId(1) }));
+        f.cycle(1);
+        assert!(matches!(
+            math_of(&f).expr,
+            MathExpr::Binary {
+                op: MathOp::Divide,
+                ..
+            }
+        ));
     }
 }

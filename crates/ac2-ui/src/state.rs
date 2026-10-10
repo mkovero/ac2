@@ -596,11 +596,15 @@ impl PromptKind {
             }
             PromptKind::TraceRename(_) => "New name for the selected trace",
             PromptKind::TraceExport(_) => {
-                "Export the selected trace as ac2 CSV to (file path; a folder takes the trace's name)"
+                "Export the selected trace to (file path: .wav writes its impulse response, \
+                 anything else ac2 CSV; a folder takes the trace's name)"
             }
             PromptKind::Delay(_) => "Delay (ms)",
             PromptKind::ImportFile(ImportRole::Target) => "Target curve file (path)",
-            PromptKind::ImportFile(ImportRole::Trace) => "Trace file to import (path)",
+            PromptKind::ImportFile(ImportRole::Trace) => {
+                "Trace file to import: CSV, analyzer text or a WAV impulse response (path; \
+                 channel N of a WAV: path #N)"
+            }
             PromptKind::SessionSave => "Save session as (name or path)",
             PromptKind::SessionLoad => "Load session, disarmed (name or path)",
             PromptKind::ReplayRecording => "Replay recording (name or path of its .wav)",

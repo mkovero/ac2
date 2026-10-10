@@ -149,7 +149,30 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
             target,
             format,
             name,
+            channel,
+            gate,
+            gate_pre,
+            keep_delay,
+            resolution,
         } => {
+            let ir_given =
+                channel.is_some() || gate.is_some() || *keep_delay || resolution.is_some();
+            let ir = ir_given.then(|| IrImport {
+                channel: channel.map(|c| c - 1),
+                window: match gate {
+                    Some(post) => IrImportWindow::Gate {
+                        pre: gate_pre.0,
+                        post: post.0,
+                    },
+                    None => IrImportWindow::Whole,
+                },
+                align: if *keep_delay {
+                    IrAlign::Start
+                } else {
+                    IrAlign::Peak
+                },
+                resolution: resolution.map_or_else(Default::default, |r| r.0),
+            });
             let content = std::fs::read(file)
                 .map_err(|e| CliError::Usage(format!("cannot read {}: {e}", file.display())))?;
             let file_name = file.file_name().map_or_else(
@@ -163,12 +186,14 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
                         ImportFormatArg::Auto => ImportFormat::Auto,
                         ImportFormatArg::Ac2 => ImportFormat::Ac2Csv,
                         ImportFormatArg::Text => ImportFormat::AnalyzerText,
+                        ImportFormatArg::Wav => ImportFormat::IrWav,
                     },
                     role: if *target {
                         ImportRole::Target
                     } else {
                         ImportRole::Trace
                     },
+                    ir,
                     content: Blob(content),
                 })
                 .await?;
@@ -181,7 +206,11 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
             }
             out.emit(&t, || {
                 let mut s = output::traces(std::slice::from_ref(&t));
-                if let TraceSource::Imported { notes, .. } = &t.source {
+                if let TraceSource::Imported { notes, ir_file, .. } = &t.source {
+                    if let Some(f) = ir_file {
+                        s.push('\n');
+                        s.push_str(&ac2_scene::trace::ir_file_text(f));
+                    }
                     for n in notes {
                         s.push_str("\nnote: ");
                         s.push_str(ac2_scene::trace::import_note(*n));
@@ -190,29 +219,34 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
                 s
             })?;
         }
-        TraceCmd::Export { trace, csv } => {
+        TraceCmd::Export { trace, csv, wav } => {
             let s = state(&c).await?;
             let t = find_trace(&s, trace)?;
+            let (format, path) = match (csv, wav) {
+                (_, Some(w)) => (ExportFormat::IrWav, w),
+                (Some(p), None) => (ExportFormat::Ac2Csv, p),
+                (None, None) => return Err(CliError::Usage("--csv FILE or --wav FILE".into())),
+            };
             let r = c
                 .call(Command::TraceExport {
                     trace: t.id,
-                    format: ExportFormat::Ac2Csv,
+                    format,
                 })
                 .await?;
             let (file_name, content) = expect_body!(
                 "trace.export", r, ReplyBody::Export { file_name, content } => (file_name, content)
             )?;
-            if csv.as_os_str() == "-" {
-                // The CSV itself is the output; nothing else may be mixed in.
+            if path.as_os_str() == "-" {
+                // The file itself is the output; nothing else may be mixed in.
                 out.w.write_all(&content.0)?;
                 out.w.flush()?;
                 return Ok(());
             }
-            std::fs::write(csv, &content.0)?;
+            std::fs::write(path, &content.0)?;
             let n = content.0.len();
             out.emit(
-                &json!({ "trace": t.id, "file": csv, "bytes": n, "suggested_name": file_name }),
-                || format!("wrote {} ({n} bytes)", csv.display()),
+                &json!({ "trace": t.id, "file": path, "bytes": n, "suggested_name": file_name }),
+                || format!("wrote {} ({n} bytes)", path.display()),
             )?;
         }
         TraceCmd::Smooth {

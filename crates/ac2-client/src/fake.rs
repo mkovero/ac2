@@ -1000,6 +1000,7 @@ impl Shared {
                         for t in owned {
                             self.traces.data.remove(&t.id);
                             self.traces.sweeps.remove(&t.id);
+                            self.traces.irs.remove(&t.id);
                             self.commit(Change::Trace(Patch::Deleted(t.id)));
                         }
                     }
@@ -1122,9 +1123,10 @@ impl Shared {
                 file_name,
                 format,
                 role,
+                ir,
                 content,
-            } => self.trace_import(file_name, format, role, &content.0)?,
-            C::TraceExport { trace, .. } => self.trace_export(trace)?,
+            } => self.trace_import(file_name, format, role, ir, &content.0)?,
+            C::TraceExport { trace, format } => self.trace_export(trace, format)?,
             C::TraceMicCurve { trace, curve } => self.trace_mic_curve(trace, curve)?,
             C::FileSave { session } => self.file_save(&session)?,
             C::FileLoad { session } => self.file_load(client, &session)?,

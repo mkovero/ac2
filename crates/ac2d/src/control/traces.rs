@@ -10,10 +10,10 @@ use ac2_core::mic_curve::Correction;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::frame::{Frame, MathState, OperandStatus};
 use ac2_proto::model::{
-    AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, MathConfig,
-    MathExpr, MeasKind, Measurement, MicCurveId, MicCurveRef, MicState, NamedOperand, Operand,
-    Smoothing, SmoothingMode, SweepData, TraceEdit, TraceIr, TraceKind, TraceMeta, TraceMicCurve,
-    TraceOwner, TraceSource, TransferIr,
+    AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, IrImport,
+    MathConfig, MathExpr, MeasKind, Measurement, MicCurveId, MicCurveRef, MicState, NamedOperand,
+    Operand, Smoothing, SmoothingMode, SweepData, TraceEdit, TraceIr, TraceKind, TraceMeta,
+    TraceMicCurve, TraceOwner, TraceSource, TransferIr,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -595,9 +595,10 @@ impl Control {
         file_name: String,
         format: ImportFormat,
         role: ImportRole,
+        ir: Option<IrImport>,
         content: &[u8],
     ) -> Result<ReplyBody, ProtoError> {
-        let imp = text::import(content, format, role).map_err(import_err)?;
+        let imp = ac2_traces::import_file(content, format, role, ir).map_err(import_err)?;
         let name = imp.name.clone().unwrap_or_else(|| {
             std::path::Path::new(&file_name)
                 .file_stem()
@@ -618,6 +619,7 @@ impl Control {
                 file_name,
                 format: imp.format,
                 notes: imp.notes,
+                ir_file: imp.ir_file,
             },
             grid_id: imp.grid.id(),
             delay: imp.delay.unwrap_or(Seconds(0.0)),
@@ -723,6 +725,14 @@ impl Control {
                 file_name: meta::file_name(&t.meta.edit.name, "csv"),
                 content: ac2_proto::units::Blob(text::export_csv(&t).into_bytes()),
             }),
+            ExportFormat::IrWav => {
+                let wav = ac2_traces::ir_wav::export(&t)
+                    .map_err(|e| perr(ErrorCode::Invalid, format!("{}: {e}", t.meta.edit.name)))?;
+                Ok(ReplyBody::Export {
+                    file_name: meta::file_name(&t.meta.edit.name, "wav"),
+                    content: ac2_proto::units::Blob(wav),
+                })
+            }
         }
     }
 }
