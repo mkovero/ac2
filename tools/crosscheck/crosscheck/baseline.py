@@ -27,6 +27,11 @@ RANK = {"PASS": 0, "INFO": 0, "INCONCLUSIVE": 1, "WARN": 2, "FAIL": 3}
 # a value is held to its baseline only where both runs judged it: an INFO value is context and
 # an INCONCLUSIVE one is a bound or rests on noise wider than its pass limit
 JUDGED = {"PASS", "WARN", "FAIL"}
+# A host stage needs no rig (it runs the analysers offline on files), so a run of it is one
+# stage whatever paths its checks carry (the OSM stage's paths are its cases), it plays nothing
+# (no level), and its baseline lives under `baselines/host/`.
+HOST_STAGES = {"osm"}
+HOST_DIR = "host"
 
 
 # ------------------------------------------------------------------ keys
@@ -82,17 +87,32 @@ def load_results(run_dir: Path) -> dict:
 
 
 # ------------------------------------------------------------------ stages and levels
+def host_stage(results: dict) -> str | None:
+    st = (results.get("manifest") or {}).get("stage")
+    return st if st in HOST_STAGES else None
+
+
+def stage_of(results: dict, c: dict) -> str:
+    return host_stage(results) or c["path"]
+
+
 def stages_of(results: dict) -> list[str]:
     seen = []
     for c in results.get("checks", []):
-        if c["path"] not in seen:
-            seen.append(c["path"])
+        st = stage_of(results, c)
+        if st not in seen:
+            seen.append(st)
     return seen
+
+
+def baseline_rig(results: dict) -> str | None:
+    """The baseline directory's name: the rig, or `host` for a stage that needs none."""
+    return HOST_DIR if host_stage(results) else (results.get("manifest") or {}).get("rig")
 
 
 def stage_level(results: dict, stage: str) -> float | None:
     """The digital level a stage played at; None for a silent stage (ambient) or unknown."""
-    if stage == "ambient":
+    if stage == "ambient" or stage in HOST_STAGES:
         return None
     man = results.get("manifest") or {}
     flags = man.get("flags") or {}
@@ -125,7 +145,7 @@ def make_baseline(results: dict, stage: str, run_id: str) -> dict:
     man = results.get("manifest") or {}
     checks = {}
     for c in results["checks"]:
-        if c["path"] != stage:
+        if stage_of(results, c) != stage:
             continue
         e = {"status": c["status"], "value": _num(c["value"]), "unit": c["unit"],
              "tol": [_num(t) for t in c["tol"]] if c.get("tol") else None}
@@ -137,7 +157,8 @@ def make_baseline(results: dict, stage: str, run_id: str) -> dict:
         summary[e["status"]] = summary.get(e["status"], 0) + 1
     return {"schema": SCHEMA, "rig": man.get("rig"), "stage": stage, "level_dbfs": stage_level(results, stage),
             "provenance": {"run": run_id, "started": man.get("started"), "ac2_build": man.get("ac2_version"),
-                           "rew_version": man.get("rew_version"), "flags": man.get("flags"),
+                           "rew_version": man.get("rew_version"), "osm_version": man.get("osm_version"),
+                           "flags": man.get("flags"),
                            "suite_commit": man.get("suite_commit")},
             "summary": summary, "checks": dict(sorted(checks.items()))}
 
@@ -244,6 +265,12 @@ def _d(r: dict) -> str:
     return f"{r['delta']:+.4g} {u} (step {r['step']:g})"
 
 
+def _tools(p: dict) -> str:
+    """The reference tool(s) a run used, from its provenance."""
+    t = [f"{name} {p[k]}" for name, k in (("REW", "rew_version"), ("OSM", "osm_version")) if p.get(k)]
+    return ", ".join(t) or "no reference tool recorded"
+
+
 def _lvl(x):
     return "silent" if x is None else f"{x:g} dBFS"
 
@@ -259,8 +286,8 @@ def render(blocks: list[dict]) -> str:
         bp, cp = b["base"]["provenance"], b["cur"]["provenance"]
         d = b["diff"]
         out += [f"- baseline: `{b['file']}` — run {bp.get('run')}, ac2 {bp.get('ac2_build')}, "
-                f"REW {bp.get('rew_version')}",
-                f"- this run: {cp.get('run')}, ac2 {cp.get('ac2_build')}, REW {cp.get('rew_version')}",
+                f"{_tools(bp)}",
+                f"- this run: {cp.get('run')}, ac2 {cp.get('ac2_build')}, {_tools(cp)}",
                 f"- builds: {bp.get('ac2_build')} → {cp.get('ac2_build')}",
                 f"- matched {d['matched']}; worse {len(d['worse'])}, better {len(d['better'])}, "
                 f"moved {len(d['moved'])} (+{len(d['drift'])} unjudged), new {len(d['new'])}, "
@@ -316,7 +343,8 @@ def _tolerances(path: Path | None) -> dict:
 
 
 def find_baseline(where: Path, rig: str | None, stage: str, level: float | None) -> Path | None:
-    """`where` is a baseline file or a directory holding <rig>/<stage>-<level>.json."""
+    """`where` is a baseline file or a directory holding <rig>/<stage>-<level>.json
+    (host/<stage>.json for a host stage)."""
     where = Path(where)
     if where.is_file():
         return where
@@ -331,7 +359,7 @@ def compare(run_dir: Path, where: Path | None = None, tolerances: Path | None = 
     run_dir = Path(run_dir)
     res = load_results(run_dir)
     tol = _tolerances(tolerances)
-    rig = (res.get("manifest") or {}).get("rig")
+    rig = baseline_rig(res)
     where = Path(where) if where else BASELINES
     blocks = []
     for st in stages or stages_of(res):
@@ -367,21 +395,21 @@ def write_baselines(run_dir: Path, where: Path | None = None, stages: list[str] 
     run_dir = Path(run_dir)
     res = load_results(run_dir)
     tol = _tolerances(tolerances)
-    rig = (res.get("manifest") or {}).get("rig")
+    rig = baseline_rig(res)
     if not rig:
         raise ValueError(f"{run_dir}: no rig in the manifest (fixtures cannot be a baseline)")
     want = stages or stages_of(res)
     unknown = [s for s in want if s not in stages_of(res)]
     if unknown:
         raise ValueError(f"{run_dir}: no checks for stage(s) {', '.join(unknown)}")
-    fails = [c["key"] for c in res["checks"] if c["path"] in want and c["status"] == "FAIL"]
+    fails = [c["key"] for c in res["checks"] if stage_of(res, c) in want and c["status"] == "FAIL"]
     if fails and not force:
         raise ValueError(f"{run_dir}: {len(fails)} FAIL(s), e.g. {fails[0]}; review the run, or pass --force")
     root = Path(where) if where else BASELINES
     lines, written = [], []
     for st in want:
         lvl = stage_level(res, st)
-        if st != "ambient" and lvl is None:
+        if st != "ambient" and st not in HOST_STAGES and lvl is None:
             raise ValueError(f"{run_dir}: stage {st} has no level in the manifest")
         b = make_baseline(res, st, run_dir.name)
         p = baseline_path(root, rig, st, lvl)

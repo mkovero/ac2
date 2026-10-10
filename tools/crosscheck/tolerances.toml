@@ -113,4 +113,5 @@ dB = 0.02
 "°" = 0.1
 rel = 0.02                  # group delay vs truth, relative: 2 %
 "µs" = 0.2
+samples = 0.01              # delay finders and phase slopes: a tenth of ac2's stated 0.1-sample finder
 "" = 0.01                   # coherence share, D50

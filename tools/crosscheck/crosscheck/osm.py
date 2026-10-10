@@ -609,6 +609,18 @@ def runs_dir() -> Path:
     return HERE / "runs"
 
 
+def suite_commit() -> str | None:
+    """The commit the suite ran from, for the baseline's provenance (None outside a checkout)."""
+    if os.environ.get("CROSSCHECK_SUITE_COMMIT"):
+        return os.environ["CROSSCHECK_SUITE_COMMIT"]
+    try:
+        r = subprocess.run(["git", "-C", str(HERE), "rev-parse", "--short=12", "HEAD"], capture_output=True,
+                           text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.strip() or None
+
+
 def run_stage(out: Path, cfg_path: Path | None = None, tolerances: dict | None = None, cases: list[str] | None = None,
               recordings: bool = True, plots: bool = True) -> tuple[int, dict | None, str]:
     """Runs the stage into `out`; returns (exit code, results or None, a line for the user).
@@ -628,7 +640,8 @@ def run_stage(out: Path, cfg_path: Path | None = None, tolerances: dict | None =
     stage_rows = {}
     ver = subprocess.run([str(bin_dir / "ac2d"), "--version"], capture_output=True, text=True).stdout.strip()
     manifest = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "rig": "none (offline)",
-                "ac2_version": ver, "flags": {"harness": str(harness), "cases": want}}
+                "stage": "osm", "ac2_version": ver, "osm_version": None, "suite_commit": suite_commit(),
+                "flags": {"harness": str(harness), "cases": want}}
     with tempfile.TemporaryDirectory(prefix="xc-osm-") as tmp, private_daemon(bin_dir, Path(tmp)) as (ac2, recdir):
         jobs: list[tuple[str, Path, osm_fixtures.Case | None, dict, bool]] = []
         for cname in want:
@@ -655,6 +668,7 @@ def run_stage(out: Path, cfg_path: Path | None = None, tolerances: dict | None =
                     raw = run_harness(harness, d / "pair.wav", d / "osm-raw.json", s)
                     s["osm_delay"] = int(raw.get("estimated") or 0)
                 osm = run_harness(harness, d / "pair.wav", d / "osm.json", s)
+                manifest["osm_version"] = manifest["osm_version"] or osm.get("version")
                 an.rows["settings"].append([
                     name,
                     f"FFT{s['fft']} {s['window']}, FIFO {s['osm_average']} ticks (hop {osm['harness']['hop']})"

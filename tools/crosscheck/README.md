@@ -291,12 +291,15 @@ calibration mapping, one table of checks per group, the data tables and the plot
 
 `baselines/<rig>/<stage>-<level>dbfs.json` (`ambient.json` for the silent stage) hold a
 reviewed run's verdict and value for every check, its limits, and where it came from (run,
-date, ac2 build, REW version, flags, suite commit). Tables, plots and audio stay in the run.
+date, ac2 build, REW or OSM version, flags, suite commit). Tables, plots and audio stay in the run.
+The OSM stage needs no rig: its run is one stage (all cases together) with no level, and its
+baseline is `baselines/host/osm.json`.
 
 ```
 python -m crosscheck compare runs/<UTC time>                 # against baselines/, every stage
 python -m crosscheck compare runs/<UTC time> --baseline f.json
 python -m crosscheck baseline runs/<UTC time> [--stage xone]  # write / update from a run
+python -m crosscheck compare runs/osm-<UTC time>             # an OSM run against baselines/host/osm.json
 ```
 
 - **Matching**: a check's key is its id with the tone frequency replaced by the one the sine

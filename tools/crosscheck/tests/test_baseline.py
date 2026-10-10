@@ -143,3 +143,43 @@ def test_real_runs_share_tone_keys():
     assert "xone.sine_mag.REW offline@50Hz" in ka & kb
     assert "xone.h2.ac2 sweep 10Hz-5.5s@100Hz" in ka & kb
     assert not any(k.endswith(("@51.275Hz", "@47.8Hz", "@97.05Hz", "@101.3Hz")) for k in ka | kb)
+
+
+def osm_results(checks):
+    return {"source": "x", "fixture": False, "summary": {},
+            "manifest": {"rig": "none (offline)", "stage": "osm", "started": "2026-10-10T03:39:20Z",
+                         "ac2_version": "ac2d 0.0.0 (build 0.0.0+abc)", "osm_version": "v1.5.2 Open Sound Meter",
+                         "flags": {"cases": ["identity", "delay48"]}},
+            "checks": checks, "tables": {}, "notes": []}
+
+
+def test_osm_run_is_one_host_stage(tmp_path):
+    root = tmp_path / "baselines"
+    r = osm_results([chk("osm.identity.ac2_tf_h_vs_analytic", "osm identity", 0.0, path="identity"),
+                     chk("osm.delay48.ac2_delay_finder_vs_analytic", "osm delay48", 0.0, unit="samples",
+                         tol=(0.05, 0.5), path="delay48"),
+                     chk("osm.delay48.uncompensated_ac2_phase_slope", "osm delay48", -0.32, status="INFO",
+                         unit="samples", tol=None, path="delay48")])
+    d = write_run(tmp_path, "osm-a", r)
+    res = B.load_results(d)
+    assert B.stages_of(res) == ["osm"] and B.stage_level(res, "osm") is None
+    lines, written = B.write_baselines(d, root)
+    assert written == [root / "host" / "osm.json"]
+    b = json.loads(written[0].read_text())
+    assert b["stage"] == "osm" and b["level_dbfs"] is None and len(b["checks"]) == 3
+    assert b["provenance"]["osm_version"] == "v1.5.2 Open Sound Meter"
+    rc, blocks, path = B.compare(d, root, out=tmp_path / "o")
+    assert rc == 0 and blocks[0]["diff"]["matched"] == 3 and "OSM v1.5.2" in path.read_text()
+    # the suite's samples step: 0.01, or half the 0.05 pass limit of ac2's finder
+    r["checks"][1]["value"] = 0.03
+    rc, blocks, _ = B.compare(write_run(tmp_path, "osm-b", r), root, out=tmp_path / "o2")
+    assert rc == 1 and [m["key"] for m in blocks[0]["diff"]["moved"]] == ["osm.delay48.ac2_delay_finder_vs_analytic"]
+    r["checks"][1]["value"] = 0.02
+    rc, _, _ = B.compare(write_run(tmp_path, "osm-c", r), root, out=tmp_path / "o3")
+    assert rc == 0
+
+
+def test_every_baseline_unit_has_a_compare_step():
+    steps, _ = B.compare_settings(B._tolerances(None))
+    units = {e["unit"] for p in B.BASELINES.glob("*/*.json") for e in json.loads(p.read_text())["checks"].values()}
+    assert units and units <= set(steps), units - set(steps)
