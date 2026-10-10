@@ -12,8 +12,13 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - CI on push is Linux only; macOS/Windows run before a release or on dispatch
   (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 684d610 on pupu,
   ketunkolo and the Pi (`docs/rigs/pupu.md`, *Deploy of 684d610*).
-- Newest feature: band Leq per 1/3-octave band (STM 545/2015), `docs/design/band-leq.md`;
-  its open items are in `docs/design/backlog.md`.
+- Newest features: per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
+  with a grey resolution marker where the estimate is coarser than the grid (`docs/user-guide.md`
+  *Resolution and the resolution marker*); mic curve applied to sweeps; settable spectrum/RTA
+  averaging. Band Leq per 1/3-octave band (STM 545/2015): `docs/design/band-leq.md`; open items
+  in `docs/design/backlog.md`.
+- REW cross-check (`tools/crosscheck`, `docs/rigs/pupu.md`): electrical and Genelec at −30 dBFS
+  agree with REW and numpy (FAIL 0 on 684d610's predecessor 8b87f49 after the suite fixes).
 - Panes are a tiling tree (one pane at first start, N split, Shift+N turns a split, Alt+←/→ or
   a dragged gap sizes a pane, Q close, Tab puts the next measurement in the focused pane, G steps every
   pane's views, IR a transfer view); the focused pane shows any measurement picked (Tab, the list, its chip's list), changing kind: `PLAN.md` §8.1, `docs/user-guide.md` *Panes: split, close…*.
