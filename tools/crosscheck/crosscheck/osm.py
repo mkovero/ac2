@@ -641,7 +641,7 @@ def run_stage(out: Path, cfg_path: Path | None = None, tolerances: dict | None =
     ver = subprocess.run([str(bin_dir / "ac2d"), "--version"], capture_output=True, text=True).stdout.strip()
     manifest = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "rig": "none (offline)",
                 "stage": "osm", "ac2_version": ver, "osm_version": None, "suite_commit": suite_commit(),
-                "flags": {"harness": str(harness), "cases": want}}
+                "flags": {"harness": harness.name, "cases": want}}
     with tempfile.TemporaryDirectory(prefix="xc-osm-") as tmp, private_daemon(bin_dir, Path(tmp)) as (ac2, recdir):
         jobs: list[tuple[str, Path, osm_fixtures.Case | None, dict, bool]] = []
         for cname in want:
