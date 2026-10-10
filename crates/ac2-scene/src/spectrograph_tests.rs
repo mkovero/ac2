@@ -129,13 +129,14 @@ fn frames_scroll_through_a_bounded_ring() {
     assert_eq!(at(&h, 9), Some(0.0));
     // The newest is drawn at the top: the oldest ring position follows it.
     let newest = (T0 + 9 * FRAME_NS) / h.slot_ns;
-    assert_eq!(u64::from(h.scroll()), (newest + 1) % SLOTS as u64);
-    // A full history later the first frames are gone and memory stays SLOTS columns.
-    for i in 10..(SLOTS as u64 + 20) {
+    let n = h.slots();
+    assert_eq!(u64::from(h.scroll()), (newest + 1) % n as u64);
+    // A full history later the first frames are gone and memory stays `n` columns.
+    for i in 10..(n as u64 + 20) {
         f.push(&mut h, T0 + i * FRAME_NS, i as f32);
     }
-    assert_eq!(h.ring().len(), SLOTS);
-    assert!(at(&h, SLOTS - 1).is_some_and(|v| v >= 19.0));
+    assert_eq!(h.ring().len(), n);
+    assert!(at(&h, n - 1).is_some_and(|v| v >= 19.0));
     assert_eq!(h.value_at(1000.0, 31.0), None);
     // The same frame delivered again changes nothing.
     let level = vec![99.0; f.edges.len()];
@@ -256,7 +257,7 @@ fn the_picture_follows_the_frequency_axis_without_new_columns() {
     assert_eq!(hm.len(), 2, "history and colour bar");
     let g = hm[1];
     assert_eq!(g.axes, HeatmapAxes::TimeUp);
-    assert_eq!((g.columns, g.range), (SLOTS as u32, [-100.0, 0.0]));
+    assert_eq!((g.columns, g.range), (900, [-100.0, 0.0]));
     let rows = h.rows().expect("rows");
     // The rows span the pixels the frequency axis gives their edges.
     let xm = a.x_axis.mapping;
@@ -518,4 +519,34 @@ fn the_spectrograph_alone_takes_the_pane() {
         crate::canvas::text_width(&text, Theme::dark().small_font_size) <= narrow.plot.w,
         "{text}"
     );
+}
+
+#[test]
+fn a_slot_is_as_long_at_every_history_length() {
+    for (span, n) in [(10, 300), (30, 900), (60, 1800), (120, 3600)] {
+        let h = SpectrographHistory::new(span);
+        assert_eq!(h.slots(), n, "{span} s");
+        assert!(
+            (h.slot_s() - 1.0 / 30.0).abs() < 1e-6,
+            "{span} s: {}",
+            h.slot_s()
+        );
+    }
+    // Past the texture limit the slots grow instead.
+    assert_eq!(slots(600), MAX_SLOTS);
+    // A spectrum updating 30 times a second keeps every update over two minutes: each
+    // frame has its own slot, a minute and a half back as at the top.
+    let mut h = SpectrographHistory::new(120);
+    let mut f = Feed::new(&third_octaves());
+    let frames = 100 * 30;
+    for i in 0..frames {
+        f.push(&mut h, T0 + i * FRAME_NS, (i % 7) as f32);
+    }
+    for back in [0u64, 1, 2, 2700, 2701, 2702] {
+        assert_eq!(
+            at(&h, back as usize),
+            Some(((frames - 1 - back) % 7) as f32),
+            "{back}"
+        );
+    }
 }

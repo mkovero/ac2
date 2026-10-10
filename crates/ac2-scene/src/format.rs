@@ -326,18 +326,32 @@ pub fn fft_len(n: u32) -> String {
     format!("{n} pt")
 }
 
-/// What an `n`-point spectrum at `fs` resolves and how often it updates:
-/// `0.73 Hz bins · 5.9 updates/s`. The update rate is the daemon's
-/// ([`ac2_proto::model::SpectrumConfig::display_hop`]).
+/// What an `n`-point spectrum at `fs` resolves, over how long a window, and how often it
+/// updates: `0.73 Hz bins · 1365 ms window · 5.9 updates/s`. The update rate is the
+/// daemon's ([`ac2_proto::model::SpectrumConfig::display_hop`]); the spectrograph keeps a
+/// row per update up to its [`crate::spectrograph::SLOTS_PER_S`] rows a second, which a
+/// faster spectrum says (`· 94 updates/s, 30 rows/s`): a longer window resolves finer and
+/// gives the spectrograph fewer rows.
 pub fn fft_resolution(n: u32, fs: u32) -> String {
     if n == 0 || fs == 0 {
         return NO_VALUE.to_string();
     }
     let bin = f64::from(fs) / f64::from(n);
+    let window_s = f64::from(n) / f64::from(fs);
+    let window = ms(window_s, if window_s < 0.1 { 1 } else { 0 });
     let hop = ac2_proto::model::SpectrumConfig::display_hop(n, fs);
     let rate = f64::from(fs) / f64::from(hop);
-    let rate = fixed(rate, if rate < 10.0 { 1 } else { 0 });
-    format!("{} bins · {rate} updates/s", freq_readout(bin))
+    let rows = crate::spectrograph::SLOTS_PER_S;
+    let updates = fixed(rate, if rate < 10.0 { 1 } else { 0 });
+    let rows = if rate > f64::from(rows) {
+        format!(", {rows} rows/s")
+    } else {
+        String::new()
+    };
+    format!(
+        "{} bins · {window} window · {updates} updates/s{rows}",
+        freq_readout(bin)
+    )
 }
 
 /// A measurement's colour family as the operator names it: `colour 1` … `colour 8`, `grey`.
@@ -488,10 +502,16 @@ mod tests {
         // 48 kHz: a 65 536-point window steps by n/8; a 1024-point one by n/2.
         assert_eq!(
             fft_resolution(65_536, 48_000),
-            "0.73 Hz bins · 5.9 updates/s"
+            "0.73 Hz bins · 1365 ms window · 5.9 updates/s"
         );
-        assert_eq!(fft_resolution(1024, 48_000), "46.9 Hz bins · 94 updates/s");
-        assert_eq!(fft_resolution(4096, 48_000), "11.7 Hz bins · 47 updates/s");
+        assert_eq!(
+            fft_resolution(1024, 48_000),
+            "46.9 Hz bins · 21.3 ms window · 94 updates/s, 30 rows/s"
+        );
+        assert_eq!(
+            fft_resolution(16_384, 48_000),
+            "2.93 Hz bins · 341 ms window · 23 updates/s"
+        );
         assert_eq!(fft_resolution(4096, 0), "—");
     }
 

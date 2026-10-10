@@ -1524,7 +1524,7 @@ mod tests {
         let f = Form::measurement(FormKind::Spectrum, Some(&o), &[], &names(&o), &[]);
         let size = &f.fields[at(&f, FieldId::FftSize)];
         assert_eq!(size.display(), "65536 pt");
-        assert_eq!(size.hint, "0.73 Hz bins · 5.9 updates/s");
+        assert_eq!(size.hint, "0.73 Hz bins · 1365 ms window · 5.9 updates/s");
         assert_eq!(f.fields[at(&f, FieldId::Window)].display(), "Hann");
 
         let m = Measurement {
@@ -1549,14 +1549,20 @@ mod tests {
         let mut e = Form::edit_spec(&m, &names(&o), Some(48_000)).expect("edit");
         let i = at(&e, FieldId::FftSize);
         assert_eq!(e.fields[i].display(), "4096 pt");
-        assert_eq!(e.fields[i].hint, "11.7 Hz bins · 47 updates/s");
+        assert_eq!(
+            e.fields[i].hint,
+            "11.7 Hz bins · 85.3 ms window · 47 updates/s, 30 rows/s"
+        );
         assert_eq!(e.fields[at(&e, FieldId::Window)].display(), "flat-top");
         assert_eq!(e.meas_config(Some(&o)).expect("same"), m.config);
         // A longer window: finer bins, fewer updates, the hint follows the field.
         e.focus = i;
         e.cycle(2);
         assert_eq!(e.fields[i].display(), "16384 pt");
-        assert_eq!(e.fields[i].hint, "2.93 Hz bins · 23 updates/s");
+        assert_eq!(
+            e.fields[i].hint,
+            "2.93 Hz bins · 341 ms window · 23 updates/s"
+        );
         let w = at(&e, FieldId::Window);
         e.focus = w;
         e.cycle(-2);

@@ -772,7 +772,9 @@ FIFO stores every frame (at most 511 frames at 65 536 points); an RTA's at most 
   made from the CLI that the list does not offer shows as it is.
 - A spectrum's dialogs also pick its *FFT size* (64 … 65 536 points) and *Window* (Hann,
   Blackman-Harris, flat-top, rectangular); the size's hint says what it gives at the
-  session's rate, e.g. `0.73 Hz bins · 5.9 updates/s` at 65 536 points and 48 kHz. A new
+  session's rate, e.g. `0.73 Hz bins · 1365 ms window · 5.9 updates/s` at 65 536 points and
+  48 kHz. The spectrograph keeps a row per update up to 30 a second (`…, 30 rows/s` says a
+  faster spectrum meets that): a longer window resolves finer and gives it fewer rows. A new
   length or window on a running spectrum restarts it and its average. A spectrum named in a
   math channel keeps its length (the channel's operands share one bin grid): edit the math
   channel first; its window changes freely.
@@ -805,7 +807,9 @@ the newest frame at the top, level as colour.
   curve's axis. The colours are a perceptual, colour-blind-safe map (viridis): equal steps
   in dB look like equal steps.
 - **Shift+B** (or **Settings › Display › Spectrograph history**) steps the history through
-  10, 30 (the default), 60 and 120 s; the length is remembered. It starts afresh
+  10, 30 (the default), 60 and 120 s; the length is remembered. Every length keeps a row
+  per 33 ms, so a spectrum updating up to 30 times a second shows each update at 120 s as
+  at 10 s (its FFT size's hint says how often it updates). It starts afresh
   at each length and when the spectrograph comes into view (from the split to the
   spectrograph alone it is kept).
 - Alone, the caption above it also names the spectrum's window and calibration.

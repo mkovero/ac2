@@ -4,8 +4,10 @@
 //!
 //! The history is display state kept by the UI between frames, like [`PeakHold`]: the
 //! frames' columns resampled once, when they arrive, onto an even log-frequency grid of
-//! [`ROWS_PER_OCTAVE`], and placed on a time grid of [`SLOTS`] slots over the history
-//! length by their capture time. A frame stands for the time since the previous one, so a
+//! [`ROWS_PER_OCTAVE`], and placed by their capture time on a time grid of
+//! [`SLOTS_PER_S`] slots a second over the history length ([`slots`]): the slot is as
+//! long at every length, so a spectrum that updates about 30 times a second keeps a row
+//! per update over two minutes as over ten seconds. A frame stands for the time since the previous one, so a
 //! long FFT that updates a few times a second fills its slots, and so does a run of frames
 //! the link left out because they drew the same. Time without frames (the stream went
 //! STALE, the measurement stopped) is a gap, never the last spectrum smeared across it.
@@ -36,9 +38,19 @@ use crate::theme::Theme;
 use crate::time::Freshness;
 use crate::view::{FREQ_LIMIT_HI, FREQ_LIMIT_LO, SpectrumMode, ViewState};
 
-/// Time slots in the history, whatever its length: 30 s at 33 ms, about the spectrum's
-/// fastest update, and well inside the 4096 texels a Pi 4 class GPU allows per texture side.
-pub const SLOTS: usize = 900;
+/// Time slots a second: one per 33 ms, the period frames are published at over the
+/// network, and about the update rate of a spectrum of up to 4096 points at 48 kHz.
+pub const SLOTS_PER_S: u32 = 30;
+/// At most this many slots, whatever the history length: the 4096 texels a Pi 4 class GPU
+/// allows per texture side (the ring is one texture). A longer history has longer slots.
+pub const MAX_SLOTS: usize = 4096;
+
+/// Time slots of a history `span_s` seconds long: [`SLOTS_PER_S`] a second, at most
+/// [`MAX_SLOTS`]. 120 s: 3600 slots; of [`MAX_ROWS`] f32 levels each, 29 MB at most (a
+/// 20 Hz – 20 kHz spectrum has under half the rows).
+pub fn slots(span_s: u32) -> usize {
+    (span_s.max(1) as usize * SLOTS_PER_S as usize).min(MAX_SLOTS)
+}
 /// Frequency rows per octave: the spectrum's own display columns per octave, so the
 /// spectrograph resolves what the curve above it shows.
 pub const ROWS_PER_OCTAVE: f64 = 96.0;
@@ -145,7 +157,7 @@ pub struct SpectrographFrame<'a> {
     pub validity: Option<&'a [ValidityMask]>,
 }
 
-/// The spectrograph history of one measurement: a ring of [`SLOTS`] time slots of
+/// The spectrograph history of one measurement: a ring of [`slots`] time slots of
 /// resampled frames, newest at `newest`.
 #[derive(Clone, Debug)]
 pub struct SpectrographHistory {
@@ -166,13 +178,14 @@ impl SpectrographHistory {
     /// An empty history `span_s` seconds long.
     pub fn new(span_s: u32) -> Self {
         let span_s = span_s.max(1);
+        let n = slots(span_s);
         Self {
             span_s,
-            slot_ns: u64::from(span_s) * 1_000_000_000 / SLOTS as u64,
+            slot_ns: u64::from(span_s) * 1_000_000_000 / n as u64,
             grid: None,
             scale: None,
             map: None,
-            ring: vec![None; SLOTS],
+            ring: vec![None; n],
             newest: None,
             last_seq: None,
             broken: false,
@@ -181,6 +194,11 @@ impl SpectrographHistory {
 
     pub fn span_s(&self) -> u32 {
         self.span_s
+    }
+
+    /// Time slots in the ring.
+    pub fn slots(&self) -> usize {
+        self.ring.len()
     }
 
     /// Length of one time slot, seconds.
@@ -208,7 +226,8 @@ impl SpectrographHistory {
 
     /// Ring position of the oldest slot shown (the bottom of the picture).
     pub fn scroll(&self) -> u32 {
-        self.newest.map_or(0, |n| ((n + 1) % SLOTS as u64) as u32)
+        self.newest
+            .map_or(0, |n| ((n + 1) % self.ring.len() as u64) as u32)
     }
 
     /// Forgets every frame (the grid and scale are taken again from the next one).
@@ -243,7 +262,7 @@ impl SpectrographHistory {
         };
         let col = map.resample(f.level, f.validity);
         let slot = f.at.0 / self.slot_ns;
-        let n = SLOTS as u64;
+        let n = self.ring.len() as u64;
         let at = |a: u64| (a % n) as usize;
         match self.newest {
             // Two frames in one slot: the slot shows the higher level of each row, as a
@@ -287,11 +306,12 @@ impl SpectrographHistory {
             return None;
         }
         let back = (before_s / self.slot_s()).floor() as u64;
-        if back >= SLOTS as u64 || back > newest {
+        let n = self.ring.len() as u64;
+        if back >= n || back > newest {
             return None;
         }
         let row = self.rows()?.row_of(hz)?;
-        let col = self.ring[((newest - back) % SLOTS as u64) as usize].as_ref()?;
+        let col = self.ring[((newest - back) % n) as usize].as_ref()?;
         col.get(row).copied().filter(|v| v.is_finite())
     }
 }
@@ -523,7 +543,7 @@ pub fn spectrograph_scene(
                         id: HISTORY_ID,
                         rect: Rect::new(x0, plot.y, (x1 - x0).max(1.0), plot.h),
                         clip: Some(plot),
-                        columns: SLOTS as u32,
+                        columns: s.history.slots() as u32,
                         rows: rows.rows() as u32,
                         axes: HeatmapAxes::TimeUp,
                         scroll: s.history.scroll(),
