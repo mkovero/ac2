@@ -41,7 +41,7 @@ egui-wgpu = "0.36.2"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time", "macros"] }
 tracing = "0.1"
-toml = "0.8"
+toml = "1.1"
 
 [dev-dependencies]
 ac2-client = { path = "../ac2-client", features = ["test-support"] }
