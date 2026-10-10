@@ -536,6 +536,8 @@ fn run(
     // seldom fires while audio flows.
     let grace = period;
     let mut changed = false;
+    // The result generation the last emit carried.
+    let mut emitted: Option<u64> = None;
     // When to emit again without new input (a frame held back by a rate or a refresh).
     let mut retry: Option<Instant> = None;
     loop {
@@ -600,14 +602,23 @@ fn run(
         }
         let now = Instant::now();
         if changed || retry.is_some_and(|t| now >= t) {
+            // A result slower than the frame rate (a long-window spectrum) goes on the
+            // hand-off that formed it, not on the next slot of the grid.
+            let generation = a.result_generation();
+            let new_result = generation.is_some() && generation != emitted;
             match cadence.ready_at() {
-                Some(t) if now < t => {
+                Some(t) if now < t && !(new_result && cadence.is_ready_for_result(now)) => {
                     // Too soon after the previous frame: emit at the slot (or on the
                     // hand-off around it).
                     retry = Some(retry.filter(|_| !changed).map_or(t, |r| r.max(t)));
                 }
                 _ => {
-                    cadence.take(now);
+                    if new_result {
+                        cadence.take_result(now);
+                        emitted = generation;
+                    } else {
+                        cadence.take(now);
+                    }
                     changed = false;
                     retry = match a.emit(em) {
                         Flush::Done => None,

@@ -7,6 +7,7 @@ use crate::common;
 use std::time::{Duration, Instant};
 
 use ac2_proto::frame::FrameData;
+use ac2_proto::model::{MeasConfig, MeasKind, SpectrumConfig};
 use ac2_proto::units::MeasId;
 use ac2_proto::{Command, DataMessage, decode_data_message};
 use ac2_zmq::drain_latest;
@@ -171,5 +172,57 @@ fn batched_hand_off_keeps_publish_rates() {
     assert!((25.0..=33.0).contains(&lr), "session meters at {lr:.1} Hz");
     // SPL frames are capped at 20 Hz (the meter's interval figures hold every peak).
     assert!((15.0..=21.0).contains(&sr), "spl at {sr:.1} Hz");
+    h.shutdown();
+}
+
+/// A spectrum slower than the frame rate goes out on the hand-off that formed it: at
+/// 10 frames/s and a 65 536-point window at 48 kHz (a new spectrum every 8192 samples,
+/// 171 ms), each frame lags the end of its window by under a hand-off, where the 100 ms
+/// frame grid alone would hold it for up to a period.
+#[test]
+fn a_slow_spectrum_goes_when_it_is_formed() {
+    init_log();
+    let mut cfg = config(realtime_rig(), inproc("slow-spectrum"));
+    cfg.publish_fps = Some(10);
+    let h = Daemon::start(cfg).unwrap();
+    let (mut c, sub) = connect(&h, &[b"d/1/spec"]);
+    c.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    c.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: "spectrum".into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig {
+                    fft_len: 65_536,
+                    ..SpectrumConfig::on_input(0)
+                },
+            },
+        },
+    });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    let hop = 8192u64;
+    // A hand-off is 16.7 ms; a loaded machine may add a few blocks.
+    let tolerance = u64::from(FS) * 30 / 1000;
+    let (mut frames, mut prompt) = (0u32, 0u32);
+    let t0 = Instant::now();
+    while frames < 12 && t0.elapsed() < Duration::from_secs(10) {
+        let Some(f) = sub.frame(T, |f| matches!(f.data, FrameData::Spec(_))) else {
+            break;
+        };
+        // Spectra are formed every `hop` samples once the first window is full.
+        let since = f.stamp.audio_sample.0 + 1 - f.stamp.config_applied_at.0;
+        let lag = since % hop;
+        frames += 1;
+        if lag <= tolerance {
+            prompt += 1;
+        }
+    }
+    assert!(frames >= 12, "{frames} spectra");
+    // On the grid, lags spread evenly over a 100 ms period: about a third within 30 ms.
+    assert!(
+        prompt >= 10,
+        "{prompt} of {frames} spectra within 30 ms of their window"
+    );
     h.shutdown();
 }
