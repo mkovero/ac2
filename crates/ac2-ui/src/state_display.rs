@@ -209,11 +209,11 @@ impl AppState {
     /// The pane the level keys act on (the focused one), or why not.
     fn level_target(&mut self) -> Option<PaneKind> {
         let p = self.layout.focus_kind();
-        // The level axis is the magnitude's: the transfer pane's phase and coherence views
-        // do not draw it.
+        // The level axis is the magnitude's: the transfer pane's phase, coherence and IR
+        // views do not draw it.
         let p = level_pane(p).filter(|p| match p {
             PaneKind::Distortion => self.modes().sweep == ac2_scene::view::SweepMode::Response,
-            PaneKind::Transfer => self.modes().transfer == super::TransferView::Response,
+            PaneKind::Transfer => self.modes().transfer == super::TransferView::Magnitude,
             _ => true,
         });
         if p.is_none() {

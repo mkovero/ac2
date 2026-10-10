@@ -382,6 +382,7 @@ commands! {
     TurnSplit => "turn_split", "Turn the focused pane's split (side by side ↔ stacked)", [Global];
     GrowPane => "grow_pane", "Grow the focused pane (within its split)", [Global];
     ShrinkPane => "shrink_pane", "Shrink the focused pane (within its split)", [Global];
+    TransferStack => "transfer_stack", "Transfer stack: magnitude / phase / coherence (in place of the focused pane)", [Global];
     MaximizePane => "maximize_pane", "Layout: split → one pane → full screen", [Global];
     NextMeasurementInTree => "next_measurement_in_tree", "Show the next measurement in the list in the focused pane", [Global];
     PrevMeasurementInTree => "prev_measurement_in_tree", "Show the previous measurement in the list in the focused pane", [Global];
@@ -494,7 +495,7 @@ commands! {
     PhaseReference => "phase_reference", "Make selected trace the phase reference", [Transfer];
     Target => "target", "Load a target curve file…", [Transfer];
     CoherenceMask => "coherence_mask", "Coherence mask: off → 0.3 → 0.5 → 0.7 → 0.9", [Transfer];
-    CoherencePlacement => "coherence_placement", "Coherence: own pane / over magnitude", [Transfer];
+    CoherencePlacement => "coherence_placement", "Coherence: its own view / over the magnitude", [Transfer];
     LegendTopLeft => "legend_top_left", "Legend: top-left corner (drag it anywhere; its corner grip resizes)", [Transfer];
     LegendTopRight => "legend_top_right", "Legend: top-right corner", [Transfer];
     LegendBottomLeft => "legend_bottom_left", "Legend: bottom-left corner", [Transfer];
@@ -1159,6 +1160,7 @@ mod tests {
             CommandId::FinderCustom,
             CommandId::FinderObservation,
             CommandId::PaneMeasurement,
+            CommandId::TransferStack,
             // Esc also deselects (when no dialog is open); this is its palette entry.
             CommandId::SelectLive,
             CommandId::SplFast,

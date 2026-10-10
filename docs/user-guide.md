@@ -374,7 +374,19 @@ running)`.
 The transfer pane shows **magnitude**, **phase** and **coherence** of measurement / reference
 on a log-frequency grid (48 points per octave unless its [resolution](#resolution-and-the-resolution-marker)
 says otherwise), computed with a multi-time-window FFT ladder so low frequencies get long
-windows and high frequencies stay responsive.
+windows and high frequencies stay responsive. Each is a view of the pane of its own (**G**
+steps them), and the **transfer stack** lays the three out one above the other:
+
+- **Transfer stack** (**Ctrl+K** *Transfer stack*): the focused transfer pane
+  becomes three panes of its measurement, stacked: magnitude on half the height, phase and
+  coherence on a quarter each. The focused pane of another kind becomes the stack of the
+  selected transfer measurement. They are ordinary panes after: **Alt+→ / Alt+←** or a drag
+  sizes them, **Q** closes one, **G** steps one to another view. The frequency axis (zoom,
+  pan) is every transfer pane's, so the three read down one column.
+- A **new transfer measurement** made in the app (**Ctrl+K** *New transfer measurement…*) opens in the
+  transfer stack, in place of the pane that would show it (the focused transfer pane, else
+  the transfer pane worked in last, else the focused pane). Measurements that appear from
+  another client, the CLI or a restored session leave the panes as they are.
 
 - **Coherence (γ²)** is how much of the measured energy is explained by the reference. It is
   drawn as the transparency of the traces, as its own curve, or as a mask that blanks the
@@ -404,7 +416,7 @@ first measurement (a transfer pane on an empty daemon). Lay it out as the job ne
 **Ctrl+Q** still quits. The layout, sizes included, is remembered for the next start. Each pane is on its own: its kind, its measurement (from the title
 chip, **Tab** or a click in the list) and its views (**G** and the other view keys act on
 the focused pane only). Two transfer panes can show two measurements side by side, or one
-measurement as response and impulse response: split (**N**), then **G** the new half to the
+measurement as magnitude and impulse response: split (**N**), then **G** the new half to the
 view wanted. The chip's list offers the measurements of the pane's kind, and the other kinds
 at its end (`pane  Spectrum / RTA`): a pick there turns the pane into that kind.
 
@@ -413,7 +425,7 @@ remembered with the pane):
 
 | Pane | G steps (Shift+G the other way) |
 |---|---|
-| Transfer | response → phase → coherence → impulse response linear → log → ETC → response |
+| Transfer | magnitude → phase → coherence → impulse response linear → log → ETC → magnitude |
 | Sweep / distortion | response & distortion → impulse response linear → log → ETC → room parameters → response & distortion |
 | Spectrum / RTA | spectrum → spectrum + spectrograph → spectrograph → spectrum |
 | SPL | meter → Leq windows → meter + Leq → bands (with a band meter) → meter |
@@ -421,7 +433,8 @@ remembered with the pane):
 The **impulse response** is part of the transfer pane's chain (**G** until the title reads
 `Impulse response`): it shows the IR of that pane's own measurement, as linear amplitude,
 in dB re its peak, or as the energy-time curve: each its own view, so **Shift+G** from the
-response reaches the ETC in one step. A stopped measurement draws no live IR (as it draws no
+magnitude reaches the ETC in one step. The magnitude view draws the coherence over the
+magnitude when Settings › Display places it there; otherwise coherence is its own view. A stopped measurement draws no live IR (as it draws no
 live response): the plot says it is stopped and **S** starts it; a selected capture's
 stored IR still shows.
 
@@ -561,7 +574,7 @@ The app remembers in `ui.toml` (written when the layout changes and on exit):
 - the panes: how they are split, what kind each shows and which has the focus, and whether
   it is maximised or full screen;
 - the measurement each pane shows (by name);
-- each pane's views: the transfer view (response, phase, coherence or an impulse-response
+- each pane's views: the transfer view (magnitude, phase, coherence or an impulse-response
   display), the SPL view (meter, Leq windows or both), the spectrum view, the sweep view and
   how much of its plot is drawn (**T**: grid, labels,
   cursor); the Leq windows' style and the sweep pane's dB / %;
@@ -2676,6 +2689,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Warning toasts on / off (off: warnings and Leq limit alarms go only to the notification log) | `warning_toasts` |
 | Stimulus outputs: tick them in Settings › Inputs & outputs… | `stimulus_outputs` |
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
+| Transfer stack: magnitude / phase / coherence (in place of the focused pane) | `transfer_stack` |
 | Choose the measurement the focused pane shows… | `pane_measurement` |
 | Theme: dark → light → high contrast | `cycle_theme` |
 | Comparison cursor on / off (IR: a time cursor) | `toggle_cursor` |
@@ -2715,7 +2729,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Delay finder: sub band (20–120 Hz) | `finder_sub` |
 | Delay finder: custom band (Hz)… | `finder_custom` |
 | Delay finder: observation length (s)… | `finder_observation` |
-| Coherence: own pane / over magnitude | `coherence_placement` |
+| Coherence: its own view / over the magnitude | `coherence_placement` |
 | Legend: top-left corner (drag it anywhere; its corner grip resizes) | `legend_top_left` |
 | Legend: top-right corner | `legend_top_right` |
 | Legend: bottom-left corner | `legend_bottom_left` |

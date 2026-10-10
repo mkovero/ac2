@@ -58,6 +58,7 @@ impl AppState {
             return;
         };
         let edit = f.edits();
+        let transfer = f.kind == FormKind::Transfer && edit.is_none();
         let r = f.meas_config(open.as_ref()).map(|config| match edit {
             Some(meas) => Request::Call {
                 what: format!("{} changed", config.name),
@@ -67,6 +68,9 @@ impl AppState {
         });
         match r {
             Ok(req) => {
+                if transfer && let Request::CreateMeas { config } = &req {
+                    self.stack_on_create = Some(config.name.clone());
+                }
                 out.push(req);
                 self.overlay = Overlay::None;
             }

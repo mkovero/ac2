@@ -292,6 +292,24 @@ impl PaneNode {
         }
     }
 
+    /// Leaf `id` replaced by `new`. `false`: no such leaf.
+    fn replace(&mut self, id: PaneId, new: PaneNode) -> bool {
+        match self {
+            PaneNode::Leaf(x) if *x == id => {
+                *self = new;
+                true
+            }
+            PaneNode::Leaf(_) => false,
+            PaneNode::Split { a, b, .. } => {
+                if a.contains(id) {
+                    a.replace(id, new)
+                } else {
+                    b.replace(id, new)
+                }
+            }
+        }
+    }
+
     /// Removes leaf `id`: its sibling takes the parent's place. The leaf of that sibling
     /// that bordered `id` along the split (its first when `id` was `a`, its last when `id`
     /// was `b`), which gets the focus; `None` for the last leaf (never removed) or no such
@@ -353,14 +371,15 @@ impl SplitGap {
 }
 
 /// What a transfer pane draws of its measurement (G steps through them in this order,
-/// Shift+G back). Phase and coherence alone fill the pane: one quantity read at the full
-/// height. The impulse response's three displays are views of their own, so one key walks
-/// from the response to its time domain and back.
+/// Shift+G back). Each fills the pane: one quantity read at the full height. Magnitude,
+/// phase and coherence read together side by side in panes of their own (the transfer
+/// stack, [`PaneTemplate`]). The impulse response's three displays are views of their own,
+/// so one key walks from the response to its time domain and back.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TransferView {
-    /// Magnitude, phase and coherence (its placement is Shift+C's).
+    /// Magnitude, with the coherence over it when that is its placement (Settings).
     #[default]
-    Response,
+    Magnitude,
     Phase,
     Coherence,
     /// The impulse response of the measurement the pane shows, drawn as this.
@@ -369,7 +388,7 @@ pub enum TransferView {
 
 impl TransferView {
     pub const ALL: [TransferView; 6] = [
-        TransferView::Response,
+        TransferView::Magnitude,
         TransferView::Phase,
         TransferView::Coherence,
         TransferView::Ir(IrMode::Linear),
@@ -396,12 +415,42 @@ impl TransferView {
     /// For the toast and the hint: what the pane now draws.
     pub fn label(self) -> &'static str {
         match self {
-            TransferView::Response => "response",
+            TransferView::Magnitude => "magnitude",
             TransferView::Phase => "phase",
             TransferView::Coherence => "coherence",
             TransferView::Ir(IrMode::Linear) => "impulse response",
             TransferView::Ir(IrMode::Log) => "impulse response (log)",
             TransferView::Ir(IrMode::Etc) => "ETC",
+        }
+    }
+}
+
+/// A ready-made arrangement of panes put in place of one, every pane showing one
+/// measurement: the panes are ordinary ones after, split, resized and closed as any.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneTemplate {
+    /// Magnitude over phase over coherence, stacked so the three share the frequency axis
+    /// as one reads down a column.
+    TransferStack,
+}
+
+impl PaneTemplate {
+    /// The panes top to bottom: kind, view and share of the height. The magnitude reads
+    /// the finest detail, so it takes half.
+    fn panes(self) -> &'static [(PaneKind, TransferView, f32)] {
+        match self {
+            PaneTemplate::TransferStack => &[
+                (PaneKind::Transfer, TransferView::Magnitude, 0.5),
+                (PaneKind::Transfer, TransferView::Phase, 0.25),
+                (PaneKind::Transfer, TransferView::Coherence, 0.25),
+            ],
+        }
+    }
+
+    /// For the toast: what was laid out.
+    pub fn label(self) -> &'static str {
+        match self {
+            PaneTemplate::TransferStack => "transfer stack: magnitude / phase / coherence",
         }
     }
 }
@@ -422,7 +471,7 @@ pub struct PaneModes {
 impl Default for PaneModes {
     fn default() -> Self {
         Self {
-            transfer: TransferView::Response,
+            transfer: TransferView::Magnitude,
             spectrum: SpectrumMode::Spectrum,
             spl: SplMode::MeterLeq,
             sweep: SweepMode::Response,
@@ -627,6 +676,49 @@ impl Layout {
         new
     }
 
+    /// Leaf `id` replaced by `views` stacked top to bottom, each taking its share of the
+    /// height; the top one keeps `id` (and the focus if it had it). `false`: no such leaf
+    /// or no views.
+    pub fn stack(&mut self, id: PaneId, views: &[(View, f32)]) -> bool {
+        let Some((first, rest)) = views.split_first() else {
+            return false;
+        };
+        if !self.root.contains(id) {
+            return false;
+        }
+        let ids: Vec<PaneId> = std::iter::once(id)
+            .chain((0..rest.len() as u32).map(|i| PaneId(self.next_id + i)))
+            .collect();
+        // Each split gives its top pane that pane's share of what is left below the panes
+        // above it.
+        fn node(ids: &[PaneId], shares: &[f32]) -> PaneNode {
+            match (ids, shares) {
+                ([id], _) => PaneNode::Leaf(*id),
+                ([id, more @ ..], [w, rest @ ..]) => {
+                    let below: f32 = rest.iter().sum();
+                    PaneNode::Split {
+                        axis: Axis::Column,
+                        ratio: (w / (w + below)).clamp(MIN_RATIO, 1.0 - MIN_RATIO),
+                        a: Box::new(PaneNode::Leaf(*id)),
+                        b: Box::new(node(more, rest)),
+                    }
+                }
+                _ => unreachable!("one share per pane"),
+            }
+        }
+        let shares: Vec<f32> = views.iter().map(|v| v.1).collect();
+        if !self.root.replace(id, node(&ids, &shares)) {
+            return false;
+        }
+        self.next_id += rest.len() as u32;
+        self.views.insert(id, first.0);
+        for (pid, (v, _)) in ids[1..].iter().zip(rest) {
+            self.views.insert(*pid, *v);
+        }
+        self.maximized = false;
+        true
+    }
+
     /// Closes the focused pane: its sibling takes its place and the focus. `false` on the
     /// last pane, which stays.
     pub fn close_focused(&mut self) -> bool {
@@ -696,8 +788,12 @@ impl AppState {
         };
         v.chrome = modes.chrome;
         // The transfer scene lays out the plots it is asked for: one alone fills the pane.
+        // The coherence rides on the magnitude view only when placed over it.
+        let over =
+            v.tf.coherence_placement == ac2_scene::view::CoherencePlacement::OverlayOnMagnitude;
         let shown = match modes.transfer {
-            TransferView::Response | TransferView::Ir(_) => None,
+            TransferView::Ir(_) => None,
+            TransferView::Magnitude => Some((true, false, over)),
             TransferView::Phase => Some((false, true, false)),
             TransferView::Coherence => Some((false, false, true)),
         };
@@ -768,13 +864,90 @@ impl AppState {
     /// The focused pane's rectangle in the area last drawn, as the tree is laid out there
     /// (a split un-maximises, so the laid-out tree is what shows after it).
     fn focused_rect(&self) -> PaneRect {
+        self.laid_out_rect(self.layout.focus)
+    }
+
+    /// Pane `p`'s rectangle in the area last drawn, the tree laid out (not maximised).
+    fn laid_out_rect(&self, p: PaneId) -> PaneRect {
         let (w, h) = self.pane_area;
         self.layout
             .root
             .rects(PaneRect::new(0.0, 0.0, w, h), 0.0)
             .into_iter()
-            .find(|(id, _)| *id == self.layout.focus)
+            .find(|(id, _)| *id == p)
             .map_or(PaneRect::new(0.0, 0.0, w, h), |(_, r)| r)
+    }
+
+    /// Pane `p` replaced by template `t`'s panes, each showing measurement `meas`; the
+    /// top one keeps `p` and gets the focus. Refused (with why) when a pane of it would be
+    /// lower than N splits to.
+    pub(super) fn apply_template(&mut self, t: PaneTemplate, p: PaneId, meas: MeasId) -> bool {
+        let Some(base) = self.layout.view(p).copied() else {
+            return false;
+        };
+        let rect = self.laid_out_rect(p);
+        let least = t.panes().iter().map(|x| x.2).fold(f32::INFINITY, f32::min);
+        let total: f32 = t.panes().iter().map(|x| x.2).sum();
+        if rect.h * least / total < MIN_RATIO * self.pane_area.1 {
+            self.warn(format!(
+                "the pane is too small for the {}: Q closes one to make room",
+                t.label()
+            ));
+            return false;
+        }
+        let views: Vec<(View, f32)> = t
+            .panes()
+            .iter()
+            .map(|&(kind, transfer, share)| {
+                let mut v = base;
+                v.kind = kind;
+                v.meas = Some(meas);
+                v.modes.transfer = transfer;
+                (v, share)
+            })
+            .collect();
+        if !self.layout.stack(p, &views) {
+            return false;
+        }
+        self.pending_pane_meas.remove(&p);
+        self.focus_pane(p);
+        true
+    }
+
+    /// The transfer stack laid out for the focused transfer pane's measurement; on another
+    /// pane, the focused pane turns into it for the selected transfer measurement.
+    pub(super) fn transfer_stack(&mut self) {
+        let f = self.layout.focus;
+        let meas = if self.layout.kind(f) == PaneKind::Transfer {
+            self.pane_meas(f)
+        } else {
+            self.selected.and_then(|id| self.meas(id))
+        }
+        .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
+        .map(|m| m.id);
+        match meas {
+            Some(m) => {
+                let t = PaneTemplate::TransferStack;
+                if self.apply_template(t, f, m) {
+                    self.toast(t.label());
+                }
+            }
+            None => self.warn("no transfer measurement to stack: select one in the list"),
+        }
+    }
+
+    /// A transfer measurement this app created: the pane that shows it now (the focused
+    /// transfer pane, else the transfer pane worked in last, else the focused one) lays it
+    /// out in the transfer stack.
+    pub(super) fn stack_created(&mut self, meas: MeasId) {
+        let p = match self.layout.focus_kind() {
+            PaneKind::Transfer => self.layout.focus,
+            _ => self
+                .layout
+                .lead(PaneKind::Transfer)
+                .unwrap_or(self.layout.focus),
+        };
+        self.apply_template(PaneTemplate::TransferStack, p, meas);
     }
 
     /// N: the focused pane split in two along its longer side; the new half shows the

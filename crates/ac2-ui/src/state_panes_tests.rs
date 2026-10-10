@@ -234,8 +234,8 @@ fn the_focused_pane_takes_a_measurement_of_any_kind() {
     assert_eq!(t.st.layout.views[&a], a_view);
 }
 
-/// G steps the focused transfer pane through response → phase → coherence → IR linear →
-/// IR log → ETC → response, Shift+G back; the phase and coherence views are that plot
+/// G steps the focused transfer pane through magnitude → phase → coherence → IR linear →
+/// IR log → ETC → magnitude, Shift+G back; each of the first three is that plot
 /// alone, and the IR views have the IR's keys.
 #[test]
 fn g_steps_the_transfer_views() {
@@ -251,8 +251,19 @@ fn g_steps_the_transfer_views() {
             .collect()
     };
     let view = |t: &T| t.st.layout.focused().modes.transfer;
-    assert_eq!(view(&t), TransferView::Response);
-    assert_eq!(plots(&t).first(), Some(&P::Magnitude));
+    assert_eq!(view(&t), TransferView::Magnitude);
+    // The magnitude alone fills the pane; placed over it, the coherence rides on it.
+    assert_eq!(plots(&t), [P::Magnitude]);
+    let overlay = |t: &T| {
+        crate::scenes::transfer(&t.st, f, &Theme::dark(), SIZE, now())
+            .coherence_overlay
+            .is_some()
+    };
+    assert!(!overlay(&t));
+    t.st.update(Msg::Command(CommandId::CoherencePlacement), &t.keys);
+    assert_eq!(plots(&t), [P::Magnitude]);
+    assert!(overlay(&t));
+    t.st.update(Msg::Command(CommandId::CoherencePlacement), &t.keys);
     t.key("G");
     assert_eq!(view(&t), TransferView::Phase);
     assert_eq!(plots(&t), [P::Phase]);
@@ -267,13 +278,13 @@ fn g_steps_the_transfer_views() {
         assert!(crate::scenes::ir(&t.st, f, &t.keys, &Theme::dark(), SIZE, now()).is_some());
     }
     t.key("G");
-    assert_eq!(view(&t), TransferView::Response);
+    assert_eq!(view(&t), TransferView::Magnitude);
     // Shift+G walks the same chain back, wrapping at the response.
     for want in TransferView::ALL.iter().rev() {
         t.key("Shift+G");
         assert_eq!(view(&t), *want);
     }
-    assert_eq!(view(&t), TransferView::Response);
+    assert_eq!(view(&t), TransferView::Magnitude);
     assert_eq!(t.st.scope(), crate::keys::Scope::Transfer);
     assert_eq!(plots(&t).first(), Some(&P::Magnitude));
     // The phase and coherence views draw no magnitude: the level keys say so.
@@ -283,6 +294,85 @@ fn g_steps_the_transfer_views() {
         t.last_toast().contains("no level axis"),
         "{}",
         t.last_toast()
+    );
+}
+
+/// The transfer stack: the focused transfer pane becomes three stacked panes of its
+/// measurement — magnitude on half the height, phase and coherence a quarter each.
+#[test]
+fn transfer_stack_lays_out_magnitude_phase_coherence() {
+    let mut t = empty();
+    t.conn(mirror(four()));
+    super::tf_group::tf_frames(&mut t, &[1, 3]);
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.key("N");
+    let (a, b) = (t.st.layout.panes()[0], t.st.layout.focus);
+    t.st.update(Msg::Command(CommandId::TransferStack), &t.keys);
+    let l = &t.st.layout;
+    let PaneNode::Split {
+        axis: Axis::Row,
+        a: left,
+        b: right,
+        ..
+    } = &l.root
+    else {
+        panic!("{:?}", l.root);
+    };
+    assert_eq!(**left, PaneNode::Leaf(a));
+    let PaneNode::Split {
+        axis: Axis::Column,
+        ratio,
+        a: top,
+        b: rest,
+    } = &**right
+    else {
+        panic!("{right:?}");
+    };
+    assert_eq!((**top == PaneNode::Leaf(b), *ratio), (true, 0.5));
+    let PaneNode::Split {
+        axis: Axis::Column,
+        ratio,
+        ..
+    } = &**rest
+    else {
+        panic!("{rest:?}");
+    };
+    assert_eq!(*ratio, 0.5);
+    let views: Vec<_> = rest
+        .leaves()
+        .into_iter()
+        .chain([b])
+        .map(|id| (l.view(id).expect("view").modes.transfer, shows(&t, id)))
+        .collect();
+    assert_eq!(
+        views,
+        [
+            (TransferView::Phase, Some(3)),
+            (TransferView::Coherence, Some(3)),
+            (TransferView::Magnitude, Some(3)),
+        ]
+    );
+    assert_eq!((l.focus, shows(&t, a)), (b, Some(3)));
+    assert!(
+        t.last_toast().contains("transfer stack"),
+        "{}",
+        t.last_toast()
+    );
+    // The panes share the frequency axis: it is the view's, not a pane's.
+    let fr = |id| t.st.view_for(id).freq;
+    assert!(rest.leaves().into_iter().all(|id| fr(id) == fr(b)));
+
+    // On a pane of another kind with no transfer measurement selected, there is nothing
+    // to stack.
+    let mut u = empty();
+    u.conn(mirror(four()));
+    u.st.update(Msg::SelectMeas(MeasId(4)), &u.keys);
+    u.st.update(Msg::Command(CommandId::TransferStack), &u.keys);
+    assert_eq!(u.st.layout.panes().len(), 1);
+    assert!(
+        u.last_toast().contains("no transfer measurement"),
+        "{}",
+        u.last_toast()
     );
 }
 
@@ -314,7 +404,7 @@ fn two_transfer_panes_keep_their_measurements_and_views() {
     let mode = |t: &T, id: PaneId| t.st.layout.view(id).expect("view").modes.transfer;
     assert_eq!(
         (mode(&t, a), mode(&t, b)),
-        (TransferView::Response, TransferView::Ir(IrMode::Linear))
+        (TransferView::Magnitude, TransferView::Ir(IrMode::Linear))
     );
     assert_eq!(shows(&t, b), Some(3));
     // A split copies the view; the halves then step apart.
@@ -337,7 +427,7 @@ fn two_transfer_panes_keep_their_measurements_and_views() {
     assert_eq!(
         (mode(&t, a), mode(&t, b), mode(&t, c)),
         (
-            TransferView::Response,
+            TransferView::Magnitude,
             TransferView::Ir(IrMode::Linear),
             TransferView::Coherence
         )

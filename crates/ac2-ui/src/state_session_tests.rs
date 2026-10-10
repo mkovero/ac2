@@ -1032,9 +1032,40 @@ fn new_measurements_start_and_become_selected() {
     t.conn(mirror(daemon_state()));
     assert_eq!(t.st.selected, Some(MeasId(7)));
     let mut s = daemon_state();
+    let before = t.st.layout.panes();
+    // Another client's measurement shows in the list only: the panes stay as they are.
+    s.measurements.push(meas(8, "Their TF", transfer()));
+    t.conn(mirror(s.clone()));
+    assert_eq!(t.st.layout.panes(), before);
     s.measurements.push(m);
     t.conn(mirror(s.clone()));
     assert_eq!(t.st.selected, Some(MeasId(7)));
+    // The new transfer measurement opens in the transfer stack, its three panes showing it,
+    // the magnitude on top with the focus.
+    let l = &t.st.layout;
+    let stack: Vec<_> = l
+        .panes()
+        .into_iter()
+        .filter(|id| l.view(*id).is_some_and(|v| v.meas == Some(MeasId(7))))
+        .map(|id| {
+            let v = l.view(id).expect("view");
+            (v.kind, v.modes.transfer, t.st.pane_meas(id).map(|m| m.id))
+        })
+        .collect();
+    assert_eq!(
+        stack,
+        [
+            (PaneKind::Transfer, TransferView::Magnitude, Some(MeasId(7))),
+            (PaneKind::Transfer, TransferView::Phase, Some(MeasId(7))),
+            (PaneKind::Transfer, TransferView::Coherence, Some(MeasId(7))),
+        ]
+    );
+    assert_eq!(l.panes().len(), before.len() + 2);
+    assert_eq!(t.st.pane_meas(l.focus).map(|m| m.id), Some(MeasId(7)));
+    assert_eq!(l.focused().modes.transfer, TransferView::Magnitude);
+    // Laid out once: a later mirror leaves the panes as the operator arranges them.
+    t.conn(mirror(s.clone()));
+    assert_eq!(t.st.layout.panes().len(), before.len() + 2);
     // The selection is the operator's again: Tab moves on and a later mirror keeps it.
     t.key("Tab");
     assert_ne!(t.st.selected, Some(MeasId(7)));

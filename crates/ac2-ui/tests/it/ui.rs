@@ -1307,6 +1307,23 @@ fn smoothed_phase_and_spectrum() {
         assert_eq!(sp.unit, "dBFS per 11.7 Hz bin (tone, 1/6 oct smoothed)");
         assert_eq!(sp.caption, "Hann window");
     }
+    // The phase drawn in its pane of the transfer stack, under the magnitude.
+    let tf = crate::common::pane(&h.state().state, ac2_ui::state::PaneKind::Transfer);
+    h.state_mut().state.layout.set_focus(tf);
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::TransferStack,
+    ));
+    let views: Vec<_> = {
+        let l = &h.state().state.layout;
+        l.panes()
+            .into_iter()
+            .filter_map(|id| l.view(id))
+            .filter(|v| v.kind == ac2_ui::state::PaneKind::Transfer && !v.shows_ir())
+            .map(|v| v.modes.transfer)
+            .collect()
+    };
+    use ac2_ui::state::TransferView as V;
+    assert_eq!(views, [V::Magnitude, V::Phase, V::Coherence]);
     snapshot(&mut h, "smoothed_phase_and_spectrum");
 }
 
@@ -3882,7 +3899,7 @@ fn transfer_legend_many_curves() {
     });
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../ac2-traces/tests/fixtures/house_curve.txt");
-    const CURVES: usize = 16;
+    const CURVES: usize = 30;
     for n in 1..=CURVES {
         h.key_press(Key::Z);
         step_until(&mut h, "target prompt", |a| {

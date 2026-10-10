@@ -80,8 +80,8 @@ mod stimulus;
 #[path = "state_text.rs"]
 mod text;
 pub use panes::{
-    Axis, DEFAULT_PANE_AREA, Layout, PaneId, PaneMenuRow, PaneModes, PaneNode, PaneRect, Side,
-    SplitGap, TransferView, View,
+    Axis, DEFAULT_PANE_AREA, Layout, PaneId, PaneMenuRow, PaneModes, PaneNode, PaneRect,
+    PaneTemplate, Side, SplitGap, TransferView, View,
 };
 use text::{SELECT_TRACE_FIRST, drawn_in, offset_text, slot_of};
 pub use text::{
@@ -1107,6 +1107,11 @@ pub struct AppState {
     armed_with: Option<GeneratorSettings>,
     /// A measurement this client just created: selected once the mirror lists it.
     pending_select: Option<MeasId>,
+    /// The name of a transfer measurement submitted from its form: its creation lays it
+    /// out in the transfer stack.
+    stack_on_create: Option<String>,
+    /// That measurement, created: stacked once the mirror lists it.
+    pending_stack: Option<MeasId>,
     /// Open the session dialog once the daemon's state shows no audio session (an embedded
     /// daemon on real audio starts without one).
     pub open_session_when_empty: bool,
@@ -1211,6 +1216,8 @@ impl AppState {
             swallow_text: None,
             armed_with: None,
             pending_select: None,
+            stack_on_create: None,
+            pending_stack: None,
             open_session_when_empty: false,
             devices: None,
             preview_sent_s: f64::NEG_INFINITY,

@@ -1421,6 +1421,45 @@ mod tests {
         assert_eq!(s.scene.layers[1].polylines.len(), 2);
     }
 
+    /// The magnitude alone: one plot over the pane's full height, the magnitude curve and
+    /// its level axis, no phase or coherence.
+    #[test]
+    fn magnitude_alone_fills_the_pane() {
+        let c = cols(20);
+        let t = [trace(&c, TraceKey::Live(MeasId(1)), 0.0)];
+        let build = |v: &ViewState| {
+            transfer_scene(
+                &t,
+                &DisplayCache::default(),
+                &Status::default(),
+                v,
+                &Theme::dark(),
+                SIZE,
+            )
+        };
+        let mut view = ViewState::default();
+        let all = build(&view);
+        (view.tf.show_phase, view.tf.show_coherence) = (false, false);
+        let s = build(&view);
+        let kinds: Vec<_> = s.panes.iter().map(|p| p.kind).collect();
+        assert_eq!(kinds, [TfPaneKind::Magnitude]);
+        assert!(s.coherence_overlay.is_none());
+        let titles: Vec<_> = s.panes.iter().map(|p| p.title.as_str()).collect();
+        assert_eq!(titles, [all.panes[0].title.as_str()]);
+        // From the stack's top to the stack's bottom: the whole height.
+        let (one, stacked) = (s.panes[0].plot, &all.panes);
+        let bottom = stacked[stacked.len() - 1].plot;
+        assert_eq!(one.y, stacked[0].plot.y);
+        assert!((one.y + one.h - (bottom.y + bottom.h)).abs() < 1e-3);
+        // The magnitude curve, drawn as in the stack.
+        let curves = &s.scene.layers[1].polylines;
+        assert_eq!(curves.len(), 1);
+        assert_eq!(
+            curves[0].points.len(),
+            all.scene.layers[1].polylines[0].points.len()
+        );
+    }
+
     #[test]
     fn overlay_text_sits_below_the_band() {
         use crate::canvas::tests::{intersects, label_box};

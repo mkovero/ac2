@@ -450,7 +450,7 @@ pub fn display_rows(
                     DistortionUnit::Percent => "% of fundamental".into(),
                 },
                 DisplayRow::Coherence => match views.coherence {
-                    CoherencePlacement::Pane => "its own strip under the phase".into(),
+                    CoherencePlacement::Pane => "its own view (G)".into(),
                     CoherencePlacement::OverlayOnMagnitude => "over the magnitude".into(),
                 },
                 DisplayRow::ResolutionMarker => {

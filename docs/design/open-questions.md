@@ -48,7 +48,7 @@ note at the start of the phase that implements them, within the decisions here.
 | 8b | Overlay reference = selected trace's measured delay (pick key to change); others drawn relative to it; per-trace nudge on top. |
 | M1 | MTW averaging: equal statistical confidence across stages is the default; a "fast LF" option caps the deepest stage's settling at ~1 s and shows its higher coherence floor. |
 | U1 | Banners live in a strip above the plots, outside the data area; plots shrink while a banner is up. |
-| U2 | Coherence in its own pane under phase (3:2:1) by default; toggle to overlay it on top of the magnitude pane. |
+| U2 | Magnitude, phase and coherence are each a transfer view of their own (G); the transfer stack lays them out as three panes (2:1:1), which a new transfer measurement opens in. Coherence can be overlaid on the magnitude view instead (Settings). |
 | D1 | Delay finder acceptance: full ≤1 sample; mid ≤0.05 ms; sub ≤0.1 ms for arrivals ≥2 pulse widths apart, ≤2 ms for unresolved sub clusters; resolved sub pairs / sub programme ≤2 % wrong, ≤20 % refused at 8 s. |
 | D2 | Sub observation 4 s default, operator choice 2/4/8 s. |
 | D3 | Sub tracking agreement ±0.1 ms. |

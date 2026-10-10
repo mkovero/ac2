@@ -583,7 +583,7 @@ enum SpectrumViewFile {
 #[serde(rename_all = "snake_case")]
 enum TransferViewFile {
     #[default]
-    Response,
+    Magnitude,
     Phase,
     Coherence,
     IrLinear,
@@ -728,7 +728,7 @@ impl PaneEntryFile {
             kind: PaneFile::of(p.kind),
             measurement: p.measurement.clone(),
             transfer_view: match m.transfer {
-                TransferView::Response => TransferViewFile::Response,
+                TransferView::Magnitude => TransferViewFile::Magnitude,
                 TransferView::Phase => TransferViewFile::Phase,
                 TransferView::Coherence => TransferViewFile::Coherence,
                 TransferView::Ir(IrMode::Linear) => TransferViewFile::IrLinear,
@@ -764,7 +764,7 @@ impl PaneEntryFile {
             measurement: self.measurement.clone(),
             modes: PaneModes {
                 transfer: match self.transfer_view {
-                    TransferViewFile::Response => TransferView::Response,
+                    TransferViewFile::Magnitude => TransferView::Magnitude,
                     TransferViewFile::Phase => TransferView::Phase,
                     TransferViewFile::Coherence => TransferView::Coherence,
                     TransferViewFile::IrLinear => TransferView::Ir(IrMode::Linear),
@@ -1448,6 +1448,9 @@ mod tests {
             "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"transfer\"\ntransfer_view = \"ir\"\n",
             "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"distortion\"\nsweep_view = \"ir\"\n",
             "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"transfer\"\nir_mode = \"log\"\n",
+            // `response` names no view: magnitude, phase and coherence together are the transfer
+            // stack, three panes.
+            "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"transfer\"\ntransfer_view = \"response\"\n",
             "[layout]\nfocus = 1\n\n[layout.tree]\nsplit = \"row\"\nratio = nan\na = { pane = 1 }\nb = { pane = 2 }\n",
             "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"spl\"\n\n[[layout.panes]]\nid = 1\nkind = \"transfer\"\n",
         ] {
@@ -1509,7 +1512,7 @@ mod tests {
         }
         // Every view of the transfer and sweep chains, the IR's displays among them.
         let names = [
-            "response",
+            "magnitude",
             "phase",
             "coherence",
             "ir_linear",

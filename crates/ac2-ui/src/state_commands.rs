@@ -649,6 +649,7 @@ impl AppState {
             C::SplitPane => self.split_pane(),
             C::ClosePane => self.close_pane(),
             C::TurnSplit => self.turn_split(),
+            C::TransferStack => self.transfer_stack(),
             C::GrowPane => self.resize_pane(true),
             C::ShrinkPane => self.resize_pane(false),
             C::SweepNew => self.open_sweep_dialog(keymap, out),

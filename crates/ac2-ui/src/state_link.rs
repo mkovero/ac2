@@ -29,6 +29,7 @@ impl AppState {
             ConnEvent::Failed { target, error, .. } => {
                 self.conn = ConnState::Failed { target, error };
                 self.pending_select = None;
+                self.pending_stack = None;
                 self.mirror = None;
                 self.data = None;
                 self.stimulus.phase = StimPhase::Idle;
@@ -50,6 +51,12 @@ impl AppState {
                 {
                     self.selected = Some(p);
                     self.pending_select = None;
+                }
+                if let Some(p) = self.pending_stack
+                    && ids.contains(&p)
+                {
+                    self.pending_stack = None;
+                    self.stack_created(p);
                 }
                 let waiting = self.pending_select.is_some() && self.pending_select == self.selected;
                 if !waiting && self.selected.is_none_or(|s| !ids.contains(&s)) {
@@ -158,6 +165,10 @@ impl AppState {
             ConnEvent::MeasCreated(m) => {
                 self.selected = Some(m.id);
                 self.pending_select = Some(m.id);
+                if self.stack_on_create.as_ref() == Some(&m.config.name) {
+                    self.stack_on_create = None;
+                    self.pending_stack = Some(m.id);
+                }
             }
             ConnEvent::Data(d) => {
                 if self.view.spectrum.peak_hold {
