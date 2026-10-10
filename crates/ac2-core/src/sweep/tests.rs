@@ -1077,7 +1077,9 @@ fn own_windows_resolve_the_lowest_columns_finer() {
         };
         let t = SweepTiming::new(&s).expect("timing");
         let a = dbfs_to_rms(s.level_dbfs) * std::f64::consts::SQRT_2;
-        let (reference, mic) = record(&s, 1, |x| polyn(&dc_blocked(x, fc), &POLY5), 1e-7, 21);
+        // Noise well above the far skirts of these strong harmonics, so that each window's
+        // floor is the noise it holds (see `GAP_NOISE_FACTOR`).
+        let (reference, mic) = record(&s, 1, |x| polyn(&dc_blocked(x, fc), &POLY5), 1e-6, 21);
         let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
         let err = |lo: f64, hi: f64| {
             let mut e = 0.0f64;
@@ -1154,6 +1156,57 @@ fn own_windows_resolve_the_lowest_columns_finer() {
         "{floor_s:.1} → {floor_f:.1} dBr"
     );
     assert!(roll_f >= 4.0 * 0.45 && roll_s < roll_f);
+}
+
+#[test]
+fn a_noise_burst_at_a_harmonics_moment_is_no_distortion() {
+    // A linear path whose input hums for a moment (0.4 s of 44 Hz) just as the sweep passes
+    // 22 Hz, the post-roll quiet: the H2 window at 22 Hz holds the hum, and a floor read only
+    // after the sweep would book it as H2. Read beside the window, the floor holds it too.
+    let s = SweepSpec {
+        level_dbfs: -30.0,
+        ..spec(ess(10.0, 20_000.0, 5.5))
+    };
+    let t = SweepTiming::new(&s).expect("timing");
+    let moment = 0.37 + t.plan.rate_s * (22.0 / t.emitted.start_hz).ln();
+    let hum = |mic: &mut Vec<f64>| {
+        let (c, half) = (moment * FS + MIC_DELAY as f64, 0.2 * FS);
+        for (i, v) in mic.iter_mut().enumerate() {
+            let x = (i as f64 - c) / half;
+            if x.abs() < 1.0 {
+                *v += 3e-5 * (0.5 + 0.5 * (PI * x).cos()) * (TAU * 44.0 * i as f64 / FS).sin();
+            }
+        }
+    };
+    let (reference, quiet) = record(&s, 1, <[f64]>::to_vec, 1e-6, 5);
+    let mut hummed = quiet.clone();
+    hum(&mut hummed);
+    let a = analyse_recording(&s, &reference, &quiet, 1).expect("analysis");
+    let b = analyse_recording(&s, &reference, &hummed, 1).expect("analysis");
+    let col = |f: f64| a.frequencies.iter().position(|&x| x >= f).expect("column");
+    let (i, j) = (col(22.0), col(1000.0));
+    let (h2a, h2b) = (&a.harmonics[0], &b.harmonics[0]);
+    eprintln!(
+        "H2 at 22 Hz: quiet {:.1} (floor {:.1}), hum {:.1} (floor {:.1}) dBr; floor at 1 kHz {:.1} → {:.1}",
+        h2a.level_db[i],
+        h2a.floor_db[i],
+        h2b.level_db[i],
+        h2b.floor_db[i],
+        h2a.floor_db[j],
+        h2b.floor_db[j]
+    );
+    assert!(
+        h2b.level_db[i] > h2a.level_db[i] + 20.0,
+        "the hum reaches the H2 window"
+    );
+    assert!(
+        !is_valid(h2b.level_db[i], h2b.floor_db[i]),
+        "the hum reads as H2"
+    );
+    assert!(
+        (h2a.floor_db[j] - h2b.floor_db[j]).abs() < 0.1,
+        "away from the hum the floor stays"
+    );
 }
 
 #[test]

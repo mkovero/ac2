@@ -68,6 +68,14 @@ pub const DISTORTION_MIN_CELLS: f64 = 3.0;
 /// distortion point): noise is smooth in frequency, and a steady floor keeps one noisy
 /// estimate from being compared with another.
 pub const FLOOR_BAND_OCT: f64 = 1.0 / 3.0;
+/// A harmonic's floor is the noise read beside its own window, in the gaps of the impulse
+/// response on either side, where that is more than this factor (3 dB) above the post-roll's.
+/// The post-roll noise windows read each frequency some 0.5–1 s after the sweep passed it; the
+/// gaps read it within a fraction of a second of the harmonic's own moment. Noise that comes
+/// in bursts (hum switching on and off) can fill the harmonic's moment while the post-roll is
+/// quiet, and then reads as distortion over a floor that never saw it. Stationary noise reads
+/// the same in both, and a single gap window scatters about ±2 dB around it.
+pub const GAP_NOISE_FACTOR: f64 = 2.0;
 /// Longest harmonic window, seconds: it still resolves fundamentals down to 2/W = 20 Hz.
 pub const MAX_WINDOW_S: f64 = 0.1;
 /// The emitted sweep starts at least this factor (two octaves) below the asked start
@@ -690,6 +698,9 @@ struct Windowed<'a> {
     pk: &'a [f64],
     p1: &'a [f64],
     noise: &'a [f64],
+    /// Noise in the impulse-response gaps beside this order's window (none where no whole
+    /// window fits): see [`GAP_NOISE_FACTOR`].
+    gaps: &'a [Vec<f64>],
 }
 
 /// An order's own longest window ([`LfHarmonics::Fine`]), with the fundamental and the
@@ -702,6 +713,7 @@ struct OwnWindow {
     pk: Vec<f64>,
     p1: Vec<f64>,
     noise: Vec<f64>,
+    gaps: Vec<Vec<f64>>,
 }
 
 impl OwnWindow {
@@ -714,6 +726,7 @@ impl OwnWindow {
             pk: &self.pk,
             p1: &self.p1,
             noise: &self.noise,
+            gaps: &self.gaps,
         }
     }
 }
@@ -734,6 +747,30 @@ fn lf_window(l: f64, k: u8) -> (f64, f64) {
     } else {
         (pre, post)
     }
+}
+
+/// Power spectra of windows `w` (rise `pre_n`, length `w.len()`) centred in the gaps on either
+/// side of order `k`'s window: between it and order k+1's, and between it and order k−1's (the
+/// linear response's for H2), every order's window placed alike around its `t(k)`. A gap
+/// without room for a whole window is skipped: the neighbours' band-limited impulses ring
+/// into it.
+fn gap_spectra(
+    src: &[f64],
+    t: impl Fn(u8) -> i64,
+    k: u8,
+    pre_n: usize,
+    w: &[f64],
+    nw: usize,
+) -> Vec<Vec<f64>> {
+    let (pre, len) = (pre_n as i64, w.len() as i64);
+    let post = len - pre;
+    [(k + 1, k), (k, k - 1)]
+        .into_iter()
+        .filter_map(|(early, late)| {
+            let (lo, hi) = (t(early) + post, t(late) - pre);
+            (hi - lo >= len).then(|| power_spectrum(&segment(src, (lo + hi - len) / 2, w), nw))
+        })
+        .collect()
 }
 
 /// Half-Hann rise over `rise` samples, flat, half-Hann fall over the last `fall` samples.
@@ -881,6 +918,9 @@ pub fn analyse_recording(
         .unwrap_or(0)
         .max(1);
     let noise = noise_power(&h_harm, noise_end, noise_windows, &w, nw);
+    let gaps: Vec<Vec<Vec<f64>>> = (2..=k_max)
+        .map(|k| gap_spectra(&h_harm, t_k, k, pre_n, &w, nw))
+        .collect();
 
     let freqs = spec.grid.frequencies();
     let (f1, f2) = (spec.ess.start_hz, spec.ess.end_hz);
@@ -901,6 +941,7 @@ pub fn analyse_recording(
         pk: &spectra[usize::from(k) - 1],
         p1: &spectra[0],
         noise: &noise,
+        gaps: &gaps[usize::from(k) - 2],
     };
     // `LfHarmonics::Fine`: per order, its longest window, the harmonic from a response
     // high-passed below that window's own lowest fundamental.
@@ -931,6 +972,7 @@ pub fn analyse_recording(
                 pk: power_spectrum(&segment(&hk, t_k(k) - pre_n as i64, &w), nw),
                 p1: power_spectrum(&segment(&h, t_k(1) - pre_n as i64, &w), nw),
                 noise: noise_power(&hk, end, count, &w, nw),
+                gaps: gap_spectra(&hk, t_k, k, pre_n, &w, nw),
             })
         })
         .collect();
@@ -974,7 +1016,14 @@ pub fn analyse_recording(
             if p1.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                 continue;
             }
-            let nk = band_power(x.noise, x.bin, kf, FLOOR_BAND_OCT, 2.0 * x.min_hz);
+            let floor = |s: &[f64]| band_power(s, x.bin, kf, FLOOR_BAND_OCT, 2.0 * x.min_hz);
+            let post = floor(x.noise);
+            let nk = x
+                .gaps
+                .iter()
+                .map(|g| floor(g))
+                .filter(|&ng| ng > GAP_NOISE_FACTOR * post)
+                .fold(post, f64::max);
             let cell = 1.0 / (k * x.window_s);
             harmonic_cell[i] = Some(harmonic_cell[i].map_or(cell, |c: f64| c.max(cell)));
             hc.level_db[i] = db10(pk / p1);
