@@ -94,6 +94,11 @@ OSM_TF_COLS = [
     ("ac2 γ² − E[γ̂²] (mean)", "ac2_γ²_vs_its_expected_value"),
     ("OSM γ² − E[γ̂²] (mean)", "osm_γ²_vs_its_expected_value"),
 ]
+# Digital DUT (a software device with exactly known harmonics, on a dummy JACK server):
+# (row label, the order's coverage check, the pattern of its per-tone checks)
+DUT_ROWS = [(f"H{k} {who}", f"coverage.h{k}.{who}", rf"dut\.h{k}\.{pat}\.")
+            for k in range(2, 6) for who, pat in (("steady sine", "steady sine"), ("ac2 sweep", r"ac2 sweep [^.]*"))]
+
 # Rig takes and masks: how many columns each OSM comparison stands on, and the tails a median hides
 OSM_COVERAGE_COLS = [
     ("columns judged", "columns_judged"),
@@ -200,7 +205,7 @@ def _run(b: dict) -> str:
 
 def _ppo(b: dict) -> int | None:
     """Columns per octave of a rig path baseline; 48 when not recorded (ac2's default)."""
-    return None if b["stage"] in ("osm", "ambient") else int(b.get("resolution_ppo") or 48)
+    return None if b["stage"] in ("osm", "ambient", "dut") else int(b.get("resolution_ppo") or 48)
 
 
 def newest(items: list[tuple[Path, dict]]) -> list[tuple[Path, dict]]:
@@ -208,7 +213,8 @@ def newest(items: list[tuple[Path, dict]]) -> list[tuple[Path, dict]]:
     width measures a different quantity, so it stands beside the default one, not over it."""
     best: dict[tuple, tuple[Path, dict]] = {}
     for p, b in items:
-        k = (p.parent.name, b["stage"], _ppo(b))
+        # the DUT matrix is one build at several levels: each level is its own evidence
+        k = (p.parent.name, b["stage"], _ppo(b), b.get("level_dbfs") if b["stage"] == "dut" else None)
         if k not in best or _run(b) > _run(best[k][1]):
             best[k] = (p, b)
     return [pb for pb in items if pb in best.values()]
@@ -281,6 +287,23 @@ def osm_tables(b: dict) -> list[str]:
     return out
 
 
+def dut_table(bs: list[dict]) -> list[str]:
+    """Per harmonic order and analyser: the worst signed error over the quasi-static cells, then
+    the verdicts of every tone judged (cells the sweep model cannot follow are reported apart)."""
+    bs = sorted(bs, key=lambda b: -(b.get("level_dbfs") or 0))
+    out = ["| order, analyser | " + " | ".join(heading(b) for b in bs) + " |", "|---|" + "---|" * len(bs),
+           "| verdicts | " + " | ".join(counts_line(b) for b in bs) + " |"]
+    for label, cov, pat in DUT_ROWS:
+        cells = []
+        for b in bs:
+            e = b["checks"].get(f"dut.{cov}")
+            tones = [e2 for _, _, e2 in matches_for(b, pat)]
+            head = fmt_value(e["value"], e.get("unit") or "") if e and e["value"] is not None else "—"
+            cells.append(f"{head} ({counts_text(tones)})" if tones else head)
+        out.append(f"| {label} | " + " | ".join(cells) + " |")
+    return out
+
+
 def render(root: Path = BASELINES) -> str:
     items = newest(load(Path(root)))
     out = [BEGIN, ""]
@@ -292,7 +315,11 @@ def render(root: Path = BASELINES) -> str:
             pv = b.get("provenance") or {}
             out += [f"### OSM stage ({pv.get('run')}, ac2 {_short_build(pv.get('ac2_build'))}, "
                     f"{pv.get('osm_version')}: {counts_line(b)})", ""] + osm_tables(b)
-        paths = [b for b in bs if b["stage"] not in ("osm", "ambient")]
+        duts = [b for b in bs if b["stage"] == "dut"]
+        if duts:
+            out += ["### Digital DUT: harmonics H2–H5 against their exact values (dummy JACK)", ""]
+            out += dut_table(duts) + [""]
+        paths = [b for b in bs if b["stage"] not in ("osm", "ambient", "dut")]
         if paths:
             paths.sort(key=lambda b: (b["stage"] != "xone", _ppo(b) != 48, _ppo(b)))
             out += [f"### {rig}: electrical (xone) and speaker (genelec) paths", ""] + rig_table(paths, RIG_ROWS) + [""]
