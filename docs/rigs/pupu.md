@@ -694,6 +694,29 @@ H2 at 22 Hz becomes −83.4 over a floor of −78.1, the 3 Hz sweep's 35–45 Hz
 bound. Rerun on d08cc70 (`20261010T172222Z`, deployed to pupu only): FAIL 0, WARN 0, METHOD 0;
 the LF harmonic cells are bounds on ac2 and REW alike. The burst source on in 5 is not found.
 
+#### Where the bursts enter (2026-10-10, passive captures, nothing emitted)
+
+30 s passive captures of all 8 FF400 inputs, read in 35–95 Hz over 0.25 s blocks.
+
+- Wiring at the time: FF400 outs 5, 6 → Xone:62 channel inputs L/R → Xone master → FF400
+  ins 5, 6.
+- The bursts are on in 5 and in 6 at once and at the same level (−91.1 / −91.2 dBFS);
+  waveform correlation 0.9995, L − R cancels to −120.7 dBFS. Ins 2 (loopback), 7 and 8 are
+  clean at about −128; the mic on in 1 is uncorrelated with them (0.005).
+- Xone ch1 fader and gain down: bursts −110.8 / −112.2 dBFS over a floor of −125 / −127.5.
+- The same cables moved to Xone ch2: bursts back at −92.3 / −92.4, so not the channel strip.
+- Out 5 unplugged at the FF400: the bursts leave in 5 (peak −110.4) and stay on in 6 (−89.2).
+- That cable moved to FF400 out 4 (nothing routed to it in JACK): bursts back on in 5 (−92.3),
+  so not specific to outs 5/6.
+- 10 s of 4-core CPU load on pupu during a capture: no change.
+- Pattern: about every 2.2 s, 0.5–0.75 s long, 36–55 Hz content.
+- Grounding: the FF400 (AC transformer supply) and pupu (Mac mini, Class II) have no PE. The
+  only ground ties are the FireWire shield and the audio cable shields to the Xone (whether the
+  Xone's chassis post is bonded to PE is unmeasured). The bursts need the FF400 ↔ Xone cable
+  loop; the FF400's own loopback is clean. Most likely switched loads (the building has
+  industrial heating/cooling next door) coupling into that shield loop; the source is not
+  located. A chassis-to-signal-ground bond FF400 ↔ Xone was being tried at the time of writing.
+
 ### Digital DUT: floors, the fade-out edge, LF harmonics fine (2026-10-09, ac2d 2416a06 → 511efb0, −10 dBFS)
 
 - **Floor +3 dB** in the suite's own model: it deconvolved the measurement input's noise only,
