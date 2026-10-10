@@ -40,6 +40,8 @@ struct Item {
     /// A separator after it (on its far side from the bar's edge).
     sep: bool,
     hover: Option<String>,
+    /// A click (or tap) runs it.
+    click: Option<CommandId>,
 }
 
 impl Item {
@@ -51,6 +53,7 @@ impl Item {
             dot: None,
             sep: false,
             hover: None,
+            click: None,
         }
     }
 
@@ -122,12 +125,22 @@ fn text_width(ui: &egui::Ui, t: &RichText) -> f32 {
 
 /// Draws item `it` with its text `k`. Right to left, the code order flips: the text first,
 /// then the dot (shown before it), then the separator (shown inwards of it).
-fn draw_item(ui: &mut egui::Ui, it: &Item, k: usize, rtl: bool) {
-    let text = |ui: &mut egui::Ui| {
-        let r = ui.label(it.variants[k].clone());
-        if let Some(h) = &it.hover {
-            r.on_hover_text(h);
+/// Draws `it` in its variant `k`; returns its command when it was clicked.
+fn draw_item(ui: &mut egui::Ui, it: &Item, k: usize, rtl: bool) -> Option<CommandId> {
+    let mut clicked = false;
+    let mut text = |ui: &mut egui::Ui| {
+        let mut l = egui::Label::new(it.variants[k].clone());
+        if it.click.is_some() {
+            l = l.sense(egui::Sense::click());
         }
+        let mut r = ui.add(l);
+        if it.click.is_some() {
+            r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
+        }
+        if let Some(h) = &it.hover {
+            r = r.on_hover_text(h);
+        }
+        clicked = r.clicked();
     };
     if rtl {
         text(ui);
@@ -143,6 +156,7 @@ fn draw_item(ui: &mut egui::Ui, it: &Item, k: usize, rtl: bool) {
     if it.sep {
         ui.separator();
     }
+    it.click.filter(|_| clicked)
 }
 
 pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
@@ -229,13 +243,36 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     .kept()
     .sep();
     link.dot = Some(color);
-    let left = [
+    let working = st.daemon().map(|_| {
+        let l =
+            ac2_scene::sessions::working_label(&st.working(), super::now().wall, st.clock_offset());
+        let name = ac2_scene::sessions::origin_name(st.working().origin.as_ref());
+        let color = if l.unsaved { ch.warn } else { ch.text };
+        let short = if l.unsaved {
+            format!("{name} ·")
+        } else {
+            name
+        };
+        let mut it = Item::new(
+            if l.unsaved { 80 } else { 50 },
+            vec![
+                RichText::new(l.text).color(color),
+                RichText::new(short).color(color),
+            ],
+        )
+        .sep();
+        it.hover = Some(l.detail);
+        it.click = Some(CommandId::Sessions);
+        it
+    });
+    let mut left = vec![
         Item::new(100, vec![RichText::new("ac2").strong().size(16.0)])
             .kept()
             .sep(),
         link,
-        session,
     ];
+    left.extend(working);
+    left.push(session);
 
     // Right side, from the edge inwards.
     let mut keys = Item::new(
@@ -316,11 +353,12 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let (lp, rp) = pick.split_at(left.len());
     let settings_tip = format!("Settings ({})", key_hint(app, CommandId::Settings));
     let mut open_settings = false;
+    let mut run = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BAR_GAP;
         for (it, p) in left.iter().zip(lp) {
             if let Some(k) = p {
-                draw_item(ui, it, *k, false);
+                run = run.or(draw_item(ui, it, *k, false));
             }
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -334,13 +372,16 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             open_settings = gear.clicked();
             for (it, p) in right.iter().zip(rp) {
                 if let Some(k) = p {
-                    draw_item(ui, it, *k, true);
+                    run = run.or(draw_item(ui, it, *k, true));
                 }
             }
         });
     });
     if open_settings {
         app.dispatch(crate::state::Msg::Command(CommandId::Settings));
+    }
+    if let Some(c) = run {
+        app.dispatch(crate::state::Msg::Command(c));
     }
 }
 

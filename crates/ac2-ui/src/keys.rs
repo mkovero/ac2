@@ -439,8 +439,12 @@ commands! {
     OffsetDownCoarse => "offset_down_coarse", "Display offset −3 dB of the selected curve", [Global];
     OffsetClear => "offset_clear", "Display offset of the selected curve back to 0", [Global];
     ImportTrace => "import_trace", "Import a trace file (CSV, analyzer text, IR WAV)…", [Global];
-    SessionSave => "session_save", "Session: save (name or path)…", [Global];
-    SessionLoad => "session_load", "Session: load, disarmed (name or path)…", [Global];
+    Sessions => "sessions", "Sessions: new, open, save, recent sessions…", [Global];
+    SessionNew => "session_new", "New session (asks about unsaved changes), then the audio settings", [Global];
+    SessionLoad => "session_load", "Sessions: open a file or folder on this computer, disarmed…", [Global];
+    SessionSave => "session_save", "Save session (where it came from; untitled: Save as)", [Global];
+    SessionSaveAs => "session_save_as", "Save session as: a new session on the daemon…", [Global];
+    SessionExport => "session_export", "Export session: an .ac2session file on this computer…", [Global];
     Reconnect => "reconnect", "Reconnect to the daemon now", [Global];
     OpenSession => "session_open", "Open audio session: Settings › Audio & I/O…", [Global];
     CloseSession => "session_close", "Close audio session", [Global];
@@ -626,6 +630,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::ZoomOut, S::Global, k(K::O)),
         // Plain O zooms out; the session dialog takes Shift+O.
         (C::OpenSession, S::Global, sh(K::O)),
+        // Alt+S: the saved sessions (S alone is start/stop, Shift+S a sweep).
+        (C::Sessions, S::Global, alt(K::S)),
         (C::PanLeft, S::Global, k(K::ArrowLeft)),
         (C::PanRight, S::Global, k(K::ArrowRight)),
         (C::ResetView, S::Global, k(K::Home)),
@@ -1146,8 +1152,11 @@ mod tests {
             CommandId::LegendBottomRight,
             CommandId::LegendHide,
             CommandId::ImportTrace,
+            CommandId::SessionNew,
             CommandId::SessionSave,
+            CommandId::SessionSaveAs,
             CommandId::SessionLoad,
+            CommandId::SessionExport,
             CommandId::InputSetup,
             CommandId::Calibrations,
             CommandId::InputMics,

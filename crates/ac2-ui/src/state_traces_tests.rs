@@ -1114,47 +1114,6 @@ fn a_wav_export_path_asks_for_the_impulse_response() {
 }
 
 #[test]
-fn sessions_from_the_palette() {
-    let mut t = T::new();
-    t.key("Ctrl+K");
-    t.text("session save");
-    t.key("Enter");
-    assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.kind == PromptKind::SessionSave));
-    t.text("friday show");
-    let r = t.key("Enter");
-    assert!(matches!(
-        r.as_slice(),
-        [Request::Call {
-            cmd: Command::FileSave {
-                session: SessionRef::Name { name },
-                overwrite: false,
-            },
-            ..
-        }] if name == "friday show"
-    ));
-    t.key("Ctrl+K");
-    t.text("session load");
-    t.key("Enter");
-    t.text("./shows/fri");
-    let r = t.key("Enter");
-    let [
-        Request::Call {
-            cmd:
-                Command::FileLoad {
-                    session: SessionRef::Path { path },
-                    discard: true,
-                },
-            ..
-        },
-    ] = r.as_slice()
-    else {
-        panic!("{r:?}")
-    };
-    assert!(std::path::Path::new(path).is_absolute());
-    assert!(path.ends_with("fri"));
-}
-
-#[test]
 fn stored_trace_metadata_follows_the_mirror() {
     let mut t = T::new();
     let meta = stored(9, Some(1), 2);

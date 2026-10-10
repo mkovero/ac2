@@ -106,6 +106,12 @@ pub fn autosave_dir() -> PathBuf {
     data_dir().join("autosave")
 }
 
+/// The autosave of the app's embedded daemon (real audio): `<data>/autosave-app`, apart
+/// from a stand-alone daemon's on the same machine.
+pub fn app_autosave_dir() -> PathBuf {
+    data_dir().join("autosave-app")
+}
+
 /// The daemon's raw capture files (`<name>.wav` + `<name>.ac2rec.json`):
 /// `<data>/recordings`.
 pub fn recording_dir() -> PathBuf {

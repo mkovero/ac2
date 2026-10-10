@@ -11,6 +11,7 @@ mod overlays;
 mod panes;
 mod recording;
 mod session;
+mod sessions;
 mod settings;
 
 use ac2_scene::theme::Theme;

@@ -215,6 +215,7 @@ fn main() -> ExitCode {
         // The simulated rig starts measuring.
         open_session_dialog: !(embedded.is_some()
             && matches!(args.backend, Some(BackendArg::Fake))),
+        embedded_autosave: embedded.as_ref().map(Embedded::autosaves),
         client_key,
         connect: Some(ac2_ui::app::ConnectSetup {
             key_dir,

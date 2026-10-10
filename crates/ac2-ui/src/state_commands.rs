@@ -672,7 +672,7 @@ impl AppState {
                     Overlay::Palette(Palette::default())
                 };
             }
-            C::Quit => self.quit = true,
+            C::Quit => self.request_quit(),
             C::Fullscreen => self.cycle_fullscreen(),
             C::KeyHints => {
                 self.prefs.key_hints = !self.prefs.key_hints;
@@ -941,8 +941,14 @@ impl AppState {
                 }
             }
             C::ImportTrace => self.prompt(PromptKind::ImportFile(ImportRole::Trace), String::new()),
-            C::SessionSave => self.prompt(PromptKind::SessionSave, String::new()),
-            C::SessionLoad => self.prompt(PromptKind::SessionLoad, String::new()),
+            C::Sessions => self.open_sessions(crate::sessions::Page::Main, out),
+            C::SessionNew
+            | C::SessionSave
+            | C::SessionSaveAs
+            | C::SessionLoad
+            | C::SessionExport => {
+                self.session_command(c, out);
+            }
             C::Reconnect => out.push(Request::Reconnect),
             C::OpenSession => {
                 if !self.connected() {

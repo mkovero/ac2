@@ -150,8 +150,9 @@ pub enum Replacing<'a> {
     New,
     /// Opening this session.
     Open(&'a str),
-    /// Quitting the app with its embedded daemon.
-    Quit,
+    /// Quitting the app with its embedded daemon; `kept`: it autosaves, so the working
+    /// state comes back at the next start.
+    Quit { kept: bool },
 }
 
 /// Answer indices of [`unsaved_question`].
@@ -184,10 +185,13 @@ pub fn unsaved_question(w: &WorkingSession, replacing: Replacing<'_>) -> Questio
     let what = match replacing {
         Replacing::New => "New session starts empty.".to_owned(),
         Replacing::Open(s) => format!("Opening {s} replaces the measurements and traces."),
-        Replacing::Quit => "The app closes its daemon.".to_owned(),
+        Replacing::Quit { .. } => "The app closes its daemon.".to_owned(),
     };
     let kept = match replacing {
-        Replacing::Quit => "Without saving they come back when the app starts again.",
+        Replacing::Quit { kept: true } => {
+            "Without saving they come back when the app starts again."
+        }
+        Replacing::Quit { kept: false } => "Without saving they are lost.",
         _ => "Discarded changes stay recoverable once (Recover previous).",
     };
     let save = if w.origin.is_some() {
@@ -196,7 +200,7 @@ pub fn unsaved_question(w: &WorkingSession, replacing: Replacing<'_>) -> Questio
         "Save as…"
     };
     let discard = match replacing {
-        Replacing::Quit => "Quit without saving",
+        Replacing::Quit { .. } => "Quit without saving",
         _ => "Discard",
     };
     Question {
@@ -232,7 +236,7 @@ pub const SALVAGE: usize = 0;
 /// Asked when a session of another format version is refused (`version`: its version).
 pub fn salvage_question(name: &str, version: Option<u32>) -> Question {
     let which = version.map_or_else(
-        || "an unreadable session format".to_owned(),
+        || "another session format".to_owned(),
         |v| format!("session format {v}"),
     );
     Question {
@@ -433,8 +437,12 @@ mod tests {
         );
         let q = unsaved_question(&w(None, true), Replacing::New);
         assert_eq!(q.answers[SAVE], "Save as…");
-        let q = unsaved_question(&w(name("friday"), true), Replacing::Quit);
+        let q = unsaved_question(&w(name("friday"), true), Replacing::Quit { kept: true });
         assert_eq!(q.answers[DISCARD], "Quit without saving");
+        assert_eq!(
+            q.lines[1],
+            "Without saving they come back when the app starts again."
+        );
         assert_eq!(q.answers[CANCEL], "Cancel");
         let q = replace_question("a", WallNs(0), WallNs(120 * S), ClockOffset(0));
         assert_eq!(q.title, "Replace session a?");

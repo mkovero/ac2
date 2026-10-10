@@ -7,7 +7,8 @@
 //! focused pane, maximised or full screen, what each pane shows (its kind, measurement,
 //! modes and how much of its plot: grid, labels, cursor), the window's size and position,
 //! and each pane's level axis range (a fit made for one show is a fair start for the next),
-//! and where the transfer pane's legend sat and how large it may be.
+//! where the transfer pane's legend sat and how large it may be, and the session files
+//! this app opened or exported (the Sessions dialog's recents).
 //!
 //! ```toml
 //! key_hints = false
@@ -75,6 +76,10 @@
 //! height = 900
 //! x = 80
 //! y = 40
+//!
+//! [[recent_sessions]]
+//! path = "/run/media/foh/STICK/friday.ac2session"
+//! opened_at = 1789500000000000000
 //! ```
 //!
 //! Channels are one-based in the file, as everywhere the operator reads or types them.
@@ -270,6 +275,36 @@ pub struct UiPrefs {
     pub spectrograph_span_s: Option<u32>,
     /// The transfer pane's legend as last left.
     pub legend: LegendPrefs,
+    /// Session files and folders on this machine the app opened or exported, most recent
+    /// first, at most [`MAX_RECENT_SESSIONS`].
+    pub recent_sessions: Vec<RecentSession>,
+}
+
+/// How many session files the recents keep.
+pub const MAX_RECENT_SESSIONS: usize = 12;
+
+/// A session file or folder on this machine the app opened or exported.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecentSession {
+    pub path: String,
+    /// When (this machine's wall clock, ns).
+    pub opened_at: u64,
+}
+
+impl UiPrefs {
+    /// `path` used now: first in the recents, once.
+    pub fn note_recent_session(&mut self, path: &str, at: ac2_proto::units::WallNs) {
+        self.recent_sessions.retain(|r| r.path != path);
+        self.recent_sessions.insert(
+            0,
+            RecentSession {
+                path: path.to_owned(),
+                opened_at: at.0,
+            },
+        );
+        self.recent_sessions.truncate(MAX_RECENT_SESSIONS);
+    }
 }
 
 /// Bounds of the record toggle's limit, minutes: a whole day of every input of a large
@@ -295,6 +330,7 @@ impl Default for UiPrefs {
             record_limit_min: None,
             spectrograph_span_s: None,
             legend: LegendPrefs::default(),
+            recent_sessions: Vec::new(),
         }
     }
 }
@@ -383,6 +419,8 @@ struct File {
     legend: Option<LegendsFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window: Option<WindowFile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recent_sessions: Vec<RecentSession>,
     /// Top-level keys this version does not know: logged and left out of the next save, so
     /// one stale or mistyped setting costs only itself, never the rest of the file.
     #[serde(flatten, skip_serializing)]
@@ -1135,6 +1173,11 @@ impl UiPrefs {
                 .map(LegendFile::parse)
                 .transpose()?
                 .unwrap_or_default(),
+            recent_sessions: {
+                let mut r = f.recent_sessions;
+                r.truncate(MAX_RECENT_SESSIONS);
+                r
+            },
         })
     }
 
@@ -1161,6 +1204,7 @@ impl UiPrefs {
                 x: w.pos.map(|p| p.0),
                 y: w.pos.map(|p| p.1),
             }),
+            recent_sessions: self.recent_sessions.clone(),
             stimulus_outputs: self
                 .outputs
                 .iter()

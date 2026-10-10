@@ -141,6 +141,12 @@ pub enum ConnEvent {
     },
     /// `spl.band_transfer` answered with the meter that took the transfer, or why not.
     BandTransfer(Result<Box<Measurement>, String>),
+    /// A [`Request::Sessions`] job ended.
+    Sessions(Box<crate::sessions::SessionOutcome>),
+    /// A session file moving: `uploading fri.ac2session: 1.2 of 3.4 MB`.
+    SessionProgress(String),
+    /// `file.list` answered.
+    SessionList(Result<Vec<ac2_proto::model::SessionFile>, String>),
 }
 
 /// Stimulus lease outcomes.
@@ -267,6 +273,11 @@ pub enum Request {
     /// `server.authorize` / `server.revoke`; answered with the new info
     /// ([`ConnEvent::Server`] carrying `what`).
     ServerCall { cmd: Command, what: String },
+    /// A Sessions-dialog job ([`ConnEvent::SessionProgress`] while it moves a file,
+    /// [`ConnEvent::Sessions`] when it ends).
+    Sessions(crate::sessions::SessionJob),
+    /// `file.list` ([`ConnEvent::SessionList`]).
+    SessionList,
 }
 
 enum Ctl {
@@ -705,6 +716,8 @@ fn request_name(r: &Request) -> String {
         Request::Reconnect => "reconnect".into(),
         Request::ServerInfo => "server info".into(),
         Request::ServerCall { what, .. } => what.clone(),
+        Request::Sessions(_) => "session".into(),
+        Request::SessionList => "list sessions".into(),
     }
 }
 
@@ -1160,6 +1173,24 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                 });
             });
         }
+        Request::Sessions(job) => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let outcome = session_job(&c, &o, job.steps).await;
+                o.send(ConnEvent::Sessions(Box::new(outcome)));
+            });
+        }
+        Request::SessionList => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let result = c
+                    .call(Command::FileList)
+                    .await
+                    .and_then(|r| expect_body!("file.list", r, ReplyBody::Sessions(l) => l))
+                    .map_err(|e| e.to_string());
+                o.send(ConnEvent::SessionList(result));
+            });
+        }
         Request::ServerInfo => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
@@ -1362,6 +1393,136 @@ async fn capture(
         })
         .await?;
     expect_body!("trace.capture", r, ReplyBody::Trace(t) => t)
+}
+
+/// Runs `steps` in order; the first failure ends the job.
+async fn session_job(
+    c: &Client,
+    o: &Out,
+    steps: Vec<crate::sessions::SessionStep>,
+) -> crate::sessions::SessionOutcome {
+    use crate::sessions::{SessionFailure, SessionOutcome};
+    let mut done = Vec::new();
+    let mut it = steps.into_iter();
+    while let Some(step) = it.next() {
+        match session_step(c, o, &step).await {
+            Ok(d) => done.push(d),
+            Err(e) => {
+                let (code, detail) = match &e {
+                    ClientError::Daemon(p) => (Some(p.code), p.detail.clone()),
+                    _ => (None, None),
+                };
+                return SessionOutcome {
+                    done,
+                    failed: Some(SessionFailure {
+                        step,
+                        rest: it.collect(),
+                        error: e.to_string(),
+                        code,
+                        detail,
+                    }),
+                };
+            }
+        }
+    }
+    SessionOutcome { done, failed: None }
+}
+
+/// A session reference for `from`: a file here is uploaded first.
+async fn session_source(
+    c: &Client,
+    o: &Out,
+    from: &crate::sessions::Source,
+) -> Result<ac2_proto::model::SessionRef, ClientError> {
+    use ac2_client::sessions::LocalSession;
+    match from {
+        crate::sessions::Source::Daemon(r) => Ok(r.clone()),
+        crate::sessions::Source::Here(p) => {
+            let local = LocalSession::at(p).ok_or_else(|| ClientError::Io {
+                path: p.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "not an .ac2session file or a session folder",
+                ),
+            })?;
+            let file = p.to_string_lossy().into_owned();
+            let transfer = ac2_client::sessions::upload(c, &local, |done, total| {
+                o.send(ConnEvent::SessionProgress(
+                    ac2_scene::sessions::transfer_progress("uploading", &file, done, total),
+                ));
+            })
+            .await?;
+            Ok(ac2_proto::model::SessionRef::Upload { transfer })
+        }
+    }
+}
+
+async fn session_step(
+    c: &Client,
+    o: &Out,
+    step: &crate::sessions::SessionStep,
+) -> Result<crate::sessions::SessionDone, ClientError> {
+    use crate::sessions::{SessionDone as D, SessionStep as S, Source};
+    Ok(match step {
+        S::Save { session, overwrite } => {
+            let r = c
+                .call(Command::FileSave {
+                    session: session.clone(),
+                    overwrite: *overwrite,
+                })
+                .await?;
+            D::Saved(expect_body!("file.save", r, ReplyBody::SessionFile(f) => f)?)
+        }
+        S::Export { session, path } => {
+            let file = path.to_string_lossy().into_owned();
+            let (path, bytes) =
+                ac2_client::sessions::export(c, session.clone(), path, |done, total| {
+                    o.send(ConnEvent::SessionProgress(
+                        ac2_scene::sessions::transfer_progress("exporting", &file, done, total),
+                    ));
+                })
+                .await?;
+            D::Exported {
+                path,
+                bytes,
+                working: session.is_none(),
+            }
+        }
+        S::New { discard } => {
+            c.call(Command::FileNew { discard: *discard }).await?;
+            D::New
+        }
+        S::Open { from, discard } => {
+            let session = session_source(c, o, from).await?;
+            let r = c
+                .call(Command::FileLoad {
+                    session,
+                    discard: *discard,
+                })
+                .await?;
+            let file = expect_body!("file.load", r, ReplyBody::SessionFile(f) => f)?;
+            D::Opened {
+                file,
+                here: match from {
+                    Source::Here(p) => Some(p.clone()),
+                    Source::Daemon(_) => None,
+                },
+            }
+        }
+        S::Recover => {
+            c.call(Command::FileRecover).await?;
+            D::Recovered
+        }
+        S::Salvage { from } => {
+            let session = session_source(c, o, from).await?;
+            let r = c.call(Command::FileSalvage { session }).await?;
+            D::Salvaged {
+                name: from.name(),
+                salvage: expect_body!("file.salvage", r, ReplyBody::Salvage(s) => s)?,
+            }
+        }
+        S::Quit => D::Quit,
+    })
 }
 
 async fn import(

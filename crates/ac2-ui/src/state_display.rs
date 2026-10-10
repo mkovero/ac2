@@ -37,13 +37,24 @@ pub struct DeletePrompt {
 }
 
 /// What a question's answer acts on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChoicePurpose {
     /// Deleting measurement `meas` that owns traces or math channels: keep, delete, cancel
     /// ([`ac2_scene::meas_list::KEEP`] …).
     DeleteOwned { meas: MeasId },
     /// Filing a stored trace (or a math channel) under the owner of the answer picked.
     Move(MoveWhat),
+    /// Unsaved changes before `then` replaces them (New, Open, Quit): Save / Discard /
+    /// Cancel ([`ac2_scene::sessions::unsaved_question`]).
+    Unsaved {
+        then: Vec<crate::sessions::SessionStep>,
+    },
+    /// Save as onto another existing session: Replace runs `rest` (the save, overwriting).
+    Replace {
+        rest: Vec<crate::sessions::SessionStep>,
+    },
+    /// A session of another format version: import its traces.
+    Salvage { from: crate::sessions::Source },
 }
 
 /// What "Move to measurement…" moves.
@@ -572,6 +583,9 @@ impl AppState {
         }
         self.overlay = Overlay::None;
         match c.purpose {
+            p @ (ChoicePurpose::Unsaved { .. }
+            | ChoicePurpose::Replace { .. }
+            | ChoicePurpose::Salvage { .. }) => self.session_answer(p, i, out),
             ChoicePurpose::DeleteOwned { meas } => {
                 let traces = match i {
                     ac2_scene::meas_list::KEEP => OwnedTraces::Keep,

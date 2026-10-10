@@ -50,6 +50,7 @@ fn main() -> Result<(), eframe::Error> {
         started,
         bench_startup: has("--bench-startup"),
         open_session_dialog: false,
+        embedded_autosave: None,
         client_key: None,
         connect: None,
     };

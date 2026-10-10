@@ -40,6 +40,9 @@ pub struct AppOptions {
     /// Open the audio setup (Settings › Audio & I/O on the device) once connected if the
     /// daemon has no audio session (an embedded daemon on real audio starts without one).
     pub open_session_dialog: bool,
+    /// The app hosts its daemon (`Some(true)`: that daemon autosaves): quitting with
+    /// unsaved changes asks first.
+    pub embedded_autosave: Option<bool>,
     /// This client's key, shown on the Connection page of Settings.
     pub client_key: Option<crate::settings::ClientKey>,
     /// What the connect dialog needs, so Settings can open it again; `None`: it cannot.
@@ -197,6 +200,7 @@ impl App {
         let mut state = AppState::new(opts.theme, describe);
         state.set_prefs(opts.prefs);
         state.open_session_when_empty = opts.open_session_dialog;
+        state.embedded_autosave = opts.embedded_autosave;
         state.client_key = opts.client_key;
         for n in opts.notices {
             state.update(
@@ -311,6 +315,7 @@ impl App {
                         describe: e.describe(),
                     };
                     self.conn = None;
+                    self.state.embedded_autosave = Some(e.autosaves());
                     self.embedded = Some(e);
                     // Real audio: the operator picks the interface and channels. The
                     // simulated rig is already measuring.
@@ -769,6 +774,11 @@ impl eframe::App for App {
                     m.surrender_focus(id);
                 }
             });
+        }
+        // The window's close button: with unsaved changes on an embedded daemon the
+        // question comes first.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.state.close_requested() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
         if self.state.quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);

@@ -4,7 +4,7 @@ What the operator saves and opens: the measurements (configurations, applied del
 flags), every stored trace with its display edits and slots, and each SPL meter's per-second
 log. Not saved: calibrations (the calibration store's), the generator (a loaded session is
 always disarmed), the audio device (the audio session). File format:
-`ac2_traces::session` (a directory, `session.json` format 21). Wire: `docs/protocol.md`
+`ac2_traces::session` (a directory, `session.json` format 22). Wire: `docs/protocol.md`
 §3.2 *Sessions*. User guide: *Sessions*.
 
 ## Model
@@ -58,7 +58,7 @@ if it holds anything — never silently "saved".
 ## Transfer
 
 Uploads and downloads are chunked over the control socket (a ctrl message is at most
-4 MiB): `file.upload_begin {file_name, bytes, sha256}` → a transfer id; `file.upload_chunk
+4 MiB): `file.upload_begin {file, bytes, sha256}` → a transfer id; `file.upload_chunk
 {transfer, offset, data}` in order, ≤ 1 MiB each; the SHA-256 is checked when the last byte
 arrives. The upload is then used by `file.load {session: {type: upload}}`, `file.salvage`
 or `file.import {transfer, name}` (store as a named session without opening it). Download:

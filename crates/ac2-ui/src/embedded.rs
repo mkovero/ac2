@@ -115,6 +115,14 @@ pub struct Embedded {
     handle: Option<ac2d::Handle>,
 }
 
+impl Embedded {
+    /// Its measurements and traces are autosaved (real audio; the simulated rig's stay in
+    /// memory).
+    pub fn autosaves(&self) -> bool {
+        self.backend != EmbeddedBackend::Fake
+    }
+}
+
 impl fmt::Debug for Embedded {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Embedded")
@@ -193,6 +201,12 @@ pub fn start_embedded_with(
     // simulated rig's stay in memory.
     config.cal_store = (backend != EmbeddedBackend::Fake).then(ac2_paths::cal_store);
     config.rig_settings = (backend != EmbeddedBackend::Fake).then(ac2_paths::rig_settings);
+    // Real audio autosaves like `ac2d`, in a directory of its own so the two never share
+    // one; the simulated rig's measurements stay in memory.
+    config.autosave = (backend != EmbeddedBackend::Fake).then(|| ac2d::AutosaveConfig {
+        dir: ac2_paths::app_autosave_dir(),
+        restore: true,
+    });
     let handle = Daemon::start(config).map_err(|e| EmbeddedError::Start(e.to_string()))?;
     let endpoints = Endpoints {
         ctrl: handle.ctrl_endpoint().to_owned(),

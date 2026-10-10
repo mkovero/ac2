@@ -866,6 +866,9 @@ mod inputs;
 #[path = "state_session_tests.rs"]
 mod session;
 
+#[path = "state_sessions_tests.rs"]
+mod sessions;
+
 #[path = "state_sweep_tests.rs"]
 mod sweep;
 

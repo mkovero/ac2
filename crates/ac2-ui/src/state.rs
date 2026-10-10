@@ -75,6 +75,9 @@ mod link;
 mod panes;
 #[path = "state_queries.rs"]
 mod queries;
+#[path = "state_sessions.rs"]
+pub(crate) mod sessions_impl;
+pub use sessions_impl::SessionsMsg;
 #[path = "state_stimulus.rs"]
 mod stimulus;
 #[path = "state_text.rs"]
@@ -560,8 +563,6 @@ pub enum PromptKind {
     Delay(MeasId),
     /// A file to import as a trace or target curve.
     ImportFile(ImportRole),
-    SessionSave,
-    SessionLoad,
     /// A recording to replay as the session.
     ReplayRecording,
     InputMics,
@@ -605,8 +606,6 @@ impl PromptKind {
                 "Trace file to import: CSV, analyzer text or a WAV impulse response (path; \
                  channel N of a WAV: path #N)"
             }
-            PromptKind::SessionSave => "Save session as (name or path)",
-            PromptKind::SessionLoad => "Load session, disarmed (name or path)",
             PromptKind::ReplayRecording => "Replay recording (name or path of its .wav)",
             PromptKind::InputMics => "Mic per input (1-based, e.g. 3=M30, 4=ECM; 3= clears)",
             PromptKind::MicCurveInput => {
@@ -678,8 +677,11 @@ pub enum Overlay {
     /// for a measurement a math channel computes from, why it cannot be).
     Delete(Box<DeletePrompt>),
     /// A question with a few answers (←/→ or ↑/↓ pick, Enter takes it, Esc cancels):
-    /// what deleting a measurement does with its traces, where a trace moves.
+    /// what deleting a measurement does with its traces, where a trace moves, unsaved
+    /// changes before a session is replaced.
     Choose(Box<ChoicePrompt>),
+    /// The Sessions dialog (Alt+S): new, open, save, recents, the file browser.
+    Sessions(Box<crate::sessions::SessionsDialog>),
 }
 
 impl Overlay {
@@ -913,6 +915,8 @@ pub enum Msg {
     Delete(bool),
     /// Mouse on a question's answers: one taken, or `None` (cancel).
     Choose(Option<usize>),
+    /// Mouse or touch on the Sessions dialog.
+    Sessions(sessions_impl::SessionsMsg),
     /// A group's arrow in the measurement tree: folds or unfolds it.
     ToggleGroup(ac2_proto::model::TraceOwner),
     /// A live curve's dot in the tree: shown / hidden (this app's display).
@@ -1102,6 +1106,9 @@ pub struct AppState {
     pub notices: std::collections::VecDeque<Notice>,
     pub now_s: f64,
     pub quit: bool,
+    /// The app hosts its daemon (`None`: it connects to one); `Some(true)`: that daemon
+    /// autosaves. Quitting with unsaved changes then asks first.
+    pub embedded_autosave: Option<bool>,
     /// The window fills the screen (the app applies it).
     pub fullscreen: bool,
     /// With `fullscreen`: the panes alone, every pane of the layout, without the top bar
@@ -1219,6 +1226,7 @@ impl AppState {
             notices: std::collections::VecDeque::new(),
             now_s: 0.0,
             quit: false,
+            embedded_autosave: None,
             fullscreen: false,
             panes_only: false,
             swallow_text: None,
@@ -1328,6 +1336,7 @@ impl AppState {
             }
             Msg::ToggleMeasShown(id) => self.toggle_meas_hidden(id, None),
             Msg::Choose(pick) => self.choose(pick, out),
+            Msg::Sessions(m) => self.sessions_msg(m, out),
             Msg::RenameTrace(id) => {
                 if self.selected_trace != Some(id) {
                     self.select_trace(Some(id));

@@ -31,6 +31,7 @@ impl AppState {
             Overlay::Palette(p) => p.backspace(),
             Overlay::Form(f) => f.backspace(),
             Overlay::Settings(_) => self.settings_backspace(out),
+            Overlay::Sessions(_) => self.sessions_backspace(),
             Overlay::Delete(_) => self.delete(true, out),
             // The safe answer, as N.
             Overlay::Offer(_) => self.offer(false, out),
@@ -134,6 +135,10 @@ impl AppState {
             }
             Overlay::Settings(_) => {
                 self.settings_key(chord, swallow, keymap, out);
+                return;
+            }
+            Overlay::Sessions(_) => {
+                self.sessions_key(chord, swallow, out);
                 return;
             }
             Overlay::Offer(_) => {
@@ -311,6 +316,10 @@ impl AppState {
     /// Esc with a window open: the topmost window closes (a dialog over a view closes back
     /// to the view) and the stimulus is left alone: no dialog arms one.
     pub(super) fn close_overlay(&mut self) {
+        if matches!(self.overlay, Overlay::Sessions(_)) {
+            self.sessions_close();
+            return;
+        }
         match &mut self.overlay {
             Overlay::Settings(s) if s.inner_open() => {
                 s.close_inner();
@@ -334,6 +343,7 @@ impl AppState {
             Overlay::Palette(p) => p.type_text(&t),
             Overlay::Form(f) => f.type_text(&t),
             Overlay::Settings(_) => self.settings_text(&t),
+            Overlay::Sessions(_) => self.sessions_text(&t),
             Overlay::Prompt(p) => {
                 p.text.push_str(&t);
                 p.error = None;
@@ -483,34 +493,6 @@ impl AppState {
                     });
                     Ok(())
                 }
-            }
-            PromptKind::SessionSave | PromptKind::SessionLoad => {
-                parse_session_ref(&text).map(|session| {
-                    let load = kind == PromptKind::SessionLoad;
-                    let what = match &session {
-                        SessionRef::Name { name } => name.clone(),
-                        SessionRef::Path { path } => path.clone(),
-                        SessionRef::Upload { transfer } => format!("upload {}", transfer.0),
-                    };
-                    let (cmd, what) = if load {
-                        (
-                            Command::FileLoad {
-                                session,
-                                discard: true,
-                            },
-                            format!("session {what:?} loaded (disarmed)"),
-                        )
-                    } else {
-                        (
-                            Command::FileSave {
-                                session,
-                                overwrite: false,
-                            },
-                            format!("session {what:?} saved"),
-                        )
-                    };
-                    out.push(Request::Call { cmd, what });
-                })
             }
             PromptKind::ReplayRecording => parse_session_ref(&text).and_then(|r| {
                 let (recording, what) = match r {

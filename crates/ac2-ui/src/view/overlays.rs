@@ -26,6 +26,7 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32) {
         Overlay::NewLog(_) => super::leq::new_log(app, ctx, ch),
         Overlay::Delete(_) => delete(app, ctx, ch),
         Overlay::Choose(_) => choose(app, ctx, ch),
+        Overlay::Sessions(_) => super::sessions::sessions(app, ctx, ch),
         // Drawn by its pane, under the title chip.
         Overlay::PaneMenu(_) => {}
     }

@@ -26,6 +26,7 @@ embedded = ["dep:ac2d"]
 
 [dependencies]
 ac2-client = { path = "../ac2-client" }
+ac2-archive = { path = "../ac2-archive" }
 ac2-discovery = { path = "../ac2-discovery" }
 ac2d = { path = "../ac2d", optional = true }
 ac2-paths = { path = "../ac2-paths", features = ["log"] }

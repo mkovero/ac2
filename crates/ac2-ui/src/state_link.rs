@@ -160,6 +160,9 @@ impl AppState {
             }
             ConnEvent::BandLog { ask, result } => self.band_log_answered(ask, result),
             ConnEvent::BandTransfer(result) => self.band_transfer_answered(result),
+            ConnEvent::Sessions(o) => self.session_outcome(*o, out),
+            ConnEvent::SessionProgress(t) => self.session_progress(t),
+            ConnEvent::SessionList(r) => self.session_list(r),
             ConnEvent::MeasCreated(m) => {
                 self.selected = Some(m.id);
                 self.pending_select = Some(m.id);
