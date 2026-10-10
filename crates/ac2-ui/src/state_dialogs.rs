@@ -226,14 +226,16 @@ impl AppState {
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
-        // The mouse reaches a row on the page it is drawn on.
-        if let SessionMsg::Focus(r)
-        | SessionMsg::Cycle(r, _)
-        | SessionMsg::Toggle(r)
-        | SessionMsg::Role(r, _)
-        | SessionMsg::EditMic(r) = m
-        {
-            s.show_row(r);
+        // A row the mouse acts on takes the focus off the max level row.
+        if matches!(
+            m,
+            SessionMsg::Focus(_)
+                | SessionMsg::Cycle(..)
+                | SessionMsg::Toggle(_)
+                | SessionMsg::Role(..)
+                | SessionMsg::EditMic(_)
+        ) {
+            s.on_ceiling = false;
         }
         let d = &mut s.session;
         match m {

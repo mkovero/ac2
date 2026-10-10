@@ -96,15 +96,6 @@ impl OutputRow {
     }
 }
 
-/// Which rows a page of Settings shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Part {
-    /// Audio: backend, device, rate, buffer.
-    Device,
-    /// Inputs & outputs: one row per channel.
-    Channels,
-}
-
 /// A focusable row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Row {
@@ -219,8 +210,6 @@ pub struct SessionDialog {
     open: Option<OpenSession>,
     /// The daemon's input setup (mic names) when the dialog opened.
     setup: Vec<InputSetup>,
-    /// The rows of which page are focusable.
-    pub part: Part,
     /// The rig's output labels as last mirrored.
     labels: Vec<OutputSetup>,
 }
@@ -279,14 +268,13 @@ impl SessionDialog {
             preview_error: None,
             open: open.cloned(),
             setup: setup.to_vec(),
-            part: Part::Device,
             labels: Vec::new(),
         }
     }
 
-    /// Shows the rows of `part`; the focus moves to its first row unless it is on one.
-    pub fn show_part(&mut self, part: Part) {
-        self.part = part;
+    /// Keeps the focus on a row that exists: rows of a device that is gone move it to the
+    /// first row.
+    fn keep_focus(&mut self) {
         if !self.rows().contains(&self.focus) {
             self.edit = None;
             if let Some(r) = self.rows().first() {
@@ -336,9 +324,8 @@ impl SessionDialog {
             .or_else(|| self.input_choices().first().copied())
             .unwrap_or(0);
         self.load_device(prefs);
-        // The rows are new: the focus belongs on one the shown page has.
-        let part = self.part;
-        self.show_part(part);
+        // The channel rows are new: the focus belongs on one that exists.
+        self.keep_focus();
     }
 
     pub fn backend_info(&self) -> Option<&BackendInfo> {
@@ -716,22 +703,18 @@ impl SessionDialog {
 
     // ----- focus -------------------------------------------------------------------------
 
-    /// Focus order of the rows [`Self::part`] shows.
+    /// Focus order: the device rows, then one row per input, then one per output.
     pub fn rows(&self) -> Vec<Row> {
-        match self.part {
-            Part::Device => vec![
-                Row::Backend,
-                Row::Device,
-                Row::OutputDevice,
-                Row::Rate,
-                Row::Buffer,
-            ],
-            Part::Channels => {
-                let mut v: Vec<Row> = (0..self.inputs.len()).map(Row::Input).collect();
-                v.extend((0..self.outputs.len()).map(Row::Output));
-                v
-            }
-        }
+        let mut v = vec![
+            Row::Backend,
+            Row::Device,
+            Row::OutputDevice,
+            Row::Rate,
+            Row::Buffer,
+        ];
+        v.extend((0..self.inputs.len()).map(Row::Input));
+        v.extend((0..self.outputs.len()).map(Row::Output));
+        v
     }
 
     /// ↑/↓ (Tab / Shift+Tab), wrapping. Ends a mic-name edit; drops an output label edit.
@@ -1119,7 +1102,7 @@ impl SessionDialog {
             return Err("this device has no inputs to listen on".into());
         }
         if self.output_info().is_none() {
-            return Err("choose an output device first (Audio page)".into());
+            return Err("choose an output device first (Audio & I/O page)".into());
         }
         self.detect = Some(DetectPanel {
             output,
@@ -1416,7 +1399,7 @@ impl SessionDialog {
         let out_dev = self.output_info().unwrap_or(dev);
         if self.out_count > 0 && out_dev.output.is_none() {
             return Err(format!(
-                "{} has no outputs: choose the output device on the Audio page.",
+                "{} has no outputs: choose the output device on the Audio & I/O page.",
                 out_dev.name
             ));
         }

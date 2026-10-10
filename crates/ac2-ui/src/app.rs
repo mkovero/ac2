@@ -37,8 +37,8 @@ pub struct AppOptions {
     pub started: Instant,
     /// Print the first-frame time and quit.
     pub bench_startup: bool,
-    /// Open the session dialog once connected if the daemon has no audio session (an
-    /// embedded daemon on real audio starts without one).
+    /// Open the audio setup (Settings › Audio & I/O on the device) once connected if the
+    /// daemon has no audio session (an embedded daemon on real audio starts without one).
     pub open_session_dialog: bool,
     /// This client's key, shown on the Connection page of Settings.
     pub client_key: Option<crate::settings::ClientKey>,
@@ -299,7 +299,11 @@ impl App {
             return;
         };
         let target = match choice {
-            Choice::Target(t) => *t,
+            Choice::Target(t) => {
+                // Another daemon: if it has no audio session, the audio setup once.
+                self.state.open_session_when_empty = true;
+                *t
+            }
             Choice::Embedded(b) => match start_embedded(b) {
                 Ok(e) => {
                     let t = Target {

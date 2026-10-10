@@ -69,6 +69,17 @@ impl AppState {
         self.settings_entered(out);
     }
 
+    /// Settings on the Audio & I/O page focused on the input device: where a fresh start
+    /// on a daemon without an audio session, a new session and the open-session command
+    /// land.
+    pub fn open_audio_setup(&mut self, out: &mut Vec<Request>) {
+        self.open_settings(Page::AudioIo, out);
+        if let Overlay::Settings(s) = &mut self.overlay {
+            s.focus_want = None;
+            s.focus_session_row(crate::session_dialog::Row::Device);
+        }
+    }
+
     /// A page was shown: it asks for what it shows.
     fn settings_entered(&mut self, out: &mut Vec<Request>) {
         let Overlay::Settings(s) = &mut self.overlay else {
@@ -150,11 +161,10 @@ impl AppState {
                 Key::Num4 => Some(3),
                 Key::Num5 => Some(4),
                 Key::Num6 => Some(5),
-                Key::Num7 => Some(6),
                 _ => None,
             };
-            if let Some(n) = n {
-                self.settings_page(Page::ALL[n], out);
+            if let Some(&p) = n.and_then(|n| Page::ALL.get(n)) {
+                self.settings_page(p, out);
                 return;
             }
         }
@@ -164,7 +174,7 @@ impl AppState {
             return;
         }
         match page {
-            Page::Io | Page::Audio => self.session_key(chord, swallow, out),
+            Page::AudioIo => self.session_key(chord, swallow, out),
             Page::Calibration => self.cal_view_key(chord, swallow, out),
             Page::Leq => self.leq_key(chord, swallow, out),
             Page::Recording => self.recording_key(chord, swallow),
@@ -352,7 +362,7 @@ impl AppState {
         }
     }
 
-    /// Keys of the Inputs & outputs and Audio pages (the session model). Esc never gets
+    /// Keys of the Audio & I/O page (the session model and the max level row). Esc never gets
     /// here: it closes the topmost window.
     pub(super) fn session_key(
         &mut self,
@@ -363,8 +373,7 @@ impl AppState {
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
-        let io = s.page == Page::Io;
-        if io && s.on_ceiling {
+        if s.on_ceiling {
             match chord.key {
                 Key::Enter => self.apply_ceiling(out),
                 Key::ArrowUp => s.io_move(-1),
@@ -394,12 +403,7 @@ impl AppState {
             }
             Key::ArrowUp | Key::ArrowDown | Key::Tab => {
                 let back = chord.key == Key::ArrowUp || (chord.key == Key::Tab && chord.shift);
-                if io {
-                    s.io_move(if back { -1 } else { 1 });
-                } else {
-                    d.detect_cancel();
-                    d.move_focus(if back { -1 } else { 1 });
-                }
+                s.io_move(if back { -1 } else { 1 });
             }
             Key::ArrowLeft | Key::ArrowRight if d.edit.is_none() => {
                 let forward = chord.key == Key::ArrowRight;
@@ -540,8 +544,8 @@ impl AppState {
             return;
         };
         match s.page {
-            Page::Io if s.on_ceiling => s.ceiling.type_text(t),
-            Page::Io | Page::Audio => s.session.type_text(t),
+            Page::AudioIo if s.on_ceiling => s.ceiling.type_text(t),
+            Page::AudioIo => s.session.type_text(t),
             Page::Calibration => s.cal.type_text(t),
             Page::Leq => {
                 // The band transfer step takes keys, not text, but for the place's name.
@@ -570,8 +574,8 @@ impl AppState {
             return;
         };
         match s.page {
-            Page::Io if s.on_ceiling => s.ceiling.backspace(),
-            Page::Io | Page::Audio => s.session.backspace(),
+            Page::AudioIo if s.on_ceiling => s.ceiling.backspace(),
+            Page::AudioIo => s.session.backspace(),
             Page::Calibration if s.cal.typing() => s.cal.backspace(),
             Page::Calibration => self.cal_view_key(Chord::key(Key::Delete), None, out),
             Page::Leq if s.leq.as_ref().is_some_and(|d| d.transfer.is_some()) => {

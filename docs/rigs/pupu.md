@@ -53,7 +53,7 @@ binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap ev
    Check `journalctl --user -u ac2d -n 30`: "autosave restored … no audio session opened" is
    normal.
    `--max-level -50` is now the **hard bound**: the system max level in force can be lowered
-   (or raised again up to −50) from any client — Settings › Inputs & outputs, or
+   (or raised again up to −50) from any client — Settings › Audio & I/O, or
    `bin/ac2 --remote 192.168.9.27 gen ceiling -60dbfs` — and is kept in
    `~/.config/ac2/rig.json`, so a restart comes up at min(kept, bound). A restart with a
    higher `--max-level` does not raise a level that was lowered; raise it explicitly

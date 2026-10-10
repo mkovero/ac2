@@ -67,7 +67,7 @@ connected, connections the daemon did not make (a recorder, a patch to another p
 are left alone, and changing the generator's outputs never reopens the stream, so they
 stay.
 
-When JACK cannot be used, `ac2 devices`, the app's Settings › Audio and the daemon log say
+When JACK cannot be used, `ac2 devices`, the app's Settings › Audio & I/O and the daemon log say
 why and what to do: *PipeWire is running but its JACK library isn't in use: install
 pipewire-jack … or start the daemon with `pw-jack ac2d`*, or *No JACK server: start JACK
 (e.g. `jackd -d alsa`) or use PipeWire*. libjack is loaded at run time, so ac2 starts either
@@ -143,7 +143,7 @@ WASAPI with a real interface is not yet.
 There are three ways; pick one.
 
 - **The app hosts it.** Start **ac2**. If no daemon is running, the connect dialog opens:
-  choose *This computer's audio* (Settings opens next on its Audio page, to pick the
+  choose *This computer's audio* (Settings opens next on its Audio & I/O page, to pick the
   interface and channels) or *Simulated rig* to try ac2 without hardware (it starts with its
   session open and a transfer measurement "demo" running). That daemon lives inside the app
   and stops with it. The command-line client cannot reach it; everything it would do is in
@@ -175,10 +175,10 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
 
 1. Until there is an audio session the transfer pane says *No audio session — press
    Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio session…*) opens Settings on its
-   **Audio** page. Its rows pick the **backend** (JACK on Linux, system audio on macOS and
+   **Audio & I/O** page. Its first rows pick the **backend** (JACK on Linux, system audio on macOS and
    Windows; one that cannot be used says why and what to do, e.g. *No JACK server: start
    JACK (e.g. `jackd -d alsa`) or use PipeWire*) and the **device** (*8 in / 8 out ·
-   48 kHz*) with **←/→**. The **Inputs & outputs** page (**Alt+1**, or **Ctrl+PgUp**) has
+   48 kHz*) with **←/→**. Below them (**↓**) the page has
    one row per input and output with its name and, for inputs, a live level meter — tap the
    mic or play something and you see which input it is on, before anything is opened
    (Settings only listens; it never plays).

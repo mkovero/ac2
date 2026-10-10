@@ -293,7 +293,7 @@ fn stimulus_outputs_are_remembered_per_device() {
     assert!(t.st.stimulus.describe().ends_with("→ out 1"));
     assert!(t.st.prefs.outputs.is_empty());
     t.st.prefs_dirty = false;
-    // Choosing outputs (S on an output in Settings › Inputs & outputs, opened on the
+    // Choosing outputs (S on an output in Settings › Audio & I/O, opened on the
     // stimulus output) remembers them for the session's output device and applies them
     // now: the open session (on the simulated rig the dialog lists) has them.
     let mut s = daemon_state();

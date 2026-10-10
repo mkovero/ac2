@@ -58,10 +58,10 @@ Pass: the interface is listed, its inputs show live levels, and a session opens 
 errors.
 
 1. Start ac2. In the connect dialog choose **This computer's
-   audio**. Settings opens on its **Audio** page.
+   audio**. Settings opens on its **Audio & I/O** page, on the input device.
 2. **Device** (←/→): pick your interface. Note what it shows (*N in / M out · rate ·
    buffer*).
-3. Go to the **Inputs & outputs** page (**Alt+1**). Tap the mic or play something into an
+3. Go down (**↓**) to the input rows. Tap the mic or play something into an
    input: its row's meter must move. Check every input you have.
 4. Roles: **↑/↓** to a row, then **R** on input 1 (the loopback), **M** on input 2
    (cable 2; **N** names it, e.g. "cable"), **S** on output 1, and make sure output 2 is in

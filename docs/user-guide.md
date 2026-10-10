@@ -15,7 +15,7 @@ guide explains the concepts and the everyday workflow.
   - [Log files](#log-files)
   - [Audio backends](#audio-backends)
   - [Settings](#settings)
-  - [Inputs & outputs and Audio](#inputs--outputs-and-audio)
+  - [Audio & I/O](#audio--io)
   - [Input meters](#input-meters)
 - [Reference wiring and loopback](#reference-wiring-and-loopback)
 - [Stimulus](#stimulus)
@@ -61,7 +61,7 @@ guide explains the concepts and the everyday workflow.
 
 | I want to… | Go to |
 |---|---|
-| connect the audio interface and open a session | [Inputs & outputs and Audio](#inputs--outputs-and-audio) |
+| connect the audio interface and open a session | [Audio & I/O](#audio--io) |
 | wire the loopback so transfer functions work | [Reference wiring and loopback](#reference-wiring-and-loopback) |
 | play pink noise safely, and stop it | [Stimulus](#stimulus) |
 | see magnitude, phase and coherence of a speaker | [Transfer measurement](#transfer-measurement) |
@@ -93,8 +93,8 @@ RTA and SPL meters. In the app:
 
 - every setting lives in **Settings** (**Ctrl+P**, the ⚙ in the top bar;
   [below](#settings));
-- **Shift+O** opens its Audio page to open a session
-  ([the session's channels](#inputs--outputs-and-audio));
+- **Shift+O** opens its Audio & I/O page to open a session
+  ([the session's channels](#audio--io));
 - the command palette (**Ctrl+K**) has *New transfer measurement…*, *New spectrum…*,
   *New RTA…* and *New SPL meter…* (created, started and selected on **Enter**) and
   *Close audio session*;
@@ -145,12 +145,17 @@ The backend is always named. Each platform has one real backend:
 Should a host still deliver audio in lumps, the daemon log says so once a minute (*audio
 arrives in bursts on …*) with the device and buffer to change.
 
-Settings › Audio preselects a real interface whenever the daemon lists one. In the app's
+Settings › Audio & I/O preselects a real interface whenever the daemon lists one. In the app's
 connect dialog:
 
 - *Simulated rig* starts ready to measure (session open, a transfer measurement "demo"
   running);
-- *This computer's audio* starts with no session and opens Settings on its Audio page.
+- *This computer's audio* starts with no session and opens Settings on its Audio & I/O
+  page, on the input device.
+
+Whenever the app connects to a daemon with no audio session open (this computer's audio, a
+rig whose session was closed), Settings opens once on the Audio & I/O page with the input
+device focused. A daemon with audio open (a rig, the Pi kiosk) opens nothing.
 
 ### Settings
 
@@ -158,7 +163,7 @@ connect dialog:
 in one view over the window, below the top bar — what drives the speakers stays in sight.
 The pages are in a sidebar:
 
-- **Ctrl+PgUp / Ctrl+PgDn** (or **Ctrl+Tab**) step through them, **Alt+1 … Alt+7** jump to
+- **Ctrl+PgUp / Ctrl+PgDn** (or **Ctrl+Tab**) step through them, **Alt+1 … Alt+6** jump to
   one, a click picks one;
 - Ctrl+P opens the page last shown;
 - Esc closes the view (a dialog or confirmation over a page first); **Shift+Esc** still
@@ -171,8 +176,7 @@ Each page says whose its settings are:
 
 | Page | What | Opened also by |
 |---|---|---|
-| Inputs & outputs | inputs and outputs by name, roles, mics, the stimulus outputs, the reference, the **system max level** | palette *Input setup…*, *Stimulus outputs…* |
-| Audio | backend, device, rate, buffer; Enter opens the session | **Shift+O** |
+| Audio & I/O | backend, input and output device, rate, buffer; inputs and outputs by name, roles, mics, the stimulus outputs, the reference; the **system max level**; Enter opens the session | **Shift+O** (on the input device), palette *Input setup…* (on the first input), *Stimulus outputs…* (on the stimulus output) |
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL pane's meter's Leq windows and limits ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
@@ -181,8 +185,8 @@ Each page says whose its settings are:
 
 #### System max level
 
-The generator never plays above the rig's maximum (dBFS RMS). The top of the Inputs &
-outputs page shows it with its bound and who changed it last:
+The generator never plays above the rig's maximum (dBFS RMS). The last row of the Audio &
+I/O page shows it with its bound and who changed it last:
 `−40.0 dBFS · bound −10.0 dBFS (ac2d --max-level)`. Type a level on its row and **Enter**:
 
 - a **lower** level applies at once for every client; a stimulus armed or playing above it
@@ -204,11 +208,12 @@ the keys it refused lately (fingerprint, address, how often, when).
 - **Delete** twice revokes a client: its requests are refused at once. You cannot revoke
   your own.
 
-### Inputs & outputs and Audio
+### Audio & I/O
 
-Nothing on these pages is a channel number to type. The Audio page holds the backend and
-the devices; the Inputs & outputs page their channels. Enter on either opens (or reopens)
-the session with what both say. From the top:
+Nothing on this page is a channel number to type. It holds the device (backend, input and
+output device, rate, buffer), then its channels, then the system max level; **↑/↓** walk
+every row in that order and wrap. Enter opens (or reopens) the session with what it says.
+From the top:
 
 - **Backend** (**←/→**): every backend the daemon offers, with what it is; one it cannot use
   now says why and what to do (*PipeWire is running but its JACK library isn't in use:
@@ -221,7 +226,7 @@ the session with what both say. From the top:
   input* when that device has outputs (JACK, a Core Audio interface: one device, one
   clock), else as the system's default output — Windows lists an interface as a capture
   and a playback endpoint, and a USB mic has no outputs at all. **←/→** step through every
-  device with outputs; the Inputs & outputs page then lists that device's outputs. Two
+  device with outputs; the channels below then list that device's outputs. Two
   devices may run on different clocks, and Settings says so: the loopback reference keeps
   the transfer function right, and the loopback monitor measures their drift while a
   stimulus plays. The choice is remembered with the input device's roles.
@@ -307,7 +312,7 @@ instead of a curve. Its detail says what to do:
 | stimulus playing (this app's or another client's) | `reference silent: check the loopback cable` |
 
 With a loopback that also returns the generator's own output (the **R** and **S** roles in
-Settings › Inputs & outputs, `session open --loopback-out 1 --loopback-in 1` from the CLI), the
+Settings › Audio & I/O, `session open --loopback-out 1 --loopback-in 1` from the CLI), the
 daemon continuously checks the output → input timing and warns about dropped or repeated
 output samples.
 
@@ -332,7 +337,7 @@ make it play by accident:
   arms nothing);
 - one client holds the stimulus at a time (a lease it keeps refreshing). If that client
   disappears, the daemon fades the output out within 1.5 s;
-- the rig has a system maximum level (Settings › Inputs & outputs, `ac2 gen ceiling`),
+- the rig has a system maximum level (Settings › Audio & I/O, `ac2 gen ceiling`),
   never above the daemon's bound (`ac2d --max-level`, default −10 dBFS RMS);
 - loading a session or restarting the daemon always comes up disarmed.
 
@@ -1719,7 +1724,7 @@ How it works and what is tested: [raw-capture.md](design/raw-capture.md).
 
 ## Calibration and SPL
 
-Inputs carry a **mic name** (**N** on the input in Settings › Inputs & outputs or
+Inputs carry a **mic name** (**N** on the input in Settings › Audio & I/O or
 Calibration, `ac2 session open … --mic 3=M30`, `ac2 session inputs --mic 3=M30`).
 Two things are stored, in the calibration store of the daemon's machine:
 
@@ -1768,7 +1773,7 @@ It is chosen per input, explicitly:
 - **CLI:** `ac2 cal use 3 90°` (or `off`); `ac2 session inputs --mic 3=M30 --curve 3=90°`
   sets names and curves of several inputs at once, and `ac2 session inputs` alone lists
   them.
-- **App:** **←/→** on the input's row on Settings › Inputs & outputs or in the **Calibrations** view
+- **App:** **←/→** on the input's row on Settings › Audio & I/O or in the **Calibrations** view
   (palette; *Input setup…* opens it on the selected measurement's input), **Mic curve on
   input N…** (*3=90°*), or **Mic curve: next curve on the selected measurement's input**.
 
@@ -1834,7 +1839,7 @@ caption, the spectrum / RTA captions, the Calibrations view, `ac2 cal list` and
 | label | meaning |
 |---|---|
 | `cal 94 dB · 3 h ago` | acoustic: a 94 dB calibrator on this mic on this input, 3 h ago |
-| `verified · 94.0 dB SPL at 1.00 kHz · 3 h ago` | the same, written out (Calibrations view, Settings › Inputs & outputs) |
+| `verified · 94.0 dB SPL at 1.00 kHz · 3 h ago` | the same, written out (Calibrations view, Settings › Audio & I/O) |
 | `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago` | electrical, a voltmeter across the connected, powered mic's pins 2–3; the sensitivity taken from the mic's curve file (`data sheet`) or typed (`typed`); ±1 dB the stated uncertainty |
 | `electrical cal (injected, 10.0 mV/Pa) ±0.5 dB` | electrical, a generator in place of the mic, phantom off |
 | `cal from other mic / input`, `from M30 on in 2 · …` | a calibration made with another mic or on another input: used, but it may not hold here |
@@ -2645,7 +2650,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Shift+↑` | Display offset +3 dB of the selected curve | `offset_up_coarse` |
 | `Alt+Shift+↓` | Display offset −3 dB of the selected curve | `offset_down_coarse` |
 | `Alt+Home` | Display offset of the selected curve back to 0 | `offset_clear` |
-| `Shift+O` | Open audio session: Settings › Audio… | `session_open` |
+| `Shift+O` | Open audio session: Settings › Audio & I/O… | `session_open` |
 | `Shift+M` | New math channel: A ÷ × + − B, or the average of several (mic positions)… | `meas_new_math` |
 | `Shift+C` | Next colour for the selected measurement (one no other measurement has; grey last) | `meas_colour_next` |
 | `Shift+A` | Show / hide the selected measurement with every trace under it | `hide_group` |
@@ -2732,7 +2737,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Recent notifications… (the messages that went by in the corner) | `notifications` |
 | Key hints on / off | `key_hints` |
 | Warning toasts on / off (off: warnings and Leq limit alarms go only to the notification log) | `warning_toasts` |
-| Stimulus outputs: tick them in Settings › Inputs & outputs… | `stimulus_outputs` |
+| Stimulus outputs: tick them in Settings › Audio & I/O… | `stimulus_outputs` |
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
 | Transfer stack: magnitude / phase / coherence (in place of the focused pane) | `transfer_stack` |
 | Choose the measurement the focused pane shows… | `pane_measurement` |
@@ -2756,7 +2761,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Edit measurement… | `meas_edit` |
 | Previous colour for the selected measurement | `meas_colour_prev` |
 | Fold / unfold the selected measurement in the list | `toggle_group` |
-| Input setup: Settings › Inputs & outputs (names, roles, mics, max level)… | `input_setup` |
+| Input setup: Settings › Audio & I/O (names, roles, mics, max level)… | `input_setup` |
 | Calibrations: Settings › Calibration (mics, curves, sensitivities)… | `calibrations` |
 | Input setup: type mic names (3=M30, 4=ECM)… | `input_mics` |
 | Mic curve: next curve on the selected measurement's input (off → 0° → 90° …) | `mic_curve` |

@@ -3,7 +3,7 @@
 use super::*;
 
 impl AppState {
-    pub(super) fn conn_event(&mut self, e: ConnEvent, keymap: &Keymap, out: &mut Vec<Request>) {
+    pub(super) fn conn_event(&mut self, e: ConnEvent, out: &mut Vec<Request>) {
         match e {
             ConnEvent::Connecting { target } => {
                 if !matches!(self.conn, ConnState::Failed { .. }) {
@@ -102,7 +102,7 @@ impl AppState {
                 if self.open_session_when_empty && self.connected() && self.daemon().is_some() {
                     self.open_session_when_empty = false;
                     if self.open_session().is_none() && self.overlay == Overlay::None {
-                        self.command(CommandId::OpenSession, keymap, out);
+                        self.open_audio_setup(out);
                     }
                 }
             }
@@ -114,9 +114,7 @@ impl AppState {
                 match (&mut self.overlay, r) {
                     (Overlay::Settings(s), Ok(d)) => {
                         s.session.set_backends(d, &self.prefs);
-                        if s.focus_outputs {
-                            s.focus_outputs = !s.focus_stimulus_outputs();
-                        }
+                        s.follow_focus_want();
                     }
                     (Overlay::Settings(s), Err(e)) => {
                         s.session.error = Some(format!("cannot list devices: {e}"));

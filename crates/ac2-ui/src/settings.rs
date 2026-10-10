@@ -6,8 +6,8 @@
 //! ↑/↓ move within the page, ←/→ change a choice, Enter applies, Esc closes the topmost
 //! window (a calibration dialog or a confirmation over a page, else the view);
 //! Ctrl+PageUp / Ctrl+PageDown (or Ctrl+Tab / Ctrl+Shift+Tab) step through the pages and
-//! Alt+1 … Alt+7 jump to one. Shift+Esc still stops the stimulus from anywhere. The keys
-//! that used to open a dialog open its page: Shift+O the Audio page, Shift+L the SPL / Leq
+//! Alt+1 … Alt+6 jump to one. Shift+Esc still stops the stimulus from anywhere. The keys
+//! that used to open a dialog open its page: Shift+O the Audio & I/O page (focused on the device), Shift+L the SPL / Leq
 //! page, the palette's input setup and calibrations their pages.
 //!
 //! Every setting says whose it is: [`THIS_APP`] (kept in `ui.toml` on this computer) or
@@ -27,20 +27,21 @@ use ac2_scene::view::{
 
 use crate::cal_view::CalView;
 use crate::leq_dialog::LeqDialog;
-use crate::session_dialog::{Part, SessionDialog};
+use crate::session_dialog::SessionDialog;
 
 /// Whose a setting is: this computer's app alone.
 pub const THIS_APP: &str = "this app";
 /// Whose a setting is: the rig, for every client.
 pub const THE_RIG: &str = "the rig — all clients";
+/// The page with the audio device, the channels and the max level, as every text names it.
+pub const AUDIO_IO: &str = "Audio & I/O";
 
 /// A page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
-    /// Inputs, outputs, stimulus outputs, the reference, the system max level.
-    Io,
-    /// Backend, device, rate, buffer.
-    Audio,
+    /// The audio device (backend, input and output device, rate, buffer), then the
+    /// channels (inputs, outputs, stimulus outputs, the reference), then the system max level.
+    AudioIo,
     /// Mics, curves, sensitivity calibrations.
     Calibration,
     /// The SPL meter's Leq windows and limits.
@@ -54,9 +55,8 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Page; 7] = [
-        Page::Io,
-        Page::Audio,
+    pub const ALL: [Page; 6] = [
+        Page::AudioIo,
         Page::Calibration,
         Page::Leq,
         Page::Recording,
@@ -66,8 +66,7 @@ impl Page {
 
     pub fn title(self) -> &'static str {
         match self {
-            Page::Io => "Inputs & outputs",
-            Page::Audio => "Audio",
+            Page::AudioIo => AUDIO_IO,
             Page::Calibration => "Calibration",
             Page::Leq => "SPL / Leq",
             Page::Recording => "Recording",
@@ -79,11 +78,11 @@ impl Page {
     /// Whose the page's settings are, as its header says.
     pub fn whose(self) -> &'static str {
         match self {
-            Page::Io => {
-                "channels, labels, the reference and the max level: the rig — all clients · \
-                 stimulus outputs: this app"
+            Page::AudioIo => {
+                "the device, channels, labels, the reference and the max level: the rig — all \
+                 clients · stimulus outputs: this app"
             }
-            Page::Audio | Page::Calibration | Page::Leq => THE_RIG,
+            Page::Calibration | Page::Leq => THE_RIG,
             Page::Recording => "the limit: this app · the folder: the rig — all clients",
             Page::Display => THIS_APP,
             Page::Connection => {
@@ -96,14 +95,11 @@ impl Page {
     /// The page's keys, under it.
     pub fn keys(self) -> &'static str {
         match self {
-            Page::Io => {
-                "↑↓ move · Space in session · R reference · M mic · S stimulus output · N names a \
-                 mic or an output · ←→ a mic's curve · D detects the loopback · on the max \
-                 level: type dBFS, Enter · Enter opens the session · Esc closes"
-            }
-            Page::Audio => {
-                "↑↓ move · ←→ backend / input / output device · type the rate or buffer · Enter opens the \
-                 session · Esc closes"
+            Page::AudioIo => {
+                "↑↓ move · ←→ backend / input / output device, a mic's curve · type the rate or \
+                 buffer · Space in session · R reference · M mic · S stimulus output · N names a \
+                 mic or an output · D detects the loopback · on the max level: type dBFS, Enter \
+                 · Enter opens the session · Esc closes"
             }
             Page::Calibration => {
                 "↑↓ move (PgUp/PgDn, Home/End) · ←→ mic curve of an input · N names the mic · I \
@@ -145,7 +141,7 @@ pub struct RaiseConfirm {
     pub typed: String,
 }
 
-/// The system max level row of the Inputs & outputs page.
+/// The system max level row of the Audio & I/O page.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CeilingEdit {
     /// The level being typed; empty shows the level in force.
@@ -787,9 +783,9 @@ pub struct ClientKey {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub page: Page,
-    /// Inputs & outputs and Audio.
+    /// The Audio & I/O page's device and channel rows.
     pub session: SessionDialog,
-    /// The max level row is focused on the Inputs & outputs page (below the channels).
+    /// The max level row is focused on the Audio & I/O page (below the channels).
     pub on_ceiling: bool,
     pub ceiling: CeilingEdit,
     pub cal: CalView,
@@ -798,9 +794,18 @@ pub struct Settings {
     pub display: DisplayRow,
     pub recording: RecordingPage,
     pub connection: ConnectionPage,
-    /// Opened for the stimulus outputs before the device's rows arrived: the focus goes to
-    /// them once they do.
-    pub focus_outputs: bool,
+    /// Opened for channel rows before the device's rows arrived: the focus goes to them
+    /// once they do.
+    pub focus_want: Option<FocusWant>,
+}
+
+/// Channel rows a command opened the Audio & I/O page for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusWant {
+    /// The first input.
+    Inputs,
+    /// The first ticked stimulus output, else the first output.
+    StimulusOutputs,
 }
 
 impl Settings {
@@ -815,63 +820,59 @@ impl Settings {
             display: DisplayRow::Theme,
             recording: RecordingPage::default(),
             connection: ConnectionPage::default(),
-            focus_outputs: false,
+            focus_want: None,
         };
         s.show(page);
         s
     }
 
-    /// Focuses the stimulus output (the first ticked one, else the first output); `false`
-    /// while there are no output rows yet.
-    pub fn focus_stimulus_outputs(&mut self) -> bool {
-        let d = &mut self.session;
-        let i = d
-            .outputs
-            .iter()
-            .position(|o| o.stimulus)
-            .or((!d.outputs.is_empty()).then_some(0));
-        match i {
-            Some(i) => {
-                self.show(Page::Io);
-                self.on_ceiling = false;
-                self.session
-                    .focus_row(crate::session_dialog::Row::Output(i));
-                true
-            }
-            None => false,
+    /// Focuses the channel rows `want` names; until the device's rows arrive the wish waits
+    /// in [`Self::focus_want`] (and [`Self::follow_focus_want`] fulfils it).
+    pub fn focus_channels(&mut self, want: FocusWant) {
+        self.focus_want = Some(want);
+        self.follow_focus_want();
+    }
+
+    /// The device's rows arrived (or changed): a waiting focus wish lands on them.
+    pub fn follow_focus_want(&mut self) {
+        use crate::session_dialog::Row;
+        let Some(want) = self.focus_want else {
+            return;
+        };
+        let d = &self.session;
+        let row = match want {
+            FocusWant::Inputs => (!d.inputs.is_empty()).then_some(Row::Input(0)),
+            FocusWant::StimulusOutputs => d
+                .outputs
+                .iter()
+                .position(|o| o.stimulus)
+                .or((!d.outputs.is_empty()).then_some(0))
+                .map(Row::Output),
+        };
+        if let Some(row) = row {
+            self.focus_want = None;
+            self.focus_session_row(row);
         }
+    }
+
+    /// Shows the Audio & I/O page focused on `row`.
+    pub fn focus_session_row(&mut self, row: crate::session_dialog::Row) {
+        self.show(Page::AudioIo);
+        self.on_ceiling = false;
+        self.session.detect_cancel();
+        self.session.focus_row(row);
     }
 
     /// Shows `page`.
     pub fn show(&mut self, page: Page) {
         self.page = page;
-        match page {
-            Page::Io => self.session.show_part(Part::Channels),
-            Page::Audio => self.session.show_part(Part::Device),
-            _ => {}
-        }
-    }
-
-    /// Shows the page `r` is a row of (Inputs & outputs or Audio).
-    pub fn show_row(&mut self, r: crate::session_dialog::Row) {
-        use crate::session_dialog::Row;
-        let page = match r {
-            Row::Input(_) | Row::Output(_) => Page::Io,
-            Row::Backend | Row::Device | Row::OutputDevice | Row::Rate | Row::Buffer => Page::Audio,
-        };
-        if self.page != page {
-            self.show(page);
-        }
-        if page == Page::Io {
-            self.on_ceiling = false;
-        }
     }
 
     /// Whether a typed edit or text row owns the keys that otherwise act on the page.
     pub fn typing(&self) -> bool {
         match self.page {
-            Page::Io if self.on_ceiling => true,
-            Page::Io | Page::Audio => self.session.text_focus(),
+            Page::AudioIo if self.on_ceiling => true,
+            Page::AudioIo => self.session.text_focus(),
             Page::Calibration => self.cal.typing(),
             Page::Leq => self.leq.is_some(),
             Page::Recording => self.recording.focus == RecordingRow::Limit,
@@ -884,7 +885,7 @@ impl Settings {
     pub fn inner_open(&self) -> bool {
         match self.page {
             Page::Calibration => self.cal.electrical.is_some() || self.cal.acoustic.is_some(),
-            Page::Io => self.ceiling.confirm.is_some(),
+            Page::AudioIo => self.ceiling.confirm.is_some(),
             Page::Leq => self.leq.as_ref().is_some_and(|d| d.transfer.is_some()),
             _ => false,
         }
@@ -894,7 +895,7 @@ impl Settings {
     pub fn close_inner(&mut self) -> bool {
         match self.page {
             Page::Calibration => self.cal.close_dialog(),
-            Page::Io if self.ceiling.confirm.is_some() => {
+            Page::AudioIo if self.ceiling.confirm.is_some() => {
                 self.ceiling = CeilingEdit::default();
                 true
             }
@@ -906,7 +907,8 @@ impl Settings {
         }
     }
 
-    /// ↑/↓ on the Inputs & outputs page: the channel rows, then the max level row.
+    /// ↑/↓ on the Audio & I/O page: the device rows, the channel rows, then the max level
+    /// row, wrapping.
     pub fn io_move(&mut self, d: i32) {
         let rows = self.session.rows();
         if self.on_ceiling {
@@ -1021,9 +1023,9 @@ mod tests {
 
     #[test]
     fn pages_step_and_wrap() {
-        assert_eq!(Page::Io.step(1), Page::Audio);
-        assert_eq!(Page::Io.step(-1), Page::Connection);
-        assert_eq!(Page::Connection.step(1), Page::Io);
+        assert_eq!(Page::AudioIo.step(1), Page::Calibration);
+        assert_eq!(Page::AudioIo.step(-1), Page::Connection);
+        assert_eq!(Page::Connection.step(1), Page::AudioIo);
         for p in Page::ALL {
             assert!(!p.title().is_empty() && !p.keys().is_empty());
             assert!(p.whose().contains(THIS_APP) || p.whose().contains(THE_RIG));

@@ -42,7 +42,7 @@ use crate::leq_dialog::LeqDialog;
 use crate::palette::Palette;
 use crate::prefs::UiPrefs;
 use crate::session_dialog::{RoleKey, Row, SessionDialog};
-use crate::settings::{Page, Settings};
+use crate::settings::{FocusWant, Page, Settings};
 
 #[path = "state_display.rs"]
 mod display;
@@ -693,19 +693,17 @@ impl Overlay {
         }
     }
 
-    /// The session model while Settings shows the Inputs & outputs or Audio page.
+    /// The session model while Settings shows the Audio & I/O page.
     pub fn session(&self) -> Option<&SessionDialog> {
         match self {
-            Overlay::Settings(s) if matches!(s.page, Page::Io | Page::Audio) => Some(&s.session),
+            Overlay::Settings(s) if matches!(s.page, Page::AudioIo) => Some(&s.session),
             _ => None,
         }
     }
 
     pub fn session_mut(&mut self) -> Option<&mut SessionDialog> {
         match self {
-            Overlay::Settings(s) if matches!(s.page, Page::Io | Page::Audio) => {
-                Some(&mut s.session)
-            }
+            Overlay::Settings(s) if matches!(s.page, Page::AudioIo) => Some(&mut s.session),
             _ => None,
         }
     }
@@ -1117,8 +1115,8 @@ pub struct AppState {
     stack_on_create: Option<String>,
     /// That measurement, created: stacked once the mirror lists it.
     pending_stack: Option<MeasId>,
-    /// Open the session dialog once the daemon's state shows no audio session (an embedded
-    /// daemon on real audio starts without one).
+    /// Open the audio setup ([`Self::open_audio_setup`]) once the daemon's state shows no
+    /// audio session (an embedded daemon on real audio starts without one).
     pub open_session_when_empty: bool,
     /// The daemon's backends and devices as last listed (channel names for the dialogs).
     pub devices: Option<Vec<ac2_proto::model::BackendInfo>>,
@@ -1246,7 +1244,7 @@ impl AppState {
             client_key: None,
             want_connect_dialog: false,
             tree_reveal: false,
-            settings_page_last: Page::Io,
+            settings_page_last: Page::AudioIo,
         }
     }
 
@@ -1278,7 +1276,7 @@ impl AppState {
             Msg::Backspace => self.backspace(out),
             Msg::Wheel { rows } => self.wheel(rows, keymap),
             Msg::Command(c) => self.command(c, keymap, out),
-            Msg::Conn(e) => self.conn_event(*e, keymap, out),
+            Msg::Conn(e) => self.conn_event(*e, out),
             Msg::Form(m) => self.form_msg(m, out),
             Msg::Session(m) => self.session_msg(m, out),
             Msg::Offer(create) => self.offer(create, out),

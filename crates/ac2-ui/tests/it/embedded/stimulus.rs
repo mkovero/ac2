@@ -286,7 +286,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     Ok(())
 }
 
-/// Settings from an empty daemon: the Audio page, then Inputs & outputs: output 1 named for
+/// Settings from an empty daemon: Audio & I/O on the input device, ↓ to the channels: output 1 named for
 /// the rig, output 2 ticked as the only stimulus output, Enter opens; the stimulus plays on
 /// output 2 alone. The system max level lowered below the playing stimulus stops it; a raise
 /// is refused while armed and needs the typed word; a second client sees the new level.
@@ -301,18 +301,22 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     other.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
-    d.until("the Audio page with the device", |s| {
+    d.until("the Audio & I/O page with the device", |s| {
         s.overlay
             .settings()
-            .is_some_and(|x| x.page == Page::Audio && x.session.device_info().is_some())
+            .is_some_and(|x| x.page == Page::AudioIo && x.session.device_info().is_some())
     })?;
-    d.key("Ctrl+PageUp");
     let focus = |s: &AppState| s.overlay.settings().map(|x| (x.page, x.session.focus));
-    assert_eq!(focus(&d.st), Some((Page::Io, Row::Input(0))));
+    assert_eq!(focus(&d.st), Some((Page::AudioIo, Row::Device)));
+    // Output device, rate, buffer, then the first input.
     for _ in 0..4 {
         d.key("ArrowDown");
     }
-    assert_eq!(focus(&d.st), Some((Page::Io, Row::Output(0))));
+    assert_eq!(focus(&d.st), Some((Page::AudioIo, Row::Input(0))));
+    for _ in 0..4 {
+        d.key("ArrowDown");
+    }
+    assert_eq!(focus(&d.st), Some((Page::AudioIo, Row::Output(0))));
     // N names output 1 for the rig; S takes it off the stimulus; output 2 gets it.
     d.key("N");
     d.send(Msg::Text("n".into()));
@@ -342,9 +346,9 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
             .map(|g| g.outputs.clone());
     assert_eq!(outputs, Some(vec![1]), "plays on output 2 alone");
 
-    // The max level row: ↑ from the first channel. −30 is below the playing −20: stopped.
+    // The max level row: ↑ from the first row (the backend) wraps to it. −30 is below the playing −20: stopped.
     d.key("Ctrl+P");
-    assert_eq!(d.st.overlay.settings().map(|x| x.page), Some(Page::Io));
+    assert_eq!(d.st.overlay.settings().map(|x| x.page), Some(Page::AudioIo));
     for _ in 0..8 {
         if d.st.overlay.settings().is_some_and(|x| x.on_ceiling) {
             break;

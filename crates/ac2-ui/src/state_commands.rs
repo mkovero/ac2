@@ -726,10 +726,9 @@ impl AppState {
                 self.prompt(PromptKind::StimulusLevel, text);
             }
             C::StimulusOutputs => {
-                self.open_settings(Page::Io, out);
-                // On the stimulus output: the first ticked one, else the first output.
+                self.open_settings(Page::AudioIo, out);
                 if let Overlay::Settings(s) = &mut self.overlay {
-                    s.focus_outputs = !s.focus_stimulus_outputs();
+                    s.focus_channels(FocusWant::StimulusOutputs);
                 }
             }
             C::Settings => {
@@ -949,7 +948,7 @@ impl AppState {
                 if !self.connected() {
                     self.warn("not connected");
                 } else {
-                    self.open_settings(Page::Audio, out);
+                    self.open_audio_setup(out);
                 }
             }
             C::Record => {
@@ -1164,14 +1163,13 @@ impl AppState {
                 self.prompt(PromptKind::CalDelete, text);
             }
             C::InputSetup | C::Calibrations => match self.daemon() {
-                Some(_) => {
-                    let page = if c == C::InputSetup {
-                        Page::Io
-                    } else {
-                        Page::Calibration
-                    };
-                    self.open_settings(page, out);
+                Some(_) if c == C::InputSetup => {
+                    self.open_settings(Page::AudioIo, out);
+                    if let Overlay::Settings(s) = &mut self.overlay {
+                        s.focus_channels(FocusWant::Inputs);
+                    }
                 }
+                Some(_) => self.open_settings(Page::Calibration, out),
                 None => self.warn("not connected to a daemon"),
             },
             C::MicCurveInput => {

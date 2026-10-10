@@ -47,9 +47,10 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
             .settings()
             .is_some_and(|x| x.session.device_info().is_some())
     })?;
-    // The rig's mic is on input 2, on the Inputs & outputs page: N names it.
-    d.key("Ctrl+PageUp");
-    d.key("ArrowDown");
+    // The rig's mic is on input 2, below the device rows: N names it.
+    for _ in 0..5 {
+        d.key("ArrowDown");
+    }
     d.key("N");
     d.send(Msg::Text("n".into()));
     d.send(Msg::Text("MM1 34804".into()));

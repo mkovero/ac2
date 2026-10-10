@@ -87,7 +87,7 @@ Know this when reading the results:
   That note is expected; the loopback reference keeps the transfer function correct
   either way.
 - **Playing from ac2.** Windows lists the interface as two endpoints: a capture one (its
-  inputs) and a playback one (its outputs). Settings › Audio has an **Input** and an
+  inputs) and a playback one (its outputs). Settings › Audio & I/O has an **Input** and an
   **Output** device row; with a capture endpoint as the input, the output starts on the
   system's default output. Test 1 sets it to the interface's playback endpoint.
 
@@ -97,12 +97,12 @@ Pass: the interface is listed, its inputs show live levels, and a session opens 
 errors.
 
 1. In the app, **Shift+O** (or **Ctrl+K → Open audio session…**) opens Settings on its
-   **Audio** page.
+   **Audio & I/O** page, on the **Input** row.
 2. **Input** (←/→): step through the list and write down every entry for your interface
    and what each shows (*N in / M out · rate · buffer*). Pick the one with its inputs.
    **Output** (↓, then ←/→): pick the interface's playback endpoint (*0 in / N out*), not
    the laptop speakers. Note the clock note shown under the rows.
-3. Go to the **Inputs & outputs** page (**Alt+1**). Tap the mic or play something into an
+3. Go down (**↓**) to the input rows. Tap the mic or play something into an
    input: its row's meter must move. Check every input you have. The output rows below
    are the playback endpoint's outputs.
 4. Roles: **↑/↓** to a row, then **R** on input 1 (the loopback), **M** on input 2
@@ -132,7 +132,7 @@ Pass: an electrical loop reads flat (0 dB, 0°, coherence 1) and the delay finde
 the interface's own latency between the two inputs, about 0 ms.
 
 1. Make the stimulus play on both outputs: **Ctrl+P**, **Alt+1**
-   (Settings › Inputs & outputs), **S** on output 2 as well, **Esc**. Output 1 feeds the
+   (Settings › Audio & I/O), **S** on output 2 as well, **Esc**. Output 1 feeds the
    reference over cable 1, output 2 the "measurement" over cable 2, so the measurement is a
    wire and the answer is known.
 2. **L**, type `-40`, **Enter**; **Space** arms, **Enter** plays pink noise. The transfer pane should show magnitude near 0 dB, phase near 0° and

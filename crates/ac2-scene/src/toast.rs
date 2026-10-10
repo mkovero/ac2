@@ -269,7 +269,7 @@ mod tests {
     fn a_long_text_wraps_at_word_boundaries_within_the_maximum_width() {
         let text = "Main L's level −3.0 dBFS is above the daemon's ceiling −6.0 dBFS: edit \
                     it (palette: edit the selected measurement) or raise the ceiling in \
-                    Settings › Audio, then arm the sweep again";
+                    Settings › Audio & I/O, then arm the sweep again";
         for w in [640.0, 1280.0, 2560.0] {
             let b = boxes(&[text], w, 800.0);
             let max = max_width(w);

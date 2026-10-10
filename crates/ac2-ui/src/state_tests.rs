@@ -528,7 +528,7 @@ fn backends(fake_names: bool) -> Vec<BackendInfo> {
     ]
 }
 
-/// The session model of Settings (its Inputs & outputs and Audio pages).
+/// The session model of Settings (its Audio & I/O page).
 fn dialog(t: &T) -> &SessionDialog {
     match t.st.overlay.settings() {
         Some(s) => &s.session,
@@ -563,12 +563,9 @@ fn opened(r: &[Request]) -> Option<(&SessionConfig, &[InputSetup], &[MeasConfig]
 }
 
 /// Focuses the session dialog row `row` with ↓ from the top.
-/// Moves to `row` by keys: Ctrl+PageUp / PageDown to its page of Settings, then ↓.
+/// Moves to `row` by keys: Ctrl+PageUp / PageDown to the Audio & I/O page, then ↓.
 fn focus(t: &mut T, row: Row) {
-    let page = match row {
-        Row::Input(_) | Row::Output(_) => crate::settings::Page::Io,
-        _ => crate::settings::Page::Audio,
-    };
+    let page = crate::settings::Page::AudioIo;
     for _ in 0..8 {
         if t.st.overlay.settings().is_some_and(|s| s.page == page) {
             break;

@@ -50,7 +50,7 @@ fn windows_leave_the_stimulus_alone_and_the_stop_chord_stops_from_one() -> R {
     assert!(
         d.st.overlay
             .settings()
-            .is_some_and(|s| s.page == ac2_ui::settings::Page::Io),
+            .is_some_and(|s| s.page == ac2_ui::settings::Page::AudioIo),
         "{:?}",
         d.st.overlay
     );

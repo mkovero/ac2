@@ -130,14 +130,7 @@ fn page(
         .max_height((body.height() - 70.0 - footer_h).max(120.0))
         .auto_shrink([false, false])
         .show(ui, |ui| match s.page {
-            Page::Io => io_page(app, ui, s, ch, msg),
-            Page::Audio => {
-                let mut m = None;
-                super::session::audio_page(ui, &s.session, ch, &mut m);
-                if let Some(m) = m {
-                    *msg = Some(Msg::Session(m));
-                }
-            }
+            Page::AudioIo => io_page(app, ui, s, ch, msg),
             Page::Calibration => super::cal::cal_page(app, ui, &s.cal, ch),
             Page::Leq => match &s.leq {
                 Some(d) => {
@@ -175,7 +168,17 @@ fn section(ui: &mut egui::Ui, title: &str, whose: &str, ch: &Chrome) {
 
 fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) {
     let mut m = None;
-    super::session::channels_page(app, ui, &s.session, ch, &mut m);
+    // One focus marker on the page: the max level row's, or a session row's.
+    let focus = (!s.on_ceiling).then_some(s.session.focus);
+    section(ui, "Device", crate::settings::THE_RIG, ch);
+    super::session::device_section(ui, &s.session, focus, ch, &mut m);
+    section(
+        ui,
+        "Channels",
+        "the rig — all clients · stimulus outputs: this app",
+        ch,
+    );
+    super::session::channels_section(app, ui, &s.session, focus, ch, &mut m);
     if let Some(m) = m {
         *msg = Some(Msg::Session(m));
     }

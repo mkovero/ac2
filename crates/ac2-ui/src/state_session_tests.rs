@@ -400,8 +400,8 @@ fn a_real_backend_is_preferred_and_an_unavailable_one_says_why() {
     assert_eq!(previewed(&r), Some(&DeviceId("card".into())));
     // A real interface starts without roles: its wiring is the operator's to say.
     assert!(dialog(&t).inputs.iter().all(|i| i.role == InputRole::None));
-    // → on the device row previews the other device.
-    t.key("Down");
+    // → on the device row (where Shift+O lands) previews the other device.
+    assert_eq!(dialog(&t).focus, Row::Device);
     let r = t.key("Right");
     assert_eq!(previewed(&r), Some(&DeviceId("other".into())));
     // The backend row: JACK is listed but not available.
@@ -1116,8 +1116,10 @@ fn new_measurements_start_and_become_selected() {
     assert!(t.last_toast().contains(&open_key()), "{}", t.last_toast());
 }
 
+/// A fresh start on a daemon with no audio session lands on Settings › Audio & I/O with the
+/// input device focused, once; a daemon with audio open (a rig, the kiosk) opens nothing.
 #[test]
-fn real_audio_embedded_daemon_opens_the_session_dialog_once() {
+fn a_daemon_without_audio_opens_the_audio_setup_once() {
     let mut t = T::disconnected();
     t.st.open_session_when_empty = true;
     connected_to(&mut t, "embedded daemon (cpal)");
@@ -1127,6 +1129,15 @@ fn real_audio_embedded_daemon_opens_the_session_dialog_once() {
         "{r:?}"
     );
     assert!(dialog(&t).backends.is_none());
+    let s = t.st.overlay.settings().expect("Settings");
+    assert_eq!(s.page, crate::settings::Page::AudioIo);
+    assert_eq!(s.session.focus, Row::Device);
+    t.conn(ConnEvent::Devices(Ok(real_backends())));
+    assert_eq!(
+        dialog(&t).focus,
+        Row::Device,
+        "the device list keeps the focus"
+    );
     t.key("Escape");
     // Only once: the operator closed it.
     assert!(t.conn(mirror(no_session_state())).is_empty());
@@ -1180,7 +1191,7 @@ fn endpoint_backends() -> Vec<BackendInfo> {
 }
 
 /// An input device without outputs plays on the system's default output; ←/→ on the
-/// Output row choose another output device, whose rows the Inputs & outputs page shows;
+/// Output row choose another output device, whose rows the Audio & I/O page shows;
 /// the session opens with both devices, the loopback detection plays on the output device,
 /// and the choice is remembered for the input device.
 #[test]

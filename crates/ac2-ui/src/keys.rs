@@ -365,7 +365,7 @@ commands! {
     LevelUpCoarse => "level_up_coarse", "Stimulus level +3 dB", [Global];
     LevelDownCoarse => "level_down_coarse", "Stimulus level −3 dB", [Global];
     StimulusLevel => "stimulus_level", "Stimulus: type level (dBFS)…", [Global];
-    StimulusOutputs => "stimulus_outputs", "Stimulus outputs: tick them in Settings › Inputs & outputs…", [Global];
+    StimulusOutputs => "stimulus_outputs", "Stimulus outputs: tick them in Settings › Audio & I/O…", [Global];
     StimulusTakeOver => "stimulus_take_over", "Stimulus: take over the lease from another client and arm", [Global];
 
     FocusPane1 => "focus_pane_1", "Focus pane 1 (panes count in reading order)", [Global];
@@ -442,7 +442,7 @@ commands! {
     SessionSave => "session_save", "Session: save (name or path)…", [Global];
     SessionLoad => "session_load", "Session: load, disarmed (name or path)…", [Global];
     Reconnect => "reconnect", "Reconnect to the daemon now", [Global];
-    OpenSession => "session_open", "Open audio session: Settings › Audio…", [Global];
+    OpenSession => "session_open", "Open audio session: Settings › Audio & I/O…", [Global];
     CloseSession => "session_close", "Close audio session", [Global];
     Record => "record", "Record: raw audio of every input on / off (stops by itself after 1 h)", [Global];
     ReplayRecording => "replay_recording", "Replay a recording as the session (name or path)…", [Global];
@@ -457,7 +457,7 @@ commands! {
     HideGroup => "hide_group", "Show / hide the selected measurement with every trace under it", [Global];
     MoveTrace => "move_trace", "Move the selected trace or math channel to another measurement (or Imported)…", [Global];
     ToggleGroup => "toggle_group", "Fold / unfold the selected measurement in the list", [Global];
-    InputSetup => "input_setup", "Input setup: Settings › Inputs & outputs (names, roles, mics, max level)…", [Global];
+    InputSetup => "input_setup", "Input setup: Settings › Audio & I/O (names, roles, mics, max level)…", [Global];
     Calibrations => "calibrations", "Calibrations: Settings › Calibration (mics, curves, sensitivities)…", [Global];
     InputMics => "input_mics", "Input setup: type mic names (3=M30, 4=ECM)…", [Global];
     MicCurve => "mic_curve", "Mic curve: next curve on the selected measurement's input (off → 0° → 90° …)", [Global];

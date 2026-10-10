@@ -40,11 +40,11 @@ fn with_ceiling(ceiling: f64, bound: f64, armed: bool) -> State {
 fn the_old_dialog_keys_open_their_pages_and_ctrl_p_the_last_one() {
     let mut t = T::new();
     t.type_key("Shift+O", "O");
-    assert_eq!(page(&t), Page::Audio);
+    assert_eq!(page(&t), Page::AudioIo);
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
     t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
-    assert_eq!(page(&t), Page::Io);
+    assert_eq!(page(&t), Page::AudioIo);
     t.key("Escape");
     t.st.update(Msg::Command(CommandId::Calibrations), &t.keys);
     assert_eq!(page(&t), Page::Calibration);
@@ -56,11 +56,11 @@ fn the_old_dialog_keys_open_their_pages_and_ctrl_p_the_last_one() {
     assert_eq!(page(&t), Page::Leq);
     t.key("Ctrl+PageUp");
     t.key("Ctrl+PageUp");
-    assert_eq!(page(&t), Page::Audio);
-    t.key("Alt+7");
+    assert_eq!(page(&t), Page::AudioIo);
+    t.key("Alt+6");
     assert_eq!(page(&t), Page::Connection);
     t.key("Ctrl+Tab");
-    assert_eq!(page(&t), Page::Io, "wraps");
+    assert_eq!(page(&t), Page::AudioIo, "wraps");
     // The mouse picks a page too; Ctrl+P again closes the view.
     t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
     assert_eq!(page(&t), Page::Display);
@@ -310,7 +310,7 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
 fn recording_limit_is_this_apps_and_the_record_key_uses_it() {
     let mut t = T::new();
     t.key("Ctrl+P");
-    t.key("Alt+5");
+    t.key("Alt+4");
     assert_eq!(page(&t), Page::Recording);
     // Opening it asks the daemon where it records.
     t.text("90");
@@ -332,7 +332,7 @@ fn recording_limit_is_this_apps_and_the_record_key_uses_it() {
 fn connection_page_asks_the_daemon_authorizes_and_revokes() {
     let mut t = T::new();
     t.key("Ctrl+P");
-    let r = t.key("Alt+7");
+    let r = t.key("Alt+6");
     assert!(r.iter().any(|r| matches!(r, Request::ServerInfo)), "{r:?}");
     // Asked again while the page is shown.
     t.st.update(
@@ -386,4 +386,100 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
     });
     assert!(t.last_toast().contains("already authorized"));
     assert_eq!(settings(&t).connection.server, Some(Ok(info)));
+}
+
+/// One page holds the audio device and the channels; its title is the name every text uses.
+#[test]
+fn the_audio_and_channels_are_one_page() {
+    assert_eq!(Page::ALL[0], Page::AudioIo);
+    assert_eq!(Page::AudioIo.title(), crate::settings::AUDIO_IO);
+    assert_eq!(Page::AudioIo.title(), "Audio & I/O");
+    let titles: Vec<&str> = Page::ALL.iter().map(|p| p.title()).collect();
+    assert!(!titles.contains(&"Audio") && !titles.contains(&"Inputs & outputs"));
+    for c in [
+        CommandId::OpenSession,
+        CommandId::InputSetup,
+        CommandId::StimulusOutputs,
+    ] {
+        assert!(
+            c.title().contains("Settings › Audio & I/O"),
+            "{}",
+            c.title()
+        );
+    }
+}
+
+/// ↑/↓ walk the device rows, then the inputs, the outputs, the max level row, and wrap.
+#[test]
+fn up_down_walk_device_channels_then_the_max_level() {
+    use crate::session_dialog::Row;
+    let mut t = T::new();
+    t.conn(mirror(with_ceiling(-30.0, -10.0, false)));
+    t.type_key("Shift+O", "O");
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    let rows = settings(&t).session.rows();
+    let (ni, no) = (
+        settings(&t).session.inputs.len(),
+        settings(&t).session.outputs.len(),
+    );
+    assert!(ni > 0 && no > 0);
+    let mut want = vec![
+        Row::Backend,
+        Row::Device,
+        Row::OutputDevice,
+        Row::Rate,
+        Row::Buffer,
+    ];
+    want.extend((0..ni).map(Row::Input));
+    want.extend((0..no).map(Row::Output));
+    assert_eq!(rows, want);
+    // Shift+O lands on the input device.
+    assert_eq!(settings(&t).session.focus, Row::Device);
+    assert!(!settings(&t).on_ceiling);
+    let at = |t: &T| {
+        let s = settings(t);
+        (s.on_ceiling, s.session.focus)
+    };
+    t.key("ArrowUp");
+    assert_eq!(at(&t), (false, Row::Backend));
+    let mut walked = vec![at(&t).1];
+    for _ in 1..want.len() {
+        t.key("ArrowDown");
+        walked.push(at(&t).1);
+    }
+    assert_eq!(walked, want);
+    t.key("ArrowDown");
+    assert!(at(&t).0, "the max level row after the last output");
+    t.key("ArrowDown");
+    assert_eq!(at(&t), (false, Row::Backend), "wraps to the backend");
+    t.key("ArrowUp");
+    assert!(at(&t).0, "↑ from the backend: the max level row");
+    t.key("ArrowUp");
+    assert_eq!(at(&t), (false, Row::Output(no - 1)));
+    assert_eq!(page(&t), Page::AudioIo);
+}
+
+/// The commands that opened either old page open this one on their row.
+#[test]
+fn commands_open_the_page_on_their_row() {
+    use crate::session_dialog::Row;
+    let mut t = T::new();
+    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    // The device's rows arrive after the page opens: the focus waits for them.
+    assert_eq!(
+        settings(&t).focus_want,
+        Some(crate::settings::FocusWant::Inputs)
+    );
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    assert_eq!(page(&t), Page::AudioIo);
+    assert_eq!(settings(&t).session.focus, Row::Input(0));
+    assert_eq!(settings(&t).focus_want, None);
+    // Shift+O on the open view moves to the input device.
+    t.key("Escape");
+    t.type_key("Shift+O", "O");
+    assert_eq!(page(&t), Page::AudioIo);
+    assert_eq!(settings(&t).session.focus, Row::Device);
+    t.key("Escape");
+    t.st.update(Msg::Command(CommandId::StimulusOutputs), &t.keys);
+    assert!(matches!(settings(&t).session.focus, Row::Output(_)));
 }

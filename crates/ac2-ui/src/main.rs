@@ -210,9 +210,11 @@ fn main() -> ExitCode {
         notices,
         started,
         bench_startup: args.bench_startup,
-        // An embedded daemon on real audio starts without a session; the simulated rig
-        // starts measuring.
-        open_session_dialog: embedded.is_some() && !matches!(args.backend, Some(BackendArg::Fake)),
+        // A daemon without an audio session (an embedded one on real audio always starts
+        // so) lands on the audio setup once; one with audio open (a rig, a kiosk) does not.
+        // The simulated rig starts measuring.
+        open_session_dialog: !(embedded.is_some()
+            && matches!(args.backend, Some(BackendArg::Fake))),
         client_key,
         connect: Some(ac2_ui::app::ConnectSetup {
             key_dir,

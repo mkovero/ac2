@@ -162,39 +162,25 @@ pub(super) fn notices(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome) {
     }
 }
 
-/// The Inputs & outputs page's channels: inputs with meters, names and roles, outputs with
-/// their labels and stimulus ticks, the reference pair and the loopback detection.
-pub(super) fn channels_page(
+/// The Audio & I/O page's channels: inputs with meters, names and roles, outputs with
+/// their labels and stimulus ticks, the reference pair, the loopback detection and the
+/// button that opens the session. `focus`: the focused row, `None` while the max level
+/// row below has it.
+pub(super) fn channels_section(
     app: &App,
     ui: &mut egui::Ui,
     d: &SessionDialog,
+    focus: Option<Row>,
     ch: &Chrome,
     msg: &mut Option<SessionMsg>,
 ) {
     if d.backends.is_none() {
-        ui.label(RichText::new("listing backends and devices…").color(ch.dim));
+        // The device section says the listing is on its way.
+        notices(ui, d, ch);
         return;
     }
-    if let Some(dev) = d.device_info() {
-        let text = match d.output_info() {
-            Some(out) if out.id != dev.id => format!(
-                "Input {} · {} — output {} · {} (devices are chosen on the Audio page)",
-                dev.name,
-                device_summary(dev),
-                out.name,
-                device_summary(out)
-            ),
-            _ => format!(
-                "{} · {} (the device is chosen on the Audio page)",
-                dev.name,
-                device_summary(dev)
-            ),
-        };
-        ui.label(RichText::new(text).color(ch.dim));
-        ui.add_space(4.0);
-    }
     let (meters, cal) = channel_data(app, d);
-    channel_grid(ui, d, &meters, &cal, ch, msg);
+    channel_grid(ui, d, focus, &meters, &cal, ch, msg);
     ui.add_space(6.0);
     ui.label(RichText::new(d.reference_text()).color(ch.text));
     detect_panel(ui, d, ch, msg);
@@ -202,7 +188,7 @@ pub(super) fn channels_page(
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         if ui
-            .button(RichText::new("Open the session with these channels").strong())
+            .button(RichText::new("Open the session").strong())
             .clicked()
         {
             *msg = Some(SessionMsg::Submit);
@@ -213,33 +199,32 @@ pub(super) fn channels_page(
     });
 }
 
-/// The Audio page: backend, device, rate and buffer.
-pub(super) fn audio_page(
+/// The Audio & I/O page's device: backend, input and output device, rate and buffer.
+pub(super) fn device_section(
     ui: &mut egui::Ui,
     d: &SessionDialog,
+    focus: Option<Row>,
     ch: &Chrome,
     msg: &mut Option<SessionMsg>,
 ) {
-    backend_rows(ui, d, ch, msg);
+    backend_rows(ui, d, focus, ch, msg);
     ui.add_space(6.0);
-    rate_rows(ui, d, ch, msg);
-    notices(ui, d, ch);
-    ui.add_space(6.0);
-    if ui
-        .button(RichText::new("Open the session").strong())
-        .clicked()
-    {
-        *msg = Some(SessionMsg::Submit);
-    }
+    rate_rows(ui, d, focus, ch, msg);
 }
 
-fn backend_rows(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Option<SessionMsg>) {
+fn backend_rows(
+    ui: &mut egui::Ui,
+    d: &SessionDialog,
+    focus: Option<Row>,
+    ch: &Chrome,
+    msg: &mut Option<SessionMsg>,
+) {
     let Some(backends) = &d.backends else {
         ui.label(RichText::new("listing backends and devices…").color(ch.dim));
         return;
     };
     ui.horizontal(|ui| {
-        if label_col(ui, "Backend ", d.focus == Row::Backend, ch).clicked() {
+        if label_col(ui, "Backend ", focus == Some(Row::Backend), ch).clicked() {
             *msg = Some(SessionMsg::Focus(Row::Backend));
         }
         for (i, b) in backends.iter().enumerate() {
@@ -279,7 +264,7 @@ fn backend_rows(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Opt
             .map(|dev| (dev.name.clone(), device_summary(dev))),
         d.input_position(),
         inputs,
-        d.focus == Row::Device,
+        focus == Some(Row::Device),
         ch,
         msg,
     );
@@ -297,7 +282,7 @@ fn backend_rows(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Opt
         out,
         d.output_position(),
         outputs,
-        d.focus == Row::OutputDevice,
+        focus == Some(Row::OutputDevice),
         ch,
         msg,
     );
@@ -353,6 +338,7 @@ fn device_row(
 fn channel_grid(
     ui: &mut egui::Ui,
     d: &SessionDialog,
+    focus: Option<Row>,
     meters: &std::collections::BTreeMap<u16, MeterReading>,
     cal: &[Option<(String, bool)>],
     ch: &Chrome,
@@ -371,7 +357,7 @@ fn channel_grid(
             ui.end_row();
             for (i, r) in d.inputs.iter().enumerate() {
                 let row = Row::Input(i);
-                let focused = d.focus == row;
+                let focused = focus == Some(row);
                 ui.horizontal(|ui| {
                     let marker = if focused { "▸" } else { " " };
                     ui.label(RichText::new(marker).color(ch.focus).monospace());
@@ -464,7 +450,7 @@ fn channel_grid(
             ui.end_row();
             for (o, r) in d.outputs.iter().enumerate() {
                 let row = Row::Output(o);
-                let focused = d.focus == row;
+                let focused = focus == Some(row);
                 let in_session = r.channel < d.out_count;
                 ui.horizontal(|ui| {
                     let marker = if focused { "▸" } else { " " };
@@ -514,7 +500,13 @@ fn channel_grid(
         });
 }
 
-fn rate_rows(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Option<SessionMsg>) {
+fn rate_rows(
+    ui: &mut egui::Ui,
+    d: &SessionDialog,
+    focus: Option<Row>,
+    ch: &Chrome,
+    msg: &mut Option<SessionMsg>,
+) {
     let dir = d
         .device_info()
         .and_then(|x| x.input.as_ref().or(x.output.as_ref()));
@@ -531,7 +523,7 @@ fn rate_rows(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Option
             (Row::Rate, "Sample rate", &d.rate, default_rate),
             (Row::Buffer, "Buffer (frames)", &d.buffer, default_buffer),
         ] {
-            let focused = d.focus == row;
+            let focused = focus == Some(row);
             if label_col(ui, label, focused, ch).clicked() {
                 *msg = Some(SessionMsg::Focus(row));
             }

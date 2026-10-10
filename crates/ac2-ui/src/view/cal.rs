@@ -68,7 +68,7 @@ pub(super) fn cal_page(app: &App, ui: &mut egui::Ui, v: &CalView, ch: &Chrome) {
     if rows.is_empty() {
         ui.label(
             RichText::new(
-                "Nothing stored and no session open: open a session (Audio page), name the mic \
+                "Nothing stored and no session open: open a session (Audio & I/O page), name the mic \
                  on its input (N), import its curve (I).",
             )
             .color(ch.dim),
