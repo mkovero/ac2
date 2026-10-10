@@ -457,7 +457,7 @@ pub fn db_to_percent(db: f64) -> f64 {
     100.0 * 10f64.powf(db / 20.0)
 }
 
-fn fft_forward(x: &[f64], n: usize) -> Vec<Complex64> {
+pub(crate) fn fft_forward(x: &[f64], n: usize) -> Vec<Complex64> {
     let mut planner = RealFftPlanner::<f64>::new();
     let fwd = planner.plan_fft_forward(n);
     let mut buf = vec![0.0; n];
@@ -774,7 +774,7 @@ fn gap_spectra(
 }
 
 /// Half-Hann rise over `rise` samples, flat, half-Hann fall over the last `fall` samples.
-fn taper(len: usize, rise: usize, fall: usize) -> Vec<f64> {
+pub(crate) fn taper(len: usize, rise: usize, fall: usize) -> Vec<f64> {
     (0..len)
         .map(|i| {
             let mut w = 1.0;
@@ -1157,7 +1157,7 @@ pub fn analyse_recording(
 /// Fractional offset of the peak of |h| from the whole sample `d`: `h[d−FINE_HALF …
 /// d+FINE_HALF]` interpolated band-limited (zero-padded DFT; the sweep stops below Nyquist, so the samples
 /// define the peak), then a parabolic vertex on the fine grid.
-fn fine_peak(h: impl Fn(i64) -> f64, d: i64) -> f64 {
+pub(crate) fn fine_peak(h: impl Fn(i64) -> f64, d: i64) -> f64 {
     let n = 2 * FINE_HALF + 1;
     let mut x: Vec<Complex64> = (0..n)
         .map(|i| Complex64::new(h(d - FINE_HALF as i64 + i as i64), 0.0))
@@ -1198,7 +1198,7 @@ fn fine_peak(h: impl Fn(i64) -> f64, d: i64) -> f64 {
 /// into a group delay swinging ±60 %. The interpolant's integral over the exact edges is
 /// centred on the column whatever the bins, and a column narrower than a bin reads the
 /// interpolated value at its centre.
-fn column_mean<T>(v: impl Fn(usize) -> T, a: f64, b: f64) -> T
+pub(crate) fn column_mean<T>(v: impl Fn(usize) -> T, a: f64, b: f64) -> T
 where
     T: Copy + std::ops::Add<Output = T> + std::ops::Mul<f64, Output = T>,
 {
@@ -1220,7 +1220,7 @@ where
     acc * (1.0 / (b - a))
 }
 
-fn wrap_deg(d: f64) -> f64 {
+pub(crate) fn wrap_deg(d: f64) -> f64 {
     let w = (d + 180.0).rem_euclid(360.0) - 180.0;
     if w == -180.0 { 180.0 } else { w }
 }
