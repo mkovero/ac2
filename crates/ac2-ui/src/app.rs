@@ -112,6 +112,8 @@ pub(crate) struct CachedScene {
     pub unit_tip: Option<(egui::Rect, String)>,
     /// Where the scene put its legend, for moving, resizing and scrolling it.
     pub legend: Option<ac2_scene::legend::LegendBox>,
+    /// Where the scene drew each legend row and whose curve it names: a click selects it.
+    pub legend_hits: Vec<ac2_scene::legend::LegendHit>,
 }
 
 /// A drag on the legend: where on the plate (or its grip) the pointer took it, so the

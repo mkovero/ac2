@@ -897,6 +897,8 @@ pub enum Msg {
     DistortionUnit(DistortionUnit),
     /// The mouse on the transfer pane's legend.
     Legend(LegendMsg),
+    /// A click on the row of pane `p`'s legend that names `key`'s curve.
+    LegendPick(PaneId, ac2_scene::trace::TraceKey),
     /// Mouse on an open dialog.
     Form(FormMsg),
     /// Mouse on the session dialog.
@@ -1341,6 +1343,7 @@ impl AppState {
                     self.select_shown(p);
                 }
             }
+            Msg::LegendPick(p, key) => self.legend_pick(p, key),
             Msg::PaneMenu(p) => {
                 self.overlay = match self.overlay {
                     Overlay::PaneMenu(m) if m.pane == p => Overlay::None,

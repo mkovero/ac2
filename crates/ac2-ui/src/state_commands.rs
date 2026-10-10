@@ -8,7 +8,7 @@ impl AppState {
     /// which draws only that group: a selected curve the pane leaves out would take the
     /// trace keys while nothing on screen moves.
     pub(super) fn select_trace(&mut self, id: Option<TraceId>) {
-        self.selected_trace = id;
+        self.set_selected_trace(id);
         let owner = self
             .selected_trace_meta()
             .filter(|t| drawn_in(t, PaneKind::Transfer))
@@ -28,6 +28,12 @@ impl AppState {
         {
             v.meas = Some(m);
         }
+    }
+
+    /// The trace selection alone, every pane keeping what it shows: a sweep selected is
+    /// also what the sweep pane shows.
+    fn set_selected_trace(&mut self, id: Option<TraceId>) {
+        self.selected_trace = id;
         if let Some(id) = id
             && self.daemon().is_some_and(|s| {
                 s.traces
@@ -247,6 +253,29 @@ impl AppState {
                 self.view.spectrum.spectrograph.cursor_s = None;
             } else if !before && let Some(d) = self.data.clone() {
                 self.fold_spectrographs(&d);
+            }
+        }
+    }
+
+    /// A click on a legend row of pane `p`: selects exactly the curve it names — a stored
+    /// trace, else the measurement (or math channel) whose live curve it is, as its row in
+    /// the list does — so the keys of the selection (A hides it) act on it. The pane keeps
+    /// what it shows: the curve is on it already, and a compared curve of another
+    /// measurement selected must not swap the pane's curves under the pointer.
+    pub(super) fn legend_pick(&mut self, p: PaneId, key: ac2_scene::trace::TraceKey) {
+        use ac2_scene::trace::TraceKey;
+        self.layout.set_focus(p);
+        match key {
+            TraceKey::Stored(id) => {
+                if self.trace_meta(id).is_ok() {
+                    self.set_selected_trace(Some(id));
+                }
+            }
+            TraceKey::Live(id) => {
+                if self.meas(id).is_some() {
+                    self.selected = Some(id);
+                    self.selected_trace = None;
+                }
             }
         }
     }

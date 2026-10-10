@@ -8,6 +8,7 @@ use std::ops::RangeInclusive;
 use crate::canvas::{anchor, cut_to, label, text_width};
 use crate::primitives::{Color, FillRect, HAlign, Layer, Rect, VAlign};
 use crate::theme::Theme;
+use crate::trace::TraceKey;
 
 /// Row pitch.
 pub const ROW: f32 = 16.0;
@@ -128,6 +129,23 @@ impl LegendView {
     }
 }
 
+/// Where a legend row is drawn and whose curve it names: a click there selects that curve,
+/// as a click on its row in the measurement list does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LegendHit {
+    pub key: TraceKey,
+    pub rect: Rect,
+}
+
+/// The curve whose legend row is at `x`, `y`, if any.
+pub fn hit_at(hits: &[LegendHit], x: f32, y: f32) -> Option<TraceKey> {
+    hits.iter()
+        .find(|h| {
+            (h.rect.x..=h.rect.right()).contains(&x) && (h.rect.y..=h.rect.bottom()).contains(&y)
+        })
+        .map(|h| h.key)
+}
+
 /// Where the legend went and what it shows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LegendBox {
@@ -192,6 +210,20 @@ impl LegendBox {
         i.checked_sub(self.first)
             .and_then(|k| self.rows.get(k))
             .map(|r| r.1)
+    }
+
+    /// The shown rows across the plate, `keys` naming every row of the whole legend (not
+    /// only the shown ones).
+    pub fn hits(&self, keys: &[TraceKey]) -> Vec<LegendHit> {
+        self.rows
+            .iter()
+            .enumerate()
+            .filter_map(|(k, &(_, y))| {
+                let key = *keys.get(self.first + k)?;
+                let rect = Rect::new(self.rect.x, y - ROW / 2.0, self.rect.w, ROW);
+                Some(LegendHit { key, rect })
+            })
+            .collect()
     }
 
     fn slack(&self) -> (f32, f32) {

@@ -529,6 +529,7 @@ selected.
   only: the measurement keeps running and measuring, the other clients still see it. Its
   list row says `hidden` (dimmed), as does its row in a pane's measurement list, and its
   pane's title starts with `TF 2 hidden`. **Tab** / **Shift+Tab** and a click still reach it.
+  A click on a curve's legend row selects that curve, so click and **A** hide it.
   The app remembers hidden measurements by name in `ui.toml` (`hidden = ["TF 2"]` under
   `[layout]`).
 - **Delete** or **Backspace** (keyboards without a Delete key) on a measurement asks first:
@@ -663,6 +664,10 @@ it in a narrow pane). With the mouse:
   every curve reachable by name, where a `+N more` would hide which curves those are.
   Ctrl/Shift+wheel over it still zoom and pan the level axis.
 - The plate turns opaque with a lighter border while the pointer is on it.
+- **click** a row to select its curve, as its row in the list does: a stored trace, a math
+  channel, the live curve, or a compared curve of another measurement. The list marks it and
+  **A** hides it (the pane keeps its group). A hidden curve leaves the legend: bring it back
+  from the list (its row says `hidden`).
 
 From **Ctrl+K**: *Legend: top-left / top-right / bottom-left / bottom-right corner* snaps it,
 *Legend: hide / show* hides it (the cursor values then name their curves). Where it sits, its
@@ -720,7 +725,8 @@ narrow pane shortens the unit (`dBFS per 1.46 Hz bin`, `dBFS/bin`, `dBFS`).
 It names every curve the pane draws (live spectra and RTAs, then shown captures) with its
 colour and what sets it apart: `stopped`, `STALE 3.2 s`, a display offset
 (`offset +3.0 dB`). It sits in rows of its own above the plot, so it never covers a curve;
-a narrow pane drops the tags first, then names what fits and `+2 more`.
+a narrow pane drops the tags first, then names what fits and `+2 more`. A **click** on an
+entry selects its curve, as in the transfer legend: **A** then hides it.
 
 #### How a live spectrum is drawn
 

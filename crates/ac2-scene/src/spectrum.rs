@@ -451,6 +451,8 @@ pub struct SpectrumScene {
     pub legend_shown: Vec<String>,
     /// The band the legend takes above the plot; zero height without one.
     pub legend_rect: Rect,
+    /// Where each drawn legend entry is, for a click to select its curve.
+    pub legend_hits: Vec<crate::legend::LegendHit>,
     /// Banner strip above the plot; zero height when no banner is up.
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
@@ -665,9 +667,21 @@ pub(crate) fn spectrum_scene_in(
         right,
     );
     let mut legend_shown = Vec::with_capacity(placed.len());
+    let mut legend_hits = Vec::with_capacity(placed.len());
     for (i, row, x, text) in placed {
         let y = legend_rect.y + (row as f32 + 0.5) * LEGEND_ROW;
         let x = legend_rect.x + x;
+        if let Some(e) = i.and_then(|i| legend.get(i)) {
+            legend_hits.push(crate::legend::LegendHit {
+                key: e.key,
+                rect: Rect::new(
+                    x,
+                    y - LEGEND_ROW / 2.0,
+                    entry_width(&text, font),
+                    LEGEND_ROW,
+                ),
+            });
+        }
         let (tx, color) = match i.and_then(|i| traces.get(i).zip(legend.get(i))) {
             Some((t, e)) => {
                 let a = if e.stale { theme.stale_alpha } else { 1.0 };
@@ -929,6 +943,7 @@ pub(crate) fn spectrum_scene_in(
         legend,
         legend_shown,
         legend_rect,
+        legend_hits,
         strip: strip.rect,
         banners: strip.rows,
     }
@@ -1691,6 +1706,24 @@ mod tests {
         let selected: Vec<bool> = wide.legend.iter().map(|e| e.selected).collect();
         assert_eq!(selected, [false, false, false, true, false]);
         assert_eq!(wide.legend_rect.h, LEGEND_ROW);
+        // A click on an entry's swatch or text names its curve.
+        let hit = |s: &SpectrumScene, text: &str| {
+            let l = s
+                .scene
+                .layers
+                .iter()
+                .flat_map(|l| &l.labels)
+                .find(|l| l.text == text)
+                .expect("entry");
+            let b = crate::canvas::tests::label_box(l);
+            (
+                crate::legend::hit_at(&s.legend_hits, b.x + b.w / 2.0, b.y + b.h / 2.0),
+                crate::legend::hit_at(&s.legend_hits, b.x - SWATCH_GAP - 2.0, l.pos[1]),
+            )
+        };
+        let front = Some(TraceKey::Live(MeasId(4)));
+        assert_eq!(hit(&wide, "Front fill"), (front, front));
+        assert_eq!(wide.legend_hits.len(), 5);
         // Narrow: rows wrap, then the tags go, then `+N more`.
         let narrow = build(420.0, 500.0);
         assert!(
@@ -1706,6 +1739,10 @@ mod tests {
             texts(&short)
         );
         assert!(!texts(&short).iter().any(|t| t.contains('·')));
+        // `+N more` is no curve's.
+        assert_eq!(short.legend_hits.len(), texts(&short).len() - 1);
+        let more = texts(&short).last().cloned().expect("more");
+        assert_eq!(hit(&short, &more).0, None);
         let tiny = build(160.0, 120.0);
         assert!(tiny.legend_rect.h <= LEGEND_ROW);
         for (w, h) in [

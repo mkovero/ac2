@@ -102,6 +102,8 @@ pub struct TfScene {
     /// Where the legend went (`None`: hidden or nothing to list): the UI moves, resizes and
     /// scrolls it by this.
     pub legend_box: Option<LegendBox>,
+    /// Where each shown legend row is, for a click to select its curve.
+    pub legend_hits: Vec<crate::legend::LegendHit>,
     pub cursor: Option<CursorReadout>,
     /// The cursor values' plate.
     pub readout_box: Option<Rect>,
@@ -691,6 +693,10 @@ pub fn transfer_scene(
         }
         legend_box = placed;
     }
+    let legend_hits = legend_box.as_ref().map_or_else(Vec::new, |b| {
+        let keys: Vec<TraceKey> = legend.iter().map(|e| e.key).collect();
+        b.hits(&keys)
+    });
 
     TfScene {
         scene: c.into_scene(size),
@@ -700,6 +706,7 @@ pub fn transfer_scene(
         traces: shown,
         legend,
         legend_box,
+        legend_hits,
         cursor,
         readout_box,
         delay,
@@ -1632,6 +1639,23 @@ mod tests {
             Some("xc-xone-tf-cap 17 · Δt 0.00 ms")
         );
         assert_eq!(b.more, Some(format!("{} above", 18 - b.shown)));
+        // A click on a shown row names that row's curve, scrolled as drawn; the note of
+        // what is scrolled out names none.
+        assert_eq!(s.legend_hits.len(), b.shown);
+        let (_, last_y) = *b.rows.last().expect("row");
+        let x = b.rect.x + b.rect.w / 2.0;
+        assert_eq!(
+            crate::legend::hit_at(&s.legend_hits, x, last_y),
+            Some(s.legend[17].key)
+        );
+        assert_eq!(
+            crate::legend::hit_at(&s.legend_hits, x, b.rows[0].1),
+            Some(s.legend[b.first].key)
+        );
+        assert_eq!(
+            crate::legend::hit_at(&s.legend_hits, x, b.rect.y + 1.0),
+            None
+        );
         let plate = s.scene.layers[2]
             .rects
             .iter()

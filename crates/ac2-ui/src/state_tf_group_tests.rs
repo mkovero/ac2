@@ -483,3 +483,101 @@ fn a_stopped_transfer_measurement_keeps_its_curve_tagged() {
     t.conn(mirror(s));
     assert_eq!(main(&t), Some(false));
 }
+
+/// A click on a transfer legend row selects that row's curve, wherever it comes from —
+/// a capture of the group, its math channel, a compared measurement, a compared import —
+/// the list marks it (a live curve: its measurement's row), the pane keeps its group, and A hides exactly that curve.
+#[test]
+fn a_legend_row_click_selects_its_curve_for_a() {
+    use ac2_scene::meas_list::{Mark, TreeKey};
+    use ac2_scene::trace::TraceKey;
+    let mut t = loaded(two_groups());
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.key("C");
+    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    t.key("C");
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    let pane = t.pane(PaneKind::Transfer);
+    // The click as the pane makes it: the scene's row under the pointer.
+    let click = |t: &mut T, name: &str| {
+        let s = crate::scenes::transfer(&t.st, pane, &Theme::dark(), SIZE, now());
+        let i = s.legend.iter().position(|e| e.name == name).expect(name);
+        let r = s
+            .legend_hits
+            .iter()
+            .find(|h| h.key == s.legend[i].key)
+            .expect("row shown")
+            .rect;
+        let key =
+            ac2_scene::legend::hit_at(&s.legend_hits, r.x + 4.0, r.y + r.h / 2.0).expect("hit");
+        t.st.update(Msg::LegendPick(pane, key), &t.keys);
+        key
+    };
+    let active = |t: &T| {
+        t.st.tree_rows()
+            .into_iter()
+            .filter(|r| r.mark == Mark::Active)
+            .map(|r| r.key)
+            .collect::<Vec<_>>()
+    };
+    for (name, key, row) in [
+        (
+            "t13",
+            TraceKey::Stored(TraceId(13)),
+            TreeKey::Trace(TraceId(13)),
+        ),
+        (
+            "t12",
+            TraceKey::Stored(TraceId(12)),
+            TreeKey::Trace(TraceId(12)),
+        ),
+        (
+            "L ÷ tower",
+            TraceKey::Live(MeasId(6)),
+            TreeKey::Math(MeasId(6)),
+        ),
+        (
+            "Delay tower",
+            TraceKey::Live(MeasId(3)),
+            TreeKey::Meas(MeasId(3)),
+        ),
+        (
+            "Main L",
+            TraceKey::Live(MeasId(1)),
+            TreeKey::Meas(MeasId(1)),
+        ),
+    ] {
+        assert_eq!(click(&mut t, name), key);
+        match key {
+            TraceKey::Stored(id) => assert_eq!(t.st.selected_trace, Some(id)),
+            TraceKey::Live(id) => {
+                assert_eq!((t.st.selected, t.st.selected_trace), (Some(id), None));
+            }
+        }
+        assert!(active(&t).contains(&row), "{name}: {:?}", active(&t));
+        assert_eq!(transfer_group(&t), Some(MeasId(1)), "{name}");
+        assert_eq!(t.st.layout.focus, pane);
+    }
+    // A on a compared measurement picked in the legend hides it there.
+    click(&mut t, "Delay tower");
+    t.key("A");
+    assert!(
+        t.last_toast().starts_with("Delay tower hidden"),
+        "{}",
+        t.last_toast()
+    );
+    assert!(!legend(&t).contains(&"Delay tower".to_owned()));
+    t.key("A");
+    assert!(legend(&t).contains(&"Delay tower".to_owned()));
+    // A on a compared import picked in the legend asks the daemon to hide that trace.
+    click(&mut t, "t12");
+    let r = t.key("A");
+    assert!(
+        matches!(
+            r.as_slice(),
+            [Request::Call { cmd: Command::TraceUpdate { trace: TraceId(12), edit }, .. }]
+                if !edit.visible
+        ),
+        "{r:?}"
+    );
+}

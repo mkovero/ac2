@@ -112,6 +112,7 @@ fn scene_for(
     let st = &app.state;
     let mut unit_tip = None;
     let mut legend = None;
+    let mut legend_hits = Vec::new();
     let (scene, axes) = match pane {
         PaneKind::Transfer if view.shows_ir() => {
             let s = scenes::ir(st, id, &app.keymap, theme, vp, now)?;
@@ -130,6 +131,7 @@ fn scene_for(
         PaneKind::Transfer => {
             let s = scenes::transfer(st, id, theme, vp, now);
             legend = s.legend_box;
+            legend_hits = s.legend_hits;
             let y = s
                 .panes
                 .iter()
@@ -148,6 +150,7 @@ fn scene_for(
         PaneKind::Spectrum if view.modes.spectrum.spectrograph() => {
             let s = scenes::spectrograph(st, id, theme, vp, now);
             if let Some(sp) = &s.spectrum {
+                legend_hits = sp.legend_hits.clone();
                 let r = sp.unit_rect;
                 unit_tip = sp.unit_help.clone().map(|h| {
                     (
@@ -168,6 +171,7 @@ fn scene_for(
         }
         PaneKind::Spectrum => {
             let s = scenes::spectrum(st, id, theme, vp, now);
+            legend_hits = s.legend_hits;
             let r = s.unit_rect;
             unit_tip = s.unit_help.map(|h| {
                 (
@@ -215,6 +219,7 @@ fn scene_for(
             ir_axes: axes.ir,
             unit_tip,
             legend,
+            legend_hits,
         },
     );
     Some((scene, axes))
@@ -1052,8 +1057,31 @@ fn navigate(
     if app.state.window_over_panes() {
         return;
     }
+    // A click (not a drag: that moves the plate) on a legend row selects that row's curve.
+    let row_at = |app: &App, pos: Option<egui::Pos2>| {
+        let p = pos? - plot_rect.min.to_vec2();
+        let c = app.scenes.get(&id)?;
+        let on_grip = c.legend.as_ref().is_some_and(|b| {
+            (b.grip.x..=b.grip.right()).contains(&p.x)
+                && (b.grip.y..=b.grip.bottom()).contains(&p.y)
+        });
+        if on_grip {
+            return None;
+        }
+        ac2_scene::legend::hit_at(&c.legend_hits, p.x, p.y)
+    };
+    if resp.clicked()
+        && let Some(key) = row_at(app, resp.interact_pointer_pos())
+    {
+        app.dispatch(Msg::LegendPick(id, key));
+        return;
+    }
     if resp.clicked() || resp.drag_started() {
         app.dispatch(Msg::FocusPane(id));
+    }
+    // The spectrum's legend is no plate to drag: the pointer over an entry says it clicks.
+    if legend == LegendTook::Nothing && row_at(app, resp.hover_pos()).is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     // A click on the legend is not a cursor placed behind it, a drag on it not a pan; when
     // its rows scroll, the wheel over it is theirs.
