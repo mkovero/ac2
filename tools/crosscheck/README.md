@@ -216,6 +216,31 @@ then SIGTERM, then kill), keeping its `xruns <n>` line.
 - **Locally:** `CROSSCHECK_JACK_E2E=1 AC2_JACK_DUT=<binary> pytest tests/test_dut_e2e.py` runs
   the sine stage and the patch against the real binary on a JACK dummy server. There is no
   ac2 daemon in that test.
+- **Cases (the matrix):** `[[dut.cases]]` turns the one DUT into several. Each case is its own
+  path `dut-<name>` (a copy of `[paths.dut]`; every `[stages.*]` setting keyed `dut` applies to
+  it) whose keys lie over `[dut]`. A case gives its polynomial as `poly`, or as targets the
+  suite designs from at the run's level (`dut.chebyshev_poly`: exact at that level and where
+  the pre-filter is flat): `harmonics_dbr = [H2, H3, H4, H5]` relative to the fundamental, or
+  `harmonics_dbfs`, each harmonic's own output level, which keeps it the same distance above
+  the DUT's noise at every `--emit`. All cases of a run form one baseline stage `dut`.
+- **Coverage:** the analysis counts, per harmonic order and analyser (all ac2 sweep rates
+  pooled), the cells the run called for: judged, INCONCLUSIVE (a bound) or MISSING (no
+  reading where one was due); k·f ≥ fs/2 and, for a sweep, k·f beyond its end are not cells.
+  The checks `dut.coverage.h<k>.<analyser>` carry the worst signed error (reading − truth) of
+  the quasi-static cells; sweep cells where the pre-filter is more than 0.1 dB from flat are
+  judged and marked † but kept out of that verdict (Wiener model). The table "DUT coverage"
+  shows the grid per tone; `python -m crosscheck dutcov <run> <run> …` merges runs at
+  several levels into one grid.
+- **On a dummy server (`rigs/host.toml`):** the matrix without hardware. A JACK dummy
+  server (`jackd -n <name> -d dummy -r 96000 -p 2048 -w 21333 -C 8 -P 8`; without real-time
+  scheduling a 256-frame period xruns) and an ac2d of its own (`--max-level -10
+  --no-autosave`, its own `XDG_RUNTIME_DIR`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`),
+  `ac2` on PATH, `AC2_JACK_DUT` set, then
+  `python -m crosscheck run --rig rigs/host.toml --stages dut --emit -10dbfs --skip rew,ac2_tf --yes`
+  and again at `-30dbfs`; `analyse` each, `baseline` writes `baselines/host/dut-<level>dbfs.json`.
+  Every case's pre-filter ends in an 8th-order low-pass at 7.2 kHz: the DUT runs at fs, so
+  without it a 40 kHz sweep's harmonics above fs/2 fold back into the analysers' noise
+  windows (ac2's Hk floors rose to about −70 dBr where k·f ≈ 10–20 kHz without it).
 
 ### Calibration (speaker path and ambient)
 

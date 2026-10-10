@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import dsp, dut, levels
+from . import dsp, dut, dutcov, levels
 from . import model
 from .model import PathData, RunData, Sweep
 
@@ -123,6 +123,7 @@ class Analysis:
         self.tables: dict[str, dict] = {}
         self.series: dict[str, dict] = {}  # for plots
         self.notes: list[str] = []
+        self.dut_cells: list[dict] = []  # dutcov entries, every digital path
 
     # ------------------------------------------------------------ helpers
     def add(self, **kw) -> Check:
@@ -173,6 +174,8 @@ class Analysis:
         if self.run.ambient:
             from . import ambient
             ambient.analyse(self, self.run)
+        if self.dut_cells:
+            self.dut_coverage()
         return self.results()
 
     def results(self) -> dict:
@@ -1162,12 +1165,20 @@ class Analysis:
             for tone in t["tones"]:
                 truth = dut.analytic(float(tone["f"]), amp, coef, fs)
                 for k in range(2, 6):
-                    tv = (tone.get("h_dbr") or {}).get(str(k))
-                    if tv is None or k not in truth:
+                    if k not in truth:
                         continue
-                    ca = dsp.classify(tv, (tone.get("floor_dbr") or {}).get(str(k), np.nan), margin)
+                    tv = (tone.get("h_dbr") or {}).get(str(k))
+                    ca = dsp.classify(np.nan if tv is None else tv, (tone.get("floor_dbr") or {}).get(str(k), np.nan),
+                                      margin)
                     self._cmp_dut(p, "steady sine", float(tone["f"]), float(tone["f"]), k, ca, truth[k], ts, rows,
-                                  coef, fs, sweep=False)
+                                  coef, fs, sweep=False, level=float(t["emit_dbfs"]))
+        elif d.get("tones") and d.get("amp") is not None and d.get("level_dbfs") is not None:
+            # the sine stage planned these tones and left no results (a failed or discarded take)
+            for tone in d["tones"]:
+                truth = dut.analytic(float(tone["f"]), float(d["amp"]), coef, fs)
+                for k, tv in truth.items():
+                    self._cmp_dut(p, "steady sine", float(tone["f"]), float(tone["f"]), k, {"kind": "none"}, tv, ts,
+                                  rows, coef, fs, sweep=False, level=float(d["level_dbfs"]))
         tones = [float(x["f"]) for x in t.get("tones", [])] or [float(x["f"]) for x in d.get("tones", [])]
         curves = []
         for name, s in p.sweeps.items():
@@ -1177,25 +1188,32 @@ class Analysis:
                 hi = (s.end_hz or fs / 2) * 2 ** (-1 / 12)
                 curves.append((f"ac2 sweep {name}", s.level_dbfs, b["freq_hz"],
                                {k: (b[f"h{k}_db"], b[f"h{k}_floor_db"]) for k in range(2, 6) if f"h{k}_db" in b},
-                               lo, hi, 1 / 24))
+                               lo, hi, 1 / 24, hi))
         if p.rew is not None and p.rew.meas_dist is not None and np.isfinite(p.rew.level_dbfs):
             r = p.rew.meas_dist
             nf = r.cols.get("Noise", np.full(len(r.f), np.nan))
             curves.append((p.rew.label, p.rew.level_dbfs, r.f,
                            {k: (r.cols[f"H{k}"], nf) for k in range(2, 6) if f"H{k}" in r.cols},
-                           10.0 * 2 ** (1 / 12), 40000.0 * 2 ** (-1 / 12), 1 / 6))
-        for name, lvl, f, hs, lo, hi, near in curves:
+                           10.0 * 2 ** (1 / 12), 40000.0 * 2 ** (-1 / 12), 1 / 6, 40000.0 * 2 ** (-1 / 12)))
+        for name, lvl, f, hs, lo, hi, near, top in curves:
             amp = levels.peak_amplitude(float(lvl))
             for fc in tones:
-                for k, (hv, hf) in hs.items():
-                    i = _nearest_finite(f, hv, fc, max_oct=near)
+                for k in range(2, 6):
+                    # a reading is due where the source played both fc and k·fc, below fs/2
+                    tr = dut.analytic(fc, amp, coef, fs).get(k)
+                    due = tr is not None and lo <= fc <= hi and k * fc <= top
+                    hv, hf = hs.get(k, (None, None))
+                    i = None if hv is None else _nearest_finite(f, hv, fc, max_oct=near)
                     if i is None or not lo <= f[i] <= hi:
+                        if due:
+                            self._cmp_dut(p, name, fc, fc, k, {"kind": "none"}, tr, tw, rows, coef, fs, sweep=True,
+                                          level=float(lvl))
                         continue
                     tr = dut.analytic(float(f[i]), amp, coef, fs).get(k)
                     if tr is None:
                         continue
                     self._cmp_dut(p, name, fc, float(f[i]), k, dsp.classify(hv[i], hf[i], margin), tr, tw, rows,
-                                  coef, fs, sweep=True)
+                                  coef, fs, sweep=True, level=float(lvl))
             # the log grid: one summary row per harmonic, every point in the table
             grid = dsp.log_centres(max(lo, 10.0), min(hi, fs / 2), ppo)
             for k, (hv, hf) in hs.items():
@@ -1240,28 +1258,65 @@ class Analysis:
                    "Truth: dut.py's analytic Hk at each source's own level and at the column's frequency. "
                    "Δ = reading − truth, only where the reading is a value (floor + margin).")
 
-    def _cmp_dut(self, p, name, fc, fcol, k, ca, truth, tol, rows, coef, fs, sweep: bool):
+    def _cmp_dut(self, p, name, fc, fcol, k, ca, truth, tol, rows, coef, fs, sweep: bool, level: float):
         note = _pre_note(coef, fs, fcol) if sweep else None
         d = ca["value"] - truth if ca["kind"] == "value" else None
-        rows.append([f"{fcol:.1f}", f"H{k}", name, _fmt_h(ca), _fmt(ca.get("floor")), f"{truth:.2f}",
-                     f"{d:+.2f}" if d is not None else "—", note or ""])
+        rows.append([f"{fcol:.1f}", f"H{k}", name, _fmt_h(ca) if ca["kind"] != "none" else "missing",
+                     _fmt(ca.get("floor")), f"{truth:.2f}", f"{d:+.2f}" if d is not None else "—", note or ""])
+        pre_db = float(20 * np.log10(abs(dut.response(coef.get("pre", []), [fcol], fs)[0])))
+        case = ((self.run.manifest or {}).get("paths", {}).get(p.name) or {}).get("case")
+
+        def cell(status):
+            self.dut_cells.append(dutcov.entry(p.name, case, name, k, fc, status, d, truth, pre_db, sweep, level))
+
         if ca["kind"] == "none":
+            cell("MISSING")
             return
         where = f" (column {fcol:.1f} Hz)" if abs(fcol - fc) > 1e-6 else ""
         base = dict(id=f"{p.name}.dut.h{k}.{name}.{fc:g}", group="dut", path=p.name,
                     title=f"{name} H{k} at {fc:g} Hz vs analytic", unit="dB", tol=tol)
         if d is not None:
-            self.add(**base, value=d, status=judge(d, tol),
+            st = judge(d, tol)
+            self.add(**base, value=d, status=st,
                      meaning=f"{name} {ca['value']:.2f} dBr{where}, truth {truth:.2f} dBr"
                              + (f"; {note}" if note else ""))
         elif truth > ca["bound"] + tol[1]:
-            self.add(**base, value=None, status="FAIL",
+            st = "FAIL"
+            self.add(**base, value=None, status=st,
                      meaning=f"{name} reads below {ca['bound']:.1f} dBr{where}; the truth is {truth:.2f} dBr, above it",
                      detail={"reading": ca})
         else:
-            self.add(**base, value=None, status="INCONCLUSIVE",
+            st = "INCONCLUSIVE"
+            self.add(**base, value=None, status=st,
                      meaning=f"a bound (shortfall {ca.get('shortfall', 0):.1f} dB below floor + margin){where}; "
                              f"truth {truth:.2f} dBr", detail={"reading": ca})
+        cell(st)
+
+    def dut_coverage(self):
+        """Per harmonic order and analyser, over every DUT case of the run: how many cells
+        were judged and the worst signed error (dutcov.py). The cells go in the check's
+        detail so runs at other levels can be merged into one grid."""
+        tc = self.tol.get("dut", {})
+        tols = {"steady sine": _tol(tc["sine_db"])}
+        cells = self.dut_cells
+        for k in sorted({e["k"] for e in cells}):
+            for src in sorted({e["class"] for e in cells if e["k"] == k}):
+                sel = [e for e in cells if e["k"] == k and e["class"] == src]
+                s = dutcov.summarise(sel)
+                at = s["worst_at"]
+                self.add(id=f"dut.coverage.h{k}.{src}", group="dut coverage", path="dut",
+                         title=f"{src} H{k} vs analytic: coverage over the DUT cases", value=s["worst"], unit="dB",
+                         tol=tols.get(src, _tol(tc["sweep_db"])), status=s["status"],
+                         meaning=(f"{s['judged']} of {s['total']} cells judged ({s['inconclusive']} inconclusive, "
+                                  f"{s['missing']} missing)"
+                                  + (f"; worst quasi-static Δ at {at['f']:g} Hz ({at['source']}"
+                                     + (f", case {at['case']})" if at['case'] else ")")
+                                     if at else "; no quasi-static cell judged")
+                                  + (f"; {s['model_judged']} model-limited cells judged, worst {s['model_worst']:+.2f} dB"
+                                     if s["model_judged"] else "")),
+                         detail={"summary": s, "cells": sel})
+        cols, rows = dutcov.grid(cells)
+        self.table("DUT coverage: harmonic order × tone, all cases", cols, rows, dutcov.NOTE)
 
     # ------------------------------------------------------------ LF H2 onset
     def lf_h2_onset(self, p: PathData):

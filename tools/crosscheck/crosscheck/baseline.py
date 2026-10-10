@@ -97,7 +97,16 @@ def host_stage(results: dict) -> str | None:
 
 
 def stage_of(results: dict, c: dict) -> str:
-    return host_stage(results) or c["path"]
+    """A check's stage: the host stage, else its path's `stage` (the DUT's cases share one),
+    else the path itself."""
+    paths = (results.get("manifest") or {}).get("paths") or {}
+    return host_stage(results) or (paths.get(c["path"]) or {}).get("stage") or c["path"]
+
+
+def _stage_kind(man: dict, stage: str) -> str | None:
+    paths = man.get("paths") or {}
+    p = paths.get(stage) or next((v for v in paths.values() if v.get("stage") == stage), None)
+    return (p or {}).get("kind")
 
 
 def stages_of(results: dict) -> list[str]:
@@ -120,7 +129,7 @@ def stage_level(results: dict, stage: str) -> float | None:
         return None
     man = results.get("manifest") or {}
     flags = man.get("flags") or {}
-    kind = ((man.get("paths") or {}).get(stage) or {}).get("kind")
+    kind = _stage_kind(man, stage)
     text = flags.get("emit_speaker") if kind == "speaker" else flags.get("emit") if kind in ("electrical", "digital") else None
     if not text:
         return None

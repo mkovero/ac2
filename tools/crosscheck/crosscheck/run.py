@@ -59,7 +59,7 @@ def preflight(rig: dict, ac2: Ac2, rew: Rew | None, want: set[str], strict: bool
         c.close()
     rep["ok"].append(f"JACK {fs:g} Hz, configured ports present")
     if "dut" in want:
-        b = Path(os.path.expanduser(rig["dut"]["binary"]))
+        b = Path(dutrun.binary(rig))
         if not (b.is_file() and os.access(b, os.X_OK)):
             if strict:
                 raise RuntimeError(f"the DUT binary {b} is missing or not executable (README: Digital DUT path)")
@@ -130,6 +130,7 @@ def _single_run_lock():
 
 def main(a) -> int:
     rig = tomllib.loads(a.rig.read_text())
+    dut_paths = dutrun.expand_cases(rig) if rig.get("dut") else []
     lock = _single_run_lock() if a.cmd == "run" else None  # noqa: F841  held until exit
     want = [s for s in ORDER if s in set(x.strip() for x in getattr(a, "stages", ",".join(ORDER)).split(","))]
     out = a.out or (Path(__file__).resolve().parent.parent / "runs" / time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))
@@ -209,14 +210,15 @@ def main(a) -> int:
                 applied = rew.set_input_cal(cal["rew_dbfs_at_94"], cal.get("full_scale_vrms", 1.0), cal_file or "")
                 (out / "cal" / "rew_input_cal.applied.json").write_text(json.dumps(applied, indent=1))
             ctx.save()
-        for s in want:
+        for s in [x for w in want for x in (dut_paths if w == "dut" else [w])]:
             try:
                 if s == "ambient":
                     stages.ambient_stage(ctx, cal, cal_file)
                     ctx.stage("ambient", "done")
                     continue
                 pc = rig["paths"][s]
-                man["paths"][s] = {"kind": pc["kind"], "mains_hz": stages.path_mains_hz(rig, s)}
+                man["paths"][s] = {"kind": pc["kind"], "mains_hz": stages.path_mains_hz(rig, s),
+                                   **{k: pc[k] for k in ("stage", "case") if k in pc}}
                 ctx.policy = path_policy(rig, base, s)
                 if pc["kind"] == "speaker":
                     spl = 63.0 + base.emit_speaker_dbfs - levels.SPEAKER_HARD_MAX_DBFS

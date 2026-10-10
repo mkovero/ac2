@@ -1,5 +1,5 @@
-"""python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,comparison} — see
-README.md."""
+"""python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison} —
+see README.md."""
 from __future__ import annotations
 
 import argparse
@@ -50,6 +50,10 @@ def main(argv=None) -> int:
                                                 "estimator's finite-average expectation (offline, needs OSM_HARNESS)")
     cs.add_argument("--out", type=Path, help="directory (default: runs/coherence-<UTC time>)")
     cs.add_argument("--seeds", type=int, default=5, help="independent noise seeds per condition (default 5)")
+
+    dc = sub.add_parser("dutcov", help="the DUT's harmonic coverage grid over runs at several levels (offline)")
+    dc.add_argument("sources", type=Path, nargs="+", help="run directories with report/results.json")
+    dc.add_argument("--out", type=Path, help="also write the grid (Markdown) here")
 
     cm = sub.add_parser("comparison", help="rebuild the results tables of comparison.md from the baselines")
     cm.add_argument("--check", action="store_true", help="write nothing; exit 1 when the tables are stale")
@@ -163,6 +167,22 @@ def main(argv=None) -> int:
         print("\n".join(baseline.summary_lines(blocks)))
         print(f"{path}: " + ("differences beyond the baseline" if rc else "no worse status, no value beyond its step"))
         return rc
+    if a.cmd == "dutcov":
+        import json
+
+        from . import dutcov
+        cells = []
+        for src in a.sources:
+            cells += dutcov.entries_of(json.loads((src / "report" / "results.json").read_text()))
+        if not cells:
+            print("no DUT coverage cells in these runs", file=sys.stderr)
+            return 2
+        cols, rows = dutcov.grid(cells, by_level=True)
+        text = dutcov.markdown(cols, rows) + "\n\n" + dutcov.NOTE + "\n"
+        print(text, end="")
+        if a.out:
+            a.out.write_text(text)
+        return 0
     if a.cmd == "comparison":
         from . import comparison
         current, path = comparison.update(a.doc or comparison.DOC, a.baselines or comparison.BASELINES, a.check)

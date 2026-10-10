@@ -134,14 +134,61 @@ def truth_freqs(fs: float) -> np.ndarray:
     return dsp.log_centres(5.0, fs / 4, 12)
 
 
+def binary(rig: dict) -> str:
+    """The DUT binary: AC2_JACK_DUT, else the rig's `[dut].binary`."""
+    return os.path.expanduser(os.environ.get("AC2_JACK_DUT") or rig["dut"]["binary"])
+
+
+POLY_KEYS = ("poly", "harmonics_dbr", "harmonics_dbfs")
+
+
+def expand_cases(rig: dict) -> list[str]:
+    """The digital paths a `--stages dut` run measures. Without `[[dut.cases]]` that is the
+    one path `dut`. With cases, each becomes a path `dut-<name>`: a copy of `[paths.dut]`
+    tagged with its case and with `stage = "dut"` (one baseline holds them all), and every
+    `[stages.*]` setting keyed by `dut` (a table entry, or `dut_hz`) copied to it. Modifies
+    `rig` in place."""
+    cases = rig.get("dut", {}).get("cases") or []
+    if not cases:
+        return ["dut"]
+    names = []
+    for c in cases:
+        pname = f"dut-{c['name']}"
+        if pname in rig["paths"] or pname in names:
+            raise ValueError(f"DUT case {c['name']!r}: path {pname} already exists")
+        names.append(pname)
+        rig["paths"][pname] = dict(rig["paths"]["dut"], stage="dut", case=c["name"])
+        for table in rig.get("stages", {}).values():
+            for key, v in list(table.items()):
+                if key == "dut":
+                    table[pname] = v
+                elif key == "dut_hz":
+                    table[f"{pname}_hz"] = v
+                elif isinstance(v, dict) and "dut" in v:
+                    v[pname] = v["dut"]
+    return names
+
+
+def dut_config(rig: dict, pname: str) -> dict:
+    """`[dut]` for one path: the shared table, with the path's case laid over it (a case
+    that gives its own polynomial replaces the shared one whichever form either uses)."""
+    base = {k: v for k, v in rig["dut"].items() if k != "cases"}
+    name = rig["paths"][pname].get("case")
+    if name is None:
+        return base
+    case = next(c for c in rig["dut"]["cases"] if c["name"] == name)
+    if any(k in case for k in POLY_KEYS):
+        base = {k: v for k, v in base.items() if k not in POLY_KEYS}
+    return {**base, **case}
+
+
 def start(ctx, pname: str) -> DutProcess:
     """Designs the coefficients from the rig's [dut] table, starts the binary, waits for it,
     and writes `<path>/dut/dut.json`: the exact command, the coefficients and the analytic
     truth for the planned tones and a dense grid."""
-    dc = ctx.rig["dut"]
-    binary = os.path.expanduser(os.environ.get("AC2_JACK_DUT") or dc["binary"])
-    coef = dut.coefficients(dc, ctx.fs)
-    cmd = dut.command(dc, coef, binary)
+    dc = dut_config(ctx.rig, pname)
+    coef = dut.coefficients(dc, ctx.fs, ctx.policy.electrical_level())
+    cmd = dut.command(dc, coef, binary(ctx.rig))
     d = ctx.out / pname / "dut"
     amp = levels.peak_amplitude(ctx.policy.electrical_level())
     pk = dut.peak_out(amp, coef, ctx.fs)

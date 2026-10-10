@@ -1,0 +1,124 @@
+# host: the digital DUT on a local JACK dummy server, no hardware (README, "Digital DUT
+# path", "On a dummy server"). The dummy driver's playback ports lead nowhere, so nothing
+# this rig plays can reach a speaker. Before a run, in one environment:
+#   jackd -n <name> -d dummy -r 96000 -p 2048 -w 21333 -C 8 -P 8   (JACK_DEFAULT_SERVER=<name>;
+#     without real-time scheduling a shorter period xruns)
+#   ac2d --max-level -10 --no-autosave       (XDG_RUNTIME_DIR etc. of its own: not the desktop's)
+# with `ac2` on PATH and AC2_JACK_DUT naming the DUT binary; then
+#   python -m crosscheck run --rig rigs/host.toml --stages dut --emit -10dbfs --skip rew,ac2_tf --yes
+
+[rig]
+name = "host"
+sample_rate = 96000
+system_max_dbfs = -10.0      # ac2d's bound here (--max-level -10): the dummy server plays nothing
+electrical_max_dbfs = -10.0
+speaker_max_dbfs = -50.0
+mains_hz = 0.0
+
+[outputs.2]
+port = "system:playback_2"
+role = "loopback"
+note = "dummy driver: leads nowhere"
+[outputs.5]
+port = "system:playback_5"
+role = "electrical"
+note = "dummy driver: leads nowhere"
+
+[inputs.2]
+port = "system:capture_2"
+note = "dummy driver: silence"
+[inputs.3]
+port = "system:capture_3"
+note = "dummy driver: silence"
+
+[paths.dut]
+kind = "digital"
+out = 5
+ref_out = 2
+meas_in = 3
+ref_in = 2
+ports = { out = "ac2-dut:dut_in", ref_out = "ac2-dut:ref_in", meas_in = "ac2-dut:dut_out", ref_in = "ac2-dut:ref_out" }
+forbidden_outputs = [1]
+mains_hz = 0.0
+
+[dut]
+binary = "ac2-jack-dut"          # AC2_JACK_DUT overrides
+client = "ac2-dut"
+ac2_client = "ac2"
+post = [{ type = "lp2", hz = 30000.0, q = 0.7071 }]
+noise_dbfs = -120.0
+# Every case's pre-filter ends in an 8th-order Butterworth low-pass at 7.2 kHz (four lp2 at
+# the Butterworth Qs). The polynomial makes k·f, and the DUT runs at fs: a sweep's k-th
+# harmonic above fs/2 folds back and lands in the analysers' noise windows. Below the
+# corner it is flat (−0.013 dB at 5 kHz); by 9.6 kHz, where H5 first folds, it is −20 dB,
+# which lowers a folded Hk by k·20 dB.
+pre = [{ type = "lp2", hz = 7200.0, q = 0.5098 }, { type = "lp2", hz = 7200.0, q = 0.6013 },
+       { type = "lp2", hz = 7200.0, q = 0.9000 }, { type = "lp2", hz = 7200.0, q = 2.5629 }]
+
+# The matrix (README, "Digital DUT path"): each case is a path dut-<name>. A polynomial is
+# designed per run (dut.chebyshev_poly) so H2..H5 hit their targets exactly at the run's
+# level and 1 kHz: `harmonics_dbr` relative to the fundamental, `harmonics_dbfs` as each
+# harmonic's own level, which keeps it the same distance above the DUT's −120 dBFS noise at
+# every level (about 20–40 dB above the ac2 sweeps' floor, 40+ above the steady sine's).
+# "-hp" cases add the 20 Hz first-order high-pass ahead of the polynomial: the Wiener part a
+# sweep sees only approximately (dut.py), at the 50 and 100 Hz tones.
+[[dut.cases]]
+name = "loud"
+harmonics_dbr = [-40.0, -45.0, -50.0, -55.0]
+
+[[dut.cases]]
+name = "loud-hp"
+harmonics_dbr = [-40.0, -45.0, -50.0, -55.0]
+pre = [{ type = "hp1", hz = 20.0 },
+       { type = "lp2", hz = 7200.0, q = 0.5098 }, { type = "lp2", hz = 7200.0, q = 0.6013 },
+       { type = "lp2", hz = 7200.0, q = 0.9000 }, { type = "lp2", hz = 7200.0, q = 2.5629 }]
+
+[[dut.cases]]
+name = "floor"
+harmonics_dbfs = [-110.0, -110.0, -110.0, -110.0]
+
+[[dut.cases]]
+name = "floor-hp"
+harmonics_dbfs = [-110.0, -110.0, -110.0, -110.0]
+pre = [{ type = "hp1", hz = 20.0 },
+       { type = "lp2", hz = 7200.0, q = 0.5098 }, { type = "lp2", hz = 7200.0, q = 0.6013 },
+       { type = "lp2", hz = 7200.0, q = 0.9000 }, { type = "lp2", hz = 7200.0, q = 2.5629 }]
+
+[ac2]
+cmd = ["ac2"]
+timeout = "5s"
+session_open = ["session", "open", "--backend", "jack", "--in", "1-8", "--outputs", "6",
+                "--loopback-out", "2", "--loopback-in", "2"]
+dropin = "/nonexistent/crosscheck-host-{uid}.conf"   # never installed: the bound already is the emit ceiling
+
+[stages.sine]
+# 50 Hz – 5 kHz: H5 of every tone stays below fs/2, and the LF tones sit where a 20 Hz
+# pre-filter still lowers the polynomial's input (the Wiener part).
+dut_hz = [50, 100, 200, 500, 1000, 2000, 5000]
+probe_seconds = 2.0
+min_periods = 40
+max_seconds = 20.0
+noise_seconds = 10.0
+target_floor_dbr = { dut = -100.0 }
+budget_seconds = { dut = 120.0 }
+fade_seconds = 0.1
+settle_seconds = 0.5
+
+[stages.ac2_sweep]
+# Two rates over the same span: a deviation that scales with the sweep's speed is the
+# Wiener model's, not the analyser's.
+dut = [
+  { name = "10Hz-5.5s", from = "10hz", to = "40khz", duration = 5.5, repeats = 1, plan = false },
+  { name = "10Hz-11s", from = "10hz", to = "40khz", duration = 11.0, repeats = 1, plan = false },
+]
+target_floor_dbr = { dut = -100.0 }
+floor_band_hz = { dut = [100, 10000] }
+budget_seconds = { dut = 180.0 }
+max_repeats = 8
+max_duration = 30.0
+noise_lead_seconds = 1.0
+
+[stages.ac2_tf]
+settle_seconds = 20.0
+blocks = 8
+max_level_dbfs = -20.0

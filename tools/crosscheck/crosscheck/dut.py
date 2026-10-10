@@ -132,9 +132,51 @@ def analytic(f: float, amp: float, cfg: dict, fs: float, kmax: int = KMAX) -> di
     return out
 
 
-def coefficients(dut_cfg: dict, fs: float) -> dict:
-    """The rig's [dut] table → the coefficient lists the binary is given."""
-    return {"poly": [float(x) for x in dut_cfg["poly"]], "pre": design_chain(dut_cfg.get("pre"), fs),
+def chebyshev_poly(h_dbr, amp: float) -> list[float]:
+    """poly(u) = u + Σ r_k·a·T_k(u/a), r_k = 10^(Hk/20), for H2, H3, … given in dBr (None:
+    absent): at input amplitude a exactly, T_k(cos θ) = cos kθ puts each term on its own
+    harmonic, so the fundamental stays a and Hk is the target. Away from a the terms leak
+    into lower harmonics of the same parity (T_k(r·cos θ) for r ≠ 1); `analytic` stays exact
+    there, the targets just no longer hold."""
+    cheb = np.polynomial.chebyshev
+    t = np.zeros(len(h_dbr) + 2)
+    t[1] = 1.0  # T_1(u/a)·a = u
+    for k, h in enumerate(h_dbr, start=2):
+        if h is not None:
+            t[k] = 10 ** (float(h) / 20)
+    c = cheb.cheb2poly(t) * amp  # a·Σ t_k T_k(x), x = u/a
+    return [float(v / amp ** j) for j, v in enumerate(c)]
+
+
+def target_dbr(dut_cfg: dict, level_dbfs: float | None) -> list[float] | None:
+    """A designed DUT's harmonic targets in dBr at the run's level: `harmonics_dbr` as given,
+    or `harmonics_dbfs` (each harmonic's own level at the output, dBFS like the run's level)
+    less the level, which keeps each harmonic at one distance above the DUT's fixed noise
+    floor at every level."""
+    if "harmonics_dbr" in dut_cfg:
+        return [None if h is None else float(h) for h in dut_cfg["harmonics_dbr"]]
+    if "harmonics_dbfs" in dut_cfg:
+        if level_dbfs is None:
+            raise ValueError("harmonics_dbfs needs the run's level")
+        return [None if h is None else float(h) - float(level_dbfs) for h in dut_cfg["harmonics_dbfs"]]
+    return None
+
+
+def coefficients(dut_cfg: dict, fs: float, level_dbfs: float | None = None) -> dict:
+    """The rig's [dut] table → the coefficient lists the binary is given. The polynomial is
+    `poly` as written, or designed (`chebyshev_poly`) from `harmonics_dbr` / `harmonics_dbfs`
+    at the peak amplitude of `level_dbfs`, the level the run plays into dut_in."""
+    given = [k for k in ("poly", "harmonics_dbr", "harmonics_dbfs") if k in dut_cfg]
+    if len(given) != 1:
+        raise ValueError(f"[dut] needs exactly one of poly, harmonics_dbr, harmonics_dbfs (has {given or 'none'})")
+    h = target_dbr(dut_cfg, level_dbfs)
+    if h is None:
+        poly_c = [float(x) for x in dut_cfg["poly"]]
+    else:
+        if level_dbfs is None:
+            raise ValueError("a designed polynomial needs the run's level")
+        poly_c = chebyshev_poly(h, 10 ** (float(level_dbfs) / 20))  # full-scale-sine dBFS: peak
+    return {"poly": poly_c, "pre": design_chain(dut_cfg.get("pre"), fs),
             "post": design_chain(dut_cfg.get("post"), fs), "noise_dbfs": float(dut_cfg.get("noise_dbfs", -120.0))}
 
 
