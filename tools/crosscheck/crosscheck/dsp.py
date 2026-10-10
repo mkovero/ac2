@@ -68,11 +68,17 @@ def cross_spectrum_bands(meas: np.ndarray, ref: np.ndarray, fs: float, centres: 
 
 
 def band_noise_rel(meas: np.ndarray, noise: np.ndarray, fs: float, centres: np.ndarray,
-                   frac: float = 1 / 48) -> np.ndarray:
+                   frac: float = 1 / 48, coh: np.ndarray | None = None) -> np.ndarray:
     """Relative error |δH|/|H| (1σ) a band of the direct estimate of `meas` carries from the
     noise. Each bin's estimate errs by N/R; the band's |R|²-weighted mean of n bins with
     independent noise errs by √(noise energy / signal energy / n). The noise energy is scaled
-    from a noise-only recording on the same input (energy grows with duration)."""
+    from a noise-only recording on the same input (energy grows with duration).
+
+    `coh` is the band's coherence γ² of `meas` with its reference. H is the linear part only,
+    the γ² share of the band's energy: harmonics made at f/k earlier in a sweep land in the
+    band without correlating with the reference at f, and where the response falls steeply
+    they can hold most of the band's energy. Without it the signal is the energy above the
+    noise, which overstates the linear part by 1/γ² on a nonlinear path."""
     def band_energy(x):
         X = np.abs(np.fft.rfft(x)) ** 2 / len(x)
         fx = np.fft.rfftfreq(len(x), 1 / fs)
@@ -82,7 +88,8 @@ def band_noise_rel(meas: np.ndarray, noise: np.ndarray, fs: float, centres: np.n
         return c[b] - c[a], np.maximum(b - a, 1)
     em, n = band_energy(meas)
     en = band_energy(noise)[0] * len(meas) / len(noise)
-    sig = np.maximum(em - en, 1e-30)
+    lin = em - en if coh is None else em * np.clip(np.nan_to_num(coh), 0.0, 1.0)
+    sig = np.maximum(lin, 1e-30)
     return np.sqrt(en / sig / n)
 
 

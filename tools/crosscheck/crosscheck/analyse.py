@@ -265,6 +265,7 @@ class Analysis:
             src["REW live"] = dsp.band_mean(p.rew_live.meas_fr.f, p.rew_live.meas_fr.H, f, self.frac)
         # each direct estimate with its recording's own delay (IR peak) taken out of the band sums
         self.direct_delay = {}
+        self.capture_coh = {}
         if p.rec is not None:
             self.direct_delay["direct (REW recording)"] = tau_d = direct_ir_peak(p.rec)
             Hd, cd = dsp.cross_spectrum_bands(p.rec.meas, p.rec.ref, p.rec.fs, f, self.frac, delay_s=tau_d)
@@ -275,6 +276,7 @@ class Analysis:
                 tau_d = self.direct_delay[f"direct (ac2 capture {name})"] = direct_ir_peak(s.raw)
                 Hd, cd = dsp.cross_spectrum_bands(s.raw.meas, s.raw.ref, s.raw.fs, f, self.frac, delay_s=tau_d)
                 src[f"direct (ac2 capture {name})"] = Hd
+                self.capture_coh[f"direct (ac2 capture {name})"] = cd  # the distortion gate in bands()
         if p.tf_raw is not None:
             tau_d = self.direct_delay["direct (TF capture)"] = direct_ir_peak(p.tf_raw)
             Hd, cd = dsp.cross_spectrum_bands(p.tf_raw.meas, p.tf_raw.ref, p.tf_raw.fs, f, self.frac, delay_s=tau_d)
@@ -305,17 +307,19 @@ class Analysis:
         # (ac2's sweep) rejects more noise than the whole recording holds, so this is an upper bound.
         self.noise_rel = {}
         if p.noise is not None:
-            rec_of = {}
+            rec_of, coh_of = {}, {}
             for name, s in p.sweeps.items():
                 if s.raw is not None:
                     rec_of[f"ac2 sweep {name}"] = rec_of[f"direct (ac2 capture {name})"] = s.raw
+                    coh_of[id(s.raw)] = self.capture_coh.get(f"direct (ac2 capture {name})")
             if p.rec is not None:
                 rec_of["REW offline"] = rec_of["direct (REW recording)"] = p.rec
             cache = {}
             for name, raw in rec_of.items():
                 if name in src and raw.fs == p.noise.fs:
                     if id(raw) not in cache:
-                        cache[id(raw)] = dsp.band_noise_rel(raw.meas, p.noise.meas, raw.fs, f, self.frac)
+                        cache[id(raw)] = dsp.band_noise_rel(raw.meas, p.noise.meas, raw.fs, f, self.frac,
+                                                            coh=coh_of.get(id(raw)))
                     self.noise_rel[name] = cache[id(raw)]
         # The live TF's own noise from its coherence over its FIFO blocks: σ = √((1 − γ²) / (2 γ² n)).
         # n = blocks counts every block as independent, though they overlap, so this is a lower
@@ -398,6 +402,17 @@ class Analysis:
             ratio = Ha / Hb * np.exp(2j * np.pi * f * tau)
             # The nulls are the path's: found once on ac2's primary sweep, used for every pair.
             m_all &= ~null
+            # A sweep's direct estimate reads the band's whole output power, |H|² = Σ|M|²/Σ|R|²:
+            # the harmonics a nonlinear path made at f/k earlier in the sweep land in the band too
+            # (an ac2 sweep windows them out). They do not correlate with the reference's chirp
+            # at f, so they show as a coherence deficit; Σ|M|² exceeds the linear part by 1/γ², a
+            # magnitude excess of −10·log10 γ² dB. Columns where that alone exceeds the pass limit
+            # do not hold the linear response: left out and counted (electrical paths; in a room
+            # the band's comb structure lowers γ² as well).
+            excess = None
+            if elec and b in self.capture_coh:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    excess = -10 * np.log10(self.capture_coh[b])
             # columns where the two sources' own noise (2σ) already exceeds the pass limit
             # cannot be judged: left out and counted
             za, zb = self.noise_rel.get(a, np.zeros(len(f))), self.noise_rel.get(b, np.zeros(len(f)))
@@ -407,18 +422,20 @@ class Analysis:
                 tm = _tol(self.tol["band"][tk])
                 inb = m_all & (f >= lo) & (f < hi)
                 noisy = inb & ~(u_mag <= tm[0])
-                m = inb & ~noisy
                 nn = int(noisy.sum())
+                dist = inb & ~noisy & ~(excess <= tm[0]) if excess is not None else np.zeros(len(f), bool)
+                nd = int(dist.sum())
+                m = inb & ~noisy & ~dist
                 if m.sum() < 3:
-                    if nn:
+                    if nn or nd:
                         for g, unit in (("mag", "dB"), ("phase", "°")):
                             self.add(id=f"{p.name}.{g}.{a}|{b}.{lo}-{hi}", group="magnitude" if g == "mag" else "phase",
                                      path=p.name, title=f"{a} − {b}, {lo}–{hi} Hz, {'magnitude' if g == 'mag' else 'phase'}",
                                      value=None, unit=unit, tol=tm if g == "mag" else None, status="INCONCLUSIVE",
-                                     meaning=meaning + f". {nn} of {int(inb.sum())} columns carry more noise (2σ, from "
+                                     meaning=meaning + f". Of {int(inb.sum())} columns, {nn} carry more noise (2σ, from "
                                              "the recordings' SNR against the silent recording, or the live TF's coherence over "
-                                             "its blocks) than the pass limit; "
-                                             "too few left to judge")
+                                             f"its blocks) than the pass limit and {nd} more uncorrelated content (harmonics, "
+                                             "−10·log10 γ² of the direct estimate); too few left to judge")
                     continue
                 nm = int((self.mains_cols & (f >= lo) & (f < hi)).sum())
                 dm = dsp.db(ratio[m])
@@ -435,6 +452,8 @@ class Analysis:
                                  f"over {m.sum()} columns"
                                  + (f" ({nm} columns within {MAINS_GUARD_HZ:g} Hz of a mains line left out)" if nm else "")
                                  + (f" ({nn} columns whose noise alone (2σ{', from its coherence' if a == 'ac2 TF' else ''}) exceeds the pass limit left out)" if nn else "")
+                                 + (f" ({nd} columns where the direct estimate's band power holds more than the pass "
+                                    "limit of uncorrelated content (harmonics, −10·log10 γ²) left out)" if nd else "")
                                  + (f" ({int((null & (f >= lo) & (f < hi)).sum())} comb-null columns ≥ 10 dB below "
                                     "their 1/3-octave mean left out)" if (null & (f >= lo) & (f < hi)).any() else "")
                                  + ".",
@@ -1078,6 +1097,10 @@ class Analysis:
             self.notes.append(f"{p.name}: {name}: no noise-only recording as long as the sweep's record "
                               f"({n_cut/fs:.1f} s): floor cross-check skipped")
             return
+        # A constant offset on an input is not noise: it has no power in any harmonic band, but
+        # divided by the reference's regularised spectrum near 0 Hz it spreads into the LF
+        # windows. Each noise-only record is taken about its own mean.
+        noise_meas, noise_ref = noise_meas - np.mean(noise_meas), noise_ref - np.mean(noise_ref)
         h = dsp.deconvolve(seg_ref, seg_meas)
         # both inputs' noise: ac2 divides by its captured reference, whose noise lands in the floor too
         hn = dsp.deconvolve_noise(seg_ref, seg_meas, noise_ref, noise_meas)
@@ -1217,7 +1240,9 @@ class Analysis:
             # the log grid: one summary row per harmonic, every point in the table
             grid = dsp.log_centres(max(lo, 10.0), min(hi, fs / 2), ppo)
             for k, (hv, hf) in hs.items():
-                ds, fails, bounds, seen = [], [], 0, set()
+                # columns where the pre-filter is not flat read the truth only in the
+                # instantaneous-frequency approximation (Wiener model): shown, not judged
+                ds, fails, bounds, seen, mds, mfails = [], [], 0, set(), [], []
                 for fc in grid:
                     i = _nearest_finite(f, hv, fc, max_oct=min(near, 1 / (2 * ppo)))
                     if i is None or i in seen:
@@ -1227,20 +1252,28 @@ class Analysis:
                     if tr is None:
                         continue
                     ca = dsp.classify(hv[i], hf[i], margin)
+                    model = _pre_note(coef, fs, float(f[i])) is not None
                     if ca["kind"] == "value":
-                        ds.append((float(f[i]), ca["value"] - tr))
+                        (mds if model else ds).append((float(f[i]), ca["value"] - tr))
                     elif ca["kind"] == "bound":
                         bounds += 1
                         if tr > ca["bound"] + tw[1]:
-                            fails.append(float(f[i]))
+                            (mfails if model else fails).append(float(f[i]))
                     rows.append([f"{f[i]:.1f}", f"H{k}", name + " (grid)", _fmt_h(ca), _fmt(ca.get("floor")),
                                  f"{tr:.2f}", f"{ca['value'] - tr:+.2f}" if ca["kind"] == "value" else "—",
                                  _pre_note(coef, fs, float(f[i])) or ""])
+                fm, dm = max(mds, key=lambda x: abs(x[1])) if mds else (None, None)
+                mnote = ((f"; {len(mds) + len(mfails)} model-limited columns not judged (pre-filter > 0.1 dB from flat, "
+                          "Wiener model)") + (f", largest |Δ| {dm:+.2f} dB at {fm:.1f} Hz" if mds else "")
+                         + (f", truth above the bound at {', '.join(f'{x:.0f}' for x in mfails)} Hz" if mfails else "")
+                         if mds or mfails else "")
                 if not ds and not fails:
-                    if bounds:
+                    if bounds or mds or mfails:
                         self.add(id=f"{p.name}.dut.grid.h{k}.{name}", group="dut", path=p.name,
                                  title=f"{name} H{k} vs analytic, log grid", value=None, unit="dB", tol=tw,
-                                 status="INCONCLUSIVE", meaning=f"all {bounds} grid columns are bounds")
+                                 status="INCONCLUSIVE",
+                                 meaning="no quasi-static grid column holds a value"
+                                         + (f"; {bounds} columns are bounds" if bounds else "") + mnote)
                     continue
                 fw, dw = max(ds, key=lambda x: abs(x[1])) if ds else (None, None)
                 st = "FAIL" if fails else judge(dw, tw)
@@ -1251,8 +1284,9 @@ class Analysis:
                                   + (f"; {bounds} columns are bounds" if bounds else "")
                                   + (f"; the truth stands above the reading's bound at {', '.join(f'{x:.0f}' for x in fails)} Hz"
                                      if fails else "")
-                                  + (f" ({_pre_note(coef, fs, fw)})" if fw and _pre_note(coef, fs, fw) else "")),
-                         detail={"columns": [[a, b] for a, b in ds], "bound_fails_hz": fails})
+                                  + mnote),
+                         detail={"columns": [[a, b] for a, b in ds], "bound_fails_hz": fails,
+                                 "model_limited": [[a, b] for a, b in mds], "model_bound_fails_hz": mfails})
         self.table(f"{p.name}: harmonics vs the DUT's analytic truth (dBr)",
                    ["f Hz", "H", "source", "reading", "floor", "truth", "Δ", "pre-filter"], rows,
                    "Truth: dut.py's analytic Hk at each source's own level and at the column's frequency. "

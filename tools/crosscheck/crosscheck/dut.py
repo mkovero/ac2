@@ -145,6 +145,9 @@ def chebyshev_poly(h_dbr, amp: float) -> list[float]:
         if h is not None:
             t[k] = 10 ** (float(h) / 20)
     c = cheb.cheb2poly(t) * amp  # a·Σ t_k T_k(x), x = u/a
+    # The even T_k carry a constant: DC alone, no part of any h_k (k ≥ 1). Dropping it keeps
+    # the DUT's output at rest at zero, as a noise-only recording expects.
+    c[0] = 0.0
     return [float(v / amp ** j) for j, v in enumerate(c)]
 
 

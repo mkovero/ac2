@@ -292,7 +292,10 @@ calibration mapping, one table of checks per group, the data tables and the plot
 - Columns left out of band comparisons, counted in each row: within 2 Hz of a mains line,
   within 1/12 octave of a sweep's ends (1/6 below the top on speaker paths), and on speaker
   paths comb nulls 10 dB below their 1/3-octave mean and columns whose noise alone exceeds
-  the pass limit.
+  the pass limit. On electrical paths, against the direct estimate of ac2's own sweep
+  capture, also the columns whose band power holds more than the pass limit of content that
+  does not correlate with the reference (−10·log10 γ²): there the power mean reads the
+  harmonics the sweep made at f/k as well as the linear response, which ac2's windows exclude.
 - Groups:
   - **magnitude / phase**: band-wise spread after removing the delay difference (1–20 kHz
     electrical, 200 Hz–5 kHz acoustic). ac2's TF is compared only where γ² ≥ 0.99.

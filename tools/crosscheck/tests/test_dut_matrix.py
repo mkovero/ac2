@@ -215,3 +215,53 @@ def test_a_failed_sine_stage_leaves_its_cells_missing(tmp_path):
     res, _ = analyse(root)
     s = next(c for c in res["checks"] if c["id"] == "dut.coverage.h2.steady sine")["detail"]["summary"]
     assert (s["judged"], s["total"], s["missing"]) == (0, 2, 2)
+
+
+def test_designed_polynomial_is_silent_at_rest():
+    # the even T_k's constant is DC only; a DUT offset at rest would read as LF "noise"
+    for h in ([-40.0, -45.0, -50.0, -55.0], [None, -60.0]):
+        c = dut.chebyshev_poly(h, 0.316)
+        assert c[0] == 0.0
+        assert np.allclose(20 * np.log10(dut.poly_harmonics(c, 0.316)[2:len(h) + 2] / 0.316 + 1e-300)[
+            [i for i, x in enumerate(h) if x is not None]], [x for x in h if x is not None], atol=1e-9)
+
+
+def test_harmonics_show_as_the_direct_estimates_coherence_deficit():
+    # a sweep through x + c·x² with the linear part 40 dB down above 4 kHz: there the band
+    # power holds H2 of the sweep at f/2, which does not correlate with the reference at f,
+    # so the power estimate's excess over the linear part is −10·log10 γ²
+    fs, T = 48000.0, 4.0
+    t = np.arange(int(fs * T)) / fs
+    f1, f2 = 20.0, 20000.0
+    L = T / np.log(f2 / f1)
+    x = 0.5 * np.sin(2 * np.pi * f1 * L * (np.exp(t / L) - 1))
+    X = np.fft.rfft(x)
+    fx = np.fft.rfftfreq(len(x), 1 / fs)
+    lin = np.fft.irfft(X * np.where(fx > 4000, 0.01, 1.0), len(x))
+    y = lin + 0.05 * x ** 2
+    cen = np.array([1000.0, 2000.0, 8000.0, 12000.0])
+    H, coh = dsp.cross_spectrum_bands(y, x, fs, cen, 1 / 6)
+    excess = -10 * np.log10(coh)
+    Hl, _ = dsp.cross_spectrum_bands(lin, x, fs, cen, 1 / 6)
+    true_excess = 20 * np.log10(np.abs(H) / np.abs(Hl))
+    assert np.all(excess[:2] < 0.01)                     # linear part dominates: no gate
+    assert np.all(excess[2:] > 1.0)                      # harmonics dominate: gated
+    assert np.allclose(excess[2:], true_excess[2:], atol=0.5)
+
+
+def test_noise_of_a_band_is_relative_to_its_linear_part():
+    # A band whose output is mostly uncorrelated power (a nonlinear path's harmonics from f/k)
+    # holds a linear part γ² of it: the noise is that much larger against H.
+    from crosscheck import dsp
+    rng = np.random.default_rng(3)
+    fs, n = 48000, 1 << 16
+    ref = rng.standard_normal(n)
+    other = rng.standard_normal(n)
+    noise = 1e-3 * rng.standard_normal(n)
+    meas = 0.1 * ref + other + 1e-3 * rng.standard_normal(n)
+    f = np.array([1000.0, 4000.0])
+    _, coh = dsp.cross_spectrum_bands(meas, ref, fs, f, 1 / 6, delay_s=0.0)
+    plain = dsp.band_noise_rel(meas, noise, fs, f, 1 / 6)
+    lin = dsp.band_noise_rel(meas, noise, fs, f, 1 / 6, coh=coh)
+    assert np.allclose(lin / plain, 1 / np.sqrt(coh), rtol=0.05)
+    assert np.all(lin / plain > 4)
