@@ -313,9 +313,9 @@ PARITY_ROWS: list[tuple[str, str, str | None, str | None]] = [
     ("response phase", rf"sine_phase\.{_SWEEP}@", r"sine_phase\.REW offline@", rf"phase\.{_SWEEP}\|REW offline\."),
     ("absolute level", rf"spl\.ac2 sweep@", r"spl\.REW \(SPL, cal from ac2\)@", r"level\.ac2_vs_rew_meas_minus_ref$"),
     ("group delay (±1/12-oct fit)", r"gd\.ac2 ±1/12-oct fit@", r"gd\.REW offline import ±1/12-oct fit@", None),
-    ("harmonics H2–H5", rf"(?P<o>h[2-5])\.{_SWEEP}@", r"(?P<o>h[2-5])\.REW offline import@",
-     rf"(?P<o>h[2-5])\.{_SWEEP}\|REW offline import@"),
-    ("LF H2 excess (H2 near 22 Hz)", r"lf_h2\.(?:10|20)Hz-5\.5s$", r"lf_h2\.REW offline import$", None),
+    ("harmonics H2–H5", r"(?P<o>h[2-5])\.ac2 sweep [^|@]+@", r"(?P<o>h[2-5])\.REW offline import@",
+     r"(?P<o>h[2-5])\.ac2 sweep [^|@]+\|REW offline import@"),
+    ("LF H2 at 22 Hz (10 Hz sweep)", r"lf_h2\.(?:10|20)Hz-5\.5s$", r"lf_h2\.REW offline import$", None),
     ("arrival (vs its own capture)", r"delay\.ac2_arrival\.", None, None),
 ]
 AMBIENT_PARITY: list[tuple[str, str, str | None, str | None]] = [
@@ -327,7 +327,14 @@ AMBIENT_PARITY: list[tuple[str, str, str | None, str | None]] = [
 def _by_loc(b: dict, pattern: str | None) -> dict[tuple, dict]:
     if not pattern:
         return {}
-    return {(o, r): e for r, o, e in matches_for(b, pattern)}
+    # Several ac2 sweeps read the same tone: the location stands on the worst of them.
+    rank = {st: i for i, st in enumerate(STATUSES)}
+    out: dict[tuple, dict] = {}
+    for r, o, e in matches_for(b, pattern):
+        k = (o, r)
+        if k not in out or rank[e["status"]] < rank[out[k]["status"]]:
+            out[k] = e
+    return out
 
 
 def _locs(keys) -> str:
@@ -347,18 +354,19 @@ def parity_cell(b: dict, a_pat: str, r_pat: str | None, c_pat: str | None) -> st
         return "—"
     judged = {k for k, e in A.items() if e["status"] in ("PASS", "WARN", "FAIL", "METHOD")}
     worse = {k for k, e in A.items() if e["status"] in MISSES and R.get(k, {}).get("status") == "PASS"}
-    alone = {k for k, e in A.items() if e["status"] in MISSES and k not in R}
+    told = ("PASS", "METHOD") + MISSES
+    alone = {k for k, e in A.items() if e["status"] in MISSES and R.get(k, {}).get("status") not in told}
     better = {k for k, e in R.items() if e["status"] in MISSES and A.get(k, {}).get("status") == "PASS"}
     method = {k for k, e in A.items() if e["status"] == "METHOD"
               or (e["status"] in MISSES and R.get(k, {}).get("status") in MISSES)}
     if any(A[k]["status"] == "FAIL" for k in worse):
         word = "**ac2 worse**"
     elif any(A[k]["status"] == "FAIL" for k in alone):
-        word = "**ac2 fails** (no REW twin)"
+        word = "**ac2 fails** (REW cannot tell)" if R else "**ac2 fails**"
     elif worse:
         word = "ac2 slightly worse (WARN)"
     elif alone:
-        word = "ac2 WARN (no REW twin)"
+        word = "ac2 WARN (REW cannot tell)" if R else "ac2 WARN"
     elif better:
         word = "ac2 better"
     elif not judged:
