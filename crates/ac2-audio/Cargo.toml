@@ -30,3 +30,8 @@ cpal = "0.18"
 # macOS: kqueue timers that opt out of coalescing (see src/timer.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
+
+# Linux: tests/jack_cancel.rs cancels a thread inside the libjack log callback.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = "0.2"
+log = "0.4"

@@ -13,7 +13,7 @@
 //! audio server at all.
 
 use std::collections::BTreeMap;
-use std::ffi::{CStr, c_char};
+use std::ffi::{CStr, c_char, c_int};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Once, Weak};
 
@@ -171,15 +171,43 @@ fn libjack_message(msg: *const c_char) -> String {
     s.to_string_lossy().into_owned()
 }
 
-// Called by libjack; must not unwind into C.
+// The libc crate binds neither on Linux; glibc and musl agree on the values.
+const PTHREAD_CANCEL_DISABLE: c_int = 1;
+#[allow(unsafe_code)]
+unsafe extern "C" {
+    fn pthread_setcancelstate(state: c_int, oldstate: *mut c_int) -> c_int;
+}
+
+/// Runs a libjack callback body. JACK2 tears a client down by `pthread_cancel`ing its
+/// threads, and a log write is a cancellation point: there glibc would start a forced
+/// unwind, which `catch_unwind` swallows, and glibc aborts the process when a forced unwind
+/// is not rethrown. With cancellation disabled for the body, a pending cancellation waits
+/// for libjack's next cancellation point, outside any Rust frame. `catch_unwind` still
+/// keeps a Rust panic from unwinding into C.
+fn libjack_callback(body: impl FnOnce()) {
+    let mut old: c_int = 0;
+    // SAFETY: changes only the calling thread's cancel state; not a cancellation point.
+    #[allow(unsafe_code)]
+    unsafe {
+        pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &mut old)
+    };
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+    let mut ignored: c_int = 0;
+    // SAFETY: as above; restoring an enabled state does not act on a pending cancellation.
+    #[allow(unsafe_code)]
+    unsafe {
+        pthread_setcancelstate(old, &mut ignored)
+    };
+}
+
 #[allow(unsafe_code)]
 unsafe extern "C" fn libjack_info(msg: *const c_char) {
-    let _ = std::panic::catch_unwind(|| log::debug!(target: "libjack", "{}", libjack_message(msg)));
+    libjack_callback(|| log::debug!(target: "libjack", "{}", libjack_message(msg)));
 }
 
 #[allow(unsafe_code)]
 unsafe extern "C" fn libjack_error(msg: *const c_char) {
-    let _ = std::panic::catch_unwind(|| {
+    libjack_callback(|| {
         let m = libjack_message(msg);
         if libjack_noise(&m) {
             log::debug!(target: "libjack", "{m}");
@@ -187,6 +215,17 @@ unsafe extern "C" fn libjack_error(msg: *const c_char) {
             log::warn!(target: "libjack", "{m}");
         }
     });
+}
+
+/// Calls the libjack error callback the way libjack's own threads do, so a test can cancel
+/// a thread inside it without a JACK server.
+#[doc(hidden)]
+pub fn libjack_error_for_test(msg: &CStr) {
+    // SAFETY: `msg` is NUL-terminated and outlives the call.
+    #[allow(unsafe_code)]
+    unsafe {
+        libjack_error(msg.as_ptr())
+    };
 }
 
 fn backend_err(operation: Operation, e: impl std::fmt::Display) -> AudioError {

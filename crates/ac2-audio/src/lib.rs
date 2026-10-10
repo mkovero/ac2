@@ -67,6 +67,9 @@ pub use generator::{
 };
 pub use history::{HistoryError, HistoryReader};
 #[cfg(target_os = "linux")]
+#[doc(hidden)]
+pub use jack_host::libjack_error_for_test;
+#[cfg(target_os = "linux")]
 pub use jack_host::{JackBackend, JackConfig, pipewire_socket};
 pub use level::{Gain, LevelError, MaxLevel};
 pub use output::{FADE_SECONDS, OutputSource, OutputState, OutputStats, OutputTick};
