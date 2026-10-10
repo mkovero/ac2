@@ -302,7 +302,12 @@ fn g_steps_the_transfer_views() {
 #[test]
 fn transfer_stack_lays_out_magnitude_phase_coherence() {
     let mut t = empty();
-    t.conn(mirror(four()));
+    // Delay tower without a delay: its NO DELAY ESTIMATE banner is up.
+    let mut s = four();
+    for m in s.measurements.iter_mut().filter(|m| m.id == MeasId(3)) {
+        m.delay = None;
+    }
+    t.conn(mirror(s));
     super::tf_group::tf_frames(&mut t, &[1, 3]);
     t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
     t.key("N");
@@ -361,6 +366,45 @@ fn transfer_stack_lays_out_magnitude_phase_coherence() {
     // The panes share the frequency axis: it is the view's, not a pane's.
     let fr = |id| t.st.view_for(id).freq;
     assert!(rest.leaves().into_iter().all(|id| fr(id) == fr(b)));
+    // The top pane carries the legend and the delay banner for the column.
+    let scene = |t: &T, id| crate::scenes::transfer(&t.st, id, &Theme::dark(), SIZE, now());
+    let delay = |t: &T, id| {
+        scene(t, id)
+            .banners
+            .iter()
+            .any(|r| r.text.starts_with("NO DELAY"))
+    };
+    let lower = rest.leaves();
+    assert!(!t.st.stacked_under(b));
+    assert!(scene(&t, b).legend_box.is_some());
+    assert!(delay(&t, b));
+    for id in &lower {
+        assert!(t.st.stacked_under(*id));
+        assert_eq!(scene(&t, *id).legend_box, None);
+        assert!(!delay(&t, *id));
+    }
+    // Another measurement in the phase pane: no longer the column's, its own legend back.
+    t.st.update(Msg::FocusPane(lower[0]), &t.keys);
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    assert!(!t.st.stacked_under(lower[0]));
+    assert!(
+        !t.st.stacked_under(lower[1]),
+        "under a pane of another measurement"
+    );
+    assert!(scene(&t, lower[0]).legend_box.is_some());
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    assert!(t.st.stacked_under(lower[1]));
+    // A phase view beside the stack (side by side) is a pane of its own.
+    t.st.update(Msg::FocusPane(a), &t.keys);
+    t.key("G");
+    assert_eq!(
+        t.st.layout.view(a).map(|v| v.modes.transfer),
+        Some(TransferView::Phase)
+    );
+    assert!(!t.st.stacked_under(a));
+    assert!(scene(&t, a).legend_box.is_some());
+    assert!(delay(&t, a));
+    t.key("Shift+G");
 
     // On a pane of another kind with no transfer measurement selected, there is nothing
     // to stack.

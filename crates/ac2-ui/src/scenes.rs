@@ -363,6 +363,11 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
     // The shown math channel's operands.
     let frames: Vec<(MeasId, &TopicFrame)> = live.iter().map(|l| (l.meas.id, l.tf)).collect();
     status.math = shown_math(st, focus, &frames);
+    // Under the stack's top pane, which says it for the column. Faults (clipping, STALE,
+    // audio stopped) stay in every pane: each must be seen wherever one looks.
+    if st.stacked_under(pane) {
+        status.no_delay_estimate = None;
+    }
     transfer_scene(
         &traces,
         &st.tf_display,

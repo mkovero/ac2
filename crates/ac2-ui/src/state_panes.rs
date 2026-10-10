@@ -292,6 +292,30 @@ impl PaneNode {
         }
     }
 
+    /// The pane right above leaf `id` in its column: the nearest split stacking `id`'s side
+    /// under another, when that other side is one pane. `None` past a side-by-side split
+    /// (what is above is not the whole width of `id`'s column) or at the top.
+    pub fn above(&self, id: PaneId) -> Option<PaneId> {
+        let (mut path, mut side) = self.parent_of(id)?;
+        loop {
+            let PaneNode::Split { axis, a, .. } = self.at(&path)? else {
+                return None;
+            };
+            match (axis, side) {
+                (Axis::Row, _) => return None,
+                (Axis::Column, Side::B) => {
+                    return match **a {
+                        PaneNode::Leaf(p) => Some(p),
+                        PaneNode::Split { .. } => None,
+                    };
+                }
+                (Axis::Column, Side::A) => {
+                    side = path.pop()?;
+                }
+            }
+        }
+    }
+
     /// Leaf `id` replaced by `new`. `false`: no such leaf.
     fn replace(&mut self, id: PaneId, new: PaneNode) -> bool {
         match self {
@@ -800,7 +824,48 @@ impl AppState {
         if let Some((m, p, c)) = shown {
             (v.tf.show_magnitude, v.tf.show_phase, v.tf.show_coherence) = (m, p, c);
         }
+        // The stack's top pane carries the legend for the column.
+        if self.stacked_under(id) {
+            v.tf.legend.hidden = true;
+        }
         v
+    }
+
+    /// Whether pane `id` is a lower pane of a transfer stack: a phase or coherence view
+    /// right under a pane of the same measurement that is the magnitude view, or itself
+    /// such a lower pane. Whoever laid the panes out (the template, N and G by hand), they
+    /// read as one column, and the top pane's legend and delay banner speak for it.
+    pub fn stacked_under(&self, id: PaneId) -> bool {
+        let lower = |p: PaneId| {
+            self.layout.view(p).is_some_and(|v| {
+                v.kind == PaneKind::Transfer
+                    && matches!(
+                        v.modes.transfer,
+                        TransferView::Phase | TransferView::Coherence
+                    )
+            })
+        };
+        let mut p = id;
+        // Each step goes one pane up the tree: at most as many as there are panes.
+        for _ in 0..self.layout.views.len() {
+            if !lower(p) {
+                return false;
+            }
+            let Some(up) = self.layout.root.above(p) else {
+                return false;
+            };
+            let same = self.layout.kind(up) == PaneKind::Transfer
+                && self.pane_meas(up).map(|m| m.id) == self.pane_meas(p).map(|m| m.id)
+                && self.pane_meas(p).is_some();
+            if !same {
+                return false;
+            }
+            if self.pane_modes(up).transfer == TransferView::Magnitude {
+                return true;
+            }
+            p = up;
+        }
+        false
     }
 
     /// Pane `id`'s modes.

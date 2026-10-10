@@ -382,7 +382,10 @@ steps them), and the **transfer stack** lays the three out one above the other:
   coherence on a quarter each. The focused pane of another kind becomes the stack of the
   selected transfer measurement. They are ordinary panes after: **Alt+→ / Alt+←** or a drag
   sizes them, **Q** closes one, **G** steps one to another view. The frequency axis (zoom,
-  pan) is every transfer pane's, so the three read down one column.
+  pan) is every transfer pane's, so the three read down one column. The top pane carries
+  the column's legend and NO DELAY ESTIMATE banner; a phase or coherence pane right under a
+  magnitude pane of the same measurement (or under such a pane) draws neither. Fault
+  banners (clipping, STALE, audio stopped) show in every pane.
 - A **new transfer measurement** made in the app (**Ctrl+K** *New transfer measurement…*) opens in the
   transfer stack, in place of the pane that would show it (the focused transfer pane, else
   the transfer pane worked in last, else the focused pane). Measurements that appear from
