@@ -91,22 +91,22 @@ distortion table shows it per harmonic order.
 | 1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs numpy, largest \|difference\| | 1.685 dB (WARN 1) |
 | 1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy, largest \|difference\| | 3.754 dB (INFO 1) |
 
-### OSM stage (osm-20261010T035316Z, ac2 befb61d, v1.5.2: PASS 86, INFO 12)
+### OSM stage (osm-20261010T143503Z, ac2 bdc1bec, v1.5.2: PASS 86, INFO 77)
 
 **Transfer: max over the gated columns; a rig take (not a planned fixture) shows the median over its columns**
 
-| case | \|ac2 \|H\| − truth\|, dB | \|OSM \|H\| − truth\|, dB | \|ac2 ∠ − truth\|, ° | \|OSM ∠ − truth\|, ° | \|ac2 − OSM\| on \|H\|, dB | \|ac2 − OSM\| on ∠, ° | ac2 γ² − true γ² (mean) | OSM γ² − E[γ̂²] (mean) |
-|---|---|---|---|---|---|---|---|---|
-| identity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| biquad | 0.031 | 0.024 | 0.273 | 0.215 | 0.030 | 0.299 | 0.000 | 0.000 |
-| delay48 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| delay10_5 | 0.002 | 0.001 | 0.014 | 0.005 | 0.002 | 0.014 | 0.000 | 0.000 |
-| polarity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| snr20 |  |  |  |  |  |  | 0.000 | 0.000 |
-| snr10 |  |  |  |  |  |  | +0.002 | +0.001 |
-| snr0 |  |  |  |  |  |  | +0.013 | −0.005 |
-| genelec-rig (median) |  |  |  |  | 0.119 | 0.723 |  |  |
-| xone-rig (median) |  |  |  |  | 0.000 | 0.004 |  |  |
+| case | \|ac2 \|H\| − truth\|, dB | \|OSM \|H\| − truth\|, dB | \|ac2 ∠ − truth\|, ° | \|OSM ∠ − truth\|, ° | \|ac2 − OSM\| on \|H\|, dB | \|ac2 − OSM\| on ∠, ° | ac2 γ² − true γ² (mean) | ac2 γ² − E[γ̂²] (mean) | OSM γ² − E[γ̂²] (mean) |
+|---|---|---|---|---|---|---|---|---|---|
+| identity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |  | 0.000 |
+| biquad | 0.031 | 0.024 | 0.273 | 0.215 | 0.030 | 0.299 | 0.000 |  | 0.000 |
+| delay48 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |  | 0.000 |
+| delay10_5 | 0.002 | 0.001 | 0.014 | 0.005 | 0.002 | 0.014 | 0.000 |  | 0.000 |
+| polarity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |  | 0.000 |
+| snr20 |  |  |  |  |  |  | 0.000 | 0.000 | 0.000 |
+| snr10 |  |  |  |  |  |  | +0.002 | +0.001 | +0.001 |
+| snr0 |  |  |  |  |  |  | +0.013 | −0.003 | −0.005 |
+| genelec-rig (median) |  |  |  |  | 0.119 | 0.723 |  |  |  |
+| xone-rig (median) |  |  |  |  | 0.000 | 0.004 |  |  |  |
 
 **Delay (samples), noise and spectrum: signed**
 
@@ -123,6 +123,21 @@ distortion table shows it per harmonic order.
 | sine1k |  |  |  |  |  |  |  | 0.000 | 0.000 |
 | genelec-rig |  |  |  |  | −0.551 |  |  |  |  |
 | xone-rig |  |  |  |  | +0.502 |  |  |  |  |
+
+**Columns behind each comparison, and a rig take's tails**
+
+| case | columns judged | below the γ² gate | ac2 non-finite | OSM bins under its float32 floor | OSM NaN-phase bins | \|ac2 − OSM\| on \|H\|: 95th pct, dB | \|ac2 − OSM\| on \|H\|: max, dB | \|ac2 − OSM\| on ∠: 95th pct, ° | \|ac2 − OSM\| on ∠: max, ° |
+|---|---|---|---|---|---|---|---|---|---|
+| identity | 412 | 0 | 3 | 0 | 0 |  |  |  |  |
+| biquad | 412 | 0 | 3 | 0 | 0 |  |  |  |  |
+| delay48 | 412 | 0 | 3 | 0 | 0 |  |  |  |  |
+| delay10_5 | 412 | 0 | 3 | 0 | 0 |  |  |  |  |
+| polarity | 412 | 0 | 3 | 0 | 0 |  |  |  |  |
+| snr20 | 412 | 0 | 3 | 0 | 1 |  |  |  |  |
+| snr10 | 10 | 402 | 3 | 0 | 0 |  |  |  |  |
+| snr0 | 0 | 412 | 3 | 0 | 0 |  |  |  |  |
+| genelec-rig | 258 | 154 | 3 | 17 | 34 | 1.034 | 3.587 @ 69.1 Hz | 5.530 | 20.399 @ 54.9 Hz |
+| xone-rig | 412 | 0 | 3 | 17 | 1 | 0.002 | 0.005 @ 59.9 Hz | 0.033 | 0.134 @ 59.9 Hz |
 
 <!-- END generated -->
 

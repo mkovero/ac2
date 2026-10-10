@@ -29,6 +29,7 @@ STATUSES = ("FAIL", "WARN", "PASS", "INCONCLUSIVE", "INFO")
 # direction. ABS: a magnitude with no direction (a band pair's larger of |mean difference| and
 # its spread about that mean), shown unsigned so it does not read as a bias. SHARE: a fraction.
 SIGNED, ABS, SHARE = "signed", "abs", "share"
+COUNT_UNITS = ("columns", "bins")
 _SWEEP = r"ac2 sweep (?:10|20)Hz-5\.5s"
 RIG_ROWS: list[tuple[str, str] | tuple[str, str, str]] = [
     ("ac2 sweep vs REW offline import, magnitude spread per band", rf"mag\.{_SWEEP}\|REW offline\.", ABS),
@@ -73,6 +74,8 @@ AMBIENT_ROWS: list[tuple[str, str]] = [
     ("LAeq ac2 vs REW", r"leq\.A\.ac2_rew$"),
     ("1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs numpy, largest \\|difference\\|", r"bands\.ac2 RTA$", ABS),
     ("1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy, largest \\|difference\\|", r"bands\.REW RTA$", ABS),
+    ("1/3-oct bands: ac2 RTA vs its own filters' response applied to the recording, worst band",
+     r"bands\.ac2 RTA\|own filters$"),
 ]
 # Distortion coverage: per harmonic order and analyser, how many tones were judged at all.
 HARMONIC_ROWS: list[tuple[str, str]] = [
@@ -88,7 +91,20 @@ OSM_TF_COLS = [
     ("\\|ac2 − OSM\\| on \\|H\\|, dB", "ac2_vs_osm_h", ABS),
     ("\\|ac2 − OSM\\| on ∠, °", "ac2_vs_osm_phase", ABS),
     ("ac2 γ² − true γ² (mean)", "ac2_γ²_vs_true_γ²"),
+    ("ac2 γ² − E[γ̂²] (mean)", "ac2_γ²_vs_its_expected_value"),
     ("OSM γ² − E[γ̂²] (mean)", "osm_γ²_vs_its_expected_value"),
+]
+# Rig takes and masks: how many columns each OSM comparison stands on, and the tails a median hides
+OSM_COVERAGE_COLS = [
+    ("columns judged", "columns_judged"),
+    ("below the γ² gate", "masked_columns_below_the_coherence_gate"),
+    ("ac2 non-finite", "masked_ac2_non_finite_columns"),
+    ("OSM bins under its float32 floor", "masked_osm_bins_below_the_reference_floor"),
+    ("OSM NaN-phase bins", "masked_osm_nan_phase_bins"),
+    ("\\|ac2 − OSM\\| on \\|H\\|: 95th pct, dB", "ac2_vs_osm_h_95th_percentile_difference", ABS),
+    ("\\|ac2 − OSM\\| on \\|H\\|: max, dB", ("ac2_vs_osm_h_max_difference", "ac2_vs_osm_h_max_difference_frequency")),
+    ("\\|ac2 − OSM\\| on ∠: 95th pct, °", "ac2_vs_osm_phase_95th_percentile_difference", ABS),
+    ("\\|ac2 − OSM\\| on ∠: max, °", ("ac2_vs_osm_phase_max_difference", "ac2_vs_osm_phase_max_difference_frequency")),
 ]
 OSM_OTHER_COLS = [
     ("ac2 finder − truth", "ac2_delay_finder_vs_analytic"),
@@ -107,6 +123,8 @@ OSM_OTHER_COLS = [
 def fmt_value(v: float | None, unit: str, stat: str = SIGNED) -> str:
     if v is None:
         return "—"
+    if unit in COUNT_UNITS:
+        return f"{v:.0f}"
     if stat == SHARE:
         return f"{v * 100:.1f} %"
     if unit == "rel":
@@ -153,7 +171,11 @@ def cell(matches: list[tuple[str, str | None, dict]], stat: str = SIGNED) -> str
             continue
         r, o, e = max(judged, key=lambda m: abs(m[2]["value"]))
         where = _loc(r, o) if len(matches) > 1 and r else ""
-        parts.append(fmt_value(e["value"], unit, stat) + (f" @ {where}" if where else ""))
+        # an unsigned band statistic hides its direction: the signed mean beside it gives it back
+        extra = [f"mean {fmt_value(e['mean'], unit)}"] if stat == ABS and e.get("mean") is not None else []
+        extra += [f"n {e['n']:.0f}"] if e.get("n") is not None else []
+        parts.append(fmt_value(e["value"], unit, stat) + (f" @ {where}" if where else "")
+                     + (f" [{', '.join(extra)}]" if extra else ""))
     head = "; ".join(parts)
     return (f"{head} ({counts_text(entries)})" if head else counts_text(entries))
 
@@ -176,11 +198,17 @@ def _run(b: dict) -> str:
     return (b.get("provenance") or {}).get("run") or ""
 
 
+def _ppo(b: dict) -> int | None:
+    """Columns per octave of a rig path baseline; 48 when not recorded (ac2's default)."""
+    return None if b["stage"] in ("osm", "ambient") else int(b.get("resolution_ppo") or 48)
+
+
 def newest(items: list[tuple[Path, dict]]) -> list[tuple[Path, dict]]:
-    """The newest baseline per (rig, stage), in file order."""
-    best: dict[tuple[str, str], tuple[Path, dict]] = {}
+    """The newest baseline per (rig, stage, resolution), in file order: a take at another column
+    width measures a different quantity, so it stands beside the default one, not over it."""
+    best: dict[tuple, tuple[Path, dict]] = {}
     for p, b in items:
-        k = (p.parent.name, b["stage"])
+        k = (p.parent.name, b["stage"], _ppo(b))
         if k not in best or _run(b) > _run(best[k][1]):
             best[k] = (p, b)
     return [pb for pb in items if pb in best.values()]
@@ -188,7 +216,8 @@ def newest(items: list[tuple[Path, dict]]) -> list[tuple[Path, dict]]:
 
 def heading(b: dict) -> str:
     pv = b.get("provenance") or {}
-    return f"{b['stage']} {_level(b)} ({pv.get('run')}, ac2 {_short_build(pv.get('ac2_build'))})"
+    res = f" 1/{_ppo(b)} oct" if _ppo(b) not in (None, 48) else ""
+    return f"{b['stage']} {_level(b)}{res} ({pv.get('run')}, ac2 {_short_build(pv.get('ac2_build'))})"
 
 
 def counts_line(b: dict) -> str:
@@ -220,11 +249,17 @@ def rig_table(bs: list[dict], rows: list[tuple[str, ...]], verdicts: bool = True
 
 
 def _osm_cell(b: dict, case: str, slug, stat: str = SIGNED) -> str:
+    if isinstance(slug, tuple) and slug[1].endswith("_frequency"):  # a maximum and where it sits
+        e, ef = (b["checks"].get(f"osm.{case}.{s}") for s in slug)
+        if e is None:
+            return ""
+        return fmt_value(e["value"], "", ABS) + (f" @ {ef['value']:.1f} Hz" if ef and ef["value"] is not None else "")
     for s in (slug if isinstance(slug, tuple) else (slug,)):
         e = b["checks"].get(f"osm.{case}.{s}")
         if e is not None:
-            v = fmt_value(e["value"], "", stat)  # the column header carries the unit
-            return v if e["status"] == "PASS" else f"{v} ({e['status']})"
+            # the column header carries the unit; a count is shown as one
+            v = fmt_value(e["value"], e.get("unit") if e.get("unit") in COUNT_UNITS else "", stat)
+            return v if e["status"] in ("PASS", "INFO") else f"{v} ({e['status']})"
     return ""
 
 
@@ -235,7 +270,8 @@ def osm_tables(b: dict) -> list[str]:
     out = []
     for title, cols, median in (("Transfer: max over the gated columns; a rig take (not a planned fixture) "
                                  "shows the median over its columns", OSM_TF_COLS, " (median)"),
-                                ("Delay (samples), noise and spectrum: signed", OSM_OTHER_COLS, "")):
+                                ("Delay (samples), noise and spectrum: signed", OSM_OTHER_COLS, ""),
+                                ("Columns behind each comparison, and a rig take's tails", OSM_COVERAGE_COLS, "")):
         # a rig take has no truth: its ac2 − OSM transfer statistic is a median, so its row says so
         rows = [[c if c in planned else c + median] + [_osm_cell(b, c, *s) for _, *s in cols] for c in cases]
         rows = [r for r in rows if any(r[1:])]
@@ -258,7 +294,7 @@ def render(root: Path = BASELINES) -> str:
                     f"{pv.get('osm_version')}: {counts_line(b)})", ""] + osm_tables(b)
         paths = [b for b in bs if b["stage"] not in ("osm", "ambient")]
         if paths:
-            paths.sort(key=lambda b: b["stage"] != "xone")
+            paths.sort(key=lambda b: (b["stage"] != "xone", _ppo(b) != 48, _ppo(b)))
             out += [f"### {rig}: electrical (xone) and speaker (genelec) paths", ""] + rig_table(paths, RIG_ROWS) + [""]
             out += [f"### {rig}: distortion coverage per harmonic order (steady-sine tones judged)", ""]
             out += rig_table(paths, HARMONIC_ROWS, verdicts=False) + [""]
