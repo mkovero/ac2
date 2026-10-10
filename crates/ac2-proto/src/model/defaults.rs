@@ -56,6 +56,37 @@ impl DepthPolicy {
 impl SpectrumConfig {
     /// Default FFT length, samples.
     pub const DEFAULT_FFT_LEN: u32 = 65_536;
+    /// Shortest FFT length, samples.
+    pub const MIN_FFT_LEN: u32 = 64;
+    /// Longest FFT length, samples.
+    pub const MAX_FFT_LEN: u32 = 65_536;
+    /// Updates per second a spectrum aims for when its window is short enough to allow it.
+    pub const UPDATES_PER_S: u32 = 30;
+
+    /// Whether `n` is an FFT length the daemon takes: a power of two in
+    /// [`Self::MIN_FFT_LEN`] … [`Self::MAX_FFT_LEN`].
+    pub fn fft_len_ok(n: u32) -> bool {
+        n.is_power_of_two() && (Self::MIN_FFT_LEN..=Self::MAX_FFT_LEN).contains(&n)
+    }
+
+    /// Hop between spectra of an `n`-point spectrum at `fs`, samples: the largest power of
+    /// two at or below `fs / UPDATES_PER_S`, kept between `n / 8` and `n / 2` (overlap
+    /// 50 – 87.5 %).
+    ///
+    /// Frames closer than `n / 8` cost FFTs without adding information: the power
+    /// estimates of windows overlapping by more than ~75 % (Hann; the narrower flat-top and
+    /// Blackman-Harris windows by a little more) are almost fully correlated, so an average
+    /// over a given time is no steadier for having more of them. The exponential
+    /// averaging's time constant is in seconds and stays what it is. A 65 536-point window
+    /// spans 1.37 s at 48 kHz; a new spectrum every eighth of it (0.17 s) follows it
+    /// closely, at an eighth of the FFT work a 1024-sample hop costs. Short windows keep
+    /// updating about 30 times a second. The daemon analyses with this hop and the app
+    /// states the update rate it gives, so both read it from here.
+    pub fn display_hop(n: u32, fs: u32) -> u32 {
+        let target = (fs / Self::UPDATES_PER_S).max(64);
+        let pow2 = 1u32 << (u32::BITS - 1 - target.leading_zeros());
+        pow2.clamp((n / 8).max(1), (n / 2).max(1))
+    }
 
     /// `input` with the default FFT length, a Hann window and no averaging.
     pub fn on_input(input: u16) -> Self {
@@ -418,5 +449,34 @@ impl LeqPreset {
         }
         LeqWindow::sort(&mut out);
         out
+    }
+}
+
+#[cfg(test)]
+mod hop_tests {
+    use super::SpectrumConfig;
+
+    #[test]
+    fn hop_overlaps_between_half_and_seven_eighths() {
+        let hop = SpectrumConfig::display_hop;
+        // 48 kHz: long windows step by n/8 (87.5 % overlap) …
+        assert_eq!(hop(65_536, 48_000), 8192);
+        assert_eq!(hop(16_384, 48_000), 2048);
+        // … short ones by a 1024-sample hop (~47 updates/s) while that is at most n/2.
+        assert_eq!(hop(4096, 48_000), 1024);
+        assert_eq!(hop(1024, 48_000), 512);
+        assert_eq!(hop(256, 48_000), 128);
+        // Other rates scale.
+        assert_eq!(hop(4096, 96_000), 2048);
+        assert_eq!(hop(65_536, 44_100), 8192);
+    }
+
+    #[test]
+    fn fft_lengths_are_powers_of_two_in_range() {
+        assert!(SpectrumConfig::fft_len_ok(64));
+        assert!(SpectrumConfig::fft_len_ok(65_536));
+        assert!(!SpectrumConfig::fft_len_ok(32));
+        assert!(!SpectrumConfig::fft_len_ok(131_072));
+        assert!(!SpectrumConfig::fft_len_ok(1000));
     }
 }

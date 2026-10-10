@@ -321,6 +321,25 @@ pub fn spec_averaging(a: ac2_proto::model::SpecAveraging) -> String {
     }
 }
 
+/// An FFT length as the measurement list and `ac2 meas list` state it: `65536 pt`.
+pub fn fft_len(n: u32) -> String {
+    format!("{n} pt")
+}
+
+/// What an `n`-point spectrum at `fs` resolves and how often it updates:
+/// `0.73 Hz bins · 5.9 updates/s`. The update rate is the daemon's
+/// ([`ac2_proto::model::SpectrumConfig::display_hop`]).
+pub fn fft_resolution(n: u32, fs: u32) -> String {
+    if n == 0 || fs == 0 {
+        return NO_VALUE.to_string();
+    }
+    let bin = f64::from(fs) / f64::from(n);
+    let hop = ac2_proto::model::SpectrumConfig::display_hop(n, fs);
+    let rate = f64::from(fs) / f64::from(hop);
+    let rate = fixed(rate, if rate < 10.0 { 1 } else { 0 });
+    format!("{} bins · {rate} updates/s", freq_readout(bin))
+}
+
 /// A measurement's colour family as the operator names it: `colour 1` … `colour 8`, `grey`.
 /// The CLI's `--colour` takes `1` … `8` and `grey`.
 pub fn colour_family(c: ac2_proto::model::ColourFamily) -> String {
@@ -462,6 +481,19 @@ pub fn celsius(t: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fft_readouts() {
+        assert_eq!(fft_len(65_536), "65536 pt");
+        // 48 kHz: a 65 536-point window steps by n/8; a 1024-point one by n/2.
+        assert_eq!(
+            fft_resolution(65_536, 48_000),
+            "0.73 Hz bins · 5.9 updates/s"
+        );
+        assert_eq!(fft_resolution(1024, 48_000), "46.9 Hz bins · 94 updates/s");
+        assert_eq!(fft_resolution(4096, 48_000), "11.7 Hz bins · 47 updates/s");
+        assert_eq!(fft_resolution(4096, 0), "—");
+    }
 
     #[test]
     fn ir_readouts() {

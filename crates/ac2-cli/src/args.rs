@@ -587,10 +587,11 @@ pub enum MeasCmd {
         #[arg(long)]
         watch: bool,
     },
-    /// Change a measurement's averaging (`--average`: spectrum, rta; `--blocks`: tf),
-    /// Resolution (`--resolution`: tf, sweep) or colour (`--colour`). What is not given
-    /// stays as it is; a running measurement starts its average afresh (a colour alone
-    /// leaves it running as it is), a sweep's Resolution applies to its next run.
+    /// Change a measurement's averaging (`--average`: spectrum, rta; `--blocks`: tf), FFT
+    /// length and window (`--fft`, `--window`: spectrum), Resolution (`--resolution`: tf,
+    /// sweep) or colour (`--colour`). What is not given stays as it is; a running
+    /// measurement starts its average afresh (a colour alone leaves it running as it is),
+    /// a sweep's Resolution applies to its next run.
     Set {
         /// Id or name.
         meas: MeasRef,
@@ -602,6 +603,13 @@ pub enum MeasCmd {
         /// tf averaging: FIFO blocks of the full-rate stage (≥ 1).
         #[arg(long)]
         blocks: Option<u32>,
+        /// Spectrum FFT length: a power of two, 64 … 65536 samples. A math channel's
+        /// operand keeps its length (edit the math channel first).
+        #[arg(long, value_name = "SAMPLES")]
+        fft: Option<SampleCount>,
+        /// Spectrum window.
+        #[arg(long, value_enum)]
+        window: Option<WindowArg>,
         /// tf and sweep: Resolution, points per octave stored: `1/12`, `1/24`, `1/48`,
         /// `1/96` (not smoothing).
         #[arg(long, value_name = "1/N")]
@@ -700,7 +708,7 @@ pub struct MeasNew {
     /// weighted by its length), `exp:<time>` (exponential, e.g. `exp:2s`).
     #[arg(long, value_name = "AVG")]
     pub average: Option<SpecAveragingArg>,
-    /// Spectrum FFT length, samples.
+    /// Spectrum FFT length: a power of two, 64 … 65536 samples.
     #[arg(long, default_value = "65536samples")]
     pub fft: SampleCount,
     /// Spectrum window.

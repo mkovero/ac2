@@ -768,8 +768,14 @@ FIFO stores every frame (at most 511 frames at 65 536 points); an RTA's at most 
 
 - **New spectrum** / **New RTA** have an *Averaging* field (**←** / **→**); *Edit
   measurement…* (`meas_edit` in the palette) on a selected spectrum or RTA changes it, its
-  input, name and smoothing or bands, and keeps the rest (FFT length, window, band range,
-  weighting). A setting made from the CLI that the list does not offer shows as it is.
+  input, name and smoothing or bands, and keeps the rest (band range, weighting). A setting
+  made from the CLI that the list does not offer shows as it is.
+- A spectrum's dialogs also pick its *FFT size* (64 … 65 536 points) and *Window* (Hann,
+  Blackman-Harris, flat-top, rectangular); the size's hint says what it gives at the
+  session's rate, e.g. `0.73 Hz bins · 5.9 updates/s` at 65 536 points and 48 kHz. A new
+  length or window on a running spectrum restarts it and its average. A spectrum named in a
+  math channel keeps its length (the channel's operands share one bin grid): edit the math
+  channel first; its window changes freely.
 - The measurement list says it: `RTA  Room · running · avg FIFO 2400 frames`; so does
   `ac2 meas list`.
 - **R** restarts the average; a change of averaging restarts it too.
@@ -780,6 +786,7 @@ ac2 meas new spectrum --input 2 --name fft --average fifo:16
 ac2 meas set room --average fifo:2400     # about 40 s of RTA results, a plain power mean
 ac2 meas set room --average off
 ac2 meas set main-l --blocks 16           # a transfer measurement's averaging
+ac2 meas set fft --fft 8192samples --window flattop
 ```
 
 ### Spectrograph

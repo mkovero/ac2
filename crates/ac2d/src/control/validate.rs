@@ -2,7 +2,9 @@
 
 use ac2_core::generator::GeneratorError;
 use ac2_proto::grid::GridDef;
-use ac2_proto::model::{InputSetup, MeasConfig, MeasKind, Measurement, SpecAveraging, SweepConfig};
+use ac2_proto::model::{
+    InputSetup, MeasConfig, MeasKind, Measurement, SpecAveraging, SpectrumConfig, SweepConfig,
+};
 use ac2_proto::units::{MeasId, Rev};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError};
 
@@ -120,8 +122,12 @@ pub(super) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
             }
         }
         MeasKind::Spectrum { config } => {
-            if !config.fft_len.is_power_of_two() || !(64..=65536).contains(&config.fft_len) {
-                return inv("fft_len must be a power of two in 64..=65536");
+            if !SpectrumConfig::fft_len_ok(config.fft_len) {
+                return inv(&format!(
+                    "fft_len must be a power of two in {}..={}",
+                    SpectrumConfig::MIN_FFT_LEN,
+                    SpectrumConfig::MAX_FFT_LEN
+                ));
             }
             if conv::spec_averaging(config.averaging).is_none() {
                 return inv("invalid averaging");

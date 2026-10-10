@@ -1396,11 +1396,13 @@ fn edit_meas_on_a_spectrum_changes_its_averaging_and_keeps_the_rest() {
             ("Input".to_owned(), "2 · Input 2".to_owned()),
             ("Name".to_owned(), "Sub".to_owned()),
             ("Smoothing".to_owned(), "off".to_owned()),
+            ("FFT size".to_owned(), "8192 pt".to_owned()),
+            ("Window".to_owned(), "Hann".to_owned()),
             ("Averaging".to_owned(), "off".to_owned()),
         ]
     );
     // Averaging: off → exp τ 0.5 s → exp τ 1 s.
-    for _ in 0..3 {
+    for _ in 0..5 {
         t.key("Down");
     }
     t.key("Right");

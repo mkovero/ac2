@@ -9,6 +9,7 @@ use super::{connect, find_meas, rate, state};
 use crate::CliError;
 use crate::args::*;
 use crate::output::{self, Out};
+use crate::units::SampleCount;
 use crate::watch;
 
 pub(crate) async fn devices(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
@@ -219,7 +220,21 @@ fn band_fraction(f: FractionArg) -> Result<BandFraction, CliError> {
     })
 }
 
-fn window(w: WindowArg) -> Window {
+/// `--fft`: a length the daemon takes.
+fn fft_len(n: SampleCount) -> Result<u32, CliError> {
+    u32::try_from(n.0)
+        .ok()
+        .filter(|n| SpectrumConfig::fft_len_ok(*n))
+        .ok_or_else(|| {
+            CliError::Usage(format!(
+                "--fft must be a power of two, {} … {} samples",
+                SpectrumConfig::MIN_FFT_LEN,
+                SpectrumConfig::MAX_FFT_LEN
+            ))
+        })
+}
+
+pub(crate) fn window(w: WindowArg) -> Window {
     match w {
         WindowArg::Hann => Window::Hann,
         WindowArg::Bh4 => Window::BlackmanHarris4,
@@ -368,23 +383,15 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                 )));
             }
             match k {
-                MeasKindArg::Spectrum => {
-                    let len = n.fft.0;
-                    if !(64..=1 << 20).contains(&len) || (len & (len - 1)) != 0 {
-                        return Err(CliError::Usage(
-                            "--fft must be a power of two, 64 … 1048576 samples".into(),
-                        ));
-                    }
-                    MeasKind::Spectrum {
-                        config: SpectrumConfig {
-                            fft_len: len as u32,
-                            window: window(n.window),
-                            smoothing: n.smooth.map(smoothing).transpose()?,
-                            averaging: n.average.map_or(SpecAveraging::Off, |a| a.0),
-                            ..SpectrumConfig::on_input(input)
-                        },
-                    }
-                }
+                MeasKindArg::Spectrum => MeasKind::Spectrum {
+                    config: SpectrumConfig {
+                        fft_len: fft_len(n.fft)?,
+                        window: window(n.window),
+                        smoothing: n.smooth.map(smoothing).transpose()?,
+                        averaging: n.average.map_or(SpecAveraging::Off, |a| a.0),
+                        ..SpectrumConfig::on_input(input)
+                    },
+                },
                 MeasKindArg::Rta => {
                     if n.from.0.0 >= n.to.0.0 {
                         return Err(CliError::Usage("--from must be below --to".into()));
@@ -423,13 +430,19 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
 pub(crate) struct MeasSet {
     pub(crate) average: Option<SpecAveraging>,
     pub(crate) blocks: Option<u32>,
+    pub(crate) fft: Option<SampleCount>,
+    pub(crate) window: Option<Window>,
     pub(crate) resolution: Option<Resolution>,
 }
 
 impl MeasSet {
     /// Nothing of the configuration changes.
     pub(crate) fn is_empty(&self) -> bool {
-        self.average.is_none() && self.blocks.is_none() && self.resolution.is_none()
+        self.average.is_none()
+            && self.blocks.is_none()
+            && self.fft.is_none()
+            && self.window.is_none()
+            && self.resolution.is_none()
     }
 }
 
@@ -437,8 +450,8 @@ impl MeasSet {
 pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, CliError> {
     if set.is_empty() {
         return Err(CliError::Usage(
-            "say what changes: --average (spectrum, rta), --blocks (tf), --resolution \
-             (tf, sweep) or --colour"
+            "say what changes: --average (spectrum, rta), --blocks (tf), --fft or --window \
+             (spectrum), --resolution (tf, sweep) or --colour"
                 .into(),
         ));
     }
@@ -472,6 +485,18 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
             return Err(CliError::Usage("--blocks must be at least 1".into()));
         }
         c.averaging = TfAveraging::Fifo { blocks: b };
+    }
+    if let Some(n) = set.fft {
+        let MeasKind::Spectrum { config: c } = &mut config.kind else {
+            return not("fft", "spectrum");
+        };
+        c.fft_len = fft_len(n)?;
+    }
+    if let Some(w) = set.window {
+        let MeasKind::Spectrum { config: c } = &mut config.kind else {
+            return not("window", "spectrum");
+        };
+        c.window = w;
     }
     if let Some(r) = set.resolution {
         match &mut config.kind {
@@ -512,6 +537,8 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             meas,
             average,
             blocks,
+            fft,
+            window: win,
             resolution,
             colour,
         } => {
@@ -520,6 +547,8 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             let set = MeasSet {
                 average: average.map(|a| a.0),
                 blocks: *blocks,
+                fft: *fft,
+                window: win.map(window),
                 resolution: resolution.map(|r| r.0),
             };
             if !set.is_empty() || colour.is_none() {
@@ -1087,6 +1116,52 @@ mod tests {
             assert!(e.contains("a colour is 1 … 8, grey or auto"), "{e}");
         }
         assert!(MeasSet::default().is_empty());
+    }
+
+    #[test]
+    fn meas_set_changes_a_spectrums_fft_and_window() {
+        let set_of = |args: &[&str]| -> Result<MeasSet, String> {
+            let argv = [&["ac2", "meas", "set", "S"][..], args].concat();
+            let cli = Cli::try_parse_from(argv).map_err(|e| e.to_string())?;
+            match cli.cmd {
+                Cmd::Meas {
+                    cmd: MeasCmd::Set { fft, window: w, .. },
+                } => Ok(MeasSet {
+                    fft,
+                    window: w.map(window),
+                    ..MeasSet::default()
+                }),
+                _ => unreachable!(),
+            }
+        };
+        let spectrum = config(&["spectrum", "--name", "S", "--input", "1"]).expect("spectrum");
+        let set = set_of(&["--fft", "4096samples", "--window", "flattop"]).expect("parsed");
+        assert!(!set.is_empty());
+        let MeasKind::Spectrum { config: c } = meas_set(&spectrum, set).expect("set").kind else {
+            panic!("a spectrum");
+        };
+        assert_eq!((c.fft_len, c.window), (4096, Window::FlatTop));
+        // The window alone keeps the length.
+        let set = set_of(&["--window", "rect"]).expect("parsed");
+        let MeasKind::Spectrum { config: c } = meas_set(&spectrum, set).expect("set").kind else {
+            panic!("a spectrum");
+        };
+        assert_eq!((c.fft_len, c.window), (65_536, Window::Rectangular));
+        for bad in ["1000samples", "32samples", "131072samples"] {
+            let set = set_of(&["--fft", bad]).expect("parsed");
+            let e = meas_set(&spectrum, set).expect_err(bad);
+            assert!(e.to_string().contains("power of two, 64 … 65536"), "{e}");
+        }
+        let rta = config(&["rta", "--name", "R", "--input", "1"]).expect("rta");
+        let e = meas_set(&rta, set_of(&["--fft", "1024samples"]).expect("parsed"))
+            .expect_err("refused");
+        assert!(e.to_string().contains("--fft applies to spectrum"), "{e}");
+        let e =
+            meas_set(&rta, set_of(&["--window", "hann"]).expect("parsed")).expect_err("refused");
+        assert!(
+            e.to_string().contains("--window applies to spectrum"),
+            "{e}"
+        );
     }
 
     #[test]

@@ -627,6 +627,19 @@ fn spectrum_difference_on_the_spectrum_stream() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+    // Its window is no part of the grid: that changes freely.
+    c.ok(Command::MeasUpdate {
+        meas: MeasId(4),
+        config: MeasConfig {
+            name: "Spectrum 1".into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig {
+                    window: ac2_proto::model::Window::FlatTop,
+                    ..SpectrumConfig::on_input(1)
+                },
+            },
+        },
+    });
     // A math channel is drawn in its measurement's colours: it has none of its own.
     let e = c
         .call(Command::MeasColour {

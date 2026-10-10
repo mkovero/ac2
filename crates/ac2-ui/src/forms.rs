@@ -11,7 +11,7 @@
 use ac2_proto::model::{
     BandFraction, DepthPolicy, EssSpec, LfHarmonics, MeasConfig, MeasKind, Measurement,
     OpenSession, Operand, Resolution, RtaConfig, Smoothing, SmoothingFraction, SpecAveraging,
-    SpectrumConfig, SplConfig, SweepConfig, TimeWeighting, TransferConfig, Weighting,
+    SpectrumConfig, SplConfig, SweepConfig, TimeWeighting, TransferConfig, Weighting, Window,
 };
 use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
@@ -117,6 +117,10 @@ pub enum FieldId {
     LfHarmonics,
     /// Frequency points per octave of a transfer or sweep curve.
     Resolution,
+    /// A spectrum's FFT length.
+    FftSize,
+    /// A spectrum's FFT window.
+    Window,
     /// Whether this operand is in a math channel's average.
     Member(Operand),
     /// How a math channel's average combines its operands.
@@ -335,6 +339,8 @@ pub struct Form {
     pub meas_edit: Option<Box<Measurement>>,
     /// The averaging field's values, one per option.
     averaging: Vec<SpecAveraging>,
+    /// The open session's sample rate: what the FFT size field's hint is stated at.
+    sample_rate: Option<u32>,
 }
 
 /// Smoothing choices of the transfer and spectrum dialogs (index 0: none, as `ac2 meas new`
@@ -373,6 +379,17 @@ const AVERAGING: [SpecAveraging; 9] = [
     },
     SpecAveraging::Fifo { frames: 16 },
     SpecAveraging::Fifo { frames: 64 },
+];
+/// FFT lengths of the spectrum dialogs: every one the daemon takes, shortest first.
+const FFT_LENS: [u32; 11] = [
+    64, 128, 256, 512, 1024, 2048, 4096, 8192, 16_384, 32_768, 65_536,
+];
+/// Windows of the spectrum dialogs (index 0: Hann, as `ac2 meas new` without `--window`).
+const WINDOWS: [Window; 4] = [
+    Window::Hann,
+    Window::BlackmanHarris4,
+    Window::FlatTop,
+    Window::Rectangular,
 ];
 const DEPTH: [&str; 2] = [
     "equal confidence (every frequency alike)",
@@ -448,7 +465,39 @@ impl Form {
             sweep_edit: None,
             meas_edit: None,
             averaging: AVERAGING.to_vec(),
+            sample_rate: None,
         }
+    }
+
+    /// The FFT size and window fields of a spectrum dialog showing `n` and `w`, with the
+    /// size's hint stated at the session's rate (set [`Form::sample_rate`] first).
+    fn fft_fields(&self, n: u32, w: Window) -> [Field; 2] {
+        let lens = FFT_LENS.map(ac2_scene::format::fft_len);
+        let lens: Vec<&str> = lens.iter().map(String::as_str).collect();
+        let index = FFT_LENS
+            .iter()
+            .position(|l| *l == n)
+            .unwrap_or(FFT_LENS.len() - 1);
+        let mut size = Field::choice(FieldId::FftSize, "FFT size", &lens, index);
+        size.hint = self.fft_hint(FFT_LENS[index]);
+        let names = WINDOWS.map(|w| {
+            let l = ac2_scene::spectrum::window_label(w);
+            l.strip_suffix(" window").unwrap_or(l)
+        });
+        let window = Field::choice(
+            FieldId::Window,
+            "Window",
+            &names,
+            WINDOWS.iter().position(|x| *x == w).unwrap_or(0),
+        );
+        [size, window]
+    }
+
+    /// Bin width and update rate of an `n`-point spectrum at the session's rate.
+    fn fft_hint(&self, n: u32) -> String {
+        self.sample_rate
+            .map(|fs| ac2_scene::format::fft_resolution(n, fs))
+            .unwrap_or_default()
     }
 
     /// The averaging field showing `current` (added to the options when it is none of them,
@@ -477,8 +526,13 @@ impl Form {
 
     /// The dialog editing transfer measurement, spectrum or RTA `m` over the session's
     /// captured `inputs`: a transfer's inputs, name, smoothing, depth and resolution; a
-    /// spectrum's or RTA's input, name, smoothing or bands, and averaging.
-    pub fn edit_spec(m: &Measurement, inputs: &[(u16, String)]) -> Result<Self, String> {
+    /// spectrum's or RTA's input, name, smoothing or bands (a spectrum's FFT size and
+    /// window too, its bin width stated at `sample_rate`), and averaging.
+    pub fn edit_spec(
+        m: &Measurement,
+        inputs: &[(u16, String)],
+        sample_rate: Option<u32>,
+    ) -> Result<Self, String> {
         if let MeasKind::Transfer { config } = &m.config.kind {
             return Ok(Self::edit_transfer(m, config, inputs));
         }
@@ -490,6 +544,7 @@ impl Form {
             _ => return Err(format!("{} is not a spectrum or an RTA", m.config.name)),
         };
         let mut f = Self::new(kind, Vec::new());
+        f.sample_rate = sample_rate;
         // An input the session no longer captures stays listed, so the edit does not move
         // the measurement to another input unasked (Enter then says to reopen the session).
         let mut inputs = inputs.to_vec();
@@ -501,15 +556,18 @@ impl Form {
             Field::text(FieldId::Name, "Name", m.config.name.clone(), ""),
         ];
         match &m.config.kind {
-            MeasKind::Spectrum { config } => fields.push(Field::choice(
-                FieldId::Smoothing,
-                "Smoothing",
-                &SMOOTHING.map(|s| s.0),
-                SMOOTHING
-                    .iter()
-                    .position(|s| s.1 == config.smoothing)
-                    .unwrap_or(0),
-            )),
+            MeasKind::Spectrum { config } => {
+                fields.push(Field::choice(
+                    FieldId::Smoothing,
+                    "Smoothing",
+                    &SMOOTHING.map(|s| s.0),
+                    SMOOTHING
+                        .iter()
+                        .position(|s| s.1 == config.smoothing)
+                        .unwrap_or(0),
+                ));
+                fields.extend(f.fft_fields(config.fft_len, config.window));
+            }
             MeasKind::Rta { config } => fields.push(Field::choice(
                 FieldId::Fraction,
                 "Bands",
@@ -658,6 +716,12 @@ impl Form {
             ],
         };
         let mut f = Self::new(kind, fields);
+        f.sample_rate = open.map(|o| o.sample_rate_hz);
+        if kind == FormKind::Spectrum {
+            let d = SpectrumConfig::on_input(0);
+            let fft = f.fft_fields(d.fft_len, d.window);
+            f.fields.extend(fft);
+        }
         if matches!(kind, FormKind::Spectrum | FormKind::Rta) {
             let a = f.averaging_field(SpecAveraging::Off);
             f.fields.push(a);
@@ -1053,6 +1117,11 @@ impl Form {
         if self.math.is_some() {
             self.math_changed();
         }
+        if let Some(n) = self.choice_index(FieldId::FftSize).map(|i| FFT_LENS[i])
+            && self.fields[self.focus].id == FieldId::FftSize
+        {
+            self.fields[self.focus].hint = self.fft_hint(n);
+        }
     }
 
     /// Typed text into the focused text field; replaces a selected text.
@@ -1158,7 +1227,12 @@ impl Form {
                         input,
                         smoothing,
                         averaging,
-                        ..base
+                        fft_len: self
+                            .choice_index(FieldId::FftSize)
+                            .map_or(base.fft_len, |i| FFT_LENS[i]),
+                        window: self
+                            .choice_index(FieldId::Window)
+                            .map_or(base.window, |i| WINDOWS[i]),
                     },
                 }
             }
@@ -1412,7 +1486,7 @@ mod tests {
             grid_id: None,
             colour: None,
         };
-        let mut f = Form::edit_spec(&m, &names(&o)).expect("edit");
+        let mut f = Form::edit_spec(&m, &names(&o), Some(o.sample_rate_hz)).expect("edit");
         assert_eq!(f.kind.title(), "Edit RTA");
         assert_eq!(f.kind.verb(), "Apply");
         assert_eq!(f.edits(), Some(MeasId(7)));
@@ -1433,13 +1507,70 @@ mod tests {
         if let MeasKind::Rta { config } = &mut gone.config.kind {
             config.input = 5;
         }
-        let f = Form::edit_spec(&gone, &names(&o)).expect("edit");
+        let f = Form::edit_spec(&gone, &names(&o), Some(o.sample_rate_hz)).expect("edit");
         assert_eq!(
             f.fields[at(&f, FieldId::Input)].display(),
             "In 6 (not captured)"
         );
         let e = f.meas_config(Some(&o)).expect_err("refused");
         assert!(e.contains("not captured by the session"), "{e}");
+    }
+
+    #[test]
+    fn a_spectrums_fft_size_and_window_are_editable() {
+        let o = open(vec![0, 1], None);
+        let at = |f: &Form, id| f.fields.iter().position(|x| x.id == id).expect("field");
+        // New: the default length and window, the size's hint at the session's rate.
+        let f = Form::measurement(FormKind::Spectrum, Some(&o), &[], &names(&o), &[]);
+        let size = &f.fields[at(&f, FieldId::FftSize)];
+        assert_eq!(size.display(), "65536 pt");
+        assert_eq!(size.hint, "0.73 Hz bins · 5.9 updates/s");
+        assert_eq!(f.fields[at(&f, FieldId::Window)].display(), "Hann");
+
+        let m = Measurement {
+            id: MeasId(2),
+            config: MeasConfig {
+                name: "Mic".into(),
+                kind: MeasKind::Spectrum {
+                    config: SpectrumConfig {
+                        fft_len: 4096,
+                        window: Window::FlatTop,
+                        averaging: SpecAveraging::Fifo { frames: 8 },
+                        ..SpectrumConfig::on_input(1)
+                    },
+                },
+            },
+            config_rev: ac2_proto::units::Rev(1),
+            running: true,
+            delay: None,
+            grid_id: None,
+            colour: None,
+        };
+        let mut e = Form::edit_spec(&m, &names(&o), Some(48_000)).expect("edit");
+        let i = at(&e, FieldId::FftSize);
+        assert_eq!(e.fields[i].display(), "4096 pt");
+        assert_eq!(e.fields[i].hint, "11.7 Hz bins · 47 updates/s");
+        assert_eq!(e.fields[at(&e, FieldId::Window)].display(), "flat-top");
+        assert_eq!(e.meas_config(Some(&o)).expect("same"), m.config);
+        // A longer window: finer bins, fewer updates, the hint follows the field.
+        e.focus = i;
+        e.cycle(2);
+        assert_eq!(e.fields[i].display(), "16384 pt");
+        assert_eq!(e.fields[i].hint, "2.93 Hz bins · 23 updates/s");
+        let w = at(&e, FieldId::Window);
+        e.focus = w;
+        e.cycle(-2);
+        let MeasKind::Spectrum { config } = e.meas_config(Some(&o)).expect("spectrum").kind else {
+            panic!("kind");
+        };
+        assert_eq!((config.fft_len, config.window), (16_384, Window::Hann));
+        assert_eq!(config.averaging, SpecAveraging::Fifo { frames: 8 });
+        // The full range, and no hint without a session rate.
+        e.focus = i;
+        e.cycle(-20);
+        assert_eq!(e.fields[i].display(), "64 pt");
+        let e = Form::edit_spec(&m, &names(&o), None).expect("edit");
+        assert_eq!(e.fields[at(&e, FieldId::FftSize)].hint, "");
     }
 
     #[test]
@@ -1595,7 +1726,7 @@ mod tests {
             grid_id: None,
             colour: None,
         };
-        let mut e = Form::edit_spec(&m, &names(&o)).expect("edit");
+        let mut e = Form::edit_spec(&m, &names(&o), Some(o.sample_rate_hz)).expect("edit");
         assert_eq!(e.kind, FormKind::TransferEdit);
         assert_eq!(e.kind.verb(), "Apply");
         assert_eq!(e.edits(), Some(MeasId(3)));

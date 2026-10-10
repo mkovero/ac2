@@ -79,25 +79,6 @@ pub(crate) fn capture_grid(cfg: &WireConfig, fs: u32) -> GridDef {
     }
 }
 
-/// Updates per second the spectrum aims for when the window is short enough to allow it.
-const SPECTRUM_UPDATES_PER_S: u32 = 30;
-
-/// Hop for an `n`-point spectrum at `fs`: the largest power of two at or below
-/// `fs / SPECTRUM_UPDATES_PER_S`, kept between `n / 8` and `n / 2` (overlap 50 – 87.5 %).
-///
-/// Frames closer than `n / 8` cost FFTs without adding information: the power estimates of
-/// windows overlapping by more than ~75 % (Hann; the narrower flat-top and Blackman-Harris
-/// windows by a little more) are almost fully correlated, so an average over a given time
-/// is no steadier for having more of them. The exponential averaging's time constant is in
-/// seconds and stays what it is. A 65 536-point window spans 1.37 s at 48 kHz; a new
-/// spectrum every eighth of it (0.17 s) follows it closely, at an eighth of the FFT work a
-/// 1024-sample hop costs. Short windows keep updating about 30 times a second.
-fn display_hop(n: usize, fs: u32) -> usize {
-    let target = (fs / SPECTRUM_UPDATES_PER_S).max(64) as usize;
-    let pow2 = 1usize << (usize::BITS - 1 - target.leading_zeros());
-    pow2.clamp((n / 8).max(1), (n / 2).max(1))
-}
-
 impl Spectrum {
     pub(crate) fn new(
         meas: MeasId,
@@ -111,7 +92,7 @@ impl Spectrum {
         let analyzer = SpectrumAnalyzer::new(SpectrumConfig {
             fs: f64::from(sample_rate),
             n,
-            hop: display_hop(n, sample_rate),
+            hop: WireConfig::display_hop(cfg.fft_len, sample_rate) as usize,
             window: conv::window(cfg.window),
             averaging: conv::spec_averaging(cfg.averaging).ok_or("invalid averaging")?,
             peak_hold: None,
@@ -320,24 +301,5 @@ impl Analysis for Spectrum {
             ..self.stamp(end)
         };
         Some((stamp, FrameData::Spec(capture)))
-    }
-}
-
-#[cfg(test)]
-mod hop_tests {
-    use super::display_hop;
-
-    #[test]
-    fn hop_overlaps_between_half_and_seven_eighths() {
-        // 48 kHz: long windows step by n/8 (87.5 % overlap) …
-        assert_eq!(display_hop(65_536, 48_000), 8192);
-        assert_eq!(display_hop(16_384, 48_000), 2048);
-        // … short ones by a 1024-sample hop (~47 updates/s) while that is at most n/2.
-        assert_eq!(display_hop(4096, 48_000), 1024);
-        assert_eq!(display_hop(1024, 48_000), 512);
-        assert_eq!(display_hop(256, 48_000), 128);
-        // Other rates scale.
-        assert_eq!(display_hop(4096, 96_000), 2048);
-        assert_eq!(display_hop(65_536, 44_100), 8192);
     }
 }

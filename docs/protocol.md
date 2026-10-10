@@ -201,8 +201,10 @@ autosave; the job, its averages and `config_rev` are untouched. Families are the
 clients take chosen families first and give the others the rest by id. `invalid` for a
 math channel (drawn in its owner's colours) and for an index past 7.
 
-`meas.update` replaces the configuration and restarts a running job (averages start over),
-except when a transfer or spectrum measurement's configuration differs only in `smoothing`
+`meas.update` replaces the configuration and restarts a running job (averages start over;
+a spectrum's new `fft_len`, a power of two in 64 … 65 536, or `window` included: frames of
+the new `config_rev` carry the new bin grid's `grid_id`; a spectrum named by a math channel
+keeps its `fft_len`, `refused` otherwise), except when a transfer or spectrum measurement's configuration differs only in `smoothing`
 (and the name): display smoothing then changes in place, averaging goes on, and the first
 `tf` / `spec` frame with the new `config_rev` carries it (`TfMeta.smoothing`,
 `SpecMeta.smoothing`). Smoothing is fractional-octave (`SmoothingFraction`: `third` \|

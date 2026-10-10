@@ -676,6 +676,74 @@ fn live_smoothing_and_resmoothed_captures() {
     r.h.shutdown();
 }
 
+/// A running spectrum's FFT length and window change by `meas.update`: the job restarts
+/// on the new bin grid and its average starts afresh from the update.
+#[test]
+fn spectrum_fft_length_and_window_change_restart_it() {
+    let mut r = rig("spec-fft");
+    let (mut c2, sub) = connect(&r.h, &[b"d/2/spec"]);
+    let spec = |fft_len, window| MeasConfig {
+        name: "fft".into(),
+        kind: MeasKind::Spectrum {
+            config: SpectrumConfig {
+                fft_len,
+                window,
+                averaging: SpecAveraging::Exponential {
+                    time_constant: Seconds(2.0),
+                },
+                ..SpectrumConfig::on_input(1)
+            },
+        },
+    };
+    c2.ok(Command::MeasCreate {
+        config: spec(4096, Window::Hann),
+    });
+    c2.ok(Command::MeasStart { meas: MeasId(2) });
+    run(&mut r.d, 0.5);
+    let old = sub
+        .frame(T, |f| matches!(f.data, FrameData::Spec(_)))
+        .expect("spec frame");
+    let at_update = end_sample(&r.d);
+    let m = match c2.ok(Command::MeasUpdate {
+        meas: MeasId(2),
+        config: spec(1024, Window::FlatTop),
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    assert!(m.running);
+    for _ in 0..3 {
+        run(&mut r.d, 0.3);
+        r.c.ok(Command::GenRefresh { lease_token: r.tok });
+    }
+    let f = sub
+        .frame(T, |f| {
+            matches!(f.data, FrameData::Spec(_)) && f.stamp.config_rev.0 >= m.config_rev.0
+        })
+        .expect("spec frame of the new length");
+    assert_ne!(f.stamp.grid_id, old.stamp.grid_id, "a new bin grid");
+    assert!(
+        f.stamp.config_applied_at.0 >= at_update,
+        "the average starts at the update: {} < {at_update}",
+        f.stamp.config_applied_at.0
+    );
+    let FrameData::Spec(live) = f.data else {
+        unreachable!()
+    };
+    assert_eq!(live.meta.window, Window::FlatTop);
+    // An out-of-range length is refused and the spectrum stays as it is.
+    let e = c2
+        .call(Command::MeasUpdate {
+            meas: MeasId(2),
+            config: spec(131_072, Window::Hann),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid);
+    assert!(e.msg.contains("power of two in 64..=65536"), "{e:?}");
+    drop(r.backend);
+    r.h.shutdown();
+}
+
 /// A narrowband spectrum's smoothing changes live; frames say it is applied; a capture
 /// holds the unsmoothed bins, starts with the measurement's smoothing and is served as the
 /// live frame showed it; the live frame is the ac2-core linear-bin smoother of the raw bins.

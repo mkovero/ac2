@@ -1063,7 +1063,8 @@ impl AppState {
                     })
                     .cloned();
                 if let Some(m) = spec {
-                    match Form::edit_spec(&m, &self.session_input_names()) {
+                    let rate = self.open_session().map(|o| o.sample_rate_hz);
+                    match Form::edit_spec(&m, &self.session_input_names(), rate) {
                         Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
                         Err(e) => self.warn(e),
                     }
