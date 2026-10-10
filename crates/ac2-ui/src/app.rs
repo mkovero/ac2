@@ -369,6 +369,7 @@ impl App {
         let what = Touches::of(&msg);
         let animating = self.state.animating();
         let easing = self.state.bars_easing(Instant::now());
+        let gliding = self.state.spectrum_gliding(Instant::now());
         let data = self.state.data.clone();
         let mirror = self.state.mirror.clone();
         let mut reqs = self.state.update(msg, &self.keymap);
@@ -381,6 +382,10 @@ impl App {
             // The Leq bars glide to their newest frame; the last step lands them on it.
             Touches::Tick if easing || self.state.bars_easing(Instant::now()) => {
                 vec![PaneKind::Spl]
+            }
+            // The live spectrum curves glide to their newest frame.
+            Touches::Tick if gliding || self.state.spectrum_gliding(Instant::now()) => {
+                vec![PaneKind::Spectrum]
             }
             Touches::Tick | Touches::Toasts => Vec::new(),
             Touches::Data => data_touches(data.as_deref(), self.state.data.as_deref()),
@@ -802,6 +807,7 @@ impl eframe::App for App {
         }
         if self.state.animating()
             || self.state.bars_easing(Instant::now())
+            || self.state.spectrum_gliding(Instant::now())
             || self.startup.first_frame.is_none()
         {
             ctx.request_repaint();

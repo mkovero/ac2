@@ -500,8 +500,21 @@ pub(crate) fn with_spectrum<R>(
             crate::state::meas_input(&c.meas.config.kind).and_then(|i| st.curve_note(i, applied))
         })
         .collect();
+    // Where each live curve's glide to its newest frame has got to: fresh values only, so
+    // nothing moves on screen that is not being measured.
+    let drawn: Vec<Option<Vec<f32>>> = cols
+        .iter()
+        .map(|c| {
+            if !st.prefs.spec_ease || !matches!(freshness(st, c.tf), Freshness::Fresh { .. }) {
+                return None;
+            }
+            st.spec_glide
+                .get(&c.tf.topic)?
+                .drawn(&c.tf.frame, now.instant)
+        })
+        .collect();
     let mut traces = Vec::new();
-    for (c, note) in cols.iter().zip(&notes) {
+    for ((c, note), drawn) in cols.iter().zip(&notes).zip(&drawn) {
         let name = c.meas.config.name.clone();
         let color = colours.meas(c.meas.id);
         let mut t = match &c.tf.frame.data {
@@ -527,6 +540,7 @@ pub(crate) fn with_spectrum<R>(
             ),
             _ => continue,
         };
+        t.drawn = drawn.as_deref();
         if st.view.spectrum.peak_hold {
             t.peak = st.peaks.get(&c.meas.id).map(|p| p.2.values());
         }
@@ -583,6 +597,7 @@ pub(crate) fn with_spectrum<R>(
             freqs: &cols.freqs,
             edges: &cols.edges,
             level: &data.mag_db,
+            drawn: None,
             validity: None,
             peak: None,
             scale: *scale,

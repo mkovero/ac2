@@ -203,6 +203,11 @@ fn the_selected_trace_is_marked_in_its_legend() {
 }
 
 fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {
+    spec_frame_at(t, meas, level, 1234, Instant::now());
+}
+
+/// [`spec_frame`] with its `seq`, received and drained at `at`.
+fn spec_frame_at(t: &mut T, meas: u32, level: Vec<f32>, seq: u64, at: Instant) {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::Frame;
     use ac2_proto::FrameData;
@@ -223,11 +228,14 @@ fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {
         },
         level,
     });
-    let stamp = ac2_proto::samples::stamp(Some(grid.clone()));
+    let stamp = ac2_proto::frame::FrameStamp {
+        seq,
+        ..ac2_proto::samples::stamp(Some(grid.clone()))
+    };
     let f = TopicFrame {
         topic: data.topic(),
         frame: Arc::new(Frame { stamp, data }),
-        received: Instant::now(),
+        received: at,
         since_new: std::time::Duration::ZERO,
         age: Some(0.0),
         stale: false,
@@ -239,8 +247,60 @@ fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {
     t.conn(ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {
         latest,
         grids,
-        drained: Instant::now(),
+        drained: at,
     })));
+}
+
+/// A live curve glides from the drawn levels to each new frame over about the time since
+/// the frame before, picks up mid-glide from where it is drawn, and jumps when the operator
+/// turns the glide off.
+#[test]
+fn a_live_curve_glides_to_each_new_frame() {
+    let mut t = T::new();
+    let ms = |v: u64| std::time::Duration::from_millis(v);
+    let t0 = Instant::now();
+    spec_frame_at(&mut t, 3, vec![-60.0; 5], 1, t0);
+    assert!(
+        t.st.spec_glide.is_empty(),
+        "a first frame is drawn as received"
+    );
+    let t1 = t0 + ms(100);
+    spec_frame_at(&mut t, 3, vec![-40.0; 5], 2, t1);
+    let to =
+        t.st.data
+            .as_ref()
+            .expect("data")
+            .latest
+            .frames
+            .values()
+            .next()
+            .expect("frame")
+            .clone();
+    let g = t.st.spec_glide[&to.topic].clone();
+    assert_eq!(g.to_seq, 2);
+    assert!((g.duration_s - 0.1).abs() < 1e-9);
+    assert!(t.st.spectrum_gliding(t1 + ms(50)));
+    assert!(!t.st.spectrum_gliding(t1 + ms(100)));
+    assert_eq!(g.drawn(&to.frame, t1 + ms(50)), Some(vec![-50.0; 5]));
+    assert_eq!(
+        g.drawn(&to.frame, t1 + ms(100)),
+        None,
+        "arrived: the frame itself"
+    );
+    // A frame half way through the glide starts from the half-way curve.
+    let t2 = t1 + ms(50);
+    spec_frame_at(&mut t, 3, vec![-60.0; 5], 3, t2);
+    let g = t.st.spec_glide[&to.topic].clone();
+    assert_eq!(&*g.from, &[-50.0; 5]);
+    assert!((g.duration_s - 0.05).abs() < 1e-9);
+    // The same levels again (a refresh) move nothing.
+    spec_frame_at(&mut t, 3, vec![-60.0; 5], 4, t2 + ms(300));
+    assert!(t.st.spec_glide.is_empty());
+    // Off: every frame is drawn as received.
+    t.st.prefs.spec_ease = false;
+    spec_frame_at(&mut t, 3, vec![-30.0; 5], 5, t2 + ms(400));
+    assert!(t.st.spec_glide.is_empty());
+    assert!(!t.st.spectrum_gliding(t2 + ms(401)));
 }
 
 #[test]

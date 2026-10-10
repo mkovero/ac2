@@ -248,6 +248,7 @@ pub enum DisplayRow {
     LeqHistory,
     LeqBars,
     SpectrumView,
+    SpectrumGlide,
     Spectrograph,
     SweepView,
     DistortionUnit,
@@ -257,7 +258,7 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 14] = [
+    pub const ALL: [DisplayRow; 15] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -266,6 +267,7 @@ impl DisplayRow {
         DisplayRow::LeqHistory,
         DisplayRow::LeqBars,
         DisplayRow::SpectrumView,
+        DisplayRow::SpectrumGlide,
         DisplayRow::Spectrograph,
         DisplayRow::SweepView,
         DisplayRow::DistortionUnit,
@@ -284,6 +286,7 @@ impl DisplayRow {
             DisplayRow::LeqHistory => "Leq history strip",
             DisplayRow::LeqBars => "Leq bars",
             DisplayRow::SpectrumView => "Spectrum pane shows",
+            DisplayRow::SpectrumGlide => "Spectrum",
             DisplayRow::SweepView => "Sweep pane shows",
             DisplayRow::Spectrograph => "Spectrograph history",
             DisplayRow::DistortionUnit => "Distortion in",
@@ -382,6 +385,15 @@ pub fn bar_ease_text(on: bool) -> &'static str {
     }
 }
 
+/// What the spectrum glide setting says, on the Display page and in its toast.
+pub fn spec_ease_text(on: bool) -> &'static str {
+    if on {
+        "glides to each new frame"
+    } else {
+        "jumps to each new frame"
+    }
+}
+
 /// The Display page's on / off lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DisplaySwitches {
@@ -389,6 +401,7 @@ pub struct DisplaySwitches {
     pub warning_toasts: bool,
     pub resolution_marker: bool,
     pub bar_ease: bool,
+    pub spec_ease: bool,
 }
 
 /// What the Display page shows for each line: title, value, whose.
@@ -430,6 +443,7 @@ pub fn display_rows(
                     }
                 }
                 DisplayRow::LeqBars => bar_ease_text(switches.bar_ease).into(),
+                DisplayRow::SpectrumGlide => spec_ease_text(switches.spec_ease).into(),
                 DisplayRow::Spectrograph => format!("last {span_s} s"),
                 DisplayRow::DistortionUnit => match views.distortion_unit {
                     DistortionUnit::Db => "dB re fundamental".into(),
@@ -1079,6 +1093,7 @@ mod tests {
             warning_toasts: false,
             resolution_marker: false,
             bar_ease: false,
+            spec_ease: false,
         };
         let rows = display_rows(ThemeName::Light, switches, Some(500), 30, views);
         let texts: Vec<&str> = rows.iter().map(|(_, v)| v.as_str()).collect();
@@ -1093,6 +1108,7 @@ mod tests {
                 "hidden",
                 "jump to each new reading",
                 "the spectrum over its spectrograph",
+                "jumps to each new frame",
                 "last 30 s",
                 "the room parameters",
                 "% of fundamental",

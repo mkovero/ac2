@@ -245,6 +245,9 @@ pub struct UiPrefs {
     /// The Leq and band Leq bars glide to each new reading (on until the operator turns it
     /// off); off, they jump to it as received.
     pub bar_ease: bool,
+    /// The live spectrum and RTA curves glide to each new frame (on until the operator
+    /// turns it off); off, they jump to it as received.
+    pub spec_ease: bool,
     /// How long the SPL meter's number holds a reading; `None`: by its time weighting
     /// (`ac2_scene::spl::display_period_s`).
     pub spl_hold_ms: Option<u32>,
@@ -280,6 +283,7 @@ impl Default for UiPrefs {
             warning_toasts: true,
             resolution_marker: true,
             bar_ease: true,
+            spec_ease: true,
             spl_hold_ms: None,
             layout: LayoutPrefs::default(),
             levels: LevelPrefs::default(),
@@ -342,6 +346,9 @@ struct File {
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bar_ease: Option<bool>,
+    /// Written only when off (the default is on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spec_ease: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spl_hold_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1101,6 +1108,7 @@ impl UiPrefs {
             warning_toasts: f.warning_toasts.unwrap_or(true),
             resolution_marker: f.resolution_marker.unwrap_or(true),
             bar_ease: f.bar_ease.unwrap_or(true),
+            spec_ease: f.spec_ease.unwrap_or(true),
             spl_hold_ms: f.spl_hold_ms,
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
             levels: f
@@ -1131,6 +1139,7 @@ impl UiPrefs {
             warning_toasts: (!self.warning_toasts).then_some(false),
             resolution_marker: (!self.resolution_marker).then_some(false),
             bar_ease: (!self.bar_ease).then_some(false),
+            spec_ease: (!self.spec_ease).then_some(false),
             spl_hold_ms: self.spl_hold_ms,
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,
@@ -1280,6 +1289,17 @@ mod tests {
         p.resolution_marker = false;
         let text = p.to_toml();
         assert!(text.contains("resolution_marker = false"), "{text}");
+        assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+    }
+
+    #[test]
+    fn spec_ease_round_trip() {
+        let mut p = UiPrefs::default();
+        assert!(p.spec_ease);
+        assert!(!p.to_toml().contains("spec_ease"));
+        p.spec_ease = false;
+        let text = p.to_toml();
+        assert!(text.contains("spec_ease = false"), "{text}");
         assert_eq!(UiPrefs::from_toml(&text), Ok(p));
     }
 

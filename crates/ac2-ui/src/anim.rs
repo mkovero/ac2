@@ -1,6 +1,7 @@
 //! Spring animation for navigation (zoom, pan). Measurement values, traces and faults are
-//! drawn as received (PLAN §4.4); the one exception, the Leq bars' length easing between
-//! fresh frames, is [`ac2_scene::bar_ease`].
+//! drawn as received (PLAN §4.4); the exceptions, the Leq bars' length easing and the live
+//! spectrum curves gliding between fresh frames, are [`ac2_scene::bar_ease`] and
+//! [`ac2_scene::curve_ease`].
 
 use ac2_scene::view::FreqRange;
 

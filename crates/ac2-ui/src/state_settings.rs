@@ -291,6 +291,7 @@ impl AppState {
             DisplayRow::LeqStyle if d != 0 => self.toggle_leq_layout(false),
             DisplayRow::LeqHistory if d != 0 => self.toggle_leq_layout(true),
             DisplayRow::LeqBars if d != 0 => self.toggle_bar_ease(),
+            DisplayRow::SpectrumGlide if d != 0 => self.toggle_spec_ease(),
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
@@ -640,6 +641,16 @@ impl AppState {
         self.toast(format!(
             "warning toasts {}",
             crate::settings::warning_toasts_text(self.prefs.warning_toasts)
+        ));
+    }
+
+    /// The Display page's spectrum glide line; remembered in the prefs.
+    pub(super) fn toggle_spec_ease(&mut self) {
+        self.prefs.spec_ease = !self.prefs.spec_ease;
+        self.prefs_dirty = true;
+        self.toast(format!(
+            "Spectrum {}",
+            crate::settings::spec_ease_text(self.prefs.spec_ease)
         ));
     }
 

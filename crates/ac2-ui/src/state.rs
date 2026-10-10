@@ -62,8 +62,11 @@ mod band_transfer;
 mod commands;
 #[path = "state_dialogs.rs"]
 mod dialogs;
+#[path = "state_glide.rs"]
+mod glide;
 #[path = "state_keys.rs"]
 mod keys;
+pub use glide::SpecGlide;
 #[path = "state_leq.rs"]
 mod leq;
 #[path = "state_link.rs"]
@@ -1025,6 +1028,9 @@ pub struct AppState {
     /// Per Leq and band Leq topic, the frame the newest one replaced: the bars ease from it
     /// ([`ac2_scene::bar_ease`]).
     pub bar_from: HashMap<Topic, Arc<ac2_proto::Frame>>,
+    /// Per live spectrum or RTA topic, the glide of its curve to the newest frame
+    /// ([`ac2_scene::curve_ease`]).
+    pub spec_glide: HashMap<Topic, SpecGlide>,
     /// Stored traces' data, as fetched.
     pub traces: BTreeMap<TraceId, (Arc<TraceData>, Arc<GridDef>)>,
     /// The transfer view's stored-trace display math, kept between frames.
@@ -1172,6 +1178,7 @@ impl AppState {
             mirror: None,
             data: None,
             bar_from: HashMap::new(),
+            spec_glide: HashMap::new(),
             traces: BTreeMap::new(),
             theme,
             view: ViewState::default(),

@@ -189,6 +189,9 @@ pub struct SpectrumTrace<'a> {
     /// Band edges per column ([`crate::grid::column_edges`]), for bars.
     pub edges: &'a [(f64, f64)],
     pub level: &'a [f32],
+    /// The levels the curve is drawn at while it glides to `level` ([`crate::curve_ease`]);
+    /// `None`: drawn at `level`. Cursor readouts and peak hold read `level`, the frame itself.
+    pub drawn: Option<&'a [f32]>,
     pub validity: Option<&'a [ValidityMask]>,
     /// Peak-hold values, column-aligned ([`PeakHold`]).
     pub peak: Option<&'a [f32]>,
@@ -240,6 +243,7 @@ impl<'a> SpectrumTrace<'a> {
             freqs,
             edges,
             level: &frame.level,
+            drawn: None,
             validity: Some(&frame.validity),
             peak: None,
             scale: frame.meta.scale,
@@ -279,6 +283,7 @@ impl<'a> SpectrumTrace<'a> {
             freqs,
             edges,
             level: &frame.level,
+            drawn: None,
             validity: None,
             peak: None,
             scale: frame.meta.scale,
@@ -302,6 +307,21 @@ impl<'a> SpectrumTrace<'a> {
             .validity
             .is_none_or(|v| v.get(i).is_some_and(|m| *m == ValidityMask::NONE));
         match self.level.get(i) {
+            Some(l) if ok && l.is_finite() => f64::from(*l) + self.offset_db,
+            _ => f64::NAN,
+        }
+    }
+
+    /// The level the curve is drawn at in column `i`: [`Self::value`], or where its glide
+    /// to it has got to.
+    fn drawn_value(&self, i: usize) -> f64 {
+        let Some(drawn) = self.drawn else {
+            return self.value(i);
+        };
+        let ok = self
+            .validity
+            .is_none_or(|v| v.get(i).is_some_and(|m| *m == ValidityMask::NONE));
+        match drawn.get(i) {
             Some(l) if ok && l.is_finite() => f64::from(*l) + self.offset_db,
             _ => f64::NAN,
         }
@@ -750,7 +770,7 @@ pub(crate) fn spectrum_scene_in(
         match style {
             SpectrumStyle::Bars => {
                 for i in cols.clone() {
-                    let v = t.value(i);
+                    let v = t.drawn_value(i);
                     let Some(&(e0, e1)) = t.edges.get(i) else {
                         continue;
                     };
@@ -775,7 +795,7 @@ pub(crate) fn spectrum_scene_in(
             }
             SpectrumStyle::Line => {
                 let xs: Vec<f32> = t.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
-                let ys: Vec<f32> = cols.clone().map(|i| ym.to_px(t.value(i))).collect();
+                let ys: Vec<f32> = cols.clone().map(|i| ym.to_px(t.drawn_value(i))).collect();
                 let (xs, ys) = max_per_pixel(&xs, &ys);
                 let (points, _) = gapped(&xs, &ys, None, |_, _| false);
                 if !points.is_empty() {
@@ -951,6 +971,7 @@ mod tests {
             freqs: f,
             edges: e,
             level,
+            drawn: None,
             validity: None,
             peak: None,
             scale,
@@ -1245,6 +1266,38 @@ mod tests {
         );
     }
 
+    /// A gliding curve is drawn where its glide has got to, while the cursor reads the
+    /// newest frame itself.
+    #[test]
+    fn a_gliding_curve_is_drawn_between_frames_and_read_at_the_newest() {
+        let g = third_octaves();
+        let (f, e) = (column_frequencies(&g), column_edges(&g));
+        let level = vec![-40.0f32; f.len()];
+        let drawn = vec![-50.0f32; f.len()];
+        let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+        t.drawn = Some(&drawn);
+        let view = ViewState {
+            spectrum: SpectrumView {
+                style: SpectrumStyle::Line,
+                level: Range::new(-60.0, 0.0),
+                peak_hold: false,
+                ..SpectrumView::default()
+            },
+            cursor_hz: Some(1000.0),
+            ..ViewState::default()
+        };
+        let s = spectrum_scene(&[t], &Status::default(), &view, &Theme::dark(), SIZE);
+        let ym = s.y_axis.mapping;
+        let line = &s.scene.layers[1].polylines[0];
+        let y = line.points.iter().find(|p| p[1].is_finite()).map(|p| p[1]);
+        assert_eq!(y, Some(ym.to_px(-50.0)));
+        let cur = s.cursor.expect("cursor");
+        assert_eq!(
+            cur.rows,
+            vec![("RTA".to_string(), "−40.0 dBFS".to_string())]
+        );
+    }
+
     /// A trace spread by a display offset is drawn that much higher, its peak hold too, and
     /// the plot and the cursor name the offset; an unshifted trace adds no note.
     #[test]
@@ -1336,6 +1389,7 @@ mod tests {
             freqs: &cols.freqs,
             edges: &cols.edges,
             level: &level,
+            drawn: None,
             validity: None,
             peak: None,
             scale: LevelScale::DbSpl,
@@ -1448,6 +1502,7 @@ mod tests {
             freqs: &cols.freqs,
             edges: &cols.edges,
             level: &level,
+            drawn: None,
             validity: None,
             peak: None,
             scale: LevelScale::DbSpl,

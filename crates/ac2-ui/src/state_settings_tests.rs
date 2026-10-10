@@ -258,6 +258,15 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
         ac2_scene::view::SpectrumMode::Spectrum
     );
     t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::SpectrumGlide);
+    assert!(t.st.prefs.spec_ease);
+    t.st.prefs_dirty = false;
+    t.key("Right");
+    assert!(!t.st.prefs.spec_ease);
+    assert!(t.st.prefs_dirty);
+    t.key("Left");
+    assert!(t.st.prefs.spec_ease);
+    t.key("Down");
     t.key("Right");
     assert_eq!(t.st.view.spectrum.spectrograph.span_s, 60);
     assert_eq!(t.st.prefs.spectrograph_span_s, Some(60));

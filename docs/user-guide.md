@@ -710,6 +710,13 @@ A long FFT updates every eighth of its window (about 6 times a second at 65 536 
 since windows overlapping more than that add work but no new information; short FFTs update
 about 30 times a second.
 
+Each new spectrum is sent as soon as it is formed, and by default the curve **glides** to it
+from the one before over about the time between them (30–200 ms), so it moves steadily
+instead of jumping a few times a second. Only the line moves: the cursor readout, peak hold
+and a capture (**Ctrl+1**) are the newest spectrum itself, and a stale, stopped or
+reconfigured measurement is drawn as it is. **Settings › Display › Spectrum** "jumps to each
+new frame" turns it off (remembered); RTA curves follow the same setting.
+
 #### Averaging (spectrum and RTA)
 
 Spectra and RTAs start **unaveraged**: each result is one frame, so a fluctuating sound

@@ -26,6 +26,7 @@ pub mod banner;
 pub mod bar_ease;
 pub mod cal;
 mod canvas;
+pub mod curve_ease;
 pub mod distortion;
 pub mod families;
 pub mod finding;

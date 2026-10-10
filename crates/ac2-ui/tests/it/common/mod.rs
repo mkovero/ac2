@@ -666,9 +666,11 @@ fn grid_of(row: &[ac2_ui::state::View]) -> ac2_ui::prefs::PanesPrefs {
 pub fn grid_ui_prefs() -> ac2_ui::prefs::UiPrefs {
     let mut p = ac2_ui::prefs::UiPrefs::default();
     p.layout.panes = Some(grid_prefs());
-    // The test publishers send a frame every 200 ms: gliding bars would never rest for a
-    // snapshot. The glide itself is tested headless (`ac2_scene::bar_ease`).
+    // The test publishers send a frame every 200 ms: gliding bars and curves would never
+    // rest for a snapshot. The glides are tested headless (`ac2_scene::bar_ease`,
+    // `ac2_scene::curve_ease`).
     p.bar_ease = false;
+    p.spec_ease = false;
     p
 }
 
