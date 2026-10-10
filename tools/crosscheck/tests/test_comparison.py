@@ -35,16 +35,35 @@ def test_cell_worst_judged_value_with_location_and_counts():
     assert C.fmt_value(-1e-9, "dB") == "0.000 dB" and C.fmt_value(0.023, "rel") == "+2.3 %"
 
 
+def test_statistic_sets_the_sign():
+    """A magnitude without a direction (max |Δ|, a band's max(|mean|, spread)) is shown unsigned so
+    it cannot read as a bias; a signed residual keeps its sign; a share reads as a percentage."""
+    assert C.fmt_value(0.031, "dB", C.ABS) == "0.031 dB" and C.fmt_value(-2.1, "°", C.ABS) == "2.100°"
+    assert C.fmt_value(-0.306, "dB") == "−0.306 dB" and C.fmt_value(0.355, "", C.SHARE) == "35.5 %"
+    m = [("100-1000", None, e(0.133, "WARN")), ("20-100", None, e(None, "INCONCLUSIVE"))]
+    assert C.cell(m, C.ABS) == "0.133 dB @ 100–1000 Hz (WARN 1, INCONCLUSIVE 1)"
+    # every row and OSM column names its statistic: unsigned rows carry |…| or "spread" in the label
+    for label, _, *stat in C.RIG_ROWS + C.AMBIENT_ROWS:
+        if stat == [C.ABS]:
+            assert "|" in label or "spread" in label, label
+    for head, _, *stat in C.OSM_TF_COLS:
+        assert (stat == [C.ABS]) == head.startswith("\\|"), head
+
+
 def test_render_from_a_baseline_directory(tmp_path):
     rig = {"schema": 1, "rig": "r", "stage": "xone", "level_dbfs": -30.0,
            "provenance": {"run": "20261007T114727Z", "ac2_build": "0.0.0+26388938b456", "rew_version": "5.40"},
-           "summary": {"PASS": 1}, "checks": {"xone.level.ac2_vs_rew_meas_minus_ref": e(-0.0004, tol=(0.1, 0.3))}}
+           "summary": {"PASS": 1}, "checks": {"xone.level.ac2_vs_rew_meas_minus_ref": e(-0.0004, tol=(0.1, 0.3)),
+                      "xone.h2.ac2 sweep 10Hz-5.5s@1000Hz": e(-1.0, tol=(3, 6)),
+                      "xone.h4.ac2 sweep 10Hz-5.5s@1000Hz": e(None, "INCONCLUSIVE", tol=(3, 6))}}
     osm = {"schema": 1, "rig": "none (offline)", "stage": "osm", "level_dbfs": None,
            "provenance": {"run": "osm-x", "ac2_build": "ac2d (build 0.0.0+befb61dc0bb2)", "osm_version": "v1.5.2",
                           "flags": {"cases": ["identity", "delay10_5"]}},
            "summary": {"PASS": 2, "INFO": 1},
            "checks": {"osm.delay10_5.osm_delay_finder_vs_analytic": e(-0.5, unit="samples", tol=(0.5, 1)),
                       "osm.identity.ac2_tf_h_vs_analytic": e(0.0),
+                      "osm.xone-rig.ac2_vs_osm_h": e(0.2),
+                      "osm.xone-rig.ac2_delay_finder_vs_osm_s": e(0.5, unit="samples", tol=(0.6, 1)),
                       "osm.delay48.uncompensated_ac2_h_vs_analytic": e(0.417, "INFO", tol=None)}}
     older = {**rig, "level_dbfs": -50.0, "provenance": {**rig["provenance"], "run": "20261006T000000Z"},
              "checks": {"xone.level.ac2_vs_rew_meas_minus_ref": e(0.5, "WARN", tol=(0.1, 0.3))}}
@@ -60,6 +79,10 @@ def test_render_from_a_baseline_directory(tmp_path):
     assert out.index("| identity |") < out.index("| delay10_5 |")
     assert "| delay10_5 |  | −0.500 |" in out
     assert "+0.417" not in out
+    # a rig take (not a planned case) is a median in the transfer table only
+    assert "| xone-rig (median) |  |  |  |  | 0.200 |" in out and "| xone-rig |  |  |  |  | +0.500 |" in out
+    # distortion coverage per order, counts even where nothing was judged
+    assert "| H2 ac2 sweep | −1.000 dB (PASS 1) |" in out and "| H4 ac2 sweep | INCONCLUSIVE 1 |" in out
     doc = tmp_path / "doc.md"
     doc.write_text(f"intro\n{C.BEGIN}\nold\n{C.END}\noutro\n")
     current, _ = C.update(doc, tmp_path, check=True)

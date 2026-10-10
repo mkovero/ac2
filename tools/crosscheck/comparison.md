@@ -1,19 +1,32 @@
 # ac2 against REW and Open Sound Meter
 
-Current accuracy of ac2 next to REW 5.40 and Open Sound Meter (OSM) v1.5.2. Every analyser is
-judged against a truth first (numpy steady sines, direct cross-spectra of the same recording,
-closed forms for synthetic WAV pairs), then against the other tool. Limits are in
-`tolerances.toml`; the README explains each stage.
+The accuracy of ac2, next to REW 5.40 and Open Sound Meter (OSM) v1.5.2, that the committed
+baselines demonstrate: the newest baseline per rig and stage, each under its own heading's run,
+ac2 build and level. The stages were not all run on one build, so this is not a claim about the
+current build as a whole. Every analyser is judged against a truth first (numpy steady sines,
+direct cross-spectra of the same recording, closed forms for synthetic WAV pairs), then against
+the other tool. A direct estimate from the same recording isolates the processing; it does not
+by itself validate the physical measurement chain. Limits are in `tolerances.toml`; the README
+explains each stage.
 
 - **REW**: the suite plays REW's sweep file itself and imports the recording (REW deconvolves
   it offline); live REW needs a Pro licence. No live TF, coherence or arrival time from REW.
+  REW's SPL calibration is taken from ac2, so the REW absolute-SPL row checks consistency with a
+  shared calibration, not the physical calibration itself.
 - **OSM**: OSM's own `Measurement` class run offline on 96 kHz WAV pairs through
   [osm-harness](https://github.com/mkovero/osm-harness) (GPL, outside this repo). OSM has no
   sweeps, distortion or IEC level meters, so those are not compared.
 
-A cell is the worst judged value of its checks (signed, with the band, tone or sweep), then the
-verdict counts. INCONCLUSIVE: the data cannot tell pass from fail (near the floor, or noise
-wider than the limit). INFO: context, not judged.
+A cell is the worst judged value of its checks, with the band, tone or sweep, then the verdict
+counts. A signed value is a − b: its sign is the direction. An unsigned value has no direction:
+the per-band rows show the larger of |mean difference| and the spread about that mean (the
+sweep-vs-REW magnitude row the spread alone: its level offset is the absolute-level row), and
+the OSM transfer columns the maximum |difference| (a rig take: the median). INCONCLUSIVE: the
+data cannot tell pass from fail (near the floor, or noise wider than the limit). INFO: context,
+not judged. Verdict counts are counts of checks over overlapping bands, tones and sweeps, not
+independent trials or a confidence level; a PASS covers its own band or tone only. The coverage
+of the transfer rows is the γ² ≥ 0.99 share row (live TF) and the INCONCLUSIVE counts; the
+distortion table shows it per harmonic order.
 
 ## Results
 
@@ -24,14 +37,14 @@ wider than the limit). INFO: context, not judged.
 | check | xone −10 dBFS (20261008T174954Z, ac2 35f6ca4) | genelec −30 dBFS (20261009T232923Z, ac2 8b87f49) |
 |---|---|---|
 | verdicts | PASS 261, INCONCLUSIVE 145, INFO 15 | WARN 8, PASS 156, INCONCLUSIVE 111, INFO 5 |
-| ac2 sweep vs REW offline import, magnitude spread per band | +0.009 dB @ 1000–20000 Hz (PASS 3) | +0.225 dB @ 20–100 Hz (PASS 3) |
-| ac2 sweep vs REW offline import, phase spread per band | +0.104° @ 20–100 Hz (PASS 3) | +2.578° @ 1000–20000 Hz (PASS 3) |
-| REW offline vs direct (same recording), magnitude | +0.004 dB @ 20–100 Hz (PASS 3) | +0.365 dB @ 20–100 Hz (WARN 1, PASS 2) |
-| REW offline vs direct (same recording), phase | +0.086° @ 20–100 Hz (PASS 3) | +2.366° @ 20–100 Hz (PASS 3) |
-| ac2 sweep vs direct (its own capture), magnitude | +0.009 dB @ 1000–20000 Hz (PASS 3) | +0.250 dB @ 20–100 Hz (PASS 3) |
-| ac2 sweep vs direct (its own capture), phase | +0.015° @ 20–100 Hz (PASS 3) | +0.517° @ 20–100 Hz (PASS 3) |
-| ac2 live TF vs direct (γ² ≥ 0.99), magnitude | +0.019 dB @ 20–100 Hz (PASS 3) | +0.133 dB @ 100–1000 Hz (WARN 1, INCONCLUSIVE 2) |
-| ac2 live TF vs direct (γ² ≥ 0.99), phase | +0.111° @ 20–100 Hz (PASS 3) | +0.705° @ 100–1000 Hz (PASS 1, INCONCLUSIVE 2) |
+| ac2 sweep vs REW offline import, magnitude spread per band | 0.009 dB @ 1000–20000 Hz (PASS 3) | 0.225 dB @ 20–100 Hz (PASS 3) |
+| ac2 sweep vs REW offline import, phase, max(\|mean\|, spread) per band | 0.104° @ 20–100 Hz (PASS 3) | 2.578° @ 1000–20000 Hz (PASS 3) |
+| REW offline vs direct (same recording), magnitude, max(\|mean\|, spread) per band | 0.004 dB @ 20–100 Hz (PASS 3) | 0.365 dB @ 20–100 Hz (WARN 1, PASS 2) |
+| REW offline vs direct (same recording), phase, max(\|mean\|, spread) per band | 0.086° @ 20–100 Hz (PASS 3) | 2.366° @ 20–100 Hz (PASS 3) |
+| ac2 sweep vs direct (its own capture), magnitude, max(\|mean\|, spread) per band | 0.009 dB @ 1000–20000 Hz (PASS 3) | 0.250 dB @ 20–100 Hz (PASS 3) |
+| ac2 sweep vs direct (its own capture), phase, max(\|mean\|, spread) per band | 0.015° @ 20–100 Hz (PASS 3) | 0.517° @ 20–100 Hz (PASS 3) |
+| ac2 live TF vs direct (γ² ≥ 0.99), magnitude, max(\|mean\|, spread) per band | 0.019 dB @ 20–100 Hz (PASS 3) | 0.133 dB @ 100–1000 Hz (WARN 1, INCONCLUSIVE 2) |
+| ac2 live TF vs direct (γ² ≥ 0.99), phase, max(\|mean\|, spread) per band | 0.111° @ 20–100 Hz (PASS 3) | 0.705° @ 100–1000 Hz (PASS 1, INCONCLUSIVE 2) |
 | ac2 sweep vs steady sine, magnitude | +0.008 dB @ 15 Hz (PASS 9) | −0.306 dB @ 1000 Hz (WARN 1, PASS 4, INCONCLUSIVE 3) |
 | REW offline vs steady sine, magnitude | +0.004 dB @ 15 Hz (PASS 9) | −0.289 dB @ 1000 Hz (PASS 5, INCONCLUSIVE 3) |
 | ac2 live TF vs steady sine, magnitude | +0.001 dB @ 60.5 Hz (PASS 7) | −0.446 dB @ 1000 Hz (WARN 1, PASS 3, INCONCLUSIVE 1) |
@@ -50,7 +63,20 @@ wider than the limit). INFO: context, not judged.
 | H2–H5 vs steady sine: REW offline import | +0.636 dB @ H3 60.5 Hz (PASS 9, INCONCLUSIVE 21) | −2.616 dB @ H2 5000 Hz (PASS 4, INCONCLUSIVE 22) |
 | absolute SPL vs steady sine: ac2 sweep | — | −0.309 dB @ 1000 Hz (PASS 5, INCONCLUSIVE 3) |
 | absolute SPL vs steady sine: REW (cal from ac2) | — | +0.047 dB @ 2000 Hz (PASS 8) |
-| live TF: share of columns at γ² ≥ 0.99 | +1.000 (PASS 1) | +0.355 (INFO 1) |
+| live TF: share of columns at γ² ≥ 0.99, 31 Hz–20 kHz | 100.0 % (PASS 1) | 35.5 % (INFO 1) |
+
+### pupu: distortion coverage per harmonic order (steady-sine tones judged)
+
+| check | xone −10 dBFS (20261008T174954Z, ac2 35f6ca4) | genelec −30 dBFS (20261009T232923Z, ac2 8b87f49) |
+|---|---|---|
+| H2 ac2 sweep | −1.913 dB @ 10000 Hz (PASS 2, INCONCLUSIVE 6) | −2.868 dB @ 5000 Hz (PASS 2, INCONCLUSIVE 5) |
+| H3 ac2 sweep | +0.095 dB @ 10000 Hz (PASS 2, INCONCLUSIVE 6) | −1.008 dB @ 1000 Hz (PASS 2, INCONCLUSIVE 5) |
+| H4 ac2 sweep | INCONCLUSIVE 7 | INCONCLUSIVE 6 |
+| H5 ac2 sweep | −0.062 dB @ 1040 Hz (PASS 1, INCONCLUSIVE 6) | +0.862 dB @ 200 Hz (PASS 2, INCONCLUSIVE 4) |
+| H2 REW offline import | −0.466 dB @ 1040 Hz (PASS 2, INCONCLUSIVE 6) | −2.616 dB @ 5000 Hz (PASS 2, INCONCLUSIVE 5) |
+| H3 REW offline import | +0.636 dB @ 60.5 Hz (PASS 6, INCONCLUSIVE 2) | −1.024 dB @ 200 Hz (PASS 2, INCONCLUSIVE 5) |
+| H4 REW offline import | INCONCLUSIVE 7 | INCONCLUSIVE 6 |
+| H5 REW offline import | +0.315 dB @ 1040 Hz (PASS 1, INCONCLUSIVE 6) | INCONCLUSIVE 6 |
 
 ### pupu: ambient
 
@@ -62,29 +88,29 @@ wider than the limit). INFO: context, not judged.
 | LCeq ac2 vs numpy | −0.002 dB (PASS 1) |
 | LAeq REW vs numpy | +0.012 dB (PASS 1) |
 | LAeq ac2 vs REW | −0.009 dB (PASS 1) |
-| 1/3-oct bands: ac2 RTA vs numpy, worst band | +1.685 dB (WARN 1) |
-| 1/3-oct bands: REW RTA vs numpy, worst band | +3.754 dB (INFO 1) |
+| 1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs numpy, largest \|difference\| | 1.685 dB (WARN 1) |
+| 1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy, largest \|difference\| | 3.754 dB (INFO 1) |
 
 ### OSM stage (osm-20261010T035316Z, ac2 befb61d, v1.5.2: PASS 86, INFO 12)
 
-**Transfer (worst column, or the median on a rig take)**
+**Transfer: max over the gated columns; a rig take (not a planned fixture) shows the median over its columns**
 
-| case | ac2 \|H\| − truth, dB | OSM \|H\| − truth, dB | ac2 ∠ − truth, ° | OSM ∠ − truth, ° | ac2 − OSM \|H\|, dB | ac2 − OSM ∠, ° | ac2 γ² − true γ² | OSM γ² − E[γ̂²] |
+| case | \|ac2 \|H\| − truth\|, dB | \|OSM \|H\| − truth\|, dB | \|ac2 ∠ − truth\|, ° | \|OSM ∠ − truth\|, ° | \|ac2 − OSM\| on \|H\|, dB | \|ac2 − OSM\| on ∠, ° | ac2 γ² − true γ² (mean) | OSM γ² − E[γ̂²] (mean) |
 |---|---|---|---|---|---|---|---|---|
 | identity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| biquad | +0.031 | +0.024 | +0.273 | +0.215 | +0.030 | +0.299 | 0.000 | 0.000 |
+| biquad | 0.031 | 0.024 | 0.273 | 0.215 | 0.030 | 0.299 | 0.000 | 0.000 |
 | delay48 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| delay10_5 | +0.002 | +0.001 | +0.014 | +0.005 | +0.002 | +0.014 | 0.000 | 0.000 |
+| delay10_5 | 0.002 | 0.001 | 0.014 | 0.005 | 0.002 | 0.014 | 0.000 | 0.000 |
 | polarity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
 | snr20 |  |  |  |  |  |  | 0.000 | 0.000 |
 | snr10 |  |  |  |  |  |  | +0.002 | +0.001 |
 | snr0 |  |  |  |  |  |  | +0.013 | −0.005 |
-| genelec-rig |  |  |  |  | +0.119 | +0.723 |  |  |
-| xone-rig |  |  |  |  | 0.000 | +0.004 |  |  |
+| genelec-rig (median) |  |  |  |  | 0.119 | 0.723 |  |  |
+| xone-rig (median) |  |  |  |  | 0.000 | 0.004 |  |  |
 
-**Delay (samples), noise and spectrum**
+**Delay (samples), noise and spectrum: signed**
 
-| case | ac2 finder − truth | OSM finder − truth | ac2 slope − truth | OSM slope − truth | ac2 − OSM finder | ac2 H1 in noise − 0 dB, dB | OSM mean ratio − E\|1+N/R\|, dB | ac2 spectrum − truth, dB | OSM spectrum (converted) − truth, dB |
+| case | ac2 finder − truth | OSM finder − truth | ac2 slope − truth | OSM slope − truth | ac2 − OSM finder | ac2 H1 in noise − 0 dB (median), dB | OSM mean ratio − E\|1+N/R\|, dB | ac2 spectrum − truth, dB | OSM spectrum (converted) − truth, dB |
 |---|---|---|---|---|---|---|---|---|---|
 | identity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |  |  | +0.019 | +0.016 |
 | biquad |  |  |  |  | −0.122 |  |  |  |  |
@@ -109,20 +135,25 @@ wider than the limit). INFO: context, not judged.
 | grid | 1/48-octave columns | native bins, unsmoothed | native bins; smoothing is display only | both power-averaged into ac2's columns |
 | delay finder | sub-sample (regularised H1, Hilbert IR) | removed by its timing markers | integer argmax of IFFT(M/R), never applied | ac2 within 0.05 sample of truth, OSM ±0.5 |
 | spectrum | dBFS peak convention | not compared | RMS (a sine reads −3.01 dB) | +3.01 dB added to OSM |
-| SPL, Leq, RTA | IEC 61672-1 / 61260-1 | SPL meter, RTA | rectangular F/S averages, Leq sampled once a second, FFT-bin bands | ac2 and REW against numpy; OSM not compared |
+| SPL, Leq, RTA | filters designed to IEC 61672-1 / 61260-1; tested here: Z/A/C Leq and 1/3-oct bands on one ambient take against numpy, not class conformance | SPL meter, RTA | rectangular F/S averages, Leq sampled once a second, FFT-bin bands | ac2 and REW against numpy; OSM not compared |
 | distortion | exponential sweep, H2–H5, ÷ measured ref | distortion export | THD+N at 1 kHz only | against steady sines net of the ref's own harmonics |
 
 ## Open and by-design differences
 
+The OSM noise and coherence columns judge each analyser against a different question: ac2 against
+the physical truth (0 dB, true γ²), OSM against its own estimator's expected value. The raw
+OSM error against the truth is in this table.
+
 | difference | numbers | status |
 |---|---|---|
 | ac2 γ² at low SNR | +0.002 / +0.013 over the true γ² at 10 / 0 dB SNR | **open**, within the 0.02 limit; a finite-average γ² reads high in noise and the suite does not model ac2's average count |
-| ac2 RTA vs numpy, ambient | worst band +1.685 dB at 79 Hz, median +0.19 dB (WARN) | by design: filter skirts vs ideal band edges in a falling LF ambient |
-| REW RTA vs numpy | worst band +3.754 dB, median −0.11 dB (INFO) | **open**: REW's RTA averaging names not verified on the rig |
-| Genelec −30 at 1 kHz vs steady sine | ac2 sweep −0.306, ac2 TF −0.446 dB (WARN) | by design: room fine structure; the 1/48-oct column and the sine differ by 0.25 dB in the direct estimate too |
-| Genelec −30 live TF 100–1000 Hz | +0.133 dB (WARN) | by design: variance at γ² ≈ 0.99, not a bias |
+| ac2 RTA vs numpy, ambient | largest \|difference\| 1.685 dB at 79 Hz, median +0.19 dB (WARN) | **open**: consistent with filter skirts against ideal band edges in a falling LF ambient (a known definition difference); not yet shown to account for the whole difference: needs the filters' own response applied to the same input |
+| REW RTA vs numpy | largest \|difference\| 3.754 dB, median −0.11 dB (INFO) | **open**: REW's RTA averaging names not verified on the rig |
+| Genelec −30 at 1 kHz vs steady sine | ac2 sweep −0.306, ac2 TF −0.446 dB (WARN) | **open**: consistent with room fine structure (the 1/48-oct column and the sine differ by 0.25 dB in the direct estimate too), which does not by itself account for the TF's −0.446 dB; needs repeated takes with signed residuals at matched frequency support |
+| Genelec −30 live TF 100–1000 Hz | 0.133 dB, max(\|mean\|, spread) (WARN) | **open**: consistent with variance at γ² ≈ 0.99; a bias is not ruled out without repeated takes |
 | OSM magnitude in noise | +0.171 / +1.216 / +5.630 dB at 20 / 10 / 0 dB SNR; ac2 H1 within 0.05 dB | by design: OSM's mean ratio, within 0.009 dB of its model E\|1 + N/R\| |
-| OSM γ² vs truth | 0.550 at 0 dB SNR, true 0.5 | by design: ≈ 5.4 averages, E[γ̂²] = 0.555 |
+| OSM γ² vs truth | 0.550 at 0 dB SNR, true 0.5 | by design: ≈ 5.4 averages, E[γ̂²] = 0.555; the effective-average model is validated on these three fixtures only |
+| ac2 vs OSM on the Genelec rig take | median \|difference\| 0.12 dB / 0.72°, max 3.6 dB / 20° (README, OSM section) | expected where the windows differ: OSM's one 0.68 s window and ac2's MTW ladder see different reflections; the median is the judged agreement |
 | Delay rounding | delay10_5: ac2 10.500, OSM 10; genelec-rig: ac2 348.449, OSM 349 | by design: OSM's finder is an integer argmax |
 | OSM masked bins | NaN phase on exactly-zero bins; a float32 floor 70 dB under the reference peak | OSM bugs, masked in the comparison |
 
@@ -133,4 +164,5 @@ wider than the limit). INFO: context, not judged.
 - Rig baselines: `./rig-run.sh …`, review, `python -m crosscheck baseline runs/<UTC time>`.
 - OSM baseline: `OSM_HARNESS=… AC2_BIN_DIR=… python -m crosscheck osm`, review,
   `python -m crosscheck baseline runs/osm-<UTC time>`.
-- The difference table above is written by hand from the runs' reports.
+- The difference table above is written by hand from the runs' reports. An explanation stays
+  **open** until a report, plot or controlled test shows it accounts for the residual.
