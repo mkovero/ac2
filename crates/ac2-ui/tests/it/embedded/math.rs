@@ -159,7 +159,7 @@ fn math_channels_from_an_empty_daemon() -> R {
 
     // Edited in the same dialog into A ÷ B: one path over itself is 0 dB.
     d.key("Ctrl+K");
-    d.send(Msg::Text("edit the selected math".into()));
+    d.send(Msg::Text("edit measurement".into()));
     d.key("Enter");
     assert!(
         matches!(&d.st.overlay, Overlay::Form(f) if f.kind == FormKind::MathEdit),

@@ -907,8 +907,8 @@ client (and `ac2 meas list`) sees the same result.
 - **B**: the curves of A's kind.
 
 The name follows the expression (`Main L ÷ Sub`) until you type another. **Enter** creates
-and starts it. *Edit the selected math channel…* in the palette opens the same dialog on an
-existing one: change its operands, operator, method or smoothing, **Enter** applies.
+and starts it. With a math channel selected, *Edit measurement…* in the palette opens the
+same dialog on it: change its operands, operator, method or smoothing, **Enter** applies.
 
 Transfer functions combine as complex values — magnitude **and** phase together:
 
@@ -2687,7 +2687,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | New spectrum… | `meas_new_spectrum` |
 | New RTA… | `meas_new_rta` |
 | New SPL meter… | `meas_new_spl` |
-| Edit the selected math channel (operands, operator, method), sweep measurement (its next run), spectrum or RTA (averaging)… | `meas_edit` |
+| Edit measurement… | `meas_edit` |
 | Fold / unfold the selected measurement in the list | `toggle_group` |
 | Input setup: Settings › Inputs & outputs (names, roles, mics, max level)… | `input_setup` |
 | Calibrations: Settings › Calibration (mics, curves, sensitivities)… | `calibrations` |

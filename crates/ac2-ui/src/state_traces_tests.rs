@@ -1033,7 +1033,7 @@ fn math_channel_edit() {
     t.conn(mirror(s));
     t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
     t.key("Ctrl+K");
-    t.text("edit the selected math");
+    t.text("edit measurement");
     t.key("Enter");
     assert!(matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::MathEdit));
     // Operator: + → − (complex difference).
@@ -1379,7 +1379,7 @@ fn edit_meas_on_a_spectrum_changes_its_averaging_and_keeps_the_rest() {
     t.conn(mirror(daemon_state()));
     t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
     t.key("Ctrl+K");
-    t.text("edit the selected math");
+    t.text("edit measurement");
     t.key("Enter");
     let Overlay::Form(f) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
