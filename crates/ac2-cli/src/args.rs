@@ -240,15 +240,64 @@ pub enum SessionCmd {
     Close,
     /// Current session.
     Status,
-    /// Save measurements and traces (with slots and display edits) to a session.
-    Save {
-        /// Session name (in the daemon's session directory) or a directory path.
+    /// Start a new session: no measurements or traces. Refused while there are unsaved
+    /// changes, unless --discard (what it replaces stays recoverable: `session recover`).
+    New {
+        /// Replace unsaved changes.
+        #[arg(long)]
+        discard: bool,
+    },
+    /// Save measurements and traces (with slots and display edits) to the session they
+    /// belong to (`session status`).
+    Save,
+    /// Save measurements and traces as another session; they then belong to it.
+    SaveAs {
+        /// Session name (in the daemon's session directory), a directory path on the
+        /// daemon's host, or an .ac2session file on this machine.
+        session: String,
+        /// Replace an existing session of that name.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Open a saved session: replaces measurements and traces; always comes up disarmed.
+    /// Refused while there are unsaved changes, unless --discard.
+    Load {
+        /// Session name, a directory path on the daemon's host, or an .ac2session file (or
+        /// session folder, for a daemon on another host) on this machine.
+        session: String,
+        /// Replace unsaved changes (they stay recoverable: `session recover`).
+        #[arg(long)]
+        discard: bool,
+    },
+    /// Bring back the measurements and traces the last `new` or `load` replaced while
+    /// they had unsaved changes.
+    Recover,
+    /// Import the traces of a session that cannot be opened (another format version) into
+    /// the current measurements and traces.
+    Salvage {
+        /// As for `load`.
         session: String,
     },
-    /// Load a session: replaces measurements and traces; always comes up disarmed.
-    Load {
-        /// Session name or directory path.
-        session: String,
+    /// Write the measurements and traces (or a saved session) to an .ac2session file on
+    /// this machine.
+    Export {
+        /// File, or a folder for the suggested file name.
+        file: PathBuf,
+        /// A saved session instead of the current measurements and traces.
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Store an .ac2session file or session folder from this machine on the daemon as a
+    /// saved session, without opening it.
+    Import {
+        /// File or folder.
+        file: PathBuf,
+        /// Session name; the file's name without its extension when omitted.
+        #[arg(long)]
+        name: Option<String>,
+        /// Replace an existing session of that name.
+        #[arg(long)]
+        force: bool,
     },
     /// Saved sessions in the daemon's session directory.
     List,

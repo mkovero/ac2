@@ -151,9 +151,10 @@ pub(crate) async fn session(
             let r = c.call(Command::SessionStatus).await?;
             let s = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
             let st = state(&c).await?;
-            let (autosave, recording) = (st.autosave, st.recording);
+            let (autosave, recording, working) = (st.autosave, st.recording, st.working);
             let mut j = json!(s);
             j["autosave"] = json!(autosave);
+            j["working"] = json!(working);
             j["recording"] = json!(recording);
             out.emit(&j, || {
                 let mut t = format!(
@@ -161,19 +162,26 @@ pub(crate) async fn session(
                     output::session(&s),
                     output::autosave(&autosave, crate::watch::now_wall())
                 );
+                t.push('\n');
+                t.push_str(&super::sessions::status_lines(
+                    &working,
+                    crate::watch::now_wall(),
+                ));
                 if let Some(r) = &recording {
                     t.push_str(&format!("\nrecording    {}", output::recording_line(r)));
                 }
                 t
             })?;
         }
-        SessionCmd::Save { session } => {
-            super::traces::save_or_load(cli, &c, session, false, out).await?;
-        }
-        SessionCmd::Load { session } => {
-            super::traces::save_or_load(cli, &c, session, true, out).await?;
-        }
-        SessionCmd::List => super::traces::list(&c, out).await?,
+        SessionCmd::New { .. }
+        | SessionCmd::Save
+        | SessionCmd::SaveAs { .. }
+        | SessionCmd::Load { .. }
+        | SessionCmd::Recover
+        | SessionCmd::Salvage { .. }
+        | SessionCmd::Export { .. }
+        | SessionCmd::Import { .. }
+        | SessionCmd::List => super::sessions::session(cli, &c, cmd, out).await?,
         SessionCmd::Replay { recording, fast } => {
             super::rec::replay(cli, &c, recording, *fast, out).await?;
         }

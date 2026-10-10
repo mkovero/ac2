@@ -19,6 +19,73 @@ fn ok(args: &[&str]) -> Cli {
 }
 
 #[test]
+fn session_grammar() {
+    let c = ok(&["session", "save-as", "friday", "--force"]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Session { cmd: SessionCmd::SaveAs { ref session, force: true } } if session == "friday"
+    ));
+    assert!(matches!(
+        ok(&["session", "save"]).cmd,
+        Cmd::Session {
+            cmd: SessionCmd::Save
+        }
+    ));
+    assert!(
+        parse(&["session", "save", "friday"]).is_err(),
+        "save as is save-as"
+    );
+    assert!(matches!(
+        ok(&["session", "load", "/media/S/fri.ac2session", "--discard"]).cmd,
+        Cmd::Session {
+            cmd: SessionCmd::Load { discard: true, .. }
+        }
+    ));
+    assert!(matches!(
+        ok(&["session", "new"]).cmd,
+        Cmd::Session {
+            cmd: SessionCmd::New { discard: false }
+        }
+    ));
+    assert!(matches!(
+        ok(&["session", "recover"]).cmd,
+        Cmd::Session {
+            cmd: SessionCmd::Recover
+        }
+    ));
+    let c = ok(&["session", "export", "/media/S", "--session", "friday"]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Session { cmd: SessionCmd::Export { ref file, session: Some(ref s) } }
+            if file == std::path::Path::new("/media/S") && s == "friday"
+    ));
+    let c = ok(&[
+        "session",
+        "import",
+        "fri.ac2session",
+        "--name",
+        "fri",
+        "--force",
+    ]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Session {
+            cmd: SessionCmd::Import {
+                name: Some(_),
+                force: true,
+                ..
+            }
+        }
+    ));
+    assert!(matches!(
+        ok(&["session", "salvage", "old"]).cmd,
+        Cmd::Session {
+            cmd: SessionCmd::Salvage { .. }
+        }
+    ));
+}
+
+#[test]
 fn recording_grammar() {
     let c = ok(&[
         "rec",

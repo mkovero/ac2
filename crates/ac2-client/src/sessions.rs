@@ -169,10 +169,11 @@ pub fn export_target(path: &Path, suggested: &str) -> PathBuf {
     }
 }
 
-/// Downloads `session` (`None`: the working state) to `path` (a file, or a folder for the
-/// suggested name), written whole before it replaces anything there. A working-state export
-/// tells the daemon, so the working state then belongs to that file. Returns the file and
-/// its size.
+/// Downloads `session` (`None`: the working state) to `path`: an `.ac2session` file, a
+/// session folder (replaced whole: the archive is unpacked beside it first), or another
+/// folder (the suggested file name inside it). Nothing there is replaced until the new
+/// content is complete. A working-state export tells the daemon, so the working state then
+/// belongs to that file or folder. Returns where it went and the archive's size.
 pub async fn export(
     c: &Client,
     session: Option<SessionRef>,
@@ -181,12 +182,16 @@ pub async fn export(
 ) -> Result<(PathBuf, u64), ClientError> {
     let working = session.is_none();
     let (t, data) = download(c, session, progress).await?;
-    let target = export_target(path, &t.file_name);
-    let written =
-        ac2_paths::write_private_atomic(&target, &data).map_err(|source| ClientError::Io {
+    let (target, written) = if ac2_archive::is_session_dir(path) {
+        (path.to_owned(), replace_folder(path, &data))
+    } else {
+        let target = export_target(path, &t.file_name);
+        let w = ac2_paths::write_private_atomic(&target, &data).map_err(|source| ClientError::Io {
             path: target.clone(),
             source,
         });
+        (target, w)
+    };
     let saved = written.is_ok() && working;
     let end = finish_download(c, t.transfer, saved.then_some(target.as_path())).await;
     written?;
@@ -194,9 +199,61 @@ pub async fn export(
     Ok((target, t.bytes))
 }
 
+/// Replaces the session folder `dir` with the archive `data`: unpacked beside it, then
+/// swapped in by renames, so a failure leaves the old folder.
+fn replace_folder(dir: &Path, data: &[u8]) -> Result<(), ClientError> {
+    let io = |path: &Path| {
+        let path = path.to_owned();
+        move |source| ClientError::Io { path, source }
+    };
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let new = dir.with_file_name(format!(".{name}.ac2-new"));
+    let old = dir.with_file_name(format!(".{name}.ac2-old"));
+    for p in [&new, &old] {
+        if p.exists() {
+            std::fs::remove_dir_all(p).map_err(io(p))?;
+        }
+    }
+    ac2_archive::unpack(data, &new).map_err(ClientError::Archive)?;
+    std::fs::rename(dir, &old).map_err(io(dir))?;
+    if let Err(e) = std::fs::rename(&new, dir) {
+        // Put the old one back: the folder never goes missing.
+        let _ = std::fs::rename(&old, dir);
+        return Err(io(dir)(e));
+    }
+    std::fs::remove_dir_all(&old).map_err(io(&old))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn a_session_folder_is_replaced_whole() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a");
+        std::fs::create_dir_all(a.join("traces")).unwrap();
+        std::fs::write(a.join("session.json"), "{\"new\": true}").unwrap();
+        std::fs::write(a.join("traces/1.csv"), "x").unwrap();
+        let data = ac2_archive::pack_dir(&a).unwrap();
+        let b = tmp.path().join("b");
+        std::fs::create_dir_all(b.join("traces")).unwrap();
+        std::fs::write(b.join("session.json"), "{}").unwrap();
+        std::fs::write(b.join("traces/old.csv"), "y").unwrap();
+        replace_folder(&b, &data).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(b.join("session.json")).unwrap(),
+            "{\"new\": true}"
+        );
+        assert!(b.join("traces/1.csv").exists());
+        assert!(!b.join("traces/old.csv").exists());
+        let left: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().collect();
+        assert_eq!(left.len(), 2, "no staging folders left");
+    }
 
     #[test]
     fn export_names_get_the_extension() {

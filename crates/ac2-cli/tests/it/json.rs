@@ -398,6 +398,7 @@ async fn status_reports_build_ids() -> R {
             "recording": null,
             "stopped": null,
             "autosave": { "state": { "type": "off" }, "saved_at": null },
+            "working": { "origin": null, "dirty": false, "saved_at": null, "recover": null },
         })
     );
     assert!(
@@ -1076,7 +1077,7 @@ async fn trace_commands_json() -> R {
     ok_json(&f, &["meas", "rm", "a ÷ b", "--json"]).await?;
 
     // Sessions.
-    let saved = ok_json(&f, &["session", "save", "show", "--json"]).await?;
+    let saved = ok_json(&f, &["session", "save-as", "show", "--json"]).await?;
     assert_eq!(saved["name"], "show");
     assert_eq!(saved["measurements"], 1);
     assert_eq!(saved["traces"], 6);
@@ -1084,7 +1085,19 @@ async fn trace_commands_json() -> R {
     assert_eq!(list.as_array().map(Vec::len), Some(1));
     assert_eq!(list[0]["name"], "show");
     ok_json(&f, &["trace", "rm", "house", "--json"]).await?;
-    let loaded = ok_json(&f, &["session", "load", "show", "--json"]).await?;
+    // Unsaved changes are not dropped unless told.
+    let r = ac2(&f, &["session", "load", "show", "--json"]).await?;
+    assert_eq!(r.code, 4, "refused");
+    let e = r.json()?;
+    let msg = e["error"]["msg"].as_str().ok_or("msg")?;
+    assert!(msg.contains("show has unsaved changes"), "{msg}");
+    let status = ok_json(&f, &["session", "status", "--json"]).await?;
+    assert_eq!(status["working"]["dirty"], true);
+    assert_eq!(
+        status["working"]["origin"],
+        json!({ "type": "name", "name": "show" })
+    );
+    let loaded = ok_json(&f, &["session", "load", "show", "--discard", "--json"]).await?;
     assert_eq!(loaded["traces"], 6);
     let dump = ok_json(&f, &["state", "dump"]).await?;
     assert_eq!(dump["state"]["traces"].as_array().map(Vec::len), Some(6));
@@ -1093,7 +1106,7 @@ async fn trace_commands_json() -> R {
     let by_path = dir.path().join("elsewhere");
     let p = ok_json(
         &f,
-        &["session", "save", &by_path.to_string_lossy(), "--json"],
+        &["session", "save-as", &by_path.to_string_lossy(), "--json"],
     )
     .await?;
     assert_eq!(p["name"], "elsewhere");

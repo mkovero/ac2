@@ -12,6 +12,7 @@ mod leq;
 mod math;
 mod rec;
 mod selftest;
+mod sessions;
 mod traces;
 
 use std::time::Duration;

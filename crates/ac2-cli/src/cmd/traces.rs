@@ -1,14 +1,12 @@
-//! `trace …` and `session save|load|list`.
+//! `trace …`.
 
-use std::path::{Path, PathBuf};
-
-use ac2_client::{Client, expect_body};
+use ac2_client::expect_body;
 use ac2_proto::model::*;
 use ac2_proto::units::Blob;
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
 
-use super::{connect, find_meas, find_trace, is_local, state};
+use super::{connect, find_meas, find_trace, state};
 use crate::CliError;
 use crate::args::*;
 use crate::output::{self, Out};
@@ -370,88 +368,4 @@ fn curve_of(
             "no curve of {mic:?} in the mic library (import one with `ac2 cal curve import`)"
         ))),
     }
-}
-
-/// A session argument: a plain name, or a path (anything with a separator, `.`/`~` start,
-/// or absolute). A local path is made absolute here: the daemon does not share the
-/// client's working directory.
-pub(crate) fn session_ref(arg: &str, local: bool) -> Result<SessionRef, CliError> {
-    let is_path = arg.contains('/')
-        || arg.contains('\\')
-        || arg.starts_with('.')
-        || arg.starts_with('~')
-        || Path::new(arg).is_absolute();
-    if !is_path {
-        return Ok(SessionRef::Name {
-            name: arg.to_owned(),
-        });
-    }
-    let p = match arg.strip_prefix('~') {
-        Some(rest) if local => {
-            let home = std::env::var_os("HOME")
-                .or_else(|| std::env::var_os("USERPROFILE"))
-                .ok_or_else(|| CliError::Usage("no home directory to expand ~".into()))?;
-            PathBuf::from(home).join(rest.trim_start_matches(['/', '\\']))
-        }
-        _ => PathBuf::from(arg),
-    };
-    let p = if local {
-        std::path::absolute(&p)?
-    } else if p.is_absolute() {
-        p
-    } else {
-        return Err(CliError::Usage(
-            "a remote daemon takes session names, or absolute paths on its host".into(),
-        ));
-    };
-    Ok(SessionRef::Path {
-        path: p.to_string_lossy().into_owned(),
-    })
-}
-
-/// `session save` / `session load`.
-pub(crate) async fn save_or_load(
-    cli: &Cli,
-    c: &Client,
-    session: &str,
-    load: bool,
-    out: &mut Out<'_>,
-) -> Result<(), CliError> {
-    let local = is_local(cli) || cli.ctrl_endpoint.is_some();
-    let session = session_ref(session, local)?;
-    let (r, what) = if load {
-        (
-            c.call(Command::FileLoad {
-                session,
-                discard: true,
-            })
-            .await?,
-            "loaded (disarmed)",
-        )
-    } else {
-        (
-            c.call(Command::FileSave {
-                session,
-                overwrite: false,
-            })
-            .await?,
-            "saved",
-        )
-    };
-    let f = expect_body!("file", r, ReplyBody::SessionFile(f) => f)?;
-    out.emit(&f, || {
-        format!(
-            "session {:?} {what}: {} measurement(s), {} trace(s)\n  {}",
-            f.name, f.measurements, f.traces, f.path
-        )
-    })?;
-    Ok(())
-}
-
-/// `session list`.
-pub(crate) async fn list(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
-    let r = c.call(Command::FileList).await?;
-    let l = expect_body!("file.list", r, ReplyBody::Sessions(l) => l)?;
-    out.emit(&l, || output::sessions(&l))?;
-    Ok(())
 }

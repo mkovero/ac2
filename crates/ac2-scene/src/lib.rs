@@ -46,6 +46,7 @@ pub mod readout;
 pub mod recording;
 pub mod rig;
 pub mod room;
+pub mod sessions;
 pub mod spectrograph;
 pub mod spectrum;
 pub mod spl;
