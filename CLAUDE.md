@@ -38,6 +38,7 @@ app runs). Profiles in `.config/nextest.toml`:
 | `ac2d` | daemon (`ac2d` binary): session, jobs, state, calibration store, autosave, SPL log and Leq history |
 | `ac2-cli` | CLI (`ac2` binary); `ac2 selftest duplex` opens `ac2-audio` in process (no daemon) |
 | `ac2-traces` | stored traces and their math, text import/export, SPL log files, session files, raw capture files (f32 WAV/RF64 + sidecar) |
+| `ac2-archive` | `.ac2session` archives: pack a session folder, unpack within size/entry limits, SHA-256 (no DSP, so the app links it) |
 | `ac2-paths` | platform config / data dirs, atomic writes (daemon and UI) |
 | `ac2-scene` | pure display truth: every displayed number/string, tested headless |
 | `ac2-plot` | wgpu renderer for scenes; places pixels, never computes values |

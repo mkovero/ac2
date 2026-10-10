@@ -1,0 +1,21 @@
+[package]
+name = "ac2-archive"
+description = "Session archives (.ac2session): a session directory as one gzip-compressed tar, packed and unpacked with limits."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+flate2 = "1"
+sha2 = "0.10"
+tar = { version = "0.4", default-features = false }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

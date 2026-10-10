@@ -3,6 +3,17 @@
 version = 4
 
 [[package]]
+name = "ac2-archive"
+version = "0.0.0"
+dependencies = [
+ "flate2",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "ac2-audio"
 version = "0.0.0"
 dependencies = [
@@ -43,6 +54,7 @@ dependencies = [
 name = "ac2-client"
 version = "0.0.0"
 dependencies = [
+ "ac2-archive",
  "ac2-client",
  "ac2-core",
  "ac2-paths",
@@ -196,6 +208,7 @@ dependencies = [
 name = "ac2d"
 version = "0.0.0"
 dependencies = [
+ "ac2-archive",
  "ac2-audio",
  "ac2-client",
  "ac2-core",
