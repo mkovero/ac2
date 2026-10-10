@@ -595,6 +595,7 @@ impl Shared {
                         nudged: d.nudged,
                         tracking: d.tracking,
                     }),
+                    colour: m.colour,
                 })
                 .collect(),
             spl_logs: self
@@ -702,6 +703,7 @@ impl Shared {
                 running: sm.running,
                 delay,
                 grid_id,
+                colour: sm.colour,
             };
             self.put_meas(meas);
         }

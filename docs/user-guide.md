@@ -1200,6 +1200,13 @@ Working with the tree:
   measurements' hues, grey only when those run out; a trace moved to another measurement
   takes that measurement's colours. Measurement colours follow the measurement, not its
   place in the list: deleting one measurement leaves the others' colours alone.
+- **Choosing a measurement's colour**: **Shift+C** steps the selected measurement to the
+  next colour no other measurement has (grey last, then round again); *Previous colour* in
+  the palette steps back. The daemon keeps the choice with the measurement (sessions and
+  the autosave too), so every app connected shows it; the other measurements keep theirs
+  or take the colours left. `ac2 meas set <meas> --colour 1…8|grey|auto` does the same
+  (`auto`: back to the colour its number gives). A math channel takes its measurement's
+  colours and has no choice of its own.
 
 #### Deleting a measurement that owns traces
 
@@ -2621,6 +2628,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Home` | Display offset of the selected curve back to 0 | `offset_clear` |
 | `Shift+O` | Open audio session: Settings › Audio… | `session_open` |
 | `Shift+M` | New math channel: A ÷ × + − B, or the average of several (mic positions)… | `meas_new_math` |
+| `Shift+C` | Next colour for the selected measurement (one no other measurement has; grey last) | `meas_colour_next` |
 | `Shift+A` | Show / hide the selected measurement with every trace under it | `hide_group` |
 | `Shift+F2` | Move the selected trace or math channel to another measurement (or Imported)… | `move_trace` |
 | `Shift+S` | New sweep measurement: response and harmonic distortion… | `sweep_new` |
@@ -2727,6 +2735,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | New RTA… | `meas_new_rta` |
 | New SPL meter… | `meas_new_spl` |
 | Edit measurement… | `meas_edit` |
+| Previous colour for the selected measurement | `meas_colour_prev` |
 | Fold / unfold the selected measurement in the list | `toggle_group` |
 | Input setup: Settings › Inputs & outputs (names, roles, mics, max level)… | `input_setup` |
 | Calibrations: Settings › Calibration (mics, curves, sensitivities)… | `calibrations` |

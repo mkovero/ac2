@@ -426,12 +426,19 @@ pub(crate) struct MeasSet {
     pub(crate) resolution: Option<Resolution>,
 }
 
+impl MeasSet {
+    /// Nothing of the configuration changes.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.average.is_none() && self.blocks.is_none() && self.resolution.is_none()
+    }
+}
+
 /// `meas set`: `config` with the averaging or Resolution changed.
 pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, CliError> {
-    if set.average.is_none() && set.blocks.is_none() && set.resolution.is_none() {
+    if set.is_empty() {
         return Err(CliError::Usage(
-            "say what changes: --average (spectrum, rta), --blocks (tf) or --resolution \
-             (tf, sweep)"
+            "say what changes: --average (spectrum, rta), --blocks (tf), --resolution \
+             (tf, sweep) or --colour"
                 .into(),
         ));
     }
@@ -506,16 +513,29 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             average,
             blocks,
             resolution,
+            colour,
         } => {
             let s = state(&c).await?;
-            let m = find_meas(&s, meas)?;
+            let mut m = find_meas(&s, meas)?.clone();
             let set = MeasSet {
                 average: average.map(|a| a.0),
                 blocks: *blocks,
                 resolution: resolution.map(|r| r.0),
             };
-            let config = meas_set(&m.config, set)?;
-            let m = meas_call(&c, Command::MeasUpdate { meas: m.id, config }).await?;
+            if !set.is_empty() || colour.is_none() {
+                let config = meas_set(&m.config, set)?;
+                m = meas_call(&c, Command::MeasUpdate { meas: m.id, config }).await?;
+            }
+            if let Some(colour) = colour {
+                m = meas_call(
+                    &c,
+                    Command::MeasColour {
+                        meas: m.id,
+                        colour: colour.0,
+                    },
+                )
+                .await?;
+            }
             out.emit(&m, || output::measurement(&m))?;
         }
         MeasCmd::Start { meas } | MeasCmd::Stop { meas } => {
@@ -1043,6 +1063,30 @@ mod tests {
         ));
         let e = meas_set(&tf, avg(SpecAveraging::Off)).expect_err("refused");
         assert!(e.to_string().contains("t is a tf measurement"), "{e}");
+    }
+
+    #[test]
+    fn meas_set_takes_a_colour_alone() {
+        use ac2_proto::model::ColourFamily;
+        let colour = |v: &str| -> Result<Option<ColourFamily>, String> {
+            let cli = Cli::try_parse_from(["ac2", "meas", "set", "Main", "--colour", v])
+                .map_err(|e| e.to_string())?;
+            match cli.cmd {
+                Cmd::Meas {
+                    cmd: MeasCmd::Set { colour, .. },
+                } => Ok(colour.expect("given").0),
+                _ => unreachable!(),
+            }
+        };
+        assert_eq!(colour("1"), Ok(Some(ColourFamily::Hue { index: 0 })));
+        assert_eq!(colour("8"), Ok(Some(ColourFamily::Hue { index: 7 })));
+        assert_eq!(colour("grey"), Ok(Some(ColourFamily::Neutral)));
+        assert_eq!(colour("auto"), Ok(None));
+        for bad in ["0", "9", "red"] {
+            let e = colour(bad).expect_err(bad);
+            assert!(e.contains("a colour is 1 … 8, grey or auto"), "{e}");
+        }
+        assert!(MeasSet::default().is_empty());
     }
 
     #[test]

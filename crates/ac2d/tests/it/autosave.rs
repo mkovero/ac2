@@ -126,6 +126,26 @@ fn traces_survive_a_restart() {
     let kept = capture(&h, &backend, &mut c);
     assert_eq!(kept.edit.owner, TraceOwner::Meas { meas: MeasId(1) });
     let kept_data = trace_data(&mut c, kept.id);
+    // A colour changes how the running measurement is drawn, nothing of its job.
+    let before = state(&mut c).measurements[0].clone();
+    let after = match c.ok(Command::MeasColour {
+        meas: MeasId(1),
+        colour: Some(ColourFamily::Neutral),
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(after.colour, Some(ColourFamily::Neutral));
+    assert_eq!(after.config_rev, before.config_rev);
+    assert!(after.running);
+    assert!(
+        c.call(Command::MeasColour {
+            meas: MeasId(1),
+            colour: Some(ColourFamily::Hue { index: 8 }),
+        })
+        .is_err(),
+        "no theme has a ninth hue"
+    );
     // A sweep measurement is restored with its settings (and never as running).
     let sweep = MeasConfig {
         name: "Genelec 1 m".into(),
@@ -167,6 +187,8 @@ fn traces_survive_a_restart() {
     assert_eq!(st.measurements.len(), 2);
     assert_eq!(st.measurements[0].config, transfer("main"));
     assert_eq!(st.measurements[1].config, sweep);
+    assert_eq!(st.measurements[0].colour, Some(ColourFamily::Neutral));
+    assert_eq!(st.measurements[1].colour, None);
     assert!(!st.measurements[1].running);
     assert_eq!(
         st.traces[0].edit.owner,

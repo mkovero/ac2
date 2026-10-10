@@ -8,7 +8,7 @@
 use crate::primitives::{Color, Colormap, Dash, Stroke};
 
 /// How many measurement colour families a theme has before they repeat.
-pub const FAMILIES: usize = 8;
+pub const FAMILIES: usize = ac2_proto::model::ColourFamily::HUES as usize;
 
 /// Which built-in theme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

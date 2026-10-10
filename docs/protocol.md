@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 35`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 36`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -86,6 +86,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `gen.ceiling` | `ceiling: Dbfs`, `confirm_raise: bool` | `generator` | any client |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
 | `meas.update` | `meas`, `config` | `measurement` | |
+| `meas.colour` | `meas`, `colour: ColourFamily \| nil` | `measurement` | |
 | `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the traces and math channels it owns) | `ack` | |
 | `meas.start` | `meas` | `measurement` | |
 | `meas.stop` | `meas` | `measurement` | |
@@ -192,6 +193,13 @@ the first playback port), removes the connections it made for outputs no longer 
 never touches connections made by anyone else, and connects again after any reopen.
 
 #### Measurements (`meas.*`)
+
+`meas.colour` sets the colour family a measurement's curves are drawn in
+(`ColourFamily`: `{type: hue, index}` with `index` 0 … 7, or `{type: neutral}` (grey);
+nil: the family its id gives). It is `Measurement.colour`, kept in sessions and the
+autosave; the job, its averages and `config_rev` are untouched. Families are the display's:
+clients take chosen families first and give the others the rest by id. `invalid` for a
+math channel (drawn in its owner's colours) and for an index past 7.
 
 `meas.update` replaces the configuration and restarts a running job (averages start over),
 except when a transfer or spectrum measurement's configuration differs only in `smoothing`
@@ -1034,7 +1042,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 
 The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`, `stopped:
 AudioStopped | nil`; §4.1.1),
-`measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`),
+`measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`, `colour`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
 math | average | sweep}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
@@ -1333,8 +1341,9 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 15, saved_at, measurements:
-[{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null}], spl_logs:
+`session.json`: `{format: "ac2-session", version: 21, saved_at, measurements:
+[{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
+ColourFamily | null}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
 dB]] | null}]}` (JSON, field names as in this document; `mic_curve_points` are the points of
 `meta.mic_curve`, a curve applied after capture). A trace

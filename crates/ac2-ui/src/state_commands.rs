@@ -579,6 +579,39 @@ impl AppState {
         self.toast("keys act on the live measurement");
     }
 
+    /// Steps the selected measurement's colour family (`meas.colour`) to the next one no
+    /// other measurement has.
+    fn step_colour(&mut self, forward: bool, out: &mut Vec<Request>) {
+        let Some(m) = self.selected_meas().cloned() else {
+            self.warn("select a measurement first (N)");
+            return;
+        };
+        if matches!(m.config.kind, MeasKind::Math { .. }) {
+            self.warn(format!(
+                "{} is a math channel: it takes its measurement's colours",
+                m.config.name
+            ));
+            return;
+        }
+        let Some(colour) = ac2_scene::families::step_colour(&self.measurements(), m.id, forward)
+        else {
+            self.warn("every other colour is another measurement's");
+            return;
+        };
+        self.call(
+            out,
+            Command::MeasColour {
+                meas: m.id,
+                colour: Some(colour),
+            },
+            format!(
+                "{}: {}",
+                m.config.name,
+                ac2_scene::format::colour_family(colour)
+            ),
+        );
+    }
+
     pub(super) fn call(&mut self, out: &mut Vec<Request>, cmd: Command, what: String) {
         out.push(Request::Call { cmd, what });
     }
@@ -995,6 +1028,7 @@ impl AppState {
                     Err(e) => self.warn(e),
                 }
             }
+            C::NextColour | C::PrevColour => self.step_colour(c == C::NextColour, out),
             C::EditMeas => {
                 // A sweep measurement selected (or the sweep pane's) edits its settings.
                 let sweep = self

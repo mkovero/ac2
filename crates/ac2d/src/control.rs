@@ -20,9 +20,9 @@ use ac2_core::sweep::{SweepAnalysis, SweepError, SweepSpec};
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
-    Autosave, AutosaveState, CalState, DelayState, GenAction, GeneratorSettings, LoopbackDetection,
-    MeasKind, Measurement, MicState, SweepConfig, SweepFailure, SweepRun, SweepStatus,
-    TimingStatus, TraceKind, TraceMeta, TraceSource,
+    Autosave, AutosaveState, CalState, ColourFamily, DelayState, GenAction, GeneratorSettings,
+    LoopbackDetection, MeasKind, Measurement, MicState, SweepConfig, SweepFailure, SweepRun,
+    SweepStatus, TimingStatus, TraceKind, TraceMeta, TraceSource,
 };
 use ac2_proto::units::{
     ClientId, DaemonIncarnation, Dbfs, LeaseToken, MeasId, RequestId, Rev, Seconds, SessionEpoch,
@@ -689,6 +689,7 @@ impl Control {
                     running: false,
                     delay,
                     grid_id,
+                    colour: None,
                 };
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 self.ensure_spl_log(&m, None);
@@ -767,6 +768,31 @@ impl Control {
                         m.grid_id = Some(self.register_grid(g));
                     }
                 }
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+            Command::MeasColour { meas, colour } => {
+                let mut m = self.meas(meas)?.clone();
+                if matches!(m.config.kind, MeasKind::Math { .. }) {
+                    return Err(perr(
+                        ErrorCode::Invalid,
+                        format!(
+                            "{} is a math channel: it is drawn in its owner's colours",
+                            m.config.name
+                        ),
+                    ));
+                }
+                if colour.is_some_and(|c| !c.is_valid()) {
+                    return Err(perr(
+                        ErrorCode::Invalid,
+                        format!(
+                            "colour families are 0 … {} and neutral",
+                            ColourFamily::HUES - 1
+                        ),
+                    ));
+                }
+                // Only how its curves are drawn changes: the job and its frames go on.
+                m.colour = colour;
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 Ok(ReplyBody::Measurement(m))
             }

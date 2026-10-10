@@ -589,6 +589,34 @@ pub struct MeasConfig {
     pub kind: MeasKind,
 }
 
+/// The colour family a measurement's curves are drawn in, chosen by the operator in place
+/// of the one its id gives. Families are the display theme's; the daemon only keeps the
+/// choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ColourFamily {
+    /// One of the theme's hues, `0 … HUES − 1`.
+    Hue {
+        /// Index of the hue.
+        index: u8,
+    },
+    /// The neutral (grey) family imported traces take.
+    Neutral,
+}
+
+impl ColourFamily {
+    /// Hues a theme has (the families before neutral).
+    pub const HUES: u8 = 8;
+
+    /// Whether a hue index is one a theme has.
+    pub fn is_valid(self) -> bool {
+        match self {
+            Self::Hue { index } => index < Self::HUES,
+            Self::Neutral => true,
+        }
+    }
+}
+
 /// Measurement entity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -605,4 +633,7 @@ pub struct Measurement {
     pub delay: Option<DelayState>,
     /// Grid of the measurement's main stream.
     pub grid_id: Option<GridId>,
+    /// Colour family the operator chose (`meas.colour`); `None`: the one its id gives.
+    /// Always `None` for a math channel, which takes its owner's.
+    pub colour: Option<ColourFamily>,
 }

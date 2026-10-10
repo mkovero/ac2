@@ -722,6 +722,7 @@ fn session_sample() -> Session {
                     nudged: Seconds(0.000_25),
                     tracking: false,
                 }),
+                colour: None,
             },
             SavedMeasurement {
                 id: MeasId(2),
@@ -733,6 +734,7 @@ fn session_sample() -> Session {
                 },
                 running: true,
                 delay: None,
+                colour: None,
             },
         ],
         spl_logs: vec![SavedSplLog {
@@ -924,16 +926,16 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format is refused with its version named, never read
     // best-effort.
-    std::fs::write(&m, text.replace("\"version\": 20", "\"version\": 19")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 21", "\"version\": 20")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 19
+            found: 20
         }
     );
-    assert!(e.to_string().contains("reads version 20 only"), "{e}");
+    assert!(e.to_string().contains("reads version 21 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))

@@ -26,6 +26,10 @@
 //! measurement does not repaint the others: measurement `id` prefers family
 //! `(id − 1) mod 8`; walking the measurements by id, one whose preferred family is taken
 //! moves on to the next free one, and only past eight measurements do families repeat.
+//! A family the operator chose for a measurement (`Measurement::colour`, kept by the
+//! daemon) comes first: those families are taken before the others are walked, and a
+//! measurement may choose the neutral grey. Stepping a measurement's colour
+//! ([`step_colour`]) skips families another measurement holds.
 //! Shades follow the tree's order within the measurement (slot, then oldest first, then
 //! math channels by id); after the last shade they repeat.
 //!
@@ -35,7 +39,7 @@
 
 use std::collections::BTreeMap;
 
-use ac2_proto::model::{MeasKind, Measurement, TraceMeta, TraceOwner};
+use ac2_proto::model::{ColourFamily, MeasKind, Measurement, TraceMeta, TraceOwner};
 use ac2_proto::units::{MeasId, TraceId};
 
 use crate::meas_list::{group_of, group_order, has_live_curve, math_group, trace_order};
@@ -125,36 +129,93 @@ impl CurveColours {
     }
 }
 
-/// Family index of every measurement that is not a math channel, by id (see the module
-/// docs for the rule).
-pub fn family_indices(meas: &[&Measurement]) -> BTreeMap<MeasId, usize> {
+/// The family of every measurement that is not a math channel, by id (see the module docs
+/// for the rule).
+pub fn family_indices(meas: &[&Measurement]) -> BTreeMap<MeasId, ColourFamily> {
     let n = FAMILIES;
-    let mut ids: Vec<MeasId> = meas
-        .iter()
-        .filter(|m| !matches!(m.config.kind, MeasKind::Math { .. }))
-        .map(|m| m.id)
-        .collect();
-    ids.sort();
+    let mut auto: Vec<MeasId> = Vec::new();
     let mut taken = vec![false; n];
     let mut out = BTreeMap::new();
-    for id in ids {
+    for m in meas
+        .iter()
+        .filter(|m| !matches!(m.config.kind, MeasKind::Math { .. }))
+    {
+        match m.colour.filter(|c| c.is_valid()) {
+            Some(c) => {
+                if let ColourFamily::Hue { index } = c {
+                    taken[usize::from(index)] = true;
+                }
+                out.insert(m.id, c);
+            }
+            None => auto.push(m.id),
+        }
+    }
+    auto.sort();
+    for id in auto {
         let preferred = (id.0 as usize).wrapping_sub(1) % n;
         let i = (0..n)
             .map(|k| (preferred + k) % n)
             .find(|i| !taken[*i])
             .unwrap_or(preferred);
         taken[i] = true;
-        out.insert(id, i);
+        out.insert(id, hue(i));
     }
     out
 }
 
-/// The colours imported traces take in turn, given the measurements' family indices
-/// (see the module docs for the order). Never empty: the neutral base ends it.
-pub fn import_palette(theme: &Theme, hues: &BTreeMap<MeasId, usize>) -> Vec<Color> {
+/// Hue `i` (below [`FAMILIES`]).
+fn hue(i: usize) -> ColourFamily {
+    ColourFamily::Hue {
+        index: u8::try_from(i).unwrap_or(0),
+    }
+}
+
+/// The family measurement `id` steps to from its current one, forwards or backwards through
+/// the hues and then neutral grey (wrapping), skipping those another measurement holds;
+/// `None` when every other is held, or `id` is a math channel or not listed.
+pub fn step_colour(meas: &[&Measurement], id: MeasId, forward: bool) -> Option<ColourFamily> {
+    let fams = family_indices(meas);
+    let current = *fams.get(&id)?;
+    let cycle: Vec<ColourFamily> = (0..FAMILIES)
+        .map(hue)
+        .chain([ColourFamily::Neutral])
+        .collect();
+    let at = cycle.iter().position(|c| *c == current)?;
+    let held = |c: &ColourFamily| fams.iter().any(|(m, f)| *m != id && f == c);
+    let len = cycle.len();
+    (1..len)
+        .map(|k| {
+            if forward {
+                cycle[(at + k) % len]
+            } else {
+                cycle[(at + len - k) % len]
+            }
+        })
+        .find(|c| !held(c))
+}
+
+/// The base colour of family `c` in `theme`.
+pub fn family_base(theme: &Theme, c: ColourFamily) -> Color {
+    match c {
+        ColourFamily::Hue { index } => theme
+            .families
+            .get(usize::from(index))
+            .copied()
+            .unwrap_or(theme.neutral),
+        ColourFamily::Neutral => theme.neutral,
+    }
+}
+
+/// The colours imported traces take in turn, given the measurements' families (see the
+/// module docs for the order). Never empty: the neutral base ends it.
+pub fn import_palette(theme: &Theme, hues: &BTreeMap<MeasId, ColourFamily>) -> Vec<Color> {
     let mut taken = [false; FAMILIES];
-    for i in hues.values() {
-        taken[*i] = true;
+    for c in hues.values() {
+        if let ColourFamily::Hue { index } = c
+            && let Some(t) = taken.get_mut(usize::from(*index))
+        {
+            *t = true;
+        }
     }
     let fams: Vec<Family> = theme
         .families
@@ -188,9 +249,9 @@ pub fn curve_colours(theme: &Theme, meas: &[&Measurement], traces: &[&TraceMeta]
         let family = Family::of(
             theme,
             match g {
-                TraceOwner::Meas { meas: id } => {
-                    hues.get(&id).map_or(theme.neutral, |i| theme.families[*i])
-                }
+                TraceOwner::Meas { meas: id } => hues
+                    .get(&id)
+                    .map_or(theme.neutral, |c| family_base(theme, *c)),
                 TraceOwner::Imported => theme.neutral,
             },
         );

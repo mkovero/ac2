@@ -254,7 +254,8 @@ async fn session_meas_delay_trace_flow() -> R {
             "config_rev": 2,
             "running": false,
             "delay": null,
-            "grid_id": null
+            "grid_id": null,
+            "colour": null
         })
     );
 

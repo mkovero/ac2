@@ -111,7 +111,10 @@ fn families_follow_the_measurement_id_and_survive_a_deletion() {
     let ms: Vec<Measurement> = (1..=4).map(|i| tf(i, &format!("m{i}"))).collect();
     let refs: Vec<&Measurement> = ms.iter().collect();
     let all4 = family_indices(&refs);
-    assert_eq!(all4.values().copied().collect::<Vec<_>>(), [0, 1, 2, 3]);
+    assert_eq!(
+        all4.values().copied().collect::<Vec<_>>(),
+        [hue(0), hue(1), hue(2), hue(3)]
+    );
     // Deleting m2 repaints nobody.
     let without: Vec<&Measurement> = ms.iter().filter(|m| m.id != MeasId(2)).collect();
     let after = family_indices(&without);
@@ -122,13 +125,76 @@ fn families_follow_the_measurement_id_and_survive_a_deletion() {
     let ninth = tf(9, "m9");
     let mut with9 = without.clone();
     with9.push(&ninth);
-    assert_eq!(family_indices(&with9)[&MeasId(9)], 1, "m2's family is free");
+    assert_eq!(
+        family_indices(&with9)[&MeasId(9)],
+        hue(1),
+        "m2's family is free"
+    );
     // Past eight measurements, families repeat.
     let many: Vec<Measurement> = (1..=10).map(|i| tf(i, "m")).collect();
     let refs: Vec<&Measurement> = many.iter().collect();
     let idx = family_indices(&refs);
-    assert_eq!(idx[&MeasId(9)], 0);
-    assert_eq!(idx[&MeasId(10)], 1);
+    assert_eq!(idx[&MeasId(9)], hue(0));
+    assert_eq!(idx[&MeasId(10)], hue(1));
+}
+
+fn chosen(id: u32, c: ColourFamily) -> Measurement {
+    Measurement {
+        colour: Some(c),
+        ..tf(id, &format!("m{id}"))
+    }
+}
+
+#[test]
+fn a_chosen_family_comes_first_and_the_others_fill_around_it() {
+    // m3 chose m1's family: m1 moves to the next free one, m2 keeps its own.
+    let ms = [tf(1, "m1"), tf(2, "m2"), chosen(3, hue(0))];
+    let refs: Vec<&Measurement> = ms.iter().collect();
+    let f = family_indices(&refs);
+    assert_eq!(f[&MeasId(3)], hue(0));
+    assert_eq!(f[&MeasId(1)], hue(1));
+    assert_eq!(f[&MeasId(2)], hue(2));
+    // Neutral takes no hue; an index no theme has is no choice.
+    let ms = [
+        chosen(1, ColourFamily::Neutral),
+        tf(2, "m2"),
+        chosen(3, ColourFamily::Hue { index: 200 }),
+    ];
+    let refs: Vec<&Measurement> = ms.iter().collect();
+    let f = family_indices(&refs);
+    assert_eq!(f[&MeasId(1)], ColourFamily::Neutral);
+    assert_eq!(f[&MeasId(2)], hue(1));
+    assert_eq!(f[&MeasId(3)], hue(2));
+    // The curves follow: m1's live curve is grey.
+    for theme in all() {
+        let c = curve_colours(&theme, &refs, &[]);
+        assert_eq!(c.meas(MeasId(1)), theme.neutral);
+        assert_eq!(c.meas(MeasId(2)), theme.families[1]);
+    }
+}
+
+#[test]
+fn stepping_skips_held_families_and_ends_on_grey_before_wrapping() {
+    let ms = [tf(1, "m1"), tf(2, "m2"), tf(3, "m3")];
+    let refs: Vec<&Measurement> = ms.iter().collect();
+    // m1 (hue 0) steps past m2's and m3's hues.
+    assert_eq!(step_colour(&refs, MeasId(1), true), Some(hue(3)));
+    // Backwards from hue 0: neutral grey is the last of the cycle.
+    assert_eq!(
+        step_colour(&refs, MeasId(1), false),
+        Some(ColourFamily::Neutral)
+    );
+    let ms = [chosen(1, ColourFamily::Neutral), tf(2, "m2")];
+    let refs: Vec<&Measurement> = ms.iter().collect();
+    // From grey forwards wraps to the first free hue (m1's own preferred one).
+    assert_eq!(step_colour(&refs, MeasId(1), true), Some(hue(0)));
+    assert_eq!(step_colour(&refs, MeasId(1), false), Some(hue(7)));
+    // Every other family held: nothing to step to.
+    let mut ms: Vec<Measurement> = (1..=8).map(|i| tf(i, "m")).collect();
+    ms.push(chosen(9, ColourFamily::Neutral));
+    let refs: Vec<&Measurement> = ms.iter().collect();
+    assert_eq!(step_colour(&refs, MeasId(1), true), None);
+    assert_eq!(step_colour(&refs, MeasId(42), true), None, "not listed");
 }
 
 #[test]

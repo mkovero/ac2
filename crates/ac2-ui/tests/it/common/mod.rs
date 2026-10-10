@@ -267,6 +267,7 @@ fn measurement(
         running: true,
         delay,
         grid_id: grid.map(GridDef::id),
+        colour: None,
     }
 }
 

@@ -1410,6 +1410,7 @@ mod tests {
             running: true,
             delay: None,
             grid_id: None,
+            colour: None,
         };
         let mut f = Form::edit_spec(&m, &names(&o)).expect("edit");
         assert_eq!(f.kind.title(), "Edit RTA");
@@ -1592,6 +1593,7 @@ mod tests {
             running: true,
             delay: None,
             grid_id: None,
+            colour: None,
         };
         let mut e = Form::edit_spec(&m, &names(&o)).expect("edit");
         assert_eq!(e.kind, FormKind::TransferEdit);
@@ -1628,6 +1630,7 @@ mod tests {
             running: false,
             delay: None,
             grid_id: None,
+            colour: None,
         };
         let se = Form::edit_sweep(&sm, Some(&o), &names(&o), &outs()).expect("edit");
         assert_eq!(

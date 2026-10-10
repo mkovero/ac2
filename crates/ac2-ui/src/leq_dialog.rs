@@ -793,6 +793,7 @@ mod tests {
             running: true,
             delay: None,
             grid_id: None,
+            colour: None,
         }
     }
 

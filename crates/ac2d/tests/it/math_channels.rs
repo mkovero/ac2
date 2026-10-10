@@ -627,5 +627,13 @@ fn spectrum_difference_on_the_spectrum_stream() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+    // A math channel is drawn in its measurement's colours: it has none of its own.
+    let e = c
+        .call(Command::MeasColour {
+            meas: id,
+            colour: Some(ac2_proto::model::ColourFamily::Neutral),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
     r.h.shutdown();
 }

@@ -113,7 +113,11 @@
       "found_at": 1790000000000000000
      }
     },
-    "grid_id": 8785464140711761104
+    "grid_id": 8785464140711761104,
+    "colour": {
+     "type": "hue",
+     "index": 5
+    }
    }
   }
  },
@@ -451,7 +455,8 @@
     "config_rev": 40,
     "running": true,
     "delay": null,
-    "grid_id": null
+    "grid_id": null,
+    "colour": null
    }
   }
  },
@@ -507,7 +512,8 @@
     "config_rev": 62,
     "running": true,
     "delay": null,
-    "grid_id": 8785464140711761104
+    "grid_id": 8785464140711761104,
+    "colour": null
    }
   }
  },
@@ -690,7 +696,10 @@
     "config_rev": 66,
     "running": false,
     "delay": null,
-    "grid_id": null
+    "grid_id": null,
+    "colour": {
+     "type": "neutral"
+    }
    }
   }
  },

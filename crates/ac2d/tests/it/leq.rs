@@ -865,6 +865,7 @@ async fn a_long_log_in_pages_and_its_history() {
                 config: meter(vec![window(60.0, Some(95.0))]),
                 running: false,
                 delay: None,
+                colour: None,
             }],
             spl_logs: vec![SavedSplLog {
                 info: ac2_traces::spl_log::SplLogInfo {

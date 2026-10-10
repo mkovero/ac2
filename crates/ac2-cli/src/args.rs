@@ -587,9 +587,10 @@ pub enum MeasCmd {
         #[arg(long)]
         watch: bool,
     },
-    /// Change a measurement's averaging (`--average`: spectrum, rta; `--blocks`: tf) or
-    /// Resolution (`--resolution`: tf, sweep). What is not given stays as it is; a running
-    /// measurement starts its average afresh, a sweep's Resolution applies to its next run.
+    /// Change a measurement's averaging (`--average`: spectrum, rta; `--blocks`: tf),
+    /// Resolution (`--resolution`: tf, sweep) or colour (`--colour`). What is not given
+    /// stays as it is; a running measurement starts its average afresh (a colour alone
+    /// leaves it running as it is), a sweep's Resolution applies to its next run.
     Set {
         /// Id or name.
         meas: MeasRef,
@@ -605,6 +606,10 @@ pub enum MeasCmd {
         /// `1/96` (not smoothing).
         #[arg(long, value_name = "1/N")]
         resolution: Option<ResolutionArg>,
+        /// The colour its curves are drawn in: `1` … `8` (the app's `colour N`), `grey`,
+        /// or `auto` (by its id, the default). Not for a math channel (its measurement's).
+        #[arg(long, value_name = "N|grey|auto")]
+        colour: Option<ColourArg>,
     },
     /// Start a measurement.
     Start {
@@ -1682,6 +1687,35 @@ impl FromStr for ResolutionArg {
             .and_then(ac2_proto::model::Resolution::from_ppo)
             .map(Self)
             .ok_or_else(|| format!("{s:?}: Resolution is 1/12, 1/24, 1/48 or 1/96 octave"))
+    }
+}
+
+/// A measurement's colour: `1` … `8` (the families, as the app names them `colour N`),
+/// `grey`, or `auto` (the one its id gives).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ColourArg(pub Option<ac2_proto::model::ColourFamily>);
+
+impl FromStr for ColourArg {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        use ac2_proto::model::ColourFamily;
+        let t = s.trim().to_ascii_lowercase();
+        match t.as_str() {
+            "auto" => return Ok(Self(None)),
+            "grey" | "gray" => return Ok(Self(Some(ColourFamily::Neutral))),
+            _ => {}
+        }
+        t.parse::<u8>()
+            .ok()
+            .filter(|n| (1..=ColourFamily::HUES).contains(n))
+            .map(|n| Self(Some(ColourFamily::Hue { index: n - 1 })))
+            .ok_or_else(|| {
+                format!(
+                    "{s:?}: a colour is 1 … {}, grey or auto",
+                    ColourFamily::HUES
+                )
+            })
     }
 }
 

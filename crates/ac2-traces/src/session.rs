@@ -43,7 +43,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use ac2_proto::GridDef;
-use ac2_proto::model::{ImportFormat, ImportRole, MeasConfig, SplLogRow, TraceKind, TraceMeta};
+use ac2_proto::model::{
+    ColourFamily, ImportFormat, ImportRole, MeasConfig, SplLogRow, TraceKind, TraceMeta,
+};
 use ac2_proto::units::{MeasId, Seconds, WallNs};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -56,7 +58,7 @@ use crate::text::{export_csv, import};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 20;
+pub const VERSION: u32 = 21;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].
@@ -77,6 +79,8 @@ pub struct SavedMeasurement {
     pub running: bool,
     /// Transfer measurements: the applied delay and whether tracking was on.
     pub delay: Option<SavedDelay>,
+    /// Colour family the operator chose; `None`: the one the id gives.
+    pub colour: Option<ColourFamily>,
 }
 
 /// Delay of a saved transfer measurement.

@@ -12,8 +12,8 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, StateSnapshot};
 use crate::grid::{GridDef, GridId};
 use crate::model::{
-    AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, DelayFinding, DelayPick,
-    DelayReference, DeviceId, ElectricalConnection, ExportFormat, FinderBand, Generator,
+    AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, ColourFamily, DelayFinding,
+    DelayPick, DelayReference, DeviceId, ElectricalConnection, ExportFormat, FinderBand, Generator,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MeasConfig,
     Measurement, Mic, MicCurveId, OutputSetup, OwnedTraces, Preview, RecordRequest, RecordingFile,
     RecordingRef, RecordingRun, ReplayPace, ServerInfo, Session, SessionConfig, SessionFile,
@@ -185,6 +185,16 @@ pub enum Command {
         meas: MeasId,
         /// New configuration.
         config: MeasConfig,
+    },
+    /// Choose the colour family a measurement's curves are drawn in (`None`: the one its
+    /// id gives). Its job and config rev go on. Refused for a math channel, which takes its
+    /// owner's.
+    #[serde(rename = "meas.colour")]
+    MeasColour {
+        /// Measurement.
+        meas: MeasId,
+        /// Family, or `None` for the automatic one.
+        colour: Option<ColourFamily>,
     },
     /// Delete a measurement, and say what becomes of the stored traces and math channels
     /// it owns. Refused while a math channel that stays computes from it or from a trace
@@ -607,6 +617,7 @@ impl Command {
             Self::GenCeiling { .. } => "gen.ceiling",
             Self::MeasCreate { .. } => "meas.create",
             Self::MeasUpdate { .. } => "meas.update",
+            Self::MeasColour { .. } => "meas.colour",
             Self::MeasDelete { .. } => "meas.delete",
             Self::MeasStart { .. } => "meas.start",
             Self::MeasStop { .. } => "meas.stop",

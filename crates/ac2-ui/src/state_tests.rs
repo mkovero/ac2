@@ -35,6 +35,7 @@ fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
         running: true,
         delay,
         grid_id: None,
+        colour: None,
     }
 }
 
@@ -882,3 +883,42 @@ mod tf_group;
 
 #[path = "state_panes_tests.rs"]
 mod panes;
+
+/// Shift+C steps the selected measurement's colour to one no other measurement has
+/// (`meas.colour`); the palette's previous colour steps back, grey last.
+#[test]
+fn shift_c_steps_the_selected_measurements_colour() {
+    use ac2_proto::model::ColourFamily;
+    let mut t = T::new();
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    // Main L (1) has colour 1, Sub (2) colour 2: the next free one is colour 3.
+    match t.key("Shift+C").as_slice() {
+        [
+            Request::Call {
+                cmd: Command::MeasColour { meas, colour },
+                what,
+            },
+        ] => {
+            assert_eq!(*meas, MeasId(1));
+            assert_eq!(*colour, Some(ColourFamily::Hue { index: 2 }));
+            assert_eq!(what, "Main L: colour 3");
+        }
+        other => panic!("{other:?}"),
+    }
+    match t
+        .st
+        .update(Msg::Command(CommandId::PrevColour), &t.keys)
+        .as_slice()
+    {
+        [
+            Request::Call {
+                cmd: Command::MeasColour { colour, .. },
+                what,
+            },
+        ] => {
+            assert_eq!(*colour, Some(ColourFamily::Neutral));
+            assert_eq!(what, "Main L: grey");
+        }
+        other => panic!("{other:?}"),
+    }
+}

@@ -521,6 +521,7 @@ SPL_MEASUREMENT = {
     "running": True,
     "delay": None,
     "grid_id": None,
+    "colour": None,
 }
 
 SPL_LOG = {
@@ -634,6 +635,7 @@ def measurement():
             "last_finding": finding(),
         },
         "grid_id": p.grid_id(LOG_GRID),
+        "colour": {"type": "hue", "index": 5},
     }
 
 
@@ -664,6 +666,7 @@ MATH_MEASUREMENT = {
     "running": True,
     "delay": None,
     "grid_id": p.grid_id(LOG_GRID),
+    "colour": None,
 }
 
 
@@ -693,6 +696,7 @@ SWEEP_MEASUREMENT = {
     "running": False,
     "delay": None,
     "grid_id": None,
+    "colour": {"type": "neutral"},
 }
 
 
@@ -870,6 +874,7 @@ def requests():
             },
             mutation=False,
         ),
+        req(62, "meas.colour", {"meas": 3, "colour": {"type": "hue", "index": 2}}),
     ]
 
 

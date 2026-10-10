@@ -409,6 +409,10 @@ pub fn commands() -> Vec<Command> {
             until: WallNs(1_789_500_030_000_000_000),
             step: Some(10),
         },
+        Command::MeasColour {
+            meas: MeasId(3),
+            colour: Some(ColourFamily::Hue { index: 2 }),
+        },
     ]
 }
 
@@ -426,6 +430,7 @@ pub fn sweep_measurement() -> Measurement {
         running: false,
         delay: None,
         grid_id: None,
+        colour: Some(ColourFamily::Neutral),
     }
 }
 
@@ -462,6 +467,7 @@ pub fn math_measurement() -> Measurement {
         running: true,
         delay: None,
         grid_id: Some(log_grid().id()),
+        colour: None,
     }
 }
 
@@ -515,6 +521,7 @@ fn measurement() -> Measurement {
             last_finding: Some(finding()),
         }),
         grid_id: Some(log_grid().id()),
+        colour: Some(ColourFamily::Hue { index: 5 }),
     }
 }
 
@@ -1163,6 +1170,7 @@ pub fn spl_measurement() -> Measurement {
         running: true,
         delay: None,
         grid_id: None,
+        colour: None,
     }
 }
 

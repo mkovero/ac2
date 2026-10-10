@@ -452,6 +452,8 @@ commands! {
     NewSpl => "meas_new_spl", "New SPL meter…", [Global];
     NewMath => "meas_new_math", "New math channel: A ÷ × + − B, or the average of several (mic positions)…", [Global];
     EditMeas => "meas_edit", "Edit measurement…", [Global];
+    NextColour => "meas_colour_next", "Next colour for the selected measurement (one no other measurement has; grey last)", [Global];
+    PrevColour => "meas_colour_prev", "Previous colour for the selected measurement", [Global];
     HideGroup => "hide_group", "Show / hide the selected measurement with every trace under it", [Global];
     MoveTrace => "move_trace", "Move the selected trace or math channel to another measurement (or Imported)…", [Global];
     ToggleGroup => "toggle_group", "Fold / unfold the selected measurement in the list", [Global];
@@ -650,6 +652,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::DeleteSelected, S::Global, k(K::Backspace)),
         (C::TraceRename, S::Global, k(K::F2)),
         (C::Compare, S::Global, k(K::C)),
+        // Shift+C steps the selected measurement's colour (C itself compares).
+        (C::NextColour, S::Global, sh(K::C)),
         (C::CursorLeft, S::Global, sh(K::ArrowLeft)),
         (C::CursorRight, S::Global, sh(K::ArrowRight)),
         (C::Slot1, S::Global, cmd(K::Num1)),
@@ -1130,6 +1134,7 @@ mod tests {
             CommandId::NewRta,
             CommandId::NewSpl,
             CommandId::EditMeas,
+            CommandId::PrevColour,
             CommandId::ToggleGroup,
             CommandId::AverageComplex,
             CommandId::ToggleCursor,

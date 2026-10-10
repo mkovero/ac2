@@ -669,6 +669,7 @@ pub(crate) mod tests {
                 last_finding: Some(refused),
             }),
             grid_id: None,
+            colour: None,
         };
         let why = no_delay_estimate(&m);
         assert_eq!(

@@ -321,6 +321,15 @@ pub fn spec_averaging(a: ac2_proto::model::SpecAveraging) -> String {
     }
 }
 
+/// A measurement's colour family as the operator names it: `colour 1` … `colour 8`, `grey`.
+/// The CLI's `--colour` takes `1` … `8` and `grey`.
+pub fn colour_family(c: ac2_proto::model::ColourFamily) -> String {
+    match c {
+        ac2_proto::model::ColourFamily::Hue { index } => format!("colour {}", index + 1),
+        ac2_proto::model::ColourFamily::Neutral => "grey".into(),
+    }
+}
+
 /// Absolute level with one decimal: `94.0`, `−23.5`.
 pub fn level(v: f64) -> String {
     fixed(v, 1)

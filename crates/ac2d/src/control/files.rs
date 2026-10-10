@@ -99,6 +99,7 @@ impl Control {
                     nudged: d.nudged,
                     tracking: d.tracking,
                 }),
+                colour: m.colour,
             })
             .collect()
     }
@@ -349,6 +350,10 @@ impl Control {
             });
             let grid_id = grids.remove(&sm.id).map(|g| self.register_grid(g));
             let running = sm.running && sm.config.kind.is_job();
+            // A math channel takes its owner's family; an index no theme has is no choice.
+            let colour = sm
+                .colour
+                .filter(|c| c.is_valid() && !matches!(sm.config.kind, MeasKind::Math { .. }));
             let mut meas = Measurement {
                 id: sm.id,
                 config: sm.config,
@@ -357,6 +362,7 @@ impl Control {
                 running,
                 delay,
                 grid_id,
+                colour,
             };
             self.ensure_spl_log(&meas, None);
             meas.config_rev = Rev(self.store.rev().0 + 1);
