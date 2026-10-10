@@ -7,7 +7,7 @@ reruns the hand comparison of 2026-10-07 (`docs/rigs/pupu.md`, "REW cross-check,
 and adds an ambient SPL check and the speaker path.
 
 ```
-crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,osm,comparison})
+crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,osm,coherence-study,comparison})
 rigs/pupu.toml   ports, roles, paths, levels, stage settings for pupu
 comparison.md    ac2 against REW and OSM: current results, definitions, open differences
 osm.toml         the OSM stage: harness and ac2 binaries, matched settings, cases, recordings
@@ -410,6 +410,13 @@ noted and skipped.
     (Carter, Knapp & Nuttall), not against the truth or ac2. At 0 dB SNR, E[γ̂²] = 0.555,
     against a truth of 0.5.
   - ac2's γ² is judged against the truth.
+    Its residual against its own finite-average expectation is kept beside it (INFO): Carter
+    per column at ac2's model effective averages (bins per column, stage, crossover blend).
+  - `python -m crosscheck coherence-study [--seeds N]` repeats noise fixtures (SNR +20…−3 dB,
+    two averaging settings) through both and tabulates mean ± sd against each model.
+  - Mask counts and the judged-column count are INFO checks per case, so every agreement
+    figure carries its population; rig takes also keep the max |difference| (and its
+    frequency) and the 95th percentile beside the judged median.
 - **Masks** (counted per case in the report):
   - OSM bins where the reference is more than 70 dB below its strongest bin. OSM's "DC
     removal" subtracts the block sum in float32, which sets a rounding floor near −80 dB.
