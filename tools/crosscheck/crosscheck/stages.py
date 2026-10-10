@@ -21,6 +21,13 @@ from .levels import Policy, PolicyError
 from .rew import Rew, RewError
 
 
+def _resolution_args(ctx) -> list[str]:
+    """`--resolution` for ac2's sweep and TF; left out at the default, which ac2 uses anyway."""
+    from .baseline import DEFAULT_PPO, resolution_of
+    ppo = resolution_of(ctx.manifest)
+    return [] if ppo == DEFAULT_PPO else ["--resolution", f"1/{ppo}"]
+
+
 @dataclass
 class Ctx:
     rig: dict
@@ -470,7 +477,8 @@ def ac2_sweep_once(ctx: Ctx, pname: str, vname: str, frm: str, to: str, duration
     ctx.ac2.meas_rm(name)
     ctx.ac2.run("meas", "new", "sweep", "--name", name, "--ref", pc["ref_in"], "--meas", pc["meas_in"],
                 "--out", ",".join(map(str, outs)), "--level", f"{level:g}dbfs", "--from", frm, "--to", to,
-                "--duration", f"{duration:g}s", "--repeats", repeats, "--lf-harmonics", lf_harmonics)
+                "--duration", f"{duration:g}s", "--repeats", repeats, "--lf-harmonics", lf_harmonics,
+                *_resolution_args(ctx))
     cfg = _sweep_config(ctx, name)
     start = float(cfg["sweep"]["start"])
     if abs(float(cfg["level"]) - level) > 1e-6 or sorted(cfg["outputs"]) != sorted(o - 1 for o in outs):
@@ -568,7 +576,7 @@ def ac2_tf(ctx: Ctx, pname: str):
     name = f"xc-{pname}-tf"
     ctx.ac2.meas_rm(name)
     ctx.ac2.run("meas", "new", "tf", "--name", name, "--ref", pc["ref_in"], "--meas", pc["meas_in"],
-                "--blocks", sc["blocks"], "--start")
+                "--blocks", sc["blocks"], *_resolution_args(ctx), "--start")
     settle = float(sc["settle_seconds"])
     ins = [int(pc["meas_in"]), int(pc["ref_in"])]
     cap = {}

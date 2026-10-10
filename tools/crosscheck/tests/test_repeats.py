@@ -67,8 +67,18 @@ def test_takes_group_by_stage_and_level_and_count_a_run_once():
     a_more = take("r1", {"x": e(0.1), "y": e(0.2)})
     b = take("r2", {"x": e(0.2)}, level=-50.0)
     g = R.group([a, b, a_more])
-    assert sorted(g) == [("genelec", -50.0), ("genelec", -30.0)]
-    assert g[("genelec", -30.0)] == [a_more]
+    assert sorted(g) == [("genelec", -50.0, 48), ("genelec", -30.0, 48)]
+    assert g[("genelec", -30.0, 48)] == [a_more]
+
+
+def test_resolutions_are_not_pooled():
+    a = take("r1", sines(-0.45, -0.29, -0.03))
+    b = take("r2", sines(-0.40, -0.20, -0.03))
+    b["resolution_ppo"] = 96
+    g = R.group([a, b])
+    assert sorted(g) == [("genelec", -30.0, 48), ("genelec", -30.0, 96)]
+    md = "\n".join(R.render(t) for t in g.values())
+    assert "1/96 octave: 1 takes" in md and "| 1/96 | sine_mag | 1000 |" in md and "| 1/48 | sine_mag |" in md
 
 
 def test_missing_values_are_left_out_not_zero():
@@ -77,3 +87,12 @@ def test_missing_values_are_left_out_not_zero():
     assert s["n"] == 1 and s["mean"] == -0.2 and s["statuses"] == ["INCONCLUSIVE", "PASS"]
     md = R.render(takes, match="^k$")
     assert "| k | dB | 1 |" in md
+
+
+def test_stage_passes_resolution_only_when_not_default():
+    from types import SimpleNamespace
+
+    from crosscheck.stages import _resolution_args
+    assert _resolution_args(SimpleNamespace(manifest={"flags": {"resolution": "1/48"}})) == []
+    assert _resolution_args(SimpleNamespace(manifest={"flags": {}})) == []
+    assert _resolution_args(SimpleNamespace(manifest={"flags": {"resolution": "1/96"}})) == ["--resolution", "1/96"]

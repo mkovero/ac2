@@ -169,7 +169,7 @@ def main(a) -> int:
            "ac2_version": rep.get("ac2_build"), "rew_version": rep.get("rew_version"),
            "flags": {"emit": a.emit, "emit_speaker": a.emit_speaker, "allow_electrical_level": a.allow_electrical_level,
                      "allow_speaker_level": a.allow_speaker_level,
-                     "stages": want, "skip": a.skip},
+                     "stages": want, "skip": a.skip, "resolution": getattr(a, "resolution", "1/48")},
            "mains_hz": rig["rig"].get("mains_hz", 50.0), "paths": {}, "preflight": rep,
            # the rig gets a copy without .git; rig-run.sh passes the commit it copied
            "suite_commit": os.environ.get("CROSSCHECK_SUITE_COMMIT") or None}

@@ -51,14 +51,22 @@ def baselines_from(path: Path) -> list[dict]:
     return [bl.make_baseline(res, st, path.name) for st in bl.stages_of(res)]
 
 
-def group(baselines: list[dict]) -> dict[tuple[str, float | None], list[dict]]:
-    """Takes by (stage, level): a residual depends on both, so takes are only pooled within one.
+def resolution(b: dict) -> int | None:
+    """A take's column resolution (per octave); None for a stage without ac2 columns."""
+    if b["stage"] == "ambient" or b["stage"] in bl.HOST_STAGES:
+        return None
+    return b.get("resolution_ppo", bl.DEFAULT_PPO)
+
+
+def group(baselines: list[dict]) -> dict[tuple[str, float | None, int | None], list[dict]]:
+    """Takes by (stage, level, resolution): a residual depends on each (a column averages the
+    room's structure over its width), so takes are only pooled within one.
     One run counts once (a run directory and its stored baseline are the same take); the copy
     with more checks is kept."""
-    out: dict[tuple[str, float | None], dict] = {}
+    out: dict[tuple[str, float | None, int | None], dict] = {}
     for i, b in enumerate(baselines):
         run = (b.get("provenance") or {}).get("run") or f"#{i}"
-        g = out.setdefault((b["stage"], b.get("level_dbfs")), {})
+        g = out.setdefault((b["stage"], b.get("level_dbfs"), resolution(b)), {})
         if run not in g or len(b["checks"]) > len(g[run]["checks"]):
             g[run] = b
     return {k: list(v.values()) for k, v in out.items()}
@@ -170,10 +178,11 @@ FOCUS = (("Steady sines: magnitude", r"\.sine_mag\."), ("Steady sines: phase", r
 
 
 def render(takes: list[dict], match: str | None = None) -> str:
-    stage, level = takes[0]["stage"], takes[0].get("level_dbfs")
+    stage, level, ppo = takes[0]["stage"], takes[0].get("level_dbfs"), resolution(takes[0])
     runs = [((b.get("provenance") or {}).get("run") or "?") for b in takes]
     builds = sorted({str((b.get("provenance") or {}).get("ac2_build")) for b in takes})
-    md = [f"## {stage}" + ("" if level is None else f" at {level:g} dBFS") + f": {len(takes)} takes", "",
+    md = [f"## {stage}" + ("" if level is None else f" at {level:g} dBFS")
+          + ("" if ppo is None else f", 1/{ppo} octave") + f": {len(takes)} takes", "",
           f"Runs: {', '.join(runs)}. ac2 builds: {', '.join(builds)}.", "",
           "Signed values across takes: sd is the sample standard deviation (n − 1); `0 in mean±2se` "
           "is whether the mean lies within two standard errors of zero (no bias shown by these takes); "
@@ -188,14 +197,15 @@ def render(takes: list[dict], match: str | None = None) -> str:
         rows = split(takes)
         if rows:
             md += ["### Column-to-tone split at the sines", "",
-                   "measurement − sine = processing (measurement − its capture's 1/48-oct column) + "
+                   f"measurement − sine = processing (measurement − its capture's 1/{ppo}-oct column) + "
                    "column-to-tone (column − the same capture narrow at the sine) + capture vs sine "
                    "(narrow − sine). Mean ± sd over the takes.", "",
-                   "| quantity | f Hz | measurement | capture | takes | total | processing | column-to-tone | capture vs sine |",
-                   "|---|---|---|---|---|---|---|---|---|"]
+                   "| resolution | quantity | f Hz | measurement | capture | takes | total | processing | column-to-tone "
+                   "| capture vs sine |",
+                   "|---|---|---|---|---|---|---|---|---|---|"]
             for r in rows:
                 cell = lambda s: _n(s["mean"]) + ("" if s.get("sd") is None else f" ± {s['sd']:.3f}")
-                md.append(f"| {r['quantity']} | {r['f']:g} | {r['source']} | {r['capture']} | {r['total']['n']} | "
+                md.append(f"| 1/{ppo} | {r['quantity']} | {r['f']:g} | {r['source']} | {r['capture']} | {r['total']['n']} | "
                           f"{cell(r['total'])} | {cell(r['processing'])} | {cell(r['column_to_tone'])} | "
                           f"{cell(r['capture_vs_sine'])} |")
             md.append("")
@@ -206,6 +216,6 @@ def report(sources: list[Path], match: str | None = None) -> str:
     bs = [b for s in sources for b in baselines_from(s)]
     groups = group(bs)
     md = ["# Repeated takes", ""]
-    for (stage, level), takes in sorted(groups.items(), key=lambda t: (t[0][0], t[0][1] or 0.0)):
+    for _, takes in sorted(groups.items(), key=lambda t: (t[0][0], t[0][1] or 0.0, t[0][2] or 0)):
         md.append(render(takes, match))
     return "\n".join(md) + "\n"

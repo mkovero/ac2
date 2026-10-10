@@ -199,3 +199,27 @@ def test_baseline_keeps_population_and_signed_parts():
     assert set(b["checks"]["xone.etc"]) == {"status", "value", "unit", "tol"}
     # one line per check survives the extra fields
     assert json.loads(B.dumps(b)) == b
+
+
+def test_resolutions_are_kept_apart(tmp_path):
+    root = tmp_path / "baselines"
+    c = [chk("xone.level.ac2_ref_vs_sine", "level", 0.0, tol=(0.1, 0.3))]
+    r48 = results(c, emit="-30dbfs")
+    _, w48 = B.write_baselines(write_run(tmp_path, "r48", r48), root)
+    r96 = results(c, emit="-30dbfs")
+    r96["manifest"]["flags"]["resolution"] = "1/96"
+    d96 = write_run(tmp_path, "r96", r96)
+    # no 1/96 baseline yet: the 1/48 one is not used
+    rc, blocks, _ = B.compare(d96, root, out=tmp_path / "o1")
+    assert "no baseline" in blocks[0]["skipped"]
+    _, w96 = B.write_baselines(d96, root)
+    assert [p.name for p in w48] == ["xone-30dbfs.json"] and [p.name for p in w96] == ["xone-30dbfs-r96.json"]
+    assert "resolution_ppo" not in json.loads(w48[0].read_text())
+    assert json.loads(w96[0].read_text())["resolution_ppo"] == 96
+    # an explicit file of another resolution is refused
+    rc, blocks, _ = B.compare(d96, w48[0], out=tmp_path / "o2")
+    assert "not comparable" in blocks[0]["skipped"]
+    rc, blocks, _ = B.compare(d96, root, out=tmp_path / "o3")
+    assert "diff" in blocks[0]
+    assert B.resolution_of({"flags": {"resolution": "1/24"}}) == 24 and B.resolution_of({}) == 48
+    assert B.baseline_name("ambient", None, None) == "ambient.json"

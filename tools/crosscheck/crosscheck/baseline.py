@@ -128,14 +128,39 @@ def stage_level(results: dict, stage: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def baseline_name(stage: str, level: float | None) -> str:
+# ac2's sweep and TF columns per octave unless the run asked for another Resolution
+DEFAULT_PPO = 48
+
+
+def resolution_of(manifest: dict | None) -> int:
+    """Columns per octave the run asked ac2 for (`--resolution 1/N`), 48 when not given."""
+    text = ((manifest or {}).get("flags") or {}).get("resolution")
+    if not text:
+        return DEFAULT_PPO
+    m = re.match(r"\s*1\s*/\s*(\d+)\s*$", str(text))
+    if not m:
+        raise ValueError(f"resolution {text!r}: expected 1/N")
+    return int(m.group(1))
+
+
+def stage_resolution(results: dict, stage: str) -> int | None:
+    """A stage's column resolution; None for a stage without ac2 sweeps or TFs (ambient, host)."""
+    if stage == "ambient" or stage in HOST_STAGES:
+        return None
+    return resolution_of(results.get("manifest"))
+
+
+def baseline_name(stage: str, level: float | None, ppo: int | None = None) -> str:
+    """A residual read on another column width is another population (a column averages the
+    room's structure over its width), so a non-default resolution has a baseline of its own."""
+    tail = "" if ppo in (None, DEFAULT_PPO) else f"-r{ppo}"
     if level is None:
-        return f"{stage}.json"
-    return f"{stage}-{abs(level):g}dbfs.json"
+        return f"{stage}{tail}.json"
+    return f"{stage}-{abs(level):g}dbfs{tail}.json"
 
 
-def baseline_path(root: Path, rig: str, stage: str, level: float | None) -> Path:
-    return Path(root) / rig / baseline_name(stage, level)
+def baseline_path(root: Path, rig: str, stage: str, level: float | None, ppo: int | None = None) -> Path:
+    return Path(root) / rig / baseline_name(stage, level, ppo)
 
 
 # ------------------------------------------------------------------ baselines
@@ -164,7 +189,9 @@ def make_baseline(results: dict, stage: str, run_id: str) -> dict:
     summary = {}
     for e in checks.values():
         summary[e["status"]] = summary.get(e["status"], 0) + 1
+    ppo = stage_resolution(results, stage)
     return {"schema": SCHEMA, "rig": man.get("rig"), "stage": stage, "level_dbfs": stage_level(results, stage),
+            **({"resolution_ppo": ppo} if ppo not in (None, DEFAULT_PPO) else {}),
             "provenance": {"run": run_id, "started": man.get("started"), "ac2_build": man.get("ac2_version"),
                            "rew_version": man.get("rew_version"), "osm_version": man.get("osm_version"),
                            "flags": man.get("flags"),
@@ -351,13 +378,15 @@ def _tolerances(path: Path | None) -> dict:
     return tomllib.loads((path or TOLERANCES).read_text())
 
 
-def find_baseline(where: Path, rig: str | None, stage: str, level: float | None) -> Path | None:
-    """`where` is a baseline file or a directory holding <rig>/<stage>-<level>.json
+def find_baseline(where: Path, rig: str | None, stage: str, level: float | None,
+                  ppo: int | None = None) -> Path | None:
+    """`where` is a baseline file or a directory holding <rig>/<stage>-<level>[-r<N>].json
     (host/<stage>.json for a host stage)."""
     where = Path(where)
     if where.is_file():
         return where
-    for p in ([where / rig / baseline_name(stage, level)] if rig else []) + [where / baseline_name(stage, level)]:
+    name = baseline_name(stage, level, ppo)
+    for p in ([where / rig / name] if rig else []) + [where / name]:
         if p.exists():
             return p
     return None
@@ -374,15 +403,18 @@ def compare(run_dir: Path, where: Path | None = None, tolerances: Path | None = 
     for st in stages or stages_of(res):
         lvl = stage_level(res, st)
         blk = {"stage": st, "level": lvl}
-        bp = find_baseline(where, rig, st, lvl)
+        ppo = stage_resolution(res, st)
+        bp = find_baseline(where, rig, st, lvl, ppo)
         if bp is None:
             blk["skipped"] = f"no baseline for this stage and level under {where}"
             blocks.append(blk)
             continue
         base = json.loads(bp.read_text())
-        if base.get("stage") != st or base.get("level_dbfs") != lvl:
-            blk["skipped"] = (f"{bp} is {base.get('stage')} at {_lvl(base.get('level_dbfs'))}; "
-                              f"a different stage or level is not comparable")
+        bppo = base.get("resolution_ppo", DEFAULT_PPO if ppo is not None else None)
+        if base.get("stage") != st or base.get("level_dbfs") != lvl or bppo != ppo:
+            blk["skipped"] = (f"{bp} is {base.get('stage')} at {_lvl(base.get('level_dbfs'))}"
+                              + (f", 1/{bppo} octave" if bppo else "")
+                              + "; a different stage, level or resolution is not comparable")
             blocks.append(blk)
             continue
         cur = make_baseline(res, st, run_dir.name)
@@ -421,7 +453,7 @@ def write_baselines(run_dir: Path, where: Path | None = None, stages: list[str] 
         if st != "ambient" and st not in HOST_STAGES and lvl is None:
             raise ValueError(f"{run_dir}: stage {st} has no level in the manifest")
         b = make_baseline(res, st, run_dir.name)
-        p = baseline_path(root, rig, st, lvl)
+        p = baseline_path(root, rig, st, lvl, stage_resolution(res, st))
         if p.exists():
             old = json.loads(p.read_text())
             d = diff(old, b, tol)

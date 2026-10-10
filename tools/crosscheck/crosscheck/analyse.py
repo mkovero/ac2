@@ -7,7 +7,7 @@ number means. Sources:
 - REW offline import (meas and ref imported separately, meas/ref formed here), REW live
   (fixtures only: needs REW Pro to start over the API);
 - direct: numpy cross-spectrum Σ M·R*/Σ|R|² of a raw recording (REW's stage, or ac2's own
-  capture of its sweep) in the same 1/48-octave bands;
+  capture of its sweep) in the same bands, ac2's column width (`--resolution`, 1/48 octave by default);
 - steady sines: least-squares phasors, Blackman harmonics, group delay from ±1/48-oct pairs.
 """
 from __future__ import annotations
@@ -113,6 +113,12 @@ class Analysis:
     def __init__(self, run: RunData, tolerances: dict | None = None):
         self.run = run
         self.tol = tolerances or tomllib.loads(TOLERANCES.read_text())
+        # ac2's columns per octave as the run asked for them: every direct estimate, REW
+        # average and mains guard is taken over the same band width, so a column's
+        # averaging of the room's structure is the same on every source
+        from .baseline import resolution_of
+        self.ppo = resolution_of(getattr(run, "manifest", None))
+        self.frac = 1 / self.ppo
         self.checks: list[Check] = []
         self.tables: dict[str, dict] = {}
         self.series: dict[str, dict] = {}  # for plots
@@ -210,6 +216,13 @@ class Analysis:
         sw = p.sweeps[p.primary]
         f, H, _ = sw.trace.complex_response()
         self.f = f
+        if len(f) > 2:
+            # the grid ac2 stored is the truth on its resolution; the manifest only says what was asked
+            got = int(round(1 / float(np.median(np.diff(np.log2(f))))))
+            if got != self.ppo:
+                self.notes.append(f"{p.name}: ac2's sweep grid is 1/{got} octave, the run asked for 1/{self.ppo}; "
+                                  f"read on 1/{got}")
+                self.ppo, self.frac = got, 1 / got
         # One phase reference for every source: meas ÷ ref as the inputs saw it, the path's
         # delay inside the phase, as the steady sines and the direct cross-spectra measure it.
         # ac2 refers its sweep phase to the arrival it reports, so the arrival goes back in.
@@ -242,26 +255,26 @@ class Analysis:
         if p.rew and p.rew.meas_fr is not None:
             if p.rew.ref_fr is not None:
                 Hr = p.rew.meas_fr.H / p.rew.ref_fr.H
-                src["REW offline"] = dsp.band_mean(p.rew.meas_fr.f, Hr, f)
+                src["REW offline"] = dsp.band_mean(p.rew.meas_fr.f, Hr, f, self.frac)
             else:
-                src["REW offline"] = dsp.band_mean(p.rew.meas_fr.f, p.rew.meas_fr.H, f)
+                src["REW offline"] = dsp.band_mean(p.rew.meas_fr.f, p.rew.meas_fr.H, f, self.frac)
         if p.rew_live and p.rew_live.meas_fr is not None:
-            src["REW live"] = dsp.band_mean(p.rew_live.meas_fr.f, p.rew_live.meas_fr.H, f)
+            src["REW live"] = dsp.band_mean(p.rew_live.meas_fr.f, p.rew_live.meas_fr.H, f, self.frac)
         # each direct estimate with its recording's own delay (IR peak) taken out of the band sums
         self.direct_delay = {}
         if p.rec is not None:
             self.direct_delay["direct (REW recording)"] = tau_d = direct_ir_peak(p.rec)
-            Hd, cd = dsp.cross_spectrum_bands(p.rec.meas, p.rec.ref, p.rec.fs, f, delay_s=tau_d)
+            Hd, cd = dsp.cross_spectrum_bands(p.rec.meas, p.rec.ref, p.rec.fs, f, self.frac, delay_s=tau_d)
             src["direct (REW recording)"] = Hd
             self.coh["direct (REW recording)"] = cd
         for name, s in p.sweeps.items():
             if s.raw is not None:
                 tau_d = self.direct_delay[f"direct (ac2 capture {name})"] = direct_ir_peak(s.raw)
-                Hd, cd = dsp.cross_spectrum_bands(s.raw.meas, s.raw.ref, s.raw.fs, f, delay_s=tau_d)
+                Hd, cd = dsp.cross_spectrum_bands(s.raw.meas, s.raw.ref, s.raw.fs, f, self.frac, delay_s=tau_d)
                 src[f"direct (ac2 capture {name})"] = Hd
         if p.tf_raw is not None:
             tau_d = self.direct_delay["direct (TF capture)"] = direct_ir_peak(p.tf_raw)
-            Hd, cd = dsp.cross_spectrum_bands(p.tf_raw.meas, p.tf_raw.ref, p.tf_raw.fs, f, delay_s=tau_d)
+            Hd, cd = dsp.cross_spectrum_bands(p.tf_raw.meas, p.tf_raw.ref, p.tf_raw.fs, f, self.frac, delay_s=tau_d)
             src["direct (TF capture)"] = Hd
             self.coh["direct (TF capture)"] = cd
         # REW's offline import refers each channel to its own timing marker, which drops the
@@ -283,7 +296,7 @@ class Analysis:
         if p.noise is not None and p.mains_hz:
             self.mains_hz = [x["hz"] for x in dsp.mains_lines(p.noise.meas, p.noise.fs,
                                                               p.mains_hz, thr_db=6.0)]
-        self.mains_cols = dsp.mains_columns(f, self.mains_hz, 1 / 48, guard_hz=MAINS_GUARD_HZ)
+        self.mains_cols = dsp.mains_columns(f, self.mains_hz, self.frac, guard_hz=MAINS_GUARD_HZ)
         # Each source's per-column noise (relative error of H) from the SNR of the recording it
         # came from, against the silent recording of the same input. A windowed deconvolution
         # (ac2's sweep) rejects more noise than the whole recording holds, so this is an upper bound.
@@ -299,7 +312,7 @@ class Analysis:
             for name, raw in rec_of.items():
                 if name in src and raw.fs == p.noise.fs:
                     if id(raw) not in cache:
-                        cache[id(raw)] = dsp.band_noise_rel(raw.meas, p.noise.meas, raw.fs, f)
+                        cache[id(raw)] = dsp.band_noise_rel(raw.meas, p.noise.meas, raw.fs, f, self.frac)
                     self.noise_rel[name] = cache[id(raw)]
         # The live TF's own noise from its coherence over its FIFO blocks: σ = √((1 − γ²) / (2 γ² n)).
         # n = blocks counts every block as independent, though they overlap, so this is a lower
@@ -433,7 +446,7 @@ class Analysis:
                              f"{tau*1e6:+.2f}", int(m.sum())])
         self.table(f"{p.name}: magnitude and phase per band", ["pair", "band Hz", "Δ dB mean ± spread",
                    "Δ° mean ± spread", "delay removed µs", "n"], rows,
-                   "1/48-octave columns of ac2's primary sweep; the TF only where γ² ≥ 0.99. Every source on one "
+                   f"1/{self.ppo}-octave columns of ac2's primary sweep; the TF only where γ² ≥ 0.99. Every source on one "
                    "phase reference (meas ÷ ref with the path delay in it): ac2's arrival and REW's lost delay "
                    "put back. Columns within "
                    f"{MAINS_GUARD_HZ:g} Hz of a mains line on the measurement input left out "
@@ -446,7 +459,7 @@ class Analysis:
                 fc = tone["f"]
                 if "ratio_deg" not in tone and "ratio_db" not in tone:
                     continue
-                # A room's response has structure finer than a 1/48-octave column (reflections
+                # A room's response has structure finer than a column (reflections
                 # comb it at 1/Δt): columns read between their centres and the sine's single frequency then
                 # differ by that structure, not by an error. The direct estimate of REW's
                 # recording read both ways measures it, and it counts as the comparison's
@@ -470,7 +483,7 @@ class Analysis:
                     narrows[cname] = nr
                     if cname == "direct (REW recording)" and not elec:
                         # the column estimate read the way every source is read: interpolated
-                        # between the 1/48-octave columns around fc; where the narrow band is
+                        # between the columns around fc; where the narrow band is
                         # noisy the structure is not known any better
                         hc = self.at(f, S[cname], np.array([fc]))[0]
                         if np.isfinite(hc):
@@ -516,7 +529,7 @@ class Analysis:
                                  status="INFO" if info_only else judge_u(dpd, tp, up),
                                  meaning=f"sine {tone['ratio_deg']:+.3f}°, {name} {np.rad2deg(np.angle(h)):+.3f}°{note}"
                                          + ((f"; the narrow band's own noise (coherence) ±{up:.1f}°" if narrow_row else
-                                             f"; the room's fine structure: a 1/48-oct column and the sine's frequency "
+                                             f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                              f"differ by {up:.1f}° in the direct estimate") if up else ""),
                                  detail={"uncertainty": up})
                     if dmd is not None:
@@ -526,7 +539,7 @@ class Analysis:
                                  status=judge_u(dmd, tm, ud) if not (name.startswith("REW live") or info_only) else "INFO",
                                  meaning=f"sine {tone['ratio_db']:+.3f} dB (meas ÷ ref), {name} {dsp.db(h):+.3f} dB"
                                          + ((f"; the narrow band's own noise (coherence) ±{ud:.2f} dB" if narrow_row else
-                                             f"; the room's fine structure: a 1/48-oct column and the sine's frequency "
+                                             f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                              f"differ by {ud:.2f} dB in the direct estimate") if ud else ""),
                                  detail={"uncertainty": ud})
                     rows.append([f"{fc:g}", name, "" if dmd is None else f"{dmd:+.3f}", "" if dpd is None else f"{dpd:+.3f}"])
@@ -573,7 +586,7 @@ class Analysis:
                          meaning="both state the loopback's gain re the digital level emitted; a 3.01 dB difference "
                                  "would be a full-scale-sine vs RMS convention slip")
         # REW's responses are unsmoothed FFT bins (0.37 Hz at 96 kHz), ac2's are 1/48-octave
-        # columns (14 Hz wide at 1 kHz): one bin against one column reads the room's structure
+        # columns by default (14 Hz wide at 1 kHz): one bin against one column reads the room's structure
         # inside the column (0.1 dB and more on a speaker), not a level. REW's meas ÷ ref is
         # averaged into ac2's columns as ac2 reads them, and the median over 500 Hz–2 kHz judged.
         sel = (f >= 500) & (f < 2000) & np.isfinite(self.src[f"ac2 sweep {p.primary}"])
@@ -583,13 +596,13 @@ class Analysis:
                 rs = rew_sets[label]
                 Hm, Hr = rs.meas_fr, rs.ref_fr
                 ratio = 10 ** ((Hm.mag - Hr.mag) / 20)
-                rc = dsp.band_mean(Hm.f, ratio, f[sel])
+                rc = dsp.band_mean(Hm.f, ratio, f[sel], self.frac)
                 d = float(np.median(dsp.db(self.src[f"ac2 sweep {p.primary}"][sel]) - dsp.db(rc)))
                 tl = _tol(self.tol["level"]["offset_db"])
                 self.add(id=f"{p.name}.level.ac2_vs_rew_meas_minus_ref", group="level", path=p.name,
                          title=f"ac2 meas÷ref vs {label} (meas − ref)", value=d, unit="dB", tol=tl, status=judge(d, tl),
                          meaning="ac2 states meas ÷ ref; REW states each channel re the stimulus; their difference "
-                                 "must be ac2's number. Median over the 1/48-octave columns 500 Hz–2 kHz, REW's "
+                                 f"must be ac2's number. Median over the 1/{self.ppo}-octave columns 500 Hz–2 kHz, REW's "
                                  f"bins power-averaged into each (one bin at 1 kHz read {a_db - (g['meas'] - g['ref']):+.3f} dB)",
                          detail={"single_bin_1k": a_db - (g["meas"] - g["ref"]), "n": int(sel.sum())})
                 if ref_lvl is not None:
@@ -807,7 +820,7 @@ class Analysis:
         jc = np.searchsorted(fm, fc)
         cen_mains = np.array([bool(self.mains_cols[m][max(j - 2, 0):j + 2].any()) for j in jc])
         # the neighbour difference of two columns, each with the fit's phase noise σφ
-        sig["ac2 as displayed (central difference)"] = np.sqrt(2) * sp / (2 * np.pi * fc * (2 ** (1 / 48) - 2 ** (-1 / 48)))
+        sig["ac2 as displayed (central difference)"] = np.sqrt(2) * sp / (2 * np.pi * fc * (2 ** self.frac - 2 ** -self.frac))
         ests["ac2 ±1/12-oct fit"], sig["ac2 ±1/12-oct fit"] = g, se
         tau = self.rew_put_back
         for rs in (p.rew_live, p.rew):
@@ -880,7 +893,7 @@ class Analysis:
                                  + (why or (": wider than the pass limit, so neither a pass nor a fail can be read"
                                             if st == "INCONCLUSIVE" else ""))
                                  + ("; REW's per-bin derivative of its own exports, context only" if own else "")
-                                 + ("; ac2's displayed derivative takes −Δφ/Δω between neighbouring 1/48-oct columns"
+                                 + (f"; ac2's displayed derivative takes −Δφ/Δω between neighbouring 1/{self.ppo}-oct columns"
                                     if "central" in name else ""),
                          detail={"uncertainty_2sigma": float(u)})
             rows.append(row)
@@ -1067,7 +1080,7 @@ class Analysis:
         hn = dsp.deconvolve_noise(seg_ref, seg_meas, noise_ref, noise_meas)
         d = int(np.argmax(np.abs(h[: int(0.05 * fs)])))
         b = s.trace.freq
-        fsel = b["freq_hz"][(b["freq_hz"] >= 20) & (b["freq_hz"] <= 10000)][::4]
+        fsel = b["freq_hz"][(b["freq_hz"] >= 20) & (b["freq_hz"] <= 10000)][::max(1, self.ppo // 12)]
         r = dsp.sweep_harmonics(h, d, fs, L, fsel, pre=pre, post=post, noise_h=hn, repeats=repeats)
         # Fine: an order in its own window where the shared band had to be widened to the
         # window's resolution (3 cells against 1/24 octave), as ac2 picks it.
@@ -1114,7 +1127,7 @@ class Analysis:
             b = s.trace.freq
             for k in range(2, 6):
                 kf = k * b["freq_hz"]
-                lo, hi = kf * 2 ** (-1 / 48), kf * 2 ** (1 / 48)
+                lo, hi = kf * 2 ** -self.frac, kf * 2 ** self.frac
                 hit = [(i, hz[(hz >= lo[i]) & (hz <= hi[i])]) for i in range(len(kf))]
                 for i, hh in hit:
                     if len(hh) and b["freq_hz"][i] <= 2000:
@@ -1336,7 +1349,7 @@ class Analysis:
             if k.startswith("direct") and np.isfinite(cd[m]).any():
                 self.add(id=f"{p.name}.coherence.{k}", group="coherence", path=p.name, title=f"{k}: band coherence (min)",
                          value=float(np.nanmin(cd[m])), unit="", tol=None, status="INFO",
-                         meaning="|Σ M·R*|² / (Σ|M|² Σ|R|²) within each 1/48-oct band of the whole recording")
+                         meaning=f"|Σ M·R*|² / (Σ|M|² Σ|R|²) within each 1/{self.ppo}-oct band of the whole recording")
 
     # ------------------------------------------------------------ speaker path
     def absolute_spl(self, p: PathData):
@@ -1374,7 +1387,7 @@ class Analysis:
                 fr = p.rew.meas_fr_spl
                 k = int(np.argmin(np.abs(fr.f - fc)))
                 vals["REW (SPL, cal from ac2)"] = float(np.mean(fr.mag[max(k - 2, 0):k + 3])) - p.rew.level_dbfs
-            # ac2's sources are read at 1/48-octave columns, REW's averaged around the sine's bin:
+            # ac2's sources are read at their columns, REW's averaged around the sine's bin:
             # the columns carry the room's fine structure against the sine's single frequency
             ud = self.fine_u.get(p.name, {}).get(fc, 0.0)
             for name, v in vals.items():
@@ -1387,7 +1400,7 @@ class Analysis:
                          meaning=f"sine: in-1 level + sensitivity {S_db:.2f} dB + mic-curve correction {corr:+.2f} dB "
                                  f"− drive; ac2: meas÷ref + reference level + sensitivity"
                                  + ("" if curve_in_columns else " + the same curve correction (not in ac2's columns)")
-                                 + (f"; the room's fine structure: a 1/48-oct column and the sine's frequency "
+                                 + (f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                     f"differ by {u:.2f} dB in the direct estimate" if u else ""),
                          detail={"uncertainty": u})
             rows.append(row)

@@ -70,6 +70,9 @@ def main(argv=None) -> int:
                                 "DUT, README)")
             p.add_argument("--skip", default="", help="comma list of sub-stages to skip: sine,rew,ac2_sweep,ac2_tf")
             p.add_argument("--yes", action="store_true", help="don't wait for Enter before audible stages")
+            p.add_argument("--resolution", default="1/48", choices=["1/12", "1/24", "1/48", "1/96"],
+                           help="ac2's sweep and TF Resolution (columns per octave); a non-default one gets "
+                                "baselines of its own (<stage>-<level>dbfs-r<N>.json)")
 
     a = ap.parse_args(argv)
     if a.cmd == "analyse":
