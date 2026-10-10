@@ -280,12 +280,18 @@ calibration mapping, one table of checks per group, the data tables and the plot
     the recording's SNR, a room's fine structure) is wider than the pass limit. It FAILs only
     when it misses the warn limit by more than that uncertainty.
   - a truth or reading a mains line sits in (the sine GD pair, a sweep's harmonic band).
-- **METHOD**: an ac2 sweep misses the steady-sine truth (WARN or FAIL: magnitude, phase,
-  GD, H2–H5, absolute SPL, LF H2) and REW's reading of the same quantity at the same tone
-  misses it the same way (same sign; a bound claim carries its sign). Two analysers on two
-  recordings agreeing shows the sweep method or the device's sweep-versus-steady behaviour,
-  not ac2. Both rows become METHOD and name each other's value. ac2 FAIL with REW PASS stays
-  FAIL. Not a pass and not ac2's failure; a baseline comparison reports changes to or from it.
+- **Shared miss** (`detail.shared`, an annotation; the verdict stays PASS/WARN/FAIL): an ac2
+  sweep misses the steady-sine truth (WARN or FAIL: magnitude, phase, GD, H2–H5, absolute
+  SPL, LF H2) and REW's reading of the same quantity at the same tone misses it too, with all
+  of: residuals of one sign; ac2 − REW within the pass limit of their own comparison (band
+  magnitude or phase, `[harmonics] ac2_vs_rew_db`, `[band] mag_acoustic` for SPL, the GD
+  limit); and comparable targets. A harmonic's targets differ by analyser (ac2: the sine net of
+  the reference's harmonics; REW: the meas input's sine alone), so a harmonic pair is annotated
+  only when the two targets are within half the vs-truth pass limit. A bound claim has no
+  residual and is never annotated. The annotation records the twin key, both residuals and
+  their difference, and says only that ac2 and REW read the same number, not why the truth
+  differs. Baselines store it beside the verdict and value; `compare` holds an annotated value
+  to its baseline like any other judged one, so a shared error that grows is a regression.
 - **ac2 vs REW harmonics** (`<path>.h<k>.ac2 sweep <name>|<REW label>@<f>Hz`): ac2's harmonic
   minus REW's at each tone, both values; INCONCLUSIVE where either is a bound or missing.
 - **Arrival**: each ac2 sweep's reported arrival is judged against the IR peak of its own
