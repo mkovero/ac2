@@ -723,3 +723,10 @@ the live TF's per-column spread had no noise gate (σ from its coherence over 8 
 the room fine-structure uncertainty the magnitude-vs-sine rows already carry (1.25 dB at
 5 kHz between a 1/48-octave column and the sine). With both: FAIL 0, WARN 9. H3 at 500 Hz
 is now INCONCLUSIVE in both apps: H3 = 1504.5 Hz lies on the 1500 Hz mains line.
+
+The one level WARN, ac2 meas ÷ ref against REW's import (meas − ref) at −0.136 dB (−0.113 on
+d6cc773), was the row's resolution, not a level: it read REW's one unsmoothed 0.37 Hz bin at
+1 kHz against ac2's 14 Hz-wide 1/48-octave column, i.e. the room's structure inside the column.
+REW's bins power-averaged into ac2's columns (as ac2 reads them) give −0.02 dB at 1 kHz and a
+median over 500 Hz–2 kHz of +0.005 dB (+0.008 dB on d6cc773); the row now judges that median.
+Electrical paths are unchanged (−0.001 dB).

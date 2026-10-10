@@ -547,14 +547,26 @@ class Analysis:
                          tol=_tol(self.tol["level"]["convention_db"]), status=judge(d, _tol(self.tol["level"]["convention_db"])),
                          meaning="both state the loopback's gain re the digital level emitted; a 3.01 dB difference "
                                  "would be a full-scale-sine vs RMS convention slip")
+        # REW's responses are unsmoothed FFT bins (0.37 Hz at 96 kHz), ac2's are 1/48-octave
+        # columns (14 Hz wide at 1 kHz): one bin against one column reads the room's structure
+        # inside the column (0.1 dB and more on a speaker), not a level. REW's meas ÷ ref is
+        # averaged into ac2's columns as ac2 reads them, and the median over 500 Hz–2 kHz judged.
+        sel = (f >= 500) & (f < 2000) & np.isfinite(self.src[f"ac2 sweep {p.primary}"])
+        rew_sets = {rs.label: rs for rs in (p.rew, p.rew_live) if rs is not None}
         for label, g in G.items():
             if "ref" in g:
-                d = a_db - (g["meas"] - g["ref"])
+                rs = rew_sets[label]
+                Hm, Hr = rs.meas_fr, rs.ref_fr
+                ratio = 10 ** ((Hm.mag - Hr.mag) / 20)
+                rc = dsp.band_mean(Hm.f, ratio, f[sel])
+                d = float(np.median(dsp.db(self.src[f"ac2 sweep {p.primary}"][sel]) - dsp.db(rc)))
                 tl = _tol(self.tol["level"]["offset_db"])
                 self.add(id=f"{p.name}.level.ac2_vs_rew_meas_minus_ref", group="level", path=p.name,
                          title=f"ac2 meas÷ref vs {label} (meas − ref)", value=d, unit="dB", tol=tl, status=judge(d, tl),
                          meaning="ac2 states meas ÷ ref; REW states each channel re the stimulus; their difference "
-                                 "must be ac2's number")
+                                 "must be ac2's number. Median over the 1/48-octave columns 500 Hz–2 kHz, REW's "
+                                 f"bins power-averaged into each (one bin at 1 kHz read {a_db - (g['meas'] - g['ref']):+.3f} dB)",
+                         detail={"single_bin_1k": a_db - (g["meas"] - g["ref"]), "columns": int(sel.sum())})
                 if ref_lvl is not None:
                     d2 = ref_lvl - g["ref"]
                     tc = _tol(self.tol["level"]["convention_db"])
