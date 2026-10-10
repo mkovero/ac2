@@ -46,17 +46,20 @@ def test_render_from_a_baseline_directory(tmp_path):
            "checks": {"osm.delay10_5.osm_delay_finder_vs_analytic": e(-0.5, unit="samples", tol=(0.5, 1)),
                       "osm.identity.ac2_tf_h_vs_analytic": e(0.0),
                       "osm.delay48.uncompensated_ac2_h_vs_analytic": e(0.417, "INFO", tol=None)}}
-    for sub, name, b in (("r", "xone-30dbfs.json", rig), ("host", "osm.json", osm)):
-        (tmp_path / sub).mkdir()
+    older = {**rig, "level_dbfs": -50.0, "provenance": {**rig["provenance"], "run": "20261006T000000Z"},
+             "checks": {"xone.level.ac2_vs_rew_meas_minus_ref": e(0.5, "WARN", tol=(0.1, 0.3))}}
+    for sub, name, b in (("r", "xone-30dbfs.json", rig), ("r", "xone-50dbfs.json", older), ("host", "osm.json", osm)):
+        (tmp_path / sub).mkdir(exist_ok=True)
         (tmp_path / sub / name).write_text(B.dumps(b))
     out = C.render(tmp_path)
     assert out.startswith(C.BEGIN) and out.rstrip().endswith(C.END)
+    # only the newest baseline of a rig and stage is shown
     assert "| ac2 meas÷ref vs REW (meas − ref), absolute level | 0.000 dB (PASS 1) |" in out  # −0.0004 rounds to 0
-    assert "−30 dBFS (20261007T114727Z, 2638893)" in out
-    # OSM cases in the planned order, then the rest; INFO rows apart
+    assert "xone −30 dBFS (20261007T114727Z, ac2 2638893)" in out and "−50 dBFS" not in out
+    # OSM cases in the planned order, then the rest; INFO-only checks not tabled
     assert out.index("| identity |") < out.index("| delay10_5 |")
     assert "| delay10_5 |  | −0.500 |" in out
-    assert "| delay48 | ac2 \\|H\\| − truth, max over all columns, dB | +0.417 |" in out
+    assert "+0.417" not in out
     doc = tmp_path / "doc.md"
     doc.write_text(f"intro\n{C.BEGIN}\nold\n{C.END}\noutro\n")
     current, _ = C.update(doc, tmp_path, check=True)

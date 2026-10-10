@@ -9,7 +9,7 @@ and adds an ambient SPL check and the speaker path.
 ```
 crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,osm,comparison})
 rigs/pupu.toml   ports, roles, paths, levels, stage settings for pupu
-comparison.md    ac2 against REW and OSM: definitions, results, known disagreements
+comparison.md    ac2 against REW and OSM: current results, definitions, open differences
 osm.toml         the OSM stage: harness and ac2 binaries, matched settings, cases, recordings
 tolerances.toml  PASS / WARN limits for every comparison, compare steps
 baselines/       reviewed results per rig, stage and level (<rig>/<stage>-<level>dbfs.json; host/osm.json)

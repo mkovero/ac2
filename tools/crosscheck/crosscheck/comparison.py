@@ -2,9 +2,11 @@
 committed baselines. The prose around them is hand-written; only the part between the two
 marker comments is replaced, so a baseline update and its tables land in one commit.
 
-A rig baseline holds hundreds of checks; the tables keep the rows that say how far ac2 can be
-trusted against REW and against the analytic truths (steady sines, direct cross-spectra), each
-cell the worst judged value of its checks with where it was and the verdict counts."""
+The tables show the current state: per rig and stage only the newest baseline (by run time),
+since an older one at another level was taken on an older ac2 build. A rig baseline holds
+hundreds of checks; the tables keep the rows that say how far ac2 can be trusted against REW
+and against the analytic truths (steady sines, direct cross-spectra), each cell the worst
+judged value of its checks with where it was and the verdict counts."""
 from __future__ import annotations
 
 import json
@@ -42,7 +44,6 @@ RIG_ROWS: list[tuple[str, str]] = [
     ("ac2 reference level vs REW's", r"level\.ac2_ref_vs_rew_ref$"),
     ("ac2 reported arrival vs direct, every sweep", r"delay\.ac2_arrival\."),
     ("ac2 arrival + phase slope vs direct, every sweep", r"delay\.ac2_total\."),
-    ("REW offline reported delay (removed by its timing markers)", r"delay\.rew\.REW offline import\.reported delay$"),
     ("group delay vs sine pairs: ac2, ±1/12-oct fit", r"gd\.ac2 ±1/12-oct fit@"),
     ("group delay vs sine pairs: ac2 as displayed", r"gd\.ac2 as displayed \(central difference\)@"),
     ("group delay vs sine pairs: REW, ±1/12-oct fit", r"gd\.REW offline import ±1/12-oct fit@"),
@@ -84,16 +85,6 @@ OSM_OTHER_COLS = [
     ("ac2 spectrum − truth, dB", "ac2_spectrum"),
     ("OSM spectrum (converted) − truth, dB", ("osm_module_3_01", "osm_module_3_01_db_vs_analytic")),
 ]
-OSM_INFO_PREFIX = "uncompensated_"
-OSM_INFO_LABELS = {
-    "ac2_h_vs_analytic": "ac2 |H| − truth, max over all columns, dB",
-    "ac2_phase_vs_analytic": "ac2 ∠ − truth, max, °",
-    "ac2_phase_slope_vs_analytic": "ac2 phase slope − truth, samples",
-    "osm_m_r_vs_analytic": "OSM |M|/|R| − truth, max, dB",
-    "osm_phase_vs_analytic": "OSM ∠ − truth, max, °",
-    "ac2_h_vs_osm": "ac2 − OSM |H|, max over all columns, dB",
-    "ac2_phase_vs_osm": "ac2 − OSM ∠, max, °",
-}
 
 
 # ------------------------------------------------------------------ formatting
@@ -161,18 +152,28 @@ def _short_build(s: str | None) -> str:
     return m.group(1) if m else (s or "—")
 
 
-def overview(items: list[tuple[Path, dict]], root: Path) -> list[str]:
-    out = ["| baseline | stage | level | run | ac2 build | reference | suite commit | " + " | ".join(STATUSES) + " |",
-           "|---|---|---|---|---|---|---|" + "---|" * len(STATUSES)]
+def _run(b: dict) -> str:
+    return (b.get("provenance") or {}).get("run") or ""
+
+
+def newest(items: list[tuple[Path, dict]]) -> list[tuple[Path, dict]]:
+    """The newest baseline per (rig, stage), in file order."""
+    best: dict[tuple[str, str], tuple[Path, dict]] = {}
     for p, b in items:
-        pv = b.get("provenance") or {}
-        ref = "; ".join(x for x in (f"REW {pv['rew_version']}" if pv.get("rew_version") else "",
-                                    f"OSM {pv['osm_version']}" if pv.get("osm_version") else "") if x) or "—"
-        s = b.get("summary") or {}
-        out.append(f"| `{p.relative_to(root)}` | {b['stage']} | {_level(b)} | {pv.get('run') or '—'} | "
-                   f"{_short_build(pv.get('ac2_build'))} | {ref} | {pv.get('suite_commit') or '—'} | "
-                   + " | ".join(str(s.get(k, 0)) for k in STATUSES) + " |")
-    return out
+        k = (p.parent.name, b["stage"])
+        if k not in best or _run(b) > _run(best[k][1]):
+            best[k] = (p, b)
+    return [pb for pb in items if pb in best.values()]
+
+
+def heading(b: dict) -> str:
+    pv = b.get("provenance") or {}
+    return f"{b['stage']} {_level(b)} ({pv.get('run')}, ac2 {_short_build(pv.get('ac2_build'))})"
+
+
+def counts_line(b: dict) -> str:
+    s = b.get("summary") or {}
+    return ", ".join(f"{k} {s[k]}" for k in STATUSES if s.get(k))
 
 
 def matches_for(b: dict, pattern: str) -> list[tuple[str, str | None, dict]]:
@@ -186,11 +187,9 @@ def matches_for(b: dict, pattern: str) -> list[tuple[str, str | None, dict]]:
     return out
 
 
-def rig_table(stage: str, bs: list[dict], rows: list[tuple[str, str]]) -> list[str]:
-    bs = sorted(bs, key=lambda b: -(b.get("level_dbfs") or 0.0))
-    head = "| check | " + " | ".join(f"{_level(b)} ({(b.get('provenance') or {}).get('run')}, "
-                                     f"{_short_build((b.get('provenance') or {}).get('ac2_build'))})" for b in bs) + " |"
-    out = [head, "|---|" + "---|" * len(bs)]
+def rig_table(bs: list[dict], rows: list[tuple[str, str]]) -> list[str]:
+    out = ["| check | " + " | ".join(heading(b) for b in bs) + " |", "|---|" + "---|" * len(bs),
+           "| verdicts | " + " | ".join(counts_line(b) for b in bs) + " |"]
     for label, pat in rows:
         cells = [cell(matches_for(b, pat)) for b in bs]
         if all(c == "—" for c in cells):
@@ -220,32 +219,26 @@ def osm_tables(b: dict) -> list[str]:
         out += [f"**{title}**", "", "| case | " + " | ".join(h for h, _ in cols) + " |",
                 "|---|" + "---|" * len(cols)]
         out += ["| " + " | ".join(r) + " |" for r in rows] + [""]
-    info = [(k.split(".")[1], k.split(".", 2)[2][len(OSM_INFO_PREFIX):], e) for k, e in b["checks"].items()
-            if k.split(".", 2)[2].startswith(OSM_INFO_PREFIX)]
-    if info:
-        out += ["**Uncompensated (INFO: the path's delay left in)**", "", "| case | check | value |", "|---|---|---|"]
-        out += [f"| {c} | {OSM_INFO_LABELS.get(s, s.replace('_', ' ')).replace('|', chr(92) + '|')} | "
-                f"{fmt_value(e['value'], '')} |" for c, s, e in sorted(info, key=lambda x: cases.index(x[0]))]
-        out.append("")
     return out
 
 
 def render(root: Path = BASELINES) -> str:
-    root = Path(root)
-    items = load(root)
-    out = [BEGIN, "", "#### Baselines", ""] + overview(items, root) + [""]
-    by_stage: dict[tuple[str, str], list[dict]] = {}
+    items = newest(load(Path(root)))
+    out = [BEGIN, ""]
+    by_rig: dict[str, list[dict]] = {}
     for p, b in items:
-        by_stage.setdefault((p.parent.name, b["stage"]), []).append(b)
-    for (rig, stage), bs in sorted(by_stage.items(), key=lambda kv: (kv[0][0] == HOST_DIR, kv[0])):
-        if rig == HOST_DIR and stage == "osm":
-            for b in bs:
-                pv = b.get("provenance") or {}
-                out += [f"#### OSM stage ({pv.get('run')}, ac2 {_short_build(pv.get('ac2_build'))}, "
-                        f"{pv.get('osm_version')})", ""] + osm_tables(b)
-            continue
-        rows = AMBIENT_ROWS if stage == "ambient" else RIG_ROWS
-        out += [f"#### {rig} {stage}", ""] + rig_table(stage, bs, rows) + [""]
+        by_rig.setdefault(p.parent.name, []).append(b)
+    for rig, bs in sorted(by_rig.items(), key=lambda kv: (kv[0] == HOST_DIR, kv[0])):
+        for b in (b for b in bs if b["stage"] == "osm"):
+            pv = b.get("provenance") or {}
+            out += [f"### OSM stage ({pv.get('run')}, ac2 {_short_build(pv.get('ac2_build'))}, "
+                    f"{pv.get('osm_version')}: {counts_line(b)})", ""] + osm_tables(b)
+        paths = [b for b in bs if b["stage"] not in ("osm", "ambient")]
+        if paths:
+            paths.sort(key=lambda b: b["stage"] != "xone")
+            out += [f"### {rig}: electrical (xone) and speaker (genelec) paths", ""] + rig_table(paths, RIG_ROWS) + [""]
+        for b in (b for b in bs if b["stage"] == "ambient"):
+            out += [f"### {rig}: ambient", ""] + rig_table([b], AMBIENT_ROWS) + [""]
     out.append(END)
     return "\n".join(out) + "\n"
 
