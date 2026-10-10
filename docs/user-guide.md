@@ -434,9 +434,10 @@ The **impulse response** is part of the transfer pane's chain (**G** until the t
 `Impulse response`): it shows the IR of that pane's own measurement, as linear amplitude,
 in dB re its peak, or as the energy-time curve: each its own view, so **Shift+G** from the
 magnitude reaches the ETC in one step. The magnitude view draws the coherence over the
-magnitude when Settings › Display places it there; otherwise coherence is its own view. A stopped measurement draws no live IR (as it draws no
-live response): the plot says it is stopped and **S** starts it; a selected capture's
-stored IR still shows.
+magnitude when Settings › Display places it there; otherwise coherence is its own view.
+A stopped measurement draws no live IR (its response views keep the last curve, tagged
+`stopped`): the plot says it is stopped and **S** starts it; a selected capture's stored IR
+still shows.
 
 A command about a kind (an SPL view key, the sweep's views) goes to the pane of that kind
 focused last; with none on screen the focused pane turns into one. A finished sweep opens
@@ -453,10 +454,10 @@ measurement tree lists it, and nothing else:
 - a sweep measurement can be chosen too: the pane then draws its shown runs (no live curve;
   **S** there says to run it on the Sweep / distortion pane).
 
-A stopped measurement or math channel draws no live curve here (its last frame is no longer
-the response; a spectrum or RTA keeps its curve, tagged `stopped`): its stored traces stay,
-the pane's title starts with `Main L stopped`, its list row says `stopped`, and **S** brings
-the live curve back.
+A stopped measurement or math channel keeps its last curve here, tagged `stopped` in the
+legend as a stopped spectrum or RTA is, in the magnitude, phase and coherence views alike;
+its list row says `stopped` and **S** starts it again. **A** hides the curve when it is in
+the way. (The impulse-response view draws no stopped IR: its plot says so.)
 
 Other measurements' curves and traces wait until theirs is the pane's measurement, and
 **Imported** traces show only when compared or moved: to file an import with a measurement,

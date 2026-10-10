@@ -438,43 +438,48 @@ fn the_cursor_is_on_the_palette_not_c() {
     assert!(t.st.view.cursor_hz.is_some());
 }
 
-/// A stopped transfer measurement draws no live curve: its last frame is no longer the
-/// response, so only its capture stays, the title says why, and the resolution marker
-/// follows a curve still drawn (the capture knows no ranges: none shown) rather than the
-/// hidden live one's. Started again, the live curve and its marks are back.
+/// A stopped transfer measurement keeps its last curve, tagged `stopped` as a stopped
+/// spectrum is, in each of the magnitude, phase and coherence views (so in the transfer
+/// stack); hiding it is A's. Started again, the tag goes.
 #[test]
-fn a_stopped_transfer_measurement_draws_no_live_curve() {
+fn a_stopped_transfer_measurement_keeps_its_curve_tagged() {
     let mut s = four();
     s.traces = vec![owned(10, under(1))];
     s.traces[0].edit.slot = Some(1);
     let mut t = loaded(s.clone());
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     let pane = t.pane(PaneKind::Transfer);
-    let scene = |t: &T| crate::scenes::transfer(&t.st, pane, &Theme::dark(), SIZE, now());
+    let main = |t: &T| {
+        crate::scenes::transfer(&t.st, pane, &Theme::dark(), SIZE, now())
+            .legend
+            .into_iter()
+            .find(|e| e.name == "Main L")
+            .map(|e| e.tags.contains(&"stopped".to_owned()))
+    };
     assert_eq!(legend(&t), ["Main L", "t10"]);
-    assert!(!scene(&t).unresolved.is_empty(), "the live curve's ranges");
+    assert_eq!(main(&t), Some(false));
 
     s.measurements[1].running = false;
     t.conn(mirror(s.clone()));
+    for _ in 0..3 {
+        assert!(t.st.layout.view(pane).is_some_and(|v| !v.shows_ir()));
+        assert_eq!(legend(&t), ["Main L", "t10"]);
+        assert_eq!(main(&t), Some(true));
+        let caption = t.st.pane_caption(pane).unwrap_or_default();
+        assert!(!caption.contains("stopped"), "{caption}");
+        t.st.layout.set_focus(pane);
+        t.key("G");
+    }
+    // Hidden only when the operator says so.
+    for _ in 0..3 {
+        t.key("Shift+G");
+    }
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.key("A");
     assert_eq!(legend(&t), ["t10"]);
-    assert!(
-        scene(&t).unresolved.is_empty(),
-        "no marks of the curve not drawn"
-    );
-    let caption = t.st.pane_caption(pane).unwrap_or_default();
-    assert!(caption.starts_with("Main L stopped · "), "{caption}");
-    // The capture selected: the marker is the capture's, still none.
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
-    assert!(scene(&t).unresolved.is_empty());
+    t.key("A");
 
     s.measurements[1].running = true;
     t.conn(mirror(s));
-    assert_eq!(legend(&t), ["Main L", "t10"]);
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
-    assert!(!scene(&t).unresolved.is_empty());
-    assert!(
-        !t.st
-            .pane_caption(pane)
-            .is_some_and(|c| c.contains("stopped"))
-    );
+    assert_eq!(main(&t), Some(false));
 }
