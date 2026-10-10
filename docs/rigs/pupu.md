@@ -670,6 +670,30 @@ resolution: at 0.1 s windows the H2 band at column 22 Hz spans 29–59 Hz (three
 the Xone's H2 rising below 22 Hz is averaged in; at 0.25 s windows they read −97.8 / −98.7. Re-run
 analysis: 261 PASS, 0 WARN, 0 FAIL.
 
+### LF H2 at 22 Hz on the 10 Hz / 5.5 s sweep: hum bursts on in 5 (2026-10-10, ac2d bdc1bec → d08cc70, −30 dBFS)
+
+Run `20261010T145427Z` failed `xone.lf_h2.10Hz-5.5s`: ac2 H2 −83.6 dBr at 22 Hz (floor −98.5)
+against the steady sine's −94.4; REW's H2 there is only a bound. Not ac2's processing and not
+distortion:
+
+- ac2-core's `analyse_recording` run offline on the stored record reproduces −83.6. On linear
+  twins (meas := ref; meas := ref through the path's own gated response) it reads −160 / −190
+  dBr. Each input against the emitted sweep: meas −83 dBr, ref −113. An independent numpy
+  Farina separation of the same meas: −82.0.
+- In the 2026-10-07 records the same "H2" falls dB for dB with drive (−62 / −81 / −87 dBr at
+  −50 / −30 / −20 dBFS): about −110 dBFS whatever the level, so added, not generated.
+- In 35–95 Hz the meas input carries bursts of −84 … −92 dBFS lasting 0.25–0.75 s every 2–3 s
+  over a quiet −118; the ref input stays at −127. One burst sat on the sweep's pass through
+  20–25 Hz. A sweep's harmonic window at fundamental f reads the record at the moment the sweep
+  passes f; the post-roll noise windows read each frequency 0.5–1 s later, quiet there. The
+  3 Hz sweep's H2/H3 at 35–45 Hz (REW's too) is the same burst at another moment.
+
+d08cc70 also reads each harmonic's floor in the impulse-response gaps beside its window (the
+noise of the same moment) and takes it where it is 3 dB over the post-roll's: on that record
+H2 at 22 Hz becomes −83.4 over a floor of −78.1, the 3 Hz sweep's 35–45 Hz bump likewise a
+bound. Rerun on d08cc70 (`20261010T172222Z`, deployed to pupu only): FAIL 0, WARN 0, METHOD 0;
+the LF harmonic cells are bounds on ac2 and REW alike. The burst source on in 5 is not found.
+
 ### Digital DUT: floors, the fade-out edge, LF harmonics fine (2026-10-09, ac2d 2416a06 → 511efb0, −10 dBFS)
 
 - **Floor +3 dB** in the suite's own model: it deconvolved the measurement input's noise only,
