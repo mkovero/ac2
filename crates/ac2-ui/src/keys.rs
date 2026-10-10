@@ -516,13 +516,11 @@ commands! {
 
     SpectrumStyle => "spectrum_style", "RTA: bars / line", [Spectrum];
     PeakHold => "peak_hold", "Peak hold on / off", [Spectrum];
-    Spectrograph => "spectrograph", "Spectrum pane: spectrum → spectrum + spectrograph → spectrograph", [Spectrum];
     SpectrographSpan => "spectrograph_span", "Spectrograph history: 10 → 30 → 60 → 120 s", [Spectrum];
 
-    TransferView => "transfer_view", "Transfer pane: response → phase → coherence → impulse response", [Transfer, Ir];
-    IrMode => "ir_mode", "IR: linear → log → ETC", [Ir, Distortion];
+    NextView => "next_view", "Next view", [Transfer, Spectrum, Ir, Spl, Distortion];
+    PrevView => "prev_view", "Previous view", [Transfer, Spectrum, Ir, Spl, Distortion];
 
-    SplLeqView => "spl_leq_view", "SPL: meter → Leq windows → meter + Leq → bands", [Spl];
     SplShowMeter => "spl_show_meter", "SPL pane: the meter", [Spl];
     SplShowLeq => "spl_show_leq", "SPL pane: the Leq windows", [Spl];
     SplShowMeterLeq => "spl_show_meter_leq", "SPL pane: meter + Leq windows", [Spl];
@@ -534,7 +532,6 @@ commands! {
     SplWeighting => "spl_weighting", "SPL meter: frequency weighting A → C → Z", [Spl];
 
     DistortionUnit => "distortion_unit", "Distortion in dB re fundamental / percent", [Distortion];
-    SweepView => "sweep_view", "Sweep pane: response & distortion → impulse response → room parameters", [Distortion];
     SweepIr => "sweep_ir", "Sweep pane: impulse response (again: response & distortion)", [Distortion];
 }
 
@@ -729,14 +726,20 @@ pub fn defaults() -> Vec<Binding> {
         // The IR view shows the transfer measurement: S starts and stops it there too.
         (C::StartStop, S::Ir, k(K::S)),
         (C::PeakHold, S::Spectrum, k(K::P)),
-        // G is the view key of every pane: here the spectrograph.
-        (C::Spectrograph, S::Spectrum, k(K::G)),
-        // The transfer pane's views; in the IR view its own steps take Shift, as on the
-        // sweep pane.
-        (C::TransferView, S::Transfer, k(K::G)),
-        (C::TransferView, S::Ir, k(K::G)),
-        (C::IrMode, S::Ir, sh(K::G)),
-        (C::SplLeqView, S::Spl, k(K::G)),
+        // G steps the focused pane's views, Shift+G back: one key pair for every pane, the
+        // IR's displays among the views, so no view needs a second key to reach.
+        (C::NextView, S::Transfer, k(K::G)),
+        (C::PrevView, S::Transfer, sh(K::G)),
+        (C::NextView, S::Ir, k(K::G)),
+        (C::PrevView, S::Ir, sh(K::G)),
+        (C::NextView, S::Spectrum, k(K::G)),
+        (C::PrevView, S::Spectrum, sh(K::G)),
+        (C::NextView, S::Spl, k(K::G)),
+        (C::PrevView, S::Spl, sh(K::G)),
+        (C::NextView, S::Distortion, k(K::G)),
+        (C::PrevView, S::Distortion, sh(K::G)),
+        // Shift+B, beside B (bars / line): the spectrograph's history length.
+        (C::SpectrographSpan, S::Spectrum, sh(K::B)),
         // R resets the meter's display; Shift+R, a step further, starts a new log (after a
         // confirmation: it discards show data).
         (C::SplNewLog, S::Spl, sh(K::R)),
@@ -747,10 +750,6 @@ pub fn defaults() -> Vec<Binding> {
         (C::SplWeighting, S::Spl, k(K::Z)),
         // Plain L types the stimulus level; Shift+L is the Leq windows.
         (C::LeqWindows, S::Global, sh(K::L)),
-        // G steps the pane's views, as in the spectrum and SPL panes; the IR's own steps
-        // take Shift.
-        (C::SweepView, S::Distortion, k(K::G)),
-        (C::IrMode, S::Distortion, sh(K::G)),
         (C::SweepIr, S::Distortion, sh(K::I)),
     ];
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
@@ -774,9 +773,6 @@ pub struct Hint {
     pub priority: u8,
 }
 
-/// The G hint's name where no meter has a band meter, so the cycle stops at both.
-pub const SPL_VIEWS_NO_BANDS: &str = "meter/Leq/both";
-
 const fn hint(command: CommandId, name: &'static str, priority: u8) -> Hint {
     Hint {
         command,
@@ -796,7 +792,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::NextTrace, "select trace", 90),
-                    hint(C::TransferView, "response/phase/coherence/IR", 75),
+                    hint(C::NextView, "view", 75),
                     hint(C::ToggleSelected, "show/hide", 80),
                     hint(C::Slot1, "capture", 85),
                     hint(C::InsertDelay, "find delay", 70),
@@ -813,7 +809,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::PeakHold, "peak hold", 75),
                     // The RTA's bars / line (B) is in the help and the palette: the line
                     // holds eight.
-                    hint(C::Spectrograph, "spectrum/both/spectrograph", 65),
+                    hint(C::NextView, "view", 65),
                     hint(C::SmoothCoarser, "smoothing", 60),
                     hint(C::LevelFit, "fit level", 55),
                     hint(C::Slot1, "capture", 85),
@@ -824,8 +820,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
         Scope::Ir => {
             const {
                 &[
-                    hint(C::TransferView, "views", 92),
-                    hint(C::IrMode, "linear/log/ETC", 90),
+                    hint(C::NextView, "view", 92),
                     hint(C::ZoomIn, "zoom time", 80),
                     hint(C::LevelZoomIn, "zoom level", 65),
                     hint(C::LevelFit, "fit", 55),
@@ -838,7 +833,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
         Scope::Spl => {
             const {
                 &[
-                    hint(C::SplLeqView, "meter/Leq/both/bands", 90),
+                    hint(C::NextView, "view", 90),
                     hint(C::SplTimeWeighting, "F/S/I", 88),
                     hint(C::SplWeighting, "A/C/Z", 86),
                     hint(C::LeqWindows, "windows", 80),
@@ -852,8 +847,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                 &[
                     hint(C::SweepNew, "new sweep", 90),
                     hint(C::NextTrace, "next sweep", 80),
-                    hint(C::SweepView, "response/IR/room", 75),
-                    hint(C::IrMode, "linear/log/ETC", 70),
+                    hint(C::NextView, "view", 75),
                     hint(C::MaximizePane, "maximise", 50),
                     hint(C::ClosePane, "close pane", 40),
                 ]
@@ -1190,7 +1184,6 @@ mod tests {
             // to what operators press while measuring.
             CommandId::KeyHints,
             CommandId::CoherencePlacement,
-            CommandId::SpectrographSpan,
             CommandId::SplLeqStyle,
             CommandId::SplLeqHistory,
             CommandId::DistortionUnit,
@@ -1224,7 +1217,8 @@ mod tests {
             ("Alt+9", CommandId::FocusPane9),
             ("N", CommandId::SplitPane),
             ("Q", CommandId::ClosePane),
-            ("G", CommandId::TransferView),
+            ("G", CommandId::NextView),
+            ("Shift+G", CommandId::PrevView),
             ("Space", CommandId::StimulusArm),
             ("Enter", CommandId::StimulusFire),
             ("Esc", CommandId::StimulusStop),
@@ -1574,31 +1568,33 @@ mod tests {
         }
     }
 
-    /// G steps every pane's views; Shift+G is each pane's second view key (the IR's mode in
-    /// the transfer pane's IR view, as on the sweep pane).
+    /// G steps every pane's views forward and Shift+G back, in every pane kind; Shift+B
+    /// is the spectrograph's history length.
     #[test]
     fn g_steps_the_views_of_every_pane() {
         let m = Keymap::default();
         let c = |s: &str| Chord::parse(s).expect(s);
-        for (scope, g, shift_g) in [
-            (Scope::Transfer, Some(CommandId::TransferView), None),
-            (
-                Scope::Ir,
-                Some(CommandId::TransferView),
-                Some(CommandId::IrMode),
-            ),
-            // The history length is set once: Settings › Display.
-            (Scope::Spectrum, Some(CommandId::Spectrograph), None),
-            (Scope::Spl, Some(CommandId::SplLeqView), None),
-            (
-                Scope::Distortion,
-                Some(CommandId::SweepView),
-                Some(CommandId::IrMode),
-            ),
-        ] {
+        for scope in Scope::ALL {
+            let (g, shift_g) = if scope == Scope::Global {
+                (None, None)
+            } else {
+                (Some(CommandId::NextView), Some(CommandId::PrevView))
+            };
             assert_eq!(m.lookup(scope, c("G")), g, "{scope:?}");
             assert_eq!(m.lookup(scope, c("Shift+G")), shift_g, "{scope:?}");
         }
+        assert_eq!(
+            m.lookup(Scope::Spectrum, c("Shift+B")),
+            Some(CommandId::SpectrographSpan)
+        );
+        assert_eq!(m.lookup(Scope::Global, c("Shift+B")), None);
+        // One binding of Shift+B anywhere: no scope's own key is shadowed.
+        let n = m
+            .bindings()
+            .iter()
+            .filter(|b| b.chord == c("Shift+B"))
+            .count();
+        assert_eq!(n, 1);
     }
 
     #[test]

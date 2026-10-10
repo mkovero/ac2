@@ -22,7 +22,7 @@ use ac2_proto::units::Dbfs;
 use ac2_scene::rig::{RAISE_WHILE_LIVE, RAISE_WORD};
 use ac2_scene::theme::ThemeName;
 use ac2_scene::view::{
-    CoherencePlacement, DistortionUnit, LeqLayout, LeqStyle, SpectrumMode, SweepMode,
+    CoherencePlacement, DistortionUnit, IrMode, LeqLayout, LeqStyle, SpectrumMode, SweepMode,
 };
 
 use crate::cal_view::CalView;
@@ -335,7 +335,9 @@ pub fn spectrum_view_name(m: SpectrumMode) -> &'static str {
 pub fn sweep_view_name(m: SweepMode) -> &'static str {
     match m {
         SweepMode::Response => "response and distortion",
-        SweepMode::Ir => "the impulse response",
+        SweepMode::Ir(IrMode::Linear) => "the impulse response",
+        SweepMode::Ir(IrMode::Log) => "the impulse response in dB",
+        SweepMode::Ir(IrMode::Etc) => "the energy-time curve",
         SweepMode::Room => "the room parameters",
     }
 }

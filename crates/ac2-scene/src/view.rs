@@ -406,6 +406,15 @@ impl SpectrumMode {
         }
     }
 
+    /// Shift+G: [`Self::next`] backwards.
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Spectrum => Self::Spectrograph,
+            Self::Split => Self::Spectrum,
+            Self::Spectrograph => Self::Split,
+        }
+    }
+
     /// The spectrograph is drawn (and its history kept).
     pub fn spectrograph(self) -> bool {
         self != Self::Spectrum
@@ -474,10 +483,11 @@ impl Default for SpectrumView {
     }
 }
 
-/// IR display.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// IR display: each is a view of its own in the pane's view chain (G), in this order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum IrMode {
     /// Linear amplitude.
+    #[default]
     Linear,
     /// 20·log10 |h|, re the peak.
     Log,
@@ -578,22 +588,47 @@ pub enum SweepMode {
     /// The fundamental's response above, the harmonic distortion below.
     #[default]
     Response,
-    /// The sweep's impulse response.
-    Ir,
+    /// The sweep's impulse response, drawn as this.
+    Ir(IrMode),
     /// The ISO 3382-1 room parameters, the whole pane: read at a distance.
     Room,
 }
 
 impl SweepMode {
-    /// G: response & distortion → impulse response → room parameters → response: the order
-    /// a sweep is read in, from what the speaker does to what the room does.
+    /// G steps through these: the order a sweep is read in, from what the speaker does
+    /// (response, then its impulse response linear, in dB, as energy) to what the room does.
+    pub const ALL: [SweepMode; 5] = [
+        SweepMode::Response,
+        SweepMode::Ir(IrMode::Linear),
+        SweepMode::Ir(IrMode::Log),
+        SweepMode::Ir(IrMode::Etc),
+        SweepMode::Room,
+    ];
+
+    /// G: the next view, the last back to the first.
     pub fn next(self) -> Self {
+        step(&Self::ALL, self, 1)
+    }
+
+    /// Shift+G: the previous view.
+    pub fn prev(self) -> Self {
+        step(&Self::ALL, self, -1)
+    }
+
+    /// The impulse-response display, in an IR view.
+    pub fn ir(self) -> Option<IrMode> {
         match self {
-            Self::Response => Self::Ir,
-            Self::Ir => Self::Room,
-            Self::Room => Self::Response,
+            SweepMode::Ir(m) => Some(m),
+            _ => None,
         }
     }
+}
+
+/// `by` steps from `v` in the view chain `all`, wrapping at both ends.
+pub fn step<T: Copy + PartialEq>(all: &[T], v: T, by: isize) -> T {
+    let n = all.len() as isize;
+    let i = all.iter().position(|x| *x == v).unwrap_or(0) as isize;
+    all[(i + by).rem_euclid(n) as usize]
 }
 
 /// How the Leq windows are laid out.
@@ -638,6 +673,16 @@ impl SplMode {
             SplMode::Leq => SplMode::MeterLeq,
             SplMode::MeterLeq if bands => SplMode::Bands,
             SplMode::MeterLeq | SplMode::Bands => SplMode::Meter,
+        }
+    }
+
+    /// Shift+G: [`Self::next`] backwards.
+    pub fn prev(self, bands: bool) -> Self {
+        match self {
+            SplMode::Meter if bands => SplMode::Bands,
+            SplMode::Meter | SplMode::Bands => SplMode::MeterLeq,
+            SplMode::Leq => SplMode::Meter,
+            SplMode::MeterLeq => SplMode::Leq,
         }
     }
 
@@ -859,6 +904,48 @@ mod tests {
         let t = |r: FreqRange| (1000f64.ln() - r.lo.ln()) / (r.hi.ln() - r.lo.ln());
         assert!((t(r) - t(FreqRange::default())).abs() < 1e-12);
         assert!(close(r.hi / r.lo, 1000f64.sqrt()));
+    }
+
+    /// Every view chain: next walks every view once and wraps, prev undoes next.
+    #[test]
+    fn view_chains_wrap_both_ways() {
+        let mut v = SweepMode::Response;
+        let mut seen = vec![];
+        for _ in 0..SweepMode::ALL.len() {
+            seen.push(v);
+            assert_eq!(v.next().prev(), v);
+            v = v.next();
+        }
+        assert_eq!(
+            (v, seen.as_slice()),
+            (SweepMode::Response, &SweepMode::ALL[..])
+        );
+        assert_eq!(SweepMode::Response.prev(), SweepMode::Room);
+        for m in [
+            SpectrumMode::Spectrum,
+            SpectrumMode::Split,
+            SpectrumMode::Spectrograph,
+        ] {
+            assert_eq!(m.next().prev(), m);
+        }
+        assert_eq!(SpectrumMode::Spectrum.prev(), SpectrumMode::Spectrograph);
+        for bands in [false, true] {
+            let modes: &[SplMode] = if bands {
+                &[
+                    SplMode::Meter,
+                    SplMode::Leq,
+                    SplMode::MeterLeq,
+                    SplMode::Bands,
+                ]
+            } else {
+                &[SplMode::Meter, SplMode::Leq, SplMode::MeterLeq]
+            };
+            for m in modes {
+                assert_eq!(m.next(bands).prev(bands), *m, "{m:?} {bands}");
+            }
+        }
+        assert_eq!(SplMode::Meter.prev(true), SplMode::Bands);
+        assert_eq!(SplMode::Meter.prev(false), SplMode::MeterLeq);
     }
 
     #[test]

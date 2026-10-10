@@ -402,7 +402,7 @@ pub fn note_lines(note: &str, width: f32, theme: &Theme) -> (Vec<String>, f32) {
 /// Why the IR pane has no picture of its transfer measurement's impulse response.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IrMissing {
-    /// The measurement is stopped (and never made an IR frame).
+    /// The measurement is stopped: its last IR is not drawn as live.
     Stopped,
     /// The session's audio stopped.
     AudioStopped,

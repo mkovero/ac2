@@ -141,7 +141,7 @@ fn grid() -> Layout {
         }),
     };
     let mut ir = View::of(PaneKind::Transfer);
-    ir.modes.transfer = TransferView::Ir;
+    ir.modes.transfer = TransferView::Ir(IrMode::Linear);
     let views = [
         View::of(PaneKind::Transfer),
         View::of(PaneKind::Spectrum),

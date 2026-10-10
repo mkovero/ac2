@@ -296,8 +296,9 @@ fn no_reference_reminds_of_the_stimulus_keys() {
     snapshot(&mut h, "transfer_no_reference_reminder");
 }
 
-/// The IR pane of a stopped transfer measurement, maximised: its kept IR tagged `stopped`
-/// after the origin, as its transfer curve is, with no STALE banner; S starts it from here.
+/// The IR pane of a stopped transfer measurement, maximised: its last IR is no longer the
+/// system's, so none is drawn and the plot says S starts it, with no STALE banner. Started
+/// again (S from here), the frequency panes' keys zoom its live IR.
 #[test]
 fn ir_pane_of_a_stopped_measurement() {
     if !have_gpu("ir_pane_of_a_stopped_measurement") {
@@ -315,9 +316,9 @@ fn ir_pane_of_a_stopped_measurement() {
             && st.layout.focused().shows_ir()
             && st.meas(MeasId(1)).is_some_and(|m| !m.running)
     });
-    {
+    let scene = |h: &Harness<'_, App>| {
         let st = &h.state().state;
-        let s = ac2_ui::scenes::ir(
+        ac2_ui::scenes::ir(
             st,
             crate::common::ir_pane(st),
             &h.state().keymap,
@@ -331,15 +332,27 @@ fn ir_pane_of_a_stopped_measurement() {
                 wall: ac2_proto::units::WallNs(0),
             },
         )
-        .expect("IR scene");
-        assert_eq!(s.tag.as_deref(), Some("stopped"));
+        .expect("IR scene")
+    };
+    {
+        let s = scene(&h);
+        let note = s.note.unwrap_or_default();
+        assert!(note.ends_with(" stopped — S starts it"), "{note}");
+        assert_eq!(s.tag, None);
         assert!(s.banners.iter().all(|b| !b.text.starts_with("STALE")));
     }
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "ir_stopped");
-    // The frequency panes' keys on its time and amplitude axes: I twice zooms time about
-    // the middle, Ctrl+I the amplitude, the cursor toggle puts the time cursor there.
+    // S starts it again: its live IR. The frequency panes' keys on its time and amplitude
+    // axes: I twice zooms time about the middle, Ctrl+I the amplitude, the cursor toggle
+    // puts the time cursor there.
+    h.key_press(Key::S);
+    step_until(&mut h, "the live IR again", |a| {
+        a.state.meas(MeasId(1)).is_some_and(|m| m.running)
+            && a.state.ir_frame_of(ac2_scene::view::IrPane::Live).is_some()
+    });
+    assert_eq!(scene(&h).note, None);
     h.key_press(Key::I);
     h.key_press(Key::I);
     h.key_press_modifiers(Modifiers::COMMAND, Key::I);
@@ -1621,17 +1634,22 @@ fn session_dialog() {
         a.state
             .kind_modes(ac2_ui::state::PaneKind::Distortion)
             .sweep
-            == ac2_scene::view::SweepMode::Ir
+            == ac2_scene::view::SweepMode::Ir(ac2_scene::view::IrMode::Linear)
     });
-    // Shift+G: the log view, where the harmonics' impulses read at their level.
-    h.key_press_modifiers(Modifiers::SHIFT, Key::G);
+    // G: the log view, where the harmonics' impulses read at their level.
+    h.key_press(Key::G);
     step_until(&mut h, "log IR", |a| {
-        a.state.kind_modes(ac2_ui::state::PaneKind::Distortion).ir == ac2_scene::view::IrMode::Log
+        a.state
+            .kind_modes(ac2_ui::state::PaneKind::Distortion)
+            .sweep
+            == ac2_scene::view::SweepMode::Ir(ac2_scene::view::IrMode::Log)
     });
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "sweep_ir");
-    // G: the room parameters alone, the whole (maximised) pane.
+    // G past the ETC: the room parameters alone, the whole (maximised) pane.
+    h.key_press(Key::G);
+    h.step();
     h.key_press(Key::G);
     step_until(&mut h, "room parameters", |a| {
         a.state

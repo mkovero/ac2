@@ -34,19 +34,17 @@ fn key_hints_follow_the_focused_pane() {
     assert!(sp.contains(&"P peak hold".to_owned()), "{sp:?}");
     t.key("Alt+3");
     let ir = hints_of(&t, t.ir_pane()).expect("IR view focused");
-    assert!(ir.contains(&"G views".to_owned()), "{ir:?}");
-    assert!(ir.contains(&"Shift+G linear/log/ETC".to_owned()), "{ir:?}");
+    assert!(ir.contains(&"G/Shift+G view".to_owned()), "{ir:?}");
     t.key("Alt+4");
     let spl = hint_texts(&t, PaneKind::Spl).expect("SPL focused");
-    assert_eq!(spl[..3], ["G meter/Leq/both", "Shift+F F/S/I", "Z A/C/Z"]);
-    // The sweep pane names the IR mode only while it shows the IR, and G its views in each.
+    assert_eq!(spl[..3], ["G/Shift+G view", "Shift+F F/S/I", "Z A/C/Z"]);
+    // The sweep pane's view keys are the same pair in each of its views.
     t.go(PaneKind::Distortion);
     let d = hint_texts(&t, PaneKind::Distortion).expect("sweep pane focused");
-    assert!(d.contains(&"G response/IR/room".to_owned()), "{d:?}");
-    assert!(!d.contains(&"Shift+G linear/log/ETC".to_owned()), "{d:?}");
+    assert!(d.contains(&"G/Shift+G view".to_owned()), "{d:?}");
     t.key("Shift+I");
     let d = hint_texts(&t, PaneKind::Distortion).expect("sweep pane focused");
-    assert!(d.contains(&"Shift+G linear/log/ETC".to_owned()), "{d:?}");
+    assert!(d.contains(&"G/Shift+G view".to_owned()), "{d:?}");
     // Mac labels.
     let mac: Vec<String> =
         t.st.key_hint_line(
@@ -283,9 +281,9 @@ fn layout_is_remembered_and_restored() {
     t.conn(mirror(state.clone()));
     t.st.prefs_dirty = false;
     t.key("Alt+3");
-    t.key("Shift+G");
-    let ir_mode = |t: &T| t.st.layout.view(t.ir_pane()).expect("view").modes.ir;
-    assert_eq!(ir_mode(&t), IrMode::Log);
+    t.key("G");
+    let ir_mode = |t: &T| t.st.layout.view(t.ir_pane()).expect("view").modes.transfer;
+    assert_eq!(ir_mode(&t), TransferView::Ir(IrMode::Log));
     t.key("Alt+4");
     t.st.update(Msg::SelectMeas(MeasId(5)), &t.keys);
     assert_eq!(t.st.kind_meas(PaneKind::Spl).map(|m| m.id), Some(MeasId(5)));
@@ -302,11 +300,11 @@ fn layout_is_remembered_and_restored() {
     let ir_view = panes
         .views
         .iter()
-        .find(|v| v.modes.transfer == TransferView::Ir)
+        .find(|v| v.modes.transfer.ir().is_some())
         .expect("the IR view");
     // G from the default meter + Leq: the meter alone, remembered.
     assert_eq!(view(PaneKind::Spl).modes.spl, SplMode::Meter);
-    assert_eq!(ir_view.modes.ir, IrMode::Log);
+    assert_eq!(ir_view.modes.transfer, TransferView::Ir(IrMode::Log));
     assert_eq!(
         view(PaneKind::Spl).measurement.as_deref(),
         Some("Stage SPL")
@@ -337,7 +335,7 @@ fn layout_is_remembered_and_restored() {
     assert_eq!(u.focus_kind(), PaneKind::Spl);
     assert!(u.st.layout.maximized && u.st.fullscreen);
     assert_eq!(u.st.kind_modes(PaneKind::Spl).spl, SplMode::Meter);
-    assert_eq!(ir_mode(&u), IrMode::Log);
+    assert_eq!(ir_mode(&u), TransferView::Ir(IrMode::Log));
     assert_eq!(u.st.stimulus.phase, StimPhase::Idle);
     // Before the daemon's state, the remembered names stay as they were.
     assert_eq!(u.st.layout_prefs(), prefs.layout);

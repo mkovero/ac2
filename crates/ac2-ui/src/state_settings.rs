@@ -168,7 +168,7 @@ impl AppState {
             Page::Calibration => self.cal_view_key(chord, swallow, out),
             Page::Leq => self.leq_key(chord, swallow, out),
             Page::Recording => self.recording_key(chord, swallow),
-            Page::Display => self.display_key(chord, out),
+            Page::Display => self.display_key(chord),
             Page::Connection => self.connection_key(chord, swallow, out),
         }
     }
@@ -219,7 +219,7 @@ impl AppState {
         }
     }
 
-    fn display_key(&mut self, chord: Chord, out: &mut Vec<Request>) {
+    fn display_key(&mut self, chord: Chord) {
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
@@ -227,15 +227,15 @@ impl AppState {
         match chord.key {
             Key::ArrowUp => s.display_move(-1),
             Key::ArrowDown | Key::Tab => s.display_move(1),
-            Key::ArrowLeft => self.display_change(row, -1, out),
-            Key::ArrowRight | Key::Space => self.display_change(row, 1, out),
-            Key::Enter => self.display_change(row, 0, out),
+            Key::ArrowLeft => self.display_change(row, -1),
+            Key::ArrowRight | Key::Space => self.display_change(row, 1),
+            Key::Enter => self.display_change(row, 0),
             _ => {}
         }
     }
 
     /// ←/→ (`d`) or Enter (`0`) on a line of the Display page: changes it at once.
-    fn display_change(&mut self, row: DisplayRow, d: i32, out: &mut Vec<Request>) {
+    fn display_change(&mut self, row: DisplayRow, d: i32) {
         if let Overlay::Settings(s) = &mut self.overlay {
             s.display = row;
         }
@@ -269,10 +269,10 @@ impl AppState {
             // The G keys of the pane of that kind worked in last, so the spectrograph's
             // history comes and goes as it does there; the focus stays where it was.
             DisplayRow::SpectrumView | DisplayRow::SweepView if d != 0 => {
-                let (c, kind) = if row == DisplayRow::SpectrumView {
-                    (CommandId::Spectrograph, PaneKind::Spectrum)
+                let kind = if row == DisplayRow::SpectrumView {
+                    PaneKind::Spectrum
                 } else {
-                    (CommandId::SweepView, PaneKind::Distortion)
+                    PaneKind::Distortion
                 };
                 let Some(pane) = self.layout.lead(kind) else {
                     self.warn(format!(
@@ -284,10 +284,7 @@ impl AppState {
                 };
                 let focus = self.layout.focus;
                 self.layout.set_focus(pane);
-                // Three views: back one is forward two.
-                for _ in 0..if d > 0 { 1 } else { 2 } {
-                    self.command(c, &Keymap::default(), out);
-                }
+                self.step_view(d > 0);
                 self.layout.set_focus(focus);
             }
             // The palette's commands without focusing a pane: the page stays in front.
@@ -616,7 +613,7 @@ impl AppState {
                 }
                 self.apply_ceiling(out);
             }
-            SettingsMsg::Display(row, d) => self.display_change(row, d, out),
+            SettingsMsg::Display(row, d) => self.display_change(row, d),
             SettingsMsg::Connection(i) => {
                 let a = match &mut self.overlay {
                     Overlay::Settings(s) => {

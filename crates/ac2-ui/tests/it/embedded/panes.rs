@@ -61,10 +61,10 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     assert!(sp.contains(&"P peak hold".to_owned()), "{sp:?}");
     d.key("Alt+3");
     let ir = hint_line(&d.st);
-    assert_eq!(ir.first().map(String::as_str), Some("G views"));
+    assert_eq!(ir.first().map(String::as_str), Some("G/Shift+G view"));
     d.key("Alt+4");
     let spl = hint_line(&d.st);
-    assert_eq!(spl.first().map(String::as_str), Some("G meter/Leq/both"));
+    assert_eq!(spl.first().map(String::as_str), Some("G/Shift+G view"));
     // A fifth pane, turned into the sweep pane from its list.
     d.key("N");
     let f = d.st.layout.focus;
@@ -78,11 +78,11 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     );
     let sw = hint_line(&d.st);
     assert_eq!(sw.first().map(String::as_str), Some("Shift+S new sweep"));
-    // Shift+I shows the sweep's IR: the line names the IR mode.
-    assert!(!sw.contains(&"Shift+G linear/log/ETC".to_owned()), "{sw:?}");
+    // The view keys are the same pair in the sweep's IR view (Shift+I).
+    assert!(sw.contains(&"G/Shift+G view".to_owned()), "{sw:?}");
     d.key("Shift+I");
     let sw = hint_line(&d.st);
-    assert!(sw.contains(&"Shift+G linear/log/ETC".to_owned()), "{sw:?}");
+    assert!(sw.contains(&"G/Shift+G view".to_owned()), "{sw:?}");
     // H: every key, and closed again.
     d.key("H");
     assert_eq!(d.st.overlay, Overlay::Help);
@@ -790,9 +790,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
             .ok_or("spectrum")?;
     d.key("Alt+2");
     assert!(
-        hint_line(&d.st)
-            .iter()
-            .any(|h| h == "G spectrum/both/spectrograph"),
+        hint_line(&d.st).iter().any(|h| h == "G/Shift+G view"),
         "{:?}",
         hint_line(&d.st)
     );
@@ -864,7 +862,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
     d.send(Msg::Command(CommandId::ToggleCursor));
     assert_eq!(d.st.view.spectrum.spectrograph.cursor_s, None);
 
-    // A minute of history (Settings › Display, the palette), started afresh.
+    // A minute of history (Shift+B, Settings › Display), started afresh.
     d.send(Msg::Command(CommandId::SpectrographSpan));
     assert_eq!(d.st.view.spectrum.spectrograph.span_s, 60);
     assert!(!filled(&d.st, 1));

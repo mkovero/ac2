@@ -852,21 +852,12 @@ fn the_ir_pane_says_why_there_is_no_ir() {
         )),
         "{r:?}"
     );
-    // Its kept IR: drawn, tagged as its transfer curve is, never STALE.
+    // Its kept IR is no longer the system's: not drawn as live, the note stays.
     t.conn(snapshot(vec![tf, ir]));
     let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
-    assert_eq!(s.note, None);
-    assert_eq!(s.tag.as_deref(), Some("stopped"));
+    assert_eq!(s.note.as_deref(), Some("Main L stopped — S starts it"));
+    assert_eq!(s.tag, None);
     assert!(texts(&s).iter().all(|b| !b.starts_with("STALE")));
-    let line = format!("{} · stopped", s.origin);
-    assert!(
-        s.scene
-            .layers
-            .iter()
-            .flat_map(|l| &l.labels)
-            .any(|l| l.text == line),
-        "{line}"
-    );
 }
 
 fn meas_deleted(r: &[Request]) -> Option<(MeasId, String)> {

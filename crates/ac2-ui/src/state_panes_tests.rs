@@ -234,9 +234,9 @@ fn the_focused_pane_takes_a_measurement_of_any_kind() {
     assert_eq!(t.st.layout.views[&a], a_view);
 }
 
-/// G steps the focused transfer pane through response → phase → coherence → impulse
-/// response → response; the phase and coherence views are that plot alone, and the IR view
-/// has the IR's keys (Shift+G its mode).
+/// G steps the focused transfer pane through response → phase → coherence → IR linear →
+/// IR log → ETC → response, Shift+G back; the phase and coherence views are that plot
+/// alone, and the IR views have the IR's keys.
 #[test]
 fn g_steps_the_transfer_views() {
     use ac2_scene::tf::TfPaneKind as P;
@@ -259,13 +259,20 @@ fn g_steps_the_transfer_views() {
     t.key("G");
     assert_eq!(view(&t), TransferView::Coherence);
     assert_eq!(plots(&t), [P::Coherence]);
+    for m in [IrMode::Linear, IrMode::Log, IrMode::Etc] {
+        t.key("G");
+        assert_eq!(view(&t), TransferView::Ir(m));
+        assert_eq!(t.st.scope(), crate::keys::Scope::Ir);
+        assert_eq!(t.st.view_for(f).ir.mode, m);
+        assert!(crate::scenes::ir(&t.st, f, &t.keys, &Theme::dark(), SIZE, now()).is_some());
+    }
     t.key("G");
-    assert_eq!(view(&t), TransferView::Ir);
-    assert_eq!(t.st.scope(), crate::keys::Scope::Ir);
-    assert!(crate::scenes::ir(&t.st, f, &t.keys, &Theme::dark(), SIZE, now()).is_some());
-    t.key("Shift+G");
-    assert_eq!(t.st.layout.focused().modes.ir, IrMode::Log);
-    t.key("G");
+    assert_eq!(view(&t), TransferView::Response);
+    // Shift+G walks the same chain back, wrapping at the response.
+    for want in TransferView::ALL.iter().rev() {
+        t.key("Shift+G");
+        assert_eq!(view(&t), *want);
+    }
     assert_eq!(view(&t), TransferView::Response);
     assert_eq!(t.st.scope(), crate::keys::Scope::Transfer);
     assert_eq!(plots(&t).first(), Some(&P::Magnitude));
@@ -307,17 +314,33 @@ fn two_transfer_panes_keep_their_measurements_and_views() {
     let mode = |t: &T, id: PaneId| t.st.layout.view(id).expect("view").modes.transfer;
     assert_eq!(
         (mode(&t, a), mode(&t, b)),
-        (TransferView::Response, TransferView::Ir)
+        (TransferView::Response, TransferView::Ir(IrMode::Linear))
     );
     assert_eq!(shows(&t, b), Some(3));
     // A split copies the view; the halves then step apart.
     t.key("N");
     let c = t.st.layout.focus;
-    assert_eq!((mode(&t, c), shows(&t, c)), (TransferView::Ir, Some(3)));
+    assert_eq!(
+        (mode(&t, c), shows(&t, c)),
+        (TransferView::Ir(IrMode::Linear), Some(3))
+    );
     t.key("G");
     assert_eq!(
         (mode(&t, b), mode(&t, c)),
-        (TransferView::Ir, TransferView::Response)
+        (
+            TransferView::Ir(IrMode::Linear),
+            TransferView::Ir(IrMode::Log)
+        )
+    );
+    t.key("Shift+G");
+    t.key("Shift+G");
+    assert_eq!(
+        (mode(&t, a), mode(&t, b), mode(&t, c)),
+        (
+            TransferView::Response,
+            TransferView::Ir(IrMode::Linear),
+            TransferView::Coherence
+        )
     );
     t.st.update(Msg::FocusPane(a), &t.keys);
     assert_eq!((shows(&t, b), shows(&t, c)), (Some(3), Some(3)));

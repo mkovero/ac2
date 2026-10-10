@@ -139,8 +139,8 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
         Some(1000.0),
         "the frequency cursor stays"
     );
-    d.key("G");
-    d.key("G");
+    // Shift+G: back to the response.
+    d.key("Shift+G");
     d.until("the stimulus off and the lease given back", |s| {
         s.stimulus.phase == StimPhase::Idle
             && s.daemon().is_some_and(|x| {
@@ -221,7 +221,7 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     d.key("Shift+I");
     assert_eq!(
         d.st.kind_modes(ac2_ui::state::PaneKind::Distortion).sweep,
-        ac2_scene::view::SweepMode::Ir
+        ac2_scene::view::SweepMode::Ir(ac2_scene::view::IrMode::Linear)
     );
     let theme = Theme::dark();
     let size = ac2_scene::primitives::Viewport {
@@ -265,8 +265,11 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
         .collect();
     assert!(labels.contains(&"T30 (s)") && labels.contains(&t.caption.as_str()));
 
-    // G: the room parameters alone, the whole pane, every band at a larger size.
-    d.key("G");
+    // G past the log and ETC displays: the room parameters alone, the whole pane, every
+    // band at a larger size.
+    for _ in 0..3 {
+        d.key("G");
+    }
     assert_eq!(
         d.st.kind_modes(ac2_ui::state::PaneKind::Distortion).sweep,
         ac2_scene::view::SweepMode::Room

@@ -598,7 +598,7 @@ impl Rig {
 /// A transfer pane in its impulse-response view.
 fn ir_view() -> ac2_ui::state::View {
     let mut v = ac2_ui::state::View::of(ac2_ui::state::PaneKind::Transfer);
-    v.modes.transfer = ac2_ui::state::TransferView::Ir;
+    v.modes.transfer = ac2_ui::state::TransferView::Ir(ac2_scene::view::IrMode::Linear);
     v
 }
 

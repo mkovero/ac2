@@ -215,14 +215,12 @@ impl AppState {
                 matches!(pane, PaneKind::Transfer | PaneKind::Spectrum) && self.meas_hidden(m)
             })
             .map(|m| format!("{} hidden", m.config.name));
-        // A stopped transfer measurement draws no live curve: said as the hidden one is, so
-        // a plot holding only its captures (or nothing) does not read as a fault. The IR
-        // view says it in its own plot.
+        // A stopped transfer measurement draws no live curve or IR: said as the hidden one
+        // is, so a plot holding only its captures (or nothing) does not read as a fault.
         let stopped = self
             .pane_meas(id)
             .filter(|m| {
                 pane == PaneKind::Transfer
-                    && self.pane_modes(id).transfer != TransferView::Ir
                     && m.config.kind.publishes_tf()
                     && !m.running
                     && !self.meas_hidden(m)
@@ -895,8 +893,6 @@ impl AppState {
 
     /// The hint line of `pane`: its most used keys as bound in `keymap`, written in `style`,
     /// then the help key. Only the focused pane has one, and only while hints are shown.
-    /// Commands that do nothing in the pane's present view are left out (the sweep pane's
-    /// dB / % while it shows the IR, its IR mode while it shows distortion).
     pub fn key_hint_line(
         &self,
         keymap: &Keymap,
@@ -917,24 +913,8 @@ impl AppState {
         style: crate::keys::LabelStyle,
     ) -> Vec<crate::hints::KeyHint> {
         let pane = self.layout.kind(id);
-        let mode = self
-            .layout
-            .view(id)
-            .map_or(SweepMode::Response, |v| v.modes.sweep);
         let scope = self.layout.view(id).map_or(pane.scope(), |v| v.scope());
-        let mut line = crate::hints::line(keymap, scope, style, |c| {
-            pane == PaneKind::Distortion && c == CommandId::IrMode && mode != SweepMode::Ir
-        });
-        // G reaches the band view only when a meter has a band meter (`SplMode::next`).
-        if !crate::scenes::has_band_meter(self) {
-            for h in line
-                .iter_mut()
-                .filter(|h| h.command == CommandId::SplLeqView)
-            {
-                h.name = crate::keys::SPL_VIEWS_NO_BANDS;
-            }
-        }
-        line
+        crate::hints::line(keymap, scope, style)
     }
 
     /// The multi-step operation running on the daemon (a set of sweeps), as the progress

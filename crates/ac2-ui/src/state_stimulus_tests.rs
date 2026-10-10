@@ -287,10 +287,17 @@ fn keys_follow_the_focused_pane() {
     assert!(t.st.view.spectrum.peak_hold);
     // X means nothing there.
     assert!(t.key("X").is_empty());
-    // A transfer pane's IR view has the IR's keys; G back to its response, the transfer's.
+    // A transfer pane's IR view has the IR's keys; Shift+G back past its response's
+    // coherence and phase views (G on past its log and ETC wraps there too).
     t.key("Alt+3");
     let pane = t.st.layout.focus;
     assert_eq!(t.st.scope(), Scope::Ir);
+    t.key("Shift+G");
+    assert_eq!(t.st.scope(), Scope::Transfer);
+    t.key("G");
+    t.key("G");
+    t.key("G");
+    t.key("G");
     t.key("G");
     assert_eq!(
         (t.st.layout.focus, t.focus_kind()),

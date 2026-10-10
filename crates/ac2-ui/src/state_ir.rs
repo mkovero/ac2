@@ -13,7 +13,7 @@ use ac2_proto::model::{TraceData, TraceKind};
 use ac2_proto::topic::Stream;
 use ac2_scene::axis::Range;
 use ac2_scene::format;
-use ac2_scene::view::{IR_AMPLITUDE_BOUNDS, IrAxes, IrExtent, IrMode, IrPane, SweepMode, level};
+use ac2_scene::view::{IR_AMPLITUDE_BOUNDS, IrAxes, IrExtent, IrMode, IrPane, level};
 
 use super::{AppState, LEVEL_ZOOM_FACTOR, PaneKind, ZOOM_FACTOR};
 use crate::keys::CommandId;
@@ -63,7 +63,7 @@ impl AppState {
         match self.layout.focus_kind() {
             PaneKind::Transfer if self.layout.focused().shows_ir() => Some(IrPane::Live),
             PaneKind::Distortion
-                if self.modes().sweep == SweepMode::Ir
+                if self.modes().sweep.ir().is_some()
                     && self.shown_sweep().is_some_and(|(d, _)| d.sweep.is_some()) =>
             {
                 Some(IrPane::Sweep)
@@ -105,7 +105,9 @@ impl AppState {
                     return ac2_scene::ir::stored_frame(d).map(Cow::Owned);
                 }
                 let m = shown?;
-                if self.meas_hidden(m) {
+                // A stopped measurement's last IR is no longer the system's: as its response,
+                // it is not drawn as live (its captures keep theirs).
+                if self.meas_hidden(m) || !m.running {
                     return None;
                 }
                 match &crate::scenes::frame(self, m.id, Stream::Ir)?.frame.data {
@@ -140,7 +142,7 @@ impl AppState {
         Some((
             ac2_scene::ir::extent(&f),
             ac2_scene::ir::time_range(&f, axes),
-            ac2_scene::ir::y_range(&f, self.modes().ir, axes),
+            ac2_scene::ir::y_range(&f, self.modes().ir(p), axes),
         ))
     }
 
@@ -172,7 +174,7 @@ impl AppState {
         let Some((_, _, y)) = self.ir_shown(p) else {
             return;
         };
-        let mode = self.modes().ir;
+        let mode = self.modes().ir(p);
         let axes = self.view.ir_axes_mut(p);
         match mode {
             IrMode::Linear => axes.amplitude = Some(f(y)),
@@ -181,7 +183,7 @@ impl AppState {
     }
 
     fn ir_value_zoom(&mut self, p: IrPane, about: Option<f64>, factor: f64) {
-        let linear = self.modes().ir == IrMode::Linear;
+        let linear = self.modes().ir(p) == IrMode::Linear;
         self.ir_value_set(p, |y| {
             let a = about.unwrap_or((y.lo + y.hi) / 2.0);
             if linear {
@@ -193,7 +195,7 @@ impl AppState {
     }
 
     fn ir_value_pan(&mut self, p: IrPane, by: f64) {
-        let linear = self.modes().ir == IrMode::Linear;
+        let linear = self.modes().ir(p) == IrMode::Linear;
         self.ir_value_set(p, |y| {
             if linear {
                 IR_AMPLITUDE_BOUNDS.pan(y, by)
@@ -278,7 +280,7 @@ impl AppState {
     /// Shift+Home: the whole IR, its value axis framing the curve: the linear view
     /// symmetric about its peak, the log and ETC views from the noise to the peak.
     fn ir_fit(&mut self, p: IrPane) {
-        let mode = self.modes().ir;
+        let mode = self.modes().ir(p);
         let fit = match mode {
             IrMode::Linear => None,
             IrMode::Log | IrMode::Etc => {

@@ -205,7 +205,7 @@ mod tests {
             ("track", CommandId::TrackDelay),
             ("peak", CommandId::PeakHold),
             ("cohmask", CommandId::CoherenceMask),
-            ("ir mode", CommandId::IrMode),
+            ("previous view", CommandId::PrevView),
             ("stim stop", CommandId::StimulusStop),
             ("type level", CommandId::StimulusLevel),
             ("slot 3", CommandId::Slot3),

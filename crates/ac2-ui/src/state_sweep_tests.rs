@@ -243,17 +243,27 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         assert!(r.is_empty(), "display only: {r:?}");
         assert_eq!(t.st.view.distortion.unit, unit);
     }
-    // G steps the views: the impulse response, the room parameters, back; Shift+I goes
-    // to the IR and back; Shift+G steps the IR's scale.
+    // G steps the views: the impulse response linear, log, ETC, the room parameters, back
+    // to the response; Shift+G the same chain back; Shift+I goes to the IR and back.
     use ac2_scene::view::SweepMode;
-    assert_eq!(
-        t.st.kind_modes(PaneKind::Distortion).sweep,
-        SweepMode::Response
-    );
-    t.key("G");
-    assert_eq!(t.st.kind_modes(PaneKind::Distortion).sweep, SweepMode::Ir);
-    t.key("G");
-    assert_eq!(t.st.kind_modes(PaneKind::Distortion).sweep, SweepMode::Room);
+    let sweep = |t: &T| t.st.kind_modes(PaneKind::Distortion).sweep;
+    assert_eq!(sweep(&t), SweepMode::Response);
+    for want in [
+        SweepMode::Ir(IrMode::Linear),
+        SweepMode::Ir(IrMode::Log),
+        SweepMode::Ir(IrMode::Etc),
+        SweepMode::Room,
+        SweepMode::Response,
+    ] {
+        t.key("G");
+        assert_eq!(sweep(&t), want);
+    }
+    for want in SweepMode::ALL.iter().rev() {
+        t.key("Shift+G");
+        assert_eq!(sweep(&t), *want);
+    }
+    t.key("Shift+G");
+    assert_eq!(sweep(&t), SweepMode::Room);
     let prefs = t.st.layout_prefs().panes.expect("a layout");
     assert!(
         prefs
@@ -262,24 +272,18 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
             .any(|v| v.kind == PaneKind::Distortion && v.modes.sweep == SweepMode::Room)
     );
     t.key("G");
-    assert_eq!(
-        t.st.kind_modes(PaneKind::Distortion).sweep,
-        SweepMode::Response
-    );
+    assert_eq!(sweep(&t), SweepMode::Response);
     t.key("Shift+I");
-    assert_eq!(t.st.kind_modes(PaneKind::Distortion).sweep, SweepMode::Ir);
-    t.key("Shift+G");
-    assert_eq!(t.st.kind_modes(PaneKind::Distortion).ir, IrMode::Log);
+    assert_eq!(sweep(&t), SweepMode::Ir(IrMode::Linear));
+    t.key("G");
+    assert_eq!(sweep(&t), SweepMode::Ir(IrMode::Log));
     assert_eq!(
-        t.st.layout.view(t.ir_pane()).expect("view").modes.ir,
-        IrMode::Linear,
+        t.st.layout.view(t.ir_pane()).expect("view").modes.transfer,
+        TransferView::Ir(IrMode::Linear),
         "the transfer pane's IR view's own"
     );
     t.key("Shift+I");
-    assert_eq!(
-        t.st.kind_modes(PaneKind::Distortion).sweep,
-        SweepMode::Response
-    );
+    assert_eq!(sweep(&t), SweepMode::Response);
 
     // The dialog turned the focused transfer pane into the sweep pane; its list turns it
     // back.
@@ -759,6 +763,16 @@ fn g_steps_the_spectrum_panes_views() {
         t.st.spectrographs.is_empty(),
         "nothing kept for a hidden one"
     );
+    // Shift+G walks the same chain back, wrapping at the spectrum.
+    for want in [
+        SpectrumMode::Spectrograph,
+        SpectrumMode::Split,
+        SpectrumMode::Spectrum,
+    ] {
+        t.key("Shift+G");
+        assert_eq!(t.st.kind_modes(PaneKind::Spectrum).spectrum, want);
+    }
+    assert!(t.st.spectrographs.is_empty(), "hidden again: dropped");
 
     // Remembered: a new app on these preferences opens on the spectrograph.
     let mut u = T::new();
@@ -766,5 +780,35 @@ fn g_steps_the_spectrum_panes_views() {
     assert_eq!(
         u.st.kind_modes(PaneKind::Spectrum).spectrum,
         SpectrumMode::Spectrograph
+    );
+}
+
+/// Shift+B in the spectrum pane steps the spectrograph's history length (10 → 30 → 60 →
+/// 120 s → 10 s), remembered as the Settings › Display row remembers it; the view stays.
+#[test]
+fn shift_b_steps_the_spectrograph_span() {
+    use ac2_scene::view::SpectrumMode;
+    let mut t = T::new();
+    t.key("Alt+2");
+    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
+    let before = t.st.view.spectrum.spectrograph.span_s;
+    let mut spans = vec![];
+    for _ in 0..4 {
+        t.key("Shift+B");
+        spans.push(t.st.view.spectrum.spectrograph.span_s);
+    }
+    assert_eq!(spans.last(), Some(&before), "{spans:?}");
+    let mut sorted = spans.clone();
+    sorted.sort_unstable();
+    assert_eq!(sorted, ac2_scene::view::SPECTROGRAPH_SPANS_S);
+    assert_eq!(t.st.prefs.spectrograph_span_s, Some(before));
+    assert!(
+        t.last_toast().contains("spectrograph: last"),
+        "{}",
+        t.last_toast()
+    );
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Spectrum).spectrum,
+        SpectrumMode::Spectrum
     );
 }

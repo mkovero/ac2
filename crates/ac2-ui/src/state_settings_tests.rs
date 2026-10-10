@@ -258,7 +258,7 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Right");
     assert_eq!(
         t.st.kind_modes(PaneKind::Distortion).sweep,
-        ac2_scene::view::SweepMode::Ir
+        ac2_scene::view::SweepMode::Ir(ac2_scene::view::IrMode::Linear)
     );
     t.key("Down");
     t.key("Right");

@@ -34,23 +34,23 @@ pub const SEP: &str = " · ";
 /// The help hint's name.
 pub const ALL_KEYS: &str = "all keys";
 
-/// The hints of `scope` with a key in `keymap`, in the line's order, then the help key.
-/// `skip` leaves out commands that do nothing in the pane's present view. A command unbound
-/// by the operator is left out (no key to show).
-pub fn line(
-    keymap: &Keymap,
-    scope: Scope,
-    style: LabelStyle,
-    skip: impl Fn(CommandId) -> bool,
-) -> Vec<KeyHint> {
+/// The hints of `scope` with a key in `keymap`, in the line's order, then the help key. A
+/// command unbound by the operator is left out (no key to show).
+pub fn line(keymap: &Keymap, scope: Scope, style: LabelStyle) -> Vec<KeyHint> {
     let mut v: Vec<KeyHint> = keys::hints(scope)
         .iter()
-        .filter(|h| !skip(h.command))
         .filter_map(|h| {
             let chord = keymap.first_chord(h.command, scope)?;
+            let mut keys = chord.label_in(style);
+            // The view keys are one pair, forward and back: one hint names both.
+            if h.command == CommandId::NextView
+                && let Some(back) = keymap.first_chord(CommandId::PrevView, scope)
+            {
+                keys = format!("{keys}/{}", back.label_in(style));
+            }
             Some(KeyHint {
                 command: h.command,
-                keys: chord.label_in(style),
+                keys,
                 name: h.name,
                 priority: h.priority,
             })
@@ -104,12 +104,12 @@ mod tests {
     #[test]
     fn each_pane_lists_its_most_used_keys_then_help() {
         let k = Keymap::default();
-        let pc = |s| texts(&line(&k, s, LabelStyle::Pc, |_| false));
+        let pc = |s| texts(&line(&k, s, LabelStyle::Pc));
         assert_eq!(
             pc(Scope::Transfer),
             [
                 "V select trace",
-                "G response/phase/coherence/IR",
+                "G/Shift+G view",
                 "A show/hide",
                 "Ctrl+1 capture",
                 "X find delay",
@@ -124,7 +124,7 @@ mod tests {
             [
                 "S start/stop",
                 "P peak hold",
-                "G spectrum/both/spectrograph",
+                "G/Shift+G view",
                 "K smoothing",
                 "Shift+Home fit level",
                 "Ctrl+1 capture",
@@ -135,8 +135,7 @@ mod tests {
         assert_eq!(
             pc(Scope::Ir),
             [
-                "G views",
-                "Shift+G linear/log/ETC",
+                "G/Shift+G view",
                 "I zoom time",
                 "Ctrl+I zoom level",
                 "Shift+Home fit",
@@ -149,7 +148,7 @@ mod tests {
         assert_eq!(
             pc(Scope::Spl),
             [
-                "G meter/Leq/both/bands",
+                "G/Shift+G view",
                 "Shift+F F/S/I",
                 "Z A/C/Z",
                 "Shift+L windows",
@@ -163,8 +162,7 @@ mod tests {
             [
                 "Shift+S new sweep",
                 "V next sweep",
-                "G response/IR/room",
-                "Shift+G linear/log/ETC",
+                "G/Shift+G view",
                 "W maximise",
                 "Q close pane",
                 "H all keys"
@@ -176,34 +174,24 @@ mod tests {
     #[test]
     fn mac_labels_and_remapped_keys() {
         let k = Keymap::default();
-        let mac = texts(&line(&k, Scope::Distortion, LabelStyle::Mac, |_| false));
+        let mac = texts(&line(&k, Scope::Distortion, LabelStyle::Mac));
         assert!(mac.contains(&"⇧S new sweep".to_owned()), "{mac:?}");
-        assert!(mac.contains(&"⇧G linear/log/ETC".to_owned()), "{mac:?}");
-        let mac = texts(&line(&k, Scope::Transfer, LabelStyle::Mac, |_| false));
+        assert!(mac.contains(&"G/⇧G view".to_owned()), "{mac:?}");
+        let mac = texts(&line(&k, Scope::Transfer, LabelStyle::Mac));
         assert!(mac.contains(&"⌘1 capture".to_owned()), "{mac:?}");
         // Remapped: the line shows the new chord; unbound: the hint goes.
         let k = Keymap::from_toml(
             "[global]\nnext_trace = \"Alt+T\"\nhelp = \"F1\"\n[transfer]\ninsert_delay = []\n",
         )
         .expect("valid");
-        let t = texts(&line(&k, Scope::Transfer, LabelStyle::Pc, |_| false));
+        let t = texts(&line(&k, Scope::Transfer, LabelStyle::Pc));
         assert_eq!(t[0], "Alt+T select trace");
         assert!(!t.iter().any(|s| s.contains("find delay")), "{t:?}");
         assert_eq!(t.last().map(String::as_str), Some("F1 all keys"));
         // A pane's own binding wins over the global one.
-        let k = Keymap::from_toml("[distortion]\nsweep_view = \"Shift+Q\"\n").expect("valid");
-        let t = texts(&line(&k, Scope::Distortion, LabelStyle::Pc, |_| false));
-        assert!(t.contains(&"Shift+Q response/IR/room".to_owned()), "{t:?}");
-    }
-
-    #[test]
-    fn skipped_commands_leave_the_line() {
-        let k = Keymap::default();
-        let t = line(&k, Scope::Distortion, LabelStyle::Pc, |c| {
-            c == CommandId::SweepNew
-        });
-        assert!(t.iter().all(|h| h.command != CommandId::SweepNew));
-        assert_eq!(t.len(), 6);
+        let k = Keymap::from_toml("[distortion]\nnext_view = \"Shift+Q\"\n").expect("valid");
+        let t = texts(&line(&k, Scope::Distortion, LabelStyle::Pc));
+        assert!(t.contains(&"Shift+Q/Shift+G view".to_owned()), "{t:?}");
     }
 
     #[test]

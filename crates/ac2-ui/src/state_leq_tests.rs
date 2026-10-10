@@ -92,6 +92,11 @@ fn leq_windows_from_the_keyboard() {
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Leq);
     t.key("G");
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::MeterLeq);
+    // Shift+G: back the same way, wrapping (no band meter: no band view).
+    for want in [SplMode::Leq, SplMode::Meter, SplMode::MeterLeq] {
+        t.key("Shift+G");
+        assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, want);
+    }
     // A refused value keeps the dialog open and says why.
     t.type_key("Shift+L", "L");
     t.key("ArrowDown");

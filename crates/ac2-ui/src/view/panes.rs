@@ -17,7 +17,6 @@ use crate::plot::{self, PlotSlot};
 use crate::scenes;
 use crate::state::{
     Axis, HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow, PaneRect,
-    TransferView,
 };
 use crate::theme::Chrome;
 
@@ -226,7 +225,7 @@ fn placeholder(id: PaneId, app: &App) -> &'static str {
     let modes = app.state.pane_modes(id);
     let spl = modes.spl;
     match pane {
-        PaneKind::Transfer if modes.transfer == TransferView::Ir => "no transfer measurement",
+        PaneKind::Transfer if modes.transfer.ir().is_some() => "no transfer measurement",
         PaneKind::Spl if spl == SplMode::Leq && scenes::has_spl(&app.state) => {
             "no Leq windows yet: they show once the meter has measured a second"
         }
@@ -1270,7 +1269,7 @@ mod tests {
             let ctx = ui.ctx();
             for scope in Scope::ALL {
                 for style in [LabelStyle::Pc, LabelStyle::Mac] {
-                    let items = hints::line(&keymap, scope, style, |_| false);
+                    let items = hints::line(&keymap, scope, style);
                     let (galleys, sep) = hint_galleys(ctx, &items, &ch);
                     let widths: Vec<(u8, f32)> = items
                         .iter()

@@ -222,6 +222,35 @@ impl AppState {
         )
     }
 
+    /// G / Shift+G: the focused pane's next or previous view, in its kind's chain.
+    pub(super) fn step_view(&mut self, forward: bool) {
+        let kind = self.layout.focus_kind();
+        let before = self.spectrograph_shown();
+        let bands = crate::scenes::has_band_meter(self);
+        let m = self.modes_mut();
+        match (kind, forward) {
+            (PaneKind::Transfer, true) => m.transfer = m.transfer.next(),
+            (PaneKind::Transfer, false) => m.transfer = m.transfer.prev(),
+            (PaneKind::Spectrum, true) => m.spectrum = m.spectrum.next(),
+            (PaneKind::Spectrum, false) => m.spectrum = m.spectrum.prev(),
+            (PaneKind::Spl, true) => m.spl = m.spl.next(bands),
+            (PaneKind::Spl, false) => m.spl = m.spl.prev(bands),
+            (PaneKind::Distortion, true) => m.sweep = m.sweep.next(),
+            (PaneKind::Distortion, false) => m.sweep = m.sweep.prev(),
+        }
+        // The history starts with the view and goes with the last pane showing it: nothing
+        // is kept for a hidden spectrograph; from the split to the spectrograph alone it
+        // stays.
+        if kind == PaneKind::Spectrum {
+            if !self.spectrograph_shown() {
+                self.spectrographs.clear();
+                self.view.spectrum.spectrograph.cursor_s = None;
+            } else if !before && let Some(d) = self.data.clone() {
+                self.fold_spectrographs(&d);
+            }
+        }
+    }
+
     /// Selects the measurement pane `p` shows, if any, leaving the pane's choice as it is.
     pub(super) fn select_shown(&mut self, p: PaneId) {
         if let Some(id) = self.pane_meas(p).map(|m| m.id) {
@@ -624,16 +653,13 @@ impl AppState {
             C::ShrinkPane => self.resize_pane(false),
             C::SweepNew => self.open_sweep_dialog(keymap, out),
             C::DistortionUnit => self.toggle_distortion_unit(),
-            C::SweepView => {
-                self.focus_kind(PaneKind::Distortion);
-                let m = self.modes_mut();
-                m.sweep = m.sweep.next();
-            }
+            C::NextView => self.step_view(true),
+            C::PrevView => self.step_view(false),
             C::SweepIr => {
                 let m = self.modes_mut();
                 m.sweep = match m.sweep {
-                    SweepMode::Ir => SweepMode::Response,
-                    _ => SweepMode::Ir,
+                    SweepMode::Ir(_) => SweepMode::Response,
+                    _ => SweepMode::Ir(IrMode::Linear),
                 };
             }
             C::MaximizePane => self.cycle_layout(),
@@ -1338,21 +1364,6 @@ impl AppState {
                 self.view.spectrum.peak_hold = !self.view.spectrum.peak_hold;
                 self.peaks.clear();
             }
-            C::Spectrograph => {
-                let before = self.spectrograph_shown();
-                self.focus_kind(PaneKind::Spectrum);
-                let m = self.modes_mut();
-                m.spectrum = m.spectrum.next();
-                // The history starts with the view and goes with the last pane showing it:
-                // nothing is kept for a hidden spectrograph; from the split to the
-                // spectrograph alone it stays.
-                if !self.spectrograph_shown() {
-                    self.spectrographs.clear();
-                    self.view.spectrum.spectrograph.cursor_s = None;
-                } else if !before && let Some(d) = self.data.clone() {
-                    self.fold_spectrographs(&d);
-                }
-            }
             C::SpectrographSpan => {
                 let sg = &mut self.view.spectrum.spectrograph;
                 sg.span_s = ac2_scene::view::SpectrographView::next_span(sg.span_s);
@@ -1360,35 +1371,19 @@ impl AppState {
                 let span = sg.span_s;
                 // Slots of another length cannot hold the frames already placed.
                 self.spectrographs.clear();
+                // Remembered as the Settings › Display row remembers it: one setting.
+                self.prefs.spectrograph_span_s = Some(span);
+                self.prefs_dirty = true;
                 self.toast(format!("spectrograph: last {span} s"));
             }
-            C::TransferView => {
-                self.focus_kind(PaneKind::Transfer);
-                let m = self.modes_mut();
-                m.transfer = m.transfer.next();
-            }
-            C::IrMode => {
-                let m = self.modes_mut();
-                m.ir = match m.ir {
-                    IrMode::Linear => IrMode::Log,
-                    IrMode::Log => IrMode::Etc,
-                    IrMode::Etc => IrMode::Linear,
-                };
-            }
-            C::SplLeqView
-            | C::SplShowMeter
-            | C::SplShowLeq
-            | C::SplShowMeterLeq
-            | C::SplShowBands => {
-                let bands = crate::scenes::has_band_meter(self);
+            C::SplShowMeter | C::SplShowLeq | C::SplShowMeterLeq | C::SplShowBands => {
                 self.focus_kind(PaneKind::Spl);
                 let m = self.modes_mut();
                 m.spl = match c {
                     C::SplShowMeter => SplMode::Meter,
                     C::SplShowLeq => SplMode::Leq,
                     C::SplShowMeterLeq => SplMode::MeterLeq,
-                    C::SplShowBands => SplMode::Bands,
-                    _ => m.spl.next(bands),
+                    _ => SplMode::Bands,
                 };
             }
             // Either shows the windows (a layout change is about them) and is remembered.

@@ -647,7 +647,9 @@ pub fn ir(
     let ir = frame(st, m.id, Stream::Ir);
     let shown: Vec<&TopicFrame> = [tf, ir].into_iter().flatten().collect();
     let status = status(st, &shown, Some(m), now);
-    if let Some(ir) = ir.filter(|_| !st.meas_hidden(m))
+    // A stopped measurement's last IR describes a system no longer measured: like its
+    // response it is not drawn as live; the empty plot says it is stopped.
+    if let Some(ir) = ir.filter(|_| !st.meas_hidden(m) && m.running)
         && let FrameData::Ir(f) = &ir.frame.data
     {
         return Some(ir_scene(
@@ -753,7 +755,7 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
             room, name, &status, theme, size,
         )));
     }
-    if st.pane_modes(pane).sweep == ac2_scene::view::SweepMode::Ir
+    if st.pane_modes(pane).sweep.ir().is_some()
         && let Some((d, _)) = shown
     {
         let color = st.curve_colours(theme).trace(d.meta.id);

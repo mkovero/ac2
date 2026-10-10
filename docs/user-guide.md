@@ -397,7 +397,7 @@ first measurement (a transfer pane on an empty daemon). Lay it out as the job ne
 | drag a gap | drag the gap between two panes to size them (the cursor turns into a resize arrow over it); the same limit holds |
 | **Q** | closes the focused pane; its neighbour takes the space and the focus. The last pane stays (**Tab** puts another measurement in it) |
 | **Tab** / **Shift+Tab** | the focused pane shows the next / previous measurement of the list, whatever its kind: the pane turns into the kind that draws it (transfer, spectrum / RTA, SPL, sweep / distortion) |
-| **G** | steps the focused pane's views; on a transfer pane: response → phase → coherence → impulse response |
+| **G** / **Shift+G** | steps the focused pane's views forward / back, the last on to the first (the chains are below) |
 | **Alt+1 … Alt+9** | focus the panes in reading order: top to bottom, then left to right |
 | click | focuses the pane |
 
@@ -408,9 +408,22 @@ measurement as response and impulse response: split (**N**), then **G** the new 
 view wanted. The chip's list offers the measurements of the pane's kind, and the other kinds
 at its end (`pane  Spectrum / RTA`): a pick there turns the pane into that kind.
 
-The **impulse response** is a view of the transfer pane (**G** until the title reads
-`Impulse response`): it shows the IR of that pane's own measurement. **Shift+G** there steps
-linear / log / ETC.
+**G** and **Shift+G** are the view keys of every pane, one chain per kind (the view is
+remembered with the pane):
+
+| Pane | G steps (Shift+G the other way) |
+|---|---|
+| Transfer | response → phase → coherence → impulse response linear → log → ETC → response |
+| Sweep / distortion | response & distortion → impulse response linear → log → ETC → room parameters → response & distortion |
+| Spectrum / RTA | spectrum → spectrum + spectrograph → spectrograph → spectrum |
+| SPL | meter → Leq windows → meter + Leq → bands (with a band meter) → meter |
+
+The **impulse response** is part of the transfer pane's chain (**G** until the title reads
+`Impulse response`): it shows the IR of that pane's own measurement, as linear amplitude,
+in dB re its peak, or as the energy-time curve: each its own view, so **Shift+G** from the
+response reaches the ETC in one step. A stopped measurement draws no live IR (as it draws no
+live response): the plot says it is stopped and **S** starts it; a selected capture's
+stored IR still shows.
 
 A command about a kind (an SPL view key, the sweep's views) goes to the pane of that kind
 focused last; with none on screen the focused pane turns into one. A finished sweep opens
@@ -548,8 +561,9 @@ The app remembers in `ui.toml` (written when the layout changes and on exit):
 - the panes: how they are split, what kind each shows and which has the focus, and whether
   it is maximised or full screen;
 - the measurement each pane shows (by name);
-- each pane's views: the transfer view (response, phase, coherence or impulse response), the
-  SPL view (meter, Leq windows or both), the spectrum view, the sweep view, the IR mode and how much of its plot is drawn (**T**: grid, labels,
+- each pane's views: the transfer view (response, phase, coherence or an impulse-response
+  display), the SPL view (meter, Leq windows or both), the spectrum view, the sweep view and
+  how much of its plot is drawn (**T**: grid, labels,
   cursor); the Leq windows' style and the sweep pane's dB / %;
 - the window's size and position;
 - each pane's level axis range (see below).
@@ -627,7 +641,7 @@ size and whether it is hidden are kept in `ui.toml` (`[legend.transfer]`).
 
 #### Impulse-response pictures
 
-The transfer pane's IR view (**G** to `Impulse response`) and the sweep pane's IR view
+The transfer pane's IR views (**G** to `Impulse response`) and the sweep pane's IR views
 (**G**) take the same keys and mouse on
 a **time axis** (ms re t = 0):
 
@@ -734,7 +748,7 @@ ac2 meas set main-l --blocks 16           # a transfer measurement's averaging
 
 ### Spectrograph
 
-**G** in the spectrum pane steps its views (the view is remembered):
+**G** in the spectrum pane steps its views, **Shift+G** back (the view is remembered):
 
 1. the spectrum;
 2. the spectrum with the **spectrograph** of the pane's measurement under it;
@@ -747,8 +761,8 @@ the newest frame at the top, level as colour.
   **Ctrl+↑/↓**, **Shift+Home** and **Ctrl+Home** change the colours as they change the
   curve's axis. The colours are a perceptual, colour-blind-safe map (viridis): equal steps
   in dB look like equal steps.
-- **Settings › Display › Spectrograph history** (palette: *Spectrograph history*) steps the
-  history through 10, 30 (the default), 60 and 120 s. It starts afresh
+- **Shift+B** (or **Settings › Display › Spectrograph history**) steps the history through
+  10, 30 (the default), 60 and 120 s; the length is remembered. It starts afresh
   at each length and when the spectrograph comes into view (from the split to the
   spectrograph alone it is kept).
 - Alone, the caption above it also names the spectrum's window and calibration.
@@ -1068,7 +1082,8 @@ The inserted delay is also the time origin of the transfer pane's impulse-respon
 (**G** on a transfer pane until its title reads `Impulse response`). It shows the IR of that
 pane's measurement and carries its banners (NO
 REFERENCE, NO SIGNAL, AUDIO STOPPED, DAEMON NOT RESPONDING); a kept IR is tagged and dimmed as
-its transfer curve is (`stopped`, `audio stopped`, `STALE`). Without an IR it says why:
+its transfer curve is (`audio stopped`, `STALE`). A stopped measurement's last IR is not
+drawn: it is no longer the system's. Without an IR it says why:
 
 - `Main L stopped — S starts it` (**S** starts and stops it from the IR view too);
 - `no reference: nothing is playing — Space arms, Enter starts the stimulus` (or
@@ -1389,8 +1404,7 @@ the run selected).
 | Key | Does |
 |---|---|
 | the **dB \| %** toggle in the title (or Settings › Display › Distortion in) | distortion in dB re fundamental or percent (a log axis: 0.01 %, 0.1 %, 1 %, …), readouts included |
-| **G** | steps the views: response & distortion → **impulse response** with the harmonics' impulses marked → **room parameters** table alone, the whole pane, as large as it fits (read across a room; maximised with **W**) → back. The view is remembered. |
-| **Shift+G** | IR view: linear / log / ETC |
+| **G** / **Shift+G** | steps the views forward / back: response & distortion → **impulse response** with the harmonics' impulses marked, linear → log → ETC → **room parameters** table alone, the whole pane, as large as it fits (read across a room; maximised with **W**) → back. The view is remembered. |
 | **Shift+I** | straight to the impulse response and back |
 | **V** / **Shift+V** | steps through stored sweeps, selecting each |
 | **Q** | closes the pane |
@@ -1855,8 +1869,8 @@ with `ac2 meas new spl` alike.
 
 #### Three views, G steps them
 
-**G** goes meter → Leq windows → meter + Leq → meter; the palette has each by name ("SPL
-pane: meter + Leq windows"), and the app remembers the choice.
+**G** goes meter → Leq windows → meter + Leq → meter, **Shift+G** the other way; the palette
+has each by name ("SPL pane: meter + Leq windows"), and the app remembers the choice.
 
 | View | Shows |
 |---|---|
@@ -2595,7 +2609,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
 | `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
 | `Shift+P` | Phase / group delay | `group_delay` |
-| `G` | Transfer pane: response → phase → coherence → impulse response | `transfer_view` |
+| `G` | Next view | `next_view` |
+| `Shift+G` | Previous view | `prev_view` |
 
 #### Spectrum / RTA
 
@@ -2608,15 +2623,17 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
 | `B` | RTA: bars / line | `spectrum_style` |
 | `P` | Peak hold on / off | `peak_hold` |
-| `G` | Spectrum pane: spectrum → spectrum + spectrograph → spectrograph | `spectrograph` |
+| `Shift+B` | Spectrograph history: 10 → 30 → 60 → 120 s | `spectrograph_span` |
+| `G` | Next view | `next_view` |
+| `Shift+G` | Previous view | `prev_view` |
 
 #### Transfer: impulse response view
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
 | `S` | Start / stop selected measurement | `start_stop` |
-| `G` | Transfer pane: response → phase → coherence → impulse response | `transfer_view` |
-| `Shift+G` | IR: linear → log → ETC | `ir_mode` |
+| `G` | Next view | `next_view` |
+| `Shift+G` | Previous view | `prev_view` |
 
 #### SPL
 
@@ -2624,7 +2641,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|---|
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
-| `G` | SPL: meter → Leq windows → meter + Leq → bands | `spl_leq_view` |
+| `G` | Next view | `next_view` |
+| `Shift+G` | Previous view | `prev_view` |
 | `Shift+R` | Start a new SPL log… | `spl_new_log` |
 | `Shift+F` | SPL meter: time weighting Fast → Slow → Impulse | `spl_time_weighting` |
 | `Z` | SPL meter: frequency weighting A → C → Z | `spl_weighting` |
@@ -2633,8 +2651,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `Shift+G` | IR: linear → log → ETC | `ir_mode` |
-| `G` | Sweep pane: response & distortion → impulse response → room parameters | `sweep_view` |
+| `G` | Next view | `next_view` |
+| `Shift+G` | Previous view | `prev_view` |
 | `Shift+I` | Sweep pane: impulse response (again: response & distortion) | `sweep_ir` |
 
 #### Command palette only (`Ctrl+K`)
@@ -2699,7 +2717,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Smoothing: 1/12 oct | `smooth_12` |
 | Smoothing: 1/6 oct | `smooth_6` |
 | Smoothing: 1/3 oct | `smooth_3` |
-| Spectrograph history: 10 → 30 → 60 → 120 s | `spectrograph_span` |
 | SPL pane: the meter | `spl_show_meter` |
 | SPL pane: the Leq windows | `spl_show_leq` |
 | SPL pane: meter + Leq windows | `spl_show_meter_leq` |
@@ -2710,15 +2727,15 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 #### Key hint lines (Settings › Display › Key hints)
 
-The least used go first on a narrow pane; the sweep pane shows `Shift+G` only while it shows the impulse response.
+The least used go first on a narrow pane; `G/Shift+G` steps the pane's views forward and back in every pane.
 
 | Pane | Hint line |
 |---|---|
-| Transfer function | `V` select trace · `G` response/phase/coherence/IR · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `H` all keys |
-| Spectrum / RTA | `S` start/stop · `P` peak hold · `G` spectrum/both/spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
-| Transfer: impulse response view | `G` views · `Shift+G` linear/log/ETC · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next measurement · `Q` close pane · `W` maximise · `H` all keys |
-| SPL | `G` meter/Leq/both/bands · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
-| Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `G` response/IR/room · `Shift+G` linear/log/ETC · `W` maximise · `Q` close pane · `H` all keys |
+| Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `H` all keys |
+| Spectrum / RTA | `S` start/stop · `P` peak hold · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
+| Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next measurement · `Q` close pane · `W` maximise · `H` all keys |
+| SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
+| Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `G/Shift+G` view · `W` maximise · `Q` close pane · `H` all keys |
 
 <!-- keymap:end -->
 

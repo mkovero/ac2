@@ -15,7 +15,7 @@ history (kept only while it is shown) builds while the spectrum is still in view
 takes the pane with that history, and the last step hides it. Frequency runs across on the spectrum's own log axis — the
 same plot left and right edges, so a frequency is at the same pixel in both, and zoom and
 pan move both. Time runs down, the newest frame at the top, over the history length
-(**Shift+G**: 10 → 30 → 60 → 120 s, default 30 s). Level is colour, through the theme's
+(**Shift+B**: 10 → 30 → 60 → 120 s, default 30 s). Level is colour, through the theme's
 colormap (viridis: perceptually uniform, readable with the common colour-vision
 deficiencies), over the pane's level range for the measurement's scale — the range the level
 keys (Ctrl+I/O, Ctrl+↑/↓, Shift+Home, Ctrl+Home) and the mouse already move. A colour bar on
@@ -99,7 +99,7 @@ and the picture cannot disagree.
   empty, fresh renderer equal), NaN transparent and release, time-up is the transpose, a
   pixel shows its highest cell; the golden `heatmap_scroll` is unchanged.
 - `ac2-ui`: `tests/embedded.rs` `spectrograph_from_an_empty_daemon` (session, spectrum
-  from the palette, G, the rig's noise fills it, cursor readout, C, Shift+G, stopped caption,
+  from the palette, G, the rig's noise fills it, cursor readout, C, the history length, stopped caption,
   G alone, W full size, level keys, G clears); GPU snapshots `tests/it/ui.rs` `spectrograph`
   and `spectrograph_alone` from a pinned 25 s sweep with a gap.
 

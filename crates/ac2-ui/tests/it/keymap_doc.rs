@@ -62,12 +62,12 @@ fn render() -> String {
     // The panes' hint lines (`ac2_ui::hints`), each closed by the help key.
     out.push_str(
         "\n#### Key hint lines (Settings › Display › Key hints)\n\n\
-         The least used go first on a narrow pane; the sweep pane shows `Shift+G` only while \
-         it shows the impulse response.\n\n\
+         The least used go first on a narrow pane; `G/Shift+G` steps the pane's views \
+         forward and back in every pane.\n\n\
          | Pane | Hint line |\n|---|---|\n",
     );
     for scope in Scope::ALL.into_iter().filter(|s| *s != Scope::Global) {
-        let line = ac2_ui::hints::line(&km, scope, LabelStyle::Pc, |_| false)
+        let line = ac2_ui::hints::line(&km, scope, LabelStyle::Pc)
             .iter()
             .map(|h| format!("`{}` {}", cell(&h.keys), cell(h.name)))
             .collect::<Vec<_>>()

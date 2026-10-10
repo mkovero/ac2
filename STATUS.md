@@ -20,8 +20,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - REW cross-check (`tools/crosscheck`, `docs/rigs/pupu.md`): electrical and Genelec at −30 dBFS
   agree with REW and numpy (FAIL 0 on 684d610's predecessor 8b87f49 after the suite fixes).
 - Panes are a tiling tree (one pane at first start, N split, Shift+N turns a split, Alt+←/→ or
-  a dragged gap sizes a pane, Q close, Tab puts the next measurement in the focused pane, G steps every
-  pane's views, IR a transfer view); the focused pane shows any measurement picked (Tab, the list, its chip's list), changing kind: `PLAN.md` §8.1, `docs/user-guide.md` *Panes: split, close…*.
+  a dragged gap sizes a pane, Q close, Tab puts the next measurement in the focused pane, G / Shift+G step
+  every pane's views forward / back, the IR's linear / log / ETC views in the transfer and sweep chains); the focused pane shows any measurement picked (Tab, the list, its chip's list), changing kind: `PLAN.md` §8.1, `docs/user-guide.md` *Panes: split, close…*.
 - Open hardware gates: duplex check (`ac2 selftest duplex`) and 1 h run on macOS/Windows, keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
 

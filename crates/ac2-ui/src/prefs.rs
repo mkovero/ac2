@@ -572,7 +572,9 @@ enum TransferViewFile {
     Response,
     Phase,
     Coherence,
-    Ir,
+    IrLinear,
+    IrLog,
+    Etc,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -580,16 +582,10 @@ enum TransferViewFile {
 enum SweepViewFile {
     #[default]
     Response,
-    Ir,
-    Room,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum IrModeFile {
-    Linear,
-    Log,
+    IrLinear,
+    IrLog,
     Etc,
+    Room,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -706,8 +702,6 @@ struct PaneEntryFile {
     spectrum_view: SpectrumViewFile,
     #[serde(default)]
     sweep_view: SweepViewFile,
-    #[serde(default = "ir_linear")]
-    ir_mode: IrModeFile,
     #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
     chrome: ChromeFile,
 }
@@ -723,7 +717,9 @@ impl PaneEntryFile {
                 TransferView::Response => TransferViewFile::Response,
                 TransferView::Phase => TransferViewFile::Phase,
                 TransferView::Coherence => TransferViewFile::Coherence,
-                TransferView::Ir => TransferViewFile::Ir,
+                TransferView::Ir(IrMode::Linear) => TransferViewFile::IrLinear,
+                TransferView::Ir(IrMode::Log) => TransferViewFile::IrLog,
+                TransferView::Ir(IrMode::Etc) => TransferViewFile::Etc,
             },
             spl_view: match m.spl {
                 SplMode::Meter => SplViewFile::Meter,
@@ -738,13 +734,10 @@ impl PaneEntryFile {
             },
             sweep_view: match m.sweep {
                 SweepMode::Response => SweepViewFile::Response,
-                SweepMode::Ir => SweepViewFile::Ir,
+                SweepMode::Ir(IrMode::Linear) => SweepViewFile::IrLinear,
+                SweepMode::Ir(IrMode::Log) => SweepViewFile::IrLog,
+                SweepMode::Ir(IrMode::Etc) => SweepViewFile::Etc,
                 SweepMode::Room => SweepViewFile::Room,
-            },
-            ir_mode: match m.ir {
-                IrMode::Linear => IrModeFile::Linear,
-                IrMode::Log => IrModeFile::Log,
-                IrMode::Etc => IrModeFile::Etc,
             },
             chrome: ChromeFile::of(m.chrome),
         }
@@ -760,7 +753,9 @@ impl PaneEntryFile {
                     TransferViewFile::Response => TransferView::Response,
                     TransferViewFile::Phase => TransferView::Phase,
                     TransferViewFile::Coherence => TransferView::Coherence,
-                    TransferViewFile::Ir => TransferView::Ir,
+                    TransferViewFile::IrLinear => TransferView::Ir(IrMode::Linear),
+                    TransferViewFile::IrLog => TransferView::Ir(IrMode::Log),
+                    TransferViewFile::Etc => TransferView::Ir(IrMode::Etc),
                 },
                 spl: match self.spl_view {
                     SplViewFile::Meter => SplMode::Meter,
@@ -775,13 +770,10 @@ impl PaneEntryFile {
                 },
                 sweep: match self.sweep_view {
                     SweepViewFile::Response => SweepMode::Response,
-                    SweepViewFile::Ir => SweepMode::Ir,
+                    SweepViewFile::IrLinear => SweepMode::Ir(IrMode::Linear),
+                    SweepViewFile::IrLog => SweepMode::Ir(IrMode::Log),
+                    SweepViewFile::Etc => SweepMode::Ir(IrMode::Etc),
                     SweepViewFile::Room => SweepMode::Room,
-                },
-                ir: match self.ir_mode {
-                    IrModeFile::Linear => IrMode::Linear,
-                    IrModeFile::Log => IrMode::Log,
-                    IrModeFile::Etc => IrMode::Etc,
                 },
                 chrome: self.chrome.chrome(),
             },
@@ -814,10 +806,6 @@ struct LayoutFile {
 
 fn spl_meter_leq() -> SplViewFile {
     SplViewFile::MeterLeq
-}
-
-fn ir_linear() -> IrModeFile {
-    IrModeFile::Linear
 }
 
 fn unit_db() -> UnitFile {
@@ -1322,7 +1310,7 @@ mod tests {
                     kind: PaneKind::Transfer,
                     measurement: Some("Main L".to_owned()),
                     modes: PaneModes {
-                        transfer: TransferView::Ir,
+                        transfer: TransferView::Ir(IrMode::Log),
                         ..PaneModes::default()
                     },
                 },
@@ -1334,8 +1322,7 @@ mod tests {
                         transfer: TransferView::Coherence,
                         spl: SplMode::Leq,
                         spectrum: SpectrumMode::Spectrograph,
-                        sweep: SweepMode::Room,
-                        ir: IrMode::Etc,
+                        sweep: SweepMode::Ir(IrMode::Etc),
                         chrome: PlotChrome::Bare,
                     },
                 },
@@ -1381,8 +1368,8 @@ mod tests {
             "measurement = \"FOH SPL\"",
             "spl_view = \"leq\"",
             "spectrum_view = \"spectrograph\"",
-            "sweep_view = \"room\"",
-            "ir_mode = \"etc\"",
+            "transfer_view = \"ir_log\"",
+            "sweep_view = \"etc\"",
             "chrome = \"traces_only\"",
             "[window]",
             "y = -20",
@@ -1416,6 +1403,11 @@ mod tests {
             "[layout]\nfocus = 1\n\n[layout.tree]\nsplit = \"row\"\nratio = 0.5\na = { pane = 1 }\nb = { pane = 1 }\n",
             "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"spl\"\nspl_view = \"bars\"\n",
             "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"spl\"\nchrome = \"bare\"\n",
+            // The IR's display is part of the view's name: an `ir` view without one, or
+            // an `ir_mode` beside the view, names no view.
+            "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"transfer\"\ntransfer_view = \"ir\"\n",
+            "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"distortion\"\nsweep_view = \"ir\"\n",
+            "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"transfer\"\nir_mode = \"log\"\n",
             "[layout]\nfocus = 1\n\n[layout.tree]\nsplit = \"row\"\nratio = nan\na = { pane = 1 }\nb = { pane = 2 }\n",
             "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"spl\"\n\n[[layout.panes]]\nid = 1\nkind = \"transfer\"\n",
         ] {
@@ -1473,6 +1465,38 @@ mod tests {
                 text.contains(&format!("spectrum_view = \"{name}\"")),
                 "{text}"
             );
+            assert_eq!(UiPrefs::from_toml(&text).expect("parse"), p);
+        }
+        // Every view of the transfer and sweep chains, the IR's displays among them.
+        let names = [
+            "response",
+            "phase",
+            "coherence",
+            "ir_linear",
+            "ir_log",
+            "etc",
+        ];
+        for (view, name) in TransferView::ALL.into_iter().zip(names) {
+            let mut p = UiPrefs::default();
+            let mut panes = two_panes();
+            panes.views[0].modes.transfer = view;
+            p.layout.panes = Some(panes);
+            let text = p.to_toml();
+            assert!(
+                text.contains(&format!("transfer_view = \"{name}\"")),
+                "{text}"
+            );
+            assert_eq!(UiPrefs::from_toml(&text).expect("parse"), p);
+        }
+        let names = ["response", "ir_linear", "ir_log", "etc", "room"];
+        for (mode, name) in SweepMode::ALL.into_iter().zip(names) {
+            let mut p = UiPrefs::default();
+            let mut panes = two_panes();
+            panes.views[0].kind = PaneKind::Distortion;
+            panes.views[0].modes.sweep = mode;
+            p.layout.panes = Some(panes);
+            let text = p.to_toml();
+            assert!(text.contains(&format!("sweep_view = \"{name}\"")), "{text}");
             assert_eq!(UiPrefs::from_toml(&text).expect("parse"), p);
         }
     }

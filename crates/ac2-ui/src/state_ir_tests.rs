@@ -132,8 +132,11 @@ fn the_ir_pane_zooms_and_pans_time_and_value() {
     assert_eq!((live(&t).time_ms, live(&t).amplitude), (None, None));
 
     // Log: the dB axis. Ctrl+wheel about −30 dB, Shift+wheel pans.
-    t.key("Shift+G");
-    assert_eq!(t.st.layout.focused().modes.ir, IrMode::Log);
+    t.key("G");
+    assert_eq!(
+        t.st.layout.focused().modes.transfer,
+        TransferView::Ir(IrMode::Log)
+    );
     nav(
         &mut t,
         IrPane::Live,
@@ -189,7 +192,7 @@ fn the_ir_cursor_reads_time_and_value() {
     // A click: on the nearest sample.
     nav(&mut t, IrPane::Live, IrNavMsg::Cursor { t_ms: 1.47 });
     assert_eq!(reading(&t).as_deref(), Some("1.5 ms · −0.250 FS"));
-    t.key("Shift+G");
+    t.key("G");
     assert_eq!(reading(&t).as_deref(), Some("1.5 ms · −6.0 dB"));
     // The frequency cursor is the transfer pane's own.
     assert_eq!(t.st.view.cursor_hz, None);
@@ -237,8 +240,11 @@ fn the_sweep_ir_view_has_its_own_navigation() {
         panic!("the IR view");
     };
     assert_eq!(ir.cursor.expect("cursor").text(), "0 ms · +1.00 FS");
-    // The room view: no IR keys; the IR view's axes stay as they were.
-    t.key("G");
+    // The room view (past the log and ETC displays): no IR keys; the IR view's axes stay
+    // as they were.
+    for _ in 0..3 {
+        t.key("G");
+    }
     assert_eq!(t.st.ir_target(), None);
     let before = axes(&t, IrPane::Sweep);
     t.key("I");
@@ -311,6 +317,74 @@ fn stored_tf(id: u32, name: &str, ir: Option<TransferIr>) -> (TraceMeta, Arc<Tra
         ir,
     };
     (m, Arc::new(d))
+}
+
+/// A stopped transfer measurement's IR views draw no live IR: its last IR is no longer the
+/// system's, as its last response is not (the response view draws none either). The plot
+/// says it is stopped and how to start it, the title says it, the IR keys find no picture;
+/// a selected capture's stored IR still shows. Started again, the live IR is back.
+#[test]
+fn a_stopped_measurement_draws_no_live_ir() {
+    let mut t = T::new();
+    t.conn(ir_event(1));
+    t.key("Alt+3");
+    let mut linear = vec![0.0f32; 64];
+    linear[40] = 0.75;
+    let ir = TransferIr {
+        sample_rate: Hz(48_000.0),
+        ir: TraceIr {
+            t0: Seconds(-32.0 / 48_000.0),
+            dt: Seconds(1.0 / 48_000.0),
+            linear,
+            etc_db: vec![-60.0; 64],
+        },
+    };
+    let (with, wd) = stored_tf(5, "Main L pre EQ", Some(ir));
+    let mut s = daemon_state();
+    s.traces = vec![with];
+    t.conn(mirror(s.clone()));
+    let grid = Arc::new(GridDef::Log {
+        ppo: 48,
+        k_min: -240,
+        k_max: 239,
+    });
+    t.conn(ConnEvent::Trace(wd, grid));
+    let theme = Theme::dark();
+    let pane = t.ir_pane();
+    let scene =
+        |t: &T| crate::scenes::ir(&t.st, pane, &t.keys, &theme, SIZE, now()).expect("scene");
+    let caption = |t: &T| t.st.pane_caption(pane).unwrap_or_default();
+    assert_eq!(scene(&t).note, None, "running: the live IR");
+    assert!(t.st.ir_frame_of(IrPane::Live).is_some());
+
+    let main_l = s.measurements.iter().position(|m| m.id == MeasId(1));
+    s.measurements[main_l.expect("Main L")].running = false;
+    t.conn(mirror(s.clone()));
+    // Every IR display of the view: none draws the last frame.
+    for _ in 0..3 {
+        assert!(t.st.layout.focused().shows_ir());
+        let sc = scene(&t);
+        assert_eq!(sc.note.as_deref(), Some("Main L stopped — S starts it"));
+        assert_eq!(sc.tag, None);
+        assert!(caption(&t).contains("Main L stopped"), "{}", caption(&t));
+        assert!(t.st.ir_frame_of(IrPane::Live).is_none());
+        t.key("G");
+    }
+    // Back on the linear display; the capture selected: its IR, stopped or not.
+    for _ in 0..3 {
+        t.key("Shift+G");
+    }
+    t.st.select_trace(Some(TraceId(5)));
+    let sc = scene(&t);
+    assert_eq!(sc.note, None);
+    assert_eq!(sc.tag.as_deref(), Some("Main L pre EQ"));
+    assert!(t.st.ir_frame_of(IrPane::Live).is_some());
+
+    t.st.select_trace(None);
+    s.measurements[main_l.expect("Main L")].running = true;
+    t.conn(mirror(s));
+    assert_eq!(scene(&t).note, None, "started: the live IR again");
+    assert!(!caption(&t).contains("stopped"), "{}", caption(&t));
 }
 
 /// The selected stored transfer trace's IR replaces the live one in the transfer IR view:

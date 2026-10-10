@@ -352,8 +352,10 @@ impl SplitGap {
     }
 }
 
-/// What a transfer pane draws of its measurement (G steps through them in this order).
-/// Phase and coherence alone fill the pane: one quantity read at the full height.
+/// What a transfer pane draws of its measurement (G steps through them in this order,
+/// Shift+G back). Phase and coherence alone fill the pane: one quantity read at the full
+/// height. The impulse response's three displays are views of their own, so one key walks
+/// from the response to its time domain and back.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TransferView {
     /// Magnitude, phase and coherence (its placement is Shift+C's).
@@ -361,21 +363,34 @@ pub enum TransferView {
     Response,
     Phase,
     Coherence,
-    /// The impulse response of the measurement the pane shows.
-    Ir,
+    /// The impulse response of the measurement the pane shows, drawn as this.
+    Ir(IrMode),
 }
 
 impl TransferView {
-    pub const ALL: [TransferView; 4] = [
+    pub const ALL: [TransferView; 6] = [
         TransferView::Response,
         TransferView::Phase,
         TransferView::Coherence,
-        TransferView::Ir,
+        TransferView::Ir(IrMode::Linear),
+        TransferView::Ir(IrMode::Log),
+        TransferView::Ir(IrMode::Etc),
     ];
 
     pub fn next(self) -> Self {
-        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
-        Self::ALL[(i + 1) % Self::ALL.len()]
+        ac2_scene::view::step(&Self::ALL, self, 1)
+    }
+
+    pub fn prev(self) -> Self {
+        ac2_scene::view::step(&Self::ALL, self, -1)
+    }
+
+    /// The impulse-response display, in an IR view.
+    pub fn ir(self) -> Option<IrMode> {
+        match self {
+            TransferView::Ir(m) => Some(m),
+            _ => None,
+        }
     }
 
     /// For the toast and the hint: what the pane now draws.
@@ -384,7 +399,9 @@ impl TransferView {
             TransferView::Response => "response",
             TransferView::Phase => "phase",
             TransferView::Coherence => "coherence",
-            TransferView::Ir => "impulse response",
+            TransferView::Ir(IrMode::Linear) => "impulse response",
+            TransferView::Ir(IrMode::Log) => "impulse response (log)",
+            TransferView::Ir(IrMode::Etc) => "ETC",
         }
     }
 }
@@ -397,8 +414,6 @@ pub struct PaneModes {
     pub transfer: TransferView,
     pub spectrum: SpectrumMode,
     pub spl: SplMode,
-    /// The transfer pane's and the sweep pane's IR view.
-    pub ir: IrMode,
     pub sweep: SweepMode,
     /// Grid, labels and cursor (T), whatever the pane shows.
     pub chrome: PlotChrome,
@@ -410,10 +425,21 @@ impl Default for PaneModes {
             transfer: TransferView::Response,
             spectrum: SpectrumMode::Spectrum,
             spl: SplMode::MeterLeq,
-            ir: IrMode::Linear,
             sweep: SweepMode::Response,
             chrome: PlotChrome::Full,
         }
+    }
+}
+
+impl PaneModes {
+    /// How IR picture `p` is drawn: its view's display, linear while the pane shows no IR
+    /// (the axes keys act on no picture then).
+    pub fn ir(&self, p: IrPane) -> IrMode {
+        match p {
+            IrPane::Live => self.transfer.ir(),
+            IrPane::Sweep => self.sweep.ir(),
+        }
+        .unwrap_or_default()
     }
 }
 
@@ -439,7 +465,7 @@ impl View {
 
     /// A transfer pane in its IR view.
     pub fn shows_ir(&self) -> bool {
-        self.kind == PaneKind::Transfer && self.modes.transfer == TransferView::Ir
+        self.kind == PaneKind::Transfer && self.modes.transfer.ir().is_some()
     }
 
     /// The pane's name in its title: the IR view names what it draws, the other views the
@@ -664,11 +690,14 @@ impl AppState {
         let mut v = self.view;
         let modes = self.pane_modes(id);
         v.spectrum.mode = modes.spectrum;
-        v.ir.mode = modes.ir;
+        v.ir.mode = match self.layout.kind(id) {
+            PaneKind::Distortion => modes.ir(IrPane::Sweep),
+            _ => modes.ir(IrPane::Live),
+        };
         v.chrome = modes.chrome;
         // The transfer scene lays out the plots it is asked for: one alone fills the pane.
         let shown = match modes.transfer {
-            TransferView::Response | TransferView::Ir => None,
+            TransferView::Response | TransferView::Ir(_) => None,
             TransferView::Phase => Some((false, true, false)),
             TransferView::Coherence => Some((false, false, true)),
         };
