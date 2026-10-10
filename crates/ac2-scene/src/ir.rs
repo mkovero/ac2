@@ -227,6 +227,48 @@ pub fn stored_ir_scene(
     ))
 }
 
+/// Points above which an IR line is drawn [`per_pixel`]: a live IR (4096 points) is drawn
+/// through every sample, a long stored or imported one through its pixel extremes.
+const THIN_ABOVE: usize = 16_384;
+
+/// The polyline through `xs`/`ys` (pixels, `xs` ascending) with at most two points per pixel
+/// column: each column's lowest and highest point in their order. A long IR (an imported
+/// file of 10⁵ samples) draws as the same envelope a full-rate line would, with one vertex
+/// per pixel edge instead of one per sample. A NaN (a gap) is kept as it is.
+fn per_pixel(xs: &[f32], ys: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    let (mut ox, mut oy) = (Vec::new(), Vec::new());
+    let mut i = 0;
+    while i < xs.len() {
+        let col = xs[i].floor();
+        let mut j = i;
+        let (mut lo, mut hi): (Option<usize>, Option<usize>) = (None, None);
+        while j < xs.len() && xs[j].floor() == col && !ys[j].is_nan() {
+            if lo.is_none_or(|k| ys[j] < ys[k]) {
+                lo = Some(j);
+            }
+            if hi.is_none_or(|k| ys[j] > ys[k]) {
+                hi = Some(j);
+            }
+            j += 1;
+        }
+        let mut pick: Vec<usize> = [lo, hi].into_iter().flatten().collect();
+        pick.sort_unstable();
+        pick.dedup();
+        for k in pick {
+            ox.push(xs[k]);
+            oy.push(ys[k]);
+        }
+        if j == i {
+            // A NaN (or an x that is NaN): a gap, kept.
+            ox.push(xs[i]);
+            oy.push(ys[i]);
+            j += 1;
+        }
+        i = j;
+    }
+    (ox, oy)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw(
     frame: &IrFrame,
@@ -312,6 +354,11 @@ fn draw(
                 }
             })
             .collect();
+        let (xs, ys) = if xs.len() > THIN_ABOVE {
+            per_pixel(&xs, &ys)
+        } else {
+            (xs, ys)
+        };
         let (points, _) = gapped(&xs, &ys, None, |_, _| false);
         let dim = if freshness.is_some_and(|f| f.is_stale()) {
             theme.stale_alpha
@@ -494,6 +541,22 @@ mod tests {
         width: 800.0,
         height: 300.0,
     };
+
+    #[test]
+    fn a_dense_line_keeps_each_pixel_columns_extremes_in_order() {
+        // Ten samples per pixel: column 0 dips to −3 then peaks at 5, column 1 is flat 1.
+        let xs: Vec<f32> = (0..20).map(|i| i as f32 / 10.0).collect();
+        let mut ys = vec![1.0f32; 20];
+        ys[2] = -3.0;
+        ys[7] = 5.0;
+        let (x, y) = per_pixel(&xs, &ys);
+        assert_eq!(y, vec![-3.0, 5.0, 1.0]);
+        assert_eq!(x, vec![0.2, 0.7, 1.0]);
+        // A gap stays a gap; sparse points stay as they are.
+        let (x, y) = per_pixel(&[0.0, 1.5, 3.0, 4.0], &[1.0, f32::NAN, 2.0, 3.0]);
+        assert_eq!(x, vec![0.0, 1.5, 3.0, 4.0]);
+        assert!(y[1].is_nan() && y[3] == 3.0);
+    }
 
     fn frame() -> IrFrame {
         // 48 kHz, 21 points from −0.5 ms; impulse 0.5 at t = 0, a −0.25 reflection at 2 ms.

@@ -250,3 +250,9 @@ fn a_trace_without_an_ir_or_with_a_decimated_one_is_not_exported() {
         matches!(export(&trace), Err(IrExportError::Decimated { every }) if (every - 3.0).abs() < 1e-9)
     );
 }
+
+#[test]
+fn a_sweep_keeps_as_many_ir_samples_as_a_trace_holds() {
+    // A sweep IR within the limit is stored sample for sample, so it exports.
+    assert_eq!(ac2_core::sweep::IR_POINTS, TraceIr::MAX_POINTS as usize);
+}

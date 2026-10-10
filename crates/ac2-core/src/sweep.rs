@@ -105,8 +105,10 @@ pub const MAX_TAIL_S: f64 = 20.0;
 pub const HARMONIC_FS_FRACTION: f64 = 0.45;
 /// A reference whose sweep is weaker than this re the emitted level is refused, dB.
 pub const MIN_REFERENCE_DB: f64 = -40.0;
-/// Most points of the stored IR; longer spans are decimated peak-preserving.
-pub const IR_POINTS: usize = 16_384;
+/// Most points of the stored IR (the protocol's `TraceIr::MAX_POINTS`): 1.37 s at 48 kHz is
+/// kept sample for sample, so a sweep's IR exports as a WAV; longer spans are decimated
+/// peak-preserving.
+pub const IR_POINTS: usize = 65_536;
 /// Corner of the harmonic windows' high-pass re the lowest analysed fundamental: H2's band
 /// at twice that fundamental is then 0.002 dB down (see `high_passed`).
 const HARMONIC_HIGH_PASS: f64 = 0.75;
