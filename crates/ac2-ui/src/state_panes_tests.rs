@@ -527,3 +527,233 @@ fn an_unchosen_pane_saves_no_measurement() {
         "{saved:?}"
     );
 }
+
+/// Each pane's rectangle in a 1000 × 600 area without gaps.
+fn rects(t: &T) -> BTreeMap<PaneId, PaneRect> {
+    t.st.pane_rects(PaneRect::new(0.0, 0.0, 1000.0, 600.0), 0.0)
+        .into_iter()
+        .collect()
+}
+
+/// Two panes in a 1000 × 600 area, side by side, the right one (the split's `b`) focused.
+fn two() -> (T, PaneId, PaneId) {
+    let mut t = empty();
+    t.st.pane_area = (1000.0, 600.0);
+    let first = t.st.layout.focus;
+    t.key("N");
+    let second = t.st.layout.focus;
+    (t, first, second)
+}
+
+/// The four-pane grid in a 1000 × 600 area.
+fn four_panes() -> T {
+    let mut t = empty();
+    t.st.pane_area = (1000.0, 600.0);
+    t.st.layout = grid();
+    t
+}
+
+fn close(a: PaneRect, b: PaneRect) -> bool {
+    [(a.x, b.x), (a.y, b.y), (a.w, b.w), (a.h, b.h)]
+        .iter()
+        .all(|(p, q)| (p - q).abs() < 1e-2)
+}
+
+/// Shift+N turns two panes side by side into two stacked, the focused one on its own line
+/// below, and back; the focus stays. One pane has nothing to turn.
+#[test]
+fn shift_n_turns_the_split_and_back() {
+    let mut u = empty();
+    u.key("Shift+N");
+    assert!(
+        u.last_toast().contains("one pane: nothing to turn"),
+        "{}",
+        u.last_toast()
+    );
+
+    let (mut t, a, b) = two();
+    assert_eq!(rects(&t)[&b], PaneRect::new(500.0, 0.0, 500.0, 600.0));
+    t.key("Shift+N");
+    let r = rects(&t);
+    assert_eq!(r[&a], PaneRect::new(0.0, 0.0, 1000.0, 300.0));
+    assert_eq!(r[&b], PaneRect::new(0.0, 300.0, 1000.0, 300.0));
+    assert_eq!(t.st.layout.focus, b);
+    t.key("Shift+N");
+    let r = rects(&t);
+    assert_eq!(r[&a], PaneRect::new(0.0, 0.0, 500.0, 600.0));
+    assert_eq!(r[&b], PaneRect::new(500.0, 0.0, 500.0, 600.0));
+    assert_eq!(t.st.layout.focus, b);
+}
+
+/// In a tree of several splits Shift+N turns only the split that holds the focused pane.
+#[test]
+fn shift_n_turns_only_the_focused_panes_split() {
+    let mut t = four_panes();
+    let before = rects(&t);
+    t.key("Alt+3");
+    t.key("Shift+N");
+    let r = rects(&t);
+    assert!(close(r[&PaneId(1)], before[&PaneId(1)]));
+    assert!(close(r[&PaneId(2)], before[&PaneId(2)]));
+    // Panes 3 and 4 shared the bottom right side by side; now stacked in the same place.
+    let x = before[&PaneId(3)].x;
+    let w = before[&PaneId(3)].w + before[&PaneId(4)].w;
+    let (y, h) = (372.0, 228.0);
+    assert!(
+        close(r[&PaneId(3)], PaneRect::new(x, y, w, h / 2.0)),
+        "{r:?}"
+    );
+    assert!(
+        close(r[&PaneId(4)], PaneRect::new(x, y + h / 2.0, w, h / 2.0)),
+        "{r:?}"
+    );
+    assert_eq!(t.st.layout.focus, PaneId(3));
+    let PaneNode::Split { axis, .. } = &t.st.layout.root else {
+        panic!("a split")
+    };
+    assert_eq!(*axis, Axis::Column);
+}
+
+/// Alt+Right grows and Alt+Left shrinks the focused pane by a tenth of its split, whichever
+/// side of the split it is on, and stop where the other pane would be too small to read.
+#[test]
+fn alt_arrows_resize_the_focused_pane_and_stop_at_the_minimum() {
+    let (mut t, a, b) = two();
+    // `b` focused: it grows as the ratio (`a`'s share) falls.
+    t.key("Alt+Right");
+    assert!(close(
+        rects(&t)[&b],
+        PaneRect::new(400.0, 0.0, 600.0, 600.0)
+    ));
+    t.key("Alt+Left");
+    t.key("Alt+Left");
+    assert!(close(
+        rects(&t)[&b],
+        PaneRect::new(600.0, 0.0, 400.0, 600.0)
+    ));
+    t.key("Alt+1");
+    assert_eq!(t.st.layout.focus, a);
+    t.key("Alt+Right");
+    assert!(close(rects(&t)[&a], PaneRect::new(0.0, 0.0, 700.0, 600.0)));
+    for _ in 0..10 {
+        t.key("Alt+Right");
+    }
+    assert!(close(rects(&t)[&b], PaneRect::new(950.0, 0.0, 50.0, 600.0)));
+    assert!(
+        t.last_toast().contains("as large as it goes"),
+        "{}",
+        t.last_toast()
+    );
+    for _ in 0..12 {
+        t.key("Alt+Left");
+    }
+    assert!(close(rects(&t)[&a], PaneRect::new(0.0, 0.0, 50.0, 600.0)));
+    assert!(t.last_toast().contains("as small as it goes"));
+
+    let mut u = empty();
+    u.key("Alt+Right");
+    assert!(u.last_toast().contains("one pane: nothing to resize"));
+}
+
+/// The minimum holds for every pane inside the other side: pane 2 grows until each of the
+/// two panes beside it is at the share N refuses to split below; stacked splits resize
+/// along their height.
+#[test]
+fn resizing_keeps_nested_panes_readable() {
+    let mut t = four_panes();
+    t.key("Alt+2");
+    for _ in 0..10 {
+        t.key("Alt+Right");
+    }
+    let r = rects(&t);
+    assert!((r[&PaneId(2)].w - 900.0).abs() < 1e-2, "{r:?}");
+    assert!((r[&PaneId(3)].w - 50.0).abs() < 1e-2, "{r:?}");
+    t.key("Alt+1");
+    let h = rects(&t)[&PaneId(1)].h;
+    t.key("Alt+Left");
+    assert!((rects(&t)[&PaneId(1)].h - (h - 60.0)).abs() < 1e-2);
+}
+
+/// A dragged gap sets its split's ratio, kept to the same limits as Alt+Left / Right; the
+/// gaps map a pointer position back to the ratio that puts the gap there.
+#[test]
+fn a_dragged_gap_sets_the_ratio_within_the_limits() {
+    let (mut t, a, _) = two();
+    t.st.update(
+        Msg::DragSplit {
+            path: vec![],
+            ratio: 0.3,
+        },
+        &t.keys,
+    );
+    assert!(close(rects(&t)[&a], PaneRect::new(0.0, 0.0, 300.0, 600.0)));
+    t.st.update(
+        Msg::DragSplit {
+            path: vec![],
+            ratio: 0.999,
+        },
+        &t.keys,
+    );
+    assert!(close(rects(&t)[&a], PaneRect::new(0.0, 0.0, 950.0, 600.0)));
+    // A path to no split changes nothing.
+    t.st.update(
+        Msg::DragSplit {
+            path: vec![Side::B, Side::A],
+            ratio: 0.5,
+        },
+        &t.keys,
+    );
+    assert!(close(rects(&t)[&a], PaneRect::new(0.0, 0.0, 950.0, 600.0)));
+
+    let gap = 6.0;
+    let t = four_panes();
+    let gaps =
+        t.st.layout
+            .root
+            .split_gaps(PaneRect::new(0.0, 0.0, 1012.0, 606.0), gap);
+    let paths: Vec<_> = gaps.iter().map(|g| g.path.clone()).collect();
+    assert_eq!(paths, [vec![], vec![Side::B], vec![Side::B, Side::B]]);
+    // The stacked split's gap under pane 1, across the whole width.
+    assert_eq!(gaps[0].axis, Axis::Column);
+    assert!((gaps[0].gap.y - 600.0 * 0.62).abs() < 1e-3 && gaps[0].gap.w == 1012.0);
+    assert!((gaps[0].ratio_at(600.0 * 0.62 + gap / 2.0) - 0.62).abs() < 1e-5);
+    // The innermost split's gap between panes 3 and 4: its centre at ratio 0.5.
+    let inner = &gaps[2];
+    let centre = inner.gap.x + gap / 2.0;
+    assert!((inner.ratio_at(centre) - 0.5).abs() < 1e-5, "{inner:?}");
+    assert!((inner.ratio_at(centre + 100.0) - (0.5 + 100.0 / 666.0)).abs() < 1e-3);
+}
+
+/// A turned and resized split goes through `ui.toml` as it is.
+#[test]
+fn a_turned_and_resized_layout_comes_back_from_ui_toml() {
+    let mut t = four_panes();
+    t.key("Alt+3");
+    t.key("Shift+N");
+    t.key("Alt+Right");
+    t.key("Alt+1");
+    t.key("Alt+Left");
+    t.st.update(
+        Msg::DragSplit {
+            path: vec![Side::B],
+            ratio: 0.25,
+        },
+        &t.keys,
+    );
+    let text = t.st.prefs.to_toml();
+    let mut u = T::fresh();
+    u.st.set_prefs(crate::prefs::UiPrefs::from_toml(&text).expect("parse"));
+    assert_eq!(u.st.layout.root, t.st.layout.root);
+    let PaneNode::Split { ratio, b, .. } = &u.st.layout.root else {
+        panic!("a split")
+    };
+    assert!((ratio - 0.52).abs() < 1e-5, "{ratio}");
+    let PaneNode::Split { ratio, b, .. } = &**b else {
+        panic!("a split")
+    };
+    assert!((ratio - 0.25).abs() < 1e-5, "{ratio}");
+    let PaneNode::Split { axis, ratio, .. } = &**b else {
+        panic!("a split")
+    };
+    assert_eq!((*axis, (ratio * 10.0).round()), (Axis::Column, 6.0));
+}

@@ -379,6 +379,9 @@ commands! {
     FocusPane9 => "focus_pane_9", "Focus pane 9", [Global];
     SplitPane => "split_pane", "Split the focused pane in two (along its longer side)", [Global];
     ClosePane => "close_pane", "Close the focused pane", [Global];
+    TurnSplit => "turn_split", "Turn the focused pane's split (side by side ↔ stacked)", [Global];
+    GrowPane => "grow_pane", "Grow the focused pane (within its split)", [Global];
+    ShrinkPane => "shrink_pane", "Shrink the focused pane (within its split)", [Global];
     MaximizePane => "maximize_pane", "Layout: split → one pane → full screen", [Global];
     NextMeasurementInTree => "next_measurement_in_tree", "Show the next measurement in the list in the focused pane", [Global];
     PrevMeasurementInTree => "prev_measurement_in_tree", "Show the previous measurement in the list in the focused pane", [Global];
@@ -603,6 +606,11 @@ pub fn defaults() -> Vec<Binding> {
         // where they are on every layout. Q closes a pane; Ctrl+Q, a step further, quits.
         (C::SplitPane, S::Global, k(K::N)),
         (C::ClosePane, S::Global, k(K::Q)),
+        // Shift+N, a step on from N: the split just made turns the other way. Alt on the
+        // side arrows sizes the pane, as Alt on the level arrows offsets the traces.
+        (C::TurnSplit, S::Global, sh(K::N)),
+        (C::GrowPane, S::Global, alt(K::ArrowRight)),
+        (C::ShrinkPane, S::Global, alt(K::ArrowLeft)),
         (C::SweepNew, S::Global, sh(K::S)),
         // Shift+M, a step on from M (average the shown traces): a math channel by name.
         (C::NewMath, S::Global, sh(K::M)),
@@ -1540,6 +1548,30 @@ mod tests {
         let bound = |cmd| m.bindings().iter().filter(|b| b.command == cmd).count();
         assert_eq!(bound(CommandId::SplitPane), 1);
         assert_eq!(bound(CommandId::ClosePane), 1);
+    }
+
+    /// Shift+N turns and Alt+Right / Alt+Left size the focused pane in every pane: no pane
+    /// binds those chords for its own, and Alt+Up / Down stay the trace offset.
+    #[test]
+    fn turn_and_resize_are_the_same_everywhere() {
+        let m = Keymap::default();
+        let c = |s: &str| Chord::parse(s).expect(s);
+        for scope in Scope::ALL {
+            for (chord, cmd) in [
+                ("Shift+N", CommandId::TurnSplit),
+                ("Alt+Right", CommandId::GrowPane),
+                ("Alt+Left", CommandId::ShrinkPane),
+                ("Alt+Up", CommandId::OffsetUp),
+                ("Alt+Down", CommandId::OffsetDown),
+            ] {
+                assert_eq!(m.lookup(scope, c(chord)), Some(cmd), "{chord} in {scope:?}");
+            }
+        }
+        for chord in ["Shift+N", "Alt+Right", "Alt+Left"] {
+            let n = m.bindings().iter().filter(|b| b.chord == c(chord)).count();
+            assert_eq!(n, 1, "{chord}");
+            assert!(RESERVED.iter().all(|(r, _)| *r != c(chord)), "{chord}");
+        }
     }
 
     /// G steps every pane's views; Shift+G is each pane's second view key (the IR's mode in

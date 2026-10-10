@@ -99,34 +99,170 @@ impl PaneNode {
     fn place(&self, r: PaneRect, gap: f32, v: &mut Vec<(PaneId, PaneRect)>) {
         match self {
             PaneNode::Leaf(id) => v.push((*id, r)),
-            PaneNode::Split { axis, ratio, a, b } => {
-                let ratio = ratio.clamp(MIN_RATIO, 1.0 - MIN_RATIO);
-                let (ga, gb) = (a.gaps(*axis) as f32 * gap, b.gaps(*axis) as f32 * gap);
-                let share = |len: f32| {
-                    let content = (len - gap - ga - gb).max(0.0);
-                    let la = (content * ratio + ga).min((len - gap).max(0.0));
-                    (la, (len - gap - la).max(0.0))
-                };
-                let (ra, rb) = match axis {
-                    Axis::Row => {
-                        let (wa, wb) = share(r.w);
-                        (
-                            PaneRect::new(r.x, r.y, wa, r.h),
-                            PaneRect::new(r.x + wa + gap, r.y, wb, r.h),
-                        )
-                    }
-                    Axis::Column => {
-                        let (ha, hb) = share(r.h);
-                        (
-                            PaneRect::new(r.x, r.y, r.w, ha),
-                            PaneRect::new(r.x, r.y + ha + gap, r.w, hb),
-                        )
-                    }
-                };
+            PaneNode::Split { a, b, .. } => {
+                let (ra, rb) = self.halves(r, gap).expect("a split");
                 a.place(ra, gap, v);
                 b.place(rb, gap, v);
             }
         }
+    }
+
+    /// The rectangles of a split's `a` and `b` inside `r`; `None` for a leaf.
+    fn halves(&self, r: PaneRect, gap: f32) -> Option<(PaneRect, PaneRect)> {
+        let PaneNode::Split { axis, ratio, a, b } = self else {
+            return None;
+        };
+        let ratio = ratio.clamp(MIN_RATIO, 1.0 - MIN_RATIO);
+        let (ga, gb) = (a.gaps(*axis) as f32 * gap, b.gaps(*axis) as f32 * gap);
+        let share = |len: f32| {
+            let content = (len - gap - ga - gb).max(0.0);
+            let la = (content * ratio + ga).min((len - gap).max(0.0));
+            (la, (len - gap - la).max(0.0))
+        };
+        Some(match axis {
+            Axis::Row => {
+                let (wa, wb) = share(r.w);
+                (
+                    PaneRect::new(r.x, r.y, wa, r.h),
+                    PaneRect::new(r.x + wa + gap, r.y, wb, r.h),
+                )
+            }
+            Axis::Column => {
+                let (ha, hb) = share(r.h);
+                (
+                    PaneRect::new(r.x, r.y, r.w, ha),
+                    PaneRect::new(r.x, r.y + ha + gap, r.w, hb),
+                )
+            }
+        })
+    }
+
+    /// Every split's gap inside `area`, as [`PaneNode::rects`] lays them out: where the
+    /// mouse grabs a split to resize it.
+    pub fn split_gaps(&self, area: PaneRect, gap: f32) -> Vec<SplitGap> {
+        let mut v = Vec::new();
+        self.collect_gaps(area, gap, &mut Vec::new(), &mut v);
+        v
+    }
+
+    fn collect_gaps(&self, r: PaneRect, gap: f32, path: &mut Vec<Side>, v: &mut Vec<SplitGap>) {
+        let PaneNode::Split { axis, a, b, .. } = self else {
+            return;
+        };
+        let (ra, rb) = self.halves(r, gap).expect("a split");
+        let ga = a.gaps(*axis) as f32 * gap;
+        let gb = b.gaps(*axis) as f32 * gap;
+        let (gap_rect, start, len) = match axis {
+            Axis::Row => (PaneRect::new(ra.x + ra.w, r.y, gap, r.h), r.x, r.w),
+            Axis::Column => (PaneRect::new(r.x, ra.y + ra.h, r.w, gap), r.y, r.h),
+        };
+        v.push(SplitGap {
+            path: path.clone(),
+            axis: *axis,
+            gap: gap_rect,
+            start: start + ga + gap / 2.0,
+            content: (len - gap - ga - gb).max(0.0),
+        });
+        path.push(Side::A);
+        a.collect_gaps(ra, gap, path, v);
+        path.pop();
+        path.push(Side::B);
+        b.collect_gaps(rb, gap, path, v);
+        path.pop();
+    }
+
+    /// The node `path` leads to from here.
+    fn at(&self, path: &[Side]) -> Option<&PaneNode> {
+        match (path.split_first(), self) {
+            (None, n) => Some(n),
+            (Some((s, rest)), PaneNode::Split { a, b, .. }) => match s {
+                Side::A => a.at(rest),
+                Side::B => b.at(rest),
+            },
+            (Some(_), PaneNode::Leaf(_)) => None,
+        }
+    }
+
+    fn at_mut(&mut self, path: &[Side]) -> Option<&mut PaneNode> {
+        match (path.split_first(), self) {
+            (None, n) => Some(n),
+            (Some((s, rest)), PaneNode::Split { a, b, .. }) => match s {
+                Side::A => a.at_mut(rest),
+                Side::B => b.at_mut(rest),
+            },
+            (Some(_), PaneNode::Leaf(_)) => None,
+        }
+    }
+
+    /// The path to the split that directly holds leaf `id`, and the side `id` is on;
+    /// `None` for a lone leaf or no such leaf.
+    pub fn parent_of(&self, id: PaneId) -> Option<(Vec<Side>, Side)> {
+        let PaneNode::Split { a, b, .. } = self else {
+            return None;
+        };
+        if **a == PaneNode::Leaf(id) {
+            return Some((Vec::new(), Side::A));
+        }
+        if **b == PaneNode::Leaf(id) {
+            return Some((Vec::new(), Side::B));
+        }
+        for (side, child) in [(Side::A, a), (Side::B, b)] {
+            if let Some((mut path, s)) = child.parent_of(id) {
+                path.insert(0, side);
+                return Some((path, s));
+            }
+        }
+        None
+    }
+
+    /// The rectangle of the node at `path` inside `area`, no gaps.
+    fn rect_at(&self, path: &[Side], area: PaneRect) -> Option<PaneRect> {
+        let Some((s, rest)) = path.split_first() else {
+            return Some(area);
+        };
+        let (ra, rb) = self.halves(area, 0.0)?;
+        let PaneNode::Split { a, b, .. } = self else {
+            return None;
+        };
+        match s {
+            Side::A => a.rect_at(rest, ra),
+            Side::B => b.rect_at(rest, rb),
+        }
+    }
+
+    /// The ratios the split at `path` may take in `area`: each side at least
+    /// [`MIN_RATIO`] of its split, and every pane in it at least that share of the area
+    /// along the split's axis, the rule N splits by. Empty (`lo > hi`) when no ratio keeps
+    /// both sides that large.
+    pub fn ratio_range(&self, path: &[Side], area: PaneRect) -> Option<(f32, f32)> {
+        let PaneNode::Split { axis, a, b, .. } = self.at(path)? else {
+            return None;
+        };
+        let r = self.rect_at(path, area)?;
+        let along = |p: &PaneRect| match axis {
+            Axis::Row => p.w,
+            Axis::Column => p.h,
+        };
+        let (len, extent) = (along(&r), along(&area));
+        // Without gaps a subtree scales with its rectangle: its narrowest pane is a fixed
+        // fraction of it, laid out once in the unit square.
+        let narrowest = |n: &PaneNode| {
+            n.rects(PaneRect::new(0.0, 0.0, 1.0, 1.0), 0.0)
+                .iter()
+                .map(|(_, p)| along(p))
+                .fold(1.0_f32, f32::min)
+        };
+        let need = |n: &PaneNode| {
+            let f = narrowest(n) * len;
+            if f > 0.0 {
+                MIN_RATIO * extent / f
+            } else {
+                f32::INFINITY
+            }
+        };
+        let lo = need(a).max(MIN_RATIO);
+        let hi = (1.0 - need(b)).min(1.0 - MIN_RATIO);
+        Some((lo, hi))
     }
 
     /// The leaves in reading order: top to bottom, then left to right, by their corners in
@@ -182,6 +318,37 @@ impl PaneNode {
             }
             None => a.remove(id).or_else(|| b.remove(id)),
         }
+    }
+}
+
+/// Which child of a split a step down the tree takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Side {
+    A,
+    B,
+}
+
+/// A split's gap as laid out: the strip the mouse drags, and how a pointer position along
+/// the split's axis maps back to its ratio.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplitGap {
+    /// The split, from the root.
+    pub path: Vec<Side>,
+    pub axis: Axis,
+    /// The strip between the split's two sides.
+    pub gap: PaneRect,
+    /// Where the gap's centre sits at ratio 0, and the extent the ratio shares.
+    start: f32,
+    content: f32,
+}
+
+impl SplitGap {
+    /// The ratio that puts the gap's centre at `pos` (x for side by side, y stacked).
+    pub fn ratio_at(&self, pos: f32) -> f32 {
+        if self.content <= 0.0 {
+            return 0.5;
+        }
+        ((pos - self.start) / self.content).clamp(0.0, 1.0)
     }
 }
 
@@ -626,6 +793,95 @@ impl AppState {
         self.pending_pane_meas
             .retain(|id, _| self.layout.views.contains_key(id));
         self.select_shown(f);
+    }
+
+    /// The panes' area last drawn, without gaps: what resizing keeps every pane readable in.
+    fn area(&self) -> PaneRect {
+        let (w, h) = self.pane_area;
+        PaneRect::new(0.0, 0.0, w, h)
+    }
+
+    /// Shift+N: the split that holds the focused pane turns, side by side ↔ stacked, its
+    /// ratio and order kept. Maximised, the turn shows at once: the layout goes back to
+    /// all panes.
+    pub(super) fn turn_split(&mut self) {
+        let Some((path, _)) = self.layout.root.parent_of(self.layout.focus) else {
+            self.warn("one pane: nothing to turn");
+            return;
+        };
+        let before = self.layout.root.clone();
+        if let Some(PaneNode::Split { axis, .. }) = self.layout.root.at_mut(&path) {
+            *axis = match axis {
+                Axis::Row => Axis::Column,
+                Axis::Column => Axis::Row,
+            };
+        }
+        // The other axis may be too short for what the split holds: a pane past the
+        // minimum is too small to read, so the turn is refused rather than squeezed.
+        let area = self.area();
+        match self.layout.root.ratio_range(&path, area) {
+            Some((lo, hi)) if lo <= hi => {
+                if let Some(PaneNode::Split { ratio, .. }) = self.layout.root.at_mut(&path) {
+                    *ratio = ratio.clamp(lo, hi);
+                }
+                self.layout.maximized = false;
+            }
+            _ => {
+                self.layout.root = before;
+                self.warn("the panes would be too small turned: Q closes one to make room");
+            }
+        }
+    }
+
+    /// Alt+Right / Alt+Left: the focused pane grows / shrinks by a tenth of the split
+    /// that holds it, never past the size N refuses to split below.
+    pub(super) fn resize_pane(&mut self, grow: bool) {
+        const STEP: f32 = 0.1;
+        let Some((path, side)) = self.layout.root.parent_of(self.layout.focus) else {
+            self.warn("one pane: nothing to resize");
+            return;
+        };
+        let Some((lo, hi)) = self.layout.root.ratio_range(&path, self.area()) else {
+            return;
+        };
+        let Some(PaneNode::Split { ratio, .. }) = self.layout.root.at_mut(&path) else {
+            return;
+        };
+        // The ratio is `a`'s share: a pane on the `b` side grows as it falls.
+        let up = (side == Side::A) == grow;
+        let now = *ratio;
+        let next = if up {
+            (now + STEP).min(hi).max(now)
+        } else {
+            (now - STEP).max(lo).min(now)
+        };
+        if (next - now).abs() < 1e-6 {
+            self.warn(if grow {
+                "the pane is as large as it goes: Q closes a neighbour to make room"
+            } else {
+                "the pane is as small as it goes"
+            });
+            return;
+        }
+        *ratio = next;
+        self.layout.maximized = false;
+    }
+
+    /// A gap dragged: the split at `path` takes `ratio`, kept to the range Alt+Left/Right
+    /// stop at.
+    pub(super) fn drag_split(&mut self, path: &[Side], ratio: f32) {
+        if !ratio.is_finite() {
+            return;
+        }
+        let Some((lo, hi)) = self.layout.root.ratio_range(path, self.area()) else {
+            return;
+        };
+        if lo > hi {
+            return;
+        }
+        if let Some(PaneNode::Split { ratio: r, .. }) = self.layout.root.at_mut(path) {
+            *r = ratio.clamp(lo, hi);
+        }
     }
 
     /// Alt+1 … 9: focuses the `n`-th pane drawn now, in reading order (1-based).

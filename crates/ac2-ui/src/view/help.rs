@@ -133,6 +133,9 @@ impl Section {
             | C::FocusPane9
             | C::SplitPane
             | C::ClosePane
+            | C::TurnSplit
+            | C::GrowPane
+            | C::ShrinkPane
             | C::MaximizePane
             | C::PlotChrome
             | C::Fullscreen

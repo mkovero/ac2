@@ -390,13 +390,16 @@ first measurement (a transfer pane on an empty daemon). Lay it out as the job ne
 | Key | Does |
 |---|---|
 | **N** | splits the focused pane in two along its longer side (side by side in a wide pane, one above the other in a tall one); the new half shows the same measurement and views and takes the focus |
+| **Shift+N** | turns the split that holds the focused pane: side by side becomes one above the other (the focused pane on its own line) and back; sizes and order stay |
+| **Alt+→** / **Alt+←** | grows / shrinks the focused pane by a tenth of its split; it stops where a pane would be too small to read (the size **N** refuses to split below) |
+| drag a gap | drag the gap between two panes to size them (the cursor turns into a resize arrow over it); the same limit holds |
 | **Q** | closes the focused pane; its neighbour takes the space and the focus. The last pane stays (**Tab** puts another measurement in it) |
 | **Tab** / **Shift+Tab** | the focused pane shows the next / previous measurement of the list, whatever its kind: the pane turns into the kind that draws it (transfer, spectrum / RTA, SPL, sweep / distortion) |
 | **G** | steps the focused pane's views; on a transfer pane: response → phase → coherence → impulse response |
 | **Alt+1 … Alt+9** | focus the panes in reading order: top to bottom, then left to right |
 | click | focuses the pane |
 
-**Ctrl+Q** still quits. Each pane is on its own: its kind, its measurement (from the title
+**Ctrl+Q** still quits. The layout, sizes included, is remembered for the next start. Each pane is on its own: its kind, its measurement (from the title
 chip, **Tab** or a click in the list) and its views (**G** and the other view keys act on
 the focused pane only). Two transfer panes can show two measurements side by side, or one
 measurement as response and impulse response: split (**N**), then **G** the new half to the
@@ -2451,6 +2454,9 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+9` | Focus pane 9 | `focus_pane_9` |
 | `N` | Split the focused pane in two (along its longer side) | `split_pane` |
 | `Q` | Close the focused pane | `close_pane` |
+| `Shift+N` | Turn the focused pane's split (side by side ↔ stacked) | `turn_split` |
+| `Alt+→` | Grow the focused pane (within its split) | `grow_pane` |
+| `Alt+←` | Shrink the focused pane (within its split) | `shrink_pane` |
 | `W` | Layout: split → one pane → full screen | `maximize_pane` |
 | `Tab` | Show the next measurement in the list in the focused pane | `next_measurement_in_tree` |
 | `Shift+Tab` | Show the previous measurement in the list in the focused pane | `prev_measurement_in_tree` |

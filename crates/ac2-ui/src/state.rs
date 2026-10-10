@@ -77,8 +77,8 @@ mod stimulus;
 #[path = "state_text.rs"]
 mod text;
 pub use panes::{
-    Axis, DEFAULT_PANE_AREA, Layout, PaneId, PaneMenuRow, PaneModes, PaneNode, PaneRect,
-    TransferView, View,
+    Axis, DEFAULT_PANE_AREA, Layout, PaneId, PaneMenuRow, PaneModes, PaneNode, PaneRect, Side,
+    SplitGap, TransferView, View,
 };
 use text::{SELECT_TRACE_FIRST, drawn_in, offset_text, slot_of};
 pub use text::{
@@ -875,6 +875,11 @@ pub enum Msg {
     /// A row picked from a pane's list: the pane shows that measurement (selected), or
     /// turns into that kind of pane.
     PanePick(PaneId, PaneMenuRow),
+    /// The gap of the split at `path` dragged: the split takes `ratio`, within its limits.
+    DragSplit {
+        path: Vec<Side>,
+        ratio: f32,
+    },
     /// Mouse wheel / pinch on a frequency axis.
     Zoom {
         about_hz: f64,
@@ -1320,6 +1325,7 @@ impl AppState {
                 };
             }
             Msg::PanePick(p, row) => self.pane_pick(p, row),
+            Msg::DragSplit { path, ratio } => self.drag_split(&path, ratio),
             Msg::Zoom { about_hz, factor } => {
                 let t = self.nav.target.zoom(about_hz, factor);
                 self.nav.set_target(t);

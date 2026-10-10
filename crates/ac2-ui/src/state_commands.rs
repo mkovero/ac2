@@ -619,6 +619,9 @@ impl AppState {
             C::FocusPane9 => self.focus_nth(9),
             C::SplitPane => self.split_pane(),
             C::ClosePane => self.close_pane(),
+            C::TurnSplit => self.turn_split(),
+            C::GrowPane => self.resize_pane(true),
+            C::ShrinkPane => self.resize_pane(false),
             C::SweepNew => self.open_sweep_dialog(keymap, out),
             C::DistortionUnit => self.toggle_distortion_unit(),
             C::SweepView => {

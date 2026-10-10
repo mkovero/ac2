@@ -16,7 +16,7 @@ use crate::keys::{CommandId, Scope};
 use crate::plot::{self, PlotSlot};
 use crate::scenes;
 use crate::state::{
-    HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow, PaneRect,
+    Axis, HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow, PaneRect,
     TransferView,
 };
 use crate::theme::Chrome;
@@ -446,7 +446,53 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             took,
         );
     }
+    if !stage {
+        split_gaps(app, ui, area);
+    }
     ui.allocate_rect(area, egui::Sense::hover());
+}
+
+/// How far past the gap's own strip the mouse still grabs it: the gap is a few points
+/// wide, too narrow to hit at a glance.
+const GAP_GRAB: f32 = 3.0;
+
+/// The gaps between panes: dragging one moves its split live, where the reducer lays the
+/// tree out. Registered after the panes so the strip's slight overlap with their edges is
+/// the gap's.
+fn split_gaps(app: &mut App, ui: &egui::Ui, area: egui::Rect) {
+    if app.state.window_over_panes() {
+        return;
+    }
+    let r = PaneRect::new(area.min.x, area.min.y, area.width(), area.height());
+    for g in app.state.visible_tree().split_gaps(r, GAP) {
+        let rect =
+            egui::Rect::from_min_size(egui::pos2(g.gap.x, g.gap.y), egui::vec2(g.gap.w, g.gap.h))
+                .expand(GAP_GRAB);
+        let resp = ui.interact(
+            rect,
+            ui.id().with(("split_gap", &g.path)),
+            egui::Sense::drag(),
+        );
+        if resp.hovered() || resp.dragged() {
+            ui.ctx().set_cursor_icon(match g.axis {
+                Axis::Row => egui::CursorIcon::ResizeHorizontal,
+                Axis::Column => egui::CursorIcon::ResizeVertical,
+            });
+        }
+        if resp.dragged()
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            let pos = match g.axis {
+                Axis::Row => p.x,
+                Axis::Column => p.y,
+            };
+            let ratio = g.ratio_at(pos);
+            app.dispatch(Msg::DragSplit {
+                path: g.path,
+                ratio,
+            });
+        }
+    }
 }
 
 /// The chip in a pane's title naming the measurement the pane shows (a click opens the list
