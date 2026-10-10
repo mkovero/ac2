@@ -6,10 +6,10 @@
 //! only the newest, so a UI that stops drawing (minimised, occluded) never piles up
 //! snapshots; replies and other events queue in order. The thread wakes the UI
 //! (`request_repaint`) only for what changes the picture: new frame content, a stale or
-//! liveness flip, a mirror change beyond a keepalive, a reply. Frames are polled at the
-//! display period while they flow and slower when idle or when the UI is not drawing, so
-//! data never repaints faster than the display period. Ages between pushes are the UI's
-//! to count ([`DataSnapshot::aged`]).
+//! liveness flip, a mirror change beyond a keepalive, a reply. Frames are drained when they
+//! arrive, at most twice per display period ([`PollClock`]), and polled slower when idle or
+//! when the UI is not drawing. Ages between pushes are the UI's to count
+//! ([`DataSnapshot::aged`]).
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::mpsc as std_mpsc;
@@ -738,12 +738,7 @@ async fn session(
     let mut mirror = client.watch();
     let mut shown_mirror: Option<Arc<MirrorView>> = None;
     let mut poll = DataPoll::default();
-    let mut next_poll = tokio::time::Instant::now();
-    let mut last_poll = next_poll;
-    // While polling at the idle period, a frame arriving cuts the wait short (the display
-    // period still bounds how often the UI is fed); while frames flow, the display period
-    // paces the drains and nothing else wakes the link.
-    let mut idle = false;
+    let mut clock = PollClock::new(tokio::time::Instant::now());
     // Served columns carry the trace's display smoothing and mic curve: a new setting means
     // new data.
     let mut fetched: HashMap<TraceId, (Option<Smoothing>, Option<Box<TraceMicCurve>>)> =
@@ -770,7 +765,7 @@ async fn session(
                     wants.topics = t;
                     resubscribe(&client, &mut subscribed, &wants.topics, out);
                     // A new stream's first frame is worth showing at the display rate.
-                    next_poll = tokio::time::Instant::now();
+                    clock.poll_now(tokio::time::Instant::now());
                 }
                 Some(Ctl::Req(Request::DisplayPeriod(p))) => wants.period = p,
                 Some(Ctl::Req(r @ (Request::Preview { .. } | Request::PreviewStop))) => {
@@ -800,16 +795,12 @@ async fn session(
                 }
                 out.mirror(v, wake);
             },
-            () = tokio::time::sleep_until(next_poll) => {
+            () = tokio::time::sleep_until(clock.next) => {
                 let active = poll.poll(&client, out).await;
-                let every = if active && !out.ui_behind() { wants.period } else { IDLE_POLL };
-                last_poll = tokio::time::Instant::now();
-                next_poll = last_poll + every;
-                idle = every == IDLE_POLL && !out.ui_behind();
+                clock.polled(tokio::time::Instant::now(), active, out.ui_behind(), wants.period);
             },
-            () = client.data_changed(), if idle => {
-                idle = false;
-                next_poll = next_poll.min(last_poll + wants.period);
+            () = client.data_changed(), if clock.watch => {
+                clock.arrived(wants.period);
             },
         }
     };
@@ -915,6 +906,56 @@ fn meter_period(prev: &ac2_proto::Frame, new: &ac2_proto::Frame) -> Option<Durat
     } else {
         METER_PERIOD
     })
+}
+
+/// When the link drains the client's frames next.
+///
+/// Frames of different topics arrive on their own schedules (meters at 30 Hz, a long
+/// spectrum every 85 ms or so). Draining only on a timer of the display period holds each
+/// frame for up to a period, so evenly spaced frames reach the screen 32–133 ms apart and
+/// the display stutters. Draining on arrival keeps their spacing; half a display period
+/// between drains still bounds how often the UI is fed, and gathers frames of several
+/// topics landing together into one drain.
+#[derive(Debug)]
+struct PollClock {
+    /// When the next drain runs.
+    next: tokio::time::Instant,
+    /// When the last drain ran.
+    last: tokio::time::Instant,
+    /// A frame arriving brings the next drain forward. Off between an arrival and the drain
+    /// it brings (the client signals for as long as frames wait), and while the UI is not
+    /// drawing, which is polled at [`IDLE_POLL`] only.
+    watch: bool,
+}
+
+impl PollClock {
+    fn new(now: tokio::time::Instant) -> Self {
+        Self {
+            next: now,
+            last: now,
+            watch: false,
+        }
+    }
+
+    /// A drain ran at `now`; `active`: frames are flowing; `behind`: the UI is not drawing.
+    /// While frames flow, a drain every display period still catches what an arrival does
+    /// not announce (a meter change held back, a STALE flip).
+    fn polled(&mut self, now: tokio::time::Instant, active: bool, behind: bool, period: Duration) {
+        self.last = now;
+        self.next = now + if active && !behind { period } else { IDLE_POLL };
+        self.watch = !behind;
+    }
+
+    /// A frame arrived: drain now, or half a display period after the last drain.
+    fn arrived(&mut self, period: Duration) {
+        self.watch = false;
+        self.next = self.next.min(self.last + period / 2);
+    }
+
+    /// Drain at once (a new stream's first frame).
+    fn poll_now(&mut self, now: tokio::time::Instant) {
+        self.next = now;
+    }
 }
 
 /// The data poll: what the UI was last given, per topic.
@@ -1742,6 +1783,44 @@ mod tests {
         assert_eq!(f.since_new, Duration::from_millis(1500));
         assert!((f.age.expect("an age") - 2.0).abs() < 1e-9);
         assert_eq!(a.drained, later);
+    }
+
+    /// Frames arriving between drains are drained on arrival, not held to the next tick of
+    /// the display period; drains stay at least half a period apart.
+    #[test]
+    fn frames_are_drained_on_arrival_at_most_twice_a_period() {
+        let t0 = tokio::time::Instant::now();
+        let ms = |v: u64| Duration::from_millis(v);
+        let mut c = PollClock::new(t0);
+        c.polled(t0, true, false, DISPLAY_PERIOD);
+        assert!(c.watch, "an active link watches for frames");
+        assert_eq!(c.next, t0 + DISPLAY_PERIOD);
+        // A frame 2 ms after a drain waits only for the half-period floor.
+        c.arrived(DISPLAY_PERIOD);
+        assert!(!c.watch, "no second wake before the drain");
+        assert_eq!(c.next, t0 + DISPLAY_PERIOD / 2);
+        // One 20 ms after the drain goes at once.
+        let t1 = t0 + ms(40);
+        c.polled(t1, true, false, DISPLAY_PERIOD);
+        c.arrived(DISPLAY_PERIOD);
+        assert!(c.next <= t1 + ms(20));
+        // Idle: the frame cuts the idle wait short the same way.
+        let t2 = t1 + ms(100);
+        c.polled(t2, false, false, DISPLAY_PERIOD);
+        assert_eq!(c.next, t2 + IDLE_POLL);
+        assert!(c.watch);
+        c.arrived(DISPLAY_PERIOD);
+        assert_eq!(c.next, t2 + DISPLAY_PERIOD / 2);
+    }
+
+    /// A UI that is not drawing is polled at the idle period only, frames or not.
+    #[test]
+    fn a_ui_not_drawing_is_polled_at_the_idle_period() {
+        let t0 = tokio::time::Instant::now();
+        let mut c = PollClock::new(t0);
+        c.polled(t0, true, true, DISPLAY_PERIOD);
+        assert!(!c.watch, "arrivals do not wake a link whose UI is away");
+        assert_eq!(c.next, t0 + IDLE_POLL);
     }
 
     #[test]
