@@ -436,10 +436,10 @@ fn traces_are_selected_from_the_keyboard() {
     t.key("Esc");
     assert_eq!(t.st.selected_trace, None);
     assert_eq!(smoothing_set(&t.key("K")).0, "m1");
-    // Tab (another measurement) deselects too.
+    // Tab steps to the next row of the list, a hidden trace's too (a click selects it).
     t.key("V");
     t.key("Tab");
-    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(t.st.selected_trace, Some(TraceId(11)));
 }
 
 #[test]

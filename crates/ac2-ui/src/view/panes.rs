@@ -518,12 +518,12 @@ fn title_chip(
     chip.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     let next = app
         .keymap
-        .first_chord(CommandId::NextMeasurementInTree, Scope::Global)
+        .first_chord(CommandId::NextInTree, Scope::Global)
         .map(|c| c.label());
     let chip = chip.on_hover_text(match next {
-        Some(k) => format!(
-            "{name}: click to choose what this pane shows · {k} the next measurement in the list"
-        ),
+        Some(k) => {
+            format!("{name}: click to choose what this pane shows · {k} steps through the list")
+        }
         None => format!("{name}: click to choose what this pane shows"),
     });
     let open = matches!(st.overlay, Overlay::PaneMenu(pm) if pm.pane == id);

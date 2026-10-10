@@ -590,10 +590,10 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let tips = RowTips {
         meas: format!(
             "Click shows it in the focused pane · the arrow folds it · {} / {} step through \
-             the measurements · {} shows / hides its curve, {} everything under it · {} \
+             the list · {} shows / hides its curve, {} everything under it · {} \
              deletes it (asks first)",
-            key_hint(app, CommandId::NextMeasurementInTree),
-            key_hint(app, CommandId::PrevMeasurementInTree),
+            key_hint(app, CommandId::NextInTree),
+            key_hint(app, CommandId::PrevInTree),
             key_hint(app, CommandId::ToggleSelected),
             key_hint(app, CommandId::HideGroup),
             key_hint(app, CommandId::DeleteSelected)

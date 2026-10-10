@@ -139,7 +139,7 @@ mod tests {
                 "I zoom time",
                 "Ctrl+I zoom level",
                 "Shift+Home fit",
-                "Tab next measurement",
+                "Tab next",
                 "Q close pane",
                 "W maximise",
                 "H all keys"

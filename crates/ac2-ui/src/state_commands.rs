@@ -272,33 +272,71 @@ impl AppState {
         self.select_on(f, id);
     }
 
-    /// Tab / Shift+Tab: the next / previous measurement in the tree, from the selected one
-    /// (a selected trace's owner), wrapping.
-    pub(super) fn cycle_tree_meas(&mut self, d: i32) {
-        let ids = self.tree_meas_order();
-        if ids.is_empty() {
+    /// Tab / Shift+Tab: the next / previous row of the measurement list as it is shown
+    /// (a folded group's rows skipped, hidden curves included: they are selectable),
+    /// wrapping. A measurement's header and its live curve select the same, so they are one
+    /// stop. A measurement row is chosen as a click on it is; a stored trace row selects
+    /// the trace as a click does, the focused pane first showing its measurement.
+    pub(super) fn cycle_tree_row(&mut self, d: i32) {
+        use ac2_scene::meas_list::TreeKey;
+        #[derive(Clone, Copy, PartialEq)]
+        enum Stop {
+            Meas(MeasId),
+            Trace(TraceId),
+        }
+        let stop = |k: TreeKey| match k {
+            TreeKey::Meas(id) | TreeKey::Live(id) | TreeKey::Math(id) => Some(Stop::Meas(id)),
+            TreeKey::Trace(id) => Some(Stop::Trace(id)),
+            TreeKey::Imported => None,
+        };
+        let stops = |rows: Vec<ac2_scene::meas_list::TreeRow>| {
+            let mut v: Vec<Stop> = Vec::new();
+            for s in rows.into_iter().filter_map(|r| stop(r.key)) {
+                if v.last() != Some(&s) {
+                    v.push(s);
+                }
+            }
+            v
+        };
+        // Every row, folded ones too, places a selection inside a folded group; the step
+        // lands on the next row the list shows.
+        let all = stops(self.tree_rows_folded(&std::collections::BTreeSet::new()));
+        let shown = stops(self.tree_rows());
+        if shown.is_empty() {
             self.warn("no measurements to step through");
             return;
         }
-        let anchor = match self.selected_trace_meta() {
-            Some(t) => match ac2_scene::meas_list::group_of(t, &self.measurements()) {
-                ac2_proto::model::TraceOwner::Meas { meas } => Some(meas),
-                ac2_proto::model::TraceOwner::Imported => None,
-            },
-            None => self.selected,
-        };
-        // Without a measurement to start from (an imported trace, whose group is the tree's
-        // last), Tab starts at the first and Shift+Tab at the last.
-        let i = anchor
-            .and_then(|a| ids.iter().position(|x| *x == a))
-            .map_or(if d > 0 { -1 } else { ids.len() as i32 }, |i| i as i32);
-        let id = ids[((i + d).rem_euclid(ids.len() as i32)) as usize];
-        // A math channel's row is under its owner: a folded owner would hide the selection.
-        if let Some(MeasKind::Math { config }) = self.meas(id).map(|m| &m.config.kind) {
-            let owner = config.owner;
-            self.collapsed.remove(&owner);
+        let at = match self.selected_trace {
+            Some(t) => Some(Stop::Trace(t)),
+            None => self.selected.map(Stop::Meas),
         }
-        self.select_meas_row(id);
+        .and_then(|s| all.iter().position(|x| *x == s));
+        let n = all.len() as i32;
+        let next = match at {
+            Some(i) => (1..=n)
+                .map(|k| all[(i as i32 + d * k).rem_euclid(n) as usize])
+                .find(|s| shown.contains(s)),
+            None if d > 0 => shown.first().copied(),
+            None => shown.last().copied(),
+        };
+        match next {
+            Some(Stop::Meas(id)) => self.select_meas_row(id),
+            Some(Stop::Trace(id)) => {
+                let owner = self
+                    .daemon()
+                    .and_then(|s| s.traces.iter().find(|t| t.id == id))
+                    .map(|t| ac2_scene::meas_list::group_of(t, &self.measurements()));
+                let f = self.layout.focus;
+                if let Some(TraceOwner::Meas { meas }) = owner
+                    && self.pane_meas(f).map(|m| m.id) != Some(meas)
+                {
+                    self.select_meas_row(meas);
+                }
+                self.select_trace(Some(id));
+                self.reveal_trace();
+            }
+            None => {}
+        }
         self.tree_reveal = true;
     }
 
@@ -664,8 +702,8 @@ impl AppState {
                 };
             }
             C::MaximizePane => self.cycle_layout(),
-            C::NextMeasurementInTree => self.cycle_tree_meas(1),
-            C::PrevMeasurementInTree => self.cycle_tree_meas(-1),
+            C::NextInTree => self.cycle_tree_row(1),
+            C::PrevInTree => self.cycle_tree_row(-1),
             C::PaneMeasurement => self.overlay = self.pane_menu(self.layout.focus),
             // The sweep pane draws one run at a time: V steps through the runs, never onto a
             // curve the pane cannot draw.

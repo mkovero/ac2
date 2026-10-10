@@ -384,8 +384,8 @@ commands! {
     ShrinkPane => "shrink_pane", "Shrink the focused pane (within its split)", [Global];
     TransferStack => "transfer_stack", "Transfer stack: magnitude / phase / coherence (in place of the focused pane)", [Global];
     MaximizePane => "maximize_pane", "Layout: split → one pane → full screen", [Global];
-    NextMeasurementInTree => "next_measurement_in_tree", "Show the next measurement in the list in the focused pane", [Global];
-    PrevMeasurementInTree => "prev_measurement_in_tree", "Show the previous measurement in the list in the focused pane", [Global];
+    NextInTree => "next_in_tree", "Select the next row in the measurement list (the focused pane shows its measurement)", [Global];
+    PrevInTree => "prev_in_tree", "Select the previous row in the measurement list (the focused pane shows its measurement)", [Global];
     PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];
     CycleTheme => "cycle_theme", "Theme: dark → light → high contrast", [Global];
     PlotChrome => "plot_chrome", "Plot of the focused pane: grid, labels and cursor → no grid → traces only", [Global];
@@ -612,10 +612,10 @@ pub fn defaults() -> Vec<Binding> {
         (C::SweepNew, S::Global, sh(K::S)),
         // Shift+M, a step on from M (average the shown traces): a math channel by name.
         (C::NewMath, S::Global, sh(K::M)),
-        // Tab walks the measurement list, the way it walks a form's fields, and the focused
-        // pane shows each measurement it reaches.
-        (C::NextMeasurementInTree, S::Global, k(K::Tab)),
-        (C::PrevMeasurementInTree, S::Global, sh(K::Tab)),
+        // Tab walks the measurement list row by row, the way it walks a form's fields, and
+        // the focused pane shows the measurement of each row it reaches.
+        (C::NextInTree, S::Global, k(K::Tab)),
+        (C::PrevInTree, S::Global, sh(K::Tab)),
         (C::MaximizePane, S::Global, k(K::W)),
         // T strips the focused plot step by step (grid, then labels and cursor) for a clean
         // picture; the theme is in Settings › Display and the palette.
@@ -825,7 +825,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::ZoomIn, "zoom time", 80),
                     hint(C::LevelZoomIn, "zoom level", 65),
                     hint(C::LevelFit, "fit", 55),
-                    hint(C::NextMeasurementInTree, "next measurement", 60),
+                    hint(C::NextInTree, "next", 60),
                     hint(C::ClosePane, "close pane", 45),
                     hint(C::MaximizePane, "maximise", 50),
                 ]
@@ -1360,10 +1360,7 @@ mod tests {
         // Desktops take Ctrl+Tab (window and workspace switching): nothing is bound to it.
         assert_eq!(m.lookup(Scope::Global, ctrl_tab), None);
         let tab = Chord::key(Key::Tab);
-        assert_eq!(
-            m.lookup(Scope::Global, tab),
-            Some(CommandId::NextMeasurementInTree)
-        );
+        assert_eq!(m.lookup(Scope::Global, tab), Some(CommandId::NextInTree));
         let back = Chord::parse("Ctrl+Shift+Tab").expect("valid");
         assert_eq!(back.label_in(LabelStyle::Mac), "⌃⇧Tab");
         assert_eq!(back.label_in(LabelStyle::Pc), "Ctrl+Shift+Tab");

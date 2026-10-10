@@ -299,7 +299,7 @@ impl AppState {
             .collect()
     }
 
-    fn tree_rows_folded(
+    pub(super) fn tree_rows_folded(
         &self,
         collapsed: &std::collections::BTreeSet<ac2_proto::model::TraceOwner>,
     ) -> Vec<ac2_scene::meas_list::TreeRow> {

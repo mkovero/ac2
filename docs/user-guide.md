@@ -408,7 +408,7 @@ first measurement (a transfer pane on an empty daemon). Lay it out as the job ne
 | **Alt+→** / **Alt+←** | grows / shrinks the focused pane by a tenth of its split; it stops where a pane would be too small to read (the size **N** refuses to split below) |
 | drag a gap | drag the gap between two panes to size them (the cursor turns into a resize arrow over it); the same limit holds |
 | **Q** | closes the focused pane; its neighbour takes the space and the focus. The last pane stays (**Tab** puts another measurement in it) |
-| **Tab** / **Shift+Tab** | the focused pane shows the next / previous measurement of the list, whatever its kind: the pane turns into the kind that draws it (transfer, spectrum / RTA, SPL, sweep / distortion) |
+| **Tab** / **Shift+Tab** | selects the next / previous row of the measurement list (a measurement, a stored trace, a math channel); the focused pane shows that row's measurement, whatever its kind: the pane turns into the kind that draws it (transfer, spectrum / RTA, SPL, sweep / distortion) |
 | **G** / **Shift+G** | steps the focused pane's views forward / back, the last on to the first (the chains are below) |
 | **Alt+1 … Alt+9** | focus the panes in reading order: top to bottom, then left to right |
 | click | focuses the pane |
@@ -480,8 +480,8 @@ To pick another measurement:
   its kind): the pane turns into the kind of the one picked, and the kinds of pane no
   measurement needs yet follow at the end;
 - or focus the pane (click it, **Alt+1 … Alt+9**) and press **Tab** / **Shift+Tab**:
-  they step through the whole list, and the pane turns into the kind of the measurement
-  it lands on;
+  they step through the list row by row, and the pane turns into the kind of the
+  measurement of the row they land on;
 - or use **Choose the measurement the focused pane shows…** in the palette (**↑/↓**,
   **Enter**).
 
@@ -1163,12 +1163,14 @@ Working with the tree:
 - A row's dot is its curve's colour (a ring when hidden): a click shows or hides that curve
   (a live curve: this app's display; a stored trace: the daemon's). A click on the row
   selects it; a double click on a trace renames it.
-- **Tab** / **Shift+Tab** select the next / previous measurement in the tree's order, math
-  channels included, wrapping at the ends; stored traces and the Imported header are
-  skipped. They start from the selected measurement, or from the selected trace's
-  measurement. A measurement in a folded group is reached too (a math channel's group
-  unfolds to show it); the tree scrolls to it and the focused pane shows it, turning into
-  its kind, as a click on the row does. (**Alt+1 …** focus the panes.)
+- **Tab** / **Shift+Tab** select the next / previous row of the tree as it is listed,
+  wrapping at the ends: measurements, math channels and stored traces (hidden ones too:
+  a click selects them as well); a measurement's header and its live curve are one stop,
+  and the Imported header is skipped. The rows of a folded group are skipped, as they are
+  not listed. They start from the selected row; the tree scrolls to the new one. A
+  measurement row is chosen as a click on it does: the focused pane shows it, turning into
+  its kind. A stored trace row selects the trace as a click (or **V**) does, the focused
+  pane first showing the trace's measurement. (**Alt+1 …** focus the panes.)
 - **Move to measurement…** (**Shift+F2**, beside F2 rename, or the palette) files the
   selected stored trace — or the selected math channel — under another measurement or
   under Imported: **↑/↓** choose, **Enter** moves it, **Esc** cancels. Only where it is
@@ -2554,8 +2556,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+→` | Grow the focused pane (within its split) | `grow_pane` |
 | `Alt+←` | Shrink the focused pane (within its split) | `shrink_pane` |
 | `W` | Layout: split → one pane → full screen | `maximize_pane` |
-| `Tab` | Show the next measurement in the list in the focused pane | `next_measurement_in_tree` |
-| `Shift+Tab` | Show the previous measurement in the list in the focused pane | `prev_measurement_in_tree` |
+| `Tab` | Select the next row in the measurement list (the focused pane shows its measurement) | `next_in_tree` |
+| `Shift+Tab` | Select the previous row in the measurement list (the focused pane shows its measurement) | `prev_in_tree` |
 | `T` | Plot of the focused pane: grid, labels and cursor → no grid → traces only | `plot_chrome` |
 | `I` | Zoom frequency in (IR: time) | `zoom_in` |
 | `O` | Zoom frequency out (IR: time) | `zoom_out` |
@@ -2759,7 +2761,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 |---|---|
 | Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `P` peak hold · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
-| Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next measurement · `Q` close pane · `W` maximise · `H` all keys |
+| Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next · `Q` close pane · `W` maximise · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `G/Shift+G` view · `W` maximise · `Q` close pane · `H` all keys |
 

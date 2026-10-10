@@ -1012,10 +1012,7 @@ fn stored_traces_and_target() {
     // Ctrl+1 captures Main L (selected) into slot 1; Tab, Ctrl+2 Delay tower into slot 2.
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
     step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
-    h.key_press(Key::Tab);
-    step_until(&mut h, "delay tower", |a| {
-        a.state.selected == Some(MeasId(2))
-    });
+    tab_to(&mut h, MeasId(2));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
     step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
     // Z: a target curve from a file.
@@ -2501,10 +2498,7 @@ fn traces_list() {
     step_until(&mut h, "live frames", live);
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
     step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
-    h.key_press(Key::Tab);
-    step_until(&mut h, "delay tower", |a| {
-        a.state.selected == Some(MeasId(2))
-    });
+    tab_to(&mut h, MeasId(2));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
     step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
     h.key_press(Key::Z);
@@ -2990,10 +2984,7 @@ fn measurement_tree_and_delete_choices() {
     step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
     step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
-    h.key_press(Key::Tab);
-    step_until(&mut h, "delay tower", |a| {
-        a.state.selected == Some(MeasId(2))
-    });
+    tab_to(&mut h, MeasId(2));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num3);
     step_until(&mut h, "slot 3", |a| a.state.slots()[2].is_some());
     h.key_press(Key::Z);
@@ -3880,6 +3871,20 @@ fn palette(h: &mut Harness<'_, App>, what: &str) {
     });
     h.key_press(Key::Enter);
     step_until(h, "palette closed", |a| a.state.overlay == Overlay::None);
+}
+
+/// Tab until the list's row of measurement `id` is selected: the stored traces listed
+/// before it are rows Tab stops on.
+fn tab_to(h: &mut Harness<'_, App>, id: MeasId) {
+    for _ in 0..8 {
+        h.key_press(Key::Tab);
+        settle(h, 2);
+        let s = &h.state().state;
+        if s.selected == Some(id) && s.selected_trace.is_none() {
+            return;
+        }
+    }
+    panic!("Tab never reached {id:?}");
 }
 
 /// Many curves from an empty daemon: target curves imported one after another fill the

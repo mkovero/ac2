@@ -880,65 +880,76 @@ fn a_new_math_channel_lives_under_the_selected_measurement() {
         if config.owner == TraceOwner::Meas { meas: MeasId(1) }));
 }
 
-fn tab(t: &mut T, key: &str) -> Option<u32> {
+/// `key` pressed: the row it selected, `m<id>` a measurement, `t<id>` a stored trace.
+fn tab(t: &mut T, key: &str) -> String {
     t.key(key);
-    assert_eq!(
-        t.st.selected_trace, None,
-        "{key} lands on the measurement, not a trace"
-    );
-    t.st.selected.map(|m| m.0)
+    match (t.st.selected_trace, t.st.selected) {
+        (Some(tr), _) => format!("t{}", tr.0),
+        (None, Some(m)) => format!("m{}", m.0),
+        (None, None) => "none".into(),
+    }
 }
 
-/// Tab / Shift+Tab walk the measurements in the tree's order (math channels included, the
-/// traces and the Imported header skipped), wrapping; the focused pane shows each.
+/// Tab / Shift+Tab walk the rows of the tree as listed (a measurement's header and live
+/// curve one stop, its stored traces and math channels, the imported traces; the Imported
+/// header skipped), wrapping; the focused pane shows each row's measurement.
 #[test]
-fn tab_steps_through_the_trees_measurements() {
+fn tab_steps_through_the_trees_rows() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
     t.st.selected = None;
-    // Main L, its math channel pre ÷ post, Sub; then round again.
-    let fwd: Vec<_> = (0..4).map(|_| tab(&mut t, "Tab")).collect();
-    assert_eq!(fwd, [Some(1), Some(6), Some(2), Some(1)]);
-    let back: Vec<_> = (0..4).map(|_| tab(&mut t, "Shift+Tab")).collect();
-    assert_eq!(back, [Some(2), Some(6), Some(1), Some(2)]);
+    // Main L, pre-EQ, post-EQ, pre ÷ post, Sub, the imported trace; then round again.
+    let fwd: Vec<_> = (0..7).map(|_| tab(&mut t, "Tab")).collect();
+    assert_eq!(fwd, ["m1", "t3", "t4", "m6", "m2", "t5", "m1"]);
+    let back: Vec<_> = (0..7).map(|_| tab(&mut t, "Shift+Tab")).collect();
+    assert_eq!(back, ["t5", "m2", "m6", "t4", "t3", "m1", "t5"]);
     assert!(t.st.tree_reveal, "the tree scrolls to the row");
 
-    // Nothing selected: Shift+Tab starts at the last.
+    // Nothing selected: Shift+Tab starts at the last. (A click on the selected trace
+    // deselects it.)
+    t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
     t.st.selected = None;
-    assert_eq!(tab(&mut t, "Shift+Tab"), Some(2));
+    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(tab(&mut t, "Shift+Tab"), "t5");
 
-    // The focused pane shows it, as on a click on its row, turning into its kind; the
-    // focus stays.
+    // The focused pane shows the row's measurement, as on a click on its row, turning into
+    // its kind; the focus stays.
+    assert_eq!(tab(&mut t, "Shift+Tab"), "m2");
     let pane = t.st.layout.focus;
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
-    assert_eq!(tab(&mut t, "Tab"), Some(1));
+    assert_eq!(tab(&mut t, "Shift+Tab"), "m6");
     assert_eq!(
         (t.st.layout.focus, t.focus_kind()),
         (pane, PaneKind::Transfer)
     );
+    assert_eq!(t.st.pane_meas(pane).map(|m| m.id), Some(MeasId(6)));
+    // A stored trace of another measurement: the pane shows that measurement, the trace
+    // selected in it.
+    assert_eq!(tab(&mut t, "Shift+Tab"), "t4");
+    assert_eq!(t.st.layout.focus, pane);
     assert_eq!(t.st.pane_meas(pane).map(|m| m.id), Some(MeasId(1)));
 }
 
-/// From a selected trace, Tab goes on from the measurement that owns it; from an imported
-/// trace (the tree's last group) it starts over.
+/// From a selected trace, Tab goes on from its row; from the imported trace (the tree's
+/// last row) it starts over.
 #[test]
-fn tab_from_a_trace_goes_on_from_its_measurement() {
+fn tab_from_a_trace_goes_on_from_its_row() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
     t.st.update(Msg::SelectTrace(TraceId(4)), &t.keys);
-    assert_eq!(tab(&mut t, "Tab"), Some(6));
+    assert_eq!(tab(&mut t, "Tab"), "m6");
     t.st.update(Msg::SelectTrace(TraceId(3)), &t.keys);
-    assert_eq!(tab(&mut t, "Shift+Tab"), Some(2));
+    assert_eq!(tab(&mut t, "Shift+Tab"), "m1");
     t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
-    assert_eq!(tab(&mut t, "Tab"), Some(1));
+    assert_eq!(tab(&mut t, "Tab"), "m1");
     t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
-    assert_eq!(tab(&mut t, "Shift+Tab"), Some(2));
+    assert_eq!(tab(&mut t, "Shift+Tab"), "m2");
 }
 
-/// A folded group's measurements are still stepped through; a math channel's folded group
-/// opens to show it, a header stays folded (its row is on screen).
+/// A folded group's rows are skipped, as the list does not show them, and the folds stay;
+/// from a selection inside a folded group Tab goes on to the next row shown.
 #[test]
-fn tab_reaches_measurements_in_folded_groups() {
+fn tab_skips_the_rows_of_folded_groups() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
     let main = TraceOwner::Meas { meas: MeasId(1) };
@@ -946,11 +957,13 @@ fn tab_reaches_measurements_in_folded_groups() {
     t.st.collapsed.insert(main);
     t.st.collapsed.insert(sub);
     t.st.selected = Some(MeasId(1));
-    assert_eq!(tab(&mut t, "Tab"), Some(6));
-    assert!(!t.st.collapsed.contains(&main));
-    assert!(tree_names(&t).contains(&"pre ÷ post".to_owned()));
-    assert_eq!(tab(&mut t, "Tab"), Some(2));
-    assert!(t.st.collapsed.contains(&sub));
+    let fwd: Vec<_> = (0..3).map(|_| tab(&mut t, "Tab")).collect();
+    assert_eq!(fwd, ["m2", "t5", "m1"]);
+    assert!(t.st.collapsed.contains(&main) && t.st.collapsed.contains(&sub));
+    t.st.update(Msg::SelectTrace(TraceId(4)), &t.keys);
+    assert_eq!(tab(&mut t, "Tab"), "m2");
+    t.st.update(Msg::SelectTrace(TraceId(4)), &t.keys);
+    assert_eq!(tab(&mut t, "Shift+Tab"), "m1");
 }
 
 /// No measurements: a toast says so and nothing is selected.

@@ -985,7 +985,7 @@ impl AppState {
     pub(super) fn close_pane(&mut self) {
         let gone = self.layout.focus;
         if !self.layout.close_focused() {
-            self.warn("the last pane stays: Tab puts the next measurement in it");
+            self.warn("the last pane stays: Tab puts another measurement in it");
             return;
         }
         if matches!(self.overlay, Overlay::PaneMenu(m) if m.pane == gone) {
