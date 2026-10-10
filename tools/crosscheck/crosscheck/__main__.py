@@ -1,4 +1,4 @@
-"""python -m crosscheck {preflight,run,analyse,baseline,compare,osm} — see README.md."""
+"""python -m crosscheck {preflight,run,analyse,baseline,compare,osm,comparison} — see README.md."""
 from __future__ import annotations
 
 import argparse
@@ -38,6 +38,11 @@ def main(argv=None) -> int:
     om.add_argument("--no-recordings", action="store_true", help="synthetic cases only")
     om.add_argument("--tolerances", type=Path, help="tolerances TOML (default: the suite's)")
     om.add_argument("--no-plots", action="store_true")
+
+    cm = sub.add_parser("comparison", help="rebuild the results tables of comparison.md from the baselines")
+    cm.add_argument("--check", action="store_true", help="write nothing; exit 1 when the tables are stale")
+    cm.add_argument("--doc", type=Path, help="document (default: the suite's comparison.md)")
+    cm.add_argument("--baselines", type=Path, help="baseline directory (default: the suite's baselines/)")
 
     for name, hlp in (("preflight", "read-only checks of the rig, no emission"),
                       ("run", "preflight, then the stages; emitting stages need the flags below")):
@@ -113,6 +118,14 @@ def main(argv=None) -> int:
         print("\n".join(baseline.summary_lines(blocks)))
         print(f"{path}: " + ("differences beyond the baseline" if rc else "no worse status, no value beyond its step"))
         return rc
+    if a.cmd == "comparison":
+        from . import comparison
+        current, path = comparison.update(a.doc or comparison.DOC, a.baselines or comparison.BASELINES, a.check)
+        if a.check:
+            print(f"{path}: " + ("tables current" if current else "tables stale; run `python -m crosscheck comparison`"))
+            return 0 if current else 1
+        print(f"{path}: " + ("unchanged" if current else "tables rebuilt"))
+        return 0
     from . import run
     from .levels import PolicyError
     try:

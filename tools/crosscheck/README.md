@@ -7,11 +7,12 @@ reruns the hand comparison of 2026-10-07 (`docs/rigs/pupu.md`, "REW cross-check,
 and adds an ambient SPL check and the speaker path.
 
 ```
-crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,osm})
+crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,osm,comparison})
 rigs/pupu.toml   ports, roles, paths, levels, stage settings for pupu
+comparison.md    ac2 against REW and OSM: definitions, results, known disagreements
 osm.toml         the OSM stage: harness and ac2 binaries, matched settings, cases, recordings
 tolerances.toml  PASS / WARN limits for every comparison, compare steps
-baselines/       reviewed results per rig, stage and level (<rig>/<stage>-<level>dbfs.json)
+baselines/       reviewed results per rig, stage and level (<rig>/<stage>-<level>dbfs.json; host/osm.json)
 reference/       documented truth of 2026-10-07 (used when analysing the fixtures)
 rig-run.sh       dev host: copy to the rig, run there, fetch the run, analyse and compare here
 tests/           pytest: dsp, safety policy, JACK dummy server, fixtures smoke test, digital DUT
@@ -314,7 +315,9 @@ python -m crosscheck compare runs/osm-<UTC time>             # an OSM run agains
 - **Updating a baseline**: after a run on a new build has been reviewed and its differences
   are understood, run `baseline` on it (it prints what changed and refuses a run with FAILs
   unless `--force`, which is for a FAIL that is a known, documented gap) and commit the
-  files with the ac2 build hash in the message.
+  files with the ac2 build hash in the message. Then run `python -m crosscheck comparison`:
+  it rebuilds the results tables of `comparison.md` from the baselines, and a test fails
+  while they are stale.
 
 ## Fixtures (2026-10-07)
 
