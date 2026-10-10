@@ -125,6 +125,8 @@ pub struct LayoutPrefs {
     pub maximized: bool,
     /// The window fills the screen (F or F11; with `maximized`, the full-screen pane).
     pub fullscreen: bool,
+    /// With `fullscreen`: the panes alone, no top bar or lists (F's second step).
+    pub panes_only: bool,
     pub distortion_unit: DistortionUnit,
     /// Measurements whose live curves are hidden (A), by name.
     pub hidden: BTreeSet<String>,
@@ -139,6 +141,7 @@ impl Default for LayoutPrefs {
             panes: None,
             maximized: false,
             fullscreen: false,
+            panes_only: false,
             distortion_unit: DistortionUnit::Db,
             hidden: BTreeSet::new(),
             compared: BTreeSet::new(),
@@ -805,6 +808,8 @@ struct LayoutFile {
     maximized: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     fullscreen: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    panes_only: bool,
     #[serde(default = "unit_db")]
     distortion_unit: UnitFile,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -880,6 +885,7 @@ impl LayoutFile {
             panes,
             maximized: self.maximized,
             fullscreen: self.fullscreen,
+            panes_only: self.panes_only,
             distortion_unit: match self.distortion_unit {
                 UnitFile::Db => DistortionUnit::Db,
                 UnitFile::Percent => DistortionUnit::Percent,
@@ -894,6 +900,7 @@ impl LayoutFile {
             focus: l.panes.as_ref().map(|p| p.focus.0),
             maximized: l.maximized,
             fullscreen: l.fullscreen,
+            panes_only: l.panes_only,
             distortion_unit: match l.distortion_unit {
                 DistortionUnit::Db => UnitFile::Db,
                 DistortionUnit::Percent => UnitFile::Percent,
@@ -1383,6 +1390,7 @@ mod tests {
             panes: Some(two_panes()),
             maximized: true,
             fullscreen: true,
+            panes_only: true,
             distortion_unit: DistortionUnit::Percent,
             hidden: ["TF 2".to_owned()].into(),
             compared: ["Main R".to_owned()].into(),
@@ -1398,6 +1406,7 @@ mod tests {
             "[layout]",
             "focus = 2",
             "fullscreen = true",
+            "panes_only = true",
             "distortion_unit = \"percent\"",
             "hidden = [\"TF 2\"]",
             "compared = [\"Main R\"]",
@@ -1621,5 +1630,13 @@ mod tests {
         let (q, err) = UiPrefs::load(Some(&path));
         assert_eq!(q, UiPrefs::default());
         assert!(err.is_some_and(|e| e.contains("ui.toml")));
+    }
+
+    /// A file from before the panes-only step: `fullscreen = true` alone is the window full
+    /// screen, top bar and lists shown.
+    #[test]
+    fn fullscreen_alone_is_the_window_full_screen() {
+        let p = UiPrefs::from_toml("[layout]\nfullscreen = true\n").expect("parses");
+        assert!(p.layout.fullscreen && !p.layout.panes_only);
     }
 }

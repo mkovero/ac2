@@ -352,7 +352,7 @@ commands! {
     Palette => "palette", "Command palette", [Global];
     Settings => "settings", "Settings: inputs & outputs, audio, calibration, Leq, recording, display, connection…", [Global];
     Quit => "quit", "Quit", [Global];
-    Fullscreen => "fullscreen", "Window full screen on / off", [Global];
+    Fullscreen => "fullscreen", "Full screen: window → panes only → off", [Global];
     KeyHints => "key_hints", "Key hints on / off", [Global];
     WarningToasts => "warning_toasts", "Warning toasts on / off (off: warnings and Leq limit alarms go only to the notification log)", [Global];
 

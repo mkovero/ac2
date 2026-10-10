@@ -217,6 +217,59 @@ fn w_cycles_split_maximised_full_screen() {
     assert!(!t.st.layout.maximized && !t.st.fullscreen);
 }
 
+/// F: windowed → the window full screen (top bar and lists as before) → the panes alone,
+/// every pane of the layout (the stage view: no top bar, lists, pane titles or hints) →
+/// windowed; F11 the same. In the panes alone, W steps the focused pane alone and back,
+/// staying full screen; F leaves. The step is remembered, and the hidden list still
+/// answers Tab.
+#[test]
+fn f_cycles_window_full_screen_then_panes_only() {
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    let panes = t.st.layout.panes().len();
+    assert!(panes > 1);
+    t.key("F");
+    assert!(t.st.fullscreen && !t.st.panes_only && !t.st.stage_view());
+    t.key("F");
+    assert!(t.st.fullscreen && t.st.panes_only && !t.st.layout.maximized);
+    assert!(t.st.stage_view() && !t.st.key_hints_shown());
+    assert_eq!(t.st.visible_tree(), t.st.layout.root, "every pane");
+    // The lists are hidden, not gone: Tab still steps the selection.
+    t.st.selected = None;
+    assert_eq!(tab(&mut t, "Tab"), "m1");
+    assert_eq!(tab(&mut t, "Tab"), "t3");
+    // W inside: one pane, then all again, full screen throughout.
+    t.key("W");
+    assert!(t.st.layout.maximized && t.st.stage_view());
+    t.key("W");
+    assert!(!t.st.layout.maximized && t.st.stage_view());
+    // Remembered, and restored on the next start.
+    let l = t.st.prefs.layout.clone();
+    assert!(l.fullscreen && l.panes_only);
+    let mut u = T::disconnected();
+    u.st.set_prefs(t.st.prefs.clone());
+    assert!(u.st.fullscreen && u.st.panes_only && u.st.stage_view());
+    t.key("F11");
+    assert!(!t.st.fullscreen && !t.st.panes_only && !t.st.stage_view());
+    assert!(!t.st.prefs.layout.panes_only);
+    // From W's full-screen pane F leaves full screen, the pane still alone; W's own cycle
+    // is as before.
+    t.key("W");
+    t.key("W");
+    assert!(t.st.stage_view() && !t.st.panes_only);
+    t.key("F");
+    assert!(t.st.layout.maximized && !t.st.fullscreen);
+    t.key("W");
+    t.key("W");
+    assert!(!t.st.layout.maximized && !t.st.fullscreen);
+    // Panes-only, then W to one pane, then F: windowed with the pane alone.
+    t.key("F");
+    t.key("F");
+    t.key("W");
+    t.key("F");
+    assert!(t.st.layout.maximized && !t.st.fullscreen && !t.st.panes_only);
+}
+
 /// T steps the focused pane's plot (grid, labels, cursor) and no other pane's, two panes of
 /// one kind included; the toast names the pane and the step; a split copies the step, a
 /// change of kind keeps it, and each pane's step is kept for the next start.

@@ -557,9 +557,19 @@ alone.
   pane resizes. Esc and Shift+Esc stop as always.
 - Outside full screen the top bar shows the stimulus as usual.
 
-**F** (or **F11**) on its own puts the whole window full screen (or back) in whatever layout it is in;
-with one pane up, that is the same stage view. Esc stops the stimulus as anywhere else
-(Shift+Esc too, also with a window open).
+**F** (or **F11**) steps the window through full screen in whatever layout it is in:
+
+1. windowed;
+2. the window **full screen**, top bar and lists as before;
+3. **panes only**: every pane of the layout and nothing else, the stage view above with all
+   the panes (each plot with its one-line caption; no top bar, input or measurement list,
+   pane titles or key hints); then windowed again.
+
+With one pane up (W), step 2 already is the stage view, so the next F goes back to the
+window. In panes only, **W** steps between all the panes and the focused one alone and
+stays full screen; F leaves it. The hidden lists still answer their keys (Tab / Shift+Tab
+step the selection, **V** the stored traces), and a click on a pane focuses it. Esc stops
+the stimulus as anywhere else (Shift+Esc too, also with a window open).
 
 With the focused pane maximised, picking a measurement in the list puts it in the one pane,
 which turns into the kind that shows it, and the layout stays maximised:
@@ -578,7 +588,7 @@ split layout every pane is on screen and selecting a trace leaves the focus wher
 The app remembers in `ui.toml` (written when the layout changes and on exit):
 
 - the panes: how they are split, what kind each shows and which has the focus, and whether
-  it is maximised or full screen;
+  it is maximised, full screen or panes only;
 - the measurement each pane shows (by name);
 - each pane's views: the transfer view (magnitude, phase, coherence or an impulse-response
   display), the SPL view (meter, Leq windows or both), the spectrum view, the sweep view and
@@ -2537,7 +2547,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+K` | Command palette | `palette` |
 | `Ctrl+P` | Settings: inputs & outputs, audio, calibration, Leq, recording, display, connection… | `settings` |
 | `Ctrl+Q` | Quit | `quit` |
-| `F` or `F11` | Window full screen on / off | `fullscreen` |
+| `F` or `F11` | Full screen: window → panes only → off | `fullscreen` |
 | `Space` | Stimulus: arm what the view plays (sweep view: a run of the selected sweep measurement; others: the generator) | `stimulus_arm` |
 | `Enter` | Stimulus: fire what is armed (named in the top bar) | `stimulus_fire` |
 | `Esc` | Stimulus: stop and disarm (no window open) | `stimulus_stop` |

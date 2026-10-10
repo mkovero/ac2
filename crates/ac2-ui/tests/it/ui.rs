@@ -959,6 +959,26 @@ fn the_stage_view_stays_the_pane_while_firing() {
     });
 }
 
+/// F twice: the panes alone, every pane of the layout, full screen (no top bar, lists, pane
+/// titles or key hints; each plot with its one-line caption).
+#[test]
+fn panes_only_full_screen() {
+    if !have_gpu("panes_only_full_screen") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press(Key::F);
+    h.key_press(Key::F);
+    step_until(&mut h, "panes only", |a| {
+        a.state.stage_view() && !a.state.layout.maximized && a.state.layout.panes().len() > 1
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "panes_only");
+}
+
 #[test]
 fn startup_first_frame() {
     if !have_gpu("startup_first_frame") {

@@ -611,7 +611,7 @@ impl AppState {
                 };
             }
             C::Quit => self.quit = true,
-            C::Fullscreen => self.fullscreen = !self.fullscreen,
+            C::Fullscreen => self.cycle_fullscreen(),
             C::KeyHints => {
                 self.prefs.key_hints = !self.prefs.key_hints;
                 self.prefs_dirty = true;

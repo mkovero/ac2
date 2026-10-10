@@ -1100,6 +1100,9 @@ pub struct AppState {
     pub quit: bool,
     /// The window fills the screen (the app applies it).
     pub fullscreen: bool,
+    /// With `fullscreen`: the panes alone, every pane of the layout, without the top bar
+    /// and the lists (F's second step).
+    pub panes_only: bool,
     /// The key that just opened a text overlay also arrives as text; drop that one char.
     swallow_text: Option<char>,
     /// Settings sent with the arm in flight; a change made before the arm is confirmed is
@@ -1213,6 +1216,7 @@ impl AppState {
             now_s: 0.0,
             quit: false,
             fullscreen: false,
+            panes_only: false,
             swallow_text: None,
             armed_with: None,
             pending_select: None,

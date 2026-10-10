@@ -741,6 +741,7 @@ impl AppState {
             panes,
             maximized: self.layout.maximized,
             fullscreen: self.fullscreen,
+            panes_only: self.panes_only,
             distortion_unit: self.view.distortion.unit,
             hidden,
             compared,
@@ -864,6 +865,7 @@ impl AppState {
         }
         self.layout.maximized = l.maximized;
         self.fullscreen = l.fullscreen;
+        self.panes_only = l.fullscreen && l.panes_only;
         self.view.distortion.unit = l.distortion_unit;
         // Before any frame: a spectrum that starts still fits its axis on its first one.
         prefs.levels.apply(&mut self.view);
@@ -878,15 +880,34 @@ impl AppState {
     }
 
     /// W: the split layout → the focused pane alone → the focused pane full screen (the
-    /// window too) → the split layout again.
+    /// window too) → the split layout again. In F's panes-only full screen, W steps between
+    /// all the panes and the focused one alone, staying full screen: leaving full screen is
+    /// F's.
     pub(super) fn cycle_layout(&mut self) {
-        if !self.layout.maximized {
+        if self.panes_only {
+            self.layout.maximized = !self.layout.maximized;
+        } else if !self.layout.maximized {
             self.layout.maximized = true;
         } else if !self.fullscreen {
             self.fullscreen = true;
         } else {
             self.layout.maximized = false;
             self.fullscreen = false;
+        }
+    }
+
+    /// F: windowed → the window full screen → the panes alone full screen (every pane of
+    /// the layout, no top bar or lists) → windowed. With one pane alone (W) the window full
+    /// screen already shows the pane alone, so F leaves full screen from there.
+    pub(super) fn cycle_fullscreen(&mut self) {
+        if !self.fullscreen {
+            self.fullscreen = true;
+            self.panes_only = false;
+        } else if !self.panes_only && !self.layout.maximized {
+            self.panes_only = true;
+        } else {
+            self.fullscreen = false;
+            self.panes_only = false;
         }
     }
 
@@ -897,7 +918,7 @@ impl AppState {
     /// nothing on it (no top bar, strip or badge comes back, no pane resizes), and Esc and
     /// Shift+Esc stop as everywhere. Outside full screen the top bar shows the stimulus.
     pub fn stage_view(&self) -> bool {
-        self.fullscreen && self.layout.maximized
+        self.fullscreen && (self.layout.maximized || self.panes_only)
     }
 
     /// Whether the panes show key hints now: on in the preferences, and never in the stage
