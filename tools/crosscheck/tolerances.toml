@@ -81,6 +81,26 @@ d50 = { pass = 0.02, warn = 0.05 }
 [coherence]
 min_fraction_099 = 0.95     # live TF: share of columns 31 Hz - 20 kHz at gamma^2 >= 0.99 (info below)
 
+[osm]
+# The OSM stage (README, "OSM stage"): ac2 and Open Sound Meter's DSP on the same WAV pairs.
+# Synthetic cases have a closed-form truth; recordings are ac2 against OSM only.
+mag_truth_db = { pass = 0.05, warn = 0.2 }      # |H| vs the fixture's closed form, max over γ² >= 0.95 columns
+phase_truth_deg = { pass = 0.5, warn = 2.0 }    # phase vs closed form, max
+mag_osm_db = { pass = 0.05, warn = 0.2 }        # ac2 vs OSM, synthetic, max over columns both at γ² >= 0.95
+phase_osm_deg = { pass = 0.5, warn = 2.0 }
+mag_osm_rig_db = { pass = 0.3, warn = 1.0 }     # ac2 vs OSM on a rig recording, median |difference| (windows see a room differently)
+phase_osm_rig_deg = { pass = 3.0, warn = 10.0 }
+mag_h1_noise_db = { pass = 0.1, warn = 0.3 }    # ac2's H1 in uncorrelated noise vs 0 dB, median 1-20 kHz
+mag_osm_bias_db = { pass = 0.2, warn = 0.5 }    # OSM's mean |M|/|R| vs its expected bias E|1 + N/R|
+coh_ac2 = { pass = 0.02, warn = 0.05 }          # ac2 γ² vs the fixture's true γ², mean 1-20 kHz
+coh_osm_model = { pass = 0.02, warn = 0.05 }    # OSM γ² vs E[γ̂²] for its overlapped 21-tick estimate
+delay_osm_samples = { pass = 0.5, warn = 1.0 }  # OSM's whole-sample finder vs truth
+delay_ac2_samples = { pass = 0.05, warn = 0.5 } # ac2's sub-sample finder vs truth
+slope_samples = { pass = 0.02, warn = 0.1 }     # phase-slope delay vs truth
+delay_vs_osm_samples = { pass = 0.6, warn = 1.0 }  # OSM rounds to a sample (0.5) + ac2's stated 0.1
+spectrum_tone_db = { pass = 0.02, warn = 0.1 }  # bin-centred sine, ac2 peak-convention dBFS
+spectrum_noise_db = { pass = 0.1, warn = 0.3 }  # white noise per bin, power mean (OSM: Rayleigh mean converted)
+
 [compare]
 # `compare` flags a judged value that moved more than max(step[unit], pass_fraction × pass
 # limit) from its baseline. The unit step is about the take-to-take scatter of a quiet band;

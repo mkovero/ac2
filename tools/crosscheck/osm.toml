@@ -1,0 +1,41 @@
+# The OSM stage (README, "OSM stage"): Open Sound Meter's own DSP, run offline by the
+# external GPL `osm-harness`, against ac2 on the same WAV pairs through ac2d's replay.
+# No rig, no audio device, nothing emitted.
+
+[tools]
+# The harness binary; OSM_HARNESS in the environment wins. Missing: the stage is SKIP.
+harness = ""
+# Directory holding the ac2 and ac2d binaries; AC2_BIN_DIR in the environment wins, then
+# PATH. Missing: the stage is SKIP.
+ac2_bin_dir = ""
+
+# Settings both analysers get, per case unless the case overrides them. OSM ticks every
+# round(0.08 fs) samples (7680 at 96 kHz) and its FIFO counts ticks; ac2's spectrum FIFO
+# counts hops of N/8. The ac2 spectrum FIFO is chosen so both average the same span of
+# audio: 15 * 7680 + 65536 samples (OSM 16 ticks) ~ 14 * 8192 + 65536 (ac2 15 frames).
+[settings]
+fft = 16                 # OSM --fft P; ac2 spectrum --fft 2^P samples
+window = "hann"          # both: OSM --window hann, ac2 spectrum --window hann
+osm_average = 16         # OSM --averageType fifo --average N (ticks)
+ac2_tf_blocks = 8        # ac2 tf --blocks (its MTW ladder has no FFT size or window to set)
+
+# Synthetic cases (crosscheck/osm_fixtures.py), all 96 kHz f32, generated per run.
+[cases]
+run = ["identity", "biquad", "delay48", "delay10_5", "polarity", "snr20", "snr10", "snr0", "sine1k"]
+
+# Real recordings from earlier rig runs: ac2 against OSM only (no analytic truth). `align`:
+# ac2's delay finder result is inserted and the file replayed again (the MTW's short HF
+# windows decorrelate under a flight time), and OSM gets its own finder's whole-sample result,
+# as an operator of either would. A missing file is skipped with a note. A relative `wav` is
+# under the runs directory rig-run.sh fetches into: $CROSSCHECK_RUNS, else
+# /work/ac2-crosscheck/runs when it exists, else runs/ here.
+[[recordings]]
+name = "xone-rig"
+wav = "20261008T213854Z/xone/ac2_tf/rec.wav"
+columns = [0, 1]         # meas, ref
+align = false
+[[recordings]]
+name = "genelec-rig"
+wav = "20261009T232923Z/genelec/ac2_tf/rec.wav"
+columns = [0, 1]
+align = true

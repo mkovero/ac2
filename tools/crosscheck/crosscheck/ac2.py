@@ -35,10 +35,11 @@ def _expand(cmd: list[str]) -> list[str]:
 
 
 class Ac2:
-    def __init__(self, cmd: list[str], timeout: str = "5s", log: Path | None = None):
+    def __init__(self, cmd: list[str], timeout: str = "5s", log: Path | None = None, env: dict | None = None):
         self.cmd = _expand(cmd)
         self.timeout = timeout
         self.log = log
+        self.env = env  # None: this process's environment (a private daemon passes its own)
 
     def _log(self, line: str):
         if self.log:
@@ -51,7 +52,8 @@ class Ac2:
     def run(self, *args, json_out: bool = True, deadline: float = 60.0, check: bool = True):
         argv = self.argv(*args, *(["--json"] if json_out else []))
         self._log("$ " + " ".join(argv))
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=deadline, stdin=subprocess.DEVNULL)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=deadline, stdin=subprocess.DEVNULL,
+                           env=self.env)
         self._log(p.stdout[-4000:] + p.stderr[-2000:])
         if check and p.returncode != 0:
             raise Ac2Error(f"ac2 {' '.join(map(str, args))}: exit {p.returncode}: {p.stderr.strip()[-500:]}")
@@ -112,7 +114,7 @@ class Ac2:
         argv = self.argv(*args, "--json")
         self._log("$ " + " ".join(argv))
         p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                             bufsize=1)
+                             bufsize=1, env=self.env)
         events: list[dict] = []
         got = threading.Event()
 

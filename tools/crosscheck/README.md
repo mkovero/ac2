@@ -7,8 +7,9 @@ reruns the hand comparison of 2026-10-07 (`docs/rigs/pupu.md`, "REW cross-check,
 and adds an ambient SPL check and the speaker path.
 
 ```
-crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare})
+crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,osm})
 rigs/pupu.toml   ports, roles, paths, levels, stage settings for pupu
+osm.toml         the OSM stage: harness and ac2 binaries, matched settings, cases, recordings
 tolerances.toml  PASS / WARN limits for every comparison, compare steps
 baselines/       reviewed results per rig, stage and level (<rig>/<stage>-<level>dbfs.json)
 reference/       documented truth of 2026-10-07 (used when analysing the fixtures)
@@ -323,6 +324,139 @@ convention used here, 3 dB hotter than the −30 dBFS sweeps it is compared with
 - REW live's delay matches the direct value;
 - ac2's whole-sample arrival is reported;
 - the 10 Hz sweeps overstate LF H2.
+
+## OSM stage
+
+Open Sound Meter's own DSP as a standing reference for ac2's live math. **Offline, file based,
+no rig, nothing emitted**: it runs on the dev host.
+
+```
+OSM_HARNESS=/path/to/osm-harness AC2_BIN_DIR=/path/to/target/release \
+  python -m crosscheck osm [--out DIR] [--cases identity,biquad] [--no-recordings]
+```
+
+Each case is a meas/ref WAV pair (96 kHz f32; channel 0 meas, channel 1 ref). It goes through:
+- **OSM**: the external `osm-harness` (OSM v1.5.2's `Measurement` class, ticked
+  deterministically every round(0.08·fs) samples). Its JSON is OSM's `requestData` shape.
+- **ac2**: a private `ac2d` (fake backend, its own HOME and runtime dir, no autosave). The pair
+  is imported (`ac2 rec import`) and replayed `--fast` (`ac2 session replay`): the replay
+  backend is capture-only, so nothing can play. A transfer measurement (ref = in 2, meas = in 1)
+  and a spectrum on in 1 run on it. After the last sample, the stage captures and exports both
+  and runs `ac2 delay find`.
+
+The report has the usual layout (`<out>/report/report.md`, `results.json`) and one plot per
+transfer case.
+
+**Cases** (`crosscheck/osm_fixtures.py`). The fixtures are generated each run. Each path is
+applied in the frequency domain over the whole file, so the file is periodic and the
+closed form holds at every frequency:
+
+| case | pair | truth |
+|---|---|---|
+| identity | M = R, white noise | 0 dB, 0°, γ² = 1, delay 0; per-bin noise level |
+| biquad | M = RBJ peaking +6 dB, 1 kHz, Q 2 | its analytic response |
+| delay48, delay10_5 | M = R delayed 48 / 10.5 samples (band-limited) | e^(−j2πfτ) |
+| polarity | M = −R | 180° |
+| snr20 / snr10 / snr0 | M = R + uncorrelated white noise | H1 = 1, γ² = SNR/(1+SNR) |
+| sine1k | bin-centred sine at −20 dBFS peak (spectrum only) | its level |
+
+`[[recordings]]` in `osm.toml` adds earlier rig takes (`<run>/<path>/ac2_tf/rec.wav` under the runs directory rig-run.sh fetches into). The
+part where the reference plays is cut out, and only ac2 vs OSM is compared. A missing file is
+noted and skipped.
+
+**Matched settings** (`[settings]`, recorded per case in the report):
+- **OSM**: FFT 2^16, Hann, FIFO 16 ticks.
+- **ac2 spectrum**: `--fft 65536samples --window hann`, with a FIFO of the same span of audio:
+  15 frames at N/8 against 16 ticks at 7680.
+- **ac2 TF**: its fixed MTW ladder (`--blocks 8`). It has no FFT size or window to match.
+- **Delay cases and the speaker recording** are measured as an operator would. ac2's finder
+  result is inserted and the file replayed again. OSM gets its own finder's whole-sample
+  result as `--delay`. The uncompensated results of both are kept as INFO rows.
+
+**How the two are compared:**
+- **One phase reference**: meas ÷ ref with the path's delay in it. Each analyser's delay is put
+  back into its phase.
+- **Common grid**: ac2's 1/48-octave columns.
+  - OSM's bins are power-averaged into each column, magnitude only. The phase is the
+    complex mean, with OSM's phase-slope delay taken out per bin and put back at the column
+    centre.
+  - A column narrower than a bin takes the nearest bin.
+  - The spectra share native bins: both are 65536 points.
+- **Magnitude**: OSM's is a mean of |M|/|R|, not H1, so the two are compared only where
+  **both γ² ≥ 0.95**. In noise the bias is tested, not hidden: OSM's linear mean over 1–20 kHz
+  against E|1 + N/R| (+0.18 / +1.22 / +5.62 dB at 20 / 10 / 0 dB SNR), and ac2's H1 against 0 dB.
+- **Coherence**: OSM reports γ, ac2 γ². OSM's γ is squared before comparing.
+  - OSM's coherence sums a fixed 21 ticks of heavily overlapped frames: about 5.4 independent
+    averages at FFT16 / 96 kHz (Welch's overlap correction).
+  - So OSM's γ² is judged against the expected value of the estimator at that count
+    (Carter, Knapp & Nuttall), not against the truth or ac2. At 0 dB SNR, E[γ̂²] = 0.555,
+    against a truth of 0.5.
+  - ac2's γ² is judged against the truth.
+- **Masks** (counted per case in the report):
+  - OSM bins where the reference is more than 70 dB below its strongest bin. OSM's "DC
+    removal" subtracts the block sum in float32, which sets a rounding floor near −80 dB.
+  - NaN-phase bins. OSM's polar form divides imag by real, so an exactly-zero bin is NaN,
+    and its FIFO keeps the NaN.
+  - DC.
+  - ac2's gap columns (finer than its windows resolve).
+- **Delay**:
+  - OSM's finder is an integer argmax, so it is judged within ±0.5 sample of the truth.
+  - ac2's finder is sub-sample, judged within 0.05 sample.
+  - ac2 against OSM: within 0.6 sample (OSM's rounding plus ac2's stated 0.1).
+  - Both phase slopes (1–20 kHz, γ² ≥ 0.95): within 0.02 sample of the truth.
+- **Spectrum**:
+  - ac2 reads dBFS in the peak convention: a sine of peak a reads 20·log10 a. OSM's module is
+    the RMS, so +3.01 dB is added to OSM.
+  - For noise, OSM averages amplitudes linearly. A Rayleigh mean reads √(π/4) (−1.05 dB)
+    under ac2's power mean.
+  - The white-noise truth is 4σ²·ENBW/N per bin (Hann ENBW 1.5 bins).
+- **Recordings**:
+  - A room seen through a 0.68 s window and through ac2's MTW (short at HF) differs column
+    by column by design, so the **median** |difference| is judged. The max is in the row.
+
+**Deliberately not compared**: the SPL, Leq and RTA band meters. OSM's meters are not IEC
+61672: rectangular Fast/Slow, and Leq sampled once a second in the UI. Display smoothing and
+OSM's LTW mode are also left out.
+
+**Results (4d85f50, harness OSM v1.5.2)**: FAIL 0, WARN 0, PASS 86, INFO 12. Worst values:
+
+| case | ac2 vs truth | OSM vs truth | ac2 vs OSM |
+|---|---|---|---|
+| identity, polarity, delay48 (aligned) | 0.000 dB / 0.00° | 0.000 dB / 0.00° | 0.000 dB |
+| delay10_5 (aligned) | 0.002 dB / 0.014° | 0.001 dB / 0.005° | 0.002 dB / 0.014° |
+| biquad | 0.031 dB / 0.27° | 0.024 dB / 0.22° | 0.030 dB / 0.30° |
+| snr 20 / 10 / 0: γ² (true 0.990 / 0.909 / 0.500) | 0.990 / 0.911 / 0.513 | 0.990 / 0.912 / 0.550 (model 0.990 / 0.911 / 0.555) | |
+| snr 20 / 10 / 0: \|H\| | H1 +0.01 / +0.04 / −0.05 dB | mean ratio +0.17 / +1.22 / +5.63 dB (model +0.18 / +1.22 / +5.62) | |
+| delay finder 48 / 10.5 | 48.000 / 10.500 | 48 / 10 | |
+| spectrum: sine / white noise per bin | −20.000 / +0.019 dB | −20.000 / +0.015 dB (converted) | |
+| xone rig take | | | median 0.000 dB / 0.004°, finder 0.502 vs 0 |
+| genelec rig take (aligned) | | | median 0.12 dB / 0.72° (max 3.6 dB / 20°), finder 348.45 vs 349 |
+
+Context from the uncompensated runs (INFO):
+- A 0.5 ms delay left in costs ac2 up to 0.42 dB and 4.3°, with γ² down to 0.92 at 5–20 kHz,
+  and a phase slope 0.32 sample short. The MTW's short HF windows decorrelate at their ends,
+  and with few averages the estimates scatter. This is not a bias: inserting the finder's
+  delay brings it back to 0.000.
+- Under the same delay, OSM's mean of ratios scatters up to 0.32 dB per bin, while its phase
+  holds.
+
+**Building the harness.** The harness is GPLv3 and lives in its own repository,
+<https://github.com/mkovero/osm-harness>. Clone it and run `QTDIR=<Qt 5.15 prefix> ./build.sh`.
+The script fetches OSM at the pinned tag, applies its small headless patch and builds with
+OSM's release flags. Then set `OSM_HARNESS` to the built `osm-harness`. Its README covers the
+CLI, the output schema, its own validation against analytic truth and the OSM behaviours
+listed above.
+
+**Licence boundary.** ac2 is MIT and OSM is GPLv3. Nothing from OSM's source is in this
+repository: no code and no tables. The stage only runs the external binary and reads the
+JSON it writes. The comparison models here (Welch overlap, the coherence-estimator
+expectation, E|1 + N/R|, the window's noise bandwidth) are textbook statistics written from
+their definitions.
+
+**SKIP**: without `OSM_HARNESS` (or `[tools].harness`), or with a path that is not an
+executable, the stage prints `osm: SKIP: …` and exits 0. Missing ac2 binaries are handled the
+same way. `tests/test_osm_stage.py` runs the models always, and the identity case end to end
+only when `OSM_HARNESS` is set.
 
 ## Known gaps
 

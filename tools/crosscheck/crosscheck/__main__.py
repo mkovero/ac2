@@ -1,4 +1,4 @@
-"""python -m crosscheck {preflight,run,analyse,baseline,compare} — see README.md."""
+"""python -m crosscheck {preflight,run,analyse,baseline,compare,osm} — see README.md."""
 from __future__ import annotations
 
 import argparse
@@ -29,6 +29,15 @@ def main(argv=None) -> int:
     cp.add_argument("--stage", action="append", help="only this stage (repeatable)")
     cp.add_argument("--out", type=Path, help="where compare.md goes (default: <source>/report)")
     cp.add_argument("--tolerances", type=Path, help="tolerances TOML (default: the suite's)")
+
+    om = sub.add_parser("osm", help="the OSM stage: ac2 vs Open Sound Meter's DSP on WAV pairs (offline, no rig; "
+                                    "SKIP without OSM_HARNESS)")
+    om.add_argument("--out", type=Path, help="run directory (default: runs/osm-<UTC time>)")
+    om.add_argument("--config", type=Path, help="stage config (default: the suite's osm.toml)")
+    om.add_argument("--cases", help="comma list of synthetic cases (default: osm.toml's [cases].run)")
+    om.add_argument("--no-recordings", action="store_true", help="synthetic cases only")
+    om.add_argument("--tolerances", type=Path, help="tolerances TOML (default: the suite's)")
+    om.add_argument("--no-plots", action="store_true")
 
     for name, hlp in (("preflight", "read-only checks of the rig, no emission"),
                       ("run", "preflight, then the stages; emitting stages need the flags below")):
@@ -68,6 +77,21 @@ def main(argv=None) -> int:
         s = res["summary"]
         print(f"{path}: " + ", ".join(f"{k} {s.get(k, 0)}" for k in report.STATUS_ORDER))
         return 1 if s.get("FAIL") else 0
+    if a.cmd == "osm":
+        import time
+        import tomllib
+        import warnings
+
+        import numpy as np
+        np.seterr(all="ignore")
+        warnings.simplefilter("ignore", RuntimeWarning)
+        from . import osm
+        out = a.out or Path("runs") / time.strftime("osm-%Y%m%dT%H%M%SZ", time.gmtime())
+        tol = tomllib.loads(a.tolerances.read_text()) if a.tolerances else None
+        cases = [c.strip() for c in a.cases.split(",") if c.strip()] if a.cases else None
+        rc, _, line = osm.run_stage(out, a.config, tol, cases, recordings=not a.no_recordings, plots=not a.no_plots)
+        print(line)
+        return rc
     if a.cmd == "baseline":
         from . import baseline
         try:
