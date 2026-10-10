@@ -1195,7 +1195,9 @@ Working with the tree:
   channels together, group by group.
 - **Each measurement has its own colour family**: its live curve in the family's colour,
   its captures, sweep runs and math results in lighter and darker shades of the same hue, so
-  the curves of one measurement read as a group in every pane. Each import takes a colour
+  the curves of one measurement read as a group in every pane. The shades alternate between
+  the far ends of the theme's range: the first capture is far from the live curve, the
+  second far from the first, so curves that follow each other are easy to tell apart. Each import takes a colour
   of its own, in list order: first the hues no measurement uses, then shades of the
   measurements' hues, grey only when those run out; a trace moved to another measurement
   takes that measurement's colours. Measurement colours follow the measurement, not its

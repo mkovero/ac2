@@ -28,7 +28,7 @@ fn every_family_has_shades_that_stand_out_from_the_plot_and_each_other() {
     for t in all() {
         for base in t.families.iter().chain([&t.neutral]) {
             let f = Family::of(&t, *base);
-            assert!(f.shades.len() >= MAX_SHADES, "{:?} {base:?}: {f:?}", t.name);
+            assert!(f.shades.len() >= MIN_SHADES, "{:?} {base:?}: {f:?}", t.name);
             let all: Vec<Color> = std::iter::once(f.base).chain(f.shades.clone()).collect();
             for (i, a) in all.iter().enumerate() {
                 let r = contrast_ratio(*a, t.plot_background);
@@ -40,6 +40,43 @@ fn every_family_has_shades_that_stand_out_from_the_plot_and_each_other() {
                 for b in &all[i + 1..] {
                     let d = dist(*a, *b);
                     assert!(d >= DISTINCT, "{:?} {a:?} {b:?}: {d:.3}", t.name);
+                }
+            }
+        }
+    }
+}
+
+/// OKLab distance of a measurement's first capture from its live curve, and of its second
+/// capture from its first: about twice what two curves need to read as different, on every theme
+/// and family.
+const FAR: f64 = 0.19;
+/// Any two curves that follow each other in a measurement's sequence, the shades starting
+/// over included (`SHADE_STEP`, less 8-bit rounding).
+const NEIGHBOURS: f64 = 0.095;
+
+#[test]
+fn consecutive_curves_of_a_measurement_are_far_apart() {
+    for t in all() {
+        for base in t.families.iter().chain([&t.neutral]) {
+            let f = Family::of(&t, *base);
+            // The live curve, then traces 1 … 2·MAX_SHADES + 1 (the shades repeat).
+            let seq: Vec<Color> = std::iter::once(f.base)
+                .chain((0..2 * MAX_SHADES + 1).map(|k| f.member(k)))
+                .collect();
+            for (i, w) in seq.windows(2).enumerate() {
+                let d = dist(w[0], w[1]);
+                let want = if i < 2 { FAR } else { NEIGHBOURS };
+                assert!(
+                    d >= want,
+                    "{:?} {base:?}: curve {i} → {}: {d:.3}",
+                    t.name,
+                    i + 1
+                );
+            }
+            // Where the range leaves room for a fourth shade, it keeps its distance.
+            if f.shades.len() > MIN_SHADES {
+                for w in seq[MIN_SHADES..].windows(2) {
+                    assert!(dist(w[0], w[1]) >= CONSECUTIVE_STEP, "{:?}", t.name);
                 }
             }
         }

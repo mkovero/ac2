@@ -4,18 +4,20 @@
 //! hue, so the eye groups a measurement's curves the way the tree does. Its live curve has
 //! the family's base colour; its stored traces (captures, sweep runs) and then its math
 //! channels' results take the family's shades in tree order. A shade keeps the base's
-//! OKLCH hue and chroma and moves only its lightness, in steps big enough to tell apart
-//! side by side, alternating lighter and darker so the first shades are the nearest
-//! distinct ones. A measurement without a live curve (a sweep) gives its first run the
-//! base colour.
+//! OKLCH hue and chroma and moves only its lightness, across the theme's whole shade range:
+//! each next shade is the one farthest from the curve before it, kept clear of the base and
+//! the other shades, so the first capture sits at the far end of the range from the live
+//! curve, the second at the other end, then back and forth: curves that follow each other
+//! in the tree are never one small step apart. A
+//! measurement without a live curve (a sweep) gives its first run the base colour.
 //!
 //! Traces under no measurement (imports, those of a deleted measurement kept) and math
 //! channels listed with them belong to no one family: each takes a colour of its own, so
 //! imported curves overlaid on a pane stay as distinct from each other and from the
 //! measurements as the palette allows. They walk the import palette ([`import_palette`])
 //! in tree order: first the bases of families no measurement holds (whole new hues), then
-//! those free families' shades, then the shades of the measurements' families (farthest
-//! shade first, since a measurement's own traces take the nearest ones first), and the
+//! those free families' shades, then the shades of the measurements' families (the last
+//! shade first, since a measurement's own traces take them from the first), and the
 //! neutral grey family only last; past its end the palette repeats. The colour goes by
 //! position in the imported group, so deleting one import shifts those listed after it one
 //! step along the palette; the colours keep running down the list in the same order, and
@@ -46,12 +48,24 @@ use crate::meas_list::{group_of, group_order, has_live_curve, math_group, trace_
 use crate::primitives::Color;
 use crate::theme::{FAMILIES, Theme, contrast_ratio};
 
-/// OKLab lightness between neighbouring shades: about the smallest step two thin lines of
-/// one hue still read as different curves side by side.
+/// OKLab distance below which two thin lines of one hue no longer read as different curves
+/// side by side: no shade is closer than this to the base or another shade.
 const SHADE_STEP: f64 = 0.10;
-/// Shades a family offers before they repeat. More would crowd the lightness range and
-/// sit too close to each other to tell apart.
-const MAX_SHADES: usize = 3;
+/// OKLab distance between curves that follow each other in a measurement's sequence (live,
+/// then its traces, the shades starting over) a shade past the [`MIN_SHADES`]th must keep:
+/// well past [`SHADE_STEP`], so a capture is told from the one before it at a glance.
+pub const CONSECUTIVE_STEP: f64 = 0.15;
+/// Shades every family offers (each at least [`SHADE_STEP`] from the others): a live curve,
+/// two captures and a math result of one measurement all differ. Where the lightness range
+/// is narrow (a light theme's top is cut by contrast against the plot), the third may sit
+/// nearer its neighbours than [`CONSECUTIVE_STEP`].
+const MIN_SHADES: usize = 3;
+/// Lightness spacing of the candidate shades the family picks from: fine enough that the
+/// picks land near the ends of the range and in the middle of the gaps.
+const CANDIDATE_STEP: f64 = 0.01;
+/// Shades a family offers before they repeat: two on each side of the base, alternating.
+/// More would crowd the lightness range and sit too close to each other to tell apart.
+const MAX_SHADES: usize = 4;
 /// A shade whose chroma, after fitting it into sRGB, falls below this share of the base's
 /// has lost its hue (washed to white or black) and is skipped.
 const MIN_CHROMA_KEPT: f64 = 0.3;
@@ -67,32 +81,39 @@ pub struct Family {
 }
 
 impl Family {
-    /// The family of `base` in `theme`: shades one, two, three steps lighter and darker in
-    /// OKLab lightness (nearest first, lighter before darker), kept only inside the
-    /// theme's shade range, at 3:1 contrast against the plot (WCAG non-text contrast) and
-    /// still showing the hue.
+    /// The family of `base` in `theme`: shades of its hue and chroma anywhere in the
+    /// theme's shade lightness range, at 3:1 contrast against the plot (WCAG non-text
+    /// contrast) and still showing the hue, in the order curves take them: each next shade
+    /// is the candidate farthest (OKLab) from both its neighbours in the sequence (the curve
+    /// before it, and the first shade, which follows it when the shades start over) that
+    /// keeps [`SHADE_STEP`] from the base and every shade already taken; past
+    /// [`MIN_SHADES`], none nearer than [`CONSECUTIVE_STEP`] to a neighbour is taken. The first
+    /// trace after the live curve so takes the far end of the range, the next the other
+    /// end, then back and forth between the two sides; consecutive curves of one
+    /// measurement never sit a small step apart, also where the shades start over.
     pub fn of(theme: &Theme, base: Color) -> Self {
         let (l, c, h) = oklch(base);
         let (lo, hi) = theme.shade_lightness;
-        let mut shades = Vec::new();
-        'steps: for k in 1..=4 {
-            for sign in [1.0, -1.0] {
-                let target = l + sign * f64::from(k) * SHADE_STEP;
-                if !(lo..=hi).contains(&target) {
-                    continue;
-                }
-                let s = quantize(from_oklch(target, c, h));
-                if contrast_ratio(s, theme.plot_background) < 3.0 {
-                    continue;
-                }
-                if c > GREY_CHROMA && oklch(s).1 < MIN_CHROMA_KEPT * c {
-                    continue;
-                }
-                shades.push(s);
-                if shades.len() == MAX_SHADES {
-                    break 'steps;
-                }
-            }
+        let fits = |s: &Color| {
+            contrast_ratio(*s, theme.plot_background) >= 3.0
+                && (c <= GREY_CHROMA || oklch(*s).1 >= MIN_CHROMA_KEPT * c)
+        };
+        let n = ((hi - lo) / CANDIDATE_STEP).round().max(1.0) as usize;
+        let candidates: Vec<Color> = (0..=n)
+            .map(|i| quantize(from_oklch(lo + (hi - lo) * i as f64 / n as f64, c, h)))
+            .filter(fits)
+            .collect();
+        let mut shades = sequence(base, &candidates, SHADE_STEP);
+        if shades.len() < MIN_SHADES {
+            // A narrow range the far ends crowd: whole steps from the base instead, which
+            // always leave room for three, in the same far-from-the-neighbours order.
+            let steps: Vec<Color> = (1..=4)
+                .flat_map(|k| [1.0, -1.0].map(|sign| l + sign * f64::from(k) * SHADE_STEP))
+                .filter(|t| (lo..=hi).contains(t))
+                .map(|t| quantize(from_oklch(t, c, h)))
+                .filter(fits)
+                .collect();
+            shades = sequence(base, &steps, 0.0);
         }
         Self { base, shades }
     }
@@ -105,6 +126,38 @@ impl Family {
             self.shades[k % self.shades.len()]
         }
     }
+}
+
+/// Shades from `candidates` in the order curves take them after `base`: each the candidate
+/// farthest from both its neighbours (the curve before it, and the first shade, which
+/// follows it when the shades start over) among those at least `clear` from every colour
+/// taken. Past [`MIN_SHADES`] a shade must keep [`CONSECUTIVE_STEP`] from its neighbours.
+fn sequence(base: Color, candidates: &[Color], clear: f64) -> Vec<Color> {
+    let mut shades: Vec<Color> = Vec::new();
+    while shades.len() < MAX_SHADES {
+        let prev = shades.last().copied().unwrap_or(base);
+        let first = shades.first().copied().unwrap_or(base);
+        let free = |s: &&Color| {
+            std::iter::once(&base)
+                .chain(&shades)
+                .all(|t| *t != **s && oklab_dist(**s, *t) >= clear)
+        };
+        let best = candidates
+            .iter()
+            .filter(free)
+            .map(|s| (*s, oklab_dist(*s, prev).min(oklab_dist(*s, first))))
+            .fold(None, |acc: Option<(Color, f64)>, (s, d)| match acc {
+                Some((_, bd)) if bd >= d => acc,
+                _ => Some((s, d)),
+            });
+        match best {
+            Some((s, d)) if d >= CONSECUTIVE_STEP || shades.len() < MIN_SHADES => {
+                shades.push(s);
+            }
+            _ => break,
+        }
+    }
+    shades
 }
 
 /// The colour of every curve: live curves and math results by measurement, stored traces
@@ -296,6 +349,12 @@ pub fn curve_colours(theme: &Theme, meas: &[&Measurement], traces: &[&TraceMeta]
         }
     }
     out
+}
+
+/// Euclidean distance in OKLab between two display-encoded colours.
+fn oklab_dist(a: Color, b: Color) -> f64 {
+    let (a, b) = (oklab(a), oklab(b));
+    ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2) + (a.2 - b.2).powi(2)).sqrt()
 }
 
 /// OKLab lightness, chroma and hue (radians) of a display-encoded colour.
