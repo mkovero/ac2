@@ -27,6 +27,10 @@ RANK = {"PASS": 0, "INFO": 0, "INCONCLUSIVE": 1, "WARN": 2, "FAIL": 3}
 # a value is held to its baseline only where both runs judged it: an INFO value is context and
 # an INCONCLUSIVE one is a bound or rests on noise wider than its pass limit
 JUDGED = {"PASS", "WARN", "FAIL"}
+# Kept from a check's detail: the population a statistic was taken over (`n` columns, bins or
+# bands) and, where the value folds a signed mean and a spread into one number, both parts: a
+# max(|mean|, spread) alone hides the sign a residual's direction needs across takes.
+DETAIL_KEPT = ("n", "mean", "spread")
 # A host stage needs no rig (it runs the analysers offline on files), so a run of it is one
 # stage whatever paths its checks carry (the OSM stage's paths are its cases), it plays nothing
 # (no level), and its baseline lives under `baselines/host/`.
@@ -151,6 +155,11 @@ def make_baseline(results: dict, stage: str, run_id: str) -> dict:
              "tol": [_num(t) for t in c["tol"]] if c.get("tol") else None}
         if c.get("f_nominal_hz") is not None:
             e["f_hz"] = _num(c["f_hz"])
+        det = c.get("detail") or {}
+        for k in DETAIL_KEPT:
+            v = det.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+                e[k] = v if k == "n" else _num(v)
         checks[c["key"]] = e
     summary = {}
     for e in checks.values():

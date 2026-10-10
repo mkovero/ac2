@@ -292,7 +292,9 @@ calibration mapping, one table of checks per group, the data tables and the plot
 
 `baselines/<rig>/<stage>-<level>dbfs.json` (`ambient.json` for the silent stage) hold a
 reviewed run's verdict and value for every check, its limits, and where it came from (run,
-date, ac2 build, REW or OSM version, flags, suite commit). Tables, plots and audio stay in the run.
+date, ac2 build, REW or OSM version, flags, suite commit). Where a check has them, an entry
+also keeps the population its statistic was taken over (`n` columns, bins or bands) and, for
+a per-band pair, the signed `mean` and the `spread` its value max(|mean|, spread) folds together. Tables, plots and audio stay in the run.
 The OSM stage needs no rig: its run is one stage (all cases together) with no level, and its
 baseline is `baselines/host/osm.json`.
 
@@ -301,7 +303,17 @@ python -m crosscheck compare runs/<UTC time>                 # against baselines
 python -m crosscheck compare runs/<UTC time> --baseline f.json
 python -m crosscheck baseline runs/<UTC time> [--stage xone]  # write / update from a run
 python -m crosscheck compare runs/osm-<UTC time>             # an OSM run against baselines/host/osm.json
+python -m crosscheck repeats runs/<t1> runs/<t2> ... [--match RE] [--out f.md]  # repeated takes
 ```
+
+`repeats` pools takes of one stage and level (run directories, analysed with this suite, or
+baseline files) and gives each check's signed value across them: count, mean, sample sd,
+range, whether the range and the mean's ±2 standard errors contain zero, and how many takes
+exceeded the pass limit. By default it shows the steady-sine checks, the live TF against its
+direct estimate per band and the delays, and splits each measurement's difference from a sine
+into its processing (measurement − its own capture's 1/48-octave column), the column-to-tone
+difference (that column − the capture read narrow at the sine's frequency) and the capture
+against the sine.
 
 - **Matching**: a check's key is its id with the tone frequency replaced by the one the sine
   plan asked for (`xone.sine_mag.REW offline@50Hz`, whether 50 Hz played at 47.8 or

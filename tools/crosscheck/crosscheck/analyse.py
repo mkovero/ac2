@@ -124,6 +124,21 @@ class Analysis:
         self.checks.append(c)
         return c
 
+    @staticmethod
+    def narrow_at(raw, fc: float, tau: float):
+        """The direct estimate of one recording in a band a few bins wide centred on fc (the
+        sine's own frequency, not a column centre), with its own noise from the band's
+        coherence over its n bins: σφ = √((1 − γ²) / (2 γ² n)), 2σ in dB and in °."""
+        T = len(raw.meas) / raw.fs
+        fn = max(1 / 1000, np.log2(1 + 6 / (T * fc)))
+        hn, cn = dsp.cross_spectrum_bands(raw.meas, raw.ref, raw.fs, np.array([fc]), fn, tau)
+        hn, cn = hn[0], cn[0]
+        if not (np.isfinite(hn) and np.isfinite(cn) and cn > 0):
+            return None
+        nb = max(1.0, fc * (2 ** (fn / 2) - 2 ** (-fn / 2)) * T)
+        sph = np.sqrt(max(1 - cn, 0.0) / (2 * cn * nb))
+        return hn, (2 * 20 / np.log(10) * sph, 2 * np.degrees(sph))
+
     def table(self, name: str, columns: list[str], rows: list[list], note: str = ""):
         self.tables[name] = {"columns": columns, "rows": rows, "note": note}
 
@@ -413,7 +428,7 @@ class Analysis:
                          status=st_p,
                          meaning=f"phase difference after removing a pure delay difference of {tau*1e6:+.2f} µs "
                                  f"(fitted 1–20 kHz); mean {pmean:+.3f}°, spread ±{pspread:.3f}°",
-                         detail={"mean": pmean, "spread": pspread, "delay_removed_s": tau})
+                         detail={"mean": pmean, "spread": pspread, "n": int(m.sum()), "delay_removed_s": tau})
                 rows.append([f"{a} − {b}", f"{lo}–{hi}", f"{mean:+.3f} ± {spread:.3f}", f"{pmean:+.2f} ± {pspread:.2f}",
                              f"{tau*1e6:+.2f}", int(m.sum())])
         self.table(f"{p.name}: magnitude and phase per band", ["pair", "band Hz", "Δ dB mean ± spread",
@@ -437,37 +452,47 @@ class Analysis:
                 # recording read both ways measures it, and it counts as the comparison's
                 # uncertainty; the narrow reading is also compared with the sine itself.
                 u_db = u_deg = 0.0
-                narrow = None
-                if p.rec is not None:
-                    tau_d = self.direct_delay.get("direct (REW recording)", 0.0)
-                    T = len(p.rec.meas) / p.rec.fs
-                    fn = max(1 / 1000, np.log2(1 + 6 / (T * fc)))
-                    hn, cn = dsp.cross_spectrum_bands(p.rec.meas, p.rec.ref, p.rec.fs, np.array([fc]), fn, tau_d)
-                    hn, cn = hn[0], cn[0]
-                    # the column estimate read the way every source is read: interpolated
-                    # between the 1/48-octave columns around fc
-                    hc = self.at(f, S["direct (REW recording)"], np.array([fc]))[0]
-                    if np.isfinite(hn) and np.isfinite(hc) and np.isfinite(cn) and cn > 0:
-                        narrow = hn
-                        # the narrow band's own noise from its coherence over its n bins:
-                        # σφ = √((1 − γ²) / (2 γ² n)), 2σ in ° and in dB
-                        nb = max(1.0, fc * (2 ** (fn / 2) - 2 ** (-fn / 2)) * T)
-                        sph = np.sqrt(max(1 - cn, 0.0) / (2 * cn * nb))
-                        narrow_u = (2 * 20 / np.log(10) * sph, 2 * np.degrees(sph))
-                        if not elec:
-                            # where the narrow band is noisy the structure is not known any better
-                            u_db = max(abs(float(dsp.db(hc) - dsp.db(hn))), narrow_u[0])
-                            u_deg = max(abs(float(dsp.wrap_deg(np.rad2deg(np.angle(hc / hn))))), narrow_u[1])
+                # Each direct estimate read narrow at the sine as well, on every raw capture there
+                # is: its column minus its narrow reading is the column-to-tone difference of
+                # that capture alone, so what a measurement differs from the sine by beyond it is
+                # left as the remaining error.
+                caps = {"direct (REW recording)": p.rec, "direct (TF capture)": p.tf_raw}
+                pr = p.sweeps.get(p.primary)
+                if pr is not None:
+                    caps[f"direct (ac2 capture {p.primary})"] = pr.raw
+                narrows = {}
+                for cname, raw in caps.items():
+                    if raw is None or cname not in S:
+                        continue
+                    nr = self.narrow_at(raw, fc, self.direct_delay.get(cname, 0.0))
+                    if nr is None:
+                        continue
+                    narrows[cname] = nr
+                    if cname == "direct (REW recording)" and not elec:
+                        # the column estimate read the way every source is read: interpolated
+                        # between the 1/48-octave columns around fc; where the narrow band is
+                        # noisy the structure is not known any better
+                        hc = self.at(f, S[cname], np.array([fc]))[0]
+                        if np.isfinite(hc):
+                            hn, nu = nr
+                            u_db = max(abs(float(dsp.db(hc) - dsp.db(hn))), nu[0])
+                            u_deg = max(abs(float(dsp.wrap_deg(np.rad2deg(np.angle(hc / hn))))), nu[1])
                 self.fine_u.setdefault(p.name, {})[fc] = u_db
                 names = [primary, "REW live", "REW offline", "direct (REW recording)", "ac2 TF"]
-                if narrow is not None:
-                    names.append("direct (REW recording), narrow at the sine")
+                names += [c for c in ("direct (TF capture)", f"direct (ac2 capture {p.primary})") if c in narrows]
+                names += [f"{c}, narrow at the sine" for c in narrows]
                 for name in names:
-                    narrow_row = name.endswith("narrow at the sine")
+                    narrow_row = name.endswith(", narrow at the sine")
                     if name not in S and not narrow_row:
                         continue
-                    h = narrow if narrow_row else self.at(f, S[name], np.array([fc]))[0]
-                    ud, up = narrow_u if narrow_row else (u_db, u_deg)
+                    if narrow_row:
+                        h, (ud, up) = narrows[name[:-len(", narrow at the sine")]]
+                    else:
+                        h, ud, up = self.at(f, S[name], np.array([fc]))[0], u_db, u_deg
+                    # the readings the REW recording's narrow one does not carry: context for the
+                    # column-to-tone split, not judged
+                    info_only = name in ("direct (TF capture)", f"direct (ac2 capture {p.primary})") or (
+                        narrow_row and not name.startswith("direct (REW recording)"))
                     if not np.isfinite(h):
                         continue
                     if name == "ac2 TF" and "ac2 TF" in self.coh:
@@ -488,7 +513,7 @@ class Analysis:
                                     "back into the phase it refers to that arrival)")
                         self.add(id=f"{p.name}.sine_phase.{name}.{fc:g}", group="phase vs sine", path=p.name,
                                  title=f"{name} phase at {fc:g} Hz vs steady sine", value=dpd, unit="°", tol=tp,
-                                 status=judge_u(dpd, tp, up),
+                                 status="INFO" if info_only else judge_u(dpd, tp, up),
                                  meaning=f"sine {tone['ratio_deg']:+.3f}°, {name} {np.rad2deg(np.angle(h)):+.3f}°{note}"
                                          + ((f"; the narrow band's own noise (coherence) ±{up:.1f}°" if narrow_row else
                                              f"; the room's fine structure: a 1/48-oct column and the sine's frequency "
@@ -498,7 +523,7 @@ class Analysis:
                         tm = _tol(self.tol["band"]["mag_lf" if elec else "mag_acoustic"])
                         self.add(id=f"{p.name}.sine_mag.{name}.{fc:g}", group="magnitude vs sine", path=p.name,
                                  title=f"{name} magnitude at {fc:g} Hz vs steady sine", value=dmd, unit="dB", tol=tm,
-                                 status=judge_u(dmd, tm, ud) if not name.startswith("REW live") else "INFO",
+                                 status=judge_u(dmd, tm, ud) if not (name.startswith("REW live") or info_only) else "INFO",
                                  meaning=f"sine {tone['ratio_db']:+.3f} dB (meas ÷ ref), {name} {dsp.db(h):+.3f} dB"
                                          + ((f"; the narrow band's own noise (coherence) ±{ud:.2f} dB" if narrow_row else
                                              f"; the room's fine structure: a 1/48-oct column and the sine's frequency "
@@ -566,7 +591,7 @@ class Analysis:
                          meaning="ac2 states meas ÷ ref; REW states each channel re the stimulus; their difference "
                                  "must be ac2's number. Median over the 1/48-octave columns 500 Hz–2 kHz, REW's "
                                  f"bins power-averaged into each (one bin at 1 kHz read {a_db - (g['meas'] - g['ref']):+.3f} dB)",
-                         detail={"single_bin_1k": a_db - (g["meas"] - g["ref"]), "columns": int(sel.sum())})
+                         detail={"single_bin_1k": a_db - (g["meas"] - g["ref"]), "n": int(sel.sum())})
                 if ref_lvl is not None:
                     d2 = ref_lvl - g["ref"]
                     tc = _tol(self.tol["level"]["convention_db"])

@@ -183,3 +183,19 @@ def test_every_baseline_unit_has_a_compare_step():
     steps, _ = B.compare_settings(B._tolerances(None))
     units = {e["unit"] for p in B.BASELINES.glob("*/*.json") for e in json.loads(p.read_text())["checks"].values()}
     assert units and units <= set(steps), units - set(steps)
+
+
+def test_baseline_keeps_population_and_signed_parts():
+    c = chk("xone.mag.a|b.100-1000", "magnitude", 0.12)
+    c["detail"] = {"mean": -0.1234567891, "spread": 0.12, "n": 37, "delay_removed_s": 1e-6}
+    nan = chk("xone.mag.a|b.20-100", "magnitude", 0.1)
+    nan["detail"] = {"mean": float("nan"), "n": 4}
+    b = B.make_baseline(B.annotate(results([c, nan, chk("xone.etc", "ETC", 1.0)]), {}), "xone", "r")
+    e = b["checks"]["xone.mag.a|b.100-1000"]
+    assert e["n"] == 37 and e["mean"] == -0.123457 and e["spread"] == 0.12
+    assert "delay_removed_s" not in e
+    assert b["checks"]["xone.mag.a|b.20-100"] == {"status": "PASS", "value": 0.1, "unit": "dB",
+                                                   "tol": [0.05, 0.2], "n": 4}
+    assert set(b["checks"]["xone.etc"]) == {"status", "value", "unit", "tol"}
+    # one line per check survives the extra fields
+    assert json.loads(B.dumps(b)) == b

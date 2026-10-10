@@ -1,4 +1,4 @@
-"""python -m crosscheck {preflight,run,analyse,baseline,compare,osm,comparison} — see README.md."""
+"""python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,comparison} — see README.md."""
 from __future__ import annotations
 
 import argparse
@@ -29,6 +29,12 @@ def main(argv=None) -> int:
     cp.add_argument("--stage", action="append", help="only this stage (repeatable)")
     cp.add_argument("--out", type=Path, help="where compare.md goes (default: <source>/report)")
     cp.add_argument("--tolerances", type=Path, help="tolerances TOML (default: the suite's)")
+
+    rp = sub.add_parser("repeats", help="repeated takes of a stage and level: each check's signed value across "
+                                        "takes (n, mean, sd, range) and the column-to-tone split at the sines")
+    rp.add_argument("sources", type=Path, nargs="+", help="run directories with report/results.json, or baseline files")
+    rp.add_argument("--match", help="only checks whose key matches this regular expression (default: the focus sets)")
+    rp.add_argument("--out", type=Path, help="write the markdown here (default: stdout)")
 
     om = sub.add_parser("osm", help="the OSM stage: ac2 vs Open Sound Meter's DSP on WAV pairs (offline, no rig; "
                                     "SKIP without OSM_HARNESS)")
@@ -97,6 +103,19 @@ def main(argv=None) -> int:
         rc, _, line = osm.run_stage(out, a.config, tol, cases, recordings=not a.no_recordings, plots=not a.no_plots)
         print(line)
         return rc
+    if a.cmd == "repeats":
+        from . import repeats
+        try:
+            md = repeats.report(a.sources, a.match)
+        except FileNotFoundError as e:
+            print(e, file=sys.stderr)
+            return 2
+        if a.out:
+            a.out.write_text(md)
+            print(a.out)
+        else:
+            sys.stdout.write(md)
+        return 0
     if a.cmd == "baseline":
         from . import baseline
         try:
