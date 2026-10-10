@@ -427,6 +427,11 @@ measurement tree lists it, and nothing else:
 - a sweep measurement can be chosen too: the pane then draws its shown runs (no live curve;
   **S** there says to run it on the Sweep / distortion pane).
 
+A stopped measurement or math channel draws no live curve here (its last frame is no longer
+the response; a spectrum or RTA keeps its curve, tagged `stopped`): its stored traces stay,
+the pane's title starts with `Main L stopped`, its list row says `stopped`, and **S** brings
+the live curve back.
+
 Other measurements' curves and traces wait until theirs is the pane's measurement, and
 **Imported** traces show only when compared or moved: to file an import with a measurement,
 select it and **Move to measurement…** (**Shift+F2**). While the group has no stored trace
@@ -457,7 +462,9 @@ To pick another measurement:
 Which measurement the keys act on:
 
 - A click inside a pane selects the measurement it shows, exactly as clicking it in the
-  measurement list does. Selecting one in the list (click, **Enter**) puts it in the
+  measurement list does — unless what is selected is already that pane's (its measurement,
+  a math channel or stored trace of its group, a trace it draws): then the click only
+  focuses the pane and the selection stays. Selecting one in the list (click, **Enter**) puts it in the
   focused pane, which turns into its kind, even when another pane of that kind is on
   screen: the pane you look at shows what you pick, and every other pane keeps what it
   shows.

@@ -215,7 +215,20 @@ impl AppState {
                 matches!(pane, PaneKind::Transfer | PaneKind::Spectrum) && self.meas_hidden(m)
             })
             .map(|m| format!("{} hidden", m.config.name));
-        if let Some(h) = hidden {
+        // A stopped transfer measurement draws no live curve: said as the hidden one is, so
+        // a plot holding only its captures (or nothing) does not read as a fault. The IR
+        // view says it in its own plot.
+        let stopped = self
+            .pane_meas(id)
+            .filter(|m| {
+                pane == PaneKind::Transfer
+                    && self.pane_modes(id).transfer != TransferView::Ir
+                    && m.config.kind.publishes_tf()
+                    && !m.running
+                    && !self.meas_hidden(m)
+            })
+            .map(|m| format!("{} stopped", m.config.name));
+        if let Some(h) = hidden.or(stopped) {
             v = v.iter().map(|s| format!("{h} · {s}")).collect();
             v.push(h);
         }
@@ -488,10 +501,12 @@ impl AppState {
     }
 
     /// Whether a transfer pane showing `shown` draws measurement `m`'s live curve: it
-    /// publishes one, is not hidden, and is the pane's measurement or a math channel of the
-    /// pane's group.
+    /// publishes one, runs, is not hidden, and is the pane's measurement or a math channel
+    /// of the pane's group. A stopped measurement's last frame describes a system no longer
+    /// measured: drawn as if live it would be read as the current response, so only its
+    /// stored traces stay.
     pub fn live_on_transfer_pane(&self, m: &Measurement, shown: Option<&Measurement>) -> bool {
-        if !m.config.kind.publishes_tf() || self.meas_hidden(m) {
+        if !m.config.kind.publishes_tf() || !m.running || self.meas_hidden(m) {
             return false;
         }
         if shown.map(|p| p.id) == Some(m.id) {
@@ -508,10 +523,11 @@ impl AppState {
         self.compared_meas.contains(&m.config.name)
     }
 
-    /// Whether the transfer pane draws `m`'s live curve for compare only: compared, not
-    /// hidden, and not of the pane's group (drawn there anyway, once, unmarked).
+    /// Whether the transfer pane draws `m`'s live curve for compare only: compared, running,
+    /// not hidden, and not of the pane's group (drawn there anyway, once, unmarked).
     pub fn live_compared_on_transfer(&self, m: &Measurement, shown: Option<&Measurement>) -> bool {
         m.config.kind.publishes_tf()
+            && m.running
             && !self.meas_hidden(m)
             && self.meas_compared(m)
             && !self.live_on_transfer_pane(m, shown)

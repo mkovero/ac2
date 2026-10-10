@@ -912,6 +912,39 @@ impl AppState {
         }
     }
 
+    /// Whether the selection (a stored trace, else a measurement) is of what pane `p`
+    /// shows: of its measurement's group, or a stored curve the pane draws. A click there
+    /// keeps it, so the trace the keys act on does not jump to the live curve under it.
+    pub(super) fn selection_on_pane(&self, p: PaneId) -> bool {
+        use ac2_proto::model::TraceOwner;
+        let Some(shown) = self.pane_meas(p) else {
+            return false;
+        };
+        let ms = self.measurements();
+        let group = TraceOwner::Meas {
+            meas: self.group_of_shown(Some(shown)).unwrap_or(shown.id),
+        };
+        let kind = self.layout.kind(p);
+        if let Some(t) = self.selected_trace_meta() {
+            if !drawn_in(t, kind) {
+                return false;
+            }
+            let drawn = match kind {
+                PaneKind::Transfer => {
+                    self.on_transfer_pane(t, Some(shown))
+                        || self.trace_compared_on_transfer(t, Some(shown))
+                }
+                // The spectrum pane draws every shown stored spectrum and band set.
+                PaneKind::Spectrum => t.edit.visible,
+                PaneKind::Distortion | PaneKind::Spl => false,
+            };
+            return drawn || ac2_scene::meas_list::group_of(t, &ms) == group;
+        }
+        self.selected
+            .and_then(|id| self.meas(id))
+            .is_some_and(|m| m.id == shown.id || ac2_scene::meas_list::meas_group(m, &ms) == group)
+    }
+
     /// Brings up a pane of kind `p` (a command about that kind: the sweep's views, the SPL
     /// modes): the one of that kind on screen worked in last, else the focused pane turns
     /// into one.

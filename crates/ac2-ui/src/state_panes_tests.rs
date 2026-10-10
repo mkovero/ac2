@@ -757,3 +757,47 @@ fn a_turned_and_resized_layout_comes_back_from_ui_toml() {
     };
     assert_eq!((*axis, (ratio * 10.0).round()), (Axis::Column, 6.0));
 }
+
+/// A click on the pane that draws the selected capture moves the focus there and keeps the
+/// selection (the keys go on acting on the capture); a click on a pane of another
+/// measurement selects that one, as before.
+#[test]
+fn a_pane_click_keeps_a_selection_the_pane_shows() {
+    let mut t = empty();
+    let mut s = four();
+    s.traces = vec![captured(10, Some(1), 2)];
+    t.conn(mirror(s));
+    super::tf_group::tf_frames(&mut t, &[1, 3]);
+    let a = t.st.layout.focus;
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.key("N");
+    let b = t.st.layout.focus;
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
+    t.key("Alt+1");
+    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    // The keyboard takes the focus to the other pane; the capture stays selected.
+    t.key("Alt+2");
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    // A click on the capture's pane: focus there, the selection as it was.
+    t.st.update(Msg::FocusPane(a), &t.keys);
+    assert_eq!(t.st.layout.focus, a);
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
+    // The selected measurement on its own pane stays selected too.
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.update(Msg::FocusPane(a), &t.keys);
+    assert_eq!(
+        (t.st.selected, t.st.selected_trace),
+        (Some(MeasId(1)), None)
+    );
+    // A click on the pane of another measurement selects that measurement.
+    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.update(Msg::FocusPane(b), &t.keys);
+    assert_eq!(t.st.layout.focus, b);
+    assert_eq!(
+        (t.st.selected, t.st.selected_trace),
+        (Some(MeasId(3)), None)
+    );
+    assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
+}

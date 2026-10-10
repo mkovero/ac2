@@ -1312,10 +1312,11 @@ impl AppState {
                 }
             }
             Msg::FocusPane(p) => {
-                self.focus_pane(p);
-                // A click in a pane is about what it shows live.
-                if self.pane_meas(p).is_some() {
-                    self.selected_trace = None;
+                self.layout.set_focus(p);
+                // A click on a pane of another measurement is about what it shows; one on
+                // the pane of the selection only moves the focus.
+                if !self.selection_on_pane(p) {
+                    self.select_shown(p);
                 }
             }
             Msg::PaneMenu(p) => {
