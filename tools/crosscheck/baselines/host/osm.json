@@ -3,7 +3,7 @@
  "rig": "none (offline)",
  "stage": "osm",
  "level_dbfs": null,
- "provenance": {"run": "osm-20261010T143503Z", "started": "2026-10-10T14:35:03Z", "ac2_build": "ac2d 0.0.0 (build 0.0.0+bdc1bec656f7)", "rew_version": null, "osm_version": "v1.5.2", "flags": {"harness": "osm-harness", "cases": ["identity", "biquad", "delay48", "delay10_5", "polarity", "snr20", "snr10", "snr0", "sine1k"]}, "suite_commit": "f3151c50aa48"},
+ "provenance": {"run": "osm-20261010T172327Z", "started": "2026-10-10T17:23:27Z", "ac2_build": "ac2d 0.0.0 (build 0.0.0+d08cc7052949)", "rew_version": null, "osm_version": "v1.5.2", "flags": {"harness": "osm-harness", "cases": ["identity", "biquad", "delay48", "delay10_5", "polarity", "snr20", "snr10", "snr0", "sine1k"]}, "suite_commit": "d08cc7052949"},
  "summary": {"INFO": 77, "PASS": 86},
  "checks": {
   "osm.biquad.ac2_delay_finder_vs_osm_s": {"status": "PASS", "value": -0.121634, "unit": "samples", "tol": [0.6, 1.0]},
