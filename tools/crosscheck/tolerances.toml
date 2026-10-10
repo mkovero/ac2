@@ -115,3 +115,6 @@ rel = 0.02                  # group delay vs truth, relative: 2 %
 "µs" = 0.2
 samples = 0.01              # delay finders and phase slopes: a tenth of ac2's stated 0.1-sample finder
 "" = 0.01                   # coherence share, D50
+bins = 0                    # mask and population counts: any change is a change
+columns = 0
+Hz = 0.5                    # where a maximum sits: under one 1/48-octave column at 50 Hz (0.72 Hz)
