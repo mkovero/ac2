@@ -10,8 +10,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   client. macOS: a tester runs the disk image (`testing/macos/`); Windows: MSI in a VM,
   tester guide and dev.10 MSI in `testing/windows/`.
 - CI on push is Linux only; macOS/Windows run before a release or on dispatch
-  (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 8b87f49 on pupu,
-  ketunkolo and the Pi (`docs/rigs/pupu.md`, *Deploy of 8b87f49*).
+  (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 684d610 on pupu,
+  ketunkolo and the Pi (`docs/rigs/pupu.md`, *Deploy of 684d610*).
 - Newest feature: band Leq per 1/3-octave band (STM 545/2015), `docs/design/band-leq.md`;
   its open items are in `docs/design/backlog.md`.
 - Panes are a tiling tree (one pane at first start, N split, Shift+N turns a split, Alt+←/→ or

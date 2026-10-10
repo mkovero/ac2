@@ -356,6 +356,18 @@ recreating measurements 1–14 in id order, `trace import` of `autosave.vN/trace
   checkout once and failed on types the checkout no longer had; touching the sources
   (`find crates -name '*.rs' -exec touch {} +`) fixed it.
 
+## Deploy of 684d610 (2026-10-10, all three hosts)
+
+Protocol 35, session format 20, text export v5: per-measurement Resolution (1/12 … 1/96
+octave) for transfer and sweep measurements and the resolution marker (Settings › Display ›
+Resolution marker); also carries 0b923ca (Shift+N turns a split, Alt+Left/Right and drag
+resize). The new daemon set `autosave.v19` aside. Before the swap the 26 measurements and 73
+traces were dumped with the old CLI (`meas list --json`, `trace list --json`, every trace
+exported) to `/work/ac2-scratch/deploy-684d610/`; `gen.py` there writes `restore.sh`, which
+recreated the 26 measurements (ids 32–36 renumbered 22–26; the SPL presets and the Genelec
+TF's 3.630 ms delay set again) and imported the 73 traces. Traces that belonged to a
+measurement came back under Imported (restore fidelity is low priority for the operator).
+
 ## Deploy of 8b87f49 (2026-10-09, all three hosts)
 
 No protocol or session format change (protocol 34, session format 19): a plain swap, the
