@@ -8,6 +8,10 @@
 //! each, so two measurements laid out side by side keep the arrangement whichever of them
 //! is selected.
 //!
+//! A selection this app made by itself — the first one, or a stand-in for one the daemon
+//! lost (a restart, a session reopened or salvaged) — never brings a measurement's panes:
+//! the kiosk showing a meter keeps showing it until the meter is back.
+//!
 //! Only the arrangement and what each pane draws travel: the measurement each pane was
 //! picked for, the focus, W and F stay this app's. A layout received is put on screen, never
 //! sent back: only what the operator does here is sent.
@@ -161,7 +165,9 @@ impl AppState {
             }
             return;
         }
-        if theirs == before.theirs {
+        // A stand-in selected while the operator's choice is gone (or before any): its
+        // panes are the operator's to bring, by its row.
+        if theirs == before.theirs || self.selection_is_standin() {
             return;
         }
         // This app's own, come back: on screen already, or older than the screen.

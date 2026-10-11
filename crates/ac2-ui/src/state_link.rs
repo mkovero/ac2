@@ -29,6 +29,10 @@ impl AppState {
             }
             ConnEvent::Failed { target, error, .. } => {
                 self.conn = ConnState::Failed { target, error };
+                // Whatever daemon answers next, its ids are its own: what is shown waits
+                // for its name.
+                let names = self.meas_names();
+                self.park_gone_meas(&names, |_| true);
                 self.forget_layout_calls();
                 self.pending_select = None;
                 self.pending_stack = None;
@@ -38,7 +42,18 @@ impl AppState {
                 self.stimulus.arm_after_stop = false;
             }
             ConnEvent::Mirror(v) => {
+                let names = self.meas_names();
+                let incarnation = self.mirror.as_ref().and_then(|m| m.incarnation);
+                // Another daemon (restarted, swapped in) numbers its measurements afresh: an
+                // id it has may be another measurement than the one shown.
+                let reborn = incarnation.is_some() && v.incarnation != incarnation;
                 self.mirror = Some(v);
+                let seen: Vec<String> = self
+                    .measurements()
+                    .iter()
+                    .map(|m| m.config.name.clone())
+                    .collect();
+                self.meas_seen.extend(seen);
                 // The daemon disarmed the generator when the audio stopped; an arm queued
                 // behind a stop must not follow it into a session that is reopening.
                 if self.stimulus.arm_after_stop
@@ -61,18 +76,31 @@ impl AppState {
                     self.stack_created(p);
                 }
                 let waiting = self.pending_select.is_some() && self.pending_select == self.selected;
-                if !waiting && self.selected.is_none_or(|s| !ids.contains(&s)) {
+                // A measurement this app made, selected before the daemon lists it, stays.
+                let keep = if waiting { self.selected } else { None };
+                self.park_gone_meas(&names, |id| {
+                    Some(id) != keep && (reborn || !ids.contains(&id))
+                });
+                if let Some(id) = self.lost_selection.as_ref().and_then(|n| {
+                    self.measurements()
+                        .iter()
+                        .find(|m| m.config.name == *n)
+                        .map(|m| m.id)
+                }) {
+                    self.selected = Some(id);
+                    self.standin = None;
+                    self.lost_selection = None;
+                }
+                if !waiting && self.selected.is_none() {
                     self.selected = self
                         .measurements()
                         .iter()
                         .find(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
                         .or(self.measurements().first())
                         .map(|m| m.id);
+                    self.standin = self.selected;
                 }
                 self.edits.retain(|k, _| ids.contains(k));
-                for v in self.layout.views.values_mut() {
-                    v.meas = v.meas.filter(|m| ids.contains(m));
-                }
                 let metas: BTreeMap<TraceId, TraceMeta> = self
                     .daemon()
                     .map(|st| st.traces.iter().map(|t| (t.id, t.clone())).collect())
@@ -464,5 +492,54 @@ impl AppState {
                 e.1 = at;
             }
         }
+    }
+}
+
+impl AppState {
+    /// The name of each measurement the daemon's state holds now.
+    fn meas_names(&self) -> BTreeMap<MeasId, String> {
+        self.measurements()
+            .iter()
+            .map(|m| (m.id, m.config.name.clone()))
+            .collect()
+    }
+
+    /// Measurements `gone` from the daemon (`names`: what they were called): each pane that
+    /// showed one waits for one of that name to come back, and so does the selection (a
+    /// stand-in may take its place meanwhile). A session reopened, salvaged or a daemon
+    /// restarted takes them away for a moment and makes them again under the same names.
+    fn park_gone_meas(&mut self, names: &BTreeMap<MeasId, String>, gone: impl Fn(MeasId) -> bool) {
+        for (pane, v) in &mut self.layout.views {
+            if let Some(id) = v.meas.filter(|id| gone(*id)) {
+                v.meas = None;
+                if let Some(n) = names.get(&id) {
+                    self.pending_pane_meas.insert(*pane, n.clone());
+                }
+            }
+        }
+        if let Some(id) = self.selected.filter(|id| gone(*id)) {
+            // A stand-in going leaves the operator's choice waiting.
+            if self.standin != Some(id)
+                && let Some(n) = names.get(&id)
+            {
+                self.lost_selection = Some(n.clone());
+            }
+            self.selected = None;
+            self.standin = None;
+        }
+    }
+
+    /// The selection moved off the stand-in (the operator chose, this app made something),
+    /// or the operator chose the stand-in's row: the selection is theirs again.
+    pub(super) fn follow_standin(&mut self) {
+        if self.own_panes_due || self.selected.is_some_and(|s| Some(s) != self.standin) {
+            self.standin = None;
+            self.lost_selection = None;
+        }
+    }
+
+    /// The selection is one this app made by itself.
+    pub(super) fn selection_is_standin(&self) -> bool {
+        self.selected.is_some() && self.selected == self.standin
     }
 }

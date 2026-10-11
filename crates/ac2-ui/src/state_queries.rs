@@ -647,8 +647,8 @@ impl AppState {
     // ----- reducer -----------------------------------------------------------------------
 
     /// Once the daemon's state is known, each pane shows the measurement it showed when the
-    /// app last ran, if one of that name (and kind) still exists; else the pane's usual
-    /// choice, quietly. With no layout remembered, the one pane shows the kind of the first
+    /// app last ran (or before the daemon lost it), once one of that name (and kind) exists:
+    /// meanwhile the pane's usual choice, quietly; a name the daemon never listed is dropped. With no layout remembered, the one pane shows the kind of the first
     /// measurement (a transfer pane while there is none).
     pub(super) fn restore_pane_meas(&mut self) {
         // A layout the operator changed is theirs from then on.
@@ -675,19 +675,33 @@ impl AppState {
         }
         let pending = std::mem::take(&mut self.pending_pane_meas);
         for (pane, name) in pending {
+            // Given another measurement meanwhile: the pane's choice now.
+            if self.layout.view(pane).is_none_or(|v| v.meas.is_some()) {
+                continue;
+            }
             let kind = self.layout.kind(pane);
             let id = self
                 .measurements()
                 .iter()
                 .find(|m| m.config.name == name && kind.shows(&m.config.kind))
                 .map(|m| m.id);
-            if let Some(id) = id {
-                if let Some(v) = self.layout.view_mut(pane) {
-                    v.meas = Some(id);
+            let Some(id) = id else {
+                // Gone for now (a session reopening, salvaged, a daemon restarting makes it
+                // again), or none made yet: it comes back. One the daemon never listed is
+                // not coming: the pane's usual choice is it, and nothing is saved for it.
+                if self.meas_seen.contains(&name) || self.measurements().is_empty() {
+                    self.pending_pane_meas.insert(pane, name);
                 }
-                if self.layout.focus == pane {
-                    self.select_on(pane, id);
-                }
+                continue;
+            };
+            if let Some(v) = self.layout.view_mut(pane) {
+                v.meas = Some(id);
+            }
+            // The focused pane's measurement is the selection, unless the operator chose
+            // another since.
+            if self.layout.focus == pane && (self.selected.is_none() || self.selection_is_standin())
+            {
+                self.select_on(pane, id);
             }
         }
     }

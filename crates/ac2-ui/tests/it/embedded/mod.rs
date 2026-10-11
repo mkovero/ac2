@@ -10,6 +10,7 @@
 
 mod calibration;
 mod harness;
+mod keep;
 mod math;
 mod panes;
 mod session;

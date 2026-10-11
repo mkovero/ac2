@@ -1204,6 +1204,15 @@ pub struct AppState {
     layout_due: Option<(Vec<MeasId>, f64)>,
     /// A measurement's row was chosen: its own panes go on screen after the message.
     own_panes_due: bool,
+    /// The measurement this app selected by itself, the one it had gone (or none chosen
+    /// yet): a stand-in while it stays selected, whose own panes never come on screen.
+    standin: Option<MeasId>,
+    /// The selected measurement that went, by name, while a stand-in (or nothing) is
+    /// selected: one of that name coming back is selected again.
+    lost_selection: Option<String>,
+    /// Names of the measurements the daemon has listed since this app started: a pane
+    /// remembered on one of them waits for it to come back.
+    meas_seen: BTreeSet<String>,
     /// Started spectrum / RTA measurements whose first frame fits the spectrum pane's level
     /// axis (as Shift+Home), with the frame shown when they started (a stopped run's last).
     spectrum_fit: BTreeMap<MeasId, Option<Arc<ac2_proto::Frame>>>,
@@ -1302,6 +1311,9 @@ impl AppState {
             layout_queued: BTreeMap::new(),
             layout_due: None,
             own_panes_due: false,
+            standin: None,
+            lost_selection: None,
+            meas_seen: BTreeSet::new(),
         }
     }
 
@@ -1326,6 +1338,7 @@ impl AppState {
         self.sync_session_watch(&mut out);
         if !tick {
             self.restore_pane_meas();
+            self.follow_standin();
             self.sync_meas_layout(panes_before, conn, drag, &mut out);
             self.prune_compared();
             self.remember_layout();

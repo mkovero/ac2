@@ -612,7 +612,9 @@ The app remembers in `ui.toml` (written when the layout changes and on exit):
 
 The next start comes back to them (full screen too) without arming or playing anything. A
 measurement that is gone (deleted, another daemon) quietly leaves its pane on its usual
-choice, a layout saved by an older version is dropped (the app starts with one pane), and a window larger than the screen it opens on is made to fit. On Wayland the
+choice; one the daemon loses while the app runs (a daemon restarted, a session reopened or
+salvaged) comes back to its pane and the selection as soon as one of that name is there
+again, and meanwhile no other measurement's own panes come by themselves. A layout saved by an older version is dropped (the app starts with one pane), and a window larger than the screen it opens on is made to fit. On Wayland the
 system places the window.
 
 #### Layouts follow the measurement
