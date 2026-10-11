@@ -1,6 +1,10 @@
 # ASIO backend (Windows)
 
-**Status: design only, no code.** On Windows, ac2 runs on cpal WASAPI in shared mode: two
+**Status: implemented** in `crates/ac2-audio/src/asio_host/` behind the `asio` feature
+(ac2-audio, ac2d, ac2-cli; off by default), over the `azo` fork (§1). It passes under Wine
+on wineasio (§4a); FlexASIO on Windows CI (§4b) and real interfaces (§4d) are pending.
+§3 is the design; §3a lists where the code settles or departs from it. Before it, on
+Windows, ac2 ran on cpal WASAPI in shared mode: two
 `IAudioClient`s on two threads, a same-clock relation that the API cannot prove, and render
 xruns that are never reported (`spike-audio-duplex.md` §1). ASIO is the Windows path where
 one driver callback (`bufferSwitch`) serves capture and playback on one clock, like JACK.
@@ -64,6 +68,22 @@ licence open; §1 below settles it.
      attached to the release. MIT code may be combined into a GPLv3 work. The dependency
      licences still have to be checked for GPLv3 compatibility in that job (libzmq is
      MPL-2.0, which is compatible).
+   **The fork.** ac2 builds azo from <https://github.com/mkovero/azo>, branch `ac2`, pinned
+   by commit in `crates/ac2-audio/Cargo.toml` (git dependency, Windows only, optional). It
+   starts at the `azo/v0.4.0` tag and adds small, upstreamable changes: the host (COM)
+   thread can be named; a channel or driver name that fills its whole fixed buffer is read
+   instead of panicking; `Proxy::callback_handle` gives the callback a `Send + Sync` handle
+   for `getSamplePosition` / `outputReady` without a round trip to the host thread; and a
+   driver is created with its CLSID as the IID, as the SDK's host code does, so no
+   reference is released before `init`. wineasio 1.3.0 reads uninitialised state in
+   `Release` before `init`: with azo's `IUnknown`-then-query creation, the second driver
+   load in one process (enumerate, then open) double-freed inside wineasio.
+   **azo-sys provenance.** `azo-sys` is a Rust re-declaration of the ASIO interface, not a
+   copy of the SDK header: its identifiers are its own (`PCM_I16_LSB` for
+   `ASIOSTInt16LSB`, `IIASIORedecl`), its comments are its own, and it uses `bitflags` and a
+   macro for C-style enums; no SDK comment text appears in it. The values, struct layouts,
+   field order and magic numbers equal `asio.h`, as any binary-compatible declaration must:
+   those are interface facts. azo's README states it does not use the SDK.
 3. ac2 does not take the proprietary route. A signed agreement, a ban on redistributing the
    SDK, and mandatory logo placement are a poor fit for an MIT project with no legal entity.
 4. ac2 uses no ASIO logo. The UI and docs name "ASIO" in plain text only, to describe what
@@ -205,6 +225,49 @@ feature
 (`BackendArg::Asio`). The tester guide (`testing/windows/README.md`) gains a section once
 there is a build to test.
 
+## 3a. As built
+
+Where the code settles an open point of §3 or departs from it, and why.
+
+- **Driver thread.** azo's `Host` is the `ac2-asio` thread: a COM single-threaded apartment
+  with a message pump, which drivers that post window messages to themselves need. Every
+  driver call except the two the callback makes goes through it.
+- **Callback reach.** One static slot holds the running engine: an `AtomicPtr` plus a user
+  count, so clearing it after `stop()` waits until no callback is inside. The callback's
+  driver calls (`getSamplePosition`, `outputReady`) go straight to the COM object through
+  azo's callback handle: the host thread is blocked in `start()` during the priming switch,
+  so a round trip through it would deadlock.
+- **Priming switch.** Drivers run one switch on the thread calling `start()` to fill the
+  output (wineasio does). It gets silent outputs and no index; index 0 and the position
+  origin are the first switch after `start()` returns. Requests arriving before then are
+  dropped.
+- **Index.** `samplePosition` from the time info, else `getSamplePosition`. A step of one
+  buffer is continuous; a larger forward step is an exact `DISCONTINUITY` of that size; a
+  backward or partial step is a `DISCONTINUITY` with the index kept monotonic. A switch with
+  the same half and position as the last is a duplicate and skipped. With no valid position
+  the index is a running count and `IndexExactness::Estimated`, with gaps estimated from
+  the system time. Which one a driver gives is decided at open by waiting for its first two
+  switches (`max(500 ms, 4 periods)`).
+- **Host timestamps.** `callback_ns` is QPC. `capture_ns` / `playback_ns` stay `None`: the
+  ASIO system time is on another clock and, under wineasio, in 1 ms steps.
+- **Buffer-size change.** ac2 answers `kAsioSelectorSupported(kAsioBufferSizeChange)` with
+  *no*, so a driver falls back to `kAsioResetRequest`; either ends the stream. Reopening
+  takes the new preferred size.
+- **Latency.** `kAsioLatenciesChanged` sets a flag that a small watcher thread
+  (`ac2-asio-latency`) reads; it re-reads the latencies and latches `CONFIG_CHANGE` only
+  when they differ. wineasio sends the message on every JACK connection change, with
+  unchanged values. `StaticLatency::Frames { input, output }` carries them.
+- **Buffers.** Inputs: the request's `input_map`, deduplicated (two block channels may carry
+  one device channel). Outputs: every channel `0..output_channels`, not only the generator's
+  routes, because the routes change at run time without a reopen.
+- **Formats.** Int16, Int24 (packed), Int32, Int32LSB16/18/20/24, Float32, Float64 (all
+  LSB). Conversion is checked against analytic bit patterns in the unit tests: there are no
+  refgen PCM vectors. MSB types are refused at open with the type named, and noted in
+  `enumerate`.
+- **Separate devices.** A request naming two drivers is `Unsupported::SeparateDevices`.
+- **Default backend.** A Windows build with `asio` offers `asio` and `cpal`, `asio` first
+  (decision W1); without the feature `cpal` stays the only real one.
+
 ## 4. Testing without Windows hardware, in this order
 
 **Audio safety.** Every stage below runs on the dummy server, a virtual device or a test
@@ -235,7 +298,24 @@ loading, `ASIOCreateBuffers`, `bufferSwitchTimeInfo`, messages.
 - Limits: wineasio is one well-behaved driver. Wine is not Windows (no MMCSS, no real
   scheduling). There are no vendor driver quirks such as double callbacks, spurious resets
   or Int24 packing. It says nothing about latency or real-time headroom.
-- It runs locally and as a Linux CI job on dispatch. It is not part of the push tier.
+- It runs locally. It is not part of the push tier, and not yet a CI job.
+
+**Result (`tools/wine-asio/ac2.sh`, 48 kHz, period 256).** Planned runs as they turned out:
+- `ac2 selftest duplex --backend asio` passes for 30 s: index `exact`, clock
+  `single_callback`, Float32 both ways, no xrun, no break in the index.
+- 20 opens of WineASIO in one process, each a new driver load and origin, with
+  `ac2:out_1 → ac2:in_1` connected in JACK: every impulse (580) came back exactly 256 samples
+  (one period) later. The shared index is exact across restarts.
+- `jack_bufsize` 256 → 512 mid-stream: wineasio's reset request ends the stream, and the
+  next open comes up at 512 frames, index exact, with no break.
+- WineASIO's channel names come through (`in_1`, `out_1`, …); it reports latency 0/0 and no
+  overload reporting (noted in `enumerate`).
+- Not run: the daemon. `ac2` gets no reply from `ac2d` under Wine 10 (libzmq over loopback
+  TCP stays idle; the `select` poller makes no difference), so the 30 s daemon session and
+  the daemon's own reopen are left to Windows CI (§4b). Killing `jackd` is not run either.
+- Found and fixed: azo's driver creation released a reference before `init`, and
+  wineasio's `Release` reads unset state then, so the second load in one process
+  double-freed (the azo fork now creates with the CLSID as the IID, §1).
 
 **(b) GitHub `windows-latest`, all-OS dispatch only.**
 - Setup: a virtual audio endpoint, then FlexASIO (MIT; ASIO over PortAudio WASAPI)
@@ -245,7 +325,15 @@ loading, `ASIOCreateBuffers`, `bufferSwitchTimeInfo`, messages.
     capture loopback. That lets the loopback correlation run.
   - Hosted runners need `audiosrv` started.
 - What it proves: the MSVC build with the chosen binding, driver enumeration from the real
-  registry, loading under real COM, a 2 min duplex selftest, and a clean stop.
+  registry, loading under real COM, a duplex selftest, and a clean stop.
+- As built (`tools/release/windows-asio.ps1`, run by `ci.yml` on an all-OS dispatch after
+  the WASAPI pass): writes `%USERPROFILE%\FlexASIO.toml` (`backend = "Windows WASAPI"`,
+  input and output `device` set to VB-CABLE's endpoint names as the system lists them),
+  lists the ASIO devices with channel names, rates and buffer sizes, runs a silent 20 s
+  `ac2 selftest duplex --backend asio` (logging rate, buffer, index exactness, clock and
+  formats, so FlexASIO's sample-position behaviour is on record), and records a silent 30 s
+  daemon session with the WASAPI pass's checks (no stop, no discontinuity, ≥ 90 % of the
+  frames). Not yet run: it lands untested on Windows.
 - Limits: FlexASIO is WASAPI shared mode underneath, so this shows plumbing, not
   pro-driver timing.
 
@@ -277,8 +365,11 @@ run must reopen by itself. Until this passes, ASIO is shipped as preview.
 - The default MSI is unchanged.
 - The two MSIs install the same binaries to the same place, so they must not both be
   installed (open question 5).
-- `ci.yml` gains a Windows `--features asio` clippy and build under `all_os=true`, and a
-  dispatch-only Linux job for §4a.
+- `ci.yml` gains a Windows `--features asio` clippy and build under `all_os=true`
+  (done, with the ASIO unit tests and the FlexASIO pass of §4b). A Linux job for §4a is
+  not added: it needs the 7 GB image.
+- The release workflow still builds without `asio`; switching the Windows release to the
+  ASIO build (W1) is a separate change.
 
 ## 6. Open questions
 
@@ -290,7 +381,8 @@ run must reopen by itself. Until this passes, ASIO is shipped as preview.
 3. If both bindings pass, should ASIO go into the default MSI (one build), with WASAPI kept
    as the fallback backend?
 4. Which channel subset do drivers accept in `ASIOCreateBuffers` (a sparse `input_map`)?
-   Some drivers may require contiguous channels.
+   Some drivers may require contiguous channels. The backend asks for exactly the mapped
+   inputs (deduplicated); wineasio accepts that; vendor drivers are unchecked.
 5. Two MSIs: should they share an UpgradeCode so that one replaces the other, or keep
    separate product codes with a launch condition that refuses to install the second?
 6. Clock source (`ASIOGetClockSources` / `ASIOSetClockSource`): show it read-only in

@@ -2,10 +2,11 @@
 
 This guide takes a tester from a fresh install to a real measurement on Windows with an
 audio interface, in about an hour of hands-on time plus a one-hour unattended run. It covers
-what is not verified on Windows yet: WASAPI capture and playback with a real interface,
-timing, and long-run stability. The MSI install and the simulated rig were confirmed in a
+what is not verified on Windows yet: capture and playback with a real interface (ASIO, or
+WASAPI on builds without it), timing, and long-run stability. The MSI install and the simulated rig were confirmed in a
 Windows 11 VM on 2026-10-03. CI (all-OS and release runs) also opens WASAPI on a virtual
-cable, VB-CABLE (`tools/release/windows-virtual-audio.ps1`): no substitute for an interface.
+cable, VB-CABLE (`tools/release/windows-virtual-audio.ps1`), and ASIO through FlexASIO on
+the same cable (`tools/release/windows-asio.ps1`): no substitute for an interface.
 
 ## 1. Get and install the build
 
@@ -72,8 +73,49 @@ interface out 2 ── cable 2 ──► in 2   (measurement: here a wire, so th
 
 ### How ac2 talks to the interface on Windows
 
-ac2 uses WASAPI in shared mode through the Windows audio engine; there is no ASIO support.
-Know this when reading the results:
+ASIO is the Windows audio path for ac2: one driver serves the interface's inputs and
+outputs from one callback, on one clock, with the channel names the driver gives (*Analog
+1*, *ADAT 3*). The dev.10 build in §1 predates it and uses WASAPI; builds with ASIO list
+the backend **ASIO** in the session dialog and in `ac2 devices`. See *Selecting ASIO*
+below; the WASAPI notes after it apply to builds without ASIO.
+
+#### Selecting ASIO
+
+- **The driver.** Install your interface maker's ASIO driver. An interface without one
+  (or a laptop's built-in audio) works through [FlexASIO](https://github.com/dechamps/FlexASIO)
+  (free, MIT): install it, then point it at the device with a text file
+  `%USERPROFILE%\FlexASIO.toml`, for example
+
+  ```toml
+  backend = "Windows WASAPI"
+
+  [input]
+  device = "Microphone (USB Audio CODEC)"
+
+  [output]
+  device = "Speakers (USB Audio CODEC)"
+  ```
+
+  using the device names as **Sound** settings (`mmsys.cpl`) show them. FlexASIO's timing
+  is WASAPI's underneath; report which driver you used.
+- **In the app.** The session dialog's backend row shows **ASIO**; each installed ASIO
+  driver is one device, with inputs and outputs together. On a build with ASIO it is the
+  default backend.
+- **From the command line.** `ac2 devices` lists the drivers under `asio`, with channel
+  names. `ac2 session open --backend asio --device "<driver>" --in 1-2` opens one;
+  `ac2 selftest duplex --backend asio --device "<driver>" --duration 60s` is Test 5 on it
+  (close the app first: a driver runs in one program at a time).
+- **Rate and buffer.** With none chosen, ac2 opens at the driver's current rate and its
+  preferred buffer size. Many drivers set the buffer only in their own control panel: a
+  change there (or a rate change on the interface) ends the stream, and ac2 reopens it by
+  itself within a few seconds (the top bar shows the outage). Report how long it took.
+- **Clock.** Input and output come from the same driver callback, so Settings shows one
+  clock; there is no *separate endpoints* note.
+- **One driver at a time.** ASIO allows one driver per program. While ac2 has a driver
+  open, the other drivers are listed by name only; ac2 cannot pair one driver's inputs with
+  another's outputs.
+
+#### WASAPI (builds without ASIO)
 
 - **One endpoint per direction.** Windows lists an interface's inputs and outputs as
   separate devices (often *Microphone (…)* or *Line (…)* and *Speakers (…)*; some drivers
