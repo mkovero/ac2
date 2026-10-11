@@ -134,10 +134,16 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         "creating it arms nothing: {r:?}"
     );
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.focus_kind(), PaneKind::Distortion);
+    // Its pane comes with it, once made: with no sweep pane on screen, one of its own split
+    // off the focused pane, which keeps its kind.
+    let (panes, focused) = (t.st.layout.panes(), t.st.layout.focus);
+    assert_eq!(t.focus_kind(), PaneKind::Transfer);
     // Listed, it waits; Space on the sweep pane arms its run.
     assert_eq!(c.kind, sweep_measurement().config.kind);
     t.conn(ConnEvent::MeasCreated(Box::new(sweep_measurement())));
+    assert_eq!(t.focus_kind(), PaneKind::Distortion);
+    assert_eq!(t.st.layout.panes().len(), panes.len() + 1);
+    assert_eq!(t.st.layout.kind(focused), PaneKind::Transfer);
     t.conn(mirror(sweep_state()));
     assert_eq!(t.st.sweep_meas().map(|m| m.id), Some(MeasId(5)));
     let r = t.key("Space");

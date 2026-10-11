@@ -729,3 +729,63 @@ fn runs_of(s: &AppState, meas: ac2_proto::units::MeasId) -> Vec<String> {
             .collect()
     })
 }
+
+/// No sweep pane on screen: a new sweep from the dialog opens a pane of its own (split off
+/// the focused transfer pane as N splits it) and focuses it. The transfer pane stays at
+/// Alt+1, and the transfer measurement's own panes are not rewritten by the new pane.
+#[test]
+fn a_new_sweep_opens_its_own_pane() -> R {
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    d.st.set_prefs(crate::common::grid_ui_prefs());
+    measure_from_empty(&mut d)?;
+    let tf = d.st.selected.ok_or("the transfer measurement")?;
+    // The transfer measurement given its own panes: the transfer pane grown a little.
+    d.key("Alt+1");
+    d.key("Alt+Right");
+    let own = d.st.pane_layout();
+    d.until("the transfer measurement's own panes", |s| {
+        s.meas(tf).and_then(|m| m.layout.as_ref()) == Some(&own)
+    })?;
+    let kinds = crate::common::visible(&d.st);
+    assert!(!kinds.contains(&PaneKind::Distortion), "{kinds:?}");
+
+    let sweeps_before = sweep_count(&d.st);
+    d.key("Shift+S");
+    d.send(Msg::Text("S".into()));
+    d.until(
+        "the sweep dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Sweep),
+    )?;
+    d.key("Enter");
+    d.until("the sweep measurement made and selected", |s| {
+        sweep_count(s) > sweeps_before && s.sweep_meas().is_some_and(|m| Some(m.id) == s.selected)
+    })?;
+    let sweep = d.st.selected.ok_or("the sweep")?;
+    // A pane more, the sweep's, focused; every pane there before keeps its kind.
+    let after = crate::common::visible(&d.st);
+    assert_eq!(after.len(), kinds.len() + 1, "{after:?}");
+    assert_eq!(
+        after.iter().filter(|k| **k == PaneKind::Distortion).count(),
+        1,
+        "{after:?}"
+    );
+    let mut rest = after.clone();
+    let at = rest
+        .iter()
+        .position(|k| *k == PaneKind::Distortion)
+        .ok_or("the sweep pane")?;
+    rest.remove(at);
+    assert_eq!(rest, kinds);
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
+    assert_eq!(d.st.pane_meas(d.st.layout.focus).map(|m| m.id), Some(sweep));
+    // The transfer pane is still Alt+1, still showing the transfer measurement.
+    d.key("Alt+1");
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
+    assert_eq!(d.st.pane_meas(d.st.layout.focus).map(|m| m.id), Some(tf));
+    // The transfer measurement's own panes are as they were, on the daemon too.
+    d.synced()?;
+    assert_eq!(d.st.meas(tf).and_then(|m| m.layout.as_ref()), Some(&own));
+    Ok(())
+}

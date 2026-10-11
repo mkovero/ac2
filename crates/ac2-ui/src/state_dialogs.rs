@@ -38,17 +38,25 @@ impl AppState {
             // pane arms its run, Enter plays it.
             match f.sweep_meas(open.as_ref(), ceiling) {
                 Ok(config) => {
-                    let req = match f.sweep_edit {
+                    let edit = f.sweep_edit;
+                    let req = match edit {
                         Some(meas) => Request::Call {
                             what: format!("{} changed: its next run uses it", config.name),
                             cmd: Command::MeasUpdate { meas, config },
                         },
-                        None => Request::CreateMeas { config },
+                        None => {
+                            self.sweep_pane_on_create = Some(config.name.clone());
+                            Request::CreateMeas { config }
+                        }
                     };
                     out.push(req);
                     self.overlay = Overlay::None;
-                    // A sweep is run from the sweep pane.
-                    self.focus_kind(PaneKind::Distortion);
+                    // A sweep is run from the sweep pane. A new one's pane comes with it,
+                    // once made: the panes changed now would be stored as the selected
+                    // measurement's own.
+                    if edit.is_some() {
+                        self.focus_kind(PaneKind::Distortion);
+                    }
                 }
                 Err(e) => f.error = Some(e),
             }

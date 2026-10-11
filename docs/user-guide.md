@@ -394,8 +394,10 @@ steps them), and the **transfer stack** lays the three out one above the other:
   banners (clipping, STALE, audio stopped) show in every pane.
 - A **new transfer measurement** made in the app (**Ctrl+K** *New transfer measurement…*) opens in the
   transfer stack, in place of the pane that would show it (the focused transfer pane, else
-  the transfer pane worked in last, else the focused pane). Measurements that appear from
-  another client, the CLI or a restored session leave the panes as they are.
+  the transfer pane worked in last). With no transfer pane on screen it gets a pane of its
+  own, split off the focused pane as **N** splits it; the panes already there keep what they
+  show. Measurements that appear from another client, the CLI or a restored session leave
+  the panes as they are.
 
 - **Coherence (γ²)** is how much of the measured energy is explained by the reference. It is
   worked out per FFT bin and averaged over each column, so it does not drop at a coarser
@@ -451,8 +453,11 @@ A stopped measurement draws no live IR (its response views keep the last curve, 
 still shows.
 
 A command about a kind (an SPL view key, the sweep's views) goes to the pane of that kind
-focused last; with none on screen the focused pane turns into one. A finished sweep opens
-no pane by itself: the toast says to **Tab** to it to see it in the focused pane.
+focused last; with none on screen the focused pane turns into one. A new sweep made from
+the sweep dialog (**Shift+S**) goes to the sweep pane focused last; with none on screen it
+gets a pane of its own, split off the focused pane as **N** splits it, and the focus: the
+panes already there keep what they show. A finished sweep opens no pane by itself: the
+toast says to **Tab** to it to see it in the focused pane.
 
 ### Choosing what a pane shows
 

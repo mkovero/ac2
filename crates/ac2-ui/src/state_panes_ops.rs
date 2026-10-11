@@ -237,15 +237,27 @@ impl AppState {
     }
 
     /// A transfer measurement this app created: the pane that shows it now (the focused
-    /// transfer pane, else the transfer pane worked in last, else the focused one) lays it
-    /// out in the transfer stack.
+    /// transfer pane, else the transfer pane worked in last) lays it out in the transfer
+    /// stack. With no transfer pane, a pane of its own split off the focused one as N
+    /// splits it holds the stack (or, too small for one, the transfer view alone), so the
+    /// panes already there keep their kinds; only a pane too small to split turns into it.
     pub(super) fn stack_created(&mut self, meas: MeasId) {
         let p = match self.layout.focus_kind() {
             PaneKind::Transfer => self.layout.focus,
-            _ => self
-                .layout
-                .lead(PaneKind::Transfer)
-                .unwrap_or(self.layout.focus),
+            _ => match self.layout.lead(PaneKind::Transfer) {
+                Some(p) => p,
+                None => match self.split_focused_pane() {
+                    Some(new) => {
+                        self.set_pane_kind(new, PaneKind::Transfer);
+                        if let Some(v) = self.layout.view_mut(new) {
+                            v.meas = Some(meas);
+                        }
+                        self.focus_pane(new);
+                        new
+                    }
+                    None => self.layout.focus,
+                },
+            },
         };
         self.apply_template(PaneTemplate::TransferStack, p, meas);
     }
@@ -254,6 +266,14 @@ impl AppState {
     /// same and has the focus. Maximised, the split shows at once: the layout goes back to
     /// all panes.
     pub(super) fn split_pane(&mut self) {
+        if self.split_focused_pane().is_none() {
+            self.warn("the pane is too small to split: Q closes one to make room");
+        }
+    }
+
+    /// N's split: the new pane, or `None` when a half would be smaller than resizing keeps
+    /// a pane.
+    fn split_focused_pane(&mut self) -> Option<PaneId> {
         let rect = self.focused_rect();
         let (w, h) = self.pane_area;
         let (side, extent) = if rect.w >= rect.h {
@@ -262,8 +282,7 @@ impl AppState {
             (rect.h, h)
         };
         if side / 2.0 < MIN_RATIO * extent {
-            self.warn("the pane is too small to split: Q closes one to make room");
-            return;
+            return None;
         }
         // Both halves keep showing what the pane did, whatever is selected later: an
         // unchosen pane would follow the selection.
@@ -278,6 +297,22 @@ impl AppState {
         if let Some(n) = waiting {
             self.pending_pane_meas.insert(new, n);
         }
+        Some(new)
+    }
+
+    /// A sweep measurement this app created, shown on the sweep pane worked in last; with
+    /// none, on a pane of its own split off the focused one as N splits it, so the panes
+    /// already there keep their kinds. Only a pane too small to split turns into it.
+    pub(super) fn open_created_sweep(&mut self, meas: MeasId) {
+        if self.layout.lead(PaneKind::Distortion).is_none()
+            && let Some(new) = self.split_focused_pane()
+        {
+            self.set_pane_kind(new, PaneKind::Distortion);
+            if let Some(v) = self.layout.view_mut(new) {
+                v.meas = Some(meas);
+            }
+        }
+        self.focus_kind(PaneKind::Distortion);
     }
 
     /// Q: the focused pane closed, its neighbour taking its place and the focus; the

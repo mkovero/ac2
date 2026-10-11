@@ -177,10 +177,12 @@ fn spl_meter_from_an_empty_daemon(h: &mut Harness<'_, App>) -> MeasId {
             && a.state.input_meters().len() == 4
     });
     h.key_press(Key::Enter);
-    step_until(h, "session open", |a| a.state.open_session().is_some());
-    if matches!(h.state().state.overlay, Overlay::Offer(_)) {
-        h.key_press(Key::N);
-    }
+    // The mirror can show the session before the reply that offers the rig's transfer
+    // measurement: a key sent in between would land on the offer.
+    step_until(h, "session open, the transfer measurement offered", |a| {
+        a.state.open_session().is_some() && matches!(a.state.overlay, Overlay::Offer(_))
+    });
+    h.key_press(Key::N);
     step_until(h, "no dialog", |a| a.state.overlay == Overlay::None);
     h.key_press_modifiers(Modifiers::COMMAND, Key::K);
     h.event(Event::Text("new spl".into()));
