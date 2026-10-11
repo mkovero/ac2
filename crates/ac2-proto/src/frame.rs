@@ -21,7 +21,7 @@ use crate::model::{
     PeakWeighting, PhaseBasis, PositionCorrection, Smoothing, SmoothingFraction, TimeWeighting,
     TimingState, TimingStatus, Unresolved, Weighting, Window,
 };
-use crate::packing::{self, elem_size};
+use crate::packing::{self, array_size};
 use crate::topic::{Stream, Topic};
 use crate::units::{
     ClientId, DaemonIncarnation, Db, Dbfs, Hz, MeasId, Rev, SampleIndex, Samples, Seconds,
@@ -283,6 +283,10 @@ pub enum Elem {
     /// Ten-thousandths, unsigned 16-bit (0 … 10 000), as neighbour differences in byte
     /// planes. Coherence.
     U16,
+    /// Block floating point: one exponent byte `e`, then signed 16-bit mantissas as
+    /// neighbour differences in byte planes, value = mantissa · 2^e; within 1/32 765 of the
+    /// array's peak. The linear IR.
+    Bfp16,
 }
 
 /// Describes one array part.
@@ -1160,12 +1164,13 @@ enum Col<'a> {
 
 fn desc(name: ArrayName, unit: Unit) -> ArrayDesc {
     // The curves a display draws at frame rate go in 16 bits (precision budget in
-    // `crate::packing`); meters, Leq windows and IR samples are read as numbers or summed
-    // further and stay f32.
+    // `crate::packing`), the linear IR relative to its peak; meters and Leq windows are read
+    // as numbers or summed further and stay f32.
     let elem = match (name, unit) {
         (_, Unit::Bitmask) => Elem::U32,
         (ArrayName::Mag | ArrayName::Phase | ArrayName::Level | ArrayName::IrEtc, _) => Elem::I16,
         (ArrayName::Coh, _) => Elem::U16,
+        (ArrayName::IrLinear, _) => Elem::Bfp16,
         _ => Elem::F32,
     };
     ArrayDesc { name, unit, elem }
@@ -1357,7 +1362,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
     parts.push(frame.topic().to_bytes());
     parts.push(hb);
     if !cols.is_empty() {
-        let mut raw = Vec::with_capacity(cols.iter().map(|(d, _)| n * elem_size(d.elem)).sum());
+        let mut raw = Vec::with_capacity(cols.iter().map(|(d, _)| array_size(d.elem, n)).sum());
         for (d, c) in &cols {
             match c {
                 Col::F(v) => packing::put_f32(&mut raw, d.elem, d.unit == Unit::Deg, v),
@@ -1518,7 +1523,7 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
     let sizes: Vec<usize> = h
         .arrays
         .iter()
-        .map(|d| h.n as usize * elem_size(d.elem))
+        .map(|d| array_size(d.elem, h.n as usize))
         .collect();
     let expected = sizes.iter().sum();
     let raw = match payload {

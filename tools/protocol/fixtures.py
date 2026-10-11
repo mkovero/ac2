@@ -18,6 +18,7 @@ import os
 import struct
 import sys
 import tempfile
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -66,7 +67,7 @@ def stamp(grid, protection=WEAK_REFERENCE):
 def arr(name, unit, elem=None):
     """The element encoding is fixed per array (docs/protocol.md §5.3)."""
     if elem is None:
-        elem = {"mag": "i16", "phase": "i16", "level": "i16", "ir_etc": "i16", "coh": "u16"}.get(name, "f32")
+        elem = {"mag": "i16", "phase": "i16", "level": "i16", "ir_etc": "i16", "coh": "u16", "ir_linear": "bfp16"}.get(name, "f32")
     return {"name": name, "unit": unit, "elem": elem}
 
 
@@ -88,7 +89,7 @@ def frame(topic, kind, grid, meta, arrays, protection=WEAK_REFERENCE):
     header["arrays"] = [d for d, _ in arrays]
     header["meta"] = {kind: meta}
     values = {
-        d["name"]: [p.wire_value(d, v) for v in vals] for d, vals in arrays
+        d["name"]: [p.wire_value(d, v, vals) for v in vals] for d, vals in arrays
     }
     return {"topic": topic, "header": header, "arrays": values}
 
@@ -157,7 +158,7 @@ def frames():
             [
                 (
                     arr("ir_linear", "full_scale"),
-                    [0.0, 0.5, -1.0, 0.25, 1.1754943508222875e-38, -0.0],
+                    [0.0, 0.5, -1.0, 0.3, 1.0e-3, -0.0],
                 ),
                 (arr("ir_etc", "db"), [-60.0, -6.0, 0.0, -12.0, -200.0, -200.0]),
             ],
@@ -1152,6 +1153,16 @@ def check():
             ok(False, "malformed frame accepted")
         except p.DecodeError:
             pass
+    # A `bfp16` exponent above 113 would decode to infinity: refused.
+    parts = p.read_container(os.path.join(FIX, "rust_frame_ir.bin"))
+    raw = bytearray(zlib.decompressobj(-15).decompress(parts[2]))
+    raw[0] = 114
+    c = zlib.compressobj(1, zlib.DEFLATED, -15)
+    try:
+        p.decode_frame(parts[:2] + [c.compress(bytes(raw)) + c.flush()])
+        ok(False, "bfp16 exponent 114 accepted")
+    except p.DecodeError:
+        pass
 
     print("ok" if failures == 0 else f"{failures} failure(s)")
     return 1 if failures else 0

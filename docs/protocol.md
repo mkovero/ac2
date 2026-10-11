@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 41`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 42`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1287,18 +1287,22 @@ Element encodings (`elem`), all little-endian:
 | `u32` | 4 | unsigned (bitmasks) |
 | `i16` | 2 | hundredths of the unit, `round(x × 100)` rounding halves up, clamped to ±32 766; −32 768 = NaN, −32 767 = −∞, 32 767 = +∞. Degrees are wrapped on the hundredths to [−18 000, 18 000), so a phase is in [−180°, 180°) and ±∞ degrees is NaN. Decoded as code ÷ 100 |
 | `u16` | 2 | ten-thousandths, `round(x × 10 000)` rounding halves up, clamped to 0 … 10 000; 65 535 = NaN; any other code above 10 000 refuses the frame. Decoded as code ÷ 10 000 |
+| `bfp16` | 2 (+ 1 per array) | block floating point: the array's bytes start with one signed exponent byte `e`, then one `i16` mantissa per element, `round(x × 2^−e)` rounding halves up, clamped to ±32 766, with the `i16` codes of NaN and ±∞. `e` is the smallest integer in [−128, 113] for which every finite \|x\| × 2^−e ≤ 32 765 (from `frexp(peak) = (m, k)`: `k − 14` if `m × 2^15 > 32 765`, else `k − 15`), 0 when no element is finite and non-zero; an exponent above 113 refuses the frame. Decoded as mantissa × 2^e rounded to f32 |
 
-An `i16` or `u16` array goes as the differences of each code from the previous column's
-(the first from 0), modulo 2¹⁶, as two planes: the low byte of every difference, then the
+An `i16`, `u16` or `bfp16` array (after its exponent byte) goes as the differences of each
+code from the previous column's (the first from 0), modulo 2¹⁶, as two planes: the low byte of every difference, then the
 high byte of every difference. Neighbouring columns of a curve are close, so the high plane
 is mostly 0x00 / 0xff and deflates to little.
 
 Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec) and
-`ir_etc` are `i16`; `coh` is `u16`; bitmasks are `u32`; everything else (`ir_linear`,
-meters, Leq and band Leq windows) is `f32`. Precision: `i16` is within 0.005 dB or 0.005°
-of the value computed, `u16` within 5·10⁻⁵ of γ² — below the readouts (0.1 dB, 1°, 0.01)
-and, for a group delay fitted to the phase over 1/12 octave of 1/48-octave columns, below
-13 µs at 20 Hz and 3 µs at 100 Hz, far below the measurement's own phase noise there.
+`ir_etc` are `i16`; `coh` is `u16`; `ir_linear` is `bfp16`; bitmasks are `u32`;
+everything else (meters, Leq and band Leq windows) is `f32`. Precision: `i16` is within
+0.005 dB or 0.005° of the value computed, `u16` within 5·10⁻⁵ of γ² — below the readouts
+(0.1 dB, 1°, 0.01) and, for a group delay fitted to the phase over 1/12 octave of
+1/48-octave columns, below 13 µs at 20 Hz and 3 µs at 100 Hz, far below the measurement's
+own phase noise there. `bfp16` is within 2^(e−1), less than 1/32 765 of the array's peak
+(−90.3 dB re peak): a thousandth of a pixel on the linear IR view, 0.03 dB at −40 dB and
+0.3 dB at −60 dB on its log view; deeper floors read on `ir_etc`.
 Stored traces, captures, exports and math are formed in the daemon from the analysis in
 f32, never from frames (design: `docs/design/wire-slim.md`).
 
@@ -1337,7 +1341,7 @@ layout as code.
 | `arrays` | [[`name`, `unit`, `elem`]] | one descriptor per array part, in part order |
 | `meta` | {kind: […]} | per-kind metadata (§5.4), fields in the order listed there |
 
-`elem` is `f32`, `u32`, `i16` or `u16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `db_spl`, `deg`, `coherence`
+`elem` is `f32`, `u32`, `i16`, `u16` or `bfp16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `db_spl`, `deg`, `coherence`
 (γ², 0…1), `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
 `u32`).
 
@@ -1404,10 +1408,11 @@ not `JUDGED`, else `over`, `near` or `ok`.
 
 In order: 2 or 3 parts; total ≤ 2 MiB; topic valid; header ≤ 8192 bytes; then after the
 bounded header parse: `v`, `n` ≤ 65536, ≤ 8 arrays, a payload part exactly when arrays are
-listed, the payload inflating to exactly n × Σ element sizes (inflation stops there: a
+listed, the payload inflating to exactly n × Σ element sizes plus one byte per `bfp16`
+array (inflation stops there: a
 payload that would inflate further is refused, so it cannot be a decompression bomb),
 `kind` = topic = `meta` key, then the per-kind array schema (each array's `elem` as fixed by
-its name), undefined `u16` codes and bitmask bits.
+its name), undefined `u16` codes, `bfp16` exponents and bitmask bits.
 A malformed frame is dropped and counted by the client; decoders never panic.
 
 ### 5.7 Sizes
@@ -1422,6 +1427,7 @@ than most real curves); bytes include topic, header and payload, not the transpo
 | `spec`, 4 096 points (513 columns) | 2 161 B | ≈ 1 010 B |
 | `rta`, 1/3 octave (30 bands) | 368 B | ≈ 210 B |
 | `band_leq` (11 windows), `leq` (5) | 988 B, 467 B | ≈ 870 B, 370 B |
+| `ir`, 4 096 points (`ir_linear`, `ir_etc`) | 32 896 B | ≈ 13 000 B |
 | `spl` (no arrays) | 138 B | 138 B |
 
 A `tf` stream goes out at its analysis hop (≈ 26 frames/s at 48 kHz, whatever the publish
@@ -1430,7 +1436,8 @@ rate), a math channel's whenever an operand changes (up to the publish rate), a 
 re-sent every 0.25 s of audio while nothing changes. A session of three transfer functions
 and their average, three default spectra and a 4 096-point one, a 1/3-octave RTA, two SPL
 meters with band meters and the input meters is ≈ 2.7 Mbit/s at 30 fps and ≈ 3.2 Mbit/s at
-60 fps (9.3 Mbit/s at 60 fps with f32 arrays). Encoding and decoding a `tf` frame take ≈ 37
+60 fps (9.3 Mbit/s at 60 fps with f32 arrays); a pane in its IR view adds `ir` at ≈ 29
+frames/s, ≈ 6.2 Mbit/s in all. Encoding and decoding a `tf` frame take ≈ 37
 and 17 µs on a desktop core.
 
 ## 6. Grids

@@ -1681,6 +1681,24 @@ fn transfer_capture_keeps_its_ir() {
     assert_eq!(ir.sample_rate, Hz(fs));
     assert_eq!(ir.ir.linear.len(), 4096);
     assert_eq!(ir.ir.etc_db.len(), 4096);
+    // Live `ir_linear` goes as 16-bit mantissas of one power of two per frame
+    // (docs/protocol.md §5.2); the capture comes from the analysis and keeps every f32.
+    let peak = ir
+        .ir
+        .linear
+        .iter()
+        .fold(0.0f64, |m, x| m.max(f64::from(x.abs())));
+    let step = 2f64.powf((peak / 32_765.0).log2().ceil());
+    let off_grid = ir
+        .ir
+        .linear
+        .iter()
+        .filter(|x| (f64::from(**x) / step).fract() != 0.0)
+        .count();
+    assert!(
+        off_grid > 4096 / 2,
+        "the capture lost precision: {off_grid}"
+    );
     assert!((ir.ir.dt.0 - 1.0 / fs).abs() < 1e-15);
     assert!((ir.ir.t0.0 + 2048.0 / fs).abs() < 1e-12);
     let peak = ir_peak_s(&ir);

@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 41
+PROTO_VERSION = 42
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -246,7 +246,13 @@ def named(t, x):
 # --------------------------------------------------------------------------------------
 # Frames
 
-_ELEM_SIZE = {"f32": 4, "u32": 4, "i16": 2, "u16": 2}
+_ELEM_SIZE = {"f32": 4, "u32": 4, "i16": 2, "u16": 2, "bfp16": 2}
+BFP_EXP_MIN, BFP_EXP_MAX, BFP_PEAK = -128, 113, 32765.0
+
+
+def array_size(elem: str, n: int) -> int:
+    """A `bfp16` array leads with its exponent byte."""
+    return n * _ELEM_SIZE[elem] + (1 if elem == "bfp16" else 0)
 I16_NAN, I16_NEG_INF, I16_POS_INF = -32768, -32767, 32767
 U16_NAN, U16_ONE = 65535, 10000
 
@@ -272,6 +278,37 @@ def from_i16(q: int) -> float:
     return {I16_NAN: math.nan, I16_NEG_INF: -math.inf, I16_POS_INF: math.inf}.get(q, q / 100.0)
 
 
+def _code_i16(x: float) -> int:
+    if math.isnan(x):
+        return I16_NAN
+    if x == math.inf:
+        return I16_POS_INF
+    if x == -math.inf:
+        return I16_NEG_INF
+    return max(-32766, min(32766, _round_half_up(x)))
+
+
+def bfp_exponent(values: list) -> int:
+    """Smallest e in [-128, 113] with every finite |x| * 2^-e <= 32765; 0 without a peak."""
+    peak = max((abs(v) for v in values if math.isfinite(v)), default=0.0)
+    if peak == 0.0:
+        return 0
+    _, k = math.frexp(peak)
+    e = k - 14 if math.ldexp(peak, 15 - k) > BFP_PEAK else k - 15
+    return max(BFP_EXP_MIN, min(BFP_EXP_MAX, e))
+
+
+def _f32(v: float) -> float:
+    return struct.unpack("<f", struct.pack("<f", v))[0]
+
+
+def from_bfp(q: int, e: int) -> float:
+    if q in (I16_NAN, I16_NEG_INF, I16_POS_INF):
+        return from_i16(q)
+    # Rounded to f32 like the Rust decoder (exact unless among the f32 subnormals).
+    return _f32(math.ldexp(q, e))
+
+
 def to_u16(x: float) -> int:
     if math.isnan(x):
         return U16_NAN
@@ -286,9 +323,13 @@ def from_u16(q: int) -> float:
     return q / U16_ONE
 
 
-def wire_value(desc: dict, v):
-    """What `v` decodes to after a trip over the wire in `desc`'s element encoding."""
+def wire_value(desc: dict, v, array=None):
+    """What `v` decodes to after a trip over the wire in `desc`'s element encoding; a
+    `bfp16` value needs its whole `array` for the exponent."""
     e = desc["elem"]
+    if e == "bfp16":
+        x = bfp_exponent([_f32(a) for a in array])
+        return from_bfp(_code_i16(math.ldexp(_f32(v), -x)), x)
     if e == "i16":
         return from_i16(to_i16(v, desc["unit"] == "deg"))
     if e == "u16":
@@ -322,6 +363,10 @@ def _encode_array(desc: dict, values: list) -> bytes:
         return _planes([to_i16(v, desc["unit"] == "deg") & 0xFFFF for v in values])
     if e == "u16":
         return _planes([to_u16(v) for v in values])
+    if e == "bfp16":
+        values = [_f32(v) for v in values]
+        x = bfp_exponent(values)
+        return struct.pack("<b", x) + _planes([_code_i16(math.ldexp(v, -x)) & 0xFFFF for v in values])
     return struct.pack("<%d%s" % (len(values), {"f32": "f", "u32": "I"}[e]), *values)
 
 
@@ -331,6 +376,13 @@ def _decode_array(desc: dict, b: bytes) -> list:
         return [from_i16(q - 0x10000 if q >= 0x8000 else q) for q in _unplanes(b)]
     if e == "u16":
         return [from_u16(q) for q in _unplanes(b)]
+    if e == "bfp16":
+        if not b:
+            raise DecodeError("bfp16 array without its exponent")
+        x = struct.unpack_from("<b", b)[0]
+        if x > BFP_EXP_MAX:
+            raise DecodeError(f"bfp16 exponent {x}")
+        return [from_bfp(q - 0x10000 if q >= 0x8000 else q, x) for q in _unplanes(b[1:])]
     return list(struct.unpack("<%d%s" % (len(b) // 4, {"f32": "f", "u32": "I"}[e]), b))
 
 
@@ -369,7 +421,7 @@ def decode_frame(parts: list) -> dict:
     for d in descs:
         if d["elem"] not in _ELEM_SIZE:
             raise DecodeError(f"elem {d['elem']!r}")
-        sizes.append(n * _ELEM_SIZE[d["elem"]])
+        sizes.append(array_size(d["elem"], n))
     out = {}
     if descs:
         expected = sum(sizes)

@@ -1,10 +1,11 @@
 //! What each live stream costs on the wire: bytes per frame and frames per second of every
 //! stream of a transfer function, a default spectrum, an RTA and an SPL meter on the fake
 //! rig, and the daemon's CPU time over the run. The spectrum frame must stay display-sized:
-//! a 65 536-point FFT is 32 769 bins, far more than any screen has pixels. A realistic
-//! tuning session (three transfer functions and their average, three default spectra and a
-//! short one, an RTA, two SPL meters with band meters, the input meters) must fit a remote
-//! client's budget at 60 frames per second.
+//! a 65 536-point FFT is 32 769 bins, far more than any screen has pixels; so must the IR
+//! frame. A realistic tuning session (three transfer functions and their average, three
+//! default spectra and a short one, an RTA, two SPL meters with band meters, the input
+//! meters), with and without a pane in its IR view, must fit a remote client's budget at
+//! 60 frames per second.
 //!
 //! Its own binary: the CPU time it reports is the whole process's.
 #![allow(clippy::unwrap_used)]
@@ -218,6 +219,10 @@ fn run_with(setup: &Setup<'_>, seconds: f64) -> Sizes {
     sizes
 }
 
+/// Bytes of one live IR frame (4 096 points, `ir_linear` and `ir_etc`): about 13 kB with a
+/// stimulus and 15 kB on the rig's noise alone; 22.8 kB with the linear IR in f32.
+const IR_FRAME_BUDGET: u64 = 17_000;
+
 fn spectrum(name: &str) -> MeasConfig {
     MeasConfig {
         name: name.into(),
@@ -246,6 +251,9 @@ fn slow_live_streams_stay_display_sized() {
     let (n, b) = sizes["d/2/spec"];
     let per_frame = b / n;
     assert!(per_frame < 16_000, "spectrum frame {per_frame} B");
+    let (n, b) = sizes["d/1/ir"];
+    let per_frame = b / n;
+    assert!(per_frame < IR_FRAME_BUDGET, "ir frame {per_frame} B");
 }
 
 /// Daemon CPU for one default spectrum alone, printed (`--ignored --nocapture`).
@@ -316,10 +324,13 @@ fn tuning_session() -> Vec<MeasConfig> {
     ]
 }
 
-/// What the app subscribes to with the transfer and spectrum panes in view: no IR, no
-/// per-measurement meters.
-fn ui_topics() -> Vec<Vec<u8>> {
+/// What the app subscribes to with the transfer and spectrum panes in view, no
+/// per-measurement meters; `ir_view`: a transfer pane shows the first IR too.
+fn ui_topics(ir_view: bool) -> Vec<Vec<u8>> {
     let mut t: Vec<String> = (1..=4).map(|m| format!("d/{m}/tf")).collect();
+    if ir_view {
+        t.push("d/1/ir".into());
+    }
     t.extend((5..=8).map(|m| format!("d/{m}/spec")));
     t.push("d/9/rta".into());
     for m in [10, 11] {
@@ -329,14 +340,14 @@ fn ui_topics() -> Vec<Vec<u8>> {
     t.into_iter().map(String::into_bytes).collect()
 }
 
-fn session_sizes(fps: u32, seconds: f64) -> Sizes {
+fn session_sizes(fps: u32, seconds: f64, ir_view: bool) -> Sizes {
     let meas = tuning_session();
     run_with(
         &Setup {
             meas: &meas,
             inputs: vec![0, 1, 2, 3],
             stimulus: true,
-            prefixes: ui_topics(),
+            prefixes: ui_topics(ir_view),
             fps: Some(fps),
         },
         seconds,
@@ -344,14 +355,31 @@ fn session_sizes(fps: u32, seconds: f64) -> Sizes {
 }
 
 /// The tuning session at 60 frames per second stays far below what a Wi-Fi or VPN link
-/// carries (about 3 Mbit/s on the fake rig, where noisy high bands make the transfer
-/// functions dear; it was 9.3 with f32 arrays).
+/// carries (about 3.3 Mbit/s on the fake rig, where noisy high bands make the transfer
+/// functions dear; it was 9.3 with f32 arrays), and about 6.2 with a pane in its IR view
+/// (8.8 with the linear IR in f32).
 #[test]
 fn slow_tuning_session_fits_a_remote_link() {
     let seconds = 4.0;
-    let sizes = session_sizes(60, seconds);
-    let bits_per_s = sizes.values().map(|(_, b)| *b as f64).sum::<f64>() * 8.0 / seconds;
-    assert!(bits_per_s < 4.5e6, "{:.2} Mbit/s", bits_per_s / 1e6);
+    let sizes = session_sizes(60, seconds, true);
+    let mbit = |ir: bool| {
+        sizes
+            .iter()
+            .filter(|(topic, _)| ir || !topic.ends_with("/ir"))
+            .map(|(_, (_, b))| *b as f64)
+            .sum::<f64>()
+            * 8.0
+            / seconds
+            / 1e6
+    };
+    // The session without the IR topic is what the app takes with no IR view: subscribing
+    // one more topic changes no other.
+    assert!(mbit(false) < 4.0, "{:.2} Mbit/s", mbit(false));
+    assert!(
+        mbit(true) < 7.2,
+        "{:.2} Mbit/s with the IR view",
+        mbit(true)
+    );
     for (topic, (n, b)) in &sizes {
         let per_frame = b / n;
         if topic.ends_with("/tf") {
@@ -359,6 +387,9 @@ fn slow_tuning_session_fits_a_remote_link() {
         }
         if topic.ends_with("/spec") {
             assert!(per_frame < 2_000, "{topic}: {per_frame} B");
+        }
+        if topic.ends_with("/ir") {
+            assert!(per_frame < IR_FRAME_BUDGET, "{topic}: {per_frame} B");
         }
     }
 }
@@ -368,8 +399,10 @@ fn slow_tuning_session_fits_a_remote_link() {
 #[test]
 #[ignore = "measurement, not a check"]
 fn tuning_session_bytes() {
-    for fps in [30, 60] {
-        eprintln!("--- {fps} fps");
-        session_sizes(fps, 10.0);
+    for ir_view in [false, true] {
+        for fps in [30, 60] {
+            eprintln!("--- {fps} fps, IR view {ir_view}");
+            session_sizes(fps, 10.0, ir_view);
+        }
     }
 }

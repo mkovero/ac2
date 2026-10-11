@@ -22,9 +22,10 @@ curves. `AC2_WIRE_DUMP=dir` writes every frame for offline trials.
 | `spec` 4 096 (513 columns) | 2 161 B | ≈ 1 010 B |
 | `rta` 1/3 octave | 368 B | ≈ 210 B |
 | `band_leq`, `leq` | 988 B, 467 B | ≈ 870 B, 370 B (still f32) |
-| `ir` (4 096 points, linear + ETC) | 32 896 B | ≈ 22 800 B |
+| `ir` (4 096 points, linear + ETC) | 32 896 B | ≈ 13 000 B (22 800 B with `ir_linear` f32) |
 | session at 30 fps | 7.6 Mbit/s | 2.7 Mbit/s |
-| session at 60 fps | 9.3 Mbit/s | 3.2 Mbit/s |
+| session at 60 fps | 9.3 Mbit/s | 3.3 Mbit/s |
+| session at 60 fps with an IR view | | 6.2 Mbit/s (8.8 with `ir_linear` f32) |
 
 Rates: a `tf` stream comes at its analysis hop, ≈ 26 per second whatever the publish rate;
 only the math average (up to every operand change: 29 → 45/s), the short spectrum (30 → 45/s)
@@ -53,11 +54,49 @@ order and deflated (raw RFC 1951, level 1) into one payload part.
 | `phase` | `i16` hundredths of a degree, wrapped to [−180°, 180°) | 0.005° | readout 1°; group delay below |
 | `coh` | `u16` ten-thousandths | 5·10⁻⁵ | readout 0.01; crosscheck ≤ 10⁻⁴ |
 | bitmasks | `u32` | exact | |
-| `ir_linear`, meters, `leq`, `band_leq` | `f32` | exact | |
+| `ir_linear` | `bfp16`: an exponent byte per frame, `i16` mantissas | 1/32 765 of the peak (−90.3 dB) | linear view: sub-pixel; log view 0.3 dB at −60 dB |
+| meters, `leq`, `band_leq` | `f32` | exact | |
 
 NaN and ±∞ have codes of their own; levels beyond ±327.66 dB clamp. A 16-bit array goes as
 neighbour differences in a low-byte and a high-byte plane, so deflate finds the high plane's
 runs; on the measured frames that is 15–25 % smaller than plain codes.
+
+### The linear IR
+
+`ir_linear` is block floating point: value = mantissa · 2^e, one exponent per frame, the
+smallest that puts the frame's largest finite |x| at or below 32 765 (odd, so a decoded
+frame picks the same exponent again and re-encodes to the same bytes). Every sample is within
+2^(e−1), under 1/32 765 of the peak: −90.3 dB re peak at worst, −96 dB when the peak fills
+the mantissa. What the IR pane does with it:
+
+- **Linear view** (amplitude on a linear axis): at the default zoom (±1.1 × peak over a few
+  hundred pixels) one pixel is ≈ −47 dB re peak, so the error is a thousandth of a pixel; it
+  reaches a pixel only zoomed in a thousandfold. The cursor reads three decimals of FS.
+- **Log view** (20·log10 |h| / peak): 0.03 dB off at −40 dB, 0.3 dB at −60 dB (the default
+  floor), ±3 dB on single samples at −80 dB. A live acoustic IR's own noise floor (mic, room
+  noise, 4 096-point transfer stage) is far above −90 dB re peak; on the fake rig the median
+  sample is −18 dB. Only an electrical loopback goes deeper, and there the log view's floor
+  shows the quantisation (≈ −101 dB RMS) instead of the true one; the ETC, in `i16` dB, keeps
+  any floor, and a captured trace keeps f32.
+- **Crosscheck**: reads IRs from stored sweep and transfer traces, never from frames.
+
+`f16` scaled by a per-frame power of two was the other candidate: relative error 2⁻¹¹ over
+≈ 170 dB, so the log view would be exact to 0.004 dB down to any floor. Measured on the fake
+rig's frames both are ≈ 8 kB of linear IR per frame (its IR is noise from −18 dB on, which no
+16-bit code compresses). On synthetic IRs with a cleaner floor block floating point is
+smaller and gains as the floor drops, because a tail sample is a small integer whose
+differences deflate, while a float carries its full 11-bit mantissa at any level:
+
+| IR floor re peak | f32 | f16 | `bfp16` |
+|---|---|---|---|
+| −40 dB | 15.3 kB | 7.7 kB | 6.7 kB |
+| −60 dB | 15.5 kB | 7.7 kB | 5.8 kB |
+| −80 dB | 15.6 kB | 7.7 kB | 5.2 kB |
+| −100 dB | 15.6 kB | 7.7 kB | 4.0 kB |
+
+Integers also decode the same way in every client language, where binary16 needs a
+conversion routine in some. The −90 dB bound is below anything the pane shows of a measured
+IR, so the smaller encoding wins.
 
 Group delay is the slope of the phase over 1/12 octave (4 columns at 1/48 octave). A uniform
 phase error of ±0.005° moves it by σ ≈ 12 µs at 20 Hz and 2.5 µs at 100 Hz, against a 0.01 ms
@@ -74,14 +113,18 @@ panic; `tools/protocol` decodes the Rust fixtures and the reverse.
 Captures, stored traces, exports (`trace export --csv`), math, sweeps and session files are
 formed in the daemon from the analysis in f32, never from a frame
 (`traces::spectrum_live_columns_are_the_captured_bins_maxima` checks a capture keeps values
-off the wire grid). For crosscheck (peer session constraints): `ac2 spl watch` reads `spl`
+off the wire grid). A transfer trace's IR comes from the job's own inverse FFT at capture
+(`capture_ir`), not from the last `ir` frame, so it keeps every f32 sample. For crosscheck
+(peer session constraints): `ac2 spl watch` reads `spl`
 frames, whose readings are header f64 and unchanged; `leq`, `band_leq` and the meters stay f32;
 coherence resolution is 10⁻⁴ or finer. A client that needs f32 curves captures a trace.
 
 ## Cost
 
 Release build, 480-column `tf` frame: encode ≈ 37 µs, decode ≈ 17 µs on a Threadripper 3945WX
-core (`roundtrip::codec_cost`). The session's ≈ 320 frames/s cost the daemon ≈ 1 % of a core;
+core (`roundtrip::codec_cost`). A 4 096-point IR frame: encode ≈ 165 µs, decode ≈ 61 µs,
+the same and less than with `ir_linear` in f32 (165 µs, 74 µs): the quantising pass costs what
+deflate saves on the smaller input. It runs at ≈ 29 frames/s only while an IR view is open. The session's ≈ 320 frames/s cost the daemon ≈ 1 % of a core;
 pupu's i5-2415M is perhaps twice as slow, a Pi 4 three to four times on decode: ≈ 2 % of a
 core there. Encoding runs on the measurement job threads, decoding on the client's I/O
 thread; neither is on the audio callback.
@@ -107,10 +150,10 @@ thread; neither is on the audio callback.
 
 ## Left
 
-- The session is ≈ 3.2 Mbit/s at 60 fps on noisy fake curves, not under 2: the floor is the
+- The session is ≈ 3.3 Mbit/s at 60 fps on noisy fake curves, not under 2: the floor is the
   measurement noise at the precision above (≈ 11–13 bits per column per array after deflate).
   Real curves with high coherence are cheaper.
-- The IR view's stream (`ir`: ≈ 22.8 KB at ≈ 29/s, ≈ 5 Mbit/s) is now the dearest single
-  topic: `ir_linear` is f32 because its log view reads 20·log10 of it far below the peak. Next
-  step: f16 scaled by a per-frame power of two (relative error 2⁻¹¹ over the whole range),
-  ≈ 8 KB less per frame.
+- The IR view's stream (`ir`: ≈ 13 kB at ≈ 29/s, ≈ 3 Mbit/s) is still the dearest single
+  topic. About half is now the ETC (`i16` dB of a noise envelope: ≈ 6.7 kB on the fake
+  rig); the IR is circular over 4 096 points, so the pane could take a decimated or
+  time-windowed span when zoomed, at the cost of a per-client request.

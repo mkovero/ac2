@@ -1896,7 +1896,7 @@ pub fn frames() -> Vec<Frame> {
                     dt: Seconds(1.0 / 12_000.0),
                     inserted_delay: Seconds(0.0125),
                 },
-                linear: vec![0.0, 0.5, -1.0, 0.25, f32::MIN_POSITIVE, -0.0],
+                linear: vec![0.0, 0.5, -1.0, 0.3, 1.0e-3, -0.0],
                 etc: Some(vec![-60.0, -6.0, 0.0, -12.0, -200.0, -200.0]),
             }),
         },

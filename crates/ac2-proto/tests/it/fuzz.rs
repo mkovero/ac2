@@ -1,6 +1,8 @@
 //! Property tests: random frames round-trip; malformed input never panics.
 
-use ac2_proto::frame::{ClipFlags, LevelsFrame, LevelsMeta, ProtectionFlags, TfFrame, TfMeta};
+use ac2_proto::frame::{
+    ClipFlags, IrFrame, LevelsFrame, LevelsMeta, ProtectionFlags, TfFrame, TfMeta,
+};
 use ac2_proto::model::{DelayPick, SplLogWhich};
 use ac2_proto::units::*;
 use ac2_proto::*;
@@ -54,6 +56,29 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
                 }),
             }
         })
+}
+
+fn ir_frame(linear: Vec<f32>) -> Frame {
+    let mut f = samples::frames()
+        .into_iter()
+        .find(|f| matches!(f.data, FrameData::Ir(_)))
+        .expect("an ir sample");
+    let FrameData::Ir(ir) = &mut f.data else {
+        unreachable!()
+    };
+    *ir = IrFrame {
+        etc: None,
+        linear,
+        ..ir.clone()
+    };
+    f
+}
+
+fn ir_linear(f: &Frame) -> &[f32] {
+    let FrameData::Ir(ir) = &f.data else {
+        panic!("not ir")
+    };
+    &ir.linear
 }
 
 fn levels_strategy() -> impl Strategy<Value = Frame> {
@@ -146,6 +171,13 @@ proptest! {
         } else {
             prop_assert!(back.is_err());
         }
+    }
+
+    #[test]
+    fn random_ir_frames_roundtrip(linear in prop::collection::vec(any_f32_bits(), 0..600)) {
+        let parts = encode_frame(&ir_frame(linear)).expect("sample message");
+        let back = decode_frame(&parts_ref(&parts)).expect("sample message");
+        prop_assert_eq!(encode_frame(&back).expect("sample message"), parts);
     }
 
     #[test]
@@ -275,6 +307,27 @@ proptest! {
             prop_assert!(d.min(360.0 - d) <= 0.005 + 2.0 * ulp(*p), "{} -> {}", p, phase[i]);
             prop_assert!((-180.0..180.0).contains(&phase[i]));
             prop_assert!((f64::from(coh[i]) - f64::from(*c)).abs() <= 5e-5 + 1e-7);
+        }
+    }
+
+    /// The linear IR is within 1/32 765 of its peak, at any scale of IR (half a mantissa
+    /// step; the f32 rounding of the decoded value is far smaller).
+    #[test]
+    fn ir_quantisation_stays_in_budget(
+        shape in prop::collection::vec(-1.0f32..=1.0, 1..600),
+        scale_exp in -60i32..40,
+    ) {
+        let scale = 2f32.powi(scale_exp) * 0.9;
+        let linear: Vec<f32> = shape.iter().map(|x| x * scale).collect();
+        let peak = linear.iter().fold(0.0f64, |m, x| m.max(f64::from(x.abs())));
+        let back = decode_frame(&parts_ref(&encode_frame(&ir_frame(linear.clone())).expect("encodes")))
+            .expect("decodes");
+        for (x, y) in linear.iter().zip(ir_linear(&back)) {
+            let ulp = f64::from(y.abs()) * f64::from(f32::EPSILON);
+            prop_assert!(
+                (f64::from(*x) - f64::from(*y)).abs() <= peak / 32_765.0 + ulp,
+                "{} -> {} (peak {})", x, y, peak
+            );
         }
     }
 }

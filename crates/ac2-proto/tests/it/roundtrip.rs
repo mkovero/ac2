@@ -331,6 +331,42 @@ fn malformed_frames_are_refused() {
     ));
 }
 
+/// The IR sample's payload: `ir_linear` (`bfp16`: exponent byte, 6 mantissas), `ir_etc`.
+#[test]
+fn malformed_ir_payloads_are_refused() {
+    let good = bytes_of(
+        &samples::frames()
+            .into_iter()
+            .find(|f| matches!(f.data, FrameData::Ir(_)))
+            .expect("an ir sample"),
+    );
+    let raw = miniz_oxide::inflate::decompress_to_vec(&good[2]).expect("payload");
+    assert_eq!(raw.len(), 1 + 6 * 2 + 6 * 2);
+    // 1.0 is the peak: 2^14 · 2^−14.
+    assert_eq!(raw[0] as i8, -14);
+    // Exponents above 113 would decode to ∞.
+    for e in [114u8, 127] {
+        let mut bad = raw.clone();
+        bad[0] = e;
+        let mut p = good.clone();
+        p[2] = miniz_oxide::deflate::compress_to_vec(&bad, 1);
+        assert_eq!(
+            decode_parts(&p),
+            Err(DecodeError::UndefinedCode(frame::ArrayName::IrLinear))
+        );
+    }
+    // The lowest exponent is a valid one.
+    let mut low = raw.clone();
+    low[0] = (-128i8) as u8;
+    let mut p = good.clone();
+    p[2] = miniz_oxide::deflate::compress_to_vec(&low, 1);
+    assert!(decode_parts(&p).is_ok());
+    // Without its exponent byte the payload is one byte short.
+    let mut p = good.clone();
+    p[2] = miniz_oxide::deflate::compress_to_vec(&raw[1..], 1);
+    assert!(matches!(decode_parts(&p), Err(DecodeError::Payload { .. })));
+}
+
 #[test]
 fn encode_refuses_ragged_arrays() {
     let mut f = samples::tf_frame();
@@ -518,6 +554,48 @@ fn codec_cost() {
     let dec = t0.elapsed() / rounds;
     println!(
         "tf 480 cols: {} B on the wire, encode {enc:?}, decode {dec:?}",
+        parts.iter().map(Vec::len).sum::<usize>()
+    );
+
+    // A live IR: 4096 points, a direct sound and a decaying noise tail over a −60 dB floor.
+    let mut f = samples::frames()
+        .into_iter()
+        .find(|f| matches!(f.data, FrameData::Ir(_)))
+        .expect("an ir sample");
+    let FrameData::Ir(ir) = &mut f.data else {
+        unreachable!()
+    };
+    let n = 4096usize;
+    ir.linear = (0..n)
+        .map(|i| {
+            let after = i.saturating_sub(n / 2) as f32;
+            let tail = if i >= n / 2 {
+                0.2 * (-after / 400.0).exp()
+            } else {
+                0.0
+            };
+            let direct = if i == n / 2 { 0.8 } else { 0.0 };
+            direct + (tail + 1e-3) * noise()
+        })
+        .collect();
+    ir.etc = Some(
+        ir.linear
+            .iter()
+            .map(|x| 20.0 * x.abs().max(1e-10).log10())
+            .collect(),
+    );
+    let t0 = std::time::Instant::now();
+    for _ in 0..rounds {
+        parts = bytes_of(&f);
+    }
+    let enc = t0.elapsed() / rounds;
+    let t0 = std::time::Instant::now();
+    for _ in 0..rounds {
+        std::hint::black_box(decode_parts(&parts).expect("decodes"));
+    }
+    let dec = t0.elapsed() / rounds;
+    println!(
+        "ir 4096 points: {} B on the wire, encode {enc:?}, decode {dec:?}",
         parts.iter().map(Vec::len).sum::<usize>()
     );
 }
