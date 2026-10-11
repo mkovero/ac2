@@ -386,19 +386,15 @@ impl App {
         let mut reqs = self.state.update(msg, &self.keymap);
         reqs.extend(self.state.sync_link());
         let panes = match what {
-            // The frequency axis moves while navigation settles; the last step settles it.
-            Touches::Tick if animating || self.state.animating() => {
-                vec![PaneKind::Transfer, PaneKind::Spectrum, PaneKind::Distortion]
+            Touches::Tick => {
+                let now = Instant::now();
+                tick_touches(
+                    animating || self.state.animating(),
+                    easing || self.state.bars_easing(now),
+                    gliding || self.state.spectrum_gliding(now),
+                )
             }
-            // The Leq bars glide to their newest frame; the last step lands them on it.
-            Touches::Tick if easing || self.state.bars_easing(Instant::now()) => {
-                vec![PaneKind::Spl]
-            }
-            // The live spectrum curves glide to their newest frame.
-            Touches::Tick if gliding || self.state.spectrum_gliding(Instant::now()) => {
-                vec![PaneKind::Spectrum]
-            }
-            Touches::Tick | Touches::Toasts => Vec::new(),
+            Touches::Toasts => Vec::new(),
             Touches::Data => data_touches(data.as_deref(), self.state.data.as_deref()),
             Touches::Mirror => match (&mirror, &self.state.mirror) {
                 (Some(a), Some(b)) if !crate::conn::mirror_differs(a, b) => Vec::new(),
@@ -508,10 +504,30 @@ impl App {
     }
 }
 
+/// The panes a frame tick rebuilds: every motion in progress moves its own panes on the same
+/// tick. A tick given to one motion alone stops the others: the spectrum curve would halt
+/// for the 0.3 s of each once-a-second Leq bar ease. The last step of each lands it.
+fn tick_touches(navigating: bool, bars_easing: bool, spectrum_gliding: bool) -> Vec<PaneKind> {
+    let mut panes = Vec::new();
+    // The frequency axis moves while navigation settles.
+    if navigating {
+        panes.extend([PaneKind::Transfer, PaneKind::Spectrum, PaneKind::Distortion]);
+    }
+    // The Leq bars glide to their newest frame.
+    if bars_easing {
+        panes.push(PaneKind::Spl);
+    }
+    // The live spectrum curves glide to their newest frame.
+    if spectrum_gliding && !panes.contains(&PaneKind::Spectrum) {
+        panes.push(PaneKind::Spectrum);
+    }
+    panes
+}
+
 /// Which panes a message can change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Touches {
-    /// The frame clock: only navigation in motion.
+    /// The frame clock: whatever is in motion ([`tick_touches`]).
     Tick,
     /// New frames: the panes drawing the topics whose picture changed.
     Data,
@@ -938,5 +954,26 @@ mod tests {
             vec![PaneKind::Spl]
         );
         assert_eq!(data_touches(None, Some(&old)), PaneKind::ALL.to_vec());
+    }
+
+    /// Every motion in progress moves its panes on a tick, whatever else moves with it: the
+    /// Leq bars easing after their once-a-second reading never hold the spectrum glide.
+    #[test]
+    fn a_tick_moves_every_pane_in_motion() {
+        assert!(tick_touches(false, false, false).is_empty());
+        assert_eq!(
+            tick_touches(false, true, true),
+            vec![PaneKind::Spl, PaneKind::Spectrum]
+        );
+        assert_eq!(
+            tick_touches(true, true, true),
+            vec![
+                PaneKind::Transfer,
+                PaneKind::Spectrum,
+                PaneKind::Distortion,
+                PaneKind::Spl
+            ]
+        );
+        assert_eq!(tick_touches(false, false, true), vec![PaneKind::Spectrum]);
     }
 }
