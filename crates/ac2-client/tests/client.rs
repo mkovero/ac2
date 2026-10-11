@@ -602,6 +602,28 @@ async fn consumers_wait_for_data_and_reuse_their_view() -> R {
     Ok(())
 }
 
+/// A frame waiting when its topic is dropped is not kept: the socket's readiness check has
+/// already taken it in, so the socket's own filter no longer sees it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_frame_waiting_at_unsubscribe_is_not_kept() -> R {
+    let f = fake()?;
+    let c = connect(&f).await?;
+    c.wait_synced(DEADLINE).await?;
+    c.subscribe(Subscription::Topic(TF1))?;
+    let mut seq = 0;
+    wait_frame(&c, &f, &mut seq).await?;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    c.latest()?;
+    seq += 1;
+    let fr = tf_with(&f, seq, None);
+    f.lock().publish(&fr);
+    assert!(c.wait_data(DEADLINE), "the frame arrives");
+    c.unsubscribe(Subscription::Topic(TF1))?;
+    let l = c.latest()?;
+    assert!(l.get(&TF1).is_none(), "kept after unsubscribe");
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn frame_age_uses_the_clock_offset() -> R {
     let f = FakeDaemon::start(FakeOptions {

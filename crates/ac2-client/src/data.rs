@@ -232,6 +232,12 @@ impl DataState {
             };
             read += 1;
             let Some(topic) = parts.first() else { continue };
+            // The SUB filters queued messages as they are read, except the one a readiness
+            // check (`ZMQ_EVENTS`) already took in: that one comes out unfiltered after its
+            // prefix is dropped, and kept now it would stay for good.
+            if !subscribed(&self.prefixes, topic) {
+                continue;
+            }
             match self.newest.get_mut(&**topic) {
                 Some(slot) => *slot = Some(parts),
                 None => {
