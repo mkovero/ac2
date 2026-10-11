@@ -82,6 +82,19 @@ files of such a session (or of a current one) one by one through `trace.import`'
 reader into the working state, and reports per file what was imported and what was refused
 (a CSV of another version names it).
 
+`ac2 session salvage` of a folder or file the CLI can read does more, on the client side
+(`crates/ac2-cli/src/cmd/salvage`): it reads the old manifest as JSON, builds each
+measurement configuration, saved-measurement field and trace edit in the current types —
+whole when it fits, otherwise field by field onto this version's default of that kind, with
+known moves (a format-23 `fft_len` becomes `resolution: fixed`) — and names every field it
+dropped or defaulted. It then issues the ordinary commands (`meas.create`, `meas.colour`,
+`meas.layout`, `delay.set`, `delay.track`, `trace.import`, `trace.update` with the restored
+owner, math channels last on the restored ids, `meas.start` where the open session captures
+the inputs). The daemon's loader keeps reading its own version only; a sweep (its level)
+and a math channel are never rebuilt from defaults. A format change that moves a setting
+adds an entry to `moved()` in `salvage/read.rs` and a fixture under
+`crates/ac2-cli/tests/fixtures/salvage`.
+
 ## App
 
 - **Sessions dialog** (Alt+S, the palette, or a click on the session name in the top bar):

@@ -1751,7 +1751,8 @@ Safety:
   fires. It keeps the audio session that is open.
 - A session of another format version is refused with the version named, and the dialog
   offers **Import its traces**: its traces come in as imported traces next to the current
-  ones. Nothing is converted or rewritten.
+  ones. Nothing is converted or rewritten. To bring back its measurements too, use
+  `ac2 session salvage` (below).
 
 | CLI | Does |
 |---|---|
@@ -1761,7 +1762,7 @@ Safety:
 | `ac2 session save-as <session> [--force]` | saves as another session; `--force` replaces an existing one |
 | `ac2 session load <session> [--discard]` | opens one, disarmed (`load`, because `session open` opens the audio session) |
 | `ac2 session recover` | brings back what the last `new` or `load` replaced |
-| `ac2 session salvage <session>` | imports the traces of a session that cannot be opened |
+| `ac2 session salvage <session>` | brings a session that cannot be opened (another format version) into the current measurements and traces (below) |
 | `ac2 session export <file> [--session <name>]` | writes an `.ac2session` file here: the working state or a saved session |
 | `ac2 session import <file> [--name <n>] [--force]` | stores a file or folder from here as a saved session on the daemon, without opening it |
 | `ac2 session list` | the daemon's saved sessions |
@@ -1770,6 +1771,31 @@ Safety:
 this machine (sent to the daemon in checked chunks). `new` and `load` with unsaved changes
 are refused (exit code 4) unless `--discard`. A client connected over the network never
 names folders on the daemon's machine; it uses names and files of its own.
+
+**Salvaging an older session.** After an update that changes the session format, the
+daemon sets its old autosave aside as `autosave.vN` (beside the new one) and starts empty.
+`ac2 session salvage <folder or .ac2session file>` on a machine where that folder or file
+is readable makes the old session again, adding to what is there:
+
+- each measurement with its name, kind and settings (FFT, window, averaging, smoothing,
+  transfer inputs, resolution and blocks, SPL weightings, Leq windows, limits, peaks,
+  horizon and warn margin, band windows, preset, predicted level and corrections), its
+  colour, its own pane layout, and a transfer's delay and tracking;
+- each stored trace with its name, colour, slot, offset, polarity, nudge, smoothing and
+  lock, under the measurement it belonged to; math channels on the restored measurements
+  and traces;
+- the measurements that were running are started when the open audio session captures
+  their inputs; open the audio session first.
+
+The old file is read setting by setting: a setting this version no longer has, or one it
+added that the old file lacks (this version's default is used), is named in the summary,
+which lists every item as restored or skipped. Not brought back: an SPL meter's
+per-second Leq history (its windows start again; the log stays in the old folder), a mic
+curve applied to a trace after capture (apply it again in the app), a
+delay's offset from the found arrival (the delay itself is applied) and where a trace came
+from (it reads as imported from its file). Run it once: a second run adds a second copy.
+With a session name, or a path that is only on the daemon's machine, only its traces are
+imported, as the dialog does.
 
 A session holds:
 

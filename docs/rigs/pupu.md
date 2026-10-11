@@ -65,10 +65,18 @@ binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap ev
    `cd ~/ac2-test && DISPLAY=:0 setsid nohup bin/ac2-ui --remote 192.168.9.27 > ui-net.log 2>&1 </dev/null &`.
    Screenshot: `DISPLAY=:0 xfce4-screenshooter -f -s <file>`.
 
-**When the session format changes**, the daemon sets the old autosave aside as `autosave.vN` and
-starts empty. Before such a deploy, save `bin/ac2 --remote 192.168.9.27 state dump` and
-`spl leq export --meas <name> <file>` on ketunkolo; afterwards recreate the measurements from
-the dump and `trace import` the CSVs in `autosave.vN/traces/` (copy them over with `scp -3`).
+**When the session format changes**, the daemon sets the old autosave aside as
+`~/.local/share/ac2/autosave.vN` and starts empty. After step 5 (audio reopened with the
+operator's inputs, so the running measurements can start), bring it back from ketunkolo;
+the CLI reads the folder, so copy it over first (pupu's daemon listens on the network only):
+`cd ~/ac2-test && scp -rq mui@192.168.9.27:.local/share/ac2/autosave.vN /tmp/ && bin/ac2 --remote 192.168.9.27 session salvage /tmp/autosave.vN`.
+It makes each measurement again with its settings, colour, layout, delay and tracking,
+puts each stored trace back under its measurement, rebuilds math channels, starts what was
+running, and prints a table of what was restored or skipped and every setting not read as
+saved; keep that summary in the deploy entry below. It does not bring back the SPL meters'
+per-second Leq history (their windows start again; before the deploy, `spl leq export
+--meas <name> <file>` keeps it) or a mic curve applied to a trace after capture. Run it once:
+a second run adds copies.
 The calibration store (`~/.config/ac2/calibrations.json`) survives unless its own format
 changes; then redo the electrical calibration with the operator.
 
