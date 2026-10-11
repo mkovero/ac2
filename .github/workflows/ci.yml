@@ -193,12 +193,13 @@ jobs:
       # WASAPI on a virtual cable, with the debug binaries built above: hosted Windows runners
       # have no audio endpoint. VB-CABLE gives a render endpoint looped into a capture one; it
       # is installed after the tests so they see the runner as it is. Outputs stay silent.
+      # They run after a failed test too: the binaries exist once the tests built them.
       - name: Virtual audio cable (VB-CABLE)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !cancelled()
         uses: LABSN/sound-ci-helpers@e9d6ba52163a3283714a68412036ddf33f78d49c # main, 2026-06
 
       - name: Windows Audio service
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !cancelled()
         shell: pwsh
         run: |
           foreach ($s in 'AudioEndpointBuilder', 'Audiosrv') {
@@ -210,7 +211,7 @@ jobs:
 
       # Groundwork for an ASIO backend: only that the driver registers itself.
       - name: FlexASIO driver
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !cancelled()
         shell: pwsh
         run: |
           $exe = Join-Path $env:RUNNER_TEMP 'FlexASIO-1.10b.exe'
@@ -222,7 +223,7 @@ jobs:
           Get-ItemProperty -Path 'HKLM:\SOFTWARE\ASIO\FlexASIO' | Format-List
 
       - name: ac2 on the virtual cable
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !cancelled()
         shell: pwsh
         run: tools/release/windows-virtual-audio.ps1 -Bin target/debug -LogDir virtual-audio-logs
 
