@@ -16,6 +16,7 @@ pub mod leq;
 pub mod loopback;
 pub mod mic_curve;
 pub mod mtw;
+pub mod multires;
 pub mod power_average;
 pub mod protection;
 pub mod resolution;

@@ -6,5 +6,6 @@ mod delay;
 mod mtw;
 mod mtw_delay;
 mod mtw_timing;
+mod multires_bench;
 mod rta_timing;
 mod spl_bench;
