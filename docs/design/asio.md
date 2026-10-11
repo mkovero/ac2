@@ -4,8 +4,10 @@
 `IAudioClient`s on two threads, a same-clock relation that the API cannot prove, and render
 xruns that are never reported (`spike-audio-duplex.md` §1). ASIO is the Windows path where
 one driver callback (`bufferSwitch`) serves capture and playback on one clock, like JACK.
-The operator rates it a must-have. PLAN.md §12, decision 1, leaves its licence open; §1
-below settles it.
+The operator rates it a must-have, and decided (W1 in `open-questions.md`) that it is the
+**only** Windows API: WASAPI is removed once this backend passes under Wine and on FlexASIO in
+Windows CI; devices without an ASIO driver use FlexASIO. PLAN.md §12, decision 1, leaves its
+licence open; §1 below settles it.
 
 ## 1. Licensing
 

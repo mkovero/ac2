@@ -4,7 +4,7 @@ Open-source live dual-channel FFT analyzer for PA system tuning. Successor to `a
 (`~/src/ac`). Goal: match the feature set of today's commercial live-tuning analyzers,
 then go beyond them on UX, networking and scriptability.
 
-- Platforms: Linux (JACK / PipeWire-JACK), macOS (CoreAudio), Windows (WASAPI, ASIO)
+- Platforms: Linux (JACK / PipeWire-JACK), macOS (CoreAudio), Windows (ASIO only, decision W1)
 - Language: Rust (stable), single Cargo workspace
 - Architecture: `core` (pure math) → `daemon` (owns audio + state) → frontends (`cli`, `ui`) over ZeroMQ, locally or across the network
 - UI: keyboard-first, GPU-accelerated, lightweight, smooth
@@ -210,7 +210,7 @@ fixtures from `tools/protocol`.
 | Need | Choice | Notes |
 |---|---|---|
 | FFT | `realfft` / `rustfft` | plans cached |
-| Audio | `jack` crate directly (not cpal's JACK host), `cpal` for CoreAudio/WASAPI; Linux is JACK only (JACK2 or pipewire-jack, decision L1) | ASIO feature opt-in; cpal has no duplex API and no exact hardware index — see `docs/design/spike-audio-duplex.md` |
+| Audio | `jack` crate directly (not cpal's JACK host), `cpal` for CoreAudio; Linux is JACK only (JACK2 or pipewire-jack, decision L1); Windows is ASIO only through azo (decision W1) | ASIO feature opt-in until WASAPI is removed; cpal has no duplex API and no exact hardware index — see `docs/design/spike-audio-duplex.md` |
 | Rings | `rtrb` | SPSC wait-free |
 | ZMQ | own thin binding over libzmq 4.3.5 + libsodium built from source (`zeromq-src`, `libsodium-sys-stable`) | `zmq` crate's vendored build has CURVE off; pure-Rust options lack CURVE or are too young — see `docs/design/spike-zmq-curve.md`. ZAP handler must be bound before CURVE sockets (fails open otherwise) |
 | Serialization | `rmp-serde` headers + raw `f32` LE arrays | decode via `bytemuck::try_cast_slice` with copy fallback on misalignment / big-endian |
@@ -626,7 +626,7 @@ Q7 calibration store (phase 5), Q8 phase comparison time reference (phase 4).
 ## 11. Packaging
 - Linux: tarball + AppImage, Flatpak later; daemon as systemd user unit; PipeWire-JACK works.
 - macOS: universal `.app`, signed + notarized, mic entitlement; optional launchd agent.
-- Windows: MSI; ASIO per license decision (§12).
+- Windows: MSI with ASIO (azo, MIT; `docs/design/asio.md`); FlexASIO for devices without an ASIO driver.
 
 ---
 
