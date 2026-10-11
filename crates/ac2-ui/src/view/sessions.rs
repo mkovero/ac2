@@ -12,6 +12,24 @@ use crate::theme::Chrome;
 /// Row height: a fingertip on a 7" touch screen.
 const ROW_H: f32 = 44.0;
 const WIDTH: f32 = 620.0;
+/// Every page's buttons are this size, so they line up page to page and take a finger.
+const BUTTON: [f32; 2] = [110.0, 40.0];
+
+/// The page's buttons (`ac2_scene::sessions::page_buttons`) in one row: the index clicked.
+fn buttons(ui: &mut egui::Ui, labels: &[&str]) -> Option<usize> {
+    let mut clicked = None;
+    ui.horizontal(|ui| {
+        for (i, l) in labels.iter().enumerate() {
+            if ui
+                .add_sized(BUTTON, egui::Button::new(RichText::new(*l).size(15.0)))
+                .clicked()
+            {
+                clicked = Some(i);
+            }
+        }
+    });
+    clicked
+}
 
 fn row(ui: &mut egui::Ui, selected: bool, title: &str, detail: &str, ch: &Chrome) -> bool {
     let mut job = egui::text::LayoutJob::default();
@@ -37,7 +55,9 @@ fn row(ui: &mut egui::Ui, selected: bool, title: &str, detail: &str, ch: &Chrome
     }
     ui.add_sized(
         [ui.available_width(), ROW_H],
-        egui::Button::selectable(selected, job),
+        // The text before a growing atom starts at the left edge: every title in the
+        // column lines up whatever the length of the detail under it.
+        egui::Button::selectable(selected, (job, egui::Atom::grow())),
     )
     .clicked()
 }
@@ -103,27 +123,18 @@ pub(super) fn sessions(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                             });
                     }
                     Page::Browse(b) => {
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_sized([90.0, 32.0], egui::Button::new("‹ Back"))
-                                .clicked()
-                            {
-                                msg = Some(SessionsMsg::Back);
-                            }
-                            if ui
-                                .add_sized([90.0, 32.0], egui::Button::new("Places"))
-                                .clicked()
-                            {
-                                msg = Some(SessionsMsg::Places);
-                            }
-                            ui.label(
-                                RichText::new(b.dir.as_ref().map_or_else(
-                                    || "Home and removable media".to_owned(),
-                                    |p| p.display().to_string(),
-                                ))
-                                .color(ch.dim),
-                            );
-                        });
+                        match buttons(ui, ac2_scene::sessions::page_buttons(d.page.scene())) {
+                            Some(0) => msg = Some(SessionsMsg::Places),
+                            Some(_) => msg = Some(SessionsMsg::Back),
+                            None => {}
+                        }
+                        ui.label(
+                            RichText::new(b.dir.as_ref().map_or_else(
+                                || "Home and removable media".to_owned(),
+                                |p| p.display().to_string(),
+                            ))
+                            .color(ch.dim),
+                        );
                         if let Some(e) = &b.error {
                             ui.label(RichText::new(e).color(ch.warn));
                         }
@@ -163,29 +174,19 @@ pub(super) fn sessions(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                         if let Some(e) = &n.error {
                             ui.label(RichText::new(e).color(ch.warn));
                         }
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_sized([90.0, 36.0], egui::Button::new("‹ Back"))
-                                .clicked()
-                            {
-                                msg = Some(SessionsMsg::Back);
-                            }
-                            if ui
-                                .add_sized([90.0, 36.0], egui::Button::new("Save"))
-                                .clicked()
-                            {
-                                msg = Some(SessionsMsg::Submit);
-                            }
-                        });
+                        ui.add_space(6.0);
+                        match buttons(ui, ac2_scene::sessions::page_buttons(d.page.scene())) {
+                            Some(0) => msg = Some(SessionsMsg::Submit),
+                            Some(_) => msg = Some(SessionsMsg::Back),
+                            None => {}
+                        }
                     }
                 }
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new(
-                        "↑↓ choose · Enter opens · Backspace: up a folder · Esc: back / close",
-                    )
-                    .small()
-                    .color(ch.dim),
+                    RichText::new(ac2_scene::sessions::page_hint(d.page.scene()))
+                        .small()
+                        .color(ch.dim),
                 );
             });
         });

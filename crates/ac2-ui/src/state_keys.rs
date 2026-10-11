@@ -304,10 +304,7 @@ impl AppState {
     ) {
         let before = std::mem::discriminant(&self.overlay);
         self.command(c, keymap, out);
-        let opened_text = matches!(
-            self.overlay,
-            Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_) | Overlay::Settings(_)
-        );
+        let opened_text = self.overlay.takes_text();
         if opened_text && std::mem::discriminant(&self.overlay) != before {
             self.swallow_text = typed_char(&chord);
         }

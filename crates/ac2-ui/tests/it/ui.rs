@@ -4016,3 +4016,83 @@ fn transfer_legend_many_curves() {
     assert_eq!([kept.x, kept.y], [1.0, 1.0]);
     assert!(kept.max_width < width);
 }
+
+/// Alt+S: the Sessions dialog's actions in one left-aligned column; Save as takes a name
+/// typed through the app's real input path (key press, then its text, as egui delivers it),
+/// letters that are shortcuts elsewhere included; Esc backs out.
+#[test]
+fn sessions_dialog_save_as() {
+    use ac2_ui::sessions::Page;
+    if !have_gpu("sessions_dialog_save_as") {
+        return;
+    }
+    let fake = ac2_client::fake::FakeDaemon::start(common::fake_options()).expect("fake daemon");
+    let mut h = harness(options_at(Some(fake.endpoints())));
+    step_until(&mut h, "synced", |a| {
+        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+    });
+    h.key_press_modifiers(Modifiers::ALT, Key::S);
+    step_until(&mut h, "the dialog, listed", |a| {
+        a.state
+            .sessions_dialog()
+            .is_some_and(|d| d.daemon.is_some())
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "sessions_dialog");
+    let save_as = h
+        .state()
+        .state
+        .sessions_rows(ac2_proto::units::WallNs(0))
+        .iter()
+        .position(|r| r.title == "Save as…")
+        .expect("a Save as row");
+    for _ in 0..save_as {
+        h.key_press(Key::ArrowDown);
+    }
+    h.key_press(Key::Enter);
+    step_until(&mut h, "the name page", |a| {
+        a.state
+            .sessions_dialog()
+            .is_some_and(|d| matches!(d.page, Page::Name(_)))
+    });
+    // The suggested name goes; Backspace held repeats on the name.
+    for _ in 0..40 {
+        h.key_press(Key::Backspace);
+    }
+    let keys = [
+        (Key::F, "F"),
+        (Key::A, "a"),
+        (Key::W, "w"),
+        (Key::Q, "q"),
+        (Key::G, "g"),
+        (Key::N, "n"),
+        (Key::Space, " "),
+        (Key::Num2, "2"),
+    ];
+    for (k, t) in keys {
+        h.key_press(k);
+        h.event(Event::Text(t.into()));
+    }
+    h.key_press(Key::Tab);
+    h.step();
+    {
+        let Some(Page::Name(n)) = h.state().state.sessions_dialog().map(|d| &d.page) else {
+            panic!("{:?}", h.state().state.overlay);
+        };
+        assert_eq!(n.text, "Fawqgn 2");
+    }
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "sessions_dialog_save_as");
+    // The fake keeps no session directory, so the save itself is the reducer tests'
+    // (`state_sessions_tests`); Esc backs out to the actions, a second Esc closes.
+    h.key_press(Key::Escape);
+    step_until(&mut h, "back on the actions", |a| {
+        a.state
+            .sessions_dialog()
+            .is_some_and(|d| d.page == Page::Main)
+    });
+    h.key_press(Key::Escape);
+    step_until(&mut h, "closed", |a| a.state.overlay == Overlay::None);
+}

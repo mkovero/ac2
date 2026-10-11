@@ -346,6 +346,42 @@ pub fn entry_label(kind: EntryKind, name: &str) -> String {
     }
 }
 
+/// Which page of the Sessions dialog is showing, for its buttons and key hint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialogPage {
+    /// The actions and the recent sessions.
+    Main,
+    /// The file browser.
+    Browse,
+    /// A name typed for Save as (`export: false`) or an export file.
+    Name { export: bool },
+}
+
+/// The page's buttons, in one row of equal buttons: the confirming verb first and the way
+/// back last, as every other dialog's Apply · Cancel.
+pub fn page_buttons(p: DialogPage) -> &'static [&'static str] {
+    match p {
+        DialogPage::Main => &[],
+        DialogPage::Browse => &["Places", "Back"],
+        DialogPage::Name { export: false } => &["Save", "Cancel"],
+        DialogPage::Name { export: true } => &["Export", "Cancel"],
+    }
+}
+
+/// The key hint under the page.
+pub fn page_hint(p: DialogPage) -> &'static str {
+    match p {
+        DialogPage::Main => "↑↓ choose · Enter opens · Esc closes",
+        DialogPage::Browse => "↑↓ choose · Enter opens · Backspace: up a folder · Esc: back",
+        DialogPage::Name { export: false } => {
+            "type the name · Enter saves · Backspace erases · Esc: back"
+        }
+        DialogPage::Name { export: true } => {
+            "type the name · Enter exports · Backspace erases · Esc: back"
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,6 +516,28 @@ mod tests {
         assert_eq!(
             entry_label(EntryKind::Archive, "fri.ac2session"),
             "fri.ac2session  (session file)"
+        );
+    }
+
+    #[test]
+    fn every_page_confirms_first_and_backs_out_last() {
+        assert!(page_buttons(DialogPage::Main).is_empty());
+        assert_eq!(page_buttons(DialogPage::Browse), ["Places", "Back"]);
+        assert_eq!(
+            page_buttons(DialogPage::Name { export: false }),
+            ["Save", "Cancel"]
+        );
+        assert_eq!(
+            page_buttons(DialogPage::Name { export: true }),
+            ["Export", "Cancel"]
+        );
+        assert_eq!(
+            page_hint(DialogPage::Name { export: false }),
+            "type the name · Enter saves · Backspace erases · Esc: back"
+        );
+        assert_eq!(
+            page_hint(DialogPage::Browse),
+            "↑↓ choose · Enter opens · Backspace: up a folder · Esc: back"
         );
     }
 }

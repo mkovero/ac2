@@ -448,10 +448,7 @@ impl App {
     /// Keyboard and text events → reducer. Handled events are removed so egui widgets never
     /// also act on them (Space must not click a focused button, Tab must not move focus).
     fn input(&mut self, ctx: &egui::Context) {
-        let text_overlay = matches!(
-            self.state.overlay,
-            Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_) | Overlay::Settings(_)
-        );
+        let text_overlay = self.state.overlay.takes_text();
         let events = ctx.input_mut(|i| {
             let (mine, rest): (Vec<Event>, Vec<Event>) =
                 std::mem::take(&mut i.events).into_iter().partition(|e| {

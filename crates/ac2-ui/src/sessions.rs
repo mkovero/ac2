@@ -216,6 +216,19 @@ pub enum Page {
     Name(NameEntry),
 }
 
+impl Page {
+    /// The page as `ac2_scene::sessions` names it, for its buttons and key hint.
+    pub fn scene(&self) -> text::DialogPage {
+        match self {
+            Page::Main => text::DialogPage::Main,
+            Page::Browse(_) => text::DialogPage::Browse,
+            Page::Name(n) => text::DialogPage::Name {
+                export: matches!(n.purpose, NamePurpose::ExportAs { .. }),
+            },
+        }
+    }
+}
+
 /// The Sessions dialog.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionsDialog {

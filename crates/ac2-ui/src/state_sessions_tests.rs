@@ -369,3 +369,63 @@ fn the_top_bar_label_and_the_palette() {
         from: Source::Here("/x".into()),
     };
 }
+
+/// Save as with a name full of letters that are shortcuts elsewhere (A, F, W, Q, G, N, Tab):
+/// every key press types, none runs its command, and Enter saves under that name.
+#[test]
+fn save_as_types_shortcut_letters_into_the_name() {
+    let mut t = with_working(true, named("sat"));
+    dialog(&mut t);
+    let i = row(&t, "Save as…");
+    assert!(click(&mut t, SessionsMsg::Row(i)).is_empty());
+    assert!(t.st.overlay.takes_text(), "the name page takes typed text");
+    // The suggested name goes; the typed one comes in key by key, as egui delivers it.
+    for _ in 0..8 {
+        t.key("Backspace");
+    }
+    let mut r = Vec::new();
+    for (k, c) in [
+        ("Shift+A", "A"),
+        ("F", "f"),
+        ("W", "w"),
+        ("Q", "q"),
+        ("G", "g"),
+        ("N", "n"),
+        ("Space", " "),
+        ("S", "s"),
+        ("H", "h"),
+    ] {
+        r.extend(t.type_key(k, c));
+    }
+    r.extend(t.key("Tab"));
+    assert!(r.is_empty(), "no shortcut ran: {r:?}");
+    let Some(SPage::Name(n)) = t.st.sessions_dialog().map(|d| &d.page) else {
+        panic!("{:?}", t.st.overlay)
+    };
+    assert_eq!(n.text, "Afwqgn sh");
+    let r = t.key("Enter");
+    assert_eq!(
+        job(&r),
+        [SessionStep::Save {
+            session: SessionRef::Name {
+                name: "Afwqgn sh".into()
+            },
+            overwrite: false,
+        }]
+    );
+}
+
+/// Esc on the name page goes back to the first page (nothing saved); a second Esc closes.
+#[test]
+fn save_as_esc_backs_out_without_saving() {
+    let mut t = with_working(true, named("sat"));
+    dialog(&mut t);
+    let i = row(&t, "Save as…");
+    click(&mut t, SessionsMsg::Row(i));
+    t.type_key("X", "x");
+    assert!(t.key("Escape").is_empty());
+    assert_eq!(t.st.sessions_dialog().map(|d| &d.page), Some(&SPage::Main));
+    assert!(!t.st.overlay.takes_text(), "the lists take keys, not text");
+    assert!(t.key("Escape").is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+}

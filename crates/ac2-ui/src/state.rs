@@ -693,6 +693,19 @@ impl Overlay {
         matches!(self, Overlay::Help | Overlay::Notifications)
     }
 
+    /// A window that takes typed text: every text event goes to it, never to a shortcut
+    /// or a widget behind it. The Sessions dialog types only on its name page; its lists
+    /// keep a held Backspace from climbing several folders.
+    pub fn takes_text(&self) -> bool {
+        match self {
+            Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_) | Overlay::Settings(_) => {
+                true
+            }
+            Overlay::Sessions(d) => matches!(d.page, crate::sessions::Page::Name(_)),
+            _ => false,
+        }
+    }
+
     /// The Settings view, when open.
     pub fn settings(&self) -> Option<&Settings> {
         match self {
