@@ -94,6 +94,11 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # The ASIO backend (feature `asio`) compiles only for Windows.
+      - name: clippy (asio)
+        if: runner.os == 'Windows'
+        run: cargo clippy -p ac2-audio -p ac2d -p ac2-cli --all-targets --locked --features ac2-audio/asio,ac2d/asio,ac2-cli/asio -- -D warnings
+
       - name: Disk headroom
         if: always()
         shell: bash
@@ -190,6 +195,20 @@ jobs:
       - name: doctests
         run: cargo test --workspace --locked --doc
 
+      # ASIO build of the daemon and CLI, over the debug binaries above: it still offers cpal,
+      # so the WASAPI pass below runs on it too (with --backend cpal). The backend's own unit
+      # tests run again with the real driver module compiled in.
+      - name: build (asio)
+        if: runner.os == 'Windows' && !cancelled()
+        run: |
+          cargo build -p ac2d -p ac2-cli --locked --features ac2d/asio,ac2-cli/asio
+          cargo nextest run -p ac2-audio --locked --features asio -E 'test(/asio/)'
+
+      - name: No VC++ runtime imports (asio)
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: tools/release/check-windows-deps.ps1 target/debug/ac2.exe target/debug/ac2d.exe
+
       # WASAPI on a virtual cable, with the debug binaries built above: hosted Windows runners
       # have no audio endpoint. VB-CABLE gives a render endpoint looped into a capture one; it
       # is installed after the tests so they see the runner as it is. Outputs stay silent.
@@ -216,7 +235,8 @@ jobs:
             Set-ItemProperty -Path $k -Name Value -Value Allow
           }
 
-      # Groundwork for an ASIO backend: only that the driver registers itself.
+      # FlexASIO (MIT): an ASIO driver over WASAPI, the ASIO path for devices without a
+      # vendor driver, and here the only ASIO driver on a hosted runner.
       - name: FlexASIO driver
         if: runner.os == 'Windows' && !cancelled()
         shell: pwsh
@@ -233,6 +253,11 @@ jobs:
         if: runner.os == 'Windows' && !cancelled()
         shell: pwsh
         run: tools/release/windows-virtual-audio.ps1 -Bin target/debug -LogDir virtual-audio-logs
+
+      - name: ac2 on FlexASIO (ASIO)
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: tools/release/windows-asio.ps1 -Bin target/debug -LogDir virtual-audio-logs/asio
 
       - name: Upload virtual-audio logs
         if: runner.os == 'Windows' && !cancelled()
