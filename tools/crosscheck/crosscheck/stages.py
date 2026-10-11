@@ -729,6 +729,8 @@ def ambient_stage(ctx: Ctx, cal: dict, cal_file: str | None):
         cap = ctx.ac2.capture(name, f"{name}-cap") or {}
         ctx.ac2.export_trace(cap.get("id") or f"{name}-cap", d / "ac2_rta.csv")
         ctx.ac2.run("meas", "stop", name, json_out=False, check=False)
+        # the export holds what the analysis needs; the rig's session keeps none of the run
+        ctx.ac2.meas_rm(name)
         _j(d / "window.json", {"seconds": secs, "starts_unix": starts,
                                "skew_s": max(starts.values()) - min(starts.values()),
                                "ac2_rta_average": rta_avg})
