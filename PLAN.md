@@ -430,7 +430,7 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an embedded 
   protected vs below floor).
 - Bounds: max frame size and array length validated before decode; malformed frame →
   dropped and counted, never panics.
-- TF frame (mag + phase + coh, ~480 cols) ≈ 6 KB. Up to 60 fps per measurement locally, 30 default remote (raisable) ≈ 180 KB/s; UI interpolates to display refresh.
+- TF frame (mag + phase + coh, ~480 cols) ≈ 2.4 KB packed (16-bit, deflated; `docs/design/wire-slim.md`). Up to 60 fps per topic, local and remote; UI interpolates to display refresh.
 - Large blobs (raw captures) via chunked binary ctrl transfer, never base64.
 - Cross-language fixtures: Rust encodes, Python decodes (and back) in CI.
 

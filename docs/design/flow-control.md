@@ -6,7 +6,7 @@ Status: design, not implemented. The current publisher is described in
 ## Problem
 
 The daemon's I/O thread keeps a latest slot per topic and sends a dirty slot at most at the
-publish rate (60 fps local, 30 network). The data socket is an XPUB, which queues per peer
+publish rate (60 fps, local and network). The data socket is an XPUB, which queues per peer
 up to `SNDHWM` messages and then silently drops the *newest* message for that peer. For a
 peer that reads slower than the publish rate (a laptop on Wi-Fi, a Pi's uplink) the queue
 is always full:

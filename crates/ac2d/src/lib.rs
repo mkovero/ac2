@@ -407,10 +407,7 @@ impl Daemon {
             (Listen::Inproc { .. }, ..) => control::rig::ServerSetup::Embedded,
             _ => control::rig::ServerSetup::Local { ctrl: ctrl.clone() },
         };
-        let fps = config
-            .publish_fps
-            .unwrap_or(if network { 30 } else { 60 })
-            .max(1);
+        let fps = config.publish_fps.max(1);
         let interest = Arc::new(Interest::default());
         let (tx, rx) = std::sync::mpsc::channel();
         let io = io::spawn(

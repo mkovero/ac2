@@ -55,8 +55,8 @@ id it doesn't know.
 
 Daemon:
 - Each job writes its newest result to a per-topic latest slot. The publisher sends each
-  dirty slot at most at the topic's rate: 60 fps for local transports, 30 for network,
-  configurable per subscriber class (2b).
+  dirty slot at most at the topic's rate: 60 fps for every transport since packed frames
+  (`wire-slim.md`), configurable per daemon (2b).
 - XPUB: `XPUB_VERBOSE`, per-peer `SNDHWM` = 48 (one burst: a full desk's ~40 topics plus
   events and keepalives; libzmq does not see a peer's reads during a burst, so a smaller
   queue drops part of every round; a larger one only lengthens the standing delay in front

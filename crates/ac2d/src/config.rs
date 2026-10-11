@@ -30,8 +30,10 @@ pub struct DaemonConfig {
     pub replay: ReplayLimits,
     /// Per-client request-id dedup window.
     pub dedup: DedupLimits,
-    /// Frames per second per topic; `None` = 60 for local transports, 30 for network.
-    pub publish_fps: Option<u32>,
+    /// Most frames per second per topic, local and network alike: the packed frames
+    /// (`docs/design/wire-slim.md`) keep a full tuning session at this rate within a Wi-Fi or
+    /// VPN link.
+    pub publish_fps: u32,
     /// Keepalive period (Q2: 250 ms).
     pub keepalive: Duration,
     /// Where `file.save` / `file.load` put sessions given by name.
@@ -138,6 +140,9 @@ impl fmt::Debug for DaemonConfig {
 }
 
 impl DaemonConfig {
+    /// Default [`Self::publish_fps`]: the display refresh the UI interpolates to.
+    pub const PUBLISH_FPS: u32 = 60;
+
     /// Default limits (Q2/Q5/Q6) for `backend` (the only one offered) listening on
     /// `listen`, with a global maximum of `max_level_dbfs`.
     pub fn new(backend: Arc<dyn Backend>, listen: Listen, max_level_dbfs: f64) -> Self {
@@ -149,7 +154,7 @@ impl DaemonConfig {
             lease_expiry: Duration::from_millis(1500),
             replay: ReplayLimits::default(),
             dedup: DedupLimits::default(),
-            publish_fps: None,
+            publish_fps: Self::PUBLISH_FPS,
             keepalive: Duration::from_millis(250),
             session_dir: ac2_paths::session_dir(),
             cal_store: None,

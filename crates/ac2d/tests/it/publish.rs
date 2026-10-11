@@ -183,7 +183,7 @@ fn batched_hand_off_keeps_publish_rates() {
 fn a_slow_spectrum_goes_when_it_is_formed() {
     init_log();
     let mut cfg = config(realtime_rig(), inproc("slow-spectrum"));
-    cfg.publish_fps = Some(10);
+    cfg.publish_fps = 10;
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/spec"]);
     c.ok(Command::SessionOpen {
