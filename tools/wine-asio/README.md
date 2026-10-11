@@ -34,10 +34,42 @@ probe:in_1` connected in JACK), `jackd.log`. Cargo cache: `$CACHE_DIR/target` (d
 and `--ulimit memlock=-1` (JACK clients mlock their shared memory; without it wineasio
 cannot open its client); cargo uses `CARGO_BUILD_JOBS=4`.
 
+## ac2's backend: `ac2.sh`
+
+`tools/wine-asio/ac2.sh` (needs the image from `run.sh`) cross-builds ac2d and ac2 with
+`--features asio`, plus `ac2-loop/` (a standalone check on ac2-audio, never shipped), for
+`x86_64-pc-windows-msvc`, and runs them on WineASIO with JACK's dummy driver
+(`WINEASIO_CLIENT_NAME=ac2`):
+
+1. `ac2 selftest duplex --backend asio` for `SECONDS_REC` (30) s, silent, in process:
+   block continuity, xruns, both clocks.
+2. `ac2-loop`: the device list (WineASIO's channel names), then `CYCLES` (20) opens of
+   WineASIO through `AsioBackend`, each a new driver load and stream origin, with a
+   -20 dBFS single-sample impulse every 4800 samples on output 1; the script keeps
+   `ac2:out_1 → ac2:in_1` connected inside JACK. Every impulse's delay on the stream's
+   shared index must be the same in every cycle. `ac2-loop` refuses any driver but
+   WineASIO.
+3. `ac2-loop MODE=bufsize` (silent): `jack_bufsize` to twice the period mid-stream;
+   wineasio asks for a reset, the stream must end, and a new open must come up at the new
+   size with an unbroken index — the backend's half of the daemon's recovery.
+
+The daemon is built but not run. Under Wine 10, `ac2` gets no reply from `ac2d` over
+loopback TCP: both sit idle in libzmq (the daemon's io thread in `zmq_poll`, its reactor in
+wepoll), with the TCP connection established. Building libzmq with the `select` poller for
+both did not change it. This is ZeroMQ under Wine, not ASIO; the daemon session on ASIO is
+covered by Windows CI on FlexASIO (`tools/release/windows-asio.ps1`).
+
+The build uses CI's pinned prebuilt MSVC libsodium (`tools/release/fetch-libsodium.sh`);
+`sodium-make` stands in for `make` in libsodium's source tree, because
+libsodium-sys-stable builds from source first and that cannot target MSVC from Linux.
+
+Logs in `out/ac2/`. Caches: `$CACHE_DIR/ac2-target` (cargo target), `$CACHE_DIR/registry`
+and `$CACHE_DIR/git` (cargo downloads; the build fetches crates, so it needs the network).
+
 ## Image
 
 - Debian trixie (digest-pinned), Wine 10.0 (64-bit prefix), JACK2 1.9.22 + example tools,
-  LLVM 19, MinGW-w64 GCC 14.
+  LLVM 19, MinGW-w64 GCC 14, jq.
 - wineasio 1.3.0 from source (`make 64`; Debian keeps Wine's headers in
   `/usr/include/wine/wine/windows`, passed as `WINEBUILD_INCLUDEDIR`), `wineasio64.dll`
   registered with `regsvr32`. Registry: 2 in / 2 out, no connection to JACK system ports.

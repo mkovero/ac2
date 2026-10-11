@@ -1,0 +1,13 @@
+[package]
+name = "wine-asio-ac2-loop"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+# Standalone: not a member of the ac2 workspace (it emits impulses, so it never ships). The
+# empty [workspace] table stops cargo from walking up to the repo root manifest.
+[workspace]
+
+[dependencies]
+ac2-audio = { path = "../../../crates/ac2-audio", features = ["asio"] }

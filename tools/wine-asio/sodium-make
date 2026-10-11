@@ -1,0 +1,15 @@
+#!/bin/sh
+# `make` for ac2.sh's cross build. libsodium-sys-stable configures and makes libsodium from
+# source before it tries its prebuilt MSVC archive, and that source build cannot target MSVC
+# from Linux (and fails hard instead of falling back). Inside the configured libsodium tree
+# this installs the pinned prebuilt static library from $SODIUM_DIST_DIR (the archive
+# tools/release/fetch-libsodium.sh checks, the one CI links) where the build script then
+# looks for it; any other make runs the real one.
+if [ -f src/libsodium/include/sodium.h ] && [ -f Makefile ] && grep -q '^PACKAGE_NAME = libsodium' Makefile; then
+    prefix=$(sed -n 's/^prefix = //p' Makefile)
+    mkdir -p "$prefix/lib"
+    unzip -p "$SODIUM_DIST_DIR/libsodium-1.0.22-stable-msvc.zip" \
+        libsodium/x64/Release/v143/static/libsodium.lib > "$prefix/lib/libsodium.lib"
+    exit 0
+fi
+exec /usr/bin/make "$@"

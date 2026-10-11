@@ -118,3 +118,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work
+
+# jq reads ac2's --json replies in ac2.sh.
+ARG JQ_VERSION=1.7.1-6+deb13u4
+RUN apt-get update && apt-get install -y --no-install-recommends jq=${JQ_VERSION} \
+    && rm -rf /var/lib/apt/lists/*
