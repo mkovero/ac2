@@ -356,6 +356,29 @@ recreating measurements 1–14 in id order, `trace import` of `autosave.vN/trace
   checkout once and failed on types the checkout no longer had; touching the sources
   (`find crates -name '*.rs' -exec touch {} +`) fixed it.
 
+## Deploy of 6f0e5b57 (2026-10-11, all three hosts)
+
+Protocol 39, session format 22. One deploy for a round of features: live frame arrays packed
+(16-bit curves in one deflated payload) and the daemon publishing at 60 fps on network
+transports too; Sessions dialog (Alt+S); transfer Magnitude view and the Response stack;
+FFT size, window and colour editable after creation; F full screen; Audio and Inputs &
+outputs on one Settings page; IR import form. `transfer_view = "response"` in `ui.toml` was
+changed to `"magnitude"` on ketunkolo and the Pi, each with its app stopped, because the old
+value makes the app drop the whole `[layout]` section. The operator had the pupu session
+cleared just before; the old autosave is kept as `autosave.scratched-2026-10-11`. Only
+"FOH SPL" was made again (in 1, C/slow, LCeq 1–60 min ≤ 80 dB, LCpeak 140, LAFmax 115,
+`finland-545-lf` bands), and its settings match the old autosave exactly. On ketunkolo,
+`frame_probe` showed levels at 60.1 frames/s with no skipped sequence numbers, frames
+1.0 ms old at arrival (p50). The fake-rig tuning session in `crates/ac2d/tests/wire_size.rs`
+went from 7.6 Mbit/s at 30 fps to 3.2 Mbit/s at 60 fps (`docs/design/wire-slim.md`).
+
+## Deploy of 4784ea9f (2026-10-10, all three hosts)
+
+Protocol and session format unchanged. A slow result is sent as soon as it is ready instead of
+waiting for its slot, and the app reads frames as they arrive. `frame_probe` from ketunkolo
+showed spectrum frames 83 ms apart (p50). The 1 frame/s pauses in the app on ketunkolo came
+from X screen blanking, not from ac2: the screen saver was turned off and DPMS kept at 60 min.
+
 ## Deploy of 1e026209 (2026-10-10, all three hosts)
 
 Protocol 35, session format 20 (unchanged): the Leq and band Leq bars glide 0.3 s to each new
