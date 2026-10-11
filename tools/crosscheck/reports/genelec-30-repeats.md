@@ -14,7 +14,7 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 | genelec.sine_mag.REW offline@1000Hz | dB | 2 | -0.624 | 0.015 | -0.635 | -0.613 | no | no | 2/2 (>0.3) |  | 2×INCONCLUSIVE |
 | genelec.sine_mag.REW offline@100Hz | dB | 2 | -0.153 | 0.021 | -0.167 | -0.138 | no | no | 0/2 (>0.3) |  | 1×INCONCLUSIVE, 1×PASS |
 | genelec.sine_mag.REW offline@2000Hz | dB | 2 | -1.542 | 0.020 | -1.556 | -1.528 | no | no | 2/2 (>0.3) |  | 2×INCONCLUSIVE |
-| genelec.sine_mag.REW offline@200Hz | dB | 2 | +0.300 | 0.011 | +0.292 | +0.307 | no | no | 1/2 (>0.3) |  | 1×INCONCLUSIVE, 1×METHOD |
+| genelec.sine_mag.REW offline@200Hz | dB | 2 | +0.300 | 0.011 | +0.292 | +0.307 | no | no | 1/2 (>0.3) |  | 1×INCONCLUSIVE, 1×WARN |
 | genelec.sine_mag.REW offline@5000Hz | dB | 2 | -0.136 | 0.124 | -0.224 | -0.048 | no | yes | 0/2 (>0.3) |  | 2×PASS |
 | genelec.sine_mag.REW offline@500Hz | dB | 2 | +0.079 | 0.006 | +0.075 | +0.083 | no | no | 0/2 (>0.3) |  | 2×PASS |
 | genelec.sine_mag.REW offline@50Hz | dB | 2 | +0.244 | 0.020 | +0.230 | +0.258 | no | no | 0/2 (>0.3) |  | 2×INCONCLUSIVE |
@@ -25,7 +25,7 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@1000Hz | dB | 2 | -0.609 | 0.014 | -0.619 | -0.599 | no | no | 2/2 (>0.3) |  | 2×INCONCLUSIVE |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@100Hz | dB | 2 | -0.077 | 0.007 | -0.083 | -0.072 | no | no | 0/2 (>0.3) |  | 1×INCONCLUSIVE, 1×PASS |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@2000Hz | dB | 2 | -1.436 | 0.007 | -1.441 | -1.431 | no | no | 2/2 (>0.3) |  | 2×INCONCLUSIVE |
-| genelec.sine_mag.ac2 sweep 20Hz-5.5s@200Hz | dB | 2 | +0.306 | 0.002 | +0.305 | +0.307 | no | no | 2/2 (>0.3) |  | 1×INCONCLUSIVE, 1×METHOD |
+| genelec.sine_mag.ac2 sweep 20Hz-5.5s@200Hz | dB | 2 | +0.306 | 0.002 | +0.305 | +0.307 | no | no | 2/2 (>0.3) |  | 1×INCONCLUSIVE, 1×WARN |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@5000Hz | dB | 2 | +0.118 | 0.047 | +0.085 | +0.152 | no | no | 0/2 (>0.3) |  | 2×PASS |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@500Hz | dB | 2 | +0.080 | 0.006 | +0.076 | +0.085 | no | no | 0/2 (>0.3) |  | 2×PASS |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@50Hz | dB | 2 | +0.190 | 0.102 | +0.118 | +0.262 | no | no | 0/2 (>0.3) |  | 2×INCONCLUSIVE |
@@ -228,7 +228,7 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 | check | unit | takes | mean | sd | min | max | 0 in range | 0 in mean±2se | >pass | spread | statuses |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | genelec.sine_mag.REW offline@10000Hz | dB | 3 | +0.575 | 0.594 | -0.097 | +1.029 | yes | yes | 2/3 (>0.3) |  | 2×INCONCLUSIVE, 1×PASS |
-| genelec.sine_mag.REW offline@1000Hz | dB | 3 | -0.309 | 0.025 | -0.337 | -0.289 | no | no | 2/3 (>0.3) |  | 2×METHOD, 1×PASS |
+| genelec.sine_mag.REW offline@1000Hz | dB | 3 | -0.309 | 0.025 | -0.337 | -0.289 | no | no | 2/3 (>0.3) |  | 1×PASS, 2×WARN |
 | genelec.sine_mag.REW offline@100Hz | dB | 3 | -0.073 | 0.027 | -0.100 | -0.047 | no | no | 0/3 (>0.3) |  | 2×INCONCLUSIVE, 1×PASS |
 | genelec.sine_mag.REW offline@2000Hz | dB | 3 | -0.667 | 0.011 | -0.677 | -0.655 | no | no | 3/3 (>0.3) |  | 3×INCONCLUSIVE |
 | genelec.sine_mag.REW offline@200Hz | dB | 3 | +0.028 | 0.017 | +0.008 | +0.039 | no | no | 0/3 (>0.3) |  | 3×PASS |
@@ -241,7 +241,7 @@ Signed values across takes: sd is the sample standard deviation (n − 1); `0 in
 | genelec.sine_mag.ac2 TF@500Hz | dB | 5 | +0.010 | 0.024 | -0.011 | +0.050 | yes | yes | 0/5 (>0.3) |  | 5×PASS |
 | genelec.sine_mag.ac2 TF@50Hz | dB | 1 | +0.042 |  | +0.042 | +0.042 |  |  | 0/1 (>0.3) |  | 1×INCONCLUSIVE |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@10000Hz | dB | 5 | +0.817 | 0.444 | +0.061 | +1.178 | no | no | 4/5 (>0.3) |  | 1×FAIL, 2×INCONCLUSIVE, 1×PASS, 1×WARN |
-| genelec.sine_mag.ac2 sweep 20Hz-5.5s@1000Hz | dB | 5 | -0.334 | 0.020 | -0.359 | -0.306 | no | no | 5/5 (>0.3) |  | 2×METHOD, 3×WARN |
+| genelec.sine_mag.ac2 sweep 20Hz-5.5s@1000Hz | dB | 5 | -0.334 | 0.020 | -0.359 | -0.306 | no | no | 5/5 (>0.3) |  | 5×WARN |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@100Hz | dB | 5 | -0.054 | 0.018 | -0.068 | -0.023 | no | no | 0/5 (>0.3) |  | 2×INCONCLUSIVE, 3×PASS |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@2000Hz | dB | 5 | -0.641 | 0.050 | -0.688 | -0.562 | no | no | 5/5 (>0.3) |  | 3×INCONCLUSIVE, 2×WARN |
 | genelec.sine_mag.ac2 sweep 20Hz-5.5s@200Hz | dB | 5 | +0.017 | 0.013 | -0.001 | +0.036 | yes | no | 0/5 (>0.3) |  | 5×PASS |

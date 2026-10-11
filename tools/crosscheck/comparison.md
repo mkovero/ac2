@@ -124,7 +124,7 @@ before them.
 | 1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs numpy at ideal band edges, largest \|difference\| (context) | 8.675 dB [n 29] (INFO 1) |
 | 1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy at ideal band edges, largest \|difference\| (context) | 6.861 dB [n 29] (INFO 1) |
 
-### OSM stage (osm-c0244e4, ac2 c0244e4, v1.5.2: PASS 86, INFO 77)
+### OSM stage (osm-6f0e5b57, ac2 6f0e5b5, v1.5.2: PASS 86, INFO 77)
 
 **Transfer: max over the gated columns; a rig take (not a planned fixture) shows the median over its columns**
 
@@ -174,17 +174,17 @@ before them.
 
 ### Digital DUT: harmonics H2–H5 against their exact values (dummy JACK)
 
-| order, analyser | dut −10 dBFS (20261010T172324Z, ac2 d08cc70) | dut −30 dBFS (20261010T173102Z, ac2 d08cc70) |
+| order, analyser | dut −10 dBFS (20261011T005229Z, ac2 6f0e5b5) | dut −30 dBFS (20261011T010051Z, ac2 6f0e5b5) |
 |---|---|---|
-| verdicts | WARN 11, PASS 753, INFO 116 | WARN 11, PASS 753, INFO 116 |
-| H2 steady sine | −0.015 dB (PASS 28) | −0.023 dB (PASS 28) |
-| H2 ac2 sweep | −0.142 dB (PASS 56) | −0.177 dB (PASS 56) |
-| H3 steady sine | −0.021 dB (PASS 28) | −0.062 dB (PASS 28) |
-| H3 ac2 sweep | +0.133 dB (PASS 56) | +0.185 dB (PASS 56) |
-| H4 steady sine | +0.018 dB (PASS 28) | −0.017 dB (PASS 28) |
-| H4 ac2 sweep | +0.101 dB (PASS 56) | +0.195 dB (PASS 56) |
-| H5 steady sine | −0.026 dB (PASS 28) | −0.020 dB (PASS 28) |
-| H5 ac2 sweep | +0.118 dB (PASS 56) | −0.111 dB (PASS 56) |
+| verdicts | WARN 12, PASS 752, INFO 116 | WARN 12, PASS 752, INFO 116 |
+| H2 steady sine | +0.054 dB (PASS 28) | +0.021 dB (PASS 28) |
+| H2 ac2 sweep | +0.181 dB (PASS 56) | +0.126 dB (PASS 56) |
+| H3 steady sine | +0.026 dB (PASS 28) | +0.041 dB (PASS 28) |
+| H3 ac2 sweep | −0.189 dB (WARN 1, PASS 55) | −0.130 dB (WARN 1, PASS 55) |
+| H4 steady sine | +0.026 dB (PASS 28) | +0.015 dB (PASS 28) |
+| H4 ac2 sweep | −0.116 dB (PASS 56) | −0.115 dB (PASS 56) |
+| H5 steady sine | −0.021 dB (PASS 28) | +0.017 dB (PASS 28) |
+| H5 ac2 sweep | −0.135 dB (PASS 56) | −0.129 dB (PASS 56) |
 
 <!-- END generated -->
 
