@@ -419,7 +419,7 @@ first measurement (a transfer pane on an empty daemon). Lay it out as the job ne
 | **Alt+→** / **Alt+←** | grows / shrinks the focused pane by a tenth of its split; it stops where a pane would be too small to read (the size **N** refuses to split below) |
 | drag a gap | drag the gap between two panes to size them (the cursor turns into a resize arrow over it); the same limit holds |
 | **Q** | closes the focused pane; its neighbour takes the space and the focus. The last pane stays (**Tab** puts another measurement in it) |
-| **Tab** / **Shift+Tab** | selects the next / previous row of the measurement list (a measurement, a stored trace, a math channel); the focused pane shows that row's measurement, whatever its kind: the pane turns into the kind that draws it (transfer, spectrum / RTA, SPL, sweep / distortion) |
+| **Tab** / **Shift+Tab** | selects the next / previous row of the measurement list (a measurement, its live curve, a stored trace, a math channel); the focused pane shows that row's measurement, whatever its kind: the pane turns into the kind that draws it (transfer, spectrum / RTA, SPL, sweep / distortion) |
 | **G** / **Shift+G** | steps the focused pane's views forward / back, the last on to the first (the chains are below) |
 | **Alt+1 … Alt+9** | focus the panes in reading order: top to bottom, then left to right |
 | click | focuses the pane |
@@ -1213,9 +1213,11 @@ Working with the tree:
   (a live curve: this app's display; a stored trace: the daemon's). A click on the row
   selects it; a double click on a trace renames it.
 - **Tab** / **Shift+Tab** select the next / previous row of the tree as it is listed,
-  wrapping at the ends: measurements, math channels and stored traces (hidden ones too:
-  a click selects them as well); a measurement's header and its live curve are one stop,
-  and the Imported header is skipped. The rows of a folded group are skipped, as they are
+  wrapping at the ends: measurements, their live curves, math channels and stored traces
+  (hidden ones too: a click selects them as well); the Imported header is skipped. A live
+  curve's row selected (Tab, a click on it or on its legend row) is marked, its
+  measurement's header outlined, and **A** hides or shows that curve as it does a stored
+  trace's. The rows of a folded group are skipped, as they are
   not listed. They start from the selected row; the tree scrolls to the new one. A
   measurement row is chosen as a click on it does: the focused pane shows it, turning into
   its kind. A stored trace row selects the trace as a click (or **V**) does, the focused

@@ -862,6 +862,9 @@ pub enum Msg {
     DismissToast(u64),
     /// A measurement clicked in the list: selected, and shown by its pane.
     SelectMeas(MeasId),
+    /// A measurement's live-curve row clicked in the list: the measurement selected as
+    /// [`Msg::SelectMeas`] does, the live row marked as what the keys act on.
+    SelectLive(MeasId),
     /// A stored trace clicked in the list: selected, so the trace keys act on it (again:
     /// deselected).
     SelectTrace(TraceId),
@@ -1057,6 +1060,12 @@ pub struct AppState {
     /// Selecting a measurement clears it, so whichever of the two was selected last is what
     /// the keys act on ([`AppState::keys_on_trace`]).
     pub selected_trace: Option<TraceId>,
+    /// The measurement whose live-curve row was picked (Tab, its legend row or its list
+    /// row) rather than its header. The live curve is what the measurement's keys act on
+    /// either way; this only says which of the two rows is the selection, so Tab steps
+    /// header → live curve → stored traces. Meaningful while it is the selected measurement
+    /// and no stored trace has the keys ([`AppState::live_row_selected`]).
+    pub selected_live: Option<MeasId>,
     /// Measurements whose live curves this app hides, by name (as `ui.toml` keeps them):
     /// display only, they keep measuring.
     pub hidden_meas: BTreeSet<String>,
@@ -1206,6 +1215,7 @@ impl AppState {
             selected: None,
             pane_area: DEFAULT_PANE_AREA,
             selected_trace: None,
+            selected_live: None,
             edits: BTreeMap::new(),
             peaks: BTreeMap::new(),
             spectrographs: BTreeMap::new(),
@@ -1323,6 +1333,7 @@ impl AppState {
                 self.toasts_held = false;
             }
             Msg::SelectMeas(id) => self.select_meas_row(id),
+            Msg::SelectLive(id) => self.select_live_row(id),
             Msg::SelectTrace(id) => {
                 let id = (self.selected_trace != Some(id)).then_some(id);
                 self.select_trace(id);

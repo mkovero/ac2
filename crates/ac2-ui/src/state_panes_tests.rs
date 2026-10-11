@@ -153,8 +153,15 @@ fn tab_puts_the_next_measurement_in_the_focused_pane() {
         assert_eq!(t.st.layout.focus, f);
         assert_eq!(others(&t), before);
     }
-    // Back: the meter again, in an SPL pane.
-    t.key("Shift+Tab");
+    // Back: the meter again, in an SPL pane (a live curve row is a stop of its own, so
+    // there are more rows than measurements to step back over).
+    for _ in 0..2 * order.len() {
+        t.key("Shift+Tab");
+        assert_eq!(others(&t), before);
+        if t.st.selected == Some(MeasId(5)) {
+            break;
+        }
+    }
     assert_eq!(t.st.pane_meas(f).map(|m| m.id), Some(MeasId(5)));
     assert_eq!(t.focus_kind(), PaneKind::Spl);
     assert_eq!(others(&t), before);

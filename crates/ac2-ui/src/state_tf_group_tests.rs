@@ -539,12 +539,12 @@ fn a_legend_row_click_selects_its_curve_for_a() {
         (
             "Delay tower",
             TraceKey::Live(MeasId(3)),
-            TreeKey::Meas(MeasId(3)),
+            TreeKey::Live(MeasId(3)),
         ),
         (
             "Main L",
             TraceKey::Live(MeasId(1)),
-            TreeKey::Meas(MeasId(1)),
+            TreeKey::Live(MeasId(1)),
         ),
     ] {
         assert_eq!(click(&mut t, name), key);

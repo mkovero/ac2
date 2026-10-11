@@ -36,6 +36,12 @@ impl AppState {
         self.selected_trace_meta().is_some()
     }
 
+    /// The selection is the selected measurement's live-curve row, not its header (both
+    /// act on the same curve; the list marks the one picked).
+    pub fn live_row_selected(&self) -> bool {
+        self.selected_live.is_some() && self.selected_live == self.selected && !self.keys_on_trace()
+    }
+
     /// Measurements pane `p` can show, in list order.
     pub fn pane_candidates(&self, p: PaneKind) -> Vec<&Measurement> {
         self.measurements()
@@ -313,6 +319,7 @@ impl AppState {
             selected: self.selected,
             selected_trace: self.selected_trace,
             keys_on_trace: self.keys_on_trace(),
+            live_selected: self.live_row_selected(),
             sweep: self.daemon().and_then(|s| s.sweep.as_ref()),
             compared: self.compared_rows(),
         })

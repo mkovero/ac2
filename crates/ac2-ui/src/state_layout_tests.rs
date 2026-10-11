@@ -237,7 +237,7 @@ fn f_cycles_window_full_screen_then_panes_only() {
     // The lists are hidden, not gone: Tab still steps the selection.
     t.st.selected = None;
     assert_eq!(tab(&mut t, "Tab"), "m1");
-    assert_eq!(tab(&mut t, "Tab"), "t3");
+    assert_eq!(tab(&mut t, "Tab"), "l1");
     // W inside: one pane, then all again, full screen throughout.
     t.key("W");
     assert!(t.st.layout.maximized && t.st.stage_view());
@@ -933,29 +933,32 @@ fn a_new_math_channel_lives_under_the_selected_measurement() {
         if config.owner == TraceOwner::Meas { meas: MeasId(1) }));
 }
 
-/// `key` pressed: the row it selected, `m<id>` a measurement, `t<id>` a stored trace.
+/// `key` pressed: the row it selected, `m<id>` a measurement, `l<id>` its live curve,
+/// `t<id>` a stored trace.
 fn tab(t: &mut T, key: &str) -> String {
     t.key(key);
     match (t.st.selected_trace, t.st.selected) {
         (Some(tr), _) => format!("t{}", tr.0),
+        (None, Some(m)) if t.st.live_row_selected() => format!("l{}", m.0),
         (None, Some(m)) => format!("m{}", m.0),
         (None, None) => "none".into(),
     }
 }
 
-/// Tab / Shift+Tab walk the rows of the tree as listed (a measurement's header and live
-/// curve one stop, its stored traces and math channels, the imported traces; the Imported
-/// header skipped), wrapping; the focused pane shows each row's measurement.
+/// Tab / Shift+Tab walk the rows of the tree as listed (a measurement's header, its live
+/// curve, its stored traces and math channels, the imported traces; the Imported header
+/// skipped), wrapping; the focused pane shows each row's measurement.
 #[test]
 fn tab_steps_through_the_trees_rows() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
     t.st.selected = None;
-    // Main L, pre-EQ, post-EQ, pre ÷ post, Sub, the imported trace; then round again.
-    let fwd: Vec<_> = (0..7).map(|_| tab(&mut t, "Tab")).collect();
-    assert_eq!(fwd, ["m1", "t3", "t4", "m6", "m2", "t5", "m1"]);
-    let back: Vec<_> = (0..7).map(|_| tab(&mut t, "Shift+Tab")).collect();
-    assert_eq!(back, ["t5", "m2", "m6", "t4", "t3", "m1", "t5"]);
+    // Main L, its live curve, pre-EQ, post-EQ, pre ÷ post, Sub, its live curve, the
+    // imported trace; then round again.
+    let fwd: Vec<_> = (0..9).map(|_| tab(&mut t, "Tab")).collect();
+    assert_eq!(fwd, ["m1", "l1", "t3", "t4", "m6", "m2", "l2", "t5", "m1"]);
+    let back: Vec<_> = (0..9).map(|_| tab(&mut t, "Shift+Tab")).collect();
+    assert_eq!(back, ["t5", "l2", "m2", "m6", "t4", "t3", "l1", "m1", "t5"]);
     assert!(t.st.tree_reveal, "the tree scrolls to the row");
 
     // Nothing selected: Shift+Tab starts at the last. (A click on the selected trace
@@ -967,8 +970,11 @@ fn tab_steps_through_the_trees_rows() {
 
     // The focused pane shows the row's measurement, as on a click on its row, turning into
     // its kind; the focus stays.
-    assert_eq!(tab(&mut t, "Shift+Tab"), "m2");
+    assert_eq!(tab(&mut t, "Shift+Tab"), "l2");
     let pane = t.st.layout.focus;
+    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
+    assert_eq!(t.st.pane_meas(pane).map(|m| m.id), Some(MeasId(2)));
+    assert_eq!(tab(&mut t, "Shift+Tab"), "m2");
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     assert_eq!(tab(&mut t, "Shift+Tab"), "m6");
     assert_eq!(
@@ -992,11 +998,50 @@ fn tab_from_a_trace_goes_on_from_its_row() {
     t.st.update(Msg::SelectTrace(TraceId(4)), &t.keys);
     assert_eq!(tab(&mut t, "Tab"), "m6");
     t.st.update(Msg::SelectTrace(TraceId(3)), &t.keys);
-    assert_eq!(tab(&mut t, "Shift+Tab"), "m1");
+    assert_eq!(tab(&mut t, "Shift+Tab"), "l1");
     t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
     assert_eq!(tab(&mut t, "Tab"), "m1");
     t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
+    assert_eq!(tab(&mut t, "Shift+Tab"), "l2");
+}
+
+/// A live curve reached by Tab is selected as a click on its legend row selects it: A hides
+/// that curve, as it does a stored trace. A legend or list pick of the live curve is a Tab
+/// stop to go on from; a header click is the header again.
+#[test]
+fn tab_stops_on_live_curves_and_a_hides_them() {
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    assert!(!t.st.live_row_selected());
+    assert_eq!(tab(&mut t, "Tab"), "l1");
+    let name = t.st.meas(MeasId(1)).expect("meas").config.name.clone();
+    t.key("A");
+    assert!(t.st.hidden_meas.contains(&name), "{}", t.last_toast());
+    assert_eq!(tab(&mut t, "Tab"), "t3");
+    assert_eq!(
+        tab(&mut t, "Shift+Tab"),
+        "l1",
+        "a hidden live curve is still a stop"
+    );
+    t.key("A");
+    assert!(!t.st.hidden_meas.contains(&name));
+
+    let pane = t.st.layout.focus;
+    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.st.update(
+        Msg::LegendPick(pane, ac2_scene::trace::TraceKey::Live(MeasId(1))),
+        &t.keys,
+    );
+    assert!(t.st.live_row_selected());
+    assert_eq!(tab(&mut t, "Tab"), "t3");
+    t.st.update(Msg::SelectLive(MeasId(2)), &t.keys);
+    assert!(t.st.live_row_selected());
     assert_eq!(tab(&mut t, "Shift+Tab"), "m2");
+    t.st.update(Msg::SelectLive(MeasId(1)), &t.keys);
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    assert!(!t.st.live_row_selected());
+    assert_eq!(tab(&mut t, "Tab"), "l1");
 }
 
 /// A folded group's rows are skipped, as the list does not show them, and the folds stay;

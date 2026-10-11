@@ -1095,19 +1095,38 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
 
     d.send(Msg::SelectMeas(tf));
     let f = d.st.layout.focus;
-    for i in 1..=4 {
+    // A transfer or spectrum measurement is two stops, its header and its live curve; the
+    // SPL meter, with no live curve row, one.
+    let steps = [
+        (tf, true),
+        (sp, false),
+        (sp, true),
+        (spl, false),
+        (tf, false),
+        (tf, true),
+        (sp, false),
+    ];
+    for (i, (id, live)) in steps.into_iter().enumerate() {
         d.key("Tab");
-        let (id, pane) = order[i % 3];
+        let pane = order.iter().find(|(m, _)| *m == id).expect("listed").1;
         assert_eq!(d.st.selected, Some(id), "Tab {i}");
+        assert_eq!(d.st.live_row_selected(), live, "Tab {i}");
         assert_eq!(d.st.selected_trace, None);
         assert_eq!(d.st.layout.focus, f, "Tab {i}");
         assert_eq!(d.st.layout.focus_kind(), pane, "Tab {i}");
         assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(id), "Tab {i}");
     }
     // On the spectrum now; back round once, by the SPL meter.
-    for want in [tf, spl, sp] {
+    for (want, live) in [
+        (tf, true),
+        (tf, false),
+        (spl, false),
+        (sp, true),
+        (sp, false),
+    ] {
         d.key("Shift+Tab");
         assert_eq!(d.st.selected, Some(want));
+        assert_eq!(d.st.live_row_selected(), live);
     }
     assert_eq!(d.st.layout.focus_kind(), Spectrum);
     drop(d);

@@ -2572,6 +2572,8 @@ fn measurement_hidden_and_delete_confirm() {
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
+    // Past the first measurement's live curve row to the next measurement.
+    h.key_press(Key::Tab);
     h.key_press(Key::Tab);
     step_until(&mut h, "delay tower", |a| {
         a.state.selected == Some(MeasId(2))

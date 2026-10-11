@@ -1068,10 +1068,10 @@ fn new_measurements_start_and_become_selected() {
     assert_eq!(t.st.layout.panes().len(), before.len() + 2);
     // The selection is the operator's again: Tab moves on and a later mirror keeps it.
     t.key("Tab");
-    assert_ne!(t.st.selected, Some(MeasId(7)));
-    let sel = t.st.selected;
+    assert!(t.st.live_row_selected() || t.st.selected != Some(MeasId(7)));
+    let sel = (t.st.selected, t.st.live_row_selected());
     t.conn(mirror(s));
-    assert_eq!(t.st.selected, sel);
+    assert_eq!((t.st.selected, t.st.live_row_selected()), sel);
 
     // Spectrum, RTA and SPL meter dialogs make their kinds on the first non-reference input.
     for (cmd, want) in [

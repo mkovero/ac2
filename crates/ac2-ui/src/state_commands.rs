@@ -272,9 +272,12 @@ impl AppState {
                 }
             }
             TraceKey::Live(id) => {
-                if self.meas(id).is_some() {
+                if let Some(m) = self.meas(id) {
+                    // A math channel's curve is its own row; a measurement's is its live row.
+                    let live = ac2_scene::meas_list::has_live_curve(&m.config.kind);
                     self.selected = Some(id);
                     self.selected_trace = None;
+                    self.selected_live = live.then_some(id);
                 }
             }
         }
@@ -285,6 +288,7 @@ impl AppState {
         if let Some(id) = self.pane_meas(p).map(|m| m.id) {
             self.selected = Some(id);
             self.selected_trace = None;
+            self.selected_live = None;
         }
     }
 
@@ -301,20 +305,32 @@ impl AppState {
         self.select_on(f, id);
     }
 
+    /// A measurement's live-curve row chosen (click, Tab): the measurement chosen as its
+    /// header is, the live row marked as the selection, as a click on its legend row does.
+    pub(super) fn select_live_row(&mut self, id: MeasId) {
+        self.select_meas_row(id);
+        if self.selected == Some(id) {
+            self.selected_live = Some(id);
+        }
+    }
+
     /// Tab / Shift+Tab: the next / previous row of the measurement list as it is shown
     /// (a folded group's rows skipped, hidden curves included: they are selectable),
-    /// wrapping. A measurement's header and its live curve select the same, so they are one
-    /// stop. A measurement row is chosen as a click on it is; a stored trace row selects
-    /// the trace as a click does, the focused pane first showing its measurement.
+    /// wrapping. A measurement's header and its live curve are two stops, as they are two
+    /// rows: the live curve is selected as a click on its row (or legend row) selects it.
+    /// A measurement row is chosen as a click on it is; a stored trace row selects the
+    /// trace as a click does, the focused pane first showing its measurement.
     pub(super) fn cycle_tree_row(&mut self, d: i32) {
         use ac2_scene::meas_list::TreeKey;
         #[derive(Clone, Copy, PartialEq)]
         enum Stop {
             Meas(MeasId),
+            Live(MeasId),
             Trace(TraceId),
         }
         let stop = |k: TreeKey| match k {
-            TreeKey::Meas(id) | TreeKey::Live(id) | TreeKey::Math(id) => Some(Stop::Meas(id)),
+            TreeKey::Meas(id) | TreeKey::Math(id) => Some(Stop::Meas(id)),
+            TreeKey::Live(id) => Some(Stop::Live(id)),
             TreeKey::Trace(id) => Some(Stop::Trace(id)),
             TreeKey::Imported => None,
         };
@@ -337,6 +353,7 @@ impl AppState {
         }
         let at = match self.selected_trace {
             Some(t) => Some(Stop::Trace(t)),
+            None if self.live_row_selected() => self.selected.map(Stop::Live),
             None => self.selected.map(Stop::Meas),
         }
         .and_then(|s| all.iter().position(|x| *x == s));
@@ -350,6 +367,7 @@ impl AppState {
         };
         match next {
             Some(Stop::Meas(id)) => self.select_meas_row(id),
+            Some(Stop::Live(id)) => self.select_live_row(id),
             Some(Stop::Trace(id)) => {
                 let owner = self
                     .daemon()
@@ -399,6 +417,7 @@ impl AppState {
         }
         self.selected = Some(id);
         self.selected_trace = None;
+        self.selected_live = None;
         if let Some(v) = self.layout.view_mut(p) {
             v.meas = Some(id);
         }

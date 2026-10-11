@@ -685,7 +685,10 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         for row in &rows {
             let reveal = reveal
                 && row.mark == Mark::Active
-                && matches!(row.key, TreeKey::Meas(_) | TreeKey::Math(_));
+                && matches!(
+                    row.key,
+                    TreeKey::Meas(_) | TreeKey::Live(_) | TreeKey::Math(_)
+                );
             if let Some(m) = tree_row(ui, row, &tips, ch, reveal) {
                 msg = Some(m);
             }
@@ -862,7 +865,8 @@ fn tree_row(
             click = Some(Msg::RenameTrace(id));
         } else if r.clicked() {
             click = Some(match row.key {
-                TreeKey::Meas(id) | TreeKey::Live(id) | TreeKey::Math(id) => Msg::SelectMeas(id),
+                TreeKey::Meas(id) | TreeKey::Math(id) => Msg::SelectMeas(id),
+                TreeKey::Live(id) => Msg::SelectLive(id),
                 TreeKey::Trace(id) => Msg::SelectTrace(id),
                 TreeKey::Imported => Msg::ToggleGroup(TraceOwner::Imported),
             });

@@ -243,6 +243,9 @@ pub struct TreeInput<'a> {
     pub selected_trace: Option<TraceId>,
     /// The keys act on the selected stored trace (it was selected after the measurement).
     pub keys_on_trace: bool,
+    /// The keys act on the selected measurement through its live-curve row (Tab or a click
+    /// picked that row, not the header): the row is marked, its header outlined.
+    pub live_selected: bool,
     /// The latest sweep run (a sweep measurement's header says it plays).
     pub sweep: Option<&'a SweepRun>,
     /// Rows compared on the transfer pane (live curves, math channels, stored traces): marked
@@ -348,7 +351,11 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
         &input.traces,
         input.selected_trace.filter(|_| input.keys_on_trace),
     );
-    let mark = |id: MeasId| match (input.selected == Some(id), input.keys_on_trace) {
+    let live_selected = input.live_selected && !input.keys_on_trace;
+    let mark = |id: MeasId| match (
+        input.selected == Some(id),
+        input.keys_on_trace || live_selected,
+    ) {
         (false, _) => Mark::None,
         (true, true) => Mark::Selected,
         (true, false) => Mark::Active,
@@ -374,7 +381,11 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 details: vec![state.to_owned()],
                 collapsed: None,
                 hidden: item.hidden,
-                mark: Mark::None,
+                mark: if live_selected && input.selected == Some(m.id) {
+                    Mark::Active
+                } else {
+                    Mark::None
+                },
                 dot: Some((item.color, !item.hidden)),
                 describe: format!("{}: the live curve, {state}", m.config.name),
             });
@@ -1113,6 +1124,7 @@ pub(crate) mod tests {
             selected,
             selected_trace: trace,
             keys_on_trace: trace.is_some(),
+            live_selected: false,
             sweep: None,
             compared: Vec::new(),
         })
@@ -1139,6 +1151,7 @@ pub(crate) mod tests {
             selected: None,
             selected_trace: None,
             keys_on_trace: false,
+            live_selected: false,
             sweep: None,
             compared: vec![TreeKey::Trace(TraceId(5)), TreeKey::Live(MeasId(1))],
         });
@@ -1225,6 +1238,44 @@ pub(crate) mod tests {
         assert_eq!(t[0].mark, Mark::None);
     }
 
+    /// The live-curve row picked (Tab, a click): it is marked, its header outlined as when
+    /// a stored trace has the keys; a stored trace selected after it takes the mark.
+    #[test]
+    fn a_live_row_selected_is_marked_and_its_header_outlined() {
+        let r = rig();
+        let none = BTreeSet::new();
+        let input = |trace: Option<TraceId>| TreeInput {
+            meas: r.meas.iter().map(item).collect(),
+            traces: r
+                .traces
+                .iter()
+                .map(|meta| TraceItem {
+                    meta,
+                    has_data: true,
+                    color: Color::from_rgba8([1, 2, 3, 255]),
+                })
+                .collect(),
+            collapsed: &none,
+            selected: Some(MeasId(1)),
+            selected_trace: trace,
+            keys_on_trace: trace.is_some(),
+            live_selected: true,
+            sweep: None,
+            compared: Vec::new(),
+        };
+        let mark = |t: &[TreeRow], k: TreeKey| t.iter().find(|x| x.key == k).expect("row").mark;
+        let t = tree_rows(&input(None));
+        assert_eq!(mark(&t, TreeKey::Meas(MeasId(1))), Mark::Selected);
+        assert_eq!(mark(&t, TreeKey::Live(MeasId(1))), Mark::Active);
+        let t = tree_rows(&input(Some(TraceId(3))));
+        assert_eq!(mark(&t, TreeKey::Live(MeasId(1))), Mark::None);
+        assert_eq!(mark(&t, TreeKey::Trace(TraceId(3))), Mark::Active);
+        // Not picked: the header has the mark, the live row none.
+        let t = rows(&r, &none, Some(MeasId(1)), None);
+        assert_eq!(mark(&t, TreeKey::Meas(MeasId(1))), Mark::Active);
+        assert_eq!(mark(&t, TreeKey::Live(MeasId(1))), Mark::None);
+    }
+
     #[test]
     fn folded_groups_hide_their_rows_and_say_how_many() {
         let r = rig();
@@ -1300,6 +1351,7 @@ pub(crate) mod tests {
             selected: None,
             selected_trace: None,
             keys_on_trace: false,
+            live_selected: false,
             sweep: Some(&playing),
             compared: Vec::new(),
         });
