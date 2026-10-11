@@ -379,6 +379,13 @@ The new daemon set `autosave.v24` aside, and `session salvage /tmp/autosave.v24`
 all twelve measurements, the crosscheck sweeps included. The multi-resolution Spectrum 3
 came back on tone, as it was. The Pi cross build took 3 min 43 s.
 
+The Pi kiosk did not stay on FOH SPL. While salvage was creating the measurements, it fell
+back to TF 1, then installed TF 1's own panes when that layout arrived, and saved them in its
+`ui.toml`. It was put back on FOH SPL by hand; the old file is kept as `ui.toml.bak-tf1`.
+0fef18ea fixes this: a pane whose measurement disappears waits for that name to come back, and
+a fallback selection never installs a layout. Only the app was deployed, to ketunkolo and the
+Pi; pupu's ac2d stayed on 2c07efef, since the protocol did not change.
+
 ## Deploy of c7bd24b1 (2026-10-11, all three hosts)
 
 Protocol 42, session format 24. This build adds:
