@@ -128,6 +128,19 @@ fn healthy(app: &App, now: Instant) -> bool {
     link && fresh
 }
 
+/// The topics [`healthy`] finds stale, for a failure to name.
+fn stale_topics(app: &App) -> Vec<String> {
+    let st = &app.state;
+    st.data.as_ref().map_or_else(Vec::new, |d| {
+        d.latest
+            .frames
+            .iter()
+            .filter(|(_, f)| ac2_ui::scenes::freshness(st, f).is_stale())
+            .map(|(k, _)| k.to_string())
+            .collect()
+    })
+}
+
 /// Compares the UI with its reference once a pass has been laid out while the link was
 /// healthy. Health is checked after the pass, against a later clock, so the pass itself
 /// was healthy too (ages only grow).
@@ -168,7 +181,11 @@ fn settled_snapshot(
         if healthy(h.state(), Instant::now()) && drawn(h.state()) {
             break;
         }
-        assert!(t0.elapsed() < WAIT, "{name}: the link never settled");
+        assert!(
+            t0.elapsed() < WAIT,
+            "{name}: the link never settled; stale: {:?}",
+            stale_topics(h.state())
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
     h.snapshot_options(name, options);

@@ -71,8 +71,23 @@ impl Driver {
             }
             if Instant::now() > end {
                 let toasts: Vec<&str> = self.st.toasts.iter().map(|t| t.text.as_str()).collect();
+                let mut held: Vec<String> = self
+                    .st
+                    .data
+                    .as_ref()
+                    .map(|d| d.latest.frames.keys().map(|k| k.to_string()).collect())
+                    .unwrap_or_default();
+                held.sort();
+                let mut wanted: Vec<String> = self
+                    .st
+                    .wanted_topics()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect();
+                wanted.sort();
                 return Err(format!(
-                    "timed out waiting for {what}; overlay {:?}; toasts {toasts:?}",
+                    "timed out waiting for {what}; overlay {:?}; toasts {toasts:?}; \
+                     frames held {held:?}; topics wanted {wanted:?}",
                     self.st.overlay
                 )
                 .into());
