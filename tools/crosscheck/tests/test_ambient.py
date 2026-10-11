@@ -43,3 +43,65 @@ def test_on_centres_matches_differently_rounded_centres():
     v = _on_centres(fc, src, np.array([1.0, 2.0, 3.0]))
     assert v.tolist() == [1.0, 2.0, 3.0]
     assert np.isnan(_on_centres(np.array([60.0]), src, np.array([1.0, 2.0, 3.0]))[0])
+
+
+class _A:
+    """Just what `ambient.analyse` touches of an Analysis."""
+
+    def __init__(self):
+        import tomllib
+        from pathlib import Path
+        self.tol = tomllib.loads((Path(__file__).parent.parent / "tolerances.toml").read_text())
+        self.checks, self.notes, self.series = {}, [], {}
+
+    def add(self, **c):
+        self.checks[c["id"]] = c
+
+    def table(self, *args, **kw):
+        pass
+
+
+def _ambient_run(tmp_path, offset_db, average="fifo:10800"):
+    import types
+
+    from crosscheck import wav
+    from crosscheck.ambient import analyse
+    fs, S = 48000, 100.0
+    rng = np.random.default_rng(3)
+    x = rng.standard_normal(fs * 10) * 0.01
+    # a strong tone near the 224 Hz edge between the 200 and 250 Hz bands: the order-3 skirts
+    # put it into both, which ideal edges do not
+    t = np.arange(len(x)) / fs
+    x = x + 0.3 * np.sin(2 * np.pi * 223.0 * t)
+    wav.write(tmp_path / "in1.wav", fs, x[:, None])
+    fc, _ = dsp.third_octave_levels(x, fs, S)
+    filt, _ = rta_filter_model(x, fs, S, None, fc)
+    ok = np.isfinite(filt)
+    rows = "\n".join(f"{f:.6g},{v + offset_db:.6f}" for f, v in zip(fc[ok], filt[ok]))
+    (tmp_path / "ac2_rta.csv").write_text("freq_hz,level_db\n" + rows + "\n")
+    run = types.SimpleNamespace(
+        ambient={"dir": tmp_path, "window": {"ac2_rta_average": average} if average else {}},
+        cal={"sensitivity_db": S}, manifest={"mains_hz": 50.0})
+    a = _A()
+    analyse(a, run)
+    return a.checks
+
+
+def test_ac2_rta_is_judged_against_its_own_filters(tmp_path):
+    c = _ambient_run(tmp_path, 0.0)
+    own = c["ambient.bands.ac2 RTA|own filters"]
+    assert own["status"] == "PASS" and abs(own["value"]) < 1e-3
+    assert own["tol"] == (0.25, 0.5)
+    # ideal edges: several dB off at the tone's neighbour band, but context only
+    ideal = c["ambient.bands.ac2 RTA"]
+    assert ideal["status"] == "INFO" and ideal["tol"] is None and ideal["value"] > 2.0
+    assert "filter definition" in ideal["meaning"]
+
+
+def test_own_filter_residual_beyond_its_limits(tmp_path):
+    assert _ambient_run(tmp_path, 0.3)["ambient.bands.ac2 RTA|own filters"]["status"] == "WARN"
+
+
+def test_own_filter_check_needs_an_averaged_rta(tmp_path):
+    c = _ambient_run(tmp_path, 0.0, average=None)
+    assert c["ambient.bands.ac2 RTA|own filters"]["status"] == "INCONCLUSIVE"

@@ -73,10 +73,12 @@ AMBIENT_ROWS: list[tuple[str, str]] = [
     ("LCeq ac2 vs numpy", r"leq\.C\.ac2$"),
     ("LAeq REW vs numpy", r"leq\.A\.REW$"),
     ("LAeq ac2 vs REW", r"leq\.A\.ac2_rew$"),
-    ("1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs numpy, largest \\|difference\\|", r"bands\.ac2 RTA$", ABS),
-    ("1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy, largest \\|difference\\|", r"bands\.REW RTA$", ABS),
-    ("1/3-oct bands: ac2 RTA vs its own filters' response applied to the recording, worst band",
+    ("1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs its own filters' response applied to the recording, worst band",
      r"bands\.ac2 RTA\|own filters$"),
+    ("1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs numpy at ideal band edges, largest \\|difference\\| (context)",
+     r"bands\.ac2 RTA$", ABS),
+    ("1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy at ideal band edges, largest \\|difference\\| (context)",
+     r"bands\.REW RTA$", ABS),
 ]
 # Distortion coverage: per harmonic order and analyser, how many tones were judged at all.
 HARMONIC_ROWS: list[tuple[str, str]] = [
@@ -324,7 +326,8 @@ PARITY_ROWS: list[tuple[str, str, str | None, str | None]] = [
 ]
 AMBIENT_PARITY: list[tuple[str, str, str | None, str | None]] = [
     ("LAeq", r"leq\.A\.ac2$", r"leq\.A\.REW$", r"leq\.A\.ac2_rew$"),
-    ("1/3-oct RTA (vs ideal band edges)", r"bands\.ac2 RTA$", r"bands\.REW RTA$", None),
+    # REW's RTA has no filter model here to judge it against: ac2's row is its own verdict
+    ("1/3-oct RTA (vs its own band filters)", r"bands\.ac2 RTA\|own filters$", None, None),
 ]
 
 

@@ -35,7 +35,12 @@ convention_db = { pass = 0.1, warn = 0.5 }   # ac2 / REW / sine on the same digi
 offset_db = { pass = 0.1, warn = 0.3 }       # ac2 meas/ref vs REW (meas - ref) absolute
 absolute_spl_db = { pass = 0.5, warn = 1.0 } # acoustic response in dB SPL, sources vs sine
 ambient_leq_db = { pass = 0.5, warn = 1.0 }  # Leq over the same window, broadband
-ambient_band_db = { pass = 1.0, warn = 2.0 } # per third octave
+# ac2's 1/3-octave RTA against its own band filters (order-3 Butterworth, pre-warped base-10
+# edges, band-averaged mic correction) applied to the recording, largest |residual| over the
+# bands. The model is exact for the filters; what remains is ac2's FIFO averaging window (the
+# recording plus a few seconds of the room around it) against the recording's own window on a
+# non-stationary room: measured 0.012 dB in a quiet room, 0.118 dB with music playing.
+ambient_rta_model_db = { pass = 0.25, warn = 0.5 }
 
 [delay]
 electrical_us = { pass = 0.3, warn = 1.0 }   # arrival vs the direct cross-spectrum

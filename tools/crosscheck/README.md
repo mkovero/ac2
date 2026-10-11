@@ -233,8 +233,9 @@ then SIGTERM, then kill), keeping its `xruns <n>` line.
   several levels into one grid.
 - **On a dummy server (`rigs/host.toml`):** the matrix without hardware. A JACK dummy
   server (`jackd -n <name> -d dummy -r 96000 -p 2048 -w 21333 -C 8 -P 8`; without real-time
-  scheduling a 256-frame period xruns) and an ac2d of its own (`--max-level -10
-  --no-autosave`, its own `XDG_RUNTIME_DIR`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`),
+  scheduling a 256-frame period xruns, and on a busy host (parallel builds) 2048 does too:
+  `-p 4096 -w 42667` then; the 2026-10-11 matrix at 4096 matched the 2048 one within its
+  run-to-run scatter) and an ac2d of its own (`--max-level -10 --no-autosave`, its own `XDG_RUNTIME_DIR`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`),
   `ac2` on PATH, `AC2_JACK_DUT` set, then
   `python -m crosscheck run --rig rigs/host.toml --stages dut --emit -10dbfs --skip rew,ac2_tf --yes`
   and again at `-30dbfs`; `analyse` each, `baseline` writes `baselines/host/dut-<level>dbfs.json`.
@@ -297,8 +298,15 @@ calibration mapping, one table of checks per group, the data tables and the plot
 - **Arrival**: each ac2 sweep's reported arrival is judged against the IR peak of its own
   capture. A loudspeaker's IR peak moves with the stimulus's top octave and end taper, so the
   REW recording's peak (`delay.capture_vs_rew_recording.<sweep>`, INFO) differs by the stimulus.
+- **Ambient RTA**: ac2's 1/3-octave RTA is judged against its own band filters (order-3
+  Butterworth, pre-warped base-10 edges, band-averaged mic correction) applied to the recording,
+  largest |residual| over the 29 bands 25 Hz–16 kHz (`ambient_rta_model_db`, 0.25 / 0.5 dB). The
+  model is exact for the filters, so the check holds on any room, music included; what it leaves
+  is ac2's FIFO averaging window against the recording's. ac2's and REW's RTA against numpy at
+  ideal band edges are INFO: there the order-3 skirts alone can add several dB on a tonal room,
+  and the ac2 row reports how much of its largest difference the filter definition accounts for.
 - **INFO** rows are context, not judged: REW's offline delays (gone by design), REW's own GD
-  export, REW's RTA averaging, an electrical path's ETC skirts.
+  export, REW's RTA averaging, both RTAs against ideal band edges, an electrical path's ETC skirts.
 - **One phase reference**: meas ÷ ref with the path's delay in it. ac2's reported arrival is
   put back into its phase, and REW offline gets back the delay its timing markers removed
   (from the direct estimate of the same recording).

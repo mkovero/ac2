@@ -107,22 +107,22 @@ before them.
 
 ### pupu: ambient
 
-| quantity | ambient silent (20261010T174045Z, ac2 d08cc70) |
+| quantity | ambient silent (20261011T002931Z, ac2 6f0e5b5) |
 |---|---|
-| LAeq | as REW: 1/1 judged; ac2 − REW −0.016 dB (PASS 1) |
-| 1/3-oct RTA (vs ideal band edges) | ac2 WARN (REW cannot tell): 1/1 judged; ac2 alone misses at the check |
+| LAeq | as REW: 1/1 judged; ac2 − REW −0.003 dB (PASS 1) |
+| 1/3-oct RTA (vs its own band filters) | PASS: 1/1 judged |
 
-| check | ambient silent (20261010T174045Z, ac2 d08cc70) |
+| check | ambient silent (20261011T002931Z, ac2 6f0e5b5) |
 |---|---|
-| verdicts | WARN 1, PASS 5, INFO 31 |
-| LZeq ac2 vs numpy | −0.003 dB (PASS 1) |
-| LAeq ac2 vs numpy | −0.001 dB (PASS 1) |
-| LCeq ac2 vs numpy | −0.001 dB (PASS 1) |
-| LAeq REW vs numpy | +0.016 dB (PASS 1) |
-| LAeq ac2 vs REW | −0.016 dB (PASS 1) |
-| 1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs numpy, largest \|difference\| | 1.797 dB [n 29] (WARN 1) |
-| 1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy, largest \|difference\| | 4.106 dB [n 29] (INFO 1) |
-| 1/3-oct bands: ac2 RTA vs its own filters' response applied to the recording, worst band | −0.012 dB [n 29] (INFO 1) |
+| verdicts | PASS 6, INFO 31 |
+| LZeq ac2 vs numpy | +0.005 dB (PASS 1) |
+| LAeq ac2 vs numpy | +0.001 dB (PASS 1) |
+| LCeq ac2 vs numpy | +0.006 dB (PASS 1) |
+| LAeq REW vs numpy | +0.005 dB (PASS 1) |
+| LAeq ac2 vs REW | −0.003 dB (PASS 1) |
+| 1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs its own filters' response applied to the recording, worst band | +0.118 dB [n 29] (PASS 1) |
+| 1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs numpy at ideal band edges, largest \|difference\| (context) | 8.675 dB [n 29] (INFO 1) |
+| 1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy at ideal band edges, largest \|difference\| (context) | 6.861 dB [n 29] (INFO 1) |
 
 ### OSM stage (osm-c0244e4, ac2 c0244e4, v1.5.2: PASS 86, INFO 77)
 

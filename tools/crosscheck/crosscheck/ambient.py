@@ -169,7 +169,12 @@ def analyse(a, run):
             cols["REW RTA"] = np.interp(np.log(fc), np.log(np.maximum(rr[0], 1e-9)), rr[1], left=np.nan, right=np.nan)
         else:
             a.notes.append("ambient: rew_rta.json not in the curve format the suite decodes; not compared")
-    tb = _tol(a.tol["level"]["ambient_band_db"])
+    # ac2's RTA is judged against its own band filters applied to the recording (below); against
+    # ideal base-10 edges the order-3 skirts alone can differ by several dB on a tonal room, so
+    # that comparison is context, as is REW's
+    tm = _tol(a.tol["level"]["ambient_rta_model_db"])
+    avg = win.get("ac2_rta_average")
+    model = rta_filter_model(x, fs, S, curve, fc) if "ac2 RTA" in cols else None
     for k in cols:
         if k == "numpy":
             continue
@@ -177,19 +182,17 @@ def analyse(a, run):
         m = np.isfinite(dd) & (fc >= 25) & (fc <= 16000)
         if m.any():
             v = float(np.max(np.abs(dd[m])))
-            st, why = judge(v, tb), ""
+            st, why = "INFO", ""
             if k == "ac2 RTA":
-                avg = win.get("ac2_rta_average")
+                kn = int(np.where(m)[0][np.argmax(np.abs(dd[m]))])
+                why = (f"; at {fc[kn]:.0f} Hz the filter definition (its order-3 band − ideal edges) accounts for "
+                       f"{model[0][kn] - lv[kn]:+.3f} dB of it; judged against its own filters instead")
                 if avg is None:
-                    # A run from before the stage set averaging: the captured trace is one
-                    # analysis frame, a sample of a fluctuating noise, not the window's mean power
-                    # the numpy column holds
-                    st, why = "INCONCLUSIVE", ("; ac2's RTA was captured without averaging (one frame), "
-                                               "so it is not an estimate over the window")
+                    why += "; ac2's RTA was captured without averaging (one frame)"
                 else:
-                    why = (f"; ac2's RTA averaged power with --average {avg}, a FIFO longer than the run: "
-                           "every result interval from its start to the capture, weighted by its length "
-                           "(the window plus the few seconds of the same room around it)")
+                    why += (f"; ac2's RTA averaged power with --average {avg}, a FIFO longer than the run: "
+                            "every result interval from its start to the capture, weighted by its length "
+                            "(the window plus the few seconds of the same room around it)")
             elif k == "REW RTA":
                 # REW's 'Forever' average reads low against the power mean, increasingly at HF:
                 # an average of levels in dB under-reads noise (the mean of a log is below the log
@@ -198,7 +201,7 @@ def analyse(a, run):
                                    "with averaging levels in dB")
             a.add(id=f"ambient.bands.{k}", group="ambient SPL", path="ambient",
                   title=f"{k} vs numpy, third octaves 25 Hz-16 kHz", value=v, unit="dB",
-                  tol=None if st == "INFO" else tb, status=st,
+                  tol=None, status=st,
                   meaning=f"largest |difference| over {int(m.sum())} bands, median {np.median(dd[m]):+.2f} dB; "
                           "an RTA reads a spectral density on its own resolution, the numpy column sums "
                           "FFT bins between ideal base-10 band edges over the whole window" + why,
@@ -206,7 +209,7 @@ def analyse(a, run):
     if "ac2 RTA" in cols:
         # ac2's RTA against its own filters applied to the same recording: what is left is
         # ac2's implementation (and its averaging window), not the band definition
-        filt, ideal = rta_filter_model(x, fs, S, curve, fc)
+        filt, ideal = model
         dm = cols["ac2 RTA"] - filt
         m = np.isfinite(dm) & (fc >= 25) & (fc <= 16000)
         if m.any():
@@ -226,7 +229,9 @@ def analyse(a, run):
             kn = int(np.where(m)[0][np.argmax(np.abs(dn[m]))])
             a.add(id="ambient.bands.ac2 RTA|own filters", group="ambient SPL", path="ambient",
                   title="ac2 RTA vs its own filters on the recording, third octaves 25 Hz-16 kHz",
-                  value=float(dm[k]), unit="dB", tol=None, status="INFO",
+                  value=float(dm[k]), unit="dB", tol=tm,
+                  # a single unaveraged frame is a sample of a fluctuating noise, not the window's power
+                  status="INCONCLUSIVE" if avg is None else judge(float(dm[k]), tm),
                   meaning=f"signed residual at the band of largest |residual| ({fc[k]:.0f} Hz) over {int(m.sum())} "
                           f"bands, median {np.median(dm[m]):+.3f} dB. The model is ac2's band filter from its design "
                           "equations (order-3 Butterworth, bilinear, pre-warped base-10 edges) and its band-averaged "
