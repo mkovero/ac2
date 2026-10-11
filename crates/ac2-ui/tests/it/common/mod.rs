@@ -220,6 +220,7 @@ fn spec_frame(meas: u32) -> SpecFrame {
             mic_curve: false,
             smoothing: None,
             math: None,
+            bands: None,
         },
         level,
     }
@@ -375,7 +376,7 @@ impl Rig {
                     MeasKind::Spectrum {
                         config: SpectrumConfig {
                             input: 1,
-                            fft_len: 4096,
+                            resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 4096 },
                             window: Window::Hann,
                             averaging: SpecAveraging::Off,
                             smoothing: smoothed.then_some(SmoothingFraction::Sixth),
@@ -547,7 +548,7 @@ impl Rig {
                 MeasKind::Spectrum {
                     config: SpectrumConfig {
                         input: 2,
-                        fft_len: 4096,
+                        resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 4096 },
                         window: Window::Hann,
                         averaging: SpecAveraging::Off,
                         smoothing: None,

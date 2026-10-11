@@ -372,6 +372,7 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
         freshness: None,
         offset_db: 0.0,
         selected,
+        bands: None,
     };
     let traces = [trace(1, "Main L S1", false), trace(2, "Main L S2", true)];
     let h = SpectrographHistory::new(30);
@@ -469,6 +470,7 @@ fn the_spectrograph_alone_takes_the_pane() {
         freshness: None,
         offset_db: 0.0,
         selected: false,
+        bands: None,
     };
     let input = SpectrographInput {
         history: &h,
@@ -549,4 +551,79 @@ fn a_slot_is_as_long_at_every_history_length() {
             "{back}"
         );
     }
+}
+
+/// A multi-resolution spectrum's window changes cross the history too, labelled there only
+/// when the spectrum above (which labels them) is not shown.
+#[test]
+fn multires_stitches_cross_the_history() {
+    let bands = crate::stitch::tests::bands_96k();
+    let freqs: Vec<f64> = (0..40)
+        .map(|i| 20.0 * 2f64.powf(f64::from(i) / 4.0))
+        .collect();
+    let edges = vec![(0.0, 0.0); freqs.len()];
+    let level = vec![-40.0f32; freqs.len()];
+    let trace = SpectrumTrace {
+        key: crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1)),
+        name: "Main".into(),
+        color: crate::primitives::Color::WHITE,
+        freqs: &freqs,
+        edges: &edges,
+        level: &level,
+        drawn: None,
+        validity: None,
+        peak: None,
+        scale: LevelScale::Dbfs,
+        quantity: crate::spectrum::Quantity::tone(None),
+        bin_hz: None,
+        caption: String::new(),
+        freshness: None,
+        offset_db: 0.0,
+        selected: false,
+        bands: Some(&bands),
+    };
+    let mut view = ViewState::default();
+    let size = Viewport {
+        width: 900.0,
+        height: 500.0,
+    };
+    let labels = |s: &SpectrographScene| {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .filter(|l| l.text == "21 ms")
+            .count()
+    };
+    let split = spectrograph_scene(
+        std::slice::from_ref(&trace),
+        &Status::default(),
+        None,
+        &view,
+        &Theme::dark(),
+        size,
+    );
+    assert_eq!(split.stitches.len(), 6);
+    assert_eq!(split.spectrum.as_ref().map(|s| s.stitches.len()), Some(6));
+    assert_eq!(labels(&split), 1, "labelled once, on the spectrum");
+    view.spectrum.mode = crate::view::SpectrumMode::Spectrograph;
+    let alone = spectrograph_scene(
+        std::slice::from_ref(&trace),
+        &Status::default(),
+        None,
+        &view,
+        &Theme::dark(),
+        size,
+    );
+    assert_eq!(labels(&alone), 1, "labelled on the history");
+    view.unresolved = false;
+    let off = spectrograph_scene(
+        std::slice::from_ref(&trace),
+        &Status::default(),
+        None,
+        &view,
+        &Theme::dark(),
+        size,
+    );
+    assert!(off.stitches.is_empty());
 }

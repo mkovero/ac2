@@ -257,7 +257,7 @@ fn spectrum_cpu() {
 
 fn short_spectrum(name: &str) -> MeasConfig {
     let mut config = SpectrumConfig::on_input(2);
-    config.fft_len = 4096;
+    config.resolution = ac2_proto::model::SpecResolution::Fixed { fft_len: 4096 };
     MeasConfig {
         name: name.into(),
         kind: MeasKind::Spectrum { config },

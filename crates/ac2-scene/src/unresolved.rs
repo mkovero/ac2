@@ -22,6 +22,8 @@ pub enum Fill {
     Gaps,
     /// Columns between estimates are interpolated (a sweep's response and harmonics).
     Interpolated,
+    /// Neighbouring columns repeat the bin they lie in (a multi-resolution spectrum).
+    Steps,
 }
 
 impl Fill {
@@ -29,6 +31,7 @@ impl Fill {
         match self {
             Fill::Gaps => "gaps",
             Fill::Interpolated => "interpolated",
+            Fill::Steps => "steps",
         }
     }
 }

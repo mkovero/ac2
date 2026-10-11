@@ -194,7 +194,7 @@ fn a_slow_spectrum_goes_when_it_is_formed() {
             name: "spectrum".into(),
             kind: MeasKind::Spectrum {
                 config: SpectrumConfig {
-                    fft_len: 65_536,
+                    resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 65_536 },
                     ..SpectrumConfig::on_input(0)
                 },
             },

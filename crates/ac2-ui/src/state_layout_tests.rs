@@ -590,6 +590,7 @@ fn tree_dots_have_the_colours_of_their_curves() {
                 mic_curve: false,
                 smoothing: None,
                 math: None,
+                bands: None,
             },
             level: vec![-60.0; 8],
         }),

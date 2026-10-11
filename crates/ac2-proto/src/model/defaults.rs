@@ -3,7 +3,8 @@
 use super::{
     BandFraction, DepthPolicy, LeqConfig, LeqPreset, LeqWindow, LogGridSpec, PeakLimit, PeakLimits,
     PeakQuantity, PeakWeighting, PositionCorrection, Resolution, RtaConfig, SpecAveraging,
-    SpectrumConfig, SplConfig, TfAveraging, TimeWeighting, TransferConfig, Weighting, Window,
+    SpecResolution, SpectrumConfig, SplConfig, TfAveraging, TimeWeighting, TransferConfig,
+    Weighting, Window,
 };
 use crate::units::{Db, DbSpl, Hz, Seconds};
 
@@ -92,7 +93,9 @@ impl SpectrumConfig {
     pub fn on_input(input: u16) -> Self {
         Self {
             input,
-            fft_len: Self::DEFAULT_FFT_LEN,
+            resolution: SpecResolution::Fixed {
+                fft_len: Self::DEFAULT_FFT_LEN,
+            },
             window: Window::Hann,
             averaging: SpecAveraging::Off,
             smoothing: None,

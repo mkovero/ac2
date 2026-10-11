@@ -580,6 +580,7 @@ pub(crate) fn combine(
                     mic_curve,
                     smoothing: None,
                     math: state,
+                    bands: None,
                 },
                 level: mag,
             })

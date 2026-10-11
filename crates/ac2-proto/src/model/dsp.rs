@@ -113,6 +113,42 @@ impl Resolution {
     }
 }
 
+/// How a spectrum resolves frequency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SpecResolution {
+    /// One FFT of `fft_len` points: linear bins, one window (and update rate) at every
+    /// frequency.
+    Fixed {
+        /// FFT length, samples.
+        fft_len: u32,
+    },
+    /// Six full-rate FFTs, each window half the one before (65 536 … 2048 points at 96 kHz,
+    /// 0.68 s … 21 ms): long windows serve the low frequencies, short ones the high, blended
+    /// between (`docs/design/multires-spectrum.md`). Columns are log-spaced at `grid`.
+    Multi {
+        /// Columns per octave of the output.
+        grid: Resolution,
+    },
+}
+
+impl SpecResolution {
+    /// Multi-resolution on the default 1/48-octave grid.
+    pub const MULTI: Self = Self::Multi {
+        grid: Resolution::FortyEighth,
+    };
+
+    /// Stored values per FIFO frame at most: `fft_len / 2 + 1` for one FFT; for the
+    /// multi-resolution bands every band's bins, about the longest window's length, bounded
+    /// here by its length at 192 kHz (131 072).
+    pub fn fifo_values_per_frame(self) -> u64 {
+        match self {
+            Self::Fixed { fft_len } => u64::from(fft_len) / 2 + 1,
+            Self::Multi { .. } => 1 << 17,
+        }
+    }
+}
+
 /// A frequency range, `lo < hi`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

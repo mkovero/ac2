@@ -3,7 +3,8 @@
 use ac2_core::generator::GeneratorError;
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
-    InputSetup, MeasConfig, MeasKind, Measurement, SpecAveraging, SpectrumConfig, SweepConfig,
+    InputSetup, MeasConfig, MeasKind, Measurement, SpecAveraging, SpecResolution, SpectrumConfig,
+    SweepConfig,
 };
 use ac2_proto::units::{MeasId, Rev};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError};
@@ -122,7 +123,9 @@ pub(super) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
             }
         }
         MeasKind::Spectrum { config } => {
-            if !SpectrumConfig::fft_len_ok(config.fft_len) {
+            if let SpecResolution::Fixed { fft_len } = config.resolution
+                && !SpectrumConfig::fft_len_ok(fft_len)
+            {
                 return inv(&format!(
                     "fft_len must be a power of two in {}..={}",
                     SpectrumConfig::MIN_FFT_LEN,
@@ -133,13 +136,16 @@ pub(super) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
                 return inv("invalid averaging");
             }
             if let SpecAveraging::Fifo { frames } = config.averaging {
-                let bins = u64::from(config.fft_len) / 2 + 1;
-                let most = SpecAveraging::MAX_SPECTRUM_FIFO_VALUES / bins;
+                let values = config.resolution.fifo_values_per_frame();
+                let most = SpecAveraging::MAX_SPECTRUM_FIFO_VALUES / values;
                 if u64::from(frames) > most {
+                    let what = match config.resolution {
+                        SpecResolution::Fixed { fft_len } => format!("a {fft_len}-point spectrum"),
+                        SpecResolution::Multi { .. } => "a multi-resolution spectrum".to_owned(),
+                    };
                     return inv(&format!(
-                        "a {}-point spectrum averages at most {most} FIFO frames \
-                         (use exponential averaging for longer)",
-                        config.fft_len
+                        "{what} averages at most {most} FIFO frames \
+                         (use exponential averaging for longer)"
                     ));
                 }
             }
@@ -310,7 +316,7 @@ mod tests {
         let spec = |fft_len, averaging| {
             validate_meas(&meas(MeasKind::Spectrum {
                 config: SpectrumConfig {
-                    fft_len,
+                    resolution: SpecResolution::Fixed { fft_len },
                     averaging,
                     ..SpectrumConfig::on_input(0)
                 },
@@ -321,6 +327,17 @@ mod tests {
         assert!(spec(65_536, fifo(512)).is_err());
         assert!(spec(4096, fifo(8188)).is_ok());
         assert!(spec(4096, fifo(0)).is_err());
+        let multi = |averaging| {
+            validate_meas(&meas(MeasKind::Spectrum {
+                config: SpectrumConfig {
+                    resolution: SpecResolution::MULTI,
+                    averaging,
+                    ..SpectrumConfig::on_input(0)
+                },
+            }))
+        };
+        assert!(multi(fifo(128)).is_ok());
+        assert!(multi(fifo(129)).is_err());
         let exp = |s| SpecAveraging::Exponential {
             time_constant: Seconds(s),
         };

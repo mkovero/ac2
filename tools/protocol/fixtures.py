@@ -200,6 +200,26 @@ def frames():
                     ],
                     "phase": "no_phase",
                 },
+                "bands": {
+                    "bands": [
+                        {
+                            "window": 0.6826666666666666,
+                            "hop": 0.08533333333333333,
+                            "sole": 202.875,
+                            "age": 0.0,
+                        },
+                        {
+                            "window": 0.021333333333333333,
+                            "hop": 0.010666666666666666,
+                            "sole": 6492.0,
+                            "age": None,
+                        },
+                    ],
+                    "unresolved": {
+                        "resolution": "forty_eighth",
+                        "ranges": [{"lo": 7.8125, "hi": 101.5}],
+                    },
+                },
             },
             [
                 (arr("level", "dbfs"), [-120.0, -20.0, INF, NAN]),

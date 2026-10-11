@@ -7,7 +7,8 @@
 use std::collections::BTreeSet;
 
 use ac2_proto::model::{
-    MeasKind, Measurement, Resolution, SpecAveraging, SweepRun, TraceMeta, TraceOwner, TraceSource,
+    MeasKind, Measurement, Resolution, SpecAveraging, SpecResolution, SweepRun, TraceMeta,
+    TraceOwner, TraceSource,
 };
 use ac2_proto::units::{MeasId, TraceId};
 
@@ -132,6 +133,14 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
             text.push_str(&format!(" · {}", format::smoothing(config.smoothing)));
         }
         MeasKind::Spectrum { config } => {
+            // One FFT is the default and its size is in the dialog; multi-resolution
+            // changes how each part of the curve behaves, so the row says it.
+            if matches!(config.resolution, SpecResolution::Multi { .. }) {
+                text.push_str(&format!(
+                    " · {}",
+                    format::spec_resolution(config.resolution)
+                ));
+            }
             if config.averaging != SpecAveraging::Off {
                 text.push_str(&format!(
                     " · avg {}",
@@ -915,6 +924,13 @@ pub(crate) mod tests {
         assert_eq!(
             meas_row(&item(&m), None, true).text,
             "FFT  Room\n     running · avg exp τ 2 s · smoothed 1/6 oct"
+        );
+        if let MeasKind::Spectrum { config } = &mut m.config.kind {
+            config.resolution = SpecResolution::MULTI;
+        }
+        assert_eq!(
+            meas_row(&item(&m), None, true).text,
+            "FFT  Room\n     running · multi-res 1/48 oct · avg exp τ 2 s · smoothed 1/6 oct"
         );
         assert_eq!(
             format::spec_averaging(SpecAveraging::Exponential {

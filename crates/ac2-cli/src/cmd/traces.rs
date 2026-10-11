@@ -155,6 +155,11 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
         } => {
             let ir_given =
                 channel.is_some() || gate.is_some() || *keep_delay || resolution.is_some();
+            let ir_resolution = resolution
+                .map(crate::args::ResolutionArg::columns)
+                .transpose()
+                .map_err(CliError::Usage)?
+                .unwrap_or_default();
             let ir = ir_given.then(|| IrImport {
                 channel: channel.map(|c| c - 1),
                 window: match gate {
@@ -169,7 +174,7 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
                 } else {
                     IrAlign::Peak
                 },
-                resolution: resolution.map_or_else(Default::default, |r| r.0),
+                resolution: ir_resolution,
             });
             let content = std::fs::read(file)
                 .map_err(|e| CliError::Usage(format!("cannot read {}: {e}", file.display())))?;

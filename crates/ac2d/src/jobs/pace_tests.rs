@@ -109,7 +109,7 @@ const SPEC: Topic = Topic::Data {
 fn spectrum_config() -> SpectrumConfig {
     SpectrumConfig {
         input: 0,
-        fft_len: 4096,
+        resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 4096 },
         window: Window::Hann,
         averaging: SpecAveraging::Off,
         smoothing: None,
@@ -128,7 +128,7 @@ fn spectrum_of(cfg: SpectrumConfig) -> Spectrum {
 /// result; the first comes after 65 536 samples (256 blocks).
 fn long_spectrum() -> Spectrum {
     spectrum_of(SpectrumConfig {
-        fft_len: 65_536,
+        resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 65_536 },
         ..spectrum_config()
     })
 }
@@ -284,7 +284,7 @@ fn spectra_are_stamped_where_their_frame_ended() {
     let mut s = Spectrum::new(
         MeasId(1),
         SpectrumConfig {
-            fft_len: 65_536,
+            resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 65_536 },
             ..spectrum_config()
         },
         FS96,
@@ -323,6 +323,100 @@ fn spectra_are_stamped_where_their_frame_ended() {
     }
     for w in spectra.windows(2) {
         assert_eq!(w[1].stamp.audio_sample.0 - w[0].stamp.audio_sample.0, hop);
+    }
+}
+
+/// A multi-resolution spectrum at 96 kHz: frames come at the shortest band's 1024-sample
+/// hop, each stamped at a frame end; every band's age is exact from its own framing; the
+/// columns only the longest window serves hold still between its spectra (every 8192
+/// samples) while the top columns change with every frame, and no column has a value
+/// before every band behind it has a spectrum.
+#[test]
+fn multires_bands_update_at_their_own_hops_with_exact_ages() {
+    use ac2_core::multires::MultiResLadder;
+    use ac2_proto::model::SpecResolution;
+    const FS96: u32 = 96_000;
+    let r = Rig::new("multires");
+    r.subscribe(SPEC);
+    let mut s = Spectrum::new(
+        MeasId(1),
+        SpectrumConfig {
+            resolution: SpecResolution::MULTI,
+            ..spectrum_config()
+        },
+        FS96,
+        0,
+        InputCal::none(),
+        Rev(1),
+    )
+    .expect("spectrum");
+    let ladder = super::spectrum::ladder(FS96).expect("ladder");
+    let grid = MultiResLadder::grid(f64::from(FS96), 48);
+    let mut seed = 5;
+    let mut at = 0u64;
+    let mut spectra = Vec::new();
+    for k in 1..=160u64 {
+        while at < k * 1600 / 256 * 256 {
+            let mut b = block(at, 0.1, &mut seed);
+            b.wall_ns = 1 + at;
+            s.push(&b);
+            at += u64::from(BLOCK);
+        }
+        s.emit(&r.em);
+        spectra.extend(
+            r.frames()
+                .into_iter()
+                .filter(|f| matches!(f.data, FrameData::Spec(_))),
+        );
+    }
+    assert!(spectra.len() > 100, "{} spectra", spectra.len());
+    let mut prev: Option<(u64, Vec<f32>)> = None;
+    let (lf, hf): (Vec<usize>, Vec<usize>) = (
+        (0..grid.len())
+            .filter(|&c| grid.frequency(c) <= ladder.bands[0].anchor_hz)
+            .collect(),
+        (0..grid.len())
+            .filter(|&c| grid.frequency(c) >= ladder.bands[5].anchor_hz)
+            .collect(),
+    );
+    for f in &spectra {
+        let end = f.stamp.audio_sample.0 + 1;
+        assert_eq!(end % 1024, 0, "stamped off the top band's hop at {end}");
+        let FrameData::Spec(spec) = &f.data else {
+            unreachable!()
+        };
+        assert_eq!(spec.level.len(), grid.len());
+        let bands = spec.meta.bands.as_ref().expect("bands");
+        assert_eq!(bands.bands.len(), 6);
+        for (band, meta) in ladder.bands.iter().zip(&bands.bands) {
+            let (n, hop) = (band.n as u64, band.hop as u64);
+            let want = (end >= n).then(|| (end - n) % hop);
+            let got = meta.age.map(|a| (a.0 * f64::from(FS96)).round() as u64);
+            assert_eq!(got, want, "band of {n} at {end}");
+            assert!((meta.hop.0 * f64::from(FS96) - hop as f64).abs() < 1e-6);
+        }
+        if bands.bands[0].age.is_none() {
+            assert!(
+                lf.iter().all(|&c| spec.level[c].is_nan()),
+                "LF before its window"
+            );
+        }
+        if let Some((prev_end, p)) = &prev {
+            let lf_same = lf
+                .iter()
+                .all(|&c| p[c].to_bits() == spec.level[c].to_bits());
+            // A new longest-window spectrum since the previous frame (a hand-off can hold
+            // two top-band hops, so it need not end exactly at this frame).
+            let lf_new = bands.bands[0]
+                .age
+                .is_some_and(|a| end - (a.0 * f64::from(FS96)).round() as u64 > *prev_end);
+            assert_eq!(lf_same, !lf_new, "LF columns at {end}");
+            assert!(
+                hf.iter().any(|&c| p[c] != spec.level[c]),
+                "HF columns hold at {end}"
+            );
+        }
+        prev = Some((end, spec.level.clone()));
     }
 }
 

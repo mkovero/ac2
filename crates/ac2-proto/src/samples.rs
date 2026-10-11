@@ -12,8 +12,8 @@ use crate::frame::{
     BandLeqFrame, BandLeqMeta, BandWindowState, ClipFlags, Frame, FrameData, FrameStamp,
     GenSummary, IrFrame, IrMeta, KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame,
     LevelsMeta, MathState, OperandState, OperandStatus, PreviewLevelsFrame, PreviewLevelsMeta,
-    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta,
-    TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
+    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SpecBand, SpecBands, SpecFrame,
+    SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -1947,6 +1947,29 @@ pub fn frames() -> Vec<Frame> {
                             },
                         ],
                         phase: PhaseBasis::NoPhase,
+                    })),
+                    bands: Some(Box::new(SpecBands {
+                        bands: vec![
+                            SpecBand {
+                                window: Seconds(0.6826666666666666),
+                                hop: Seconds(0.08533333333333333),
+                                sole: Hz(202.875),
+                                age: Some(Seconds(0.0)),
+                            },
+                            SpecBand {
+                                window: Seconds(0.021333333333333333),
+                                hop: Seconds(0.010666666666666666),
+                                sole: Hz(6492.0),
+                                age: None,
+                            },
+                        ],
+                        unresolved: Unresolved {
+                            resolution: Resolution::FortyEighth,
+                            ranges: vec![FreqRange {
+                                lo: Hz(7.8125),
+                                hi: Hz(101.5),
+                            }],
+                        },
                     })),
                 },
                 level: vec![-120.0, -20.0, f32::INFINITY, f32::NAN],

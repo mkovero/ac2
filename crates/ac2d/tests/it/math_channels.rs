@@ -620,7 +620,7 @@ fn spectrum_difference_on_the_spectrum_stream() {
                 name: "Spectrum 1".into(),
                 kind: MeasKind::Spectrum {
                     config: SpectrumConfig {
-                        fft_len: 8192,
+                        resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 8192 },
                         ..SpectrumConfig::on_input(1)
                     },
                 },

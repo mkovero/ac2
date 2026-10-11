@@ -326,6 +326,20 @@ pub fn fft_len(n: u32) -> String {
     format!("{n} pt")
 }
 
+/// What the multi-resolution bands trade, for a dialog: the longest and shortest window
+/// (65 536 and 2048 points at 96 kHz, 32 768 and 1024 at 48 kHz).
+pub const MULTIRES_HINT: &str = "0.68 s window at LF … 21 ms at HF";
+
+/// How a spectrum resolves frequency, the same in a measurement row, legend, dialog and
+/// the CLI: `65536 pt` for one FFT, `multi-res 1/48 oct` for the multi-resolution bands.
+pub fn spec_resolution(r: ac2_proto::model::SpecResolution) -> String {
+    use ac2_proto::model::SpecResolution;
+    match r {
+        SpecResolution::Fixed { fft_len: n } => fft_len(n),
+        SpecResolution::Multi { grid } => format!("multi-res {}", resolution(grid)),
+    }
+}
+
 /// What an `n`-point spectrum at `fs` resolves, over how long a window, and how often it
 /// updates: `0.73 Hz bins · 1365 ms window · 5.9 updates/s`. The update rate is the
 /// daemon's ([`ac2_proto::model::SpectrumConfig::display_hop`]); the spectrograph keeps a
@@ -508,6 +522,12 @@ mod tests {
     #[test]
     fn fft_readouts() {
         assert_eq!(fft_len(65_536), "65536 pt");
+        use ac2_proto::model::SpecResolution;
+        assert_eq!(
+            spec_resolution(SpecResolution::Fixed { fft_len: 4096 }),
+            "4096 pt"
+        );
+        assert_eq!(spec_resolution(SpecResolution::MULTI), "multi-res 1/48 oct");
         // 48 kHz: a 65 536-point window steps by n/8; a 1024-point one by n/2.
         assert_eq!(
             fft_resolution(65_536, 48_000),

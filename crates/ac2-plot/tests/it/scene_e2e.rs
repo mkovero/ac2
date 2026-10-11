@@ -202,3 +202,102 @@ fn transfer_view_unresolved() {
         golden(&name, &img, TEXT);
     }
 }
+
+/// A live multi-resolution spectrum at 96 kHz: a faint dashed line at each window change,
+/// labelled with the window's length at the plot foot, and the shade below what its
+/// longest window resolves, in the valid-resolution marker's style.
+#[test]
+fn spectrum_multires_stitches() {
+    use ac2_proto::GridDef;
+    use ac2_proto::frame::{SpecBand, SpecBands, SpecFrame, SpecMeta};
+    use ac2_proto::model::{CalStatus, FreqRange, LevelScale, Resolution, Unresolved, Window};
+    use ac2_proto::units::{Hz, WallNs};
+    use ac2_scene::spectrum::{SpectrumTrace, spectrum_scene};
+    let name = "spectrum_multires_stitches";
+    let Some(gpu) = gpu(name) else {
+        return;
+    };
+    let fs = 96_000.0;
+    let kappa = 1.0 / (2f64.powf(1.0 / 96.0) - 2f64.powf(-1.0 / 96.0));
+    let bands = SpecBands {
+        bands: [65_536u32, 32_768, 16_384, 8192, 4096, 2048]
+            .iter()
+            .zip([8192u32, 4096, 2048, 2048, 2048, 1024])
+            .map(|(&n, hop)| SpecBand {
+                window: Seconds(f64::from(n) / fs),
+                hop: Seconds(f64::from(hop) / fs),
+                sole: Hz(2.0 * kappa * fs / f64::from(n)),
+                age: Some(Seconds(0.0)),
+            })
+            .collect(),
+        unresolved: Unresolved {
+            resolution: Resolution::FortyEighth,
+            ranges: vec![FreqRange {
+                lo: Hz(7.8125),
+                hi: Hz(101.5),
+            }],
+        },
+    };
+    let grid = GridDef::Log {
+        ppo: 48,
+        k_min: -7 * 48,
+        k_max: 263,
+    };
+    let freqs = ac2_scene::grid::column_frequencies(&grid);
+    let edges = ac2_scene::grid::column_edges(&grid);
+    // Pink-like noise floor with a sine at 1 kHz.
+    let level = freqs
+        .iter()
+        .map(|&f| {
+            let floor = -70.0 - 3.0 * (f / 1000.0).log2() as f32;
+            if (f / 1000.0).log2().abs() < 0.5 / 48.0 {
+                -20.0
+            } else {
+                floor
+            }
+        })
+        .collect();
+    let spec = SpecFrame {
+        meas: MeasId(1),
+        meta: SpecMeta {
+            window: Window::Hann,
+            scale: LevelScale::Dbfs,
+            cal: CalStatus::Uncalibrated,
+            mic_curve: false,
+            smoothing: None,
+            math: None,
+            bands: Some(Box::new(bands)),
+        },
+        level,
+    };
+    let t = SpectrumTrace::spectrum(
+        &spec,
+        WallNs(0),
+        None,
+        &freqs,
+        &edges,
+        "Main L",
+        Theme::dark().trace_color(0),
+        Freshness::from_age(0.0),
+    );
+    let theme = Theme::dark();
+    let view = ViewState {
+        cursor_hz: Some(1000.0),
+        ..ViewState::default()
+    };
+    let size = Viewport {
+        width: 560.0,
+        height: 360.0,
+    };
+    let s = spectrum_scene(
+        std::slice::from_ref(&t),
+        &Status::default(),
+        &view,
+        &theme,
+        size,
+    );
+    assert_eq!(s.stitches.len(), 6);
+    let mut r = renderer(gpu);
+    let img = render_on(gpu, &mut r, &s.scene, 1.0, theme.background);
+    golden(name, &img, TEXT);
+}

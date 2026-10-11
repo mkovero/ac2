@@ -362,6 +362,9 @@ pub struct SpectrographScene {
     pub cursor: Option<SpectrographCursor>,
     /// Shown in the plot instead of a picture (nothing measured yet).
     pub message: Option<String>,
+    /// Where the marked multi-resolution spectrum's windows change, drawn across the
+    /// history too: its rows above a line update more often than those below.
+    pub stitches: Vec<crate::stitch::Stitch>,
 }
 
 /// Share of the pane height the spectrum keeps above the spectrograph.
@@ -631,6 +634,10 @@ pub fn spectrograph_scene(
             theme.text_dim,
         ));
     }
+    // Labelled here only when the spectrum above, which labels them, is not shown.
+    let stitches = crate::spectrum::marked_bands(traces, view)
+        .map_or_else(Vec::new, |(b, _)| crate::stitch::stitches(b));
+    crate::stitch::draw(&mut c, plot, &xm, &stitches, alone, theme);
     if let Some(hz) = cursor_hz {
         canvas::vline(&mut c.overlay, plot, xm.to_px(hz), theme.cursor);
     }
@@ -668,6 +675,7 @@ pub fn spectrograph_scene(
         caption,
         cursor,
         message,
+        stitches,
     }
 }
 

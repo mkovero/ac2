@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 40
+PROTO_VERSION = 41
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -158,7 +158,11 @@ META = {
     "rta": [("fraction", None), ("weighting", None), ("scale", None), ("cal", _CAL), ("mic_curve", None),
             ("math", _MATH)],
     "spec": [("window", None), ("scale", None), ("cal", _CAL), ("mic_curve", None), ("smoothing", None),
-             ("math", _MATH)],
+             ("math", _MATH),
+             ("bands", ("opt", [("bands", ("list", [("window", None), ("hop", None), ("sole", None),
+                                                     ("age", None)])),
+                                ("unresolved", [("resolution", None),
+                                                ("ranges", ("list", [("lo", None), ("hi", None)]))])]))],
     "spl": [("scale", None), ("weighting", None), ("time_weighting", None), ("peak_weighting", None),
             ("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
             ("duration", None), ("cal", _CAL), ("mic_curve", None), ("position", ("opt", _POSITION))],

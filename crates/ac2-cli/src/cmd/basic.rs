@@ -228,6 +228,25 @@ fn band_fraction(f: FractionArg) -> Result<BandFraction, CliError> {
     })
 }
 
+/// A spectrum's `--resolution multi[:1/N]`, else one FFT of `--fft`.
+fn spec_resolution(
+    r: Option<ResolutionArg>,
+    fft: Option<SampleCount>,
+) -> Result<SpecResolution, CliError> {
+    match (r, fft) {
+        (Some(r), _) if !r.multi => Err(CliError::Usage(
+            "a spectrum takes --resolution multi or multi:1/N (the multi-resolution bands), \
+             or --fft for one FFT"
+                .into(),
+        )),
+        (Some(r), _) => Ok(SpecResolution::Multi { grid: r.grid }),
+        (None, Some(n)) => Ok(SpecResolution::Fixed {
+            fft_len: fft_len(n)?,
+        }),
+        (None, None) => Err(CliError::Usage("--fft or --resolution multi".into())),
+    }
+}
+
 /// `--fft`: a length the daemon takes.
 fn fft_len(n: SampleCount) -> Result<u32, CliError> {
     u32::try_from(n.0)
@@ -281,13 +300,26 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
             n.kind
         )));
     }
-    if n.resolution.is_some() && !matches!(n.kind, MeasKindArg::Tf | MeasKindArg::Sweep) {
+    if n.resolution.is_some()
+        && !matches!(
+            n.kind,
+            MeasKindArg::Tf | MeasKindArg::Sweep | MeasKindArg::Spectrum
+        )
+    {
         return Err(CliError::Usage(format!(
-            "--resolution applies to tf and sweep, not {:?}",
+            "--resolution applies to tf, sweep and spectrum, not {:?}",
             n.kind
         )));
     }
-    let resolution = n.resolution.map(|r| r.0).unwrap_or_default();
+    let resolution = match n.kind {
+        MeasKindArg::Spectrum => Resolution::default(),
+        _ => n
+            .resolution
+            .map(ResolutionArg::columns)
+            .transpose()
+            .map_err(CliError::Usage)?
+            .unwrap_or_default(),
+    };
     if n.average.is_some() && !matches!(n.kind, MeasKindArg::Spectrum | MeasKindArg::Rta) {
         return Err(CliError::Usage(format!(
             "--average applies to spectrum and rta, not {:?}{}",
@@ -393,7 +425,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
             match k {
                 MeasKindArg::Spectrum => MeasKind::Spectrum {
                     config: SpectrumConfig {
-                        fft_len: fft_len(n.fft)?,
+                        resolution: spec_resolution(n.resolution, Some(n.fft))?,
                         window: window(n.window),
                         smoothing: n.smooth.map(smoothing).transpose()?,
                         averaging: n.average.map_or(SpecAveraging::Off, |a| a.0),
@@ -440,7 +472,7 @@ pub(crate) struct MeasSet {
     pub(crate) blocks: Option<u32>,
     pub(crate) fft: Option<SampleCount>,
     pub(crate) window: Option<Window>,
-    pub(crate) resolution: Option<Resolution>,
+    pub(crate) resolution: Option<ResolutionArg>,
 }
 
 impl MeasSet {
@@ -459,7 +491,7 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
     if set.is_empty() {
         return Err(CliError::Usage(
             "say what changes: --average (spectrum, rta), --blocks (tf), --fft or --window \
-             (spectrum), --resolution (tf, sweep) or --colour"
+             (spectrum), --resolution (tf, sweep; multi[:1/N] for a spectrum) or --colour"
                 .into(),
         ));
     }
@@ -498,7 +530,14 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
         let MeasKind::Spectrum { config: c } = &mut config.kind else {
             return not("fft", "spectrum");
         };
-        c.fft_len = fft_len(n)?;
+        if set.resolution.is_some() {
+            return Err(CliError::Usage(
+                "--fft is one FFT, --resolution multi the bands: give one".into(),
+            ));
+        }
+        c.resolution = SpecResolution::Fixed {
+            fft_len: fft_len(n)?,
+        };
     }
     if let Some(w) = set.window {
         let MeasKind::Spectrum { config: c } = &mut config.kind else {
@@ -508,9 +547,14 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
     }
     if let Some(r) = set.resolution {
         match &mut config.kind {
-            MeasKind::Transfer { config: c } => c.resolution = r,
-            MeasKind::Sweep { config: c } => c.resolution = r,
-            _ => return not("resolution", "tf and sweep"),
+            MeasKind::Transfer { config: c } => {
+                c.resolution = r.columns().map_err(CliError::Usage)?;
+            }
+            MeasKind::Sweep { config: c } => {
+                c.resolution = r.columns().map_err(CliError::Usage)?;
+            }
+            MeasKind::Spectrum { config: c } => c.resolution = spec_resolution(Some(r), None)?,
+            _ => return not("resolution", "tf, sweep and spectrum"),
         }
     }
     Ok(config)
@@ -557,7 +601,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                 blocks: *blocks,
                 fft: *fft,
                 window: win.map(window),
-                resolution: resolution.map(|r| r.0),
+                resolution: *resolution,
             };
             if !set.is_empty() || colour.is_none() {
                 let config = meas_set(&m.config, set)?;
@@ -1163,13 +1207,22 @@ mod tests {
         let MeasKind::Spectrum { config: c } = meas_set(&spectrum, set).expect("set").kind else {
             panic!("a spectrum");
         };
-        assert_eq!((c.fft_len, c.window), (4096, Window::FlatTop));
+        assert_eq!(
+            (c.resolution, c.window),
+            (SpecResolution::Fixed { fft_len: 4096 }, Window::FlatTop)
+        );
         // The window alone keeps the length.
         let set = set_of(&["--window", "rect"]).expect("parsed");
         let MeasKind::Spectrum { config: c } = meas_set(&spectrum, set).expect("set").kind else {
             panic!("a spectrum");
         };
-        assert_eq!((c.fft_len, c.window), (65_536, Window::Rectangular));
+        assert_eq!(
+            (c.resolution, c.window),
+            (
+                SpecResolution::Fixed { fft_len: 65_536 },
+                Window::Rectangular
+            )
+        );
         for bad in ["1000samples", "32samples", "131072samples"] {
             let set = set_of(&["--fft", bad]).expect("parsed");
             let e = meas_set(&spectrum, set).expect_err(bad);
@@ -1233,12 +1286,14 @@ mod tests {
             .expect_err("refused");
         assert!(
             e.to_string()
-                .contains("--resolution applies to tf and sweep"),
+                .contains("--resolution applies to tf, sweep and spectrum"),
             "{e}"
         );
+        let e = tf(&["--resolution", "multi"]).expect_err("refused");
+        assert!(e.to_string().contains("a spectrum's"), "{e}");
 
         let fine = MeasSet {
-            resolution: Some(Resolution::NinetySixth),
+            resolution: Some(crate::args::ResolutionArg::grid(Resolution::NinetySixth)),
             ..MeasSet::default()
         };
         let set = meas_set(&sweep, fine).expect("set");
@@ -1250,9 +1305,72 @@ mod tests {
         let e = meas_set(&rta, fine).expect_err("refused");
         assert!(
             e.to_string()
-                .contains("--resolution applies to tf and sweep"),
+                .contains("--resolution applies to tf, sweep and spectrum"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn spectrum_takes_multi_resolution_and_meas_set_switches_it() {
+        let spec = |extra: &[&str]| {
+            let base = ["spectrum", "--name", "s", "--input", "1"];
+            let args: Vec<&str> = base.iter().chain(extra).copied().collect();
+            config(&args).map(|c| match c.kind {
+                MeasKind::Spectrum { config } => config.resolution,
+                other => panic!("{other:?}"),
+            })
+        };
+        assert_eq!(
+            spec(&[]).expect("default"),
+            SpecResolution::Fixed { fft_len: 65_536 }
+        );
+        assert_eq!(
+            spec(&["--resolution", "multi"]).expect("multi"),
+            SpecResolution::MULTI
+        );
+        assert_eq!(
+            spec(&["--resolution", "multi:1/96"]).expect("multi:1/96"),
+            SpecResolution::Multi {
+                grid: Resolution::NinetySixth
+            }
+        );
+        let e = spec(&["--resolution", "1/48"]).expect_err("refused");
+        assert!(e.to_string().contains("--resolution multi"), "{e}");
+        assert!(spec(&["--resolution", "multi:1/7"]).is_err());
+
+        let multi = config(&["spectrum", "--name", "s", "--input", "1"]).expect("spectrum");
+        let to = |r: &str| MeasSet {
+            resolution: Some(r.parse().expect("arg")),
+            ..MeasSet::default()
+        };
+        let m = meas_set(&multi, to("multi:1/24")).expect("set");
+        let MeasKind::Spectrum { config: c } = &m.kind else {
+            panic!("a spectrum")
+        };
+        assert_eq!(
+            c.resolution,
+            SpecResolution::Multi {
+                grid: Resolution::TwentyFourth
+            }
+        );
+        assert_eq!(
+            crate::output::meas_kind(&m.kind),
+            "spectrum in 1 (multi-res 1/24 oct)"
+        );
+        let back = MeasSet {
+            fft: Some(SampleCount(8192)),
+            ..MeasSet::default()
+        };
+        let MeasKind::Spectrum { config: c } = meas_set(&m, back).expect("set").kind else {
+            panic!("a spectrum")
+        };
+        assert_eq!(c.resolution, SpecResolution::Fixed { fft_len: 8192 });
+        let both = MeasSet {
+            fft: Some(SampleCount(8192)),
+            ..to("multi")
+        };
+        let e = meas_set(&m, both).expect_err("refused");
+        assert!(e.to_string().contains("give one"), "{e}");
     }
 
     /// A merged lobe lists one candidate: the text explains why and offers only `--pick 1`.

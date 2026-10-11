@@ -1498,7 +1498,7 @@ fn edit_meas_on_a_spectrum_changes_its_averaging_and_keeps_the_rest() {
             ("Input".to_owned(), "2 · Input 2".to_owned()),
             ("Name".to_owned(), "Sub".to_owned()),
             ("Smoothing".to_owned(), "off".to_owned()),
-            ("FFT size".to_owned(), "8192 pt".to_owned()),
+            ("Resolution".to_owned(), "8192 pt".to_owned()),
             ("Window".to_owned(), "Hann".to_owned()),
             ("Averaging".to_owned(), "off".to_owned()),
         ]
@@ -1531,5 +1531,59 @@ fn edit_meas_on_a_spectrum_changes_its_averaging_and_keeps_the_rest() {
         }
     );
     // What the dialog does not show stays the spectrum's own.
-    assert_eq!((config.fft_len, config.input), (8192, 1));
+    assert_eq!(
+        (config.resolution, config.input),
+        (ac2_proto::model::SpecResolution::Fixed { fft_len: 8192 }, 1)
+    );
+}
+
+#[test]
+fn edit_meas_switches_a_spectrum_to_multi_resolution() {
+    let mut t = T::new();
+    t.conn(mirror(daemon_state()));
+    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.key("Ctrl+K");
+    t.text("edit measurement");
+    t.key("Enter");
+    // Resolution: 8192 pt → … → the largest FFT → multi-res 1/48 oct.
+    for _ in 0..3 {
+        t.key("Down");
+    }
+    let field = |t: &T| {
+        let Overlay::Form(f) = &t.st.overlay else {
+            panic!("{:?}", t.st.overlay);
+        };
+        let x = &f.fields[f.focus];
+        (x.label.clone(), x.display(), x.hint.clone())
+    };
+    assert_eq!(field(&t).0, "Resolution");
+    for _ in 0..20 {
+        if field(&t).1 == "multi-res 1/48 oct" {
+            break;
+        }
+        t.key("Right");
+    }
+    let (_, shown, hint) = field(&t);
+    assert_eq!(shown, "multi-res 1/48 oct");
+    assert_eq!(hint, ac2_scene::format::MULTIRES_HINT);
+    let r = t.key("Enter");
+    let [
+        Request::Call {
+            cmd: Command::MeasUpdate { config, .. },
+            ..
+        },
+    ] = r.as_slice()
+    else {
+        panic!("{r:?}");
+    };
+    let MeasKind::Spectrum { config } = &config.kind else {
+        panic!("{config:?}");
+    };
+    assert_eq!(
+        config.resolution,
+        ac2_proto::model::SpecResolution::Multi {
+            grid: ac2_proto::model::Resolution::FortyEighth
+        }
+    );
+    assert_eq!(config.averaging, SpecAveraging::Off);
 }

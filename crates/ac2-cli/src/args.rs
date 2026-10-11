@@ -638,7 +638,8 @@ pub enum MeasCmd {
     },
     /// Change a measurement's averaging (`--average`: spectrum, rta; `--blocks`: tf), FFT
     /// length and window (`--fft`, `--window`: spectrum), Resolution (`--resolution`: tf,
-    /// sweep) or colour (`--colour`). What is not given stays as it is; a running
+    /// sweep; `multi[:1/N]` for a spectrum's multi-resolution bands, `--fft` back to one
+    /// FFT) or colour (`--colour`). What is not given stays as it is; a running
     /// measurement starts its average afresh (a colour alone leaves it running as it is),
     /// a sweep's Resolution applies to its next run.
     Set {
@@ -660,8 +661,9 @@ pub enum MeasCmd {
         #[arg(long, value_enum)]
         window: Option<WindowArg>,
         /// tf and sweep: Resolution, points per octave stored: `1/12`, `1/24`, `1/48`,
-        /// `1/96` (not smoothing).
-        #[arg(long, value_name = "1/N")]
+        /// `1/96` (not smoothing). Spectrum: `multi` or `multi:1/N`, the multi-resolution
+        /// bands (long windows low, short high) on a 1/N-octave grid.
+        #[arg(long, value_name = "1/N|multi[:1/N]")]
         resolution: Option<ResolutionArg>,
         /// The colour its curves are drawn in: `1` … `8` (the app's `colour N`), `grey`,
         /// or `auto` (by its id, the default). Not for a math channel (its measurement's).
@@ -751,8 +753,10 @@ pub struct MeasNew {
     /// tf and sweep: Resolution, the points per octave stored, `1/12`, `1/24`, `1/48`
     /// (default) or `1/96`. Not smoothing (a display edit, `--smooth`): a finer resolution
     /// adds columns, and below a frequency set by the analysis window they are
-    /// interpolation, not detail (the plot marks where).
-    #[arg(long, value_name = "1/N")]
+    /// interpolation, not detail (the plot marks where). Spectrum: `multi` or `multi:1/N`
+    /// instead of one `--fft`: six windows from 0.68 s at the lowest frequencies to 21 ms
+    /// at the highest, on 1/N-octave columns (1/48 by default).
+    #[arg(long, value_name = "1/N|multi[:1/N]")]
     pub resolution: Option<ResolutionArg>,
     /// Display smoothing, 1/N octave (tf: magnitude and phase; spectrum: power, and the
     /// level then no longer reads as tone level).
@@ -773,7 +777,8 @@ pub struct MeasNew {
     /// weighted by its length), `exp:<time>` (exponential, e.g. `exp:2s`).
     #[arg(long, value_name = "AVG")]
     pub average: Option<SpecAveragingArg>,
-    /// Spectrum FFT length: a power of two, 64 … 65536 samples.
+    /// Spectrum FFT length: a power of two, 64 … 65536 samples (not with
+    /// `--resolution multi`).
     #[arg(long, default_value = "65536samples")]
     pub fft: SampleCount,
     /// Spectrum window.
@@ -1772,22 +1777,61 @@ impl FromStr for TraceSlot {
     }
 }
 
-/// A Resolution argument: `1/N` or `N`, N one of 12, 24, 48, 96.
+/// A Resolution argument: `1/N` or `N`, N one of 12, 24, 48, 96; for a spectrum `multi`
+/// or `multi:1/N` (the multi-resolution bands on a 1/N-octave grid, 1/48 by default).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ResolutionArg(pub ac2_proto::model::Resolution);
+pub struct ResolutionArg {
+    /// Points per octave.
+    pub grid: ac2_proto::model::Resolution,
+    /// `multi[:1/N]`: a spectrum's multi-resolution bands.
+    pub multi: bool,
+}
+
+impl ResolutionArg {
+    /// `1/N` without `multi`.
+    pub fn grid(grid: ac2_proto::model::Resolution) -> Self {
+        Self { grid, multi: false }
+    }
+
+    /// The points per octave of a tf or sweep, which have no `multi`.
+    pub fn columns(self) -> Result<ac2_proto::model::Resolution, String> {
+        if self.multi {
+            Err("--resolution multi is a spectrum's; tf and sweep take 1/N".into())
+        } else {
+            Ok(self.grid)
+        }
+    }
+}
 
 impl FromStr for ResolutionArg {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, String> {
         let t = s.trim();
-        t.strip_prefix("1/")
-            .unwrap_or(t)
-            .parse::<u32>()
-            .ok()
-            .and_then(ac2_proto::model::Resolution::from_ppo)
-            .map(Self)
-            .ok_or_else(|| format!("{s:?}: Resolution is 1/12, 1/24, 1/48 or 1/96 octave"))
+        let (multi, rest) = match t.strip_prefix("multi") {
+            Some("") => (true, None),
+            Some(r) => match r.strip_prefix(':') {
+                Some(r) => (true, Some(r)),
+                None => (false, Some(t)),
+            },
+            None => (false, Some(t)),
+        };
+        let grid = match rest {
+            None => ac2_proto::model::Resolution::FortyEighth,
+            Some(r) => r
+                .strip_prefix("1/")
+                .unwrap_or(r)
+                .parse::<u32>()
+                .ok()
+                .and_then(ac2_proto::model::Resolution::from_ppo)
+                .ok_or_else(|| {
+                    format!(
+                        "{s:?}: Resolution is 1/12, 1/24, 1/48 or 1/96 octave \
+                         (a spectrum: multi or multi:1/N)"
+                    )
+                })?,
+        };
+        Ok(Self { grid, multi })
     }
 }
 

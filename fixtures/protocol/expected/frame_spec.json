@@ -1,7 +1,7 @@
 {
  "topic": "d/5/spec",
  "header": {
-  "v": 40,
+  "v": 41,
   "kind": "spec",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -51,6 +51,31 @@
       }
      ],
      "phase": "no_phase"
+    },
+    "bands": {
+     "bands": [
+      {
+       "window": 0.6826666666666666,
+       "hop": 0.08533333333333333,
+       "sole": 202.875,
+       "age": 0.0
+      },
+      {
+       "window": 0.021333333333333333,
+       "hop": 0.010666666666666666,
+       "sole": 6492.0,
+       "age": null
+      }
+     ],
+     "unresolved": {
+      "resolution": "forty_eighth",
+      "ranges": [
+       {
+        "lo": 7.8125,
+        "hi": 101.5
+       }
+      ]
+     }
     }
    }
   }

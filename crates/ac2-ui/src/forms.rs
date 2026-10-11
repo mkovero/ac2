@@ -11,7 +11,8 @@
 use ac2_proto::model::{
     BandFraction, DepthPolicy, EssSpec, LfHarmonics, MeasConfig, MeasKind, Measurement,
     OpenSession, Operand, Resolution, RtaConfig, Smoothing, SmoothingFraction, SpecAveraging,
-    SpectrumConfig, SplConfig, SweepConfig, TimeWeighting, TransferConfig, Weighting, Window,
+    SpecResolution, SpectrumConfig, SplConfig, SweepConfig, TimeWeighting, TransferConfig,
+    Weighting, Window,
 };
 use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
@@ -122,7 +123,7 @@ pub enum FieldId {
     LfHarmonics,
     /// Frequency points per octave of a transfer or sweep curve.
     Resolution,
-    /// A spectrum's FFT length.
+    /// A spectrum's resolution: one FFT's length, or the multi-resolution bands.
     FftSize,
     /// A spectrum's FFT window.
     Window,
@@ -399,6 +400,19 @@ const AVERAGING: [SpecAveraging; 9] = [
 const FFT_LENS: [u32; 11] = [
     64, 128, 256, 512, 1024, 2048, 4096, 8192, 16_384, 32_768, 65_536,
 ];
+/// How a spectrum dialog can resolve frequency: one FFT of each length, then the
+/// multi-resolution bands on each column grid.
+fn spec_resolutions() -> Vec<SpecResolution> {
+    FFT_LENS
+        .iter()
+        .map(|&fft_len| SpecResolution::Fixed { fft_len })
+        .chain(
+            Resolution::ALL
+                .iter()
+                .map(|&grid| SpecResolution::Multi { grid }),
+        )
+        .collect()
+}
 /// Windows of the spectrum dialogs (index 0: Hann, as `ac2 meas new` without `--window`).
 const WINDOWS: [Window; 4] = [
     Window::Hann,
@@ -485,17 +499,22 @@ impl Form {
         }
     }
 
-    /// The FFT size and window fields of a spectrum dialog showing `n` and `w`, with the
-    /// size's hint stated at the session's rate (set [`Form::sample_rate`] first).
-    fn fft_fields(&self, n: u32, w: Window) -> [Field; 2] {
-        let lens = FFT_LENS.map(ac2_scene::format::fft_len);
-        let lens: Vec<&str> = lens.iter().map(String::as_str).collect();
-        let index = FFT_LENS
+    /// The resolution (one FFT's size, or the multi-resolution bands) and window fields
+    /// of a spectrum dialog showing `r` and `w`, with the resolution's hint stated at the
+    /// session's rate (set [`Form::sample_rate`] first).
+    fn fft_fields(&self, r: SpecResolution, w: Window) -> [Field; 2] {
+        let all = spec_resolutions();
+        let labels: Vec<String> = all
             .iter()
-            .position(|l| *l == n)
+            .map(|r| ac2_scene::format::spec_resolution(*r))
+            .collect();
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let index = all
+            .iter()
+            .position(|x| *x == r)
             .unwrap_or(FFT_LENS.len() - 1);
-        let mut size = Field::choice(FieldId::FftSize, "FFT size", &lens, index);
-        size.hint = self.fft_hint(FFT_LENS[index]);
+        let mut size = Field::choice(FieldId::FftSize, "Resolution", &labels, index);
+        size.hint = self.fft_hint(all[index]);
         let names = WINDOWS.map(|w| {
             let l = ac2_scene::spectrum::window_label(w);
             l.strip_suffix(" window").unwrap_or(l)
@@ -509,11 +528,16 @@ impl Form {
         [size, window]
     }
 
-    /// Bin width and update rate of an `n`-point spectrum at the session's rate.
-    fn fft_hint(&self, n: u32) -> String {
-        self.sample_rate
-            .map(|fs| ac2_scene::format::fft_resolution(n, fs))
-            .unwrap_or_default()
+    /// Bin width and update rate of an `n`-point spectrum at the session's rate; what the
+    /// multi-resolution bands trade.
+    fn fft_hint(&self, r: SpecResolution) -> String {
+        match r {
+            SpecResolution::Fixed { fft_len } => self
+                .sample_rate
+                .map(|fs| ac2_scene::format::fft_resolution(fft_len, fs))
+                .unwrap_or_default(),
+            SpecResolution::Multi { .. } => ac2_scene::format::MULTIRES_HINT.to_owned(),
+        }
     }
 
     /// The averaging field showing `current` (added to the options when it is none of them,
@@ -582,7 +606,7 @@ impl Form {
                         .position(|s| s.1 == config.smoothing)
                         .unwrap_or(0),
                 ));
-                fields.extend(f.fft_fields(config.fft_len, config.window));
+                fields.extend(f.fft_fields(config.resolution, config.window));
             }
             MeasKind::Rta { config } => fields.push(Field::choice(
                 FieldId::Fraction,
@@ -736,7 +760,7 @@ impl Form {
         f.sample_rate = open.map(|o| o.sample_rate_hz);
         if kind == FormKind::Spectrum {
             let d = SpectrumConfig::on_input(0);
-            let fft = f.fft_fields(d.fft_len, d.window);
+            let fft = f.fft_fields(d.resolution, d.window);
             f.fields.extend(fft);
         }
         if matches!(kind, FormKind::Spectrum | FormKind::Rta) {
@@ -1135,10 +1159,12 @@ impl Form {
             self.math_changed();
         }
         crate::ir_import_dialog::rehint(self, self.focus);
-        if let Some(n) = self.choice_index(FieldId::FftSize).map(|i| FFT_LENS[i])
+        if let Some(r) = self
+            .choice_index(FieldId::FftSize)
+            .and_then(|i| spec_resolutions().get(i).copied())
             && self.fields[self.focus].id == FieldId::FftSize
         {
-            self.fields[self.focus].hint = self.fft_hint(n);
+            self.fields[self.focus].hint = self.fft_hint(r);
         }
     }
 
@@ -1246,9 +1272,10 @@ impl Form {
                         input,
                         smoothing,
                         averaging,
-                        fft_len: self
+                        resolution: self
                             .choice_index(FieldId::FftSize)
-                            .map_or(base.fft_len, |i| FFT_LENS[i]),
+                            .and_then(|i| spec_resolutions().get(i).copied())
+                            .unwrap_or(base.resolution),
                         window: self
                             .choice_index(FieldId::Window)
                             .map_or(base.window, |i| WINDOWS[i]),
@@ -1389,7 +1416,7 @@ mod tests {
             MeasKind::Spectrum {
                 config: SpectrumConfig {
                     input: 1,
-                    fft_len: 65_536,
+                    resolution: SpecResolution::Fixed { fft_len: 65_536 },
                     window: Window::Hann,
                     averaging: SpecAveraging::Off,
                     smoothing: None,
@@ -1540,7 +1567,7 @@ mod tests {
     fn a_spectrums_fft_size_and_window_are_editable() {
         let o = open(vec![0, 1], None);
         let at = |f: &Form, id| f.fields.iter().position(|x| x.id == id).expect("field");
-        // New: the default length and window, the size's hint at the session's rate.
+        // New: the default length and window, the resolution's hint at the session's rate.
         let f = Form::measurement(FormKind::Spectrum, Some(&o), &[], &names(&o), &[]);
         let size = &f.fields[at(&f, FieldId::FftSize)];
         assert_eq!(size.display(), "65536 pt");
@@ -1553,7 +1580,7 @@ mod tests {
                 name: "Mic".into(),
                 kind: MeasKind::Spectrum {
                     config: SpectrumConfig {
-                        fft_len: 4096,
+                        resolution: SpecResolution::Fixed { fft_len: 4096 },
                         window: Window::FlatTop,
                         averaging: SpecAveraging::Fifo { frames: 8 },
                         ..SpectrumConfig::on_input(1)
@@ -1590,12 +1617,25 @@ mod tests {
         let MeasKind::Spectrum { config } = e.meas_config(Some(&o)).expect("spectrum").kind else {
             panic!("kind");
         };
-        assert_eq!((config.fft_len, config.window), (16_384, Window::Hann));
+        assert_eq!(
+            (config.resolution, config.window),
+            (SpecResolution::Fixed { fft_len: 16_384 }, Window::Hann)
+        );
         assert_eq!(config.averaging, SpecAveraging::Fifo { frames: 8 });
         // The full range, and no hint without a session rate.
         e.focus = i;
         e.cycle(-20);
         assert_eq!(e.fields[i].display(), "64 pt");
+        // Past the longest FFT: the multi-resolution bands, on each column grid.
+        e.cycle(11);
+        assert_eq!(e.fields[i].display(), "multi-res 1/12 oct");
+        e.cycle(2);
+        assert_eq!(e.fields[i].display(), "multi-res 1/48 oct");
+        assert_eq!(e.fields[i].hint, ac2_scene::format::MULTIRES_HINT);
+        let MeasKind::Spectrum { config } = e.meas_config(Some(&o)).expect("spectrum").kind else {
+            panic!("kind");
+        };
+        assert_eq!(config.resolution, SpecResolution::MULTI);
         let e = Form::edit_spec(&m, &names(&o), None).expect("edit");
         assert_eq!(e.fields[at(&e, FieldId::FftSize)].hint, "");
     }

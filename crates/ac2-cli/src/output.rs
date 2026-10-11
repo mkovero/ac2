@@ -142,9 +142,9 @@ pub fn meas_kind(k: &MeasKind) -> String {
             config.measurement_input + 1
         ),
         MeasKind::Spectrum { config } => format!(
-            "spectrum in {} ({} pt){}",
+            "spectrum in {} ({}){}",
             config.input + 1,
-            config.fft_len,
+            ac2_scene::format::spec_resolution(config.resolution),
             spec_averaging(config.averaging)
         ),
         MeasKind::Rta { config } => format!(

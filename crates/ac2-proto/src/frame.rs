@@ -434,6 +434,38 @@ pub struct SpecMeta {
     pub smoothing: Option<SmoothingFraction>,
     /// What a math channel combined; `None` for a spectrum measurement.
     pub math: Option<Box<MathState>>,
+    /// The bands behind a multi-resolution spectrum's columns; `None` for one FFT and a
+    /// math channel.
+    pub bands: Option<Box<SpecBands>>,
+}
+
+/// The windows of a multi-resolution spectrum as of this frame
+/// (`docs/design/multires-spectrum.md`). Band `b` alone serves the columns at its
+/// `sole` frequency; between two bands' `sole` frequencies a column blends both, so the
+/// columns below the first follow the longest window and those above the last the
+/// shortest.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpecBands {
+    /// Bands, longest window first.
+    pub bands: Vec<SpecBand>,
+    /// Where the columns are finer than the band serving them resolves.
+    pub unresolved: Unresolved,
+}
+
+/// One window of a multi-resolution spectrum.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpecBand {
+    /// Window length.
+    pub window: Seconds,
+    /// Time between the band's spectra: how often the columns it serves change.
+    pub hop: Seconds,
+    /// Where this band is the only estimate.
+    pub sole: Hz,
+    /// From the end of the band's newest spectrum to the end of this frame's
+    /// (`audio_sample`); `None` before its first, when its columns have no value.
+    pub age: Option<Seconds>,
 }
 
 /// SPL meter readings; values in `scale`.

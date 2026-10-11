@@ -59,7 +59,7 @@ fn spectrum() -> MeasKind {
     MeasKind::Spectrum {
         config: SpectrumConfig {
             input: 1,
-            fft_len: 8192,
+            resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 8192 },
             window: Window::Hann,
             averaging: SpecAveraging::Off,
             smoothing: None,

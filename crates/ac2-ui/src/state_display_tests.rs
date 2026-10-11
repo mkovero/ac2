@@ -238,6 +238,7 @@ fn spec_frame_captured(
             mic_curve: false,
             smoothing: None,
             math: None,
+            bands: None,
         },
         level,
     });
@@ -1101,6 +1102,7 @@ fn live_frames(t: &mut T) {
                 mic_curve: false,
                 smoothing: None,
                 math: None,
+                bands: None,
             },
             level: vec![-60.0; 8],
         }),

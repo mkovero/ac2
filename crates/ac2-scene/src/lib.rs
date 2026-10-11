@@ -51,6 +51,7 @@ pub mod spectrograph;
 pub mod spectrum;
 pub mod spl;
 pub mod stimulus;
+pub mod stitch;
 pub mod tf;
 pub mod theme;
 pub mod time;

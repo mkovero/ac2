@@ -621,6 +621,7 @@ pub(crate) fn with_spectrum<R>(
             freshness: None,
             offset_db: data.meta.edit.offset.0,
             selected: st.selected_trace == Some(data.meta.id),
+            bands: None,
         });
     }
     let shown: Vec<&TopicFrame> = cols.iter().map(|c| c.tf).collect();

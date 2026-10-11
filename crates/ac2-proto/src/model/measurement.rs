@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AverageMethod, BandFraction, DelayState, PeakWeighting, Resolution, Smoothing,
-    SmoothingFraction, SpecAveraging, SweepConfig, TfAveraging, TimeWeighting, Weighting, Window,
+    SmoothingFraction, SpecAveraging, SpecResolution, SweepConfig, TfAveraging, TimeWeighting,
+    Weighting, Window,
 };
 use crate::grid::GridId;
 use crate::topic::Stream;
@@ -62,11 +63,12 @@ pub enum DepthPolicy {
 pub struct SpectrumConfig {
     /// Input channel.
     pub input: u16,
-    /// FFT length, samples.
-    pub fft_len: u32,
-    /// Window.
+    /// One FFT, or the multi-resolution bands.
+    pub resolution: SpecResolution,
+    /// Window (of every band, multi-resolution).
     pub window: Window,
-    /// Averaging.
+    /// Averaging (each multi-resolution band on its own frames: a FIFO of `n` frames spans
+    /// `n` hops of that band; an exponential time constant is the same time in every band).
     pub averaging: SpecAveraging,
     /// Display smoothing (power, on a log-frequency kernel over the bins), if any. A
     /// smoothed bin no longer reads as tone level; frames say so (`SpecMeta.smoothing`).

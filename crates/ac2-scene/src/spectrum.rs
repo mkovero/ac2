@@ -6,7 +6,7 @@
 //! a fractional-octave power average of tone levels — a sine reads lower by however many
 //! bins the kernel spreads it over — so its axis says that too.
 
-use ac2_proto::frame::{RtaFrame, SpecFrame, ValidityMask};
+use ac2_proto::frame::{RtaFrame, SpecBands, SpecFrame, ValidityMask};
 use ac2_proto::model::{BandFraction, CalStatus, LevelScale, SmoothingFraction, Weighting, Window};
 use ac2_proto::units::WallNs;
 
@@ -86,6 +86,9 @@ pub enum BinWidth {
     Hz(f64),
     /// Curves on different spacings share the axis.
     Mixed,
+    /// A multi-resolution spectrum: each column's bandwidth is its window's, wider the
+    /// higher the column.
+    MultiRes,
 }
 
 impl BinWidth {
@@ -126,6 +129,14 @@ pub fn level_unit_forms(scale: LevelScale, q: Quantity, bin: BinWidth) -> Vec<St
             v.push(format!("{s}/bin"));
             v
         }
+        (_, BinWidth::MultiRes) => {
+            let mut v = vec![format!("{s} ({tone}, multi-res)")];
+            if let Some(sm) = &smoothed {
+                v.push(format!("{s} ({sm}, multi-res)"));
+            }
+            v.push(format!("{s} (multi-res)"));
+            v
+        }
         (_, BinWidth::Mixed) => {
             let per = format!("{s} per bin, mixed widths");
             vec![format!("{per} ({tone})"), per, format!("{s}/bin")]
@@ -138,9 +149,18 @@ pub fn level_unit_forms(scale: LevelScale, q: Quantity, bin: BinWidth) -> Vec<St
 
 /// What the level axis of a narrowband spectrum means, for its tooltip and the help.
 pub fn tone_unit_help(bin: BinWidth) -> String {
+    if bin == BinWidth::MultiRes {
+        return "Tone level from windows of 0.68 s at the lowest frequencies to 21 ms at the \
+                highest: a sine reads its RMS level at any frequency. Each column's \
+                bandwidth grows with its frequency, so broadband sound reads as in a \
+                constant fraction of an octave (pink noise flat, white rising 3 dB per \
+                octave) between the window changes the dashed lines mark. Use an RTA for \
+                band levels in dB SPL."
+            .to_string();
+    }
     let per = match bin {
         BinWidth::Hz(b) => format!("per FFT bin ({} wide)", format::freq_readout(b)),
-        BinWidth::Mixed | BinWidth::Unknown => "per FFT bin".to_string(),
+        BinWidth::Mixed | BinWidth::Unknown | BinWidth::MultiRes => "per FFT bin".to_string(),
     };
     format!(
         "Level {per}: a sine reads its RMS level. Broadband sound reads lower than its band \
@@ -209,6 +229,9 @@ pub struct SpectrumTrace<'a> {
     pub offset_db: f64,
     /// The selected stored trace: marked in the legend and drawn with a thicker line.
     pub selected: bool,
+    /// A live multi-resolution spectrum's bands: where its windows change, and which
+    /// columns resolve less than their grid.
+    pub bands: Option<&'a SpecBands>,
 }
 
 /// ` · stopped` after a stopped measurement's caption: its curve is the final result.
@@ -259,6 +282,7 @@ impl<'a> SpectrumTrace<'a> {
             freshness: Some(freshness),
             offset_db: 0.0,
             selected: false,
+            bands: None,
         }
     }
 
@@ -291,14 +315,21 @@ impl<'a> SpectrumTrace<'a> {
             bin_hz: None,
             // The axis unit says whether the level is smoothed (`level_unit`).
             caption: format!(
-                "{}{}{}",
+                "{}{}{}{}",
                 window_label(frame.meta.window),
+                frame.meta.bands.as_ref().map_or(String::new(), |b| format!(
+                    " · {}",
+                    format::spec_resolution(ac2_proto::model::SpecResolution::Multi {
+                        grid: b.unresolved.resolution
+                    })
+                )),
                 cal_caption(frame.meta.cal, curve, captured),
                 stopped_caption(freshness)
             ),
             freshness: Some(freshness),
             offset_db: 0.0,
             selected: false,
+            bands: frame.meta.bands.as_deref(),
         }
     }
 
@@ -456,6 +487,25 @@ pub struct SpectrumScene {
     /// Banner strip above the plot; zero height when no banner is up.
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
+    /// Where the marked multi-resolution spectrum's windows change (the selected curve's,
+    /// else the first's that has bands); empty when the marker is off.
+    pub stitches: Vec<crate::stitch::Stitch>,
+    /// Its columns finer than the window behind them resolves, shaded.
+    pub unresolved: Vec<crate::unresolved::Mark>,
+}
+
+/// The bands of the selected curve that has them, else of the first that does; `None`
+/// when the valid-resolution marker is off.
+pub(crate) fn marked_bands<'a>(
+    traces: &[SpectrumTrace<'a>],
+    view: &ViewState,
+) -> Option<(&'a SpecBands, f64)> {
+    if !view.unresolved {
+        return None;
+    }
+    let with = || traces.iter().filter(|t| t.bands.is_some());
+    let t = with().find(|t| t.selected).or_else(|| with().next())?;
+    Some((t.bands?, t.freqs.first().copied().unwrap_or(0.0)))
 }
 
 /// A caption from its longest form to its shortest, for a pane too narrow for the full
@@ -506,7 +556,12 @@ fn unit_forms(traces: &[SpectrumTrace<'_>]) -> (Vec<String>, Option<String>) {
     {
         return (vec!["mixed units".to_string()], None);
     }
-    let bin = if traces.iter().all(|t| t.bin_hz == first.bin_hz) {
+    let bin = if traces.iter().all(|t| t.bands.is_some()) {
+        BinWidth::MultiRes
+    } else if traces
+        .iter()
+        .all(|t| t.bin_hz == first.bin_hz && t.bands.is_none())
+    {
         BinWidth::of(first.bin_hz)
     } else {
         BinWidth::Mixed
@@ -768,6 +823,20 @@ pub(crate) fn spectrum_scene_in(
         theme.text_dim,
     ));
     let (xm, ym) = (x_axis.mapping, y_axis.mapping);
+    let marked = marked_bands(traces, view);
+    let stitches = marked.map_or_else(Vec::new, |(b, _)| crate::stitch::stitches(b));
+    let unresolved = marked.map_or_else(Vec::new, |(b, first)| {
+        crate::unresolved::marks(
+            crate::unresolved::Source {
+                unresolved: &b.unresolved,
+                fill: crate::unresolved::Fill::Steps,
+            },
+            first,
+            None,
+        )
+    });
+    crate::unresolved::draw(&mut c, plot, &xm, &unresolved, theme);
+    crate::stitch::draw(&mut c, plot, &xm, &stitches, true, theme);
 
     for t in traces {
         let dim = if t.is_stale() { theme.stale_alpha } else { 1.0 };
@@ -906,9 +975,18 @@ pub(crate) fn spectrum_scene_in(
                 Some((name, s))
             })
             .collect();
+        let mut freq = format::freq_readout(f);
+        if let Some((b, _)) = marked {
+            if let Some(w) = crate::stitch::windows_at(b, f) {
+                freq = format!("{freq} · {w}");
+            }
+            if let Some(m) = crate::unresolved::at(&unresolved, f) {
+                freq = format!("{freq} · {}", m.note);
+            }
+        }
         Some(SpectrumCursor {
             freq_hz: f,
-            freq: format::freq_readout(f),
+            freq,
             rows,
         })
     });
@@ -946,6 +1024,8 @@ pub(crate) fn spectrum_scene_in(
         legend_hits,
         strip: strip.rect,
         banners: strip.rows,
+        stitches,
+        unresolved,
     }
 }
 
@@ -1000,6 +1080,7 @@ mod tests {
             freshness: None,
             offset_db: 0.0,
             selected: false,
+            bands: None,
         }
     }
 
@@ -1129,6 +1210,7 @@ mod tests {
                 mic_curve: false,
                 smoothing: None,
                 math: None,
+                bands: None,
             },
             level: vec![],
         };
@@ -1414,6 +1496,7 @@ mod tests {
             freshness: None,
             offset_db: 0.0,
             selected: false,
+            bands: None,
         };
         let theme = Theme::dark();
         let scene = |traces: &[SpectrumTrace<'_>], w: f32| {
@@ -1527,6 +1610,7 @@ mod tests {
             freshness: None,
             offset_db: 0.0,
             selected: false,
+            bands: None,
         };
         let theme = Theme::dark();
         let mut captions = Vec::new();
@@ -1859,5 +1943,103 @@ mod tests {
         // Sparse input passes through unchanged.
         let (x, y) = max_per_pixel(&[1.0, 5.0], &[2.0, 3.0]);
         assert_eq!((x, y), (vec![1.0, 5.0], vec![2.0, 3.0]));
+    }
+
+    /// A live multi-resolution spectrum: its caption and unit say so, a dashed line marks
+    /// each window change with the window's length, the columns below what its longest
+    /// window resolves are shaded, and the cursor names the windows behind its column.
+    #[test]
+    fn multires_spectrum_marks_where_its_windows_change() {
+        let bands = crate::stitch::tests::bands_96k();
+        let grid = GridDef::Log {
+            ppo: 48,
+            k_min: -7 * 48,
+            k_max: 263,
+        };
+        let freqs = column_frequencies(&grid);
+        let edges = column_edges(&grid);
+        let spec = SpecFrame {
+            meas: MeasId(3),
+            meta: ac2_proto::frame::SpecMeta {
+                window: Window::Hann,
+                scale: LevelScale::Dbfs,
+                cal: CalStatus::Uncalibrated,
+                mic_curve: false,
+                smoothing: None,
+                math: None,
+                bands: Some(Box::new(bands)),
+            },
+            level: freqs.iter().map(|_| -60.0).collect(),
+        };
+        let t = SpectrumTrace::spectrum(
+            &spec,
+            WallNs(0),
+            None,
+            &freqs,
+            &edges,
+            "Main L",
+            Color::WHITE,
+            Freshness::from_age(0.0),
+        );
+        assert_eq!(t.caption, "Hann window · multi-res 1/48 oct");
+        let view = ViewState {
+            cursor_hz: Some(1000.0),
+            ..ViewState::default()
+        };
+        let s = spectrum_scene(
+            std::slice::from_ref(&t),
+            &Status::default(),
+            &view,
+            &Theme::dark(),
+            SIZE,
+        );
+        let windows: Vec<&str> = s.stitches.iter().map(|s| s.label.as_str()).collect();
+        assert_eq!(
+            windows,
+            ["683 ms", "341 ms", "171 ms", "85 ms", "43 ms", "21 ms"]
+        );
+        assert_eq!(s.unresolved.len(), 1);
+        assert!(s.unit.starts_with("dBFS (tone, multi-res)"), "{}", s.unit);
+        assert!(s.unit_help.as_deref().is_some_and(|h| h.contains("21 ms")));
+        let cur = s.cursor.expect("cursor");
+        assert!(cur.freq.ends_with(" · 171 + 85 ms windows"), "{}", cur.freq);
+        let labels: Vec<&str> = s
+            .scene
+            .layers
+            .iter()
+            .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
+            .collect();
+        for w in &windows {
+            assert!(labels.contains(w), "{w} not drawn");
+        }
+
+        // Below the longest window's reach the cursor says the column repeats its bin.
+        let low = ViewState {
+            cursor_hz: Some(50.0),
+            ..ViewState::default()
+        };
+        let s = spectrum_scene(
+            std::slice::from_ref(&t),
+            &Status::default(),
+            &low,
+            &Theme::dark(),
+            SIZE,
+        );
+        let cur = s.cursor.expect("cursor");
+        assert!(cur.freq.contains("683 ms window"), "{}", cur.freq);
+
+        // The marker's toggle hides both.
+        let off = ViewState {
+            unresolved: false,
+            ..ViewState::default()
+        };
+        let s = spectrum_scene(
+            std::slice::from_ref(&t),
+            &Status::default(),
+            &off,
+            &Theme::dark(),
+            SIZE,
+        );
+        assert!(s.stitches.is_empty() && s.unresolved.is_empty());
     }
 }

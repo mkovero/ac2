@@ -475,7 +475,7 @@ impl Control {
                 static_grid(old) == static_grid(new)
             }
             (Some(MeasKind::Spectrum { config: a }), MeasKind::Spectrum { config: b }) => {
-                a.fft_len == b.fft_len
+                a.resolution == b.resolution
             }
             (Some(MeasKind::Rta { config: a }), MeasKind::Rta { config: b }) => {
                 a.fraction == b.fraction && a.f_lo == b.f_lo && a.f_hi == b.f_hi

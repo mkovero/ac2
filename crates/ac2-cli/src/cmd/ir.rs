@@ -139,7 +139,7 @@ pub fn request(a: &IrCaptureArgs, (reference, mic): (u16, u16)) -> Result<SweepC
         gate: a.gate.map(|g| g.0),
         tail: a.tail.map(|t| t.0),
         lf_harmonics: a.lf_harmonics.into(),
-        resolution: a.resolution.0,
+        resolution: a.resolution.columns().map_err(CliError::Usage)?,
     })
 }
 
@@ -558,7 +558,7 @@ mod tests {
             gate: None,
             tail: None,
             lf_harmonics: LfHarmonicsArg::Standard,
-            resolution: crate::args::ResolutionArg(Resolution::FortyEighth),
+            resolution: crate::args::ResolutionArg::grid(Resolution::FortyEighth),
             name: None,
             force: false,
         }

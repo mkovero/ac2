@@ -691,7 +691,7 @@ fn spectrum_fft_length_and_window_change_restart_it() {
         name: "fft".into(),
         kind: MeasKind::Spectrum {
             config: SpectrumConfig {
-                fft_len,
+                resolution: ac2_proto::model::SpecResolution::Fixed { fft_len },
                 window,
                 averaging: SpecAveraging::Exponential {
                     time_constant: Seconds(2.0),
@@ -760,7 +760,7 @@ fn spectrum_smoothing_live_and_captured() {
         name: "fft".into(),
         kind: MeasKind::Spectrum {
             config: SpectrumConfig {
-                fft_len: 4096,
+                resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 4096 },
                 smoothing,
                 ..SpectrumConfig::on_input(1)
             },
@@ -873,6 +873,100 @@ fn spectrum_smoothing_live_and_captured() {
     };
     let t = set_smoothing(&mut c2, &t, Some(third));
     assert_ne!(data(&mut c2, t.id).mag_db, served.mag_db);
+    drop(r.backend);
+    r.h.shutdown();
+}
+
+/// A spectrum switched from one FFT to multi-resolution by `meas.update`: frames move to
+/// the log column grid and name the bands; a capture keeps the unsmoothed columns on the
+/// same grid and, re-smoothed at the measurement's setting, reads as the live frame did.
+#[test]
+fn multires_spectrum_live_and_captured() {
+    use ac2_proto::model::{Resolution, SpecResolution};
+    let mut r = rig("spec-multires");
+    let (mut c2, sub) = connect(&r.h, &[b"d/2/spec"]);
+    let spec = |resolution, smoothing| MeasConfig {
+        name: "multi".into(),
+        kind: MeasKind::Spectrum {
+            config: SpectrumConfig {
+                resolution,
+                smoothing,
+                ..SpectrumConfig::on_input(1)
+            },
+        },
+    };
+    c2.ok(Command::MeasCreate {
+        config: spec(SpecResolution::Fixed { fft_len: 4096 }, None),
+    });
+    c2.ok(Command::MeasStart { meas: MeasId(2) });
+    run(&mut r.d, 0.3);
+    let multi = SpecResolution::Multi {
+        grid: Resolution::TwentyFourth,
+    };
+    let m = match c2.ok(Command::MeasUpdate {
+        meas: MeasId(2),
+        config: spec(multi, Some(SmoothingFraction::Sixth)),
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    for _ in 0..4 {
+        run(&mut r.d, 0.3);
+        r.c.ok(Command::GenRefresh { lease_token: r.tok });
+    }
+    let g = ac2_core::multires::MultiResLadder::grid(f64::from(FS), 24);
+    let log = ac2_proto::GridDef::Log {
+        ppo: 24,
+        k_min: g.k_min,
+        k_max: g.k_max,
+    };
+    // The longest window (32 768 samples at 48 kHz) has had time for spectra.
+    let f = sub
+        .frame(T, |f| {
+            matches!(&f.data, FrameData::Spec(s) if f.stamp.config_rev.0 >= m.config_rev.0
+                && s.meta.bands.as_ref().is_some_and(|b| b.bands[0].age.is_some()))
+        })
+        .expect("multi-resolution frame");
+    assert_eq!(f.stamp.grid_id, Some(log.id()));
+    let FrameData::Spec(live) = f.data else {
+        unreachable!()
+    };
+    assert_eq!(live.level.len(), g.len());
+    let bands = live.meta.bands.expect("bands");
+    assert_eq!(bands.bands.len(), 6);
+    assert!((bands.bands[0].window.0 - 32_768.0 / 48_000.0).abs() < 1e-9);
+    assert!((bands.bands[5].window.0 - 1024.0 / 48_000.0).abs() < 1e-9);
+    assert_eq!(bands.unresolved.resolution, Resolution::TwentyFourth);
+
+    let t = trace(c2.ok(Command::TraceCapture {
+        meas: MeasId(2),
+        name: "multi".into(),
+        slot: None,
+    }));
+    assert_eq!(t.grid_id, log.id());
+    let served = data(&mut c2, t.id);
+    assert_eq!(served.mag_db.len(), g.len());
+    let t = set_smoothing(&mut c2, &t, None);
+    let raw = data(&mut c2, t.id);
+    assert_ne!(raw.mag_db, served.mag_db, "the capture is unsmoothed");
+    // A FIFO deeper than the bands' memory bound is refused.
+    let e = c2
+        .call(Command::MeasUpdate {
+            meas: MeasId(2),
+            config: MeasConfig {
+                name: "multi".into(),
+                kind: MeasKind::Spectrum {
+                    config: SpectrumConfig {
+                        resolution: multi,
+                        averaging: SpecAveraging::Fifo { frames: 1000 },
+                        ..SpectrumConfig::on_input(1)
+                    },
+                },
+            },
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid);
+    assert!(e.msg.contains("multi-resolution"), "{e:?}");
     drop(r.backend);
     r.h.shutdown();
 }
