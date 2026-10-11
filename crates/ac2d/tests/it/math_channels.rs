@@ -14,7 +14,7 @@
 
 use crate::common;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ac2_audio::fake::FakePath;
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
@@ -29,7 +29,7 @@ use ac2_proto::{Command, ErrorCode, ReplyBody};
 use ac2d::Daemon;
 use common::*;
 
-const T: Duration = Duration::from_secs(10);
+const T: Duration = Duration::from_secs(60);
 
 fn rig3() -> FakeBackend {
     let db = |g: f32| 10f32.powf(g / 20.0);
@@ -118,11 +118,30 @@ fn play(d: &mut FakeDriver, c: &mut Client, tok: LeaseToken, seconds: f64) {
     }
 }
 
-/// The newest frame of the stream `pred` picks that covers the audio played so far.
-fn newest(sub: &Sub, d: &FakeDriver, pred: impl Fn(&Frame) -> bool) -> Frame {
+/// The frame of each measurement in `metas` that covers the audio played so far, read in
+/// one pass: the daemon publishes the measurements' frames in no fixed order, so waiting for
+/// one at a time would pass another's by. The DSP jobs may still be working through the
+/// audio when the driver stops (a busy machine runs them slower than real time), hence the
+/// long wait.
+fn newest<const N: usize>(sub: &Sub, d: &FakeDriver, metas: [u32; N]) -> [Frame; N] {
     let end = end_sample(d);
-    sub.frame(T, |f| pred(f) && f.stamp.audio_sample.0 + 1 >= end)
-        .expect("frame")
+    let mut got: [Option<Frame>; N] = std::array::from_fn(|_| None);
+    let deadline = Instant::now() + T;
+    while got.iter().any(Option::is_none) {
+        let left = deadline.checked_duration_since(Instant::now());
+        let Some(f) = left.and_then(|left| sub.frame(left, |f| f.stamp.audio_sample.0 + 1 >= end))
+        else {
+            let missing: Vec<u32> = (0..N)
+                .filter(|&i| got[i].is_none())
+                .map(|i| metas[i])
+                .collect();
+            panic!("no frame up to sample {end} of measurements {missing:?}");
+        };
+        if let Some(i) = metas.iter().position(|&m| of_meas(&f, m)) {
+            got[i].get_or_insert(f);
+        }
+    }
+    got.map(|f| f.expect("every one"))
 }
 
 fn of_meas(f: &Frame, m: u32) -> bool {
@@ -225,7 +244,7 @@ fn power_average_of_three_positions() {
     }
     c.ok(Command::MeasStart { meas: MeasId(4) });
     play(&mut r.d, c, r.tok, 3.5);
-    let f = newest(&r.sub, &r.d, |f| of_meas(f, 4));
+    let [f] = newest(&r.sub, &r.d, [4]);
     let t = tf(&f);
     assert_eq!(f.stamp.protection, ProtectionFlags::NONE);
     let a = t.meta.math.as_ref().expect("math metadata");
@@ -315,7 +334,7 @@ fn power_average_of_three_positions() {
     // An operand stopped is left out as stopped; one usable operand is no average.
     c.ok(Command::MeasStop { meas: MeasId(2) });
     play(&mut r.d, c, r.tok, 0.5);
-    let f = newest(&r.sub, &r.d, |f| of_meas(f, 4));
+    let [f] = newest(&r.sub, &r.d, [4]);
     let t = tf(&f);
     let st: Vec<OperandStatus> = t
         .meta
@@ -366,7 +385,7 @@ fn ratio_edit_capture_and_summation() {
     assert_eq!(q, MeasId(4));
     c.ok(Command::MeasStart { meas: q });
     play(&mut r.d, c, r.tok, 3.5);
-    let f = newest(&r.sub, &r.d, |f| of_meas(f, 4));
+    let [f] = newest(&r.sub, &r.d, [4]);
     let t = tf(&f);
     assert_eq!(
         t.meta.delay,
@@ -419,7 +438,7 @@ fn ratio_edit_capture_and_summation() {
         ),
     });
     play(&mut r.d, c, r.tok, 1.0);
-    let f = newest(&r.sub, &r.d, |f| of_meas(f, 4));
+    let [f] = newest(&r.sub, &r.d, [4]);
     let t = tf(&f);
     for &i in &band(t) {
         assert!(t.mag[i].abs() < 0.3, "{} dB", t.mag[i]);
@@ -454,7 +473,7 @@ fn ratio_edit_capture_and_summation() {
     assert_eq!(sum, MeasId(5));
     c.ok(Command::MeasStart { meas: sum });
     play(&mut r.d, c, r.tok, 1.0);
-    let f = newest(&r.sub, &r.d, |f| of_meas(f, 5));
+    let [f] = newest(&r.sub, &r.d, [5]);
     let t = tf(&f);
     assert_eq!(t.meta.delay, Seconds(dt), "referred to the first operand");
     assert!(t.coh.iter().all(|c| c.is_nan()), "a sum has no coherence");
@@ -582,7 +601,7 @@ fn spectrum_difference_on_the_spectrum_stream() {
         c.ok(Command::MeasStart { meas: MeasId(m) });
     }
     play(&mut r.d, c, r.tok, 4.0);
-    let f = newest(&r.sub, &r.d, |f| of_meas(f, 6));
+    let [f] = newest(&r.sub, &r.d, [6]);
     let FrameData::Spec(s) = &f.data else {
         panic!("{f:?}");
     };
@@ -730,14 +749,12 @@ fn an_imported_impulse_response_filters_live_measurements() {
     }
     play(&mut r.d, c, r.tok, 4.0);
 
-    let level = |m: u32| {
-        let f = newest(&r.sub, &r.d, |f| of_meas(f, m));
+    let [plain, filtered] = newest(&r.sub, &r.d, [4, 5]).map(|f| {
         let FrameData::Spec(s) = f.data else {
             panic!("{f:?}");
         };
         s
-    };
-    let (plain, filtered) = (level(4), level(5));
+    });
     assert_eq!(
         filtered.meta.math.as_ref().expect("math").included(),
         2,
@@ -759,8 +776,7 @@ fn an_imported_impulse_response_filters_live_measurements() {
 
     // The spectrum reads above passed the transfer frames by: fresh ones.
     play(&mut r.d, c, r.tok, 1.0);
-    let seat = newest(&r.sub, &r.d, |f| of_meas(f, 1));
-    let both = newest(&r.sub, &r.d, |f| of_meas(f, 6));
+    let [seat, both] = newest(&r.sub, &r.d, [1, 6]);
     let (a, b) = (tf(&seat), tf(&both));
     assert_eq!(
         b.meta.math.as_ref().expect("math").phase,
