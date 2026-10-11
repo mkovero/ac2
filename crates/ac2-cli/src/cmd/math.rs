@@ -17,16 +17,16 @@ pub(crate) async fn run(cli: &Cli, cmd: &MathCmd, out: &mut Out<'_>) -> Result<(
     let m = match cmd {
         MathCmd::New { math, start } => {
             let config = math_config(math, &s, None)?;
-            let mut m = super::basic::meas_call(&c, Command::MeasCreate { config }).await?;
+            let mut m = super::meas::meas_call(&c, Command::MeasCreate { config }).await?;
             if *start {
-                m = super::basic::meas_call(&c, Command::MeasStart { meas: m.id }).await?;
+                m = super::meas::meas_call(&c, Command::MeasStart { meas: m.id }).await?;
             }
             m
         }
         MathCmd::Set { channel, math } => {
             let existing = find_meas(&s, channel)?;
             let config = math_config(math, &s, Some(existing))?;
-            super::basic::meas_call(
+            super::meas::meas_call(
                 &c,
                 Command::MeasUpdate {
                     meas: existing.id,
@@ -288,7 +288,7 @@ pub(crate) fn math_config(
     let smoothing = match (a.smooth, a.no_smooth) {
         (_, true) => None,
         (Some(f), false) => Some(Smoothing {
-            fraction: super::basic::smoothing(f)?,
+            fraction: super::meas_config::smoothing(f)?,
             mode: if a.smooth_magnitude_only || domain != MathDomain::Transfer {
                 SmoothingMode::Magnitude
             } else {

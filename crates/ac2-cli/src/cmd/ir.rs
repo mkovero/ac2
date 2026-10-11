@@ -181,7 +181,7 @@ pub(crate) async fn sweep_meas_for(
         .map(|n| format!("Sweep {n}"))
         .find(|n| st.measurements.iter().all(|m| m.config.name != *n))
         .unwrap_or_else(|| "Sweep".into());
-    super::basic::meas_call(
+    super::meas::meas_call(
         c,
         Command::MeasCreate {
             config: MeasConfig {

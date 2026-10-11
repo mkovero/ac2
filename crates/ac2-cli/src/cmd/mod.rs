@@ -2,17 +2,21 @@
 
 mod auth;
 mod bands;
-mod basic;
 mod cal;
 mod daemon;
+mod delay;
 mod discover;
 mod gen_;
 mod ir;
 mod leq;
 mod math;
+mod meas;
+mod meas_config;
+mod readouts;
 mod rec;
 mod salvage;
 mod selftest;
+mod session;
 mod sessions;
 mod traces;
 
@@ -27,25 +31,25 @@ use crate::{BUILD_ID, CliError};
 
 pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     match &cli.cmd {
-        Cmd::Devices => basic::devices(cli, out).await,
+        Cmd::Devices => session::devices(cli, out).await,
         Cmd::Status => daemon::status(cli, out).await,
         Cmd::Daemon { cmd } => daemon::run(cli, cmd, out).await,
         Cmd::Session {
             cmd: SessionCmd::Inputs(a),
         } => cal::session_inputs(cli, a, out).await,
-        Cmd::Session { cmd } => basic::session(cli, cmd, out).await,
+        Cmd::Session { cmd } => session::session(cli, cmd, out).await,
         Cmd::Gen { cmd } => gen_::run(cli, cmd, out).await,
-        Cmd::Meas { cmd } => basic::meas(cli, cmd, out).await,
+        Cmd::Meas { cmd } => meas::meas(cli, cmd, out).await,
         Cmd::Math { cmd } => math::run(cli, cmd, out).await,
-        Cmd::Delay { cmd } => basic::delay(cli, cmd, out).await,
-        Cmd::Spl { cmd } => basic::spl(cli, cmd, out).await,
+        Cmd::Delay { cmd } => delay::delay(cli, cmd, out).await,
+        Cmd::Spl { cmd } => readouts::spl(cli, cmd, out).await,
         Cmd::Cal { cmd } => cal::run(cli, cmd, out).await,
-        Cmd::Timing { watch } => basic::timing(cli, *watch, out).await,
+        Cmd::Timing { watch } => readouts::timing(cli, *watch, out).await,
         Cmd::Ir { cmd } => ir::run(cli, cmd, out).await,
         Cmd::Sweep { cmd } => ir::sweep(cli, cmd, out).await,
         Cmd::Rec { cmd } => rec::run(cli, cmd, out).await,
         Cmd::Trace { cmd } => traces::trace(cli, cmd, out).await,
-        Cmd::State { cmd } => basic::state_dump(cli, cmd, out).await,
+        Cmd::State { cmd } => readouts::state_dump(cli, cmd, out).await,
         Cmd::Selftest { cmd } => selftest::run(cli, cmd, out).await,
         Cmd::Discover(a) => discover::run(cli, a, out),
         Cmd::Auth { cmd } => auth::run(cli, cmd, out),

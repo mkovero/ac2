@@ -23,7 +23,8 @@ use ac2_proto::units::{Blob, MeasId, TraceId};
 use ac2_proto::{Command, ReplyBody};
 use serde::Serialize;
 
-use super::basic::{meas_call, uncaptured};
+use super::meas::meas_call;
+use super::meas_config::uncaptured;
 use super::state;
 use crate::CliError;
 use crate::output::{self, Out};
