@@ -27,6 +27,11 @@ TOLERANCES = Path(__file__).resolve().parent.parent / "tolerances.toml"
 # A mains line leaks about ±1/gate (≈1.1 Hz for ac2's 0.89 s default gate) into the gated
 # estimates; twice that keeps the masked columns clear of it.
 MAINS_GUARD_HZ = 2.0
+# How long after a clarity boundary the decay must stay above the noise before C50/C80 count as
+# measured: within it, the late energy past the boundary is mostly the noise-floor correction.
+CLARITY_GUARD_S = 0.010
+# Above this D50 the late energy is a trace and C = 10·log10(D/(1 − D)) rests on it alone.
+CLARITY_D_MAX = 0.998
 
 
 def dual_channel_harmonic_dbr(tones: list[dict], tone: dict, k: int, transfer=None) -> float | None:
@@ -304,24 +309,34 @@ class Analysis:
                                                               p.mains_hz, thr_db=6.0)]
         self.mains_cols = dsp.mains_columns(f, self.mains_hz, self.frac, guard_hz=MAINS_GUARD_HZ)
         # Each source's per-column noise (relative error of H) from the SNR of the recording it
-        # came from, against the silent recording of the same input. A windowed deconvolution
-        # (ac2's sweep) rejects more noise than the whole recording holds, so this is an upper bound.
+        # came from, against noise-only records of the same input: the silent recording, and the
+        # take's own stretches before and after its stimulus. Each column takes the larger: a
+        # noise that is there during a take but not in the silent recording (a machine tone that
+        # starts later) is in the take's own quiet stretches, and a short stretch that resolves
+        # too little is covered by the long silent recording. A windowed deconvolution (ac2's
+        # sweep) rejects more noise than the whole recording holds, so this is an upper bound.
         self.noise_rel = {}
-        if p.noise is not None:
-            rec_of, coh_of = {}, {}
-            for name, s in p.sweeps.items():
-                if s.raw is not None:
-                    rec_of[f"ac2 sweep {name}"] = rec_of[f"direct (ac2 capture {name})"] = s.raw
-                    coh_of[id(s.raw)] = self.capture_coh.get(f"direct (ac2 capture {name})")
-            if p.rec is not None:
-                rec_of["REW offline"] = rec_of["direct (REW recording)"] = p.rec
-            cache = {}
-            for name, raw in rec_of.items():
-                if name in src and raw.fs == p.noise.fs:
-                    if id(raw) not in cache:
-                        cache[id(raw)] = dsp.band_noise_rel(raw.meas, p.noise.meas, raw.fs, f, self.frac,
-                                                            coh=coh_of.get(id(raw)))
-                    self.noise_rel[name] = cache[id(raw)]
+        rec_of, coh_of = {}, {}
+        for name, s in p.sweeps.items():
+            if s.raw is not None:
+                rec_of[f"ac2 sweep {name}"] = rec_of[f"direct (ac2 capture {name})"] = s.raw
+                coh_of[id(s.raw)] = self.capture_coh.get(f"direct (ac2 capture {name})")
+        if p.rec is not None:
+            rec_of["REW offline"] = rec_of["direct (REW recording)"] = p.rec
+        cache = {}
+        for name, raw in rec_of.items():
+            if name not in src:
+                continue
+            if id(raw) not in cache:
+                z = np.zeros(len(f))
+                if p.noise is not None and raw.fs == p.noise.fs:
+                    z = dsp.band_noise_rel(raw.meas, p.noise.meas, raw.fs, f, self.frac, coh=coh_of.get(id(raw)))
+                own = dsp.quiet_parts(raw.meas, raw.ref, raw.fs)
+                if own:
+                    z = np.fmax(z, dsp.band_noise_rel(raw.meas, own, raw.fs, f, self.frac, coh=coh_of.get(id(raw)),
+                                                         hann=True))
+                cache[id(raw)] = z
+            self.noise_rel[name] = cache[id(raw)]
         # The live TF's own noise from its coherence over its FIFO blocks: σ = √((1 − γ²) / (2 γ² n)).
         # ac2's γ² is a per-bin coherence averaged over the column, so this is a bin's noise.
         # n = blocks counts every block as independent, though they overlap, so this is a lower
@@ -435,7 +450,7 @@ class Analysis:
                                      path=p.name, title=f"{a} − {b}, {lo}–{hi} Hz, {'magnitude' if g == 'mag' else 'phase'}",
                                      value=None, unit=unit, tol=tm if g == "mag" else None, status="INCONCLUSIVE",
                                      meaning=meaning + f". Of {int(inb.sum())} columns, {nn} carry more noise (2σ, from "
-                                             "the recordings' SNR against the silent recording, or the live TF's coherence over "
+                                             "the recordings' SNR against their noise-only records, or the live TF's coherence over "
                                              f"its blocks) than the pass limit and {nd} more uncorrelated content (harmonics, "
                                              "−10·log10 γ² of the direct estimate); too few left to judge")
                     continue
@@ -529,6 +544,18 @@ class Analysis:
                         h, (ud, up) = narrows[name[:-len(", narrow at the sine")]]
                     else:
                         h, ud, up = self.at(f, S[name], np.array([fc]))[0], u_db, u_deg
+                    # A column's own noise (2σ from its recording's SNR at fc): where the tone sits
+                    # near the noise, the column reads the noise's energy along with the response
+                    # and the sine's probe cannot be told from it either
+                    zc = 0.0
+                    if not narrow_row and name in self.noise_rel:
+                        zc = float(np.interp(np.log(fc), np.log(f), np.nan_to_num(self.noise_rel[name], posinf=1.0)))
+                    # at a relative error of 1 the noise holds as much as the response: the column
+                    # tells nothing, and no larger figure means more
+                    swamped, zc = zc >= 1.0, min(zc, 1.0)
+                    nz_db, nz_deg = 2 * 20 / np.log(10) * zc, 2 * np.degrees(zc)
+                    room_db, room_deg = ud, up
+                    ud, up = max(ud, nz_db), max(up, nz_deg)
                     # the readings the REW recording's narrow one does not carry: context for the
                     # column-to-tone split, not judged
                     info_only = name in ("direct (TF capture)", f"direct (ac2 capture {p.primary})") or (
@@ -557,7 +584,10 @@ class Analysis:
                                  meaning=f"sine {tone['ratio_deg']:+.3f}°, {name} {np.rad2deg(np.angle(h)):+.3f}°{note}"
                                          + ((f"; the narrow band's own noise (coherence) ±{up:.1f}°" if narrow_row else
                                              f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
-                                             f"differ by {up:.1f}° in the direct estimate") if up else ""),
+                                             f"differ by {room_deg:.1f}° in the direct estimate") if room_deg else "")
+                                         + (("; the column's noise-only records hold as much energy as its recording"
+                                             if swamped else f"; the column's own noise (2σ, its recording's SNR) ±{nz_deg:.1f}°")
+                                            if nz_deg > room_deg else ""),
                                  detail={"uncertainty": up, **_twin(p.name, "sine_phase", fc, name, tp[0])})
                     if dmd is not None:
                         tm = _tol(self.tol["band"]["mag_lf" if elec else "mag_acoustic"])
@@ -571,7 +601,10 @@ class Analysis:
                                  meaning=f"sine {tone['ratio_db']:+.3f} dB (meas ÷ ref), {name} {dsp.db(h):+.3f} dB"
                                          + ((f"; the narrow band's own noise (coherence) ±{ud:.2f} dB" if narrow_row else
                                              f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
-                                             f"differ by {ud:.2f} dB in the direct estimate") if ud else ""),
+                                             f"differ by {room_db:.2f} dB in the direct estimate") if room_db else "")
+                                         + (("; the column's noise-only records hold as much energy as its recording"
+                                             if swamped else f"; the column's own noise (2σ, its recording's SNR) ±{nz_db:.2f} dB")
+                                            if nz_db > room_db else ""),
                                  detail={"uncertainty": ud, **_twin(p.name, "sine_mag", fc, name, agree)})
                     rows.append([f"{fc:g}", name, "" if dmd is None else f"{dmd:+.3f}", "" if dpd is None else f"{dpd:+.3f}"])
             self.table(f"{p.name}: against the steady sines", ["f Hz", "source", "Δ dB", "Δ°"], rows)
@@ -1633,12 +1666,20 @@ class Analysis:
                 st, why = judge(d, tol), ""
                 trunc, d50 = _f(bb.get("truncation")), (bb.get("d50") or {}).get("value")
                 boundary = {"c50": 0.05, "c80": 0.08, "d50": 0.05}.get(key)
-                if boundary and trunc is not None and trunc - _f(bb.get("onset") or 0.0) < boundary:
-                    # the decay meets the noise before the clarity boundary: the late energy is
-                    # the noise-floor compensation, not a measurement
-                    st, why = "INCONCLUSIVE", (f"; ac2's decay meets the noise at {trunc*1e3:.1f} ms, before the "
-                                               f"{boundary*1e3:g} ms boundary (decay range "
+                guard = CLARITY_GUARD_S if key in ("c50", "c80") else 0.0
+                if boundary and trunc is not None and trunc - _f(bb.get("onset") or 0.0) < boundary + guard:
+                    # the decay meets the noise before the clarity boundary, or so soon after it
+                    # that the late energy is mostly the noise-floor compensation: not a measurement.
+                    # D50 holds that energy only as a share of the total, too small to move it.
+                    st, why = "INCONCLUSIVE", (f"; ac2's decay meets the noise at {trunc*1e3:.1f} ms, "
+                                               + (f"within {guard*1e3:g} ms of" if guard else "before")
+                                               + f" the {boundary*1e3:g} ms boundary (decay range "
                                                f"{_f(bb.get('decay_range')) or float('nan'):.1f} dB)")
+                elif key in ("c50", "c80") and d50 is not None and d50 > CLARITY_D_MAX:
+                    # C = 10·log10(D/(1 − D)), so dC/dD = 10/ln 10 / (D·(1 − D)): at D = 0.999 a
+                    # 0.0005 difference in D, a trace of late energy, moves C by about 2 dB
+                    st, why = "INCONCLUSIVE", (f"; D50 {d50:.4f}: so little late energy that C moves "
+                                               f"{10/np.log(10)/(d50*(1-d50)):.0f} dB per unit of D")
                 elif key == "edt" and d50 is not None and d50 > 0.98:
                     # the first 10 dB of the Schroeder decay fall within the direct sound itself:
                     # their slope is the impulse's shape and band edge, not the room's decay

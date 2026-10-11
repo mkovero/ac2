@@ -67,12 +67,16 @@ def cross_spectrum_bands(meas: np.ndarray, ref: np.ndarray, fs: float, centres: 
     return H, coh
 
 
-def band_noise_rel(meas: np.ndarray, noise: np.ndarray, fs: float, centres: np.ndarray,
-                   frac: float = 1 / 48, coh: np.ndarray | None = None) -> np.ndarray:
+def band_noise_rel(meas: np.ndarray, noise: np.ndarray | list[np.ndarray], fs: float, centres: np.ndarray,
+                   frac: float = 1 / 48, coh: np.ndarray | None = None, hann: bool = False) -> np.ndarray:
     """Relative error |δH|/|H| (1σ) a band of the direct estimate of `meas` carries from the
     noise. Each bin's estimate errs by N/R; the band's |R|²-weighted mean of n bins with
     independent noise errs by √(noise energy / signal energy / n). The noise energy is scaled
-    from a noise-only recording on the same input (energy grows with duration).
+    from a noise-only recording on the same input (energy grows with duration); `noise` may be
+    several noise-only pieces, each transformed on its own (no step where they would join),
+    their energies summed over their summed length. `hann`: each noise record under a Hann
+    window (energy restored by its mean square), for short records, where a strong line would
+    otherwise leak its rectangular sidelobes into every band near it.
 
     `coh` is the band's coherence γ² of `meas` with its reference. H is the linear part only,
     the γ² share of the band's energy: harmonics made at f/k earlier in a sweep land in the
@@ -87,10 +91,42 @@ def band_noise_rel(meas: np.ndarray, noise: np.ndarray, fs: float, centres: np.n
         b = np.searchsorted(fx, centres * 2 ** (frac / 2))
         return c[b] - c[a], np.maximum(b - a, 1)
     em, n = band_energy(meas)
-    en = band_energy(noise)[0] * len(meas) / len(noise)
+    pieces = [noise] if isinstance(noise, np.ndarray) else list(noise)
+    def windowed(x):
+        if not hann:
+            return x
+        w = np.hanning(len(x))
+        return x * w / np.sqrt(np.mean(w ** 2))
+    en = sum(band_energy(windowed(x))[0] for x in pieces) * len(meas) / sum(len(x) for x in pieces)
     lin = em - en if coh is None else em * np.clip(np.nan_to_num(coh), 0.0, 1.0)
     sig = np.maximum(lin, 1e-30)
     return np.sqrt(en / sig / n)
+
+
+def quiet_parts(meas: np.ndarray, ref: np.ndarray, fs: float, guard_pre: float = 0.2,
+                guard_post: float = 1.0, min_s: float = 0.25) -> list[np.ndarray]:
+    """The noise-only pieces of one take: `meas` before the stimulus first reaches its reference
+    input and after it last leaves it, each about its own mean. The guards keep out the
+    stimulus's fade and, after it, the room's decay and the latest harmonics' arrival. A noise
+    that starts or grows after a separate silent recording (a machine starting up next door) is
+    in these and not in that. Pieces shorter than `min_s` resolve no column and are dropped.
+
+    The stimulus is found on the reference's 10 ms RMS envelope, 30 dB under its loudest block:
+    single samples of the input's own noise reach past any threshold low enough to catch a fade."""
+    blk = max(1, int(0.01 * fs))
+    nb = len(ref) // blk
+    if nb == 0:
+        return []
+    env = np.sqrt(np.mean(ref[:nb * blk].reshape(nb, blk) ** 2, axis=1))
+    on = np.where(env > env.max() * 10 ** (-30 / 20))[0] if env.max() > 0 else np.array([], int)
+    if not len(on):
+        return []
+    a, b = on[0] * blk - int(guard_pre * fs), (on[-1] + 1) * blk + int(guard_post * fs)
+    out = []
+    for x in (meas[:max(a, 0)], meas[b:]):
+        if len(x) >= min_s * fs:
+            out.append(x - np.mean(x))
+    return out
 
 
 def db(x) -> np.ndarray:

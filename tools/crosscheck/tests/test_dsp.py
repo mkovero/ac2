@@ -304,3 +304,50 @@ def test_lf_window_matches_ac2s_own_windows():
     pre5, post5 = dsp.lf_window(L, 5)
     assert pre5 + post5 < pre + post
     assert pre5 <= L * np.log(6 / 5) and post5 <= L * np.log(5 / 4)
+
+
+def test_a_take_s_own_quiet_parts_hold_a_tone_the_silent_recording_lacks():
+    # A machine tone that starts after the silent recording is in the take's stretches before and
+    # after its stimulus: estimated from those, the tone's column carries the noise; estimated
+    # from the silent recording alone, it reads as clean as its neighbours.
+    fs, rng = 48000.0, np.random.default_rng(11)
+    n_pre, n_sw, n_post = int(3 * fs), int(4 * fs), int(2 * fs)
+    n = n_pre + n_sw + n_post
+    t = np.arange(n) / fs
+    sweep = np.zeros(n)
+    sweep[n_pre:n_pre + n_sw] = np.sin(2 * np.pi * (20 * t[:n_sw] + 1000 * t[:n_sw] ** 2))
+    tone = 0.05 * np.sin(2 * np.pi * 240.0 * t)
+    meas = 0.3 * sweep + tone + 1e-4 * rng.standard_normal(n)
+    silent = 1e-4 * rng.standard_normal(n)
+    c = np.array([200.0, 240.0, 290.0])
+    parts = dsp.quiet_parts(meas, sweep, fs)
+    assert len(parts) == 2
+    # the stimulus is kept out: no piece reaches into the sweep, guards included
+    assert abs(len(parts[0]) - (n_pre - int(0.2 * fs))) <= 2 and abs(len(parts[1]) - (n_post - int(1.0 * fs))) <= 2
+    z_silent = dsp.band_noise_rel(meas, silent, fs, c)
+    z_own = dsp.band_noise_rel(meas, parts, fs, c, hann=True)
+    assert z_own[1] > 30 * z_silent[1]
+    # where only the broadband floor is, both read the same floor
+    for i in (0, 2):
+        assert abs(20 * np.log10(z_own[i] / z_silent[i])) < 6.0
+    # a take with no quiet stretch long enough gives none
+    assert dsp.quiet_parts(meas[n_pre - 100:n_pre + n_sw], sweep[n_pre - 100:n_pre + n_sw], fs) == []
+
+
+def test_a_column_s_own_noise_covers_its_power_excess_at_low_snr():
+    # A direct column reads |H|² = Σ|M|²/Σ|R|²: at 0 dB SNR the noise's energy adds as much
+    # as the response's, +3 dB. The column's own noise (2σ from the recording's SNR against a
+    # noise-only record) is wider than that, so a comparison carrying it cannot FAIL on it.
+    from crosscheck.analyse import judge_u
+    fs, n, rng = 48000.0, int(20 * 48000), np.random.default_rng(3)
+    ref = rng.standard_normal(n)
+    meas = 0.1 * ref + 0.1 * rng.standard_normal(n)
+    c = np.array([51.275])
+    H, _ = dsp.cross_spectrum_bands(meas, ref, fs, c)
+    excess = float(dsp.db(H[0]) - dsp.db(0.1))
+    assert 2.0 < excess < 4.0
+    z = dsp.band_noise_rel(meas, 0.1 * rng.standard_normal(n), fs, c)
+    u = 2 * 20 / np.log(10) * z[0]
+    assert u > excess
+    assert judge_u(excess, (0.3, 1.0), u) == "INCONCLUSIVE"
+    assert judge_u(excess, (0.3, 1.0), 0.0) == "FAIL"

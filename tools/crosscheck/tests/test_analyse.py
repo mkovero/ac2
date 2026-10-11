@@ -101,3 +101,46 @@ def test_ambient_rta_fifo_outlasts_the_run():
     from crosscheck.stages import RTA_FIFO_MAX, rta_average
     assert rta_average(60) == "fifo:10800"
     assert rta_average(1e6) == f"fifo:{RTA_FIFO_MAX}"
+
+
+def _room_checks(d50: float, truncation: float, c50: float):
+    """Analysis.room on one sweep's broadband metrics against numpy on a synthetic REW IR:
+    a direct impulse and a faint exponential tail, no REW RT60."""
+    from crosscheck import dsp
+    fs = 48000.0
+    h = np.zeros(int(fs))
+    h[100] = 1.0
+    t = np.arange(len(h) - 101) / fs
+    h[101:] = 2e-3 * np.random.default_rng(2).standard_normal(len(t)) * np.exp(-t / 0.05)
+    ours = dsp.room_parameters(h, fs, 100 - int(0.001 * fs))
+    val = lambda v: {"type": "value", "value": v}
+    bb = {"c50": val(c50 if c50 is not None else ours["c50"]), "c80": val(ours["c80"]), "d50": val(d50),
+          "truncation": truncation, "onset": 0.0, "decay_range": 40.0}
+    sw = SimpleNamespace(trace=SimpleNamespace(room_metrics={"broadband": bb}))
+    p = SimpleNamespace(name="g", primary="s", sweeps={"s": sw},
+                        rew=SimpleNamespace(meas_ir=SimpleNamespace(h=h, fs=fs), rt60=None))
+    a = Analysis(SimpleNamespace(manifest=None))
+    a.room(p)
+    return {c.id: c for c in a.checks}, ours
+
+
+def test_clarity_is_not_judged_on_a_trace_of_late_energy():
+    # C = 10·log10(D/(1 − D)): with D50 above 0.998 a hair of late energy moves C by dBs, so a
+    # C50 2 dB off numpy's says nothing about either
+    checks, ours = _room_checks(d50=0.999, truncation=0.3, c50=None)
+    assert ours["d50"] > 0.99
+    c = checks["g.room.c50.numpy on REW IR"]
+    checks2, _ = _room_checks(d50=0.999, truncation=0.3, c50=ours["c50"] + 2.5)
+    assert checks2["g.room.c50.numpy on REW IR"].status == "INCONCLUSIVE"
+    assert c.status == "INCONCLUSIVE"
+    # D50 itself is judged: it is linear in the late energy
+    assert checks2["g.room.d50.numpy on REW IR"].status != "INCONCLUSIVE"
+
+
+def test_clarity_is_not_judged_when_the_decay_meets_the_noise_just_past_the_boundary():
+    # the decay ends 4 ms past 50 ms: the energy beyond the boundary is the noise correction
+    checks, ours = _room_checks(d50=0.9, truncation=0.054, c50=None)
+    assert checks["g.room.c50.numpy on REW IR"].status == "INCONCLUSIVE"
+    # well past it, and with real late energy, the same agreement is a pass
+    checks, ours = _room_checks(d50=0.9, truncation=0.3, c50=None)
+    assert checks["g.room.c50.numpy on REW IR"].status == "PASS"
