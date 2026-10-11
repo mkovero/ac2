@@ -159,6 +159,11 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
     if item.offset_db != 0.0 {
         text.push_str(&format!(" · {}", format::db_readout(item.offset_db)));
     }
+    // Last and quiet: selecting it brings its own panes, which the operator should
+    // expect before the screen changes under them.
+    if let Some(l) = &m.layout {
+        text.push_str(&format!(" · {}", format::own_panes(l.panes().len())));
+    }
     let mark = match (selected == Some(m.id), active) {
         (false, _) => Mark::None,
         (true, false) => Mark::Selected,
@@ -791,6 +796,7 @@ pub(crate) mod tests {
             delay: None,
             grid_id: None,
             colour: None,
+            layout: None,
         }
     }
 
@@ -803,6 +809,26 @@ pub(crate) mod tests {
             hidden: false,
             color: Color::from_rgba8([0, 0, u8::try_from(m.id.0).unwrap_or(0), 255]),
         }
+    }
+
+    /// A measurement with its own panes says how many, last on its row.
+    #[test]
+    fn rows_say_a_measurement_has_its_own_panes() {
+        let mut m = tf(2, "TF 2");
+        m.delay = None;
+        m.layout = Some(ac2_proto::samples::pane_layout());
+        assert_eq!(
+            meas_row(&item(&m), None, true).text,
+            "TF  TF 2\n     running · 2 own panes"
+        );
+        m.layout = Some(ac2_proto::model::PaneLayout::Pane {
+            pane: *ac2_proto::samples::pane_layout().panes()[0],
+        });
+        assert!(
+            meas_row(&item(&m), None, true)
+                .text
+                .ends_with("· 1 own pane")
+        );
     }
 
     #[test]

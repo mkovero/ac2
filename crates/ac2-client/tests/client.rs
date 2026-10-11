@@ -84,6 +84,7 @@ fn spl_meas(id: u32, name: &str) -> Measurement {
         delay: None,
         grid_id: None,
         colour: None,
+        layout: None,
     }
 }
 

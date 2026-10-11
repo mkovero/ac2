@@ -268,6 +268,7 @@ fn measurement(
         delay,
         grid_id: grid.map(GridDef::id),
         colour: None,
+        layout: None,
     }
 }
 

@@ -702,6 +702,7 @@ impl Control {
                     delay,
                     grid_id,
                     colour: None,
+                    layout: None,
                 };
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 self.ensure_spl_log(&m, None);
@@ -805,6 +806,16 @@ impl Control {
                 }
                 // Only how its curves are drawn changes: the job and its frames go on.
                 m.colour = colour;
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+            Command::MeasLayout { meas, layout } => {
+                let mut m = self.meas(meas)?.clone();
+                if let Some(l) = &layout {
+                    l.check().map_err(|e| perr(ErrorCode::Invalid, e))?;
+                }
+                // Only what clients show changes: the job and its frames go on.
+                m.layout = layout;
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 Ok(ReplyBody::Measurement(m))
             }

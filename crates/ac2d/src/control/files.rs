@@ -141,6 +141,7 @@ impl Control {
                     tracking: d.tracking,
                 }),
                 colour: m.colour,
+                layout: m.layout.clone(),
             })
             .collect()
     }
@@ -513,6 +514,8 @@ impl Control {
             let colour = sm
                 .colour
                 .filter(|c| c.is_valid() && !matches!(sm.config.kind, MeasKind::Math { .. }));
+            // A layout no client could draw is no layout.
+            let layout = sm.layout.filter(|l| l.check().is_ok());
             let mut meas = Measurement {
                 id: sm.id,
                 config: sm.config,
@@ -522,6 +525,7 @@ impl Control {
                 delay,
                 grid_id,
                 colour,
+                layout,
             };
             self.ensure_spl_log(&meas, None);
             meas.config_rev = Rev(self.store.rev().0 + 1);

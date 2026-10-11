@@ -423,6 +423,7 @@ mod tests {
             running: true,
             delay: None,
             colour: None,
+            layout: None,
         }
     }
 
@@ -880,6 +881,7 @@ mod tests {
                 running: false,
                 delay: None,
                 colour: None,
+                layout: None,
             }],
             Vec::new(),
             Vec::new(),

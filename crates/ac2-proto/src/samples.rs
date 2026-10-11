@@ -455,7 +455,37 @@ pub fn commands() -> Vec<Command> {
             transfer: TransferId(4),
             saved_as: Some("/run/media/foh/STICK/friday show.ac2session".into()),
         },
+        Command::MeasLayout {
+            meas: MeasId(1),
+            layout: Some(pane_layout()),
+        },
     ]
+}
+
+/// A transfer pane beside an SPL meter, the transfer one in its phase view.
+pub fn pane_layout() -> PaneLayout {
+    use crate::model::layout::*;
+    let pane = |kind, transfer_view| LayoutPane {
+        kind,
+        transfer_view,
+        spectrum_view: SpectrumView::Spectrograph,
+        spl_view: SplView::MeterLeq,
+        sweep_view: SweepView::Response,
+        chrome: PlotChrome::Full,
+    };
+    PaneLayout::Split {
+        axis: SplitAxis::Row,
+        ratio: 0.625,
+        a: Box::new(PaneLayout::Pane {
+            pane: pane(PaneKind::Transfer, TransferView::Phase),
+        }),
+        b: Box::new(PaneLayout::Pane {
+            pane: LayoutPane {
+                chrome: PlotChrome::NoGrid,
+                ..pane(PaneKind::Spl, TransferView::Magnitude)
+            },
+        }),
+    }
 }
 
 /// The working session of [`state`].
@@ -492,6 +522,7 @@ pub fn sweep_measurement() -> Measurement {
         delay: None,
         grid_id: None,
         colour: Some(ColourFamily::Neutral),
+        layout: None,
     }
 }
 
@@ -529,6 +560,7 @@ pub fn math_measurement() -> Measurement {
         delay: None,
         grid_id: Some(log_grid().id()),
         colour: None,
+        layout: None,
     }
 }
 
@@ -583,6 +615,7 @@ fn measurement() -> Measurement {
         }),
         grid_id: Some(log_grid().id()),
         colour: Some(ColourFamily::Hue { index: 5 }),
+        layout: Some(pane_layout()),
     }
 }
 
@@ -1246,6 +1279,7 @@ pub fn spl_measurement() -> Measurement {
         delay: None,
         grid_id: None,
         colour: None,
+        layout: None,
     }
 }
 

@@ -36,6 +36,7 @@ fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
         delay,
         grid_id: None,
         colour: None,
+        layout: None,
     }
 }
 
@@ -883,6 +884,9 @@ mod tf_group;
 
 #[path = "state_panes_tests.rs"]
 mod panes;
+
+#[path = "state_meas_layout_tests.rs"]
+mod meas_layout;
 
 /// Shift+C steps the selected measurement's colour to one no other measurement has
 /// (`meas.colour`); the palette's previous colour steps back, grey last.

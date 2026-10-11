@@ -870,6 +870,7 @@ async fn a_long_log_in_pages_and_its_history() {
                 running: false,
                 delay: None,
                 colour: None,
+                layout: None,
             }],
             spl_logs: vec![SavedSplLog {
                 info: ac2_traces::spl_log::SplLogInfo {

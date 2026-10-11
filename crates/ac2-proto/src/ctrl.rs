@@ -15,10 +15,10 @@ use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, ColourFamily, DelayFinding,
     DelayPick, DelayReference, DeviceId, ElectricalConnection, ExportFormat, FinderBand, Generator,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, Lease, LoopbackDetection,
-    MeasConfig, Measurement, Mic, MicCurveId, OutputSetup, OwnedTraces, Preview, RecordRequest,
-    RecordingFile, RecordingRef, RecordingRun, ReplayPace, ServerInfo, Session, SessionConfig,
-    SessionFile, SessionOrigin, SessionRef, SplHistory, SplLogPage, SplLogWhich, SweepRun,
-    TraceData, TraceEdit, TraceMeta,
+    MeasConfig, Measurement, Mic, MicCurveId, OutputSetup, OwnedTraces, PaneLayout, Preview,
+    RecordRequest, RecordingFile, RecordingRef, RecordingRun, ReplayPace, ServerInfo, Session,
+    SessionConfig, SessionFile, SessionOrigin, SessionRef, SplHistory, SplLogPage, SplLogWhich,
+    SweepRun, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, RequestId,
@@ -196,6 +196,15 @@ pub enum Command {
         meas: MeasId,
         /// Family, or `None` for the automatic one.
         colour: Option<ColourFamily>,
+    },
+    /// Set the panes a client shows while the measurement is selected, or clear them
+    /// (`None`). Its job and config rev go on.
+    #[serde(rename = "meas.layout")]
+    MeasLayout {
+        /// Measurement.
+        meas: MeasId,
+        /// Layout, or `None` for none of its own.
+        layout: Option<PaneLayout>,
     },
     /// Delete a measurement, and say what becomes of the stored traces and math channels
     /// it owns. Refused while a math channel that stays computes from it or from a trace
@@ -704,6 +713,7 @@ impl Command {
             Self::MeasCreate { .. } => "meas.create",
             Self::MeasUpdate { .. } => "meas.update",
             Self::MeasColour { .. } => "meas.colour",
+            Self::MeasLayout { .. } => "meas.layout",
             Self::MeasDelete { .. } => "meas.delete",
             Self::MeasStart { .. } => "meas.start",
             Self::MeasStop { .. } => "meas.stop",

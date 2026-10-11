@@ -146,6 +146,39 @@ fn traces_survive_a_restart() {
         .is_err(),
         "no theme has a ninth hue"
     );
+    // So does a layout: what clients show while it is selected.
+    let layout = ac2_proto::samples::pane_layout();
+    let after = match c.ok(Command::MeasLayout {
+        meas: MeasId(1),
+        layout: Some(layout.clone()),
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(after.layout, Some(layout.clone()));
+    assert_eq!(after.config_rev, before.config_rev);
+    assert!(after.running);
+    let mut bad = layout.clone();
+    if let ac2_proto::model::PaneLayout::Split { ratio, .. } = &mut bad {
+        *ratio = 1.0;
+    }
+    assert!(
+        c.call(Command::MeasLayout {
+            meas: MeasId(1),
+            layout: Some(bad),
+        })
+        .is_err(),
+        "a split that leaves one side no room"
+    );
+    // A settings change keeps it.
+    let kept_layout = match c.ok(Command::MeasUpdate {
+        meas: MeasId(1),
+        config: after.config.clone(),
+    }) {
+        ReplyBody::Measurement(m) => m.layout,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(kept_layout, Some(layout.clone()));
     // A sweep measurement is restored with its settings (and never as running).
     let sweep = MeasConfig {
         name: "Genelec 1 m".into(),
@@ -189,6 +222,8 @@ fn traces_survive_a_restart() {
     assert_eq!(st.measurements[1].config, sweep);
     assert_eq!(st.measurements[0].colour, Some(ColourFamily::Neutral));
     assert_eq!(st.measurements[1].colour, None);
+    assert_eq!(st.measurements[0].layout, Some(layout));
+    assert_eq!(st.measurements[1].layout, None);
     assert!(!st.measurements[1].running);
     assert_eq!(
         st.traces[0].edit.owner,

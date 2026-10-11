@@ -1,8 +1,9 @@
 //! The pane tree: the operator splits the screen into panes (N), closes them (Q) and picks
 //! what each one shows (Tab and the list put a measurement in the focused pane, the title
 //! chip, G for the pane's views). A pane's content is a [`View`]: a kind, the measurement it
-//! shows and the kind's display modes. All of it is this app's: it lives in `ui.toml`, never
-//! on the wire.
+//! shows and the kind's display modes. The layout on screen is kept in `ui.toml`; its
+//! arrangement and views are also a measurement's own when edited while it is selected
+//! (`state_meas_layout.rs`).
 
 use super::*;
 
@@ -741,6 +742,32 @@ impl Layout {
         }
         self.maximized = false;
         true
+    }
+
+    /// An id no pane of this run has had.
+    pub fn fresh_id(&mut self) -> PaneId {
+        let id = PaneId(self.next_id);
+        self.next_id += 1;
+        id
+    }
+
+    /// Every pane replaced by `root` and its `views` (ids from [`Self::fresh_id`], so
+    /// nothing kept by a gone pane's id follows a new one), the focus on `focus`. A
+    /// maximised layout stays maximised: that is this screen's, not the panes'.
+    pub fn install(&mut self, root: PaneNode, views: BTreeMap<PaneId, View>, focus: PaneId) {
+        let leaves = root.leaves();
+        let focus = if leaves.contains(&focus) {
+            focus
+        } else {
+            leaves[0]
+        };
+        self.next_id = self
+            .next_id
+            .max(leaves.iter().map(|id| id.0).max().unwrap_or(0) + 1);
+        self.root = root;
+        self.views = views;
+        self.focus = focus;
+        self.mru = vec![focus];
     }
 
     /// Closes the focused pane: its sibling takes its place and the focus. `false` on the

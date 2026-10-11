@@ -724,6 +724,7 @@ fn session_sample() -> Session {
                     tracking: false,
                 }),
                 colour: None,
+                layout: Some(ac2_proto::samples::pane_layout()),
             },
             SavedMeasurement {
                 id: MeasId(2),
@@ -736,6 +737,7 @@ fn session_sample() -> Session {
                 running: true,
                 delay: None,
                 colour: None,
+                layout: None,
             },
         ],
         spl_logs: vec![SavedSplLog {

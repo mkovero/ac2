@@ -970,6 +970,7 @@ impl Shared {
                     delay,
                     grid_id,
                     colour: None,
+                    layout: None,
                 };
                 self.put_meas(m)
             }
@@ -982,6 +983,11 @@ impl Shared {
             C::MeasColour { meas, colour } => {
                 let mut m = self.meas(meas)?;
                 m.colour = colour;
+                self.put_meas(m)
+            }
+            C::MeasLayout { meas, layout } => {
+                let mut m = self.meas(meas)?;
+                m.layout = layout;
                 self.put_meas(m)
             }
             C::MeasDelete { meas, traces } => {

@@ -621,6 +621,7 @@ impl Shared {
                         tracking: d.tracking,
                     }),
                     colour: m.colour,
+                    layout: m.layout.clone(),
                 })
                 .collect(),
             spl_logs: self
@@ -785,6 +786,7 @@ impl Shared {
                 delay,
                 grid_id,
                 colour: sm.colour,
+                layout: sm.layout,
             };
             self.put_meas(meas);
         }

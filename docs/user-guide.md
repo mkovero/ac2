@@ -609,6 +609,27 @@ measurement that is gone (deleted, another daemon) quietly leaves its pane on it
 choice, a layout saved by an older version is dropped (the app starts with one pane), and a window larger than the screen it opens on is made to fit. On Wayland the
 system places the window.
 
+#### Layouts follow the measurement
+
+A measurement can carry its own panes. Edit the panes while a measurement is selected —
+split (**N**), close (**Q**), turn a pane into another kind, step its view (**G** and the
+kind's view keys), **T**, drag a split, lay out the transfer stack — and that layout is
+stored on the selected measurement. Selecting the measurement again brings its panes back;
+selecting one without a layout of its own keeps the panes on screen (edit them and it gets
+its own). The list says it on the measurement's row: `· 3 own panes`.
+
+The layout lives in the session, with the measurement: it is saved and opened with the
+session file and its archive, and every app that selects the measurement — another laptop,
+the kiosk — shows the same panes; an edit made on one shows on the others that have it
+selected. What travels is how the panes are split and what kind and view each shows. Which
+measurement each pane was picked for, which pane has the focus, **W** and **F**, and the
+window stay with each app (in `ui.toml`, as above). A pane of the layout follows the
+selection: selecting the measurement puts it in the first pane of its kind.
+
+`ac2 meas list` has a `layout` column; `ac2 meas layout clear <meas>` takes a measurement's
+own panes away (selecting it then keeps the panes on screen). Deleting a measurement
+deletes its layout; editing its settings keeps it.
+
 ### Zoom, pan and the level axis
 
 The frequency axis is shared by the panes: **I** / **O** zoom it, **←** / **→** pan it,

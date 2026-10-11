@@ -670,6 +670,7 @@ pub(crate) mod tests {
             }),
             grid_id: None,
             colour: None,
+            layout: None,
         };
         let why = no_delay_estimate(&m);
         assert_eq!(

@@ -636,4 +636,7 @@ pub struct Measurement {
     /// Colour family the operator chose (`meas.colour`); `None`: the one its id gives.
     /// Always `None` for a math channel, which takes its owner's.
     pub colour: Option<ColourFamily>,
+    /// The panes a client shows while this measurement is selected (`meas.layout`);
+    /// `None`: none of its own, a client keeps the panes it has.
+    pub layout: Option<super::PaneLayout>,
 }

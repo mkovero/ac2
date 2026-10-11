@@ -25,9 +25,11 @@ impl AppState {
                 self.stimulus.arm_after_stop = false;
                 // Nor has it rebuilt any history: the log may have moved on meanwhile.
                 self.leq_logs.clear();
+                self.forget_layout_calls();
             }
             ConnEvent::Failed { target, error, .. } => {
                 self.conn = ConnState::Failed { target, error };
+                self.forget_layout_calls();
                 self.pending_select = None;
                 self.pending_stack = None;
                 self.mirror = None;
@@ -198,6 +200,7 @@ impl AppState {
                 self.traces.insert(t.meta.id, (t, g));
                 self.fit_new_sweep();
             }
+            ConnEvent::Reply { what, result } if self.layout_reply(&what, &result) => {}
             ConnEvent::Reply { what, result } => {
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.cal.reply(&what, &result);

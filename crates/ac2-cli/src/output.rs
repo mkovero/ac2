@@ -210,7 +210,7 @@ pub fn average_method(m: ac2_proto::model::AverageMethod) -> &'static str {
 
 /// Measurements table.
 pub fn measurements(ms_: &[Measurement]) -> String {
-    let mut t = table(&["id", "name", "kind", "running", "delay", "rev"]);
+    let mut t = table(&["id", "name", "kind", "running", "delay", "layout", "rev"]);
     for m in ms_ {
         t.add_row(vec![
             m.id.to_string(),
@@ -220,6 +220,10 @@ pub fn measurements(ms_: &[Measurement]) -> String {
             m.delay.as_ref().map_or_else(
                 || format::NO_VALUE.to_owned(),
                 |d| format::delay_and_offset(d.applied.0, d.nudged.0),
+            ),
+            m.layout.as_ref().map_or_else(
+                || format::NO_VALUE.to_owned(),
+                |l| format::own_panes(l.panes().len()),
             ),
             m.config_rev.to_string(),
         ]);
@@ -244,6 +248,9 @@ pub fn measurement(m: &Measurement) -> String {
             format::fixed(d.applied_samples, 2),
             if d.tracking { ", tracking" } else { "" }
         ));
+    }
+    if let Some(l) = &m.layout {
+        s.push_str(&format!("  {}", format::own_panes(l.panes().len())));
     }
     s
 }

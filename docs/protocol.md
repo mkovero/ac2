@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 39`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 40`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -88,6 +88,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `meas.create` | `config: MeasConfig` | `measurement` | |
 | `meas.update` | `meas`, `config` | `measurement` | |
 | `meas.colour` | `meas`, `colour: ColourFamily \| nil` | `measurement` | |
+| `meas.layout` | `meas`, `layout: PaneLayout \| nil` | `measurement` | |
 | `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the traces and math channels it owns) | `ack` | |
 | `meas.start` | `meas` | `measurement` | |
 | `meas.stop` | `meas` | `measurement` | |
@@ -210,6 +211,22 @@ nil: the family its id gives). It is `Measurement.colour`, kept in sessions and 
 autosave; the job, its averages and `config_rev` are untouched. Families are the display's:
 clients take chosen families first and give the others the rest by id. `invalid` for a
 math channel (drawn in its owner's colours) and for an index past 7.
+
+`meas.layout` sets the panes a client shows while the measurement is selected, or clears
+them (nil). It is `Measurement.layout`, kept in sessions and the autosave (and so in
+session archives); the job, its averages and `config_rev` are untouched; `meas.update`
+keeps it and `meas.delete` takes it with the measurement. Last write wins: a client puts a
+layout it receives for the measurement it has selected on screen and never sends it back.
+A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axis: row |
+column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
+`ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is `{kind: transfer
+| spectrum | spl | distortion, transfer_view: magnitude | phase | coherence | ir_linear |
+ir_log | etc, spectrum_view: spectrum | spectrum_spectrograph | spectrograph, spl_view:
+meter | leq | meter_leq | bands, sweep_view: response | ir_linear | ir_log | etc | room,
+chrome: full | no_grid | traces_only}`: its kind and the view of each kind it may be turned
+into. Which measurement a pane shows, the focused pane, a maximised or full-screen pane and
+the window are each client's. `invalid` for a ratio out of range and for more than 16
+panes; a session file's layout that is either is dropped on load.
 
 `meas.update` replaces the configuration and restarts a running job (averages start over;
 a spectrum's new `fft_len`, a power of two in 64 … 65 536, or `window` included: frames of
@@ -1118,7 +1135,8 @@ saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
 
 The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`, `stopped:
 AudioStopped | nil`; §4.1.1),
-`measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`, `colour`),
+`measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`, `colour`,
+`layout`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
 math | average | sweep}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
@@ -1460,9 +1478,9 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 21, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 23, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
-ColourFamily | null}], spl_logs:
+ColourFamily | null, layout: PaneLayout | null}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
 dB]] | null}]}` (JSON, field names as in this document; `mic_curve_points` are the points of
 `meta.mic_curve`, a curve applied after capture). A trace

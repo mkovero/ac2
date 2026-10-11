@@ -1504,6 +1504,7 @@ mod tests {
             delay: None,
             grid_id: None,
             colour: None,
+            layout: None,
         };
         let mut f = Form::edit_spec(&m, &names(&o), Some(o.sample_rate_hz)).expect("edit");
         assert_eq!(f.kind.title(), "Edit RTA");
@@ -1564,6 +1565,7 @@ mod tests {
             delay: None,
             grid_id: None,
             colour: None,
+            layout: None,
         };
         let mut e = Form::edit_spec(&m, &names(&o), Some(48_000)).expect("edit");
         let i = at(&e, FieldId::FftSize);
@@ -1750,6 +1752,7 @@ mod tests {
             delay: None,
             grid_id: None,
             colour: None,
+            layout: None,
         };
         let mut e = Form::edit_spec(&m, &names(&o), Some(o.sample_rate_hz)).expect("edit");
         assert_eq!(e.kind, FormKind::TransferEdit);
@@ -1787,6 +1790,7 @@ mod tests {
             delay: None,
             grid_id: None,
             colour: None,
+            layout: None,
         };
         let se = Form::edit_sweep(&sm, Some(&o), &names(&o), &outs()).expect("edit");
         assert_eq!(

@@ -678,6 +678,12 @@ pub enum MeasCmd {
         /// Id or name.
         meas: MeasRef,
     },
+    /// A measurement's own panes: the app shows them while it is selected (edited in the
+    /// app).
+    Layout {
+        #[command(subcommand)]
+        cmd: MeasLayoutCmd,
+    },
     /// Delete a measurement. One that owns stored traces or math channels needs
     /// `--keep-traces` (they move to the imported group) or `--delete-traces`.
     Rm {
@@ -689,6 +695,16 @@ pub enum MeasCmd {
         /// Delete its traces and math channels with it.
         #[arg(long)]
         delete_traces: bool,
+    },
+}
+
+/// `meas layout …`.
+#[derive(Debug, Subcommand)]
+pub enum MeasLayoutCmd {
+    /// Clear a measurement's own panes: selecting it keeps the panes on screen.
+    Clear {
+        /// Id or name.
+        meas: MeasRef,
     },
 }
 

@@ -250,6 +250,23 @@ fn archives_round_trip_in_checked_chunks() {
     let c = &mut c;
     import(c, "rew_export.txt");
     import(c, "smaart_tf.txt");
+    // A measurement's own panes travel in the archive.
+    let meter = match c.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: "FOH SPL".into(),
+            kind: MeasKind::Spl {
+                config: SplConfig::on_input(0, Weighting::A, TimeWeighting::Fast),
+            },
+        },
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    let layout = ac2_proto::samples::pane_layout();
+    c.ok(Command::MeasLayout {
+        meas: meter.id,
+        layout: Some(layout.clone()),
+    });
     let before = traces(c);
     let (t, bytes) = download(c, None);
     assert_eq!(t.file_name, "untitled.ac2session");
@@ -281,6 +298,13 @@ fn archives_round_trip_in_checked_chunks() {
         after.iter().map(|t| &t.edit).collect::<Vec<_>>(),
         before.iter().map(|t| &t.edit).collect::<Vec<_>>()
     );
+    match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => {
+            let m = s.state.measurements.iter().find(|m| m.id == meter.id);
+            assert_eq!(m.and_then(|m| m.layout.clone()), Some(layout.clone()));
+        }
+        other => panic!("{other:?}"),
+    }
     let w = working(c);
     assert_eq!(w.origin, Some(SessionOrigin::Client { path: stick.into() }));
     assert!(!w.dirty);

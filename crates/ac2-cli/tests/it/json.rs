@@ -255,9 +255,14 @@ async fn session_meas_delay_trace_flow() -> R {
             "running": false,
             "delay": null,
             "grid_id": null,
-            "colour": null
+            "colour": null,
+            "layout": null
         })
     );
+    // Clearing panes it never had leaves it as it is.
+    let m = ok_json(&f, &["meas", "layout", "clear", "foh", "--json"]).await?;
+    assert_eq!(m["layout"], serde_json::Value::Null);
+    assert_eq!(m["config_rev"], 2);
 
     let tf = ok_json(
         &f,

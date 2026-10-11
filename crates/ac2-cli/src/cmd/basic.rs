@@ -575,6 +575,21 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             }
             out.emit(&m, || output::measurement(&m))?;
         }
+        MeasCmd::Layout {
+            cmd: MeasLayoutCmd::Clear { meas },
+        } => {
+            let s = state(&c).await?;
+            let id = find_meas(&s, meas)?.id;
+            let m = meas_call(
+                &c,
+                Command::MeasLayout {
+                    meas: id,
+                    layout: None,
+                },
+            )
+            .await?;
+            out.emit(&m, || output::measurement(&m))?;
+        }
         MeasCmd::Start { meas } | MeasCmd::Stop { meas } => {
             let s = state(&c).await?;
             let id = find_meas(&s, meas)?.id;

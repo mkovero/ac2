@@ -354,6 +354,15 @@ pub fn fft_resolution(n: u32, fs: u32) -> String {
     )
 }
 
+/// A measurement's own pane layout of `n` panes, as the list, the toasts and the CLI say
+/// it: `1 own pane`, `3 own panes`.
+pub fn own_panes(n: usize) -> String {
+    match n {
+        1 => "1 own pane".to_owned(),
+        n => format!("{n} own panes"),
+    }
+}
+
 /// A measurement's colour family as the operator names it: `colour 1` … `colour 8`, `grey`.
 /// The CLI's `--colour` takes `1` … `8` and `grey`.
 pub fn colour_family(c: ac2_proto::model::ColourFamily) -> String {

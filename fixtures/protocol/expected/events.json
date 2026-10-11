@@ -117,6 +117,33 @@
     "colour": {
      "type": "hue",
      "index": 5
+    },
+    "layout": {
+     "type": "split",
+     "axis": "row",
+     "ratio": 0.625,
+     "a": {
+      "type": "pane",
+      "pane": {
+       "kind": "transfer",
+       "transfer_view": "phase",
+       "spectrum_view": "spectrograph",
+       "spl_view": "meter_leq",
+       "sweep_view": "response",
+       "chrome": "full"
+      }
+     },
+     "b": {
+      "type": "pane",
+      "pane": {
+       "kind": "spl",
+       "transfer_view": "magnitude",
+       "spectrum_view": "spectrograph",
+       "spl_view": "meter_leq",
+       "sweep_view": "response",
+       "chrome": "no_grid"
+      }
+     }
     }
    }
   }
@@ -456,7 +483,8 @@
     "running": true,
     "delay": null,
     "grid_id": null,
-    "colour": null
+    "colour": null,
+    "layout": null
    }
   }
  },
@@ -513,7 +541,8 @@
     "running": true,
     "delay": null,
     "grid_id": 8785464140711761104,
-    "colour": null
+    "colour": null,
+    "layout": null
    }
   }
  },
@@ -699,7 +728,8 @@
     "grid_id": null,
     "colour": {
      "type": "neutral"
-    }
+    },
+    "layout": null
    }
   }
  },

@@ -521,6 +521,7 @@ SPL_MEASUREMENT = {
     "delay": None,
     "grid_id": None,
     "colour": None,
+    "layout": None,
 }
 
 SPL_LOG = {
@@ -618,6 +619,27 @@ def finding():
     }
 
 
+def _layout_pane(kind, transfer_view, chrome="full"):
+    return {
+        "kind": kind,
+        "transfer_view": transfer_view,
+        "spectrum_view": "spectrograph",
+        "spl_view": "meter_leq",
+        "sweep_view": "response",
+        "chrome": chrome,
+    }
+
+
+# samples::pane_layout(): a transfer pane beside an SPL meter.
+PANE_LAYOUT = {
+    "type": "split",
+    "axis": "row",
+    "ratio": 0.625,
+    "a": {"type": "pane", "pane": _layout_pane("transfer", "phase")},
+    "b": {"type": "pane", "pane": _layout_pane("spl", "magnitude", "no_grid")},
+}
+
+
 def measurement():
     return {
         "id": 1,
@@ -635,6 +657,7 @@ def measurement():
         },
         "grid_id": p.grid_id(LOG_GRID),
         "colour": {"type": "hue", "index": 5},
+        "layout": PANE_LAYOUT,
     }
 
 
@@ -666,6 +689,7 @@ MATH_MEASUREMENT = {
     "delay": None,
     "grid_id": p.grid_id(LOG_GRID),
     "colour": None,
+    "layout": None,
 }
 
 
@@ -696,6 +720,7 @@ SWEEP_MEASUREMENT = {
     "delay": None,
     "grid_id": None,
     "colour": {"type": "neutral"},
+    "layout": None,
 }
 
 

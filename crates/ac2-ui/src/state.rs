@@ -71,6 +71,8 @@ pub use glide::SpecGlide;
 mod leq;
 #[path = "state_link.rs"]
 mod link;
+#[path = "state_meas_layout.rs"]
+mod meas_layout;
 #[path = "state_panes.rs"]
 mod panes;
 #[path = "state_queries.rs"]
@@ -1176,6 +1178,11 @@ pub struct AppState {
     pub tree_reveal: bool,
     /// The Settings page last shown: the Settings key opens it again.
     settings_page_last: Page,
+    /// `meas.layout` calls not answered yet, oldest first.
+    layout_calls: std::collections::VecDeque<meas_layout::LayoutCall>,
+    /// A split dragged: the measurement whose layout takes it, and when (`now_s`) the drag
+    /// counts as done.
+    layout_due: Option<(MeasId, f64)>,
     /// Started spectrum / RTA measurements whose first frame fits the spectrum pane's level
     /// axis (as Shift+Home), with the frame shown when they started (a stopped run's last).
     spectrum_fit: BTreeMap<MeasId, Option<Arc<ac2_proto::Frame>>>,
@@ -1270,6 +1277,8 @@ impl AppState {
             want_connect_dialog: false,
             tree_reveal: false,
             settings_page_last: Page::AudioIo,
+            layout_calls: std::collections::VecDeque::new(),
+            layout_due: None,
         }
     }
 
@@ -1279,14 +1288,22 @@ impl AppState {
         let mut out = Vec::new();
         let before = self.meter_wants();
         let tick = matches!(msg, Msg::Tick { .. });
+        let drag = matches!(msg, Msg::DragSplit { .. });
+        let conn = matches!(msg, Msg::Conn(_));
+        if !tick && !drag {
+            self.flush_layout_drag(&mut out);
+        }
+        let panes_before = self.panes_watch();
         self.update_inner(msg, keymap, &mut out);
         if tick {
             self.poll_settings(&mut out);
+            self.layout_drag_due(&mut out);
         }
         self.sync_meters(before, tick, &mut out);
         self.sync_session_watch(&mut out);
         if !tick {
             self.restore_pane_meas();
+            self.sync_meas_layout(panes_before, conn, drag, &mut out);
             self.prune_compared();
             self.remember_layout();
         }

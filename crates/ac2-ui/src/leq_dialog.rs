@@ -794,6 +794,7 @@ mod tests {
             delay: None,
             grid_id: None,
             colour: None,
+            layout: None,
         }
     }
 
