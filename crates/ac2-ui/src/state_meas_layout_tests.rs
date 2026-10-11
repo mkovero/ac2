@@ -188,3 +188,49 @@ fn a_dragged_split_is_sent_when_it_rests() {
         other => panic!("{other:?}"),
     }
 }
+
+/// Edits made faster than the daemon answers: one call in flight, the newest edit sent when
+/// it is answered (two in flight could arrive in either order). The daemon's copies of
+/// this app's earlier layouts, arriving after the replies, leave the screen as it is.
+#[test]
+fn quick_edits_go_one_call_at_a_time() {
+    let mut t = T::new();
+    select(&mut t, 1);
+    let n = t.st.layout.panes().len();
+    let r = t.key("N");
+    let first = layout_calls(&r);
+    assert_eq!(first.len(), 1, "{r:?}");
+    let r = t.key("N");
+    assert!(layout_calls(&r).is_empty(), "held behind the first: {r:?}");
+    let r = t.key("N");
+    assert!(layout_calls(&r).is_empty(), "held behind the first: {r:?}");
+    let screen = t.st.pane_layout();
+    assert_eq!(screen.panes().len(), n + 3);
+    let r = t.conn(ConnEvent::Reply {
+        what: format!("Main L: {}", ac2_scene::format::own_panes(n + 1)),
+        result: Ok(()),
+    });
+    let second = layout_calls(&r);
+    assert_eq!(
+        second,
+        vec![(MeasId(1), Some(screen.clone()))],
+        "the newest"
+    );
+    let r = t.conn(ConnEvent::Reply {
+        what: format!("Main L: {}", ac2_scene::format::own_panes(n + 3)),
+        result: Ok(()),
+    });
+    assert!(layout_calls(&r).is_empty(), "{r:?}");
+    // Both answered; the state events follow.
+    t.conn(mirror(with_layout(1, first[0].1.clone())));
+    assert_eq!(
+        t.st.pane_layout(),
+        screen,
+        "an older layout of this app's own"
+    );
+    t.conn(mirror(with_layout(1, Some(screen.clone()))));
+    assert_eq!(t.st.pane_layout(), screen);
+    // Then another client's edit is shown.
+    t.conn(mirror(with_layout(1, Some(two_transfer()))));
+    assert_eq!(t.st.pane_layout(), two_transfer());
+}

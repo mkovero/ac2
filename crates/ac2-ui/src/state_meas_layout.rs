@@ -6,6 +6,12 @@
 //! Only the arrangement and what each pane draws travel: the measurement each pane was
 //! picked for, the focus, W and F stay this app's. A layout received is put on screen, never
 //! sent back: only what the operator does here is sent.
+//!
+//! One call per measurement is in flight at a time, the newest edit waiting behind it: each
+//! call is a task of its own on the link, so two in flight could reach the daemon in either
+//! order and leave it holding an older layout than the screen. A call is done when it is
+//! answered and the daemon's copy has shown it: a reply can come before the state events
+//! that carry the layouts sent before it, and those older layouts are this app's own.
 
 use ac2_proto::model::PaneLayout;
 use ac2_proto::model::layout as wire;
@@ -20,6 +26,12 @@ pub(crate) struct LayoutCall {
     what: String,
     /// The measurement had no layout of its own: the reply says it has one now.
     first: bool,
+    /// The layout sent.
+    layout: PaneLayout,
+    /// The reply came.
+    answered: bool,
+    /// The daemon's copy has shown this layout or a later one of this app's.
+    applied: bool,
 }
 
 /// What the panes were before a message: whether it changed the selection, the selected
@@ -107,12 +119,36 @@ impl AppState {
             }
             return;
         }
-        // Another client's edit (this app's own, come back, is on screen already). While a call of this app's for it is unanswered, the
-        // daemon's copy is older than the screen: the last call made wins.
-        if theirs != before.theirs
-            && !self.layout_calls.iter().any(|c| c.meas == sel)
-            && let Some(l) = theirs.filter(|l| *l != self.pane_layout())
+        if theirs == before.theirs {
+            return;
+        }
+        // This app's own, come back: on screen already, or older than the screen.
+        if let Some(i) = self
+            .layout_calls
+            .iter()
+            .position(|c| c.meas == sel && Some(&c.layout) == theirs.as_ref())
         {
+            for c in self.layout_calls.iter_mut().take(i + 1) {
+                if c.meas == sel {
+                    c.applied = true;
+                }
+            }
+            self.layout_calls.retain(|c| !(c.answered && c.applied));
+            return;
+        }
+        // While a call of this app's is unanswered, the daemon's copy is older than the
+        // screen: the last call made wins.
+        if self.layout_queued.contains_key(&sel)
+            || self
+                .layout_calls
+                .iter()
+                .any(|c| c.meas == sel && !c.answered)
+        {
+            return;
+        }
+        // Another client's edit.
+        self.layout_calls.retain(|c| c.meas != sel);
+        if let Some(l) = theirs.filter(|l| *l != self.pane_layout()) {
             self.show_layout(&l);
         }
     }
@@ -131,16 +167,30 @@ impl AppState {
         }
     }
 
-    /// The panes on screen sent as measurement `id`'s layout, unless it has them already.
+    /// The panes on screen sent as measurement `id`'s layout, unless it has them already;
+    /// held until the call in flight for it is answered.
     fn store_layout(&mut self, id: MeasId, out: &mut Vec<Request>) {
         let l = self.pane_layout();
+        if self
+            .layout_calls
+            .iter()
+            .any(|c| c.meas == id && !c.answered)
+        {
+            self.layout_queued.insert(id, l);
+            return;
+        }
+        self.send_layout(id, l, out);
+    }
+
+    fn send_layout(&mut self, id: MeasId, l: PaneLayout, out: &mut Vec<Request>) {
         let Some(m) = self.meas(id) else {
             return;
         };
-        if m.layout.as_ref() == Some(&l) {
+        let last_sent = self.layout_calls.iter().rev().find(|c| c.meas == id);
+        if last_sent.map_or(m.layout.as_ref(), |c| Some(&c.layout)) == Some(&l) {
             return;
         }
-        let first = m.layout.is_none();
+        let first = m.layout.is_none() && last_sent.is_none();
         let what = format!(
             "{}: {}",
             m.config.name,
@@ -150,6 +200,9 @@ impl AppState {
             meas: id,
             what: what.clone(),
             first,
+            layout: l.clone(),
+            answered: false,
+            applied: false,
         });
         self.call(
             out,
@@ -164,15 +217,40 @@ impl AppState {
     /// A reply to a `meas.layout` call of this app's: `true` when it was one. Said only
     /// when the measurement got its first layout or the call failed: every pane edit
     /// answered aloud would bury what the edit itself said.
-    pub(super) fn layout_reply(&mut self, what: &str, result: &Result<(), String>) -> bool {
-        let Some(i) = self.layout_calls.iter().position(|c| c.what == what) else {
+    /// The edit held behind the call goes now.
+    pub(super) fn layout_reply(
+        &mut self,
+        what: &str,
+        result: &Result<(), String>,
+        out: &mut Vec<Request>,
+    ) -> bool {
+        let Some(i) = self
+            .layout_calls
+            .iter()
+            .position(|c| c.what == what && !c.answered)
+        else {
             return false;
         };
-        let call = self.layout_calls.remove(i).expect("found");
+        let meas = self.layout_calls[i].meas;
         match result {
-            Ok(()) if call.first => self.toast(what),
-            Ok(()) => {}
-            Err(e) => self.fault(format!("{what}: {e}")),
+            Ok(()) => {
+                let c = &mut self.layout_calls[i];
+                c.answered = true;
+                let first = c.first;
+                if c.applied {
+                    self.layout_calls.remove(i);
+                }
+                if first {
+                    self.toast(what);
+                }
+            }
+            Err(e) => {
+                self.layout_calls.remove(i);
+                self.fault(format!("{what}: {e}"));
+            }
+        }
+        if let Some(l) = self.layout_queued.remove(&meas) {
+            self.send_layout(meas, l, out);
         }
         true
     }
@@ -180,6 +258,7 @@ impl AppState {
     /// The link went down or came up: no answer to an earlier call comes.
     pub(super) fn forget_layout_calls(&mut self) {
         self.layout_calls.clear();
+        self.layout_queued.clear();
         self.layout_due = None;
     }
 

@@ -1193,6 +1193,8 @@ pub struct AppState {
     settings_page_last: Page,
     /// `meas.layout` calls not answered yet, oldest first.
     layout_calls: std::collections::VecDeque<meas_layout::LayoutCall>,
+    /// Edits waiting for the `meas.layout` call in flight for their measurement: the newest.
+    layout_queued: BTreeMap<MeasId, ac2_proto::model::PaneLayout>,
     /// A split dragged: the measurement whose layout takes it, and when (`now_s`) the drag
     /// counts as done.
     layout_due: Option<(MeasId, f64)>,
@@ -1291,6 +1293,7 @@ impl AppState {
             tree_reveal: false,
             settings_page_last: Page::AudioIo,
             layout_calls: std::collections::VecDeque::new(),
+            layout_queued: BTreeMap::new(),
             layout_due: None,
         }
     }

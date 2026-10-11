@@ -200,7 +200,7 @@ impl AppState {
                 self.traces.insert(t.meta.id, (t, g));
                 self.fit_new_sweep();
             }
-            ConnEvent::Reply { what, result } if self.layout_reply(&what, &result) => {}
+            ConnEvent::Reply { what, result } if self.layout_reply(&what, &result, out) => {}
             ConnEvent::Reply { what, result } => {
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.cal.reply(&what, &result);
