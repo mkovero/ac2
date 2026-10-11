@@ -508,6 +508,8 @@ def ac2_sweep_once(ctx: Ctx, pname: str, vname: str, frm: str, to: str, duration
     done = next(e for e in ev if e.get("event") == "done")
     _j(d / "done.json", done)
     ctx.ac2.export_trace(done["trace"], d / "trace.csv")
+    # the export holds what the analysis needs; the rig's session keeps none of the run
+    ctx.ac2.meas_rm(name)
     src = Path(rec["path"])
     if src.exists():
         shutil.copyfile(src, d / "rec.wav")
@@ -603,6 +605,7 @@ def ac2_tf(ctx: Ctx, pname: str):
         ctx.ac2.run("meas", "stop", name, json_out=False, check=False)
     tid = cap.get("id") or cap.get("trace") or f"{name}-cap"
     ctx.ac2.export_trace(tid, d / "trace.csv")
+    ctx.ac2.meas_rm(name)
     src = Path(rec["path"])
     if src.exists():
         shutil.copyfile(src, d / "rec.wav")
