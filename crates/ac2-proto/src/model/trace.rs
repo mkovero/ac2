@@ -44,7 +44,7 @@ pub enum ImportFormat {
 #[serde(deny_unknown_fields)]
 pub struct IrImport {
     /// Channel to read, 0-based; `None` reads a mono file and refuses a multi-channel one
-    /// (`invalid`, [`ImportProblem::PickChannel`]).
+    /// (`invalid`, [`ImportProblem::PickChannel`](crate::ctrl::ImportProblem::PickChannel)).
     pub channel: Option<u16>,
     /// Window the frequency response is computed through.
     pub window: IrImportWindow,

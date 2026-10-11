@@ -177,7 +177,7 @@ pub fn pane_layout() -> PaneLayout {
     }
 }
 
-/// The working session of [`state`].
+/// The working session of [`state`](fn@super::state).
 pub fn working() -> WorkingSession {
     WorkingSession {
         origin: Some(SessionOrigin::Name {
