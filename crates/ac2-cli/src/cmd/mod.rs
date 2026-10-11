@@ -11,6 +11,7 @@ mod ir;
 mod leq;
 mod math;
 mod rec;
+mod salvage;
 mod selftest;
 mod sessions;
 mod traces;

@@ -14,5 +14,6 @@ mod pairing;
 mod parse;
 mod rec_rig;
 mod recovery_rig;
+mod salvage_rig;
 mod spl_rig;
 mod tree_rig;

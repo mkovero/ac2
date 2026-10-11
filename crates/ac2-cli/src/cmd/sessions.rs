@@ -47,16 +47,21 @@ pub(crate) fn target(arg: &str, same_host: bool) -> Result<Target, CliError> {
     session_ref(arg, same_host).map(Target::Daemon)
 }
 
+/// Whether a session argument is a path rather than a name: anything with a separator, a
+/// `.`/`~` start, or absolute.
+pub(crate) fn is_path(arg: &str) -> bool {
+    arg.contains('/')
+        || arg.contains('\\')
+        || arg.starts_with('.')
+        || arg.starts_with('~')
+        || Path::new(arg).is_absolute()
+}
+
 /// A daemon-side session argument: a plain name, or a path (anything with a separator,
 /// `.`/`~` start, or absolute). A local path is made absolute here: the daemon does not
 /// share the client's working directory.
 pub(crate) fn session_ref(arg: &str, local: bool) -> Result<SessionRef, CliError> {
-    let is_path = arg.contains('/')
-        || arg.contains('\\')
-        || arg.starts_with('.')
-        || arg.starts_with('~')
-        || Path::new(arg).is_absolute();
-    if !is_path {
+    if !is_path(arg) {
         return Ok(SessionRef::Name {
             name: arg.to_owned(),
         });
@@ -229,6 +234,9 @@ pub(crate) async fn session(
             })?;
         }
         SessionCmd::Salvage { session } => {
+            if let Some(local) = super::salvage::local_session(session)? {
+                return super::salvage::run(c, session, &local, out).await;
+            }
             let r = match target(session, here)? {
                 Target::Here(p) => SessionRef::Upload {
                     transfer: upload(c, &p).await?,
@@ -238,7 +246,13 @@ pub(crate) async fn session(
             let r = c.call(Command::FileSalvage { session: r }).await?;
             let s = expect_body!("file.salvage", r, ReplyBody::Salvage(s) => s)?;
             let name = text::file_part(session).to_owned();
-            out.emit(&s, || text::salvage_toast(&name, &s))?;
+            out.emit(&s, || {
+                format!(
+                    "{}\nmeasurements are made again only from a session folder or \
+                     .ac2session file on this machine",
+                    text::salvage_toast(&name, &s)
+                )
+            })?;
         }
         SessionCmd::Export { file, session } => match session {
             None => export_working(c, file, out).await?,

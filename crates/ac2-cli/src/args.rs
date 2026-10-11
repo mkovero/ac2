@@ -272,10 +272,14 @@ pub enum SessionCmd {
     /// Bring back the measurements and traces the last `new` or `load` replaced while
     /// they had unsaved changes.
     Recover,
-    /// Import the traces of a session that cannot be opened (another format version) into
-    /// the current measurements and traces.
+    /// Bring a session that cannot be opened (another format version) into the current
+    /// measurements and traces. From a folder or .ac2session file on this machine: its
+    /// measurements with their settings, colours, layouts and delays, its traces under
+    /// their measurements, and the running ones started where the audio session captures
+    /// their inputs, with a summary of what was restored, skipped or not read as saved.
+    /// From a name or a path of the daemon's host: its traces only.
     Salvage {
-        /// As for `load`.
+        /// A session folder or .ac2session file here, or as for `load`.
         session: String,
     },
     /// Write the measurements and traces (or a saved session) to an .ac2session file on

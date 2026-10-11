@@ -1,0 +1,7 @@
+# ac2 spl log v2
+# meas: 1
+# name: FOH SPL
+# input: 1
+start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,sensitivity_db,position_db,position_peak_db
+2026-10-11T02:25:05.484Z,1791685505484711168,1,dBFS,-inf,-inf,-inf,-inf,-inf,,,
+2026-10-11T02:25:06.481Z,1791685506481439232,1,dBFS,-inf,-inf,-inf,-inf,-inf,,,
