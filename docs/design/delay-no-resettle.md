@@ -103,7 +103,7 @@ FIFO 8 (and exponential where marked).
 | two quick 100-sample steps, then one after the average turned over (FIFO, exponential) | reset of the full-rate stage on the second, kept on the third |
 
 Unchanged: `partial_coherence_matches_theory_and_large_delay_does_not_bias_it` (bit for
-bit across ±0.2 s), the golden and loopback suites in `tests/it/mtw.rs`.
+bit across ±0.2 s), the golden and loopback suites in `tests/it/mtw/`.
 
 ## Cost
 
