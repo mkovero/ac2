@@ -34,8 +34,8 @@ tools/protocol/.venv/bin/python tools/protocol/fixtures.py check
 cargo test -p ac2-proto
 ```
 
-Edit the Python values in `fixtures.py` to mirror `samples.rs` first; commit code,
-`docs/protocol.md` and fixtures together.
+Edit the Python values in `fixture_frames.py` / `fixture_messages.py` to mirror `samples.rs`
+first; commit code, `docs/protocol.md` and fixtures together.
 
 ## Container format (`*.bin`)
 
