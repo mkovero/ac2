@@ -41,7 +41,7 @@ Audio / WASAPI) on macOS and Windows.
                          file is never overwritten
   --autosave <dir>       where measurements and traces are autosaved (default: autosave
                          in the ac2 data directory, ~/.local/share/ac2 on Linux); the
-                         previous autosave is kept beside it as <dir>.prev
+                         previous manifest is kept as <dir>/session.prev.json
   --no-restore           start empty: the autosave is not loaded but moved aside to
                          <dir>.unrestored
   --no-autosave          keep measurements and traces in memory only

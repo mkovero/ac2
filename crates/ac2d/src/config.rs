@@ -95,8 +95,8 @@ impl LocalClock {
 /// Where the daemon autosaves, and whether it loads that autosave when it starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AutosaveConfig {
-    /// The autosave (a session directory); its backup and set-aside copies live beside it
-    /// (`<dir>.prev`, …).
+    /// The autosave (a session directory); the previous manifest stays inside it
+    /// (`session.prev.json`), set-aside copies live beside it (`<dir>.damaged`, …).
     pub dir: PathBuf,
     /// Load the autosave at start (disarmed, as `file.load`). `false` moves it aside to
     /// `<dir>.unrestored` and starts empty.
