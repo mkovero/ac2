@@ -364,6 +364,25 @@ recreating measurements 1–14 in id order, `trace import` of `autosave.vN/trace
   checkout once and failed on types the checkout no longer had; touching the sources
   (`find crates -name '*.rs' -exec touch {} +`) fixed it.
 
+## Deploy of c7bd24b1 (2026-10-11, all three hosts)
+
+Protocol 42, session format 24. This build adds:
+- the multi-resolution spectrum, with its window changes marked on the plot;
+- `ac2 session salvage`;
+- the linear IR sent as 16-bit block floating point;
+- the Sessions dialog fixes;
+- the client dropping frames for topics it has unsubscribed from.
+
+It was the first format change restored with salvage, and nothing was rebuilt by hand. The
+new daemon set `autosave.v23` aside. It was copied to ketunkolo by way of the build host,
+because ketunkolo has no SSH host key for pupu. After `session open --in 1-10`,
+`session salvage /tmp/autosave.v23` restored FOH SPL, TF 1, Spectrum 1 (with its own panes),
+TF 2, Spectrum 2 and the trace "TF 1 S1". It skipped only the per-second Leq history.
+
+On ketunkolo, `frame_probe` measured Spectrum 1 (32768 points) at 23.6 frames/s. Every
+`audio_sample` step was 4096 and frames were 9.2 ms old at arrival (p50). On start, ac2d now
+warns that ufw is enabled on pupu; remote clients connect as before.
+
 ## Deploy of 303d02a9 (2026-10-11, all three hosts)
 
 Protocol 40, session format 23. Pane layouts are stored with the measurement (`meas.layout`).
