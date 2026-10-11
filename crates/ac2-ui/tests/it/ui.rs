@@ -1360,6 +1360,17 @@ fn smoothed_phase_and_spectrum() {
     };
     use ac2_ui::state::TransferView as V;
     assert_eq!(views, [V::Magnitude, V::Phase, V::Coherence]);
+    // The stack becomes Main L's own panes on the daemon (`meas.layout`); its reply changes
+    // the tree row and the session label, so the snapshot waits for it. Its toast expires
+    // on the wall clock.
+    step_until(&mut h, "own panes on the daemon", |a| {
+        a.state.working().dirty
+            && a.state
+                .measurements()
+                .iter()
+                .any(|m| m.id == MeasId(1) && m.layout.is_some())
+    });
+    h.state_mut().state.toasts.clear();
     snapshot(&mut h, "smoothed_phase_and_spectrum");
 }
 
