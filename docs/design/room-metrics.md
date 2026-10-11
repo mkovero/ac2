@@ -97,7 +97,7 @@ Expected values are analytic or from numpy/scipy, never from `ac`.
 Single bands of a single IR scatter (the statistical uncertainty of any IR measurement,
 Lundeby et al. discuss it): at 63–250 Hz one room's T20 is within about ±30 %, its EDT
 within ±50 % at short decay times. The app and CLI show one measurement; averaging
-positions is the operator's job (and a later spatial average).
+positions is the operator's job.
 
 ## Display
 
@@ -107,7 +107,7 @@ refused cells as words (dimmed), the legend for the words and marks that occur, 
 `Room (ISO 3382-1) · octave bands · decay to 1980 ms`. In the app the sweep pane's IR view
 (Shift+I) draws the octave table under the IR when the pane is at least 140 px taller than the
 table; a pane too narrow drops outer bands (broadband stays) and says how many are hidden.
-The pane's third view (G: response → IR → room) is the table alone under the banners, its
+The pane's last view (G: response → IR linear / log / ETC → room) is the table alone under the banners, its
 font the largest (up to twice the theme's) at which every band and the legend fit; a pane
 too small even for the small font keeps the narrow-pane rule (`room::room_scene`). The
 CLI prints the octave table after the distortion summary of `ac2 ir capture` and on
@@ -115,11 +115,10 @@ CLI prints the octave table after the distortion summary of `ac2 ir capture` and
 
 ## Storage
 
-`SweepData.room` (`RoomAcoustics`, nil only for an import from a v2 export) on the wire
-(PROTO_VERSION 18). The ac2 CSV export v3 adds `# room_metrics: {…}` (the JSON
+`SweepData.room` (`RoomAcoustics`, nil only for an import of an export written without it)
+on the wire. The ac2 CSV export (since v3) carries `# room_metrics: {…}` (the JSON
 `RoomAcoustics`, what import reads) and, after the IR table, a readable table of comment lines
-(`# band_hz,edt_s,…`; refused values `refused:<why>`). Sessions (format 9) keep it in the
-trace's CSV.
+(`# band_hz,edt_s,…`; refused values `refused:<why>`). Sessions keep it in the trace's CSV.
 
 ## Sources
 

@@ -14,7 +14,7 @@ tools/protocol/.venv/bin/python tools/protocol/fixtures.py check
 cargo test -p ac2-proto --test it fixtures::
 ```
 
-Both must pass; neither is wired into CI yet (that is the command to wire).
+Both must pass; CI runs both (the `protocol` job and the quick tier).
 
 - `fixtures.py check` decodes `fixtures/protocol/rust_*.bin` and compares them with
   `fixtures/protocol/expected/*.json` (frames in full; a subset of requests and events in
@@ -23,18 +23,20 @@ Both must pass; neither is wired into CI yet (that is the command to wire).
   `gen` would write.
 - `cargo test --test it fixtures::` checks the committed `rust_*.bin` equal this build's
   encoding and decodes every `py_*.bin` to exactly the values in
-  `crates/ac2-proto/src/samples.rs`.
+  `crates/ac2-proto/src/samples/`.
 
 ## After a protocol change
 
+Bump `PROTO_VERSION` first: the update refuses a changed wire under the committed version.
+
 ```
-AC2_UPDATE_FIXTURES=1 cargo test -p ac2-proto --test it fixtures::   # rewrite rust_*.bin
+AC2_UPDATE_FIXTURES=1 cargo test -p ac2-proto --test it fixtures::   # rewrite rust_*.bin, WIRE_LOCK
 tools/protocol/.venv/bin/python tools/protocol/fixtures.py gen   # rewrite py_*.bin, expected/
 tools/protocol/.venv/bin/python tools/protocol/fixtures.py check
 cargo test -p ac2-proto
 ```
 
-Edit the Python values in `fixture_frames.py` / `fixture_messages.py` to mirror `samples.rs`
+Edit the Python values in `fixture_frames.py` / `fixture_messages.py` to mirror `samples/`
 first; commit code, `docs/protocol.md` and fixtures together.
 
 ## Container format (`*.bin`)

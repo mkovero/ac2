@@ -1,7 +1,7 @@
 # Q4 — Level normalisation
 
-Status: implemented (`ac2-core` spectrum, RTA, generator; phase 2). Answers Q4 in `open-questions.md`. Decisions 4a–4c apply.
-The golden vectors in `fixtures/golden/spectrum_hann_tone_noise.*` (from `tools/refgen`)
+Status: implemented (`ac2-core` `window`, `spectrum`, `generator`). Answers Q4 in
+`open-questions.md`. The golden vectors `fixtures/golden/spectrum_*` (from `tools/refgen`)
 implement these formulas and cross-check them against `scipy.signal.periodogram`.
 
 ## Conventions
@@ -28,7 +28,8 @@ matches the amplitude convention.
   (tone)" — the bin spacing fs/N from the frame's grid (not the window's ENBW: the spacing is
   what the FFT length sets and every grid carries; with Hann, broadband reads 1.76 dB above
   `S · fs/N`). A tone reads its level and noise reads lower as N grows (3 dB per doubling);
-  the axis's tooltip says so and points to the RTA for band levels.
+  the axis's tooltip says so and points to the RTA for band levels
+  (`ac2-scene` `spectrum/units.rs`). A density quantity (PSD per hertz) is offered beside it.
 - **RTA:** band power in dBFS (or dB SPL when calibrated), with the axis labelled "dBFS (band)".
   FFT-banded and IEC-filterbank RTAs both use this unit. Which method was used is part of
   the label.
@@ -40,10 +41,11 @@ matches the amplitude convention.
 |---|---|---|
 | Hann (default) | 1.42 dB | general |
 | Blackman-Harris 4-term | 0.83 dB | high dynamic range |
-| Flat-top (HFT95 or similar) | < 0.01 dB | reading tone levels; option in spectrum view only |
+| Flat-top (HFT95) | < 0.01 dB | reading tone levels |
+| Rectangular | 3.92 dB | periodic stimuli whose period equals the FFT length |
 
-The UI shows the active window's scalloping bound in the axis tooltip. It is never applied as a
-correction.
+Scalloping is never applied as a correction. (Showing the active window's scalloping bound in
+the axis tooltip was decided but not built.)
 
 ## FFT banding (RTA without the filterbank)
 
@@ -60,9 +62,10 @@ correction.
 - Noise is scaled to the requested RMS over its whole period (periodic) or over a long-term
   estimate (free-running). If the requested RMS plus the crest factor would clip, the daemon
   refuses and reports the maximum achievable RMS. It never clips silently.
-- The global maximum level (daemon config) is checked against the requested RMS.
+- The system max level (`gen.ceiling`, capped by daemon config `max_level_dbfs`) is checked
+  against the requested RMS.
 
-## Tests (phase 2)
+## Tests
 
 - Golden: tone + noise amplitude and PSD (exists), DC and Nyquist not doubled (exists).
 - Off-bin tone at half-bin offset reads exactly the window's scalloping loss.

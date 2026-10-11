@@ -1,6 +1,6 @@
 # Q7 — Calibration store, mic curves and SPL correction
 
-Status: implemented (phase 5; several curves per mic and the active curve per input, §10; electrical calibration, §11; the acoustic calibration dialog in the app, §12; verified on the pupu rig — `docs/rigs/pupu.md`). Answers Q7 in `open-questions.md` within decisions 7a/7b
+Status: implemented, including §9–§12; verified on the pupu rig (`docs/rigs/pupu.md`). Answers Q7 in `open-questions.md` within decisions 7a/7b
 (calibration tied to device + input channel + mic name; mismatch → "cal from other mic /
 input", otherwise cal age; no gain/phantom fields, no prompts), 7c (mic curve: TF /
 spectrum / RTA subtract the file's dB from the displayed magnitude; SPL applies it as a
@@ -107,7 +107,7 @@ nothing double-counts (§5.7).
 | readout | cal state | curve flag |
 |---|---|---|
 | SPL meter (`spl` frame) | `cal: uncalibrated \| verified{calibrated_at} \| other_mic_or_input{calibrated_at}` | `mic_curve` |
-| RTA (`rta`), spectrum (`spec`) | same `cal` (they are in dB SPL when calibrated); the caption shows it too (round 5, C3) | `mic_curve` |
+| RTA (`rta`), spectrum (`spec`) | same `cal` (they are in dB SPL when calibrated); the caption shows it too | `mic_curve` |
 | TF (`tf`) | — (a ratio; sensitivity cancels) | `mic_curve` (measurement input only) |
 
 The age is `capture_wall_ns − calibrated_at`, both on the daemon clock, so no client clock
@@ -200,7 +200,7 @@ it by. The peak readout therefore never carries the curve; this is stated in the
   macOS, `%APPDATA%\ac2\config` on Windows; `$AC2_CONFIG_DIR` or `--cal-store PATH`
   override (tests and in-process daemons may run without a file — memory only). The store
   is machine configuration (it describes the hardware), so it lives with the config, not with
-  the sessions in the data directory (round 5, C2).
+  the sessions in the data directory.
 - Format: JSON `{"format": "ac2-calibrations", "version": 3, "sensitivities": [CalEntry],
   "mics": [{"name", "curves": [{"reference": MicCurveRef, "points": [[Hz, dB]]}]}],
   "inputs": [InputSetup]}`. Human-readable, diffable, hand-repairable.
@@ -208,8 +208,8 @@ it by. The peak readout therefore never carries the curve; this is stated in the
   over the old one, directory synced. A crash leaves the old file or the new one, never a
   mix.
 - Read once at daemon start. Missing → empty store (created on the first write).
-  **Another version** of this format (version 1 held one curve per device + input + mic
-  entry and an on/off switch per input; version 2 had no calibration method) → the file is set aside as `<file>.v<N>` (the time
+  **Another version** of this format (v1: one curve per device + input + mic and an on/off
+  switch per input; v2: no calibration method) → the file is set aside as `<file>.v<N>` (the time
   appended when that exists; never deleted) and the daemon starts with an empty, writable
   store, logging what happened and how to recover: calibrate again (`ac2 cal spl`) and
   import the curves again (`ac2 cal curve import FILE --mic NAME`); the old file shows the
@@ -238,12 +238,11 @@ it by. The peak readout therefore never carries the curve; this is stated in the
   log-f band averages for 1/3-octave bands.
 - Daemon: store round trip, atomic write leaves no temp files, unparseable file refused
   and untouched, matching rules (verified / other mic / other input / uncalibrated),
-  frames carry the state, TF/RTA/spectrum corrected and flagged, on/off.
-- CLI, client fake, scene wording, UI reducer (mic-name prompt, curve toggle).
+  frames carry the state, TF/RTA/spectrum corrected and flagged.
 - `cal.delete`: daemon (persisted across a restart, refused on an unreadable store,
-  `not_found`), client fake, CLI `cal rm`, UI palette prompt; spectrum / RTA caption age
-  (`ac2-scene`).
-- §10: see there.
+  `not_found`), client fake, CLI `cal rm`, UI palette prompt.
+- CLI, client fake, scene wording (spectrum / RTA caption age), UI reducer; §10–§12 list
+  their own.
 
 ## 9. Mic curve on a stored trace
 
@@ -269,7 +268,7 @@ needed the curve's points kept anyway to undo it.
 - **Recorded** in `TraceMeta.mic_curve` (`TraceMicCurve`: mic name, the `MicCurveRef` —
   label, file, content hash, points, range, import time — and `f_norm`). The daemon keeps the
   curve's **points** with the trace (and a session keeps them in its manifest,
-  `mic_curve_points`, session format 6), so deleting or replacing the curve in the store
+  `mic_curve_points`), so deleting or replacing the curve in the store
   later never changes a stored trace.
 - **Where it applies** (§5): transfer and sweep traces per log-grid column, spectra per
   bin, RTA bands as the band power average; phase and coherence never. A sweep's
@@ -282,8 +281,7 @@ needed the curve's points kept anyway to undo it.
   them): `trace.mic_curve` is refused (`refused`,
   "captured with mic curve … applied: it is in the columns already, a second curve would
   correct twice"). The two fields are never set together. A sweep's analysis works on the
-  raw recordings, so a sweep trace never names a curve in `mic.curve` (the earlier capture
-  wrongly named the input's curve there) and can always take one afterwards. When the
+  raw recordings, so a sweep trace never names a curve in `mic.curve` and can always take one afterwards. When the
   measurement input has a curve in use, the stored sweep gets it this way at once — the
   input's curve normalised as its live jobs normalise it (`resolve`) — so a correction put
   on an input applies wherever the input is used. Targets are
@@ -306,8 +304,8 @@ A measurement mic usually comes with more than one calibration file: one per inc
 angle (beyerdynamic MM1: `…_0Grad.txt` for a mic pointed at the source, `…_90Grad.txt` with
 the header `rel. Level [dB], 90-degree-curve` for grazing incidence). They differ by up to a
 few dB above 5 kHz, so the curve in use is part of the measurement: the wrong one is a
-measurement error, and one that changes silently (a newer import replacing the older one,
-as "the newest curve for the mic" did) cannot be told from a change in the system.
+measurement error, and one that changes silently (a newer import replacing the older one)
+cannot be told from a change in the system.
 
 **Model.** Curves live in a mic library keyed by mic name, each with a short `label`; the
 sensitivity calibration stays per (device, input, mic), because it calibrates the chain

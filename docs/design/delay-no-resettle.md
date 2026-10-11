@@ -9,9 +9,8 @@ Tests: `crates/ac2-core/tests/it/mtw_delay.rs` (analytic systems), the aligner's
 
 ## What the operator gets
 
-Changing a measurement's delay used to restart the whole MTW ladder: every stage went back
-to *settling* and the curve was untrustworthy for about 2.4 s (the deepest stage's fill).
-Now:
+A delay change no longer restarts the whole MTW ladder (every stage back to *settling*, the
+curve untrustworthy for about 2.4 s, the deepest stage's fill):
 
 - **Ctrl+,** / **Ctrl+.** move the delay by one sample, **Alt+,** / **Alt+.** by a tenth
   (`delay.nudge`, `ac2 delay nudge main-l -0.25samples`). The phase moves at once — no
@@ -35,12 +34,11 @@ The transfer panes draw every curve of the session's shared time base as if meas
 the reference's delay (decision 8a, `ac2_scene::trace`). Referred to the *applied* delay, a
 change of the compensation cancels: a curve that is not the reference does not move at all,
 and when the stepped curve is the reference every other curve is redrawn against the new
-reference delay and turns with it, so the whole picture moves together and looks unchanged
-(seen on the rig: `Δt` of every stored trace changed by the step, nothing appeared to move).
+reference delay and turns with it, so the whole picture moves together and looks unchanged.
 
 So the daemon keeps the operator's steps apart: `DelayState::nudged` is what `delay.nudge`
 added to the arrival (`applied = arrival + nudged`), and every TF frame states it
-(`TfMeta::nudged`). The view's time base of a live curve is the arrival, `applied − nudged`.
+(`TfMeta::nudged`; `DelayState::nudged_samples` too). The view's time base of a live curve is the arrival, `applied − nudged`.
 Its columns carry `e^{+jω·applied}`, so the curve is drawn `e^{+jω(τ_ref + nudged)}`: a
 step Δ moves it by `e^{+jωΔ}`, exactly as a display nudge `ν = Δ` moves a trace (Ctrl+. and
 `.` both lead the phase; Ctrl+, and `,` both lag it — no key is flipped), and since the
@@ -73,15 +71,14 @@ arrival it had at capture, so after its nudge is changed no honest absolute dela
   exact applied delay including the fraction (`IrMeta::inserted_delay`).
 - **Traces** record `TfMeta::delay` = the exact applied delay in seconds; phase comparison
   (decision 8a) therefore refers overlays to the exact value.
-- **Protocol** (PROTO_VERSION 15): `DelayState::applied_samples` is a float (samples at the
+- **Protocol**: `DelayState::applied_samples` is a float (samples at the
   session rate, fractions included); `delay.nudge {meas, by: Seconds}` moves the delay by a
   step (an operator action that keeps the last finding: it refines it). The daemon snaps the
   delay in samples to 10⁻⁶ sample so whole-sample values stay exactly whole (no rotation is
   applied to them at all).
-- **Sessions**: the saved form (`applied: Seconds`, and since format 12 `nudged`); a loaded
-  delay is not rounded to whole samples.
-- **TF frame shape** is unchanged (the live spatial average and other consumers see the same
-  frames; the curve just stops going back to settling).
+- **Sessions**: the saved form (`applied: Seconds`, `nudged`); a loaded delay is not rounded
+  to whole samples.
+- **TF frame shape** is unchanged (math channels and other consumers see the same frames).
 
 ## Validation (`crates/ac2-core/tests/it/mtw_delay.rs`)
 

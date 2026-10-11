@@ -82,20 +82,15 @@ clock and the total then cover the 48 h kept, and the caption says "last 48 h".
 The caption: `running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s` — the clock always
 in hours (it is never a time of day), the start in local time (with the date when not the
 newest second's day), LAeq always and LCeq / LZeq when a window uses that weighting, gaps
-only when there are some (≥ 1 s). Large (4 % of the pane's height, up to twice the caption
-type) between the meter and the calibration so it reads from a distance in the stage view;
-narrower panes get `2:14:05 since 19:02 · total 97.8 · offline 12 s`, then `2:14:05 · total
-97.8`, and when even that does not fit beside the meter it moves to a row of its own,
-shortened down to the clock. Tested at 320–1920 px in columns and tiles: no overlap.
+only when ≥ 1 s. It is large, to read from a distance in the stage view, and shortens
+step by step in narrower panes down to the clock alone (tested 320–1920 px, no overlap).
 
-The run belongs to the look back: it is drawn only with the history on (Shift+B), in every
-SPL view that has the windows (meter + Leq, Leq alone, tiles, columns, the stage view).
-In the stage view the whole caption line (meter, unit, calibration) follows the history
-too ("the grey title-line describing calibration and such is not necessary"), kept only
-while the values are stale (its STALE is the warning); outside full screen it stays.
-Without the history the windows and the number are the whole picture and take its row
-(operator, 2026-10-07). The per-window "offline for …" notes stay: they explain that
-window's value. The CLI (`spl leq watch`) prints the run regardless.
+The run belongs to the look back: it is drawn only with the history strip on, in every SPL
+view that has the windows. In the stage view the caption line (meter, unit, calibration)
+follows the history too, kept only while the values are stale; outside full screen it
+stays. Without the history the windows and the number are the whole picture. The
+per-window "offline for …" notes stay: they explain that window's value. The CLI (`spl leq
+watch`) prints the run regardless.
 
 ## A new log
 
@@ -306,14 +301,14 @@ what the FOH mic measures beside the corrected one. App: the Leq windows dialog 
 
 ## Where it shows
 
-- App: **G** steps the SPL pane meter → windows → meter + windows (the meter's number over
-  the windows, the default; `ac2_scene::meter_leq`); **B** lays the
-  windows out as columns or tiles, **Shift+B** shows the history strip (rebuilt from the
-  log, *The history strip* below), both remembered in `ui.toml`; **W** steps split → the pane
-  alone → full screen (the stage view); **F11** puts the window full screen in any layout. **Shift+L** opens the windows
-  dialog (lengths and weightings picked, limits typed, a preset row, the horizon, the peak
-  limits and the position correction). Over / recovered alarms are toasts. See *Display*
-  below.
+- App: **G** steps the SPL pane meter → windows → meter + windows (the default;
+  `ac2_scene::meter_leq`) → bands (with a band meter); columns or tiles and the history
+  strip are Settings › Display rows ("Leq windows", "Leq history strip") and palette
+  commands, remembered in `ui.toml`; **W** steps split → the pane alone → full screen (the
+  stage view); **F** / **F11** put the window full screen in any layout. **Shift+L** opens
+  the windows dialog (lengths and weightings, limits, a preset row, the horizon, the peak
+  limits, the position correction; Insert adds a window). Over / recovered alarms are
+  toasts.
 - CLI: `ac2 spl leq watch` (block digits on a terminal, `--json` a line a second, with the
   run, the peaks and the correction), `ac2 spl leq set` (`--windows`, `--preset`, `--limit
   30min=99db`, `--peak-limit lcpeak=135db`, `--warn`, `--horizon`, `--position 3db`,
@@ -341,34 +336,27 @@ code that made the frames.
   (at most 5 h of a log that keeps 48): the longest window before the first point is what
   that point is computed over; the rest of a 48 h log would only make points the strip
   drops.
-- **How**: `ac2_core::leq::LogReplay` replays the rows as the job computed them — a second
-  without a row while running is a gap pushed into the windows; a stretch without rows is
-  where the meter was stopped or the daemon was down, and the job that started after it
-  refilled its windows from the rows in its span (`RollingLeq::refill`, which the job
-  itself calls), so the windows count as elapsed from the oldest of those; a stretch longer
-  than the longest window empties them. Each second is judged with `judge_window` against
-  the window's limit and the row's sensitivity (a filling window on its budget), as the job
-  judged it. Begun part way through the log, the seconds before the longest window has
-  filled with replayed rows are left out: they lack what came before. Only the seconds
-  after the last change of unit (a calibration) are given, as the history starts over at
-  one live. The rows are copied out of the log under its lock; the replay runs outside it.
+- **How**: `ac2_core::leq::LogReplay` replays the rows as the job computed them: a missing
+  second while running is a gap; a longer stretch without rows is a stop, after which the
+  windows are refilled from the rows in their span (`RollingLeq::refill`, as the job does);
+  a stretch longer than the longest window empties them. Each second is judged with
+  `judge_window` against the row's sensitivity. Seconds before the longest window has
+  filled with replayed rows are left out (they lack what came before), as are seconds
+  before the last change of unit. The replay runs outside the log's lock on copied rows.
 - **Joining live**: the rebuilt points replace the series up to the newest of them; frames
   received after that second continue it. A frame within half a second of the newest point
   is the same second (a point is stamped at the end of its second, a frame a few
   milliseconds later), so no second appears twice. A history in another unit than the
   frames received since (calibrated meanwhile) is dropped.
 
-The only difference from the frames received live: a stretch of seconds without rows
-while the job ran (whole seconds lost to capture gaps) is taken as a restart, which can
-make a window count as filling a few seconds longer than the job did when such a stretch
-falls exactly at the start of its span. Tests: the replay against the job second by second
-over a log with lost seconds, short and long pauses (`ac2_core::leq`); the history bit for
-bit against frames built as the job builds them, from the log's start and part way, and
-across a change of unit (`ac2d` `leq_history`); a log longer than a page, paged and its
-4 h history (`crates/ac2d/tests/it/leq/log.rs`); the history joining live frames
-(`ac2_scene::leq`); the app's reducer (restart, a new log from elsewhere, changed windows,
-reconnect); and from an empty daemon, a restarted app shows the seconds before it started
-within 0.01 dB of what the first app received, and a new log from one app clears another's.
+The only difference from the live frames: a stretch of whole seconds lost to capture gaps
+is taken as a restart, which can make a window count as filling a few seconds longer when
+such a stretch falls exactly at the start of its span. Tests: replay vs job second by
+second (`ac2_core::leq`); history bit for bit vs frames, from the start, part way and
+across a change of unit (`ac2d` `leq_history`); paging and the 4 h history
+(`crates/ac2d/tests/it/leq/log.rs`); joining live frames (`ac2_scene::leq`); the reducer;
+and from an empty daemon, a restarted app shows the earlier seconds within 0.01 dB of what
+the first app received.
 
 ## Display
 
@@ -399,37 +387,25 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   the column narrows), and the headroom holds until the window is full (still worded
   "stay ≤ 98.2 dB"). Tiles show the same texts. The limit is a line across the whole column.
 - **Text**: what a performer acts on is large — the state (`OVER`, `NEAR`, `OK`, "over in
-  47 s" on course) and the instruction ("stay ≤ 101.5 dB" alone, not what it holds for;
-  "cooling down in 7 min 30 s" when it cannot recover within the horizon) — each in the
-  longest wording that fits every column saying the same kind of thing, shrinking to half
-  its size before a shorter one is used, so neighbours read alike ("stay ≤ 102.0" beside
-  "stay ≤ 85.3"); the limit small under them (dim unless the column is alarmed), as the line
-  across the bar shows it; "not calibrated" in its place when nothing is judged (nothing
-  judged is nothing large). The window's value is secondary: a small figure **held still
-  low in the track** — the same place at any level, since a figure riding the bar's top
-  moves every second and draws the eye for nothing — smaller than the window's name under
-  the column (`NAME_RATIO`), at most 0.8 of the state's size (`VALUE_RATIO`) and well under
-  the meter's number above the windows (≤ 0.3 of it, tested). Every window's value is one
-  size, a window without a limit too, though its column is then mostly empty: values read as
-  one row only when they match. Its colour is judged on what
-  is behind it (`Behind`): on the fill (the usual case: the bar is above it) the theme ink
-  of highest contrast with the fill, ≥ 4.5:1 (white on red, black on amber or green, never
-  red on red); on the track (the level below it) the bar's own colour where that reads
-  (≥ 3:1), plain text otherwise, dim before anything was measured; across the fill's edge
-  the ink that reads on both. The limit line is 30 dB above the scale's bottom on a judged
-  scale, far above the figure; on a track too short for that the figure goes just above
-  the line. On its baseline, smaller, the window's own unit and weighting (`dB(A)`,
-  `dB(C)`, `dBFS (A)` uncalibrated; tiles the same), never dropped, since the SPL meter
-  shown above the windows may use another weighting. Rows are left out when the bar would
-  get too short (the limit first, the instruction last); the name at the bottom, shortened
-  uniformly when narrow (`LAeq 30 min` → `30 min` → `30m`, the caption then names the
-  weighting; mixed weightings keep their letter). Tested: 1–8 windows, 320–3840 px, no text
-  overlaps, every value inside its track, low, at the same place from the bottom of the
-  scale to over its top, clear of the limit line and legible on what is behind it.
-- **Tiles** (B) keep every figure written out in a grid: the name and state on top, in the
+  47 s" on course) and the instruction ("stay ≤ 101.5 dB", or "cooling down in 7 min 30 s"
+  when it cannot recover within the horizon) — each in the longest wording that fits every
+  column saying the same kind of thing, shrinking to half size before a shorter wording is
+  used, so neighbours read alike. The limit is small under them; "not calibrated" in its
+  place when nothing is judged. The window's value is secondary: a small figure **held
+  still low in the track** (a figure riding the bar's top moves every second and draws the
+  eye for nothing), one size for every window, smaller than the name (`NAME_RATIO`), at
+  most 0.8 of the state (`VALUE_RATIO`) and ≤ 0.3 of the meter's number above. Its colour
+  depends on what is behind it (`Behind`): on the fill the theme ink of highest contrast
+  (≥ 4.5:1, never red on red), on the track the bar's colour where it reads (≥ 3:1). The
+  unit and weighting (`dB(A)`, `dBFS (A)` uncalibrated) are never dropped, since the meter
+  above may use another weighting. Rows drop when the bar would get too short (the limit
+  first, the instruction last); the name shortens uniformly (`LAeq 30 min` → `30 min` →
+  `30m`). Tested: 1–8 windows, 320–3840 px, no overlaps, every value inside its track,
+  clear of the limit line and legible on what is behind it.
+- **Tiles** keep every figure written out in a grid: the name and state on top, in the
   middle the instruction large, the value smaller than the name at a fixed place low in the
   body (one size and place in every tile of the grid, with an instruction or not), the
-  course, limit and progress below; over tiles fill red, near ones amber; the **history strip** (Shift+B) goes under
+  course, limit and progress below; over tiles fill red, near ones amber; the **history strip** goes under
   either. Defaults: columns, no strip.
 - **Stage view**: full screen with the SPL pane maximised on its windows draws only the
   scene — columns and the caption (meter, unit, run, calibration) — without the app's top bar,

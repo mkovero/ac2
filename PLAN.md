@@ -302,8 +302,8 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
   Zero-padded to ≥ 2× the search span to avoid circular wrap; lag sign: positive = measurement late.
   Search range bounded and signed (default ±1 s, configurable). Result is the **absolute**
   delay; the held delay is never added to it.
-- **Band** per measurement: high-pass 2 kHz default (full-range), band-pass for subs
-  (e.g. 40–120 Hz) and mid boxes; auto mode picks from measured excitation.
+- **Band** per measurement: full range 2–16 kHz (default), mid 300 Hz–3 kHz, sub 20–120 Hz
+  (decision 1e), or custom edges; auto mode picks from measured excitation.
 - **Confidence** from peak-to-sidelobe ratio, band SNR and excitation check. Below
   threshold → explicit "no estimate".
 - A residual check on the *aligned* stream reports `residual` separately (should be ≈0).
@@ -368,7 +368,8 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 - Raw `ac` rig captures replayed as stimulus; results judged against refgen, not `ac`.
 - Quantified non-DSP gates: xruns/overruns, device disconnect + recovery, daemon
   restart recovery, CPU and memory per job, clock drift detection.
-- `proptest` for averaging/smoothing invariants; `criterion` benches in CI.
+- `proptest` covers frame round trips, malformed frames and the CLI grammar; averaging/smoothing
+  invariants under `proptest` and `criterion` benches are not done.
 
 ### 5.7 Calibration store
 - Per input: mic sensitivity, mic curve (magnitude-only file), optional voltage scale.
@@ -401,12 +402,9 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an embedded 
 - Ctrl: msgpack `{v, id, cmd}` where `cmd` is a tagged enum with `deny_unknown_fields`.
   Reply `{v, id, result | error{code, msg}}`. Request ids are deduplicated per client
   for a retry window, so a retried command never executes twice.
-- Command groups: `session` (devices, open, close, status), `gen` (acquire, release, arm,
-  fire, set, stop), `meas` (create, update, delete, start, stop, reset), `delay`
-  (find, insert, set, track), `trace` (capture, list, get, update, delete, average,
-  import, export, mic curve), `cal` (spl, spl electrical, curve import / rename / delete,
-  use, list, delete), `spl` (log get, log new, history get), `ir` (capture), `state` (snapshot, since), `grid` (get), `file` (save,
-  load, list). `docs/protocol.md` is the normative list.
+- Command groups: `session`, `gen` (lease, full-state `set`, stop, ceiling), `meas` (math
+  channels and sweeps are measurement kinds), `delay`, `trace`, `cal`, `spl`, `sweep`, `rec`,
+  `state`, `grid`, `file`, `server`. `docs/protocol.md` is the normative list.
 - Mutations take an optional `expect_rev` precondition; stale → `conflict` error.
   The daemon commits state changes serially.
 - **State sync:** client subscribes to `evt` first, buffers, then requests a snapshot
@@ -420,7 +418,8 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an embedded 
   frames reference them. Late subscribers fetch on first unknown id.
 
 ### 6.3 Data frames (normative schema in `docs/protocol.md`)
-- Topics `d/<meas>/<kind>` (`tf`, `ir`, `rta`, `spec`, `spl`, `levels`), `evt`, `ka`.
+- Topics `d/<meas>/<kind>` (`tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`),
+  `session/levels`, `session/preview`, `timing`, `evt`, `ka`.
 - Multipart `[topic][msgpack header][payload arrays…]`. Header fields: `seq`,
   `audio_sample` (index in the session's sample clock, origin = session open),
   `daemon_incarnation`, `config_rev`, `grid_id`, `n`, `kind`, `units` per array,
@@ -470,7 +469,7 @@ ac2 gen pink --out 1,2 --level -20dbfs        # foreground: acquires + arms, Ent
                                               # Ctrl-C/Esc stops; lease ends with the process
 ac2 gen stop                                  # any client, no lease needed
 ac2 meas new tf --ref 1 --meas 2 --name main-l
-ac2 delay find main-l --band 2khz- --insert
+ac2 delay find main-l --band full --insert
 ac2 delay find sub --band 40hz-120hz
 ac2 spl watch --input 3 --weight a --json
 ac2 cal spl --input 3 --ref 94db
@@ -493,14 +492,15 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
 - Perceptual, colorblind-safe palettes. Dark, light, high-contrast sunlight theme.
 
 - Panes are a tiling tree: one pane at the first start; `N` splits the focused pane
-  along its longer side, `Q` closes it (never the last), `Tab` / `Shift+Tab` put the next /
-  previous list measurement in it (the pane takes that measurement's kind), `G` steps its
-  views (transfer: response → phase → coherence → impulse response), `Alt+1..9` focus the
+  along its longer side, `Q` closes it (never the last), `Tab` / `Shift+Tab` step the
+  measurement tree's rows into it (the pane takes that measurement's kind), `G` / `Shift+G`
+  step its views (transfer: magnitude → phase → coherence → IR linear / log / ETC), `Alt+1..9` focus the
   panes in reading order, a click focuses one, `W` cycles maximised → stage view → back.
   Each pane has its own view: kind, measurement and modes; the impulse response is a view
-  of a transfer pane, of that pane's measurement. Nothing opens a pane by itself (a finished sweep says where to look). The
-  tree, kinds, views and measurements (by name) are kept in `ui.toml`; a layout an older
-  version wrote is dropped for a fresh start.
+  of a transfer pane, of that pane's measurement. The tree, kinds, views and measurements
+  (by name) are kept in `ui.toml`; a measurement can carry its own panes in the session,
+  brought up only by its row (decision P1, `docs/user-guide.md` *Layouts follow the
+  measurement*).
 
 ### 8.2 Keyboard
 - One binding table, scoped (global / transfer / spectrum / SPL / IR), test-enforced: no dead keys, no conflicts.
@@ -563,8 +563,6 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 
 ### 9.0 Status
 
-Last updated 2026-10-05.
-
 | # | CI criteria | HW criteria |
 |---|---|---|
 | 0 | done | duplex check (`ac2 selftest duplex`) on real mac/win interface — **open** |
@@ -572,32 +570,28 @@ Last updated 2026-10-05.
 | 2 | done (refgen + Q1 scenario acceptance) | — |
 | 3 | done (sync, replay, restart, lease expiry, CURVE refusal) | CLI drives a live TF remotely over CURVE — **done** on Linux (`docs/rigs/pupu.md`, network test) |
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
-| 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu, 2026-10-04) |
-| 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (macOS: disk image installs, app starts and asks for microphone access, tester 2026-10-05; Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history, peak limits (LCpeak, LAFmax), measuring-position correction and alarm hysteresis (`docs/design/leq.md`); acoustic calibration dialog in the app (`docs/design/q7-calibration.md` §12); spectrograph under the spectrum (`docs/design/spectrograph.md`); delay change without resettle and sub-sample delay (`docs/design/delay-no-resettle.md`); output-vs-input clock drift detection (`docs/design/multi-device.md`); raw capture files: record to f32 WAV/RF64 + sidecar, replay as a session, replay within stated tolerance (`docs/design/raw-capture.md`); ISO 3382-1 room parameters per band from the sweep IR (`docs/design/room-metrics.md`); live spatial average of transfer functions (`docs/design/spatial-average.md`); audio that stops is reported and reopened by itself (`docs/design/audio-recovery.md`); Settings view, system max level at run time, output names and server features (`docs/design/settings.md`); band Leq per 1/3 octave with a measured band transfer (`docs/design/band-leq.md`); open — ASIO (design: `docs/design/asio.md`), multi-device support (resampling) and input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
+| 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu) |
+| 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (macOS: disk image installs, app starts and asks for microphone access; Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
+| 7 | in progress. Done, each with its design note in `docs/design/`: sweep with H2…H5 / THD and IR (`sweep-distortion.md`); ISO 3382-1 room parameters (`room-metrics.md`); rolling Leq windows, limits, alarms, presets, per-second SPL log, peak limits, position correction (`leq.md`); band Leq (`band-leq.md`); acoustic and electrical calibration dialogs (`q7-calibration.md`); spectrograph (`spectrograph.md`); multi-resolution spectrum, tone / density level (`multires-spectrum.md`); delay change without resettle, sub-sample delay and sweep arrival (`delay-no-resettle.md`, `subsample-arrival-group-delay.md`); output-vs-input drift detection (`multi-device.md`); raw capture and replay (`raw-capture.md`); math channels incl. spatial average (`math-channels.md`); measurement tree (`measurement-tree.md`); audio recovery (`audio-recovery.md`); Settings and run-time max level (`settings.md`). Open: ASIO (`asio.md`), multi-device support (resampling), input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
 
-Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames:
-transfer, delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE,
-mDNS; `docs/rigs/pupu.md`); Windows only as an MSI install in a VM with the simulated rig
-(`docs/design/backlog.md`); macOS: the universal disk image installs and starts on a
-tester's Mac (microphone prompt shown), not yet measured with an audio interface. No
-GitHub release is published: installers are workflow artifacts of `release.yml` runs,
-unsigned. Versions (protocol, session format) live in the code. CI (Linux, macOS, Windows) green again
-since 9dc4274 (2026-10-05). The current macOS tester build (dev.9, 9dc4274) and its test
-guide are in `testing/macos/` (binaries git-ignored); open items in
-`docs/design/backlog.md` → *Performance and platforms*.
+Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames: transfer,
+delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE, mDNS, REW
+cross-check; `docs/rigs/pupu.md`); a Pi 4 B runs the app as a remote kiosk client; Windows
+only as an MSI install in a VM with the simulated rig (`docs/design/backlog.md`); macOS: the universal disk image
+installs and starts on a tester's Mac, not yet measured with an audio interface (tester
+build and guide in `testing/macos/`). No GitHub release is published: installers are
+unsigned workflow artifacts of `release.yml`. Open items: `docs/design/backlog.md` →
+*Performance and platforms*.
 
-Performance pass for the real targets (2026-10-04, `docs/design/flow-control.md` for what
-is left): idle wakeups cut (≈1340 → 250/s with a session open), work only for subscribed
-and new results, display-sized spectrum frames (≈8–12 MB/s → ≈22 kB/s per client),
-append-only SPL log (no whole-log rewrites, SD-card safe), cheaper SPL/RTA/delay-tracking
-DSP, UI repaints only on visible change with per-pane rebuilds and a low-power GPU request.
-Measured on the fake rig: daemon 10.5 % → 2.4 % of a desktop core with TF + RTA + spectrum +
-SPL; UI with idle panes 3.3 → 0.2 cores under a software renderer. On pupu (i5-2415M,
-96 kHz): SPL + spectrum ≈ 14 % of a core, of which ≈ 4 % is JACK's own process thread.
-Not yet measured: §8.3 frame time on a real laptop iGPU, anything on Pi hardware. Pi 4 class
-so far in emulation only (2026-10-05): the aarch64 test suites pass under qemu-user, and a
-kiosk image (JACK, network-mode daemon, full-screen UI) boots in QEMU (`docs/design/backlog.md`).
+Performance pass for the real targets (`docs/design/flow-control.md` for what is left): idle
+wakeups cut (≈1340 → 250/s with a session open), work only for subscribed and new results,
+display-sized spectrum frames (≈8–12 MB/s → ≈22 kB/s per client), append-only SPL log
+(SD-card safe), cheaper SPL/RTA/delay-tracking DSP, UI repaints only on visible change with
+per-pane rebuilds and a low-power GPU request. Measured on the fake rig: daemon 10.5 % →
+2.4 % of a desktop core with TF + RTA + spectrum + SPL; UI with idle panes 3.3 → 0.2 cores
+under a software renderer. On pupu (i5-2415M, 96 kHz): SPL + spectrum ≈ 14 % of a core, of
+which ≈ 4 % is JACK's own process thread. Not yet measured: §8.3 frame time on a real laptop
+iGPU, a daemon on Pi hardware.
 
 ### 9.1 1.0 release
 Phases 0–6: one clock domain, reliable dual-channel TF and RTA, delay finder, traces and
@@ -656,6 +650,6 @@ Open decisions (settle before phase 1; technical design questions are in §9.2):
    with the UI elsewhere. A desktop with a discrete GPU is the easy case, not the yardstick.
    The Pi is best effort until a Pi rig exists; then it gets an HW gate (SPL + Leq log 24 h,
    CPU budget, SD-card writes). SIMD where it matters, NEON included.
-5. ~~Raw capture format~~ **Decided:** f32 WAV/W64 + JSON sidecar (config timeline,
+5. ~~Raw capture format~~ **Decided:** f32 WAV (RF64 past 4 GiB) + JSON sidecar (config timeline,
    discontinuities, algorithm version). Exact sample preservation;
    DSP replay judged within tolerance, not bit-exact.

@@ -1,7 +1,6 @@
 # Multi-resolution spectrum
 
-Status: implemented (`PROTO_VERSION` 41, session format 24; the density level 43 and 25). Decision rows S1, S2 in
-`open-questions.md`. Code: `ac2_core::multires` (estimator), `ac2d::jobs::spectrum`
+Status: implemented, density level included. Decision rows S1, S2 in `open-questions.md`. Code: `ac2_core::multires` (estimator), `ac2d::jobs::spectrum`
 (job, `Engine::Multi`), `ac2_scene::stitch` (window-change lines). Wire:
 `docs/protocol.md` §3.2 *Spectrum resolution*. Golden vectors: `tools/refgen/sets/multires.py`.
 
@@ -75,7 +74,7 @@ The level is not a band level: use the RTA for dB SPL in bands. The axis says
 
 `SpectrumConfig.level` (`SpecLevel`) is `tone` (above) or `density`, the default for
 multi-resolution: power per hertz, `P / B` with `B` the noise bandwidth in hertz. It keeps
-the dBFS reference of tone level (a full-scale sine's mean square), so white noise of
+the dBFS reference of tone level (axis `dBFS/Hz (density, multi-res)`) (a full-scale sine's mean square), so white noise of
 deviation σ reads `4σ²/fs` per hertz, and density integrated over 0 … fs/2 is the signal's
 level in dBFS. For one FFT `B = ENBW · fs / N` (the density factor is `2 / (fs · S₂)`,
 `S₂ = Σw²`, applied per bin). For multi-resolution
@@ -147,7 +146,7 @@ FIFO holds at most 128 frames (`invalid` beyond).
 
 ## Window changes on screen
 
-The operator asked that the change of behaviour across frequency be visible. Each band's
+The change of behaviour across frequency is made visible. Each band's
 anchor (`SpecBand.sole`) is drawn as a faint grey dashed vertical line in the
 resolution-marker style (`theme.unresolved_edge`), labelled with the window length at the
 plot foot (`683 ms` … `21 ms`, a label that would collide with the previous one is left

@@ -1,19 +1,15 @@
 # Audio that stops: detection and recovery
 
-Status: implemented (protocol 21). Wire format: `docs/protocol.md` §4.1.1.
+Status: implemented (`ac2d` `control/recovery.rs`, `fanout.rs`). Wire format:
+`docs/protocol.md` §4.1.1.
 
-## What happened
+## Why
 
-On the pupu rig an RME Fireface 400 was reset; FireWire re-created the device, jackd kept
-the old ALSA card open and hung. The daemon's JACK client then got no callbacks and no
-error: the session stayed "open", measurements stayed "running", nothing was logged, and
-the app only showed STALE frames, minutes old. When jackd was stopped, the host ended the
-stream, the daemon tried one reopen ("No JACK server") and gave up with the session closed;
-after jackd was restarted by hand a manual `ac2 session open` was needed
-(`docs/rigs/pupu.md`, *Wiring and FF400 reset recovery*).
-
-Two faults: a stream that stops without an error was not noticed, and a stream that ended
-was not brought back.
+A reset FireWire interface (`docs/rigs/pupu.md`, *Wiring and FF400 reset recovery*) leaves
+jackd hung: the JACK client gets no callbacks and no error, so the session looks open and
+running while frames go STALE; and once the host does end the stream, one failed reopen
+must not leave the session closed. So a stream that stops without an error has to be
+noticed, and a stream that ended has to be brought back.
 
 ## Detecting a stop
 
@@ -96,8 +92,8 @@ instead of closing the session.
 - Banner (fault, right under DAEMON NOT RESPONDING, replacing STALE):
   `AUDIO STOPPED · device not delivering since 20:36`, detail
   `attempt 3 failed: No JACK server: start JACK … · next in 8 s · measurements paused`;
-  an attempt with no answer for 5 s says so (`attempt 1 has had no answer from the audio
-  host for 12 s`). In a narrow pane the headline drops its parts from the end
+  an attempt with no answer for 5 s says so (`reopening: attempt 1 has had no answer from
+  the audio host for 12 s`). In a narrow pane the headline drops its parts from the end
   (`AUDIO STOPPED`), like every banner, and never leaves its row.
 - Curves and readouts under it: dimmed, tagged `audio stopped` (legend) and `AUDIO
   STOPPED` (SPL readout, Leq view) instead of a STALE age — the banner has the time.
@@ -118,8 +114,9 @@ Tests, all from an empty daemon on the fake: stall → AUDIO STOPPED within the 
 control thread answering while an attempt hangs, the device back → same measurements, new
 epoch, generator disarmed, SPL log gap (`crates/ac2d/tests/it/recovery.rs`); vanish → reopen
 after the device returns; the device back in the middle of a 30 s wait → reopened within
-2.5 s, with no early attempt while it stays away; `ac2 status` (`crates/ac2-cli/tests/it/recovery_rig.rs`); the app's
-banner appears and clears without user action (`crates/ac2-ui/tests/embedded.rs`).
+2.5 s, with no early attempt while it stays away; `ac2 status`
+(`crates/ac2-cli/tests/it/recovery_rig.rs`); the app's banner appears and clears without
+user action (`crates/ac2-ui/tests/it/embedded/stimulus.rs`).
 
 ## Open
 

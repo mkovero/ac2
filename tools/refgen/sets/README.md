@@ -1,4 +1,4 @@
-One module per area (e.g. `mtw.py`, `spl.py`). Each exports `GENERATORS = [fn, ...]`; each
+One module per area (e.g. `mtw.py`, `levels.py`). Each exports `GENERATORS = [fn, ...]`; each
 `fn()` returns a `VectorSet`. Import helpers with:
 
 ```python

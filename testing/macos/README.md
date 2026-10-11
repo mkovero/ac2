@@ -46,6 +46,7 @@ interface out 2 ── cable 2 ──► in 2   (measurement: here a wire, so th
   level; turn both inputs' preamp gain to minimum, pads on if they have them).
 - **No speaker connected for the first tests.** If one is connected, keep the amp or
   monitor level low.
+- Shortcuts use the Mac keys: ⌘ where ac2 on Linux uses Ctrl, ⌥ (Option) for Alt.
 - ac2 never plays anything without a typed level: **L** types it, **Space** arms,
   **Enter** plays, **Shift+Esc** stops from anywhere. Start at **−40 dBFS** and stay at or
   below **−20 dBFS** unless you know your gain structure.
@@ -71,7 +72,7 @@ errors.
 6. Check the top bar: device, rate and buffer are shown. The **Inputs** list on the left
    keeps a meter per input.
 
-Also worth a try: close the session (**Ctrl+K → Close audio session**), reopen it at
+Also worth a try: close the session (**⌘K → Close audio session**), reopen it at
 96 kHz if the interface supports it, and unplug and replug the interface while a session
 is open (ac2 should say so and recover, not crash).
 
@@ -80,8 +81,8 @@ is open (ac2 should say so and recover, not crash).
 Pass: an electrical loop reads flat (0 dB, 0°, coherence 1) and the delay finder reports
 the interface's own latency between the two inputs, about 0 ms.
 
-1. Make the stimulus play on both outputs: **Ctrl+P**, **Alt+1** (Settings › Inputs &
-   outputs), **S** on output 2 as well, **Esc**. Output 1 feeds the reference over cable 1,
+1. Make the stimulus play on both outputs: **⌘P**, **⌥1** (Settings › Audio & I/O),
+   **S** on output 2 as well, **Esc**. Output 1 feeds the reference over cable 1,
    output 2 the "measurement" over cable 2, so the measurement is a wire and the answer is
    known.
 2. **L**, type `-40`, **Enter**; **Space** arms, **Enter** plays pink noise. The transfer
@@ -115,11 +116,11 @@ room.
 Pass: each view shows live data that moves with the signal, and the SPL meter reads
 plausible levels.
 
-1. **Ctrl+K → New spectrum…** on input 1, then **New RTA…** on input 1. With pink noise
+1. **⌘K → New spectrum…** on input 1, then **New RTA…** on input 1. With pink noise
    playing at −40 dBFS over the loopback, the RTA bands should sit roughly level with each
    other (pink noise has equal energy per octave) and the spectrum should slope down about
    3 dB per octave.
-2. **Ctrl+K → New SPL meter…** on input 2. Uncalibrated it reads dBFS: with pink noise at
+2. **⌘K → New SPL meter…** on input 2. Uncalibrated it reads dBFS: with pink noise at
    −40 dBFS on cable 2 it should read close to −40 with Z weighting (**Z** in the SPL pane
    cycles A / C / Z; A reads lower on pink noise) and follow the level when you change it
    with ↑/↓. A mic on a spare input works too.
@@ -189,11 +190,11 @@ into what you send back (`--json` gives the same as JSON).
 
 Checks the file writes and the replay path on macOS.
 
-1. With the session open and pink noise playing, **Ctrl+K**, type `rec`, **Enter** on
+1. With the session open and pink noise playing, **⌘K**, type `rec`, **Enter** on
    *Record: raw audio of every input on / off*. The top bar shows `REC 0:12 · … MB`. After
    a minute, the same command again stops it; the top bar names the recording
    (`recorded rec-… · 1:00 · … MB`).
-2. **Shift+Esc** stops the stimulus. **Ctrl+K → Replay a recording as the session (name or
+2. **Shift+Esc** stops the stimulus. **⌘K → Replay a recording as the session (name or
    path)…**, type that name, **Enter**. The measurements should show the same curves as
    live. Note what the app shows when the recording ends.
 3. The files are in `~/Library/Application Support/ac2/recordings/`. Note their size.

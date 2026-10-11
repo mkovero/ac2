@@ -3,23 +3,20 @@
 Feeds PLAN.md §6 (protocol), §4.3 (publishing), open questions Q2 (freshness), Q5 (frame
 identity), Q6 (lease binding to identity).
 
-> **History; code promoted.** A record of the phase 0 spike. The spike code (`spikes/zmq-curve`) has been removed; its build script,
-> binding and tests were reviewed and promoted to `crates/ac2-zmq` (build, typed API,
+> **Concluded; code promoted** to `crates/ac2-zmq` (build script, typed API,
 > `SecureContext` + ZAP handler, authorized-keys store, `drain_latest`,
-> `SubscriptionTracker`). Commands and paths below that name `spike-zmq-curve` describe the
-> spike as it was measured; the throughput example was not carried over. The equivalent
-> tests now run with `cargo test -p ac2-zmq`.
+> `SubscriptionTracker`). Its tests (`cargo test -p ac2-zmq --test it`) cover the claims
+> below; the spike's throughput example was not carried over.
 
 ## Answer
 
 **Yes, with one caveat.** libzmq 4.3.5 with CURVE (libsodium 1.0.22) builds from cargo with
 no system packages on Linux, and the build path for macOS and Windows has no extra
-requirements beyond the platform C/C++ toolchain. It cannot be done with the `zmq` crate as
-published: its vendored build compiles libzmq **without CURVE**. The spike builds libzmq
-itself (`zeromq-src` + `libsodium-sys-stable`) and binds the C API with a thin hand-written
-wrapper (~600 lines incl. FFI declarations). The planned socket design (ROUTER/DEALER ctrl, XPUB/SUB data, CURVE + ZAP
-on both, client-side latest-wins drain) works as intended. All tests pass and stayed green
-over 120 runs while 12 test processes ran in parallel.
+requirements beyond the platform C/C++ toolchain. The `zmq` crate as published can't do it:
+its vendored build compiles libzmq **without CURVE**. ac2-zmq builds libzmq itself
+(`zeromq-src` + `libsodium-sys-stable`) and binds the C API with a thin hand-written wrapper.
+The socket design (ROUTER/DEALER ctrl, XPUB/SUB data, CURVE + ZAP on both, client-side
+latest-wins drain) works as intended.
 
 Caveat: on Windows, `libsodium-sys-stable` **downloads** a prebuilt, minisign-verified
 libsodium archive at build time, unless `SODIUM_LIB_DIR` (e.g. vcpkg) or `SODIUM_DIST_DIR`
@@ -54,15 +51,12 @@ Windows MSVC (windows-latest).
 
 ## Build notes
 
-What the build does (`spikes/zmq-curve/build.rs`):
-1. `libsodium-sys-stable` builds/fetches static libsodium and exports `DEP_SODIUM_INCLUDE`
-   / `DEP_SODIUM_LIB` to our build script (Unix). On MSVC it exports only an include dir that
-   does not exist; see the Windows row below.
-2. `zeromq_src::Build::new().with_libsodium(Some(LibLocation::new(lib, include))).build()`
-   compiles static libzmq with `ZMQ_USE_LIBSODIUM` + `ZMQ_HAVE_CURVE`.
-3. A unit test asserts `zmq_version() == 4.3.5`, `zmq_has("curve")` and (Unix) `zmq_has("ipc")`.
-
-Per OS:
+The build script: `libsodium-sys-stable` builds/fetches static libsodium and exports
+`DEP_SODIUM_INCLUDE` / `DEP_SODIUM_LIB` (Unix); then
+`zeromq_src::Build::new().with_libsodium(Some(..)).build()` compiles static libzmq with
+`ZMQ_USE_LIBSODIUM` + `ZMQ_HAVE_CURVE`. A unit test asserts `zmq_version() == 4.3.5`,
+`zmq_has("curve")` and (Unix) `zmq_has("ipc")`. `zeromq-src` and `libsodium-sys-stable` are
+pinned exactly in `crates/ac2-zmq/Cargo.toml`.
 
 | OS | needs | notes |
 |---|---|---|
@@ -71,37 +65,13 @@ Per OS:
 | Windows MSVC | Visual Studio Build Tools (already needed by Rust) | Verified on CI (windows-latest, x64, debug). libsodium: `configure` fails, so `libsodium-sys-stable` falls back to the prebuilt zip **downloaded at build time** (minisign-verified), or `SODIUM_LIB_DIR` / `SODIUM_DIST_DIR` / vcpkg. That fallback unpacks to `<its OUT_DIR>/installed/libsodium/{include, x64/{Debug,Release}/v143/{static,dynamic,ltcg}}`, emits `rustc-link-search` + `static=libsodium` for the `static` dir of the current profile, but exports **no `DEP_SODIUM_LIB`** and `DEP_SODIUM_INCLUDE = <OUT_DIR>/installed/include`, which does not exist. Our build script rebuilds both paths from that anchor (`installed/libsodium/include`, `installed/libsodium/<arch>/<Debug or Release>/v143/static`) and asserts `sodium.h` / `libsodium.lib` are there. It also (a) appends `/DSODIUM_STATIC` to `CXXFLAGS` so libzmq does not expect `dllimport` symbols, (b) gives zeromq-src a header shim for the `builds/msvc/version.h` path it copies from a libsodium *source* tree, and (c) links `ws2_32`, `iphlpapi`, `advapi32` explicitly (zeromq-src names only `iphlpapi`; libsodium's RNG uses `RtlGenRandom` from advapi32). libzmq and libsodium are both static. Debug builds link libsodium's Debug archive against Rust's release CRT without errors. libzmq is C++: the binary needs `msvcp140.dll` (VC++ redistributable) unless built with `+crt-static`. IPC on Windows depends on `afunix.h` (Win10+ SDK); ac2 uses tcp://127.0.0.1 there anyway, and the ipc tests are Unix-only. Cold Windows CI build of the workspace is ~15 min (whole job). |
 | Windows GNU | mingw toolchain | libsodium prebuilt archive (downloaded); no wepoll. Low priority. |
 
-Measurements (Threadripper PRO 3945WX, 12 cores, Linux):
+Measured (Threadripper PRO 3945WX, Linux): cold libsodium build 15.3 s (configure-bound,
+sequential before libzmq), libzmq 7.9 s; static `libzmq.a` / `libsodium.a` 2.7 / 1.2 MB;
+**~1 MB** added to a stripped release binary.
 
-| what | value |
-|---|---|
-| cold build of libsodium (`configure` + `make`) | 15.3 s (build-script run) |
-| cold build of libzmq (`cc`, parallel) | 7.9 s |
-| total cold build of the spike crate incl. deps | ~25 s (sodium and zmq are sequential) |
-| static `libzmq.a` / `libsodium.a` (release) | 2.7 MB / 1.2 MB |
-| binary size impact (stripped release example vs Rust baseline) | 1.42 MB vs 0.37 MB → **~1 MB** for libzmq + libsodium + rmp-serde |
-| build-deps pulled in | `cc`, `zip`, `tar`, `libflate`, `ureq` (download path), `minisign-verify`, `vcpkg`, `pkg-config`, `dircpy` — 69 crates in the normal+build tree |
-
-Note: in a workspace member, `cc` builds libzmq at the member's opt-level (0 in dev). The
-production sys crate gets `opt-level = 2` from `[profile.dev.package."*"]` only if it is not
-a workspace member — or set it explicitly for that package.
-
-## What the tests prove
-
-`cargo test -p spike-zmq-curve` (18 tests, < 1 s, localhost only; every wait is a poll with a
-10 s deadline, never a fixed sleep):
-
-| test | claim |
-|---|---|
-| `ctrl::slow_handler_does_not_block_other_client` | ROUTER/DEALER with request ids: A's request parks on a test-controlled gate (deterministic "slow"); B gets 10 replies meanwhile; A's later request overtakes its own parked one (replies matched by id); opening the gate delivers A's slow reply. |
-| `ctrl::bad_version_and_garbage_get_typed_errors` | version mismatch and undecodable msgpack produce typed errors, not silence. |
-| `pubsub::xpub_sees_subscriptions_and_frames_roundtrip` | `[topic][msgpack header][f32 LE]` frames roundtrip bit-exact (6144-byte payload); publisher-side topic filtering; XPUB_VERBOSE reports every subscribe including duplicates; unsubscribe reported only when the last subscriber of a prefix leaves, **including by disconnect**. |
-| `curve::authorized_client_works_on_ctrl_and_data` | CURVE + ZAP on both sockets; the ZAP `User-Id` ("alice") arrives with every ctrl message. |
-| `curve::unauthorized_client_refused_on_ctrl_and_data` | Valid keypair not on the list: client and server monitors both report `HANDSHAKE_FAILED_AUTH` (status 400) on ctrl and data; the daemon never sees its request; XPUB never sees its subscription; after an authorized client received all 20 frames (barrier), the refused SUB and DEALER hold nothing. |
-| `curve::plaintext_and_wrong_server_key_refused` | NULL-mechanism client and a client pinned to the wrong server key are refused (`HANDSHAKE_FAILED_PROTOCOL`) on both sockets and receive nothing. |
-| `curve::without_zap_handler_any_curve_client_is_accepted` | Documents the fail-open gotcha below. |
-| `latest::*` | Latest-wins behaviour and CONFLATE (below). |
-| `transports::*` | Same ctrl + data roundtrip on tcp://127.0.0.1, ipc:// (Unix), inproc://; CURVE on tcp and ipc. |
+`cc` builds libzmq at the member crate's opt-level; `[profile.dev.package."*"]` does not
+apply to workspace members, so ac2-zmq's C code builds at opt-level 0 in dev unless set
+explicitly (it currently is not).
 
 ## CURVE / ZAP pattern
 
@@ -130,7 +100,7 @@ a workspace member — or set it explicitly for that package.
 
 ## Latest-wins findings (Q2)
 
-Run `cargo test -p spike-zmq-curve --test latest -- --nocapture` for the numbers.
+Numbers from `cargo test -p ac2-zmq --test it latest:: -- --nocapture`.
 
 - **XPUB drops the newest, not the oldest.** When a peer's pipe is at HWM, XPUB discards new
   messages for that peer (multipart-atomic). A stalled subscriber's queue therefore holds the
@@ -160,55 +130,38 @@ Run `cargo test -p spike-zmq-curve --test latest -- --nocapture` for the numbers
 
 ## Throughput / CPU (sanity)
 
-`cargo run --release -p spike-zmq-curve --example throughput` (publisher + subscriber +
-libzmq I/O threads in one process, tcp://127.0.0.1):
+Publisher + subscriber in one process over tcp://127.0.0.1: 8 topics × 60 fps × 6 KB
+(2.9 MB/s) costs 2.1 % of one core with NULL, 2.8 % with CURVE (latency p99 ~1 ms). Burst:
+~90 k frames/s NULL, ~34 k frames/s (≈ 209 MB/s) CURVE. The planned load is < 2 % of CURVE's
+headroom; encryption cost is not a factor.
 
-| run | result |
-|---|---|
-| paced 8 topics × 60 fps × 6 KB (2.9 MB/s), NULL, 5 s | 2400/2400 frames, **2.1 % of one core**, latency p50 167 µs / p99 1.05 ms |
-| same, CURVE | 2400/2400 frames, **2.8 % of one core**, latency p50 275 µs / p99 0.85 ms |
-| burst, NULL | ~90 k frames/s (≈ 556 MB/s) |
-| burst, CURVE | ~34 k frames/s (≈ 209 MB/s) |
+## Decisions carried into ac2d / ac2-client
 
-The planned load is < 2 % of CURVE's headroom; encryption cost is not a factor.
-
-## Recommendations for ac2-proto / ac2d / ac2-client
-
-1. **`ac2-zmq` crate** (or `zmq-sys`-style crate under `crates/`): the spike's `build.rs`,
-   `ffi.rs`, `zmq.rs`, promoted and reviewed. Keep the API minimal and typed (socket-type
-   enum, option setters per option rather than raw ints). Pin `zeromq-src` exactly. No other
-   crate links libzmq. Set its opt-level explicitly.
-2. **I/O thread owns the sockets.** libzmq sockets are single-threaded. In ac2d one I/O thread
-   owns ROUTER + XPUB and `zmq_poll`s them together with an inproc PULL. Tokio handler tasks
-   and the publisher coalescer feed it through a `Mutex`-guarded (or per-thread) inproc PUSH;
-   no tokio-integrated ZMQ_FD tricks (edge-triggered semantics are a known trap). The spike's
-   thread-per-request + PUSH-per-reply is spike-only.
-3. **Ctrl:** DEALER ↔ ROUTER without an empty delimiter frame; frame = one msgpack
-   `{v, id, cmd}`. Set `ROUTER_MANDATORY` so replies to vanished clients fail visibly. The
-   ZAP `User-Id` (or, without CURVE, the routing id) is the client identity for leases (Q6)
-   and for per-client request-id dedup.
-4. **Data:** XPUB with `XPUB_VERBOSE`; keep a per-topic interest set (subscribe adds, the
-   last-unsubscribe removes; prefix matching like ZMQ's). On a new subscribe, re-send the
-   latest slot for that topic so late joiners don't wait for the next frame. Per-peer
-   `SNDHWM` ≈ topics × 2–4. Subscribe to `evt` before requesting a snapshot (Q5): the XPUB
-   subscribe event is the daemon-side proof that the subscription is live, and on the client
-   side a keepalive on `ka` received after subscribing proves the same.
-5. **Client:** before each render, `drain_latest` (read until EAGAIN, keep max `seq` per
-   topic, count malformed); never render frame by frame from the socket. Validate sizes
-   before decoding (the spike checks header ≤ 1 KiB, `n` bound, payload == `n × 4`).
+1. **`ac2-zmq` is the only crate linking libzmq.** Minimal typed API (socket-type enum, one
+   setter per option).
+2. **An I/O thread owns the sockets** (libzmq sockets are single-threaded): in ac2d it owns
+   ROUTER + XPUB and polls them with an inproc PULL fed by handlers and the publisher. No
+   tokio-integrated `ZMQ_FD` (edge-triggered semantics are a known trap).
+3. **Ctrl:** DEALER ↔ ROUTER without an empty delimiter frame; one msgpack `{v, id, cmd}` per
+   message; `ROUTER_MANDATORY` so replies to vanished clients fail visibly. The ZAP `User-Id`
+   (without CURVE, the routing id) is the client identity for leases (Q6) and request-id
+   dedup.
+4. **Data:** XPUB with `XPUB_VERBOSE` and a per-topic interest set (`SubscriptionTracker`);
+   on a new subscribe re-send the latest slot so late joiners don't wait. Per-peer SNDHWM
+   ≈ topics × 2–4; small `SNDBUF` in network mode. Subscribe to `evt` before requesting a
+   snapshot (Q5): the XPUB subscribe event proves the subscription live daemon-side, a `ka`
+   keepalive received after subscribing proves it client-side.
+5. **Client:** `drain_latest` before each render (read until EAGAIN, keep max `seq` per
+   topic, count malformed); never render frame by frame. Validate sizes before decoding.
 6. **Security:** ZAP handler first, alive for the context lifetime, exit = fatal; CURVE on
-   both sockets in network mode; tests for authorized, unauthorized, plaintext, wrong-server-
-   key, and "no ZAP handler" ordering on both sockets.
+   both sockets in network mode.
 
 ## Risks / open items
 
 - **Windows build**: verified on CI. Open: libsodium download at build time (decide: allow, vendor the zip via
   `SODIUM_DIST_DIR`, or vcpkg in CI); `msvcp140.dll` runtime dependency (decide:
   `+crt-static` vs redistributable in the installer).
-- **macOS build**: verified on CI (macos-latest, arm64), no changes needed.
-- **pyzmq interop** of our CURVE build not tested yet (expected fine: same libzmq/libsodium);
-  add to the cross-language fixture job.
-- **libsodium build time** (15 s, configure-bound) is paid on every clean CI build; cache
-  `target/` or provide `SODIUM_LIB_DIR`.
+- **pyzmq interop** of the CURVE build is untested (expected fine: same libzmq/libsodium);
+  the Python fixtures exercise encoding only.
 - rust-zmq's `links = "zmq"` means no dependency may pull in `zmq`/`zmq-sys`; any crate that
   wants `links = "sodium"` must agree on `libsodium-sys-stable`.

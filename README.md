@@ -33,7 +33,7 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
   is never counted as silence), a history strip that survives an app restart, a new log at show
   start; informational presets that replace the windows with a rule's (DIN 15905-5,
   Switzerland, WHO, France, Flanders, Brussels, the Dutch covenant, Finland).
-- **Band Leq for the neighbours**: 1/3-octave band Leq in up to eight windows of their own
+- **Band Leq for the neighbours**: 1/3-octave band Leq in up to 64 windows of their own
   length and Z/A/C weighting against per-band limits (preset: Finland STM 545/2015), on the
   bands you keep, moved from a named receiving place to the FOH mic by a measured band
   transfer, with the predicted LAeq there.
@@ -65,7 +65,7 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
 | ![Meter + Leq windows in the stage view](crates/ac2-ui/tests/snapshots/spl_meter_leq_stage.png) | ![Leq windows as columns, full screen](crates/ac2-ui/tests/snapshots/leq_columns_fullscreen.png) |
 | ![Sweep distortion in percent](crates/ac2-ui/tests/snapshots/sweep_distortion_percent.png) | ![Room parameters from a sweep](crates/ac2-ui/tests/snapshots/sweep_room.png) |
 | ![Spectrum with its spectrograph](crates/ac2-ui/tests/snapshots/spectrograph.png) | ![Band Leq bars against the band limits](crates/ac2-ui/tests/snapshots/band_leq_over.png) |
-| ![Settings: named inputs with meters and roles](crates/ac2-ui/tests/snapshots/settings_inputs_outputs.png) | ![Settings: mic library, active curves, sensitivity calibrations](crates/ac2-ui/tests/snapshots/settings_calibration.png) |
+| ![Settings: named inputs with meters and roles](crates/ac2-ui/tests/snapshots/settings_audio.png) | ![Settings: mic library, active curves, sensitivity calibrations](crates/ac2-ui/tests/snapshots/settings_calibration.png) |
 
 ## Get it
 
@@ -100,11 +100,8 @@ function in about two minutes, with or without hardware (a simulated rig is buil
 Pre-1.0 (version 0.0.0; no compatibility promised between builds: protocol, session and
 calibration-store versions are checked and a mismatch is refused or set aside, never
 guessed). Phases 0–6 of [PLAN.md](PLAN.md#9-phases) — audio, DSP, daemon and protocol, UI,
-calibration / SPL / sessions, packaging and documentation — meet their CI criteria. Of the
-post-1.0 phase 7, the sweep with distortion, impulse response and room parameters, the
-spectrograph, math channels and spatial averages, rolling Leq windows with the per-second
-log, band Leq, raw recording and replay, and the Settings view are done; ASIO and
-multi-device support are open.
+calibration / SPL / sessions, packaging and documentation — meet their CI criteria; most
+of the post-1.0 phase 7 is done, ASIO and multi-device support are open.
 
 The hardware acceptance runs are still open ([status table](PLAN.md#90-status)):
 
@@ -140,7 +137,7 @@ own directories:
 
 | what | Linux | macOS | Windows |
 |---|---|---|---|
-| config: calibration store (`calibrations.json`: sensitivity calibrations, the mic library, each input's mic and active curve), UI preferences (`ui.toml`), key bindings (`keys.toml`), network keys (`server.key`, `authorized_clients`, `keys/`) | `~/.config/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\config` |
+| config: calibration store (`calibrations.json`: sensitivity calibrations, the mic library, each input's mic and active curve), rig settings (`rig.json`: system max level, output labels), UI preferences (`ui.toml`), key bindings (`keys.toml`), network keys (`server.key`, `authorized_clients`, `keys/`) | `~/.config/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\config` |
 | data: saved sessions (`sessions/<name>/`), the daemon's autosave (`autosave/`, the previous manifest in `autosave/session.prev.json`), raw recordings (`recordings/`) | `~/.local/share/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\data` |
 
 A session directory holds `session.json` (measurements, trace metadata, slots), one CSV per

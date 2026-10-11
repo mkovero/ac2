@@ -272,10 +272,9 @@ then the unsure and close candidates by descending level.
 
 Behaviour (decision 1c):
 
-- The rule pick is pre-selected. One key accepts it and another cycles through the list. The
-  IR panel marks all listed candidates.
-- CLI: `delay: AMBIGUOUS (borderline_level) 1) +6.250 ms −12.3 dB  2) +10.417 ms 0.0 dB …`.
-  The exit status distinguishes accepted, ambiguous and no estimate.
+- The rule pick is candidate 1. The app lists the candidates and the operator picks one
+  with 1–3; the IR panel marks all of them. CLI: `AMBIGUOUS · <reasons>` and the ranked
+  list; `ac2 delay insert --pick 1…3` (or `first` / `strongest`).
 - Tracking never acts on `Ambiguous` (§10). An ambiguous `delay.find` result also pauses
   tracking outright (the measurement's `delay.awaiting_pick`): no window is observed until the
   operator resolves it with `delay.insert` (a candidate) or `delay.set` (a typed value), or runs
@@ -283,27 +282,25 @@ Behaviour (decision 1c):
   `Accepted` windows of one of the candidates could move the delay to a choice the operator
   was just asked to make. A resumed tracker starts over: the audio skipped while paused cannot
   be spliced onto what follows.
-- UI: X / Shift+X run the finder in the band and over the observation chosen in the palette
-  (`Delay finder: auto / full / mid / sub band`, `custom band (Hz)…`, `observation length
-  (s)…`); auto band and automatic observation by default.
+- UI (Transfer pane): X finds and inserts the first arrival, Shift+X the strongest, in the
+  band and observation chosen in the palette (`Delay finder: auto / full / mid / sub band`,
+  `custom band (Hz)…`, `observation length (s)…`); auto band and the band's default
+  observation unless set.
 
 **`MergedLobe` with a single candidate.** `MergedLobe` is the only reason that can stand
 alone with a one-row list: `BorderlineLevel` and `CloseArrivals` each add a second candidate,
 and `OutsideRefinement` alone lists the coarse pick. A merged lobe is a peak whose shape does
 not fit one arrival in the band: two arrivals closer than the pulse width, or a dispersive
-path. The first rig's box is a two-way (woofer and tweeter). The test models crossovers at
-430 Hz and 2.6 kHz (LR4, an assumption, not the box's datasheet); the 2.6 kHz one, inside the
-full band, alone does exactly that. Its LR4 sum is a flat-level 2nd-order allpass
-with ≈ 0.17 ms group delay at f0, so the lobe is smeared (misfit ≈ 0.17 against μ 0.10), its
-phase is far from 0°, and its centre sits ≈ 1.2 samples after the onset. That is outside the
-full-band tolerance, so accepting it would break §12. The floor bounce (+3.5 ms, −23 dB) is many
-pulse widths away and plays no part. Decision: the outcome stays `Ambiguous{MergedLobe}`
-and lists only the peak. The finder never invents the second arrival (§2). The CLI and the
-app say why there is a single row ("One peak only: two arrivals closer than this band resolves
-(or a crossover's group delay) are merged into it …") and offer only key/`--pick` 1. They
-point the operator to another band (one without the crossover) for the first arrival.
-`ac2-core` test `crossover_in_band_is_a_merged_lobe_listed_alone` reproduces the rig case,
-and `ac2-scene` `finding` tests pin the text.
+path. A two-way box with an LR4 crossover inside the full band (2.6 kHz) does exactly that:
+the LR4 sum is a flat-level 2nd-order allpass with ≈ 0.17 ms group delay at f0, so the lobe is
+smeared (misfit ≈ 0.17 against μ 0.10), its phase is far from 0° and its centre sits ≈ 1.2
+samples after the onset — outside the full-band tolerance, so accepting it would break §12.
+Decision: the outcome stays `Ambiguous{MergedLobe}` and lists only the peak; the finder never
+invents the second arrival (§2). CLI and app say why there is one row ("One peak only: two
+arrivals closer than this band resolves (or a crossover's group delay) are merged into it …"),
+offer only pick 1, and point to a band without the crossover for the first arrival. Tests:
+`ac2-core` `crossover_in_band_is_a_merged_lobe_listed_alone` (the rig case, crossovers modelled
+at 430 Hz and 2.6 kHz), `ac2-scene` `finding` (the text).
 
 ---
 
@@ -326,6 +323,9 @@ Shared: ε = 0.01, T = −12 dB, list depth −20 dB, p_fa = 10⁻³, PSR ≥ 15
 m_b = 2 dB, close spacing 2 w_p, sidelobe margin 6 dB, deblend reach 6 w_p, floor exclusion
 3 w_p, uncertainty coefficient 0.35 with k = 2.5, band SNR ≥ −10 dB, periodicity −10 dB,
 T_tail = 1 s, search ±1 s (1d).
+
+A custom band takes its segment lengths, tolerance and μ_band from the preset its lower edge
+falls in: ≥ 1 kHz full range, ≥ 150 Hz mid, lower sub (`Band::class`).
 
 Implementations may decimate before the sub and mid bands (e.g. by 16 and by 4) if the results
 stay within the acceptance table. N and windows then scale with the rate. The reported delay
@@ -352,8 +352,9 @@ reflection later than P − (lag of the direct sound) lands at an earlier appare
 indistinguishable from an arrival. The rule is therefore a refusal, not a heuristic:
 `P ≤ (Dmax − Dmin) + T_tail·fs` → `NoEstimate{PeriodicExcitation}`.
 
-- The daemon passes the generator's period whenever the stimulus is its own periodic pink.
-- Otherwise P is detected from the ref block. Take the whitened autocorrelation in a 40 Hz –
+- `FinderConfig::excitation_period` takes the generator's period when the stimulus is its own
+  periodic pink. The daemon currently leaves it `None`, so P is always detected.
+- P is detected from the ref block. Take the whitened autocorrelation in a 40 Hz –
   16 kHz band, `A_k = B_k|R_k|²/(S_k + ε·mean S)` with S being |R|² smoothed over ±(Nfft/4096)
   bins, and the IFFT envelope normalised to 1 at lag 0 and divided by its overlap fraction
   (Lr − τ)/Lr. A peak ≥ −10 dB at τ ∈ [256, Lr − max(2048, Lr/8)] is a period. A repeat
@@ -365,16 +366,21 @@ indistinguishable from an arrival. The rule is therefore a refusal, not a heuris
 
 ### 10.2 Tracking
 
-State: `held: Option<i64>` and `pending: Option<(delay, meas_window_end)>`.
+State: `held: Option<i64>`, the last inserted (fractional) delay, and
+`pending: Option<(fractional delay, meas_window_end)>`.
 
 1. A `NoEstimate` or `Ambiguous` result clears `pending`. Nothing moves.
 2. If an `Accepted` result's meas window starts before `pending.window_end`, it is ignored.
    Overlapping windows are the same audio read twice.
 3. If an `Accepted` result agrees with `pending` within the band's agreement tolerance (§9),
-   `held` is set to the new integer delay of the first arrival (event: moved), unless it
-   already equals it, and `pending` clears.
+   `held` is set to the first arrival's integer delay and `pending` clears. The delay
+   inserted is the pair's fractional mean when the two agree within 0.1 sample
+   (`FINE_AGREEMENT_SAMPLES`; it moves again only when the next mean is > 0.1 sample away),
+   otherwise the integer delay when it changed. A fraction that wanders more than that
+   between windows would only turn the phase by noise.
 4. Any other `Accepted` result becomes the new `pending`.
 5. A change of band, threshold, search range or measurement routing clears `pending`.
+   An operator insert or typed delay sets `held` (`Tracker::set_held`).
 
 **Local search while holding.** A tracking window runs every observation (0.25 s full range),
 so a full ±1 s search per window is most of the analyzer's CPU on small machines. While the
@@ -398,296 +404,124 @@ agreement is never used as evidence of correctness.
 
 ## 11. Evidence
 
-All results come from `tools/experiments/q1`. Seeds are fixed (`mc.py` seeds per class and
-trial index), so a re-run reproduces them. Columns: **acc** = accepted; **ok** = accepted and
-|error| ≤ band tolerance from an acceptable first arrival; **wrong** = accepted and outside
-the tolerance (a wrong arrival or too imprecise); **w/acc** = wrong as a share of accepted;
-**amb** = ambiguous; **ambX** = ambiguous with no listed candidate within the tolerance;
-**ref** = refused; **e50/e95/emax** = |error| (samples) of the correct ones; **span** = share
-of accepted estimates inside [first path − tol, last path + tol].
+All results come from `tools/experiments/q1` with fixed seeds; the full tables are in
+`tools/experiments/q1/results/*.txt` (`python3 mc.py --n 200` for `baseline.txt`;
+`sh sweep.sh DIR` then `python3 report.py DIR` for the sweeps; `tracking.py --n 60`).
+Scoring: **ok** = accepted and |error| ≤ band tolerance from an acceptable first arrival (the
+true first significant arrival, or a path within ±2 dB of the threshold); **wrong** =
+accepted otherwise; ambiguity and refusal are not errors.
 
-"Acceptable first arrival": the true first significant arrival. If a path lies within ±2 dB
-of the threshold, that path is acceptable too (`borderline`).
-
-Scenario classes (`mc.py`): `single` (one path); `two_path` (direct + delayed copy at 0 dB,
-separation log-uniform 0.2–20 ms, direct level uniform −20…+10 dB re the copy, copy polarity
-±1, fractional delays across the signed search range); `room` (direct −8…+3 dB plus 3–6
-reflections 0.5–25 ms at −15…0 dB, random polarity); `exc_*` (two-path, direct −10…0 dB,
-separation 0.5–20 ms, under the named excitation); `snr_*` (fixed band SNR);
-`periodic_wrap`; `large_delay` (±0.9 s inside a ±1 s search); `no_signal`. The band SNR is
-20–40 dB unless the class fixes it.
+Scenario classes (`mc.py`): `single`; `two_path` (direct + copy, separation log-uniform
+0.2–20 ms, direct −20…+10 dB re the copy, copy polarity ±1); `room` (direct −8…+3 dB plus 3–6
+reflections 0.5–25 ms at −15…0 dB); `exc_*` (two-path under the named excitation); `snr_*`
+(fixed band SNR); `periodic_wrap`; `large_delay` (±0.9 s in a ±1 s search); `no_signal`.
+Band SNR is 20–40 dB unless the class fixes it.
 
 ### 11.1 Results at the defaults
 
-`python3 mc.py --n 200` (4.9 k trials, about 2 min on 12 cores). The full output is
-`tools/experiments/q1/results/baseline.txt`.
+4.9 k trials (`results/baseline.txt`).
 
-| class | n | acc % | ok % | wrong % | amb % | ambX % | ref % | e50 | e95 | emax | span % |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| full/exc_bandlimited | 200 | 99.5 | 99.5 | 0.0 | 0.5 | 0.0 | 0.0 | 0.01 | 0.04 | 0.06 | 100.0 |
-| full/exc_music | 200 | 98.0 | 98.0 | 0.0 | 2.0 | 0.0 | 0.0 | 0.01 | 0.04 | 0.08 | 100.0 |
-| full/exc_music_hf | 200 | 93.5 | 93.5 | 0.0 | 4.0 | 0.0 | 2.5 | 0.01 | 0.07 | 0.12 | 100.0 |
-| full/exc_narrow | 60 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 100.0 | nan | nan | nan | — |
-| full/exc_pink | 200 | 99.5 | 99.5 | 0.0 | 0.5 | 0.0 | 0.0 | 0.00 | 0.03 | 0.09 | 100.0 |
-| full/exc_white | 200 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.00 | 0.01 | 0.10 | 100.0 |
-| full/large_delay | 60 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.00 | 0.01 | 0.02 | 100.0 |
-| full/no_signal | 60 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 100.0 | nan | nan | nan | — |
-| full/periodic_wrap | 100 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 100.0 | nan | nan | nan | — |
-| full/room | 200 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.00 | 0.02 | 0.04 | 100.0 |
-| full/single | 200 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.00 | 0.00 | 0.01 | 100.0 |
-| full/snr_+0 | 100 | 98.0 | 98.0 | 0.0 | 2.0 | 0.0 | 0.0 | 0.06 | 0.20 | 0.30 | 100.0 |
-| full/snr_+10 | 100 | 98.0 | 98.0 | 0.0 | 2.0 | 0.0 | 0.0 | 0.02 | 0.05 | 0.08 | 100.0 |
-| full/snr_+20 | 100 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.01 | 0.02 | 0.10 | 100.0 |
-| full/snr_+30 | 100 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.00 | 0.03 | 0.05 | 100.0 |
-| full/snr_+40 | 100 | 98.0 | 98.0 | 0.0 | 2.0 | 0.0 | 0.0 | 0.00 | 0.01 | 0.05 | 100.0 |
-| full/snr_-10 | 100 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 100.0 | nan | nan | nan | — |
-| full/two_path | 600 | 85.7 | 85.7 | 0.0 | 14.3 | 0.0 | 0.0 | 0.00 | 0.01 | 0.17 | 100.0 |
-| full/two_path_far | 100 | 99.0 | 99.0 | 0.0 | 1.0 | 0.0 | 0.0 | 0.02 | 0.07 | 0.10 | 100.0 |
-| full/two_path_resolved | 200 | 81.5 | 81.5 | 0.0 | 18.5 | 0.0 | 0.0 | 0.00 | 0.03 | 0.11 | 100.0 |
-| mid/room | 200 | 94.0 | 94.0 | 0.0 | 6.0 | 0.0 | 0.0 | 0.03 | 0.19 | 0.29 | 100.0 |
-| mid/single | 200 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.01 | 0.03 | 0.07 | 100.0 |
-| mid/two_path | 600 | 63.7 | 63.7 | 0.0 | 36.3 | 9.7 | 0.0 | 0.01 | 0.30 | 1.93 | 100.0 |
-| mid/two_path_resolved | 200 | 85.5 | 85.5 | 0.0 | 14.5 | 1.0 | 0.0 | 0.02 | 0.25 | 1.65 | 100.0 |
-| sub/exc_music | 60 | 66.7 | 65.0 | 1.7 | 0.0 | 0.0 | 33.3 | 0.81 | 2.15 | 3.64 | 97.5 |
-| sub/exc_pink | 60 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.19 | 0.77 | 0.94 | 100.0 |
-| sub/exc_subonly | 60 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.18 | 0.81 | 1.52 | 100.0 |
-| sub/no_signal | 40 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 100.0 | nan | nan | nan | — |
-| sub/room | 60 | 0.0 | 0.0 | 0.0 | 100.0 | 96.7 | 0.0 | nan | nan | nan | — |
-| sub/single | 60 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.20 | 1.15 | 1.71 | 100.0 |
-| sub/snr_+0 | 60 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 100.0 | nan | nan | nan | — |
-| sub/snr_+10 | 60 | 5.0 | 3.3 | 1.7 | 0.0 | 0.0 | 95.0 | 0.87 | 1.12 | 1.14 | 66.7 |
-| sub/snr_+20 | 60 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.78 | 1.96 | 2.53 | 100.0 |
-| sub/snr_+30 | 60 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.28 | 0.69 | 0.79 | 100.0 |
-| sub/snr_+40 | 60 | 100.0 | 100.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.06 | 0.18 | 0.27 | 100.0 |
-| sub/snr_-10 | 60 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 100.0 | nan | nan | nan | — |
-| sub/two_path | 179 | 49.2 | 10.1 | 39.1 | 49.7 | 38.5 | 1.1 | 2.58 | 4.27 | 4.75 | 62.5 |
-| sub/two_path_resolved | 60 | 76.7 | 75.0 | 1.7 | 13.3 | 1.7 | 10.0 | 0.50 | 3.12 | 3.61 | 97.8 |
-
-How to read it:
-
-- **Full range** meets every provisional target in every class. Across about 4 000 trials
-  there were 0 wrong acceptances, the largest accepted error was 0.30 samples (at 0 dB SNR),
-  and nothing was refused at ≥ 20 dB SNR except 2.5 % of the dull-programme class
-  (`exc_music_hf`, excited fraction just under 0.5). Ambiguity comes from the borderline rule
-  (direct sound within ±2 dB of the threshold; by design) and close arrivals.
-- **Mid** meets the targets with the revised tolerance of 0.05 ms. In the 0.2–20 ms sweep,
-  separations below 2 pulse widths (< 0.8 ms) are almost always `Ambiguous` and never wrong.
-- **Sub, isolated arrivals** (`single`, `exc_pink`, `exc_subonly`, `snr_+20…+40`) meet
-  0.1 ms with 0 % refusal at ≥ 20 dB and a 4 s observation. At 10 dB the precision gate
-  refuses 95 %, and the one acceptance that remains is wrong by 5 samples.
-- **Sub, the 0.2–20 ms sweep** (`sub/two_path`) is the case the provisional targets cannot
-  meet: every separation is below one sub pulse width (11 ms), see §11.5. **Sub, resolved**
-  (`two_path_resolved`, 2.5–8 pulse widths = 28–89 ms) gives 1.7 % wrong (1 trial of 60: an
-  inverted reflection 2.6 widths away left a 0.6 ms deblending residual) and 10 % refused.
-- **Programme material in the sub band** refuses 33 % at 4 s and 17 % at 8 s. It never
-  produced a wrong acceptance at 8 s.
-- `periodic_wrap`, `exc_narrow`, `no_signal` and `snr_−10` are refused in 100 % of trials.
-  `large_delay` (±0.9 s inside a ±1 s search) is 100 % correct.
+- **Full range** meets every provisional target in every class: 0 wrong in ~4 000 trials,
+  largest accepted error 0.30 samples (0 dB SNR), nothing refused at ≥ 20 dB except 2.5 % of
+  dull programme (`exc_music_hf`, excited fraction just under 0.5). Ambiguity (two_path 14 %)
+  is the borderline rule and close arrivals. `two_path_far` (direct 25–45 ms before a louder
+  reflection, beyond the first refinement window) is 99 % correct.
+- **Mid** meets the targets with the 0.05 ms tolerance. Separations below 2 pulse widths
+  (< 0.8 ms) are almost always `Ambiguous`, never wrong (two_path: 64 % ok, 36 % ambiguous).
+- **Sub, isolated arrivals** (`single`, `exc_pink`, `exc_subonly`, `snr_+20…+40`) meet 0.1 ms
+  with 0 % refusal at ≥ 20 dB and 4 s observation (e95 ≤ 1.96 samples). At 10 dB the
+  precision gate refuses 95 %.
+- **Sub, 0.2–20 ms sweep** (`sub/two_path`): 39 % wrong — every separation is below one sub
+  pulse width (11 ms), see §11.5. **Sub, resolved** (2.5–8 pulse widths): 1.7 % wrong (an
+  inverted reflection 2.6 widths away left a 0.6 ms deblending residual), 10 % refused.
+- **Programme in the sub band**: 33 % refused at 4 s, 17 % at 8 s, no wrong acceptance at 8 s.
+- `periodic_wrap`, `exc_narrow`, `no_signal`, `snr_−10`: 100 % refused. `large_delay`: 100 %
+  correct.
 
 ### 11.2 Timing uncertainty
 
-u = 0.35·w_p·σ_n/|A| against the actual error of accepted single-arrival trials
-(baseline):
-
-| band | n | \|err\|/u p50 | p90 | p99 | max | median u (samples) |
-|---|---|---|---|---|---|---|
-| full | 694 | 0.97 | 2.67 | 13.5 | 30.3 | 0.004 (before the 0.1 floor) |
-| mid | 200 | 0.57 | 1.71 | 2.52 | 3.96 | 0.011 |
-| sub | 400 | 0.50 | 1.50 | 2.43 | 6.65 | 0.43 |
-
-In mid and sub, u behaves as a slightly conservative 1 σ. The gate k = 2.5 was chosen from the
-sub classes (§11.6). k = 2 let 3 % of 10 dB sub trials through with |err| > 0.1 ms, while
-k = 2.5 cost nothing at ≥ 20 dB on pink. In the full band the error is dominated by a
-fractional-interpolation bias of ≤ 0.3 samples that does not scale with noise. Hence the
-0.1-sample floor on u. It cannot matter for a 1-sample tolerance.
+u = 0.35·w_p·σ_n/|A| against the actual error of accepted single-arrival trials: |err|/u p50
+/ p90 / p99 is 0.57 / 1.71 / 2.52 (mid) and 0.50 / 1.50 / 2.43 (sub), so u is a slightly
+conservative 1 σ. k = 2.5 comes from the sub classes: k = 2 let 3 % of 10 dB sub trials through
+with |err| > 0.1 ms; 2.5 cost nothing at ≥ 20 dB on pink. In the full band the error is a
+fractional-interpolation bias of ≤ 0.3 samples that does not scale with noise (median raw u
+0.004 samples), hence the 0.1-sample floor; it cannot matter for a 1-sample tolerance.
 
 ### 11.3 GCC-PHAT vs regularised H1
 
-| run | full/two_path | full/room | full/exc_music | full/exc_music_hf | full/exc_bandlimited | mid/two_path | sub/single | sub/exc_music |
-|---|---|---|---|---|---|---|---|---|
-| baseline | 85.7/0.0/14.3/0.0 | 100.0/0.0/0.0/0.0 | 98.0/0.0/2.0/0.0 | 93.5/0.0/4.0/2.5 | 99.5/0.0/0.5/0.0 | 63.7/0.0/36.3/0.0 | 100.0/0.0/0.0/0.0 | 65.0/1.7/0.0/33.3 |
-| phat | 45.3/20.3/34.3/0.0 | 74.0/0.0/26.0/0.0 | 37.0/10.0/53.0/0.0 | 36.0/17.0/43.0/4.0 | 32.0/13.0/55.0/0.0 | 38.3/13.3/48.3/0.0 | 96.7/0.0/3.3/0.0 | 66.7/3.3/0.0/30.0 |
-
-cells: ok / wrong / ambiguous / refused, % of trials
-
-GCC-PHAT flattens |H| to 1, so the relative level of two arrivals no longer survives. The
+GCC-PHAT flattens |H| to 1, so the relative level of two arrivals does not survive: the
 two-path sum `1 + g·e^{−jωΔ}` becomes a phase-only function whose IR has spurious peaks and
-distorted levels. In every multipath class it accepted the wrong arrival 10–20 % of the time,
-compared with 0 % for regularised H1. It is no better on coloured or band-limited excitation,
-which is the case PLAN suggested it as a fallback for. Regularised H1 with ε = 0.01 already
-handles those: excited bandwidth is checked explicitly, and weak bins shrink rather than
-blow up. Decision Q1-d follows from this.
+distorted levels. In every multipath class PHAT accepted the wrong arrival 10–20 % of the time
+(full/two_path 20 %, full/exc_bandlimited 13 %, mid/two_path 13 %) against 0 % for
+regularised H1, and it is no better on coloured or band-limited excitation, the case PLAN
+proposed it for. Regularised H1 with ε = 0.01 already handles those: excited bandwidth is
+checked explicitly and weak bins shrink rather than blow up. Hence Q1-d.
 
 ### 11.4 Two passes
 
-Envelope floor (median, re peak), single arrival at 40 dB SNR, no other paths:
+Envelope floor (median, re peak), single arrival at 40 dB SNR:
 
-| band | inside the tile holding the arrival | other tiles |
+| band | tile holding the arrival | other tiles |
 |---|---|---|
 | full | −62 dB | −37 dB |
 | mid | −53 dB | −33 dB |
 | sub | −32 dB (pass 1) / −46 dB (pass 2) | −27 dB |
 
-A tile whose shift does not match the arrival estimates H from unaligned segments. Its floor
-is set by the time–bandwidth product of the observation, not by noise, and in the sub band it
-leaves an acquisition-only PSR of about 16 dB, which is too close to the 15 dB requirement. The
-refinement tile is what makes the sub band work:
-
-| run | full/two_path | full/room | mid/two_path | sub/single | sub/snr_+10 | sub/snr_+20 | sub/snr_+30 |
-|---|---|---|---|---|---|---|---|
-| norefine | 83.0/0.0/17.0/0.0 | 100.0/0.0/0.0/0.0 | 66.3/0.0/33.7/0.0 | 0.0/0.0/0.0/100.0 | 0.0/0.0/0.0/100.0 | 0.0/0.0/0.0/100.0 | 3.3/0.0/0.0/96.7 |
-| baseline | 85.7/0.0/14.3/0.0 | 100.0/0.0/0.0/0.0 | 63.7/0.0/36.3/0.0 | 100.0/0.0/0.0/0.0 | 3.3/1.7/0.0/95.0 | 100.0/0.0/0.0/0.0 | 100.0/0.0/0.0/0.0 |
-
-cells: ok / wrong / ambiguous / refused, % of trials
-
-(`norefine` uses the acquisition envelope everywhere and the same rules otherwise.) In the
-full and mid bands, acquisition alone already gives 0 % wrong. There the refinement buys PSR
-margin (about 26 dB → 45 dB in the full band) and cleaner lobes for the deblend fit.
+A tile whose shift does not match the arrival estimates H from unaligned segments; its floor
+is set by the time–bandwidth product, not noise. In the sub band acquisition alone leaves a
+PSR of about 16 dB, too close to the 15 dB gate: without the refinement tile (`norefine`) sub
+single arrivals are 100 % refused, with it 100 % correct. In full and mid, acquisition alone is
+already 0 % wrong; refinement buys PSR margin (≈ 26 → 45 dB full band) and cleaner lobes for
+deblending.
 
 ### 11.5 Resolution: when arrivals merge
 
-| band | sep / w_p | direct level | n | ok % | wrong % | amb % | ref % | max \|err\| accepted (ms) |
-|---|---|---|---|---|---|---|---|---|
-| full | 2–4 | < −14 dB | 12 | 100 | 0 | 0 | 0 | 0.00 |
-| full | 2–4 | −14…−10 dB | 5 | 0 | 0 | 100 | 0 | nan |
-| full | 2–4 | −10…0 dB | 16 | 100 | 0 | 0 | 0 | 0.00 |
-| full | 2–4 | > 0 dB | 22 | 100 | 0 | 0 | 0 | 0.00 |
-| full | ≥ 4 | < −14 dB | 111 | 100 | 0 | 0 | 0 | 0.00 |
-| full | ≥ 4 | −14…−10 dB | 81 | 0 | 0 | 100 | 0 | nan |
-| full | ≥ 4 | −10…0 dB | 179 | 100 | 0 | 0 | 0 | 0.00 |
-| full | ≥ 4 | > 0 dB | 174 | 100 | 0 | 0 | 0 | 0.00 |
-| mid | 0.25–1 | < −14 dB | 18 | 44 | 0 | 56 | 0 | 0.02 |
-| mid | 0.25–1 | −14…−10 dB | 5 | 0 | 0 | 100 | 0 | nan |
-| mid | 0.25–1 | −10…0 dB | 38 | 0 | 0 | 100 | 0 | nan |
-| mid | 0.25–1 | > 0 dB | 30 | 0 | 0 | 100 | 0 | nan |
-| mid | 1–2 | < −14 dB | 20 | 55 | 0 | 45 | 0 | 0.00 |
-| mid | 1–2 | −14…−10 dB | 9 | 0 | 0 | 100 | 0 | nan |
-| mid | 1–2 | −10…0 dB | 27 | 0 | 0 | 100 | 0 | nan |
-| mid | 1–2 | > 0 dB | 33 | 0 | 0 | 100 | 0 | nan |
-| mid | 2–4 | < −14 dB | 20 | 95 | 0 | 5 | 0 | 0.00 |
-| mid | 2–4 | −14…−10 dB | 11 | 9 | 0 | 91 | 0 | 0.00 |
-| mid | 2–4 | −10…0 dB | 31 | 100 | 0 | 0 | 0 | 0.04 |
-| mid | 2–4 | > 0 dB | 40 | 100 | 0 | 0 | 0 | 0.00 |
-| mid | ≥ 4 | < −14 dB | 64 | 100 | 0 | 0 | 0 | 0.00 |
-| mid | ≥ 4 | −14…−10 dB | 46 | 2 | 0 | 98 | 0 | 0.00 |
-| mid | ≥ 4 | −10…0 dB | 103 | 99 | 0 | 1 | 0 | 0.01 |
-| mid | ≥ 4 | > 0 dB | 105 | 100 | 0 | 0 | 0 | 0.00 |
-| sub | 0–0.25 | < −14 dB | 27 | 33 | 67 | 0 | 0 | 0.23 |
-| sub | 0–0.25 | −14…−10 dB | 15 | 27 | 73 | 0 | 0 | 1.87 |
-| sub | 0–0.25 | −10…0 dB | 26 | 0 | 73 | 27 | 0 | 1.74 |
-| sub | 0–0.25 | > 0 dB | 34 | 9 | 62 | 29 | 0 | 0.60 |
-| sub | 0.25–1 | < −14 dB | 11 | 18 | 9 | 73 | 0 | 0.20 |
-| sub | 0.25–1 | −14…−10 dB | 3 | 0 | 0 | 100 | 0 | nan |
-| sub | 0.25–1 | −10…0 dB | 22 | 0 | 0 | 100 | 0 | nan |
-| sub | 0.25–1 | > 0 dB | 20 | 0 | 0 | 100 | 0 | nan |
-| sub | 1–2 | < −14 dB | 2 | 0 | 0 | 100 | 0 | nan |
-| sub | 1–2 | −14…−10 dB | 2 | 0 | 0 | 50 | 50 | nan |
-| sub | 1–2 | −10…0 dB | 9 | 0 | 0 | 89 | 11 | nan |
-| sub | 1–2 | > 0 dB | 8 | 0 | 0 | 100 | 0 | nan |
-
-- A pulse is w_p wide (−6 dB). Two arrivals closer than about w_p are one lobe, and below
-  about 0.25 w_p the lobe is indistinguishable from a single arrival (lobe misfit < 0.01, the
-  same as a true single arrival with noise). In the sub band, 0.25 w_p is 2.8 ms, so a floor
-  bounce at 1–3 ms is *physically* one arrival at 20–120 Hz. There the finder reports the
-  merged lobe's delay. Accepted errors re the first arrival reached **1.9 ms** (max) for
-  separations ≤ 0.25 w_p. Between 0.25 and 2 w_p the merged-lobe and close-arrival rules make
-  the result `Ambiguous` (94 %), and there was 1 wrong acceptance in 77 trials.
-- Deblending matters once arrivals are resolved but their skirts overlap. In the sub fixture
-  (direct −4 dB, reflection 35 ms = 3.1 w_p later), the plain envelope fit was biased by
-  +8.3 samples (and by −13 samples with 50 ms spacing, +4 with 70 ms). After deblending the
-  error was 0.25 samples.
-- In the full band the 0.2–20 ms sweep never goes below 2.5 w_p (0.2 ms = 9.6 samples), so
-  every case is resolved. The two-path class is 0 % wrong, and the 14 % that are ambiguous
-  are the borderline-level cases.
+- Two arrivals closer than about w_p are one lobe; below about 0.25 w_p the lobe is
+  indistinguishable from a single arrival (misfit < 0.01, as for a true single arrival with
+  noise). In the sub band 0.25 w_p is 2.8 ms, so a floor bounce at 1–3 ms is *physically* one
+  arrival at 20–120 Hz and the finder reports the merged lobe's delay: accepted errors re the
+  first arrival reached **1.9 ms** for separations ≤ 0.25 w_p. Between 0.25 and 2 w_p the
+  merged-lobe and close-arrival rules make it `Ambiguous` (94 %), 1 wrong in 77 trials.
+- Full band: at ≥ 2 w_p every level class is 100 % correct except direct −14…−10 dB (the
+  borderline band), which is 100 % ambiguous. Mid: < 2 w_p is mostly ambiguous, ≥ 2 w_p
+  correct except the borderline band.
+- Deblending matters once arrivals are resolved but their skirts overlap. Sub fixture (direct
+  −4 dB, reflection 35 ms = 3.1 w_p later): the plain envelope fit was biased by +8.3 samples
+  (−13 at 50 ms spacing, +4 at 70 ms); after deblending, 0.25 samples.
+- The full-band 0.2–20 ms sweep never goes below 2.5 w_p (0.2 ms = 9.6 samples), so every case
+  is resolved.
 
 ### 11.6 Parameter sweeps
 
-Outputs: `tools/experiments/q1/results/*.txt` (`sh sweep.sh DIR`, then `python3 report.py DIR`).
-
-**Regularisation eps.** ε = 0.01 is the knee. Larger ε shrinks the weakly excited part of a coloured spectrum below W = 0.5, so programme material fails the excitation check (0.1: 58 % refused on dull programme; 0.3: up to 100 %). Smaller ε (0.001) admits noisy bins: sub programme refusals rise from 33 % to 50 %. No ε produced a wrong acceptance in the full band.
-
-| run | full/exc_music | full/exc_music_hf | full/exc_bandlimited | full/two_path | full/room | mid/two_path | sub/exc_music | sub/exc_subonly |
-|---|---|---|---|---|---|---|---|---|
-| baseline | 98.0/0.0/2.0/0.0 | 93.5/0.0/4.0/2.5 | 99.5/0.0/0.5/0.0 | 85.7/0.0/14.3/0.0 | 100.0/0.0/0.0/0.0 | 63.7/0.0/36.3/0.0 | 65.0/1.7/0.0/33.3 | 100.0/0.0/0.0/0.0 |
-| eps_0.001 | 97.0/0.0/3.0/0.0 | 94.0/0.0/5.0/1.0 | 99.0/0.0/1.0/0.0 | 83.0/0.0/17.0/0.0 | 100.0/0.0/0.0/0.0 | 66.7/0.0/33.3/0.0 | 50.0/0.0/0.0/50.0 | 100.0/0.0/0.0/0.0 |
-| eps_0.1 | 92.0/0.0/3.0/5.0 | 38.0/0.0/4.0/58.0 | 99.0/0.0/1.0/0.0 | 83.0/0.0/17.0/0.0 | 100.0/0.0/0.0/0.0 | 66.7/0.0/33.3/0.0 | 73.3/0.0/0.0/26.7 | 100.0/0.0/0.0/0.0 |
-| eps_0.3 | 38.0/0.0/1.0/61.0 | 8.0/0.0/2.0/90.0 | 99.0/0.0/1.0/0.0 | 82.7/0.0/17.3/0.0 | 100.0/0.0/0.0/0.0 | 65.7/0.0/34.3/0.0 | 0.0/0.0/0.0/100.0 | 36.7/0.0/0.0/63.3 |
-
-cells: ok / wrong / ambiguous / refused, % of trials
-
-**Borderline band.** m_b only trades ambiguity for acceptance near the threshold; none of the settings produced wrong acceptances under the ±2 dB acceptable-answer scoring. 2 dB is kept because it matches that scoring and the measured level error (≤ 0.2 dB) leaves margin for real responses whose levels are less ideal than pure delays.
-
-| run | full/two_path | mid/two_path |
-|---|---|---|
-| baseline | 85.7/0.0/14.3/0.0 | 63.7/0.0/36.3/0.0 |
-| border_1 | 91.1/0.0/8.9/0.0 | 67.3/0.0/32.7/0.0 |
-| border_3 | 78.4/0.0/21.6/0.0 | 59.6/0.0/40.4/0.0 |
-
-cells: ok / wrong / ambiguous / refused, % of trials
-
-**Close spacing.** k = 1 lowers mid ambiguity from 36 % to 28 % with no wrong acceptance, because deblending already removes neighbours beyond one pulse width. k = 2 is kept as the default: the sub band was not swept, and its unresolved cases are where wrong answers live (§11.5). Lowering it is a candidate tuning once rig captures exist.
-
-| run | full/two_path | mid/two_path | full/room |
-|---|---|---|---|
-| baseline | 85.7/0.0/14.3/0.0 | 63.7/0.0/36.3/0.0 | 100.0/0.0/0.0/0.0 |
-| close_1 | 85.3/0.0/14.7/0.0 | 72.2/0.0/27.8/0.0 | 100.0/0.0/0.0/0.0 |
-| close_3 | 82.4/0.0/17.6/0.0 | 55.6/0.0/44.4/0.0 | 100.0/0.0/0.0/0.0 |
-
-cells: ok / wrong / ambiguous / refused, % of trials
-
-**PSR threshold.** PSR 12 vs 15 dB changes nothing measurable; 18 dB refuses 54 % at 0 dB full-band SNR. 15 dB = |T| + 3 dB is kept for its meaning (an arrival at the threshold must clear the noise-maximum level).
-
-| run | full/snr_-10 | full/snr_+0 | full/snr_+10 | sub/snr_+0 | sub/snr_+10 | sub/snr_+20 |
-|---|---|---|---|---|---|---|
-| psr_12 | 0.0/0.0/0.0/100.0 | 98.0/0.0/2.0/0.0 | 98.0/0.0/2.0/0.0 | 0.0/0.0/0.0/100.0 | 3.3/3.3/0.0/93.3 | 100.0/0.0/0.0/0.0 |
-| baseline | 0.0/0.0/0.0/100.0 | 98.0/0.0/2.0/0.0 | 98.0/0.0/2.0/0.0 | 0.0/0.0/0.0/100.0 | 3.3/1.7/0.0/95.0 | 100.0/0.0/0.0/0.0 |
-| psr_18 | 0.0/0.0/0.0/100.0 | 44.0/0.0/2.0/54.0 | 98.0/0.0/2.0/0.0 | 0.0/0.0/0.0/100.0 | 3.3/3.3/0.0/93.3 | 100.0/0.0/0.0/0.0 |
-
-cells: ok / wrong / ambiguous / refused, % of trials
-
-**Observation length.** Full range: 0.2 s works at ≥ 10 dB but refuses 42 % at 0 dB; 0.25 s refuses nothing at ≥ 0 dB. Sub: 2 s refuses 30 % at 20 dB (and one 0.1 ms miss), 4 s refuses 0 % at 20 dB, 6 s still refuses 57 % at 10 dB. The sub default is therefore 4 s; 10 dB in the sub band is outside what 0.1 ms can promise at any practical observation length.
-
-| run | full/single | full/two_path | full/snr_+0 | full/snr_+10 | mid/single | sub/single | sub/snr_+10 | sub/snr_+20 |
-|---|---|---|---|---|---|---|---|---|
-| obs_short | 100.0/0.0/0.0/0.0 | 83.0/0.0/17.0/0.0 | 58.0/0.0/0.0/42.0 | 100.0/0.0/0.0/0.0 | 100.0/0.0/0.0/0.0 | 96.7/0.0/0.0/3.3 | 0.0/0.0/0.0/100.0 | 66.7/3.3/0.0/30.0 |
-| baseline | 100.0/0.0/0.0/0.0 | 85.7/0.0/14.3/0.0 | 98.0/0.0/2.0/0.0 | 98.0/0.0/2.0/0.0 | 100.0/0.0/0.0/0.0 | 100.0/0.0/0.0/0.0 | 3.3/1.7/0.0/95.0 | 100.0/0.0/0.0/0.0 |
-| obs_long | — | — | 100.0/0.0/0.0/0.0 | 100.0/0.0/0.0/0.0 | — | — | 43.3/0.0/0.0/56.7 | 100.0/0.0/0.0/0.0 |
-
-cells: ok / wrong / ambiguous / refused, % of trials
-
-**Sub band, programme.** Programme in the sub band needs about 8 s for ≤ 20 % refusal.
-
-| run | sub/exc_music |
-|---|---|
-| baseline | 65.0/1.7/0.0/33.3 |
-| sub_music_8s | 83.3/0.0/0.0/16.7 |
-
-cells: ok / wrong / ambiguous / refused, % of trials
+- **ε.** 0.01 is the knee. Larger ε shrinks the weakly excited part of a coloured spectrum
+  below W = 0.5, so programme fails the excitation check (0.1: 58 % refused on dull programme;
+  0.3: up to 100 %). 0.001 admits noisy bins: sub programme refusals rise from 33 % to 50 %. No
+  ε produced a wrong acceptance in the full band.
+- **m_b** only trades ambiguity for acceptance near the threshold (1 dB: full two_path 9 %
+  ambiguous; 3 dB: 22 %), never wrong. 2 dB matches the ±2 dB scoring and leaves margin over
+  the measured level error (≤ 0.2 dB) for real responses.
+- **Close spacing.** k = 1 lowers mid ambiguity from 36 % to 28 % with no wrong acceptance
+  (deblending removes neighbours beyond one pulse width). k = 2 is kept: the sub band was not
+  swept and its unresolved cases are where wrong answers live (§11.5).
+- **PSR.** 12 vs 15 dB changes nothing measurable; 18 dB refuses 54 % at 0 dB full-band SNR.
+  15 dB = |T| + 3 dB is kept for its meaning (§7).
+- **Observation length.** Full: 0.2 s refuses 42 % at 0 dB, 0.25 s nothing at ≥ 0 dB. Sub: 2 s
+  refuses 30 % at 20 dB (one 0.1 ms miss), 4 s 0 %, and 6 s still refuses 57 % at 10 dB —
+  10 dB in the sub band is outside what 0.1 ms can promise at any practical length. Sub
+  programme needs about 8 s for ≤ 20 % refusal.
 
 ### 11.7 Tracking
 
-`python3 tracking.py --n 60`. Each trial cuts a long measurement into back-to-back windows
-of the default observation (6 × 0.25 s full, 4 × 4 s sub), steps the delay by 5 samples to
-30 % of the search range halfway through, and runs the tracker.
+Each trial cuts back-to-back windows of the default observation (6 × 0.25 s full, 4 × 4 s
+sub) and steps the delay by 5 samples to 30 % of the search range halfway through.
 
-| band / scene | trials | correct moves | wrong moves | windows to lock (start / after step) | ambiguous % | refused % |
-|---|---|---|---|---|---|---|
-| full / single | 60 | 121 | 0 | 2.0 / 2.0 | 0 | 0 |
-| full / direct −9…−3 dB, inverted reflection 1–15 ms later | 60 | 122 | 0 | 2.0 / 2.0 | 0 | 0 |
-| full / borderline (direct −13…−11 dB) | 60 | 0 | 0 | never | 100 | 0 |
-| sub / single | 15 | 48 | 0 | 2.0 / 2.0 | 0 | 0 |
-| sub / direct −9…−3 dB, reflection 1–15 ms later | 15 | 0 | 0 | never | 100 | 0 |
-| sub / borderline | 15 | 0 | 4 | never | 93 | 0 |
-
-- Full range: every move is correct, and the minimum possible latency (2 windows = 0.5 s) is
-  reached both at start and after a step. Borderline scenes are 100 % ambiguous, so tracking
-  never moves on them, as required by 1c.
-- Sub: single arrivals lock in 2 windows (8 s). Reflections 1–15 ms behind the direct sound
-  are below one sub pulse width; those scenes are ambiguous and tracking holds. In
-  `borderline` (direct −13…−11 dB, 1–15 ms ahead, all below one pulse width), 4 moves out of
-  15 trials landed on the merged-lobe delay,
-  which is more than 0.1 ms from the direct sound. This is the unresolved-cluster behaviour of
-  §11.5: agreement between windows is repeatability, not correctness (Q1 "must not").
+- Full range (single; direct −9…−3 dB with an inverted reflection 1–15 ms later): every move
+  correct, locking in the minimum 2 windows (0.5 s) at start and after the step. Borderline
+  scenes (direct −13…−11 dB) are 100 % ambiguous, so tracking never moves (1c).
+- Sub: single arrivals lock in 2 windows (8 s). Reflections 1–15 ms behind the direct sound are
+  below one pulse width: ambiguous, tracking holds. In `borderline` (direct −13…−11 dB, 1–15 ms
+  ahead) 4 moves in 15 trials landed on the merged-lobe delay, > 0.1 ms from the direct
+  sound — agreement between windows is repeatability, not correctness (§11.5).
 
 ---
 
@@ -705,10 +539,10 @@ pulse widths away (full 0.16 ms, mid 0.8 ms, sub 22 ms).
 | mid, resolved | **0.05 ms** (was: 1 sample) | ≤ 1 % | ≤ 10 % | e95 0.25 samples; 0 wrong / 1 200; 0 % refused |
 | mid, unresolved (< 2 w_p) | — (expected `Ambiguous`) | ≤ 1 % | — | 0 wrong; ambiguous except buried-direct scenes, which are accepted correctly |
 | sub, isolated, pink/white/sub-only feed, 4 s | **0.1 ms** | ≤ 1 % | ≤ 10 % | e95 ≤ 1.96 samples; 0 wrong / 360; 0 % refused |
-| sub, resolved two-path (≥ 2.5 w_p) | 0.1 ms | **≤ 2 %** (proposed) | **≤ 20 %** (proposed) | 1.7 % wrong; 10 % refused; 13 % ambiguous |
-| sub, unresolved (< 0.25 w_p ≈ 3 ms) | **≤ 2 ms** re first arrival (proposed) | ≤ 1 % beyond 2 ms | — | max accepted error 1.87 ms |
+| sub, resolved two-path (≥ 2.5 w_p) | 0.1 ms | **≤ 2 %** | **≤ 20 %** | 1.7 % wrong; 10 % refused; 13 % ambiguous |
+| sub, unresolved (< 0.25 w_p ≈ 3 ms) | **≤ 2 ms** re first arrival | ≤ 1 % beyond 2 ms | — | max accepted error 1.87 ms |
 | sub, unresolved (0.25–2 w_p) | — (expected `Ambiguous`) | ≤ 2 % | — | 94 % ambiguous, 1/77 wrong |
-| sub, programme material | 0.1 ms | ≤ 2 % | **≤ 20 % at 8 s** (proposed) | 33 % refused at 4 s, 17 % at 8 s, 0 wrong at 8 s |
+| sub, programme material | 0.1 ms | ≤ 2 % | **≤ 20 % at 8 s** | 33 % refused at 4 s, 17 % at 8 s, 0 wrong at 8 s |
 | periodic excitation, P ≤ W + T | — | 0 % | must refuse | 100 % refused |
 | excitation not reaching the band | — | 0 % | must refuse | 100 % refused |
 | band SNR ≤ −10 dB | — | 0 % | must refuse | 100 % refused |
@@ -731,7 +565,7 @@ Where the provisional targets are unreachable, and why:
 
 ---
 
-## 13. Fixture acceptance table (phase 2 Rust tests)
+## 13. Fixture acceptance table (Rust tests)
 
 The golden sets are `fixtures/golden/delay_finder_{full_pink, full_music, full_narrow,
 full_periodic, mid_pink, sub_pink}`, written by `tools/refgen/sets/delay_finder.py`. Each set
@@ -771,139 +605,71 @@ Expectations (`parameters.expect_semantics`):
 Observation lengths: full 12 000 samples (0.25 s), mid 24 000 (0.5 s), sub 96 000 (2 s; the
 case is at 40 dB, where 2 s is enough, and keeps the fixture small). Total size is 4.9 MB.
 
-`python3 tools/experiments/q1/check_fixtures.py` runs the prototype against these files, and
-all cases pass. The Rust implementation must pass the same table. Beyond the table, phase 2 adds
-property tests for sign and index invariance (shifting both block starts by the same amount
-leaves the result unchanged; swapping the roles of ref and meas negates a single-path delay)
-and the `NoReference` / `NoSignal` / `ObservationTooShort` / `InsufficientOverlap` paths
-using zero and short blocks.
+`python3 tools/experiments/q1/check_fixtures.py` runs the prototype against these files; the
+Rust side is `ac2-core` `tests/it/delay/fixtures.rs` (`fixture_acceptance_table`,
+`matches_python_prototype`). `scenes.rs` adds index invariance and sign (shifting both block
+starts leaves the result unchanged; swapping ref and meas negates a single-path delay) and the
+`NoReference` / `NoSignal` / `ObservationTooShort` / `InsufficientOverlap` paths.
 
 ---
 
 ## 14. API shape (`ac2-core::delay`)
 
-```rust
-pub struct Block<'a> { pub start: u64, pub samples: &'a [f32] }   // absolute sample index
+The types live in `crates/ac2-core/src/delay/mod.rs`: `Block` (absolute start index),
+`Band` (`FullRange`, `Mid`, `Sub`, `Custom`), `Estimator` (`RegularisedH1`, `Phat`),
+`FinderConfig` (`FinderConfig::new(fs, band)` = §9 defaults, `Tuning::default()` = the shared
+constants), `Arrival`, `Confidence`, `NoEstimateReason`, `AmbiguityReason`, `Outcome`
+(`Ambiguous` carries ≤ 3 ranked, rule pick first) and `FinderResult` (all candidates by
+delay, resolved band, meas window). `find` / `find_auto` (§9.1) return
+`Result<FinderResult, ConfigError>`; `find_with` / `find_auto_with` reuse a `FinderScratch`
+(FFT plans and buffers). `Tracker` (`track.rs`) implements §10.2; `DelayStream` (`stream.rs`)
+cuts back-to-back windows from sample-indexed blocks and runs the local search while tracking.
 
-pub enum Band { FullRange, Mid, Sub, Custom { lo_hz: f64, hi_hz: f64 } }
-pub enum Estimator { RegularisedH1, Phat }            // Phat: diagnostic only
-
-pub struct FinderConfig {
-    pub fs: f64,
-    pub band: Band,
-    pub search: SearchRange,                          // signed samples, default ±1 s
-    pub threshold_db: f64,                            // −12
-    pub excitation_period: Option<u64>,               // from the generator when known
-    pub tail_s: f64,                                  // 1.0
-    pub estimator: Estimator,
-    pub tuning: Tuning,                               // §9 shared constants, Default = §9
-}
-
-pub struct Arrival {
-    pub delay: i64,                // integer samples at fs (rounded)
-    pub delay_frac: f64,           // fractional samples
-    pub level_db: f64,             // re strongest
-    pub phase_deg: f64,
-    pub uncertainty: f64,          // 1-σ samples
-    pub misfit: f64,
-    pub refined: bool,
-}
-
-pub struct Confidence {
-    pub psr_db: f64, pub psr_acq_db: f64, pub band_snr_db: f64,
-    pub excited_fraction: f64, pub pulse_width: f64, pub nominal_width: f64,
-    pub period: Option<u64>, pub refinement_window: (i64, i64),
-}
-
-pub enum NoEstimateReason {
-    NoReference, NoSignal, ObservationTooShort, InsufficientOverlap,
-    InsufficientExcitation, PeriodicExcitation { period: u64 },
-    LowPsr, LowPrecision, PeakAtSearchEdge, LowBandSnr,
-}
-pub enum AmbiguityReason { BorderlineLevel, CloseArrivals, MergedLobe, OutsideRefinement }
-
-pub enum Outcome {
-    Accepted { first: Arrival, strongest: Arrival },
-    Ambiguous { reasons: Vec<AmbiguityReason>, ranked: ArrayVec<Arrival, 3>, strongest: Arrival },
-    NoEstimate { reasons: Vec<NoEstimateReason> },
-}
-
-pub struct FinderResult {
-    pub outcome: Outcome,
-    pub candidates: Vec<Arrival>,          // all, by delay (IR panel)
-    pub confidence: Confidence,
-    pub band: Band,                        // resolved band (auto mode)
-    pub meas_window: core::ops::Range<u64>,
-}
-
-pub fn find(ref_: Block, meas: Block, cfg: &FinderConfig) -> FinderResult;
-pub fn find_auto(ref_: Block, meas: Block, cfg: &FinderConfig) -> FinderResult;   // §9.1
-
-pub struct Tracker { /* held, pending, agreement */ }
-impl Tracker {
-    pub fn new(agreement: Agreement) -> Self;          // per band, §9
-    pub fn observe(&mut self, r: &FinderResult) -> Option<i64>;   // Some(new held delay)
-    pub fn reset(&mut self);                           // config change
-}
-```
-
-Notes:
-
-- `find` is pure. It allocates its FFT plans and buffers through a reusable `FinderScratch`
-  (an overload `find_with(&mut scratch, …)`). It runs on a worker thread, never in the audio
-  callback.
-- A block that spans a discontinuity (xrun marker) is never passed in. The daemon cuts at
-  discontinuities, so `NoEstimate` does not need a discontinuity reason.
-- The residual check on the aligned stream (PLAN §5.2) belongs to the MTW pair, not to this
-  module.
+- The finder runs on a worker thread, never in the audio callback.
+- A block that spans a discontinuity is never passed in: `DelayStream` restarts a stream's
+  buffer at a discontinuity and drops the window it breaks, so there is no discontinuity
+  reason.
+- The residual check on the aligned stream (PLAN §5.2) belongs to the MTW pair, not here.
 
 ---
 
 ## 15. Limits
 
 - All scenarios are synthetic pure delays with frequency-independent path gains. Real
-  loudspeakers add band-dependent group delay, so a sub-band delay and a full-range delay of
-  the same box legitimately differ. The finder reports the band, and comparison across bands
-  is the operator's call (§2). Recorded captures (off-axis, near boundaries, different
-  boxes) are still owed. They should be replayed through `check_fixtures`-style scoring once
-  rig captures exist (phase 2 HW). They are judged against tape-measure geometry, never
-  against `ac`.
-- "Music" here is a synthetic programme model (tonal notes, kick, hats, pink bed). It shows
-  the effect of colour and tonality, not the full range of real programme.
-- The noise is stationary pink. Impulsive noise (claps, speech) during the observation lifts
-  the floor estimate and shows up as `LowPsr` refusals, not as wrong arrivals. This is
-  expected but not measured here.
+  loudspeakers add band-dependent group delay, so sub-band and full-range delays of one box
+  legitimately differ; the finder reports the band and comparison is the operator's call
+  (§2). Recorded captures (off-axis, near boundaries, other boxes) are still owed, scored
+  against tape-measure geometry, never against `ac`. Nothing here was tuned on real
+  loudspeaker responses.
+- "Music" is a synthetic programme model (tonal notes, kick, hats, pink bed): it shows the
+  effect of colour and tonality, not the full range of real programme.
+- Noise is stationary pink. Impulsive noise (claps, speech) lifts the floor estimate and
+  should show up as `LowPsr` refusals, not wrong arrivals; not measured.
 
 ---
 
-## 16. Open items for the user
+## 16. Decisions D1–D4
 
-1. **Revised acceptance numbers (§12).** The provisional numbers hold for full range. For mid
-   and sub I propose: mid tolerance 0.05 ms instead of 1 sample; sub ≤ 0.1 ms only for
-   arrivals ≥ 2 pulse widths (≈ 22 ms) from others; ≤ 2 ms for unresolved sub clusters;
-   sub resolved two-path ≤ 2 % wrong and ≤ 20 % refused; programme in sub ≤ 20 % refused at
-   8 s. *Recommendation: accept.* The alternative is to keep 0.1 ms for every sub scene, and
-   that is not achievable by any estimator in a 100 Hz band (§11.5).
-2. **Sub-band observation 4 s (default), 8 s for programme.** That is one sub-band estimate
-   every 4 s and a tracking lock after 8 s. 2 s gives faster updates at the cost of 30 %
-   refusals at 20 dB SNR. *Recommendation: 4 s default, operator-selectable 2/4/8 s, with
-   the reason for any refusal shown.*
-3. **Tracking agreement in the sub band ±0.1 ms (≈ 5 samples) instead of ±1 sample** (PLAN
-   §5.2 says ±1 sample). With 1 σ ≈ 0.5–2 samples at 20 dB, ±1 sample would rarely agree, and
-   sub tracking would stall. *Recommendation: per-band agreement = the band tolerance, with
-   full and mid kept at ±1 sample.*
-4. **GCC-PHAT demoted to a diagnostic option, not a fallback** (Q1-d). This is a change from
-   the PLAN §5.2 wording "GCC-PHAT is the fallback for poor reference spectra".
-   *Recommendation: accept, and update PLAN §5.2 when this note is accepted.*
-5. Not a decision, but owed: recorded captures (off-axis, near a boundary, other boxes) to
-   rescore against tape-measured geometry in phase 2 HW. Nothing here was tuned on real
-   loudspeaker responses.
+Accepted provisionally (`open-questions.md` Q1).
 
-## Known issue (from the Rust implementation)
+1. **D1 — revised acceptance numbers (§12).** Mid tolerance 0.05 ms instead of 1 sample; sub
+   ≤ 0.1 ms only for arrivals ≥ 2 pulse widths (≈ 22 ms) from others; ≤ 2 ms for unresolved
+   sub clusters; sub resolved two-path ≤ 2 % wrong, ≤ 20 % refused; sub programme ≤ 20 %
+   refused at 8 s. 0.1 ms for every sub scene is not achievable by any estimator in a 100 Hz
+   band (§11.5).
+2. **D2 — sub observation 4 s default**, operator-selectable 2/4/8 s (`FinderConfig::
+   observation_s`), the refusal reason always shown. 2 s updates faster but refuses 30 % at
+   20 dB.
+3. **D3 — sub tracking agreement ±0.1 ms** (≈ 5 samples) instead of PLAN's ±1 sample: with
+   1 σ ≈ 0.5–2 samples at 20 dB, ±1 sample would rarely agree and sub tracking would stall.
+   Full and mid stay ±1 sample.
+4. **D4 — GCC-PHAT is a diagnostic option, not a fallback** (Q1-d), contrary to PLAN §5.2's
+   original wording.
 
-The §7 excited-bandwidth check measures each bin relative to the band's own mean level, so a
-perfectly flat floor inside the band (e.g. a brick-wall low-passed synthetic reference with
-only f32 quantisation noise in band) passes as fully excited; the finder then returns
-Ambiguous instead of InsufficientExcitation. Real reference noise behaves correctly. Fix
-candidate: compare in-band level against an absolute floor derived from the capture's
-noise estimate as well as the relative check. Track before phase 5 HW acceptance.
+## Known issue
+
+The §7 excited-bandwidth check measures each bin relative to the band's own mean, so a
+perfectly flat in-band floor (e.g. a brick-wall low-passed synthetic reference with only f32
+quantisation noise in band) passes as fully excited and the finder returns `Ambiguous` instead
+of `InsufficientExcitation`. Real reference noise behaves correctly. Fix candidate: also
+compare the in-band level against an absolute floor from the capture's noise estimate.

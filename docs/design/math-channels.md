@@ -2,9 +2,9 @@
 
 Status: implemented (`MeasKind::Math`, `ac2_traces::math`, the daemon's math job
 `crates/ac2d/src/jobs/math.rs`, `ac2 math new / set`, the app's math channel dialog,
-Shift+M). Supersedes the spatial-average measurement kind (`spatial-average.md`, whose
-averaging is this note's *Average*) and the stored-trace `trace.math` command. Answers PLAN.md
-§3.3 "Live spatial average" and §3.5 "Trace math".
+Shift+M). Answers PLAN.md §3.3 "Live spatial average" and §3.5 "Trace math"; supersedes the
+spatial-average measurement kind (its rationale: [`spatial-average.md`](spatial-average.md))
+and the stored-trace `trace.math` command.
 
 ## What the operator gets
 
@@ -17,10 +17,7 @@ afterwards (operands, operator, method, smoothing) and kept as a stored trace by
 capture (Ctrl+1 … 9, `ac2 trace capture`) whose metadata names the expression and the
 operands that went in.
 
-It replaces two things that were each half of it: the palette's "A − B" / "A / B" on stored
-traces (an implicit "selected and next shown" pair, magnitude difference or complex division,
-and a spectrum difference drawn on the magnitude pane) and the spatial-average measurement
-kind (a live average of transfer measurements only). Both are one concept: an expression the
+Stored-trace A − B / A ÷ B and the live spatial average are one concept: an expression the
 daemon evaluates, with operands chosen by name.
 
 ## Model
@@ -96,7 +93,7 @@ drawn on the level axis in the first operand's scale; the caption says `level di
 
 ## Average (the spatial average)
 
-Unchanged from the spatial average (`spatial-average.md`): 2 … 16 operands; **power**
+2 … 16 operands (why and how the positions are combined: `spatial-average.md`); **power**
 (default) `|H| = sqrt(mean |hₖ|²)`, phase the argument of the complex mean; **complex**
 `mean hₖ` (what one point summing the arrivals would see); **coherence-weighted**, the complex
 mean weighted by `γ²/(1 − γ²)` (γ² capped at 0.999). Every operand re-referred to `τ_ref`
@@ -173,7 +170,8 @@ reason.
 A --b B`, `--op avg --of A,B,C [--method …] [--phase-ref X | --ref-delay T] [--smooth N]
 [--name …] [--start]`; `ac2 math set <channel> …` changes what is given. Operands by name or
 id; `trace:NAME` / `meas:NAME` when a measurement and a trace share a name. Replaces `ac2 meas
-new avg` and `ac2 trace math`.
+new avg` and `ac2 trace math`. `--smooth-magnitude-only` keeps the phase unsmoothed;
+`--no-smooth` (on `set`) takes smoothing off.
 
 ## Wire and files
 
@@ -184,10 +182,8 @@ new avg` and `ac2 trace math`.
   [`NamedOperand` {`operand`, `name`}], `phase`}: a capture shares its epoch's time base when
   its phase is `shared_time_base` and it is a sum, difference or average (a ratio or cascade
   is relative).
-- `trace.math`, `MeasKind::spatial_average`, `TraceSource::spatial_average` / `math {a, b,
-  op}` removed. `PROTO_VERSION` 22, session format 10 (sessions hold math channels; a load
-  checks their operands against the loaded measurements and traces and starts them after
-  every measurement and trace is in).
+- Sessions hold math channels; a load checks their operands against the loaded measurements
+  and traces and starts them after every measurement and trace is in.
 
 ## Tests
 
@@ -208,10 +204,11 @@ new avg` and `ac2 trace math`.
   its capture a spectrum trace, operand FFT length locked.
 - `ac2-cli` (`tests/it/math_rig.rs`): expressions typed and by `--op`, refusals by message, an
   edit keeping the name, `meas list`.
-- `ac2-ui`: the dialog (`math_dialog.rs` tests, `state_tests`), `tests/embedded.rs` from an
-  empty daemon (dialog by name, the average at −6 dB with its legend, capture with Ctrl+1,
+- `ac2-ui`: the dialog (`math_dialog.rs` tests, `state_tests`), `tests/it/embedded/math.rs`
+  from an empty daemon (dialog by name, the average at −6 dB with its legend, capture with Ctrl+1,
   edit into ÷ at 0 dB, NO RESULT banner; spectrum math on the spectrum pane and not on the
-  transfer pane), GPU snapshots `math_dialog`, `spectrum_math`, `transfer_math_average`.
+  transfer pane), GPU snapshots `math_dialog`, `spectrum_math`, `transfer_math_average`
+  (`tests/it/ui/transfer.rs`).
 
 ## Open questions
 

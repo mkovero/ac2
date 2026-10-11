@@ -41,11 +41,10 @@ the per-band rows show the larger of |mean difference| and the spread about that
 sweep-vs-REW magnitude row the spread alone: its level offset is the absolute-level row), and
 the OSM transfer columns the maximum |difference| (a rig take: the median). INCONCLUSIVE: the
 data cannot tell pass from fail (near the floor, or noise wider than the limit). "ac2 and REW
-miss the truth alike (ac2 − REW within tolerance)" is an annotation on two WARN/FAIL checks, not
-a verdict: both miss with one sign, their difference is within the ac2-vs-REW pass limit and
-their targets compare. It says the two analysers read the same number, not why the truth
-differs; both checks keep their verdict, appear in the worst-cell values and are held to their
-baselines. Two misses without it are each analyser's own ("not alike"). INFO: context,
+miss the truth alike (ac2 − REW within tolerance)" is the shared-miss annotation, not a verdict
+(README, "Reading the report"): it says the two analysers read the same number, not why the
+truth differs; both checks keep their verdict, appear in the worst-cell values and are held to
+their baselines. Two misses without it are each analyser's own ("not alike"). INFO: context,
 not judged. Verdict counts are counts of checks over overlapping bands, tones and sweeps, not
 independent trials or a confidence level; a PASS covers its own band or tone only. The coverage
 of the transfer rows is the γ² ≥ 0.99 share row (live TF) and the INCONCLUSIVE counts; the
@@ -313,14 +312,13 @@ against their own estimator's expected value, ac2's beside its residual against 
 ## Refreshing
 
 - Tables between the markers: `python -m crosscheck comparison` after a baseline changes
-  (`tests/test_comparison.py` fails when they are stale).
-- Rig baselines: `./rig-run.sh …`, review, `python -m crosscheck baseline runs/<UTC time>`.
-- OSM baseline: `OSM_HARNESS=… AC2_BIN_DIR=… python -m crosscheck osm`, review,
-  `python -m crosscheck baseline runs/osm-<UTC time>`.
+  (`tests/test_comparison.py` fails when they are stale). Baselines: README, "Baselines and
+  compare".
 - The tables in the last section are written by hand from the runs' reports and `reports/`. An
   explanation stays **open** until a report, plot or controlled test shows it accounts for the
   residual.
-- Repeated takes: `python -m crosscheck repeats runs/<t1> runs/<t2> …` (the takes must be
-  analysed by the same suite; a run's `--resolution` keeps it apart). Coherence model:
-  `python -m crosscheck coherence-study --seeds 8`. DUT matrix: `./rig-run.sh --rig rigs/host.toml …`
-  then `python -m crosscheck dutcov <runs>`.
+- `reports/`: `python -m crosscheck repeats <runs>` (takes analysed by the same suite; a run's
+  `--resolution` keeps it apart), `python -m crosscheck coherence-study --seeds 8`, and the DUT
+  matrix (`python -m crosscheck run --rig rigs/host.toml --stages dut …`, README, "On a dummy
+  server") then `python -m crosscheck dutcov <runs>`.
+

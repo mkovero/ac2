@@ -1,9 +1,9 @@
 # Raw capture files
 
-PLAN §3.5 "Raw capture files (lossless samples + config timeline) re-analysable within
-tolerance" (P1, phase 7); §12 decision 5: f32 WAV/W64 + JSON sidecar, exact sample
-preservation, DSP replay judged within tolerance. Wire: `docs/protocol.md` §3.2 (*Raw
-capture files*) and §7.5.
+Status: implemented (`ac2d` `jobs/record.rs`, `ac2-traces::raw`, `ac2-audio` replay).
+Answers PLAN §3.5 "Raw capture files" and §12 decision 5 (f32 audio + JSON sidecar, exact
+samples, replay judged within tolerance; RF64 was chosen over W64, see *Files*). Wire:
+`docs/protocol.md` §3.2 (*Raw capture files*) and §7.5.
 
 ## What it is for
 

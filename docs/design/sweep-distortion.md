@@ -33,7 +33,7 @@ One synchronised exponential sine sweep per repeat (`ac2_core::generator::EssPla
 - **level** is typed by the operator, dBFS RMS of the constant-envelope part (0 dBFS RMS = a
   full-scale sine, so a sweep at `L` dBFS peaks at `10^(L/20)` FS, crest factor √2). No
   default; refused above the daemon's ceiling (§5.4), and the output path's peak limit holds.
-- each repeat is followed by `post_roll` of silence (≥ 1 s, longer for long sweeps) that
+- each repeat is followed by silence (`tail`: ≥ 1 s or what the sweep needs, ≤ 20 s) that
   carries the room's tail and the noise estimate; `repeats` (1…8) sweeps are averaged
   (complex mean of the deconvolved spectra: noise falls 3 dB per doubling, distortion stays).
 
@@ -62,9 +62,10 @@ and to check the reference actually carries the sweep: refused below −40 dB).
 
 ## Separating the harmonics
 
-The arrival `d` is the largest |h| in [−20 ms, ½·post_roll]. Harmonic k sits at
+The arrival `d` is the largest |h| in [−20 ms, ½·post_roll] (refined to a fraction of a
+sample: `subsample-arrival-group-delay.md`). Harmonic k sits at
 `t_k = d − L·ln k`; consecutive orders are `g_k = L·ln((k+1)/k)` apart, which shrinks with k,
-so the highest order analysed (`K = 5`, H2…H5) sets one window used for **every** order and the
+so the highest order analysed (`K` = `DEFAULT_MAX_ORDER` 5, H2…H5; at most 9) sets one window used for **every** order and the
 fundamental's distortion reference:
 
 - pre = 0.1·g_K (before `t_k`, half-Hann rise), post = 0.9·g_(K−1) (after `t_k`, half-Hann fall
@@ -82,6 +83,9 @@ fundamental's distortion reference:
   tail at that frequency) is truncated, as in any gated measurement.
 - low-frequency limit: a 100 ms window resolves ≈ 2/W = 20 Hz; fundamentals below
   `max(f1, 2/W)` are not reported (`f1·2^(1/6)` when the start is not extended).
+- `lf_harmonics: fine` (`--lf-harmonics fine`) instead gives each order its own longest
+  window: finer low-frequency resolution, a higher floor there, and up to four longest
+  windows of silence after each sweep.
 - high-frequency limit: harmonic k exists for fundamentals up to `f2/k` (the sweep stops at
   f2) and below `0.45·fs/k` (anti-alias filters).
 
@@ -121,6 +125,12 @@ capped) and per 3 dB more level; for white noise of variance σ² at the mic and
 amplitude A there, `floor(F) ≈ 4·W·F·σ² / (fs·A²·L)` (for the noise test: −44.8 dB predicted,
 −44.2 dB measured).
 
+A harmonic's floor is raised to the noise read in the gaps of the impulse response beside its
+own window where that is more than 3 dB above the post-roll's (`GAP_NOISE_FACTOR`): the
+post-roll reads each frequency 0.5–1 s after the sweep passed it, the gaps within a fraction
+of a second, so noise in bursts (hum switching on and off) that filled the harmonic's moment
+would otherwise read as distortion over a floor that never saw it.
+
 ## Display (Sweep / distortion pane)
 
 `ac2_scene::distortion` draws the fundamental's response above the distortion of each order
@@ -139,7 +149,7 @@ and THD, and every number the pane shows comes from there.
 - **Shading** fills the plot from the bottom up to the lowest order's floor at each frequency:
   below it every order is within the noise. Legend: the order names in their colours, THD, a
   dashed sample `< floor`, a shaded sample `noise`.
-- **dB / %**: the toggle in the pane's title (`dB | %`, key **U**) switches the axis and every
+- **dB / %**: the toggle in the pane's title (`dB | %`; also the palette and Settings › Display, no key) switches the axis and every
   readout, including `< floor` values. Percent is drawn on a log axis over the same ratios as
   the dB view (−100…0 dB = 0.001…100 %), labelled per decade (1-2-5 when tall enough, every
   second decade when very short): equal ratios keep equal distances, so a curve does not
@@ -192,13 +202,13 @@ measurement, named `Run <n>`. Progress
 and outcome are the mirrored `sweep` entity. Once the recording is in, the generator is
 disarmed (the lease stays with its holder): a sweep is one shot, and nothing is left armed for
 a stray Enter. Lease expiry, `gen.stop`/`gen.release`, a forced takeover or a closed session
-abort the capture and discard its audio. The ac2 CSV export (v2) holds the whole sweep: the
+abort the capture and discard its audio. The ac2 CSV export holds the whole sweep: the
 curves as columns, the analysis facts (`SweepInfo`) as a `# sweep_info:` JSON header line and
 the decimated IR as a second table (`t_s,linear,etc_db`, announced by `# sweep_ir:`), so
-`trace import` of an export restores the sweep trace with its delay; sessions (format 5) save
-that one CSV per trace. A v1 export (no analysis facts) imports as its transfer function, the
-distortion dropped with a note. The sweep's columns are never mic-corrected (the analysis
-uses the raw recordings); a curve can be applied afterwards (`q7-calibration.md` §9).
+`trace import` of an export restores the sweep trace with its delay; sessions save that one
+CSV per trace. The analysis uses the raw recordings, so no mic curve is in its columns; the
+input's active curve is applied to the stored run after capture, as for every measurement on
+that input (`q7-calibration.md` §9).
 
 ## Running it on a speaker (pupu, Genelec 1083 at −50 dBFS)
 

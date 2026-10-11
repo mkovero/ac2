@@ -7,35 +7,37 @@ what ac2 learned on it.
 - **Access:** private (`$AC_HOME/rig-hosts/pupu.access.env`). Never build on the rig; ship
   binaries. Take the rig lock first: `~/src/ac/bin/rig.sh --lock "<who, what>"`.
 - **Audio:** RME Fireface 400, JACK 96 kHz / 256 frames / 3 periods, `-S`.
-- **Services (systemd user units of mui, lingering; since 2026-10-07):** `jack-ac.service`
-  (jackd; counts as started once `jack_wait` sees the server), `ac2d.service` (`Wants=` and
-  `After=jack-ac`, not `BindsTo=`: ac2d keeps its session through a JACK restart and reopens
-  it), `snd-fireface-ctl.service` (FF400 mixer control). Restart on failure; logs in the user
-  journal (`journalctl --user -u ac2d -u jack-ac`). The old system `jack-ac.service` is
-  disabled. Checked 2026-10-07 (ac2d 1303a63): `systemctl --user restart jack-ac` left ac2d
-  running and the session reopened by itself after 1.1 s without audio. A restarted ac2d
-  brings back its measurements but not the audio session: reopen it (step 5 below).
+- **Services (systemd user units of mui, lingering):** `jack-ac.service` (jackd; counts as
+  started once `jack_wait` sees the server), `ac2d.service` (`Wants=` and `After=jack-ac`, not
+  `BindsTo=`: ac2d keeps its session through a JACK restart and reopens it),
+  `snd-fireface-ctl.service` (FF400 mixer control). Restart on failure; logs in the user journal
+  (`journalctl --user -u ac2d -u jack-ac`). The old system `jack-ac.service` is disabled.
+  `systemctl --user restart jack-ac` leaves ac2d running and the session reopens by itself
+  (about 1 s without audio). A restarted ac2d brings back its measurements but not the audio
+  session: reopen it (step 5 below).
   JACK port order can move (ADAT block before/after analog): check silently before emitting —
   captures 9–14 read exact digital zero when analog is first.
-- **Wiring:** out 1 (AN1) → Genelec 1083 (two-way: woofer and tweeter); out 2 (AN2) → cable → in 2 (reference
-  loopback); in 1 = measurement mic, beyerdynamic MM1 (449350, s/n 34804), **mounted at 90°
-  (pointing up)** → use `~/src/ac/beyer/449350_34804_90Grad.txt`.
+- **Wiring:** out 1 (AN1) → Genelec 1083 (two-way: woofer and tweeter); out 2 (AN2) → cable →
+  in 2 (reference loopback); in 1 = measurement mic, beyerdynamic MM1 (449350, s/n 34804),
+  **mounted at 90° (pointing up)** → use `~/src/ac/beyer/449350_34804_90Grad.txt`. Full table:
+  *Wiring and FF400 reset recovery*.
 - **Emission ceilings:** −40 dBFS standing, **−50 dBFS on anything that drives the speaker**.
-- **Baseline check (2026-10-03):** 1 kHz at −60 dBFS on out 2 only → in 2 −57.7 dBFS (profile
-  −57.5), no leakage into in 1 (−126 dBFS at 1 kHz); mic room noise ≈ −72 dBFS, with occasional
-  60–200 Hz rumble bursts up to ≈ −53 dBFS.
-- **Network:** ufw active. Since 2026-10-03 (operator approved): `47820/tcp`, `47821/tcp` and
-  `5353/udp` allowed from 192.168.9.0/24 only, one rule per port — the RT kernel lacks the
-  iptables `multiport` module, so a ufw port *range* is listed but silently not enforced.
-  Also `47820/tcp`, `47821/tcp` from 100.100.44.45 (rantu over the VPN; there is a further
-  firewall between the VPN and this LAN that must allow those ports too). mDNS does not cross the
-  VPN: connect by address. Clients authorized: `ketunkolo` (192.168.9.25), `rantu`
-  (100.100.44.45), `ac2pi` (mui's CLI on the netbooted Pi 4, 192.168.9.249) and `ac2pi-kiosk`
-  (that Pi's kiosk UI, which shows pupu's SPL meter; image and setup in the sys repo, `ac2pi/`).
-- **Operator policy (2026-10-04):** pupu is the ac2 agent's machine to deploy to and restart,
-  and the ac2 app on ketunkolo may be (re)started freely. Emission ceilings above still apply;
-  anything louder needs the operator's approval for that run. Other changes on ketunkolo
-  (system config, non-ac2 software) need asking.
+- **Baseline check:** 1 kHz at −60 dBFS on out 2 only → in 2 −57.7 dBFS (profile −57.5), no
+  leakage into in 1 (−126 dBFS at 1 kHz); mic room noise ≈ −72 dBFS, with occasional 60–200 Hz
+  rumble bursts up to ≈ −53 dBFS.
+- **Network:** ufw active (operator approved): `47820/tcp`, `47821/tcp` and `5353/udp` allowed
+  from 192.168.9.0/24 only, one rule per port — the RT kernel lacks the iptables `multiport`
+  module, so a ufw port *range* is listed but silently not enforced. Also `47820/tcp`,
+  `47821/tcp` from 100.100.44.45 (rantu over the VPN; a further firewall between the VPN and
+  this LAN must allow those ports too). mDNS does not cross the VPN: connect by address. ac2d
+  warns at start that ufw is enabled; remote clients connect regardless. Clients authorized:
+  `ketunkolo` (192.168.9.25), `rantu` (100.100.44.45), `ac2pi` (mui's CLI on the netbooted
+  Pi 4, 192.168.9.249) and `ac2pi-kiosk` (that Pi's kiosk UI, which shows pupu's SPL meter;
+  image and setup in the sys repo, `ac2pi/`).
+- **Operator policy:** pupu is the ac2 agent's machine to deploy to and restart, and the ac2 app
+  on ketunkolo may be (re)started freely. Emission ceilings above still apply; anything louder
+  needs the operator's approval for that run. Other changes on ketunkolo (system config, non-ac2
+  software) need asking.
 
 ## Deploying a build
 
@@ -47,190 +49,122 @@ binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap ev
 2. Ship: on each host `cd ~/ac2-test && rm -rf bin.prev bin.new && cp -a bin bin.prev && mkdir
    bin.new`, then `scp target/release/{ac2d,ac2,ac2-ui} mui@<host>:ac2-test/bin.new/`.
 3. Swap: on ketunkolo `pkill -x ac2-ui`; on pupu `systemctl --user stop ac2d` (SIGTERM: clean
-   shutdown flushes the autosave and SPL logs), then `cp -f bin.new/* bin/` on both.
+   shutdown flushes the autosave and SPL logs), then `cp -f bin.new/* bin/` on both (`cp`, not a
+   directory swap, keeps `ac2-jack-dut` in pupu's `bin/` for `tools/crosscheck`).
 4. Start the daemon on pupu: `systemctl --user start ac2d` (flags in
    `~/.config/systemd/user/ac2d.service`: `--listen tcp://0.0.0.0 --name pupu --max-level -50`).
    Check `journalctl --user -u ac2d -n 30`: "autosave restored … no audio session opened" is
    normal.
-   `--max-level -50` is now the **hard bound**: the system max level in force can be lowered
-   (or raised again up to −50) from any client — Settings › Audio & I/O, or
+   `--max-level -50` is the **hard bound**: the system max level in force can be lowered (or
+   raised again up to −50) from any client — Settings › Audio & I/O, or
    `bin/ac2 --remote 192.168.9.27 gen ceiling -60dbfs` — and is kept in
    `~/.config/ac2/rig.json`, so a restart comes up at min(kept, bound). A restart with a
    higher `--max-level` does not raise a level that was lowered; raise it explicitly
    (`gen ceiling -50dbfs --yes`). The daemon log's `ac2d::audit` lines say who changed it.
 5. Reopen audio (from ketunkolo):
    `bin/ac2 --remote 192.168.9.27 session open --backend jack --in 1-2 --outputs 2 --loopback-out 2 --loopback-in 2 --mic "1=MM1 34804"`.
-   Restored measurements resume; check `meas list`.
+   Use the inputs and outputs the operator had (lately `--in 1-10`; the old autosave's
+   `session.json` records them). Restored measurements resume; check `meas list`.
 6. App on ketunkolo:
    `cd ~/ac2-test && DISPLAY=:0 setsid nohup bin/ac2-ui --remote 192.168.9.27 > ui-net.log 2>&1 </dev/null &`.
    Screenshot: `DISPLAY=:0 xfce4-screenshooter -f -s <file>`.
+
+The Pi kiosk is the third host: cross build with `~/src/sys/ac2pi/build-ac2.sh` (steps in the
+sys repo), then restart the kiosk after the nfsroot update — an old kiosk is refused at the
+protocol check. If the cross build fails on types the checkout no longer has, it reused stale
+crates: `find crates -name '*.rs' -exec touch {} +` and rebuild.
 
 **When the session format changes**, the daemon sets the old autosave aside as
 `~/.local/share/ac2/autosave.vN` and starts empty. After step 5 (audio reopened with the
 operator's inputs, so the running measurements can start), bring it back from ketunkolo;
 the CLI reads the folder, so copy it over first (pupu's daemon listens on the network only):
 `cd ~/ac2-test && scp -rq mui@192.168.9.27:.local/share/ac2/autosave.vN /tmp/ && bin/ac2 --remote 192.168.9.27 session salvage /tmp/autosave.vN`.
+(ketunkolo may lack pupu's SSH host key; then copy by way of the build host, `scp -3`.)
 It makes each measurement again with its settings, colour, layout, delay and tracking,
 puts each stored trace back under its measurement, rebuilds math channels, starts what was
 running, and prints a table of what was restored or skipped and every setting not read as
-saved; keep that summary in the deploy entry below. It does not bring back the SPL meters'
+saved; keep that summary in the deploy log below. It does not bring back the SPL meters'
 per-second Leq history (their windows start again; before the deploy, `spl leq export
---meas <name> <file>` keeps it) or a mic curve applied to a trace after capture. Run it once:
-a second run adds copies.
+--meas <name> -o <file>` keeps it) or a mic curve applied to a trace after capture. Run it
+once: a second run adds copies.
 The calibration store (`~/.config/ac2/calibrations.json`) survives unless its own format
 changes; then redo the electrical calibration with the operator.
+When an enum in the app's `ui.toml` loses a value, the app drops the whole section holding it
+(no compatibility shims): edit the value on ketunkolo and the Pi with the app stopped.
 
 **Reading thread costs:** `ac2d-control` at one wake per audio period (≈375/s at 96 kHz/256) is
 JACK's process thread (libjack threads take the name of the thread that opened the client), not
 the control loop. Most of the daemon's RSS is JACK's `/dev/shm/jack-*` mapping; compare
 `Anonymous` in `/proc/<pid>/smaps_rollup`.
 
-## First measurement (2026-10-03, ac2 850a3a4)
+### Deploy log
 
-Pink noise −50 dBFS on out 1 + out 2, transfer in 1 vs in 2, delay finder: 3.32 ms (319
-samples), mic ≈ 1 m. ac2's transfer function agreed with an independent numpy H1 within 0.5 dB
-from 100 Hz to 16 kHz. Response re 1 kHz (1/6 oct): within ±3 dB 100 Hz–1.6 kHz; **broad dip
-−5…−9.5 dB from 2 to 6.3 kHz** (MM1 90° correction changes it by < 1 dB) — not normal for a
-1083 on axis; check mic height/aim against the speaker's reference axis, or the mid/tweeter
-section (the `ac` profile notes intermittent distortion). Floor bounce ≈ +3.5 ms at −23 dB;
-strong late reflection at +17.9 ms (−18 dB); broadband T20 ≈ 0.1 s. Data:
-`/home/mui/ac2-1083-transfer*.png`.
+Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless noted.
+
+| ac2 | date | proto / session fmt | notable |
+|---|---|---|---|
+| 0fef18ea | 2026-10-11 | 43 / 25 | app only (ketunkolo, Pi): a pane whose measurement disappears waits for its name to return |
+| 2c07efef | 2026-10-11 | 43 / 25 | salvage of `autosave.v24` restored all twelve measurements; the Pi kiosk fell back to TF 1 during salvage and saved that layout (fixed by 0fef18ea; old file `ui.toml.bak-tf1`) |
+| c7bd24b1 | 2026-10-11 | 42 / 24 | first format change restored with `session salvage`; only the per-second Leq history skipped |
+| 6f0e5b57 | 2026-10-11 | 39 / 22 | `transfer_view = "response"` in `ui.toml` changed to `"magnitude"` by hand; session cleared by the operator before (`autosave.scratched-2026-10-11`) |
 
 ## Network test (2026-10-03)
 
-ketunkolo → pupu over the LAN, CURVE: remote CLI (status, session, measurements) ✓; app on
-ketunkolo's display with live JACK data ✓; CLI + app on one daemon stay in sync ✓; unpaired and
-pinned-but-unauthorized clients refused ✓ (messages unclear — backlog); daemon killed → app shows
-DAEMON NOT RESPONDING + STALE with traces kept, restarted → app resyncs by itself ✓. mDNS
-discovery ✗ and remote generator ✗ at first — both fixed in f7991d9 and re-verified on the rig:
-`ac2 discover` on ketunkolo lists pupu; remote 1 kHz −60 dBFS on out 2 → `ac2:out_2` −60.0,
-in 2 −57.7 dBFS; the daemon connects only the chosen outputs (`out_N → system:playback_N`).
-Also verified: rantu over the VPN (100.100.44.45) via a further firewall.
+ketunkolo → pupu over the LAN, CURVE: remote CLI, the app on ketunkolo with live JACK data, CLI
+and app on one daemon in sync, unpaired and pinned-but-unauthorized clients refused, a killed
+daemon shown as DAEMON NOT RESPONDING + STALE with traces kept and resynced after restart,
+`ac2 discover` listing pupu, a remote generator (1 kHz −60 dBFS on out 2 → in 2 −57.7 dBFS; the
+daemon connects only the chosen outputs, `out_N → system:playback_N`). rantu over the VPN works
+too. A remote −50 dBFS pink measurement repeated the local one within 0.7 dB 100 Hz–16 kHz,
+delay identical (3.32 ms).
 
-Remote measurement (ketunkolo CLI, −50 dBFS pink, f7991d9): delay 3.32 ms (identical), response
-repeats the local measurement within 0.7 dB from 100 Hz to 16 kHz.
+## Genelec 1083 on axis: the 2–6 kHz dip (2026-10-03)
 
-## First sweep / distortion run (2026-10-03, ac2 c062151, from the app on ketunkolo)
+Mic ≈ 1 m, first at 102 cm height, then 94 cm re-centred on axis. Arrival 3.32–3.62 ms (moves
+with small mic/speaker shifts). Floor bounce ≈ +3.5 ms at −23 dB; late reflection +17.9 ms
+(−18 dB); broadband T20 ≈ 0.1 s.
 
-Daemon `--max-level -50` (hard ceiling). ESS 20 Hz–20 kHz, 6 s × 2 at −50 dBFS on out 1 + out 2,
-mic (in 1) re loopback (in 2): arrival 3.33 ms (same as the noise measurements); response matches
-the transfer measurement. **No harmonic measurably above its floor anywhere** (0 of 420 points
-≥ 6 dB over floor). Upper bounds on THD at this drive: < −28 dB (4 %) 60–120 Hz, < −41 dB (0.9 %)
-120–300 Hz, < −49…−52 dB (0.25–0.35 %) 300 Hz–2 kHz, **< −46 dB (0.5 %) in the 2–6 kHz dip
-region**. So the dip is not accompanied by measurable distortion at this (quiet) level; the
-intermittent fault from the `ac` profile was not visible. Floor is set by room noise and the low
-drive: more repeats (8×: about −6 dB) or a louder drive (needs the operator to lift the −50 dBFS
-speaker ceiling) would be needed to see distortion. Data: `/home/mui/ac2-1083-sweep*`.
+- ac2's transfer function agreed with an independent numpy H1 within 0.5 dB 100 Hz–16 kHz, and
+  with an independent Python JACK sweep + numpy deconvolution (no ac2 code) within 0.5 dB in
+  every third octave 63 Hz–16 kHz.
+- Response re 1 kHz: within ±3 dB 100 Hz–1.6 kHz; **broad dip −5…−9.5 dB from 2 to 6.3 kHz**
+  (MM1 90° correction changes it by < 1 dB). Moving the mic 8 cm in height changed it by
+  ≤ 1.3 dB per third octave while path-difference notches moved, so it is not a mic-geometry comb.
+- **The dip is in the direct sound:** gated 3 ms after arrival (before the floor bounce) it keeps
+  its shape — at 1/12 octave two notches, −9…−11 dB at 1.8–2.1 kHz and −8…−10 dB at 3–4 kHz,
+  a peak at 2.5 kHz between, back to ≈ 0 dB by 7 kHz. Likely woofer–tweeter interference
+  around the crossover (mic off the vertical axis where the stacked drivers sum in phase).
+  Unchecked: heights through the marked reference axis, 15–30° horizontally, rear-panel
+  switches.
+- **Distortion:** at −50 dBFS no harmonic stands clear of the room-noise floor except H3 of
+  510–680 Hz (≈ −55 dBr, 8–11 dB over its floor). At −30 dBFS (operator-approved, one run) the
+  response is unchanged within ±0.6 dB 40 Hz–16 kHz (no compression); THD 0.3 % 30–150 Hz,
+  0.4 % 150–400 Hz, **0.7 % 400–700 Hz (H3 peak −38 dB, 1.3 %)**, ≤ 0.1 % above 1.2 kHz;
+  H2 ≤ −49 dB. H3 rose 15 dB for 20 dB more drive (a pure cubic would rise 40), so the −50 dBFS
+  value was mostly level-independent noise and the −30 value is the woofer's odd-order
+  nonlinearity. The intermittent fault in the `ac` profile was not seen.
 
-## Mic moved: 94 cm height, re-centred on axis, 1 m (2026-10-03, ac2 c062151, from the app)
+## Electrical SPL calibration of input 1 (2026-10-04)
 
-Same daemon and session, 12 s sweeps at −50 dBFS: `1083 94cm` (2×) and `1083 94cm 8x` (8×).
-Arrival 3.45 ms (+0.11 ms, ≈ 4 cm longer path than at 102 cm).
+Keysight 34461A in ACV (100 mV range, slow filter) across XLR pins 2–3 of input 1 through a
+breakout, MM1 34804 connected with phantom on, gain as for use (leads on one leg and ground read
+half the signal plus common-mode noise). 1 kHz at −30 dBFS (operator-approved) on out 1 + out 2:
+DMM 4.320 mV, ac2 −36.0 dBFS → 0 dBFS = 271.3 mV; with the data-sheet 15.0 mV/Pa →
+**0 dBFS = 119.1 dB SPL** on input 1 (±1 dB, labelled "electrical in-line, data sheet"). The tone
+was ≈ 83.2 dB SPL at the mic. Holds only at this preamp gain.
 
-- **The 2–6 kHz dip did not move.** Third-octave levels re the 200 Hz–1 kHz mean, 102 cm → 94 cm:
-  2 k −7.8 → −8.7, 2.5 k −5.0 → −3.8, 3.15 k −6.7 → −7.0, 4 k −7.9 → −7.3, 5 k −5.0 → −4.6,
-  6.3 k −3.9 → −3.1; band mean −6.1 → −5.9 dB. 100 Hz–1.6 kHz and 6.3–16 kHz also agree
-  within ±1.3 dB. An 8 cm height change shifts floor-bounce and other path-difference notches
-  noticeably, so the dip is not a mic-geometry comb: it is the speaker on this axis (or the
-  room as a broad feature). Next checks: rear-panel tone/room switch settings, a near-field
-  look at each driver, and the response 20–30° off axis.
-- **Distortion (8×: floor ≈ 5–6 dB lower than 2×).** THD at or within 1–3 dB of the floor
-  everywhere: < −36 dB 60–120 Hz, < −48 dB 120–300 Hz, < −57 dB 300 Hz–2 kHz, < −55 dB
-  2–6 kHz. Clusters 6–10 dB over the floor in the 2× run (H2 at 130–140 Hz around −32 dB,
-  H4 near 160 Hz) fell to the floor at 8×: room noise during that run, not the speaker.
-  One stable feature: **H3 of 510–680 Hz excitation (harmonic at 1.5–2 kHz), −53…−58 dB re
-  fundamental (≈ 0.15 %), 8–11 dB over its floor**, seen at the same level in all three
-  sweeps. Part of that ratio is the fundamental sitting in a 3–4 dB response dip at 530–570 Hz.
-  Small and not a fault indication at this drive. The intermittent fault from the `ac`
-  profile was not seen.
-- Recount of the first run over all H2–H5 points with the same ≥ 6 dB-over-floor test: 11 of
-  1540 points, isolated. The "0 of 420" figure above used a narrower selection.
+## SPL log over 32 h (2026-10-04/05, `spl leq export`)
 
-Data: `/home/mui/ac2-1083-sweep2-94cm.csv`, `/home/mui/ac2-1083-sweep3-94cm-8x.csv`.
-
-## One sweep at −30 dBFS (2026-10-03, operator-requested, ceiling lifted for this run only)
-
-Daemon restarted with `--max-level -30` for one sweep (`1083 94cm -30`, 12 s × 2, same
-geometry), then restarted with `--max-level -50` again. Data:
-`/home/mui/ac2-1083-sweep4-94cm-30dbfs.csv`.
-
-- **Response unchanged by drive level**: within ±0.6 dB of the −50 dBFS 8× run from 40 Hz to
-  16 kHz, overall gain −0.2 dB. No compression; the 2–6 kHz dip is the same.
-- **Floor 15–20 dB lower; distortion now clearly measured, third-harmonic dominated.** THD
-  (median over band): 0.3 % 30–150 Hz (at the floor below 100 Hz), 0.4 % 150–400 Hz,
-  **0.7 % 400–700 Hz (peak H3 −38 dB, 1.3 %, 39 dB over its floor)**, 0.3 % 700 Hz–1.2 kHz,
-  ≤ 0.1 % above 1.2 kHz. H2 stays ≤ −49 dB; H4/H5 ≤ −52 dB.
-- The H3 region is the one that stood out at −50 dBFS (510–680 Hz, −53…−58 dB). It rose about
-  15 dB for 20 dB more drive. A pure cubic nonlinearity would rise 40 dB, so the −50 dBFS value
-  was mostly something level-independent (noise/leakage) and the H3 seen here is the speaker.
-  An odd-order (symmetric) nonlinearity in the woofer (the box is two-way) is the likely source.
-  A −40 dBFS run would pin down its growth with level.
-- The daemon logged two "output timing jump 0 → 96000 samples" warnings around arming the
-  sweep; the sweep's arrival (3.45 ms) is unchanged, so the measurement is not affected.
-  (Explained: false timing peaks at the search-range ends during the sweep's low part; see
-  the backlog's Done list.)
-
-
-## New-build check (2026-10-03, ac2 ac82dab, −50 dBFS, from the app)
-
-Daemon and app updated (protocol 7, session format 5; the v4 autosave was set aside as
-`autosave.v4`). Sweep `1083 94cm 50 v2`, 12 s × 2 at −50 dBFS: progress strip ("sweep 2 of 2",
-time left, Stop), REF/MEAS-marked input meters (room noise on the MM1 reads ≈ −65 dBFS), STIM OFF
-after the sweep, "autosaved just now", dB | % toggle with the log % axis. The export is CSV v2
-(sweep info + IR) and re-imports as a sweep: `/home/mui/ac2-1083-sweep5-94cm-50-v2.csv`.
-Arrival 3.62 ms, 0.17 ms (≈ 6 cm) later than the morning's 94 cm runs: the mic or the speaker
-moved slightly in between. The four morning sweeps were re-imported from their v1 CSVs as
-transfer traces (delay kept, distortion not recoverable from v1).
-
-## Independent check of the 2–6 kHz dip (2026-10-03, no ac2 code in the chain)
-
-A Python JACK client on pupu (`~/ac2-test/jsweep.py`, venv `~/ac2-test/venv-meas`) played its
-own 12 s exponential sweep × 2 at −50 dBFS RMS to playback_1 + playback_2 and recorded
-capture_1 (mic) and capture_2 (loopback) in the same JACK cycles; numpy deconvolved mic re
-loopback. Repeat-to-repeat IR difference −36 dB; mic noise −68 dBFS vs −56 dBFS during the sweep.
-
-- **Same answer as ac2:** with ac2's 100 ms window, within 0.5 dB of ac2's sweep in every
-  third-octave band 63 Hz–16 kHz. Plot: `/home/mui/ac2-1083-independent-check.png`.
-- **The dip is in the direct sound:** gated to 3 ms after the arrival (before the floor bounce at
-  +3.44 ms; the only earlier reflection, +2.15 ms at −21.6 dB, can move the level ±0.7 dB at
-  most) it keeps the same shape. At 1/12 octave it is two notches, −9…−11 dB at 1.8–2.1 kHz and
-  −8…−10 dB at 3–4 kHz, with a peak at 2.5 kHz between them, back to ≈ 0 dB by 7 kHz.
-- **Likely cause: woofer–tweeter interference around the one crossover**, i.e. the mic off the
-  axis where the two drivers sum in phase. That is vertical (the drivers are stacked); 102 →
-  94 cm at 1 m is only ≈ 5°. Next: 3–4 heights through the marked reference axis, 15–30°
-  horizontally, and the listening position; check the rear-panel switches.
-
-## Electrical SPL calibration of input 1 (2026-10-04, ac2 54defea)
-
-In-line method: Keysight 34461A in ACV (100 mV range, slow filter) across XLR pins 2–3 of
-input 1 through a breakout, MM1 34804 connected with phantom on, gain as for use. (A first
-attempt read about 2 mV in a silent room: the leads were on one leg and ground, which shows
-half the signal plus common-mode noise; across 2–3 the silent floor reads ≈ 0.00 mV.)
-Daemon ceiling lifted to −30 dBFS for this only (operator's approval), 1 kHz sine at
-−30 dBFS on out 1 + out 2: DMM 4.315–4.325 mV (4.320 mV used), ac2 read −36.0 dBFS →
-0 dBFS = 271.3 mV; with the data-sheet 15.0 mV/Pa → **0 dBFS = 119.1 dB SPL** on input 1
-(±1 dB, labelled "electrical in-line, data sheet"). The tone was ≈ 83.2 dB SPL at the mic.
-Ceiling back at −50 dBFS afterwards. The calibration holds only at this preamp gain.
-
-## SPL log over 32 h (2026-10-04/05, ac2d b97a2c9, `spl leq export`)
-
-FOH SPL (in 1, MM1 34804, electrical cal) logged 2026-10-04 08:59:44 → 2026-10-05 17:13:11 UTC,
-exported over the network in 0.5 s (115 995 rows, 10 MB CSV). Checked with a script against the
-CSV, not against ac2's own summary:
-- **One gap, 13.1 s**, at 2026-10-04 15:15:14 UTC: the daemon redeploy (ac2d started 15:15:16).
-  Since then 26 h of continuous run with no capture discontinuity in `d-net.log` (the fan-out
-  logs every one).
-- Every row a whole measured second (`measured_s` = 1), no non-finite values, LAeq and LCeq never
-  above LZeq, one sensitivity (119.13 dB) throughout, no stuck values. Totals over the log:
-  LAeq 40.1, LCeq 52.7, LZeq 55.8 dB.
-- Row times step by 1 s ± one JACK period (2.67 ms at 96 kHz / 256): the wall time is read per
-  period; the steps alternate and never accumulate.
+FOH SPL (in 1, electrical cal), 115 995 rows, exported over the network in 0.5 s (10 MB CSV),
+checked by script against the CSV:
+- One gap, 13.1 s, at a daemon redeploy; then 26 h continuous with no capture discontinuity.
+- Every row a whole measured second, all finite, LAeq and LCeq never above LZeq, one sensitivity
+  throughout, no stuck values.
+- Row times step 1 s ± one JACK period (wall time read per period); the steps never accumulate.
 - **The interface's sample clock runs +5.56 ppm against the system clock** (NTP), stable to
-  ±0.3 ppm over 20+ stretches of 1 000–25 000 s: 0.48 s per day. A single device is one clock
-  domain, so this is harmless; it is the size of drift `docs/design/multi-device.md` must tell
-  apart from device-to-device drift.
-- After 26 h: ac2d RSS 167 MB, of which 105 MB JACK shared memory and 54 MB its own (one
-  sample, not a trend); the data directory (autosave, log, traces) 9.1 MB in all.
+  ±0.3 ppm: 0.48 s per day. Harmless within one device; it is the size of drift
+  `docs/design/multi-device.md` must tell apart from device-to-device drift.
+- After 26 h: ac2d RSS 167 MB (105 MB JACK shared memory, 54 MB its own); data directory 9.1 MB.
 
 ## Wiring and FF400 reset recovery (2026-10-05)
 
@@ -246,264 +180,52 @@ crosstalk elsewhere below −118 dBFS except the Xone's own L/R (−68 dB):
 | 5 | Xone:62 ch 1 line L (RCA) → master L → in 5, balanced (no speaker on the Xone) | −47.2 dBFS | +2.8 dB |
 | 6 | Xone:62 ch 1 line R → master R → in 6 | −47.2 dBFS | +2.8 dB |
 
-The FF400's jacks: ins 1–4 on the front, 5–8 on the back. In silence in 5/6 hold the Xone's noise
-(−90 dBFS rms) and hum at −111 dBFS (50, 150 Hz). Before 2026-10-08: out 3 → Xone (unbalanced,
-−14.8 dB) → in 5, outs 4–6 → ins 6–8 at −6 dB; the runs and notes below up to that date are on
-that wiring.
+The FF400's jacks: ins 1–4 on the front, 5–8 on the back. In silence ins 5/6 hold the Xone's
+noise (−90 dBFS rms) and hum at −111 dBFS (50, 150 Hz). Findings below dated before 2026-10-08
+used the old wiring (out 3 → Xone, unbalanced, −14.8 dB → in 5; outs 4–6 → ins 6–8 at −6 dB).
 
 In 1 is the MM1 (phantom, mic gain 20); ins 3–4 are empty. Session:
 `session open --backend jack --in 1-8 --outputs 6 --loopback-out 2 --loopback-in 2 --mic "1=MM1 34804"`.
 
-**An FF400 reset (front-panel or bus) takes three steps to recover**, as on 2026-10-05. Since
-protocol 21 ac2 does its part by itself (`docs/design/audio-recovery.md`): within a second of
-the last block the app shows AUDIO STOPPED (`ac2 status`: `audio STOPPED: …`), ac2d closes
-its JACK client off its control thread and keeps reopening the same session (backoff 1 s …
-30 s, the state saying what it waits for, e.g. no JACK server), so after step 1 the session,
-its measurements and the SPL log (with the outage as gap) come back without `session open`;
-the generator comes back disarmed. Restarting jackd and steps 2–3 stay the operator's:
+**An FF400 reset (front-panel or bus) takes three steps to recover.** ac2 does its part by
+itself (`docs/design/audio-recovery.md`): within a second of the last block the app shows AUDIO
+STOPPED (`ac2 status`: `audio STOPPED: …`), ac2d closes its JACK client off its control thread
+and keeps reopening the same session (backoff 1 s … 30 s, reopening at once when JACK reports
+the device back), so after step 1 the session, its measurements and the SPL log (with the outage
+as a gap) come back without `session open`; the generator comes back disarmed. Verified on the
+rig by stopping and restarting jackd. Restarting jackd and steps 2–3 stay the operator's:
 1. The FireWire layer re-creates the device, but jackd keeps the old card open: `snd_card_free`
    blocks in the kernel (`hung task … fw_device_shutdown`), jackd stops answering (`jack_lsp`
    times out) and ac2 gets no audio and no error — the app shows STALE. A hung jackd is not a
    failed one, so its unit does not restart it: `systemctl --user restart jack-ac` once the
-   bus has settled (it exited cleanly on SIGTERM). Before protocol 21 ac2d closed the session after one
-   failed reopen and `session open` as above was needed; now it reopens by itself once jackd
-   answers.
-2. The control service (`snd-fireface-ctl`, user unit) dies with the reset:
-   `systemctl --user restart snd-fireface-ctl`.
-3. The device is back at driver defaults (phantom off, gains 0: the mic read a dead −102 dBFS
-   and failed a clap test; no output reached any input) while ALSA readback still shows the old
-   values. Restore with the toggle writes in `~/src/ac/docs/rigs/pupu.md` ("Restore with toggle
-   writes"; not `ff400.sh`, which forces phantom off) and verify by emission: the table above,
-   mic room noise ≈ −67 dBFS RMS.
+   bus has settled (it exits cleanly on SIGTERM).
+2. The control service dies with the reset: `systemctl --user restart snd-fireface-ctl`.
+3. The device is back at driver defaults (phantom off, gains 0: the mic reads a dead −102 dBFS;
+   no output reaches any input) while ALSA readback still shows the old values. Restore with
+   the toggle writes in `~/src/ac/docs/rigs/pupu.md` ("Restore with toggle writes"; not
+   `ff400.sh`, which forces phantom off) and verify by emission: the table above, mic room
+   noise ≈ −67 dBFS RMS.
 
-
-## Phase 1 hardware run (2026-10-05, ac2d b97a2c9)
+## Phase 1 hardware run (2026-10-05)
 
 JACK at the gate's **48 kHz / 128 frames** (3 periods), session 8 in / 6 out, pink noise
-−63 dBFS RMS on outs 2–6 (the electrical loops; out 1 unconnected — −50 dBFS RMS was refused
-by the peak ceiling), four transfer measurements against the in 2 loopback plus the running SPL
-meter and a 65536-point spectrum. Sampled every 5 min for 65 min (noise ran 92 min):
+−63 dBFS RMS on outs 2–6 (electrical loops; out 1 unconnected), four transfer measurements
+against the in 2 loopback plus the SPL meter and a 65536-point spectrum, 65 min:
 
-- **0 xruns** (`jackd` log), **0 capture discontinuities** (ac2d log).
+- **0 xruns**, **0 capture discontinuities**.
 - CPU (one core of the i5-2415M): ac2d 28–36 %, jackd 6–9 %.
-- ac2d anonymous memory 666 MB, growing 16 kB per 5 min (≈ 55 B/s: the per-second SPL log
-  held in memory, bounded by its 48 h retention). The 666 MB against 54 MB at 96 kHz with
-  SPL + spectrum only is the four transfer ladders' state — worth a look (backlog).
-- Results against the expected answer (ref in 2 reads +2.4 dB, rear ins −6 dB → −8.4 dB):
-  lines 6/7/8 −8.38…−8.65 dB, flat within 0.2 dB 31 Hz–20 kHz, coherence ≥ 0.9987, delay
-  0 samples; phase 0° mid-band, −7.7° at 31 Hz (different input coupling corners). The Xone
-  path: −17.4 dB at 1 kHz (expected −17.2), rising +1.8 dB to 20 kHz with −22° there, and
-  coherence down to 0.94 (0.98 at 50 Hz: mains hum in the mixer path).
-- Afterwards JACK went back to 96 kHz / 256 and the session reopened; the FF400 kept its
-  settings over both JACK restarts (mic alive, tone levels unchanged at 48 kHz).
+- ac2d anonymous memory 666 MB, growing ≈ 55 B/s (the per-second SPL log, bounded by its 48 h
+  retention). The 666 MB against 54 MB with SPL + spectrum only is the four transfer ladders'
+  state (backlog).
+- Lines read their expected gain within 0.2 dB, flat 31 Hz–20 kHz, coherence ≥ 0.9987, delay 0;
+  phase −7.7° at 31 Hz (input coupling corners). Xone path −17.4 dB at 1 kHz (expected −17.2),
+  coherence 0.98 at 50 Hz (mains hum in the mixer path).
+- The FF400 kept its settings over both JACK rate changes.
 
-## Deploy of 645f5ec and audio recovery on the rig (2026-10-06)
+## REW cross-check, electrical (2026-10-07, REW 5.40 beta 135)
 
-Deployed 645f5ec (protocol 21, session format 9). The format-8 autosave was set aside as
-`autosave.v8` as expected; before the deploy `state dump`, `spl leq export` (48 h, 15 MB) and a
-CSV export of each of the 10 traces were saved (`/work/ac2-scratch/deploy-645f5ec/` on the dev
-host). Afterwards FOH SPL (with its five C windows, limits 70 dB, warn 3 dB, horizon 1 min),
-Spectrum 1/2 and TF 1 were recreated with `meas new` / `spl leq set`, and the 10 traces imported
-(the four test transfer measurements of the phase 1 run were not recreated). Calibration survived
-(the store's format did not change). A CLI `gen pink` from the phase 1 run on ketunkolo had never
-exited; the new daemon refused it at protocol 14 and it was killed.
-
-**Recovery, real hardware:** `pkill -TERM jackd` at 19:03:13 UTC → within the same second the
-daemon logged the host ending the stream; every pane showed `AUDIO STOPPED · audio host ended
-the stream at 22:03`, the top bar `audio stopped · reopening (attempt 3, next in 3 s)`, `ac2
-status` the backend's reason ("No JACK server: start JACK"). jackd started again at 19:03:32 →
-the session reopened by itself on attempt 6 at 19:03:44 (the next backoff step), epoch 2, the
-same measurements running, SPL fresh, the Leq caption counting "offline 31 s"; the FF400 kept
-its settings. Not tried: a hung (not stopped) jackd, as after the FF400 reset.
-
-## Deploy of 360c6b8 (2026-10-07)
-
-Protocol 23, session format 10 (math channels, Settings, stimulus by view). Same procedure as
-645f5ec: `state dump`, both SPL meters' logs and all 8 traces saved first
-(`/work/ac2-scratch/deploy-360c6b8/` on the dev host); after the swap the six measurements were
-recreated (FOH SPL with five C windows at 70 dB; a second FOH SPL with `--preset din15905`,
-which brings LAeq 30 min ≤ 99 and LCpeak ≤ 135; Spectrum 1 at 1/3 oct, Spectrum 2 unsmoothed;
-TF 1 stopped, TF 2 running) and the traces imported hidden. The system max level reads −50 dBFS,
-the `--max-level` bound; changes made in Settings now persist in the daemon's `rig.json`.
-
-**Reopen probe, real hardware:** jackd stopped and started again 6 s later; the daemon logged
-"the audio device is back: reopening now" and reopened at once (8.1 s without audio in all,
-against 12 s after jackd's return with the backoff alone on 645f5ec).
-
-## Deploy of 1303a63 (2026-10-07)
-
-Protocol 24, session format 11 (measurement tree, sweep as a measurement kind, IR/sweep zoom
-and cursor). Backup in `/work/ac2-scratch/deploy-1303a63/`; restored as for 360c6b8, plus the
-operator's two math channels on stored traces (`ac2 math new --name … --op div --a "1083 94cm"
---b "1083 94cm -30" --imported --start`, and `-30 ÷ 50 v2`), which came back with the same ids.
-
-## Deploy of a680dcd (2026-10-07)
-
-ac2d only (protocol 24 and the session format unchanged since 1303a63; the apps stay): math
-channels form a result only when a live operand has one. `bin.prev` is 1ae159c (what ran
-before). Deployed with the user unit (`systemctl --user stop/start ac2d`), session reopened
-from ketunkolo. Per-topic traffic over 30 s with a throwaway CURVE subscriber on the Pi:
-689.7 → 238.2 KiB/s (the two ÷ channels of stored traces 30 → 3.8 msg/s, the spectrum sum
-30 → 17.4 msg/s); ac2d CPU over 60 s 60 → 48 % of a core (the sum's thread 20.8 → 13.0 %).
-
-## Deploys 35f6ca4 … eb74253 (2026-10-08/09, all three hosts)
-
-Four deploys of the band Leq work, each a session format change (13 → 17), so each was the
-restore from the previous one: `autosave.vN` set aside by the new daemon, a `restore.sh`
-recreating measurements 1–14 in id order, `trace import` of `autosave.vN/traces/*`
-(copied to ketunkolo with `scp -3`), then the band and Leq presets. Backups and scripts in
-`/work/ac2-scratch/deploy-<sha>/` (state dump, `restore.sh`); the newest is
-`deploy-eb74253/` (protocol 32, session format 17, 14 measurements, 52 traces).
-- Not recreated: the `xc-*` / `xc-dut-*` measurements; `tools/crosscheck` makes its own.
-- State at eb74253: FOH SPL (1) Leq preset `finland-545` (LAeq 4 h 100, LAFmax 115,
-  LCpeak 140) and band preset `finland-545-lf`; FOH SPL (5) Leq `din15905` and band
-  `finland-545-lf`; no band transfer measured. TF 2 stays stopped after the restore.
-- The script's `session open` is the one in the state dump (8 in, 6 out, loopback 2→2, mic
-  MM1 34804 on in 1); check `session open --help` still takes its flags before running it.
-- The Pi's cross build (`~/src/sys/ac2pi/build-ac2.sh`) reused crates built from an earlier
-  checkout once and failed on types the checkout no longer had; touching the sources
-  (`find crates -name '*.rs' -exec touch {} +`) fixed it.
-
-## Deploy of 2c07efef (2026-10-11, all three hosts)
-
-Protocol 43, session format 25. This build adds:
-- the spectrum level choice, tone or density (dBFS/Hz). New multi-resolution spectra start
-  on density, so they agree with a fixed FFT on broadband sound; fixed FFTs stay on tone;
-- list rows that follow the operator's model: a live curve, math channel or stored trace row
-  goes into the focused pane only, and only a measurement row brings its own panes, so two
-  spectrographs of different measurements stay side by side;
-- release builds without cross-crate LTO (a rebuild after an ac2-ui change takes 20 s, not
-  126 s).
-
-The new daemon set `autosave.v24` aside, and `session salvage /tmp/autosave.v24` restored
-all twelve measurements, the crosscheck sweeps included. The multi-resolution Spectrum 3
-came back on tone, as it was. The Pi cross build took 3 min 43 s.
-
-The Pi kiosk did not stay on FOH SPL. While salvage was creating the measurements, it fell
-back to TF 1, then installed TF 1's own panes when that layout arrived, and saved them in its
-`ui.toml`. It was put back on FOH SPL by hand; the old file is kept as `ui.toml.bak-tf1`.
-0fef18ea fixes this: a pane whose measurement disappears waits for that name to come back, and
-a fallback selection never installs a layout. Only the app was deployed, to ketunkolo and the
-Pi; pupu's ac2d stayed on 2c07efef, since the protocol did not change.
-
-## Deploy of c7bd24b1 (2026-10-11, all three hosts)
-
-Protocol 42, session format 24. This build adds:
-- the multi-resolution spectrum, with its window changes marked on the plot;
-- `ac2 session salvage`;
-- the linear IR sent as 16-bit block floating point;
-- the Sessions dialog fixes;
-- the client dropping frames for topics it has unsubscribed from.
-
-It was the first format change restored with salvage, and nothing was rebuilt by hand. The
-new daemon set `autosave.v23` aside. It was copied to ketunkolo by way of the build host,
-because ketunkolo has no SSH host key for pupu. After `session open --in 1-10`,
-`session salvage /tmp/autosave.v23` restored FOH SPL, TF 1, Spectrum 1 (with its own panes),
-TF 2, Spectrum 2 and the trace "TF 1 S1". It skipped only the per-second Leq history.
-
-On ketunkolo, `frame_probe` measured Spectrum 1 (32768 points) at 23.6 frames/s. Every
-`audio_sample` step was 4096 and frames were 9.2 ms old at arrival (p50). On start, ac2d now
-warns that ufw is enabled on pupu; remote clients connect as before.
-
-## Deploy of 303d02a9 (2026-10-11, all three hosts)
-
-Protocol 40, session format 23. Pane layouts are stored with the measurement (`meas.layout`).
-Tab stops on live-curve rows. Two causes of spectrum frame drops are fixed: an animation
-frame now moves every pane that is in motion (while the Leq bars eased, the spectrum glide
-stopped for 0.3 s every second), and a spectrum frame is stamped at the end of its FFT frame.
-The new daemon set the format-22 autosave aside as `autosave.v22`. The audio session was
-reopened with 10 inputs (`--in 1-10`), as the operator had it, and the measurements were made
-again by hand from that autosave's `session.json`: FOH SPL, TF 1 (stopped), Spectrum 1
-(65536, Hann, 1/24 smoothing) and TF 2 (ref 9 → meas 1). The capture "TF 1 S1" was brought
-back with `trace import`; it now sits under Imported, not under TF 1. A `meas new … --start`
-on an input the session does not capture creates the measurement and then fails, so the
-first attempt at TF 2 left a stopped copy behind (deleted). On ketunkolo, `frame_probe` showed Spectrum 1
-at 11.75 frames/s with every `audio_sample` step exactly 8192, capture spacing 82.9–87.0 ms
-(it had been 66–100 ms before) and frames 9.6 ms old at arrival (p50).
-
-## Deploy of 6f0e5b57 (2026-10-11, all three hosts)
-
-Protocol 39, session format 22. One deploy for a round of features: live frame arrays packed
-(16-bit curves in one deflated payload) and the daemon publishing at 60 fps on network
-transports too; Sessions dialog (Alt+S); transfer Magnitude view and the Response stack;
-FFT size, window and colour editable after creation; F full screen; Audio and Inputs &
-outputs on one Settings page; IR import form. `transfer_view = "response"` in `ui.toml` was
-changed to `"magnitude"` on ketunkolo and the Pi, each with its app stopped, because the old
-value makes the app drop the whole `[layout]` section. The operator had the pupu session
-cleared just before; the old autosave is kept as `autosave.scratched-2026-10-11`. Only
-"FOH SPL" was made again (in 1, C/slow, LCeq 1–60 min ≤ 80 dB, LCpeak 140, LAFmax 115,
-`finland-545-lf` bands), and its settings match the old autosave exactly. On ketunkolo,
-`frame_probe` showed levels at 60.1 frames/s with no skipped sequence numbers, frames
-1.0 ms old at arrival (p50). The fake-rig tuning session in `crates/ac2d/tests/wire_size.rs`
-went from 7.6 Mbit/s at 30 fps to 3.2 Mbit/s at 60 fps (`docs/design/wire-slim.md`).
-
-## Deploy of 4784ea9f (2026-10-10, all three hosts)
-
-Protocol and session format unchanged. A slow result is sent as soon as it is ready instead of
-waiting for its slot, and the app reads frames as they arrive. `frame_probe` from ketunkolo
-showed spectrum frames 83 ms apart (p50). The 1 frame/s pauses in the app on ketunkolo came
-from X screen blanking, not from ac2: the screen saver was turned off and DPMS kept at 60 min.
-
-## Deploy of 1e026209 (2026-10-10, all three hosts)
-
-Protocol 35, session format 20 (unchanged): the Leq and band Leq bars glide 0.3 s to each new
-reading (Settings › Display › Leq bars). Binary swap; the restarted ac2d restored 32
-measurements and 84 traces, the session reopened with the usual `session open` line; JACK
-left running, `--max-level -50` kept. The Pi kiosk reconnected. Earlier the same evening the
-host this repo lives on crashed: 34 loose objects of an unsynced commit were left 0-byte in
-the shared `.git` (`git fsck`; deleted, then committed again).
-
-## Deploy of 684d610 (2026-10-10, all three hosts)
-
-Protocol 35, session format 20, text export v5: per-measurement Resolution (1/12 … 1/96
-octave) for transfer and sweep measurements and the resolution marker (Settings › Display ›
-Resolution marker); also carries 0b923ca (Shift+N turns a split, Alt+Left/Right and drag
-resize). The new daemon set `autosave.v19` aside. Before the swap the 26 measurements and 73
-traces were dumped with the old CLI (`meas list --json`, `trace list --json`, every trace
-exported) to `/work/ac2-scratch/deploy-684d610/`; `gen.py` there writes `restore.sh`, which
-recreated the 26 measurements (ids 32–36 renumbered 22–26; the SPL presets and the Genelec
-TF's 3.630 ms delay set again) and imported the 73 traces. Traces that belonged to a
-measurement came back under Imported (restore fidelity is low priority for the operator).
-
-## Deploy of 8b87f49 (2026-10-09, all three hosts)
-
-No protocol or session format change (protocol 34, session format 19): a plain swap, the
-daemon restored its autosave and `session open` reopened audio. New for the operator: a mic's
-curve now applies to sweeps through that input as well (a display edit on the stored trace,
-`meta.mic_curve`; the columns stay raw), and spectrum/RTA averaging is settable (`ac2 meas
-new spectrum|rta --average off|fifo:N|exp:T`, `ac2 meas set`, the Edit spectrum/RTA dialogs).
-
-## Deploy of 2416a06, then 511efb0 (2026-10-09, all three hosts)
-
-Protocol 33, session format 18 (LF harmonics standard / fine): the c618724 deploy's state was
-the restore's source. The new daemon set `autosave.v17` aside; `restore.sh` from
-`deploy-eb74253/` with the trace path changed recreated measurements 1–14 and imported its 55
-traces (backup and script in `/work/ac2-scratch/deploy-2416a06/`). 511efb0 (fine's shared
-windows) was a plain swap. `ac2-jack-dut` was not in `~/ac2-test/bin` (only `bin.old`); rebuilt
-from `tools/jack-dut` and copied there: the swap's `cp -f bin.new/* bin/` keeps it now.
-
-## Deploy of c618724 (2026-10-09, all three hosts)
-
-Protocol 32 and session format 17 as at eb74253, so a plain binary swap: the daemon restored
-its autosave (14 measurements, 55 traces) and `session open` reopened audio; no restore
-script. New for the operator: Settings › Display › *Warning toasts* (also Ctrl+K), which
-keeps warnings and Leq limit alarms out of the corner toasts during deliberate over-limit
-testing; they still land in the notification log.
-
-## Deploy of 6136f8a (2026-10-07, all three hosts)
-
-Protocol 25, session format 12 (a measurement's delay steps kept apart from its measured
-arrival, colour families, toasts sized to their text with a log, no calibration line on the
-SPL stage). Backup in `/work/ac2-scratch/deploy-6136f8a/` (state, SPL logs, 15 traces as
-CSV). The restore is now a script, `restore.sh` there, generated from the state dump: it
-recreates the 13 measurements in id order so ids match, then imports the traces and moves each
-under its owner, slot and visibility, then sets TF 2's delay (44 samples). Run it from
-ketunkolo only after ketunkolo has the new CLI: the old one is refused at the protocol check.
-The PipeWire bridge REW uses (see below) stayed up across the `ac2d` restart.
-The Pi's kiosk must be restarted after its nfsroot update; the old one is refused as
-protocol 24 until then.
-
-## REW cross-check, electrical (2026-10-07, ac2d a680dcd, REW 5.40 beta 135)
+Current standings per quantity: `tools/crosscheck/comparison.md`; how to run:
+`tools/crosscheck/README.md`.
 
 REW runs on pupu itself (`~/REW`, headless on Xvfb `:5`, its API on localhost:4735, the GUI
 driven with xdotool). REW talks only ALSA and jackd owns the FF400, so REW reaches the
@@ -515,387 +237,114 @@ duplex tunnel client `pw_rew` with `jack.connect = false`;
 so PipeWire never opens the FF400 or the onboard card. The tunnel is wired by hand after each
 PipeWire start (a restart leaves it unconnected): `pw_rew:playback_FL → system:playback_2`,
 `playback_FR → system:playback_3`, `system:capture_5 → pw_rew:capture_FL`,
-`system:capture_2 → pw_rew:capture_FR`. In REW: device "PCM: pipewire", stereo only, input L,
-reference input R, Measure with "loopback as cal and timing reference", reference output L.
-Checked with a −60 dBFS REW sine: in 2 −57.6, in 5 −74.9 dBFS (the wiring table), no tone on
-ins 1, 3–4, 6–8. Dead ends: the alsa-plugins `jack` PCM (arecord works, REW's Java sound
-refuses every format on it) and `snd-aloop` (not built for the RT kernel). REW's API starts
-measurements only with a Pro licence; device, generator and reading results work without.
+`system:capture_2 → pw_rew:capture_FR` (as on the pre-2026-10-08 wiring;
+`tools/crosscheck/rigs/pupu.toml` has the current ports). In REW: device "PCM: pipewire",
+stereo only, input L, reference input R, Measure with "loopback as cal and timing reference",
+reference output L. Dead ends: the alsa-plugins `jack` PCM (REW's Java sound refuses every
+format on it) and `snd-aloop` (not built for the RT kernel). REW's API starts measurements only
+with a Pro licence; device, generator and reading results work without. The PipeWire bridge
+stays up across an ac2d restart.
 
-Path: out 3 → Xone → in 5, reference out 2 → in 2. Ground truth: in 5 ÷ in 2 computed directly
-(numpy, cross-spectrum over the whole recording, 1/48-octave bands) from a recording of the
-same path.
+Path: Xone → in 5, reference out 2 → in 2; ground truth in 5 ÷ in 2 by direct cross-spectrum
+(numpy, 1/48 octave) of the same recording. ac2's sweep agreed with REW's offline import within
+0.02 dB mean, with the truth within ±0.17 dB below 100 Hz and ±0.03 dB above 1 kHz, ±0.65°.
 
-| comparison (1/48 oct, 31 Hz – 20 kHz) | magnitude | phase |
-|---|---|---|
-| ac2 sweep −50 dBFS vs REW offline import (same recording as truth) | ≤ 0.02 dB mean, ±0.08 dB below 100 Hz, ±0.02 above 1 kHz | — |
-| ac2 sweep −50 dBFS vs truth | ±0.17 dB below 100 Hz, ±0.03 dB above 1 kHz | ±0.65° |
-| ac2 sweep −30 dBFS vs REW live −30 dBFS (constant offset removed, see below) | ±0.017 dB below 100 Hz, ±0.005 dB above 1 kHz | ±0.7° |
-| ac2 transfer (pink-noise style FIFO of 8 blocks) fed one REW sweep | only where γ² ≥ 0.99 (138 points): 0.074 dB max | — |
+**Level convention.** At 1 kHz ac2 read −17.33 dB, REW live −44.87 "dBFS" for a −30 dBFS
+sweep. ac2 reports measurement ÷ reference (the dual-channel convention: 0 dB means the
+measurement point carries what the reference point carries), so the loopback's own +2.4 dB
+gain is in the number: −14.9 − 2.4 = −17.3 dB. REW's "loopback as cal" uses the loopback only for
+timing and shape and keeps the measurement channel's level re the digital stimulus:
+−44.87 + 30 = −14.87 dB. Both are right for what they state; ac2's sweep reports the difference
+as `reference_level` ("reference +2.3 dB" in `ac2 ir` / `sweep run`).
 
-The live transfer measurement is not a sweep analyser: with the default 8-block FIFO a one-shot
-sweep leaves the average seconds later and coherence drops to 0.0001 there, which it shows.
-REW's offline import refers each channel to its own timing marker, which removes the 3.7 µs
-between in 5 and in 2 (a constant 3.25 µs in phase); live, with the loopback as timing
-reference, REW keeps it (3.7 µs, as the direct computation).
+**Delay and group delay.** The path delay is 3.7 µs (REW and direct cross-spectrum); ac2 keeps
+the sub-sample part in its phase, which agrees with REW's
+(`docs/design/subsample-arrival-group-delay.md`). Phase against steady sines: ac2 within 0.03°
+from 31.5 Hz, REW 0.66° off at 16 Hz. Group delay as a central difference of neighbouring
+1/48-oct columns was off by up to 31 % at 20 Hz (a 0.03° phase ripple differentiated over
+0.6 Hz); a slope fitted over ±1/12 oct is within 7 % from 16 Hz.
 
-**Level convention.** At 1 kHz: ac2 −17.33 dB, REW live −44.87 "dBFS" for a −30 dBFS sweep.
-A sine probe gives out 3 → in 5 −14.9 dB and out 2 → in 2 +2.4 dB (in 2's preamp trim). ac2
-reports measurement ÷ reference, −14.9 − 2.4 = −17.3 dB, the dual-channel convention: 0 dB means
-the measurement point carries what the reference point carries, so the loopback's own gain is
-in the number. REW's "loopback as cal" uses the loopback only for timing and shape (normalised to
-0 dB) and keeps the measurement channel's absolute level re the digital stimulus: −44.87 + 30 =
-−14.87 dB, the path's gain re what was emitted. Both are right for what they state; ac2's sweep
-already measures the difference (`reference_level`, 2.33 dB on this run, "reference +2.3 dB" in
-`ac2 ir` / `sweep run`).
+**Hand-script level convention.** Early steady-sine scripts (`~/rew-dl/jsine.py`, `jphase.py`)
+scaled "−30 dBFS" as a peak of √2·10^(−30/20), i.e. −27 dBFS in the full-scale-sine convention
+ac2 and REW use. `tools/crosscheck` uses the full-scale-sine convention throughout and asserts
+it.
 
-**Harmonic distortion disagrees** (−30 dBFS; the operator allowed −30 for electrical paths
-only, ac2d raised with a runtime drop-in and returned to −50 afterwards). Ground truth: steady
-sines at −30 dBFS (`~/rew-dl/jsine.py`, Blackman FFT of 2 s): the Xone path shows H2/H3 ≈ −71
-… −80 dBr at every frequency (bin noise −108 dBr); the loopback alone is clean (−110 … −120).
+### Low-frequency harmonics on electrical paths: what was found
 
-| f | truth H2 | ac2 sweep H2 (its floor) | REW live H2 |
-|---|---|---|---|
-| 20 Hz | −75 | −53 (−75) | −90 |
-| 31.5 Hz | −71 | −60 (−82) | −87 |
-| 50 Hz | −73 | −69 (−87) | −97 |
-| 100 Hz | −76 | −86 (−84) | −92 |
-| 1 kHz | −79 | −79 (−80) | −88 |
+The suite drives electrical paths up to −10 dBFS (`electrical_max_dbfs`, backstop −6 in code;
+the speaker stays at −50). Baselines in `tools/crosscheck/baselines/pupu/`. Each finding below
+was an apparent LF H2 excess on the Xone path; the conclusions hold for any path:
 
-ac2 overstates H2 below about 63 Hz (22 dB at 20 Hz, falling about 6 dB per third octave) while
-calling it well above its floor: an onset artefact, see "Low-frequency H2 near the sweep's start" below. Above 100 Hz ac2 agrees within a few dB
-but places the harmonics at its own floor; REW reads 8–15 dB below the steady sines throughout,
-unexplained. At −50 dBFS both are floor-limited.
+- **Onset and DC-blocking reference.** The loopback (out 2 → in 2) has the interface's
+  DC-blocking high-pass, 29 dB below the emitted sweep at 1 Hz, so the reference meets the
+  deconvolution's regularisation (−60 dB re peak) near 2 Hz with a steep edge. That edge rings
+  as a 0–6 Hz swell around the arrival, which the short harmonic windows' side lobes carry into
+  the 40–60 Hz bands (+22 dB at 22 Hz on a 20 Hz sweep; a linear prediction of the path read the
+  same, so not the Xone). Fixes: the emitted sweep starts two octaves below the asked start
+  (`docs/design/sweep-distortion.md`), and the harmonic and noise windows read the response
+  through a fourth-order **minimum-phase** Butterworth high-pass at 0.75 × the lowest analysed
+  fundamental. A zero-phase high-pass rang before the arrival into H2's window
+  (−L·ln 2 ≈ −0.49 s); minimum phase rings only after it (linear prediction −136 dBr); eighth
+  order lifts the noise windows.
+- **Truth net of the reference.** ac2 divides by the measured reference, so harmonics the
+  reference carries (RME DA out 2 → AD in 2, H2/H3 ≈ −98/−104 dBr at LF) come off the
+  measurement's. ac2's sweeps are judged against D_m − T(k·f)·D_r with the sine stage fitting both
+  inputs' harmonic phasors jointly with the fundamental (one at a time leaks ~45 dB); REW, which
+  deconvolves each input by its own stimulus, against the meas input alone.
+- **Mains bands.** pupu shows a line at every 50 Hz multiple to 2 kHz; a harmonic whose ±17 Hz
+  band holds one cannot be judged. The Xone tones (15, 26.25, 35, 40.5, 56.2, 60.5, 93.9, 1040,
+  10000 Hz) each keep at least two of H2..H5 clear (`tests/test_rig_tones.py`).
+- **The Xone's own H2 rise after a fade-in.** A sweep starting at 20 Hz crosses 20–26 Hz within
+  0.2 s of full level; the Xone's H2 there reads 3–4 dB high for the first ≈ 100 ms (steady
+  22 Hz after a glide: −94.3 dBr at 50 ms, −98…−99.5 from 200 ms; the loopback stays flat). Real,
+  in the capture. The suite reports a sweep that reaches 22 Hz less than `lf_onset_settle_s`
+  (0.3 s) after full level as INFO.
+- **Hum bursts on in 5/6.** 35–95 Hz bursts of −84…−92 dBFS, 0.5–0.75 s every ≈ 2.2 s, over a
+  quiet −118, identical on ins 5 and 6 (correlation 0.9995, L − R −120.7 dBFS); the loopback and
+  ins 7–8 clean at −128. A burst while the sweep passes f lands in f's harmonic windows; its
+  level in dBFS does not follow the drive, so it is added, not generated. ac2 now reads each
+  harmonic's floor in the IR gaps beside its window (the noise of the same moment) and takes it
+  where it is 3 dB over the post-roll's: such cells are bounds, on ac2 and REW alike. Passive
+  captures: the bursts need the FF400 ↔ Xone cable loop (gone with out 5 unplugged, back on any
+  FF400 output, not the Xone channel strip, not CPU load). The FF400 (AC transformer supply) and
+  pupu (Mac mini, Class II) have no PE; the only ground ties are the FireWire and audio cable
+  shields. Most likely switched loads next door coupling into that shield loop; source not
+  located.
 
-**Delay, ETC, group delay** (same −30 dBFS runs; REW's IR fetched with the default unit and
-`normalised=false` — `?unit=dBFS` returns log-scaled values).
-
-- Delay: REW 3.69 µs (its IR peak 3.70 µs), the direct cross-spectrum 3.70 µs. ac2's sweep
-  reports `arrival 0.00 ms`: it places the arrival in whole samples (10.4 µs) and the 3.7 µs
-  stays in its phase, which agrees with REW's. Sub-sample arrival:
-  `docs/design/subsample-arrival-group-delay.md`.
-- ETC: ac2's is 5–8 dB wider than REW's within ±2 ms of the peak because ac2 swept to 40 kHz
-  and REW to 48 kHz; REW band-limited to 40 kHz agrees within 1–2 dB. The 5–100 ms tail (the
-  Xone's LF high-pass) agrees within 2 dB; ac2's noise floor is about 6 dB higher (shorter
-  sweep, −98 vs −104 dB).
-- Phase against steady sines (`~/rew-dl/jphase.py`: least-squares sine fit of in 5 / in 2, no
-  window): ac2 within 0.03° from 31.5 Hz up and 0.17° at 16 Hz, magnitude within 0.04 dB; REW
-  0.66° off at 16 Hz.
-- Group delay: steady-sine pairs give 1535 / 1054 / 459 / 187 / 49 / 3.2 µs at 16 / 20 / 31.5 /
-  50 / 100 / 10 k Hz. ac2's displayed group delay (central difference of neighbouring 1/48-oct
-  columns) is off by −31 % at 20 Hz, +17 % at 31.5 Hz, −13 % at 50 Hz: a 0.03° phase ripple
-  (period ≈ 1.1 Hz at 20 Hz) differentiated over 0.6 Hz. The same phase with the slope fitted
-  over ±1/12 oct is within 7 % from 16 Hz; REW's within 5–14 %. Design:
-  `docs/design/subsample-arrival-group-delay.md`.
-
-### Low-frequency H2 near the sweep's start (2026-10-07, −30 dBFS, electrical)
-
-Same Xone path. H2 in dBr; steady sines: −75 at 20 Hz, −71 at 31.5 Hz, −73 at 50 Hz, and
-−87.8 / −84.0 / −87.0 / −77.3 / −73.3 at 11 / 13 / 15 / 18 / 22 Hz.
-
-| run | 22 Hz | 25 | 31.5 | 40 | 50 |
-|---|---|---|---|---|---|
-| ac2, 10 Hz – 40 kHz, 5.5 s (first run) | −53.6 | −55.7 | −59.5 | −63.9 | −69.4 |
-| ac2, same, repeated | −60.6 | −62.5 | −66.1 | −71.3 | −75.5 |
-| ac2, start 3 Hz | −74.6 | −78.6 | −83.8 | −85.0 | −88.8 |
-| ac2, 10 Hz, 11 s | −82.9 | −84.8 | −88.5 | −92.5 | −93.4 |
-| ac2's sweep played with `jplayrec` (outside ac2d), ac2's analysis replicated in numpy, two takes | −57.1 / −59.5 | −58.7 / −60.9 | −61.3 / −63.6 | −66.9 / −68.8 | −74.9 / −76.4 |
-| same, fade-in 300 ms instead of 77 ms | −68.4 | −71.0 | −71.7 | −72.5 | −73.9 |
-| same, fade-in 25 ms | −64.8 | −65.6 | −67.8 | −71.5 | −75.6 |
-
-From 63 Hz up every run reads −74 … −78 dBr, as the sines. So the excess is real in the
-capture (not ac2d's playback), is not distortion of the path (steady sines below 20 Hz are
-cleaner than at 20 Hz), disappears when the first two octaves of the sweep lie below the
-analysed band (3 Hz start) or the sweep is slower, depends on the fade-in without being
-monotonic in it, and varies 3–7 dB between identical runs. Below 30 Hz the clean loopback
-shows the same level as in 5 when demodulated at twice the instantaneous frequency, so a
-direct time-domain view cannot separate it there; at 40–100 Hz the demodulated H2 of in 5 is
-−72 … −77 dBr. Mechanism unproven: a transient of the path near the onset that the LTI
-deconvolution books as harmonics. ac2's sweep now starts two octaves below the asked start at a
-rising level, so the onset lies below the reported band; the harmonic window's rise was also lengthened to a third of the window
-(the lowest columns read about 2 dB low before, numpy replica). Scripts for these runs lived
-in the session scratchpad; `jsine.py` and `jphase.py` stay on pupu in `~/rew-dl`.
-
-**Mechanism (offline, 2026-10-07, the crosscheck captures of runs 114727Z–170514Z).** Not the
-path and not an onset transient: replacing in 5 by the linear prediction (the analysed IR
-convolved with in 2) reproduces ac2's H2 at 22 Hz to 1 dB (−62.8 vs −63.8 dBr on 170514Z
-`dist`). The loopback (out 2 → in 2) has the interface's DC-blocking high-pass: its spectrum
-is 29 dB below the emitted sweep's at 1 Hz and 14 dB at 2 Hz, so the reference reaches the
-regularisation (−60 dB re its peak) at about 2 Hz with a steep edge. The division turns over
-there, and that edge rings as a zero-phase 0–6 Hz swell around the arrival: −22 dBr at
-±0.1 s, −40 dBr at −0.5 s (H2's window for L = 0.7 s), −43 … −90 dBr in the post-roll noise
-windows. The harmonic window (0.1 s, 13 ms fall) carries it about 25 dB down into the
-40–60 Hz bands. The 10 Hz / 5.5 s requests read the same H2 (−60 … −63 dBr) but their noise
-windows sit on the swell as well, so it shows only as a high floor; which side wins on a
-20 Hz request varies run to run. Fix: the harmonic and noise windows are taken from the
-response high-passed (raised cosine in log f) from the emitted start to the lowest analysed
-fundamental; the H1 window, linear response, IR and room keep the full response.
-
-**Level convention of the hand scripts (correction).** `jsine.py`, `jphase.py` and the E3 replica
-sweeps scaled a "−30 dBFS" level as a peak of √2·10^(−30/20); in the full-scale-sine convention
-ac2 and REW use (0 dBFS = a full-scale sine) that is −27 dBFS — 3 dB above the −30 allowed for
-the electrical path (Xone only; out 1 was never driven by them) and 3 dB above the ac2 and REW
-sweeps they were compared with. The steady-sine H2 "truth" above is therefore about 3 dB high
-for a second-order term (≈ 1 dB per dB) relative to a true −30 dBFS; the onset excess (13–22 dB)
-and the group-delay and phase comparisons (level-independent) are unaffected. The cross-check
-suite (`tools/crosscheck/`) uses the full-scale-sine convention throughout and asserts it.
-
-## First `tools/crosscheck` runs (2026-10-07, ac2d badbfc1 → 2638893)
-
-Suite runs from the dev host (`tools/crosscheck/rig-run.sh`); REW speaker stimulus
-`~/rew-dl/sweep96k-20-20k.wav` (20 Hz–20 kHz, 512k, peak −50 dBFS, saved from REW's
-generator through the GUI). Reports in `tools/crosscheck/runs/` on the dev host (git-ignored).
-
-| run | build | stages | FAIL | WARN | PASS | INCONCLUSIVE |
-|---|---|---|---|---|---|---|
-| 20261007T100854Z | badbfc1 | ambient, Xone −50 | 32 → 0 after suite triage | 32 → 8 | 117 → 156 | 140 → 162 |
-| 20261007T104217Z | 3309fff | Genelec −50 (audible, operator present) | 64 → 3 after triage | 25 → 13 | 41 → 75 | 104 → 161 |
-| 20261007T113432Z | 2638893 | Xone −50 | 2 (REW's own GD fit) | 1 | 175 | 156 |
-| 20261007T114727Z | 2638893 | Xone −30 (drop-in, removed after) | 0 | 1 (REW GD at 97 Hz) | 186 | 143 |
-
-Most first-run failures were the suite's: it compared ac2's phase, now referred to the
-sub-sample arrival, with absolute steady-sine phase (13° at 10 kHz for 3.6 µs; on the speaker
-path the 3.6 ms delay wrapped band sums into +15…+33 dB "differences"); noise-floor and mains
-handling; REW's offline import refers each channel to its own timing marker, so its path delay
-is put back from the direct estimate. Two were ac2's and are fixed in 2638893: the sweep's
-reference level read the matched-filter peak, which weights the 20–40 kHz anti-alias roll-off
-(−0.125 dB; now the mid-band gain, −0.006 dB vs steady sine), and an f32 rounding of the output
-limit refused pink noise whose peak sat exactly at the limit at −50/−60 dBFS.
-
-Xone −30 dBFS, 2638893, ac2 sweep 10 Hz–40 kHz 5.5 s:
-
-- vs REW offline import: magnitude +0.003 / +0.002 / +0.009 dB, phase +0.09 / +0.01 / +0.01°
-  (20–100 / 100–1000 / 1000–20000 Hz).
-- vs steady sines: phase +0.041° at 20.5 Hz, +0.004° at 31.5 Hz, +0.0004° at 1 kHz; group delay
-  (±1/12-oct fit) +2.3 % at 20.5 Hz, +0.2 % at 31.5 Hz, +7.6 % at 47.8 Hz, −0.09 µs at 1 kHz,
-  +0.01 µs at 10 kHz. Before the column-centre fix the displayed GD was ±30 % below 100 Hz.
-- H2/H3 floors vs the raw capture's floor: within 0.21 dB on every sweep.
-- LF H2 excess at 22 Hz: now only a bound (ac2's H2 there is below its floor); the onset
-  artefact of the first run (−53 dBr) is gone with the sweep emitted from below the asked band.
-- ac2 live TF vs the direct cross-spectrum (γ² ≥ 0.99): ≤ 0.013 dB, ≤ 0.14°.
-
-Left open (ac2): +0.09…0.13 dB at 16 Hz from the linear window's pre-arrival rise cutting LF
-ringing (longer rise trades against H2 tail leakage in rooms); `meas new rta` has no averaging
-option, so the suite cannot judge ac2's RTA; C50/C80 are reported when the decay meets the
-noise before the clarity boundary (should be refused like T20/T30); a tonal line inside the
-1/3-oct floor band reads as a harmonic. Speaker path at −50 dBFS is noise-limited below 1 kHz.
-
-### Electrical runs at proper level (2026-10-07 evening, ac2d 2638893 → 8c3a658)
-
-At −50 dBFS the electrical comparisons below 1 kHz were noise-limited (all five FAILs of the
-first baselines were REW's analysis or scatter, none ac2's). With the operator's go the suite now
-drives the electrical paths up to −10 dBFS (`electrical_max_dbfs`, backstop −6 in code; the
-speaker stays at −50). Xone −20: 192 PASS, 1 FAIL (REW's own H2 at 10 kHz). Xone −10: 196 PASS,
-1 FAIL — ac2's H2 at 22 Hz on the 20 Hz request, −63.7 dBr vs −86.1 by steady sines.
-
-Cause: the loopback reference (FF400 out 2 → in 2) falls 29 dB at 1 Hz below the emitted sweep
-(DC blocking); the deconvolution's edge at the regularisation level rings as a 0–6 Hz swell
-around the arrival, and the short H2 window's side lobes carry it into 40–60 Hz. A linear
-replica of the path read the same H2, so it was never the Xone. Fixed in 8c3a658: the H2–H5 and
-noise windows read the response high-passed below the lowest analysed fundamental.
-Xone −10 on 8c3a658: 198 PASS, 0 WARN, 0 FAIL; dist H2 at 22 Hz +1.1 dB vs sine (was +22.4),
-10 Hz requests now read a value (−0.2 dB) instead of a bound. Baselines `xone-10dbfs`
-(8c3a658) and `xone-20dbfs` (2638893) in `tools/crosscheck/baselines/pupu/`.
-
-### Xone tones re-picked off the mains bands (2026-10-07, ac2d 8c3a658, −10 dBFS)
-
-The 134 INCONCLUSIVE of the first −10 run were 90 harmonics a sweep could not judge because a
-mains line (pupu shows one at every 50 Hz multiple to 2 kHz) sat inside the ±17 Hz band a sweep
-reads as the harmonic, 39 harmonics below floor + margin, 3 displayed group delays with a mains
-column and 2 LF H2 bounds. Below 300 Hz no tone keeps more than three of H2..H5 clear, so the
-Xone tones are now 15, 26.25, 35, 40.5, 56.2, 60.5, 93.9, 1040 and 10000 Hz: each keeps at least
-two harmonics clear and together they cover H2..H5 below 100 Hz (`tests/test_rig_tones.py`).
-Run `20261007T193836Z`: 243 PASS, 1 WARN (10Hz-11s H3 at 26 Hz −3.0 dB vs sine, 11 dB over its
-floor), 0 FAIL; judged harmonic comparisons 3 → 19. Of the 164 INCONCLUSIVE, 60 are the mains
-bands no tone can avoid, 101 harmonics below floor (the Xone's H3..H5 sit under −115 dBr), 2 LF H2 bounds and the 1040 Hz group delay:
-those need a lower floor, not a different tone. The 1040 Hz displayed group delay still has a
-mains column beside it. Baseline `xone-10dbfs.json` re-taken from this run.
-
-### Harmonic truth net of the reference (2026-10-07, ac2d 8c3a658, −10 dBFS)
-
-The WARN at 26 Hz (ac2 H3 −3.0 dB under the steady sine on every sweep variant) was the suite's
-truth, not ac2: ac2 divides the measurement by the measured loopback reference
-(`crates/ac2-core/src/sweep.rs`), so a harmonic the reference input carries (RME DA out2 → AD in2,
-H2/H3 near −98/−104 dBr at low frequency) comes off the measurement's, carried through the path.
-The steady sine read the meas input alone. The sine stage now fits both inputs' harmonic phasors
-jointly with the fundamental (fitted one at a time, the fundamental leaks ~45 dB into them) and
-ac2's sweeps are judged against D_m − T(k·f)·D_r; REW, which deconvolves each input by its own
-stimulus, stays judged against the meas input alone. Run `20261007T200249Z`: H3 at 26 Hz −0.4 to
-+0.9 dB (was −2.1 to −3.0), every ac2 harmonic comparison within ±2.4 dB; 253 PASS, 1 WARN,
-0 FAIL. The WARN: ac2's H2 at 20–25 Hz read +1.3 to +3.2 dB over the net truth, most on the
-sweeps that start at 20 Hz (dist, dist-probe +3.2 at 22 Hz).
-
-**Cause and fix (501330a).** Replaying the captures through `analyse_recording` with in 5
-replaced by its linear prediction (the analysed IR convolved with in 2, so no distortion at
-all) read H2 at 22 Hz at −90.5 dBr on the 20 Hz sweeps, 3 dB under the path's own: the harmonic
-windows' high-pass was zero-phase, and what its 4–20 Hz transition passes of the large response
-below the analysed band (the Xone's own roll-off) rang before the arrival as well, into H2's
-window at −L·ln 2 = −0.49 s. Moving the transition up lowered it, letting more below it through
-raised it. A fourth-order minimum-phase Butterworth at 0.75 × the lowest fundamental rings only
-after the arrival: the linear prediction reads −136 dBr (10 Hz sweeps −155 … −189), and an
-eighth order lifts the noise windows to −90. Run `20261007T204144Z` on 501330a: 247 PASS,
-0 WARN, 0 FAIL; LF H2 excess at 22 Hz −0.2 … +1.6 dB on all five sweeps (the 10 Hz / 3 Hz
-5.5 s requests, bounds before, now read values), the remaining ≈ +1 dB the same on every sweep
-and within the sine truth's interpolation between 15 and 26 Hz. The PASS → INCONCLUSIVE lines
-against the previous baseline are the 100 Hz line found this time (its detection at 6 dB over
-the local median varies run to run) and REW's H2 at 35 Hz 0.9 dB short of its floor + margin.
-Baseline `xone-10dbfs.json` re-taken from this run.
-
-### LF H2 right after the sweep's fade-in is the Xone's (2026-10-08, ac2d 35f6ca4, −10 dBFS, balanced wiring)
-
-Run `20261008T174954Z` (Xone on out 5 → in 5, reference out 2 → in 2) warned on the dist sweep's
-H2 at 22 Hz: −94.0 dBr against the net sine truth −97.2 (+3.1 dB; dist-probe +1.9, the 10 Hz
-sweeps +0.4 / +1.1). It is a real, short-lived rise of the Xone's H2, which a sweep starting at
-20 Hz measures and a steady sine or REW's 10 Hz sweep does not:
-
-- Each input against the emitted stimulus (as REW does): the loopback's H2 matches REW within
-  0.3 dB at every column 20–100 Hz; the Xone's matches REW from 30 Hz up and in H3 everywhere,
-  and only its H2 at 20–26 Hz reads high, most on the 20 Hz sweeps (22 Hz: −94.9 vs REW −98.4).
-- A plain numpy deconvolution of the same records (whole record, M/R, Hann windows of 0.1–0.27 s,
-  no high-pass) reads the dist records 2–4 dB above the 10 Hz ones at 20–26 Hz: the excess is in
-  the capture, not ac2's analysis.
-- Steady 22 Hz on the rig (jackio, out 5 + out 2): after a 1 s fade-in, Xone H2 −98.7 dBr from
-  the first 0.25 s window (loopback −97.8). After the dist sweep's own start (exponential chirp
-  from 4.29 Hz, L 0.7 s, 1.08 s fade) gliding into a held 22 Hz: −94.3 / −94.5 dBr in the window
-  50 ms after reaching 22 Hz, −97.6 at 100 ms, −98…−99.5 from 200 ms; the loopback stays at
-  −97…−98. The dist sweep crosses 20–26 Hz within 0.2 s of its fade's end; the 10 Hz sweeps cross
-  it 0.5 s or more after.
-
-The suite reports a sweep that reaches 22 Hz less than `lf_onset_settle_s` (0.3 s) after full
-level as INFO instead of judging it. The 10 Hz sweeps' remaining +0.4 … +1.1 dB is ac2's harmonic
-resolution: at 0.1 s windows the H2 band at column 22 Hz spans 29–59 Hz (three 10 Hz cells), so
-the Xone's H2 rising below 22 Hz is averaged in; at 0.25 s windows they read −97.8 / −98.7. Re-run
-analysis: 261 PASS, 0 WARN, 0 FAIL.
-
-### LF H2 at 22 Hz on the 10 Hz / 5.5 s sweep: hum bursts on in 5 (2026-10-10, ac2d bdc1bec → d08cc70, −30 dBFS)
-
-Run `20261010T145427Z` failed `xone.lf_h2.10Hz-5.5s`: ac2 H2 −83.6 dBr at 22 Hz (floor −98.5)
-against the steady sine's −94.4; REW's H2 there is only a bound. Not ac2's processing and not
-distortion:
-
-- ac2-core's `analyse_recording` run offline on the stored record reproduces −83.6. On linear
-  twins (meas := ref; meas := ref through the path's own gated response) it reads −160 / −190
-  dBr. Each input against the emitted sweep: meas −83 dBr, ref −113. An independent numpy
-  Farina separation of the same meas: −82.0.
-- In the 2026-10-07 records the same "H2" falls dB for dB with drive (−62 / −81 / −87 dBr at
-  −50 / −30 / −20 dBFS): about −110 dBFS whatever the level, so added, not generated.
-- In 35–95 Hz the meas input carries bursts of −84 … −92 dBFS lasting 0.25–0.75 s every 2–3 s
-  over a quiet −118; the ref input stays at −127. One burst sat on the sweep's pass through
-  20–25 Hz. A sweep's harmonic window at fundamental f reads the record at the moment the sweep
-  passes f; the post-roll noise windows read each frequency 0.5–1 s later, quiet there. The
-  3 Hz sweep's H2/H3 at 35–45 Hz (REW's too) is the same burst at another moment.
-
-d08cc70 also reads each harmonic's floor in the impulse-response gaps beside its window (the
-noise of the same moment) and takes it where it is 3 dB over the post-roll's: on that record
-H2 at 22 Hz becomes −83.4 over a floor of −78.1, the 3 Hz sweep's 35–45 Hz bump likewise a
-bound. Rerun on d08cc70 (`20261010T172222Z`, deployed to pupu only): FAIL 0, WARN 0, METHOD 0;
-the LF harmonic cells are bounds on ac2 and REW alike. The burst source on in 5 is not found.
-
-#### Where the bursts enter (2026-10-10, passive captures, nothing emitted)
-
-30 s passive captures of all 8 FF400 inputs, read in 35–95 Hz over 0.25 s blocks.
-
-- Wiring at the time: FF400 outs 5, 6 → Xone:62 channel inputs L/R → Xone master → FF400
-  ins 5, 6.
-- The bursts are on in 5 and in 6 at once and at the same level (−91.1 / −91.2 dBFS);
-  waveform correlation 0.9995, L − R cancels to −120.7 dBFS. Ins 2 (loopback), 7 and 8 are
-  clean at about −128; the mic on in 1 is uncorrelated with them (0.005).
-- Xone ch1 fader and gain down: bursts −110.8 / −112.2 dBFS over a floor of −125 / −127.5.
-- The same cables moved to Xone ch2: bursts back at −92.3 / −92.4, so not the channel strip.
-- Out 5 unplugged at the FF400: the bursts leave in 5 (peak −110.4) and stay on in 6 (−89.2).
-- That cable moved to FF400 out 4 (nothing routed to it in JACK): bursts back on in 5 (−92.3),
-  so not specific to outs 5/6.
-- 10 s of 4-core CPU load on pupu during a capture: no change.
-- Pattern: about every 2.2 s, 0.5–0.75 s long, 36–55 Hz content.
-- Grounding: the FF400 (AC transformer supply) and pupu (Mac mini, Class II) have no PE. The
-  only ground ties are the FireWire shield and the audio cable shields to the Xone (whether the
-  Xone's chassis post is bonded to PE is unmeasured). The bursts need the FF400 ↔ Xone cable
-  loop; the FF400's own loopback is clean. Most likely switched loads (the building has
-  industrial heating/cooling next door) coupling into that shield loop; the source is not
-  located. A chassis-to-signal-ground bond FF400 ↔ Xone was being tried at the time of writing.
-
-### Room tone near 240 Hz (2026-10-11, passive capture on in 1, nothing emitted)
+### Room tone near 240 Hz (2026-10-11, passive capture on in 1)
 
 A narrow tone drifting between 238.5 and 240.75 Hz sits about 16 dB above the neighbouring room
-floor on the MM1 at in 1 (30 s capture: 238.5 Hz at +15.7 dB over the 220–260 Hz median; other
-6 Hz windows 180–340 Hz +6…+10 dB, 300 Hz being mains). It stays with the 1086s off, and the
-1083 is passively cooled, so it is the building's plant or air conditioning. It comes and goes:
-it can be absent from the suite's silent recording and present a few minutes later during the
-takes (14–22 dB above the silent recording at 239 Hz on one Genelec −50 dBFS take). A noise gate
-fed only by the silent recording then judges that column as signal, and ac2's windowed IR and
-numpy's whole-recording estimate read the tone differently (−1.18 dB at 239.4 Hz). The suite's
-noise gate therefore also reads each take's own quiet parts before and after its sweep and
-keeps the larger noise per column.
+floor on the MM1. It stays with the 1086s off and the 1083 is passively cooled, so it is the
+building's plant. It comes and goes within minutes, so a noise gate fed only by the suite's
+silent recording can judge that column as signal; the suite's noise gate also reads each take's
+own quiet parts before and after its sweep and keeps the larger noise per column.
 
-### Digital DUT: floors, the fade-out edge, LF harmonics fine (2026-10-09, ac2d 2416a06 → 511efb0, −10 dBFS)
+### Digital DUT findings (2026-10-09, −10 dBFS)
 
-- **Floor +3 dB** in the suite's own model: it deconvolved the measurement input's noise only,
-  while ac2 divides by a noisy reference too (H = M/R adds −H·Nr/S; with |H| ≈ 1 and equal noise
-  on both inputs the floor rises 3 dB). `dsp.deconvolve_noise` takes both; DUT floor rows went
-  from +3.1 to +0.05 … +0.6 dB.
-- **H5 at 7.8 kHz read high**: the band at the sweep's fade-out edge (40 kHz sweep: f_top =
-  f2/5·2^(−1/24) = 7772 Hz, a 48/oct column). ac2 now reports an order only where its whole band
-  lies below the fade-out (292e28c); run `20261009T020317Z` has no such row.
-- **LF harmonics fine** (b90156c; variant `10Hz-5.5s-fine`): its longer post-roll had moved the
-  shared noise windows to later lags, where the DUT's aliased products sit at lower frequencies
-  (fa = fs·x/(k+x), x = e^(−τ/L)); fine's floor above its own-window columns differed from
-  standard's and hid H5 at 1040 Hz. 511efb0 keeps the shared windows where standard has them.
-  Run `20261009T021926Z`, re-analysed with the suite modelling fine's own windows: FAIL 0,
-  WARN 3, fine floor rows +0.37 / +0.30 dB.
-- Fine reads 12 and 15 Hz, which standard does not reach: +0.3 … +0.7 dB above the steady sine
-  (sine = analytic within 0.001 dB) on every order, behind the DUT's 20 Hz high-pass (−5.7 dB at
-  12 Hz). The same band averaging over a steep slope that fine removes at 20–30 Hz, at its own
-  lowest columns; a longer sweep lengthens the windows and reduces it.
+- **Floor +3 dB** in the suite's model: ac2 divides by a noisy reference too (H = M/R adds
+  −H·Nr/S; with |H| ≈ 1 and equal noise on both inputs the floor rises 3 dB).
+  `dsp.deconvolve_noise` takes both inputs.
+- **Fade-out edge:** an order is reported only where its whole band lies below the sweep's
+  fade-out (on a 40 kHz sweep H5's top column 7772 Hz straddled it and read high).
+- **LF harmonics fine** keeps the shared noise windows where standard has them: later lags put
+  a DUT's aliased products at lower frequencies (fa = fs·x/(k+x), x = e^(−τ/L)) and hid H5.
+  Fine reads 12 and 15 Hz +0.3…+0.7 dB above the steady sine behind the DUT's 20 Hz high-pass:
+  band averaging over a steep slope at its lowest columns; a longer sweep reduces it.
 
-### Genelec at −30 dBFS (2026-10-09, ac2d d6cc773, operator-approved, REW 5.40 b135)
+### Genelec at −30 dBFS (2026-10-09/10, operator-approved)
 
-The operator approved the speaker at up to −30 dBFS for this session; the suite lifts its −50
-ceiling only with `--allow-speaker-level` (−30 at most) and ac2d's bound only for the speaker
-stage. Runs 20261009T160212Z (REW's file still played at its own −50), 20261009T161037Z (all
-at −30), 20261009T161810Z (live TF with the delay finder's 3.631 ms inserted). After every run
-`gen ceiling` read bound −50.
+The suite lifts its −50 speaker ceiling only with `--allow-speaker-level` (−30 at most) and
+ac2d's bound only for the speaker stage; `gen ceiling` read bound −50 after every run.
 
-- Magnitude, 1/48-oct, against numpy on REW's recording: ac2 sweep +0.001 / −0.003 / +0.047 dB
-  (20–100 / 100–1k / 1k–20k Hz); REW, its mic-curve correction taken back out, matches as well.
-  ac2 − REW phase −0.4 … +0.2°. Against the steady sines at 101 / 201 / 501 Hz: ac2 sweep
-  −0.06 / +0.02 / +0.04 dB.
-- Live TF (8 blocks, delay inserted) against numpy on its own capture: mean −0.07 / −0.02 /
-  −0.01 dB, +0.8 / +0.2 / +0.2°. The per-column spread (±0.4 dB) is the estimate's variance at
-  γ² ≈ 0.99 with 8 blocks (σ ≈ 0.3 dB), not a bias.
-- Harmonics where both are above their floors: H3 at 500 Hz ac2 −49.5, REW −49.2 dBr; H3 at
-  1 kHz −52.0 / −51.9; H2 at 5 kHz −57.2 / −57.1; H2 at 2 kHz −64.7 / −61.5 (sine −63.1).
-  H3 at 500 Hz reads +7.5 dB over the steady sine in both apps: the steady tone's harmonic in
-  the room, not either analyser.
-- Suite fixes from these runs: the mic curve is in the TF's and REW's columns and in nothing
-  else (it read as a −1 dB LF "error" of both); the absolute-SPL rows took the sweep's
-  "(curve: none)" for a curve in the columns (+0.8 … +1.5 dB at 50–200 Hz); the TF's
-  inserted delay is put back into its phase; TF SPL rows skip γ² < 0.99.
-
-### Ambient with an averaged RTA (2026-10-09, ac2d 8b87f49)
-
-Run `20261009T180151Z`: the ambient stage now sets the RTA to `--average fifo:N` over the Leq
-window (recorded as `ac2_rta_average` in `window.json`). LZ / LA / LC against numpy on the
-recording +0.005 / +0.004 / −0.002 dB; LAeq ac2 vs REW −0.009 dB. ac2's RTA against numpy's
-summed FFT bins: worst third octave +1.69 dB at 79 Hz (WARN), median +0.19 dB, was 7.7 dB
-from a single unaveraged frame; REW's worst on the same recording is 3.75 dB. What remains is
-filter skirts against ideal band edges in a falling LF ambient and the averaging span not
-matching the numpy window to the sample.
-
-### Genelec at −30 dBFS on 8b87f49 (2026-10-10, operator-approved)
-
-Run `20261009T232923Z`, the first speaker run with the mic curve applied to sweeps (as a
-display edit; the suite reads the raw columns). Every ac2 sweep row against the direct
-estimates passes, as on d6cc773 (magnitude spread ≤ 0.29 dB at 20–100 Hz, ≤ 0.05 dB above
-100 Hz on ac2's own capture; phase ≤ 2.2°). The 4 FAILs were all suite gates, now fixed:
-the live TF's per-column spread had no noise gate (σ from its coherence over 8 blocks,
-√((1 − γ²)/(2γ²n)), is ≥ 0.2 dB at γ² = 0.99); the absolute-SPL rows at 2 and 5 kHz lacked
-the room fine-structure uncertainty the magnitude-vs-sine rows already carry (1.25 dB at
-5 kHz between a 1/48-octave column and the sine). With both: FAIL 0, WARN 9. H3 at 500 Hz
-is now INCONCLUSIVE in both apps: H3 = 1504.5 Hz lies on the 1500 Hz mains line.
-
-The one level WARN, ac2 meas ÷ ref against REW's import (meas − ref) at −0.136 dB (−0.113 on
-d6cc773), was the row's resolution, not a level: it read REW's one unsmoothed 0.37 Hz bin at
-1 kHz against ac2's 14 Hz-wide 1/48-octave column, i.e. the room's structure inside the column.
-REW's bins power-averaged into ac2's columns (as ac2 reads them) give −0.02 dB at 1 kHz and a
-median over 500 Hz–2 kHz of +0.005 dB (+0.008 dB on d6cc773); the row now judges that median.
-Electrical paths are unchanged (−0.001 dB).
+- Magnitude (1/48 oct) against numpy on REW's recording: ac2 sweep within 0.05 dB, REW (its mic
+  curve taken back out) likewise; ac2 − REW phase −0.4…+0.2°.
+- Live TF (8 blocks, delay inserted): mean within 0.07 dB; its per-column spread (±0.4 dB) is
+  the estimate's variance, σ = √((1 − γ²)/(2γ²n)) ≥ 0.2 dB at γ² = 0.99, not a bias.
+- Harmonics where both are above floor agree within 0.3 dB (H3 at 500 Hz / 1 kHz, H2 at
+  5 kHz); H3 = 1504.5 Hz sits on the 1500 Hz mains line, so that cell is INCONCLUSIVE.
+- A level row comparing REW's single 0.37 Hz bin to ac2's 14 Hz-wide 1/48-oct column read the
+  room's fine structure (−0.136 dB); REW's bins power-averaged into ac2's columns give +0.005 dB
+  median over 500 Hz–2 kHz.
+- Ambient with an averaged RTA (`--average fifo:N` over the Leq window): LZ / LA / LC within
+  0.005 dB of numpy, LAeq ac2 vs REW −0.009 dB; worst third octave +1.69 dB at 79 Hz (filter
+  skirts against ideal band edges in a falling LF ambient).

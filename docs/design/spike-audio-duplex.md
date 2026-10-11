@@ -1,27 +1,21 @@
 # Spike: audio duplex (phase 0)
 
-> **History; code removed.** A record of what the phase 0 spike measured, not a description
-> of the product. The backends live in `crates/ac2-audio`; Linux there is JACK only
-> (decision L1 in `open-questions.md`), so the ALSA-through-cpal results below no longer
-> apply to a shipped path. The spike crate is deleted: its checks run through the production
-> backends as `ac2 selftest duplex` (`crates/ac2-cli/src/selftest`), and §8 is now that
-> command's hardware procedure. §2 describes the spike as it was built.
+> **Concluded; spike code removed.** Findings and the decisions they led to. The backends
+> live in `crates/ac2-audio`; Linux is JACK only (decision L1 in `open-questions.md`), so
+> the cpal-ALSA results below no longer apply to a shipped path. The spike's run mode lives
+> on as `ac2 selftest duplex` (`crates/ac2-cli/src/selftest`); §8 is its hardware procedure.
 
 **Question.** Can one small trait give RT-safe, multichannel, sample-indexed duplex capture
 on all three OSes, using cpal (CoreAudio / WASAPI / ALSA) and JACK (the `jack` crate)?
 
-**Short answer.** Yes for the transport and the trait. Sample indexing is **exact on JACK**
-and **estimated on cpal**: cpal gives no hardware frame position on any host. On cpal,
-input and output are always **two separate streams**, so the generator→loopback offset is
-only fixed when both run on one device clock. Even then it can change on every stream
-start. That is acceptable under decision 3a: continuous loopback correlation exists to
-catch exactly that. JACK was proven locally against a dummy server, and ALSA was proven
-through cpal on the `null` PCM. **macOS and Windows compile paths exist but are unverified**:
-there is no hardware here, and only the Linux target is installed. The manual steps are in §8.
+**Answer.** Yes. Sample indexing is **exact on JACK** and **estimated on cpal**: cpal gives
+no hardware frame position on any host. On cpal, input and output are always **two separate
+streams**, so the generator→loopback offset is fixed only when both run on one device clock,
+and even then it can change on every stream start. Decision 3a (continuous loopback
+correlation) exists to catch exactly that. JACK was proven against a dummy server, ALSA
+through cpal on the `null` PCM; macOS and Windows were not run on hardware (§8).
 
-Code (removed): the phase 0 spike crate. cpal 0.18.2, jack 0.13.5, rtrb 0.4.
-
----
+Spike versions: cpal 0.18.2, jack 0.13.5, rtrb 0.4.
 
 ## 1. Verdict per OS / backend
 
@@ -36,66 +30,40 @@ Code (removed): the phase 0 spike crate. cpal 0.18.2, jack 0.13.5, rtrb 0.4.
 ASIO (not tested, feature-gated, phase 7) is the only cpal host where both directions share a
 single driver `bufferSwitch` callback.
 
-## 2. What was built
+## 2. What carried into `ac2-audio`
 
-- `block.rs`: `BlockHeader {start_sample: u64, frames, channels, flags, callback_ns,
-  capture_ns}` and the transport. The callback writes interleaved f32 samples to one
-  `rtrb` ring, then the header to a second ring. The sample commit is sequenced before the
-  header's release store, so a popped header always has its samples available. A block is
-  written whole or dropped whole. A drop sets `OVERFLOW|DISCONTINUITY` on the next block
-  that gets through and bumps the drop counters. The callback never allocates, locks or blocks.
-- `clock.rs`: two index sources.
-  - `FrameCounterClock` (JACK): extends the u32 counter across its wrap (about 24.8 h at
-    48 kHz). Any deviation from `prev + n` sets `DISCONTINUITY` with the exact size.
-  - `TimestampClock` (cpal): running frame count. If the capture timestamp moves more than
-    half a block beyond what the previous block's length predicts, the estimated missing
-    frames are added and `DISCONTINUITY|GAP_ESTIMATED` is set.
-- `backend.rs`: the trait, capabilities, `Negotiated`, `ClockRelation`, `StaticLatency`,
-  `EventLatch` and `DuplexStream`.
-  - `EventLatch` turns asynchronous xrun and config notifications (atomics) into flags on
-    the next block.
-  - `DuplexStream` owns the consumer, an output-timing ring (`OutputTick`), counters, and a
-    type-erased guard that keeps the backend stream alive.
-- `output.rs`: silence by default. `EmitLevel` is a typed dBFS value that rejects anything
-  above −20 dBFS. The tone goes to output channel 0 only, with a 20 ms fade-in and fade-out
-  and a hard clamp at the cap. `DuplexStream::stop` requests the fade, waits for the
-  renderer to report silence, then drops the stream. **`--emit` was never run.**
-- `cpal_backend.rs`, `jack_backend.rs` (feature `jack`, Linux only), `fake.rs`.
-- The spike binary:
-  - `--list [--backend cpal|jack|fake|all]` prints JSON capabilities.
-  - `--run <s>` prints JSON: negotiated config, block counts, flag counts, index gaps and
-    regressions, callback and capture interval jitter, input lag, backend event counters,
-    per-channel peak, output callback interval, and playback lead.
-  - `--trace` prints flagged or irregular blocks.
-  - Input routing: `--inputs 3,1` selects device channels in block order.
-- Tests: 13 that need no hardware (ring wrap and alignment, whole-block drop, cross-thread
-  lossless transfer, u32 wrap, exact and estimated gaps, level cap, fades, fake end-to-end
-  routing, xrun index jump, loopback onset at exactly the delay index, slow-consumer
-  overflow), plus device tests that skip cleanly:
-  - cpal enumeration;
-  - ALSA `null` duplex;
-  - JACK, only when a server is running and only with `--features jack`.
+The spike's pieces became the shared, backend-agnostic core of `ac2-audio`:
+- `block.rs`: `BlockHeader {start_sample, frames, channels, flags, callback_ns, capture_ns}`
+  over two SPSC `rtrb` rings (interleaved samples, then headers). The sample commit is
+  sequenced before the header's release store, so a popped header always has its samples.
+  A block is written whole or dropped whole; a drop sets `OVERFLOW|DISCONTINUITY` on the
+  next block that gets through.
+- `clock.rs`: `FrameCounterClock` (JACK: extends the u32 counter across its ~24.8 h wrap at
+  48 kHz; any deviation from `prev + n` is an exact `DISCONTINUITY`) and `TimestampClock`
+  (cpal: running count; a capture timestamp more than half a block past prediction adds the
+  estimated missing frames and sets `DISCONTINUITY|GAP_ESTIMATED`).
+- `events.rs`: `EventLatch` turns asynchronous xrun/config notifications (atomics) into flags
+  on the next block.
+- `output.rs`: silence by default, fades, and a global level limit (`MaxLevel`); stop fades
+  out before the stream drops.
 
-## 3. Measured locally (Linux, no sound hardware, no RT privileges)
+## 3. Measured (Linux, no sound hardware, no RT privileges)
 
 | Run | Result |
 |---|---|
-| JACK dummy (`jackd -d dummy -r 48000 -p 256 -C 4 -P 2`), 10 s, 4 in / 2 out, release | 1876 blocks, all 256 frames, **0 index gaps, 0 regressions, 0 drops, 0 xruns**. Wake interval stddev 181 µs, max deviation 3.5 ms (not RT-scheduled). DLL cycle-start interval stddev 0.86 µs. Port latency capture 256 / playback 512 frames. |
-| Same, debug build, first 5 s run | 5 xruns, 3 exact index gaps (1024 frames total), all flagged. jackd log: "client was not finished" (non-RT scheduling in this sandbox). |
-| cpal ALSA `null`, 3 s | The PCM has no clock, so callbacks spin at about 1.6 µs. This stress-tests the transport: 620 k blocks delivered, 3.9 M dropped. **Every one of the 1350 index gaps carried `OVERFLOW`**, with 0 regressions and channels never misaligned. |
+| JACK dummy (`jackd -d dummy -r 48000 -p 256 -C 4 -P 2`), 10 s, 4 in / 2 out, release | 1876 blocks of 256 frames, **0 index gaps, 0 regressions, 0 drops, 0 xruns**. Wake interval stddev 181 µs, max deviation 3.5 ms (not RT-scheduled); DLL cycle-start stddev 0.86 µs. Port latency capture 256 / playback 512 frames. |
+| Same, debug build, 5 s | 5 xruns, 3 exact index gaps (1024 frames), all flagged (non-RT scheduling). |
+| cpal ALSA `null`, 3 s | No clock, callbacks spin at ~1.6 µs: a transport stress test. 620 k blocks delivered, 3.9 M dropped; **every one of the 1350 index gaps carried `OVERFLOW`**, 0 regressions, channels never misaligned. |
 
-Two observations from the JACK trace shape the trait:
+Two findings shape the trait:
 
-1. **A late JACK cycle need not skip frames.** In one trace the callback woke 8.8 ms after the
-   previous one (nominal 5.3 ms), but `last_frame_time` stayed contiguous. On real hardware,
-   an ALSA driver xrun loses ADC samples while JACK's frame time counts *cycles*, so the index
-   can look contiguous across lost audio. **`XRUN` must break continuity by itself**; it is in
-   `BREAKS_CONTINUITY`.
-2. **The xrun notification is asynchronous.** It arrives on JACK's notification thread, so
-   the `XRUN` flag can land one block after the affected block (seen in the trace:
-   `flags=0x2` on the block after the late one). Consumers should treat the block before an
-   `XRUN` as suspect too. ac2-audio could instead hold the most recent block back for one
-   cycle before publishing it.
+1. **A late JACK cycle need not skip frames.** A callback woke 8.8 ms after the previous one
+   (nominal 5.3 ms) with `last_frame_time` contiguous. On real hardware an ALSA driver xrun
+   loses ADC samples while JACK's frame time counts *cycles*, so the index can look
+   contiguous across lost audio. **`XRUN` breaks continuity by itself** (it is in
+   `BREAKS_CONTINUITY`).
+2. **The xrun notification is asynchronous** (JACK's notification thread), so `XRUN` can land
+   one block after the affected block. Consumers treat the block before an `XRUN` as suspect.
 
 ## 4. cpal 0.18 per host (from source)
 
@@ -211,63 +179,32 @@ The spike's own callbacks do only rtrb writes, atomics and arithmetic.
   - Variable callback sizes.
   - ASIO (phase 7, licensing) is the real pro-audio path.
 
-## 6. Recommended trait shape for `ac2-audio`
+## 6. Trait shape
 
-```rust
-pub trait Backend {
-    fn kind(&self) -> BackendKind;
-    fn enumerate(&self) -> Result<Vec<DeviceCaps>, AudioError>;      // read-only
-    fn open(&self, req: &DuplexRequest) -> Result<DuplexStream, AudioError>;
-}
+Implemented in `crates/ac2-audio/src/backend.rs` (`Backend`: `kind`, `enumerate`, `open`,
+`probe`; `DeviceCaps`, `DuplexRequest`, `Negotiated`, `ClockRelation`
+{`SingleCallback`, `SameDeviceSeparateCallbacks`, `Unknown`}, `IndexExactness`,
+`StaticLatency` {`PortRanges`, `PerCallbackTimestamps`, `Unknown`}) and `stream.rs`
+(`DuplexStream`, concrete, not a trait object). Design points from the spike:
 
-pub struct DeviceCaps {
-    id, name, host,
-    input: Option<DirectionCaps>, output: Option<DirectionCaps>,  // channels, rate ranges,
-                                                                  // buffer range (Option), formats
-    duplex_clock: ClockRelation,   // SingleCallback | SameDeviceSeparateCallbacks | Unknown
-    latency: StaticLatency,        // PortRanges{capture,playback} | PerCallbackTimestamps | None
-}
-
-pub struct DuplexRequest {
-    input_device, output_device, input_map: Vec<u16>, output_channels,
-    sample_rate: Option<u32>, buffer_frames: Option<u32>, ring_seconds,
-    output: OutputSource,   // Silence | Generator(lock-free handle) — never a default tone
-}
-
-pub struct DuplexStream {          // concrete, not a trait object
-    negotiated: Negotiated,        // what actually opened, incl. clock relation & index exactness
-    capture: BlockConsumer,        // headers {start_sample, frames, channels, flags,
-                                   //          callback_ns, capture_ns}
-    output_ticks: Consumer<OutputTick>, // {start_sample, frames, callback_ns, playback_ns}
-    events: Arc<BackendEvents>,    // xruns, errors, config changes (atomics)
-    guard: Box<dyn Send>,          // drop = stop; stop() fades first
-}
-```
-
-Design points that came out of the spike:
-
-1. **Keep the trait object-safe and tiny.** Put the work in shared, backend-agnostic pieces
-   that are unit-tested with the fake: `BlockProducer`, the two clocks, `EventLatch` and
-   `OutputRenderer`. The real backends turned out to be about 300 lines of glue each.
-2. **`Negotiated` must state how exact the index is**: exact frame counter vs estimated.
-   Every gap flag also says `GAP_ESTIMATED` when the size is a guess. Jobs reset on any
-   `BREAKS_CONTINUITY` flag regardless.
-3. **Generator sample index ≠ capture sample index on cpal.** They are separate counters on
-   separate threads. Only on JACK, ASIO and fake does a single callback make
-   `out_start_sample == in_start_sample` meaningful. Expose `OutputTick` so a job can
-   relate them through timestamps, and let the loopback correlation (3a) be the truth.
-4. **Ring transport:** two SPSC rings (samples + headers), whole-block-or-nothing, overflow
-   carried as a flag. Interleaved is natural for cpal and cheap to produce on JACK; jobs
-   that want planar data deinterleave on their own thread. Size the header ring from the
+1. **Keep the trait object-safe and tiny.** The work lives in shared pieces unit-tested with
+   the fake backend (block transport, the two clocks, `EventLatch`, output renderer); each
+   real backend is a few hundred lines of glue.
+2. **`Negotiated` states how exact the index is.** Gap flags add `GAP_ESTIMATED` when the
+   size is a guess; jobs reset on any `BREAKS_CONTINUITY` flag regardless.
+3. **Generator index ≠ capture index on cpal**: separate counters on separate threads. Only
+   JACK, ASIO and fake (one callback) make `out_start_sample == in_start_sample` meaningful.
+   `OutputTick` lets a job relate them through timestamps; loopback correlation (3a) is the
+   truth.
+4. **Ring transport:** two SPSC rings, whole-block-or-nothing, overflow carried as a flag.
+   Interleaved; jobs deinterleave on their own thread. Size the header ring from the
    *smallest* plausible block, because WASAPI packets vary.
-5. **One stream per session, fan-out after the ring (PLAN §4.3).** The trait should not
-   support multiple consumers in the callback.
-6. **Don't use cpal's JACK host.** It creates a client per stream, which loses the
-   single-callback property. Use the `jack` crate directly behind a cargo feature, as done
-   here.
-7. **Later, optional:** thin native CoreAudio/WASAPI backends, or an upstream cpal patch,
-   that expose `mSampleTime` / the WASAPI device position. That would make the index exact
-   on mac/win as well. It is not needed for 1.0 if the loopback monitor is in place.
+5. **One stream per session, fan-out after the ring (PLAN §4.3)**; no multiple consumers in
+   the callback.
+6. **Don't use cpal's JACK host**: it creates a client per stream and loses the
+   single-callback property. Use the `jack` crate directly.
+7. **Not built (optional, post-1.0):** native CoreAudio/WASAPI backends or a cpal patch
+   exposing `mSampleTime` / the WASAPI device position for an exact index on mac/win.
 
 ## 7. Risks for Q3 (continuous loopback timing monitor)
 
@@ -369,9 +306,7 @@ human runs them, never an agent.
 
 ## 9. Compared to `ac`
 
-`ac`'s cpal backend took a mutex and allocated in the callback, read only channel 0, was
-hard-wired to 44.1 kHz and had no routing. Here, the callbacks only push into rings, open the
-device's native format, route arbitrary channel maps, and honour the requested or default
-rate. `ac`'s JACK ideas held up and were kept as ideas: SPSC rings, sample-aligned capture,
-and port latency ranges as plausibility data. New here: a sample index on every block, and
-gap and overflow flags carried in-band rather than as side counters.
+`ac`'s cpal backend locked and allocated in the callback, read only channel 0, was fixed at
+44.1 kHz and had no routing. Kept from `ac` as ideas: SPSC rings, sample-aligned capture, port
+latency ranges as plausibility data. New: a sample index on every block, and gap/overflow
+flags in-band.

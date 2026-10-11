@@ -117,9 +117,7 @@ The daemon can run as a launchd agent: `launchd/io.github.mkovero.ac2d.plist` in
 image has the instructions in its header. A daemon started by launchd cannot show the
 microphone prompt, so either let the app host its daemon or start `ac2d` from Terminal.
 
-Verified by a tester (2026-10-05): the disk image installs, the app starts, and macOS asks
-for microphone access on the first start. Measuring with a real audio interface on macOS is
-not yet verified.
+Measuring with a real audio interface on macOS is not yet verified.
 
 ## Windows (10 1809 or newer, x64)
 

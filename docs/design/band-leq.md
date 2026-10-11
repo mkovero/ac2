@@ -1,8 +1,6 @@
 # Band Leq: 1/3-octave band limits where the neighbours are
 
-Status: stages 1 to 5 implemented (`ac2_core::band_leq`; the daemon's band meter,
-`spl.band_transfer`, the `band_leq` frame, the band log; the band view, the dialog rows and
-`ac2 spl bands`; band windows configured like the Leq windows).
+Status: implemented (*Stages*).
 
 ## What the operator and the artist get
 
@@ -53,7 +51,7 @@ larger than the music's level above the place's background), and stopping at 10 
 keeps every band below Nyquist at 44.1 kHz with margin (upper edge 11.2 kHz). The count is
 fixed: a second is a `[f64; 28]` plus its measured time, never a `Vec`.
 
-**Stored per second** (stage 2's log row): the wall time of its start, `m`, the 28 band
+**Stored per second**: the wall time of its start, `m`, the 28 band
 levels (dBFS, `10·lg(2·e/m)`, 0.01 dB), the §13 correction in force, the period it was
 judged in (day / night, *Day and night*) and the sensitivity in force. The levels are stored
 uncorrected; the correction is a column of its own, so a correction typed later or wrongly
@@ -188,10 +186,9 @@ alike.
 
     L_A,place = 10·lg Σ_b 10^((L_b,FOH − D_b + A(f_b)) / 10)
 
-with `A(f_b)` the IEC 61672-1 A weighting at the band's exact centre. A band's A weighting
-varies across it (most at 20 Hz, about ±1.5 dB at the edges), which for a smooth spectrum
-shifts the band's energy by a few tenths of a dB at the lowest bands, where the A-weighted
-contribution is small anyway. Two figures are summed per second: the **estimate**, from
+with `A(f_b)` the IEC 61672-1 A weighting at the band's exact centre (error for a smooth
+spectrum: a few tenths of a dB at the lowest bands, where the A-weighted contribution is
+small anyway; *Weighting a band*). Two figures are summed per second: the **estimate**, from
 the bands with a measured attenuation, and **at most**, adding the unusable bands at their
 bound. The predicted LAeq (`PredictedWindow`: its length, day and night limits and warn
 margin; the Finnish preset's LAeq,1h ≤ 25 dB at night) is a rolling window over the
@@ -264,127 +261,61 @@ pätevyysvaatimuksista (asumisterveysasetus), original text as published, retrie
 
 ## Stages
 
-1. **Core** (done): `ac2_core::band_leq` — the band integrator over the 1/3-octave bank,
-   per-band rolling windows judged on the leq rules, the day/night selection, the transfer
-   with the background rules, FOH limits and the predicted LAeq; the `finland-545` preset.
-2. **Daemon and protocol** (done): `SplConfig.bands` (`BandLeqConfig`: window length, day
-   and night limits per band 20 … 200 Hz, warn margin, predicted LAeq limits, §13
-   correction, the stored transfer with its per-band status; presets as
-   `BandLeqPreset` `Finland545Lf` and `Finland545LivingRoom`, filled in by front ends), the band meter in
-   the SPL job on the meter's second grid (`SplMeter::process_tapped` hands it the
-   mic-curve corrected, unweighted signal), the period from the local wall time of each
-   second (`ac2d::LocalClock`, injectable), alarms with the Leq windows' hysteresis
-   (`AlarmSubject::band` / `predicted`), the `band_leq` frame each second, the per-second
-   band log (`ac2_traces::band_log`, `<meter>.bands.csv` beside the SPL log in sessions and
-   the autosave, same retention), windows rebuilt from it by wall time on a job start or a
-   configuration change, and `spl.band_transfer` (`docs/protocol.md`, *Band meter*);
-   `PROTO_VERSION` 26, session format 13. Decided on the way:
-   - The transfer is stored in the meter's configuration, not the calibration store: it
-     belongs to a FOH position and a place, not to a mic, and the calibration store's
-     format is versioned per device, input and mic, so a change there would set aside
-     operators' calibrations. It travels with the session and the autosave.
-   - The position correction is not applied to the band meter: it is calibrated on A/C
-     levels at the measuring position, and the band limits are at the place.
-   - The transfer takes FOH, place and background band levels from spans of a band log
-     (the same mic moved, or a second meter) or from typed or imported levels
-     (`ac2_traces::band_levels`, `<Hz> <dB>` lines). There is no dedicated two-position
-     capture job: the operator plays the test signal and names the spans (stage 4).
-3. **Scene, UI, CLI** (done): `ac2_scene::band_leq` words and draws the `band_leq` frame —
-   eleven bars 20 … 200 Hz with the limit line, the headroom ("≤ …") and "cooling down in
-   …" per band, the worst band named in a headline with what to do ("63 Hz band Leq 3.2 dB
-   over its limit · cooling down in 6 min 52 s"), the period (and "headroom for the night
-   limits from 22:00" when the set changes within the horizon), the limits' place, the §13
-   correction, the predicted LAeq at the place against its limit with "at most"; the SPL pane's
-   fourth view (`SplMode::Bands`, G after meter + Leq when the meter has a band meter); the
-   band rows of the Leq dialog (off / preset, window, impulse, narrowband, the transfer per
-   band); `ac2 spl bands set|watch|transfer`. Decided on the way:
-   - The CLI is `spl bands …`, a sibling of `spl leq …`, not more flags on `spl leq set`:
-     the band meter has its own watch (bands, not windows), its own presets and the
-     transfer, and `spl leq set --preset` replaces windows, which a band preset never does.
-   - A transfer source on the CLI is a file of `<Hz> <dB>` lines or `METER@FROM..UNTIL`,
-     times resolved on the CLI's host (local time of day, local or UTC date-time, `-30s`,
-     `now`).
-4. **Measuring the transfer** (done): `spl.band_log_get` reads a span of the band log back
-   (the energy average a transfer takes, `ac2_traces::band_log::span_average`, shared by the
-   daemon, the fake client and the reply; every `step`-th second; at most 3600 rows, else
-   refused naming the step that fits); `ac2 spl bands log [--step N] [--levels-out FILE]`;
-   the app's **band transfer step** over the Leq dialog (T on a band row: FOH, place and
-   background spans marked with Space / Space or the last 1–9 minutes on the meter's clock,
-   each read back, then Enter stores the transfer); `spl.band_transfer` refuses
-   overlapping spans of one meter and a span of a meter without a band meter or log, saying
-   what to do; a mic place and nothing judged at FOH without a transfer (both gone in stage
-   5); `BandTransferSet.origin` and `ac2 spl bands estimate`; `ac2 rec import` (a
-   recorder's 16/24/32-bit PCM or float WAV as a recording, so a calibrated recorder at the
-   place without a cable replays, calibrates from its recorded tone and gives the place's
-   spans); `PROTO_VERSION` 27. The fake client
-   keeps band rows a test puts in (`Shared::band_rows`) and answers spans from them.
-   Decided on the way:
-   - A span is timed on the meter's clock (its newest frame's capture wall time in the
-     app; the CLI's host clock for `METER@FROM..UNTIL`), so a rig elsewhere lines up with its
-     own log.
-   - A replay logs at the replay's wall time: at real-time pace file second t is the
-     replay's start + t, so its spans are addressable; at fast pace they are not, and the
-     guide says to replay a recorder in real time. Spans in file time (rather than replay
-     wall time) are not offered.
-   - The reply is bounded by refusing, not by decimating behind the caller's back.
-   - Not yet: typing an estimated attenuation in the app (the CLI does it), the band
-     history in the view, a recorder's file-time marks shown in the step.
-5. **Band windows like the Leq windows** (done): `BandLeqConfig` = `windows` (up to eight
-   `BandWindow`: length, weighting Z/A/C, `BandLimitSet` `Always` or `NightDay` with a day
-   offset, warn margin), `bands` (the shown bands), `predicted` (`PredictedWindow` with its
-   own length), the correction and the transfer, whose `place` the operator names
-   (`receiving room` unless named). The `band_leq` frame carries one column per window and
-   shown band (`leq`, `limit`, `allowed`, `recover`, `leq_flags`) and a `BandWindowState`
-   per window; alarms name the window (`AlarmSubject::Band` {`duration`, `weighting`,
-   `nominal`}); `PROTO_VERSION` 28, session format 14 (older sessions are set aside, not
-   converted). The view stacks the windows, each a row of bars captioned with its name and
-   period, and its headline follows the worst window; it says nothing about a transfer. The
-   Leq dialog's band section is a table like the Leq windows': Off / On / a preset, the
-   bands from … to and further bands, one row per window (length, weighting, day +dB,
-   margin) with its limits per shown band beneath, Insert / Delete adding and removing a
-   window. The CLI mirrors `spl leq set`: `ac2 spl bands set --windows z:60min,a:15min
-   --bands 20hz..200hz,1khz --limit z:60min:63hz=42db --day-offset z:60min=5db --warn 3db`,
-   `--preset` as before; `transfer --place-levels SOURCE --place NAME`, `estimate --place
-   NAME`; `bands watch --json` gives a `windows` array. Decided on the way:
-   - The mic place (FOH or at the place) is gone: without a transfer the limits are judged
-     at the mic as typed, so a monitor at the place and FOH limits typed by hand both work,
-     and the view no longer shows a "no band transfer" headline the stage cannot act on.
-   - Weighting is an offset at the mid-band frequency (*Weighting a band*), not a filter
-     per weighting: one bank, one unweighted log, any weighting later.
-   - Wording names no room the operator did not name: "the place" in help, the operator's
-     name (or "receiving room") in every line about it; a scene test greps for the rest.
-   - Not yet: setting the predicted window other than by a preset (the dialog and the CLI
-     keep it), per-band warn margins.
-6. **Bands per window** (done): `BandWindow.bands` (`BandRange`) replaces the meter-wide
-   `BandLeqConfig.bands`, so "20 Hz, LZeq 1 min, 80 dB" is one window beside the 20 … 200 Hz
-   hour. A window's limits are on its own bands only (`check` refuses others). The
-   `band_leq` frame has a `bands` per `BandWindowState` and a window's columns follow the
-   previous windows'; `PROTO_VERSION` 30, session format 16 (older ones refused). The view
-   names a window by its bands ("20 Hz LZeq 1 min", "20–200 Hz LZeq 60 min") in its
-   caption, the dialog and the CLI alike. Dialog: a row per window `‹Band› ‹Up to›
-   ‹LZeq 1 min› ‹Z› limit day+dB warn −`, a single band's limit on its row, a range's on a
-   sub-row; + at the Leq and band headings, − per row (Insert / Delete as before). CLI:
-   `--windows z:1min@20hz,z:60min@20hz..200hz` (without `@`: 20 … 200 Hz), a window named
-   in `--limit` / `--day-offset` by length and weighting, with `@BANDS` when two share
-   them (`z:60min@20hz..200hz:63hz=42db`), a single band's limit without naming the band
-   (`z:1min@20hz=80db`); `--bands` is gone. `bands watch --json` gives each window its
-   `bands_hz` [low, high].
-7. **One band per window** (done): a `BandWindow` is one band (`band`: Hz, `limit`,
-   `day_offset`: Db or none), the way an Leq window is one level; `BandRange` and
-   `BandLimitSet` are gone, the cap is 64 and two windows of the same band, length and
-   weighting are refused. The `band_leq` frame has one column per window and a `band` per
-   `BandWindowState`; the worst band is ranked by the front end. `PROTO_VERSION` 32, session
-   format 17 (older ones refused). The view groups windows of the same length, weighting
-   and day/night scheme into one row of bars, low band to high, captioned "LZeq 60 min ·
-   night limits (22–07)"; a lone window draws one bar of the usual width. Dialog: one line
-   per window `‹63 Hz› ‹LZeq 60 min› ‹Z› limit day+dB warn −`; + copies the focused (or last)
-   window's length, weighting and margin onto the next band not yet a window of those;
-   **+ range…** (Shift+Insert) adds one window per band from … to, skipping existing ones.
-   CLI: `--windows z:60min@63hz,z:1min@20hz`, `z:60min@20hz..200hz` expanding to one window
-   per band; `--limit z:60min@63hz=42db`, `--day-offset z:60min@20hz..200hz=5db|none`;
-   `bands watch --json` gives each window its `band_hz` and the `rows` as drawn. Decided on
-   the way:
-   - A range is a front-end convenience only: nothing range-shaped is on the wire, so the
-     daemon, the log and the alarms have one kind of window.
-   - The living-room preset keeps its eleven windows without limits rather than none: the
-     bars are what the operator looks at while the predicted LAeq is what is judged.
+All built (`ac2_core::band_leq`; the band meter in the daemon's SPL job; `spl.band_transfer`,
+`spl.band_log_get`, the `band_leq` frame; `ac2_scene::band_leq`; the Leq dialog's band
+section and transfer step; `ac2 spl bands set|watch|transfer|log|estimate`).
+
+- **Configuration**: `SplConfig.bands` = `BandLeqConfig` {`windows` (up to 64 `BandWindow`,
+  one band each; the same band, length and weighting twice is refused), `predicted`
+  (`PredictedWindow`), the §13 correction, the transfer (`BandTransferSet`, `place`,
+  `origin`)}; presets `BandLeqPreset::Finland545Lf` / `Finland545LivingRoom`, filled in by
+  front ends. Ranges (`z:60min@20hz..200hz`, the dialog's **+ range…**, Shift+Insert) are a
+  front-end convenience: nothing range-shaped is on the wire, so the daemon, the log and the
+  alarms have one kind of window.
+- **Daemon**: the band meter runs on the meter's second grid (`SplMeter::process_tapped`
+  hands it the mic-curve corrected, unweighted signal); the period comes from the local wall
+  time of each second (`ac2d` `LocalClock`, injectable); alarms use the Leq windows'
+  hysteresis (`AlarmSubject::Band` {`duration`, `weighting`, `nominal`}, `Predicted`); the
+  band log is `ac2_traces::band_log`, `<meter>.bands.csv` beside the SPL log in sessions and
+  the autosave, same retention; windows are rebuilt from it by wall time on a job start or a
+  configuration change. The frame has one column per window (`leq`, `limit`, `allowed`,
+  `recover`, `flags`) and a `BandWindowState` per window; the front end ranks the worst band.
+- **Measuring the transfer**: `spl.band_log_get` reads a span back as its energy average
+  (`ac2_traces::band_log::span_average`, shared by daemon, fake client and the reply; every
+  `step`-th second; over `SplBandLog::MAX_ROWS` = 3600 rows it is refused, naming the step
+  that fits — bounded by refusing, not by decimating behind the caller's back). The app's
+  transfer step: T on a band row of the Leq dialog; FOH, place and background spans marked
+  with Space / Space or as the last 1–9 minutes; Enter stores. `spl.band_transfer` refuses
+  overlapping spans of one meter and a span of a meter without a band log. Sources may also
+  be `<Hz> <dB>` files (`ac2_traces::band_levels`) or, on the CLI, `METER@FROM..UNTIL`.
+  `ac2 rec import` turns a calibrated recorder's WAV into a recording whose replay gives the
+  place's spans.
+- **View**: the SPL pane's fourth view (`SplMode::Bands`, G after meter + Leq when the meter
+  has a band meter) groups windows of the same length, weighting and day/night scheme into
+  one row of bars, low band to high ("LZeq 60 min · night limits (22–07)"); the headline
+  follows the worst band; it says nothing about a transfer (that is configuration, shown in
+  the dialog and `ac2 spl bands set`).
+
+Decisions and why:
+- The transfer lives in the meter's configuration, not the calibration store: it belongs to
+  a FOH position and a place, not to a mic, and travels with the session and autosave.
+- The measuring-position correction is not applied to the band meter: it is set on A/C
+  levels at the measuring position, and the band limits are at the place.
+- Without a transfer the limits are judged at the mic as typed, so a monitor at the place
+  and FOH limits typed by hand both work.
+- Weighting is an offset at the mid-band frequency, not a filter per weighting (*Weighting a
+  band*).
+- A span is timed on the meter's clock (its newest frame's capture wall time in the app),
+  so a rig elsewhere lines up with its own log. A replay logs at its wall time, so a
+  recorder must be replayed at real-time pace for its spans to be addressable.
+- The CLI is `spl bands …`, a sibling of `spl leq …`: the band meter has its own watch,
+  presets and transfer, and `spl leq set --preset` replaces windows, which a band preset
+  never does.
+- Wording names no room the operator did not name: "the place" in help, the operator's name
+  (or "receiving room") in every line about it; a scene test checks it.
+- The living-room preset keeps its eleven windows without limits: the bars are what the
+  operator looks at while the predicted LAeq is what is judged.
+
+Not built: typing an estimated attenuation in the app (the CLI does it), setting the
+predicted window other than by a preset, band history in the view, a recorder's file-time
+marks in the transfer step.

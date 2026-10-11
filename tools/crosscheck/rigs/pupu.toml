@@ -92,7 +92,7 @@ noise_dbfs = -120.0
 
 [ac2]
 # The CLI must reach the rig's daemon from here. Either pair the rig's own CLI once
-# (README, "One-time setup") and use localhost, or run it on another paired host over ssh:
+# (README, "Prerequisites") and use localhost, or run it on another paired host over ssh:
 #   cmd = ["ssh", "mui@192.168.9.25", "~/ac2-test/bin/ac2", "--remote", "192.168.9.27"]
 cmd = ["~/ac2-test/bin/ac2", "--remote", "localhost"]
 timeout = "5s"

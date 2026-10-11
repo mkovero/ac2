@@ -1,13 +1,12 @@
 # The measurement tree: a measurement owns its traces
 
-Status: implemented (protocol 24, session format 11). The UI's sidebar is
+Status: implemented. The UI's sidebar is
 `ac2_scene::meas_list::tree_rows`; ownership is kept by the daemon (`control/owners.rs`).
 
 ## Why
 
-The operator compared captures of a transfer function with math on them, and saw two
-unrelated lists: *Measurements* and *Traces*. A capture is part of the measurement it came
-from; math made while looking at one measurement belongs to it; a sweep is a measurement
+Separate *Measurements* and *Traces* lists hide what belongs together. A capture is part of
+the measurement it came from; math made while looking at one measurement belongs to it; a sweep is a measurement
 whose results are its runs. So the sidebar is one tree, and every stored result is filed
 under a measurement:
 
@@ -68,7 +67,7 @@ inputs, outputs, typed level, `EssSpec`, repeats, gate, silence after. It has no
 publishes no stream (`MeasKind::stream()` is `None`): `meas.start/stop/reset` and
 `trace.capture` of it are `invalid`. Creating it plays nothing.
 
-`sweep.run {lease_token, meas, name}` replaces `ir.capture`: the same checks and the same
+`sweep.run {lease_token, meas, name}`: the same checks and the same
 arm → fire safety (lease, armed by the caller, typed level against the ceiling at every
 run, session inputs and outputs), the settings taken from the measurement. Each run is a
 `sweep` trace under it, named `Run <n>` (n = one more than the highest run number of its
@@ -92,9 +91,9 @@ the explicit form.
 ## Sessions and autosave
 
 Owners and sweep measurements are part of the saved metadata, so sessions and the autosave
-keep them: format 11. A session whose owners name no measurement of it (or a math channel)
-is refused as invalid. Older sessions are refused with their version, as always; an export
-re-imported is an import (`imported`), a sweep export a run under Imported until moved.
+keep them. A session whose owners name no measurement of it (or a math channel) is refused as
+invalid. An export re-imported is an import (`imported`), a sweep export a run under Imported
+until moved.
 
 ## Display
 
@@ -103,7 +102,7 @@ re-imported is an import (`imported`), a sweep export a run under Imported until
   spectrum, RTA), its stored traces in list order (slot, then oldest first), its math
   channels. A sweep measurement's header says `no runs yet`, `2 runs`, `playing 1/2`,
   `analysing`. Folding is this app's display (`AppState::collapsed`).
-- The selection rule is unchanged (PLAN §8.2): the item selected last has the keys — a
+- The selection rule (PLAN §8.2): the item selected last has the keys — a
   measurement (its header, its live curve or a math channel's row) or a stored trace.
   Shift+A toggles the selected item's whole group (live curves are this app's display, the
   traces' visibility the daemon's). V steps through the traces in the tree's order.

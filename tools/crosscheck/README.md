@@ -2,14 +2,14 @@
 
 An on-demand suite, not run in CI. It measures the same paths with ac2, with REW (offline
 import of a recording), with steady sines analysed in numpy, and from the raw recordings
-themselves. Then it compares the numbers against the tolerances in `tolerances.toml`. It
-reruns the hand comparison of 2026-10-07 (`docs/rigs/pupu.md`, "REW cross-check, electrical")
-and adds an ambient SPL check and the speaker path.
+themselves, and compares the numbers against the tolerances in `tolerances.toml`. Current
+results, definitions and open differences: [comparison.md](comparison.md).
 
 ```
-crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,osm,coherence-study,comparison})
-rigs/pupu.toml   ports, roles, paths, levels, stage settings for pupu
+crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison})
+rigs/            pupu.toml: ports, roles, paths, levels, stage settings; host.toml: the digital DUT on a dummy JACK server
 comparison.md    ac2 against REW and OSM: current results, definitions, open differences
+reports/         repeated takes, coherence study, DUT coverage (cited from comparison.md)
 osm.toml         the OSM stage: harness and ac2 binaries, matched settings, cases, recordings
 tolerances.toml  PASS / WARN limits for every comparison, compare steps
 baselines/       reviewed results per rig, stage and level (<rig>/<stage>-<level>dbfs.json; host/osm.json)
@@ -36,8 +36,7 @@ The **rig** (pupu) runs `run` and `preflight`. It needs only numpy and JACK-Clie
   3. Authorize the new client from the app on ketunkolo (Settings → Connection: **A** on the
      refused key, give it a name).
 
-  Alternatively, set `[ac2].cmd` in the rig file to a paired host over ssh. pupu has no ssh
-  key for ketunkolo today.
+  Alternatively, set `[ac2].cmd` in the rig file to a paired host over ssh.
 
 The **dev host** runs `analyse`. It needs numpy; matplotlib adds the plots and pytest runs
 the tests. scipy is not used.
@@ -79,6 +78,8 @@ ssh -t mui@192.168.9.27 'cd ~/crosscheck && ~/ac2-test/venv-meas/bin/python -m c
 ./rig-run.sh --stages ambient                                     # silent
 ./rig-run.sh --stages xone --emit -50dbfs                         # electrical only, no speaker
 ./rig-run.sh --stages genelec --emit-speaker -50dbfs --skip ac2_tf
+./rig-run.sh --stages genelec --emit-speaker -50dbfs --resolution 1/96   # own baselines: <stage>-<level>dbfs-r96.json
+
 python -m crosscheck analyse runs/<UTC time>                      # again, after changing tolerances
 python -m crosscheck analyse /work/ac2-scratch/crosscheck-fixtures --out /tmp/xc-fixtures
 ```
@@ -102,7 +103,7 @@ reach of Ctrl-C.
 
 - **Units are required.** Every level is typed with its unit (`-50dbfs`); a bare number is
   refused. The levels follow the full-scale-sine dBFS convention of ac2 and REW.
-- **Nothing emits without a flag.** `--emit` covers the electrical-only outputs (out 3 Xone,
+- **Nothing emits without a flag.** `--emit` covers the electrical-only outputs (out 5 Xone,
   out 2 loopback). `--emit-speaker` covers the speaker stage, which plays out 1 plus the
   loopback.
 - **The speaker stays at or below −50 dBFS** whatever the config or the electrical flags say
@@ -142,7 +143,7 @@ reach of Ctrl-C.
      wired for the stage and the previous wiring restored afterwards,
    - ac2's third-octave RTA,
    - a JACK recording analysed in numpy (FFT, analytic A/C weighting, the mic curve).
-2. **genelec** at −50 dBFS: out 1 → Genelec → mic on in 1; reference out 2 → in 2.
+2. **genelec** at `--emit-speaker`: out 1 → Genelec → mic on in 1; reference out 2 → in 2.
 3. **xone** at `--emit`: out 5 → Xone (L) → in 5; reference out 2 → in 2. With
    `--allow-electrical-level`, the drop-in is installed just before this stage.
 4. **dut** at `--emit` (opt-in: `--stages …,dut`): the digital DUT (below). Same flags and
@@ -234,8 +235,8 @@ then SIGTERM, then kill), keeping its `xruns <n>` line.
 - **On a dummy server (`rigs/host.toml`):** the matrix without hardware. A JACK dummy
   server (`jackd -n <name> -d dummy -r 96000 -p 2048 -w 21333 -C 8 -P 8`; without real-time
   scheduling a 256-frame period xruns, and on a busy host (parallel builds) 2048 does too:
-  `-p 4096 -w 42667` then; the 2026-10-11 matrix at 4096 matched the 2048 one within its
-  run-to-run scatter) and an ac2d of its own (`--max-level -10 --no-autosave`, its own `XDG_RUNTIME_DIR`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`),
+  `-p 4096 -w 42667` then, which matched 2048 within the matrix's run-to-run scatter)
+ and an ac2d of its own (`--max-level -10 --no-autosave`, its own `XDG_RUNTIME_DIR`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`),
   `ac2` on PATH, `AC2_JACK_DUT` set, then
   `python -m crosscheck run --rig rigs/host.toml --stages dut --emit -10dbfs --skip rew,ac2_tf --yes`
   and again at `-30dbfs`; `analyse` each, `baseline` writes `baselines/host/dut-<level>dbfs.json`.
@@ -501,21 +502,10 @@ noted and skipped.
 61672: rectangular Fast/Slow, and Leq sampled once a second in the UI. Display smoothing and
 OSM's LTW mode are also left out.
 
-**Results (4d85f50, harness OSM v1.5.2)**: FAIL 0, WARN 0, PASS 86, INFO 12. Worst values:
+**Results**: the OSM tables in [comparison.md](comparison.md), rebuilt from
+`baselines/host/osm.json`.
 
-| case | ac2 vs truth | OSM vs truth | ac2 vs OSM |
-|---|---|---|---|
-| identity, polarity, delay48 (aligned) | 0.000 dB / 0.00° | 0.000 dB / 0.00° | 0.000 dB |
-| delay10_5 (aligned) | 0.002 dB / 0.014° | 0.001 dB / 0.005° | 0.002 dB / 0.014° |
-| biquad | 0.031 dB / 0.27° | 0.024 dB / 0.22° | 0.030 dB / 0.30° |
-| snr 20 / 10 / 0: γ² (true 0.990 / 0.909 / 0.500) | 0.990 / 0.911 / 0.513 | 0.990 / 0.912 / 0.550 (model 0.990 / 0.911 / 0.555) | |
-| snr 20 / 10 / 0: \|H\| | H1 +0.01 / +0.04 / −0.05 dB | mean ratio +0.17 / +1.22 / +5.63 dB (model +0.18 / +1.22 / +5.62) | |
-| delay finder 48 / 10.5 | 48.000 / 10.500 | 48 / 10 | |
-| spectrum: sine / white noise per bin | −20.000 / +0.019 dB | −20.000 / +0.015 dB (converted) | |
-| xone rig take | | | median 0.000 dB / 0.004°, finder 0.502 vs 0 |
-| genelec rig take (aligned) | | | median 0.14 dB / 0.80° (max 3.6 dB / 20°), finder 348.45 vs 349 |
-
-Context from the uncompensated runs (INFO):
+Context from the uncompensated runs (INFO, 4d85f50):
 - A 0.5 ms delay left in costs ac2 up to 0.42 dB and 4.3°, with γ² down to 0.92 at 5–20 kHz,
   and a phase slope 0.32 sample short. The MTW's short HF windows decorrelate at their ends,
   and with few averages the estimates scatter. This is not a bias: inserting the finder's
@@ -546,19 +536,14 @@ only when `OSM_HARNESS` is set.
 - **REW live measurements need Pro**, so only the offline import runs. The fixtures'
   "REW live" set came from a GUI session. REW's sweep length is the file's: make another
   file for another length, or use `[stages.rew].repeats`.
-- **Not exercised on the rig yet:** REW's SPL-meter `levels` and `rta/captured-data`
-  formats, `Generate RT60` with the `/rt60` export, the RTA mode and averaging names, and
-  REW's absolute FR convention for an imported response (the `REW (SPL…)` rows assume FR =
-  gain + drive level). Check these rows on the first run.
+- **REW's RT60 export fails on the rig:** after the suite's `Generate RT60` command, `/rt60`
+  answers HTTP 400 ("no RT60 data … use the Generate RT60 command"), so the room group judges
+  ac2 only against numpy's Schroeder integration of REW's IR.
 - **ac2's RTA averages power over the whole run:** the ambient stage creates it with
   `--average fifo:<N>`, a FIFO longer than the run (at most ~60 results a second), so the
   capture is the duration-weighted power mean from its start to the capture: the window
   plus a few seconds of the same room. A FIFO and not an exponential: τ ≈ window/3 would
-  weight the last third ~63 % instead of every moment alike. Runs from before this read
-  INCONCLUSIVE (one frame against a 60 s average).
+  weight the last third ~63 % instead of every moment alike.
 - **Speaker paths at −50 dBFS** leave most of 20–1000 Hz below the noise limit: those band
   rows are INCONCLUSIVE, and room clarity (C50/C80) is INCONCLUSIVE when ac2's decay meets
   the noise before the boundary.
-- **Emission was not exercised here.** On the dev host the run side was exercised only
-  against ac2d's fake backend and a JACK dummy server, and the systemd drop-in path was not
-  exercised at all (it restarts the rig's ac2d).

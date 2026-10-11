@@ -2,8 +2,8 @@
 
 Status: PLAN §3.1 "Multiple devices in one clock domain; drift detection", P2, phase 7;
 §12 "Clock drift between devices". Implemented: output-vs-input drift detection on the
-loopback timing monitor (§5, §6; `ac2-core::timing::drift`, PROTO 16). Designed, not
-implemented: methods B and C (§4, §7). Multi-device *support* (resampling) is out of scope (§8).
+loopback timing monitor (§5, §6; `ac2-core::timing::drift`). Designed, never built:
+methods B and C (§4, §7). Multi-device *support* (resampling) is out of scope (§8).
 Builds on `q3-loopback-timing.md` (the monitor), `spike-audio-duplex.md` (cpal has no
 duplex API) and decisions 3a/3b in `open-questions.md`.
 
@@ -87,7 +87,7 @@ points of noise σ: `σ_slope ≈ σ·√(12/n)/S`; at σ = 0.05 sample, S = 10 
 hundredths of a sample) adds a few percent of the slope near threshold. Single-clock rigs
 read exactly 0 within that noise. This is the sharp tool, but only while a stimulus plays.
 
-**B. Callback timestamps per stream (designed, not implemented).** Each stream's frame
+**B. Callback timestamps per stream (designed, never built).** Each stream's frame
 count against the host monotonic clock gives its rate against the host; the difference of
 the input and output rates is the device-vs-device drift, without a stimulus. Timestamps
 are period-quantised (pupu: ±1 period, 2.67 ms) and on WASAPI arrive per packet with
@@ -98,24 +98,19 @@ on JACK and the fake both directions share one counter and the method reads 0 by
 construction. It is a rough pre-stimulus hint ("these two endpoints look like two clocks"),
 not a substitute for A. Left for when a Windows/macOS rig can validate it.
 
-**C. TF delay slope (designed, not implemented).** The input-vs-input case of §3: a tracked
+**C. TF delay slope (designed, never built).** The input-vs-input case of §3: a tracked
 delay moving monotonically at a constant rate over minutes is a clock slip between the
 reference and measurement inputs. Delay tracking already re-estimates the delay; a
 regression of tracked delay over time with the same threshold logic as A would flag it.
 
-### What the Q3 monitor got wrong (found while writing this note, fixed by §5)
+### Why the monitor needs a drift model
 
-Probing the Q3 tracker with the simulated drift (`timing/tests.rs`):
-
-- **Drift above one sample per hop was read as jumps.** The tracker compared each window
-  with the previous offset within ±1 sample. At 48 kHz one sample per 0.25 s hop is 83 ppm
-  (42 ppm at 96 kHz). At 100 ppm, 48 kHz, 20 s produced 14 OUTPUT TIMING JUMPs of +5 samples
-  and no drift estimate; at 300 ppm it never locked. PLAN §12's own example (100 ppm) was
-  undetectable.
-- **A one-sample step was read as drift.** An offset change of exactly one sample is within
-  the ±1 sample agreement, so it was followed and stayed in the regression: a step `h` in
-  the middle of a span S biases the slope by `1.5·h/S`, 3 ppm for one sample over 10 s at
-  48 kHz — a false CLOCK DRIFT warning from one dropped frame.
+A tracker that compares each window with the previous offset within ±1 sample fails both
+ways (shown with the simulated drift in `timing/tests.rs`): drift above one sample per
+0.25 s hop (83 ppm at 48 kHz, 42 ppm at 96 kHz) reads as a train of jumps and never gives
+an estimate, and a one-sample step is followed as drift and stays in the regression, where
+a step `h` mid-span biases the slope by `1.5·h/S` (3 ppm for one sample over 10 s at
+48 kHz: a false CLOCK DRIFT from one dropped frame). §5 fixes both.
 
 ## 5. The drift model in the monitor
 
@@ -128,12 +123,10 @@ offset belongs to its centre. A window gives an offset only if its correlation's
 (width at half the peak, about the inverse of the stimulus bandwidth) is at most
 `max_lobe_s` = 0.2 ms. PHAT whitens every bin, and where a narrowband window's band ends the
 leakage of the window's edges pulls the peak off the true lag by a fraction of the lobe.
-On pupu (96 kHz, 1743-sample loopback) the sweep emitted from 4.3 Hz read offset 0 (the edge
-of the searched range) with PSR 21–30 dB from 9 to 230 Hz. With a floor relative to the
-strongest bin it read 1669…1742 up to 1.4 kHz: −74 samples at a 549-lag lobe, −1 at 20–42,
-exact at 14 or less. A bias of tens of samples against a ½-sample jump threshold reads as a
-lock elsewhere, a jump back and a tilted line: every suite sweep logged a false OUTPUT TIMING
-JUMP, and a −3.6 ppm CLOCK DRIFT that refused the internal reference. Such a window is
+On pupu (96 kHz loopback) a sweep's low-frequency start biased the offset by −74 samples at
+a 549-lag lobe, −1 at 20–42, none at 14 or less; tens of samples against a ½-sample jump
+threshold read as a false OUTPUT TIMING JUMP on every sweep and a tilted line (a false
+−3.6 ppm CLOCK DRIFT). Such a window is
 `Narrowband`. The lobe is judged before the PSR, since a missing loopback whitens to a narrow
 lobe. A narrowband window says nothing about the loopback, so it neither counts towards
 Lost nor changes the state.
@@ -150,20 +143,17 @@ Lost nor changes the state.
   `W·ε` samples (3.3 at 100 ppm in a 0.68 s window) and the peak can sit anywhere along
   that. Past the newest held window σ also grows by `slope_sigma_ppm` (1 ppm) times the
   distance: a sweep is timed at the group delay of the frequency it is at plus the
-  estimator's band-dependent bias, so on pupu's one clock the offset still rose 0.5 sample
-  within each 2.25 s sweep (2.3 ppm). Carried 20 s to the next sweep that slope missed by
-  4–5 samples; every suite sweep after the first logged a JUMP 1748 → 1743, and the shifted
-  points added up to a 2.0–2.3 ppm CLOCK DRIFT. Unshifted, the regression across sweeps
-  sees the same trend repeat and its slope is the clocks' (5 ppm between sweeps is judged
-  as such). Over a 20 s gap a step must exceed about 6 samples to be a jump; within
+  estimator's band-dependent bias, so on one clock its offset still moves within a sweep
+  (pupu: 0.5 sample in 2.25 s, 2.3 ppm); carried 20 s to the next sweep that slope misses
+  by 4–5 samples and would log a false JUMP. The regression across sweeps sees the same
+  trend repeat, so its slope is the clocks'. Over a 20 s gap a step must exceed about 6 samples to be a jump; within
   continuous stimulus the term is a hundredth of a sample per hop. Outside the threshold a window is a jump candidate, confirmed when its windows lie
   on one line over at least W (as in Q3). The jump is measured re the drifted offset at the
   newest candidate window (the first may straddle the step).
 - **Steps never enter the slope.** A confirmed jump shifts the held points by the step, so
   the regression continues across it with the same slope. A rate ratio does not change when
   frames drop, so continuing the line is the physically right model. With a ½-sample
-  threshold a single dropped or repeated frame is an OUTPUT TIMING JUMP of one sample (it
-  was invisible before), and no 10-minute 0 dB SNR run reads a false one.
+  threshold a single dropped or repeated frame is an OUTPUT TIMING JUMP of one sample, and no 10-minute 0 dB SNR run reads a false one.
 - **When no line fits** (off the line for longer than a jump takes to confirm plus the loss
   count, without a new line forming) the state is Lost, never a Locked offset nothing
   confirms. Measured on the simulated loopback (pink, 10 dB SNR, 48 kHz): followed without
@@ -226,9 +216,9 @@ open question (§9).
 | `ac2-cli/tests/it/drift_rig.rs` | 50 ppm | `ac2 status` clock line with `+50.0 ppm` and the warning |
 | `ac2-scene`, `ac2-ui` | banner text, order, detail; from mirrored state; session dialog note | asserted headless |
 
-## 7. Input-vs-input (designed, not implemented)
+## 7. Input-vs-input (designed, never built)
 
-The TF case of §3 needs method C. Once implemented: a measurement whose tracked delay moves
+The TF case of §3 needs method C. Proposed: a measurement whose tracked delay moves
 by more than one sample over the stage length of its top MTW band, at a constant rate over
 ≥ 10 s, gets a protection flag (`CLOCK_SLIP`) that the scene shows as a fault banner
 ("reference and measurement on different clocks"), and averaging stops; this is a refusal,

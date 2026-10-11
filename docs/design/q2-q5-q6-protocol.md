@@ -1,7 +1,9 @@
 # Q2 / Q5 / Q6 — Delivery, state sync and stimulus lease
 
-Status: implemented (`ac2d`, `ac2-client`, `docs/protocol.md`; phase 3). Answers Q2, Q5 and Q6 in `open-questions.md` within the
-decisions table (2a, 2b, 5a, 5b, 6a–6d). Transport facts come from `spike-zmq-curve.md`.
+Status: implemented (`ac2d`, `ac2-client`). Answers Q2, Q5 and Q6 in `open-questions.md`
+within decisions 2a, 2b, 5a, 5b, 6a–6d. The wire itself (commands, events, errors, header
+fields) is specified in [`docs/protocol.md`](../protocol.md); this note keeps the guarantees
+and why they are built this way. Transport facts: `spike-zmq-curve.md`.
 
 ## Identities and counters
 
@@ -15,27 +17,18 @@ decisions table (2a, 2b, 5a, 5b, 6a–6d). Transport facts come from `spike-zmq-
 
 ## Q5 — State sync, replay, frame identity
 
-**Sync procedure (client):**
+**Sync** (procedure: protocol §4.3; replay buffer 5a: the last 1024 events or 60 s). The
+first `ka` proves the subscription is live before the snapshot is taken, so no event between
+snapshot and subscription can be missed; buffered events with `rev > R` are then applied in
+order. A gap in `rev` asks `state.since`; an evicted `rev` (`resync_required`) or another
+`daemon_incarnation` starts over from a snapshot. A `ka` whose `rev` stays ahead of the last
+applied event for 1 s catches a missed final patch.
 
-1. Subscribe to `evt` and `ka`.
-2. Wait for the first `ka`. That proves the subscription is live.
-3. Call `state.snapshot`, which returns `{state, rev = R, daemon_incarnation, session_epoch}`.
-4. Apply buffered `evt` with `rev > R` in order, then live events.
-5. If an event arrives with `rev > last + 1`, call `state.since(last)`.
-6. If a `ka` shows another `daemon_incarnation`, drop all mirrored state and go back to step 1.
-7. If a `ka` shows `rev` ahead of the last applied event for more than 1 s, call `state.since`.
-   This catches a missed final patch.
+**Events** carry the changed entity's full new value (protocol §4.2): applying one is
+assignment, which keeps clients trivial and makes missed-ordering bugs impossible within an
+entity.
 
-**Replay buffer** (5a): the last 1024 events or 60 s, whichever holds fewer.
-`state.since(r)` returns the events after r, or the error `resync_required` if r has been
-evicted. The client then takes a fresh snapshot.
-
-**Events** are typed and patch-shaped: `{rev, kind, payload}`, where `kind` names the
-changed entity (`measurement`, `trace`, `generator`, `session`, `calibration`, `timing`, …)
-and the payload is that entity's full new value (or `deleted`). Full entity values keep
-client application trivial and make missed-ordering bugs impossible within an entity.
-
-**Frame identity** (header fields beyond PLAN §6.3):
+**Frame identity** (header fields beyond PLAN §6.3; protocol §5.3):
 
 - `session_epoch`: frames from an older epoch are discarded by clients.
 - `config_rev`: the `rev` of the measurement config the DSP actually used.
@@ -82,8 +75,8 @@ Daemon:
 - Client sockets reconnect after 100 ms, backing off to 2 s.
 - Pacing each peer to what it has consumed (instead of to the publish rate) is designed in
   [`flow-control.md`](flow-control.md), not implemented.
-- `ka` keepalive every 250 ms carries:
-  `{daemon_incarnation, session_epoch, rev, daemon_wall_ns, timing summary, generator owner/state}`.
+- `ka` keepalive every 250 ms carries the rev, daemon wall clock, timing state and generator
+  summary (protocol §5.4).
 
 Client:
 - Before each render, drain the socket: read until EAGAIN (without copying), keep the
@@ -98,12 +91,12 @@ Client:
   minus that message's delivery delay. Take the **maximum** over the last 10 s (the
   least-delayed sample); it under-estimates the offset by the minimum delivery delay only.
   Frame age = `now_local + offset − capture_wall_ns`.
-- **STALE** (2a): no new frame on a topic for 1 s, or frame age > 1 s. The trace dims and
+- **STALE** (2a): no new frame on a topic for 1 s (3 s for the once-a-second Leq streams), or frame age > 1 s. The trace dims and
   shows its age. STALE says nothing about measured delay.
 - Daemon unreachable: if no `ka` arrives for 1.5 s, every trace is STALE and the banner
   reads "DAEMON NOT RESPONDING".
 
-Tests (phase 3): a stalled subscriber recovers to fresh frames within one drain plus one
+Tests: a stalled subscriber recovers to fresh frames within one drain plus one
 publish period on inproc and tcp; bandwidth-limited link (tc/netem or a throttled proxy in
 tests) shows bounded age; late joiner gets latest slot immediately.
 
@@ -112,15 +105,9 @@ tests) shows bounded age; late joiner gets latest slot immediately.
 **Ownership** is bound to `client_id` (the ZAP User-Id under CURVE). Request content can
 never claim an identity.
 
-**Commands:**
-
-| Command | Lease needed | Effect |
-|---|---|---|
-| `gen.acquire {force: bool}` | none | Returns `{lease_token: u128 random, expires_in_ms}`. Refused if another client holds the lease, unless `force`. `force` first stops output (fade) and disarms. |
-| `gen.set {lease_token, desired}` | yes | Sets the full desired generator state: signal, level, routing, `armed`, `firing`. Also refreshes the lease. |
-| `gen.refresh {lease_token}` | yes | Refreshes the lease without changing state. |
-| `gen.release {lease_token}` | yes | Stops output, disarms, and releases the lease. |
-| `gen.stop` | **no** | Any authorized client: fade out, disarm, keep the owner (6c/decision: stop is universal). |
+Commands and rules: protocol §3.2 (`gen.acquire {force}`, `gen.set`, `gen.refresh`,
+`gen.release` need the lease token; `gen.stop` is universal: any authorized client fades out
+and disarms, keeping the owner, because stopping must never wait on whoever holds the lease).
 
 - Refresh at least every 0.5 s; the lease expires 1.5 s after the last refresh (6a,
   configurable). On expiry the daemon fades the output path out over 20 ms (6b), disarms
@@ -129,23 +116,13 @@ never claim an identity.
   generator port checks it per callback. If the control thread is stuck, output still fades.
 - `firing` requires `armed`. Arming does not emit. Loading a session, reconnecting or
   restarting always comes up disarmed with no owner.
-- **IR capture** (ESS) needs the lease and holds it for the whole capture. Expiry or
-  `gen.stop` aborts the capture, and the result is discarded with reason `aborted`.
-- **Audit:** every acquire, force, arm, fire, stop, release and expiry is an `evt` (kind
-  `generator`) carrying `client_id`, and is written to the daemon log.
+- **Sweep runs** (`sweep.run`) need the lease and hold it for the whole run. Expiry or
+  `gen.stop` aborts the run, and its result is discarded.
+- **Audit:** every acquire, force, arm, fire, stop, release and expiry is a `generator` event
+  naming the client, and is written to the daemon log.
 
-## Ctrl channel details
+## Ctrl channel
 
-- DEALER ↔ ROUTER, one msgpack frame `{v, id, cmd}` per request, `ROUTER_MANDATORY` on.
-- Dedup: per `client_id`, the daemon remembers the last 256 request ids and their replies
-  for 30 s. A retried id returns the stored reply and never runs twice.
-- Every mutation accepts an optional `expect_rev`. If state has moved past it, the reply is
-  `conflict` with the current `rev`.
-- Errors are a typed `{code, msg}` with `code` an enum: `invalid`, `not_found`,
-  `conflict`, `lease_required`, `lease_held`, `refused` (safety), `resync_required`,
-  `unsupported`, `internal`.
-
-## Out of scope for phase 3
-
-- Rate-limiting refused CURVE reconnects beyond logging (phase 6).
-- pyzmq interop tests (phase 3 adds Rust↔Python frame-codec fixtures; CURVE interop later).
+DEALER ↔ ROUTER with `ROUTER_MANDATORY`; request ids are deduplicated per client (a retried
+id returns the stored reply and never runs twice), mutations take an optional `expect_rev`,
+errors are typed codes: protocol §3.1, §3.4.

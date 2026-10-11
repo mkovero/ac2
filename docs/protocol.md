@@ -40,8 +40,8 @@ fields first:
   decoding the body.
 - There is no negotiation, no range of accepted versions and no compatibility layer.
 
-The first request on a connection is `hello`; its reply `welcome` carries `client_id`
-(the identity the daemon bound to the connection: the ZAP User-Id under CURVE, otherwise a
+The first request on a connection is `hello`; its reply `welcome` carries `server`
+(`ac2d <version> (build <id>)`), `client_id` (the identity the daemon bound to the connection: the ZAP User-Id under CURVE, otherwise a
 daemon-assigned id), `daemon_incarnation`, `session_epoch` and `rev`.
 
 Frame headers carry `v` too; a frame at another version is refused.
@@ -219,12 +219,9 @@ keeps it and `meas.delete` takes it with the measurement. Last write wins: a cli
 layout it receives for the measurement it has selected on screen and never sends it back.
 A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axis: row |
 column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
-`ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is `{kind: transfer
-| spectrum | spl | distortion, transfer_view: magnitude | phase | coherence | ir_linear |
-ir_log | etc, spectrum_view: spectrum | spectrum_spectrograph | spectrograph, spl_view:
-meter | leq | meter_leq | bands, sweep_view: response | ir_linear | ir_log | etc | room,
-chrome: full | no_grid | traces_only}`: its kind and the view of each kind it may be turned
-into. Which measurement a pane shows, the focused pane, a maximised or full-screen pane and
+`ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is {`kind`,
+`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `chrome`} (snake_case enums,
+`ac2_proto::model::layout`): its kind and the view of each kind it may be turned into. Which measurement a pane shows, the focused pane, a maximised or full-screen pane and
 the window are each client's. `invalid` for a ratio out of range and for more than 16
 panes; a session file's layout that is either is dropped on load.
 
@@ -327,7 +324,7 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
 - **Sweep measurement** (`sweep`, `SweepConfig`: `reference_input`, `measurement_input`,
   `outputs` ([u16], the speaker's and the loopback's), `level: Dbfs` (typed, no default),
   `sweep: EssSpec`, `repeats` (1…8), `gate: Seconds | nil`, `tail: Seconds | nil`,
-  `lf_harmonics: LfHarmonics`). Settings
+  `lf_harmonics: LfHarmonics`, `resolution: Resolution`; §3.2 *Sweep runs*). Settings
   only: it publishes no stream, `running` stays false, and `meas.start` / `meas.stop` /
   `meas.reset` of it are `invalid`. `sweep.run` plays it (below); each run is
   a stored `sweep` trace it owns. `meas.update` changes the settings for the next run.
@@ -514,7 +511,7 @@ band's limit at the mic is the place's limit plus the attenuation (the bound for
 unusable band; a missing band has no limit), and the LAeq at the place is predicted from
 every second: each band less its attenuation, A-weighted at the band centre, summed (the
 estimate from the measured bands; `at_most` with the unusable bands at their bound). A
-`night_day` window is judged by the night limits while it holds a night second, else by the
+window with a `day_offset` is judged by the night limits while it holds a night second, else by the
 day limits; headroom against the set in force once the horizon (the meter's `leq.horizon`)
 has passed. Judging, filling windows, headroom and hysteresis are the Leq windows' (above),
 on dB SPL only (the sensitivity; the position correction is not applied to the band meter).
@@ -646,9 +643,8 @@ The reply `DelayFinding`:
 - `DelayOutcome` (tagged by `type`): `accepted` {`first`, `strongest`} | `ambiguous`
   {`reasons: [AmbiguityReason]`, `ranked: [DelayArrival]` (≤ 3, the rule pick first),
   `strongest`} | `no_estimate` {`reasons: [NoEstimateReason]`}.
-- `DelayArrival`: `delay: Seconds`, `delay_samples` (f64, fractional), `level: Db` (re the
-  strongest), `phase: Degrees`, `uncertainty_samples` (f64, 1 σ), `misfit` (f64),
-  `refined` (bool).
+- `DelayArrival`: `delay`, `delay_samples` (fractional), `level` (dB re the strongest),
+  `phase`, `uncertainty_samples` (1 σ), `misfit`, `refined`.
 - `DelayConfidence` (nil where the finder refused before reaching it): `psr_db`,
   `psr_acq_db`, `band_snr_db` (Db), `excited_fraction` (0…1), `uncertainty_samples` (of
   the rule pick), `pulse_width_samples`, `period` (Samples).
@@ -675,10 +671,8 @@ keeps the arrival and sets `nudged` to the value's distance from it, and `delay.
 its step to `nudged` (both refused beyond ±10 s from the arrival); tracking compares the
 finder's estimates with the arrival and moves it, keeping `nudged`. A view's shared time
 base refers the live curve to the arrival, so a step moves that curve alone, like a
-trace's `delay_nudge` (`docs/design/delay-no-resettle.md`, "What the keys mean"); the app's
-plain `,` / `.` (0.1 ms) and Ctrl / Alt (a sample, a tenth) all send `delay.nudge`, and its
-front ends say the delay with its offset: `delay 12.60 ms (+0.10 ms from arrival)`. A
-capture records the applied delay as `TraceMeta.delay` and `nudged` as its
+trace's `delay_nudge` (`docs/design/delay-no-resettle.md`, *What the keys mean on the
+view*). A capture records the applied delay as `TraceMeta.delay` and `nudged` as its
 `edit.delay_nudge` (the trace's offset from that arrival). Delays are not rounded to whole
 samples: the finder's fractional estimate is inserted as found, and the delay in samples is
 kept to 10⁻⁶ sample, so whole 0.1 ms steps (9.6 samples at 96 kHz) out and back return
@@ -738,9 +732,8 @@ display edits and are never applied to the stored data.
   frame has display columns (grid `log_bins`) — with columns whose validity mask is set
   stored as NaN.
   A transfer capture also keeps the impulse response its `ir` frame would carry, formed
-  from the same state: `TraceData.ir` (`TransferIr` {`sample_rate`, `ir`: `TraceIr`
-  {`t0`, `dt` re the trace's `delay` (the inserted delay), `linear`, `etc_db`}}), every
-  sample (one FFT length of the full-rate stage: 4096 points, ±42.7 ms at 48 kHz). It is nil
+  from the same state: `TraceData.ir` (`TransferIr` {`sample_rate`, `ir`: `TraceIr`},
+  `t0` re the trace's `delay`), every sample (one FFT length of the full-rate stage: 4096 points, ±42.7 ms at 48 kHz). It is nil
   when the measurement has no IR yet (no block accepted with a reference); traces made by
   `trace.average`, math channels, imports of other formats and targets have none.
   It needs a result in the current session epoch (`invalid` otherwise: not running, no
@@ -1375,7 +1368,7 @@ layout as code.
 | `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil) |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve`, `position` (`PositionCorrection` \| nil: included in the levels) |
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
-| `band_leq` | one column per band of each band window, window-major: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
+| `band_leq` | one column per band window, in configuration order: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n) |
@@ -1441,7 +1434,7 @@ A malformed frame is dropped and counted by the client; decoders never panic.
 Measured on the fake rig (`crates/ac2d/tests/wire_size.rs`, noisy high bands, so dearer
 than most real curves); bytes include topic, header and payload, not the transport:
 
-| frame | f32 arrays (v35) | now |
+| frame | as f32 arrays | as sent |
 |---|---|---|
 | `tf`, 480 columns | 7 863 B | ≈ 2 400 B (header ≈ 180 B) |
 | `spec`, 65 536 points (897 columns) | 3 696 B | ≈ 1 580 B |
@@ -1539,7 +1532,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 24, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 25, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
 ColourFamily | null, layout: PaneLayout | null}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
@@ -1551,17 +1544,9 @@ once written. A save writes the trace files that are not there yet, then replace
 names: a reader sees the old session or the new one, never a mix. An SPL log's
 unterminated last line (an append cut short, §7.3) is not read and is not an error.
 `format` and `version` are read first; any other version is
-refused (no migration). Trace files hold the unsmoothed columns; each trace's display
-smoothing is its `meta.edit.smoothing` (older versions — version 1 transfer captures could
-hold smoothed columns, version 2 named smoothing modes `power` / `complex` and had no
-spectrum smoothing, version 3 had no sweep traces, version 4 kept a sweep's impulse response
-in a `*.sweep.json` sidecar and had no mic curves on traces, version 5 named a capture's
-curve by name only, without its label, file and content hash, version 6 had no Leq windows
-and no SPL logs, version 7 named files by save generation and its autosave kept the
-previous one as a separate directory, version 8 had no spatial averages and no room
-parameters on sweeps, version 9 held spatial averages where version 10 holds math channels, version 12 had no
-band meters — are refused). A directory that holds other files is never written
-into.
+refused (no migration; `file.salvage` recovers the traces). Trace files hold the unsmoothed
+columns; each trace's display smoothing is its `meta.edit.smoothing`. A directory that
+holds other files is never written into.
 
 A session archive (`.ac2session`) is that directory as a gzip-compressed POSIX tar, the
 entries at their relative paths (`session.json`, `traces/…`, `spl/…`), regular files only.
@@ -1642,7 +1627,7 @@ in the recording directory:
   `WAVE`, a 28-byte `JUNK` chunk, `fmt ` of 40 bytes, `fact`, `data`). Past 4 GiB the file
   becomes RF64 (EBU Tech 3306): `RIFF` → `RF64`, `JUNK` → `ds64` with the 64-bit sizes, the
   32-bit sizes 0xFFFFFFFF; the audio never moves.
-- `<name>.ac2rec.json`: the sidecar, JSON, `format: "ac2-raw-capture"`, `version: 1`
+- `<name>.ac2rec.json`: the sidecar, JSON, `format: "ac2-raw-capture"`, `version: 2`
   (another version is refused), `software` {`ac2`, `build`, `protocol`}, `audio`
   {`file`, `sample_rate`, `channels`: [{`input`, `name`, `mic`, `roles`: [{type: loopback
   \| reference \| measured \| analysed, `measurement`}]}]}, `device` {`backend`,
@@ -1720,8 +1705,8 @@ TXT record (all values UTF-8 strings):
 | `v` | daemon version (`ac2d --version`) |
 | `proto` | `PROTO_VERSION` the daemon speaks (§2) |
 | `fp` | fingerprint of the daemon's CURVE server key: the first 10 bytes of SHA-256 over the 32 raw key bytes as five dash-separated groups of four lowercase hex digits (`1a2b-3c4d-5e6f-7a8b-9c0d`) |
+| `key` | the full 40-character Z85 public CURVE server key |
 
-The `key` TXT value is the full 40-character Z85 public CURVE server key.
 The advert carries no secret and grants nothing. A client connects only with a server key it
 pinned after comparing the fingerprint with the one the daemon host shows
 (`ac2 auth pair` or a discovered-key pairing dialog), and CURVE fails the handshake when the daemon does not hold that key. Clients

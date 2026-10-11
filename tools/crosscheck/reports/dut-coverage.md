@@ -1,8 +1,8 @@
 # Digital DUT: harmonic coverage per order, tone and level
 
 `python -m crosscheck dutcov <runs>` over the DUT matrix runs 20261011T005229Z (−10) and 20261011T010051Z (−30) (ac2 6f0e5b57, dummy JACK with a 4096-frame period,
-`rigs/host.toml`). A cell: judged/total at that tone and its worst signed error (reading − exact value, dB);
-† the sweep cells the Wiener pre-filter model cannot follow, reported apart.
+`rigs/host.toml`). Legend below the table.
+
 | H | source | level | 50 Hz | 100 Hz | 200 Hz | 500 Hz | 1000 Hz | 2000 Hz | 5000 Hz | judged | incon. | missing | worst Δ dB | model-limited | status |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | H2 | steady sine | -10 dBFS | 4/4 +0.05 | 4/4 +0.01 | 4/4 -0.01 | 4/4 -0.01 | 4/4 +0.01 | 4/4 +0.00 | 4/4 +0.01 | 28/28 | 0 | 0 | +0.05 | — | PASS |

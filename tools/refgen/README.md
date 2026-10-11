@@ -71,16 +71,25 @@ that an estimator is not expected to match exactly).
 
 ## Vector sets
 
+Each set's JSON `description` and `parameters` say exactly what it holds; module in brackets
+(`generate.py` itself where none).
+
 | name | content |
 |---|---|
-| `spectrum_hann_tone_noise` | one 4096-sample frame at 48 kHz: bin-centred 3 kHz sine (peak 0.5) + white noise; periodic Hann; one-sided amplitude spectrum (FS RMS, and dBFS) and PSD (FS²/Hz, and dB) |
-| `transfer_h1_biquad_delay` | white noise through an RBJ peaking biquad + 24-sample delay + uncorrelated noise; scipy Welch `Pxx`, `Pyy`, `Pxy`, H1 and coherence; analytic `h_true` |
-| `weighting_iec61672` | A and C weighting in dB at the exact base-10 one-third-octave frequencies 10 Hz–20 kHz from IEC 61672-1 Annex E, plus the standard's rounded Table 3 values |
-| `calibration_mic_curve` | analog mic model (HP 18 Hz, +3 dB at 9 kHz, LP 30 kHz) at 1/12-octave points; exact correction normalised at 1 kHz at IEC 1/3-octave centres, and its log-f power average per band (`sets/calibration.py`) |
-| `delay_integer_pos_neg` | white-noise reference `x` and `y_pos` / `y_neg` delayed by +137 / −61 samples plus noise; expected lags in `scalars` |
-| `room_schroeder_octaves` | an impulse response (two exponential decays, direct sound, background noise) through IEC octave bands run backwards in time; Schroeder curves from each band's −20 dB trigger to a fixed truncation point, EDT / T20 / T30 by `numpy.polyfit`, C50 / C80 by window-before-filtering (`sets/room.py`) |
-| `spectrum_density` | ac2's spectrum density `2·c_k·|X_k|²/(fs·Σw²)` (twice the PSD convention below, so it keeps the dBFS reference: white noise σ reads `4σ²/fs`) of a 1024-point Hann spectrum at 48 kHz, FIFO 32: white noise + bin-centred sine, and frequency-domain pink noise; analytic densities and the sine's `level − 10·log10(ENBW·fs/N)` (`sets/density.py`) |
-| `multires_density` | the multi-resolution density at 12 kHz, 1/24 grid, FIFO 16: each band's mean bin over a column, blended in power and divided by `B(f) = Σ w_b·ENBW·fs/N_b`, on white noise + sine and pink noise; `noise_bandwidth_hz` per column (`sets/density.py`) |
+| `spectrum_hann_tone_noise` | one 4096-sample Hann frame at 48 kHz: bin-centred 3 kHz sine (peak 0.5) + white noise; amplitude spectrum (FS RMS, dBFS) and PSD (FS²/Hz, dB) |
+| `spectrum_offbin_windows` | full-scale sine half a bin off-centre through Hann, Blackman-Harris 4, HFT95 and rectangular windows: scalloping loss [`levels.py`] |
+| `transfer_h1_biquad_delay` | white noise through an RBJ peaking biquad + 24-sample delay + uncorrelated noise; scipy Welch `Pxx`, `Pyy`, `Pxy`, H1, coherence; analytic `h_true` |
+| `mtw_stage_pipeline_48k` | MTW stages: integer alignment, Kaiser decimation, Hann Welch auto/cross spectra per stage [`mtw.py`] |
+| `weighting_iec61672` | A and C weighting at the exact base-10 1/3-octave frequencies 10 Hz–20 kHz (IEC 61672-1 Annex E) plus the standard's rounded Table 3 |
+| `fft_banding_noise`, `rta_butterworth_bands` | 1/1- and 1/3-octave band power from PSD bins; Butterworth band-pass responses on IEC 61260-1 edges [`levels.py`] |
+| `spl_toneburst`, `spl_time_weighting` | F / S / I time weighting: 4 kHz toneburst maxima, step rise and fall (IEC 61672-1 Formula 7) [`levels.py`] |
+| `calibration_mic_curve` | analog mic model at 1/12-octave points; correction normalised at 1 kHz and its log-f power average per 1/3-octave band [`calibration.py`] |
+| `delay_integer_pos_neg` | white-noise reference and copies delayed +137 / −61 samples plus noise; expected lags in `scalars` |
+| `delay_finder_{full,mid,sub}_*` | delay finder scenarios per band and excitation (pink, music, narrow, periodic), direct sound below a louder reflection [`delay_finder.py`] |
+| `room_schroeder_octaves` | two-slope IR through IEC octave bands; Schroeder curves, EDT / T20 / T30, C50 / C80 [`room.py`] |
+| `spectrum_density` | spectrum density `2·c_k·|X_k|²/(fs·Σw²)` (twice the PSD below, so it keeps the dBFS reference: white noise σ reads `4σ²/fs`), 1024-point Hann at 48 kHz, FIFO 32, on noise + sine and pink noise [`density.py`] |
+| `multires_density`, `multires_spectrum` | multi-resolution spectrum at 12 kHz on the 1/24 grid: density divided by `B(f) = Σ w_b·ENBW·fs/N_b`, and tone level with bands blended in power [`density.py`, `multires.py`] |
+| `display_smoothing_biquad`, `display_ir_etc` | fractional-octave display smoothing (power and complex); live IR by circular IFFT and ETC from the Hilbert envelope [`display.py`] |
 
 ## Conventions
 
