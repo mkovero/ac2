@@ -1,5 +1,5 @@
 //! `ac2 session salvage` of sessions saved by earlier format versions (fixtures under
-//! `tests/fixtures/salvage`, in the shapes of formats 20, 22 and 23) into a real
+//! `tests/fixtures/salvage`, in the shapes of formats 20, 22, 23 and 24) into a real
 //! daemon: measurements with their settings, colours and delays, the trace under its
 //! measurement, the math channel on the restored ids, and the running ones started only
 //! where the audio session captures their inputs. The fixtures were saved from the fake
@@ -17,7 +17,7 @@ use ac2_client::{Client, ClientConfig, Endpoints};
 use ac2_proto::Command;
 use ac2_proto::model::{
     ColourFamily, DeviceSelector, MathExpr, MeasKind, Measurement, Operand, SessionConfig,
-    SpecResolution, TfAveraging, TraceOwner, Weighting, Window,
+    SpecLevel, SpecResolution, TfAveraging, TraceOwner, Weighting, Window,
 };
 use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
 use clap::Parser;
@@ -250,6 +250,32 @@ async fn format_22_comes_back_with_colours_and_running_state() {
     // Running when saved and its input captured: started.
     assert!(meas(&r.c, "FOH SPL").await.running);
     assert!(meas(&r.c, "Spectrum 1").await.running);
+}
+
+/// Format 24 had no level mode: a spectrum read tone power at every resolution, so both
+/// the fixed and the multi-resolution one come back as tone (what was on screen, and
+/// what their stored traces hold) and the report names the setting it filled in.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn format_24_spectra_come_back_as_tone_and_say_so() {
+    let r = rig(Some(vec![0, 1])).await;
+    let report = salvage(&r, 24).await;
+    check_common(&r, &report).await;
+    for (name, resolution) in [
+        ("Spectrum 1", SpecResolution::Fixed { fft_len: 65_536 }),
+        ("Spectrum MR", SpecResolution::MULTI),
+    ] {
+        let m = meas(&r.c, name).await;
+        let MeasKind::Spectrum { config } = &m.config.kind else {
+            panic!("{m:?}")
+        };
+        assert_eq!(config.resolution, resolution);
+        assert_eq!(config.level, SpecLevel::Tone, "{name}");
+        let n = notes(item(&report, name));
+        assert!(
+            n.contains("level") && n.contains("tone"),
+            "{name}: {report:#}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

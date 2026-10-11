@@ -1,25 +1,27 @@
-//! Narrowband spectrum job: tone level per FFT bin and input meters. A calibrated input
-//! reads dB SPL; its mic curve, when on, is subtracted per bin. Display smoothing, when set,
-//! power-averages the bins over a fractional-octave kernel.
+//! Narrowband spectrum job: tone level or power spectral density per FFT bin
+//! ([`SpecLevel`]) and input meters. A calibrated input reads dB SPL (dB SPL/Hz); its mic
+//! curve, when on, is subtracted per bin. Display smoothing, when set, power-averages the
+//! bins over a fractional-octave kernel: of a density, the density.
 //!
-//! The live `spec` frame gathers the bins into display columns ([`GridDef::LogBins`]), each
-//! the highest level among its bins, so a 65 536-point spectrum is under a thousand columns
-//! on the wire and a single-bin tone keeps its level. A capture takes every bin, unsmoothed,
-//! on the FFT's own grid.
+//! The live `spec` frame gathers the bins into display columns ([`GridDef::LogBins`]), so a
+//! 65 536-point spectrum is under a thousand columns on the wire. A tone-level column is
+//! the highest level among its bins, so a single-bin tone keeps its level; a density column
+//! is the mean of its bins, so a noise reads its density however many bins the column
+//! spans. A capture takes every bin, unsmoothed, on the FFT's own grid.
 //!
 //! A multi-resolution spectrum ([`SpecResolution::Multi`], `ac2_core::multires`) has
-//! log-spaced columns on the live frame and in a capture alike, each the tone level its
-//! bands give; the frame names the bands, how old each one's newest spectrum is and where
-//! the columns are finer than the band behind them resolves.
+//! log-spaced columns on the live frame and in a capture alike, each the tone level or the
+//! density its bands give; the frame names the bands, how old each one's newest spectrum is
+//! and where the columns are finer than the band behind them resolves.
 
 use ac2_core::grid::LogGrid;
 use ac2_core::multires::{MultiResAnalyzer, MultiResConfig, MultiResLadder};
 use ac2_core::smoothing::{LinearSmoother, Smoother, SmoothingMode, TfColumns};
-use ac2_core::spectrum::{SpectrumAnalyzer, SpectrumConfig, column_max};
+use ac2_core::spectrum::{SpectrumAnalyzer, SpectrumConfig, column_max, column_mean};
 use ac2_proto::frame::{FrameData, ProtectionFlags, SpecBand, SpecBands, SpecFrame, SpecMeta};
 use ac2_proto::grid::{BinColumns, GridDef, GridId};
 use ac2_proto::model::{
-    FreqRange, LevelScale, Resolution, SmoothingFraction, SpecResolution,
+    FreqRange, LevelScale, Resolution, SmoothingFraction, SpecLevel, SpecResolution,
     SpectrumConfig as WireConfig, Unresolved,
 };
 use ac2_proto::topic::{Stream, Topic};
@@ -81,14 +83,14 @@ struct Fixed {
     analyzer: SpectrumAnalyzer,
     /// First bin of each display column, then the bin count.
     first_bin: Vec<u32>,
-    /// Per bin: folded power → tone power in the frame's scale (window gain, sensitivity
-    /// and mic-curve correction as one factor).
+    /// Per bin: folded power → tone power or density in the frame's scale (window gain or
+    /// noise bandwidth, sensitivity and mic-curve correction as one factor).
     gain: Vec<f64>,
     /// Display smoothing kernel for `cfg.smoothing`, built for the spectrum's bin count.
     smoother: Option<LinearSmoother>,
-    /// Tone power per bin.
+    /// Tone power or density per bin.
     power: Vec<f64>,
-    /// Smoothed tone power per bin (smoothing on).
+    /// Smoothed `power` (smoothing on).
     smoothed: Vec<f64>,
 }
 
@@ -99,7 +101,7 @@ struct Multi {
     resolution: Resolution,
     /// Display smoothing on the columns (power, the kernel stored traces are smoothed with).
     smoother: Option<Smoother>,
-    /// Tone power per column.
+    /// Tone power or density per column.
     power: Vec<f64>,
     /// Where the columns are finer than the band behind them resolves.
     unresolved: Vec<FreqRange>,
@@ -233,6 +235,7 @@ impl Spectrum {
                         window,
                         averaging,
                         grid,
+                        level: conv::spec_level(cfg.level),
                     },
                 )
                 .map_err(|e| e.to_string())?;
@@ -284,9 +287,9 @@ impl Spectrum {
         match &mut self.engine {
             Engine::Fixed(e) => {
                 let df = e.analyzer.config().fs / e.analyzer.config().n as f64;
-                let tone = e.analyzer.tone_power_factor();
+                let scale = e.analyzer.power_factor(conv::spec_level(self.cfg.level));
                 e.gain = (0..e.analyzer.bins())
-                    .map(|k| tone * gain_at(k as f64 * df))
+                    .map(|k| scale * gain_at(k as f64 * df))
                     .collect();
             }
             Engine::Multi(e) => e.analyzer.set_gain(gain_at),
@@ -350,6 +353,7 @@ impl Spectrum {
                 LevelScale::Dbfs
             },
             cal: self.cal.status,
+            level: self.cfg.level,
             mic_curve: self.cal.correction.is_some(),
             smoothing: self.cfg.smoothing,
             math: None,
@@ -389,8 +393,8 @@ impl Spectrum {
         }))
     }
 
-    /// Fills the engine's `power` with the averaged tone power per bin (per column,
-    /// multi-resolution); `false` before the first spectrum. A bin without power is a gap
+    /// Fills the engine's `power` with the averaged tone power or density per bin (per
+    /// column, multi-resolution); `false` before the first spectrum. A bin without power is a gap
     /// (−∞ dB has no place on a dB axis), as it is in a captured trace; smoothing never
     /// crosses a gap, so a capture re-smoothed at this setting reads the same as the live
     /// frame.
@@ -434,7 +438,10 @@ impl Spectrum {
                     }
                     None => &e.power,
                 };
-                column_max(shown, &e.first_bin).map(db).collect()
+                match self.cfg.level {
+                    SpecLevel::Tone => column_max(shown, &e.first_bin).map(db).collect(),
+                    SpecLevel::Density => column_mean(shown, &e.first_bin).map(db).collect(),
+                }
             }
             Engine::Multi(e) => match &e.smoother {
                 Some(sm) => e.smoothed(sm).into_iter().map(db).collect(),
@@ -453,7 +460,7 @@ impl Spectrum {
     }
 }
 
-/// Tone power as a level; a bin without power (or a gap) has none.
+/// Tone power or density as a level; a bin without power (or a gap) has none.
 fn db(p: f64) -> f32 {
     if p > 0.0 && p.is_finite() {
         (10.0 * p.log10()) as f32

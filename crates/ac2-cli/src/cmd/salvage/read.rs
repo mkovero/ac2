@@ -509,7 +509,7 @@ fn set(doc: &mut Value, ptr: &str, key: &str, v: Option<Value>) {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use ac2_proto::model::{MeasKind, SpecResolution, SplConfig, Window};
+    use ac2_proto::model::{MeasKind, SpecLevel, SpecResolution, SplConfig, Window};
     use serde_json::json;
 
     fn spl() -> MeasConfig {
@@ -596,7 +596,11 @@ mod tests {
         assert_eq!(config.resolution, SpecResolution::Fixed { fft_len: 4096 });
         assert_eq!(config.input, 3);
         assert_eq!(config.window, Window::BlackmanHarris4);
-        assert!(notes.is_empty(), "{notes:?}");
+        // Before format 25 every spectrum read tone power: the level is filled in as
+        // tone and named.
+        assert_eq!(config.level, SpecLevel::Tone);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("kind.config.level"), "{notes:?}");
     }
 
     #[test]

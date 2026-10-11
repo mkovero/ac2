@@ -292,6 +292,7 @@ fn smoothing_keys_change_a_selected_slot() {
     let mut spec = stored(11, Some(4), 2);
     spec.kind = TraceKind::Spectrum {
         scale: LevelScale::Dbfs,
+        level: ac2_proto::model::SpecLevel::Tone,
     };
     let mut locked = stored(12, Some(5), 2);
     locked.edit.locked = true;
@@ -568,6 +569,7 @@ fn trace_keys_act_on_the_selected_trace() {
     let mut spec = stored(16, None, 2);
     spec.kind = TraceKind::Spectrum {
         scale: LevelScale::Dbfs,
+        level: ac2_proto::model::SpecLevel::Tone,
     };
     t.conn(with_traces(vec![
         stored(13, None, 2),
@@ -1500,11 +1502,12 @@ fn edit_meas_on_a_spectrum_changes_its_averaging_and_keeps_the_rest() {
             ("Smoothing".to_owned(), "off".to_owned()),
             ("Resolution".to_owned(), "8192 pt".to_owned()),
             ("Window".to_owned(), "Hann".to_owned()),
+            ("Level".to_owned(), "tone (dBFS)".to_owned()),
             ("Averaging".to_owned(), "off".to_owned()),
         ]
     );
     // Averaging: off → exp τ 0.5 s → exp τ 1 s.
-    for _ in 0..5 {
+    for _ in 0..6 {
         t.key("Down");
     }
     t.key("Right");
@@ -1566,6 +1569,11 @@ fn edit_meas_switches_a_spectrum_to_multi_resolution() {
     let (_, shown, hint) = field(&t);
     assert_eq!(shown, "multi-res 1/48 oct");
     assert_eq!(hint, ac2_scene::format::MULTIRES_HINT);
+    // Crossing to multi-resolution takes its default level, density.
+    t.key("Down");
+    t.key("Down");
+    assert_eq!(field(&t).0, "Level");
+    assert_eq!(field(&t).1, "density (dBFS/Hz)");
     let r = t.key("Enter");
     let [
         Request::Call {
@@ -1586,4 +1594,50 @@ fn edit_meas_switches_a_spectrum_to_multi_resolution() {
         }
     );
     assert_eq!(config.averaging, SpecAveraging::Off);
+    assert_eq!(config.level, ac2_proto::model::SpecLevel::Density);
+}
+
+#[test]
+fn edit_meas_sets_a_fixed_spectrum_to_density() {
+    let mut t = T::new();
+    t.conn(mirror(daemon_state()));
+    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.key("Ctrl+K");
+    t.text("edit measurement");
+    t.key("Enter");
+    for _ in 0..5 {
+        t.key("Down");
+    }
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    assert_eq!(f.fields[f.focus].label, "Level");
+    t.key("Right");
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    assert_eq!(f.fields[f.focus].display(), "density (dBFS/Hz)");
+    assert!(
+        f.fields[f.focus].hint.contains("per hertz"),
+        "{:?}",
+        f.fields[f.focus].hint
+    );
+    let r = t.key("Enter");
+    let [
+        Request::Call {
+            cmd: Command::MeasUpdate { config, .. },
+            ..
+        },
+    ] = r.as_slice()
+    else {
+        panic!("{r:?}");
+    };
+    let MeasKind::Spectrum { config } = &config.kind else {
+        panic!("{config:?}");
+    };
+    assert_eq!(config.level, ac2_proto::model::SpecLevel::Density);
+    assert_eq!(
+        config.resolution,
+        ac2_proto::model::SpecResolution::Fixed { fft_len: 8192 }
+    );
 }

@@ -75,6 +75,13 @@ pub(crate) fn window(w: pm::Window) -> core::window::Window {
     }
 }
 
+pub(crate) fn spec_level(l: pm::SpecLevel) -> core::spectrum::SpectrumLevel {
+    match l {
+        pm::SpecLevel::Tone => core::spectrum::SpectrumLevel::Tone,
+        pm::SpecLevel::Density => core::spectrum::SpectrumLevel::Density,
+    }
+}
+
 /// TF averaging; `None` when the values are out of range.
 pub(crate) fn tf_averaging(a: pm::TfAveraging) -> Option<core::mtw::Averaging> {
     match a {

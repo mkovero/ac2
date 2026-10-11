@@ -81,6 +81,7 @@ fn stored(db: f32, delay: f64, time_base: Option<SessionEpoch>) -> Answer {
         delay,
         time_base,
         scale: None,
+        level: None,
         mic_curve: false,
     }))
 }

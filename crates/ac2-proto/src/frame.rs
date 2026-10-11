@@ -18,8 +18,8 @@ use crate::event::{Event, EventError, decode_event, encode_event};
 use crate::grid::GridId;
 use crate::model::{
     BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale, Operand,
-    PeakWeighting, PhaseBasis, PositionCorrection, Smoothing, SmoothingFraction, TimeWeighting,
-    TimingState, TimingStatus, Unresolved, Weighting, Window,
+    PeakWeighting, PhaseBasis, PositionCorrection, Smoothing, SmoothingFraction, SpecLevel,
+    TimeWeighting, TimingState, TimingStatus, Unresolved, Weighting, Window,
 };
 use crate::packing::{self, array_size};
 use crate::topic::{Stream, Topic};
@@ -256,6 +256,10 @@ pub enum Unit {
     Dbfs,
     /// dB SPL.
     DbSpl,
+    /// dBFS per hertz (power spectral density).
+    DbfsPerHz,
+    /// dB SPL per hertz (power spectral density).
+    DbSplPerHz,
     /// Degrees.
     Deg,
     /// γ², 0…1.
@@ -427,8 +431,10 @@ pub struct RtaMeta {
 pub struct SpecMeta {
     /// Window.
     pub window: Window,
-    /// Unit of `level` (tone level per bin, decision 4b).
+    /// Unit of `level` (decision 4b).
     pub scale: LevelScale,
+    /// Tone level or density: `level` in dBFS or dBFS/Hz (dB SPL or dB SPL/Hz).
+    pub level: SpecLevel,
     /// Calibration applied (`uncalibrated` with dBFS).
     pub cal: CalStatus,
     /// A mic curve was subtracted from `level`.
@@ -1183,6 +1189,14 @@ fn level_unit(scale: LevelScale) -> Unit {
     }
 }
 
+fn spec_unit(scale: LevelScale, level: SpecLevel) -> Unit {
+    match (scale, level) {
+        (_, SpecLevel::Tone) => level_unit(scale),
+        (LevelScale::Dbfs, SpecLevel::Density) => Unit::DbfsPerHz,
+        (LevelScale::DbSpl, SpecLevel::Density) => Unit::DbSplPerHz,
+    }
+}
+
 fn mask_slice<T: MaskBits>(v: &[T]) -> Vec<u32> {
     v.iter().map(T::to_u32).collect()
 }
@@ -1247,7 +1261,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
         }
         FrameData::Spec(f) => {
             cols.push((
-                desc(ArrayName::Level, level_unit(f.meta.scale)),
+                desc(ArrayName::Level, spec_unit(f.meta.scale, f.meta.level)),
                 Col::F(&f.level),
             ));
             FrameMeta::Spec(f.meta.clone())
@@ -1585,7 +1599,7 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
         }),
         FrameMeta::Spec(meta) => FrameData::Spec(SpecFrame {
             meas,
-            level: a.f32(ArrayName::Level, level_unit(meta.scale))?,
+            level: a.f32(ArrayName::Level, spec_unit(meta.scale, meta.level))?,
             meta,
         }),
         FrameMeta::Spl(meta) => FrameData::Spl(SplFrame { meas, meta }),

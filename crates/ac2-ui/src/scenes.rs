@@ -398,7 +398,7 @@ pub fn spectrum_scale(st: &AppState) -> LevelScale {
             continue;
         }
         match t.meta.kind {
-            TraceKind::Spectrum { scale } | TraceKind::Rta { scale } => scales.push(scale),
+            TraceKind::Spectrum { scale, .. } | TraceKind::Rta { scale } => scales.push(scale),
             _ => {}
         }
     }
@@ -554,7 +554,7 @@ pub(crate) fn with_spectrum<R>(
         if let Some(m) = math_status(st, c.meas, &c.tf.frame.data) {
             t.caption = m.tag();
         }
-        if matches!(t.quantity, Quantity::Tone | Quantity::SmoothedTone(_)) {
+        if t.quantity.is_narrow() {
             t.bin_hz = c.cols.bin_hz;
         }
         traces.push(t);
@@ -572,10 +572,10 @@ pub(crate) fn with_spectrum<R>(
         .filter(|(t, _)| t.meta.edit.visible)
         .filter_map(|(t, g)| {
             let (scale, q) = match t.meta.kind {
-                TraceKind::Spectrum { scale } => (
+                TraceKind::Spectrum { scale, level } => (
                     scale,
                     // Served smoothed at its setting (`ac2_traces::smooth`).
-                    Quantity::tone(t.meta.edit.smoothing.map(|s| s.fraction)),
+                    Quantity::narrow(level, t.meta.edit.smoothing.map(|s| s.fraction)),
                 ),
                 TraceKind::Rta { scale } => (scale, Quantity::Band),
                 _ => return None,

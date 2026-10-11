@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AverageMethod, BandFraction, DelayState, PeakWeighting, Resolution, Smoothing,
-    SmoothingFraction, SpecAveraging, SpecResolution, SweepConfig, TfAveraging, TimeWeighting,
-    Weighting, Window,
+    SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SweepConfig, TfAveraging,
+    TimeWeighting, Weighting, Window,
 };
 use crate::grid::GridId;
 use crate::topic::Stream;
@@ -73,6 +73,8 @@ pub struct SpectrumConfig {
     /// Display smoothing (power, on a log-frequency kernel over the bins), if any. A
     /// smoothed bin no longer reads as tone level; frames say so (`SpecMeta.smoothing`).
     pub smoothing: Option<SmoothingFraction>,
+    /// Tone level or power spectral density.
+    pub level: SpecLevel,
 }
 
 /// Fractional-octave RTA.

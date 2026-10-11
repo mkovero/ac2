@@ -227,6 +227,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
                     window: Window::Hann,
                     averaging: SpecAveraging::Off,
                     smoothing: None,
+                    level: ac2_proto::model::SpecLevel::Tone,
                 },
             },
         },

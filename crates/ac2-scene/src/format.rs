@@ -340,6 +340,26 @@ pub fn spec_resolution(r: ac2_proto::model::SpecResolution) -> String {
     }
 }
 
+/// `tone`, `density`: what a spectrum's levels are, as rows, menus and the CLI name it.
+pub fn spec_level(l: ac2_proto::model::SpecLevel) -> &'static str {
+    match l {
+        ac2_proto::model::SpecLevel::Tone => "tone",
+        ac2_proto::model::SpecLevel::Density => "density",
+    }
+}
+
+/// The level mode a spectrum's row names, if any. An unmarked row reads tone level, as one
+/// FFT always has; density, and tone on a multi-resolution spectrum (whose default is
+/// density), are named.
+pub fn spec_level_shown(
+    resolution: ac2_proto::model::SpecResolution,
+    level: ac2_proto::model::SpecLevel,
+) -> Option<&'static str> {
+    (level == ac2_proto::model::SpecLevel::Density
+        || matches!(resolution, ac2_proto::model::SpecResolution::Multi { .. }))
+    .then(|| spec_level(level))
+}
+
 /// What an `n`-point spectrum at `fs` resolves, over how long a window, and how often it
 /// updates: `0.73 Hz bins · 1365 ms window · 5.9 updates/s`. The update rate is the
 /// daemon's ([`ac2_proto::model::SpectrumConfig::display_hop`]); the spectrograph keeps a

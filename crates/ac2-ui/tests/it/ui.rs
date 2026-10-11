@@ -2796,6 +2796,7 @@ fn sweep_history(def: &ac2_proto::GridDef) -> ac2_scene::spectrograph::Spectrogr
             grid: def.id(),
             edges: &edges,
             scale: ac2_proto::model::LevelScale::Dbfs,
+            spec_level: None,
             level: &level,
             validity: None,
         });

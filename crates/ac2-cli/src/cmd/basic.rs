@@ -261,6 +261,13 @@ fn fft_len(n: SampleCount) -> Result<u32, CliError> {
         })
 }
 
+pub(crate) fn spec_level(l: SpecLevelArg) -> SpecLevel {
+    match l {
+        SpecLevelArg::Tone => SpecLevel::Tone,
+        SpecLevelArg::Density => SpecLevel::Density,
+    }
+}
+
 pub(crate) fn window(w: WindowArg) -> Window {
     match w {
         WindowArg::Hann => Window::Hann,
@@ -285,7 +292,10 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
     };
     let sweep_only = [
         ("out", n.outputs.is_some()),
-        ("level", n.level.is_some()),
+        (
+            "level",
+            matches!(n.level, Some(crate::units::MeasLevel::Stimulus(_))),
+        ),
         ("duration", n.duration.is_some()),
         ("repeats", n.repeats.is_some()),
         ("gate", n.gate.is_some()),
@@ -295,8 +305,22 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
     if n.kind != MeasKindArg::Sweep
         && let Some((flag, _)) = sweep_only.iter().find(|(_, given)| *given)
     {
+        let hint = if *flag == "level" && n.kind == MeasKindArg::Spectrum {
+            " (a spectrum takes --level tone|density)"
+        } else {
+            ""
+        };
         return Err(CliError::Usage(format!(
-            "--{flag} applies to a sweep, not {:?}",
+            "--{flag} applies to a sweep, not {:?}{hint}",
+            n.kind
+        )));
+    }
+    if n.kind != MeasKindArg::Spectrum
+        && let Some(crate::units::MeasLevel::Spectrum(l)) = n.level
+    {
+        return Err(CliError::Usage(format!(
+            "--level {} applies to a spectrum, not {:?}",
+            ac2_scene::format::spec_level(l),
             n.kind
         )));
     }
@@ -350,9 +374,21 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                         .as_ref()
                         .map(|o| o.0.clone())
                         .ok_or_else(|| CliError::Usage("sweep needs --out".into()))?,
-                    level: n.level.map(|l| l.0).ok_or_else(|| {
-                        CliError::Usage("sweep needs --level: a sweep has no default level".into())
-                    })?,
+                    level: match n.level {
+                        Some(crate::units::MeasLevel::Stimulus(l)) => l,
+                        Some(crate::units::MeasLevel::Spectrum(_)) => {
+                            return Err(CliError::Usage(
+                                "a sweep's --level is its RMS level, e.g. -50dbfs; tone and \
+                                 density are a spectrum's"
+                                    .into(),
+                            ));
+                        }
+                        None => {
+                            return Err(CliError::Usage(
+                                "sweep needs --level: a sweep has no default level".into(),
+                            ));
+                        }
+                    },
                     from: n.from.0,
                     to: n.to.0,
                     duration: n.duration.map_or(
@@ -423,15 +459,22 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                 )));
             }
             match k {
-                MeasKindArg::Spectrum => MeasKind::Spectrum {
-                    config: SpectrumConfig {
-                        resolution: spec_resolution(n.resolution, Some(n.fft))?,
-                        window: window(n.window),
-                        smoothing: n.smooth.map(smoothing).transpose()?,
-                        averaging: n.average.map_or(SpecAveraging::Off, |a| a.0),
-                        ..SpectrumConfig::on_input(input)
-                    },
-                },
+                MeasKindArg::Spectrum => {
+                    let resolution = spec_resolution(n.resolution, Some(n.fft))?;
+                    MeasKind::Spectrum {
+                        config: SpectrumConfig {
+                            resolution,
+                            window: window(n.window),
+                            smoothing: n.smooth.map(smoothing).transpose()?,
+                            averaging: n.average.map_or(SpecAveraging::Off, |a| a.0),
+                            level: match n.level {
+                                Some(crate::units::MeasLevel::Spectrum(l)) => l,
+                                _ => SpecLevel::default_for(resolution),
+                            },
+                            ..SpectrumConfig::on_input(input)
+                        },
+                    }
+                }
                 MeasKindArg::Rta => {
                     if n.from.0.0 >= n.to.0.0 {
                         return Err(CliError::Usage("--from must be below --to".into()));
@@ -473,6 +516,7 @@ pub(crate) struct MeasSet {
     pub(crate) fft: Option<SampleCount>,
     pub(crate) window: Option<Window>,
     pub(crate) resolution: Option<ResolutionArg>,
+    pub(crate) level: Option<SpecLevel>,
 }
 
 impl MeasSet {
@@ -483,6 +527,7 @@ impl MeasSet {
             && self.fft.is_none()
             && self.window.is_none()
             && self.resolution.is_none()
+            && self.level.is_none()
     }
 }
 
@@ -490,11 +535,16 @@ impl MeasSet {
 pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, CliError> {
     if set.is_empty() {
         return Err(CliError::Usage(
-            "say what changes: --average (spectrum, rta), --blocks (tf), --fft or --window \
-             (spectrum), --resolution (tf, sweep; multi[:1/N] for a spectrum) or --colour"
+            "say what changes: --average (spectrum, rta), --blocks (tf), --fft, --window or \
+             --level (spectrum), --resolution (tf, sweep; multi[:1/N] for a spectrum) or \
+             --colour"
                 .into(),
         ));
     }
+    let before = match &config.kind {
+        MeasKind::Spectrum { config: c } => Some(c.resolution),
+        _ => None,
+    };
     let mut config = config.clone();
     let name = config.name.clone();
     let kind = match &config.kind {
@@ -556,6 +606,29 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
             MeasKind::Spectrum { config: c } => c.resolution = spec_resolution(Some(r), None)?,
             _ => return not("resolution", "tf, sweep and spectrum"),
         }
+    }
+    if let MeasKind::Spectrum { config: c } = &mut config.kind {
+        // Between one FFT and the multi-resolution bands the level follows the new
+        // resolution's default unless `--level` says otherwise (as the edit dialog does).
+        let crossed = matches!(
+            (before, c.resolution),
+            (
+                Some(SpecResolution::Fixed { .. }),
+                SpecResolution::Multi { .. }
+            ) | (
+                Some(SpecResolution::Multi { .. }),
+                SpecResolution::Fixed { .. }
+            )
+        );
+        if crossed {
+            c.level = SpecLevel::default_for(c.resolution);
+        }
+    }
+    if let Some(l) = set.level {
+        let MeasKind::Spectrum { config: c } = &mut config.kind else {
+            return not("level", "spectrum");
+        };
+        c.level = l;
     }
     Ok(config)
 }
@@ -634,6 +707,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             fft,
             window: win,
             resolution,
+            level,
             colour,
         } => {
             let s = state(&c).await?;
@@ -644,6 +718,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                 fft: *fft,
                 window: win.map(window),
                 resolution: *resolution,
+                level: level.map(spec_level),
             };
             if !set.is_empty() || colour.is_none() {
                 let config = meas_set(&m.config, set)?;
@@ -1397,7 +1472,7 @@ mod tests {
         );
         assert_eq!(
             crate::output::meas_kind(&m.kind),
-            "spectrum in 1 (multi-res 1/24 oct)"
+            "spectrum in 1 (multi-res 1/24 oct · density)"
         );
         let back = MeasSet {
             fft: Some(SampleCount(8192)),
@@ -1413,6 +1488,93 @@ mod tests {
         };
         let e = meas_set(&m, both).expect_err("refused");
         assert!(e.to_string().contains("give one"), "{e}");
+    }
+
+    #[test]
+    fn spectrum_level_defaults_by_resolution_and_meas_set_changes_it() {
+        use ac2_proto::model::SpecLevel;
+        let level = |extra: &[&str]| {
+            let base = ["spectrum", "--name", "s", "--input", "1"];
+            let args: Vec<&str> = base.iter().chain(extra).copied().collect();
+            config(&args).map(|c| match c.kind {
+                MeasKind::Spectrum { config } => config.level,
+                other => panic!("{other:?}"),
+            })
+        };
+        assert_eq!(level(&[]).expect("fixed"), SpecLevel::Tone);
+        assert_eq!(
+            level(&["--resolution", "multi"]).expect("multi"),
+            SpecLevel::Density
+        );
+        assert_eq!(
+            level(&["--level", "density"]).expect("fixed density"),
+            SpecLevel::Density
+        );
+        assert_eq!(
+            level(&["--resolution", "multi", "--level", "tone"]).expect("multi tone"),
+            SpecLevel::Tone
+        );
+        let e = level(&["--level", "-20dbfs"]).expect_err("refused");
+        assert!(e.to_string().contains("tone|density"), "{e}");
+        let e = config(&["rta", "--name", "r", "--input", "1", "--level", "density"])
+            .expect_err("refused");
+        assert!(e.to_string().contains("applies to a spectrum"), "{e}");
+
+        let fixed = config(&["spectrum", "--name", "s", "--input", "1"]).expect("spectrum");
+        let level_of = |m: &MeasConfig| match &m.kind {
+            MeasKind::Spectrum { config } => config.level,
+            other => panic!("{other:?}"),
+        };
+        let set = |m: &MeasConfig, s: MeasSet| meas_set(m, s).expect("set");
+        let d = set(
+            &fixed,
+            MeasSet {
+                level: Some(SpecLevel::Density),
+                ..MeasSet::default()
+            },
+        );
+        assert_eq!(level_of(&d), SpecLevel::Density);
+        assert_eq!(
+            crate::output::meas_kind(&d.kind),
+            "spectrum in 1 (65536 pt · density)"
+        );
+        // Crossing fixed↔multi without a level takes the new resolution's default.
+        let multi = MeasSet {
+            resolution: Some("multi".parse().expect("arg")),
+            ..MeasSet::default()
+        };
+        let m = set(&fixed, multi);
+        assert_eq!(level_of(&m), SpecLevel::Density);
+        let back = set(
+            &m,
+            MeasSet {
+                fft: Some(SampleCount(8192)),
+                ..MeasSet::default()
+            },
+        );
+        assert_eq!(level_of(&back), SpecLevel::Tone);
+        // An explicit level wins over the default.
+        let m = set(
+            &fixed,
+            MeasSet {
+                level: Some(SpecLevel::Tone),
+                ..multi
+            },
+        );
+        assert_eq!(level_of(&m), SpecLevel::Tone);
+        assert_eq!(
+            crate::output::meas_kind(&m.kind),
+            "spectrum in 1 (multi-res 1/48 oct · tone)"
+        );
+        // A grid change within multi-resolution keeps the level chosen.
+        let m = set(
+            &m,
+            MeasSet {
+                resolution: Some("multi:1/24".parse().expect("arg")),
+                ..MeasSet::default()
+            },
+        );
+        assert_eq!(level_of(&m), SpecLevel::Tone);
     }
 
     /// A merged lobe lists one candidate: the text explains why and offers only `--pick 1`.

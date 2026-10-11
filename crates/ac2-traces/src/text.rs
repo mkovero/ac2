@@ -566,16 +566,15 @@ fn on_import_grid(raw: Raw, known: Option<GridDef>) -> Result<(GridDef, Columns)
 }
 
 fn kind_from_header(v: &str) -> Option<TraceKind> {
-    use ac2_proto::model::LevelScale;
+    use ac2_proto::model::{LevelScale, SpecLevel};
+    let spectrum = |scale, level| TraceKind::Spectrum { scale, level };
     Some(match v.trim() {
         "transfer" => TraceKind::Transfer,
         "target" => TraceKind::Target,
-        "spectrum dBFS" => TraceKind::Spectrum {
-            scale: LevelScale::Dbfs,
-        },
-        "spectrum dB SPL" => TraceKind::Spectrum {
-            scale: LevelScale::DbSpl,
-        },
+        "spectrum dBFS" => spectrum(LevelScale::Dbfs, SpecLevel::Tone),
+        "spectrum dB SPL" => spectrum(LevelScale::DbSpl, SpecLevel::Tone),
+        "spectrum dBFS/Hz" => spectrum(LevelScale::Dbfs, SpecLevel::Density),
+        "spectrum dB SPL/Hz" => spectrum(LevelScale::DbSpl, SpecLevel::Density),
         "rta dBFS" => TraceKind::Rta {
             scale: LevelScale::Dbfs,
         },
@@ -599,16 +598,16 @@ pub fn header_kind(content: &[u8]) -> Option<TraceKind> {
 }
 
 fn kind_header(k: TraceKind) -> &'static str {
-    use ac2_proto::model::LevelScale;
+    use ac2_proto::model::{LevelScale, SpecLevel};
     match k {
         TraceKind::Transfer => "transfer",
         TraceKind::Target => "target",
-        TraceKind::Spectrum {
-            scale: LevelScale::Dbfs,
-        } => "spectrum dBFS",
-        TraceKind::Spectrum {
-            scale: LevelScale::DbSpl,
-        } => "spectrum dB SPL",
+        TraceKind::Spectrum { scale, level } => match (scale, level) {
+            (LevelScale::Dbfs, SpecLevel::Tone) => "spectrum dBFS",
+            (LevelScale::DbSpl, SpecLevel::Tone) => "spectrum dB SPL",
+            (LevelScale::Dbfs, SpecLevel::Density) => "spectrum dBFS/Hz",
+            (LevelScale::DbSpl, SpecLevel::Density) => "spectrum dB SPL/Hz",
+        },
         TraceKind::Rta {
             scale: LevelScale::Dbfs,
         } => "rta dBFS",
@@ -1387,6 +1386,7 @@ fn mic_text(mic: Option<&MicState>, applied: Option<&TraceMicCurve>) -> String {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use ac2_proto::model::{LevelScale, SpecLevel};
 
     #[test]
     fn delimiters() {
@@ -1416,5 +1416,30 @@ mod tests {
             })
         );
         assert_eq!(named(&h(&["a", "b"])), None);
+    }
+
+    #[test]
+    fn spectrum_kinds_name_their_scale_and_level() {
+        for scale in [LevelScale::Dbfs, LevelScale::DbSpl] {
+            for level in [SpecLevel::Tone, SpecLevel::Density] {
+                let k = TraceKind::Spectrum { scale, level };
+                assert_eq!(kind_from_header(kind_header(k)), Some(k), "{k:?}");
+            }
+        }
+        // Files of before the level choice read tone, what their spectra held.
+        assert_eq!(
+            kind_from_header("spectrum dB SPL"),
+            Some(TraceKind::Spectrum {
+                scale: LevelScale::DbSpl,
+                level: SpecLevel::Tone
+            })
+        );
+        assert_eq!(
+            kind_header(TraceKind::Spectrum {
+                scale: LevelScale::DbSpl,
+                level: SpecLevel::Density
+            }),
+            "spectrum dB SPL/Hz"
+        );
     }
 }

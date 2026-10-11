@@ -122,6 +122,28 @@ impl FromStr for LevelDbfs {
     }
 }
 
+/// `meas new --level`: a sweep's stimulus level (`-50dbfs`) or a spectrum's level (`tone`,
+/// `density`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MeasLevel {
+    /// A sweep's RMS level.
+    Stimulus(Dbfs),
+    /// A spectrum's tone level or density.
+    Spectrum(ac2_proto::model::SpecLevel),
+}
+
+impl FromStr for MeasLevel {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        use ac2_proto::model::SpecLevel;
+        match s.trim().to_ascii_lowercase().as_str() {
+            "tone" => Ok(Self::Spectrum(SpecLevel::Tone)),
+            "density" => Ok(Self::Spectrum(SpecLevel::Density)),
+            _ => s.parse::<LevelDbfs>().map(|l| Self::Stimulus(l.0)),
+        }
+    }
+}
+
 /// A level ratio in dB: `3db`, `-6db`. |x| ≤ 200.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Gain(pub Db);

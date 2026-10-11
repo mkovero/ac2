@@ -1,7 +1,9 @@
 //! The list of stored traces beside the panes: every trace by name, what it is, its slot,
 //! whether it is shown, and its colour, in the order the selection keys step through.
 
-use ac2_proto::model::{LfHarmonics, MathExpr, MathOp, TraceKind, TraceMeta, TraceSource};
+use ac2_proto::model::{
+    LfHarmonics, MathExpr, MathOp, SpecLevel, TraceKind, TraceMeta, TraceSource,
+};
 use ac2_proto::units::TraceId;
 
 use crate::format;
@@ -124,9 +126,19 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
             let delay = format::trace_delay(t.edit.delay_nudge.0);
             let smooth = smoothing_text(t);
             let run = run_settings(t);
+            // An unmarked spectrum reads tone level (as on a measurement's row).
+            let level = matches!(
+                t.kind,
+                TraceKind::Spectrum {
+                    level: SpecLevel::Density,
+                    ..
+                }
+            )
+            .then(|| format::spec_level(SpecLevel::Density).to_owned());
             // Dropped from the end first: what the eye and the colour already say last.
             let parts = |extra: bool| -> String {
                 let mut v = vec![kind.to_owned()];
+                v.extend(level.clone());
                 v.extend(run.clone());
                 v.extend(slot.clone());
                 v.extend(hidden.clone());
@@ -301,6 +313,7 @@ mod tests {
             (
                 TraceKind::Spectrum {
                     scale: LevelScale::Dbfs,
+                    level: ac2_proto::model::SpecLevel::Tone,
                 },
                 captured(),
                 "spectrum capture",
@@ -326,6 +339,7 @@ mod tests {
             (
                 TraceKind::Spectrum {
                     scale: LevelScale::Dbfs,
+                    level: ac2_proto::model::SpecLevel::Tone,
                 },
                 math(MathExpr::Binary {
                     a: Operand::Meas { meas: MeasId(1) },

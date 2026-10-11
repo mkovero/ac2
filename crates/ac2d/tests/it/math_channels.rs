@@ -671,6 +671,77 @@ fn spectrum_difference_on_the_spectrum_stream() {
     r.h.shutdown();
 }
 
+/// A density spectrum says so on its frames and its captures, and a difference of a tone
+/// and a density spectrum leaves the second out as a mismatch, not converted.
+#[test]
+fn density_spectrum_frames_captures_and_level_mismatch() {
+    use ac2_proto::model::SpecLevel;
+    let mut r = rig(
+        "math-spec-density",
+        &[b"d/6/spec", b"d/4/spec", b"d/5/spec"],
+    );
+    let c = &mut r.c;
+    for (input, level) in [(1u16, SpecLevel::Tone), (2, SpecLevel::Density)] {
+        c.ok(Command::MeasCreate {
+            config: MeasConfig {
+                name: format!("Spectrum {input}"),
+                kind: MeasKind::Spectrum {
+                    config: SpectrumConfig {
+                        level,
+                        ..SpectrumConfig::on_input(input)
+                    },
+                },
+            },
+        });
+    }
+    let id = created(c.ok(Command::MeasCreate {
+        config: binary(
+            "tone − density",
+            MathDomain::Spectrum,
+            meas(4),
+            MathOp::Subtract,
+            meas(5),
+        ),
+    }));
+    for m in [4, 5, id.0] {
+        c.ok(Command::MeasStart { meas: MeasId(m) });
+    }
+    play(&mut r.d, c, r.tok, 4.0);
+    let [tone, density, diff] = newest(&r.sub, &r.d, [4, 5, id.0]);
+    let level = |f: &Frame| match &f.data {
+        FrameData::Spec(s) => s.meta.level,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(level(&tone), SpecLevel::Tone);
+    assert_eq!(level(&density), SpecLevel::Density);
+    let FrameData::Spec(d) = &diff.data else {
+        panic!("{diff:?}");
+    };
+    let m = d.meta.math.as_ref().expect("math metadata");
+    let statuses: Vec<OperandStatus> = m.operands.iter().map(|o| o.status).collect();
+    assert_eq!(
+        statuses,
+        [OperandStatus::Included, OperandStatus::Mismatch],
+        "{m:?}"
+    );
+    let t = match c.ok(Command::TraceCapture {
+        meas: MeasId(5),
+        name: "density".into(),
+        slot: None,
+    }) {
+        ReplyBody::Trace(t) => t,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        t.kind,
+        TraceKind::Spectrum {
+            scale: ac2_proto::model::LevelScale::Dbfs,
+            level: SpecLevel::Density
+        }
+    );
+    r.h.shutdown();
+}
+
 /// A mono float WAV of an impulse of `v` at sample `at`, `len` samples at the rig's rate.
 fn impulse_wav(len: usize, at: usize, v: f32) -> Vec<u8> {
     let mut h = vec![0.0f32; len];

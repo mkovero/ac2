@@ -34,6 +34,18 @@
 //! rises 3 dB per octave. Below `A_0` and above `A_5` one band serves and the noise bandwidth
 //! is that band's constant `ENBW · Δf_b`.
 //!
+//! # Density
+//! With [`SpectrumLevel::Density`] a column reports power spectral density instead: within
+//! a band it takes the **mean** of the bins it covers (the maximum of several bins of a
+//! noise reads above their mean), blends the bands with the same weights and divides by
+//! the column's noise bandwidth [`MultiResLadder::noise_bandwidth_hz`],
+//!
+//! `D(f) = ((1 − w) · P̄_b + w · P̄_{b+1}) / B(f)`, `B(f) = (1 − w) · B_b + w · B_{b+1}`.
+//!
+//! A noise of density `S` gives `P̄_b = S · B_b` in every band, so `D = S` exactly, through
+//! the crossovers as well as at the anchors: the same reading as a fixed spectrum's
+//! density. A sine reads `a² / B(f)`, its level less `10·lg B(f)`.
+//!
 //! # Time
 //! Each band is a [`SpectrumAnalyzer`] with its own hop and averaging, so a column updates
 //! when a band behind it produces a frame: the low columns at the long window's hop, the high
@@ -42,7 +54,7 @@
 
 use crate::grid::LogGrid;
 use crate::mtw::layout::{LADDER_DESIGN_PPO, validity_factor};
-use crate::spectrum::{Averaging, SpectrumAnalyzer, SpectrumConfig, SpectrumError};
+use crate::spectrum::{Averaging, SpectrumAnalyzer, SpectrumConfig, SpectrumError, SpectrumLevel};
 use crate::window::Window;
 
 /// Widest bin of the longest window, Hz: that of a 65 536-point FFT at 96 kHz.
@@ -228,6 +240,8 @@ pub struct MultiResConfig {
     pub averaging: Averaging,
     /// Output grid.
     pub grid: LogGrid,
+    /// Tone level or density per column.
+    pub level: SpectrumLevel,
 }
 
 /// The bins one band contributes to one column.
@@ -237,6 +251,7 @@ struct Tap {
     /// Bins `first .. end` of the band.
     first: usize,
     end: usize,
+    /// The band's weight in the column (over the column's noise bandwidth, density).
     weight: f64,
 }
 
@@ -272,10 +287,17 @@ impl MultiResAnalyzer {
             .collect::<Result<Vec<_>, _>>()?;
         let mut taps = Vec::new();
         let mut tap_first = Vec::with_capacity(cfg.grid.len() + 1);
+        let enbw = bands
+            .first()
+            .map_or(1.0, |a: &SpectrumAnalyzer| a.gains().enbw_bins());
         for c in 0..cfg.grid.len() {
             tap_first.push(taps.len());
             let f = cfg.grid.frequency(c);
             let (lo, hi) = cfg.grid.edges(c);
+            let per = match cfg.level {
+                SpectrumLevel::Tone => 1.0,
+                SpectrumLevel::Density => 1.0 / ladder.noise_bandwidth_hz(f, enbw),
+            };
             for w in ladder.weights(f).into_iter().flatten() {
                 let band = &ladder.bands[w.band];
                 let bins = band.n / 2 + 1;
@@ -292,7 +314,7 @@ impl MultiResAnalyzer {
                     band: w.band,
                     first,
                     end,
-                    weight: w.weight,
+                    weight: w.weight * per,
                 });
             }
         }
@@ -379,9 +401,9 @@ impl MultiResAnalyzer {
         }
     }
 
-    /// Tone power per column (in the scale [`Self::set_gain`] set) from the averaged
-    /// spectra; NaN where a band behind the column has no frame yet. Returns `false` when no
-    /// band has a frame.
+    /// Tone power or density per column (in the scale [`Self::set_gain`] set) from the
+    /// averaged spectra; NaN where a band behind the column has no frame yet. Returns
+    /// `false` when no band has a frame.
     ///
     /// # Panics
     /// If `out.len()` is not [`Self::columns`].
@@ -398,12 +420,15 @@ impl MultiResAnalyzer {
                     break;
                 };
                 let g = &self.gain[t.band];
-                let peak = s.folded()[t.first..t.end]
+                let bins = s.folded()[t.first..t.end]
                     .iter()
                     .zip(&g[t.first..t.end])
-                    .map(|(f, g)| f * g)
-                    .fold(f64::NEG_INFINITY, f64::max);
-                p += t.weight * peak;
+                    .map(|(f, g)| f * g);
+                let v = match self.cfg.level {
+                    SpectrumLevel::Tone => bins.fold(f64::NEG_INFINITY, f64::max),
+                    SpectrumLevel::Density => bins.sum::<f64>() / (t.end - t.first) as f64,
+                };
+                p += t.weight * v;
             }
             *o = p;
         }

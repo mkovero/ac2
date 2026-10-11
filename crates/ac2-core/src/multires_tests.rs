@@ -18,6 +18,7 @@ fn analyzer(fs: f64, ppo: u32, window: Window, averaging: Averaging) -> MultiRes
             window,
             averaging,
             grid: MultiResLadder::grid(fs, ppo),
+            level: SpectrumLevel::Tone,
         },
     )
     .expect("analyzer")
@@ -296,6 +297,7 @@ fn matches_golden() {
             window: Window::Hann,
             averaging: Averaging::Fifo { frames },
             grid: MultiResLadder::grid(fs, ppo),
+            level: SpectrumLevel::Tone,
         },
     )
     .expect("analyzer");

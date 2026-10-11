@@ -247,7 +247,8 @@ mod tests {
             scale: ac2_proto::model::LevelScale::Dbfs
         }));
         assert!(smoothable(TraceKind::Spectrum {
-            scale: ac2_proto::model::LevelScale::Dbfs
+            scale: ac2_proto::model::LevelScale::Dbfs,
+            level: ac2_proto::model::SpecLevel::Density,
         }));
     }
 }

@@ -22,7 +22,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use ac2_core::average::DelayReference as CoreReference;
-use ac2_core::spectrum::column_max;
+use ac2_core::spectrum::{column_max, column_mean};
 use ac2_proto::frame::{
     Frame, FrameData, MathState, OperandState, OperandStatus, ProtectionFlags, RtaFrame, RtaMeta,
     SpecFrame, SpecMeta, TfFrame, TfMeta, ValidityMask,
@@ -30,7 +30,7 @@ use ac2_proto::frame::{
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
     AverageMethod, BandFraction, CalStatus, LevelScale, MathConfig, MathDomain, MathExpr, MathOp,
-    MathReference, Operand, PhaseBasis, Weighting, Window,
+    MathReference, Operand, PhaseBasis, SpecLevel, Weighting, Window,
 };
 use ac2_proto::topic::Topic;
 use ac2_proto::units::{MeasId, Rev, Seconds, SessionEpoch};
@@ -57,6 +57,8 @@ pub(crate) struct Held {
     pub(crate) time_base: Option<SessionEpoch>,
     /// Level scale (spectrum, RTA).
     pub(crate) scale: Option<LevelScale>,
+    /// Tone level or density (spectrum).
+    pub(crate) level: Option<SpecLevel>,
     /// A mic curve is in its columns.
     pub(crate) mic_curve: bool,
 }
@@ -261,6 +263,18 @@ impl MathJob {
             FrameData::Spec(mut f) => {
                 let level = smooth(f.level, None, None).mag_db;
                 f.level = match &self.grids.display {
+                    // Gathered as the spectrum's own frame is: a density by the mean
+                    // power over the column (its level for a noise whatever the column
+                    // width), a tone level by its highest bin.
+                    Some((_, first)) if f.meta.level == SpecLevel::Density => {
+                        let v: Vec<f64> = level
+                            .iter()
+                            .map(|x| 10f64.powf(f64::from(*x) / 10.0))
+                            .collect();
+                        column_mean(&v, first)
+                            .map(|x| (10.0 * x.log10()) as f32)
+                            .collect()
+                    }
                     Some((_, first)) => {
                         let v: Vec<f64> = level.iter().map(|x| f64::from(*x)).collect();
                         column_max(&v, first).map(|x| x as f32).collect()
@@ -331,6 +345,7 @@ struct Value {
     time_base: Option<SessionEpoch>,
     validity: Option<Vec<ValidityMask>>,
     scale: Option<LevelScale>,
+    level: Option<SpecLevel>,
     mic_curve: bool,
     frame: Option<FrameData>,
 }
@@ -343,24 +358,33 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
             time_base: h.time_base,
             validity: None,
             scale: h.scale,
+            level: h.level,
             mic_curve: h.mic_curve,
             frame: None,
         });
     }
     let f = f?;
     let (_, columns) = capture_columns(&f.data)?;
-    let (delay, validity, scale, mic_curve) = match &f.data {
+    let (delay, validity, scale, level, mic_curve) = match &f.data {
         FrameData::Tf(t) => (
             t.meta.delay.0,
             Some(t.validity.clone()),
             None,
+            None,
             t.meta.mic_curve,
         ),
-        FrameData::Spec(s) => (0.0, None, Some(s.meta.scale), s.meta.mic_curve),
+        FrameData::Spec(s) => (
+            0.0,
+            None,
+            Some(s.meta.scale),
+            Some(s.meta.level),
+            s.meta.mic_curve,
+        ),
         FrameData::Rta(r) => (
             0.0,
             Some(r.validity.clone()),
             Some(r.meta.scale),
+            None,
             r.meta.mic_curve,
         ),
         _ => return None,
@@ -371,6 +395,7 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
         time_base: Some(epoch),
         validity,
         scale,
+        level,
         mic_curve,
         frame: Some(f.data.clone()),
     })
@@ -431,12 +456,13 @@ pub(crate) fn combine(
         };
         let status = match frame.map(|f| value(a, f, epoch)) {
             Ok(Some(v)) => {
-                // Levels combine only in one scale; phase-combining transfer math only in
-                // one time base (the first included operand's).
+                // Levels combine only in one scale, spectra only in one level (a tone level
+                // and a density are different quantities); phase-combining transfer math
+                // only in one time base (the first included operand's).
                 let first = included.first().map(|(_, f)| f);
                 let is_filter = filter && k == 1;
                 let mismatch = first.is_some_and(|f| {
-                    (f.scale != v.scale && !is_filter)
+                    ((f.scale != v.scale || f.level != v.level) && !is_filter)
                         || (shared_needed && f.time_base != v.time_base)
                 }) || (shared_needed && v.time_base.is_none());
                 if mismatch {
@@ -568,7 +594,7 @@ pub(crate) fn combine(
         MathDomain::Spectrum => {
             let (window, cal) = match first_frame {
                 Some(FrameData::Spec(s)) => (s.meta.window, s.meta.cal),
-                // A stored spectrum keeps no window; its level is a tone level either way.
+                // A stored spectrum keeps no window; its level is as its kind says.
                 _ => (Window::Hann, CalStatus::Uncalibrated),
             };
             FrameData::Spec(SpecFrame {
@@ -576,6 +602,10 @@ pub(crate) fn combine(
                 meta: SpecMeta {
                     window,
                     scale: level_scale(&included),
+                    level: included
+                        .first()
+                        .and_then(|(_, v)| v.level)
+                        .unwrap_or(SpecLevel::Tone),
                     cal,
                     mic_curve,
                     smoothing: None,

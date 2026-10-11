@@ -565,6 +565,19 @@ pub fn math_measurement() -> Measurement {
 }
 
 /// A capture of the math channel `Main L ÷ Sub` (a live measurement over a stored trace).
+fn spectrum_trace_meta() -> TraceMeta {
+    TraceMeta {
+        id: TraceId(11),
+        kind: TraceKind::Spectrum {
+            scale: LevelScale::DbSpl,
+            level: SpecLevel::Density,
+        },
+        delay: Seconds(0.0),
+        depth: None,
+        ..trace_meta()
+    }
+}
+
 fn math_trace_meta() -> TraceMeta {
     TraceMeta {
         id: TraceId(10),
@@ -616,6 +629,31 @@ fn measurement() -> Measurement {
         grid_id: Some(log_grid().id()),
         colour: Some(ColourFamily::Hue { index: 5 }),
         layout: Some(pane_layout()),
+    }
+}
+
+fn spectrum_measurement() -> Measurement {
+    Measurement {
+        id: MeasId(4),
+        config: MeasConfig {
+            name: "Spectrum".into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig {
+                    input: 1,
+                    resolution: SpecResolution::MULTI,
+                    window: Window::Hann,
+                    averaging: SpecAveraging::Fifo { frames: 4 },
+                    smoothing: None,
+                    level: SpecLevel::Density,
+                },
+            },
+        },
+        config_rev: Rev(41),
+        running: true,
+        delay: None,
+        grid_id: None,
+        colour: None,
+        layout: None,
     }
 }
 
@@ -1445,8 +1483,8 @@ fn spl_log_page() -> SplLogPage {
 pub fn state() -> State {
     State {
         session: session(),
-        measurements: vec![measurement()],
-        traces: vec![trace_meta()],
+        measurements: vec![measurement(), spectrum_measurement()],
+        traces: vec![trace_meta(), spectrum_trace_meta()],
         generator: generator(),
         calibrations: vec![cal_entry(), electrical_cal_entry()],
         mics: vec![mic()],
@@ -1935,6 +1973,7 @@ pub fn frames() -> Vec<Frame> {
                     cal: CalStatus::Uncalibrated,
                     mic_curve: false,
                     smoothing: Some(SmoothingFraction::Sixth),
+                    level: SpecLevel::Density,
                     math: Some(Box::new(MathState {
                         operands: vec![
                             OperandState {

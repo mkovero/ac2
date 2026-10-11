@@ -61,7 +61,7 @@ impl fmt::Display for OpError {
             Self::Duplicate(t) => write!(f, "trace {t} is listed twice"),
             Self::MixedKinds => write!(
                 f,
-                "these traces cannot be combined (transfer and target combine with each other; spectra and RTA only with their own kind and scale)"
+                "these traces cannot be combined (transfer and target combine with each other; spectra and RTA only with their own kind and scale, a spectrum only with one of the same level: tone or density)"
             ),
             Self::KindNotSupported(k) => write!(f, "not supported for {} traces", kind_name(*k)),
             Self::GridMismatch => write!(
@@ -141,6 +141,7 @@ pub fn capture_columns(data: &FrameData) -> Option<(TraceKind, Columns)> {
         FrameData::Spec(f) => Some((
             TraceKind::Spectrum {
                 scale: f.meta.scale,
+                level: f.meta.level,
             },
             Columns {
                 mag_db: f.level.clone(),

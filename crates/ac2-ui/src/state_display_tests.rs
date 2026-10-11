@@ -9,6 +9,7 @@ fn spec_meta(id: u32) -> TraceMeta {
     TraceMeta {
         kind: TraceKind::Spectrum {
             scale: LevelScale::Dbfs,
+            level: ac2_proto::model::SpecLevel::Tone,
         },
         ..stored(id, None, 2)
     }
@@ -234,6 +235,7 @@ fn spec_frame_captured(
         meta: SpecMeta {
             window: Window::Hann,
             scale: LevelScale::Dbfs,
+            level: ac2_proto::model::SpecLevel::Tone,
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
             smoothing: None,
@@ -1098,6 +1100,7 @@ fn live_frames(t: &mut T) {
             meta: SpecMeta {
                 window: Window::Hann,
                 scale: LevelScale::Dbfs,
+                level: ac2_proto::model::SpecLevel::Tone,
                 cal: CalStatus::Uncalibrated,
                 mic_curve: false,
                 smoothing: None,

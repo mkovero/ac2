@@ -1,0 +1,121 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "spectrum_density",
+  "description": "Power spectral density of a 1024-point Hann spectrum at 48 kHz, FIFO of 32 frames (hop 512): white noise plus a bin-centred 4.5 kHz sine, and pink noise; with the analytic densities.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_spectrum_density"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "n": 1024,
+    "hop": 512,
+    "fifo_frames": 32,
+    "signal_a": "0.1 N(0,1) + 0.5 sin(2 pi 4500.0 t)",
+    "signal_pink": "0.1 N(0,1) shaped by sqrt(1000.0/f) over the whole signal",
+    "seed": "numpy default_rng(0x0AC2D351), white first, then the pink's white",
+    "density": "2/(fs S2) * mean over the last 32 frames of c_k |X_k|^2",
+    "white_density": "4 sigma^2 / fs",
+    "pink_density": "4 sigma^2 / fs * 1000 / f",
+    "sine": "density at its bin = a^2/2 * 2 / (ENBW fs/N): level - 10 lg(ENBW fs/N)"
+  },
+  "references": [
+    "crates/ac2-core/src/spectrum.rs",
+    "docs/design/multires-spectrum.md"
+  ],
+  "scalars": {
+    "fs_hz": 48000.0,
+    "n": 1024,
+    "hop": 512,
+    "fifo_frames": 32,
+    "sine_bin": 96,
+    "sine_level_db": -6.020599913279624,
+    "enbw_hz": 70.3125,
+    "white_density_db": -60.79181246047625,
+    "pink_density_1khz_db": -60.79181246047625
+  },
+  "blob": {
+    "file": "spectrum_density.bin",
+    "nbytes": 282648,
+    "sha256": "54c7cf556111792410b38a60db502b32978516558636290665837c7fdf737718"
+  },
+  "arrays": [
+    {
+      "name": "x_a",
+      "dtype": "f64",
+      "shape": [
+        16896
+      ],
+      "offset": 0,
+      "nbytes": 135168,
+      "unit": "FS",
+      "description": "white noise + bin-centred sine"
+    },
+    {
+      "name": "x_pink",
+      "dtype": "f64",
+      "shape": [
+        16896
+      ],
+      "offset": 135168,
+      "nbytes": 135168,
+      "unit": "FS",
+      "description": "pink noise"
+    },
+    {
+      "name": "freq_hz",
+      "dtype": "f64",
+      "shape": [
+        513
+      ],
+      "offset": 270336,
+      "nbytes": 4104,
+      "unit": "Hz",
+      "description": "bin centres",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      }
+    },
+    {
+      "name": "density_a_db",
+      "dtype": "f64",
+      "shape": [
+        513
+      ],
+      "offset": 274440,
+      "nbytes": 4104,
+      "unit": "dBFS/Hz",
+      "description": "density of x_a per bin",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "density_pink_db",
+      "dtype": "f64",
+      "shape": [
+        513
+      ],
+      "offset": 278544,
+      "nbytes": 4104,
+      "unit": "dBFS/Hz",
+      "description": "density of x_pink per bin",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "freq_hz"
+    }
+  ]
+}

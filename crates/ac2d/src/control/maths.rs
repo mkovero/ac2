@@ -371,6 +371,7 @@ impl Control {
                     delay: 0.0,
                     time_base: None,
                     scale: None,
+                    level: None,
                     mic_curve: false,
                 })));
                 continue;
@@ -382,9 +383,10 @@ impl Control {
                     t.meta.edit.name
                 )));
             }
-            let scale = match t.meta.kind {
-                TraceKind::Spectrum { scale } | TraceKind::Rta { scale } => Some(scale),
-                _ => None,
+            let (scale, level) = match t.meta.kind {
+                TraceKind::Spectrum { scale, level } => (Some(scale), Some(level)),
+                TraceKind::Rta { scale } => (Some(scale), None),
+                _ => (None, None),
             };
             let mic_curve = t.meta.mic_curve.is_some()
                 || t.meta.mic.as_ref().is_some_and(|m| m.curve.is_some());
@@ -393,6 +395,7 @@ impl Control {
                 delay: t.meta.delay.0,
                 time_base: t.meta.source.shared_epoch(),
                 scale,
+                level,
                 mic_curve,
             })));
         }

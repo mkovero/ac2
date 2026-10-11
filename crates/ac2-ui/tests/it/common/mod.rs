@@ -216,6 +216,7 @@ fn spec_frame(meas: u32) -> SpecFrame {
         meta: SpecMeta {
             window: Window::Hann,
             scale: LevelScale::Dbfs,
+            level: ac2_proto::model::SpecLevel::Tone,
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
             smoothing: None,
@@ -380,6 +381,7 @@ impl Rig {
                             window: Window::Hann,
                             averaging: SpecAveraging::Off,
                             smoothing: smoothed.then_some(SmoothingFraction::Sixth),
+                            level: ac2_proto::model::SpecLevel::Tone,
                         },
                     },
                     None,
@@ -552,6 +554,7 @@ impl Rig {
                         window: Window::Hann,
                         averaging: SpecAveraging::Off,
                         smoothing: None,
+                        level: ac2_proto::model::SpecLevel::Tone,
                     },
                 },
                 None,

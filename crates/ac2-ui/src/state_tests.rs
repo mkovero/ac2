@@ -63,6 +63,7 @@ fn spectrum() -> MeasKind {
             window: Window::Hann,
             averaging: SpecAveraging::Off,
             smoothing: None,
+            level: ac2_proto::model::SpecLevel::Tone,
         },
     }
 }

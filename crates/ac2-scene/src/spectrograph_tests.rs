@@ -60,6 +60,7 @@ impl Feed {
             grid: self.grid,
             edges: &self.edges,
             scale,
+            spec_level: None,
             level,
             validity: None,
         })
@@ -146,6 +147,7 @@ fn frames_scroll_through_a_bounded_ring() {
         grid: f.grid,
         edges: &f.edges,
         scale: LevelScale::Dbfs,
+        spec_level: None,
         level: &level,
         validity: None,
     }));
@@ -574,7 +576,7 @@ fn multires_stitches_cross_the_history() {
         validity: None,
         peak: None,
         scale: LevelScale::Dbfs,
-        quantity: crate::spectrum::Quantity::tone(None),
+        quantity: crate::spectrum::Quantity::narrow(ac2_proto::model::SpecLevel::Tone, None),
         bin_hz: None,
         caption: String::new(),
         freshness: None,
@@ -626,4 +628,33 @@ fn multires_stitches_cross_the_history() {
         size,
     );
     assert!(off.stitches.is_empty());
+}
+
+/// A density spectrum's spectrograph names its unit per hertz, and a change of level
+/// starts the history over: the colours of tone and density levels do not compare.
+#[test]
+fn a_density_reads_per_hertz_and_a_level_change_starts_over() {
+    use ac2_proto::model::SpecLevel;
+    let mut h = SpectrographHistory::new(30);
+    let f = Feed::new(&log_bins());
+    let l = vec![-90.0f32; f.edges.len()];
+    let frame = |seq: u64, at: u64, spec_level| SpectrographFrame {
+        seq,
+        at: WallNs(at),
+        grid: f.grid,
+        edges: &f.edges,
+        scale: LevelScale::Dbfs,
+        spec_level: Some(spec_level),
+        level: &l,
+        validity: None,
+    };
+    h.push(&frame(1, T0, SpecLevel::Density));
+    h.push(&frame(2, T0 + FRAME_NS, SpecLevel::Density));
+    assert_eq!(h.unit(), Some("dBFS/Hz"));
+    assert_eq!(h.ring().iter().flatten().count(), 2);
+    let s = scene_of(&h, &ViewState::default());
+    assert_eq!(s.caption, "Main · last 30 s · dBFS/Hz");
+    h.push(&frame(3, T0 + 2 * FRAME_NS, SpecLevel::Tone));
+    assert_eq!(h.ring().iter().flatten().count(), 1);
+    assert_eq!(h.unit(), Some("dBFS"));
 }

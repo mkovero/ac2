@@ -3,6 +3,7 @@
 //! `cargo nextest run -p ac2-core -E 'test(/^delay::/)'` or `cargo test -p ac2-core --test it delay::`.
 
 mod delay;
+mod density;
 mod mtw;
 mod mtw_delay;
 mod mtw_timing;

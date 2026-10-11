@@ -1,0 +1,175 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "multires_density",
+  "description": "Multi-resolution power spectral density at 12 kHz: six full-rate Hann bands (8192 ... 256 points), FIFO of 16 frames per band, 1/24-octave columns, each band's mean bin over the column blended in power and divided by the column's noise bandwidth: white noise plus a 52.7 Hz sine, and pink noise.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_multires_density"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 12000.0,
+    "ppo": 24,
+    "fifo_frames": 16,
+    "windows": [
+      8192,
+      4096,
+      2048,
+      1024,
+      512,
+      256
+    ],
+    "hops": [
+      1024,
+      512,
+      256,
+      256,
+      256,
+      128
+    ],
+    "signal_a": "0.1 N(0,1) + 0.5 sin(2 pi 52.734375 t)",
+    "signal_pink": "0.1 N(0,1) shaped by sqrt(1000.0/f) over the whole signal",
+    "seed": "numpy default_rng(0x0AC2D352), white first, then the pink's white",
+    "anchor": "A_b = 2 kappa(48) fs / N_b, kappa(p) = 1/(2^(1/2p) - 2^(-1/2p))",
+    "blend": "A_b < f < 2A_b: (1-w) P_b + w P_{b+1}, w = f/A_b - 1",
+    "column": "mean tone power over bins k with ceil(lo/df) <= k < ceil(hi/df); none: k = round(f/df)",
+    "density": "blend / B(f), B(f) = sum_b w_b ENBW fs / N_b",
+    "white_density": "4 sigma^2 / fs",
+    "pink_density": "4 sigma^2 / fs * 1000 / f"
+  },
+  "references": [
+    "docs/design/multires-spectrum.md",
+    "crates/ac2-core/src/multires.rs"
+  ],
+  "scalars": {
+    "fs_hz": 12000.0,
+    "ppo": 24,
+    "fifo_frames": 16,
+    "sine_hz": 52.734375,
+    "sine_level_db": -6.020599913279624,
+    "white_density_db": -54.771212547196626
+  },
+  "blob": {
+    "file": "multires_density.bin",
+    "nbytes": 394080,
+    "sha256": "07e76eb0a02ec0319702e527bd5136d2bfd711d9583c6cd982469056a9bdb849"
+  },
+  "arrays": [
+    {
+      "name": "x_a",
+      "dtype": "f64",
+      "shape": [
+        24052
+      ],
+      "offset": 0,
+      "nbytes": 192416,
+      "unit": "FS",
+      "description": "white noise + sine"
+    },
+    {
+      "name": "x_pink",
+      "dtype": "f64",
+      "shape": [
+        24052
+      ],
+      "offset": 192416,
+      "nbytes": 192416,
+      "unit": "FS",
+      "description": "pink noise"
+    },
+    {
+      "name": "hops",
+      "dtype": "f64",
+      "shape": [
+        6
+      ],
+      "offset": 384832,
+      "nbytes": 48,
+      "unit": "samples",
+      "description": "hop of each band, longest window first"
+    },
+    {
+      "name": "freq_hz",
+      "dtype": "f64",
+      "shape": [
+        230
+      ],
+      "offset": 384880,
+      "nbytes": 1840,
+      "unit": "Hz",
+      "description": "column centres",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      }
+    },
+    {
+      "name": "noise_bandwidth_hz",
+      "dtype": "f64",
+      "shape": [
+        230
+      ],
+      "offset": 386720,
+      "nbytes": 1840,
+      "unit": "Hz",
+      "description": "noise bandwidth per column",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-12
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "density_a_db",
+      "dtype": "f64",
+      "shape": [
+        230
+      ],
+      "offset": 388560,
+      "nbytes": 1840,
+      "unit": "dBFS/Hz",
+      "description": "density of x_a per column",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "density_pink_db",
+      "dtype": "f64",
+      "shape": [
+        230
+      ],
+      "offset": 390400,
+      "nbytes": 1840,
+      "unit": "dBFS/Hz",
+      "description": "density of x_pink per column",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "pink_expected_db",
+      "dtype": "f64",
+      "shape": [
+        230
+      ],
+      "offset": 392240,
+      "nbytes": 1840,
+      "unit": "dBFS/Hz",
+      "description": "analytic density of the pink noise",
+      "axis": "freq_hz"
+    }
+  ]
+}

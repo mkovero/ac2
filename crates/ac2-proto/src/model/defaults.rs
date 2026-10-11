@@ -3,8 +3,8 @@
 use super::{
     BandFraction, DepthPolicy, LeqConfig, LeqPreset, LeqWindow, LogGridSpec, PeakLimit, PeakLimits,
     PeakQuantity, PeakWeighting, PositionCorrection, Resolution, RtaConfig, SpecAveraging,
-    SpecResolution, SpectrumConfig, SplConfig, TfAveraging, TimeWeighting, TransferConfig,
-    Weighting, Window,
+    SpecLevel, SpecResolution, SpectrumConfig, SplConfig, TfAveraging, TimeWeighting,
+    TransferConfig, Weighting, Window,
 };
 use crate::units::{Db, DbSpl, Hz, Seconds};
 
@@ -99,6 +99,7 @@ impl SpectrumConfig {
             window: Window::Hann,
             averaging: SpecAveraging::Off,
             smoothing: None,
+            level: SpecLevel::Tone,
         }
     }
 }

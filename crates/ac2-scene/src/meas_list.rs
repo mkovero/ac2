@@ -141,6 +141,9 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
                     format::spec_resolution(config.resolution)
                 ));
             }
+            if let Some(l) = format::spec_level_shown(config.resolution, config.level) {
+                text.push_str(&format!(" · {l}"));
+            }
             if config.averaging != SpecAveraging::Off {
                 text.push_str(&format!(
                     " · avg {}",
@@ -918,6 +921,7 @@ pub(crate) mod tests {
                     time_constant: Seconds(2.0),
                 },
                 smoothing: Some(SmoothingFraction::Sixth),
+                level: ac2_proto::model::SpecLevel::Tone,
                 ..SpectrumConfig::on_input(1)
             },
         };
@@ -930,7 +934,21 @@ pub(crate) mod tests {
         }
         assert_eq!(
             meas_row(&item(&m), None, true).text,
-            "FFT  Room\n     running · multi-res 1/48 oct · avg exp τ 2 s · smoothed 1/6 oct"
+            "FFT  Room\n     running · multi-res 1/48 oct · tone · avg exp τ 2 s · smoothed 1/6 oct"
+        );
+        if let MeasKind::Spectrum { config } = &mut m.config.kind {
+            config.level = ac2_proto::model::SpecLevel::Density;
+        }
+        assert_eq!(
+            meas_row(&item(&m), None, true).text,
+            "FFT  Room\n     running · multi-res 1/48 oct · density · avg exp τ 2 s · smoothed 1/6 oct"
+        );
+        if let MeasKind::Spectrum { config } = &mut m.config.kind {
+            config.resolution = SpecResolution::Fixed { fft_len: 65_536 };
+        }
+        assert_eq!(
+            meas_row(&item(&m), None, true).text,
+            "FFT  Room\n     running · density · avg exp τ 2 s · smoothed 1/6 oct"
         );
         assert_eq!(
             format::spec_averaging(SpecAveraging::Exponential {

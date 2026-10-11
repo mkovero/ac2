@@ -149,6 +149,37 @@ impl SpecResolution {
     }
 }
 
+/// What a spectrum's level values are.
+///
+/// A tone-scaled bin reads a stationary noise of density `S` as `S · B`, where `B` is the
+/// bin's noise bandwidth (ENBW · bin width; a multi-resolution column's grows with
+/// frequency), so the same noise reads differently on spectra of different resolution.
+/// Dividing by `B` gives the density, the same on every resolution; a sine then reads
+/// `10·log10(B / 1 Hz)` dB below its level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpecLevel {
+    /// Tone level (dBFS, dB SPL): a sine reads its level; a noise reads its density plus
+    /// `10·log10(B)`.
+    Tone,
+    /// Power spectral density (dBFS/Hz, dB SPL/Hz): a noise reads the same at every
+    /// resolution; a sine reads `10·log10(B)` below its level.
+    Density,
+}
+
+impl SpecLevel {
+    /// The level a new spectrum at `resolution` gets: tone for one FFT (a sine reads its
+    /// level, as on any analyzer), density for multi-resolution (its noise bandwidth grows
+    /// with frequency, so a tone-level noise reading rises 3 dB per octave over a white
+    /// noise's true density).
+    pub fn default_for(resolution: SpecResolution) -> Self {
+        match resolution {
+            SpecResolution::Fixed { .. } => Self::Tone,
+            SpecResolution::Multi { .. } => Self::Density,
+        }
+    }
+}
+
 /// A frequency range, `lo < hi`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -79,6 +79,8 @@ that an estimator is not expected to match exactly).
 | `calibration_mic_curve` | analog mic model (HP 18 Hz, +3 dB at 9 kHz, LP 30 kHz) at 1/12-octave points; exact correction normalised at 1 kHz at IEC 1/3-octave centres, and its log-f power average per band (`sets/calibration.py`) |
 | `delay_integer_pos_neg` | white-noise reference `x` and `y_pos` / `y_neg` delayed by +137 / −61 samples plus noise; expected lags in `scalars` |
 | `room_schroeder_octaves` | an impulse response (two exponential decays, direct sound, background noise) through IEC octave bands run backwards in time; Schroeder curves from each band's −20 dB trigger to a fixed truncation point, EDT / T20 / T30 by `numpy.polyfit`, C50 / C80 by window-before-filtering (`sets/room.py`) |
+| `spectrum_density` | ac2's spectrum density `2·c_k·|X_k|²/(fs·Σw²)` (twice the PSD convention below, so it keeps the dBFS reference: white noise σ reads `4σ²/fs`) of a 1024-point Hann spectrum at 48 kHz, FIFO 32: white noise + bin-centred sine, and frequency-domain pink noise; analytic densities and the sine's `level − 10·log10(ENBW·fs/N)` (`sets/density.py`) |
+| `multires_density` | the multi-resolution density at 12 kHz, 1/24 grid, FIFO 16: each band's mean bin over a column, blended in power and divided by `B(f) = Σ w_b·ENBW·fs/N_b`, on white noise + sine and pink noise; `noise_bandwidth_hz` per column (`sets/density.py`) |
 
 ## Conventions
 

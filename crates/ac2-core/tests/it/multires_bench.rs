@@ -10,7 +10,7 @@
 use std::time::Instant;
 
 use ac2_core::multires::{MultiResAnalyzer, MultiResConfig, MultiResLadder};
-use ac2_core::spectrum::{Averaging, SpectrumAnalyzer, SpectrumConfig};
+use ac2_core::spectrum::{Averaging, SpectrumAnalyzer, SpectrumConfig, SpectrumLevel};
 use ac2_core::window::Window;
 
 /// The daemon's display hop rule.
@@ -71,6 +71,7 @@ fn multires_vs_fixed_65536_at_96k() {
             window: Window::Hann,
             averaging: Averaging::Fifo { frames: 4 },
             grid: MultiResLadder::grid(fs, 48),
+            level: SpectrumLevel::Tone,
         },
     )
     .expect("multi");

@@ -142,9 +142,12 @@ pub fn meas_kind(k: &MeasKind) -> String {
             config.measurement_input + 1
         ),
         MeasKind::Spectrum { config } => format!(
-            "spectrum in {} ({}){}",
+            "spectrum in {} ({}{}){}",
             config.input + 1,
             ac2_scene::format::spec_resolution(config.resolution),
+            ac2_scene::format::spec_level_shown(config.resolution, config.level)
+                .map(|l| format!(" · {l}"))
+                .unwrap_or_default(),
             spec_averaging(config.averaging)
         ),
         MeasKind::Rta { config } => format!(
@@ -449,7 +452,14 @@ fn kind_text(k: TraceKind) -> &'static str {
     match k {
         TraceKind::Transfer => "transfer",
         TraceKind::Target => "target",
-        TraceKind::Spectrum { .. } => "spectrum",
+        TraceKind::Spectrum {
+            level: ac2_proto::model::SpecLevel::Tone,
+            ..
+        } => "spectrum",
+        TraceKind::Spectrum {
+            level: ac2_proto::model::SpecLevel::Density,
+            ..
+        } => "spectrum density",
         TraceKind::Rta { .. } => "rta",
         TraceKind::Sweep => "sweep",
     }

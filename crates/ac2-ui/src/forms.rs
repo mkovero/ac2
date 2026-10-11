@@ -11,8 +11,8 @@
 use ac2_proto::model::{
     BandFraction, DepthPolicy, EssSpec, LfHarmonics, MeasConfig, MeasKind, Measurement,
     OpenSession, Operand, Resolution, RtaConfig, Smoothing, SmoothingFraction, SpecAveraging,
-    SpecResolution, SpectrumConfig, SplConfig, SweepConfig, TimeWeighting, TransferConfig,
-    Weighting, Window,
+    SpecLevel, SpecResolution, SpectrumConfig, SplConfig, SweepConfig, TimeWeighting,
+    TransferConfig, Weighting, Window,
 };
 use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
@@ -127,6 +127,8 @@ pub enum FieldId {
     FftSize,
     /// A spectrum's FFT window.
     Window,
+    /// A spectrum's level: tone or density.
+    SpecLevel,
     /// Whether this operand is in a math channel's average.
     Member(Operand),
     /// How a math channel's average combines its operands.
@@ -420,6 +422,21 @@ const WINDOWS: [Window; 4] = [
     Window::FlatTop,
     Window::Rectangular,
 ];
+/// What the level field's choice means, under it.
+fn spec_level_hint(l: SpecLevel) -> &'static str {
+    match l {
+        SpecLevel::Tone => "a sine reads its level; noise reads lower the finer the bins",
+        SpecLevel::Density => {
+            "per hertz: noise and music read alike at any resolution; a sine reads low"
+        }
+    }
+}
+
+/// Levels of the spectrum dialogs, in [`SpecLevel`] order.
+const SPEC_LEVELS: [(&str, SpecLevel); 2] = [
+    ("tone (dBFS)", SpecLevel::Tone),
+    ("density (dBFS/Hz)", SpecLevel::Density),
+];
 const DEPTH: [&str; 2] = [
     "equal confidence (every frequency alike)",
     "fast LF (low stages settle within 1 s)",
@@ -502,7 +519,7 @@ impl Form {
     /// The resolution (one FFT's size, or the multi-resolution bands) and window fields
     /// of a spectrum dialog showing `r` and `w`, with the resolution's hint stated at the
     /// session's rate (set [`Form::sample_rate`] first).
-    fn fft_fields(&self, r: SpecResolution, w: Window) -> [Field; 2] {
+    fn fft_fields(&self, r: SpecResolution, w: Window, level: SpecLevel) -> [Field; 3] {
         let all = spec_resolutions();
         let labels: Vec<String> = all
             .iter()
@@ -525,7 +542,21 @@ impl Form {
             &names,
             WINDOWS.iter().position(|x| *x == w).unwrap_or(0),
         );
-        [size, window]
+        let mut lv = Field::choice(
+            FieldId::SpecLevel,
+            "Level",
+            &SPEC_LEVELS.map(|l| l.0),
+            SPEC_LEVELS.iter().position(|l| l.1 == level).unwrap_or(0),
+        );
+        lv.hint = spec_level_hint(level).to_owned();
+        [size, window, lv]
+    }
+
+    /// The level the spectrum dialog shows (tone when it has no level field).
+    fn spec_level(&self) -> SpecLevel {
+        self.choice_index(FieldId::SpecLevel)
+            .and_then(|i| SPEC_LEVELS.get(i))
+            .map_or(SpecLevel::Tone, |l| l.1)
     }
 
     /// Bin width and update rate of an `n`-point spectrum at the session's rate; what the
@@ -606,7 +637,7 @@ impl Form {
                         .position(|s| s.1 == config.smoothing)
                         .unwrap_or(0),
                 ));
-                fields.extend(f.fft_fields(config.resolution, config.window));
+                fields.extend(f.fft_fields(config.resolution, config.window, config.level));
             }
             MeasKind::Rta { config } => fields.push(Field::choice(
                 FieldId::Fraction,
@@ -760,7 +791,7 @@ impl Form {
         f.sample_rate = open.map(|o| o.sample_rate_hz);
         if kind == FormKind::Spectrum {
             let d = SpectrumConfig::on_input(0);
-            let fft = f.fft_fields(d.resolution, d.window);
+            let fft = f.fft_fields(d.resolution, d.window, d.level);
             f.fields.extend(fft);
         }
         if matches!(kind, FormKind::Spectrum | FormKind::Rta) {
@@ -1159,12 +1190,43 @@ impl Form {
             self.math_changed();
         }
         crate::ir_import_dialog::rehint(self, self.focus);
-        if let Some(r) = self
+        if let Some((i, r)) = self
             .choice_index(FieldId::FftSize)
-            .and_then(|i| spec_resolutions().get(i).copied())
+            .and_then(|i| spec_resolutions().get(i).map(|r| (i, *r)))
             && self.fields[self.focus].id == FieldId::FftSize
         {
+            // The option before this step (← / → move one option).
+            let before = usize::try_from(i as i64 - i64::from(d))
+                .ok()
+                .and_then(|j| spec_resolutions().get(j).copied());
             self.fields[self.focus].hint = self.fft_hint(r);
+            // Between one FFT and the multi-resolution bands the level follows the new
+            // resolution's default (`SpecLevel::default_for`), as `ac2 meas set` does;
+            // the operator can still pick the other one after.
+            let level = SpecLevel::default_for(r);
+            if let Some(f) = self.fields.iter_mut().find(|f| f.id == FieldId::SpecLevel)
+                && let Value::Choice { index, .. } = &mut f.value
+            {
+                let was = SPEC_LEVELS.get(*index).map(|l| l.1);
+                let kind_changed = matches!(
+                    (before, r),
+                    (
+                        Some(SpecResolution::Fixed { .. }),
+                        SpecResolution::Multi { .. }
+                    ) | (
+                        Some(SpecResolution::Multi { .. }),
+                        SpecResolution::Fixed { .. }
+                    )
+                );
+                if kind_changed && was != Some(level) {
+                    *index = SPEC_LEVELS.iter().position(|l| l.1 == level).unwrap_or(0);
+                    f.hint = spec_level_hint(level).to_owned();
+                }
+            }
+        }
+        if self.fields[self.focus].id == FieldId::SpecLevel {
+            let level = self.spec_level();
+            self.fields[self.focus].hint = spec_level_hint(level).to_owned();
         }
     }
 
@@ -1279,6 +1341,10 @@ impl Form {
                         window: self
                             .choice_index(FieldId::Window)
                             .map_or(base.window, |i| WINDOWS[i]),
+                        level: self
+                            .choice_index(FieldId::SpecLevel)
+                            .and_then(|i| SPEC_LEVELS.get(i))
+                            .map_or(base.level, |l| l.1),
                     },
                 }
             }
@@ -1420,6 +1486,7 @@ mod tests {
                     window: Window::Hann,
                     averaging: SpecAveraging::Off,
                     smoothing: None,
+                    level: SpecLevel::Tone,
                 }
             }
         );

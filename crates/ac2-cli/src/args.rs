@@ -8,8 +8,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::units::{
     BandLimitArg, BandSourceArg, BandWindowArg, ByteSize, Celsius, Channel, Channels, DayOffsetArg,
-    DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg, LevelDbfs, MicSensitivityArg, PeakLimitArg,
-    PositionArg, SampleCount, SpecAveragingArg, SplLevel, Time, TimeRef, VoltsArg,
+    DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg, LevelDbfs, MeasLevel, MicSensitivityArg,
+    PeakLimitArg, PositionArg, SampleCount, SpecAveragingArg, SplLevel, Time, TimeRef, VoltsArg,
 };
 
 /// ac2: live dual-channel analyzer — command-line client.
@@ -582,6 +582,15 @@ pub enum WindowArg {
     Rect,
 }
 
+/// What a spectrum's levels are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SpecLevelArg {
+    /// Tone level (dBFS): a sine reads its level.
+    Tone,
+    /// Power spectral density (dBFS/Hz): noise reads the same at any resolution.
+    Density,
+}
+
 /// Octave fraction 1/N.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum FractionArg {
@@ -664,6 +673,11 @@ pub enum MeasCmd {
         /// Spectrum window.
         #[arg(long, value_enum)]
         window: Option<WindowArg>,
+        /// Spectrum level: `tone` (a sine reads its level) or `density` (per hertz: noise
+        /// reads alike at any resolution). Changing between one FFT and `multi` without it
+        /// takes the new resolution's default (tone for one FFT, density for multi).
+        #[arg(long, value_enum)]
+        level: Option<SpecLevelArg>,
         /// tf and sweep: Resolution, points per octave stored: `1/12`, `1/24`, `1/48`,
         /// `1/96` (not smoothing). Spectrum: `multi` or `multi:1/N`, the multi-resolution
         /// bands (long windows low, short high) on a 1/N-octave grid.
@@ -733,8 +747,10 @@ pub struct MeasNew {
     #[arg(long = "out", value_name = "OUTS")]
     pub outputs: Option<Channels>,
     /// Sweep: RMS level, e.g. `-50dbfs`; required for a sweep (there is no default level).
+    /// Spectrum: `tone` (a sine reads its level) or `density` (per hertz: noise reads alike
+    /// at any resolution); default tone for one FFT, density for `--resolution multi`.
     #[arg(long, allow_hyphen_values = true)]
-    pub level: Option<LevelDbfs>,
+    pub level: Option<MeasLevel>,
     /// Sweep: duration (default 3 s).
     #[arg(long, value_name = "TIME")]
     pub duration: Option<Time>,

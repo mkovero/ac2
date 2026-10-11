@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use ac2_proto::GridId;
 use ac2_proto::frame::ValidityMask;
-use ac2_proto::model::LevelScale;
+use ac2_proto::model::{LevelScale, SpecLevel};
 use ac2_proto::units::WallNs;
 
 use crate::axis::{self, Axis, Range, TickKind};
@@ -33,7 +33,7 @@ use crate::primitives::{
     FillRect, HAlign, Heatmap, HeatmapAxes, HeatmapColumn, HeatmapId, Polyline, Rect, Scene,
     VAlign, Viewport,
 };
-use crate::spectrum::{SpectrumScene, SpectrumTrace, offset_note, scale_unit, spectrum_scene_in};
+use crate::spectrum::{SpectrumScene, SpectrumTrace, offset_note, spectrum_scene_in};
 use crate::theme::Theme;
 use crate::time::Freshness;
 use crate::view::{FREQ_LIMIT_HI, FREQ_LIMIT_LO, SpectrumMode, ViewState};
@@ -153,6 +153,8 @@ pub struct SpectrographFrame<'a> {
     /// Band edges of the grid's columns ([`crate::grid::column_edges`]).
     pub edges: &'a [(f64, f64)],
     pub scale: LevelScale,
+    /// A narrowband spectrum's tone level or density; `None` for RTA bands.
+    pub spec_level: Option<SpecLevel>,
     pub level: &'a [f32],
     pub validity: Option<&'a [ValidityMask]>,
 }
@@ -165,6 +167,7 @@ pub struct SpectrographHistory {
     slot_ns: u64,
     grid: Option<GridId>,
     scale: Option<LevelScale>,
+    spec_level: Option<SpecLevel>,
     map: Option<Arc<RowMap>>,
     ring: Vec<Option<HeatmapColumn>>,
     /// Absolute slot (capture time / slot length) of the newest frame.
@@ -184,6 +187,7 @@ impl SpectrographHistory {
             slot_ns: u64::from(span_s) * 1_000_000_000 / n as u64,
             grid: None,
             scale: None,
+            spec_level: None,
             map: None,
             ring: vec![None; n],
             newest: None,
@@ -209,6 +213,21 @@ impl SpectrographHistory {
     /// The level scale of the frames held.
     pub fn scale(&self) -> Option<LevelScale> {
         self.scale
+    }
+
+    /// The unit of the levels held: `dBFS`, `dB SPL/Hz`, …
+    pub fn unit(&self) -> Option<&'static str> {
+        let density = self.spec_level == Some(SpecLevel::Density);
+        self.scale.map(|s| {
+            crate::spectrum::value_unit(
+                s,
+                if density {
+                    crate::spectrum::Quantity::Density
+                } else {
+                    crate::spectrum::Quantity::Tone
+                },
+            )
+        })
     }
 
     pub fn rows(&self) -> Option<&RowMap> {
@@ -244,17 +263,22 @@ impl SpectrographHistory {
     }
 
     /// Takes frame `f`; whether the picture changed. A frame seen already (same `seq`) is
-    /// ignored. A new grid or level scale starts over: rows of another grid, or levels in
-    /// another unit, cannot share a colour field.
+    /// ignored. A new grid, level scale or spectrum level starts over: rows of another grid,
+    /// or levels in another unit, cannot share a colour field.
     pub fn push(&mut self, f: &SpectrographFrame<'_>) -> bool {
         if self.last_seq == Some(f.seq) {
             return false;
         }
         self.last_seq = Some(f.seq);
-        if self.grid != Some(f.grid) || self.scale != Some(f.scale) || self.map.is_none() {
+        if self.grid != Some(f.grid)
+            || self.scale != Some(f.scale)
+            || self.spec_level != f.spec_level
+            || self.map.is_none()
+        {
             self.clear();
             self.grid = Some(f.grid);
             self.scale = Some(f.scale);
+            self.spec_level = f.spec_level;
             self.map = RowMap::new(f.edges).map(Arc::new);
         }
         let Some(map) = &self.map else {
@@ -476,8 +500,8 @@ pub fn spectrograph_scene(
     let range = sg.map_or(view.spectrum.level, |s| s.range);
     let bar = Rect::new(plot.right() + BAR_GAP, plot.y, BAR_W, plot.h);
     let unit = sg
-        .and_then(|s| s.history.scale())
-        .map_or(String::new(), |s| scale_unit(s).to_string());
+        .and_then(|s| s.history.unit())
+        .map_or(String::new(), str::to_string);
     let bar_axis = axis::linear_axis(range, bar.bottom(), bar.y, &unit);
     if range.is_valid() {
         let values: HeatmapColumn = (0..BAR_STEPS)
@@ -524,8 +548,8 @@ pub fn spectrograph_scene(
                 s.name.clone()
             };
             caption = format!("{name} · last {span} s");
-            if let Some(scale) = s.history.scale() {
-                caption.push_str(&format!(" · {}", scale_unit(scale)));
+            if let Some(unit) = s.history.unit() {
+                caption.push_str(&format!(" · {unit}"));
             }
             // In the split the spectrum's legend tags the curve; alone, the caption does.
             let tag = match s.freshness {
@@ -570,9 +594,9 @@ pub fn spectrograph_scene(
                     .history
                     .value_at(hz, before)
                     .map_or(f64::NAN, |v| f64::from(v) + s.offset_db);
-                let level = match s.history.scale() {
-                    Some(scale) if v.is_finite() => {
-                        format!("{} {}", format::level(v), scale_unit(scale))
+                let level = match s.history.unit() {
+                    Some(unit) if v.is_finite() => {
+                        format!("{} {unit}", format::level(v))
                     }
                     _ => format::level(f64::NAN),
                 };

@@ -399,9 +399,15 @@ impl AppState {
             .collect();
         self.spectrographs.retain(|id, _| running.contains_key(id));
         for tf in d.latest.frames.values() {
-            let (meas, scale, level, validity) = match &tf.frame.data {
-                FrameData::Spec(f) => (f.meas, f.meta.scale, &f.level, None),
-                FrameData::Rta(f) => (f.meas, f.meta.scale, &f.level, Some(f.validity.as_slice())),
+            let (meas, scale, spec_level, level, validity) = match &tf.frame.data {
+                FrameData::Spec(f) => (f.meas, f.meta.scale, Some(f.meta.level), &f.level, None),
+                FrameData::Rta(f) => (
+                    f.meas,
+                    f.meta.scale,
+                    None,
+                    &f.level,
+                    Some(f.validity.as_slice()),
+                ),
                 _ => continue,
             };
             let Some(&live) = running.get(&meas) else {
@@ -430,6 +436,7 @@ impl AppState {
                 grid,
                 edges: &cols.edges,
                 scale,
+                spec_level,
                 level,
                 validity,
             });

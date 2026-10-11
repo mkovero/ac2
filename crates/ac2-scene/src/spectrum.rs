@@ -7,7 +7,9 @@
 //! bins the kernel spreads it over — so its axis says that too.
 
 use ac2_proto::frame::{RtaFrame, SpecBands, SpecFrame, ValidityMask};
-use ac2_proto::model::{BandFraction, CalStatus, LevelScale, SmoothingFraction, Weighting, Window};
+use ac2_proto::model::{
+    BandFraction, CalStatus, LevelScale, SmoothingFraction, SpecLevel, Weighting, Window,
+};
 use ac2_proto::units::WallNs;
 
 use crate::axis::{self, Axis};
@@ -33,14 +35,43 @@ pub enum Quantity {
     Tone,
     /// Tone levels power-averaged over a fractional-octave kernel (smoothed spectrum).
     SmoothedTone(SmoothingFraction),
+    /// Power spectral density (narrowband spectrum, per hertz).
+    Density,
+    /// Densities averaged over a fractional-octave kernel (smoothed spectrum).
+    SmoothedDensity(SmoothingFraction),
     /// Power in the band (RTA).
     Band,
 }
 
 impl Quantity {
-    /// A narrowband spectrum's quantity under `smoothing`.
-    pub fn tone(smoothing: Option<SmoothingFraction>) -> Self {
-        smoothing.map_or(Quantity::Tone, Quantity::SmoothedTone)
+    /// A narrowband spectrum's quantity at `level` under `smoothing`.
+    pub fn narrow(level: SpecLevel, smoothing: Option<SmoothingFraction>) -> Self {
+        match (level, smoothing) {
+            (SpecLevel::Tone, None) => Quantity::Tone,
+            (SpecLevel::Tone, Some(f)) => Quantity::SmoothedTone(f),
+            (SpecLevel::Density, None) => Quantity::Density,
+            (SpecLevel::Density, Some(f)) => Quantity::SmoothedDensity(f),
+        }
+    }
+
+    /// A narrowband spectrum (tone level or density), not RTA bands.
+    pub fn is_narrow(self) -> bool {
+        self != Quantity::Band
+    }
+
+    /// A density, smoothed or not.
+    pub fn is_density(self) -> bool {
+        matches!(self, Quantity::Density | Quantity::SmoothedDensity(_))
+    }
+}
+
+/// The unit a value of `q` in `scale` reads in: `dBFS`, `dB SPL`, `dBFS/Hz`, `dB SPL/Hz`.
+pub fn value_unit(scale: LevelScale, q: Quantity) -> &'static str {
+    match (scale, q.is_density()) {
+        (LevelScale::Dbfs, false) => "dBFS",
+        (LevelScale::DbSpl, false) => "dB SPL",
+        (LevelScale::Dbfs, true) => "dBFS/Hz",
+        (LevelScale::DbSpl, true) => "dB SPL/Hz",
     }
 }
 
@@ -98,7 +129,7 @@ impl BinWidth {
 }
 
 /// Axis unit, longest form: `dBFS per 1.46 Hz bin (tone)`, `dB SPL (band)`,
-/// `dBFS per 11.7 Hz bin (tone, 1/6 oct smoothed)`.
+/// `dBFS per 11.7 Hz bin (tone, 1/6 oct smoothed)`, `dBFS/Hz (density, multi-res)`.
 pub fn level_unit(scale: LevelScale, q: Quantity, bin: BinWidth) -> String {
     level_unit_forms(scale, q, bin).swap_remove(0)
 }
@@ -109,9 +140,30 @@ pub fn level_unit(scale: LevelScale, q: Quantity, bin: BinWidth) -> String {
 pub fn level_unit_forms(scale: LevelScale, q: Quantity, bin: BinWidth) -> Vec<String> {
     let s = scale_unit(scale);
     let smoothed = match q {
-        Quantity::SmoothedTone(f) => Some(format!("{} smoothed", format::octave_fraction(f))),
+        Quantity::SmoothedTone(f) | Quantity::SmoothedDensity(f) => {
+            Some(format!("{} smoothed", format::octave_fraction(f)))
+        }
         _ => None,
     };
+    if q.is_density() {
+        // A density is per hertz whatever the bin width: no bin to name.
+        let d = value_unit(scale, q);
+        let what = match &smoothed {
+            Some(sm) => format!("density, {sm}"),
+            None => "density".to_string(),
+        };
+        let mut v = match bin {
+            BinWidth::MultiRes => vec![format!("{d} ({what}, multi-res)")],
+            _ => vec![],
+        };
+        v.push(format!("{d} ({what})"));
+        if smoothed.is_some() {
+            v.push(format!("{d} (density)"));
+        }
+        v.push(d.to_string());
+        v.dedup();
+        return v;
+    }
     let tone = match &smoothed {
         Some(sm) => format!("tone, {sm}"),
         None => "tone".to_string(),
@@ -145,6 +197,32 @@ pub fn level_unit_forms(scale: LevelScale, q: Quantity, bin: BinWidth) -> Vec<St
     v.push(s.to_string());
     v.dedup();
     v
+}
+
+/// What the level axis of a narrowband spectrum of quantity `q` means, for its tooltip and
+/// the help.
+pub fn narrow_unit_help(q: Quantity, bin: BinWidth) -> String {
+    if q.is_density() {
+        density_unit_help(bin)
+    } else {
+        tone_unit_help(bin)
+    }
+}
+
+/// What a density axis means.
+pub fn density_unit_help(bin: BinWidth) -> String {
+    let source = if bin == BinWidth::MultiRes {
+        "from windows of 0.68 s at the lowest frequencies to 21 ms at the highest"
+    } else {
+        "per hertz"
+    };
+    format!(
+        "Power spectral density {source}: the power each hertz holds, so noise and music \
+         read the same on a fixed or a multi-resolution spectrum, at any FFT length (white \
+         noise flat, pink falling 3 dB per octave). A sine reads below its level by \
+         10·log10 of the bin's noise bandwidth in hertz (Hann, 1.46 Hz bins: 3.4 dB). Use \
+         tone level to read a sine, an RTA for band levels in dB SPL."
+    )
 }
 
 /// What the level axis of a narrowband spectrum means, for its tooltip and the help.
@@ -288,7 +366,7 @@ impl<'a> SpectrumTrace<'a> {
 
     /// A live narrowband spectrum; `captured` is the frame's capture time, `curve` the
     /// mic-curve note of its input. Its columns are display columns of FFT bins, each the
-    /// highest tone level among its bins; a gap is NaN.
+    /// highest tone level among its bins (the mean density, a density); a gap is NaN.
     #[allow(clippy::too_many_arguments)]
     pub fn spectrum(
         frame: &'a SpecFrame,
@@ -311,7 +389,7 @@ impl<'a> SpectrumTrace<'a> {
             validity: None,
             peak: None,
             scale: frame.meta.scale,
-            quantity: Quantity::tone(frame.meta.smoothing),
+            quantity: Quantity::narrow(frame.meta.level, frame.meta.smoothing),
             bin_hz: None,
             // The axis unit says whether the level is smoothed (`level_unit`).
             caption: format!(
@@ -566,7 +644,10 @@ fn unit_forms(traces: &[SpectrumTrace<'_>]) -> (Vec<String>, Option<String>) {
     } else {
         BinWidth::Mixed
     };
-    let help = (first.quantity != Quantity::Band).then(|| tone_unit_help(bin));
+    let help = first
+        .quantity
+        .is_narrow()
+        .then(|| narrow_unit_help(first.quantity, bin));
     (level_unit_forms(first.scale, first.quantity, bin), help)
 }
 
@@ -846,9 +927,10 @@ pub(crate) fn spectrum_scene_in(
         // Bars are band power (RTA). A narrowband bin is a tone level, and thousands of bins
         // share a pixel at the top of a log axis: drawn as bars, a single-bin tone becomes a
         // sub-pixel sliver. Tone traces are always the max-per-pixel line.
-        let style = match t.quantity {
-            Quantity::Tone | Quantity::SmoothedTone(_) => SpectrumStyle::Line,
-            Quantity::Band => view.spectrum.style,
+        let style = if t.quantity.is_narrow() {
+            SpectrumStyle::Line
+        } else {
+            view.spectrum.style
         };
         match style {
             SpectrumStyle::Bars => {
@@ -962,7 +1044,7 @@ pub(crate) fn spectrum_scene_in(
                 let v = t.value(j);
                 let s = format::level(v);
                 let s = if v.is_finite() {
-                    format!("{s} {}", scale_unit(t.scale))
+                    format!("{s} {}", value_unit(t.scale, t.quantity))
                 } else {
                     s
                 };
@@ -1206,6 +1288,7 @@ mod tests {
             meta: SpecMeta {
                 window: Window::Hann,
                 scale: LevelScale::DbSpl,
+                level: SpecLevel::Tone,
                 cal,
                 mic_curve: false,
                 smoothing: None,
@@ -1273,7 +1356,7 @@ mod tests {
         assert_eq!(
             level_unit_forms(
                 LevelScale::DbSpl,
-                Quantity::tone(Some(SmoothingFraction::Third)),
+                Quantity::narrow(SpecLevel::Tone, Some(SmoothingFraction::Third)),
                 bin
             ),
             [
@@ -1490,7 +1573,7 @@ mod tests {
             validity: None,
             peak: None,
             scale: LevelScale::DbSpl,
-            quantity: Quantity::tone(Some(SmoothingFraction::Third)),
+            quantity: Quantity::narrow(SpecLevel::Tone, Some(SmoothingFraction::Third)),
             bin_hz: cols.bin_hz,
             caption: "Hann window".into(),
             freshness: None,
@@ -1555,6 +1638,89 @@ mod tests {
         u.quantity = Quantity::Tone;
         let s = scene(&[t, u], 900.0);
         assert_eq!(s.unit, "dB SPL per bin, mixed widths (tone)");
+    }
+
+    /// A density reads per hertz on any FFT length or resolution: spectra on two FFT
+    /// lengths share one axis, a tone and a density spectrum do not.
+    #[test]
+    fn density_unit_is_per_hertz_on_any_resolution() {
+        use BinWidth as B;
+        assert_eq!(
+            level_unit_forms(LevelScale::Dbfs, Quantity::Density, B::MultiRes),
+            [
+                "dBFS/Hz (density, multi-res)",
+                "dBFS/Hz (density)",
+                "dBFS/Hz"
+            ]
+        );
+        assert_eq!(
+            level_unit_forms(
+                LevelScale::DbSpl,
+                Quantity::narrow(SpecLevel::Density, Some(SmoothingFraction::Sixth)),
+                B::Hz(1.46)
+            ),
+            [
+                "dB SPL/Hz (density, 1/6 oct smoothed)",
+                "dB SPL/Hz (density)",
+                "dB SPL/Hz"
+            ]
+        );
+        assert_eq!(
+            value_unit(LevelScale::DbSpl, Quantity::Density),
+            "dB SPL/Hz"
+        );
+        assert_eq!(value_unit(LevelScale::Dbfs, Quantity::Tone), "dBFS");
+
+        let cols = |n: u32| {
+            crate::grid::columns(&GridDef::LogBins {
+                fs: Hz(48_000.0),
+                n,
+                ppo: 96,
+            })
+        };
+        let (a, b) = (cols(65_536), cols(4096));
+        let (la, lb) = (vec![-90.0f32; a.freqs.len()], vec![-90.0f32; b.freqs.len()]);
+        fn trace<'a>(c: &'a crate::grid::GridColumns, l: &'a [f32], id: u32) -> SpectrumTrace<'a> {
+            SpectrumTrace {
+                key: TraceKey::Stored(ac2_proto::units::TraceId(id)),
+                name: format!("S{id}"),
+                color: Color::WHITE,
+                freqs: &c.freqs,
+                edges: &c.edges,
+                level: l,
+                drawn: None,
+                validity: None,
+                peak: None,
+                scale: LevelScale::Dbfs,
+                quantity: Quantity::Density,
+                bin_hz: c.bin_hz,
+                caption: "Hann window".into(),
+                freshness: None,
+                offset_db: 0.0,
+                selected: false,
+                bands: None,
+            }
+        }
+        let (ta, tb) = (trace(&a, &la, 1), trace(&b, &lb, 2));
+        let scene = |traces: &[SpectrumTrace<'_>]| {
+            spectrum_scene(
+                traces,
+                &Status::default(),
+                &ViewState::default(),
+                &Theme::dark(),
+                SIZE,
+            )
+        };
+        let s = scene(&[ta.clone(), tb.clone()]);
+        assert_eq!(s.unit, "dBFS/Hz (density)");
+        let help = s.unit_help.as_deref().expect("help");
+        assert!(
+            help.contains("per hertz") && help.contains("3.4 dB"),
+            "{help}"
+        );
+        let mut tone = tb;
+        tone.quantity = Quantity::Tone;
+        assert_eq!(scene(&[ta, tone]).unit, "mixed units");
     }
 
     /// The unit's label and the drawn caption never overlap.
@@ -1963,6 +2129,7 @@ mod tests {
             meta: ac2_proto::frame::SpecMeta {
                 window: Window::Hann,
                 scale: LevelScale::Dbfs,
+                level: SpecLevel::Tone,
                 cal: CalStatus::Uncalibrated,
                 mic_curve: false,
                 smoothing: None,

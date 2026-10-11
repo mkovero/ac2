@@ -586,6 +586,7 @@ fn tree_dots_have_the_colours_of_their_curves() {
             meta: SpecMeta {
                 window: Window::Hann,
                 scale: LevelScale::Dbfs,
+                level: ac2_proto::model::SpecLevel::Tone,
                 cal: CalStatus::Uncalibrated,
                 mic_curve: false,
                 smoothing: None,

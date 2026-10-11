@@ -271,6 +271,7 @@ fn linear_grid_spectrum_round_trips_with_dc_bin() {
             0.0,
             TraceKind::Spectrum {
                 scale: LevelScale::Dbfs,
+                level: SpecLevel::Tone,
             },
             &g,
         ),
@@ -521,6 +522,7 @@ fn spectrum_and_rta_averages_across_grids_are_refused() {
         (
             TraceKind::Spectrum {
                 scale: LevelScale::Dbfs,
+                level: SpecLevel::Tone,
             },
             GridDef::Linear {
                 fs: Hz(48_000.0),
@@ -534,6 +536,7 @@ fn spectrum_and_rta_averages_across_grids_are_refused() {
         (
             TraceKind::Spectrum {
                 scale: LevelScale::Dbfs,
+                level: SpecLevel::Tone,
             },
             GridDef::Linear {
                 fs: Hz(48_000.0),

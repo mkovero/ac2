@@ -262,6 +262,7 @@ fn spectrum_multires_stitches() {
         meta: SpecMeta {
             window: Window::Hann,
             scale: LevelScale::Dbfs,
+            level: ac2_proto::model::SpecLevel::Tone,
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
             smoothing: None,

@@ -9,6 +9,7 @@
 //! | amplitude (FS RMS) | √F_k / S₁ |
 //! | amplitude dBFS | 20·lg(√2 · amplitude) — a full-scale sine reads 0 dBFS |
 //! | PSD (FS²/Hz) | F_k / (fs·S₂) |
+//! | density (dBFS/Hz) | 10·lg(2·F_k / (fs·S₂)) = tone power / (ENBW·Δf) |
 //! | band power (FS²) | Σ_k w_k · PSD_k · Δf, w_k = fraction of bin k inside the band |
 //! | band power dBFS | 10·lg(2 · power) |
 //!
@@ -16,6 +17,13 @@
 //! [0, fs/2] completely equals the windowed signal's mean square Σ(w·x)²/S₂ (Parseval), and a
 //! bin that straddles a band edge is shared between the two bands in proportion to overlap,
 //! so no power is created or lost by banding.
+//!
+//! Tone power `2·F_k / S₁²` reads a sine at its level; a stationary noise it reads as its
+//! density times the bin's noise bandwidth ENBW·Δf, so the same noise reads 3 dB lower per
+//! doubling of N. Density (`2·F_k / (fs·S₂)`, [`SpectrumLevel::Density`]) divides that
+//! bandwidth out: the noise reads the same at every N and a sine reads `10·lg(ENBW·Δf)` dB
+//! below its level. It keeps the dBFS reference of tone power (a full-scale sine's mean
+//! square), so a density integrated over frequency is the signal's level in dBFS.
 
 use crate::rta::BandFraction;
 use crate::window::{Window, WindowGains};
@@ -227,6 +235,33 @@ pub fn column_max<'a>(values: &'a [f64], first: &'a [u32]) -> impl Iterator<Item
             .filter(|v| v.is_finite())
             .fold(f64::NAN, |m, &v| if v > m || m.is_nan() { v } else { m })
     })
+}
+
+/// Mean of the finite values in each column of bins, NaN for a column without one (columns
+/// as in [`column_max`]). A density is gathered for display by its mean: a column's mean
+/// density is the power it holds over its width, which a noise reads the same whatever the
+/// bin width, where the maximum of many bins of a noise reads above its mean.
+pub fn column_mean<'a>(values: &'a [f64], first: &'a [u32]) -> impl Iterator<Item = f64> + 'a {
+    first.windows(2).map(|w| {
+        let (a, b) = (w[0] as usize, (w[1] as usize).min(values.len()));
+        let (sum, n) = values
+            .get(a..b)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|v| v.is_finite())
+            .fold((0.0, 0usize), |(s, n), &v| (s + v, n + 1));
+        if n == 0 { f64::NAN } else { sum / n as f64 }
+    })
+}
+
+/// What a spectrum's per-bin power is scaled to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpectrumLevel {
+    /// Tone power `2·F_k / S₁²`: a sine reads its level.
+    Tone,
+    /// Power spectral density `2·F_k / (fs·S₂)` (tone power per hertz of noise bandwidth):
+    /// a noise reads the same at every resolution.
+    Density,
 }
 
 /// One band of an FFT banding.
@@ -485,6 +520,21 @@ impl SpectrumAnalyzer {
     /// [`PowerSpectrum::tone_power_factor`] of this analyzer's spectra.
     pub fn tone_power_factor(&self) -> f64 {
         2.0 / (self.gains.sum * self.gains.sum)
+    }
+
+    /// Noise bandwidth of a bin, Hz: ENBW (bins) · fs / N. A tone-scaled bin reads a noise
+    /// of density `S` as `S` times this.
+    pub fn noise_bandwidth_hz(&self) -> f64 {
+        self.gains.enbw_bins() * self.cfg.fs / self.cfg.n as f64
+    }
+
+    /// The factor that turns folded power into `level`: the tone factor `2 / S₁²`, or for
+    /// a density that over the noise bandwidth, `2 / (fs · S₂)`.
+    pub fn power_factor(&self, level: SpectrumLevel) -> f64 {
+        match level {
+            SpectrumLevel::Tone => self.tone_power_factor(),
+            SpectrumLevel::Density => 2.0 / (self.cfg.fs * self.gains.sum_sq),
+        }
     }
 
     /// Frames analysed since the averaging was last reset.

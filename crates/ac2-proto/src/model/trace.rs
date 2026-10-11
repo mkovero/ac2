@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AverageMethod, CalKey, DelayReference, DepthPolicy, EssSpec, LevelScale, LfHarmonics, MathExpr,
-    MathOp, MicCurveRef, Operand, PhaseBasis, Resolution, Smoothing, SweepData, TraceIr,
+    MathOp, MicCurveRef, Operand, PhaseBasis, Resolution, Smoothing, SpecLevel, SweepData, TraceIr,
     TraceOwner, Unresolved,
 };
 use crate::grid::GridId;
@@ -138,10 +138,13 @@ pub enum TraceKind {
     Transfer,
     /// Target curve: magnitude dB only.
     Target,
-    /// Narrowband spectrum (tone level).
+    /// Narrowband spectrum (tone level or density).
     Spectrum {
         /// Level unit.
         scale: LevelScale,
+        /// Tone level or density: spectra of different `level` are different quantities,
+        /// never combined.
+        level: SpecLevel,
     },
     /// Fractional-octave RTA (band power).
     Rta {

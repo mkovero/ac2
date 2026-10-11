@@ -1,0 +1,349 @@
+{
+ "format": "ac2-session",
+ "version": 24,
+ "saved_at": 1791685507565700409,
+ "measurements": [
+  {
+   "id": 1,
+   "config": {
+    "name": "FOH SPL",
+    "kind": {
+     "type": "spl",
+     "config": {
+      "input": 0,
+      "weighting": "c",
+      "time_weighting": "slow",
+      "peak_weighting": "c",
+      "leq": {
+       "windows": [
+        {
+         "duration": 60.0,
+         "weighting": "c",
+         "limit": null,
+         "warn_margin": 4.0
+        },
+        {
+         "duration": 3600.0,
+         "weighting": "c",
+         "limit": 80.0,
+         "warn_margin": 4.0
+        }
+       ],
+       "horizon": 600.0,
+       "peaks": {
+        "lcpeak": {
+         "limit": 140.0,
+         "warn_margin": 4.0
+        },
+        "lafmax": {
+         "limit": 115.0,
+         "warn_margin": 4.0
+        }
+       }
+      },
+      "position": null,
+      "bands": {
+       "windows": [
+        {
+         "band": 20.0,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 74.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        },
+        {
+         "band": 25.0,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 64.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        },
+        {
+         "band": 31.5,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 56.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        },
+        {
+         "band": 40.0,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 49.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        },
+        {
+         "band": 50.0,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 44.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        },
+        {
+         "band": 63.0,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 42.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        },
+        {
+         "band": 80.0,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 40.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        },
+        {
+         "band": 100.0,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 38.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        },
+        {
+         "band": 125.0,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 36.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        },
+        {
+         "band": 160.0,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 34.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        },
+        {
+         "band": 200.0,
+         "duration": 3600.0,
+         "weighting": "z",
+         "limit": 32.0,
+         "day_offset": 5.0,
+         "warn_margin": 3.0
+        }
+       ],
+       "predicted": {
+        "duration": 3600.0,
+        "day": null,
+        "night": 25.0,
+        "warn_margin": 3.0
+       },
+       "correction": {
+        "impulse": "none",
+        "tonal": "none"
+       },
+       "transfer": null
+      }
+     }
+    }
+   },
+   "running": true,
+   "delay": null,
+   "colour": null,
+   "layout": null
+  },
+  {
+   "id": 2,
+   "config": {
+    "name": "TF 1",
+    "kind": {
+     "type": "transfer",
+     "config": {
+      "reference_input": 1,
+      "measurement_input": 0,
+      "averaging": {
+       "type": "fifo",
+       "blocks": 16
+      },
+      "resolution": "twelfth",
+      "smoothing": {
+       "fraction": "sixth",
+       "mode": "magnitude_phase"
+      },
+      "depth": {
+       "type": "equal_confidence"
+      }
+     }
+    }
+   },
+   "running": false,
+   "delay": {
+    "applied": 0.0025,
+    "nudged": 0.0025,
+    "tracking": false
+   },
+   "colour": {
+    "type": "hue",
+    "index": 2
+   },
+   "layout": null
+  },
+  {
+   "id": 3,
+   "config": {
+    "name": "Spectrum 1",
+    "kind": {
+     "type": "spectrum",
+     "config": {
+      "input": 0,
+      "resolution": {
+       "type": "fixed",
+       "fft_len": 65536
+      },
+      "window": "hann",
+      "averaging": {
+       "type": "off"
+      },
+      "smoothing": "twenty_fourth"
+     }
+    }
+   },
+   "running": true,
+   "delay": null,
+   "colour": null,
+   "layout": null
+  },
+  {
+   "id": 4,
+   "config": {
+    "name": "TF 1 vs S1",
+    "kind": {
+     "type": "math",
+     "config": {
+      "owner": {
+       "type": "meas",
+       "meas": 2
+      },
+      "domain": "transfer",
+      "expr": {
+       "type": "binary",
+       "a": {
+        "type": "meas",
+        "meas": 2
+       },
+       "op": "divide",
+       "b": {
+        "type": "trace",
+        "trace": 1
+       }
+      },
+      "reference": {
+       "type": "operand",
+       "operand": {
+        "type": "meas",
+        "meas": 2
+       }
+      },
+      "smoothing": null
+     }
+    }
+   },
+   "running": false,
+   "delay": null,
+   "colour": null,
+   "layout": null
+  },
+  {
+   "id": 5,
+   "config": {
+    "name": "Spectrum MR",
+    "kind": {
+     "type": "spectrum",
+     "config": {
+      "input": 0,
+      "resolution": {
+       "type": "multi",
+       "grid": "forty_eighth"
+      },
+      "window": "hann",
+      "averaging": {
+       "type": "off"
+      },
+      "smoothing": "twenty_fourth"
+     }
+    }
+   },
+   "running": false,
+   "delay": null,
+   "colour": null,
+   "layout": null
+  }
+ ],
+ "spl_logs": [
+  {
+   "meas": 1,
+   "file": "spl/1791685507565700409-1.csv",
+   "bands": "spl/1791685507565700409-1.bands.csv"
+  }
+ ],
+ "traces": [
+  {
+   "meta": {
+    "id": 1,
+    "edit": {
+     "name": "TF 1 S1",
+     "color": {
+      "r": 230,
+      "g": 159,
+      "b": 0
+     },
+     "visible": true,
+     "locked": false,
+     "order": 1,
+     "offset": 0.0,
+     "polarity": "normal",
+     "delay_nudge": 0.0,
+     "slot": 2,
+     "smoothing": {
+      "fraction": "sixth",
+      "mode": "magnitude_phase"
+     },
+     "owner": {
+      "type": "meas",
+      "meas": 2
+     }
+    },
+    "kind": {
+     "type": "transfer"
+    },
+    "source": {
+     "type": "captured",
+     "meas": 2,
+     "meas_name": "TF 1",
+     "epoch": 1,
+     "at_sample": 99327
+    },
+    "grid_id": 1445325567755393628,
+    "delay": 0.0,
+    "depth": {
+     "type": "equal_confidence"
+    },
+    "cal": {
+     "type": "uncalibrated"
+    },
+    "mic": null,
+    "mic_curve": null,
+    "created_at": 1791685507542643385
+   },
+   "grid": {
+    "type": "log",
+    "ppo": 12,
+    "k_min": -60,
+    "k_max": 59
+   },
+   "file": "traces/1-24423bce71430265.csv",
+   "mic_curve_points": null
+  }
+ ]
+}

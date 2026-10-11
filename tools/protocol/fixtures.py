@@ -191,6 +191,7 @@ def frames():
             {
                 "window": "hann",
                 "scale": "dbfs",
+                "level": "density",
                 "cal": {"type": "uncalibrated"},
                 "mic_curve": False,
                 "smoothing": "sixth",
@@ -223,7 +224,7 @@ def frames():
                 },
             },
             [
-                (arr("level", "dbfs"), [-120.0, -20.0, INF, NAN]),
+                (arr("level", "dbfs_per_hz"), [-120.0, -20.0, INF, NAN]),
             ],
         ),
         "spl": frame(
