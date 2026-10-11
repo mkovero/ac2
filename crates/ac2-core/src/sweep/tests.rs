@@ -2,6 +2,11 @@
 //! continuous capture with the sweeps (and their silence) somewhere in it, a loopback
 //! reference with its own latency and gain, the measurement path with another delay.
 
+use std::f64::consts::{LN_2, PI, TAU};
+
+use num_complex::Complex64;
+
+use super::spectral::{band_power, db10, fft_inverse, noise_power};
 use super::*;
 use crate::generator::dbfs_to_rms;
 
