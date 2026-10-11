@@ -79,6 +79,10 @@ mod link;
 mod meas_layout;
 #[path = "state_panes.rs"]
 mod panes;
+#[path = "state_panes_ops.rs"]
+mod panes_ops;
+#[path = "state_panes_views.rs"]
+mod panes_views;
 #[path = "state_queries.rs"]
 mod queries;
 #[path = "state_select.rs"]
@@ -90,9 +94,9 @@ pub use sessions_impl::SessionsMsg;
 mod stimulus;
 #[path = "state_text.rs"]
 mod text;
-pub use panes::{
-    Axis, DEFAULT_PANE_AREA, Layout, PaneId, PaneMenuRow, PaneModes, PaneNode, PaneRect,
-    PaneTemplate, Side, SplitGap, TransferView, View,
+pub use panes::{Axis, PaneId, PaneNode, PaneRect, Side, SplitGap};
+pub use panes_views::{
+    DEFAULT_PANE_AREA, Layout, PaneMenuRow, PaneModes, PaneTemplate, TransferView, View,
 };
 use text::{SELECT_TRACE_FIRST, drawn_in, offset_text, slot_of};
 pub use text::{
