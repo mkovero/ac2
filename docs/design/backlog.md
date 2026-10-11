@@ -126,7 +126,7 @@ decision 4). Measured numbers: PLAN §9.0.
 - **ac2d `remote_stimulus` "timed out waiting for the tone"**: once in a full workspace run
   at load ~30 (no loopback, so the timing job is not involved); passed 4/4 alone.
 
-- **ac2d `traces::capture_average_math_export_import`, unaligned capture at 301.6 Hz:
+- **ac2d `traces::capture::capture_average_math_export_import`, unaligned capture at 301.6 Hz:
   −6.37 dB (want −6.02 ± 0.3)**, once, in a full `cargo test --workspace` at load ~40 after
   the capture-slot fix. Unloaded the error there is −0.002 ± 0.028 dB (300 runs, max 0.10);
   200 runs of the traces suite at load 40–130 did not repeat it. Not queue overflow (no

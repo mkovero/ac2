@@ -112,7 +112,7 @@ panic; `tools/protocol` decodes the Rust fixtures and the reverse.
 
 Captures, stored traces, exports (`trace export --csv`), math, sweeps and session files are
 formed in the daemon from the analysis in f32, never from a frame
-(`traces::spectrum_live_columns_are_the_captured_bins_maxima` checks a capture keeps values
+(`traces::spectrum::spectrum_live_columns_are_the_captured_bins_maxima` checks a capture keeps values
 off the wire grid). A transfer trace's IR comes from the job's own inverse FFT at capture
 (`capture_ir`), not from the last `ir` frame, so it keeps every f32 sample. For crosscheck
 (peer session constraints): `ac2 spl watch` reads `spl`

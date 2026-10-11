@@ -468,7 +468,7 @@ Calibration visibility (field, 2026-10-03; `docs/design/q7-calibration.md` §10;
 
 Flaky tests (seen on CI and under load, 2026-10-03), by cause (db95852, d8fc428, 927c69c):
 - **A capture could return the result before the one a client was shown** (ac2d
-  `traces::spectrum_smoothing_live_and_captured` "bin 1: live … vs ac2-core …",
+  `traces::spectrum::spectrum_smoothing_live_and_captured` "bin 1: live … vs ac2-core …",
   `live_smoothing_and_resmoothed_captures` "301 Hz: … vs live …",
   `capture_average_math_export_import` NaN average, `session_save_load_round_trip` "no result
   to capture yet"; Windows CI). A job sent its frame to the I/O thread before storing it as the
