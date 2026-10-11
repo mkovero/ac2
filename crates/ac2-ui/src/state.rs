@@ -604,7 +604,7 @@ impl PromptKind {
             PromptKind::ImportFile(ImportRole::Target) => "Target curve file (path)",
             PromptKind::ImportFile(ImportRole::Trace) => {
                 "Trace file to import: CSV, analyzer text or a WAV impulse response (path; \
-                 channel N of a WAV: path #N)"
+                 a WAV asks its channel, time zero and gate next)"
             }
             PromptKind::ReplayRecording => "Replay recording (name or path of its .wav)",
             PromptKind::InputMics => "Mic per input (1-based, e.g. 3=M30, 4=ECM; 3= clears)",

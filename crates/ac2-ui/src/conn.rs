@@ -204,12 +204,12 @@ pub enum Request {
         name: String,
         replace: Option<TraceId>,
     },
-    /// Read a local file and `trace.import` it (`channel`: a WAV impulse response's,
-    /// 0-based).
+    /// Read a local file and `trace.import` it (`ir`: how a WAV impulse response is read;
+    /// `None` for a text file). The client reads it, so a remote daemon gets its content.
     Import {
         path: std::path::PathBuf,
         role: ImportRole,
-        channel: Option<u16>,
+        ir: Option<ac2_proto::model::IrImport>,
     },
     /// Read a local mic-curve file and `cal.curve_import` it as a curve of `mic` (the label
     /// from the file), setting `input`'s mic name when given.
@@ -1138,15 +1138,11 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                 });
             });
         }
-        Request::Import {
-            path,
-            role,
-            channel,
-        } => {
+        Request::Import { path, role, ir } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
                 let what = format!("import {}", path.display());
-                let result = import(&c, &path, role, channel).await.map(|t| {
+                let result = import(&c, &path, role, ir).await.map(|t| {
                     o.send(ConnEvent::Reply {
                         what: format!("{} imported", t.edit.name),
                         result: Ok(()),
@@ -1529,7 +1525,7 @@ async fn import(
     c: &Client,
     path: &std::path::Path,
     role: ImportRole,
-    channel: Option<u16>,
+    ir: Option<ac2_proto::model::IrImport>,
 ) -> Result<TraceMeta, String> {
     let content = tokio::task::spawn_blocking({
         let p = path.to_owned();
@@ -1547,10 +1543,7 @@ async fn import(
             file_name,
             format: ImportFormat::Auto,
             role,
-            ir: channel.map(|c| ac2_proto::model::IrImport {
-                channel: Some(c),
-                ..Default::default()
-            }),
+            ir,
             content: ac2_proto::units::Blob(content),
         })
         .await

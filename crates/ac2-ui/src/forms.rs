@@ -36,6 +36,8 @@ pub enum FormKind {
     RtaEdit,
     /// A transfer measurement's settings edited (its averaging restarts).
     TransferEdit,
+    /// A WAV / RF64 file imported as an impulse response ([`crate::ir_import_dialog`]).
+    IrImport,
 }
 
 impl FormKind {
@@ -52,6 +54,7 @@ impl FormKind {
             FormKind::SpectrumEdit => "Edit spectrum",
             FormKind::RtaEdit => "Edit RTA",
             FormKind::TransferEdit => "Edit transfer measurement (averaging restarts)",
+            FormKind::IrImport => "Import impulse response",
         }
     }
 
@@ -61,6 +64,7 @@ impl FormKind {
             FormKind::Sweep => {
                 "Enter creates it; nothing plays · Space on the sweep pane arms a run, Enter plays it"
             }
+            FormKind::IrImport => "Enter imports it as a transfer trace",
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
@@ -80,6 +84,7 @@ impl FormKind {
     pub fn verb(self) -> &'static str {
         match self {
             FormKind::Sweep => "Create",
+            FormKind::IrImport => "Import",
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
@@ -133,6 +138,14 @@ pub enum FieldId {
     OperandB,
     /// The operand whose delay a math channel's sum or average is referred to.
     PhaseRef,
+    /// The channel of a multi-channel impulse-response file.
+    IrChannel,
+    /// An imported impulse response's time zero: its peak or the file's start.
+    TimeZero,
+    /// An imported impulse response's gate after the peak (`off`: the whole file).
+    Gate,
+    /// An imported impulse response's gate before the peak.
+    GatePre,
 }
 
 /// A field's value: typed text, one of a few options (←/→ pick), or an input of the session
@@ -281,7 +294,7 @@ const DEFAULT_RESOLUTION: usize = 2;
 pub const RESOLUTION_HINT: &str =
     "points per octave, not smoothing; the plot shades where the analysis is coarser";
 
-fn resolution_field(r: Resolution) -> Field {
+pub(crate) fn resolution_field(r: Resolution) -> Field {
     Field {
         hint: RESOLUTION_HINT.into(),
         ..Field::choice(
@@ -337,6 +350,8 @@ pub struct Form {
     pub sweep_edit: Option<MeasId>,
     /// The spectrum or RTA this dialog edits: what the fields don't show stays its own.
     pub meas_edit: Option<Box<Measurement>>,
+    /// The file the impulse-response import dialog reads.
+    pub ir_import: Option<Box<crate::ir_import_dialog::IrTarget>>,
     /// The averaging field's values, one per option.
     averaging: Vec<SpecAveraging>,
     /// The open session's sample rate: what the FFT size field's hint is stated at.
@@ -464,6 +479,7 @@ impl Form {
             math: None,
             sweep_edit: None,
             meas_edit: None,
+            ir_import: None,
             averaging: AVERAGING.to_vec(),
             sample_rate: None,
         }
@@ -663,14 +679,15 @@ impl Form {
         let name = |base: &str| Field::text(FieldId::Name, "Name", format!("{base} {n}"), "");
         let input_field = Field::channel(FieldId::Input, "Input", inputs, Some(measurement), "");
         let fields = match kind {
-            // Built by [`Form::sweep`] and [`Form::math`].
+            // Built by [`Form::sweep`], [`Form::math`] and [`crate::ir_import_dialog::form`].
             FormKind::Sweep
             | FormKind::SweepEdit
             | FormKind::Math
             | FormKind::MathEdit
             | FormKind::SpectrumEdit
             | FormKind::RtaEdit
-            | FormKind::TransferEdit => Vec::new(),
+            | FormKind::TransferEdit
+            | FormKind::IrImport => Vec::new(),
             FormKind::Transfer => vec![
                 Field::channel(
                     FieldId::Reference,
@@ -1005,7 +1022,7 @@ impl Form {
     }
 
     /// The Resolution field's choice (the default when the dialog has none).
-    fn resolution(&self) -> Resolution {
+    pub(crate) fn resolution(&self) -> Resolution {
         RESOLUTIONS[self
             .choice_index(FieldId::Resolution)
             .unwrap_or(DEFAULT_RESOLUTION)
@@ -1034,7 +1051,7 @@ impl Form {
         self.field(id).and_then(Field::channel_value)
     }
 
-    fn choice_index(&self, id: FieldId) -> Option<usize> {
+    pub(crate) fn choice_index(&self, id: FieldId) -> Option<usize> {
         match self.field(id).map(|f| &f.value) {
             Some(Value::Choice { options, index }) if *index < options.len() => Some(*index),
             _ => None,
@@ -1117,6 +1134,7 @@ impl Form {
         if self.math.is_some() {
             self.math_changed();
         }
+        crate::ir_import_dialog::rehint(self, self.focus);
         if let Some(n) = self.choice_index(FieldId::FftSize).map(|i| FFT_LENS[i])
             && self.fields[self.focus].id == FieldId::FftSize
         {
@@ -1182,6 +1200,7 @@ impl Form {
         let base = self.meas_edit.as_ref().map(|m| &m.config.kind);
         let kind = match self.kind {
             FormKind::Sweep | FormKind::SweepEdit => return Err("a sweep dialog".into()),
+            FormKind::IrImport => return Err("an import dialog".into()),
             FormKind::Math | FormKind::MathEdit => return self.math_config(),
             FormKind::Transfer | FormKind::TransferEdit => {
                 let r = input(FieldId::Reference, "reference input")?;

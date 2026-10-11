@@ -57,6 +57,16 @@ impl AppState {
         let Overlay::Form(f) = &mut self.overlay else {
             return;
         };
+        if f.kind == FormKind::IrImport {
+            match crate::ir_import_dialog::request(f) {
+                Ok(req) => {
+                    out.push(req);
+                    self.overlay = Overlay::None;
+                }
+                Err(e) => f.error = Some(e),
+            }
+            return;
+        }
         let edit = f.edits();
         let transfer = f.kind == FormKind::Transfer && edit.is_none();
         let r = f.meas_config(open.as_ref()).map(|config| match edit {

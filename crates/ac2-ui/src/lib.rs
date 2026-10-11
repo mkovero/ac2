@@ -24,6 +24,7 @@ pub mod embedded;
 pub mod forms;
 pub mod gpu;
 pub mod hints;
+pub mod ir_import_dialog;
 pub mod keys;
 pub mod leq_dialog;
 pub mod link_wants;

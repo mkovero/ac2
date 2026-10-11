@@ -1395,7 +1395,19 @@ ac2 trace import room.wav --gate 10ms --gate-pre 1ms   # only 1 ms before … 10
 ac2 trace import a.wav --keep-delay                    # phase re the file's first sample
 ```
 
-In the app the palette's **Import a trace file (CSV, analyzer text, IR WAV)…** takes the path, `path #2` for channel 2.
+In the app the palette's **Import a trace file (CSV, analyzer text, IR WAV)…** takes the path.
+A WAV / RF64 file (recognised by its header, whatever its name) then opens the **Import impulse
+response** dialog, each option at the CLI's default:
+
+| field | options | CLI |
+|---|---|---|
+| Channel (multi-channel files only; the hint names the file's channels, rate and length) | 1 … n, default 1 | `--channel` |
+| Time zero | **IR peak (bulk delay removed)** · file start (keep delay) | `--keep-delay` |
+| Gate | **off** (the whole file) or a length after the peak, `10 ms` | `--gate` |
+| Before the peak | **1 ms**, used with a gate | `--gate-pre` |
+| Resolution | 1/12 · 1/24 · **1/48** · 1/96 oct | `--resolution` |
+
+The app reads the file and sends it, so the import works with a daemon on another machine.
 
 - The result is a **transfer** trace: the response on the transfer grid (1/48 octave by
   default, `--resolution`), the impulse response itself in the IR views, no coherence.

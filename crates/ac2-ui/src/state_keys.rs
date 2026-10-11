@@ -366,6 +366,7 @@ impl AppState {
         };
         let kind = p.kind;
         let text = p.text.clone();
+        let mut ir_form = None;
         let r = match kind {
             PromptKind::StimulusLevel => self.set_level_text(&text, out),
             PromptKind::CalDelete => self.cal_delete(&text, out),
@@ -482,16 +483,23 @@ impl AppState {
                 Ok(())
             }),
             PromptKind::ImportFile(role) => {
-                let (path, channel) = parse_import(&text);
+                let path = std::path::PathBuf::from(text.trim());
                 if path.as_os_str().is_empty() {
                     Err("type a file path".to_string())
                 } else {
-                    out.push(Request::Import {
-                        path,
-                        role,
-                        channel,
-                    });
-                    Ok(())
+                    // A WAV file is an impulse response: its options are asked first.
+                    crate::ir_import_dialog::probe(&path).map(|header| match header {
+                        Some(header) => {
+                            ir_form = Some(crate::ir_import_dialog::form(
+                                crate::ir_import_dialog::IrTarget { path, role, header },
+                            ));
+                        }
+                        None => out.push(Request::Import {
+                            path,
+                            role,
+                            ir: None,
+                        }),
+                    })
                 }
             }
             PromptKind::ReplayRecording => parse_session_ref(&text).and_then(|r| {
@@ -561,7 +569,9 @@ impl AppState {
             }),
         };
         match r {
-            Ok(()) => self.overlay = Overlay::None,
+            Ok(()) => {
+                self.overlay = ir_form.map_or(Overlay::None, |f| Overlay::Form(Box::new(f)));
+            }
             Err(e) => {
                 if let Overlay::Prompt(p) = &mut self.overlay {
                     p.error = Some(e);
@@ -569,21 +579,4 @@ impl AppState {
             }
         }
     }
-}
-
-/// An import prompt's text: a path, and for a multi-channel WAV impulse response the channel
-/// after it as ` #N` (1-based; returned 0-based). A file whose name itself ends so is read
-/// whole: the suffix counts only when the full text names no file.
-pub(crate) fn parse_import(text: &str) -> (std::path::PathBuf, Option<u16>) {
-    let t = text.trim();
-    let whole = std::path::PathBuf::from(t);
-    if whole.exists() {
-        return (whole, None);
-    }
-    if let Some((p, n)) = t.rsplit_once(" #")
-        && let Ok(n @ 1..) = n.trim().parse::<u16>()
-    {
-        return (std::path::PathBuf::from(p.trim_end()), Some(n - 1));
-    }
-    (whole, None)
 }
