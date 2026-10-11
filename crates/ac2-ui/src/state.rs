@@ -85,6 +85,10 @@ mod panes_ops;
 mod panes_views;
 #[path = "state_queries.rs"]
 mod queries;
+#[path = "state_queries_inputs.rs"]
+mod queries_inputs;
+#[path = "state_queries_layout.rs"]
+mod queries_layout;
 #[path = "state_select.rs"]
 mod select;
 #[path = "state_sessions.rs"]
