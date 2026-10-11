@@ -23,7 +23,7 @@ use ac2_client::{
 use ac2_proto::model::{
     BackendInfo, BackendKind, DelayFinding, DelayPick, DeviceId, FinderBand, GeneratorDesired,
     GeneratorSettings, ImportFormat, ImportRole, InputSetup, LoopbackDetection, MeasConfig,
-    Measurement, Preview, SessionConfig, Smoothing, SplHistory, TraceData, TraceMeta,
+    Measurement, OwnedTraces, Preview, SessionConfig, Smoothing, SplHistory, TraceData, TraceMeta,
     TraceMicCurve,
 };
 use ac2_proto::topic::{Stream, Topic};
@@ -1289,9 +1289,20 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                     });
                     return;
                 }
+                // The dialog makes a running measurement or none: a stopped one left behind
+                // would be made again by the operator's retry.
                 let (what, result) = match c.call(Command::MeasStart { meas: id }).await {
                     Ok(_) => (format!("{name} created and started"), Ok(())),
-                    Err(e) => (name, Err(format!("created but not started: {e}"))),
+                    Err(e) => {
+                        let undo = Command::MeasDelete {
+                            meas: id,
+                            traces: OwnedTraces::Delete,
+                        };
+                        match c.call(undo).await {
+                            Ok(_) => (name, Err(format!("not created: {e}"))),
+                            Err(_) => (name, Err(format!("created but not started: {e}"))),
+                        }
+                    }
                 };
                 o.send(ConnEvent::Reply { what, result });
             });

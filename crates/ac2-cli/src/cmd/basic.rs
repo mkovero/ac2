@@ -560,6 +560,25 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
     Ok(config)
 }
 
+/// Refuses a measurement whose job would read an input the open session does not capture,
+/// before anything is created: the daemon would refuse its start in the same words.
+fn uncaptured(kind: &MeasKind, captured: &[u16]) -> Result<(), CliError> {
+    let inputs: &[u16] = match kind {
+        MeasKind::Spectrum { config } => &[config.input],
+        MeasKind::Rta { config } => &[config.input],
+        MeasKind::Spl { config } => &[config.input],
+        MeasKind::Transfer { config } => &[config.reference_input, config.measurement_input],
+        MeasKind::Math { .. } | MeasKind::Sweep { .. } => &[],
+    };
+    match inputs.iter().find(|i| !captured.contains(i)) {
+        Some(i) => Err(CliError::Usage(format!(
+            "input {} is not captured by the session",
+            i + 1
+        ))),
+        None => Ok(()),
+    }
+}
+
 pub(crate) async fn meas_call(c: &Client, cmd: Command) -> Result<Measurement, CliError> {
     let op = cmd.name();
     let r = c.call(cmd).await?;
@@ -575,9 +594,32 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
     match cmd {
         MeasCmd::New(n) => {
             let config = meas_config(n)?;
+            if n.start
+                && let Some(open) = &state(&c).await?.session.open
+            {
+                uncaptured(&config.kind, &open.config.input_channels)?;
+            }
             let mut m = meas_call(&c, Command::MeasCreate { config }).await?;
             if n.start {
-                m = meas_call(&c, Command::MeasStart { meas: m.id }).await?;
+                match meas_call(&c, Command::MeasStart { meas: m.id }).await {
+                    Ok(started) => m = started,
+                    Err(e) => {
+                        // `--start` is one request from the operator's side: a measurement
+                        // left behind stopped would be duplicated by the retry.
+                        let undo = Command::MeasDelete {
+                            meas: m.id,
+                            traces: OwnedTraces::Delete,
+                        };
+                        if let Err(d) = c.call(undo).await {
+                            return Err(CliError::Usage(format!(
+                                "{e}; measurement {} ({}) was created stopped and could not \
+                                 be removed: {d}",
+                                m.id.0, m.config.name
+                            )));
+                        }
+                        return Err(e);
+                    }
+                }
             }
             out.emit(&m, || output::measurement(&m))?;
         }

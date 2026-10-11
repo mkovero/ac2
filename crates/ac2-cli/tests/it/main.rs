@@ -8,6 +8,7 @@ mod drift_rig;
 mod json;
 mod leq_rig;
 mod math_rig;
+mod meas_rig;
 mod out_device_rig;
 mod pairing;
 mod parse;

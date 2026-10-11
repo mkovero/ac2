@@ -100,7 +100,7 @@ impl Control {
             block_index(&rt.input_map, input).ok_or_else(|| {
                 perr(
                     ErrorCode::Invalid,
-                    format!("input {input} is not captured by the session"),
+                    format!("input {} is not captured by the session", input + 1),
                 )
             })
         };
