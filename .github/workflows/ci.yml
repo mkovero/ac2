@@ -208,6 +208,13 @@ jobs:
           }
           Get-Service AudioEndpointBuilder, Audiosrv | Format-Table -AutoSize
           Get-CimInstance Win32_SoundDevice | Format-Table -AutoSize Name, Status
+          # The runner image denies microphone access to desktop apps, and WASAPI then refuses
+          # every capture client with E_ACCESSDENIED.
+          $cs = 'SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone'
+          foreach ($k in "HKLM:\$cs", "HKCU:\$cs", "HKCU:\$cs\NonPackaged") {
+            New-Item -Path $k -Force | Out-Null
+            Set-ItemProperty -Path $k -Name Value -Value Allow
+          }
 
       # Groundwork for an ASIO backend: only that the driver registers itself.
       - name: FlexASIO driver

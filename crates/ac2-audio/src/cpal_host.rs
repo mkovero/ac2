@@ -63,6 +63,28 @@ fn backend_err(operation: Operation, e: impl std::fmt::Display) -> AudioError {
     }
 }
 
+/// An open failure names its direction and device: WASAPI opens capture and playback as two
+/// clients, and the host's own text does not say which one refused.
+fn open_err(side: &str, d: &cpal::Device, e: impl std::fmt::Display) -> AudioError {
+    let detail = e.to_string();
+    let hint = access_denied_hint(side, &detail);
+    backend_err(
+        Operation::Open,
+        format!("{side} {:?}: {detail}{hint}", device_name(d)),
+    )
+}
+
+/// E_ACCESSDENIED (0x80070005) on a capture client is Windows' microphone privacy switch for
+/// desktop apps; cpal passes the HRESULT through only as text.
+fn access_denied_hint(side: &str, detail: &str) -> &'static str {
+    if side == "capture" && detail.contains("-2147024891") {
+        "; Windows blocks microphone access for desktop apps: Settings → Privacy & security → \
+         Microphone → Let desktop apps access your microphone"
+    } else {
+        ""
+    }
+}
+
 fn device_id(d: &cpal::Device) -> DeviceId {
     DeviceId(d.id().map(|i| i.to_string()).unwrap_or_default())
 }
@@ -412,7 +434,7 @@ impl Backend for CpalBackend {
                 move |e| on_error(&ev, &e),
                 None,
             )
-            .map_err(|e| backend_err(Operation::Open, e))?;
+            .map_err(|e| open_err("capture", &in_dev, e))?;
 
         let out_stream = match (&out_dev, out_cfg) {
             (Some(d), Some((channels, cpal_fmt, _, _))) => {
@@ -437,7 +459,7 @@ impl Backend for CpalBackend {
                         move |e| on_error(&ev, &e),
                         None,
                     )
-                    .map_err(|e| backend_err(Operation::Open, e))?;
+                    .map_err(|e| open_err("playback", d, e))?;
                 Some(s)
             }
             _ => {
@@ -598,6 +620,14 @@ impl OutputSide {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn access_denied_on_capture_points_at_the_privacy_switch() {
+        let denied = "Failed to initialize audio client: Access is denied. (os error -2147024891)";
+        assert!(access_denied_hint("capture", denied).contains("microphone"));
+        assert_eq!(access_denied_hint("playback", denied), "");
+        assert_eq!(access_denied_hint("capture", "device not available"), "");
+    }
 
     /// Read-only: lists devices, opens nothing. Skips where the host has no devices (CI).
     #[test]

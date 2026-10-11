@@ -25,7 +25,7 @@ The build is an x64 installer for Windows 10 (1809) or newer, unsigned for now.
    entry **ac2**, and puts that folder on the system `PATH`. A newer MSI replaces an older
    one; uninstall from **Settings → Apps**.
 3. Microphone privacy: **Settings → Privacy & security → Microphone** must allow
-   *Let desktop apps access your microphone*. Without it Windows hands ac2 silence from
+   *Let desktop apps access your microphone*. Without it Windows refuses the input ("Access is denied") or hands ac2 silence from
    every input, including line inputs. ac2 reads your interface's inputs and nothing else.
 4. Firewall: on this computer the daemon listens on `127.0.0.1:47820` and `:47821` only
    (loopback), so no firewall prompt is expected. If one appears anyway, note it in the
