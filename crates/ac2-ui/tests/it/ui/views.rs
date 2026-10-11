@@ -277,9 +277,13 @@ fn spl_meter_big_and_stage() {
             && a.state.layout.focus_kind() == PaneKind::Spl
             && a.state.spl_hold.contains_key(&MeasId(4))
     });
+    // The group's toast expires on the wall clock: a slower rasterizer reaches the stage
+    // view after it has gone, so neither picture shows it.
+    h.state_mut().state.toasts.clear();
     snapshot(&mut h, "spl_meter_big");
     h.key_press(Key::W);
     step_until(&mut h, "the stage view", |a| a.state.stage_view());
+    h.state_mut().state.toasts.clear();
     snapshot(&mut h, "spl_meter_stage");
 }
 

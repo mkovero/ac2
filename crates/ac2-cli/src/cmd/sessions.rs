@@ -77,7 +77,7 @@ pub(crate) fn session_ref(arg: &str, local: bool) -> Result<SessionRef, CliError
     };
     let p = if local {
         std::path::absolute(&p)?
-    } else if p.is_absolute() {
+    } else if absolute_on_any_host(arg) {
         p
     } else {
         return Err(CliError::Usage(
@@ -89,6 +89,17 @@ pub(crate) fn session_ref(arg: &str, local: bool) -> Result<SessionRef, CliError
     Ok(SessionRef::Path {
         path: p.to_string_lossy().into_owned(),
     })
+}
+
+/// Whether a path is absolute on the daemon's host, whatever OS that is. The client's own
+/// `Path::is_absolute` cannot decide it: `/srv/shows` is absolute on a Linux daemon but only
+/// drive-relative on a Windows client, and `D:\shows` the other way round. The daemon
+/// checks the path against its own filesystem.
+fn absolute_on_any_host(arg: &str) -> bool {
+    let b = arg.as_bytes();
+    let drive =
+        b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'/' | b'\\');
+    arg.starts_with('/') || arg.starts_with(r"\\") || drive
 }
 
 /// A refusal to drop unsaved changes says what to do.
@@ -341,14 +352,27 @@ mod tests {
                 name: "friday".into()
             })
         );
+        // A rooted path without a drive is made absolute on the current drive on Windows.
         assert!(matches!(
             target("/media/STICK/fri.AC2SESSION", false).unwrap(),
-            Target::Here(p) if p == Path::new("/media/STICK/fri.AC2SESSION")
+            Target::Here(p) if p.is_absolute() && p.ends_with("media/STICK/fri.AC2SESSION")
         ));
         assert_eq!(
             target("/srv/shows/fri", false).unwrap(),
             Target::Daemon(SessionRef::Path {
                 path: "/srv/shows/fri".into()
+            })
+        );
+        assert_eq!(
+            target(r"D:\shows\fri", false).unwrap(),
+            Target::Daemon(SessionRef::Path {
+                path: r"D:\shows\fri".into()
+            })
+        );
+        assert_eq!(
+            target(r"\\nas\shows\fri", false).unwrap(),
+            Target::Daemon(SessionRef::Path {
+                path: r"\\nas\shows\fri".into()
             })
         );
         assert!(target("shows/fri", false).is_err());

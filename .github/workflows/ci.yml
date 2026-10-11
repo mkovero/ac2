@@ -200,7 +200,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: golden-images-${{ matrix.os }}
-          path: target/golden-images/
+          # ac2-testkit's comparisons, and egui_kittest's UI snapshots beside their goldens.
+          path: |
+            target/golden-images/
+            crates/*/tests/snapshots/*.new.png
+            crates/*/tests/snapshots/*.diff.png
           if-no-files-found: ignore
 
   refgen:
