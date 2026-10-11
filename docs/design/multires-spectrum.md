@@ -1,6 +1,6 @@
 # Multi-resolution spectrum
 
-Status: implemented (`PROTO_VERSION` 41, session format 24). Decision row S1 in
+Status: implemented (`PROTO_VERSION` 41, session format 24; the density level 43 and 25). Decision rows S1, S2 in
 `open-questions.md`. Code: `ac2_core::multires` (estimator), `ac2d::jobs::spectrum`
 (job, `Engine::Multi`), `ac2_scene::stitch` (window-change lines). Wire:
 `docs/protocol.md` §3.2 *Spectrum resolution*. Golden vectors: `tools/refgen/sets/multires.py`.
@@ -70,6 +70,35 @@ blends the two bands in power with the shorter band's weight
 
 The level is not a band level: use the RTA for dB SPL in bands. The axis says
 `dBFS (tone, multi-res)` and its help text says the above.
+
+### Density
+
+`SpectrumConfig.level` (`SpecLevel`) is `tone` (above) or `density`, the default for
+multi-resolution: power per hertz, `P / B` with `B` the noise bandwidth in hertz. It keeps
+the dBFS reference of tone level (a full-scale sine's mean square), so white noise of
+deviation σ reads `4σ²/fs` per hertz, and density integrated over 0 … fs/2 is the signal's
+level in dBFS. For one FFT `B = ENBW · fs / N` (the density factor is `2 / (fs · S₂)`,
+`S₂ = Σw²`, applied per bin). For multi-resolution
+
+`B(f) = Σ_b w_b · ENBW · Δf_b`
+
+with the blend weights above (`MultiResLadder::noise_bandwidth_hz`). It equals
+`ENBW · f / (2κ)` between the anchors and the band's own `ENBW · Δf_b` outside, so the
+division undoes exactly what the blend does to noise: white noise reads flat through every
+crossover, with no step (the weights are continuous, so is `B`). The division is folded into
+the blend taps, so density costs nothing per frame.
+
+A column of a density takes the **mean** of its bins in each band (the bin under its centre
+when it covers none), not the highest: the highest of many noise bins reads high by an
+amount that grows with the bin count, which would make the reading depend on the column
+width. The fixed live display does the same for density (`column_mean`; `column_max` stays
+for tone). So a sine reads `level − 10·log10(B)` where a column covers one bin (and per bin
+in a capture of a fixed spectrum); on a column spanning several bins its power spreads over
+the column. Smoothing a density averages density, as smoothing a tone level averages power.
+
+A tone and a density spectrum are different trace kinds (`TraceKind::Spectrum {scale,
+level}`): averaging and math across them is refused, not converted, since a stored or
+imported curve does not carry its noise bandwidth per column.
 
 ## Resolution cell and the marker
 
@@ -141,6 +170,17 @@ lines and the shade together. Positions and text come from the frame (`ac2_scene
 - `ac2d` job test: frame stamps and band ages exact, LF columns unchanged unless band 0 has
   a new frame. End to end: fixed → multi by `meas.update`, `log` grid id, bands on the frame,
   capture on the same grid, FIFO bound refused.
+
+- Density (`crates/ac2-core/tests/it/density.rs`, goldens `spectrum_density` and
+  `multires_density` from `tools/refgen/sets/density.py`): fixed and multi-resolution
+  match numpy within 1e-6 dB; a sine in a single-bin column reads `level − 10·log10(B)`
+  within 0.01 dB; white noise through every crossover flat within 0.45 dB per
+  third-octave group, steps < 0.4 dB. **Fixed 65 536 vs multi-resolution** on the same 60 s
+  of white noise at 48 kHz (exponential averaging, 490 columns ≥ 20 Hz): 0.15 dB rms over
+  all columns; worst column 0.14 dB above 1 kHz and 0.93 dB below (fewer independent bins
+  under a low column: statistical), third-octave means within 0.11 dB; pink noise 0.15 dB
+  rms, third-octave means within 0.12 dB. Asserted: < 0.5 dB per column ≥ 1 kHz, < 1.5 dB
+  below, rms < 0.25 dB, third-octave means < 0.25–0.3 dB.
 
 ## CPU
 

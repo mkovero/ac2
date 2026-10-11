@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 42`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 43`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -251,7 +251,8 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   power (no finite level) are gaps the kernel never crosses. Smoothing runs on every bin,
   before the bins are gathered into the frame's display columns (§5.4). A smoothed bin is
   no longer the tone level of that bin: frames say so (`SpecMeta.smoothing`) and clients
-  label it.
+  label it. A density (`level: density`, below) is smoothed as a density: the kernel
+  averages power per hertz.
 - **SPL** (`SplConfig`): any change on the same `input` — `weighting`, `time_weighting`,
   `peak_weighting`, the Leq windows and peak limits (`leq: LeqConfig`), the measuring-position
   correction (`position`), the name — applies in place; the
@@ -744,7 +745,7 @@ display edits and are never applied to the stored data.
   `trace.average`, math channels, imports of other formats and targets have none.
   It needs a result in the current session epoch (`invalid` otherwise: not running, no
   frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
-  `target`, `spectrum` {`scale`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
+  `target`, `spectrum` {`scale`, `level`: `SpecLevel`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
   `epoch`, `at_sample`}, `edit.owner` the measurement, `delay` (the delay the DSP used),
   `depth` (transfer),
   `cal` (spectrum / RTA: the calibration the measurement used, picked by the calibration
@@ -770,7 +771,8 @@ display edits and are never applied to the stored data.
   `shared_time_base` and whose expression is a sum, difference or average (a ratio or a
   cascade is relative, in no time base); every other source (`imported`, `average`, other
   `math`) is independent.
-- `trace.average`: ≥ 2 distinct traces of one kind (no targets). Transfer: `power` (RMS
+- `trace.average`: ≥ 2 distinct traces of one kind (no targets; a tone and a density
+  spectrum are different kinds). Transfer: `power` (RMS
   magnitude, phase of the complex mean), `complex`, `coherence_weighted` (weight
   γ²/(1 − γ²), γ² capped at 0.999); every input's phase is re-referred to `reference`
   (`DelayReference`: `trace` {`trace`} = that input's measured delay, or `fixed` {`delay`})
@@ -1133,6 +1135,24 @@ newest frame's end before this frame's audio end; nil before its first frame)}. 
 exact: every band's frame ends on a multiple of the shortest hop, and a column whose bands
 made no new frame since the previous `spec` frame repeats its previous value.
 
+#### Spectrum level (`SpecLevel`)
+
+`SpectrumConfig.level: SpecLevel` is `tone` or `density`; a change restarts the job (its
+averaging starts over). Front ends default it by resolution: `tone` for `fixed`, `density`
+for `multi`.
+
+- `tone`: folded bin power `F_k = c_k·|X_k|²` scaled by `2 / S₁²` (`S₁ = Σw`): a sine of
+  RMS `a` reads `a²` (0 dBFS at full scale). Units `dbfs` / `db_spl`.
+- `density`: power per hertz of noise bandwidth, keeping the same reference. `fixed`:
+  `2·F_k / (fs·S₂)` (`S₂ = Σw²`), i.e. tone power over `ENBW · fs / N`; white noise of
+  deviation σ reads `4σ²/fs`. `multi`: each band's mean bin over the column, blended as for
+  tone, divided by `B(f) = Σ_b w_b · ENBW · fs / N_b` (continuous through the anchors).
+  Units `dbfs_per_hz` / `db_spl_per_hz` (a calibrated input: sensitivity and mic curve
+  applied as for tone). A sine reads `level − 10·log10(B)` where a column covers one bin.
+
+Frames carry it (`SpecMeta.level`); a fixed density's display columns are the mean of their
+bins (§5.4). Captures carry it in their kind (`TraceKind` `spectrum` {`scale`, `level`}).
+
 #### Averaging depth
 
 `TransferConfig.depth: DepthPolicy` (tagged by `type`): `equal_confidence` (every MTW stage
@@ -1341,7 +1361,7 @@ layout as code.
 | `arrays` | [[`name`, `unit`, `elem`]] | one descriptor per array part, in part order |
 | `meta` | {kind: […]} | per-kind metadata (§5.4), fields in the order listed there |
 
-`elem` is `f32`, `u32`, `i16`, `u16` or `bfp16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `db_spl`, `deg`, `coherence`
+`elem` is `f32`, `u32`, `i16`, `u16` or `bfp16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `db_spl`, `dbfs_per_hz`, `db_spl_per_hz` (a spectrum density), `deg`, `coherence`
 (γ², 0…1), `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
 `u32`).
 
@@ -1352,7 +1372,7 @@ layout as code.
 | `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
-| `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil) |
+| `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil) |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve`, `position` (`PositionCorrection` \| nil: included in the levels) |
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
 | `band_leq` | one column per band of each band window, window-major: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
@@ -1374,11 +1394,12 @@ as aligned by its own delay, no shared time base; `no_phase`). `OperandStatus` (
 `type`): `included` (went into this frame), `stopped` (not running), `settling` (running
 without a usable result: no valid column yet, or no answer in time), `refused`
 {`protection`: the operand's fault flags among `CLIP`, `NO_REFERENCE`, `CHECK_ROUTING`,
-`NO_SIGNAL`}, `mismatch` (does not combine with the others: another level scale, grid or
-time base). A math channel's own `protection` is always 0: its operands' faults are in their
+`NO_SIGNAL`}, `mismatch` (does not combine with the others: another level scale, spectrum
+level (`tone` / `density`), grid or time base). A math channel's own `protection` is always 0: its operands' faults are in their
 statuses. A spectrum math result's live frame gathers its bins into display columns like a
 spectrum's, each the highest value among its bins (a level difference: the largest in the
-column); its capture keeps every bin.
+column; the mean power for a density result, as a density spectrum's); its capture keeps
+every bin. Its `level` is its operands'.
 
 The unit of `level` must match `meta.scale`. A required array missing, an array listed
 twice or one that does not belong to the kind refuses the frame.

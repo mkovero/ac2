@@ -742,6 +742,25 @@ A narrowband spectrum's levels are **per FFT bin**, and its axis says how wide a
 > **Use an RTA for band levels in dB SPL** (its axis says `(band)`); hovering over the
 > spectrum's unit says the same.
 
+A spectrum's **Level** (in the New and **Edit measurement…** forms, `ac2 meas new spectrum
+--level tone|density`, `ac2 meas set --level`) chooses between that and **density**:
+
+- **tone** (`dBFS`, `dB SPL`): the per-bin level above. Default for one FFT.
+- **density** (`dBFS/Hz`, `dB SPL/Hz`): the power each hertz holds, the bin's power divided
+  by its noise bandwidth in hertz. Noise and music read the same at any FFT length and on a
+  fixed or a multi-resolution spectrum (white noise flat, pink falling 3 dB per octave); a
+  sine reads below its level by 10·log10 of the noise bandwidth (Hann at 48 kHz / 65 536
+  points: 1.1 Hz, 0.4 dB; at 4096 points: 17.6 Hz, 12.4 dB). Default for multi-resolution.
+  The axis says `dBFS/Hz (density)`, the measurement row `· density`, and the cursor reads
+  `dBFS/Hz`. A calibrated input reads `dB SPL/Hz`, with its mic curve applied as always.
+
+Captures keep their level (a stored spectrum's row says `density` when it is one; the export
+header's kind is `spectrum dBFS/Hz` or `spectrum dB SPL/Hz`). Averaging or math across a
+tone and a density spectrum is refused rather than converted: the conversion needs each
+column's noise bandwidth, which an imported curve does not carry. Changing the resolution
+between one FFT and multi-resolution takes the new one's default level unless a level is
+chosen with it.
+
 The width named is the bin spacing (sample rate / FFT length); with the Hann window
 broadband sound reads 1.8 dB above what that spacing alone would give (the window's noise
 bandwidth is 1.5 bins). Curves on different FFT lengths share `per bin, mixed widths`; a
@@ -806,11 +825,17 @@ half as many points):
 Between two dashed lines the column blends the two windows, more of the shorter one the
 higher it is, so a level never steps where a window changes.
 
-- **Level**: tone level, as one FFT: a sine reads its RMS level at any frequency.
-  Broadband sound reads in a bandwidth that grows with frequency (about 1/64 octave
-  between 203 Hz and 6.5 kHz), so pink noise reads flat there and white noise rises 3 dB
-  per octave; below 203 Hz and above 6.5 kHz the bandwidth is the window's own bin. The
-  axis says `dBFS (tone, multi-res)`; hovering over it explains it.
+- **Level**: density by default (`dBFS/Hz (density, multi-res)`), so a multi-resolution
+  spectrum and a 65 536-point one read the same noise alike: on white noise they agree
+  within 0.15 dB rms over every column, and within 0.15 dB at every column above 1 kHz.
+  **Tone** (`dBFS (tone, multi-res)`) reads a sine at its RMS level at any frequency,
+  but broadband sound then reads in a bandwidth that grows with frequency (about 1/64
+  octave between 203 Hz and 6.5 kHz), so pink noise reads flat there and white noise
+  rises 3 dB per octave; below 203 Hz and above 6.5 kHz the bandwidth is the window's own
+  bin. The difference is large: pink noise in tone level reads about **15 dB higher** at
+  3 kHz on a multi-resolution spectrum (32.5 Hz bandwidth) than on a 65 536-point FFT at
+  48 kHz (1.1 Hz), though nothing changed but the analyzer; in density both read the
+  same. Hovering over the axis explains it.
 - **Where the windows change**: a faint grey dashed line marks each window's own frequency,
   labelled with its length (`683 ms` … `21 ms`), on the spectrum and across the
   spectrograph, and the cursor's frequency line names the windows behind the column
