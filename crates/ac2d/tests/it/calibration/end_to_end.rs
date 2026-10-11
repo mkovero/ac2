@@ -1,0 +1,417 @@
+//! Calibration and a mic curve end to end, and an unreadable store refused untouched.
+
+use super::*;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slow_calibration_mic_curve_and_matching_end_to_end() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("calibrations.json");
+    let h = start(&store);
+    let c = connect(&h).await;
+
+    // No session: a calibration needs the capture device it is tied to.
+    let e = c
+        .call(Command::CalSpl {
+            input: 1,
+            mic: "M30".into(),
+            calibrator_level: DbSpl(94.0),
+            calibrator_freq: Hz(1000.0),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
+
+    c.call(Command::SessionOpen {
+        config: session(false),
+    })
+    .await
+    .unwrap();
+    for cfg in [
+        spl("meter", 1),
+        transfer("tf"),
+        MeasConfig {
+            name: "spec".into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig {
+                    input: 1,
+                    resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 8192 },
+                    window: Window::Hann,
+                    averaging: SpecAveraging::Off,
+                    smoothing: None,
+                    level: ac2_proto::model::SpecLevel::Tone,
+                },
+            },
+        },
+        MeasConfig {
+            name: "rta".into(),
+            kind: MeasKind::Rta {
+                config: RtaConfig {
+                    input: 1,
+                    fraction: BandFraction::Third,
+                    f_lo: Hz(20.0),
+                    f_hi: Hz(20_000.0),
+                    weighting: Weighting::Z,
+                    averaging: SpecAveraging::Exponential {
+                        time_constant: Seconds(1.0),
+                    },
+                },
+            },
+        },
+    ] {
+        let m = match c.call(Command::MeasCreate { config: cfg }).await.unwrap() {
+            ReplyBody::Measurement(m) => m,
+            other => panic!("{other:?}"),
+        };
+        c.call(Command::MeasStart { meas: m.id }).await.unwrap();
+        c.subscribe(Subscription::Meas(m.id)).unwrap();
+    }
+    // Measurement ids: 1 spl, 2 tf, 3 spec, 4 rta.
+
+    // The "calibrator": a 1 kHz tone through the acoustic path (−20 dBFS × 0.5 = −26 dBFS).
+    let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
+    fire(&lease, Signal::Sine { freq: Hz(1000.0) }).await;
+    let m = spl_until(&c, "uncalibrated tone", |m| (m.level + 26.02).abs() < 0.2).await;
+    assert_eq!(m.scale, LevelScale::Dbfs);
+    assert_eq!(m.cal, CalStatus::Uncalibrated);
+
+    // Right after the tone starts the 1 s reading has not settled: refused, then accepted
+    // once it is steady.
+    let mut refused = 0;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let entry = loop {
+        match c
+            .call(Command::CalSpl {
+                input: 1,
+                mic: "M30".into(),
+                calibrator_level: DbSpl(94.0),
+                calibrator_freq: Hz(1000.0),
+            })
+            .await
+        {
+            Ok(ReplyBody::Calibration(e)) => break e,
+            Err(ClientError::Daemon(p)) if p.msg.contains("not steady") => refused += 1,
+            other => panic!("{other:?}"),
+        }
+        assert!(Instant::now() < deadline, "calibrator never steady");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    assert!(refused > 0, "an unsettled reading must be refused");
+    let cal = entry.spl;
+    assert!((cal.measured.0 + 26.02).abs() < 0.06, "{:?}", cal.measured);
+    assert!((cal.sensitivity.0 - 120.02).abs() < 0.1);
+    let st = state_until(&c, |s| !s.inputs.is_empty()).await;
+    assert_eq!(
+        st.inputs,
+        vec![InputSetup {
+            channel: 1,
+            mic: Some("M30".into()),
+            curve: CurveChoice::NotChosen,
+        }],
+        "calibrating binds the input's mic name"
+    );
+    let m = spl_until(&c, "verified", |m| {
+        matches!(m.cal, CalStatus::Verified { .. }) && (m.level - 94.0).abs() < 0.2
+    })
+    .await;
+    assert_eq!(m.scale, LevelScale::DbSpl);
+    assert!(!m.mic_curve);
+
+    // A refused curve file: typed error, nothing stored.
+    let e = c
+        .call(Command::CalCurveImport {
+            mic: "M30".into(),
+            label: None,
+            file_name: "bad.frd".into(),
+            content: Blob(b"20 0\n10 1\n".to_vec()),
+            input: Some(1),
+        })
+        .await
+        .unwrap_err();
+    let ClientError::Daemon(p) = e else {
+        panic!("{e:?}")
+    };
+    assert_eq!(p.code, ErrorCode::Invalid);
+    assert!(matches!(
+        p.detail,
+        Some(ErrorDetail::MicCurveFile { line: Some(2), .. })
+    ));
+
+    // Import the curve: 0 dB at the 1 kHz calibrator, so the tone reads the same. The mic's
+    // only curve becomes the input's active one; its label is the file stem (no angle).
+    let m = import(&c, "M30", "/home/op/curves/M30.frd", CURVE.as_bytes()).await;
+    let r = m.curves[0].clone();
+    assert_eq!(
+        (r.file_name.as_str(), r.label.as_str(), r.points),
+        ("M30.frd", "M30", 5)
+    );
+    let st = state_until(&c, |s| {
+        s.inputs.first().is_some_and(|i| i.curve == label("M30"))
+    })
+    .await;
+    assert_eq!(st.calibrations.len(), 1, "the calibration is kept");
+    let m = spl_until(&c, "corrected at 1 kHz", |m| m.mic_curve).await;
+    assert!((m.level - 94.0).abs() < 0.2, "{}", m.level);
+
+    // 10 kHz: the curve's +6 dB comes off SPL and spectrum; switching it off restores them.
+    fire(&lease, Signal::Sine { freq: Hz(10_000.0) }).await;
+    let on = spl_until(&c, "10 kHz corrected", |m| {
+        m.mic_curve && (m.level - 88.0).abs() < 0.3
+    })
+    .await;
+    assert!(
+        (on.lpeak - (94.0 + 3.01)).abs() < 0.3,
+        "Lpeak stays uncorrected: {}",
+        on.lpeak
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let s_on = wait(&c, 3, Stream::Spec, "spec on", |d| {
+        spec(d).filter(|f| f.meta.mic_curve)
+    })
+    .await;
+    set_curve(&c, "M30", CurveChoice::Off).await;
+    spl_until(&c, "10 kHz uncorrected", |m| {
+        !m.mic_curve && (m.level - 94.0).abs() < 0.3
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let s_off = wait(&c, 3, Stream::Spec, "spec off", |d| {
+        spec(d).filter(|f| !f.meta.mic_curve)
+    })
+    .await;
+    let ((k_on, p_on), (k_off, p_off)) = (spec_peak(&s_on), spec_peak(&s_off));
+    assert_eq!(k_on, k_off);
+    assert!(
+        (p_off - p_on - 6.0).abs() < 0.3,
+        "spectrum {p_off} vs {p_on}"
+    );
+    assert!(matches!(s_on.meta.cal, CalStatus::Verified { .. }));
+
+    // Pink noise: TF magnitude at ~10 kHz drops by the curve's 6 dB; phase is untouched.
+    c.call(Command::DelaySet {
+        meas: MeasId(2),
+        delay: Seconds(f64::from(ACOUSTIC_DELAY) / f64::from(FS)),
+    })
+    .await
+    .unwrap();
+    fire(&lease, Signal::Pink).await;
+    let col = 399; // k = 159: 1000·2^(159/48) ≈ 9.9 kHz
+    // The RTA averages exponentially (1 s): let the 10 kHz tone decay out of it.
+    tokio::time::sleep(Duration::from_millis(5000)).await;
+    let off = wait(&c, 2, Stream::Tf, "tf off", |d| {
+        tf(d).filter(|f| !f.meta.mic_curve && f.mag[col].is_finite())
+    })
+    .await;
+    let rta_off = wait(&c, 4, Stream::Rta, "rta off", |d| match d {
+        FrameData::Rta(f) if !f.meta.mic_curve => Some(f.level.clone()),
+        _ => None,
+    })
+    .await;
+    set_curve(&c, "M30", label("M30")).await;
+    let on = wait(&c, 2, Stream::Tf, "tf on", |d| {
+        tf(d).filter(|f| f.meta.mic_curve && f.mag[col].is_finite())
+    })
+    .await;
+    assert!(
+        (off.mag[col] + 6.02).abs() < 0.3,
+        "acoustic gain 0.5: {}",
+        off.mag[col]
+    );
+    assert!(
+        (off.mag[col] - on.mag[col] - 6.0).abs() < 0.3,
+        "{} vs {}",
+        off.mag[col],
+        on.mag[col]
+    );
+    assert!((off.phase[col] - on.phase[col]).abs() < 5.0);
+    let rta_on = wait(&c, 4, Stream::Rta, "rta on", |d| match d {
+        FrameData::Rta(f) if f.meta.mic_curve => Some(f.level.clone()),
+        _ => None,
+    })
+    .await;
+    // Band 10 kHz is index 27 of 20 Hz … 20 kHz; 1 kHz (index 17) is not corrected.
+    let d10 = rta_off[27] - rta_on[27];
+    let d1 = rta_off[17] - rta_on[17];
+    assert!((d10 - 6.0).abs() < 1.0, "10 kHz band {d10}");
+    assert!(d1.abs() < 1.0, "1 kHz band {d1}");
+
+    // A captured RTA trace records the input's mic, its curve and the verified calibration.
+    let t = capture(&c, 4, "rta-m30").await;
+    let key = CalKey {
+        device: st.session.open.as_ref().unwrap().input_device.clone(),
+        channel: 1,
+        mic: "M30".into(),
+    };
+    let mic = t.mic.clone().unwrap();
+    assert_eq!(mic.name, "M30");
+    assert_eq!(mic.curve.as_ref().map(|c| c.label.as_str()), Some("M30"));
+    assert_eq!(
+        mic.curve.as_ref().map(|c| c.content_hash.as_str()),
+        Some(r.content_hash.as_str())
+    );
+    assert_eq!(
+        t.cal,
+        CalState::Calibrated {
+            key: key.clone(),
+            sensitivity: cal.sensitivity,
+            calibrated_at: cal.calibrated_at,
+        }
+    );
+    // A transfer function is a ratio: no calibration, but the mic and its curve.
+    let t = capture(&c, 2, "tf-m30").await;
+    assert_eq!(t.cal, CalState::Uncalibrated);
+    assert_eq!(
+        t.mic
+            .as_ref()
+            .and_then(|m| m.curve.as_ref())
+            .map(|c| c.label.as_str()),
+        Some("M30")
+    );
+
+    // Another mic on the input: the calibration still applies but is flagged; no curve
+    // (M30's curve belongs to M30, and none is stored for the ECM). Choosing M30's label for
+    // the ECM is refused.
+    let e = c
+        .call(Command::SessionInputs {
+            inputs: vec![InputSetup {
+                channel: 1,
+                mic: Some("ECM".into()),
+                curve: label("M30"),
+            }],
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid && p.msg.contains("no curve")),
+        "{e:?}"
+    );
+    set_curve(&c, "ECM", CurveChoice::NotChosen).await;
+    let st = state_until(&c, |s| s.inputs[0].mic.as_deref() == Some("ECM")).await;
+    assert!(matches!(
+        ac2_proto::cal::state_input_use(&st, 1).curve,
+        ac2_proto::cal::CurveUse::NoneStored { mic: "ECM" }
+    ));
+    let m = spl_until(&c, "other mic", |m| {
+        matches!(m.cal, CalStatus::OtherMicOrInput { .. })
+    })
+    .await;
+    assert!(!m.mic_curve);
+    assert_eq!(m.scale, LevelScale::DbSpl);
+    // Captured now: the ECM without a curve, calibrated with M30's entry (its key says so).
+    let t = capture(&c, 4, "rta-ecm").await;
+    assert_eq!(
+        t.mic.as_ref().map(|m| (m.name.as_str(), m.curve.is_none())),
+        Some(("ECM", true))
+    );
+    assert!(matches!(&t.cal, CalState::Calibrated { key: k, .. } if *k == key));
+
+    lease.end().await.unwrap();
+    drop(c);
+    tokio::task::spawn_blocking(move || h.shutdown())
+        .await
+        .unwrap();
+
+    // Restart on the same store: calibrations, the mic library and input setup are back.
+    let h = start(&store);
+    let c = connect(&h).await;
+    let st = state_until(&c, |_| true).await;
+    assert_eq!(st.calibrations.len(), 1);
+    assert_eq!(st.calibrations[0].spl, cal);
+    assert_eq!(st.mics.len(), 1);
+    assert_eq!(st.mics[0].curves[0].points, 5);
+    assert_eq!(st.inputs[0].mic.as_deref(), Some("ECM"));
+
+    // Library and sensitivity changes need no session. The curve first (the calibration
+    // stays), then the sensitivity.
+    let missing =
+        |e: ClientError| matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::NotFound);
+    let id = MicCurveId {
+        mic: "M30".into(),
+        label: "M30".into(),
+    };
+    let r = c
+        .call(Command::CalCurveDelete { curve: id.clone() })
+        .await
+        .unwrap();
+    assert!(matches!(r, ReplyBody::Ack { .. }), "{r:?}");
+    let st = state_until(&c, |s| s.mics.is_empty()).await;
+    assert_eq!(st.calibrations.len(), 1);
+    assert!(missing(
+        c.call(Command::CalCurveDelete { curve: id })
+            .await
+            .unwrap_err()
+    ));
+    let del = || Command::CalDelete { key: key.clone() };
+    c.call(del()).await.unwrap();
+    let st = state_until(&c, |s| s.calibrations.is_empty()).await;
+    assert_eq!(
+        st.inputs[0].mic.as_deref(),
+        Some("ECM"),
+        "input setup untouched"
+    );
+    assert!(missing(c.call(del()).await.unwrap_err()));
+    drop(c);
+    tokio::task::spawn_blocking(move || h.shutdown())
+        .await
+        .unwrap();
+
+    // The deletion is in the file.
+    let h = start(&store);
+    let c = connect(&h).await;
+    let st = state_until(&c, |_| true).await;
+    assert!(st.calibrations.is_empty(), "{:?}", st.calibrations);
+    drop(c);
+    tokio::task::spawn_blocking(move || h.shutdown())
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unreadable_store_is_refused_and_untouched() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("calibrations.json");
+    let garbage = b"{\"format\": \"ac2-calibrations\", \"version\": 1, \"entries\": [";
+    std::fs::write(&store, garbage).unwrap();
+    let h = start(&store);
+    let c = connect(&h).await;
+    for cmd in [
+        Command::CalList,
+        Command::CalDelete {
+            key: CalKey {
+                device: ac2_proto::model::DeviceId("fake:loop".into()),
+                channel: 1,
+                mic: "M30".into(),
+            },
+        },
+        Command::SessionInputs {
+            inputs: vec![InputSetup {
+                channel: 0,
+                mic: Some("M30".into()),
+                curve: CurveChoice::NotChosen,
+            }],
+        },
+        Command::CalCurveImport {
+            mic: "M30".into(),
+            label: None,
+            file_name: "c.txt".into(),
+            content: Blob(CURVE.as_bytes().to_vec()),
+            input: None,
+        },
+    ] {
+        let e = c.call(cmd).await.unwrap_err();
+        let ClientError::Daemon(p) = e else {
+            panic!("{e:?}")
+        };
+        assert_eq!(p.code, ErrorCode::Refused);
+        assert!(
+            matches!(p.detail, Some(ErrorDetail::CalStore { .. })),
+            "{p:?}"
+        );
+    }
+    assert_eq!(std::fs::read(&store).unwrap(), garbage);
+    drop(c);
+    tokio::task::spawn_blocking(move || h.shutdown())
+        .await
+        .unwrap();
+}
