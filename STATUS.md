@@ -30,6 +30,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   math or trace row goes into the focused pane alone (*Layouts follow the measurement*).
 - Open hardware gates: duplex check (`ac2 selftest duplex`) and 1 h run on macOS/Windows, keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
+- Windows ASIO: design only, no code (`docs/design/asio.md`: licence, binding spike, tests via
+  Wine + wineasio).
 
 ## Where to look
 | need | file |
