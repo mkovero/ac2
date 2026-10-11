@@ -1,486 +1,9 @@
-//! Key commands ([`CommandId`]) and the selection, pane and trace steps they make.
+//! Key commands ([`CommandId`]): the app, stimulus, pane, trace and view steps; the rest go
+//! on to `commands_meas` and `commands_tf`.
 
 use super::*;
 
 impl AppState {
-    /// The one trace selection: a sweep selected is also what the sweep pane shows.
-    /// A transfer-like trace selected brings its measurement's group to the transfer pane,
-    /// which draws only that group: a selected curve the pane leaves out would take the
-    /// trace keys while nothing on screen moves.
-    pub(super) fn select_trace(&mut self, id: Option<TraceId>) {
-        self.set_selected_trace(id);
-        let owner = self
-            .selected_trace_meta()
-            .filter(|t| drawn_in(t, PaneKind::Transfer))
-            .and_then(|t| match t.edit.owner {
-                TraceOwner::Meas { meas } => Some(meas),
-                TraceOwner::Imported => None,
-            })
-            .filter(|m| {
-                self.meas(*m)
-                    .is_some_and(|m| PaneKind::Transfer.shows(&m.config.kind))
-            });
-        // The transfer pane worked in last shows the trace's measurement, so the trace is
-        // drawn in its group.
-        if let Some(m) = owner
-            && let Some(p) = self.layout.lead(PaneKind::Transfer)
-            && let Some(v) = self.layout.view_mut(p)
-        {
-            v.meas = Some(m);
-        }
-    }
-
-    /// The trace selection alone, every pane keeping what it shows: a sweep selected is
-    /// also what the sweep pane shows.
-    fn set_selected_trace(&mut self, id: Option<TraceId>) {
-        self.selected_trace = id;
-        if let Some(id) = id
-            && self.daemon().is_some_and(|s| {
-                s.traces
-                    .iter()
-                    .any(|t| t.id == id && t.kind == TraceKind::Sweep)
-            })
-        {
-            self.sweep.shown = Some(id);
-        }
-    }
-
-    pub(super) fn set_finder(&mut self, f: FinderChoice) {
-        self.finder = f;
-        self.toast(format!("delay finder: {} · X finds", f.describe()));
-    }
-
-    pub(super) fn set_observation(&mut self, text: &str) -> Result<(), String> {
-        let observation = if text.trim().is_empty() {
-            None
-        } else {
-            let v = parse_number(text, &["s"])?;
-            if !(v > 0.0 && v <= MAX_OBSERVATION_S) {
-                return Err(format!(
-                    "observation must be above 0 and at most {MAX_OBSERVATION_S} s"
-                ));
-            }
-            Some(Seconds(v))
-        };
-        let f = FinderChoice {
-            observation,
-            ..self.finder
-        };
-        if let Some(o) = observation
-            && f.sub_like()
-            && !SUB_OBSERVATIONS_S.contains(&o.0)
-        {
-            return Err("the sub band observes 2, 4 or 8 s".into());
-        }
-        self.set_finder(f);
-        Ok(())
-    }
-
-    /// The prompt text of a calibration to delete: the selected measurement's input and its
-    /// mic name.
-    pub(super) fn cal_delete_text(&self) -> String {
-        self.selected_meas()
-            .and_then(|m| meas_input(&m.config.kind))
-            .map(|input| {
-                let mic = self.input_setup(input).mic.unwrap_or_default();
-                format!("{}={mic}", u32::from(input) + 1)
-            })
-            .unwrap_or_default()
-    }
-
-    pub(super) fn cal_delete(&mut self, text: &str, out: &mut Vec<Request>) -> Result<(), String> {
-        let (channel, mic) = match parse_mics(text)?.as_slice() {
-            [(c, Some(m))] => (*c, m.clone()),
-            [(c, None)] => {
-                return Err(format!("type the mic name after {}=", u32::from(*c) + 1));
-            }
-            _ => return Err("one input=mic".into()),
-        };
-        let Some(device) = self
-            .daemon()
-            .and_then(|s| s.session.open.as_ref())
-            .map(|o| o.input_device.clone())
-        else {
-            return Err(
-                "no open session: calibrations of other devices are deleted with `ac2 cal rm --device`"
-                    .into(),
-            );
-        };
-        out.push(Request::Call {
-            what: format!(
-                "sensitivity calibration of {mic} on input {} deleted",
-                u32::from(channel) + 1
-            ),
-            cmd: Command::CalDelete {
-                key: CalKey {
-                    device,
-                    channel,
-                    mic,
-                },
-            },
-        });
-        Ok(())
-    }
-
-    /// The stimulus outputs follow the open session's output device: the ones last used on
-    /// it, output 1 on a device never used (decision K4). Outputs never change under a held
-    /// stimulus; a device change re-opens the session, which disarms it anyway.
-    pub(super) fn follow_output_device(&mut self) {
-        let dev = self
-            .daemon()
-            .and_then(|s| s.session.open.as_ref())
-            .map(|o| o.output_device.0.clone());
-        let Some(dev) = dev else {
-            return;
-        };
-        if self.stim_device.as_ref() == Some(&dev) || self.stimulus.phase != StimPhase::Idle {
-            return;
-        }
-        self.stimulus.outputs = self
-            .prefs
-            .outputs_for(&dev)
-            .map_or_else(|| vec![0], <[u16]>::to_vec);
-        self.stim_device = Some(dev);
-    }
-
-    pub(super) fn need_meas(
-        &mut self,
-        want: &[fn(&MeasKind) -> bool],
-        what: &str,
-    ) -> Option<Measurement> {
-        match self.selected_meas() {
-            Some(m) if want.iter().any(|f| f(&m.config.kind)) => Some(m.clone()),
-            _ => {
-                self.warn(format!("select a {what} measurement first (N)"));
-                None
-            }
-        }
-    }
-
-    /// The daemon's input setup row of `channel` (default: no mic name, no curve chosen).
-    pub(super) fn input_setup(&self, channel: u16) -> InputSetup {
-        ac2_proto::cal::input_setup(
-            self.daemon()
-                .map(|s| s.inputs.as_slice())
-                .unwrap_or_default(),
-            channel,
-        )
-    }
-
-    /// Moves the selected transfer measurement's one delay by `step` (`delay.nudge`): plain
-    /// `,` / `.` by 0.1 ms, Ctrl / Alt by a sample or a tenth. The daemon keeps the averages
-    /// where it can, so the curve moves at once.
-    ///
-    /// A step is something the operator sees: its live curve moves (a later delay leads the
-    /// phase, e^{+jωΔ}), and no other curve moves. With no live curve on the pane (stopped,
-    /// or hidden) the step would change nothing visible now and surprise later, so it is
-    /// refused with the reason.
-    pub(super) fn step_delay(&mut self, step: format::DelayStep, out: &mut Vec<Request>) {
-        let Some(m) = self.need_tf() else {
-            return;
-        };
-        if !m.running {
-            self.toast(format!(
-                "{} is stopped \u{2014} its delay applies to the live curve; S starts it",
-                m.config.name
-            ));
-            return;
-        }
-        if self.meas_hidden(&m) {
-            self.toast(format!(
-                "{} is hidden \u{2014} its delay applies to the live curve; show it first",
-                m.config.name
-            ));
-            return;
-        }
-        let Some(rate) = self.open_session().map(|s| f64::from(s.sample_rate_hz)) else {
-            self.warn(format!(
-                "{}: no audio session (a delay is applied in samples of its rate)",
-                m.config.name
-            ));
-            return;
-        };
-        let by = match step {
-            format::DelayStep::Samples(n) => n / rate,
-            format::DelayStep::Seconds(s) => s,
-        };
-        // The delay and its offset from the arrival after the step, as the row and the
-        // legend will show them: the daemon moves both by the step.
-        let (applied, offset) = m
-            .delay
-            .as_ref()
-            .map_or((by, by), |d| (d.applied.0 + by, d.nudged.0 + by));
-        let what = format::delay_step_toast(&m.config.name, step, applied, offset);
-        self.call(
-            out,
-            Command::DelayNudge {
-                meas: m.id,
-                by: Seconds(by),
-            },
-            what,
-        );
-    }
-
-    pub(super) fn need_tf(&mut self) -> Option<Measurement> {
-        self.need_meas(
-            &[|k| matches!(k, MeasKind::Transfer { .. })],
-            "transfer-function",
-        )
-    }
-
-    /// G / Shift+G: the focused pane's next or previous view, in its kind's chain.
-    pub(super) fn step_view(&mut self, forward: bool) {
-        let kind = self.layout.focus_kind();
-        let before = self.spectrograph_shown();
-        let bands = crate::scenes::has_band_meter(self);
-        let m = self.modes_mut();
-        match (kind, forward) {
-            (PaneKind::Transfer, true) => m.transfer = m.transfer.next(),
-            (PaneKind::Transfer, false) => m.transfer = m.transfer.prev(),
-            (PaneKind::Spectrum, true) => m.spectrum = m.spectrum.next(),
-            (PaneKind::Spectrum, false) => m.spectrum = m.spectrum.prev(),
-            (PaneKind::Spl, true) => m.spl = m.spl.next(bands),
-            (PaneKind::Spl, false) => m.spl = m.spl.prev(bands),
-            (PaneKind::Distortion, true) => m.sweep = m.sweep.next(),
-            (PaneKind::Distortion, false) => m.sweep = m.sweep.prev(),
-        }
-        // The history starts with the view and goes with the last pane showing it: nothing
-        // is kept for a hidden spectrograph; from the split to the spectrograph alone it
-        // stays.
-        if kind == PaneKind::Spectrum {
-            if !self.spectrograph_shown() {
-                self.spectrographs.clear();
-                self.view.spectrum.spectrograph.cursor_s = None;
-            } else if !before && let Some(d) = self.data.clone() {
-                self.fold_spectrographs(&d);
-            }
-        }
-    }
-
-    /// A click on a legend row of pane `p`: selects exactly the curve it names — a stored
-    /// trace, else the measurement (or math channel) whose live curve it is, as its row in
-    /// the list does — so the keys of the selection (A hides it) act on it. The pane keeps
-    /// what it shows: the curve is on it already, and a compared curve of another
-    /// measurement selected must not swap the pane's curves under the pointer.
-    pub(super) fn legend_pick(&mut self, p: PaneId, key: ac2_scene::trace::TraceKey) {
-        use ac2_scene::trace::TraceKey;
-        self.layout.set_focus(p);
-        match key {
-            TraceKey::Stored(id) => {
-                if self.trace_meta(id).is_ok() {
-                    self.set_selected_trace(Some(id));
-                }
-            }
-            TraceKey::Live(id) => {
-                if let Some(m) = self.meas(id) {
-                    // A math channel's curve is its own row; a measurement's is its live row.
-                    let live = ac2_scene::meas_list::has_live_curve(&m.config.kind);
-                    self.selected = Some(id);
-                    self.selected_trace = None;
-                    self.selected_live = live.then_some(id);
-                }
-            }
-        }
-    }
-
-    /// Selects the measurement pane `p` shows, if any, leaving the pane's choice as it is.
-    pub(super) fn select_shown(&mut self, p: PaneId) {
-        if let Some(id) = self.pane_meas(p).map(|m| m.id) {
-            self.selected = Some(id);
-            self.selected_trace = None;
-            self.selected_live = None;
-        }
-    }
-
-    /// A measurement's row in the tree chosen (click, Enter, Tab): selected, and its own
-    /// panes on screen when it has them; else the focused pane shows it, turning into the
-    /// kind of pane that measurement belongs in. The operator's eyes are on the focused
-    /// pane: the measurement goes where they look, and every other pane keeps what it shows.
-    pub(super) fn select_meas_row(&mut self, id: MeasId) {
-        let Some(kind) = self.meas(id).map(|m| PaneKind::for_kind(&m.config.kind)) else {
-            return;
-        };
-        let f = self.layout.focus;
-        self.set_pane_kind(f, kind);
-        self.select_on(f, id);
-        self.own_panes_due = true;
-    }
-
-    /// A child row of the tree chosen (a live curve, a math channel, a stored trace's
-    /// measurement): the focused pane shows measurement `id`, turning into a kind that draws
-    /// it when it cannot. Only that pane changes: the focus stays and no measurement's own
-    /// panes come, so a pane can be given another curve without the others moving.
-    pub(super) fn focused_pane_shows(&mut self, id: MeasId) {
-        let Some(m) = self.meas(id) else {
-            return;
-        };
-        let f = self.layout.focus;
-        if !self.layout.kind(f).shows(&m.config.kind) {
-            let kind = PaneKind::for_kind(&m.config.kind);
-            self.set_pane_kind(f, kind);
-        }
-        if let Some(v) = self.layout.view_mut(f) {
-            v.meas = Some(id);
-        }
-    }
-
-    /// A measurement's live-curve row chosen (click, Tab): a child row, shown by the
-    /// focused pane; the live curve is what the keys act on, as a click on its legend row
-    /// makes it.
-    pub(super) fn select_live_row(&mut self, id: MeasId) {
-        if self.meas(id).is_none() {
-            return;
-        }
-        self.focused_pane_shows(id);
-        self.selected = Some(id);
-        self.selected_trace = None;
-        self.selected_live = Some(id);
-    }
-
-    /// A math channel's row chosen (click, Tab): a child row of its owner, shown by the
-    /// focused pane; the channel is what the keys act on.
-    pub(super) fn select_math_row(&mut self, id: MeasId) {
-        if self.meas(id).is_none() {
-            return;
-        }
-        self.focused_pane_shows(id);
-        self.selected = Some(id);
-        self.selected_trace = None;
-        self.selected_live = None;
-    }
-
-    /// A stored trace's row chosen (click, Tab): a child row, its measurement shown by the
-    /// focused pane (turned into the kind that draws the trace), the trace selected; the
-    /// measurement selection stays.
-    pub(super) fn select_trace_row(&mut self, id: TraceId) {
-        let Some(t) = self
-            .daemon()
-            .and_then(|s| s.traces.iter().find(|t| t.id == id))
-            .cloned()
-        else {
-            return;
-        };
-        let f = self.layout.focus;
-        if !drawn_in(&t, self.layout.kind(f)) {
-            self.set_pane_kind(f, display::home_pane(t.kind));
-        }
-        if let TraceOwner::Meas { meas } = ac2_scene::meas_list::group_of(&t, &self.measurements())
-            && self
-                .meas(meas)
-                .is_some_and(|m| self.layout.kind(f).shows(&m.config.kind))
-            && let Some(v) = self.layout.view_mut(f)
-        {
-            v.meas = Some(meas);
-        }
-        self.select_trace(Some(id));
-    }
-
-    /// Tab / Shift+Tab: the next / previous row of the measurement list as it is shown
-    /// (a folded group's rows skipped, hidden curves included: they are selectable),
-    /// wrapping. A measurement's header and its live curve are two stops, as they are two
-    /// rows: the live curve is selected as a click on its row (or legend row) selects it.
-    /// A measurement row is chosen as a click on it is; a stored trace row selects the
-    /// trace as a click does, the focused pane first showing its measurement.
-    pub(super) fn cycle_tree_row(&mut self, d: i32) {
-        use ac2_scene::meas_list::TreeKey;
-        #[derive(Clone, Copy, PartialEq)]
-        enum Stop {
-            Meas(MeasId),
-            Math(MeasId),
-            Live(MeasId),
-            Trace(TraceId),
-        }
-        let stop = |k: TreeKey| match k {
-            TreeKey::Meas(id) => Some(Stop::Meas(id)),
-            TreeKey::Math(id) => Some(Stop::Math(id)),
-            TreeKey::Live(id) => Some(Stop::Live(id)),
-            TreeKey::Trace(id) => Some(Stop::Trace(id)),
-            TreeKey::Imported => None,
-        };
-        let stops = |rows: Vec<ac2_scene::meas_list::TreeRow>| {
-            let mut v: Vec<Stop> = Vec::new();
-            for s in rows.into_iter().filter_map(|r| stop(r.key)) {
-                if v.last() != Some(&s) {
-                    v.push(s);
-                }
-            }
-            v
-        };
-        // Every row, folded ones too, places a selection inside a folded group; the step
-        // lands on the next row the list shows.
-        let all = stops(self.tree_rows_folded(&std::collections::BTreeSet::new()));
-        let shown = stops(self.tree_rows());
-        if shown.is_empty() {
-            self.warn("no measurements to step through");
-            return;
-        }
-        let at = match self.selected_trace {
-            Some(t) => Some(Stop::Trace(t)),
-            None if self.live_row_selected() => self.selected.map(Stop::Live),
-            None => self.selected.map(Stop::Meas),
-        }
-        .and_then(|s| {
-            all.iter().position(|x| {
-                *x == s || matches!((s, *x), (Stop::Meas(a), Stop::Math(b)) if a == b)
-            })
-        });
-        let n = all.len() as i32;
-        let next = match at {
-            Some(i) => (1..=n)
-                .map(|k| all[(i as i32 + d * k).rem_euclid(n) as usize])
-                .find(|s| shown.contains(s)),
-            None if d > 0 => shown.first().copied(),
-            None => shown.last().copied(),
-        };
-        match next {
-            Some(Stop::Meas(id)) => self.select_meas_row(id),
-            Some(Stop::Math(id)) => self.select_math_row(id),
-            Some(Stop::Live(id)) => self.select_live_row(id),
-            Some(Stop::Trace(id)) => {
-                self.select_trace_row(id);
-                self.reveal_trace();
-            }
-            None => {}
-        }
-        self.tree_reveal = true;
-    }
-
-    /// Pane `p` shows `id`; it gets the focus and `id` is selected. A pane that cannot draw
-    /// it turns into the kind of pane it belongs in; one that can keeps its kind (a sweep
-    /// picked on the transfer pane has its runs drawn there).
-    pub(super) fn pane_show(&mut self, p: PaneId, id: MeasId) {
-        if matches!(self.overlay, Overlay::PaneMenu(_)) {
-            self.overlay = Overlay::None;
-        }
-        let Some(m) = self.meas(id) else {
-            return;
-        };
-        if self.layout.view(p).is_none() {
-            return;
-        }
-        if !self.layout.kind(p).shows(&m.config.kind) {
-            let kind = PaneKind::for_kind(&m.config.kind);
-            self.set_pane_kind(p, kind);
-        }
-        self.layout.set_focus(p);
-        self.select_on(p, id);
-    }
-
-    /// Selects `id` as what pane `p` shows: a sweep picked on the transfer pane is that
-    /// pane's (its runs drawn there).
-    pub(super) fn select_on(&mut self, p: PaneId, id: MeasId) {
-        // A pane closed since (a stale menu or click) has nothing to show it on.
-        if self.layout.view(p).is_none() {
-            return;
-        }
-        self.selected = Some(id);
-        self.selected_trace = None;
-        self.selected_live = None;
-        if let Some(v) = self.layout.view_mut(p) {
-            v.meas = Some(id);
-        }
-    }
-
     /// The list of pane `p`, the shown measurement highlighted.
     pub(super) fn pane_menu(&mut self, p: PaneId) -> Overlay {
         let rows = self.pane_menu_rows(p);
@@ -687,7 +210,7 @@ impl AppState {
 
     /// Steps the selected measurement's colour family (`meas.colour`) to the next one no
     /// other measurement has.
-    fn step_colour(&mut self, forward: bool, out: &mut Vec<Request>) {
+    pub(super) fn step_colour(&mut self, forward: bool, out: &mut Vec<Request>) {
         let Some(m) = self.selected_meas().cloned() else {
             self.warn("select a measurement first (N)");
             return;
@@ -724,7 +247,6 @@ impl AppState {
 
     pub(super) fn command(&mut self, c: CommandId, keymap: &Keymap, out: &mut Vec<Request>) {
         use CommandId as C;
-        use ac2_scene::legend::LegendCorner;
         match c {
             C::Help => {
                 self.overlay = if self.overlay == Overlay::Help {
@@ -1017,599 +539,94 @@ impl AppState {
                     Some(id) => self.toggle_shown(id, out),
                 }
             }
-            C::ImportTrace => self.prompt(PromptKind::ImportFile(ImportRole::Trace), String::new()),
-            C::Sessions => self.open_sessions(crate::sessions::Page::Main, out),
-            C::SessionNew
+            c @ (C::ImportTrace
+            | C::Sessions
+            | C::SessionNew
             | C::SessionSave
             | C::SessionSaveAs
             | C::SessionLoad
-            | C::SessionExport => {
-                self.session_command(c, out);
-            }
-            C::Reconnect => out.push(Request::Reconnect),
-            C::OpenSession => {
-                if !self.connected() {
-                    self.warn("not connected");
-                } else {
-                    self.open_audio_setup(out);
-                }
-            }
-            C::Record => {
-                let recording = self
-                    .daemon()
-                    .and_then(|s| s.recording.as_ref())
-                    .is_some_and(ac2_proto::model::RecordingRun::active);
-                match self.open_session().cloned() {
-                    _ if recording => {
-                        self.call(out, Command::RecStop, "recording stopped".into());
-                    }
-                    None => self.warn(format!(
-                        "no audio session to record: {}",
-                        open_session_hint(keymap)
-                    )),
-                    Some(o) => self.call(
-                        out,
-                        Command::RecStart {
-                            request: ac2_proto::model::RecordRequest {
-                                inputs: o.config.input_channels.clone(),
-                                name: None,
-                                max_duration: Seconds(
-                                    self.prefs
-                                        .record_limit_min
-                                        .map_or(RECORD_MAX_S, |m| f64::from(m) * 60.0),
-                                ),
-                                max_bytes: None,
-                            },
-                        },
-                        "recording started".into(),
-                    ),
-                }
-            }
-            C::ReplayRecording => {
-                if self.connected() {
-                    self.prompt(PromptKind::ReplayRecording, String::new());
-                } else {
-                    self.warn("not connected");
-                }
-            }
-            C::CloseSession => {
-                if self.open_session().is_none() {
-                    self.warn("no audio session is open");
-                } else {
-                    self.call(out, Command::SessionClose, "audio session closed".into());
-                }
-            }
-            C::NewTransfer | C::NewSpectrum | C::NewRta | C::NewSpl => {
-                let kind = match c {
-                    C::NewSpectrum => FormKind::Spectrum,
-                    C::NewRta => FormKind::Rta,
-                    C::NewSpl => FormKind::Spl,
-                    _ => FormKind::Transfer,
-                };
-                match self.open_session().cloned() {
-                    None => self.warn(format!(
-                        "no audio session to measure: {}",
-                        open_session_hint(keymap)
-                    )),
-                    Some(o) => {
-                        let names = self.session_input_names();
-                        let mics: Vec<u16> = self
-                            .daemon()
-                            .map(|s| {
-                                s.inputs
-                                    .iter()
-                                    .filter(|i| i.mic.is_some())
-                                    .map(|i| i.channel)
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        let f =
-                            Form::measurement(kind, Some(&o), &self.measurements(), &names, &mics);
-                        self.overlay = Overlay::Form(Box::new(f));
-                        if self.devices.is_none() {
-                            // Channel names arrive with the device list.
-                            out.push(Request::Devices);
-                        }
-                    }
-                }
-            }
-            C::NewMath => {
-                // The channel lives under the measurement selected now (a selected trace's
-                // or math channel's owner): its live curve and traces are offered first.
-                let owner = self
-                    .selected_group()
-                    .unwrap_or(ac2_proto::model::TraceOwner::Imported);
-                // A starts as what the focused pane shows: its measurement, or the selected
-                // trace.
-                let first = self
-                    .selected_trace_meta()
-                    .map(|t| Operand::Trace { trace: t.id })
-                    .or_else(|| {
-                        let p = match self.layout.focus_kind() {
-                            PaneKind::Spectrum => PaneKind::Spectrum,
-                            _ => PaneKind::Transfer,
-                        };
-                        // A sweep has no live curve to be an operand: its runs are traces.
-                        self.kind_meas(p)
-                            .filter(|m| m.config.kind.is_job())
-                            .map(|m| Operand::Meas { meas: m.id })
-                    });
-                match Form::math(self.math_candidates(Some(owner)), first, owner) {
-                    Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
-                    Err(e) => self.warn(e),
-                }
-            }
-            C::NextColour | C::PrevColour => self.step_colour(c == C::NextColour, out),
-            C::EditMeas => {
-                // A sweep measurement selected (or the sweep pane's) edits its settings.
-                let sweep = self
-                    .selected_meas()
-                    .filter(|m| matches!(m.config.kind, MeasKind::Sweep { .. }))
-                    .or_else(|| {
-                        (self.layout.focus_kind() == PaneKind::Distortion)
-                            .then(|| self.sweep_meas())
-                            .flatten()
-                    })
-                    .cloned();
-                if let Some(m) = sweep {
-                    let open = self.open_session().cloned();
-                    let (inputs, outputs) =
-                        (self.session_input_names(), self.session_output_names());
-                    match Form::edit_sweep(&m, open.as_ref(), &inputs, &outputs) {
-                        Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
-                        Err(e) => self.warn(e),
-                    }
-                    return;
-                }
-                // A transfer, spectrum or RTA selected edits its settings.
-                let spec = self
-                    .selected_meas()
-                    .filter(|m| {
-                        matches!(
-                            m.config.kind,
-                            MeasKind::Transfer { .. }
-                                | MeasKind::Spectrum { .. }
-                                | MeasKind::Rta { .. }
-                        )
-                    })
-                    .cloned();
-                if let Some(m) = spec {
-                    let rate = self.open_session().map(|o| o.sample_rate_hz);
-                    match Form::edit_spec(&m, &self.session_input_names(), rate) {
-                        Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
-                        Err(e) => self.warn(e),
-                    }
-                    return;
-                }
-                let m = self
-                    .selected_meas()
-                    .filter(|m| matches!(m.config.kind, MeasKind::Math { .. }))
-                    .or_else(|| {
-                        [PaneKind::Transfer, PaneKind::Spectrum]
-                            .into_iter()
-                            .filter_map(|p| self.kind_meas(p))
-                            .find(|m| matches!(m.config.kind, MeasKind::Math { .. }))
-                    })
-                    .cloned();
-                let owner = m.as_ref().and_then(|m| match &m.config.kind {
-                    MeasKind::Math { config } => Some(config.owner),
-                    _ => None,
-                });
-                let candidates = self.math_candidates(owner);
-                match m.map(|m| Form::edit_math(&m, candidates)) {
-                    Some(Ok(f)) => self.overlay = Overlay::Form(Box::new(f)),
-                    Some(Err(e)) => self.warn(e),
-                    None => self.warn(
-                        "select a measurement first (a transfer, sweep, spectrum, RTA or math channel)",
-                    ),
-                }
-            }
-            C::HideGroup => self.toggle_group_shown(out),
-            C::MoveTrace => self.ask_move(),
-            C::ToggleGroup => match self.selected_group() {
-                Some(g) => {
-                    if !self.collapsed.remove(&g) {
-                        self.collapsed.insert(g);
-                    }
-                }
-                None => self.warn("select a measurement first (click it in the list, N)"),
-            },
-            C::InputMics => {
-                let rows: Vec<InputSetup> = self
-                    .daemon()
-                    .map(|s| {
-                        s.inputs
-                            .iter()
-                            .filter(|i| i.mic.is_some())
-                            .cloned()
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                self.prompt(PromptKind::InputMics, mics_text(&rows));
-            }
-            C::TraceMicCurve => match self.selected_trace_meta().cloned() {
-                Some(t) => {
-                    // Start from what the trace knows: the applied curve, else the mic it
-                    // was captured with.
-                    let text = t
-                        .mic_curve
-                        .as_ref()
-                        .map(|m| ac2_scene::cal::curve_name(&m.mic, &m.curve.label))
-                        .or_else(|| t.mic.as_ref().map(|m| format!("{} ", m.name)))
-                        .unwrap_or_default();
-                    self.prompt(PromptKind::TraceMicCurve(t.id), text);
-                }
-                None => self.warn("select a stored trace first (V, or click it in the list)"),
-            },
-            C::CalDelete => {
-                let text = self.cal_delete_text();
-                self.prompt(PromptKind::CalDelete, text);
-            }
-            C::InputSetup | C::Calibrations => match self.daemon() {
-                Some(_) if c == C::InputSetup => {
-                    self.open_settings(Page::AudioIo, out);
-                    if let Overlay::Settings(s) = &mut self.overlay {
-                        s.focus_channels(FocusWant::Inputs);
-                    }
-                }
-                Some(_) => self.open_settings(Page::Calibration, out),
-                None => self.warn("not connected to a daemon"),
-            },
-            C::MicCurveInput => {
-                let text = self
-                    .selected_meas()
-                    .and_then(|m| meas_input(&m.config.kind))
-                    .map(|i| format!("{}=", u32::from(i) + 1))
-                    .unwrap_or_default();
-                self.prompt(PromptKind::MicCurveInput, text);
-            }
-            C::FinderAuto | C::FinderFull | C::FinderMid | C::FinderSub => {
-                let band = match c {
-                    C::FinderFull => FinderBand::Full,
-                    C::FinderMid => FinderBand::Mid,
-                    C::FinderSub => FinderBand::Sub,
-                    _ => FinderBand::Auto,
-                };
-                self.set_finder(FinderChoice {
-                    band,
-                    observation: None,
-                });
-            }
-            C::FinderCustom => {
-                let text = match self.finder.band {
-                    FinderBand::Custom { lo_hz, hi_hz } => format!("{}-{}", lo_hz.0, hi_hz.0),
-                    _ => String::new(),
-                };
-                self.prompt(PromptKind::FinderBand, text);
-            }
-            C::FinderObservation => {
-                let text = self
-                    .finder
-                    .observation
-                    .map(|o| o.0.to_string())
-                    .unwrap_or_default();
-                self.prompt(PromptKind::FinderObservation, text);
-            }
-            C::MicCurve => {
-                if let Some(m) = self.need_meas(
-                    &[|k| {
-                        matches!(
-                            k,
-                            MeasKind::Transfer { .. }
-                                | MeasKind::Spectrum { .. }
-                                | MeasKind::Rta { .. }
-                                | MeasKind::Spl { .. }
-                        )
-                    }],
-                    "transfer, spectrum, RTA or SPL",
-                ) && let Some(input) = meas_input(&m.config.kind)
-                {
-                    let mut row = self.input_setup(input);
-                    let Some(mic) = row.mic.clone() else {
-                        self.warn(format!(
-                            "input {} has no mic name: name it first (palette: Input setup…)",
-                            u32::from(input) + 1
-                        ));
-                        return;
-                    };
-                    let mics = self.daemon().map(|s| s.mics.clone()).unwrap_or_default();
-                    ac2_proto::cal::settle(&mut row, &mics);
-                    row.curve =
-                        ac2_proto::cal::step(&row.curve, ac2_proto::cal::mic(&mics, &mic), true);
-                    let what = curve_what(&row);
-                    self.call(out, Command::SessionInputs { inputs: vec![row] }, what);
-                }
-            }
-
-            C::ResetAverage => {
-                let m = self.focused_pane_meas();
-                if let Some(m) = &m
-                    && let MeasKind::Math { config } = &m.config.kind
-                {
-                    // A math channel holds no averaging of its own: starting it over means
-                    // starting its live operands over.
-                    for o in config.expr.operands() {
-                        if let Operand::Meas { meas } = o {
-                            self.call(
-                                out,
-                                Command::MeasReset { meas },
-                                format!("{}: operands' averaging reset", m.config.name),
-                            );
-                        }
-                    }
-                } else if let Some(m) = m {
-                    self.call(
-                        out,
-                        Command::MeasReset { meas: m.id },
-                        format!("{} averaging reset", m.config.name),
-                    );
-                }
-            }
-            C::StartStop => {
-                if let Some(m) = self.focused_pane_meas() {
-                    if m.running {
-                        let stim = if self.stop_stimulus_with(&m, out) {
-                            STIMULUS_STOPPED_TOO
-                        } else {
-                            ""
-                        };
-                        self.call(
-                            out,
-                            Command::MeasStop { meas: m.id },
-                            format!("{} stopped{stim}", m.config.name),
-                        );
-                    } else {
-                        self.call(
-                            out,
-                            Command::MeasStart { meas: m.id },
-                            format!("{} started", m.config.name),
-                        );
-                    }
-                }
-            }
-
-            C::InsertDelay | C::InsertStrongest => {
-                if let Some(m) = self.need_tf() {
-                    let pick = if c == C::InsertDelay {
-                        DelayPick::FirstArrival
-                    } else {
-                        DelayPick::Strongest
-                    };
-                    if matches!(self.overlay, Overlay::DelayPick(_)) {
-                        self.overlay = Overlay::None;
-                    }
-                    out.push(Request::FindDelay {
-                        meas: m.id,
-                        pick,
-                        band: self.finder.band,
-                        observation: self.finder.observation,
-                    });
-                }
-            }
-            C::TypeDelay => {
-                if let Some(m) = self.need_tf() {
-                    let text = m
-                        .delay
-                        .as_ref()
-                        .map(|d| format::delay_entry_ms(d.applied.0))
-                        .unwrap_or_default();
-                    self.prompt(PromptKind::Delay(m.id), text);
-                }
-            }
-            C::DelayDown | C::DelayUp | C::DelayDownFine | C::DelayUpFine => {
-                let step = match c {
-                    C::DelayDown => -1.0,
-                    C::DelayUp => 1.0,
-                    C::DelayDownFine => -DELAY_FINE_STEP,
-                    _ => DELAY_FINE_STEP,
-                };
-                self.step_delay(format::DelayStep::Samples(step), out);
-            }
-            C::TrackDelay => {
-                if let Some(m) = self.need_tf() {
-                    let enabled = !m.delay.as_ref().is_some_and(|d| d.tracking);
-                    let what = if enabled { "on" } else { "off" };
-                    self.call(
-                        out,
-                        Command::DelayTrack {
-                            meas: m.id,
-                            enabled,
-                        },
-                        format!("{}: tracking {what}", m.config.name),
-                    );
-                }
-            }
-            C::Invert => match self.transfer_trace_for_edit() {
-                Err(()) => {}
-                Ok(Some(t)) if t.kind == TraceKind::Target => {
-                    self.warn(format!("{}: a target curve has no phase", trace_label(&t)));
-                }
-                Ok(Some(t)) => {
-                    let mut edit = t.edit.clone();
-                    edit.polarity = match edit.polarity {
-                        Polarity::Normal => Polarity::Inverted,
-                        Polarity::Inverted => Polarity::Normal,
-                    };
-                    let what = format!(
-                        "{}: polarity {}",
-                        trace_label(&t),
-                        match edit.polarity {
-                            Polarity::Normal => "normal",
-                            Polarity::Inverted => "inverted",
-                        }
-                    );
-                    self.call(out, Command::TraceUpdate { trace: t.id, edit }, what);
-                }
-                Ok(None) => {
-                    if let Some(m) = self.need_tf() {
-                        let e = self.edits.entry(m.id).or_default();
-                        e.inverted = !e.inverted;
-                    }
-                }
-            },
-            C::Offset => self.offset_prompt(),
-            C::OffsetUp => self.step_offset(Some(1.0), out),
-            C::OffsetDown => self.step_offset(Some(-1.0), out),
-            C::OffsetUpCoarse => self.step_offset(Some(3.0), out),
-            C::OffsetDownCoarse => self.step_offset(Some(-3.0), out),
-            C::OffsetClear => self.step_offset(None, out),
-            C::NudgeEarlier | C::NudgeLater => {
-                let d = if c == C::NudgeEarlier {
-                    -NUDGE_S
-                } else {
-                    NUDGE_S
-                };
-                // A trace's nudge in whole steps: repeated steps never accumulate float
-                // error.
-                let step = |v: f64| ((v + d) / NUDGE_S).round() * NUDGE_S;
-                match self.transfer_trace_for_edit() {
-                    Err(()) => {}
-                    Ok(Some(t)) if t.kind == TraceKind::Target => {
-                        self.warn(format!("{}: a target curve has no phase", trace_label(&t)));
-                    }
-                    Ok(Some(t)) => {
-                        let mut edit = t.edit.clone();
-                        edit.delay_nudge = Seconds(step(edit.delay_nudge.0));
-                        let what =
-                            format::trace_delay_toast(&trace_label(&t), d, edit.delay_nudge.0);
-                        self.call(out, Command::TraceUpdate { trace: t.id, edit }, what);
-                    }
-                    // A measurement has one delay, the daemon's: the plain keys step it too.
-                    Ok(None) => self.step_delay(format::DelayStep::Seconds(d), out),
-                }
-            }
-            C::PhaseReference => match self.transfer_trace_for_edit() {
-                Err(()) => {}
-                Ok(Some(t)) if t.kind == TraceKind::Target => {
-                    self.warn(format!("{}: a target curve has no phase", trace_label(&t)));
-                }
-                Ok(Some(t)) => {
-                    self.view.tf.phase_reference = Some(TraceKey::Stored(t.id));
-                    self.toast(format!("phase reference: {}", trace_label(&t)));
-                }
-                Ok(None) => {
-                    if let Some(m) = self.need_tf() {
-                        self.view.tf.phase_reference = Some(TraceKey::Live(m.id));
-                        self.toast(format!("phase reference: {}", m.config.name));
-                    }
-                }
-            },
-            C::Target => self.prompt(PromptKind::ImportFile(ImportRole::Target), String::new()),
-            C::Average => self.average(AverageMethod::Power, out),
-            C::AverageComplex => self.average(AverageMethod::Complex, out),
-            C::AverageCoherence => self.average(AverageMethod::CoherenceWeighted, out),
-            C::CoherenceMask => {
-                let cur = self.view.tf.coherence.blank_below;
-                let i = COHERENCE_MASKS.iter().position(|m| *m == cur).unwrap_or(0);
-                let next = COHERENCE_MASKS[(i + 1) % COHERENCE_MASKS.len()];
-                self.view.tf.coherence.blank_below = next;
-                self.toast(match next {
-                    None => "coherence mask off".to_string(),
-                    Some(t) => format!("coherence mask: hide γ² < {t:.1}"),
-                });
-            }
-            C::CoherencePlacement => self.toggle_coherence_placement(),
-            C::LegendTopLeft => self.view.tf.legend.snap(LegendCorner::TopLeft),
-            C::LegendTopRight => self.view.tf.legend.snap(LegendCorner::TopRight),
-            C::LegendBottomLeft => self.view.tf.legend.snap(LegendCorner::BottomLeft),
-            C::LegendBottomRight => self.view.tf.legend.snap(LegendCorner::BottomRight),
-            C::LegendHide => {
-                let hidden = !self.view.tf.legend.hidden;
-                self.view.tf.legend.hidden = hidden;
-                self.toast(if hidden {
-                    "legend hidden (Legend: hide / show brings it back)"
-                } else {
-                    "legend shown"
-                });
-            }
-            C::PhaseUnwrap => {
-                self.view.tf.phase = match self.view.tf.phase {
-                    PhaseView::Wrapped => PhaseView::Unwrapped {
-                        range: Range::new(-720.0, 180.0),
-                    },
-                    _ => PhaseView::Wrapped,
-                };
-            }
-            C::GroupDelay => {
-                self.view.tf.phase = match self.view.tf.phase {
-                    PhaseView::GroupDelay { .. } => PhaseView::Wrapped,
-                    _ => PhaseView::GroupDelay {
-                        range_ms: Range::new(-2.0, 10.0),
-                    },
-                };
-            }
-            C::SpectrumStyle => {
-                self.view.spectrum.style = match self.view.spectrum.style {
-                    SpectrumStyle::Bars => SpectrumStyle::Line,
-                    SpectrumStyle::Line => SpectrumStyle::Bars,
-                };
-            }
-            C::PeakHold => {
-                self.view.spectrum.peak_hold = !self.view.spectrum.peak_hold;
-                self.peaks.clear();
-            }
-            C::SpectrographSpan => {
-                let sg = &mut self.view.spectrum.spectrograph;
-                sg.span_s = ac2_scene::view::SpectrographView::next_span(sg.span_s);
-                sg.cursor_s = sg.cursor_s.filter(|t| *t <= f64::from(sg.span_s));
-                let span = sg.span_s;
-                // Slots of another length cannot hold the frames already placed.
-                self.spectrographs.clear();
-                // Remembered as the Settings › Display row remembers it: one setting.
-                self.prefs.spectrograph_span_s = Some(span);
-                self.prefs_dirty = true;
-                self.toast(format!("spectrograph: last {span} s"));
-            }
-            C::SplShowMeter | C::SplShowLeq | C::SplShowMeterLeq | C::SplShowBands => {
-                self.focus_kind(PaneKind::Spl);
-                let m = self.modes_mut();
-                m.spl = match c {
-                    C::SplShowMeter => SplMode::Meter,
-                    C::SplShowLeq => SplMode::Leq,
-                    C::SplShowMeterLeq => SplMode::MeterLeq,
-                    _ => SplMode::Bands,
-                };
-            }
-            // Either shows the windows (a layout change is about them) and is remembered.
-            C::SplLeqStyle | C::SplLeqHistory => {
-                self.toggle_leq_layout(c == C::SplLeqHistory);
-                self.focus_kind(PaneKind::Spl);
-                let m = self.modes_mut();
-                m.spl = m.spl.with_leq();
-            }
-            C::SplNewLog => match self.kind_meas(PaneKind::Spl).cloned() {
-                Some(m) => {
-                    let MeasKind::Spl { config } = &m.config.kind else {
-                        return;
-                    };
-                    let zone = self.local_zone;
-                    let run = self
-                        .leq_run(m.id)
-                        .map(|r| ac2_scene::leq::run_text(&r, &config.leq, |t| zone.offset_s(t)));
-                    self.overlay = Overlay::NewLog(Box::new(NewLogPrompt {
-                        meas: m.id,
-                        meter: m.config.name.clone(),
-                        confirm: ac2_scene::leq::new_log_confirm(
-                            &m.config.name,
-                            &config.leq,
-                            run.as_ref(),
-                        ),
-                    }));
-                }
-                None => self.warn("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
-            },
-            C::SplTimeWeighting
+            | C::SessionExport
+            | C::Reconnect
+            | C::OpenSession
+            | C::Record
+            | C::ReplayRecording
+            | C::CloseSession
+            | C::NewTransfer
+            | C::NewSpectrum
+            | C::NewRta
+            | C::NewSpl
+            | C::NewMath
+            | C::NextColour
+            | C::PrevColour
+            | C::EditMeas
+            | C::HideGroup
+            | C::MoveTrace
+            | C::ToggleGroup
+            | C::InputMics
+            | C::TraceMicCurve
+            | C::CalDelete
+            | C::InputSetup
+            | C::Calibrations
+            | C::MicCurveInput
+            | C::FinderAuto
+            | C::FinderFull
+            | C::FinderMid
+            | C::FinderSub
+            | C::FinderCustom
+            | C::FinderObservation
+            | C::MicCurve
+            | C::ResetAverage
+            | C::StartStop) => self.command_meas(c, keymap, out),
+            c @ (C::InsertDelay
+            | C::InsertStrongest
+            | C::TypeDelay
+            | C::DelayDown
+            | C::DelayUp
+            | C::DelayDownFine
+            | C::DelayUpFine
+            | C::TrackDelay
+            | C::Invert
+            | C::Offset
+            | C::OffsetUp
+            | C::OffsetDown
+            | C::OffsetUpCoarse
+            | C::OffsetDownCoarse
+            | C::OffsetClear
+            | C::NudgeEarlier
+            | C::NudgeLater
+            | C::PhaseReference
+            | C::Target
+            | C::Average
+            | C::AverageComplex
+            | C::AverageCoherence
+            | C::CoherenceMask
+            | C::CoherencePlacement
+            | C::LegendTopLeft
+            | C::LegendTopRight
+            | C::LegendBottomLeft
+            | C::LegendBottomRight
+            | C::LegendHide
+            | C::PhaseUnwrap
+            | C::GroupDelay
+            | C::SpectrumStyle
+            | C::PeakHold
+            | C::SpectrographSpan
+            | C::SplShowMeter
+            | C::SplShowLeq
+            | C::SplShowMeterLeq
+            | C::SplShowBands
+            | C::SplLeqStyle
+            | C::SplLeqHistory
+            | C::SplNewLog
+            | C::SplTimeWeighting
             | C::SplWeighting
             | C::SplFast
             | C::SplSlow
             | C::SplImpulse
             | C::SplA
             | C::SplC
-            | C::SplZ => self.spl_weightings(c, out),
-            C::LeqWindows => match self.kind_meas(PaneKind::Spl) {
-                Some(_) => self.open_settings(Page::Leq, out),
-                None => self.warn("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
-            },
+            | C::SplZ
+            | C::LeqWindows) => self.command_tf(c, out),
         }
     }
 }

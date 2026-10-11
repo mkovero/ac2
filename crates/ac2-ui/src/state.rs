@@ -60,6 +60,10 @@ pub use ir_nav::IrNavMsg;
 mod band_transfer;
 #[path = "state_commands.rs"]
 mod commands;
+#[path = "state_commands_meas.rs"]
+mod commands_meas;
+#[path = "state_commands_tf.rs"]
+mod commands_tf;
 #[path = "state_dialogs.rs"]
 mod dialogs;
 #[path = "state_glide.rs"]
@@ -77,6 +81,8 @@ mod meas_layout;
 mod panes;
 #[path = "state_queries.rs"]
 mod queries;
+#[path = "state_select.rs"]
+mod select;
 #[path = "state_sessions.rs"]
 pub(crate) mod sessions_impl;
 pub use sessions_impl::SessionsMsg;
