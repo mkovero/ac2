@@ -5,3 +5,4 @@
 .claude/worktrees/
 crates/ac2-ui/tests/snapshots/*.diff.png
 crates/ac2-ui/tests/snapshots/*.old.png
+crates/ac2-ui/tests/snapshots/*.new.png
