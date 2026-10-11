@@ -1,7 +1,12 @@
-//! A measurement's own panes (`meas.layout`): selecting a measurement that has a layout
-//! puts its panes on screen; one without keeps the panes there are. Editing the panes (N,
-//! Q, a pane's kind or view, T, a split dragged, the transfer stack) while a measurement is
-//! selected gives it that layout, and every client that selects it shows the same.
+//! A measurement's own panes (`meas.layout`): choosing a measurement's row in the list
+//! puts its panes on screen; one without keeps the panes there are. Anything else that
+//! moves the selection — a pane clicked or picked from its chip, a child row (live curve,
+//! math channel, stored trace) — keeps the panes: it is about one pane. Editing the panes
+//! (N, Q, a pane's kind or view, T, a split dragged, the transfer stack) while a
+//! measurement is selected gives it that layout, and every client that selects it shows the
+//! same. Measurements whose own panes are the ones on screen share them: an edit goes to
+//! each, so two measurements laid out side by side keep the arrangement whichever of them
+//! is selected.
 //!
 //! Only the arrangement and what each pane draws travel: the measurement each pane was
 //! picked for, the focus, W and F stay this app's. A layout received is put on screen, never
@@ -82,6 +87,22 @@ impl AppState {
             .and_then(|m| m.layout.clone())
     }
 
+    /// The layout of measurement `id` as this app last has it: the edit waiting to be sent,
+    /// else the last one sent that the daemon's copy has not shown yet, else that copy.
+    fn own_layout(&self, id: MeasId) -> Option<PaneLayout> {
+        self.layout_queued
+            .get(&id)
+            .cloned()
+            .or_else(|| {
+                self.layout_calls
+                    .iter()
+                    .rev()
+                    .find(|c| c.meas == id && !c.applied)
+                    .map(|c| c.layout.clone())
+            })
+            .or_else(|| self.meas_layout(Some(id)))
+    }
+
     pub(super) fn panes_watch(&self) -> PanesWatch {
         PanesWatch {
             selected: self.selected,
@@ -90,10 +111,10 @@ impl AppState {
         }
     }
 
-    /// After a message: the selected measurement's layout on screen when the selection
-    /// moved to it or another client changed it; the panes sent as its layout when the
-    /// operator edited them (`conn`: the message came from the daemon, which edits nothing;
-    /// `drag`: a split being dragged, sent when it rests).
+    /// After a message: the selected measurement's layout on screen when its row was chosen
+    /// or another client changed it; the panes sent as its layout when the operator edited
+    /// them (`conn`: the message came from the daemon, which edits nothing; `drag`: a split
+    /// being dragged, sent when it rests).
     pub(super) fn sync_meas_layout(
         &mut self,
         before: PanesWatch,
@@ -101,21 +122,42 @@ impl AppState {
         drag: bool,
         out: &mut Vec<Request>,
     ) {
-        let theirs = self.meas_layout(self.selected);
-        if self.selected != before.selected {
-            if let Some(l) = theirs.filter(|l| *l != self.pane_layout()) {
+        self.settle_layout_calls();
+        if std::mem::take(&mut self.own_panes_due) {
+            if let Some(l) = self
+                .selected
+                .and_then(|id| self.own_layout(id))
+                .filter(|l| *l != self.pane_layout())
+            {
                 self.show_layout(&l);
             }
             return;
         }
+        // A selection moved by a pane (clicked, picked) or a child row: about that pane, and
+        // a pane it turned into another kind is no edit.
+        if self.selected != before.selected {
+            return;
+        }
+        let theirs = self.meas_layout(self.selected);
         let Some(sel) = self.selected else {
             return;
         };
         if !conn && self.pane_layout() != before.panes {
+            // Those whose own panes were the ones on screen share them: the edit is theirs too.
+            let mut ids = vec![sel];
+            ids.extend(
+                self.measurements().iter().map(|m| m.id).filter(|id| {
+                    *id != sel && self.own_layout(*id).as_ref() == Some(&before.panes)
+                }),
+            );
             if drag {
-                self.layout_due = Some((sel, self.now_s + DRAG_REST_S));
+                // A drag is many steps: those sharing the panes before its first one.
+                let ids = self.layout_due.take().map_or(ids, |(ids, _)| ids);
+                self.layout_due = Some((ids, self.now_s + DRAG_REST_S));
             } else {
-                self.store_layout(sel, out);
+                for id in ids {
+                    self.store_layout(id, out);
+                }
             }
             return;
         }
@@ -153,17 +195,49 @@ impl AppState {
         }
     }
 
+    /// Calls of measurements not selected whose layout the daemon's copy shows (or a later
+    /// one of this app's) are done once answered; the selected one's are settled as its
+    /// copy changes, above.
+    fn settle_layout_calls(&mut self) {
+        let sel = self.selected;
+        let shown: Vec<(MeasId, usize)> = self
+            .layout_calls
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| Some(c.meas) != sel && !c.applied)
+            .filter(|(_, c)| self.meas_layout(Some(c.meas)).as_ref() == Some(&c.layout))
+            .map(|(i, c)| (c.meas, i))
+            .collect();
+        if shown.is_empty() {
+            return;
+        }
+        for (meas, i) in shown {
+            for c in self.layout_calls.iter_mut().take(i + 1) {
+                if c.meas == meas {
+                    c.applied = true;
+                }
+            }
+        }
+        self.layout_calls.retain(|c| !(c.answered && c.applied));
+    }
+
     /// A dragged split resting long enough: sent.
     pub(super) fn layout_drag_due(&mut self, out: &mut Vec<Request>) {
-        if self.layout_due.is_some_and(|(_, at)| self.now_s >= at) {
+        if self
+            .layout_due
+            .as_ref()
+            .is_some_and(|(_, at)| self.now_s >= *at)
+        {
             self.flush_layout_drag(out);
         }
     }
 
     /// A dragged split sent now (before anything else changes the panes).
     pub(super) fn flush_layout_drag(&mut self, out: &mut Vec<Request>) {
-        if let Some((meas, _)) = self.layout_due.take() {
-            self.store_layout(meas, out);
+        if let Some((ids, _)) = self.layout_due.take() {
+            for id in ids {
+                self.store_layout(id, out);
+            }
         }
     }
 
@@ -262,23 +336,45 @@ impl AppState {
         self.layout_due = None;
     }
 
-    /// Layout `l` on screen. Every pane follows the selection; the focus goes to the first
-    /// pane that shows the selected measurement, which it then shows.
+    /// Layout `l` on screen. Laid out as the panes on screen (the same splits and kinds,
+    /// another view or size), each pane keeps the measurement it was picked for; otherwise
+    /// every pane follows the selection. The focus goes to a pane picked for the selected
+    /// measurement, else to the first pane that shows it, which it then shows.
     fn show_layout(&mut self, l: &PaneLayout) {
         if l.check().is_err() {
             return;
         }
+        let kept: Vec<Option<MeasId>> = if same_shape(l, &self.pane_layout()) {
+            self.layout
+                .root
+                .reading_order()
+                .iter()
+                .map(|id| self.layout.view(*id).and_then(|v| v.meas))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let mut views = BTreeMap::new();
         let root = self.install_node(l, &mut views);
         let sel = self.selected.and_then(|id| self.meas(id)).cloned();
         let order = root.reading_order();
+        for (id, meas) in order.iter().zip(kept) {
+            if let Some(v) = views.get_mut(id) {
+                v.meas = meas;
+            }
+        }
         let focus = sel
             .as_ref()
             .and_then(|m| {
                 let home = PaneKind::for_kind(&m.config.kind);
                 order
                     .iter()
-                    .find(|id| views.get(*id).is_some_and(|v: &View| v.kind == home))
+                    .find(|id| views.get(*id).is_some_and(|v: &View| v.meas == Some(m.id)))
+                    .or_else(|| {
+                        order
+                            .iter()
+                            .find(|id| views.get(*id).is_some_and(|v: &View| v.kind == home))
+                    })
                     .or_else(|| {
                         order.iter().find(|id| {
                             views
@@ -326,6 +422,29 @@ impl AppState {
                 b: Box::new(self.install_node(b, views)),
             },
         }
+    }
+}
+
+/// Whether `a` and `b` split the same way into panes of the same kinds (views and sizes
+/// aside).
+fn same_shape(a: &PaneLayout, b: &PaneLayout) -> bool {
+    match (a, b) {
+        (PaneLayout::Pane { pane: x }, PaneLayout::Pane { pane: y }) => x.kind == y.kind,
+        (
+            PaneLayout::Split {
+                axis: xa,
+                a: x1,
+                b: x2,
+                ..
+            },
+            PaneLayout::Split {
+                axis: ya,
+                a: y1,
+                b: y2,
+                ..
+            },
+        ) => xa == ya && same_shape(x1, y1) && same_shape(x2, y2),
+        _ => false,
     }
 }
 

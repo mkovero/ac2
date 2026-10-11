@@ -132,7 +132,7 @@ fn level_range_mut(view: &mut ViewState, pane: PaneKind, scale: LevelScale) -> O
 }
 
 /// The pane a stored trace of this kind is drawn in first.
-fn home_pane(kind: TraceKind) -> PaneKind {
+pub(super) fn home_pane(kind: TraceKind) -> PaneKind {
     match kind {
         TraceKind::Spectrum { .. } | TraceKind::Rta { .. } => PaneKind::Spectrum,
         TraceKind::Sweep => PaneKind::Distortion,

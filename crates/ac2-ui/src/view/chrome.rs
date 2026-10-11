@@ -865,7 +865,8 @@ fn tree_row(
             click = Some(Msg::RenameTrace(id));
         } else if r.clicked() {
             click = Some(match row.key {
-                TreeKey::Meas(id) | TreeKey::Math(id) => Msg::SelectMeas(id),
+                TreeKey::Meas(id) => Msg::SelectMeas(id),
+                TreeKey::Math(id) => Msg::SelectMath(id),
                 TreeKey::Live(id) => Msg::SelectLive(id),
                 TreeKey::Trace(id) => Msg::SelectTrace(id),
                 TreeKey::Imported => Msg::ToggleGroup(TraceOwner::Imported),

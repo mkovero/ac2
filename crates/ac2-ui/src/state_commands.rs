@@ -292,10 +292,10 @@ impl AppState {
         }
     }
 
-    /// A measurement's row in the tree chosen (click, Enter, Tab): selected, and the
-    /// focused pane shows it, turning into the kind of pane that measurement belongs in. The
-    /// operator's eyes are on the focused pane: the measurement goes where they look, and
-    /// every other pane keeps what it shows.
+    /// A measurement's row in the tree chosen (click, Enter, Tab): selected, and its own
+    /// panes on screen when it has them; else the focused pane shows it, turning into the
+    /// kind of pane that measurement belongs in. The operator's eyes are on the focused
+    /// pane: the measurement goes where they look, and every other pane keeps what it shows.
     pub(super) fn select_meas_row(&mut self, id: MeasId) {
         let Some(kind) = self.meas(id).map(|m| PaneKind::for_kind(&m.config.kind)) else {
             return;
@@ -303,15 +303,76 @@ impl AppState {
         let f = self.layout.focus;
         self.set_pane_kind(f, kind);
         self.select_on(f, id);
+        self.own_panes_due = true;
     }
 
-    /// A measurement's live-curve row chosen (click, Tab): the measurement chosen as its
-    /// header is, the live row marked as the selection, as a click on its legend row does.
-    pub(super) fn select_live_row(&mut self, id: MeasId) {
-        self.select_meas_row(id);
-        if self.selected == Some(id) {
-            self.selected_live = Some(id);
+    /// A child row of the tree chosen (a live curve, a math channel, a stored trace's
+    /// measurement): the focused pane shows measurement `id`, turning into a kind that draws
+    /// it when it cannot. Only that pane changes: the focus stays and no measurement's own
+    /// panes come, so a pane can be given another curve without the others moving.
+    pub(super) fn focused_pane_shows(&mut self, id: MeasId) {
+        let Some(m) = self.meas(id) else {
+            return;
+        };
+        let f = self.layout.focus;
+        if !self.layout.kind(f).shows(&m.config.kind) {
+            let kind = PaneKind::for_kind(&m.config.kind);
+            self.set_pane_kind(f, kind);
         }
+        if let Some(v) = self.layout.view_mut(f) {
+            v.meas = Some(id);
+        }
+    }
+
+    /// A measurement's live-curve row chosen (click, Tab): a child row, shown by the
+    /// focused pane; the live curve is what the keys act on, as a click on its legend row
+    /// makes it.
+    pub(super) fn select_live_row(&mut self, id: MeasId) {
+        if self.meas(id).is_none() {
+            return;
+        }
+        self.focused_pane_shows(id);
+        self.selected = Some(id);
+        self.selected_trace = None;
+        self.selected_live = Some(id);
+    }
+
+    /// A math channel's row chosen (click, Tab): a child row of its owner, shown by the
+    /// focused pane; the channel is what the keys act on.
+    pub(super) fn select_math_row(&mut self, id: MeasId) {
+        if self.meas(id).is_none() {
+            return;
+        }
+        self.focused_pane_shows(id);
+        self.selected = Some(id);
+        self.selected_trace = None;
+        self.selected_live = None;
+    }
+
+    /// A stored trace's row chosen (click, Tab): a child row, its measurement shown by the
+    /// focused pane (turned into the kind that draws the trace), the trace selected; the
+    /// measurement selection stays.
+    pub(super) fn select_trace_row(&mut self, id: TraceId) {
+        let Some(t) = self
+            .daemon()
+            .and_then(|s| s.traces.iter().find(|t| t.id == id))
+            .cloned()
+        else {
+            return;
+        };
+        let f = self.layout.focus;
+        if !drawn_in(&t, self.layout.kind(f)) {
+            self.set_pane_kind(f, display::home_pane(t.kind));
+        }
+        if let TraceOwner::Meas { meas } = ac2_scene::meas_list::group_of(&t, &self.measurements())
+            && self
+                .meas(meas)
+                .is_some_and(|m| self.layout.kind(f).shows(&m.config.kind))
+            && let Some(v) = self.layout.view_mut(f)
+        {
+            v.meas = Some(meas);
+        }
+        self.select_trace(Some(id));
     }
 
     /// Tab / Shift+Tab: the next / previous row of the measurement list as it is shown
@@ -325,11 +386,13 @@ impl AppState {
         #[derive(Clone, Copy, PartialEq)]
         enum Stop {
             Meas(MeasId),
+            Math(MeasId),
             Live(MeasId),
             Trace(TraceId),
         }
         let stop = |k: TreeKey| match k {
-            TreeKey::Meas(id) | TreeKey::Math(id) => Some(Stop::Meas(id)),
+            TreeKey::Meas(id) => Some(Stop::Meas(id)),
+            TreeKey::Math(id) => Some(Stop::Math(id)),
             TreeKey::Live(id) => Some(Stop::Live(id)),
             TreeKey::Trace(id) => Some(Stop::Trace(id)),
             TreeKey::Imported => None,
@@ -356,7 +419,11 @@ impl AppState {
             None if self.live_row_selected() => self.selected.map(Stop::Live),
             None => self.selected.map(Stop::Meas),
         }
-        .and_then(|s| all.iter().position(|x| *x == s));
+        .and_then(|s| {
+            all.iter().position(|x| {
+                *x == s || matches!((s, *x), (Stop::Meas(a), Stop::Math(b)) if a == b)
+            })
+        });
         let n = all.len() as i32;
         let next = match at {
             Some(i) => (1..=n)
@@ -367,19 +434,10 @@ impl AppState {
         };
         match next {
             Some(Stop::Meas(id)) => self.select_meas_row(id),
+            Some(Stop::Math(id)) => self.select_math_row(id),
             Some(Stop::Live(id)) => self.select_live_row(id),
             Some(Stop::Trace(id)) => {
-                let owner = self
-                    .daemon()
-                    .and_then(|s| s.traces.iter().find(|t| t.id == id))
-                    .map(|t| ac2_scene::meas_list::group_of(t, &self.measurements()));
-                let f = self.layout.focus;
-                if let Some(TraceOwner::Meas { meas }) = owner
-                    && self.pane_meas(f).map(|m| m.id) != Some(meas)
-                {
-                    self.select_meas_row(meas);
-                }
-                self.select_trace(Some(id));
+                self.select_trace_row(id);
                 self.reveal_trace();
             }
             None => {}

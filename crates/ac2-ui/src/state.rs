@@ -875,13 +875,17 @@ pub enum Msg {
     ToastsHeld(bool),
     /// A toast clicked away.
     DismissToast(u64),
-    /// A measurement clicked in the list: selected, and shown by its pane.
+    /// A measurement's row clicked in the list: selected, and its own panes on screen (or
+    /// the focused pane shows it).
     SelectMeas(MeasId),
-    /// A measurement's live-curve row clicked in the list: the measurement selected as
-    /// [`Msg::SelectMeas`] does, the live row marked as what the keys act on.
+    /// A measurement's live-curve row clicked in the list: a child row, shown by the
+    /// focused pane alone, the live row marked as what the keys act on.
     SelectLive(MeasId),
-    /// A stored trace clicked in the list: selected, so the trace keys act on it (again:
-    /// deselected).
+    /// A math channel's row clicked in the list: a child row, shown by the focused pane
+    /// alone.
+    SelectMath(MeasId),
+    /// A stored trace clicked in the list: selected, so the trace keys act on it, and its
+    /// measurement shown by the focused pane alone (again: deselected).
     SelectTrace(TraceId),
     /// A stored trace's eye in the list: shown / hidden.
     ToggleShown(TraceId),
@@ -1195,9 +1199,11 @@ pub struct AppState {
     layout_calls: std::collections::VecDeque<meas_layout::LayoutCall>,
     /// Edits waiting for the `meas.layout` call in flight for their measurement: the newest.
     layout_queued: BTreeMap<MeasId, ac2_proto::model::PaneLayout>,
-    /// A split dragged: the measurement whose layout takes it, and when (`now_s`) the drag
+    /// A split dragged: the measurements whose layout takes it, and when (`now_s`) the drag
     /// counts as done.
-    layout_due: Option<(MeasId, f64)>,
+    layout_due: Option<(Vec<MeasId>, f64)>,
+    /// A measurement's row was chosen: its own panes go on screen after the message.
+    own_panes_due: bool,
     /// Started spectrum / RTA measurements whose first frame fits the spectrum pane's level
     /// axis (as Shift+Home), with the frame shown when they started (a stopped run's last).
     spectrum_fit: BTreeMap<MeasId, Option<Arc<ac2_proto::Frame>>>,
@@ -1295,6 +1301,7 @@ impl AppState {
             layout_calls: std::collections::VecDeque::new(),
             layout_queued: BTreeMap::new(),
             layout_due: None,
+            own_panes_due: false,
         }
     }
 
@@ -1370,9 +1377,13 @@ impl AppState {
             }
             Msg::SelectMeas(id) => self.select_meas_row(id),
             Msg::SelectLive(id) => self.select_live_row(id),
+            Msg::SelectMath(id) => self.select_math_row(id),
             Msg::SelectTrace(id) => {
-                let id = (self.selected_trace != Some(id)).then_some(id);
-                self.select_trace(id);
+                if self.selected_trace == Some(id) {
+                    self.select_trace(None);
+                } else {
+                    self.select_trace_row(id);
+                }
                 self.reveal_trace();
             }
             Msg::ToggleShown(id) => self.toggle_shown(id, out),

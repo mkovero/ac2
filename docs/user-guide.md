@@ -419,7 +419,7 @@ first measurement (a transfer pane on an empty daemon). Lay it out as the job ne
 | **Alt+→** / **Alt+←** | grows / shrinks the focused pane by a tenth of its split; it stops where a pane would be too small to read (the size **N** refuses to split below) |
 | drag a gap | drag the gap between two panes to size them (the cursor turns into a resize arrow over it); the same limit holds |
 | **Q** | closes the focused pane; its neighbour takes the space and the focus. The last pane stays (**Tab** puts another measurement in it) |
-| **Tab** / **Shift+Tab** | selects the next / previous row of the measurement list (a measurement, its live curve, a stored trace, a math channel); the focused pane shows that row's measurement, whatever its kind: the pane turns into the kind that draws it (transfer, spectrum / RTA, SPL, sweep / distortion) |
+| **Tab** / **Shift+Tab** | steps to the next / previous row of the measurement list, as a click on that row does (below): a measurement's row selects it (its own panes come, if it has them), a child row (its live curve, a stored trace, a math channel) goes to the focused pane alone; the pane turns into the kind that draws it (transfer, spectrum / RTA, SPL, sweep / distortion) |
 | **G** / **Shift+G** | steps the focused pane's views forward / back, the last on to the first (the chains are below) |
 | **Alt+1 … Alt+9** | focus the panes in reading order: top to bottom, then left to right |
 | click | focuses the pane |
@@ -490,10 +490,16 @@ To pick another measurement:
 
 - click the chip for the list of every measurement, in the tree's order (each tagged with
   its kind): the pane turns into the kind of the one picked, and the kinds of pane no
-  measurement needs yet follow at the end;
-- or focus the pane (click it, **Alt+1 … Alt+9**) and press **Tab** / **Shift+Tab**:
-  they step through the list row by row, and the pane turns into the kind of the
-  measurement of the row they land on;
+  measurement needs yet follow at the end. Only that pane changes;
+- or focus the pane (click it, **Alt+1 … Alt+9**) and click a row of the measurement list,
+  or step to one with **Tab** / **Shift+Tab**. The two kinds of row act differently:
+  - a **child row** — a measurement's live curve, one of its stored traces, a math channel
+    under it — goes into the focused pane and nowhere else: the pane shows that row's
+    measurement (turning into the kind that draws it), the focus stays, no other pane
+    moves and no measurement's own panes come. A stored trace row selects the trace (the
+    trace keys act on it) and leaves the measurement selection as it was;
+  - a **measurement row** selects the measurement and shows it: its own panes when it has
+    them (see *Layouts follow the measurement*), otherwise it goes into the focused pane;
 - or use **Choose the measurement the focused pane shows…** in the palette (**↑/↓**,
   **Enter**).
 
@@ -614,17 +620,25 @@ system places the window.
 A measurement can carry its own panes. Edit the panes while a measurement is selected —
 split (**N**), close (**Q**), turn a pane into another kind, step its view (**G** and the
 kind's view keys), **T**, drag a split, lay out the transfer stack — and that layout is
-stored on the selected measurement. Selecting the measurement again brings its panes back;
-selecting one without a layout of its own keeps the panes on screen (edit them and it gets
-its own). The list says it on the measurement's row: `· 3 own panes`.
+stored on the selected measurement. Clicking the measurement's row again (or **Tab** onto
+it) brings its panes back; a measurement without a layout of its own keeps the panes on
+screen (edit them and it gets its own). Only a measurement row brings panes: a pane clicked,
+a pick from a pane's chip and a child row (live curve, stored trace, math channel) change
+the one pane and keep the rest. The list says it on the measurement's row: `· 3 own panes`.
+
+Measurements whose own panes are the ones on screen share them: an edit made while one of
+them is selected goes to each. Two measurements laid out side by side therefore keep the
+arrangement whichever of them is selected, and clicking either's row changes nothing.
 
 The layout lives in the session, with the measurement: it is saved and opened with the
 session file and its archive, and every app that selects the measurement — another laptop,
 the kiosk — shows the same panes; an edit made on one shows on the others that have it
 selected. What travels is how the panes are split and what kind and view each shows. Which
 measurement each pane was picked for, which pane has the focus, **W** and **F**, and the
-window stay with each app (in `ui.toml`, as above). A pane of the layout follows the
-selection: selecting the measurement puts it in the first pane of its kind.
+window stay with each app (in `ui.toml`, as above). When the panes that come are split the
+same way into the same kinds as those on screen (only a view or a size differs, as when
+another app steps a view), each pane keeps the measurement it was picked for. Otherwise the
+panes follow the selection: the measurement goes into the first pane of its kind.
 
 `ac2 meas list` has a `layout` column; `ac2 meas layout clear <meas>` takes a measurement's
 own panes away (selecting it then keeps the panes on screen). Deleting a measurement
@@ -923,6 +937,18 @@ the newest frame at the top, level as colour.
   at each length and when the spectrograph comes into view (from the split to the
   spectrograph alone it is kept).
 - Alone, the caption above it also names the spectrum's window and calibration.
+
+**Two spectrographs side by side** (two inputs, two spectrum measurements):
+
+1. click the first measurement's row (say `Spectrum 1`) with the spectrum pane focused;
+2. **N** splits the pane; the new half has the focus;
+3. click the new half's title chip and pick `Spectrum 2` (or click `Spectrum 2`'s live
+   curve row in the list: a child row goes to the focused pane only);
+4. **G G** on each half (click it first) for the spectrograph alone.
+
+Each half keeps its own measurement and view while you click between them, click either
+measurement's row or **Tab** through the list and back; each history fills from its own
+measurement's frames.
 
 - A click in the spectrograph puts the cursor there: above the plot it reads frequency, time
   before the newest frame and level (`1.00 kHz · 4.2 s ago · −32.0 dBFS`); *Comparison cursor

@@ -234,3 +234,90 @@ fn quick_edits_go_one_call_at_a_time() {
     t.conn(mirror(with_layout(1, Some(two_transfer()))));
     assert_eq!(t.st.pane_layout(), two_transfer());
 }
+
+/// Measurements whose own panes are the ones on screen share them: an edit made with one
+/// selected goes to each, so choosing either's row keeps the screen. One with other panes
+/// of its own keeps them.
+#[test]
+fn measurements_sharing_the_panes_take_an_edit_together() {
+    let mut t = T::new();
+    select(&mut t, 1);
+    t.key("N");
+    let l = t.st.pane_layout();
+    let mut s = with_layout(1, Some(l.clone()));
+    for m in &mut s.measurements {
+        if m.id == MeasId(2) {
+            m.layout = Some(l.clone());
+        }
+    }
+    t.conn(mirror(s));
+    t.conn(ConnEvent::Reply {
+        what: "Main L: 5 own panes".into(),
+        result: Ok(()),
+    });
+    select(&mut t, 2);
+    assert_eq!(t.st.pane_layout(), l, "Sub's own panes, the same");
+    let r = t.key("G");
+    let mut to: Vec<MeasId> = layout_calls(&r).into_iter().map(|(m, _)| m).collect();
+    to.sort();
+    assert_eq!(to, [MeasId(1), MeasId(2)], "{r:?}");
+    let edited = t.st.pane_layout();
+    select(&mut t, 1);
+    assert_eq!(t.st.pane_layout(), edited, "Main L's row: the screen stays");
+}
+
+/// A layout laid out as the screen (another view only) keeps each pane's pick; one laid
+/// out otherwise has its panes follow the selection.
+#[test]
+fn a_layout_of_the_same_panes_keeps_the_picks() {
+    let three = |layout: Option<PaneLayout>| {
+        let mut s = with_layout(2, layout);
+        s.measurements.push(meas(3, "Sub 2", spectrum()));
+        s
+    };
+    let mut t = T::new();
+    t.conn(mirror(three(None)));
+    select(&mut t, 2);
+    t.key("N");
+    // Sub on both halves: the new one picked for Sub 2.
+    let b = t.st.layout.focus;
+    t.st.layout.view_mut(b).expect("pane").meas = Some(MeasId(3));
+    let picks = |t: &T| -> Vec<Option<MeasId>> {
+        t.st.layout
+            .root
+            .reading_order()
+            .iter()
+            .filter(|p| t.st.layout.kind(**p) == PaneKind::Spectrum)
+            .map(|p| t.st.pane_meas(*p).map(|m| m.id))
+            .collect()
+    };
+    let before = picks(&t);
+    // (The grid's own spectrum pane follows the selection too.)
+    assert_eq!(before, [Some(MeasId(2)), Some(MeasId(3)), Some(MeasId(2))]);
+    t.conn(ConnEvent::Reply {
+        what: "Sub: 5 own panes".into(),
+        result: Ok(()),
+    });
+    // Another client steps a pane's chrome.
+    fn first_pane(l: &mut PaneLayout) -> &mut wire::LayoutPane {
+        match l {
+            PaneLayout::Pane { pane } => pane,
+            PaneLayout::Split { a, .. } => first_pane(a),
+        }
+    }
+    let mut l = t.st.pane_layout();
+    first_pane(&mut l).chrome = wire::PlotChrome::NoGrid;
+    t.conn(mirror(three(Some(l.clone()))));
+    assert_eq!(t.st.pane_layout(), l, "another client's edit");
+    assert_eq!(picks(&t), before, "each pane keeps its pick");
+    // Laid out otherwise: the panes follow the selection.
+    let mut one = two_transfer();
+    if let PaneLayout::Split { b, .. } = &mut one
+        && let PaneLayout::Pane { pane } = b.as_mut()
+    {
+        pane.kind = wire::PaneKind::Spectrum;
+    }
+    t.conn(mirror(three(Some(one.clone()))));
+    assert_eq!(t.st.pane_layout(), one);
+    assert_eq!(picks(&t), [Some(MeasId(2))]);
+}

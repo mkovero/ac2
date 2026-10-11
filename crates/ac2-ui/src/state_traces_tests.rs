@@ -632,8 +632,16 @@ fn trace_keys_act_on_the_selected_trace() {
         t.st.pane_caption(t.pane(PaneKind::Transfer)).as_deref(),
         Some("t15")
     );
-    // A spectrum trace is not on the transfer pane: the keys act on the live measurement.
+    // A spectrum trace's row: the focused pane turns into a spectrum pane to draw it.
     t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
+    assert_eq!(t.st.layout.focus_kind(), PaneKind::Spectrum);
+    // The pane back to a transfer pane, which does not draw it: the keys act on the live
+    // measurement.
+    let f = t.st.layout.focus;
+    t.st.update(
+        Msg::PanePick(f, PaneMenuRow::Kind(PaneKind::Transfer)),
+        &t.keys,
+    );
     assert!(t.key("U").is_empty());
     assert!(t.st.edit(MeasId(1)).inverted);
 }

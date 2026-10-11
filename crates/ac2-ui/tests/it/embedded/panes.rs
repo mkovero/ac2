@@ -1133,3 +1133,313 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// A spectrum made from the palette's dialog, on the dialog's input or (`other`) the
+/// session's other one: its id once it runs.
+fn new_spectrum(d: &mut Driver, other: bool) -> R<MeasId> {
+    let before: Vec<MeasId> = d.st.measurements().iter().map(|m| m.id).collect();
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spectrum".into()));
+    d.key("Enter");
+    d.until(
+        "the spectrum dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spectrum),
+    )?;
+    if other {
+        // The input is the dialog's first row, on the mic (the session's last input): ←
+        // steps it to the input before.
+        d.key("ArrowLeft");
+    }
+    d.key("Enter");
+    d.until("the new spectrum, running", |s| {
+        s.measurements().iter().any(|m| {
+            !before.contains(&m.id)
+                && matches!(m.config.kind, MeasKind::Spectrum { .. })
+                && m.running
+        })
+    })?;
+    d.st.measurements()
+        .iter()
+        .find(|m| !before.contains(&m.id))
+        .map(|m| m.id)
+        .ok_or_else(|| "the new spectrum".into())
+}
+
+/// The spectrum panes in reading order: the measurement each shows, its view, and the
+/// spectrograph's caption as drawn.
+fn spectrum_panes(s: &AppState) -> Vec<(Option<MeasId>, SpectrumMode, String)> {
+    let size = ac2_scene::primitives::Viewport {
+        width: 1000.0,
+        height: 600.0,
+    };
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    s.visible_panes()
+        .into_iter()
+        .filter(|p| s.layout.kind(*p) == ac2_ui::state::PaneKind::Spectrum)
+        .map(|p| {
+            let caption = ac2_ui::scenes::spectrograph(s, p, &Theme::dark(), size, now).caption;
+            (
+                s.pane_meas(p).map(|m| m.id),
+                s.pane_modes(p).spectrum,
+                caption,
+            )
+        })
+        .collect()
+}
+
+/// The operator's case from an empty daemon: two spectrum measurements on two inputs, the
+/// spectrum pane split (N), Spectrum 2 picked on the new half from its title chip, both
+/// halves stepped (G) to the spectrograph alone. Left Spectrum 1's spectrograph, right
+/// Spectrum 2's, both filling; and so they stay while the focus moves between them, the
+/// list's rows are clicked and Tab / Shift+Tab step through every row and back.
+#[test]
+fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
+    use ac2_ui::state::PaneMenuRow;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let s1 = new_spectrum(&mut d, false)?;
+    let s2 = new_spectrum(&mut d, true)?;
+    let of = |s: &AppState, id: MeasId| {
+        s.meas(id).map(|m| match &m.config.kind {
+            MeasKind::Spectrum { config } => (m.config.name.clone(), config.input),
+            _ => (m.config.name.clone(), u16::MAX),
+        })
+    };
+    let (n1, i1) = of(&d.st, s1).ok_or("Spectrum 1")?;
+    let (n2, i2) = of(&d.st, s2).ok_or("Spectrum 2")?;
+    assert_eq!((n1.as_str(), n2.as_str()), ("Spectrum 1", "Spectrum 2"));
+    assert_ne!(i1, i2, "two inputs");
+
+    // The spectrum pane shows Spectrum 1; N splits it side by side.
+    d.key("Alt+2");
+    d.send(Msg::SelectMeas(s1));
+    d.key("N");
+    let right = d.st.layout.focus;
+    // The new half's chip: Spectrum 2.
+    d.send(Msg::PaneMenu(right));
+    assert!(matches!(d.st.overlay, Overlay::PaneMenu(_)));
+    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s2)));
+    let shown = |s: &AppState| -> Vec<(Option<MeasId>, SpectrumMode)> {
+        spectrum_panes(s)
+            .into_iter()
+            .map(|(m, v, _)| (m, v))
+            .collect()
+    };
+    assert_eq!(
+        shown(&d.st),
+        [
+            (Some(s1), SpectrumMode::Spectrum),
+            (Some(s2), SpectrumMode::Spectrum)
+        ]
+    );
+    // G twice on the right half, then the left half clicked and G twice.
+    d.key("G");
+    d.key("G");
+    let left =
+        d.st.visible_panes()
+            .into_iter()
+            .find(|p| d.st.layout.kind(*p) == ac2_ui::state::PaneKind::Spectrum)
+            .ok_or("the left half")?;
+    d.send(Msg::FocusPane(left));
+    d.key("G");
+    d.key("G");
+    let both = [
+        (Some(s1), SpectrumMode::Spectrograph),
+        (Some(s2), SpectrumMode::Spectrograph),
+    ];
+    assert_eq!(shown(&d.st), both, "after G on both halves");
+    let captions = |s: &AppState| -> Vec<String> {
+        spectrum_panes(s)
+            .into_iter()
+            .map(|(_, _, c)| c.split(" · ").next().unwrap_or_default().to_owned())
+            .collect()
+    };
+    assert_eq!(captions(&d.st), ["Spectrum 1", "Spectrum 2"]);
+    // Both histories fill, side by side (30 slots a second at 30 s).
+    let filled = |s: &AppState, id: MeasId, n: usize| {
+        s.spectrographs
+            .get(&id)
+            .is_some_and(|h| h.ring().iter().flatten().count() >= n)
+    };
+    d.until("both spectrographs filling", |s| {
+        filled(s, s1, 30) && filled(s, s2, 30)
+    })?;
+    assert_eq!(shown(&d.st), both, "once the daemon has the layouts");
+
+    // The focus moving between the halves, and each one's list row clicked with its half
+    // focused: nothing moves.
+    let half = |s: &AppState, i: usize| {
+        s.visible_panes()
+            .into_iter()
+            .filter(|p| s.layout.kind(*p) == ac2_ui::state::PaneKind::Spectrum)
+            .nth(i)
+    };
+    for (i, id) in [(1, s2), (0, s1), (1, s2), (0, s1)] {
+        let p = half(&d.st, i).ok_or("a half")?;
+        d.send(Msg::FocusPane(p));
+        assert_eq!(shown(&d.st), both, "half {i} clicked");
+        d.send(Msg::SelectMeas(id));
+        assert_eq!(shown(&d.st), both, "{id:?}'s row clicked on half {i}");
+        d.pump();
+        assert_eq!(
+            shown(&d.st),
+            both,
+            "{id:?}'s row clicked on half {i}, pumped"
+        );
+    }
+
+    // Tab through every row and round to the half's own measurement again, then Shift+Tab
+    // round the other way, on each half: the other half never moves, and back on its own
+    // measurement the half is its spectrograph again.
+    let rows = d.st.tree_rows().len() + 1;
+    for (i, id) in [(1, s2), (0, s1)] {
+        for key in ["Tab", "Shift+Tab"] {
+            let p = half(&d.st, i).ok_or("a half")?;
+            d.send(Msg::FocusPane(p));
+            let mut steps = 0;
+            loop {
+                d.key(key);
+                d.pump();
+                steps += 1;
+                if d.st.selected == Some(id)
+                    && d.st.selected_trace.is_none()
+                    && !d.st.live_row_selected()
+                {
+                    break;
+                }
+                assert!(steps <= rows, "{key} never came back to {id:?}");
+            }
+            assert_eq!(shown(&d.st), both, "{key} round on half {i}");
+            assert_eq!(captions(&d.st), ["Spectrum 1", "Spectrum 2"]);
+        }
+    }
+    assert!(
+        filled(&d.st, s1, 30) && filled(&d.st, s2, 30),
+        "the histories stay"
+    );
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// A child row of the list — a live curve, a stored trace — goes to the focused pane and
+/// nowhere else, from an empty daemon: Spectrum 1 on both halves of a split spectrum pane
+/// (the left one its spectrograph), Spectrum 2 with a capture and panes of its own. Pane B
+/// (the right half) clicked, then Spectrum 2's live row: B shows Spectrum 2, pane A is as it
+/// was, the focus stays on B and no measurement's panes come. Back to Spectrum 1 on B from
+/// its chip, then Spectrum 2's stored trace row: the same, the measurement selection kept.
+#[test]
+fn a_child_row_goes_to_the_focused_pane_from_an_empty_daemon() -> R {
+    use ac2_ui::state::PaneMenuRow;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let s1 = new_spectrum(&mut d, false)?;
+    let s2 = new_spectrum(&mut d, true)?;
+    let shown = |s: &AppState| -> Vec<(Option<MeasId>, SpectrumMode)> {
+        spectrum_panes(s)
+            .into_iter()
+            .map(|(m, v, _)| (m, v))
+            .collect()
+    };
+    let half = |s: &AppState, i: usize| {
+        s.visible_panes()
+            .into_iter()
+            .filter(|p| s.layout.kind(*p) == ac2_ui::state::PaneKind::Spectrum)
+            .nth(i)
+    };
+    // Spectrum 1 split side by side (its own panes now).
+    d.key("Alt+2");
+    d.send(Msg::SelectMeas(s1));
+    d.key("N");
+    let b = d.st.layout.focus;
+    // Spectrum 2 on B: captured, and given panes of its own (B to its spectrum +
+    // spectrograph and back).
+    d.send(Msg::PanePick(b, PaneMenuRow::Meas(s2)));
+    let topic = Topic::Data {
+        meas: s2,
+        stream: Stream::Spec,
+    };
+    d.until("Spectrum 2's spectrum", |s| {
+        s.data
+            .as_ref()
+            .is_some_and(|x| x.latest.get(&topic).is_some())
+    })?;
+    d.key("Ctrl+1");
+    d.until("Spectrum 2's capture", |s| {
+        s.daemon().is_some_and(|x| {
+            x.traces.iter().any(|t| {
+                matches!(t.edit.owner, ac2_proto::model::TraceOwner::Meas { meas } if meas == s2)
+            })
+        })
+    })?;
+    let trace = d
+        .st
+        .daemon()
+        .ok_or("the daemon")?
+        .traces
+        .iter()
+        .find(|t| matches!(t.edit.owner, ac2_proto::model::TraceOwner::Meas { meas } if meas == s2))
+        .map(|t| t.id)
+        .ok_or("the capture")?;
+    d.key("G");
+    d.key("Shift+G");
+    d.until("Spectrum 2's own panes", |s| {
+        s.meas(s2).is_some_and(|m| m.layout.is_some())
+    })?;
+    // B back on Spectrum 1; A (the left half) stepped to its spectrograph.
+    d.send(Msg::PanePick(b, PaneMenuRow::Meas(s1)));
+    let a = half(&d.st, 0).ok_or("pane A")?;
+    d.send(Msg::FocusPane(a));
+    d.key("G");
+    d.key("G");
+    let before = [
+        (Some(s1), SpectrumMode::Spectrograph),
+        (Some(s1), SpectrumMode::Spectrum),
+    ];
+    assert_eq!(shown(&d.st), before);
+    let after = [
+        (Some(s1), SpectrumMode::Spectrograph),
+        (Some(s2), SpectrumMode::Spectrum),
+    ];
+
+    // Pane B clicked, then Spectrum 2's live row.
+    let b = half(&d.st, 1).ok_or("pane B")?;
+    d.send(Msg::FocusPane(b));
+    let panes = d.st.pane_layout();
+    d.send(Msg::SelectLive(s2));
+    d.pump();
+    assert_eq!(shown(&d.st), after, "the live row");
+    assert_eq!(d.st.layout.focus, b, "the focus stays on B");
+    assert_eq!(d.st.pane_layout(), panes, "no measurement's panes came");
+
+    // B back on Spectrum 1 from its chip: A stays.
+    d.send(Msg::PanePick(b, PaneMenuRow::Meas(s1)));
+    assert_eq!(shown(&d.st), before, "the chip");
+    let selected = d.st.selected;
+    let panes = d.st.pane_layout();
+    // Spectrum 2's stored trace row: B shows Spectrum 2 with the trace selected.
+    d.send(Msg::SelectTrace(trace));
+    d.pump();
+    assert_eq!(shown(&d.st), after, "the trace row");
+    assert_eq!(d.st.selected_trace, Some(trace));
+    assert_eq!(d.st.selected, selected, "the measurement selection stays");
+    assert_eq!(d.st.layout.focus, b, "the focus stays on B");
+    assert_eq!(d.st.pane_layout(), panes, "no measurement's panes came");
+
+    // Spectrum 2's header row: selected, its own panes on screen.
+    d.send(Msg::SelectMeas(s2));
+    assert_eq!(d.st.selected, Some(s2));
+    assert_eq!(
+        Some(d.st.pane_layout()),
+        d.st.meas(s2).and_then(|m| m.layout.clone()),
+        "the header row brings its panes"
+    );
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
