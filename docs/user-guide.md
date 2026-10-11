@@ -1635,13 +1635,54 @@ The silence after the sweep must hold the room's decay: the dialog's **Silence a
 
 ## Sessions
 
-| CLI | Palette | Does |
-|---|---|---|
-| `ac2 session save <name>` | **Session: save** | stores the session in the daemon's session directory (`sessions/` in the ac2 data directory) |
-| `ac2 session load <name>` | **Session: load** | restores it |
-| `ac2 session list` | | lists them |
+The measurements and traces on the daemon are the **working state**. It belongs to a saved
+session (a name in the daemon's session directory, a folder on the daemon's machine, or a
+file on your computer) or is **untitled**. The top bar shows its name and, in the warning
+colour, *unsaved changes* once it differs from that session's last save. Click the name,
+press **Alt+S** or pick **Sessions** in the palette to open the Sessions dialog:
 
-A path instead of a name saves or loads anywhere on the daemon's machine.
+| Row | Does |
+|---|---|
+| **New session** | no measurements or traces, then the **Audio & I/O** settings for the new session's interface and channels |
+| **Open…** | a session file (`.ac2session`) or session folder on this computer: home, USB sticks and other removable media, in a browser with finger-sized rows |
+| **Save** | back to where it came from; untitled: asks for a name first |
+| **Save as…** | a new session on the daemon; it then belongs to that one |
+| **Export…** | an `.ac2session` file on this computer (a USB stick…); a session opened from a file saves back to it |
+| **Recover previous: …** | brings back what the last New or Open replaced while it had unsaved changes |
+| *Recent* | the daemon's saved sessions and files opened on this computer, newest first |
+
+Arrow keys and Enter work as everywhere; Backspace goes up a folder, Esc goes back or closes.
+
+Safety:
+
+- **New**, **Open** and quitting the app while it hosts its own daemon ask **Save /
+  Discard / Cancel** when there are unsaved changes. Discarded changes stay recoverable
+  until the next New or Open replaces something again.
+- **Save as** onto another existing session asks before replacing it (**Cancel** is the
+  default).
+- An opened session always comes up disarmed: nothing plays until someone types a level and
+  fires. It keeps the audio session that is open.
+- A session of another format version is refused with the version named, and the dialog
+  offers **Import its traces**: its traces come in as imported traces next to the current
+  ones. Nothing is converted or rewritten.
+
+| CLI | Does |
+|---|---|
+| `ac2 session status` | the audio session and the working state: name, *unsaved changes*, when saved, what could be recovered |
+| `ac2 session new [--discard]` | new, empty measurements and traces |
+| `ac2 session save` | saves to the session it belongs to |
+| `ac2 session save-as <session> [--force]` | saves as another session; `--force` replaces an existing one |
+| `ac2 session load <session> [--discard]` | opens one, disarmed (`load`, because `session open` opens the audio session) |
+| `ac2 session recover` | brings back what the last `new` or `load` replaced |
+| `ac2 session salvage <session>` | imports the traces of a session that cannot be opened |
+| `ac2 session export <file> [--session <name>]` | writes an `.ac2session` file here: the working state or a saved session |
+| `ac2 session import <file> [--name <n>] [--force]` | stores a file or folder from here as a saved session on the daemon, without opening it |
+| `ac2 session list` | the daemon's saved sessions |
+
+`<session>` is a name, a folder path on the daemon's machine, or an `.ac2session` file on
+this machine (sent to the daemon in checked chunks). `new` and `load` with unsaved changes
+are refused (exit code 4) unless `--discard`. A client connected over the network never
+names folders on the daemon's machine; it uses names and files of its own.
 
 A session holds:
 
@@ -1649,14 +1690,14 @@ A session holds:
 - display edits (smoothing, a mic curve applied after capture; curves are saved as
   measured);
 - sweep distortion and impulse responses;
-- each SPL meter's per-second log.
+- each SPL meter's per-second log (a running meter does not count as an unsaved change).
 
 Not in a session: **calibrations**. They describe the machine's hardware and stay in its
 calibration store.
 
-- A session saved with a different session format is refused with the version named.
-- A loaded session always comes up disarmed: nothing plays until someone types a level and
-  fires.
+An `.ac2session` file is a compressed archive of a session folder with a checksum; the
+daemon refuses one that is damaged, larger than 64 MiB, or that unpacks to more than
+512 MiB.
 
 ### Autosave
 
@@ -1670,9 +1711,11 @@ display edits):
 
 When it starts again, for example after `--max-level` was changed, it loads that autosave
 exactly like `session load`: disarmed, no audio session opened (open one as usual; restored
-measurements wait for it). Its log says what was restored.
+measurements wait for it), under the same session name and with the same *unsaved changes*
+as before. Its log says what was restored.
 
-> The daemon hosted inside the app does **not** autosave; save a session by name there.
+The daemon hosted inside the app autosaves too, into `autosave-app/` beside `autosave/`; a
+simulated rig (`--backend fake`) does not.
 
 The top bar shows the state next to the stimulus (`ac2 status` and `ac2 session status`
 print the same line):
@@ -1692,6 +1735,7 @@ Support/ac2` on macOS, `%APPDATA%\ac2\data` on Windows):
 | `autosave.v<N>/` | an autosave of another session format, set aside at start, not deleted |
 | `autosave.damaged/` | an unreadable autosave, set aside |
 | `autosave.unrestored/` | what `ac2d --no-restore` did not load |
+| `autosave.replaced/` | what the last New or Open replaced with unsaved changes (**Recover previous**) |
 
 Any of these loads by path: `ac2 session load ~/.local/share/ac2/autosave.unrestored`.
 
@@ -2696,6 +2740,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Shift+↑` | Display offset +3 dB of the selected curve | `offset_up_coarse` |
 | `Alt+Shift+↓` | Display offset −3 dB of the selected curve | `offset_down_coarse` |
 | `Alt+Home` | Display offset of the selected curve back to 0 | `offset_clear` |
+| `Alt+S` | Sessions: new, open, save, recent sessions… | `sessions` |
 | `Shift+O` | Open audio session: Settings › Audio & I/O… | `session_open` |
 | `Shift+M` | New math channel: A ÷ × + − B, or the average of several (mic positions)… | `meas_new_math` |
 | `Shift+C` | Next colour for the selected measurement (one no other measurement has; grey last) | `meas_colour_next` |
@@ -2794,8 +2839,11 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Export the selected trace (CSV or IR WAV) to a file… | `trace_export` |
 | Deselect the stored trace: keys act on the live measurement again | `select_live` |
 | Import a trace file (CSV, analyzer text, IR WAV)… | `import_trace` |
-| Session: save (name or path)… | `session_save` |
-| Session: load, disarmed (name or path)… | `session_load` |
+| New session (asks about unsaved changes), then the audio settings | `session_new` |
+| Sessions: open a file or folder on this computer, disarmed… | `session_load` |
+| Save session (where it came from; untitled: Save as) | `session_save` |
+| Save session as: a new session on the daemon… | `session_save_as` |
+| Export session: an .ac2session file on this computer… | `session_export` |
 | Reconnect to the daemon now | `reconnect` |
 | Close audio session | `session_close` |
 | Record: raw audio of every input on / off (stops by itself after 1 h) | `record` |
