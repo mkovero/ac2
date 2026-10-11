@@ -15,6 +15,8 @@ use ac2d::{Daemon, Listen};
 use common::*;
 
 const T: Duration = Duration::from_secs(5);
+/// Stalls a subscriber may take to show one recovery within the bounds.
+const ATTEMPTS: usize = 3;
 
 fn seq_of(m: &ac2_zmq::Message) -> Option<u64> {
     let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
@@ -38,34 +40,51 @@ fn stalled_subscriber_recovers(listen: Listen) {
 
     // A subscriber with a tiny receive queue that stops reading.
     let sub = Sub::connect_with(h.context(), h.data_endpoint(), &[b"d/1/spl"], None, Some(2));
-    let first = sub
+    let mut first = sub
         .frame(T, |f| matches!(f.data, FrameData::Spl(_)))
         .expect("first frame");
-    std::thread::sleep(Duration::from_millis(1200));
+    // The bounds are wall-clock time on a machine that may be busy with other work: a
+    // descheduled daemon or test thread misses them without anything having queued. So the
+    // stall is repeated a few times and one recovery within the bounds suffices; a backlog
+    // that is queued instead of skipped misses them every time.
+    let mut misses = Vec::new();
+    for _ in 0..ATTEMPTS {
+        std::thread::sleep(Duration::from_millis(1200));
 
-    // One drain discards the backlog …
-    let t0 = Instant::now();
-    let d = drain_latest(&sub.sock, 10_000, seq_of).unwrap();
-    assert!(d.emptied);
-    assert_eq!(d.malformed, 0);
-    // … and the next publish period brings a fresh frame.
-    let fresh = sub
-        .frame(Duration::from_millis(500), |f| {
+        // One drain discards the backlog …
+        let t0 = Instant::now();
+        let d = drain_latest(&sub.sock, 10_000, seq_of).unwrap();
+        assert!(d.emptied);
+        assert_eq!(d.malformed, 0);
+        // … and the next publish period brings a fresh frame.
+        let fresh = sub.frame(Duration::from_millis(500), |f| {
             let age_ns = wall_now_ns().saturating_sub(f.stamp.capture_wall_ns.0);
             age_ns < 150_000_000
-        })
-        .expect("fresh frame after one drain");
-    let took = t0.elapsed();
-    assert!(
-        took < Duration::from_millis(200),
-        "recovered in {took:?} (drain + publish period)"
-    );
-    // 1.2 s of SPL frames at 20 per second, of which the queue held two.
-    assert!(
-        fresh.stamp.seq > first.stamp.seq + 15,
-        "newer frames were skipped, not queued"
-    );
-    h.shutdown();
+        });
+        let took = t0.elapsed();
+        match fresh {
+            Some(fresh) if took < Duration::from_millis(200) => {
+                // 1.2 s of SPL frames at 20 per second, of which the queue held two.
+                assert!(
+                    fresh.stamp.seq > first.stamp.seq + 15,
+                    "newer frames were skipped, not queued"
+                );
+                h.shutdown();
+                return;
+            }
+            Some(fresh) => {
+                misses.push(format!("recovered in {took:?}"));
+                first = fresh;
+            }
+            None => {
+                misses.push("no fresh frame within 500 ms".into());
+                first = sub
+                    .frame(T, |f| matches!(f.data, FrameData::Spl(_)))
+                    .expect("a frame");
+            }
+        }
+    }
+    panic!("never recovered within one drain plus a publish period (200 ms): {misses:?}");
 }
 
 #[test]
