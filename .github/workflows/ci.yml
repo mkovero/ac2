@@ -190,6 +190,50 @@ jobs:
       - name: doctests
         run: cargo test --workspace --locked --doc
 
+      # WASAPI on a virtual cable, with the debug binaries built above: hosted Windows runners
+      # have no audio endpoint. VB-CABLE gives a render endpoint looped into a capture one; it
+      # is installed after the tests so they see the runner as it is. Outputs stay silent.
+      - name: Virtual audio cable (VB-CABLE)
+        if: runner.os == 'Windows'
+        uses: LABSN/sound-ci-helpers@e9d6ba52163a3283714a68412036ddf33f78d49c # main, 2026-06
+
+      - name: Windows Audio service
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($s in 'AudioEndpointBuilder', 'Audiosrv') {
+            Set-Service -Name $s -StartupType Automatic
+            Start-Service -Name $s
+          }
+          Get-Service AudioEndpointBuilder, Audiosrv | Format-Table -AutoSize
+          Get-CimInstance Win32_SoundDevice | Format-Table -AutoSize Name, Status
+
+      # Groundwork for an ASIO backend: only that the driver registers itself.
+      - name: FlexASIO driver
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'FlexASIO-1.10b.exe'
+          Invoke-WebRequest -Uri https://github.com/dechamps/FlexASIO/releases/download/flexasio-1.10b/FlexASIO-1.10b.exe -OutFile $exe
+          $sha = (Get-FileHash -Algorithm SHA256 $exe).Hash
+          if ($sha -ne 'FE496BCC08D6C421C6244C8A60AC7B538560BDA138000FD1A54AB8EBCE031209') { throw "FlexASIO installer hash $sha" }
+          $p = Start-Process -FilePath $exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "FlexASIO installer exited $($p.ExitCode)" }
+          Get-ItemProperty -Path 'HKLM:\SOFTWARE\ASIO\FlexASIO' | Format-List
+
+      - name: ac2 on the virtual cable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: tools/release/windows-virtual-audio.ps1 -Bin target/debug -LogDir virtual-audio-logs
+
+      - name: Upload virtual-audio logs
+        if: runner.os == 'Windows' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtual-audio-logs
+          path: virtual-audio-logs/
+          if-no-files-found: ignore
+
       - name: Disk headroom
         if: always()
         shell: bash

@@ -4,7 +4,8 @@ This guide takes a tester from a fresh install to a real measurement on Windows 
 audio interface, in about an hour of hands-on time plus a one-hour unattended run. It covers
 what is not verified on Windows yet: WASAPI capture and playback with a real interface,
 timing, and long-run stability. The MSI install and the simulated rig were confirmed in a
-Windows 11 VM on 2026-10-03.
+Windows 11 VM on 2026-10-03. CI (all-OS and release runs) also opens WASAPI on a virtual
+cable, VB-CABLE (`tools/release/windows-virtual-audio.ps1`): no substitute for an interface.
 
 ## 1. Get and install the build
 
