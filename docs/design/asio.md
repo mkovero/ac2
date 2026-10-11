@@ -46,6 +46,13 @@ below settles it.
 2. The binding is chosen by a short spike against wineasio (§4a). The spike checks
    enumeration, buffer creation, `bufferSwitchTimeInfo` with a valid sample position,
    messages, and a clean stop/restart. ac2 keeps one binding, never two.
+   **Result: azo passes** (`tools/wine-asio/`, azo 0.4.0 under Wine 10 + wineasio 1.3.0). It
+   builds for msvc and gnu with no SDK; the sample position steps by exactly one buffer on
+   every switch (938/938) and equals `getSamplePosition`; a 2-in/2-out JACK loopback delays
+   by exactly one period in every pulse across separate runs. wineasio's system time comes
+   from `timeGetTime()` (1 ms steps), so it is unusable for the index and only the sample
+   position is used. **azo is the binding.** Quirks: the clock-source name has junk after its
+   NUL, `channel_info` reports inactive until buffers exist, the driver handle is `!Send`.
    - **azo passes:** the ASIO build links no Steinberg code and stays MIT. Shipping
      it in the default MSI then becomes a plain product decision.
    - **azo fails:** ac2 uses its own thin binding over the SDK (bindgen + `cc`, the
@@ -273,8 +280,8 @@ run must reopen by itself. Until this passes, ASIO is shipped as preview.
 
 ## 6. Open questions
 
-1. Does azo hold up in the §4a spike (time info, messages, stop/restart, thread affinity)?
-   Is a weeks-old, single-author crate acceptable as a dependency, or should ac2 vendor or
+1. azo held up under wineasio; vendor drivers on real Windows are still unchecked. Is a
+   weeks-old, single-author crate acceptable as a dependency, or should ac2 vendor or
    fork it?
 2. Trademark: with azo there is no SDK licence at all. Is plain-text "ASIO" in the UI and
    the docs nominative use with no logo duty? The SDK guidelines bind SDK licensees.
