@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 43`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 44`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -565,12 +565,13 @@ or a predicted window.
 #### Devices, preview and loopback detection (`session.*`)
 
 `session.devices` answers `[BackendInfo]`, one per backend the daemon offers, the one it was
-started on first: `kind: BackendKind` (`jack` \| `cpal` \| `fake`; `replay` is the kind of a
-replay session and is never listed), `description` (for the
+started on first: `kind: BackendKind` (`jack` \| `cpal` \| `asio` \| `fake`; `replay` is the
+kind of a replay session and is never listed), `description` (for the
 operator), `availability` (tagged by `type`: `available` \| `unavailable` {`reason`}: why,
 in plain words with the remedy, e.g. `No JACK server: start JACK (e.g. `jackd -d alsa`) or
 use PipeWire`) and `devices: [DeviceInfo]` (empty while unavailable). A daemon started on
-real audio offers its platform's backend (`jack` on Linux, `cpal` on macOS and Windows);
+real audio offers its platform's backend (`jack` on Linux, `cpal` on macOS and Windows; a
+Windows build with the `asio` feature offers `asio` and `cpal`, the one started on first);
 one started on the simulated rig offers only that (a simulated device never stands in for
 a missing real one).
 
@@ -578,8 +579,8 @@ a missing real one).
 `DirectionInfo | nil`, `duplex_clock`, `index`, `notes`. `DirectionInfo`: `max_channels`,
 `rates_hz` ([{min, max}]), `buffer_frames` ({min, max} \| nil), `default_rate_hz`,
 `default_buffer_frames` (u32 \| nil), `channel_names` ([string], one per channel, \| nil
-where the backend does not name channels: JACK gives the port alias or short name, cpal
-nothing), `system_default` (bool: the host's default device for this direction). A host
+where the backend does not name channels: JACK gives the port alias or short name, ASIO
+the driver's channel name, cpal nothing), `system_default` (bool: the host's default device for this direction). A host
 whose devices are single-direction endpoints (WASAPI) lists an interface as an input-only
 and an output-only device, each with `duplex_clock: unknown`.
 

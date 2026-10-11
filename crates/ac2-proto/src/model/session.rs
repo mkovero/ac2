@@ -18,6 +18,8 @@ pub enum BackendKind {
     /// A raw capture file played back (`session.replay`); never listed by
     /// `session.devices`.
     Replay,
+    /// ASIO drivers (Windows, in builds with the `asio` feature).
+    Asio,
 }
 
 /// How capture and playback of one device relate in time.

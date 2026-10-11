@@ -58,6 +58,50 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
                 },
                 devices: vec![],
             },
+            BackendInfo {
+                kind: BackendKind::Asio,
+                description: "ASIO drivers".into(),
+                availability: Availability::Available,
+                devices: vec![DeviceInfo {
+                    backend: BackendKind::Asio,
+                    host: "asio".into(),
+                    id: DeviceId("Fireface USB".into()),
+                    name: "Fireface USB".into(),
+                    input: Some(DirectionInfo {
+                        max_channels: 2,
+                        rates_hz: vec![
+                            RangeU32 {
+                                min: 44_100,
+                                max: 44_100,
+                            },
+                            RangeU32 {
+                                min: 48_000,
+                                max: 48_000,
+                            },
+                        ],
+                        buffer_frames: Some(RangeU32 { min: 32, max: 2048 }),
+                        default_rate_hz: Some(48_000),
+                        default_buffer_frames: Some(256),
+                        channel_names: Some(vec!["Mic/Line 1".into(), "Mic/Line 2".into()]),
+                        system_default: true,
+                    }),
+                    output: Some(DirectionInfo {
+                        max_channels: 2,
+                        rates_hz: vec![RangeU32 {
+                            min: 48_000,
+                            max: 48_000,
+                        }],
+                        buffer_frames: Some(RangeU32 { min: 32, max: 2048 }),
+                        default_rate_hz: Some(48_000),
+                        default_buffer_frames: Some(256),
+                        channel_names: Some(vec!["Analog 1".into(), "Analog 2".into()]),
+                        system_default: true,
+                    }),
+                    duplex_clock: ClockRelation::SingleCallback,
+                    index: IndexExactness::Exact,
+                    notes: vec!["buffer 32–2048 frames in powers of two".into()],
+                }],
+            },
         ])),
         Ok(ReplyBody::Preview(Preview {
             backend: BackendKind::Jack,
