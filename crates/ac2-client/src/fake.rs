@@ -34,6 +34,8 @@ use crate::endpoint::Endpoints;
 
 #[path = "fake_cal.rs"]
 mod cal;
+#[path = "fake_files.rs"]
+mod files;
 #[path = "fake_generator.rs"]
 mod generator;
 #[path = "fake_meas.rs"]
@@ -42,6 +44,8 @@ mod meas;
 mod session;
 #[path = "fake_spl.rs"]
 mod spl;
+#[path = "fake_sweeps.rs"]
+mod sweeps;
 #[path = "fake_traces.rs"]
 mod traces;
 use crate::io::wall_ns;
