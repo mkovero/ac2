@@ -356,6 +356,22 @@ recreating measurements 1–14 in id order, `trace import` of `autosave.vN/trace
   checkout once and failed on types the checkout no longer had; touching the sources
   (`find crates -name '*.rs' -exec touch {} +`) fixed it.
 
+## Deploy of 303d02a9 (2026-10-11, all three hosts)
+
+Protocol 40, session format 23. Pane layouts are stored with the measurement (`meas.layout`).
+Tab stops on live-curve rows. Two causes of spectrum frame drops are fixed: an animation
+frame now moves every pane that is in motion (while the Leq bars eased, the spectrum glide
+stopped for 0.3 s every second), and a spectrum frame is stamped at the end of its FFT frame.
+The new daemon set the format-22 autosave aside as `autosave.v22`. The audio session was
+reopened with 10 inputs (`--in 1-10`), as the operator had it, and the measurements were made
+again by hand from that autosave's `session.json`: FOH SPL, TF 1 (stopped), Spectrum 1
+(65536, Hann, 1/24 smoothing) and TF 2 (ref 9 → meas 1). The capture "TF 1 S1" was brought
+back with `trace import`; it now sits under Imported, not under TF 1. A `meas new … --start`
+on an input the session does not capture creates the measurement and then fails, so the
+first attempt at TF 2 left a stopped copy behind (deleted). On ketunkolo, `frame_probe` showed Spectrum 1
+at 11.75 frames/s with every `audio_sample` step exactly 8192, capture spacing 82.9–87.0 ms
+(it had been 66–100 ms before) and frames 9.6 ms old at arrival (p50).
+
 ## Deploy of 6f0e5b57 (2026-10-11, all three hosts)
 
 Protocol 39, session format 22. One deploy for a round of features: live frame arrays packed
