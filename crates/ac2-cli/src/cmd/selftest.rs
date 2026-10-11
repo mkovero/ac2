@@ -6,9 +6,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ac2_audio::{
-    Backend, ClockRelation, DeviceCaps, DeviceSelector, FakeBackend, FakeConfig, IndexExactness,
+    Backend, ClockRelation, DeviceCaps, DeviceSelector, Direction, FakeBackend, FakeConfig,
+    IndexExactness,
 };
 
+use super::devsel;
 use crate::args::{BackendArg, Cli, SelftestCmd, SelftestDuplex};
 use crate::output::Out;
 use crate::selftest::{self, DuplexReport, DuplexSpec, Emit, SetupError, Spread};
@@ -57,45 +59,19 @@ fn backend(b: BackendArg) -> Result<Arc<dyn Backend>, CliError> {
     }
 }
 
-/// The listed device `name` (an id, or a name ignoring case) names.
-fn find<'a>(devices: &'a [DeviceCaps], name: &str) -> Result<&'a DeviceCaps, CliError> {
-    devices
-        .iter()
-        .find(|d| d.id.0 == name)
-        .or_else(|| devices.iter().find(|d| d.name == name))
-        .or_else(|| devices.iter().find(|d| d.name.eq_ignore_ascii_case(name)))
-        .ok_or_else(|| {
-            let known: Vec<String> = devices
-                .iter()
-                .map(|d| format!("{} ({})", d.id, d.name))
-                .collect();
-            CliError::Usage(format!(
-                "no device {name:?}; listed: {}",
-                if known.is_empty() {
-                    "none".to_owned()
-                } else {
-                    known.join(", ")
-                }
-            ))
-        })
-}
-
 /// Device selection and channel defaults from what the backend lists.
 fn spec(a: &SelftestDuplex, devices: &[DeviceCaps]) -> Result<DuplexSpec, CliError> {
+    let listed: Vec<&DeviceCaps> = devices.iter().collect();
     let input = match &a.device {
-        Some(n) => Some(find(devices, n)?),
-        None => devices
-            .iter()
-            .find(|d| d.input.as_ref().is_some_and(|c| c.system_default))
+        Some(n) => Some(devsel::named(&listed, n, Direction::Input)?),
+        None => devsel::default_for(&listed, Direction::Input)
             .or_else(|| devices.iter().find(|d| d.input.is_some())),
     };
     let output = match &a.out_device {
-        Some(n) => Some(find(devices, n)?),
-        None => input.filter(|d| d.output.is_some()).or_else(|| {
-            devices
-                .iter()
-                .find(|d| d.output.as_ref().is_some_and(|c| c.system_default))
-        }),
+        Some(n) => Some(devsel::named(&listed, n, Direction::Output)?),
+        None => input
+            .filter(|d| d.output.is_some())
+            .or_else(|| devsel::default_for(&listed, Direction::Output)),
     };
     let input_map = match (&a.inputs, input.and_then(|d| d.input.as_ref())) {
         (Some(c), _) => c.0.clone(),
@@ -490,6 +466,26 @@ mod tests {
         // The capture device plays nothing: the default output device does.
         assert_eq!(s.output_channels, 2);
         assert!(spec(&args(&["--device", "nope"]), &devs).is_err());
+    }
+
+    #[test]
+    fn a_name_shared_by_two_endpoints_resolves_by_direction() {
+        // WASAPI lists playback and capture endpoints as separate devices, often with the
+        // same name; the playback one coming first must not be taken for capture.
+        let devs = [
+            device("play", "USB Audio", 0, 2, true),
+            device("rec", "USB Audio", 2, 0, true),
+        ];
+        let s = spec(
+            &args(&["--device", "USB Audio", "--out-device", "usb audio"]),
+            &devs,
+        )
+        .expect("spec");
+        assert_eq!(s.input_device, DeviceSelector::Id(DeviceId("rec".into())));
+        assert_eq!(s.output_device, DeviceSelector::Id(DeviceId("play".into())));
+        assert_eq!(s.input_map, [0, 1]);
+        assert_eq!(s.output_channels, 2);
+        assert!(spec(&args(&["--device", "play"]), &devs).is_err());
     }
 
     #[test]

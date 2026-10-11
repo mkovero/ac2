@@ -14,7 +14,7 @@ use crate::stream::{DuplexStream, Plumbing, StreamParts};
 use super::config::{FakeConfig, FakeConfigError, FakeDrive, FakeEndpoints, Pace};
 use super::outage::{Outage, OutageKind};
 use super::sim::{FakeDriver, Sim};
-use super::{FAKE_DEVICE_ID, FAKE_INPUT_ID, FAKE_OUTPUT_ID};
+use super::{FAKE_DEVICE_ID, FAKE_INPUT_ID, FAKE_OUTPUT_ID, FAKE_SPLIT_NAME as SPLIT_NAME};
 
 /// The simulated device. Cloning shares the parked manual driver slot and the device's
 /// availability.
@@ -223,14 +223,14 @@ impl Backend for FakeBackend {
             FakeEndpoints::Split => vec![
                 device(
                     FAKE_INPUT_ID,
-                    "simulated input endpoint",
+                    SPLIT_NAME,
                     input,
                     None,
                     ClockRelation::Unknown,
                 ),
                 device(
                     FAKE_OUTPUT_ID,
-                    "simulated output endpoint",
+                    SPLIT_NAME,
                     None,
                     output,
                     ClockRelation::Unknown,

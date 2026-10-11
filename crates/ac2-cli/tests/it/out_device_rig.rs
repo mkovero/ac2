@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use ac2_audio::fake::{FAKE_INPUT_ID, FAKE_OUTPUT_ID, FakeDrive};
+use ac2_audio::fake::{FAKE_INPUT_ID, FAKE_OUTPUT_ID, FAKE_SPLIT_NAME, FakeDrive};
 use ac2_audio::{FakeBackend, FakeConfig, FakeEndpoints};
 use ac2_cli::{Cli, Out, run_reporting};
 use ac2_client::Endpoints;
@@ -80,6 +80,20 @@ async fn session_open_plays_on_the_out_device() {
     );
     assert!(text.contains("another device"), "{text}");
 
+    // Nothing named: the system default capture and playback endpoints, not a refusal
+    // for listing more than one device.
+    let (code, text, err) = ac2(
+        &ep,
+        &["session", "open", "--backend", "fake", "--in", "1-2"],
+    )
+    .await;
+    assert_eq!(code, 0, "{text} {err}");
+    assert!(text.contains(FAKE_INPUT_ID), "{text}");
+    assert!(
+        text.contains(&format!("output {FAKE_OUTPUT_ID} × 2")),
+        "{text}"
+    );
+
     // Named explicitly, by id or by name.
     let (code, text, err) = ac2(&ep, &open(&["--out-device", FAKE_OUTPUT_ID])).await;
     assert_eq!(code, 0, "{text} {err}");
@@ -89,12 +103,7 @@ async fn session_open_plays_on_the_out_device() {
     );
     let (code, text, err) = ac2(
         &ep,
-        &open(&[
-            "--out-device",
-            "simulated output endpoint",
-            "--outputs",
-            "1",
-        ]),
+        &open(&["--out-device", FAKE_SPLIT_NAME, "--outputs", "1"]),
     )
     .await;
     assert_eq!(code, 0, "{text} {err}");
@@ -103,9 +112,32 @@ async fn session_open_plays_on_the_out_device() {
         "{text}"
     );
 
+    // Both endpoints share one name: each direction finds its own.
+    let (code, text, err) = ac2(
+        &ep,
+        &[
+            "session",
+            "open",
+            "--backend",
+            "fake",
+            "--device",
+            FAKE_SPLIT_NAME,
+            "--out-device",
+            FAKE_SPLIT_NAME,
+            "--in",
+            "1-2",
+        ],
+    )
+    .await;
+    assert_eq!(code, 0, "{text} {err}");
+    assert!(
+        text.contains(&format!("output {FAKE_OUTPUT_ID} × 2")),
+        "{text}"
+    );
+
     // The capture endpoint named as the output: refused before the daemon is asked.
     let (code, text, err) = ac2(&ep, &open(&["--out-device", FAKE_INPUT_ID])).await;
     assert_ne!(code, 0, "{text}");
-    assert!(err.contains("has no outputs"), "{err}");
+    assert!(err.contains("has no playback side"), "{err}");
     h.shutdown();
 }

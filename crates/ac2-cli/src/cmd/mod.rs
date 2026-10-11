@@ -5,6 +5,7 @@ mod bands;
 mod cal;
 mod daemon;
 mod delay;
+mod devsel;
 mod discover;
 mod gen_;
 mod ir;

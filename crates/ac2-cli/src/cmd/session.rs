@@ -6,10 +6,11 @@ use ac2_proto::model::*;
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
 
-use super::{connect, state};
+use super::{connect, devsel, state};
 use crate::CliError;
 use crate::args::*;
 use crate::output::{self, Out};
+use ac2_audio::Direction;
 
 pub(crate) async fn devices(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
@@ -49,32 +50,11 @@ pub(crate) async fn session(
                 )));
             }
             let of_backend: Vec<&DeviceInfo> = b.devices.iter().collect();
-            let named = |sel: &String| {
-                of_backend
-                    .iter()
-                    .find(|d| &d.id.0 == sel || &d.name == sel)
-                    .copied()
-                    .ok_or_else(|| {
-                        CliError::Usage(format!("no {want:?} device {sel:?} (see `ac2 devices`)"))
-                    })
-            };
-            let dev = match &o.device {
-                Some(sel) => named(sel)?,
-                None => match of_backend.as_slice() {
-                    [d] => *d,
-                    [] => {
-                        return Err(CliError::Usage(format!(
-                            "the daemon lists no {want:?} device"
-                        )));
-                    }
-                    _ => {
-                        return Err(CliError::Usage(format!(
-                            "{} {want:?} devices; choose one with --device (see `ac2 devices`)",
-                            of_backend.len()
-                        )));
-                    }
-                },
-            };
+            let (dev, out_dev) = pick(&of_backend, o.device.as_deref(), o.out_device.as_deref())
+                .map_err(|e| match e {
+                    CliError::Usage(m) => CliError::Usage(format!("{want:?}: {m}")),
+                    e => e,
+                })?;
             let rate = match o.rate {
                 None => None,
                 Some(f) if f.0.0.fract() == 0.0 && f.0.0 <= f64::from(u32::MAX) => {
@@ -100,10 +80,6 @@ pub(crate) async fn session(
                     input: in_ch.0,
                 }),
                 _ => None,
-            };
-            let out_dev = match &o.out_device {
-                Some(sel) => named(sel)?,
-                None => default_output(dev, &of_backend).unwrap_or(dev),
             };
             let has_outputs = out_dev.output.as_ref().is_some_and(|d| d.max_channels > 0);
             if o.outputs > 0 && !has_outputs {
@@ -189,14 +165,88 @@ pub(crate) async fn session(
     Ok(())
 }
 
-/// The playback device when none is named: the capture device itself when it has outputs
-/// (one device, one clock where the host allows it), else the system's default output.
-fn default_output<'a>(input: &'a DeviceInfo, devices: &[&'a DeviceInfo]) -> Option<&'a DeviceInfo> {
-    if input.output.is_some() {
-        return Some(input);
+/// The capture and playback devices `session open` asks for. Unnamed capture: the host's
+/// default capture device (or the only one). Unnamed playback: the capture device itself
+/// when it plays (one device, one clock where the host allows it), else the host's default
+/// playback device, else the capture device (which then has no outputs to offer).
+fn pick<'a>(
+    devices: &[&'a DeviceInfo],
+    device: Option<&str>,
+    out_device: Option<&str>,
+) -> Result<(&'a DeviceInfo, &'a DeviceInfo), CliError> {
+    let dev = match device {
+        Some(sel) => devsel::named(devices, sel, Direction::Input)?,
+        None => match devsel::default_for(devices, Direction::Input) {
+            Some(d) => d,
+            None => {
+                return Err(CliError::Usage(
+                    match devsel::count(devices, Direction::Input) {
+                        0 => "no capture device listed".to_owned(),
+                        n => format!(
+                            "{n} capture devices and no system default; choose one with \
+                             --device (see `ac2 devices`)"
+                        ),
+                    },
+                ));
+            }
+        },
+    };
+    let out_dev = match out_device {
+        Some(sel) => devsel::named(devices, sel, Direction::Output)?,
+        None if dev.output.is_some() => dev,
+        None => devices
+            .iter()
+            .find(|d| d.output.as_ref().is_some_and(|o| o.system_default))
+            .copied()
+            .unwrap_or(dev),
+    };
+    Ok((dev, out_dev))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cmd::devsel::tests::info;
+
+    #[test]
+    fn unnamed_devices_follow_the_system_defaults_among_many() {
+        let devs = [
+            info("{play}", "Speakers (USB Audio)", 0, 2, true),
+            info("{rec}", "Speakers (USB Audio)", 2, 0, true),
+            info("{mic}", "Microphone (Webcam)", 1, 0, false),
+            info("{hdmi}", "HDMI", 0, 8, false),
+        ];
+        let refs: Vec<&DeviceInfo> = devs.iter().collect();
+        let (i, o) = pick(&refs, None, None).expect("defaults");
+        assert_eq!((i.id.0.as_str(), o.id.0.as_str()), ("{rec}", "{play}"));
+
+        let (i, o) = pick(
+            &refs,
+            Some("Speakers (USB Audio)"),
+            Some("Speakers (USB Audio)"),
+        )
+        .expect("same name, both directions");
+        assert_eq!((i.id.0.as_str(), o.id.0.as_str()), ("{rec}", "{play}"));
+
+        let (i, o) = pick(&refs, Some("microphone (webcam)"), Some("HDMI")).expect("named");
+        assert_eq!((i.id.0.as_str(), o.id.0.as_str()), ("{mic}", "{hdmi}"));
+        assert!(pick(&refs, Some("HDMI"), None).is_err());
     }
-    devices
-        .iter()
-        .find(|d| d.output.as_ref().is_some_and(|o| o.system_default))
-        .copied()
+
+    #[test]
+    fn a_duplex_device_plays_through_itself_and_ambiguity_is_refused() {
+        let devs = [
+            info("a", "Interface", 8, 8, false),
+            info("b", "Speakers", 0, 2, true),
+        ];
+        let refs: Vec<&DeviceInfo> = devs.iter().collect();
+        let (i, o) = pick(&refs, None, None).expect("the only capture device");
+        assert_eq!((i.id.0.as_str(), o.id.0.as_str()), ("a", "a"));
+
+        let devs = [info("a", "A", 2, 0, false), info("b", "B", 2, 0, false)];
+        let refs: Vec<&DeviceInfo> = devs.iter().collect();
+        let e = pick(&refs, None, None).expect_err("refused");
+        assert!(e.to_string().contains("choose one with --device"), "{e}");
+        assert!(pick(&[], None, None).is_err());
+    }
 }
