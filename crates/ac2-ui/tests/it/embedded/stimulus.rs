@@ -153,6 +153,9 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    // A sweep pane of its own beside the transfer pane: the dialog's sweep goes there
+    // (Alt+5) and leaves the transfer pane (Alt+1) as it is.
+    d.st.set_prefs(crate::common::grid_with_sweep_ui_prefs());
     measure_from_empty(&mut d)?;
     let meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
 

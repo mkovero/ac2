@@ -680,6 +680,14 @@ pub fn grid_ui_prefs() -> ac2_ui::prefs::UiPrefs {
     p
 }
 
+/// [`grid_with_sweep_prefs`] in a fresh app's preferences: a sweep from the dialog lands
+/// on its own pane (Alt+5) and the transfer pane stays Alt+1.
+pub fn grid_with_sweep_ui_prefs() -> ac2_ui::prefs::UiPrefs {
+    let mut p = grid_ui_prefs();
+    p.layout.panes = Some(grid_with_sweep_prefs());
+    p
+}
+
 /// The pane showing `kind` (the one focused last when several do).
 pub fn pane(st: &ac2_ui::state::AppState, kind: ac2_ui::state::PaneKind) -> ac2_ui::state::PaneId {
     st.layout

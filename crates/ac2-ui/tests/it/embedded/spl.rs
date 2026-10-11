@@ -678,8 +678,9 @@ fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     {
         d.key("G");
     }
+    // The history strip is a set-once Display choice: the palette command (no key).
     assert!(!d.st.view.spl.layout.history);
-    d.key("Shift+B");
+    d.send(Msg::Command(CommandId::SplLeqHistory));
     assert!(d.st.view.spl.layout.history);
     d.until("the run clock past 4 s", |s| {
         run_seconds(s).is_some_and(|t| t >= 4)
@@ -687,10 +688,10 @@ fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     let caption = run_caption(&d.st).ok_or("caption")?;
     assert!(caption.contains(" since "), "{caption}");
     assert!(caption.contains("LAeq total "), "{caption}");
-    // Shift+B off: the run goes with the history; on again, it is back.
-    d.key("Shift+B");
+    // History off: the run goes with it; on again, it is back.
+    d.send(Msg::Command(CommandId::SplLeqHistory));
     assert_eq!(run_caption(&d.st), None);
-    d.key("Shift+B");
+    d.send(Msg::Command(CommandId::SplLeqHistory));
     assert!(run_caption(&d.st).is_some());
     let before = run_seconds(&d.st).ok_or("clock")?;
 

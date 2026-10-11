@@ -343,7 +343,7 @@ fn slow_band_leq_from_an_empty_daemon() {
     step_until(&mut h, "the bands", |a| {
         a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::Bands
     });
-    // With a band meter the G hint names the band view too.
+    // The G hint is the same in every pane: it steps the views, the bands among them.
     let hints = h
         .state()
         .state
@@ -353,7 +353,7 @@ fn slow_band_leq_from_an_empty_daemon() {
             ac2_ui::keys::LabelStyle::Pc,
         )
         .expect("the SPL pane focused");
-    assert_eq!(hints[0].text(), "G meter/Leq/both/bands");
+    assert_eq!(hints[0].text(), "G/Shift+G view");
     h.key_press(Key::W);
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
     let has_frame = move |a: &ac2_ui::App| {
