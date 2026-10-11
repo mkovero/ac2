@@ -779,6 +779,54 @@ and a capture (**Ctrl+1**) are the newest spectrum itself, and a stale, stopped 
 reconfigured measurement is drawn as it is. **Settings › Display › Spectrum** "jumps to each
 new frame" turns it off (remembered); RTA curves follow the same setting.
 
+#### Fixed or multi-resolution
+
+A spectrum's **Resolution** is either one FFT (`4096 pt` … `65536 pt`, the default 65 536)
+or **multi-resolution** (`multi-res 1/48 oct`; 1/12 … 1/96 oct). One FFT has one window for
+every frequency: a 65 536-point FFT resolves 0.73 Hz at 48 kHz but takes 1.4 s to see a
+change anywhere, a 2048-point one follows a change within 43 ms but cannot separate
+anything closer than 23 Hz. A multi-resolution spectrum runs six FFTs side by side, each
+half as long as the one before, and shows each frequency from the window suited to it: the
+low end as finely as a 65 536-point FFT at 96 kHz (1.46 Hz bins), the top from a window of
+about 21 ms.
+
+How fast each part follows a change, at 96 kHz (at 48 kHz the windows are the same length,
+half as many points):
+
+| Frequency | Windows | Updates every |
+|---|---|---|
+| below 203 Hz | 683 ms | 85 ms |
+| 203 – 406 Hz | 683 + 341 ms | 85 / 43 ms |
+| 406 – 812 Hz | 341 + 171 ms | 43 / 21 ms |
+| 812 Hz – 1.6 kHz | 171 + 85 ms | 21 ms |
+| 1.6 – 3.25 kHz | 85 + 43 ms | 21 ms |
+| 3.25 – 6.5 kHz | 43 + 21 ms | 21 / 11 ms |
+| above 6.5 kHz | 21 ms | 11 ms |
+
+Between two dashed lines the column blends the two windows, more of the shorter one the
+higher it is, so a level never steps where a window changes.
+
+- **Level**: tone level, as one FFT: a sine reads its RMS level at any frequency.
+  Broadband sound reads in a bandwidth that grows with frequency (about 1/64 octave
+  between 203 Hz and 6.5 kHz), so pink noise reads flat there and white noise rises 3 dB
+  per octave; below 203 Hz and above 6.5 kHz the bandwidth is the window's own bin. The
+  axis says `dBFS (tone, multi-res)`; hovering over it explains it.
+- **Where the windows change**: a faint grey dashed line marks each window's own frequency,
+  labelled with its length (`683 ms` … `21 ms`), on the spectrum and across the
+  spectrograph, and the cursor's frequency line names the windows behind the column
+  (`1.00 kHz · 171 + 85 ms windows`). So a curve that moves at the top while it holds still
+  at the bottom reads as what it is: the low columns change only when their long window has
+  a new frame, and the glide never moves a column between its frames. The columns below
+  what the longest window resolves at the chosen grid (below about 101 Hz at 1/48) are
+  shaded as in the [resolution marker](#resolution-and-the-resolution-marker); **the
+  marker's toggle** hides lines and shade alike.
+- **Averaging** counts frames of every window alike: `FIFO 16 frames` averages the top over
+  16 × 11 ms and the bottom over 16 × 85 ms. At most 128 frames.
+- **Captures** keep the multi-resolution columns (a log grid at the chosen resolution).
+- It costs about 4 times the processing of one 65 536-point FFT (all six windows are
+  computed at their own rates): about 2 % of one core at 96 kHz on a current desktop, an
+  estimated 5–7 % on a 2011 laptop (Core i5-2415M).
+
 #### Averaging (spectrum and RTA)
 
 Spectra and RTAs start **unaveraged**: each result is one frame, so a fluctuating sound
@@ -803,13 +851,14 @@ FIFO stores every frame (at most 511 frames at 65 536 points); an RTA's at most 
   measurement…* (`meas_edit` in the palette) on a selected spectrum or RTA changes it, its
   input, name and smoothing or bands, and keeps the rest (band range, weighting). A setting
   made from the CLI that the list does not offer shows as it is.
-- A spectrum's dialogs also pick its *FFT size* (64 … 65 536 points) and *Window* (Hann,
-  Blackman-Harris, flat-top, rectangular); the size's hint says what it gives at the
-  session's rate, e.g. `0.73 Hz bins · 1365 ms window · 5.9 updates/s` at 65 536 points and
-  48 kHz. The spectrograph keeps a row per update up to 30 a second (`…, 30 rows/s` says a
+- A spectrum's dialogs also pick its *Resolution* (an FFT of 64 … 65 536 points, or
+  multi-resolution at 1/12 … 1/96 oct, above) and *Window* (Hann, Blackman-Harris, flat-top,
+  rectangular); the resolution's hint says what it gives at the session's rate, e.g.
+  `0.73 Hz bins · 1365 ms window · 5.9 updates/s` at 65 536 points and 48 kHz, and
+  `0.68 s window at LF … 21 ms at HF` for multi-resolution. The spectrograph keeps a row per update up to 30 a second (`…, 30 rows/s` says a
   faster spectrum meets that): a longer window resolves finer and gives it fewer rows. A new
-  length or window on a running spectrum restarts it and its average. A spectrum named in a
-  math channel keeps its length (the channel's operands share one bin grid): edit the math
+  resolution or window on a running spectrum restarts it and its average. A spectrum named
+  in a math channel keeps its resolution (the channel's operands share one bin grid): edit the math
   channel first; its window changes freely.
 - The measurement list says it: `RTA  Room · running · avg FIFO 2400 frames`; so does
   `ac2 meas list`.
@@ -822,6 +871,9 @@ ac2 meas set room --average fifo:2400     # about 40 s of RTA results, a plain p
 ac2 meas set room --average off
 ac2 meas set main-l --blocks 16           # a transfer measurement's averaging
 ac2 meas set fft --fft 8192samples --window flattop
+ac2 meas new spectrum --input 2 --name live --resolution multi      # multi-res 1/48 oct
+ac2 meas set live --resolution multi:1/96
+ac2 meas set live --fft 65536samples                                # back to one FFT
 ```
 
 ### Spectrograph

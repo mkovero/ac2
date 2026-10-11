@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 40`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 41`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -229,9 +229,9 @@ the window are each client's. `invalid` for a ratio out of range and for more th
 panes; a session file's layout that is either is dropped on load.
 
 `meas.update` replaces the configuration and restarts a running job (averages start over;
-a spectrum's new `fft_len`, a power of two in 64 … 65 536, or `window` included: frames of
-the new `config_rev` carry the new bin grid's `grid_id`; a spectrum named by a math channel
-keeps its `fft_len`, `refused` otherwise), except when a transfer or spectrum measurement's configuration differs only in `smoothing`
+a spectrum's new `resolution` (§3.2 *Spectrum resolution*) or `window` included: frames of
+the new `config_rev` carry the new grid's `grid_id`; a spectrum named by a math channel
+keeps its `resolution`, `refused` otherwise), except when a transfer or spectrum measurement's configuration differs only in `smoothing`
 (and the name): display smoothing then changes in place, averaging goes on, and the first
 `tf` / `spec` frame with the new `config_rev` carries it (`TfMeta.smoothing`,
 `SpecMeta.smoothing`). Smoothing is fractional-octave (`SmoothingFraction`: `third` \|
@@ -1100,6 +1100,39 @@ cell is 1/(its linear window), set by `gate`; a distortion point's is, on the fu
 axis, 1/(k · its harmonic window) for every order k it reports, with `lf_harmonics: fine`
 each order's own window where it serves.
 
+#### Spectrum resolution (`SpecResolution`)
+
+`SpectrumConfig.resolution: SpecResolution` (tagged by `type`):
+
+- `fixed` {`fft_len`: a power of two in 64 … 65 536}: one FFT; frames on a `log_bins` grid
+  (§6), every column the same bin width `fs / fft_len` and the same window length.
+- `multi` {`grid`: `Resolution`}: a multi-resolution spectrum. Six full-rate FFTs of halving
+  length, the longest the smallest power of two whose bin is at most 96 000 / 65 536 Hz
+  (65 536 points at 88.2/96 kHz, 32 768 at 44.1/48 kHz, 131 072 at 176.4/192 kHz), each
+  with its own hop (the daemon's display hop rule: the largest power of two ≤ fs/30,
+  clamped to n/8 … n/2) and its own `averaging` (an `fifo` of N frames is N frames of
+  every band, so the longest band averages over N times its hop; at most 128 frames,
+  `invalid` beyond). Frames are on a `log` grid at `grid`'s points per octave from
+  `1000 · 2^−7` Hz (7.8 Hz) to below Nyquist (`k_min = −7·ppo`, `k_max =
+  floor(ppo · log2(fs / 2000) − ½)`). Level is the tone level as for `fixed`: band b serves
+  alone up to `A_b = 2κ(48)·fs/N_b` (`κ(p) = 1/(2^(1/2p) − 2^(−1/2p))`, so its bin fills
+  at most half a 1/48-octave column there), and between `A_b` and `A_{b+1} = 2A_b` the two
+  bands' column powers are blended, `(1−w)·P_b + w·P_{b+1}` with `w = f/A_b − 1`. A sine
+  reads its level everywhere; broadband noise reads in a bandwidth `ENBW · f / (2κ)` (about
+  1/64 octave for Hann) between the first and last anchor, with no step at an anchor, and
+  in the band's fixed bin below `A_0` and above `A_5`. A column has no value (NaN) until
+  every band behind it has a frame. The design note is `docs/design/multires-spectrum.md`.
+
+A `multi` frame carries `SpecMeta.bands` (`SpecBands` \| nil; nil for `fixed` and math):
+`bands` ([`SpecBand`], longest window first) and `unresolved` (`Unresolved`: the columns
+whose coarsest contributing bin is wider than a column, at 1/48 only below ≈ 101 Hz at
+96 kHz). `SpecBand` {`window`: Seconds (its FFT length / fs), `hop`: Seconds (how often its
+columns change), `sole`: Hz (its anchor `A_b`, where it alone serves; the longest band
+also alone below it, the shortest above it), `age`: Seconds \| nil (its
+newest frame's end before this frame's audio end; nil before its first frame)}. Ages are
+exact: every band's frame ends on a multiple of the shortest hop, and a column whose bands
+made no new frame since the previous `spec` frame repeats its previous value.
+
 #### Averaging depth
 
 `TransferConfig.depth: DepthPolicy` (tagged by `type`): `equal_confidence` (every MTW stage
@@ -1315,7 +1348,7 @@ layout as code.
 | `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
-| `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil) |
+| `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil) |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve`, `position` (`PositionCorrection` \| nil: included in the levels) |
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
 | `band_leq` | one column per band of each band window, window-major: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
@@ -1478,7 +1511,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 23, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 24, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
 ColourFamily | null, layout: PaneLayout | null}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,

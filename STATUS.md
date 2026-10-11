@@ -15,7 +15,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - Newest features: per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
   with a grey resolution marker where the estimate is coarser than the grid (`docs/user-guide.md`
   *Resolution and the resolution marker*); mic curve applied to sweeps; settable spectrum/RTA
-  averaging. Band Leq per 1/3-octave band (STM 545/2015): `docs/design/band-leq.md`; open items
+  averaging; multi-resolution spectrum (683 ms windows at LF … 21 ms at HF, window changes
+  marked: `docs/design/multires-spectrum.md`). Band Leq per 1/3-octave band (STM 545/2015): `docs/design/band-leq.md`; open items
   in `docs/design/backlog.md`.
 - REW cross-check (`tools/crosscheck`, `docs/rigs/pupu.md`): electrical and Genelec at −30 dBFS
   agree with REW and numpy (FAIL 0 on 684d610's predecessor 8b87f49 after the suite fixes).
