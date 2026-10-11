@@ -2,6 +2,7 @@
 //!
 //! Each platform has one real backend: JACK on Linux (JACK2, or PipeWire through
 //! pipewire-jack; there is no ALSA backend), cpal on macOS and Windows (Core Audio, WASAPI).
+//! A Windows build with the `asio` feature also has ASIO, its default, and offers both.
 //! The simulated rig is never a fallback: a fake device must never stand in for a missing
 //! real one, so it runs only when named.
 
@@ -19,15 +20,20 @@ pub enum BackendChoice {
     Cpal,
     /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
+    /// ASIO drivers; Windows builds with the `asio` feature.
+    Asio,
     /// A simulated rig ([`FAKE_RIG`]); never real audio.
     Fake,
 }
 
 impl BackendChoice {
-    /// This platform's real backend, and the default: JACK on Linux, cpal elsewhere.
+    /// This platform's real backend, and the default: JACK on Linux, ASIO on Windows when
+    /// built in, cpal elsewhere.
     pub const fn platform() -> Self {
         if cfg!(target_os = "linux") {
             Self::Jack
+        } else if cfg!(all(windows, feature = "asio")) {
+            Self::Asio
         } else {
             Self::Cpal
         }
@@ -38,6 +44,7 @@ impl BackendChoice {
         match self {
             Self::Cpal => "cpal",
             Self::Jack => "jack",
+            Self::Asio => "asio",
             Self::Fake => "fake",
         }
     }
@@ -55,9 +62,10 @@ impl FromStr for BackendChoice {
         match s {
             "cpal" => Ok(Self::Cpal),
             "jack" => Ok(Self::Jack),
+            "asio" => Ok(Self::Asio),
             "fake" => Ok(Self::Fake),
             other => Err(format!(
-                "unknown backend {other} ({} or fake)",
+                "unknown backend {other} ({}, asio or fake)",
                 Self::platform()
             )),
         }
@@ -140,13 +148,27 @@ pub(crate) fn describe(kind: ac2_audio::BackendKind) -> String {
             "Simulated rig (no audio): out 1 returns on in 1 (loop) and in 2 (room)".into()
         }
         ac2_audio::BackendKind::Replay => "A recording played back (capture only)".into(),
+        ac2_audio::BackendKind::Asio => "ASIO drivers: one driver serves input and output on \
+                                         its own clock, rate and buffer set with its control \
+                                         panel"
+            .into(),
     }
 }
 
-/// Every backend a daemon started on `choice` offers: that one alone. A platform has one
-/// real backend, and the simulated rig is offered only when named.
+/// Every backend a daemon started on `choice` offers, `choice` first. A platform has one
+/// real backend, except a Windows build with ASIO, which offers ASIO and the system audio
+/// together; the simulated rig is offered only when named, and alone.
 pub fn backends(choice: BackendChoice) -> Result<Vec<Arc<dyn Backend>>, String> {
-    Ok(vec![backend(choice)?])
+    let first = backend(choice)?;
+    let mut all = vec![first];
+    if cfg!(all(windows, feature = "asio")) {
+        match choice {
+            BackendChoice::Asio => all.push(backend(BackendChoice::Cpal)?),
+            BackendChoice::Cpal => all.push(backend(BackendChoice::Asio)?),
+            BackendChoice::Jack | BackendChoice::Fake => {}
+        }
+    }
+    Ok(all)
 }
 
 /// Builds the backend `choice` names; a backend this platform does not have is refused
@@ -168,6 +190,14 @@ pub fn backend(choice: BackendChoice) -> Result<Arc<dyn Backend>, String> {
         BackendChoice::Jack => {
             Err("JACK is supported on Linux only; use --backend cpal (the system audio)".into())
         }
+        #[cfg(all(windows, feature = "asio"))]
+        BackendChoice::Asio => Ok(Arc::new(ac2_audio::AsioBackend::new())),
+        #[cfg(not(all(windows, feature = "asio")))]
+        BackendChoice::Asio => Err(format!(
+            "this build has no ASIO: ASIO runs in Windows builds with the asio feature; use \
+             --backend {}",
+            BackendChoice::platform()
+        )),
     }
 }
 
@@ -180,6 +210,7 @@ mod tests {
         for c in [
             BackendChoice::Cpal,
             BackendChoice::Jack,
+            BackendChoice::Asio,
             BackendChoice::Fake,
         ] {
             assert_eq!(c.name().parse::<BackendChoice>(), Ok(c));
@@ -202,6 +233,16 @@ mod tests {
         let other = if cfg!(target_os = "linux") {
             assert_eq!(real, [ac2_audio::BackendKind::Jack]);
             BackendChoice::Cpal
+        } else if cfg!(all(windows, feature = "asio")) {
+            assert_eq!(
+                real,
+                [ac2_audio::BackendKind::Asio, ac2_audio::BackendKind::Cpal]
+            );
+            assert_eq!(
+                kinds(BackendChoice::Cpal),
+                [ac2_audio::BackendKind::Cpal, ac2_audio::BackendKind::Asio]
+            );
+            BackendChoice::Jack
         } else {
             assert_eq!(real, [ac2_audio::BackendKind::Cpal]);
             BackendChoice::Jack
@@ -209,6 +250,12 @@ mod tests {
         match backend(other) {
             Err(e) => assert!(e.contains("--backend"), "{e}"),
             Ok(_) => panic!("the other platform's backend is refused"),
+        }
+        if !cfg!(all(windows, feature = "asio")) {
+            match backend(BackendChoice::Asio) {
+                Err(e) => assert!(e.contains("no ASIO") && e.contains("--backend"), "{e}"),
+                Ok(_) => panic!("ASIO is refused where it is not built in"),
+            }
         }
     }
 }

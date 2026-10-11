@@ -242,6 +242,8 @@ pub enum BackendArg {
     Jack,
     /// The OS audio host (Core Audio, WASAPI): the real backend on macOS and Windows.
     Cpal,
+    /// ASIO drivers (Windows builds with ASIO; a daemon may run one).
+    Asio,
     /// Simulated device; never touches hardware.
     Fake,
 }

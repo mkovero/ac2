@@ -61,6 +61,12 @@ pub enum Unavailability {
          (e.g. `sudo apt install pipewire-jack`), else JACK2 (e.g. `sudo apt install jackd2`)"
     )]
     NoJackLibrary,
+    /// No ASIO driver is registered on this machine.
+    #[error(
+        "No ASIO driver is installed: install the interface's own ASIO driver, or FlexASIO \
+         (https://github.com/dechamps/FlexASIO) for a device that has none"
+    )]
+    NoAsioDriver,
     /// Anything else the host reported.
     #[error("{0}")]
     Host(String),
@@ -127,6 +133,19 @@ pub enum Unsupported {
         requested: usize,
         /// Backend limit.
         max: usize,
+    },
+    /// Input and output on two devices of a backend that serves both directions from one
+    /// device's callback (ASIO loads one driver per process).
+    #[error(
+        "input and output on two devices ({input} and {output}): {backend:?} runs both on one device"
+    )]
+    SeparateDevices {
+        /// Which backend.
+        backend: BackendKind,
+        /// Capture device asked for.
+        input: String,
+        /// Playback device asked for.
+        output: String,
     },
     /// No sample format this crate converts is offered in this direction.
     #[error("no supported sample format for {direction:?} at the requested rate and channels")]

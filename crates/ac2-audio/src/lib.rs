@@ -1,6 +1,7 @@
 //! Audio backend trait with explicit capabilities, and sample-indexed multichannel blocks.
 //! Backends: JACK on Linux (JACK2, or PipeWire through pipewire-jack), cpal on macOS and
-//! Windows (Core Audio, WASAPI), and a simulated device everywhere.
+//! Windows (Core Audio, WASAPI), ASIO on Windows (feature `asio`), and a simulated device
+//! everywhere.
 //!
 //! # Shape
 //!
@@ -45,12 +46,17 @@ pub mod replay;
 pub mod stream;
 pub mod timer;
 
+#[cfg(any(test, all(windows, feature = "asio")))]
+#[cfg_attr(not(all(windows, feature = "asio")), allow(dead_code))]
+mod asio_host;
 #[cfg(not(target_os = "linux"))]
 mod cpal_host;
 #[cfg(target_os = "linux")]
 mod jack_host;
 mod rng;
 
+#[cfg(all(windows, feature = "asio"))]
+pub use asio_host::AsioBackend;
 pub use backend::{
     Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
     DirectionCaps, DuplexRequest, FrameRange, HistoryRequest, IndexExactness, Negotiated, Presence,

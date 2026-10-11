@@ -1,6 +1,6 @@
 [package]
 name = "ac2-audio"
-description = "Audio backend trait with explicit capabilities, sample-indexed multichannel blocks; JACK (Linux), cpal (macOS, Windows) and fake backends."
+description = "Audio backend trait with explicit capabilities, sample-indexed multichannel blocks; JACK (Linux), cpal (macOS, Windows), ASIO (Windows, feature asio) and fake backends."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,10 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+# The ASIO backend (Windows only; does nothing elsewhere). Off by default.
+asio = ["dep:azo"]
 
 [dependencies]
 rtrb = "0.4"
@@ -26,6 +30,12 @@ log = "0.4"
 # macOS and Windows: the OS audio host (Core Audio, WASAPI) through cpal.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 cpal = "0.18"
+
+# Windows, feature `asio`: ASIO drivers over COM directly, without the Steinberg SDK. ac2's
+# fork of azo (MIT), pinned: a named apartment thread, a callback-side handle for
+# getSamplePosition/outputReady, and names that fill their buffer taken whole.
+[target.'cfg(windows)'.dependencies]
+azo = { git = "https://github.com/mkovero/azo", rev = "7c4e7be019b1f71a5dcf118c3b5b94b90438ed44", optional = true }
 
 # macOS: kqueue timers that opt out of coalescing (see src/timer.rs).
 [target.'cfg(target_os = "macos")'.dependencies]

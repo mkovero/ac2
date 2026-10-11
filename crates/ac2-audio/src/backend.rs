@@ -21,6 +21,9 @@ pub enum BackendKind {
     Fake,
     /// A recording played back by [`crate::replay`].
     Replay,
+    /// ASIO drivers on Windows (feature `asio`): one driver callback serves capture and
+    /// playback on the driver's clock, indexed by its sample position.
+    Asio,
 }
 
 /// Capture or playback.
@@ -119,6 +122,15 @@ pub enum StaticLatency {
     /// Only available per callback, as the capture / playback times in block headers and
     /// output ticks (cpal).
     PerCallbackTimestamps,
+    /// The driver's own statement for the open buffer size, in frames (ASIO
+    /// `getLatencies`): from the converter to the buffer the callback reads, and from the
+    /// buffer it writes to the converter.
+    Frames {
+        /// Capture side.
+        input: u32,
+        /// Playback side.
+        output: u32,
+    },
     /// The backend states nothing.
     Unknown,
 }
@@ -135,6 +147,8 @@ pub enum SampleFormat {
     I24,
     /// 16-bit integer.
     I16,
+    /// 64-bit float.
+    F64,
 }
 
 /// What one direction of a device offers.

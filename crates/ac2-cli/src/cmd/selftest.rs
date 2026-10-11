@@ -56,6 +56,12 @@ fn backend(b: BackendArg) -> Result<Arc<dyn Backend>, CliError> {
         BackendArg::Jack => Err(CliError::Usage(
             "JACK is supported on Linux only: use --backend cpal (the system audio)".into(),
         )),
+        #[cfg(all(windows, feature = "asio"))]
+        BackendArg::Asio => Ok(Arc::new(ac2_audio::AsioBackend::new())),
+        #[cfg(not(all(windows, feature = "asio")))]
+        BackendArg::Asio => Err(CliError::Usage(
+            "this build has no ASIO: ASIO runs in Windows builds with the asio feature".into(),
+        )),
     }
 }
 

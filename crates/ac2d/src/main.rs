@@ -16,9 +16,10 @@ platform's audio: JACK on Linux (JACK2, or PipeWire through pipewire-jack), cpal
 Audio / WASAPI) on macOS and Windows.
 
   --backend <name>       audio backend: jack (Linux) or cpal (macOS, Windows), the
-                         default; or fake (a simulated rig: out 1 → in 1 loopback,
-                         out 1 → in 2 acoustic path; only when named here, never as a
-                         fallback)
+                         default; asio (Windows builds with ASIO: their default,
+                         with cpal offered beside it); or fake (a simulated rig:
+                         out 1 → in 1 loopback, out 1 → in 2 acoustic path; only
+                         when named here, never as a fallback)
   --listen <tcp://iface[:port]>
                          network mode: ctrl on port (default 47820), data on port+1,
                          CURVE on both
