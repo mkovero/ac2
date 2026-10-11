@@ -1,0 +1,31 @@
+[package]
+name = "wine-asio-probe"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+autobins = false
+
+# Standalone: not a member of the ac2 workspace. The empty [workspace] table stops cargo
+# from walking up to the repo root manifest.
+[workspace]
+
+[features]
+default = ["cpal-asio"]
+# cpal's ASIO host needs the Steinberg SDK (CPAL_ASIO_DIR) at build time; azo does not.
+cpal-asio = ["dep:cpal"]
+
+[[bin]]
+name = "azo_probe"
+path = "src/bin/azo_probe.rs"
+
+[[bin]]
+name = "cpal_probe"
+path = "src/bin/cpal_probe.rs"
+required-features = ["cpal-asio"]
+
+[target.'cfg(windows)'.dependencies]
+# Talks to ASIO drivers over COM directly: no Steinberg SDK, and the sample position is
+# reachable from inside bufferSwitch.
+azo = "=0.4.0"
+cpal = { version = "=0.18.2", features = ["asio"], optional = true }
