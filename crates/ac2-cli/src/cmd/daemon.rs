@@ -257,9 +257,11 @@ fn signal_terminate(pid: u32) -> Result<(), CliError> {
     // A detached console process has no window to receive taskkill's close request, so
     // Windows can only end it forcefully; `stop` has already faded the output out and
     // closed the session through the daemon itself.
+    // taskkill reports success on stdout, which would corrupt `--json` output.
     #[cfg(windows)]
     let st = std::process::Command::new("taskkill")
         .args(["/PID", &pid.to_string(), "/F"])
+        .stdout(std::process::Stdio::null())
         .status();
     match st {
         Ok(s) if s.success() => Ok(()),

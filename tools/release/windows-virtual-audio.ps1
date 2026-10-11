@@ -1,7 +1,8 @@
 # Runs the Windows binaries on a virtual audio cable through WASAPI: the daemon's device
 # list, an in-process duplex self-test, and a daemon session whose capture is recorded for a
-# while. CI installs VB-CABLE first (its render endpoint "CABLE Input" loops into its capture
-# endpoint "CABLE Output"); any pair of endpoints works with -Capture/-Playback.
+# while. CI installs VB-CABLE first: its render endpoint loops into its capture endpoint.
+# Endpoint names vary by driver version and runner image ("CABLE Input" or "Speakers" for the
+# render side), so both are found by -Match plus direction and then addressed by id.
 #
 #   pwsh tools/release/windows-virtual-audio.ps1 -Bin target/debug -LogDir audio-logs
 #
@@ -10,8 +11,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Bin,
     [Parameter(Mandatory = $true)][string]$LogDir,
-    [string]$Capture = 'CABLE Output (VB-Audio Virtual Cable)',
-    [string]$Playback = 'CABLE Input (VB-Audio Virtual Cable)',
+    [string]$Match = 'VB-Audio Virtual Cable',
     [int]$Seconds = 30
 )
 $ErrorActionPreference = 'Stop'
@@ -66,14 +66,16 @@ try {
         Invoke-Ac2 'status' @('status') -Soft
     } | Out-Null
 
-    Write-Host "== ac2 devices: waiting for '$Capture' and '$Playback'"
+    Write-Host "== ac2 devices: waiting for a capture and a render endpoint matching '$Match'"
     # The endpoints appear once the audio service has picked up the freshly installed driver.
     $cpal = Wait-Until 'both endpoints in the cpal device list' 60 {
         $d = Invoke-Ac2 'devices' @('devices') -Soft
         $b = $d | Where-Object { $_.kind -eq 'cpal' }
-        if ($b -and ($b.devices | Where-Object { $_.name -eq $Capture -and $_.input }) -and
-            ($b.devices | Where-Object { $_.name -eq $Playback -and $_.output })) { $b }
+        if ($b -and ($b.devices | Where-Object { $_.name -like "*$Match*" -and $_.input }) -and
+            ($b.devices | Where-Object { $_.name -like "*$Match*" -and $_.output })) { $b }
     }
+    $Capture = @($cpal.devices | Where-Object { $_.name -like "*$Match*" -and $_.input })[0].id
+    $Playback = @($cpal.devices | Where-Object { $_.name -like "*$Match*" -and $_.output })[0].id
     $cpal.devices | ForEach-Object {
         $in = if ($_.input) { "in $($_.input.max_channels)" } else { '' }
         $out = if ($_.output) { "out $($_.output.max_channels)" } else { '' }
