@@ -16,7 +16,8 @@ pub struct SpecGlide {
     pub from: Arc<[f32]>,
     /// When the frame was taken.
     pub start: Instant,
-    /// How long it lasts, s: about the time since the frame before.
+    /// How long it lasts, s: about the time since the frame before
+    /// ([`curve_ease::Pacing`]).
     pub duration_s: f64,
 }
 
@@ -51,16 +52,19 @@ impl AppState {
     pub(super) fn keep_spec_glide(&mut self, d: &DataSnapshot) {
         if !self.prefs.spec_ease {
             self.spec_glide.clear();
+            self.spec_pacing.clear();
             return;
         }
         let old = self.data.as_deref();
         self.spec_glide.retain(|t, _| d.latest.get(t).is_some());
+        self.spec_pacing.retain(|t, _| d.latest.get(t).is_some());
         for tf in d.latest.frames.values() {
             let Some(to) = levels(&tf.frame.data) else {
                 continue;
             };
             let Some(prev) = old.and_then(|o| o.latest.get(&tf.topic)) else {
                 self.spec_glide.remove(&tf.topic);
+                self.spec_pacing.remove(&tf.topic);
                 continue;
             };
             let (a, b) = (&prev.frame.stamp, &tf.frame.stamp);
@@ -75,6 +79,7 @@ impl AppState {
                 levels(&prev.frame.data).filter(|p| same && p.len() == to.len())
             else {
                 self.spec_glide.remove(&tf.topic);
+                self.spec_pacing.remove(&tf.topic);
                 continue;
             };
             // Mid-glide, the curve moves on from where it is drawn, so it never jumps.
@@ -88,14 +93,24 @@ impl AppState {
                 self.spec_glide.remove(&tf.topic);
                 continue;
             }
-            let interval = tf.received.saturating_duration_since(prev.received);
+            // A refresh carries the newest capture time, not its result's: it never gets
+            // here (same levels), so it does not upset the pacing.
+            let duration_s = self
+                .spec_pacing
+                .entry(tf.topic)
+                .or_default()
+                .glide_s(d.drained, b.capture_wall_ns.0)
+                .unwrap_or_else(|| {
+                    let interval = tf.received.saturating_duration_since(prev.received);
+                    curve_ease::duration_s(interval.as_secs_f64())
+                });
             self.spec_glide.insert(
                 tf.topic,
                 SpecGlide {
                     to_seq: b.seq,
                     from: from.into(),
                     start: d.drained,
-                    duration_s: curve_ease::duration_s(interval.as_secs_f64()),
+                    duration_s,
                 },
             );
         }

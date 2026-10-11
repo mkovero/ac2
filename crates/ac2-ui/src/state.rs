@@ -1042,6 +1042,8 @@ pub struct AppState {
     /// Per live spectrum or RTA topic, the glide of its curve to the newest frame
     /// ([`ac2_scene::curve_ease`]).
     pub spec_glide: HashMap<Topic, SpecGlide>,
+    /// Per live spectrum or RTA topic, the capture times and arrivals that pace its glides.
+    pub spec_pacing: HashMap<Topic, ac2_scene::curve_ease::Pacing>,
     /// Stored traces' data, as fetched.
     pub traces: BTreeMap<TraceId, (Arc<TraceData>, Arc<GridDef>)>,
     /// The transfer view's stored-trace display math, kept between frames.
@@ -1207,6 +1209,7 @@ impl AppState {
             data: None,
             bar_from: HashMap::new(),
             spec_glide: HashMap::new(),
+            spec_pacing: HashMap::new(),
             traces: BTreeMap::new(),
             theme,
             view: ViewState::default(),

@@ -5,6 +5,18 @@
 //! curve in continuous motion without smearing it over time: it reaches every frame as the
 //! next one arrives. Only the line moves; cursor readouts, peak hold and captures read the
 //! newest frame itself.
+//!
+//! Frames reach the display later than they were captured by a delay that varies: the
+//! daemon hands audio on in batches whose period beats against a long FFT's hop, the link
+//! drains on its own clock. A glide as long as the time since the previous frame's arrival
+//! then ends too early before a late frame (the curve stops, a dropped frame to the eye) and
+//! too late before an early one (cut short, a jump). Paced by the frames' capture times
+//! instead ([`Pacing`]), every glide ends when the latest a frame has recently been would
+//! have it arrive, so the next frame is there before the curve stops; the cost is that much
+//! display latency.
+
+use std::collections::VecDeque;
+use std::time::Instant;
 
 /// Shortest glide, s: frames faster than this (a display frame or two apart) are hardly
 /// steps at all.
@@ -19,6 +31,54 @@ pub fn duration_s(interval_s: f64) -> f64 {
         interval_s.clamp(MIN_S, MAX_S)
     } else {
         MAX_S
+    }
+}
+
+/// Frames over which the latest arrival is remembered: a hop beating against the hand-off
+/// period comes back to its latest phase every few frames, and a few seconds of history
+/// keep a clock drifting between hosts out of it.
+pub const PACING_FRAMES: usize = 32;
+
+/// The capture times and arrivals of a live curve's recent frames, which pace its glides.
+#[derive(Clone, Debug, Default)]
+pub struct Pacing {
+    /// Arrival and capture wall clock (ns) of the first frame: lags are kept relative to
+    /// it, small enough for an `f64`.
+    anchor: Option<(Instant, u64)>,
+    /// Capture wall clock of the newest frame, ns.
+    last_ns: u64,
+    /// Arrival minus capture time of recent frames, s, relative to the anchor's.
+    lags: VecDeque<f64>,
+}
+
+impl Pacing {
+    /// Takes a frame captured at `wall_ns` (daemon wall clock) that reached the display at
+    /// `arrived`; the glide to it, s: the capture interval since the previous frame plus how
+    /// much earlier this frame came than the latest recent one. `None` for the first frame,
+    /// or one not captured after the previous (the history starts over from it).
+    pub fn glide_s(&mut self, arrived: Instant, wall_ns: u64) -> Option<f64> {
+        let Some((at0, wall0)) = self.anchor.filter(|_| wall_ns > self.last_ns) else {
+            self.anchor = Some((arrived, wall_ns));
+            self.last_ns = wall_ns;
+            self.lags.clear();
+            self.lags.push_back(0.0);
+            return None;
+        };
+        let interval_s = (wall_ns - self.last_ns) as f64 / 1e9;
+        let lag =
+            arrived.saturating_duration_since(at0).as_secs_f64() - (wall_ns - wall0) as f64 / 1e9;
+        self.last_ns = wall_ns;
+        if self.lags.len() == PACING_FRAMES {
+            self.lags.pop_front();
+        }
+        self.lags.push_back(lag);
+        let latest = self.lags.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        Some(duration_s(interval_s + (latest - lag)))
+    }
+
+    /// Starts over: the next frame is a first.
+    pub fn clear(&mut self) {
+        *self = Self::default();
     }
 }
 
@@ -59,6 +119,66 @@ mod tests {
         assert_eq!(duration_s(0.005), MIN_S);
         assert_eq!(duration_s(1.0), MAX_S);
         assert_eq!(duration_s(f64::NAN), MAX_S);
+    }
+
+    /// 85 ms frames handed on at 60 Hz: seven arrive 83 ms apart, then one 100 ms after.
+    /// Glides paced by arrival intervals stop before the late frame; paced by capture time,
+    /// each glide is still running when the next frame comes, and they end evenly spaced.
+    #[test]
+    fn glides_paced_by_capture_time_never_wait_for_a_late_frame() {
+        let t0 = Instant::now();
+        let hop_ns = 85_333_333u64;
+        let handoff_ns = 16_666_667u64;
+        let mut p = Pacing::default();
+        let mut prev: Option<(Instant, f64)> = None;
+        let mut ends = Vec::new();
+        for k in 0..64u64 {
+            let wall = 1_700_000_000_000_000_000 + k * hop_ns;
+            // Arrives at the next hand-off after its capture.
+            let since = k * hop_ns;
+            let arrive_ns = since.div_ceil(handoff_ns) * handoff_ns + 3_000_000;
+            let arrived = t0 + std::time::Duration::from_nanos(arrive_ns);
+            let glide = p.glide_s(arrived, wall);
+            if let Some((start, d)) = prev {
+                let ran = arrived.duration_since(start).as_secs_f64();
+                // Once the history holds the latest phase of the beat (the 18th frame), a
+                // glide is still running when the next frame comes.
+                if k > 17 {
+                    assert!(
+                        ran <= d + 1e-6,
+                        "frame {k}: glide of {d} s stopped {ran} s in"
+                    );
+                }
+            }
+            match glide {
+                Some(d) => {
+                    prev = Some((arrived, d));
+                    ends.push(arrived + std::time::Duration::from_secs_f64(d));
+                }
+                None => assert_eq!(k, 0, "only the first frame has no glide"),
+            }
+        }
+        // Once the latest arrival is known, glides end a hop apart.
+        let later: Vec<f64> = ends[17..]
+            .windows(2)
+            .map(|w| w[1].duration_since(w[0]).as_secs_f64())
+            .collect();
+        for dt in later {
+            assert!((dt - 0.085_333).abs() < 1e-5, "glides end {dt} s apart");
+        }
+    }
+
+    #[test]
+    fn a_capture_clock_going_back_starts_the_pacing_over() {
+        let t0 = Instant::now();
+        let mut p = Pacing::default();
+        assert_eq!(p.glide_s(t0, 1_000_000_000), None);
+        let d = p.glide_s(t0 + std::time::Duration::from_millis(80), 1_080_000_000);
+        assert!(d.is_some_and(|d| (d - 0.08).abs() < 1e-9), "{d:?}");
+        assert_eq!(
+            p.glide_s(t0 + std::time::Duration::from_millis(160), 900_000_000),
+            None
+        );
     }
 
     #[test]

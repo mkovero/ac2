@@ -208,6 +208,19 @@ fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {
 
 /// [`spec_frame`] with its `seq`, received and drained at `at`.
 fn spec_frame_at(t: &mut T, meas: u32, level: Vec<f32>, seq: u64, at: Instant) {
+    let wall = ac2_proto::samples::stamp(None).capture_wall_ns;
+    spec_frame_captured(t, meas, level, seq, at, wall);
+}
+
+/// [`spec_frame_at`] captured at `wall`.
+fn spec_frame_captured(
+    t: &mut T,
+    meas: u32,
+    level: Vec<f32>,
+    seq: u64,
+    at: Instant,
+    wall: ac2_proto::units::WallNs,
+) {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::Frame;
     use ac2_proto::FrameData;
@@ -230,6 +243,7 @@ fn spec_frame_at(t: &mut T, meas: u32, level: Vec<f32>, seq: u64, at: Instant) {
     });
     let stamp = ac2_proto::frame::FrameStamp {
         seq,
+        capture_wall_ns: wall,
         ..ac2_proto::samples::stamp(Some(grid.clone()))
     };
     let f = TopicFrame {
@@ -1233,4 +1247,31 @@ fn hidden_measurements_are_remembered_by_name() {
     u.key("Delete");
     assert!(meas_deleted(&u.key("Enter")).is_some());
     assert!(u.st.hidden_meas.is_empty());
+}
+
+/// Frames captured 85 ms apart that arrive 100 ms and then 67 ms apart (a long FFT's hop
+/// beating against the daemon's hand-offs) glide by their capture times: the glide to the
+/// early frame lasts until the latest seen arrival would have brought it, not 67 ms.
+#[test]
+fn live_curve_glides_are_paced_by_capture_time() {
+    use ac2_proto::units::WallNs;
+    let mut t = T::new();
+    let ms = |v: u64| std::time::Duration::from_millis(v);
+    let t0 = Instant::now();
+    let w0 = 1_700_000_000_000_000_000u64;
+    let hop = 85_000_000u64;
+    spec_frame_captured(&mut t, 3, vec![-60.0; 5], 1, t0, WallNs(w0));
+    spec_frame_captured(&mut t, 3, vec![-50.0; 5], 2, t0 + ms(100), WallNs(w0 + hop));
+    spec_frame_captured(
+        &mut t,
+        3,
+        vec![-40.0; 5],
+        3,
+        t0 + ms(167),
+        WallNs(w0 + 2 * hop),
+    );
+    let g = t.st.spec_glide.values().next().expect("gliding").clone();
+    assert_eq!(g.to_seq, 3);
+    // 85 ms of capture time, plus the 18 ms this frame came earlier than the one before.
+    assert!((g.duration_s - 0.103).abs() < 1e-6, "{}", g.duration_s);
 }
