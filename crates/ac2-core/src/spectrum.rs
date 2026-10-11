@@ -492,6 +492,14 @@ impl SpectrumAnalyzer {
         self.frames_averaged
     }
 
+    /// Samples pushed after the last sample of the newest analysed frame; `None` before the
+    /// first frame. A frame is the spectrum of the N samples ending there, so this places
+    /// a result on the input's own time axis, wherever a block boundary fell.
+    pub fn samples_since_frame(&self) -> Option<u64> {
+        let last_end = self.next_frame_at - self.cfg.hop as u64;
+        (self.total >= self.cfg.n as u64).then(|| self.total - last_end)
+    }
+
     /// Pushes samples; returns how many frames were analysed during this call.
     pub fn push(&mut self, mut block: &[f64]) -> usize {
         let mut frames = 0;
@@ -937,6 +945,10 @@ mod tests {
             count += many.push(chunk);
         }
         assert_eq!(count, frames);
+        // The newest frame ended at the same input sample however the input was split.
+        let since = (x.len() - n) % hop;
+        assert_eq!(one.samples_since_frame(), Some(since as u64));
+        assert_eq!(many.samples_since_frame(), Some(since as u64));
         let (a, b) = (one.average().expect("a"), many.average().expect("b"));
         assert_eq!(a.folded(), b.folded());
         // FIFO of 8 equals the mean of the last 8 single frames computed directly.

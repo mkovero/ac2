@@ -60,6 +60,14 @@ pub(crate) struct Spectrum {
     buf: Vec<f64>,
     end: Option<u64>,
     wall: u64,
+    /// End (exclusive) and wall clock of the newest analysed frame. A new result is
+    /// stamped here rather than at the newest block: audio is handed on in batches whose
+    /// period beats against the hop, so the newest block lands anywhere up to a hand-off
+    /// after the frame, and a stamp there would make evenly spaced spectra look unevenly
+    /// spaced in time to whatever places them by it (a spectrograph, a display glide).
+    result: Option<(u64, u64)>,
+    /// `result` has not gone out in a frame yet.
+    fresh: bool,
 }
 
 /// The live (display) grid of a spectrum at `fs`.
@@ -124,6 +132,8 @@ impl Spectrum {
             buf: Vec::new(),
             end: None,
             wall: 0,
+            result: None,
+            fresh: false,
         }
         .with_cal(cal))
     }
@@ -150,12 +160,26 @@ impl Spectrum {
 }
 
 impl Spectrum {
+    /// The stamp of the newest block, `end` exclusive.
     fn stamp(&self, end: u64) -> StampArgs {
+        self.stamp_at(end, self.wall)
+    }
+
+    /// The stamp of a frame carrying the newest analysed spectrum: at its own end when it
+    /// has not gone out yet, else (a setting changed, or a refresh) at the newest block.
+    fn result_stamp(&self, end: u64) -> StampArgs {
+        match self.result.filter(|_| self.fresh) {
+            Some((r_end, r_wall)) => self.stamp_at(r_end, r_wall),
+            None => self.stamp(end),
+        }
+    }
+
+    fn stamp_at(&self, end: u64, wall: u64) -> StampArgs {
         StampArgs {
             audio_sample: end.saturating_sub(1),
             config_rev: self.config_rev,
             applied_at: self.applied_at.unwrap_or(0),
-            wall_ns: self.wall,
+            wall_ns: wall,
             grid_id: Some(self.grid_id),
             protection: if self.levels.any_clip_held() {
                 ProtectionFlags::CLIP
@@ -220,6 +244,13 @@ impl Analysis for Spectrum {
         channel_f64(b, self.idx, &mut self.buf);
         if self.analyzer.push(&self.buf) > 0 {
             self.generation += 1;
+            let since = self.analyzer.samples_since_frame().unwrap_or(0);
+            let since_ns = since as f64 / self.analyzer.config().fs * 1e9;
+            self.result = Some((
+                b.end_sample() - since,
+                b.wall_ns.saturating_sub(since_ns as u64),
+            ));
+            self.fresh = true;
         }
         self.levels.push(b);
         self.end = Some(b.end_sample());
@@ -278,7 +309,15 @@ impl Analysis for Spectrum {
                 meta: self.meta(),
                 level: column_max(shown, &self.first_bin).map(db).collect(),
             };
-            if !e.send(stamp, FrameData::Spec(live)) {
+            if e.send(
+                StampArgs {
+                    protection: stamp.protection,
+                    ..self.result_stamp(end)
+                },
+                FrameData::Spec(live),
+            ) {
+                self.fresh = false;
+            } else {
                 self.pace.unsent();
             }
         }
@@ -298,7 +337,9 @@ impl Analysis for Spectrum {
         };
         let stamp = StampArgs {
             grid_id: Some(self.capture_grid_id),
-            ..self.stamp(end)
+            ..self
+                .result
+                .map_or_else(|| self.stamp(end), |(e, w)| self.stamp_at(e, w))
         };
         Some((stamp, FrameData::Spec(capture)))
     }

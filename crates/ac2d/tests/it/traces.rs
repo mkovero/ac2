@@ -781,7 +781,8 @@ fn spectrum_smoothing_live_and_captured() {
         run(&mut r.d, 0.3);
         r.c.ok(Command::GenRefresh { lease_token: r.tok });
     }
-    let end = end_sample(&r.d);
+    // A spectrum is stamped where its frame ended: one hop or less before the newest audio.
+    let end = end_sample(&r.d) - u64::from(SpectrumConfig::display_hop(4096, FS));
     let f = sub
         .frame(T, |f| {
             matches!(f.data, FrameData::Spec(_))

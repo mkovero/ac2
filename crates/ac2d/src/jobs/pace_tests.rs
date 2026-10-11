@@ -272,6 +272,60 @@ fn the_last_block_is_stamped() {
     assert_eq!(last.stamp.audio_sample.0 + 1, at);
 }
 
+/// A 65 536-point spectrum at 96 kHz has an 8192-sample hop (32 blocks of 256), and audio
+/// comes in hand-offs of 6 or 7 blocks (60 a second): the hop ends anywhere in a hand-off.
+/// Each spectrum is still stamped where its frame ended, sample and wall clock, so frames
+/// read as evenly spaced as they were analysed; the blocks after the frame do not shift it.
+#[test]
+fn spectra_are_stamped_where_their_frame_ended() {
+    const FS96: u32 = 96_000;
+    let r = Rig::new("hop-stamp");
+    r.subscribe(SPEC);
+    let mut s = Spectrum::new(
+        MeasId(1),
+        SpectrumConfig {
+            fft_len: 65_536,
+            ..spectrum_config()
+        },
+        FS96,
+        0,
+        InputCal::none(),
+        Rev(1),
+    )
+    .expect("spectrum");
+    let hop = u64::from(SpectrumConfig::display_hop(65_536, FS96));
+    assert_eq!(hop, 8192);
+    let wall0 = 1_000_000_000_000u64;
+    let wall_of = |end: u64| wall0 + end * 1_000_000_000 / u64::from(FS96);
+    let mut seed = 21;
+    let mut at = 0u64;
+    // 6.25 blocks per hand-off on average, as at 60 hand-offs a second.
+    for k in 1..=200u64 {
+        while at < k * 1600 / 256 * 256 {
+            let mut b = block(at, 0.1, &mut seed);
+            b.wall_ns = wall_of(at + u64::from(BLOCK));
+            s.push(&b);
+            at += u64::from(BLOCK);
+        }
+        s.emit(&r.em);
+    }
+    let spectra: Vec<Frame> = r
+        .frames()
+        .into_iter()
+        .filter(|f| matches!(f.data, FrameData::Spec(_)))
+        .collect();
+    assert!(spectra.len() > 20, "{} spectra", spectra.len());
+    for f in &spectra {
+        let end = f.stamp.audio_sample.0 + 1;
+        assert_eq!(end % hop, 0, "a spectrum stamped off its hop at {end}");
+        let off_ns = f.stamp.capture_wall_ns.0.abs_diff(wall_of(end));
+        assert!(off_ns < 1000, "wall clock {off_ns} ns off the frame's end");
+    }
+    for w in spectra.windows(2) {
+        assert_eq!(w[1].stamp.audio_sample.0 - w[0].stamp.audio_sample.0, hop);
+    }
+}
+
 #[test]
 fn capture_works_with_nobody_subscribed() {
     let r = Rig::new("capture");
