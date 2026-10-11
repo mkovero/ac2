@@ -5,21 +5,14 @@ baselines demonstrate: the newest baseline per rig and stage, each under its own
 ac2 build and level. The stages sit on different builds, and a claim about another build needs
 its own runs:
 
-- **pupu xone** (−30 dBFS): ac2 2c07efe, 2026-10-11, with the per-bin live-TF γ² and the
-  noise gates that also read each take's own quiet parts.
-- **pupu genelec** (−30 dBFS, the speaker ceiling of that session): ac2 d08cc70, 2026-10-10.
+- **pupu xone and genelec** (both at −30 dBFS): ac2 2c07efe, 2026-10-11, with the per-bin
+  live-TF γ² (3248315c) and noise gates that also read each take's own quiet parts, so a room
+  tone that is absent from the silent recording (the building's plant near 239 Hz, docs/rigs/pupu.md)
+  is gated instead of judged. Genelec −50 dBFS, its other baseline, is the same build and room:
+  FAIL 1 (REW's SPL at 51 Hz, +1.17 dB, where −50 dBFS on a speaker leaves the room's noise
+  close) and WARN 3, all ac2 sweep against another ac2 sweep or its own capture (open, below).
 - **pupu ambient** (silent; the operator was playing music in the room), the **OSM stage** and
   the **digital DUT** matrix (−10 and −30 dBFS on a dummy JACK server): ac2 6f0e5b5, 2026-10-11.
-
-Since d08cc70, ac2 forms the live TF's γ² per bin and averages it over the column weighted by Gxx
-(3248315c); d08cc70 read \|ΣGxy\|²/(ΣGxx·ΣGyy) over the column, which falls where the phase turns
-across a column. The genelec rows that rest on ac2's live-TF γ² are therefore **stale against
-current ac2**: the γ² ≥ 0.99 share, every live-TF row gated on it (against the direct estimate per
-band, with its n of columns, and against the steady sine) and the live-TF noise gate. The genelec
-sweep, REW, steady-sine, harmonic and arrival rows do not read ac2's γ², and the later protocol
-changes leave the full-precision outputs the suite reads (`trace capture`, `trace export --csv`,
-`spl watch --json`) as they were; still, those rows were measured on d08cc70 only. The xone
-column is current.
 
 Repeated takes, the coherence model and the DUT matrix are in [reports/](reports/): the Genelec
 repeats at 1/48 octave are five takes on two builds (8b87f49 and bdc1bec; REW's recording is in
@@ -69,59 +62,59 @@ in this baseline is such a cell; [reports/dut-coverage.md](reports/dut-coverage.
 
 ### pupu: ac2 against REW, per quantity
 
-| quantity | xone −30 dBFS (20261011T052811Z, ac2 2c07efe) | genelec −30 dBFS (20261010T173215Z, ac2 d08cc70) |
+| quantity | xone −30 dBFS (20261011T052811Z, ac2 2c07efe) | genelec −30 dBFS (20261011T191033Z, ac2 2c07efe) |
 |---|---|---|
-| response magnitude | as REW: 9/9 judged; ac2 − REW 0.013 dB @ 20–100 Hz [mean 0.000 dB, n 99 of 111] (PASS 3) | as REW, both miss alike, ac2 − REW WARN: 3/8 judged; ac2 and REW miss the truth alike (ac2 − REW within tolerance) at 1000 Hz; ac2 − REW 0.323 dB @ 20–100 Hz [mean −0.011 dB, n 20 of 111] (WARN 1, PASS 2) |
-| response phase | as REW: 9/9 judged; ac2 − REW 0.102° @ 20–100 Hz [mean +0.010°, n 99 of 111] (PASS 3) | as REW: 5/8 judged; ac2 − REW 2.280° @ 20–100 Hz [mean −0.186°, n 20 of 111] (PASS 3) |
-| absolute level | — | as REW: 5/8 judged; ac2 − REW +0.009 dB [n 96] (PASS 1) |
+| response magnitude | as REW: 9/9 judged; ac2 − REW 0.013 dB @ 20–100 Hz [mean 0.000 dB, n 99 of 111] (PASS 3) | as REW: 5/8 judged; ac2 − REW 0.284 dB @ 1000–20000 Hz [mean +0.034 dB, n 188 of 208] (PASS 3) |
+| response phase | as REW: 9/9 judged; ac2 − REW 0.102° @ 20–100 Hz [mean +0.010°, n 99 of 111] (PASS 3) | as REW: 5/8 judged; ac2 − REW 2.078° @ 20–100 Hz [mean −0.378°, n 19 of 111] (PASS 3) |
+| absolute level | — | as REW: 7/8 judged; ac2 − REW +0.014 dB [n 96] (PASS 1) |
 | group delay (±1/12-oct fit) | as REW: 6/8 judged | — |
-| harmonics H2–H5 | not judged (floor): 0/30 judged; ac2 − REW INCONCLUSIVE 150 | as REW, both miss alike: 8/26 judged; ac2 and REW miss the truth alike (ac2 − REW within tolerance) at H3 500 Hz; ac2 − REW +0.711 dB @ H2 2000 Hz (PASS 10, INCONCLUSIVE 68) |
+| harmonics H2–H5 | not judged (floor): 0/30 judged; ac2 − REW INCONCLUSIVE 150 | ac2 WARN (REW cannot tell): 9/26 judged; ac2 alone misses at H4 500 Hz; ac2 and REW miss the truth alike (ac2 − REW within tolerance) at H2 5000 Hz; ac2 − REW −1.284 dB @ H2 5000 Hz (PASS 7, INCONCLUSIVE 71) |
 | LF H2 at 22 Hz (10 Hz sweep) | not judged (floor): 0/1 judged | — |
 | arrival (vs its own capture) | PASS: 5/5 judged | PASS: 3/3 judged |
 
 ### pupu: electrical (xone) and speaker (genelec) paths, every row
 
-| check | xone −30 dBFS (20261011T052811Z, ac2 2c07efe) | genelec −30 dBFS (20261010T173215Z, ac2 d08cc70) |
+| check | xone −30 dBFS (20261011T052811Z, ac2 2c07efe) | genelec −30 dBFS (20261011T191033Z, ac2 2c07efe) |
 |---|---|---|
-| verdicts | PASS 211, INCONCLUSIVE 350, INFO 90 | WARN 15, PASS 145, INCONCLUSIVE 186, INFO 72 |
-| ac2 sweep vs REW offline import, magnitude spread per band | 0.013 dB @ 20–100 Hz [mean 0.000 dB, n 99 of 111] (PASS 3) | 0.323 dB @ 20–100 Hz [mean −0.011 dB, n 20 of 111] (WARN 1, PASS 2) |
-| ac2 sweep vs REW offline import, phase, max(\|mean\|, spread) per band | 0.102° @ 20–100 Hz [mean +0.010°, n 99 of 111] (PASS 3) | 2.280° @ 20–100 Hz [mean −0.186°, n 20 of 111] (PASS 3) |
-| REW offline vs direct (same recording), magnitude, max(\|mean\|, spread) per band | 0.010 dB @ 20–100 Hz [mean 0.000 dB, n 99 of 111] (PASS 3) | 0.180 dB @ 20–100 Hz [mean −0.008 dB, n 19 of 111] (PASS 3) |
-| REW offline vs direct (same recording), phase, max(\|mean\|, spread) per band | 0.104° @ 20–100 Hz [mean −0.003°, n 99 of 111] (PASS 3) | 1.767° @ 20–100 Hz [mean +0.026°, n 19 of 111] (PASS 3) |
-| ac2 sweep vs direct (its own capture), magnitude, max(\|mean\|, spread) per band | 0.009 dB @ 1000–20000 Hz [mean −0.005 dB, n 197 of 208] (PASS 3) | 0.163 dB @ 20–100 Hz [mean +0.001 dB, n 24 of 111] (PASS 3) |
-| ac2 sweep vs direct (its own capture), phase, max(\|mean\|, spread) per band | 0.061° @ 20–100 Hz [mean +0.004°, n 99 of 111] (PASS 3) | 0.865° @ 20–100 Hz [mean +0.048°, n 24 of 111] (PASS 3) |
-| ac2 live TF vs direct (γ² ≥ 0.99), magnitude, max(\|mean\|, spread) per band | 0.017 dB @ 20–100 Hz [mean −0.001 dB, n 73 of 111] (PASS 3) | 0.208 dB @ 100–1000 Hz [mean 0.000 dB, n 21 of 159] (WARN 1, INCONCLUSIVE 2) |
-| ac2 live TF vs direct (γ² ≥ 0.99), phase, max(\|mean\|, spread) per band | 0.085° @ 20–100 Hz [mean −0.005°, n 73 of 111] (PASS 3) | 1.224° @ 100–1000 Hz [mean +0.030°, n 21 of 159] (PASS 1, INCONCLUSIVE 2) |
-| ac2 sweep vs steady sine, magnitude | +0.010 dB @ 15 Hz (PASS 9) | −0.320 dB @ 1000 Hz (WARN 1, PASS 2, INCONCLUSIVE 5) |
-| REW offline vs steady sine, magnitude | +0.004 dB @ 56.2 Hz (PASS 9) | −0.324 dB @ 1000 Hz (WARN 1, PASS 2, INCONCLUSIVE 5) |
-| ac2 live TF vs steady sine, magnitude | −0.001 dB @ 93.9 Hz (PASS 7) | −0.006 dB @ 200 Hz (PASS 2, INCONCLUSIVE 1) |
-| ac2 sweep vs steady sine, phase | +0.037° @ 40.5 Hz (PASS 9) | +2.728° @ 2000 Hz (PASS 5, INCONCLUSIVE 3) |
-| REW offline vs steady sine, phase | −0.066° @ 15 Hz (PASS 9) | +1.879° @ 2000 Hz (PASS 5, INCONCLUSIVE 3) |
-| ac2 live TF vs steady sine, phase | −0.056° @ 40.5 Hz (PASS 7) | +0.400° @ 100 Hz (PASS 3) |
-| ac2 meas÷ref vs REW (meas − ref), absolute level | −0.001 dB [n 96] (PASS 1) | +0.009 dB [n 96] (PASS 1) |
-| ac2 reference level vs REW's | −0.006 dB (PASS 1) | −0.005 dB (PASS 1) |
-| ac2 reported arrival vs direct, every sweep | −0.02 µs @ 3Hz-5.5s (PASS 5) | −0.53 µs @ 20Hz-5.5s (PASS 3) |
+| verdicts | PASS 211, INCONCLUSIVE 350, INFO 90 | WARN 11, PASS 158, INCONCLUSIVE 183, INFO 72 |
+| ac2 sweep vs REW offline import, magnitude spread per band | 0.013 dB @ 20–100 Hz [mean 0.000 dB, n 99 of 111] (PASS 3) | 0.284 dB @ 1000–20000 Hz [mean +0.034 dB, n 188 of 208] (PASS 3) |
+| ac2 sweep vs REW offline import, phase, max(\|mean\|, spread) per band | 0.102° @ 20–100 Hz [mean +0.010°, n 99 of 111] (PASS 3) | 2.078° @ 20–100 Hz [mean −0.378°, n 19 of 111] (PASS 3) |
+| REW offline vs direct (same recording), magnitude, max(\|mean\|, spread) per band | 0.010 dB @ 20–100 Hz [mean 0.000 dB, n 99 of 111] (PASS 3) | 0.317 dB @ 20–100 Hz [mean −0.036 dB, n 21 of 111] (WARN 1, PASS 2) |
+| REW offline vs direct (same recording), phase, max(\|mean\|, spread) per band | 0.104° @ 20–100 Hz [mean −0.003°, n 99 of 111] (PASS 3) | 1.934° @ 20–100 Hz [mean +0.284°, n 21 of 111] (PASS 3) |
+| ac2 sweep vs direct (its own capture), magnitude, max(\|mean\|, spread) per band | 0.009 dB @ 1000–20000 Hz [mean −0.005 dB, n 197 of 208] (PASS 3) | 0.109 dB @ 20–100 Hz [mean −0.002 dB, n 22 of 111] (PASS 3) |
+| ac2 sweep vs direct (its own capture), phase, max(\|mean\|, spread) per band | 0.061° @ 20–100 Hz [mean +0.004°, n 99 of 111] (PASS 3) | 0.849° @ 20–100 Hz [mean −0.036°, n 22 of 111] (PASS 3) |
+| ac2 live TF vs direct (γ² ≥ 0.99), magnitude, max(\|mean\|, spread) per band | 0.017 dB @ 20–100 Hz [mean −0.001 dB, n 73 of 111] (PASS 3) | 0.143 dB @ 100–1000 Hz [mean +0.001 dB, n 30 of 159] (WARN 1, INCONCLUSIVE 2) |
+| ac2 live TF vs direct (γ² ≥ 0.99), phase, max(\|mean\|, spread) per band | 0.085° @ 20–100 Hz [mean −0.005°, n 73 of 111] (PASS 3) | 1.133° @ 100–1000 Hz [mean +0.014°, n 30 of 159] (PASS 1, INCONCLUSIVE 2) |
+| ac2 sweep vs steady sine, magnitude | +0.010 dB @ 15 Hz (PASS 9) | −0.176 dB @ 2000 Hz (PASS 5, INCONCLUSIVE 3) |
+| REW offline vs steady sine, magnitude | +0.004 dB @ 56.2 Hz (PASS 9) | −0.185 dB @ 2000 Hz (PASS 5, INCONCLUSIVE 3) |
+| ac2 live TF vs steady sine, magnitude | −0.001 dB @ 93.9 Hz (PASS 7) | −0.498 dB @ 1000 Hz (WARN 1, PASS 2, INCONCLUSIVE 2) |
+| ac2 sweep vs steady sine, phase | +0.037° @ 40.5 Hz (PASS 9) | +1.187° @ 2000 Hz (PASS 5, INCONCLUSIVE 3) |
+| REW offline vs steady sine, phase | −0.066° @ 15 Hz (PASS 9) | +1.218° @ 2000 Hz (PASS 5, INCONCLUSIVE 3) |
+| ac2 live TF vs steady sine, phase | −0.056° @ 40.5 Hz (PASS 7) | +1.522° @ 1000 Hz (PASS 5) |
+| ac2 meas÷ref vs REW (meas − ref), absolute level | −0.001 dB [n 96] (PASS 1) | +0.014 dB [n 96] (PASS 1) |
+| ac2 reference level vs REW's | −0.006 dB (PASS 1) | −0.004 dB (PASS 1) |
+| ac2 reported arrival vs direct, every sweep | −0.02 µs @ 3Hz-5.5s (PASS 5) | +0.56 µs @ 20Hz-5.5s (PASS 3) |
 | ac2 arrival + phase slope vs direct, every sweep | 0.00 µs @ dist-probe (PASS 5) | — |
 | group delay vs sine pairs: ac2, ±1/12-oct fit | −0.01 µs @ 1040 Hz; −8.0 % @ 60.5 Hz (PASS 6, INCONCLUSIVE 2) | — |
 | group delay vs sine pairs: ac2 as displayed | 0.00 µs @ 10000 Hz; −5.9 % @ 60.5 Hz (PASS 3, INCONCLUSIVE 5) | — |
 | group delay vs sine pairs: REW, ±1/12-oct fit | +0.03 µs @ 1040 Hz; +4.6 % @ 40.5 Hz (PASS 7, INCONCLUSIVE 1) | — |
 | group delay vs sine pairs: REW's own GD export | −0.03 µs @ 10000 Hz; +6.6 % @ 40.5 Hz (INFO 8) | — |
-| H2–H5 vs steady sine: ac2 sweep | INCONCLUSIVE 30 | +5.133 dB @ H3 500 Hz (WARN 1, PASS 4, INCONCLUSIVE 21) |
-| H2–H5 vs steady sine: REW offline import | INCONCLUSIVE 30 | +5.034 dB @ H3 500 Hz (WARN 1, PASS 3, INCONCLUSIVE 22) |
-| absolute SPL vs steady sine: ac2 sweep | — | −0.326 dB @ 1000 Hz (PASS 5, INCONCLUSIVE 3) |
-| absolute SPL vs steady sine: REW (cal from ac2) | — | +0.547 dB @ 10000 Hz (WARN 1, PASS 7) |
-| live TF: share of columns at γ² ≥ 0.99, 31 Hz–20 kHz | 100.0 % (PASS 1) | 32.6 % (INFO 1) |
+| H2–H5 vs steady sine: ac2 sweep | INCONCLUSIVE 30 | +3.521 dB @ H2 5000 Hz (WARN 1, PASS 4, INCONCLUSIVE 21) |
+| H2–H5 vs steady sine: REW offline import | INCONCLUSIVE 30 | +4.807 dB @ H2 5000 Hz (WARN 1, PASS 2, INCONCLUSIVE 23) |
+| absolute SPL vs steady sine: ac2 sweep | — | −0.183 dB @ 2000 Hz (PASS 7, INCONCLUSIVE 1) |
+| absolute SPL vs steady sine: REW (cal from ac2) | — | +0.135 dB @ 10000 Hz (PASS 8) |
+| live TF: share of columns at γ² ≥ 0.99, 31 Hz–20 kHz | 100.0 % (PASS 1) | 44.6 % (INFO 1) |
 
 ### pupu: distortion coverage per harmonic order (steady-sine tones judged)
 
-| check | xone −30 dBFS (20261011T052811Z, ac2 2c07efe) | genelec −30 dBFS (20261010T173215Z, ac2 d08cc70) |
+| check | xone −30 dBFS (20261011T052811Z, ac2 2c07efe) | genelec −30 dBFS (20261011T191033Z, ac2 2c07efe) |
 |---|---|---|
-| H2 ac2 sweep | INCONCLUSIVE 8 | +1.919 dB @ 5000 Hz (PASS 1, INCONCLUSIVE 6) |
-| H3 ac2 sweep | INCONCLUSIVE 8 | +5.133 dB @ 500 Hz (WARN 1, PASS 1, INCONCLUSIVE 5) |
+| H2 ac2 sweep | INCONCLUSIVE 8 | +3.521 dB @ 5000 Hz (WARN 1, PASS 1, INCONCLUSIVE 5) |
+| H3 ac2 sweep | INCONCLUSIVE 8 | +0.420 dB @ 1000 Hz (PASS 2, INCONCLUSIVE 5) |
 | H4 ac2 sweep | INCONCLUSIVE 7 | INCONCLUSIVE 6 |
-| H5 ac2 sweep | INCONCLUSIVE 7 | +0.913 dB @ 500 Hz (PASS 2, INCONCLUSIVE 4) |
-| H2 REW offline import | INCONCLUSIVE 8 | +2.213 dB @ 5000 Hz (PASS 2, INCONCLUSIVE 5) |
-| H3 REW offline import | INCONCLUSIVE 8 | +5.034 dB @ 500 Hz (WARN 1, PASS 1, INCONCLUSIVE 5) |
+| H5 ac2 sweep | INCONCLUSIVE 7 | +0.043 dB @ 500 Hz (PASS 1, INCONCLUSIVE 5) |
+| H2 REW offline import | INCONCLUSIVE 8 | +4.807 dB @ 5000 Hz (WARN 1, PASS 1, INCONCLUSIVE 5) |
+| H3 REW offline import | INCONCLUSIVE 8 | +0.372 dB @ 1000 Hz (PASS 1, INCONCLUSIVE 6) |
 | H4 REW offline import | INCONCLUSIVE 7 | INCONCLUSIVE 6 |
 | H5 REW offline import | INCONCLUSIVE 7 | INCONCLUSIVE 6 |
 
@@ -213,7 +206,7 @@ in this baseline is such a cell; [reports/dut-coverage.md](reports/dut-coverage.
 | quantity | ac2 | REW (imported sweep) | OSM v1.5.2 | how the suite compares |
 |---|---|---|---|---|
 | transfer | live H1 = G_rm/G_rr over a multi-time-window ladder; sweep meas ÷ measured loopback ref | each input deconvolved by REW's stimulus, meas ÷ ref | mean of \|M\|/\|R\| per 80 ms tick (not H1); phase a mean of unit phasors | magnitudes only where both γ² ≥ 0.95; in noise OSM against E\|1 + N/R\|, ac2 against 0 dB |
-| coherence | γ² per bin from accumulated cross and auto spectra (≈ 7.6–8.1 effective averages per bin at 8 blocks), averaged over the column weighted by Gxx (since 3248315c; the pupu xone/genelec baselines on d08cc70 still read the earlier \|ΣGxy\|²/(ΣGxx·ΣGyy) over the column). The weight biases γ² upward beyond each bin's own finite-average bias, towards γ² + (1 − γ²)/n over many bins; ac2 keeps that bias by design | none | γ over a fixed 21 overlapping ticks (≈ 5.4 independent averages) | in noise both against their own E[γ̂²]: OSM Carter's at its Welch count (γ squared), ac2 Carter's per bin plus the weight's bias (k bins 1 − 1/k of the way to the limit, `coherence_study.ac2_column_g2`); ac2 against the true γ² where that is 1, and beside it (INFO) elsewhere |
+| coherence | γ² per bin from accumulated cross and auto spectra (≈ 7.6–8.1 effective averages per bin at 8 blocks), averaged over the column weighted by Gxx (since 3248315c; earlier builds read \|ΣGxy\|²/(ΣGxx·ΣGyy) over the column, which falls where the phase turns across a column). The weight biases γ² upward beyond each bin's own finite-average bias, towards γ² + (1 − γ²)/n over many bins; ac2 keeps that bias by design | none | γ over a fixed 21 overlapping ticks (≈ 5.4 independent averages) | in noise both against their own E[γ̂²]: OSM Carter's at its Welch count (γ squared), ac2 Carter's per bin plus the weight's bias (k bins 1 − 1/k of the way to the limit, `coherence_study.ac2_column_g2`); ac2 against the true γ² where that is 1, and beside it (INFO) elsewhere |
 | grid | 1/48-octave columns | native bins, unsmoothed | native bins; smoothing is display only | both power-averaged into ac2's columns |
 | delay finder | sub-sample (regularised H1, Hilbert IR) | removed by its timing markers | integer argmax of IFFT(M/R), not applied automatically | ac2 within 0.05 sample of truth, OSM ±0.5; in the delay cases and the speaker recording the harness inserts each finder's result (OSM's whole sample as `--delay`) and replays, as an operator would |
 | spectrum | dBFS peak convention, power mean of noise | not compared | RMS (a sine reads −3.01 dB); a linear mean of amplitudes | +3.01 dB added to OSM; on noise also +1.05 dB, the Rayleigh amplitude mean's √(π/4) under the power mean |
@@ -234,46 +227,59 @@ the evidence.
 
 **As good as REW:**
 
-- Response magnitude and phase. Xone: ac2 − REW signed mean ≤ 0.005 dB / 0.006° in every band,
-  spread ≤ 0.010 dB / 0.09°. Genelec: signed mean ≤ 0.011 dB below 1 kHz and +0.04 dB above,
-  phase −0.09 … −0.19°; the spread is 0.19–0.32 dB / 1.5–2.3° (the two tools run different
-  sweeps through a room, so single columns differ take to take: 20–100 Hz is WARN on this take
-  and was PASS at 0.20 dB on the last; the signed means show no material band-average offset
-  on this take, which does not rule out a local, frequency-dependent one). At the sines ac2 and
-  REW land within 0.01 dB of each other (1 kHz: ac2 −0.320, REW −0.324).
-- Electrical gain, ac2 meas÷ref vs REW meas − ref: −0.001 dB (Xone), +0.009 dB (Genelec). The
+- Response magnitude and phase. Xone: ac2 − REW signed mean ≤ 0.005 dB / 0.010° in every band,
+  spread ≤ 0.013 dB / 0.10°. Genelec: signed mean −0.005 … +0.040 dB, phase −0.38 … +0.05°; the
+  spread is 0.15–0.28 dB / 1.6–2.1°, PASS in all three bands (the two tools run different sweeps
+  through a room, so single columns differ take to take: 20–100 Hz was WARN at 0.32 dB on the
+  d08cc70 take; the signed means show no material band-average offset, which does not rule out
+  a local, frequency-dependent one). At the judged sines ac2 and REW land within 0.10 dB of each
+  other (1 kHz: ac2 −0.157, REW −0.145 dB, both PASS; on the d08cc70 take both read −0.32 dB
+  there, the room's fine structure inside a column, split in
+  [reports/genelec-30-repeats.md](reports/genelec-30-repeats.md), "Column-to-tone split at the
+  sines": the column-to-tone term scales with the column width, −0.607 / −0.303 / −0.153 dB at
+  1/24 / 1/48 / 1/96 octave, while ac2's sweep processing at 1 kHz is +0.006 ± 0.002 /
+  +0.001 ± 0.001 / +0.000 ± 0.000 dB over 2 / 5 / 2 earlier takes).
+- Electrical gain, ac2 meas÷ref vs REW meas − ref: −0.001 dB (Xone), +0.014 dB (Genelec). The
   Genelec's absolute SPL is a consistency check only (REW calibrated from ac2); the Xone has no
   SPL rows.
 - Harmonics where the rig gives a reading: on the Genelec every judged ac2 − REW harmonic
-  passes (10 on this take, largest +0.71 dB; at most +1.51 dB over the six bdc1bec takes that
-  have REW's recording, of eight bdc1bec Genelec takes at 1/24–1/96 octave, and +1.44 dB on the
-  8b87f49 take; those runs re-analysed with this suite).
+  passes (7 on this take, largest −1.28 dB, H2 at 5 kHz; at most +1.51 dB over the six bdc1bec
+  takes that have REW's recording, of eight bdc1bec Genelec takes at 1/24–1/96 octave, and
+  +1.44 dB on the 8b87f49 take; those runs re-analysed with this suite).
 - Group delay (Xone, ±1/12-oct fit) and ambient LAeq (−0.003 dB on the 6f0e5b5 take, −0.016 dB on d08cc70).
 - Arrival: ac2's reported arrival against the IR peak of its own sweep capture is within
-  ±0.8 µs on every Genelec take and ±0.007 µs on the Xone. (REW reports no arrival to compare.)
+  −0.17 … +0.56 µs on this Genelec take (±0.8 µs on every earlier one) and ±0.015 µs on the
+  Xone. (REW reports no arrival to compare.)
 
 **ac2 and REW miss the truth alike** (ac2 − REW within tolerance; both stay WARN):
 
 | difference | ac2 | REW | evidence |
 |---|---|---|---|
-| Genelec magnitude at 1 kHz vs steady sine | −0.320 dB | −0.324 dB | room fine structure inside a column: the column-to-tone term scales with the column width, −0.607 / −0.303 / −0.153 dB at 1/24 / 1/48 / 1/96 octave, while ac2's sweep processing (sweep − its own capture's column) at 1 kHz is +0.006 ± 0.002 / +0.001 ± 0.001 / +0.000 ± 0.000 dB (mean ± sd over 2 / 5 / 2 takes). At 1/48 octave over 100 Hz–10 kHz (5 takes) the processing term's mean is within ±0.011 dB (sd ≤ 0.015 dB); at 50 Hz it is −0.741 ± 1.254 dB, noise-limited and outside that bound. [reports/genelec-30-repeats.md](reports/genelec-30-repeats.md), "Column-to-tone split at the sines" per resolution |
-| Genelec H3 at 500 Hz vs steady sine | +4.76…+5.13 dB (three sweeps) | +5.03 dB | a shared sweep-versus-sine difference with no demonstrated mechanism yet; the two truths (ac2's net of the reference, REW's meas alone) are within 1.5 dB of each other, so the targets compare |
+| Genelec H2 at 5 kHz vs steady sine | +3.52 … +4.21 dB (three sweeps) | +4.81 dB | ac2 − REW −0.59 … −1.28 dB, PASS: the two analysers read the same harmonic, a shared sweep-versus-sine difference with no demonstrated mechanism. The d08cc70 take passed this cell (ac2 +1.50 … +1.97, REW +2.21 dB) |
+| Genelec H3 at 500 Hz vs steady sine (not judged on this take) | +4.95 dB (20 Hz / 5.5 s sweep) | +5.26 dB | the 1500 Hz mains line lies inside the ±24 Hz band a sweep reads as H3 = 1504.5 Hz, so the cell is INCONCLUSIVE; the shared sweep-versus-sine difference persists (+4.76 … +5.13 dB on ac2's three sweeps, +5.03 dB REW, d08cc70 take). No demonstrated mechanism; the two truths (ac2's net of the reference, REW's meas alone) are within 0.2 dB, so the targets compare |
 
 **ac2 worse, or ac2 alone:** on the ac2-vs-REW parity rows above, no rig quantity has ac2
-missing where REW passes. Outside them, ac2 alone has WARNs only on the digital DUT: 12 per level
-(open, below). The ambient RTA, judged against its own band filters, passes (+0.118 dB); against
-ideal band edges it reads 8.675 dB, context explained below by the filter skirts. On bdc1bec the Xone's H2 at 22 Hz on the 10 Hz / 5.5 s sweep failed
-(+10.8 dB over the steady sine, REW unable to tell): hum bursts on the Xone's input, below;
-d08cc70 reads that floor and the cell is a bound.
+missing where REW passes. Outside them ac2 alone has WARNs where REW has nothing to compare:
+on the Genelec −30 take the live TF (against its direct estimate 100 Hz–1 kHz, 0.143 dB; at the
+1 kHz sine −0.50 dB, also its SPL row) and one harmonic (H4 at 500 Hz on the `dist` sweep,
+−75.0 against the sine's −80.8 dBr, 12 dB over that sweep's floor, while REW's reading is only a
+bound at −60.8 dBr and the other two ac2 sweeps are bounds); on the Genelec −50 take, sweep
+repeatability; and 12 per level on the digital DUT (all open, below). REW alone is WARN on its
+deconvolution against numpy on the same recording, 20–100 Hz (0.317 dB, 21 of 111 columns). The
+ambient RTA, judged against its own band filters, passes (+0.118 dB); against ideal band edges
+it reads 8.675 dB, context explained below by the filter skirts. On bdc1bec the Xone's H2 at
+22 Hz on the 10 Hz / 5.5 s sweep failed (+10.8 dB over the steady sine, REW unable to tell): hum
+bursts on the Xone's input, below; since d08cc70 ac2 reads that floor, and on the 2c07efe take
+every Xone H2/H3 cell at 26–40 Hz is a bound, on ac2 and REW alike.
 
 **Explained by measurement** (residuals against the truth with a quantified, reproduced cause):
 
 | difference | numbers | evidence |
 |---|---|---|
-| Xone LF harmonics on the sweeps vs steady sine (bdc1bec: H2 at 22 Hz FAIL on the 10 Hz / 5.5 s sweep; H2/H3 at 35–40 Hz on the 3 Hz sweep missed by ac2 and REW, same sign) | +10.8 dB; −75…−77 dBr against a truth below −89 | hum bursts on the Xone's input (in 5): 35–95 Hz at −84…−92 dBFS for 0.25–0.75 s every 2–3 s over a quiet −118, the reference input clean at −127. A burst at the moment the sweep passes a fundamental lands in its harmonic windows; the post-roll noise windows read 0.5–1 s later. Its level in dBFS does not follow the drive (−50 … −20 dBFS records), an independent numpy separation of the same record reads the same (−82.0 vs −83.6 dBr) and linear twins read nothing (−160 dBr). d08cc70 reads each harmonic's floor beside its window, the noise of the same moment: these cells are now bounds, on ac2 and REW alike. [docs/rigs/pupu.md](../../docs/rigs/pupu.md) |
+| Xone LF harmonics on the sweeps vs steady sine (bdc1bec: H2 at 22 Hz FAIL on the 10 Hz / 5.5 s sweep; H2/H3 at 35–40 Hz on the 3 Hz sweep missed by ac2 and REW, same sign) | +10.8 dB; −75…−77 dBr against a truth below −89 | hum bursts on the Xone's input (in 5): 35–95 Hz at −84…−92 dBFS for 0.25–0.75 s every 2–3 s over a quiet −118, the reference input clean at −127. A burst at the moment the sweep passes a fundamental lands in its harmonic windows; the post-roll noise windows read 0.5–1 s later. Its level in dBFS does not follow the drive (−50 … −20 dBFS records), an independent numpy separation of the same record reads the same (−82.0 vs −83.6 dBr) and linear twins read nothing (−160 dBr). ac2 reads each harmonic's floor beside its window, the noise of the same moment: these cells are bounds, on ac2 and REW alike (all 26 Xone harmonic × tone cells on the 2c07efe take). [docs/rigs/pupu.md](../../docs/rigs/pupu.md) |
 | ac2 RTA vs numpy at ideal band edges, ambient (INFO) | 6f0e5b5 take (music in the room): largest \|difference\| 8.675 dB at 251 Hz over 29 bands; d08cc70 take (quiet): 1.797 dB | the filter definition: ac2's order-3 Butterworth bands (closed-form response, computed independently of ac2) applied to the same recording account for +8.681 dB of the 8.675 at 251 Hz, where the room carried strong energy near the 224 Hz edge between the 200 and 250 Hz bands (200 Hz band 62.9 dB SPL) that an order-3 skirt passes into its neighbour. Against those filters ac2's worst band is +0.118 dB at 7.9 kHz (median +0.013; judged, PASS), −0.012 dB on the quiet d08cc70 take. Ambient table |
 | ac2 vs OSM on the Genelec rig take | median 0.14 dB / 0.80°, 95th pct 1.05 dB / 5.7°, max 3.59 dB @ 69 Hz / 20.4° @ 55 Hz over 307 columns above the γ² gate | windows: OSM's one 0.68 s window and ac2's MTW ladder see different reflections; the tails sit at LF room modes. On the Xone path the same comparison is 0.005 dB / 0.13° at worst |
-| ac2 sweep capture vs REW's recording, arrival | +1.28…+2.10 µs on the d08cc70 take (three sweeps); +1.39…+2.32 µs over the seven earlier takes with REW's recording (1/24–1/96 repeats) | two different stimuli: the IR peak moves with each sweep's top-octave content. Context only (INFO); each analyser's arrival is judged against its own capture |
+| ac2 sweep capture vs REW's recording, arrival | +1.08…+1.87 µs on the 2c07efe take (three sweeps); +1.28…+2.10 µs on d08cc70; +1.39…+2.32 µs over the seven earlier takes with REW's recording (1/24–1/96 repeats) | two different stimuli: the IR peak moves with each sweep's top-octave content. Context only (INFO); each analyser's arrival is judged against its own capture |
 
 **By design** (a known difference of definition, not an error):
 
@@ -289,15 +295,16 @@ d08cc70 reads that floor and the cell is a bound.
 
 | difference | numbers | status |
 |---|---|---|
-| pupu xone and genelec on current ac2 | baselines on d08cc70 (column-sum γ²); current main 6f0e5b5 | the live-TF γ² share, the γ² ≥ 0.99-gated live-TF rows and the noise gate on these paths describe the old coherence; the sweep, REW, sine and arrival rows have no reason to move but are unmeasured on 6f0e5b5. Needs xone and genelec runs at operator-approved levels (the Genelec stage is audible: operator present) |
-| Genelec live TF at 1 kHz, its own term | −0.202 ± 0.167 dB at 1/48 (4 takes), +0.085 ± 0.045 at 1/96 (2) (mean ± sd) | the TF's MTW window at 1 kHz is shorter than the capture the direct estimate reads; a window effect is plausible, unmeasured |
-| Genelec live TF 100–1000 Hz vs its direct estimate (γ² ≥ 0.99 columns) | 1/48 octave: WARN on 4 of 5 earlier takes (max(\|mean\|, spread) ≤ 0.175 dB) and on the d08cc70 take (0.208 dB, n 21 of 159 columns); signed band mean −0.001 ± 0.011 dB over the five (mean ± sd; phase +0.012 ± 0.078°). 1/96 octave (2 takes, bdc1bec): FAIL and WARN, spread up to 0.300 dB with signed mean −0.005 dB | no material band-average offset shown by the five 1/48 takes, but the WARN spread itself is unexplained: a stable frequency-dependent error can cancel in a band mean, and per-frequency means and scatter across takes on a common mask are not yet compared. Every take here read the column-sum γ² (pre-3248315c), so which columns pass the γ² ≥ 0.99 gate changes on current ac2: needs new Genelec takes. [reports/genelec-30-repeats.md](reports/genelec-30-repeats.md), 1/48 and 1/96 octave, "Live TF vs its direct estimate, per band" |
-| Live-TF noise gate | Genelec 100–1000 Hz on the d08cc70 take: n 21 of 159 columns after every mask, against a 32.6 % γ² ≥ 0.99 share over 31 Hz–20 kHz | the gate's uncertainty takes the TF's FIFO block count as independent averages, though the blocks overlap, so it is a lower bound; it does not use the per-column effective-average model of the coherence study. Since 3248315c ac2's γ² is a Gxx-weighted per-bin mean that reads high in noise (0.548 at a true 0.5, 8 blocks), so σ from it is lower again and the gate admits more columns; the share and n here are from d08cc70's column-sum γ², stale until new rig runs. Whether its intervals cover the observed transfer-error scatter (white, coloured and non-stationary signals, across MTW crossovers) is unvalidated |
+| Genelec live TF at 1 kHz, its own term | −0.320 dB on the 2c07efe take (TF −0.498 dB against the sine, its direct estimate −0.178 dB; also the WARN on its SPL row, −0.50 dB); −0.202 ± 0.167 dB at 1/48 (4 earlier takes), +0.085 ± 0.045 at 1/96 (2) (mean ± sd) | the TF's MTW window at 1 kHz is shorter than the capture the direct estimate reads; a window effect is plausible, unmeasured |
+| Genelec live TF 100–1000 Hz vs its direct estimate (γ² ≥ 0.99 columns) | per-bin γ² (2c07efe take): WARN, max(\|mean\|, spread) 0.143 dB over 30 of 159 columns, signed mean +0.001 dB, phase 1.13° PASS. Column-sum γ², 1/48 octave: WARN on 4 of 5 earlier takes (≤ 0.175 dB) and on the d08cc70 take (0.208 dB, 21 of 159); signed band mean −0.001 ± 0.011 dB over the five (mean ± sd; phase +0.012 ± 0.078°). 1/96 octave (2 takes, bdc1bec): FAIL and WARN, spread up to 0.300 dB with signed mean −0.005 dB | no material band-average offset on any take, but the WARN spread itself is unexplained: a stable frequency-dependent error can cancel in a band mean, and per-frequency means and scatter across takes on a common mask are not yet compared. One per-bin take so far; repeats on it would separate scatter from a fixed error. [reports/genelec-30-repeats.md](reports/genelec-30-repeats.md) (column-sum takes), 1/48 and 1/96 octave, "Live TF vs its direct estimate, per band" |
+| Live-TF noise gate | Genelec 100–1000 Hz on the 2c07efe take: 30 of 159 columns after every mask (106 left out by the gate), against a 44.6 % γ² ≥ 0.99 share over 448 columns, 31 Hz–20 kHz (column-sum γ² on d08cc70: 21 of 159, 32.6 %) | the gate's uncertainty takes the TF's FIFO block count as independent averages, though the blocks overlap, so it is a lower bound; it does not use the per-column effective-average model of the coherence study. ac2's γ² is a Gxx-weighted per-bin mean that reads high in noise (0.548 at a true 0.5, 8 blocks), so σ from it is lower again and the gate admits more columns. Whether its intervals cover the observed transfer-error scatter (white, coloured and non-stationary signals, across MTW crossovers) is unvalidated |
+| Genelec H4 at 500 Hz, `dist` sweep (ac2 alone) | +5.76 dB WARN: −75.0 dBr against the sine's −80.8 (sine floor −93.0), the sweep's floor −87.0; the 20 Hz / 5.5 s and `dist-probe` sweeps are bounds (floors −75.6 / −75.4), REW a bound at −60.8 | open: the longer `dist` sweep reaches a floor low enough to read H4 at 2 kHz, and reads it 6 dB over the sine; one take, and the two shorter sweeps cannot confirm or refute it |
+| Genelec −50 dBFS: ac2 sweep repeatability | `dist` against its own capture 100–1000 Hz: 0.663 dB (signed mean −0.110 dB, 135 of 159 columns); `dist-probe` against the 20 Hz / 5.5 s sweep 1–20 kHz: 0.356 dB / 4.06° (means +0.056 dB / +0.061°, 191 of 208, after a fitted +0.65 µs delay) | at −30 dBFS the same pairs pass (0.036 dB; 0.198 dB / 1.31°); at −50 the room's noise is 20 dB nearer, but these columns passed the gate, so the cause is not separated on this take (on the earlier −50 take, 303d02a9, the equivalent rows sat on a room tone at 239 Hz that the gate now catches). Per-column residuals are not in the report |
 | DUT, 12 WARN at each level (−10 and −30 dBFS, 6f0e5b5) | 8 arrival: +0.69 … +0.76 µs (0.07 sample) on the two 10 Hz sweeps of the four DUT paths. 3 sweep-vs-direct magnitude on `dut-loud`: 20–100 Hz spread 0.092–0.111 dB on both 10 Hz sweeps, 100–1000 Hz spread 0.035 dB on 10 Hz / 5.5 s; signed means ≤ 0.001 dB. 1 model-limited harmonic (†): H3 at 50 Hz on `dut-floor-hp`, 10 Hz / 5.5 s, +0.54 / +0.56 dB | open. Arrival: the DUT's 7.2 kHz low-pass broadens the IR peak; how ac2's and the suite's peak interpolation differ there is unmeasured. Magnitude: only on the loud path, not on the other three; cause not investigated. The H3 cell is one the sweep's Wiener model cannot follow, at −110 dBFS: it read +0.31 … +0.58 dB over seven earlier matrix runs, WARN in two (d08cc70 baselines: +0.42 / +0.31), so its WARN here is that scatter, kept out of the coverage verdict. Both levels ran with a 4096-frame dummy period: at 2048 the host's load made xruns. `baselines/host/dut-*.json` |
 | Ambient RTA against its own filters: what the residual is | +0.118 dB worst band (7.9 kHz) with music in the room (6f0e5b5), −0.012 dB in a quiet room (d08cc70); bands across the range moved up by 0.02–0.12 dB against the quiet take | the filter model is exact, so the remainder is attributed to ac2's RTA FIFO spanning the recording plus a few seconds of the room around it, which a non-stationary room shows; plausible, not demonstrated (e.g. by capturing the RTA at the recording's end with a FIFO of the recording's length). The limit (0.25 / 0.5 dB) assumes it |
 | OSM's coherence average count | behaves like ≈ 5.8 averages at FFT16 against the 5.4 the Welch model gives; FFT14 matches its 19.4 | the model is slightly pessimistic; the PASS stands |
 | REW RTA vs numpy | largest \|difference\| 6.861 dB over 29 bands on the 6f0e5b5 take (music), 4.106 dB on the quiet d08cc70 take (INFO) | REW's RTA averaging (Forever) consistent with averaging in dB, and REW's band filters are not modelled here; not verified |
-| Distortion coverage on the rig | harmonic × tone cells judged on any ac2 sweep: xone 0 of 30, genelec 8 of 26 | the rig's own harmonics sit near the floor at −30 dBFS; the DUT matrix carries the distortion evidence: of 448 judged ac2 sweep cells (two levels, 6f0e5b5), the 384 quasi-static ones PASS within 0.19 dB, and the 64 cells where the sweep model cannot follow the DUT's pre-filter are reported apart (worst +0.56 dB, one WARN per level). [reports/dut-coverage.md](reports/dut-coverage.md) |
+| Distortion coverage on the rig | harmonic × tone cells judged on the primary ac2 sweep (coverage table): xone 0 of 30, genelec 5 of 26 | the rig's own harmonics sit near the floor at −30 dBFS; the DUT matrix carries the distortion evidence: of 448 judged ac2 sweep cells (two levels, 6f0e5b5), the 384 quasi-static ones PASS within 0.19 dB, and the 64 cells where the sweep model cannot follow the DUT's pre-filter are reported apart (worst +0.56 dB, one WARN per level). [reports/dut-coverage.md](reports/dut-coverage.md) |
 
 The OSM noise columns judge each analyser against a different question: ac2's H1 against the
 physical truth (0 dB), OSM's mean ratio against its expected bias. Both coherences are judged

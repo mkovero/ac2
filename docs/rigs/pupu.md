@@ -814,6 +814,19 @@ the LF harmonic cells are bounds on ac2 and REW alike. The burst source on in 5 
   industrial heating/cooling next door) coupling into that shield loop; the source is not
   located. A chassis-to-signal-ground bond FF400 ↔ Xone was being tried at the time of writing.
 
+### Room tone near 240 Hz (2026-10-11, passive capture on in 1, nothing emitted)
+
+A narrow tone drifting between 238.5 and 240.75 Hz sits about 16 dB above the neighbouring room
+floor on the MM1 at in 1 (30 s capture: 238.5 Hz at +15.7 dB over the 220–260 Hz median; other
+6 Hz windows 180–340 Hz +6…+10 dB, 300 Hz being mains). It stays with the 1086s off, and the
+1083 is passively cooled, so it is the building's plant or air conditioning. It comes and goes:
+it can be absent from the suite's silent recording and present a few minutes later during the
+takes (14–22 dB above the silent recording at 239 Hz on one Genelec −50 dBFS take). A noise gate
+fed only by the silent recording then judges that column as signal, and ac2's windowed IR and
+numpy's whole-recording estimate read the tone differently (−1.18 dB at 239.4 Hz). The suite's
+noise gate therefore also reads each take's own quiet parts before and after its sweep and
+keeps the larger noise per column.
+
 ### Digital DUT: floors, the fade-out edge, LF harmonics fine (2026-10-09, ac2d 2416a06 → 511efb0, −10 dBFS)
 
 - **Floor +3 dB** in the suite's own model: it deconvolved the measurement input's noise only,
