@@ -364,6 +364,21 @@ recreating measurements 1–14 in id order, `trace import` of `autosave.vN/trace
   checkout once and failed on types the checkout no longer had; touching the sources
   (`find crates -name '*.rs' -exec touch {} +`) fixed it.
 
+## Deploy of 2c07efef (2026-10-11, all three hosts)
+
+Protocol 43, session format 25. This build adds:
+- the spectrum level choice, tone or density (dBFS/Hz). New multi-resolution spectra start
+  on density, so they agree with a fixed FFT on broadband sound; fixed FFTs stay on tone;
+- list rows that follow the operator's model: a live curve, math channel or stored trace row
+  goes into the focused pane only, and only a measurement row brings its own panes, so two
+  spectrographs of different measurements stay side by side;
+- release builds without cross-crate LTO (a rebuild after an ac2-ui change takes 20 s, not
+  126 s).
+
+The new daemon set `autosave.v24` aside, and `session salvage /tmp/autosave.v24` restored
+all twelve measurements, the crosscheck sweeps included. The multi-resolution Spectrum 3
+came back on tone, as it was. The Pi cross build took 3 min 43 s.
+
 ## Deploy of c7bd24b1 (2026-10-11, all three hosts)
 
 Protocol 42, session format 24. This build adds:
