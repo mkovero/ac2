@@ -242,3 +242,39 @@ proptest! {
         }
     }
 }
+
+/// The arrays of the 16-bit encodings, decoded, against what went in.
+fn tf_arrays(f: &Frame) -> (&[f32], &[f32], &[f32]) {
+    let FrameData::Tf(t) = &f.data else {
+        panic!("not tf")
+    };
+    (&t.mag, &t.phase, &t.coh)
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// Quantisation stays within its budget: 0.005 dB, 0.005° (wrapped), 5·10⁻⁵ of γ²; plus
+    /// the f32 rounding of the decoded value.
+    #[test]
+    fn quantisation_stays_in_budget(
+        vals in prop::collection::vec((-300.0f32..300.0, -1.0e4f32..1.0e4, 0.0f32..=1.0), 1..300),
+    ) {
+        let mut f = samples::tf_frame();
+        let FrameData::Tf(t) = &mut f.data else { unreachable!() };
+        t.mag = vals.iter().map(|v| v.0).collect();
+        t.phase = vals.iter().map(|v| v.1).collect();
+        t.coh = vals.iter().map(|v| v.2).collect();
+        t.validity = vec![frame::ValidityMask::NONE; vals.len()];
+        let back = decode_frame(&parts_ref(&encode_frame(&f).expect("encodes"))).expect("decodes");
+        let (mag, phase, coh) = tf_arrays(&back);
+        for (i, (m, p, c)) in vals.iter().enumerate() {
+            let ulp = |x: f32| f64::from(x.abs()) * f64::from(f32::EPSILON);
+            prop_assert!((f64::from(mag[i]) - f64::from(*m)).abs() <= 0.005 + 2.0 * ulp(*m));
+            let d = (f64::from(phase[i]) - f64::from(*p)).rem_euclid(360.0);
+            prop_assert!(d.min(360.0 - d) <= 0.005 + 2.0 * ulp(*p), "{} -> {}", p, phase[i]);
+            prop_assert!((-180.0..180.0).contains(&phase[i]));
+            prop_assert!((f64::from(coh[i]) - f64::from(*c)).abs() <= 5e-5 + 1e-7);
+        }
+    }
+}

@@ -1819,11 +1819,17 @@ pub fn tf_frame() -> Frame {
                     phase: PhaseBasis::SharedTimeBase,
                 })),
             },
-            mag: (0..n).map(|i| val(i, -6.0 + i as f32 * 0.031_25)).collect(),
+            // On the wire's grids (hundredths of a dB and degree, ten-thousandths of γ²), so
+            // they decode to themselves.
+            mag: (0..n)
+                .map(|i| val(i, (3 * i as i32 - 600) as f32 / 100.0))
+                .collect(),
             phase: (0..n)
                 .map(|i| val(i, ((i * 15) % 720) as f32 * 0.5 - 180.0))
                 .collect(),
-            coh: (0..n).map(|i| val(i, (i % 33) as f32 / 32.0)).collect(),
+            coh: (0..n)
+                .map(|i| val(i, ((i % 41) * 250) as f32 / 10_000.0))
+                .collect(),
             validity: (0..n)
                 .map(|i| {
                     if i < 4 {

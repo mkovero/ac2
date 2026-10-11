@@ -14,6 +14,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 - Ctrl messages and events are **msgpack maps with named fields**; field order carries no
   meaning. Frame headers are the exception: **msgpack arrays**, positional (§5.3), since a
   frame goes out tens of times a second with a payload often smaller than its field names.
+  Frame arrays are packed binary, not msgpack (§5.2).
 - Unknown fields are refused everywhere (strict in both directions). Fields are never
   defaulted when missing, except that an absent optional field reads as `nil`.
 - Enums are snake_case strings (`"db_spl"`) when they carry no data. Enums with data are
@@ -28,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 38`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 39`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1219,11 +1220,36 @@ topics). Longest topic: 32 bytes.
 ```
 part 0   topic (UTF-8)
 part 1   header (msgpack array, ≤ 8192 bytes)
-part 2…  arrays: each exactly n × 4 bytes, little-endian; f32 or u32 per header
+part 2   payload, only when the header lists arrays: the arrays in the header's order,
+         each n elements in its `elem` encoding, concatenated and deflated (RFC 1951,
+         raw: no zlib or gzip wrapper)
 ```
 
 Columns are in grid order. Invalid values are NaN; where the reason matters a `validity`
 bitmask array says why.
+
+Element encodings (`elem`), all little-endian:
+
+| elem | bytes | encoding |
+|---|---|---|
+| `f32` | 4 | IEEE-754 binary32 |
+| `u32` | 4 | unsigned (bitmasks) |
+| `i16` | 2 | hundredths of the unit, `round(x × 100)` rounding halves up, clamped to ±32 766; −32 768 = NaN, −32 767 = −∞, 32 767 = +∞. Degrees are wrapped on the hundredths to [−18 000, 18 000), so a phase is in [−180°, 180°) and ±∞ degrees is NaN. Decoded as code ÷ 100 |
+| `u16` | 2 | ten-thousandths, `round(x × 10 000)` rounding halves up, clamped to 0 … 10 000; 65 535 = NaN; any other code above 10 000 refuses the frame. Decoded as code ÷ 10 000 |
+
+An `i16` or `u16` array goes as the differences of each code from the previous column's
+(the first from 0), modulo 2¹⁶, as two planes: the low byte of every difference, then the
+high byte of every difference. Neighbouring columns of a curve are close, so the high plane
+is mostly 0x00 / 0xff and deflates to little.
+
+Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec) and
+`ir_etc` are `i16`; `coh` is `u16`; bitmasks are `u32`; everything else (`ir_linear`,
+meters, Leq and band Leq windows) is `f32`. Precision: `i16` is within 0.005 dB or 0.005°
+of the value computed, `u16` within 5·10⁻⁵ of γ² — below the readouts (0.1 dB, 1°, 0.01)
+and, for a group delay fitted to the phase over 1/12 octave of 1/48-octave columns, below
+13 µs at 20 Hz and 3 µs at 100 Hz, far below the measurement's own phase noise there.
+Stored traces, captures, exports and math are formed in the daemon from the analysis in
+f32, never from frames (design: `docs/design/wire-slim.md`).
 
 ### 5.3 Header fields
 
@@ -1260,7 +1286,7 @@ layout as code.
 | `arrays` | [[`name`, `unit`, `elem`]] | one descriptor per array part, in part order |
 | `meta` | {kind: […]} | per-kind metadata (§5.4), fields in the order listed there |
 
-`elem` is `f32` or `u32`. `unit` is one of `db`, `dbfs`, `db_spl`, `deg`, `coherence`
+`elem` is `f32`, `u32`, `i16` or `u16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `db_spl`, `deg`, `coherence`
 (γ², 0…1), `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
 `u32`).
 
@@ -1325,19 +1351,36 @@ not `JUDGED`, else `over`, `near` or `ok`.
 
 ### 5.6 Bounds (checked before decoding)
 
-In order: 2 … 10 parts; total ≤ 2 MiB; topic valid; header ≤ 8192 bytes; then after the
-bounded header parse: `v`, `n` ≤ 65536, array count = parts − 2, every array part exactly
-n × 4 bytes, `kind` = topic = `meta` key, then the per-kind array schema and bitmask bits.
+In order: 2 or 3 parts; total ≤ 2 MiB; topic valid; header ≤ 8192 bytes; then after the
+bounded header parse: `v`, `n` ≤ 65536, ≤ 8 arrays, a payload part exactly when arrays are
+listed, the payload inflating to exactly n × Σ element sizes (inflation stops there: a
+payload that would inflate further is refused, so it cannot be a decompression bomb),
+`kind` = topic = `meta` key, then the per-kind array schema (each array's `elem` as fixed by
+its name), undefined `u16` codes and bitmask bits.
 A malformed frame is dropped and counted by the client; decoders never panic.
 
 ### 5.7 Sizes
 
-A 480-column `tf` frame: topic 6 B, header ≈ 150 B, four arrays (mag, phase, coh,
-validity) of 1920 B — ≈ 7.8 KB. At 60 fps ≈ 0.47 MB/s per
-measurement locally, half that remote at 30 fps. A default `spec` frame (65 536 points at
-48 kHz: 897 `log_bins` columns of one f32) is ≈ 3.7 KB; it goes out with each new spectrum
-(every hop: `n/8`, ≈ 6 per second at 65 536 points; ≈ 30 per second for short FFTs) and is
-repeated every 0.25 s of audio while nothing changes, ≈ 22 KB/s.
+Measured on the fake rig (`crates/ac2d/tests/wire_size.rs`, noisy high bands, so dearer
+than most real curves); bytes include topic, header and payload, not the transport:
+
+| frame | f32 arrays (v35) | now |
+|---|---|---|
+| `tf`, 480 columns | 7 863 B | ≈ 2 400 B (header ≈ 180 B) |
+| `spec`, 65 536 points (897 columns) | 3 696 B | ≈ 1 580 B |
+| `spec`, 4 096 points (513 columns) | 2 161 B | ≈ 1 010 B |
+| `rta`, 1/3 octave (30 bands) | 368 B | ≈ 210 B |
+| `band_leq` (11 windows), `leq` (5) | 988 B, 467 B | ≈ 870 B, 370 B |
+| `spl` (no arrays) | 138 B | 138 B |
+
+A `tf` stream goes out at its analysis hop (≈ 26 frames/s at 48 kHz, whatever the publish
+rate), a math channel's whenever an operand changes (up to the publish rate), a default
+`spec` with each new spectrum (every `n/8` samples: ≈ 6 per second at 65 536 points),
+re-sent every 0.25 s of audio while nothing changes. A session of three transfer functions
+and their average, three default spectra and a 4 096-point one, a 1/3-octave RTA, two SPL
+meters with band meters and the input meters is ≈ 2.7 Mbit/s at 30 fps and ≈ 3.2 Mbit/s at
+60 fps (9.3 Mbit/s at 60 fps with f32 arrays). Encoding and decoding a `tf` frame take ≈ 37
+and 17 µs on a desktop core.
 
 ## 6. Grids
 

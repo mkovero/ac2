@@ -1299,8 +1299,9 @@ fn smoothed_phase_and_spectrum() {
         };
         let mut moved: f64 = 0.0;
         for (i, p) in t.phase_wrapped_deg.iter().enumerate() {
+            // The frame reached the app in hundredths of a degree.
             assert!(
-                diff(*p, f64::from(want.phase[i])) < 1e-3,
+                diff(*p, f64::from(want.phase[i])) < 0.006,
                 "column {i}: drawn {p} vs smoothed {}",
                 want.phase[i]
             );
@@ -1311,7 +1312,7 @@ fn smoothed_phase_and_spectrum() {
         for i in 1..want.phase.len() {
             let step = t.phase_unwrapped_deg[i] - t.phase_unwrapped_deg[i - 1];
             let want_step = f64::from(want.phase[i] - want.phase[i - 1]);
-            assert!(diff(step, want_step) < 1e-3, "column {i}");
+            assert!(diff(step, want_step) < 0.011, "column {i}");
         }
         assert_eq!(s.legend[0].text, "Main L · ref · 1/6 oct");
 

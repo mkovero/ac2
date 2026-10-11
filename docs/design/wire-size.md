@@ -1,6 +1,7 @@
 # Wire size: encoding and compression of data frames
 
-Status: evaluation, not implemented. Wire format today: `docs/protocol.md` §1, §5. Related:
+Status: evaluation, superseded by [`wire-slim.md`](wire-slim.md) (16-bit arrays and deflate,
+for every client). Wire format today: `docs/protocol.md` §1, §5. Related:
 [`flow-control.md`](flow-control.md) (pacing a slow peer, which bounds latency whatever the
 frame size).
 

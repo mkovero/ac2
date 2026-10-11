@@ -574,9 +574,10 @@ fn live_smoothing_and_resmoothed_captures() {
     }));
     assert_eq!(a.edit.smoothing, Some(sixth()));
     let smoothed = data(c, a.id);
+    // Live frames carry hundredths of a dB (docs/protocol.md §5.2): within 0.005 dB.
     for i in band() {
         assert!(
-            (smoothed.mag_db[i] - shown.mag[i]).abs() < 1e-3,
+            (smoothed.mag_db[i] - shown.mag[i]).abs() < 0.006,
             "{} Hz: {} vs live {}",
             grid_freq(i),
             smoothed.mag_db[i],
@@ -603,7 +604,7 @@ fn live_smoothing_and_resmoothed_captures() {
             grid_freq(i),
             want_phase[i]
         );
-        assert!((f64::from(shown.mag[i]) - want_mag[i]).abs() < 1e-3);
+        assert!((f64::from(shown.mag[i]) - want_mag[i]).abs() < 0.006);
         moved = moved.max(deg_diff(p, f64::from(raw.phase_deg.as_ref().unwrap()[i])));
     }
     assert!(compared > 300, "{compared} columns compared");
@@ -846,8 +847,9 @@ fn spectrum_smoothing_live_and_captured() {
         if want_c.is_nan() {
             continue;
         }
+        // Live levels go in hundredths of a dB.
         assert!(
-            (f64::from(live.level[c]) - want_c).abs() < 1e-3,
+            (f64::from(live.level[c]) - want_c).abs() < 0.006,
             "column {c}: live {} vs ac2-core {want_c}",
             live.level[c]
         );
@@ -927,6 +929,14 @@ fn spectrum_live_columns_are_the_captured_bins_maxima() {
     assert_eq!(bins.len(), 32_769);
     let cols = ac2_proto::BinColumns::new(f64::from(FS), 65_536, 96);
     assert_eq!(live.level.len(), cols.len());
+    // Live columns go in hundredths of a dB (docs/protocol.md §5.3); the capture is formed
+    // in the daemon from the analysis itself, never from a frame, and keeps every bin's f32.
+    let on_wire_grid = |v: f32| v.is_finite() && f32::from((v * 100.0).round() as i16) / 100.0 == v;
+    let finite: Vec<f32> = bins.iter().copied().filter(|v| v.is_finite()).collect();
+    assert!(
+        finite.iter().filter(|v| !on_wire_grid(**v)).count() > finite.len() / 2,
+        "the capture lost precision"
+    );
     for (c, w) in cols.first_bin.windows(2).enumerate() {
         let top = bins[w[0] as usize..w[1] as usize]
             .iter()
@@ -934,14 +944,14 @@ fn spectrum_live_columns_are_the_captured_bins_maxima() {
             .filter(|v| v.is_finite())
             .fold(f32::NAN, f32::max);
         assert!(
-            live.level[c] == top || (live.level[c].is_nan() && top.is_nan()),
+            (live.level[c] - top).abs() <= 0.005 + 1e-4 || (live.level[c].is_nan() && top.is_nan()),
             "column {c}: {} vs {top}",
             live.level[c]
         );
     }
     // The tone: its peak bin, half a bin off centre, reads the same live.
     let peak = |v: &[f32]| v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    assert_eq!(peak(&live.level), peak(&bins));
+    assert!((peak(&live.level) - peak(&bins)).abs() <= 0.005 + 1e-4);
     assert!(peak(&bins) > -40.0, "{}", peak(&bins));
     drop(r.backend);
     r.h.shutdown();

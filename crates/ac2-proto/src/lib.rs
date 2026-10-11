@@ -2,7 +2,7 @@
 //! the protocol version. Transport-agnostic: bytes in, bytes out; no socket code here.
 //!
 //! Normative description: `docs/protocol.md`. Every ctrl and event message is msgpack with
-//! named fields; data frames are `[topic][msgpack header][little-endian 4-byte arrays…]`.
+//! named fields; data frames are `[topic][msgpack header][deflated arrays]`.
 #![forbid(unsafe_code)]
 
 pub mod cal;
@@ -11,13 +11,14 @@ pub mod event;
 pub mod frame;
 pub mod grid;
 pub mod model;
+mod packing;
 pub mod samples;
 pub mod topic;
 pub mod units;
 
 /// The one protocol version this build speaks. Peers on any other version are refused
 /// (`version_mismatch`); there is no negotiation and no fallback.
-pub const PROTO_VERSION: u16 = 38;
+pub const PROTO_VERSION: u16 = 39;
 
 pub use ctrl::{
     Command, CtrlError, Envelope, ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason,

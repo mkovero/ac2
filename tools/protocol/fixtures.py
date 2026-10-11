@@ -31,10 +31,6 @@ NAN = float("nan")
 INF = float("inf")
 
 
-def f32(x):
-    return struct.unpack("<f", struct.pack("<f", x))[0]
-
-
 # --------------------------------------------------------------------------------------
 # Shared values (mirror samples.rs)
 
@@ -67,7 +63,10 @@ def stamp(grid, protection=WEAK_REFERENCE):
     }
 
 
-def arr(name, unit, elem="f32"):
+def arr(name, unit, elem=None):
+    """The element encoding is fixed per array (docs/protocol.md §5.3)."""
+    if elem is None:
+        elem = {"mag": "i16", "phase": "i16", "level": "i16", "ir_etc": "i16", "coh": "u16"}.get(name, "f32")
     return {"name": name, "unit": unit, "elem": elem}
 
 
@@ -89,7 +88,7 @@ def frame(topic, kind, grid, meta, arrays, protection=WEAK_REFERENCE):
     header["arrays"] = [d for d, _ in arrays]
     header["meta"] = {kind: meta}
     values = {
-        d["name"]: [f32(v) if d["elem"] == "f32" else v for v in vals] for d, vals in arrays
+        d["name"]: [p.wire_value(d, v) for v in vals] for d, vals in arrays
     }
     return {"topic": topic, "header": header, "arrays": values}
 
@@ -127,9 +126,9 @@ def tf_frame():
             },
         },
         [
-            (arr("mag", "db"), [val(i, -6.0 + i * 0.03125) for i in range(n)]),
+            (arr("mag", "db"), [val(i, (3 * i - 600) / 100.0) for i in range(n)]),
             (arr("phase", "deg"), [val(i, ((i * 15) % 720) * 0.5 - 180.0) for i in range(n)]),
-            (arr("coh", "coherence"), [val(i, (i % 33) / 32.0) for i in range(n)]),
+            (arr("coh", "coherence"), [val(i, (i % 41) * 250 / 10000.0) for i in range(n)]),
             (
                 arr("validity", "bitmask", "u32"),
                 [THINNED if i < 4 else OUT_OF_BAND if i >= 470 else 0 for i in range(n)],
@@ -1102,7 +1101,7 @@ def check():
 
     # 5. The Python decoder refuses malformed frames without crashing.
     parts = p.read_container(os.path.join(FIX, "rust_frame_tf.bin"))
-    for bad in (parts[:1], parts[:-1], parts[:2] + [parts[2][:-1]] + parts[3:]):
+    for bad in (parts[:1], parts[:-1], parts[:2] + [parts[2][:-1]], parts + [b""]):
         try:
             p.decode_frame(bad)
             ok(False, "malformed frame accepted")

@@ -191,10 +191,16 @@ fn every_frame_kind_roundtrips() {
 fn tf_frame_size() {
     let parts = bytes_of(&samples::tf_frame());
     let total: usize = parts.iter().map(Vec::len).sum();
-    assert_eq!(parts.len(), 2 + 4);
+    assert_eq!(parts.len(), 3);
     assert!(parts[1].len() < MAX_HEADER_BYTES);
+    // Unpacked: 480 × (2 + 2 + 2 + 4) bytes; the sample's smooth curves deflate far below.
+    assert!(
+        parts[2].len() < 480 * 10 / 2,
+        "payload {} B",
+        parts[2].len()
+    );
     println!(
-        "tf 480 cols: topic {} B, header {} B, arrays 4 x {} B, total {} B",
+        "tf 480 cols: topic {} B, header {} B, payload {} B, total {} B",
         parts[0].len(),
         parts[1].len(),
         parts[2].len(),
@@ -270,10 +276,14 @@ fn malformed_frames_are_refused() {
     let good = bytes_of(&samples::tf_frame());
     let mut p = good.clone();
     p[2].pop();
-    assert!(matches!(
-        decode_parts(&p),
-        Err(DecodeError::ArrayLength { index: 0, .. })
-    ));
+    assert!(matches!(decode_parts(&p), Err(DecodeError::Payload { .. })));
+    let mut p = good.clone();
+    p[2] = vec![0xff; 64];
+    assert!(matches!(decode_parts(&p), Err(DecodeError::Payload { .. })));
+    // A payload that inflates to more than the arrays take is refused, not truncated.
+    let mut p = good.clone();
+    p[2] = miniz_oxide::deflate::compress_to_vec(&vec![0; 480 * 10 + 1], 1);
+    assert!(matches!(decode_parts(&p), Err(DecodeError::Payload { .. })));
     let mut p = good.clone();
     p.pop();
     assert!(matches!(
@@ -289,12 +299,32 @@ fn malformed_frames_are_refused() {
         decode_parts(&p),
         Err(DecodeError::HeaderTooLarge(_))
     ));
+    // The payload of the tf sample: mag, phase (i16), coh (u16), validity (u32).
+    let raw = miniz_oxide::inflate::decompress_to_vec(&good[2]).expect("payload");
+    let (coh, validity) = (480 * 4..480 * 6, 480 * 6..);
+    let mut bad = raw.clone();
+    bad[validity].fill(0xff);
     let mut p = good.clone();
-    p[5] = vec![0xff; p[5].len()];
+    p[2] = miniz_oxide::deflate::compress_to_vec(&bad, 1);
     assert_eq!(
         decode_parts(&p),
         Err(DecodeError::UnknownBits(frame::ArrayName::Validity))
     );
+    // Coherence codes above 10 000 (other than NaN's) are undefined. The array is
+    // neighbour differences: a first difference of 10 001 is the code 10 001.
+    let mut bad = raw.clone();
+    bad[coh.clone()].fill(0);
+    bad[coh.start] = 0x11;
+    bad[coh.start + 480] = 0x27;
+    let mut p = good.clone();
+    p[2] = miniz_oxide::deflate::compress_to_vec(&bad, 1);
+    assert_eq!(
+        decode_parts(&p),
+        Err(DecodeError::UndefinedCode(frame::ArrayName::Coh))
+    );
+    let mut p = good.clone();
+    p.push(Vec::new());
+    assert!(matches!(decode_parts(&p), Err(DecodeError::Parts(4))));
     assert!(matches!(
         decode_parts(&good[..1]),
         Err(DecodeError::Parts(1))
@@ -451,4 +481,43 @@ fn lf_harmonics_is_a_named_setting_that_defaults_to_standard() {
         assert_eq!(s, name);
         assert_eq!(rmp_serde::from_slice::<LfHarmonics>(&b).expect("decode"), l);
     }
+}
+
+/// Encode and decode time of a 480-column transfer function with measurement-like noise,
+/// printed (`cargo test --release -p ac2-proto --test it codec_cost -- --ignored
+/// --nocapture`).
+#[test]
+#[ignore = "measurement, not a check"]
+fn codec_cost() {
+    let mut f = samples::tf_frame();
+    let FrameData::Tf(t) = &mut f.data else {
+        unreachable!()
+    };
+    let mut seed = 1u32;
+    let mut noise = move || {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5
+    };
+    for i in 0..t.mag.len() {
+        let hf = i as f32 / 480.0;
+        t.mag[i] = -3.0 * hf + noise() * hf;
+        t.phase[i] = -40.0 * hf + 20.0 * noise() * hf;
+        t.coh[i] = (1.0 - 0.5 * hf * hf + 0.05 * noise() * hf).clamp(0.0, 1.0);
+    }
+    let rounds = 2000;
+    let t0 = std::time::Instant::now();
+    let mut parts = Vec::new();
+    for _ in 0..rounds {
+        parts = bytes_of(&f);
+    }
+    let enc = t0.elapsed() / rounds;
+    let t0 = std::time::Instant::now();
+    for _ in 0..rounds {
+        std::hint::black_box(decode_parts(&parts).expect("decodes"));
+    }
+    let dec = t0.elapsed() / rounds;
+    println!(
+        "tf 480 cols: {} B on the wire, encode {enc:?}, decode {dec:?}",
+        parts.iter().map(Vec::len).sum::<usize>()
+    );
 }

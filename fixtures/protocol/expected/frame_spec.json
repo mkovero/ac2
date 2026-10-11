@@ -1,7 +1,7 @@
 {
  "topic": "d/5/spec",
  "header": {
-  "v": 38,
+  "v": 39,
   "kind": "spec",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -17,7 +17,7 @@
    {
     "name": "level",
     "unit": "dbfs",
-    "elem": "f32"
+    "elem": "i16"
    }
   ],
   "meta": {

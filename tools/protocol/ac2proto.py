@@ -9,13 +9,15 @@ from __future__ import annotations
 import math
 import re
 import struct
+import zlib
 
 import msgpack
 
-PROTO_VERSION = 38
+PROTO_VERSION = 39
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
+MAX_PARTS = 3
 MAX_FRAME_BYTES = 2 << 20
 MAX_TOPIC_BYTES = 32
 
@@ -240,21 +242,108 @@ def named(t, x):
 # --------------------------------------------------------------------------------------
 # Frames
 
-_ELEM = {"f32": "f", "u32": "I"}
+_ELEM_SIZE = {"f32": 4, "u32": 4, "i16": 2, "u16": 2}
+I16_NAN, I16_NEG_INF, I16_POS_INF = -32768, -32767, 32767
+U16_NAN, U16_ONE = 65535, 10000
+
+
+def _round_half_up(x: float) -> int:
+    return math.floor(x + 0.5)
+
+
+def to_i16(x: float, deg: bool) -> int:
+    """Hundredths of the unit; degrees wrapped to [-180, 180) on the hundredths."""
+    if math.isnan(x) or (deg and math.isinf(x)):
+        return I16_NAN
+    if deg:
+        return (_round_half_up(x * 100.0) + 18000) % 36000 - 18000
+    if x == math.inf:
+        return I16_POS_INF
+    if x == -math.inf:
+        return I16_NEG_INF
+    return max(-32766, min(32766, _round_half_up(x * 100.0)))
+
+
+def from_i16(q: int) -> float:
+    return {I16_NAN: math.nan, I16_NEG_INF: -math.inf, I16_POS_INF: math.inf}.get(q, q / 100.0)
+
+
+def to_u16(x: float) -> int:
+    if math.isnan(x):
+        return U16_NAN
+    return max(0, min(U16_ONE, _round_half_up(x * U16_ONE)))
+
+
+def from_u16(q: int) -> float:
+    if q == U16_NAN:
+        return math.nan
+    if q > U16_ONE:
+        raise DecodeError(f"undefined coherence code {q}")
+    return q / U16_ONE
+
+
+def wire_value(desc: dict, v):
+    """What `v` decodes to after a trip over the wire in `desc`'s element encoding."""
+    e = desc["elem"]
+    if e == "i16":
+        return from_i16(to_i16(v, desc["unit"] == "deg"))
+    if e == "u16":
+        return from_u16(to_u16(v))
+    if e == "f32":
+        return struct.unpack("<f", struct.pack("<f", v))[0]
+    return v
+
+
+def _planes(codes: list) -> bytes:
+    """Neighbour differences (mod 2^16), low-byte plane then high-byte plane."""
+    prev, d = 0, []
+    for q in codes:
+        d.append((q - prev) & 0xFFFF)
+        prev = q
+    return bytes(x & 0xFF for x in d) + bytes(x >> 8 for x in d)
+
+
+def _unplanes(b: bytes) -> list:
+    n = len(b) // 2
+    prev, out = 0, []
+    for i in range(n):
+        prev = (prev + (b[i] | b[n + i] << 8)) & 0xFFFF
+        out.append(prev)
+    return out
+
+
+def _encode_array(desc: dict, values: list) -> bytes:
+    e = desc["elem"]
+    if e == "i16":
+        return _planes([to_i16(v, desc["unit"] == "deg") & 0xFFFF for v in values])
+    if e == "u16":
+        return _planes([to_u16(v) for v in values])
+    return struct.pack("<%d%s" % (len(values), {"f32": "f", "u32": "I"}[e]), *values)
+
+
+def _decode_array(desc: dict, b: bytes) -> list:
+    e = desc["elem"]
+    if e == "i16":
+        return [from_i16(q - 0x10000 if q >= 0x8000 else q) for q in _unplanes(b)]
+    if e == "u16":
+        return [from_u16(q) for q in _unplanes(b)]
+    return list(struct.unpack("<%d%s" % (len(b) // 4, {"f32": "f", "u32": "I"}[e]), b))
 
 
 def encode_frame(topic: str, header: dict, arrays: list) -> list:
     """`header` is the named header; `arrays` a list of value lists in the order of
-    header["arrays"]."""
+    header["arrays"]. The arrays go deflated (raw) as one payload part."""
     parts = [topic.encode(), msgpack.packb(positional(HEADER, header), use_bin_type=True)]
-    for desc, values in zip(header["arrays"], arrays, strict=True):
-        parts.append(struct.pack("<%d%s" % (len(values), _ELEM[desc["elem"]]), *values))
+    if header["arrays"]:
+        raw = b"".join(_encode_array(d, v) for d, v in zip(header["arrays"], arrays, strict=True))
+        c = zlib.compressobj(1, zlib.DEFLATED, -15)
+        parts.append(c.compress(raw) + c.flush())
     return parts
 
 
 def decode_frame(parts: list) -> dict:
     """Validates sizes before parsing, like the Rust decoder."""
-    if len(parts) < 2 or len(parts) > 2 + MAX_ARRAYS:
+    if len(parts) < 2 or len(parts) > MAX_PARTS:
         raise DecodeError(f"{len(parts)} parts")
     if sum(len(p) for p in parts) > MAX_FRAME_BYTES:
         raise DecodeError("frame too large")
@@ -269,14 +358,28 @@ def decode_frame(parts: list) -> dict:
     n = h["n"]
     if not isinstance(n, int) or n < 0 or n > MAX_N:
         raise DecodeError("n out of range")
-    arrays = parts[2:]
-    if len(h["arrays"]) != len(arrays):
+    descs = h["arrays"]
+    if len(descs) > MAX_ARRAYS or (len(descs) > 0) != (len(parts) == 3):
         raise DecodeError("array count")
+    sizes = []
+    for d in descs:
+        if d["elem"] not in _ELEM_SIZE:
+            raise DecodeError(f"elem {d['elem']!r}")
+        sizes.append(n * _ELEM_SIZE[d["elem"]])
     out = {}
-    for desc, p in zip(h["arrays"], arrays):
-        if len(p) != 4 * n:
-            raise DecodeError(f"array {desc['name']}: {len(p)} bytes, expected {4 * n}")
-        out[desc["name"]] = list(struct.unpack("<%d%s" % (n, _ELEM[desc["elem"]]), p))
+    if descs:
+        expected = sum(sizes)
+        z = zlib.decompressobj(-15)
+        try:
+            payload = z.decompress(parts[2], expected + 1)
+        except zlib.error as e:
+            raise DecodeError(f"payload: {e}") from e
+        if len(payload) != expected or not z.eof:
+            raise DecodeError(f"payload does not inflate to {expected} bytes")
+        off = 0
+        for d, k in zip(descs, sizes):
+            out[d["name"]] = _decode_array(d, payload[off : off + k])
+            off += k
     expected_kind = topic.get("stream", topic.get("kind", topic["topic"]))
     if h["kind"] != expected_kind or list(h["meta"].keys()) != [h["kind"]]:
         raise DecodeError("kind mismatch")

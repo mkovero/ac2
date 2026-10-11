@@ -16,7 +16,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ac2_proto::frame::MAX_ARRAYS;
+use ac2_proto::frame::MAX_PARTS;
 use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
 use ac2_proto::{Frame, GridId, Topic, decode_frame};
 use ac2_zmq::{Part, Socket};
@@ -157,7 +157,7 @@ pub fn frame_age(f: &Frame, now_wall_ns: i128, offset_ns: Option<i128>) -> Optio
 }
 
 fn decode(parts: &[Part]) -> Option<Frame> {
-    let mut refs: [&[u8]; 2 + MAX_ARRAYS] = [&[]; 2 + MAX_ARRAYS];
+    let mut refs: [&[u8]; MAX_PARTS] = [&[]; MAX_PARTS];
     if parts.len() > refs.len() {
         return None;
     }

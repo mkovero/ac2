@@ -1,7 +1,7 @@
 {
  "topic": "d/1/ir",
  "header": {
-  "v": 38,
+  "v": 39,
   "kind": "ir",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -22,7 +22,7 @@
    {
     "name": "ir_etc",
     "unit": "db",
-    "elem": "f32"
+    "elem": "i16"
    }
   ],
   "meta": {

@@ -1,7 +1,7 @@
 {
  "topic": "d/3/rta",
  "header": {
-  "v": 38,
+  "v": 39,
   "kind": "rta",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -17,7 +17,7 @@
    {
     "name": "level",
     "unit": "db_spl",
-    "elem": "f32"
+    "elem": "i16"
    },
    {
     "name": "validity",

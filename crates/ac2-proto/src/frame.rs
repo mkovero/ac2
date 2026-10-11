@@ -1,12 +1,14 @@
-//! Data frames: `[topic][msgpack header][array 0][array 1]…`.
+//! Data frames: `[topic][msgpack header][payload]`.
 //!
-//! Each array part is `n` little-endian 4-byte elements (f32, or u32 for bitmasks), in the
-//! order the header's `arrays` list describes. Column order = grid order. Invalid values
-//! are NaN; where the reason matters a `validity` bitmask array says why.
+//! The payload holds the arrays the header's `arrays` list describes, in its order, each
+//! `n` elements in its element encoding (`crate::packing`), deflated as one part; a frame
+//! without arrays has no payload part. Column order = grid order. Invalid values are NaN;
+//! where the reason matters a `validity` bitmask array says why.
 //!
 //! Decoding validates every size before it parses anything: part count, topic length,
-//! header length, total length, then (after the bounded header parse) `n`, the array count
-//! and every part's length. A malformed frame is an error value, never a panic.
+//! header length, total length, then (after the bounded header parse) `n`, the array count,
+//! and the payload, inflated to exactly the size the header implies and no further. A
+//! malformed frame is an error value, never a panic.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,6 +21,7 @@ use crate::model::{
     PeakWeighting, PhaseBasis, PositionCorrection, Smoothing, SmoothingFraction, TimeWeighting,
     TimingState, TimingStatus, Unresolved, Weighting, Window,
 };
+use crate::packing::{self, elem_size};
 use crate::topic::{Stream, Topic};
 use crate::units::{
     ClientId, DaemonIncarnation, Db, Dbfs, Hz, MeasId, Rev, SampleIndex, Samples, Seconds,
@@ -30,8 +33,10 @@ use crate::units::{
 pub const MAX_HEADER_BYTES: usize = 8192;
 /// Largest `n` (columns / points / channels).
 pub const MAX_N: u32 = 1 << 16;
-/// Most array parts in one frame.
+/// Most arrays in one frame.
 pub const MAX_ARRAYS: usize = 8;
+/// Most parts of one frame: topic, header, payload.
+pub const MAX_PARTS: usize = 3;
 /// Largest whole frame (all parts), bytes.
 pub const MAX_FRAME_BYTES: usize = 2 << 20;
 
@@ -271,6 +276,13 @@ pub enum Elem {
     F32,
     /// Unsigned 32-bit, little-endian.
     U32,
+    /// Hundredths of the unit, signed 16-bit, as neighbour differences in byte planes;
+    /// degrees wrapped to [−180, 180). Levels, magnitudes and phase of the curves a display
+    /// draws.
+    I16,
+    /// Ten-thousandths, unsigned 16-bit (0 … 10 000), as neighbour differences in byte
+    /// planes. Coherence.
+    U16,
 }
 
 /// Describes one array part.
@@ -1046,24 +1058,25 @@ pub enum DecodeError {
     /// `n` above [`MAX_N`].
     #[error("n = {0} exceeds the limit")]
     TooManyElements(u32),
-    /// Array descriptors and parts disagree in count.
-    #[error("header lists {listed} arrays, frame has {parts}")]
+    /// More arrays than [`MAX_ARRAYS`], or a payload part without arrays or arrays
+    /// without one.
+    #[error("header lists {listed} arrays, frame has {parts} parts")]
     ArrayCount {
         /// In the header.
         listed: usize,
         /// Parts present.
         parts: usize,
     },
-    /// A part's length is not `n × 4`.
-    #[error("array {index}: {got} bytes, expected {expected}")]
-    ArrayLength {
-        /// Array index.
-        index: usize,
-        /// Expected.
+    /// The payload is not deflate data of exactly the size `n` and the arrays' element
+    /// encodings make.
+    #[error("payload does not inflate to {expected} bytes")]
+    Payload {
+        /// Bytes the arrays take.
         expected: usize,
-        /// Got.
-        got: usize,
     },
+    /// An array holds a code its element encoding does not define.
+    #[error("undefined code in {0:?}")]
+    UndefinedCode(ArrayName),
     /// Topic, `kind` and `meta` disagree.
     #[error("topic, kind and meta disagree")]
     KindMismatch,
@@ -1114,10 +1127,14 @@ enum Col<'a> {
 }
 
 fn desc(name: ArrayName, unit: Unit) -> ArrayDesc {
-    let elem = if unit == Unit::Bitmask {
-        Elem::U32
-    } else {
-        Elem::F32
+    // The curves a display draws at frame rate go in 16 bits (precision budget in
+    // `crate::packing`); meters, Leq windows and IR samples are read as numbers or summed
+    // further and stay f32.
+    let elem = match (name, unit) {
+        (_, Unit::Bitmask) => Elem::U32,
+        (ArrayName::Mag | ArrayName::Phase | ArrayName::Level | ArrayName::IrEtc, _) => Elem::I16,
+        (ArrayName::Coh, _) => Elem::U16,
+        _ => Elem::F32,
     };
     ArrayDesc { name, unit, elem }
 }
@@ -1156,27 +1173,7 @@ macro_rules! mask_bits {
     };
 }
 
-fn put_f32(out: &mut Vec<u8>, v: &[f32]) {
-    if cfg!(target_endian = "little") {
-        out.extend_from_slice(bytemuck::cast_slice(v));
-    } else {
-        for x in v {
-            out.extend_from_slice(&x.to_le_bytes());
-        }
-    }
-}
-
-fn put_u32(out: &mut Vec<u8>, v: &[u32]) {
-    if cfg!(target_endian = "little") {
-        out.extend_from_slice(bytemuck::cast_slice(v));
-    } else {
-        for x in v {
-            out.extend_from_slice(&x.to_le_bytes());
-        }
-    }
-}
-
-/// Encode a frame into its parts `[topic, header, arrays…]`.
+/// Encode a frame into its parts `[topic, header]` or `[topic, header, payload]`.
 pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
     let mut cols: Vec<(ArrayDesc, Col<'_>)> = Vec::new();
     let meta = match &frame.data {
@@ -1324,16 +1321,18 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
         return Err(EncodeError::HeaderTooLarge(hb.len()));
     }
 
-    let mut parts = Vec::with_capacity(2 + cols.len());
+    let mut parts = Vec::with_capacity(MAX_PARTS);
     parts.push(frame.topic().to_bytes());
     parts.push(hb);
-    for (_, c) in &cols {
-        let mut b = Vec::with_capacity(n * 4);
-        match c {
-            Col::F(v) => put_f32(&mut b, v),
-            Col::U(v) => put_u32(&mut b, v),
+    if !cols.is_empty() {
+        let mut raw = Vec::with_capacity(cols.iter().map(|(d, _)| n * elem_size(d.elem)).sum());
+        for (d, c) in &cols {
+            match c {
+                Col::F(v) => packing::put_f32(&mut raw, d.elem, d.unit == Unit::Deg, v),
+                Col::U(v) => packing::put_u32(&mut raw, v),
+            }
         }
-        parts.push(b);
+        parts.push(packing::deflate(&raw));
     }
     Ok(parts)
 }
@@ -1346,32 +1345,10 @@ pub fn encode_event_message(e: &Event) -> Result<Vec<Vec<u8>>, EncodeError> {
 // ---------------------------------------------------------------------------------------
 // Decode
 
-/// Little-endian f32 from bytes: zero-copy cast when aligned, per-element copy otherwise.
-fn get_f32(b: &[u8]) -> Vec<f32> {
-    if cfg!(target_endian = "little")
-        && let Ok(v) = bytemuck::try_cast_slice::<u8, f32>(b)
-    {
-        return v.to_vec();
-    }
-    b.chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect()
-}
-
-fn get_u32(b: &[u8]) -> Vec<u32> {
-    if cfg!(target_endian = "little")
-        && let Ok(v) = bytemuck::try_cast_slice::<u8, u32>(b)
-    {
-        return v.to_vec();
-    }
-    b.chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect()
-}
-
 struct Arrays<'a> {
     descs: &'a [ArrayDesc],
-    parts: &'a [&'a [u8]],
+    /// Each array's bytes in the inflated payload.
+    parts: Vec<&'a [u8]>,
     used: Vec<bool>,
 }
 
@@ -1405,14 +1382,17 @@ impl<'a> Arrays<'a> {
     }
 
     fn opt_f32(&mut self, name: ArrayName, unit: Unit) -> Result<Option<Vec<f32>>, DecodeError> {
-        Ok(self.find(name, unit)?.map(get_f32))
+        let elem = desc(name, unit).elem;
+        self.find(name, unit)?
+            .map(|b| packing::get_f32(b, elem).ok_or(DecodeError::UndefinedCode(name)))
+            .transpose()
     }
 
     fn mask<T: MaskBits>(&mut self, name: ArrayName) -> Result<Vec<T>, DecodeError> {
         let b = self
             .find(name, Unit::Bitmask)?
             .ok_or_else(|| DecodeError::Schema(format!("missing {name:?}")))?;
-        let v: Vec<T> = get_u32(b).into_iter().map(T::from_u32).collect();
+        let v: Vec<T> = packing::get_u32(b).into_iter().map(T::from_u32).collect();
         if v.iter().all(T::known) {
             Ok(v)
         } else {
@@ -1464,7 +1444,7 @@ fn header_version(h: &[u8]) -> Option<u16> {
 
 /// Decode a data frame from its parts. Sizes are validated before anything is parsed.
 pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
-    if parts.len() < 2 || parts.len() > 2 + MAX_ARRAYS {
+    if parts.len() < 2 || parts.len() > MAX_PARTS {
         return Err(DecodeError::Parts(parts.len()));
     }
     let total = parts.iter().fold(0usize, |a, p| a.saturating_add(p.len()));
@@ -1496,23 +1476,23 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
     if h.n > MAX_N {
         return Err(DecodeError::TooManyElements(h.n));
     }
-    let arrays = &parts[2..];
-    if h.arrays.len() != arrays.len() {
+    let payload = parts.get(2);
+    if h.arrays.len() > MAX_ARRAYS || h.arrays.is_empty() != payload.is_none() {
         return Err(DecodeError::ArrayCount {
             listed: h.arrays.len(),
-            parts: arrays.len(),
+            parts: parts.len(),
         });
     }
-    let expected = h.n as usize * 4;
-    for (index, p) in arrays.iter().enumerate() {
-        if p.len() != expected {
-            return Err(DecodeError::ArrayLength {
-                index,
-                expected,
-                got: p.len(),
-            });
-        }
-    }
+    let sizes: Vec<usize> = h
+        .arrays
+        .iter()
+        .map(|d| h.n as usize * elem_size(d.elem))
+        .collect();
+    let expected = sizes.iter().sum();
+    let raw = match payload {
+        Some(p) => packing::inflate(p, expected).ok_or(DecodeError::Payload { expected })?,
+        None => Vec::new(),
+    };
     let topic_kind = match topic {
         Topic::Data { stream, .. } => stream_kind(stream),
         Topic::SessionLevels => FrameKind::SessionLevels,
@@ -1532,10 +1512,18 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
         Topic::Data { meas, .. } => meas,
         _ => MeasId(0),
     };
+    let mut rest = raw.as_slice();
     let mut a = Arrays {
         descs: &h.arrays,
-        parts: arrays,
-        used: vec![false; arrays.len()],
+        parts: sizes
+            .iter()
+            .map(|k| {
+                let (this, more) = rest.split_at(*k);
+                rest = more;
+                this
+            })
+            .collect(),
+        used: vec![false; h.arrays.len()],
     };
     let data = match h.meta {
         FrameMeta::Tf(meta) => FrameData::Tf(TfFrame {
