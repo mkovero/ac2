@@ -3,7 +3,8 @@
 > **Concluded; spike code removed.** Findings and the decisions they led to. The backends
 > live in `crates/ac2-audio`; Linux is JACK only (decision L1 in `open-questions.md`), so
 > the cpal-ALSA results below no longer apply to a shipped path; Windows is ASIO only
-> (decision W1, `asio.md`), so neither do the cpal-WASAPI ones. The spike's run mode lives
+> (decision W1, `asio.md`), so neither do the cpal-WASAPI ones; macOS runs on the HAL
+> directly (decision H1, `coreaudio.md`), and cpal is no longer a dependency. The spike's run mode lives
 > on as `ac2 selftest duplex` (`crates/ac2-cli/src/selftest`); §8 is its hardware procedure.
 
 **Question.** Can one small trait give RT-safe, multichannel, sample-indexed duplex capture

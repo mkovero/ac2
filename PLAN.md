@@ -92,7 +92,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Feature | Pri | Src | Phase |
 |---|---|---|---|
 | JACK backend (RT-safe, sample-aligned multi-channel capture) | P0 | ac | 1 |
-| CoreAudio via cpal, multichannel, RT-safe, with routing (unproven in `ac`) | P0 | new | 1 |
+| CoreAudio (the HAL directly, `cahal`), multichannel, RT-safe, with routing (unproven in `ac`) | P0 | new | 1 |
 | Device enumeration, rate, buffer size; xrun / discontinuity telemetry | P0 | ac | 1 |
 | Input meters with clip indication, always visible | P0 | ac | 4 |
 | ASIO | P1 | new | 7 |
@@ -194,7 +194,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
                       │  ipc:// / tcp:// / inproc://  ·  CURVE over network
               ┌───────┴────────┐
               │     ac2d       │  session, jobs, state, logging, discovery
-              │  ac2-audio     │  JACK / cpal backends, rtrb rings
+              │  ac2-audio     │  JACK / CoreAudio / ASIO, rtrb rings
               │  ac2-core      │  pure DSP + acoustics math
               └────────────────┘
 ```
@@ -210,7 +210,7 @@ fixtures from `tools/protocol`.
 | Need | Choice | Notes |
 |---|---|---|
 | FFT | `realfft` / `rustfft` | plans cached |
-| Audio | `jack` crate directly (not cpal's JACK host), `cpal` for CoreAudio; Linux is JACK only (JACK2 or pipewire-jack, decision L1); Windows is ASIO only through azo (decision W1) | ASIO in every Windows build (no feature; FlexASIO for devices without a driver); cpal has no duplex API and no exact hardware index — see `docs/design/spike-audio-duplex.md` |
+| Audio | `jack` crate directly, the Core Audio HAL through `cahal` (decision H1); Linux is JACK only (JACK2 or pipewire-jack, decision L1); Windows is ASIO only through azo (decision W1) | ASIO in every Windows build (no feature; FlexASIO for devices without a driver); cpal (dropped) has no duplex API and no exact hardware index — see `docs/design/spike-audio-duplex.md`, `coreaudio.md` |
 | Rings | `rtrb` | SPSC wait-free |
 | ZMQ | own thin binding over libzmq 4.3.5 + libsodium built from source (`zeromq-src`, `libsodium-sys-stable`) | `zmq` crate's vendored build has CURVE off; pure-Rust options lack CURVE or are too young — see `docs/design/spike-zmq-curve.md`. ZAP handler must be bound before CURVE sockets (fails open otherwise) |
 | Serialization | `rmp-serde` headers + raw `f32` LE arrays | decode via `bytemuck::try_cast_slice` with copy fallback on misalignment / big-endian |

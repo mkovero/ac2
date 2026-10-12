@@ -16,8 +16,8 @@ noticed, and a stream that ended has to be brought back.
 The capture fan-out already wakes every hand-off and knows when it last popped a block. A
 session's audio is **stopped** when either
 
-- the host ends the stream (JACK's shutdown callback, cpal's `StreamInvalidated` /
-  `DeviceNotAvailable`; `EventSnapshot::ended`) — cause `host_ended`; or, when the driver
+- the host ends the stream (JACK's shutdown callback, Core Audio's device-alive or
+  I/O-stopped-abnormally listener, or coreaudiod restarting; `EventSnapshot::ended`) — cause `host_ended`; or, when the driver
   ended it because its own settings or its clock changed (an ASIO reset or resync request,
   a buffer-size or sample-rate change; `EventSnapshot::reset` with the reason), cause
   `driver_reset` with that reason: the backend has already cut the output, and the reopen
@@ -73,9 +73,10 @@ the next attempt at once when the device **comes back** — absent → present, 
 under a new generation — so a server restarted during a 30 s wait is reopened within about
 a second, not up to 30 s later. The look opens nothing: JACK checks the server's socket
 (`jack_<server>_<uid>_0` in `$JACK_TMPDIR` or `/dev/shm`, else PipeWire's), its inode and
-change time as the generation (a restarted server makes a new one); cpal lists the host's
-devices; a replay has no cheaper look (`Unknown`: the attempts alone). Only a change starts
-an early attempt: a device that looks present all along (a stale socket, a hung server)
+change time as the generation (a restarted server makes a new one); Core Audio looks the
+device's UID up, its object id as the generation; ASIO lists the installed drivers; a
+replay has no cheaper look (`Unknown`: the attempts alone). Only a change starts an early
+attempt: a device that looks present all along (a stale socket, a hung server)
 keeps the backoff, never one attempt per look; the first look comes right after the failed
 attempt, so a device that returns at once is still seen arriving.
 

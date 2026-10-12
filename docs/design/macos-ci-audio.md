@@ -9,9 +9,11 @@ arm64 and Intel, with no permission work on the current images. Measured in a sp
 (`hal-timestamps`, a Core Audio HAL IOProc in Swift; `cpal-ts`, a standalone cpal 0.18
 timestamp program; `tcc.sh`) stay on that branch under `tools/experiments/macos-blackhole/`. CI uses the recipe in *In CI* below.
 
-The findings below were made through cpal. Since `coreaudio.md` stage (b) the BlackHole
-checks run on the macOS default, the direct HAL backend `coreaudio`; its results on this
-runner are in `coreaudio.md` §12, *Settled on CI*.
+The findings below were made through cpal, which ac2 no longer has: `coreaudio.md` stage
+(c) removed it, and the BlackHole checks run on the direct HAL backend `coreaudio`; its
+results on this runner are in `coreaudio.md` §12, *Settled on CI*. The timestamp finding
+(Q4) is kept as the reason, and is reported upstream as
+<https://github.com/RustAudio/cpal/issues/1398>.
 
 Runner images seen: `macos-latest` = image `macos-26-arm64` 20260907, macOS 26.6.2 (25G83),
 arm64. `macos-15-intel` = image `macos-15` 20260824, macOS 15.7.9 (24G830), x86_64.
@@ -112,8 +114,8 @@ seems to wedge Core Audio clients until the runner ends), so the denied case now
   The insert itself was exercised (run 38195766309); whether it alone recovers a fresh
   runner was not, because no image lacked the row. It must run before any capture.
 - Real Macs: a capture with access denied returns zeros per Apple's documentation; this
-  spike saw only the undetermined case. ac2's `access_denied_hint` in `cpal_host.rs` is
-  Windows-only today.
+  spike saw only the undetermined case. ac2 checks consent before opening (`coreaudio.md`
+  §12 Q5).
 
 ## Q3. ac2 on BlackHole through cpal
 
@@ -209,7 +211,7 @@ line 787, output around line 913). So on Core Audio cpal's `capture` is one buff
 its `playback` one buffer late, and a loop that is 0 in the device's own time reads as
 **−2 buffers** from cpal's timestamps: a negative latency, which cannot happen.
 
-What this means for ac2 today: the offset is constant for a given buffer size, and
+What this meant for ac2 on cpal: the offset is constant for a given buffer size, and
 `q3-loopback-timing.md` uses only the stability of cpal's offset, so drift and slips are
 unaffected. Anything that turns cpal timestamps into an absolute output→input latency on
 macOS is off by 2 × buffer (plus the device latency and safety offset twice over on real
@@ -230,7 +232,7 @@ result and its label ends in 2027), after the tests, with the debug binaries the
    - waits (≤ 30 s) until `system_profiler SPAudioDataType` lists `BlackHole 2ch`;
    - asserts the `kTCCServiceMicrophone` row for `/opt/hca/hosted-compute-agent` (user or
      system `TCC.db`) instead of writing it, and fails naming the fallback in Q2 if missing;
-   - `ac2d --backend cpal`: `ac2 devices` lists BlackHole with inputs and outputs;
+   - `ac2d` on its default backend (`coreaudio`): `ac2 devices` lists BlackHole with inputs and outputs;
    - `selftest duplex --buffer 2048samples --duration 20s` with the sox sine: pass, and the
      captured peak −40 ± 1 dBFS on both inputs;
    - a 30 s daemon session at `--buffer 2048samples` with a recording and the tf running on

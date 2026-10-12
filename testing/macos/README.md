@@ -7,8 +7,8 @@ stability. Install and first start (microphone prompt) were confirmed on 2026-10
 
 **Core Audio backend.** Builds newer than dev.10 run on ac2's own Core Audio backend
 (`coreaudio`: the HAL directly, one callback per device with an exact sample index) by
-default, in the app, `ac2d` and the self-test. cpal, the backend of dev.10 and earlier,
-stays selectable for a comparison (`--backend cpal`) until the next round removes it.
+default, in the app, `ac2d` and the self-test. cpal, the backend of dev.10 and earlier, is
+removed.
 Settings remembered per device by an older build (outputs, roles, mic names in a session
 default) are keyed by the backend and are not found once on the new one: set them again.
 Device ids (`coreaudio:<UID>`) are unchanged. Test 6 covers what only a real interface can
@@ -221,8 +221,6 @@ change.
    `grep 'audio device probe' ~/Library/Logs/ac2/ac2-ui.log` and paste the lines: each
    `Present { generation: … }` is the interface's object id after a replug, and whether it
    changes between the two replugs is the open question.
-4. Optional, for a comparison on the same build: the silent self-test of Test 5, step 1,
-   once with `--backend coreaudio` and once with `--backend cpal`.
 
 ## 9. Optional: record and replay
 
@@ -256,7 +254,6 @@ useful.
 | Test 6.1: stated latency (in / out frames) at 48 kHz; the ten loopback offsets; remainder | |
 | Test 6.2: rate change in Audio MIDI Setup: reopened by itself at the new rate, note shown? | |
 | Test 6.3: unplug / replug ×2: reopened within 30 s? the `audio device probe` lines | |
-| Test 6.4 (optional): silent self-test on coreaudio and on cpal | |
 | Record and replay (optional): file written, replay matches live? | |
 | Do the input meters and the SPL number move smoothly, or noticeably steppy? | |
 | ac2 CPU % in Activity Monitor with a session open and nothing playing | |

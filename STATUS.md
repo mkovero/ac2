@@ -15,8 +15,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   (`docs/rigs/pupu.md`, *Deploy log*). A session format change on deploy is restored
   with `ac2 session salvage`.
 - macOS: the direct Core Audio backend (`coreaudio`, the HAL through the `cahal` crate) is
-  the default; cpal stays selectable (`--backend cpal`) until stage (c) removes it after the
-  tester round (`docs/design/coreaudio.md` §11, `testing/macos/` Test 6).
+  the only macOS backend; cpal is removed (stage (c), `docs/design/coreaudio.md` §11). The
+  tester round on a real interface is `testing/macos/` Test 6.
 - Newest features: per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
   with a grey resolution marker where the estimate is coarser than the grid (`docs/user-guide.md`
   *Resolution and the resolution marker*); mic curve applied to sweeps; settable spectrum/RTA

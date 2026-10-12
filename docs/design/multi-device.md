@@ -31,7 +31,7 @@ transfer delay between inputs of the one FF400 stayed at 0 samples.
 | Platform / backend | How several devices become one stream | Clock relation ac2 can state |
 |---|---|---|
 | Linux, JACK (JACK2 or PipeWire's JACK) | Only through the server: one driver device; extra devices via `alsa_in`/`zita-a2j` (adaptive resampling to the driver clock), or PipeWire's graph, which resamples every non-driver device to the driver | `SingleCallback`: every port is on the server's clock. Resampled devices are on that clock *on average*; their latency wanders slowly as the resampler servo works |
-| macOS, Core Audio (`coreaudio`, the HAL directly) | An aggregate device made in Audio MIDI Setup. With "drift correction" on for a subdevice, Core Audio resamples it to the clock source; off, it free-runs and its samples slide against the clock source's | One IOProc per device serves both directions: `SingleCallback` with an exact index, the aggregate's subdevices without drift correction named in `notes`. Two devices run two IOProcs: `Unknown` (`coreaudio.md` §2). cpal, until removed, opened one device with a callback per direction (`SameDeviceSeparateCallbacks`) and could not see the drift-correction flags |
+| macOS, Core Audio (`coreaudio`, the HAL directly) | An aggregate device made in Audio MIDI Setup. With "drift correction" on for a subdevice, Core Audio resamples it to the clock source; off, it free-runs and its samples slide against the clock source's | One IOProc per device serves both directions: `SingleCallback` with an exact index, the aggregate's subdevices without drift correction named in `notes`. Two devices run two IOProcs: `Unknown` (`coreaudio.md` §2). cpal (removed in `coreaudio.md` stage (c)) opened one device with a callback per direction (`SameDeviceSeparateCallbacks`) and could not see the drift-correction flags |
 | Windows, ASIO | One driver per session: a driver's inputs and outputs share its callback. Two drivers cannot be paired (`Unsupported::SeparateDevices`). FlexASIO is one ASIO driver over two Windows endpoints, which may be two devices and then two clocks | `SingleCallback`; under FlexASIO with input and output on different devices that claim does not hold, and the loopback measurement is the truth |
 | fake | One simulated callback; `FakeConfig::drift_ppm` resamples the DAC side to simulate two clocks | `SingleCallback` (the drift is what tests inject) |
 
@@ -93,7 +93,7 @@ the input and output rates is the device-vs-device drift, without a stimulus. Ti
 are period-quantised (pupu: ±1 period, 2.67 ms) and on packet-based hosts arrive with
 scheduling jitter. By endpoints alone, 1 ppm needs ~1 h; by regression over n callbacks
 `σ_slope ≈ J·√(12/n)/T` (J = 2.7 ms, 375 callbacks/s at 96 kHz/256: ≈ 1 ppm after ~2 min,
-0.1 ppm after ~10 min). Useful only where input and output are separate streams (cpal);
+0.1 ppm after ~10 min). Useful only where input and output are separate streams (two devices);
 on JACK and the fake both directions share one counter and the method reads 0 by
 construction. It is a rough pre-stimulus hint ("these two endpoints look like two clocks"),
 not a substitute for A. Left for when a Windows/macOS rig can validate it.

@@ -1,9 +1,9 @@
 # Core Audio backend (macOS)
 
-**Status: stage (b) built** (§11: `cahal` and the `coreaudio` backend, the macOS default;
-cpal stays selectable until (c), after the tester round of §10c; decision H1 in
+**Status: stage (c) built** (§11: `cahal` and the `coreaudio` backend, the only macOS
+backend; cpal removed; the tester round of §10c is still open; decision H1 in
 `open-questions.md`). Before this backend, macOS audio went through
-cpal (`crates/ac2-audio/src/cpal_host.rs`): two AUHAL units, one per direction, each
+cpal (`cpal_host.rs`, removed in (c)): two AUHAL units, one per direction, each
 with its own callback, a running frame count for the index (`IndexExactness::Estimated`)
 and timestamps that put input against output two buffers off (`macos-ci-audio.md` Q4: a
 loop that is 0 samples in the device's own time reads as −2 buffers). The HAL itself gives
@@ -206,7 +206,7 @@ tests, on every OS (`cfg(any(target_os = "macos", test))`), like `asio_host`:
 - `#![forbid(unsafe_code)]` in `mod.rs`: the adapter has none (§9).
 
 **Kind and id.** New `BackendKind::CoreAudio` (host `"coreaudio"`). The device id stays
-`coreaudio:<UID>`, which is what cpal's id renders today (`cpal::DeviceId` Display is
+`coreaudio:<UID>`, which is what cpal's id rendered (`cpal::DeviceId` Display is
 `<host>:<id>`, the coreaudio id is `kAudioDevicePropertyDeviceUID`), so sessions, the CLI
 `--device coreaudio:BlackHole2ch_UID` and stored device ids keep naming the same device. It
 is the natural id of a Core Audio device, not a compatibility layer.
@@ -235,7 +235,7 @@ for a device that is present (§12 Q4); a device that is not is `DeviceNotFound`
 changed there reaches a running stream through the rate listener (§4, a reset).
 
 **Selection.** `coreaudio` is the macOS backend of the daemon, CLI (`BackendArg::CoreAudio`)
-and the app's embedded daemon (§11b); `--backend cpal` selects cpal until (c).
+and the app's embedded daemon (§11b); `--backend cpal` is gone since (c).
 
 ## 4. Format and configuration
 
@@ -518,7 +518,11 @@ backend, ac2d started without `--backend`.
   `docs/design/macos-ci-audio.md` (pointer to this doc), `STATUS.md`.
 
 **(c) Remove cpal.** PROTO bump (`BackendKind::Cpal` leaves the wire), as W1 removed
-WASAPI (`6dad3701`, `2b844164`, `57fcd527`).
+WASAPI (`6dad3701`, `2b844164`, `57fcd527`). **Built** (PROTO 48): `cpal` is out of the
+dependency graph on every target; `ClockRelation::SameDeviceSeparateCallbacks` (wire too)
+and `StaticLatency::PerCallbackTimestamps` left with it; `TimestampClock` stays, since
+`asio_host` estimates the index from timestamps when a driver gives no sample position.
+Old `cpal/<id>` prefs keys and `backend: cpal` sidecars no longer parse (§12 Q1, Q2).
 - `crates/ac2-audio/Cargo.toml` (drop `cpal`), `src/cpal_host.rs` (deleted), `src/lib.rs`,
   `src/backend.rs` (`Cpal`, `ClockRelation::SameDeviceSeparateCallbacks` and
   `StaticLatency::PerCallbackTimestamps` if nothing else uses them, `clock.rs`'s
@@ -539,10 +543,11 @@ WASAPI (`6dad3701`, `2b844164`, `57fcd527`).
 1. **Remembered UI prefs** are keyed `cpal/<id>` (`UiPrefs::device_key`); after (b) the
    same device is `coreaudio/<id>`, so remembered outputs and session defaults are not
    found once. Recommended: accept it (pre-1.0, no shims), say it in the tester guide's
-   release notes; the device id itself is unchanged.
+   release notes; the device id itself is unchanged. **Accepted** (the tester guide says
+   it; no key migration).
 2. **Raw recordings from before (c)** carry `backend: cpal` in their sidecar, which no
    longer parses. Recommended: accept it; only tester recordings exist on macOS. If one
-   matters, convert its sidecar by hand.
+   matters, convert its sidecar by hand. **Accepted** in (c).
 3. **Two devices in one clock domain** (same non-zero `ClockDomain`): claim one clock?
    Recommended: keep `Unknown` with a note; the loopback decides (decision 3a).
 4. **`control_panel`**: open Audio MIDI Setup (bundle `com.apple.audio.AudioMIDISetup`)?

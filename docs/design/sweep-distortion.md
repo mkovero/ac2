@@ -45,7 +45,7 @@ record of the same capture, both zero-padded to `2·next_pow2(len)`; `ε = 10⁻
 Dividing by the **measured** reference (instead of convolving with the emitted sweep's inverse
 and a loopback-derived latency):
 
-- cancels every latency of the chain (DAC/ADC, driver buffering, a cpal stream pair's start
+- cancels every latency of the chain (DAC/ADC, driver buffering, two devices' callback start
   offset) sample-exactly, without estimating it; t = 0 is "when the loopback heard it", the
   same time base as the transfer function, so the sweep's arrival equals the delay finder's;
 - cancels the converters' and the loopback's own response and level (the transfer-function

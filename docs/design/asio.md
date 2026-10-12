@@ -2,7 +2,7 @@
 
 **Status: implemented, and the only Windows audio backend** (decision W1 in
 `open-questions.md`). `crates/ac2-audio/src/asio_host/` builds on every Windows build, over
-the `azo` fork (§1); there is no cargo feature, and cpal is macOS only. It passes under Wine
+the `azo` fork (§1); there is no cargo feature. It passes under Wine
 on wineasio (§4a); FlexASIO on Windows CI (§4b) and real interfaces (§4d) are pending.
 §3 is the design; §3a lists where the code settles or departs from it. Shared-mode WASAPI,
 which ac2 used on Windows before, has two `IAudioClient`s on two threads, a same-clock
@@ -356,8 +356,8 @@ Where the code settles an open point of §3 or departs from it, and why.
   `enumerate`.
 - **Separate devices.** A request naming two drivers is `Unsupported::SeparateDevices`.
 - **Only backend.** A Windows daemon offers `asio` alone (decision W1), as Linux offers
-  `jack` alone; `--backend cpal` on Windows is refused with a pointer to `asio` and
-  FlexASIO.
+  `jack` alone; another platform's backend named on Windows is refused with a pointer to
+  `asio`.
 - **No driver.** An empty `HKLM\SOFTWARE\ASIO` is `Unavailable(NoAsioDriver)`: the daemon's
   backend availability, `ac2 devices`, `ac2 session open` and `ac2 selftest duplex` all
   carry its text, which names FlexASIO for devices without their own driver.
