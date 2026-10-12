@@ -18,6 +18,28 @@ fn help_overlay() {
     step_until(&mut h, "help closed", |a| a.state.overlay == Overlay::None);
 }
 
+/// Drawn by a CPU rasteriser, the window says so once in the corner and paces its frames.
+#[test]
+fn software_rendering_is_said() {
+    if !have_gpu("software_rendering_is_said") {
+        return;
+    }
+    let mut opts = options(None);
+    opts.rasterizer = Some(ac2_plot::Rasterizer::Software);
+    let mut h = harness(opts);
+    h.step();
+    h.step();
+    let toasts: Vec<_> = h
+        .state()
+        .state
+        .toasts
+        .iter()
+        .map(|t| t.text.clone())
+        .collect();
+    assert_eq!(toasts, [ac2_scene::toast::SOFTWARE_RENDERING]);
+    h.get_by_label(ac2_scene::toast::SOFTWARE_RENDERING);
+}
+
 /// Notifications in the corner: an information, a long warning that wraps at the box's
 /// maximum width, an error naming a long path; stacked over the focused pane's key hints,
 /// each as wide as its text. A click dismisses one; the log keeps it.

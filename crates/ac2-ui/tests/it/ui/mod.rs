@@ -74,6 +74,7 @@ fn options_at(endpoints: Option<ac2_client::Endpoints>) -> AppOptions {
         embedded_autosave: None,
         client_key: None,
         connect: None,
+        rasterizer: Some(ac2_plot::Rasterizer::Gpu),
     }
 }
 

@@ -49,6 +49,10 @@ pub struct AppOptions {
     pub client_key: Option<crate::settings::ClientKey>,
     /// What the connect dialog needs, so Settings can open it again; `None`: it cannot.
     pub connect: Option<ConnectSetup>,
+    /// What draws the window when the caller knows better than the adapter's report;
+    /// `None`: classified from the adapter. Screenshot tests draw on whatever adapter the
+    /// machine has (llvmpipe on CI) and pin the GPU look.
+    pub rasterizer: Option<ac2_plot::Rasterizer>,
 }
 
 /// What the connect dialog is made from (Settings › Connection opens it while running).
@@ -172,6 +176,8 @@ pub struct App {
     window_checked: bool,
     /// What the connect dialog is made from.
     connect_setup: Option<ConnectSetup>,
+    /// Least time between two frames asked for by data or animation (zero on a GPU).
+    frame_interval: Duration,
 }
 
 impl std::fmt::Debug for App {
@@ -231,6 +237,14 @@ impl App {
             }
             None => false,
         };
+        let rasterizer = opts.rasterizer.unwrap_or_else(|| {
+            cc.wgpu_render_state
+                .as_ref()
+                .map_or(ac2_plot::Rasterizer::Gpu, |rs| {
+                    ac2_plot::classify_info(&rs.adapter.get_info())
+                })
+        });
+        let frame_interval = crate::gpu::frame_interval(rasterizer);
         install_fonts(&cc.egui_ctx);
         let ctx = cc.egui_ctx.clone();
         let describe = opts
@@ -239,12 +253,13 @@ impl App {
             .map_or_else(|| "no daemon".to_string(), |t| t.describe.clone());
         let conn = opts
             .target
-            .and_then(|t| Conn::start(t, link_wake(ctx)).ok());
+            .and_then(|t| Conn::start(t, link_wake(ctx, frame_interval)).ok());
         let mut state = AppState::new(opts.theme, describe);
         state.set_prefs(opts.prefs);
         state.open_session_when_empty = opts.open_session_dialog;
         state.embedded_autosave = opts.embedded_autosave;
         state.client_key = opts.client_key;
+        state.update(Msg::Rasterizer(rasterizer), &opts.keymap);
         for n in opts.notices {
             state.update(
                 Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
@@ -282,6 +297,7 @@ impl App {
             window: None,
             window_checked: false,
             connect_setup: opts.connect,
+            frame_interval,
         }
     }
 
@@ -382,7 +398,7 @@ impl App {
             },
         };
         self.conn = None;
-        match Conn::start(target, link_wake(ctx.clone())) {
+        match Conn::start(target, link_wake(ctx.clone(), self.frame_interval)) {
             Ok(c) => {
                 self.conn = Some(c);
                 self.connect = None;
@@ -589,7 +605,7 @@ impl Touches {
         use crate::conn::ConnEvent;
         match msg {
             Msg::Tick { .. } => Self::Tick,
-            Msg::ToastsHeld(_) | Msg::DismissToast(_) => Self::Toasts,
+            Msg::ToastsHeld(_) | Msg::DismissToast(_) | Msg::Rasterizer(_) => Self::Toasts,
             Msg::Legend(_) => Self::Legend,
             Msg::Conn(e) => match **e {
                 ConnEvent::Data(_) => Self::Data,
@@ -731,9 +747,12 @@ const PREFS_SAVE_INTERVAL: Duration = Duration::from_secs(1);
 /// Wakes the UI for what the link reports: one pass. egui answers a plain
 /// `request_repaint` with two passes (for responses that land a frame late), which on a
 /// software rasteriser doubles the cost of every data frame; a delayed request is painted
-/// once, and a nanosecond is no delay at all.
-fn link_wake(ctx: egui::Context) -> crate::conn::Wake {
-    Arc::new(move || ctx.request_repaint_after(Duration::from_nanos(1)))
+/// once, and a nanosecond is no delay at all. With a frame `interval` (a CPU rasteriser) the
+/// frame is asked that far ahead: egui keeps the earliest pending request, so the data
+/// frames arriving meanwhile join that one frame instead of each drawing their own.
+fn link_wake(ctx: egui::Context, interval: Duration) -> crate::conn::Wake {
+    let after = interval.max(Duration::from_nanos(1));
+    Arc::new(move || ctx.request_repaint_after(after))
 }
 
 fn dialog_error(d: &mut Option<ConnectDialog>, msg: String) {
@@ -861,6 +880,9 @@ impl eframe::App for App {
         let t = self.theme();
         if self.applied_theme != Some(self.state.theme) {
             theme::apply(&ctx, &t);
+            if self.state.rasterizer == ac2_plot::Rasterizer::Software {
+                theme::drop_shadows(&ctx);
+            }
             self.applied_theme = Some(self.state.theme);
         }
         view::draw(self, ui, &t);
@@ -886,7 +908,11 @@ impl eframe::App for App {
             || self.state.spectrum_gliding(Instant::now())
             || self.startup.first_frame.is_none()
         {
-            ctx.request_repaint();
+            if self.frame_interval.is_zero() {
+                ctx.request_repaint();
+            } else {
+                ctx.request_repaint_after(self.frame_interval);
+            }
         } else if self.state.overlay.session().is_some()
             || self
                 .state

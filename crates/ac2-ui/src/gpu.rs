@@ -9,8 +9,9 @@
 //!   textures, GLES 3.1 or v3dv Vulkan) refuses wgpu's desktop defaults.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use ac2_plot::wgpu;
+use ac2_plot::{Rasterizer, wgpu};
 
 /// The device limits asked of an adapter on `backend` that offers `adapter`.
 pub fn required_limits(backend: wgpu::Backend, adapter: &wgpu::Limits) -> wgpu::Limits {
@@ -25,6 +26,23 @@ pub fn required_limits(backend: wgpu::Backend, adapter: &wgpu::Limits) -> wgpu::
 /// The adapter preference: `WGPU_POWER_PREF` when set, else low power.
 pub fn power_preference() -> wgpu::PowerPreference {
     wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::LowPower)
+}
+
+/// The fastest a CPU rasteriser is asked to draw: 30 frames a second. A dense 1080p plot
+/// (16 curves, grid, labels) takes about 20 ms to rasterise on llvmpipe, so 60 frames a
+/// second cannot be drawn at all and keeps the rasteriser's threads busy all the time,
+/// taking cores from the analyzer and the daemon; at 30 they draw about 60 % of the time,
+/// and a level or spectrum updating 30 times a second still reads as continuous motion.
+pub const SOFTWARE_FRAME_INTERVAL: Duration = Duration::from_micros(33_333);
+
+/// Least time between frames asked for by data or animation: none on a GPU (the display's
+/// rate paces it), [`SOFTWARE_FRAME_INTERVAL`] on a CPU rasteriser. Input still repaints at
+/// once, so the pointer and keys stay responsive.
+pub fn frame_interval(r: Rasterizer) -> Duration {
+    match r {
+        Rasterizer::Gpu => Duration::ZERO,
+        Rasterizer::Software => SOFTWARE_FRAME_INTERVAL,
+    }
 }
 
 /// eframe's wgpu options with this module's adapter and device choice.
@@ -45,6 +63,13 @@ pub fn wgpu_options() -> egui_wgpu::WgpuConfiguration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_cpu_rasteriser_is_paced() {
+        assert_eq!(frame_interval(Rasterizer::Gpu), Duration::ZERO);
+        let sw = frame_interval(Rasterizer::Software);
+        assert!((1.0 / sw.as_secs_f64() - 30.0).abs() < 0.01, "{sw:?}");
+    }
 
     /// A V3D-class adapter (4096 px textures, GLES 3.1 class) can grant what is asked, on
     /// either backend, and the window may use all of its texture size.

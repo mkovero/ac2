@@ -232,6 +232,7 @@ fn main() -> ExitCode {
             backends: embedded_backends(),
             discovery: !args.no_discovery,
         }),
+        rasterizer: None,
     };
     // The window as last left; the app makes it fit the screen if that changed.
     let mut viewport = egui::ViewportBuilder::default()

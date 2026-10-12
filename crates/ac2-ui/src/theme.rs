@@ -83,6 +83,15 @@ pub fn visuals(t: &Theme) -> Visuals {
     v
 }
 
+/// No shadows under popups and windows: each is a feathered mesh as large as its window
+/// plus the blur, filled pixel by pixel, which a CPU rasteriser pays for on every frame.
+pub fn drop_shadows(ctx: &egui::Context) {
+    ctx.global_style_mut(|s| {
+        s.visuals.window_shadow = egui::Shadow::NONE;
+        s.visuals.popup_shadow = egui::Shadow::NONE;
+    });
+}
+
 pub fn apply(ctx: &egui::Context, t: &Theme) {
     ctx.set_visuals(visuals(t));
     let size = t.font_size + 1.0;

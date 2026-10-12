@@ -324,6 +324,8 @@ pub enum Msg {
     ToastsHeld(bool),
     /// A toast clicked away.
     DismissToast(u64),
+    /// What rasterises the window, known once its adapter is chosen.
+    Rasterizer(ac2_plot::Rasterizer),
     /// A measurement's row clicked in the list: selected, and its own panes on screen (or
     /// the focused pane shows it).
     SelectMeas(MeasId),

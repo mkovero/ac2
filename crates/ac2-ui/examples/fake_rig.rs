@@ -54,6 +54,7 @@ fn main() -> Result<(), eframe::Error> {
         embedded_autosave: None,
         client_key: None,
         connect: None,
+        rasterizer: None,
     };
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

@@ -33,6 +33,10 @@ pub const MAX_LINES: usize = 10;
 /// Where a word too long for a line prefers to break: after a path or name separator.
 const BREAK_AFTER: &[char] = &['/', '\\', '_', '-', '.', ':', ',', ';', '=', '&', '?'];
 
+/// Said once when the window draws on a CPU rasteriser: the curves update less often than
+/// on a GPU, and the operator should know it is the machine, not the measurement.
+pub const SOFTWARE_RENDERING: &str = "software rendering: reduced frame rate";
+
 /// Time to notice a message before reading it.
 pub const READ_BASE_S: f64 = 3.0;
 /// Reading time per word: about 200 words a minute, slower than prose reading because the
@@ -263,6 +267,15 @@ mod tests {
         assert_eq!(b[0].rect.h, LINE_H + 2.0 * PAD_Y);
         assert_eq!(b[0].rect.right(), 1280.0 - MARGIN);
         assert_eq!(b[0].rect.bottom(), 800.0 - HINT - GAP);
+    }
+
+    /// The software-rendering notice reads as the backlog promised and fits one line even
+    /// on the smallest window.
+    #[test]
+    fn the_software_rendering_notice_is_one_line() {
+        assert_eq!(SOFTWARE_RENDERING, "software rendering: reduced frame rate");
+        let b = boxes(&[SOFTWARE_RENDERING], 640.0, 480.0);
+        assert_eq!(b[0].lines, vec![SOFTWARE_RENDERING]);
     }
 
     #[test]

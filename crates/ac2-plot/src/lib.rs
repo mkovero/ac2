@@ -10,6 +10,7 @@
 //! use [`offscreen`].
 #![deny(unsafe_code)]
 
+pub mod adapter;
 pub mod colormap;
 mod geometry;
 mod heatmap;
@@ -18,6 +19,7 @@ mod renderer;
 pub mod scene;
 mod text;
 
+pub use adapter::{Rasterizer, classify_info};
 pub use offscreen::{Gpu, GpuError, Offscreen, Pixels, RenderError, render_to_image};
 pub use renderer::{FrameTarget, PrepareError, RenderShared, Renderer};
 pub use scene::*;

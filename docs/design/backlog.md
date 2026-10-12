@@ -50,8 +50,6 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
 - **The UI redraws the whole window per data frame**: under a software renderer, 4 live
   measurements cost ≈ 1.7 cores, SPL only ≈ 1.3 (egui has no damage regions). Not measured
   on a real laptop iGPU (PLAN §8.3 frame-time target).
-- **Software adapter**: see *Windows* below (reduced frame rate when wgpu reports a CPU
-  adapter).
 - **No flow control to slow clients**: a Wi-Fi client can lag up to the 48-frame send queue
   (`DATA_SNDHWM`); client-paced credit is designed in `docs/design/flow-control.md`, not
   implemented (wire change).
@@ -90,9 +88,11 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   **Output** device row (default: the input device when it has outputs, else the system
   default output), `ac2 session open --out-device`, and loopback detection plays on the
   output device. The tester guide now chooses the playback endpoint there.
-- **Sluggish without a GPU** (VM, software adapter). When wgpu reports a CPU / software adapter
-  (WARP, llvmpipe, lavapipe), lower the redraw rate and skip costly effects (MSAA, blur), and
-  say so once ("software rendering: reduced frame rate"); measure frame time before and after.
+- ~~**Sluggish without a GPU**~~ — done: a CPU adapter (type `Cpu`, or WARP / llvmpipe /
+  lavapipe / SwiftShader by name; `ac2_plot::adapter::classify`) paces data and animation
+  frames to 30 fps, drops egui's popup/window shadows (no MSAA or blur exists to skip) and
+  toasts "software rendering: reduced frame rate" once. A dense 1080p frame is ≈ 20 ms on
+  llvmpipe (prepare_bench), so the cap halves the drawing from saturated to ≈ 60 %.
 
 ## Flaky tests
 

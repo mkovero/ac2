@@ -73,6 +73,7 @@ fn harness(dialog: ConnectDialog) -> Harness<'static, App> {
         embedded_autosave: None,
         client_key: None,
         connect: None,
+        rasterizer: Some(ac2_plot::Rasterizer::Gpu),
     };
     let mut dialog = Some(dialog);
     Harness::builder()

@@ -225,3 +225,18 @@ fn warning_toasts_off_keeps_warnings_in_the_log_only() {
     t.st.warn("no stimulus level yet");
     assert_eq!(t.last_toast(), "no stimulus level yet");
 }
+
+#[test]
+fn a_software_rasteriser_is_said_once() {
+    let mut t = T::new();
+    let keys = t.keys.clone();
+    t.st.update(Msg::Rasterizer(ac2_plot::Rasterizer::Gpu), &keys);
+    assert!(t.st.toasts.is_empty(), "a GPU is not news");
+    t.st.update(Msg::Rasterizer(ac2_plot::Rasterizer::Software), &keys);
+    assert_eq!(t.last_toast(), ac2_scene::toast::SOFTWARE_RENDERING);
+    assert_eq!(t.last_toast(), "software rendering: reduced frame rate");
+    assert_eq!(t.st.rasterizer, ac2_plot::Rasterizer::Software);
+    t.st.toasts.clear();
+    t.st.update(Msg::Rasterizer(ac2_plot::Rasterizer::Software), &keys);
+    assert!(t.st.toasts.is_empty(), "said once");
+}

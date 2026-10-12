@@ -244,6 +244,8 @@ pub struct AppState {
     /// The pointer is over the toasts: none expires while the operator reads them.
     pub toasts_held: bool,
     toast_seq: u64,
+    /// What rasterises the window: a CPU rasteriser gets fewer frames and no shadows.
+    pub rasterizer: ac2_plot::Rasterizer,
     /// The last [`ac2_scene::toast::LOG_LEN`] notifications, oldest first.
     pub notices: std::collections::VecDeque<Notice>,
     pub now_s: f64,
@@ -388,6 +390,7 @@ impl AppState {
             toasts: Vec::new(),
             toasts_held: false,
             toast_seq: 0,
+            rasterizer: ac2_plot::Rasterizer::Gpu,
             notices: std::collections::VecDeque::new(),
             now_s: 0.0,
             quit: false,
@@ -499,6 +502,12 @@ impl AppState {
                 self.toasts.retain(|t| t.until_s > now);
             }
             Msg::ToastsHeld(held) => self.toasts_held = held,
+            Msg::Rasterizer(r) => {
+                if r == ac2_plot::Rasterizer::Software && self.rasterizer != r {
+                    self.toast(ac2_scene::toast::SOFTWARE_RENDERING);
+                }
+                self.rasterizer = r;
+            }
             Msg::DismissToast(id) => {
                 self.toasts.retain(|t| t.id != id);
                 // What moved under the pointer is not what it rested on.
