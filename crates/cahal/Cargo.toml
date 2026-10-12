@@ -1,0 +1,40 @@
+[package]
+name = "cahal"
+description = "Core Audio HAL binding for macOS: devices, properties, listeners, and one duplex IOProc with an exact sample index."
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/mkovero/ac2"
+readme = "README.md"
+keywords = ["audio", "coreaudio", "macos", "hal"]
+categories = ["multimedia::audio", "os::macos-apis"]
+# Lives in ac2's workspace until its API settles; it carries every setting itself (nothing
+# `.workspace = true`) so it can move to its own repository unchanged.
+publish = false
+
+[features]
+default = ["consent"]
+# The microphone consent check (AVFoundation). Without a grant, macOS blocks a capture
+# IOProc's start on a prompt instead of failing it, so a caller checks first.
+consent = ["dep:objc2-av-foundation", "dep:block2", "dep:objc2"]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+unwrap_used = "warn"
+
+# The HAL itself is macOS only; elsewhere the crate is its pure part (types, the sample-time
+# indexer, channel tables) with no dependencies, so its tests run on any host.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-audio = { version = "0.3", default-features = false, features = ["std", "AudioHardware", "HostTime", "objc2-core-audio-types"] }
+objc2-core-audio-types = { version = "0.3", default-features = false, features = ["std", "CoreAudioBaseTypes"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFString"] }
+objc2 = { version = "0.6", optional = true }
+block2 = { version = "0.6", optional = true }
+objc2-av-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
