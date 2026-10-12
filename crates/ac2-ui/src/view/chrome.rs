@@ -208,17 +208,17 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             it
         }
         (Some(o), None) => {
-            let rate = format::fixed(f64::from(o.sample_rate_hz) / 1000.0, 1);
-            Item::new(
+            let l = ac2_scene::audio::session_line(o);
+            let color = if l.changed { ch.warn } else { ch.dim };
+            let mut it = Item::new(
                 40,
                 vec![
-                    dim(format!(
-                        "{} · {rate} kHz · {} frames",
-                        o.input_device.0, o.buffer_frames
-                    )),
-                    dim(format!("{rate} kHz · {} frames", o.buffer_frames)),
+                    RichText::new(l.full).color(color),
+                    RichText::new(l.short).color(color),
                 ],
-            )
+            );
+            it.hover = l.detail;
+            it
         }
         (None, _) if st.daemon().is_some() => Item::new(
             60,

@@ -309,6 +309,11 @@ pub fn devices(backends: &[BackendInfo]) -> String {
         ]);
     }
     let mut out = t.to_string();
+    for dev in backends.iter().flat_map(|b| &b.devices) {
+        if let Some(clocks) = ac2_scene::audio::clock_sources_text(&dev.clock_sources) {
+            out.push_str(&format!("\n{}: clock source {clocks}", dev.name));
+        }
+    }
     for u in unavailable {
         out.push('\n');
         out.push_str(&u);
@@ -344,23 +349,37 @@ pub fn session(s: &Session) -> String {
                 format::freq_readout(f64::from(o.sample_rate_hz)),
                 ac2_scene::recording::clock(r.frames as f64 / f64::from(o.sample_rate_hz.max(1)))
             ),
-            None => format!(
-                "session open (epoch {})\n  input  {} ch {}\n  output {} × {}{}\n  rate   {}  buffer {} samples",
-                s.epoch,
-                o.input_device.0,
-                channels_text(&o.config.input_channels),
-                o.output_device.0,
-                o.config.output_channels,
-                if o.output_device != o.input_device && o.config.output_channels > 0 {
-                    " (another device: the two clocks may drift)"
-                } else {
-                    ""
-                },
-                format::freq_readout(f64::from(o.sample_rate_hz)),
-                o.buffer_frames
-            ),
+            None => {
+                format!(
+                    "session open (epoch {})\n  input  {} ch {}\n  output {} × {}{}\n  rate   {}  buffer {} samples",
+                    s.epoch,
+                    o.input_device.0,
+                    channels_text(&o.config.input_channels),
+                    o.output_device.0,
+                    o.config.output_channels,
+                    if o.output_device != o.input_device && o.config.output_channels > 0 {
+                        " (another device: the two clocks may drift)"
+                    } else {
+                        ""
+                    },
+                    format::freq_readout(f64::from(o.sample_rate_hz)),
+                    o.buffer_frames
+                ) + &driver_lines(o)
+            }
         },
     }
+}
+
+/// An ASIO session's clock source and a change the driver made to its rate or buffer.
+fn driver_lines(o: &ac2_proto::model::OpenSession) -> String {
+    let mut t = String::new();
+    if let Some(c) = &o.clock_source {
+        t.push_str(&format!("\n  clock  {c}"));
+    }
+    if let Some(c) = ac2_scene::audio::driver_change_text(o) {
+        t.push_str(&format!("\n  NOTE   {c}"));
+    }
+    t
 }
 
 fn input_label(i: u16) -> String {

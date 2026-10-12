@@ -163,6 +163,19 @@ impl SessionDialog {
         }
     }
 
+    /// The device whose driver control panel P opens: an ASIO driver's own settings
+    /// (rate, buffer size, clock source, routing), which no other backend has.
+    pub fn panel_target(&self) -> Option<(BackendKind, DeviceId)> {
+        let k = self.backend_kind()?;
+        (k == BackendKind::Asio).then_some(())?;
+        Some((k, self.device_info()?.id.clone()))
+    }
+
+    /// The chosen device's clock sources, the one in use marked; ASIO devices only.
+    pub fn clock_sources_text(&self) -> Option<String> {
+        ac2_scene::audio::clock_sources_text(&self.device_info()?.clock_sources)
+    }
+
     /// The open session, if the dialog opened over one.
     pub fn open_session(&self) -> Option<&OpenSession> {
         self.open.as_ref()

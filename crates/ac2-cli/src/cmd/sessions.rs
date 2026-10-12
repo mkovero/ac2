@@ -307,6 +307,7 @@ pub(crate) async fn session(
         | SessionCmd::Close
         | SessionCmd::Status
         | SessionCmd::Replay { .. }
+        | SessionCmd::Panel { .. }
         | SessionCmd::Inputs(_) => {
             return Err(CliError::Usage("not a saved-session command".into()));
         }

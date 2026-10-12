@@ -289,6 +289,25 @@ fn backend_rows(
     if let Some(note) = d.clock_note() {
         ui.label(RichText::new(note).small().color(ch.dim));
     }
+    if let Some(clocks) = d.clock_sources_text() {
+        ui.label(
+            RichText::new(format!("Clock source: {clocks}"))
+                .small()
+                .color(ch.dim),
+        );
+    }
+    if d.panel_target().is_some() {
+        ui.horizontal(|ui| {
+            if ui.button("Driver control panel… (P)").clicked() {
+                *msg = Some(SessionMsg::Panel);
+            }
+            ui.label(
+                RichText::new("rate, buffer, clock and routing are the driver's own settings")
+                    .small()
+                    .color(ch.dim),
+            );
+        });
+    }
 }
 
 /// One device stepper: the name (a click steps on), ‹ › and its place among the choices.

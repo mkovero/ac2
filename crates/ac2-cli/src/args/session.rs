@@ -94,6 +94,18 @@ pub enum SessionCmd {
     },
     /// Input setup: the mic on each input and its active mic curve (shown without options).
     Inputs(SessionInputs),
+    /// Open an ASIO driver's own control panel (rate, buffer size, clock source, routing)
+    /// on the daemon's host. A change there resets the driver: the open session reopens
+    /// at the driver's new settings by itself (`session status` says what changed).
+    Panel {
+        /// Backend (default: the open session's).
+        #[arg(long, value_enum)]
+        backend: Option<BackendArg>,
+        /// Device id or name (default: the open session's device, else the backend's
+        /// only or default device).
+        #[arg(long)]
+        device: Option<String>,
+    },
 }
 
 /// `IN=NAME`: the mic on a 1-based input; `IN=` clears the name.

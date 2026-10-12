@@ -171,6 +171,13 @@ output device, rate, buffer), channels, system max level; **↑/↓** walk them 
   offered), then on **Enter** plays a 0.5 s band-limited noise burst on the stimulus output —
   under the stimulus lease and the ceiling, faded — and marks the input it returns on as the
   Reference (or says none answered and which came closest).
+- **Driver control panel…** (**P**, ASIO devices only): opens the driver's own settings
+  window (sample rate, buffer size, clock source, routing). A change there resets the
+  driver; the open session reopens at the driver's new rate and buffer by itself, its
+  measurements restart at them, and the top bar says what changed in the warning colour
+  (`… · 44.1 kHz · 512 frames · driver changed from 48.0 kHz`, the hover has the
+  details) until the session is next opened. The clock sources the driver offers are listed
+  under the device, the one in use marked; choose among them in the driver's panel.
 - **Enter** opens; what is missing is said in words (*Pick a reference input: the loopback
   from your stimulus output*). Roles and mic names are remembered per device (`ui.toml`).
   With a Reference, at least one mic and no measurements yet, one more **Enter** creates

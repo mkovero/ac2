@@ -162,8 +162,60 @@ pub(crate) async fn session(
             super::rec::replay(cli, &c, recording, *fast, out).await?;
         }
         SessionCmd::Inputs(a) => return super::cal::session_inputs(cli, a, out).await,
+        SessionCmd::Panel { backend: b, device } => {
+            let (kind, id) = panel_target(&c, b.map(backend), device.as_deref()).await?;
+            let r = c
+                .call(Command::SessionControlPanel {
+                    backend: kind,
+                    device: id.clone(),
+                })
+                .await?;
+            expect_body!("session.control_panel", r, ReplyBody::Ack { rev } => rev)?;
+            out.emit(&json!({ "backend": kind, "device": id }), || {
+                format!(
+                    "{}: the driver's control panel is open on the daemon's host; a change \
+                     there reopens the session at the driver's new settings",
+                    id.0
+                )
+            })?;
+        }
     }
     Ok(())
+}
+
+/// The device whose control panel `session panel` opens: the one named, else the open
+/// session's, else the backend's default.
+async fn panel_target(
+    c: &ac2_client::Client,
+    want: Option<BackendKind>,
+    device: Option<&str>,
+) -> Result<(BackendKind, DeviceId), CliError> {
+    let st = state(c).await?;
+    let open = st.session.open.as_ref().filter(|o| o.replay.is_none());
+    let kind = match (want, open) {
+        (Some(k), _) => k,
+        (None, Some(o)) => o.backend,
+        (None, None) => {
+            return Err(CliError::Usage(
+                "no session is open: name the backend (--backend asio)".into(),
+            ));
+        }
+    };
+    if device.is_none()
+        && let Some(o) = open.filter(|o| o.backend == kind)
+    {
+        return Ok((kind, o.input_device.clone()));
+    }
+    let r = c.call(Command::SessionDevices).await?;
+    let backends = expect_body!("session.devices", r, ReplyBody::Backends(d) => d)?;
+    let Some(b) = backends.iter().find(|b| b.kind == kind) else {
+        return Err(CliError::Usage(format!(
+            "the daemon offers no {kind:?} backend (see `ac2 devices`)"
+        )));
+    };
+    let devices: Vec<&DeviceInfo> = b.devices.iter().collect();
+    let (dev, _) = pick(&devices, device, None)?;
+    Ok((kind, dev.id.clone()))
 }
 
 /// The capture and playback devices `session open` asks for. Unnamed capture: the host's

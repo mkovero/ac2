@@ -190,3 +190,63 @@ fn a_duplex_device_plays_on_itself() {
     let (config, _, _) = opened(&r).expect("session.open");
     assert_eq!(config.input_device, config.output_device);
 }
+
+/// An ASIO device: its clock sources are listed with the one in use marked, and P opens its
+/// driver's control panel on the daemon; a device of another backend has neither.
+#[test]
+fn an_asio_device_lists_its_clocks_and_p_opens_its_driver_panel() {
+    let b = backends(false);
+    let mut dev = b[0].devices[0].clone();
+    dev.backend = BackendKind::Asio;
+    dev.id = DeviceId("Fireface USB".into());
+    dev.name = "Fireface USB".into();
+    dev.clock_sources = vec![
+        ClockSource {
+            name: "Internal".into(),
+            current: true,
+        },
+        ClockSource {
+            name: "Word Clock".into(),
+            current: false,
+        },
+    ];
+    let asio = BackendInfo {
+        kind: BackendKind::Asio,
+        description: "ASIO".into(),
+        availability: Availability::Available,
+        devices: vec![dev],
+    };
+    let mut t = T::new();
+    open_dialog(&mut t, vec![asio]);
+    assert_eq!(
+        dialog(&t).clock_sources_text().as_deref(),
+        Some("Internal (in use) · Word Clock")
+    );
+    focus(&mut t, Row::Device);
+    let r = t.type_key("P", "p");
+    let calls: Vec<_> = r
+        .iter()
+        .filter_map(|r| match r {
+            Request::Call { what, cmd } => Some((what.as_str(), cmd)),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        matches!(
+            calls.as_slice(),
+            [(what, Command::SessionControlPanel { backend: BackendKind::Asio, device })]
+                if device.0 == "Fireface USB" && *what == "driver control panel of Fireface USB"
+        ),
+        "{r:?}"
+    );
+
+    let mut t = T::new();
+    open_dialog(&mut t, backends(false));
+    assert_eq!(dialog(&t).clock_sources_text(), None);
+    focus(&mut t, Row::Device);
+    let r = t.type_key("P", "p");
+    assert!(
+        !r.iter().any(|r| matches!(r, Request::Call { .. })),
+        "{r:?}"
+    );
+}

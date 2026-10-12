@@ -294,6 +294,14 @@ impl AppState {
                     d.error = Some(e);
                 }
             }
+            SessionMsg::Panel => {
+                if let Some((backend, device)) = d.panel_target() {
+                    out.push(Request::Call {
+                        what: format!("driver control panel of {}", device.0),
+                        cmd: Command::SessionControlPanel { backend, device },
+                    });
+                }
+            }
             SessionMsg::DetectConfirm => {
                 if let Some(req) = d.detect_confirm(ceiling) {
                     out.push(Request::DetectLoopback(req));

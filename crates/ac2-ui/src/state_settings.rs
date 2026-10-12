@@ -445,6 +445,7 @@ impl AppState {
                     self.swallow_text = typed_char(&chord);
                 }
             }
+            Key::P if plain => self.session_msg(super::SessionMsg::Panel, out),
             Key::D if plain => {
                 self.session_msg(super::SessionMsg::Detect, out);
                 if self
