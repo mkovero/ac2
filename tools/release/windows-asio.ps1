@@ -1,8 +1,9 @@
-# Runs the Windows binaries (built with --features asio) on FlexASIO over a virtual audio
-# cable: the daemon's ASIO device list, an in-process duplex self-test on the ASIO backend, and
-# a daemon session whose capture is recorded for a while. CI installs VB-CABLE and FlexASIO
-# first; FlexASIO is pointed at the cable's capture and render endpoints by writing
-# %USERPROFILE%\FlexASIO.toml (FlexASIO reads it whenever the driver is loaded).
+# Runs the Windows binaries on FlexASIO over a virtual audio cable: the daemon's ASIO device
+# list, an in-process duplex self-test, and a daemon session whose capture is recorded for a
+# while. CI installs VB-CABLE and FlexASIO first; FlexASIO is pointed at the cable's capture
+# and render endpoints by writing %USERPROFILE%\FlexASIO.toml (FlexASIO reads it whenever the
+# driver is loaded). Endpoint names vary by driver version and runner image ("CABLE Input" or
+# "Speakers" for the render side), so both are found by -Match plus direction.
 #
 #   pwsh tools/release/windows-asio.ps1 -Bin target/debug -LogDir asio-logs
 #
@@ -68,29 +69,22 @@ function Show-Asio {
     }
 }
 
+# The friendly name of the audio endpoint matching -Match in one direction, as Windows lists
+# it: FlexASIO matches its `device` settings against these names. An endpoint's instance id
+# carries its data flow: {0.0.0.…} render, {0.0.1.…} capture.
+function Find-Endpoint {
+    param([ValidateSet('render', 'capture')][string]$Flow)
+    $flag = if ($Flow -eq 'render') { '0' } else { '1' }
+    Get-PnpDevice -Class AudioEndpoint -PresentOnly -ErrorAction SilentlyContinue |
+        Where-Object { $_.FriendlyName -like "*$Match*" -and $_.InstanceId -match "\{0\.0\.$flag\." } |
+        Select-Object -First 1 -ExpandProperty FriendlyName
+}
+
 $daemon = $null
 try {
-    Write-Host "== ac2d --backend asio"
-    $daemon = Start-Process -FilePath $ac2d -PassThru -NoNewWindow `
-        -ArgumentList @('--backend', 'asio', '--no-autosave', '--recordings', "`"$work`"") `
-        -RedirectStandardOutput (Join-Path $LogDir 'ac2d.stdout.txt') `
-        -RedirectStandardError (Join-Path $LogDir 'ac2d.stderr.txt')
-    $null = $daemon.Handle
-    Wait-Until 'the daemon to answer' 60 {
-        if ($daemon.HasExited) { throw "ac2d exited $($daemon.ExitCode) at startup" }
-        Invoke-Ac2 'status' @('status') -Soft
-    } | Out-Null
-
-    # The cable's endpoint names as the system lists them (the daemon's cpal backend); FlexASIO
-    # matches its `device` settings against the same WASAPI friendly names.
-    $cpal = Wait-Until "both cable endpoints matching '$Match'" 60 {
-        $d = Invoke-Ac2 'devices-cpal' @('devices') -Soft
-        $b = $d | Where-Object { $_.kind -eq 'cpal' }
-        if ($b -and ($b.devices | Where-Object { $_.name -like "*$Match*" -and $_.input }) -and
-            ($b.devices | Where-Object { $_.name -like "*$Match*" -and $_.output })) { $b }
-    }
-    $capture = @($cpal.devices | Where-Object { $_.name -like "*$Match*" -and $_.input })[0].name
-    $render = @($cpal.devices | Where-Object { $_.name -like "*$Match*" -and $_.output })[0].name
+    Write-Host "== audio endpoints matching '$Match'"
+    $capture = Wait-Until 'the cable capture endpoint' 60 { Find-Endpoint capture }
+    $render = Wait-Until 'the cable render endpoint' 60 { Find-Endpoint render }
     @(
         'backend = "Windows WASAPI"',
         '',
@@ -104,6 +98,17 @@ try {
     New-Item -ItemType File -Force -Path $flexLog | Out-Null
     Copy-Item $flexConfig (Join-Path $LogDir 'FlexASIO.toml')
     Write-Host "  FlexASIO: input '$capture', output '$render'"
+
+    Write-Host "== ac2d --backend asio"
+    $daemon = Start-Process -FilePath $ac2d -PassThru -NoNewWindow `
+        -ArgumentList @('--backend', 'asio', '--no-autosave', '--recordings', "`"$work`"") `
+        -RedirectStandardOutput (Join-Path $LogDir 'ac2d.stdout.txt') `
+        -RedirectStandardError (Join-Path $LogDir 'ac2d.stderr.txt')
+    $null = $daemon.Handle
+    Wait-Until 'the daemon to answer' 60 {
+        if ($daemon.HasExited) { throw "ac2d exited $($daemon.ExitCode) at startup" }
+        Invoke-Ac2 'status' @('status') -Soft
+    } | Out-Null
 
     Write-Host "== ac2 devices (asio)"
     $asio = Wait-Until "$Driver in the ASIO device list" 30 {

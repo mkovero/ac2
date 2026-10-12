@@ -94,11 +94,6 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      # The ASIO backend (feature `asio`) compiles only for Windows.
-      - name: clippy (asio)
-        if: runner.os == 'Windows'
-        run: cargo clippy -p ac2-audio -p ac2d -p ac2-cli --all-targets --locked --features ac2-audio/asio,ac2d/asio,ac2-cli/asio -- -D warnings
-
       - name: Disk headroom
         if: always()
         shell: bash
@@ -195,24 +190,27 @@ jobs:
       - name: doctests
         run: cargo test --workspace --locked --doc
 
-      # ASIO build of the daemon and CLI, over the debug binaries above: it still offers cpal,
-      # so the WASAPI pass below runs on it too (with --backend cpal). The backend's own unit
-      # tests run again with the real driver module compiled in.
-      - name: build (asio)
-        if: runner.os == 'Windows' && !cancelled()
-        run: |
-          cargo build -p ac2d -p ac2-cli --locked --features ac2d/asio,ac2-cli/asio
-          cargo nextest run -p ac2-audio --locked --features asio -E 'test(/asio/)'
-
-      - name: No VC++ runtime imports (asio)
+      # A hosted runner has no ASIO driver: before FlexASIO is installed, the backend must
+      # say so by name and point at FlexASIO.
+      - name: No ASIO driver message
         if: runner.os == 'Windows' && !cancelled()
         shell: pwsh
-        run: tools/release/check-windows-deps.ps1 target/debug/ac2.exe target/debug/ac2d.exe
+        run: |
+          $out = & target/debug/ac2.exe selftest duplex --backend asio 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -eq 0) { throw 'selftest passed with no ASIO driver installed' }
+          if ($out -notmatch 'No ASIO driver found' -or $out -notmatch 'github.com/dechamps/FlexASIO') {
+            throw 'no named "No ASIO driver found" message pointing at FlexASIO'
+          }
+          # The expected failure's exit code is not this step's.
+          exit 0
 
-      # WASAPI on a virtual cable, with the debug binaries built above: hosted Windows runners
-      # have no audio endpoint. VB-CABLE gives a render endpoint looped into a capture one; it
-      # is installed after the tests so they see the runner as it is. Outputs stay silent.
-      # They run after a failed test too: the binaries exist once the tests built them.
+      # ASIO through FlexASIO on a virtual cable, with the debug binaries built above: hosted
+      # Windows runners have no audio interface. VB-CABLE gives a render endpoint looped into a
+      # capture one; it is installed after the tests so they see the runner as it is. Outputs
+      # stay silent. These run after a failed test too: the binaries exist once the tests
+      # built them.
       - name: Virtual audio cable (VB-CABLE)
         if: runner.os == 'Windows' && !cancelled()
         uses: LABSN/sound-ci-helpers@e9d6ba52163a3283714a68412036ddf33f78d49c # main, 2026-06
@@ -227,16 +225,16 @@ jobs:
           }
           Get-Service AudioEndpointBuilder, Audiosrv | Format-Table -AutoSize
           Get-CimInstance Win32_SoundDevice | Format-Table -AutoSize Name, Status
-          # The runner image denies microphone access to desktop apps, and WASAPI then refuses
-          # every capture client with E_ACCESSDENIED.
+          # The runner image denies microphone access to desktop apps. FlexASIO opens the
+          # cable through WASAPI, which then refuses every capture client with E_ACCESSDENIED.
           $cs = 'SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone'
           foreach ($k in "HKLM:\$cs", "HKCU:\$cs", "HKCU:\$cs\NonPackaged") {
             New-Item -Path $k -Force | Out-Null
             Set-ItemProperty -Path $k -Name Value -Value Allow
           }
 
-      # FlexASIO (MIT): an ASIO driver over WASAPI, the ASIO path for devices without a
-      # vendor driver, and here the only ASIO driver on a hosted runner.
+      # FlexASIO (MIT): an ASIO driver over the Windows audio stack (WASAPI underneath), the
+      # ASIO path for devices without a vendor driver, and here the only ASIO driver.
       - name: FlexASIO driver
         if: runner.os == 'Windows' && !cancelled()
         shell: pwsh
@@ -249,15 +247,10 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "FlexASIO installer exited $($p.ExitCode)" }
           Get-ItemProperty -Path 'HKLM:\SOFTWARE\ASIO\FlexASIO' | Format-List
 
-      - name: ac2 on the virtual cable
-        if: runner.os == 'Windows' && !cancelled()
-        shell: pwsh
-        run: tools/release/windows-virtual-audio.ps1 -Bin target/debug -LogDir virtual-audio-logs
-
       - name: ac2 on FlexASIO (ASIO)
         if: runner.os == 'Windows' && !cancelled()
         shell: pwsh
-        run: tools/release/windows-asio.ps1 -Bin target/debug -LogDir virtual-audio-logs/asio
+        run: tools/release/windows-asio.ps1 -Bin target/debug -LogDir virtual-audio-logs
 
       - name: Upload virtual-audio logs
         if: runner.os == 'Windows' && !cancelled()
