@@ -1,0 +1,13 @@
+[package]
+name = "cpal-ts"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Spike: cpal's Core Audio timestamps beside the host clock and a click loopback."
+
+# Standalone: not a member of the ac2 workspace.
+[workspace]
+
+[dependencies]
+cpal = "0.18"
+libc = "0.2"

@@ -49,8 +49,9 @@ jobs:
         run: |
           command -v cmake || brew install cmake
           cargo build -p ac2-cli -p ac2d --locked
+          cargo build --manifest-path tools/experiments/macos-blackhole/cpal-ts/Cargo.toml --locked --target-dir target
           mkdir -p bin
-          cp target/debug/ac2 target/debug/ac2d bin/
+          cp target/debug/ac2 target/debug/ac2d target/debug/cpal-ts bin/
           swiftc -swift-version 5 -O tools/experiments/macos-blackhole/hal-timestamps.swift -o bin/hal-timestamps
 
       - name: BlackHole and sox
@@ -92,7 +93,7 @@ jobs:
           tools/experiments/macos-blackhole/probe.sh capture 3-chain bin logs
           got 3-chain || echo "::warning::capture still silent after every grant"
 
-      - name: HAL timestamps and click loopback
+      - name: HAL and cpal timestamps, click loopbacks
         if: ${{ !cancelled() }}
         run: tools/experiments/macos-blackhole/probe.sh hal bin logs
 
@@ -108,7 +109,7 @@ jobs:
       # the runner agent at the top of the process chain.
       - name: Capture with microphone revoked, then granted to the runner agent only
         if: ${{ !cancelled() }}
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: |
           tcc=tools/experiments/macos-blackhole/tcc.sh
           $tcc revoke

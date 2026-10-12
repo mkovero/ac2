@@ -2,7 +2,7 @@
 # macOS spike: ac2 on the BlackHole virtual loopback driver on a GitHub-hosted runner.
 #
 #   probe.sh capture <tag> <bin> <logdir>   # who gets real samples: sox, the HAL probe, ac2 selftest
-#   probe.sh hal <bin> <logdir>             # Core Audio IOProc timestamps and a click loopback
+#   probe.sh hal <bin> <logdir>             # Core Audio IOProc and cpal timestamps, click loopbacks
 #   probe.sh session <bin> <logdir>         # daemon session: 30 s recording, delay finder
 #
 # ac2 never emits: no --emit, no generator. A capture-permission check needs non-zero
@@ -35,6 +35,13 @@ stimulus_stop() {
 }
 trap stimulus_stop EXIT
 
+# Runs a command with a deadline: a capture without microphone access can block for good.
+tmo() {
+    local s=$1
+    shift
+    perl -e 'alarm shift; exec @ARGV' "$s" "$@"
+}
+
 summary() {
     jq -c '{pass, failures, opened, peak: .capture.peak_dbfs, blocks: .capture.blocks, gaps: .capture.index_gaps, disc: .capture.discontinuity_blocks, xruns: .capture.xrun_blocks, in_rate: .capture.rate, in_lag: .capture.input_lag, in_cb: .capture.callback_interval, out_rate: .output.rate, out_lead: .output.playback_lead, out_disc: .output.discontinuities}' "$1" 2>/dev/null || cat "${1%.json}.stderr.txt"
 }
@@ -44,19 +51,22 @@ capture() {
     mkdir -p "$log"
     stimulus_start
     echo "== [$tag] sox records $DEV for 2 s"
-    sox -V1 -t coreaudio "$DEV" -n trim 0 2 stat 2>&1 | grep -E 'Maximum amplitude|RMS +amplitude|Samples read' | tee "$log/sox-stat.txt"
+    tmo 15 sox -V1 -t coreaudio "$DEV" -n trim 0 2 stat 2>&1 | grep -E 'Maximum amplitude|RMS +amplitude|Samples read' | tee "$log/sox-stat.txt"
     echo "== [$tag] HAL IOProc on $DEV, 3 s"
-    "$bin/hal-timestamps" "$DEV" 3 2>&1 | tee "$log/hal.txt" | grep -E 'authorization|rate|latency|callbacks|gaps|Start'
+    tmo 20 "$bin/hal-timestamps" "$DEV" 3 2>&1 | tee "$log/hal.txt" | grep -E 'authorization|rate|latency|callbacks|gaps|Start'
     echo "== [$tag] ac2 selftest duplex on $DEV, 8 s (silent outputs; sox is the source)"
-    "$bin/ac2" --json selftest duplex --backend cpal --device "$DEV" --in 1-2 --outputs 2 --duration 8s \
+    tmo 40 "$bin/ac2" --json selftest duplex --backend cpal --device "$DEV" --in 1-2 --outputs 2 --duration 8s \
         > "$log/selftest.json" 2> "$log/selftest.stderr.txt"
     echo "  exit $?"
     summary "$log/selftest.json"
-    echo "== [$tag] ac2 selftest duplex, 512-frame buffer, 8 s"
-    "$bin/ac2" --json selftest duplex --backend cpal --device "$DEV" --in 1-2 --outputs 2 --duration 8s --buffer 512samples \
-        > "$log/selftest-512.json" 2> "$log/selftest-512.stderr.txt"
-    echo "  exit $?"
-    summary "$log/selftest-512.json"
+    [[ "$tag" == 0-pre ]] || { stimulus_stop; return; }
+    for b in 512 2048; do
+        echo "== [$tag] ac2 selftest duplex, $b-frame buffer, 8 s"
+        tmo 40 "$bin/ac2" --json selftest duplex --backend cpal --device "$DEV" --in 1-2 --outputs 2 --duration 8s --buffer "${b}samples" \
+            > "$log/selftest-$b.json" 2> "$log/selftest-$b.stderr.txt"
+        echo "  exit $?"
+        summary "$log/selftest-$b.json"
+    done
     stimulus_stop
 }
 
@@ -66,6 +76,10 @@ hal() {
     for b in 1024 512; do
         echo "== HAL IOProc, $b-frame buffer, click loopback, 6 s"
         "$bin/hal-timestamps" "$DEV" 6 "$b" click 2>&1 | tee "$log/hal-$b.txt" | grep -v -E '^device |^[0-9]+ '
+    done
+    for b in 1024 2048; do
+        echo "== cpal timestamps, $b-frame buffer, click loopback, 6 s"
+        "$bin/cpal-ts" "$DEV" 6 "$b" click 2>&1 | tee "$log/cpal-$b.txt"
     done
 }
 
@@ -105,6 +119,7 @@ session() {
     ac2j rec-start rec start --name blackhole --max 90s > /dev/null
     echo "== tf (ref in 1, meas in 2; sox delays in 2 by 480 samples) and the delay finder"
     ac2j meas-new meas new tf --name bh --ref 1 --meas 2 | jq -c . | cut -c1-400
+    ac2j meas-start meas start bh | jq -c . | cut -c1-400
     sleep 10
     ac2j delay-find delay find bh | jq -c . | cut -c1-1500
     sleep 18
