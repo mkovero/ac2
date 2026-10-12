@@ -14,7 +14,7 @@
 //! use cahal::{IoConfig, Scope, System};
 //! let dev = System::default_device(Scope::Input)?.ok_or(cahal::Error::NotFound)?;
 //! println!("{} at {} Hz", dev.info()?.name, dev.nominal_rate()?);
-//! let io = dev.start_io(IoConfig { input: true, output: false }, |cycle| {
+//! let io = dev.start_io(IoConfig::new(true, false), |cycle| {
 //!     // Real-time thread: no allocation, locks or system calls here.
 //!     let _first = cycle.input.channel(0).get(0);
 //! })?;
@@ -56,8 +56,8 @@ pub use index::Indexer;
 pub use layout::{Channel, ChannelLoc, ChannelMut, ChannelTable, Cycle, Input, Output};
 pub use types::{
     ClockSource, CycleTime, DeviceInfo, DeviceProperty, Error, FourCc, FrameRange, Gap, IoConfig,
-    IoStats, Latency, RateRange, Scope, StreamFormat, StreamInfo, StreamLayout, SystemProperty,
-    Transport,
+    IoStats, Latency, RateRange, Scope, StreamFormat, StreamInfo, StreamLayout, StreamSet,
+    SystemProperty, Transport,
 };
 
 #[cfg(target_os = "macos")]

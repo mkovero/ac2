@@ -23,7 +23,7 @@ use crate::layout::{ChannelTable, Cycle, Input, Output};
 use crate::listener::Listener;
 use crate::types::{
     CycleTime, DeviceProperty, Error, FourCc, Gap, IoConfig, IoStats, Scope, StreamFormat,
-    StreamLayout,
+    StreamLayout, StreamSet,
 };
 
 /// Most buffers (streams, or channels of non-interleaved streams) per direction. The
@@ -161,10 +161,36 @@ where
     };
     status("AudioDeviceCreateIOProcID", st)?;
     io.id = id;
+    if config.input {
+        use_input_streams(device, id, config.input_streams);
+    }
     // SAFETY: a proc id just created on this device.
     let st = unsafe { ca::AudioDeviceStart(device.object_id(), io.id) };
     status("AudioDeviceStart", st)?;
     Ok(io)
+}
+
+/// Turns off the input streams `used` leaves out, so the HAL does not convert them. Best
+/// effort: a device that refuses keeps every stream on, which costs conversion time and
+/// changes no sample the closure reads.
+fn use_input_streams(device: Device, id: ca::AudioDeviceIOProcID, used: StreamSet) {
+    let Some(proc) = id.and_then(|f| NonNull::new(f as *mut c_void)) else {
+        return;
+    };
+    let Ok(layout) = device.layout(Scope::Input) else {
+        return;
+    };
+    let count = layout.streams.len();
+    if used.covers(count) || used.is_empty() {
+        return;
+    }
+    let _ = crate::property::set_stream_usage(
+        device.object_id(),
+        crate::property::scope(Scope::Input),
+        proc,
+        count,
+        used,
+    );
 }
 
 unsafe fn free<F>(p: NonNull<c_void>) {
@@ -280,15 +306,16 @@ unsafe fn buffers(
     for (i, &channels) in want.iter().enumerate() {
         // SAFETY: the list has `n` buffers.
         let b = unsafe { &*first.add(i) };
+        if b.mData.is_null() {
+            // A stream the HAL does not serve (turned off by stream usage) reads as
+            // silence, whatever channel count its empty buffer states.
+            parts[i] = (std::ptr::null_mut(), 0);
+            continue;
+        }
         if b.mNumberChannels != channels {
             return None;
         }
         let samples = b.mDataByteSize as usize / std::mem::size_of::<f32>();
-        if b.mData.is_null() {
-            // A stream the HAL does not serve this cycle reads as silence.
-            parts[i] = (std::ptr::null_mut(), 0);
-            continue;
-        }
         let f = samples / channels.max(1) as usize;
         if *frames.get_or_insert(f) != f {
             return None;

@@ -11,7 +11,7 @@ use objc2_core_audio as ca;
 use objc2_core_audio_types::{AudioStreamBasicDescription, AudioValueRange, AudioValueTranslation};
 use objc2_core_foundation::{CFRetained, CFString};
 
-use crate::types::{Error, FourCc, Scope};
+use crate::types::{Error, FourCc, Scope, StreamSet};
 
 /// The HAL's system object.
 pub(crate) const SYSTEM: u32 = ca::kAudioObjectSystemObject as u32;
@@ -235,6 +235,50 @@ pub(crate) fn set<T: Plain>(
             std::ptr::null(),
             size_of::<T>() as u32,
             NonNull::from(value).cast(),
+        )
+    };
+    check("AudioObjectSetPropertyData", &a, st)
+}
+
+/// `AudioHardwareIOProcStreamUsage` with room for every stream a [`StreamSet`] names; the
+/// HAL reads `mNumberStreams` entries of the trailing array.
+#[repr(C)]
+struct StreamUsage {
+    proc: *mut c_void,
+    count: u32,
+    on: [u32; StreamSet::MAX],
+}
+
+/// `kAudioDevicePropertyIOProcStreamUsage`: which of the device's `count` streams in
+/// `scope` the IOProc `proc` is served. Set between creating the IOProc and starting it.
+pub(crate) fn set_stream_usage(
+    device: u32,
+    scope: u32,
+    proc: NonNull<c_void>,
+    count: usize,
+    used: StreamSet,
+) -> Result<(), Error> {
+    let count = count.min(StreamSet::MAX);
+    let mut u = StreamUsage {
+        proc: proc.as_ptr(),
+        count: count as u32,
+        on: [0; StreamSet::MAX],
+    };
+    for (i, on) in u.on.iter_mut().enumerate().take(count) {
+        *on = u32::from(used.contains(i));
+    }
+    let a = addr(ca::kAudioDevicePropertyIOProcStreamUsage, scope, MAIN);
+    let bytes = std::mem::offset_of!(StreamUsage, on) + count * size_of::<u32>();
+    // SAFETY: `u` holds at least `bytes` bytes laid out as the HAL's variable-length
+    // struct, and outlives the call.
+    let st = unsafe {
+        ca::AudioObjectSetPropertyData(
+            device,
+            NonNull::from(&a),
+            0,
+            std::ptr::null(),
+            bytes as u32,
+            NonNull::from(&u).cast(),
         )
     };
     check("AudioObjectSetPropertyData", &a, st)

@@ -25,7 +25,7 @@ use cahal::Scope;
 use crate::backend::{
     Backend, BackendKind, DeviceCaps, DeviceSelector, Direction, DuplexRequest, Presence,
 };
-use crate::error::{AudioError, Operation, Unsupported};
+use crate::error::{AudioError, Operation};
 use crate::stream::DuplexStream;
 use source::HalSource;
 
@@ -125,10 +125,23 @@ impl Backend for CoreAudioBackend {
         }
     }
 
-    fn control_panel(&self, _device: &DeviceSelector) -> Result<(), AudioError> {
-        Err(Unsupported::ControlPanel {
-            backend: BackendKind::CoreAudio,
+    /// Core Audio devices have no driver panel of their own: their rate, format and clock
+    /// source are set in Audio MIDI Setup, which this brings up. A change made there
+    /// reaches a running stream through the HAL's listeners (a rate change resets it).
+    fn control_panel(&self, device: &DeviceSelector) -> Result<(), AudioError> {
+        let uid = open::resolve(&*self.source, device, Direction::Input)?;
+        match self.source.object_id(&uid) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return Err(AudioError::DeviceNotFound {
+                    direction: Direction::Input,
+                    selector: device.to_string(),
+                });
+            }
+            Err(e) => return Err(open::backend_err(Operation::Open, e)),
         }
-        .into())
+        self.source
+            .open_audio_midi_setup()
+            .map_err(|e| open::backend_err(Operation::Open, e))
     }
 }

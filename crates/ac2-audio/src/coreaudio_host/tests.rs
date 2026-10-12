@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use cahal::{
     ChannelTable, ClockSource as HalClock, Cycle, CycleTime, DeviceProperty, Error, FrameRange,
     Indexer, Input, IoConfig, IoStats, Latency, Output, RateRange, Scope, StreamFormat, StreamInfo,
-    StreamLayout, Transport,
+    StreamLayout, StreamSet, Transport,
 };
 
 use super::CoreAudioBackend;
@@ -155,8 +155,13 @@ impl ScriptRun {
         input: &[Vec<f32>],
     ) -> Vec<Vec<f32>> {
         assert!(!self.stopped.load(Ordering::SeqCst), "cycle after stop");
+        // The HAL gives a stream the IOProc does not use no buffer (the test layouts are
+        // interleaved: buffer b is stream b).
         let ins: Vec<&[f32]> = (0..self.input.buffers().len())
-            .map(|b| input.get(b).map_or(&[][..], |v| &v[..]))
+            .map(|b| match input.get(b) {
+                Some(v) if self.config.input_streams.contains(b) => &v[..],
+                _ => &[][..],
+            })
             .collect();
         let mut outs: Vec<Vec<f32>> = self
             .output
@@ -248,6 +253,8 @@ struct Scripted {
     buffers_set: Mutex<Vec<(String, u32)>>,
     silent: AtomicBool,
     out_minus_in: Mutex<Option<f64>>,
+    /// Audio MIDI Setup launches so far.
+    panels: Mutex<u32>,
 }
 
 impl Scripted {
@@ -264,6 +271,7 @@ impl Scripted {
             rates_set: Mutex::default(),
             buffers_set: Mutex::default(),
             silent: AtomicBool::new(false),
+            panels: Mutex::default(),
             out_minus_in: Mutex::new(None),
         })
     }
@@ -370,6 +378,10 @@ impl HalSource for Scripted {
     }
     fn microphone(&self) -> Consent {
         self.consent.lock().expect("lock").0
+    }
+    fn open_audio_midi_setup(&self) -> Result<(), String> {
+        *self.panels.lock().expect("lock") += 1;
+        Ok(())
     }
     fn request_microphone(&self, timeout: Duration) -> Consent {
         self.requests.lock().expect("lock").push(timeout);
@@ -550,8 +562,8 @@ fn input_and_output_share_the_index_from_the_sample_time() {
     assert_eq!(
         run.config,
         IoConfig {
-            input: true,
-            output: true
+            input_streams: StreamSet::NONE.with(0),
+            ..IoConfig::new(true, true)
         }
     );
     // The priming cycle ran at sample time 1e6 with 512 frames; the device now runs 1024.
@@ -599,6 +611,33 @@ fn sparse_inputs_across_two_streams() {
     let blocks = drain(&mut st);
     let last = &blocks.last().expect("block").3;
     assert_eq!(&last[..4], &[0.5, 0.25, 0.5, 0.25]);
+    assert!(
+        run.config.input_streams.covers(2),
+        "both streams carry a mapped channel"
+    );
+}
+
+#[test]
+fn only_the_input_streams_in_use_are_on() {
+    let s = Scripted::new(vec![interface()]);
+    // ADAT 5 and 6 only: the analog stream is not converted.
+    let mut st = backend(&s).open(request(vec![6, 7], 2)).expect("open");
+    let run = s.run(0);
+    let c = run.config;
+    assert!(c.input && c.output);
+    assert_eq!(c.input_streams, StreamSet::NONE.with(1));
+    let analog = vec![0.9; 512 * 2];
+    let adat: Vec<f32> = (0..512 * 8)
+        .map(|i| match i % 8 {
+            4 => 0.25,
+            5 => -0.5,
+            _ => 0.0,
+        })
+        .collect();
+    run.cycle(Some(1_000_512.0), 512, 0, &[analog, adat]);
+    let blocks = drain(&mut st);
+    let last = &blocks.last().expect("block").3;
+    assert_eq!(&last[..4], &[0.25, -0.5, 0.25, -0.5]);
 }
 
 #[test]
@@ -818,13 +857,10 @@ fn two_devices_run_two_indexes_on_unknown_clocks() {
     assert_eq!(
         (out.config, inp.config),
         (
+            IoConfig::new(false, true),
             IoConfig {
-                input: false,
-                output: true
-            },
-            IoConfig {
-                input: true,
-                output: false
+                input_streams: StreamSet::NONE.with(0),
+                ..IoConfig::new(true, false)
             }
         )
     );
@@ -899,12 +935,24 @@ fn selectors_and_probe() {
         Presence::Present { generation: 78 },
         "a replugged device's new object id is a new generation"
     );
+}
+
+#[test]
+fn the_control_panel_is_audio_midi_setup_for_a_present_device() {
+    let s = Scripted::new(vec![blackhole()]);
+    let b = backend(&s);
+    b.control_panel(&DeviceSelector::Default).expect("default");
+    b.control_panel(&id("BlackHole2ch_UID")).expect("named");
+    assert_eq!(*s.panels.lock().expect("lock"), 2);
     assert!(matches!(
-        b.control_panel(&DeviceSelector::Default),
-        Err(AudioError::Unsupported(Unsupported::ControlPanel {
-            backend: BackendKind::CoreAudio
-        }))
+        b.control_panel(&id("gone")),
+        Err(AudioError::DeviceNotFound { .. })
     ));
+    assert_eq!(
+        *s.panels.lock().expect("lock"),
+        2,
+        "nothing opened for a missing device"
+    );
 }
 
 #[test]

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use cahal::{DeviceProperty, IoConfig, Scope};
+use cahal::{DeviceProperty, IoConfig, Scope, StreamSet};
 
 use super::caps::{self, device_id, uid_of};
 use super::engine::{Capture, Engine, Render, Shared};
@@ -422,13 +422,20 @@ pub(crate) fn open_stream(
         .map_err(|e| backend_err(Operation::Start, e))
     };
 
+    // Only the input streams a mapped channel lives on; with none named, all stay on.
+    let used = in_dev.input.streams_of(capture.map.iter().copied());
+    let input_streams = if used.is_empty() {
+        StreamSet::ALL
+    } else {
+        used
+    };
     let mut runs: Vec<Box<dyn Running>> = Vec::new();
     let mut shared = Vec::new();
     if one_device {
         let s = Arc::new(Shared::new());
         let config = IoConfig {
-            input: true,
-            output: render.is_some(),
+            input_streams,
+            ..IoConfig::new(true, render.is_some())
         };
         runs.push(start(&in_uid, config, engine(Some(capture), render, &s))?);
         shared.push(s);
@@ -438,17 +445,14 @@ pub(crate) fn open_stream(
         let out_uid = out_dev.as_ref().map(|o| o.uid.clone()).unwrap_or_default();
         runs.push(start(
             &out_uid,
-            IoConfig {
-                input: false,
-                output: true,
-            },
+            IoConfig::new(false, true),
             engine(None, render, &so),
         )?);
         runs.push(start(
             &in_uid,
             IoConfig {
-                input: true,
-                output: false,
+                input_streams,
+                ..IoConfig::new(true, false)
             },
             engine(Some(capture), None, &si),
         )?);

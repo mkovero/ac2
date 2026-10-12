@@ -166,6 +166,64 @@ impl StreamLayout {
             .iter()
             .all(|s| s.format == StreamFormat::Float32)
     }
+
+    /// The streams that carry any of the device channels `channels` (counted across all
+    /// streams in device order); a channel past the last is in none.
+    pub fn streams_of(&self, channels: impl IntoIterator<Item = usize>) -> StreamSet {
+        let mut set = StreamSet::NONE;
+        for ch in channels {
+            let mut first = 0usize;
+            for (i, s) in self.streams.iter().enumerate() {
+                let end = first + s.channels as usize;
+                if ch < end {
+                    set = set.with(i);
+                    break;
+                }
+                first = end;
+            }
+        }
+        set
+    }
+}
+
+/// A set of a direction's streams by index in device order, for
+/// `kAudioDevicePropertyIOProcStreamUsage`. Streams past [`StreamSet::MAX`] are always in
+/// it: the HAL then converts them, which costs time but changes no sample.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StreamSet(u64);
+
+impl StreamSet {
+    /// Streams a set names one by one.
+    pub const MAX: usize = 64;
+    /// Every stream.
+    pub const ALL: Self = Self(u64::MAX);
+    /// No stream.
+    pub const NONE: Self = Self(0);
+
+    /// The set with stream `i` added.
+    #[must_use]
+    pub const fn with(self, i: usize) -> Self {
+        if i < Self::MAX {
+            Self(self.0 | 1 << i)
+        } else {
+            self
+        }
+    }
+
+    /// Stream `i` is in the set.
+    pub const fn contains(self, i: usize) -> bool {
+        i >= Self::MAX || self.0 & (1 << i) != 0
+    }
+
+    /// No stream is in the set.
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Every one of `n` streams is in the set.
+    pub fn covers(self, n: usize) -> bool {
+        (0..n.min(Self::MAX)).all(|i| self.contains(i))
+    }
 }
 
 /// One stream of a device.
@@ -245,6 +303,22 @@ pub struct IoConfig {
     pub input: bool,
     /// Write the device's outputs.
     pub output: bool,
+    /// The input streams the HAL serves this IOProc (`kAudioDevicePropertyIOProcStreamUsage`);
+    /// the others arrive without a buffer and read as silence, and the HAL skips their
+    /// conversion. Output streams are always on: what is written to them can change
+    /// without a restart.
+    pub input_streams: StreamSet,
+}
+
+impl IoConfig {
+    /// Every stream of the chosen directions.
+    pub const fn new(input: bool, output: bool) -> Self {
+        Self {
+            input,
+            output,
+            input_streams: StreamSet::ALL,
+        }
+    }
 }
 
 /// How a cycle's sample time relates to the previous cycle's.
@@ -385,5 +459,31 @@ mod tests {
             streams: vec![f(2, other)],
         };
         assert!(!l.all_float32());
+    }
+
+    #[test]
+    fn streams_of_channels() {
+        let f = |channels, interleaved| StreamInfo {
+            channels,
+            interleaved,
+            format: StreamFormat::Float32,
+        };
+        // Analog 1–8 interleaved, ADAT 9–16 non-interleaved, a mono stream last.
+        let l = StreamLayout {
+            streams: vec![f(8, true), f(8, false), f(1, true)],
+        };
+        let s = l.streams_of([0, 7]);
+        assert!(s.contains(0) && !s.contains(1) && !s.contains(2));
+        let s = l.streams_of([8, 16]);
+        assert!(!s.contains(0) && s.contains(1) && s.contains(2));
+        assert!(
+            s.contains(StreamSet::MAX),
+            "streams past the set's reach stay on"
+        );
+        assert!(l.streams_of([17]).is_empty());
+        assert!(l.streams_of([0, 15, 16]).covers(3));
+        assert!(!l.streams_of([0, 16]).covers(3));
+        assert!(StreamSet::ALL.covers(200));
+        assert_eq!(IoConfig::new(true, false).input_streams, StreamSet::ALL);
     }
 }

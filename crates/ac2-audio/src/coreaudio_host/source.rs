@@ -85,6 +85,9 @@ pub(crate) trait HalSource: Send + Sync {
     fn microphone(&self) -> Consent;
     /// Asks for the microphone, waiting up to `timeout`.
     fn request_microphone(&self, timeout: Duration) -> Consent;
+    /// Brings up Audio MIDI Setup, where the operator sets a device's rate, format, clock
+    /// source and aggregates; returns once it is launched.
+    fn open_audio_midi_setup(&self) -> Result<(), String>;
 }
 
 #[cfg(target_os = "macos")]
@@ -221,7 +224,24 @@ mod mac {
         fn request_microphone(&self, timeout: Duration) -> Consent {
             consent(cahal::consent::request_microphone(timeout).authorization)
         }
+
+        fn open_audio_midi_setup(&self) -> Result<(), String> {
+            // `open -b` launches (or brings forward) the app by bundle id and returns once
+            // Launch Services has it, so the call never waits on the operator.
+            let st = std::process::Command::new("/usr/bin/open")
+                .args(["-b", AUDIO_MIDI_SETUP])
+                .status()
+                .map_err(|e| format!("open -b {AUDIO_MIDI_SETUP}: {e}"))?;
+            if st.success() {
+                Ok(())
+            } else {
+                Err(format!("open -b {AUDIO_MIDI_SETUP}: {st}"))
+            }
+        }
     }
+
+    /// Audio MIDI Setup's bundle id.
+    const AUDIO_MIDI_SETUP: &str = "com.apple.audio.AudioMIDISetup";
 
     fn consent(a: cahal::consent::Authorization) -> Consent {
         use cahal::consent::Authorization as A;
