@@ -7,7 +7,8 @@ timing, and long-run stability. On Windows ac2 talks to audio through ASIO only:
 interface's own ASIO driver, or FlexASIO for a device without one (§2). The MSI install
 and the simulated rig were confirmed in a Windows 11 VM on 2026-10-03. CI (all-OS and
 release runs) opens ASIO through FlexASIO on a virtual cable, VB-CABLE
-(`tools/release/windows-asio.ps1`): no substitute for an interface.
+(`tools/release/windows-asio.ps1`), and the app comes up on it. A dispatch can also run
+that session for an hour (`soak_minutes`). None of this substitutes for an interface.
 
 ## 1. Get and install the build
 
@@ -242,6 +243,11 @@ crash.
    `Select-String -Path $env:LOCALAPPDATA\ac2\logs\ac2-ui.log -Pattern 'discontinu|overflow|underrun|burst|xrun'`.
 6. Minimise ac2 for a few minutes during the run, then bring it back. It should come back
    at once, not freeze while catching up.
+
+CI's hour on FlexASIO and a virtual cable (`-f soak_minutes=60`, see
+`docs/design/asio.md` §4b) runs the daemon alone. It has no interface clock, no vendor
+driver, no app drawing and no battery. It is the closest thing without hardware, but it does
+not replace this run.
 
 ## 7. Test 5: duplex self-test (command line)
 
