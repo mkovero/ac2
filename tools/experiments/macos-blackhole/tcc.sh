@@ -4,6 +4,7 @@
 #
 #   tcc.sh dump
 #   tcc.sh grant <client>…    # absolute paths of executables (client_type 1 = path)
+#   tcc.sh revoke             # delete every microphone row
 set -uo pipefail
 
 if [[ "${GITHUB_ACTIONS:-}" != true || "${RUNNER_ENVIRONMENT:-}" != github-hosted ]]; then
@@ -36,5 +37,14 @@ case "${1:-}" in
         killall tccd 2>/dev/null
         sleep 1
         ;;
-    *) echo "usage: tcc.sh dump | grant <client>…" >&2; exit 64 ;;
+    revoke)
+        # Removes every microphone row: what a capture gets when nobody granted access.
+        for db in "${DBS[@]}"; do
+            sudo sqlite3 "$db" "DELETE FROM access WHERE service = 'kTCCServiceMicrophone';"
+        done
+        sudo killall tccd 2>/dev/null
+        killall tccd 2>/dev/null
+        sleep 1
+        ;;
+    *) echo "usage: tcc.sh dump | grant <client>… | revoke" >&2; exit 64 ;;
 esac

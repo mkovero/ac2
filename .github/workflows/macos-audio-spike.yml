@@ -57,6 +57,8 @@ jobs:
         run: |
           brew install sox jq
           brew install --cask blackhole-2ch
+          echo "-- before restarting coreaudiod"
+          system_profiler SPAudioDataType | grep -E '^ {8}[^ ].*:$' || true
           sudo launchctl kickstart -kp system/com.apple.audio.coreaudiod || sudo killall coreaudiod
           sleep 3
           system_profiler SPAudioDataType
@@ -90,6 +92,10 @@ jobs:
           tools/experiments/macos-blackhole/probe.sh capture 3-chain bin logs
           got 3-chain || echo "::warning::capture still silent after every grant"
 
+      - name: HAL timestamps and click loopback
+        if: ${{ !cancelled() }}
+        run: tools/experiments/macos-blackhole/probe.sh hal bin logs
+
       - name: Daemon session, 30 s
         if: ${{ !cancelled() }}
         run: tools/experiments/macos-blackhole/probe.sh session bin logs
@@ -97,6 +103,18 @@ jobs:
       - name: TCC after
         if: ${{ !cancelled() }}
         run: tools/experiments/macos-blackhole/tcc.sh dump | grep -i microphone || true
+
+      # The failure mode, then the smallest grant: every microphone row removed, then only
+      # the runner agent at the top of the process chain.
+      - name: Capture with microphone revoked, then granted to the runner agent only
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: |
+          tcc=tools/experiments/macos-blackhole/tcc.sh
+          $tcc revoke
+          tools/experiments/macos-blackhole/probe.sh capture 4-revoked bin logs
+          $tcc grant /opt/hca/hosted-compute-agent
+          tools/experiments/macos-blackhole/probe.sh capture 5-agent-only bin logs
 
       - name: Upload logs
         if: ${{ !cancelled() }}

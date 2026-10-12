@@ -3,10 +3,13 @@
 // authorization this process gets. The numbers cpal hides are what a direct Core Audio
 // backend would index samples by.
 //
-//   swiftc -O hal-timestamps.swift -o hal-timestamps && ./hal-timestamps "BlackHole 2ch" 5
+//   swiftc -O hal-timestamps.swift -o hal-timestamps
+//   ./hal-timestamps "BlackHole 2ch" <seconds> [buffer frames, 0 = as is] [click]
 //
-// It opens the device's IOProc and writes nothing to the output buffers (they stay as the
-// HAL zeroed them).
+// Without `click` it writes nothing to the output buffers (they stay as the HAL zeroed
+// them). With `click` (CI runner on a virtual loopback driver only) it writes a -40 dBFS
+// one-sample click every 24000 output samples and reports at which input sample time each
+// returns: the loopback in the device's own sample-time domain.
 import AVFoundation
 import CoreAudio
 import Foundation
@@ -14,6 +17,12 @@ import Foundation
 let args = CommandLine.arguments
 let want = args.count > 1 ? args[1] : "BlackHole 2ch"
 let seconds = args.count > 2 ? Double(args[2]) ?? 5 : 5
+let wantBuffer = args.count > 3 ? UInt32(args[3]) ?? 0 : 0
+let click = args.count > 4 && args[4] == "click"
+if click, ProcessInfo.processInfo.environment["RUNNER_ENVIRONMENT"] != "github-hosted" || !want.hasPrefix("BlackHole") {
+    print("click plays only into BlackHole on a GitHub-hosted runner")
+    exit(2)
+}
 
 let auth = AVCaptureDevice.authorizationStatus(for: .audio)
 let authName = ["notDetermined", "restricted", "denied", "authorized"]
@@ -65,6 +74,12 @@ guard dev != 0 else {
     exit(1)
 }
 
+if wantBuffer > 0 {
+    var a = address(kAudioDevicePropertyBufferFrameSize)
+    var v = wantBuffer
+    let st = AudioObjectSetPropertyData(dev, &a, 0, nil, UInt32(MemoryLayout<UInt32>.size), &v)
+    print("set buffer \(wantBuffer) frames: \(st)")
+}
 print("nominal rate \(f64(dev, kAudioDevicePropertyNominalSampleRate)) Hz")
 for (label, scope) in [("input", kAudioObjectPropertyScopeInput), ("output", kAudioObjectPropertyScopeOutput)] {
     print("\(label): latency \(u32(dev, kAudioDevicePropertyLatency, scope)) safety offset \(u32(dev, kAudioDevicePropertySafetyOffset, scope)) buffer \(u32(dev, kAudioDevicePropertyBufferFrameSize, scope)) frames")
@@ -83,18 +98,51 @@ struct Row {
 let capacity = 100_000
 let rows = UnsafeMutablePointer<Row>.allocate(capacity: capacity)
 var count = 0
+let maxClicks = 64
+let clickOut = UnsafeMutablePointer<Float64>.allocate(capacity: maxClicks)
+let clickIn = UnsafeMutablePointer<Float64>.allocate(capacity: maxClicks)
+var nOut = 0, nIn = 0
+var nextClick: Float64 = -1
+var lastIn: Float64 = -1e9
 
 var proc: AudioDeviceIOProcID? = nil
 let queue = DispatchQueue(label: "hal-timestamps", qos: .userInteractive)
-let st = AudioDeviceCreateIOProcIDWithBlock(&proc, dev, queue) { now, input, inTime, _, outTime in
+let st = AudioDeviceCreateIOProcIDWithBlock(&proc, dev, queue) { now, input, inTime, output, outTime in
     var peak: Float = 0
     var frames: UInt32 = 0
     for buf in UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input)) {
         guard let d = buf.mData else { continue }
         let n = Int(buf.mDataByteSize) / MemoryLayout<Float>.size
-        frames = UInt32(n) / max(buf.mNumberChannels, 1)
+        let ch = Int(max(buf.mNumberChannels, 1))
+        frames = UInt32(n / ch)
         let p = d.assumingMemoryBound(to: Float.self)
-        for i in 0 ..< n { peak = max(peak, abs(p[i])) }
+        for i in 0 ..< n {
+            let x = abs(p[i])
+            peak = max(peak, x)
+            let t = inTime.pointee.mSampleTime + Double(i / ch)
+            if click, x > 0.005, t > lastIn + 1000, nIn < maxClicks {
+                clickIn[nIn] = t
+                nIn += 1
+                lastIn = t
+            }
+        }
+    }
+    if click {
+        if nextClick < 0 { nextClick = outTime.pointee.mSampleTime + 4800 }
+        for buf in UnsafeMutableAudioBufferListPointer(output) {
+            guard let d = buf.mData else { continue }
+            let ch = Int(max(buf.mNumberChannels, 1))
+            let n = Int(buf.mDataByteSize) / MemoryLayout<Float>.size / ch
+            let start = outTime.pointee.mSampleTime
+            if nextClick >= start, nextClick < start + Double(n), nOut < maxClicks {
+                let f = Int(nextClick - start)
+                let p = d.assumingMemoryBound(to: Float.self)
+                for c in 0 ..< ch { p[f * ch + c] = 0.01 }
+                clickOut[nOut] = nextClick
+                nOut += 1
+                nextClick += 24000
+            }
+        }
     }
     if count < capacity {
         rows[count] = Row(
@@ -136,3 +184,9 @@ let a = rows[1], b = rows[n - 1]
 let rate = (b.inSample - a.inSample) / ((ns(b.inHost) - ns(a.inHost)) / 1e9)
 print(String(format: "input sample-time gaps: %d; rate vs host clock: %.3f Hz; in→out sample offset: %.0f; out−in host: %.3f ms; now−in host: %.3f ms; max peak %.6f (%.1f dBFS)",
              gaps, rate, a.outSample - a.inSample, (ns(a.outHost) - ns(a.inHost)) / 1e6, (ns(a.nowHost) - ns(a.inHost)) / 1e6, maxPeak, maxPeak > 0 ? 20 * log10(Double(maxPeak)) : -Double.infinity))
+if click {
+    print("clicks out \(nOut), back \(nIn)")
+    for i in 0 ..< min(nOut, nIn) {
+        print(String(format: "click %d: out sample %.0f, in sample %.0f, loopback %.0f samples", i, clickOut[i], clickIn[i], clickIn[i] - clickOut[i]))
+    }
+}
