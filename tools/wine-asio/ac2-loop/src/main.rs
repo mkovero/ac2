@@ -104,7 +104,10 @@ fn bufsize() -> Result<bool, Box<dyn std::error::Error>> {
 
     let mut s = open(&backend)?;
     let before = s.negotiated().buffer_frames;
-    println!("opened, buffer {before:?}");
+    println!(
+        "opened, buffer {before:?}, latency {:?}",
+        s.negotiated().latency
+    );
     println!("READY");
     std::io::stdout().flush()?;
     let mut next = None;

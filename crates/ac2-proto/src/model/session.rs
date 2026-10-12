@@ -221,6 +221,66 @@ pub struct OpenSession {
     /// The session reopened after its driver reset itself at another rate or buffer size
     /// (a change in the driver's control panel): what it ran at before. `None` otherwise.
     pub driver_change: Option<DriverChange>,
+    /// The session reopened after its driver reset or its clock changed: what the driver
+    /// did, and whether that stopped the generator's output. Kept until a client opens a
+    /// session anew. `None` otherwise.
+    pub driver_reset: Option<DriverReset>,
+    /// The driver's own statement of its latency at the open buffer size (ASIO);
+    /// `None` for a backend that states none in frames.
+    pub stated_latency: Option<StatedLatency>,
+}
+
+/// A driver reset or clock change the session went through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DriverReset {
+    /// What the driver did.
+    pub reason: DriverResetReason,
+    /// The generator was emitting: its output was cut, and it stays stopped until a client
+    /// starts it again.
+    pub output_stopped: bool,
+}
+
+/// What a driver did that reset the session's stream (ASIO). Each one may have moved the
+/// sample clock under the stream (another rate, another source, a slip).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DriverResetReason {
+    /// It asked to be reset: its settings changed (control panel, clock source).
+    ResetRequest,
+    /// It asked to resync: its clock slipped, or lost and regained lock.
+    ResyncRequest,
+    /// It announced another buffer size.
+    BufferSizeChange,
+    /// It reported a sample-rate change.
+    RateChange,
+    /// It reported no sample rate: the clock it follows went away.
+    ClockLost,
+}
+
+/// What a driver states about its latency at the open buffer size, in frames
+/// (ASIO `getLatencies`). Plausibility only: the loopback delay is the measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StatedLatency {
+    /// From the converter to the buffer ac2 reads.
+    pub input_frames: u32,
+    /// From the buffer ac2 writes to the converter.
+    pub output_frames: u32,
+    /// The part of the two above spent in the driver's own buffers (ASIO 2.3
+    /// `kAsioGetInternalBufferSamples`, included in `getLatencies` by the SDK's
+    /// definition); `None` when the driver does not report it.
+    pub driver_buffering: Option<DriverBuffering>,
+}
+
+/// Buffering inside a driver, frames per direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DriverBuffering {
+    /// Capture side.
+    pub input_frames: u32,
+    /// Playback side.
+    pub output_frames: u32,
 }
 
 /// What a session ran at before its driver reset itself to other settings.
@@ -271,10 +331,13 @@ pub enum StopCause {
     },
     /// The audio host ended the stream (its server shut down, the device was removed).
     HostEnded,
-    /// The driver asked to be reset because its own settings changed (rate, buffer size or
-    /// clock, typically in its control panel; ASIO). The reopen takes the driver's new rate
-    /// and buffer size.
-    DriverReset,
+    /// The driver reset or its clock changed (rate, buffer size or clock source, typically
+    /// in its control panel, or a clock it follows; ASIO). The output was cut at once; the
+    /// reopen takes the driver's new rate and buffer size.
+    DriverReset {
+        /// What the driver did.
+        reason: DriverResetReason,
+    },
     /// The device or its configuration changed, and opening it again failed.
     DeviceChanged,
 }

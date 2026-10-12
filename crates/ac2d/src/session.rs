@@ -130,6 +130,8 @@ impl Runtime {
             replay: None,
             clock_source: n.clock_source.clone(),
             driver_change: None,
+            driver_reset: None,
+            stated_latency: conv::stated_latency(&n.latency),
         };
         tracing::info!(
             "session open: {} in / {} out @ {} Hz on {:?}/{:?} ({:?}), epoch {}",

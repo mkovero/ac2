@@ -202,4 +202,8 @@ async fn session_panel_opens_the_drivers_panel_and_status_says_what_it_changed()
         ),
         "{text}"
     );
+    assert!(
+        text.contains("NOTE   Audio driver reset (driver asked to be reset)"),
+        "{text}"
+    );
 }

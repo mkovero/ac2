@@ -90,6 +90,8 @@ impl Shared {
                         replay: None,
                         clock_source: None,
                         driver_change: None,
+                        driver_reset: None,
+                        stated_latency: None,
                     }),
                     stopped: None,
                 };

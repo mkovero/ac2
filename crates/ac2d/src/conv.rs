@@ -203,6 +203,38 @@ fn direction(d: &audio::DirectionCaps) -> pm::DirectionInfo {
     }
 }
 
+pub(crate) fn reset_reason(r: audio::ResetReason) -> pm::DriverResetReason {
+    match r {
+        audio::ResetReason::ResetRequest => pm::DriverResetReason::ResetRequest,
+        audio::ResetReason::ResyncRequest => pm::DriverResetReason::ResyncRequest,
+        audio::ResetReason::BufferSizeChange => pm::DriverResetReason::BufferSizeChange,
+        audio::ResetReason::RateChange => pm::DriverResetReason::RateChange,
+        audio::ResetReason::ClockLost => pm::DriverResetReason::ClockLost,
+    }
+}
+
+/// The driver's latency statement in frames (ASIO); `None` for the other forms, which
+/// state no frame counts of the device's own.
+pub(crate) fn stated_latency(l: &audio::StaticLatency) -> Option<pm::StatedLatency> {
+    match *l {
+        audio::StaticLatency::Frames {
+            input,
+            output,
+            driver_buffering,
+        } => Some(pm::StatedLatency {
+            input_frames: input,
+            output_frames: output,
+            driver_buffering: driver_buffering.map(|b| pm::DriverBuffering {
+                input_frames: b.input,
+                output_frames: b.output,
+            }),
+        }),
+        audio::StaticLatency::PortRanges { .. }
+        | audio::StaticLatency::PerCallbackTimestamps
+        | audio::StaticLatency::Unknown => None,
+    }
+}
+
 pub(crate) fn backend_kind(k: audio::BackendKind) -> pm::BackendKind {
     match k {
         audio::BackendKind::Jack => pm::BackendKind::Jack,

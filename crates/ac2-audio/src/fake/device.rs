@@ -380,7 +380,10 @@ fn spawn_driver(
                     // The driver reset itself under this stream, which is over.
                     if !ended {
                         ended = true;
-                        driver.sim.events.reset();
+                        driver
+                            .sim
+                            .events
+                            .reset(crate::events::ResetReason::ResetRequest);
                     }
                     std::thread::sleep(Duration::from_millis(1));
                     continue;

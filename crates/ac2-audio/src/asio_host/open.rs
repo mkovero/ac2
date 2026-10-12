@@ -11,7 +11,8 @@ use super::engine::{Channel, Engine, Rt, RtDriver, Slot};
 use super::format::Format;
 use crate::backend::{
     BackendKind, ClockRelation, ClockSource, Delivery, DeviceCaps, DeviceId, Direction,
-    DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, StaticLatency,
+    DirectionCaps, DriverBuffering, DuplexRequest, FrameRange, IndexExactness, Negotiated,
+    RateRange, StaticLatency,
 };
 use crate::error::{AudioError, Operation, Unavailability, Unsupported};
 use crate::stream::{DuplexStream, Plumbing, StreamParts};
@@ -256,6 +257,10 @@ pub(crate) trait AsioDriver: Send + Sync {
     fn set_sample_rate(&self, hz: f64) -> Result<(), DriverError>;
     /// `getLatencies`: input, output, in frames.
     fn latencies(&self) -> Result<(u32, u32), DriverError>;
+    /// `future(kAsioGetInternalBufferSamples)` (ASIO 2.3): the driver's own buffering,
+    /// input, output, in frames, valid once buffers exist. `None` when the driver does not
+    /// answer (`ASE_NotPresent` from drivers before 2.3, or any other refusal).
+    fn internal_buffering(&self) -> Option<(u32, u32)>;
     /// `future(kAsioCanReportOverload)`.
     fn can_report_overload(&self) -> bool;
     /// `createBuffers` for `channels` (input?, index) in order, with this backend's
@@ -372,7 +377,11 @@ pub(crate) fn device_caps(
     let input = dir(true, ins)?;
     let output = dir(false, outs)?;
     let latency = match drv.latencies() {
-        Ok((input, output)) => StaticLatency::Frames { input, output },
+        Ok((input, output)) => StaticLatency::Frames {
+            input,
+            output,
+            driver_buffering: None,
+        },
         Err(_) => StaticLatency::Unknown,
     };
     Ok(DeviceCaps {
@@ -534,6 +543,10 @@ pub(crate) fn open_stream(
     let input_format = inputs[0].format.sample_format();
     let output_format = outputs.first().map(|c| c.format.sample_format());
     let latencies = drv.latencies().unwrap_or((0, 0));
+    // Asked after `createBuffers`: the buffering a driver keeps may depend on the size.
+    let driver_buffering = drv
+        .internal_buffering()
+        .map(|(input, output)| DriverBuffering { input, output });
     let clock_source = clock_sources(&*drv)
         .into_iter()
         .find(|c| c.current)
@@ -551,8 +564,8 @@ pub(crate) fn open_stream(
             Arc::clone(&events),
             drv.rt(),
         ),
-        f64::from(rate),
         Arc::clone(&events),
+        Arc::clone(&plumbing.output.shared),
     ));
 
     slot.install(&engine);
@@ -588,6 +601,7 @@ pub(crate) fn open_stream(
         latency: StaticLatency::Frames {
             input: latencies.0,
             output: latencies.1,
+            driver_buffering,
         },
         clock_source,
         delivery: Delivery::Device,

@@ -13,11 +13,15 @@ use super::open::{
     one_device, open_stream,
 };
 use crate::backend::{
-    Backend, ClockSource, DeviceId, DeviceSelector, DuplexRequest, IndexExactness, StaticLatency,
+    Backend, ClockSource, DeviceId, DeviceSelector, DriverBuffering, DuplexRequest, IndexExactness,
+    StaticLatency,
 };
 use crate::block::{BlockFlags, BlockHeader};
 use crate::error::{AudioError, Unavailability, Unsupported};
+use crate::events::ResetReason;
+use crate::generator::{GeneratorHandle, Sine, generator};
 use crate::level::MaxLevel;
+use crate::output::{OutputSource, OutputState};
 use crate::stream::DuplexStream;
 
 const F32: i32 = 19;
@@ -98,6 +102,8 @@ struct Scripted {
     panel_calls: AtomicUsize,
     rate: Mutex<f64>,
     latencies: Mutex<(u32, u32)>,
+    /// `kAsioGetInternalBufferSamples`; `None` answers `ASE_NotPresent`.
+    internal: Mutex<Option<(u32, u32)>>,
     buffers: Mutex<Buffers>,
     position: Arc<AtomicI64>,
     half: AtomicUsize,
@@ -140,6 +146,7 @@ impl Scripted {
             panel_calls: AtomicUsize::new(0),
             rate: Mutex::new(48_000.0),
             latencies: Mutex::new((32, 48)),
+            internal: Mutex::new(None),
             buffers: Mutex::new(Buffers::default()),
             position: Arc::new(AtomicI64::new(0)),
             half: AtomicUsize::new(0),
@@ -302,6 +309,9 @@ impl AsioDriver for Scripted {
     fn can_report_overload(&self) -> bool {
         false
     }
+    fn internal_buffering(&self) -> Option<(u32, u32)> {
+        *self.internal.lock().expect("scripted state")
+    }
     fn create_buffers(
         &self,
         channels: &[(bool, u16)],
@@ -421,7 +431,8 @@ fn caps_carry_the_drivers_channel_names_rates_and_sizes() {
         c.latency,
         StaticLatency::Frames {
             input: 32,
-            output: 48
+            output: 48,
+            driver_buffering: None,
         }
     );
     assert_eq!(c.duplex_clock, crate::ClockRelation::SingleCallback);
@@ -481,7 +492,8 @@ fn both_directions_of_a_switch_share_one_index_from_the_position() {
         s.negotiated().latency,
         StaticLatency::Frames {
             input: 32,
-            output: 48
+            output: 48,
+            driver_buffering: None,
         }
     );
 }
@@ -635,11 +647,12 @@ fn messages_map_to_events() {
 fn a_rate_change_ends_the_stream_and_static_answers_hold_without_one() {
     let drv = Scripted::new(Script::default());
     let s = open(&drv, DuplexRequest::new(vec![0], 0, level())).expect("open");
+    drv.slot.with(|e| e.expect("engine").rate_changed(44_100.0));
+    assert!(!s.events().ended, "dropped before the first indexed switch");
     drv.tick();
-    drv.slot.with(|e| e.expect("engine").rate_changed(48_000.0));
-    assert!(!s.events().ended, "the same rate is no change");
     drv.slot.with(|e| e.expect("engine").rate_changed(44_100.0));
     assert!(s.events().ended);
+    assert_eq!(s.events().reset, Some(ResetReason::RateChange));
     for (sel, value, want) in [
         (
             selector::SELECTOR_SUPPORTED,
@@ -984,7 +997,8 @@ fn an_unplugged_interface_ends_the_stream_and_reopens_once_back() {
     // Unplugged: the driver asks for a reset and stops switching.
     drv.present.store(false, Ordering::SeqCst);
     drv.message(selector::RESET_REQUEST, 0);
-    assert!(s.events().ended && s.events().reset);
+    assert!(s.events().ended);
+    assert_eq!(s.events().reset, Some(ResetReason::ResetRequest));
     drop(s);
     assert!(!drv.slot.is_set());
 
@@ -1036,7 +1050,10 @@ fn a_panel_change_resets_the_stream_and_the_reopen_takes_the_drivers_new_rate() 
     assert_eq!(drv.panel_calls.load(Ordering::SeqCst), 1);
     assert_eq!(rig.creates.load(Ordering::SeqCst), 1, "no second load");
     let ev = s.events();
-    assert!(ev.ended && ev.reset, "{ev:?}");
+    assert!(
+        ev.ended && ev.reset == Some(ResetReason::ResetRequest),
+        "{ev:?}"
+    );
     drop(s);
 
     // Reopened with no rate or buffer asked for: the driver's new ones.
@@ -1171,5 +1188,126 @@ fn a_sparse_input_map_makes_buffers_for_exactly_its_channels() {
             );
             assert_eq!(v[f * 2 + 1], Scripted::signal(2, pos));
         }
+    }
+}
+
+#[test]
+fn driver_buffering_is_stated_when_the_driver_reports_it_and_not_otherwise() {
+    let drv = Scripted::new(Script::default());
+    let s = open(&drv, DuplexRequest::new(vec![0], 2, level())).expect("open");
+    assert_eq!(
+        s.negotiated().latency,
+        StaticLatency::Frames {
+            input: 32,
+            output: 48,
+            driver_buffering: None,
+        },
+        "a driver before ASIO 2.3 answers not present: not reported, never 0"
+    );
+    drop(s);
+    *drv.internal.lock().expect("scripted state") = Some((16, 24));
+    let s = open(&drv, DuplexRequest::new(vec![0], 2, level())).expect("reopen");
+    assert_eq!(
+        s.negotiated().latency,
+        StaticLatency::Frames {
+            input: 32,
+            output: 48,
+            driver_buffering: Some(DriverBuffering {
+                input: 16,
+                output: 24
+            }),
+        }
+    );
+}
+
+/// A stream playing a sine on output 0, run until it is at full level.
+fn emitting(drv: &Arc<Scripted>) -> (DuplexStream, GeneratorHandle) {
+    let (mut handle, port) = generator([0]).expect("routes");
+    handle
+        .set_source(Box::new(Sine::new(1000.0, 48_000, 0.05)))
+        .expect("queue");
+    let mut req = DuplexRequest::new(vec![0], 2, level());
+    req.output = OutputSource::Generator(port);
+    let s = open(drv, req).expect("open");
+    handle.start();
+    // The 20 ms fade-in is under four periods of 256 at 48 kHz.
+    for _ in 0..6 {
+        drv.tick();
+    }
+    assert_eq!(handle.state(), OutputState::Active);
+    (s, handle)
+}
+
+/// Peak of output 0 over frames `range` of the half the last switch wrote.
+fn last_peak(drv: &Scripted, range: std::ops::Range<usize>) -> f32 {
+    let half = drv.half.load(Ordering::SeqCst);
+    range.fold(0.0, |m, f| m.max(drv.output(0, half, f).abs()))
+}
+
+#[test]
+fn every_clock_event_cuts_the_output_within_one_block_and_names_itself() {
+    type Event = fn(&Scripted);
+    let cases: [(&str, Event, ResetReason); 6] = [
+        (
+            "reset request",
+            |d| {
+                d.message(selector::RESET_REQUEST, 0);
+            },
+            ResetReason::ResetRequest,
+        ),
+        (
+            "resync request",
+            |d| {
+                d.message(selector::RESYNC_REQUEST, 0);
+            },
+            ResetReason::ResyncRequest,
+        ),
+        (
+            "buffer size change",
+            |d| {
+                d.message(selector::BUFFER_SIZE_CHANGE, 512);
+            },
+            ResetReason::BufferSizeChange,
+        ),
+        (
+            "another rate",
+            |d| d.slot.with(|e| e.expect("engine").rate_changed(44_100.0)),
+            ResetReason::RateChange,
+        ),
+        (
+            "the same rate (a relock or another source)",
+            |d| d.slot.with(|e| e.expect("engine").rate_changed(48_000.0)),
+            ResetReason::RateChange,
+        ),
+        (
+            "no clock",
+            |d| d.slot.with(|e| e.expect("engine").rate_changed(0.0)),
+            ResetReason::ClockLost,
+        ),
+    ];
+    // 2 ms at 48 kHz.
+    const CUT: usize = 96;
+    for (what, event, reason) in cases {
+        let drv = Scripted::new(Script::default());
+        let (s, handle) = emitting(&drv);
+        assert!(last_peak(&drv, 0..256) > 0.04, "{what}: playing");
+        event(&drv);
+        let ev = s.events();
+        assert!(ev.ended, "{what}: the stream ends");
+        assert_eq!(ev.reset, Some(reason), "{what}");
+        // The next block ramps down over the cut and is silent after it.
+        drv.tick();
+        assert!(last_peak(&drv, 0..CUT / 2) > 0.0, "{what}: a ramp, no step");
+        assert_eq!(
+            last_peak(&drv, CUT..256),
+            0.0,
+            "{what}: silent after the cut"
+        );
+        assert_eq!(handle.state(), OutputState::Silent, "{what}");
+        // Silent for good: starting the generator again on this stream does nothing.
+        handle.start();
+        drv.tick();
+        drv.tick();
+        assert_eq!(last_peak(&drv, 0..256), 0.0, "{what}: stays silent");
     }
 }

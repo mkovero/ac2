@@ -646,9 +646,13 @@ fn run(
         let ev = stream.events();
         if !stop_reported && ev.ended {
             stop_reported = true;
-            let cause = if ev.reset {
-                tracing::warn!("the audio driver reset the stream (its settings changed)");
-                StopCause::DriverReset
+            let cause = if let Some(r) = ev.reset {
+                tracing::warn!(
+                    "the audio driver reset the stream or its clock changed ({r:?}); output cut"
+                );
+                StopCause::DriverReset {
+                    reason: crate::conv::reset_reason(r),
+                }
             } else {
                 tracing::error!("audio stream ended by the host");
                 StopCause::HostEnded

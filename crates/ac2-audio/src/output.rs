@@ -20,6 +20,12 @@ use crate::level::{Gain, MaxLevel};
 /// Fade length for start, stop and source swaps (decision 6b).
 pub const FADE_SECONDS: f64 = 0.020;
 
+/// Fade length when the device clock changed under the stream ([`OutputShared::cut`]):
+/// short enough that next to nothing plays on a clock that may be wrong (another rate, a
+/// slipping source), long enough not to be a step (a step is a broadband click at full
+/// level).
+pub const CUT_SECONDS: f64 = 0.002;
+
 /// What the output callback emits.
 #[derive(Debug, Default)]
 pub enum OutputSource {
@@ -71,6 +77,8 @@ pub(crate) struct OutputShared {
     pub(crate) run: AtomicBool,
     /// The stream is stopping: fade out and stay silent for good.
     pub(crate) shutdown: AtomicBool,
+    /// The device clock changed: as `shutdown`, over [`CUT_SECONDS`].
+    cut: AtomicBool,
     pub(crate) gain_bits: AtomicU32,
     /// Sample-peak limit set while the stream runs (linear, `f32` bits): the callback
     /// enforces the lower of it and the limit the stream was opened with, so it can tighten
@@ -89,6 +97,7 @@ impl Default for OutputShared {
         Self {
             run: AtomicBool::new(false),
             shutdown: AtomicBool::new(false),
+            cut: AtomicBool::new(false),
             gain_bits: AtomicU32::new(Gain::UNITY.to_bits()),
             limit_bits: AtomicU32::new(1.0f32.to_bits()),
             state: AtomicU8::new(OutputState::Silent.to_u8()),
@@ -106,6 +115,15 @@ impl OutputShared {
     }
 
     pub(crate) fn begin_shutdown(&self) {
+        self.shutdown.store(true, Ordering::Release);
+    }
+
+    /// The device clock changed under the stream: fade out over [`CUT_SECONDS`] from the
+    /// next rendered block and stay silent for good, like a shutdown. Lock-free, callable
+    /// from a driver callback. Only the ASIO backend (Windows) reports clock events.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn cut(&self) {
+        self.cut.store(true, Ordering::Release);
         self.shutdown.store(true, Ordering::Release);
     }
 
@@ -213,6 +231,8 @@ pub(crate) struct OutputRenderer {
     /// `fade_frames` samples, with no float accumulation residue.
     env_pos: u32,
     fade_frames: u32,
+    /// Envelope step per sample of a cut: `fade_frames` over [`CUT_SECONDS`].
+    cut_step: u32,
     gain: f32,
     gain_step: f32,
     scratch: Box<[f32]>,
@@ -258,6 +278,7 @@ impl OutputRenderer {
         };
         let (tp, tc) = rtrb::RingBuffer::new(TICK_CAPACITY);
         let fade_frames = (FADE_SECONDS * f64::from(cfg.sample_rate)).round().max(1.0) as u32;
+        let cut_frames = (CUT_SECONDS * f64::from(cfg.sample_rate)).round().max(1.0) as u32;
         let renderer = Self {
             shared: Arc::clone(&shared),
             sources,
@@ -271,6 +292,7 @@ impl OutputRenderer {
             max: cfg.max_level.linear(),
             env_pos: 0,
             fade_frames,
+            cut_step: fade_frames.div_ceil(cut_frames).max(1),
             gain: 0.0,
             gain_step: 1.0 / fade_frames as f32,
             scratch: vec![0.0; CHUNK].into_boxed_slice(),
@@ -357,6 +379,11 @@ impl OutputRenderer {
             && self.source.is_some()
             && !swap_waiting;
         let env_target = if audible { self.fade_frames } else { 0 };
+        let down = if sh.cut.load(Ordering::Acquire) {
+            self.cut_step
+        } else {
+            1
+        };
         let gain_target = Gain::from_bits(sh.gain_bits.load(Ordering::Acquire))
             .linear()
             .clamp(0.0, 1.0);
@@ -387,7 +414,7 @@ impl OutputRenderer {
                     if self.env_pos < env_target {
                         self.env_pos += 1;
                     } else if self.env_pos > env_target {
-                        self.env_pos -= 1;
+                        self.env_pos = self.env_pos.saturating_sub(down).max(env_target);
                     }
                     self.gain = step_toward(self.gain, gain_target, self.gain_step);
                     let x = *v * (self.env_pos as f32 * inv_fade) * self.gain;
@@ -584,6 +611,29 @@ mod tests {
         assert_eq!(tail[FADE - 1][0], 0.0);
         handle.start();
         assert!(run(&mut r, 2960, 2000).iter().flatten().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn a_cut_fades_out_within_the_cut_time_and_is_final() {
+        const CUT: usize = 96;
+        let (mut handle, port) = generator([0]).expect("routes");
+        handle
+            .set_source(Box::new(Sine::new(440.0, RATE, 0.05)))
+            .expect("queue");
+        handle.start();
+        let (mut r, parts) = renderer(OutputSource::Generator(port), -6.0);
+        run(&mut r, 0, 2000);
+        parts.shared.cut();
+        let tail = run(&mut r, 2000, 256);
+        assert_eq!(parts.shared.state(), OutputState::Silent);
+        // A ramp, not a step to zero.
+        assert!(
+            peak(tail[..CUT / 2].iter().map(|f| f[0])) > 0.0,
+            "no hard cut"
+        );
+        assert!(tail[CUT..].iter().flatten().all(|&v| v == 0.0));
+        handle.start();
+        assert!(run(&mut r, 2256, 2000).iter().flatten().all(|&v| v == 0.0));
     }
 
     #[test]

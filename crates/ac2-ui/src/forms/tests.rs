@@ -29,6 +29,8 @@ fn open(inputs: Vec<u16>, loopback: Option<LoopbackRoute>) -> OpenSession {
         replay: None,
         clock_source: None,
         driver_change: None,
+        driver_reset: None,
+        stated_latency: None,
     }
 }
 

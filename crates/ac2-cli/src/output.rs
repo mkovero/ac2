@@ -370,11 +370,18 @@ pub fn session(s: &Session) -> String {
     }
 }
 
-/// An ASIO session's clock source and a change the driver made to its rate or buffer.
+/// An ASIO session's clock source, the driver's stated latency, and a change or reset the
+/// driver made under it.
 fn driver_lines(o: &ac2_proto::model::OpenSession) -> String {
     let mut t = String::new();
     if let Some(c) = &o.clock_source {
         t.push_str(&format!("\n  clock  {c}"));
+    }
+    if let Some(l) = &o.stated_latency {
+        t.push_str(&format!("\n  {}", ac2_scene::audio::stated_latency_text(l)));
+    }
+    if let Some(c) = ac2_scene::audio::driver_reset_text(o) {
+        t.push_str(&format!("\n  NOTE   {c}"));
     }
     if let Some(c) = ac2_scene::audio::driver_change_text(o) {
         t.push_str(&format!("\n  NOTE   {c}"));

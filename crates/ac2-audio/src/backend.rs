@@ -107,6 +107,16 @@ impl RateRange {
     }
 }
 
+/// Buffering inside a driver, frames per direction: where a device's own processing
+/// (DSP, a USB transfer queue) adds latency on top of the buffers the host sees.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriverBuffering {
+    /// Capture side.
+    pub input: u32,
+    /// Playback side.
+    pub output: u32,
+}
+
 /// Latency a backend states without measuring. Plausibility data only: the loopback
 /// correlation is the truth (decision 3a).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,6 +140,11 @@ pub enum StaticLatency {
         input: u32,
         /// Playback side.
         output: u32,
+        /// The part of `input` / `output` spent in the driver's own buffers (ASIO 2.3
+        /// `kAsioGetInternalBufferSamples`; the SDK defines it as included in
+        /// `getLatencies`). `None` when the driver does not report it, or nobody asked (a
+        /// listing: it depends on the buffers an open creates).
+        driver_buffering: Option<DriverBuffering>,
     },
     /// The backend states nothing.
     Unknown,

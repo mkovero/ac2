@@ -598,7 +598,13 @@ zero-based), `output_channels` (u16, a count), `sample_rate_hz`, `buffer_frames`
 files), `clock_source` (string \| nil: the clock source the device ran on when opened,
 ASIO), `driver_change` (`DriverChange` \| nil: {`from_rate_hz`, `from_buffer_frames`},
 set when the session reopened after its driver reset itself at another rate or buffer
-size, §4.1.1; nil after a `session.open`). `session.open` with `backend: replay` is `invalid`: recordings open with
+size, §4.1.1; nil after a `session.open`), `driver_reset` (`DriverReset` \| nil:
+{`reason`: `DriverResetReason`, `output_stopped`: bool, the generator was emitting and its
+output was cut}, set when the session reopened after a `driver_reset` stop, kept through
+later recoveries, nil after a `session.open`), `stated_latency` (`StatedLatency` \| nil:
+{`input_frames`, `output_frames`: the driver's `getLatencies` at the open buffer size,
+`driver_buffering`: {`input_frames`, `output_frames`} \| nil, the ASIO 2.3 buffering inside
+the driver, part of the two, nil when the driver does not report it}; ASIO only). `session.open` with `backend: replay` is `invalid`: recordings open with
 `session.replay`. Input and output may be two devices of one backend; an output device
 without outputs (or an `output_device: default` the host has none for) is `not_found`
 when `output_channels > 0`. Two devices open with `clock: unknown`: they may drift, which
@@ -1232,9 +1238,12 @@ configuration is open again or a client closes the session; `session.open` keeps
 session as last opened throughout. `AudioStopped`: `since` (WallNs, the last audio
 received, or the open when none came), `cause` (tagged by `type`): `not_delivering`
 {`after_ms`: u32, the silence that counts as stopped: max(1 s, 20 periods)} \| `host_ended`
-(the audio host ended the stream: server shut down, device removed) \| `driver_reset` (the
-driver asked to be reset because its own settings changed, typically in its control
-panel; ASIO) \| `device_changed`
+(the audio host ended the stream: server shut down, device removed) \| `driver_reset`
+{`reason`: `DriverResetReason`} (the driver reset or its clock changed, ASIO; the backend
+cut the output within the block, over 2 ms; `reason`: `reset_request` (its settings
+changed, typically in its control panel, or its clock source) \| `resync_request` (its
+clock slipped or relocked) \| `buffer_size_change` \| `rate_change` (`sampleRateDidChange`,
+also at the same rate) \| `clock_lost` (a rate of 0)) \| `device_changed`
 (a device or configuration change whose reopen failed); `recovery` (tagged by `state`):
 `opening` {`attempt`: u32 from 1, `started`: WallNs} \| `waiting` {`attempt`, `error`:
 string (what the backend said, e.g. that no JACK server runs), `next_at`: WallNs}.

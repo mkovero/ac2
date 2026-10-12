@@ -47,7 +47,25 @@ impl AppState {
                 // Another daemon (restarted, swapped in) numbers its measurements afresh: an
                 // id it has may be another measurement than the one shown.
                 let reborn = incarnation.is_some() && v.incarnation != incarnation;
+                let (was_stopped, was_firing) = self.daemon().map_or((true, false), |s| {
+                    (s.session.stopped.is_some(), s.generator.firing)
+                });
                 self.mirror = Some(v);
+                // A driver reset or clock change: the backend cut the output at once and the
+                // daemon disarmed the generator; say so when it happens, not only in the bar.
+                if !was_stopped
+                    && let Some(ac2_proto::model::StopCause::DriverReset { reason }) = self
+                        .daemon()
+                        .and_then(|s| s.session.stopped.as_ref())
+                        .map(|s| s.cause)
+                {
+                    let line = ac2_scene::audio::driver_reset_line(reason, was_firing);
+                    if was_firing {
+                        self.fault(line);
+                    } else {
+                        self.warn(line);
+                    }
+                }
                 let seen: Vec<String> = self
                     .measurements()
                     .iter()

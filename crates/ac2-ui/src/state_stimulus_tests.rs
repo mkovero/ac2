@@ -853,3 +853,47 @@ fn delay_steps_need_the_live_curve() {
         t.last_toast()
     );
 }
+
+/// The driver reset or its clock changed while the generator played: the app says at once
+/// what happened and that the output stopped; with nothing playing it still says what
+/// happened.
+#[test]
+fn a_driver_clock_change_is_told_with_whether_output_stopped() {
+    let stopped = |s: &mut State, reason| {
+        s.generator.firing = false;
+        s.generator.armed = false;
+        s.session.stopped = Some(ac2_proto::model::AudioStopped {
+            since: WallNs(0),
+            cause: ac2_proto::model::StopCause::DriverReset { reason },
+            recovery: ac2_proto::model::Recovery::Opening {
+                attempt: 1,
+                started: WallNs(0),
+            },
+        });
+    };
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.generator.armed = true;
+    s.generator.firing = true;
+    t.conn(mirror(s.clone()));
+    stopped(&mut s, ac2_proto::model::DriverResetReason::ResyncRequest);
+    t.conn(mirror(s.clone()));
+    assert_eq!(
+        t.last_toast(),
+        "Audio clock changed (driver asked to resync): output stopped"
+    );
+    // Told once: the next mirror of the same outage says nothing new.
+    let told = t.st.toasts.len();
+    t.conn(mirror(s));
+    assert_eq!(t.st.toasts.len(), told);
+
+    let mut t = T::new();
+    let mut s = daemon_state();
+    t.conn(mirror(s.clone()));
+    stopped(&mut s, ac2_proto::model::DriverResetReason::ClockLost);
+    t.conn(mirror(s));
+    assert_eq!(
+        t.last_toast(),
+        "Audio clock lost (driver reports no sample rate)"
+    );
+}

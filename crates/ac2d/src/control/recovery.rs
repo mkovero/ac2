@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use ac2_proto::ProtoError;
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    AudioStopped, BackendKind, DriverChange, GenAction, OpenSession, Recovery as WireRecovery,
-    Session, StopCause,
+    AudioStopped, BackendKind, DriverChange, DriverReset, DriverResetReason, GenAction,
+    OpenSession, Recovery as WireRecovery, Session, StopCause,
 };
 use ac2_proto::units::{SessionEpoch, WallNs};
 
@@ -97,6 +97,8 @@ pub(crate) struct Recovery {
     routes: Vec<u16>,
     since: WallNs,
     cause: StopCause,
+    /// The generator was emitting when the audio stopped (its output was cut).
+    output_stopped: bool,
     attempt: u32,
     phase: Phase,
     /// The last failure logged: its wait and text.
@@ -146,8 +148,18 @@ fn cause_text(c: StopCause) -> &'static str {
     match c {
         StopCause::NotDelivering { .. } => "the device stopped delivering",
         StopCause::HostEnded => "the audio host ended the stream",
-        StopCause::DriverReset => "the audio driver reset itself (its settings changed)",
+        StopCause::DriverReset { reason } => reset_text(reason),
         StopCause::DeviceChanged => "the device changed and did not reopen",
+    }
+}
+
+fn reset_text(r: DriverResetReason) -> &'static str {
+    match r {
+        DriverResetReason::ResetRequest => "the audio driver asked to be reset",
+        DriverResetReason::ResyncRequest => "the audio driver asked to resync its clock",
+        DriverResetReason::BufferSizeChange => "the audio driver changed its buffer size",
+        DriverResetReason::RateChange => "the audio driver signalled a sample-rate change",
+        DriverResetReason::ClockLost => "the audio driver lost its clock",
     }
 }
 
@@ -195,7 +207,10 @@ impl Control {
         let open = rt.open.clone();
         let routes = rt.routes.clone();
         self.wind_down(ac2_proto::model::RecordingEnd::AudioStopped);
-        self.disarm_for_outage();
+        let output_stopped = self.disarm_for_outage();
+        if output_stopped {
+            tracing::warn!("the generator's output stopped with the audio; start it again to emit");
+        }
         let closed = close_off_thread(rt);
         self.recovery = Some(Recovery {
             epoch,
@@ -203,6 +218,7 @@ impl Control {
             routes,
             since,
             cause,
+            output_stopped,
             attempt: 0,
             phase: Phase::Waiting { at: Instant::now() },
             logged: None,
@@ -220,13 +236,14 @@ impl Control {
         epoch: SessionEpoch,
         e: &ProtoError,
     ) {
-        self.disarm_for_outage();
+        let output_stopped = self.disarm_for_outage();
         self.recovery = Some(Recovery {
             epoch,
             open,
             routes,
             since: WallNs(wall_ns()),
             cause: StopCause::DeviceChanged,
+            output_stopped,
             attempt: 1,
             phase: Phase::Opening { token: 0 },
             logged: None,
@@ -236,8 +253,10 @@ impl Control {
     }
 
     /// The generator never comes back armed (principle 9): an outage disarms it at once.
-    fn disarm_for_outage(&mut self) {
+    /// Returns whether it was emitting.
+    fn disarm_for_outage(&mut self) -> bool {
         let g = self.store.state().generator.clone();
+        let firing = g.firing;
         self.gate.close();
         if g.armed || g.firing {
             let mut g = g;
@@ -246,6 +265,7 @@ impl Control {
             self.audit(&mut g, GenAction::Stop, None);
             self.commit(Change::Generator(g));
         }
+        firing
     }
 
     /// Starts the next attempt on a thread of its own; `closed`: the stopped stream's close,
@@ -264,7 +284,7 @@ impl Control {
         r.probe.next = None;
         let attempt = r.attempt;
         let mut config = r.open.config.clone();
-        if r.cause == StopCause::DriverReset {
+        if matches!(r.cause, StopCause::DriverReset { .. }) {
             // The operator changed the driver's own settings (its control panel): its rate
             // and buffer size are the ones to run at now. Asking for the old ones would
             // undo that change, or fail for good on a driver following an external clock.
@@ -337,6 +357,13 @@ impl Control {
                 };
                 rt.open.replay = r.open.replay.clone();
                 follow_driver(&r.open, &mut rt.open);
+                rt.open.driver_reset = match r.cause {
+                    StopCause::DriverReset { reason } => Some(DriverReset {
+                        reason,
+                        output_stopped: r.output_stopped,
+                    }),
+                    _ => r.open.driver_reset,
+                };
                 let out_s = (wall_ns().saturating_sub(r.since.0)) as f64 / 1e9;
                 tracing::warn!(
                     "audio back: the session reopened on attempt {} after {out_s:.1} s without \

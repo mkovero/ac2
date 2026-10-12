@@ -253,10 +253,24 @@ Where the code settles an open point of §3 or departs from it, and why.
 - **Buffer-size change.** ac2 answers `kAsioSelectorSupported(kAsioBufferSizeChange)` with
   *no*, so a driver falls back to `kAsioResetRequest`; either ends the stream. Reopening
   takes the new preferred size.
-- **Driver reset.** `kAsioResetRequest`, `kAsioResyncRequest`, `kAsioBufferSizeChange` and
-  `sampleRateDidChange` end the stream with `events().reset` set: the driver changed its
-  own settings (its control panel, a clock it follows). The daemon reports that as
-  `StopCause::DriverReset` and its recovery reopens **at the driver's settings**: the rate
+- **Clock events cut the output.** `kAsioResetRequest`, `kAsioResyncRequest`,
+  `kAsioBufferSizeChange` and every `sampleRateDidChange` (the stream's own rate included:
+  a relock or another source at the same nominal rate has still moved the sample grid; 0
+  is `clock_lost`) are clock events. On one, from whatever thread the driver sends it,
+  the engine first cuts the output (`OutputShared::cut`: the next rendered block fades
+  out over 2 ms, `CUT_SECONDS`, a ramp rather than a step's click, and the stream's output
+  stays silent for good), then records the reason (`ResetReason`, the first one wins) and
+  ends the stream. A generator on a clock that moved plays at a wrong rate or through a
+  slip; 20 ms of the usual fade is too long for that. Only atomics: no allocation, lock or
+  call in the callback. The daemon disarms the generator when the stream stops and never
+  re-arms it: emitting again takes a start by the operator. Requests from inside `start()`
+  or before the first indexed switch are still dropped. ASIO has no message of its own for
+  a change of the current clock source; drivers signal it with a reset or resync request,
+  or `sampleRateDidChange`, which this covers.
+- **Driver reset.** Each clock event ends the stream with `events().reset` set to its
+  reason: the driver changed its own settings (its control panel, a clock it follows).
+  The daemon reports that as `StopCause::DriverReset { reason }` and its recovery reopens
+  **at the driver's settings**: the rate
   and buffer size the session asked for are dropped for that reopen, and a session that
   pinned them is pinned to the new ones afterwards. Asking for the old rate again would
   undo the operator's change in the panel, or, on a driver following word clock at the new
@@ -266,7 +280,12 @@ Where the code settles an open point of §3 or departs from it, and why.
   delays in samples are re-derived from their seconds, the generator stays disarmed. The
   session carries `driver_change` (the old rate and buffer) until a client opens a session
   anew; the app's top bar shows it in the warning colour (`… · 44.1 kHz · 512 frames ·
-  driver changed from 48.0 kHz`), `ac2 session status` as a `NOTE` line. Changing the rate
+  driver changed from 48.0 kHz`), `ac2 session status` as a `NOTE` line. Every
+  driver-reset reopen also carries `driver_reset` (reason, and whether the generator was
+  emitting), shown the same way: `Audio clock changed (driver asked to resync): output
+  stopped` as a `NOTE` line, in the session line's detail and, at the moment it happens, as
+  an app toast (a fault when the output was cut, a warning otherwise); the AUDIO STOPPED
+  banner meanwhile reads `audio clock changed at 20:36 (driver asked to resync)`. Changing the rate
   under the operator without saying so would make every reading after it silently
   different; refusing to follow it would leave the rig dead until a client noticed.
 - **Control panel.** `session.control_panel` (`ac2 session panel`, **P** in Settings ›
@@ -317,7 +336,17 @@ Where the code settles an open point of §3 or departs from it, and why.
 - **Latency.** `kAsioLatenciesChanged` sets a flag that a small watcher thread
   (`ac2-asio-latency`) reads; it re-reads the latencies and latches `CONFIG_CHANGE` only
   when they differ. wineasio sends the message on every JACK connection change, with
-  unchanged values. `StaticLatency::Frames { input, output }` carries them.
+  unchanged values. `StaticLatency::Frames { input, output, driver_buffering }` carries
+  them; the session states them as `OpenSession.stated_latency` (`ac2 session status`, the
+  app's session-line detail): `stated latency: 288 frames in / 320 out (driver buffering:
+  32 frames in / 64 out)`.
+- **Driver buffering.** `future(kAsioGetInternalBufferSamples)` (ASIO 2.3) is asked at
+  every open, after `createBuffers` (it may depend on the size), so a reopen after a reset
+  asks again. The SDK defines `ASIOInternalBufferInfo` as the driver's internal buffering
+  *included in* `getLatencies`, so it is shown as the part of the stated latency spent
+  inside the driver (device DSP, a USB transfer queue), not added on top: adding it would
+  count it twice. A driver that does not answer (`ASE_NotPresent` from drivers before 2.3)
+  reads `driver buffering: not reported`, never 0.
 - **Buffers.** Inputs: the request's `input_map`, deduplicated (two block channels may carry
   one device channel). Outputs: every channel `0..output_channels`, not only the generator's
   routes, because the routes change at run time without a reopen.
@@ -494,9 +523,17 @@ run must reopen by itself. Until this passes, ASIO is shipped as preview.
 5. ~~Two MSIs and their UpgradeCode~~: moot, there is one MSI.
 6. ~~Clock source: read-only in Settings, or the driver panel?~~ Decided: read-only (the
    list in Settings and `ac2 devices`, the current one in the session), set in the
-   driver's panel (§3a). Still to see on hardware: what a driver does when the external
-   clock it follows goes away (a reset, an error, or silence).
-7. `kAsioGetInternalBufferSamples` (ASIO 2.3) reports buffering inside the driver. Should
-   it be folded into the stated latency?
+   driver's panel (§3a). ~~What happens when the clock changes?~~ Decided (operator): any
+   clock event (reset, resync, buffer-size or rate change, a rate of 0) stops emitting at
+   once and says so in plain words; nothing resumes by itself (§3a, *Clock events cut the
+   output*). Still to see on hardware: what a driver does when the external clock it
+   follows goes away (a reset, a rate of 0, an error, or silence; silence is caught by the
+   not-delivering bound, the output then fades over the usual 20 ms at the teardown).
+7. ~~`kAsioGetInternalBufferSamples` (ASIO 2.3): fold into the stated latency?~~ Decided
+   (operator: it shows added latency from the device's own DSP, and not every driver
+   implements it): asked at every open and shown beside the stated latency, `not
+   reported` when absent (§3a, *Driver buffering*). Per the SDK it is already part of
+   `getLatencies`, so it is not added a second time; a vendor driver that reports it
+   outside its latencies would show on the loopback delay, which is the measurement.
 8. ~~Can a capture-only session on ASIO coexist with a WASAPI output device?~~ Moot: there
    is no WASAPI backend.

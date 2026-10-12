@@ -13,8 +13,10 @@ use std::sync::{Arc, Mutex};
 
 use azo::driver::{CallbackHandle, Driver, Metadata, Proxy};
 use azo::dto::{ChannelId, Granularity};
-use azo::future::CanReportOverload;
-use azo::sys::{Bool, Callbacks, MessageSelector, SampleRate, Time, TimeInfoFlags};
+use azo::future::{CanReportOverload, GetInternalBufferSamples};
+use azo::sys::{
+    Bool, Callbacks, InternalBufferInfo, MessageSelector, SampleRate, Time, TimeInfoFlags,
+};
 use azo::utils::Host;
 
 use super::backend::{AsioHost, DriverSource};
@@ -215,6 +217,20 @@ impl AsioDriver for AzoDriver {
 
     fn can_report_overload(&self) -> bool {
         self.proxy.future::<CanReportOverload>(&mut ()).is_ok()
+    }
+
+    fn internal_buffering(&self) -> Option<(u32, u32)> {
+        let mut info = InternalBufferInfo {
+            input_samples: 0,
+            output_samples: 0,
+        };
+        self.proxy
+            .future::<GetInternalBufferSamples>(&mut info)
+            .ok()?;
+        Some((
+            info.input_samples.max(0) as u32,
+            info.output_samples.max(0) as u32,
+        ))
     }
 
     fn create_buffers(

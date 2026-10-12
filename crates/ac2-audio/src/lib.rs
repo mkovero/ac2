@@ -58,15 +58,15 @@ mod rng;
 pub use asio_host::AsioBackend;
 pub use backend::{
     Backend, BackendKind, ClockRelation, ClockSource, Delivery, DeviceCaps, DeviceId,
-    DeviceSelector, Direction, DirectionCaps, DuplexRequest, FrameRange, HistoryRequest,
-    IndexExactness, Negotiated, Presence, RateRange, SHORT_BUFFER_AT_48K, SampleFormat,
-    StaticLatency, short_buffer_frames,
+    DeviceSelector, Direction, DirectionCaps, DriverBuffering, DuplexRequest, FrameRange,
+    HistoryRequest, IndexExactness, Negotiated, Presence, RateRange, SHORT_BUFFER_AT_48K,
+    SampleFormat, StaticLatency, short_buffer_frames,
 };
 pub use block::{BlockConsumer, BlockFlags, BlockHeader, TransportStats};
 #[cfg(target_os = "macos")]
 pub use cpal_host::CpalBackend;
 pub use error::{AudioError, Operation, RequestError, Unavailability, Unsupported};
-pub use events::EventSnapshot;
+pub use events::{EventSnapshot, ResetReason};
 pub use fake::{FakeBackend, FakeConfig, FakeDriver, FakeEndpoints, FakeReverb, OutageKind};
 pub use generator::{
     GeneratorHandle, GeneratorPort, MAX_ROUTED_CHANNELS, RouteError, SignalSource, generator,

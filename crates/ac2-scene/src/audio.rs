@@ -1,7 +1,9 @@
 //! An open session whose audio stopped, in words: the AUDIO STOPPED banner, the app's top
 //! bar and the `ac2 status` line all say the same thing (`docs/design/audio-recovery.md`).
 
-use ac2_proto::model::{AudioStopped, ClockSource, OpenSession, Recovery, StopCause};
+use ac2_proto::model::{
+    AudioStopped, ClockSource, DriverResetReason, OpenSession, Recovery, StatedLatency, StopCause,
+};
 use ac2_proto::units::WallNs;
 
 use crate::format;
@@ -44,7 +46,11 @@ pub fn audio_stopped_text(
         StopCause::NotDelivering { .. } => format!("device not delivering since {at}"),
         StopCause::HostEnded => format!("audio host ended the stream at {at}"),
         StopCause::DeviceChanged => format!("device changed at {at}, did not reopen"),
-        StopCause::DriverReset => format!("audio driver settings changed at {at}"),
+        StopCause::DriverReset { reason } => format!(
+            "{} at {at} ({})",
+            reset_headline(reason),
+            reset_reason_text(reason)
+        ),
     };
     let secs = |t: WallNs| (t.0 as f64 - now.0 as f64) / 1e9;
     let (long, short) = match &s.recovery {
@@ -102,6 +108,68 @@ pub fn changes_in(s: &AudioStopped, now: WallNs) -> f64 {
     }
 }
 
+/// What a driver did that reset the stream, as every surface names it: `driver asked to
+/// resync`.
+pub fn reset_reason_text(r: DriverResetReason) -> &'static str {
+    match r {
+        DriverResetReason::ResetRequest => "driver asked to be reset",
+        DriverResetReason::ResyncRequest => "driver asked to resync",
+        DriverResetReason::BufferSizeChange => "driver changed its buffer size",
+        DriverResetReason::RateChange => "driver signalled a sample-rate change",
+        DriverResetReason::ClockLost => "driver reports no sample rate",
+    }
+}
+
+/// The kind of event a reset reason is: the clock moved, the clock went away, or the
+/// driver reset its settings.
+fn reset_headline(r: DriverResetReason) -> &'static str {
+    match r {
+        DriverResetReason::ResetRequest | DriverResetReason::BufferSizeChange => {
+            "audio driver reset"
+        }
+        DriverResetReason::ResyncRequest | DriverResetReason::RateChange => "audio clock changed",
+        DriverResetReason::ClockLost => "audio clock lost",
+    }
+}
+
+/// A driver reset in one sentence, for a toast and the session's note: `Audio clock
+/// changed (driver asked to resync): output stopped`. `output_stopped`: the generator was
+/// emitting, so its output was cut and stays stopped until started again.
+pub fn driver_reset_line(r: DriverResetReason, output_stopped: bool) -> String {
+    let h = reset_headline(r);
+    let mut c = h.chars();
+    let h: String = c
+        .next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default();
+    let line = format!("{h} ({})", reset_reason_text(r));
+    if output_stopped {
+        format!("{line}: output stopped")
+    } else {
+        line
+    }
+}
+
+/// The driver reset the session reopened after, if any (see [`driver_reset_line`]).
+pub fn driver_reset_text(o: &OpenSession) -> Option<String> {
+    o.driver_reset
+        .map(|d| driver_reset_line(d.reason, d.output_stopped))
+}
+
+/// A driver's latency statement: `stated latency: 288 frames in / 320 out (driver
+/// buffering: 32 frames in / 64 out)`. Buffering a driver does not report says so rather
+/// than reading as none.
+pub fn stated_latency_text(l: &StatedLatency) -> String {
+    let buffering = match l.driver_buffering {
+        Some(b) => format!("{} frames in / {} out", b.input_frames, b.output_frames),
+        None => "not reported".into(),
+    };
+    format!(
+        "stated latency: {} frames in / {} out (driver buffering: {buffering})",
+        l.input_frames, l.output_frames
+    )
+}
+
 /// A sample rate as the session shows it: `48.0 kHz`, `44.1 kHz`.
 pub fn rate_text(hz: u32) -> String {
     format!("{} kHz", format::fixed(f64::from(hz) / 1000.0, 1))
@@ -114,10 +182,12 @@ pub struct SessionLine {
     pub full: String,
     /// The same without the device: `44.1 kHz · 512 frames`.
     pub short: String,
-    /// The driver changed the rate or buffer size under the session (its control panel):
-    /// the operator should notice, since every measurement restarted at the new settings.
+    /// The driver changed the rate or buffer size under the session (its control panel),
+    /// or reset or changed its clock: the operator should notice, since every measurement
+    /// restarted and a generator that was playing stopped.
     pub changed: bool,
-    /// The longer story: the change and the clock source, when there is either.
+    /// The longer story: the change, the reset, the clock source and the driver's stated
+    /// latency, when there is any.
     pub detail: Option<String>,
 }
 
@@ -182,22 +252,26 @@ pub fn session_line(o: &OpenSession) -> SessionLine {
         ));
     } else if change.is_some() {
         full.push_str(" · driver changed the buffer");
+    } else if let Some(d) = o.driver_reset {
+        full.push_str(&format!(" · {}", reset_headline(d.reason)));
     }
-    let clock = o
-        .clock_source
-        .as_ref()
-        .map(|c| format!("clock source: {c}"));
-    let detail = match (&change, clock) {
-        (None, None) => None,
-        (Some(c), None) => Some(c.clone()),
-        (None, Some(k)) => Some(k),
-        (Some(c), Some(k)) => Some(format!("{c} · {k}")),
-    };
+    let reset = driver_reset_text(o);
+    let parts: Vec<String> = [
+        change.clone(),
+        reset.clone(),
+        o.clock_source
+            .as_ref()
+            .map(|c| format!("clock source: {c}")),
+        o.stated_latency.as_ref().map(stated_latency_text),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     SessionLine {
         full,
         short,
-        changed: change.is_some(),
-        detail,
+        changed: change.is_some() || reset.is_some(),
+        detail: (!parts.is_empty()).then(|| parts.join(" · ")),
     }
 }
 
@@ -315,6 +389,8 @@ mod tests {
             replay: None,
             clock_source: None,
             driver_change: None,
+            driver_reset: None,
+            stated_latency: None,
         }
     }
 
@@ -368,7 +444,9 @@ mod tests {
     fn a_driver_reset_is_named_as_a_settings_change() {
         let s = AudioStopped {
             since: at(0.0),
-            cause: StopCause::DriverReset,
+            cause: StopCause::DriverReset {
+                reason: DriverResetReason::ResetRequest,
+            },
             recovery: Recovery::Opening {
                 attempt: 1,
                 started: at(0.0),
@@ -377,7 +455,7 @@ mod tests {
         let t = audio_stopped_text(&s, at(0.5), utc);
         assert_eq!(
             t.banner,
-            "AUDIO STOPPED · audio driver settings changed at 20:36"
+            "AUDIO STOPPED · audio driver reset at 20:36 (driver asked to be reset)"
         );
     }
 
@@ -398,6 +476,99 @@ mod tests {
             Some(
                 "the driver changed the buffer to 512 frames (was 256); measurements \
                  restarted at the new settings"
+            )
+        );
+    }
+
+    #[test]
+    fn each_driver_reset_is_named_in_plain_words_with_whether_output_stopped() {
+        use ac2_proto::model::DriverReset;
+        let line = |r, stopped| driver_reset_line(r, stopped);
+        assert_eq!(
+            line(DriverResetReason::ResyncRequest, true),
+            "Audio clock changed (driver asked to resync): output stopped"
+        );
+        assert_eq!(
+            line(DriverResetReason::RateChange, true),
+            "Audio clock changed (driver signalled a sample-rate change): output stopped"
+        );
+        assert_eq!(
+            line(DriverResetReason::ClockLost, true),
+            "Audio clock lost (driver reports no sample rate): output stopped"
+        );
+        assert_eq!(
+            line(DriverResetReason::ResetRequest, false),
+            "Audio driver reset (driver asked to be reset)"
+        );
+        assert_eq!(
+            line(DriverResetReason::BufferSizeChange, false),
+            "Audio driver reset (driver changed its buffer size)"
+        );
+
+        // Reopened at the same settings: the session line still says it, in the warning
+        // colour, until a client opens the session anew.
+        let mut o = open(48_000, 256);
+        o.driver_reset = Some(DriverReset {
+            reason: DriverResetReason::ResyncRequest,
+            output_stopped: true,
+        });
+        let l = session_line(&o);
+        assert_eq!(
+            l.full,
+            "Fireface USB · 48.0 kHz · 256 frames · audio clock changed"
+        );
+        assert!(l.changed);
+        assert_eq!(
+            l.detail.as_deref(),
+            Some("Audio clock changed (driver asked to resync): output stopped")
+        );
+
+        // While it reopens: the banner names it with the time.
+        let s = AudioStopped {
+            since: at(0.0),
+            cause: StopCause::DriverReset {
+                reason: DriverResetReason::ClockLost,
+            },
+            recovery: Recovery::Opening {
+                attempt: 1,
+                started: at(0.0),
+            },
+        };
+        assert_eq!(
+            audio_stopped_text(&s, at(0.5), utc).banner,
+            "AUDIO STOPPED · audio clock lost at 20:36 (driver reports no sample rate)"
+        );
+    }
+
+    #[test]
+    fn stated_latency_names_driver_buffering_or_that_it_is_not_reported() {
+        use ac2_proto::model::DriverBuffering;
+        let mut l = StatedLatency {
+            input_frames: 288,
+            output_frames: 320,
+            driver_buffering: None,
+        };
+        assert_eq!(
+            stated_latency_text(&l),
+            "stated latency: 288 frames in / 320 out (driver buffering: not reported)"
+        );
+        l.driver_buffering = Some(DriverBuffering {
+            input_frames: 32,
+            output_frames: 64,
+        });
+        assert_eq!(
+            stated_latency_text(&l),
+            "stated latency: 288 frames in / 320 out (driver buffering: 32 frames in / 64 out)"
+        );
+        let mut o = open(48_000, 256);
+        o.stated_latency = Some(l);
+        let line = session_line(&o);
+        assert!(!line.changed);
+        assert_eq!(
+            line.detail.as_deref(),
+            Some(
+                "stated latency: 288 frames in / 320 out (driver buffering: 32 frames in / \
+                 64 out)"
             )
         );
     }

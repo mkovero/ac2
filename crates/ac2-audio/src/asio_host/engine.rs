@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicU64, AtomicUsize,
 use super::format::Format;
 use super::position::PositionClock;
 use crate::block::{BlockProducer, BlockStamp};
-use crate::events::{BackendEvents, EventLatch};
-use crate::output::{OutputRenderer, OutputStamp};
+use crate::events::{BackendEvents, EventLatch, ResetReason};
+use crate::output::{OutputRenderer, OutputShared, OutputStamp};
 
 /// The calls a switch makes into the driver.
 pub(crate) trait RtDriver: Send + Sync {
@@ -90,7 +90,8 @@ impl Rt {
 /// One open stream as its callbacks reach it.
 pub(crate) struct Engine {
     pub(crate) events: Arc<BackendEvents>,
-    rate: f64,
+    /// The output's control side, to cut it from a driver message.
+    output: Arc<OutputShared>,
     phase: AtomicU8,
     /// Switches that produced a block.
     indexed: AtomicU64,
@@ -111,10 +112,10 @@ unsafe impl Send for Engine {}
 unsafe impl Sync for Engine {}
 
 impl Engine {
-    pub(crate) fn new(rt: Rt, rate: f64, events: Arc<BackendEvents>) -> Self {
+    pub(crate) fn new(rt: Rt, events: Arc<BackendEvents>, output: Arc<OutputShared>) -> Self {
         Self {
             events,
-            rate,
+            output,
             phase: AtomicU8::new(STARTING),
             indexed: AtomicU64::new(0),
             duplicates: AtomicU64::new(0),
@@ -256,13 +257,27 @@ impl Engine {
         self.phase.load(Ordering::Acquire) == RUNNING && self.indexed() > 0
     }
 
-    /// `sampleRateDidChange`.
-    pub(crate) fn rate_changed(&self, hz: f64) {
-        // 0 means the driver lost its clock; any other rate than the stream's means the
-        // index no longer counts the frames it was opened at.
-        if hz != self.rate && self.live() {
-            self.events.reset();
+    /// The driver reset or its clock changed under a running stream: the output is cut
+    /// first (the next block fades out over [`CUT_SECONDS`](crate::output::CUT_SECONDS)
+    /// and stays silent; a generator on a clock that moved plays at a wrong rate or
+    /// through a slip), then the stream ends as a driver reset with `reason`.
+    fn clock_event(&self, reason: ResetReason) {
+        if self.live() {
+            self.output.cut();
+            self.events.reset(reason);
         }
+    }
+
+    /// `sampleRateDidChange`. Every call is a clock event, the stream's own rate included:
+    /// drivers call it when the clock they follow changes or relocks, and a source that
+    /// changed at the same nominal rate has still moved the sample grid under the index.
+    /// 0 means the driver has no clock at all.
+    pub(crate) fn rate_changed(&self, hz: f64) {
+        self.clock_event(if hz > 0.0 {
+            ResetReason::RateChange
+        } else {
+            ResetReason::ClockLost
+        });
     }
 }
 
@@ -281,7 +296,7 @@ pub(crate) mod selector {
 
 /// The answer to `asioMessage(selector, value)`, and its effect on the running stream.
 ///
-/// - Reset and resync requests end the stream as a driver reset
+/// - Reset and resync requests cut the output and end the stream as a driver reset
 ///   ([`EventSnapshot::reset`](crate::EventSnapshot::reset)): the recovery reopens from
 ///   scratch at the driver's settings, which is what a reset asks the host to do.
 /// - A buffer size change is refused (answer 0, and not listed as supported): a driver must
@@ -307,10 +322,12 @@ pub(crate) fn answer(engine: Option<&Engine>, selector: i32, value: i32) -> i32 
         SUPPORTS_TIME_INFO => 1,
         SUPPORTS_TIME_CODE => 0,
         RESET_REQUEST | RESYNC_REQUEST | BUFFER_SIZE_CHANGE => {
-            if let Some(e) = engine
-                && e.live()
-            {
-                e.events.reset();
+            if let Some(e) = engine {
+                e.clock_event(match selector {
+                    RESET_REQUEST => ResetReason::ResetRequest,
+                    RESYNC_REQUEST => ResetReason::ResyncRequest,
+                    _ => ResetReason::BufferSizeChange,
+                });
             }
             i32::from(selector != BUFFER_SIZE_CHANGE)
         }

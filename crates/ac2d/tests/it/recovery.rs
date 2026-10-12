@@ -15,7 +15,8 @@ use ac2_audio::FakeBackend;
 use ac2_client::{Client, ClientConfig, Endpoints, OnDrop};
 use ac2_proto::frame::{FrameData, LeqRun};
 use ac2_proto::model::{
-    DriverChange, GeneratorDesired, GeneratorSettings, Recovery, Session, Signal, State, StopCause,
+    DriverChange, DriverReset, DriverResetReason, GeneratorDesired, GeneratorSettings, Recovery,
+    Session, Signal, State, StopCause,
 };
 use ac2_proto::units::{Dbfs, MeasId};
 use ac2_proto::{Command, ReplyBody, Stream, Subscription, Topic};
@@ -353,18 +354,37 @@ async fn a_close_ends_the_attempts() {
 /// The operator changes the driver's rate and buffer size in its control panel while a
 /// session pinned to 48 kHz runs: the driver resets the stream, and the session reopens at
 /// the driver's new settings (asking for the old ones would undo the change), says so, and
-/// its measurements run again at the new rate.
+/// its measurements run again at the new rate. The generator that was playing stays
+/// stopped, and the session says why.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_driver_panel_change_reopens_the_session_at_the_drivers_new_rate() {
     let backend = realtime_rig();
     let (_h, c, _tf, _meter) = start(&backend).await;
-    let before = until(&c, "the measurements running", WAIT, |s| {
-        s.measurements.iter().all(|m| m.running)
-    })
+    let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
+    lease
+        .set(GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Pink,
+                level: Dbfs(-30.0),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: true,
+            firing: true,
+        })
+        .await
+        .unwrap();
+    let before = until(
+        &c,
+        "the measurements running, the generator firing",
+        WAIT,
+        |s| s.measurements.iter().all(|m| m.running) && s.generator.firing,
+    )
     .await;
     let was = before.session.open.clone().unwrap();
     assert_eq!(was.config.sample_rate_hz, Some(FS));
     assert_eq!(was.driver_change, None);
+    assert_eq!(was.driver_reset, None);
 
     backend.script_panel(Some((44_100, 512)));
     let reply = c
@@ -384,6 +404,17 @@ async fn a_driver_panel_change_reopens_the_session_at_the_drivers_new_rate() {
     })
     .await;
     let now = after.session.open.clone().unwrap();
+    assert_eq!(
+        now.driver_reset,
+        Some(DriverReset {
+            reason: DriverResetReason::ResetRequest,
+            output_stopped: true,
+        })
+    );
+    assert!(
+        !after.generator.armed && !after.generator.firing,
+        "no automatic resume"
+    );
     assert_eq!((now.sample_rate_hz, now.buffer_frames), (44_100, 512));
     assert_eq!(now.config.sample_rate_hz, Some(44_100));
     assert_eq!(now.config.buffer_frames, Some(512));
@@ -408,6 +439,7 @@ async fn a_driver_panel_change_reopens_the_session_at_the_drivers_new_rate() {
     let open = reopened.session.open.clone().unwrap();
     assert_eq!(open.sample_rate_hz, 44_100);
     assert_eq!(open.driver_change, None);
+    assert_eq!(open.driver_reset, None);
 }
 
 /// A panel call names a device the backend does not have: refused, with the device named.

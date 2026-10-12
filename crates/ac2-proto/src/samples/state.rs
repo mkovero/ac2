@@ -80,6 +80,18 @@ pub(super) fn session() -> Session {
                 from_rate_hz: 44_100,
                 from_buffer_frames: 512,
             }),
+            driver_reset: Some(DriverReset {
+                reason: DriverResetReason::ResyncRequest,
+                output_stopped: true,
+            }),
+            stated_latency: Some(StatedLatency {
+                input_frames: 288,
+                output_frames: 320,
+                driver_buffering: Some(DriverBuffering {
+                    input_frames: 32,
+                    output_frames: 64,
+                }),
+            }),
         }),
         stopped: Some(AudioStopped {
             since: WallNs(1_789_999_500_000_000_000),

@@ -18,9 +18,11 @@ session's audio is **stopped** when either
 
 - the host ends the stream (JACK's shutdown callback, cpal's `StreamInvalidated` /
   `DeviceNotAvailable`; `EventSnapshot::ended`) — cause `host_ended`; or, when the driver
-  ended it because its own settings changed (an ASIO reset request after a change in its
-  control panel; `EventSnapshot::reset`), cause `driver_reset`: the reopen then takes the
-  driver's current rate and buffer size instead of the session's (`asio.md` §3a); or
+  ended it because its own settings or its clock changed (an ASIO reset or resync request,
+  a buffer-size or sample-rate change; `EventSnapshot::reset` with the reason), cause
+  `driver_reset` with that reason: the backend has already cut the output, and the reopen
+  takes the driver's current rate and buffer size instead of the session's (`asio.md`
+  §3a); or
 - no block arrived for `max(1 s, 20 periods)` while the backend said nothing — cause
   `not_delivering`.
 
