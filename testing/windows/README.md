@@ -129,11 +129,26 @@ driver you used.
   `ac2 selftest duplex --backend asio --device "<driver>" --duration 60s` is Test 5 on it
   (close the app first: a driver runs in one program at a time).
 - **Rate and buffer.** With none chosen, ac2 opens at the driver's current rate and its
-  preferred buffer size. Many drivers set the buffer only in their own control panel: a
-  change there (or a rate change on the interface) ends the stream, and ac2 reopens it by
-  itself within a few seconds (the top bar shows the outage). Report how long it took.
+  preferred buffer size. Many drivers set the buffer only in their own control panel.
+- **Driver control panel.** In Settings › Audio & I/O, with an ASIO device chosen, the
+  **Driver control panel… (P)** button (or **P**) opens the driver's own settings window;
+  `ac2 session panel` does the same from the command line (on the PC running ac2d). A rate
+  or buffer change there resets the driver: the session reopens by itself **at the
+  driver's new settings**, its measurements restart, and the top bar shows the new rate in
+  the warning colour (`… · 44.1 kHz · 512 frames · driver changed from 48.0 kHz`; hover for
+  details) until you open the session again. `ac2 session status` shows it as a `NOTE`.
+- **Clock source.** Settings lists the driver's clock sources under the device (`Clock
+  source: Internal (in use) · Word Clock …`), `ac2 devices` after the table, and `ac2
+  session status` the one in use (`clock  Internal`). It is read-only: choose it in the
+  driver's panel.
 - **Clock.** Input and output come from the same driver callback, so Settings shows one
   clock; there is no *separate endpoints* note.
+- **When the driver is busy or the interface is off.** With another program (a DAW)
+  holding the driver, ac2 says `<driver> is in use by another application (close the DAW or
+  other audio program using it)`; with the interface unplugged or off, `<driver> is
+  installed but its interface is not present (connect it and switch it on)`, plus the
+  driver's own words when it gives any. Both keep retrying: close the other program or plug
+  the interface back in, and the session comes up within 30 s.
 - **One driver at a time.** ASIO allows one driver per program. While ac2 has a driver
   open, the other drivers are listed by name only; ac2 cannot pair one driver's inputs with
   another's outputs.
@@ -303,6 +318,27 @@ Checks the file writes and the replay path on Windows.
    the app shows when the recording ends.
 3. The files are in `%APPDATA%\ac2\data\recordings\`. Note their size.
 
+## 8a. ASIO: driver panel, clock, busy and unplug (about 10 minutes)
+
+Not run under emulation with a real driver yet; each tells us what your driver really does.
+
+1. **Panel.** Session open at 48 kHz. Press **P** in Settings › Audio & I/O (or `ac2
+   session panel`). Does the driver's window appear? Is it in front? Does the app stay
+   responsive while it is open? Change the rate to 44.1 kHz (or the buffer size) and close
+   it. Note: how long until audio is back, the top bar text, and the rate the measurements
+   show. Change it back.
+2. **Clock.** Note the clock sources Settings lists and which is marked *in use*. If the
+   interface can follow an external clock and you have one, switch to it in the panel, then
+   unplug that clock cable: what does the top bar say, and does audio come back when you
+   plug it in again?
+3. **Busy.** Open a DAW (or another ASIO program) on the same driver first, then open the
+   session in ac2. Copy the error text. Close the DAW: does ac2 come up by itself?
+4. **Unplug.** With a session running, unplug the interface's USB cable. Note the top bar
+   text and the error under it after a few attempts (copy it). Plug it back in: how long
+   until audio is back?
+5. **Sparse inputs.** `ac2 session open --backend asio --device "<driver>" --in 3,7`
+   (any two non-adjacent inputs): does it open, and does each meter follow its own input?
+
 ## 9. What to send back
 
 A short note per test is enough; failures with a screenshot and the log are the most
@@ -321,6 +357,7 @@ useful.
 | Test 4: 1 h run clean? CPU %, memory (both processes) and battery at start and end | |
 | Test 5: self-test reports (silent, under load, loopback offsets if run) | |
 | Record and replay (optional): file written, replay matches live? | |
+| 8a ASIO: panel shows? time to reopen after a rate change, top bar text; clock sources listed; busy and unplug texts; replug time; inputs 3,7 | |
 | Do the input meters and the SPL number move smoothly, or noticeably steppy? | |
 | CPU % of ac2-ui.exe with a session open and nothing playing | |
 | Any banner, freeze, crash, firewall prompt or odd behaviour | |

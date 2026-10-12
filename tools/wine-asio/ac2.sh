@@ -11,12 +11,15 @@
 #   loop.log             ac2-loop: the device list, then CYCLES opens of WineASIO with
 #                        out_1 -> in_1 connected inside JACK
 #   bufsize.log          ac2-loop MODE=bufsize: jack_bufsize mid-stream, end, reopen
+#   selftest-sparse.json ac2 selftest duplex --in 3,7 (a sparse input map), 5 s, silent
+#   sparse.log           ac2-loop MODE=sparse: inputs 3 and 7, out_1 -> in_7 inside JACK
+#   panel.log            ac2-loop MODE=panel: the driver's control panel, no stream / running
 #   jackd.log
 # The daemon (ac2d) is built but not run: see README.md, "ac2's backend".
 #
 # Audio safety: JACK runs the dummy driver (no sound device) and wineasio never connects to
 # JACK's (dummy) system ports. The selftest and the bufsize run are silent: nothing passes
-# --emit or starts the generator. Only ac2-loop writes nonzero samples (-20 dBFS single-sample
+# --emit or starts the generator. Only ac2-loop (default and sparse modes) writes nonzero samples (-20 dBFS single-sample
 # impulses), it refuses any driver but WineASIO, and its output reaches only its own input
 # through the connection made here.
 set -euo pipefail
@@ -91,6 +94,37 @@ docker run --rm --memory 8g --ulimit memlock=-1 --cpus 4 --shm-size 256m \
         done
         wait "$loop_pid" || problem "ac2-loop exit $?"
         sed -n "/^# summary/,\$p" /out/loop.log
+
+        # WineASIO has as many inputs as its registry says (2 in this image): 8 for the sparse
+        # map, back to 2 after.
+        inputs() { wine reg add "HKCU\\Software\\Wine\\WineASIO" /v "Number of inputs" /t REG_DWORD /d "$1" /f >/dev/null 2>&1; }
+        inputs 8
+        echo "== ac2 selftest duplex --in 3,7 (sparse input map), 5 s (silent)"
+        ac2 selftest duplex --backend asio --device "WineASIO Driver" --in 3,7 --outputs 2 \
+            --duration 5s > /out/selftest-sparse.json || true
+        jq -c "{pass, failures, opened: (.opened | {sample_rate, buffer_frames, inputs, device_inputs})}" /out/selftest-sparse.json || problem "sparse selftest: no report"
+        [ "$(jq -r .pass /out/selftest-sparse.json)" = true ] || problem "sparse selftest did not pass"
+
+        echo "== ac2-loop MODE=sparse: inputs 3 and 7, impulses out_1 -> in_7 inside JACK"
+        MODE=sparse timeout 120 wine "$loop" > /out/sparse.log 2>&1 &
+        sp_pid=$!
+        while kill -0 "$sp_pid" 2>/dev/null; do
+            jack_connect ac2:out_1 ac2:in_7 >/dev/null 2>&1 || true
+            sleep 0.1
+        done
+        wait "$sp_pid" || problem "sparse exit $?"
+        grep -E "^(cycle|# summary|PASS|FAIL|ac2-loop failed)" /out/sparse.log || problem "sparse: no result"
+        inputs 2
+
+        echo "== ac2-loop MODE=panel: the driver control panel (silent)"
+        # The result is the PASS line, not the exit status: wineasio opens its panel by
+        # vfork+exec of `wineasio-settings`, and a process that called it ends with SIGKILL at
+        # exit here (status 137), with or without that program installed; without the panel
+        # call the same process exits 0.
+        rc=0; MODE=panel timeout 120 wine "$loop" > /out/panel.log 2>&1 || rc=$?
+        grep -E "^(panel|clock|opened|after|PASS|FAIL|ac2-loop failed)" /out/panel.log || true
+        echo "panel exit status $rc"
+        grep -q "^PASS" /out/panel.log || problem "panel: no PASS"
 
         echo "== jack_bufsize $((PERIOD * 2)) mid-stream: the stream ends, a reopen takes the new size"
         MODE=bufsize timeout 120 wine "$loop" > /out/bufsize.log 2>&1 &

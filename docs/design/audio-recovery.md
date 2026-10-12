@@ -17,7 +17,10 @@ The capture fan-out already wakes every hand-off and knows when it last popped a
 session's audio is **stopped** when either
 
 - the host ends the stream (JACK's shutdown callback, cpal's `StreamInvalidated` /
-  `DeviceNotAvailable`; `EventSnapshot::ended`) — cause `host_ended`; or
+  `DeviceNotAvailable`; `EventSnapshot::ended`) — cause `host_ended`; or, when the driver
+  ended it because its own settings changed (an ASIO reset request after a change in its
+  control panel; `EventSnapshot::reset`), cause `driver_reset`: the reopen then takes the
+  driver's current rate and buffer size instead of the session's (`asio.md` §3a); or
 - no block arrived for `max(1 s, 20 periods)` while the backend said nothing — cause
   `not_delivering`.
 

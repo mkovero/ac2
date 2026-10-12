@@ -52,6 +52,14 @@ is in every Windows build), plus `ac2-loop/` (a standalone check on ac2-audio, n
 3. `ac2-loop MODE=bufsize` (silent): `jack_bufsize` to twice the period mid-stream;
    wineasio asks for a reset, the stream must end, and a new open must come up at the new
    size with an unbroken index — the backend's half of the daemon's recovery.
+4. A sparse input map, with WineASIO set to 8 inputs for it: `ac2 selftest duplex --in
+   3,7` (silent), then `ac2-loop MODE=sparse` with `ac2:out_1 → ac2:in_7`: the impulses
+   must arrive on the block's second channel only.
+5. `ac2-loop MODE=panel` (silent): the driver's control panel with no stream and over a
+   running one; prints what the driver answered and whether the stream kept running.
+   wineasio answers at once (it vforks `wineasio-settings`); the process then ends with
+   SIGKILL at exit (status 137), with or without that program installed, so the check is
+   the `PASS` line.
 
 The daemon is built but not run. Under Wine 10, `ac2` gets no reply from `ac2d` over
 loopback TCP: both sit idle in libzmq (the daemon's io thread in `zmq_poll`, its reactor in

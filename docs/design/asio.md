@@ -246,6 +246,67 @@ Where the code settles an open point of §3 or departs from it, and why.
 - **Buffer-size change.** ac2 answers `kAsioSelectorSupported(kAsioBufferSizeChange)` with
   *no*, so a driver falls back to `kAsioResetRequest`; either ends the stream. Reopening
   takes the new preferred size.
+- **Driver reset.** `kAsioResetRequest`, `kAsioResyncRequest`, `kAsioBufferSizeChange` and
+  `sampleRateDidChange` end the stream with `events().reset` set: the driver changed its
+  own settings (its control panel, a clock it follows). The daemon reports that as
+  `StopCause::DriverReset` and its recovery reopens **at the driver's settings**: the rate
+  and buffer size the session asked for are dropped for that reopen, and a session that
+  pinned them is pinned to the new ones afterwards. Asking for the old rate again would
+  undo the operator's change in the panel, or, on a driver following word clock at the new
+  rate, fail on every attempt. Everything that depends on the rate is derived again by the
+  reopen as for any session open: measurements restart (their FFT bins, smoothing, Leq
+  windows and sweeps are built for the new rate; a stored trace keeps its own frequencies),
+  delays in samples are re-derived from their seconds, the generator stays disarmed. The
+  session carries `driver_change` (the old rate and buffer) until a client opens a session
+  anew; the app's top bar shows it in the warning colour (`… · 44.1 kHz · 512 frames ·
+  driver changed from 48.0 kHz`), `ac2 session status` as a `NOTE` line. Changing the rate
+  under the operator without saying so would make every reading after it silently
+  different; refusing to follow it would leave the rig dead until a client noticed.
+- **Control panel.** `session.control_panel` (`ac2 session panel`, **P** in Settings ›
+  Audio & I/O) calls `ASIOControlPanel` on the `ac2-asio` thread: on the stream's own
+  driver while a session runs, otherwise on a driver loaded for it, which stays loaded
+  (its panel may be a window of that instance) until a stream or a listing needs the
+  process's one driver. Another driver than the running stream's is refused. A modal panel
+  runs its own message loop on that thread: azo's command channel is a message-only window
+  (`HWND_MESSAGE`), whose messages a modal loop dispatches, so other driver calls still
+  get through while the panel is up, where thread messages would be lost. The daemon
+  answers once the driver returns, or after 1.2 s with `ack` while a modal panel stays up.
+  Under wineasio (`ac2.sh`) the panel answers at once with no stream and over a running
+  one, and the stream runs on; wineasio's panel is a separate program (it vforks
+  `wineasio-settings`), so the modal case is unseen until a vendor driver.
+- **Typed refusals.** `ASIOInit` returns a bool; `getErrorMessage` says why. Mapped once in
+  `open.rs` (`refusal`), never by matching text:
+
+  | driver says | step | error | text |
+  |---|---|---|---|
+  | `ASE_NotPresent` | any | `AsioHardwareNotPresent` | `<driver> is installed but its interface is not present (connect it and switch it on); the driver says: <its text>` |
+  | init false, a message | init | `AsioHardwareNotPresent` | as above, with the driver's message |
+  | init false, no message | init | `AsioDriverInUse` | `<driver> is in use by another application (close the DAW or other audio program using it)` |
+  | `ASE_HWMalfunction`, `ASE_NoMemory` | createBuffers, start | `AsioDriverInUse` | as above |
+  | anything else | createBuffers, start | `Backend` | `refused to make buffers: <code>: <text>` |
+
+  Drivers that are exclusive refuse a second client at `init` with no message, or at
+  `createBuffers` with a hardware error; one that names its trouble is quoted. Both
+  variants are `Unavailable`, so the daemon's recovery retries them with its backoff.
+- **Unplug and replug.** An unplugged interface ends the stream (the driver stops calling
+  back: the fanout's not-delivering bound, or a reset message). `probe` reads the registry
+  only (loading a driver to look could take it from its panel or another program), so the
+  device stays "present" and recovery keeps reopening with backoff; while it is away
+  `init` or `createBuffers` refuses (`NotPresent`), and the first attempt after it is back
+  opens. A replug is found within the backoff cap, 30 s.
+- **Clock sources** (read-only). `ASIOGetClockSources` at listing (`DeviceInfo.
+  clock_sources`, the current one marked) and at open (`OpenSession.clock_source`).
+  Names are cut at the first NUL (drivers leave junk after it in the fixed 32-byte field;
+  fixed in the azo fork) and trimmed; an empty name reads `Clock N`. Choosing a source is
+  left to the driver's panel: it is a property of the rig (who is master), and a change
+  of source resets the driver, which the reset path above already follows.
+- **Sparse input maps.** `createBuffers` gets exactly the mapped inputs (deduplicated),
+  in device order, and each block channel is filled from its own buffer: inputs 3 and 7
+  are two buffers, not seven.
+- **Backend structure.** `AsioHost<S: DriverSource>` holds the process's one driver
+  (stream or panel) and does listing, opening and the panel; `AzoSource` is the registry
+  and COM, the tests' `Installed` a set of scripted drivers, so busy, not-present,
+  reset-with-new-rate, unplug/replug, panel and sparse maps are tested headless on Linux.
 - **Latency.** `kAsioLatenciesChanged` sets a flag that a small watcher thread
   (`ac2-asio-latency`) reads; it re-reads the latencies and latches `CONFIG_CHANGE` only
   when they differ. wineasio sends the message on every JACK connection change, with
@@ -418,12 +479,16 @@ run must reopen by itself. Until this passes, ASIO is shipped as preview.
 3. ~~Should ASIO go into the default MSI with WASAPI kept as the fallback?~~ Decided (W1):
    ASIO only, in the one MSI; FlexASIO for devices without a driver.
 4. Which channel subset do drivers accept in `ASIOCreateBuffers` (a sparse `input_map`)?
-   Some drivers may require contiguous channels. The backend asks for exactly the mapped
-   inputs (deduplicated); wineasio accepts that; vendor drivers are unchecked.
+   Settled for ac2's side: the backend asks for exactly the mapped inputs (deduplicated)
+   and maps them back correctly (scripted-driver test; under wineasio inputs 3 and 7 with
+   `out_1 → in_7` put the impulses on the second block channel only, `ac2.sh`). Still
+   open: a vendor driver that wants contiguous channels; it would refuse at
+   `createBuffers` with its own words.
 5. ~~Two MSIs and their UpgradeCode~~: moot, there is one MSI.
-6. Clock source (`ASIOGetClockSources` / `ASIOSetClockSource`): show it read-only in
-   Settings, or leave it to the driver panel? An external-word-clock loss is another reset
-   path to test.
+6. ~~Clock source: read-only in Settings, or the driver panel?~~ Decided: read-only (the
+   list in Settings and `ac2 devices`, the current one in the session), set in the
+   driver's panel (§3a). Still to see on hardware: what a driver does when the external
+   clock it follows goes away (a reset, an error, or silence).
 7. `kAsioGetInternalBufferSamples` (ASIO 2.3) reports buffering inside the driver. Should
    it be folded into the stated latency?
 8. ~~Can a capture-only session on ASIO coexist with a WASAPI output device?~~ Moot: there
