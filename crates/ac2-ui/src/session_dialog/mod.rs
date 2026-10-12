@@ -224,6 +224,7 @@ pub fn backend_name(b: BackendKind) -> &'static str {
     match b {
         BackendKind::Jack => "JACK",
         BackendKind::Cpal => "System audio",
+        BackendKind::CoreAudio => "Core Audio",
         BackendKind::Fake => "Simulated rig",
         BackendKind::Replay => "Recording",
         BackendKind::Asio => "ASIO",

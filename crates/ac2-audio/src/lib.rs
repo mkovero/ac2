@@ -1,6 +1,6 @@
 //! Audio backend trait with explicit capabilities, and sample-indexed multichannel blocks.
-//! Backends: JACK on Linux (JACK2, or PipeWire through pipewire-jack), cpal on macOS (Core
-//! Audio), ASIO on Windows, and a simulated device everywhere.
+//! Backends: JACK on Linux (JACK2, or PipeWire through pipewire-jack), Core Audio on macOS
+//! (the HAL through `cahal`, and cpal), ASIO on Windows, and a simulated device everywhere.
 //!
 //! # Shape
 //!
@@ -48,6 +48,8 @@ pub mod timer;
 #[cfg(any(test, windows))]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod asio_host;
+#[cfg(any(test, target_os = "macos"))]
+mod coreaudio_host;
 #[cfg(target_os = "macos")]
 mod cpal_host;
 #[cfg(target_os = "linux")]
@@ -63,6 +65,8 @@ pub use backend::{
     SampleFormat, StaticLatency, short_buffer_frames,
 };
 pub use block::{BlockConsumer, BlockFlags, BlockHeader, TransportStats};
+#[cfg(target_os = "macos")]
+pub use coreaudio_host::CoreAudioBackend;
 #[cfg(target_os = "macos")]
 pub use cpal_host::CpalBackend;
 pub use error::{AudioError, Operation, RequestError, Unavailability, Unsupported};

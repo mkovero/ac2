@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Runs the macOS binaries on the BlackHole 2ch virtual loopback driver (Core Audio through
-# cpal): the device is listed, an in-process duplex self-test, and a daemon session recorded
-# for a while with the delay finder running on it. CI installs BlackHole and sox and
-# restarts coreaudiod first; docs/design/macos-ci-audio.md has the findings behind each check.
+# Runs the macOS binaries on the BlackHole 2ch virtual loopback driver, once per Core Audio
+# backend (cpal, then coreaudio, the HAL directly) so the two compare on one build: the
+# device is listed, an in-process duplex self-test, and a daemon session recorded for a while
+# with the delay finder running on it. Given the coreaudio-loop binary, it then checks the
+# coreaudio backend's exact index with impulses (the one emitting step, see below) and, last,
+# what a revoked microphone grant does. CI installs BlackHole and sox and restarts coreaudiod
+# first; docs/design/macos-ci-audio.md and docs/design/coreaudio.md have the findings.
 #
-#   tools/release/macos-blackhole.sh target/debug virtual-audio-logs
+#   tools/release/macos-blackhole.sh target/debug virtual-audio-logs [coreaudio-loop binary]
 #
-# ac2 never emits: nothing here passes --emit or starts the generator. A capture check needs
+# ac2 never emits: nothing here passes --emit or starts ac2's generator. coreaudio-loop
+# plays -20 dBFS impulses into BlackHole under the same guards as sox. A capture check needs
 # non-zero samples, so sox plays the stimulus into BlackHole: a -40 dBFS sine during the
 # self-test, and pink noise on both channels with the second 480 samples late during the
 # session, which the delay finder must read back. sox plays only on a GitHub-hosted runner
@@ -18,6 +22,7 @@ set -uo pipefail
 
 BIN=${1:?usage: macos-blackhole.sh <bin dir> <log dir>}
 LOG=${2:?usage: macos-blackhole.sh <bin dir> <log dir>}
+LOOP=${3:-}
 DEV=${AC2_BLACKHOLE_DEVICE:-BlackHole 2ch}
 SECONDS_REC=${AC2_BLACKHOLE_SECONDS:-30}
 # 1024 frames lost whole cycles on the shared VM (Intel) and 512 on both architectures;
@@ -103,7 +108,7 @@ ac2j() {
 }
 
 daemon_start() {
-    "$AC2D" --backend cpal --no-autosave --recordings "$WORK" > "$LOG/ac2d-$1.stdout.txt" 2> "$LOG/ac2d-$1.stderr.txt" &
+    "$AC2D" --backend "$BACKEND" --no-autosave --recordings "$WORK" > "$LOG/ac2d-$1.stdout.txt" 2> "$LOG/ac2d-$1.stderr.txt" &
     DAEMON=$!
     for _ in $(seq 120); do
         kill -0 "$DAEMON" 2> /dev/null || fail "ac2d exited at startup (see ac2d-$1.stderr.txt)"
@@ -140,72 +145,130 @@ if [[ "$grant" != 2 ]]; then
 fi
 echo "  $agent: allowed"
 
-echo "== ac2d --backend cpal: '$DEV' in the device list"
-daemon_start devices
-ac2j devices 15 devices
-ID=$(jq -r --arg d "$DEV" '.[] | select(.kind == "cpal") | .devices[] | select(.name == $d and .input and .output) | .id' \
-    "$LOG/devices.json" | head -1)
-[[ -n "$ID" ]] || fail "ac2 devices does not list '$DEV' with inputs and outputs (see devices.json)"
-echo "  $ID"
-daemon_stop
-
-echo "== ac2 selftest duplex on $ID, $BUFFER-frame buffer (silent outputs; sox plays a -40 dBFS sine)"
-stimulus_start sine
-tmo 60 "$AC2" --json selftest duplex --backend cpal --device "$ID" --in 1-2 --outputs 2 --duration 20s \
-    --buffer "${BUFFER}samples" > "$LOG/selftest-duplex.json" 2> "$LOG/selftest-duplex.stderr.txt"
-code=$?
-stimulus_stop
-[[ $code -eq 142 ]] && fail "selftest duplex did not finish in 60 s (a capture without microphone access hangs)"
-jq -c '{pass, failures, opened: (.opened | {sample_rate, buffer_frames, clock, index}), peak: .capture.peak_dbfs,
-    xruns: .capture.xrun_blocks, gaps: .capture.index_gaps, disc: .capture.discontinuity_blocks}' \
-    "$LOG/selftest-duplex.json" 2> /dev/null || { cat "$LOG/selftest-duplex.stderr.txt" >&2; fail "selftest duplex exited $code with no report"; }
-[[ $(jq -r .pass "$LOG/selftest-duplex.json") == true ]] ||
-    fail "selftest duplex failed: $(jq -c .failures "$LOG/selftest-duplex.json")"
-# The sine arrives unchanged on both inputs: BlackHole is a bit-exact loop.
-jq -e '.capture.peak_dbfs | length == 2 and all(. > -41 and . < -39)' "$LOG/selftest-duplex.json" > /dev/null ||
-    fail "captured peak $(jq -c .capture.peak_dbfs "$LOG/selftest-duplex.json") dBFS, expected the -40 dBFS sine on both inputs"
-echo "  pass"
-
-echo "== session on $ID, recording $SECONDS_REC s; delay finder on in 2 vs in 1 (sox delays in 2 by $DELAY samples)"
-daemon_start session
-stimulus_start pink
-ac2j session-open 30 session open --backend cpal --device "$ID" --out-device "$ID" --in 1-2 --outputs 2 \
-    --buffer "${BUFFER}samples"
-rate=$(jq -r .open.sample_rate_hz "$LOG/session-open.json")
-echo "  $rate Hz, buffer $(jq -r .open.buffer_frames "$LOG/session-open.json") frames, clock $(jq -r .open.clock "$LOG/session-open.json")"
-ac2j rec-start 15 rec start --name blackhole --max "$((SECONDS_REC + 60))s"
-ac2j meas-new 15 meas new tf --name bh --ref 1 --meas 2
-ac2j meas-start 15 meas start bh
-half=$((SECONDS_REC / 2))
-sleep "$half"
-ac2j delay-find 30 delay find bh
-sleep "$((SECONDS_REC - half))"
-ac2j session-status 15 session status
-ac2j rec-stop 30 rec stop
-ac2j session-close 15 session close
-stimulus_stop
-daemon_stop
-
 problems=()
-stopped=$(jq -c '.stopped // empty' "$LOG/session-status.json")
-[[ -z "$stopped" ]] || problems+=("session audio stopped: $stopped")
-frames=$(jq -r .frames "$LOG/rec-stop.json")
-disc=$(jq -r .discontinuities "$LOG/rec-stop.json")
-expected=$((rate * SECONDS_REC))
-echo "  recorded $frames frames (expected about $expected), $disc discontinuities"
-((frames * 10 >= expected * 9)) || problems+=("recorded $frames frames, expected at least 90 % of $expected")
-[[ "$disc" == 0 ]] || problems+=("$disc discontinuities in the capture")
-jq -c '.finding | {outcome: .outcome.type, first: .outcome.first.delay_samples, psr_db: .confidence.psr_db,
-    uncertainty: .confidence.uncertainty_samples, reasons: .outcome.reasons}' "$LOG/delay-find.json"
-outcome=$(jq -r .finding.outcome.type "$LOG/delay-find.json")
-found=$(jq -r '.finding.outcome.first.delay_samples // empty' "$LOG/delay-find.json")
-if [[ "$outcome" != accepted ]]; then
-    problems+=("delay finder: $outcome, expected an accepted $DELAY-sample delay")
-elif ! jq -en --argjson f "$found" --argjson d "$DELAY" '($f - $d) | (if . < 0 then -. else . end) <= 1' > /dev/null; then
-    problems+=("delay finder read $found samples, expected $DELAY ± 1")
+# One backend's pass; a failure goes to problems, prefixed by the backend, so the other
+# backend still runs and both show up side by side.
+run_backend() {
+    BACKEND=$1
+    local b=$1 code rate half stopped frames disc expected outcome found
+    echo "== [$b] ac2d --backend $b: '$DEV' in the device list"
+    daemon_start "$b-devices"
+    ac2j "$b-devices" 15 devices
+    ID=$(jq -r --arg d "$DEV" --arg b "$b" '.[] | select(.kind == $b) | .devices[] | select(.name == $d and .input and .output) | .id' \
+        "$LOG/$b-devices.json" | head -1)
+    daemon_stop
+    if [[ -z "$ID" ]]; then
+        problems+=("[$b] ac2 devices does not list '$DEV' with inputs and outputs (see $b-devices.json)")
+        return
+    fi
+    jq -c --arg id "$ID" '.[] | .devices[] | select(.id == $id) | {id, duplex_clock, index, notes,
+        rates: .input.rates_hz, buffers: .input.buffer_frames}' "$LOG/$b-devices.json"
+    if [[ $b == coreaudio ]]; then
+        [[ "$ID" == coreaudio:BlackHole2ch_UID ]] || problems+=("[$b] BlackHole listed as $ID")
+        jq -e --arg id "$ID" '.[] | .devices[] | select(.id == $id) | .duplex_clock == "single_callback" and .index == "exact"' \
+            "$LOG/$b-devices.json" > /dev/null || problems+=("[$b] BlackHole not listed as one callback with an exact index")
+    fi
+
+    echo "== [$b] ac2 selftest duplex on $ID, $BUFFER-frame buffer (silent outputs; sox plays a -40 dBFS sine)"
+    stimulus_start sine
+    tmo 60 "$AC2" --json selftest duplex --backend "$b" --device "$ID" --in 1-2 --outputs 2 --duration 20s \
+        --buffer "${BUFFER}samples" > "$LOG/$b-selftest-duplex.json" 2> "$LOG/$b-selftest-duplex.stderr.txt"
+    code=$?
+    stimulus_stop
+    if [[ $code -eq 142 ]]; then
+        problems+=("[$b] selftest duplex did not finish in 60 s (a capture without microphone access hangs)")
+    elif ! jq -c '{pass, failures, opened: (.opened | {sample_rate, buffer_frames, clock, index}), peak: .capture.peak_dbfs,
+        xruns: .capture.xrun_blocks, gaps: .capture.index_gaps, disc: .capture.discontinuity_blocks}' \
+        "$LOG/$b-selftest-duplex.json" 2> /dev/null; then
+        cat "$LOG/$b-selftest-duplex.stderr.txt" >&2
+        problems+=("[$b] selftest duplex exited $code with no report")
+    elif [[ $(jq -r .pass "$LOG/$b-selftest-duplex.json") != true ]]; then
+        problems+=("[$b] selftest duplex failed: $(jq -c .failures "$LOG/$b-selftest-duplex.json")")
+    elif ! jq -e '.capture.peak_dbfs | length == 2 and all(. > -41 and . < -39)' "$LOG/$b-selftest-duplex.json" > /dev/null; then
+        # The sine arrives unchanged on both inputs: BlackHole is a bit-exact loop.
+        problems+=("[$b] captured peak $(jq -c .capture.peak_dbfs "$LOG/$b-selftest-duplex.json") dBFS, expected the -40 dBFS sine on both inputs")
+    else
+        echo "  pass"
+    fi
+
+    echo "== [$b] session on $ID, recording $SECONDS_REC s; delay finder on in 2 vs in 1 (sox delays in 2 by $DELAY samples)"
+    daemon_start "$b-session"
+    stimulus_start pink
+    ac2j "$b-session-open" 30 session open --backend "$b" --device "$ID" --out-device "$ID" --in 1-2 --outputs 2 \
+        --buffer "${BUFFER}samples"
+    rate=$(jq -r .open.sample_rate_hz "$LOG/$b-session-open.json")
+    echo "  $rate Hz, buffer $(jq -r .open.buffer_frames "$LOG/$b-session-open.json") frames, clock $(jq -r .open.clock "$LOG/$b-session-open.json")"
+    ac2j "$b-rec-start" 15 rec start --name "blackhole-$b" --max "$((SECONDS_REC + 60))s"
+    ac2j "$b-meas-new" 15 meas new tf --name bh --ref 1 --meas 2
+    ac2j "$b-meas-start" 15 meas start bh
+    half=$((SECONDS_REC / 2))
+    sleep "$half"
+    ac2j "$b-delay-find" 30 delay find bh
+    sleep "$((SECONDS_REC - half))"
+    ac2j "$b-session-status" 15 session status
+    ac2j "$b-rec-stop" 30 rec stop
+    ac2j "$b-session-close" 15 session close
+    stimulus_stop
+    daemon_stop
+
+    stopped=$(jq -c '.stopped // empty' "$LOG/$b-session-status.json")
+    [[ -z "$stopped" ]] || problems+=("[$b] session audio stopped: $stopped")
+    frames=$(jq -r .frames "$LOG/$b-rec-stop.json")
+    disc=$(jq -r .discontinuities "$LOG/$b-rec-stop.json")
+    expected=$((rate * SECONDS_REC))
+    echo "  recorded $frames frames (expected about $expected), $disc discontinuities"
+    ((frames * 10 >= expected * 9)) || problems+=("[$b] recorded $frames frames, expected at least 90 % of $expected")
+    [[ "$disc" == 0 ]] || problems+=("[$b] $disc discontinuities in the capture")
+    jq -c '.finding | {outcome: .outcome.type, first: .outcome.first.delay_samples, psr_db: .confidence.psr_db,
+        uncertainty: .confidence.uncertainty_samples, reasons: .outcome.reasons}' "$LOG/$b-delay-find.json"
+    outcome=$(jq -r .finding.outcome.type "$LOG/$b-delay-find.json")
+    found=$(jq -r '.finding.outcome.first.delay_samples // empty' "$LOG/$b-delay-find.json")
+    if [[ "$outcome" != accepted ]]; then
+        problems+=("[$b] delay finder: $outcome, expected an accepted $DELAY-sample delay")
+    elif ! jq -en --argjson f "$found" --argjson d "$DELAY" '($f - $d) | (if . < 0 then -. else . end) <= 1' > /dev/null; then
+        problems+=("[$b] delay finder read $found samples, expected $DELAY ± 1")
+    fi
+    echo "$b: selftest $(jq -c '.capture | {xruns: .xrun_blocks, gaps: .index_gaps, disc: .discontinuity_blocks}' \
+        "$LOG/$b-selftest-duplex.json" 2> /dev/null), session $frames frames, $disc discontinuities, delay $found" \
+        >> "$LOG/compare.txt"
+}
+
+: > "$LOG/compare.txt"
+run_backend cpal
+run_backend coreaudio
+echo "== cpal and coreaudio side by side"
+cat "$LOG/compare.txt"
+
+if [[ -n "$LOOP" ]]; then
+    echo "== [coreaudio] exact index: impulses out 1 -> in 1, each back at T + stated latency"
+    # coreaudio-loop checks the same guards itself; this is the script's own refusal.
+    [[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_ENVIRONMENT:-}" == github-hosted ]] ||
+        fail "coreaudio-loop plays only on a GitHub-hosted runner"
+    tmo 300 "$LOOP" loop > "$LOG/coreaudio-loop.txt" 2>&1
+    code=$?
+    grep -E '^(device|listed|RESULT|probe|PASS|FAIL)' "$LOG/coreaudio-loop.txt"
+    [[ $code -eq 0 ]] || problems+=("[coreaudio] exact-index loop exited $code (see coreaudio-loop.txt)")
 fi
+
 if ((${#problems[@]})); then
     printf 'FAIL: %s\n' "${problems[@]}" >&2
     exit 1
+fi
+
+if [[ -n "$LOOP" ]]; then
+    # Last, because it takes the runner's microphone grant away: what a request and an open
+    # do when nobody has decided. The request runs on a thread of its own, bounded at 10 s;
+    # the whole call is bounded again here in case the status query itself blocks.
+    echo "== [coreaudio] microphone grant revoked: does the request return, does an open?"
+    tccutil reset Microphone > /dev/null 2>&1
+    sudo -n sqlite3 "$system_db" "DELETE FROM access WHERE service='kTCCServiceMicrophone'" 2> /dev/null
+    sqlite3 "$user_db" "DELETE FROM access WHERE service='kTCCServiceMicrophone'" 2> /dev/null
+    sudo -n killall tccd 2> /dev/null
+    killall tccd 2> /dev/null
+    sleep 2
+    tmo 60 "$LOOP" consent > "$LOG/coreaudio-consent.txt" 2>&1
+    code=$?
+    cat "$LOG/coreaudio-consent.txt"
+    [[ $code -eq 142 ]] && echo "  (the consent check itself did not finish in 60 s)"
 fi
 echo "== BlackHole ($DEV): pass"

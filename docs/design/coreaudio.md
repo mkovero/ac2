@@ -1,6 +1,6 @@
 # Core Audio backend (macOS)
 
-**Status: design, not built** (decision H1 in `open-questions.md`). macOS audio goes through
+**Status: stage (a) built** (§11: `cahal` and `--backend coreaudio` beside cpal, which stays the macOS default; decision H1 in `open-questions.md`). macOS audio goes through
 cpal today (`crates/ac2-audio/src/cpal_host.rs`): two AUHAL units, one per direction, each
 with its own callback, a running frame count for the index (`IndexExactness::Estimated`)
 and timestamps that put input against output two buffers off (`macos-ci-audio.md` Q4: a

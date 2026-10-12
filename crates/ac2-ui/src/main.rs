@@ -18,6 +18,9 @@ use eframe::egui;
 enum BackendArg {
     /// Core Audio through cpal; macOS.
     Cpal,
+    /// The Core Audio HAL directly; macOS.
+    #[value(name = "coreaudio")]
+    CoreAudio,
     /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
     /// ASIO drivers; Windows.
@@ -116,6 +119,7 @@ fn target(
         let backend = match a.backend {
             None => EmbeddedBackend::platform(),
             Some(BackendArg::Cpal) => EmbeddedBackend::Cpal,
+            Some(BackendArg::CoreAudio) => EmbeddedBackend::CoreAudio,
             Some(BackendArg::Jack) => EmbeddedBackend::Jack,
             Some(BackendArg::Asio) => EmbeddedBackend::Asio,
             Some(BackendArg::Fake) => EmbeddedBackend::Fake,

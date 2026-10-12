@@ -566,14 +566,15 @@ or a predicted window.
 #### Devices, preview and loopback detection (`session.*`)
 
 `session.devices` answers `[BackendInfo]`, one per backend the daemon offers, the one it was
-started on first: `kind: BackendKind` (`jack` \| `cpal` \| `asio` \| `fake`; `replay` is the
+started on first: `kind: BackendKind` (`jack` \| `cpal` \| `coreaudio` \| `asio` \| `fake`; `replay` is the
 kind of a replay session and is never listed), `description` (for the
 operator), `availability` (tagged by `type`: `available` \| `unavailable` {`reason`}: why,
 in plain words with the remedy, e.g. `No JACK server: start JACK (e.g. `jackd -d alsa`) or
 use PipeWire`) and `devices: [DeviceInfo]` (empty while unavailable). A daemon started on
 real audio offers its platform's backend (`jack` on Linux, `cpal` on macOS, `asio` on
 Windows; with no ASIO driver installed, `asio` is `unavailable` with a reason naming
-FlexASIO);
+FlexASIO; a macOS daemon started with `--backend coreaudio` offers `coreaudio` (the HAL
+directly; `cpal` stays the default while the two are compared));
 one started on the simulated rig offers only that (a simulated device never stands in for
 a missing real one).
 

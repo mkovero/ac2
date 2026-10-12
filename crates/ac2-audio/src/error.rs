@@ -93,6 +93,19 @@ pub enum Unavailability {
         /// The driver's own words (`getErrorMessage`); empty when it gave none.
         detail: String,
     },
+    /// macOS denies this process the microphone (Core Audio capture).
+    #[error(
+        "macOS denies ac2 the microphone: allow it in System Settings › Privacy & Security › \
+         Microphone (from a terminal, allow the terminal app)"
+    )]
+    MicrophoneDenied,
+    /// Nobody has answered macOS's microphone prompt yet; capture would wait for it.
+    #[error(
+        "macOS is asking whether ac2 may use the microphone: answer the system prompt, or \
+         allow it in System Settings › Privacy & Security › Microphone (from a terminal or \
+         ssh, allow the app that started ac2)"
+    )]
+    MicrophonePending,
     /// Anything else the host reported.
     #[error("{0}")]
     Host(String),

@@ -297,10 +297,19 @@ jobs:
           brew install sox
           sudo launchctl kickstart -kp system/com.apple.audio.coreaudiod || sudo killall coreaudiod
 
+      # The exact-index check of the coreaudio backend: a standalone crate (it plays
+      # impulses into BlackHole, so it is never a workspace member and never ships).
+      - name: Build coreaudio-loop
+        if: runner.os == 'macOS' && !cancelled()
+        timeout-minutes: 15
+        run: cargo build --manifest-path tools/release/coreaudio-loop/Cargo.toml --target-dir target
+
+      # cpal and coreaudio on one build, side by side; then coreaudio-loop's impulses and,
+      # last, a revoked microphone grant.
       - name: ac2 on BlackHole (Core Audio)
         if: runner.os == 'macOS' && !cancelled()
-        timeout-minutes: 10
-        run: tools/release/macos-blackhole.sh target/debug virtual-audio-logs
+        timeout-minutes: 20
+        run: tools/release/macos-blackhole.sh target/debug virtual-audio-logs target/debug/coreaudio-loop
 
       - name: Upload virtual-audio logs
         if: runner.os != 'Linux' && !cancelled()

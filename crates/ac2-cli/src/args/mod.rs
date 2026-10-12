@@ -242,6 +242,9 @@ pub enum BackendArg {
     Jack,
     /// Core Audio through cpal: the real backend on macOS.
     Cpal,
+    /// The Core Audio HAL directly (macOS): one callback per device, exact index.
+    #[value(name = "coreaudio")]
+    CoreAudio,
     /// ASIO drivers: the real backend on Windows.
     Asio,
     /// Simulated device; never touches hardware.

@@ -2,6 +2,8 @@
 //!
 //! Each platform has one real backend: JACK on Linux (JACK2, or PipeWire through
 //! pipewire-jack; there is no ALSA backend), cpal on macOS (Core Audio), ASIO on Windows.
+//! macOS also has the direct Core Audio backend (`coreaudio`, the HAL through `cahal`),
+//! named explicitly while it is compared with cpal.
 //! The simulated rig is never a fallback: a fake device must never stand in for a missing
 //! real one, so it runs only when named.
 
@@ -17,6 +19,8 @@ use ac2_audio::{Backend, FakeBackend, FakeConfig};
 pub enum BackendChoice {
     /// Core Audio through cpal; macOS.
     Cpal,
+    /// The Core Audio HAL directly, one IOProc per device; macOS.
+    CoreAudio,
     /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
     /// ASIO drivers; Windows.
@@ -42,6 +46,7 @@ impl BackendChoice {
     pub fn name(self) -> &'static str {
         match self {
             Self::Cpal => "cpal",
+            Self::CoreAudio => "coreaudio",
             Self::Jack => "jack",
             Self::Asio => "asio",
             Self::Fake => "fake",
@@ -60,6 +65,7 @@ impl FromStr for BackendChoice {
     fn from_str(s: &str) -> Result<Self, String> {
         match s {
             "cpal" => Ok(Self::Cpal),
+            "coreaudio" => Ok(Self::CoreAudio),
             "jack" => Ok(Self::Jack),
             "asio" => Ok(Self::Asio),
             "fake" => Ok(Self::Fake),
@@ -138,6 +144,10 @@ pub(crate) fn describe(kind: ac2_audio::BackendKind) -> String {
         ac2_audio::BackendKind::Cpal => {
             "System audio (Core Audio): the interfaces the operating system lists".into()
         }
+        ac2_audio::BackendKind::CoreAudio => "Core Audio (the HAL directly): one callback \
+                                              per device serves input and output on its own \
+                                              clock"
+            .into(),
         ac2_audio::BackendKind::Fake => {
             "Simulated rig (no audio): out 1 returns on in 1 (loop) and in 2 (room)".into()
         }
@@ -174,6 +184,13 @@ pub fn backend(choice: BackendChoice) -> Result<Arc<dyn Backend>, String> {
             .into()),
         #[cfg(target_os = "macos")]
         BackendChoice::Cpal => Ok(Arc::new(ac2_audio::CpalBackend::new())),
+        #[cfg(target_os = "macos")]
+        BackendChoice::CoreAudio => Ok(Arc::new(ac2_audio::CoreAudioBackend::new())),
+        #[cfg(not(target_os = "macos"))]
+        BackendChoice::CoreAudio => Err(format!(
+            "Core Audio is macOS only; use --backend {}",
+            BackendChoice::platform()
+        )),
         #[cfg(not(target_os = "linux"))]
         BackendChoice::Jack => Err(format!(
             "JACK is supported on Linux only; use --backend {}",
@@ -197,6 +214,7 @@ mod tests {
     fn names_round_trip_and_fake_builds() {
         for c in [
             BackendChoice::Cpal,
+            BackendChoice::CoreAudio,
             BackendChoice::Jack,
             BackendChoice::Asio,
             BackendChoice::Fake,
@@ -226,13 +244,17 @@ mod tests {
             ac2_audio::BackendKind::Cpal
         };
         assert_eq!(real, [platform]);
+        // macOS has two Core Audio backends while they are compared.
+        let mac_too =
+            |c: &BackendChoice| cfg!(target_os = "macos") && *c == BackendChoice::CoreAudio;
         for other in [
             BackendChoice::Cpal,
+            BackendChoice::CoreAudio,
             BackendChoice::Jack,
             BackendChoice::Asio,
         ]
         .into_iter()
-        .filter(|c| *c != BackendChoice::platform())
+        .filter(|c| *c != BackendChoice::platform() && !mac_too(c))
         {
             match backend(other) {
                 Err(e) => assert!(e.contains("--backend"), "{other}: {e}"),

@@ -52,6 +52,9 @@ impl Entry {
         match self {
             Entry::Local { .. } => "Local daemon".into(),
             Entry::Embedded(EmbeddedBackend::Cpal) => "This computer's audio".into(),
+            Entry::Embedded(EmbeddedBackend::CoreAudio) => {
+                "This computer's audio (Core Audio)".into()
+            }
             Entry::Embedded(EmbeddedBackend::Jack) => "This computer's audio (JACK)".into(),
             Entry::Embedded(EmbeddedBackend::Asio) => "This computer's audio (ASIO)".into(),
             Entry::Embedded(EmbeddedBackend::Fake) => "Simulated rig (no audio)".into(),

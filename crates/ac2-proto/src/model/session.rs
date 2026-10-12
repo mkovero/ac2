@@ -13,6 +13,10 @@ pub enum BackendKind {
     Jack,
     /// cpal's OS host.
     Cpal,
+    /// The Core Audio HAL directly (macOS): one IOProc per device, exact index. Named as
+    /// `--backend` takes it.
+    #[serde(rename = "coreaudio")]
+    CoreAudio,
     /// Simulated device.
     Fake,
     /// A raw capture file played back (`session.replay`); never listed by

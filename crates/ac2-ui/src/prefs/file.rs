@@ -425,6 +425,7 @@ impl UiPrefs {
         let b = match backend {
             B::Jack => "jack",
             B::Cpal => "cpal",
+            B::CoreAudio => "coreaudio",
             B::Fake => "fake",
             B::Asio => "asio",
             B::Replay => "replay",

@@ -17,6 +17,9 @@ pub enum BackendKind {
     Jack,
     /// cpal on Core Audio; macOS only.
     Cpal,
+    /// The Core Audio HAL directly (`cahal`), macOS only: one IOProc per device serves
+    /// capture and playback, indexed by the device's sample time.
+    CoreAudio,
     /// The simulated device of [`crate::fake`].
     Fake,
     /// A recording played back by [`crate::replay`].

@@ -14,6 +14,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   ketunkolo and the Pi, then the app alone at 0fef18ea on ketunkolo and the Pi
   (`docs/rigs/pupu.md`, *Deploy log*). A session format change on deploy is restored
   with `ac2 session salvage`.
+- macOS: a direct Core Audio backend (`--backend coreaudio`, the HAL through the `cahal`
+  crate) runs beside cpal, still the default, until it replaces it (`docs/design/coreaudio.md` §11).
 - Newest features: per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
   with a grey resolution marker where the estimate is coarser than the grid (`docs/user-guide.md`
   *Resolution and the resolution marker*); mic curve applied to sweeps; settable spectrum/RTA
