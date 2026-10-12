@@ -44,6 +44,9 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   command. Memory over time is likewise only a `/proc` sample.
 - **macOS not verified with an audio interface**: a tester has the dev.10 disk image and
   `testing/macos/README.md`. Results pending.
+- **Core Audio backend** (`coreaudio.md`, decision H1): build `cahal` and
+  `ac2-audio/src/coreaudio_host/` beside cpal with the BlackHole exact-index loopback check
+  (stage a), make it the macOS default (b), then remove cpal and `BackendKind::Cpal` (c).
 - **App Nap**: the macOS hand-off timer is not coalesced (kqueue `NOTE_CRITICAL`), but a
   hidden app on battery may still be App Napped, throttling a daemon the app hosts. Needs an
   activity assertion from the UI while a session is open.
