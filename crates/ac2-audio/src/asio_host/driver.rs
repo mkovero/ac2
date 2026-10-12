@@ -48,8 +48,8 @@ unsafe extern "system" {
 
 static QPC_HZ: AtomicU64 = AtomicU64::new(0);
 
-/// The host clock in ns: the performance counter, which WASAPI and the rest of Windows
-/// audio stamp with too, read in user mode without a system call.
+/// The host clock in ns: the performance counter, which Windows audio stamps with too, read
+/// in user mode without a system call.
 fn now_ns() -> u64 {
     let hz = QPC_HZ.load(Ordering::Relaxed);
     if hz == 0 {

@@ -15,13 +15,13 @@ use crate::stream::DuplexStream;
 pub enum BackendKind {
     /// The `jack` crate (Linux only: JACK2, or PipeWire through pipewire-jack).
     Jack,
-    /// cpal on the OS host (Core Audio, WASAPI); macOS and Windows only.
+    /// cpal on Core Audio; macOS only.
     Cpal,
     /// The simulated device of [`crate::fake`].
     Fake,
     /// A recording played back by [`crate::replay`].
     Replay,
-    /// ASIO drivers on Windows (feature `asio`): one driver callback serves capture and
+    /// ASIO drivers, Windows only: one driver callback serves capture and
     /// playback on the driver's clock, indexed by its sample position.
     Asio,
 }
@@ -47,8 +47,8 @@ pub enum ClockRelation {
     /// One physical device, separate callbacks (cpal on Core Audio). One
     /// clock, but the phase between directions is new on every start.
     SameDeviceSeparateCallbacks,
-    /// Different devices, or identity cannot be proven (WASAPI endpoints differ by
-    /// direction). May drift; drift detection must warn.
+    /// Different devices, or identity cannot be proven (an input-only device beside an
+    /// output-only one). May drift; drift detection must warn.
     Unknown,
 }
 
@@ -191,7 +191,7 @@ impl fmt::Display for DeviceId {
 pub struct DeviceCaps {
     /// Backend that lists it.
     pub backend: BackendKind,
-    /// Host name (`jack`, `alsa`, `coreaudio`, `wasapi`, `fake`).
+    /// Host name (`jack`, `coreaudio`, `asio`, `fake`, `replay`).
     pub host: String,
     /// Identifier for [`DeviceSelector::Id`].
     pub id: DeviceId,

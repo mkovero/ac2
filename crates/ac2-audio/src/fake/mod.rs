@@ -30,8 +30,8 @@
 pub const FAKE_DEVICE_ID: &str = "fake";
 /// Capture device id of [`FakeEndpoints::Split`].
 pub const FAKE_INPUT_ID: &str = "fake:in";
-/// The name both devices of [`FakeEndpoints::Split`] carry, as WASAPI names the capture
-/// and playback endpoints of one interface alike: only the direction tells them apart.
+/// The name both devices of [`FakeEndpoints::Split`] carry, as a host may name the capture
+/// and playback devices of one interface alike: only the direction tells them apart.
 pub const FAKE_SPLIT_NAME: &str = "simulated interface";
 /// Playback device id of [`FakeEndpoints::Split`].
 pub const FAKE_OUTPUT_ID: &str = "fake:out";

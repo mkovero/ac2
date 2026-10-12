@@ -20,10 +20,6 @@ path = "src/lib.rs"
 name = "ac2"
 path = "src/main.rs"
 
-[features]
-# The ASIO backend (Windows only; does nothing elsewhere). Off by default.
-asio = ["ac2-audio/asio"]
-
 [dependencies]
 # `selftest duplex` opens the audio backends in process and times the loopback with the
 # daemon's own monitor.

@@ -13,11 +13,10 @@ usage: ac2d [options]
 
 With no options: local mode (ipc in the runtime dir; loopback TCP on Windows), on this
 platform's audio: JACK on Linux (JACK2, or PipeWire through pipewire-jack), cpal (Core
-Audio / WASAPI) on macOS and Windows.
+Audio) on macOS, ASIO on Windows.
 
-  --backend <name>       audio backend: jack (Linux) or cpal (macOS, Windows), the
-                         default; asio (Windows builds with ASIO: their default,
-                         with cpal offered beside it); or fake (a simulated rig:
+  --backend <name>       audio backend: jack (Linux), cpal (macOS) or asio
+                         (Windows), the platform's default; or fake (a simulated rig:
                          out 1 → in 1 loopback, out 1 → in 2 acoustic path; only
                          when named here, never as a fallback)
   --listen <tcp://iface[:port]>

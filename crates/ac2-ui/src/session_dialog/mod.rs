@@ -5,7 +5,7 @@
 //!
 //! The output device is the input device itself when it has outputs (one device keeps one
 //! clock where the host allows it), else the system's default output: hosts that list each
-//! direction as its own endpoint (WASAPI), and a USB mic beside an interface, need another
+//! direction as its own device, and a USB mic beside an interface, need another
 //! device to play the stimulus on.
 //!
 //! Roles say what a channel is for, so nobody types channel numbers:

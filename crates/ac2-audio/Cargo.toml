@@ -1,6 +1,6 @@
 [package]
 name = "ac2-audio"
-description = "Audio backend trait with explicit capabilities, sample-indexed multichannel blocks; JACK (Linux), cpal (macOS, Windows), ASIO (Windows, feature asio) and fake backends."
+description = "Audio backend trait with explicit capabilities, sample-indexed multichannel blocks; JACK (Linux), cpal (macOS), ASIO (Windows) and fake backends."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,10 +10,6 @@ publish.workspace = true
 
 [lints]
 workspace = true
-
-[features]
-# The ASIO backend (Windows only; does nothing elsewhere). Off by default.
-asio = ["dep:azo"]
 
 [dependencies]
 rtrb = "0.4"
@@ -27,18 +23,16 @@ thiserror = "2"
 jack = "0.13"
 log = "0.4"
 
-# macOS and Windows: the OS audio host (Core Audio, WASAPI) through cpal.
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-cpal = "0.18"
-
-# Windows, feature `asio`: ASIO drivers over COM directly, without the Steinberg SDK. ac2's
-# fork of azo (MIT), pinned: a named apartment thread, a callback-side handle for
+# Windows: ASIO is the only backend. ASIO drivers over COM directly, without the Steinberg
+# SDK, through ac2's fork of azo (MIT), pinned: a named apartment thread, a callback-side handle for
 # getSamplePosition/outputReady, and names that fill their buffer taken whole.
 [target.'cfg(windows)'.dependencies]
-azo = { git = "https://github.com/mkovero/azo", rev = "d9964074a230ec96dce55661fbccc1ff3b2ca0a1", optional = true }
+azo = { git = "https://github.com/mkovero/azo", rev = "d9964074a230ec96dce55661fbccc1ff3b2ca0a1" }
 
-# macOS: kqueue timers that opt out of coalescing (see src/timer.rs).
+# macOS: Core Audio through cpal, and kqueue timers that opt out of coalescing (see
+# src/timer.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
+cpal = "0.18"
 libc = "0.2"
 
 # Linux: tests/jack_cancel.rs cancels a thread inside the libjack log callback.

@@ -10,4 +10,4 @@ publish = false
 [workspace]
 
 [dependencies]
-ac2-audio = { path = "../../../crates/ac2-audio", features = ["asio"] }
+ac2-audio = { path = "../../../crates/ac2-audio" }

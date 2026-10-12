@@ -187,7 +187,7 @@ pub struct SessionOpen {
     #[arg(long)]
     pub device: Option<String>,
     /// Playback device id or name, when it is another device than the capture one (a USB
-    /// mic, a WASAPI output endpoint). Default: the capture device when it has outputs,
+    /// mic, an output-only device). Default: the capture device when it has outputs,
     /// else the system's default output.
     #[arg(long, value_name = "ID|NAME")]
     pub out_device: Option<String>,

@@ -36,8 +36,8 @@ cannot open its client); cargo uses `CARGO_BUILD_JOBS=4`.
 
 ## ac2's backend: `ac2.sh`
 
-`tools/wine-asio/ac2.sh` (needs the image from `run.sh`) cross-builds ac2d and ac2 with
-`--features asio`, plus `ac2-loop/` (a standalone check on ac2-audio, never shipped), for
+`tools/wine-asio/ac2.sh` (needs the image from `run.sh`) cross-builds ac2d and ac2 (ASIO
+is in every Windows build), plus `ac2-loop/` (a standalone check on ac2-audio, never shipped), for
 `x86_64-pc-windows-msvc`, and runs them on WineASIO with JACK's dummy driver
 (`WINEASIO_CLIENT_NAME=ac2`):
 

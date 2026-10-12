@@ -240,9 +240,9 @@ pub struct SelftestDuplex {
 pub enum BackendArg {
     /// JACK (JACK2, or PipeWire through pipewire-jack): the real backend on Linux.
     Jack,
-    /// The OS audio host (Core Audio, WASAPI): the real backend on macOS and Windows.
+    /// Core Audio through cpal: the real backend on macOS.
     Cpal,
-    /// ASIO drivers (Windows builds with ASIO; a daemon may run one).
+    /// ASIO drivers: the real backend on Windows.
     Asio,
     /// Simulated device; never touches hardware.
     Fake,

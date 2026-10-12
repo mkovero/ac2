@@ -42,7 +42,7 @@ fn empty_local_daemon_measures_from_the_app() -> R {
 }
 
 /// From an empty daemon whose rig is listed as an input-only and an output-only device (as
-/// WASAPI lists one interface): the dialog picks the output device by itself, the session
+/// an OS lists a built-in mic and speakers): the dialog picks the output device by itself, the session
 /// opens with the two, and the stimulus routed to the output device's output 1 reaches the
 /// measurement (the simulated rig only: nothing plays on hardware).
 #[test]

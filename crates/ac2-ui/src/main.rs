@@ -16,10 +16,12 @@ use eframe::egui;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum BackendArg {
-    /// System audio through cpal (Core Audio / WASAPI); macOS and Windows.
+    /// Core Audio through cpal; macOS.
     Cpal,
     /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
+    /// ASIO drivers; Windows.
+    Asio,
     /// Simulated rig: out 1 → in 1 loopback, out 1 → in 2 acoustic path. No real audio.
     Fake,
 }
@@ -48,7 +50,7 @@ struct Args {
     #[arg(long, conflicts_with = "ctrl")]
     embedded: bool,
     /// Audio backend of the embedded daemon: this platform's audio (jack on Linux, cpal on
-    /// macOS and Windows) unless named; fake only when named here.
+    /// macOS, asio on Windows) unless named; fake only when named here.
     #[arg(long, value_enum, requires = "embedded")]
     backend: Option<BackendArg>,
     /// Key directory for CURVE (default: the per-user ac2 config dir).
@@ -111,6 +113,7 @@ fn target(
             None => EmbeddedBackend::platform(),
             Some(BackendArg::Cpal) => EmbeddedBackend::Cpal,
             Some(BackendArg::Jack) => EmbeddedBackend::Jack,
+            Some(BackendArg::Asio) => EmbeddedBackend::Asio,
             Some(BackendArg::Fake) => EmbeddedBackend::Fake,
         };
         // An embedded daemon that cannot start is an error, never a silent switch to

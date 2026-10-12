@@ -60,19 +60,23 @@ pub fn demo_measurement() -> MeasConfig {
 /// Audio backend of the embedded daemon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmbeddedBackend {
-    /// System audio through cpal (Core Audio / WASAPI); macOS and Windows.
+    /// Core Audio through cpal; macOS.
     Cpal,
     /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
+    /// ASIO drivers; Windows.
+    Asio,
     /// The simulated rig of `ac2d --backend fake`; never real audio.
     Fake,
 }
 
 impl EmbeddedBackend {
-    /// This platform's audio: JACK on Linux, cpal elsewhere.
+    /// This platform's audio: JACK on Linux, ASIO on Windows, cpal on macOS.
     pub const fn platform() -> Self {
         if cfg!(target_os = "linux") {
             Self::Jack
+        } else if cfg!(windows) {
+            Self::Asio
         } else {
             Self::Cpal
         }
@@ -150,6 +154,7 @@ impl Embedded {
         match self.backend {
             EmbeddedBackend::Cpal => "embedded daemon (cpal)".into(),
             EmbeddedBackend::Jack => "embedded daemon (jack)".into(),
+            EmbeddedBackend::Asio => "embedded daemon (asio)".into(),
             EmbeddedBackend::Fake => "embedded daemon (fake rig)".into(),
         }
     }
@@ -169,7 +174,7 @@ impl Drop for Embedded {
 pub fn start_embedded(backend: EmbeddedBackend) -> Result<Embedded, EmbeddedError> {
     let setup = match backend {
         EmbeddedBackend::Fake => Setup::Demo,
-        EmbeddedBackend::Cpal | EmbeddedBackend::Jack => Setup::Empty,
+        EmbeddedBackend::Cpal | EmbeddedBackend::Jack | EmbeddedBackend::Asio => Setup::Empty,
     };
     start_embedded_with(backend, setup)
 }
@@ -190,6 +195,7 @@ pub fn start_embedded_with(
     let choice = match backend {
         EmbeddedBackend::Cpal => BackendChoice::Cpal,
         EmbeddedBackend::Jack => BackendChoice::Jack,
+        EmbeddedBackend::Asio => BackendChoice::Asio,
         EmbeddedBackend::Fake => BackendChoice::Fake,
     };
     let audio = ac2d::backends(choice).map_err(EmbeddedError::Backend)?;

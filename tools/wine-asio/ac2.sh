@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ac2's own ASIO backend under Wine on WineASIO, JACK dummy driver: cross-builds ac2d, ac2
-# (feature asio) and the ac2-loop check for x86_64-pc-windows-msvc, then runs them.
+# and the ac2-loop check for x86_64-pc-windows-msvc, then runs them.
 #
 # Usage: tools/wine-asio/ac2.sh        (needs the image; tools/wine-asio/run.sh builds it)
 # Env:   RATE (48000), PERIOD (256), CACHE_DIR (/work/ac2-scratch/wine-asio), IMAGE,
@@ -51,7 +51,7 @@ docker run --rm --memory 8g --ulimit memlock=-1 --cpus 4 --shm-size 256m \
             mkdir -p /tmp/shim && cp /src/tools/wine-asio/sodium-make /tmp/shim/make
             export PATH=/tmp/shim:$PATH
             cargo xwin build --locked --target x86_64-pc-windows-msvc --target-dir /target \
-                -p ac2d -p ac2-cli --features ac2d/asio,ac2-cli/asio || return 1
+                -p ac2d -p ac2-cli || return 1
             cd /src/tools/wine-asio/ac2-loop
             cargo xwin build --locked --release --target x86_64-pc-windows-msvc \
                 --target-dir /target/ac2-loop

@@ -370,7 +370,7 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
     assert_eq!(e.code, ErrorCode::Refused);
 }
 
-/// Input and output listed as two devices (WASAPI endpoints): each says which direction it
+/// Input and output listed as two devices (a built-in mic and speakers): each says which direction it
 /// has, the loopback is found across them, and a session opens with the output on the other
 /// device, reported as of unknown clock relation.
 #[test]

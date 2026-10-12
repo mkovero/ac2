@@ -50,17 +50,31 @@ fn backend(b: BackendArg) -> Result<Arc<dyn Backend>, CliError> {
              --backend jack"
                 .into(),
         )),
-        #[cfg(not(target_os = "linux"))]
-        BackendArg::Cpal => Ok(Arc::new(ac2_audio::CpalBackend::new())),
-        #[cfg(not(target_os = "linux"))]
-        BackendArg::Jack => Err(CliError::Usage(
-            "JACK is supported on Linux only: use --backend cpal (the system audio)".into(),
+        #[cfg(windows)]
+        BackendArg::Cpal => Err(CliError::Usage(
+            "Windows audio goes through ASIO: use --backend asio (with FlexASIO for a device \
+             without its own ASIO driver)"
+                .into(),
         )),
-        #[cfg(all(windows, feature = "asio"))]
+        #[cfg(target_os = "macos")]
+        BackendArg::Cpal => Ok(Arc::new(ac2_audio::CpalBackend::new())),
+        #[cfg(target_os = "macos")]
+        BackendArg::Jack => Err(CliError::Usage(
+            "JACK is supported on Linux only: use --backend cpal (Core Audio)".into(),
+        )),
+        #[cfg(windows)]
+        BackendArg::Jack => Err(CliError::Usage(
+            "JACK is supported on Linux only: use --backend asio".into(),
+        )),
+        #[cfg(windows)]
         BackendArg::Asio => Ok(Arc::new(ac2_audio::AsioBackend::new())),
-        #[cfg(not(all(windows, feature = "asio")))]
+        #[cfg(target_os = "linux")]
         BackendArg::Asio => Err(CliError::Usage(
-            "this build has no ASIO: ASIO runs in Windows builds with the asio feature".into(),
+            "ASIO is supported on Windows only: use --backend jack".into(),
+        )),
+        #[cfg(target_os = "macos")]
+        BackendArg::Asio => Err(CliError::Usage(
+            "ASIO is supported on Windows only: use --backend cpal (Core Audio)".into(),
         )),
     }
 }
@@ -476,8 +490,8 @@ mod tests {
 
     #[test]
     fn a_name_shared_by_two_endpoints_resolves_by_direction() {
-        // WASAPI lists playback and capture endpoints as separate devices, often with the
-        // same name; the playback one coming first must not be taken for capture.
+        // A host may list playback and capture as separate devices with the same name; the
+        // playback one coming first must not be taken for capture.
         let devs = [
             device("play", "USB Audio", 0, 2, true),
             device("rec", "USB Audio", 2, 0, true),

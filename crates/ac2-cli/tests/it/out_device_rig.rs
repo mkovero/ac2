@@ -1,5 +1,6 @@
 //! `ac2 session open` with the playback on another device than the capture: a simulated rig
-//! listed as an input-only and an output-only endpoint (as WASAPI lists one interface).
+//! listed as an input-only and an output-only device (as an OS lists a built-in mic and
+//! speakers).
 #![allow(clippy::unwrap_used)]
 
 use std::sync::Arc;

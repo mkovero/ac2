@@ -1,5 +1,4 @@
-//! cpal backend on the OS's default host (Core Audio, WASAPI). Not built on Linux, where
-//! JACK is the only real backend.
+//! cpal backend on Core Audio, macOS only: Linux has JACK and Windows ASIO.
 //!
 //! cpal has no duplex stream: capture and playback are two streams with their own callbacks
 //! and, except on CoreAudio's IO thread, their own threads. Each side therefore keeps its own
@@ -63,26 +62,10 @@ fn backend_err(operation: Operation, e: impl std::fmt::Display) -> AudioError {
     }
 }
 
-/// An open failure names its direction and device: WASAPI opens capture and playback as two
-/// clients, and the host's own text does not say which one refused.
+/// An open failure names its direction and device: capture and playback are two streams,
+/// and the host's own text does not say which one refused.
 fn open_err(side: &str, d: &cpal::Device, e: impl std::fmt::Display) -> AudioError {
-    let detail = e.to_string();
-    let hint = access_denied_hint(side, &detail);
-    backend_err(
-        Operation::Open,
-        format!("{side} {:?}: {detail}{hint}", device_name(d)),
-    )
-}
-
-/// E_ACCESSDENIED (0x80070005) on a capture client is Windows' microphone privacy switch for
-/// desktop apps; cpal passes the HRESULT through only as text.
-fn access_denied_hint(side: &str, detail: &str) -> &'static str {
-    if side == "capture" && detail.contains("-2147024891") {
-        "; Windows blocks microphone access for desktop apps: Settings → Privacy & security → \
-         Microphone → Let desktop apps access your microphone"
-    } else {
-        ""
-    }
+    backend_err(Operation::Open, format!("{side} {:?}: {e}", device_name(d)))
 }
 
 fn device_id(d: &cpal::Device) -> DeviceId {
@@ -208,8 +191,7 @@ fn common_range(a: Option<FrameRange>, b: Option<FrameRange>) -> Option<FrameRan
 
 fn duplex_relation(d: &cpal::Device) -> ClockRelation {
     if d.supports_input() && d.supports_output() {
-        // CoreAudio and ALSA use one device object (one PCM name) for both directions.
-        // WASAPI endpoints are single-direction and never get here.
+        // Core Audio uses one device object for both directions.
         ClockRelation::SameDeviceSeparateCallbacks
     } else {
         ClockRelation::Unknown
@@ -409,7 +391,8 @@ impl Backend for CpalBackend {
         });
         let buffer_size = BufferSize::Fixed(frames);
 
-        // Variable-size hosts (WASAPI) can deliver small packets; size headers for them.
+        // A callback may deliver fewer frames than the fixed buffer; size headers for small
+        // ones.
         let min_block = request.buffer_frames.unwrap_or(64).clamp(16, 64) as usize;
         let plumbing = Plumbing::new(&mut request, rate, min_block);
         let events = Arc::clone(&plumbing.events);
@@ -620,14 +603,6 @@ impl OutputSide {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn access_denied_on_capture_points_at_the_privacy_switch() {
-        let denied = "Failed to initialize audio client: Access is denied. (os error -2147024891)";
-        assert!(access_denied_hint("capture", denied).contains("microphone"));
-        assert_eq!(access_denied_hint("playback", denied), "");
-        assert_eq!(access_denied_hint("capture", "device not available"), "");
-    }
 
     /// Read-only: lists devices, opens nothing. Skips where the host has no devices (CI).
     #[test]

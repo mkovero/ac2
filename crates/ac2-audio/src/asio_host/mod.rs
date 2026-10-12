@@ -1,4 +1,4 @@
-//! ASIO backend (Windows, feature `asio`), on the `azo` binding: ASIO drivers' COM objects
+//! ASIO backend (Windows), on the `azo` binding: ASIO drivers' COM objects
 //! directly, no Steinberg SDK.
 //!
 //! One `bufferSwitch` serves capture and playback on the driver's clock, so both directions
@@ -12,9 +12,9 @@ mod format;
 mod open;
 mod position;
 
-#[cfg(all(windows, feature = "asio"))]
+#[cfg(windows)]
 mod driver;
-#[cfg(all(windows, feature = "asio"))]
+#[cfg(windows)]
 pub use driver::AsioBackend;
 
 #[cfg(test)]

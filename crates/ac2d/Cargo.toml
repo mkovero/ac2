@@ -18,10 +18,6 @@ path = "src/lib.rs"
 name = "ac2d"
 path = "src/main.rs"
 
-[features]
-# The ASIO backend (Windows only; does nothing elsewhere). Off by default.
-asio = ["ac2-audio/asio"]
-
 [dependencies]
 ac2-archive = { path = "../ac2-archive" }
 ac2-audio = { path = "../ac2-audio" }

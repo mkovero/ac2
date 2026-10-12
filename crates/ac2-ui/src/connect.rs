@@ -53,6 +53,7 @@ impl Entry {
             Entry::Local { .. } => "Local daemon".into(),
             Entry::Embedded(EmbeddedBackend::Cpal) => "This computer's audio".into(),
             Entry::Embedded(EmbeddedBackend::Jack) => "This computer's audio (JACK)".into(),
+            Entry::Embedded(EmbeddedBackend::Asio) => "This computer's audio (ASIO)".into(),
             Entry::Embedded(EmbeddedBackend::Fake) => "Simulated rig (no audio)".into(),
             Entry::Rig { rig, .. } => rig.advert.name.clone(),
         }
@@ -71,6 +72,9 @@ impl Entry {
             Entry::Embedded(EmbeddedBackend::Jack) => {
                 "a daemon inside this app on JACK (JACK2 or PipeWire's); closes with the window"
                     .into()
+            }
+            Entry::Embedded(EmbeddedBackend::Asio) => {
+                "a daemon inside this app on ASIO drivers; closes with the window".into()
             }
             Entry::Embedded(_) => "a daemon inside this app; closes with the window".into(),
             Entry::Rig { rig, status } => {

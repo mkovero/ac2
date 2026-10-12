@@ -61,10 +61,13 @@ pub enum Unavailability {
          (e.g. `sudo apt install pipewire-jack`), else JACK2 (e.g. `sudo apt install jackd2`)"
     )]
     NoJackLibrary,
-    /// No ASIO driver is registered on this machine.
+    /// No ASIO driver is registered on this machine. ASIO is the only audio API ac2 uses on
+    /// Windows, so a device without its own driver needs FlexASIO, which serves any device
+    /// Windows lists through one ASIO driver.
     #[error(
-        "No ASIO driver is installed: install the interface's own ASIO driver, or FlexASIO \
-         (https://github.com/dechamps/FlexASIO) for a device that has none"
+        "No ASIO driver found: ac2 uses ASIO on Windows. Install the interface's own ASIO \
+         driver, or FlexASIO (https://github.com/dechamps/FlexASIO) for a device without one \
+         (USB measurement mics, class-compliant interfaces, built-in audio)"
     )]
     NoAsioDriver,
     /// Anything else the host reported.
@@ -189,4 +192,21 @@ pub enum RequestError {
         /// Which field.
         what: &'static str,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_asio_driver_names_flexasio_for_devices_without_one() {
+        let s = AudioError::Unavailable {
+            backend: BackendKind::Asio,
+            reason: Unavailability::NoAsioDriver,
+        }
+        .to_string();
+        assert!(s.contains("No ASIO driver found"), "{s}");
+        assert!(s.contains("https://github.com/dechamps/FlexASIO"), "{s}");
+        assert!(s.contains("USB measurement mics"), "{s}");
+    }
 }

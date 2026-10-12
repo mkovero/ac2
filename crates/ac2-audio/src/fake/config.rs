@@ -11,8 +11,8 @@ pub enum FakeEndpoints {
     #[default]
     Duplex,
     /// An input-only device ([`FAKE_INPUT_ID`]) and an output-only one
-    /// ([`FAKE_OUTPUT_ID`]) under one name, like the two WASAPI endpoints of one
-    /// interface: a session must name a different output device than its input device to
+    /// ([`FAKE_OUTPUT_ID`]) under one name, like one interface listed once per
+    /// direction: a session must name a different output device than its input device to
     /// play anything.
     Split,
 }

@@ -43,7 +43,7 @@ fn a_daemon_without_audio_opens_the_audio_setup_once() {
     assert!(!t.st.open_session_when_empty);
 }
 
-/// System audio listing each direction as its own endpoint (WASAPI): an output-only device
+/// System audio listing each direction as its own device: an output-only device
 /// listed first and the system's default output, an input-only USB mic, and another
 /// output-only device.
 fn endpoint_backends() -> Vec<BackendInfo> {

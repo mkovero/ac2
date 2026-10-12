@@ -1,9 +1,9 @@
 //! Picking a listed device for one direction, shared by `session open` (the daemon's
 //! listing) and `selftest duplex` (the backend's own).
 //!
-//! Some hosts list each direction as its own device (WASAPI: a capture endpoint and a
-//! playback endpoint, often with the same name), so a name only means something together
-//! with the direction it is wanted for.
+//! Some hosts list each direction as its own device (an input-only and an output-only
+//! device, sometimes with the same name), so a name only means something together with the
+//! direction it is wanted for.
 
 use ac2_audio::{DeviceCaps, Direction};
 use ac2_proto::model::DeviceInfo;
@@ -142,7 +142,7 @@ pub(crate) mod tests {
     ) -> DeviceInfo {
         DeviceInfo {
             backend: BackendKind::Cpal,
-            host: "wasapi".into(),
+            host: "coreaudio".into(),
             id: DeviceId(id.into()),
             name: name.into(),
             input: dir(inputs, default),
@@ -153,48 +153,48 @@ pub(crate) mod tests {
         }
     }
 
-    /// WASAPI's shape: one interface listed as a playback endpoint first, then a capture
-    /// endpoint with the very same name.
-    fn wasapi() -> Vec<DeviceInfo> {
+    /// One interface listed as a playback-only device first, then a capture-only device
+    /// with the very same name.
+    fn split() -> Vec<DeviceInfo> {
         vec![
-            info("{0.0.0}.{play}", "Speakers (USB Audio)", 0, 2, true),
-            info("{0.0.1}.{rec}", "Speakers (USB Audio)", 2, 0, true),
-            info("{0.0.1}.{mic}", "Microphone (Webcam)", 1, 0, false),
+            info("usb-out", "Speakers (USB Audio)", 0, 2, true),
+            info("usb-in", "Speakers (USB Audio)", 2, 0, true),
+            info("webcam", "Microphone (Webcam)", 1, 0, false),
         ]
     }
 
     #[test]
     fn a_shared_name_resolves_by_direction() {
-        let devs = wasapi();
+        let devs = split();
         let refs: Vec<&DeviceInfo> = devs.iter().collect();
         let cap = named(&refs, "Speakers (USB Audio)", Direction::Input).expect("capture");
-        assert_eq!(cap.id.0, "{0.0.1}.{rec}");
+        assert_eq!(cap.id.0, "usb-in");
         let play = named(&refs, "speakers (usb audio)", Direction::Output).expect("playback");
-        assert_eq!(play.id.0, "{0.0.0}.{play}");
+        assert_eq!(play.id.0, "usb-out");
     }
 
     #[test]
     fn a_device_without_the_side_is_refused_by_name() {
-        let devs = wasapi();
+        let devs = split();
         let refs: Vec<&DeviceInfo> = devs.iter().collect();
         let e = named(&refs, "Microphone (Webcam)", Direction::Output).expect_err("refused");
         assert!(e.to_string().contains("no playback side"), "{e}");
-        let e = named(&refs, "{0.0.0}.{play}", Direction::Input).expect_err("refused");
+        let e = named(&refs, "usb-out", Direction::Input).expect_err("refused");
         assert!(e.to_string().contains("no capture side"), "{e}");
         assert!(named(&refs, "nope", Direction::Input).is_err());
     }
 
     #[test]
     fn defaults_follow_the_host_per_direction() {
-        let devs = wasapi();
+        let devs = split();
         let refs: Vec<&DeviceInfo> = devs.iter().collect();
         assert_eq!(
             default_for(&refs, Direction::Input).map(|d| d.id.0.as_str()),
-            Some("{0.0.1}.{rec}")
+            Some("usb-in")
         );
         assert_eq!(
             default_for(&refs, Direction::Output).map(|d| d.id.0.as_str()),
-            Some("{0.0.0}.{play}")
+            Some("usb-out")
         );
         // No host default and two capture devices: nothing to guess.
         let devs = [info("a", "A", 2, 0, false), info("b", "B", 2, 0, false)];
