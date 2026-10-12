@@ -98,7 +98,9 @@ distribution configures in `/etc/security/limits.d`.
    sudo cp /Volumes/ac2*/bin/ac2 /Volumes/ac2*/bin/ac2d /usr/local/bin/
    ```
 3. Start **ac2** from Applications. macOS asks for microphone access the first time an input
-   is opened; allow it (ac2 reads your audio interface's inputs, nothing else).
+   is opened; allow it (ac2 reads your audio interface's inputs, nothing else). Refused by
+   mistake: **System Settings → Privacy & Security → Microphone**, turn ac2 on.
+   `ac2d` or `ac2 selftest` started in Terminal ask for Terminal instead.
 
 Unsigned builds (every build so far: the project has no Developer ID yet): macOS refuses
 to open them at first. There is no need to allow unsigned software in general; let ac2
@@ -117,7 +119,11 @@ The daemon can run as a launchd agent: `launchd/io.github.mkovero.ac2d.plist` in
 image has the instructions in its header. A daemon started by launchd cannot show the
 microphone prompt, so either let the app host its daemon or start `ac2d` from Terminal.
 
-Measuring with a real audio interface on macOS is not yet verified.
+Audio goes through Core Audio, the HAL directly (backend `coreaudio`, the only one on
+macOS): any device macOS lists, an aggregate device made in Audio MIDI Setup included. A
+device's rate, format and clock source are set in Audio MIDI Setup, which **P** on Settings ›
+Audio & I/O brings up. The audio path is verified in CI on BlackHole, a virtual device;
+measuring with a real audio interface is not yet verified ([testing/macos](../testing/macos/README.md)).
 
 ## Windows (10 1809 or newer, x64)
 
@@ -175,7 +181,7 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
 
 1. Until there is an audio session the transfer pane says *No audio session — press
    Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio session…*) opens Settings on its
-   **Audio & I/O** page. Its first rows pick the **backend** (JACK on Linux, system audio on macOS and
+   **Audio & I/O** page. Its first rows pick the **backend** (JACK on Linux, Core Audio on macOS, ASIO on
    Windows; one that cannot be used says why and what to do, e.g. *No JACK server: start
    JACK (e.g. `jackd -d alsa`) or use PipeWire*) and the **device** (*8 in / 8 out ·
    48 kHz*) with **←/→**. Below them (**↓**) the page has

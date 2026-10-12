@@ -14,9 +14,11 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   ketunkolo and the Pi, then the app alone at 0fef18ea on ketunkolo and the Pi
   (`docs/rigs/pupu.md`, *Deploy log*). A session format change on deploy is restored
   with `ac2 session salvage`.
-- macOS: the direct Core Audio backend (`coreaudio`, the HAL through `cahal`, its own
-  repository github.com/mkovero/cahal, from crates.io) is the only macOS backend; cpal is removed (stage (c), `docs/design/coreaudio.md` §11). The
-  tester round on a real interface is `testing/macos/` Test 6.
+- macOS: the direct Core Audio backend (`coreaudio`, the HAL through `cahal`: its own
+  repository github.com/mkovero/cahal, from crates.io) is the only macOS backend (cpal removed,
+  `docs/design/coreaudio.md` §11); exact on BlackHole in the all-OS CI run (`all_os=true`).
+  Open on real hardware: the tester round (`testing/macos/`, Test 6: stated vs measured
+  latency, replug, rate change, streams).
 - Newest features: per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
   with a grey resolution marker where the estimate is coarser than the grid (`docs/user-guide.md`
   *Resolution and the resolution marker*); mic curve applied to sweeps; settable spectrum/RTA

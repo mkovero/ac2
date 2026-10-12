@@ -42,13 +42,17 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   logged (`capture discontinuity at sample …`). Counters since the session opened (and the
   last one's time) in `status` / `--json` would make the 24 h check (`docs/rigs/pupu.md`) one
   command. Memory over time is likewise only a `/proc` sample.
-- **macOS not verified with an audio interface**: a tester has the dev.10 disk image and
-  `testing/macos/README.md`. Results pending.
 - **Core Audio backend** (`coreaudio.md`, decision H1): stages (a)–(c) built: `coreaudio`
   is the only macOS backend (cpal removed), exact on BlackHole CI (§12, *Settled on CI*),
-  Audio MIDI Setup behind P, only the used input streams on. Next: the tester round on a
-  real interface (`testing/macos/` Test 6: stated vs measured latency, replug object id, rate
-  change).
+  Audio MIDI Setup behind P, only the used input streams on. Not yet verified with an audio
+  interface. Next: the tester round on the next build (`testing/macos/README.md`, Tests 1–5
+  and Test 6: stated vs measured latency, replug object id, rate change, stream usage on a
+  multi-stream interface).
+- **Per-cycle out − in check against the stated latency in `coreaudio_host`**: a VM overload
+  put one impulse 256 frames early; that block was flagged `XRUN | DISCONTINUITY`
+  (`coreaudio.md` §12, *Settled on CI*). Today only `coreaudio-loop` sets such round trips
+  apart; the engine should check each cycle's output placement against the stated latency
+  and flag a cycle that differs.
 - **App Nap**: the macOS hand-off timer is not coalesced (kqueue `NOTE_CRITICAL`), but a
   hidden app on battery may still be App Napped, throttling a daemon the app hosts. Needs an
   activity assertion from the UI while a session is open.

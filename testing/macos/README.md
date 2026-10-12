@@ -2,44 +2,70 @@
 
 This guide takes a tester from a fresh install to a real measurement on macOS with an audio
 interface, in about an hour of hands-on time plus a one-hour unattended run. It covers what
-is not verified on macOS yet: Core Audio capture and playback, timing, and long-run
-stability. Install and first start (microphone prompt) were confirmed on 2026-10-05.
+is not verified on macOS yet: Core Audio capture and playback on a real interface, timing,
+and long-run stability. Install and first start were confirmed on an earlier build; the
+audio path has so far run only on a virtual device (BlackHole) in CI.
 
-**Core Audio backend.** Builds newer than dev.10 run on ac2's own Core Audio backend
-(`coreaudio`: the HAL directly, one callback per device with an exact sample index) by
-default, in the app, `ac2d` and the self-test. cpal, the backend of dev.10 and earlier, is
-removed.
-Settings remembered per device by an older build (outputs, roles, mic names in a session
-default) are keyed by the backend and are not found once on the new one: set them again.
-Device ids (`coreaudio:<UID>`) are unchanged. Test 6 covers what only a real interface can
-show about the new backend.
+## What is new in this build
+
+- **One audio backend: Core Audio.** ac2 talks to the Core Audio HAL directly (`coreaudio`:
+  one callback per device, inputs and outputs on one exact sample index, the device's
+  latency stated). It is the only backend in the app, `ac2d` and the self-test; the cpal
+  backend of earlier builds is gone, and so is `--backend cpal`.
+- **Device settings set again once.** What an earlier build remembered per device (stimulus
+  outputs, roles, mic names in a session default) was kept under the old backend and is not
+  found now: set it again the first time. Device ids (`coreaudio:<UID>`) are unchanged.
+  Raw recordings made by an earlier build no longer open for replay.
+- **Microphone consent.** ac2 asks macOS before it opens any input. The first start may
+  ask again even if an earlier build was allowed (macOS may treat each unsigned build as a
+  new app). If access is refused, ac2 says so in words (*macOS denies ac2 the
+  microphone: allow it in System Settings › Privacy & Security › Microphone*) instead of
+  hanging.
+- **Audio MIDI Setup on P.** On a Core Audio device, **P** in Settings › Audio & I/O brings
+  up macOS's Audio MIDI Setup, where the device's rate, format and clock source are set. A
+  change there reopens the session at the new settings by itself.
+- **Only the inputs in use are read.** On an interface with several input streams (analog
+  and ADAT, say), only the streams the session's inputs are on are switched on.
+- **BlackHole.** If BlackHole is installed it is listed like any device. It is what CI tests
+  on; it reports no latency and cannot be unplugged, so it answers none of Test 6. Use the
+  real interface for every test here.
 
 ## 1. Get and install the build
 
 The build is a universal disk image (Apple silicon and Intel, macOS 11 or newer), unsigned
 for now.
 
-1. The disk image `ac2-0.0.0-dev.10-macos-universal.dmg` (built 2026-10-08;
-   the code of main 81fcb14, build id e415ef1) is in this directory, with `SHA256SUMS` beside it (check with
-   `shasum -a 256 -c SHA256SUMS --ignore-missing`). The `.zip` beside it holds the same
-   programs unpacked, for use without the disk image.
-   Release files are not in git: if this directory has only `SHA256SUMS`, fetch them from
-   the dev.10 release run with `gh run download 37819512973 -R mkovero/ac2 -n dist-macos`
-   (or the run's *Artifacts* on GitHub; kept until 2027-01-06).
+<!-- BUILD:begin: the maintainer fills in this block for each build -->
+- Version **`<VERSION>`**, built `<BUILD_DATE>` from main `<COMMIT>` (release workflow run
+  `<RUN_ID>`).
+- Files: `ac2-<VERSION>-macos-universal.dmg`, and `ac2-<VERSION>-macos-universal.zip` with
+  the same programs unpacked, for use without the disk image.
+- Fetch them with
+  `gh run download <RUN_ID> -R mkovero/ac2 -n dist-macos`
+  (or the run's *Artifacts* on GitHub; kept until `<EXPIRES>`).
+<!-- BUILD:end -->
+
+1. Release files are not in git: if this directory has only `SHA256SUMS`, fetch them with
+   the `gh run download` line above. Check them with
+   `shasum -a 256 -c SHA256SUMS --ignore-missing`.
 2. Open the .dmg and drag **ac2** to Applications. If a previous ac2 is there, replace it.
 3. First start: **right-click ac2.app in Applications → Open**, then **Open** in the
    dialog. macOS remembers the answer for this one app; there is no need to allow unsigned
-   apps in general. On macOS 15, use **System Settings → Privacy & Security → Open Anyway**
-   after a first refused start.
-4. Allow microphone access when asked. ac2 reads your interface's inputs and nothing else.
+   apps in general. On macOS 15 the dialog has no Open button: after the first refused
+   start, use **System Settings → Privacy & Security**, scroll down, **Open Anyway**.
+4. Allow microphone access when asked (it comes when ac2 first opens an input, usually as
+   Settings shows the input meters). ac2 reads your interface's inputs and nothing else.
+   Note whether the prompt came, and when.
 5. Optional, for the command-line tools: copy them from the disk image with
    `sudo cp /Volumes/ac2*/bin/ac2 /Volumes/ac2*/bin/ac2d /usr/local/bin/` and run
    `xattr -d com.apple.quarantine /usr/local/bin/ac2 /usr/local/bin/ac2d`.
+   `ac2 --version` prints the build.
 
 Start the app as usual (Launchpad, Finder or Dock). It keeps its log, including the audio
 engine it hosts, in `~/Library/Logs/ac2/ac2-ui.log` (Console.app lists it under *Log
 Reports*); the previous run's is `ac2-ui.log.1`. Each start replaces the older one, so copy
-the file before starting ac2 again if a run went wrong.
+the file before starting ac2 again if a run went wrong. The log's `ac2d <version> up` line
+names the version.
 
 ## 2. Wiring and safety
 
@@ -67,11 +93,11 @@ interface out 2 ── cable 2 ──► in 2   (measurement: here a wire, so th
 Pass: the interface is listed, its inputs show live levels, and a session opens without
 errors.
 
-1. Start ac2. In the connect dialog choose **This computer's audio (Core Audio)**
-   (dev.10 and older: **This computer's audio**). Settings opens on its **Audio & I/O**
-   page, on the input device.
-2. **Device** (←/→): pick your interface. Note what it shows (*N in / M out · rate ·
-   buffer*).
+1. Start ac2. In the connect dialog choose **This computer's audio (Core Audio)**. Settings
+   opens on its **Audio & I/O** page, on the input device.
+2. **Input** device (**←/→**): pick your interface. Note what it shows (*N in / M out ·
+   rate · buffer*), and whether its inputs carry the interface's own channel names or are
+   numbered (*Input 3*).
 3. Go down (**↓**) to the input rows. Tap the mic or play something into an
    input: its row's meter must move. Check every input you have.
 4. Roles: **↑/↓** to a row, then **R** on input 1 (the loopback), **M** on input 2
@@ -79,12 +105,13 @@ errors.
    the session too (**Space** on its row). Optional: **D** (*Detect loopback…*) at −40 dBFS
    should mark input 1 as the Reference by itself.
 5. **Enter** opens the session. Accept the offered transfer measurement with **Enter**.
-6. Check the top bar: device, rate and buffer are shown. The **Inputs** list on the left
+6. Check the top bar: device, rate and buffer are shown (`<device> · 48.0 kHz · 1024
+   frames`); hovering over it shows the stated latency. The **Inputs** list on the left
    keeps a meter per input.
 
 Also worth a try: close the session (**⌘K → Close audio session**), reopen it at
-96 kHz if the interface supports it, and unplug and replug the interface while a session
-is open (ac2 should say so and recover, not crash).
+96 kHz if the interface supports it (type the rate on the rate row), and a short buffer
+such as 256 frames (the buffer row).
 
 ## 4. Test 2: transfer function over a cable, then the delay finder
 
@@ -98,8 +125,8 @@ the interface's own latency between the two inputs, about 0 ms.
 2. **L**, type `-40`, **Enter**; **Space** arms, **Enter** plays pink noise. The transfer
    pane should show magnitude near 0 dB, phase near 0° and coherence near 1 across
    20 Hz–20 kHz.
-3. Press **X** (delay finder). Expect a first arrival close to 0 ms, a high confidence,
-   and no "no estimate".
+3. Press **X** (find delay). Expect an arrival close to 0 ms with a PSR figure, not
+   *NO ESTIMATE* or *AMBIGUOUS*.
 4. Watch for **banners** over the plots (NO REFERENCE, NO SIGNAL, CLIP, STALE, or a
    loopback timing warning about dropped or repeated output samples). With signal playing
    there should be none.
@@ -117,9 +144,9 @@ room.
 2. **Space** arms, **Enter** plays. A strip at the bottom counts down, then *analysing…*.
 3. Expect a flat response near 0 dB across the band and distortion far down (H2, H3 well
    below −80 dB, or drawn dashed at the noise floor). The arrival is about 0 ms.
-4. **G** steps to the impulse response (one sharp peak) and the room table (mostly `—` over
-   a cable: there is no decay). Note anything odd, and whether the run finished without a
-   dropout warning.
+4. **G** steps through the pane's views: the impulse response (one sharp peak) and the room
+   table (mostly `—` over a cable: there is no decay). Note anything odd, and whether the
+   run finished without a dropout warning.
 
 ## 5. Test 3: spectrum, RTA and the SPL meter
 
@@ -133,7 +160,7 @@ plausible levels.
 2. **⌘K → New SPL meter…** on input 2. Uncalibrated it reads dBFS: with pink noise at
    −40 dBFS on cable 2 it should read close to −40 with Z weighting (**Z** in the SPL pane
    cycles A / C / Z; A reads lower on pink noise) and follow the level when you change it
-   with ↑/↓. A mic on a spare input works too.
+   with **↑/↓**. A mic on a spare input works too.
 3. Optional, if a calibrator is at hand: calibrate the mic input (Settings › Calibration,
    **C** on the input, 94 or 114 dB) and check the meter then reads dB SPL.
 4. Maximise the SPL pane (**W**); a new meter shows its Leq windows below the number
@@ -159,11 +186,10 @@ crash.
 ## 7. Test 5: duplex self-test (command line)
 
 Checks the interface below the app: the same audio backend, run for a fixed time, judged
-pass or fail with a named reason per failure. Needs a build newer than dev.10 (`ac2 selftest
---help` answers if yours has it). Use the command-line tools from section 1, step 5, in
-Terminal. The first run asks for microphone access for Terminal: allow it (a denial must end
-in a clean `FAIL`, not a hang; worth noting). **Quit the ac2 app first** so the device is
-free.
+pass or fail with a named reason per failure. Use the command-line tools from section 1,
+step 5, in Terminal. The first run asks for microphone access for Terminal: allow it (a
+denial must end in a clean `FAIL` naming the microphone, not a hang; worth noting). **Quit
+the ac2 app first** so the device is free.
 
 1. **Silent** (no cable needed; the outputs open but play only zeros):
 
@@ -175,7 +201,8 @@ free.
    wrong name prints the devices it knows. Without `--device` it tests the system default
    input. It reports device, channel counts, rate and buffer, block sizes, xruns and gaps,
    callback timing, both clocks against the computer's clock and the peak of every input,
-   and ends in `result PASS` or one `FAIL` line per reason.
+   and ends in `result PASS` or one `FAIL` line per reason. `--rate 48khz` and
+   `--buffer 256samples` choose rate and buffer; try the smallest buffer you would use.
 
 2. Same again while loading the computer (a browser benchmark, a big build): any dropout
    must show up as a `FAIL` line, not pass silently.
@@ -189,38 +216,49 @@ free.
    ```
 
    It refuses levels above −20 dBFS, fades in and out, and Ctrl-C fades out early. It adds
-   the output→input delay (`loopback offset`), whether it held still, and the drift between
-   output and input clocks. Run it about five times and note each offset: whether it changes
-   between runs is the point.
+   the `loopback` line (the output→input offset in samples, whether it held still) and the
+   drift between output and input clocks. Run it about five times and note each offset:
+   whether it changes between runs is the point.
 
-macOS: an aggregate device of two interfaces is worth one silent run too. Paste each report
-into what you send back (`--json` gives the same as JSON). On dev.10 and older, use
-`--backend cpal` (the only Core Audio backend there).
+An aggregate device of two interfaces (made in Audio MIDI Setup) is worth one silent run
+too. Paste each report into what you send back (`--json` gives the same as JSON).
 
 ## 8. Test 6: the Core Audio backend on a real interface
 
-Needs a build newer than dev.10. These answer what the CI loop on a virtual device cannot:
-a virtual device reports no latency of its own, cannot be unplugged and has no clock to
-change.
+These answer what the CI loop on a virtual device cannot: a virtual device reports no
+latency of its own, cannot be unplugged, has no clock to change and has one stream.
 
 1. **Stated against measured latency.** With the loopback cable (output 1 → input 1), open
-   a session on the interface at 48 kHz (Test 1) and note the top bar's
-   `stated latency: N frames in / M out` (`ac2 session status` shows it too). Quit the
-   app, then run the loopback self-test of Test 5, step 3, **ten times**, and note each
-   `loopback offset` in samples. Pass: the offset is the same in all ten runs, and equals
-   N + M plus a small remainder (the interface's converters; a few tens of samples). Note
-   the remainder; a negative one (measured below stated) is worth a line of its own.
+   a session on the interface at 48 kHz with the buffer typed as 256 frames (Test 1).
+   Hover over the top bar's device text and note
+   `stated latency: N frames in / M out`. Quit the app, then run the loopback self-test of
+   Test 5, step 3, with `--rate 48khz --buffer 256samples` added, **ten times**, and note
+   each `loopback` offset in samples. Pass: the offset is the same in all ten runs, and
+   equals N + M plus a small remainder (the interface's converters; a few tens of samples).
+   Note the remainder; a negative one (measured below stated) is worth a line of its own.
+   Repeat at a second buffer size (1024 frames): the stated latency changes with the
+   buffer, and the remainder should not.
 2. **Rate change while running.** Open a session with the transfer measurement running
-   (Test 2). In Settings, on the device row, **P** brings up **Audio MIDI Setup**. There,
-   change the interface's format to another rate (e.g. 44.1 kHz). Pass: within a few
-   seconds ac2 reopens by itself at the new rate, and the top bar notes that the driver
-   changed the rate. Change it back afterwards.
+   (Test 2). In Settings › Audio & I/O, on the device rows, **P** brings up **Audio MIDI
+   Setup**. There, change the interface's format to another rate (e.g. 44.1 kHz). Pass:
+   within a few seconds ac2 reopens by itself at the new rate, and the top bar says so in
+   the warning colour (`… · 44.1 kHz · … frames · driver changed from 48.0 kHz`; the hover
+   has the details). Change it back afterwards.
 3. **Unplug and replug.** With a session open, unplug the interface, wait 10 s, plug it
-   back. Pass: ac2 says the audio stopped, then reopens by itself within 30 s of the
-   replug. Do it **twice**, then run
+   back. Pass: the top bar says the audio stopped and that ac2 is reopening, then the
+   session comes back by itself within 30 s of the replug. Do it **twice**, then run
    `grep 'audio device probe' ~/Library/Logs/ac2/ac2-ui.log` and paste the lines: each
    `Present { generation: … }` is the interface's object id after a replug, and whether it
    changes between the two replugs is the open question.
+4. **Several input streams** (only if the interface has more inputs than its analog ones,
+   e.g. ADAT or S/PDIF inputs beside 8 analog: these usually arrive as a second stream).
+   Open a session with only input 1 and an input from the second group (e.g. input 9, the
+   first ADAT input) in it, and feed each something you can tell apart (the loopback on
+   input 1, a tap or a source on the other). Pass: each input's meter moves only with its
+   own signal, and the inputs left out of the session cost nothing visible. Note ac2's CPU %
+   in Activity Monitor with only inputs 1–2 in the session, then with every input in it.
+   With the command line instead: `ac2 selftest duplex --backend coreaudio --device
+   "<interface>" --in 1,9 --duration 30s` (silent) against the same without `--in`.
 
 ## 9. Optional: record and replay
 
@@ -242,18 +280,23 @@ useful.
 
 | Item | Your result |
 | --- | --- |
-| Mac model, Apple silicon or Intel, macOS version | |
-| Interface model, driver or firmware version | |
-| ac2 version (top bar, *build …*) | |
-| Test 1: interface listed, input meters move, session opens (rate / buffer shown) | |
-| Test 2: cables read 0 dB / 0° / coherence 1; delay finder result (ms, confidence) | |
+| Mac model, Apple silicon or Intel | |
+| macOS version | |
+| Interface model | |
+| Interface driver or firmware version (or "class compliant") | |
+| ac2 version (disk image name, or the log's `ac2d … up` line) | |
+| Install: right-click → Open or Open Anyway needed? Microphone prompt shown, and when? | |
+| Buffer sizes tried (app and self-test), and any that failed | |
+| Test 1: interface listed, channel names or numbers, input meters move, session opens (rate / buffer shown) | |
+| Test 2: cables read 0 dB / 0° / coherence 1; delay finder result (ms, PSR) | |
 | Test 2 sweep: flat response, distortion level, arrival; finished cleanly? | |
 | Test 3: spectrum, RTA and SPL meter live; calibration if tried | |
 | Test 4: 1 h run clean? CPU %, memory and battery at start and end | |
 | Test 5: self-test reports (silent, under load, loopback offsets if run) | |
-| Test 6.1: stated latency (in / out frames) at 48 kHz; the ten loopback offsets; remainder | |
+| Test 6.1: stated latency (in / out frames) at 48 kHz, 256 and 1024 frames; the ten loopback offsets; remainder | |
 | Test 6.2: rate change in Audio MIDI Setup: reopened by itself at the new rate, note shown? | |
 | Test 6.3: unplug / replug ×2: reopened within 30 s? the `audio device probe` lines | |
+| Test 6.4: several input streams: right signal on each input? CPU % with 2 inputs and with all | |
 | Record and replay (optional): file written, replay matches live? | |
 | Do the input meters and the SPL number move smoothly, or noticeably steppy? | |
 | ac2 CPU % in Activity Monitor with a session open and nothing playing | |

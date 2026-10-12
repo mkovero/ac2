@@ -82,6 +82,14 @@ The backend is always named. Each platform has one real backend:
 | Windows | `asio` | ASIO drivers, one device per installed driver, inputs and outputs on one clock. With no `--rate` / `--buffer`, the driver's current rate and preferred buffer. A device without its own ASIO driver goes through [FlexASIO](https://github.com/dechamps/FlexASIO); with no ASIO driver installed, the backend is listed as unavailable with that pointer. |
 | any | `fake` | a simulated rig for trying things out; never chosen for you |
 
+**macOS: microphone access.** macOS lets a program read any audio input only once the
+user allows it, so ac2 asks before it opens an input (the first time Settings shows the
+input meters, usually). While the prompt goes unanswered, or once access is refused, ac2
+says so in words and nothing is opened: allow ac2 in **System Settings › Privacy & Security
+› Microphone**. macOS asks on behalf of the program that started ac2: the app for itself and
+the daemon it hosts, Terminal for `ac2d` or `ac2 selftest` run there. A daemon started by
+launchd or over ssh gets no prompt; allow its app by hand first ([install.md](install.md)).
+
 Should a host still deliver audio in lumps, the daemon log says so once a minute (*audio
 arrives in bursts on …*) with the device and buffer to change.
 
@@ -154,7 +162,7 @@ output device, rate, buffer), channels, system max level; **↑/↓** walk them 
   reference keeps the transfer function right, and the loopback monitor measures their
   drift while a stimulus plays. The choice is remembered with the input device's roles.
 - **Channels**: one row per input and output, named by the backend where it can (JACK port
-  names; system audio has none, so *Input 3*); inputs have a **live meter** (RMS bar, peak
+  names, the channel names a Core Audio or ASIO device gives; without them *Input 3*); inputs have a **live meter** (RMS bar, peak
   tick, *CLIP* held 1 s). The meters run before the session opens (the daemon opens the
   device capture-only, no output stream), so you can find a mic by tapping it.
 - **Roles**: **R** Reference (the loopback return, one input); **M** measurement mic (any
