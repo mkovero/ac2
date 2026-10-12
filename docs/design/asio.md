@@ -63,7 +63,7 @@ licence open; §1 below settles it.
    NUL, `channel_info` reports inactive until buffers exist, the driver handle is `!Send`.
    Had azo failed, the fallback was ac2's own binding over a pinned SDK, shipped as a
    GPLv3 build; with azo that branch is moot.
-   **The fork.** ac2 builds azo from <https://github.com/mkovero/azo>, branch `ac2-0.4.1`,
+   **The fork.** ac2 builds azo from <https://github.com/mkovero/azo>, branch `ac2`,
    pinned by commit in `crates/ac2-audio/Cargo.toml` (git dependency, Windows only). It
    starts at upstream azo 0.4.1, which posts host commands as `WM_APP`: `WM_USER` on the
    apartment thread also arrives from the system, and its `wParam` was read as a command
@@ -507,11 +507,14 @@ run must reopen by itself. Until this passes, ASIO is shipped as preview.
 
 ## 6. Open questions
 
-1. azo held up under wineasio; vendor drivers on real Windows are still unchecked. Is a
-   weeks-old, single-author crate acceptable as a dependency, or should ac2 vendor or
-   fork it?
-2. Trademark: with azo there is no SDK licence at all. Is plain-text "ASIO" in the UI and
-   the docs nominative use with no logo duty? The SDK guidelines bind SDK licensees.
+1. ~~Is a weeks-old, single-author crate acceptable as a dependency?~~ Decided: yes,
+   through the fork (above), with each fork change offered upstream; upstream answered and
+   released a fix within a day. Still open: vendor drivers on real Windows, unchecked so far
+   (only wineasio and FlexASIO).
+2. ~~Trademark: plain-text "ASIO" in the UI and docs?~~ Decided (W3): yes. Naming the
+   interface a device speaks is nominative use; the SDK's logo and wording guidelines bind
+   SDK licensees, and ac2 uses no SDK. No logo, and the docs carry the attribution line
+   "ASIO is a trademark of Steinberg Media Technologies GmbH".
 3. ~~Should ASIO go into the default MSI with WASAPI kept as the fallback?~~ Decided (W1):
    ASIO only, in the one MSI; FlexASIO for devices without a driver.
 4. Which channel subset do drivers accept in `ASIOCreateBuffers` (a sparse `input_map`)?

@@ -156,3 +156,5 @@ Calibrations describe the machine's hardware and stay in the config directory; s
 the operator's documents and live in the data directory.
 
 License: MIT.
+
+ASIO is a trademark of Steinberg Media Technologies GmbH.
