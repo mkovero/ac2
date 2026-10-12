@@ -570,8 +570,9 @@ kind of a replay session and is never listed), `description` (for the
 operator), `availability` (tagged by `type`: `available` \| `unavailable` {`reason`}: why,
 in plain words with the remedy, e.g. `No JACK server: start JACK (e.g. `jackd -d alsa`) or
 use PipeWire`) and `devices: [DeviceInfo]` (empty while unavailable). A daemon started on
-real audio offers its platform's backend (`jack` on Linux, `cpal` on macOS and Windows; a
-Windows build with the `asio` feature offers `asio` and `cpal`, the one started on first);
+real audio offers its platform's backend (`jack` on Linux, `cpal` on macOS, `asio` on
+Windows; with no ASIO driver installed, `asio` is `unavailable` with a reason naming
+FlexASIO);
 one started on the simulated rig offers only that (a simulated device never stands in for
 a missing real one).
 
@@ -581,8 +582,8 @@ a missing real one).
 `default_buffer_frames` (u32 \| nil), `channel_names` ([string], one per channel, \| nil
 where the backend does not name channels: JACK gives the port alias or short name, ASIO
 the driver's channel name, cpal nothing), `system_default` (bool: the host's default device for this direction). A host
-whose devices are single-direction endpoints (WASAPI) lists an interface as an input-only
-and an output-only device, each with `duplex_clock: unknown`.
+whose devices are single-direction lists an interface (or a built-in mic and speakers) as an
+input-only and an output-only device, each with `duplex_clock: unknown`.
 
 `SessionConfig`: `backend: BackendKind | nil` (nil = the default backend), `input_device`,
 `output_device` (`DeviceSelector`: `default` \| `id` {`id`}), `input_channels` ([u16],

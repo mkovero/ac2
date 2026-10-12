@@ -92,7 +92,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Feature | Pri | Src | Phase |
 |---|---|---|---|
 | JACK backend (RT-safe, sample-aligned multi-channel capture) | P0 | ac | 1 |
-| CoreAudio / WASAPI via cpal, multichannel, RT-safe, with routing (unproven in `ac`) | P0 | new | 1 |
+| CoreAudio via cpal, multichannel, RT-safe, with routing (unproven in `ac`) | P0 | new | 1 |
 | Device enumeration, rate, buffer size; xrun / discontinuity telemetry | P0 | ac | 1 |
 | Input meters with clip indication, always visible | P0 | ac | 4 |
 | ASIO | P1 | new | 7 |
@@ -210,7 +210,7 @@ fixtures from `tools/protocol`.
 | Need | Choice | Notes |
 |---|---|---|
 | FFT | `realfft` / `rustfft` | plans cached |
-| Audio | `jack` crate directly (not cpal's JACK host), `cpal` for CoreAudio; Linux is JACK only (JACK2 or pipewire-jack, decision L1); Windows is ASIO only through azo (decision W1) | ASIO feature opt-in until WASAPI is removed; cpal has no duplex API and no exact hardware index — see `docs/design/spike-audio-duplex.md` |
+| Audio | `jack` crate directly (not cpal's JACK host), `cpal` for CoreAudio; Linux is JACK only (JACK2 or pipewire-jack, decision L1); Windows is ASIO only through azo (decision W1) | ASIO in every Windows build (no feature; FlexASIO for devices without a driver); cpal has no duplex API and no exact hardware index — see `docs/design/spike-audio-duplex.md` |
 | Rings | `rtrb` | SPSC wait-free |
 | ZMQ | own thin binding over libzmq 4.3.5 + libsodium built from source (`zeromq-src`, `libsodium-sys-stable`) | `zmq` crate's vendored build has CURVE off; pure-Rust options lack CURVE or are too young — see `docs/design/spike-zmq-curve.md`. ZAP handler must be bound before CURVE sockets (fails open otherwise) |
 | Serialization | `rmp-serde` headers + raw `f32` LE arrays | decode via `bytemuck::try_cast_slice` with copy fallback on misalignment / big-endian |
@@ -553,7 +553,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | # | Name | Scope | Exit criterion |
 |---|---|---|---|
 | 0 | Foundations + spikes | workspace, CI (linux/mac/win), lint/fmt, refgen; spikes: cpal multichannel duplex + output→input timing on mac/win, libzmq+CURVE vendored build on 3 OS, wgpu software-adapter test | CI: green on 3 OS; golden-vector harness runs. HW: duplex check (`ac2 selftest duplex`) on a real interface per OS |
-| 1 | Audio | backend trait + capabilities, sample-indexed blocks, JACK, cpal, fake (explicit), xrun/discontinuity telemetry, duplex timing validation | CI: forced overflow yields a discontinuity marker, never a channel shift. HW: 8 in / 2 out @ 48 kHz, 128-frame buffer (256 on Windows WASAPI), 4 TF jobs, 1 h, zero self-caused xruns, per OS |
+| 1 | Audio | backend trait + capabilities, sample-indexed blocks, JACK, cpal, fake (explicit), xrun/discontinuity telemetry, duplex timing validation | CI: forced overflow yields a discontinuity marker, never a channel shift. HW: 8 in / 2 out @ 48 kHz, 128-frame buffer, 4 TF jobs, 1 h, zero self-caused xruns, per OS |
 | 2 | Core DSP | MTW ladder + alignment, averaging (reset), smoothing, protection, delay finder (target, bands, confidence, candidates) + tracking, spectrum, RTA, weighting, generator | CI: §5.6 loopback suites pass against refgen; finder meets §5.2 acceptance numbers on scenario fixtures |
 | 3 | Daemon + protocol + CLI | session + jobs, ROUTER/XPUB, typed proto, state sync with replay/resync, bounded-freshness publishing, stimulus lease, CURVE + pairing, client, CLI `--watch` | CI: two clients stay in sync through dropped events, expired replay, session reopen and daemon restart; stalled subscriber recovers to fresh frames; unauthorized connect refused on both sockets; lease expiry stops output. HW: CLI drives a live TF remotely over CURVE |
 | 4 | Scene + UI | scene layer, wgpu plot, panes, keys, palette, banners, meters, live TF/RTA/IR, traces + metadata + slots + compare cursor, embedded daemon | HW: tune a real speaker end-to-end keyboard-only on Linux, macOS and Windows |
@@ -572,7 +572,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
 | 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu) |
 | 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (macOS: disk image installs, app starts and asks for microphone access; Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | in progress. Done, each with its design note in `docs/design/`: sweep with H2…H5 / THD and IR (`sweep-distortion.md`); ISO 3382-1 room parameters (`room-metrics.md`); rolling Leq windows, limits, alarms, presets, per-second SPL log, peak limits, position correction (`leq.md`); band Leq (`band-leq.md`); acoustic and electrical calibration dialogs (`q7-calibration.md`); spectrograph (`spectrograph.md`); multi-resolution spectrum, tone / density level (`multires-spectrum.md`); delay change without resettle, sub-sample delay and sweep arrival (`delay-no-resettle.md`, `subsample-arrival-group-delay.md`); output-vs-input drift detection (`multi-device.md`); raw capture and replay (`raw-capture.md`); math channels incl. spatial average (`math-channels.md`); measurement tree (`measurement-tree.md`); audio recovery (`audio-recovery.md`); Settings and run-time max level (`settings.md`). ASIO in progress (`asio.md`: behind the `asio` feature, passes under Wine; FlexASIO in Windows CI and real interfaces pending), open: multi-device support (resampling), input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
+| 7 | in progress. Done, each with its design note in `docs/design/`: sweep with H2…H5 / THD and IR (`sweep-distortion.md`); ISO 3382-1 room parameters (`room-metrics.md`); rolling Leq windows, limits, alarms, presets, per-second SPL log, peak limits, position correction (`leq.md`); band Leq (`band-leq.md`); acoustic and electrical calibration dialogs (`q7-calibration.md`); spectrograph (`spectrograph.md`); multi-resolution spectrum, tone / density level (`multires-spectrum.md`); delay change without resettle, sub-sample delay and sweep arrival (`delay-no-resettle.md`, `subsample-arrival-group-delay.md`); output-vs-input drift detection (`multi-device.md`); raw capture and replay (`raw-capture.md`); math channels incl. spatial average (`math-channels.md`); measurement tree (`measurement-tree.md`); audio recovery (`audio-recovery.md`); Settings and run-time max level (`settings.md`). ASIO in progress (`asio.md`: the only Windows backend, in every Windows build, WASAPI removed (W1); passes under Wine; FlexASIO in Windows CI and real interfaces pending), open: multi-device support (resampling), input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
 
 Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames: transfer,
 delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE, mDNS, REW
@@ -638,10 +638,9 @@ Q7 calibration store (phase 5), Q8 phase comparison time reference (phase 4).
 | Scope creep before 1.0 | §9.1 slice; phase 7 is explicitly post-1.0 |
 
 Open decisions (settle before phase 1; technical design questions are in §9.2):
-1. ~~License~~ **Decided: MIT.** ASIO stays an opt-in cargo feature, off in default
-   builds; the SDK is not vendored. ASIO binaries need their own licensing decision when
-   phase 7 starts (Steinberg proprietary terms vs GPLv3 SDK, which would make that binary GPL);
-   settled in `docs/design/asio.md` §1.
+1. ~~License~~ **Decided: MIT.** The SDK is not vendored: ASIO goes through azo, which
+   links no Steinberg code, so the Windows build carrying it stays MIT (settled in
+   `docs/design/asio.md` §1).
 2. ~~Distance readout~~ **Decided:** shown as plain delay × c(temperature), no correction layers.
 3. ~~UI chrome~~ **Decided (phase 0 spike):** egui + custom theme; requirement stays cross-platform, sleek, beautiful.
 4. ~~Headless hardware~~ **Decided (revised 2026-10-05):** primary targets are laptops with

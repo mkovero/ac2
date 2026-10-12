@@ -131,10 +131,12 @@ Measuring with a real audio interface on macOS is not yet verified.
 Uninstall from **Settings → Apps** like any other program.
 
 On Windows the local daemon listens on `tcp://127.0.0.1:47820` and `:47821` (loopback only).
-WASAPI needs a buffer of 256 frames or more for reliable duplex; the default (about 20 ms,
-1024 frames at 48 kHz) is above that, and `--buffer` (e.g. `--buffer 256samples`) sets it per
-session. So far the MSI install and the simulated rig are verified on Windows;
-WASAPI with a real interface is not yet.
+Audio goes through ASIO only: install the interface's ASIO driver, or
+[FlexASIO](https://github.com/dechamps/FlexASIO) for a device without one (a USB measurement
+mic, a class-compliant interface, built-in audio); with no ASIO driver, the device list says
+so and names FlexASIO. Setup and microphone privacy are in
+[testing/windows](../testing/windows/README.md). So far the MSI install and the simulated rig
+are verified on Windows; ASIO with a real interface is not yet.
 
 ## Starting a daemon
 
@@ -206,7 +208,8 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
 ```sh
 ac2 devices                                       # find your interface
 ac2 session open --backend jack --in 1-2                    # Linux
-ac2 session open --backend cpal --device "<name>" --in 1-2  # macOS, Windows
+ac2 session open --backend cpal --device "<name>" --in 1-2  # macOS
+ac2 session open --backend asio --device "<driver>" --in 1-2  # Windows
 ac2 meas new tf --ref 1 --meas 2 --name main
 ac2 meas start main
 ac2-ui                                            # or start ac2 from the menu

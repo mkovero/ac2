@@ -2,15 +2,18 @@
 
 This guide takes a tester from a fresh install to a real measurement on Windows with an
 audio interface, in about an hour of hands-on time plus a one-hour unattended run. It covers
-what is not verified on Windows yet: capture and playback with a real interface (ASIO, or
-WASAPI on builds without it), timing, and long-run stability. The MSI install and the simulated rig were confirmed in a
-Windows 11 VM on 2026-10-03. CI (all-OS and release runs) also opens WASAPI on a virtual
-cable, VB-CABLE (`tools/release/windows-virtual-audio.ps1`), and ASIO through FlexASIO on
-the same cable (`tools/release/windows-asio.ps1`): no substitute for an interface.
+what is not verified on Windows yet: capture and playback with a real interface over ASIO,
+timing, and long-run stability. On Windows ac2 talks to audio through ASIO only: the
+interface's own ASIO driver, or FlexASIO for a device without one (§2). The MSI install
+and the simulated rig were confirmed in a Windows 11 VM on 2026-10-03. CI (all-OS and
+release runs) opens ASIO through FlexASIO on a virtual cable, VB-CABLE
+(`tools/release/windows-asio.ps1`): no substitute for an interface.
 
 ## 1. Get and install the build
 
-The build is an x64 installer for Windows 10 (1809) or newer, unsigned for now.
+The build is an x64 installer for Windows 10 (1809) or newer, unsigned for now. The dev.10
+build below predates ASIO and runs the older system-audio backend; the steps in §2 onwards
+need a newer build, which lists the backend **ASIO**.
 
 1. The installer `ac2-0.0.0-dev.10-windows-x64.msi` (built 2026-10-08; the code of main
    81fcb14, build id e415ef1, the same build as the macOS dev.10 disk image) is in this
@@ -25,10 +28,12 @@ The build is an x64 installer for Windows 10 (1809) or newer, unsigned for now.
    **More info → Run anyway**. It installs into `C:\Program Files\ac2`, adds a Start-menu
    entry **ac2**, and puts that folder on the system `PATH`. A newer MSI replaces an older
    one; uninstall from **Settings → Apps**.
-3. Microphone privacy: **Settings → Privacy & security → Microphone** must allow
-   *Let desktop apps access your microphone*. Without it Windows refuses the input ("Access
-   is denied") or hands ac2 silence from every input, including line inputs. ac2 reads your
-   interface's inputs and nothing else.
+3. Microphone privacy, when the device runs through FlexASIO (§2): **Settings → Privacy &
+   security → Microphone** must allow *Let desktop apps access your microphone*. FlexASIO
+   opens the device through Windows' own audio stack (WASAPI), and without that switch
+   Windows refuses the input ("Access is denied", or FlexASIO fails to start) or hands ac2
+   silence from every input, including line inputs. A maker's ASIO driver bypasses it. ac2
+   reads your interface's inputs and nothing else.
 4. Firewall: on this computer the daemon listens on `127.0.0.1:47820` and `:47821` only
    (loopback), so no firewall prompt is expected. If one appears anyway, note it in the
    report; denying it does not affect local use.
@@ -73,34 +78,51 @@ interface out 2 ── cable 2 ──► in 2   (measurement: here a wire, so th
 
 ### How ac2 talks to the interface on Windows
 
-ASIO is the Windows audio path for ac2: one driver serves the interface's inputs and
-outputs from one callback, on one clock, with the channel names the driver gives (*Analog
-1*, *ADAT 3*). The dev.10 build in §1 predates it and uses WASAPI; builds with ASIO list
-the backend **ASIO** in the session dialog and in `ac2 devices`. See *Selecting ASIO*
-below; the WASAPI notes after it apply to builds without ASIO.
+ASIO is ac2's only Windows audio path: one driver serves the interface's inputs and outputs
+from one callback, on one clock, with the channel names the driver gives (*Analog 1*,
+*ADAT 3*). The session dialog and `ac2 devices` list the backend **ASIO**, one device per
+installed driver.
 
-#### Selecting ASIO
+#### The driver
 
-- **The driver.** Install your interface maker's ASIO driver. An interface without one
-  (or a laptop's built-in audio) works through [FlexASIO](https://github.com/dechamps/FlexASIO)
-  (free, MIT): install it, then point it at the device with a text file
-  `%USERPROFILE%\FlexASIO.toml`, for example
+Install your interface maker's ASIO driver. With no ASIO driver installed at all, the
+session dialog and `ac2 devices` show the backend as unavailable with *No ASIO driver
+found*, naming FlexASIO.
 
-  ```toml
-  backend = "Windows WASAPI"
+#### FlexASIO: devices without their own ASIO driver
 
-  [input]
-  device = "Microphone (USB Audio CODEC)"
+A USB measurement mic, a class-compliant interface or a laptop's built-in audio has no
+ASIO driver of its own. It works through [FlexASIO](https://github.com/dechamps/FlexASIO)
+(free, MIT), an ASIO driver over Windows' own audio stack:
 
-  [output]
-  device = "Speakers (USB Audio CODEC)"
-  ```
+1. Install FlexASIO. It appears in ac2 as the device **FlexASIO**.
+2. Point it at your device with a text file `%USERPROFILE%\FlexASIO.toml`, for example
 
-  using the device names as **Sound** settings (`mmsys.cpl`) show them. FlexASIO's timing
-  is WASAPI's underneath; report which driver you used.
+   ```toml
+   backend = "Windows WASAPI"
+
+   [input]
+   device = "Microphone (USB Audio CODEC)"
+
+   [output]
+   device = "Speakers (USB Audio CODEC)"
+   ```
+
+   using the device names as **Sound** settings (`mmsys.cpl`) show them. Input and output
+   may be different devices (a USB mic in, the interface out); ac2 then still sees one ASIO
+   device, but the two may run on different clocks, so keep the loopback reference.
+   FlexASIO reads the file whenever the driver loads: close the session (or quit the app)
+   after editing it.
+3. Allow microphone access for desktop apps (§1 step 3): FlexASIO opens the input through
+   WASAPI, which applies Windows' microphone privacy switch.
+
+FlexASIO's timing is WASAPI shared mode's underneath, not a pro driver's; report which
+driver you used.
+
+#### Using ASIO
+
 - **In the app.** The session dialog's backend row shows **ASIO**; each installed ASIO
-  driver is one device, with inputs and outputs together. On a build with ASIO it is the
-  default backend.
+  driver is one device, with inputs and outputs together.
 - **From the command line.** `ac2 devices` lists the drivers under `asio`, with channel
   names. `ac2 session open --backend asio --device "<driver>" --in 1-2` opens one;
   `ac2 selftest duplex --backend asio --device "<driver>" --duration 60s` is Test 5 on it
@@ -115,26 +137,6 @@ below; the WASAPI notes after it apply to builds without ASIO.
   open, the other drivers are listed by name only; ac2 cannot pair one driver's inputs with
   another's outputs.
 
-#### WASAPI (builds without ASIO)
-
-- **One endpoint per direction.** Windows lists an interface's inputs and outputs as
-  separate devices (often *Microphone (…)* or *Line (…)* and *Speakers (…)*; some drivers
-  split them further into stereo pairs). The number of channels ac2 sees is what the
-  Windows format of that endpoint says, not necessarily every input on the box.
-- **Rate.** With no rate chosen, ac2 opens at the input device's Windows default format. A
-  rate the device does not offer is refused with a message naming the rates it does offer.
-- **Buffer.** With no buffer chosen, ac2 asks for about 20 ms (1024 frames at 48 kHz,
-  within what the device allows). Below 256 frames WASAPI duplex is not expected to be
-  reliable.
-- **Clock.** Because input and output are separate endpoints, ac2 cannot prove they share
-  a clock and says so in Settings (*separate endpoints … may run on different clocks*).
-  That note is expected; the loopback reference keeps the transfer function correct
-  either way.
-- **Playing from ac2.** Windows lists the interface as two endpoints: a capture one (its
-  inputs) and a playback one (its outputs). Settings › Audio & I/O has an **Input** and an
-  **Output** device row; with a capture endpoint as the input, the output starts on the
-  system's default output. Test 1 sets it to the interface's playback endpoint.
-
 ## 3. Test 1: the interface opens and its inputs meter
 
 Pass: the interface is listed, its inputs show live levels, and a session opens without
@@ -142,30 +144,31 @@ errors.
 
 1. In the app, **Shift+O** (or **Ctrl+K → Open audio session…**) opens Settings on its
    **Audio & I/O** page, on the **Input** row.
-2. **Input** (←/→): step through the list and write down every entry for your interface
-   and what each shows (*N in / M out · rate · buffer*). Pick the one with its inputs.
-   **Output** (↓, then ←/→): pick the interface's playback endpoint (*0 in / N out*), not
-   the laptop speakers. Note the clock note shown under the rows.
+2. **Input** (←/→): step through the list and write down every entry and what each shows
+   (*N in / M out · rate · buffer*). Pick your interface's ASIO driver (or **FlexASIO**).
+   The **Output** row follows it: one ASIO driver serves both directions. Note the clock
+   note shown under the rows.
 3. Go down (**↓**) to the input rows. Tap the mic or play something into an
    input: its row's meter must move. Check every input you have. The output rows below
-   are the playback endpoint's outputs.
+   are the driver's outputs.
 4. Roles: **↑/↓** to a row, then **R** on input 1 (the loopback), **M** on input 2
    (cable 2; **N** names it, e.g. "cable"). **S** on output 1, and make sure output 2 is in
    the session too (**Space** on its row); optional: **D** (*Detect loopback…*) at −40 dBFS
-   plays on the playback endpoint and should mark input 1 as the Reference by itself.
+   plays on the driver's outputs and should mark input 1 as the Reference by itself.
 5. **Enter** opens the session. Accept the offered transfer measurement with **Enter**.
 6. Check the top bar: device, rate and buffer are shown. The **Inputs** list on the left
    keeps a meter per input.
 
-**Stimulus for the tests below.** ac2 plays its own pink noise on the playback endpoint (as
-written in Test 2). If no output rows are listed, the Output row is not on the interface's
-playback endpoint: go back to step 2.
+**Stimulus for the tests below.** ac2 plays its own pink noise on the driver's outputs (as
+written in Test 2). If no output rows are listed, the driver has no outputs (with FlexASIO,
+check the `[output]` device in `FlexASIO.toml`): go back to step 2.
 
-From the CLI the same session is `ac2 session open --backend cpal --device "<capture
-endpoint>" --out-device "<playback endpoint>" --in 1-2` (names as `ac2 devices` lists them).
+From the CLI the same session is `ac2 session open --backend asio --device "<driver>" --in
+1-2` (the name as `ac2 devices` lists it).
 
-Also worth a try: close the session (**Ctrl+K → Close audio session**), set both endpoints
-to 96000 Hz in `mmsys.cpl`, reopen, and check the top bar shows 96 kHz. Unplug and replug
+Also worth a try: close the session (**Ctrl+K → Close audio session**), set the interface to
+96000 Hz in its driver's control panel (with FlexASIO, both devices in `mmsys.cpl`), reopen,
+and check the top bar shows 96 kHz. Unplug and replug
 the interface while a session is open (ac2 should say so and recover, not crash). If the
 interface does not open at all, copy the exact message from the app and the last lines of
 `ac2-ui.log`, and say which entry from step 2 you picked.
@@ -250,12 +253,12 @@ the `PATH`). **Quit the ac2 app first** so the device is free.
 1. **Silent** (no cable needed; the outputs open but play only zeros):
 
    ```
-   ac2 selftest duplex --backend cpal --device "<interface>" --duration 60s
+   ac2 selftest duplex --backend asio --device "<driver>" --duration 60s
    ```
 
-   `<interface>` is your interface's capture endpoint as the app lists it; when its outputs
-   are a separate render endpoint, add `--out-device "<render endpoint>"`. A wrong name
-   prints the devices it knows. Without `--device` it tests the system default input. It
+   `<driver>` is your interface's ASIO driver (or `FlexASIO`) as the app lists it. A wrong
+   name prints the drivers it knows. Without `--device` it tests the first installed
+   driver. It
    reports device, channel counts, rate and buffer, block sizes, xruns and gaps, callback
    timing, both clocks against the computer's clock and the peak of every input, and ends in
    `result PASS` or one `FAIL` line per reason.
@@ -267,7 +270,7 @@ the `PATH`). **Quit the ac2 app first** so the device is free.
    output 1 only, at the level you type; nothing but the cable on that output):
 
    ```
-   ac2 selftest duplex --backend cpal --device "<interface>" --duration 30s ^
+   ac2 selftest duplex --backend asio --device "<driver>" --duration 30s ^
        --emit -40dbfs --loopback-out 1 --loopback-in 1
    ```
 
@@ -276,8 +279,9 @@ the `PATH`). **Quit the ac2 app first** so the device is free.
    output and input clocks. Run it about five times and note each offset: whether it changes
    between runs is the point.
 
-Windows: a `--rate` other than the endpoint's mix rate should fail to open, by name;
-`--buffer 128samples` is worth one silent run too. Paste each report into what you send back
+A `--rate` the driver does not offer should fail to open, by name; `--buffer 128samples` is
+worth one silent run too (many drivers take the buffer only from their control panel and
+say so). Paste each report into what you send back
 (`--json` gives the same as JSON).
 
 ## 8. Optional: record and replay
@@ -301,10 +305,10 @@ useful.
 | Item | Your result |
 | --- | --- |
 | PC model, CPU, GPU, VM or not; Windows version and build (`winver`) | |
-| Interface model, driver (maker's or class driver) and version; Windows format set | |
+| Interface model; ASIO driver (maker's or FlexASIO) and version; with FlexASIO, its `FlexASIO.toml` | |
 | `ac2 --version` output (and the top bar's *build …*) | |
-| Test 1: device list entries for the interface; input meters move; Output set to the playback endpoint, its rows listed; clock note; session opens (rate / buffer shown) | |
-| Output device chosen (name as listed); detect loopback found input 1? | |
+| Test 1: device list entries for the interface; input meters move; output rows listed; clock note; session opens (rate / buffer shown) | |
+| Detect loopback found input 1? | |
 | Test 2: cables read 0 dB / 0° / coherence 1; delay finder result (ms, confidence); banners | |
 | Test 2 sweep (if ac2 plays): flat response, distortion level, arrival; finished cleanly? | |
 | Test 3: spectrum, RTA and SPL meter live; calibration if tried | |

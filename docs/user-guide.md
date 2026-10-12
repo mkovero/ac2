@@ -45,7 +45,8 @@ pane says which comes next. The CLI does the same with the same defaults:
 
 ```sh
 ac2 session open --backend jack --in 1-4                     # Linux: the JACK server
-ac2 session open --backend cpal --device "<name>" --in 1-4 --rate 48khz   # macOS, Windows
+ac2 session open --backend cpal --device "<name>" --in 1-4 --rate 48khz   # macOS
+ac2 session open --backend asio --device "<driver>" --in 1-4              # Windows
 ac2 session open --backend cpal --device "<mic>" --out-device "<speakers>" --in 1   # two devices
 ac2 meas new tf --ref 1 --meas 2 --name main-l
 ac2 meas new tf --ref 1 --meas 3 --name sub
@@ -77,7 +78,8 @@ The backend is always named. Each platform has one real backend:
 | Platform | Backend | Notes |
 |---|---|---|
 | Linux | `jack` | a JACK2 server, or PipeWire through pipewire-jack; there is no ALSA backend. Rate and buffer are the server's. |
-| macOS, Windows | `cpal` | Core Audio, WASAPI. With no `--buffer`, ac2 asks for a short fixed buffer of about 20 ms (1024 frames at 48 kHz, within what the device allows) rather than the host's default, which can be large enough to deliver audio in lumps. |
+| macOS | `cpal` | Core Audio. With no `--buffer`, ac2 asks for a short fixed buffer of about 20 ms (1024 frames at 48 kHz, within what the device allows) rather than the host's default, which can be large enough to deliver audio in lumps. |
+| Windows | `asio` | ASIO drivers, one device per installed driver, inputs and outputs on one clock. With no `--rate` / `--buffer`, the driver's current rate and preferred buffer. A device without its own ASIO driver goes through [FlexASIO](https://github.com/dechamps/FlexASIO); with no ASIO driver installed, the backend is listed as unavailable with that pointer. |
 | any | `fake` | a simulated rig for trying things out; never chosen for you |
 
 Should a host still deliver audio in lumps, the daemon log says so once a minute (*audio

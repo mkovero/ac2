@@ -32,8 +32,10 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   goes into the focused pane alone (*Layouts follow the measurement*).
 - Open hardware gates: duplex check (`ac2 selftest duplex`) and 1 h run on macOS/Windows, keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
-- Windows ASIO: design only, no code (`docs/design/asio.md`: licence, binding spike, tests via
-  Wine + wineasio).
+- Windows audio is ASIO only (decision W1): the backend over the azo fork is in every Windows
+  build and WASAPI is gone; devices without a driver use FlexASIO, and with no ASIO driver the
+  device list says so. Passes under Wine (`tools/wine-asio`); the Windows CI audio pass is
+  FlexASIO on VB-CABLE (all-OS runs); a real interface is untested (`docs/design/asio.md`).
 
 ## Where to look
 | need | file |

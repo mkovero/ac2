@@ -14,8 +14,8 @@ The monitor watches a different relation: **generator output stream → loopback
 exists to:
 
 1. Detect silent output-side problems that would otherwise corrupt measurements without any
-   visible sign: dropped or repeated output frames, cpal/ALSA internal xrun recovery, WASAPI
-   render glitches (never reported), clock slips between separate input and output devices.
+   visible sign: dropped or repeated output frames, a host's internal xrun recovery, render
+   glitches a host never reports, clock slips between separate input and output devices.
 2. Provide the validated mapping that the optional internal-reference mode (P1) needs: using
    the generator's own samples as the reference only when this monitor is **Locked**.
 

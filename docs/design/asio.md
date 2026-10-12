@@ -1,16 +1,18 @@
 # ASIO backend (Windows)
 
-**Status: implemented** in `crates/ac2-audio/src/asio_host/` behind the `asio` feature
-(ac2-audio, ac2d, ac2-cli; off by default), over the `azo` fork (§1). It passes under Wine
+**Status: implemented, and the only Windows audio backend** (decision W1 in
+`open-questions.md`). `crates/ac2-audio/src/asio_host/` builds on every Windows build, over
+the `azo` fork (§1); there is no cargo feature, and cpal is macOS only. It passes under Wine
 on wineasio (§4a); FlexASIO on Windows CI (§4b) and real interfaces (§4d) are pending.
-§3 is the design; §3a lists where the code settles or departs from it. Before it, on
-Windows, ac2 ran on cpal WASAPI in shared mode: two
-`IAudioClient`s on two threads, a same-clock relation that the API cannot prove, and render
-xruns that are never reported (`spike-audio-duplex.md` §1). ASIO is the Windows path where
-one driver callback (`bufferSwitch`) serves capture and playback on one clock, like JACK.
-The operator rates it a must-have, and decided (W1 in `open-questions.md`) that it is the
-**only** Windows API: WASAPI is removed once this backend passes under Wine and on FlexASIO in
-Windows CI; devices without an ASIO driver use FlexASIO. PLAN.md §12, decision 1, leaves its
+§3 is the design; §3a lists where the code settles or departs from it. Shared-mode WASAPI,
+which ac2 used on Windows before, has two `IAudioClient`s on two threads, a same-clock
+relation that the API cannot prove, and render xruns that are never reported
+(`spike-audio-duplex.md` §1). ASIO is the Windows path where one driver callback
+(`bufferSwitch`) serves capture and playback on one clock, like JACK. A device without its
+own ASIO driver (a USB measurement mic, a class-compliant interface, built-in audio) runs
+through FlexASIO (<https://github.com/dechamps/FlexASIO>), an ASIO driver over the Windows
+audio stack; with no ASIO driver installed at all, device listing and session open say so
+and point at FlexASIO (`Unavailability::NoAsioDriver`). PLAN.md §12, decision 1, leaves the
 licence open; §1 below settles it.
 
 ## 1. Licensing
@@ -47,8 +49,8 @@ licence open; §1 below settles it.
   releases.
 
 **Decision.**
-1. ac2's source stays MIT. The `asio` cargo feature stays off in default builds, and the
-   default MSI stays WASAPI-only and MIT. Both choices from §12 hold.
+1. ac2's source stays MIT, and so does the Windows build: azo links no Steinberg code, so
+   the one MSI carries the ASIO backend under MIT.
 2. The binding is chosen by a short spike against wineasio (§4a). The spike checks
    enumeration, buffer creation, `bufferSwitchTimeInfo` with a valid sample position,
    messages, and a clean stop/restart. ac2 keeps one binding, never two.
@@ -59,17 +61,10 @@ licence open; §1 below settles it.
    from `timeGetTime()` (1 ms steps), so it is unusable for the index and only the sample
    position is used. **azo is the binding.** Quirks: the clock-source name has junk after its
    NUL, `channel_info` reports inactive until buffers exist, the driver handle is `!Send`.
-   - **azo passes:** the ASIO build links no Steinberg code and stays MIT. Shipping
-     it in the default MSI then becomes a plain product decision.
-   - **azo fails:** ac2 uses its own thin binding over the SDK (bindgen + `cc`, the
-     `asio-sys` recipe, over a pinned and hashed SDK, never downloaded unchecked). The
-     binaries built with `asio` then ship as a **separate GPLv3 variant**: `LICENSE` plus
-     `COPYING`, and the corresponding source (the ac2 tag, the SDK zip, the build recipe)
-     attached to the release. MIT code may be combined into a GPLv3 work. The dependency
-     licences still have to be checked for GPLv3 compatibility in that job (libzmq is
-     MPL-2.0, which is compatible).
+   Had azo failed, the fallback was ac2's own binding over a pinned SDK, shipped as a
+   GPLv3 build; with azo that branch is moot.
    **The fork.** ac2 builds azo from <https://github.com/mkovero/azo>, branch `ac2`, pinned
-   by commit in `crates/ac2-audio/Cargo.toml` (git dependency, Windows only, optional). It
+   by commit in `crates/ac2-audio/Cargo.toml` (git dependency, Windows only). It
    starts at the `azo/v0.4.0` tag and adds small, upstreamable changes: the host (COM)
    thread can be named; a channel or driver name that fills its whole fixed buffer is read
    instead of panicking; `Proxy::callback_handle` gives the callback a `Send + Sync` handle
@@ -145,7 +140,7 @@ stuck falls back to the running count with `GAP_ESTIMATED`, and is reported as `
 ## 3. Backend shape in `ac2-audio`
 
 **Placement and types.**
-- Feature `asio`, Windows only, in `crates/ac2-audio/src/asio_host/`.
+- Windows only (`cfg(windows)`, no feature), in `crates/ac2-audio/src/asio_host/`.
 - The callback logic is plain Rust, so Linux tests build it: format conversion, the
   sample-position clock, message → event mapping, duplicate-index guard. A `driver.rs`
   holds the only code that touches COM or the SDK.
@@ -220,10 +215,8 @@ falls back to the numbered form the cpal host already uses.
 - A driver that stops calling `bufferSwitch` is caught by the existing `not_delivering`
   bound (`Delivery::Device`).
 
-**Selection.** The CLI and the app offer `asio` as a backend only in builds with the
-feature
-(`BackendArg::Asio`). The tester guide (`testing/windows/README.md`) gains a section once
-there is a build to test.
+**Selection.** `asio` is the Windows backend of the daemon, the CLI (`BackendArg::Asio`)
+and the app's embedded daemon; the tester guide is `testing/windows/README.md`.
 
 ## 3a. As built
 
@@ -265,8 +258,12 @@ Where the code settles an open point of §3 or departs from it, and why.
   refgen PCM vectors. MSB types are refused at open with the type named, and noted in
   `enumerate`.
 - **Separate devices.** A request naming two drivers is `Unsupported::SeparateDevices`.
-- **Default backend.** A Windows build with `asio` offers `asio` and `cpal`, `asio` first
-  (decision W1); without the feature `cpal` stays the only real one.
+- **Only backend.** A Windows daemon offers `asio` alone (decision W1), as Linux offers
+  `jack` alone; `--backend cpal` on Windows is refused with a pointer to `asio` and
+  FlexASIO.
+- **No driver.** An empty `HKLM\SOFTWARE\ASIO` is `Unavailable(NoAsioDriver)`: the daemon's
+  backend availability, `ac2 devices`, `ac2 session open` and `ac2 selftest duplex` all
+  carry its text, which names FlexASIO for devices without their own driver.
 
 ## 4. Testing without Windows hardware, in this order
 
@@ -326,14 +323,18 @@ loading, `ASIOCreateBuffers`, `bufferSwitchTimeInfo`, messages.
   - Hosted runners need `audiosrv` started.
 - What it proves: the MSVC build with the chosen binding, driver enumeration from the real
   registry, loading under real COM, a duplex selftest, and a clean stop.
-- As built (`tools/release/windows-asio.ps1`, run by `ci.yml` on an all-OS dispatch after
-  the WASAPI pass): writes `%USERPROFILE%\FlexASIO.toml` (`backend = "Windows WASAPI"`,
-  input and output `device` set to VB-CABLE's endpoint names as the system lists them),
+- As built (`tools/release/windows-asio.ps1`, run by `ci.yml` on an all-OS dispatch; it is
+  the Windows audio pass): CI first checks that `ac2 selftest duplex --backend asio`
+  without a driver fails with the named FlexASIO message, then installs VB-CABLE and
+  FlexASIO and grants desktop apps microphone access (FlexASIO opens the cable through
+  WASAPI, which refuses capture otherwise). The script writes
+  `%USERPROFILE%\FlexASIO.toml` (`backend = "Windows WASAPI"`, input and output `device`
+  set to VB-CABLE's endpoint names as Windows lists them, found with `Get-PnpDevice`),
   lists the ASIO devices with channel names, rates and buffer sizes, runs a silent 20 s
   `ac2 selftest duplex --backend asio` (logging rate, buffer, index exactness, clock and
   formats, so FlexASIO's sample-position behaviour is on record), and records a silent 30 s
-  daemon session with the WASAPI pass's checks (no stop, no discontinuity, ≥ 90 % of the
-  frames). Not yet run: it lands untested on Windows.
+  daemon session (no stop, no discontinuity, ≥ 90 % of the frames). Not yet run: it lands
+  untested on Windows.
 - Limits: FlexASIO is WASAPI shared mode underneath, so this shows plumbing, not
   pro-driver timing.
 
@@ -347,29 +348,12 @@ run must reopen by itself. Until this passes, ASIO is shipped as preview.
 
 ## 5. Packaging and CI
 
-**If azo is chosen.**
-- No SDK and no libclang are needed. `cargo build --features asio` runs in the existing
-  `windows` release job as a second build.
-- Artifact: `ac2-<ver>-windows-x64-asio.msi` (and `.zip`), MIT.
-
-**If the SDK binding is chosen.**
-- The release job downloads the pinned SDK URL, checks the SHA-256 above (a mismatch fails
-  the job, so a changed SDK is reviewed before any binary links it), unzips it to `CPAL_ASIO_DIR`, and
-  uses the runner's LLVM for bindgen.
-- Artifact: `ac2-<ver>-windows-x64-asio-gpl3.msi` (and `.zip`), carrying GPLv3 `COPYING`
-  in place of the MIT `LICENSE` in `packaging/windows/ac2.wxs`. The release also attaches
-  `ac2-<ver>-asio-source.zip` (the tag, the SDK zip and the build steps).
-- The dependency licence check (for example `cargo about` or `cargo deny`) runs in that job.
-
-**Both cases.**
-- The default MSI is unchanged.
-- The two MSIs install the same binaries to the same place, so they must not both be
-  installed (open question 5).
-- `ci.yml` gains a Windows `--features asio` clippy and build under `all_os=true`
-  (done, with the ASIO unit tests and the FlexASIO pass of §4b). A Linux job for §4a is
-  not added: it needs the 7 GB image.
-- The release workflow still builds without `asio`; switching the Windows release to the
-  ASIO build (W1) is a separate change.
+- No SDK and no libclang are needed. The ASIO backend is part of every Windows build, so
+  the `windows` release job's plain `cargo build --release` is the ASIO build.
+- Artifact: the one `ac2-<ver>-windows-x64.msi` (and `.zip`), MIT.
+- `ci.yml`: the Windows clippy, build and tests compile the ASIO backend with everything
+  else (the driver module included); on an all-OS dispatch the FlexASIO pass of §4b is the
+  Windows audio pass. A Linux job for §4a is not added: it needs the 7 GB image.
 
 ## 6. Open questions
 
@@ -378,17 +362,16 @@ run must reopen by itself. Until this passes, ASIO is shipped as preview.
    fork it?
 2. Trademark: with azo there is no SDK licence at all. Is plain-text "ASIO" in the UI and
    the docs nominative use with no logo duty? The SDK guidelines bind SDK licensees.
-3. If both bindings pass, should ASIO go into the default MSI (one build), with WASAPI kept
-   as the fallback backend?
+3. ~~Should ASIO go into the default MSI with WASAPI kept as the fallback?~~ Decided (W1):
+   ASIO only, in the one MSI; FlexASIO for devices without a driver.
 4. Which channel subset do drivers accept in `ASIOCreateBuffers` (a sparse `input_map`)?
    Some drivers may require contiguous channels. The backend asks for exactly the mapped
    inputs (deduplicated); wineasio accepts that; vendor drivers are unchecked.
-5. Two MSIs: should they share an UpgradeCode so that one replaces the other, or keep
-   separate product codes with a launch condition that refuses to install the second?
+5. ~~Two MSIs and their UpgradeCode~~: moot, there is one MSI.
 6. Clock source (`ASIOGetClockSources` / `ASIOSetClockSource`): show it read-only in
    Settings, or leave it to the driver panel? An external-word-clock loss is another reset
    path to test.
 7. `kAsioGetInternalBufferSamples` (ASIO 2.3) reports buffering inside the driver. Should
    it be folded into the stated latency?
-8. Can a capture-only session on ASIO coexist with a WASAPI output device? The answer is
-   probably no: it is the same "one clock" rule as multi-device (`multi-device.md`).
+8. ~~Can a capture-only session on ASIO coexist with a WASAPI output device?~~ Moot: there
+   is no WASAPI backend.

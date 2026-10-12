@@ -84,7 +84,7 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
 ## Windows (2026-10-03, operator's Windows 11 VM, release build of 6c122d5)
 
 - MSI installed cleanly (unsigned: SmartScreen "More info → Run anyway"), Start-menu entry and
-  PATH fine; the app ran the simulated rig. Real audio (WASAPI) on Windows is still untested;
+  PATH fine; the app ran the simulated rig. Real audio on Windows (now ASIO only) is still untested;
   `testing/windows/README.md` (dev.10 MSI) is the tester guide for it.
 - ~~**No stimulus on a WASAPI capture endpoint**~~ — done: Settings › Audio has an
   **Output** device row (default: the input device when it has outputs, else the system

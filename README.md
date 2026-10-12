@@ -1,7 +1,7 @@
 # ac2
 
 Open-source live dual-channel FFT analyzer for PA system tuning — Linux (JACK: JACK2 or
-PipeWire through pipewire-jack), macOS (Core Audio), Windows (WASAPI). A Rust daemon owns
+PipeWire through pipewire-jack), macOS (Core Audio), Windows (ASIO). A Rust daemon owns
 the audio interface; a GPU desktop app, a CLI and your own scripts connect to it over
 ZeroMQ, on the same machine or across the network (encrypted and paired).
 
@@ -109,8 +109,9 @@ The hardware acceptance runs are still open ([status table](PLAN.md#90-status)):
   electrical SPL calibration, remote use over CURVE and mDNS, a 24 h SPL log, cross-checked
   against REW ([docs/rigs/pupu.md](docs/rigs/pupu.md)); a Raspberry Pi 4 runs the app as a
   touch kiosk client.
-- **Windows**: the MSI installs and the app runs the simulated rig (checked in a VM); WASAPI
-  on a real interface is untested ([testing/windows](testing/windows/README.md)).
+- **Windows**: the MSI installs and the app runs the simulated rig (checked in a VM). Audio
+  is ASIO only (FlexASIO for devices without their own driver); it passes under Wine, and
+  a real interface is untested ([testing/windows](testing/windows/README.md)).
 - **macOS**: the universal disk image installs and starts on a tester's Mac; not yet
   measured with an audio interface ([testing/macos](testing/macos/README.md)).
 - Builds are not code-signed, and there are no GitHub Releases: installers are artifacts of

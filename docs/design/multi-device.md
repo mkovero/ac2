@@ -32,7 +32,7 @@ transfer delay between inputs of the one FF400 stayed at 0 samples.
 |---|---|---|
 | Linux, JACK (JACK2 or PipeWire's JACK) | Only through the server: one driver device; extra devices via `alsa_in`/`zita-a2j` (adaptive resampling to the driver clock), or PipeWire's graph, which resamples every non-driver device to the driver | `SingleCallback`: every port is on the server's clock. Resampled devices are on that clock *on average*; their latency wanders slowly as the resampler servo works |
 | macOS, Core Audio (cpal) | An aggregate device made in Audio MIDI Setup. With "drift correction" on for a subdevice, Core Audio resamples it to the clock source; off, it free-runs and its samples slide against the clock source's | cpal opens one device (aggregate or not) for both directions: `SameDeviceSeparateCallbacks`. ac2 cannot see the aggregate's drift-correction flags through cpal |
-| Windows, WASAPI (cpal) | None in ac2: capture and render are separate endpoints (two streams, two event threads). Picking the input of one interface and the output of another is two clocks; even one interface's two endpoints cannot be *proven* to share a clock through the API | `Unknown` for a capture endpoint, whose output is necessarily another endpoint. Shared-mode engine SRC runs both at the mix rate but does not lock them |
+| Windows, ASIO | One driver per session: a driver's inputs and outputs share its callback. Two drivers cannot be paired (`Unsupported::SeparateDevices`). FlexASIO is one ASIO driver over two Windows endpoints, which may be two devices and then two clocks | `SingleCallback`; under FlexASIO with input and output on different devices that claim does not hold, and the loopback measurement is the truth |
 | fake | One simulated callback; `FakeConfig::drift_ppm` resamples the DAC side to simulate two clocks | `SingleCallback` (the drift is what tests inject) |
 
 `ClockRelation` already says this per opened session (`OpenSession.clock`):
@@ -90,7 +90,7 @@ read exactly 0 within that noise. This is the sharp tool, but only while a stimu
 **B. Callback timestamps per stream (designed, never built).** Each stream's frame
 count against the host monotonic clock gives its rate against the host; the difference of
 the input and output rates is the device-vs-device drift, without a stimulus. Timestamps
-are period-quantised (pupu: ±1 period, 2.67 ms) and on WASAPI arrive per packet with
+are period-quantised (pupu: ±1 period, 2.67 ms) and on packet-based hosts arrive with
 scheduling jitter. By endpoints alone, 1 ppm needs ~1 h; by regression over n callbacks
 `σ_slope ≈ J·√(12/n)/T` (J = 2.7 ms, 375 callbacks/s at 96 kHz/256: ≈ 1 ppm after ~2 min,
 0.1 ppm after ~10 min). Useful only where input and output are separate streams (cpal);
@@ -240,6 +240,6 @@ macOS aggregate with drift correction), and ac2 detects and says when it is not.
 - Servo wander of adaptive resamplers (PipeWire non-driver devices, `alsa_in`, Core Audio
   drift correction) on real hardware: does a 30 s regression stay below 2 ppm? Measure on a
   rig with two interfaces before tightening or loosening the threshold.
-- Method B on WASAPI: callback jitter of two endpoints, and whether it can say "two clocks"
-  before the first stimulus.
+- Method B on two separate devices (macOS, input-only and output-only): callback jitter, and
+  whether it can say "two clocks" before the first stimulus.
 - Method C's slope floor (§7).
