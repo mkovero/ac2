@@ -9,6 +9,10 @@ arm64 and Intel, with no permission work on the current images. Measured in a sp
 (`hal-timestamps`, a Core Audio HAL IOProc in Swift; `cpal-ts`, a standalone cpal 0.18
 timestamp program; `tcc.sh`) stay on that branch under `tools/experiments/macos-blackhole/`. CI uses the recipe in *In CI* below.
 
+The findings below were made through cpal. Since `coreaudio.md` stage (b) the BlackHole
+checks run on the macOS default, the direct HAL backend `coreaudio`; its results on this
+runner are in `coreaudio.md` §12, *Settled on CI*.
+
 Runner images seen: `macos-latest` = image `macos-26-arm64` 20260907, macOS 26.6.2 (25G83),
 arm64. `macos-15-intel` = image `macos-15` 20260824, macOS 15.7.9 (24G830), x86_64.
 `macos-13` is retired (December 2025); `macos-15-intel` is the last Intel label (until the

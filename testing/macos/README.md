@@ -5,6 +5,15 @@ interface, in about an hour of hands-on time plus a one-hour unattended run. It 
 is not verified on macOS yet: Core Audio capture and playback, timing, and long-run
 stability. Install and first start (microphone prompt) were confirmed on 2026-10-05.
 
+**Core Audio backend.** Builds newer than dev.10 run on ac2's own Core Audio backend
+(`coreaudio`: the HAL directly, one callback per device with an exact sample index) by
+default, in the app, `ac2d` and the self-test. cpal, the backend of dev.10 and earlier,
+stays selectable for a comparison (`--backend cpal`) until the next round removes it.
+Settings remembered per device by an older build (outputs, roles, mic names in a session
+default) are keyed by the backend and are not found once on the new one: set them again.
+Device ids (`coreaudio:<UID>`) are unchanged. Test 6 covers what only a real interface can
+show about the new backend.
+
 ## 1. Get and install the build
 
 The build is a universal disk image (Apple silicon and Intel, macOS 11 or newer), unsigned
@@ -58,8 +67,9 @@ interface out 2 ── cable 2 ──► in 2   (measurement: here a wire, so th
 Pass: the interface is listed, its inputs show live levels, and a session opens without
 errors.
 
-1. Start ac2. In the connect dialog choose **This computer's
-   audio**. Settings opens on its **Audio & I/O** page, on the input device.
+1. Start ac2. In the connect dialog choose **This computer's audio (Core Audio)**
+   (dev.10 and older: **This computer's audio**). Settings opens on its **Audio & I/O**
+   page, on the input device.
 2. **Device** (←/→): pick your interface. Note what it shows (*N in / M out · rate ·
    buffer*).
 3. Go down (**↓**) to the input rows. Tap the mic or play something into an
@@ -158,7 +168,7 @@ free.
 1. **Silent** (no cable needed; the outputs open but play only zeros):
 
    ```
-   ac2 selftest duplex --backend cpal --device "<interface>" --duration 60s
+   ac2 selftest duplex --backend coreaudio --device "<interface>" --duration 60s
    ```
 
    `<interface>` is your interface as the app lists it, e.g. `--device "Babyface Pro"`. A
@@ -174,7 +184,7 @@ free.
    output 1 only, at the level you type; nothing but the cable on that output):
 
    ```
-   ac2 selftest duplex --backend cpal --device "<interface>" --duration 30s \
+   ac2 selftest duplex --backend coreaudio --device "<interface>" --duration 30s \
        --emit -40dbfs --loopback-out 1 --loopback-in 1
    ```
 
@@ -184,9 +194,37 @@ free.
    between runs is the point.
 
 macOS: an aggregate device of two interfaces is worth one silent run too. Paste each report
-into what you send back (`--json` gives the same as JSON).
+into what you send back (`--json` gives the same as JSON). On dev.10 and older, use
+`--backend cpal` (the only Core Audio backend there).
 
-## 8. Optional: record and replay
+## 8. Test 6: the Core Audio backend on a real interface
+
+Needs a build newer than dev.10. These answer what the CI loop on a virtual device cannot:
+a virtual device reports no latency of its own, cannot be unplugged and has no clock to
+change.
+
+1. **Stated against measured latency.** With the loopback cable (output 1 → input 1), open
+   a session on the interface at 48 kHz (Test 1) and note the top bar's
+   `stated latency: N frames in / M out` (`ac2 session status` shows it too). Quit the
+   app, then run the loopback self-test of Test 5, step 3, **ten times**, and note each
+   `loopback offset` in samples. Pass: the offset is the same in all ten runs, and equals
+   N + M plus a small remainder (the interface's converters; a few tens of samples). Note
+   the remainder; a negative one (measured below stated) is worth a line of its own.
+2. **Rate change while running.** Open a session with the transfer measurement running
+   (Test 2). In Settings, on the device row, **P** brings up **Audio MIDI Setup**. There,
+   change the interface's format to another rate (e.g. 44.1 kHz). Pass: within a few
+   seconds ac2 reopens by itself at the new rate, and the top bar notes that the driver
+   changed the rate. Change it back afterwards.
+3. **Unplug and replug.** With a session open, unplug the interface, wait 10 s, plug it
+   back. Pass: ac2 says the audio stopped, then reopens by itself within 30 s of the
+   replug. Do it **twice**, then run
+   `grep 'audio device probe' ~/Library/Logs/ac2/ac2-ui.log` and paste the lines: each
+   `Present { generation: … }` is the interface's object id after a replug, and whether it
+   changes between the two replugs is the open question.
+4. Optional, for a comparison on the same build: the silent self-test of Test 5, step 1,
+   once with `--backend coreaudio` and once with `--backend cpal`.
+
+## 9. Optional: record and replay
 
 Checks the file writes and the replay path on macOS.
 
@@ -199,7 +237,7 @@ Checks the file writes and the replay path on macOS.
    live. Note what the app shows when the recording ends.
 3. The files are in `~/Library/Application Support/ac2/recordings/`. Note their size.
 
-## 9. What to send back
+## 10. What to send back
 
 A short note per test is enough; failures with a screenshot and the log are the most
 useful.
@@ -215,6 +253,10 @@ useful.
 | Test 3: spectrum, RTA and SPL meter live; calibration if tried | |
 | Test 4: 1 h run clean? CPU %, memory and battery at start and end | |
 | Test 5: self-test reports (silent, under load, loopback offsets if run) | |
+| Test 6.1: stated latency (in / out frames) at 48 kHz; the ten loopback offsets; remainder | |
+| Test 6.2: rate change in Audio MIDI Setup: reopened by itself at the new rate, note shown? | |
+| Test 6.3: unplug / replug ×2: reopened within 30 s? the `audio device probe` lines | |
+| Test 6.4 (optional): silent self-test on coreaudio and on cpal | |
 | Record and replay (optional): file written, replay matches live? | |
 | Do the input meters and the SPL number move smoothly, or noticeably steppy? | |
 | ac2 CPU % in Activity Monitor with a session open and nothing playing | |

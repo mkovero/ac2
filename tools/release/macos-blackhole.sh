@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Runs the macOS binaries on the BlackHole 2ch virtual loopback driver, once per Core Audio
-# backend (cpal, then coreaudio, the HAL directly) so the two compare on one build: the
-# device is listed, an in-process duplex self-test, and a daemon session recorded for a while
-# with the delay finder running on it. Given the coreaudio-loop binary, it then checks the
+# Runs the macOS binaries on the BlackHole 2ch virtual loopback driver, on the platform's
+# default backend (coreaudio, the HAL directly; ac2d is started without --backend, so the
+# check fails if the default is anything else): the device is listed, an in-process duplex
+# self-test, and a daemon session recorded for a while with the delay finder running on it.
+# Given the coreaudio-loop binary, it then checks the
 # coreaudio backend's exact index with impulses (the one emitting step, see below) and, last,
 # what a revoked microphone grant does. CI installs BlackHole and sox and restarts coreaudiod
 # first; docs/design/macos-ci-audio.md and docs/design/coreaudio.md have the findings.
@@ -107,8 +108,9 @@ ac2j() {
     fi
 }
 
+# ac2d on its default backend: the one a macOS operator gets without naming any.
 daemon_start() {
-    "$AC2D" --backend "$BACKEND" --no-autosave --recordings "$WORK" > "$LOG/ac2d-$1.stdout.txt" 2> "$LOG/ac2d-$1.stderr.txt" &
+    "$AC2D" --no-autosave --recordings "$WORK" > "$LOG/ac2d-$1.stdout.txt" 2> "$LOG/ac2d-$1.stderr.txt" &
     DAEMON=$!
     for _ in $(seq 120); do
         kill -0 "$DAEMON" 2> /dev/null || fail "ac2d exited at startup (see ac2d-$1.stderr.txt)"
@@ -146,14 +148,15 @@ fi
 echo "  $agent: allowed"
 
 problems=()
-# One backend's pass; a failure goes to problems, prefixed by the backend, so the other
-# backend still runs and both show up side by side.
+# The default backend's pass; a failure goes to problems, prefixed by the backend, so the
+# later checks still run and every failure shows up.
 run_backend() {
-    BACKEND=$1
-    local b=$1 code rate half stopped frames disc expected outcome found
-    echo "== [$b] ac2d --backend $b: '$DEV' in the device list"
+    local b=$1 code rate half stopped frames disc expected outcome found kinds
+    echo "== [$b] ac2d (default backend): '$DEV' in the device list"
     daemon_start "$b-devices"
     ac2j "$b-devices" 15 devices
+    kinds=$(jq -c '[.[] | .kind]' "$LOG/$b-devices.json")
+    [[ "$kinds" == "[\"$b\"]" ]] || problems+=("[$b] ac2d's default backend offers $kinds, expected [\"$b\"]")
     ID=$(jq -r --arg d "$DEV" --arg b "$b" '.[] | select(.kind == $b) | .devices[] | select(.name == $d and .input and .output) | .id' \
         "$LOG/$b-devices.json" | head -1)
     daemon_stop
@@ -234,9 +237,8 @@ run_backend() {
 }
 
 : > "$LOG/compare.txt"
-run_backend cpal
 run_backend coreaudio
-echo "== cpal and coreaudio side by side"
+echo "== summary"
 cat "$LOG/compare.txt"
 
 if [[ -n "$LOOP" ]]; then

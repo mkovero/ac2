@@ -44,9 +44,11 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   command. Memory over time is likewise only a `/proc` sample.
 - **macOS not verified with an audio interface**: a tester has the dev.10 disk image and
   `testing/macos/README.md`. Results pending.
-- **Core Audio backend** (`coreaudio.md`, decision H1): stage (a) built, `cahal` and
-  `--backend coreaudio` beside cpal, exact on BlackHole CI (§12, *Settled on CI*). Next: make
-  it the macOS default (b), then remove cpal and `BackendKind::Cpal` (c).
+- **Core Audio backend** (`coreaudio.md`, decision H1): stages (a) and (b) built: `coreaudio`
+  is the macOS default (daemon, app, CLI examples), exact on BlackHole CI (§12, *Settled on
+  CI*), Audio MIDI Setup behind P, only the used input streams on. Next: the tester round on a
+  real interface (`testing/macos/` Test 6: stated vs measured latency, replug object id, rate
+  change), then remove cpal and `BackendKind::Cpal` (c).
 - **App Nap**: the macOS hand-off timer is not coalesced (kqueue `NOTE_CRITICAL`), but a
   hidden app on battery may still be App Napped, throttling a daemon the app hosts. Needs an
   activity assertion from the UI while a session is open.

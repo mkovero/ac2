@@ -571,10 +571,10 @@ kind of a replay session and is never listed), `description` (for the
 operator), `availability` (tagged by `type`: `available` \| `unavailable` {`reason`}: why,
 in plain words with the remedy, e.g. `No JACK server: start JACK (e.g. `jackd -d alsa`) or
 use PipeWire`) and `devices: [DeviceInfo]` (empty while unavailable). A daemon started on
-real audio offers its platform's backend (`jack` on Linux, `cpal` on macOS, `asio` on
-Windows; with no ASIO driver installed, `asio` is `unavailable` with a reason naming
-FlexASIO; a macOS daemon started with `--backend coreaudio` offers `coreaudio` (the HAL
-directly; `cpal` stays the default while the two are compared));
+real audio offers its platform's backend (`jack` on Linux, `coreaudio` on macOS, `asio`
+on Windows; with no ASIO driver installed, `asio` is `unavailable` with a reason naming
+FlexASIO; a macOS daemon started with `--backend cpal` offers `cpal`, kept for a
+comparison until it is removed);
 one started on the simulated rig offers only that (a simulated device never stands in for
 a missing real one).
 
@@ -621,8 +621,10 @@ rate, buffer size, clock and routing), on the driver's own COM thread. While a s
 on that driver the call goes to it; with no session the driver is loaded and stays loaded
 (listed in full, every other ASIO driver by name only) until a session or another panel
 needs the process's one driver. A session open on another ASIO driver makes it
-`unsupported`. The reply follows the driver's answer, or a short wait while a modal panel
-stays open (`ack`, after 1.2 s); a backend without a panel is `unsupported`. A change there may make
+`unsupported`. On `coreaudio` it brings up Audio MIDI Setup (where a Core Audio device's
+rate, format and clock source are set) for a device that is present, `not_found`
+for one that is not. The reply follows the driver's answer, or a short wait while a modal
+panel stays open (`ack`, after 1.2 s); a backend without a panel is `unsupported`. A change there may make
 the driver reset the session's stream (§4.1.1, `driver_reset`).
 
 **Preview.** `session.preview` opens a device for capture only — no output stream exists,

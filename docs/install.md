@@ -208,7 +208,7 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
 ```sh
 ac2 devices                                       # find your interface
 ac2 session open --backend jack --in 1-2                    # Linux
-ac2 session open --backend cpal --device "<name>" --in 1-2  # macOS
+ac2 session open --backend coreaudio --device "<name>" --in 1-2  # macOS
 ac2 session open --backend asio --device "<driver>" --in 1-2  # Windows
 ac2 meas new tf --ref 1 --meas 2 --name main
 ac2 meas start main

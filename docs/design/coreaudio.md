@@ -1,7 +1,9 @@
 # Core Audio backend (macOS)
 
-**Status: stage (a) built** (§11: `cahal` and `--backend coreaudio` beside cpal, which stays the macOS default; decision H1 in `open-questions.md`). macOS audio goes through
-cpal today (`crates/ac2-audio/src/cpal_host.rs`): two AUHAL units, one per direction, each
+**Status: stage (b) built** (§11: `cahal` and the `coreaudio` backend, the macOS default;
+cpal stays selectable until (c), after the tester round of §10c; decision H1 in
+`open-questions.md`). Before this backend, macOS audio went through
+cpal (`crates/ac2-audio/src/cpal_host.rs`): two AUHAL units, one per direction, each
 with its own callback, a running frame count for the index (`IndexExactness::Estimated`)
 and timestamps that put input against output two buffers off (`macos-ci-audio.md` Q4: a
 loop that is 0 samples in the device's own time reads as −2 buffers). The HAL itself gives
@@ -228,10 +230,12 @@ is the natural id of a Core Audio device, not a compatibility layer.
 `AudioObjectID` as `generation` (a replugged device normally gets a new object id; when it
 does not, the reopen attempts still find it). Opens nothing.
 
-**`control_panel`.** `Unsupported::ControlPanel` (§12 Q4).
+**`control_panel`.** Brings up Audio MIDI Setup (`open -b com.apple.audio.AudioMIDISetup`)
+for a device that is present (§12 Q4); a device that is not is `DeviceNotFound`. A rate
+changed there reaches a running stream through the rate listener (§4, a reset).
 
 **Selection.** `coreaudio` is the macOS backend of the daemon, CLI (`BackendArg::CoreAudio`)
-and the app's embedded daemon once §11b lands; until then `--backend coreaudio` selects it.
+and the app's embedded daemon (§11b); `--backend cpal` selects cpal until (c).
 
 ## 4. Format and configuration
 
@@ -248,9 +252,12 @@ reads a channel without searching; ac2 never assumes one stream.
 **Unused streams.** `kAudioDevicePropertyIOProcStreamUsage` turns off input streams no
 mapped channel uses, so the HAL does not convert them. Output streams stay on: the
 generator's routes change at run time without a reopen (as in `asio_host`).
-Stage (a) leaves every stream on: an unused input stream costs only its conversion, and
-the stream-usage property is per IOProc, set between create and start; it comes with (b)
-if a many-stream interface shows the cost.
+The adapter passes the input streams the request's `input_map` touches as
+`IoConfig::input_streams` (`StreamLayout::streams_of`); `cahal` sets the property between
+create and start, and only when some stream is left out, so a one-stream device (BlackHole)
+takes the same path as before. A stream left out arrives with a null buffer and reads as
+silence. Setting it is best effort: a device that refuses keeps every stream on, which
+costs conversion time and changes no sample read.
 
 **Rate.** `set_nominal_rate` only when the request names a rate other than the current
 one; it is a device-wide setting other apps see, so an unrequested rate is never forced.
@@ -499,7 +506,9 @@ for (a)–(b) so BlackHole CI and a tester can compare them on one build.
   properties, listeners, one duplex IOProc with an exact index; no ac2 deps, MIT, to be
   split out"); `STATUS.md`.
 
-**(b) Switch macOS to it.** No wire change.
+**(b) Switch macOS to it.** No wire change. **Built**: also `IOProcStreamUsage` (§4) and
+Audio MIDI Setup as the control panel (§12 Q4); the BlackHole checks run on the default
+backend, ac2d started without `--backend`.
 - `crates/ac2d/src/backend.rs` (default on macOS), `crates/ac2-cli/src/args/mod.rs`,
   `crates/ac2-ui/src/main.rs` / `embedded.rs` (default backend).
 - `tools/release/macos-blackhole.sh` (coreaudio only for the session checks),
@@ -537,8 +546,8 @@ WASAPI (`6dad3701`, `2b844164`, `57fcd527`).
 3. **Two devices in one clock domain** (same non-zero `ClockDomain`): claim one clock?
    Recommended: keep `Unknown` with a note; the loopback decides (decision 3a).
 4. **`control_panel`**: open Audio MIDI Setup (bundle `com.apple.audio.AudioMIDISetup`)?
-   Recommended: yes, after (b), in the adapter, not in `cahal`; the reset path already
-   follows what is changed there. Clock source stays read-only, as on ASIO.
+   **Done in (b)**, in the adapter, not in `cahal`; the reset path already follows what is
+   changed there. Clock source stays read-only, as on ASIO.
 5. **Consent for a headless daemon** (ssh, launchd): TCC charges the responsible process
    and no prompt can appear. Recommended: `NotDetermined` times out to `MicrophonePending`
    naming the responsible app; the rig guide grants it once by hand.

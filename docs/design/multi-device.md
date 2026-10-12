@@ -31,14 +31,14 @@ transfer delay between inputs of the one FF400 stayed at 0 samples.
 | Platform / backend | How several devices become one stream | Clock relation ac2 can state |
 |---|---|---|
 | Linux, JACK (JACK2 or PipeWire's JACK) | Only through the server: one driver device; extra devices via `alsa_in`/`zita-a2j` (adaptive resampling to the driver clock), or PipeWire's graph, which resamples every non-driver device to the driver | `SingleCallback`: every port is on the server's clock. Resampled devices are on that clock *on average*; their latency wanders slowly as the resampler servo works |
-| macOS, Core Audio (cpal) | An aggregate device made in Audio MIDI Setup. With "drift correction" on for a subdevice, Core Audio resamples it to the clock source; off, it free-runs and its samples slide against the clock source's | cpal opens one device (aggregate or not) for both directions: `SameDeviceSeparateCallbacks`. ac2 cannot see the aggregate's drift-correction flags through cpal |
+| macOS, Core Audio (`coreaudio`, the HAL directly) | An aggregate device made in Audio MIDI Setup. With "drift correction" on for a subdevice, Core Audio resamples it to the clock source; off, it free-runs and its samples slide against the clock source's | One IOProc per device serves both directions: `SingleCallback` with an exact index, the aggregate's subdevices without drift correction named in `notes`. Two devices run two IOProcs: `Unknown` (`coreaudio.md` §2). cpal, until removed, opened one device with a callback per direction (`SameDeviceSeparateCallbacks`) and could not see the drift-correction flags |
 | Windows, ASIO | One driver per session: a driver's inputs and outputs share its callback. Two drivers cannot be paired (`Unsupported::SeparateDevices`). FlexASIO is one ASIO driver over two Windows endpoints, which may be two devices and then two clocks | `SingleCallback`; under FlexASIO with input and output on different devices that claim does not hold, and the loopback measurement is the truth |
 | fake | One simulated callback; `FakeConfig::drift_ppm` resamples the DAC side to simulate two clocks | `SingleCallback` (the drift is what tests inject) |
 
 `ClockRelation` already says this per opened session (`OpenSession.clock`):
 `SingleCallback` and `SameDeviceSeparateCallbacks` are *claims* of one clock;
 `Unknown` means "may drift; drift detection must warn". None of them is proof: an aggregate
-without drift correction is one cpal device and still two clocks inside. So the relation is
+without drift correction is one device and still two clocks inside. So the relation is
 a prior, and the loopback measurement is the truth (decision 3a).
 
 ac2 has one input stream per session. All captured channels travel in one block with one

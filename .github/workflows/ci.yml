@@ -286,7 +286,7 @@ jobs:
             throw 'FlexASIO with inputs and outputs is missing from the device list'
           }
 
-      # Core Audio through cpal on BlackHole, a virtual loopback device (hosted macOS runners
+      # Core Audio on BlackHole, a virtual loopback device (hosted macOS runners
       # have no audio hardware), with the debug binaries built above. The driver loads only
       # after coreaudiod restarts; no reboot is needed. sox is the stimulus the script plays
       # into BlackHole (ac2's outputs stay silent). See docs/design/macos-ci-audio.md.
@@ -304,8 +304,8 @@ jobs:
         timeout-minutes: 15
         run: cargo build --manifest-path tools/release/coreaudio-loop/Cargo.toml --target-dir target
 
-      # cpal and coreaudio on one build, side by side; then coreaudio-loop's impulses and,
-      # last, a revoked microphone grant.
+      # ac2d's default backend (coreaudio); then coreaudio-loop's impulses and, last, a
+      # revoked microphone grant.
       - name: ac2 on BlackHole (Core Audio)
         if: runner.os == 'macOS' && !cancelled()
         timeout-minutes: 20

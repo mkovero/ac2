@@ -31,7 +31,10 @@ capture_index = output_index + offset          (offset in samples, signed, per e
 ```
 
 On cpal, `offset` includes the arbitrary start difference between the two streams; that is
-fine, because only its stability matters.
+fine, because only its stability matters. On the exact backends (JACK, ASIO, and Core
+Audio's `coreaudio`, the macOS default) input and output share one index, so `offset` is the
+loop's absolute latency: the stated `input + output` plus the converters' remainder
+(`coreaudio.md` §7).
 
 The daemon keeps a **generator history ring** of the last 4 s of emitted samples for the
 loopback channel, indexed by output index. It is written by the output callback after the

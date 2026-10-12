@@ -45,9 +45,9 @@ pane says which comes next. The CLI does the same with the same defaults:
 
 ```sh
 ac2 session open --backend jack --in 1-4                     # Linux: the JACK server
-ac2 session open --backend cpal --device "<name>" --in 1-4 --rate 48khz   # macOS
+ac2 session open --backend coreaudio --device "<name>" --in 1-4 --rate 48khz   # macOS
 ac2 session open --backend asio --device "<driver>" --in 1-4              # Windows
-ac2 session open --backend cpal --device "<mic>" --out-device "<speakers>" --in 1   # two devices
+ac2 session open --backend coreaudio --device "<mic>" --out-device "<speakers>" --in 1   # two devices
 ac2 meas new tf --ref 1 --meas 2 --name main-l
 ac2 meas new tf --ref 1 --meas 3 --name sub
 ac2 meas new rta --input 2 --name rta
@@ -78,7 +78,7 @@ The backend is always named. Each platform has one real backend:
 | Platform | Backend | Notes |
 |---|---|---|
 | Linux | `jack` | a JACK2 server, or PipeWire through pipewire-jack; there is no ALSA backend. Rate and buffer are the server's. |
-| macOS | `cpal` | Core Audio. With no `--buffer`, ac2 asks for a short fixed buffer of about 20 ms (1024 frames at 48 kHz, within what the device allows) rather than the host's default, which can be large enough to deliver audio in lumps. |
+| macOS | `coreaudio` | Core Audio, the HAL directly: one callback per device serves its inputs and outputs on one exact sample index, and the session states the device's latency. Two devices (a USB mic beside the built-in output) run one callback each, on two clocks; an aggregate device made in Audio MIDI Setup is one device. With no `--rate`, the device's current rate (a rate is set only when asked for, since other apps share it); with no `--buffer`, a short buffer of about 20 ms (1024 frames at 48 kHz, within what the device allows). Only the input streams a session's channels are on are read. `cpal` (Core Audio through the cpal library, each direction on its own callback) stays selectable for a comparison until it is removed. |
 | Windows | `asio` | ASIO drivers, one device per installed driver, inputs and outputs on one clock. With no `--rate` / `--buffer`, the driver's current rate and preferred buffer. A device without its own ASIO driver goes through [FlexASIO](https://github.com/dechamps/FlexASIO); with no ASIO driver installed, the backend is listed as unavailable with that pointer. |
 | any | `fake` | a simulated rig for trying things out; never chosen for you |
 
@@ -171,13 +171,16 @@ output device, rate, buffer), channels, system max level; **↑/↓** walk them 
   offered), then on **Enter** plays a 0.5 s band-limited noise burst on the stimulus output —
   under the stimulus lease and the ceiling, faded — and marks the input it returns on as the
   Reference (or says none answered and which came closest).
-- **Driver control panel…** (**P**, ASIO devices only): opens the driver's own settings
-  window (sample rate, buffer size, clock source, routing). A change there resets the
+- **Driver control panel…** (**P**, ASIO devices): opens the driver's own settings
+  window (sample rate, buffer size, clock source, routing). On a Core Audio device the same
+  key is **Audio MIDI Setup…**: it brings up macOS's Audio MIDI Setup, where the device's
+  rate, format and clock source are set (for every app using it). A change there resets the
   driver; the open session reopens at the driver's new rate and buffer by itself, its
   measurements restart at them, and the top bar says what changed in the warning colour
   (`… · 44.1 kHz · 512 frames · driver changed from 48.0 kHz`, the hover has the
   details) until the session is next opened. The clock sources the driver offers are listed
-  under the device, the one in use marked; choose among them in the driver's panel.
+  under the device, the one in use marked; choose among them in the driver's panel (Audio
+  MIDI Setup on macOS).
 - **Enter** opens; what is missing is said in words (*Pick a reference input: the loopback
   from your stimulus output*). Roles and mic names are remembered per device (`ui.toml`).
   With a Reference, at least one mic and no measurements yet, one more **Enter** creates
