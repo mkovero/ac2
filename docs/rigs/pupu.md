@@ -21,6 +21,7 @@ what ac2 learned on it.
   in 2 (reference loopback); in 1 = measurement mic, beyerdynamic MM1 (449350, s/n 34804),
   **mounted at 90° (pointing up)** → use `~/src/ac/beyer/449350_34804_90Grad.txt`. Full table:
   *Wiring and FF400 reset recovery*.
+- **Analog Discovery 2** (2026-10-12): scope 1+/1- across in 1's hot/cold through 10 µF 100 V electrolytics (+ to the XLR; phantom is on, so the ±2.5 V range needs the AC coupling). Reads the mic's loaded voltage for electrical calibrations: 1 kHz at −50 dBFS on out 1 → ≈0.39 mV. Host setup (udev, Digilent runtime, `~/ad2/` scripts) in `~/src/sys/pupu.md`.
 - **Emission ceilings:** −40 dBFS standing, **−50 dBFS on anything that drives the speaker**.
 - **Baseline check:** 1 kHz at −60 dBFS on out 2 only → in 2 −57.7 dBFS (profile −57.5), no
   leakage into in 1 (−126 dBFS at 1 kHz); mic room noise ≈ −72 dBFS, with occasional 60–200 Hz
@@ -103,6 +104,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
+| 5f18a3ef | 2026-10-12 | 49 / 25 | autosave restored as is (no format change since 2c07efef); input 1 recalibrated electrically with the mic loading (MM1 330 Ω → FF400 XLR 2 kΩ, −1.3 dB): 0 dBFS = 120.3 dB SPL (was 119.1), volts from the AD2 |
 | 0fef18ea | 2026-10-11 | 43 / 25 | app only (ketunkolo, Pi): a pane whose measurement disappears waits for its name to return |
 | 2c07efef | 2026-10-11 | 43 / 25 | salvage of `autosave.v24` restored all twelve measurements; the Pi kiosk fell back to TF 1 during salvage and saved that layout (fixed by 0fef18ea; old file `ui.toml.bak-tf1`) |
 | c7bd24b1 | 2026-10-11 | 42 / 24 | first format change restored with `session salvage`; only the per-second Leq history skipped |
