@@ -426,7 +426,8 @@ fn lists_devices_with_exact_index_and_named_channels() {
         bh.latency,
         StaticLatency::Frames {
             input: 512,
-            output: 512
+            output: 512,
+            driver_buffering: None,
         }
     );
     let input = bh.input.as_ref().expect("input");
@@ -522,7 +523,8 @@ fn stated_latency_adds_buffers_offsets_and_converters() {
         st.negotiated().latency,
         StaticLatency::Frames {
             input: 512 + 16 + 10 + 3,
-            output: 1064 - 512 - 16 + 20 + 4
+            output: 1064 - 512 - 16 + 20 + 4,
+            driver_buffering: None,
         }
     );
     // Listing states the same from the HAL's placement, before any cycle.
@@ -672,7 +674,7 @@ fn unplugging_ends_the_stream() {
         assert!(!st.events().ended);
         s.notify(n);
         wait_until("end", || st.events().ended);
-        assert!(!st.events().reset);
+        assert!(st.events().reset.is_none());
     }
 }
 
@@ -683,10 +685,10 @@ fn a_rate_change_by_someone_else_resets_the_stream() {
     // A notification with the rate unchanged is not a reset.
     s.notify(Notice::Device(DeviceProperty::NominalRate));
     std::thread::sleep(Duration::from_millis(250));
-    assert!(!st.events().reset);
+    assert!(st.events().reset.is_none());
     s.set_device("BlackHole2ch_UID", |d| d.nominal_rate = 44_100.0);
     s.notify(Notice::Device(DeviceProperty::NominalRate));
-    wait_until("reset", || st.events().reset);
+    wait_until("reset", || st.events().reset.is_some());
     // So is a new stream layout or clock source.
     for p in [
         DeviceProperty::StreamConfiguration,
@@ -695,7 +697,7 @@ fn a_rate_change_by_someone_else_resets_the_stream() {
         let s = Scripted::new(vec![blackhole()]);
         let st = backend(&s).open(request(vec![0], 2)).expect("open");
         s.notify(Notice::Device(p));
-        wait_until("reset", || st.events().reset);
+        wait_until("reset", || st.events().reset.is_some());
     }
 }
 

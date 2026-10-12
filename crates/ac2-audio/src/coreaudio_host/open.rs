@@ -16,7 +16,7 @@ use crate::backend::{
     Negotiated, SampleFormat, StaticLatency, short_buffer_frames,
 };
 use crate::error::{AudioError, Operation, Unavailability, Unsupported};
-use crate::events::{BackendEvents, EventLatch};
+use crate::events::{BackendEvents, EventLatch, ResetReason};
 use crate::stream::{DuplexStream, Plumbing, StreamParts};
 
 pub(crate) fn backend_err(operation: Operation, e: impl std::fmt::Display) -> AudioError {
@@ -242,8 +242,9 @@ impl Watch {
             if p.end.swap(false, Ordering::AcqRel) {
                 self.events.end();
             }
+            // Streams or clock source changed under the stream: its settings did.
             if p.reset.swap(false, Ordering::AcqRel) {
-                self.events.reset();
+                self.events.reset(ResetReason::ResetRequest);
             }
             if p.rate.swap(false, Ordering::AcqRel) {
                 let moved = self.uids.iter().any(|u| match self.source.describe(u) {
@@ -251,7 +252,7 @@ impl Watch {
                     Err(_) => true,
                 });
                 if moved {
-                    self.events.reset();
+                    self.events.reset(ResetReason::RateChange);
                 }
             }
             if p.config.swap(false, Ordering::AcqRel) {
@@ -478,6 +479,7 @@ pub(crate) fn open_stream(
                     + out_now.output_latency.safety_offset
                     + out_now.output_latency.device
                     + out_now.output_latency.streams.first().copied().unwrap_or(0),
+                driver_buffering: None,
             },
             other => other,
         }

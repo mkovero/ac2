@@ -84,6 +84,7 @@ pub(crate) fn stated_latency(
     StaticLatency::Frames {
         input: input_part,
         output: output_part,
+        driver_buffering: None,
     }
 }
 

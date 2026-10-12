@@ -227,7 +227,7 @@ mod mac {
         let mut stream = b.open(req)?;
         let neg = stream.negotiated().clone();
         let (stated_in, stated_out) = match neg.latency {
-            StaticLatency::Frames { input, output } => (input, output),
+            StaticLatency::Frames { input, output, .. } => (input, output),
             other => return Err(format!("stated latency {other:?}, expected frames").into()),
         };
         gen_handle.set_gain(Gain::UNITY);
