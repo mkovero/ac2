@@ -21,7 +21,7 @@ what ac2 learned on it.
   in 2 (reference loopback); in 1 = measurement mic, beyerdynamic MM1 (449350, s/n 34804),
   **mounted at 90° (pointing up)** → use `~/src/ac/beyer/449350_34804_90Grad.txt`. Full table:
   *Wiring and FF400 reset recovery*.
-- **Analog Discovery 2** (2026-10-12): scope 1+/1- across in 1's hot/cold through 10 µF 100 V electrolytics (+ to the XLR; phantom is on, so the ±2.5 V range needs the AC coupling). Reads the mic's loaded voltage for electrical calibrations: 1 kHz at −50 dBFS on out 1 → ≈0.39 mV. Host setup (udev, Digilent runtime, `~/ad2/` scripts) in `~/src/sys/pupu.md`.
+- **Analog Discovery 2** (used 2026-10-12, removed after; plug it back for an electrical calibration): scope 1+/1- across in 1's hot/cold through 10 µF 100 V electrolytics (+ to the XLR; phantom is on, so the ±2.5 V range needs the AC coupling). Reads the mic's loaded voltage for electrical calibrations: 1 kHz at −50 dBFS on out 1 → ≈0.39 mV. Host setup (udev, Digilent runtime, `~/ad2/` scripts) in `~/src/sys/pupu.md`.
 - **Emission ceilings:** −40 dBFS standing, **−50 dBFS on anything that drives the speaker**.
 - **Baseline check:** 1 kHz at −60 dBFS on out 2 only → in 2 −57.7 dBFS (profile −57.5), no
   leakage into in 1 (−126 dBFS at 1 kHz); mic room noise ≈ −72 dBFS, with occasional 60–200 Hz
