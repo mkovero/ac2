@@ -1,0 +1,107 @@
+name: macOS audio spike
+
+# Spike: Core Audio duplex through the BlackHole virtual loopback driver on GitHub-hosted
+# macOS runners (docs/design/macos-ci-audio.md). Runs on pushes to the spike branch only.
+on:
+  push:
+    branches: ["spike/macos-blackhole"]
+
+concurrency:
+  group: macos-audio-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_NET_RETRY: "10"
+
+jobs:
+  blackhole:
+    name: blackhole (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # arm64 (Apple silicon) and the last Intel image (macos-13 is retired).
+        os: [macos-latest, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Runner
+        run: |
+          sw_vers; uname -m
+          system_profiler SPAudioDataType || true
+          ps -o pid,ppid,comm -p $$ -p $PPID
+          # The process chain up to launchd: TCC attributes a CLI's access to the responsible
+          # process at the top of it.
+          p=$$; while [ "$p" -gt 1 ]; do ps -o pid=,ppid=,comm= -p "$p"; p=$(ps -o ppid= -p "$p" | tr -d ' '); done
+          tools/experiments/macos-blackhole/tcc.sh dump
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - name: Build ac2, ac2d and the HAL probe
+        run: |
+          command -v cmake || brew install cmake
+          cargo build -p ac2-cli -p ac2d --locked
+          mkdir -p bin
+          cp target/debug/ac2 target/debug/ac2d bin/
+          swiftc -swift-version 5 -O tools/experiments/macos-blackhole/hal-timestamps.swift -o bin/hal-timestamps
+
+      - name: BlackHole and sox
+        run: |
+          brew install sox jq
+          brew install --cask blackhole-2ch
+          sudo launchctl kickstart -kp system/com.apple.audio.coreaudiod || sudo killall coreaudiod
+          sleep 3
+          system_profiler SPAudioDataType
+          bin/hal-timestamps "BlackHole 2ch" 0.5 | head -20 || true
+
+      - name: Capture before any TCC change
+        run: tools/experiments/macos-blackhole/probe.sh capture 0-pre bin logs
+
+      - name: Grant microphone in stages until capture gets samples
+        run: |
+          got() { jq -e '[.capture.peak_dbfs[]? | select(. != null)] | length > 0' "logs/$1/selftest.json" > /dev/null 2>&1; }
+          if got 0-pre; then echo "capture already has samples: no grant needed"; exit 0; fi
+          tcc=tools/experiments/macos-blackhole/tcc.sh
+          # 1: the executables themselves.
+          $tcc grant "$PWD/bin/ac2" "$PWD/bin/hal-timestamps" "$(realpath "$(command -v sox)")"
+          tools/experiments/macos-blackhole/probe.sh capture 1-binaries bin logs
+          if got 1-binaries; then exit 0; fi
+          # 2: the shells.
+          $tcc grant /bin/bash /bin/zsh /bin/sh "$(command -v bash)"
+          tools/experiments/macos-blackhole/probe.sh capture 2-shells bin logs
+          if got 2-shells; then exit 0; fi
+          # 3: every process up the chain to launchd (the runner agent is the responsible one).
+          chain=()
+          p=$$; while [ "$p" -gt 1 ]; do
+            exe=$(ps -o comm= -p "$p"); [[ "$exe" == /* ]] && chain+=("$exe")
+            p=$(ps -o ppid= -p "$p" | tr -d ' ')
+          done
+          # The agents the image itself lists in TCC.
+          while IFS= read -r c; do chain+=("$c"); done < <(sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "SELECT DISTINCT client FROM access WHERE client LIKE '/%'")
+          $tcc grant "${chain[@]}"
+          tools/experiments/macos-blackhole/probe.sh capture 3-chain bin logs
+          got 3-chain || echo "::warning::capture still silent after every grant"
+
+      - name: Daemon session, 30 s
+        if: ${{ !cancelled() }}
+        run: tools/experiments/macos-blackhole/probe.sh session bin logs
+
+      - name: TCC after
+        if: ${{ !cancelled() }}
+        run: tools/experiments/macos-blackhole/tcc.sh dump | grep -i microphone || true
+
+      - name: Upload logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackhole-${{ matrix.os }}
+          path: logs/
+          if-no-files-found: ignore
