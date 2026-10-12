@@ -8,7 +8,9 @@ interface's own ASIO driver, or FlexASIO for a device without one (§2). The MSI
 and the simulated rig were confirmed in a Windows 11 VM on 2026-10-03. CI (all-OS and
 release runs) opens ASIO through FlexASIO on a virtual cable, VB-CABLE
 (`tools/release/windows-asio.ps1`), and the app comes up on it. A dispatch can also run
-that session for an hour (`soak_minutes`). None of this substitutes for an interface.
+that session for an hour (`soak_minutes`). In a Windows 11 VM, RME's own driver for a
+Babyface Pro passed the one-hour run and loopback timing (2026-10-13). None of this
+substitutes for a tester's own interface on a real PC.
 
 ## 1. Get and install the build
 
@@ -16,10 +18,20 @@ The build is an x64 installer for Windows 10 (1809) or newer, unsigned for now. 
 audio backend is **ASIO**: your interface's own ASIO driver, or FlexASIO for a device
 without one (§2).
 
-1. Use the installer `ac2-<version>-windows-x64.msi` you were given: the one attached to
-   the latest draft GitHub release, or the `release-<version>` artifact of a release dry
-   run (`gh run download <run id> -R mkovero/ac2 -n release-<version>`, or the run's
-   *Artifacts* on GitHub). `SHA256SUMS` comes with it; check the MSI in PowerShell with
+<!-- BUILD:begin: the maintainer fills in this block for each build -->
+- Version **`0.0.0-dev.13`**, built `2026-10-12` from main `28d81545` (release workflow run
+  `38306477890`).
+- Files: `ac2-0.0.0-dev.13-windows-x64.msi`, and `ac2-0.0.0-dev.13-windows-x64.zip` with
+  the same programs unpacked, for use without installing.
+- Fetch them with
+  `gh run download 38306477890 -R mkovero/ac2 -n dist-windows`
+  (or the run's *Artifacts* on GitHub; kept until `2027-01-10`).
+<!-- BUILD:end -->
+
+1. Use the build above, or the installer `ac2-<version>-windows-x64.msi` you were given:
+   the one attached to the latest draft GitHub release, or the `release-<version>` artifact
+   of a release dry run (`gh run download <run id> -R mkovero/ac2 -n release-<version>`,
+   or the run's *Artifacts* on GitHub). `SHA256SUMS` comes with it; check the MSI in PowerShell with
    `Get-FileHash ac2-<version>-windows-x64.msi` and compare with its line there. The `.zip`
    beside it holds the same three programs unpacked, for use without installing. Release
    files are not in git. The release run has already installed that MSI and run its
