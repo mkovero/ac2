@@ -152,6 +152,23 @@ impl Control {
                         Err(e) => Err(e),
                     }
                 }
+                // A driver's panel may be a modal dialog: the call runs on its own thread.
+                Command::SessionControlPanel { backend, device } => {
+                    match self.start_panel(backend, device) {
+                        Ok(token) => {
+                            self.panels.insert(
+                                token,
+                                PendingReply {
+                                    routing_id: routing_id.to_vec(),
+                                    client,
+                                    id: req.id,
+                                },
+                            );
+                            return;
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
                 Command::DelayFind {
                     meas,
                     band,

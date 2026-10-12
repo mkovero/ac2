@@ -27,6 +27,8 @@ fn open(inputs: Vec<u16>, loopback: Option<LoopbackRoute>) -> OpenSession {
         clock: ClockRelation::SingleCallback,
         opened_at: WallNs(0),
         replay: None,
+        clock_source: None,
+        driver_change: None,
     }
 }
 

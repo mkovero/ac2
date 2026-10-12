@@ -101,8 +101,22 @@ pub struct DeviceInfo {
     pub duplex_clock: ClockRelation,
     /// Capture index exactness.
     pub index: IndexExactness,
+    /// The clocks the device can run on, as its driver names them, the current one marked
+    /// (ASIO); empty where the backend does not say. Read-only: the clock is set in the
+    /// driver's control panel (`session.control_panel`).
+    pub clock_sources: Vec<ClockSource>,
     /// Non-fatal problems.
     pub notes: Vec<String>,
+}
+
+/// A clock a device can run on ("Internal", "Word Clock", "ADAT").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClockSource {
+    /// The driver's name for it.
+    pub name: String,
+    /// The device runs on it now.
+    pub current: bool,
 }
 
 /// Whether a backend can be used now.
@@ -202,6 +216,21 @@ pub struct OpenSession {
     /// The recording it plays, for a replay session (`backend` is then `replay`, the
     /// devices are the ones that recorded it); `None` for a live device.
     pub replay: Option<ReplayInfo>,
+    /// The clock source the device ran on when opened, as its driver names it (ASIO).
+    pub clock_source: Option<String>,
+    /// The session reopened after its driver reset itself at another rate or buffer size
+    /// (a change in the driver's control panel): what it ran at before. `None` otherwise.
+    pub driver_change: Option<DriverChange>,
+}
+
+/// What a session ran at before its driver reset itself to other settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DriverChange {
+    /// Rate before, Hz.
+    pub from_rate_hz: u32,
+    /// Buffer size before, frames.
+    pub from_buffer_frames: u32,
 }
 
 /// Session entity.
@@ -242,6 +271,10 @@ pub enum StopCause {
     },
     /// The audio host ended the stream (its server shut down, the device was removed).
     HostEnded,
+    /// The driver asked to be reset because its own settings changed (rate, buffer size or
+    /// clock, typically in its control panel; ASIO). The reopen takes the driver's new rate
+    /// and buffer size.
+    DriverReset,
     /// The device or its configuration changed, and opening it again failed.
     DeviceChanged,
 }

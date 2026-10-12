@@ -345,6 +345,8 @@ impl Rig {
                     clock: ClockRelation::SingleCallback,
                     opened_at: WallNs(0),
                     replay: None,
+                    clock_source: None,
+                    driver_change: None,
                 }),
                 stopped: None,
             };

@@ -44,6 +44,19 @@ pub enum Command {
     /// Close the preview.
     #[serde(rename = "session.preview_stop")]
     SessionPreviewStop,
+    /// Open a device's driver control panel on the daemon's machine (ASIO: where pro
+    /// interfaces set their rate, buffer size, clock and routing). Answered once the driver
+    /// has shown it, or after a short wait while a modal panel stays open. A change there
+    /// may reset the open session's stream: it reopens at the driver's new settings
+    /// (`StopCause::DriverReset`, `OpenSession::driver_change`). Refused (`unsupported`)
+    /// by backends without one.
+    #[serde(rename = "session.control_panel")]
+    SessionControlPanel {
+        /// Backend.
+        backend: BackendKind,
+        /// Device.
+        device: DeviceId,
+    },
     /// Play a short band-limited noise burst at `level` on `output` of `output_device` and
     /// find the input of `input_device` it returns on (the same device, or two of one
     /// backend). Needs the stimulus lease and an explicit level; refused while the stimulus
@@ -658,6 +671,7 @@ impl Command {
             Self::SessionDevices => "session.devices",
             Self::SessionPreview { .. } => "session.preview",
             Self::SessionPreviewStop => "session.preview_stop",
+            Self::SessionControlPanel { .. } => "session.control_panel",
             Self::SessionDetectLoopback { .. } => "session.detect_loopback",
             Self::SessionOpen { .. } => "session.open",
             Self::SessionClose => "session.close",
@@ -738,6 +752,7 @@ impl Command {
                 | Self::SessionDevices
                 | Self::SessionPreview { .. }
                 | Self::SessionPreviewStop
+                | Self::SessionControlPanel { .. }
                 | Self::SessionDetectLoopback { .. }
                 | Self::SessionStatus
                 | Self::TraceList

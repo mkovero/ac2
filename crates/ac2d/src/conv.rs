@@ -226,6 +226,14 @@ pub(crate) fn device_info(c: &audio::DeviceCaps) -> pm::DeviceInfo {
             audio::IndexExactness::Exact => pm::IndexExactness::Exact,
             audio::IndexExactness::Estimated => pm::IndexExactness::Estimated,
         },
+        clock_sources: c
+            .clock_sources
+            .iter()
+            .map(|k| pm::ClockSource {
+                name: k.name.clone(),
+                current: k.current,
+            })
+            .collect(),
         notes: c.notes.clone(),
     }
 }

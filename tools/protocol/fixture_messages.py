@@ -505,6 +505,12 @@ def requests():
             "file.download_end",
             {"transfer": 4, "saved_as": "/run/media/foh/STICK/friday show.ac2session"},
         ),
+        req(
+            73,
+            "session.control_panel",
+            {"backend": "asio", "device": "Fireface USB"},
+            mutation=False,
+        ),
     ]
 
 

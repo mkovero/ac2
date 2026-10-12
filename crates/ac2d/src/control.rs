@@ -112,6 +112,12 @@ pub(crate) enum ControlMsg {
         epoch: SessionEpoch,
         samples: f64,
     },
+    /// The `session.control_panel` call started under `token` answered (or is showing a
+    /// modal panel).
+    PanelShown {
+        token: u64,
+        result: Result<(), ProtoError>,
+    },
     /// A `session.detect_loopback` started under `token` finished.
     LoopbackDetected {
         token: u64,
@@ -285,6 +291,8 @@ pub(crate) struct Control {
     preview: Option<Preview>,
     /// The loopback detection running, by token.
     detecting: Option<(u64, PendingReply)>,
+    /// Driver control panel calls under way, by token.
+    panels: HashMap<u64, PendingReply>,
     next_fanout_id: u64,
     next_meas: u32,
     lease: Option<Lease>,
@@ -390,6 +398,7 @@ impl Control {
             timing_job: None,
             preview: None,
             detecting: None,
+            panels: HashMap::new(),
             next_fanout_id: 1,
             next_meas: 1,
             lease: None,
@@ -513,6 +522,14 @@ impl Control {
                     }
                 }
                 Ok(ControlMsg::DelayFound { token, result }) => self.finish_find(token, *result),
+                Ok(ControlMsg::PanelShown { token, result }) => {
+                    if let Some(p) = self.panels.remove(&token) {
+                        let r = result.map(|()| ReplyBody::Ack {
+                            rev: self.store.rev(),
+                        });
+                        self.answer(&p.routing_id, &p.client, p.id, r, Instant::now());
+                    }
+                }
                 Ok(ControlMsg::LoopbackDetected { token, result }) => {
                     if let Some((t, p)) = self.detecting.take() {
                         if t == token {

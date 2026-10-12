@@ -90,6 +90,8 @@ fn daemon_state() -> State {
         clock: ClockRelation::SingleCallback,
         opened_at: WallNs(0),
         replay: None,
+        clock_source: None,
+        driver_change: None,
     });
     s
 }
@@ -510,6 +512,7 @@ fn backends(fake_names: bool) -> Vec<BackendInfo> {
         output: Some(dir(2, None)),
         duplex_clock: ClockRelation::SingleCallback,
         index: IndexExactness::Exact,
+        clock_sources: vec![],
         notes: vec![],
     };
     vec![

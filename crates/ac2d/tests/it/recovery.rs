@@ -15,7 +15,7 @@ use ac2_audio::FakeBackend;
 use ac2_client::{Client, ClientConfig, Endpoints, OnDrop};
 use ac2_proto::frame::{FrameData, LeqRun};
 use ac2_proto::model::{
-    GeneratorDesired, GeneratorSettings, Recovery, Session, Signal, State, StopCause,
+    DriverChange, GeneratorDesired, GeneratorSettings, Recovery, Session, Signal, State, StopCause,
 };
 use ac2_proto::units::{Dbfs, MeasId};
 use ac2_proto::{Command, ReplyBody, Stream, Subscription, Topic};
@@ -348,4 +348,82 @@ async fn a_close_ends_the_attempts() {
         "no attempt after the close: {:?}",
         s.session
     );
+}
+
+/// The operator changes the driver's rate and buffer size in its control panel while a
+/// session pinned to 48 kHz runs: the driver resets the stream, and the session reopens at
+/// the driver's new settings (asking for the old ones would undo the change), says so, and
+/// its measurements run again at the new rate.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_driver_panel_change_reopens_the_session_at_the_drivers_new_rate() {
+    let backend = realtime_rig();
+    let (_h, c, _tf, _meter) = start(&backend).await;
+    let before = until(&c, "the measurements running", WAIT, |s| {
+        s.measurements.iter().all(|m| m.running)
+    })
+    .await;
+    let was = before.session.open.clone().unwrap();
+    assert_eq!(was.config.sample_rate_hz, Some(FS));
+    assert_eq!(was.driver_change, None);
+
+    backend.script_panel(Some((44_100, 512)));
+    let reply = c
+        .call(Command::SessionControlPanel {
+            backend: was.backend,
+            device: was.input_device.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(matches!(reply, ReplyBody::Ack { .. }), "{reply:?}");
+    assert_eq!(backend.panel_opens(), 1);
+
+    let after = until(&c, "the session reopened at 44.1 kHz", WAIT, |s| {
+        s.session.stopped.is_none()
+            && s.session.epoch != before.session.epoch
+            && s.measurements.iter().all(|m| m.running)
+    })
+    .await;
+    let now = after.session.open.clone().unwrap();
+    assert_eq!((now.sample_rate_hz, now.buffer_frames), (44_100, 512));
+    assert_eq!(now.config.sample_rate_hz, Some(44_100));
+    assert_eq!(now.config.buffer_frames, Some(512));
+    assert_eq!(
+        now.driver_change,
+        Some(DriverChange {
+            from_rate_hz: FS,
+            from_buffer_frames: BLOCK,
+        })
+    );
+
+    // A client opening the session anew has seen the change: it is no longer reported.
+    c.call(Command::SessionOpen {
+        config: now.config.clone(),
+    })
+    .await
+    .unwrap();
+    let reopened = until(&c, "the new session", WAIT, |s| {
+        s.session.epoch != after.session.epoch && s.session.open.is_some()
+    })
+    .await;
+    let open = reopened.session.open.clone().unwrap();
+    assert_eq!(open.sample_rate_hz, 44_100);
+    assert_eq!(open.driver_change, None);
+}
+
+/// A panel call names a device the backend does not have: refused, with the device named.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_panel_of_an_unknown_device_is_refused() {
+    let backend = realtime_rig();
+    init_log();
+    let h = Daemon::start(config(backend.clone(), local_tcp())).unwrap();
+    let c = connect(&h).await;
+    let e = c
+        .call(Command::SessionControlPanel {
+            backend: ac2_proto::model::BackendKind::Fake,
+            device: ac2_proto::model::DeviceId("no such card".into()),
+        })
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("no such card"), "{e}");
+    assert_eq!(backend.panel_opens(), 0);
 }

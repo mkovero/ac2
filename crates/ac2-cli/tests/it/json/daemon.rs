@@ -36,6 +36,7 @@ async fn devices_json() -> R {
                     "output": dir(2, json!(["Out 1 (speaker + loop)", "Out 2"])),
                     "duplex_clock": "single_callback",
                     "index": "exact",
+                    "clock_sources": [],
                     "notes": []
                 }]
             },

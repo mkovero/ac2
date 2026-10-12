@@ -149,6 +149,7 @@ pub(crate) mod tests {
             output: dir(outputs, default),
             duplex_clock: ClockRelation::SingleCallback,
             index: IndexExactness::Exact,
+            clock_sources: vec![],
             notes: vec![],
         }
     }

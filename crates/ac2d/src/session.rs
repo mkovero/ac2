@@ -128,6 +128,8 @@ impl Runtime {
             clock: conv::clock(n.clock),
             opened_at: WallNs(wall_ns()),
             replay: None,
+            clock_source: n.clock_source.clone(),
+            driver_change: None,
         };
         tracing::info!(
             "session open: {} in / {} out @ {} Hz on {:?}/{:?} ({:?}), epoch {}",

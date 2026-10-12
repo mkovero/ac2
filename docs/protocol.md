@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 44`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 45`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -73,6 +73,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `session.devices` | — | `backends` | |
 | `session.preview` | `backend: BackendKind`, `device: DeviceId` | `preview` | |
 | `session.preview_stop` | — | `ack` | |
+| `session.control_panel` | `backend: BackendKind`, `device: DeviceId` | `ack` | |
 | `session.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs \| nil` | `loopback_detection` | L |
 | `session.open` | `config: SessionConfig` | `session` | |
 | `session.close` | — | `ack` | |
@@ -577,7 +578,10 @@ one started on the simulated rig offers only that (a simulated device never stan
 a missing real one).
 
 `DeviceInfo`: `backend`, `host`, `id`, `name` (display name), `input` / `output`:
-`DirectionInfo | nil`, `duplex_clock`, `index`, `notes`. `DirectionInfo`: `max_channels`,
+`DirectionInfo | nil`, `duplex_clock`, `index`, `clock_sources` ([`ClockSource`]: `name`,
+`current` (bool); the clocks the driver can run on, e.g. `Internal`, `Word Clock`, `ADAT`,
+the one in use marked; ASIO only, empty elsewhere; read-only, set in the driver's control
+panel), `notes`. `DirectionInfo`: `max_channels`,
 `rates_hz` ([{min, max}]), `buffer_frames` ({min, max} \| nil), `default_rate_hz`,
 `default_buffer_frames` (u32 \| nil), `channel_names` ([string], one per channel, \| nil
 where the backend does not name channels: JACK gives the port alias or short name, ASIO
@@ -591,7 +595,10 @@ zero-based), `output_channels` (u16, a count), `sample_rate_hz`, `buffer_frames`
 `loopback` ({`output`, `input`} \| nil). `OpenSession` adds `backend` (the one used),
 `input_device`, `output_device`, `sample_rate_hz`, `buffer_frames`, `clock`, `opened_at`,
 `replay` (`ReplayInfo` \| nil: the recording a replay session plays, §3.2 raw capture
-files). `session.open` with `backend: replay` is `invalid`: recordings open with
+files), `clock_source` (string \| nil: the clock source the device ran on when opened,
+ASIO), `driver_change` (`DriverChange` \| nil: {`from_rate_hz`, `from_buffer_frames`},
+set when the session reopened after its driver reset itself at another rate or buffer
+size, §4.1.1; nil after a `session.open`). `session.open` with `backend: replay` is `invalid`: recordings open with
 `session.replay`. Input and output may be two devices of one backend; an output device
 without outputs (or an `output_device: default` the host has none for) is `not_found`
 when `output_channels > 0`. Two devices open with `clock: unknown`: they may drift, which
@@ -600,6 +607,16 @@ the loopback monitor measures while a stimulus plays (`timing.drift`, §4.1).
 While a session is open the daemon meters every captured input on `session/levels` (§5.1)
 whether or not a measurement runs: per-interval sample peak, 300 ms integrated RMS and clip
 (held 1 s), at most 30 frames per second, published only while subscribed.
+
+**Driver control panel.** `session.control_panel` opens the named device's driver
+settings window on the daemon's machine (ASIO's `controlPanel`, where pro interfaces set
+rate, buffer size, clock and routing), on the driver's own COM thread. While a session runs
+on that driver the call goes to it; with no session the driver is loaded and stays loaded
+(listed in full, every other ASIO driver by name only) until a session or another panel
+needs the process's one driver. A session open on another ASIO driver makes it
+`unsupported`. The reply follows the driver's answer, or a short wait while a modal panel
+stays open (`ack`, after 1.2 s); a backend without a panel is `unsupported`. A change there may make
+the driver reset the session's stream (§4.1.1, `driver_reset`).
 
 **Preview.** `session.preview` opens a device for capture only — no output stream exists,
 so nothing can be emitted — and publishes meters of every input on `session/preview`
@@ -1215,7 +1232,9 @@ configuration is open again or a client closes the session; `session.open` keeps
 session as last opened throughout. `AudioStopped`: `since` (WallNs, the last audio
 received, or the open when none came), `cause` (tagged by `type`): `not_delivering`
 {`after_ms`: u32, the silence that counts as stopped: max(1 s, 20 periods)} \| `host_ended`
-(the audio host ended the stream: server shut down, device removed) \| `device_changed`
+(the audio host ended the stream: server shut down, device removed) \| `driver_reset` (the
+driver asked to be reset because its own settings changed, typically in its control
+panel; ASIO) \| `device_changed`
 (a device or configuration change whose reopen failed); `recovery` (tagged by `state`):
 `opening` {`attempt`: u32 from 1, `started`: WallNs} \| `waiting` {`attempt`, `error`:
 string (what the backend said, e.g. that no JACK server runs), `next_at`: WallNs}.
@@ -1227,6 +1246,14 @@ server may block) and reopens the same configuration attempt after attempt, back
 across the gap. When an attempt succeeds the session gets a new epoch with `stopped: nil`,
 the same measurements restart from fresh averages (an SPL meter's log shows the outage as
 gap time), and the generator is disarmed (it was disarmed when the audio stopped).
+
+After a `driver_reset` the reopen does not ask for the configuration's rate and buffer
+size: it takes the driver's current ones, because the operator changed them in the
+driver's panel (setting the old rate back would undo that, or fail for good on a driver
+following an external clock at the new rate). A configuration that named a rate or
+buffer size names the new one from then on; `OpenSession.driver_change` says what it ran
+at before, and the measurements restart at the new rate (delays are re-derived in
+samples). Every later recovery reopens the configuration as it then stands.
 
 ### 4.2 Snapshot and events
 

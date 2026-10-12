@@ -414,4 +414,46 @@ impl Control {
             .map_err(|e| perr(ErrorCode::Internal, format!("cannot start detection: {e}")))?;
         Ok(token)
     }
+
+    /// Opens `device`'s driver control panel on a thread of its own, and answers once the
+    /// driver returns or after [`PANEL_WAIT`] while a modal panel stays open: the call
+    /// blocks for as long as such a dialog shows, and the client is not kept waiting on it.
+    pub(super) fn start_panel(
+        &mut self,
+        kind: ac2_proto::model::BackendKind,
+        device: ac2_proto::model::DeviceId,
+    ) -> Result<u64, ProtoError> {
+        let backend = self.backend_for(Some(kind))?;
+        let token = self.next_token;
+        self.next_token += 1;
+        let selector = ac2_audio::DeviceSelector::Id(ac2_audio::DeviceId(device.0.clone()));
+        tracing::info!("driver control panel of {:?} ({kind:?})", device.0);
+        let to = self.s.to_self.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("ac2d-panel".into())
+            .spawn(move || {
+                let _ = tx.send(backend.control_panel(&selector));
+            })
+            .map_err(|e| perr(ErrorCode::Internal, format!("cannot open the panel: {e}")))?;
+        std::thread::Builder::new()
+            .name("ac2d-panel-wait".into())
+            .spawn(move || {
+                let result = match rx.recv_timeout(PANEL_WAIT) {
+                    Ok(r) => r.map_err(session::audio_err),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(()),
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(perr(
+                        ErrorCode::Internal,
+                        "the control panel call ended without an answer",
+                    )),
+                };
+                let _ = to.send(ControlMsg::PanelShown { token, result });
+            })
+            .map_err(|e| perr(ErrorCode::Internal, format!("cannot open the panel: {e}")))?;
+        Ok(token)
+    }
 }
+
+/// How long `session.control_panel` waits for the driver before answering that its panel
+/// is showing: within a client's reply deadline (1.5 s per try).
+const PANEL_WAIT: std::time::Duration = std::time::Duration::from_millis(1200);

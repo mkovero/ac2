@@ -302,5 +302,9 @@ pub fn commands() -> Vec<Command> {
             meas: MeasId(1),
             layout: Some(pane_layout()),
         },
+        Command::SessionControlPanel {
+            backend: BackendKind::Asio,
+            device: DeviceId("Fireface USB".into()),
+        },
     ]
 }

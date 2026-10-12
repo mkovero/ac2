@@ -47,6 +47,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
                     output: None,
                     duplex_clock: ClockRelation::SingleCallback,
                     index: IndexExactness::Exact,
+                    clock_sources: vec![],
                     notes: vec![],
                 }],
             },
@@ -99,6 +100,16 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
                     }),
                     duplex_clock: ClockRelation::SingleCallback,
                     index: IndexExactness::Exact,
+                    clock_sources: vec![
+                        ClockSource {
+                            name: "Internal".into(),
+                            current: false,
+                        },
+                        ClockSource {
+                            name: "Word Clock".into(),
+                            current: true,
+                        },
+                    ],
                     notes: vec!["buffer 32–2048 frames in powers of two".into()],
                 }],
             },

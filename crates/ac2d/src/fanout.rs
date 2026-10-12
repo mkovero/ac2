@@ -643,13 +643,20 @@ fn run(
         while stream.pop_output_tick().is_some() {}
         // Once either is reported the control thread tears this stream down; it is never
         // trusted again, so blocks arriving late cannot splice onto the audio before the gap.
-        if !stop_reported && stream.events().ended {
+        let ev = stream.events();
+        if !stop_reported && ev.ended {
             stop_reported = true;
-            tracing::error!("audio stream ended by the host");
+            let cause = if ev.reset {
+                tracing::warn!("the audio driver reset the stream (its settings changed)");
+                StopCause::DriverReset
+            } else {
+                tracing::error!("audio stream ended by the host");
+                StopCause::HostEnded
+            };
             let _ = to_control.send(ControlMsg::AudioStopped {
                 epoch: cfg.epoch,
                 since: WallNs(last_audio.1),
-                cause: StopCause::HostEnded,
+                cause,
             });
         }
         if let Some(after) = cfg.stall_after

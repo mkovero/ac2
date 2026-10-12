@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use ac2_proto::ProtoError;
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    AudioStopped, BackendKind, GenAction, OpenSession, Recovery as WireRecovery, Session, StopCause,
+    AudioStopped, BackendKind, DriverChange, GenAction, OpenSession, Recovery as WireRecovery,
+    Session, StopCause,
 };
 use ac2_proto::units::{SessionEpoch, WallNs};
 
@@ -145,8 +146,34 @@ fn cause_text(c: StopCause) -> &'static str {
     match c {
         StopCause::NotDelivering { .. } => "the device stopped delivering",
         StopCause::HostEnded => "the audio host ended the stream",
+        StopCause::DriverReset => "the audio driver reset itself (its settings changed)",
         StopCause::DeviceChanged => "the device changed and did not reopen",
     }
+}
+
+/// The reopened session `now` against the one that stopped, `was`: a configuration that
+/// named a rate or buffer size names the one the device now runs at (a driver reset may
+/// have changed it), and a change of either is stated in `driver_change` until a client
+/// opens a session anew.
+fn follow_driver(was: &OpenSession, now: &mut OpenSession) {
+    now.config.sample_rate_hz = was.config.sample_rate_hz.map(|_| now.sample_rate_hz);
+    now.config.buffer_frames = was.config.buffer_frames.map(|_| now.buffer_frames);
+    now.driver_change =
+        if (now.sample_rate_hz, now.buffer_frames) == (was.sample_rate_hz, was.buffer_frames) {
+            was.driver_change
+        } else {
+            tracing::warn!(
+                "the session reopened at {} Hz / {} frames (was {} Hz / {} frames)",
+                now.sample_rate_hz,
+                now.buffer_frames,
+                was.sample_rate_hz,
+                was.buffer_frames
+            );
+            Some(DriverChange {
+                from_rate_hz: was.sample_rate_hz,
+                from_buffer_frames: was.buffer_frames,
+            })
+        };
 }
 
 impl Control {
@@ -236,7 +263,14 @@ impl Control {
         r.probe.pending = None;
         r.probe.next = None;
         let attempt = r.attempt;
-        let config = r.open.config.clone();
+        let mut config = r.open.config.clone();
+        if r.cause == StopCause::DriverReset {
+            // The operator changed the driver's own settings (its control panel): its rate
+            // and buffer size are the ones to run at now. Asking for the old ones would
+            // undo that change, or fail for good on a driver following an external clock.
+            config.sample_rate_hz = None;
+            config.buffer_frames = None;
+        }
         let routes = r.routes.clone();
         let kind: BackendKind = r.open.backend;
         let backend = match self.backend_for(Some(kind)) {
@@ -302,6 +336,7 @@ impl Control {
                     return;
                 };
                 rt.open.replay = r.open.replay.clone();
+                follow_driver(&r.open, &mut rt.open);
                 let out_s = (wall_ns().saturating_sub(r.since.0)) as f64 / 1e9;
                 tracing::warn!(
                     "audio back: the session reopened on attempt {} after {out_s:.1} s without \

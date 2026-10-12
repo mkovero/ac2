@@ -46,6 +46,10 @@ impl Control {
                 ErrorCode::Internal,
                 "session.detect_loopback is answered asynchronously",
             )),
+            Command::SessionControlPanel { .. } => Err(perr(
+                ErrorCode::Internal,
+                "session.control_panel is answered asynchronously",
+            )),
             Command::SessionOpen { config } => self.session_open(client, config),
             Command::SessionClose => {
                 self.session_close(client);

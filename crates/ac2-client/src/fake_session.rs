@@ -88,6 +88,8 @@ impl Shared {
                         opened_at: WallNs(self.now_ns()),
                         config,
                         replay: None,
+                        clock_source: None,
+                        driver_change: None,
                     }),
                     stopped: None,
                 };
@@ -128,6 +130,15 @@ impl Shared {
                 mode: ServerMode::Embedded,
                 recording_dir: None,
             }),
+            C::SessionControlPanel { backend, .. } => {
+                if backend != BackendKind::Asio {
+                    return Err(err(
+                        ErrorCode::Unsupported,
+                        format!("{backend:?} has no driver control panel"),
+                    ));
+                }
+                ReplyBody::Ack { rev: self.rev }
+            }
             C::ServerAuthorize { .. } | C::ServerRevoke { .. } => {
                 return Err(err(
                     ErrorCode::Unsupported,

@@ -75,6 +75,11 @@ pub(super) fn session() -> Session {
             clock: ClockRelation::SingleCallback,
             opened_at: WallNs(1_789_999_000_000_000_000),
             replay: None,
+            clock_source: Some("Internal".into()),
+            driver_change: Some(DriverChange {
+                from_rate_hz: 44_100,
+                from_buffer_frames: 512,
+            }),
         }),
         stopped: Some(AudioStopped {
             since: WallNs(1_789_999_500_000_000_000),

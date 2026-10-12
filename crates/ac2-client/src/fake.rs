@@ -238,6 +238,7 @@ pub fn fake_backends() -> Vec<BackendInfo> {
                 output: Some(dir(2, names(&["Out 1 (speaker + loop)", "Out 2"]))),
                 duplex_clock: ClockRelation::SingleCallback,
                 index: IndexExactness::Exact,
+                clock_sources: vec![],
                 notes: vec![],
             }],
         },
@@ -459,7 +460,8 @@ impl Shared {
             | C::ServerAuthorize { .. }
             | C::ServerRevoke { .. }
             | C::SessionReplay { .. }
-            | C::SessionInputs { .. }) => self.session_cmd(client, c)?,
+            | C::SessionInputs { .. }
+            | C::SessionControlPanel { .. }) => self.session_cmd(client, c)?,
             c @ (C::GenAcquire { .. }
             | C::GenSet { .. }
             | C::GenRefresh { .. }
