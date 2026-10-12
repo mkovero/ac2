@@ -30,7 +30,7 @@ app runs). Profiles in `.config/nextest.toml`:
 | crate | role |
 |---|---|
 | `ac2-core` | pure DSP/acoustics math (MTW, delay finder, spectrum/RTA, SPL, rolling Leq, sweep, mic curves, generator); no I/O, no threads, `forbid(unsafe_code)` |
-| `ac2-audio` | backend trait + capabilities, sample-indexed blocks; jack (Linux only), cpal (macOS, Windows), fake, replay (a recording as a capture-only device) |
+| `ac2-audio` | backend trait + capabilities, sample-indexed blocks; jack (Linux only), asio (Windows, azo), cpal (macOS), fake, replay (a recording as a capture-only device) |
 | `ac2-proto` | typed protocol: commands, events, frame headers, version |
 | `ac2-zmq` | the only crate linking libzmq: safe typed sockets, CURVE behind `SecureContext` (ZAP handler first) |
 | `ac2-client` | async client |
