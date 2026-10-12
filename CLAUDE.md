@@ -31,7 +31,7 @@ app runs). Profiles in `.config/nextest.toml`:
 |---|---|
 | `ac2-core` | pure DSP/acoustics math (MTW, delay finder, spectrum/RTA, SPL, rolling Leq, sweep, mic curves, generator); no I/O, no threads, `forbid(unsafe_code)` |
 | `ac2-audio` | backend trait + capabilities, sample-indexed blocks; jack (Linux only), asio (Windows, azo), coreaudio (macOS), fake, replay (a recording as a capture-only device) |
-| `cahal` | Core Audio HAL binding, macOS: devices, properties, listeners, one duplex IOProc with an exact index; no ac2 deps, MIT, to be split out |
+| `cahal` | external: github.com/mkovero/cahal, crates.io — Core Audio HAL binding (macOS); ac2-audio's `coreaudio` backend runs on it |
 | `ac2-proto` | typed protocol: commands, events, frame headers, version |
 | `ac2-zmq` | the only crate linking libzmq: safe typed sockets, CURVE behind `SecureContext` (ZAP handler first) |
 | `ac2-client` | async client |

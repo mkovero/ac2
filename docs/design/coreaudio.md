@@ -12,7 +12,8 @@ call, with one `AudioTimeStamp` per side on one sample-time line (`mSampleTime`)
 BlackHole a click written at output sample time T was read at input sample time T, every
 click (Q4). This document designs a direct HAL backend that replaces cpal on macOS.
 
-The HAL binding is a crate of its own, **`cahal`** (§1), the way `azo` is for ASIO;
+The HAL binding is a crate of its own, **`cahal`** (§1), in its own repository
+(github.com/mkovero/cahal, published on crates.io), the way `azo` is for ASIO;
 `ac2-audio/src/coreaudio_host/` is a thin adapter from it to the `Backend` trait (§3).
 
 ## 1. The `cahal` crate
@@ -26,11 +27,16 @@ people, and the unsafe code has one small, reviewable home (§9).
 collision with `coreaudio-rs`, `coreaudio-sys` or `objc2-*` (`halio` is taken).
 
 **Rules for the crate.**
-- `crates/cahal/`, MIT, its own `README.md` and `LICENSE`, `publish = false` until it is
-  split out. **No `ac2-*` dependency**, no workspace-only settings it cannot carry along
-  (it sets its own `license`, `edition`, `rust-version`, `repository` instead of
-  `.workspace = true`), so it can move to `mkovero/cahal` and crates.io without changes;
-  ac2 then pins it by git rev, as it pins `azo`.
+- Its own repository, `mkovero/cahal`, MIT, published on crates.io; ac2 depends on a
+  released version (`cahal = "0.1.0"` in `ac2-audio` and `tools/release/coreaudio-loop`).
+  **No `ac2-*` dependency** and no ac2 policy: anything only ac2 wants belongs in the
+  adapter (§3).
+- **Changing it:** a PR in `mkovero/cahal` (its CI: fmt, clippy and tests on Linux for the
+  pure part and on macOS for the binding, docs with warnings denied, a publish dry run),
+  then a release (version bump, tag `vX.Y.Z`, `cargo publish`), then bump the version here
+  in the same commit as the adapter change that needs it. While iterating, a local
+  `[patch.crates-io] cahal = { path = "…" }` on a scratch branch tests both sides
+  together; it never lands on main.
 - The HAL code is `cfg(target_os = "macos")`. Elsewhere the library holds only its pure
   part: the plain data types (`DeviceInfo`, `StreamLayout`, `Latency`, `CycleTime`, `Gap`)
   and the sample-time indexer, no dependencies and no `unsafe`. That is the one departure
@@ -145,13 +151,15 @@ the fade (`output.rs`), the block hand-off into the `rtrb` transport, `BlockFlag
 event latches, `StaticLatency`, `ClockRelation`, recovery, device ids of the form
 `coreaudio:<UID>`, channel naming fallbacks, error texts for the operator.
 
-**Why it starts in the workspace.** Its only real test loop is ac2's BlackHole CI pass
-(§10b), and its API will move while the adapter is written: one commit can change both.
-**Split it out** when (1) the API has been unchanged through the switch (§11b) and one
-tester round on a real interface, (2) it has its own CI on a hosted macOS runner with
-BlackHole (the IOProc loop test of §10b, without ac2), and (3) its README and rustdoc cover
-every public item with an example. Then: move to `mkovero/cahal`, pin by rev in
-`ac2-audio`'s `Cargo.toml`, delete `crates/cahal`.
+**Split out.** It began in ac2's workspace so one commit could change the API and the
+adapter while both were written. The split criteria were (1) the API unchanged through the
+switch (§11b) and one tester round on a real interface, (2) its own CI on a hosted macOS
+runner with BlackHole (the IOProc loop test of §10b, without ac2), and (3) a README and
+rustdoc covering every public item with an example. It moved to `mkovero/cahal` on
+2026-10-12 with (1) met through the switch (the tester round is still open, §10c) and its
+own CI building and testing the binding on macOS; the BlackHole IOProc loop test in that
+repository and per-item examples remain to do there. Until then ac2's BlackHole pass
+(§10b, `coreaudio-loop`) is the only real-device loop test of the IOProc.
 
 ## 2. Device model
 

@@ -852,6 +852,8 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 [[package]]
 name = "cahal"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a856e5b0a7dfd4fc2f663946908ead6dd72594d12796d9c52ae90e93af96001c"
 dependencies = [
  "block2 0.6.2",
  "objc2 0.6.4",

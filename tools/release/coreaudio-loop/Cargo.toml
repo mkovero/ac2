@@ -11,4 +11,4 @@ publish = false
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ac2-audio = { path = "../../../crates/ac2-audio" }
-cahal = { path = "../../../crates/cahal" }
+cahal = "0.1.0"

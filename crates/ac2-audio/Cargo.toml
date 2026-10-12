@@ -33,13 +33,13 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Media",
 
 # macOS: Core Audio through the HAL (cahal, src/coreaudio_host), and kqueue timers that opt out of coalescing (see src/timer.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
-cahal = { path = "../cahal" }
+cahal = "0.1.0"
 libc = "0.2"
 
 # The Core Audio adapter's tests run on every OS against scripted devices, on cahal's pure
 # part (types, indexer, channel tables).
 [dev-dependencies]
-cahal = { path = "../cahal", default-features = false }
+cahal = { version = "0.1.0", default-features = false }
 
 # Linux: tests/jack_cancel.rs cancels a thread inside the libjack log callback.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
