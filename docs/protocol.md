@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 47`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 48`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -566,15 +566,14 @@ or a predicted window.
 #### Devices, preview and loopback detection (`session.*`)
 
 `session.devices` answers `[BackendInfo]`, one per backend the daemon offers, the one it was
-started on first: `kind: BackendKind` (`jack` \| `cpal` \| `coreaudio` \| `asio` \| `fake`; `replay` is the
+started on first: `kind: BackendKind` (`jack` \| `coreaudio` \| `asio` \| `fake`; `replay` is the
 kind of a replay session and is never listed), `description` (for the
 operator), `availability` (tagged by `type`: `available` \| `unavailable` {`reason`}: why,
 in plain words with the remedy, e.g. `No JACK server: start JACK (e.g. `jackd -d alsa`) or
 use PipeWire`) and `devices: [DeviceInfo]` (empty while unavailable). A daemon started on
 real audio offers its platform's backend (`jack` on Linux, `coreaudio` on macOS, `asio`
 on Windows; with no ASIO driver installed, `asio` is `unavailable` with a reason naming
-FlexASIO; a macOS daemon started with `--backend cpal` offers `cpal`, kept for a
-comparison until it is removed);
+FlexASIO);
 one started on the simulated rig offers only that (a simulated device never stands in for
 a missing real one).
 
@@ -586,7 +585,7 @@ panel), `notes`. `DirectionInfo`: `max_channels`,
 `rates_hz` ([{min, max}]), `buffer_frames` ({min, max} \| nil), `default_rate_hz`,
 `default_buffer_frames` (u32 \| nil), `channel_names` ([string], one per channel, \| nil
 where the backend does not name channels: JACK gives the port alias or short name, ASIO
-the driver's channel name, cpal nothing), `system_default` (bool: the host's default device for this direction). A host
+the driver's channel name, Core Audio the device's channel name where it has one), `system_default` (bool: the host's default device for this direction). A host
 whose devices are single-direction lists an interface (or a built-in mic and speakers) as an
 input-only and an output-only device, each with `duplex_clock: unknown`.
 

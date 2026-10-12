@@ -42,7 +42,7 @@ pub(super) fn token() -> LeaseToken {
 
 pub(super) fn session_config() -> SessionConfig {
     SessionConfig {
-        backend: Some(BackendKind::Cpal),
+        backend: Some(BackendKind::CoreAudio),
         input_device: DeviceSelector::Id {
             id: DeviceId("hw:UMC1820".into()),
         },

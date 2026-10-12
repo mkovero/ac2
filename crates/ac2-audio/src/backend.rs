@@ -15,8 +15,6 @@ use crate::stream::DuplexStream;
 pub enum BackendKind {
     /// The `jack` crate (Linux only: JACK2, or PipeWire through pipewire-jack).
     Jack,
-    /// cpal on Core Audio; macOS only.
-    Cpal,
     /// The Core Audio HAL directly (`cahal`), macOS only: one IOProc per device serves
     /// capture and playback, indexed by the device's sample time.
     CoreAudio,
@@ -47,9 +45,6 @@ pub enum ClockRelation {
     /// One callback services both directions on one clock (JACK, ASIO, fake). Output and
     /// capture indices of one cycle are equal.
     SingleCallback,
-    /// One physical device, separate callbacks (cpal on Core Audio). One
-    /// clock, but the phase between directions is new on every start.
-    SameDeviceSeparateCallbacks,
     /// Different devices, or identity cannot be proven (an input-only device beside an
     /// output-only one). May drift; drift detection must warn.
     Unknown,
@@ -132,9 +127,6 @@ pub enum StaticLatency {
         /// Playback side.
         playback: FrameRange,
     },
-    /// Only available per callback, as the capture / playback times in block headers and
-    /// output ticks (cpal).
-    PerCallbackTimestamps,
     /// The driver's own statement for the open buffer size, in frames (ASIO
     /// `getLatencies`): from the converter to the buffer the callback reads, and from the
     /// buffer it writes to the converter.
@@ -186,7 +178,7 @@ pub struct DirectionCaps {
     /// one.
     pub default_buffer: Option<u32>,
     /// One name per channel (`max_channels` of them) where the host names its channels
-    /// (JACK ports); `None` where it does not (cpal).
+    /// (JACK ports); `None` where it does not.
     pub channel_names: Option<Vec<String>>,
     /// The host's default device for this direction: where the system plays or records
     /// unless told otherwise.

@@ -1,6 +1,6 @@
 [package]
 name = "ac2-audio"
-description = "Audio backend trait with explicit capabilities, sample-indexed multichannel blocks; JACK (Linux), Core Audio and cpal (macOS), ASIO (Windows) and fake backends."
+description = "Audio backend trait with explicit capabilities, sample-indexed multichannel blocks; JACK (Linux), Core Audio (macOS), ASIO (Windows) and fake backends."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -31,11 +31,9 @@ azo = { git = "https://github.com/mkovero/azo", rev = "8ccc197966df0528db38c9116
 # Millisecond timer resolution and MMCSS registration (src/timer.rs).
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Media", "Win32_System_Threading"] }
 
-# macOS: Core Audio through the HAL (cahal, src/coreaudio_host) and through cpal, and kqueue
-# timers that opt out of coalescing (see src/timer.rs).
+# macOS: Core Audio through the HAL (cahal, src/coreaudio_host), and kqueue timers that opt out of coalescing (see src/timer.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 cahal = { path = "../cahal" }
-cpal = "0.18"
 libc = "0.2"
 
 # The Core Audio adapter's tests run on every OS against scripted devices, on cahal's pure

@@ -4,10 +4,11 @@
 //!
 //! - [`FrameCounterClock`]: the backend hands every cycle an exact wrapping frame counter
 //!   (JACK `last_frame_time`, the fake device). Gaps are exact.
-//! - [`TimestampClock`]: the backend hands only buffers and host timestamps (cpal). The
-//!   index is a running count of delivered frames; a gap can only be estimated from a
-//!   timestamp jump, so it is flagged `DISCONTINUITY | GAP_ESTIMATED`. Consumers reset on
-//!   the flag rather than trusting the size.
+//! - [`TimestampClock`]: the backend hands only buffers and host timestamps (an ASIO
+//!   driver without a sample position). The index is a running count of delivered frames;
+//!   a gap can only be estimated from a timestamp jump, so it is flagged
+//!   `DISCONTINUITY | GAP_ESTIMATED`. Consumers reset on the flag rather than trusting the
+//!   size.
 
 use crate::block::BlockFlags;
 

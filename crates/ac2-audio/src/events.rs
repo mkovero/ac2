@@ -2,7 +2,7 @@
 //! become in-band block flags.
 //!
 //! Hosts report these on threads other than the audio callback (JACK's notification thread,
-//! cpal's error callback). They only bump atomics here. Each callback owns an
+//! the HAL's property listeners). They only bump atomics here. Each callback owns an
 //! [`EventLatch`] that compares the counters with the values it saw last and turns any
 //! change into flags on its next block, without locks.
 

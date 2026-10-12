@@ -20,7 +20,7 @@
 //! [stimulus_outputs]
 //! "hw:UMC1820" = [1, 2]
 //!
-//! [sessions."cpal/hw:UMC1820"]
+//! [sessions."coreaudio/hw:UMC1820"]
 //! inputs = [1, 2, 3]
 //! outputs = 2
 //! reference = 1

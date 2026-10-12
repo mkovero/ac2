@@ -856,9 +856,6 @@ pub fn clock(session: &Session, t: &TimingStatus) -> Option<String> {
     let open = session.open.as_ref()?;
     let relation = match open.clock {
         ClockRelation::SingleCallback => "one clock (one callback for input and output)",
-        ClockRelation::SameDeviceSeparateCallbacks => {
-            "one device (separate input and output callbacks)"
-        }
         ClockRelation::Unknown => "input and output may be on different clocks",
     };
     let drift = match &t.drift {

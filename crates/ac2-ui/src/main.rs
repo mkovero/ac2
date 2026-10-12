@@ -19,8 +19,6 @@ enum BackendArg {
     /// The Core Audio HAL directly; macOS.
     #[value(name = "coreaudio")]
     CoreAudio,
-    /// Core Audio through cpal; macOS, kept for comparison.
-    Cpal,
     /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
     /// ASIO drivers; Windows.
@@ -118,7 +116,6 @@ fn target(
     if a.embedded {
         let backend = match a.backend {
             None => EmbeddedBackend::platform(),
-            Some(BackendArg::Cpal) => EmbeddedBackend::Cpal,
             Some(BackendArg::CoreAudio) => EmbeddedBackend::CoreAudio,
             Some(BackendArg::Jack) => EmbeddedBackend::Jack,
             Some(BackendArg::Asio) => EmbeddedBackend::Asio,

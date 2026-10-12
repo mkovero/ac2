@@ -23,7 +23,6 @@ pub(crate) async fn devices(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError
 fn backend(b: BackendArg) -> BackendKind {
     match b {
         BackendArg::Jack => BackendKind::Jack,
-        BackendArg::Cpal => BackendKind::Cpal,
         BackendArg::CoreAudio => BackendKind::CoreAudio,
         BackendArg::Asio => BackendKind::Asio,
         BackendArg::Fake => BackendKind::Fake,

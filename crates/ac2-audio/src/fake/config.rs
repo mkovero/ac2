@@ -216,8 +216,8 @@ pub struct FakeConfig {
     pub stop_after_blocks: Option<u64>,
     /// How far ahead DAC history is kept for drift, in seconds of run time.
     pub drift_horizon_seconds: f64,
-    /// Names of the input channels as listed (one per input); `None`: unnamed, like a cpal
-    /// device.
+    /// Names of the input channels as listed (one per input); `None`: unnamed, like a device
+    /// whose driver names no channels.
     pub input_names: Option<Vec<String>>,
     /// Names of the output channels as listed (one per output).
     pub output_names: Option<Vec<String>>,

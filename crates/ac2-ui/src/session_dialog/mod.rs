@@ -223,7 +223,6 @@ pub struct SessionDialog {
 pub fn backend_name(b: BackendKind) -> &'static str {
     match b {
         BackendKind::Jack => "JACK",
-        BackendKind::Cpal => "Core Audio (cpal)",
         BackendKind::CoreAudio => "Core Audio",
         BackendKind::Fake => "Simulated rig",
         BackendKind::Replay => "Recording",

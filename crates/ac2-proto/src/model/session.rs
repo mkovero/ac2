@@ -11,8 +11,6 @@ use crate::units::{Db, Dbfs, Samples, Seconds, SessionEpoch, WallNs};
 pub enum BackendKind {
     /// JACK.
     Jack,
-    /// cpal's OS host.
-    Cpal,
     /// The Core Audio HAL directly (macOS): one IOProc per device, exact index. Named as
     /// `--backend` takes it.
     #[serde(rename = "coreaudio")]
@@ -32,8 +30,6 @@ pub enum BackendKind {
 pub enum ClockRelation {
     /// One callback, one clock.
     SingleCallback,
-    /// One device, separate callbacks.
-    SameDeviceSeparateCallbacks,
     /// Unknown; may drift.
     Unknown,
 }
@@ -78,7 +74,7 @@ pub struct DirectionInfo {
     /// Callback size the device runs at unless asked otherwise, when the host states one.
     pub default_buffer_frames: Option<u32>,
     /// One name per channel (`max_channels` of them) where the backend names its channels
-    /// (JACK ports: alias or short name); `None` where it does not (cpal).
+    /// (JACK ports: alias or short name); `None` where it does not.
     pub channel_names: Option<Vec<String>>,
     /// The host's default device for this direction (where the system plays or records
     /// unless told otherwise).

@@ -5,18 +5,18 @@ use super::*;
 fn real_backends() -> Vec<BackendInfo> {
     let mut b = backends(false);
     b.push(BackendInfo {
-        kind: BackendKind::Cpal,
-        description: "System audio".into(),
+        kind: BackendKind::CoreAudio,
+        description: "Core Audio".into(),
         availability: Availability::Available,
         devices: vec![
             DeviceInfo {
-                backend: BackendKind::Cpal,
+                backend: BackendKind::CoreAudio,
                 id: DeviceId("card".into()),
                 name: "card".into(),
                 ..b[0].devices[0].clone()
             },
             DeviceInfo {
-                backend: BackendKind::Cpal,
+                backend: BackendKind::CoreAudio,
                 id: DeviceId("other".into()),
                 name: "other".into(),
                 ..b[0].devices[0].clone()
@@ -396,7 +396,7 @@ fn roles_are_remembered_per_device() {
 fn a_real_backend_is_preferred_and_an_unavailable_one_says_why() {
     let mut t = T::new();
     let r = open_dialog(&mut t, real_backends());
-    assert_eq!(dialog(&t).backend_kind(), Some(BackendKind::Cpal));
+    assert_eq!(dialog(&t).backend_kind(), Some(BackendKind::CoreAudio));
     assert_eq!(previewed(&r), Some(&DeviceId("card".into())));
     // A real interface starts without roles: its wiring is the operator's to say.
     assert!(dialog(&t).inputs.iter().all(|i| i.role == InputRole::None));

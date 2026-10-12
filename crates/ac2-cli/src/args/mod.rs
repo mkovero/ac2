@@ -244,8 +244,6 @@ pub enum BackendArg {
     /// exact index).
     #[value(name = "coreaudio")]
     CoreAudio,
-    /// Core Audio through cpal (macOS), kept for comparison.
-    Cpal,
     /// ASIO drivers: the real backend on Windows.
     Asio,
     /// Simulated device; never touches hardware.

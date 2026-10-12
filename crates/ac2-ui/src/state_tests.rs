@@ -82,7 +82,7 @@ fn daemon_state() -> State {
             buffer_frames: Some(256),
             loopback: None,
         },
-        backend: BackendKind::Cpal,
+        backend: BackendKind::CoreAudio,
         input_device: DeviceId("fake:loop".into()),
         output_device: DeviceId("fake:loop".into()),
         sample_rate_hz: 48_000,

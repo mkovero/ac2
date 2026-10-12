@@ -8,7 +8,7 @@ use super::*;
 fn a_daemon_without_audio_opens_the_audio_setup_once() {
     let mut t = T::disconnected();
     t.st.open_session_when_empty = true;
-    connected_to(&mut t, "embedded daemon (cpal)");
+    connected_to(&mut t, "embedded daemon (coreaudio)");
     let r = t.conn(mirror(no_session_state()));
     assert!(
         matches!(r.as_slice(), [Request::Devices, Request::Meters(true)]),
@@ -33,7 +33,7 @@ fn a_daemon_without_audio_opens_the_audio_setup_once() {
     // names for them.
     let mut t = T::disconnected();
     t.st.open_session_when_empty = true;
-    connected_to(&mut t, "embedded daemon (cpal)");
+    connected_to(&mut t, "embedded daemon (coreaudio)");
     let r = t.conn(mirror(daemon_state()));
     assert!(
         matches!(r.as_slice(), [Request::Meters(true), Request::Devices]),
@@ -43,14 +43,14 @@ fn a_daemon_without_audio_opens_the_audio_setup_once() {
     assert!(!t.st.open_session_when_empty);
 }
 
-/// System audio listing each direction as its own device: an output-only device
+/// Core Audio listing each direction as its own device: an output-only device
 /// listed first and the system's default output, an input-only USB mic, and another
 /// output-only device.
 fn endpoint_backends() -> Vec<BackendInfo> {
     let mut b = backends(false);
     let base = b[0].devices[0].clone();
     let endpoint = |id: &str, input: bool, output: Option<bool>| DeviceInfo {
-        backend: BackendKind::Cpal,
+        backend: BackendKind::CoreAudio,
         id: DeviceId(id.into()),
         name: id.into(),
         input: base.input.clone().filter(|_| input),
@@ -64,8 +64,8 @@ fn endpoint_backends() -> Vec<BackendInfo> {
         ..base.clone()
     };
     b.push(BackendInfo {
-        kind: BackendKind::Cpal,
-        description: "System audio".into(),
+        kind: BackendKind::CoreAudio,
+        description: "Core Audio".into(),
         availability: Availability::Available,
         devices: vec![
             endpoint("Speakers", false, Some(true)),
@@ -158,7 +158,11 @@ fn an_input_only_device_plays_on_another_output_device() {
     );
     assert_eq!(config.output_channels, 2);
     assert_eq!(config.loopback.map(|l| l.output), Some(0));
-    let roles = t.st.prefs.sessions.get("cpal/USB mic").expect("remembered");
+    let roles =
+        t.st.prefs
+            .sessions
+            .get("coreaudio/USB mic")
+            .expect("remembered");
     assert_eq!(roles.output_device.as_deref(), Some("Speakers"));
     // The stimulus outputs belong to the device that plays them.
     assert_eq!(t.st.prefs.outputs_for("Speakers"), Some(&[0][..]));

@@ -3,7 +3,8 @@
 //! One process callback services capture and playback on the server's clock, and the
 //! server's frame counter gives exact indices. Output and capture of one cycle therefore
 //! share one index, so the generator→loopback offset is fixed for the life of the client.
-//! cpal's JACK host is not used: it creates one client per stream and loses that property.
+//! The stream is one client for both directions: a client per direction would lose that
+//! property.
 //!
 //! Rate and buffer size belong to the server; a request can only confirm them.
 //!

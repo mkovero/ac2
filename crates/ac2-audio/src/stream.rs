@@ -177,7 +177,7 @@ impl DuplexStream {
 
     /// The connections from this stream's outputs to the device's physical outputs, on a
     /// backend where those are graph connections (JACK). `None` where the stream's outputs
-    /// are the device's channels themselves (cpal, the fake device). The patch outlives
+    /// are the device's channels themselves (Core Audio, ASIO, the fake device). The patch outlives
     /// the stream harmlessly: once the stream is stopped, it refuses to connect.
     pub fn output_patch(&self) -> Option<Arc<dyn OutputPatch>> {
         self.patch.clone()

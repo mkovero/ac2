@@ -130,7 +130,7 @@ impl FakeBackend {
             (&request.input_device, Direction::Input),
             (&request.output_device, Direction::Output),
         ] {
-            // A capture-only stream opens no output device, whatever it names (as cpal).
+            // A capture-only stream opens no output device, whatever it names (as Core Audio).
             let used = direction == Direction::Input || request.output_channels > 0;
             if used
                 && let DeviceSelector::Id(id) = selector

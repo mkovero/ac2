@@ -62,8 +62,6 @@ pub fn demo_measurement() -> MeasConfig {
 pub enum EmbeddedBackend {
     /// The Core Audio HAL directly; macOS.
     CoreAudio,
-    /// Core Audio through cpal; macOS, kept for comparison.
-    Cpal,
     /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
     /// ASIO drivers; Windows.
@@ -154,7 +152,6 @@ impl Embedded {
     /// `embedded daemon (fake rig)`, for the top bar.
     pub fn describe(&self) -> String {
         match self.backend {
-            EmbeddedBackend::Cpal => "embedded daemon (cpal)".into(),
             EmbeddedBackend::CoreAudio => "embedded daemon (coreaudio)".into(),
             EmbeddedBackend::Jack => "embedded daemon (jack)".into(),
             EmbeddedBackend::Asio => "embedded daemon (asio)".into(),
@@ -177,10 +174,7 @@ impl Drop for Embedded {
 pub fn start_embedded(backend: EmbeddedBackend) -> Result<Embedded, EmbeddedError> {
     let setup = match backend {
         EmbeddedBackend::Fake => Setup::Demo,
-        EmbeddedBackend::Cpal
-        | EmbeddedBackend::CoreAudio
-        | EmbeddedBackend::Jack
-        | EmbeddedBackend::Asio => Setup::Empty,
+        EmbeddedBackend::CoreAudio | EmbeddedBackend::Jack | EmbeddedBackend::Asio => Setup::Empty,
     };
     start_embedded_with(backend, setup)
 }
@@ -199,7 +193,6 @@ pub fn start_embedded_with(
         ));
     }
     let choice = match backend {
-        EmbeddedBackend::Cpal => BackendChoice::Cpal,
         EmbeddedBackend::CoreAudio => BackendChoice::CoreAudio,
         EmbeddedBackend::Jack => BackendChoice::Jack,
         EmbeddedBackend::Asio => BackendChoice::Asio,

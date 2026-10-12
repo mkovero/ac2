@@ -419,12 +419,11 @@ impl UiPrefs {
         self.outputs.get(device).map(Vec::as_slice)
     }
 
-    /// Key of a device in [`UiPrefs::sessions`]: `fake/fake:loop`, `cpal/hw:UMC1820`.
+    /// Key of a device in [`UiPrefs::sessions`]: `fake/fake:loop`, `coreaudio/hw:UMC1820`.
     pub fn device_key(backend: ac2_proto::model::BackendKind, device: &str) -> String {
         use ac2_proto::model::BackendKind as B;
         let b = match backend {
             B::Jack => "jack",
-            B::Cpal => "cpal",
             B::CoreAudio => "coreaudio",
             B::Fake => "fake",
             B::Asio => "asio",

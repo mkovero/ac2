@@ -174,9 +174,6 @@ pub(crate) fn device_selector(d: &pm::DeviceSelector) -> audio::DeviceSelector {
 pub(crate) fn clock(c: audio::ClockRelation) -> pm::ClockRelation {
     match c {
         audio::ClockRelation::SingleCallback => pm::ClockRelation::SingleCallback,
-        audio::ClockRelation::SameDeviceSeparateCallbacks => {
-            pm::ClockRelation::SameDeviceSeparateCallbacks
-        }
         audio::ClockRelation::Unknown => pm::ClockRelation::Unknown,
     }
 }
@@ -229,16 +226,13 @@ pub(crate) fn stated_latency(l: &audio::StaticLatency) -> Option<pm::StatedLaten
                 output_frames: b.output,
             }),
         }),
-        audio::StaticLatency::PortRanges { .. }
-        | audio::StaticLatency::PerCallbackTimestamps
-        | audio::StaticLatency::Unknown => None,
+        audio::StaticLatency::PortRanges { .. } | audio::StaticLatency::Unknown => None,
     }
 }
 
 pub(crate) fn backend_kind(k: audio::BackendKind) -> pm::BackendKind {
     match k {
         audio::BackendKind::Jack => pm::BackendKind::Jack,
-        audio::BackendKind::Cpal => pm::BackendKind::Cpal,
         audio::BackendKind::CoreAudio => pm::BackendKind::CoreAudio,
         audio::BackendKind::Fake => pm::BackendKind::Fake,
         audio::BackendKind::Replay => pm::BackendKind::Replay,

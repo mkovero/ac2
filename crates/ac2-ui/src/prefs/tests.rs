@@ -6,7 +6,7 @@ fn round_trip_is_one_based_in_the_file() {
     p.outputs.insert("hw:UMC1820".into(), vec![0, 1]);
     p.outputs.insert("fake:loop".into(), vec![3]);
     p.sessions.insert(
-        "cpal/hw:UMC1820".into(),
+        "coreaudio/hw:UMC1820".into(),
         DeviceRoles {
             inputs: vec![0, 1, 2],
             outputs: 2,

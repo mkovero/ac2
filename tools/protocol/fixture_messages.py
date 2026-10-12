@@ -321,7 +321,7 @@ def requests():
             "session.open",
             {
                 "config": {
-                    "backend": "cpal",
+                    "backend": "coreaudio",
                     "input_device": {"type": "id", "id": "hw:UMC1820"},
                     "output_device": {"type": "default"},
                     "input_channels": [0, 1, 2],

@@ -52,8 +52,8 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
                 }],
             },
             BackendInfo {
-                kind: BackendKind::Cpal,
-                description: "system audio".into(),
+                kind: BackendKind::CoreAudio,
+                description: "Core Audio".into(),
                 availability: Availability::Unavailable {
                     reason: "no devices".into(),
                 },

@@ -67,7 +67,7 @@ pub(super) fn session() -> Session {
         epoch: SessionEpoch(2),
         open: Some(OpenSession {
             config: session_config(),
-            backend: BackendKind::Cpal,
+            backend: BackendKind::CoreAudio,
             input_device: DeviceId("hw:UMC1820".into()),
             output_device: DeviceId("hw:UMC1820".into()),
             sample_rate_hz: 48_000,

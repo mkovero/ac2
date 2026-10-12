@@ -44,20 +44,6 @@ fn backend(b: BackendArg) -> Result<Arc<dyn Backend>, CliError> {
         BackendArg::Jack => Ok(Arc::new(ac2_audio::JackBackend::new(
             ac2_audio::JackConfig::default(),
         ))),
-        #[cfg(target_os = "linux")]
-        BackendArg::Cpal => Err(CliError::Usage(
-            "Linux audio goes through JACK (JACK2, or PipeWire through pipewire-jack): use \
-             --backend jack"
-                .into(),
-        )),
-        #[cfg(windows)]
-        BackendArg::Cpal => Err(CliError::Usage(
-            "Windows audio goes through ASIO: use --backend asio (with FlexASIO for a device \
-             without its own ASIO driver)"
-                .into(),
-        )),
-        #[cfg(target_os = "macos")]
-        BackendArg::Cpal => Ok(Arc::new(ac2_audio::CpalBackend::new())),
         #[cfg(target_os = "macos")]
         BackendArg::CoreAudio => Ok(Arc::new(ac2_audio::CoreAudioBackend::new())),
         #[cfg(target_os = "linux")]
@@ -230,7 +216,6 @@ fn spread_ms(s: &Option<Spread>) -> String {
 fn clock_text(c: ClockRelation) -> &'static str {
     match c {
         ClockRelation::SingleCallback => "one callback for both directions",
-        ClockRelation::SameDeviceSeparateCallbacks => "one device, separate callbacks",
         ClockRelation::Unknown => "separate devices or endpoints (one clock not proven)",
     }
 }
