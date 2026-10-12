@@ -36,13 +36,13 @@ The build is a universal disk image (Apple silicon and Intel, macOS 11 or newer)
 for now.
 
 <!-- BUILD:begin: the maintainer fills in this block for each build -->
-- Version **`<VERSION>`**, built `<BUILD_DATE>` from main `<COMMIT>` (release workflow run
-  `<RUN_ID>`).
-- Files: `ac2-<VERSION>-macos-universal.dmg`, and `ac2-<VERSION>-macos-universal.zip` with
+- Version **`0.0.0-dev.13`**, built `2026-10-12` from main `28d81545` (release workflow run
+  `38306477890`).
+- Files: `ac2-0.0.0-dev.13-macos-universal.dmg`, and `ac2-0.0.0-dev.13-macos-universal.zip` with
   the same programs unpacked, for use without the disk image.
 - Fetch them with
-  `gh run download <RUN_ID> -R mkovero/ac2 -n dist-macos`
-  (or the run's *Artifacts* on GitHub; kept until `<EXPIRES>`).
+  `gh run download 38306477890 -R mkovero/ac2 -n dist-macos`
+  (or the run's *Artifacts* on GitHub; kept until `2027-01-10`).
 <!-- BUILD:end -->
 
 1. Release files are not in git: if this directory has only `SHA256SUMS`, fetch them with
