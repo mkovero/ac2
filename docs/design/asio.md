@@ -63,16 +63,23 @@ licence open; §1 below settles it.
    NUL, `channel_info` reports inactive until buffers exist, the driver handle is `!Send`.
    Had azo failed, the fallback was ac2's own binding over a pinned SDK, shipped as a
    GPLv3 build; with azo that branch is moot.
-   **The fork.** ac2 builds azo from <https://github.com/mkovero/azo>, branch `ac2`, pinned
-   by commit in `crates/ac2-audio/Cargo.toml` (git dependency, Windows only). It
-   starts at the `azo/v0.4.0` tag and adds small, upstreamable changes: the host (COM)
+   **The fork.** ac2 builds azo from <https://github.com/mkovero/azo>, branch `ac2-0.4.1`,
+   pinned by commit in `crates/ac2-audio/Cargo.toml` (git dependency, Windows only). It
+   starts at upstream azo 0.4.1, which posts host commands as `WM_APP`: `WM_USER` on the
+   apartment thread also arrives from the system, and its `wParam` was read as a command
+   (a FlexASIO soak aborted on it). Upstream is maintained and answered within a day, so
+   each fork change is offered upstream; the fork carries what is not merged yet: the host (COM)
    thread can be named; a channel or driver name that fills its whole fixed buffer is read
    instead of panicking; `Proxy::callback_handle` gives the callback a `Send + Sync` handle
    for `getSamplePosition` / `outputReady` without a round trip to the host thread; and a
    driver is created with its CLSID as the IID, as the SDK's host code does, so no
    reference is released before `init`. wineasio 1.3.0 reads uninitialised state in
    `Release` before `init`: with azo's `IUnknown`-then-query creation, the second driver
-   load in one process (enumerate, then open) double-freed inside wineasio.
+   load in one process (enumerate, then open) double-freed inside wineasio. Commands go to
+   a message-only window rather than the thread, because a modal loop on the apartment
+   thread (a driver's control panel) dispatches window messages and drops thread messages.
+   Drivers are held in `Rc`, since wineasio tears an instance down on every `Release`, not
+   only the last. Clock source names are cut at the first NUL.
    **azo-sys provenance.** `azo-sys` is a Rust re-declaration of the ASIO interface, not a
    copy of the SDK header: its identifiers are its own (`PCM_I16_LSB` for
    `ASIOSTInt16LSB`, `IIASIORedecl`), its comments are its own, and it uses `bitflags` and a
