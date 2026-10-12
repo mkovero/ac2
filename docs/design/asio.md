@@ -265,6 +265,45 @@ Where the code settles an open point of §3 or departs from it, and why.
   backend availability, `ac2 devices`, `ac2 session open` and `ac2 selftest duplex` all
   carry its text, which names FlexASIO for devices without their own driver.
 
+## 3b. Timers and scheduling on Windows
+
+Windows ends a timed wait on its system clock tick, 15.6 ms unless a process asks for a
+finer one, except a high-resolution waitable timer (Windows 10 1803 and later). Checked in
+the sources (Rust 1.95 std, tokio 1.53, mio 1.2, winit 0.30.13):
+
+- std `thread::sleep` uses a high-resolution waitable timer, so it is on time.
+- std's timed waits (`Condvar::wait_timeout`, `mpsc::recv_timeout`, `park_timeout`) are
+  `WaitOnAddress` with a millisecond timeout, so they end on a tick.
+- tokio's timer wheel has 1 ms slots, but the runtime parks in mio's
+  `GetQueuedCompletionStatusEx` with a millisecond timeout, so its timers end on a tick too.
+- winit's `WaitUntil` uses a high-resolution waitable timer.
+- libzmq's `zmq_poll` on Windows is `select` with a millisecond timeout, so it ends on a
+  tick.
+
+| Place | Waits with | On a 15.6 ms tick | Verdict | Fix |
+|---|---|---|---|---|
+| Fan-out hand-off (`ac2d/src/fanout.rs`): drains the capture ring, meters, feeds jobs | `timer::Sleeper` (condvar timed wait), every `1/fps`, 33 ms | 33 → 33–47 ms: 30 fps arrives as an uneven 21–30 | hurts the display | `timer::fine_resolution()` (1 ms) for the daemon's life |
+| Same thread, under load | normal priority | Windows lifts a starved thread only after about 4 s; the ring holds about 2 s | can lose audio | MMCSS "Pro Audio" at thread start (`timer::pro_audio_thread()`); the ASIO callback itself is the driver's thread |
+| I/O thread publish gap (`ac2d/src/io.rs`) | `zmq_poll`, held-back frame `period/2` ≈ 16 ms | 16 → up to 31 ms | latency, uneven frames | fine resolution |
+| Job emit retry, math operand wait (`ac2d/src/jobs`) | `recv_timeout`, ≥ one period | + up to a tick | harmless; the hand-off normally wakes them | fine resolution covers them |
+| Leq / SPL per second (`jobs/spl`) | sample counts, not clocks | none | fine | — |
+| Control loop: leases, recovery, autosave (`control.rs`, `autosave.rs`) | `recv_timeout`, 100 ms to seconds | + up to a tick | fine | — |
+| Outbox retry (`ac2d/src/outbox.rs`), preview, detect, stream stop | `thread::sleep` 1–2 ms | high-resolution timer | fine | — |
+| Replay and fake devices (`ac2-audio`) | `Sleeper`, `thread::sleep` 1 ms | bursts of a tick's worth | fine (lossless, or test-only) | fine resolution covers it |
+| UI link display clock (`ac2-ui/src/conn/mod.rs`) | tokio `sleep_until`, 33 ms | 33–47 ms between fetches | hurts the display | `timeBeginPeriod(1)` in `ac2-ui` `main` for the app's life, also when the daemon is elsewhere |
+| Client data wait (`ac2-client`, Windows has no fd for the runtime) | tokio sleep 8 ms poll | 8 → 16 ms: each frame up to a tick late | latency | same |
+| UI repaint (`request_repaint_after`), present | winit `WaitUntil`, vsync | high-resolution timer | fine | — |
+| CLI `watch`, lease refresh, sync tick | tokio, 100 ms or more | + up to a tick | fine | — |
+| ASIO host thread, open handshake (`asio_host/open.rs`) | `park_timeout` 100 ms, `sleep` 2 ms | + up to a tick on the park | fine (open time only) | — |
+
+`timeBeginPeriod` is process-wide and counted: the daemon (`ac2d::Handle`) and the app
+each hold one, and an embedded daemon in the app holds both. Windows 11 may ignore it for a
+process whose windows are all minimised or hidden. Then the app's own fetches slow down
+while nobody looks, and the capture still drains, since the ring holds 2 s and MMCSS
+covers the drain thread. MMCSS registration happens when the fan-out thread starts, never in
+the audio callback. A refused registration (the scheduler service stopped) is logged, and
+the thread runs at normal priority.
+
 ## 4. Testing without Windows hardware, in this order
 
 **Audio safety.** Every stage below runs on the dummy server, a virtual device or a test
@@ -335,6 +374,20 @@ loading, `ASIOCreateBuffers`, `bufferSwitchTimeInfo`, messages.
   formats, so FlexASIO's sample-position behaviour is on record), and records a silent 30 s
   daemon session (no stop, no discontinuity, ≥ 90 % of the frames). Not yet run: it lands
   untested on Windows.
+- App: after the script, `ac2-ui --embedded --backend asio --smoke` hosts its daemon on
+  ASIO, waits for the device list and quits. The step passes when the app exits 0 within
+  120 s, prints `smoke: ok`, and lists `FlexASIO` with inputs and outputs. It opens no
+  session, so nothing plays.
+- Soak (dispatch only): `gh workflow run ci.yml --ref <branch> -f soak_minutes=60` runs the
+  Windows job and keeps the recorded session open that long. Each minute goes into
+  `soak-samples.csv` in the `virtual-audio-logs` artifact: recorded frames against
+  rate × time, discontinuities, the stopped flag, and the daemon's CPU, working set, private
+  bytes and handles. It passes with no discontinuity, frames within 0.1 % of rate × time and
+  the daemon alive. Private-byte growth over 64 MB is a warning, not a failure, because
+  history legitimately grows; a leak shows as steady growth in the CSV. Xruns are counted
+  from the recording's sidecar at the end. This is the closest a hosted runner comes to the
+  hardware gate (d). Its clock is a virtual cable through WASAPI, with no interface, no
+  vendor driver and no UI load.
 - Limits: FlexASIO is WASAPI shared mode underneath, so this shows plumbing, not
   pro-driver timing.
 

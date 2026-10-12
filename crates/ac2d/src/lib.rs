@@ -154,6 +154,9 @@ pub struct Handle {
     control: Option<JoinHandle<()>>,
     io: Option<JoinHandle<()>>,
     advert: Option<ac2_discovery::Advertiser>,
+    /// Held for the daemon's lifetime: frame hand-offs, publish gaps and job timers are all
+    /// timed waits, which Windows otherwise ends only on its 15.6 ms tick.
+    _timer: ac2_audio::timer::FineResolution,
 }
 
 impl fmt::Debug for Handle {
@@ -407,6 +410,7 @@ impl Daemon {
             (Listen::Inproc { .. }, ..) => control::rig::ServerSetup::Embedded,
             _ => control::rig::ServerSetup::Local { ctrl: ctrl.clone() },
         };
+        let timer = ac2_audio::timer::fine_resolution();
         let fps = config.publish_fps.max(1);
         let interest = Arc::new(Interest::default());
         let (tx, rx) = std::sync::mpsc::channel();
@@ -484,6 +488,7 @@ impl Daemon {
             control: Some(control),
             io: Some(io),
             advert,
+            _timer: timer,
         })
     }
 }

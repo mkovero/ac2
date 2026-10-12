@@ -352,6 +352,11 @@ impl Fanout {
         let thread = std::thread::Builder::new()
             .name("ac2d-fanout".into())
             .spawn(move || {
+                // The capture ring holds about 2 s. Windows lifts an ordinary thread that
+                // busy analysis threads starve only after about 4 s, so this one asks for
+                // audio scheduling there instead.
+                let _pro_audio = ac2_audio::timer::pro_audio_thread()
+                    .inspect_err(|e| tracing::warn!("no MMCSS audio scheduling: {e}"));
                 let wait = Wait { rx, sleeper };
                 run(stream, &wait, &cfg, &to_control, &m, &l, bursts);
             })?;

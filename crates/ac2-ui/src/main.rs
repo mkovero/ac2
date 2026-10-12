@@ -143,6 +143,7 @@ fn embedded_backends() -> Vec<EmbeddedBackend> {
 fn main() -> ExitCode {
     let started = Instant::now();
     let args = Args::parse();
+    let _timer = fine_timer::begin();
     // A GUI launch has no terminal, so the file is what a tester can send back; the embedded
     // daemon logs through the same subscriber.
     if let Some(path) = ac2_paths::log::init("ac2-ui") {
@@ -268,5 +269,45 @@ fn main() -> ExitCode {
             tracing::error!("ac2-ui: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Millisecond timer resolution for the app's lifetime (Windows; elsewhere nothing).
+///
+/// Windows ends a timed wait that is not a high-resolution waitable timer on its 15.6 ms
+/// tick. The link's display clock (33 ms) and the client's data poll (8 ms) are tokio
+/// timers, which wait in the I/O completion port with a millisecond timeout and so on that
+/// tick: frames would be fetched 33 to 47 ms apart, unevenly, and each up to 16 ms late.
+/// An embedded daemon asks the same; a remote or local one does not cover this process.
+mod fine_timer {
+    #[cfg(windows)]
+    pub(crate) struct Guard(bool);
+
+    #[cfg(windows)]
+    #[allow(unsafe_code)]
+    pub(crate) fn begin() -> Guard {
+        // SAFETY: no pointers; ended in `Drop` only when it succeeded.
+        Guard(unsafe { windows_sys::Win32::Media::timeBeginPeriod(1) } == 0)
+    }
+
+    #[cfg(windows)]
+    #[allow(unsafe_code)]
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            if self.0 {
+                // SAFETY: pairs with the successful `timeBeginPeriod(1)` above.
+                unsafe {
+                    windows_sys::Win32::Media::timeEndPeriod(1);
+                }
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub(crate) struct Guard;
+
+    #[cfg(not(windows))]
+    pub(crate) fn begin() -> Guard {
+        Guard
     }
 }

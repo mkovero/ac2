@@ -25,6 +25,7 @@ dependencies = [
  "rtrb",
  "serde",
  "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -195,6 +196,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

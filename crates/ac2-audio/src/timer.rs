@@ -7,6 +7,10 @@
 //! interval on a loaded or virtualised machine, and raising the thread's QoS class does not
 //! change that. A kqueue timer marked `NOTE_CRITICAL` opts out of coalescing; it is what
 //! [`Sleeper`] uses there. Elsewhere a condition variable's timed wait already wakes on time.
+//!
+//! Windows rounds timed waits to its timer tick instead; [`fine_resolution`] shortens the
+//! tick, and [`pro_audio_thread`] puts a thread that drains captured audio in the audio
+//! scheduling class.
 
 use std::io;
 use std::time::Instant;
@@ -39,6 +43,124 @@ impl Waker {
     /// Ends the current or the next sleep.
     pub fn wake(&self) {
         self.0.wake();
+    }
+}
+
+/// Keeps the process's timed waits at about a millisecond while alive.
+///
+/// Windows ends every timed wait that is not a high-resolution waitable timer on a
+/// system clock tick, 15.6 ms unless a process asks for less. That covers a condition
+/// variable's or channel's timed wait (the [`Sleeper`] above, the daemon's job and control
+/// loops), `zmq_poll`, and tokio's and the client's timers. A 33 ms frame hand-off then
+/// comes after 33 to 47 ms, so a 30 fps stream arrives at an uneven 21 to 30, and a frame
+/// held back 16 ms waits up to 31. One millisecond keeps every one of those waits within
+/// a millisecond of its deadline. Elsewhere this does nothing: the kernels there already
+/// wake on time (macOS through [`Sleeper`]'s kqueue timer).
+#[derive(Debug)]
+#[must_use = "the resolution falls back when this is dropped"]
+pub struct FineResolution {
+    #[cfg(windows)]
+    begun: bool,
+}
+
+/// Asks for millisecond timer resolution until the returned value is dropped.
+pub fn fine_resolution() -> FineResolution {
+    FineResolution {
+        #[cfg(windows)]
+        begun: win::time_begin_period(),
+    }
+}
+
+#[cfg(windows)]
+impl Drop for FineResolution {
+    fn drop(&mut self) {
+        if self.begun {
+            win::time_end_period();
+        }
+    }
+}
+
+/// The calling thread registered with the Windows multimedia scheduler (MMCSS) as a
+/// "Pro Audio" task until dropped, on the thread that registered it.
+///
+/// A thread that moves captured audio on from the device's ring has a deadline set by the
+/// ring's length, not by how busy the machine is: at normal priority, analysis threads
+/// using every core can starve it. MMCSS raises it into the band the audio stack itself
+/// uses while capping it below a full core, so a runaway thread there cannot freeze the
+/// desktop. Elsewhere this does nothing: JACK and Core Audio deliver blocks on their own
+/// real-time threads.
+#[derive(Debug)]
+#[must_use = "the thread leaves MMCSS when this is dropped"]
+pub struct ProAudioThread {
+    #[cfg(windows)]
+    _task: win::MmcssTask,
+    /// Reverting must happen on the registered thread.
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+/// Registers the calling thread as a "Pro Audio" task (Windows; elsewhere a no-op).
+///
+/// # Errors
+/// The scheduler refused (service stopped, task name missing from the registry); the
+/// thread keeps its ordinary priority.
+pub fn pro_audio_thread() -> io::Result<ProAudioThread> {
+    Ok(ProAudioThread {
+        #[cfg(windows)]
+        _task: win::MmcssTask::join_pro_audio()?,
+        _not_send: std::marker::PhantomData,
+    })
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod win {
+    use std::io;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::Media::{TIMERR_NOERROR, timeBeginPeriod, timeEndPeriod};
+    use windows_sys::Win32::System::Threading::{
+        AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW,
+    };
+
+    const PERIOD_MS: u32 = 1;
+
+    pub(super) fn time_begin_period() -> bool {
+        // SAFETY: no pointers; a request the system may round to what the hardware offers.
+        unsafe { timeBeginPeriod(PERIOD_MS) == TIMERR_NOERROR }
+    }
+
+    pub(super) fn time_end_period() {
+        // SAFETY: paired with a successful `timeBeginPeriod` of the same period.
+        unsafe {
+            timeEndPeriod(PERIOD_MS);
+        }
+    }
+
+    #[derive(Debug)]
+    pub(super) struct MmcssTask(HANDLE);
+
+    impl MmcssTask {
+        pub(super) fn join_pro_audio() -> io::Result<Self> {
+            let name: Vec<u16> = "Pro Audio\0".encode_utf16().collect();
+            let mut index = 0u32;
+            // SAFETY: `name` is NUL-terminated UTF-16 and outlives the call; `index` is a
+            // valid out pointer (0 asks for a new task).
+            let h = unsafe { AvSetMmThreadCharacteristicsW(name.as_ptr(), &raw mut index) };
+            if h.is_null() {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(Self(h))
+            }
+        }
+    }
+
+    impl Drop for MmcssTask {
+        fn drop(&mut self) {
+            // SAFETY: the handle came from `AvSetMmThreadCharacteristicsW` on this thread
+            // (`ProAudioThread` is not `Send`) and is reverted once.
+            unsafe {
+                AvRevertMmThreadCharacteristics(self.0);
+            }
+        }
     }
 }
 
@@ -250,5 +372,16 @@ mod tests {
         s.sleep_until(t0 + Duration::from_secs(10));
         assert!(t0.elapsed() < Duration::from_secs(5));
         t.join().expect("waker thread");
+    }
+
+    #[test]
+    fn scheduling_guards_are_taken_and_released() {
+        let fine = fine_resolution();
+        // A Windows host may run without the multimedia scheduler; elsewhere it is a no-op.
+        let task = pro_audio_thread();
+        #[cfg(not(windows))]
+        assert!(task.is_ok());
+        drop(task);
+        drop(fine);
     }
 }
