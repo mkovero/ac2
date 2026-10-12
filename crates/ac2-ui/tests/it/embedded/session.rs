@@ -165,12 +165,15 @@ fn demo_setup_is_for_the_simulated_rig_only() {
     }
 }
 
-/// One real backend per platform: JACK on Linux (no ALSA), the system audio elsewhere. The
-/// other platform's is refused with what to use instead, never swapped for something else.
+/// One real backend per platform: JACK on Linux (no ALSA), ASIO on Windows, Core Audio through
+/// cpal on macOS. Another platform's is refused with what to use instead, never swapped for
+/// something else.
 #[test]
 fn the_platform_audio_is_the_only_real_backend() {
     let (native, other) = if cfg!(target_os = "linux") {
         (EmbeddedBackend::Jack, EmbeddedBackend::Cpal)
+    } else if cfg!(windows) {
+        (EmbeddedBackend::Asio, EmbeddedBackend::Jack)
     } else {
         (EmbeddedBackend::Cpal, EmbeddedBackend::Jack)
     };
