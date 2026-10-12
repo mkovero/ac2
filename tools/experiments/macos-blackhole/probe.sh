@@ -115,14 +115,14 @@ session() {
     echo "  $DEV id: $id"
     stimulus_start pink
     echo "== session open"
-    ac2j session-open session open --backend cpal --device "$id" --out-device "$id" --in 1-2 --outputs 2 | jq -c '.open'
+    ac2j session-open session open --backend cpal --device "$id" --out-device "$id" --in 1-2 --outputs 2 --buffer "${SESSION_BUFFER:-1024}samples" | jq -c '.open'
     ac2j rec-start rec start --name blackhole --max 90s > /dev/null
     echo "== tf (ref in 1, meas in 2; sox delays in 2 by 480 samples) and the delay finder"
     ac2j meas-new meas new tf --name bh --ref 1 --meas 2 | jq -c . | cut -c1-400
     ac2j meas-start meas start bh | jq -c . | cut -c1-400
-    sleep 10
+    sleep 15
     ac2j delay-find delay find bh | jq -c . | cut -c1-1500
-    sleep 18
+    sleep 13
     ac2j session-status session status > /dev/null
     jq -c '{stopped}' "$LOG/session-status.json"
     echo "== rec stop"

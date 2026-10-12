@@ -14,6 +14,8 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
+// Line-buffered: a run killed while blocked in Core Audio still shows how far it got.
+setvbuf(stdout, nil, _IOLBF, 0)
 let args = CommandLine.arguments
 let want = args.count > 1 ? args[1] : "BlackHole 2ch"
 let seconds = args.count > 2 ? Double(args[2]) ?? 5 : 5

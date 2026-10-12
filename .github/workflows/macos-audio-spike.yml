@@ -101,21 +101,28 @@ jobs:
         if: ${{ !cancelled() }}
         run: tools/experiments/macos-blackhole/probe.sh session bin logs
 
+      - name: Daemon session, 30 s, 2048-frame buffer
+        if: ${{ !cancelled() }}
+        env:
+          SESSION_BUFFER: "2048"
+        run: tools/experiments/macos-blackhole/probe.sh session bin logs/2048
+
       - name: TCC after
         if: ${{ !cancelled() }}
         run: tools/experiments/macos-blackhole/tcc.sh dump | grep -i microphone || true
 
-      # The failure mode, then the smallest grant: every microphone row removed, then only
-      # the runner agent at the top of the process chain.
-      - name: Capture with microphone revoked, then granted to the runner agent only
+      # Which row capture depends on, then the failure mode: every microphone row but the
+      # runner agent's removed, then all of them. A capture without access blocks Core Audio
+      # clients on the runner, so the denied case runs last.
+      - name: Capture with only the runner agent's microphone row, then with none
         if: ${{ !cancelled() }}
         timeout-minutes: 8
         run: |
           tcc=tools/experiments/macos-blackhole/tcc.sh
+          $tcc revoke /opt/hca/hosted-compute-agent
+          tools/experiments/macos-blackhole/probe.sh capture 4-agent-only bin logs
           $tcc revoke
-          tools/experiments/macos-blackhole/probe.sh capture 4-revoked bin logs
-          $tcc grant /opt/hca/hosted-compute-agent
-          tools/experiments/macos-blackhole/probe.sh capture 5-agent-only bin logs
+          tools/experiments/macos-blackhole/probe.sh capture 5-revoked bin logs
 
       - name: Upload logs
         if: ${{ !cancelled() }}
