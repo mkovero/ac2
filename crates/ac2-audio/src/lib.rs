@@ -57,9 +57,10 @@ mod rng;
 #[cfg(windows)]
 pub use asio_host::AsioBackend;
 pub use backend::{
-    Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
-    DirectionCaps, DuplexRequest, FrameRange, HistoryRequest, IndexExactness, Negotiated, Presence,
-    RateRange, SHORT_BUFFER_AT_48K, SampleFormat, StaticLatency, short_buffer_frames,
+    Backend, BackendKind, ClockRelation, ClockSource, Delivery, DeviceCaps, DeviceId,
+    DeviceSelector, Direction, DirectionCaps, DuplexRequest, FrameRange, HistoryRequest,
+    IndexExactness, Negotiated, Presence, RateRange, SHORT_BUFFER_AT_48K, SampleFormat,
+    StaticLatency, short_buffer_frames,
 };
 pub use block::{BlockConsumer, BlockFlags, BlockHeader, TransportStats};
 #[cfg(target_os = "macos")]

@@ -292,6 +292,7 @@ impl Backend for CpalBackend {
                 duplex_clock: duplex_relation(&d),
                 index: IndexExactness::Estimated,
                 latency: StaticLatency::PerCallbackTimestamps,
+                clock_sources: Vec::new(),
                 notes,
             });
         }
@@ -306,6 +307,13 @@ impl Backend for CpalBackend {
             Ok(_) => Presence::Present { generation: 0 },
             Err(_) => Presence::Absent,
         }
+    }
+
+    fn control_panel(&self, _device: &DeviceSelector) -> Result<(), AudioError> {
+        Err(crate::error::Unsupported::ControlPanel {
+            backend: BackendKind::Cpal,
+        }
+        .into())
     }
 
     fn open(&self, mut request: DuplexRequest) -> Result<DuplexStream, AudioError> {
@@ -483,6 +491,7 @@ impl Backend for CpalBackend {
             },
             index: IndexExactness::Estimated,
             latency: StaticLatency::PerCallbackTimestamps,
+            clock_source: None,
             delivery: Delivery::Device,
         };
         // Device buffers hold about two periods; allow three plus scheduling slack.

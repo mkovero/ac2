@@ -5,12 +5,18 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use super::backend::{AsioHost, DriverSource};
 use super::engine::{RtDriver, Slot, TimeInfo, answer, selector};
 use super::format::Format;
-use super::open::{AsioDriver, BufferSizes, ChannelDesc, device_caps, one_device, open_stream};
-use crate::backend::{DeviceId, DeviceSelector, DuplexRequest, IndexExactness, StaticLatency};
+use super::open::{
+    AsioCode, AsioDriver, BufferSizes, ChannelDesc, ClockDesc, DriverError, device_caps,
+    one_device, open_stream,
+};
+use crate::backend::{
+    Backend, ClockSource, DeviceId, DeviceSelector, DuplexRequest, IndexExactness, StaticLatency,
+};
 use crate::block::{BlockFlags, BlockHeader};
-use crate::error::{AudioError, Unsupported};
+use crate::error::{AudioError, Unavailability, Unsupported};
 use crate::level::MaxLevel;
 use crate::stream::DuplexStream;
 
@@ -37,6 +43,8 @@ struct Script {
     timing: Timing,
     /// Messages the driver sends from inside `start()`.
     messages_in_start: Vec<i32>,
+    /// `getClockSources`; `None` answers `ASE_NotPresent`.
+    clocks: Option<Vec<ClockDesc>>,
 }
 
 impl Default for Script {
@@ -57,6 +65,7 @@ impl Default for Script {
             rates: vec![44_100.0, 48_000.0],
             timing: Timing::TimeInfo,
             messages_in_start: Vec::new(),
+            clocks: None,
         }
     }
 }
@@ -69,9 +78,24 @@ struct Buffers {
     frames: usize,
 }
 
+/// What the scripted control panel does when opened: set the driver to a rate and a
+/// preferred buffer size, then ask the host for a reset.
+type PanelChange = (f64, i32);
+
 struct Scripted {
     script: Script,
     slot: &'static Slot,
+    /// The buffer sizes the driver offers now (its panel may change the preferred one).
+    sizes: Mutex<BufferSizes>,
+    /// The interface is plugged in.
+    present: AtomicBool,
+    /// `init` refuses with this message (empty: refuses without a word).
+    init_refusal: Mutex<Option<String>>,
+    /// `createBuffers` fails with this code.
+    create_refusal: Mutex<Option<AsioCode>>,
+    /// What opening the panel changes.
+    panel: Mutex<Option<PanelChange>>,
+    panel_calls: AtomicUsize,
     rate: Mutex<f64>,
     latencies: Mutex<(u32, u32)>,
     buffers: Mutex<Buffers>,
@@ -101,9 +125,19 @@ impl RtDriver for ScriptedRt {
 
 impl Scripted {
     fn new(script: Script) -> Arc<Self> {
+        Self::with_slot(script, Box::leak(Box::new(Slot::new())))
+    }
+
+    fn with_slot(script: Script, slot: &'static Slot) -> Arc<Self> {
         Arc::new(Self {
+            sizes: Mutex::new(script.sizes),
             script,
-            slot: Box::leak(Box::new(Slot::new())),
+            slot,
+            present: AtomicBool::new(true),
+            init_refusal: Mutex::new(None),
+            create_refusal: Mutex::new(None),
+            panel: Mutex::new(None),
+            panel_calls: AtomicUsize::new(0),
             rate: Mutex::new(48_000.0),
             latencies: Mutex::new((32, 48)),
             buffers: Mutex::new(Buffers::default()),
@@ -189,14 +223,56 @@ impl Scripted {
     }
 }
 
+impl Scripted {
+    /// `ASE_NotPresent` while unplugged, as drivers answer once their hardware is gone.
+    fn plugged(&self) -> Result<(), DriverError> {
+        if self.present.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err(DriverError {
+                code: Some(AsioCode::NotPresent),
+                message: String::new(),
+            })
+        }
+    }
+}
+
 impl AsioDriver for Scripted {
-    fn channel_counts(&self) -> Result<(u16, u16), String> {
+    fn init(&self) -> Result<(), DriverError> {
+        self.log("init");
+        if !self.present.load(Ordering::SeqCst) {
+            return Err(DriverError::text("No ASIO device found"));
+        }
+        match self.init_refusal.lock().expect("scripted state").clone() {
+            Some(m) => Err(DriverError::text(m)),
+            None => Ok(()),
+        }
+    }
+    fn clock_sources(&self) -> Result<Vec<ClockDesc>, DriverError> {
+        self.script.clocks.clone().ok_or(DriverError {
+            code: Some(AsioCode::NotPresent),
+            message: String::new(),
+        })
+    }
+    fn control_panel(&self) -> Result<(), DriverError> {
+        self.log("control_panel");
+        self.panel_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some((rate, preferred)) = self.panel.lock().expect("scripted state").take() {
+            *self.rate.lock().expect("scripted state") = rate;
+            self.sizes.lock().expect("scripted state").preferred = preferred;
+            // As drivers do once their settings changed under a running host.
+            self.message(selector::RESET_REQUEST, 0);
+        }
+        Ok(())
+    }
+    fn channel_counts(&self) -> Result<(u16, u16), DriverError> {
+        self.plugged()?;
         Ok((
             self.script.inputs.len() as u16,
             self.script.outputs.len() as u16,
         ))
     }
-    fn channel(&self, input: bool, index: u16) -> Result<ChannelDesc, String> {
+    fn channel(&self, input: bool, index: u16) -> Result<ChannelDesc, DriverError> {
         let list = if input {
             &self.script.inputs
         } else {
@@ -204,23 +280,23 @@ impl AsioDriver for Scripted {
         };
         list.get(usize::from(index))
             .cloned()
-            .ok_or_else(|| "no such channel".into())
+            .ok_or_else(|| DriverError::text("no such channel"))
     }
-    fn buffer_sizes(&self) -> Result<BufferSizes, String> {
-        Ok(self.script.sizes)
+    fn buffer_sizes(&self) -> Result<BufferSizes, DriverError> {
+        Ok(*self.sizes.lock().expect("scripted state"))
     }
     fn can_sample_rate(&self, hz: f64) -> bool {
         self.script.rates.contains(&hz)
     }
-    fn sample_rate(&self) -> Result<f64, String> {
+    fn sample_rate(&self) -> Result<f64, DriverError> {
         Ok(*self.rate.lock().expect("scripted state"))
     }
-    fn set_sample_rate(&self, hz: f64) -> Result<(), String> {
+    fn set_sample_rate(&self, hz: f64) -> Result<(), DriverError> {
         self.log("set_sample_rate");
         *self.rate.lock().expect("scripted state") = hz;
         Ok(())
     }
-    fn latencies(&self) -> Result<(u32, u32), String> {
+    fn latencies(&self) -> Result<(u32, u32), DriverError> {
         Ok(*self.latencies.lock().expect("scripted state"))
     }
     fn can_report_overload(&self) -> bool {
@@ -230,8 +306,14 @@ impl AsioDriver for Scripted {
         &self,
         channels: &[(bool, u16)],
         frames: u32,
-    ) -> Result<Vec<[*mut u8; 2]>, String> {
+    ) -> Result<Vec<[*mut u8; 2]>, DriverError> {
         self.log("create_buffers");
+        if let Some(code) = *self.create_refusal.lock().expect("scripted state") {
+            return Err(DriverError {
+                code: Some(code),
+                message: String::new(),
+            });
+        }
         let mut b = self.buffers.lock().expect("scripted state");
         b.frames = frames as usize;
         b.channels.clear();
@@ -249,7 +331,7 @@ impl AsioDriver for Scripted {
         }
         Ok(out)
     }
-    fn start(&self) -> Result<(), String> {
+    fn start(&self) -> Result<(), DriverError> {
         self.log("start");
         for &m in &self.script.messages_in_start {
             self.message(m, 0);
@@ -260,12 +342,12 @@ impl AsioDriver for Scripted {
         self.running.store(true, Ordering::SeqCst);
         Ok(())
     }
-    fn stop(&self) -> Result<(), String> {
+    fn stop(&self) -> Result<(), DriverError> {
         self.log("stop");
         self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
-    fn dispose_buffers(&self) -> Result<(), String> {
+    fn dispose_buffers(&self) -> Result<(), DriverError> {
         self.log("dispose_buffers");
         assert!(
             !self.slot.is_set(),
@@ -726,4 +808,368 @@ fn input_and_output_name_one_driver() {
         one_device(&id("A"), &id("B")),
         Err(AudioError::Unsupported(Unsupported::SeparateDevices { .. }))
     ));
+}
+
+/// Scripted drivers as installed drivers: what [`AsioHost`] lists, loads and opens. Every
+/// load of a name gets the same driver, which keeps its settings across loads as hardware
+/// does.
+struct Installed {
+    drivers: Vec<(String, Arc<Scripted>)>,
+    slot: &'static Slot,
+    creates: AtomicUsize,
+}
+
+impl std::fmt::Debug for Installed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Installed")
+    }
+}
+
+impl Installed {
+    fn new(scripts: Vec<(&str, Script)>) -> Arc<Self> {
+        let slot: &'static Slot = Box::leak(Box::new(Slot::new()));
+        Arc::new(Self {
+            drivers: scripts
+                .into_iter()
+                .map(|(n, s)| (n.to_owned(), Scripted::with_slot(s, slot)))
+                .collect(),
+            slot,
+            creates: AtomicUsize::new(0),
+        })
+    }
+
+    fn driver(&self, name: &str) -> Arc<Scripted> {
+        let d = self
+            .drivers
+            .iter()
+            .find(|(n, _)| n == name)
+            .expect("driver");
+        Arc::clone(&d.1)
+    }
+}
+
+impl DriverSource for Arc<Installed> {
+    fn installed(&self) -> Result<Vec<String>, AudioError> {
+        Ok(self.drivers.iter().map(|(n, _)| n.clone()).collect())
+    }
+    fn create(&self, name: &str) -> Result<Arc<dyn AsioDriver>, AudioError> {
+        self.creates.fetch_add(1, Ordering::SeqCst);
+        Ok(self.driver(name) as Arc<dyn AsioDriver>)
+    }
+    fn slot(&self) -> &'static Slot {
+        self.slot
+    }
+}
+
+fn on(name: &str, req: DuplexRequest) -> DuplexRequest {
+    let id = DeviceSelector::Id(DeviceId(name.into()));
+    DuplexRequest {
+        input_device: id.clone(),
+        output_device: id,
+        ..req
+    }
+}
+
+fn unavailable(r: Result<DuplexStream, AudioError>) -> (Unavailability, String) {
+    match r {
+        Err(e @ AudioError::Unavailable { .. }) => {
+            let text = e.to_string();
+            let AudioError::Unavailable { reason, .. } = e else {
+                unreachable!()
+            };
+            (reason, text)
+        }
+        Err(e) => panic!("not unavailable: {e:?}"),
+        Ok(_) => panic!("opened"),
+    }
+}
+
+#[test]
+fn a_driver_held_by_another_program_is_named_in_use() {
+    let rig = Installed::new(vec![("UMC ASIO Driver", Script::default())]);
+    let host = AsioHost::new(Arc::clone(&rig));
+    let drv = rig.driver("UMC ASIO Driver");
+
+    // Refused at `init` without a word.
+    *drv.init_refusal.lock().expect("scripted state") = Some(String::new());
+    let (reason, text) = unavailable(host.open(DuplexRequest::new(vec![0], 0, level())));
+    assert_eq!(
+        reason,
+        Unavailability::AsioDriverInUse {
+            driver: "UMC ASIO Driver".into()
+        }
+    );
+    assert!(
+        text.ends_with(
+            "UMC ASIO Driver is in use by another application (close the DAW or other audio \
+             program using it)"
+        ),
+        "{text}"
+    );
+
+    // Loaded, then refused buffers.
+    *drv.init_refusal.lock().expect("scripted state") = None;
+    *drv.create_refusal.lock().expect("scripted state") = Some(AsioCode::HwMalfunction);
+    let (reason, _) = unavailable(host.open(DuplexRequest::new(vec![0], 0, level())));
+    assert!(
+        matches!(reason, Unavailability::AsioDriverInUse { .. }),
+        "{reason:?}"
+    );
+
+    // Released by the other program: the next open runs.
+    *drv.create_refusal.lock().expect("scripted state") = None;
+    let s = host
+        .open(DuplexRequest::new(vec![0], 0, level()))
+        .expect("open");
+    assert_eq!(s.negotiated().input_device.0, "UMC ASIO Driver");
+}
+
+#[test]
+fn an_interface_that_is_not_there_is_named_with_the_drivers_words() {
+    let rig = Installed::new(vec![("Fireface USB", Script::default())]);
+    let host = AsioHost::new(Arc::clone(&rig));
+    let drv = rig.driver("Fireface USB");
+    drv.present.store(false, Ordering::SeqCst);
+    let (reason, text) = unavailable(host.open(DuplexRequest::new(vec![0], 0, level())));
+    assert_eq!(
+        reason,
+        Unavailability::AsioHardwareNotPresent {
+            driver: "Fireface USB".into(),
+            detail: "No ASIO device found".into(),
+        }
+    );
+    assert!(
+        text.ends_with(
+            "Fireface USB is installed but its interface is not present (connect it and switch \
+             it on); the driver says: No ASIO device found"
+        ),
+        "{text}"
+    );
+    // A driver that loads but answers ASE_NotPresent to its first call.
+    drv.present.store(true, Ordering::SeqCst);
+    *drv.init_refusal.lock().expect("scripted state") = None;
+    let s = host.open(DuplexRequest::new(vec![0], 0, level()));
+    assert!(s.is_ok());
+    drop(s);
+    drv.present.store(false, Ordering::SeqCst);
+    let e = super::open::refusal(
+        "Fireface USB",
+        super::open::Step::Other(crate::Operation::Open),
+        drv.channel_counts().expect_err("unplugged"),
+    );
+    assert!(
+        matches!(
+            e,
+            AudioError::Unavailable {
+                reason: Unavailability::AsioHardwareNotPresent { .. },
+                ..
+            }
+        ),
+        "{e:?}"
+    );
+}
+
+#[test]
+fn an_unplugged_interface_ends_the_stream_and_reopens_once_back() {
+    let rig = Installed::new(vec![("Fireface USB", Script::default())]);
+    let host = AsioHost::new(Arc::clone(&rig));
+    let drv = rig.driver("Fireface USB");
+    let mut s = host
+        .open(DuplexRequest::new(vec![0, 1], 2, level()))
+        .expect("open");
+    drv.tick();
+    drv.tick();
+    assert_eq!(blocks(&mut s).len(), 2);
+
+    // Unplugged: the driver asks for a reset and stops switching.
+    drv.present.store(false, Ordering::SeqCst);
+    drv.message(selector::RESET_REQUEST, 0);
+    assert!(s.events().ended && s.events().reset);
+    drop(s);
+    assert!(!drv.slot.is_set());
+
+    // Every attempt while it is away fails as not present; each is a fresh load.
+    for _ in 0..3 {
+        let (reason, _) = unavailable(host.open(DuplexRequest::new(vec![0, 1], 2, level())));
+        assert!(
+            matches!(reason, Unavailability::AsioHardwareNotPresent { .. }),
+            "{reason:?}"
+        );
+    }
+    // The registry still lists it: the look between attempts says present.
+    assert!(matches!(
+        host.probe(&DeviceSelector::Default),
+        crate::Presence::Present { .. }
+    ));
+
+    // Plugged back in: the next attempt opens, indexed from 0 again.
+    drv.present.store(true, Ordering::SeqCst);
+    let mut s = host
+        .open(DuplexRequest::new(vec![0, 1], 2, level()))
+        .expect("reopen");
+    drv.position.store(0, Ordering::SeqCst);
+    drv.tick();
+    let b = blocks(&mut s);
+    assert_eq!(b[0].0.flags, BlockFlags::FIRST);
+    assert_eq!(b[0].0.start_sample, 0);
+    assert_eq!(rig.creates.load(Ordering::SeqCst), 5);
+}
+
+#[test]
+fn a_panel_change_resets_the_stream_and_the_reopen_takes_the_drivers_new_rate() {
+    let rig = Installed::new(vec![("Fireface USB", Script::default())]);
+    let host = AsioHost::new(Arc::clone(&rig));
+    let drv = rig.driver("Fireface USB");
+    let s = host
+        .open(DuplexRequest::new(vec![0], 2, level()))
+        .expect("open");
+    assert_eq!(
+        (s.negotiated().sample_rate, s.negotiated().buffer_frames),
+        (48_000, Some(256))
+    );
+    drv.tick();
+
+    // The operator sets 44.1 kHz and 512 frames in the panel of the running driver: the
+    // call goes to the stream's own driver, which asks for a reset.
+    *drv.panel.lock().expect("scripted state") = Some((44_100.0, 512));
+    host.control_panel(&DeviceSelector::Default).expect("panel");
+    assert_eq!(drv.panel_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(rig.creates.load(Ordering::SeqCst), 1, "no second load");
+    let ev = s.events();
+    assert!(ev.ended && ev.reset, "{ev:?}");
+    drop(s);
+
+    // Reopened with no rate or buffer asked for: the driver's new ones.
+    let s = host
+        .open(DuplexRequest::new(vec![0], 2, level()))
+        .expect("reopen");
+    assert_eq!(
+        (s.negotiated().sample_rate, s.negotiated().buffer_frames),
+        (44_100, Some(512))
+    );
+    assert!(
+        !drv.calls
+            .lock()
+            .expect("scripted state")
+            .contains(&"set_sample_rate"),
+        "the rate is the driver's, never set back"
+    );
+}
+
+#[test]
+fn the_panel_of_a_driver_with_no_stream_stays_loaded_and_the_open_reuses_it() {
+    let rig = Installed::new(vec![
+        ("Fireface USB", Script::default()),
+        ("FlexASIO", Script::default()),
+    ]);
+    let host = AsioHost::new(Arc::clone(&rig));
+    host.control_panel(&DeviceSelector::Id(DeviceId("FlexASIO".into())))
+        .expect("panel");
+    assert_eq!(rig.driver("FlexASIO").panel_calls.load(Ordering::SeqCst), 1);
+    // Listing while the panel's driver is loaded loads nothing else.
+    let list = host.enumerate().expect("list");
+    assert_eq!(rig.creates.load(Ordering::SeqCst), 1);
+    assert!(list[0].input.is_none(), "{:?}", list[0].notes);
+    assert!(list[1].input.is_some());
+    // Opening it keeps the instance the panel is showing.
+    let s = host
+        .open(on("FlexASIO", DuplexRequest::new(vec![0], 0, level())))
+        .expect("open");
+    assert_eq!(rig.creates.load(Ordering::SeqCst), 1);
+    // Another driver's panel is refused while a stream runs on this one.
+    assert!(matches!(
+        host.control_panel(&DeviceSelector::Id(DeviceId("Fireface USB".into()))),
+        Err(AudioError::Unavailable { .. })
+    ));
+    drop(s);
+    host.control_panel(&DeviceSelector::Id(DeviceId("Fireface USB".into())))
+        .expect("panel");
+    assert_eq!(rig.creates.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn clock_sources_are_listed_with_the_current_one_and_named_at_open() {
+    let ck = |n: &str, current| ClockDesc {
+        name: n.into(),
+        current,
+    };
+    let drv = Scripted::new(Script {
+        clocks: Some(vec![
+            ck("Internal", false),
+            ck(" Word Clock ", true),
+            ck("", false),
+        ]),
+        ..Script::default()
+    });
+    let c = device_caps(&*drv, "Scripted ASIO", true).expect("caps");
+    assert_eq!(
+        c.clock_sources,
+        vec![
+            ClockSource {
+                name: "Internal".into(),
+                current: false
+            },
+            ClockSource {
+                name: "Word Clock".into(),
+                current: true
+            },
+            ClockSource {
+                name: "Clock 3".into(),
+                current: false
+            },
+        ]
+    );
+    let s = open(&drv, DuplexRequest::new(vec![0], 0, level())).expect("open");
+    assert_eq!(s.negotiated().clock_source.as_deref(), Some("Word Clock"));
+    // A driver that lists none.
+    let drv = Scripted::new(Script::default());
+    assert!(
+        device_caps(&*drv, "Scripted ASIO", true)
+            .expect("caps")
+            .clock_sources
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_sparse_input_map_makes_buffers_for_exactly_its_channels() {
+    let ch = |n: &str| ChannelDesc {
+        name: n.into(),
+        sample_type: F32,
+    };
+    let drv = Scripted::new(Script {
+        inputs: (1..=8).map(|i| ch(&format!("Analog {i}"))).collect(),
+        ..Script::default()
+    });
+    // Inputs 3 and 7 only (device channels 2 and 6), in the operator's order 7, 3.
+    let mut s = open(&drv, DuplexRequest::new(vec![6, 2], 2, level())).expect("open");
+    let made: Vec<(bool, u16)> = drv
+        .buffers
+        .lock()
+        .expect("scripted state")
+        .channels
+        .iter()
+        .map(|&(i, c, _)| (i, c))
+        .collect();
+    assert_eq!(made, [(true, 2), (true, 6), (false, 0), (false, 1)]);
+    assert_eq!(s.negotiated().input_channels, 2);
+    assert_eq!(s.negotiated().device_input_channels, 8);
+    drv.tick();
+    drv.tick();
+    for (h, v) in blocks(&mut s) {
+        assert_eq!(h.channels, 2);
+        let frames = v.len() / 2;
+        for f in [0, frames - 1] {
+            let pos = h.start_sample as i64 + f as i64;
+            // The driver's position is the block index here (first switch at 256).
+            let pos = pos + i64::from(FRAMES);
+            assert_eq!(
+                v[f * 2],
+                Scripted::signal(6, pos),
+                "block {}",
+                h.start_sample
+            );
+            assert_eq!(v[f * 2 + 1], Scripted::signal(2, pos));
+        }
+    }
 }

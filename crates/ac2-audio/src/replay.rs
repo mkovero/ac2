@@ -144,6 +144,13 @@ impl Backend for ReplayBackend {
         Presence::Unknown
     }
 
+    fn control_panel(&self, _device: &DeviceSelector) -> Result<(), AudioError> {
+        Err(crate::error::Unsupported::ControlPanel {
+            backend: BackendKind::Replay,
+        }
+        .into())
+    }
+
     fn enumerate(&self) -> Result<Vec<DeviceCaps>, AudioError> {
         let c = &self.cfg;
         Ok(vec![DeviceCaps {
@@ -171,6 +178,7 @@ impl Backend for ReplayBackend {
             duplex_clock: ClockRelation::SingleCallback,
             index: IndexExactness::Exact,
             latency: StaticLatency::Unknown,
+            clock_sources: Vec::new(),
             notes: vec!["a recording played back; capture only".into()],
         }])
     }
@@ -233,6 +241,7 @@ impl Backend for ReplayBackend {
             clock: ClockRelation::SingleCallback,
             index: IndexExactness::Exact,
             latency: StaticLatency::Unknown,
+            clock_source: None,
             delivery: Delivery::Stepped,
         };
         let source = (c.open)().map_err(|e| AudioError::Backend {

@@ -70,9 +70,40 @@ pub enum Unavailability {
          (USB measurement mics, class-compliant interfaces, built-in audio)"
     )]
     NoAsioDriver,
+    /// The ASIO driver is held by another program. Many drivers serve one client at a
+    /// time; the driver loads, then refuses to start or to make buffers.
+    #[error(
+        "{driver} is in use by another application (close the DAW or other audio program \
+         using it)"
+    )]
+    AsioDriverInUse {
+        /// The driver's name.
+        driver: String,
+    },
+    /// The ASIO driver is installed but finds no hardware (the interface is unplugged or
+    /// off). `detail` is the driver's own message, if it gave one.
+    #[error(
+        "{driver} is installed but its interface is not present (connect it and switch it \
+         on){}",
+        driver_says(.detail)
+    )]
+    AsioHardwareNotPresent {
+        /// The driver's name.
+        driver: String,
+        /// The driver's own words (`getErrorMessage`); empty when it gave none.
+        detail: String,
+    },
     /// Anything else the host reported.
     #[error("{0}")]
     Host(String),
+}
+
+fn driver_says(detail: &str) -> String {
+    if detail.trim().is_empty() {
+        String::new()
+    } else {
+        format!("; the driver says: {}", detail.trim())
+    }
 }
 
 /// What a backend was doing when it failed.
@@ -149,6 +180,12 @@ pub enum Unsupported {
         input: String,
         /// Playback device asked for.
         output: String,
+    },
+    /// The backend has no driver settings window of its own ([`crate::Backend::control_panel`]).
+    #[error("{backend:?} has no driver control panel")]
+    ControlPanel {
+        /// Which backend.
+        backend: BackendKind,
     },
     /// No sample format this crate converts is offered in this direction.
     #[error("no supported sample format for {direction:?} at the requested rate and channels")]

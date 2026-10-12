@@ -10,10 +10,10 @@ use std::time::{Duration, Instant};
 use super::engine::{Channel, Engine, Rt, RtDriver, Slot};
 use super::format::Format;
 use crate::backend::{
-    BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, Direction, DirectionCaps,
-    DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, StaticLatency,
+    BackendKind, ClockRelation, ClockSource, Delivery, DeviceCaps, DeviceId, Direction,
+    DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, StaticLatency,
 };
-use crate::error::{AudioError, Operation, Unsupported};
+use crate::error::{AudioError, Operation, Unavailability, Unsupported};
 use crate::stream::{DuplexStream, Plumbing, StreamParts};
 
 /// One channel as the driver describes it.
@@ -61,23 +61,201 @@ impl BufferSizes {
     }
 }
 
-/// The control-side calls into one loaded and initialised driver. Errors are the driver's
-/// own words (its error message or result code).
+/// An `ASIOError` result code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AsioCode {
+    /// `ASE_NotPresent`: the hardware is not there, or the call is not supported.
+    NotPresent,
+    /// `ASE_HWMalfunction`.
+    HwMalfunction,
+    /// `ASE_InvalidParameter`.
+    InvalidParameter,
+    /// `ASE_InvalidMode`.
+    InvalidMode,
+    /// `ASE_SPNotAdvancing`.
+    SpNotAdvancing,
+    /// `ASE_NoClock`.
+    NoClock,
+    /// `ASE_NoMemory`.
+    NoMemory,
+    /// Any other code.
+    Other(i32),
+}
+
+impl AsioCode {
+    pub(crate) fn from_raw(code: i32) -> Self {
+        match code {
+            -1000 => Self::NotPresent,
+            -999 => Self::HwMalfunction,
+            -998 => Self::InvalidParameter,
+            -997 => Self::InvalidMode,
+            -996 => Self::SpNotAdvancing,
+            -995 => Self::NoClock,
+            -994 => Self::NoMemory,
+            c => Self::Other(c),
+        }
+    }
+
+    fn name(self) -> String {
+        match self {
+            Self::NotPresent => "ASE_NotPresent".into(),
+            Self::HwMalfunction => "ASE_HWMalfunction".into(),
+            Self::InvalidParameter => "ASE_InvalidParameter".into(),
+            Self::InvalidMode => "ASE_InvalidMode".into(),
+            Self::SpNotAdvancing => "ASE_SPNotAdvancing".into(),
+            Self::NoClock => "ASE_NoClock".into(),
+            Self::NoMemory => "ASE_NoMemory".into(),
+            Self::Other(c) => format!("ASIO error {c}"),
+        }
+    }
+}
+
+/// What a driver call returned on failure: its result code, when the call has one (`init`
+/// returns only a yes or no), and the driver's own words (`getErrorMessage`), if any.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DriverError {
+    pub(crate) code: Option<AsioCode>,
+    pub(crate) message: String,
+}
+
+impl DriverError {
+    /// A failure with no code, described by `message`.
+    pub(crate) fn text(message: impl Into<String>) -> Self {
+        Self {
+            code: None,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for DriverError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let msg = self.message.trim();
+        match (self.code, msg.is_empty()) {
+            (Some(c), true) => f.write_str(&c.name()),
+            (Some(c), false) => write!(f, "{msg} ({})", c.name()),
+            (None, true) => f.write_str("the driver gave no reason"),
+            (None, false) => f.write_str(msg),
+        }
+    }
+}
+
+impl From<DriverError> for String {
+    fn from(e: DriverError) -> Self {
+        e.to_string()
+    }
+}
+
+/// The step of loading or starting a driver that failed, for [`refusal`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Step {
+    /// `init`.
+    Init,
+    /// `createBuffers`.
+    CreateBuffers,
+    /// `start`.
+    Start,
+    /// Anything else, during `operation`.
+    Other(Operation),
+}
+
+/// The error for a failed driver call, typed from the driver's result code alone (never
+/// from its message text), so the operator reads what to do:
+///
+/// - `ASE_NotPresent` from any call: the interface is not there.
+/// - `init` refused with a message from the driver: the driver could not reach its
+///   hardware and says why (an unplugged interface is the common case). Refused without a
+///   word: the driver is held elsewhere — single-client drivers refuse a second program
+///   this way and have nothing to report about their hardware.
+/// - `createBuffers` or `start` with `ASE_HWMalfunction` or `ASE_NoMemory`: the driver
+///   loaded, but another program holds the hardware stream.
+/// - Anything else: the driver's words, with the step.
+pub(crate) fn refusal(driver: &str, step: Step, e: DriverError) -> AudioError {
+    let unavailable = |reason| AudioError::Unavailable {
+        backend: BackendKind::Asio,
+        reason,
+    };
+    let not_present = |e: &DriverError| {
+        unavailable(Unavailability::AsioHardwareNotPresent {
+            driver: driver.into(),
+            detail: e.message.trim().into(),
+        })
+    };
+    let in_use = || {
+        unavailable(Unavailability::AsioDriverInUse {
+            driver: driver.into(),
+        })
+    };
+    match (step, e.code) {
+        (_, Some(AsioCode::NotPresent)) => not_present(&e),
+        (Step::Init, None) if e.message.trim().is_empty() => in_use(),
+        (Step::Init, _) => not_present(&e),
+        (Step::CreateBuffers | Step::Start, Some(AsioCode::HwMalfunction | AsioCode::NoMemory)) => {
+            in_use()
+        }
+        (Step::CreateBuffers, _) => backend_err(
+            Operation::Open,
+            format!("{driver} refused to make buffers: {e}"),
+        ),
+        (Step::Start, _) => backend_err(Operation::Start, format!("{driver}: {e}")),
+        (Step::Other(op), _) => backend_err(op, format!("{driver}: {e}")),
+    }
+}
+
+/// Initialises the driver `drv`, loaded as `name`.
+pub(crate) fn initialise(drv: &dyn AsioDriver, name: &str) -> Result<(), AudioError> {
+    drv.init().map_err(|e| refusal(name, Step::Init, e))
+}
+
+/// One clock source as the driver lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClockDesc {
+    /// Its name ("Internal", "Word Clock").
+    pub(crate) name: String,
+    /// The driver runs on it now.
+    pub(crate) current: bool,
+}
+
+/// The driver's clock sources, or none when it does not list them (many drivers answer
+/// `ASE_NotPresent`). Names are trimmed; an empty one is numbered.
+fn clock_sources(drv: &dyn AsioDriver) -> Vec<ClockSource> {
+    drv.clock_sources()
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| ClockSource {
+            name: match c.name.trim() {
+                "" => format!("Clock {}", i + 1),
+                n => n.to_owned(),
+            },
+            current: c.current,
+        })
+        .collect()
+}
+
+/// The control-side calls into one loaded driver. Every call but [`Self::init`] needs it
+/// initialised.
 pub(crate) trait AsioDriver: Send + Sync {
+    /// `init`; on a refusal, the driver's `getErrorMessage`.
+    fn init(&self) -> Result<(), DriverError>;
+    /// `getClockSources`.
+    fn clock_sources(&self) -> Result<Vec<ClockDesc>, DriverError>;
+    /// `controlPanel`.
+    fn control_panel(&self) -> Result<(), DriverError>;
     /// `getChannels`: inputs, outputs.
-    fn channel_counts(&self) -> Result<(u16, u16), String>;
+    fn channel_counts(&self) -> Result<(u16, u16), DriverError>;
     /// `getChannelInfo`.
-    fn channel(&self, input: bool, index: u16) -> Result<ChannelDesc, String>;
+    fn channel(&self, input: bool, index: u16) -> Result<ChannelDesc, DriverError>;
     /// `getBufferSize`.
-    fn buffer_sizes(&self) -> Result<BufferSizes, String>;
+    fn buffer_sizes(&self) -> Result<BufferSizes, DriverError>;
     /// `canSampleRate`.
     fn can_sample_rate(&self, hz: f64) -> bool;
     /// `getSampleRate`.
-    fn sample_rate(&self) -> Result<f64, String>;
+    fn sample_rate(&self) -> Result<f64, DriverError>;
     /// `setSampleRate`.
-    fn set_sample_rate(&self, hz: f64) -> Result<(), String>;
+    fn set_sample_rate(&self, hz: f64) -> Result<(), DriverError>;
     /// `getLatencies`: input, output, in frames.
-    fn latencies(&self) -> Result<(u32, u32), String>;
+    fn latencies(&self) -> Result<(u32, u32), DriverError>;
     /// `future(kAsioCanReportOverload)`.
     fn can_report_overload(&self) -> bool;
     /// `createBuffers` for `channels` (input?, index) in order, with this backend's
@@ -86,13 +264,13 @@ pub(crate) trait AsioDriver: Send + Sync {
         &self,
         channels: &[(bool, u16)],
         frames: u32,
-    ) -> Result<Vec<[*mut u8; 2]>, String>;
+    ) -> Result<Vec<[*mut u8; 2]>, DriverError>;
     /// `start`.
-    fn start(&self) -> Result<(), String>;
+    fn start(&self) -> Result<(), DriverError>;
     /// `stop`.
-    fn stop(&self) -> Result<(), String>;
+    fn stop(&self) -> Result<(), DriverError>;
     /// `disposeBuffers`.
-    fn dispose_buffers(&self) -> Result<(), String>;
+    fn dispose_buffers(&self) -> Result<(), DriverError>;
     /// The calls a switch makes, for the callback's own use.
     fn rt(&self) -> Box<dyn RtDriver>;
 }
@@ -129,7 +307,7 @@ pub(crate) fn device_caps(
     id: &str,
     first: bool,
 ) -> Result<DeviceCaps, AudioError> {
-    let err = |e: String| backend_err(Operation::Enumerate, e);
+    let err = |e: DriverError| refusal(id, Step::Other(Operation::Enumerate), e);
     let (ins, outs) = drv.channel_counts().map_err(err)?;
     let sizes = drv.buffer_sizes().map_err(err)?;
     let current = drv.sample_rate().map_err(err)?;
@@ -207,6 +385,7 @@ pub(crate) fn device_caps(
         duplex_clock: ClockRelation::SingleCallback,
         index: IndexExactness::Exact,
         latency,
+        clock_sources: clock_sources(drv),
         notes,
     })
 }
@@ -223,6 +402,7 @@ pub(crate) fn unloaded_caps(id: &str, held: &str) -> DeviceCaps {
         duplex_clock: ClockRelation::SingleCallback,
         index: IndexExactness::Exact,
         latency: StaticLatency::Unknown,
+        clock_sources: Vec::new(),
         notes: vec![format!(
             "not loaded while {held} is open: a process runs one ASIO driver at a time"
         )],
@@ -249,7 +429,7 @@ pub(crate) fn open_stream(
     release: Box<dyn FnOnce() + Send>,
 ) -> Result<DuplexStream, AudioError> {
     request.validate()?;
-    let err = |e: String| backend_err(Operation::Open, e);
+    let err = |e: DriverError| refusal(&id.0, Step::Other(Operation::Open), e);
     let (ins, outs) = drv.channel_counts().map_err(err)?;
     if let Some(&ch) = request.input_map.iter().find(|&&c| c >= ins) {
         return Err(Unsupported::InputChannel {
@@ -307,26 +487,34 @@ pub(crate) fn open_stream(
     for &(input, ch) in &wanted {
         let d = drv.channel(input, ch).map_err(err)?;
         let f = Format::from_asio(d.sample_type).ok_or_else(|| {
-            err(format!(
-                "{} {} ({}) is {}, which ac2 does not convert",
-                if input { "input" } else { "output" },
-                ch + 1,
-                d.name,
-                Format::asio_name(d.sample_type)
-            ))
+            backend_err(
+                Operation::Open,
+                format!(
+                    "{} {} ({}) is {}, which ac2 does not convert",
+                    if input { "input" } else { "output" },
+                    ch + 1,
+                    d.name,
+                    Format::asio_name(d.sample_type)
+                ),
+            )
         })?;
         formats.push(f);
     }
 
     let plumbing = Plumbing::new(&mut request, rate, frames as usize);
-    let bufs = drv.create_buffers(&wanted, frames).map_err(err)?;
+    let bufs = drv
+        .create_buffers(&wanted, frames)
+        .map_err(|e| refusal(&id.0, Step::CreateBuffers, e))?;
     if bufs.len() != wanted.len() {
         let _ = drv.dispose_buffers();
-        return Err(err(format!(
-            "driver returned {} buffers for {} channels",
-            bufs.len(),
-            wanted.len()
-        )));
+        return Err(backend_err(
+            Operation::Open,
+            format!(
+                "driver returned {} buffers for {} channels",
+                bufs.len(),
+                wanted.len()
+            ),
+        ));
     }
     let channel = |i: usize| Channel {
         bufs: bufs[i],
@@ -346,6 +534,10 @@ pub(crate) fn open_stream(
     let input_format = inputs[0].format.sample_format();
     let output_format = outputs.first().map(|c| c.format.sample_format());
     let latencies = drv.latencies().unwrap_or((0, 0));
+    let clock_source = clock_sources(&*drv)
+        .into_iter()
+        .find(|c| c.current)
+        .map(|c| c.name);
 
     let events = Arc::clone(&plumbing.events);
     let engine = Arc::new(Engine::new(
@@ -367,7 +559,7 @@ pub(crate) fn open_stream(
     if let Err(e) = drv.start() {
         slot.clear();
         let _ = drv.dispose_buffers();
-        return Err(backend_err(Operation::Start, e));
+        return Err(refusal(&id.0, Step::Start, e));
     }
     engine.started();
     let deadline = Instant::now() + first_switches;
@@ -397,6 +589,7 @@ pub(crate) fn open_stream(
             input: latencies.0,
             output: latencies.1,
         },
+        clock_source,
         delivery: Delivery::Device,
     };
     // Output written in one switch leaves after the other half has played, then passes

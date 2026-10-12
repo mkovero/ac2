@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -16,13 +16,31 @@ use super::outage::{Outage, OutageKind};
 use super::sim::{FakeDriver, Sim};
 use super::{FAKE_DEVICE_ID, FAKE_INPUT_ID, FAKE_OUTPUT_ID, FAKE_SPLIT_NAME as SPLIT_NAME};
 
-/// The simulated device. Cloning shares the parked manual driver slot and the device's
-/// availability.
+/// The simulated device. Cloning shares the parked manual driver slot, the device's
+/// availability and its driver settings.
 #[derive(Debug, Clone)]
 pub struct FakeBackend {
     config: FakeConfig,
     parked: Arc<Mutex<Option<FakeDriver>>>,
     outage: Arc<Outage>,
+    panel: Arc<Panel>,
+}
+
+/// The simulated driver's own settings, as an ASIO driver's control panel changes them.
+#[derive(Debug, Default)]
+struct Panel {
+    /// The rate and buffer size the device runs at, once changed from the configuration's.
+    now: Mutex<Option<(u32, u32)>>,
+    /// What opening the control panel changes next, if anything.
+    on_open: Mutex<Option<(u32, u32)>>,
+    /// Control panel calls so far.
+    opened: AtomicU64,
+    /// Driver resets so far; a stream running when one happens ends.
+    resets: AtomicU64,
+}
+
+fn locked<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl FakeBackend {
@@ -33,7 +51,38 @@ impl FakeBackend {
             config,
             parked: Arc::new(Mutex::new(None)),
             outage: Arc::new(Outage::new()),
+            panel: Arc::new(Panel::default()),
         })
+    }
+
+    /// The driver resets itself to run at `sample_rate` and `block_frames` from now on, as
+    /// an ASIO driver does after a change in its control panel: a running stream ends with
+    /// [`EventSnapshot::reset`](crate::EventSnapshot::reset), and the device lists and
+    /// opens at the new settings.
+    pub fn driver_reset(&self, sample_rate: u32, block_frames: u32) {
+        *locked(&self.panel.now) = Some((sample_rate.max(1), block_frames.max(1)));
+        self.panel.resets.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// What the next [`Backend::control_panel`] call does: change the driver to this rate
+    /// and buffer size ([`Self::driver_reset`]), or nothing.
+    pub fn script_panel(&self, change: Option<(u32, u32)>) {
+        *locked(&self.panel.on_open) = change;
+    }
+
+    /// [`Backend::control_panel`] calls so far.
+    pub fn panel_opens(&self) -> u64 {
+        self.panel.opened.load(Ordering::Acquire)
+    }
+
+    /// The configuration with the driver's current rate and buffer size.
+    fn current(&self) -> FakeConfig {
+        let mut c = self.config.clone();
+        if let Some((rate, frames)) = *locked(&self.panel.now) {
+            c.sample_rate = rate;
+            c.block_frames = frames;
+        }
+        c
     }
 
     /// The device stops delivering without an error ([`OutageKind::Stall`]) for `lasts`, or
@@ -76,7 +125,7 @@ impl FakeBackend {
     ) -> Result<(DuplexStream, FakeDriver), AudioError> {
         request.validate()?;
         self.outage.admit()?;
-        let c = &self.config;
+        let c = &self.current();
         for (selector, direction) in [
             (&request.input_device, Direction::Input),
             (&request.output_device, Direction::Output),
@@ -143,6 +192,7 @@ impl FakeBackend {
             },
             index: IndexExactness::Exact,
             latency: StaticLatency::Unknown,
+            clock_source: None,
             delivery: Delivery::Stepped,
         };
         let sim = Sim::new(
@@ -180,8 +230,26 @@ impl Backend for FakeBackend {
         }
     }
 
+    /// Counts the call and applies what [`FakeBackend::script_panel`] scripted.
+    fn control_panel(&self, device: &DeviceSelector) -> Result<(), AudioError> {
+        if let DeviceSelector::Id(id) = device
+            && id.0 != self.config.endpoints.id(Direction::Input)
+            && id.0 != self.config.endpoints.id(Direction::Output)
+        {
+            return Err(AudioError::DeviceNotFound {
+                direction: Direction::Input,
+                selector: device.to_string(),
+            });
+        }
+        self.panel.opened.fetch_add(1, Ordering::AcqRel);
+        if let Some((rate, frames)) = locked(&self.panel.on_open).take() {
+            self.driver_reset(rate, frames);
+        }
+        Ok(())
+    }
+
     fn enumerate(&self) -> Result<Vec<DeviceCaps>, AudioError> {
-        let c = &self.config;
+        let c = &self.current();
         let dir = |channels: u16, names: &Option<Vec<String>>| DirectionCaps {
             max_channels: channels,
             rates: vec![RateRange {
@@ -210,6 +278,7 @@ impl Backend for FakeBackend {
             duplex_clock,
             index: IndexExactness::Exact,
             latency: StaticLatency::Unknown,
+            clock_sources: Vec::new(),
             notes: Vec::new(),
         };
         Ok(match c.endpoints {
@@ -253,15 +322,16 @@ impl Backend for FakeBackend {
             FakeDrive::Thread(pace) => {
                 stream.set_delivery(Delivery::Device);
                 let outage = Arc::clone(&self.outage);
-                let guard = spawn_driver(driver, pace, &self.config, outage).map_err(|e| {
+                let c = self.current();
+                let panel = Arc::clone(&self.panel);
+                let guard = spawn_driver(driver, pace, &c, outage, panel).map_err(|e| {
                     AudioError::Backend {
                         backend: BackendKind::Fake,
                         operation: Operation::Start,
                         detail: e.to_string(),
                     }
                 })?;
-                let drain =
-                    Duration::from_nanos(self.config.ns(2 * u64::from(self.config.block_frames)));
+                let drain = Duration::from_nanos(c.ns(2 * u64::from(c.block_frames)));
                 stream.set_guard(Box::new(guard), drain);
             }
         }
@@ -289,6 +359,7 @@ fn spawn_driver(
     pace: Pace,
     c: &FakeConfig,
     outage: Arc<Outage>,
+    panel: Arc<Panel>,
 ) -> std::io::Result<ThreadGuard> {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_t = Arc::clone(&stop);
@@ -297,6 +368,7 @@ fn spawn_driver(
     let (sleeper, _) = crate::timer::sleeper()?;
     // Read before the thread starts: an outage begun after the open hits this stream.
     let born = outage.begun.load(Ordering::Acquire);
+    let born_resets = panel.resets.load(Ordering::Acquire);
     let thread = std::thread::Builder::new()
         .name("ac2-fake-audio".into())
         .spawn(move || {
@@ -304,6 +376,15 @@ fn spawn_driver(
             let mut due = Duration::ZERO;
             let mut ended = false;
             while !stop_t.load(Ordering::Acquire) {
+                if panel.resets.load(Ordering::Acquire) != born_resets {
+                    // The driver reset itself under this stream, which is over.
+                    if !ended {
+                        ended = true;
+                        driver.sim.events.reset();
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
                 if outage.begun.load(Ordering::Acquire) != born {
                     // The device was reset under this stream: it never delivers again; a
                     // vanished one is reported ended by the host, a stalled one says nothing.

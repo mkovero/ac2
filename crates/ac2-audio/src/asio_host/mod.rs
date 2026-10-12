@@ -7,6 +7,7 @@
 //! message handling, negotiation) are plain Rust and run in the Linux tests against a
 //! scripted driver; only `driver.rs` touches COM.
 
+mod backend;
 mod engine;
 mod format;
 mod open;

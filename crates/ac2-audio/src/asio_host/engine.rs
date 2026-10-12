@@ -261,7 +261,7 @@ impl Engine {
         // 0 means the driver lost its clock; any other rate than the stream's means the
         // index no longer counts the frames it was opened at.
         if hz != self.rate && self.live() {
-            self.events.end();
+            self.events.reset();
         }
     }
 }
@@ -281,8 +281,9 @@ pub(crate) mod selector {
 
 /// The answer to `asioMessage(selector, value)`, and its effect on the running stream.
 ///
-/// - Reset and resync requests end the stream: the recovery reopens the same configuration
-///   from scratch, which is what a reset asks the host to do.
+/// - Reset and resync requests end the stream as a driver reset
+///   ([`EventSnapshot::reset`](crate::EventSnapshot::reset)): the recovery reopens from
+///   scratch at the driver's settings, which is what a reset asks the host to do.
 /// - A buffer size change is refused (answer 0, and not listed as supported): a driver must
 ///   then ask for a reset rather than change the size under a callback whose buffers and
 ///   index step were sized at open. A driver that announces one anyway also ends the
@@ -309,7 +310,7 @@ pub(crate) fn answer(engine: Option<&Engine>, selector: i32, value: i32) -> i32 
             if let Some(e) = engine
                 && e.live()
             {
-                e.events.end();
+                e.events.reset();
             }
             i32::from(selector != BUFFER_SIZE_CHANGE)
         }

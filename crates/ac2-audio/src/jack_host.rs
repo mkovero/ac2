@@ -371,6 +371,7 @@ impl Backend for JackBackend {
             duplex_clock: ClockRelation::SingleCallback,
             index: IndexExactness::Exact,
             latency: static_latency(&client, &capture, &playback),
+            clock_sources: Vec::new(),
             notes: vec!["rate and buffer size are the server's".into()],
         }])
     }
@@ -386,6 +387,13 @@ impl Backend for JackBackend {
             .map_or(Presence::Absent, |generation| Presence::Present {
                 generation,
             })
+    }
+
+    fn control_panel(&self, _device: &DeviceSelector) -> Result<(), AudioError> {
+        Err(crate::error::Unsupported::ControlPanel {
+            backend: BackendKind::Jack,
+        }
+        .into())
     }
 
     fn open(&self, mut request: DuplexRequest) -> Result<DuplexStream, AudioError> {
@@ -527,6 +535,7 @@ impl Backend for JackBackend {
                 capture: cap_lat,
                 playback: play_lat,
             },
+            clock_source: None,
             delivery: Delivery::Device,
         };
         // Output written in cycle n leaves at the next cycle boundary, then passes the

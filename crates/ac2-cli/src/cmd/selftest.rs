@@ -453,6 +453,7 @@ mod tests {
             duplex_clock: ClockRelation::SingleCallback,
             index: IndexExactness::Exact,
             latency: ac2_audio::StaticLatency::Unknown,
+            clock_sources: Vec::new(),
             notes: vec![],
         }
     }

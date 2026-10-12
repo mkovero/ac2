@@ -207,8 +207,20 @@ pub struct DeviceCaps {
     pub index: IndexExactness,
     /// Stated latency.
     pub latency: StaticLatency,
+    /// The clocks the device can run on, as its driver names them, the current one marked
+    /// (ASIO; empty where the host does not say).
+    pub clock_sources: Vec<ClockSource>,
     /// Problems that did not stop the device from being listed.
     pub notes: Vec<String>,
+}
+
+/// A clock a device can run on ("Internal", "Word Clock", "ADAT"), as its driver names it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClockSource {
+    /// The driver's name for it.
+    pub name: String,
+    /// The device runs on it now.
+    pub current: bool,
 }
 
 /// Which device to open for one direction.
@@ -389,6 +401,8 @@ pub struct Negotiated {
     pub index: IndexExactness,
     /// Stated latency.
     pub latency: StaticLatency,
+    /// The clock source the device ran on when opened, as its driver names it (ASIO).
+    pub clock_source: Option<String>,
     /// What paces the blocks.
     pub delivery: Delivery,
 }
@@ -440,6 +454,15 @@ pub trait Backend: Send + Sync + fmt::Debug {
     /// (a server's socket, a device list). Opens nothing and emits nothing; may block on a
     /// hung host, so callers look off any thread that must stay responsive.
     fn probe(&self, device: &DeviceSelector) -> Presence;
+
+    /// Opens the device's own settings window on the machine running the backend (an ASIO
+    /// driver's control panel, where pro interfaces set their rate, buffer size, clock and
+    /// routing). Returns once the driver has shown it; a driver whose panel is a modal
+    /// dialog returns when it closes, so callers call off any thread that must stay
+    /// responsive. A change made there may make the driver reset a running stream: the
+    /// stream then ends ([`crate::EventSnapshot::reset`]). Backends without such a window
+    /// refuse with [`Unsupported::ControlPanel`](crate::Unsupported::ControlPanel).
+    fn control_panel(&self, device: &DeviceSelector) -> Result<(), AudioError>;
 }
 
 #[cfg(test)]

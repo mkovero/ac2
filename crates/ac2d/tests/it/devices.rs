@@ -56,6 +56,10 @@ impl Backend for Recording {
             .push((request.output_channels, generator));
         self.inner.open(request)
     }
+
+    fn control_panel(&self, device: &ac2_audio::DeviceSelector) -> Result<(), AudioError> {
+        self.inner.control_panel(device)
+    }
 }
 
 fn named_rig(drive: FakeDrive, noise: f32) -> FakeBackend {
@@ -471,6 +475,10 @@ impl Backend for AsJack {
 
     fn probe(&self, device: &ac2_audio::DeviceSelector) -> ac2_audio::Presence {
         self.0.probe(device)
+    }
+
+    fn control_panel(&self, device: &ac2_audio::DeviceSelector) -> Result<(), AudioError> {
+        self.0.control_panel(device)
     }
 }
 

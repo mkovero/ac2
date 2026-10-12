@@ -9,7 +9,7 @@
 
 use std::ffi::{c_long, c_void};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 use azo::driver::{CallbackHandle, Driver, Metadata, Proxy};
 use azo::dto::{ChannelId, Granularity};
@@ -17,14 +17,12 @@ use azo::future::CanReportOverload;
 use azo::sys::{Bool, Callbacks, MessageSelector, SampleRate, Time, TimeInfoFlags};
 use azo::utils::Host;
 
+use super::backend::{AsioHost, DriverSource};
 use super::engine::{RtDriver, Slot, TimeInfo, answer};
 use super::open::{
-    AsioDriver, BufferSizes, ChannelDesc, backend_err, device_caps, first_switches_wait, not_found,
-    one_device, open_stream, unloaded_caps,
+    AsioCode, AsioDriver, BufferSizes, ChannelDesc, ClockDesc, DriverError, backend_err,
 };
-use crate::backend::{
-    Backend, BackendKind, DeviceCaps, DeviceId, DeviceSelector, DuplexRequest, Presence,
-};
+use crate::backend::{Backend, BackendKind, DeviceCaps, DeviceSelector, DuplexRequest, Presence};
 use crate::error::{AudioError, Operation, Unavailability};
 use crate::stream::DuplexStream;
 
@@ -122,31 +120,55 @@ unsafe extern "system" fn asio_message(
     SLOT.with(|e| answer(e, selector.0, value))
 }
 
-/// A loaded, initialised driver, reached through azo's apartment.
+/// A loaded driver, reached through azo's apartment.
 struct AzoDriver {
     proxy: Proxy,
 }
 
 impl AzoDriver {
-    fn error(&self, e: azo::Error) -> String {
-        let msg = self.proxy.last_error();
-        let msg = msg.to_string_lossy();
-        if msg.trim().is_empty() {
-            e.to_string()
-        } else {
-            format!("{e}: {}", msg.trim())
+    /// The driver's result code with its own message, if it gave one.
+    fn error(&self, e: azo::Error) -> DriverError {
+        DriverError {
+            code: Some(AsioCode::from_raw(e.code().0)),
+            message: self.message(),
         }
+    }
+
+    fn message(&self) -> String {
+        self.proxy.last_error().to_string_lossy().trim().to_owned()
     }
 }
 
 impl AsioDriver for AzoDriver {
-    fn channel_counts(&self) -> Result<(u16, u16), String> {
+    fn init(&self) -> Result<(), DriverError> {
+        if self.proxy.init(None) {
+            Ok(())
+        } else {
+            Err(DriverError::text(self.message()))
+        }
+    }
+
+    fn clock_sources(&self) -> Result<Vec<ClockDesc>, DriverError> {
+        let c = self.proxy.clock_sources().map_err(|e| self.error(e))?;
+        Ok(c.into_iter()
+            .map(|c| ClockDesc {
+                name: c.name.to_string_lossy().into_owned(),
+                current: c.is_current,
+            })
+            .collect())
+    }
+
+    fn control_panel(&self) -> Result<(), DriverError> {
+        self.proxy.open_control_panel().map_err(|e| self.error(e))
+    }
+
+    fn channel_counts(&self) -> Result<(u16, u16), DriverError> {
         let c = self.proxy.channel_counts().map_err(|e| self.error(e))?;
         let n = |v: c_long| u16::try_from(v.max(0)).unwrap_or(u16::MAX);
         Ok((n(c.in_), n(c.out)))
     }
 
-    fn channel(&self, input: bool, index: u16) -> Result<ChannelDesc, String> {
+    fn channel(&self, input: bool, index: u16) -> Result<ChannelDesc, DriverError> {
         let info = self
             .proxy
             .channel_info(ChannelId {
@@ -160,7 +182,7 @@ impl AsioDriver for AzoDriver {
         })
     }
 
-    fn buffer_sizes(&self) -> Result<BufferSizes, String> {
+    fn buffer_sizes(&self) -> Result<BufferSizes, DriverError> {
         let b = self.proxy.buffer_size().map_err(|e| self.error(e))?;
         Ok(BufferSizes {
             min: b.min,
@@ -178,15 +200,15 @@ impl AsioDriver for AzoDriver {
         self.proxy.can_sample_rate(hz).is_ok()
     }
 
-    fn sample_rate(&self) -> Result<f64, String> {
+    fn sample_rate(&self) -> Result<f64, DriverError> {
         self.proxy.get_sample_rate().map_err(|e| self.error(e))
     }
 
-    fn set_sample_rate(&self, hz: f64) -> Result<(), String> {
+    fn set_sample_rate(&self, hz: f64) -> Result<(), DriverError> {
         self.proxy.set_sample_rate(hz).map_err(|e| self.error(e))
     }
 
-    fn latencies(&self) -> Result<(u32, u32), String> {
+    fn latencies(&self) -> Result<(u32, u32), DriverError> {
         let l = self.proxy.latencies().map_err(|e| self.error(e))?;
         Ok((l.in_.max(0) as u32, l.out.max(0) as u32))
     }
@@ -199,7 +221,7 @@ impl AsioDriver for AzoDriver {
         &self,
         channels: &[(bool, u16)],
         frames: u32,
-    ) -> Result<Vec<[*mut u8; 2]>, String> {
+    ) -> Result<Vec<[*mut u8; 2]>, DriverError> {
         let ids: Vec<ChannelId> = channels
             .iter()
             .map(|&(input, index)| ChannelId {
@@ -207,7 +229,7 @@ impl AsioDriver for AzoDriver {
                 index: c_long::from(index),
             })
             .collect();
-        let frames = c_long::try_from(frames).map_err(|e| e.to_string())?;
+        let frames = c_long::try_from(frames).map_err(|e| DriverError::text(e.to_string()))?;
         // SAFETY: CALLBACKS is static; the stream guard disposes the buffers before the
         // stream's pointers into them are dropped.
         #[allow(unsafe_code)]
@@ -216,15 +238,15 @@ impl AsioDriver for AzoDriver {
             .map_err(|e| self.error(e))
     }
 
-    fn start(&self) -> Result<(), String> {
+    fn start(&self) -> Result<(), DriverError> {
         self.proxy.start().map_err(|e| self.error(e))
     }
 
-    fn stop(&self) -> Result<(), String> {
+    fn stop(&self) -> Result<(), DriverError> {
         self.proxy.stop().map_err(|e| self.error(e))
     }
 
-    fn dispose_buffers(&self) -> Result<(), String> {
+    fn dispose_buffers(&self) -> Result<(), DriverError> {
         self.proxy.dispose_buffers().map_err(|e| self.error(e))
     }
 
@@ -249,31 +271,76 @@ impl RtDriver for AzoRt {
     }
 }
 
-/// The driver this process holds, and what it listed as when opened.
-#[derive(Debug)]
-struct Held {
-    id: DeviceId,
-    caps: Option<DeviceCaps>,
-}
-
+/// The drivers listed under `HKLM\SOFTWARE\ASIO`, created in the `ac2-asio` apartment.
 #[derive(Debug, Default)]
-struct Inner {
+struct AzoSource {
     host: Mutex<Option<Arc<Host>>>,
-    held: Mutex<Option<Held>>,
-    /// Serialises loading drivers: listing loads each one in turn, and a process holds
-    /// one driver at a time.
-    loading: Mutex<()>,
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+impl AzoSource {
+    fn host(&self) -> Result<Arc<Host>, AudioError> {
+        let mut h = self
+            .host
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(h) = h.as_ref() {
+            return Ok(Arc::clone(h));
+        }
+        let host = Host::with_thread_name("ac2-asio")
+            .map_err(|e| backend_err(Operation::Open, format!("ac2-asio thread: {e}")))?;
+        *h = Some(Arc::clone(&host));
+        Ok(host)
+    }
+}
+
+/// Installed drivers, in registry order.
+fn installed() -> Result<Vec<Metadata>, AudioError> {
+    match Metadata::enumerate() {
+        Ok(m) if !m.is_empty() => Ok(m),
+        _ => Err(AudioError::Unavailable {
+            backend: BackendKind::Asio,
+            reason: Unavailability::NoAsioDriver,
+        }),
+    }
+}
+
+impl DriverSource for AzoSource {
+    fn installed(&self) -> Result<Vec<String>, AudioError> {
+        Ok(installed()?
+            .iter()
+            .map(|m| m.description.to_string_lossy())
+            .collect())
+    }
+
+    fn create(&self, name: &str) -> Result<Arc<dyn AsioDriver>, AudioError> {
+        let metas = installed()?;
+        let meta = metas
+            .iter()
+            .find(|m| m.description.to_string_lossy() == name)
+            .ok_or_else(|| super::open::not_found(&crate::DeviceId(name.into())))?;
+        let proxy = self
+            .host()?
+            .create_driver(meta.clsid)
+            .map_err(|e| backend_err(Operation::Open, format!("{name}: {e}")))?;
+        Ok(Arc::new(AzoDriver { proxy }))
+    }
+
+    fn slot(&self) -> &'static Slot {
+        &SLOT
+    }
 }
 
 /// The ASIO backend: installed ASIO drivers, one per device; input and output on the same
 /// driver.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AsioBackend {
-    inner: Arc<Inner>,
+    host: Arc<AsioHost<AzoSource>>,
+}
+
+impl Default for AsioBackend {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AsioBackend {
@@ -286,50 +353,10 @@ impl AsioBackend {
             QueryPerformanceFrequency(&mut hz)
         };
         QPC_HZ.store(hz.max(0) as u64, Ordering::Relaxed);
-        Self::default()
-    }
-
-    fn host(&self) -> Result<Arc<Host>, AudioError> {
-        let mut h = lock(&self.inner.host);
-        if let Some(h) = h.as_ref() {
-            return Ok(Arc::clone(h));
+        Self {
+            host: Arc::new(AsioHost::new(AzoSource::default())),
         }
-        let host = Host::with_thread_name("ac2-asio")
-            .map_err(|e| backend_err(Operation::Open, format!("ac2-asio thread: {e}")))?;
-        *h = Some(Arc::clone(&host));
-        Ok(host)
     }
-
-    fn load(&self, meta: &Metadata) -> Result<AzoDriver, AudioError> {
-        let name = meta.description.to_string_lossy();
-        let proxy = self
-            .host()?
-            .create_driver(meta.clsid)
-            .map_err(|e| backend_err(Operation::Open, format!("{name}: {e}")))?;
-        if !proxy.init(None) {
-            let msg = proxy.last_error();
-            return Err(backend_err(
-                Operation::Open,
-                format!("{name} did not initialise: {}", msg.to_string_lossy()),
-            ));
-        }
-        Ok(AzoDriver { proxy })
-    }
-}
-
-/// Installed drivers, from `HKLM\SOFTWARE\ASIO`, in registry order.
-fn installed() -> Result<Vec<Metadata>, AudioError> {
-    match Metadata::enumerate() {
-        Ok(m) if !m.is_empty() => Ok(m),
-        _ => Err(AudioError::Unavailable {
-            backend: BackendKind::Asio,
-            reason: Unavailability::NoAsioDriver,
-        }),
-    }
-}
-
-fn id_of(m: &Metadata) -> String {
-    m.description.to_string_lossy()
 }
 
 impl Backend for AsioBackend {
@@ -338,92 +365,18 @@ impl Backend for AsioBackend {
     }
 
     fn enumerate(&self) -> Result<Vec<DeviceCaps>, AudioError> {
-        let metas = installed()?;
-        let _loading = lock(&self.inner.loading);
-        let held = lock(&self.inner.held)
-            .as_ref()
-            .map(|h| (h.id.clone(), h.caps.clone()));
-        let mut out = Vec::with_capacity(metas.len());
-        for (i, m) in metas.iter().enumerate() {
-            let id = id_of(m);
-            let caps = match &held {
-                Some((h, Some(caps))) if h.0 == id => caps.clone(),
-                Some((h, _)) => unloaded_caps(&id, &h.0),
-                None => match self.load(m) {
-                    Ok(drv) => device_caps(&drv, &id, i == 0)?,
-                    Err(e) => {
-                        let mut c = unloaded_caps(&id, "");
-                        c.notes = vec![e.to_string()];
-                        c
-                    }
-                },
-            };
-            out.push(caps);
-        }
-        Ok(out)
+        self.host.enumerate()
     }
 
-    /// The registry only: loading a driver to look at it could take it from its control
-    /// panel or another program.
     fn probe(&self, device: &DeviceSelector) -> Presence {
-        let present = match (Metadata::enumerate(), device) {
-            (Ok(m), DeviceSelector::Default) => !m.is_empty(),
-            (Ok(m), DeviceSelector::Id(id)) => m.iter().any(|m| id_of(m) == id.0),
-            (Err(_), _) => false,
-        };
-        if present {
-            Presence::Present { generation: 0 }
-        } else {
-            Presence::Absent
-        }
+        self.host.probe(device)
     }
 
     fn open(&self, request: DuplexRequest) -> Result<DuplexStream, AudioError> {
-        request.validate()?;
-        let want = one_device(&request.input_device, &request.output_device)?;
-        let metas = installed()?;
-        let (index, meta) = match &want {
-            None => (0, &metas[0]),
-            Some(id) => metas
-                .iter()
-                .enumerate()
-                .find(|(_, m)| id_of(m) == id.0)
-                .ok_or_else(|| not_found(id))?,
-        };
-        let id = DeviceId(id_of(meta));
-        let _loading = lock(&self.inner.loading);
-        if let Some(h) = lock(&self.inner.held).as_ref() {
-            return Err(AudioError::Unavailable {
-                backend: BackendKind::Asio,
-                reason: Unavailability::Host(format!(
-                    "{} is open in this process; ASIO runs one driver at a time",
-                    h.id
-                )),
-            });
-        }
-        let drv = Arc::new(self.load(meta)?);
-        let caps = device_caps(&*drv, &id.0, index == 0).ok();
-        let (rate, frames) =
-            caps.as_ref()
-                .and_then(|c| c.input.as_ref())
-                .map_or((48_000, 1024), |d| {
-                    (
-                        d.default_rate.unwrap_or(48_000),
-                        d.default_buffer.unwrap_or(1024),
-                    )
-                });
-        let wait = first_switches_wait(
-            request.sample_rate.unwrap_or(rate),
-            request.buffer_frames.unwrap_or(frames),
-        );
-        *lock(&self.inner.held) = Some(Held {
-            id: id.clone(),
-            caps,
-        });
-        let inner = Arc::clone(&self.inner);
-        let release = Box::new(move || *lock(&inner.held) = None);
-        open_stream(drv, &SLOT, id, request, wait, release).inspect_err(|_| {
-            *lock(&self.inner.held) = None;
-        })
+        self.host.open(request)
+    }
+
+    fn control_panel(&self, device: &DeviceSelector) -> Result<(), AudioError> {
+        self.host.control_panel(device)
     }
 }

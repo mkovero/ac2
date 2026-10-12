@@ -21,6 +21,7 @@ pub struct BackendEvents {
     config_changes: AtomicU64,
     errors: AtomicU64,
     ended: AtomicBool,
+    reset: AtomicBool,
 }
 
 /// Plain copy of [`BackendEvents`].
@@ -34,6 +35,10 @@ pub struct EventSnapshot {
     pub errors: u64,
     /// The host stopped the stream (server shut down, device removed).
     pub ended: bool,
+    /// The stream ended because the driver asked to be reset: its own settings changed
+    /// (rate, buffer size or clock, typically in its control panel). A reopen should take
+    /// the driver's new settings rather than force the old ones back.
+    pub reset: bool,
 }
 
 impl BackendEvents {
@@ -58,6 +63,12 @@ impl BackendEvents {
         self.ended.store(true, Ordering::Release);
     }
 
+    /// Records that the driver asked to be reset, which ends the stream.
+    pub fn reset(&self) {
+        self.reset.store(true, Ordering::Release);
+        self.end();
+    }
+
     /// Current values.
     pub fn snapshot(&self) -> EventSnapshot {
         EventSnapshot {
@@ -65,6 +76,7 @@ impl BackendEvents {
             config_changes: self.config_changes.load(Ordering::Relaxed),
             errors: self.errors.load(Ordering::Relaxed),
             ended: self.ended.load(Ordering::Acquire),
+            reset: self.reset.load(Ordering::Acquire),
         }
     }
 }
