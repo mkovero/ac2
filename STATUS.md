@@ -6,9 +6,10 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 ## Where things stand
 - Phases 0–6 (1.0 scope) pass their CI criteria; phase 7 (post-1.0 extras) is in progress.
   Per-phase table with CI and hardware results: `PLAN.md` §9.0.
-- Hardware verified on Linux only: the `pupu` rig (`docs/rigs/pupu.md`), a Pi 4 kiosk
-  client. macOS: a tester runs the disk image (`testing/macos/`); Windows: MSI in a VM,
-  tester guide and dev.10 MSI in `testing/windows/`.
+- Hardware verified on Linux: the `pupu` rig (`docs/rigs/pupu.md`), a Pi 4 kiosk client.
+  Windows: RME Babyface Pro on its ASIO driver in a VM (1 h duplex, loopback timing;
+  `docs/design/asio.md` §4c); tester guide and dev.13 MSI in `testing/windows/`. macOS: no
+  audio interface yet; tester guide and dev.13 disk image in `testing/macos/`.
 - CI on push is Linux only; macOS/Windows run before a release or on dispatch
   (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 2c07efef on pupu,
   ketunkolo and the Pi, then the app alone at 0fef18ea on ketunkolo and the Pi
@@ -35,7 +36,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   `docs/user-guide.md` *Panes: split, close…*. A measurement can carry its own panes (in the
   session, decision P1); only a measurement row brings them, a live-curve, math or trace row
   goes into the focused pane alone (*Layouts follow the measurement*).
-- Open hardware gates: duplex check (`ac2 selftest duplex`) and 1 h run on macOS/Windows, keyboard-only speaker
+- Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
+  a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
 - Windows audio is ASIO only (decision W1): the backend over the azo fork is in every Windows
   build and WASAPI is gone; devices without a driver use FlexASIO, and with no ASIO driver the
