@@ -104,7 +104,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
-| 5f18a3ef | 2026-10-12 | 49 / 25 | autosave restored as is (no format change since 2c07efef); input 1 recalibrated electrically with the mic loading (MM1 330 Ω → FF400 XLR 2 kΩ, −1.3 dB): 0 dBFS = 120.3 dB SPL (was 119.1), volts from the AD2 |
+| 5f18a3ef | 2026-10-12 | 49 / 25 | autosave restored as is (no format change since 2c07efef); input 1 recalibrated electrically with the mic loading (MM1 330 Ω → FF400 XLR 2 kΩ, −1.3 dB): 0 dBFS = 120.5 dB SPL (was 119.1), volts from the AD2 at 1 kHz −40 dBFS |
 | 0fef18ea | 2026-10-11 | 43 / 25 | app only (ketunkolo, Pi): a pane whose measurement disappears waits for its name to return |
 | 2c07efef | 2026-10-11 | 43 / 25 | salvage of `autosave.v24` restored all twelve measurements; the Pi kiosk fell back to TF 1 during salvage and saved that layout (fixed by 0fef18ea; old file `ui.toml.bak-tf1`) |
 | c7bd24b1 | 2026-10-11 | 42 / 24 | first format change restored with `session salvage`; only the per-second Leq history skipped |
