@@ -11,7 +11,7 @@
 # -SoakMinutes N runs the session for N minutes instead of -Seconds and samples it once a
 # minute into soak-samples.csv: recorded frames against rate x time, discontinuities, the
 # stopped flag, and the daemon's CPU, working set and private bytes (a leak shows as steady
-# growth). It passes with no discontinuity, the frame count within 0.1 % of rate x time and
+# growth). It passes with no discontinuity, the frame count within 0.5 % of rate x time and
 # the daemon still running. This is the closest a hosted runner comes to the 1 h hardware
 # gate (docs/design/asio.md): the timing comes from a virtual cable through WASAPI, not from
 # an interface's clock and driver.
@@ -247,11 +247,13 @@ try {
 
     if ($status.stopped) { $problems += "session audio stopped: $($status.stopped | ConvertTo-Json -Compress)" }
     if ($SoakMinutes -gt 0) {
-        # Command latency is well under a second, 0.1 % of a minute-long run or more.
+        # The device clock is not the wall clock: a virtual cable is paced by a software timer
+        # (VB-CABLE runs about 0.13 % slow against the performance counter), a crystal stays
+        # within 0.01 %. Lost or stalled audio over an hour shows as far more than 0.5 %.
         $expected = [double]$rate * $elapsed
         $off = [math]::Abs($run.frames - $expected) / $expected
         Write-Host ("  recorded {0} frames in {1:N1} s, {2:P3} from {3:N0}" -f $run.frames, $elapsed, $off, $expected)
-        if ($off -gt 0.001) { $problems += ("recorded {0} frames in {1:N1} s: {2:P3} from rate x time" -f $run.frames, $elapsed, $off) }
+        if ($off -gt 0.005) { $problems += ("recorded {0} frames in {1:N1} s: {2:P3} from rate x time" -f $run.frames, $elapsed, $off) }
     }
     else {
         $expected = [int64]$rate * $Seconds
