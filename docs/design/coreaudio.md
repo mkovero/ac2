@@ -243,6 +243,9 @@ reads a channel without searching; ac2 never assumes one stream.
 **Unused streams.** `kAudioDevicePropertyIOProcStreamUsage` turns off input streams no
 mapped channel uses, so the HAL does not convert them. Output streams stay on: the
 generator's routes change at run time without a reopen (as in `asio_host`).
+Stage (a) leaves every stream on: an unused input stream costs only its conversion, and
+the stream-usage property is per IOProc, set between create and start; it comes with (b)
+if a many-stream interface shows the cost.
 
 **Rate.** `set_nominal_rate` only when the request names a rate other than the current
 one; it is a device-wide setting other apps see, so an unrequested rate is never forced.
@@ -538,3 +541,29 @@ WASAPI (`6dad3701`, `2b844164`, `57fcd527`).
    vendors' `Latency` + stream latency match the measured loop is unknown. Recommended:
    §10c records the remainder per interface; if it is ever negative, the stated latency is
    marked unreliable in `notes` for that device, not corrected.
+
+### Settled on CI (stage a)
+
+From the all-OS run [38271062157](https://github.com/mkovero/ac2/actions/runs/38271062157)
+(`macos-latest`, BlackHole 2ch, 48 kHz), `tools/release/macos-blackhole.sh` with
+`coreaudio-loop`:
+
+- **Exact index.** Impulses on output 1 returned on input 1 at exactly the stated latency,
+  every one, over 20 opens at each size: 2048 frames stated 4096 (in 2048 + out 2048),
+  measured 4096 for all 354 impulses; 1024 frames stated 2048, measured 2048 for all 366.
+  No stray sample on either input, no index break. The stated latency is the 2 buffers of
+  §7 (BlackHole's own latency and safety offsets are 0).
+- **cpal beside it, same build.** Self-test and a 30 s session on both: 0 xruns, gaps and
+  discontinuities on both, delay finder 480 samples (accepted, PSR 73 dB) on both; cpal
+  `same_device_separate_callbacks` / `estimated`, coreaudio `single_callback` / `exact`.
+- **Does the microphone request hang?** No, the call returns, but nothing ever answers it.
+  With the runner's grant revoked (TCC rows deleted, tccd restarted) the status is
+  `NotDetermined`; `requestAccessForMediaType` returned at once, its completion handler
+  had not run when the 10 s bound expired, and the status stayed `NotDetermined`: a
+  headless process gets no prompt. So the bound is what ends the wait, as designed (§12
+  Q5), and a silent open with a 5 s consent wait was refused in 5.03 s with
+  `MicrophonePending` instead of hanging in `AudioDeviceStart`.
+- **Does a replugged device get a new object id?** Not testable on BlackHole (it cannot be
+  unplugged). What CI shows: the object id (54) stayed the same across 40 open/close cycles,
+  so `probe`'s generation does not move on a reopen alone. The replug question stays for
+  the tester round on a real interface (§10c).
