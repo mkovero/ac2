@@ -252,11 +252,27 @@ jobs:
         shell: pwsh
         run: tools/release/windows-asio.ps1 -Bin target/debug -LogDir virtual-audio-logs
 
+      # Core Audio through cpal on BlackHole, a virtual loopback device (hosted macOS runners
+      # have no audio hardware), with the debug binaries built above. The driver loads only
+      # after coreaudiod restarts; no reboot is needed. sox is the stimulus the script plays
+      # into BlackHole (ac2's outputs stay silent). See docs/design/macos-ci-audio.md.
+      - name: Virtual audio device (BlackHole)
+        if: runner.os == 'macOS' && !cancelled()
+        run: |
+          brew install --cask blackhole-2ch
+          brew install sox
+          sudo launchctl kickstart -kp system/com.apple.audio.coreaudiod || sudo killall coreaudiod
+
+      - name: ac2 on BlackHole (Core Audio)
+        if: runner.os == 'macOS' && !cancelled()
+        timeout-minutes: 10
+        run: tools/release/macos-blackhole.sh target/debug virtual-audio-logs
+
       - name: Upload virtual-audio logs
-        if: runner.os == 'Windows' && !cancelled()
+        if: runner.os != 'Linux' && !cancelled()
         uses: actions/upload-artifact@v4
         with:
-          name: virtual-audio-logs
+          name: virtual-audio-logs-${{ runner.os }}
           path: virtual-audio-logs/
           if-no-files-found: ignore
 
