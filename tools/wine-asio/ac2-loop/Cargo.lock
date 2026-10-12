@@ -14,6 +14,7 @@ dependencies = [
  "rtrb",
  "serde",
  "thiserror 2.0.21",
+ "windows-sys",
 ]
 
 [[package]]
@@ -46,8 +47,8 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "azo"
-version = "0.4.0"
-source = "git+https://github.com/mkovero/azo?rev=3cb05ff0044fc4771e50a938e8e7ebd688b4d1a2#3cb05ff0044fc4771e50a938e8e7ebd688b4d1a2"
+version = "0.4.1"
+source = "git+https://github.com/mkovero/azo?rev=8ccc197966df0528db38c911655c89d1bd96d1c8#8ccc197966df0528db38c911655c89d1bd96d1c8"
 dependencies = [
  "azo-sys",
  "oneshot",
@@ -60,7 +61,7 @@ dependencies = [
 [[package]]
 name = "azo-sys"
 version = "0.3.2"
-source = "git+https://github.com/mkovero/azo?rev=3cb05ff0044fc4771e50a938e8e7ebd688b4d1a2#3cb05ff0044fc4771e50a938e8e7ebd688b4d1a2"
+source = "git+https://github.com/mkovero/azo?rev=8ccc197966df0528db38c911655c89d1bd96d1c8#8ccc197966df0528db38c911655c89d1bd96d1c8"
 dependencies = [
  "bitflags 2.13.2",
  "windows-core 0.100.0",
