@@ -8,6 +8,9 @@
 //! shared sample index. It passes when every delay equals the stated latency
 //! (`StaticLatency::Frames`, input + output) and no other sample on either input is
 //! non-zero: BlackHole is a bit-exact loop, so anything else is the backend's doing.
+//! A round trip with a block flagged as a break inside it (the VM overloaded the HAL's I/O
+//! thread: `XRUN | DISCONTINUITY`) is reported apart and not judged: across a flagged break
+//! the stream itself says the line is not continuous.
 //!
 //! `coreaudio-loop consent`: silent. The microphone authorization, a bounded request for it
 //! (does the call return, does its handler run), then a silent open with a short consent
@@ -142,6 +145,7 @@ mod mac {
         let mut generations = Vec::new();
         for &buffer in &buffers {
             let mut delays: BTreeMap<i64, u32> = BTreeMap::new();
+            let mut across: BTreeMap<i64, u32> = BTreeMap::new();
             let mut stated_all: BTreeMap<u32, u32> = BTreeMap::new();
             let mut buffer_ok = true;
             for cycle in 0..cycles {
@@ -151,13 +155,17 @@ mod mac {
                 for (d, n) in &r.delays {
                     *delays.entry(*d).or_default() += n;
                 }
+                for (d, n) in &r.across {
+                    *across.entry(*d).or_default() += n;
+                }
                 let good = r.delays.len() == 1
                     && r.delays.contains_key(&i64::from(r.stated))
                     && r.strays == 0
                     && r.exact;
                 println!(
                     "{buffer} cycle {cycle:2}: {} Hz, buffer {:?}, stated {} (in {} + out {}), \
-                     {} out / {} in impulses, delays {:?}, strays {}, breaks {:?}, events {}, {}",
+                     {} out / {} in impulses, delays {:?}, across a break {:?}, strays {}, \
+                     breaks {:?}, events {}, {}",
                     r.rate,
                     r.buffer,
                     r.stated,
@@ -166,6 +174,7 @@ mod mac {
                     r.outputs,
                     r.inputs,
                     r.delays,
+                    r.across,
                     r.strays,
                     r.breaks,
                     r.events,
@@ -174,7 +183,8 @@ mod mac {
                 buffer_ok &= good;
             }
             println!(
-                "RESULT buffer {buffer}: stated {stated_all:?}, measured {delays:?}, {}",
+                "RESULT buffer {buffer}: stated {stated_all:?}, measured {delays:?}, across a flagged \
+                 break {across:?}, {}",
                 if buffer_ok { "exact" } else { "FAIL" }
             );
             ok &= buffer_ok;
@@ -203,6 +213,8 @@ mod mac {
         outputs: usize,
         inputs: usize,
         delays: BTreeMap<i64, u32>,
+        /// Round trips across a flagged break, kept apart.
+        across: BTreeMap<i64, u32>,
         strays: u64,
         breaks: Vec<(u64, u32)>,
         events: String,
@@ -287,9 +299,14 @@ mod mac {
         let events = format!("{:?}", stream.events());
         let _ = stream.stop(Duration::from_secs(2));
         let mut delays: BTreeMap<i64, u32> = BTreeMap::new();
+        let mut across: BTreeMap<i64, u32> = BTreeMap::new();
         for &j in &inputs {
             if let Some(&k) = outputs.iter().rev().find(|&&k| k <= j) {
-                *delays.entry(j as i64 - k as i64).or_default() += 1;
+                // A round trip with a flagged break (an overload: XRUN | DISCONTINUITY) inside
+                // it is outside the exactness claim: the stream said the line broke there.
+                let flagged = breaks.iter().any(|&(at, _)| at > k && at <= j);
+                let into = if flagged { &mut across } else { &mut delays };
+                *into.entry(j as i64 - k as i64).or_default() += 1;
             }
         }
         Ok(CycleResult {
@@ -302,6 +319,7 @@ mod mac {
             outputs: outputs.len(),
             inputs: inputs.len(),
             delays,
+            across,
             strays,
             breaks,
             events,

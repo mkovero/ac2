@@ -556,7 +556,13 @@ From the all-OS run [38271062157](https://github.com/mkovero/ac2/actions/runs/38
 - **Exact index.** Impulses on output 1 returned on input 1 at exactly the stated latency,
   every one, over 20 opens at each size: 2048 frames stated 4096 (in 2048 + out 2048),
   measured 4096 for all 354 impulses; 1024 frames stated 2048, measured 2048 for all 366.
-  No stray sample on either input, no index break. The stated latency is the 2 buffers of
+  No stray sample on either input, no index break. A later run
+  ([38285173131](https://github.com/mkovero/ac2/actions/runs/38285173131)) had one VM
+  overload (a block flagged `XRUN | DISCONTINUITY`), and the one impulse whose round trip
+  spanned it came back 256 frames early while every other one stayed exact: across a flagged
+  break the output placement of that cycle is not the stated one. `coreaudio-loop` reports
+  such round trips apart and judges only the rest; a per-cycle check of out − in against the
+  stated latency in the engine would catch it directly (stage b). The stated latency is the 2 buffers of
   §7 (BlackHole's own latency and safety offsets are 0).
 - **cpal beside it, same build.** Self-test and a 30 s session on both: 0 xruns, gaps and
   discontinuities on both, delay finder 480 samples (accepted, PSR 73 dB) on both; cpal
