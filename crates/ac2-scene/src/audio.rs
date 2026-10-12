@@ -156,17 +156,32 @@ pub fn driver_reset_text(o: &OpenSession) -> Option<String> {
         .map(|d| driver_reset_line(d.reason, d.output_stopped))
 }
 
-/// A driver's latency statement: `stated latency: 288 frames in / 320 out (driver
-/// buffering: 32 frames in / 64 out)`. Buffering a driver does not report says so rather
-/// than reading as none.
-pub fn stated_latency_text(l: &StatedLatency) -> String {
+/// A driver's latency statement at rate `rate_hz`: `stated latency: 288 frames in / 320
+/// out / 608 total = 6.00 / 6.67 / 12.67 ms (driver buffering: 32 frames in / 64 out)`.
+/// The total is the least a loopback through the converters can measure, so it is the
+/// number a measured offset is held against. Buffering a driver does not report says so
+/// rather than reading as none.
+pub fn stated_latency_text(l: &StatedLatency, rate_hz: u32) -> String {
     let buffering = match l.driver_buffering {
         Some(b) => format!("{} frames in / {} out", b.input_frames, b.output_frames),
         None => "not reported".into(),
     };
+    let total = u64::from(l.input_frames) + u64::from(l.output_frames);
+    let ms = |frames: u64| {
+        if rate_hz == 0 {
+            "—".to_owned()
+        } else {
+            format::fixed(frames as f64 * 1000.0 / f64::from(rate_hz), 2)
+        }
+    };
     format!(
-        "stated latency: {} frames in / {} out (driver buffering: {buffering})",
-        l.input_frames, l.output_frames
+        "stated latency: {} frames in / {} out / {total} total = {} / {} / {} ms (driver \
+         buffering: {buffering})",
+        l.input_frames,
+        l.output_frames,
+        ms(u64::from(l.input_frames)),
+        ms(u64::from(l.output_frames)),
+        ms(total),
     )
 }
 
@@ -220,7 +235,7 @@ pub fn driver_change_text(o: &OpenSession) -> Option<String> {
 }
 
 /// A device's clock sources, the one it runs on marked: `Internal (in use) · Word Clock ·
-/// ADAT`. `None` for a device that names none (every backend but ASIO).
+/// ADAT`. `None` for a device that names none (only ASIO and Core Audio name them).
 pub fn clock_sources_text(sources: &[ClockSource]) -> Option<String> {
     (!sources.is_empty()).then(|| {
         sources
@@ -262,7 +277,9 @@ pub fn session_line(o: &OpenSession) -> SessionLine {
         o.clock_source
             .as_ref()
             .map(|c| format!("clock source: {c}")),
-        o.stated_latency.as_ref().map(stated_latency_text),
+        o.stated_latency
+            .as_ref()
+            .map(|l| stated_latency_text(l, o.sample_rate_hz)),
     ]
     .into_iter()
     .flatten()
@@ -549,16 +566,18 @@ mod tests {
             driver_buffering: None,
         };
         assert_eq!(
-            stated_latency_text(&l),
-            "stated latency: 288 frames in / 320 out (driver buffering: not reported)"
+            stated_latency_text(&l, 48_000),
+            "stated latency: 288 frames in / 320 out / 608 total = 6.00 / 6.67 / 12.67 ms \
+             (driver buffering: not reported)"
         );
         l.driver_buffering = Some(DriverBuffering {
             input_frames: 32,
             output_frames: 64,
         });
         assert_eq!(
-            stated_latency_text(&l),
-            "stated latency: 288 frames in / 320 out (driver buffering: 32 frames in / 64 out)"
+            stated_latency_text(&l, 48_000),
+            "stated latency: 288 frames in / 320 out / 608 total = 6.00 / 6.67 / 12.67 ms \
+             (driver buffering: 32 frames in / 64 out)"
         );
         let mut o = open(48_000, 256);
         o.stated_latency = Some(l);
@@ -567,8 +586,8 @@ mod tests {
         assert_eq!(
             line.detail.as_deref(),
             Some(
-                "stated latency: 288 frames in / 320 out (driver buffering: 32 frames in / \
-                 64 out)"
+                "stated latency: 288 frames in / 320 out / 608 total = 6.00 / 6.67 / 12.67 ms \
+                 (driver buffering: 32 frames in / 64 out)"
             )
         );
     }

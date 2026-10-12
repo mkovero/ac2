@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use ac2_audio::{
     Backend, BackendKind, ClockRelation, DeviceSelector, DuplexRequest, DuplexStream,
     EventSnapshot, GeneratorHandle, HistoryRequest, IndexExactness, MaxLevel, OutputSource,
-    SampleFormat, SignalSource, StopOutcome, TransportStats,
+    SampleFormat, SignalSource, StaticLatency, StopOutcome, TransportStats,
 };
 use ac2_core::generator::{BandLimit, Generator, GeneratorConfig, GeneratorError, Signal};
 use serde::Serialize;
@@ -292,6 +292,62 @@ pub struct Opened {
     pub clock: ClockRelation,
     /// How the capture index is obtained.
     pub index: IndexExactness,
+    /// The backend's latency statement as it gives it.
+    pub latency: StaticLatency,
+    /// The driver's statement in frames per direction with the round trip, also in ms;
+    /// `None` when the backend states no frame counts (JACK states port ranges).
+    pub stated_latency: Option<StatedLatency>,
+}
+
+/// A driver's stated latency at the open rate and buffer, with the round trip: the least a
+/// loopback through the converters can measure.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct StatedLatency {
+    /// From the converter to the buffer the callback reads.
+    pub input_frames: u32,
+    /// From the buffer the callback writes to the converter.
+    pub output_frames: u32,
+    /// `input_frames + output_frames`.
+    pub total_frames: u64,
+    /// `input_frames` at the stream rate.
+    pub input_ms: f64,
+    /// `output_frames` at the stream rate.
+    pub output_ms: f64,
+    /// `total_frames` at the stream rate.
+    pub total_ms: f64,
+    /// The part spent in the driver's own buffers; `None` when it does not report it.
+    pub driver_buffering: Option<ac2_audio::DriverBuffering>,
+}
+
+impl StatedLatency {
+    /// The frame statement `l` at `rate_hz`; `None` for the forms that state no frames.
+    pub fn new(l: &StaticLatency, rate_hz: u32) -> Option<Self> {
+        let StaticLatency::Frames {
+            input,
+            output,
+            driver_buffering,
+        } = *l
+        else {
+            return None;
+        };
+        let total = u64::from(input) + u64::from(output);
+        let ms = |f: u64| {
+            if rate_hz == 0 {
+                0.0
+            } else {
+                f as f64 * 1000.0 / f64::from(rate_hz)
+            }
+        };
+        Some(Self {
+            input_frames: input,
+            output_frames: output,
+            total_frames: total,
+            input_ms: ms(u64::from(input)),
+            output_ms: ms(u64::from(output)),
+            total_ms: ms(total),
+            driver_buffering,
+        })
+    }
 }
 
 /// The whole result.
@@ -468,6 +524,8 @@ impl DuplexSession {
             output_format: n.output_format,
             clock: n.clock,
             index: n.index,
+            latency: n.latency.clone(),
+            stated_latency: StatedLatency::new(&n.latency, n.sample_rate),
         };
         Ok(Ok(Self {
             stats: StreamStats::new(n.sample_rate, n.input_channels),

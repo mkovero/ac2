@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use ac2_audio::{
     Backend, ClockRelation, DeviceCaps, DeviceSelector, Direction, FakeBackend, FakeConfig,
-    IndexExactness,
+    IndexExactness, StaticLatency,
 };
 
 use super::devsel;
@@ -220,6 +220,41 @@ fn clock_text(c: ClockRelation) -> &'static str {
     }
 }
 
+/// The backend's latency statement for the `latency` row, in the words of the app's session
+/// line: a driver's frames per direction with the round trip in frames and ms, JACK's port
+/// ranges, or that it states none.
+fn latency_text(l: &StaticLatency, rate_hz: u32) -> String {
+    match *l {
+        StaticLatency::Frames {
+            input,
+            output,
+            driver_buffering,
+        } => {
+            let t = ac2_scene::audio::stated_latency_text(
+                &ac2_proto::model::StatedLatency {
+                    input_frames: input,
+                    output_frames: output,
+                    driver_buffering: driver_buffering.map(|b| ac2_proto::model::DriverBuffering {
+                        input_frames: b.input,
+                        output_frames: b.output,
+                    }),
+                },
+                rate_hz,
+            );
+            // The row is labelled `latency` already: `stated 288 frames in / …`.
+            match t.strip_prefix("stated latency: ") {
+                Some(rest) => format!("stated {rest}"),
+                None => t,
+            }
+        }
+        StaticLatency::PortRanges { capture, playback } => format!(
+            "port ranges: capture {}–{} frames / playback {}–{} frames",
+            capture.min, capture.max, playback.min, playback.max
+        ),
+        StaticLatency::Unknown => "not stated by the backend".into(),
+    }
+}
+
 fn channels(list: &[u16]) -> String {
     crate::units::channels_text(list)
 }
@@ -288,6 +323,11 @@ pub(crate) fn text(r: &DuplexReport) -> String {
                 IndexExactness::Exact => "exact",
                 IndexExactness::Estimated => "estimated from timestamps",
             }
+        );
+        let _ = writeln!(
+            s,
+            "latency      {}",
+            latency_text(&o.latency, o.sample_rate)
         );
     }
     if let Some(c) = &r.capture {
@@ -424,6 +464,31 @@ pub(crate) fn text(r: &DuplexReport) -> String {
 mod tests {
     use super::*;
     use ac2_audio::DeviceId;
+
+    #[test]
+    fn latency_row_states_both_directions_and_the_round_trip_in_frames_and_ms() {
+        let l = StaticLatency::Frames {
+            input: 288,
+            output: 320,
+            driver_buffering: None,
+        };
+        assert_eq!(
+            latency_text(&l, 48_000),
+            "stated 288 frames in / 320 out / 608 total = 6.00 / 6.67 / 12.67 ms (driver \
+             buffering: not reported)"
+        );
+        let r = crate::selftest::StatedLatency::new(&l, 48_000).expect("frames");
+        assert_eq!(r.total_frames, 608);
+        assert!((r.total_ms - 608.0 / 48.0).abs() < 1e-9);
+        assert_eq!(
+            latency_text(&StaticLatency::Unknown, 48_000),
+            "not stated by the backend"
+        );
+        assert_eq!(
+            crate::selftest::StatedLatency::new(&StaticLatency::Unknown, 48_000),
+            None
+        );
+    }
 
     fn device(id: &str, name: &str, inputs: u16, outputs: u16, default: bool) -> DeviceCaps {
         let dir = |n: u16| {

@@ -218,7 +218,7 @@ pub struct DeviceCaps {
     /// Stated latency.
     pub latency: StaticLatency,
     /// The clocks the device can run on, as its driver names them, the current one marked
-    /// (ASIO; empty where the host does not say).
+    /// (ASIO, Core Audio; empty where the host does not say).
     pub clock_sources: Vec<ClockSource>,
     /// Problems that did not stop the device from being listed.
     pub notes: Vec<String>,
@@ -411,7 +411,7 @@ pub struct Negotiated {
     pub index: IndexExactness,
     /// Stated latency.
     pub latency: StaticLatency,
-    /// The clock source the device ran on when opened, as its driver names it (ASIO).
+    /// The clock source the device ran on when opened, as its driver names it (ASIO, Core Audio).
     pub clock_source: Option<String>,
     /// What paces the blocks.
     pub delivery: Delivery,

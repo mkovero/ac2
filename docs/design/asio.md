@@ -338,8 +338,8 @@ Where the code settles an open point of §3 or departs from it, and why.
   when they differ. wineasio sends the message on every JACK connection change, with
   unchanged values. `StaticLatency::Frames { input, output, driver_buffering }` carries
   them; the session states them as `OpenSession.stated_latency` (`ac2 session status`, the
-  app's session-line detail): `stated latency: 288 frames in / 320 out (driver buffering:
-  32 frames in / 64 out)`.
+  app's session-line detail, `ac2 selftest duplex`): `stated latency: 288 frames in / 320
+  out / 608 total = 6.00 / 6.67 / 12.67 ms (driver buffering: 32 frames in / 64 out)`.
 - **Driver buffering.** `future(kAsioGetInternalBufferSamples)` (ASIO 2.3) is asked at
   every open, after `createBuffers` (it may depend on the size), so a reopen after a reset
   asks again. The SDK defines `ASIOInternalBufferInfo` as the driver's internal buffering
