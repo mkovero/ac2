@@ -27,7 +27,7 @@ log = "0.4"
 # SDK, through ac2's fork of azo (MIT), pinned: a named apartment thread, a callback-side handle for
 # getSamplePosition/outputReady, and names that fill their buffer taken whole.
 [target.'cfg(windows)'.dependencies]
-azo = { git = "https://github.com/mkovero/azo", rev = "3cb05ff0044fc4771e50a938e8e7ebd688b4d1a2" }
+azo = { git = "https://github.com/mkovero/azo", rev = "bd1fddb677758cc65967786ad24e4dee95e35b59" }
 # Millisecond timer resolution and MMCSS registration (src/timer.rs).
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Media", "Win32_System_Threading"] }
 
