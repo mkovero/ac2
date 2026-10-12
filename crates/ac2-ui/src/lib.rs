@@ -13,6 +13,10 @@
 //! This crate has no DSP and computes no displayed value; `ac2-scene` does display math.
 #![forbid(unsafe_code)]
 
+/// This build's id: `<version>+<git commit>`, the same as `ac2 --version` prints for the
+/// same checkout.
+pub const BUILD_ID: &str = env!("AC2_BUILD_ID");
+
 pub mod acoustic_dialog;
 pub mod anim;
 pub mod app;

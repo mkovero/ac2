@@ -109,6 +109,7 @@ fn connect_dialog_lists_rigs_and_starts_the_simulated_rig() {
         false,
         None,
     );
+    d.build_id = "0.0.0+test".into();
     d.table.apply(Update::Resolved(rig(
         "FOH rack",
         &paired,

@@ -249,15 +249,20 @@ pub struct ClientKey {
     pub key: String,
 }
 
-/// The Connection page's "this app" lines: what the link is, who this client is, its key.
+/// The Connection page's "this app" lines: this app's build (`build`, as `ac2 --version`
+/// prints it), what the link is, who this client is, its key.
 pub fn link_lines(
+    build: &str,
     target: &str,
     state: &str,
     server: Option<&str>,
     client_id: Option<&str>,
     key: Option<&ClientKey>,
 ) -> Vec<String> {
-    let mut v = vec![format!("Daemon: {target} · {state}")];
+    let mut v = vec![
+        format!("Version: ac2-ui {build}"),
+        format!("Daemon: {target} · {state}"),
+    ];
     if let Some(s) = server {
         v.push(format!("Server software: {s}"));
     }

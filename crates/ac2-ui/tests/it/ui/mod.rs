@@ -88,6 +88,8 @@ fn harness(opts: AppOptions) -> Harness<'static, App> {
         .build_eframe(move |cc| App::new(cc, opts));
     // Local times in UTC on every machine.
     h.state_mut().state.local_zone = ac2_ui::scenes::LocalZone::Fixed { offset_s: 0 };
+    // The build id names the commit: pinned, or every commit would change the pictures.
+    h.state_mut().state.build_id = "0.0.0+test".into();
     h
 }
 

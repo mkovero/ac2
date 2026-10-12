@@ -229,6 +229,9 @@ pub struct AppState {
     pub export_dir: Option<std::path::PathBuf>,
     /// Local time of day for wall times.
     pub local_zone: crate::scenes::LocalZone,
+    /// This app's build as Settings › Connection shows it ([`crate::BUILD_ID`]; screenshot
+    /// tests pin it, since it names the commit).
+    pub build_id: String,
     /// The output device the stimulus outputs belong to (the open session's).
     stim_device: Option<String>,
     /// Band and observation X / Shift+X run the finder with.
@@ -382,6 +385,7 @@ impl AppState {
             prefs_dirty: false,
             export_dir: std::env::home_dir(),
             local_zone: crate::scenes::LocalZone::System,
+            build_id: crate::BUILD_ID.into(),
             stim_device: None,
             finder: FinderChoice::default(),
             overlay: Overlay::None,

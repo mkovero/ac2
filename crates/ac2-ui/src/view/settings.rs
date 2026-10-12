@@ -353,7 +353,14 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
     };
     let me = st.my_client_id().map(|c| c.0.clone());
     section(ui, "This app", crate::settings::THIS_APP, ch);
-    for l in link_lines(target, state, server, me.as_deref(), st.client_key.as_ref()) {
+    for l in link_lines(
+        &st.build_id,
+        target,
+        state,
+        server,
+        me.as_deref(),
+        st.client_key.as_ref(),
+    ) {
         ui.label(RichText::new(l).color(ch.text));
     }
     let p = &s.connection;

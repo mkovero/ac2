@@ -202,6 +202,7 @@ fn link_lines_say_who_and_which_key() {
     };
     assert_eq!(
         link_lines(
+            "0.1.0+0123456789ab",
             "foh-rig",
             "connected",
             Some("ac2d 0.1"),
@@ -209,6 +210,7 @@ fn link_lines_say_who_and_which_key() {
             Some(&k)
         ),
         vec![
+            "Version: ac2-ui 0.1.0+0123456789ab",
             "Daemon: foh-rig · connected",
             "Server software: ac2d 0.1",
             "This client is laptop on the daemon",

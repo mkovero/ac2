@@ -146,6 +146,8 @@ pub struct ConnectDialog {
     pair: Option<(String, String, Option<PairOutcome>)>,
     /// Shown under the list (embedded start failed, …).
     pub error: Option<String>,
+    /// This app's build, at the foot ([`crate::BUILD_ID`]; screenshot tests pin it).
+    pub build_id: String,
 }
 
 impl std::fmt::Debug for ConnectDialog {
@@ -184,6 +186,7 @@ impl ConnectDialog {
             selected,
             pair: None,
             error: None,
+            build_id: crate::BUILD_ID.into(),
         }
     }
 
@@ -356,6 +359,11 @@ impl ConnectDialog {
                     picked = Some(self.selected);
                 }
             });
+            ui.label(
+                egui::RichText::new(format!("ac2-ui {}", self.build_id))
+                    .small()
+                    .color(ch.dim),
+            );
         });
         let i = picked?;
         let e = entries.get(i)?;
