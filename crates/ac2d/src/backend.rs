@@ -1,9 +1,9 @@
 //! The audio backends a front end (the `ac2d` binary, an app embedding the daemon) can name.
 //!
 //! Each platform has one real backend: JACK on Linux (JACK2, or PipeWire through
-//! pipewire-jack; there is no ALSA backend), cpal on macOS (Core Audio), ASIO on Windows.
-//! macOS also has the direct Core Audio backend (`coreaudio`, the HAL through `cahal`),
-//! named explicitly while it is compared with cpal.
+//! pipewire-jack; there is no ALSA backend), Core Audio on macOS (`coreaudio`, the HAL
+//! through `cahal`), ASIO on Windows. macOS also keeps cpal, named explicitly, as a
+//! comparison until it is removed.
 //! The simulated rig is never a fallback: a fake device must never stand in for a missing
 //! real one, so it runs only when named.
 
@@ -30,15 +30,15 @@ pub enum BackendChoice {
 }
 
 impl BackendChoice {
-    /// This platform's real backend, and the default: JACK on Linux, ASIO on Windows, cpal
-    /// on macOS.
+    /// This platform's real backend, and the default: JACK on Linux, ASIO on Windows, Core
+    /// Audio on macOS.
     pub const fn platform() -> Self {
         if cfg!(target_os = "linux") {
             Self::Jack
         } else if cfg!(windows) {
             Self::Asio
         } else {
-            Self::Cpal
+            Self::CoreAudio
         }
     }
 
@@ -142,7 +142,9 @@ pub(crate) fn describe(kind: ac2_audio::BackendKind) -> String {
                                          port on one clock, rate and buffer set by the server"
             .into(),
         ac2_audio::BackendKind::Cpal => {
-            "System audio (Core Audio): the interfaces the operating system lists".into()
+            "Core Audio through cpal, kept for comparison: input and output on separate \
+             callbacks"
+                .into()
         }
         ac2_audio::BackendKind::CoreAudio => "Core Audio (the HAL directly): one callback \
                                               per device serves input and output on its own \
@@ -241,12 +243,11 @@ mod tests {
         } else if cfg!(windows) {
             ac2_audio::BackendKind::Asio
         } else {
-            ac2_audio::BackendKind::Cpal
+            ac2_audio::BackendKind::CoreAudio
         };
         assert_eq!(real, [platform]);
-        // macOS has two Core Audio backends while they are compared.
-        let mac_too =
-            |c: &BackendChoice| cfg!(target_os = "macos") && *c == BackendChoice::CoreAudio;
+        // macOS keeps cpal, named explicitly, as a comparison.
+        let mac_too = |c: &BackendChoice| cfg!(target_os = "macos") && *c == BackendChoice::Cpal;
         for other in [
             BackendChoice::Cpal,
             BackendChoice::CoreAudio,

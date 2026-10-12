@@ -447,7 +447,7 @@ pub enum SessionMsg {
     /// The mic name of an input.
     EditMic(Row),
     Detect,
-    /// The chosen ASIO device's driver control panel.
+    /// The chosen device's driver settings: an ASIO control panel, Audio MIDI Setup.
     Panel,
     DetectConfirm,
     DetectCancel,

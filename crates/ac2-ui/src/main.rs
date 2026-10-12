@@ -16,11 +16,11 @@ use eframe::egui;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum BackendArg {
-    /// Core Audio through cpal; macOS.
-    Cpal,
     /// The Core Audio HAL directly; macOS.
     #[value(name = "coreaudio")]
     CoreAudio,
+    /// Core Audio through cpal; macOS, kept for comparison.
+    Cpal,
     /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
     /// ASIO drivers; Windows.
@@ -52,8 +52,8 @@ struct Args {
     /// Host an embedded daemon instead of connecting to one.
     #[arg(long, conflicts_with = "ctrl")]
     embedded: bool,
-    /// Audio backend of the embedded daemon: this platform's audio (jack on Linux, cpal on
-    /// macOS, asio on Windows) unless named; fake only when named here.
+    /// Audio backend of the embedded daemon: this platform's audio (jack on Linux,
+    /// coreaudio on macOS, asio on Windows) unless named; fake only when named here.
     #[arg(long, value_enum, requires = "embedded")]
     backend: Option<BackendArg>,
     /// Key directory for CURVE (default: the per-user ac2 config dir).

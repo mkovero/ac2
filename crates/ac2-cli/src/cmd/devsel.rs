@@ -141,7 +141,7 @@ pub(crate) mod tests {
         default: bool,
     ) -> DeviceInfo {
         DeviceInfo {
-            backend: BackendKind::Cpal,
+            backend: BackendKind::CoreAudio,
             host: "coreaudio".into(),
             id: DeviceId(id.into()),
             name: name.into(),

@@ -173,9 +173,13 @@ pub(crate) async fn session(
                 .await?;
             expect_body!("session.control_panel", r, ReplyBody::Ack { rev } => rev)?;
             out.emit(&json!({ "backend": kind, "device": id }), || {
+                let panel = match kind {
+                    BackendKind::CoreAudio => "Audio MIDI Setup",
+                    _ => "the driver's control panel",
+                };
                 format!(
-                    "{}: the driver's control panel is open on the daemon's host; a change \
-                     there reopens the session at the driver's new settings",
+                    "{}: {panel} is open on the daemon's host; a change there reopens the \
+                     session at the driver's new settings",
                     id.0
                 )
             })?;
@@ -198,7 +202,7 @@ async fn panel_target(
         (None, Some(o)) => o.backend,
         (None, None) => {
             return Err(CliError::Usage(
-                "no session is open: name the backend (--backend asio)".into(),
+                "no session is open: name the backend (--backend asio, --backend coreaudio)".into(),
             ));
         }
     };

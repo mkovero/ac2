@@ -296,8 +296,14 @@ impl AppState {
             }
             SessionMsg::Panel => {
                 if let Some((backend, device)) = d.panel_target() {
+                    let what = match backend {
+                        ac2_proto::model::BackendKind::CoreAudio => {
+                            format!("Audio MIDI Setup for {}", device.0)
+                        }
+                        _ => format!("driver control panel of {}", device.0),
+                    };
                     out.push(Request::Call {
-                        what: format!("driver control panel of {}", device.0),
+                        what,
                         cmd: Command::SessionControlPanel { backend, device },
                     });
                 }

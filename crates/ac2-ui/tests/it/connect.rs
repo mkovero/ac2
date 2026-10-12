@@ -105,7 +105,7 @@ fn connect_dialog_lists_rigs_and_starts_the_simulated_rig() {
     let mut d = ConnectDialog::new(
         kd,
         "ac2-ui test",
-        vec![EmbeddedBackend::Cpal, EmbeddedBackend::Fake],
+        vec![EmbeddedBackend::CoreAudio, EmbeddedBackend::Fake],
         false,
         None,
     );

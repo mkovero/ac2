@@ -163,11 +163,12 @@ impl SessionDialog {
         }
     }
 
-    /// The device whose driver control panel P opens: an ASIO driver's own settings
-    /// (rate, buffer size, clock source, routing), which no other backend has.
+    /// The device whose driver settings P opens: an ASIO driver's own control panel
+    /// (rate, buffer size, clock source, routing), or Audio MIDI Setup for a Core Audio
+    /// device (rate, format, clock source). Other backends have none.
     pub fn panel_target(&self) -> Option<(BackendKind, DeviceId)> {
         let k = self.backend_kind()?;
-        (k == BackendKind::Asio).then_some(())?;
+        matches!(k, BackendKind::Asio | BackendKind::CoreAudio).then_some(())?;
         Some((k, self.device_info()?.id.clone()))
     }
 

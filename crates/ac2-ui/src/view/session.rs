@@ -296,16 +296,13 @@ fn backend_rows(
                 .color(ch.dim),
         );
     }
-    if d.panel_target().is_some() {
+    if let Some((kind, _)) = d.panel_target() {
+        let (button, hint) = crate::session_dialog::panel_label(kind);
         ui.horizontal(|ui| {
-            if ui.button("Driver control panel… (P)").clicked() {
+            if ui.button(button).clicked() {
                 *msg = Some(SessionMsg::Panel);
             }
-            ui.label(
-                RichText::new("rate, buffer, clock and routing are the driver's own settings")
-                    .small()
-                    .color(ch.dim),
-            );
+            ui.label(RichText::new(hint).small().color(ch.dim));
         });
     }
 }

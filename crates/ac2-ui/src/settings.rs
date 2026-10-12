@@ -104,8 +104,8 @@ impl Page {
             Page::AudioIo => {
                 "↑↓ move · ←→ backend / input / output device, a mic's curve · type the rate or \
                  buffer · Space in session · R reference · M mic · S stimulus output · N names a \
-                 mic or an output · D detects the loopback · P opens an ASIO driver's control panel · \
-                 on the max level: type dBFS, Enter \
+                 mic or an output · D detects the loopback · P opens the driver's settings (ASIO \
+                 panel, Audio MIDI Setup) · on the max level: type dBFS, Enter \
                  · Enter opens the session · Esc closes"
             }
             Page::Calibration => {

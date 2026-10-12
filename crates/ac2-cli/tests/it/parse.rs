@@ -307,7 +307,7 @@ fn other_commands_parse() {
         "session",
         "open",
         "--backend",
-        "cpal",
+        "coreaudio",
         "--device",
         "USB mic",
         "--out-device",

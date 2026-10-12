@@ -60,10 +60,10 @@ pub fn demo_measurement() -> MeasConfig {
 /// Audio backend of the embedded daemon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmbeddedBackend {
-    /// Core Audio through cpal; macOS.
-    Cpal,
     /// The Core Audio HAL directly; macOS.
     CoreAudio,
+    /// Core Audio through cpal; macOS, kept for comparison.
+    Cpal,
     /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
     /// ASIO drivers; Windows.
@@ -73,14 +73,14 @@ pub enum EmbeddedBackend {
 }
 
 impl EmbeddedBackend {
-    /// This platform's audio: JACK on Linux, ASIO on Windows, cpal on macOS.
+    /// This platform's audio: JACK on Linux, ASIO on Windows, Core Audio on macOS.
     pub const fn platform() -> Self {
         if cfg!(target_os = "linux") {
             Self::Jack
         } else if cfg!(windows) {
             Self::Asio
         } else {
-            Self::Cpal
+            Self::CoreAudio
         }
     }
 }

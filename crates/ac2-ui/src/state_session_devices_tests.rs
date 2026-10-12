@@ -250,3 +250,33 @@ fn an_asio_device_lists_its_clocks_and_p_opens_its_driver_panel() {
         "{r:?}"
     );
 }
+
+/// A Core Audio device: P brings up Audio MIDI Setup on the daemon's host.
+#[test]
+fn p_on_a_core_audio_device_opens_audio_midi_setup() {
+    let b = backends(false);
+    let mut dev = b[0].devices[0].clone();
+    dev.backend = BackendKind::CoreAudio;
+    dev.id = DeviceId("coreaudio:BlackHole2ch_UID".into());
+    let ca = BackendInfo {
+        kind: BackendKind::CoreAudio,
+        description: "Core Audio".into(),
+        availability: Availability::Available,
+        devices: vec![dev],
+    };
+    let mut t = T::new();
+    open_dialog(&mut t, vec![ca]);
+    assert_eq!(
+        crate::session_dialog::panel_label(BackendKind::CoreAudio).0,
+        "Audio MIDI Setup… (P)"
+    );
+    focus(&mut t, Row::Device);
+    let r = t.type_key("P", "p");
+    assert!(
+        r.iter().any(|r| matches!(r,
+            Request::Call { what, cmd: Command::SessionControlPanel { backend: BackendKind::CoreAudio, device } }
+                if device.0 == "coreaudio:BlackHole2ch_UID"
+                    && what == "Audio MIDI Setup for coreaudio:BlackHole2ch_UID")),
+        "{r:?}"
+    );
+}

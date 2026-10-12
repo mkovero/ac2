@@ -240,11 +240,12 @@ pub struct SelftestDuplex {
 pub enum BackendArg {
     /// JACK (JACK2, or PipeWire through pipewire-jack): the real backend on Linux.
     Jack,
-    /// Core Audio through cpal: the real backend on macOS.
-    Cpal,
-    /// The Core Audio HAL directly (macOS): one callback per device, exact index.
+    /// The Core Audio HAL directly: the real backend on macOS (one callback per device,
+    /// exact index).
     #[value(name = "coreaudio")]
     CoreAudio,
+    /// Core Audio through cpal (macOS), kept for comparison.
+    Cpal,
     /// ASIO drivers: the real backend on Windows.
     Asio,
     /// Simulated device; never touches hardware.

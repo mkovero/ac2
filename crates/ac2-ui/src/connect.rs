@@ -51,10 +51,10 @@ impl Entry {
     pub fn title(&self) -> String {
         match self {
             Entry::Local { .. } => "Local daemon".into(),
-            Entry::Embedded(EmbeddedBackend::Cpal) => "This computer's audio".into(),
             Entry::Embedded(EmbeddedBackend::CoreAudio) => {
                 "This computer's audio (Core Audio)".into()
             }
+            Entry::Embedded(EmbeddedBackend::Cpal) => "This computer's audio (cpal)".into(),
             Entry::Embedded(EmbeddedBackend::Jack) => "This computer's audio (JACK)".into(),
             Entry::Embedded(EmbeddedBackend::Asio) => "This computer's audio (ASIO)".into(),
             Entry::Embedded(EmbeddedBackend::Fake) => "Simulated rig (no audio)".into(),
@@ -78,6 +78,9 @@ impl Entry {
             }
             Entry::Embedded(EmbeddedBackend::Asio) => {
                 "a daemon inside this app on ASIO drivers; closes with the window".into()
+            }
+            Entry::Embedded(EmbeddedBackend::CoreAudio) => {
+                "a daemon inside this app on Core Audio; closes with the window".into()
             }
             Entry::Embedded(_) => "a daemon inside this app; closes with the window".into(),
             Entry::Rig { rig, status } => {

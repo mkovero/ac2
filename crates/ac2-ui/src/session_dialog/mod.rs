@@ -223,11 +223,25 @@ pub struct SessionDialog {
 pub fn backend_name(b: BackendKind) -> &'static str {
     match b {
         BackendKind::Jack => "JACK",
-        BackendKind::Cpal => "System audio",
+        BackendKind::Cpal => "Core Audio (cpal)",
         BackendKind::CoreAudio => "Core Audio",
         BackendKind::Fake => "Simulated rig",
         BackendKind::Replay => "Recording",
         BackendKind::Asio => "ASIO",
+    }
+}
+
+/// What P opens for a backend's device: the button text and what is set there.
+pub fn panel_label(b: BackendKind) -> (&'static str, &'static str) {
+    match b {
+        BackendKind::CoreAudio => (
+            "Audio MIDI Setup… (P)",
+            "rate, format and clock source are set there for every app",
+        ),
+        _ => (
+            "Driver control panel… (P)",
+            "rate, buffer, clock and routing are the driver's own settings",
+        ),
     }
 }
 

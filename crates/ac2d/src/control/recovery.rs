@@ -459,6 +459,11 @@ impl Control {
             return;
         }
         r.probe.pending = None;
+        if r.probe.last != Some(presence) {
+            // The generation (Core Audio: the device's object id) says whether a replugged
+            // device came back as a new object, which decides how a reopen finds it.
+            tracing::info!("audio device probe: {presence:?}");
+        }
         let back = matches!(presence, Presence::Present { .. })
             && r.probe.last.is_some_and(|l| l != presence);
         r.probe.last = Some(presence);

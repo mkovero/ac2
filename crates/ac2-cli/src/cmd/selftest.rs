@@ -70,7 +70,7 @@ fn backend(b: BackendArg) -> Result<Arc<dyn Backend>, CliError> {
         )),
         #[cfg(target_os = "macos")]
         BackendArg::Jack => Err(CliError::Usage(
-            "JACK is supported on Linux only: use --backend cpal (Core Audio)".into(),
+            "JACK is supported on Linux only: use --backend coreaudio (Core Audio)".into(),
         )),
         #[cfg(windows)]
         BackendArg::Jack => Err(CliError::Usage(
@@ -84,7 +84,7 @@ fn backend(b: BackendArg) -> Result<Arc<dyn Backend>, CliError> {
         )),
         #[cfg(target_os = "macos")]
         BackendArg::Asio => Err(CliError::Usage(
-            "ASIO is supported on Windows only: use --backend cpal (Core Audio)".into(),
+            "ASIO is supported on Windows only: use --backend coreaudio (Core Audio)".into(),
         )),
     }
 }

@@ -157,7 +157,7 @@ fn a_captured_trace_survives_a_daemon_restart() -> R {
 
 #[test]
 fn demo_setup_is_for_the_simulated_rig_only() {
-    for b in [EmbeddedBackend::Cpal, EmbeddedBackend::Jack] {
+    for b in [EmbeddedBackend::CoreAudio, EmbeddedBackend::Jack] {
         match start_embedded_with(b, Setup::Demo) {
             Err(EmbeddedError::Setup(_)) => {}
             other => panic!("{b:?}: {other:?}"),
@@ -165,17 +165,17 @@ fn demo_setup_is_for_the_simulated_rig_only() {
     }
 }
 
-/// One real backend per platform: JACK on Linux (no ALSA), ASIO on Windows, Core Audio through
-/// cpal on macOS. Another platform's is refused with what to use instead, never swapped for
+/// One real backend per platform: JACK on Linux (no ALSA), ASIO on Windows, Core Audio on
+/// macOS. Another platform's is refused with what to use instead, never swapped for
 /// something else.
 #[test]
 fn the_platform_audio_is_the_only_real_backend() {
     let (native, other) = if cfg!(target_os = "linux") {
-        (EmbeddedBackend::Jack, EmbeddedBackend::Cpal)
+        (EmbeddedBackend::Jack, EmbeddedBackend::CoreAudio)
     } else if cfg!(windows) {
         (EmbeddedBackend::Asio, EmbeddedBackend::Jack)
     } else {
-        (EmbeddedBackend::Cpal, EmbeddedBackend::Jack)
+        (EmbeddedBackend::CoreAudio, EmbeddedBackend::Jack)
     };
     assert_eq!(EmbeddedBackend::platform(), native);
     match start_embedded(other) {
