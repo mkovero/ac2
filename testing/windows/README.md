@@ -12,19 +12,18 @@ that session for an hour (`soak_minutes`). None of this substitutes for an inter
 
 ## 1. Get and install the build
 
-The build is an x64 installer for Windows 10 (1809) or newer, unsigned for now. The dev.10
-build below predates ASIO and runs the older system-audio backend; the steps in §2 onwards
-need a newer build, which lists the backend **ASIO**.
+The build is an x64 installer for Windows 10 (1809) or newer, unsigned for now. Its only
+audio backend is **ASIO**: your interface's own ASIO driver, or FlexASIO for a device
+without one (§2).
 
-1. The installer `ac2-0.0.0-dev.10-windows-x64.msi` (built 2026-10-08; the code of main
-   81fcb14, build id e415ef1, the same build as the macOS dev.10 disk image) is in this
-   directory, with `SHA256SUMS` beside it. Check it in PowerShell with
-   `Get-FileHash ac2-0.0.0-dev.10-windows-x64.msi` and compare with the line in
-   `SHA256SUMS`. The `.zip` beside it holds the same three programs unpacked, for use
-   without installing.
-   Release files are not in git: if this directory has only `SHA256SUMS`, fetch them from
-   the dev.10 release run with `gh run download 37819512973 -R mkovero/ac2 -n dist-windows`
-   (or the run's *Artifacts* on GitHub; kept until 2027-01-06).
+1. Use the installer `ac2-<version>-windows-x64.msi` you were given: the one attached to
+   the latest draft GitHub release, or the `release-<version>` artifact of a release dry
+   run (`gh run download <run id> -R mkovero/ac2 -n release-<version>`, or the run's
+   *Artifacts* on GitHub). `SHA256SUMS` comes with it; check the MSI in PowerShell with
+   `Get-FileHash ac2-<version>-windows-x64.msi` and compare with its line there. The `.zip`
+   beside it holds the same three programs unpacked, for use without installing. Release
+   files are not in git. The release run has already installed that MSI and run its
+   programs on ASIO (FlexASIO over a virtual cable) before uninstalling it.
 2. Run the .msi. SmartScreen shows *Windows protected your PC* (unknown publisher): choose
    **More info → Run anyway**. It installs into `C:\Program Files\ac2`, adds a Start-menu
    entry **ac2**, and puts that folder on the system `PATH`. A newer MSI replaces an older
@@ -267,8 +266,8 @@ not replace this run.
 ## 7. Test 5: duplex self-test (command line)
 
 Checks the interface below the app: the same audio backend, run for a fixed time, judged
-pass or fail with a named reason per failure. Needs a build newer than dev.10 (`ac2 selftest
---help` answers if yours has it). Use `ac2` in a new Command Prompt (the installer put it on
+pass or fail with a named reason per failure. `ac2 selftest --help` answers if your build
+has it. Use `ac2` in a new Command Prompt (the installer put it on
 the `PATH`). **Quit the ac2 app first** so the device is free.
 
 1. **Silent** (no cable needed; the outputs open but play only zeros):
