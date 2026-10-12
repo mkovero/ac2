@@ -159,6 +159,11 @@ and the output buffers to fill, and one `inInputTime` / `inOutputTime` pair on t
 one sample-time line. This is JACK's and ASIO's model: `ClockRelation::SingleCallback`,
 `IndexExactness::Exact`.
 
+**Default output.** A request whose output device is `Default` plays on the input device
+when that device has outputs, even if the system's default output is another device: one
+device, one IOProc, one clock is the point of this backend. Another output device has to be
+named.
+
 **Separate input and output devices** (a USB measurement mic beside the built-in output,
 the common light setup). The options:
 

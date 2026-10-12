@@ -228,13 +228,16 @@ impl Watch {
         let mut last_out_minus_in: Vec<Option<u32>> =
             self.shared.iter().map(|s| s.out_minus_in()).collect();
         let mut latency = self.latency.clone();
+        // A panicked closure stays panicked: the end is reported once, on the change.
+        let mut panicked = false;
         while !self.quit.load(Ordering::Acquire) {
             std::thread::park_timeout(Duration::from_millis(100));
             if self.quit.load(Ordering::Acquire) {
                 break;
             }
             let p = &self.pending;
-            if runs.iter().any(|r| r.stats().panicked) {
+            if !panicked && runs.iter().any(|r| r.stats().panicked) {
+                panicked = true;
                 self.events.end();
             }
             // The device died, its IO stopped abnormally, or coreaudiod restarted (every
@@ -337,6 +340,9 @@ pub(crate) fn open_stream(
         None
     } else {
         let same = match &request.output_device {
+            // Intended: a default output follows an input device that plays, even when the
+            // system's default output is another device. One device, one IOProc, one clock
+            // is the point of the backend (H1); another device has to be named.
             DeviceSelector::Default => in_dev.output.channels() > 0,
             DeviceSelector::Id(id) => uid_of(id) == Some(in_uid.as_str()),
         };

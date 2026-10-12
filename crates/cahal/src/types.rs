@@ -275,10 +275,10 @@ pub struct CycleTime {
     pub estimated: bool,
     /// `kAudioDeviceProcessorOverload` notifications since the previous cycle.
     pub overloads: u32,
-    /// `inInputTime.mSampleTime` as the HAL gave it.
-    pub input_sample_time: f64,
-    /// `inOutputTime.mSampleTime` as the HAL gave it.
-    pub output_sample_time: f64,
+    /// `inInputTime.mSampleTime` as the HAL gave it; `None` when not flagged valid.
+    pub input_sample_time: Option<f64>,
+    /// `inOutputTime.mSampleTime` as the HAL gave it; `None` when not flagged valid.
+    pub output_sample_time: Option<f64>,
     /// `inNow.mHostTime` in ns on the host clock.
     pub now_ns: u64,
     /// When the first input frame was sampled, ns on the host clock.

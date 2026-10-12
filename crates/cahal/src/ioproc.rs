@@ -216,16 +216,24 @@ impl IoProc {
             // SAFETY: the proc id created in `start` on this device.
             let st = unsafe { ca::AudioDeviceStop(self.device.object_id(), self.id) };
             result = status("AudioDeviceStop", st);
-            // SAFETY: as above; stopped, so the HAL no longer calls it.
+            // SAFETY: as above. Destroying a proc the HAL may still call is the HAL's to
+            // refuse; whether the state may be freed is decided below.
             let st = unsafe { ca::AudioDeviceDestroyIOProcID(self.device.object_id(), self.id) };
             if result.is_ok() {
                 result = status("AudioDeviceDestroyIOProcID", st);
             }
             self.id = None;
         }
-        if let Some(p) = self.state.take() {
-            // SAFETY: the IOProc that used the state is destroyed (or was never created).
-            unsafe { (self.free)(p) };
+        match self.state.take() {
+            Some(p) if result.is_ok() => {
+                // SAFETY: the IOProc that used the state is stopped and destroyed (or was
+                // never created), so the HAL never calls the trampoline with it again.
+                unsafe { (self.free)(p) };
+            }
+            // A failed stop or destroy: the HAL may still call the trampoline with this
+            // pointer, so the state is leaked on purpose. A leaked box beats a
+            // use-after-free.
+            _ => {}
         }
         result
     }
@@ -290,6 +298,27 @@ unsafe fn buffers(
     Some(frames.unwrap_or(0))
 }
 
+/// Zeroes every buffer of a list, whatever its shape: the output of a cycle that is not
+/// rendered must be silence, not what the HAL's buffer held before.
+///
+/// # Safety
+///
+/// `list` must point to a valid `AudioBufferList` for the call, its buffers writable.
+unsafe fn zero_list(list: NonNull<AudioBufferList>) {
+    // SAFETY: valid for the call, per the contract.
+    let n = unsafe { list.as_ref() }.mNumberBuffers as usize;
+    // SAFETY: field projection on a valid pointer, no read.
+    let first = unsafe { std::ptr::addr_of!((*list.as_ptr()).mBuffers) }.cast::<AudioBuffer>();
+    for i in 0..n {
+        // SAFETY: the list has `n` buffers.
+        let b = unsafe { &*first.add(i) };
+        if !b.mData.is_null() {
+            // SAFETY: the HAL's buffer of `mDataByteSize` bytes, writable for the call.
+            unsafe { std::ptr::write_bytes(b.mData.cast::<u8>(), 0, b.mDataByteSize as usize) };
+        }
+    }
+}
+
 unsafe extern "C-unwind" fn trampoline<F>(
     _device: u32,
     now: NonNull<AudioTimeStamp>,
@@ -322,6 +351,12 @@ where
     } else {
         Some(0)
     };
+    if out_frames.is_none() || !st.config.output {
+        // A list that does not match the table is never handed to the closure, so nothing
+        // else zeroes it: silence, never stale samples past the renderer's gating.
+        // SAFETY: the HAL's output list, valid and writable for the call.
+        unsafe { zero_list(out_data) };
+    }
     let n_in = st.input.buffers().len();
     let n_out = st.output.buffers().len();
 
@@ -383,8 +418,8 @@ where
         gap,
         estimated: st.indexer.estimated(),
         overloads,
-        input_sample_time: in_time.mSampleTime,
-        output_sample_time: out_time.mSampleTime,
+        input_sample_time: sample_time(in_time),
+        output_sample_time: sample_time(out_time),
         now_ns: st.clock.ns(now.mHostTime),
         input_ns: host_ns(&st.clock, in_time),
         output_ns: host_ns(&st.clock, out_time),
@@ -403,6 +438,8 @@ where
         time,
     };
     let f = &mut st.f;
+    // The default panic hook writes the first panic's message to stderr from this thread:
+    // accepted, it happens once (the proc is dead after it) and catch_unwind still holds.
     if let Err(payload) = catch_unwind(AssertUnwindSafe(|| f(cycle))) {
         // Freeing the payload would deallocate on the I/O thread; it happens once.
         std::mem::forget(payload);
@@ -414,4 +451,38 @@ where
     }
     c.cycles.fetch_add(1, Ordering::Release);
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{StreamFormat, StreamInfo, StreamLayout};
+
+    #[test]
+    fn a_list_that_does_not_match_the_table_is_refused_and_zeroed() {
+        // The table expects one mono stream; the HAL hands a stereo one.
+        let table = ChannelTable::new(&StreamLayout {
+            streams: vec![StreamInfo {
+                channels: 1,
+                interleaved: true,
+                format: StreamFormat::Float32,
+            }],
+        });
+        let mut data = vec![0.5f32; 2 * 8];
+        let mut list = AudioBufferList {
+            mNumberBuffers: 1,
+            mBuffers: [AudioBuffer {
+                mNumberChannels: 2,
+                mDataByteSize: (data.len() * std::mem::size_of::<f32>()) as u32,
+                mData: data.as_mut_ptr().cast(),
+            }],
+        };
+        let ptr = NonNull::from(&mut list);
+        let mut parts = [(std::ptr::null_mut::<f32>(), 0usize); MAX_BUFFERS];
+        // SAFETY: `list` and `data` outlive both calls.
+        assert_eq!(unsafe { buffers(ptr, &table, &mut parts) }, None);
+        // SAFETY: as above.
+        unsafe { zero_list(ptr) };
+        assert!(data.iter().all(|v| *v == 0.0));
+    }
 }

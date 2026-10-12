@@ -89,10 +89,12 @@ impl Engine {
             }
         }
         if self.capture.is_some() && self.render.is_some() {
-            self.shared.out_minus_in.store(
-                (t.output_sample_time - t.input_sample_time).to_bits(),
-                Ordering::Release,
-            );
+            // Only two valid times on one line give a distance; anything else states none.
+            let diff = match (t.input_sample_time, t.output_sample_time) {
+                (Some(i), Some(o)) => (o - i).to_bits(),
+                _ => NO_DIFF,
+            };
+            self.shared.out_minus_in.store(diff, Ordering::Release);
         }
         if let Some(cap) = &mut self.capture {
             let input = &c.input;

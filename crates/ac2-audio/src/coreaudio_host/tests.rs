@@ -172,7 +172,6 @@ impl ScriptRun {
         }
         let (index, gap) = self.indexer.lock().expect("lock").advance(t, frames as u32);
         let estimated = self.indexer.lock().expect("lock").estimated();
-        let it = t.unwrap_or(0.0);
         let cycle = Cycle {
             input: Input::new(&ins, &self.input, frames),
             output: out,
@@ -182,8 +181,8 @@ impl ScriptRun {
                 gap,
                 estimated,
                 overloads,
-                input_sample_time: it,
-                output_sample_time: it + self.out_minus_in,
+                input_sample_time: t,
+                output_sample_time: t.map(|t| t + self.out_minus_in),
                 now_ns: 1_000_000 + index,
                 input_ns: Some(index),
                 output_ns: Some(index + 1),
