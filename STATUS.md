@@ -40,7 +40,9 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - Windows audio is ASIO only (decision W1): the backend over the azo fork is in every Windows
   build and WASAPI is gone; devices without a driver use FlexASIO, and with no ASIO driver the
   device list says so. Passes under Wine (`tools/wine-asio`); the Windows CI audio pass is
-  FlexASIO on VB-CABLE (all-OS runs); a real interface is untested (`docs/design/asio.md`).
+  FlexASIO on VB-CABLE (all-OS runs). RME's driver (Babyface Pro in a Windows 11 VM, USB host
+  passthrough) passes the 1 h silent run and loopback timing (4160 samples measured, 4159
+  stated); its ADAT clock loss is silent to the host (`docs/design/asio.md` §4c).
 
 ## Where to look
 | need | file |

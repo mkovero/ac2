@@ -3,7 +3,8 @@
 **Status: implemented, and the only Windows audio backend** (decision W1 in
 `open-questions.md`). `crates/ac2-audio/src/asio_host/` builds on every Windows build, over
 the `azo` fork (§1); there is no cargo feature. It passes under Wine
-on wineasio (§4a); FlexASIO on Windows CI (§4b) and real interfaces (§4d) are pending.
+on wineasio (§4a), FlexASIO on Windows CI (§4b) and RME's own driver for a Babyface Pro in
+a Windows 11 VM (§4c, 1 h and loopback timing); a tester on a Windows PC (§4d) is pending.
 §3 is the design; §3a lists where the code settles or departs from it. Shared-mode WASAPI,
 which ac2 used on Windows before, has two `IAudioClient`s on two threads, a same-clock
 relation that the API cannot prove, and render xruns that are never reported
@@ -404,8 +405,8 @@ the thread runs at normal priority.
 ## 4. Testing without Windows hardware, in this order
 
 **Audio safety.** Every stage below runs on the dummy server, a virtual device or a test
-signal path. No automated run passes `--emit`, and nothing here touches a real interface's
-outputs.
+signal path, except the loopback in (c). No automated run passes `--emit`; (c) emitted only
+at the level the operator gave (−30 dBFS) into cables the operator wired.
 
 **(0) Linux unit tests** run in the quick tier against a scripted in-process driver, with
 the same intent as `fake`. They cover:
@@ -488,13 +489,30 @@ loading, `ASIOCreateBuffers`, `bufferSwitchTimeInfo`, messages.
 - Limits: FlexASIO is WASAPI shared mode underneath, so this shows plumbing, not
   pro-driver timing.
 
-**(c) VM with USB passthrough of the Babyface Pro.** A last resort, used only when (a) and
-(b) pass and a fault shows up only on RME's driver. Outputs stay muted or disconnected.
+**(c) VM with USB passthrough of the Babyface Pro.** RME's driver (*ASIO Fireface USB*) in a
+Windows 11 VM, the installed MSI, driven over ssh. Run 2026-10-13:
+- The device has to be passed through as a USB host device (libvirt `<hostdev>`). Over SPICE
+  USB redirection the driver opens, reports latencies and changes the rate, but its
+  isochronous stream never starts: no `bufferSwitch` at all.
+- With the clock on ADAT (locked at 48 kHz) and the driver at 96 kHz there are no callbacks
+  either: the device cannot run at a rate its clock source does not carry. `--rate 48khz`
+  sets the driver to the clock's rate and it runs.
+- Silent duplex 1 h at 48 kHz / 2048: 84 377 blocks, 0 xruns, gaps or discontinuities,
+  callback period sd 0.08 ms, +9 ppm against QPC. Inputs `1,3,9` open alone and stay apart.
+- Loopback at −30 dBFS, out 2 → in 3 and out 1 → in 1 (mic input, phantom off, no gain):
+  4160 samples measured against 4159 stated (`getLatencies` in + out), one lock, 0 jumps,
+  0 ppm drift. The driver does not answer `kAsioGetInternalBufferSamples`.
+- Pulling the ADAT cable moves the device to its own clock (+41 ppm over that run) with no
+  message to the host: no reset, resync or rate change, and the sample position runs on.
+  ac2 cannot tell, so output keeps playing; accepted (operator).
+- Not covered: the control panel during a run (the modal case of §3a), unplugging the
+  device, and another ASIO program holding the driver.
 
 **(d) Hardware gate.** A Windows tester with a real interface runs the existing 1 h duplex
 gate (`ac2 selftest duplex` procedure, 0 discontinuities, a stable loopback delay) on the
 ASIO build. It also changes the buffer size in the driver's control panel mid-run, and the
-run must reopen by itself. Until this passes, ASIO is shipped as preview.
+run must reopen by itself. The VM run (c) passed the 1 h and loopback parts on RME's
+driver; the panel change and a real PC remain. Until this passes, ASIO is shipped as preview.
 
 ## 5. Packaging and CI
 
@@ -509,8 +527,8 @@ run must reopen by itself. Until this passes, ASIO is shipped as preview.
 
 1. ~~Is a weeks-old, single-author crate acceptable as a dependency?~~ Decided: yes,
    through the fork (above), with each fork change offered upstream; upstream answered and
-   released a fix within a day. Still open: vendor drivers on real Windows, unchecked so far
-   (only wineasio and FlexASIO).
+   released a fix within a day. Vendor drivers: RME's (Babyface Pro, in a VM, §4c) passes;
+   others unchecked.
 2. ~~Trademark: plain-text "ASIO" in the UI and docs?~~ Decided (W3): yes. Naming the
    interface a device speaks is nominative use; the SDK's logo and wording guidelines bind
    SDK licensees, and ac2 uses no SDK. No logo, and the docs carry the attribution line
@@ -522,16 +540,18 @@ run must reopen by itself. Until this passes, ASIO is shipped as preview.
    and maps them back correctly (scripted-driver test; under wineasio inputs 3 and 7 with
    `out_1 → in_7` put the impulses on the second block channel only, `ac2.sh`). Still
    open: a vendor driver that wants contiguous channels; it would refuse at
-   `createBuffers` with its own words.
+   `createBuffers` with its own words. RME's driver takes inputs `1,3,9` (§4c).
 5. ~~Two MSIs and their UpgradeCode~~: moot, there is one MSI.
 6. ~~Clock source: read-only in Settings, or the driver panel?~~ Decided: read-only (the
    list in Settings and `ac2 devices`, the current one in the session), set in the
    driver's panel (§3a). ~~What happens when the clock changes?~~ Decided (operator): any
    clock event (reset, resync, buffer-size or rate change, a rate of 0) stops emitting at
    once and says so in plain words; nothing resumes by itself (§3a, *Clock events cut the
-   output*). Still to see on hardware: what a driver does when the external clock it
-   follows goes away (a reset, a rate of 0, an error, or silence; silence is caught by the
-   not-delivering bound, the output then fades over the usual 20 ms at the teardown).
+   output*). On hardware, RME's driver says nothing when its ADAT clock goes away: the
+   device runs on its own clock and the stream continues (§4c), so no cut happens. The
+   operator accepts that ac2 cannot know a clock the driver does not report. A driver that
+   goes silent instead is caught by the not-delivering bound; the output then fades over
+   the usual 20 ms at the teardown.
 7. ~~`kAsioGetInternalBufferSamples` (ASIO 2.3): fold into the stated latency?~~ Decided
    (operator: it shows added latency from the device's own DSP, and not every driver
    implements it): asked at every open and shown beside the stated latency, `not

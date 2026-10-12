@@ -188,6 +188,15 @@ the interface while a session is open (ac2 should say so and recover, not crash)
 interface does not open at all, copy the exact message from the app and the last lines of
 `ac2-ui.log`, and say which entry from step 2 you picked.
 
+If it opens but no meter ever moves and nothing plays:
+- **External clock.** When the interface follows an external clock (ADAT, S/PDIF, word
+  clock), the session rate has to match that clock's rate: an RME Babyface on ADAT at
+  48 kHz delivers nothing with its driver set to 96 kHz. Pick the clock's rate, or switch
+  the clock to internal in the driver's panel.
+- **Windows in a virtual machine.** Pass the interface through as a USB host device, not by
+  the viewer's USB redirection (SPICE in virt-manager): over redirection the driver opens
+  but its audio stream never starts.
+
 ## 4. Test 2: transfer function over a cable, then the delay finder
 
 Pass: an electrical loop reads flat (0 dB, 0°, coherence 1) and the delay finder reports
@@ -329,7 +338,8 @@ Not run under emulation with a real driver yet; each tells us what your driver r
 2. **Clock.** Note the clock sources Settings lists and which is marked *in use*. If the
    interface can follow an external clock and you have one, switch to it in the panel, then
    unplug that clock cable: what does the top bar say, and does audio come back when you
-   plug it in again?
+   plug it in again? Some drivers (RME's Babyface) move to their own clock without telling
+   the program; then the top bar says nothing and audio runs on. Note which it was.
 3. **Busy.** Open a DAW (or another ASIO program) on the same driver first, then open the
    session in ac2. Copy the error text. Close the DAW: does ac2 come up by itself?
 4. **Unplug.** With a session running, unplug the interface's USB cable. Note the top bar
