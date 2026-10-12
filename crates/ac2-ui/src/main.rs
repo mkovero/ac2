@@ -73,6 +73,10 @@ struct Args {
     /// Print the time to the first presented frame and exit.
     #[arg(long)]
     bench_startup: bool,
+    /// Wait for the daemon's device list, print it ("smoke: ok" last) and exit; a link
+    /// that brings none within a minute prints "smoke: failed". For scripted checks.
+    #[arg(long)]
+    smoke: bool,
 }
 
 const NAME: &str = concat!("ac2-ui ", env!("CARGO_PKG_VERSION"));
@@ -214,6 +218,7 @@ fn main() -> ExitCode {
         notices,
         started,
         bench_startup: args.bench_startup,
+        smoke: args.smoke,
         // A daemon without an audio session (an embedded one on real audio always starts
         // so) lands on the audio setup once; one with audio open (a rig, a kiosk) does not.
         // The simulated rig starts measuring.

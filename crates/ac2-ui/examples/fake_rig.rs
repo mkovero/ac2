@@ -49,6 +49,7 @@ fn main() -> Result<(), eframe::Error> {
         notices: err.into_iter().collect(),
         started,
         bench_startup: has("--bench-startup"),
+        smoke: false,
         open_session_dialog: false,
         embedded_autosave: None,
         client_key: None,

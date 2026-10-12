@@ -68,6 +68,7 @@ fn harness(dialog: ConnectDialog) -> Harness<'static, App> {
         notices: vec![],
         started: Instant::now(),
         bench_startup: false,
+        smoke: false,
         open_session_dialog: false,
         embedded_autosave: None,
         client_key: None,

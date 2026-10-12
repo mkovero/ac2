@@ -37,6 +37,8 @@ pub struct AppOptions {
     pub started: Instant,
     /// Print the first-frame time and quit.
     pub bench_startup: bool,
+    /// Print the daemon's device list once it arrives and quit (`--smoke`).
+    pub smoke: bool,
     /// Open the audio setup (Settings › Audio & I/O on the device) once connected if the
     /// daemon has no audio session (an embedded daemon on real audio starts without one).
     pub open_session_dialog: bool,
@@ -141,6 +143,7 @@ pub struct App {
     prefs_saved: Option<Instant>,
     pub startup: StartupTiming,
     bench_startup: bool,
+    smoke: bool,
     applied_theme: Option<ThemeName>,
     /// The full-screen state last sent to the window.
     applied_fullscreen: bool,
@@ -176,6 +179,46 @@ impl std::fmt::Debug for App {
         f.debug_struct("App")
             .field("passes", &self.passes)
             .finish_non_exhaustive()
+    }
+}
+
+/// How long `--smoke` waits for the device list: the link's first connect, the daemon's
+/// start and a driver that takes seconds to load all fit with room to spare.
+const SMOKE_LIMIT: Duration = Duration::from_secs(60);
+
+impl App {
+    /// `--smoke`: prints every device of the daemon's list once it arrives and quits, or
+    /// gives up after [`SMOKE_LIMIT`]. The last line says which.
+    fn smoke_step(&mut self, ctx: &egui::Context) {
+        let done = if let Some(backends) = &self.state.devices {
+            for b in backends {
+                for d in &b.devices {
+                    println!(
+                        "smoke: device {:?} {:?}: {} in, {} out",
+                        b.kind,
+                        d.id.0,
+                        d.input.as_ref().map_or(0, |i| i.max_channels),
+                        d.output.as_ref().map_or(0, |o| o.max_channels)
+                    );
+                }
+            }
+            println!("smoke: ok");
+            true
+        } else if self.started.elapsed() > SMOKE_LIMIT {
+            println!(
+                "smoke: failed: no device list within {} s",
+                SMOKE_LIMIT.as_secs()
+            );
+            true
+        } else {
+            // Nothing else may ask for a frame while the link connects.
+            ctx.request_repaint_after(Duration::from_millis(100));
+            false
+        };
+        if done {
+            self.smoke = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
     }
 }
 
@@ -222,6 +265,7 @@ impl App {
             prefs_saved: None,
             startup: StartupTiming::default(),
             bench_startup: opts.bench_startup,
+            smoke: opts.smoke,
             applied_theme: None,
             applied_fullscreen: false,
             generation: 0,
@@ -747,6 +791,9 @@ impl eframe::App for App {
                 );
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+        }
+        if self.smoke {
+            self.smoke_step(&ctx);
         }
 
         let now = Instant::now();
