@@ -56,7 +56,8 @@ for now.
 4. Allow microphone access when asked (it comes when ac2 first opens an input, usually as
    Settings shows the input meters). ac2 reads your interface's inputs and nothing else.
    Note whether the prompt came, and when.
-5. Optional, for the command-line tools: copy them from the disk image with
+5. Optional, for the command-line tools (`ac2` and the daemon `ac2d`, in the disk image's
+   `bin/` folder): copy them with
    `sudo cp /Volumes/ac2*/bin/ac2 /Volumes/ac2*/bin/ac2d /usr/local/bin/` and run
    `xattr -d com.apple.quarantine /usr/local/bin/ac2 /usr/local/bin/ac2d`.
    `ac2 --version` prints the build.
@@ -64,8 +65,22 @@ for now.
 Start the app as usual (Launchpad, Finder or Dock). It keeps its log, including the audio
 engine it hosts, in `~/Library/Logs/ac2/ac2-ui.log` (Console.app lists it under *Log
 Reports*); the previous run's is `ac2-ui.log.1`. Each start replaces the older one, so copy
-the file before starting ac2 again if a run went wrong. The log's `ac2d <version> up` line
-names the version.
+the file before starting ac2 again if a run went wrong. The app shows its version at the
+foot of the connect dialog and on **Settings › Connection** (*Version: ac2-ui …*), the same
+string `ac2 --version` prints; the log's `ac2d <version> up` line names it too.
+
+**The app alone, or the app and the command line together.** By default the app runs its
+audio engine inside itself (*This computer's audio* in the connect dialog), and the
+command line cannot reach that one. The app-only tests use it as is. A test that uses
+`ac2` against the app's running session says so, and needs the per-user daemon instead:
+
+1. Quit the app. In Terminal: `ac2 daemon start` (it starts the `ac2d` copied beside `ac2`
+   in step 5).
+2. Start the app: it finds the daemon and connects to it without the connect dialog (the
+   top bar names `ac2d …`). The app and `ac2` now share one session: `ac2 session status`
+   and `ac2 devices` read it.
+3. Afterwards quit the app, then `ac2 daemon stop`. The next start of the app is the
+   built-in engine again. The daemon's log is `~/Library/Logs/ac2/ac2d.log`.
 
 ## 2. Wiring and safety
 
@@ -189,7 +204,7 @@ Checks the interface below the app: the same audio backend, run for a fixed time
 pass or fail with a named reason per failure. Use the command-line tools from section 1,
 step 5, in Terminal. The first run asks for microphone access for Terminal: allow it (a
 denial must end in a clean `FAIL` naming the microphone, not a hang; worth noting). **Quit
-the ac2 app first** so the device is free.
+the ac2 app first** (and `ac2 daemon stop` if you started the daemon) so the device is free.
 
 1. **Silent** (no cable needed; the outputs open but play only zeros):
 
@@ -199,8 +214,9 @@ the ac2 app first** so the device is free.
 
    `<interface>` is your interface as the app lists it, e.g. `--device "Babyface Pro"`. A
    wrong name prints the devices it knows. Without `--device` it tests the system default
-   input. It reports device, channel counts, rate and buffer, block sizes, xruns and gaps,
-   callback timing, both clocks against the computer's clock and the peak of every input,
+   input. It reports device, channel counts, rate and buffer, the driver's stated latency,
+   block sizes, xruns and gaps, callback timing, both clocks against the computer's clock
+   and the peak of every input,
    and ends in `result PASS` or one `FAIL` line per reason. `--rate 48khz` and
    `--buffer 256samples` choose rate and buffer; try the smallest buffer you would use.
 
@@ -228,16 +244,20 @@ too. Paste each report into what you send back (`--json` gives the same as JSON)
 These answer what the CI loop on a virtual device cannot: a virtual device reports no
 latency of its own, cannot be unplugged, has no clock to change and has one stream.
 
-1. **Stated against measured latency.** With the loopback cable (output 1 → input 1), open
-   a session on the interface at 48 kHz with the buffer typed as 256 frames (Test 1).
-   Hover over the top bar's device text and note
-   `stated latency: N frames in / M out`. Quit the app, then run the loopback self-test of
-   Test 5, step 3, with `--rate 48khz --buffer 256samples` added, **ten times**, and note
-   each `loopback` offset in samples. Pass: the offset is the same in all ten runs, and
-   equals N + M plus a small remainder (the interface's converters; a few tens of samples).
+1. **Stated against measured latency.** With the loopback cable (output 1 → input 1), run
+   the loopback self-test of Test 5, step 3, with `--rate 48khz --buffer 256samples` added,
+   **ten times**. Each report has the driver's statement on its `latency` row
+   (`stated N frames in / M out / T total = … ms`) and the measured `loopback` offset in
+   samples; note T once and each offset. Pass: the offset is the same in all ten runs, and
+   equals T plus a small remainder (the interface's converters; a few tens of samples).
    Note the remainder; a negative one (measured below stated) is worth a line of its own.
    Repeat at a second buffer size (1024 frames): the stated latency changes with the
    buffer, and the remainder should not.
+   Then check that a session states the same, with the daemon (section 1, *the app and
+   the command line together*): `ac2 daemon start`, start the app, open a session at 48 kHz
+   with a 256-frame buffer (Test 1), and run `ac2 session status`: its `stated latency: …`
+   line (the same as the top bar's hover) should match the self-test's. Quit the app and
+   `ac2 daemon stop` before the next self-test.
 2. **Rate change while running.** Open a session with the transfer measurement running
    (Test 2). In Settings › Audio & I/O, on the device rows, **P** brings up **Audio MIDI
    Setup**. There, change the interface's format to another rate (e.g. 44.1 kHz). Pass:
@@ -284,7 +304,7 @@ useful.
 | macOS version | |
 | Interface model | |
 | Interface driver or firmware version (or "class compliant") | |
-| ac2 version (disk image name, or the log's `ac2d … up` line) | |
+| ac2 version (connect dialog foot or Settings › Connection, or `ac2 --version`) | |
 | Install: right-click → Open or Open Anyway needed? Microphone prompt shown, and when? | |
 | Buffer sizes tried (app and self-test), and any that failed | |
 | Test 1: interface listed, channel names or numbers, input meters move, session opens (rate / buffer shown) | |
@@ -293,7 +313,7 @@ useful.
 | Test 3: spectrum, RTA and SPL meter live; calibration if tried | |
 | Test 4: 1 h run clean? CPU %, memory and battery at start and end | |
 | Test 5: self-test reports (silent, under load, loopback offsets if run) | |
-| Test 6.1: stated latency (in / out frames) at 48 kHz, 256 and 1024 frames; the ten loopback offsets; remainder | |
+| Test 6.1: stated latency (in / out / total frames) at 48 kHz, 256 and 1024 frames; the ten loopback offsets; remainder | |
 | Test 6.2: rate change in Audio MIDI Setup: reopened by itself at the new rate, note shown? | |
 | Test 6.3: unplug / replug ×2: reopened within 30 s? the `audio device probe` lines | |
 | Test 6.4: several input streams: right signal on each input? CPU % with 2 inputs and with all | |
