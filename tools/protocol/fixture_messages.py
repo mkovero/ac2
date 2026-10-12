@@ -430,6 +430,7 @@ def requests():
                 "volts": 0.015,
                 "freq": 1000.0,
                 "mic_sensitivity": 15.0,
+                "loading": {"mic_impedance": 330.0, "input_impedance": 2000.0},
                 "uncertainty": None,
                 "replace_acoustic": False,
             },

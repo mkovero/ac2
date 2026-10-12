@@ -147,6 +147,23 @@ pub fn volts(v: f64) -> String {
     format!("{} {unit}", fixed(x, decimals))
 }
 
+/// Impedance: whole ohms below 1 kΩ (a decimal only when given), else kΩ or MΩ with at
+/// least one decimal: `330 Ω`, `47.5 Ω`, `2.0 kΩ`, `1.37 kΩ`, `1.0 MΩ`.
+pub fn ohms(z: f64) -> String {
+    if !z.is_finite() || z <= 0.0 {
+        return NO_VALUE.to_string();
+    }
+    if z < 1e3 {
+        return format!("{} Ω", fixed(z, needed_decimals(z, 1)));
+    }
+    let (x, unit) = if z < 1e6 {
+        (z / 1e3, "kΩ")
+    } else {
+        (z / 1e6, "MΩ")
+    };
+    format!("{} {unit}", fixed(x, needed_decimals(x, 2).max(1)))
+}
+
 /// Level difference readout: `+3.2 dB`, `−12.0 dB`.
 pub fn db_readout(db: f64) -> String {
     with_unit(signed(db, 1), " dB")

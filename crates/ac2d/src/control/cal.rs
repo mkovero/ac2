@@ -12,7 +12,7 @@ use ac2_core::mic_curve::{MicCurve, file_info};
 use ac2_proto::cal;
 use ac2_proto::model::{
     CalEntry, CalKey, CalMethod, CurveChoice, ElectricalConnection, InputSetup, Mic, MicCurveId,
-    MicCurveRef, SensitivitySource, SplCal,
+    MicCurveRef, MicLoading, SensitivitySource, SplCal,
 };
 use ac2_proto::units::{Blob, Db, DbSpl, Dbfs, Hz, MvPerPa, Rev, Volts, WallNs};
 
@@ -42,6 +42,7 @@ pub(super) struct ElectricalArgs {
     pub(super) volts: Volts,
     pub(super) freq: Hz,
     pub(super) mic_sensitivity: Option<MvPerPa>,
+    pub(super) loading: Option<MicLoading>,
     pub(super) uncertainty: Option<Db>,
     pub(super) replace_acoustic: bool,
 }
@@ -301,6 +302,9 @@ impl Control {
                 mic_sensitivity.0
             )));
         }
+        // The data sheet's sensitivity is open circuit; the preamp sees it divided down.
+        let loaded = cal::loaded_sensitivity(mic_sensitivity, a.loading.as_ref())
+            .map_err(|e| invalid(e.to_string()))?;
         let device = self.cal_target(input)?;
         let key = CalKey {
             device,
@@ -348,7 +352,7 @@ impl Control {
             ));
         }
         let full_scale = cal::full_scale_volts(a.volts.0, measured);
-        let sensitivity = cal::electrical_sensitivity_db(full_scale, mic_sensitivity.0);
+        let sensitivity = cal::electrical_sensitivity_db(full_scale, loaded.0);
         let entry = CalEntry {
             key,
             spl: SplCal {
@@ -359,6 +363,7 @@ impl Control {
                     full_scale: Volts(full_scale),
                     mic_sensitivity,
                     mic_sensitivity_from: from,
+                    loading: a.loading,
                     uncertainty,
                 },
                 freq: a.freq,
@@ -369,11 +374,13 @@ impl Control {
         self.store_calibration(&entry)?;
         tracing::info!(
             "input {input} ({}) calibrated electrically ({:?}): {} V read at {measured:.2} dBFS \
-             → {full_scale:.4} V at 0 dBFS, {} mV/Pa → 0 dBFS = {sensitivity:.2} dB SPL",
+             → {full_scale:.4} V at 0 dBFS, {} mV/Pa ({:.3} mV/Pa loaded) → 0 dBFS = \
+             {sensitivity:.2} dB SPL",
             a.mic,
             a.connection,
             a.volts.0,
-            mic_sensitivity.0
+            mic_sensitivity.0,
+            loaded.0
         );
         Ok(ReplyBody::Calibration(entry))
     }

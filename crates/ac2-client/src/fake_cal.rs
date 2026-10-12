@@ -39,6 +39,7 @@ impl Shared {
                 volts,
                 freq,
                 mic_sensitivity,
+                loading,
                 uncertainty,
                 replace_acoustic,
             } => {
@@ -66,17 +67,20 @@ impl Shared {
                 {
                     return Err(err(ErrorCode::Refused, "input has an acoustic calibration"));
                 }
+                let loaded = cal::loaded_sensitivity(s, loading.as_ref())
+                    .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?;
                 let measured = -20.0;
                 let full_scale = cal::full_scale_volts(volts.0, measured);
                 let e = CalEntry {
                     spl: SplCal {
-                        sensitivity: Db(cal::electrical_sensitivity_db(full_scale, s.0)),
+                        sensitivity: Db(cal::electrical_sensitivity_db(full_scale, loaded.0)),
                         method: CalMethod::Electrical {
                             connection,
                             volts,
                             full_scale: ac2_proto::units::Volts(full_scale),
                             mic_sensitivity: s,
                             mic_sensitivity_from: from,
+                            loading,
                             uncertainty: uncertainty.unwrap_or(cal::DEFAULT_ELECTRICAL_UNCERTAINTY),
                         },
                         freq,

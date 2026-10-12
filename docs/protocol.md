@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 48`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 49`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -109,7 +109,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.export` | `trace`, `format: ac2_csv \| ir_wav` | `export` (`file_name`, `content: bin`) | |
 | `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
-| `cal.spl_electrical` | `input`, `mic`, `connection: in_line \| injected`, `volts: Volts`, `freq: Hz`, `mic_sensitivity: MvPerPa \| nil`, `uncertainty: Db \| nil`, `replace_acoustic: bool` | `calibration` | |
+| `cal.spl_electrical` | `input`, `mic`, `connection: in_line \| injected`, `volts: Volts`, `freq: Hz`, `mic_sensitivity: MvPerPa \| nil`, `loading: MicLoading \| nil`, `uncertainty: Db \| nil`, `replace_acoustic: bool` | `calibration` | |
 | `cal.curve_import` | `mic`, `label: string \| nil`, `file_name`, `content: bin`, `input: u16 \| nil` | `mic` | |
 | `cal.curve_rename` | `curve: MicCurveId`, `label` | `mic` | |
 | `cal.curve_delete` | `curve: MicCurveId` | `ack` | |
@@ -1045,11 +1045,15 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   `volts` (RMS) at the input, and stores `sensitivity = 20·lg(V_FS / (S · 20 µPa))` with
   `V_FS = volts / 10^(L/20)` (volts at 0 dBFS) and `S` = `mic_sensitivity` (mV/Pa), or, when
   nil, the one value the `stated_sensitivity` of `mic`'s curves states (`invalid` when they
-  state none or disagree). `method` is `electrical` {`connection`: `in_line` (pins 2–3 with
+  state none or disagree). With `loading` {`mic_impedance`: Ohms, `input_impedance`: Ohms}
+  `S` is the open-circuit sensitivity divided down by the preamp's input,
+  `S · Z_in / (Z_in + Z_out)` (`invalid` unless both are finite and above 0); nil: unloaded.
+  `method` is `electrical` {`connection`: `in_line` (pins 2–3 with
   the mic connected and powered) | `injected` (a generator in place of the mic), `volts`,
   `full_scale`: Volts (V_FS), `mic_sensitivity`: MvPerPa, `mic_sensitivity_from:
   SensitivitySource` (tagged by `type`: `typed` | `data_sheet` {`label`, `file_name`}),
-  `uncertainty`: Db (± dB; 1 when nil; 0.05–6 accepted)}. Refused like `cal.spl`, and
+  `loading`: MicLoading | nil (as given; `mic_sensitivity` stays the open-circuit value and
+  `sensitivity` counts the loading), `uncertainty`: Db (± dB; 1 when nil; 0.05–6 accepted)}. Refused like `cal.spl`, and
   also above −3 dBFS or below −70 dBFS (a poor reading), for `volts` outside 0.1 mV–100 V,
   a mic sensitivity outside 0.1–1000 mV/Pa, or a `freq` outside 20 Hz–20 kHz (any `freq`
   in that range is accepted; the mic curve is normalised at 1 kHz, where data sheets
@@ -1094,7 +1098,7 @@ tagged by `type`: `uncalibrated` | `verified` {`calibrated_at`, `basis`} |
 `other_mic_or_input` {`calibrated_at`, `basis`}; the age is `capture_wall_ns −
 calibrated_at`. `basis: CalBasis` (tagged by `type`) says what the calibration rests on:
 `acoustic` {`calibrator_level`} | `electrical` {`connection`, `mic_sensitivity`,
-`data_sheet`: bool, `uncertainty`}. The mic curve is the input's chosen curve of its mic —
+`data_sheet`: bool, `loading`: MicLoading | nil, `uncertainty`}. The mic curve is the input's chosen curve of its mic —
 only that one; none when not chosen, off, or not stored — normalised to 0 dB at the
 calibration's frequency in use (the calibrator's; 1 kHz for an electrical calibration and
 uncalibrated). The rules are
@@ -1369,7 +1373,8 @@ its fields (`["verified", calibrated_at, ["acoustic", calibrator_level]]`); the 
 stays a one-entry map `{kind: [...]}`; enums without data stay strings. Nested orders:
 `Smoothing` [fraction, mode]; `CalStatus` `uncalibrated` \| `verified` /
 `other_mic_or_input` [calibrated_at, basis]; `CalBasis` `acoustic` [calibrator_level] \|
-`electrical` [connection, mic_sensitivity, data_sheet, uncertainty]; `LeqRun` [started_at,
+`electrical` [connection, mic_sensitivity, data_sheet, loading, uncertainty] (`loading` nil
+or [mic_impedance, input_impedance]); `LeqRun` [started_at,
 until, measured, gaps, trimmed, laeq, lceq, lzeq]; `LeqPeak` [level, judgement];
 `PositionCorrection` [level, peak]; `TimingStatus` [epoch, state, last_lock,
 drift, internal_reference]; `TimingState` `no_stimulus` \| `acquiring` \| `locked`

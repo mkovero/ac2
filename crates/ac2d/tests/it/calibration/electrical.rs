@@ -15,9 +15,21 @@ fn electrical(
         volts: Volts(volts),
         freq: Hz(1000.0),
         mic_sensitivity: mic_sensitivity.map(MvPerPa),
+        loading: None,
         uncertainty: None,
         replace_acoustic,
     }
+}
+
+/// `cmd` with the mic's output and the preamp's input impedance, Ω.
+fn loaded(mut cmd: Command, mic_ohms: f64, input_ohms: f64) -> Command {
+    if let Command::CalSplElectrical { loading, .. } = &mut cmd {
+        *loading = Some(MicLoading {
+            mic_impedance: Ohms(mic_ohms),
+            input_impedance: Ohms(input_ohms),
+        });
+    }
+    cmd
 }
 
 /// Retries `cmd` while the tone the generator just started is not there or not steady yet.
@@ -95,6 +107,14 @@ async fn slow_electrical_calibration_end_to_end() {
             "outside 0.1",
         ),
         (electrical("ECM", 0.015, None, false), "no curve file"),
+        (
+            loaded(electrical("MM1 34804", 0.015, None, false), 0.0, 2000.0),
+            "mic output impedance 0 Ω",
+        ),
+        (
+            loaded(electrical("MM1 34804", 0.015, None, false), 330.0, -1.0),
+            "preamp input impedance -1 Ω",
+        ),
     ] {
         match c.call(cmd).await {
             Err(ClientError::Daemon(p)) if p.code == ErrorCode::Invalid => {
@@ -149,6 +169,7 @@ async fn slow_electrical_calibration_end_to_end() {
         full_scale,
         mic_sensitivity,
         mic_sensitivity_from,
+        loading,
         uncertainty,
     } = &e.spl.method
     else {
@@ -165,6 +186,7 @@ async fn slow_electrical_calibration_end_to_end() {
             file_name: "449350_34804_0Grad.txt".into()
         }
     );
+    assert_eq!(*loading, None);
     assert_eq!(*uncertainty, Db(1.0));
     // By hand: 15 mV / 15 mV/Pa = 1 Pa = 93.98 dB SPL, read at L dBFS.
     let want = 20.0 * (1.0 / 20e-6f64).log10() - l;
@@ -209,19 +231,34 @@ async fn slow_electrical_calibration_end_to_end() {
         "acoustic",
     );
     assert!(msg.contains("acoustic calibration"), "{msg}");
-    let r = steady(&c, electrical("MM1 34804", 0.0151, Some(15.0), true))
-        .await
-        .unwrap();
-    let ReplyBody::Calibration(e) = r else {
+    // With the MM1's 330 Ω driving a 2 kΩ input the open-circuit 15 mV/Pa reads as
+    // 15 · 2000/2330 mV/Pa at the input: 0 dBFS is 20·lg(2330/2000) = 1.327 dB more SPL.
+    let r = steady(
+        &c,
+        loaded(
+            electrical("MM1 34804", 0.015, Some(15.0), true),
+            330.0,
+            2000.0,
+        ),
+    )
+    .await
+    .unwrap();
+    let ReplyBody::Calibration(e2) = r else {
         panic!("{r:?}")
     };
     assert!(matches!(
-        e.spl.method,
+        e2.spl.method,
         CalMethod::Electrical {
+            mic_sensitivity: MvPerPa(15.0),
             mic_sensitivity_from: SensitivitySource::Typed,
+            loading: Some(_),
             ..
         }
     ));
+    let want =
+        20.0 * (1.0 / 20e-6f64).log10() - e2.spl.measured.0 + 20.0 * (2330.0f64 / 2000.0).log10();
+    assert!((e2.spl.sensitivity.0 - want).abs() < 1e-9);
+    assert!((e2.spl.sensitivity.0 - e.spl.sensitivity.0 - 1.3265).abs() < 0.06);
     let st = state_until(&c, |s| {
         s.calibrations
             .iter()
@@ -241,7 +278,7 @@ async fn slow_electrical_calibration_end_to_end() {
     let c = connect(&h).await;
     let st = state_until(&c, |_| true).await;
     assert_eq!(st.calibrations.len(), 1);
-    assert_eq!(st.calibrations[0].spl, e.spl);
+    assert_eq!(st.calibrations[0].spl, e2.spl);
     drop(c);
     tokio::task::spawn_blocking(move || h.shutdown())
         .await

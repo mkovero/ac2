@@ -4,7 +4,8 @@
 use ac2_client::{Client, expect_body};
 use ac2_proto::cal::input_setup;
 use ac2_proto::model::{
-    CalEntry, CalKey, DeviceId, ElectricalConnection, InputSetup, Mic, MicCurveId, State,
+    CalEntry, CalKey, DeviceId, ElectricalConnection, InputSetup, Mic, MicCurveId, MicLoading,
+    State,
 };
 use ac2_proto::units::Blob;
 use ac2_proto::{Command, ReplyBody};
@@ -123,6 +124,13 @@ async fn cal_electrical(cli: &Cli, a: &CalElectrical, out: &mut Out<'_>) -> Resu
             volts: a.volts.0,
             freq: a.freq.0,
             mic_sensitivity: a.sensitivity.map(|x| x.0),
+            loading: a
+                .mic_impedance
+                .zip(a.input_impedance)
+                .map(|(m, i)| MicLoading {
+                    mic_impedance: m.0,
+                    input_impedance: i.0,
+                }),
             uncertainty: a.uncertainty.map(|x| x.0),
             replace_acoustic: a.replace_acoustic,
         })

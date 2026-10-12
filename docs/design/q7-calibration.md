@@ -395,8 +395,23 @@ since 0 dBFS is `V_FS / S` pascal. Check: 15 mV read at −40.0 dBFS → `V_FS` 
 15 mV/Pa, 0 dBFS = 100 Pa = 133.98 dB SPL; the mic at 1 Pa (93.98 dB SPL) gives 15 mV, which
 reads −40 dBFS → 93.98 dB SPL, shown 94.0 (`ac2_proto::cal` tests).
 
+**Loading.** A data-sheet sensitivity is the capsule's open-circuit voltage per pascal. In
+use the mic drives the preamp: its output impedance `Z_out` and the preamp's input impedance
+`Z_in` form a divider, so the input sees
+
+    S_eff = S · Z_in / (Z_in + Z_out)         (loading 20·lg(Z_in / (Z_in + Z_out)) dB)
+
+and `S_eff` takes `S`'s place above. `V_FS` is the input's own (whatever drives it), so the
+correction holds for both connections: in-line measures the loaded voltage, but pairing it
+with the open-circuit `S` would still read low by the loading. Example: beyerdynamic MM1
+(15 mV/Pa, 330 Ω) into an RME Fireface 400 mic input (2 kΩ): `S_eff` = 12.88 mV/Pa,
+−1.33 dB; without it SPL reads 1.3 dB low (`ac2_proto::cal::loading_db`,
+`loaded_sensitivity`, tested by hand). Magnitudes only: both impedances are near-resistive at
+1 kHz. Optional, both or neither (`loading: {mic_impedance, input_impedance}` in Ω, each
+finite and above 0, else `invalid`); without it the sensitivity counts none.
+
 **Command.** `cal.spl_electrical {input, mic, connection: in_line | injected, volts, freq,
-mic_sensitivity?, uncertainty?, replace_acoustic}`. The level is read exactly as `cal.spl`
+mic_sensitivity?, loading?, uncertainty?, replace_acoustic}`. The level is read exactly as `cal.spl`
 reads it (broadband, uncorrected, τ = 1 s; refused without signal, while the 0.2 s and 1 s
 readings differ by more than 0.05 dB, and when the input reached full scale in the last 2 s —
 a clipped tone reads low; the last applies to `cal.spl` too). Further refusals, because the
@@ -408,14 +423,18 @@ one value the mic's curve files state (`ac2_proto::cal::data_sheet`); none, or f
 disagree, is `invalid` with the reason.
 
 **Stored** as the key's sensitivity calibration with `method: electrical {connection, volts,
-full_scale (V_FS), mic_sensitivity, mic_sensitivity_from: typed | data_sheet {label,
-file_name}, uncertainty}`; `freq` is the tone's. Frames carry `CalStatus … {basis}` with the
-connection, sensitivity, whether it is the data sheet's and the uncertainty, so every readout
-words it from the frame: `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago`
-(an acoustic one: `cal 94 dB · 2 h ago`; a mismatch: `electrical cal from other mic / input
-±1 dB`). The input setup rows and `ac2 cal list` give the full record (`electrical, in-line ·
-15.03 mV at 1.00 kHz read −40.0 dBFS · 0 dBFS = 1.500 V · 15.0 mV/Pa from the data sheet (0°,
-449350_34804_0Grad.txt) · ±1 dB`). It is a calibration for every purpose: values in dB SPL,
+full_scale (V_FS), mic_sensitivity (open circuit, as stated), mic_sensitivity_from: typed |
+data_sheet {label, file_name}, loading?, uncertainty}`; the stored `sensitivity` counts the
+loading; `freq` is the tone's. A stored entry without `loading` (store file, capture sidecar)
+reads as none, which is what its sensitivity counts — the store keeps version 3. Frames carry
+`CalStatus … {basis}` with the connection, sensitivity, whether it is the data sheet's, the
+loading and the uncertainty, so every readout words it from the frame: `electrical cal
+(in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago`, with a loading `electrical cal (in-line,
+data sheet 15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ −1.3 dB) ±1 dB · 2 h ago` (an acoustic one: `cal
+94 dB · 2 h ago`; a mismatch: `electrical cal from other mic / input ±1 dB`). The input setup
+rows and `ac2 cal list` give the full record (`electrical, in-line · 15.03 mV at 1.00 kHz read
+−40.0 dBFS · 0 dBFS = 1.500 V · 15.0 mV/Pa from the data sheet (0°, 449350_34804_0Grad.txt) ·
+loaded 330 Ω → 2.0 kΩ −1.3 dB · ±1 dB`; the loading only when stated). It is a calibration for every purpose: values in dB SPL,
 Leq limits judged (`leq.md`).
 
 **Precedence.** One entry per key. A calibrator reading replaces an electrical one without
@@ -434,7 +453,7 @@ clients note it (`the tone was 400 Hz: …`).
 | mic sensitivity, data sheet | ±0.5 … 1 dB | dominates; a capsule's individual calibration sheet: ±0.2 dB, state `--uncertainty` |
 | voltmeter | ±0.05 … 0.2 dB | handheld true-RMS DMM ±(0.5–2 %) at 1 kHz on its lowest fitting range; AD2 scope ±0.5 % of range; check the meter's AC bandwidth |
 | level reading | ≤ 0.05 dB | the settling rule; the tone steady and unclipped |
-| loading (injected only) | 0 … 0.3 dB | the mic's source impedance (~50–200 Ω) differs from the generator's (AD2: 50 Ω); in-line measures the real loading and removes the term |
+| loading, not stated | 0.2 … 2 dB | the open-circuit `S` against the loaded voltage: 20·lg(Z_in / (Z_in + Z_out)); stating both impedances removes it, leaving their tolerances (≤ 0.1 dB) |
 | preamp flatness (tone ≠ 1 kHz) | small | usually < 0.1 dB between 400 Hz and 1 kHz |
 | gain changed afterwards | unbounded | a gain change invalidates any calibration (7b) |
 
@@ -457,14 +476,19 @@ for the mic afterwards; either way keep the gain you will measure with.
 the dialog — where measured (←/→: in-line / injected, its safety note prominent), the input's
 level meter live, the voltage typed with its unit (`15.03 mV`), the tone (`1 kHz`), the
 sensitivity prefilled from the data sheet with its source (`data sheet (MM1 34804 0°)`; typing
-makes it `typed`); Enter reads and stores, a refusal stays in the dialog to retry, success
+makes it `typed`), and optionally the mic's output and the preamp's input impedance (`330
+ohm`, `2 k`; blank = no loading) with the correction shown live (`loaded 330 Ω → 2.0 kΩ
+−1.3 dB`); Enter reads and stores, a refusal stays in the dialog to retry, success
 closes it with what to do next. **CLI.** `ac2 cal electrical --input N --volts 15.03mv
 [--freq 1khz] [--sensitivity 15.0mv/pa | -36.5dbv/pa] [--method inline|injected]
+[--mic-impedance 330ohm --input-impedance 2kohm]
 [--uncertainty 1db] [--mic NAME] [--replace-acoustic]` prints the record, `0 dBFS = … dB SPL`,
 the notes and the phantom reminder.
 
-Tests: `ac2-proto::cal` (the formulas by hand, `f_norm`, `data_sheet`), calstore (round
-trip with a method, version 2 set aside, electrical normalised at 1 kHz), daemon
+Tests: `ac2-proto::cal` (the formulas by hand, the loading by hand, `f_norm`, `data_sheet`),
+calstore (round trip with a method and a loading, an entry without `loading` read unloaded,
+version 2 set aside, electrical normalised at 1 kHz), raw sidecar (a calibration without
+`loading` reads), daemon
 `slow_electrical_calibration_end_to_end` (invalid inputs, no tone, too low, a tone at −26.02 dBFS
 with 15 mV and the data sheet's 15 mV/Pa → 120.0 dB and the SPL meter at 93.98 dB SPL with an
 electrical basis, acoustic precedence, persistence), `ac2-scene::cal` wording, CLI (`cal

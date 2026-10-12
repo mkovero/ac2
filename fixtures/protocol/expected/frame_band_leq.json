@@ -1,7 +1,7 @@
 {
  "topic": "d/4/band_leq",
  "header": {
-  "v": 48,
+  "v": 49,
   "kind": "band_leq",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -51,6 +51,10 @@
       "connection": "injected",
       "mic_sensitivity": 15.0,
       "data_sheet": false,
+      "loading": {
+       "mic_impedance": 330.0,
+       "input_impedance": 2000.0
+      },
       "uncertainty": 1.0
      }
     },

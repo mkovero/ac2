@@ -125,6 +125,19 @@ fn volts_and_sensitivities() {
 }
 
 #[test]
+fn impedances() {
+    assert_eq!(ok::<OhmsArg>("330ohm").0, Ohms(330.0));
+    assert_eq!(ok::<OhmsArg>("330 Ω").0, Ohms(330.0));
+    assert_eq!(ok::<OhmsArg>("330\u{2126}").0, Ohms(330.0));
+    assert_eq!(ok::<OhmsArg>("2kohm").0, Ohms(2000.0));
+    assert_eq!(ok::<OhmsArg>("2kΩ").0, Ohms(2000.0));
+    assert_eq!(ok::<OhmsArg>("1.5KOhm").0, Ohms(1500.0));
+    for bad in ["330", "0ohm", "-330ohm", "2mohm", "20000kohm", "2k"] {
+        assert!(bad.parse::<OhmsArg>().is_err(), "{bad}");
+    }
+}
+
+#[test]
 fn levels() {
     assert_eq!(ok::<LevelDbfs>("-20dbfs").0, Dbfs(-20.0));
     assert_eq!(ok::<LevelDbfs>("-12.5dBFS").0, Dbfs(-12.5));

@@ -251,7 +251,38 @@ fn plan_examples_parse() {
     assert_eq!(a.freq, Freq(Hz(1000.0)));
     assert_eq!(a.method, ElectricalMethodArg::Inline);
     assert_eq!(a.sensitivity, None);
+    assert_eq!(a.mic_impedance, None);
+    assert_eq!(a.input_impedance, None);
     assert!(!a.replace_acoustic);
+    // The loading is both impedances or neither.
+    let c = ok(&[
+        "cal",
+        "electrical",
+        "--input",
+        "2",
+        "--volts",
+        "15.03mv",
+        "--mic-impedance",
+        "330ohm",
+        "--input-impedance",
+        "2kΩ",
+    ]);
+    let Cmd::Cal {
+        cmd: CalCmd::Electrical(a),
+    } = c.cmd
+    else {
+        panic!("not cal electrical");
+    };
+    assert_eq!(a.mic_impedance.map(|z| z.0.0), Some(330.0));
+    assert_eq!(a.input_impedance.map(|z| z.0.0), Some(2000.0));
+    for one in [
+        ["--mic-impedance", "330ohm"],
+        ["--input-impedance", "2kohm"],
+    ] {
+        let mut v = vec!["cal", "electrical", "--input", "2", "--volts", "15mv"];
+        v.extend(one);
+        assert!(parse(&v).is_err(), "{one:?}");
+    }
     // Every value carries its unit: a bare voltage is refused.
     assert!(parse(&["cal", "electrical", "--input", "2", "--volts", "0.015"]).is_err());
     assert!(parse(&["cal", "electrical", "--input", "2"]).is_err());

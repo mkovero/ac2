@@ -191,6 +191,10 @@ pub fn commands() -> Vec<Command> {
             volts: Volts(0.015),
             freq: Hz(1000.0),
             mic_sensitivity: Some(MvPerPa(15.0)),
+            loading: Some(MicLoading {
+                mic_impedance: Ohms(330.0),
+                input_impedance: Ohms(2000.0),
+            }),
             uncertainty: None,
             replace_acoustic: false,
         },

@@ -264,6 +264,42 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     ] {
         assert!(text.stdout.contains(want), "{want:?} in\n{}", text.stdout);
     }
+    // The MM1's 330 Ω loaded by a 2 kΩ input: 15 mV/Pa open circuit is 12.88 mV/Pa at the
+    // input, so 0 dBFS (150 mV) is 1.327 dB more SPL than unloaded.
+    let e = ok_json(
+        &f,
+        &[
+            "cal",
+            "electrical",
+            "--input",
+            "2",
+            "--volts",
+            "15mv",
+            "--mic-impedance",
+            "330ohm",
+            "--input-impedance",
+            "2kohm",
+            "--json",
+        ],
+    )
+    .await?;
+    let m = &e["spl"]["method"];
+    assert_eq!(m["mic_sensitivity"], 15.0);
+    assert_eq!(
+        m["loading"],
+        json!({ "mic_impedance": 330.0, "input_impedance": 2000.0 })
+    );
+    let s = e["spl"]["sensitivity"].as_f64().unwrap_or_default();
+    let want = 113.979_400_086_720_4 + 20.0 * (2330.0f64 / 2000.0).log10();
+    assert!((s - want).abs() < 1e-9, "{s}");
+    let text = ac2(&f, &["cal", "list"]).await?;
+    for want in [
+        "data sheet 15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ −1.3 dB",
+        "verified · electrical (in-line, data sheet 15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ −1.3 dB) \
+         ±1 dB",
+    ] {
+        assert!(text.stdout.contains(want), "{want:?} in\n{}", text.stdout);
+    }
 
     // `cal rm`: the sensitivity calibration of the session's device, the input's mic by
     // default.

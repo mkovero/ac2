@@ -106,6 +106,42 @@ fn sidecar_round_trips_and_a_foreign_version_is_refused() {
     ));
 }
 
+/// A sidecar whose electrical calibrations state no mic loading (taken unloaded) still
+/// reads, as unloaded.
+#[test]
+fn sidecar_calibration_without_loading_reads_unloaded() {
+    use ac2_proto::model::CalMethod;
+    let dir = tempfile::tempdir().expect("dir");
+    let s = sidecar("a");
+    assert!(s.initial.calibrations.iter().any(|e| matches!(
+        e.spl.method,
+        CalMethod::Electrical {
+            loading: Some(_),
+            ..
+        }
+    )));
+    write_sidecar(dir.path(), "a", &s).expect("write");
+    let mut v: serde_json::Value =
+        serde_json::from_slice(&fs::read(sidecar_path(dir.path(), "a")).expect("read"))
+            .expect("json");
+    let mut removed = 0;
+    for e in v["initial"]["calibrations"].as_array_mut().expect("cals") {
+        if let Some(m) = e["spl"]["method"].as_object_mut() {
+            removed += usize::from(m.remove("loading").is_some());
+        }
+    }
+    assert_eq!(removed, 1);
+    fs::write(sidecar_path(dir.path(), "a"), v.to_string()).expect("write");
+    let r = read_sidecar(dir.path(), "a").expect("read");
+    let mut want = s.initial.calibrations.clone();
+    for e in &mut want {
+        if let CalMethod::Electrical { loading, .. } = &mut e.spl.method {
+            *loading = None;
+        }
+    }
+    assert_eq!(r.initial.calibrations, want);
+}
+
 #[test]
 fn file_frames_and_session_samples_map_across_gaps() {
     let s = sidecar("a");

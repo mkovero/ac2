@@ -6,15 +6,18 @@
 //! Keyboard-first like the other dialogs: ↑/↓ (Tab) move between the fields, ←/→ choose
 //! where the voltage is measured (in-line or injected), typing edits the focused field,
 //! Enter reads and stores, Esc closes. The sensitivity starts as the data sheet's (the mic's
-//! curve files), named as such; editing it makes it typed.
+//! curve files), named as such; editing it makes it typed. The mic's output impedance and
+//! the preamp's input impedance are optional (both or neither): the data-sheet sensitivity is
+//! open circuit, and the preamp loads the mic; the dialog shows the correction they make
+//! as they are typed.
 //!
 //! Pure data: the reducer turns Enter into a `cal.spl_electrical` request and hands the
 //! reply back through [`ElectricalDialog::reply`].
 
 use ac2_proto::Command;
 use ac2_proto::cal::{self, DataSheet};
-use ac2_proto::model::{CalMethod, ElectricalConnection, State};
-use ac2_proto::units::{Hz, MvPerPa, Volts};
+use ac2_proto::model::{CalMethod, ElectricalConnection, MicLoading, State};
+use ac2_proto::units::{Hz, MvPerPa, Ohms, Volts};
 
 /// The fields, top to bottom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -28,9 +31,20 @@ pub enum Field {
     Freq,
     /// The mic's sensitivity.
     Sensitivity,
+    /// The mic's output impedance (optional).
+    MicImpedance,
+    /// The preamp's input impedance (optional).
+    InputImpedance,
 }
 
-const FIELDS: [Field; 4] = [Field::Method, Field::Volts, Field::Freq, Field::Sensitivity];
+const FIELDS: [Field; 6] = [
+    Field::Method,
+    Field::Volts,
+    Field::Freq,
+    Field::Sensitivity,
+    Field::MicImpedance,
+    Field::InputImpedance,
+];
 
 /// The `what` of the dialog's request: its reply comes back to the dialog by it.
 pub const WHAT_PREFIX: &str = "electrical calibration of input ";
@@ -44,6 +58,10 @@ pub struct ElectricalDialog {
     pub volts: String,
     pub freq: String,
     pub sensitivity: String,
+    /// The mic's output impedance as typed; blank with `input_impedance`: no loading.
+    pub mic_impedance: String,
+    /// The preamp's input impedance as typed.
+    pub input_impedance: String,
     /// The data sheet's value as prefilled, with where it comes from (`MM1 34804 0°`), when
     /// the mic's curve files state one.
     pub data_sheet: Option<(String, String)>,
@@ -124,6 +142,22 @@ pub fn parse_sensitivity(t: &str) -> Result<MvPerPa, String> {
     }
 }
 
+/// `330 ohm`, `330 Ω`, `330` (Ω), `2 k`, `2 kΩ`, `2 kohm` → Ω.
+pub fn parse_ohms(t: &str) -> Result<Ohms, String> {
+    let (n, u) = split(t).ok_or("type the impedance, e.g. 330 ohm or 2 k")?;
+    // `split` lowercases: Ω (and the ohm sign) become ω.
+    let z = match u.as_str() {
+        "" | "ohm" | "ω" => n,
+        "k" | "kohm" | "kω" => n * 1e3,
+        _ => return Err(format!("unknown unit {u:?}: ohm or k")),
+    };
+    if z > 0.0 && z.is_finite() {
+        Ok(Ohms(z))
+    } else {
+        Err("the impedance must be above 0".into())
+    }
+}
+
 impl ElectricalDialog {
     /// The dialog for `input`, whose mic name is `mic`: in-line, 1 kHz, the data-sheet
     /// sensitivity when the mic's files state exactly one.
@@ -179,6 +213,8 @@ impl ElectricalDialog {
             volts: String::new(),
             freq: "1 kHz".into(),
             sensitivity: data_sheet.as_ref().map(|d| d.0.clone()).unwrap_or_default(),
+            mic_impedance: String::new(),
+            input_impedance: String::new(),
             data_sheet,
             no_data_sheet,
             acoustic,
@@ -223,6 +259,36 @@ impl ElectricalDialog {
         }
     }
 
+    /// The loading as typed: `Ok(None)` both blank, or the field to fix and why.
+    fn loading(&self) -> Result<Option<MicLoading>, (Field, String)> {
+        let (m, i) = (self.mic_impedance.trim(), self.input_impedance.trim());
+        match (m.is_empty(), i.is_empty()) {
+            (true, true) => Ok(None),
+            (true, false) => Err((
+                Field::MicImpedance,
+                "give the mic's output impedance too, or leave both blank".into(),
+            )),
+            (false, true) => Err((
+                Field::InputImpedance,
+                "give the preamp's input impedance too, or leave both blank".into(),
+            )),
+            (false, false) => Ok(Some(MicLoading {
+                mic_impedance: parse_ohms(m).map_err(|e| (Field::MicImpedance, e))?,
+                input_impedance: parse_ohms(i).map_err(|e| (Field::InputImpedance, e))?,
+            })),
+        }
+    }
+
+    /// The loading correction as typed, live: `loaded 330 Ω → 2.0 kΩ −1.3 dB`, `blank: no
+    /// loading correction`, or what is missing.
+    pub fn loading_text(&self) -> String {
+        match self.loading() {
+            Ok(None) => "blank: no loading correction".into(),
+            Ok(Some(l)) => ac2_scene::cal::loading(&l),
+            Err((_, e)) => e,
+        }
+    }
+
     fn touched(&mut self) {
         self.error = None;
         self.notice = None;
@@ -252,6 +318,8 @@ impl ElectricalDialog {
             Field::Volts => Some(&mut self.volts),
             Field::Freq => Some(&mut self.freq),
             Field::Sensitivity => Some(&mut self.sensitivity),
+            Field::MicImpedance => Some(&mut self.mic_impedance),
+            Field::InputImpedance => Some(&mut self.input_impedance),
         }
     }
 
@@ -295,9 +363,10 @@ impl ElectricalDialog {
             } else {
                 Some(parse_sensitivity(&self.sensitivity).map_err(|e| (Field::Sensitivity, e))?)
             };
-            Ok((volts, freq, mic_sensitivity))
+            let loading = self.loading()?;
+            Ok((volts, freq, mic_sensitivity, loading))
         })();
-        let (volts, freq, mic_sensitivity) = match parsed {
+        let (volts, freq, mic_sensitivity, loading) = match parsed {
             Ok(p) => p,
             Err((f, e)) => {
                 self.focus = f;
@@ -327,6 +396,7 @@ impl ElectricalDialog {
             volts,
             freq,
             mic_sensitivity,
+            loading,
             uncertainty: None,
             replace_acoustic,
         })
@@ -454,6 +524,7 @@ mod tests {
                 volts: Volts(0.015),
                 freq: Hz(1000.0),
                 mic_sensitivity: None,
+                loading: None,
                 uncertainty: None,
                 replace_acoustic: false,
             }
@@ -501,6 +572,54 @@ mod tests {
         assert_eq!(connection, ElectricalConnection::Injected);
         assert_eq!(freq, Hz(400.0));
         assert!(mic_sensitivity.is_some_and(|m| (m.0 - 10.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn loading_both_or_neither_shown_live() {
+        assert_eq!(parse_ohms("330 ohm"), Ok(Ohms(330.0)));
+        assert_eq!(parse_ohms("330Ω"), Ok(Ohms(330.0)));
+        assert_eq!(parse_ohms("330"), Ok(Ohms(330.0)));
+        assert_eq!(parse_ohms("2 k"), Ok(Ohms(2000.0)));
+        assert_eq!(parse_ohms("2 kΩ"), Ok(Ohms(2000.0)));
+        assert_eq!(parse_ohms("2,2 kohm"), Ok(Ohms(2200.0)));
+        assert!(parse_ohms("0 ohm").is_err());
+        assert!(parse_ohms("2 mA").is_err());
+
+        let s = state(Some(15.0));
+        let mut d = ElectricalDialog::new(&s, 1, "MM1 34804");
+        assert_eq!(d.loading_text(), "blank: no loading correction");
+        d.type_text("15 mV");
+        d.move_focus(3);
+        assert_eq!(d.focus, Field::MicImpedance);
+        d.type_text("330 ohm");
+        assert_eq!(
+            d.loading_text(),
+            "give the preamp's input impedance too, or leave both blank"
+        );
+        // One impedance alone is refused at that field, nothing sent.
+        assert_eq!(d.submit(), None);
+        assert_eq!(d.focus, Field::InputImpedance);
+        d.type_text("2 k");
+        assert_eq!(d.loading_text(), "loaded 330 Ω → 2.0 kΩ −1.3 dB");
+        let Some(Command::CalSplElectrical {
+            mic_sensitivity,
+            loading,
+            ..
+        }) = d.submit()
+        else {
+            panic!("{:?}", d.error)
+        };
+        assert_eq!(mic_sensitivity, None);
+        assert_eq!(
+            loading,
+            Some(MicLoading {
+                mic_impedance: Ohms(330.0),
+                input_impedance: Ohms(2000.0),
+            })
+        );
+        // Down from the last field wraps to the method.
+        d.move_focus(1);
+        assert_eq!(d.focus, Field::Method);
     }
 
     #[test]

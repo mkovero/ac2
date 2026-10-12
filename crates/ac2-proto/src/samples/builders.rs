@@ -384,7 +384,7 @@ pub(super) fn electrical_cal_entry() -> CalEntry {
             ..cal_key()
         },
         spl: SplCal {
-            sensitivity: Db(133.98),
+            sensitivity: Db(135.31),
             method: CalMethod::Electrical {
                 connection: ElectricalConnection::InLine,
                 volts: Volts(0.015),
@@ -394,6 +394,10 @@ pub(super) fn electrical_cal_entry() -> CalEntry {
                     label: "0°".into(),
                     file_name: "449350_34804_0Grad.txt".into(),
                 },
+                loading: Some(MicLoading {
+                    mic_impedance: Ohms(330.0),
+                    input_impedance: Ohms(2000.0),
+                }),
                 uncertainty: Db(1.0),
             },
             freq: Hz(1000.0),
@@ -408,6 +412,10 @@ pub(super) fn electrical_basis() -> CalBasis {
         connection: ElectricalConnection::Injected,
         mic_sensitivity: MvPerPa(15.0),
         data_sheet: false,
+        loading: Some(MicLoading {
+            mic_impedance: Ohms(330.0),
+            input_impedance: Ohms(2000.0),
+        }),
         uncertainty: Db(1.0),
     }
 }

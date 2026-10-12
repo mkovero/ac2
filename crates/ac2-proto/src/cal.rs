@@ -6,7 +6,7 @@
 
 use crate::model::{
     CalEntry, CalMethod, CalStatus, CurveChoice, DeviceId, InputSetup, Mic, MicCurveRef,
-    SensitivitySource, SplCal, State,
+    MicLoading, SensitivitySource, SplCal, State,
 };
 use crate::units::{Db, Hz, MvPerPa};
 
@@ -325,6 +325,60 @@ pub fn electrical_sensitivity_db(full_scale_volts: f64, mv_per_pa: f64) -> f64 {
     20.0 * (full_scale_volts / (mv_per_pa / 1000.0 * P_REF_PA)).log10()
 }
 
+/// An impedance of a [`MicLoading`] that cannot form a voltage divider.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LoadingError {
+    /// The mic's output impedance is not a finite value above 0 Ω.
+    MicImpedance(f64),
+    /// The preamp's input impedance is not a finite value above 0 Ω.
+    InputImpedance(f64),
+}
+
+impl std::fmt::Display for LoadingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MicImpedance(z) => write!(f, "mic output impedance {z} Ω is not above 0 Ω"),
+            Self::InputImpedance(z) => {
+                write!(f, "preamp input impedance {z} Ω is not above 0 Ω")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LoadingError {}
+
+/// Level change of the mic's voltage when it drives the preamp, dB (≤ 0): the mic's output
+/// impedance and the preamp's input impedance divide the open-circuit voltage a data sheet
+/// states, `20·lg(Z_in / (Z_in + Z_out))`. Magnitudes only: both are near-resistive at
+/// 1 kHz, where the sensitivity is specified.
+pub fn loading_db(l: &MicLoading) -> Result<Db, LoadingError> {
+    let ok = |z: f64| z.is_finite() && z > 0.0;
+    if !ok(l.mic_impedance.0) {
+        return Err(LoadingError::MicImpedance(l.mic_impedance.0));
+    }
+    if !ok(l.input_impedance.0) {
+        return Err(LoadingError::InputImpedance(l.input_impedance.0));
+    }
+    let zin = l.input_impedance.0;
+    Ok(Db(20.0 * (zin / (zin + l.mic_impedance.0)).log10()))
+}
+
+/// The sensitivity the preamp's input sees, mV/Pa: the open-circuit `mv_per_pa` divided
+/// down by `loading` (`S · Z_in / (Z_in + Z_out)`), or `mv_per_pa` itself without one.
+pub fn loaded_sensitivity(
+    mv_per_pa: MvPerPa,
+    loading: Option<&MicLoading>,
+) -> Result<MvPerPa, LoadingError> {
+    match loading {
+        None => Ok(mv_per_pa),
+        Some(l) => {
+            loading_db(l)?;
+            let zin = l.input_impedance.0;
+            Ok(MvPerPa(mv_per_pa.0 * zin / (zin + l.mic_impedance.0)))
+        }
+    }
+}
+
 /// The frequency a calibration normalises the mic curve at: the calibrator's (the tone was
 /// read uncorrected through the capsule, so 0 dB there counts nothing twice), or 1 kHz for an
 /// electrical one (the data-sheet sensitivity is the capsule's at 1 kHz).
@@ -538,6 +592,66 @@ mod tests {
     }
 
     #[test]
+    fn loading_maths_by_hand() {
+        use crate::units::Ohms;
+        // MM1 (15 mV/Pa open circuit, 330 Ω) into a 2 kΩ mic input: 2000 / 2330 of the
+        // voltage, 20·lg(0.858369) = −1.3265 dB; 15 mV/Pa reads as 12.876 mV/Pa.
+        let l = MicLoading {
+            mic_impedance: Ohms(330.0),
+            input_impedance: Ohms(2000.0),
+        };
+        let db = loading_db(&l).expect("valid").0;
+        assert!((db - 20.0 * (2000.0f64 / 2330.0).log10()).abs() < 1e-12);
+        assert!((db - -1.3265).abs() < 1e-4, "{db}");
+        let s = loaded_sensitivity(MvPerPa(15.0), Some(&l))
+            .expect("valid")
+            .0;
+        assert!((s - 15.0 * 2000.0 / 2330.0).abs() < 1e-12, "{s}");
+        // 0 dBFS = 1.5 V: unloaded 133.979 dB SPL, loaded 1.327 dB more (each pascal gives
+        // less voltage, so full scale is more pascal).
+        let unloaded = electrical_sensitivity_db(1.5, 15.0);
+        let loaded = electrical_sensitivity_db(1.5, s);
+        assert!(
+            (loaded - unloaded - 1.3265).abs() < 1e-4,
+            "{}",
+            loaded - unloaded
+        );
+        assert_eq!(loaded_sensitivity(MvPerPa(15.0), None), Ok(MvPerPa(15.0)));
+        // Equal impedances halve the voltage: −6.02 dB.
+        let half = MicLoading {
+            mic_impedance: Ohms(600.0),
+            input_impedance: Ohms(600.0),
+        };
+        assert!((loading_db(&half).expect("valid").0 - -6.0206).abs() < 1e-4);
+        // Impedances that cannot divide are refused, never taken as unloaded.
+        for (zm, zi, e) in [
+            (0.0, 2000.0, LoadingError::MicImpedance(0.0)),
+            (-330.0, 2000.0, LoadingError::MicImpedance(-330.0)),
+            (330.0, 0.0, LoadingError::InputImpedance(0.0)),
+            (
+                330.0,
+                f64::INFINITY,
+                LoadingError::InputImpedance(f64::INFINITY),
+            ),
+        ] {
+            let l = MicLoading {
+                mic_impedance: Ohms(zm),
+                input_impedance: Ohms(zi),
+            };
+            assert_eq!(loading_db(&l), Err(e));
+            assert_eq!(loaded_sensitivity(MvPerPa(15.0), Some(&l)), Err(e));
+        }
+        let nan = MicLoading {
+            mic_impedance: Ohms(f64::NAN),
+            input_impedance: Ohms(2000.0),
+        };
+        assert!(matches!(
+            loading_db(&nan),
+            Err(LoadingError::MicImpedance(_))
+        ));
+    }
+
+    #[test]
     fn electrical_f_norm_and_data_sheet() {
         let mut e = entry("hw:A", 0, "MM1", 1).spl;
         e.freq = Hz(250.0);
@@ -548,6 +662,7 @@ mod tests {
             full_scale: Volts(1.5),
             mic_sensitivity: MvPerPa(15.0),
             mic_sensitivity_from: SensitivitySource::Typed,
+            loading: None,
             uncertainty: Db(1.0),
         };
         // The data-sheet sensitivity is the capsule's at 1 kHz, whatever tone was read.

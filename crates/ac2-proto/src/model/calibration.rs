@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::DeviceId;
-use crate::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Volts, WallNs};
+use crate::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Ohms, Volts, WallNs};
 
 /// What a calibration is tied to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -54,13 +54,31 @@ pub enum CalMethod {
         volts: Volts,
         /// Voltage at 0 dBFS: `volts / 10^(measured / 20)`.
         full_scale: Volts,
-        /// Mic sensitivity used.
+        /// Mic sensitivity used, as the data sheet states it (open circuit).
         mic_sensitivity: MvPerPa,
         /// Where it came from.
         mic_sensitivity_from: SensitivitySource,
+        /// The mic's output impedance against the preamp's input impedance, when stated:
+        /// the voltage per pascal at the input is the open-circuit one divided down by
+        /// them, and `SplCal::sensitivity` counts that. `None`: taken as unloaded, which is
+        /// also what a stored calibration (store file, capture sidecar) without the field was.
+        #[serde(default)]
+        loading: Option<MicLoading>,
         /// Stated uncertainty of the sensitivity, ± dB.
         uncertainty: Db,
     },
+}
+
+/// The mic's source impedance and the preamp's input impedance it drives. A data-sheet
+/// sensitivity is the open-circuit voltage; the preamp's input impedance and the mic's
+/// output impedance form a divider, so the input sees `S · Z_in / (Z_in + Z_out)`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MicLoading {
+    /// Mic output (nominal) impedance.
+    pub mic_impedance: Ohms,
+    /// Preamp (mic input) impedance.
+    pub input_impedance: Ohms,
 }
 
 /// Where the voltage of an electrical calibration was measured.
@@ -107,6 +125,8 @@ pub enum CalBasis {
         mic_sensitivity: MvPerPa,
         /// It is the data sheet's (else typed).
         data_sheet: bool,
+        /// The loading counted, if any.
+        loading: Option<MicLoading>,
         /// Stated uncertainty, ± dB.
         uncertainty: Db,
     },
@@ -123,12 +143,14 @@ impl CalMethod {
                 connection,
                 mic_sensitivity,
                 mic_sensitivity_from,
+                loading,
                 uncertainty,
                 ..
             } => CalBasis::Electrical {
                 connection: *connection,
                 mic_sensitivity: *mic_sensitivity,
                 data_sheet: matches!(mic_sensitivity_from, SensitivitySource::DataSheet { .. }),
+                loading: *loading,
                 uncertainty: *uncertainty,
             },
         }

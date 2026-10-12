@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::CurveArg;
-use crate::units::{Channel, Freq, Gain, MicSensitivityArg, SplLevel, VoltsArg};
+use crate::units::{Channel, Freq, Gain, MicSensitivityArg, OhmsArg, SplLevel, VoltsArg};
 
 /// `cal …`.
 #[derive(Debug, Subcommand)]
@@ -122,6 +122,15 @@ pub struct CalElectrical {
     /// mic's curve files state, when they state one).
     #[arg(long, value_name = "MV/PA", allow_hyphen_values = true)]
     pub sensitivity: Option<MicSensitivityArg>,
+    /// Mic output impedance from its data sheet ("nominal/output impedance"), e.g.
+    /// `330ohm`: with `--input-impedance`, the open-circuit sensitivity is divided down by
+    /// the preamp's input, `S · Z_in / (Z_in + Z_out)` (MM1 into 2 kΩ: −1.3 dB).
+    #[arg(long, value_name = "OHMS", requires = "input_impedance")]
+    pub mic_impedance: Option<OhmsArg>,
+    /// Preamp (mic input) impedance from the interface's manual, e.g. `2kohm`; given with
+    /// `--mic-impedance`.
+    #[arg(long, value_name = "OHMS", requires = "mic_impedance")]
+    pub input_impedance: Option<OhmsArg>,
     /// Where the voltage is measured.
     #[arg(long, value_enum, default_value = "inline")]
     pub method: ElectricalMethodArg,

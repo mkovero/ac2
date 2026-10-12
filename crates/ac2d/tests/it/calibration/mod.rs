@@ -15,10 +15,10 @@ use ac2_proto::frame::{FrameData, SpecFrame, SplMeta, TfFrame};
 use ac2_proto::model::{
     BandFraction, CalBasis, CalKey, CalMethod, CalState, CalStatus, CurveChoice,
     ElectricalConnection, GeneratorDesired, GeneratorSettings, InputSetup, LevelScale, MeasConfig,
-    MeasKind, Mic, MicCurveId, RtaConfig, SensitivitySource, Signal, SpecAveraging, SpectrumConfig,
-    State, TraceMeta, Weighting, Window,
+    MeasKind, Mic, MicCurveId, MicLoading, RtaConfig, SensitivitySource, Signal, SpecAveraging,
+    SpectrumConfig, State, TraceMeta, Weighting, Window,
 };
-use ac2_proto::units::{Blob, Db, DbSpl, Dbfs, Hz, MeasId, MvPerPa, Seconds, Volts};
+use ac2_proto::units::{Blob, Db, DbSpl, Dbfs, Hz, MeasId, MvPerPa, Ohms, Seconds, Volts};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody, Stream, Subscription, Topic};
 use ac2d::{Daemon, Handle};
 use common::*;

@@ -7,7 +7,7 @@
 
 use ac2_proto::cal::{CurveUse, Sensitivity};
 use ac2_proto::model::{
-    CalBasis, CalEntry, CalMethod, CalStatus, ElectricalConnection, Mic, MicCurveRef,
+    CalBasis, CalEntry, CalMethod, CalStatus, ElectricalConnection, Mic, MicCurveRef, MicLoading,
     SensitivitySource,
 };
 use ac2_proto::units::{Db, MvPerPa, WallNs};
@@ -109,8 +109,28 @@ pub fn mv_per_pa(s: MvPerPa) -> String {
     format!("{} mV/Pa", format::fixed(s.0, 1))
 }
 
+/// The mic driving the preamp, and what that costs the open-circuit sensitivity:
+/// `loaded 330 Ω → 2.0 kΩ −1.3 dB`.
+pub fn loading(l: &MicLoading) -> String {
+    format!(
+        "loaded {} → {} {}",
+        format::ohms(l.mic_impedance.0),
+        format::ohms(l.input_impedance.0),
+        match ac2_proto::cal::loading_db(l) {
+            Ok(db) => format::db_readout(db.0),
+            Err(_) => format::NO_VALUE.into(),
+        }
+    )
+}
+
+/// `, loaded 330 Ω → 2.0 kΩ −1.3 dB` after a sensitivity, or nothing without a loading.
+fn loading_suffix(l: Option<&MicLoading>) -> String {
+    l.map(|l| format!(", {}", loading(l))).unwrap_or_default()
+}
+
 /// What a calibration rests on, as readouts name it: `cal 94 dB` (the calibrator level),
-/// `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB`.
+/// `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB`, `electrical cal (in-line, data
+/// sheet 15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ −1.3 dB) ±1 dB`.
 pub fn basis(b: &CalBasis) -> String {
     match b {
         CalBasis::Acoustic { calibrator_level } => {
@@ -121,12 +141,14 @@ pub fn basis(b: &CalBasis) -> String {
             connection: c,
             mic_sensitivity,
             data_sheet,
+            loading: l,
             uncertainty: u,
         } => format!(
-            "electrical cal ({}, {}{}) {}",
+            "electrical cal ({}, {}{}{}) {}",
             connection(*c),
             if *data_sheet { "data sheet " } else { "" },
             mv_per_pa(*mic_sensitivity),
+            loading_suffix(l.as_ref()),
             uncertainty(*u)
         ),
     }
@@ -148,7 +170,8 @@ pub fn calibrator(e: &CalEntry) -> String {
 /// How a calibration was taken, in full (calibrations view, `ac2 cal list`): `94.0 dB SPL
 /// at 1.00 kHz · read −26.0 dBFS`; `electrical, in-line · 15.00 mV at 1.00 kHz read
 /// −40.0 dBFS · 0 dBFS = 1.500 V · 15.0 mV/Pa from the data sheet (0°,
-/// 449350_34804_0Grad.txt) · ±1 dB`.
+/// 449350_34804_0Grad.txt) · loaded 330 Ω → 2.0 kΩ −1.3 dB · ±1 dB` (the loading only
+/// when stated).
 pub fn method_detail(e: &CalEntry) -> String {
     let read = format!("read {} dBFS", format::level(e.spl.measured.0));
     match &e.spl.method {
@@ -159,9 +182,10 @@ pub fn method_detail(e: &CalEntry) -> String {
             full_scale,
             mic_sensitivity,
             mic_sensitivity_from,
+            loading: l,
             uncertainty: u,
         } => format!(
-            "electrical, {} · {} at {} {read} · 0 dBFS = {} · {} {} · {}",
+            "electrical, {} · {} at {} {read} · 0 dBFS = {} · {} {}{} · {}",
             connection(*c),
             format::volts(volts.0),
             format::freq_readout(e.spl.freq.0),
@@ -173,6 +197,9 @@ pub fn method_detail(e: &CalEntry) -> String {
                     format!("from the data sheet ({label}, {file_name})")
                 }
             },
+            l.as_ref()
+                .map(|l| format!(" · {}", loading(l)))
+                .unwrap_or_default(),
             uncertainty(*u)
         ),
     }
@@ -195,7 +222,8 @@ pub fn electrical_notes(e: &CalEntry) -> Vec<String> {
 }
 
 /// The method column of a calibrations table: `calibrator 94.0 dB SPL at 1.00 kHz`,
-/// `electrical in-line, 15.03 mV at 1.00 kHz, 0 dBFS = 1.500 V, data sheet 15.0 mV/Pa`.
+/// `electrical in-line, 15.03 mV at 1.00 kHz, 0 dBFS = 1.500 V, data sheet 15.0 mV/Pa`
+/// (`…, loaded 330 Ω → 2.0 kΩ −1.3 dB` with a loading).
 pub fn method_cell(e: &CalEntry) -> String {
     match &e.spl.method {
         CalMethod::Acoustic { .. } => format!("calibrator {}", calibrator(e)),
@@ -205,9 +233,10 @@ pub fn method_cell(e: &CalEntry) -> String {
             full_scale,
             mic_sensitivity,
             mic_sensitivity_from,
+            loading: l,
             ..
         } => format!(
-            "electrical {}, {} at {}, 0 dBFS = {}, {}{}",
+            "electrical {}, {} at {}, 0 dBFS = {}, {}{}{}",
             connection(*c),
             format::volts(volts.0),
             format::freq_readout(e.spl.freq.0),
@@ -217,7 +246,8 @@ pub fn method_cell(e: &CalEntry) -> String {
             } else {
                 ""
             },
-            mv_per_pa(*mic_sensitivity)
+            mv_per_pa(*mic_sensitivity),
+            loading_suffix(l.as_ref())
         ),
     }
 }
@@ -490,6 +520,7 @@ mod tests {
                         label: "0°".into(),
                         file_name: "449350_34804_0Grad.txt".into(),
                     },
+                    loading: None,
                     uncertainty: Db(1.0),
                 },
                 freq: Hz(1000.0),
@@ -524,6 +555,43 @@ mod tests {
         );
         assert!(electrical_notes(&e).is_empty());
 
+        // The MM1's 330 Ω into a 2 kΩ mic input: the same words everywhere.
+        let mm1 = ac2_proto::model::MicLoading {
+            mic_impedance: ac2_proto::units::Ohms(330.0),
+            input_impedance: ac2_proto::units::Ohms(2000.0),
+        };
+        if let CalMethod::Electrical { loading: l, .. } = &mut e.spl.method {
+            *l = Some(mm1);
+        }
+        assert_eq!(loading(&mm1), "loaded 330 Ω → 2.0 kΩ −1.3 dB");
+        assert_eq!(
+            status_text(Sensitivity::Verified(&e).status(), 7200.0).as_deref(),
+            Some(
+                "electrical cal (in-line, data sheet 15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ −1.3 dB) \
+                 ±1 dB · 2 h ago"
+            )
+        );
+        assert_eq!(
+            sensitivity_state(&Sensitivity::Verified(&e), now, off),
+            "verified · electrical (in-line, data sheet 15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ \
+             −1.3 dB) ±1 dB · 2 h ago"
+        );
+        assert_eq!(
+            method_detail(&e),
+            "electrical, in-line · 15.00 mV at 1.00 kHz read −40.0 dBFS · 0 dBFS = 1.500 V \
+             · 15.0 mV/Pa from the data sheet (0°, 449350_34804_0Grad.txt) · loaded 330 Ω → \
+             2.0 kΩ −1.3 dB · ±1 dB"
+        );
+        assert_eq!(
+            method_cell(&e),
+            "electrical in-line, 15.00 mV at 1.00 kHz, 0 dBFS = 1.500 V, data sheet \
+             15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ −1.3 dB"
+        );
+        assert_eq!(format::ohms(47.5), "47.5 Ω");
+        assert_eq!(format::ohms(1370.0), "1.37 kΩ");
+        assert_eq!(format::ohms(1e6), "1.0 MΩ");
+        assert_eq!(format::ohms(0.0), "—");
+
         e.spl.freq = Hz(400.0);
         e.spl.method = CalMethod::Electrical {
             connection: ElectricalConnection::Injected,
@@ -531,6 +599,7 @@ mod tests {
             full_scale: Volts(3.162),
             mic_sensitivity: MvPerPa(10.0),
             mic_sensitivity_from: SensitivitySource::Typed,
+            loading: None,
             uncertainty: Db(0.5),
         };
         assert_eq!(

@@ -219,7 +219,8 @@ fn acoustic(app: &App, ctx: &egui::Context, ch: &Chrome, d: &AcousticDialog) {
 
 /// The electrical calibration dialog over the view: where the voltage is measured (with its
 /// safety note, prominent), the input's level now, the voltage, the tone, the sensitivity
-/// and where it comes from.
+/// and where it comes from, the optional mic and preamp impedances and the correction they
+/// make.
 fn electrical(app: &App, ctx: &egui::Context, ch: &Chrome, d: &ElectricalDialog) {
     let meter = app
         .state
@@ -301,6 +302,25 @@ fn electrical(app: &App, ctx: &egui::Context, ch: &Chrome, d: &ElectricalDialog)
                         let f = row(ui, Some(Field::Sensitivity), "Mic sensitivity");
                         value(ui, &d.sensitivity, f);
                         ui.label(RichText::new(d.sensitivity_source()).small().color(ch.dim));
+                        ui.end_row();
+                        let f = row(ui, Some(Field::MicImpedance), "Mic output impedance");
+                        value(ui, &d.mic_impedance, f);
+                        ui.label(
+                            RichText::new("mic data sheet, e.g. 330 ohm · optional")
+                                .small()
+                                .color(ch.dim),
+                        );
+                        ui.end_row();
+                        let f = row(ui, Some(Field::InputImpedance), "Preamp input impedance");
+                        value(ui, &d.input_impedance, f);
+                        ui.label(
+                            RichText::new("interface manual, e.g. 2 k · optional")
+                                .small()
+                                .color(ch.dim),
+                        );
+                        ui.end_row();
+                        row(ui, None, "Loading");
+                        ui.label(RichText::new(d.loading_text()).color(ch.text));
                         ui.end_row();
                     });
                 if let Some(n) = &d.no_data_sheet {

@@ -9,7 +9,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Seconds, Volts};
+use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Ohms, Seconds, Volts};
 
 mod band;
 
@@ -220,6 +220,30 @@ impl FromStr for MicSensitivityArg {
             return fail(format!("{s:?}: mic sensitivity must be 0.01 … 10000 mV/Pa"));
         }
         Ok(Self(MvPerPa(mv)))
+    }
+}
+
+/// An impedance as data sheets and manuals state it: `330ohm`, `2kohm`, `330Ω`, `2kΩ`.
+/// 0 < z ≤ 10 MΩ.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OhmsArg(pub Ohms);
+
+impl FromStr for OhmsArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        let (n, u) = split(s)?;
+        // `split` lowercases, and Ω (U+03A9 or the ohm sign U+2126) lowercases to ω.
+        let z = match u.as_str() {
+            "ohm" | "ω" => n,
+            "kohm" | "kω" => n * 1e3,
+            _ => return need_unit(s, &u, "ohm, kohm, Ω or kΩ"),
+        };
+        if !(z > 0.0 && z <= 1e7) {
+            return fail(format!(
+                "{s:?}: impedance must be above 0 and at most 10 MΩ"
+            ));
+        }
+        Ok(Self(Ohms(z)))
     }
 }
 

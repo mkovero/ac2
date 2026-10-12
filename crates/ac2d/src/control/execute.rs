@@ -368,6 +368,7 @@ impl Control {
                 volts,
                 freq,
                 mic_sensitivity,
+                loading,
                 uncertainty,
                 replace_acoustic,
             } => self.cal_spl_electrical(cal::ElectricalArgs {
@@ -377,6 +378,7 @@ impl Control {
                 volts,
                 freq,
                 mic_sensitivity,
+                loading,
                 uncertainty,
                 replace_acoustic,
             }),

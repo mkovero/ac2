@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 48
+PROTO_VERSION = 49
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -113,10 +113,11 @@ def grid_id(g: dict) -> int:
 # fields), or ("meta", {kind: t}) for the one-key metadata map.
 
 _SMOOTHING = [("fraction", None), ("mode", None)]
+_MIC_LOADING = [("mic_impedance", None), ("input_impedance", None)]
 _CAL_BASIS = ("tagged", {
     "acoustic": [("calibrator_level", None)],
     "electrical": [("connection", None), ("mic_sensitivity", None), ("data_sheet", None),
-                   ("uncertainty", None)],
+                   ("loading", ("opt", _MIC_LOADING)), ("uncertainty", None)],
 })
 _CAL = ("tagged", {
     "uncalibrated": [],

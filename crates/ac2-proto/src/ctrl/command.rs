@@ -6,7 +6,7 @@ use crate::grid::GridId;
 use crate::model::{
     AverageMethod, BackendKind, CalKey, ColourFamily, DelayPick, DelayReference, DeviceId,
     ElectricalConnection, ExportFormat, FinderBand, GeneratorDesired, ImportFormat, ImportRole,
-    InputSetup, IrImport, MeasConfig, MicCurveId, OutputSetup, OwnedTraces, PaneLayout,
+    InputSetup, IrImport, MeasConfig, MicCurveId, MicLoading, OutputSetup, OwnedTraces, PaneLayout,
     RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef, SplLogWhich, TraceEdit,
 };
 use crate::units::{
@@ -352,7 +352,7 @@ pub enum Command {
     /// while a steady tone of `freq` is on it; the daemon reads the input's level and
     /// stores `20·lg(V_FS / (S · 20 µPa))` with `V_FS = volts / 10^(level/20)` and the mic
     /// sensitivity `S` (`None`: the data-sheet value of `mic`'s curve files, when they
-    /// state exactly one).
+    /// state exactly one), loaded by `loading` when given: `S · Z_in / (Z_in + Z_out)`.
     #[serde(rename = "cal.spl_electrical")]
     CalSplElectrical {
         /// Input channel.
@@ -367,6 +367,9 @@ pub enum Command {
         freq: Hz,
         /// Mic sensitivity; `None` = the data sheet's.
         mic_sensitivity: Option<MvPerPa>,
+        /// Mic output and preamp input impedance: the sensitivity is divided down by them
+        /// (`cal::loaded_sensitivity`). `None` = unloaded.
+        loading: Option<MicLoading>,
         /// Stated uncertainty, ± dB; `None` = 1 dB.
         uncertainty: Option<Db>,
         /// Replace an acoustic calibration of this input and mic (refused otherwise: a

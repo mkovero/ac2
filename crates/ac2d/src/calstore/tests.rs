@@ -1,8 +1,9 @@
 use super::*;
 use ac2_proto::model::{
-    CalBasis, CalKey, CalMethod, CurveChoice, ElectricalConnection, SensitivitySource, SplCal,
+    CalBasis, CalKey, CalMethod, CurveChoice, ElectricalConnection, MicLoading, SensitivitySource,
+    SplCal,
 };
-use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Volts, WallNs};
+use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Ohms, Volts, WallNs};
 
 fn key(dev: &str, ch: u16, mic: &str) -> CalKey {
     CalKey {
@@ -38,6 +39,7 @@ fn electrical(at: u64, freq: f64) -> SplCal {
                 label: "0°".into(),
                 file_name: "449350_34804_0Grad.txt".into(),
             },
+            loading: None,
             uncertainty: Db(1.0),
         },
         freq: Hz(freq),
@@ -272,6 +274,59 @@ fn file_round_trip_and_atomic_write() {
         s2.curve("M30 #1", "0°").map(|c| c.gains().to_vec()),
         Some(vec![0.0, 0.0, 1.5])
     );
+}
+
+/// The loading travels through the store; a stored electrical calibration that states none
+/// (written before the mic's and preamp's impedances could be given) is one taken unloaded,
+/// which is what its sensitivity counts.
+#[test]
+fn electrical_loading_round_trip_and_absent_reads_unloaded() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let path = dir.path().join("calibrations.json");
+    let (mut s, _) = CalStore::open(&path);
+    let mut loaded = electrical(30, 1000.0);
+    let l = MicLoading {
+        mic_impedance: Ohms(330.0),
+        input_impedance: Ohms(2000.0),
+    };
+    if let CalMethod::Electrical { loading, .. } = &mut loaded.method {
+        *loading = Some(l);
+    }
+    loaded.sensitivity = Db(cal::electrical_sensitivity_db(
+        1.5,
+        cal::loaded_sensitivity(MvPerPa(15.0), Some(&l))
+            .expect("valid")
+            .0,
+    ));
+    let c = Contents {
+        calibrations: vec![
+            entry(key("hw:A", 4, "MM1"), loaded),
+            entry(key("hw:A", 5, "MM1"), electrical(31, 1000.0)),
+        ],
+        ..Contents::default()
+    };
+    s.persist(&c, HashMap::new()).expect("persist");
+    let (s2, c2) = CalStore::open(&path);
+    s2.check().expect("readable");
+    assert_eq!(c2, c);
+
+    // The same file with the key left out entirely reads as unloaded.
+    let mut v: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("json");
+    let mut removed = 0;
+    for e in v["sensitivities"].as_array_mut().expect("entries") {
+        let m = e["spl"]["method"].as_object_mut().expect("method");
+        removed += usize::from(m.remove("loading").is_some());
+    }
+    assert_eq!(removed, 2);
+    std::fs::write(&path, serde_json::to_vec(&v).expect("json")).expect("write");
+    let (s3, c3) = CalStore::open(&path);
+    s3.check().expect("readable");
+    assert_eq!(c3.calibrations[1], c.calibrations[1]);
+    assert!(matches!(
+        c3.calibrations[0].spl.method,
+        CalMethod::Electrical { loading: None, .. }
+    ));
 }
 
 #[test]

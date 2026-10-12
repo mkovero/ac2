@@ -50,6 +50,10 @@ float_unit!(
     /// Microphone sensitivity, millivolts per pascal (the unit data sheets state it in).
     MvPerPa
 );
+float_unit!(
+    /// Impedance magnitude, ohms.
+    Ohms
+);
 
 /// Signed sample count (offsets, delays in samples).
 #[derive(

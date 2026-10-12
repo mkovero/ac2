@@ -1507,6 +1507,7 @@ spectrum / RTA captions, the Calibrations view, `ac2 cal list`, `ac2 status`):
 | `verified · 94.0 dB SPL at 1.00 kHz · 3 h ago` | the same, written out (Calibrations view, Settings › Audio & I/O) |
 | `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago` | electrical, a voltmeter across the connected, powered mic's pins 2–3; sensitivity from the mic's curve file (`data sheet`) or typed (`typed`); ±1 dB the stated uncertainty |
 | `electrical cal (injected, 10.0 mV/Pa) ±0.5 dB` | electrical, a generator in place of the mic, phantom off |
+| `electrical cal (in-line, data sheet 15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ −1.3 dB) ±1 dB` | electrical with the loading counted: the mic's 330 Ω output impedance into the preamp's 2 kΩ input takes 1.3 dB off its open-circuit sensitivity ([Loading](#loading-the-preamps-input-impedance)); the full record (`ac2 cal list`) says `… · loaded 330 Ω → 2.0 kΩ −1.3 dB · ±1 dB` |
 | `cal from other mic / input`, `from M30 on in 2 · …` | made with another mic or on another input: used, but may not hold here |
 | `uncalibrated` (values in dBFS) | no calibration for this device, input and mic |
 | `· mic curve` after any of these | a mic curve is in the readout too (its label is in the caption) |
@@ -1531,6 +1532,35 @@ Example: 15.0 mV at −40.0 dBFS → 0 dBFS = 1.500 V; at 15.0 mV/Pa that is 100
   individual calibration sheet state `--uncertainty 0.5db`); the meter adds a little.
 - A later acoustic calibration replaces it; it replaces an acoustic one only when you say
   so (`--replace-acoustic`, or Enter twice in the app).
+- Give the mic's output impedance and the preamp's input impedance too
+  ([Loading](#loading-the-preamps-input-impedance)): without them SPL reads low by the
+  loading, often 1 dB or more.
+
+#### Loading: the preamp's input impedance
+
+A data sheet states the sensitivity **open circuit**: the voltage per pascal with nothing
+connected. In use the mic drives the preamp, and its output impedance and the preamp's input
+impedance divide that voltage:
+
+    S_eff = S · Z_in / (Z_in + Z_out)        loading = 20·lg(Z_in / (Z_in + Z_out)) dB
+
+ac2 uses `S_eff` in place of `S`. This holds for both connections: in-line, the meter reads
+the loaded voltage, but it is paired with the open-circuit sensitivity, so SPL reads low by
+exactly the loading unless you state it.
+
+Example: a beyerdynamic MM1 (15 mV/Pa, 330 Ω) on an RME Fireface 400 mic input (2 kΩ):
+`S_eff` = 15 · 2000 / 2330 = 12.88 mV/Pa, a loading of −1.33 dB. Without it, the MM1 read
+1.3 dB below a sound level meter.
+
+- **Mic output impedance:** the mic's data sheet, "nominal impedance" or "output
+  impedance" (MM1: 330 Ω).
+- **Preamp input impedance:** the interface's manual, "mic input impedance" (Fireface 400:
+  2 kΩ). Use the mic input's figure, not the line or instrument input's.
+- CLI: `--mic-impedance 330ohm --input-impedance 2kohm` (also `330Ω`, `2kΩ`), always both;
+  app: the *Mic output impedance* and *Preamp input impedance* fields (`330 ohm`, `2 k`;
+  blank = no correction), the correction shown live under them.
+- The calibration's label names it (`…, loaded 330 Ω → 2.0 kΩ −1.3 dB`). The record keeps
+  the data sheet's mV/Pa and both impedances; its dB SPL of 0 dBFS counts the loading.
 
 #### In-line (the usual way: the mic stays connected and powered)
 
@@ -1548,15 +1578,16 @@ Example: 15.0 mV at −40.0 dBFS → 0 dBFS = 1.500 V; at 15.0 mV/Pa that is 100
    > measure to pin 1, never short pins together (that is what the breakout is for).
 5. While the tone plays: palette *Calibrations…*, the mic's input, **E**; type the voltage
    (*15.03 mV*), check the sensitivity (prefilled from the mic's curve file when it states
-   one, else *15.0 mV/Pa* or *−36.5 dBV/Pa*), **Enter**. CLI:
-   `ac2 cal electrical --input 2 --volts 15.03mv` (`--sensitivity 15.0mv/pa` if the curve
-   file has none).
+   one, else *15.0 mV/Pa* or *−36.5 dBV/Pa*) and the two impedances (*330 ohm*, *2 k*),
+   **Enter**. CLI:
+   `ac2 cal electrical --input 2 --volts 15.03mv --mic-impedance 330ohm --input-impedance 2kohm`
+   (`--sensitivity 15.0mv/pa` if the curve file has none).
 
    ac2 refuses while the level is not steady (retry after a few seconds), without signal,
    when the input clipped, above −3 dBFS or below −70 dBFS.
 
-In-line includes the mic's real source impedance loading the preamp, which an injected
-signal does not.
+In-line, the mic loads the preamp as in use; the loading correction still applies, because
+the data-sheet sensitivity it is paired with is open circuit.
 
 #### Injected (a generator in place of the mic)
 
@@ -1565,8 +1596,10 @@ signal does not.
 2. Wire the generator between pins 2 (hot) and 3 (cold, also to pin 1 for an unbalanced
    generator), gain as you will measure with.
 3. Play 1 kHz near what the mic gives (tens of mV), measure the voltage at pins 2–3, and
-   run `ac2 cal electrical --method injected --input 2 --volts 15.0mv` (app: ←/→ on
-   *Measured* chooses injected).
+   run `ac2 cal electrical --method injected --input 2 --volts 15.0mv --mic-impedance 330ohm
+   --input-impedance 2kohm` (app: ←/→ on *Measured* chooses injected). The full-scale
+   voltage is the input's, whatever drives it; the mic will load the input in use, so state
+   its loading here too.
 4. Disconnect the generator, plug the mic back in and **switch phantom back on**.
 
 #### Tips
