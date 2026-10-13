@@ -575,3 +575,96 @@ fn remote_clients_never_name_daemon_paths() {
     assert!(t.bytes > 0);
     h.shutdown();
 }
+
+/// Copies session `from` to `to` with `edit` applied to its manifest.
+fn edited_copy(dir: &Path, from: &str, to: &str, edit: impl Fn(&mut serde_json::Value)) {
+    let (src, dst) = (
+        dir.join("sessions").join(from),
+        dir.join("sessions").join(to),
+    );
+    std::fs::create_dir_all(dst.join("traces")).unwrap();
+    for e in std::fs::read_dir(src.join("traces")).unwrap() {
+        let e = e.unwrap();
+        std::fs::copy(e.path(), dst.join("traces").join(e.file_name())).unwrap();
+    }
+    let text = std::fs::read_to_string(src.join("session.json")).unwrap();
+    let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    edit(&mut v);
+    std::fs::write(
+        dst.join("session.json"),
+        serde_json::to_string_pretty(&v).unwrap(),
+    )
+    .unwrap();
+}
+
+/// A saved delay, nudge or trace edit the live commands would refuse refuses the whole
+/// load before anything changes: the working state, its unsaved changes and the recovery
+/// slot stay as they were.
+#[test]
+fn a_session_with_values_out_of_range_refuses_to_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("load-limits", dir.path(), true);
+    let (mut c, _sub) = connect(&h, &[]);
+    let c = &mut c;
+    import(c, "rew_export.txt");
+    c.ok(Command::MeasCreate {
+        config: transfer("tf"),
+    });
+    save(c, "good", false).unwrap();
+    let delay = |applied: f64, nudged: f64| {
+        move |v: &mut serde_json::Value| {
+            v["measurements"][0]["delay"] =
+                serde_json::json!({ "applied": applied, "nudged": nudged, "tracking": false });
+        }
+    };
+    edited_copy(dir.path(), "good", "far", delay(1e12, 0.0));
+    edited_copy(dir.path(), "good", "far-back", delay(-10.5, 0.0));
+    edited_copy(dir.path(), "good", "nudged", delay(1.0, 1e12));
+    edited_copy(dir.path(), "good", "offset", |v| {
+        v["traces"][0]["meta"]["edit"]["offset"] = serde_json::json!(1e6);
+    });
+    edited_copy(dir.path(), "good", "trace-nudge", |v| {
+        v["traces"][0]["meta"]["edit"]["delay_nudge"] = serde_json::json!(-1e12);
+    });
+    // The good session still loads with an in-range delay.
+    edited_copy(dir.path(), "good", "near", delay(-10.0, 0.5));
+
+    // Unsaved changes, so a load that went ahead would keep a recovery copy.
+    let t = import(c, "smaart_tf.txt");
+    let before = match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => s.state,
+        other => panic!("{other:?}"),
+    };
+    assert!(before.working.dirty);
+    assert_eq!(before.working.recover, None);
+    for name in ["far", "far-back", "nudged", "offset", "trace-nudge"] {
+        let e = c
+            .call(Command::FileLoad {
+                session: named(name),
+                discard: true,
+            })
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::Invalid, "{name}: {e:?}");
+        let after = match c.ok(Command::StateSnapshot) {
+            ReplyBody::Snapshot(s) => s.state,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(after.measurements, before.measurements, "{name}");
+        assert_eq!(after.traces, before.traces, "{name}");
+        assert_eq!(after.working, before.working, "{name}");
+    }
+    assert!(traces(c).iter().any(|x| x.id == t.id));
+
+    c.ok(Command::FileLoad {
+        session: named("near"),
+        discard: true,
+    });
+    let m = match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => s.state.measurements,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(m.len(), 1);
+    let d = m[0].delay.as_ref().expect("transfer delay");
+    assert_eq!((d.applied, d.nudged), (Seconds(-10.0), Seconds(0.5)));
+    h.shutdown();
+}

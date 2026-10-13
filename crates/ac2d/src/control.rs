@@ -66,8 +66,8 @@ mod validate;
 mod working;
 
 use validate::{
-    MAX_CAL_UNSETTLED_DB, MAX_DELAY_S, check_find, delay_samples, gen_err, lease_required,
-    mutation_conflict, not_found, static_grid, upsert_inputs, validate_meas,
+    MAX_CAL_UNSETTLED_DB, MAX_DELAY_S, check_delay, check_find, delay_samples, gen_err,
+    lease_required, mutation_conflict, not_found, static_grid, upsert_inputs, validate_meas,
 };
 
 /// Everything that reaches the control thread.

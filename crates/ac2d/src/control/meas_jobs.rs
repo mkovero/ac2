@@ -16,7 +16,9 @@ use crate::jobs::{self, Analysis, JobCmd, JobEnv, block_index};
 use crate::session::Runtime;
 use crate::util::{perr, wall_ns};
 
-use super::{Control, DelaySource, MAX_DELAY_S, check_find, delay_samples, static_grid};
+use super::{
+    Control, DelaySource, MAX_DELAY_S, check_delay, check_find, delay_samples, static_grid,
+};
 
 /// A tracked arrival closer than this to the applied one, samples, leaves the delay alone:
 /// half the tracker's fine agreement, below which two estimates are the same arrival, and a
@@ -319,12 +321,7 @@ impl Control {
         source: DelaySource,
     ) -> Result<ReplyBody, ProtoError> {
         self.transfer_delay(meas)?;
-        if !(delay.0.is_finite() && delay.0.abs() <= MAX_DELAY_S) {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("delay must be finite and within ±{MAX_DELAY_S} s"),
-            ));
-        }
+        check_delay("delay", delay)?;
         let Some(fs) = self.session.as_ref().map(|r| f64::from(r.sample_rate)) else {
             return Err(perr(
                 ErrorCode::Invalid,

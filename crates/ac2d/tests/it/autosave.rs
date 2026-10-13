@@ -516,3 +516,36 @@ fn slow_spl_log_survives_a_restart() {
     assert_eq!(again, file);
     assert_eq!(rows as u64, total);
 }
+
+/// An autosave whose transfer delay the live commands would refuse is not restored: it is
+/// set aside as damaged and the daemon starts empty.
+#[test]
+fn an_autosave_with_a_delay_out_of_range_is_set_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, _backend) = start("autosave-delay-seed", dir.path(), true);
+    let (mut c, _sub) = connect(&h, &[b"evt"]);
+    c.ok(Command::MeasCreate {
+        config: transfer("tf"),
+    });
+    drop(c);
+    h.shutdown();
+    let m = dir.path().join("autosave/session.json");
+    let mut v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&m).unwrap()).unwrap();
+    v["measurements"][0]["delay"] =
+        serde_json::json!({ "applied": 1e12, "nudged": 0.0, "tracking": false });
+    std::fs::write(&m, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+
+    let (h, _backend) = start("autosave-delay", dir.path(), true);
+    let (mut c, _sub) = connect(&h, &[b"evt"]);
+    assert!(state(&mut c).measurements.is_empty());
+    let aside = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("autosave.damaged"))
+        .count();
+    assert_eq!(aside, 1, "the refused autosave is set aside");
+    drop(c);
+    h.shutdown();
+}

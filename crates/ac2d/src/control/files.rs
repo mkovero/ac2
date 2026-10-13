@@ -19,11 +19,12 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{ClientId, MeasId, Rev, Seconds, SessionEpoch, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
+use ac2_traces::meta;
 use ac2_traces::session::{
     self, Manifest, SavedDelay, SavedMeasurement, Session as SessionData, SessionError,
 };
 
-use super::{Control, delay_samples, maths, static_grid, validate_meas};
+use super::{Control, check_delay, delay_samples, maths, static_grid, validate_meas};
 use crate::util::{perr, perr_detail, wall_ns};
 
 pub(super) fn session_err(e: SessionError) -> ProtoError {
@@ -211,6 +212,9 @@ impl Control {
             super::transfer::remove_dir(&dir);
         }
         let (m, data) = read.map_err(session_err)?;
+        // Refused before the working state is kept aside: a load that cannot happen must not
+        // take the recovery copy's place.
+        check_session(&data)?;
         self.keep_replaced()?;
         let epoch = self.replace_session(Some(client), data)?;
         if let SessionRef::Upload { transfer } = r {
@@ -327,91 +331,7 @@ impl Control {
     ) -> Result<SessionEpoch, ProtoError> {
         // Everything is checked before anything changes: a refused load leaves the state
         // as it was.
-        // The grid of each measurement that has one before a session runs; a transfer math
-        // channel's is its operands' (checked against the loaded measurements and traces).
-        let mut grids: HashMap<MeasId, GridDef> = HashMap::new();
-        for sm in &data.measurements {
-            validate_meas(&sm.config)?;
-            if data.measurements.iter().filter(|o| o.id == sm.id).count() > 1 {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("measurement {} appears twice in the session", sm.id),
-                ));
-            }
-            let grid = match &sm.config.kind {
-                MeasKind::Math { config } => {
-                    let meas = |id| {
-                        data.measurements
-                            .iter()
-                            .find(|o: &&SavedMeasurement| o.id == id)
-                            .map(|o| (o.config.name.as_str(), &o.config.kind))
-                    };
-                    let trace = |id| {
-                        data.traces
-                            .iter()
-                            .find(|t: &&ac2_traces::StoredTrace| t.meta.id == id)
-                            .map(|t| (&t.meta, t.grid.clone()))
-                    };
-                    maths::check_operands(
-                        Some(sm.id),
-                        config,
-                        &maths::Lookup {
-                            meas: &meas,
-                            trace: &trace,
-                            epoch: None,
-                        },
-                    )?
-                }
-                k => static_grid(k),
-            };
-            if let Some(g) = grid {
-                grids.insert(sm.id, g);
-            }
-        }
-        // Every owner is a measurement of the session that can own (not a math channel).
-        let owner_ok = |o: TraceOwner| match o.meas() {
-            None => true,
-            Some(id) => data
-                .measurements
-                .iter()
-                .any(|m| m.id == id && !matches!(m.config.kind, MeasKind::Math { .. })),
-        };
-        let owners = data
-            .traces
-            .iter()
-            .map(|t| (format!("trace {}", t.meta.id), t.meta.edit.owner))
-            .chain(
-                data.measurements
-                    .iter()
-                    .filter_map(|m| match &m.config.kind {
-                        MeasKind::Math { config } => {
-                            Some((format!("math channel {}", m.id), config.owner))
-                        }
-                        _ => None,
-                    }),
-            );
-        for (what, owner) in owners {
-            if !owner_ok(owner) {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("{what} is filed under a measurement the session does not hold"),
-                ));
-            }
-        }
-        for t in &data.traces {
-            if data
-                .traces
-                .iter()
-                .filter(|o| o.meta.id == t.meta.id)
-                .count()
-                > 1
-            {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("trace {} appears twice in the session", t.meta.id),
-                ));
-            }
-        }
+        let mut grids = check_session(&data)?;
 
         // Disarmed, no owner; a sweep run in progress is discarded.
         self.abort_sweep(SweepFailure::Stopped, "a session was loaded");
@@ -551,4 +471,103 @@ impl Control {
         }
         Ok(epoch)
     }
+}
+
+/// Checks `data` before a load replaces anything with it: everything the live commands
+/// would refuse is refused here too. Returns the grid of each measurement that has one before
+/// a session runs; a transfer math channel's is its operands' (checked against the loaded
+/// measurements and traces).
+pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDef>, ProtoError> {
+    let mut grids: HashMap<MeasId, GridDef> = HashMap::new();
+    for sm in &data.measurements {
+        validate_meas(&sm.config)?;
+        // A saved delay meets the limits `delay.set` and `delay.nudge` enforce.
+        if let Some(d) = &sm.delay {
+            check_delay(&format!("measurement {} saved delay", sm.id), d.applied)?;
+            check_delay(&format!("measurement {} saved nudge", sm.id), d.nudged)?;
+        }
+        if data.measurements.iter().filter(|o| o.id == sm.id).count() > 1 {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("measurement {} appears twice in the session", sm.id),
+            ));
+        }
+        let grid = match &sm.config.kind {
+            MeasKind::Math { config } => {
+                let meas = |id| {
+                    data.measurements
+                        .iter()
+                        .find(|o: &&SavedMeasurement| o.id == id)
+                        .map(|o| (o.config.name.as_str(), &o.config.kind))
+                };
+                let trace = |id| {
+                    data.traces
+                        .iter()
+                        .find(|t: &&ac2_traces::StoredTrace| t.meta.id == id)
+                        .map(|t| (&t.meta, t.grid.clone()))
+                };
+                maths::check_operands(
+                    Some(sm.id),
+                    config,
+                    &maths::Lookup {
+                        meas: &meas,
+                        trace: &trace,
+                        epoch: None,
+                    },
+                )?
+            }
+            k => static_grid(k),
+        };
+        if let Some(g) = grid {
+            grids.insert(sm.id, g);
+        }
+    }
+    // Every owner is a measurement of the session that can own (not a math channel).
+    let owner_ok = |o: TraceOwner| match o.meas() {
+        None => true,
+        Some(id) => data
+            .measurements
+            .iter()
+            .any(|m| m.id == id && !matches!(m.config.kind, MeasKind::Math { .. })),
+    };
+    let owners = data
+        .traces
+        .iter()
+        .map(|t| (format!("trace {}", t.meta.id), t.meta.edit.owner))
+        .chain(
+            data.measurements
+                .iter()
+                .filter_map(|m| match &m.config.kind {
+                    MeasKind::Math { config } => {
+                        Some((format!("math channel {}", m.id), config.owner))
+                    }
+                    _ => None,
+                }),
+        );
+    for (what, owner) in owners {
+        if !owner_ok(owner) {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("{what} is filed under a measurement the session does not hold"),
+            ));
+        }
+    }
+    for t in &data.traces {
+        // A saved edit meets the limits `trace.update` enforces.
+        meta::check_values(&t.meta.edit)
+            .map_err(|e| perr(ErrorCode::Invalid, format!("trace {}: {e}", t.meta.id)))?;
+        if data
+            .traces
+            .iter()
+            .filter(|o| o.meta.id == t.meta.id)
+            .count()
+            > 1
+        {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("trace {} appears twice in the session", t.meta.id),
+            ));
+        }
+    }
+    Ok(grids)
 }

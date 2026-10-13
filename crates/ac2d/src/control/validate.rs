@@ -6,7 +6,7 @@ use ac2_proto::model::{
     InputSetup, MeasConfig, MeasKind, Measurement, SpecAveraging, SpecResolution, SpectrumConfig,
     SweepConfig,
 };
-use ac2_proto::units::{MeasId, Rev};
+use ac2_proto::units::{MeasId, Rev, Seconds};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError};
 
 use crate::conv;
@@ -16,6 +16,20 @@ use crate::util::{perr, perr_detail};
 use super::maths;
 
 pub(super) const MAX_DELAY_S: f64 = 10.0;
+
+/// Refuses a delay outside ±[`MAX_DELAY_S`] or not finite, whether typed or loaded from a
+/// session: the aligner buffers the reference for the whole delay, and a larger one either
+/// holds memory without bound or overflows the delay in samples.
+pub(super) fn check_delay(what: &str, delay: Seconds) -> Result<(), ProtoError> {
+    if delay.0.is_finite() && delay.0.abs() <= MAX_DELAY_S {
+        Ok(())
+    } else {
+        Err(perr(
+            ErrorCode::Invalid,
+            format!("{what} must be finite and within ±{MAX_DELAY_S} s"),
+        ))
+    }
+}
 
 /// A delay in samples at `fs`, fractions kept. Snapped to a millionth of a sample: a delay
 /// given in seconds or built from fractional steps lands within float rounding of the value
