@@ -2,7 +2,7 @@
 
 A quoted number carries its source in an HTML comment right after it (hidden when rendered):
 
-    +1.17 dB<!--= b pupu/genelec-50dbfs // genelec.spl.REW (SPL, cal from ac2)@50Hz -->
+    +0.18 dB<!--= b pupu/genelec-30dbfs // genelec.mag.ac2 TF|direct (TF capture).20-100 -->
 
 `python -m crosscheck comparison` rewrites the number from the source at the precision and sign
 style it is written with (written unsigned: the magnitude), and `--check` reports one that
@@ -36,6 +36,9 @@ ALLOWED: list[tuple[str, str]] = [
     (r"6167[23]-1|61260-1", "standard numbers"),
     (r"γ² ≥ 0\.9[59]", "the coherence gates the suite applies (README)"),
     (r"\d+ Hz / \d+(?:\.\d+)? s", "sweep names: start frequency and length"),
+    (r"90° grazing", "the microphone's orientation"),
+    (r"94 dB SPL", "the calibrator level REW's calibration is set at"),
+    (r"loading into the input \(−1\.33 dB\)", "the mic's loading divider, measured once (docs/rigs/pupu.md)"),
 ]
 MEASURED = re.compile(
     r"(?<![\w.])[+−-]?\d+\.\d+"                             # a decimal
