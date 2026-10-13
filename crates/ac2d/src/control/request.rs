@@ -11,6 +11,7 @@ use ac2_proto::{
     peek_envelope,
 };
 
+use crate::dedup::Admit;
 use crate::health::SessionStream;
 use crate::util::{hex, perr, wall_ns};
 
@@ -116,11 +117,19 @@ impl Control {
         }
         let client =
             ClientId(peer.map_or_else(|| format!("local-{}", hex(routing_id)), |p| p.name));
-        if let Some(stored) = self.dedup.get(&client, req.id, now) {
-            let stored = stored.to_vec();
-            tracing::debug!("{} retried request {}; stored reply", client.0, req.id.0);
-            self.s.outbox.reply(routing_id, &stored);
-            return;
+        // Reserved before anything executes, the asynchronous branches below included: a
+        // copy of a request still running waits for its reply rather than running it again.
+        match self.dedup.admit(&client, req.id, routing_id, now) {
+            Admit::Execute => {}
+            Admit::Attached => {
+                tracing::debug!("{} retried running request {}", client.0, req.id.0);
+                return;
+            }
+            Admit::Stored(stored) => {
+                tracing::debug!("{} retried request {}; stored reply", client.0, req.id.0);
+                self.s.outbox.reply(routing_id, &stored);
+                return;
+            }
         }
         let result = match req.expect_rev {
             Some(r) if req.cmd.is_mutation() && r != self.store.rev() => {
@@ -203,7 +212,8 @@ impl Control {
         self.answer(routing_id, &client, req.id, result, now);
     }
 
-    /// Sends a reply and remembers it for retries of `id`.
+    /// Answers request `id`, received on `routing_id`: sends the reply to it and to every
+    /// copy of the request that arrived while it ran, and remembers it for later retries.
     pub(super) fn answer(
         &mut self,
         routing_id: &[u8],
@@ -226,8 +236,13 @@ impl Control {
                 }
             }
         };
-        self.dedup.insert(client, id, bytes.clone(), now);
-        self.s.outbox.reply(routing_id, &bytes);
+        let owed = self.dedup.complete(client, id, routing_id, &bytes, now);
+        if owed.is_empty() {
+            self.s.outbox.reply(routing_id, &bytes);
+        }
+        for r in &owed {
+            self.s.outbox.reply(r, &bytes);
+        }
     }
 
     pub(super) fn send_reply(&self, routing_id: &[u8], r: &Reply) {

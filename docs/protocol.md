@@ -57,8 +57,13 @@ ProtoError { code: ErrorCode, msg: string, detail: ErrorDetail | nil }
 ```
 
 - `args` is absent for commands without arguments.
-- `id` is unique per client within the dedup window (last 256 ids, 30 s). A retried id
-  returns the stored reply and never executes twice.
+- `id` is unique per client (a network client's authorized name; a local connection) within
+  the dedup window: the last 256 answered ids, each kept 30 s from its reply. An id executes
+  once, whichever command it carries. A copy sent while the request still runs (a panel, the
+  delay finder, loopback detection) runs nothing: when the request completes, the reply goes
+  to every copy, on whichever connection each arrived. A copy sent after the reply gets the
+  stored reply. Requests refused before execution (protocol version, undecodable, revoked
+  key) are not remembered. Revoking a client forgets its stored replies and running ids.
 - `expect_rev` applies to mutations: if state has moved past it the reply is `conflict`
   with `detail: {type: conflict, rev}` (the current rev). Commits are serial.
 - Largest ctrl message: 4 MiB, checked before parsing.

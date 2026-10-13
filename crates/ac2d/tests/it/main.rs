@@ -8,6 +8,7 @@ mod calibration;
 mod ceiling;
 mod client;
 mod common;
+mod dedup;
 mod devices;
 mod discovery;
 mod drift;

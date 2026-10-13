@@ -833,3 +833,34 @@ fn tenth_millisecond_steps_at_96_khz_return_exactly() {
     );
     h.shutdown();
 }
+
+/// Two copies of one `delay.find` run the finder once: both replies are the one finding,
+/// stamped once (a second run would stamp its own time), whether the copy arrived while the
+/// finder ran or after.
+#[test]
+fn a_retried_delay_find_runs_once() {
+    init_log();
+    let h = Daemon::start(config(manual_rig(), inproc("tf-find-once"))).unwrap();
+    let (mut c, _sub) = connect(&h, &[]);
+    c.ok(Command::SessionOpen {
+        config: session(true),
+    });
+    c.ok(Command::MeasCreate {
+        config: transfer("main"),
+    });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    let req = ac2_proto::Request::new(c.next_id(), find(FinderBand::Auto, None));
+    c.send(&req);
+    c.send(&req);
+    let first = c.recv_raw(T).unwrap();
+    let second = c.recv_raw(T).unwrap();
+    assert_eq!(first, second);
+    let reply = ac2_proto::decode_reply(&first).unwrap();
+    assert!(
+        matches!(reply.result, Ok(ReplyBody::DelayFinding(_))),
+        "{reply:?}"
+    );
+    c.send(&req);
+    assert_eq!(c.recv_raw(T).unwrap(), first);
+    h.shutdown();
+}

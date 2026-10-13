@@ -571,3 +571,43 @@ fn a_renewal_reopens_a_preview_that_stopped_delivering() {
     preview_of(&s, BackendKind::Fake).expect("frames after the renewal reopened the stream");
     assert_eq!(opened.lock().unwrap().len(), 2);
 }
+
+/// A copy of a running detection request attaches to it: one burst, one stream, the same
+/// reply to both, not a busy refusal for the copy.
+#[test]
+fn a_retried_detection_runs_once() {
+    let opened: Opened = Arc::default();
+    let rec = Recording {
+        inner: named_rig(FakeDrive::Thread(Pace::Realtime), 0.0),
+        opened: Arc::clone(&opened),
+    };
+    let h = start(Arc::new(rec));
+    let (mut c, _s) = connect(&h, &[]);
+    let token = acquire(&mut c);
+    let req = ac2_proto::Request::new(
+        c.next_id(),
+        Command::SessionDetectLoopback {
+            lease_token: token,
+            backend: BackendKind::Fake,
+            input_device: fake_dev(),
+            output_device: fake_dev(),
+            output: 0,
+            level: Some(Dbfs(-30.0)),
+        },
+    );
+    c.send(&req);
+    c.send(&req);
+    let first = c.recv_raw(T).unwrap();
+    let second = c.recv_raw(T).unwrap();
+    assert_eq!(first, second);
+    let reply = ac2_proto::decode_reply(&first).unwrap();
+    assert!(
+        matches!(reply.result, Ok(ReplyBody::LoopbackDetection(_))),
+        "{reply:?}"
+    );
+    // After completion: the stored reply, nothing opened again.
+    c.send(&req);
+    assert_eq!(c.recv_raw(T).unwrap(), first);
+    assert_eq!(*opened.lock().unwrap(), vec![(1, true)]);
+    h.shutdown();
+}

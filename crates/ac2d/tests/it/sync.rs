@@ -254,6 +254,24 @@ fn request_dedup_and_expect_rev() {
     let mut fresh = Request::new(c.next_id(), Command::MeasStop { meas: MeasId(1) });
     fresh.expect_rev = Some(Rev(2));
     assert!(c.call_req(fresh).result.is_ok());
+    // A conflict is an answer like any other: retried once the rev it expected is
+    // current, the id returns the stored conflict and does not execute.
+    let (_, now_rev, _) = snapshot(&mut c);
+    let mut early = Request::new(
+        c.next_id(),
+        Command::MeasDelete {
+            meas: MeasId(1),
+            traces: ac2_proto::model::OwnedTraces::Delete,
+        },
+    );
+    early.expect_rev = Some(Rev(now_rev.0 + 1));
+    c.send(&early);
+    let conflict = c.recv_raw(T).unwrap();
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    assert_eq!(snapshot(&mut c).1, early.expect_rev.unwrap());
+    c.send(&early);
+    assert_eq!(c.recv_raw(T).unwrap(), conflict);
+    assert_eq!(snapshot(&mut c).0.measurements.len(), 1, "not deleted");
     // Reads ignore expect_rev.
     let mut read = Request::new(c.next_id(), Command::SessionStatus);
     read.expect_rev = Some(Rev(0));
