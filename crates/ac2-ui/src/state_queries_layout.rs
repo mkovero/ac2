@@ -79,10 +79,10 @@ impl AppState {
                 .and_then(|v| v.measurement.clone())
         };
         // Unknown until the daemon's state is (and while a remembered one waits for it):
-        // keep what the preferences say. No layout of the operator's yet: none is kept,
-        // unless a pane's level axis moved: the range lives with its pane.
-        let keep = !self.pane_auto || !self.pane_levels.is_empty();
-        let panes = keep.then(|| crate::prefs::PanesPrefs {
+        // keep what the preferences say. No layout of the operator's yet: none is kept, and
+        // neither are its panes' level axes (an automatic fit or a zoom there is no layout
+        // choice: kept, the panes would stop taking the first measurement's kind).
+        let panes = (!self.pane_auto).then(|| crate::prefs::PanesPrefs {
             root: self.layout.root.clone(),
             focus: self.layout.focus,
             views: self

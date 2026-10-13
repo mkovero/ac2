@@ -485,7 +485,9 @@ resets to 20 Hz – 20 kHz; the wheel zooms about the pointer, a drag pans.
 Each pane's **level axis** (transfer magnitude, spectrum / RTA level, sweep distortion) is
 its own: two transfer panes side by side zoom and pan apart, and the keys and the wheel move
 only the pane they act on. A pane split off (**N**) starts on the range of the pane it came
-from. The axis is remembered with its pane in `ui.toml` (**Ctrl+Home** forgets it; Settings
+from. The axis is remembered with its pane in `ui.toml` once the panes are a layout of the
+operator's (the app's own first pane, still taking the first measurement's kind, keeps its
+axis only while the app runs; **Ctrl+Home** forgets it; Settings
 → Display → *level axes* resets every pane's). A spectrum that starts fits the spectrum
 panes' level axes on the first frame, and a new sweep result fits the sweep panes' (as
 **Shift+Home**, frequency left alone). The impulse-response views' axes are shared by kind:

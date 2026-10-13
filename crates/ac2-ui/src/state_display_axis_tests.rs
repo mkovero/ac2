@@ -213,3 +213,28 @@ fn split_panes_level_axes_are_remembered_each_with_its_pane() {
     assert_eq!(u.st.level_range(first), a);
     assert_eq!(u.st.level_range(second), b);
 }
+
+/// A level axis moved on the app's own first pane (an automatic fit writes it this way) is
+/// no layout choice: no panes go to `ui.toml`, and the next start's pane still takes the
+/// kind of the first measurement.
+#[test]
+fn an_automatic_fit_on_the_auto_pane_writes_no_layout() {
+    let mut t = T::fresh();
+    let mut s = daemon_state();
+    s.measurements.clear();
+    t.connect(s.clone());
+    let pane = t.st.layout.focus;
+    t.st.change_level(pane, |_| Range::new(-12.0, 6.0));
+    t.conn(mirror(s));
+    assert_eq!(t.st.level_range(pane), Some(Range::new(-12.0, 6.0)));
+    assert!(t.st.prefs.layout.panes.is_none());
+    let text = t.st.prefs.to_toml();
+    assert!(!text.contains("[[layout.panes]]"), "{text}");
+
+    let mut u = T::fresh();
+    u.st.set_prefs(crate::prefs::UiPrefs::from_toml(&text).expect("parse"));
+    let mut sub = daemon_state();
+    sub.measurements.retain(|m| m.config.name == "Sub");
+    u.connect(sub);
+    assert_eq!(u.st.layout.focus_kind(), PaneKind::Spectrum);
+}

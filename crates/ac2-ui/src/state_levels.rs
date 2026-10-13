@@ -90,7 +90,7 @@ impl AppState {
     }
 
     /// Sets the range pane `pane` draws on now to what `f` makes of it.
-    fn change_level(&mut self, pane: PaneId, f: impl FnOnce(Range) -> Range) {
+    pub(super) fn change_level(&mut self, pane: PaneId, f: impl FnOnce(Range) -> Range) {
         let kind = self.layout.kind(pane);
         let scale = crate::scenes::spectrum_scale(self);
         let levels = self.pane_levels.entry(pane).or_default();
