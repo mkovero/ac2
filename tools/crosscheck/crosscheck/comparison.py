@@ -1,26 +1,27 @@
-"""`python -m crosscheck comparison`: the generated parts of `comparison.md`, rebuilt from the
-committed baselines, and the numbers quoted in its hand-written parts, rewritten from their
-sources (`comparison_quotes`). Only the parts between marker comments are replaced, so a baseline
-update and its document land in one commit; `--check` writes nothing and reports what is stale.
+"""`python -m crosscheck comparison`: the generated parts of `comparison.md` from the committed
+baselines, and the numbers quoted in its prose rewritten from their sources (`comparison_quotes`).
 
-The document shows the current evidence: per rig, stage and resolution the newest baseline (by
-run time), and beside it the stage's other levels taken on the same ac2 build. A take on an
-older build stays committed for `compare` but is not shown. A rig baseline holds hundreds of
-checks; the tables keep the rows that say how far ac2 can be trusted against REW and against the
-analytic truths (steady sines, direct cross-spectra), each cell the worst judged value of its
-checks with where it was and the verdict counts."""
+The document shows one ac2 build: that of the newest rig baseline. Baselines on other builds are
+not shown (a stage with none on the build is named as not run). The table has one row per
+quantity and one column per comparison; each cell is the worst judged value (worst verdict
+first, then the largest share of its pass limit) and its verdict. Every warn or FAIL cell needs
+a `### <quantity>: <column>` section under "Disparities", and every such section a warn or FAIL
+cell; `--check` fails while the document is stale or either is missing."""
 from __future__ import annotations
 
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
+from . import comparison_quotes as Q
 from .baseline import BASELINES, HOST_DIR, JUDGED
 
 ROOT = Path(__file__).resolve().parent.parent
 DOC = ROOT / "comparison.md"
-BLOCKS = ("build", "summary", "misses", "results")
+BLOCKS = ("build", "table")
+DISPARITIES = "## Disparities"
 
 
 def begin(name: str) -> str:
@@ -31,490 +32,275 @@ def end(name: str) -> str:
     return f"<!-- END generated {name} -->"
 
 
-STATUSES = ("FAIL", "WARN", "PASS", "INCONCLUSIVE", "INFO")
-MISSES = ("WARN", "FAIL")
+@dataclass(frozen=True)
+class Pair:
+    """ac2 − another tool at the same tone, from their two checks against one truth (the truth
+    cancels); judged against the ac2 check's limits."""
+    ac2: str
+    other: str
 
-# (row label, pattern on the key without its stage prefix[, statistic]). A named group `o` (the
-# harmonic order) is shown with the location. Sweeps: the stage's main sweep (10 Hz on the
-# electrical path, 20 Hz on the speaker), so one row reads one ac2 analysis.
-#
-# The statistic says what a value's sign means. SIGNED (the default): a − b, the sign is the
-# direction. ABS: a magnitude with no direction (a band pair's larger of |mean difference| and
-# its spread about that mean), shown unsigned so it does not read as a bias. SHARE: a fraction.
-SIGNED, ABS, SHARE = "signed", "abs", "share"
-COUNT_UNITS = ("columns", "bins")
-_SWEEP = r"ac2 sweep (?:10|20)Hz-5\.5s"
-RIG_ROWS: list[tuple[str, str] | tuple[str, str, str]] = [
-    ("ac2 sweep vs REW offline import, magnitude spread per band", rf"mag\.{_SWEEP}\|REW offline\.", ABS),
-    ("ac2 sweep vs REW offline import, phase, max(\\|mean\\|, spread) per band", rf"phase\.{_SWEEP}\|REW offline\.", ABS),
-    ("REW offline vs direct (same recording), magnitude, max(\\|mean\\|, spread) per band",
-     r"mag\.REW offline\|direct \(REW recording\)\.", ABS),
-    ("REW offline vs direct (same recording), phase, max(\\|mean\\|, spread) per band",
-     r"phase\.REW offline\|direct \(REW recording\)\.", ABS),
-    ("ac2 sweep vs direct (its own capture), magnitude, max(\\|mean\\|, spread) per band",
-     rf"mag\.{_SWEEP}\|direct \(ac2 capture [^)]*\)\.", ABS),
-    ("ac2 sweep vs direct (its own capture), phase, max(\\|mean\\|, spread) per band",
-     rf"phase\.{_SWEEP}\|direct \(ac2 capture [^)]*\)\.", ABS),
-    ("ac2 live TF vs direct (γ² ≥ 0.99), magnitude, max(\\|mean\\|, spread) per band",
-     r"mag\.ac2 TF\|direct \(TF capture\)\.", ABS),
-    ("ac2 live TF vs direct (γ² ≥ 0.99), phase, max(\\|mean\\|, spread) per band",
-     r"phase\.ac2 TF\|direct \(TF capture\)\.", ABS),
-    ("ac2 sweep vs steady sine, magnitude", rf"sine_mag\.{_SWEEP}@"),
-    ("REW offline vs steady sine, magnitude", r"sine_mag\.REW offline@"),
-    ("ac2 live TF vs steady sine, magnitude", r"sine_mag\.ac2 TF@"),
-    ("ac2 sweep vs steady sine, phase", rf"sine_phase\.{_SWEEP}@"),
-    ("REW offline vs steady sine, phase", r"sine_phase\.REW offline@"),
-    ("ac2 live TF vs steady sine, phase", r"sine_phase\.ac2 TF@"),
-    ("ac2 meas÷ref vs REW (meas − ref), absolute level", r"level\.ac2_vs_rew_meas_minus_ref$"),
-    ("ac2 reference level vs REW's", r"level\.ac2_ref_vs_rew_ref$"),
-    ("ac2 reported arrival vs direct, every sweep", r"delay\.ac2_arrival\."),
-    ("ac2 arrival + phase slope vs direct, every sweep", r"delay\.ac2_total\."),
-    ("group delay vs sine pairs: ac2, ±1/12-oct fit", r"gd\.ac2 ±1/12-oct fit@"),
-    ("group delay vs sine pairs: ac2 as displayed", r"gd\.ac2 as displayed \(central difference\)@"),
-    ("group delay vs sine pairs: REW, ±1/12-oct fit", r"gd\.REW offline import ±1/12-oct fit@"),
-    ("group delay vs sine pairs: REW's own GD export", r"gd\.REW offline import own GD export \(±1/12-oct mean\)@"),
-    ("H2–H5 vs steady sine: ac2 sweep", rf"(?P<o>h[2-5])\.{_SWEEP}@"),
-    ("H2–H5 vs steady sine: REW offline import", r"(?P<o>h[2-5])\.REW offline import@"),
-    ("absolute SPL vs steady sine: ac2 sweep", r"spl\.ac2 sweep@"),
-    ("absolute SPL vs steady sine: REW (cal from ac2)", r"spl\.REW \(SPL, cal from ac2\)@"),
-    ("live TF: share of columns at γ² ≥ 0.99, 31 Hz–20 kHz", r"coherence\.tf$", SHARE),
-]
-AMBIENT_ROWS: list[tuple[str, str]] = [
-    ("LZeq ac2 vs numpy", r"leq\.Z\.ac2$"),
-    ("LAeq ac2 vs numpy", r"leq\.A\.ac2$"),
-    ("LCeq ac2 vs numpy", r"leq\.C\.ac2$"),
-    ("LAeq REW vs numpy", r"leq\.A\.REW$"),
-    ("LAeq ac2 vs REW", r"leq\.A\.ac2_rew$"),
-    ("1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs its own filters' response applied to the recording, worst band",
-     r"bands\.ac2 RTA\|own filters$"),
-    ("1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs numpy at ideal band edges, largest \\|difference\\| (context)",
-     r"bands\.ac2 RTA$", ABS),
-    ("1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy at ideal band edges, largest \\|difference\\| (context)",
-     r"bands\.REW RTA$", ABS),
-]
-# Distortion coverage: per harmonic order and analyser, how many tones were judged at all.
-HARMONIC_ROWS: list[tuple[str, str]] = [
-    (f"H{k} {who}", rf"h{k}\.{pat}@") for who, pat in (("ac2 sweep", _SWEEP), ("REW offline import", r"REW offline import"))
-    for k in range(2, 6)]
-# OSM stage: (column header, check slug after `osm.<case>.`)
-# (column header, check slug after `osm.<case>.`[, statistic]); see SIGNED/ABS above
-OSM_TF_COLS = [
-    ("\\|ac2 \\|H\\| − truth\\|, dB", "ac2_tf_h_vs_analytic", ABS),
-    ("\\|OSM \\|H\\| − truth\\|, dB", "osm_m_r_vs_analytic", ABS),
-    ("\\|ac2 ∠ − truth\\|, °", "ac2_tf_phase_vs_analytic", ABS),
-    ("\\|OSM ∠ − truth\\|, °", "osm_phase_vs_analytic", ABS),
-    ("\\|ac2 − OSM\\| on \\|H\\|, dB", "ac2_vs_osm_h", ABS),
-    ("\\|ac2 − OSM\\| on ∠, °", "ac2_vs_osm_phase", ABS),
-    ("ac2 γ² − true γ² (mean)", "ac2_γ²_vs_true_γ²"),
-    ("ac2 γ² − E[γ̂²] (mean)", "ac2_γ²_vs_its_expected_value"),
-    ("OSM γ² − E[γ̂²] (mean)", "osm_γ²_vs_its_expected_value"),
-]
-# Digital DUT (a software device with exactly known harmonics, on a dummy JACK server):
-# (row label, the order's coverage check, the pattern of its per-tone checks)
-DUT_ROWS = [(f"H{k} {who}", f"coverage.h{k}.{who}", rf"dut\.h{k}\.{pat}\.")
-            for k in range(2, 6) for who, pat in (("steady sine", "steady sine"), ("ac2 sweep", r"ac2 sweep [^.]*"))]
 
-# Rig takes and masks: how many columns each OSM comparison stands on, and the tails a median hides
-OSM_COVERAGE_COLS = [
-    ("columns judged", "columns_judged"),
-    ("below the γ² gate", "masked_columns_below_the_coherence_gate"),
-    ("ac2 non-finite", "masked_ac2_non_finite_columns"),
-    ("OSM bins under its float32 floor", "masked_osm_bins_below_the_reference_floor"),
-    ("OSM NaN-phase bins", "masked_osm_nan_phase_bins"),
-    ("\\|ac2 − OSM\\| on \\|H\\|: 95th pct, dB", "ac2_vs_osm_h_95th_percentile_difference", ABS),
-    ("\\|ac2 − OSM\\| on \\|H\\|: max, dB", ("ac2_vs_osm_h_max_difference", "ac2_vs_osm_h_max_difference_frequency")),
-    ("\\|ac2 − OSM\\| on ∠: 95th pct, °", "ac2_vs_osm_phase_95th_percentile_difference", ABS),
-    ("\\|ac2 − OSM\\| on ∠: max, °", ("ac2_vs_osm_phase_max_difference", "ac2_vs_osm_phase_max_difference_frequency")),
-]
-OSM_OTHER_COLS = [
-    ("ac2 finder − truth", "ac2_delay_finder_vs_analytic"),
-    ("OSM finder − truth", "osm_delay_finder_vs_analytic"),
-    ("ac2 slope − truth", "ac2_phase_slope_vs_analytic"),
-    ("OSM slope − truth", "osm_phase_slope_vs_analytic"),
-    ("ac2 − OSM finder", "ac2_delay_finder_vs_osm_s"),
-    ("ac2 H1 in noise − 0 dB (median), dB", "ac2_h1_h_vs_analytic_0_db"),
-    ("OSM mean ratio − E\\|1+N/R\\|, dB", "osm_mean_m_r_vs_its_expected_bias"),
-    ("ac2 spectrum − truth, dB", "ac2_spectrum"),
-    ("OSM spectrum (converted) − truth, dB", ("osm_module_3_01", "osm_module_3_01_db_vs_analytic")),
+@dataclass(frozen=True)
+class Row:
+    label: str
+    stages: tuple[str, ...]  # the stages that measure it: none on the build reads "not run"
+    ac2: tuple = ()
+    rew: tuple = ()
+    osm: tuple = ()
+    ac2_rew: tuple = ()
+    ac2_osm: tuple = ()
+
+    def columns(self) -> tuple[tuple, ...]:
+        return self.ac2, self.rew, self.osm, self.ac2_rew, self.ac2_osm
+
+
+COLUMNS = ("ac2 vs truth", "REW vs truth", "OSM vs truth", "ac2 − REW", "ac2 − OSM")
+
+# Patterns match a check key after its first segment (the stage, a DUT case, or `osm`; an OSM
+# key goes on with its case). Truths: the steady sine and the direct cross-spectrum of the same
+# capture on the rig, the closed form of the OSM fixtures, the digital DUT's exact harmonics.
+SWEEP = r"ac2 sweep [^|@]+"
+AC2_ANY = rf"(?:{SWEEP}|ac2 TF)"
+PATHS = ("xone", "genelec", "dut", "osm")
+ROWS: list[Row] = [
+    Row("Gain / level", ("xone", "genelec"),
+        ac2=(r"level\.ac2_ref_vs_sine$",),
+        ac2_rew=(r"level\.ac2_vs_rew_meas_minus_ref$", r"level\.ac2_ref_vs_rew_ref$")),
+    Row("SPL", ("genelec",),
+        ac2=(r"spl\.ac2 (?:sweep|TF × ref level)@",),
+        rew=(r"spl\.REW \(SPL, cal from ac2\)@",),
+        ac2_rew=(Pair(r"spl\.ac2 (?:sweep|TF × ref level)@", r"spl\.REW \(SPL, cal from ac2\)@"),)),
+    Row("Magnitude", PATHS,
+        ac2=(rf"sine_mag\.{AC2_ANY}@",
+             r"mag\.(?:ac2 sweep [^|]+\|direct \(ac2 capture [^)]*\)|ac2 TF\|direct \(TF capture\))\.",
+             r"[^.]+\.ac2_(?:tf_h_vs_analytic|h1_h_vs_analytic_0_db)$"),
+        rew=(r"sine_mag\.REW offline@", r"mag\.REW offline\|direct \(REW recording\)\."),
+        osm=(r"[^.]+\.osm_(?:m_r_vs_analytic|mean_m_r_vs_its_expected_bias)$",),
+        ac2_rew=(rf"mag\.{SWEEP}\|REW offline\.", Pair(rf"sine_mag\.{AC2_ANY}@", r"sine_mag\.REW offline@")),
+        ac2_osm=(r"[^.]+\.ac2_vs_osm_h$",)),
+    Row("Phase", PATHS,
+        ac2=(rf"sine_phase\.{AC2_ANY}@",
+             r"phase\.(?:ac2 sweep [^|]+\|direct \(ac2 capture [^)]*\)|ac2 TF\|direct \(TF capture\))\.",
+             r"[^.]+\.ac2_tf_phase_vs_analytic$"),
+        rew=(r"sine_phase\.REW offline@", r"phase\.REW offline\|direct \(REW recording\)\."),
+        osm=(r"[^.]+\.osm_phase_vs_analytic$",),
+        ac2_rew=(rf"phase\.{SWEEP}\|REW offline\.", Pair(rf"sine_phase\.{AC2_ANY}@", r"sine_phase\.REW offline@")),
+        ac2_osm=(r"[^.]+\.ac2_vs_osm_phase$",)),
+    Row("Group delay", ("xone", "genelec"),
+        ac2=(r"gd\.ac2 ±1/12-oct fit@",),
+        rew=(r"gd\.REW offline import ±1/12-oct fit@",),
+        ac2_rew=(Pair(r"gd\.ac2 ±1/12-oct fit@", r"gd\.REW offline import ±1/12-oct fit@"),)),
+    Row("Arrival / delay", PATHS,
+        ac2=(r"delay\.ac2_arrival\.", r"[^.]+\.ac2_(?:delay_finder|phase_slope)_vs_analytic$"),
+        osm=(r"[^.]+\.osm_(?:delay_finder|phase_slope)_vs_analytic$",),
+        ac2_osm=(r"[^.]+\.ac2_delay_finder_vs_osm_s$",)),
+    Row("Coherence γ²", ("osm",),
+        ac2=(r"[^.]+\.ac2_γ²_vs_(?:true_γ²|its_expected_value)$",),
+        osm=(r"[^.]+\.osm_γ²_vs_its_expected_value$",)),
+    Row("Harmonics H2–H5", ("xone", "genelec", "dut"),
+        ac2=(rf"h[2-5]\.{SWEEP}@", r"dut\.(?:grid\.)?h[2-5]\.ac2 sweep "),
+        rew=(r"h[2-5]\.REW offline import@",),
+        ac2_rew=(rf"h[2-5]\.{SWEEP}\|REW offline import@",)),
+    Row("Leq (Z, A, C)", ("ambient",),
+        ac2=(r"leq\.[ZAC]\.ac2$",),
+        rew=(r"leq\.A\.REW$",),
+        ac2_rew=(r"leq\.A\.ac2_rew$",)),
+    Row("1/3-octave RTA", ("ambient",),
+        ac2=(r"bands\.ac2 RTA\|own filters$",)),
+    Row("Spectrum level", ("osm",),
+        ac2=(r"[^.]+\.ac2_spectrum$",),
+        osm=(r"[^.]+\.osm_module_3_01(?:_db_vs_analytic)?$",)),
 ]
 
-
-# ------------------------------------------------------------------ formatting
-def fmt_value(v: float | None, unit: str, stat: str = SIGNED) -> str:
-    if v is None:
-        return "—"
-    if unit in COUNT_UNITS:
-        return f"{v:.0f}"
-    if stat == SHARE:
-        return f"{v * 100:.1f} %"
-    if unit == "rel":
-        s = f"{v * 100:+.1f} %"
-    elif unit == "µs":
-        s = f"{v:+.2f} µs"
-    else:
-        s = f"{v:+.3f}" + (f" {unit}" if unit and unit != "°" else unit)
-    # a value that rounds to zero, or a magnitude without a direction, carries no sign
-    s = re.sub(r"^[+-](0\.0+(?:\D|$))", r"\1", s)
-    if stat == ABS:
-        s = s.lstrip("+-")
-    return s.replace("-", "−", 1) if s.startswith("-") else s
+# A maximum |difference| or a band's max(|mean|, spread) has no direction: shown unsigned.
+UNSIGNED = re.compile(r"\.(?:ac2_tf_h|ac2_tf_phase|osm_m_r|osm_phase)_vs_analytic$|\.ac2_vs_osm_(?:h|phase)$")
+RANK = {"FAIL": 0, "WARN": 1, "PASS": 2}
+WORD = {"FAIL": "**FAIL**", "WARN": "**warn**", "PASS": "pass"}
 
 
-def _loc(rest: str, order: str | None) -> str:
-    """Where in the stage a check sits: a band, a tone, a sweep."""
-    m = re.fullmatch(r"(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)", rest)
-    if m:
-        rest = f"{m.group(1)}–{m.group(2)} Hz"
-    else:
-        rest = re.sub(r"^(\d+(?:\.\d+)?)Hz$", r"\1 Hz", rest)
-    return f"{order.upper()} {rest}" if order else rest
+@dataclass(frozen=True)
+class Hit:
+    """One judged (or unjudged) value of a cell: a check, or a Pair's difference."""
+    b: dict
+    key: str
+    status: str
+    value: float | None
+    unit: str
+    tol: tuple[float, float] | None
+    signed: bool
 
 
-def counts_text(entries: list[dict]) -> str:
-    c = {}
-    for e in entries:
-        c[e["status"]] = c.get(e["status"], 0) + 1
-    return ", ".join(f"{s} {c[s]}" for s in STATUSES if c.get(s))
-
-
-def cell(matches: list[tuple[str, str | None, dict]], stat: str = SIGNED) -> str:
-    """The worst judged value per unit (with where), then the verdict counts. Without a judged
-    value, the largest INFO value or just the counts (an INCONCLUSIVE value is a bound)."""
-    if not matches:
-        return "—"
-    entries = [e for _, _, e in matches]
-    parts = []
-    for unit in dict.fromkeys(e.get("unit") or "" for e in entries):
-        mine = [(r, o, e) for r, o, e in matches if (e.get("unit") or "") == unit and e["value"] is not None]
-        judged = [m for m in mine if m[2]["status"] in JUDGED] or [m for m in mine if m[2]["status"] == "INFO"]
-        if not judged:
-            continue
-        r, o, e = max(judged, key=lambda m: abs(m[2]["value"]))
-        where = _loc(r, o) if len(matches) > 1 and r else ""
-        # an unsigned band statistic hides its direction: the signed mean beside it gives it back
-        extra = [f"mean {fmt_value(e['mean'], unit)}"] if stat == ABS and e.get("mean") is not None else []
-        # n of the band's columns: what every mask (coherence, noise, nulls, mains, edges) left
-        extra += ([f"n {e['n']:.0f}" + (f" of {e['of']:.0f}" if e.get("of") is not None else "")]
-                  if e.get("n") is not None else [])
-        parts.append(fmt_value(e["value"], unit, stat) + (f" @ {where}" if where else "")
-                     + (f" [{', '.join(extra)}]" if extra else ""))
-    head = "; ".join(parts)
-    return (f"{head} ({counts_text(entries)})" if head else counts_text(entries))
-
-
-# ------------------------------------------------------------------ tables
+# ------------------------------------------------------------------ baselines and the build
 def load(root: Path) -> list[tuple[Path, dict]]:
     return [(p, json.loads(p.read_text())) for p in sorted(Path(root).glob("*/*.json"))]
 
 
-def _level(b: dict) -> str:
-    return "silent" if b.get("level_dbfs") is None else f"{b['level_dbfs']:g} dBFS".replace("-", "−")
-
-
-def _short_build(s: str | None) -> str:
-    m = re.search(r"\+([0-9a-f]{7})", s or "")
+def build_of(b: dict) -> str:
+    s = (b.get("provenance") or {}).get("ac2_build") or ""
+    m = re.search(r"\+([0-9a-f]{7})", s)
     return m.group(1) if m else (s or "—")
 
 
-def _run(b: dict) -> str:
-    return (b.get("provenance") or {}).get("run") or ""
-
-
-def _ppo(b: dict) -> int | None:
-    """Columns per octave of a rig path baseline; 48 when not recorded (ac2's default)."""
-    return None if b["stage"] in ("osm", "ambient", "dut") else int(b.get("resolution_ppo") or 48)
-
-
-def _build(b: dict) -> str:
-    return _short_build((b.get("provenance") or {}).get("ac2_build"))
+def is_rig(p: Path, b: dict) -> bool:
+    return p.parent.name != HOST_DIR and b["stage"] in ("xone", "genelec")
 
 
 def doc_build(items: list[tuple[Path, dict]]) -> str | None:
-    """The ac2 build the document shows: that of the newest rig baseline (a rig take is what a
-    release is tested on; host stages are re-run on the same build)."""
-    rig = [b for p, b in items if p.parent.name != HOST_DIR and b["stage"] not in ("osm", "ambient", "dut")]
-    return _build(max(rig, key=_run)) if rig else None
+    """The newest rig baseline's build (a release is tested on the rig; host stages are re-run on
+    the same build); without a rig baseline, the newest one's."""
+    run = lambda pb: (pb[1].get("provenance") or {}).get("started") or ""  # noqa: E731
+    pool = [pb for pb in items if is_rig(*pb)] or items
+    return build_of(max(pool, key=run)[1]) if pool else None
 
 
 def current(items: list[tuple[Path, dict]]) -> list[tuple[Path, dict]]:
-    """The baselines on the document's build, every level and resolution, in file order.
-    Results from different builds are not combined: a stage with no baseline on this build is
-    listed as not run (`missing`), never shown with an older build's numbers."""
     build = doc_build(items)
-    return [(p, b) for p, b in items if _build(b) == build]
+    return [(p, b) for p, b in items if build_of(b) == build]
 
 
-def missing(items: list[tuple[Path, dict]]) -> list[tuple[str, dict]]:
-    """(rig, baseline) of each committed take not on the document's build, newest per (rig,
-    stage, resolution, level): what this build has not been run on."""
-    shown = {(p.parent.name, b["stage"], _ppo(b), b.get("level_dbfs")) for p, b in current(items)}
-    best: dict[tuple, tuple[str, dict]] = {}
-    for p, b in items:
-        k = (p.parent.name, b["stage"], _ppo(b), b.get("level_dbfs"))
-        if k not in shown and (k not in best or _run(b) > _run(best[k][1])):
-            best[k] = (p.parent.name, b)
-    return list(best.values())
+def level(b: dict) -> str:
+    return "" if b.get("level_dbfs") is None else f"{b['level_dbfs']:g}".replace("-", "−")
 
 
-def missing_stages(items: list[tuple[Path, dict]]) -> set[str]:
-    """The stages with no baseline at all on the document's build."""
-    have = {b["stage"] for _, b in current(items)}
-    return {b["stage"] for _, b in missing(items)} - have
-
-
-def _take(b: dict) -> str:
-    res = f" 1/{_ppo(b)} oct" if _ppo(b) not in (None, 48) else ""
-    return f"{b['stage']} {_level(b)}{res}".replace(" silent", "")
+STAGE_NAMES = {"xone": "Xone (electrical)", "genelec": "Genelec (speaker)", "ambient": "ambient",
+               "dut": "digital DUT", "osm": "OSM fixtures and rig recordings"}
 
 
 def build_text(items: list[tuple[Path, dict]]) -> str:
-    """The lead's statement of the build every number comes from, and what it was not run on."""
     shown = current(items)
-    rigs = sorted({p.parent.name for p, b in shown
-                   if p.parent.name != HOST_DIR and b["stage"] not in ("osm", "ambient", "dut")})
-    out = [f"Every result below is from **ac2 build {doc_build(items)}**, the build of the newest "
-           f"rig baseline ({', '.join(rigs)}). Only baselines on that build are shown, at all their "
-           "levels; results of different builds are never combined."]
-    gone = missing(items)
+    days = sorted({((b.get("provenance") or {}).get("started") or "")[:10] for _, b in shown} - {""})
+    when = days[0] if len(days) == 1 else f"{days[0]} to {days[-1]}" if days else "—"
+    takes: dict[str, list[str]] = {}
+    for _, b in sorted(shown, key=lambda pb: (list(STAGE_NAMES).index(pb[1]["stage"]), -(pb[1].get("level_dbfs") or 0))):
+        takes.setdefault(b["stage"], []).append(level(b))
+    parts = [STAGE_NAMES[st] + (f" at {', '.join(lv)} dBFS" if any(lv) else "") for st, lv in takes.items()]
+    out = f"ac2 build **{doc_build(items)}**, runs of {when}: {'; '.join(parts)}."
+    gone = sorted({b["stage"] for _, b in items} - set(takes))
     if gone:
-        by: dict[str, list[str]] = {}
-        for rig, b in sorted(gone, key=lambda t: (t[0], t[1]["stage"], -(t[1].get("level_dbfs") or 0))):
-            by.setdefault(rig, []).append(_take(b))
-        names = "; ".join(f"{rig}: {', '.join(ts)}" for rig, ts in by.items())
-        out.append(f"Not run on this build (their baselines are from earlier builds and not shown): {names}.")
-    return " ".join(out)
+        out += f" Not run on this build: {', '.join(STAGE_NAMES[s] for s in gone)}."
+    return out
 
 
-def heading(b: dict) -> str:
-    pv = b.get("provenance") or {}
-    res = f" 1/{_ppo(b)} oct" if _ppo(b) not in (None, 48) else ""
-    return f"{b['stage']} {_level(b)}{res} ({pv.get('run')})"
-
-
-def counts_line(b: dict) -> str:
-    s = b.get("summary") or {}
-    return ", ".join(f"{k} {s[k]}" for k in STATUSES if s.get(k))
-
-
-def matches_for(b: dict, pattern: str) -> list[tuple[str, str | None, dict]]:
+# ------------------------------------------------------------------ cells
+def _matches(b: dict, pattern: str):
     rx = re.compile(pattern)
-    out = []
     for k, e in b["checks"].items():
-        k2 = k.split(".", 1)[1] if "." in k else k
-        m = rx.match(k2)
-        if m:
-            out.append((k2[m.end():], m.groupdict().get("o"), e))
-    return out
+        k2 = k.partition(".")[2]
+        if rx.match(k2):
+            yield k, k2, e
 
 
-def rig_table(bs: list[dict], rows: list[tuple[str, ...]], verdicts: bool = True) -> list[str]:
-    out = ["| check | " + " | ".join(heading(b) for b in bs) + " |", "|---|" + "---|" * len(bs)]
-    if verdicts:
-        out.append("| verdicts | " + " | ".join(counts_line(b) for b in bs) + " |")
-    for label, pat, *stat in rows:
-        cells = [cell(matches_for(b, pat), *stat) for b in bs]
-        if all(c == "—" for c in cells):
-            continue
-        out.append(f"| {label} | " + " | ".join(cells) + " |")
-    return out
+def judge(v: float, tol) -> str:
+    return "PASS" if abs(v) <= tol[0] else "WARN" if abs(v) <= tol[1] else "FAIL"
 
 
-def _osm_cell(b: dict, case: str, slug, stat: str = SIGNED) -> str:
-    if isinstance(slug, tuple) and slug[1].endswith("_frequency"):  # a maximum and where it sits
-        e, ef = (b["checks"].get(f"osm.{case}.{s}") for s in slug)
-        if e is None:
-            return ""
-        return fmt_value(e["value"], "", ABS) + (f" @ {ef['value']:.1f} Hz" if ef and ef["value"] is not None else "")
-    for s in (slug if isinstance(slug, tuple) else (slug,)):
-        e = b["checks"].get(f"osm.{case}.{s}")
-        if e is not None:
-            # the column header carries the unit; a count is shown as one
-            v = fmt_value(e["value"], e.get("unit") if e.get("unit") in COUNT_UNITS else "", stat)
-            return v if e["status"] in ("PASS", "INFO") else f"{v} ({e['status']})"
-    return ""
+def hits(b: dict, source) -> list[Hit]:
+    if isinstance(source, Pair):
+        other = {k2.rpartition("@")[2]: (k, e) for k, k2, e in _matches(b, source.other)
+                 if e["status"] in JUDGED and e["value"] is not None}
+        out = []
+        for k, k2, e in _matches(b, source.ac2):
+            o = other.get(k2.rpartition("@")[2])
+            if o is None or e["status"] not in JUDGED or e["value"] is None or not e.get("tol"):
+                continue
+            v = e["value"] - o[1]["value"]
+            out.append(Hit(b, f"{k} minus {o[0]}", judge(v, e["tol"]), v, e.get("unit") or "", tuple(e["tol"]), True))
+        return out
+    return [Hit(b, k, e["status"], e["value"], e.get("unit") or "", tuple(e["tol"]) if e.get("tol") else None,
+                "spread" not in e and not UNSIGNED.search(k))
+            for k, _, e in _matches(b, source)]
 
 
-def osm_tables(b: dict) -> list[str]:
-    seen = list(dict.fromkeys(k.split(".")[1] for k in b["checks"]))
-    planned = ((b.get("provenance") or {}).get("flags") or {}).get("cases") or []
-    cases = [c for c in planned if c in seen] + [c for c in seen if c not in planned]
-    out = []
-    for title, cols, median in (("Transfer: max over the gated columns; a rig take (not a planned fixture) "
-                                 "shows the median over its columns", OSM_TF_COLS, " (median)"),
-                                ("Delay (samples), noise and spectrum: signed", OSM_OTHER_COLS, ""),
-                                ("Columns behind each comparison, and a rig take's tails", OSM_COVERAGE_COLS, "")):
-        # a rig take has no truth: its ac2 − OSM transfer statistic is a median, so its row says so
-        rows = [[c if c in planned else c + median] + [_osm_cell(b, c, *s) for _, *s in cols] for c in cases]
-        rows = [r for r in rows if any(r[1:])]
-        out += [f"**{title}**", "", "| case | " + " | ".join(h for h, *_ in cols) + " |",
-                "|---|" + "---|" * len(cols)]
-        out += ["| " + " | ".join(r) + " |" for r in rows] + [""]
-    return out
+def _ratio(h: Hit) -> float:
+    return abs(h.value) / h.tol[0] if h.tol and h.tol[0] else 0.0
 
 
-def dut_table(bs: list[dict]) -> list[str]:
-    """Per harmonic order and analyser: the worst signed error over the quasi-static cells, then
-    the verdicts of every tone judged (cells the sweep model cannot follow are reported apart)."""
-    bs = sorted(bs, key=lambda b: -(b.get("level_dbfs") or 0))
-    out = ["| order, analyser | " + " | ".join(heading(b) for b in bs) + " |", "|---|" + "---|" * len(bs),
-           "| verdicts | " + " | ".join(counts_line(b) for b in bs) + " |"]
-    for label, cov, pat in DUT_ROWS:
-        cells = []
-        for b in bs:
-            e = b["checks"].get(f"dut.{cov}")
-            tones = [e2 for _, _, e2 in matches_for(b, pat)]
-            head = fmt_value(e["value"], e.get("unit") or "") if e and e["value"] is not None else "—"
-            cells.append(f"{head} ({counts_text(tones)})" if tones else head)
-        out.append(f"| {label} | " + " | ".join(cells) + " |")
-    return out
+def worst(hs: list[Hit]) -> Hit | None:
+    judged = [h for h in hs if h.status in JUDGED and h.value is not None]
+    return min(judged, key=lambda h: (RANK[h.status], -_ratio(h))) if judged else None
 
 
-# ac2 against REW, quantity by quantity: (label, ac2 vs truth, REW vs truth, ac2 − REW). The truth
-# (steady sines on the same path) only decides which of the two is right where they differ.
-# Where both miss it, they miss it alike only by the analysis's `shared` annotation (same sign,
-# ac2 − REW within their own tolerance, comparable targets); every other double miss is each
-# analyser's own.
-PARITY_ROWS: list[tuple[str, str, str | None, str | None]] = [
-    ("response magnitude", rf"sine_mag\.{_SWEEP}@", r"sine_mag\.REW offline@", rf"mag\.{_SWEEP}\|REW offline\."),
-    ("response phase", rf"sine_phase\.{_SWEEP}@", r"sine_phase\.REW offline@", rf"phase\.{_SWEEP}\|REW offline\."),
-    ("absolute level", rf"spl\.ac2 sweep@", r"spl\.REW \(SPL, cal from ac2\)@", r"level\.ac2_vs_rew_meas_minus_ref$"),
-    ("group delay (±1/12-oct fit)", r"gd\.ac2 ±1/12-oct fit@", r"gd\.REW offline import ±1/12-oct fit@", None),
-    ("harmonics H2–H5", r"(?P<o>h[2-5])\.ac2 sweep [^|@]+@", r"(?P<o>h[2-5])\.REW offline import@",
-     r"(?P<o>h[2-5])\.ac2 sweep [^|@]+\|REW offline import@"),
-    ("LF H2 at 22 Hz (10 Hz sweep)", r"lf_h2\.(?:10|20)Hz-5\.5s$", r"lf_h2\.REW offline import$", None),
-    ("arrival (vs its own capture)", r"delay\.ac2_arrival\.", None, None),
-]
-AMBIENT_PARITY: list[tuple[str, str, str | None, str | None]] = [
-    ("LAeq", r"leq\.A\.ac2$", r"leq\.A\.REW$", r"leq\.A\.ac2_rew$"),
-    # REW's RTA has no filter model here to judge it against: ac2's row is its own verdict
-    ("1/3-oct RTA (vs its own band filters)", r"bands\.ac2 RTA\|own filters$", None, None),
-]
-
-
-def _by_loc(b: dict, pattern: str | None) -> dict[tuple, dict]:
-    if not pattern:
-        return {}
-    # Several ac2 sweeps read the same tone: the location stands on the worst of them.
-    rank = {st: i for i, st in enumerate(STATUSES)}
-    out: dict[tuple, dict] = {}
-    for r, o, e in matches_for(b, pattern):
-        k = (o, r)
-        if k not in out or rank[e["status"]] < rank[out[k]["status"]]:
-            out[k] = e
-    return out
-
-
-def _locs(keys) -> str:
-    return ", ".join(_loc(r, o) or "the check" for o, r in sorted(keys, key=lambda k: (k[0] or "", _num(k[1]))))
-
-
-def _num(s: str) -> float:
-    m = re.match(r"(\d+(?:\.\d+)?)", s or "")
-    return float(m.group(1)) if m else 0.0
-
-
-def parity_cell(b: dict, a_pat: str, r_pat: str | None, c_pat: str | None) -> str:
-    """One quantity on one path: whether ac2 is as good as REW there. ac2 is worse where it misses
-    the truth and REW at the same tone does not; both miss alike only where the miss is annotated
-    shared, and otherwise each misses on its own."""
-    A, R = _by_loc(b, a_pat), _by_loc(b, r_pat)
-    if not A:
-        return "—"
-    judged = {k for k, e in A.items() if e["status"] in ("PASS", "WARN", "FAIL")}
-    worse = {k for k, e in A.items() if e["status"] in MISSES and R.get(k, {}).get("status") == "PASS"}
-    told = ("PASS",) + MISSES
-    alone = {k for k, e in A.items() if e["status"] in MISSES and R.get(k, {}).get("status") not in told}
-    better = {k for k, e in R.items() if e["status"] in MISSES and A.get(k, {}).get("status") == "PASS"}
-    both = {k for k, e in A.items() if e["status"] in MISSES and R.get(k, {}).get("status") in MISSES}
-    alike = {k for k in both if A[k].get("shared") and R[k].get("shared")}
-    unlike = both - alike
-
-    def worst_of(d, keys):
-        return next(st for st in ("FAIL", "WARN") if any(d[k]["status"] == st for k in keys))
-
-    if any(A[k]["status"] == "FAIL" for k in worse):
-        word = "**ac2 worse**"
-    elif any(A[k]["status"] == "FAIL" for k in alone):
-        word = "**ac2 fails** (REW cannot tell)" if R else "**ac2 fails**"
-    elif worse:
-        word = "ac2 slightly worse (WARN)"
-    elif alone:
-        word = "ac2 WARN (REW cannot tell)" if R else "ac2 WARN"
-    elif unlike:
-        word = f"ac2 {worst_of(A, unlike)}, REW {worst_of(R, unlike)}, not alike"
-    elif better:
-        word = "ac2 better"
-    elif not judged:
-        word = "not judged (floor)"
-    elif alike:
-        word = "as REW, both miss alike"
+def fmt_value(v: float, unit: str, signed: bool = True) -> str:
+    if unit == "rel":
+        s = f"{v * 100:+.1f} %"
+    elif unit == "°":
+        s = f"{v:+.2f}°"
+    elif unit == "µs":
+        s = f"{v:+.2f} µs"
+    elif unit == "samples":
+        s = f"{v:+.3f} samples"
+    elif unit == "":
+        s = f"{v:+.4f}"
     else:
-        word = "as REW" if R else "PASS"
-    parts = [f"{len(judged)}/{len(A)} judged"]
-    if worse or alone:
-        parts.append("ac2 alone misses at " + _locs(worse | alone))
-    if better:
-        parts.append("REW misses at " + _locs(better))
-    if unlike:
-        parts.append("both miss, not alike (sign or size), at " + _locs(unlike))
-    if alike:
-        parts.append("ac2 and REW miss the truth alike (ac2 − REW within tolerance) at " + _locs(alike))
-    c = matches_for(b, c_pat) if c_pat else []
-    if c:
-        parts.append("ac2 − REW " + cell(c, ABS if c_pat.startswith(("mag", "phase")) else SIGNED))
-    worst = next((st for st in ("FAIL", "WARN") if any(e["status"] == st for _r, _o, e in c)), None)
-    if worst:
-        word += f", ac2 − REW {worst}"
-    return f"{word}: " + "; ".join(parts)
+        s = f"{v:+.3f} {unit}"
+    if not signed or re.match(r"[+-]0\.0+(?:\D|$)", s):  # no direction, or rounds to zero
+        s = s[1:]
+    return s.replace("-", "−", 1)
 
 
-def parity_table(bs: list[dict], rows) -> list[str]:
-    out = ["| quantity | " + " | ".join(heading(b) for b in bs) + " |", "|---|" + "---|" * len(bs)]
-    for label, a, r, c in rows:
-        cells = [parity_cell(b, a, r, c) for b in bs]
-        if all(x == "—" for x in cells):
-            continue
-        out.append(f"| {label} | " + " | ".join(cells) + " |")
+def cell_text(hs: list[Hit], sourced: bool, run: bool) -> str:
+    if not sourced:
+        return "—"
+    if not run:
+        return "not run"
+    if not hs:
+        return "—"
+    w = worst(hs)
+    return "not judged" if w is None else f"{fmt_value(w.value, w.unit, w.signed)} {WORD[w.status]}"
+
+
+def _g(v: float) -> str:
+    return f"{v:g}"
+
+
+def limits_text(hs: list[Hit]) -> str:
+    """pass / warn limits of the row's judged checks, per unit; the speaker path's apart (a room
+    is noisier than a cable)."""
+    groups: dict[tuple[bool, str], list[tuple[float, float]]] = {}
+    for h in hs:
+        if h.tol and h.status in JUDGED:
+            speaker = h.b["stage"] == "genelec" or ".genelec-rig." in h.key
+            groups.setdefault((speaker, h.unit), []).append(h.tol)
+    parts = []
+    for (speaker, unit), tols in sorted(groups.items()):
+        scale, u = (100, " %") if unit == "rel" else (1, {"°": "°", "": ""}.get(unit, f" {unit}"))
+
+        def rng(vals):
+            lo, hi = min(vals) * scale, max(vals) * scale
+            return _g(lo) if lo == hi else f"{_g(lo)}–{_g(hi)}"
+        parts.append(("speaker " if speaker else "") + f"{rng([t[0] for t in tols])} / {rng([t[1] for t in tols])}{u}")
+    return "; ".join(parts) or "—"
+
+
+def cells(bs: list[dict], row: Row) -> list[tuple[str, Hit | None]]:
+    run = any(b["stage"] in row.stages for b in bs)
+    out = []
+    for sources in row.columns():
+        hs = [h for b in bs for s in sources for h in hits(b, s)]
+        out.append((cell_text(hs, bool(sources), run), worst(hs)))
     return out
 
 
-def render(root: Path = BASELINES) -> str:
-    """The results tables."""
-    items = current(load(Path(root)))
-    out = []
-    by_rig: dict[str, list[dict]] = {}
-    for p, b in items:
-        by_rig.setdefault(p.parent.name, []).append(b)
-    for rig, bs in sorted(by_rig.items(), key=lambda kv: (kv[0] == HOST_DIR, kv[0])):
-        for b in (b for b in bs if b["stage"] == "osm"):
-            pv = b.get("provenance") or {}
-            out += [f"### OSM stage ({pv.get('run')}, "
-                    f"{pv.get('osm_version')}: {counts_line(b)})", ""] + osm_tables(b)
-        duts = [b for b in bs if b["stage"] == "dut"]
-        if duts:
-            out += ["### Digital DUT: harmonics H2–H5 against their exact values (dummy JACK)", ""]
-            out += dut_table(duts) + [""]
-        paths = [b for b in bs if b["stage"] not in ("osm", "ambient", "dut")]
-        if paths:
-            paths.sort(key=lambda b: (b["stage"] != "xone", _ppo(b) != 48, _ppo(b), -(b.get("level_dbfs") or 0)))
-            out += [f"### {rig}: ac2 against REW, per quantity", ""] + parity_table(paths, PARITY_ROWS) + [""]
-            out += [f"### {rig}: electrical (xone) and speaker (genelec) paths, every row", ""]
-            out += rig_table(paths, RIG_ROWS) + [""]
-            out += [f"### {rig}: distortion coverage per harmonic order (steady-sine tones judged)", ""]
-            out += rig_table(paths, HARMONIC_ROWS, verdicts=False) + [""]
-        for b in (b for b in bs if b["stage"] == "ambient"):
-            out += [f"### {rig}: ambient", ""] + parity_table([b], AMBIENT_PARITY) + [""] + rig_table([b], AMBIENT_ROWS) + [""]
+def table(bs: list[dict]) -> str:
+    out = ["| quantity | " + " | ".join(COLUMNS) + " | limits (pass / warn) |",
+           "|---|" + "---|" * (len(COLUMNS) + 1)]
+    for row in ROWS:
+        texts = [t for t, _ in cells(bs, row)]
+        every = [h for b in bs for sources in row.columns() for s in sources for h in hits(b, s)]
+        out.append(f"| {row.label} | " + " | ".join(texts) + f" | {limits_text(every)} |")
     return "\n".join(out)
 
 
-def blocks(root: Path = BASELINES, items=None) -> dict[str, str]:
-    """Each generated part of the document, by name."""
-    from . import comparison_summary as S
-    every = load(Path(root))
-    bs = [b for _, b in current(every)]
-    items = S.MISS_ITEMS if items is None else items
-    return {"build": build_text(every), "summary": "\n".join(S.summary_table(bs, missing_stages(every))), "misses": "\n".join(S.miss_table(bs, items)),
-            "results": render(root)}
+def disparities(bs: list[dict]) -> list[str]:
+    """`<quantity>: <column>` of every warn or FAIL cell."""
+    return [f"{row.label}: {col}" for row in ROWS for col, (_, w) in zip(COLUMNS, cells(bs, row))
+            if w is not None and w.status in ("WARN", "FAIL")]
+
+
+# ------------------------------------------------------------------ the document
+def blocks(root: Path) -> dict[str, str]:
+    items = load(Path(root))
+    return {"build": build_text(items), "table": table([b for _, b in current(items)])}
 
 
 def splice(doc: str, name: str, generated: str) -> str:
@@ -534,33 +320,43 @@ def hand_written(doc: str) -> str:
     return doc
 
 
-def build(doc: str, root: Path = BASELINES, items=None) -> tuple[str, list[str]]:
-    """The document rebuilt, and what no rebuild can fix: quotes whose source failed, numbers
-    without a source, misses no item discusses. `items`: the open items (default
-    `comparison_summary.MISS_ITEMS`, which belong to the committed baselines)."""
-    from . import comparison_quotes as Q
-    from . import comparison_summary as S
-    items = S.MISS_ITEMS if items is None else items
-    for name, text in blocks(root, items).items():
+def sections(doc: str) -> list[str]:
+    """The `###` headings under "Disparities"."""
+    i = doc.find("\n" + DISPARITIES + "\n")
+    if i < 0:
+        return []
+    out = []
+    for line in doc[i + 1:].splitlines()[1:]:
+        if line.startswith("## "):
+            break
+        if line.startswith("### "):
+            out.append(line[4:].strip())
+    return out
+
+
+def build(doc: str, root: Path = BASELINES) -> tuple[str, list[str]]:
+    """The document rebuilt, and what a rebuild cannot fix: quotes whose source failed, numbers
+    without a source, disparities without a section and sections without a disparity."""
+    for name, text in blocks(root).items():
         doc = splice(doc, name, text)
     doc, problems = Q.refresh(doc, Path(root))
     problems += Q.unquoted(hand_written(doc))
-    problems += S.problems([b for _, b in current(load(Path(root)))], doc, items)
+    want, have = disparities([b for _, b in current(load(Path(root)))]), sections(doc)
+    problems += [f"the {d!r} cell is warn or FAIL: it needs a `### {d}` section under {DISPARITIES!r}"
+                 for d in want if d not in have]
+    problems += [f"`### {s}` under {DISPARITIES!r} has no warn or FAIL cell: remove it"
+                 for s in have if s not in want]
     return doc, problems
 
 
-def update(doc_path: Path = DOC, root: Path = BASELINES, check: bool = False, items=None) -> tuple[bool, Path]:
-    """Rewrites the generated parts and the quoted numbers; returns (it was current, path).
-    `check` writes nothing. A problem a rebuild cannot fix is printed and fails the check, and
-    refuses the rewrite."""
+def update(doc_path: Path = DOC, root: Path = BASELINES, check: bool = False) -> tuple[bool, list[str]]:
+    """Rewrites the generated parts and the quoted numbers (unless `check`); returns (the document
+    was current and has no problem, the problems). Problems are printed; the rewrite still
+    happens, so the table follows the baselines while the prose is being brought up to date."""
     doc = Path(doc_path).read_text()
-    new, problems = build(doc, root, items)
+    new, problems = build(doc, root)
     for p in problems:
         print(f"{Path(doc_path).name}: {p}", file=sys.stderr)
-    current_ = new == doc and not problems
-    if not check:
-        if problems:
-            raise ValueError(f"{Path(doc_path).name}: {len(problems)} problem(s), listed above")
-        if new != doc:
-            Path(doc_path).write_text(new)
-    return current_, Path(doc_path)
+    if not check and new != doc:
+        Path(doc_path).write_text(new)
+    return new == doc and not problems, problems

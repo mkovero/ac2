@@ -58,8 +58,8 @@ def main(argv=None) -> int:
     dc.add_argument("sources", type=Path, nargs="+", help="run directories with report/results.json")
     dc.add_argument("--out", type=Path, help="also write the grid (Markdown) here")
 
-    cm = sub.add_parser("comparison", help="rebuild the results tables of comparison.md from the baselines")
-    cm.add_argument("--check", action="store_true", help="write nothing; exit 1 when the tables are stale")
+    cm = sub.add_parser("comparison", help="rebuild comparison.md's table and quoted numbers from the baselines")
+    cm.add_argument("--check", action="store_true", help="write nothing; exit 1 when the document is stale")
     cm.add_argument("--doc", type=Path, help="document (default: the suite's comparison.md)")
     cm.add_argument("--baselines", type=Path, help="baseline directory (default: the suite's baselines/)")
 
@@ -191,17 +191,19 @@ def main(argv=None) -> int:
         return 0
     if a.cmd == "comparison":
         from . import comparison
+        path = a.doc or comparison.DOC
         try:
-            current, path = comparison.update(a.doc or comparison.DOC, a.baselines or comparison.BASELINES, a.check)
-        except ValueError as e:  # a problem a rebuild cannot fix: listed, nothing written
+            current, problems = comparison.update(path, a.baselines or comparison.BASELINES, a.check)
+        except ValueError as e:  # the document has lost its marker comments: nothing written
             print(f"refused: {e}", file=sys.stderr)
             return 1
         if a.check:
             print(f"{path}: " + ("current" if current else "stale, or the problems listed; "
                                  "fix those, then run `python -m crosscheck comparison`"))
             return 0 if current else 1
-        print(f"{path}: " + ("unchanged" if current else "tables rebuilt"))
-        return 0
+        print(f"{path}: " + ("rebuilt; the problems listed need the prose" if problems else
+                             "unchanged" if current else "rebuilt"))
+        return 1 if problems else 0
     from . import run
     from .levels import PolicyError
     try:

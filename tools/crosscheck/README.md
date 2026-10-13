@@ -3,14 +3,14 @@
 The rig stages run on demand; CI runs the host stage on a dummy server ("CI and releases"). It measures the same paths with ac2, with REW (offline
 import of a recording), with steady sines analysed in numpy, and from the raw recordings
 themselves, and compares the numbers against the tolerances in `tolerances.toml`. What the
-committed results show (a summary per quantity, the evidence tables, definitions and open
-items): [comparison.md](comparison.md).
+committed results show (one table of ac2, REW and OSM against truth and each other, and the
+disparities): [comparison.md](comparison.md).
 
 ```
 crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison})
 rigs/            pupu.toml: ports, roles, paths, levels, stage settings; host.toml: the digital DUT on a dummy JACK server
-comparison.md    ac2 against truth, REW and OSM: summary, results, definitions, open items
-reports/         repeated takes, coherence study, DUT coverage (cited from comparison.md)
+comparison.md    ac2 vs REW vs OSM against truth: one table, then the disparities
+reports/         repeated takes, coherence study, DUT coverage
 osm.toml         the OSM stage: harness and ac2 binaries, matched settings, cases, recordings
 tolerances.toml  PASS / WARN limits for every comparison, compare steps
 baselines/       reviewed results per rig, stage and level (<rig>/<stage>-<level>dbfs.json; host/osm.json)
@@ -391,13 +391,13 @@ against the sine.
   are understood, run `baseline` on it (it prints what changed and refuses a run with FAILs
   unless `--force`, which is for a FAIL that is a known, documented gap) and commit the
   files with the ac2 build hash in the message. Then run `python -m crosscheck comparison`:
-  it rebuilds the summary, the miss list and the results tables of `comparison.md` from the
-  baselines on one build (that of the newest rig baseline; a stage with none on it is listed
-  as not run on this build, so re-run the host stages on a new rig build), and rewrites each number quoted in its prose from the baseline, report or
-  tolerance it names. `--check` (and a test) fails while any is stale, when the prose holds a
-  measured number or build hash with no source, and when a WARN or FAIL has no open item in
-  `comparison_summary.MISS_ITEMS` or an item has no miss left: a new miss needs its item and
-  section, a cleared one closes its item.
+  it rebuilds the table of `comparison.md` from the baselines on one build (that of the
+  newest rig baseline; a stage with none on it reads "not run", so re-run the host stages on a
+  new rig build), and rewrites each number quoted in its prose from the baseline or tolerance
+  it names (`crosscheck/comparison_quotes.py`). It lists, and `--check` (and a test) fails on: a
+  stale table or number, a measured number or build hash in the prose with no source, a warn
+  or FAIL cell with no `### <quantity>: <column>` section under "Disparities", and such a
+  section whose cell no longer warns or fails.
 
 ## Reproducing the results
 
@@ -578,7 +578,7 @@ noted and skipped.
 61672: rectangular Fast/Slow, and Leq sampled once a second in the UI. Display smoothing and
 OSM's LTW mode are also left out.
 
-**Results**: the OSM tables in [comparison.md](comparison.md), rebuilt from
+**Results**: the OSM columns of [comparison.md](comparison.md), rebuilt from
 `baselines/host/osm.json`.
 
 Context from the uncompensated runs (INFO, 4d85f50):
