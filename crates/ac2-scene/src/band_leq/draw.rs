@@ -356,16 +356,9 @@ fn draw_window(
             label_fs,
             if worst { theme.text } else { theme.axis_text },
         ));
-        let under = match b.state {
-            TileState::Over => Some(
-                b.recover_s
-                    .map_or_else(|| "OVER".to_owned(), crate::leq::time_to),
-            ),
-            _ => b.allowed_db.map(|a| format!("≤ {}", format::level(a))),
-        };
-        if let Some(u) = under {
+        if let Some(u) = &b.under {
             c.overlay.labels.push(label(
-                u,
+                u.clone(),
                 [x + cw / 2.0, area.bottom() + 4.0 + label_fs * 1.3],
                 anchor(HAlign::Center, VAlign::Top),
                 sfs.min(cw * 0.22).max(READABLE),

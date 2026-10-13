@@ -641,11 +641,33 @@ pub enum LeqStyle {
     Tiles,
 }
 
-/// The Leq view's layout: the windows' style and whether the history strip is under them.
+/// What the Leq views write beside their colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LeqStatusText {
+    /// The state words (`OK`, `NEAR`, `OVER`), what to stay under (`stay ≤ 101.5 dB`) and
+    /// the limit (`limit 99.0 dB`), besides the colours.
+    #[default]
+    WordsAndLimits,
+    /// The colours carry the state alone: read live from a distance, the bar's colour and
+    /// its limit line say it. Every other word (on course, cooling down, not calibrated,
+    /// the values and window names) stays.
+    ColoursOnly,
+}
+
+impl LeqStatusText {
+    /// The state words and the limit texts are written.
+    pub fn words(self) -> bool {
+        self == LeqStatusText::WordsAndLimits
+    }
+}
+
+/// The Leq view's layout: the windows' style, whether the history strip is under them, and
+/// whether the state is written out or left to the colours.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct LeqLayout {
     pub style: LeqStyle,
     pub history: bool,
+    pub status: LeqStatusText,
 }
 
 /// What the SPL pane shows.

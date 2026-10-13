@@ -296,6 +296,7 @@ commands! {
     SplShowBands => "spl_show_bands", "SPL pane: the band Leq bars (20 Hz … 10 kHz)", [Spl];
     SplLeqStyle => "spl_leq_style", "SPL Leq windows: columns / tiles", [Spl];
     SplLeqHistory => "spl_leq_history", "SPL Leq windows: history strip on / off", [Spl];
+    SplLeqStatusText => "spl_leq_status_text", "SPL Leq status text: words and limits / colours only", [Spl];
     SplNewLog => "spl_new_log", "Start a new SPL log…", [Spl];
     SplTimeWeighting => "spl_time_weighting", "SPL meter: time weighting Fast → Slow → Impulse", [Spl];
     SplWeighting => "spl_weighting", "SPL meter: frequency weighting A → C → Z", [Spl];

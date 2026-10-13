@@ -456,6 +456,28 @@ fn leq_tiles_from_an_empty_daemon() {
         }
     };
     snapshot_when(&mut h, "leq_columns_over", pin, first_is(true));
+    // Colours only (Settings › SPL / Leq, the palette): no OK / NEAR / OVER, stay or limit
+    // text; the colours and limit lines say it. Then back to the words.
+    let status = |s| {
+        move |a: &ac2_ui::App| a.state.view.spl.layout.status == s && a.state.prefs.leq.status == s
+    };
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::SplLeqStatusText,
+    ));
+    step_until(
+        &mut h,
+        "colours only",
+        status(ac2_scene::view::LeqStatusText::ColoursOnly),
+    );
+    snapshot_when(&mut h, "leq_columns_colours_only", pin, first_is(true));
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::SplLeqStatusText,
+    ));
+    step_until(
+        &mut h,
+        "words and limits",
+        status(ac2_scene::view::LeqStatusText::WordsAndLimits),
+    );
     // Tiles, and the history strip under them (Settings › Display, the palette).
     h.state_mut().dispatch(ac2_ui::state::Msg::Command(
         ac2_ui::keys::CommandId::SplLeqStyle,
@@ -468,6 +490,7 @@ fn leq_tiles_from_an_empty_daemon() {
             == ac2_scene::view::LeqLayout {
                 style: ac2_scene::view::LeqStyle::Tiles,
                 history: true,
+                ..Default::default()
             }
     });
     snapshot_when(&mut h, "leq_tiles_over", pin, first_is(true));

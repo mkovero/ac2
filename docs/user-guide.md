@@ -1823,6 +1823,10 @@ the time before.
 - Settings › Display › **Leq bars**: each column (and band bar) glides to a new reading over
   0.3 s; the number, colours and limit lines change at once. "jump to each new reading"
   turns it off.
+- Settings › SPL / Leq (**Shift+L**) › **Status text** (palette *SPL Leq status text: words
+  and limits / colours only*): **colours only** drops OK / NEAR / OVER, "stay ≤ … dB" and
+  "limit … dB" from every Leq view (columns, tiles, meter + Leq, band bars), leaving the
+  colours and limit lines to say it; on course, cooling down and not calibrated stay.
 - **W**, then **W** or **F**: the **stage view**, nothing but the columns (in meter + Leq,
   the number above them). The grey caption shows there only with the history strip on, or
   with STALE.
@@ -1848,7 +1852,9 @@ and limits stay. It asks first, naming the run that ends. The ended log can be e
 **Shift+L** (palette *Leq windows and limits…*) opens Settings › SPL / Leq: window lengths
 and weightings (←/→), limits and warn margins typed in dB (empty: no limit), a **preset**
 row and the headroom horizon, and under the windows the **LCpeak** and **LAFmax** limits and
-the **position correction**.
+the **position correction**; after the band meter, last, this app's **Status text** (words
+and limits, or colours only: changed at once with ←/→, remembered in `ui.toml`, not sent to
+the meter).
 
 | Key | Does |
 |---|---|
@@ -1930,7 +1936,7 @@ bedroom"; "receiving room" until then).
 
 #### Turning it on
 
-**Shift+L**, ↑ from the preset row to the **Band meter** rows:
+**Shift+L**, ↑ from the preset row past the status text to the **Band meter** rows:
 
 - ←/→ picks off, **on** or a preset: **Finland STM 545/2015, low frequencies** (eleven LZeq
   60 min windows 20 … 200 Hz with the table's limits, predicted LAeq ≤ 25 dB at night) or
@@ -2444,6 +2450,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | SPL pane: the band Leq bars (20 Hz … 10 kHz) | `spl_show_bands` |
 | SPL Leq windows: columns / tiles | `spl_leq_style` |
 | SPL Leq windows: history strip on / off | `spl_leq_history` |
+| SPL Leq status text: words and limits / colours only | `spl_leq_status_text` |
 | Distortion in dB re fundamental / percent | `distortion_unit` |
 
 #### Key hint lines (Settings › Display › Key hints)

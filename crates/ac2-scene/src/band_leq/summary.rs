@@ -3,8 +3,9 @@
 
 use super::*;
 
-/// The predicted level at the transfer's place.
-pub fn predicted_text(p: &PredictedLeq, place: &str) -> PredictedText {
+/// The predicted level at the transfer's place; with colours only (`status`) without its
+/// limit and state word, which the line's colour carries.
+pub fn predicted_text(p: &PredictedLeq, place: &str, status: LeqStatusText) -> PredictedText {
     let mut parts = vec![format!(
         "predicted LAeq {} in {place} {}",
         length(p.duration.0),
@@ -15,11 +16,12 @@ pub fn predicted_text(p: &PredictedLeq, place: &str) -> PredictedText {
         parts.push(format!("at most {} dB", format::level(p.at_most)));
     }
     match p.limit {
+        Some(_) if !status.words() => {}
         Some(l) => parts.push(format!("limit {} dB", format::level(l.0))),
         None => parts.push("no limit now".to_owned()),
     }
     let state = TileState::from(p.judgement);
-    if let Some(s) = state_text(state, false) {
+    if let Some(s) = state_text(state, false, status) {
         parts.push(s);
     }
     PredictedText {

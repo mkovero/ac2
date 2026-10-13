@@ -4,6 +4,7 @@ use ac2_proto::model::CalStatus;
 use ac2_proto::units::{Db, DbSpl, MeasId, Seconds, WallNs};
 
 mod caption;
+mod colours;
 mod columns;
 mod tiles;
 

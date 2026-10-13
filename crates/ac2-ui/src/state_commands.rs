@@ -642,6 +642,7 @@ impl AppState {
             | C::SplShowBands
             | C::SplLeqStyle
             | C::SplLeqHistory
+            | C::SplLeqStatusText
             | C::SplNewLog
             | C::SplTimeWeighting
             | C::SplWeighting

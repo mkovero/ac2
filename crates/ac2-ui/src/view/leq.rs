@@ -1,12 +1,17 @@
 //! The Leq windows dialog: the preset and horizon on top, one row per window (length and
 //! weighting by name, limit and warn margin typed, − to remove it) under a heading whose +
-//! adds one, the band windows likewise (one band each; "+ range…" adds one per band); keys
-//! drive it, the mouse can too.
+//! adds one, the band windows likewise (one band each; "+ range…" adds one per band), last
+//! the app's status text choice; keys drive it, the mouse can too.
 
 use eframe::egui::{self, RichText};
 
 use crate::app::App;
-use crate::leq_dialog::{BandCol, BandField, BandFocus, Col, Extra, Focus, LeqDialog, RangeCol};
+use ac2_scene::view::LeqStatusText;
+
+use crate::leq_dialog::{
+    BandCol, BandField, BandFocus, Col, Extra, Focus, LeqDialog, RangeCol, STATUS_TEXT_NOTE,
+    STATUS_TEXT_TITLE, status_text_choice,
+};
 use crate::state::{LeqMsg, Msg, Overlay};
 use crate::theme::Chrome;
 
@@ -131,8 +136,14 @@ fn sized_text_cell(
     }
 }
 
-/// The SPL / Leq page: the Leq windows and limits of the SPL pane's meter.
-pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<LeqMsg> {
+/// The SPL / Leq page: the Leq windows and limits of the SPL pane's meter, and how this
+/// app's Leq views write the state (`status`).
+pub(super) fn leq_page(
+    ui: &mut egui::Ui,
+    d: &LeqDialog,
+    status: LeqStatusText,
+    ch: &Chrome,
+) -> Option<LeqMsg> {
     let mut msg = None;
     ui.set_max_width(760.0);
     ui.label(
@@ -283,6 +294,29 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
     ui.add_space(10.0);
     ui.label(RichText::new("Band Leq (1/3-octave bands against per-band limits)").strong());
     band_section(ui, d, &mut msg, ch);
+    ui.add_space(10.0);
+    ui.label(RichText::new("On this app's Leq views").strong());
+    egui::Grid::new("ac2-leq-display")
+        .num_columns(2)
+        .spacing(egui::vec2(12.0, 6.0))
+        .show(ui, |ui| {
+            let f = d.focus == Focus::StatusText;
+            ui.label(RichText::new(STATUS_TEXT_TITLE).color(if f { ch.text } else { ch.dim }));
+            ui.horizontal(|ui| {
+                choice(
+                    ui,
+                    status_text_choice(status).to_owned(),
+                    f,
+                    Focus::StatusText,
+                    &mut msg,
+                    ch,
+                );
+            });
+            ui.end_row();
+            ui.label("");
+            ui.add(egui::Label::new(RichText::new(STATUS_TEXT_NOTE).small().color(ch.dim)).wrap());
+            ui.end_row();
+        });
     if let Some(e) = &d.error {
         ui.add_space(4.0);
         ui.label(RichText::new(e).color(ch.fault));

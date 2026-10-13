@@ -9,6 +9,7 @@ use ac2_proto::units::{Db, DbSpl, Hz, MeasId, Seconds, WallNs};
 use super::*;
 use crate::banner::Status;
 use crate::theme::Theme;
+use crate::view::LeqStatusText;
 
 fn flags(j: LeqJudgement, on_course: bool) -> LeqFlags {
     let f = match j {
@@ -152,7 +153,7 @@ fn frame() -> BandLeqFrame {
 
 #[test]
 fn a_band_over_is_named_with_its_window_and_how_long_to_back_off() {
-    let t = band_leq_text(&cfg(), &frame());
+    let t = band_leq_text(&cfg(), &frame(), LeqStatusText::WordsAndLimits);
     assert_eq!(t.rows.len(), 2);
     let w = &t.rows[0];
     assert_eq!(w.bars.len(), 11);
@@ -193,7 +194,7 @@ fn a_band_over_is_named_with_its_window_and_how_long_to_back_off() {
 
 #[test]
 fn a_second_window_has_its_own_weighting_caption_and_judgement() {
-    let t = band_leq_text(&cfg(), &frame());
+    let t = band_leq_text(&cfg(), &frame(), LeqStatusText::WordsAndLimits);
     let w = &t.rows[1];
     assert_eq!(w.name, "LAeq 15 min");
     // One limit day and night: no period; filling half way.
@@ -218,7 +219,7 @@ fn the_headline_follows_the_worst_window() {
     f.flags[k] = flags(LeqJudgement::Over, false);
     f.leq[k] = 91.0;
     f.recover[k] = 90.0;
-    let t = band_leq_text(&cfg(), &f);
+    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
     assert_eq!(t.worst, Some((1, 5)));
     assert_eq!(
         t.headline,
@@ -228,7 +229,7 @@ fn the_headline_follows_the_worst_window() {
     f.flags[k] = flags(LeqJudgement::Ok, false);
     f.leq[k] = 62.0;
     f.recover[k] = f32::NAN;
-    let t = band_leq_text(&cfg(), &f);
+    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
     assert_eq!(t.worst, Some((0, 4)));
     assert_eq!(
         t.headline,
@@ -240,7 +241,7 @@ fn the_headline_follows_the_worst_window() {
 
 #[test]
 fn near_on_course_ok_and_unlimited_bands() {
-    let t = band_leq_text(&cfg(), &frame());
+    let t = band_leq_text(&cfg(), &frame(), LeqStatusText::WordsAndLimits);
     let w = &t.rows[0];
     let near = &w.bars[4];
     assert_eq!(near.state_text.as_deref(), Some("ON COURSE"));
@@ -265,7 +266,7 @@ fn without_a_transfer_the_limits_are_judged_at_the_mic_and_nothing_asks_for_one(
     let mut f = frame();
     f.meta.limits_from = BandLimitPlace::AtMic;
     f.meta.predicted = None;
-    let t = band_leq_text(&c, &f);
+    let t = band_leq_text(&c, &f, LeqStatusText::WordsAndLimits);
     assert_eq!(t.limits_from, None);
     assert_eq!(t.predicted, None);
     assert!(t.headline.starts_with("63 Hz band LZeq 60 min 3.2 dB over"));
@@ -276,7 +277,9 @@ fn without_a_transfer_the_limits_are_judged_at_the_mic_and_nothing_asks_for_one(
         ..transfer("receiving room")
     });
     assert_eq!(
-        band_leq_text(&c, &f).limits_from.as_deref(),
+        band_leq_text(&c, &f, LeqStatusText::WordsAndLimits)
+            .limits_from
+            .as_deref(),
         Some(
             "limits moved from receiving room through an estimated band transfer (typed, not \
              measured)"
@@ -294,7 +297,7 @@ fn filling_period_change_correction_and_offline() {
         w.period_after_horizon = BandPeriod::Night;
     }
     f.meta.correction = Db(8.0);
-    let t = band_leq_text(&cfg(), &f);
+    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
     let w = &t.rows[0];
     assert_eq!(
         w.caption(),
@@ -311,7 +314,9 @@ fn filling_period_change_correction_and_offline() {
         w.period_after_horizon = BandPeriod::Day;
     }
     assert_eq!(
-        band_leq_text(&cfg(), &f).rows[0].period.as_deref(),
+        band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits).rows[0]
+            .period
+            .as_deref(),
         Some("night limits (22–07) · headroom for the day limits")
     );
 }
@@ -334,7 +339,7 @@ fn uncalibrated_bands_are_dbfs_and_not_judged() {
         limit: Some(DbSpl(25.0)),
         judgement: LeqJudgement::NotCalibrated,
     });
-    let t = band_leq_text(&cfg(), &f);
+    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
     assert_eq!(
         t.headline,
         "not calibrated: band levels in dBFS, limits not judged"
@@ -355,7 +360,7 @@ fn uncalibrated_bands_are_dbfs_and_not_judged() {
 fn nothing_measured_no_band_limits_and_no_windows() {
     let mut f = frame();
     f.leq.iter_mut().for_each(|l| *l = f32::NAN);
-    let t = band_leq_text(&cfg(), &f);
+    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
     assert_eq!(t.headline, "waiting for the first second");
     assert_eq!(t.rows[0].bars[0].value, "—");
     let mut f = frame();
@@ -370,7 +375,7 @@ fn nothing_measured_no_band_limits_and_no_windows() {
         limit: None,
         judgement: LeqJudgement::NoLimit,
     });
-    let t = band_leq_text(&cfg(), &f);
+    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
     assert_eq!(t.headline, "no band limits");
     assert_eq!(
         t.predicted.expect("predicted").line,
@@ -378,10 +383,13 @@ fn nothing_measured_no_band_limits_and_no_windows() {
     );
     f.meta.windows.clear();
     f.leq.clear();
-    let t = band_leq_text(&cfg(), &f);
+    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
     assert!(t.rows.is_empty());
     assert_eq!(t.bands, "no bands");
-    assert_eq!(band_leq_text(&cfg(), &f).headline, "no band windows");
+    assert_eq!(
+        band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits).headline,
+        "no band windows"
+    );
 }
 
 #[test]
@@ -452,7 +460,7 @@ fn view(c: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqView {
     BandLeqView {
         meter: "FOH SPL".into(),
         cal: "M30 · calibrated".into(),
-        text: band_leq_text(c, f),
+        text: band_leq_text(c, f, LeqStatusText::WordsAndLimits),
         stale: None,
     }
 }
@@ -631,7 +639,7 @@ fn a_single_band_window_is_one_bar_named_by_its_band() {
     f.allowed = vec![f32::NAN];
     f.recover = vec![f32::NAN];
     f.flags = vec![flags(LeqJudgement::Ok, false)];
-    let t = band_leq_text(&c, &f);
+    let t = band_leq_text(&c, &f, LeqStatusText::WordsAndLimits);
     assert_eq!(t.bands, "20 Hz");
     assert_eq!(t.rows.len(), 1);
     let w = &t.rows[0];
@@ -664,7 +672,7 @@ fn a_single_band_window_is_one_bar_named_by_its_band() {
 /// another weighting or another way of judging day and night is a row of its own.
 #[test]
 fn windows_are_grouped_by_length_and_weighting_low_band_to_high() {
-    let t = band_leq_text(&cfg(), &frame());
+    let t = band_leq_text(&cfg(), &frame(), LeqStatusText::WordsAndLimits);
     assert_eq!(t.rows.len(), 2);
     for r in &t.rows {
         let hz: Vec<f64> = r.bars.iter().map(|b| b.nominal_hz).collect();
@@ -676,7 +684,7 @@ fn windows_are_grouped_by_length_and_weighting_low_band_to_high() {
     // 63 Hz LZeq 60 min without a day offset: one limit day and night, its own row.
     let mut c = cfg();
     c.windows[5].day_offset = None;
-    let t = band_leq_text(&c, &frame());
+    let t = band_leq_text(&c, &frame(), LeqStatusText::WordsAndLimits);
     let names: Vec<String> = t.rows.iter().map(BandRowText::caption).collect();
     assert_eq!(
         names,
@@ -724,4 +732,99 @@ fn an_easing_bar_moves_only_its_length() {
     assert!(a.iter().zip(&b).all(|(a, b)| b.h <= a.h));
     assert!(a.iter().zip(&b).any(|(a, b)| b.h < a.h));
     assert!(a.iter().zip(&b).all(|(a, b)| a.bottom() == b.bottom()));
+}
+
+/// Colours only: the state words, what to stay under and the limits are not written —
+/// not on the bars, under their labels, in the headline or on the predicted line; the
+/// colours, the limit marks, the values and every other word stay.
+#[test]
+fn colours_only_leaves_the_state_to_the_colours() {
+    let words = band_leq_text(&cfg(), &frame(), LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &frame(), LeqStatusText::ColoursOnly);
+    let w = &t.rows[0];
+    let over = &w.bars[5];
+    assert_eq!(over.state, TileState::Over);
+    assert_eq!(
+        (over.state_text.as_ref(), over.limit.as_ref()),
+        (None, None)
+    );
+    assert_eq!(over.limit_db, Some(80.0));
+    assert_eq!(over.recover.as_deref(), Some("cooling down in 6 min 52 s"));
+    // Over with a cooling-down time: the time stays under its label.
+    assert_eq!(over.under, words.rows[0].bars[5].under);
+    assert!(over.under.as_deref().is_some_and(|u| u.contains("min")));
+    // On course says what no colour does.
+    let near = &w.bars[4];
+    assert_eq!(near.state_text.as_deref(), Some("ON COURSE"));
+    assert_eq!((near.headroom.as_ref(), near.under.as_ref()), (None, None));
+    assert_eq!(near.allowed_db, words.rows[0].bars[4].allowed_db);
+    assert_eq!(w.bars[0].state_text, None);
+    assert_eq!(t.rows[1].bars[5].state_text, None);
+    for (a, b) in words.rows.iter().zip(&t.rows) {
+        assert_eq!(a.caption(), b.caption());
+        for (x, y) in a.bars.iter().zip(&b.bars) {
+            assert_eq!(
+                (x.state, &x.value, &x.label, x.limit_db, x.over_db),
+                (y.state, &y.value, &y.label, y.limit_db, y.over_db)
+            );
+        }
+    }
+    assert_eq!(t.headline, words.headline);
+    assert_eq!(t.headline_state, words.headline_state);
+    let p = t.predicted.as_ref().expect("predicted");
+    assert_eq!(
+        p.line,
+        "predicted LAeq 60 min in flat 4 23.5 dB · at most 27.3 dB"
+    );
+    assert_eq!(p.state, words.predicted.as_ref().expect("predicted").state);
+
+    // The headline keeps what is over or under and cooling down, not what to stay under.
+    let mut f = frame();
+    let k = col(0, 5);
+    f.flags[k] = flags(LeqJudgement::Ok, false);
+    f.leq[k] = 70.0;
+    f.recover[k] = f32::NAN;
+    let t = band_leq_text(&cfg(), &f, LeqStatusText::ColoursOnly);
+    assert_eq!(
+        t.headline,
+        "50 Hz band LZeq 60 min 1.5 dB under its limit · on course to go over"
+    );
+    assert_eq!(t.headline_state, TileState::Near);
+}
+
+/// The band view in colours only draws the same colours and marks, without the words.
+#[test]
+fn colours_only_band_scene() {
+    let at = |status| {
+        let v = BandLeqView {
+            text: band_leq_text(&cfg(), &frame(), status),
+            ..view(&cfg(), &frame())
+        };
+        band_leq_scene(&v, &Status::default(), &Theme::dark(), SIZE)
+    };
+    let words = at(LeqStatusText::WordsAndLimits);
+    let colours = at(LeqStatusText::ColoursOnly);
+    let said = |t: &String| {
+        matches!(t.as_str(), "OK" | "NEAR" | "OVER")
+            || t.contains("stay ≤ ")
+            || t.starts_with("≤ ")
+            || t.match_indices("limit ")
+                .any(|(i, m)| t[i + m.len()..].starts_with(|c: char| c.is_ascii_digit()))
+    };
+    let a = texts(&words);
+    let b = texts(&colours);
+    assert!(a.iter().any(said), "{a:?}");
+    assert!(!b.iter().any(said), "{b:?}");
+    for t in a.iter().filter(|t| !said(t)) {
+        assert!(b.contains(t), "{t} kept in {b:?}");
+    }
+    // Every fill and mark where it was, in its colour.
+    for l in 0..words.scene.layers.len() {
+        assert_eq!(words.scene.layers[l].rects, colours.scene.layers[l].rects);
+        assert_eq!(
+            words.scene.layers[l].polylines,
+            colours.scene.layers[l].polylines
+        );
+    }
+    assert_eq!(words.columns, colours.columns);
 }

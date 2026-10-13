@@ -33,7 +33,8 @@ fn leq_layout_round_trips() {
         p.leq,
         LeqLayout {
             style: LeqStyle::Columns,
-            history: false
+            history: false,
+            ..Default::default()
         }
     );
     // The default is not written.
@@ -41,6 +42,7 @@ fn leq_layout_round_trips() {
     p.leq = LeqLayout {
         style: LeqStyle::Tiles,
         history: true,
+        ..Default::default()
     };
     let text = p.to_toml();
     assert!(text.contains("[leq]"), "{text}");
@@ -51,6 +53,30 @@ fn leq_layout_round_trips() {
     assert_eq!(q.leq.style, LeqStyle::Columns);
     assert!(q.leq.history);
     assert!(UiPrefs::from_toml("[leq]\nstyle = \"bars\"\n").is_err());
+}
+
+/// The Leq views' status text: `status_text = "colours_only"` under `[leq]`; the default
+/// (words and limits) is not written, and a file without the key (the Pi kiosk's) keeps it.
+#[test]
+fn leq_status_text_round_trips() {
+    let mut p = UiPrefs::default();
+    assert_eq!(p.leq.status, LeqStatusText::WordsAndLimits);
+    p.leq.status = LeqStatusText::ColoursOnly;
+    let text = p.to_toml();
+    assert!(text.contains("[leq]"), "{text}");
+    assert!(text.contains("status_text = \"colours_only\""), "{text}");
+    assert_eq!(UiPrefs::from_toml(&text), Ok(p.clone()));
+    p.leq.status = LeqStatusText::WordsAndLimits;
+    p.leq.history = true;
+    let text = p.to_toml();
+    assert!(!text.contains("status_text"), "{text}");
+    assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+    let q = UiPrefs::from_toml("[leq]\nstyle = \"tiles\"\nstatus_text = \"words_and_limits\"\n")
+        .expect("parse");
+    assert_eq!(q.leq.status, LeqStatusText::WordsAndLimits);
+    let q = UiPrefs::from_toml("[leq]\nstyle = \"columns\"\nhistory = true\n").expect("parse");
+    assert_eq!(q.leq.status, LeqStatusText::WordsAndLimits);
+    assert!(UiPrefs::from_toml("[leq]\nstyle = \"columns\"\nstatus_text = \"none\"\n").is_err());
 }
 
 #[test]

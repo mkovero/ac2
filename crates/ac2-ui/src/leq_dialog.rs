@@ -2,17 +2,20 @@
 //! its length and weighting picked from named choices, its limit and warn margin typed in
 //! dB — a preset row that replaces the windows (and peak limits) with a published rule's,
 //! the headroom horizon, and under the windows the LCpeak and LAFmax limits and the
-//! measuring-position correction, typed; last the band meter ([`bands`]): off, on or a
+//! measuring-position correction, typed; then the band meter ([`bands`]): off, on or a
 //! rule's preset, its windows (one band each, a row like a Leq window's; a range row adds
-//! one per band), the §13 corrections, the transfer as it stands.
+//! one per band), the §13 corrections, the transfer as it stands; last how this app writes
+//! the state on the Leq views ([`status_text_choice`]), not part of the meter.
 //! Pure data; the reducer routes keys here and the view draws it. Enter sends the meter's
-//! configuration with the new windows (`meas.update`, applied in place by the daemon).
+//! configuration with the new windows (`meas.update`, applied in place by the daemon); the
+//! status text row changes the app's display at once and is not sent.
 
 use ac2_proto::model::{
     LeqConfig, LeqPreset, LeqWindow, MeasConfig, MeasKind, Measurement, PeakLimit, PeakLimits,
     PeakQuantity, PositionCorrection, SplConfig, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, MeasId, Seconds};
+use ac2_scene::view::LeqStatusText;
 
 mod bands;
 mod transfer;
@@ -29,6 +32,32 @@ pub const LENGTHS: [u32; 13] = [
 /// Headroom horizons offered.
 pub const HORIZONS: [u32; 6] = [10, 30, 60, 120, 300, 900];
 const WEIGHTINGS: [Weighting; 3] = [Weighting::A, Weighting::C, Weighting::Z];
+
+/// The status text row's label.
+pub const STATUS_TEXT_TITLE: &str = "Status text";
+
+/// The status text row's choice as shown.
+pub fn status_text_choice(s: LeqStatusText) -> &'static str {
+    match s {
+        LeqStatusText::WordsAndLimits => "words and limits",
+        LeqStatusText::ColoursOnly => "colours only",
+    }
+}
+
+/// The toast of a change of the status text.
+pub fn status_text_toast(s: LeqStatusText) -> String {
+    match s {
+        LeqStatusText::WordsAndLimits => {
+            "Leq status text: words and limits (OK / NEAR / OVER, stay ≤, limit)".to_owned()
+        }
+        LeqStatusText::ColoursOnly => "Leq status text: colours only".to_owned(),
+    }
+}
+
+/// What the status text row does, beside it.
+pub const STATUS_TEXT_NOTE: &str = "colours only: no OK / NEAR / OVER, stay ≤ … dB or limit … dB \
+     on the Leq views — the bar colours and limit lines carry the state; this app's \
+     display, changed at once, not sent to the meter";
 
 /// A column of a window row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,8 +169,10 @@ pub enum Focus {
     Window { row: usize, col: Col },
     /// A setting under the windows.
     Extra(Extra),
-    /// A cell of the band meter's section, last.
+    /// A cell of the band meter's section.
     Band(BandFocus),
+    /// How the Leq views write the state (the app's display), last.
+    StatusText,
 }
 
 /// One window being edited.
@@ -323,8 +354,9 @@ impl LeqDialog {
     }
 
     fn rows_count(&self) -> usize {
-        // Preset, horizon, the windows, the settings under them, the band meter.
-        2 + self.rows.len() + Extra::ALL.len() + self.bands.grid().len()
+        // Preset, horizon, the windows, the settings under them, the band meter, the
+        // status text.
+        2 + self.rows.len() + Extra::ALL.len() + self.bands.grid().len() + 1
     }
 
     /// The band section's row and cell of `b`.
@@ -344,6 +376,7 @@ impl LeqDialog {
             Focus::Window { row, .. } => 2 + row,
             Focus::Extra(e) => 2 + self.rows.len() + e.index(),
             Focus::Band(b) => 2 + self.rows.len() + Extra::ALL.len() + self.band_at(b).0,
+            Focus::StatusText => self.rows_count() - 1,
         }
     }
 
@@ -358,7 +391,7 @@ impl LeqDialog {
             Focus::Window { col, .. } => col.is_text(),
             Focus::Extra(_) => true,
             Focus::Band(b) => b.is_text(),
-            Focus::Preset | Focus::Horizon => false,
+            Focus::Preset | Focus::Horizon | Focus::StatusText => false,
         }
     }
 
@@ -372,7 +405,9 @@ impl LeqDialog {
     /// Row `i`: a window row in column `col`, a band row in its cell `cell` (or its last).
     fn set_row(&mut self, i: usize, col: Col, cell: usize) {
         let n = self.rows.len();
+        let last = self.rows_count() - 1;
         self.focus = match i {
+            r if r >= last => Focus::StatusText,
             0 => Focus::Preset,
             1 => Focus::Horizon,
             r if r < 2 + n => Focus::Window { row: r - 2, col },
@@ -404,7 +439,8 @@ impl LeqDialog {
         let w = 4 * self.rows.len() as i32;
         let x = Extra::ALL.len() as i32;
         let band: Vec<BandFocus> = self.bands.grid().into_iter().flatten().collect();
-        let cells = 2 + w + x + band.len() as i32;
+        // The status text, last.
+        let cells = 2 + w + x + band.len() as i32 + 1;
         let at = match self.focus {
             Focus::Preset => 0,
             Focus::Horizon => 1,
@@ -413,9 +449,11 @@ impl LeqDialog {
             }
             Focus::Extra(e) => 2 + w + e.index() as i32,
             Focus::Band(b) => 2 + w + x + band.iter().position(|c| *c == b).unwrap_or(0) as i32,
+            Focus::StatusText => cells - 1,
         };
         let next = (at + d).rem_euclid(cells);
         self.focus = match next {
+            k if k == cells - 1 => Focus::StatusText,
             0 => Focus::Preset,
             1 => Focus::Horizon,
             k if k < 2 + w => Focus::Window {
@@ -471,7 +509,8 @@ impl LeqDialog {
             }
             Focus::Horizon => self.horizon = step(self.horizon, HORIZONS.len()),
             Focus::Band(b) => self.bands.cycle(b, d),
-            Focus::Extra(_) => return,
+            // The app's display, not the meter's: the reducer changes it.
+            Focus::Extra(_) | Focus::StatusText => return,
             Focus::Window { row, col } => {
                 self.before_preset = None;
                 let Some(r) = self.rows.get_mut(row) else {

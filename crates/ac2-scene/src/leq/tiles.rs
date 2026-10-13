@@ -95,6 +95,20 @@ pub struct LeqTile {
 }
 
 impl LeqTile {
+    /// The state word as written under `status`: with colours only, `OK`, `NEAR` and
+    /// `OVER` are left to the tile's colour; `ON COURSE` and `not calibrated` say what no
+    /// colour does, so they stay.
+    pub fn state_word(&self, status: LeqStatusText) -> Option<&str> {
+        let coloured = match self.state {
+            TileState::Ok | TileState::Over => true,
+            TileState::Near => !self.on_course,
+            TileState::NoLimit | TileState::NotCalibrated => false,
+        };
+        self.state_text
+            .as_deref()
+            .filter(|_| status.words() || !coloured)
+    }
+
     /// The window has not covered its whole length yet.
     pub fn filling(&self) -> bool {
         self.elapsed_s < self.duration_s

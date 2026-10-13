@@ -153,7 +153,8 @@ fn page(
             Page::Calibration => super::cal::cal_page(app, ui, &s.cal, ch),
             Page::Leq => match &s.leq {
                 Some(d) => {
-                    if let Some(m) = super::leq::leq_page(ui, d, ch) {
+                    let status = app.state.view.spl.layout.status;
+                    if let Some(m) = super::leq::leq_page(ui, d, status, ch) {
                         *msg = Some(Msg::Leq(m));
                     }
                 }

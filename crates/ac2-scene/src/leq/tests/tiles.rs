@@ -121,6 +121,7 @@ fn scene_lays_tiles_out_and_colours_them() {
         layout: LeqLayout {
             style: LeqStyle::Tiles,
             history: true,
+            ..Default::default()
         },
         run: run_of(&c, &f),
         stage: false,
@@ -212,6 +213,7 @@ fn scene_lays_tiles_out_and_colours_them() {
         layout: LeqLayout {
             style: LeqStyle::Tiles,
             history: false,
+            ..Default::default()
         },
         ..v.clone()
     };

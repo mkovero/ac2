@@ -80,6 +80,7 @@ fn display_and_recording_texts() {
         leq: LeqLayout {
             style: LeqStyle::Tiles,
             history: false,
+            ..Default::default()
         },
         distortion_unit: DistortionUnit::Percent,
         coherence: CoherencePlacement::OverlayOnMagnitude,

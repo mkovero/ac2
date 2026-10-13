@@ -127,7 +127,7 @@ fn band_view<'a>(
         Freshness::AudioStopped { .. } => Some("AUDIO STOPPED".into()),
         Freshness::Fresh { .. } => None,
     };
-    let mut text = band_leq_text(bands, f);
+    let mut text = band_leq_text(bands, f, st.view.spl.layout.status);
     if let Some((from, since)) = easing_from(st, tf, now)
         && let FrameData::BandLeq(p) = &from.data
     {

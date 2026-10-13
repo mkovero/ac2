@@ -9,7 +9,8 @@ fn columns_are_the_default_and_go_shortest_left() {
         LeqLayout::default(),
         LeqLayout {
             style: LeqStyle::Columns,
-            history: false
+            history: false,
+            ..Default::default()
         }
     );
     let (c, f) = many(5, false, LevelScale::DbSpl);
@@ -299,6 +300,7 @@ fn on_course_while_filling() {
         layout: LeqLayout {
             style: LeqStyle::Tiles,
             history: false,
+            ..Default::default()
         },
         ..columns_view(&c, &f, None)
     };
@@ -523,6 +525,7 @@ fn columns_fit_two_to_eight_windows_without_overlap() {
                             layout: LeqLayout {
                                 style: LeqStyle::Columns,
                                 history,
+                                ..Default::default()
                             },
                             ..columns_view(&c, &f, None)
                         };
@@ -631,6 +634,7 @@ fn columns_keep_banners_and_history_clear() {
         layout: LeqLayout {
             style: LeqStyle::Columns,
             history: true,
+            ..Default::default()
         },
         ..columns_view(&c, &f, Some(&h))
     };

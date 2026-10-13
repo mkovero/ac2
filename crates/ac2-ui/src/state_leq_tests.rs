@@ -192,6 +192,45 @@ fn new_spl_log_asks_first() {
 /// The Leq view starts as columns without the history strip; B switches columns / tiles, H
 /// the strip, each showing the windows on the SPL pane and remembered in the preferences,
 /// which the next start applies. Full screen with the pane maximised is the stage view,
+/// Shift+L's last row, the Leq views' status text: ←/→ (or the mouse on its choice)
+/// changes the app's display at once, toasts it and remembers it; nothing is sent and the
+/// dialog stays open; the palette does the same.
+#[test]
+fn leq_status_text_from_the_dialog() {
+    use crate::leq_dialog::Focus;
+    use ac2_scene::view::LeqStatusText;
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    t.conn(leq_data(1, 100, 80.0, ac2_proto::frame::LeqFlags::NONE));
+    assert_eq!(t.st.view.spl.layout.status, LeqStatusText::WordsAndLimits);
+    t.type_key("Shift+L", "L");
+    // ↑ from the preset row wraps to it, last.
+    t.key("ArrowUp");
+    assert_eq!(t.st.overlay.leq().map(|d| d.focus), Some(Focus::StatusText));
+    let sent = t.key("ArrowRight");
+    assert!(sent.is_empty(), "{sent:?}");
+    assert_eq!(t.st.view.spl.layout.status, LeqStatusText::ColoursOnly);
+    assert_eq!(t.st.prefs.leq, t.st.view.spl.layout);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(t.last_toast(), "Leq status text: colours only");
+    assert!(t.st.overlay.leq().is_some(), "the dialog stays open");
+    // The mouse on its ‹: back to the words.
+    t.st.update(Msg::Leq(LeqMsg::Cycle(Focus::StatusText, -1)), &t.keys);
+    assert_eq!(t.st.view.spl.layout.status, LeqStatusText::WordsAndLimits);
+    assert!(
+        t.last_toast()
+            .starts_with("Leq status text: words and limits")
+    );
+    // ↓ from it wraps to the preset row.
+    t.key("ArrowDown");
+    assert_eq!(t.st.overlay.leq().map(|d| d.focus), Some(Focus::Preset));
+    t.key("Escape");
+    // The palette's command.
+    t.st.update(Msg::Command(CommandId::SplLeqStatusText), &t.keys);
+    assert_eq!(t.st.view.spl.layout.status, LeqStatusText::ColoursOnly);
+    assert_eq!(t.st.prefs.leq.status, LeqStatusText::ColoursOnly);
+}
+
 /// unless a stimulus may be sounding.
 #[test]
 fn leq_layout_keys_and_prefs() {
@@ -203,7 +242,8 @@ fn leq_layout_keys_and_prefs() {
         t.st.view.spl.layout,
         LeqLayout {
             style: LeqStyle::Columns,
-            history: false
+            history: false,
+            ..Default::default()
         }
     );
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::MeterLeq);
@@ -225,7 +265,8 @@ fn leq_layout_keys_and_prefs() {
         t.st.prefs.leq,
         LeqLayout {
             style: LeqStyle::Tiles,
-            history: true
+            history: true,
+            ..Default::default()
         }
     );
     // G still steps the views and leaves the layout alone.
@@ -246,6 +287,7 @@ fn leq_layout_keys_and_prefs() {
         leq: LeqLayout {
             style: LeqStyle::Tiles,
             history: true,
+            ..Default::default()
         },
         ..Default::default()
     };

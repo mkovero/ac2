@@ -25,11 +25,11 @@ fn shown_name<'a>(name: &'a str, shared: Option<&str>) -> &'a str {
         .unwrap_or(name)
 }
 
-/// The small lines at the bottom of a tile: on course first, then the limit, the filling
-/// and the gaps (a peak limit: what its value is).
-pub(super) fn tile_below(t: &LeqTile) -> Vec<String> {
+/// The small lines at the bottom of a tile: on course first, then the limit (not with
+/// colours only), the filling and the gaps (a peak limit: what its value is).
+pub(super) fn tile_below(t: &LeqTile, status: LeqStatusText) -> Vec<String> {
     let mut below: Vec<String> = t.course.iter().cloned().collect();
-    below.extend(t.limit.iter().cloned());
+    below.extend(t.limit.iter().filter(|_| status.words()).cloned());
     below.extend(t.held.iter().cloned());
     match (&t.filling, &t.incomplete) {
         (Some(f), Some(i)) => below.push(format!("{f} · {i}")),
@@ -45,6 +45,7 @@ pub(super) fn tile_below(t: &LeqTile) -> Vec<String> {
 /// the name, the window's value — on stage the instruction is acted on, the value only
 /// explains it, and a meter's number shown above the tiles must stay the big one; below,
 /// the course, limit and progress, in room for `lines_below` of them.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_tile(
     c: &mut Canvas,
     t: &LeqTile,
@@ -52,6 +53,7 @@ pub(super) fn draw_tile(
     stale: bool,
     shared: Option<&str>,
     lines_below: usize,
+    status: LeqStatusText,
     theme: &Theme,
 ) {
     let (bg, fg) = tile_colors(t.state, theme);
@@ -82,16 +84,16 @@ pub(super) fn draw_tile(
         VAlign::Top,
         head,
     );
-    if let Some(s) = &t.state_text {
+    if let Some(s) = t.state_word(status) {
         push(
-            s.clone(),
+            s.to_owned(),
             [r.right() - pad, r.y + pad],
             HAlign::Right,
             VAlign::Top,
             head,
         );
     }
-    let below = tile_below(t);
+    let below = tile_below(t, status);
     let lines = below.len() as f32;
     for (k, text) in below.into_iter().enumerate().rev() {
         let row = lines - 1.0 - k as f32;
@@ -105,7 +107,7 @@ pub(super) fn draw_tile(
     }
     let body_top = r.y + pad + head * 1.3;
     let body_bottom = r.bottom() - pad - lines_below as f32 * small * 1.3;
-    let [_, instruction, _] = columns::detail_lines(t);
+    let [_, instruction, _] = columns::detail_lines(t, status);
     // Every tile shares the shares of its body, so tiles of one grid show their values at
     // one size and place whether or not they have an instruction above them. The
     // instruction stays within [`TILE_INSTRUCTION_EM`] of the header's size and the value

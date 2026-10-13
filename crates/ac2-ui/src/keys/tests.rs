@@ -129,6 +129,8 @@ fn every_command_is_reachable() {
         CommandId::CoherencePlacement,
         CommandId::SplLeqStyle,
         CommandId::SplLeqHistory,
+        // Settings › SPL / Leq (Shift+L) has its row.
+        CommandId::SplLeqStatusText,
         CommandId::DistortionUnit,
     ];
     let m = Keymap::default();

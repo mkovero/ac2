@@ -23,6 +23,7 @@ use crate::format;
 use crate::leq::{TileState, clock, column_colors, length, tile_colors, w_letter};
 use crate::primitives::{Color, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport};
 use crate::theme::Theme;
+use crate::view::LeqStatusText;
 
 mod draw;
 mod summary;
@@ -102,21 +103,26 @@ pub struct BandBar {
     pub leq_db: f64,
     /// The limit at the mic when judged.
     pub limit_db: Option<f64>,
-    /// `limit 42.0 dB`; none without a limit.
+    /// `limit 42.0 dB`; none without a limit, or with colours only.
     pub limit: Option<String>,
     pub state: TileState,
-    /// `OVER`, `NEAR`, `ON COURSE`, `OK`, `not calibrated`; none without a limit.
+    /// `OVER`, `NEAR`, `ON COURSE`, `OK`, `not calibrated`; none without a limit. With
+    /// colours only `OVER`, `NEAR` and `OK` are left to the bar's colour.
     pub state_text: Option<String>,
     pub on_course: bool,
     /// Floored steady level allowed (a ceiling to stay under).
     pub allowed_db: Option<f64>,
-    /// `next 1 min: stay ≤ 41.3 dB`, `until full: stay ≤ 40.2 dB`.
+    /// `next 1 min: stay ≤ 41.3 dB`, `until full: stay ≤ 40.2 dB`; none with colours only.
     pub headroom: Option<String>,
     pub recover_s: Option<f64>,
     /// `cooling down in 6 min 52 s` when it cannot recover within the horizon.
     pub recover: Option<String>,
     /// Leq − limit, dB (positive: over), when judged and measured.
     pub over_db: Option<f64>,
+    /// Under the band's label: the time it cools down in when over (`OVER` when the daemon
+    /// has no time), else the level to stay under (`≤ 41.3`). With colours only the bar's
+    /// colour says over and the level is not written: only a cooling-down time is.
+    pub under: Option<String>,
     /// The bar's length while it eases to `leq_db` ([`crate::bar_ease`]), dB; `None`:
     /// drawn at `leq_db`.
     pub drawn_db: Option<f64>,
@@ -211,8 +217,10 @@ pub struct BandLeqText {
     pub predicted: Option<PredictedText>,
 }
 
-fn state_text(state: TileState, on_course: bool) -> Option<String> {
+fn state_text(state: TileState, on_course: bool, status: LeqStatusText) -> Option<String> {
     match state {
+        TileState::Ok | TileState::Over if !status.words() => None,
+        TileState::Near if !status.words() && !on_course => None,
         TileState::NoLimit => None,
         TileState::NotCalibrated => Some("not calibrated".into()),
         TileState::Ok => Some("OK".into()),
@@ -303,7 +311,7 @@ pub fn group_rows<K: PartialEq>(keys: &[(f64, K)]) -> Vec<Vec<usize>> {
 }
 
 /// One window's bar from its column of a `band_leq` frame.
-fn bar(f: &BandLeqFrame, k: usize) -> BandBar {
+fn bar(f: &BandLeqFrame, k: usize, status: LeqStatusText) -> BandBar {
     let m = &f.meta;
     let st = m.windows[k];
     let duration = st.duration.0;
@@ -321,7 +329,7 @@ fn bar(f: &BandLeqFrame, k: usize) -> BandBar {
     let allowed_db = finite(f.allowed[k])
         .filter(|_| is_judged)
         .map(|a| (a * 10.0 + 1e-6).floor() / 10.0);
-    let headroom = allowed_db.map(|a| {
+    let headroom = allowed_db.filter(|_| status.words()).map(|a| {
         let a = format::level(a);
         if until_full {
             format!("until full: stay ≤ {a} dB")
@@ -348,9 +356,11 @@ fn bar(f: &BandLeqFrame, k: usize) -> BandBar {
         value: format::level(leq),
         leq_db,
         limit_db,
-        limit: limit.map(|l| format!("limit {} dB", format::level(l))),
+        limit: limit
+            .filter(|_| status.words())
+            .map(|l| format!("limit {} dB", format::level(l))),
         state,
-        state_text: state_text(state, on_course),
+        state_text: state_text(state, on_course, status),
         on_course,
         allowed_db,
         headroom,
@@ -359,6 +369,15 @@ fn bar(f: &BandLeqFrame, k: usize) -> BandBar {
         over_db: limit_db
             .filter(|_| leq_db.is_finite())
             .map(|l| rounded(leq_db - l)),
+        under: match state {
+            TileState::Over => match recover_s {
+                Some(r) => Some(crate::leq::time_to(r)),
+                None => status.words().then(|| "OVER".to_owned()),
+            },
+            _ => allowed_db
+                .filter(|_| status.words())
+                .map(|a| format!("≤ {}", format::level(a))),
+        },
         drawn_db: None,
     }
 }
@@ -371,7 +390,12 @@ fn worse(a: &BandBar, b: &BandBar) -> std::cmp::Ordering {
 }
 
 /// One row's text from its windows (frame indices, low band to high).
-fn row_text(cfg: &BandLeqConfig, f: &BandLeqFrame, ws: &[usize]) -> BandRowText {
+fn row_text(
+    cfg: &BandLeqConfig,
+    f: &BandLeqFrame,
+    ws: &[usize],
+    status: LeqStatusText,
+) -> BandRowText {
     let m = &f.meta;
     // One length: the windows fill, and miss audio, together.
     let st = m.windows[ws[0]];
@@ -380,7 +404,7 @@ fn row_text(cfg: &BandLeqConfig, f: &BandLeqFrame, ws: &[usize]) -> BandRowText 
     let filling = elapsed < duration;
     let until_full = filling && duration - elapsed >= m.horizon.0;
     let horizon = length(m.horizon.0);
-    let bars: Vec<BandBar> = ws.iter().map(|&k| bar(f, k)).collect();
+    let bars: Vec<BandBar> = ws.iter().map(|&k| bar(f, k, status)).collect();
     // The period matters only to windows whose limits differ by day and night.
     let day_night = ws.iter().any(|&k| {
         config_of(cfg, f, k).is_some_and(|c| c.limit.is_some() && c.day_offset.is_some())
@@ -420,8 +444,9 @@ fn row_text(cfg: &BandLeqConfig, f: &BandLeqFrame, ws: &[usize]) -> BandRowText 
 }
 
 /// The band view's text from a `band_leq` frame and the configuration it was made under
-/// (its windows' limits and the transfer's place).
-pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqText {
+/// (its windows' limits and the transfer's place), with the state words and limit texts
+/// or with colours only (`status`).
+pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame, status: LeqStatusText) -> BandLeqText {
     let m = &f.meta;
     let unit = match m.scale {
         LevelScale::DbSpl => "dB SPL",
@@ -442,7 +467,7 @@ pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqText {
         .collect();
     let rows: Vec<BandRowText> = group_rows(&keys)
         .iter()
-        .map(|ws| row_text(cfg, f, ws))
+        .map(|ws| row_text(cfg, f, ws, status))
         .collect();
     // The headline follows the band nearest to (or over) its limit; equal: the earlier
     // row, as the operator ordered them, then the lower band.
@@ -471,7 +496,7 @@ pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqText {
         limits_from: limits_from_text(m.limits_from, place),
         correction: (m.correction.0 != 0.0)
             .then(|| format!("§13 correction {} dB", format::signed(m.correction.0, 0))),
-        predicted: m.predicted.map(|p| predicted_text(&p, place)),
+        predicted: m.predicted.map(|p| predicted_text(&p, place, status)),
     }
 }
 
