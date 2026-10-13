@@ -3,6 +3,7 @@
 Items moved here from `backlog.md` when they land, newest first, one line each with the
 commit; `git show <commit>` and the linked design notes have the rest.
 
+- Top-bar health meter: host CPU (daemon's, and this computer's when remote), ac2d's callback load, xruns, data rate, fps; health in the keepalive (PROTO 50; 950d3504 … 6d5a4275).
 - Sub-sample sweep arrival, fractional delay tracking, `ac2 trace delay-diff`, fitted group delay (5505d703; `subsample-arrival-group-delay.md`).
 - Band Leq per 1/3-octave band (STM 545/2015): core, daemon, scene, CLI (86aca6e … ba731d1); FOH → place transfer without a cable, `ac2 rec import` (35f6ca4); band windows like Leq windows (ae54f65); one band per window, ranges expand to single bands, frame header cap 8 KiB (502f87e, eb74253; `band-leq.md`).
 - CI: pushes Linux only; macOS / Windows before a release or on dispatch; deploy binaries built locally (ae54f65).

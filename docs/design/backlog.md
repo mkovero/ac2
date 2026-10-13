@@ -38,8 +38,10 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   phase 1 run on pupu, `docs/rigs/pupu.md`). Stable over the hour, so not a leak, but large
   for a Pi 4 class daemon: account for the MTW ladders' buffers (and the 65536-point
   spectrum) per job.
-- **Audio continuity is not in `ac2 status`**: xruns and capture discontinuities are only
-  logged (`capture discontinuity at sample …`). Counters since the session opened (and the
+- **Audio continuity is not in `ac2 status`**: the xrun count since the session opened, the
+  callback load and host CPU reach clients in the keepalive and the app's top bar, but the
+  CLI prints none of them, and capture discontinuities are still only logged (`capture
+  discontinuity at sample …`). The keepalive's health plus a discontinuity count (and the
   last one's time) in `status` / `--json` would make the 24 h check (`docs/rigs/pupu.md`) one
   command. Memory over time is likewise only a `/proc` sample.
 - **Core Audio backend** (`coreaudio.md`, decision H1): stages (a)–(c) built: `coreaudio`

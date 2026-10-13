@@ -11,16 +11,19 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   `docs/design/asio.md` §4c); tester guide and dev.13 MSI in `testing/windows/`. macOS: no
   audio interface yet; tester guide and dev.13 disk image in `testing/macos/`.
 - CI on push is Linux only; macOS/Windows run before a release or on dispatch
-  (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 2c07efef on pupu,
-  ketunkolo and the Pi, then the app alone at 0fef18ea on ketunkolo and the Pi
-  (`docs/rigs/pupu.md`, *Deploy log*). A session format change on deploy is restored
+  (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 6d5a4275 on pupu,
+  ketunkolo and the Pi (`docs/rigs/pupu.md`, *Deploy log*). A session format change on deploy is restored
   with `ac2 session salvage`.
 - macOS: the direct Core Audio backend (`coreaudio`, the HAL through `cahal`: its own
   repository github.com/mkovero/cahal, from crates.io) is the only macOS backend (cpal removed,
   `docs/design/coreaudio.md` §11); exact on BlackHole in the all-OS CI run (`all_os=true`).
   Open on real hardware: the tester round (`testing/macos/`, Test 6: stated vs measured
   latency, replug, rate change, streams).
-- Newest features: per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
+- Newest features: a health meter in the top bar after the session line (daemon host CPU,
+  this computer's with a remote daemon, ac2d's callback load, xruns, data rate, fps;
+  `docs/user-guide.md`, the paragraph after the driver-change one; health in the keepalive,
+  `docs/protocol.md`). Its ASIO and Core Audio callback timing and `sysinfo` are not yet
+  built in an all-OS CI run. Per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
   with a grey resolution marker where the estimate is coarser than the grid (`docs/user-guide.md`
   *Resolution and the resolution marker*); mic curve applied to sweeps; settable spectrum/RTA
   averaging; multi-resolution spectrum (683 ms windows at LF … 21 ms at HF, window changes
