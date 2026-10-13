@@ -67,6 +67,8 @@ class LevelChecks:
                 src["REW offline"] = dsp.band_mean(p.rew.meas_fr.f, Hr, f, self.frac)
             else:
                 src["REW offline"] = dsp.band_mean(p.rew.meas_fr.f, p.rew.meas_fr.H, f, self.frac)
+        if p.rew_div is not None and p.rew_div.meas_fr is not None:
+            src["REW ÷ ref"] = dsp.band_mean(p.rew_div.meas_fr.f, p.rew_div.meas_fr.H, f, self.frac)
         if p.rew_live and p.rew_live.meas_fr is not None:
             src["REW live"] = dsp.band_mean(p.rew_live.meas_fr.f, p.rew_live.meas_fr.H, f, self.frac)
         # each direct estimate with its recording's own delay (IR peak) taken out of the band sums
@@ -108,13 +110,21 @@ class LevelChecks:
         # path's delay: put back the delay difference to the direct cross-spectrum of the very
         # same recording (phase slope over the band the delay checks use), so REW's phase is
         # judged for its shape on the same reference as everything else.
-        self.rew_put_back = 0.0
-        if "REW offline" in src and p.rew.ref_fr is not None and "direct (REW recording)" in src:
+        # REW's own A / B divides those two marker-referred responses, so it has lost the same
+        # delay: put back the same way, from its own phase.
+        self.rew_put_back = self.rew_div_put_back = 0.0
+        if "direct (REW recording)" in src:
             lo, hi = (1000, 20000) if p.kind != "speaker" else (500, 5000)
-            Hd, Hr = src["direct (REW recording)"], src["REW offline"]
-            md, mr = np.isfinite(Hd), np.isfinite(Hr)
-            self.rew_put_back = dsp.delay_from_phase(f[md], Hd[md], lo, hi) - dsp.delay_from_phase(f[mr], Hr[mr], lo, hi)
-            src["REW offline"] = Hr * np.exp(-2j * np.pi * f * self.rew_put_back)
+            Hd = src["direct (REW recording)"]
+            md = np.isfinite(Hd)
+            for name, attr in (("REW offline", "rew_put_back"), ("REW ÷ ref", "rew_div_put_back")):
+                if name not in src or (name == "REW offline" and p.rew.ref_fr is None):
+                    continue
+                Hr = src[name]
+                mr = np.isfinite(Hr)
+                tau = dsp.delay_from_phase(f[md], Hd[md], lo, hi) - dsp.delay_from_phase(f[mr], Hr[mr], lo, hi)
+                setattr(self, attr, tau)
+                src[name] = Hr * np.exp(-2j * np.pi * f * tau)
         # Stationary lines on the measurement input (mains) are no part of the response; takes
         # and estimators read them differently, so the band comparisons leave those columns out.
         # A line's level drifts between the silent recording and the takes, so a line only 6 dB
@@ -138,7 +148,7 @@ class LevelChecks:
                 rec_of[f"ac2 sweep {name}"] = rec_of[f"direct (ac2 capture {name})"] = s.raw
                 coh_of[id(s.raw)] = self.capture_coh.get(f"direct (ac2 capture {name})")
         if p.rec is not None:
-            rec_of["REW offline"] = rec_of["direct (REW recording)"] = p.rec
+            rec_of["REW offline"] = rec_of["REW ÷ ref"] = rec_of["direct (REW recording)"] = p.rec
         if p.tf_raw is not None:
             rec_of["direct (TF capture)"] = p.tf_raw
         cache = {}

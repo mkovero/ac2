@@ -32,9 +32,16 @@ class BandChecks:
         if "REW offline" in S:
             pairs.append((primary, "REW offline", False, "ac2's sweep against REW's offline import "
                           "(REW meas ÷ REW ref, each referred to REW's own timing marker)"))
+        if "REW ÷ ref" in S:
+            pairs.append((primary, "REW ÷ ref", False, "ac2's sweep against REW's own reference division "
+                          "(REW's Arithmetic A / B of its meas and ref imports)"))
         if "direct (REW recording)" in S:
-            pairs.append(("REW offline", "direct (REW recording)", False,
-                          "REW against numpy on the very same recording: REW's deconvolution alone"))
+            if "REW offline" in S:
+                pairs.append(("REW offline", "direct (REW recording)", False,
+                              "REW against numpy on the very same recording: REW's deconvolution alone"))
+            if "REW ÷ ref" in S:
+                pairs.append(("REW ÷ ref", "direct (REW recording)", False,
+                              "REW's own A / B against numpy on the very same recording"))
             pairs.append((primary, "direct (REW recording)", False,
                           "ac2's sweep against the direct cross-spectrum of REW's run (another take, "
                           "maybe another level)"))
@@ -219,7 +226,7 @@ class BandChecks:
                     for src_name, cap in ((primary, sw_cap), (sw_cap, sw_cap), ("ac2 TF", tf_cap), (tf_cap, tf_cap)):
                         if cap in narrows:
                             take[src_name] = take_difference(narrows[cap][0], ref_n[0])
-                names = [primary, "REW live", "REW offline", "direct (REW recording)", "ac2 TF"]
+                names = [primary, "REW live", "REW offline", "REW ÷ ref", "direct (REW recording)", "ac2 TF"]
                 names += [c for c in ("direct (TF capture)", f"direct (ac2 capture {p.primary})") if c in narrows]
                 names += [f"{c}, narrow at the sine" for c in narrows]
                 for name in names:
@@ -265,6 +272,9 @@ class BandChecks:
                         if name == "REW offline" and self.rew_put_back:
                             note = (f" (REW offline: {self.rew_put_back*1e6:+.2f} µs put back, the delay its "
                                     "timing markers took out)")
+                        elif name == "REW ÷ ref" and self.rew_div_put_back:
+                            note = (f" (REW ÷ ref: {self.rew_div_put_back*1e6:+.2f} µs put back, the delay its "
+                                    "imports' timing markers took out)")
                         elif name.startswith("ac2 sweep"):
                             note = (f" (ac2: its reported arrival {self.arrival.get(p.primary, 0)*1e6:.3f} µs put "
                                     "back into the phase it refers to that arrival)")

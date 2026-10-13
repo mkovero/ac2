@@ -9,6 +9,8 @@ Run directory layout (written by `run.py`, read here):
     ambient/in1.wav, window.json, ac2_spl_{z,a,c}.jsonl, rew_spl_{Z,A,C}.json, rew_rta.json, ac2_rta.csv
     <path>/sine/results.json, noise.wav
     <path>/rew/rec.wav, play.json, {meas,ref}_{fr,fr_spl,ir,gd,dist,rt60,summary}.json
+    <path>/rew/div_{fr,ir,gd,summary}.json, rew_ids.json   REW's A / B (meas ÷ ref), the ids used
+    rew_reimport.json             the REW import step redone later (`rew-import`): when, suite commit
     <path>/ac2_sweep/<variant>/trace.csv, events.jsonl, rec.wav, rec.json, plan.json
     <path>/ac2_tf/trace.csv, rec.wav, rec.json
     <path>/dut/dut.json           digital path: the DUT's command, coefficients, truth tables, xruns
@@ -75,6 +77,7 @@ class PathData:
     tf_blocks: int | None = None  # the live TF's FIFO blocks, from its stage's info.json
     rew: RewSet | None = None
     rew_live: RewSet | None = None
+    rew_div: RewSet | None = None  # REW's own A / B of its meas and ref imports (meas ÷ ref)
     rec: Raw | None = None  # the REW stage's recording (meas, ref)
     truth: dict | None = None
     noise: Raw | None = None
@@ -168,6 +171,19 @@ def _remove_curve(mag_db: np.ndarray, f: np.ndarray, curve) -> np.ndarray:
     return mag_db - dsp.mic_correction_db(curve, f)
 
 
+def load_rew_div(rd: Path, curve=None, level_dbfs: float = np.nan) -> RewSet:
+    """REW's own reference division (Arithmetic A / B of the meas and ref imports). A carries
+    the mic channel's calibration when it was imported with it (speaker), so the quotient does:
+    taken out like the meas import's, the relative comparisons being of the raw inputs."""
+    fr = formats.read_rew_curve(rd / "div_fr.json")
+    if curve:
+        fr.mag = _remove_curve(fr.mag, fr.f, curve)
+    return RewSet(label="REW ÷ ref (REW's A / B)", level_dbfs=level_dbfs, meas_fr=fr,
+                  meas_ir=_maybe(formats.read_rew_ir, rd / "div_ir.json"),
+                  meas_gd=_maybe(formats.read_rew_curve, rd / "div_gd.json"),
+                  summary=_json(rd / "div_summary.json"))
+
+
 def load_run(root: Path) -> RunData:
     man = json.loads((root / "manifest.json").read_text())
     cal = _json(root / "cal" / "store_excerpt.json")
@@ -226,6 +242,8 @@ def load_run(root: Path) -> RunData:
                            meas_dist=_maybe(formats.read_rew_distortion, rd / "meas_dist.json"),
                            rt60=_json(rd / "meas_rt60.json"), summary=_json(rd / "meas_summary.json"))
             p.rec = _raw(rd / "rec.wav")
+            if (rd / "div_fr.json").exists():
+                p.rew_div = load_rew_div(rd, curve if play.get("cal_file") else None, play.get("level_dbfs", np.nan))
         sine = _json(d / "sine" / "results.json")
         if sine:
             p.truth = sine
@@ -238,4 +256,7 @@ def load_run(root: Path) -> RunData:
     ad = root / "ambient"
     if ad.exists():
         amb = {"dir": ad, "window": _json(ad / "window.json")}
+    redo = _json(root / "rew_reimport.json")
+    if redo:
+        man = {**man, "rew_reimport": redo}
     return RunData(root=root, paths=paths, ambient=amb, cal=cal, manifest=man)

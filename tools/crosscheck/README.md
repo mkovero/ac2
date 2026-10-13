@@ -167,8 +167,23 @@ Each path stage runs these sub-stages (`--skip` takes their names):
   - The stimulus is played (and repeated if `[stages.rew].repeats` > 1, then averaged
     sample-synchronously) and recorded on both inputs.
   - Each channel is imported into REW against the stimulus: the mic with `applyCal`, the
-    others uncalibrated. Exports: FR, IR, GD, distortion, RT60.
-  - The suite's REW measurements are deleted afterwards.
+    others uncalibrated. Exports: FR, IR, GD, distortion, RT60 (`meas_*`, `ref_*`).
+  - Then REW's own reference division: Arithmetic `A / B` (meas ÷ ref) of the two imports,
+    `POST /measurements/process-measurements` with
+    `{"processName": "Arithmetic", "measurementUUIDs": [meas, ref], "parameters": {"function": "A / B"}}`.
+    Exports FR, IR and GD as `div_*`; a quotient has no distortion data, so REW's harmonics
+    stay those of the meas import (meas against the stimulus). The analysis judges it as the
+    source "REW ÷ ref" beside "REW offline" (the two imports divided by the suite).
+  - REW's soundcard calibration (`/audio/output-cal`) is not applied to an import, so the
+    reference division is the only way to take the interface out of REW's response here.
+  - `rew_ids.json` names the REW measurements used (UUIDs). Unless `[rew].keep_measurements`,
+    all three are deleted afterwards, by UUID: REW's index ids renumber on every delete.
+  - `python -m crosscheck rew-import <run dir> [--stages xone,genelec]`, on the rig, redoes
+    only this import step from a run's saved `rew/rec_meas.wav` and `rec_ref.wav` (nothing is
+    played): REW's input calibration is set from the run's `cal/` as `run` set it and put back
+    afterwards, and `rew_reimport.json` in the run records when, with which suite commit
+    (`CROSSCHECK_SUITE_COMMIT`, as `rig-run.sh` passes it) and which ids. Sync the suite the
+    way `rig-run.sh` does first; a baseline's `provenance.rew_reimport` carries the record.
 - **ac2_sweep**: the variants in the rig file. `plan = true` runs a probe, reads the H2 floor
   over `floor_band_hz`, then picks repeats (+10·log10 N) and length (+10·log10 T) to reach
   the target within the budget. `plan.json` gives the predicted and the achieved floor. The
@@ -326,8 +341,8 @@ calibration mapping, one table of checks per group, the data tables and the plot
 - **INFO** rows are context, not judged: REW's offline delays (gone by design), REW's own GD
   export, REW's RTA averaging, both RTAs against ideal band edges, an electrical path's ETC skirts.
 - **One phase reference**: meas ÷ ref with the path's delay in it. ac2's reported arrival is
-  put back into its phase, and REW offline gets back the delay its timing markers removed
-  (from the direct estimate of the same recording).
+  put back into its phase, and REW offline and REW ÷ ref get back the delay their timing
+  markers removed (from the direct estimate of the same recording).
 - **direct** sources are numpy cross-spectra of the same recording an app analysed. A
   difference to them is the app's analysis, not the take. A band's magnitude is its power
   mean and its phase that of the complex mean, as ac2's columns read; the recording's delay

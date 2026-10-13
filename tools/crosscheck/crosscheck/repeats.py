@@ -28,7 +28,8 @@ from . import baseline as bl
 
 NARROW = ", narrow at the sine"
 # a measurement and the raw capture it was computed from
-_CAPTURE_OF = {"ac2 TF": "direct (TF capture)", "REW offline": "direct (REW recording)"}
+_CAPTURE_OF = {"ac2 TF": "direct (TF capture)", "REW offline": "direct (REW recording)",
+               "REW ÷ ref": "direct (REW recording)"}
 _SINE = re.compile(r"^(?P<stage>[^.]+)\.(?P<q>sine_mag|sine_phase)\.(?P<src>.+)@(?P<f>[\d.]+)Hz$")
 
 

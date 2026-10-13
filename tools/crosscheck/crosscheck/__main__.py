@@ -1,4 +1,4 @@
-"""python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison} —
+"""python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison,rew-import} —
 see README.md."""
 from __future__ import annotations
 

@@ -49,13 +49,15 @@ class Row:
     label: str
     ac2: tuple = ()
     rew: tuple = ()
+    rew_div: tuple = ()  # REW's own reference division (its A / B)
     osm: tuple = ()
     ac2_rew: tuple = ()
+    ac2_rew_div: tuple = ()
     ac2_osm: tuple = ()
     unit: str | None = None  # only checks in this unit: a quantity judged in two units is two rows
 
     def columns(self) -> tuple[tuple, ...]:
-        return self.ac2, self.rew, self.osm, self.ac2_rew, self.ac2_osm
+        return self.ac2, self.rew, self.rew_div, self.osm, self.ac2_rew, self.ac2_rew_div, self.ac2_osm
 
 
 @dataclass(frozen=True)
@@ -68,7 +70,8 @@ class SignalPath:
     rows: tuple[Row, ...]
 
 
-COLUMNS = ("ac2 vs truth", "REW vs truth", "OSM vs truth", "ac2 − REW", "ac2 − OSM")
+COLUMNS = ("ac2 vs truth", "REW vs truth", "REW ÷ ref vs truth", "OSM vs truth", "ac2 − REW", "ac2 − REW ÷ ref",
+           "ac2 − OSM")
 
 # Patterns match a check key after its first segment (the stage, a DUT case, or `osm`; an OSM
 # key goes on with its case).
@@ -77,27 +80,35 @@ AC2_ANY = rf"(?:{SWEEP}|ac2 TF)"
 SWEEP_DIRECT = r"ac2 sweep [^|]+\|direct \(ac2 capture [^)]*\)"
 TF_DIRECT = r"ac2 TF\|direct \(TF capture\)"
 REW_DIRECT = r"REW offline\|direct \(REW recording\)"
+# REW's Arithmetic A / B of its two imports: REW's own meas ÷ ref
+REW_DIV = r"REW ÷ ref"
+REW_DIV_DIRECT = rf"{REW_DIV}\|direct \(REW recording\)"
 # Magnitude limits differ per band (a cable's low band is noisier than its mid band).
 BANDS = (("20-100", "20–100 Hz"), ("100-1000", "100 Hz–1 kHz"), ("1000-20000", "1–20 kHz"))
 
 
-def _tones(q: str, label: str, ac2: str = AC2_ANY, rew: str = r"REW offline", unit: str | None = None) -> Row:
+def _tones(q: str, label: str, ac2: str = AC2_ANY, rew: str = r"REW offline", unit: str | None = None,
+           rew_div: str | None = None) -> Row:
     """At each steady sine's frequency; ac2 − REW is the difference of the two readings."""
+    div = dict(rew_div=(rf"{q}\.{rew_div}@",), ac2_rew_div=(Pair(rf"{q}\.{ac2}@", rf"{q}\.{rew_div}@"),)) if rew_div else {}
     return Row(label, ac2=(rf"{q}\.{ac2}@",), rew=(rf"{q}\.{rew}@",),
-               ac2_rew=(Pair(rf"{q}\.{ac2}@", rf"{q}\.{rew}@"),), unit=unit)
+               ac2_rew=(Pair(rf"{q}\.{ac2}@", rf"{q}\.{rew}@"),), unit=unit, **div)
 
 
 REF_LEVEL = Row("Reference level", ac2=(r"level\.ac2_ref_vs_sine$",), ac2_rew=(r"level\.ac2_ref_vs_rew_ref$",))
 GAIN = Row("Gain, measurement ÷ reference", ac2_rew=(r"level\.ac2_vs_rew_meas_minus_ref$",))
 SPL = _tones("spl", "SPL at the tones", ac2=r"ac2 (?:sweep|TF × ref level)", rew=r"REW \(SPL, cal from ac2\)")
-MAG_TONES = _tones("sine_mag", "Magnitude at the tones")
+MAG_TONES = _tones("sine_mag", "Magnitude at the tones", rew_div=REW_DIV)
 MAG_BANDS = tuple(Row(f"Magnitude {name}, sweeps", ac2=(rf"mag\.{SWEEP_DIRECT}\.{key}$",),
-                      rew=(rf"mag\.{REW_DIRECT}\.{key}$",), ac2_rew=(rf"mag\.{SWEEP}\|REW offline\.{key}$",))
+                      rew=(rf"mag\.{REW_DIRECT}\.{key}$",), ac2_rew=(rf"mag\.{SWEEP}\|REW offline\.{key}$",),
+                      rew_div=(rf"mag\.{REW_DIV_DIRECT}\.{key}$",),
+                      ac2_rew_div=(rf"mag\.{SWEEP}\|{REW_DIV}\.{key}$",))
                   for key, name in BANDS)
 MAG_TF = Row("Magnitude 20 Hz–20 kHz, live TF", ac2=(rf"mag\.{TF_DIRECT}\.",))
-PHASE_TONES = _tones("sine_phase", "Phase at the tones")
+PHASE_TONES = _tones("sine_phase", "Phase at the tones", rew_div=REW_DIV)
 PHASE = Row("Phase 20 Hz–20 kHz", ac2=(rf"phase\.(?:{SWEEP_DIRECT}|{TF_DIRECT})\.",),
-            rew=(rf"phase\.{REW_DIRECT}\.",), ac2_rew=(rf"phase\.{SWEEP}\|REW offline\.",))
+            rew=(rf"phase\.{REW_DIRECT}\.",), ac2_rew=(rf"phase\.{SWEEP}\|REW offline\.",),
+            rew_div=(rf"phase\.{REW_DIV_DIRECT}\.",), ac2_rew_div=(rf"phase\.{SWEEP}\|{REW_DIV}\.",))
 # Group delay is judged relative below 1 kHz and in µs above (where it is a few µs).
 GD = tuple(_tones("gd", label, ac2=r"ac2 ±1/12-oct fit", rew=r"REW offline import ±1/12-oct fit", unit=unit)
            for label, unit in (("Group delay below 1 kHz", "rel"), ("Group delay above 1 kHz", "µs")))

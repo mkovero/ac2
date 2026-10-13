@@ -227,6 +227,9 @@ def make_baseline(results: dict, stage: str, run_id: str) -> dict:
                            "rew_version": man.get("rew_version"), "osm_version": man.get("osm_version"),
                            "flags": man.get("flags"),
                            "suite_commit": man.get("suite_commit"),
+                           **({"rew_reimport": [{k: r.get(k) for k in ("when", "suite_commit", "rew_version")}
+                                                for r in man["rew_reimport"] if stage in (r.get("stages") or {})]}
+                              if any(stage in (r.get("stages") or {}) for r in man.get("rew_reimport") or []) else {}),
                            **({"calibration": cal} if (cal := calibration(man)) else {})},
             "summary": summary, "checks": dict(sorted(checks.items()))}
 
