@@ -6,14 +6,15 @@ use crate::common;
 
 use std::time::{Duration, Instant};
 
-use ac2_audio::FakeDriver;
+use ac2_audio::{FakeBackend, FakeDriver};
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::{
     BandLimit, FilterOrder, GenAction, GeneratorDesired, GeneratorSettings, Signal,
 };
-use ac2_proto::units::{ClientId, Dbfs, Hz, LeaseToken, MeasId};
-use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody};
-use ac2d::Daemon;
+use ac2_proto::units::{ClientId, Dbfs, Hz, LeaseToken, MeasId, RequestId};
+use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody, Request};
+use ac2_zmq::{AuthorizedKeys, CurveClient, KeyPair};
+use ac2d::{Daemon, Listen, NetworkSecurity};
 use common::*;
 
 const T: Duration = Duration::from_secs(5);
@@ -295,4 +296,173 @@ fn lease_acquire_force_expiry_and_universal_stop() {
         std::thread::sleep(Duration::from_millis(1));
     }
     stop.join().unwrap();
+}
+
+/// A network-mode daemon on the manual fake rig whose only authorized client is `laptop`,
+/// and that client's CURVE credentials: every connection made with them is the same
+/// principal, whatever process or socket carries it.
+fn curve_rig(dir: &std::path::Path) -> (FakeBackend, ac2d::Handle, CurveClient) {
+    let key = KeyPair::generate().unwrap();
+    let mut keys = AuthorizedKeys::new();
+    keys.insert("laptop", key.public).unwrap();
+    let authorized = dir.join("authorized_clients");
+    keys.save(&authorized).unwrap();
+    let listen = Listen::Network {
+        ctrl: "tcp://127.0.0.1:0".into(),
+        data: "tcp://127.0.0.1:0".into(),
+        security: NetworkSecurity {
+            server_key_file: dir.join("server.key"),
+            authorized_clients_file: authorized,
+        },
+    };
+    let backend = manual_rig();
+    let mut cfg = config(backend.clone(), listen);
+    cfg.lease_expiry = EXPIRY;
+    let h = Daemon::start(cfg).unwrap();
+    let curve = CurveClient {
+        keys: key,
+        server_key: h.server_public_key().unwrap(),
+    };
+    (backend, h, curve)
+}
+
+/// A request under an explicit id: a second connection of the same principal must not reuse
+/// the first one's ids, or the daemon answers it from the first one's stored replies.
+fn call_as(c: &mut Client, id: u64, cmd: Command) -> Result<ReplyBody, ac2_proto::ProtoError> {
+    c.call_req(Request::new(RequestId(id), cmd)).result
+}
+
+fn generator(c: &mut Client, id: u64) -> ac2_proto::model::Generator {
+    match call_as(c, id, Command::StateSnapshot).unwrap() {
+        ReplyBody::Snapshot(s) => s.state.generator,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A lease belongs to the client instance holding its token, not to the key: a new
+/// connection with the same key (a reconnect, or a second process) that acquires gets a
+/// lease that comes up disarmed, with the old output faded out. It never inherits firing
+/// output it did not set, and the old token is dead.
+#[test]
+fn same_key_new_connection_acquires_disarmed() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let (backend, h, curve) = curve_rig(dir.path());
+    let mut a = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
+    let mut m = Meter {
+        sub: Sub::connect_with(
+            h.context(),
+            h.data_endpoint(),
+            &[b"d/1/levels"],
+            Some(&curve),
+            None,
+        ),
+        seen_end: 0,
+    };
+    a.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    a.ok(Command::MeasCreate {
+        config: spl("loopback meter", 0),
+    });
+    a.ok(Command::MeasStart { meas: MeasId(1) });
+    let tok_a = acquire(&mut a, false).unwrap();
+    a.ok(Command::GenSet {
+        lease_token: tok_a,
+        desired: fire(-20.0),
+    });
+    let mut d = driver(&backend);
+    let _fade_in = m.level(&mut d, 0.35);
+    let (_, rms) = m.level(&mut d, 0.3);
+    assert!((rms + 20.0).abs() < 1.5, "A fires: {rms}");
+
+    // A's socket drops within the lease; B, same key, acquires without force.
+    drop(a);
+    let mut b = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
+    let tok_b = match call_as(&mut b, 1000, Command::GenAcquire { force: false }).unwrap() {
+        ReplyBody::Lease(l) => l.lease_token,
+        other => panic!("{other:?}"),
+    };
+    assert_ne!(tok_b, tok_a);
+    let g = generator(&mut b, 1001);
+    assert!(
+        !g.armed && !g.firing,
+        "a new holder never inherits armed={} firing={}",
+        g.armed,
+        g.firing
+    );
+    assert_eq!(g.owner.as_ref().map(|o| o.0.as_str()), Some("laptop"));
+    assert_eq!(
+        g.last_action.as_ref().map(|x| x.action),
+        Some(GenAction::Acquire)
+    );
+    // The output faded out and stays silent while B holds a fresh lease.
+    let _ = m.level(&mut d, 0.05);
+    let (peak, rms) = m.level(&mut d, 0.2);
+    assert!(peak == f32::NEG_INFINITY, "silent: peak {peak}, rms {rms}");
+
+    // A, back on a new socket with its old token, holds nothing any more.
+    let mut a2 = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
+    let e = call_as(&mut a2, 2000, Command::GenRefresh { lease_token: tok_a }).unwrap_err();
+    assert_eq!(e.code, ErrorCode::LeaseRequired);
+    let e = call_as(
+        &mut a2,
+        2001,
+        Command::GenSet {
+            lease_token: tok_a,
+            desired: fire(-20.0),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(e.code, ErrorCode::LeaseRequired);
+    // B arms and fires explicitly under its own token.
+    call_as(
+        &mut b,
+        1002,
+        Command::GenSet {
+            lease_token: tok_b,
+            desired: fire(-26.0),
+        },
+    )
+    .unwrap();
+    let _fade_in = m.level(&mut d, 0.35);
+    let (_, rms) = m.level(&mut d, 0.2);
+    assert!((rms + 26.0).abs() < 1.5, "B fires: {rms}");
+    h.shutdown();
+}
+
+/// The holder's own token keeps the lease across a transport hiccup: a refresh from a new
+/// socket of the same key carrying the existing token changes nothing, still firing.
+#[test]
+fn lease_refresh_with_token_survives_a_new_socket() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let (_backend, h, curve) = curve_rig(dir.path());
+    let mut a = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
+    a.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    let tok = acquire(&mut a, false).unwrap();
+    a.ok(Command::GenSet {
+        lease_token: tok,
+        desired: fire(-20.0),
+    });
+    a.ok(Command::GenRefresh { lease_token: tok });
+    let g = generator(&mut a, 500);
+    assert!(g.armed && g.firing);
+
+    drop(a);
+    let mut a2 = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
+    call_as(&mut a2, 1000, Command::GenRefresh { lease_token: tok }).unwrap();
+    let g = generator(&mut a2, 1001);
+    assert!(
+        g.armed && g.firing,
+        "refreshing with the held token keeps the output"
+    );
+    assert_eq!(
+        g.last_action.as_ref().map(|x| x.action),
+        Some(GenAction::Fire)
+    );
+    call_as(&mut a2, 1002, Command::GenRelease { lease_token: tok }).unwrap();
+    h.shutdown();
 }

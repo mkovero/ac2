@@ -109,29 +109,35 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         self.check_lease(Instant::now());
         let mut g = self.store.state().generator.clone();
+        // Ownership is bound to the authenticated key, but a lease belongs to one client
+        // instance: the one holding its token. An acquisition carries no token, so it is
+        // always a new instance (a reconnect, or another process with the same key) and
+        // must never inherit armed or firing output it did not set. Whatever the old lease
+        // drove fades out and disarms first; the new holder arms and fires explicitly.
         let action = match &self.lease {
-            Some(l) if l.owner != *client => {
-                if !force {
-                    return Err(perr_detail(
-                        ErrorCode::LeaseHeld,
-                        format!("{} holds the stimulus lease", l.owner.0),
-                        ErrorDetail::LeaseHeld {
-                            owner: l.owner.clone(),
-                        },
-                    ));
-                }
-                // Takeover stops and disarms first; the new owner arms and fires explicitly.
-                self.abort_sweep(
-                    SweepFailure::Stopped,
-                    "another client took the stimulus over",
-                );
-                self.stop_output();
-                g.armed = false;
-                g.firing = false;
-                GenAction::Force
+            Some(l) if l.owner != *client && !force => {
+                return Err(perr_detail(
+                    ErrorCode::LeaseHeld,
+                    format!("{} holds the stimulus lease", l.owner.0),
+                    ErrorDetail::LeaseHeld {
+                        owner: l.owner.clone(),
+                    },
+                ));
             }
+            Some(l) if l.owner != *client => GenAction::Force,
             _ => GenAction::Acquire,
         };
+        if self.lease.is_some() || g.armed || g.firing {
+            let why = if action == GenAction::Force {
+                "another client took the stimulus over"
+            } else {
+                "the stimulus lease was acquired again"
+            };
+            self.abort_sweep(SweepFailure::Stopped, why);
+            self.stop_output();
+            g.armed = false;
+            g.firing = false;
+        }
         let token = LeaseToken(random_u128());
         let deadline = Instant::now() + self.s.lease_expiry;
         self.lease = Some(Lease {
@@ -139,9 +145,6 @@ impl Control {
             owner: client.clone(),
             deadline,
         });
-        if g.firing {
-            self.gate.open_until(deadline);
-        }
         g.owner = Some(client.clone());
         self.audit(&mut g, action, Some(client));
         self.commit(Change::Generator(g));

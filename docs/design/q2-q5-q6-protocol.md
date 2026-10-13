@@ -103,7 +103,9 @@ tests) shows bounded age; late joiner gets latest slot immediately.
 ## Q6 — Stimulus lease
 
 **Ownership** is bound to `client_id` (the ZAP User-Id under CURVE). Request content can
-never claim an identity.
+never claim an identity. A lease belongs to the client instance holding its token: an
+acquire without the token, even under the owner's own key, is a new instance and starts
+disarmed (the old output fades out first, the old token dies).
 
 Commands and rules: protocol §3.2 (`gen.acquire {force}`, `gen.set`, `gen.refresh`,
 `gen.release` need the lease token; `gen.stop` is universal: any authorized client fades out
