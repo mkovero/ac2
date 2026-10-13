@@ -67,6 +67,118 @@ def cross_spectrum_bands(meas: np.ndarray, ref: np.ndarray, fs: float, centres: 
     return H, coh
 
 
+# ac2's MTW ladder (crates/ac2-core/src/mtw/layout.rs): every stage a Hann window of 4096
+# samples, decimated stages at round(fs/12 kHz) and round(fs/4 kHz); each shallower stage
+# serves from κ(48)·bin up, blended over 1/3 octave into the deeper one.
+MTW_NFFT = 4096
+MTW_TARGET_RATES = (12000.0, 4000.0)
+MTW_SERVED_FRACTION = 0.45
+MTW_BLEND_OCT = 1 / 3
+MTW_DESIGN_PPO = 48
+
+
+def hann_kernel(nu: np.ndarray, n: int = MTW_NFFT) -> np.ndarray:
+    """|W(ν)|² of the periodic Hann window of n samples at ν bins off a bin centre, normalised
+    to 1 at ν = 0. The window is ½ − ¼e^{j2πk/n} − ¼e^{−j2πk/n}, so its transform is three
+    Dirichlet kernels D(ν) = Σ e^{−j2πνk/n}, one bin apart."""
+    def dirichlet(v):
+        s = np.sin(np.pi * v / n)
+        small = np.abs(s) < 1e-12
+        r = np.where(small, n, np.sin(np.pi * v) / np.where(small, 1.0, s))
+        return r * np.exp(-1j * np.pi * v * (n - 1) / n)
+    nu = np.asarray(nu, float)
+    w = 0.5 * dirichlet(nu) - 0.25 * dirichlet(nu - 1) - 0.25 * dirichlet(nu + 1)
+    return np.abs(w) ** 2 / (0.5 * n) ** 2
+
+
+def mtw_ladder(fs: float) -> tuple[list[dict], list[tuple[float, float]]]:
+    """ac2's stages (rate, bin, highest frequency served) and crossovers (blend start, end)."""
+    factors = [1]
+    for t in MTW_TARGET_RATES:
+        m = max(int(round(fs / t)), 1)
+        if m > factors[-1]:
+            factors.append(m)
+    kappa = 1 / (2 ** (0.5 / MTW_DESIGN_PPO) - 2 ** (-0.5 / MTW_DESIGN_PPO))
+    stages, xo = [], []
+    for b, m in enumerate(factors):
+        rate = fs / m
+        if b == 0:
+            served = MTW_SERVED_FRACTION * rate
+        else:
+            lo = kappa * stages[b - 1]["bin"]
+            xo.append((lo, lo * 2 ** MTW_BLEND_OCT))
+            served = lo * 2 ** MTW_BLEND_OCT * 2 ** (0.5 / MTW_DESIGN_PPO)
+        stages.append({"rate": rate, "bin": rate / MTW_NFFT, "served": served})
+    return stages, xo
+
+
+def mtw_column_bands(meas: np.ndarray, ref: np.ndarray, fs: float, centres: np.ndarray,
+                     frac: float = 1 / 48, delay_s: float = 0.0, reach_bins: int = 16) -> np.ndarray:
+    """Direct transfer function of one whole recording read through ac2's live-TF columns.
+
+    A column of ac2's TF is H1 = Σ Gxy / Σ Gxx over the bins k (k·Δf in the column) of the
+    stage serving it, each bin a Hann-windowed spectrum: for a stationary path its expectation
+    is Σₖ ∫|W(f − kΔf)|² Sxy df / Σₖ ∫|W(f − kΔf)|² Sxx df. Below a few hundred Hz a stage bin
+    (1 Hz at the ~4 kHz stage) and its window's main lobe (±2 bins) are wider than a 1/48-octave
+    column, so a room's modes are read through that kernel, not through the column's width.
+    Here the whole recording's cross- and auto-spectra are weighted by exactly that kernel and
+    summed complex like ac2 (no power mean), crossover columns blended complex like ac2.
+    `delay_s` (ac2's inserted delay) aligns the reference as ac2's windows do, then is put back
+    at the column centre. Columns with no stage bin are NaN, as ac2 thins them."""
+    M, R = np.fft.rfft(meas), np.fft.rfft(ref)
+    fx = np.fft.rfftfreq(len(meas), 1 / fs)
+    MR = M * np.conj(R) * np.exp(2j * np.pi * fx * delay_s)
+    RR = np.abs(R) ** 2
+    stages, xo = mtw_ladder(fs)
+
+    def column(b, lo, hi):
+        st = stages[b]
+        k_lo = max(math.ceil(lo / st["bin"]), 1)
+        k_hi = min(math.ceil(hi / st["bin"]), math.floor(st["served"] / st["bin"]) + 1)
+        if k_hi <= k_lo:
+            return None
+        a = np.searchsorted(fx, (k_lo - reach_bins) * st["bin"])
+        z = np.searchsorted(fx, (k_hi - 1 + reach_bins) * st["bin"], side="right")
+        nu = fx[a:z] / st["bin"]
+        g = sum(hann_kernel(nu - k) for k in range(k_lo, k_hi))
+        sxx = np.sum(g * RR[a:z])
+        return np.sum(g * MR[a:z]) / sxx if sxx > 0 else None
+
+    H = np.full(len(centres), np.nan + 0j)
+    h = 2 ** (frac / 2)
+    for i, c in enumerate(centres):
+        lo, hi = c / h, c * h
+        if c > stages[0]["served"]:
+            continue
+        # down the ladder to the first crossover the column is at or above, or inside
+        b, blend = 0, None
+        while b < len(xo) and c < xo[b][1]:
+            if c > xo[b][0]:
+                t = math.log(c / xo[b][0]) / math.log(xo[b][1] / xo[b][0])
+                blend = 0.5 - 0.5 * math.cos(math.pi * t)  # the shallow stage's weight
+                break
+            b += 1
+        if blend is None:
+            val = column(b, lo, hi)
+        else:
+            deep, shallow = column(b + 1, lo, hi), column(b, lo, hi)
+            if deep is not None and shallow is not None:
+                val = (1 - blend) * deep + blend * shallow
+            else:
+                val = deep if deep is not None else shallow
+        if val is not None:
+            H[i] = val * np.exp(-2j * np.pi * c * delay_s)
+    return H
+
+
+def coherence_noise_rel(coh: np.ndarray, n: float) -> np.ndarray:
+    """Complex relative error |δH|/|H| (1σ) of an H1 averaged over n blocks at coherence γ²:
+    √((1 − γ²) / (γ² n)). Half its variance is the magnitude's, half the phase's, each
+    (1 − γ²) / (2 γ² n) (Bendat & Piersol); the same convention as `band_noise_rel`."""
+    g = np.clip(np.nan_to_num(np.asarray(coh, float)), 1e-6, 1.0)
+    return np.sqrt((1 - g) / (g * n))
+
+
 def band_noise_rel(meas: np.ndarray, noise: np.ndarray | list[np.ndarray], fs: float, centres: np.ndarray,
                    frac: float = 1 / 48, coh: np.ndarray | None = None, hann: bool = False) -> np.ndarray:
     """Relative error |δH|/|H| (1σ) a band of the direct estimate of `meas` carries from the

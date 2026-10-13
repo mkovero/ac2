@@ -407,3 +407,94 @@ def test_direct_ir_peak_on_a_dut_recording():
     meas = np.fft.irfft(np.fft.rfft(ref) * dut.response(chain, np.fft.rfftfreq(n, 1 / FS), FS), n)
     tau = direct_ir_peak(Raw(fs=FS, meas=meas, ref=ref))
     assert abs(tau * FS - _dut_peak_truth(chain)) < 1e-3
+
+
+def test_hann_kernel_is_the_periodic_hann_windows_transform():
+    n = 4096
+    w = 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(n) / n)
+    nu = np.array([0.0, 0.3, 0.5, 1.0, 1.5, 2.0, 3.7, -2.25])
+    direct = np.abs(np.exp(-2j * np.pi * np.outer(nu, np.arange(n)) / n) @ w) ** 2 / np.sum(w) ** 2
+    assert np.allclose(dsp.hann_kernel(nu, n), direct, rtol=1e-9, atol=1e-15)
+    assert dsp.hann_kernel(np.array([1.0]))[0] == pytest.approx(0.25)
+
+
+def test_mtw_ladder_matches_ac2s_layout_at_48k():
+    # crates/ac2-core/src/mtw/layout.rs `crossovers_at_48k`
+    stages, xo = dsp.mtw_ladder(48000.0)
+    assert [s["rate"] for s in stages] == [48000.0, 12000.0, 4000.0]
+    assert xo[0][0] == pytest.approx(811.51, abs=0.01) and xo[1][0] == pytest.approx(202.88, abs=0.01)
+
+
+def test_mtw_column_bands_reads_a_reflection_through_the_stage_window():
+    # A path 1 + a·z^(−τ): a Hann-windowed bin keeps a reflection by the window's normalised
+    # autocorrelation ρ(τ) = Σ w[n]·w[n+τ·rate] / Σ w² (the bin's |W|² is the transform of that
+    # autocorrelation), so with a flat reference a column of bins k reads
+    # 1 + a·ρ(τ)·mean_k e^(−j2π·kΔf·τ). At the ~4 kHz stage (a 1.02 s window) a 50 ms
+    # reflection is mostly inside the window; at full rate (43 ms) it is outside it, and the
+    # column reads the direct sound alone.
+    fs, n = 96000.0, 2 ** 21
+    rng = np.random.default_rng(11)
+    fx = np.fft.rfftfreq(n, 1 / fs)
+    R = np.exp(2j * np.pi * rng.random(len(fx)))  # flat magnitude: the kernel's expectation exactly
+    R[0] = R[-1] = 1.0
+    a, tau = 0.5, 0.05
+    ref = np.fft.irfft(R, n)
+    meas = np.fft.irfft(R * (1 + a * np.exp(-2j * np.pi * fx * tau)), n)
+    centres = dsp.log_centres(50, 8000, 48)
+    H = dsp.mtw_column_bands(meas, ref, fs, centres)
+    stages, xo = dsp.mtw_ladder(fs)
+    w = 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(dsp.MTW_NFFT) / dsp.MTW_NFFT)
+
+    def want(c, st):
+        lag = int(round(tau * st["rate"]))
+        rho = np.sum(w[: len(w) - lag] * w[lag:]) / np.sum(w * w) if lag < len(w) else 0.0
+        h = 2 ** (1 / 96)
+        k = np.arange(max(int(np.ceil(c / h / st["bin"])), 1), int(np.ceil(c * h / st["bin"])))
+        return 1 + a * rho * np.mean(np.exp(-2j * np.pi * k * st["bin"] * tau)) if len(k) else np.nan
+
+    checked = 0
+    for c, got in zip(centres, H):
+        if c <= xo[1][0]:
+            st = stages[2]
+        elif xo[1][1] <= c <= xo[0][0]:
+            st = stages[1]
+        elif c >= xo[0][1]:
+            st = stages[0]
+        else:
+            continue  # inside a crossover blend
+        exp = want(c, st)
+        if np.isnan(exp):
+            assert np.isnan(got)  # a column without a bin is thinned, as ac2 thins it
+            continue
+        assert abs(got - exp) < 2e-3, (c, got, exp)
+        checked += 1
+    assert checked > 200
+    i = np.argmin(np.abs(centres - 5000))
+    assert abs(H[i] - 1) < 2e-3
+
+
+def test_coherence_noise_rel_is_the_complex_error_of_an_averaged_h1():
+    # H1 = Σ y·x* / Σ|x|² over n independent blocks of one bin, y = x + noise at coherence γ²:
+    # the complex relative error's rms is √((1 − γ²)/(γ² n)), the magnitude's 1/√2 of it
+    rng = np.random.default_rng(9)
+    n, trials, g2 = 32, 20000, 0.99
+    s = np.sqrt((1 - g2) / g2)
+    cn = lambda *sh: (rng.standard_normal(sh) + 1j * rng.standard_normal(sh)) / np.sqrt(2)
+    x = cn(trials, n)
+    y = x + s * cn(trials, n)
+    H = np.sum(y * np.conj(x), 1) / np.sum(np.abs(x) ** 2, 1)
+    z = float(dsp.coherence_noise_rel(np.array([g2]), n)[0])
+    assert np.sqrt(np.mean(np.abs(H - 1) ** 2)) == pytest.approx(z, rel=0.05)
+    assert np.std(np.abs(H)) == pytest.approx(z / np.sqrt(2), rel=0.05)
+
+
+def test_mtw_column_bands_takes_the_inserted_delay_out_and_puts_it_back():
+    fs, n = 96000.0, 2 ** 20
+    ref = np.random.default_rng(2).standard_normal(n)
+    D = 212.3
+    fx = np.fft.rfftfreq(n, 1 / fs)
+    meas = 0.5 * np.fft.irfft(np.fft.rfft(ref) * np.exp(-2j * np.pi * fx * D / fs), n)
+    c = dsp.log_centres(100, 16000, 12)
+    H = dsp.mtw_column_bands(meas, ref, fs, c, frac=1 / 12, delay_s=D / fs)
+    assert np.all(np.abs(dsp.db(H) - dsp.db(0.5)) < 0.01)
+    assert np.all(np.abs(np.angle(H / np.exp(-2j * np.pi * c * D / fs))) < 0.01)

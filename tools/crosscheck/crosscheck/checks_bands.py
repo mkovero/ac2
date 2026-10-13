@@ -102,7 +102,8 @@ class BandChecks:
                 with np.errstate(divide="ignore", invalid="ignore"):
                     excess = -10 * np.log10(self.capture_coh[b])
             # columns where the two sources' own noise (2σ) already exceeds the pass limit
-            # cannot be judged: left out and counted
+            # cannot be judged: left out and counted. Each noise_rel is a complex relative error
+            # |δH|/|H|; half its variance is the magnitude's.
             za, zb = self.noise_rel.get(a, np.zeros(len(f))), self.noise_rel.get(b, np.zeros(len(f)))
             u_mag = 2 * 20 / np.log(10) * np.sqrt((za ** 2 + zb ** 2) / 2)
             for lo, hi, key in bands:
@@ -224,7 +225,8 @@ class BandChecks:
                     # at a relative error of 1 the noise holds as much as the response: the column
                     # tells nothing, and no larger figure means more
                     swamped, zc = zc >= 1.0, min(zc, 1.0)
-                    nz_db, nz_deg = 2 * 20 / np.log(10) * zc, 2 * np.degrees(zc)
+                    # zc is a complex relative error: half its variance is the magnitude's, half the phase's
+                    nz_db, nz_deg = 2 * 20 / np.log(10) * zc / np.sqrt(2), 2 * np.degrees(zc / np.sqrt(2))
                     room_db, room_deg = ud, up
                     ud, up = max(ud, nz_db), max(up, nz_deg)
                     # the readings the REW recording's narrow one does not carry: context for the

@@ -48,6 +48,7 @@ class LevelChecks:
         self.fine_u = {}  # path → tone → the room's fine structure between a column and the sine, dB
         self.coh_by_path = getattr(self, "coh_by_path", {})
         self.coh_by_path[p.name] = self.coh
+        tf_delay = 0.0
         if p.tf is not None:
             b = p.tf.freq
             Ht = 10 ** (b["mag_db"] / 20) * np.exp(1j * np.deg2rad(b["phase_deg"]))
@@ -85,7 +86,13 @@ class LevelChecks:
         if p.tf_raw is not None:
             tau_d = self.direct_delay["direct (TF capture)"] = direct_ir_peak(p.tf_raw)
             Hd, cd = dsp.cross_spectrum_bands(p.tf_raw.meas, p.tf_raw.ref, p.tf_raw.fs, f, self.frac, delay_s=tau_d)
-            src["direct (TF capture)"] = Hd
+            # The live TF's truth is read through the TF's own column kernel (its stages' Hann
+            # bins, complex sums, aligned at its inserted delay): below a few hundred Hz a stage
+            # bin is wider than a 1/48-octave band, and a band power mean would read a room's
+            # modes at a finer resolution than the TF can. Its band coherence stays as above.
+            align = tf_delay or tau_d
+            src["direct (TF capture)"] = dsp.mtw_column_bands(p.tf_raw.meas, p.tf_raw.ref, p.tf_raw.fs, f,
+                                                              self.frac, delay_s=align)
             self.coh["direct (TF capture)"] = cd
         # REW's offline import refers each channel to its own timing marker, which drops the
         # path's delay: put back the delay difference to the direct cross-spectrum of the very
@@ -136,13 +143,13 @@ class LevelChecks:
                                                          hann=True))
                 cache[id(raw)] = z
             self.noise_rel[name] = cache[id(raw)]
-        # The live TF's own noise from its coherence over its FIFO blocks: σ = √((1 − γ²) / (2 γ² n)).
+        # The live TF's own noise from its coherence over its FIFO blocks, as a complex relative
+        # error like every other source's (the band gate takes the magnitude's half of it).
         # ac2's γ² is a per-bin coherence averaged over the column, so this is a bin's noise.
         # n = blocks counts every block as independent, though they overlap, so this is a lower
         # bound on the TF's noise and the gate leaves out too few columns rather than too many.
         if "ac2 TF" in self.coh and p.tf_blocks:
-            g = np.clip(np.nan_to_num(self.coh["ac2 TF"]), 1e-6, 1.0)
-            self.noise_rel["ac2 TF"] = np.sqrt((1 - g) / (2 * g * p.tf_blocks))
+            self.noise_rel["ac2 TF"] = dsp.coherence_noise_rel(self.coh["ac2 TF"], p.tf_blocks)
         self.src = src
         self.series[p.name] = {"f": f, "src": src}
         return f
