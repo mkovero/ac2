@@ -296,7 +296,7 @@ fn t_steps_only_the_focused_plot_and_is_remembered() {
     t.key("T");
     assert_eq!(chrome(&t, tf), PlotChrome::NoGrid);
     assert_eq!(t.st.view_for(tf).chrome, PlotChrome::NoGrid);
-    assert_eq!(t.last_toast(), "Transfer: no grid");
+    assert_eq!(t.last_toast(), "Transfer: no grid or marks");
     t.key("Alt+3");
     t.key("T");
     t.key("T");

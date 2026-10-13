@@ -728,7 +728,7 @@ fn unresolved_marks(
     let Some(&first) = t.freqs.first() else {
         return (Vec::new(), Vec::new());
     };
-    if !view.unresolved {
+    if !view.marks() {
         return (Vec::new(), Vec::new());
     }
     let src = |unresolved| Source {

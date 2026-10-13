@@ -715,7 +715,7 @@ pub enum PlotChrome {
     /// Grid, axis labels and the cursor.
     #[default]
     Full,
-    /// Axis labels and the cursor, no grid lines.
+    /// Axis labels and the cursor; no grid lines, resolution marker or window changes.
     NoGrid,
     /// The traces alone: no grid, no axis labels, no cursor.
     Bare,
@@ -735,7 +735,7 @@ impl PlotChrome {
     pub fn name(self) -> &'static str {
         match self {
             Self::Full => "grid, labels and cursor",
-            Self::NoGrid => "no grid",
+            Self::NoGrid => "no grid or marks",
             Self::Bare => "traces only",
         }
     }
@@ -794,6 +794,12 @@ impl Default for ViewState {
 }
 
 impl ViewState {
+    /// Whether the resolution marker and a multi-resolution spectrum's window changes are
+    /// drawn: they read as grid lines, so T takes them away with the grid.
+    pub fn marks(&self) -> bool {
+        self.unresolved && self.chrome.grid()
+    }
+
     /// The axes of IR picture `p`.
     pub fn ir_axes(&self, p: IrPane) -> &IrAxes {
         match p {

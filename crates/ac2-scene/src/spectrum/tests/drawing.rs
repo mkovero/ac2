@@ -513,6 +513,23 @@ fn multires_spectrum_marks_where_its_windows_change() {
         assert!(labels.contains(w), "{w} not drawn");
     }
 
+    // T past the grid takes the window changes and the shading away with it.
+    for chrome in [
+        crate::view::PlotChrome::NoGrid,
+        crate::view::PlotChrome::Bare,
+    ] {
+        let bare = ViewState { chrome, ..view };
+        let s = spectrum_scene(
+            std::slice::from_ref(&t),
+            &Status::default(),
+            &bare,
+            &Theme::dark(),
+            SIZE,
+        );
+        assert!(s.stitches.is_empty(), "{chrome:?}");
+        assert!(s.unresolved.is_empty(), "{chrome:?}");
+    }
+
     // Below the longest window's reach the cursor says the column repeats its bin.
     let low = ViewState {
         cursor_hz: Some(50.0),

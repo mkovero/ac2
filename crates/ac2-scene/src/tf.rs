@@ -127,7 +127,7 @@ fn unresolved_marks(
     shown: &[DisplayTrace],
     view: &ViewState,
 ) -> Vec<crate::unresolved::Mark> {
-    if !view.unresolved {
+    if !view.marks() {
         return Vec::new();
     }
     let known = || {

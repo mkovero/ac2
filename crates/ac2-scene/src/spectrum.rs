@@ -381,7 +381,7 @@ pub(crate) fn marked_bands<'a>(
     traces: &[SpectrumTrace<'a>],
     view: &ViewState,
 ) -> Option<(&'a SpecBands, f64)> {
-    if !view.unresolved {
+    if !view.marks() {
         return None;
     }
     let with = || traces.iter().filter(|t| t.bands.is_some());

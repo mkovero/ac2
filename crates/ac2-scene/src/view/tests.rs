@@ -13,7 +13,7 @@ fn plot_chrome_cycle_wraps() {
         seen,
         [
             ("grid, labels and cursor", true, true, true),
-            ("no grid", false, true, true),
+            ("no grid or marks", false, true, true),
             ("traces only", false, false, false),
         ]
     );

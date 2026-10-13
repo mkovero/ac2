@@ -486,9 +486,11 @@ its level axis on the first frame, and a new sweep result fits the sweep pane's 
 
 #### Grid, labels and cursor (T)
 
-**T** steps the focused pane's plot: grid, labels and cursor → no grid → traces only (no
-grid, labels or cursor; for screenshots; the legend stays) → full. A toast names the step
-(`Transfer: no grid`). Axis ranges and cursor keys keep working in every step. The step
+**T** steps the focused pane's plot: grid, labels and cursor → no grid or marks → traces
+only (no grid, labels or cursor; for screenshots; the legend stays) → full. The marks are
+the grey resolution marker and a multi-resolution spectrum's window changes (`171 ms`,
+`85 ms` …): they go with the grid, and come back with it. A toast names the step
+(`Transfer: no grid or marks`). Axis ranges and cursor keys keep working in every step. The step
 belongs to the pane (kept when **Tab** changes its measurement, copied by a split) and
 covers the spectrograph, the Leq history strip and the sweep's IR too. The theme is in
 Settings › Display and the palette (*Theme*).
@@ -1293,8 +1295,9 @@ hall wants 4 s.
 The measurements and traces on the daemon are the **working state**. It belongs to a saved
 session (a name in the daemon's session directory, a folder on the daemon's machine, or a
 file on your computer) or is **untitled**. The top bar shows its name and, in the warning
-colour, *unsaved changes*. Click the name, **Alt+S** or palette *Sessions* opens the
-Sessions dialog ([sessions.md](design/sessions.md)):
+colour, *unsaved changes*. **Ctrl+S** saves it where it came from (untitled: *Save as*).
+Click the name, **Alt+S** or palette *Sessions* opens the Sessions dialog
+([sessions.md](design/sessions.md)):
 
 | Row | Does |
 |---|---|
@@ -2185,7 +2188,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `W` | Layout: split → one pane → full screen | `maximize_pane` |
 | `Tab` | Select the next row in the measurement list (the focused pane shows its measurement) | `next_in_tree` |
 | `Shift+Tab` | Select the previous row in the measurement list (the focused pane shows its measurement) | `prev_in_tree` |
-| `T` | Plot of the focused pane: grid, labels and cursor → no grid → traces only | `plot_chrome` |
+| `T` | Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only | `plot_chrome` |
 | `I` | Zoom frequency in (IR: time) | `zoom_in` |
 | `O` | Zoom frequency out (IR: time) | `zoom_out` |
 | `←` | Pan frequency down (IR: earlier) | `pan_left` |
@@ -2231,6 +2234,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Shift+↓` | Display offset −3 dB of the selected curve | `offset_down_coarse` |
 | `Alt+Home` | Display offset of the selected curve back to 0 | `offset_clear` |
 | `Alt+S` | Sessions: new, open, save, recent sessions… | `sessions` |
+| `Ctrl+S` | Save session (where it came from; untitled: Save as) | `session_save` |
 | `Shift+O` | Open audio session: Settings › Audio & I/O… | `session_open` |
 | `Shift+M` | New math channel: A ÷ × + − B, or the average of several (mic positions)… | `meas_new_math` |
 | `Shift+C` | Next colour for the selected measurement (one no other measurement has; grey last) | `meas_colour_next` |
@@ -2331,7 +2335,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Import a trace file (CSV, analyzer text, IR WAV)… | `import_trace` |
 | New session (asks about unsaved changes), then the audio settings | `session_new` |
 | Sessions: open a file or folder on this computer, disarmed… | `session_load` |
-| Save session (where it came from; untitled: Save as) | `session_save` |
 | Save session as: a new session on the daemon… | `session_save_as` |
 | Export session: an .ac2session file on this computer… | `session_export` |
 | Reconnect to the daemon now | `reconnect` |
