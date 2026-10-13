@@ -4,11 +4,13 @@ import pytest
 
 from crosscheck import baseline as B
 from crosscheck import comparison as C
+from crosscheck import comparison_quotes as Q
 
 
 def test_generated_tables_are_current():
-    """comparison.md's tables are those of the committed baselines: after a baseline update,
-    run `python -m crosscheck comparison` and commit both."""
+    """comparison.md's generated parts and quoted numbers are those of the committed baselines
+    and reports, and every miss has its open item: after a baseline update, run
+    `python -m crosscheck comparison` and commit both."""
     current, _ = C.update(C.DOC, C.BASELINES, check=True)
     assert current, "comparison.md is stale: run `python -m crosscheck comparison`"
 
@@ -50,7 +52,7 @@ def test_statistic_sets_the_sign():
         assert (stat == [C.ABS]) == head.startswith("\\|"), head
 
 
-def test_render_from_a_baseline_directory(tmp_path):
+def _baselines(tmp_path):
     rig = {"schema": 1, "rig": "r", "stage": "xone", "level_dbfs": -30.0,
            "provenance": {"run": "20261007T114727Z", "ac2_build": "0.0.0+26388938b456", "rew_version": "5.40"},
            "summary": {"PASS": 1}, "checks": {"xone.level.ac2_vs_rew_meas_minus_ref": e(-0.0004, tol=(0.1, 0.3)),
@@ -65,16 +67,35 @@ def test_render_from_a_baseline_directory(tmp_path):
                       "osm.xone-rig.ac2_vs_osm_h": e(0.2),
                       "osm.xone-rig.ac2_delay_finder_vs_osm_s": e(0.5, unit="samples", tol=(0.6, 1)),
                       "osm.delay48.uncompensated_ac2_h_vs_analytic": e(0.417, "INFO", tol=None)}}
-    older = {**rig, "level_dbfs": -50.0, "provenance": {**rig["provenance"], "run": "20261006T000000Z"},
+    # an older take on an older build: not current evidence
+    older = {**rig, "level_dbfs": -50.0, "provenance": {**rig["provenance"], "run": "20261006T000000Z",
+                                                        "ac2_build": "0.0.0+0123456789ab"},
              "checks": {"xone.level.ac2_vs_rew_meas_minus_ref": e(0.5, "WARN", tol=(0.1, 0.3))}}
-    for sub, name, b in (("r", "xone-30dbfs.json", rig), ("r", "xone-50dbfs.json", older), ("host", "osm.json", osm)):
+    # another level on the newest take's build: shown beside it
+    same = {**rig, "level_dbfs": -20.0, "provenance": {**rig["provenance"], "run": "20261007T100000Z"},
+            "checks": {"xone.level.ac2_vs_rew_meas_minus_ref": e(0.2, "WARN", tol=(0.1, 0.3))}}
+    for sub, name, b in (("r", "xone-30dbfs.json", rig), ("r", "xone-50dbfs.json", older),
+                         ("r", "xone-20dbfs.json", same), ("host", "osm.json", osm)):
         (tmp_path / sub).mkdir(exist_ok=True)
         (tmp_path / sub / name).write_text(B.dumps(b))
-    out = C.render(tmp_path)
-    assert out.startswith(C.BEGIN) and out.rstrip().endswith(C.END)
-    # only the newest baseline of a rig and stage is shown
-    assert "| ac2 meas÷ref vs REW (meas − ref), absolute level | 0.000 dB (PASS 1) |" in out  # −0.0004 rounds to 0
-    assert "xone −30 dBFS (20261007T114727Z, ac2 2638893)" in out and "−50 dBFS" not in out
+    return tmp_path
+
+
+ITEMS = [("Xone gain at −20", "open", r"xone\.level\.")]
+
+
+def _doc(body=""):
+    return ("intro\n" + "".join(f"{C.begin(n)}\nold\n{C.end(n)}\n" for n in C.BLOCKS) + body
+            + "\n### Xone gain at −20\n\nopen\n")
+
+
+def test_render_from_a_baseline_directory(tmp_path):
+    root = _baselines(tmp_path)
+    out = C.render(root)
+    # the newest baseline of a rig and stage, and its other levels on the same build (louder first)
+    assert "| ac2 meas÷ref vs REW (meas − ref), absolute level | +0.200 dB (WARN 1) | 0.000 dB (PASS 1) |" in out
+    assert "xone −30 dBFS (20261007T114727Z, ac2 2638893)" in out and "xone −20 dBFS" in out
+    assert "−50 dBFS" not in out
     # OSM cases in the planned order, then the rest; INFO-only checks not tabled
     assert out.index("| identity |") < out.index("| delay10_5 |")
     assert "| delay10_5 |  | −0.500 |" in out
@@ -82,14 +103,119 @@ def test_render_from_a_baseline_directory(tmp_path):
     # a rig take (not a planned case) is a median in the transfer table only
     assert "| xone-rig (median) |  |  |  |  | 0.200 |" in out and "| xone-rig |  |  |  |  | +0.500 |" in out
     # distortion coverage per order, counts even where nothing was judged
-    assert "| H2 ac2 sweep | −1.000 dB (PASS 1) |" in out and "| H4 ac2 sweep | INCONCLUSIVE 1 |" in out
+    assert "| H2 ac2 sweep | — | −1.000 dB (PASS 1) |" in out and "| H4 ac2 sweep | — | INCONCLUSIVE 1 |" in out
     doc = tmp_path / "doc.md"
-    doc.write_text(f"intro\n{C.BEGIN}\nold\n{C.END}\noutro\n")
-    current, _ = C.update(doc, tmp_path, check=True)
+    doc.write_text(_doc())
+    current, _ = C.update(doc, root, check=True, items=ITEMS)
     assert not current and "old" in doc.read_text()
-    C.update(doc, tmp_path)
-    assert doc.read_text() == "intro\n" + out + "outro\n"
-    assert C.update(doc, tmp_path, check=True)[0]
+    C.update(doc, root, items=ITEMS)
+    text = doc.read_text()
+    assert "old" not in text and out.strip() in text
+    assert C.update(doc, root, check=True, items=ITEMS)[0]
+    # a hand edit inside a generated part is stale again
+    doc.write_text(text.replace("0.000 dB (PASS 1)", "0.001 dB (PASS 1)"))
+    assert not C.update(doc, root, check=True, items=ITEMS)[0]
+
+
+def test_summary_row_names_limit_verdict_worst_and_run(tmp_path):
+    root = _baselines(tmp_path)
+    doc = tmp_path / "doc.md"
+    doc.write_text(_doc())
+    C.update(doc, root, items=ITEMS)
+    text = doc.read_text()
+    # both current xone levels, the limit they carry, the miss, and the run and build it is from
+    assert ("| Level: electrical gain | REW (meas − ref) | xone −20/−30 dBFS | 0.1 / 0.3 dB | "
+            "**WARN** (WARN 1 of 2 judged) | +0.200 dB @ xone −20 dBFS | 20261007T100000Z (ac2 2638893) |") in text
+    assert ("| Harmonics H2–H5 | truth: steady sine | xone −30 dBFS | 3 / 6 dB | "
+            "PASS (1 judged, 1 inconclusive) |") in text
+    # OSM rows split the planned fixtures from the rig recordings
+    assert ("| Transfer: ac2 vs OSM | OSM on the same rig recording (median) | osm | 0.03 / 0.1 dB | "
+            "PASS (1 judged) | 0.200 dB @ xone-rig |") in text
+    # the miss list links the item's section
+    assert ("| [Xone gain at −20](#xone-gain-at-20) | open | xone −20 dBFS | WARN 1 | +0.200 dB | "
+            "0.1 / 0.3 dB |") in text
+    # a stale summary cell fails the check
+    doc.write_text(text.replace("**WARN** (WARN 1 of 2 judged)", "PASS (2 judged)"))
+    assert not C.update(doc, root, check=True, items=ITEMS)[0]
+
+
+def test_every_miss_belongs_to_a_discussed_item(tmp_path, capsys):
+    root = _baselines(tmp_path)
+    doc = tmp_path / "doc.md"
+    # a miss no item names
+    doc.write_text(_doc())
+    assert not C.update(doc, root, check=True, items=[])[0]
+    assert "belongs to no item" in capsys.readouterr().err
+    # an item with no miss left, and an item without its section
+    gone = ITEMS + [("Closed", "open", r"nothing$")]
+    assert not C.update(doc, root, check=True, items=gone)[0]
+    err = capsys.readouterr().err
+    assert "'Closed' has no WARN or FAIL left" in err and "no `### Closed` section" in err
+    with pytest.raises(ValueError, match="problem"):
+        C.update(doc, root, items=gone)
+
+
+def test_quoted_numbers_follow_their_source(tmp_path, capsys):
+    root = _baselines(tmp_path)
+    ref = "<!--= b r/xone-20dbfs // xone.level.ac2_vs_rew_meas_minus_ref -->"
+    doc = tmp_path / "doc.md"
+    doc.write_text(_doc(f"\nThe gain at −20 reads +0.31 dB{ref}, or 0.3{ref} unsigned.\n"))
+    current, _ = C.update(doc, root, check=True, items=ITEMS)
+    assert not current
+    C.update(doc, root, items=ITEMS)
+    # rewritten at the precision and sign style written
+    assert f"reads +0.20 dB{ref}, or 0.2{ref} unsigned" in doc.read_text()
+    assert C.update(doc, root, check=True, items=ITEMS)[0]
+    # a source that does not resolve is reported, not guessed
+    doc.write_text(_doc("\nA gone check: +0.20 dB<!--= b r/xone-20dbfs // xone.no_such_check -->.\n"))
+    assert not C.update(doc, root, check=True, items=ITEMS)[0]
+    assert "no check 'xone.no_such_check'" in capsys.readouterr().err
+
+
+def test_quote_sources_and_formatting(tmp_path):
+    root = _baselines(tmp_path)
+    assert Q.resolve("b r/xone-30dbfs // xone.h2.ac2 sweep 10Hz-5.5s@1000Hz // tol.1", root) == 6
+    assert Q.resolve("b r/xone-20dbfs // xone.level.ac2_vs_rew_meas_minus_ref minus "
+                     "xone.level.ac2_vs_rew_meas_minus_ref", root) == 0
+    assert Q.resolve("t harmonics.vs_truth_db.pass", root) == 3.0
+    assert Q.written_as(-0.4979, "−0.50") == "−0.50" and Q.written_as(-0.4979, "0.5") == "0.5"
+    assert Q.written_as(0.00143, "+0.001") == "+0.001" and Q.written_as(30, "30") == "30"
+    # a report cell: the i-th number of a table cell under the named headings
+    rep = tmp_path / "reports"
+    rep.mkdir()
+    (rep / "x.md").write_text(
+        "# X\n\n## a, 1/48 octave\n\n### Split\n\n| f Hz | m | total |\n|---|---|---|\n"
+        "| 1000 | ac2 TF | -0.202 ± 0.167 |\n\n## b, 1/96 octave\n\n### Split\n\n"
+        "| f Hz | m | total |\n|---|---|---|\n| 1000 | ac2 TF | +0.085 ± 0.045 |\n")
+    old, Q.REPORTS = Q.REPORTS, rep
+    try:
+        assert Q.resolve("r x.md // 1/96 octave > Split // f Hz=1000; m=ac2 TF // total#1", root) == 0.045
+        assert Q.resolve("r x.md // 1/48 octave > Split // f Hz=1000; m=ac2 TF // total", root) == -0.202
+        with pytest.raises(LookupError):
+            Q.resolve("r x.md // 1/48 octave > Split // f Hz=2000 // total", root)
+    finally:
+        Q.REPORTS = old
+
+
+def test_unsourced_numbers_and_build_hashes_refused():
+    bad = Q.unquoted("ac2 reads +0.32 dB here,\n30 of 159 columns,\non build 2c07efe,\nwithin 2 dB.\n")
+    assert [b.split(":")[0] for b in bad] == ["line 1", "line 2", "line 3", "line 4"]
+    # definitions, settings, frequencies, levels, run IDs and quoted numbers need no source
+    ok = ("REW 5.40 and OSM v1.5.2, IEC 61672-1, γ² ≥ 0.99, the 20 Hz / 5.5 s sweep at −30 dBFS,\n"
+          "1/48 octave, H2–H5, 100 Hz–1 kHz, run 20261011T191033Z, a sine reads 3.01 dB lower,\n"
+          "`0.25 / 0.5 dB` in code, [a link](reports/x-1.5.md), +0.20 dB<!--= t level.offset_db.pass -->\n")
+    assert Q.unquoted(ok) == []
+
+
+def test_the_documents_hand_written_numbers_all_have_sources():
+    """No number in comparison.md's prose can drift: each is quoted from a source (held to it by
+    `test_generated_tables_are_current`) or is a listed definition."""
+    doc = C.DOC.read_text()
+    assert Q.unquoted(C.hand_written(doc)) == []
+    quotes = list(Q.QUOTE.finditer(doc))
+    assert len(quotes) > 40
+    for m in quotes:
+        assert Q.written_as(Q.resolve(m["ref"], C.BASELINES), m["num"]) == m["num"].replace("-", "−"), m[0]
 
 
 def _parity(a_val, a_st, r_val, r_st, shared=False):

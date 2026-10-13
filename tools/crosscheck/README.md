@@ -2,13 +2,14 @@
 
 An on-demand suite, not run in CI. It measures the same paths with ac2, with REW (offline
 import of a recording), with steady sines analysed in numpy, and from the raw recordings
-themselves, and compares the numbers against the tolerances in `tolerances.toml`. Current
-results, definitions and open differences: [comparison.md](comparison.md).
+themselves, and compares the numbers against the tolerances in `tolerances.toml`. What the
+committed results show (a summary per quantity, the evidence tables, definitions and open
+items): [comparison.md](comparison.md).
 
 ```
 crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison})
 rigs/            pupu.toml: ports, roles, paths, levels, stage settings; host.toml: the digital DUT on a dummy JACK server
-comparison.md    ac2 against REW and OSM: current results, definitions, open differences
+comparison.md    ac2 against truth, REW and OSM: summary, results, definitions, open items
 reports/         repeated takes, coherence study, DUT coverage (cited from comparison.md)
 osm.toml         the OSM stage: harness and ac2 binaries, matched settings, cases, recordings
 tolerances.toml  PASS / WARN limits for every comparison, compare steps
@@ -382,8 +383,12 @@ against the sine.
   are understood, run `baseline` on it (it prints what changed and refuses a run with FAILs
   unless `--force`, which is for a FAIL that is a known, documented gap) and commit the
   files with the ac2 build hash in the message. Then run `python -m crosscheck comparison`:
-  it rebuilds the results tables of `comparison.md` from the baselines, and a test fails
-  while they are stale.
+  it rebuilds the summary, the miss list and the results tables of `comparison.md` from the
+  baselines, and rewrites each number quoted in its prose from the baseline, report or
+  tolerance it names. `--check` (and a test) fails while any is stale, when the prose holds a
+  measured number or build hash with no source, and when a WARN or FAIL has no open item in
+  `comparison_summary.MISS_ITEMS` or an item has no miss left: a new miss needs its item and
+  section, a cleared one closes its item.
 
 ## Fixtures (2026-10-07)
 
