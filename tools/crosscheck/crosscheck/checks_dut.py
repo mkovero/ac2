@@ -11,7 +11,6 @@ from .checks_common import (
     _pre_note,
     _settle_lag_s,
     _tol,
-    dual_channel_harmonic_dbr,
     judge,
 )
 from .model import PathData
@@ -233,9 +232,7 @@ class DutChecks:
     def lf_h2_onset(self, p: PathData):
         t = p.truth or {}
         tones = [x for x in t.get("tones", []) if x.get("h_dbr") and "2" in x["h_dbr"]]
-        # ac2 divides by the measured reference: its truth is the meas H2 net of the reference's
-        net = {id(x): dual_channel_harmonic_dbr(t.get("tones", []), x, 2) for x in tones}
-        pts = sorted((x["f"], net[id(x)] if net[id(x)] is not None else x["h_dbr"]["2"]) for x in tones)
+        pts = sorted((x["f"], x["h_dbr"]["2"]) for x in tones)
         if len(pts) < 2:
             return
         tf_, tv = np.array([a for a, _ in pts]), np.array([b for _, b in pts])

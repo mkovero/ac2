@@ -21,31 +21,6 @@ CLARITY_GUARD_S = 0.010
 CLARITY_D_MAX = 0.998
 
 
-def dual_channel_harmonic_dbr(tones: list[dict], tone: dict, k: int, transfer=None) -> float | None:
-    """Harmonic k of `tone` as a sweep divided by the measured reference reads it, dBr: the
-    meas input's harmonic phasor less the reference input's carried through the path,
-    D_m − T(k·f)·D_r, over the meas fundamental. T(k·f) is the meas÷ref ratio interpolated
-    between the tones (dB and unwrapped phase, linear in log f); outside them, `transfer(k·f)`
-    (a direct cross-spectrum of the same path, path delay in its phase) when given. None when
-    neither covers k·f or the tone has no phasors."""
-    hv = (tone.get("h_vec") or {}).get(str(k))
-    pts = sorted((x["f"], x["ratio_db"], x["ratio_deg"]) for x in tones if "ratio_db" in x)
-    fk = k * tone["f"]
-    if hv is None:
-        return None
-    if len(pts) >= 2 and pts[0][0] <= fk <= pts[-1][0]:
-        lf = np.log([a for a, _, _ in pts])
-        mag = np.interp(np.log(fk), lf, [b for _, b, _ in pts])
-        ph = np.interp(np.log(fk), lf, np.unwrap(np.radians([c for _, _, c in pts])))
-        tk = 10 ** (mag / 20) * np.exp(1j * ph)
-    else:
-        tk = transfer(fk) if transfer is not None else None
-        if tk is None or not np.isfinite(tk):
-            return None
-    d = complex(*hv["meas"]) - tk * complex(*hv["ref"])
-    return float(20 * np.log10(abs(d))) if abs(d) > 0 else None
-
-
 @dataclass
 class Check:
     id: str

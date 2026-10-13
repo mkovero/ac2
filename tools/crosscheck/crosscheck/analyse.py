@@ -34,7 +34,6 @@ from .checks_common import (
     _tol,
     _twin,
     direct_ir_peak,
-    dual_channel_harmonic_dbr,
     judge,
     judge_u,
     shared_pass,
@@ -48,7 +47,7 @@ from .model import PathData, RunData
 # Other modules and the tests import these from here.
 __all__ = [
     "MAINS_GUARD_HZ", "TOLERANCES", "Analysis", "Check", "_pre_note", "_settle_lag_s", "_tol", "analyse",
-    "direct_ir_peak", "dual_channel_harmonic_dbr", "judge", "judge_u", "shared_pass",
+    "direct_ir_peak", "judge", "judge_u", "shared_pass",
 ]
 
 

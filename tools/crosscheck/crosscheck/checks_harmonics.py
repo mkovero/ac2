@@ -12,10 +12,13 @@ from .checks_common import (
     _fmt_lvl,
     _nearest_finite,
     _tol,
-    dual_channel_harmonic_dbr,
     judge,
 )
 from .model import PathData, Sweep
+
+# A meas harmonic less than this far above the reference input's own is flagged in the table
+# (ac2-scene's REFERENCE_BOUND_DB): 6 dB above, shared converters add at most 1 dB to it.
+REFERENCE_BOUND_DB = 6.0
 
 
 class HarmonicChecks:
@@ -34,15 +37,6 @@ class HarmonicChecks:
             b = s.trace.freq
             if "h2_db" in b:
                 sources[f"ac2 sweep {name}"] = s
-        # above the top tone the path's transfer at k·f comes from a direct cross-spectrum of
-        # a raw recording (independent of either app), on the same phase reference as the tones
-        dkey = next((x for x in ("direct (REW recording)", f"direct (ac2 capture {p.primary})") if x in self.src), None)
-
-        def transfer(fk):
-            if dkey is None or not self.f[0] <= fk <= self.f[-1]:
-                return None
-            return complex(self.at(self.f, self.src[dkey], np.array([fk]))[0])
-
         for tone in tones:
             fc = tone["f"]
             for k in range(2, 6):
@@ -57,15 +51,6 @@ class HarmonicChecks:
                 if rv is not None:
                     rows.append([f"{fc:g}", f"H{k}", "steady sine, reference input", _fmt_lvl(tone.get("ref_level_dbfs")),
                                  f"{rv:.1f}", "—", "—", "info"])
-                # ac2 divides by the measured reference, so its truth is the meas harmonic less
-                # the reference's carried through the path at k·f
-                net = dual_channel_harmonic_dbr(tones, tone, k, transfer)
-                ct_net = ct
-                if net is not None:
-                    ct_net = {**dsp.classify(net, tfl if tfl is not None else np.nan, margin),
-                              "label": f"sine net of reference (meas alone {tv:.1f})"}
-                    rows.append([f"{fc:g}", f"H{k}", "steady sine, net of reference", "—", _fmt_h(ct_net),
-                                 _fmt(ct_net.get("floor")), _fmt(ct_net.get("margin")), ct_net["kind"]])
                 reads_ac2, reads_rew = {}, {}
                 for name, s in sources.items():
                     b = s.trace.freq
@@ -82,7 +67,17 @@ class HarmonicChecks:
                     rows.append([f"{b['freq_hz'][i]:.1f}", f"H{k}", name, _fmt_lvl(fund), _fmt_h(ca), _fmt(ca.get("floor")),
                                  _fmt(ca.get("margin")), ca["kind"]])
                     reads_ac2[name] = ca
-                    self._cmp_h(p, name, fc, k, ca, ct_net, th, "ac2")
+                    self._cmp_h(p, name, fc, k, ca, ct, th, "ac2")
+                    # ac2's reading of the reference input's own order: where the loopback
+                    # shares the meas path's converters, a meas harmonic within a few dB of it
+                    # may be theirs
+                    if f"ref_h{k}_db" in b:
+                        cref = dsp.classify(b[f"ref_h{k}_db"][i], b[f"ref_h{k}_floor_db"][i], margin)
+                        near = (ca["kind"] == "value" and cref["kind"] == "value"
+                                and ca["value"] < cref["value"] + REFERENCE_BOUND_DB)
+                        rows.append([f"{b['freq_hz'][i]:.1f}", f"H{k}", f"{name}, reference input", "—", _fmt_h(cref),
+                                     _fmt(cref.get("floor")), _fmt(cref.get("margin")),
+                                     f"{cref['kind']}, meas within {REFERENCE_BOUND_DB:g} dB" if near else cref["kind"]])
                 for rs in (p.rew, p.rew_live):
                     if rs is None or rs.meas_dist is None:
                         continue
@@ -120,8 +115,9 @@ class HarmonicChecks:
 
     def _cmp_h(self, p, name, fc, k, ca, ct, th, who):
         line, half = self._mains_in_harmonic(fc, k)
-        # ac2's truth is the sine net of the reference's harmonics, REW's the meas input's alone:
-        # the twin carries its own so the shared pass can tell whether the targets compare
+        # ac2 and REW both separate the harmonics against the stimulus: the truth of either is
+        # the meas input's own harmonic re its own fundamental. The twin carries it so the shared
+        # pass can tell whether the targets compare
         twin = {"key": f"{p.name}|h{k}|{fc:g}", "analyser": who, "truth": ct.get("value"),
                 "agree": _tol(self.tol["harmonics"]["ac2_vs_rew_db"])[0]}
         if line is not None and ca["kind"] != "none":
@@ -166,7 +162,7 @@ class HarmonicChecks:
             d = ca["value"] - cr["value"]
             self.add(**base, value=d, status=judge(d, th),
                      meaning=f"{name} {ca['value']:.1f} dBr, {label} {cr['value']:.1f} dBr: positive = ac2 reads "
-                             "more; ac2 divides by the measured reference, REW's export is the meas input alone",
+                             "more; both are the meas input's own harmonic re its own fundamental",
                      detail={"ac2": ca, "rew": cr})
             return
         if line is not None:
