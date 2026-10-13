@@ -152,7 +152,7 @@ async fn export_working(c: &Client, path: &Path, out: &mut Out<'_>) -> Result<()
 /// The `working` line of `session status`, and the recovery copy when there is one.
 pub(crate) fn status_lines(w: &WorkingSession, now: ac2_proto::units::WallNs) -> String {
     let off = ClockOffset(0);
-    let l = text::working_label(w, now, off);
+    let l = text::working_label(w, now, off, None);
     let mut t = format!(
         "working      {}  ({})",
         l.text,
@@ -240,7 +240,7 @@ pub(crate) async fn session(
             out.emit(&json!({ "rev": rev, "working": w }), || {
                 format!(
                     "recovered {}",
-                    text::working_label(&w, crate::watch::now_wall(), ClockOffset(0)).text
+                    text::working_label(&w, crate::watch::now_wall(), ClockOffset(0), None).text
                 )
             })?;
         }
