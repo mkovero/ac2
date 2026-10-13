@@ -29,7 +29,7 @@ the same steady sine.
 
 <!-- BEGIN generated table: `python -m crosscheck comparison` from baselines/; do not edit by hand -->
 
-**Xone (electrical), −10 dBFS.** Out of the interface, through the Xone:62 and back in. Truth: the steady sine at each tone, analysed in numpy, for the level, tone, group delay and harmonic rows; numpy's direct cross-spectrum of the same capture for the band rows and the arrival.
+**Xone (electrical), −10 dBFS.** Out of the interface, through the Xone:62 and back in. Truth: the steady sine at each tone, analysed in numpy, for the level, tone, group delay and harmonic rows; numpy's direct cross-spectrum of the same capture for the band rows and the arrival, for the live TF read through the TF's own windows and columns.
 
 | quantity | ac2 vs truth | REW vs truth | ac2 − REW | limit (pass / warn) |
 |---|---|---|---|---|
@@ -39,15 +39,15 @@ the same steady sine.
 | Magnitude 20–100 Hz, sweeps | 0.006 dB pass | 0.003 dB pass | 0.003 dB pass | 0.05 / 0.2 dB |
 | Magnitude 100 Hz–1 kHz, sweeps | 0.000 dB pass | 0.000 dB pass | 0.000 dB pass | 0.03 / 0.1 dB |
 | Magnitude 1–20 kHz, sweeps | 0.010 dB pass | 0.002 dB pass | 0.009 dB pass | 0.03 / 0.1 dB |
-| Magnitude 20 Hz–20 kHz, live TF | 0.005 dB pass | — | — | 0.1 / 0.3 dB |
+| Magnitude 20 Hz–20 kHz, live TF | 0.003 dB pass | — | — | 0.1 / 0.3 dB |
 | Phase at the tones | +0.02° pass | −0.06° pass | +0.09° pass | 1 / 3° |
-| Phase 20 Hz–20 kHz | 0.07° pass | 0.09° pass | 0.10° pass | 1 / 3° |
+| Phase 20 Hz–20 kHz | 0.05° pass | 0.09° pass | 0.10° pass | 1 / 3° |
 | Group delay below 1 kHz | +2.1 % pass | +1.7 % pass | +1.9 % pass | 10 / 25 % |
 | Group delay above 1 kHz | +0.01 µs pass | 0.00 µs pass | 0.00 µs pass | 0.5 / 2 µs |
 | Arrival | +0.01 µs pass | — | — | 0.3 / 1 µs |
 | Harmonics H2–H5 | −0.959 dB pass | −1.630 dB pass | +4.054 dB **warn** | 3 / 6 dB |
 
-**Genelec (speaker at 56 cm), −30 dBFS.** The Genelec 1083 in the room, the MM1 on its tweeter axis. Truth: the steady sine at each tone, analysed in numpy, for the level, tone, group delay and harmonic rows; numpy's direct cross-spectrum of the same capture for the band rows and the arrival. SPL: the steady sine through the stored calibration.
+**Genelec (speaker at 56 cm), −30 dBFS.** The Genelec 1083 in the room, the MM1 on its tweeter axis. Truth: the steady sine at each tone, analysed in numpy, for the level, tone, group delay and harmonic rows; numpy's direct cross-spectrum of the same capture for the band rows and the arrival, for the live TF read through the TF's own windows and columns. SPL: the steady sine through the stored calibration.
 
 | quantity | ac2 vs truth | REW vs truth | ac2 − REW | limit (pass / warn) |
 |---|---|---|---|---|
@@ -58,9 +58,9 @@ the same steady sine.
 | Magnitude 20–100 Hz, sweeps | 0.122 dB pass | 0.199 dB pass | 0.244 dB pass | 0.3 / 1 dB |
 | Magnitude 100 Hz–1 kHz, sweeps | 0.051 dB pass | 0.055 dB pass | 0.114 dB pass | 0.3 / 1 dB |
 | Magnitude 1–20 kHz, sweeps | 0.014 dB pass | 0.061 dB pass | 0.118 dB pass | 0.3 / 1 dB |
-| Magnitude 20 Hz–20 kHz, live TF | 0.180 dB **warn** | — | — | 0.1 / 0.3 dB |
+| Magnitude 20 Hz–20 kHz, live TF | 0.093 dB pass | — | — | 0.1 / 0.3 dB |
 | Phase at the tones | +2.19° pass | +1.74° pass | +0.85° pass | 3 / 10° |
-| Phase 20 Hz–20 kHz | 1.49° pass | 2.49° pass | 2.45° pass | 3 / 10° |
+| Phase 20 Hz–20 kHz | 1.34° pass | 2.49° pass | 2.45° pass | 3 / 10° |
 | Arrival | −0.66 µs pass | — | — | 2 / 10.4 µs |
 | Harmonics H2–H5 | −1.835 dB pass | −1.776 dB pass | +0.956 dB pass | 3 / 6 dB |
 
@@ -131,27 +131,6 @@ off: ac2 divides by the measured reference, REW's export is the measurement inpu
 each is held to the sine on its own definition. The reference loopback's own H2 at this tone
 accounts for most of the gap, the rest is within each tool's limit against the sine. The
 ac2 − REW check compares the two definitions directly; closed as a convention difference.
-
-### Genelec: Magnitude 20 Hz–20 kHz, live TF: ac2 vs truth
-
-On the columns at γ² ≥ 0.99 the TF spreads
-0.176 dB<!--= b pupu/genelec-30dbfs // genelec.mag.ac2 TF|direct (TF capture).20-100 --> at
-20–100 Hz and
-0.180 dB<!--= b pupu/genelec-30dbfs // genelec.mag.ac2 TF|direct (TF capture).100-1000 --> at
-100 Hz–1 kHz about numpy's estimate of the same capture, with band means of only
-+0.029 dB<!--= b pupu/genelec-30dbfs // genelec.mag.ac2 TF|direct (TF capture).20-100 // mean -->
-and
-−0.006 dB<!--= b pupu/genelec-30dbfs // genelec.mag.ac2 TF|direct (TF capture).100-1000 // mean -->:
-column-to-column scatter, not an offset. Against the steady sines the TF passes at every judged
-tone, e.g.
-+0.07 dB<!--= b pupu/genelec-30dbfs // genelec.sine_mag.ac2 TF@500Hz --> at 500 Hz and
-+0.06 dB<!--= b pupu/genelec-30dbfs // genelec.sine_mag.ac2 TF@1000Hz --> at 1 kHz. At
-20–100 Hz only
-5<!--= b pupu/genelec-30dbfs // genelec.mag.ac2 TF|direct (TF capture).20-100 // n --> of
-111<!--= b pupu/genelec-30dbfs // genelec.mag.ac2 TF|direct (TF capture).20-100 // of -->
-columns pass the coherence gate. REW has no live TF to compare. Likely cause, not shown: the
-TF's frequency-dependent windows read the room's reflections differently from the direct
-estimate's whole capture. Open.
 
 ### digital DUT: Magnitude 20–100 Hz, sweeps: ac2 vs truth
 

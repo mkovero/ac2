@@ -117,7 +117,7 @@ def _rig_osm(rig: str, label: str) -> tuple[Row, ...]:
 
 RIG_TRUTH = ("Truth: the steady sine at each tone, analysed in numpy, for the level, tone, group delay "
              "and harmonic rows; numpy's direct cross-spectrum of the same capture for the band rows and "
-             "the arrival.")
+             "the arrival, for the live TF read through the TF's own windows and columns.")
 PATHS: tuple[SignalPath, ...] = (
     SignalPath("Xone", "xone", "Xone (electrical)",
                "Out of the interface, through the Xone:62 and back in. " + RIG_TRUTH,
