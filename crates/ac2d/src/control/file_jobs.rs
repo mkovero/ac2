@@ -18,8 +18,8 @@
 //! - A load or new commits only onto the working state it began on: when the content or its
 //!   saved standing changed meanwhile, it is refused (`conflict`, nothing changed) and the
 //!   client asks again (the unsaved-changes guard then sees the edits).
-//! - A retry of the request still pending is not answered twice: the reply follows the
-//!   result.
+//! - A retry of the request still pending never reaches here: the request's reservation
+//!   (`Dedup::admit`) attaches it, and the one result answers every copy.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -148,15 +148,6 @@ impl Control {
         id: RequestId,
         cmd: Command,
     ) -> Result<(), ProtoError> {
-        if self
-            .file_jobs
-            .0
-            .values()
-            .any(|j| j.reply.client == *client && j.reply.id == id)
-        {
-            tracing::debug!("{} retried pending request {}", client.0, id.0);
-            return Ok(());
-        }
         let command = cmd.name();
         let (pending, work) = match cmd {
             Command::FileList => self.begin_list(),

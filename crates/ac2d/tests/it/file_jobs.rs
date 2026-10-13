@@ -195,7 +195,7 @@ fn a_save_writes_the_content_it_began_with() {
 }
 
 #[test]
-fn a_retry_of_a_pending_file_operation_is_answered_once() {
+fn a_retry_of_a_pending_file_operation_runs_once() {
     let dir = tempfile::tempdir().unwrap();
     let h = start("slow-retry", dir.path());
     let (mut a, _sub) = connect(&h, &[]);
@@ -218,7 +218,9 @@ fn a_retry_of_a_pending_file_operation_is_answered_once() {
     let r = reply(&a, id, Duration::from_secs(10)).expect("answered");
     writer.join().unwrap();
     assert!(r.result.is_ok(), "{:?}", r.result);
-    // Nothing else follows.
+    // Each copy gets the one save's reply; no second save follows it.
+    let again = reply(&a, id, Duration::from_secs(1)).expect("the retry answered");
+    assert_eq!(again.result, r.result);
     assert!(a.recv(Duration::from_millis(200)).is_none());
     h.shutdown();
 }
