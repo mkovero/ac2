@@ -211,10 +211,11 @@ pub struct SessionOpen {
     /// Output channels of the stream.
     #[arg(long = "outputs", value_name = "N", default_value_t = 2)]
     pub outputs: u16,
-    /// Sample rate, e.g. `48khz` (default: device default).
+    /// Sample rate, e.g. `48khz` (default: the device's rate).
     #[arg(long)]
     pub rate: Option<Freq>,
-    /// Buffer size, e.g. `256samples` (default: device default).
+    /// Buffer size, e.g. `256samples` (default: the JACK server's or ASIO driver's own;
+    /// Core Audio 1024 frames at 48 kHz, about 21 ms, scaled with the rate).
     #[arg(long)]
     pub buffer: Option<SampleCount>,
     /// Loopback output channel carrying the reference copy.

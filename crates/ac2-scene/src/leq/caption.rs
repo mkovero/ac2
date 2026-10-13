@@ -43,7 +43,7 @@ pub(super) fn caption(
     let pad = 10.0;
     let gap = theme.font_size;
     let base_h = theme.font_size * 1.6;
-    // The run belongs to the look back (Shift+B): without the history the windows and the
+    // The run belongs to the history strip: without the history the windows and the
     // number are the whole picture, and the row it took is theirs.
     let Some(run) = v.run.as_ref().filter(|_| v.layout.history) else {
         return Caption {

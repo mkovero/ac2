@@ -484,7 +484,7 @@ impl AppState {
                     Some(p) => {
                         self.layout.set_focus(p);
                         self.toast(format!(
-                            "{}{of} stored: U dB / %, Shift+I impulse response, Space runs it again",
+                            "{}{of} stored: Shift+I impulse response, Space runs it again; dB / % in Settings › Display",
                             r.name
                         ));
                     }

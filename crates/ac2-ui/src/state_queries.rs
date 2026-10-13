@@ -58,7 +58,7 @@ impl AppState {
         if p == PaneKind::Distortion {
             let m = self.selected_meas().cloned();
             if m.is_none() {
-                self.warn("select a measurement first (N)");
+                self.warn("select a measurement first (Tab to it, or click it in the list)");
             }
             return m;
         }

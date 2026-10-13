@@ -2326,7 +2326,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Export session: an .ac2session file on this computer… | `session_export` |
 | Reconnect to the daemon now | `reconnect` |
 | Close audio session | `session_close` |
-| Record: raw audio of every input on / off (stops by itself after 1 h) | `record` |
+| Record: raw audio of every input on / off (stops by itself at the limit in Settings › Recording) | `record` |
 | Replay a recording as the session (name or path)… | `replay_recording` |
 | New transfer measurement… | `meas_new_transfer` |
 | New spectrum… | `meas_new_spectrum` |
@@ -2371,7 +2371,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | SPL pane: the meter | `spl_show_meter` |
 | SPL pane: the Leq windows | `spl_show_leq` |
 | SPL pane: meter + Leq windows | `spl_show_meter_leq` |
-| SPL pane: the band Leq bars (20 … 200 Hz) | `spl_show_bands` |
+| SPL pane: the band Leq bars (20 Hz … 10 kHz) | `spl_show_bands` |
 | SPL Leq windows: columns / tiles | `spl_leq_style` |
 | SPL Leq windows: history strip on / off | `spl_leq_history` |
 | Distortion in dB re fundamental / percent | `distortion_unit` |

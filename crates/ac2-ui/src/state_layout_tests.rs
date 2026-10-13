@@ -539,5 +539,28 @@ fn session_dialog_notes_separate_clocks() {
     );
 }
 
+/// With nothing selected, a key that needs a measurement names keys the keymap binds:
+/// Tab walks the list to one, the palette (Ctrl+K) makes one; N only splits a pane.
+#[test]
+fn need_meas_names_the_keys_that_reach_a_measurement() {
+    let mut t = T::new();
+    t.st.selected = None;
+    t.st.selected_trace = None;
+    assert!(
+        t.st.need_meas(&[MeasKind::publishes_tf], "transfer")
+            .is_none()
+    );
+    let w = t.last_toast().to_owned();
+    for (c, chord) in [
+        (CommandId::NextInTree, "Tab"),
+        (CommandId::Palette, "Ctrl+K"),
+    ] {
+        let want = Chord::parse(chord).expect(chord);
+        assert_eq!(t.keys.first_chord(c, Scope::Global), Some(want), "{c:?}");
+        assert!(w.contains(chord), "{w}");
+    }
+    assert!(!w.contains("(N)"), "{w}");
+}
+
 #[path = "state_layout_tree_tests.rs"]
 mod tree;

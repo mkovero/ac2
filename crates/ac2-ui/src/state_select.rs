@@ -151,7 +151,9 @@ impl AppState {
         match self.selected_meas() {
             Some(m) if want.iter().any(|f| f(&m.config.kind)) => Some(m.clone()),
             _ => {
-                self.warn(format!("select a {what} measurement first (N)"));
+                self.warn(format!(
+                    "select a {what} measurement first (Tab to it; New … in Ctrl+K makes one)"
+                ));
                 None
             }
         }

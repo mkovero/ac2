@@ -208,7 +208,7 @@ commands! {
     Reconnect => "reconnect", "Reconnect to the daemon now", [Global];
     OpenSession => "session_open", "Open audio session: Settings › Audio & I/O…", [Global];
     CloseSession => "session_close", "Close audio session", [Global];
-    Record => "record", "Record: raw audio of every input on / off (stops by itself after 1 h)", [Global];
+    Record => "record", "Record: raw audio of every input on / off (stops by itself at the limit in Settings › Recording)", [Global];
     ReplayRecording => "replay_recording", "Replay a recording as the session (name or path)…", [Global];
     NewTransfer => "meas_new_transfer", "New transfer measurement…", [Global];
     NewSpectrum => "meas_new_spectrum", "New spectrum…", [Global];
@@ -291,7 +291,7 @@ commands! {
     SplShowMeter => "spl_show_meter", "SPL pane: the meter", [Spl];
     SplShowLeq => "spl_show_leq", "SPL pane: the Leq windows", [Spl];
     SplShowMeterLeq => "spl_show_meter_leq", "SPL pane: meter + Leq windows", [Spl];
-    SplShowBands => "spl_show_bands", "SPL pane: the band Leq bars (20 … 200 Hz)", [Spl];
+    SplShowBands => "spl_show_bands", "SPL pane: the band Leq bars (20 Hz … 10 kHz)", [Spl];
     SplLeqStyle => "spl_leq_style", "SPL Leq windows: columns / tiles", [Spl];
     SplLeqHistory => "spl_leq_history", "SPL Leq windows: history strip on / off", [Spl];
     SplNewLog => "spl_new_log", "Start a new SPL log…", [Spl];
