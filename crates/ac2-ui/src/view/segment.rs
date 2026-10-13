@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn changing_digits_move_no_label_and_keep_the_width() {
         let (a, wa) = lay_out_health(&line(0.09, 0.41, 0.01, 0, 1.8e6, 9.0), width);
-        let (b, wb) = lay_out_health(&line(1.0, 0.18, 0.88, 12, 340e3, 60.0), width);
+        let (b, wb) = lay_out_health(&line(1.0, 0.18, 0.88, 12, 34e3, 60.0), width);
         assert_eq!(wa, wb);
         assert_eq!(a.len(), b.len());
         for (pa, pb) in a.iter().zip(&b) {
@@ -308,6 +308,6 @@ mod tests {
             }
         }
         let texts: Vec<&str> = b.iter().map(|p| p.text.as_str()).collect();
-        assert!(texts.contains(&"100") && texts.contains(&"12") && texts.contains(&"kB/s"));
+        assert!(texts.contains(&"100") && texts.contains(&"12") && texts.contains(&"kbit/s"));
     }
 }

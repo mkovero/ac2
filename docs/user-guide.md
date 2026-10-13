@@ -191,7 +191,7 @@ output device, rate, buffer), channels, system max level; **↑/↓** walk them 
   under the device, the one in use marked; choose among them in the driver's panel (Audio
   MIDI Setup on macOS).
 - After the session line the top bar shows how the rig holds up:
-  `CPU remote 23 % · local 41 % · DSP 14 % · 0 xruns · 1.8 MB/s · 30 fps`. **CPU** is the
+  `CPU remote 23 % · local 41 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps`. **CPU** is the
   whole daemon host's use (every process, every core); with the daemon on another computer
   it reads **remote** and **local** is this one's, and with the daemon on this computer (or
   inside the app) a single `CPU 23 %`; **DSP** is the share of each buffer period ac2d's own

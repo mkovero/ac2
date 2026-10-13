@@ -1,6 +1,6 @@
 //! The health meter after the session line: CPU use, the audio callback's load, xruns, the
 //! link's data rate and the UI's frame rate (`CPU remote 23 % · local 41 % · DSP 14 % ·
-//! 0 xruns · 1.8 MB/s · 60 fps`).
+//! 0 xruns · 14 Mbit/s · 60 fps`).
 //!
 //! Every figure that is missing (an older daemon, no session, the first second) is left
 //! out rather than shown as zero: a zero reads as a measurement.
@@ -65,7 +65,7 @@ pub struct HealthInputs<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct HealthPart {
     /// What the figure is, before the number (`CPU remote`, `local`, `DSP`); empty when the
-    /// unit names it (`xruns`, `MB/s`, `fps`).
+    /// unit names it (`xruns`, `Mbit/s`, `fps`).
     pub label: String,
     pub value: String,
     /// The widest number expected, its digits as `9`; the number sits right-aligned in it.
@@ -117,30 +117,30 @@ pub fn percent(share: f64) -> String {
     format!("{} %", format::fixed(share * 100.0, 0))
 }
 
-/// A data rate's unit (decimal prefixes, as network rates are stated).
+/// A data rate's unit: bits with decimal prefixes, as network links are rated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RateUnit {
-    B,
-    Kb,
-    Mb,
+    Bit,
+    Kbit,
+    Mbit,
 }
 
 impl RateUnit {
-    const ALL: [Self; 3] = [Self::B, Self::Kb, Self::Mb];
+    const ALL: [Self; 3] = [Self::Bit, Self::Kbit, Self::Mbit];
 
-    fn bytes(self) -> f64 {
+    fn bits(self) -> f64 {
         match self {
-            Self::B => 1.0,
-            Self::Kb => 1e3,
-            Self::Mb => 1e6,
+            Self::Bit => 1.0,
+            Self::Kbit => 1e3,
+            Self::Mbit => 1e6,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::B => "B/s",
-            Self::Kb => "kB/s",
-            Self::Mb => "MB/s",
+            Self::Bit => "bit/s",
+            Self::Kbit => "kbit/s",
+            Self::Mbit => "Mbit/s",
         }
     }
 }
@@ -149,25 +149,30 @@ impl RateUnit {
 /// hovering at a step would otherwise flip its unit, and its digits, every second.
 const RATE_DOWN: f64 = 0.9;
 
-/// The unit for `bytes_per_s`, given the one shown before: up at each thousand, back down
-/// only below [`RATE_DOWN`] of it.
+/// The unit for `bytes_per_s` in bits, given the one shown before: up at each thousand,
+/// back down only below [`RATE_DOWN`] of it.
 pub fn rate_unit(bytes_per_s: f64, was: Option<RateUnit>) -> RateUnit {
-    let b = bytes_per_s.max(0.0);
+    let b = bits(bytes_per_s);
     let up = RateUnit::ALL
         .into_iter()
         .rev()
-        .find(|u| b >= u.bytes())
-        .unwrap_or(RateUnit::B);
+        .find(|u| b >= u.bits())
+        .unwrap_or(RateUnit::Bit);
     match was {
-        Some(w) if w > up && b >= RATE_DOWN * w.bytes() => w,
+        Some(w) if w > up && b >= RATE_DOWN * w.bits() => w,
         _ => up,
     }
 }
 
+/// Bits a second for `bytes_per_s`.
+fn bits(bytes_per_s: f64) -> f64 {
+    bytes_per_s.max(0.0) * 8.0
+}
+
 /// The number for `bytes_per_s` in `unit`: one decimal under ten.
 fn rate_value(bytes_per_s: f64, unit: RateUnit) -> String {
-    let v = bytes_per_s.max(0.0) / unit.bytes();
-    let decimals = if v < 10.0 && unit != RateUnit::B {
+    let v = bits(bytes_per_s) / unit.bits();
+    let decimals = if v < 10.0 && unit != RateUnit::Bit {
         1
     } else {
         0
@@ -175,8 +180,8 @@ fn rate_value(bytes_per_s: f64, unit: RateUnit) -> String {
     format::fixed(v, decimals)
 }
 
-/// `1.8 MB/s`, `340 kB/s`, `800 B/s`.
-pub fn byte_rate(bytes_per_s: f64) -> String {
+/// `bytes_per_s` in bits: `14 Mbit/s`, `340 kbit/s`, `800 bit/s`.
+pub fn bit_rate(bytes_per_s: f64) -> String {
     let u = rate_unit(bytes_per_s, None);
     format!("{} {}", rate_value(bytes_per_s, u), u.label())
 }
@@ -296,7 +301,7 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
             unit_slot: RateUnit::ALL.iter().map(|u| u.label().into()).collect(),
             warn: false,
         });
-        here.push(format!("{} received from the daemon", byte_rate(r)));
+        here.push(format!("{} received from the daemon", bit_rate(r)));
     }
     if let Some(f) = i.frames.filter(|f| f.streaming) {
         let warn = f.fps < f.wanted_fps * FPS_WARN_SHARE;
@@ -389,7 +394,7 @@ mod tests {
         let l = health_line(&i).expect("figures");
         assert_eq!(
             l.text(),
-            "CPU remote 23 % · local 41 % · DSP 14 % · 0 xruns · 1.8 MB/s · 60 fps"
+            "CPU remote 23 % · local 41 % · DSP 14 % · 0 xruns · 14 Mbit/s · 60 fps"
         );
         assert!(l.parts.iter().all(|p| !p.warn));
         assert!(
@@ -403,7 +408,7 @@ mod tests {
             "0 xruns since the session opened",
             "not the whole audio graph",
             "local = ketunkolo:\n  CPU 41 %",
-            "1.8 MB/s received from the daemon",
+            "14 Mbit/s received from the daemon",
             "longest gap between frames 34 ms",
         ] {
             assert!(l.detail.contains(want), "{want:?} in {}", l.detail);
@@ -486,24 +491,25 @@ mod tests {
     }
 
     #[test]
-    fn byte_rates_read_with_decimal_prefixes() {
-        assert_eq!(byte_rate(800.0), "800 B/s");
-        assert_eq!(byte_rate(1_234.0), "1.2 kB/s");
-        assert_eq!(byte_rate(340_000.0), "340 kB/s");
-        assert_eq!(byte_rate(1_840_000.0), "1.8 MB/s");
-        assert_eq!(byte_rate(12_600_000.0), "13 MB/s");
+    fn rates_read_in_bits_with_decimal_prefixes() {
+        assert_eq!(bit_rate(100.0), "800 bit/s");
+        assert_eq!(bit_rate(154.25), "1.2 kbit/s");
+        assert_eq!(bit_rate(42_500.0), "340 kbit/s");
+        assert_eq!(bit_rate(230_000.0), "1.8 Mbit/s");
+        assert_eq!(bit_rate(1_840_000.0), "15 Mbit/s");
     }
 
     #[test]
     fn a_rate_near_a_step_keeps_its_unit() {
-        assert_eq!(rate_unit(1_000_000.0, None), RateUnit::Mb);
-        assert_eq!(rate_unit(950_000.0, None), RateUnit::Kb);
+        // Bytes in, bits out: a megabit is 125 000 bytes.
+        assert_eq!(rate_unit(125_000.0, None), RateUnit::Mbit);
+        assert_eq!(rate_unit(118_750.0, None), RateUnit::Kbit);
         // Down only well below the step.
-        assert_eq!(rate_unit(950_000.0, Some(RateUnit::Mb)), RateUnit::Mb);
-        assert_eq!(rate_unit(899_000.0, Some(RateUnit::Mb)), RateUnit::Kb);
+        assert_eq!(rate_unit(118_750.0, Some(RateUnit::Mbit)), RateUnit::Mbit);
+        assert_eq!(rate_unit(112_000.0, Some(RateUnit::Mbit)), RateUnit::Kbit);
         // Up at once.
-        assert_eq!(rate_unit(1_000.0, Some(RateUnit::B)), RateUnit::Kb);
-        assert_eq!(rate_unit(2e6, Some(RateUnit::B)), RateUnit::Mb);
+        assert_eq!(rate_unit(125.0, Some(RateUnit::Bit)), RateUnit::Kbit);
+        assert_eq!(rate_unit(2e6, Some(RateUnit::Bit)), RateUnit::Mbit);
         let d = daemon("pupu", None, None);
         let line = |r: f64, was| {
             health_line(&HealthInputs {
@@ -513,8 +519,8 @@ mod tests {
             })
             .expect("rate")
         };
-        let l = line(960_000.0, Some(RateUnit::Mb));
-        assert_eq!(l.text(), "1.0 MB/s");
+        let l = line(120_000.0, Some(RateUnit::Mbit));
+        assert_eq!(l.text(), "1.0 Mbit/s");
     }
 
     #[test]
@@ -522,7 +528,7 @@ mod tests {
         let d = daemon("pupu", Some(0.09), Some(audio(Some(1.0), 12)));
         let l = health_line(&HealthInputs {
             local_cpu: Some(1.0),
-            received_per_s: Some(1.8e6),
+            received_per_s: Some(225e3),
             frames: Some(streaming(60.0)),
             ..inputs(Some(&d), "ketunkolo")
         })
@@ -546,7 +552,7 @@ mod tests {
         assert_eq!(slots[3], ("", "12", "9999", &s(&["xruns"])[..]));
         assert_eq!(
             slots[4],
-            ("", "1.8", "999.9", &s(&["B/s", "kB/s", "MB/s"])[..])
+            ("", "1.8", "999.9", &s(&["bit/s", "kbit/s", "Mbit/s"])[..])
         );
         assert_eq!(slots[5], ("", "60", "999", &s(&["fps"])[..]));
         // A count past four digits widens its slot.

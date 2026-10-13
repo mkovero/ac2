@@ -225,7 +225,7 @@ fn top_bar_health_meter() {
         .collect();
     assert!(
         bar.iter()
-            .any(|t| t == "· CPU remote 23 % · DSP 14 % · 0 xruns · 1.8 MB/s · 30 fps"),
+            .any(|t| t == "· CPU remote 23 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps"),
         "{bar:?}"
     );
     snapshot(&mut h, "top_bar_health");
