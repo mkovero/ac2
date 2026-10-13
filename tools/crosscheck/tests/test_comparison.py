@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from crosscheck import baseline as B
@@ -48,33 +50,60 @@ def _baselines(tmp_path):
     return tmp_path
 
 
-def _doc(body="## Disparities\n\n### Magnitude: ac2 vs truth\n\nopen\n"):
+TONES = "Xone: Magnitude at the tones: ac2 vs truth"
+
+
+def _doc(body=f"## Disparities\n\n### {TONES}\n\nopen\n"):
     return "intro\n" + "".join(f"{C.begin(n)}\nold\n{C.end(n)}\n" for n in C.BLOCKS) + body
+
+
+def _path(text, title):
+    """One path's caption and table."""
+    return next(p for p in text.split("\n\n**") if p.lstrip("*").startswith(title))
 
 
 def _row(text, label):
     return next(line for line in text.splitlines() if line.startswith(f"| {label} |"))
 
 
-def test_table_worst_value_and_verdict(tmp_path):
+def test_tables_per_path_worst_value_and_verdict(tmp_path):
     root = _baselines(tmp_path)
     text = C.blocks(root)["table"]
+    xone = _path(text, "Xone (electrical), −30 dBFS.")
+    # only the columns some row has a value in, the row's one limit
+    assert "| quantity | ac2 vs truth | REW vs truth | ac2 − REW | limit (pass / warn) |" in xone
     # worst verdict first; ac2 − REW at a tone is the difference of the two readings vs the sine
-    assert _row(text, "Magnitude") == ("| Magnitude | −0.060 dB **warn** | −0.030 dB pass | — | 0.020 dB pass "
-                                       "| 0.200 dB pass | 0.03–0.05 / 0.1–0.2 dB; speaker 0.3 / 1 dB |")
-    # only bounds: not judged; a stage not on the build: not run
-    assert _row(text, "Harmonics H2–H5").startswith("| Harmonics H2–H5 | not judged | — |")
-    assert _row(text, "Leq (Z, A, C)") == "| Leq (Z, A, C) | not run | not run | — | not run | — | — |"
+    assert _row(xone, "Magnitude at the tones") == ("| Magnitude at the tones | −0.060 dB **warn** | −0.030 dB pass "
+                                                    "| −0.030 dB pass | 0.05 / 0.2 dB |")
+    # a band is its own row, held to its own limit; a band's max(|mean|, spread) is unsigned
+    assert _row(xone, "Magnitude 20–100 Hz, sweeps") == "| Magnitude 20–100 Hz, sweeps | — | — | 0.020 dB pass | 0.03 / 0.1 dB |"
+    # only bounds: not judged
+    assert _row(xone, "Harmonics H2–H5") == "| Harmonics H2–H5 | not judged | — | — | — |"
+    # OSM's synthetic fixtures and its rig recordings are separate tables
+    assert _row(_path(text, "OSM fixtures."), "Magnitude") == "| Magnitude | 0.000 dB pass | 0.05 / 0.2 dB |"
+    assert _row(_path(text, "OSM on the rig recordings."), "Genelec: magnitude") == "| Genelec: magnitude | 0.200 dB pass | 0.3 / 1 dB |"
+    # a path not on the build: not run, no table
+    assert _path(text, "Ambient (silent room).").endswith("Not run on this build.")
     assert "2638893" not in text
+
+
+def test_row_mixing_limits_is_refused(tmp_path):
+    root = _baselines(tmp_path)
+    p = root / "r" / "xone-30dbfs.json"
+    b = json.loads(p.read_text())
+    b["checks"]["xone.sine_mag.ac2 TF@1000Hz"] = e(0.01, tol=(0.1, 0.3))
+    p.write_text(B.dumps(b))
+    problems = C.mixed_limits([x for _, x in C.current(C.load(root))])
+    assert problems == ["Xone: 'Magnitude at the tones' mixes limits (0.05 / 0.2 dB; 0.1 / 0.3 dB): split the row"]
 
 
 def test_pair_is_the_difference_at_one_tone():
     b = {"stage": "genelec", "checks": {
         "g.spl.ac2 sweep@1000Hz": e(-0.4, tol=(0.5, 1.0)), "g.spl.REW (SPL, cal from ac2)@1000Hz": e(0.3, tol=(0.5, 1.0)),
         "g.spl.ac2 sweep@50Hz": e(0.1, tol=(0.5, 1.0)), "g.spl.REW (SPL, cal from ac2)@50Hz": e(None, "INCONCLUSIVE")}}
-    hs = C.hits(b, C.ROWS[1].ac2_rew[0])
+    hs = C.hits(b, C.SPL.ac2_rew[0])
     assert [(round(h.value, 3), h.status) for h in hs] == [(-0.7, "WARN")]
-    assert C.cell_text(hs, True, True) == "−0.700 dB **warn**"
+    assert C.cell_text(hs) == "−0.700 dB **warn**"
 
 
 def test_value_format():
@@ -99,11 +128,12 @@ def test_rebuild_check_and_disparity_sections(tmp_path, capsys):
     doc.write_text(doc.read_text().replace("−0.060 dB **warn**", "−0.060 dB pass"))
     assert not C.update(doc, root, check=True)[0]
     # a warn cell without its section, and a section without a warn cell
-    doc.write_text(_doc("## Disparities\n\n### Phase: ac2 vs truth\n\n## Reproducing\n"))
+    # (keyed by path: the same quantity on another path is another cell)
+    doc.write_text(_doc("## Disparities\n\n### Genelec: Magnitude at the tones: ac2 vs truth\n\n## Reproducing\n"))
     current, problems = C.update(doc, root, check=True)
     assert not current and len(problems) == 2
-    assert "'Magnitude: ac2 vs truth' cell is warn or FAIL" in problems[0]
-    assert "`### Phase: ac2 vs truth`" in problems[1]
+    assert f"'{TONES}' cell is warn or FAIL" in problems[0]
+    assert "`### Genelec: Magnitude at the tones: ac2 vs truth`" in problems[1]
 
 
 def test_quoted_numbers_follow_their_source(tmp_path, capsys):

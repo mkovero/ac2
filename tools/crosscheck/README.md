@@ -9,7 +9,7 @@ disparities): [comparison.md](comparison.md).
 ```
 crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison})
 rigs/            pupu.toml: ports, roles, paths, levels, stage settings; host.toml: the digital DUT on a dummy JACK server
-comparison.md    ac2 vs REW vs OSM against truth: one table, then the disparities
+comparison.md    ac2 vs REW vs OSM against truth: a table per signal path, then the disparities
 reports/         repeated takes, coherence study, DUT coverage
 osm.toml         the OSM stage: harness and ac2 binaries, matched settings, cases, recordings
 tolerances.toml  PASS / WARN limits for every comparison, compare steps
