@@ -68,9 +68,12 @@ fn past_full_drops_the_words_and_keeps_the_colours() {
         );
         // The values, the names and every word that is not one of them stay: on course
         // and cooling down say what no colour does.
+        // Traces only also takes the columns' scale numbers ([`t_steps_the_column_scale`]).
         let before = texts(&words.scene);
+        let scale =
+            |t: &str| style == LeqStyle::Columns && chrome == PlotChrome::Bare && is_scale(t);
         for t in &before {
-            if status_words(&[t]).is_empty() {
+            if status_words(&[t]).is_empty() && !scale(t) {
                 assert!(all.contains(t), "{style:?} {chrome:?}: {t} kept in {all:?}");
             }
         }
@@ -108,6 +111,53 @@ fn past_full_drops_the_words_and_keeps_the_colours() {
                 assert_eq!(words.scene.layers[0].rects, colours.scene.layers[0].rects);
             }
         }
+    }
+}
+
+/// A number of the columns' dB scale: whole tens.
+fn is_scale(t: &str) -> bool {
+    t.parse::<i64>().is_ok_and(|v| v % 10 == 0)
+}
+
+/// T on the Leq columns, as on a graph: no grid drops the 10 dB lines across the tracks,
+/// traces only the scale's numbers too; the scale keeps its room, so the columns, their
+/// bars, colours, values and limit lines stay where they were.
+#[test]
+fn t_steps_the_column_scale() {
+    let (c, f) = many(8, false, LevelScale::DbSpl);
+    let v = columns_view(&c, &f, None);
+    let full = with(&v, LeqStyle::Columns, PlotChrome::Full);
+    let no_grid = with(&v, LeqStyle::Columns, PlotChrome::NoGrid);
+    let bare = with(&v, LeqStyle::Columns, PlotChrome::Bare);
+    assert!(cols(&full).gutter.is_some());
+    let numbers =
+        |s: &LeqScene| -> usize { texts(&s.scene).iter().filter(|t| is_scale(t)).count() };
+    assert!(numbers(&full) > 0);
+    assert_eq!(numbers(&no_grid), numbers(&full));
+    assert_eq!(numbers(&bare), 0);
+    // The grid: lines across each column's track, on the base layer.
+    let lines = |s: &LeqScene| s.scene.layers[0].polylines.len();
+    assert!(lines(&full) > 0);
+    assert_eq!((lines(&no_grid), lines(&bare)), (0, 0));
+    // Past full the limit row goes and the tracks grow, words and lines alike;
+    // traces only then moves nothing.
+    assert_eq!(cols(&full).gutter, cols(&no_grid).gutter);
+    for l in 0..full.scene.layers.len() {
+        assert_eq!(no_grid.scene.layers[l].rects, bare.scene.layers[l].rects);
+        assert_eq!(
+            no_grid.scene.layers[l].polylines,
+            bare.scene.layers[l].polylines
+        );
+    }
+    let (a, b) = (cols(&no_grid), cols(&bare));
+    assert_eq!((a.gutter, a.range, a.large), (b.gutter, b.range, b.large));
+    assert_eq!(a.columns.len(), b.columns.len());
+    for (x, y) in a.columns.iter().zip(&b.columns) {
+        assert_eq!(
+            (x.rect, x.track, x.bar, x.limit_y, &x.value, &x.name),
+            (y.rect, y.track, y.bar, y.limit_y, &y.value, &y.name)
+        );
+        assert_eq!(x.bar_db.to_bits(), y.bar_db.to_bits());
     }
 }
 

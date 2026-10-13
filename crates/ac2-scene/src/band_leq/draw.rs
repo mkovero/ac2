@@ -16,6 +16,9 @@ pub struct BandLeqView {
     pub text: BandLeqText,
     /// `STALE 3.2 s`.
     pub stale: Option<String>,
+    /// The pane's T step: the 10 dB lines go with the grid, the scale's numbers with the
+    /// labels, as on a graph. The bars, limit marks and band labels stay at every step.
+    pub chrome: PlotChrome,
 }
 
 /// The band view as drawn.
@@ -177,7 +180,8 @@ pub fn band_leq_scene(
             .filter(|&(w, _)| w == wi)
             .map(|(_, i)| i)
             .or(win.worst);
-        let cols = draw_window(&mut c, win, worst, range, (top, section_h), pad, w, theme);
+        let section = (top, section_h);
+        let cols = draw_window(&mut c, win, worst, range, section, pad, w, v.chrome, theme);
         columns.push(cols);
         ranges.push(range);
     }
@@ -200,6 +204,7 @@ fn draw_window(
     (top, height): (f32, f32),
     pad: f32,
     w: f32,
+    chrome: PlotChrome,
     theme: &Theme,
 ) -> Vec<Rect> {
     let fs = theme.font_size;
@@ -273,22 +278,27 @@ fn draw_window(
     };
     // Grid lines every 10 dB, fewer when the section is short.
     let step = if area.h < sfs * 8.0 { 20.0 } else { 10.0 };
+    // The scale's room stays when T hides it, so the columns keep their place.
     let mut db = range.0;
     while db <= range.1 + 1e-9 {
         let gy = to_y(db);
-        c.base.polylines.push(Polyline {
-            points: vec![[area.x, gy], [area.right(), gy]],
-            alpha: Vec::new(),
-            stroke: theme.grid_major,
-            clip: None,
-        });
-        c.overlay.labels.push(label(
-            format::fixed(db, 0),
-            [area.x - 4.0, gy],
-            anchor(HAlign::Right, VAlign::Center),
-            sfs,
-            theme.axis_text,
-        ));
+        if chrome.grid() {
+            c.base.polylines.push(Polyline {
+                points: vec![[area.x, gy], [area.right(), gy]],
+                alpha: Vec::new(),
+                stroke: theme.grid_major,
+                clip: None,
+            });
+        }
+        if chrome.labels() {
+            c.overlay.labels.push(label(
+                format::fixed(db, 0),
+                [area.x - 4.0, gy],
+                anchor(HAlign::Right, VAlign::Center),
+                sfs,
+                theme.axis_text,
+            ));
+        }
         db += step;
     }
     let col_w = area.w / t.bars.len().max(WIDEST_OF) as f32;

@@ -150,7 +150,7 @@ commands! {
     PrevInTree => "prev_in_tree", "Select the previous row in the measurement list (the focused pane shows its measurement)", [Global];
     PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];
     CycleTheme => "cycle_theme", "Theme: dark → light → high contrast", [Global];
-    PlotChrome => "plot_chrome", "Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only (SPL: the limit text goes with the grid)", [Global];
+    PlotChrome => "plot_chrome", "Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only (SPL: the limit text goes with the grid, the scale with the labels)", [Global];
     ZoomIn => "zoom_in", "Zoom frequency in (IR: time)", [Global];
     ZoomOut => "zoom_out", "Zoom frequency out (IR: time)", [Global];
     PanLeft => "pan_left", "Pan frequency down (IR: earlier)", [Global];

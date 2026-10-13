@@ -520,7 +520,13 @@ fn past_full_under_the_meter() {
         let b: Vec<&str> = b.iter().map(String::as_str).collect();
         assert!(a.iter().any(status_word), "{style:?} {chrome:?}: {a:?}");
         assert!(!b.iter().any(status_word), "{style:?} {chrome:?}: {b:?}");
-        for t in a.iter().filter(|t| !status_word(t)) {
+        // Traces only also takes the columns' scale numbers, whole tens.
+        let scale = |t: &str| {
+            style == LeqStyle::Columns
+                && chrome == PlotChrome::Bare
+                && t.parse::<i64>().is_ok_and(|v| v % 10 == 0)
+        };
+        for t in a.iter().filter(|t| !status_word(t) && !scale(t)) {
             assert!(b.contains(t), "{style:?} {chrome:?}: {t} kept in {b:?}");
         }
         if style == LeqStyle::Columns {

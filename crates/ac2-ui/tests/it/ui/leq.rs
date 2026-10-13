@@ -457,13 +457,14 @@ fn leq_tiles_from_an_empty_daemon() {
     };
     snapshot_when(&mut h, "leq_columns_over", pin, first_is(true));
     // T, the plot chrome: no OK / NEAR / OVER, stay or limit text; the colours and limit
-    // lines say it. T T: through traces only back to the words.
+    // lines say it, and the columns' 10 dB lines go with the grid. T T: through no scale
+    // back to the words.
     let chrome =
         |c| move |a: &ac2_ui::App| a.state.kind_modes(ac2_ui::state::PaneKind::Spl).chrome == c;
     h.key_press(Key::T);
     step_until(
         &mut h,
-        "no limit text",
+        "no grid or limit text",
         chrome(ac2_scene::view::PlotChrome::NoGrid),
     );
     snapshot_when(&mut h, "leq_columns_no_limit_text", pin, first_is(true));
@@ -471,7 +472,7 @@ fn leq_tiles_from_an_empty_daemon() {
     h.key_press(Key::T);
     step_until(
         &mut h,
-        "words and limits",
+        "grid, scale and limit text",
         chrome(ac2_scene::view::PlotChrome::Full),
     );
     // Tiles, and the history strip under them (Settings › Display, the palette).

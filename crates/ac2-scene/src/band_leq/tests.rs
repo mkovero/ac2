@@ -462,6 +462,7 @@ fn view(c: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqView {
         cal: "M30 · calibrated".into(),
         text: band_leq_text(c, f, PlotChrome::Full),
         stale: None,
+        chrome: PlotChrome::Full,
     }
 }
 
@@ -741,7 +742,7 @@ fn an_easing_bar_moves_only_its_length() {
 fn past_full_leaves_the_state_to_the_colours() {
     let words = band_leq_text(&cfg(), &frame(), PlotChrome::Full);
     let t = band_leq_text(&cfg(), &frame(), PlotChrome::NoGrid);
-    // The band view has nothing else for traces only to take away.
+    // Traces only takes the scale too, which is the scene's, not the text's.
     assert_eq!(t, band_leq_text(&cfg(), &frame(), PlotChrome::Bare));
     let w = &t.rows[0];
     let over = &w.bars[5];
@@ -794,20 +795,39 @@ fn past_full_leaves_the_state_to_the_colours() {
     assert_eq!(t.headline_state, TileState::Near);
 }
 
-/// The band view past full draws the same colours, limit marks and allowed-level marks,
-/// without the words.
+/// T on the band view, as on a graph: no grid drops the 10 dB lines (and the limit text),
+/// traces only the scale's numbers too. The bars, their colours and values, the band
+/// labels, the limit lines and the allowed-level marks with their key stay at every step.
 #[test]
-fn past_full_band_scene() {
+fn t_steps_the_band_scene() {
     let at = |chrome| {
         let v = BandLeqView {
             text: band_leq_text(&cfg(), &frame(), chrome),
+            chrome,
             ..view(&cfg(), &frame())
         };
         band_leq_scene(&v, &Status::default(), &Theme::dark(), SIZE)
     };
-    let words = at(PlotChrome::Full);
-    let colours = at(PlotChrome::NoGrid);
-    assert_eq!(colours, at(PlotChrome::Bare));
+    let theme = Theme::dark();
+    let full = at(PlotChrome::Full);
+    let no_grid = at(PlotChrome::NoGrid);
+    let bare = at(PlotChrome::Bare);
+    // The base layer's lines are the 10 dB grid, and only it.
+    let grid = &full.scene.layers[0].polylines;
+    assert!(!grid.is_empty());
+    assert!(grid.iter().all(|p| p.stroke == theme.grid_major));
+    for s in [&no_grid, &bare] {
+        assert!(s.scene.layers[0].polylines.is_empty());
+        // Every fill, bar, limit line and allowed-level mark where it was, in its colour.
+        for l in 0..full.scene.layers.len() {
+            assert_eq!(full.scene.layers[l].rects, s.scene.layers[l].rects);
+            if l > 0 {
+                assert_eq!(full.scene.layers[l].polylines, s.scene.layers[l].polylines);
+            }
+        }
+        assert_eq!(full.columns, s.columns);
+        assert_eq!(full.ranges, s.ranges);
+    }
     let said = |t: &String| {
         matches!(t.as_str(), "OK" | "NEAR" | "OVER")
             || t.contains("stay ≤ ")
@@ -815,20 +835,24 @@ fn past_full_band_scene() {
             || t.match_indices("limit ")
                 .any(|(i, m)| t[i + m.len()..].starts_with(|c: char| c.is_ascii_digit()))
     };
-    let a = texts(&words);
-    let b = texts(&colours);
+    let (a, b, c) = (texts(&full), texts(&no_grid), texts(&bare));
     assert!(a.iter().any(said), "{a:?}");
     assert!(!b.iter().any(said), "{b:?}");
     for t in a.iter().filter(|t| !said(t)) {
         assert!(b.contains(t), "{t} kept in {b:?}");
     }
-    // Every fill and mark where it was, in its colour.
-    for l in 0..words.scene.layers.len() {
-        assert_eq!(words.scene.layers[l].rects, colours.scene.layers[l].rects);
-        assert_eq!(
-            words.scene.layers[l].polylines,
-            colours.scene.layers[l].polylines
-        );
+    // Traces only: one scale number per grid line goes, every other word stays in order.
+    let scale = |t: &String| t.parse::<i64>().is_ok_and(|v| v % 10 == 0);
+    let mut rest = c.iter();
+    let mut gone = 0;
+    for t in &b {
+        if rest.clone().next() == Some(t) {
+            rest.next();
+        } else {
+            assert!(scale(t), "{t} kept in {c:?}");
+            gone += 1;
+        }
     }
-    assert_eq!(words.columns, colours.columns);
+    assert_eq!(rest.next(), None);
+    assert_eq!(gone, grid.len());
 }

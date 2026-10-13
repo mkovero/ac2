@@ -808,22 +808,28 @@ fn t_on_the_spl_pane_takes_the_limit_text() {
     };
     let before = others(&t);
     for (want, toast) in [
-        (PlotChrome::NoGrid, "SPL: no limit text"),
-        (PlotChrome::Bare, "SPL: no limit text, traces only"),
+        (PlotChrome::NoGrid, "SPL: no grid or limit text"),
+        (PlotChrome::Bare, "SPL: no grid, scale or limit text"),
     ] {
         t.key("T");
         assert_eq!(t.st.pane_modes(spl).chrome, want);
         assert_eq!(t.last_toast(), toast);
         let all = texts(&t);
         assert!(!said(&all), "{want:?}: {all:?}");
-        // Every other text of the windows (values, names, the caption) stays.
-        for v in full.iter().filter(|v| !said(std::slice::from_ref(*v))) {
+        // Every other text of the windows (values, names, the caption) stays; the scale's
+        // numbers, whole tens, go with the labels.
+        let scale =
+            |v: &str| want == PlotChrome::Bare && v.parse::<i64>().is_ok_and(|v| v % 10 == 0);
+        for v in full
+            .iter()
+            .filter(|v| !said(std::slice::from_ref(*v)) && !scale(v))
+        {
             assert!(all.contains(v), "{want:?}: {v} kept in {all:?}");
         }
     }
     t.key("T");
     assert_eq!(t.st.pane_modes(spl).chrome, PlotChrome::Full);
-    assert_eq!(t.last_toast(), "SPL: words and limits");
+    assert_eq!(t.last_toast(), "SPL: grid, scale and limit text");
     assert_eq!(texts(&t), full);
     assert_eq!(others(&t), before);
     // Kept per pane for the next start.

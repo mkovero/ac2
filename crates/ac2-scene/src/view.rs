@@ -762,12 +762,13 @@ impl PlotChrome {
         self == Self::Full
     }
 
-    /// [`Self::name`] on an SPL pane, where the step past full takes the limit text too.
+    /// [`Self::name`] on an SPL pane: the grid is the bars' 10 dB lines, the labels their
+    /// scale's numbers, and the step past full takes the limit text too.
     pub fn spl_name(self) -> &'static str {
         match self {
-            Self::Full => "words and limits",
-            Self::NoGrid => "no limit text",
-            Self::Bare => "no limit text, traces only",
+            Self::Full => "grid, scale and limit text",
+            Self::NoGrid => "no grid or limit text",
+            Self::Bare => "no grid, scale or limit text",
         }
     }
 }

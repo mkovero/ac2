@@ -428,6 +428,32 @@ fn slow_band_leq_from_an_empty_daemon() {
         },
         has_frame,
     );
+    // T, the plot chrome: no grid drops the 10 dB lines and the limit text, traces only the
+    // scale's numbers too; the bars, values, band labels, limit lines and the allowed-level
+    // marks with their key stay where they were. T back to full.
+    let chrome =
+        |c| move |a: &ac2_ui::App| a.state.kind_modes(ac2_ui::state::PaneKind::Spl).chrome == c;
+    for (c, name) in [
+        (ac2_scene::view::PlotChrome::NoGrid, "band_leq_no_grid"),
+        (ac2_scene::view::PlotChrome::Bare, "band_leq_no_scale"),
+    ] {
+        h.key_press(Key::T);
+        step_until(&mut h, name, chrome(c));
+        snapshot_when(
+            &mut h,
+            name,
+            |a| {
+                a.state.toasts.clear();
+            },
+            has_frame,
+        );
+    }
+    h.key_press(Key::T);
+    step_until(
+        &mut h,
+        "grid, scale and limit text",
+        chrome(ac2_scene::view::PlotChrome::Full),
+    );
 
     band_transfer_step(&mut h, &fake, meas);
 }

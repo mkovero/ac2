@@ -550,10 +550,12 @@ belongs to the pane (kept when **Tab** changes its measurement, copied by a spli
 covers the spectrograph, the Leq history strip and the sweep's IR too. On the SPL pane the
 step past full also takes the limit text: OK / NEAR / OVER, "stay ≤ … dB" and "limit … dB"
 leave the Leq columns, tiles, meter + Leq and band bars, and the colours, limit lines and
-the band view's allowed-level marks say it (`SPL: no limit text`, then
-`SPL: no limit text, traces only`, `SPL: words and limits`); on course, cooling down and
-not calibrated stay. The windows and band bars keep their scale at every step, so outside
-the history strip traces only looks like the step before. The theme is in
+the band view's allowed-level marks say it; on course, cooling down and not calibrated
+stay. The 10 dB lines across the Leq columns and band bars go with the grid, and traces
+only takes their scale's numbers too (`SPL: no grid or limit text`, then
+`SPL: no grid, scale or limit text`, `SPL: grid, scale and limit text`). The bars, their
+values, the band labels, the limit lines and the allowed-level marks with their key stay
+at every step, and nothing moves: the scale keeps its room. The theme is in
 Settings › Display and the palette (*Theme*).
 
 #### The transfer legend
@@ -2253,7 +2255,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+Shift+Z` | Redo the pane change last undone | `redo` |
 | `Tab` | Select the next row in the measurement list (the focused pane shows its measurement) | `next_in_tree` |
 | `Shift+Tab` | Select the previous row in the measurement list (the focused pane shows its measurement) | `prev_in_tree` |
-| `T` | Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only (SPL: the limit text goes with the grid) | `plot_chrome` |
+| `T` | Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only (SPL: the limit text goes with the grid, the scale with the labels) | `plot_chrome` |
 | `I` | Zoom frequency in (IR: time) | `zoom_in` |
 | `O` | Zoom frequency out (IR: time) | `zoom_out` |
 | `←` | Pan frequency down (IR: earlier) | `pan_left` |

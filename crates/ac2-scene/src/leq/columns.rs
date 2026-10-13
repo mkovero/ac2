@@ -627,7 +627,9 @@ pub(super) fn draw_columns(
         .min((track_bottom - track_top) * 0.4 / 1.25)
         .max(4.0);
 
-    if let Some(g) = gutter {
+    // T hides the scale as on a graph: the lines with the grid, the numbers with the
+    // labels; the gutter keeps its room so the columns stay where they were.
+    if let Some(g) = gutter.filter(|_| chrome.labels()) {
         // A short track labels every second or fifth line, so the labels stay apart.
         let per_step = (track_bottom - track_top) * step as f32 / range.span().max(1.0) as f32;
         let every = [1.0, 2.0, 5.0, 10.0]
@@ -679,7 +681,7 @@ pub(super) fn draw_columns(
             color: track_color,
             clip: None,
         });
-        for v in &ticks {
+        for v in ticks.iter().filter(|_| chrome.grid()) {
             let y = to_y(*v);
             c.base.polylines.push(Polyline {
                 points: vec![[track.x, y], [track.right(), y]],

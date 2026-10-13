@@ -128,7 +128,8 @@ fn band_view<'a>(
         Freshness::AudioStopped { .. } => Some("AUDIO STOPPED".into()),
         Freshness::Fresh { .. } => None,
     };
-    let mut text = band_leq_text(bands, f, st.pane_modes(pane).chrome);
+    let chrome = st.pane_modes(pane).chrome;
+    let mut text = band_leq_text(bands, f, chrome);
     if let Some((from, since)) = easing_from(st, tf, now)
         && let FrameData::BandLeq(p) = &from.data
     {
@@ -144,6 +145,7 @@ fn band_view<'a>(
             cal: spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now),
             text,
             stale,
+            chrome,
         },
         tf,
     ))
