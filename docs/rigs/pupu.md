@@ -105,6 +105,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
+| 47d7298a | 2026-10-13 | 50 / 25 | app only (ketunkolo, Pi; pupu daemon stays on 438048f2): T on an SPL pane hides the limit text (OK/NEAR/OVER, stay ≤, limit), the Shift+L status-text row is gone; no `ui.toml` had `[leq] status_text`; stray own layouts of FOH SPL, Spectrum 1 and Spectrum 2 cleared with `meas layout clear` |
 | 438048f2 | 2026-10-13 | 50 / 25 | pupu only (daemon and CLI; app hosts stay on 7e863a50): session loads check SPL logs and trace data; autosave restored as is (5 measurements, 3 traces, nothing set aside), session reopened `--in 1-8 --outputs 6` |
 | 7e863a50 | 2026-10-13 | 50 / 25 | drag rows onto panes (edge-drop splits, Shift-drop compare), Ctrl+Z / Ctrl+Shift+Z undo of pane edits, Leq status text "colours only" (Shift+L, off by default), file.recover / file.salvage as file jobs; autosave restored as is, session reopened `--in 1-8 --outputs 6` |
 | 26508046 | 2026-10-13 | 50 / 25 | edits go only to the chosen row's own layout (a chip pick no longer writes the picked measurement's), rate in bits, the audit fixes (gen.acquire disarm, request dedup, file I/O workers, per-pane level axes, hide/compare by id); autosave restored as is |
