@@ -5,12 +5,22 @@ the pupu rig (RME Fireface 400 at 96 kHz): an electrical path through an Allen &
 mixer, a Genelec 1083 speaker in a room with a beyerdynamic MM1 measurement microphone at
 56 cm on the Genelec's tweeter axis, 90° grazing, and the same room's ambient noise. On the dev
 host: a software device with known distortion on a dummy JACK server, and OSM's DSP on synthetic
-test signals and on the rig's recordings. All tools share ac2's stored calibration, which
-includes the mic's loading into the input (−1.33 dB); REW is set to the same dBFS at 94 dB SPL.
+test signals and on the rig's recordings. All tools share ac2's stored calibration (below).
 Each tool is held to a truth that depends on none of them: a steady sine analysed in numpy,
 numpy's direct cross-spectrum of the same recording, closed-form test signals, and the software
 device's exact harmonics. Not validated here: the physical calibration chain (microphone
 sensitivity, calibrator) and IEC 61672-1 / 61260-1 class conformance.
+
+**Calibration and mic loading.** A microphone's data-sheet sensitivity is open-circuit. Its
+source impedance into the input's impedance is a voltage divider, so the input sees less than
+the data sheet promises (the values are in the build line below). ac2's electrical calibration
+measures the volts at the input, so its stored sensitivity already includes the divider, and the
+store records both impedances beside it. REW has no setting for loading: it takes one "dBFS at
+94 dB SPL", and is given 94 minus ac2's loaded sensitivity. Given the data-sheet value instead,
+REW would read every SPL low against ac2 by the divider; with the loaded value, loading never
+shows as a difference between the tools. OSM gets no SPL calibration here: its comparisons are
+relative (transfer functions, spectra in dBFS). The suite's preflight refuses a run whose stored
+sensitivity disagrees with the data sheet once the divider is applied.
 
 <!-- BEGIN generated build: `python -m crosscheck comparison` from baselines/; do not edit by hand -->
 

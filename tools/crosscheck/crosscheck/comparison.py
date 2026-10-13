@@ -237,6 +237,14 @@ def build_text(items: list[tuple[Path, dict]]) -> str:
         takes.setdefault(b["stage"], []).append(b)
     parts = [STAGE_NAMES[st] + (f" at {levels_text(bs)}" if levels_text(bs) else "") for st, bs in takes.items()]
     out = f"ac2 build **{doc_build(items)}**, runs of {when}: {'; '.join(parts)}."
+    cals = [c for _, b in shown if (c := (b.get("provenance") or {}).get("calibration"))]
+    if cals:
+        c = cals[0]
+        out += (f" SPL calibration: {c['mic']} on input {c['input']}, 0 dBFS = {c['sensitivity_db']:.2f} dB SPL")
+        if "loading_db" in c:
+            out += (f", including its loading ({c['mic_impedance']:g} Ω into {c['input_impedance']:g} Ω,"
+                    f" {c['loading_db']:+.2f} dB)".replace("-", "−"))
+        out += f"; REW given {c['rew_dbfs_at_94']:.2f} dBFS at 94 dB SPL.".replace("-", "−")
     gone = sorted({b["stage"] for _, b in items} - set(takes))
     if gone:
         out += f" Not run on this build: {', '.join(STAGE_NAMES[s] for s in gone)}."

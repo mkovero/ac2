@@ -1,3 +1,4 @@
+import math
 import json
 from pathlib import Path
 
@@ -279,3 +280,14 @@ def test_case_subset_judges_its_cases_and_strict_fails_on_lost_checks(tmp_path):
     d3 = write_run(tmp_path, "l30", dut_results(full, emit="-30dbfs"))
     assert B.compare(d3, root, out=tmp_path / "o4")[0] == 0
     assert B.compare(d3, root, out=tmp_path / "o5", strict=True)[0] == 1
+
+
+def test_calibration_carries_the_loading_and_rews_value():
+    # REW has no loading setting: it is given 94 − the loaded sensitivity, and the baseline
+    # keeps the divider the stored sensitivity includes, so the document can state both
+    man = {"preflight": {"cal": {"mic": "MM1", "input": 1, "sensitivity_db": 120.468, "rew_dbfs_at_94": -26.468,
+                                 "method": {"loading": {"mic_impedance": 330.0, "input_impedance": 2000.0}}}}}
+    c = B.calibration(man)
+    assert abs(c["loading_db"] - 20 * math.log10(2000 / 2330)) < 1e-4
+    assert abs(c["rew_dbfs_at_94"] - (94 - c["sensitivity_db"])) < 1e-3
+    assert B.calibration({"preflight": {}}) is None

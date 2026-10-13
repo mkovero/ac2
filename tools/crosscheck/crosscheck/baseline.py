@@ -181,6 +181,22 @@ def _num(x):
     return float(f"{x:.6g}")
 
 
+def calibration(man: dict) -> dict | None:
+    """The SPL calibration a rig run used, from its preflight: ac2's stored sensitivity, the
+    mic's loading into the input that it includes, and the value REW was given (it has no
+    loading setting, so it takes the loaded sensitivity as dBFS at 94 dB SPL)."""
+    cal = (man.get("preflight") or {}).get("cal")
+    if not cal or cal.get("sensitivity_db") is None:
+        return None
+    out = {"mic": cal.get("mic"), "input": cal.get("input"), "sensitivity_db": _num(cal["sensitivity_db"]),
+           "rew_dbfs_at_94": _num(cal.get("rew_dbfs_at_94"))}
+    load = (cal.get("method") or {}).get("loading")
+    if load:
+        zm, zi = float(load["mic_impedance"]), float(load["input_impedance"])
+        out |= {"mic_impedance": zm, "input_impedance": zi, "loading_db": _num(20 * math.log10(zi / (zi + zm)))}
+    return out
+
+
 def make_baseline(results: dict, stage: str, run_id: str) -> dict:
     man = results.get("manifest") or {}
     checks = {}
@@ -210,7 +226,8 @@ def make_baseline(results: dict, stage: str, run_id: str) -> dict:
             "provenance": {"run": run_id, "started": man.get("started"), "ac2_build": man.get("ac2_version"),
                            "rew_version": man.get("rew_version"), "osm_version": man.get("osm_version"),
                            "flags": man.get("flags"),
-                           "suite_commit": man.get("suite_commit")},
+                           "suite_commit": man.get("suite_commit"),
+                           **({"calibration": cal} if (cal := calibration(man)) else {})},
             "summary": summary, "checks": dict(sorted(checks.items()))}
 
 
