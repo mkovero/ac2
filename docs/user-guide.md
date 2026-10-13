@@ -479,6 +479,40 @@ measurement goes into the first pane of its kind.
 `ac2 meas list` has a `layout` column; `ac2 meas layout clear <meas>` removes a
 measurement's own panes. Deleting a measurement deletes its layout; editing it keeps it.
 
+#### Dragging a row onto a pane
+
+Any row of the measurement list (a measurement, its live curve, a math channel, a stored
+trace) can be dragged onto a pane: hold the button and move a few pixels. A label beside
+the pointer says where it lands (`FOH SPL → pane 2`) and the target is shaded faintly with
+a dashed edge. Dropped in the middle of a pane, that pane shows the row as a pick from its
+chip (or a child row) would, turning into the kind that draws it; focus moves there and no
+other pane changes. A dropped measurement is selected as a chip pick selects it. A drop is a
+guest pick: it never brings the measurement's own panes, and the edit is stored on the
+measurement whose row was chosen, as in *Layouts follow the measurement*.
+
+Dropped within about the outer fifth of a pane (`FOH SPL → new pane below`), the pane splits
+on that side as **N** would and the new half shows the row. A pane too small for **N** to
+split takes a plain drop instead, and the label names the pane. **Shift** held on release
+compares the row over the pane, as **C** does, and the pane keeps what it shows
+(`FOH SPL → compare in pane 2`); only a transfer pane draws compared curves and only a
+measurement or trace with a transfer curve can be one, so anything else is refused with a
+toast that says why. **Esc** cancels the drag; a drop outside the panes does nothing.
+
+#### Undo and redo (Ctrl+Z, Ctrl+Shift+Z)
+
+**Ctrl+Z** takes back the last change to the panes and **Ctrl+Shift+Z** does it again; the
+toast names it (`Undid: FOH SPL → pane 2`, `Redid: split pane 1`, `Nothing to undo`).
+Covered: drops and edge drops, **N** / **Shift+N**, **Q**, chip picks and list-row picks,
+**Tab** / **Shift+Tab**, **G** / **Shift+G**, **T**, a dragged split (one step per drag),
+**Alt+←/→**, **W**, **F**, the transfer stack, and compare on / off (**C**, clear compare).
+Daemon actions (start, stop, delete, capture, rename, delay, smoothing) are not undone. The
+history keeps 50 steps per app instance, is not saved, and a new change drops whatever was
+undone after it.
+
+When the step undone or redone had been stored as the chosen measurement's own panes, the
+restored panes are stored on it again; no other measurement's layout is written. A pane
+whose measurement has since been deleted comes back empty, of its kind.
+
 ### Zoom, pan and the level axis
 
 The frequency axis is shared by the panes: **I** / **O** zoom, **←** / **→** pan, **Home**
@@ -2207,6 +2241,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+→` | Grow the focused pane (within its split) | `grow_pane` |
 | `Alt+←` | Shrink the focused pane (within its split) | `shrink_pane` |
 | `W` | Layout: split → one pane → full screen | `maximize_pane` |
+| `Ctrl+Z` | Undo the last change to the panes (split, close, drop, pick, view, size, W / F, compare) | `undo` |
+| `Ctrl+Shift+Z` | Redo the pane change last undone | `redo` |
 | `Tab` | Select the next row in the measurement list (the focused pane shows its measurement) | `next_in_tree` |
 | `Shift+Tab` | Select the previous row in the measurement list (the focused pane shows its measurement) | `prev_in_tree` |
 | `T` | Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only | `plot_chrome` |

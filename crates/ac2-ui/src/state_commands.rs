@@ -258,7 +258,10 @@ impl AppState {
 
     pub(super) fn command(&mut self, c: CommandId, keymap: &Keymap, out: &mut Vec<Request>) {
         use CommandId as C;
+        self.ran_command.get_or_insert(c);
         match c {
+            C::Undo => self.undo(out),
+            C::Redo => self.redo(out),
             C::Help => {
                 self.overlay = if self.overlay == Overlay::Help {
                     Overlay::None

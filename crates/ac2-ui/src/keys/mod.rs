@@ -144,6 +144,8 @@ commands! {
     ShrinkPane => "shrink_pane", "Shrink the focused pane (within its split)", [Global];
     TransferStack => "transfer_stack", "Transfer stack: magnitude / phase / coherence (in place of the focused pane)", [Global];
     MaximizePane => "maximize_pane", "Layout: split → one pane → full screen", [Global];
+    Undo => "undo", "Undo the last change to the panes (split, close, drop, pick, view, size, W / F, compare)", [Global];
+    Redo => "redo", "Redo the pane change last undone", [Global];
     NextInTree => "next_in_tree", "Select the next row in the measurement list (the focused pane shows its measurement)", [Global];
     PrevInTree => "prev_in_tree", "Select the previous row in the measurement list (the focused pane shows its measurement)", [Global];
     PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];

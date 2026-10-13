@@ -905,6 +905,9 @@ mod panes;
 #[path = "state_meas_layout_tests.rs"]
 mod meas_layout;
 
+#[path = "state_drag_undo_tests.rs"]
+mod drag_undo;
+
 /// Shift+C steps the selected measurement's colour to one no other measurement has
 /// (`meas.colour`); the palette's previous colour steps back, grey last.
 #[test]

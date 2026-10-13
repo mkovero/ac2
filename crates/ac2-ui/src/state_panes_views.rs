@@ -291,23 +291,36 @@ impl Layout {
             .find(|id| self.views.get(id).is_some_and(|v| v.kind == kind))
     }
 
-    /// Splits the focused pane (`rect` where it is drawn) along its longer side: a wide
-    /// pane side by side, a tall one stacked. The new pane shows what the focused one does
-    /// and gets the focus.
-    pub fn split_focused(&mut self, rect: PaneRect) -> PaneId {
-        let axis = if rect.w >= rect.h {
-            Axis::Row
-        } else {
-            Axis::Column
-        };
+    /// Splits pane `id` in halves along `axis`, the new pane on `side` of it (`A`: left or
+    /// top). The new pane shows what `id` does and gets the focus.
+    pub fn split_pane(&mut self, id: PaneId, axis: Axis, side: Side) -> PaneId {
         let new = PaneId(self.next_id);
-        let view = self.focused();
-        if self.root.split(self.focus, axis, new) {
+        let Some(view) = self.views.get(&id).copied() else {
+            return new;
+        };
+        if self.root.split_side(id, axis, new, side) {
             self.next_id += 1;
             self.views.insert(new, view);
             self.set_focus(new);
         }
         new
+    }
+
+    /// The same panes, focus and views as `o`, whatever ids each has handed out.
+    pub(super) fn same_panes(&self, o: &Layout) -> bool {
+        self.root == o.root
+            && self.views == o.views
+            && self.focus == o.focus
+            && self.maximized == o.maximized
+            && self.mru == o.mru
+    }
+
+    /// The panes of `snap` back on screen (an undo or redo). Pane ids stay past every id
+    /// used this run, so a pane split later never takes the id of one closed since.
+    pub(super) fn restore(&mut self, snap: &Layout) {
+        let next_id = self.next_id.max(snap.next_id);
+        *self = snap.clone();
+        self.next_id = next_id;
     }
 
     /// Leaf `id` replaced by `views` stacked top to bottom, each taking its share of the

@@ -24,6 +24,7 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::{Harness, SnapshotOptions};
 
 mod band;
+mod drag;
 mod leq;
 mod overlays;
 mod session;

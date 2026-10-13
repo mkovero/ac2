@@ -170,7 +170,7 @@ impl AppState {
     }
 
     /// Pane `p`'s rectangle in the area last drawn, the tree laid out (not maximised).
-    fn laid_out_rect(&self, p: PaneId) -> PaneRect {
+    pub(super) fn laid_out_rect(&self, p: PaneId) -> PaneRect {
         let (w, h) = self.pane_area;
         self.layout
             .root
@@ -277,26 +277,32 @@ impl AppState {
     /// a pane.
     fn split_focused_pane(&mut self) -> Option<PaneId> {
         let rect = self.focused_rect();
-        let (w, h) = self.pane_area;
-        let (side, extent) = if rect.w >= rect.h {
-            (rect.w, w)
+        let axis = if rect.w >= rect.h {
+            Axis::Row
         } else {
-            (rect.h, h)
+            Axis::Column
         };
-        if side / 2.0 < MIN_RATIO * extent {
+        self.split_pane_at(self.layout.focus, axis, Side::B)
+    }
+
+    /// Pane `p` split in halves along `axis`, the new half on `side` (`A`: left or top),
+    /// showing what `p` does and taking the focus: the new pane, or `None` when a half would
+    /// be smaller than resizing keeps a pane.
+    pub(super) fn split_pane_at(&mut self, p: PaneId, axis: Axis, side: Side) -> Option<PaneId> {
+        self.layout.view(p)?;
+        if !self.can_split(p, axis) {
             return None;
         }
         // Both halves keep showing what the pane did, whatever is selected later: an
         // unchosen pane would follow the selection.
-        let f = self.layout.focus;
-        let shown = self.pane_meas(f).map(|m| m.id);
-        if let Some(v) = self.layout.view_mut(f) {
+        let shown = self.pane_meas(p).map(|m| m.id);
+        if let Some(v) = self.layout.view_mut(p) {
             v.meas = v.meas.or(shown);
         }
-        let waiting = self.pending_pane_meas.get(&f).cloned();
+        let waiting = self.pending_pane_meas.get(&p).cloned();
         self.layout.maximized = false;
-        let new = self.layout.split_focused(rect);
-        self.copy_levels(f, new);
+        let new = self.layout.split_pane(p, axis, side);
+        self.copy_levels(p, new);
         if let Some(n) = waiting {
             self.pending_pane_meas.insert(new, n);
         }

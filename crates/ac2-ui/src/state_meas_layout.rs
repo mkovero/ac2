@@ -167,6 +167,7 @@ impl AppState {
             if drag {
                 // A drag is many steps: those sharing the panes before its first one.
                 let ids = self.layout_due.take().map_or(ids, |(ids, _)| ids);
+                self.history.stored.extend(ids.iter().copied());
                 self.layout_due = Some((ids, self.now_s + DRAG_REST_S));
             } else {
                 for id in ids {
@@ -266,13 +267,14 @@ impl AppState {
     /// held until the call in flight for it is answered.
     /// Panes none of which shows `id` are no layout of its: nothing is sent, and they are
     /// not its own panes any more.
-    fn store_layout(&mut self, id: MeasId, out: &mut Vec<Request>) {
+    pub(super) fn store_layout(&mut self, id: MeasId, out: &mut Vec<Request>) {
         if !self.panes_show(id) {
             if self.own_panes == Some(id) {
                 self.own_panes = None;
             }
             return;
         }
+        self.history.stored.insert(id);
         let l = self.pane_layout();
         if self
             .layout_calls

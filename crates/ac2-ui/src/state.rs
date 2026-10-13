@@ -66,6 +66,9 @@ mod commands_meas;
 mod commands_tf;
 #[path = "state_dialogs.rs"]
 mod dialogs;
+#[path = "state_drag.rs"]
+mod drag;
+pub use drag::{DragMsg, DropTarget, EDGE_SHARE, RowDrag, drop_target};
 #[path = "state_glide.rs"]
 mod glide;
 #[path = "state_keys.rs"]
@@ -98,6 +101,8 @@ pub use sessions_impl::SessionsMsg;
 mod stimulus;
 #[path = "state_text.rs"]
 mod text;
+#[path = "state_undo.rs"]
+mod undo;
 pub use panes::{Axis, PaneId, PaneNode, PaneRect, Side, SplitGap};
 pub use panes_views::{
     DEFAULT_PANE_AREA, Layout, PaneMenuRow, PaneModes, PaneTemplate, TransferView, View,
@@ -107,6 +112,7 @@ pub use text::{
     parse_outputs, parse_session_ref, parse_slot, trace_label, transfer_kind_shown,
 };
 use text::{drawn_in, offset_text, slot_of};
+pub use undo::HISTORY_LEN;
 
 #[path = "state_types.rs"]
 mod types;
@@ -355,6 +361,14 @@ pub struct AppState {
     /// Started spectrum / RTA measurements whose first frame fits the spectrum pane's level
     /// axis (as Shift+Home), with the frame shown when they started (a stopped run's last).
     spectrum_fit: BTreeMap<MeasId, Option<Arc<ac2_proto::Frame>>>,
+    /// A list row being dragged onto the panes.
+    row_drag: Option<RowDrag>,
+    /// Edits of the panes that undo takes back.
+    history: undo::History,
+    /// The message is an undo or redo: it puts back panes, it edits none.
+    undoing: bool,
+    /// The first command the message ran (a key, the palette): what an edit was.
+    ran_command: Option<CommandId>,
 }
 
 impl Default for AppState {
@@ -462,6 +476,10 @@ impl AppState {
             lost_own_panes: false,
             meas_seen: BTreeSet::new(),
             keys: Keymap::default(),
+            row_drag: None,
+            history: undo::History::default(),
+            undoing: false,
+            ran_command: None,
         }
     }
 
@@ -475,11 +493,22 @@ impl AppState {
         let conn = matches!(msg, Msg::Conn(_));
         if !tick && !drag {
             self.flush_layout_drag(&mut out);
+            self.finish_split_drag();
         }
         if self.keys != *keymap {
             self.keys = keymap.clone();
         }
         let panes_before = self.panes_watch();
+        let edit = if drag {
+            self.start_split_drag();
+            None
+        } else if tick || conn {
+            None
+        } else {
+            self.undo_watch(&msg)
+        };
+        self.ran_command = None;
+        self.undoing = false;
         self.update_inner(msg, keymap, &mut out);
         if tick {
             self.poll_settings(&mut out);
@@ -491,8 +520,14 @@ impl AppState {
             self.restore_pane_meas();
             self.restore_meas_choices();
             self.follow_standin();
-            self.sync_meas_layout(panes_before, conn, drag, &mut out);
+            // An undo or redo stores what it restores itself, on the owner of the edit only.
+            let undoing = std::mem::take(&mut self.undoing);
+            self.sync_meas_layout(panes_before, conn || undoing, drag, &mut out);
             self.prune_compared();
+            if let Some(w) = edit.filter(|_| !undoing) {
+                let ran = self.ran_command;
+                self.record_edit(w, ran);
+            }
             self.remember_layout();
         }
         out
@@ -592,6 +627,9 @@ impl AppState {
             }
             Msg::PanePick(p, row) => self.pane_pick(p, row),
             Msg::DragSplit { path, ratio } => self.drag_split(&path, ratio),
+            // The drag's step was closed before the message, as any other message closes it.
+            Msg::DragSplitEnd => {}
+            Msg::RowDrag(m) => self.row_drag_msg(m),
             Msg::Zoom { about_hz, factor } => {
                 let t = self.nav.target.zoom(about_hz, factor);
                 self.nav.set_target(t);

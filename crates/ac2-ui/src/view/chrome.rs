@@ -10,7 +10,7 @@ use eframe::egui::{self, Color32, RichText};
 use crate::app::App;
 use crate::keys::{CommandId, STOP_ANYWHERE, Scope};
 use crate::marquee::Marquee;
-use crate::state::{ConnState, Msg, StimPhase, outputs_text};
+use crate::state::{ConnState, DragMsg, Msg, StimPhase, outputs_text};
 use crate::theme::Chrome;
 
 use super::segment::{Part, SEGMENT_MIN_W, draw_segment, health_part, segment_width};
@@ -692,6 +692,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     inputs(app, ui, ch);
     let mut msg = None;
     let reveal = std::mem::take(&mut app.state.tree_reveal);
+    let dragging = app.state.row_drag_held();
     {
         let st = &app.state;
         ui.horizontal_wrapped(|ui| {
@@ -730,7 +731,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                     row.key,
                     TreeKey::Meas(_) | TreeKey::Live(_) | TreeKey::Math(_)
                 );
-            if let Some(m) = tree_row(ui, row, &tips, ch, reveal) {
+            if let Some(m) = tree_row(ui, row, &tips, ch, reveal, dragging) {
                 msg = Some(m);
             }
         }
@@ -763,15 +764,22 @@ const EYE_W: f32 = 18.0;
 /// How far a row under a header is indented.
 const INDENT: f32 = 14.0;
 
+/// How far (points) the pointer moves with the button held on a row before the row is
+/// dragged: a click that wobbles a little stays a click.
+const ROW_DRAG_START: f32 = 6.0;
+
 /// One row of the measurement tree: a header (its fold arrow, its tag and name over its
 /// state) or a row under it (its tree line, its dot when it has a curve to show or hide,
-/// its name over what it is). `reveal`: the tree scrolls the row into view.
+/// its name over what it is). `reveal`: the tree scrolls the row into view. Pressed and
+/// moved, a row other than Imported's starts a drag onto the panes (unless one is
+/// `dragging` already).
 fn tree_row(
     ui: &mut egui::Ui,
     row: &TreeRow,
     tips: &RowTips,
     ch: &Chrome,
     reveal: bool,
+    dragging: bool,
 ) -> Option<Msg> {
     let mut click = None;
     let group = match row.key {
@@ -892,11 +900,30 @@ fn tree_row(
             TreeKey::Trace(_) => format!("{}\n{}", row.describe, tips.select),
             _ => format!("{}\n{}", row.describe, tips.meas),
         };
-        let r = ui
-            .add(b.wrap_mode(egui::TextWrapMode::Wrap))
-            .on_hover_text(tip);
+        let draggable = row.key != TreeKey::Imported;
+        let sense = if draggable {
+            egui::Sense::click_and_drag()
+        } else {
+            egui::Sense::click()
+        };
+        let r = ui.add(b.wrap_mode(egui::TextWrapMode::Wrap).sense(sense));
+        // No tooltip while the row is held: it would cover the drag label.
+        let r = if r.is_pointer_button_down_on() {
+            r
+        } else {
+            r.on_hover_text(tip)
+        };
         if reveal {
             r.scroll_to_me(None);
+        }
+        let moved = ui.input(|i| {
+            i.pointer
+                .press_origin()
+                .zip(i.pointer.latest_pos())
+                .map_or(0.0, |(a, b)| a.distance(b))
+        });
+        if draggable && !dragging && r.dragged() && moved >= ROW_DRAG_START {
+            click = Some(Msg::RowDrag(DragMsg::Start(row.key)));
         }
         // A double click's second click also reads as a click: check it first, or it would
         // deselect the row the first click selected.

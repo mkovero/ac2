@@ -85,6 +85,17 @@ pub fn defaults() -> Vec<Binding> {
         (C::NextInTree, S::Global, k(K::Tab)),
         (C::PrevInTree, S::Global, sh(K::Tab)),
         (C::MaximizePane, S::Global, k(K::W)),
+        // Ctrl+Z / Ctrl+Shift+Z as in every editor; both reach the app on the desktops it
+        // runs on. No Ctrl+Y: Y and Z swap places on German layouts, and one redo is enough.
+        (C::Undo, S::Global, cmd(K::Z)),
+        (
+            C::Redo,
+            S::Global,
+            Chord {
+                shift: true,
+                ..cmd(K::Z)
+            },
+        ),
         // T strips the focused plot step by step (grid, then labels and cursor) for a clean
         // picture; the theme is in Settings › Display and the palette.
         (C::PlotChrome, S::Global, k(K::T)),

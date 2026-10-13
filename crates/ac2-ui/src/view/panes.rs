@@ -16,7 +16,8 @@ use crate::keys::{CommandId, Scope};
 use crate::plot::{self, PlotSlot};
 use crate::scenes;
 use crate::state::{
-    Axis, HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow, PaneRect,
+    Axis, DragMsg, HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow,
+    PaneRect, drop_target,
 };
 use crate::theme::Chrome;
 
@@ -255,6 +256,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
     let stage = app.state.stage_view();
     // Numbered in reading order, as Alt+1 … 9 count them.
     let order = app.state.layout.panes();
+    app.pane_rects = layout(&app.state, area);
     for (id, rect) in layout(&app.state, area) {
         // Each pane's widgets live under its own id and are clipped to its rectangle: two
         // panes of one kind draw the same controls, which must stay distinct widgets, and a
@@ -523,6 +525,98 @@ fn split_gaps(app: &mut App, ui: &egui::Ui, area: egui::Rect) {
                 ratio,
             });
         }
+    }
+}
+
+/// A list row dragged over the panes: the pane (or the half of it a drop near its side
+/// splits off) shaded faintly with a dashed edge, as the resolution marker shades a range,
+/// and a label by the pointer naming where the row goes. Dropped on release, Shift held
+/// comparing; off the panes, nothing happens.
+pub(super) fn row_drag(app: &mut App, ctx: &egui::Context, theme: &Theme, ch: &Chrome) {
+    if !app.state.row_drag_held() {
+        return;
+    }
+    let (pos, down, shift) = ctx.input(|i| {
+        (
+            i.pointer.latest_pos(),
+            i.pointer.primary_down(),
+            i.modifiers.shift,
+        )
+    });
+    let over = if app.state.window_over_panes() {
+        None
+    } else {
+        let rects: Vec<(PaneId, PaneRect)> = app
+            .pane_rects
+            .iter()
+            .map(|(id, r)| (*id, PaneRect::new(r.min.x, r.min.y, r.width(), r.height())))
+            .collect();
+        pos.and_then(|p| drop_target(&rects, p.x, p.y))
+    };
+    if !down {
+        app.dispatch(Msg::RowDrag(DragMsg::Drop { compare: shift }));
+        return;
+    }
+    if app
+        .state
+        .row_drag()
+        .is_some_and(|d| d.over != over || d.compare != shift)
+    {
+        app.dispatch(Msg::RowDrag(DragMsg::Over {
+            target: over,
+            compare: shift,
+        }));
+    }
+    if app.state.row_drag().is_none() {
+        return;
+    }
+    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("row-drag"),
+    ));
+    if let Some((pane, edge)) = app.state.drop_highlight()
+        && let Some(r) = app
+            .pane_rects
+            .iter()
+            .find(|(id, _)| *id == pane)
+            .map(|x| x.1)
+    {
+        use ac2_scene::pane_edit::Edge;
+        let (w, h) = (r.width() / 2.0, r.height() / 2.0);
+        let r = match edge {
+            None => r,
+            Some(Edge::Top) => egui::Rect::from_min_size(r.min, egui::vec2(r.width(), h)),
+            Some(Edge::Bottom) => egui::Rect::from_min_max(egui::pos2(r.min.x, r.min.y + h), r.max),
+            Some(Edge::Left) => egui::Rect::from_min_size(r.min, egui::vec2(w, r.height())),
+            Some(Edge::Right) => egui::Rect::from_min_max(egui::pos2(r.min.x + w, r.min.y), r.max),
+        }
+        .shrink(3.0);
+        painter.rect_filled(r, 4.0, crate::theme::c32(theme.unresolved_shade));
+        let e = theme.unresolved_edge;
+        let stroke = egui::Stroke::new(e.width, crate::theme::c32(e.color));
+        let (on, off) = e.dash.map_or((4.0, 4.0), |d| (d.on, d.off));
+        let outline = [
+            r.left_top(),
+            r.right_top(),
+            r.right_bottom(),
+            r.left_bottom(),
+            r.left_top(),
+        ];
+        painter.extend(egui::Shape::dashed_line(&outline, stroke, on, off));
+    }
+    if let (Some(text), Some(p)) = (app.state.drag_label(), pos) {
+        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), ch.text);
+        let at = p + egui::vec2(16.0, 12.0);
+        let plate = egui::Rect::from_min_size(at, galley.size()).expand2(egui::vec2(6.0, 3.0));
+        painter.rect_filled(plate, 4.0, ch.raised);
+        painter.rect_stroke(
+            plate,
+            4.0,
+            egui::Stroke::new(1.0, ch.border),
+            egui::StrokeKind::Outside,
+        );
+        painter.galley(at, galley, ch.text);
     }
 }
 

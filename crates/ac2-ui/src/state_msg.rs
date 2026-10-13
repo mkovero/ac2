@@ -360,6 +360,10 @@ pub enum Msg {
         path: Vec<Side>,
         ratio: f32,
     },
+    /// A split's gap released: the drag is one step of the undo history.
+    DragSplitEnd,
+    /// A row of the measurement list dragged onto the panes.
+    RowDrag(super::DragMsg),
     /// Mouse wheel / pinch on a frequency axis.
     Zoom {
         about_hz: f64,

@@ -162,6 +162,8 @@ pub struct App {
     pub(crate) legend_screen: Option<(egui::Rect, egui::Rect)>,
     /// Wheel travel over the legend not yet a whole row.
     pub(crate) legend_wheel: f32,
+    /// Where each pane was last drawn, on screen: what a dragged list row is dropped on.
+    pub pane_rects: Vec<(crate::state::PaneId, egui::Rect)>,
     pub(crate) plots: bool,
     passes: u64,
     /// The connect dialog, while open: the app has no link until the operator picks one.
@@ -306,6 +308,7 @@ impl App {
             legend_drag: None,
             legend_screen: None,
             legend_wheel: 0.0,
+            pane_rects: Vec::new(),
             plots,
             passes: 0,
             connect: None,
@@ -633,7 +636,14 @@ impl Touches {
         use crate::conn::ConnEvent;
         match msg {
             Msg::Tick { .. } => Self::Tick,
-            Msg::ToastsHeld(_) | Msg::DismissToast(_) | Msg::Rasterizer(_) => Self::Toasts,
+            // A row dragged over the panes changes the drag's highlight and label, drawn
+            // over the panes; the panes' own pictures stay until it is dropped.
+            Msg::ToastsHeld(_)
+            | Msg::DismissToast(_)
+            | Msg::Rasterizer(_)
+            | Msg::RowDrag(crate::state::DragMsg::Start(_) | crate::state::DragMsg::Over { .. }) => {
+                Self::Toasts
+            }
             Msg::Legend(_) => Self::Legend,
             Msg::Conn(e) => match **e {
                 ConnEvent::Data(_) => Self::Data,

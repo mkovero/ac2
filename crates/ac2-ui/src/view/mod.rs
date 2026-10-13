@@ -37,6 +37,7 @@ pub(crate) fn draw(app: &mut App, ui: &mut egui::Ui, theme: &Theme) {
         egui::CentralPanel::no_frame()
             .frame(egui::Frame::new().fill(ch.panel))
             .show(ui, |ui| panes::panes(app, ui, theme, &ch));
+        panes::row_drag(app, ui.ctx(), theme, &ch);
         let top = ui.ctx().content_rect().min.y;
         overlays::draw(app, ui.ctx(), &ch, top);
         return;
@@ -76,5 +77,6 @@ pub(crate) fn draw(app: &mut App, ui: &mut egui::Ui, theme: &Theme) {
     if let Some(p) = app.state.operation() {
         chrome::progress_overlay(app, ui.ctx(), &ch, &p, panes);
     }
+    panes::row_drag(app, ui.ctx(), theme, &ch);
     overlays::draw(app, ui.ctx(), &ch, top);
 }

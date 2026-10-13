@@ -137,6 +137,8 @@ impl Section {
             | C::GrowPane
             | C::ShrinkPane
             | C::MaximizePane
+            | C::Undo
+            | C::Redo
             | C::PlotChrome
             | C::Fullscreen
             | C::CycleTheme => Section::Panes,

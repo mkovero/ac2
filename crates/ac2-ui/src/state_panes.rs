@@ -276,18 +276,30 @@ impl PaneNode {
 
     /// Splits leaf `id` along `axis` in halves, `new` the second half. `false`: no such leaf.
     pub fn split(&mut self, id: PaneId, axis: Axis, new: PaneId) -> bool {
+        self.split_side(id, axis, new, Side::B)
+    }
+
+    /// Splits leaf `id` along `axis` in halves, `new` on `side` (`A`: left or top).
+    /// `false`: no such leaf.
+    pub fn split_side(&mut self, id: PaneId, axis: Axis, new: PaneId, side: Side) -> bool {
         match self {
             PaneNode::Leaf(x) if *x == id => {
+                let (a, b) = match side {
+                    Side::A => (new, id),
+                    Side::B => (id, new),
+                };
                 *self = PaneNode::Split {
                     axis,
                     ratio: 0.5,
-                    a: Box::new(PaneNode::Leaf(id)),
-                    b: Box::new(PaneNode::Leaf(new)),
+                    a: Box::new(PaneNode::Leaf(a)),
+                    b: Box::new(PaneNode::Leaf(b)),
                 };
                 true
             }
             PaneNode::Leaf(_) => false,
-            PaneNode::Split { a, b, .. } => a.split(id, axis, new) || b.split(id, axis, new),
+            PaneNode::Split { a, b, .. } => {
+                a.split_side(id, axis, new, side) || b.split_side(id, axis, new, side)
+            }
         }
     }
 

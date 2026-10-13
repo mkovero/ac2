@@ -66,6 +66,10 @@ impl AppState {
         // stops the stimulus and hands the keys back from a selected slot to the live
         // measurement.
         if chord == Chord::key(Key::Escape) {
+            // A row being dragged owns Esc as a window does: it cancels the drag only.
+            if self.cancel_row_drag() {
+                return;
+            }
             if self.overlay == Overlay::None {
                 self.command(CommandId::StimulusStop, keymap, out);
                 self.selected_trace = None;
