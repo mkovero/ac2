@@ -63,6 +63,11 @@ def main(argv=None) -> int:
     cm.add_argument("--doc", type=Path, help="document (default: the suite's comparison.md)")
     cm.add_argument("--baselines", type=Path, help="baseline directory (default: the suite's baselines/)")
 
+    ri = sub.add_parser("rew-import", help="on the rig: redo a run's REW import (meas, ref, A / B) from its saved "
+                                           "recordings; plays nothing")
+    ri.add_argument("run", type=Path, help="run directory on the rig")
+    ri.add_argument("--stages", default="", help="comma list of paths (default: every one with REW recordings)")
+
     for name, hlp in (("preflight", "read-only checks of the rig, no emission"),
                       ("run", "preflight, then the stages; emitting stages need the flags below")):
         p = sub.add_parser(name, help=hlp)
@@ -204,6 +209,9 @@ def main(argv=None) -> int:
         print(f"{path}: " + ("rebuilt; the problems listed need the prose" if problems else
                              "unchanged" if current else "rebuilt"))
         return 1 if problems else 0
+    if a.cmd == "rew-import":
+        from . import rewimport
+        return rewimport.main(a)
     from . import run
     from .levels import PolicyError
     try:

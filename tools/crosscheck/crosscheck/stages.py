@@ -441,23 +441,49 @@ def rew_stage(ctx: Ctx, pname: str, cal_file: str | None):
     wav.write(d / "rec_ref.wav", fs, avg[:, 1:2])
     _j(d / "play.json", {"level_dbfs": played_peak, "gain_db": gain_db, "stimulus": stim_path, "file_peak_dbfs": peak,
                          "repeats": reps, "speaker": speaker, "cal_file": cal_file if speaker else None})
-    ids = []
-    try:
-        mid = ctx.rew.import_response(stim_path, str((d / "rec_meas.wav").resolve()), 1, apply_cal=speaker)
-        ids.append(mid)
-        ctx.rew.put(f"/measurements/{mid}", {"title": f"xc {pname} meas"})
-        ctx.rew.fetch(mid, d, "meas", spl=speaker)
-        rid = ctx.rew.import_response(stim_path, str((d / "rec_ref.wav").resolve()), 1, apply_cal=False)
-        ids.append(rid)
-        ctx.rew.fetch(rid, d, "ref")
-    finally:
-        if not rig["rew"].get("keep_measurements", False):
-            for i in ids:
-                try:
-                    ctx.rew.delete(f"/measurements/{i}")
-                except RewError:
-                    pass
+    rew_import(ctx.rew, d, stim_path, pname, speaker, keep=rig["rew"].get("keep_measurements", False))
     return d
+
+
+def rew_import(rew, d: Path, stim_path: str, pname: str, speaker: bool, keep: bool = False) -> dict:
+    """Imports a REW stage's saved recordings (`rec_meas.wav`, `rec_ref.wav` in `d`) into REW,
+    each against the stimulus, then REW's own reference division `A / B` (meas ÷ ref), and
+    fetches the three as `meas_*`, `ref_*` and `div_*`. Only the meas import gets the input
+    calibration (the mic channel); the quotient carries it from A. Every measurement made
+    here is deleted again unless `keep`, by UUID (REW's index ids renumber on a delete).
+    Writes and returns `rew_ids.json`: which REW measurements were used."""
+    ids: dict = {"meas": None, "ref": None, "div": None, "kept": bool(keep)}
+    made = []
+    try:
+        mid = rew.import_response(stim_path, str((d / "rec_meas.wav").resolve()), 1, apply_cal=speaker)
+        made.append(mid)
+        ids["meas"] = mid
+        rew.put(f"/measurements/{mid}", {"title": f"xc {pname} meas"})
+        rew.fetch(mid, d, "meas", spl=speaker)
+        rid = rew.import_response(stim_path, str((d / "rec_ref.wav").resolve()), 1, apply_cal=False)
+        made.append(rid)
+        ids["ref"] = rid
+        rew.put(f"/measurements/{rid}", {"title": f"xc {pname} ref"})
+        rew.fetch(rid, d, "ref")
+        qid = rew.divide(mid, rid)
+        made.append(qid)
+        ids["div"] = qid
+        rew.put(f"/measurements/{qid}", {"title": f"xc {pname} meas / ref"})
+        rew.fetch(qid, d, "div", dist=False)
+    finally:
+        if not keep:
+            errs = []
+            for u in made:
+                try:
+                    rew.delete(f"/measurements/{u}")
+                except RewError as e:
+                    errs.append(f"{u}: {e}")
+            ids["deleted"] = [u for u in made if not any(x.startswith(u) for x in errs)]
+            if errs:
+                ids["delete_errors"] = errs
+                print(f"REW: could not delete {len(errs)} measurement(s): {'; '.join(errs)}", flush=True)
+        _j(d / "rew_ids.json", ids)
+    return ids
 
 
 # ---------------------------------------------------------------- ac2 sweeps and TF

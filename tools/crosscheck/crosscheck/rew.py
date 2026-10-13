@@ -109,31 +109,52 @@ class Rew:
         return back
 
     # ---------------------------------------------------------------- import
-    def ids(self) -> list[str]:
-        return list((self.get("/measurements") or {}).keys())
+    def uuids(self) -> list[str]:
+        """REW's measurement ids are list positions that renumber on every delete; its UUIDs
+        are stable, so everything the suite creates is named by UUID."""
+        return [m["uuid"] for m in (self.get("/measurements") or {}).values() if m.get("uuid")]
 
     def import_response(self, stimulus: str, response: str, channel: int, apply_cal: bool,
                         wait_s: float = 60.0) -> str:
-        """Imports one channel of a recording against the stimulus; returns the new id."""
-        before = set(self.ids())
+        """Imports one channel of a recording against the stimulus; returns the new UUID."""
+        before = set(self.uuids())
         self.post("/import/sweep-recordings/stimulus", stimulus)
         self.post("/import/sweep-recordings/response", {"path": response, "channels": str(channel),
                                                         "applyCal": apply_cal})
         t0 = time.monotonic()
         while time.monotonic() - t0 < wait_s:
-            new = [i for i in self.ids() if i not in before]
+            new = [u for u in self.uuids() if u not in before]
             if new:
                 return new[-1]
             time.sleep(0.5)
         raise RewError(f"REW made no measurement from {response} ch {channel} in {wait_s:g} s "
                        f"(last error: {self.get('/application/last-error')})")
 
-    def fetch(self, mid: str, out: Path, prefix: str, spl: bool = False) -> None:
-        """The exports the analysis reads, as REW returns them."""
+    def divide(self, a: str, b: str, wait_s: float = 60.0) -> str:
+        """REW's own reference division: Arithmetic `A / B` of two measurements (UUIDs), the
+        complex quotient of their responses. Returns the result's UUID."""
+        body = {"processName": "Arithmetic", "measurementUUIDs": [a, b], "parameters": {"function": "A / B"}}
+        msg = (self.post("/measurements/process-measurements", body) or {}).get("message", "")
+        name = msg.removesuffix(" in progress").strip()  # "Arithmetic ID <n>"
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < wait_s:
+            r = self.get("/measurements/process-result") or {}
+            if r.get("processName") == name and r.get("message") == "Completed":
+                for res in (r.get("results") or {}).values():
+                    if res.get("UUID"):
+                        return res["UUID"]
+                raise RewError(f"REW's {name} completed without a measurement: {r}")
+            time.sleep(0.5)
+        raise RewError(f"REW's A / B did not complete in {wait_s:g} s ({msg}; last: "
+                       f"{self.get('/measurements/process-result')})")
+
+    def fetch(self, mid: str, out: Path, prefix: str, spl: bool = False, dist: bool = True) -> None:
+        """The exports the analysis reads, as REW returns them. A quotient (`dist=False`) has
+        no distortion data: REW's harmonics come from a sweep's deconvolution only."""
         q = {f"{prefix}_fr": "/frequency-response?unit=dBFS&smoothing=None",
              f"{prefix}_ir": "/impulse-response?normalised=false&unit=percent",
              f"{prefix}_gd": "/group-delay?smoothing=None",
-             f"{prefix}_dist": "/distortion?unit=dBr&ppo=48",
+             **({f"{prefix}_dist": "/distortion?unit=dBr&ppo=48"} if dist else {}),
              f"{prefix}_summary": ""}
         if spl:
             q[f"{prefix}_fr_spl"] = "/frequency-response?unit=SPL&smoothing=None"
