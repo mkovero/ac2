@@ -179,6 +179,34 @@ def coherence_noise_rel(coh: np.ndarray, n: float) -> np.ndarray:
     return np.sqrt((1 - g) / (g * n))
 
 
+def sweep_linear_part(meas: np.ndarray, ref: np.ndarray, fs: float, rate_s: float,
+                      delay_s: float = 0.0) -> np.ndarray:
+    """`meas` with an exponential sweep's harmonic products taken out: what a linear path
+    would have given the same `ref`.
+
+    A sweep's instantaneous frequency is deterministic, so H_k (output at k·f(t), excited at
+    f(t)) correlates with the reference where the reference later reaches k·f: in the whole
+    capture's IR it sits at −L·ln k (L = duration / ln(f2/f1), `rate_s`). Its spectrum adds to
+    the linear one with the phase of that delay, a ripple of period 1/(L·ln k) in frequency;
+    the cross-spectrum's coherence does not see it, since inside a band narrower than the
+    period it is as correlated as the linear part. Bands at low frequencies are that narrow
+    (1/48 octave at 20 Hz is 0.29 Hz, against 2.2 Hz for H2 of a 5.5 s 10 Hz–40 kHz sweep),
+    so H2 at −40 dBr reads as ±0.09 dB ripple there. Everything earlier than half-way
+    between the arrival and H2 is cut; the rest of the IR (the linear part and its whole
+    tail, no window) is put back on the reference. Bins the sweep did not excite (|R|² 60 dB
+    under its peak) are zeroed before the cut, not divided: a harmonic above f2 over an
+    unexcited bin would otherwise be a huge value that the time cut smears into the band."""
+    n = len(meas)
+    M, R = np.fft.rfft(meas), np.fft.rfft(ref)
+    P = np.abs(R) ** 2
+    H = np.where(P > 1e-6 * P.max(), M * np.conj(R) / np.maximum(P, 1e-300), 0.0)
+    h = np.fft.irfft(H, n)
+    t = np.arange(n) / fs
+    t[t >= n / fs / 2] -= n / fs
+    h[t - delay_s < -rate_s * np.log(2) / 2] = 0.0
+    return np.fft.irfft(np.fft.rfft(h) * R, n)
+
+
 def band_noise_rel(meas: np.ndarray, noise: np.ndarray | list[np.ndarray], fs: float, centres: np.ndarray,
                    frac: float = 1 / 48, coh: np.ndarray | None = None, hann: bool = False) -> np.ndarray:
     """Relative error |δH|/|H| (1σ) a band of the direct estimate of `meas` carries from the
@@ -351,7 +379,6 @@ def gd_slope(f: np.ndarray, phase_rad: np.ndarray, fc: np.ndarray, half_oct: flo
         xm, ym = np.average(x, weights=ww), np.average(y, weights=ww)
         out[i] = -np.sum(ww * (x - xm) * (y - ym)) / np.sum(ww * (x - xm) ** 2)
     return out
-
 
 
 def gd_slope_err(f: np.ndarray, phase_rad: np.ndarray, fc: np.ndarray, half_oct: float = 1 / 12,

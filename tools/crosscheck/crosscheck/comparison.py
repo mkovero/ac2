@@ -135,7 +135,8 @@ PATHS: tuple[SignalPath, ...] = (
     SignalPath("digital DUT", "dut", "Digital DUT",
                "A software device with known distortion on a dummy JACK server, in four configurations; "
                "a cell is the worst over them and the levels. Truth: the device's exact harmonics, the "
-               "steady sine at each tone, numpy's direct cross-spectrum of the same capture for the bands "
+               "steady sine at each tone, numpy's direct cross-spectrum of the same capture (the sweep's "
+               "harmonic products cut) for the bands "
                "and the arrival.",
                (REF_LEVEL, MAG_TONES, *MAG_BANDS, PHASE_TONES, PHASE, ARRIVAL,
                 Row("Harmonics H2–H5 vs exact", ac2=(r"dut\.(?:grid\.)?h[2-5]\.ac2 sweep ",)),
