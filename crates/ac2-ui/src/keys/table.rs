@@ -94,6 +94,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::OpenSession, S::Global, sh(K::O)),
         // Alt+S: the saved sessions (S alone is start/stop, Shift+S a sweep).
         (C::Sessions, S::Global, alt(K::S)),
+        // Ctrl+S: save is rare enough for a Ctrl chord, and it is the key every editor uses.
+        (C::SessionSave, S::Global, cmd(K::S)),
         (C::PanLeft, S::Global, k(K::ArrowLeft)),
         (C::PanRight, S::Global, k(K::ArrowRight)),
         (C::ResetView, S::Global, k(K::Home)),
