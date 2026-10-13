@@ -103,6 +103,21 @@ impl AppState {
         )
     }
 
+    /// How to reach a row of the measurement list: its bound key, else a click.
+    pub(super) fn to_it(&self) -> String {
+        self.keys
+            .label(CommandId::NextInTree, Scope::Global)
+            .map_or_else(
+                || "pick it in the list".to_owned(),
+                |k| format!("{k} to it"),
+            )
+    }
+
+    /// What a command needing a selected measurement says without one.
+    pub(super) fn select_meas_first(&self) -> String {
+        format!("select a measurement first ({})", self.to_it())
+    }
+
     /// What a command needing an SPL meter says without one.
     pub(super) fn no_spl_meter(&self) -> String {
         format!(

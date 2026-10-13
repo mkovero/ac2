@@ -494,8 +494,9 @@ impl AppState {
                         ));
                     }
                     None => self.toast(format!(
-                        "{}{of} stored: Tab to it to see it in the focused pane",
-                        r.name
+                        "{}{of} stored: {} to see it in the focused pane",
+                        r.name,
+                        self.to_it()
                     )),
                 }
             }

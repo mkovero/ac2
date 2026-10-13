@@ -58,17 +58,28 @@ impl AppState {
         if p == PaneKind::Distortion {
             let m = self.selected_meas().cloned();
             if m.is_none() {
-                self.warn("select a measurement first (Tab to it, or click it in the list)");
+                self.warn(self.select_meas_first());
             }
             return m;
         }
         let m = self.pane_meas(self.layout.focus).cloned();
         if m.is_none() {
-            self.warn(match p {
-                PaneKind::Transfer => "no transfer measurement: Ctrl+K → New transfer measurement…",
-                PaneKind::Spectrum => "no spectrum or RTA: Ctrl+K → New spectrum / New RTA",
-                _ => "no SPL meter: Ctrl+K → New SPL meter",
-            });
+            let make = match p {
+                PaneKind::Transfer => format!(
+                    "no transfer measurement: {}",
+                    self.keys
+                        .reach(CommandId::NewTransfer, "New transfer measurement…")
+                ),
+                PaneKind::Spectrum => format!(
+                    "no spectrum or RTA: {}",
+                    self.keys.palette_entry("New spectrum… / New RTA…")
+                ),
+                _ => format!(
+                    "no SPL meter: {}",
+                    self.keys.reach(CommandId::NewSpl, "New SPL meter…")
+                ),
+            };
+            self.warn(make);
         }
         // The transfer pane showing a sweep's runs: a sweep plays only from the sweep pane.
         if let Some(s) = m.as_ref().filter(|m| !m.config.kind.is_job()) {

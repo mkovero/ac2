@@ -207,9 +207,7 @@ impl AppState {
                         self.collapsed.insert(g);
                     }
                 }
-                None => {
-                    self.warn("select a measurement first (click it in the list, or Tab to it)")
-                }
+                None => self.warn(self.select_meas_first()),
             },
             C::InputMics => {
                 let rows: Vec<InputSetup> = self

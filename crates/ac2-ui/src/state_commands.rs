@@ -223,7 +223,7 @@ impl AppState {
     /// other measurement has.
     pub(super) fn step_colour(&mut self, forward: bool, out: &mut Vec<Request>) {
         let Some(m) = self.selected_meas().cloned() else {
-            self.warn("select a measurement first (Tab to it, or click it in the list)");
+            self.warn(self.select_meas_first());
             return;
         };
         if matches!(m.config.kind, MeasKind::Math { .. }) {

@@ -151,13 +151,7 @@ impl AppState {
         match self.selected_meas() {
             Some(m) if want.iter().any(|f| f(&m.config.kind)) => Some(m.clone()),
             _ => {
-                let to_it = self
-                    .keys
-                    .label(CommandId::NextInTree, Scope::Global)
-                    .map_or_else(
-                        || "pick it in the list".to_owned(),
-                        |k| format!("{k} to it"),
-                    );
+                let to_it = self.to_it();
                 let new = self.keys.palette_entry("New …");
                 self.warn(format!(
                     "select a {what} measurement first ({to_it}; {new} makes one)"

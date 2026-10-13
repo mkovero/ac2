@@ -286,7 +286,8 @@ impl AppState {
                 };
                 let Some(pane) = self.layout.lead(kind) else {
                     self.warn(format!(
-                        "no {} pane: Tab to a {} measurement shows one in the focused pane",
+                        "no {} pane: a {} measurement selected in the list shows one in the \
+                         focused pane",
                         kind.title(),
                         kind.what()
                     ));
