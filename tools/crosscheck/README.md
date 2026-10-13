@@ -16,6 +16,7 @@ tolerances.toml  PASS / WARN limits for every comparison, compare steps
 baselines/       reviewed results per rig, stage and level (<rig>/<stage>-<level>dbfs.json; host/osm.json)
 reference/       documented truth of 2026-10-07 (used when analysing the fixtures)
 rig-run.sh       dev host: copy to the rig, run there, fetch the run, analyse and compare here
+ci-host.sh       the host DUT matrix as CI runs it: dummy server, own ac2d, run, analyse, compare --strict
 tests/           pytest: dsp, safety policy, JACK dummy server, fixtures smoke test, digital DUT
 ```
 
@@ -236,11 +237,18 @@ then SIGTERM, then kill), keeping its `xruns <n>` line.
 - **On a dummy server (`rigs/host.toml`):** the matrix without hardware. A JACK dummy
   server (`jackd -n <name> -d dummy -r 96000 -p 2048 -w 21333 -C 8 -P 8`; without real-time
   scheduling a 256-frame period xruns, and on a busy host (parallel builds) 2048 does too:
-  `-p 4096 -w 42667` then, which matched 2048 within the matrix's run-to-run scatter)
- and an ac2d of its own (`--max-level -10 --no-autosave`, its own `XDG_RUNTIME_DIR`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`),
+  `-p 4096 -w 42667` then, which matched 2048 within the matrix's run-to-run scatter; under
+  load ≈ 20 on 12 cores 4096 xruns too, and `-p 8192 -w 85333`, `ci-host.sh`'s default,
+  compared clean against the 2048 baselines)
+  and an ac2d of its own (`--max-level -10 --no-autosave`, its own `XDG_RUNTIME_DIR`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`),
   `ac2` on PATH, `AC2_JACK_DUT` set, then
   `python -m crosscheck run --rig rigs/host.toml --stages dut --emit -10dbfs --skip rew,ac2_tf --yes`
   and again at `-30dbfs`; `analyse` each, `baseline` writes `baselines/host/dut-<level>dbfs.json`.
+  `./ci-host.sh <bin dir> <out dir> [--cases loud-hp] [--levels -10]` sets all of that up and
+  measures each case as a run of its own, then analyses and compares it (`compare --strict`),
+  as CI does (*CI and releases*). `run --cases` measures only the named `[[dut.cases]]`; such a
+  run compares only its cases' own checks (the matrix-wide `dut.coverage.*` pool every case)
+  and cannot be a baseline.
   Every case's pre-filter ends in an 8th-order low-pass at 7.2 kHz: the DUT runs at fs, so
   without it a 40 kHz sweep's harmonics above fs/2 fold back into the analysers' noise
   windows (ac2's Hk floors rose to about −70 dBr where k·f ≈ 10–20 kHz without it).
@@ -402,6 +410,57 @@ convention used here, 3 dB hotter than the −30 dBFS sweeps it is compared with
 - REW live's delay matches the direct value;
 - ac2's whole-sample arrival is reported;
 - the 10 Hz sweeps overstate LF H2.
+
+## CI and releases
+
+**Per push** (`.github/workflows/ci.yml`, job `crosscheck (host DUT)`), beside `test` and sized
+to end before it so a push's CI takes no longer:
+- the pytest suite (`python -m pytest -q` here; the JACK tests start their own dummy server);
+- `ci-host.sh target/debug crosscheck-out --cases loud-hp --levels -10`: one case of the DUT
+  matrix, the one with the most judged rows (H2–H5 well above the DUT's noise, the 20 Hz
+  high-pass ahead of the polynomial), at −10 dBFS. One case at one level takes about 2.3 min,
+  and the job's setup and build most of the rest of `test`'s 5 min, so that is what fits.
+
+**On `-f full=true`** (`gh workflow run ci.yml --ref <branch> -f full=true`) and on every
+all-OS or release run: every case at −10 and −30 dBFS, the whole of `baselines/host/dut-*`.
+
+`ci-host.sh` measures each case as a run of its own (`run --cases <case>`) and compares it
+(`compare --strict`). What fails it: a status worse than the baseline's, a judged value that
+moved beyond its step (`[compare]` in `tolerances.toml`), a baseline check of the case that is
+missing, or a level with no baseline. New checks and INFO/INCONCLUSIVE drift are listed, not
+gated; the matrix-wide `dut.coverage.*` rows are not compared (they pool the per-case checks
+that are). The ac2 build hash is provenance: a baseline from an older build compares like any
+other. A case whose take hit an xrun on the runner is measured again (at most 3 times): that
+is the runner's timing, not ac2's math. The reports are uploaded when it fails.
+
+**Safety:** only `jackd -d dummy`, whose playback ports lead nowhere, with ac2d bounded at
+`--max-level -10`; emission goes through `run --emit` and the level policy as on a rig.
+
+**Not in CI:**
+- the rig stages (ambient, genelec, xone: real hardware, an operator for the speaker path);
+- the OSM stage and the coherence study: they need `osm-harness`, a GPL build of Open Sound
+  Meter's DSP from a separate checkout (github.com/mkovero/osm-harness), not fetched at CI time.
+
+Timings, measured on the 12-core dev host under parallel builds (load 20–35; a hosted runner
+has 4 vCPUs to itself, and its main test job takes about 5 min):
+- building `ac2d`, `ac2`, `ac2-jack-dut` (dev profile) from an empty target: 2 min with 6 jobs;
+- pytest: 25–37 s;
+- one case at one level: 2.3 min clean (sine stage 72 s, the two sweeps 51 s, analyse and
+  compare 11 s); a take lost to an xrun costs one more attempt of 2–3 min;
+- the whole matrix (4 cases × 2 levels): about 19 min clean.
+
+**Release rule.** Before each release, every stage runs on the one build that is released
+(the commit the release workflow packages, deployed to pupu):
+1. Every rig stage runs on pupu: the default run and the electrical −10 dBFS run (*Running
+   it*), with the operator present for the Genelec stage.
+2. The host matrix runs whole on the dev host, at −10 and −30 dBFS, as in *On a dummy server*
+   (one `run` per level with every case: `ci-host.sh`'s per-case runs cannot be baselines),
+   and the OSM stage with `osm-harness`. The release workflow's CI call is an all-OS run, so
+   it checks every case again.
+3. Each run is reviewed against its baseline (`compare`), and every baseline is refreshed from
+   these runs (`baseline`, then `python -m crosscheck comparison`), even when nothing moved,
+   so each baseline's `ac2_build` is the released build. Commit them with that build hash in
+   the message, before the tag.
 
 ## OSM stage
 

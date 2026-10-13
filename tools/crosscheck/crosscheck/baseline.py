@@ -407,10 +407,46 @@ def find_baseline(where: Path, rig: str | None, stage: str, level: float | None,
     return None
 
 
+def case_subset(results: dict) -> set[str] | None:
+    """The DUT paths of a run that measured only some `[[dut.cases]]` (`run --cases`), else
+    None. The matrix-wide checks (`dut.coverage.*`) pool every case, so such a run is judged
+    on its cases' own checks only. (The OSM stage's `cases` are its WAV pairs, one stage.)"""
+    if host_stage(results):
+        return None
+    cases = ((results.get("manifest") or {}).get("flags") or {}).get("cases")
+    return {f"dut-{c}" for c in cases} if cases else None
+
+
+def _only_paths(b: dict, keep: set[str]) -> dict:
+    return {**b, "checks": {k: v for k, v in b["checks"].items() if k.split(".", 1)[0] in keep}}
+
+
+def strict_problems(blocks: list[dict]) -> list[str]:
+    """What `compare --strict` fails on beyond the gates: a stage with no comparable
+    baseline, or a baseline check missing from a path the run measured (a take lost to
+    xruns, a reading no longer produced). A new check is not a problem."""
+    out = []
+    for b in blocks:
+        if "skipped" in b:
+            out.append(f"{b['stage']} ({_lvl(b['level'])}): {b['skipped']}")
+            continue
+        measured = {k.split(".", 1)[0] for k in b["cur"]["checks"]}
+        lost = [k for k in b["diff"]["missing"] if k.split(".", 1)[0] in measured]
+        if lost:
+            out.append(f"{b['stage']} ({_lvl(b['level'])}): {len(lost)} baseline check(s) missing, e.g. {lost[0]}")
+        if not b["diff"]["matched"]:
+            out.append(f"{b['stage']} ({_lvl(b['level'])}): no check matched the baseline")
+    return out
+
+
 def compare(run_dir: Path, where: Path | None = None, tolerances: Path | None = None,
-            stages: list[str] | None = None, out: Path | None = None) -> tuple[int, list[dict], Path]:
+            stages: list[str] | None = None, out: Path | None = None,
+            strict: bool = False) -> tuple[int, list[dict], Path]:
+    """rc 1 when a status got worse or a judged value moved; with `strict` also on
+    `strict_problems` (printed and appended to compare.md). The ac2 build is provenance only."""
     run_dir = Path(run_dir)
     res = load_results(run_dir)
+    subset = case_subset(res)
     tol = _tolerances(tolerances)
     rig = baseline_rig(res)
     where = Path(where) if where else BASELINES
@@ -433,13 +469,19 @@ def compare(run_dir: Path, where: Path | None = None, tolerances: Path | None = 
             blocks.append(blk)
             continue
         cur = make_baseline(res, st, run_dir.name)
+        if subset is not None:
+            base, cur = _only_paths(base, subset), _only_paths(cur, subset)
         blk.update(file=str(bp), base=base, cur=cur, diff=diff(base, cur, tol))
         blocks.append(blk)
     rc = 1 if any(gates(b["diff"]) for b in blocks if "diff" in b) else 0
+    probs = strict_problems(blocks) if strict else []
+    rc = 1 if probs else rc
     out = Path(out) if out else run_dir / "report"
     out.mkdir(parents=True, exist_ok=True)
     path = out / "compare.md"
-    path.write_text(render(blocks))
+    path.write_text(render(blocks) + "".join(f"\n**strict:** {p}\n" for p in probs))
+    for p in probs:
+        print(f"strict: {p}")
     return rc, blocks, path
 
 
@@ -454,6 +496,8 @@ def write_baselines(run_dir: Path, where: Path | None = None, stages: list[str] 
     rig = baseline_rig(res)
     if not rig:
         raise ValueError(f"{run_dir}: no rig in the manifest (fixtures cannot be a baseline)")
+    if case_subset(res) is not None:
+        raise ValueError(f"{run_dir}: ran only some DUT cases (--cases); a baseline is the whole matrix")
     want = stages or stages_of(res)
     unknown = [s for s in want if s not in stages_of(res)]
     if unknown:

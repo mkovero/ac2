@@ -130,6 +130,13 @@ def _single_run_lock():
 
 def main(a) -> int:
     rig = tomllib.loads(a.rig.read_text())
+    sel = [c.strip() for c in getattr(a, "cases", "").split(",") if c.strip()]
+    if sel:
+        known = [c["name"] for c in rig.get("dut", {}).get("cases") or []]
+        unknown = [c for c in sel if c not in known]
+        if unknown:
+            raise RuntimeError(f"--cases: {', '.join(unknown)} not in {a.rig}'s [[dut.cases]] ({', '.join(known)})")
+        rig["dut"]["cases"] = [c for c in rig["dut"]["cases"] if c["name"] in sel]
     dut_paths = dutrun.expand_cases(rig) if rig.get("dut") else []
     lock = _single_run_lock() if a.cmd == "run" else None  # noqa: F841  held until exit
     want = [s for s in ORDER if s in set(x.strip() for x in getattr(a, "stages", ",".join(ORDER)).split(","))]
@@ -170,7 +177,7 @@ def main(a) -> int:
            "ac2_version": rep.get("ac2_build"), "rew_version": rep.get("rew_version"),
            "flags": {"emit": a.emit, "emit_speaker": a.emit_speaker, "allow_electrical_level": a.allow_electrical_level,
                      "allow_speaker_level": a.allow_speaker_level,
-                     "stages": want, "skip": a.skip, "resolution": getattr(a, "resolution", "1/48")},
+                     "stages": want, "skip": a.skip, "cases": sel or None, "resolution": getattr(a, "resolution", "1/48")},
            "mains_hz": rig["rig"].get("mains_hz", 50.0), "paths": {}, "preflight": rep,
            # the rig gets a copy without .git; rig-run.sh passes the commit it copied
            "suite_commit": os.environ.get("CROSSCHECK_SUITE_COMMIT") or None}

@@ -336,6 +336,69 @@ jobs:
             crates/*/tests/snapshots/*.diff.png
           if-no-files-found: ignore
 
+  # ac2's measurements against the committed host baselines (tools/crosscheck, README "CI and
+  # releases"): the digital DUT matrix on a JACK dummy server, whose playback ports lead
+  # nowhere, with ac2d bounded at -10 dBFS. It runs beside `test` and is sized to end before
+  # it: a push measures a reduced matrix, `-f full=true` and all-OS/release runs every case.
+  # A worse status, a judged value beyond its step or a lost baseline check fails it; the
+  # ac2 build hash is provenance, never compared.
+  crosscheck:
+    name: crosscheck (host DUT)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - name: Linux system deps
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            pkg-config cmake libjack-jackd2-dev jackd2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Python deps
+        run: pip install numpy JACK-Client pytest
+
+      - name: build ac2, ac2d, ac2-jack-dut
+        run: cargo build --locked -p ac2d -p ac2-cli -p ac2-jack-dut
+
+      - name: crosscheck pytest
+        working-directory: tools/crosscheck
+        run: python -m pytest -q
+
+      # One case at one level takes about 2.3 min, so a push measures the case with the most
+      # judged rows (harmonics well above the DUT's noise, the 20 Hz high-pass ahead of the
+      # polynomial) at -10 dBFS; full and all-OS/release runs measure every case at both
+      # baseline levels (about 20 min).
+      - name: DUT matrix against baselines/host
+        env:
+          FULL: ${{ inputs.all_os || inputs.full }}
+        run: |
+          if [ "$FULL" != true ]; then set -- --cases loud-hp --levels -10; fi
+          tools/crosscheck/ci-host.sh target/debug crosscheck-out "$@"
+
+      - name: Upload crosscheck reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crosscheck-host
+          path: |
+            crosscheck-out/runs/*/report/
+            crosscheck-out/*.log
+            crosscheck-out/home/.local/state/ac2/
+          if-no-files-found: ignore
+
   refgen:
     name: refgen check
     runs-on: ubuntu-latest
