@@ -249,8 +249,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     .sep();
     link.dot = Some(color);
     let working = st.daemon().map(|_| {
-        let l =
-            ac2_scene::sessions::working_label(&st.working(), super::now().wall, st.clock_offset());
+        let l = st.working_label(super::now().wall);
         let name = ac2_scene::sessions::origin_name(st.working().origin.as_ref());
         let color = if l.unsaved { ch.warn } else { ch.text };
         let short = if l.unsaved {

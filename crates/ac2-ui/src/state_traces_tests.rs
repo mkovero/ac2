@@ -248,7 +248,7 @@ fn a_shows_and_hides_the_selected_trace_and_the_eye_any_trace() {
     assert!(t.key("A").is_empty());
     assert_eq!(
         t.last_toast(),
-        "select a measurement or a stored trace first (click it in the list, N, V)"
+        "select a measurement or a stored trace first (click it in the list, Tab, V)"
     );
     t.conn(with_traces(vec![
         stored(10, Some(1), 2),

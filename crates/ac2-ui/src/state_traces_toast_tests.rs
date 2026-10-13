@@ -240,3 +240,29 @@ fn a_software_rasteriser_is_said_once() {
     t.st.update(Msg::Rasterizer(ac2_plot::Rasterizer::Software), &keys);
     assert!(t.st.toasts.is_empty(), "said once");
 }
+
+/// Toasts name the keys of the keymap in effect: a rebind moves them, an unbound command
+/// is named by its palette entry, and that names the palette's own key as bound.
+#[test]
+fn toasts_name_the_keys_the_keymap_binds() {
+    let mut t = T::new();
+    assert!(t.key("5").is_empty());
+    assert_eq!(t.last_toast(), "slot 5 is empty (Ctrl+5 captures into it)");
+    t.key("Shift+L");
+    assert_eq!(
+        t.last_toast(),
+        "no SPL meter: make one first (New SPL meter… in Ctrl+K)"
+    );
+    t.keys =
+        Keymap::from_toml("[global]\nslot_5 = \"F7\"\nmeas_new_spl = \"F8\"\n").expect("valid");
+    t.key("5");
+    assert_eq!(t.last_toast(), "slot 5 is empty (F7 captures into it)");
+    t.key("Shift+L");
+    assert_eq!(t.last_toast(), "no SPL meter: make one first (F8)");
+    t.keys = Keymap::from_toml("[global]\nslot_5 = []\npalette = \"F9\"\n").expect("valid");
+    t.key("5");
+    assert_eq!(
+        t.last_toast(),
+        "slot 5 is empty (Capture selected measurement to slot 5 in F9)"
+    );
+}

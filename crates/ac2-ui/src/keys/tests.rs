@@ -597,3 +597,28 @@ fn stop_anywhere_is_safe_on_every_layout() {
     // Keeping it and adding nothing is fine.
     Keymap::from_toml("[global]\nstimulus_stop_anywhere = \"Shift+Esc\"").expect("valid");
 }
+
+/// Message text names a command by its chord in the label style, else by its palette
+/// entry, the palette named by its own key while it has one.
+#[test]
+fn message_text_names_keys_in_the_label_style() {
+    use LabelStyle::{Mac, Pc};
+    let m = Keymap::default();
+    assert_eq!(m.reach_in(CommandId::SweepNew, "New sweep…", Pc), "Shift+S");
+    assert_eq!(m.reach_in(CommandId::SweepNew, "New sweep…", Mac), "⇧S");
+    assert_eq!(
+        m.reach_in(CommandId::NewSpl, "New SPL meter…", Mac),
+        "New SPL meter… in ⌘K"
+    );
+    assert_eq!(
+        m.label_in(CommandId::SweepIr, Scope::Distortion, Mac)
+            .as_deref(),
+        Some("⇧I")
+    );
+    assert_eq!(m.label_in(CommandId::SweepIr, Scope::Transfer, Pc), None);
+    let bare = Keymap::from_toml("[global]\npalette = []\nsweep_new = []\n").expect("valid");
+    assert_eq!(
+        bare.reach_in(CommandId::SweepNew, "New sweep…", Mac),
+        "New sweep… in the command palette"
+    );
+}

@@ -483,8 +483,13 @@ impl AppState {
                 match self.layout.lead(PaneKind::Distortion) {
                     Some(p) => {
                         self.layout.set_focus(p);
+                        let ir = self
+                            .keys
+                            .label(CommandId::SweepIr, Scope::Distortion)
+                            .map_or_else(String::new, |k| format!("{k} impulse response, "));
+                        let again = Chord::key(eframe::egui::Key::Space).label();
                         self.toast(format!(
-                            "{}{of} stored: Shift+I impulse response, Space runs it again; dB / % in Settings › Display",
+                            "{}{of} stored: {ir}{again} runs it again; dB / % in Settings › Display",
                             r.name
                         ));
                     }
@@ -609,7 +614,7 @@ impl AppState {
     pub(super) fn cycle_sweep(&mut self, d: i32) {
         let ids: Vec<TraceId> = self.sweep_traces().iter().map(|(t, _)| t.meta.id).collect();
         if ids.is_empty() {
-            self.warn("no sweep results yet: Shift+S sets one up");
+            self.warn(ac2_scene::room::no_sweep_results(&self.new_sweep_key()));
             return;
         }
         let cur = self.shown_sweep().map(|(t, _)| t.meta.id);

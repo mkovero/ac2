@@ -301,7 +301,7 @@ pub(crate) fn leq_scene_under<T>(
     let mut cols = None;
     if n == 0 {
         c.overlay.labels.push(label(
-            "no Leq windows: add them with Leq windows… (Ctrl+K)",
+            "no Leq windows: add them in Settings › SPL / Leq",
             [
                 tiles_area.x + tiles_area.w / 2.0,
                 tiles_area.y + tiles_area.h / 2.0,

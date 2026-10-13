@@ -354,7 +354,7 @@ fn files_opened_here_join_the_recents() {
 #[test]
 fn the_top_bar_label_and_the_palette() {
     let t = with_working(true, named("sat"));
-    let l = ac2_scene::sessions::working_label(&t.st.working(), WallNs(0), t.st.clock_offset());
+    let l = t.st.working_label(WallNs(0));
     assert_eq!(l.text, "sat · unsaved changes");
     let mut t = with_working(false, named("sat"));
     let r = t.st.update(Msg::Command(CommandId::SessionSave), &t.keys);

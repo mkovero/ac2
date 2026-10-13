@@ -10,9 +10,107 @@ pub fn trace_label(t: &TraceMeta) -> String {
     }
 }
 
-/// What a trace command without a selected trace says.
-pub(super) const SELECT_TRACE_FIRST: &str =
-    "select a stored trace first (V, Alt+V for hidden ones, or click it in the list)";
+/// Capture into slot 1 … 9.
+pub(super) const CAPTURE_SLOT: [CommandId; 9] = {
+    use CommandId as C;
+    [
+        C::Slot1,
+        C::Slot2,
+        C::Slot3,
+        C::Slot4,
+        C::Slot5,
+        C::Slot6,
+        C::Slot7,
+        C::Slot8,
+        C::Slot9,
+    ]
+};
+
+/// Show / hide slot 1 … 9.
+pub(super) const SHOW_SLOT: [CommandId; 9] = {
+    use CommandId as C;
+    [
+        C::ShowSlot1,
+        C::ShowSlot2,
+        C::ShowSlot3,
+        C::ShowSlot4,
+        C::ShowSlot5,
+        C::ShowSlot6,
+        C::ShowSlot7,
+        C::ShowSlot8,
+        C::ShowSlot9,
+    ]
+};
+
+impl AppState {
+    /// What a trace command without a selected trace says, naming the trace keys bound.
+    pub(super) fn select_trace_first(&self) -> String {
+        let k = |c| self.keys.label(c, Scope::Global);
+        let how = match (k(CommandId::NextTrace), k(CommandId::NextAnyTrace)) {
+            (Some(v), Some(a)) => format!("{v}, {a} for hidden ones, or click it in the list"),
+            (Some(v), None) | (None, Some(v)) => format!("{v} or click it in the list"),
+            (None, None) => "click it in the list".to_owned(),
+        };
+        format!("select a stored trace first ({how})")
+    }
+
+    /// What a command needing a selection says with nothing selected (`to`: `first`, `to
+    /// compare`): the list, then the keys that step through measurements and traces.
+    pub(super) fn select_first(&self, to: &str) -> String {
+        let keys = [CommandId::NextInTree, CommandId::NextTrace]
+            .into_iter()
+            .filter_map(|c| self.keys.label(c, Scope::Global));
+        let how = std::iter::once("click it in the list".to_owned())
+            .chain(keys)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("select a measurement or a stored trace {to} ({how})")
+    }
+
+    /// `Ctrl+1 … Ctrl+9`: the keys of the first and the last of the nine slot commands
+    /// `slots` (`None` unless both are bound).
+    pub(super) fn slot_keys(&self, slots: &[CommandId; 9]) -> Option<String> {
+        let k = |c| self.keys.label(c, Scope::Global);
+        Some(format!("{} … {}", k(slots[0])?, k(slots[8])?))
+    }
+
+    /// How message text says to capture into a slot: its keys, else the palette entry.
+    pub(super) fn capture_keys(&self) -> String {
+        self.slot_keys(&CAPTURE_SLOT).unwrap_or_else(|| {
+            self.keys
+                .palette_entry("Capture selected measurement to slot …")
+        })
+    }
+
+    /// How message text says to set up a sweep: its key, else the palette entry.
+    pub fn new_sweep_key(&self) -> String {
+        self.keys
+            .reach(CommandId::SweepNew, "New sweep measurement…")
+    }
+
+    /// The working session's label in the top bar and the sessions dialog, naming the key
+    /// that opens the dialog.
+    pub fn working_label(
+        &self,
+        now: ac2_proto::units::WallNs,
+    ) -> ac2_scene::sessions::WorkingLabel {
+        let key = self.keys.label(CommandId::Sessions, Scope::Global);
+        ac2_scene::sessions::working_label(
+            &self.working(),
+            now,
+            self.clock_offset(),
+            key.as_deref(),
+        )
+    }
+
+    /// What a command needing an SPL meter says without one.
+    pub(super) fn no_spl_meter(&self) -> String {
+        format!(
+            "no SPL meter: make one first ({})",
+            self.keys.reach(CommandId::NewSpl, "New SPL meter…")
+        )
+    }
+}
 
 /// A display offset as its prompt starts: empty for none, else `-3.5`.
 pub(super) fn offset_text(v: f64) -> String {

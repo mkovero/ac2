@@ -196,6 +196,42 @@ impl Keymap {
             .find_map(|s| self.chords(command, s).first().copied())
     }
 
+    /// The label, in `style`, of the chord that runs `command` with `scope` active; `None`
+    /// when no key does.
+    pub fn label_in(&self, command: CommandId, scope: Scope, style: LabelStyle) -> Option<String> {
+        self.first_chord(command, scope).map(|c| c.label_in(style))
+    }
+
+    /// [`Keymap::label_in`] in the current label style.
+    pub fn label(&self, command: CommandId, scope: Scope) -> Option<String> {
+        self.label_in(command, scope, label_style())
+    }
+
+    /// Where message text sends the operator for palette entry `entry`: `New SPL meter… in
+    /// Ctrl+K`, or `… in the command palette` when no key opens it.
+    pub fn palette_entry_in(&self, entry: &str, style: LabelStyle) -> String {
+        match self.label_in(CommandId::Palette, Scope::Global, style) {
+            Some(p) => format!("{entry} in {p}"),
+            None => format!("{entry} in the command palette"),
+        }
+    }
+
+    /// [`Keymap::palette_entry_in`] in the current label style.
+    pub fn palette_entry(&self, entry: &str) -> String {
+        self.palette_entry_in(entry, label_style())
+    }
+
+    /// How message text names global `command`: its chord, else its palette entry `entry`.
+    pub fn reach_in(&self, command: CommandId, entry: &str, style: LabelStyle) -> String {
+        self.label_in(command, Scope::Global, style)
+            .unwrap_or_else(|| self.palette_entry_in(entry, style))
+    }
+
+    /// [`Keymap::reach_in`] in the current label style.
+    pub fn reach(&self, command: CommandId, entry: &str) -> String {
+        self.reach_in(command, entry, label_style())
+    }
+
     /// Key text for the palette: the chord in `active` scope (or global), else the chord in
     /// the command's own scope with that scope named.
     pub fn key_hint(&self, command: CommandId, active: Scope) -> Option<String> {

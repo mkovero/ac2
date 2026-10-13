@@ -98,9 +98,14 @@ impl Page {
         }
     }
 
-    /// The page's keys, under it.
-    pub fn keys(self) -> &'static str {
-        match self {
+    /// The page's keys, under it, chords in the current label style.
+    pub fn keys(self) -> String {
+        self.keys_in(crate::keys::label_style())
+    }
+
+    /// The page's keys with chords written in `style`.
+    pub fn keys_in(self, style: crate::keys::LabelStyle) -> String {
+        let text = match self {
             Page::AudioIo => {
                 "↑↓ move · ←→ backend / input / output device, a mic's curve · type the rate or \
                  buffer · Space in session · R reference · M mic · S stimulus output · N names a \
@@ -114,10 +119,13 @@ impl Page {
                  calibrates electrically · Delete deletes (twice) · Esc closes"
             }
             Page::Leq => {
-                "Enter applies (the log and the windows carry on) · ↑↓ row · Tab cell · ←→ \
-                 choose · Insert or + adds a window to the section · Shift+Insert or + range… \
-                 a band window per band from … to · Delete or − removes the focused one · T on \
-                 a band row: band transfer · Esc closes"
+                let range = crate::keys::Chord::shift(eframe::egui::Key::Insert).label_in(style);
+                return format!(
+                    "Enter applies (the log and the windows carry on) · ↑↓ row · Tab cell · ←→ \
+                     choose · Insert or + adds a window to the section · {range} or + range… a \
+                     band window per band from … to · Delete or − removes the focused one · T on \
+                     a band row: band transfer · Esc closes"
+                );
             }
             Page::Recording => "↑↓ move · type minutes, Enter applies · Esc closes",
             Page::Display => "↑↓ move · ←→ change · Enter resets the level axes · Esc closes",
@@ -125,7 +133,8 @@ impl Page {
                 "↑↓ move · Enter acts on the line · A authorizes a refused key (type its name) · \
                  Delete revokes a client (twice) · Esc closes"
             }
-        }
+        };
+        text.to_owned()
     }
 
     pub fn index(self) -> usize {

@@ -10,7 +10,7 @@ impl AppState {
         use CommandId as C;
         use ac2_proto::model::{TimeWeighting as T, Weighting as W};
         let Some(mut m) = self.kind_meas(PaneKind::Spl).cloned() else {
-            self.warn("no SPL meter: make one first (New SPL meter… in Ctrl+K)");
+            self.warn(self.no_spl_meter());
             return;
         };
         let MeasKind::Spl { config } = &mut m.config.kind else {

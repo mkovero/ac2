@@ -68,8 +68,7 @@ pub(super) fn sessions(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
     };
     let d: SessionsDialog = d.as_ref().clone();
     let now = super::now().wall;
-    let w = app.state.working();
-    let label = ac2_scene::sessions::working_label(&w, now, app.state.clock_offset());
+    let label = app.state.working_label(now);
     let rows = app.state.sessions_rows(now);
     backdrop(ctx);
     let mut msg = None;

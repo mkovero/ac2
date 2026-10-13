@@ -219,3 +219,19 @@ fn link_lines_say_who_and_which_key() {
         ]
     );
 }
+
+/// The Leq page's range key is written in the label style.
+#[test]
+fn page_keys_follow_the_label_style() {
+    use crate::keys::LabelStyle;
+    assert!(
+        Page::Leq
+            .keys_in(LabelStyle::Pc)
+            .contains("Shift+Insert or + range…")
+    );
+    assert!(
+        Page::Leq
+            .keys_in(LabelStyle::Mac)
+            .contains("⇧Insert or + range…")
+    );
+}

@@ -102,11 +102,11 @@ pub use panes::{Axis, PaneId, PaneNode, PaneRect, Side, SplitGap};
 pub use panes_views::{
     DEFAULT_PANE_AREA, Layout, PaneMenuRow, PaneModes, PaneTemplate, TransferView, View,
 };
-use text::{SELECT_TRACE_FIRST, drawn_in, offset_text, slot_of};
 pub use text::{
     curve_what, meas_input, mics_text, open_session_hint, parse_band, parse_mics, parse_number,
     parse_outputs, parse_session_ref, parse_slot, trace_label, transfer_kind_shown,
 };
+use text::{drawn_in, offset_text, slot_of};
 
 #[path = "state_types.rs"]
 mod types;
@@ -348,6 +348,8 @@ pub struct AppState {
     /// Names of the measurements the daemon has listed since this app started: a pane
     /// remembered on one of them waits for it to come back.
     meas_seen: BTreeSet<String>,
+    /// The keymap of the latest update: toasts and warnings name the keys it binds.
+    keys: Keymap,
     /// Started spectrum / RTA measurements whose first frame fits the spectrum pane's level
     /// axis (as Shift+Home), with the frame shown when they started (a stopped run's last).
     spectrum_fit: BTreeMap<MeasId, Option<Arc<ac2_proto::Frame>>>,
@@ -457,6 +459,7 @@ impl AppState {
             own_panes: None,
             lost_own_panes: false,
             meas_seen: BTreeSet::new(),
+            keys: Keymap::default(),
         }
     }
 
@@ -470,6 +473,9 @@ impl AppState {
         let conn = matches!(msg, Msg::Conn(_));
         if !tick && !drag {
             self.flush_layout_drag(&mut out);
+        }
+        if self.keys != *keymap {
+            self.keys = keymap.clone();
         }
         let panes_before = self.panes_watch();
         self.update_inner(msg, keymap, &mut out);

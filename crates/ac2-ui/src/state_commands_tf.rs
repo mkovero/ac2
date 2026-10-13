@@ -238,7 +238,7 @@ impl AppState {
                         ),
                     }));
                 }
-                None => self.warn("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
+                None => self.warn(self.no_spl_meter()),
             },
             C::SplTimeWeighting
             | C::SplWeighting
@@ -250,7 +250,7 @@ impl AppState {
             | C::SplZ => self.spl_weightings(c, out),
             C::LeqWindows => match self.kind_meas(PaneKind::Spl) {
                 Some(_) => self.open_settings(Page::Leq, out),
-                None => self.warn("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
+                None => self.warn(self.no_spl_meter()),
             },
             _ => unreachable!("{c:?} is not a transfer/view command: routed by command"),
         }

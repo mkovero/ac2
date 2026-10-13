@@ -226,16 +226,12 @@ impl Form {
         candidates: Vec<Candidate>,
         first: Option<Operand>,
         owner: TraceOwner,
-    ) -> Result<Form, String> {
+    ) -> Option<Form> {
         let pairable = |d: MathDomain| candidates.iter().filter(|c| c.domain == d).count() >= 2;
         let a = first
             .and_then(|o| candidates.iter().find(|c| c.operand == o))
             .filter(|c| pairable(c.domain))
-            .or_else(|| candidates.iter().find(|c| pairable(c.domain)))
-            .ok_or(
-                "a math channel needs two transfer functions, spectra or RTAs of one kind, live \
-                 or stored: make a measurement or capture one (Ctrl+1 … 9) first",
-            )?;
+            .or_else(|| candidates.iter().find(|c| pairable(c.domain)))?;
         let b = candidates
             .iter()
             .find(|c| c.domain == a.domain && c.operand != a.operand)
@@ -260,7 +256,7 @@ impl Form {
             mode: SmoothingMode::MagnitudePhase,
         }));
         f.lay_out(picks, Some(FieldId::OperandA));
-        Ok(f)
+        Some(f)
     }
 
     /// The dialog editing math channel `m`, its rows as configured.
@@ -706,8 +702,7 @@ mod tests {
     /// A ÷ B by default, named after itself; B follows A's kind.
     #[test]
     fn defaults_and_names() {
-        let f =
-            Form::math(candidates(), None, TraceOwner::Imported).unwrap_or_else(|e| panic!("{e}"));
+        let f = Form::math(candidates(), None, TraceOwner::Imported).expect("two candidates");
         let c = f.math_config().unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(c.name, "Main L ÷ Sub");
         let MeasKind::Math { config } = c.kind else {
@@ -728,7 +723,7 @@ mod tests {
             Some(Operand::Meas { meas: MeasId(3) }),
             TraceOwner::Imported,
         )
-        .unwrap_or_else(|e| panic!("{e}"));
+        .expect("two candidates");
         let c = math_of(&f);
         assert_eq!(c.domain, MathDomain::Spectrum);
         assert_eq!(
@@ -753,8 +748,7 @@ mod tests {
     /// The average ticks every operand of A's kind; leaving all but one out is refused.
     #[test]
     fn average_ticks() {
-        let mut f =
-            Form::math(candidates(), None, TraceOwner::Imported).unwrap_or_else(|e| panic!("{e}"));
+        let mut f = Form::math(candidates(), None, TraceOwner::Imported).expect("two candidates");
         focus(&mut f, FieldId::Operator);
         f.cycle(4);
         let c = math_of(&f);
@@ -825,7 +819,7 @@ mod tests {
             Some(Operand::Meas { meas: MeasId(3) }),
             TraceOwner::Imported,
         )
-        .unwrap_or_else(|e| panic!("{e}"));
+        .expect("two candidates");
         focus(&mut f, FieldId::Operator);
         f.cycle(2);
         let c = math_of(&f);

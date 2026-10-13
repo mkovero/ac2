@@ -126,10 +126,17 @@ impl AppState {
         match self.kind_meas(pane).cloned() {
             Some(m) => Some(OffsetTarget::Live(m)),
             None => {
-                self.warn(format!(
-                    "no {} measurement to offset ({SELECT_TRACE_FIRST_SHORT})",
-                    pane.what()
-                ));
+                let how = self
+                    .keys
+                    .label(
+                        crate::keys::CommandId::NextTrace,
+                        crate::keys::Scope::Global,
+                    )
+                    .map_or_else(
+                        || "select a stored trace with a click in the list".to_owned(),
+                        |v| format!("select a stored trace with {v} or a click in the list"),
+                    );
+                self.warn(format!("no {} measurement to offset ({how})", pane.what()));
                 None
             }
         }
@@ -190,7 +197,7 @@ impl AppState {
             return;
         }
         let Some(id) = self.selected_meas().map(|m| m.id) else {
-            self.warn(SELECT_FIRST);
+            self.warn(self.select_first("first"));
             return;
         };
         self.toggle_meas_hidden(id, Some(keymap));
@@ -224,7 +231,7 @@ impl AppState {
     /// again. With a trace selected, its group.
     pub(super) fn toggle_group_shown(&mut self, out: &mut Vec<Request>) {
         let Some(group) = self.selected_group() else {
-            self.warn(SELECT_FIRST);
+            self.warn(self.select_first("first"));
             return;
         };
         let ms = self.measurements();
@@ -296,7 +303,7 @@ impl AppState {
                     }
                 }
             } else {
-                self.warn(SELECT_FIRST);
+                self.warn(self.select_first("first"));
                 return;
             };
         let ms = self.measurements();
@@ -401,7 +408,7 @@ impl AppState {
             return;
         }
         let Some(m) = self.selected_meas().cloned() else {
-            self.warn(SELECT_FIRST);
+            self.warn(self.select_first("first"));
             return;
         };
         let operand = Operand::Meas { meas: m.id };
@@ -567,9 +574,7 @@ impl AppState {
             return;
         }
         let Some(m) = self.selected_meas().cloned() else {
-            self.warn(
-                "select a measurement or a stored trace to compare (click it in the list, N, V)",
-            );
+            self.warn(self.select_first("to compare"));
             return;
         };
         let name = m.config.name.clone();
@@ -663,10 +668,3 @@ impl AppState {
         }
     }
 }
-
-/// How to select a trace, in a sentence that goes on.
-const SELECT_TRACE_FIRST_SHORT: &str = "select a stored trace with V or a click in the list";
-
-/// What Delete and A say with nothing selected.
-const SELECT_FIRST: &str =
-    "select a measurement or a stored trace first (click it in the list, N, V)";

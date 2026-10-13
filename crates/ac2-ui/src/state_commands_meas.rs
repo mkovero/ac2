@@ -126,8 +126,12 @@ impl AppState {
                             .map(|m| Operand::Meas { meas: m.id })
                     });
                 match Form::math(self.math_candidates(Some(owner)), first, owner) {
-                    Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
-                    Err(e) => self.warn(e),
+                    Some(f) => self.overlay = Overlay::Form(Box::new(f)),
+                    None => self.warn(format!(
+                        "a math channel needs two transfer functions, spectra or RTAs of one \
+                         kind, live or stored: make a measurement or capture one ({}) first",
+                        self.capture_keys()
+                    )),
                 }
             }
             C::NextColour | C::PrevColour => self.step_colour(c == C::NextColour, out),

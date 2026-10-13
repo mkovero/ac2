@@ -192,7 +192,14 @@ fn the_room_view_takes_the_pane_and_grows_to_fit() {
         width: 1100.0,
         height: 600.0,
     };
-    let s = room_scene(Some(&r), Some("Sweep 1"), &Status::default(), &theme, full);
+    let s = room_scene(
+        Some(&r),
+        Some("Sweep 1"),
+        "Shift+S",
+        &Status::default(),
+        &theme,
+        full,
+    );
     let t = s.table.as_ref().expect("table");
     assert!(
         t.caption
@@ -218,6 +225,7 @@ fn the_room_view_takes_the_pane_and_grows_to_fit() {
     let small = room_scene(
         Some(&r),
         Some("Sweep 1"),
+        "Shift+S",
         &Status::default(),
         &theme,
         Viewport {
@@ -238,14 +246,21 @@ fn the_room_view_takes_the_pane_and_grows_to_fit() {
         "{some:?}"
     );
     // No parameters, no sweep: the note says why.
-    let none = room_scene(None, Some("Sweep 2"), &Status::default(), &theme, full);
+    let none = room_scene(
+        None,
+        Some("Sweep 2"),
+        "Shift+S",
+        &Status::default(),
+        &theme,
+        full,
+    );
     assert_eq!(
         none.note.as_deref(),
         Some("Sweep 2: no room parameters (a sweep with silence after it measures them)")
     );
-    let nothing = room_scene(None, None, &Status::default(), &theme, full);
+    let nothing = room_scene(None, None, "⇧S", &Status::default(), &theme, full);
     assert_eq!(
         nothing.note.as_deref(),
-        Some("no sweep results yet: Shift+S sets one up")
+        Some("no sweep results yet: ⇧S sets one up")
     );
 }

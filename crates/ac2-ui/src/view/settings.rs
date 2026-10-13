@@ -6,7 +6,7 @@
 use eframe::egui::{self, RichText};
 
 use crate::app::App;
-use crate::keys::{Chord, LabelStyle, STOP_ANYWHERE};
+use crate::keys::{Chord, CommandId, LabelStyle, STOP_ANYWHERE};
 use crate::settings::{
     ConnLine, DisplayRow, Page, RecordingRow, Settings, conn_line_text, display_rows, link_lines,
     recording_rows,
@@ -158,11 +158,12 @@ fn page(
                     }
                 }
                 None => {
+                    let new = app.keymap.reach(CommandId::NewSpl, "New SPL meter…");
                     ui.label(
-                        RichText::new(
-                            "No SPL meter: make one first (Ctrl+K → New SPL meter…); its Leq \
-                             windows and limits are set here.",
-                        )
+                        RichText::new(format!(
+                            "No SPL meter: make one first ({new}); its Leq windows and limits \
+                             are set here."
+                        ))
                         .color(ch.dim),
                     );
                 }

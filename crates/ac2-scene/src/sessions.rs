@@ -56,8 +56,14 @@ pub struct WorkingLabel {
     pub detail: String,
 }
 
-/// The label for `w`. Ages are on the daemon clock (`offset`).
-pub fn working_label(w: &WorkingSession, client_now: WallNs, offset: ClockOffset) -> WorkingLabel {
+/// The label for `w`. Ages are on the daemon clock (`offset`); `sessions_key` is the key
+/// that opens the sessions dialog, named in the detail when there is one.
+pub fn working_label(
+    w: &WorkingSession,
+    client_now: WallNs,
+    offset: ClockOffset,
+    sessions_key: Option<&str>,
+) -> WorkingLabel {
     let name = origin_name(w.origin.as_ref());
     let text = if w.dirty {
         format!("{name} · {UNSAVED}")
@@ -73,11 +79,13 @@ pub fn working_label(w: &WorkingSession, client_now: WallNs, offset: ClockOffset
         ),
         (Some(_), None) => format!("Kept {}.", origin_place(w.origin.as_ref())),
     };
-    let detail = if w.dirty {
-        format!("{saved} Measurements or traces changed since. Alt+S: sessions.")
+    let changed = if w.dirty {
+        " Measurements or traces changed since."
     } else {
-        format!("{saved} Alt+S: sessions.")
+        ""
     };
+    let keys = sessions_key.map_or_else(String::new, |k| format!(" {k}: sessions."));
+    let detail = format!("{saved}{changed}{keys}");
     WorkingLabel {
         text,
         unsaved: w.dirty,
@@ -406,11 +414,17 @@ mod tests {
     fn the_working_label_names_the_session_and_its_unsaved_changes() {
         let now = WallNs(4000 * S);
         let off = ClockOffset(0);
-        let l = working_label(&w(name("friday"), false), now, off);
+        let l = working_label(&w(name("friday"), false), now, off, Some("Alt+S"));
         assert_eq!(l.text, "friday");
         assert!(!l.unsaved);
         assert_eq!(l.detail, "Saved 1 h ago (on the daemon). Alt+S: sessions.");
-        let l = working_label(&w(name("friday"), true), now, off);
+        let l = working_label(&w(name("friday"), false), now, off, None);
+        assert_eq!(l.detail, "Saved 1 h ago (on the daemon).");
+        let l = working_label(&w(name("friday"), true), now, off, Some("⌥S"));
+        assert_eq!(
+            l.detail,
+            "Saved 1 h ago (on the daemon). Measurements or traces changed since. ⌥S: sessions."
+        );
         assert_eq!(l.text, "friday · unsaved changes");
         assert!(l.unsaved);
         let l = working_label(
@@ -422,10 +436,11 @@ mod tests {
             ),
             now,
             off,
+            None,
         );
         assert_eq!(l.text, "sat.ac2session");
         assert!(l.detail.contains("(/run/media/foh/STICK/sat.ac2session)"));
-        let l = working_label(&w(None, true), now, off);
+        let l = working_label(&w(None, true), now, off, None);
         assert_eq!(l.text, "untitled · unsaved changes");
         assert!(l.detail.starts_with("Not saved yet."));
     }

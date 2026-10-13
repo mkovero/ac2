@@ -472,10 +472,18 @@ pub struct RoomScene {
 /// Largest table font of the room view, times the theme's font size.
 pub const ROOM_FONT_MAX: f32 = 2.0;
 
-/// The room view of `room` (a sweep `name`'s parameters; `None`: says why there are none).
+/// What the sweep views say before any sweep has run; `new_sweep` names how to set one up
+/// (`Shift+S`, or the palette entry when no key does).
+pub fn no_sweep_results(new_sweep: &str) -> String {
+    format!("no sweep results yet: {new_sweep} sets one up")
+}
+
+/// The room view of `room` (a sweep `name`'s parameters; `None`: says why there are none,
+/// `new_sweep` naming how to set a sweep up).
 pub fn room_scene(
     room: Option<&RoomAcoustics>,
     name: Option<&str>,
+    new_sweep: &str,
     status: &crate::banner::Status,
     theme: &Theme,
     size: crate::primitives::Viewport,
@@ -515,7 +523,7 @@ pub fn room_scene(
         (None, Some(n)) => Some(format!(
             "{n}: no room parameters (a sweep with silence after it measures them)"
         )),
-        (None, None) => Some("no sweep results yet: Shift+S sets one up".to_string()),
+        (None, None) => Some(no_sweep_results(new_sweep)),
     };
     if let Some(t) = &table {
         // The legend lines are long sentences: a smaller size than the numbers keeps them on

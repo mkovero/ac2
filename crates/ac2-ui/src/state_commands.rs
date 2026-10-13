@@ -109,11 +109,22 @@ impl AppState {
             .map(|t| t.id)
             .collect();
         if ids.is_empty() {
-            self.warn(if hidden {
-                "no stored traces (Ctrl+1 … 9 capture one)"
+            let text = if hidden {
+                format!("no stored traces (capture one: {})", self.capture_keys())
             } else {
-                "no shown stored traces (1 … 9 show a slot; Alt+V reaches hidden traces)"
-            });
+                let show = self
+                    .slot_keys(&text::SHOW_SLOT)
+                    .map(|k| format!("{k} show a slot"));
+                let any = self
+                    .keys
+                    .label(CommandId::NextAnyTrace, Scope::Global)
+                    .map(|k| format!("{k} reaches hidden traces"));
+                match [show, any].into_iter().flatten().collect::<Vec<_>>() {
+                    v if v.is_empty() => "no shown stored traces".to_owned(),
+                    v => format!("no shown stored traces ({})", v.join("; ")),
+                }
+            };
+            self.warn(text);
             return;
         }
         // Position 0 is the live measurement, the k-th trace is k + 1. A selected trace off
@@ -383,7 +394,7 @@ impl AppState {
                     let text = t.edit.slot.map(|n| n.to_string()).unwrap_or_default();
                     self.prompt(PromptKind::TraceSlot(t.id), text);
                 }
-                None => self.warn(SELECT_TRACE_FIRST),
+                None => self.warn(self.select_trace_first()),
             },
             C::TraceExport => match self.selected_trace_meta().map(|t| t.id) {
                 Some(id) => {
@@ -402,11 +413,11 @@ impl AppState {
                         .unwrap_or_default();
                     self.prompt(PromptKind::TraceExport(id), text);
                 }
-                None => self.warn(SELECT_TRACE_FIRST),
+                None => self.warn(self.select_trace_first()),
             },
             C::TraceRename => match self.selected_trace_meta().cloned() {
                 Some(t) => self.prompt(PromptKind::TraceRename(t.id), t.edit.name.clone()),
-                None => self.warn(SELECT_TRACE_FIRST),
+                None => self.warn(self.select_trace_first()),
             },
             C::SelectLive => self.select_live(),
             C::DeleteSelected => self.ask_delete(),
@@ -533,9 +544,20 @@ impl AppState {
             | C::ShowSlot9 => {
                 let slot = slot_of(c);
                 match self.slots()[usize::from(slot - 1)].map(|t| t.id) {
-                    None => self.warn(format!(
-                        "slot {slot} is empty (Ctrl+{slot} captures into it)"
-                    )),
+                    None => {
+                        let how = self
+                            .keys
+                            .label(text::CAPTURE_SLOT[usize::from(slot - 1)], Scope::Global)
+                            .map_or_else(
+                                || {
+                                    self.keys.palette_entry(&format!(
+                                        "Capture selected measurement to slot {slot}"
+                                    ))
+                                },
+                                |k| format!("{k} captures into it"),
+                            );
+                        self.warn(format!("slot {slot} is empty ({how})"));
+                    }
                     Some(id) => self.toggle_shown(id, out),
                 }
             }
