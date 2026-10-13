@@ -24,7 +24,7 @@ sensitivity disagrees with the data sheet once the divider is applied.
 
 <!-- BEGIN generated build: `python -m crosscheck comparison` from baselines/; do not edit by hand -->
 
-ac2 build **438048f**, runs of 2026-10-13: Xone (electrical) at −10 dBFS; Genelec (speaker) at −30 dBFS; ambient; digital DUT at −10, −30 dBFS; OSM fixtures and rig recordings. SPL calibration: MM1 34804 on input 1, 0 dBFS = 120.47 dB SPL, including its loading (330 Ω into 2000 Ω, −1.33 dB); REW given −26.47 dBFS at 94 dB SPL.
+ac2 build **7065549**, runs of 2026-10-13: Xone (electrical) at −10 dBFS; Genelec (speaker) at −30 dBFS; ambient; digital DUT at −10, −30 dBFS; OSM fixtures and rig recordings. SPL calibration: MM1 34804 on input 1, 0 dBFS = 120.47 dB SPL, including its loading (330 Ω into 2000 Ω, −1.33 dB); REW given −26.47 dBFS at 94 dB SPL.
 
 <!-- END generated build -->
 
@@ -38,7 +38,10 @@ or under its own uncertainty. ac2 − REW at a tone is the difference of the two
 the same steady sine. REW imports the measurement and reference recordings separately, each
 against its stimulus: "REW" is those two imports divided by the suite, "REW ÷ ref" REW's own
 division of them (Arithmetic A / B). Both lose the path delay to REW's timing markers; it is put
-back from the direct cross-spectrum of the same recording before the phase is judged.
+back from the direct cross-spectrum of the same recording before the phase is judged. Harmonics
+are each input's own against its own fundamental, in every tool: ac2 and REW separate them
+against the emitted sweep (ac2 uses the reference only for the response and its timing), and
+the steady-sine truth reads the measurement input alone.
 
 <!-- BEGIN generated table: `python -m crosscheck comparison` from baselines/; do not edit by hand -->
 
@@ -49,41 +52,41 @@ back from the direct cross-spectrum of the same recording before the phase is ju
 | Reference level | −0.006 dB pass | — | — | −0.006 dB pass | — | 0.1 / 0.5 dB |
 | Gain, measurement ÷ reference | — | — | — | −0.001 dB pass | — | 0.1 / 0.3 dB |
 | Magnitude at the tones | +0.008 dB pass | +0.003 dB pass | +0.008 dB pass | −0.007 dB pass | −0.007 dB pass | 0.05 / 0.2 dB |
-| Magnitude 20–100 Hz, sweeps | 0.038 dB pass | 0.003 dB pass | 0.009 dB pass | 0.003 dB pass | 0.008 dB pass | 0.05 / 0.2 dB |
+| Magnitude 20–100 Hz, sweeps | 0.038 dB pass | 0.003 dB pass | 0.009 dB pass | 0.003 dB pass | 0.009 dB pass | 0.05 / 0.2 dB |
 | Magnitude 100 Hz–1 kHz, sweeps | 0.006 dB pass | 0.000 dB pass | 0.000 dB pass | 0.000 dB pass | 0.000 dB pass | 0.03 / 0.1 dB |
 | Magnitude 1–20 kHz, sweeps | 0.010 dB pass | 0.002 dB pass | 0.002 dB pass | 0.009 dB pass | 0.009 dB pass | 0.03 / 0.1 dB |
-| Magnitude 20 Hz–20 kHz, live TF | 0.014 dB pass | — | — | — | — | 0.1 / 0.3 dB |
-| Phase at the tones | −0.03° pass | −0.07° pass | −0.07° pass | +0.09° pass | +0.09° pass | 1 / 3° |
-| Phase 20 Hz–20 kHz | 0.24° pass | 0.09° pass | 0.08° pass | 0.10° pass | 0.09° pass | 1 / 3° |
-| Group delay below 1 kHz | +2.1 % pass | +1.7 % pass | — | +2.2 % pass | — | 10 / 25 % |
-| Group delay above 1 kHz | +0.02 µs pass | +0.01 µs pass | — | +0.01 µs pass | — | 0.5 / 2 µs |
+| Magnitude 20 Hz–20 kHz, live TF | 0.011 dB pass | — | — | — | — | 0.1 / 0.3 dB |
+| Phase at the tones | +0.02° pass | −0.06° pass | −0.07° pass | +0.09° pass | +0.09° pass | 1 / 3° |
+| Phase 20 Hz–20 kHz | 0.23° pass | 0.08° pass | 0.07° pass | 0.10° pass | 0.09° pass | 1 / 3° |
+| Group delay below 1 kHz | +1.7 % pass | +1.9 % pass | — | +1.9 % pass | — | 10 / 25 % |
+| Group delay above 1 kHz | 0.00 µs pass | 0.00 µs pass | — | 0.00 µs pass | — | 0.5 / 2 µs |
 | Arrival | +0.01 µs pass | — | — | — | — | 0.3 / 1 µs |
-| Harmonics H2–H5 | +0.682 dB pass | −0.723 dB pass | — | +4.177 dB **warn** | — | 3 / 6 dB |
+| Harmonics H2–H5 | +1.924 dB pass | +2.263 dB pass | — | +2.196 dB pass | — | 3 / 6 dB |
 
 **Genelec (speaker at 56 cm), −30 dBFS.** The Genelec 1083 in the room, the MM1 on its tweeter axis. Truth: the steady sine at each tone, analysed in numpy, for the level, tone, group delay and harmonic rows; numpy's direct cross-spectrum of the same capture for the band rows and the arrival, for the live TF read through the TF's own windows and columns. SPL: the steady sine through the stored calibration.
 
 | quantity | ac2 vs truth | REW vs truth | REW ÷ ref vs truth | ac2 − REW | ac2 − REW ÷ ref | limit (pass / warn) |
 |---|---|---|---|---|---|---|
-| Reference level | −0.004 dB pass | — | — | −0.004 dB pass | — | 0.1 / 0.5 dB |
-| Gain, measurement ÷ reference | — | — | — | 0.000 dB pass | — | 0.1 / 0.3 dB |
-| SPL at the tones | −0.209 dB pass | +0.122 dB pass | — | −0.330 dB pass | — | 0.5 / 1 dB |
-| Magnitude at the tones | +0.168 dB pass | +0.170 dB pass | +0.170 dB pass | +0.184 dB pass | +0.184 dB pass | 0.3 / 1 dB |
-| Magnitude 20–100 Hz, sweeps | 0.114 dB pass | 0.198 dB pass | 0.198 dB pass | 0.165 dB pass | 0.164 dB pass | 0.3 / 1 dB |
-| Magnitude 100 Hz–1 kHz, sweeps | 0.126 dB pass | 0.051 dB pass | 0.051 dB pass | 0.098 dB pass | 0.098 dB pass | 0.3 / 1 dB |
-| Magnitude 1–20 kHz, sweeps | 0.013 dB pass | 0.084 dB pass | 0.084 dB pass | 0.192 dB pass | 0.192 dB pass | 0.3 / 1 dB |
-| Magnitude 20 Hz–20 kHz, live TF | 0.040 dB pass | — | — | — | — | 0.1 / 0.3 dB |
-| Phase at the tones | +2.71° pass | +2.07° pass | +2.07° pass | +1.19° pass | +1.19° pass | 3 / 10° |
-| Phase 20 Hz–20 kHz | 1.16° pass | 2.66° pass | 2.66° pass | 2.16° pass | 2.16° pass | 3 / 10° |
-| Arrival | +0.17 µs pass | — | — | — | — | 2 / 10.4 µs |
-| Harmonics H2–H5 | −1.853 dB pass | −1.775 dB pass | — | +2.057 dB pass | — | 3 / 6 dB |
+| Reference level | −0.005 dB pass | — | — | −0.005 dB pass | — | 0.1 / 0.5 dB |
+| Gain, measurement ÷ reference | — | — | — | +0.003 dB pass | — | 0.1 / 0.3 dB |
+| SPL at the tones | −0.227 dB pass | +0.185 dB pass | — | −0.412 dB pass | — | 0.5 / 1 dB |
+| Magnitude at the tones | +0.206 dB pass | +0.195 dB pass | +0.195 dB pass | +0.134 dB pass | +0.134 dB pass | 0.3 / 1 dB |
+| Magnitude 20–100 Hz, sweeps | 0.214 dB pass | 0.163 dB pass | 0.163 dB pass | 0.265 dB pass | 0.265 dB pass | 0.3 / 1 dB |
+| Magnitude 100 Hz–1 kHz, sweeps | 0.025 dB pass | 0.058 dB pass | 0.058 dB pass | 0.080 dB pass | 0.080 dB pass | 0.3 / 1 dB |
+| Magnitude 1–20 kHz, sweeps | 0.015 dB pass | 0.077 dB pass | 0.077 dB pass | 0.250 dB pass | 0.250 dB pass | 0.3 / 1 dB |
+| Magnitude 20 Hz–20 kHz, live TF | 0.048 dB pass | — | — | — | — | 0.1 / 0.3 dB |
+| Phase at the tones | +3.09° **warn** | +1.96° pass | +1.96° pass | +2.75° pass | +2.75° pass | 3 / 10° |
+| Phase 20 Hz–20 kHz | 1.16° pass | 2.37° pass | 2.37° pass | 4.42° **warn** | 4.42° **warn** | 3 / 10° |
+| Arrival | −0.20 µs pass | — | — | — | — | 2 / 10.4 µs |
+| Harmonics H2–H5 | +3.294 dB **warn** | −1.309 dB pass | — | +1.784 dB pass | — | 3 / 6 dB |
 
 **Ambient (silent room).** The room's own noise at the MM1, nothing played. Truth: numpy's Leq of the same recording with analytic weightings; for the RTA, ac2's own band filters applied to the recording.
 
 | quantity | ac2 vs truth | REW vs truth | ac2 − REW | limit (pass / warn) |
 |---|---|---|---|---|
-| Leq, A-weighted | +0.002 dB pass | +0.016 dB pass | −0.014 dB pass | 0.5 / 1 dB |
-| Leq, Z- and C-weighted | +0.005 dB pass | — | — | 0.5 / 1 dB |
-| 1/3-octave RTA | −0.019 dB pass | — | — | 0.25 / 0.5 dB |
+| Leq, A-weighted | +0.002 dB pass | +0.013 dB pass | −0.011 dB pass | 0.5 / 1 dB |
+| Leq, Z- and C-weighted | +0.003 dB pass | — | — | 0.5 / 1 dB |
+| 1/3-octave RTA | −0.023 dB pass | — | — | 0.25 / 0.5 dB |
 
 **Digital DUT, −10, −30 dBFS.** A software device with known distortion on a dummy JACK server, in four configurations; a cell is the worst over them and the levels. Truth: the device's exact harmonics, the steady sine at each tone, numpy's direct cross-spectrum of the same capture (the sweep's harmonic products cut) for the bands and the arrival.
 
@@ -96,9 +99,9 @@ back from the direct cross-spectrum of the same recording before the phase is ju
 | Magnitude 1–20 kHz, sweeps | 0.015 dB pass | 0.03 / 0.1 dB |
 | Phase at the tones | −0.01° pass | 1 / 3° |
 | Phase 20 Hz–20 kHz | 0.08° pass | 1 / 3° |
-| Arrival | −0.05 µs pass | 0.3 / 1 µs |
-| Harmonics H2–H5 vs exact | −0.252 dB pass | 0.5 / 1 dB |
-| Harmonics H2–H5 vs the steady sine | +0.648 dB pass | 3 / 6 dB |
+| Arrival | −0.04 µs pass | 0.3 / 1 µs |
+| Harmonics H2–H5 vs exact | −0.240 dB pass | 0.5 / 1 dB |
+| Harmonics H2–H5 vs the steady sine | +0.879 dB pass | 3 / 6 dB |
 
 **OSM fixtures.** Synthetic WAV pairs (identity, a peaking biquad, two delays, a polarity flip, uncorrelated noise at three SNRs, a 1 kHz sine), analysed by ac2 and by OSM's DSP. Truth: each fixture's closed form; in noise, each estimator's expected value.
 
@@ -131,22 +134,51 @@ back from the direct cross-spectrum of the same recording before the phase is ju
 
 ## Disparities
 
-### Xone: Harmonics H2–H5: ac2 − REW
+### Genelec: Phase 20 Hz–20 kHz: ac2 − REW
 
-H2 of the 1040 Hz tone: the ac2 sweeps read
-+2.82 dB<!--= b pupu/xone-10dbfs // xone.h2.ac2 sweep 3Hz-5.5s|REW offline import@1040Hz --> to
-+4.18 dB<!--= b pupu/xone-10dbfs // xone.h2.ac2 sweep dist-probe|REW offline import@1040Hz -->
-more than REW. Against the steady sine both pass: ac2's sweeps by
-−0.67 dB<!--= b pupu/xone-10dbfs // xone.h2.ac2 sweep 3Hz-5.5s@1040Hz --> to
-+0.68 dB<!--= b pupu/xone-10dbfs // xone.h2.ac2 sweep dist-probe@1040Hz -->, REW by
-−0.72 dB<!--= b pupu/xone-10dbfs // xone.h2.REW offline import@1040Hz -->. Neither tool is
-off: ac2 divides by the measured reference; REW, fed by recording import, reads each channel
-against the ideal stimulus. Its own reference division (Arithmetic A / B, the "REW ÷ ref"
-column) gives a response but no harmonics, and its soundcard calibration is linear and applies
-at live capture only, so REW's H2 stays the measurement input against the stimulus. Each is
-held to the sine on its own definition. The reference loopback's own H2 at this tone
-accounts for most of the gap, the rest is within each tool's limit against the sine. The
-ac2 − REW check compares the two definitions directly; closed as a convention difference.
+Above 1 kHz ac2's short sweep and REW's sweep differ by
++4.42 °<!--= b pupu/genelec-30dbfs // genelec.phase.ac2 sweep 20Hz-5.5s|REW offline.1000-20000 -->
+after the pure delay is removed. They are two takes of the speaker: ac2 against numpy on its
+own capture differs by
++0.09 °<!--= b pupu/genelec-30dbfs // genelec.phase.ac2 sweep 20Hz-5.5s|direct (ac2 capture 20Hz-5.5s).1000-20000 -->,
+REW against numpy on its own capture by
++0.63 °<!--= b pupu/genelec-30dbfs // genelec.phase.REW offline|direct (REW recording).1000-20000 -->,
+and ac2's own sweeps of the same run differ from each other by up to
++2.57 °<!--= b pupu/genelec-30dbfs // genelec.phase.ac2 sweep dist-probe|ac2 sweep 20Hz-5.5s.1000-20000 -->.
+The Genelec's phase above 1 kHz changes from one take to the next by a few degrees; a second run on this build showed the same spread between ac2's own sweeps.
+Neither tool's analysis is off; open as a property of the speaker path, not a tool difference.
+
+### Genelec: Phase 20 Hz–20 kHz: ac2 − REW ÷ ref
+
+The same pair of takes as the row above: REW's own division gives
++4.42 °<!--= b pupu/genelec-30dbfs // genelec.phase.ac2 sweep 20Hz-5.5s|REW ÷ ref.1000-20000 -->,
+the same as the suite's division of REW's imports.
+
+### Genelec: Phase at the tones: ac2 vs truth
+
+ac2's live TF at 1 kHz reads
++3.09 °<!--= b pupu/genelec-30dbfs // genelec.sine_phase.ac2 TF@1000Hz --> from the steady
+sine. The TF is its own take (continuous pink noise): numpy's direct cross-spectrum of the
+TF's capture differs from the sine by
++2.38 °<!--= b pupu/genelec-30dbfs // genelec.sine_phase.direct (TF capture)@1000Hz -->, while
+ac2's sweep, a take close to the sine, reads
++1.97 °<!--= b pupu/genelec-30dbfs // genelec.sine_phase.ac2 sweep 20Hz-5.5s@1000Hz -->. The
+difference is between takes of the speaker, as in the phase rows above, with the tweeter-band
+change under pink noise (Notes) on top.
+
+### Genelec: Harmonics H2–H5: ac2 vs truth
+
+H2 of the 500 Hz tone: ac2's three sweeps read
++3.29 dB<!--= b pupu/genelec-30dbfs // genelec.h2.ac2 sweep 20Hz-5.5s@500Hz -->,
++2.41 dB<!--= b pupu/genelec-30dbfs // genelec.h2.ac2 sweep dist@500Hz --> and
++2.32 dB<!--= b pupu/genelec-30dbfs // genelec.h2.ac2 sweep dist-probe@500Hz --> above the
+steady sine, agreeing with each other within a decibel. The reference loopback's own H2 is far
+below this reading, so how the reference is used does not enter. REW's import cannot arbitrate:
+its H2 here sits under its floor. On the previous build this row went unjudged (a mains line in
+the harmonic band of the noise recording) and the gap was already there. The sine is a
+steady-state reading in the room, the sweep's harmonic is gated by its window, so the room's
+response at 1 kHz enters the two differently; that is a candidate, not an established cause.
+Open.
 
 ## Notes
 
