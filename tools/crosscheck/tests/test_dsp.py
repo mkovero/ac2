@@ -407,3 +407,28 @@ def test_direct_ir_peak_on_a_dut_recording():
     meas = np.fft.irfft(np.fft.rfft(ref) * dut.response(chain, np.fft.rfftfreq(n, 1 / FS), FS), n)
     tau = direct_ir_peak(Raw(fs=FS, meas=meas, ref=ref))
     assert abs(tau * FS - _dut_peak_truth(chain)) < 1e-3
+
+
+def test_sweep_harmonics_ripple_the_whole_capture_estimate_until_cut():
+    # A memoryless polynomial with H2–H5 at −40…−55 dBr driven by a 10 Hz–20 kHz exponential
+    # sweep (5·f2 < fs/2: no harmonic aliases): its fundamental gain is the describing
+    # function h1(a)/a, flat in frequency, so
+    # every 1/48-octave band should read it. The whole capture's cross-spectrum ripples about
+    # it by ~2·10^(−40/20) at 20–100 Hz (bands narrower than 1/(L·ln 2)) while its coherence
+    # stays ~1; the linear part alone reads the closed form.
+    fs, T, f1, f2, amp = 48000.0, 5.5, 10.0, 4000.0, 0.316
+    L = T / np.log(f2 / f1)
+    t = np.arange(int(fs * T)) / fs
+    x = amp * np.sin(2 * np.pi * f1 * L * (np.exp(t / L) - 1))
+    x = np.concatenate([np.zeros(int(fs)), x, np.zeros(int(fs))])
+    c = dut.chebyshev_poly([-40.0, -45.0, -50.0, -55.0], amp)
+    y = dut.poly(c, x)
+    truth_db = 20 * np.log10(dut.poly_harmonics(c, amp)[1] / amp)
+    cen = dsp.log_centres(20, 100)
+    H, coh = dsp.cross_spectrum_bands(y, x, fs, cen)
+    raw = dsp.db(H) - truth_db
+    Hl, _ = dsp.cross_spectrum_bands(dsp.sweep_linear_part(y, x, fs, L), x, fs, cen)
+    lin = dsp.db(Hl) - truth_db
+    assert np.all(-10 * np.log10(coh) < 0.01)            # invisible to the coherence gate
+    assert np.max(np.abs(raw)) > 0.05                     # ripple from H2 at −40 dBr
+    assert np.max(np.abs(lin)) < 0.005

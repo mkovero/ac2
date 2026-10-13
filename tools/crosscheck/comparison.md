@@ -72,17 +72,17 @@ the same steady sine.
 | Leq, Z- and C-weighted | +0.008 dB pass | — | — | 0.5 / 1 dB |
 | 1/3-octave RTA | −0.040 dB pass | — | — | 0.25 / 0.5 dB |
 
-**Digital DUT, −10, −30 dBFS.** A software device with known distortion on a dummy JACK server, in four configurations; a cell is the worst over them and the levels. Truth: the device's exact harmonics, the steady sine at each tone, numpy's direct cross-spectrum of the same capture for the bands and the arrival.
+**Digital DUT, −10, −30 dBFS.** A software device with known distortion on a dummy JACK server, in four configurations; a cell is the worst over them and the levels. Truth: the device's exact harmonics, the steady sine at each tone, numpy's direct cross-spectrum of the same capture (the sweep's harmonic products cut) for the bands and the arrival.
 
 | quantity | ac2 vs truth | limit (pass / warn) |
 |---|---|---|
 | Reference level | 0.000 dB pass | 0.1 / 0.5 dB |
 | Magnitude at the tones | −0.005 dB pass | 0.05 / 0.2 dB |
-| Magnitude 20–100 Hz, sweeps | 0.111 dB **warn** | 0.05 / 0.2 dB |
-| Magnitude 100 Hz–1 kHz, sweeps | 0.034 dB **warn** | 0.03 / 0.1 dB |
-| Magnitude 1–20 kHz, sweeps | 0.028 dB pass | 0.03 / 0.1 dB |
+| Magnitude 20–100 Hz, sweeps | 0.011 dB pass | 0.05 / 0.2 dB |
+| Magnitude 100 Hz–1 kHz, sweeps | 0.001 dB pass | 0.03 / 0.1 dB |
+| Magnitude 1–20 kHz, sweeps | 0.015 dB pass | 0.03 / 0.1 dB |
 | Phase at the tones | −0.01° pass | 1 / 3° |
-| Phase 20 Hz–20 kHz | 0.83° pass | 1 / 3° |
+| Phase 20 Hz–20 kHz | 0.08° pass | 1 / 3° |
 | Arrival | −0.03 µs pass | 0.3 / 1 µs |
 | Harmonics H2–H5 vs exact | +0.607 dB **warn** | 0.5 / 1 dB |
 | Harmonics H2–H5 vs the steady sine | +0.842 dB pass | 3 / 6 dB |
@@ -152,23 +152,6 @@ tone, e.g.
 columns pass the coherence gate. REW has no live TF to compare. Likely cause, not shown: the
 TF's frequency-dependent windows read the room's reflections differently from the direct
 estimate's whole capture. Open.
-
-### digital DUT: Magnitude 20–100 Hz, sweeps: ac2 vs truth
-
-In the loud case the 10 Hz sweeps spread up to
-0.111 dB<!--= b host/dut-30dbfs // dut-loud.mag.ac2 sweep 10Hz-5.5s|direct (ac2 capture 10Hz-5.5s).20-100 -->
-about their own capture, with a mean of
-0.000 dB<!--= b host/dut-30dbfs // dut-loud.mag.ac2 sweep 10Hz-5.5s|direct (ac2 capture 10Hz-5.5s).20-100 // mean -->,
-the same at both levels. Against the steady sines the same sweep is within
-0.005 dB<!--= b host/dut-30dbfs // dut-loud.sine_mag.ac2 sweep 10Hz-5.5s@5000Hz --> at every
-tone, and the device's three other cases pass. Ripple between the tones, cause not
-investigated. Open.
-
-### digital DUT: Magnitude 100 Hz–1 kHz, sweeps: ac2 vs truth
-
-The same loud-case sweeps as at 20–100 Hz (above), spreading
-0.034 dB<!--= b host/dut-30dbfs // dut-loud.mag.ac2 sweep 10Hz-5.5s|direct (ac2 capture 10Hz-5.5s).100-1000 -->
-about their own capture: the same ripple, smaller. Open.
 
 ### digital DUT: Harmonics H2–H5 vs exact: ac2 vs truth
 

@@ -80,6 +80,13 @@ class LevelChecks:
             if s.raw is not None:
                 tau_d = self.direct_delay[f"direct (ac2 capture {name})"] = direct_ir_peak(s.raw)
                 Hd, cd = dsp.cross_spectrum_bands(s.raw.meas, s.raw.ref, s.raw.fs, f, self.frac, delay_s=tau_d)
+                # the sweep's harmonic products ripple a whole-capture estimate where a band is
+                # narrower than 1/(L·ln 2) (dsp.sweep_linear_part): the linear part is the
+                # truth; the coherence stays that of the capture as recorded
+                if s.start_hz and s.end_hz and s.duration_s and s.end_hz > s.start_hz:
+                    lin = dsp.sweep_linear_part(s.raw.meas, s.raw.ref, s.raw.fs,
+                                                s.duration_s / np.log(s.end_hz / s.start_hz), tau_d)
+                    Hd, _ = dsp.cross_spectrum_bands(lin, s.raw.ref, s.raw.fs, f, self.frac, delay_s=tau_d)
                 src[f"direct (ac2 capture {name})"] = Hd
                 self.capture_coh[f"direct (ac2 capture {name})"] = cd  # the distortion gate in bands()
         if p.tf_raw is not None:
