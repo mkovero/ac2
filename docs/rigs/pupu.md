@@ -104,6 +104,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
+| 7e863a50 | 2026-10-13 | 50 / 25 | drag rows onto panes (edge-drop splits, Shift-drop compare), Ctrl+Z / Ctrl+Shift+Z undo of pane edits, Leq status text "colours only" (Shift+L, off by default), file.recover / file.salvage as file jobs; autosave restored as is, session reopened `--in 1-8 --outputs 6` |
 | 26508046 | 2026-10-13 | 50 / 25 | edits go only to the chosen row's own layout (a chip pick no longer writes the picked measurement's), rate in bits, the audit fixes (gen.acquire disarm, request dedup, file I/O workers, per-pane level axes, hide/compare by id); autosave restored as is |
 | 6630842e | 2026-10-13 | 50 / 25 | top-bar marquee + fixed number slots, Ctrl+S, T hides marks, viewer keeps its panes; FOH SPL's stray own layout (a copy of TF 1's, written by the desk under the fixed bug) cleared with `meas layout clear`; Pi `ui.toml` rewritten pinned to FOH SPL (`ui.toml.bak-1791600215` had `ir_mode` and `transfer_view = "response"`, which drop the section) |
 | 6d5a4275 | 2026-10-13 | 50 / 25 | top-bar health meter (host CPU, DSP load, xruns, MB/s, fps); autosave restored as is, session reopened `--in 1-8 --outputs 6` |
