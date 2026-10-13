@@ -17,8 +17,9 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 
 # Linux: JACK is the only real backend (JACK2, or PipeWire through pipewire-jack). The crate
-# loads libjack at run time, so builds never need it and a missing library or server is
-# reported as `AudioError::Unavailable`, not as a link error. No ALSA: nothing links libasound.
+# loads libjack at run time, so a missing library or server is reported as
+# `AudioError::Unavailable`, not as a link error. jack-sys's build script still asks pkg-config
+# for jack, so building needs JACK's development package. No ALSA: nothing links libasound.
 [target.'cfg(target_os = "linux")'.dependencies]
 jack = "0.13"
 log = "0.4"
