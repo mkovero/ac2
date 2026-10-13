@@ -75,6 +75,11 @@ def _baseline(args: list[str], root: Path) -> float:
     if field.endswith("*100"):
         field, scale = field[:-4], 100.0
     b = json.loads((Path(root) / f"{where}.json").read_text())
+    from . import comparison as C
+    build = C.doc_build(C.load(Path(root)))
+    if C._build(b) != build:
+        # a quote from another build would combine builds the tables keep apart
+        raise LookupError(f"{where} is on ac2 build {C._build(b)}, not the document's {build}")
     vals = []
     for key in keys.split(" minus "):
         e = b["checks"].get(key)

@@ -59,7 +59,7 @@ def _baselines(tmp_path):
                       "xone.h2.ac2 sweep 10Hz-5.5s@1000Hz": e(-1.0, tol=(3, 6)),
                       "xone.h4.ac2 sweep 10Hz-5.5s@1000Hz": e(None, "INCONCLUSIVE", tol=(3, 6))}}
     osm = {"schema": 1, "rig": "none (offline)", "stage": "osm", "level_dbfs": None,
-           "provenance": {"run": "osm-x", "ac2_build": "ac2d (build 0.0.0+befb61dc0bb2)", "osm_version": "v1.5.2",
+           "provenance": {"run": "osm-x", "ac2_build": "ac2d (build 0.0.0+26388938b456)", "osm_version": "v1.5.2",
                           "flags": {"cases": ["identity", "delay10_5"]}},
            "summary": {"PASS": 2, "INFO": 1},
            "checks": {"osm.delay10_5.osm_delay_finder_vs_analytic": e(-0.5, unit="samples", tol=(0.5, 1)),
@@ -67,15 +67,19 @@ def _baselines(tmp_path):
                       "osm.xone-rig.ac2_vs_osm_h": e(0.2),
                       "osm.xone-rig.ac2_delay_finder_vs_osm_s": e(0.5, unit="samples", tol=(0.6, 1)),
                       "osm.delay48.uncompensated_ac2_h_vs_analytic": e(0.417, "INFO", tol=None)}}
-    # an older take on an older build: not current evidence
+    # takes on an older build: not run on the document's build, so not shown
     older = {**rig, "level_dbfs": -50.0, "provenance": {**rig["provenance"], "run": "20261006T000000Z",
                                                         "ac2_build": "0.0.0+0123456789ab"},
              "checks": {"xone.level.ac2_vs_rew_meas_minus_ref": e(0.5, "WARN", tol=(0.1, 0.3))}}
-    # another level on the newest take's build: shown beside it
+    ambient = {"schema": 1, "rig": "r", "stage": "ambient", "level_dbfs": None,
+               "provenance": {"run": "20261005T000000Z", "ac2_build": "0.0.0+0123456789ab"},
+               "summary": {"PASS": 1}, "checks": {"ambient.leq.A.ac2": e(0.01, tol=(0.1, 0.2))}}
+    # another level on the newest rig take's build: shown beside it
     same = {**rig, "level_dbfs": -20.0, "provenance": {**rig["provenance"], "run": "20261007T100000Z"},
             "checks": {"xone.level.ac2_vs_rew_meas_minus_ref": e(0.2, "WARN", tol=(0.1, 0.3))}}
     for sub, name, b in (("r", "xone-30dbfs.json", rig), ("r", "xone-50dbfs.json", older),
-                         ("r", "xone-20dbfs.json", same), ("host", "osm.json", osm)):
+                         ("r", "xone-20dbfs.json", same), ("r", "ambient.json", ambient),
+                         ("host", "osm.json", osm)):
         (tmp_path / sub).mkdir(exist_ok=True)
         (tmp_path / sub / name).write_text(B.dumps(b))
     return tmp_path
@@ -92,10 +96,10 @@ def _doc(body=""):
 def test_render_from_a_baseline_directory(tmp_path):
     root = _baselines(tmp_path)
     out = C.render(root)
-    # the newest baseline of a rig and stage, and its other levels on the same build (louder first)
+    # every baseline on the newest rig take's build, louder level first; no other build
     assert "| ac2 meas÷ref vs REW (meas − ref), absolute level | +0.200 dB (WARN 1) | 0.000 dB (PASS 1) |" in out
-    assert "xone −30 dBFS (20261007T114727Z, ac2 2638893)" in out and "xone −20 dBFS" in out
-    assert "−50 dBFS" not in out
+    assert "xone −30 dBFS (20261007T114727Z)" in out and "xone −20 dBFS" in out
+    assert "−50 dBFS" not in out and "ambient" not in out and "2638893" not in out
     # OSM cases in the planned order, then the rest; INFO-only checks not tabled
     assert out.index("| identity |") < out.index("| delay10_5 |")
     assert "| delay10_5 |  | −0.500 |" in out
@@ -123,9 +127,15 @@ def test_summary_row_names_limit_verdict_worst_and_run(tmp_path):
     doc.write_text(_doc())
     C.update(doc, root, items=ITEMS)
     text = doc.read_text()
-    # both current xone levels, the limit they carry, the miss, and the run and build it is from
+    # both xone levels on the build, the limit they carry, the miss, and the run it is from
     assert ("| Level: electrical gain | REW (meas − ref) | xone −20/−30 dBFS | 0.1 / 0.3 dB | "
-            "**WARN** (WARN 1 of 2 judged) | +0.200 dB @ xone −20 dBFS | 20261007T100000Z (ac2 2638893) |") in text
+            "**WARN** (WARN 1 of 2 judged) | +0.200 dB @ xone −20 dBFS | 20261007T100000Z |") in text
+    # the build named once, and a stage with no baseline on it named, not shown with old numbers
+    assert "**ac2 build 2638893**" in text and text.count("2638893") == 1
+    assert ("Not run on this build (their baselines are from earlier builds and not shown): "
+            "r: ambient, xone −50 dBFS.") in text
+    assert ("| Leq Z, A, C | truth: numpy on the same recording | ambient | — | "
+            "not run on this build | — | — |") in text
     assert ("| Harmonics H2–H5 | truth: steady sine | xone −30 dBFS | 3 / 6 dB | "
             "PASS (1 judged, 1 inconclusive) |") in text
     # OSM rows split the planned fixtures from the rig recordings
@@ -170,6 +180,10 @@ def test_quoted_numbers_follow_their_source(tmp_path, capsys):
     doc.write_text(_doc("\nA gone check: +0.20 dB<!--= b r/xone-20dbfs // xone.no_such_check -->.\n"))
     assert not C.update(doc, root, check=True, items=ITEMS)[0]
     assert "no check 'xone.no_such_check'" in capsys.readouterr().err
+    # a quote from another build would combine builds: refused
+    doc.write_text(_doc("\nOld: +0.50 dB<!--= b r/xone-50dbfs // xone.level.ac2_vs_rew_meas_minus_ref -->.\n"))
+    assert not C.update(doc, root, check=True, items=ITEMS)[0]
+    assert "r/xone-50dbfs is on ac2 build 0123456, not the document's 2638893" in capsys.readouterr().err
 
 
 def test_quote_sources_and_formatting(tmp_path):

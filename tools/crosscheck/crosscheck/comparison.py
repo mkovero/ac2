@@ -20,7 +20,7 @@ from .baseline import BASELINES, HOST_DIR, JUDGED
 
 ROOT = Path(__file__).resolve().parent.parent
 DOC = ROOT / "comparison.md"
-BLOCKS = ("summary", "misses", "results")
+BLOCKS = ("build", "summary", "misses", "results")
 
 
 def begin(name: str) -> str:
@@ -229,25 +229,66 @@ def _build(b: dict) -> str:
     return _short_build((b.get("provenance") or {}).get("ac2_build"))
 
 
+def doc_build(items: list[tuple[Path, dict]]) -> str | None:
+    """The ac2 build the document shows: that of the newest rig baseline (a rig take is what a
+    release is tested on; host stages are re-run on the same build)."""
+    rig = [b for p, b in items if p.parent.name != HOST_DIR and b["stage"] not in ("osm", "ambient", "dut")]
+    return _build(max(rig, key=_run)) if rig else None
+
+
 def current(items: list[tuple[Path, dict]]) -> list[tuple[Path, dict]]:
-    """The newest baseline per (rig, stage, resolution), and the stage's other levels on that
-    build, in file order: a take at another column width measures a different quantity, so it
-    stands beside the default one, not over it; a level on an older build is older evidence."""
-    best: dict[tuple, tuple[Path, dict]] = {}
+    """The baselines on the document's build, every level and resolution, in file order.
+    Results from different builds are not combined: a stage with no baseline on this build is
+    listed as not run (`missing`), never shown with an older build's numbers."""
+    build = doc_build(items)
+    return [(p, b) for p, b in items if _build(b) == build]
+
+
+def missing(items: list[tuple[Path, dict]]) -> list[tuple[str, dict]]:
+    """(rig, baseline) of each committed take not on the document's build, newest per (rig,
+    stage, resolution, level): what this build has not been run on."""
+    shown = {(p.parent.name, b["stage"], _ppo(b), b.get("level_dbfs")) for p, b in current(items)}
+    best: dict[tuple, tuple[str, dict]] = {}
     for p, b in items:
-        # the DUT matrix is one build at several levels: each level is its own evidence
-        k = (p.parent.name, b["stage"], _ppo(b), b.get("level_dbfs") if b["stage"] == "dut" else None)
-        if k not in best or _run(b) > _run(best[k][1]):
-            best[k] = (p, b)
-    builds = {k[:3]: _build(b) for k, (_, b) in best.items() if k[3] is None}
-    return [(p, b) for p, b in items
-            if (p, b) in best.values() or builds.get((p.parent.name, b["stage"], _ppo(b))) == _build(b)]
+        k = (p.parent.name, b["stage"], _ppo(b), b.get("level_dbfs"))
+        if k not in shown and (k not in best or _run(b) > _run(best[k][1])):
+            best[k] = (p.parent.name, b)
+    return list(best.values())
+
+
+def missing_stages(items: list[tuple[Path, dict]]) -> set[str]:
+    """The stages with no baseline at all on the document's build."""
+    have = {b["stage"] for _, b in current(items)}
+    return {b["stage"] for _, b in missing(items)} - have
+
+
+def _take(b: dict) -> str:
+    res = f" 1/{_ppo(b)} oct" if _ppo(b) not in (None, 48) else ""
+    return f"{b['stage']} {_level(b)}{res}".replace(" silent", "")
+
+
+def build_text(items: list[tuple[Path, dict]]) -> str:
+    """The lead's statement of the build every number comes from, and what it was not run on."""
+    shown = current(items)
+    rigs = sorted({p.parent.name for p, b in shown
+                   if p.parent.name != HOST_DIR and b["stage"] not in ("osm", "ambient", "dut")})
+    out = [f"Every result below is from **ac2 build {doc_build(items)}**, the build of the newest "
+           f"rig baseline ({', '.join(rigs)}). Only baselines on that build are shown, at all their "
+           "levels; results of different builds are never combined."]
+    gone = missing(items)
+    if gone:
+        by: dict[str, list[str]] = {}
+        for rig, b in sorted(gone, key=lambda t: (t[0], t[1]["stage"], -(t[1].get("level_dbfs") or 0))):
+            by.setdefault(rig, []).append(_take(b))
+        names = "; ".join(f"{rig}: {', '.join(ts)}" for rig, ts in by.items())
+        out.append(f"Not run on this build (their baselines are from earlier builds and not shown): {names}.")
+    return " ".join(out)
 
 
 def heading(b: dict) -> str:
     pv = b.get("provenance") or {}
     res = f" 1/{_ppo(b)} oct" if _ppo(b) not in (None, 48) else ""
-    return f"{b['stage']} {_level(b)}{res} ({pv.get('run')}, ac2 {_short_build(pv.get('ac2_build'))})"
+    return f"{b['stage']} {_level(b)}{res} ({pv.get('run')})"
 
 
 def counts_line(b: dict) -> str:
@@ -447,7 +488,7 @@ def render(root: Path = BASELINES) -> str:
     for rig, bs in sorted(by_rig.items(), key=lambda kv: (kv[0] == HOST_DIR, kv[0])):
         for b in (b for b in bs if b["stage"] == "osm"):
             pv = b.get("provenance") or {}
-            out += [f"### OSM stage ({pv.get('run')}, ac2 {_short_build(pv.get('ac2_build'))}, "
+            out += [f"### OSM stage ({pv.get('run')}, "
                     f"{pv.get('osm_version')}: {counts_line(b)})", ""] + osm_tables(b)
         duts = [b for b in bs if b["stage"] == "dut"]
         if duts:
@@ -469,9 +510,10 @@ def render(root: Path = BASELINES) -> str:
 def blocks(root: Path = BASELINES, items=None) -> dict[str, str]:
     """Each generated part of the document, by name."""
     from . import comparison_summary as S
-    bs = [b for _, b in current(load(Path(root)))]
+    every = load(Path(root))
+    bs = [b for _, b in current(every)]
     items = S.MISS_ITEMS if items is None else items
-    return {"summary": "\n".join(S.summary_table(bs)), "misses": "\n".join(S.miss_table(bs, items)),
+    return {"build": build_text(every), "summary": "\n".join(S.summary_table(bs, missing_stages(every))), "misses": "\n".join(S.miss_table(bs, items)),
             "results": render(root)}
 
 

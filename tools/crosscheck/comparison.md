@@ -8,46 +8,51 @@ the same signals.
 
 This does not validate the physical calibration chain (the microphone's sensitivity and a
 calibrator; REW's SPL here is calibrated from ac2, so it checks consistency only), class
-conformance of ac2's level meter and RTA to IEC 61672-1 and IEC 61260-1, or any ac2 build other
-than the one a row names. Every number below is generated from the committed baselines, reports
-and `tolerances.toml`, or checked against them by `python -m crosscheck comparison --check`.
+conformance of ac2's level meter and RTA to IEC 61672-1 and IEC 61260-1, or any other ac2
+build. Every number below is generated from the committed baselines, reports and
+`tolerances.toml`, or checked against them by `python -m crosscheck comparison --check`.
+
+<!-- BEGIN generated build: `python -m crosscheck comparison` from baselines/; do not edit by hand -->
+
+Every result below is from **ac2 build 2c07efe**, the build of the newest rig baseline (pupu). Only baselines on that build are shown, at all their levels; results of different builds are never combined. Not run on this build (their baselines are from earlier builds and not shown): pupu: ambient, xone −10 dBFS, xone −20 dBFS, xone −50 dBFS.
+
+<!-- END generated build -->
 
 ## Summary
 
-One row per quantity and reference, over the current baselines: the newest per rig and stage,
-with its other levels on the same ac2 build. The verdict counts checks (bands, tones and sweeps,
-which overlap), not independent trials. "Worst" is the value furthest outside its pass limit,
+One row per quantity and reference, over every baseline on the build named above. The verdict
+counts checks (bands, tones and sweeps, which overlap), not independent trials. "Worst" is the value furthest outside its pass limit,
 as a share of that limit. Terms are defined under [Definitions](#definitions).
 
 <!-- BEGIN generated summary: `python -m crosscheck comparison` from baselines/; do not edit by hand -->
 
-| quantity | measured against | on | limit (pass / warn) | verdict | worst (largest share of its limit) | from run (ac2 build) |
+| quantity | measured against | on | limit (pass / warn) | verdict | worst (largest share of its limit) | from run |
 |---|---|---|---|---|---|---|
-| Level: electrical gain | REW (meas − ref) | xone −30 dBFS, genelec −30/−50 dBFS | 0.1 / 0.3 dB | PASS (3 judged) | +0.014 dB @ genelec −30 dBFS | 20261011T191033Z (ac2 2c07efe) |
-| Level: absolute SPL | truth: steady sine | genelec −30/−50 dBFS | 0.5 / 1 dB | **WARN** (WARN 2 of 16 judged, 7 inconclusive) | +0.505 dB @ 50 Hz, genelec −30 dBFS | 20261011T191033Z (ac2 2c07efe) |
-| Magnitude | truth: steady sine | xone −30 dBFS, genelec −30/−50 dBFS | 0.05–0.3 / 0.2–1 dB | **WARN** (WARN 1 of 28 judged, 11 inconclusive) | −0.498 dB @ 1000 Hz, genelec −30 dBFS | 20261011T191033Z (ac2 2c07efe) |
-| Magnitude | truth: direct estimate of the same capture | xone −30 dBFS, genelec −30/−50 dBFS, dut −10/−30 dBFS | 0.03–0.3 / 0.1–1 dB | **WARN** (WARN 8 of 83 judged, 6 inconclusive) | 0.111 dB @ dut-loud, 20–100 Hz, dut −30 dBFS | 20261011T010051Z (ac2 6f0e5b5) |
-| Magnitude | REW (offline import) | xone −30 dBFS, genelec −30/−50 dBFS | 0.03–0.3 / 0.1–1 dB | PASS (8 judged, 1 inconclusive) | 0.284 dB @ 1000–20000 Hz, genelec −30 dBFS | 20261011T191033Z (ac2 2c07efe) |
-| Magnitude | truth: closed form | osm | 0.05–0.1 / 0.2–0.3 dB | PASS (8 judged) | 0.031 dB @ biquad | osm-6f0e5b57 (ac2 6f0e5b5) |
-| Phase | truth: steady sine | xone −30 dBFS, genelec −30/−50 dBFS | 1–3 / 3–10° | PASS (29 judged, 10 inconclusive) | +1.522° @ 1000 Hz, genelec −30 dBFS | 20261011T191033Z (ac2 2c07efe) |
-| Phase | truth: direct estimate of the same capture | xone −30 dBFS, genelec −30/−50 dBFS, dut −10/−30 dBFS | 1–3 / 3–10° | PASS (83 judged, 6 inconclusive) | 0.836° @ dut-loud, 20–100 Hz, dut −10 dBFS | 20261011T005229Z (ac2 6f0e5b5) |
-| Phase | REW (offline import) | xone −30 dBFS, genelec −30/−50 dBFS | 1–3 / 3–10° | PASS (8 judged, 1 inconclusive) | 2.193° @ 1000–20000 Hz, genelec −50 dBFS | 20261011T185816Z (ac2 2c07efe) |
-| Phase | truth: closed form | osm | 0.5 / 2° | PASS (5 judged) | 0.273° @ biquad | osm-6f0e5b57 (ac2 6f0e5b5) |
-| Magnitude and phase: repeatability | another ac2 sweep of the same path | xone −30 dBFS, genelec −30/−50 dBFS | 0.03–0.3 / 0.1–1 dB; 1–3 / 3–10° | **WARN** (WARN 2 of 44 judged, 4 inconclusive) | 4.060° @ 1000–20000 Hz, genelec −50 dBFS | 20261011T185816Z (ac2 2c07efe) |
-| Group delay (±1/12-oct fit) | truth: steady-sine pairs | xone −30 dBFS | 0.5 / 2 µs; 10 / 25 % | PASS (6 judged, 2 inconclusive) | −8.0 % @ 60.5 Hz | 20261011T052811Z (ac2 2c07efe) |
-| Arrival | truth: IR peak of its own capture | xone −30 dBFS, genelec −30/−50 dBFS, dut −10/−30 dBFS | 0.3–2 / 1–10.4 µs | **WARN** (WARN 16 of 27 judged) | +0.76 µs @ dut-floor, 10Hz-11s, dut −30 dBFS | 20261011T010051Z (ac2 6f0e5b5) |
-| Delay finder and phase slope | truth: closed form | osm | 0.02–0.05 / 0.1–0.5 samples | PASS (8 judged) | 0.000 samples @ delay10_5 | osm-6f0e5b57 (ac2 6f0e5b5) |
-| Coherence γ² | truth: closed form, in noise its estimator's expected value | osm | 0.02 / 0.05 | PASS (8 judged) | −0.003 @ snr0 | osm-6f0e5b57 (ac2 6f0e5b5) |
-| Harmonics H2–H5 | truth: steady sine | xone −30 dBFS, genelec −30/−50 dBFS | 3 / 6 dB | **WARN** (WARN 4 of 19 judged, 287 inconclusive) | +5.760 dB @ H4 500 Hz, genelec −30 dBFS | 20261011T191033Z (ac2 2c07efe) |
-| Harmonics H2–H5 | REW (offline import) | xone −30 dBFS, genelec −30/−50 dBFS | 3 / 6 dB | PASS (7 judged, 299 inconclusive) | −1.284 dB @ H2 5000 Hz, genelec −30 dBFS | 20261011T191033Z (ac2 2c07efe) |
-| Harmonics H2–H5 | truth: exact values of a digital device | dut −10/−30 dBFS | 0.1–0.5 / 0.3–1 dB | **WARN** (WARN 2 of 672 judged) | +0.556 dB @ dut-floor-hp, H3 50 Hz, ac2 sweep 10Hz-5.5s, dut −30 dBFS | 20261011T010051Z (ac2 6f0e5b5) |
-| Leq Z, A, C | truth: numpy on the same recording | ambient | 0.5 / 1 dB | PASS (3 judged) | +0.006 dB | 20261011T002931Z (ac2 6f0e5b5) |
-| LAeq | REW | ambient | 0.5 / 1 dB | PASS (1 judged) | −0.003 dB | 20261011T002931Z (ac2 6f0e5b5) |
-| 1/3-octave RTA | its own band filters on the same recording | ambient | 0.25 / 0.5 dB | PASS (1 judged) | +0.118 dB | 20261011T002931Z (ac2 6f0e5b5) |
-| Spectrum (tone, noise) | truth: closed form | osm | 0.02–0.1 / 0.1–0.3 dB | PASS (2 judged) | +0.019 dB @ identity | osm-6f0e5b57 (ac2 6f0e5b5) |
-| Transfer: ac2 vs OSM | OSM on the same fixtures (max) | osm | 0.05 / 0.2 dB; 0.5 / 2° | PASS (10 judged) | 0.299° @ biquad | osm-6f0e5b57 (ac2 6f0e5b5) |
-| Transfer: ac2 vs OSM | OSM on the same rig recording (median) | osm | 0.3 / 1 dB; 3 / 10° | PASS (4 judged) | 0.144 dB @ genelec-rig | osm-6f0e5b57 (ac2 6f0e5b5) |
-| Delay finder: ac2 vs OSM | OSM's whole-sample finder | osm | 0.6 / 1 samples | PASS (10 judged) | −0.551 samples @ genelec-rig | osm-6f0e5b57 (ac2 6f0e5b5) |
+| Level: electrical gain | REW (meas − ref) | xone −30 dBFS, genelec −30/−50 dBFS | 0.1 / 0.3 dB | PASS (3 judged) | +0.014 dB @ genelec −30 dBFS | 20261011T191033Z |
+| Level: absolute SPL | truth: steady sine | genelec −30/−50 dBFS | 0.5 / 1 dB | **WARN** (WARN 2 of 16 judged, 7 inconclusive) | +0.505 dB @ 50 Hz, genelec −30 dBFS | 20261011T191033Z |
+| Magnitude | truth: steady sine | xone −30 dBFS, genelec −30/−50 dBFS | 0.05–0.3 / 0.2–1 dB | **WARN** (WARN 1 of 28 judged, 11 inconclusive) | −0.498 dB @ 1000 Hz, genelec −30 dBFS | 20261011T191033Z |
+| Magnitude | truth: direct estimate of the same capture | xone −30 dBFS, genelec −30/−50 dBFS, dut −10/−30 dBFS | 0.03–0.3 / 0.1–1 dB | **WARN** (WARN 8 of 83 judged, 6 inconclusive) | 0.115 dB @ dut-loud, 20–100 Hz, dut −30 dBFS | 20261013T043410Z |
+| Magnitude | REW (offline import) | xone −30 dBFS, genelec −30/−50 dBFS | 0.03–0.3 / 0.1–1 dB | PASS (8 judged, 1 inconclusive) | 0.284 dB @ 1000–20000 Hz, genelec −30 dBFS | 20261011T191033Z |
+| Magnitude | truth: closed form | osm | 0.05–0.1 / 0.2–0.3 dB | PASS (8 judged) | 0.031 dB @ biquad | osm-2c07efe |
+| Phase | truth: steady sine | xone −30 dBFS, genelec −30/−50 dBFS | 1–3 / 3–10° | PASS (29 judged, 10 inconclusive) | +1.522° @ 1000 Hz, genelec −30 dBFS | 20261011T191033Z |
+| Phase | truth: direct estimate of the same capture | xone −30 dBFS, genelec −30/−50 dBFS, dut −10/−30 dBFS | 1–3 / 3–10° | PASS (83 judged, 6 inconclusive) | 0.843° @ dut-loud, 20–100 Hz, dut −30 dBFS | 20261013T043410Z |
+| Phase | REW (offline import) | xone −30 dBFS, genelec −30/−50 dBFS | 1–3 / 3–10° | PASS (8 judged, 1 inconclusive) | 2.193° @ 1000–20000 Hz, genelec −50 dBFS | 20261011T185816Z |
+| Phase | truth: closed form | osm | 0.5 / 2° | PASS (5 judged) | 0.273° @ biquad | osm-2c07efe |
+| Magnitude and phase: repeatability | another ac2 sweep of the same path | xone −30 dBFS, genelec −30/−50 dBFS | 0.03–0.3 / 0.1–1 dB; 1–3 / 3–10° | **WARN** (WARN 2 of 44 judged, 4 inconclusive) | 4.060° @ 1000–20000 Hz, genelec −50 dBFS | 20261011T185816Z |
+| Group delay (±1/12-oct fit) | truth: steady-sine pairs | xone −30 dBFS | 0.5 / 2 µs; 10 / 25 % | PASS (6 judged, 2 inconclusive) | −8.0 % @ 60.5 Hz | 20261011T052811Z |
+| Arrival | truth: IR peak of its own capture | xone −30 dBFS, genelec −30/−50 dBFS, dut −10/−30 dBFS | 0.3–2 / 1–10.4 µs | PASS (27 judged) | −1.04 µs @ dist-probe, genelec −50 dBFS | 20261011T185816Z |
+| Delay finder and phase slope | truth: closed form | osm | 0.02–0.05 / 0.1–0.5 samples | PASS (8 judged) | 0.000 samples @ delay10_5 | osm-2c07efe |
+| Coherence γ² | truth: closed form, in noise its estimator's expected value | osm | 0.02 / 0.05 | PASS (8 judged) | −0.003 @ snr0 | osm-2c07efe |
+| Harmonics H2–H5 | truth: steady sine | xone −30 dBFS, genelec −30/−50 dBFS | 3 / 6 dB | **WARN** (WARN 4 of 19 judged, 287 inconclusive) | +5.760 dB @ H4 500 Hz, genelec −30 dBFS | 20261011T191033Z |
+| Harmonics H2–H5 | REW (offline import) | xone −30 dBFS, genelec −30/−50 dBFS | 3 / 6 dB | PASS (7 judged, 299 inconclusive) | −1.284 dB @ H2 5000 Hz, genelec −30 dBFS | 20261011T191033Z |
+| Harmonics H2–H5 | truth: exact values of a digital device | dut −10/−30 dBFS | 0.1–0.5 / 0.3–1 dB | PASS (672 judged) | +0.476 dB @ dut-floor-hp, H3 50 Hz, ac2 sweep 10Hz-11s, dut −30 dBFS | 20261013T043410Z |
+| Leq Z, A, C | truth: numpy on the same recording | ambient | — | not run on this build | — | — |
+| LAeq | REW | ambient | — | not run on this build | — | — |
+| 1/3-octave RTA | its own band filters on the same recording | ambient | — | not run on this build | — | — |
+| Spectrum (tone, noise) | truth: closed form | osm | 0.02–0.1 / 0.1–0.3 dB | PASS (2 judged) | +0.019 dB @ identity | osm-2c07efe |
+| Transfer: ac2 vs OSM | OSM on the same fixtures (max) | osm | 0.05 / 0.2 dB; 0.5 / 2° | PASS (10 judged) | 0.299° @ biquad | osm-2c07efe |
+| Transfer: ac2 vs OSM | OSM on the same rig recording (median) | osm | 0.3 / 1 dB; 3 / 10° | PASS (4 judged) | 0.144 dB @ genelec-rig | osm-2c07efe |
+| Delay finder: ac2 vs OSM | OSM's whole-sample finder | osm | 0.6 / 1 samples | PASS (10 judged) | −0.551 samples @ genelec-rig | osm-2c07efe |
 
 <!-- END generated summary -->
 
@@ -55,23 +60,19 @@ Every WARN and FAIL in those baselines belongs to one item under [Open items](#o
 
 <!-- BEGIN generated misses: `python -m crosscheck comparison` from baselines/; do not edit by hand -->
 
-| item | status | on | checks | values | limit (pass / warn) | from run (ac2 build) |
+| item | status | on | checks | values | limit (pass / warn) | from run |
 |---|---|---|---|---|---|---|
-| [Genelec H2 at 5 kHz](#genelec-h2-at-5-khz) | open; ac2 and REW alike | genelec −30 dBFS | WARN 4 | +3.521 dB … +4.807 dB | 3 / 6 dB | 20261011T191033Z (ac2 2c07efe) |
-| [Genelec H4 at 500 Hz on the dist sweep](#genelec-h4-at-500-hz-on-the-dist-sweep) | open | genelec −30 dBFS | WARN 1 | +5.760 dB | 3 / 6 dB | 20261011T191033Z (ac2 2c07efe) |
-| [Genelec live TF at 1 kHz](#genelec-live-tf-at-1-khz) | open | genelec −30 dBFS | WARN 2 | −0.501 dB … −0.498 dB | 0.3–0.5 / 1 dB | 20261011T191033Z (ac2 2c07efe) |
-| [Genelec live TF SPL at 51 Hz](#genelec-live-tf-spl-at-51-hz) | open | genelec −30 dBFS | WARN 1 | +0.505 dB | 0.5 / 1 dB | 20261011T191033Z (ac2 2c07efe) |
-| [Genelec live TF against its direct estimate](#genelec-live-tf-against-its-direct-estimate) | open | genelec −30 dBFS | WARN 1 | 0.143 dB | 0.1 / 0.3 dB | 20261011T191033Z (ac2 2c07efe) |
-| [REW's deconvolution against numpy](#rews-deconvolution-against-numpy) | open | genelec −30 dBFS | WARN 1 | 0.317 dB | 0.3 / 1 dB | 20261011T191033Z (ac2 2c07efe) |
-| [The truth chain at the 100 Hz sine](#the-truth-chain-at-the-100-hz-sine) | open | genelec −30 dBFS | WARN 1 | −3.722° | 3 / 10° | 20261011T191033Z (ac2 2c07efe) |
-| [Genelec at −50 dBFS: ac2 sweep repeatability](#genelec-at-50-dbfs-ac2-sweep-repeatability) | open | genelec −50 dBFS | WARN 3 | 0.356 dB … 0.663 dB; 4.060° | 0.3 / 1 dB; 3 / 10° | 20261011T185816Z (ac2 2c07efe) |
-| [Genelec at −50 dBFS: REW's SPL at 51 Hz](#genelec-at-50-dbfs-rews-spl-at-51-hz) | open | genelec −50 dBFS | FAIL 1 | +1.172 dB | 0.5 / 1 dB | 20261011T185816Z (ac2 2c07efe) |
-| [Digital DUT: arrival on the 10 Hz sweeps](#digital-dut-arrival-on-the-10-hz-sweeps) | open | dut −10 dBFS | WARN 8 | +0.72 µs … +0.75 µs | 0.3 / 1 µs | 20261011T005229Z (ac2 6f0e5b5) |
-| [Digital DUT: arrival on the 10 Hz sweeps](#digital-dut-arrival-on-the-10-hz-sweeps) | open | dut −30 dBFS | WARN 8 | +0.69 µs … +0.76 µs | 0.3 / 1 µs | 20261011T010051Z (ac2 6f0e5b5) |
-| [Digital DUT: dut-loud sweep against its capture](#digital-dut-dut-loud-sweep-against-its-capture) | open | dut −10 dBFS | WARN 3 | 0.035 dB … 0.110 dB | 0.03–0.05 / 0.1–0.2 dB | 20261011T005229Z (ac2 6f0e5b5) |
-| [Digital DUT: dut-loud sweep against its capture](#digital-dut-dut-loud-sweep-against-its-capture) | open | dut −30 dBFS | WARN 3 | 0.035 dB … 0.111 dB | 0.03–0.05 / 0.1–0.2 dB | 20261011T010051Z (ac2 6f0e5b5) |
-| [Digital DUT: H3 at 50 Hz on dut-floor-hp](#digital-dut-h3-at-50-hz-on-dut-floor-hp) | outside the sweep model | dut −10 dBFS | WARN 1 | +0.543 dB | 0.5 / 1 dB | 20261011T005229Z (ac2 6f0e5b5) |
-| [Digital DUT: H3 at 50 Hz on dut-floor-hp](#digital-dut-h3-at-50-hz-on-dut-floor-hp) | outside the sweep model | dut −30 dBFS | WARN 1 | +0.556 dB | 0.5 / 1 dB | 20261011T010051Z (ac2 6f0e5b5) |
+| [Genelec H2 at 5 kHz](#genelec-h2-at-5-khz) | open; ac2 and REW alike | genelec −30 dBFS | WARN 4 | +3.521 dB … +4.807 dB | 3 / 6 dB | 20261011T191033Z |
+| [Genelec H4 at 500 Hz on the dist sweep](#genelec-h4-at-500-hz-on-the-dist-sweep) | open | genelec −30 dBFS | WARN 1 | +5.760 dB | 3 / 6 dB | 20261011T191033Z |
+| [Genelec live TF at 1 kHz](#genelec-live-tf-at-1-khz) | open | genelec −30 dBFS | WARN 2 | −0.501 dB … −0.498 dB | 0.3–0.5 / 1 dB | 20261011T191033Z |
+| [Genelec live TF SPL at 51 Hz](#genelec-live-tf-spl-at-51-hz) | open | genelec −30 dBFS | WARN 1 | +0.505 dB | 0.5 / 1 dB | 20261011T191033Z |
+| [Genelec live TF against its direct estimate](#genelec-live-tf-against-its-direct-estimate) | open | genelec −30 dBFS | WARN 1 | 0.143 dB | 0.1 / 0.3 dB | 20261011T191033Z |
+| [REW's deconvolution against numpy](#rews-deconvolution-against-numpy) | open | genelec −30 dBFS | WARN 1 | 0.317 dB | 0.3 / 1 dB | 20261011T191033Z |
+| [The truth chain at the 100 Hz sine](#the-truth-chain-at-the-100-hz-sine) | open | genelec −30 dBFS | WARN 1 | −3.722° | 3 / 10° | 20261011T191033Z |
+| [Genelec at −50 dBFS: ac2 sweep repeatability](#genelec-at-50-dbfs-ac2-sweep-repeatability) | open | genelec −50 dBFS | WARN 3 | 0.356 dB … 0.663 dB; 4.060° | 0.3 / 1 dB; 3 / 10° | 20261011T185816Z |
+| [Genelec at −50 dBFS: REW's SPL at 51 Hz](#genelec-at-50-dbfs-rews-spl-at-51-hz) | open | genelec −50 dBFS | FAIL 1 | +1.172 dB | 0.5 / 1 dB | 20261011T185816Z |
+| [Digital DUT: dut-loud sweep against its capture](#digital-dut-dut-loud-sweep-against-its-capture) | open | dut −10 dBFS | WARN 3 | 0.034 dB … 0.111 dB | 0.03–0.05 / 0.1–0.2 dB | 20261013T044420Z |
+| [Digital DUT: dut-loud sweep against its capture](#digital-dut-dut-loud-sweep-against-its-capture) | open | dut −30 dBFS | WARN 3 | 0.035 dB … 0.115 dB | 0.03–0.05 / 0.1–0.2 dB | 20261013T043410Z |
 
 <!-- END generated misses -->
 
@@ -86,7 +87,7 @@ of columns it stands on after every mask out of the band's columns.
 
 ### pupu: ac2 against REW, per quantity
 
-| quantity | xone −30 dBFS (20261011T052811Z, ac2 2c07efe) | genelec −30 dBFS (20261011T191033Z, ac2 2c07efe) | genelec −50 dBFS (20261011T185816Z, ac2 2c07efe) |
+| quantity | xone −30 dBFS (20261011T052811Z) | genelec −30 dBFS (20261011T191033Z) | genelec −50 dBFS (20261011T185816Z) |
 |---|---|---|---|
 | response magnitude | as REW: 9/9 judged; ac2 − REW 0.013 dB @ 20–100 Hz [mean 0.000 dB, n 99 of 111] (PASS 3) | as REW: 5/8 judged; ac2 − REW 0.284 dB @ 1000–20000 Hz [mean +0.034 dB, n 188 of 208] (PASS 3) | as REW: 3/8 judged; ac2 − REW 0.212 dB @ 1000–20000 Hz [mean −0.050 dB, n 191 of 208] (PASS 2, INCONCLUSIVE 1) |
 | response phase | as REW: 9/9 judged; ac2 − REW 0.102° @ 20–100 Hz [mean +0.010°, n 99 of 111] (PASS 3) | as REW: 5/8 judged; ac2 − REW 2.078° @ 20–100 Hz [mean −0.378°, n 19 of 111] (PASS 3) | as REW: 2/8 judged; ac2 − REW 2.193° @ 1000–20000 Hz [mean −0.082°, n 191 of 208] (PASS 2, INCONCLUSIVE 1) |
@@ -98,13 +99,13 @@ of columns it stands on after every mask out of the band's columns.
 
 ### pupu: electrical (xone) and speaker (genelec) paths, every row
 
-| check | xone −30 dBFS (20261011T052811Z, ac2 2c07efe) | genelec −30 dBFS (20261011T191033Z, ac2 2c07efe) | genelec −50 dBFS (20261011T185816Z, ac2 2c07efe) |
+| check | xone −30 dBFS (20261011T052811Z) | genelec −30 dBFS (20261011T191033Z) | genelec −50 dBFS (20261011T185816Z) |
 |---|---|---|---|
 | verdicts | PASS 211, INCONCLUSIVE 350, INFO 90 | WARN 11, PASS 158, INCONCLUSIVE 183, INFO 72 | FAIL 1, WARN 3, PASS 83, INCONCLUSIVE 249, INFO 72 |
 | ac2 sweep vs REW offline import, magnitude spread per band | 0.013 dB @ 20–100 Hz [mean 0.000 dB, n 99 of 111] (PASS 3) | 0.284 dB @ 1000–20000 Hz [mean +0.034 dB, n 188 of 208] (PASS 3) | 0.212 dB @ 1000–20000 Hz [mean −0.050 dB, n 191 of 208] (PASS 2, INCONCLUSIVE 1) |
 | ac2 sweep vs REW offline import, phase, max(\|mean\|, spread) per band | 0.102° @ 20–100 Hz [mean +0.010°, n 99 of 111] (PASS 3) | 2.078° @ 20–100 Hz [mean −0.378°, n 19 of 111] (PASS 3) | 2.193° @ 1000–20000 Hz [mean −0.082°, n 191 of 208] (PASS 2, INCONCLUSIVE 1) |
 | REW offline vs direct (same recording), magnitude, max(\|mean\|, spread) per band | 0.010 dB @ 20–100 Hz [mean 0.000 dB, n 99 of 111] (PASS 3) | 0.317 dB @ 20–100 Hz [mean −0.036 dB, n 21 of 111] (WARN 1, PASS 2) | 0.119 dB @ 100–1000 Hz [mean −0.043 dB, n 44 of 159] (PASS 2, INCONCLUSIVE 1) |
-| REW offline vs direct (same recording), phase, max(\|mean\|, spread) per band | 0.104° @ 20–100 Hz [mean −0.003°, n 99 of 111] (PASS 3) | 1.934° @ 20–100 Hz [mean +0.284°, n 21 of 111] (PASS 3) | 0.721° @ 1000–20000 Hz [mean 0.000°, n 191 of 208] (PASS 2, INCONCLUSIVE 1) |
+| REW offline vs direct (same recording), phase, max(\|mean\|, spread) per band | 0.104° @ 20–100 Hz [mean −0.003°, n 99 of 111] (PASS 3) | 1.934° @ 20–100 Hz [mean +0.284°, n 21 of 111] (PASS 3) | 0.722° @ 1000–20000 Hz [mean 0.000°, n 191 of 208] (PASS 2, INCONCLUSIVE 1) |
 | ac2 sweep vs direct (its own capture), magnitude, max(\|mean\|, spread) per band | 0.009 dB @ 1000–20000 Hz [mean −0.005 dB, n 197 of 208] (PASS 3) | 0.109 dB @ 20–100 Hz [mean −0.002 dB, n 22 of 111] (PASS 3) | 0.113 dB @ 100–1000 Hz [mean −0.038 dB, n 52 of 159] (PASS 2, INCONCLUSIVE 1) |
 | ac2 sweep vs direct (its own capture), phase, max(\|mean\|, spread) per band | 0.061° @ 20–100 Hz [mean +0.004°, n 99 of 111] (PASS 3) | 0.849° @ 20–100 Hz [mean −0.036°, n 22 of 111] (PASS 3) | 0.484° @ 100–1000 Hz [mean −0.013°, n 52 of 159] (PASS 2, INCONCLUSIVE 1) |
 | ac2 live TF vs direct (γ² ≥ 0.99), magnitude, max(\|mean\|, spread) per band | 0.017 dB @ 20–100 Hz [mean −0.001 dB, n 73 of 111] (PASS 3) | 0.143 dB @ 100–1000 Hz [mean +0.001 dB, n 30 of 159] (WARN 1, INCONCLUSIVE 2) | INCONCLUSIVE 2 |
@@ -117,7 +118,7 @@ of columns it stands on after every mask out of the band's columns.
 | ac2 live TF vs steady sine, phase | −0.056° @ 40.5 Hz (PASS 7) | +1.522° @ 1000 Hz (PASS 5) | −0.734° @ 1000 Hz (PASS 1, INCONCLUSIVE 1) |
 | ac2 meas÷ref vs REW (meas − ref), absolute level | −0.001 dB [n 96] (PASS 1) | +0.014 dB [n 96] (PASS 1) | −0.002 dB [n 96] (PASS 1) |
 | ac2 reference level vs REW's | −0.006 dB (PASS 1) | −0.004 dB (PASS 1) | −0.006 dB (PASS 1) |
-| ac2 reported arrival vs direct, every sweep | −0.02 µs @ 3Hz-5.5s (PASS 5) | +0.56 µs @ 20Hz-5.5s (PASS 3) | −1.02 µs @ dist-probe (PASS 3) |
+| ac2 reported arrival vs direct, every sweep | −0.01 µs @ 3Hz-5.5s (PASS 5) | +0.53 µs @ 20Hz-5.5s (PASS 3) | −1.04 µs @ dist-probe (PASS 3) |
 | ac2 arrival + phase slope vs direct, every sweep | 0.00 µs @ dist-probe (PASS 5) | — | — |
 | group delay vs sine pairs: ac2, ±1/12-oct fit | −0.01 µs @ 1040 Hz; −8.0 % @ 60.5 Hz (PASS 6, INCONCLUSIVE 2) | — | — |
 | group delay vs sine pairs: ac2 as displayed | 0.00 µs @ 10000 Hz; −5.9 % @ 60.5 Hz (PASS 3, INCONCLUSIVE 5) | — | — |
@@ -131,7 +132,7 @@ of columns it stands on after every mask out of the band's columns.
 
 ### pupu: distortion coverage per harmonic order (steady-sine tones judged)
 
-| check | xone −30 dBFS (20261011T052811Z, ac2 2c07efe) | genelec −30 dBFS (20261011T191033Z, ac2 2c07efe) | genelec −50 dBFS (20261011T185816Z, ac2 2c07efe) |
+| check | xone −30 dBFS (20261011T052811Z) | genelec −30 dBFS (20261011T191033Z) | genelec −50 dBFS (20261011T185816Z) |
 |---|---|---|---|
 | H2 ac2 sweep | INCONCLUSIVE 8 | +3.521 dB @ 5000 Hz (WARN 1, PASS 1, INCONCLUSIVE 5) | INCONCLUSIVE 7 |
 | H3 ac2 sweep | INCONCLUSIVE 8 | +0.420 dB @ 1000 Hz (PASS 2, INCONCLUSIVE 5) | INCONCLUSIVE 7 |
@@ -142,26 +143,7 @@ of columns it stands on after every mask out of the band's columns.
 | H4 REW offline import | INCONCLUSIVE 7 | INCONCLUSIVE 6 | INCONCLUSIVE 6 |
 | H5 REW offline import | INCONCLUSIVE 7 | INCONCLUSIVE 6 | INCONCLUSIVE 6 |
 
-### pupu: ambient
-
-| quantity | ambient silent (20261011T002931Z, ac2 6f0e5b5) |
-|---|---|
-| LAeq | as REW: 1/1 judged; ac2 − REW −0.003 dB (PASS 1) |
-| 1/3-oct RTA (vs its own band filters) | PASS: 1/1 judged |
-
-| check | ambient silent (20261011T002931Z, ac2 6f0e5b5) |
-|---|---|
-| verdicts | PASS 6, INFO 31 |
-| LZeq ac2 vs numpy | +0.005 dB (PASS 1) |
-| LAeq ac2 vs numpy | +0.001 dB (PASS 1) |
-| LCeq ac2 vs numpy | +0.006 dB (PASS 1) |
-| LAeq REW vs numpy | +0.005 dB (PASS 1) |
-| LAeq ac2 vs REW | −0.003 dB (PASS 1) |
-| 1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs its own filters' response applied to the recording, worst band | +0.118 dB [n 29] (PASS 1) |
-| 1/3-oct bands 25 Hz–16 kHz: ac2 RTA vs numpy at ideal band edges, largest \|difference\| (context) | 8.675 dB [n 29] (INFO 1) |
-| 1/3-oct bands 25 Hz–16 kHz: REW RTA vs numpy at ideal band edges, largest \|difference\| (context) | 6.861 dB [n 29] (INFO 1) |
-
-### OSM stage (osm-6f0e5b57, ac2 6f0e5b5, v1.5.2: PASS 86, INFO 77)
+### OSM stage (osm-2c07efe, v1.5.2: PASS 86, INFO 77)
 
 **Transfer: max over the gated columns; a rig take (not a planned fixture) shows the median over its columns**
 
@@ -211,17 +193,17 @@ of columns it stands on after every mask out of the band's columns.
 
 ### Digital DUT: harmonics H2–H5 against their exact values (dummy JACK)
 
-| order, analyser | dut −10 dBFS (20261011T005229Z, ac2 6f0e5b5) | dut −30 dBFS (20261011T010051Z, ac2 6f0e5b5) |
+| order, analyser | dut −10 dBFS (20261013T044420Z) | dut −30 dBFS (20261013T043410Z) |
 |---|---|---|
-| verdicts | WARN 12, PASS 752, INFO 116 | WARN 12, PASS 752, INFO 116 |
-| H2 steady sine | +0.054 dB (PASS 28) | +0.021 dB (PASS 28) |
-| H2 ac2 sweep | +0.181 dB (PASS 56) | +0.126 dB (PASS 56) |
-| H3 steady sine | +0.026 dB (PASS 28) | +0.041 dB (PASS 28) |
-| H3 ac2 sweep | −0.189 dB (WARN 1, PASS 55) | −0.130 dB (WARN 1, PASS 55) |
-| H4 steady sine | +0.026 dB (PASS 28) | +0.015 dB (PASS 28) |
-| H4 ac2 sweep | −0.116 dB (PASS 56) | −0.115 dB (PASS 56) |
-| H5 steady sine | −0.021 dB (PASS 28) | +0.017 dB (PASS 28) |
-| H5 ac2 sweep | −0.135 dB (PASS 56) | −0.129 dB (PASS 56) |
+| verdicts | WARN 3, PASS 761, INFO 116 | WARN 3, PASS 761, INFO 116 |
+| H2 steady sine | +0.024 dB (PASS 28) | −0.032 dB (PASS 28) |
+| H2 ac2 sweep | +0.137 dB (PASS 56) | +0.212 dB (PASS 56) |
+| H3 steady sine | +0.034 dB (PASS 28) | −0.023 dB (PASS 28) |
+| H3 ac2 sweep | +0.086 dB (PASS 56) | −0.105 dB (PASS 56) |
+| H4 steady sine | −0.021 dB (PASS 28) | +0.013 dB (PASS 28) |
+| H4 ac2 sweep | +0.144 dB (PASS 56) | −0.196 dB (PASS 56) |
+| H5 steady sine | +0.012 dB (PASS 28) | +0.017 dB (PASS 28) |
+| H5 ac2 sweep | −0.193 dB (PASS 56) | +0.145 dB (PASS 56) |
 
 <!-- END generated results -->
 
@@ -425,29 +407,13 @@ REW's SPL, calibrated from ac2, reads
 steady sine at 51 Hz. At −50 dBFS a speaker leaves the room's noise close at LF; ac2's sweep at
 that tone is inconclusive. REW's reading, not ac2's. Not investigated.
 
-### Digital DUT: arrival on the 10 Hz sweeps
-
-On all four DUT paths and at both levels, the two 10 Hz sweeps report an arrival later than their
-capture's IR peak, by less than a tenth of a sample (miss table). The DUT's 7.2 kHz low-pass
-broadens the IR peak; how ac2's and the suite's peak interpolation differ there is unmeasured.
-Next: compare the two interpolators on the low-passed IR.
-
 ### Digital DUT: dut-loud sweep against its capture
 
 Only on the loud path, and not on the other three, the 10 Hz sweeps spread slightly more than
 the pass limit against their own capture, at 20–100 Hz and 100 Hz–1 kHz. The signed means stay
-within 0.001 dB<!--= b host/dut-10dbfs // dut-loud.mag.ac2 sweep 10Hz-5.5s|direct (ac2 capture 10Hz-5.5s).20-100 // mean -->.
+within 0.000 dB<!--= b host/dut-10dbfs // dut-loud.mag.ac2 sweep 10Hz-5.5s|direct (ac2 capture 10Hz-5.5s).20-100 // mean -->.
 Not investigated. Next: replay the `dut-loud` captures to see whether the spread depends on
 level.
-
-### Digital DUT: H3 at 50 Hz on dut-floor-hp
-
-This cell lies outside the sweep's model: there the DUT's pre-filter changes faster than the
-sweep's instantaneous-frequency reading can follow, at −110 dBFS. It is marked † in
-[reports/dut-coverage.md](reports/dut-coverage.md), left out of the DUT table's worst value and
-counted in its verdicts. The earlier matrix runs on another build (20261010T172324Z and
-20261010T173102Z) read it as PASS, which fits scatter about the pass limit; that it is only
-scatter is not shown.
 
 ### Other open questions
 
@@ -457,9 +423,8 @@ scatter is not shown.
   transfer-error scatter (white, coloured and non-stationary signals, across window crossovers)
   is unvalidated. Next: on the OSM-stage and coherence-study fixtures, compare the gate's σ with
   the scatter of |H| − truth per column.
-- **Ambient RTA against its own filters**: the residual
-  (+0.118 dB<!--= b pupu/ambient // ambient.bands.ac2 RTA|own filters --> worst band, with music in
-  the room) is attributed to ac2's RTA FIFO spanning the recording plus a few seconds of the room
+- **Ambient RTA against its own filters** (stage not run on this build): the worst-band residual
+  of the last take, with music in the room, is attributed to ac2's RTA FIFO spanning the recording plus a few seconds of the room
   around it. A quiet-room take (run 20261010T174045Z) read much smaller. Plausible, not
   demonstrated: capture the RTA at the recording's end with a FIFO of the recording's length.
 - **REW's RTA against numpy** (INFO): REW's band filters and its averaging are not modelled
@@ -474,12 +439,24 @@ scatter is not shown.
 
 INFO rows and bounds whose cause is shown.
 
-- **ac2's RTA against ideal band edges** (INFO,
-  8.675 dB<!--= b pupu/ambient // ambient.bands.ac2 RTA --> largest band difference): ac2's bands
-  are order-3 Butterworth filters, whose skirts pass a strong tone near a band edge into the
-  neighbouring band. Against those filters applied to the same recording ac2's worst band is
-  +0.118 dB<!--= b pupu/ambient // ambient.bands.ac2 RTA|own filters --> (PASS), so the filter
-  definition, not ac2's processing, accounts for the difference to ideal edges.
+- **Digital DUT: H3 at 50 Hz on dut-floor-hp**: this cell lies outside the sweep's model; there
+  the DUT's pre-filter changes faster than the sweep's instantaneous-frequency reading can
+  follow, at −110 dBFS. It is marked † in [reports/dut-coverage.md](reports/dut-coverage.md),
+  left out of the DUT table's worst value and counted in its verdicts. It passes at both levels
+  on this build and has warned on earlier takes, which fits scatter about the pass limit; that
+  it is only scatter is not shown.
+- **Arrival on the digital DUT** (closed): the suite's truth, the IR peak of the capture,
+  was interpolated over a span of the IR too short for the DUT's 8th-order 7.2 kHz Butterworth,
+  which still rings there. The DFT interpolant treats the span as one period, so the ringing at
+  its ends wrapped in and moved the truth early by under a tenth of a sample, which every DUT
+  arrival check read as ac2 being late. With a span that holds the ringing the suite's peak
+  matches the cascade's closed-form band-limited peak (`tests/test_dsp.py`), and every arrival
+  check passes.
+- **ac2's RTA against ideal band edges** (INFO; the ambient stage was not run on this build):
+  ac2's bands are order-3 Butterworth filters, whose skirts pass a strong tone near a band edge
+  into the neighbouring band, so they differ from ideal edges by several dB in such a band.
+  Against those filters applied to the same recording ac2's bands passed on the last take, so the
+  filter definition, not ac2's processing, accounts for the difference to ideal edges.
 - **Xone LF harmonics are bounds**: hum bursts on the Xone's input, intermittent and set by
   whatever device in the building cycles, land in a sweep's harmonic windows when they coincide.
   ac2 reads each harmonic's floor beside its window, so these cells are bounds on ac2 and REW

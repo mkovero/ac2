@@ -66,7 +66,7 @@ SUMMARY_ROWS: list[tuple[str, str, tuple[str, ...], str]] = [
 # |difference|: none has a direction, so the worst value is shown unsigned.
 UNSIGNED = re.compile(r"\.ac2_(?:tf_h|tf_phase)_vs_analytic$|\.ac2_vs_osm_(?:h|phase)$")
 
-OPEN, SHARED, LIMIT = "open", "open; ac2 and REW alike", "outside the sweep model"
+OPEN, SHARED = "open", "open; ac2 and REW alike"
 MISS_ITEMS: list[tuple[str, str, str]] = [
     ("Genelec H2 at 5 kHz", SHARED, r"genelec\.h2\.(?:ac2 sweep [^|@]+|REW offline import)@5000Hz$"),
     ("Genelec H4 at 500 Hz on the dist sweep", OPEN, r"genelec\.h4\.ac2 sweep dist@500Hz$"),
@@ -78,9 +78,7 @@ MISS_ITEMS: list[tuple[str, str, str]] = [
     ("Genelec at −50 dBFS: ac2 sweep repeatability", OPEN,
      r"genelec\.(?:mag|phase)\.ac2 sweep [^|]+\|(?:ac2 sweep|direct)"),
     ("Genelec at −50 dBFS: REW's SPL at 51 Hz", OPEN, r"genelec\.spl\.REW \(SPL, cal from ac2\)@50Hz$"),
-    ("Digital DUT: arrival on the 10 Hz sweeps", OPEN, r"dut[^.]*\.delay\.ac2_arrival\.10Hz-"),
     ("Digital DUT: dut-loud sweep against its capture", OPEN, r"dut-loud\.mag\.ac2 sweep [^|]+\|direct"),
-    ("Digital DUT: H3 at 50 Hz on dut-floor-hp", LIMIT, r"dut-floor-hp\.dut\.h3\.ac2 sweep 10Hz-5\.5s\.50$"),
 ]
 
 
@@ -103,7 +101,7 @@ def stages_text(bs: list[dict]) -> str:
 
 def provenance(b: dict) -> str:
     pv = b.get("provenance") or {}
-    return f"{pv.get('run')} (ac2 {C._short_build(pv.get('ac2_build'))})"
+    return str(pv.get("run"))
 
 
 def _osm_split(b: dict) -> tuple[set[str], set[str]]:
@@ -187,10 +185,20 @@ def _ratio(e: dict) -> float:
     return abs(e["value"]) / tol[0] if tol and tol[0] else 0.0
 
 
-def summary_row(bs: list[dict], quantity: str, against: str, stages, pattern: str) -> str | None:
+def _stage(selector: str) -> str:
+    return "osm" if selector.startswith("osm:") else selector
+
+
+def summary_row(bs: list[dict], quantity: str, against: str, stages, pattern: str,
+                not_run: set[str] = frozenset()) -> str | None:
+    """One row; `not_run`: the stages with no baseline on the document's build, named in the row
+    instead of an older build's numbers."""
     found = [(b, w, e, k) for b, cases in _selected(bs, stages) for w, e, k in entries(b, pattern, cases)]
+    absent = list(dict.fromkeys(_stage(s) for s in stages if _stage(s) in not_run))
     if not found:
-        return None
+        if not absent:
+            return None
+        return f"| {quantity} | {against} | {', '.join(absent)} | — | not run on this build | — | — |"
     es = [t[2] for t in found]
     judged = [t for t in found if t[2]["status"] in JUDGED and t[2]["value"] is not None]
     several = len({id(t[0]) for t in found}) > 1
@@ -202,15 +210,15 @@ def summary_row(bs: list[dict], quantity: str, against: str, stages, pattern: st
         src = provenance(b)
     else:
         worst, src = "—", ", ".join(dict.fromkeys(provenance(t[0]) for t in found))
-    on = stages_text([t[0] for t in found])
+    on = stages_text([t[0] for t in found]) + "".join(f"; {a} not run on this build" for a in absent)
     return (f"| {quantity} | {against} | {on} | {limit_text([t[2] for t in judged] or es)} | "
             f"{verdict_text(es)} | {worst} | {src} |")
 
 
-def summary_table(bs: list[dict]) -> list[str]:
-    out = ["| quantity | measured against | on | limit (pass / warn) | verdict | worst (largest share of its limit) | from run (ac2 build) |",
+def summary_table(bs: list[dict], not_run: set[str] = frozenset()) -> list[str]:
+    out = ["| quantity | measured against | on | limit (pass / warn) | verdict | worst (largest share of its limit) | from run |",
            "|---|---|---|---|---|---|---|"]
-    out += [r for r in (summary_row(bs, *row) for row in SUMMARY_ROWS) if r]
+    out += [r for r in (summary_row(bs, *row, not_run=not_run) for row in SUMMARY_ROWS) if r]
     return out
 
 
@@ -245,7 +253,7 @@ def anchor(title: str) -> str:
 
 
 def miss_table(bs: list[dict], items: list[Item] = MISS_ITEMS) -> list[str]:
-    out = ["| item | status | on | checks | values | limit (pass / warn) | from run (ac2 build) |",
+    out = ["| item | status | on | checks | values | limit (pass / warn) | from run |",
            "|---|---|---|---|---|---|---|"]
     for title, status, _ in items:
         for b in bs:

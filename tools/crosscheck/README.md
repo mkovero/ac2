@@ -384,7 +384,8 @@ against the sine.
   unless `--force`, which is for a FAIL that is a known, documented gap) and commit the
   files with the ac2 build hash in the message. Then run `python -m crosscheck comparison`:
   it rebuilds the summary, the miss list and the results tables of `comparison.md` from the
-  baselines, and rewrites each number quoted in its prose from the baseline, report or
+  baselines on one build (that of the newest rig baseline; a stage with none on it is listed
+  as not run on this build, so re-run the host stages on a new rig build), and rewrites each number quoted in its prose from the baseline, report or
   tolerance it names. `--check` (and a test) fails while any is stale, when the prose holds a
   measured number or build hash with no source, and when a WARN or FAIL has no open item in
   `comparison_summary.MISS_ITEMS` or an item has no miss left: a new miss needs its item and
