@@ -1,4 +1,4 @@
-"""python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison,data} —
+"""python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison} —
 see README.md."""
 from __future__ import annotations
 
@@ -90,12 +90,7 @@ def main(argv=None) -> int:
                            help="ac2's sweep and TF Resolution (columns per octave); a non-default one gets "
                                 "baselines of its own (<stage>-<level>dbfs-r<N>.json)")
 
-    from . import data
-    data.register(sub)
-
     a = ap.parse_args(argv)
-    if a.cmd == "data":
-        return data.main(a)
     if a.cmd == "analyse":
         import tomllib
         import warnings
