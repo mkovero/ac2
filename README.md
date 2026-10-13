@@ -7,7 +7,7 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
 
 ![Transfer function with stored traces, the measurement tree and key hints](crates/ac2-ui/tests/snapshots/traces_list.png)
 
-- **Transfer function** with coherence (multi-time-window FFT ladder, 48 points per octave),
+- **Transfer function** with coherence (multi-time-window FFT ladder, 48 points per octave by default, 1/12 … 1/96 octave),
   averaging, magnitude and phase smoothing, fault banners that say what is wrong
   instead of drawing a plausible curve.
 - **Delay finder** that targets the first arrival, reports confidence and candidates, and
@@ -50,7 +50,7 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
   delete, show / hide, slots, display offsets to spread curves apart, a comparison cursor,
   target curves, smoothing and a mic curve applied after capture, CSV import / export (a
   sweep round-trips with its distortion and impulse response).
-- **Sessions and autosave**: save and load by name; a stand-alone daemon autosaves and
+- **Sessions and autosave**: save and load by name, export and open `.ac2session` files; a stand-alone daemon autosaves and
   restores on restart, always disarmed.
 - **Keyboard first**: one remappable binding table, layout-safe defaults, a command palette,
   **H** for every key, per-pane key hints and tooltips; per-pane level-axis zoom / pan / fit;
@@ -101,7 +101,9 @@ Pre-1.0 (version 0.0.0; no compatibility promised between builds: protocol, sess
 calibration-store versions are checked and a mismatch is refused or set aside, never
 guessed). Phases 0–6 of [PLAN.md](PLAN.md#9-phases) — audio, DSP, daemon and protocol, UI,
 calibration / SPL / sessions, packaging and documentation — meet their CI criteria; most
-of the post-1.0 phase 7 is done, ASIO and multi-device support are open.
+of the post-1.0 phase 7 is done. ASIO ships as a preview until it is checked on a real PC; two-device
+sessions and output-vs-input drift detection are done, multi-device resampling and
+input-vs-input drift are open.
 
 The hardware acceptance runs are still open ([status table](PLAN.md#90-status)):
 
@@ -110,8 +112,9 @@ The hardware acceptance runs are still open ([status table](PLAN.md#90-status)):
   against REW ([docs/rigs/pupu.md](docs/rigs/pupu.md)); a Raspberry Pi 4 runs the app as a
   touch kiosk client.
 - **Windows**: the MSI installs and the app runs the simulated rig (checked in a VM). Audio
-  is ASIO only (FlexASIO for devices without their own driver); it passes under Wine, and
-  a real interface is untested ([testing/windows](testing/windows/README.md)).
+  is ASIO only (FlexASIO for devices without their own driver); in a Windows VM, RME's
+  driver with a Babyface Pro passed a one-hour duplex run and loopback timing; a real PC is
+  untested ([testing/windows](testing/windows/README.md)).
 - **macOS**: the universal disk image installs and starts on a tester's Mac; not yet
   measured with an audio interface ([testing/macos](testing/macos/README.md)).
 - Builds are not code-signed, and there are no GitHub Releases: installers are artifacts of
@@ -120,13 +123,14 @@ The hardware acceptance runs are still open ([status table](PLAN.md#90-status)):
 ## Building from source
 
 Rust (version pinned in `rust-toolchain.toml`) and a C/C++ toolchain; on Linux also
-`pkg-config cmake libjack-jackd2-dev libudev-dev`. libjack is loaded at run time, so the
+`pkg-config cmake libjack-jackd2-dev`. libjack is loaded at run time, so the
 binaries run (and say why audio is unavailable) where JACK is not installed; nothing links
 ALSA.
 
 ```sh
 cargo build --release -p ac2d -p ac2-cli -p ac2-ui
-cargo test --workspace
+cargo nextest run --workspace    # quick tier; slow_* tests need --profile full
+cargo test --workspace --doc
 ```
 
 Release packaging: `packaging/` (scripts per OS) and `.github/workflows/release.yml`.
@@ -151,7 +155,9 @@ version named.
 
 `XDG_CONFIG_HOME` / `XDG_DATA_HOME` apply on Linux. `AC2_CONFIG_DIR` moves the config
 directory, `AC2_SESSION_DIR` the sessions, `ac2d --cal-store PATH` the calibration store,
-`ac2d --autosave DIR` the autosave (`--no-autosave` keeps everything in memory).
+`ac2d --autosave DIR` the autosave (`--no-autosave` keeps everything in memory),
+`ac2d --settings PATH` the rig settings, `ac2d --recordings DIR` the raw recordings and
+`AC2_LOG_DIR` the log directory.
 Calibrations describe the machine's hardware and stay in the config directory; sessions are
 the operator's documents and live in the data directory.
 

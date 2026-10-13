@@ -31,8 +31,10 @@ audio interface ── ac2d (daemon) ──┬── ac2-ui  (the app: plots, ke
 
 The **daemon** owns the audio interface and does all measuring. The app and the CLI are
 clients; several can be connected at once (a laptop at FOH, another at a delay tower) and
-see the same measurements. Locally the daemon is reachable only by your user; across the
-network it requires pairing ([install.md](install.md#remote-use-foh--stage)).
+see the same measurements. Locally the daemon is reachable only by your user on Linux and
+macOS (sockets in your runtime directory); on Windows it listens on `127.0.0.1:47820`
+without encryption, so any program on the same computer can reach it. Across the network it
+requires pairing ([install.md](install.md#remote-use-foh--stage)).
 
 A **session** is the open audio stream: one device, a sample rate, a buffer size and the
 inputs to capture. **Measurements** run on it: transfer functions (`tf`), spectrum, RTA,
@@ -157,8 +159,7 @@ output device, rate, buffer), channels, system max level; **↑/↓** walk them 
   devices are not offered.
 - **Output** (**←/→**): where the stimulus plays. It starts as *same device as the input*
   when that device has outputs (one device, one clock), else the system's default output —
-  Windows lists an interface as separate capture and playback endpoints, and a USB mic has
-  no outputs. With two devices the clocks may differ, and Settings says so: the loopback
+  a USB mic has no outputs. With two devices the clocks may differ, and Settings says so: the loopback
   reference keeps the transfer function right, and the loopback monitor measures their
   drift while a stimulus plays. The choice is remembered with the input device's roles.
 - **Channels**: one row per input and output, named by the backend where it can (JACK port
@@ -282,8 +283,8 @@ multi-time-window FFT ladder: long windows at low frequencies, responsive at hig
 Each is its own view of the pane (**G** steps them).
 
 - **Coherence (γ²)** is how much of the measured energy the reference explains. It is
-  computed per FFT bin and averaged over each column, so it does not drop at a coarser
-  resolution or where phase turns quickly. It is drawn as trace transparency, its own curve,
+  computed per FFT bin and averaged over each column, weighted by the reference's power in
+  each bin, so it does not drop at a coarser resolution or where phase turns quickly. It is drawn as trace transparency, its own curve,
   or a mask blanking the traces where γ² is below a threshold (**B**: off, 0.3, 0.5, 0.7,
   0.9).
 - **Averaging** accumulates the cross- and auto-spectra; **R** resets it. To keep a result,
@@ -329,8 +330,8 @@ and impulse response (**N**, then **G** the new half). The layout is remembered.
 
 The transfer pane's **impulse response** views show the IR of that pane's measurement as
 linear amplitude, dB re its peak, or energy-time curve (**Shift+G** from magnitude reaches
-the ETC in one step). Coherence is drawn over the magnitude when Settings › Display places
-it there; otherwise it is its own view. A stopped measurement draws no live IR (its other
+the ETC in one step). Coherence is always a view of its own; Settings › Display can also
+draw it over the magnitude. A stopped measurement draws no live IR (its other
 views keep the last curve, tagged `stopped`); a selected capture's stored IR still shows.
 
 A command about a kind (an SPL view key, the sweep's views) goes to the pane of that kind
@@ -395,9 +396,11 @@ only outlined while a later-selected trace has them.
   A click on a legend row selects that curve, so click then **A** hides it.
 - **Shift+A** hides a measurement and everything under it (live curve, traces, math
   channels), and shows them all when all are hidden (with a trace selected: its group).
-- **Delete** / **Backspace** on a measurement asks: *Delete measurement TF 2? Its live curve
-  and settings go; captured traces stay.* **Delete**, **Backspace** or **Enter** deletes,
-  **Esc** or **N** keeps. A measurement a math channel computes from cannot be deleted; the
+- **Delete** / **Backspace** on a measurement that owns no stored traces asks: *Delete
+  measurement TF 2? Its live curve and settings go; it owns no stored traces.* **Delete**,
+  **Backspace** or **Enter** deletes, **Esc** or **N** keeps. One that owns traces or math
+  channels asks what happens to them
+  ([below](#deleting-a-measurement-that-owns-traces)). A measurement a math channel computes from cannot be deleted; the
   window names the channel to edit or delete first.
 - On a stored trace both act on the trace ([below](#rename-export-delete)).
 
@@ -411,7 +414,7 @@ Esc and Shift+Esc stop as always.
 
 **F** (or **F11**) steps the window: windowed → window full screen (top bar and lists as
 before) → **panes only** (the stage view with every pane) → windowed. With one pane up (W),
-the second step already is the stage view. In panes only, **W** toggles all panes / the
+the first **F** already gives the stage view and the next one returns to windowed. In panes only, **W** toggles all panes / the
 focused one and stays full screen. The hidden lists still answer their keys (**Tab**,
 **V**), a click focuses a pane.
 
@@ -562,14 +565,15 @@ within 1/96 octave, while the stream stays small enough for WiFi. A **capture** 
 bin: zoom into one for finer detail.
 
 A long FFT updates every eighth of its window (about 6/s at 65 536 points; more overlap adds
-work but no information); short FFTs about 30/s. The curve **glides** to each new spectrum
+work but no information); a short FFT steps by 1024 samples at 48 kHz (about 47/s; the step
+scales with the rate), or by half its window when that is shorter. The curve **glides** to each new spectrum
 over the time between them (30–200 ms); the cursor, peak hold and captures use the newest
 spectrum itself, and stale, stopped or reconfigured measurements are drawn as they are.
 Settings › Display › Spectrum "jumps to each new frame" turns gliding off (RTAs too).
 
 #### Fixed or multi-resolution
 
-A spectrum's **Resolution** is one FFT (`4096 pt` … `65536 pt`, default 65 536) or
+A spectrum's **Resolution** is one FFT (`64 pt` … `65536 pt`, default 65 536) or
 **multi-resolution** (`multi-res 1/48 oct`; 1/12 … 1/96 oct). One FFT has one window for all
 frequencies: 65 536 points resolve 0.73 Hz at 48 kHz but take 1.4 s to see a change; 2048
 follow within 43 ms but cannot separate anything closer than 23 Hz. Multi-resolution runs
@@ -622,7 +626,7 @@ what an integrating meter reads).
 | `FIFO 64 frames` | the mean of the last 64 frames, each counted equally in time | `fifo:64` |
 
 A spectrum's frame is one hop of its FFT (0.17 s at 65 536 points, 48 kHz; 1024 samples for
-short ones), so a FIFO's span depends on FFT length; an RTA's frame is one result interval,
+short ones, half the window for the shortest), so a FIFO's span depends on FFT length; an RTA's frame is one result interval,
 about 1/60 s. A time constant means the same for both, so the dialogs list those first. A
 spectrum FIFO holds at most 511 frames at 65 536 points; an RTA's at most 65 536.
 
@@ -737,8 +741,9 @@ measurement's smoothing); averages and math channels combine unsmoothed curves.
 #### Banners
 
 Banners say what is wrong rather than show a misleading curve: **NO REFERENCE**, **NO
-SIGNAL**, **CHECK ROUTING**, **CLIP**, **STALE** (with the age), **NO DELAY ESTIMATE**, and
-for math channels **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE** / **NO RESULT**.
+SIGNAL**, **CHECK ROUTING**, **CLIP**, **STALE** (with the age: `STALE · 3.2 s`), **NO DELAY
+ESTIMATE**, **CLOCK DRIFT** (in ppm), **OUTPUT TIMING JUMP**, **AUDIO STOPPED** (with the
+reason), **DAEMON NOT RESPONDING**, and for math channels **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE** / **NO RESULT**.
 
 ### Math channels
 
@@ -840,6 +845,10 @@ delay finder estimates it from the impulse response, with a **confidence** and t
   can separate, or a crossover inside the band (a multi-way box in the full band). **1**
   inserts the peak's delay; for the first arrival, run the finder in a band without the
   crossover (palette *Delay finder: mid / sub band* or a custom band, CLI `--band`).
+- The band is **auto** unless you pick one: full (2–16 kHz), then mid (300 Hz – 3 kHz), then
+  sub (20–120 Hz), the first the finder does not refuse. Palette *Delay finder: auto / full /
+  mid / sub band*, *custom band (Hz)…*, *observation length (s)…*; CLI `--band
+  full|mid|sub|auto|<lo>-<hi>` and `--observation`.
 
 #### Setting the delay by hand
 
@@ -847,7 +856,7 @@ A measurement has one delay, the daemon's.
 
 | Key | Does |
 |---|---|
-| **D** | types it: `12.5ms`, `600samples`, or a distance `4.3m` (at the set temperature's speed of sound); −10000 … 10000 ms, negative = the measurement leads |
+| **D** | types it in ms (`12.5` or `12.5ms`); −10000 … 10000 ms, negative = the measurement leads. Samples (`600samples`) or a distance (`4.3m`, at the set temperature's speed of sound) go through the CLI ([below](#from-the-cli)) |
 | **,** / **.** | step it by 0.1 ms |
 | **Ctrl+,** / **Ctrl+.** | step it by one sample |
 | **Alt+,** / **Alt+.** | step it by a tenth of a sample |
@@ -930,10 +939,13 @@ Imported              1 trace
 | **imports**, session traces of no measurement | **Imported**, listed last when it holds something |
 
 - The arrow before a measurement **folds** it (palette *Fold / unfold the selected
-  measurement*).
+  measurement in the list*).
 - A row's dot is its curve's colour (a ring when hidden): a click on it shows or hides the
   curve (a live curve: this app's display; a stored trace: the daemon's). A click on the row
-  selects; a double click on a trace renames it.
+  selects it: a measurement row also brings its own panes, a child row (live curve, stored
+  trace, math channel) goes into the focused pane only and no other pane moves
+  ([Choosing what a pane shows](#choosing-what-a-pane-shows)); a click on the selected trace
+  deselects it. A double click on a trace renames it.
 - **Tab** / **Shift+Tab** select the next / previous listed row, wrapping (hidden rows too;
   the Imported header and folded rows skipped), as a click on it does. A selected live-curve
   row is marked and **A** hides that curve.
@@ -950,12 +962,13 @@ Imported              1 trace
   autosave), so every app shows it. `ac2 meas set <meas> --colour 1…8|grey|auto`. A math
   channel takes its measurement's colours.
 
-#### Deleting a measurement that owns traces
+### Deleting a measurement that owns traces
 
-It asks every time: *Keep them (move to Imported)* (default), *Delete them too*, or
-*Cancel* (**←/→**, **Enter**, **Esc**). An answer that would leave a math channel without an
-operand cannot be taken (Keep with a math channel under it computing from the measurement;
-Delete when a math channel elsewhere uses one of its traces). A measurement owning nothing
+It asks every time: *Keep them (move to Imported)*, *Delete them too*, or *Cancel*
+(**←/→**, **Enter**, **Esc**). An answer that would leave a math channel without an operand
+cannot be taken (Keep with a math channel under it computing from the measurement; Delete
+when a math channel elsewhere uses one of its traces). **Enter** keeps them by default, or
+cancels when Keep cannot be taken. A measurement owning nothing
 gets the plain confirmation. CLI: `ac2 meas rm` needs `--keep-traces` or `--delete-traces`.
 
 ## Traces and slots
@@ -964,7 +977,7 @@ A **trace** is a stored snapshot of a live result with the metadata to interpret
 delay, polarity, offset, smoothing, calibration state, mic and time. Its curve is stored
 unsmoothed.
 
-#### Capturing and selecting
+### Capturing and selecting
 
 - **Ctrl+1 … Ctrl+9** capture the selected measurement into slot 1–9 (replacing what was
   there); **1 … 9** show and hide a slot.
@@ -979,7 +992,7 @@ unsmoothed.
 - **A** shows or hides the selected trace.
 - Palette *Move the selected trace to slot…* puts it in slot 1–9 (`none` frees its slot).
 
-#### Trace keys
+### Trace keys
 
 On the selected trace when its curve is on the transfer pane (else the live measurement):
 
@@ -996,14 +1009,14 @@ delay is shown. A target curve takes an offset only; a locked trace refuses. The
 names the selected trace and the plot marks it (a bar and thicker swatch on its legend row,
 a line twice as wide).
 
-#### Spreading curves apart (display offset)
+### Spreading curves apart (display offset)
 
 | Key | Moves the selected curve |
 |---|---|
 | **Alt+↑** / **Alt+↓** | up / down by 1 dB |
 | **Alt+Shift+↑** / **Alt+Shift+↓** | up / down by 3 dB |
 | **Alt+Home** | back to 0 dB |
-| **J** | to a typed value |
+| **J** | to a typed value (transfer and spectrum panes) |
 
 The selected curve is the selected stored trace (any kind), else the focused pane's live
 measurement. A trace's offset is part of its record (`ac2 trace list`, sessions, exports); a
@@ -1011,7 +1024,7 @@ live measurement's is this app's display only. The plot says it beside the curve
 (`Main L S2 · Δt 0.00 ms · +3.0 dB`, `Main L S2 · offset +3.0 dB`), so a spread is never read
 as a level difference. A locked trace keeps its offset.
 
-#### Rename, export, delete
+### Rename, export, delete
 
 - **F2** (palette *Rename the selected trace…*, or a double click) renames the selected
   trace; `ac2 trace rename <trace> <name>`.
@@ -1024,7 +1037,7 @@ as a level difference. A locked trace keeps its offset.
   before, else live). A locked trace is not deleted. With a measurement selected after the
   trace, the keys are about the measurement.
 
-#### Comparing traces
+### Comparing traces
 
 - A sweep selected in the list or with **V** is the one the **Sweep / distortion** pane
   shows; **V** / **Shift+V** on that pane select the sweep they step to. A finished sweep is
@@ -1085,7 +1098,7 @@ it, so it works with a remote daemon.
   the resolution marker shades the response.
 - A file longer than 65536 samples (1.37 s at 48 kHz) is cut around its peak (said so).
 - `ac2 trace show` lists the file facts: `IR · channel 2 of 2 · 48 kHz · 16384 samples ·
-  peak at 2.71 ms · whole file · phase re peak`.
+  peak at 2.710 ms · whole file · phase re peak`.
 
 **Export:** `ac2 trace export <trace> --wav out.wav` (or the app's export prompt with a
 `.wav` path) writes the IR of a sweep, transfer capture or imported IR as mono 32-bit float
@@ -1143,7 +1156,7 @@ dialog:
 | reference | the session's loopback input; without a loopback mapping it reads "choose the reference" and nothing is made until one is picked |
 | mic, output | by name (the session's loopback output always plays too) |
 | **level** | typed, no default |
-| range | 20 Hz – 20 kHz |
+| from, to | typed, 20 Hz and 20 kHz by default |
 | duration | 1 s quick look, 3 s default; 6 s and 12 s lower the noise floor |
 | repeats | each doubling lowers the floor by 3 dB |
 | silence after | 1, 2, 4, 8 s: must hold the room's decay ([room parameters](#room-parameters-iso-3382-1)) |
@@ -1154,7 +1167,10 @@ dialog:
 **←/→** step a choice and stop at the ends; a text field's text is selected on focus
 (**Ctrl+A** selects again), so typing replaces it.
 
-1. **Enter** makes the measurement and **plays nothing**; the sweep pane comes up focused.
+1. **Enter** makes the measurement and **plays nothing**. It shows on the sweep pane worked
+   in last; with none on screen, a pane of its own is split off the focused pane (as **N**
+   splits it) and other panes keep what they show. Only a pane too small to split turns into
+   the sweep pane. The sweep pane gets the focus.
 2. **Space** on the sweep pane arms a run with its settings, with the safety of any
    stimulus (typed level, the rig's maximum, the lease).
 3. **Enter** plays it; **Esc** stops and discards it.
@@ -1282,9 +1298,12 @@ Sessions dialog ([sessions.md](design/sessions.md)):
 
 Backspace goes up a folder; Esc goes back or closes.
 
-- **New**, **Open** and quitting an app that hosts its own daemon ask **Save / Discard /
-  Cancel** with unsaved changes. Discarded changes stay recoverable until the next New or
-  Open replaces something.
+- **New** and **Open** ask **Save / Discard / Cancel** with unsaved changes (**Save as…** in
+  place of Save when the work is untitled). Discarded changes stay recoverable until the
+  next New or Open replaces something.
+- Quitting an app that hosts its own daemon asks **Save** (**Save as…**) / **Quit without
+  saving** / **Cancel**. Changes left unsaved come back from the autosave when the app starts
+  again; on the simulated rig, which keeps no autosave, they are lost.
 - **Save as** onto an existing session asks first (**Cancel** is the default).
 - An opened session comes up disarmed and keeps the open audio session.
 - A session of another format version is refused, naming the version, and the dialog offers
@@ -1317,7 +1336,8 @@ or .ac2session file>`, where that path is readable, rebuilds it on top of what i
 - each stored trace with its name, colour, slot, offset, polarity, nudge, smoothing and
   lock, under its measurement; math channels on the restored items;
 - measurements that were running are started when the open audio session captures their
-  inputs (open the audio session first).
+  inputs (open the audio session first);
+- panes and the selection that showed a measurement come back to it once it is recreated.
 
 The old file is read setting by setting: a setting dropped or added since is named in the
 summary, which lists every item as restored or skipped. Not brought back: an SPL meter's
@@ -1464,8 +1484,8 @@ Chosen per input, explicitly:
   palette *Mic curve on input N…* (*3=90°*) or *Mic curve: next curve on the selected
   measurement's input*.
 
-ac2 never guesses: a mic's first curve imported on an input is chosen; with several and none
-chosen, none applies and the input says *choose: 0°, 90°*.
+ac2 never guesses: a mic with exactly one curve uses it on every input naming the mic; with
+several and none chosen, none applies and the input says *choose: 0°, 90°*.
 
 **The rule:** an input's curve in use applies to every measurement reading the input —
 transfer, spectrum, RTA, SPL meter, Leq and band Leq, and sweeps. It corrects levels (the
@@ -1513,7 +1533,7 @@ spectrum / RTA captions, the Calibrations view, `ac2 cal list`, `ac2 status`):
 |---|---|
 | `cal 94 dB · 3 h ago` | acoustic: a 94 dB calibrator on this mic on this input, 3 h ago |
 | `verified · 94.0 dB SPL at 1.00 kHz · 3 h ago` | the same, written out (Calibrations view, Settings › Audio & I/O) |
-| `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago` | electrical, a voltmeter across the connected, powered mic's pins 2–3; sensitivity from the mic's curve file (`data sheet`) or typed (`typed`); ±1 dB the stated uncertainty |
+| `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago` | electrical, a voltmeter across the connected, powered mic's pins 2–3; `data sheet` when the sensitivity came from the mic's curve file, nothing when it was typed (the full record in the Calibrations view and `ac2 cal list` says `typed`); ±1 dB the stated uncertainty |
 | `electrical cal (injected, 10.0 mV/Pa) ±0.5 dB` | electrical, a generator in place of the mic, phantom off |
 | `electrical cal (in-line, data sheet 15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ −1.3 dB) ±1 dB` | electrical with the loading counted: the mic's 330 Ω output impedance into the preamp's 2 kΩ input takes 1.3 dB off its open-circuit sensitivity ([Loading](#loading-the-preamps-input-impedance)); the full record (`ac2 cal list`) says `… · loaded 330 Ω → 2.0 kΩ −1.3 dB · ±1 dB` |
 | `cal from other mic / input`, `from M30 on in 2 · …` | made with another mic or on another input: used, but may not hold here |
@@ -1586,7 +1606,8 @@ Example: a beyerdynamic MM1 (15 mV/Pa, 330 Ω) on an RME Fireface 400 mic input 
    > measure to pin 1, never short pins together (that is what the breakout is for).
 5. While the tone plays: palette *Calibrations…*, the mic's input, **E**; type the voltage
    (*15.03 mV*), check the sensitivity (prefilled from the mic's curve file when it states
-   one, else *15.0 mV/Pa* or *−36.5 dBV/Pa*) and the two impedances (*330 ohm*, *2 k*),
+   one; else empty, and the dialog asks you to type it: *15.0 mV/Pa* or *−36.5 dBV/Pa*) and
+   the two impedances (*330 ohm*, *2 k*),
    **Enter**. CLI:
    `ac2 cal electrical --input 2 --volts 15.03mv --mic-impedance 330ohm --input-impedance 2kohm`
    (`--sensitivity 15.0mv/pa` if the curve file has none).
@@ -1641,7 +1662,8 @@ palette has each by name (*SPL pane: meter + Leq windows*).
 | **meter + Leq** (where a new meter starts) | the meter's number across the top third (with `LAF · dB SPL` and the live bar, no statistics) and the Leq windows below, under one caption: the meter's name, the run and the calibration |
 
 **W** twice (or W, then **F**) makes it the stage view. On a short pane the number and its
-name share one line; under about 170 px the number gives way to the windows.
+name share one line; with less than about 120 px under the caption the number gives way to
+the windows.
 
 #### The number
 
@@ -1778,7 +1800,7 @@ back only 0.3 dB under the line or after 10 s under it.
 
 **Position correction:** the difference from your mic to where the limit applies (the
 loudest audience spot, measured with pink noise at both places beforehand), e.g. *4* dB, and
-for the peaks when different (DIN 15905-5's K2). Every level then includes it and says so
+for LCpeak when different (DIN 15905-5's K2; LAFmax takes the level correction). Every level then includes it and says so
 (*corrected +4.0 dB*, `dB(A) corr.`); limits are judged on it. The per-second log keeps what
 the mic measured, with the correction beside each second.
 
@@ -2039,6 +2061,9 @@ Everything in the app is reachable from the keyboard.
   history, sweep dB / %, coherence placement) have no key: they are rows of Settings ›
   Display and palette commands.
 - Keys are scoped: the focused pane's keys apply first, then the global ones.
+- Settings pages have letter keys of their own, listed under each page (Audio & I/O: **R**,
+  **M**, **S**, **N**, **D**, **P** the driver's settings; Calibration: **N**, **I**, **R**,
+  **C**, **E**).
 - The defaults avoid `[ ] + - =` and other keys that need AltGr or a dead key on Nordic and
   other European layouts.
 
@@ -2069,6 +2094,9 @@ cycle_theme = "Ctrl+T"
 [transfer]
 insert_delay = ["X", "Alt+D"]
 ```
+
+The sections follow the keyboard map: `[global]` (Everywhere), `[transfer]`, `[spectrum]`,
+`[ir]` (the impulse response view), `[spl]` and `[distortion]` (Sweep / distortion).
 
 A `keys.toml` that cannot be used (a conflict, an unknown key or command, a pane command on
 **H**, a change to **Shift+Esc**) is reported at start and the defaults are used until it is
@@ -2364,15 +2392,17 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 
 ## Command line
 
-Every command takes `--json` for machine-readable output and `--remote <host>` to talk to a
-network daemon. Live views (`--watch`) redraw in the terminal. Units are written with
+Every command takes `--json` for machine-readable output. Commands that talk to the daemon
+take `--remote <host[:port]>` for a network daemon, `--timeout` (the reply deadline per
+try, default `1.5s`) and `--key-dir` (the client key pair and pinned daemon keys). Live views (`--watch`) redraw in the terminal. Units are written with
 suffixes: `-20dbfs`, `48khz`, `12.5ms`, `600samples`, `4.3m`, `94db`. `ac2 <command> --help`
 documents each command.
 
 | command | what it does |
 |---|---|
 | `ac2 devices`, `ac2 status`, `ac2 daemon start / stop / status` | the daemon and its audio devices; `status` includes the autosave state |
-| `ac2 session open / close / status / inputs / replay` | the audio session, each input's mic and active curve; replaying a recording as the session |
+| `ac2 session open / close / status / inputs / replay` | the audio session (`open --out-device` plays on another device than the capture one), each input's mic and active curve; replaying a recording as the session |
+| `ac2 session panel [--backend B] [--device D]` | opens the device's driver settings on the daemon's host (an ASIO driver's control panel, Audio MIDI Setup for Core Audio) |
 | `ac2 session new / save / save-as / load / recover / salvage / export / import / list` | the working state and saved sessions ([Sessions](#sessions)) |
 | `ac2 meas new / list / set / start / stop / rm`, `ac2 meas layout clear` | transfer (`tf`), `spectrum`, `rta`, `spl` and `sweep` measurements (math channels are listed too); `rm` of one that owns traces needs `--keep-traces` (moved to Imported) or `--delete-traces`; `layout clear` removes a measurement's own panes |
 | `ac2 math new / set` | math channels: `"A / B"`, `--op div\|mul\|add\|sub --a A --b B`, `--op avg --of A,B,C` |
@@ -2388,5 +2418,5 @@ documents each command.
 | `ac2 spl bands watch / set / transfer / log / estimate` | the band meter and its transfer ([Band Leq](#band-leq-band-limits-at-a-neighbours)) |
 | `ac2 timing --watch` | the loopback timing monitor |
 | `ac2 state dump` | the daemon's whole state as JSON |
-| `ac2 selftest duplex --backend …` | an interface checked without a daemon (stop one that holds it): runs it for `--duration` and prints pass or fail with named reasons (xruns, gaps, clock rate, …); silent unless `--emit <level> --loopback-out N --loopback-in N` plays pink noise (at most −20 dBFS) on a loopback cable to time output→input and drift |
+| `ac2 selftest duplex --backend jack\|coreaudio\|asio\|fake` | an interface checked without a daemon (stop one that holds it); the backend has no default, `--device` / `--out-device`, `--in`, `--outputs`, `--rate`, `--buffer` choose the stream. Runs it for `--duration` (default 30 s) and prints pass or fail with named reasons (xruns, gaps, clock rate, …) and the latency the backend states (each way and the round trip, where it states one); silent unless `--emit <level> --loopback-out N --loopback-in N` plays pink noise (at most −20 dBFS) on a loopback cable to time output→input and drift |
 | `ac2 discover`, `ac2 auth pair / show` | find network daemons, pair with one |
