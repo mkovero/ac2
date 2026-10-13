@@ -245,3 +245,37 @@ def test_resolutions_are_kept_apart(tmp_path):
     assert "diff" in blocks[0]
     assert B.resolution_of({"flags": {"resolution": "1/24"}}) == 24 and B.resolution_of({}) == 48
     assert B.baseline_name("ambient", None, None) == "ambient.json"
+
+
+def dut_results(checks, cases=None, emit="-10dbfs"):
+    r = results(checks, emit=emit)
+    r["manifest"].update(rig="host", paths={p: {"kind": "digital", "stage": "dut", "case": p[4:]}
+                                            for p in ("dut-loud", "dut-floor")})
+    r["manifest"]["flags"]["cases"] = cases
+    return r
+
+
+def test_case_subset_judges_its_cases_and_strict_fails_on_lost_checks(tmp_path):
+    root = tmp_path / "baselines"
+    full = [chk("dut-loud.dut.h2", "dut", 0.0, path="dut-loud"), chk("dut-floor.dut.h2", "dut", 0.0, path="dut-floor"),
+            chk("dut.coverage.h2.ac2 sweep", "dut", 0.0, path="dut")]
+    B.write_baselines(write_run(tmp_path, "full", dut_results(full)), root)
+    # one case: neither the other case's checks nor the matrix-wide pool are judged
+    sub = [chk("dut-loud.dut.h2", "dut", 0.0, path="dut-loud"),
+           chk("dut.coverage.h2.ac2 sweep", "dut", 0.15, path="dut")]
+    d = write_run(tmp_path, "sub", dut_results(sub, cases=["loud"]))
+    rc, blocks, _ = B.compare(d, root, out=tmp_path / "o1", strict=True)
+    assert rc == 0 and blocks[0]["diff"]["matched"] == 1 and not blocks[0]["diff"]["missing"]
+    with pytest.raises(ValueError, match="--cases"):
+        B.write_baselines(d, tmp_path / "other")
+    # a full run that lost a check of a measured path fails only under strict
+    lost = [chk("dut-loud.dut.h2", "dut", 0.0, path="dut-loud"), chk("dut-floor.dut.h3", "dut", 0.0, path="dut-floor"),
+            chk("dut.coverage.h2.ac2 sweep", "dut", 0.0, path="dut")]
+    d2 = write_run(tmp_path, "lost", dut_results(lost))
+    assert B.compare(d2, root, out=tmp_path / "o2")[0] == 0
+    assert B.compare(d2, root, out=tmp_path / "o3", strict=True)[0] == 1
+    assert "missing" in (tmp_path / "o3" / "compare.md").read_text()
+    # no baseline at this level: strict fails
+    d3 = write_run(tmp_path, "l30", dut_results(full, emit="-30dbfs"))
+    assert B.compare(d3, root, out=tmp_path / "o4")[0] == 0
+    assert B.compare(d3, root, out=tmp_path / "o5", strict=True)[0] == 1

@@ -30,6 +30,9 @@ def main(argv=None) -> int:
     cp.add_argument("--stage", action="append", help="only this stage (repeatable)")
     cp.add_argument("--out", type=Path, help="where compare.md goes (default: <source>/report)")
     cp.add_argument("--tolerances", type=Path, help="tolerances TOML (default: the suite's)")
+    cp.add_argument("--strict", action="store_true",
+                    help="CI: also exit 1 when a stage has no comparable baseline or a baseline check of a "
+                         "measured path is missing (a run of some DUT cases compares only those cases)")
 
     rp = sub.add_parser("repeats", help="repeated takes of a stage and level: each check's signed value across "
                                         "takes (n, mean, sd, range) and the column-to-tone split at the sines")
@@ -78,6 +81,9 @@ def main(argv=None) -> int:
             p.add_argument("--stages", default="ambient,genelec,xone",
                            help="comma list from ambient,genelec,xone,dut (order is fixed; dut: the digital "
                                 "DUT, README)")
+            p.add_argument("--cases", default="",
+                           help="comma list of [[dut.cases]] names to run (default: all); compare then "
+                                "judges only those cases' checks")
             p.add_argument("--skip", default="", help="comma list of sub-stages to skip: sine,rew,ac2_sweep,ac2_tf")
             p.add_argument("--yes", action="store_true", help="don't wait for Enter before audible stages")
             p.add_argument("--resolution", default="1/48", choices=["1/12", "1/24", "1/48", "1/96"],
@@ -160,7 +166,7 @@ def main(argv=None) -> int:
     if a.cmd == "compare":
         from . import baseline
         try:
-            rc, blocks, path = baseline.compare(a.source, a.baseline, a.tolerances, a.stage, a.out)
+            rc, blocks, path = baseline.compare(a.source, a.baseline, a.tolerances, a.stage, a.out, a.strict)
         except FileNotFoundError as e:
             print(f"stopped: {e}", file=sys.stderr)
             return 2
@@ -185,9 +191,14 @@ def main(argv=None) -> int:
         return 0
     if a.cmd == "comparison":
         from . import comparison
-        current, path = comparison.update(a.doc or comparison.DOC, a.baselines or comparison.BASELINES, a.check)
+        try:
+            current, path = comparison.update(a.doc or comparison.DOC, a.baselines or comparison.BASELINES, a.check)
+        except ValueError as e:  # a problem a rebuild cannot fix: listed, nothing written
+            print(f"refused: {e}", file=sys.stderr)
+            return 1
         if a.check:
-            print(f"{path}: " + ("tables current" if current else "tables stale; run `python -m crosscheck comparison`"))
+            print(f"{path}: " + ("current" if current else "stale, or the problems listed; "
+                                 "fix those, then run `python -m crosscheck comparison`"))
             return 0 if current else 1
         print(f"{path}: " + ("unchanged" if current else "tables rebuilt"))
         return 0
