@@ -2,7 +2,7 @@
 # Copy the suite to the rig, run it there in a terminal (audible stages ask for Enter),
 # fetch the run directory, analyse it here and compare it with the stored baselines.
 #   ./rig-run.sh [--rig rigs/pupu.toml] <crosscheck run flags...>
-# e.g. ./rig-run.sh --emit -50dbfs --emit-speaker -50dbfs
+# e.g. ./rig-run.sh --emit=-50dbfs --emit-speaker=-50dbfs
 set -euo pipefail
 cd "$(dirname "$0")"
 RIG=rigs/pupu.toml

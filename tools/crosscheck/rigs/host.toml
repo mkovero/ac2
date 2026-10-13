@@ -5,7 +5,7 @@
 #     without real-time scheduling a shorter period xruns)
 #   ac2d --max-level -10 --no-autosave       (XDG_RUNTIME_DIR etc. of its own: not the desktop's)
 # with `ac2` on PATH and AC2_JACK_DUT naming the DUT binary; then
-#   python -m crosscheck run --rig rigs/host.toml --stages dut --emit -10dbfs --skip rew,ac2_tf --yes
+#   python -m crosscheck run --rig rigs/host.toml --stages dut --emit=-10dbfs --skip rew,ac2_tf --yes
 
 [rig]
 name = "host"

@@ -62,7 +62,7 @@ From the dev host, in `tools/crosscheck`. The **default run** has all stages at 
 (ambient, Genelec, Xone):
 
 ```
-./rig-run.sh --emit -50dbfs --emit-speaker -50dbfs
+./rig-run.sh --emit=-50dbfs --emit-speaker=-50dbfs
 ```
 
 The **electrical −10 dBFS** run has the Xone stages at −10 and the Genelec stages still at −50.
@@ -70,7 +70,7 @@ Use it for judging: at −50 the electrical comparisons below 1 kHz are noise-li
 delay and harmonics INCONCLUSIVE or failing on scatter), and no ear is on these paths:
 
 ```
-./rig-run.sh --emit -10dbfs --allow-electrical-level -10dbfs --emit-speaker -50dbfs
+./rig-run.sh --emit=-10dbfs --allow-electrical-level=-10dbfs --emit-speaker=-50dbfs
 ```
 
 The pieces on their own:
@@ -78,9 +78,9 @@ The pieces on their own:
 ```
 ssh -t mui@192.168.9.27 'cd ~/crosscheck && ~/ac2-test/venv-meas/bin/python -m crosscheck preflight --rig rigs/pupu.toml'
 ./rig-run.sh --stages ambient                                     # silent
-./rig-run.sh --stages xone --emit -50dbfs                         # electrical only, no speaker
-./rig-run.sh --stages genelec --emit-speaker -50dbfs --skip ac2_tf
-./rig-run.sh --stages genelec --emit-speaker -50dbfs --resolution 1/96   # own baselines: <stage>-<level>dbfs-r96.json
+./rig-run.sh --stages xone --emit=-50dbfs                         # electrical only, no speaker
+./rig-run.sh --stages genelec --emit-speaker=-50dbfs --skip ac2_tf
+./rig-run.sh --stages genelec --emit-speaker=-50dbfs --resolution 1/96   # own baselines: <stage>-<level>dbfs-r96.json
 
 python -m crosscheck analyse runs/<UTC time>                      # again, after changing tolerances
 python -m crosscheck analyse /work/ac2-scratch/crosscheck-fixtures --out /tmp/xc-fixtures
@@ -113,7 +113,7 @@ reach of Ctrl-C.
   `--allow-speaker-level`, and never above −30 dBFS (`levels.SPEAKER_APPROVED_MAX_DBFS`,
   about 83 dB SPL at the mic for a 1 kHz sine). That flag raises ac2d's bound through the
   same drop-in for the speaker stage only and removes it before the next stage:
-  `./rig-run.sh --stages genelec --emit-speaker -30dbfs --allow-speaker-level -30dbfs`.
+  `./rig-run.sh --stages genelec --emit-speaker=-30dbfs --allow-speaker-level=-30dbfs`.
   REW's stimulus file is scaled to the stage's level like every other signal. The Xone
   stages refuse out 1 (`forbidden_outputs`).
 - **Above the rig's −50 needs `--allow-electrical-level`**, capped by the config
@@ -242,7 +242,7 @@ then SIGTERM, then kill), keeping its `xruns <n>` line.
   compared clean against the 2048 baselines)
   and an ac2d of its own (`--max-level -10 --no-autosave`, its own `XDG_RUNTIME_DIR`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME`),
   `ac2` on PATH, `AC2_JACK_DUT` set, then
-  `python -m crosscheck run --rig rigs/host.toml --stages dut --emit -10dbfs --skip rew,ac2_tf --yes`
+  `python -m crosscheck run --rig rigs/host.toml --stages dut --emit=-10dbfs --skip rew,ac2_tf --yes`
   and again at `-30dbfs`; `analyse` each, `baseline` writes `baselines/host/dut-<level>dbfs.json`.
   `./ci-host.sh <bin dir> <out dir> [--cases loud-hp] [--levels -10]` sets all of that up and
   measures each case as a run of its own, then analyses and compares it (`compare --strict`),

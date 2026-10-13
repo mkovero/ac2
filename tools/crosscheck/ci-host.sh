@@ -101,7 +101,7 @@ for l in "${lv[@]}"; do
       run="$out/runs/${c}${l}dbfs-$a"
       log="$out/run-${c}${l}-$a.log"
       st=0
-      "$py" -m crosscheck run --rig rigs/host.toml --stages dut --cases "$c" --emit "${l}dbfs" \
+      "$py" -m crosscheck run --rig rigs/host.toml --stages dut --cases "$c" --emit="${l}dbfs" \
         --skip "rew,ac2_tf" --yes --out "$run" 2>&1 | tee "$log" || st=$?
       [ "$st" -eq 0 ] || { echo "$c at ${l} dBFS: run exited $st" >&2; break; }
       # A baseline may hold a reviewed FAIL (baseline --force): analyse's own exit code is
