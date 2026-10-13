@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use ac2_proto::frame::DaemonHealth;
-use ac2_scene::health::{HealthInputs, UiFrames};
+use ac2_scene::health::{HealthInputs, RateUnit, UiFrames, rate_unit};
 
 /// How long one reading spans: as the daemon's, so both sides' figures move together.
 pub const WINDOW: Duration = Duration::from_secs(1);
@@ -63,6 +63,8 @@ pub struct LocalHealth {
     shown: Shown,
     /// The daemon's xrun count as last seen, and when it last rose.
     xruns: Option<(u64, Option<Instant>)>,
+    /// The unit the data rate is shown in; kept until the rate moves well past its step.
+    rate_unit: Option<RateUnit>,
 }
 
 impl std::fmt::Debug for LocalHealth {
@@ -94,6 +96,7 @@ impl LocalHealth {
             data_before: false,
             shown: Shown::default(),
             xruns: None,
+            rate_unit: None,
         }
     }
 
@@ -132,6 +135,10 @@ impl LocalHealth {
             received_per_s: Some(bytes.saturating_sub(self.bytes_at_start) as f64 / secs),
             frames: Some((f64::from(self.frames) / secs, self.longest_gap, streaming)),
         };
+        self.rate_unit = self
+            .shown
+            .received_per_s
+            .map(|r| rate_unit(r, self.rate_unit));
         self.data_before = self.data > 0;
         self.window_start = now;
         self.bytes_at_start = bytes;
@@ -162,6 +169,7 @@ impl LocalHealth {
         &'a self,
         daemon: Option<&'a DaemonHealth>,
         embedded: bool,
+        daemon_addr: Option<&'a str>,
         wanted_fps: f64,
         now: Instant,
     ) -> HealthInputs<'a> {
@@ -169,6 +177,8 @@ impl LocalHealth {
             daemon,
             embedded,
             local_host: &self.local_host,
+            daemon_addr,
+            rate_unit: self.rate_unit,
             local_cpu: self.shown.cpu,
             received_per_s: self.shown.received_per_s,
             frames: self.shown.frames.map(|(fps, gap, streaming)| UiFrames {
@@ -199,7 +209,7 @@ mod tests {
         h.data_arrived();
         frame_at(&mut h, 5000);
         let f = h
-            .inputs(None, false, 30.0, t0)
+            .inputs(None, false, None, 30.0, t0)
             .frames
             .expect("a window ended");
         assert!(!f.streaming && f.fps < 1.0);
@@ -208,7 +218,7 @@ mod tests {
             frame_at(&mut h, 5000 + i * 34);
         }
         let f = h
-            .inputs(None, false, 30.0, t0)
+            .inputs(None, false, None, 30.0, t0)
             .frames
             .expect("a window ended");
         assert!(f.streaming, "{f:?}");
@@ -222,7 +232,7 @@ mod tests {
         let t0 = h.window_start;
         h.received.fetch_add(2_000_000, Ordering::Relaxed);
         h.frame(t0 + Duration::from_secs(2), false);
-        let r = h.inputs(None, false, 30.0, t0).received_per_s;
+        let r = h.inputs(None, false, None, 30.0, t0).received_per_s;
         assert_eq!(r, Some(1_000_000.0));
     }
 
@@ -232,13 +242,13 @@ mod tests {
         let t0 = Instant::now();
         h.daemon_xruns(Some(4), t0);
         assert_eq!(
-            h.inputs(None, false, 30.0, t0).since_xrun_s,
+            h.inputs(None, false, None, 30.0, t0).since_xrun_s,
             None,
             "seen, not risen"
         );
         h.daemon_xruns(Some(5), t0 + Duration::from_secs(1));
         let since = h
-            .inputs(None, false, 30.0, t0 + Duration::from_secs(3))
+            .inputs(None, false, None, 30.0, t0 + Duration::from_secs(3))
             .since_xrun_s;
         assert_eq!(since, Some(2.0));
         h.daemon_xruns(Some(0), t0 + Duration::from_secs(4));

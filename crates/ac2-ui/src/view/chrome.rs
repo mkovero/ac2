@@ -9,8 +9,11 @@ use eframe::egui::{self, Color32, RichText};
 
 use crate::app::App;
 use crate::keys::{CommandId, STOP_ANYWHERE, Scope};
+use crate::marquee::Marquee;
 use crate::state::{ConnState, Msg, StimPhase, outputs_text};
 use crate::theme::Chrome;
+
+use super::segment::{Part, SEGMENT_MIN_W, draw_segment, health_part, segment_width};
 
 fn dot(ui: &mut egui::Ui, c: Color32) {
     let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
@@ -73,7 +76,7 @@ impl Item {
 }
 
 /// Item spacing in the bar.
-const BAR_GAP: f32 = 8.0;
+pub(super) const BAR_GAP: f32 = 8.0;
 /// A separator's own width (it also takes a gap on each side).
 const BAR_SEP: f32 = 6.0;
 /// The status dot.
@@ -115,7 +118,7 @@ fn fit_bar(widths: &[(u8, Vec<f32>, bool)], available: f32) -> Vec<Option<usize>
     pick
 }
 
-fn text_width(ui: &egui::Ui, t: &egui::WidgetText) -> f32 {
+pub(super) fn text_width(ui: &egui::Ui, t: &egui::WidgetText) -> f32 {
     t.clone()
         .into_galley(
             ui,
@@ -199,42 +202,40 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     };
     let dim = |s: String| RichText::new(s).color(ch.dim);
     let stopped = crate::scenes::audio_stopped(st, super::now().wall);
-    let session = match (st.daemon().and_then(|s| s.session.open.as_ref()), stopped) {
-        (Some(_), Some(t)) => {
-            let mut it = Item::new(
-                75,
-                t.bar
-                    .iter()
-                    .map(|b| RichText::new(b.clone()).color(ch.fault))
-                    .collect(),
-            );
-            it.hover = Some(format!("{} · {}", t.banner, t.detail));
-            it
-        }
+    // The session line in full: when it is wider than its room the segment scrolls.
+    let (session_prio, session) = match (st.daemon().and_then(|s| s.session.open.as_ref()), stopped)
+    {
+        (Some(_), Some(t)) => (
+            75,
+            Part::single(
+                ui,
+                RichText::new(t.bar.first().cloned().unwrap_or_default())
+                    .color(ch.fault)
+                    .into(),
+                Some(format!("{} · {}", t.banner, t.detail)),
+            ),
+        ),
         (Some(o), None) => {
             let l = ac2_scene::audio::session_line(o);
             let color = if l.changed { ch.warn } else { ch.dim };
-            let mut it = Item::new(
+            (
                 40,
-                vec![
-                    RichText::new(l.full).color(color),
-                    RichText::new(l.short).color(color),
-                ],
-            );
-            it.hover = l.detail;
-            it
+                Part::single(ui, RichText::new(l.full).color(color).into(), l.detail),
+            )
         }
-        (None, _) if st.daemon().is_some() => Item::new(
+        (None, _) if st.daemon().is_some() => (
             60,
-            vec![
+            Part::single(
+                ui,
                 dim(format!(
                     "no audio session · {} opens one",
                     key_hint(app, CommandId::OpenSession)
-                )),
-                dim("no audio session".into()),
-            ],
+                ))
+                .into(),
+                None,
+            ),
         ),
-        (None, _) => Item::new(40, vec![dim("—".into())]),
+        (None, _) => (40, Part::single(ui, dim("—".into()).into(), None)),
     };
     let mut link = Item::new(
         70,
@@ -269,7 +270,8 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         it.click = Some(CommandId::Sessions);
         it
     });
-    let health = health_item(app, ui, ch, now);
+    let mut segment = vec![session];
+    segment.extend(health_part(app, ui, ch, now));
     let mut left = vec![
         Item::new(100, vec![RichText::new("ac2").strong().size(16.0)])
             .kept()
@@ -277,8 +279,6 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         link,
     ];
     left.extend(working);
-    left.push(session);
-    left.extend(health);
 
     // Right side, from the edge inwards.
     let mut keys = Item::new(
@@ -339,27 +339,47 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     }
     right.extend(stimulus(app, ch));
 
-    let items: Vec<&Item> = left.iter().chain(right.iter()).collect();
-    let widths: Vec<(u8, Vec<f32>, bool)> = items
+    let segment_w = segment_width(&segment);
+    let item_w = |it: &Item| {
+        let extra = BAR_GAP
+            + it.dot.map_or(0.0, |_| BAR_DOT + BAR_GAP)
+            + if it.sep { BAR_SEP + 2.0 * BAR_GAP } else { 0.0 };
+        let v = it
+            .variants
+            .iter()
+            .map(|t| text_width(ui, t) + extra)
+            .collect();
+        (it.prio, v, it.droppable)
+    };
+    // The segment takes all the room between the two groups. It enters the fit as two
+    // entries: the width past its scrolling minimum, given up early (at the session line's
+    // own priority: scrolling beats dropping other items), and the minimum itself, given
+    // up only after the link has shortened to its dot (the segment says what the audio
+    // does; the dot's colour still says how the link is).
+    let min_w = segment_w.min(SEGMENT_MIN_W);
+    let widths: Vec<(u8, Vec<f32>, bool)> = left
         .iter()
-        .map(|it| {
-            let extra = BAR_GAP
-                + it.dot.map_or(0.0, |_| BAR_DOT + BAR_GAP)
-                + if it.sep { BAR_SEP + 2.0 * BAR_GAP } else { 0.0 };
-            let v = it
-                .variants
-                .iter()
-                .map(|t| text_width(ui, t) + extra)
-                .collect();
-            (it.prio, v, it.droppable)
-        })
+        .map(item_w)
+        .chain([
+            (session_prio, vec![segment_w - min_w, 0.0], false),
+            (
+                session_prio.max(SEGMENT_KEEP_PRIO),
+                vec![min_w + BAR_GAP],
+                true,
+            ),
+        ])
+        .chain(right.iter().map(item_w))
         .collect();
     // A little slack: egui rounds widget sizes to whole pixels; the gear keeps its place.
     let pick = fit_bar(&widths, ui.available_width() - 4.0 - GEAR_W);
-    let (lp, rp) = pick.split_at(left.len());
+    let (lp, rest) = pick.split_at(left.len());
+    let (segment_shown, rp) = (rest[1].is_some(), &rest[2..]);
     let settings_tip = format!("Settings ({})", key_hint(app, CommandId::Settings));
     let mut open_settings = false;
     let mut run = None;
+    let fade = ch.panel;
+    let marquee = &mut app.marquee;
+    let mut wake = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BAR_GAP;
         for (it, p) in left.iter().zip(lp) {
@@ -381,8 +401,18 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                     run = run.or(draw_item(ui, it, *k, true));
                 }
             }
+            if segment_shown {
+                let room = ui.available_rect_before_wrap();
+                wake = draw_segment(ui, room, &segment, marquee, fade);
+            } else {
+                *marquee = Marquee::default();
+            }
         });
     });
+    if let Some(w) = wake {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(w));
+    }
     if open_settings {
         app.dispatch(crate::state::Msg::Command(CommandId::Settings));
     }
@@ -391,43 +421,9 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     }
 }
 
-/// The health meter after the session line: its figures, warnings in the warning colour,
-/// and a short form that keeps the essential ones.
-fn health_item(app: &App, ui: &egui::Ui, ch: &Chrome, now: std::time::Instant) -> Option<Item> {
-    let st = &app.state;
-    // A daemon that stopped answering has no current figures.
-    let daemon = st
-        .mirror
-        .as_ref()
-        .filter(|m| m.responding(now))
-        .and_then(|m| m.health.as_ref());
-    let wanted_fps = 1.0 / st.display_period().as_secs_f64();
-    let inputs = app
-        .health
-        .inputs(daemon, app.link_embedded, wanted_fps, now);
-    let line = ac2_scene::health::health_line(&inputs)?;
-    let job = |essential_only: bool| {
-        let mut job = egui::text::LayoutJob::default();
-        let mut add = |t: RichText| {
-            t.append_to(
-                &mut job,
-                ui.style(),
-                egui::FontSelection::Default,
-                egui::Align::Center,
-            );
-        };
-        let shown = line.parts.iter().filter(|p| p.essential || !essential_only);
-        for (k, p) in shown.enumerate() {
-            add(RichText::new(if k == 0 { "· " } else { " · " }).color(ch.dim));
-            let color = if p.warn { ch.warn } else { ch.dim };
-            add(RichText::new(p.text.clone()).color(color));
-        }
-        egui::WidgetText::from(job)
-    };
-    let mut it = Item::of(35, vec![job(false), job(true)]);
-    it.hover = Some(line.detail);
-    Some(it)
-}
+/// The scrolling segment's minimum gives way after the link (70); a stopped stream's banner
+/// keeps its own, higher priority.
+const SEGMENT_KEEP_PRIO: u8 = 72;
 
 /// Room the Settings gear takes at the bar's right edge.
 const GEAR_W: f32 = 28.0;

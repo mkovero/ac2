@@ -186,6 +186,10 @@ pub struct App {
     pub health_measured: bool,
     /// The link reaches a daemon inside this process: no network between, the same host.
     pub(crate) link_embedded: bool,
+    /// The host the link reaches the daemon at over the network; `None` on a local link.
+    pub(crate) daemon_addr: Option<String>,
+    /// The top bar's session and health line, scrolling when it is wider than its room.
+    pub marquee: crate::marquee::Marquee,
 }
 
 impl std::fmt::Debug for App {
@@ -261,6 +265,7 @@ impl App {
             .map_or_else(|| "no daemon".to_string(), |t| t.describe.clone());
         let health = crate::health::LocalHealth::new();
         let link_embedded = opts.target.as_ref().is_some_and(embedded_target);
+        let daemon_addr = opts.target.as_ref().and_then(network_host);
         let conn = opts.target.and_then(|mut t| {
             t.config.received_bytes = Arc::clone(&health.received);
             Conn::start(t, link_wake(ctx, frame_interval)).ok()
@@ -312,6 +317,8 @@ impl App {
             health,
             health_measured: true,
             link_embedded,
+            daemon_addr,
+            marquee: crate::marquee::Marquee::default(),
         }
     }
 
@@ -415,6 +422,7 @@ impl App {
         let mut target = target;
         target.config.received_bytes = Arc::clone(&self.health.received);
         self.link_embedded = embedded_target(&target);
+        self.daemon_addr = network_host(&target);
         match Conn::start(target, link_wake(ctx.clone(), self.frame_interval)) {
             Ok(c) => {
                 self.conn = Some(c);
@@ -779,6 +787,17 @@ fn link_wake(ctx: egui::Context, interval: Duration) -> crate::conn::Wake {
 /// only through the context it shares.
 fn embedded_target(t: &Target) -> bool {
     t.config.context.is_some()
+}
+
+/// The host of `t`'s TCP endpoint (`tcp://host:port`, IPv6 in brackets).
+fn network_host(t: &Target) -> Option<String> {
+    let rest = t.config.endpoints.ctrl.strip_prefix("tcp://")?;
+    let (host, _port) = rest.rsplit_once(':')?;
+    Some(
+        host.trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_owned(),
+    )
 }
 
 fn dialog_error(d: &mut Option<ConnectDialog>, msg: String) {

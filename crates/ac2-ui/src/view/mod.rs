@@ -10,6 +10,7 @@ mod leq;
 mod overlays;
 mod panes;
 mod recording;
+mod segment;
 mod session;
 mod sessions;
 mod settings;
