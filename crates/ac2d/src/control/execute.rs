@@ -443,12 +443,17 @@ impl Control {
                 .cloned()
                 .map(ReplyBody::Grid)
                 .ok_or_else(|| perr(ErrorCode::NotFound, format!("no grid {grid_id}"))),
-            Command::FileSave { session, overwrite } => self.file_save(&session, overwrite),
-            Command::FileLoad { session, discard } => self.file_load(client, &session, discard),
-            Command::FileNew { discard } => self.file_new(client, discard),
+            Command::FileSave { .. }
+            | Command::FileLoad { .. }
+            | Command::FileNew { .. }
+            | Command::FileList
+            | Command::FileImport { .. }
+            | Command::FileDownloadBegin { .. } => Err(perr(
+                ErrorCode::Internal,
+                "session file work is answered asynchronously",
+            )),
             Command::FileRecover => self.file_recover(client),
             Command::FileSalvage { session } => self.file_salvage(client, &session),
-            Command::FileList => self.file_list(),
             Command::FileUploadBegin {
                 file,
                 bytes,
@@ -459,14 +464,6 @@ impl Control {
                 offset,
                 data,
             } => self.file_upload_chunk(client, transfer, offset, &data),
-            Command::FileImport {
-                transfer,
-                name,
-                overwrite,
-            } => self.file_import(client, transfer, &name, overwrite),
-            Command::FileDownloadBegin { session } => {
-                self.file_download_begin(client, session.as_ref())
-            }
             Command::FileDownloadChunk { transfer, offset } => {
                 self.file_download_chunk(client, transfer, offset)
             }

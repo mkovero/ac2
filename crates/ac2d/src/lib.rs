@@ -22,7 +22,8 @@
 //!
 //! Only the I/O thread touches client-facing sockets, and it never blocks on anything but
 //! `zmq_poll`. The control thread is a plain thread with one input channel: commands are
-//! short (DSP runs on job threads), and one consumer yields serial commits and a total
+//! short (DSP runs on job threads, session file and archive work on `ac2d-file` workers
+//! that report back on the channel), and one consumer yields serial commits and a total
 //! event order without locks. Generator control reaches the audio callback only through
 //! atomics and a wait-free source queue; the lease deadline is enforced inside the output
 //! path itself ([`stimulus`]).

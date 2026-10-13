@@ -206,6 +206,18 @@ impl Control {
                     }
                     Err(e) => Err(e),
                 },
+                // Session file work runs on a worker; the reply follows its result.
+                cmd @ (Command::FileSave { .. }
+                | Command::FileLoad { .. }
+                | Command::FileNew { .. }
+                | Command::FileList
+                | Command::FileImport { .. }
+                | Command::FileDownloadBegin { .. }) => {
+                    match self.start_file_job(routing_id, &client, req.id, cmd) {
+                        Ok(()) => return,
+                        Err(e) => Err(e),
+                    }
+                }
                 cmd => self.execute(&client, cmd),
             },
         };

@@ -17,9 +17,10 @@ use ac2_archive::{ArchiveError, MAX_ARCHIVE_BYTES};
 use ac2_proto::model::{SessionOrigin, SessionRef, Transfer};
 use ac2_proto::units::{Blob, ClientId, TransferId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
-use ac2_traces::session;
+use ac2_traces::session::{self, Manifest};
 
 use super::Control;
+use super::file_jobs::{FileDone, Pending, Work};
 use super::files::{info, session_err};
 use crate::util::{perr, perr_detail};
 
@@ -167,18 +168,21 @@ impl Transfers {
 }
 
 impl Control {
-    /// A fresh staging directory path (not created).
-    pub(super) fn stage_dir(&mut self, tag: &str) -> Result<PathBuf, ProtoError> {
-        let root = self.s.session_dir.join(STAGING);
-        fs::create_dir_all(&root)
-            .map_err(|e| perr(ErrorCode::Internal, format!("{}: {e}", root.display())))?;
+    /// A fresh staging directory path; nothing on disk changes ([`prepare_stage`] makes
+    /// room for it).
+    pub(super) fn stage_path(&mut self, tag: &str) -> PathBuf {
         self.transfers.staged = self.transfers.staged.wrapping_add(1);
-        let p = root.join(format!(
+        self.s.session_dir.join(STAGING).join(format!(
             "{tag}-{}-{}",
             std::process::id(),
             self.transfers.staged
-        ));
-        remove_dir(&p);
+        ))
+    }
+
+    /// A fresh staging directory path, made room for (not created).
+    pub(super) fn stage_dir(&mut self, tag: &str) -> Result<PathBuf, ProtoError> {
+        let p = self.stage_path(tag);
+        prepare_stage(&p)?;
         Ok(p)
     }
 
@@ -196,10 +200,7 @@ impl Control {
     ) -> Result<(String, PathBuf), ProtoError> {
         let dir = self.stage_dir("upload")?;
         let (file, data) = self.transfers.upload(client, id)?;
-        if let Err(e) = ac2_archive::unpack(data, &dir) {
-            remove_dir(&dir);
-            return Err(archive_err(e));
-        }
+        unpack_into(data, &dir)?;
         Ok((file, dir))
     }
 
@@ -286,81 +287,63 @@ impl Control {
         Ok(ReplyBody::Ack { rev })
     }
 
-    /// `file.import`: stores a complete upload as a named session without opening it.
-    pub(super) fn file_import(
+    /// `file.import`: stores a complete upload as a named session without opening it. The
+    /// unpacking and renames run on a worker ([`super::file_jobs`]).
+    pub(super) fn begin_import(
         &mut self,
         client: &ClientId,
         id: TransferId,
-        name: &str,
+        name: String,
         overwrite: bool,
-    ) -> Result<ReplyBody, ProtoError> {
-        session::validate_name(name).map_err(session_err)?;
-        let target = self.s.session_dir.join(name);
-        if !overwrite && let Some(p) = session::peek(&target) {
-            return Err(exists(name, p.saved_at.unwrap_or_default()));
-        }
-        if !overwrite && target.exists() {
-            return Err(perr(
-                ErrorCode::Conflict,
-                format!(
-                    "{} exists and is not a session of this version",
-                    target.display()
-                ),
-            ));
-        }
-        let (_, staged) = self.unpack_upload(client, id)?;
-        // Only a session this build reads is stored by name: one of another version would
-        // not list. Its traces can be salvaged instead.
-        let m = match session::read_manifest(&staged) {
-            Ok(m) => m,
-            Err(e) => {
-                remove_dir(&staged);
-                return Err(session_err(e));
-            }
-        };
-        let old = if target.exists() {
-            let old = self.stage_dir("replaced")?;
-            fs::rename(&target, &old)
-                .map_err(|e| perr(ErrorCode::Internal, format!("{}: {e}", target.display())))?;
-            Some(old)
-        } else {
-            None
-        };
-        if let Err(e) =
-            fs::create_dir_all(&self.s.session_dir).and_then(|()| fs::rename(&staged, &target))
-        {
-            if let Some(old) = &old {
-                let _ = fs::rename(old, &target);
-            }
-            remove_dir(&staged);
-            return Err(perr(
-                ErrorCode::Internal,
-                format!("{}: {e}", target.display()),
-            ));
-        }
-        if let Some(old) = old {
-            remove_dir(&old);
-        }
-        self.transfers.remove(id);
-        tracing::info!("session {name:?} imported from an upload");
-        Ok(ReplyBody::SessionFile(info(name, &target, &m)))
+    ) -> Result<(Pending, Work), ProtoError> {
+        session::validate_name(&name).map_err(session_err)?;
+        let target = self.s.session_dir.join(&name);
+        let bytes = self.transfers.upload(client, id)?.1.to_vec();
+        let staged = self.stage_path("upload");
+        let aside = self.stage_path("replaced");
+        let root = self.s.session_dir.clone();
+        let (n, t) = (name.clone(), target.clone());
+        let work: Work = Box::new(move || {
+            FileDone::Import(import_upload(
+                &bytes, &n, &t, &root, &staged, &aside, overwrite,
+            ))
+        });
+        Ok((
+            Pending::Import {
+                transfer: id,
+                name,
+                target,
+            },
+            work,
+        ))
     }
 
-    pub(super) fn file_download_begin(
+    pub(super) fn finish_import(
+        &mut self,
+        id: TransferId,
+        name: &str,
+        target: &Path,
+        stored: Result<Manifest, ProtoError>,
+    ) -> Result<ReplyBody, ProtoError> {
+        let m = stored?;
+        self.transfers.remove(id);
+        tracing::info!("session {name:?} imported from an upload");
+        Ok(ReplyBody::SessionFile(info(name, target, &m)))
+    }
+
+    /// `file.download_begin`: the working state's content as of now (or a stored
+    /// session), packed by a worker.
+    pub(super) fn begin_download(
         &mut self,
         client: &ClientId,
         r: Option<&SessionRef>,
-    ) -> Result<ReplyBody, ProtoError> {
-        let (stem, data, working) = match r {
+    ) -> Result<(Pending, Work), ProtoError> {
+        let (stem, work, working): (String, Work, _) = match r {
             None => {
-                let dir = self.stage_dir("download")?;
+                let dir = self.stage_path("download");
                 let data = self.session_data(true)?;
                 let at = data.saved_at;
                 let hash = self.content_hash();
-                let packed = session::save(&dir, &data)
-                    .map_err(session_err)
-                    .and_then(|_| ac2_archive::pack_dir(&dir).map_err(archive_err));
-                remove_dir(&dir);
                 let stem = match &self.working.origin {
                     None => "untitled".to_owned(),
                     Some(SessionOrigin::Name { name }) => name.clone(),
@@ -369,7 +352,16 @@ impl Control {
                         f.strip_suffix(".ac2session").unwrap_or(f).to_owned()
                     }
                 };
-                (stem, packed?, Some((hash, at)))
+                let work: Work = Box::new(move || {
+                    let packed = prepare_stage(&dir).and_then(|()| {
+                        session::save(&dir, &data)
+                            .map_err(session_err)
+                            .and_then(|_| ac2_archive::pack_dir(&dir).map_err(archive_err))
+                    });
+                    remove_dir(&dir);
+                    FileDone::Download(packed)
+                });
+                (stem, work, Some((hash, at)))
             }
             Some(SessionRef::Upload { .. }) => {
                 return Err(perr(
@@ -379,14 +371,34 @@ impl Control {
             }
             Some(r) => {
                 let (name, dir) = self.session_path(r)?;
-                session::read_manifest(&dir).map_err(session_err)?;
-                (
-                    name,
-                    ac2_archive::pack_dir(&dir).map_err(archive_err)?,
-                    None,
-                )
+                let work: Work = Box::new(move || {
+                    FileDone::Download(
+                        session::read_manifest(&dir)
+                            .map_err(session_err)
+                            .and_then(|_| ac2_archive::pack_dir(&dir).map_err(archive_err)),
+                    )
+                });
+                (name, work, None)
             }
         };
+        Ok((
+            Pending::Download {
+                client: client.clone(),
+                stem,
+                working,
+            },
+            work,
+        ))
+    }
+
+    pub(super) fn finish_download(
+        &mut self,
+        client: &ClientId,
+        stem: &str,
+        working: Option<(u64, WallNs)>,
+        packed: Result<Vec<u8>, ProtoError>,
+    ) -> Result<ReplyBody, ProtoError> {
+        let data = packed?;
         let bytes = data.len() as u64;
         let sha256 = ac2_archive::sha256_hex(&data);
         let transfer = self
@@ -452,6 +464,91 @@ impl Control {
             rev: self.store.rev(),
         })
     }
+}
+
+/// Makes room for staging directory `p`: its parent made, anything left at `p` removed.
+pub(super) fn prepare_stage(p: &Path) -> Result<(), ProtoError> {
+    if let Some(root) = p.parent() {
+        fs::create_dir_all(root)
+            .map_err(|e| perr(ErrorCode::Internal, format!("{}: {e}", root.display())))?;
+    }
+    remove_dir(p);
+    Ok(())
+}
+
+/// Unpacks archive `bytes` into staging directory `dir`; nothing is left there on an
+/// error.
+pub(super) fn unpack_into(bytes: &[u8], dir: &Path) -> Result<(), ProtoError> {
+    prepare_stage(dir)?;
+    ac2_archive::unpack(bytes, dir).map_err(|e| {
+        remove_dir(dir);
+        archive_err(e)
+    })
+}
+
+/// `file.import`'s disk work: unpacks into `staged`, then renames it to `target` (an
+/// existing session moved to `aside` first, and back if the rename fails).
+fn import_upload(
+    bytes: &[u8],
+    name: &str,
+    target: &Path,
+    root: &Path,
+    staged: &Path,
+    aside: &Path,
+    overwrite: bool,
+) -> Result<Manifest, ProtoError> {
+    if !overwrite && let Some(p) = session::peek(target) {
+        return Err(exists(name, p.saved_at.unwrap_or_default()));
+    }
+    if !overwrite && target.exists() {
+        return Err(perr(
+            ErrorCode::Conflict,
+            format!(
+                "{} exists and is not a session of this version",
+                target.display()
+            ),
+        ));
+    }
+    unpack_into(bytes, staged)?;
+    // Only a session this build reads is stored by name: one of another version would
+    // not list. Its traces can be salvaged instead.
+    let m = match session::read_manifest(staged) {
+        Ok(m) => m,
+        Err(e) => {
+            remove_dir(staged);
+            return Err(session_err(e));
+        }
+    };
+    let old = if target.exists() {
+        if let Err(e) = prepare_stage(aside) {
+            remove_dir(staged);
+            return Err(e);
+        }
+        if let Err(e) = fs::rename(target, aside) {
+            remove_dir(staged);
+            return Err(perr(
+                ErrorCode::Internal,
+                format!("{}: {e}", target.display()),
+            ));
+        }
+        Some(aside)
+    } else {
+        None
+    };
+    if let Err(e) = fs::create_dir_all(root).and_then(|()| fs::rename(staged, target)) {
+        if let Some(old) = old {
+            let _ = fs::rename(old, target);
+        }
+        remove_dir(staged);
+        return Err(perr(
+            ErrorCode::Internal,
+            format!("{}: {e}", target.display()),
+        ));
+    }
+    if let Some(old) = old {
+        remove_dir(old);
+    }
+    Ok(m)
 }
 
 /// `conflict` / `session_exists`.

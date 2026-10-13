@@ -193,12 +193,24 @@ impl Control {
     /// The working state was saved to, or opened from, `origin` (saved at `saved_at`), and
     /// is what it holds now.
     pub(super) fn mark_saved(&mut self, origin: Option<SessionOrigin>, saved_at: WallNs) {
-        let p = Persist {
+        let hash = self.content_hash();
+        self.mark_saved_as(origin, saved_at, hash);
+    }
+
+    /// [`Self::mark_saved`] for content of hash `saved_hash`: a save written off the control
+    /// thread wrote the content as it was when the save began, and edits made since stay
+    /// unsaved.
+    pub(super) fn mark_saved_as(
+        &mut self,
+        origin: Option<SessionOrigin>,
+        saved_at: WallNs,
+        saved_hash: u64,
+    ) {
+        self.set_working(Persist {
             origin,
-            saved_hash: self.content_hash(),
+            saved_hash,
             saved_at: Some(saved_at),
-        };
-        self.set_working(p);
+        });
     }
 
     fn is_dirty(&self) -> bool {
@@ -222,38 +234,51 @@ impl Control {
         ))
     }
 
-    /// Keeps the working state as the recovery copy when it has unsaved changes (it is
-    /// about to be replaced). On disk beside the autosave when there is one; in memory when
-    /// there is none or the disk refuses.
-    pub(super) fn keep_replaced(&mut self) -> Result<(), ProtoError> {
+    /// The working state as the recovery copy would keep it, when it has unsaved changes
+    /// (it is about to be replaced); `None` when it has none. Captured here, on the control
+    /// thread; [`Kept::stage`] writes it, [`Control::keep`] puts it in place.
+    pub(super) fn kept(&self) -> Result<Option<Kept>, ProtoError> {
         if !self.is_dirty() {
-            return Ok(());
+            return Ok(None);
         }
         let data = self.session_data(true)?;
         let st = self.store.state();
-        let info = Recoverable {
-            replaced_at: WallNs(wall_ns()),
-            origin: self.working.origin.clone(),
-            measurements: u32::try_from(st.measurements.len()).unwrap_or(u32::MAX),
-            traces: u32::try_from(st.traces.len()).unwrap_or(u32::MAX),
-        };
-        let working = self.working.clone();
-        let copy = match self.autosave_dir() {
-            Some(a) => {
-                let dir = replaced_dir(&a);
-                match write_replaced(&dir, &data, &working, info.replaced_at) {
-                    Ok(()) => Copy::Disk(dir),
-                    Err(e) => {
-                        tracing::warn!(
-                            "the replaced working state is kept in memory only: {}: {e}",
-                            dir.display()
-                        );
-                        Copy::Memory(Box::new(data))
-                    }
+        Ok(Some(Kept {
+            info: Recoverable {
+                replaced_at: WallNs(wall_ns()),
+                origin: self.working.origin.clone(),
+                measurements: u32::try_from(st.measurements.len()).unwrap_or(u32::MAX),
+                traces: u32::try_from(st.traces.len()).unwrap_or(u32::MAX),
+            },
+            working: self.working.clone(),
+            data: Box::new(data),
+            dir: self.autosave_dir().map(|a| replaced_dir(&a)),
+        }))
+    }
+
+    /// Makes a staged copy the recovery copy: on disk beside the autosave when it was
+    /// written there, in memory when there is no autosave or the disk refused.
+    pub(super) fn keep(&mut self, s: Staged) {
+        let Staged { kept, tmp } = s;
+        let copy = match (kept.dir, tmp) {
+            (Some(dir), Some(Ok(tmp))) => match install_replaced(&dir, &tmp) {
+                Ok(()) => Copy::Disk(dir),
+                Err(e) => {
+                    tracing::warn!("the replaced working state is kept in memory only: {e}");
+                    remove_dir_off_thread(tmp);
+                    Copy::Memory(kept.data)
                 }
+            },
+            (Some(dir), Some(Err(e))) => {
+                tracing::warn!(
+                    "the replaced working state is kept in memory only: {}: {e}",
+                    dir.display()
+                );
+                Copy::Memory(kept.data)
             }
-            None => Copy::Memory(Box::new(data)),
+            _ => Copy::Memory(kept.data),
         };
+        let info = kept.info;
         tracing::info!(
             "kept {} ({} measurements, {} traces) for file.recover",
             origin_label(info.origin.as_ref()),
@@ -262,36 +287,29 @@ impl Control {
         );
         self.recover = Some(Recover {
             info,
-            working,
+            working: kept.working,
             copy,
         });
+    }
+
+    /// [`Self::kept`], written and kept here and now (`file.recover`, which swaps two
+    /// copies the daemon holds already).
+    fn keep_replaced(&mut self) -> Result<(), ProtoError> {
+        if let Some(k) = self.kept()? {
+            self.keep(k.stage());
+        }
         Ok(())
     }
 
-    /// `file.new`.
-    pub(super) fn file_new(
-        &mut self,
-        client: &ClientId,
-        discard: bool,
-    ) -> Result<ReplyBody, ProtoError> {
-        self.guard_unsaved(discard)?;
-        self.keep_replaced()?;
-        let empty = SessionData {
-            saved_at: WallNs(wall_ns()),
-            measurements: Vec::new(),
-            spl_logs: Vec::new(),
-            traces: Vec::new(),
-        };
-        self.replace_session(Some(client), empty)?;
-        self.set_working(Persist::untitled());
-        tracing::info!("new untitled session");
-        Ok(ReplyBody::Ack {
-            rev: self.store.rev(),
-        })
+    /// The content hash and the saved hash: equal pairs mean the same content in the same
+    /// saved/unsaved standing, which a replace begun on one pair may commit on.
+    pub(super) fn standing(&self) -> (u64, u64) {
+        (self.content_hash(), self.working.saved_hash)
     }
 
     /// `file.recover`: swaps the working state with the recovery copy.
     pub(super) fn file_recover(&mut self, client: &ClientId) -> Result<ReplyBody, ProtoError> {
+        self.file_idle("file.recover")?;
         let Some(r) = self.recover.take() else {
             return Err(perr(
                 ErrorCode::NotFound,
@@ -371,17 +389,52 @@ impl Control {
     }
 }
 
-/// Writes the recovery copy to `dir` whole (beside it first, then renamed into place).
-fn write_replaced(
+/// The working state a replace keeps for `file.recover` (`Control::kept`).
+pub(crate) struct Kept {
+    info: Recoverable,
+    working: Persist,
+    data: Box<SessionData>,
+    /// `<autosave>.replaced`; `None`: kept in memory only.
+    dir: Option<PathBuf>,
+}
+
+/// A [`Kept`] whose disk copy is written beside its place, not yet in it: a replace refused
+/// after the write must leave the recovery copy it had.
+pub(crate) struct Staged {
+    kept: Kept,
+    /// The written copy, or why it could not be written; `None` without a place on disk.
+    tmp: Option<Result<PathBuf, String>>,
+}
+
+impl Kept {
+    /// Writes the copy beside its place. Disk work: a worker thread does it for a replace
+    /// that runs off the control thread.
+    pub(crate) fn stage(self) -> Staged {
+        let tmp = self
+            .dir
+            .as_ref()
+            .map(|d| stage_replaced(d, &self.data, &self.working, self.info.replaced_at));
+        Staged { kept: self, tmp }
+    }
+}
+
+impl Staged {
+    /// The replace was refused: the written copy goes, the recovery copy in place stays.
+    pub(crate) fn discard(self) {
+        if let Some(Ok(tmp)) = self.tmp {
+            remove_dir_off_thread(tmp);
+        }
+    }
+}
+
+/// Writes the recovery copy whole beside `dir` (`<dir>.tmp`); returns where.
+fn stage_replaced(
     dir: &Path,
     data: &SessionData,
     working: &Persist,
     replaced_at: WallNs,
-) -> Result<(), String> {
-    let name = dir
-        .file_name()
-        .map_or_else(|| "replaced".into(), |n| n.to_string_lossy().into_owned());
-    let tmp = dir.with_file_name(format!("{name}.tmp"));
+) -> Result<PathBuf, String> {
+    let tmp = sibling(dir, "tmp");
     remove_dir(&tmp);
     session::save(&tmp, data).map_err(|e| e.to_string())?;
     write_json(
@@ -391,8 +444,41 @@ fn write_replaced(
             replaced_at,
         },
     )?;
-    remove_dir(dir);
-    fs::rename(&tmp, dir).map_err(|e| format!("{}: {e}", dir.display()))
+    Ok(tmp)
+}
+
+/// Puts the copy written at `tmp` in `dir`'s place. Only renames here, on the control
+/// thread: the copy it replaces is moved aside and removed on a thread of its own.
+fn install_replaced(dir: &Path, tmp: &Path) -> Result<(), String> {
+    let old = sibling(dir, &format!("old-{}", wall_ns()));
+    match fs::rename(dir, &old) {
+        Ok(()) => remove_dir_off_thread(old),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
+    }
+    fs::rename(tmp, dir).map_err(|e| format!("{}: {e}", dir.display()))
+}
+
+/// `<dir>.<suffix>`.
+fn sibling(dir: &Path, suffix: &str) -> PathBuf {
+    let name = dir
+        .file_name()
+        .map_or_else(|| "replaced".into(), |n| n.to_string_lossy().into_owned());
+    dir.with_file_name(format!("{name}.{suffix}"))
+}
+
+/// Removes `p` on a thread of its own: a whole session's files are not the control
+/// thread's to wait for.
+pub(crate) fn remove_dir_off_thread(p: PathBuf) {
+    let r = std::thread::Builder::new()
+        .name("ac2d-remove".into())
+        .spawn({
+            let p = p.clone();
+            move || remove_dir(&p)
+        });
+    if r.is_err() {
+        remove_dir(&p);
+    }
 }
 
 #[cfg(test)]

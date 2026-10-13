@@ -233,7 +233,9 @@ audio callback ──► multichannel blocks {start_sample, frames, flags} ─�
                                                      │ results → per-topic latest slot
                                                      ▼
                                      publisher: coalesce per topic ──► XPUB
-control (tokio) ◄─► ROUTER; serialized state commits; jobs controlled via channels
+I/O thread ◄─► ROUTER/XPUB ── requests (mpsc) ──► control thread: serialized state commits;
+    jobs controlled via channels; disk/archive work (file.*) on worker threads, committed
+    when their result comes back (mpsc)
 generator ◄── atomics / lock-free param swap ◄── control (owner lease enforced, §6.5)
 ```
 - **Sync contract.** Every block carries its absolute sample index and flags (xrun, overflow, device change). All channels of a block travel together, so channels can never shift relative to each other. A gap is a discontinuity marker: affected jobs reset their averages and report it; nothing silently splices.

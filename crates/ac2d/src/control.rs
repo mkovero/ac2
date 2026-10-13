@@ -48,6 +48,7 @@ use crate::util::perr;
 mod autosave;
 mod cal;
 mod execute;
+mod file_jobs;
 mod files;
 mod generator;
 mod leq;
@@ -166,6 +167,11 @@ pub(crate) enum ControlMsg {
     RecordingEnded { token: u64 },
     /// The network sockets are gone (ZAP handler exited); shut down.
     Fatal(String),
+    /// The worker of file operation `token` finished its disk work.
+    FileDone {
+        token: u64,
+        done: Box<file_jobs::FileDone>,
+    },
     /// Orderly shutdown.
     Shutdown,
 }
@@ -342,6 +348,8 @@ pub(crate) struct Control {
     recover: Option<working::Recover>,
     /// Session archives being uploaded or downloaded.
     transfers: transfer::Transfers,
+    /// File operations whose disk work runs on a worker, by token.
+    file_jobs: file_jobs::FileJobs,
 }
 
 impl Control {
@@ -436,6 +444,7 @@ impl Control {
             working: working::Persist::untitled(),
             recover: None,
             transfers: transfer::Transfers::default(),
+            file_jobs: file_jobs::FileJobs::default(),
             rig,
             ceiling_set: saved.ceiling_dbfs,
             s,
@@ -581,6 +590,7 @@ impl Control {
                 ),
                 Ok(ControlMsg::RecordingProgress { token }) => self.recording_progress(token),
                 Ok(ControlMsg::RecordingEnded { token }) => self.recording_ended(token),
+                Ok(ControlMsg::FileDone { token, done }) => self.file_done(token, *done),
                 Ok(ControlMsg::Fatal(why)) => {
                     tracing::error!("fatal: {why}");
                     break;
@@ -603,6 +613,7 @@ impl Control {
         if let Some(rt) = self.session.take() {
             recovery::close_bounded(rt, recovery::CLOSE_BOUND);
         }
+        self.flush_file_jobs();
         self.flush_autosave();
         self.s.outbox.stop();
     }

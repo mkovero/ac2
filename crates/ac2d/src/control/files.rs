@@ -24,6 +24,7 @@ use ac2_traces::session::{
     self, Manifest, SavedDelay, SavedMeasurement, Session as SessionData, SessionError,
 };
 
+use super::file_jobs::{FileDone, Pending, ReplaceFrom, ReplaceRead, Work};
 use super::{Control, check_delay, delay_samples, maths, static_grid, validate_meas};
 use crate::util::{perr, perr_detail, wall_ns};
 
@@ -169,74 +170,214 @@ impl Control {
         })
     }
 
-    pub(super) fn file_save(
+    /// `file.save`: the content now, written by a worker ([`super::file_jobs`]).
+    pub(super) fn begin_save(
         &mut self,
         r: &SessionRef,
         overwrite: bool,
-    ) -> Result<ReplyBody, ProtoError> {
+    ) -> Result<(Pending, Work), ProtoError> {
         let (name, dir) = self.session_path(r)?;
         let origin = Self::origin_of(r, &dir);
-        if !overwrite
-            && self.working.origin.as_ref() != Some(&origin)
-            && let Some(p) = session::peek(&dir)
-        {
-            return Err(super::transfer::exists(
-                &name,
-                p.saved_at.unwrap_or_default(),
-            ));
-        }
+        // Its own session is saved again without asking.
+        let ask = !overwrite && self.working.origin.as_ref() != Some(&origin);
         let data = self.session_data(true)?;
-        let m = session::save(&dir, &data).map_err(session_err)?;
-        tracing::info!("session saved to {}", dir.display());
-        self.mark_saved(Some(origin), m.saved_at);
-        Ok(ReplyBody::SessionFile(info(&name, &dir, &m)))
-    }
-
-    pub(super) fn file_list(&self) -> Result<ReplyBody, ProtoError> {
-        let l = session::list(&self.s.session_dir).map_err(session_err)?;
-        Ok(ReplyBody::Sessions(
-            l.iter().map(|(n, p, m)| info(n, p, m)).collect(),
+        let hash = self.content_hash();
+        let (n, d) = (name.clone(), dir.clone());
+        let work: Work = Box::new(move || {
+            FileDone::Save((|| {
+                if ask && let Some(p) = session::peek(&d) {
+                    return Err(super::transfer::exists(&n, p.saved_at.unwrap_or_default()));
+                }
+                session::save(&d, &data).map_err(session_err)
+            })())
+        });
+        Ok((
+            Pending::Save {
+                name,
+                dir,
+                origin,
+                hash,
+            },
+            work,
         ))
     }
 
-    pub(super) fn file_load(
+    pub(super) fn finish_save(
+        &mut self,
+        name: &str,
+        dir: &Path,
+        origin: SessionOrigin,
+        hash: u64,
+        written: Result<Manifest, ProtoError>,
+    ) -> Result<ReplyBody, ProtoError> {
+        let m = written?;
+        tracing::info!("session saved to {}", dir.display());
+        self.mark_saved_as(Some(origin), m.saved_at, hash);
+        Ok(ReplyBody::SessionFile(info(name, dir, &m)))
+    }
+
+    /// `file.list`: read by a worker; it changes nothing, so it runs beside anything.
+    pub(super) fn begin_list(&self) -> (Pending, Work) {
+        let dir = self.s.session_dir.clone();
+        let work: Work =
+            Box::new(move || {
+                FileDone::List(session::list(&dir).map_err(session_err).map(|l| {
+                    ReplyBody::Sessions(l.iter().map(|(n, p, m)| info(n, p, m)).collect())
+                }))
+            });
+        (Pending::List, work)
+    }
+
+    /// `file.load`: read (an upload unpacked first) and checked by a worker, committed by
+    /// [`Self::finish_replace`].
+    pub(super) fn begin_load(
         &mut self,
         client: &ClientId,
         r: &SessionRef,
         discard: bool,
-    ) -> Result<ReplyBody, ProtoError> {
+    ) -> Result<(Pending, Work), ProtoError> {
         self.guard_unsaved(discard)?;
-        let (name, dir, origin, staged) = self.read_dir_of(client, r)?;
-        let read = session::read_manifest(&dir).and_then(|m| session::load(&dir).map(|d| (m, d)));
-        if staged {
-            super::transfer::remove_dir(&dir);
+        let (from, src) = match r {
+            SessionRef::Upload { transfer } => {
+                let (file, bytes) = self.transfers.upload(client, *transfer)?;
+                let src = (file, bytes.to_vec());
+                let stage = self.stage_path("upload");
+                (
+                    ReplaceFrom::Upload {
+                        transfer: *transfer,
+                        file: src.0,
+                        stage: stage.clone(),
+                    },
+                    Source::Upload(stage, src.1),
+                )
+            }
+            _ => {
+                let (name, dir) = self.session_path(r)?;
+                let origin = Self::origin_of(r, &dir);
+                let src = Source::Dir(dir.clone());
+                (ReplaceFrom::Dir { name, dir, origin }, src)
+            }
+        };
+        self.begin_replace(client, discard, from, src)
+    }
+
+    /// `file.new`: a replace with the empty session.
+    pub(super) fn begin_new(
+        &mut self,
+        client: &ClientId,
+        discard: bool,
+    ) -> Result<(Pending, Work), ProtoError> {
+        self.guard_unsaved(discard)?;
+        self.begin_replace(client, discard, ReplaceFrom::Empty, Source::Empty)
+    }
+
+    /// The working state as it is goes to the recovery copy when it has unsaved changes:
+    /// captured here, written by the worker after the new session read well.
+    fn begin_replace(
+        &mut self,
+        client: &ClientId,
+        discard: bool,
+        from: ReplaceFrom,
+        src: Source,
+    ) -> Result<(Pending, Work), ProtoError> {
+        let kept = self.kept()?;
+        let work: Work = Box::new(move || {
+            let read = src.read();
+            // A session that cannot replace the working state must not take the recovery
+            // copy's place.
+            let kept = if read.is_ok() {
+                kept.map(super::working::Kept::stage)
+            } else {
+                None
+            };
+            FileDone::Replace(ReplaceRead { read, kept })
+        });
+        Ok((
+            Pending::Replace {
+                client: client.clone(),
+                discard,
+                from,
+                standing: self.standing(),
+            },
+            work,
+        ))
+    }
+
+    /// Commits a `file.load` / `file.new` its worker read: only onto the working state it
+    /// began on (`super::file_jobs`).
+    pub(super) fn finish_replace(
+        &mut self,
+        client: &ClientId,
+        discard: bool,
+        from: ReplaceFrom,
+        standing: (u64, u64),
+        r: ReplaceRead,
+    ) -> Result<ReplyBody, ProtoError> {
+        let ReplaceRead { read, kept } = r;
+        let checked = read.and_then(|(m, data)| {
+            if self.standing() != standing {
+                return Err(perr(
+                    ErrorCode::Conflict,
+                    "the working state changed while the session was being read; nothing \
+                     was replaced: ask again",
+                ));
+            }
+            self.guard_unsaved(discard)?;
+            // Refused before the working state is kept aside: a load that cannot happen
+            // must not take the recovery copy's place.
+            check_session(&data)?;
+            Ok((m, data))
+        });
+        let (m, data) = match checked {
+            Ok(x) => x,
+            Err(e) => {
+                if let Some(k) = kept {
+                    k.discard();
+                }
+                return Err(e);
+            }
+        };
+        if let Some(k) = kept {
+            self.keep(k);
         }
-        let (m, data) = read.map_err(session_err)?;
-        // Refused before the working state is kept aside: a load that cannot happen must not
-        // take the recovery copy's place.
-        check_session(&data)?;
-        self.keep_replaced()?;
         let epoch = self.replace_session(Some(client), data)?;
-        if let SessionRef::Upload { transfer } = r {
-            self.transfers.remove(*transfer);
+        let read_manifest =
+            |m: Option<Manifest>| m.ok_or_else(|| perr(ErrorCode::Internal, "no manifest read"));
+        match from {
+            ReplaceFrom::Empty => {
+                self.set_working(super::working::Persist::untitled());
+                tracing::info!("new untitled session");
+                Ok(ReplyBody::Ack {
+                    rev: self.store.rev(),
+                })
+            }
+            ReplaceFrom::Dir { name, dir, origin } => {
+                let m = read_manifest(m)?;
+                tracing::info!(
+                    "session loaded from {} (epoch {}, disarmed)",
+                    dir.display(),
+                    epoch.0
+                );
+                self.mark_saved(Some(origin), m.saved_at);
+                Ok(ReplyBody::SessionFile(info(&name, &dir, &m)))
+            }
+            ReplaceFrom::Upload {
+                transfer,
+                file,
+                stage,
+            } => {
+                let m = read_manifest(m)?;
+                self.transfers.remove(transfer);
+                tracing::info!("session loaded from {file} (epoch {}, disarmed)", epoch.0);
+                self.mark_saved(
+                    Some(SessionOrigin::Client { path: file.clone() }),
+                    m.saved_at,
+                );
+                let mut f = info(super::transfer::file_part(&file), &stage, &m);
+                f.path = file;
+                Ok(ReplyBody::SessionFile(f))
+            }
         }
-        let from = if staged {
-            name.clone()
-        } else {
-            dir.display().to_string()
-        };
-        tracing::info!("session loaded from {from} (epoch {}, disarmed)", epoch.0);
-        self.mark_saved(Some(origin), m.saved_at);
-        let shown = if staged {
-            super::transfer::file_part(&name).to_owned()
-        } else {
-            name.clone()
-        };
-        let mut f = info(&shown, &dir, &m);
-        if staged {
-            f.path = name;
-        }
-        Ok(ReplyBody::SessionFile(f))
     }
 
     /// `file.salvage`: each trace file of the session through `trace.import`'s reader.
@@ -245,6 +386,7 @@ impl Control {
         client: &ClientId,
         r: &SessionRef,
     ) -> Result<ReplyBody, ProtoError> {
+        self.file_idle("file.salvage")?;
         let (_, dir, _, staged) = self.read_dir_of(client, r)?;
         let result = self.salvage_dir(&dir);
         if staged {
@@ -570,4 +712,42 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
         }
     }
     Ok(grids)
+}
+
+/// What a replace reads its new working state from, on the worker.
+pub(super) enum Source {
+    Dir(PathBuf),
+    /// An upload's archive, unpacked into the staging directory first.
+    Upload(PathBuf, Vec<u8>),
+    Empty,
+}
+
+impl Source {
+    /// The session (with its manifest), checked as a load checks it. Disk work.
+    fn read(self) -> Result<(Option<Manifest>, SessionData), ProtoError> {
+        let read_dir = |dir: &Path| {
+            let m = session::read_manifest(dir).map_err(session_err)?;
+            let data = session::load(dir).map_err(session_err)?;
+            check_session(&data)?;
+            Ok((Some(m), data))
+        };
+        match self {
+            Self::Dir(dir) => read_dir(&dir),
+            Self::Upload(stage, bytes) => {
+                let r =
+                    super::transfer::unpack_into(&bytes, &stage).and_then(|()| read_dir(&stage));
+                super::transfer::remove_dir(&stage);
+                r
+            }
+            Self::Empty => Ok((
+                None,
+                SessionData {
+                    saved_at: WallNs(wall_ns()),
+                    measurements: Vec::new(),
+                    spl_logs: Vec::new(),
+                    traces: Vec::new(),
+                },
+            )),
+        }
+    }
 }

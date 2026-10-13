@@ -1,0 +1,224 @@
+//! Session file work runs off the control thread: while a save or load waits on its disk,
+//! lease refreshes, the state and other clients are still answered, a second file operation
+//! is refused until the first is answered, and a save writes the content as it was when it
+//! began. Slow storage is a named pipe in place of a session's manifest: reading it blocks
+//! until the test writes to it.
+#![cfg(unix)]
+#![allow(clippy::unwrap_used)]
+
+use crate::common;
+
+use std::path::{Path, PathBuf};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use ac2_proto::model::*;
+use ac2_proto::units::*;
+use ac2_proto::{Command, ErrorCode, Reply, ReplyBody, Request};
+use ac2d::{Daemon, Handle};
+use common::*;
+
+fn start(name: &str, dir: &Path) -> Handle {
+    init_log();
+    let mut cfg = config(manual_rig(), inproc(&unique(name)));
+    cfg.session_dir = dir.join("sessions");
+    Daemon::start(cfg).unwrap()
+}
+
+/// A session directory `name` whose manifest is a named pipe: reading it waits for
+/// [`release`].
+fn slow_session(h_dir: &Path, name: &str) -> PathBuf {
+    let dir = h_dir.join("sessions").join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    let pipe = dir.join("session.json");
+    let ok = std::process::Command::new("mkfifo")
+        .arg(&pipe)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "mkfifo");
+    pipe
+}
+
+/// Lets one read of `pipe` finish, with content that is no manifest.
+fn release(pipe: PathBuf) -> JoinHandle<()> {
+    std::thread::spawn(move || std::fs::write(pipe, b"not a manifest").unwrap())
+}
+
+fn import(c: &mut Client) -> TraceMeta {
+    let content = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../ac2-traces/tests/fixtures/rew_export.txt"),
+    )
+    .unwrap();
+    match c.ok(Command::TraceImport {
+        file_name: "rew_export.txt".into(),
+        format: ImportFormat::Auto,
+        role: ImportRole::Trace,
+        ir: None,
+        content: Blob(content),
+    }) {
+        ReplyBody::Trace(t) => t,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn working(c: &mut Client) -> WorkingSession {
+    match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => s.state.working,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn named(name: &str) -> SessionRef {
+    SessionRef::Name { name: name.into() }
+}
+
+/// Sends `cmd` without waiting; returns its id.
+fn send(c: &mut Client, cmd: Command) -> RequestId {
+    let id = c.next_id();
+    c.send(&Request::new(id, cmd));
+    id
+}
+
+fn reply(c: &Client, id: RequestId, within: Duration) -> Option<Reply> {
+    let r = c.recv(within)?;
+    assert_eq!(r.id, id);
+    Some(r)
+}
+
+#[test]
+fn a_load_waiting_on_its_disk_blocks_no_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("slow-load", dir.path());
+    let (mut a, _sub) = connect(&h, &[]);
+    let (mut b, _sub_b) = connect(&h, &[]);
+    import(&mut a);
+    let lease = match b.ok(Command::GenAcquire { force: false }) {
+        ReplyBody::Lease(l) => l.lease_token,
+        other => panic!("{other:?}"),
+    };
+    let pipe = slow_session(dir.path(), "slow");
+
+    let load = send(
+        &mut a,
+        Command::FileLoad {
+            session: named("slow"),
+            discard: true,
+        },
+    );
+    // The control thread may not even have started it; either way the load is not
+    // answered while its manifest cannot be read.
+    assert!(reply(&a, load, Duration::from_millis(300)).is_none());
+
+    // Another client's lease refresh, a state request and the universal stop.
+    b.ok(Command::GenRefresh { lease_token: lease });
+    assert_eq!(working(&mut b).origin, None);
+    b.ok(Command::GenStop);
+    // One file operation at a time.
+    let e = b
+        .call(Command::FileSave {
+            session: named("other"),
+            overwrite: false,
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+    let e = b.call(Command::FileNew { discard: true }).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+    let writer = release(pipe);
+    let r = reply(&a, load, Duration::from_secs(10)).expect("the load is answered");
+    writer.join().unwrap();
+    let e = r.result.unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
+    // A refused load changed nothing, and file operations are taken again.
+    let w = working(&mut a);
+    assert!(w.dirty && w.recover.is_none(), "{w:?}");
+    b.ok(Command::FileSave {
+        session: named("other"),
+        overwrite: false,
+    });
+    h.shutdown();
+}
+
+#[test]
+fn a_save_writes_the_content_it_began_with() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("slow-save", dir.path());
+    let (mut a, _sub) = connect(&h, &[]);
+    let (mut b, _sub_b) = connect(&h, &[]);
+    let t = import(&mut a);
+    // Saving onto a session that is not the working state's asks: it reads the manifest
+    // there first, and that read waits.
+    let pipe = slow_session(dir.path(), "slow");
+    let save = send(
+        &mut a,
+        Command::FileSave {
+            session: named("slow"),
+            overwrite: false,
+        },
+    );
+    assert!(reply(&a, save, Duration::from_millis(300)).is_none());
+
+    // An edit while the save waits.
+    let mut edit = t.edit.clone();
+    edit.name = "edited meanwhile".into();
+    b.ok(Command::TraceUpdate { trace: t.id, edit });
+
+    let writer = release(pipe);
+    let r = reply(&a, save, Duration::from_secs(10)).expect("the save is answered");
+    writer.join().unwrap();
+    match r.result.unwrap() {
+        ReplyBody::SessionFile(f) => assert_eq!(f.traces, 1),
+        other => panic!("{other:?}"),
+    }
+    // It belongs to the session now, and the edit made after the save began is unsaved.
+    let w = working(&mut b);
+    assert_eq!(
+        w.origin,
+        Some(SessionOrigin::Name {
+            name: "slow".into()
+        })
+    );
+    assert!(w.dirty, "the edit came after the snapshot");
+
+    // What was written is the content as the save began.
+    b.ok(Command::FileLoad {
+        session: named("slow"),
+        discard: true,
+    });
+    let ts = match b.ok(Command::TraceList) {
+        ReplyBody::Traces(t) => t,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(ts.len(), 1);
+    assert_eq!(ts[0].edit.name, t.edit.name);
+    h.shutdown();
+}
+
+#[test]
+fn a_retry_of_a_pending_file_operation_is_answered_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("slow-retry", dir.path());
+    let (mut a, _sub) = connect(&h, &[]);
+    import(&mut a);
+    let pipe = slow_session(dir.path(), "slow");
+    let id = a.next_id();
+    let req = Request::new(
+        id,
+        Command::FileSave {
+            session: named("slow"),
+            overwrite: false,
+        },
+    );
+    a.send(&req);
+    assert!(reply(&a, id, Duration::from_millis(200)).is_none());
+    // The client gave up waiting and sends it again: the same request, not a second save.
+    a.send(&req);
+    assert!(reply(&a, id, Duration::from_millis(200)).is_none());
+    let writer = release(pipe);
+    let r = reply(&a, id, Duration::from_secs(10)).expect("answered");
+    writer.join().unwrap();
+    assert!(r.result.is_ok(), "{:?}", r.result);
+    // Nothing else follows.
+    assert!(a.recv(Duration::from_millis(200)).is_none());
+    h.shutdown();
+}

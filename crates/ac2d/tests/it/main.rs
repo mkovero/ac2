@@ -12,6 +12,7 @@ mod dedup;
 mod devices;
 mod discovery;
 mod drift;
+mod file_jobs;
 mod jack;
 mod leq;
 mod math_channels;
