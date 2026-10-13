@@ -2,7 +2,7 @@
 
 ac2, REW 5.40 and Open Sound Meter (OSM) v1.5.2 measured the same signals on one ac2 build. On
 the pupu rig (RME Fireface 400 at 96 kHz): an electrical path through an Allen & Heath Xone:62
-mixer, a Genelec 1083 speaker in a living room with a beyerdynamic MM1 measurement microphone at
+mixer, a Genelec 1083 speaker in a room with a beyerdynamic MM1 measurement microphone at
 56 cm on the Genelec's tweeter axis, 90° grazing, and the same room's ambient noise. On the dev
 host: a software device with known distortion on a dummy JACK server, and OSM's DSP on synthetic
 test signals and on the rig's recordings. All tools share ac2's stored calibration, which
