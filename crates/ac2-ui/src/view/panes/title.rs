@@ -3,24 +3,49 @@
 
 use super::*;
 
+/// The narrowest a measurement chip is drawn: its ▾ and a few letters of the name.
+pub(super) const CHIP_MIN_W: f32 = 56.0;
+
+/// The chip's padding around its name: the left inset and the ▾ on the right.
+const CHIP_PAD: f32 = 24.0;
+
+/// What a chip leaves of the title for a caption to follow it: a few letters and `…`, so
+/// the title still shows that a trace is selected.
+const CAPTION_MIN_W: f32 = 32.0;
+
+/// The widest the chip may be in `room` (from its left edge to where the title's required
+/// controls begin): all of it, or with a caption to follow, all but the caption's least.
+pub(super) fn chip_budget(room: f32, has_caption: bool) -> f32 {
+    let budget = if has_caption {
+        room - CAPTION_MIN_W
+    } else {
+        room
+    };
+    budget.max(CHIP_MIN_W)
+}
+
 /// The chip in a pane's title naming the measurement the pane shows (a click opens the list
-/// of measurements it can show); where it was drawn.
+/// of measurements it can show), at most `max_w` wide with its name cut short by `…` beyond
+/// that (the tooltip and accessible label keep the whole name); where it was drawn.
 pub(super) fn title_chip(
     app: &mut App,
     ui: &egui::Ui,
     id: PaneId,
     title: egui::Rect,
     x: f32,
+    max_w: f32,
     ch: &Chrome,
 ) -> Option<egui::Rect> {
     let st = &app.state;
     let m = st.pane_meas(id)?;
     let font = egui::FontId::proportional(12.0);
     let painter = ui.painter();
-    let galley = painter.layout_no_wrap(m.config.name.clone(), font.clone(), ch.text);
+    let mut job = egui::text::LayoutJob::simple_singleline(m.config.name.clone(), font, ch.text);
+    job.wrap = egui::text::TextWrapping::truncate_at_width((max_w - CHIP_PAD).max(0.0));
+    let galley = painter.layout_job(job);
     let r = egui::Rect::from_min_size(
         egui::pos2(x, title.min.y + 2.0),
-        egui::vec2(galley.size().x + 24.0, TITLE_H - 3.0),
+        egui::vec2(galley.size().x + CHIP_PAD, TITLE_H - 3.0),
     );
     let chip = ui.interact(r, ui.id().with(("pane-chip", id.0)), egui::Sense::click());
     let name = m.config.name.clone();

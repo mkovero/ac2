@@ -256,204 +256,231 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
     // Numbered in reading order, as Alt+1 … 9 count them.
     let order = app.state.layout.panes();
     for (id, rect) in layout(&app.state, area) {
-        let pane = app.state.layout.kind(id);
-        let pane_title = app
-            .state
-            .layout
-            .view(id)
-            .map_or(pane.title(), |v| v.title());
-        if stage {
-            // The SPL meter and its Leq windows carry their own captions; a plot gets a slim
-            // one naming the pane and its measurement, and nothing else.
-            let rect = match stage_caption(&app.state, id) {
-                Some(text) => {
-                    let strip = egui::Rect::from_min_size(
-                        rect.min,
-                        egui::vec2(rect.width(), STAGE_CAPTION_H),
-                    );
-                    ui.painter().text(
-                        strip.left_center() + egui::vec2(10.0, 0.0),
-                        egui::Align2::LEFT_CENTER,
-                        text,
-                        egui::FontId::proportional(13.0),
-                        ch.dim,
-                    );
-                    egui::Rect::from_min_max(
-                        egui::pos2(rect.min.x, rect.min.y + STAGE_CAPTION_H),
-                        rect.max,
-                    )
-                }
-                None => rect,
-            };
-            let resp = ui.interact(
-                rect,
-                ui.id().with(("stage", id.0)),
-                egui::Sense::click_and_drag(),
-            );
-            let built = if app.plots {
-                scene_for(app, id, rect.size(), theme)
-            } else {
-                None
-            };
-            let axes = built.as_ref().map(|b| b.1).unwrap_or_default();
-            match built {
-                Some((scene, _)) => plot::paint(ui, slot(id), rect, scene),
-                None => {
-                    ui.painter().text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        placeholder(id, app),
-                        egui::FontId::proportional(13.0),
-                        ch.dim,
-                    );
-                }
-            }
-            // Full screen keeps the mouse: wheel zooms frequency, Ctrl/Shift+wheel the level
-            // axis, as in the split layout.
-            let took = legend_mouse(app, ui, &resp, id, rect);
-            navigate(app, ui, &resp, id, rect, axes, took);
-            continue;
-        }
-        let focused = app.state.layout.focus == id;
-        let stroke = if focused {
-            egui::Stroke::new(1.5, ch.focus)
-        } else {
-            egui::Stroke::new(1.0, ch.border)
-        };
-        let painter = ui.painter();
-        painter.rect_filled(rect, 4.0, ch.raised);
-        painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
-        let title = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), TITLE_H));
-        let n = order.iter().position(|p| *p == id).unwrap_or(0) + 1;
-        let label = painter.text(
-            title.left_center() + egui::vec2(8.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            format!("{n}  {pane_title}"),
-            egui::FontId::proportional(12.0),
-            if focused { ch.text } else { ch.dim },
+        // Each pane's widgets live under its own id and are clipped to its rectangle: two
+        // panes of one kind draw the same controls, which must stay distinct widgets, and a
+        // title that runs long must neither paint nor take clicks past its pane.
+        let mut pane_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(("pane-scope", id.0))
+                .max_rect(rect),
         );
-        let style = crate::keys::label_style();
-        let line = app.state.key_hint_line(&app.keymap, id, style);
-        // The hint line takes its strip off the plot's bottom: it never covers a curve.
-        let bottom = rect.max.y - 2.0 - if line.is_some() { HINT_H } else { 0.0 };
-        let plot_rect = egui::Rect::from_min_max(
-            egui::pos2(rect.min.x + 2.0, rect.min.y + TITLE_H),
-            egui::pos2(rect.max.x - 2.0, bottom),
-        );
-        let resp = ui.interact(
-            rect,
-            ui.id().with(("pane", id.0)),
-            egui::Sense::click_and_drag(),
-        );
-        // After the pane's own response, so a hover or click there is theirs.
-        let all = app.state.pane_hints(&app.keymap, id, style);
-        let name_rect =
-            egui::Rect::from_min_max(title.min, egui::pos2(label.right() + 4.0, title.max.y));
-        let name = ui.interact(
-            name_rect,
-            ui.id().with(("pane-title", id.0)),
-            egui::Sense::hover(),
-        );
-        name.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{n}  {pane_title}"))
-        });
-        // No tooltip on the name: it would open over the top of the plot (where the legend
-        // sits) whenever the pointer crosses the title; the hint line carries it instead.
-        if let Some(items) = &line {
-            let strip = egui::Rect::from_min_max(
-                egui::pos2(rect.min.x + 2.0, bottom),
-                egui::pos2(rect.max.x - 2.0, rect.max.y - 2.0),
-            );
-            hint_line(ui, strip, items, ch);
-            let line = ui.interact(
-                strip,
-                ui.id().with(("pane-hints", id.0)),
-                egui::Sense::hover(),
-            );
-            line.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Label,
-                    true,
-                    format!("{pane_title} keys"),
-                )
-            });
-            line.on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, pane_title, &all, ch));
-        }
-        let mut x = label.right() + 10.0;
-        if let Some(chip) = title_chip(app, ui, id, title, x, ch) {
-            x = chip.right() + 10.0;
-        }
-        let mut right = title.right() - 8.0;
-        if pane == PaneKind::Distortion
-            && app.state.pane_modes(id).sweep == ac2_scene::view::SweepMode::Response
-            && let Some(left) = unit_toggle(app, ui, title, x, ch)
-        {
-            right = left - 10.0;
-        }
-        let caption_end = caption(app, ui, id, title, x, right, ch);
-        if plot_rect.width() < 8.0 || plot_rect.height() < 8.0 {
-            continue;
-        }
-        let built = if app.plots {
-            scene_for(app, id, plot_rect.size(), theme)
-        } else {
-            None
-        };
-        // What the level axis means, over its unit (a spectrum's per-bin levels).
-        let tip = app.scenes.get(&id).and_then(|c| c.unit_tip.clone());
-        let resp = match tip {
-            Some((r, text))
-                if built.is_some()
-                    && resp
-                        .hover_pos()
-                        .is_some_and(|p| r.translate(plot_rect.min.to_vec2()).contains(p)) =>
-            {
-                resp.on_hover_text(text)
-            }
-            _ => resp,
-        };
-        match &built {
-            Some((scene, _)) => plot::paint(ui, slot(id), plot_rect, scene.clone()),
-            None => {
-                let text = if app.plots {
-                    placeholder(id, app)
-                } else {
-                    "plots need the wgpu renderer"
-                };
-                ui.painter().text(
-                    plot_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    text,
-                    egui::FontId::proportional(13.0),
-                    ch.dim,
-                );
-            }
-        }
-        // Hidden under a dialog, which is already the next step.
-        if pane == PaneKind::Transfer
-            && app.state.overlay == crate::state::Overlay::None
-            && let Some(hint) = app.state.empty_hint(&app.keymap)
-        {
-            match hint.place {
-                HintPlace::Centre => empty_hint(ui, plot_rect, &hint.text, ch),
-                HintPlace::Title => title_hint(ui, title, caption_end + 16.0, &hint.text, ch),
-            }
-        }
-        let took = legend_mouse(app, ui, &resp, id, plot_rect);
-        navigate(
-            app,
-            ui,
-            &resp,
-            id,
-            plot_rect,
-            built.map(|b| b.1).unwrap_or_default(),
-            took,
-        );
+        pane_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+        pane(app, &mut pane_ui, theme, ch, id, rect, stage, &order);
     }
     if !stage {
         split_gaps(app, ui, area);
     }
     ui.allocate_rect(area, egui::Sense::hover());
+}
+
+/// One pane in `rect`: its frame, title strip, plot and hint line (or, on the stage, its
+/// picture alone).
+#[allow(clippy::too_many_arguments)]
+fn pane(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    ch: &Chrome,
+    id: PaneId,
+    rect: egui::Rect,
+    stage: bool,
+    order: &[PaneId],
+) {
+    let pane = app.state.layout.kind(id);
+    let pane_title = app
+        .state
+        .layout
+        .view(id)
+        .map_or(pane.title(), |v| v.title());
+    if stage {
+        // The SPL meter and its Leq windows carry their own captions; a plot gets a slim
+        // one naming the pane and its measurement, and nothing else.
+        let rect = match stage_caption(&app.state, id) {
+            Some(text) => {
+                let strip =
+                    egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), STAGE_CAPTION_H));
+                ui.painter().text(
+                    strip.left_center() + egui::vec2(10.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    text,
+                    egui::FontId::proportional(13.0),
+                    ch.dim,
+                );
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.min.x, rect.min.y + STAGE_CAPTION_H),
+                    rect.max,
+                )
+            }
+            None => rect,
+        };
+        let resp = ui.interact(
+            rect,
+            ui.id().with(("stage", id.0)),
+            egui::Sense::click_and_drag(),
+        );
+        let built = if app.plots {
+            scene_for(app, id, rect.size(), theme)
+        } else {
+            None
+        };
+        let axes = built.as_ref().map(|b| b.1).unwrap_or_default();
+        match built {
+            Some((scene, _)) => plot::paint(ui, slot(id), rect, scene),
+            None => {
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    placeholder(id, app),
+                    egui::FontId::proportional(13.0),
+                    ch.dim,
+                );
+            }
+        }
+        // Full screen keeps the mouse: wheel zooms frequency, Ctrl/Shift+wheel the level
+        // axis, as in the split layout.
+        let took = legend_mouse(app, ui, &resp, id, rect);
+        navigate(app, ui, &resp, id, rect, axes, took);
+        return;
+    }
+    let focused = app.state.layout.focus == id;
+    let stroke = if focused {
+        egui::Stroke::new(1.5, ch.focus)
+    } else {
+        egui::Stroke::new(1.0, ch.border)
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, 4.0, ch.raised);
+    painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
+    let title = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), TITLE_H));
+    let n = order.iter().position(|p| *p == id).unwrap_or(0) + 1;
+    let label = painter.text(
+        title.left_center() + egui::vec2(8.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        format!("{n}  {pane_title}"),
+        egui::FontId::proportional(12.0),
+        if focused { ch.text } else { ch.dim },
+    );
+    let style = crate::keys::label_style();
+    let line = app.state.key_hint_line(&app.keymap, id, style);
+    // The hint line takes its strip off the plot's bottom: it never covers a curve.
+    let bottom = rect.max.y - 2.0 - if line.is_some() { HINT_H } else { 0.0 };
+    let plot_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x + 2.0, rect.min.y + TITLE_H),
+        egui::pos2(rect.max.x - 2.0, bottom),
+    );
+    let resp = ui.interact(
+        rect,
+        ui.id().with(("pane", id.0)),
+        egui::Sense::click_and_drag(),
+    );
+    // After the pane's own response, so a hover or click there is theirs.
+    let all = app.state.pane_hints(&app.keymap, id, style);
+    let name_rect =
+        egui::Rect::from_min_max(title.min, egui::pos2(label.right() + 4.0, title.max.y));
+    let name = ui.interact(
+        name_rect,
+        ui.id().with(("pane-title", id.0)),
+        egui::Sense::hover(),
+    );
+    name.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{n}  {pane_title}"))
+    });
+    // No tooltip on the name: it would open over the top of the plot (where the legend
+    // sits) whenever the pointer crosses the title; the hint line carries it instead.
+    if let Some(items) = &line {
+        let strip = egui::Rect::from_min_max(
+            egui::pos2(rect.min.x + 2.0, bottom),
+            egui::pos2(rect.max.x - 2.0, rect.max.y - 2.0),
+        );
+        hint_line(ui, strip, items, ch);
+        let line = ui.interact(
+            strip,
+            ui.id().with(("pane-hints", id.0)),
+            egui::Sense::hover(),
+        );
+        line.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{pane_title} keys"))
+        });
+        line.on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, pane_title, &all, ch));
+    }
+    let mut x = label.right() + 10.0;
+    let mut right = title.right() - 8.0;
+    // The unit toggle keeps its place beside the shortest chip; the chip takes what is left.
+    let chip_reserve = if app.state.pane_meas(id).is_some() {
+        CHIP_MIN_W + 10.0
+    } else {
+        0.0
+    };
+    if pane == PaneKind::Distortion
+        && app.state.pane_modes(id).sweep == ac2_scene::view::SweepMode::Response
+        && let Some(left) = unit_toggle(app, ui, title, x + chip_reserve, ch)
+    {
+        right = left - 10.0;
+    }
+    let has_caption = !app.state.pane_caption_variants(id).is_empty();
+    let chip_max = chip_budget(right - x, has_caption);
+    if let Some(chip) = title_chip(app, ui, id, title, x, chip_max, ch) {
+        x = chip.right() + 10.0;
+    }
+    let caption_end = caption(app, ui, id, title, x, right, ch);
+    if plot_rect.width() < 8.0 || plot_rect.height() < 8.0 {
+        return;
+    }
+    let built = if app.plots {
+        scene_for(app, id, plot_rect.size(), theme)
+    } else {
+        None
+    };
+    // What the level axis means, over its unit (a spectrum's per-bin levels).
+    let tip = app.scenes.get(&id).and_then(|c| c.unit_tip.clone());
+    let resp = match tip {
+        Some((r, text))
+            if built.is_some()
+                && resp
+                    .hover_pos()
+                    .is_some_and(|p| r.translate(plot_rect.min.to_vec2()).contains(p)) =>
+        {
+            resp.on_hover_text(text)
+        }
+        _ => resp,
+    };
+    match &built {
+        Some((scene, _)) => plot::paint(ui, slot(id), plot_rect, scene.clone()),
+        None => {
+            let text = if app.plots {
+                placeholder(id, app)
+            } else {
+                "plots need the wgpu renderer"
+            };
+            ui.painter().text(
+                plot_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                egui::FontId::proportional(13.0),
+                ch.dim,
+            );
+        }
+    }
+    // Hidden under a dialog, which is already the next step.
+    if pane == PaneKind::Transfer
+        && app.state.overlay == crate::state::Overlay::None
+        && let Some(hint) = app.state.empty_hint(&app.keymap)
+    {
+        match hint.place {
+            HintPlace::Centre => empty_hint(ui, plot_rect, &hint.text, ch),
+            HintPlace::Title => title_hint(ui, title, caption_end + 16.0, &hint.text, ch),
+        }
+    }
+    let took = legend_mouse(app, ui, &resp, id, plot_rect);
+    navigate(
+        app,
+        ui,
+        &resp,
+        id,
+        plot_rect,
+        built.map(|b| b.1).unwrap_or_default(),
+        took,
+    );
 }
 
 /// How far past the gap's own strip the mouse still grabs it: the gap is a few points

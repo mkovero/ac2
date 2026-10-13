@@ -8,4 +8,5 @@ mod connect;
 mod embedded;
 mod keymap_doc;
 mod no_dsp;
+mod pane_title;
 mod ui;
