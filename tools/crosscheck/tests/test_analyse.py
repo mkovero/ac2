@@ -1,9 +1,11 @@
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from crosscheck.ac2 import event_errors
 from crosscheck.analyse import Analysis, judge_u
+from crosscheck.checks_common import sine_uncertainty, take_difference
 
 
 def test_judge_u():
@@ -16,6 +18,23 @@ def test_judge_u():
     # an uncertainty wider than the pass limit cannot tell a pass from a fail
     assert judge_u(0.0, tol, 0.15) == "INCONCLUSIVE"
     assert judge_u(0.2, tol, float("nan")) == "WARN"
+
+
+def test_a_take_under_another_stimulus_carries_its_path_difference_against_the_sine():
+    # the narrow readings of two takes at one frequency: 0.9 dB and 3° apart
+    h_ref = 10 ** (1.8 / 20) * np.exp(1j * np.deg2rad(10.0))
+    h_take = 10 ** (0.9 / 20) * np.exp(1j * np.deg2rad(13.0))
+    ddb, ddeg = take_difference(h_take, h_ref)
+    assert abs(ddb - 0.9) < 1e-9 and abs(ddeg - 3.0) < 1e-9
+    assert take_difference(h_ref, h_take) == pytest.approx((ddb, ddeg))
+    assert take_difference(complex("nan"), h_ref) == (0.0, 0.0)
+    # fine structure and the take add; the column noise covers both only where it is larger.
+    # The Genelec TF at 10005 Hz: −2.72 dB against the sine, 1.42 fine + 0.90 take
+    tol = (0.3, 1.0)
+    u = sine_uncertainty(1.42, 0.90, 0.2)
+    assert abs(u - 2.32) < 1e-9
+    assert judge_u(-2.72, tol, 1.42) == "FAIL" and judge_u(-2.72, tol, u) == "INCONCLUSIVE"
+    assert sine_uncertainty(0.11, 0.0, 0.42) == 0.42
 
 
 def test_event_errors_reads_the_daemon_refusal():

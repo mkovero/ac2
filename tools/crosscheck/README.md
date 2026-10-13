@@ -292,8 +292,12 @@ calibration mapping, one table of checks per group, the data tables and the plot
     never a value, and the row gives the shortfall. Comparisons that rest on bounds never
     PASS or FAIL. One exception: a value more than the warn limit above a bound is a FAIL.
   - a comparison whose own uncertainty (2σ: probe floors, phase scatter, a band's noise from
-    the recording's SNR, a room's fine structure) is wider than the pass limit. It FAILs only
-    when it misses the warn limit by more than that uncertainty.
+    the recording's SNR, a room's fine structure, the path's own difference in a source's
+    take) is wider than the pass limit. It FAILs only when it misses the warn limit by more
+    than that uncertainty. A source against a steady sine carries the fine structure plus how
+    far its own capture, read narrow at the sine, stands from the REW recording's: a speaker's
+    tweeter band read after seconds of continuous pink noise is not the path a sweep or a 2 s sine
+    measured. An absolute-SPL row carries the uncertainty of its magnitude row.
   - a truth or reading a mains line sits in (the sine GD pair, a sweep's harmonic band).
 - **Shared miss** (`detail.shared`, an annotation; the verdict stays PASS/WARN/FAIL): an ac2
   sweep misses the steady-sine truth (WARN or FAIL: magnitude, phase, GD, H2–H5, absolute
