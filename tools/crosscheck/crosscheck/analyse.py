@@ -212,12 +212,14 @@ class Analysis(LevelChecks, BandChecks, DelayChecks, HarmonicChecks, DutChecks):
                 fr = p.rew.meas_fr_spl
                 k = int(np.argmin(np.abs(fr.f - fc)))
                 vals["REW (SPL, cal from ac2)"] = float(np.mean(fr.mag[max(k - 2, 0):k + 3])) - p.rew.level_dbfs
-            # ac2's sources are read at their columns, REW's averaged around the sine's bin:
-            # the columns carry the room's fine structure against the sine's single frequency
-            ud = self.fine_u.get(p.name, {}).get(fc, 0.0)
+            # ac2's sources are read at their columns, REW's averaged around the sine's bin. An
+            # ac2 row is its magnitude row against the sine plus the reference level and the
+            # sensitivity, which are the same numbers for every source: it carries that row's
+            # uncertainty (fine structure, its take's path, its column noise), no more, no less
+            twin = {"ac2 sweep": f"ac2 sweep {p.primary}", "ac2 TF × ref level": "ac2 TF"}
             for name, v in vals.items():
                 d = v - sine
-                u = 0.0 if name.startswith("REW") else ud
+                u = self.sine_u.get(p.name, {}).get((twin[name], fc), 0.0) if name in twin else 0.0
                 row.append(f"{v:.2f} ({d:+.2f})")
                 self.add(id=f"{p.name}.spl.{name}.{fc:g}", group="absolute SPL", path=p.name,
                          title=f"{name} at {fc:g} Hz vs steady sine, dB SPL per 0 dBFS drive", value=d, unit="dB", tol=tl,
@@ -225,8 +227,8 @@ class Analysis(LevelChecks, BandChecks, DelayChecks, HarmonicChecks, DutChecks):
                          meaning=f"sine: in-1 level + sensitivity {S_db:.2f} dB + mic-curve correction {corr:+.2f} dB "
                                  f"− drive; ac2: meas÷ref + reference level + sensitivity"
                                  + ("" if curve_in_columns else " + the same curve correction (not in ac2's columns)")
-                                 + (f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
-                                    f"differ by {u:.2f} dB in the direct estimate" if u else ""),
+                                 + (f"; ±{u:.2f} dB, the uncertainty of its magnitude row against the sine (the room's "
+                                    "fine structure, its take's own path, its column noise)" if u else ""),
                          detail={"uncertainty": u, **_twin(p.name, "spl", fc, name,
                                                          _tol(self.tol["band"]["mag_acoustic"])[0])})
             rows.append(row)

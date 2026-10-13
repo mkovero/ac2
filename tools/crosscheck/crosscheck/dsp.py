@@ -179,6 +179,19 @@ def coherence_noise_rel(coh: np.ndarray, n: float) -> np.ndarray:
     return np.sqrt((1 - g) / (g * n))
 
 
+def estimated_coherence_noise_rel(coh_est: np.ndarray, n: float) -> np.ndarray:
+    """`coherence_noise_rel` for a γ² that was itself estimated from the same n blocks.
+
+    γ̂² scatters about γ² by √2·|γ|·(1 − γ²)/√n (1σ; Bendat & Piersol's random error of the
+    coherence), so at n = 8 its incoherence 1 − γ̂² is uncertain by half itself. A gate that
+    admits the columns whose noise reads under a limit then admits, among many columns near
+    it, those whose γ̂² happened to read high: their noise is understated just where it
+    decides. The incoherence is taken at its 2σ upper bound, (1 − γ̂²)·(1 + 2√(2/n)·|γ̂|)."""
+    g = np.clip(np.nan_to_num(np.asarray(coh_est, float)), 1e-6, 1.0)
+    inc = np.minimum((1 - g) * (1 + 2 * np.sqrt(2 / n) * np.sqrt(g)), 1 - 1e-6)
+    return np.sqrt(inc / ((1 - inc) * n))
+
+
 def sweep_linear_part(meas: np.ndarray, ref: np.ndarray, fs: float, rate_s: float,
                       delay_s: float = 0.0) -> np.ndarray:
     """`meas` with an exponential sweep's harmonic products taken out: what a linear path

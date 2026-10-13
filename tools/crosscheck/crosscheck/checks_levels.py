@@ -45,7 +45,7 @@ class LevelChecks:
             src[f"ac2 sweep {name}"] = Hs * np.exp(-2j * np.pi * f * arr)
         src = {f"ac2 sweep {p.primary}": src.pop(f"ac2 sweep {p.primary}"), **src}
         self.coh = {}
-        self.fine_u = {}  # path → tone → the room's fine structure between a column and the sine, dB
+        self.sine_u = {}  # path → (source, tone) → its magnitude row's uncertainty against the sine, dB
         self.coh_by_path = getattr(self, "coh_by_path", {})
         self.coh_by_path[p.name] = self.coh
         tf_delay = 0.0
@@ -139,6 +139,8 @@ class LevelChecks:
                 coh_of[id(s.raw)] = self.capture_coh.get(f"direct (ac2 capture {name})")
         if p.rec is not None:
             rec_of["REW offline"] = rec_of["direct (REW recording)"] = p.rec
+        if p.tf_raw is not None:
+            rec_of["direct (TF capture)"] = p.tf_raw
         cache = {}
         for name, raw in rec_of.items():
             if name not in src:
@@ -158,8 +160,13 @@ class LevelChecks:
         # ac2's γ² is a per-bin coherence averaged over the column, so this is a bin's noise.
         # n = blocks counts every block as independent, though they overlap, so this is a lower
         # bound on the TF's noise and the gate leaves out too few columns rather than too many.
+        # The band gate picks columns by this noise, and γ² came from the same few blocks: there
+        # it takes the incoherence at its upper bound, or it would admit the columns whose γ²
+        # read high by chance (one tone's row picks its column by frequency, not by its noise).
+        self.gate_noise_rel = {}
         if "ac2 TF" in self.coh and p.tf_blocks:
             self.noise_rel["ac2 TF"] = dsp.coherence_noise_rel(self.coh["ac2 TF"], p.tf_blocks)
+            self.gate_noise_rel["ac2 TF"] = dsp.estimated_coherence_noise_rel(self.coh["ac2 TF"], p.tf_blocks)
         self.src = src
         self.series[p.name] = {"f": f, "src": src}
         return f

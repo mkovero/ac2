@@ -11,6 +11,8 @@ from .checks_common import (
     _twin,
     judge,
     judge_u,
+    sine_uncertainty,
+    take_difference,
     worst,
 )
 from .model import PathData
@@ -104,7 +106,9 @@ class BandChecks:
             # columns where the two sources' own noise (2σ) already exceeds the pass limit
             # cannot be judged: left out and counted. Each noise_rel is a complex relative error
             # |δH|/|H|; half its variance is the magnitude's.
-            za, zb = self.noise_rel.get(a, np.zeros(len(f))), self.noise_rel.get(b, np.zeros(len(f)))
+            zero = np.zeros(len(f))
+            za = self.gate_noise_rel.get(a, self.noise_rel.get(a, zero))
+            zb = self.gate_noise_rel.get(b, self.noise_rel.get(b, zero))
             u_mag = 2 * 20 / np.log(10) * np.sqrt((za ** 2 + zb ** 2) / 2)
             for lo, hi, key in bands:
                 tk = "mag_tf" if a == "ac2 TF" else (key if elec else "mag_acoustic")
@@ -204,7 +208,17 @@ class BandChecks:
                             hn, nu = nr
                             u_db = max(abs(float(dsp.db(hc) - dsp.db(hn))), nu[0])
                             u_deg = max(abs(float(dsp.wrap_deg(np.rad2deg(np.angle(hc / hn))))), nu[1])
-                self.fine_u.setdefault(p.name, {})[fc] = u_db
+                # Each source of a take of its own, judged against the sine: its capture read
+                # narrow at the sine against the REW recording's narrow reading is how far the
+                # path itself stood apart in that take (a speaker under continuous pink noise
+                # loses tweeter-band gain within seconds that a sweep or a 2 s sine never shows)
+                take = {}
+                ref_n = narrows.get("direct (REW recording)")
+                if ref_n is not None and not elec:
+                    tf_cap, sw_cap = "direct (TF capture)", f"direct (ac2 capture {p.primary})"
+                    for src_name, cap in ((primary, sw_cap), (sw_cap, sw_cap), ("ac2 TF", tf_cap), (tf_cap, tf_cap)):
+                        if cap in narrows:
+                            take[src_name] = take_difference(narrows[cap][0], ref_n[0])
                 names = [primary, "REW live", "REW offline", "direct (REW recording)", "ac2 TF"]
                 names += [c for c in ("direct (TF capture)", f"direct (ac2 capture {p.primary})") if c in narrows]
                 names += [f"{c}, narrow at the sine" for c in narrows]
@@ -228,7 +242,10 @@ class BandChecks:
                     # zc is a complex relative error: half its variance is the magnitude's, half the phase's
                     nz_db, nz_deg = 2 * 20 / np.log(10) * zc / np.sqrt(2), 2 * np.degrees(zc / np.sqrt(2))
                     room_db, room_deg = ud, up
-                    ud, up = max(ud, nz_db), max(up, nz_deg)
+                    tk_db, tk_deg = (0.0, 0.0) if narrow_row else take.get(name, (0.0, 0.0))
+                    ud, up = sine_uncertainty(ud, tk_db, nz_db), sine_uncertainty(up, tk_deg, nz_deg)
+                    if not narrow_row:
+                        self.sine_u.setdefault(p.name, {})[(name, fc)] = ud
                     # the readings the REW recording's narrow one does not carry: context for the
                     # column-to-tone split, not judged
                     info_only = name in ("direct (TF capture)", f"direct (ac2 capture {p.primary})") or (
@@ -258,9 +275,11 @@ class BandChecks:
                                          + ((f"; the narrow band's own noise (coherence) ±{up:.1f}°" if narrow_row else
                                              f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                              f"differ by {room_deg:.1f}° in the direct estimate") if room_deg else "")
+                                         + (f"; its own take read narrow at the sine differs from the REW recording's "
+                                            f"by {tk_deg:.1f}° (the path under this stimulus)" if tk_deg >= 0.05 else "")
                                          + (("; the column's noise-only records hold as much energy as its recording"
                                              if swamped else f"; the column's own noise (2σ, its recording's SNR) ±{nz_deg:.1f}°")
-                                            if nz_deg > room_deg else ""),
+                                            if nz_deg > room_deg + tk_deg else ""),
                                  detail={"uncertainty": up, **_twin(p.name, "sine_phase", fc, name, tp[0])})
                     if dmd is not None:
                         tm = _tol(self.tol["band"]["mag_lf" if elec else "mag_acoustic"])
@@ -275,9 +294,11 @@ class BandChecks:
                                          + ((f"; the narrow band's own noise (coherence) ±{ud:.2f} dB" if narrow_row else
                                              f"; the room's fine structure: a 1/{self.ppo}-oct column and the sine's frequency "
                                              f"differ by {room_db:.2f} dB in the direct estimate") if room_db else "")
+                                         + (f"; its own take read narrow at the sine differs from the REW recording's "
+                                            f"by {tk_db:.2f} dB (the path under this stimulus)" if tk_db >= 0.005 else "")
                                          + (("; the column's noise-only records hold as much energy as its recording"
                                              if swamped else f"; the column's own noise (2σ, its recording's SNR) ±{nz_db:.2f} dB")
-                                            if nz_db > room_db else ""),
+                                            if nz_db > room_db + tk_db else ""),
                                  detail={"uncertainty": ud, **_twin(p.name, "sine_mag", fc, name, agree)})
                     rows.append([f"{fc:g}", name, "" if dmd is None else f"{dmd:+.3f}", "" if dpd is None else f"{dpd:+.3f}"])
             self.table(f"{p.name}: against the steady sines", ["f Hz", "source", "Δ dB", "Δ°"], rows)

@@ -488,6 +488,37 @@ def test_coherence_noise_rel_is_the_complex_error_of_an_averaged_h1():
     assert np.std(np.abs(H)) == pytest.approx(z / np.sqrt(2), rel=0.05)
 
 
+def test_a_gate_on_an_estimated_coherence_takes_its_incoherence_at_the_upper_bound():
+    # 30 columns whose true 2σ magnitude noise spans 0.08–0.4 dB (a room's LF band under an
+    # 8-block live TF), each H1 and γ² estimated from the same 8 blocks. A gate admitting the
+    # columns whose noise reads ≤ 0.1 dB on the estimated γ² admits those whose γ² read high by
+    # chance, and their spread then exceeds the 0.1 dB pass limit by noise alone far more often
+    # than a 2σ gate should; at the upper bound of the incoherence it does not.
+    rng = np.random.default_rng(1)
+    n, cols, trials, lim = 8, 30, 3000, 0.1
+    k = 2 * 20 / np.log(10) / np.sqrt(2)
+    z = np.exp(rng.uniform(np.log(0.08), np.log(0.4), cols)) / k
+    s = np.sqrt(n) * z  # (1 − γ²)/γ² = n z²
+    cn = lambda *sh: (rng.standard_normal(sh) + 1j * rng.standard_normal(sh)) / np.sqrt(2)
+    over = {"plain": 0, "bound": 0}
+    for _ in range(trials):
+        x = cn(cols, n)
+        y = x + s[:, None] * cn(cols, n)
+        gxy, gxx, gyy = np.sum(y * np.conj(x), 1), np.sum(np.abs(x) ** 2, 1), np.sum(np.abs(y) ** 2, 1)
+        d = dsp.db(gxy / gxx)
+        g2 = np.abs(gxy) ** 2 / (gxx * gyy)
+        for key, fn in (("plain", dsp.coherence_noise_rel), ("bound", dsp.estimated_coherence_noise_rel)):
+            m = k * fn(g2, n) <= lim
+            if m.sum() >= 3 and np.max(np.abs(d[m] - d[m].mean())) > lim:
+                over[key] += 1
+    assert over["plain"] / trials > 0.10
+    assert over["bound"] / trials < 0.01
+    # a coherent column stays coherent, and the bound never reads less than the estimate
+    g = np.array([1.0, 0.9999, 0.99, 0.5])
+    assert dsp.estimated_coherence_noise_rel(g, 8)[0] < 1e-6
+    assert np.all(dsp.estimated_coherence_noise_rel(g, 8) >= dsp.coherence_noise_rel(g, 8))
+
+
 def test_mtw_column_bands_takes_the_inserted_delay_out_and_puts_it_back():
     fs, n = 96000.0, 2 ** 20
     ref = np.random.default_rng(2).standard_normal(n)

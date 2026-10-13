@@ -82,6 +82,27 @@ def judge_u(value, tol, u) -> str:
     return judge(value, tol)
 
 
+def take_difference(h_take: complex, h_ref: complex) -> tuple[float, float]:
+    """How far one take's path differs from another's at one frequency, |Δ dB| and |Δ°|, from
+    each recording's direct estimate read narrow at that frequency (no column, so no fine
+    structure in it). A path whose gain depends on its stimulus or drifts with exposure (a
+    loudspeaker's drivers under continuous noise against a sweep's few milliseconds per
+    frequency) reads differently in each take; a source of one take judged against a truth
+    taken under another stimulus carries that difference, not an error of its own."""
+    if not (np.isfinite(h_take) and np.isfinite(h_ref)) or h_take == 0 or h_ref == 0:
+        return 0.0, 0.0
+    r = h_take / h_ref
+    return abs(float(dsp.db(r))), abs(float(np.rad2deg(np.angle(r))))
+
+
+def sine_uncertainty(room: float, take: float, noise: float) -> float:
+    """A source's uncertainty against a steady sine (2σ-like, the value's units): the room's
+    fine structure between a column and the sine and the take's own path difference are
+    systematic and add, each its own term of the source minus the sine; the column's random
+    noise covers both where it is the larger."""
+    return max(room + take, noise)
+
+
 def worst(*s: str) -> str:
     order = ["PASS", "INFO", "WARN", "INCONCLUSIVE", "FAIL"]
     return max(s, key=order.index)
