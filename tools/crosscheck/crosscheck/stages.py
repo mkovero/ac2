@@ -124,6 +124,12 @@ def cal_excerpt(rig: dict) -> dict:
         ms = method.get("mic_sensitivity")
         if ms:
             implied = 20 * math.log10(float(ms) * 1e-3 / float(fsv))
+            # The data-sheet sensitivity is open-circuit; the mic's source impedance into the
+            # input's impedance is a voltage divider that the store's sensitivity includes.
+            load = method.get("loading")
+            if load:
+                zm, zi = float(load["mic_impedance"]), float(load["input_impedance"])
+                implied += 20 * math.log10(zi / (zi + zm))
             ex["convention_check_db"] = (94.0 - S) - implied
             if abs(ex["convention_check_db"]) > 0.5:
                 raise RuntimeError(f"calibration store: 94 - sensitivity = {94 - S:.2f} dBFS but the mic's "
