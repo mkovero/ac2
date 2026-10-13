@@ -58,6 +58,10 @@ pub struct ClientConfig {
     /// An `inproc://` daemon (embedded in this process) is reachable only through its own
     /// context, and then nothing crosses the kernel.
     pub context: Option<Context>,
+    /// Bytes of every message received from the daemon (replies, events, keepalives, data
+    /// frames), as decoded by ZeroMQ: CURVE and TCP overhead are not in it. Shared, so its
+    /// owner can read the rate across reconnects; each connect adds to the same counter.
+    pub received_bytes: Arc<AtomicU64>,
 }
 
 /// First retry after a lost or refused connection.
@@ -120,6 +124,7 @@ impl ClientConfig {
             retry: Retry::default(),
             mirror: true,
             context: None,
+            received_bytes: Arc::default(),
         }
     }
 
@@ -341,7 +346,8 @@ impl Client {
         data_sub.connect(&cfg.endpoints.data)?;
 
         let (sync_tx, sync_rx) = mpsc::unbounded_channel();
-        let io = Io::start(&ctx, dealer, sync_sub, sync_tx)?;
+        let received = Arc::clone(&cfg.received_bytes);
+        let io = Io::start(&ctx, dealer, sync_sub, sync_tx, Arc::clone(&received))?;
         let core = Arc::new(CallCore {
             io,
             // Random start: under CURVE two processes share one client id (the key name), and
@@ -367,7 +373,7 @@ impl Client {
             view: view_rx,
             #[cfg(unix)]
             data_fd: std::sync::OnceLock::new(),
-            data: Mutex::new(DataState::new(data_sub)),
+            data: Mutex::new(DataState::new(data_sub, received)),
             grids: Mutex::new(HashMap::new()),
             sync_task,
             name: cfg.name,
@@ -664,7 +670,7 @@ async fn run_sync(
                 None => return,
                 Some(SyncIn::Event(e)) => (mirror.on_event(*e, now), true),
                 Some(SyncIn::Ka { stamp, meta, at, local_wall_ns }) => {
-                    (mirror.on_ka(&stamp, meta, at, local_wall_ns), true)
+                    (mirror.on_ka(&stamp, *meta, at, local_wall_ns), true)
                 }
             },
             _ = tick.tick(), if ticking => (mirror.on_tick(Instant::now()), false),

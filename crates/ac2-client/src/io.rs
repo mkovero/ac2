@@ -33,7 +33,9 @@ pub(crate) enum SyncIn {
     /// A keepalive and when it was received.
     Ka {
         stamp: FrameStamp,
-        meta: KaMeta,
+        /// Boxed: it carries the daemon's health with its host name, larger than an event's
+        /// box, and keepalives come only four times a second.
+        meta: Box<KaMeta>,
         at: Instant,
         local_wall_ns: i128,
     },
@@ -70,6 +72,7 @@ impl Io {
         dealer: Socket,
         sync_sub: Socket,
         sync_tx: mpsc::UnboundedSender<SyncIn>,
+        received: Arc<AtomicU64>,
     ) -> Result<Self, ClientError> {
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let ep = format!(
@@ -92,6 +95,7 @@ impl Io {
             pending: pending.clone(),
             sync_tx,
             malformed: malformed.clone(),
+            received,
         };
         let thread = std::thread::Builder::new()
             .name("ac2-client-io".into())
@@ -142,9 +146,16 @@ struct Worker {
     pending: Pending,
     sync_tx: mpsc::UnboundedSender<SyncIn>,
     malformed: Arc<AtomicU64>,
+    /// Bytes received from the daemon ([`ClientConfig::received_bytes`](crate::ClientConfig)).
+    received: Arc<AtomicU64>,
 }
 
 impl Worker {
+    fn count(&self, frames: &[Vec<u8>]) {
+        let n: usize = frames.iter().map(Vec::len).sum();
+        self.received.fetch_add(n as u64, Ordering::Relaxed);
+    }
+
     fn run(self) {
         loop {
             let mut items = [
@@ -182,6 +193,7 @@ impl Worker {
 
     fn drain_dealer(&self) -> Result<(), ac2_zmq::Error> {
         while let Some(m) = self.dealer.try_recv()? {
+            self.count(m.frames());
             // DEALER ↔ ROUTER without an empty delimiter: one frame per reply.
             let Some(body) = m.frames().last() else {
                 continue;
@@ -224,6 +236,7 @@ impl Worker {
 
     fn drain_sub(&self) -> Result<(), ac2_zmq::Error> {
         while let Some(m) = self.sub.try_recv()? {
+            self.count(m.frames());
             let at = Instant::now();
             let local_wall_ns = wall_ns();
             let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
@@ -232,7 +245,7 @@ impl Worker {
                 Ok(DataMessage::Frame(f)) => match f.data {
                     FrameData::Ka(meta) => SyncIn::Ka {
                         stamp: f.stamp,
-                        meta,
+                        meta: Box::new(meta),
                         at,
                         local_wall_ns,
                     },

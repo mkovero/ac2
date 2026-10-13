@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 49
+PROTO_VERSION = 50
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -184,7 +184,10 @@ META = {
                ("window", ("opt", [("capture_start", None), ("offset", None), ("psr", None),
                                    ("loopback", None), ("stimulus", None)]))],
     "ka": [("rev", None), ("daemon_wall_ns", None), ("timing", _TIMING_STATE),
-           ("generator", [("owner", None), ("armed", None), ("firing", None)])],
+           ("generator", [("owner", None), ("armed", None), ("firing", None)]),
+           ("health", [("host", None), ("cpu", None),
+                       ("audio", ("opt", [("load", None), ("peak", None), ("session_load", None),
+                                          ("session_peak", None), ("xruns", None)]))])],
 }
 HEADER = [
     ("v", None), ("kind", None), ("seq", None), ("audio_sample", None), ("session_epoch", None),

@@ -3,11 +3,12 @@
 use super::builders::*;
 use super::state::*;
 use crate::frame::{
-    BandLeqFrame, BandLeqMeta, BandWindowState, ClipFlags, Frame, FrameData, FrameStamp,
-    GenSummary, IrFrame, IrMeta, KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame,
-    LevelsMeta, MathState, OperandState, OperandStatus, PreviewLevelsFrame, PreviewLevelsMeta,
-    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SpecBand, SpecBands, SpecFrame,
-    SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
+    AudioHealth, BandLeqFrame, BandLeqMeta, BandWindowState, ClipFlags, DaemonHealth, Frame,
+    FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LeqFlags, LeqFrame, LeqMeta,
+    LeqPeak, LeqRun, LevelsFrame, LevelsMeta, MathState, OperandState, OperandStatus,
+    PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame,
+    SpecBand, SpecBands, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta,
+    TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -365,6 +366,17 @@ pub fn frames() -> Vec<Frame> {
                     owner: Some(ClientId("alice".into())),
                     armed: true,
                     firing: true,
+                },
+                health: DaemonHealth {
+                    host: "pupu".into(),
+                    cpu: Some(0.25),
+                    audio: Some(AudioHealth {
+                        load: Some(0.125),
+                        peak: Some(0.5),
+                        session_load: None,
+                        session_peak: Some(0.75),
+                        xruns: 3,
+                    }),
                 },
             }),
         },

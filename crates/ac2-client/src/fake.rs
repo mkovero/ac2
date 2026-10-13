@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use ac2_proto::frame::{GenSummary, KaMeta, ProtectionFlags};
+use ac2_proto::frame::{DaemonHealth, GenSummary, KaMeta, ProtectionFlags};
 use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{
@@ -117,6 +117,8 @@ pub struct Shared {
     pub(crate) marking: bool,
     /// Keepalives paused.
     pub ka_paused: bool,
+    /// The health figures keepalives carry.
+    pub health: DaemonHealth,
     /// Ctrl requests are read and ignored (no execution, no reply).
     pub mute: bool,
     /// Ops whose next reply is swallowed after executing (the client must retry the id).
@@ -298,6 +300,11 @@ impl Shared {
             publish_events: true,
             marking: false,
             ka_paused: false,
+            health: DaemonHealth {
+                host: "fake".into(),
+                cpu: None,
+                audio: None,
+            },
             mute: false,
             drop_reply_once: HashSet::new(),
             executions: HashMap::new(),
@@ -700,6 +707,7 @@ fn run(
                             armed: g.armed,
                             firing: g.firing,
                         },
+                        health: s.health.clone(),
                     }),
                     stamp,
                 };

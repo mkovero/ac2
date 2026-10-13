@@ -14,6 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use ac2_proto::frame::MAX_PARTS;
@@ -65,6 +66,8 @@ pub(crate) struct DataState {
     kept: HashMap<Topic, Kept>,
     malformed: u64,
     discarded: u64,
+    /// Bytes received from the daemon ([`ClientConfig::received_bytes`](crate::ClientConfig)).
+    received: Arc<AtomicU64>,
     /// Newest undecoded message per topic during a drain. Keys persist once seen, so a
     /// steady-state drain allocates nothing here.
     newest: HashMap<Box<[u8]>, Option<Vec<Part>>>,
@@ -168,9 +171,10 @@ fn decode(parts: &[Part]) -> Option<Frame> {
 }
 
 impl DataState {
-    pub(crate) fn new(sub: Socket) -> Self {
+    pub(crate) fn new(sub: Socket, received: Arc<AtomicU64>) -> Self {
         Self {
             sub,
+            received,
             prefixes: BTreeMap::new(),
             kept: HashMap::new(),
             malformed: 0,
@@ -231,6 +235,8 @@ impl DataState {
                 break;
             };
             read += 1;
+            let bytes: usize = parts.iter().map(|p| p.len()).sum();
+            self.received.fetch_add(bytes as u64, Ordering::Relaxed);
             let Some(topic) = parts.first() else { continue };
             // The SUB filters queued messages as they are read, except the one a readiness
             // check (`ZMQ_EVENTS`) already took in: that one comes out unfiltered after its

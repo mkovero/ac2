@@ -281,6 +281,8 @@ pub(crate) struct Control {
     cal: CalStore,
     dedup: Dedup,
     session: Option<Runtime>,
+    /// The health meter keepalives carry.
+    health: crate::health::Health,
     /// The open session's audio stopped and is being reopened; `session` is `None` meanwhile.
     recovery: Option<recovery::Recovery>,
     jobs: BTreeMap<MeasId, JobHandle>,
@@ -392,6 +394,7 @@ impl Control {
             cal,
             dedup,
             session: None,
+            health: crate::health::Health::new(),
             recovery: None,
             jobs: BTreeMap::new(),
             probes: Arc::new(Probes::default()),

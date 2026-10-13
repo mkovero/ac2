@@ -306,3 +306,54 @@ fn daemon_restart_is_a_new_incarnation() {
     );
     h2.shutdown();
 }
+
+/// Keepalives carry the daemon's host and, with a session open, its callback load and the
+/// xruns the backend reported; nothing of the audio without a session.
+#[test]
+fn keepalives_carry_the_host_the_callback_load_and_the_xruns() {
+    use ac2_audio::fake::{FakeConfig, FakeFault};
+    init_log();
+    let health = |sub: &Sub| match sub.ka(T).unwrap().data {
+        FrameData::Ka(k) => k.health,
+        _ => unreachable!(),
+    };
+    let backend = ac2_audio::FakeBackend::new(FakeConfig {
+        faults: vec![FakeFault::XrunFlag { at_block: 2 }],
+        ..manual_rig().config().clone()
+    })
+    .unwrap();
+    let h = Daemon::start(config(backend.clone(), inproc("health"))).unwrap();
+    let (mut c, sub) = connect(&h, &[b"ka"]);
+    let first = health(&sub);
+    assert!(!first.host.is_empty());
+    assert_eq!(first.audio, None, "no session");
+
+    c.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    let mut d = driver(&backend);
+    d.run_blocks(50);
+    // The first window ends with the first keepalive after the open; the next one a second
+    // later holds the blocks just run.
+    let deadline = std::time::Instant::now() + 3 * T;
+    let audio = loop {
+        let a = health(&sub).audio.expect("a session is open");
+        if a.load.is_some() && a.xruns == 1 {
+            break a;
+        }
+        assert!(std::time::Instant::now() < deadline, "{a:?}");
+    };
+    let load = audio.load.unwrap();
+    assert!((0.0..1.0).contains(&load), "{load}");
+    assert!(audio.peak.unwrap() >= load && audio.session_load.is_some());
+
+    c.ok(Command::SessionClose);
+    let deadline = std::time::Instant::now() + T;
+    while health(&sub).audio.is_some() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "audio figures after the close"
+        );
+    }
+    h.shutdown();
+}

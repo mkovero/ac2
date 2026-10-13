@@ -416,6 +416,17 @@ def frames():
                 "daemon_wall_ns": 1790000000123456789,
                 "timing": {"type": "locked", "offset": 312},
                 "generator": {"owner": "alice", "armed": True, "firing": True},
+                "health": {
+                    "host": "pupu",
+                    "cpu": 0.25,
+                    "audio": {
+                        "load": 0.125,
+                        "peak": 0.5,
+                        "session_load": None,
+                        "session_peak": 0.75,
+                        "xruns": 3,
+                    },
+                },
             },
             [],
             protection=0,

@@ -404,6 +404,45 @@ pub struct KaMeta {
     pub timing: TimingState,
     /// Generator owner/state.
     pub generator: GenSummary,
+    /// The daemon's host and audio health, for a status meter.
+    pub health: DaemonHealth,
+}
+
+/// How the daemon's host and its audio are holding up, carried by keepalives.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DaemonHealth {
+    /// The daemon's host name (a DNS label): a client on another machine names where these
+    /// figures come from.
+    pub host: String,
+    /// Whole-host CPU use over about the last second, every process on every core, as a
+    /// share of the host's capacity (1.0 = every core busy). `None` until the daemon has
+    /// sampled twice, or where the system states none.
+    pub cpu: Option<f64>,
+    /// The open session's audio; `None` with no session open.
+    pub audio: Option<AudioHealth>,
+}
+
+/// The open session's audio callback load and xruns.
+///
+/// The load is the time the daemon's own audio callback takes as a share of the period
+/// its blocks cover (1.0 = the whole period, where the next block is late). It is this
+/// process's callback only: the rest of the audio graph (other JACK clients, the driver)
+/// is not in it. Each figure is `None` when no callback was timed over its span (a replay
+/// has no device callback).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioHealth {
+    /// Mean load over about the last second.
+    pub load: Option<f64>,
+    /// The largest load of a single callback over about the last second.
+    pub peak: Option<f64>,
+    /// Mean load since the session opened.
+    pub session_load: Option<f64>,
+    /// The largest load of a single callback since the session opened.
+    pub session_peak: Option<f64>,
+    /// Xruns the backend reported since the session opened.
+    pub xruns: u64,
 }
 
 /// Per-kind metadata on the wire, keyed by kind: `{"tf": {…}}`.

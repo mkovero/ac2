@@ -113,6 +113,7 @@ fn mirror_of(state: State, incarnation: u64, me: Option<&str>) -> ConnEvent {
         last_ka: Some(Instant::now()),
         generator: None,
         timing: None,
+        health: None,
         ka_rev: Some(Rev(10)),
         clock_offset_ns: Some(0),
         snapshots: 1,

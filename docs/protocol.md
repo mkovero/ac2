@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 49`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 50`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1418,7 +1418,18 @@ layout as code.
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n) |
 | `timing` | none | `status` (TimingStatus), `window` {capture_start, offset, psr, loopback, stimulus} |
-| `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, armed, firing} |
+| `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, armed, firing}, `health` (`DaemonHealth`, below) |
+
+`DaemonHealth`: `host` (the daemon's host name as a DNS label, so a client on another
+machine names where the figures come from), `cpu` (f64 \| nil: whole-host CPU use over about
+the last second, every process on every core, as a share of capacity, 1.0 = every core
+busy; nil until sampled twice), `audio` (`AudioHealth` \| nil: nil with no session open).
+`AudioHealth`: `load`, `peak` (f64 \| nil: the mean, and the largest single-callback, share
+of the block period the daemon's own audio callback took over about the last second;
+1.0 = the whole period), `session_load`, `session_peak` (the same since the session
+opened), `xruns` (u64: xruns the backend reported since the session opened). The load is
+the daemon's callback only, not the whole audio graph (other JACK clients, the driver); a
+load is nil when no callback was timed over its span (a replay).
 
 `cal` is a `CalStatus` (§3.2, calibration); `mic_curve` says the mic curve was applied:
 subtracted from `mag` (tf, measurement input only; phase untouched) or `level` (spec per

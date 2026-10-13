@@ -41,6 +41,7 @@ mod dedup;
 mod detect;
 mod fanout;
 mod firewall;
+mod health;
 mod io;
 mod jobs;
 pub mod keys;

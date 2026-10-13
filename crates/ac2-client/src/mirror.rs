@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ac2_proto::frame::{GenSummary, KaMeta};
+use ac2_proto::frame::{DaemonHealth, GenSummary, KaMeta};
 use ac2_proto::model::{State, TimingState};
 use ac2_proto::units::{ClientId, DaemonIncarnation, Rev, SessionEpoch};
 use ac2_proto::{Change, Event, FrameStamp, Patch, StateSnapshot};
@@ -104,6 +104,8 @@ pub struct MirrorView {
     pub generator: Option<GenSummary>,
     /// Timing state from the last `ka`.
     pub timing: Option<TimingState>,
+    /// The daemon's host and audio health from the last `ka`.
+    pub health: Option<DaemonHealth>,
     /// `ka.rev` of the last `ka`.
     pub ka_rev: Option<Rev>,
     /// Clock offset `daemon − local`, ns.
@@ -189,6 +191,7 @@ impl Mirror {
             last_ka: self.last_ka,
             generator: self.ka.as_ref().map(|k| k.generator.clone()),
             timing: self.ka.as_ref().map(|k| k.timing),
+            health: self.ka.as_ref().map(|k| k.health.clone()),
             ka_rev: self.ka.as_ref().map(|k| k.rev),
             clock_offset_ns: self.clock.offset_ns(),
             snapshots: self.snapshots,
@@ -480,6 +483,11 @@ mod tests {
                 owner: None,
                 armed: false,
                 firing: false,
+            },
+            health: DaemonHealth {
+                host: "rig".into(),
+                cpu: None,
+                audio: None,
             },
         };
         (stamp, meta)

@@ -11,6 +11,7 @@ use ac2_proto::{
     peek_envelope,
 };
 
+use crate::health::SessionStream;
 use crate::util::{hex, perr, wall_ns};
 
 use super::{Control, PendingFind, PendingReply, mutation_conflict};
@@ -23,6 +24,12 @@ impl Control {
             return;
         }
         self.ka_seq += 1;
+        let stream = match (&self.session, &self.recovery) {
+            (Some(rt), _) => SessionStream::Running(&rt.health),
+            (None, Some(_)) => SessionStream::Recovering,
+            (None, None) => SessionStream::Closed,
+        };
+        self.health.tick(Instant::now(), stream);
         let st = self.store.state();
         let now = wall_ns();
         let latest = self
@@ -50,6 +57,7 @@ impl Control {
                     armed: st.generator.armed,
                     firing: st.generator.firing,
                 },
+                health: self.health.snapshot(),
             }),
         };
         match ac2_proto::encode_frame(&frame) {

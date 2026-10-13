@@ -160,6 +160,7 @@ impl Control {
             recovery::close_bounded(rt, recovery::CLOSE_BOUND);
         }
         if had {
+            self.health.session_closed();
             self.s.outbox.clear(b"d/");
             self.s.outbox.clear(b"timing");
             self.s.outbox.clear(b"session/levels");

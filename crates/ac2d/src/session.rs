@@ -32,6 +32,8 @@ pub(crate) struct Runtime {
     patch: Option<Arc<dyn OutputPatch>>,
     pub(crate) history: Option<HistoryReader>,
     pub(crate) fanout: Fanout,
+    /// The stream's callback load and xruns, for the health meter.
+    pub(crate) health: ac2_audio::StreamHealth,
 }
 
 pub(crate) fn audio_err(e: AudioError) -> ProtoError {
@@ -118,6 +120,7 @@ impl Runtime {
         let n = stream.negotiated().clone();
         let history = stream.history().cloned();
         let patch = stream.output_patch();
+        let health = stream.health();
         let open = OpenSession {
             config: cfg.clone(),
             backend: conv::backend_kind(backend.kind()),
@@ -157,6 +160,7 @@ impl Runtime {
             patch,
             history,
             fanout,
+            health,
         };
         rt.connect_outputs();
         Ok(rt)
