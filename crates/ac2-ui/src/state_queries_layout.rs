@@ -79,8 +79,10 @@ impl AppState {
                 .and_then(|v| v.measurement.clone())
         };
         // Unknown until the daemon's state is (and while a remembered one waits for it):
-        // keep what the preferences say. No layout of the operator's yet: none is kept.
-        let panes = (!self.pane_auto).then(|| crate::prefs::PanesPrefs {
+        // keep what the preferences say. No layout of the operator's yet: none is kept,
+        // unless a pane's level axis moved: the range lives with its pane.
+        let keep = !self.pane_auto || !self.pane_levels.is_empty();
+        let panes = keep.then(|| crate::prefs::PanesPrefs {
             root: self.layout.root.clone(),
             focus: self.layout.focus,
             views: self
@@ -103,23 +105,13 @@ impl AppState {
                         kind: v.kind,
                         measurement,
                         modes: v.modes,
+                        levels: self.pane_levels(id),
                     })
                 })
                 .collect(),
         });
-        // Names of measurements that exist (all of them until the daemon's state is known):
-        // a deleted one's name must not hide a new one of that name in a later run.
-        let existing = |set: &BTreeSet<String>| match self.daemon() {
-            None => set.clone(),
-            Some(_) => self
-                .measurements()
-                .iter()
-                .map(|m| m.config.name.clone())
-                .filter(|n| set.contains(n))
-                .collect(),
-        };
-        let hidden = existing(&self.hidden_meas);
-        let compared = existing(&self.compared_meas);
+        let hidden = self.remembered_names(&self.hidden_meas, &self.pending_hidden);
+        let compared = self.remembered_names(&self.compared_meas, &self.pending_compared);
         crate::prefs::LayoutPrefs {
             panes,
             maximized: self.layout.maximized,
@@ -131,16 +123,88 @@ impl AppState {
         }
     }
 
-    /// Saves the layout, the level axes and the legend with the preferences when they changed.
+    /// The names `ui.toml` keeps for the measurements `ids` (hidden or compared) and the
+    /// names still waiting in `pending`. A name only when it is that measurement's alone: a
+    /// name several measurements share would apply to none of them in the next run
+    /// ([`Self::restore_meas_choices`]), and kept, it would come to mean whichever of them
+    /// was left once the others went. A deleted one's name must not hide a new one of that
+    /// name in a later run, so a waiting name is kept only while the daemon lists no
+    /// measurements at all (a session reopening): until the daemon's state is known, all.
+    fn remembered_names(
+        &self,
+        ids: &BTreeSet<MeasId>,
+        pending: &BTreeSet<String>,
+    ) -> BTreeSet<String> {
+        if self.daemon().is_none() {
+            return pending.clone();
+        }
+        let ms = self.measurements();
+        let mut names: BTreeSet<String> = ms
+            .iter()
+            .filter(|m| ids.contains(&m.id))
+            .map(|m| &m.config.name)
+            .filter(|n| ms.iter().filter(|o| o.config.name == **n).count() == 1)
+            .cloned()
+            .collect();
+        if ms.is_empty() {
+            names.extend(pending.iter().cloned());
+        }
+        names
+    }
+
+    /// Hidden and compared measurements remembered by name (`ui.toml`, or ones the daemon
+    /// took away) become ids once the daemon lists a measurement of that name; after that,
+    /// a rename keeps the choice on the measurement and a new one of an old name starts
+    /// shown and uncompared.
+    ///
+    /// A name several measurements share applies to none of them, and is forgotten: the
+    /// name cannot say which was meant, and a hide is the riskier guess (a curve missing
+    /// from the plot reads as a measurement not working; one shown too many is seen and
+    /// hidden again with one key). Forgotten rather than kept waiting, so it never lands
+    /// later on whichever duplicate is left after the others are deleted or renamed. A
+    /// name no measurement has waits as a pane's remembered measurement does: while the
+    /// daemon lists none, or once listed (it comes back with a session reopening).
+    pub(super) fn restore_meas_choices(&mut self) {
+        if self.daemon().is_none()
+            || (self.pending_hidden.is_empty() && self.pending_compared.is_empty())
+        {
+            return;
+        }
+        let ms: Vec<(MeasId, String)> = self
+            .measurements()
+            .iter()
+            .map(|m| (m.id, m.config.name.clone()))
+            .collect();
+        let seen = &self.meas_seen;
+        let resolve = |pending: &mut BTreeSet<String>, ids: &mut BTreeSet<MeasId>| {
+            pending.retain(|name| {
+                let mut of_name = ms.iter().filter(|(_, n)| n == name).map(|(id, _)| *id);
+                match (of_name.next(), of_name.next()) {
+                    (Some(id), None) => {
+                        ids.insert(id);
+                        false
+                    }
+                    (Some(_), Some(_)) => false,
+                    (None, _) => ms.is_empty() || seen.contains(name),
+                }
+            });
+        };
+        resolve(&mut self.pending_hidden, &mut self.hidden_meas);
+        resolve(&mut self.pending_compared, &mut self.compared_meas);
+    }
+
+    /// Saves the layout (with each pane's level axes), the IR axes and the legend with the
+    /// preferences when they changed.
     pub(super) fn remember_layout(&mut self) {
+        self.prune_levels();
         let now = self.layout_prefs();
         if now != self.prefs.layout {
             self.prefs.layout = now;
             self.prefs_dirty = true;
         }
-        let levels = crate::prefs::LevelPrefs::of(&self.view);
-        if levels != self.prefs.levels {
-            self.prefs.levels = levels;
+        let levels = crate::prefs::IrLevelPrefs::of(&self.view);
+        if levels != self.prefs.ir_levels {
+            self.prefs.ir_levels = levels;
             self.prefs_dirty = true;
         }
         let legend = crate::prefs::LegendPrefs::of(&self.view.tf.legend);
@@ -215,6 +279,7 @@ impl AppState {
         self.view.spl.layout = prefs.leq;
         let l = &prefs.layout;
         self.pending_pane_meas.clear();
+        self.pane_levels.clear();
         match &l.panes {
             Some(p) => {
                 let views = p
@@ -233,6 +298,9 @@ impl AppState {
                     .collect();
                 self.layout = Layout::of(p.root.clone(), views, p.focus);
                 for v in &p.views {
+                    if v.levels != PaneLevels::default() {
+                        self.pane_levels.insert(v.id, v.levels);
+                    }
                     if let Some(n) = &v.measurement
                         && self.layout.views.contains_key(&v.id)
                     {
@@ -251,15 +319,18 @@ impl AppState {
         self.panes_only = l.fullscreen && l.panes_only;
         self.view.distortion.unit = l.distortion_unit;
         // Before any frame: a spectrum that starts still fits its axis on its first one.
-        prefs.levels.apply(&mut self.view);
+        prefs.ir_levels.apply(&mut self.view);
         prefs.legend.apply(&mut self.view.tf.legend);
         if let Some(s) = prefs.spectrograph_span_s {
             self.view.spectrum.spectrograph.span_s = s;
         }
         self.view.unresolved = prefs.resolution_marker;
-        self.hidden_meas = l.hidden.clone();
-        self.compared_meas = l.compared.clone();
+        self.hidden_meas.clear();
+        self.compared_meas.clear();
+        self.pending_hidden = l.hidden.clone();
+        self.pending_compared = l.compared.clone();
         self.prefs = prefs;
+        self.restore_meas_choices();
     }
 
     /// W: the split layout → the focused pane alone → the focused pane full screen (the

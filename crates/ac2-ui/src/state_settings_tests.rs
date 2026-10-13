@@ -297,11 +297,20 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     assert!(t.st.view.unresolved && t.st.prefs.resolution_marker);
     t.key("Down");
     assert_eq!(settings(&t).display, DisplayRow::LevelAxes);
-    t.st.view.tf.magnitude_db = ac2_scene::axis::Range { lo: -3.0, hi: 3.0 };
+    let f = t.st.layout.focus;
+    t.st.pane_levels.insert(
+        f,
+        PaneLevels {
+            transfer: ac2_scene::axis::Range { lo: -3.0, hi: 3.0 },
+            ..PaneLevels::default()
+        },
+    );
+    t.st.view.ir.axes.level_db = ac2_scene::axis::Range { lo: -40.0, hi: 0.0 };
     t.key("Enter");
+    assert_eq!(t.st.pane_levels(f), PaneLevels::default());
     assert_eq!(
-        crate::prefs::LevelPrefs::of(&t.st.view),
-        crate::prefs::LevelPrefs::default()
+        crate::prefs::IrLevelPrefs::of(&t.st.view),
+        crate::prefs::IrLevelPrefs::default()
     );
     assert!(t.st.prefs_dirty);
 }

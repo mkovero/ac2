@@ -145,6 +145,7 @@ fn two_panes() -> PanesPrefs {
                     transfer: TransferView::Ir(IrMode::Log),
                     ..PaneModes::default()
                 },
+                levels: PaneLevels::default(),
             },
             PanePrefs {
                 id: PaneId(2),
@@ -157,6 +158,7 @@ fn two_panes() -> PanesPrefs {
                     sweep: SweepMode::Ir(IrMode::Etc),
                     chrome: PlotChrome::Bare,
                 },
+                levels: PaneLevels::default(),
             },
         ],
     }
@@ -344,31 +346,59 @@ fn bad_files_are_reported() {
     assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\nmics = [0]\n").is_err());
     assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\nmic_names = { a = \"M\" }\n").is_err());
     assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\ncolour = 1\n").is_err());
-    assert!(UiPrefs::from_toml("[levels]\ntransfer = [10.0, -10.0]\n").is_err());
-    assert!(UiPrefs::from_toml("[levels]\ntransfer = [-10.0]\n").is_err());
-    assert!(UiPrefs::from_toml("[levels]\nphase = [-10.0, 10.0]\n").is_err());
+    assert!(UiPrefs::from_toml("[ir_levels]\ntransfer = [10.0, -10.0]\n").is_err());
+    assert!(UiPrefs::from_toml("[ir_levels]\nsweep = [-10.0]\n").is_err());
+    assert!(UiPrefs::from_toml("[ir_levels]\nphase = [-10.0, 10.0]\n").is_err());
 }
 
-/// Level axes moved off their defaults are written, the rest left out; an
-/// out-of-limits range is brought within the axis limits on reading.
+/// The impulse-response dB axes and each pane's own level axes moved off their defaults
+/// are written, the rest left out; an out-of-limits range is brought within the axis
+/// limits on reading.
 #[test]
 fn level_ranges_round_trip() {
     let d = UiPrefs::default();
     assert!(!d.to_toml().contains("levels"));
     let mut p = UiPrefs::default();
-    p.levels.spectrum_dbfs = Range::new(-140.0, -40.0);
-    p.levels.transfer = Range::new(-24.5, 12.0);
-    p.levels.sweep_ir = Range::new(-90.0, 0.0);
+    p.ir_levels.sweep = Range::new(-90.0, 0.0);
+    let mut panes = two_panes();
+    panes.views[0].levels.transfer = Range::new(-24.5, 12.0);
+    panes.views[1].levels.spectrum_dbfs = Range::new(-140.0, -40.0);
+    p.layout.panes = Some(panes);
     let text = p.to_toml();
-    assert!(text.contains("sweep_ir = [-90.0, 0.0]"), "{text}");
-    assert!(!text.contains("\nir ="), "{text}");
-    assert!(text.contains("[levels]"), "{text}");
-    assert!(text.contains("spectrum_dbfs = [-140.0, -40.0]"), "{text}");
+    assert!(text.contains("[ir_levels]"), "{text}");
+    assert!(text.contains("sweep = [-90.0, 0.0]"), "{text}");
+    assert!(!text.contains("\ntransfer = [-80"), "{text}");
+    assert!(
+        text.contains("[layout.panes.levels]\ntransfer = [-24.5, 12.0]"),
+        "{text}"
+    );
+    assert!(
+        text.contains("[layout.panes.levels]\nspectrum_dbfs = [-140.0, -40.0]"),
+        "{text}"
+    );
     assert!(!text.contains("spectrum_spl"), "{text}");
     assert!(!text.contains("distortion ="), "{text}");
     assert_eq!(UiPrefs::from_toml(&text), Ok(p));
-    let far = UiPrefs::from_toml("[levels]\ndistortion = [-900.0, -800.0]\n").expect("parse");
-    assert_eq!(far.levels.distortion, Range::new(-300.0, -200.0));
+    let far = UiPrefs::from_toml(
+        "[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"distortion\"\n\
+         levels = { distortion = [-900.0, -800.0], transfer = [3.0, -3.0] }\n",
+    )
+    .expect("parse");
+    let v = far.layout.panes.expect("panes").views[0].levels;
+    assert_eq!(v.distortion, Range::new(-300.0, -200.0));
+    // Low above high is no range: that one is the default, the layout stays.
+    assert_eq!(v.transfer, PaneLevels::default().transfer);
+}
+
+/// A kind-wide `[levels]` table is no setting: logged and left out (the panes start on
+/// their defaults), and the rest of the file reads.
+#[test]
+fn a_kind_wide_levels_table_is_ignored() {
+    let p = UiPrefs::from_toml("theme = \"light\"\n\n[levels]\ntransfer = [-24.0, 12.0]\n")
+        .expect("parse");
+    assert_eq!(p.theme, Some(ac2_scene::theme::ThemeName::Light));
+    assert_eq!(p.ir_levels, IrLevelPrefs::default());
+    assert!(!p.to_toml().contains("levels"));
 }
 
 /// A legend moved or resized is written, its defaults left out; out of bounds is an

@@ -77,6 +77,8 @@ struct PaneEntryFile {
     sweep_view: SweepViewFile,
     #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
     chrome: ChromeFile,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    levels: Option<PaneLevelsFile>,
 }
 
 impl PaneEntryFile {
@@ -113,6 +115,7 @@ impl PaneEntryFile {
                 SweepMode::Room => SweepViewFile::Room,
             },
             chrome: ChromeFile::of(m.chrome),
+            levels: PaneLevelsFile::of(&p.levels),
         }
     }
 
@@ -150,6 +153,7 @@ impl PaneEntryFile {
                 },
                 chrome: self.chrome.chrome(),
             },
+            levels: PaneLevelsFile::parse(self.levels.as_ref(), self.id),
         }
     }
 }

@@ -5,9 +5,9 @@
 //! meter's number holds a reading, the theme, the record toggle's time limit, the
 //! spectrograph's history span, the layout and window as last left: the pane tree, the
 //! focused pane, maximised or full screen, what each pane shows (its kind, measurement,
-//! modes and how much of its plot: grid, labels, cursor), the window's size and position,
-//! and each pane's level axis range (a fit made for one show is a fair start for the next),
-//! where the transfer pane's legend sat and how large it may be, and the session files
+//! modes and how much of its plot: grid, labels, cursor, and its own level axis range: a fit
+//! made for one show is a fair start for the next), the window's size and position, the
+//! impulse-response views' dB axes, where the transfer pane's legend sat and how large it may be, and the session files
 //! this app opened or exported (the Sessions dialog's recents).
 //!
 //! ```toml
@@ -51,6 +51,9 @@
 //! kind = "transfer"
 //! measurement = "Main L"
 //!
+//! [layout.panes.levels]
+//! transfer = [-24.0, 12.0]
+//!
 //! [[layout.panes]]
 //! id = 2
 //! kind = "spl"
@@ -58,13 +61,9 @@
 //! spl_view = "meter_leq"
 //! chrome = "no_grid"
 //!
-//! [levels]
-//! transfer = [-24.0, 12.0]
-//! spectrum_dbfs = [-140.0, -40.0]
-//! spectrum_spl = [20.0, 120.0]
-//! distortion = [-100.0, 0.0]
-//! ir = [-80.0, 3.0]
-//! sweep_ir = [-90.0, 0.0]
+//! [ir_levels]
+//! transfer = [-80.0, 3.0]
+//! sweep = [-90.0, 0.0]
 //!
 //! [legend.transfer]
 //! x = 1.0
@@ -98,7 +97,7 @@ use ac2_scene::view::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::{Axis, PaneId, PaneKind, PaneModes, PaneNode, TransferView};
+use crate::state::{Axis, PaneId, PaneKind, PaneLevels, PaneModes, PaneNode, TransferView};
 
 mod file;
 mod layout;
@@ -176,46 +175,36 @@ pub struct PanePrefs {
     /// The measurement it showed, by name.
     pub measurement: Option<String>,
     pub modes: PaneModes,
+    /// Its own level axis ranges.
+    pub levels: PaneLevels,
 }
 
-/// The level axis range of each pane, dB (the spectrum pane keeps one per scale).
+/// The impulse-response views' dB axes (log / ETC), dB re peak: one for the transfer
+/// panes' IR views, one for the sweep panes'. The panes' level axes are each pane's own
+/// ([`PanePrefs::levels`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct LevelPrefs {
+pub struct IrLevelPrefs {
     pub transfer: Range,
-    pub spectrum_dbfs: Range,
-    pub spectrum_spl: Range,
-    pub distortion: Range,
-    /// The transfer pane's IR view's log / ETC axis, dB re peak.
-    pub ir: Range,
-    /// The sweep pane's IR view's log / ETC axis, dB re peak.
-    pub sweep_ir: Range,
+    pub sweep: Range,
 }
 
-impl LevelPrefs {
+impl IrLevelPrefs {
     /// The ranges `view` shows.
     pub fn of(view: &ViewState) -> Self {
         Self {
-            transfer: view.tf.magnitude_db,
-            spectrum_dbfs: view.spectrum.level,
-            spectrum_spl: view.spectrum.level_spl,
-            distortion: view.distortion.range_db,
-            ir: view.ir.axes.level_db,
-            sweep_ir: view.distortion.ir.level_db,
+            transfer: view.ir.axes.level_db,
+            sweep: view.distortion.ir.level_db,
         }
     }
 
     /// Puts the ranges on `view`.
     pub fn apply(&self, view: &mut ViewState) {
-        view.tf.magnitude_db = self.transfer;
-        view.spectrum.level = self.spectrum_dbfs;
-        view.spectrum.level_spl = self.spectrum_spl;
-        view.distortion.range_db = self.distortion;
-        view.ir.axes.level_db = self.ir;
-        view.distortion.ir.level_db = self.sweep_ir;
+        view.ir.axes.level_db = self.transfer;
+        view.distortion.ir.level_db = self.sweep;
     }
 }
 
-impl Default for LevelPrefs {
+impl Default for IrLevelPrefs {
     fn default() -> Self {
         Self::of(&ViewState::default())
     }
@@ -266,8 +255,8 @@ pub struct UiPrefs {
     pub spl_hold_ms: Option<u32>,
     /// The layout as last left.
     pub layout: LayoutPrefs,
-    /// The level axes as last left.
-    pub levels: LevelPrefs,
+    /// The impulse-response dB axes as last left.
+    pub ir_levels: IrLevelPrefs,
     /// The window as last left (`None`: never saved).
     pub window: Option<WindowPrefs>,
     /// The theme last chosen (`None`: never chosen; `ac2-ui --theme` overrides it for a run).
@@ -329,7 +318,7 @@ impl Default for UiPrefs {
             spec_ease: true,
             spl_hold_ms: None,
             layout: LayoutPrefs::default(),
-            levels: LevelPrefs::default(),
+            ir_levels: IrLevelPrefs::default(),
             window: None,
             theme: None,
             record_limit_min: None,

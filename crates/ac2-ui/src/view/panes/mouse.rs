@@ -192,12 +192,7 @@ pub(super) fn navigate(
         return;
     }
     if resp.hovered()
-        && crate::state::level_range(
-            &app.state.view,
-            pane,
-            crate::scenes::spectrum_scale(&app.state),
-        )
-        .is_some()
+        && app.state.level_range(id).is_some()
         && (pane != PaneKind::Distortion
             || app.state.pane_modes(id).sweep == ac2_scene::view::SweepMode::Response)
     {
@@ -230,23 +225,19 @@ pub(super) fn navigate(
             .filter(|v| v.is_finite());
         if zoom != 1.0 {
             app.dispatch(Msg::LevelZoom {
-                pane,
+                pane: id,
                 about_db,
                 factor: f64::from(zoom),
             });
         }
         if shift
             && dx != 0.0
-            && let Some(r) = crate::state::level_range(
-                &app.state.view,
-                pane,
-                crate::scenes::spectrum_scale(&app.state),
-            )
+            && let Some(r) = app.state.level_range(id)
         {
             // Wheel up (positive delta) shows higher levels; about a tenth of the span per
             // notch (50 px of scroll).
             app.dispatch(Msg::LevelPan {
-                pane,
+                pane: id,
                 db: f64::from(dx / 500.0) * r.span(),
             });
         }

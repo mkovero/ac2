@@ -177,7 +177,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
         .ok_or("the history in the scene")?;
     assert!(history.data.iter().flatten().count() >= 30);
     // Its colours span the pane's level axis, the one the level keys move.
-    let r = d.st.view.spectrum.level;
+    let r = crate::common::spectrum_level(&d.st);
     assert_eq!(history.range, [r.lo as f32, r.hi as f32]);
     // The rig's noise at 1 kHz, just now.
     d.send(Msg::SpectrographCursor {
@@ -263,9 +263,9 @@ fn spectrograph_from_an_empty_daemon() -> R {
         alone.caption
     );
     // The level keys still move the colours.
-    let before = d.st.view.spectrum.level;
+    let before = crate::common::spectrum_level(&d.st);
     d.key("Ctrl+I");
-    assert_ne!(d.st.view.spectrum.level, before);
+    assert_ne!(crate::common::spectrum_level(&d.st), before);
     d.key("W");
     // G again hides it and nothing is kept.
     d.key("G");

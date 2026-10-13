@@ -11,10 +11,7 @@ fn transfer_view_two_traces_and_banner() {
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
     // The pane draws Main L's group; Delay tower joins it compared (C), tagged `cmp`.
-    h.state_mut()
-        .state
-        .compared_meas
-        .insert("Delay tower".to_owned());
+    h.state_mut().state.compared_meas.insert(MeasId(2));
     {
         let st = &h.state().state;
         assert_eq!(st.selected, Some(MeasId(1)));

@@ -27,7 +27,7 @@ impl AppState {
 
     /// Whether `m`'s live curves are hidden in this app.
     pub fn meas_hidden(&self, m: &Measurement) -> bool {
-        self.hidden_meas.contains(&m.config.name)
+        self.hidden_meas.contains(&m.id)
     }
 
     /// The keys that act on "the selected curve" (Delete, A) act on the selected stored
@@ -526,7 +526,7 @@ impl AppState {
 
     /// Whether measurement `m` (a live curve or math channel) is compared (C).
     pub fn meas_compared(&self, m: &Measurement) -> bool {
-        self.compared_meas.contains(&m.config.name)
+        self.compared_meas.contains(&m.id)
     }
 
     /// Whether the transfer pane draws `m`'s live curve for compare only: compared, not

@@ -8,7 +8,7 @@ use ac2_scene::theme::Theme;
 use ac2_ui::embedded::{EmbeddedBackend, Setup, start_embedded_with};
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::CommandId;
-use ac2_ui::state::{AppState, Msg, Overlay, PromptKind, Severity, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay, PaneKind, PromptKind, Severity, StimPhase};
 use std::time::Instant;
 
 /// From an empty daemon: two captures, one spread by +3 dB with the keys (its legend says
@@ -141,7 +141,7 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
         "{:?}",
         pane.unit_help
     );
-    let level = |s: &AppState| s.view.spectrum.level;
+    let level = |s: &AppState| crate::common::spectrum_level(s);
     // The new spectrum's first frame framed the level axis (as Shift+Home).
     let default = ac2_scene::view::ViewState::default().spectrum.level;
     assert_ne!(level(&d.st), default);
@@ -341,12 +341,25 @@ fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     let remembered = ac2_scene::axis::Range::new(-160.0, -150.0);
     let mut prefs = crate::common::grid_ui_prefs();
-    prefs.levels.spectrum_dbfs = remembered;
+    let spectrum_pane = |p: &ac2_ui::prefs::UiPrefs| {
+        let panes = p.layout.panes.as_ref().expect("panes");
+        let v = panes.views.iter().find(|v| v.kind == PaneKind::Spectrum);
+        v.expect("a spectrum pane").levels
+    };
+    if let Some(v) = prefs
+        .layout
+        .panes
+        .as_mut()
+        .and_then(|p| p.views.iter_mut().find(|v| v.kind == PaneKind::Spectrum))
+    {
+        v.levels.spectrum_dbfs = remembered;
+    }
     let prefs = ac2_ui::prefs::UiPrefs::from_toml(&prefs.to_toml())?;
     d.st.set_prefs(prefs);
-    assert_eq!(d.st.view.spectrum.level, remembered);
+    let level = |s: &AppState| crate::common::spectrum_level(s);
+    assert_eq!(level(&d.st), remembered);
     measure_from_empty(&mut d)?;
-    assert_eq!(d.st.view.spectrum.level, remembered);
+    assert_eq!(level(&d.st), remembered);
     d.key("Ctrl+K");
     d.send(Msg::Text("new spectrum".into()));
     d.key("Enter");
@@ -355,13 +368,11 @@ fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
         |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spectrum),
     )?;
     d.key("Enter");
-    d.until("the started spectrum fitted", |s| {
-        s.view.spectrum.level != remembered
-    })?;
-    let fit = d.st.view.spectrum.level;
+    d.until("the started spectrum fitted", |s| level(s) != remembered)?;
+    let fit = level(&d.st);
     assert!(fit.is_valid() && fit.hi > -150.0, "{fit:?}");
     // The fit is what the next start comes back to.
-    assert_eq!(d.st.prefs.levels.spectrum_dbfs, fit);
+    assert_eq!(spectrum_pane(&d.st.prefs).spectrum_dbfs, fit);
     drop(d);
     drop(daemon);
     Ok(())

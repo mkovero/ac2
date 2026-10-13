@@ -527,14 +527,14 @@ fn sweep_stored_as(t: &mut T, id: u32) -> SweepConfig {
 #[test]
 fn a_finished_sweep_fits_the_sweep_panes_level_axis() {
     let mut t = T::new();
-    let start = t.st.view.distortion.range_db;
+    let start = t.level(PaneKind::Distortion);
     let freq = t.st.view.freq;
     sweep_once(&mut t);
     // Not before its data: there is nothing to fit yet.
-    assert_eq!(t.st.view.distortion.range_db, start);
+    assert_eq!(t.level(PaneKind::Distortion), start);
     let (d, g) = sweep_data(7);
     t.conn(ConnEvent::Trace(d.clone(), g.clone()));
-    let fitted = t.st.view.distortion.range_db;
+    let fitted = t.level(PaneKind::Distortion);
     assert_ne!(fitted, start);
     // Harmonics at −40 dB over floors at −80 dB, framed with a margin.
     assert!(fitted.lo < -80.0 && fitted.lo > -100.0, "{fitted:?}");
@@ -542,15 +542,15 @@ fn a_finished_sweep_fits_the_sweep_panes_level_axis() {
     assert_eq!(t.st.view.freq, freq);
     // The operator zooms; the same result fetched again keeps the zoom.
     t.key("Ctrl+I");
-    let zoomed = t.st.view.distortion.range_db;
+    let zoomed = t.level(PaneKind::Distortion);
     assert_ne!(zoomed, fitted);
     t.conn(ConnEvent::Trace(d, g));
-    assert_eq!(t.st.view.distortion.range_db, zoomed);
+    assert_eq!(t.level(PaneKind::Distortion), zoomed);
     // The next sweep's result is framed again.
     sweep_stored_as(&mut t, 8);
     let (d, g) = sweep_data(8);
     t.conn(ConnEvent::Trace(d, g));
-    assert_eq!(t.st.view.distortion.range_db, fitted);
+    assert_eq!(t.level(PaneKind::Distortion), fitted);
 }
 
 /// On the sweep view Space arms a run of the sweep measurement with its settings and Enter

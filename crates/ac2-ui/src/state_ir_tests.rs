@@ -286,16 +286,16 @@ fn the_distortion_cursor_reads_in_db_and_percent() {
     // 1 % under the pointer is −40 dB: zooming there keeps −40 dB where it was.
     let about = ac2_scene::distortion::db_of_percent(1.0);
     assert!((about + 40.0).abs() < 1e-9);
-    let before = t.st.view.distortion.range_db;
+    let before = t.level(PaneKind::Distortion);
     t.st.update(
         Msg::LevelZoom {
-            pane: PaneKind::Distortion,
+            pane: t.st.layout.lead(PaneKind::Distortion).expect("sweep pane"),
             about_db: Some(about),
             factor: 2.0,
         },
         &t.keys,
     );
-    let r = t.st.view.distortion.range_db;
+    let r = t.level(PaneKind::Distortion);
     let frac = |r: Range| (-40.0 - r.lo) / r.span();
     assert!((frac(r) - frac(before)).abs() < 1e-9 && (r.span() - before.span() / 2.0).abs() < 1e-9);
 }

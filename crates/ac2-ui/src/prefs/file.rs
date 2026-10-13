@@ -46,7 +46,7 @@ struct File {
     )]
     layout: Option<LayoutFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    levels: Option<LevelsFile>,
+    ir_levels: Option<IrLevelsFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     legend: Option<LegendsFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -149,10 +149,54 @@ impl ThemeFile {
     }
 }
 
-/// `[low, high]` dB per axis; one left out is the default.
+/// `[low, high]` dB as a range: finite, low below high, within what the axis can show.
+fn level_range([lo, hi]: [f64; 2]) -> Option<Range> {
+    (lo.is_finite() && hi.is_finite() && lo < hi).then(|| level::clamp(Range::new(lo, hi)))
+}
+
+/// `[ir_levels]`: the impulse-response views' dB axes, `[low, high]` dB re peak; one left
+/// out is the default.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LevelsFile {
+struct IrLevelsFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transfer: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sweep: Option<[f64; 2]>,
+}
+
+impl IrLevelsFile {
+    fn parse(&self) -> Result<IrLevelPrefs, String> {
+        let d = IrLevelPrefs::default();
+        let range = |name: &str, v: Option<[f64; 2]>, default: Range| match v {
+            None => Ok(default),
+            Some(v) => level_range(v).ok_or_else(|| {
+                format!("ui.toml: ir_levels.{name} must be [low, high] in dB, low below high")
+            }),
+        };
+        Ok(IrLevelPrefs {
+            transfer: range("transfer", self.transfer, d.transfer)?,
+            sweep: range("sweep", self.sweep, d.sweep)?,
+        })
+    }
+
+    /// Only the ranges moved off their defaults.
+    fn from_prefs(l: &IrLevelPrefs) -> Option<Self> {
+        let d = IrLevelPrefs::default();
+        let v = |r: Range, default: Range| (r != default).then_some([r.lo, r.hi]);
+        let f = Self {
+            transfer: v(l.transfer, d.transfer),
+            sweep: v(l.sweep, d.sweep),
+        };
+        (*l != d).then_some(f)
+    }
+}
+
+/// A pane's own level axes (`[layout.panes.levels]` under its `[[layout.panes]]` entry),
+/// `[low, high]` dB; one left out is the default.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PaneLevelsFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     transfer: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -161,47 +205,43 @@ struct LevelsFile {
     spectrum_spl: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     distortion: Option<[f64; 2]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    ir: Option<[f64; 2]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    sweep_ir: Option<[f64; 2]>,
 }
 
-impl LevelsFile {
-    fn parse(&self) -> Result<LevelPrefs, String> {
-        let d = LevelPrefs::default();
-        let range = |name: &str, v: Option<[f64; 2]>, default: Range| match v {
-            None => Ok(default),
-            Some([lo, hi]) if lo.is_finite() && hi.is_finite() && lo < hi => {
-                Ok(level::clamp(Range::new(lo, hi)))
-            }
-            Some(_) => Err(format!(
-                "ui.toml: levels.{name} must be [low, high] in dB, low below high"
-            )),
+impl PaneLevelsFile {
+    /// The ranges; one that is no range is the default, logged (a layout is a convenience,
+    /// read leniently).
+    pub(super) fn parse(f: Option<&Self>, pane: u32) -> PaneLevels {
+        let d = PaneLevels::default();
+        let Some(f) = f else {
+            return d;
         };
-        Ok(LevelPrefs {
-            transfer: range("transfer", self.transfer, d.transfer)?,
-            spectrum_dbfs: range("spectrum_dbfs", self.spectrum_dbfs, d.spectrum_dbfs)?,
-            spectrum_spl: range("spectrum_spl", self.spectrum_spl, d.spectrum_spl)?,
-            distortion: range("distortion", self.distortion, d.distortion)?,
-            ir: range("ir", self.ir, d.ir)?,
-            sweep_ir: range("sweep_ir", self.sweep_ir, d.sweep_ir)?,
-        })
+        let range = |name: &str, v: Option<[f64; 2]>, default: Range| match v {
+            None => default,
+            Some(v) => level_range(v).unwrap_or_else(|| {
+                tracing::warn!(
+                    "ui.toml: pane {pane}'s levels.{name} is not [low, high] in dB; default"
+                );
+                default
+            }),
+        };
+        PaneLevels {
+            transfer: range("transfer", f.transfer, d.transfer),
+            spectrum_dbfs: range("spectrum_dbfs", f.spectrum_dbfs, d.spectrum_dbfs),
+            spectrum_spl: range("spectrum_spl", f.spectrum_spl, d.spectrum_spl),
+            distortion: range("distortion", f.distortion, d.distortion),
+        }
     }
 
-    /// Only the ranges moved off their defaults.
-    fn from_prefs(l: &LevelPrefs) -> Option<Self> {
-        let d = LevelPrefs::default();
+    /// Only the ranges moved off their defaults; `None` when all are at them.
+    pub(super) fn of(l: &PaneLevels) -> Option<Self> {
+        let d = PaneLevels::default();
         let v = |r: Range, default: Range| (r != default).then_some([r.lo, r.hi]);
-        let f = Self {
+        (*l != d).then(|| Self {
             transfer: v(l.transfer, d.transfer),
             spectrum_dbfs: v(l.spectrum_dbfs, d.spectrum_dbfs),
             spectrum_spl: v(l.spectrum_spl, d.spectrum_spl),
             distortion: v(l.distortion, d.distortion),
-            ir: v(l.ir, d.ir),
-            sweep_ir: v(l.sweep_ir, d.sweep_ir),
-        };
-        (*l != d).then_some(f)
+        })
     }
 }
 
@@ -519,10 +559,10 @@ impl UiPrefs {
             spec_ease: f.spec_ease.unwrap_or(true),
             spl_hold_ms: f.spl_hold_ms,
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
-            levels: f
-                .levels
+            ir_levels: f
+                .ir_levels
                 .as_ref()
-                .map(LevelsFile::parse)
+                .map(IrLevelsFile::parse)
                 .transpose()?
                 .unwrap_or_default(),
             window,
@@ -559,7 +599,7 @@ impl UiPrefs {
             spectrograph_span_s: self.spectrograph_span_s,
             layout: (self.layout != LayoutPrefs::default())
                 .then(|| LayoutFile::from_prefs(&self.layout)),
-            levels: LevelsFile::from_prefs(&self.levels),
+            ir_levels: IrLevelsFile::from_prefs(&self.ir_levels),
             legend: LegendFile::from_prefs(&self.legend),
             window: self.window.map(|w| WindowFile {
                 width: w.width,

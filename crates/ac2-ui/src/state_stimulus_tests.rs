@@ -845,7 +845,12 @@ fn delay_steps_need_the_live_curve() {
         );
     }
     let mut t = T::new();
-    t.st.hidden_meas.insert("Main L".into());
+    let main =
+        t.st.measurements()
+            .iter()
+            .find(|m| m.config.name == "Main L")
+            .map(|m| m.id);
+    t.st.hidden_meas.insert(main.expect("Main L"));
     assert!(t.key("Ctrl+.").is_empty());
     assert!(
         t.last_toast().starts_with("Main L is hidden"),

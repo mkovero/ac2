@@ -86,7 +86,7 @@ pub fn spectrograph(
         SpectrographInput {
             history,
             name: m.config.name.clone(),
-            range: st.view.spectrum.range(scale),
+            range: st.view_for(pane).spectrum.range(scale),
             offset_db: st.edit(m.id).offset_db,
             freshness: frame(st, m.id, stream).map(|tf| freshness(st, tf)),
         }
@@ -273,6 +273,6 @@ pub(crate) fn with_spectrum<R>(
     status.math = shown_math(st, st.pane_meas(pane), &frames);
     // The pane draws on the level range of the scale its curves are in.
     let mut view = st.view_for(pane);
-    view.spectrum.level = st.view.spectrum.range(spectrum_scale(st));
+    view.spectrum.level = view.spectrum.range(spectrum_scale(st));
     f(&traces, &status, &view)
 }

@@ -306,7 +306,8 @@ impl AppState {
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
             DisplayRow::LevelAxes if d == 0 => {
-                crate::prefs::LevelPrefs::default().apply(&mut self.view);
+                self.pane_levels.clear();
+                crate::prefs::IrLevelPrefs::default().apply(&mut self.view);
                 self.toast("every pane's level axis is back at its default");
             }
             _ => {}

@@ -371,7 +371,9 @@ Selecting a stored trace (click, **V**) brings its measurement's group to the pa
 stored or Imported trace and press **C**; it is drawn tagged `cmp` (its tree row too). **C**
 again stops, palette *Clear compare* drops all. A compared curve of the pane's own group is
 drawn once, untagged. Compare is display only: **M**, math operands and the phase reference
-use the group's own curves. Compared measurements are remembered by name in `ui.toml`;
+use the group's own curves. Compare follows the measurement, not its name: a renamed one
+stays compared, and of two with the same name only the one chosen is. Compared measurements
+are remembered by name in `ui.toml` (see hidden ones below for how a name comes back);
 compared stored traces while the app runs.
 
 To pick another measurement:
@@ -408,6 +410,12 @@ only outlined while a later-selected trace has them.
   keeps running; other clients still see it). Its list row says `hidden` (dimmed), its
   pane title starts `TF 2 hidden`, the IR view says `TF 2 hidden — A shows it`. Hidden
   measurements are remembered by name (`hidden = ["TF 2"]` under `[layout]` in `ui.toml`).
+  While the app runs, hiding follows the measurement itself: renaming it keeps it hidden,
+  a new one made under its old name starts shown, and of two measurements with the same
+  name **A** hides only the selected one. On the next start a remembered name hides the
+  one measurement of that name; a name two or more measurements share hides none of them
+  and is forgotten (the name cannot say which was meant), so such a duplicate is not
+  written to `ui.toml` either.
   A click on a legend row selects that curve, so click then **A** hides it.
 - **Shift+A** hides a measurement and everything under it (live curve, traces, math
   channels), and shows them all when all are hidden (with a trace selected: its group).
@@ -441,8 +449,8 @@ the layout stays maximised.
 
 `ui.toml` (written on layout change and exit) keeps the panes (split, kind, focus,
 maximised / full screen / panes only), each pane's measurement by name, its views and **T**
-step, the Leq style and the sweep pane's dB / %, each pane's level axis, and the window's
-size and position. The next start restores them without arming anything. A measurement
+step, its own level axis (`[layout.panes.levels]`), the Leq style and the sweep pane's
+dB / %, the IR views' dB axes (`[ir_levels]`), and the window's size and position. The next start restores them without arming anything. A measurement
 that is gone leaves its pane on its usual choice; one the daemon loses while the app runs
 (restart, reopened or salvaged session) comes back to its pane and selection as soon as one
 of that name exists again. A layout from an older version is dropped (one pane); a window
@@ -475,9 +483,13 @@ The frequency axis is shared by the panes: **I** / **O** zoom, **←** / **→**
 resets to 20 Hz – 20 kHz; the wheel zooms about the pointer, a drag pans.
 
 Each pane's **level axis** (transfer magnitude, spectrum / RTA level, sweep distortion) is
-its own and remembered in `ui.toml` (**Ctrl+Home** forgets it). A spectrum that starts fits
-its level axis on the first frame, and a new sweep result fits the sweep pane's (as
-**Shift+Home**, frequency left alone).
+its own: two transfer panes side by side zoom and pan apart, and the keys and the wheel move
+only the pane they act on. A pane split off (**N**) starts on the range of the pane it came
+from. The axis is remembered with its pane in `ui.toml` (**Ctrl+Home** forgets it; Settings
+→ Display → *level axes* resets every pane's). A spectrum that starts fits the spectrum
+panes' level axes on the first frame, and a new sweep result fits the sweep panes' (as
+**Shift+Home**, frequency left alone). The impulse-response views' axes are shared by kind:
+one for the transfer panes' IR views, one for the sweep panes'.
 
 - **Ctrl+I** / **Ctrl+O** zoom it about its middle; **Ctrl+wheel** about the pointer.
 - **Ctrl+↑** / **Ctrl+↓** pan it by about a tenth of the range; **Shift+wheel** pans
@@ -530,7 +542,7 @@ The transfer pane's IR views and the sweep pane's IR views share keys and mouse 
   it (a sample when zoomed in, else 1/100 of the span); it reads `1.25 ms · +0.500 FS` or
   `1.25 ms · −12.3 dB`.
 - Transfer and sweep IR views keep their own zoom and cursor; the log / ETC ranges are in
-  `ui.toml` (`ir`, `sweep_ir`). A selected transfer trace's stored IR is drawn on the
+  `ui.toml` (`[ir_levels]`: `transfer`, `sweep`). A selected transfer trace's stored IR is drawn on the
   transfer IR view ([The impulse-response view](#the-impulse-response-view)).
 
 The sweep's response & distortion view uses the frequency keys of the other panes, its

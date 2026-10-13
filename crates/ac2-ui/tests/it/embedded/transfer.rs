@@ -608,7 +608,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.send(Msg::SelectMeas(m.id));
     assert_eq!(d.st.selected_trace, None);
     d.key("C");
-    assert!(d.st.compared_meas.contains(&m.config.name));
+    assert!(d.st.compared_meas.contains(&m.id));
     for _ in 0..8 {
         if d.st.selected_trace == Some(run) {
             break;

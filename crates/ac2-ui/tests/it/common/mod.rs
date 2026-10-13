@@ -663,6 +663,7 @@ fn grid_of(row: &[ac2_ui::state::View]) -> ac2_ui::prefs::PanesPrefs {
             kind: v.kind,
             measurement: None,
             modes: v.modes,
+            levels: Default::default(),
         })
         .collect();
     ac2_ui::prefs::PanesPrefs {
@@ -673,6 +674,15 @@ fn grid_of(row: &[ac2_ui::state::View]) -> ac2_ui::prefs::PanesPrefs {
 }
 
 /// [`grid_prefs`] in a fresh app's preferences.
+/// The level range the spectrum pane the keys mean draws on.
+pub fn spectrum_level(s: &ac2_ui::state::AppState) -> ac2_scene::axis::Range {
+    let pane = s
+        .layout
+        .lead(ac2_ui::state::PaneKind::Spectrum)
+        .expect("a spectrum pane");
+    s.level_range(pane).expect("level axis")
+}
+
 pub fn grid_ui_prefs() -> ac2_ui::prefs::UiPrefs {
     let mut p = ac2_ui::prefs::UiPrefs::default();
     p.layout.panes = Some(grid_prefs());

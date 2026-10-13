@@ -543,6 +543,28 @@ impl AppState {
                 }
             }
         }
+        // Hidden and compared ones wait by name as a pane's measurement does, unless one
+        // that stays has that name: it is another measurement, and the choice was not its.
+        let staying: BTreeSet<String> = self
+            .measurements()
+            .iter()
+            .filter(|m| !gone(m.id))
+            .map(|m| m.config.name.clone())
+            .collect();
+        for (ids, pending) in [
+            (&mut self.hidden_meas, &mut self.pending_hidden),
+            (&mut self.compared_meas, &mut self.pending_compared),
+        ] {
+            ids.retain(|id| {
+                if !gone(*id) {
+                    return true;
+                }
+                if let Some(n) = names.get(id).filter(|n| !staying.contains(*n)) {
+                    pending.insert(n.clone());
+                }
+                false
+            });
+        }
         if let Some(id) = self.selected.filter(|id| gone(*id)) {
             // A stand-in going leaves the operator's choice waiting.
             if self.standin != Some(id)

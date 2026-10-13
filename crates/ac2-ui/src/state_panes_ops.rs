@@ -36,9 +36,11 @@ impl AppState {
         }
     }
 
-    /// The view state pane `id` is drawn with: the shared one with the pane's own modes.
+    /// The view state pane `id` is drawn with: the shared one (the frequency axis, read
+    /// across panes) with the pane's own modes and level axis.
     pub fn view_for(&self, id: PaneId) -> ViewState {
         let mut v = self.view;
+        self.pane_levels(id).apply(&mut v);
         let modes = self.pane_modes(id);
         v.spectrum.mode = modes.spectrum;
         v.ir.mode = match self.layout.kind(id) {
@@ -294,6 +296,7 @@ impl AppState {
         let waiting = self.pending_pane_meas.get(&f).cloned();
         self.layout.maximized = false;
         let new = self.layout.split_focused(rect);
+        self.copy_levels(f, new);
         if let Some(n) = waiting {
             self.pending_pane_meas.insert(new, n);
         }

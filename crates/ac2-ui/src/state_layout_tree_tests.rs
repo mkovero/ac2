@@ -260,9 +260,9 @@ fn shift_a_hides_a_measurement_with_everything_under_it() {
         })
         .collect();
     assert_eq!(hidden, [TraceId(3), TraceId(4)]);
-    assert!(t.st.hidden_meas.contains("Main L"));
-    assert!(t.st.hidden_meas.contains("pre ÷ post"));
-    assert!(!t.st.hidden_meas.contains("Sub"));
+    assert!(hidden_named(&t, "Main L"));
+    assert!(hidden_named(&t, "pre ÷ post"));
+    assert!(!hidden_named(&t, "Sub"));
     // The daemon hid them: Shift+A again shows the whole group.
     let mut s = tree_state();
     for tr in &mut s.traces[..2] {
@@ -277,7 +277,7 @@ fn shift_a_hides_a_measurement_with_everything_under_it() {
         })
         .count();
     assert_eq!(shown, 2);
-    assert!(!t.st.hidden_meas.contains("Main L"));
+    assert!(!hidden_named(&t, "Main L"));
 }
 
 /// Shift+F2 asks where the selected trace goes; Enter files it there (a `trace.update` with
@@ -480,9 +480,8 @@ fn tab_stops_on_live_curves_and_a_hides_them() {
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert!(!t.st.live_row_selected());
     assert_eq!(tab(&mut t, "Tab"), "l1");
-    let name = t.st.meas(MeasId(1)).expect("meas").config.name.clone();
     t.key("A");
-    assert!(t.st.hidden_meas.contains(&name), "{}", t.last_toast());
+    assert!(t.st.hidden_meas.contains(&MeasId(1)), "{}", t.last_toast());
     assert_eq!(tab(&mut t, "Tab"), "t3");
     assert_eq!(
         tab(&mut t, "Shift+Tab"),
@@ -490,7 +489,7 @@ fn tab_stops_on_live_curves_and_a_hides_them() {
         "a hidden live curve is still a stop"
     );
     t.key("A");
-    assert!(!t.st.hidden_meas.contains(&name));
+    assert!(!t.st.hidden_meas.contains(&MeasId(1)));
 
     let pane = t.st.layout.focus;
     t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
@@ -540,4 +539,11 @@ fn tab_without_measurements_says_so() {
     t.key("Tab");
     assert_eq!(t.st.selected, None);
     assert_eq!(t.last_toast(), "no measurements to step through");
+}
+
+/// Whether the measurement named `name` has its live curves hidden.
+fn hidden_named(t: &T, name: &str) -> bool {
+    t.st.measurements()
+        .iter()
+        .any(|m| m.config.name == name && t.st.meas_hidden(m))
 }

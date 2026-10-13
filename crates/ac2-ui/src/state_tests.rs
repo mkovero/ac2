@@ -248,6 +248,16 @@ impl T {
         self.st.layout.lead(kind).is_some()
     }
 
+    /// The level range the pane of `kind` the keys mean draws on: with none of that kind,
+    /// the focused pane's own range for it.
+    fn level(&self, kind: PaneKind) -> ac2_scene::axis::Range {
+        let pane = self.st.layout.lead(kind).unwrap_or(self.st.layout.focus);
+        self.st
+            .pane_levels(pane)
+            .range(kind, crate::scenes::spectrum_scale(&self.st))
+            .expect("level axis")
+    }
+
     /// The pane of `kind` focused as a click would; with none, the last pane in reading
     /// order split and the new half turned into it (so on the grid Alt+5 reaches it).
     fn go(&mut self, kind: PaneKind) {

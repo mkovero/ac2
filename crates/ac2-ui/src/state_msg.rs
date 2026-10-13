@@ -396,13 +396,13 @@ pub enum Msg {
     ToggleMeasShown(MeasId),
     /// Ctrl+wheel on a pane: its level axis zooms by `factor` (> 1 in) about `about_db`.
     LevelZoom {
-        pane: PaneKind,
+        pane: PaneId,
         about_db: Option<f64>,
         factor: f64,
     },
     /// Shift+wheel on a pane: its level axis pans by `db` (positive: higher levels).
     LevelPan {
-        pane: PaneKind,
+        pane: PaneId,
         db: f64,
     },
     /// Mouse on the Leq windows dialog.

@@ -271,3 +271,116 @@ fn hidden_measurements_are_remembered_by_name() {
     assert!(meas_deleted(&u.key("Enter")).is_some());
     assert!(u.st.hidden_meas.is_empty());
 }
+
+/// Sub and two transfer measurements both named Main (names may repeat).
+fn two_mains() -> State {
+    let mut s = daemon_state();
+    s.measurements = vec![
+        meas(1, "Main", transfer()),
+        meas(2, "Sub", spectrum()),
+        meas(3, "Main", transfer()),
+    ];
+    s
+}
+
+/// Hiding or comparing one of two measurements of one name is that measurement's alone.
+#[test]
+fn hiding_one_of_two_same_named_measurements_hides_only_it() {
+    let mut t = T::new();
+    t.conn(mirror(two_mains()));
+    t.st.update(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
+    let m = |t: &T, id| t.st.meas(MeasId(id)).cloned().expect("meas");
+    assert!(t.st.meas_hidden(&m(&t, 1)));
+    assert!(!t.st.meas_hidden(&m(&t, 3)), "hiding id 1 also hid id 3");
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.key("C");
+    assert!(t.st.meas_compared(&m(&t, 3)));
+    assert!(
+        !t.st.meas_compared(&m(&t, 1)),
+        "comparing id 3 also compared id 1"
+    );
+}
+
+/// A hidden measurement deleted elsewhere does not pass its choice to another of its name.
+#[test]
+fn a_deleted_duplicates_choice_does_not_pass_to_the_other() {
+    let mut t = T::new();
+    t.conn(mirror(two_mains()));
+    t.st.update(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
+    let mut s = two_mains();
+    s.measurements.retain(|m| m.id != MeasId(1));
+    t.conn(mirror(s));
+    assert!(!t.st.meas_hidden(t.st.meas(MeasId(3)).expect("Main")));
+    assert!(t.st.hidden_meas.is_empty());
+}
+
+/// A rename keeps the choice on the measurement; a new one under the old name starts shown.
+#[test]
+fn a_renamed_measurement_keeps_its_hidden_choice() {
+    let mut t = T::new();
+    t.st.update(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
+    let mut s = daemon_state();
+    s.measurements = vec![
+        meas(1, "Main X", transfer()),
+        meas(2, "Sub", spectrum()),
+        meas(5, "Main L", transfer()),
+    ];
+    t.conn(mirror(s));
+    assert!(t.st.meas_hidden(t.st.meas(MeasId(1)).expect("renamed")));
+    assert!(!t.st.meas_hidden(t.st.meas(MeasId(5)).expect("new")));
+    // Remembered under its new name.
+    assert_eq!(t.st.layout_prefs().hidden, ["Main X".to_owned()].into());
+}
+
+/// `ui.toml` keeps choices by name; they become ids once the daemon lists measurements. A
+/// name several measurements share applies to none of them and is forgotten (it does not
+/// land later on whichever is left), and is never written for one of them.
+#[test]
+fn remembered_names_resolve_to_ids_and_a_shared_name_applies_to_none() {
+    let mut t = T::new();
+    t.conn(mirror(two_mains()));
+    t.st.update(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
+    t.st.update(Msg::ToggleMeasShown(MeasId(2)), &t.keys);
+    let kept = t.st.layout_prefs();
+    assert_eq!(
+        kept.hidden,
+        ["Sub".to_owned()].into(),
+        "Main is not one measurement's"
+    );
+
+    // A file naming both: Sub is the one Sub; Main matches two.
+    let p = crate::prefs::UiPrefs {
+        layout: crate::prefs::LayoutPrefs {
+            hidden: ["Main".to_owned(), "Sub".to_owned()].into(),
+            compared: ["Main".to_owned()].into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let p = crate::prefs::UiPrefs::from_toml(&p.to_toml()).expect("parse");
+    let mut u = T::fresh();
+    u.st.layout = grid();
+    u.st.pane_auto = false;
+    u.st.set_prefs(p);
+    u.connect(two_mains());
+    assert_eq!(u.st.hidden_meas, [MeasId(2)].into());
+    assert!(u.st.compared_meas.is_empty());
+    // One Main deleted elsewhere: the other does not take the forgotten choice.
+    let mut s = two_mains();
+    s.measurements.retain(|m| m.id != MeasId(3));
+    u.conn(mirror(s));
+    assert!(!u.st.meas_hidden(u.st.meas(MeasId(1)).expect("Main")));
+    assert!(u.st.compared_meas.is_empty());
+}
+
+/// A daemon restarting numbers its measurements afresh: a hidden one waits by name and
+/// is hidden again under its new id.
+#[test]
+fn a_hidden_measurement_stays_hidden_across_a_daemon_restart() {
+    let mut t = T::new();
+    t.st.update(Msg::ToggleMeasShown(MeasId(2)), &t.keys);
+    let mut s = daemon_state();
+    s.measurements = vec![meas(7, "Sub", spectrum()), meas(8, "Main L", transfer())];
+    t.conn(mirror_of(s, 2, Some("c1")));
+    assert_eq!(t.st.hidden_meas, [MeasId(7)].into());
+}

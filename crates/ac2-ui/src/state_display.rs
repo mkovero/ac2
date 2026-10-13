@@ -1,18 +1,14 @@
-//! Display edits the operator makes while comparing curves: display offsets in steps, the
-//! level (vertical) axis of each pane, showing / hiding and deleting (after a confirmation)
+//! Display edits the operator makes while comparing curves: display offsets in steps,
+//! showing / hiding and deleting (after a confirmation)
 //! the selected measurement or stored trace, and which pane a selection brings up. No
 //! measured value changes: an offset is drawn, never applied to the stored columns.
 
 use ac2_proto::Command;
 use ac2_proto::model::{
-    LevelScale, MeasKind, Measurement, Operand, OwnedTraces, TraceKind, TraceMeta, TraceOwner,
+    MeasKind, Measurement, Operand, OwnedTraces, TraceKind, TraceMeta, TraceOwner,
 };
-use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Db, MeasId, TraceId};
-use ac2_scene::axis::Range;
 use ac2_scene::format;
-use ac2_scene::grid::column_frequencies;
-use ac2_scene::view::{ViewState, level};
 
 use super::{AppState, Overlay, PaneKind, drawn_in, trace_label};
 use crate::conn::Request;
@@ -86,9 +82,6 @@ enum OffsetTarget {
     Live(Measurement),
 }
 
-/// Zoom factor of one level-zoom key press.
-pub const LEVEL_ZOOM_FACTOR: f64 = 1.5;
-
 /// `+3.0 dB`, `no offset`.
 fn offset_words(v: f64) -> String {
     if v == 0.0 {
@@ -101,34 +94,6 @@ fn offset_words(v: f64) -> String {
 /// A step in whole tenths of a dB: repeated steps never accumulate float error.
 fn tenths(v: f64) -> f64 {
     (v * 10.0).round() / 10.0
-}
-
-/// The pane whose level axis the keys act on, if it has one.
-fn level_pane(p: PaneKind) -> Option<PaneKind> {
-    match p {
-        PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Distortion => Some(p),
-        PaneKind::Spl => None,
-    }
-}
-
-/// The level range of `pane` in `view`; the spectrum pane's is the one for `scale`, the
-/// scale its curves are shown in ([`crate::scenes::spectrum_scale`]).
-pub fn level_range(view: &ViewState, pane: PaneKind, scale: LevelScale) -> Option<Range> {
-    match pane {
-        PaneKind::Transfer => Some(view.tf.magnitude_db),
-        PaneKind::Spectrum => Some(view.spectrum.range(scale)),
-        PaneKind::Distortion => Some(view.distortion.range_db),
-        PaneKind::Spl => None,
-    }
-}
-
-fn level_range_mut(view: &mut ViewState, pane: PaneKind, scale: LevelScale) -> Option<&mut Range> {
-    match pane {
-        PaneKind::Transfer => Some(&mut view.tf.magnitude_db),
-        PaneKind::Spectrum => Some(view.spectrum.range_mut(scale)),
-        PaneKind::Distortion => Some(&mut view.distortion.range_db),
-        PaneKind::Spl => None,
-    }
 }
 
 /// The pane a stored trace of this kind is drawn in first.
@@ -215,224 +180,6 @@ impl AppState {
         }
     }
 
-    // ----- the level axis ----------------------------------------------------------------
-
-    /// The pane the level keys act on (the focused one), or why not.
-    fn level_target(&mut self) -> Option<PaneKind> {
-        let p = self.layout.focus_kind();
-        // The level axis is the magnitude's: the transfer pane's phase, coherence and IR
-        // views do not draw it.
-        let p = level_pane(p).filter(|p| match p {
-            PaneKind::Distortion => self.modes().sweep == ac2_scene::view::SweepMode::Response,
-            PaneKind::Transfer => self.modes().transfer == super::TransferView::Magnitude,
-            _ => true,
-        });
-        if p.is_none() {
-            let f = self.layout.focused();
-            let what = match f.kind {
-                PaneKind::Transfer => format!("{} ({})", f.title(), f.modes.transfer.label()),
-                _ => f.title().to_owned(),
-            };
-            self.warn(format!("{what} has no level axis to zoom"));
-        }
-        p
-    }
-
-    /// Zoom pane `pane`'s level axis by `factor` (> 1 in) about `about` (dB; `None`: the
-    /// middle).
-    pub(super) fn level_zoom(&mut self, pane: PaneKind, about: Option<f64>, factor: f64) {
-        let scale = crate::scenes::spectrum_scale(self);
-        if let Some(r) = level_range_mut(&mut self.view, pane, scale) {
-            let a = about.unwrap_or((r.lo + r.hi) / 2.0);
-            *r = level::zoom(*r, a, factor);
-        }
-    }
-
-    /// Pan pane `pane`'s level axis by `db`.
-    pub(super) fn level_pan(&mut self, pane: PaneKind, db: f64) {
-        let scale = crate::scenes::spectrum_scale(self);
-        if let Some(r) = level_range_mut(&mut self.view, pane, scale) {
-            *r = level::pan(*r, db);
-        }
-    }
-
-    pub(super) fn level_key(&mut self, c: crate::keys::CommandId) {
-        use crate::keys::CommandId as C;
-        let Some(p) = self.level_target() else {
-            return;
-        };
-        let scale = crate::scenes::spectrum_scale(self);
-        let Some(r) = level_range(&self.view, p, scale) else {
-            return;
-        };
-        match c {
-            C::LevelZoomIn => self.level_zoom(p, None, LEVEL_ZOOM_FACTOR),
-            C::LevelZoomOut => self.level_zoom(p, None, 1.0 / LEVEL_ZOOM_FACTOR),
-            C::LevelPanUp => self.level_pan(p, level::pan_step(r)),
-            C::LevelPanDown => self.level_pan(p, -level::pan_step(r)),
-            C::LevelReset => {
-                let d = level_range(&ViewState::default(), p, scale);
-                if let (Some(slot), Some(d)) = (level_range_mut(&mut self.view, p, scale), d) {
-                    *slot = d;
-                }
-            }
-            C::LevelFit => match level::fit(self.level_values(p)) {
-                Some(fit) => {
-                    if let Some(slot) = level_range_mut(&mut self.view, p, scale) {
-                        *slot = fit;
-                    }
-                    self.toast(format!(
-                        "{}: level {} … {} dB",
-                        p.title(),
-                        format::fixed(fit.lo, 0),
-                        format::fixed(fit.hi, 0)
-                    ));
-                }
-                None => self.warn(format!("{}: no curve shown to fit", p.title())),
-            },
-            _ => {}
-        }
-    }
-
-    /// A started spectrum / RTA measurement's first frame is in: the spectrum pane's level
-    /// axis frames what it shows, as Shift+Home does (frequency left as it is). A level
-    /// range that suits one signal rarely suits the next, so each start begins framed.
-    pub(super) fn fit_started_spectra(&mut self) {
-        let arrived: Vec<MeasId> = self
-            .spectrum_fit
-            .iter()
-            .filter(|(id, shown)| {
-                self.spectrum_frame(**id).is_some_and(|f| {
-                    shown
-                        .as_ref()
-                        .is_none_or(|old| !std::sync::Arc::ptr_eq(old, &f.frame))
-                })
-            })
-            .map(|(id, _)| *id)
-            .collect();
-        if arrived.is_empty() {
-            return;
-        }
-        for id in &arrived {
-            self.spectrum_fit.remove(id);
-        }
-        let scale = crate::scenes::spectrum_scale(self);
-        if let Some(fit) = level::fit(self.level_values(PaneKind::Spectrum))
-            && let Some(slot) = level_range_mut(&mut self.view, PaneKind::Spectrum, scale)
-        {
-            *slot = fit;
-        }
-    }
-
-    /// A finished sweep's data is in: the sweep pane's level axis frames its harmonics and
-    /// THD, as Shift+Home does (frequency left as it is). Distortion levels differ by tens
-    /// of dB from one device or drive level to the next, so a range kept from the last
-    /// result often shows the new one off the plot. Only once per result: a zoom after it
-    /// stays until the next sweep.
-    pub(super) fn fit_new_sweep(&mut self) {
-        let Some(id) = self.sweep.fit else {
-            return;
-        };
-        if !self.traces.contains_key(&id) {
-            return;
-        }
-        self.sweep.fit = None;
-        if self.shown_sweep().map(|(t, _)| t.meta.id) != Some(id) {
-            return;
-        }
-        if let Some(fit) = level::fit(self.level_values(PaneKind::Distortion)) {
-            self.view.distortion.range_db = fit;
-        }
-    }
-
-    /// Every level pane `p` draws in the shown frequency range, as drawn (offsets
-    /// included).
-    fn level_values(&self, p: PaneKind) -> Vec<f64> {
-        let (lo, hi) = (self.view.freq.lo, self.view.freq.hi);
-        let mut v = Vec::new();
-        let mut add = |freqs: &[f64], vals: &[f32], offset: f64| {
-            v.extend(
-                freqs
-                    .iter()
-                    .zip(vals)
-                    .filter(|(f, _)| **f >= lo && **f <= hi)
-                    .map(|(_, x)| f64::from(*x) + offset),
-            );
-        };
-        let live = |stream: Stream, m: &Measurement| {
-            let d = self.data.as_ref()?;
-            let f = d.latest.get(&Topic::Data { meas: m.id, stream })?;
-            let g = d.grids.get(&f.frame.stamp.grid_id?)?;
-            Some((f.frame.clone(), column_frequencies(g)))
-        };
-        let shown = self.kind_meas(PaneKind::Transfer);
-        match p {
-            PaneKind::Transfer => {
-                for m in self.measurements().into_iter().filter(|m| {
-                    self.live_on_transfer_pane(m, shown) || self.live_compared_on_transfer(m, shown)
-                }) {
-                    if let Some((f, freqs)) = live(Stream::Tf, m)
-                        && let ac2_proto::FrameData::Tf(tf) = &f.data
-                    {
-                        add(&freqs, &tf.mag, self.edit(m.id).offset_db);
-                    }
-                }
-                for (t, g) in self.traces.values() {
-                    if self.on_transfer_pane(&t.meta, shown)
-                        || self.trace_compared_on_transfer(&t.meta, shown)
-                    {
-                        add(&column_frequencies(g), &t.mag_db, t.meta.edit.offset.0);
-                    }
-                }
-            }
-            PaneKind::Spectrum => {
-                for m in self
-                    .measurements()
-                    .into_iter()
-                    .filter(|m| !self.meas_hidden(m))
-                {
-                    if !m.config.kind.publishes_levels() {
-                        continue;
-                    }
-                    let Some(stream) = m.config.kind.stream() else {
-                        continue;
-                    };
-                    if let Some((f, freqs)) = live(stream, m) {
-                        let level = match &f.data {
-                            ac2_proto::FrameData::Spec(s) => &s.level,
-                            ac2_proto::FrameData::Rta(r) => &r.level,
-                            _ => continue,
-                        };
-                        add(&freqs, level, self.edit(m.id).offset_db);
-                    }
-                }
-                for (t, g) in self.traces.values() {
-                    if t.meta.edit.visible
-                        && matches!(
-                            t.meta.kind,
-                            TraceKind::Spectrum { .. } | TraceKind::Rta { .. }
-                        )
-                    {
-                        add(&column_frequencies(g), &t.mag_db, t.meta.edit.offset.0);
-                    }
-                }
-            }
-            PaneKind::Distortion => {
-                if let Some((t, g)) = self.shown_sweep()
-                    && let Some(s) = &t.sweep
-                {
-                    let freqs = column_frequencies(g);
-                    for c in s.harmonics.iter().map(|h| &h.curve).chain([&s.thd]) {
-                        add(&freqs, &c.level_db, 0.0);
-                        add(&freqs, &c.floor_db, 0.0);
-                    }
-                }
-            }
-            PaneKind::Spl => {}
-        }
-        v
-    }
-
     // ----- the selected curve: show / hide, delete ----------------------------------------
 
     /// A: shows or hides the selected stored trace (the daemon keeps that), else the selected
@@ -454,7 +201,7 @@ impl AppState {
         let Some(name) = self.meas(id).map(|m| m.config.name.clone()) else {
             return;
         };
-        if self.hidden_meas.remove(&name) {
+        if self.hidden_meas.remove(&id) {
             self.toast(format!("{name} shown"));
         } else {
             let key = keymap
@@ -468,7 +215,7 @@ impl AppState {
             self.toast(format!(
                 "{name} hidden: it keeps measuring · {key} shows it"
             ));
-            self.hidden_meas.insert(name);
+            self.hidden_meas.insert(id);
         }
     }
 
@@ -487,13 +234,13 @@ impl AppState {
             .filter(|t| ac2_scene::meas_list::group_of(t, &ms) == group)
             .cloned()
             .collect();
-        let live: Vec<String> = ms
+        let live: Vec<MeasId> = ms
             .iter()
             .filter(|m| match &m.config.kind {
                 MeasKind::Math { config } => config.owner == group,
                 _ => group == TraceOwner::Meas { meas: m.id },
             })
-            .map(|m| m.config.name.clone())
+            .map(|m| m.id)
             .collect();
         let name = match group {
             TraceOwner::Meas { meas } => self
@@ -502,12 +249,12 @@ impl AppState {
             TraceOwner::Imported => "Imported".to_owned(),
         };
         let any_shown = traces.iter().any(|t| t.edit.visible)
-            || live.iter().any(|n| !self.hidden_meas.contains(n));
-        for n in &live {
+            || live.iter().any(|id| !self.hidden_meas.contains(id));
+        for id in &live {
             if any_shown {
-                self.hidden_meas.insert(n.clone());
+                self.hidden_meas.insert(*id);
             } else {
-                self.hidden_meas.remove(n);
+                self.hidden_meas.remove(id);
             }
         }
         for t in traces.into_iter().filter(|t| t.edit.visible == any_shown) {
@@ -592,8 +339,8 @@ impl AppState {
                     ac2_scene::meas_list::DELETE => OwnedTraces::Delete,
                     _ => return,
                 };
-                self.hidden_meas.remove(&c.label);
-                self.compared_meas.remove(&c.label);
+                self.hidden_meas.remove(&meas);
+                self.compared_meas.remove(&meas);
                 let mut what = match traces {
                     OwnedTraces::Keep => {
                         format!("{} deleted; its traces are under Imported", c.label)
@@ -767,9 +514,8 @@ impl AppState {
         match target {
             DeleteTarget::Trace(id) => self.delete_trace(id, label, out),
             DeleteTarget::Meas(meas) => {
-                // A measurement of that name made later starts shown.
-                self.hidden_meas.remove(&label);
-                self.compared_meas.remove(&label);
+                self.hidden_meas.remove(&meas);
+                self.compared_meas.remove(&meas);
                 // It owns nothing (else the three-answer question was asked).
                 let mut what = format!("{label} deleted");
                 self.stimulus_with_deleted(meas, &mut what, out);
@@ -831,9 +577,9 @@ impl AppState {
             self.warn(format!("{name}: no live transfer curve to compare"));
             return;
         }
-        let on = self.compared_meas.insert(name.clone());
+        let on = self.compared_meas.insert(m.id);
         if !on {
-            self.compared_meas.remove(&name);
+            self.compared_meas.remove(&m.id);
         }
         self.toast(ac2_scene::meas_list::compare_toast(
             &name,
@@ -846,6 +592,7 @@ impl AppState {
     pub(super) fn clear_compare(&mut self) {
         let n = self.compared_meas.len() + self.compared_traces.len();
         self.compared_meas.clear();
+        self.pending_compared.clear();
         self.compared_traces.clear();
         self.toast(match n {
             0 => "nothing compared".to_owned(),

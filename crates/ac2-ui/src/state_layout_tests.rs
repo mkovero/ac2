@@ -98,37 +98,48 @@ fn key_hints_follow_the_focused_pane() {
     assert_eq!(hint_texts(&u, PaneKind::Transfer), None);
 }
 
-/// Every pane's level axis is remembered in the preferences as it moves, and the next start
-/// comes back to it; Ctrl+Home's defaults are remembered as such (left out of the file).
+/// Every pane's level axis is remembered in the preferences with its pane as it moves, and
+/// the next start comes back to it; Ctrl+Home's defaults are remembered as such (left out of
+/// the file).
 #[test]
 fn level_axes_are_remembered_for_the_next_start() {
     let mut t = T::new();
-    let default = crate::prefs::LevelPrefs::default();
+    let default = PaneLevels::default();
+    let remembered = |t: &T, kind: PaneKind| {
+        let pane = t.st.layout.lead(kind).expect("pane");
+        let p = t.st.prefs.layout.panes.as_ref().expect("panes");
+        p.views.iter().find(|v| v.id == pane).expect("view").levels
+    };
     t.key("Alt+2");
     t.st.prefs_dirty = false;
     t.key("Ctrl+Down");
-    let spectrum = t.st.view.spectrum.level;
+    let spectrum = t.level(PaneKind::Spectrum);
     assert_ne!(spectrum, default.spectrum_dbfs);
     assert!(t.st.prefs_dirty);
-    assert_eq!(t.st.prefs.levels.spectrum_dbfs, spectrum);
+    assert_eq!(remembered(&t, PaneKind::Spectrum).spectrum_dbfs, spectrum);
     t.key("Alt+1");
     t.key("Ctrl+I");
-    let transfer = t.st.view.tf.magnitude_db;
+    let transfer = t.level(PaneKind::Transfer);
     assert_ne!(transfer, default.transfer);
-    assert_eq!(t.st.prefs.levels.transfer, transfer);
+    assert_eq!(remembered(&t, PaneKind::Transfer).transfer, transfer);
     let text = t.st.prefs.to_toml();
-    assert!(text.contains("[levels]"), "{text}");
+    assert!(text.contains("[layout.panes.levels]"), "{text}");
+    assert!(!text.contains("[levels]"), "{text}");
 
     let mut u = T::new();
     u.st.set_prefs(crate::prefs::UiPrefs::from_toml(&text).expect("parse"));
-    assert_eq!(u.st.view.spectrum.level, spectrum);
-    assert_eq!(u.st.view.tf.magnitude_db, transfer);
-    assert_eq!(u.st.view.spectrum.level_spl, default.spectrum_spl);
+    assert_eq!(u.level(PaneKind::Spectrum), spectrum);
+    assert_eq!(u.level(PaneKind::Transfer), transfer);
+    let sp = u.st.layout.lead(PaneKind::Spectrum).expect("pane");
+    assert_eq!(u.st.pane_levels(sp).spectrum_spl, default.spectrum_spl);
     // Nothing changed by the start itself.
     u.key("Alt+1");
-    assert_eq!(u.st.prefs.levels.transfer, transfer);
+    assert_eq!(remembered(&u, PaneKind::Transfer).transfer, transfer);
     u.key("Ctrl+Home");
-    assert_eq!(u.st.prefs.levels.transfer, default.transfer);
+    assert_eq!(
+        remembered(&u, PaneKind::Transfer).transfer,
+        default.transfer
+    );
     assert!(!u.st.prefs.to_toml().contains("transfer = ["));
 }
 

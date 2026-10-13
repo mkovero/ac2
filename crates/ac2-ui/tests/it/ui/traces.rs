@@ -45,7 +45,7 @@ fn stored_traces_and_target() {
     // target join it compared (C).
     {
         let st = &mut h.state_mut().state;
-        st.compared_meas.insert("Main L".to_owned());
+        st.compared_meas.insert(MeasId(1));
         let others: Vec<_> = st
             .traces
             .values()
@@ -463,7 +463,7 @@ fn measurement_hidden_and_delete_confirm() {
     });
     h.key_press(Key::A);
     step_until(&mut h, "delay tower hidden", |a| {
-        a.state.hidden_meas.contains("Delay tower")
+        a.state.hidden_meas.contains(&MeasId(2))
     });
     let caption = h
         .state()

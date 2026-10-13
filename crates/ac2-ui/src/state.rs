@@ -46,10 +46,10 @@ use crate::settings::{FocusWant, Page, Settings};
 
 #[path = "state_display.rs"]
 mod display;
-pub use display::{
-    ChoicePrompt, ChoicePurpose, DeletePrompt, DeleteTarget, LEVEL_ZOOM_FACTOR, MoveWhat,
-    level_range,
-};
+pub use display::{ChoicePrompt, ChoicePurpose, DeletePrompt, DeleteTarget, MoveWhat};
+#[path = "state_levels.rs"]
+mod levels;
+pub use levels::{LEVEL_ZOOM_FACTOR, PaneLevels};
 #[path = "state_settings.rs"]
 mod settings_impl;
 pub use settings_impl::SettingsMsg;
@@ -199,12 +199,13 @@ pub struct AppState {
     /// header → live curve → stored traces. Meaningful while it is the selected measurement
     /// and no stored trace has the keys ([`AppState::live_row_selected`]).
     pub selected_live: Option<MeasId>,
-    /// Measurements whose live curves this app hides, by name (as `ui.toml` keeps them):
-    /// display only, they keep measuring.
-    pub hidden_meas: BTreeSet<String>,
+    /// Measurements whose live curves this app hides: display only, they keep measuring.
+    /// By id: names may repeat, and hiding one `Main` must not hide another. `ui.toml`
+    /// keeps them by name ([`AppState::restore_meas_choices`]).
+    pub hidden_meas: BTreeSet<MeasId>,
     /// Measurements (live curves, math channels) every transfer pane draws besides its own
-    /// group, by name as hidden ones are (compare, C): an overlay, never an operand.
-    pub compared_meas: BTreeSet<String>,
+    /// group, by id as hidden ones are (compare, C): an overlay, never an operand.
+    pub compared_meas: BTreeSet<MeasId>,
     /// Stored traces every transfer pane draws besides its own group (compare, C), whatever
     /// their owner. Ids are the daemon's: kept while the app runs, not in `ui.toml`.
     pub compared_traces: BTreeSet<TraceId>,
@@ -300,6 +301,14 @@ pub struct AppState {
     /// The measurement each pane showed when the app last ran, by name, until the daemon's
     /// state is known.
     pending_pane_meas: BTreeMap<PaneId, String>,
+    /// Hidden measurements by name, waiting for the daemon to list one of that name: read
+    /// from `ui.toml`, or a hidden one the daemon took away (a session reopening, a daemon
+    /// restarting renumbers them).
+    pending_hidden: BTreeSet<String>,
+    /// Compared measurements by name, waiting as hidden ones do.
+    pending_compared: BTreeSet<String>,
+    /// Each pane's level axis ranges, by pane: a pane not here draws on the defaults.
+    pane_levels: BTreeMap<PaneId, PaneLevels>,
     /// No layout was remembered: the one pane takes the kind of the first measurement once
     /// the daemon's state is known.
     pane_auto: bool,
@@ -425,6 +434,9 @@ impl AppState {
             spl_hold: BTreeMap::new(),
             pending_pane_meas: BTreeMap::new(),
             pane_auto: true,
+            pending_hidden: BTreeSet::new(),
+            pane_levels: BTreeMap::new(),
+            pending_compared: BTreeSet::new(),
             hidden_meas: BTreeSet::new(),
             compared_meas: BTreeSet::new(),
             compared_traces: BTreeSet::new(),
@@ -469,6 +481,7 @@ impl AppState {
         self.sync_session_watch(&mut out);
         if !tick {
             self.restore_pane_meas();
+            self.restore_meas_choices();
             self.follow_standin();
             self.sync_meas_layout(panes_before, conn, drag, &mut out);
             self.prune_compared();
