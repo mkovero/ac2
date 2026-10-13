@@ -154,10 +154,18 @@ def parabolic_vertex(y0: float, y1: float, y2: float) -> float:
     return 0.0 if d == 0 else 0.5 * (y0 - y2) / d
 
 
-def fractional_peak(h: np.ndarray, up: int = 16, half: int = 16) -> tuple[float, float]:
+def fractional_peak(h: np.ndarray, up: int = 16, half: int = 128) -> tuple[float, float]:
     """Sub-sample position and signed value of |h|'s peak: band-limited interpolation by
     zero-padding the DFT of h[d−half … d+half] ×up, then a parabola on the fine grid (a
-    parabola on raw samples is biased by up to ~0.05 sample for a sinc-shaped peak)."""
+    parabola on raw samples is biased by up to ~0.05 sample for a sinc-shaped peak).
+
+    The DFT treats the segment as one period, so whatever h still holds at its ends wraps
+    into the interpolant and pulls the vertex; the span has to hold the peak's ringing, not
+    just a sinc's main lobe. A filter that rings is the case that matters: the digital DUT's
+    8th-order 7.2 kHz Butterworth (Q up to 2.56) still rings at ±16 samples (96 kHz), where
+    the vertex lands 0.074 sample (0.77 µs) early; at ±128 it is within 0.0001 sample of the
+    whole IR's band-limited peak, and a pure fractional delay within 0.00005."""
+    half = min(half, (len(h) - 1) // 2)
     d = int(np.argmax(np.abs(h)))
     n = 2 * half + 1
     idx = (d - half + np.arange(n)) % len(h)

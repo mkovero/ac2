@@ -1,7 +1,9 @@
 import numpy as np
 import pytest
 
-from crosscheck import dsp
+from crosscheck import dsp, dut
+from crosscheck.checks_common import direct_ir_peak
+from crosscheck.model import Raw
 
 FS = 96000.0
 
@@ -351,3 +353,57 @@ def test_a_column_s_own_noise_covers_its_power_excess_at_low_snr():
     assert u > excess
     assert judge_u(excess, (0.3, 1.0), u) == "INCONCLUSIVE"
     assert judge_u(excess, (0.3, 1.0), 0.0) == "FAIL"
+
+
+# The host rig's DUT pre-filter (an 8th-order Butterworth at 7.2 kHz as four lp2) and its
+# 30 kHz post-filter: a minimum-phase IR that rings for tens of samples past its peak.
+DUT_PRE = [{"type": "lp2", "hz": 7200.0, "q": q} for q in (0.5098, 0.6013, 0.9000, 2.5629)]
+DUT_POST = [{"type": "lp2", "hz": 30000.0, "q": 0.7071}]
+
+
+def _dut_peak_truth(chain, n=8192, fs=FS):
+    """The band-limited IR's peak from the cascade's closed-form response: h(t) =
+    (1/n)·Σ H(k·fs/n)·e^{j2πkt/n} evaluated at continuous t (n ≫ the IR's decay, so the
+    period does not matter), maximised on a fine grid and then by a parabola."""
+    k = np.arange(n // 2 + 1)
+    H = dut.response(chain, k * fs / n, fs)
+    w = np.where((k == 0) | (k == n // 2), 1.0, 2.0)
+
+    def h(t):
+        return np.real(np.exp(2j * np.pi * np.outer(t, k) / n) @ (w * H)) / n
+
+    t0 = float(np.argmax(np.abs(h(np.arange(64.0)))))
+    t = t0 + np.linspace(-1, 1, 4001)
+    a = np.abs(h(t))
+    j = int(np.argmax(a))
+    return t[j] + dsp.parabolic_vertex(a[j - 1], a[j], a[j + 1]) * (t[1] - t[0])
+
+
+@pytest.mark.parametrize("pre", [DUT_PRE, [{"type": "hp1", "hz": 20.0}] + DUT_PRE])
+@pytest.mark.parametrize("delay", [0, 1000])
+def test_fractional_peak_on_the_ringing_dut_ir(pre, delay):
+    """The DUT's arrival truth: the interpolated peak of its sampled IR lands where the
+    cascade's continuous band-limited IR peaks (within 0.001 sample, ≈ 0.01 µs at 96 kHz)."""
+    chain = dut.design_chain(pre, FS) + dut.design_chain(DUT_POST, FS)
+    truth = _dut_peak_truth(chain)
+    x = np.zeros(4096)
+    x[delay] = 1.0
+    h = dut.biquad(chain, x)
+    pos, _ = dsp.fractional_peak(h)
+    assert abs(pos - delay - truth) < 1e-3, (pos - delay, truth)
+    # A span holding only a sinc's main lobe wraps the ringing into the interpolant and reads
+    # the peak early by ~0.07 sample: the bias the span exists to avoid.
+    short, _ = dsp.fractional_peak(h, half=16)
+    assert short - delay - truth < -0.05
+
+
+def test_direct_ir_peak_on_a_dut_recording():
+    """The suite's arrival truth on a capture: noise through the DUT cascade, re the noise,
+    reads the cascade's band-limited IR peak."""
+    chain = dut.design_chain(DUT_PRE, FS) + dut.design_chain(DUT_POST, FS)
+    n = 1 << 15
+    ref = np.random.default_rng(3).standard_normal(n)
+    # The cascade applied circularly (in frequency): the recording has no start transient.
+    meas = np.fft.irfft(np.fft.rfft(ref) * dut.response(chain, np.fft.rfftfreq(n, 1 / FS), FS), n)
+    tau = direct_ir_peak(Raw(fs=FS, meas=meas, ref=ref))
+    assert abs(tau * FS - _dut_peak_truth(chain)) < 1e-3
