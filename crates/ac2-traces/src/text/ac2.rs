@@ -13,7 +13,7 @@ use super::table::{
 };
 use super::{
     AC2_CSV_MAGIC, AC2_CSV_MAGIC_V1, AC2_CSV_MAGIC_V2, AC2_CSV_MAGIC_V3, AC2_CSV_MAGIC_V4,
-    AC2_CSV_PREFIX, IR_HEADER, ImportError, Imported, IrAnnounce, fail,
+    AC2_CSV_MAGIC_V5, AC2_CSV_PREFIX, IR_HEADER, ImportError, Imported, IrAnnounce, fail,
 };
 
 pub(super) fn kind_from_header(v: &str) -> Option<TraceKind> {
@@ -77,6 +77,7 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
     let magic = first.1.trim();
     if ![
         AC2_CSV_MAGIC,
+        AC2_CSV_MAGIC_V5,
         AC2_CSV_MAGIC_V4,
         AC2_CSV_MAGIC_V3,
         AC2_CSV_MAGIC_V2,
@@ -87,7 +88,7 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
         let msg = if magic.starts_with(AC2_CSV_PREFIX) {
             format!(
                 "{magic:?}: another ac2 CSV version; this build reads {AC2_CSV_MAGIC:?}, \
-                 {AC2_CSV_MAGIC_V4:?}, {AC2_CSV_MAGIC_V3:?}, {AC2_CSV_MAGIC_V2:?} and {AC2_CSV_MAGIC_V1:?}"
+                 {AC2_CSV_MAGIC_V5:?}, {AC2_CSV_MAGIC_V4:?}, {AC2_CSV_MAGIC_V3:?}, {AC2_CSV_MAGIC_V2:?} and {AC2_CSV_MAGIC_V1:?}"
             )
         } else {
             format!("not an ac2 CSV file (expected {AC2_CSV_MAGIC:?})")
@@ -226,16 +227,24 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
             "distortion level out of range",
         ));
     }
-    let distortion = (!orders.is_empty()).then(|| {
-        let harmonics = orders
+    let (orders, ref_orders) = orders;
+    let curves = |at: usize, orders: &[u8]| -> Vec<HarmonicCurve> {
+        orders
             .iter()
             .enumerate()
             .map(|(j, &order)| HarmonicCurve {
                 order,
-                curve: curve(base + 2 * j),
+                curve: curve(at + 2 * j),
             })
-            .collect();
-        (harmonics, curve(base + 2 * orders.len()))
+            .collect()
+    };
+    let distortion = (!orders.is_empty()).then(|| {
+        let thd_at = base + 2 * orders.len();
+        (
+            curves(base, &orders),
+            curve(thd_at),
+            (!ref_orders.is_empty()).then(|| curves(thd_at + 2, &ref_orders)),
+        )
     });
     let ir = match (ir_head, ir_at) {
         (Some((no, h)), Some(at)) => {
@@ -292,14 +301,17 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
                 notes.push(ImportNote::SweepOffGrid);
                 None
             }
-            (Some((harmonics, thd)), Some(info), Some(ir)) => Some(SweepData {
-                harmonics,
-                thd,
-                ir,
-                info,
-                room,
-                unresolved,
-            }),
+            (Some((harmonics, thd, reference_harmonics)), Some(info), Some(ir)) => {
+                Some(SweepData {
+                    harmonics,
+                    thd,
+                    reference_harmonics,
+                    ir,
+                    info,
+                    room,
+                    unresolved,
+                })
+            }
             _ => {
                 notes.push(ImportNote::SweepWithoutAnalysis);
                 None
@@ -395,21 +407,33 @@ fn ir_table(lines: &[(usize, &str)], at: usize, a: IrAnnounce) -> Result<TraceIr
     })
 }
 
-/// Orders of the distortion columns `h<k>_db,h<k>_floor_db,…,thd_db,thd_floor_db` (none
-/// when `extra` is empty); `None` when they are anything else.
-fn distortion_columns(extra: &[&str]) -> Option<Vec<u8>> {
+/// Orders of the distortion columns `h<k>_db,h<k>_floor_db,…,thd_db,thd_floor_db`, then of
+/// the reference's own `ref_h<k>_db,ref_h<k>_floor_db,…` (none when `extra` is empty); `None`
+/// when they are anything else.
+fn distortion_columns(extra: &[&str]) -> Option<(Vec<u8>, Vec<u8>)> {
     if extra.is_empty() {
-        return Some(Vec::new());
+        return Some((Vec::new(), Vec::new()));
     }
-    let (pairs, thd) = extra.split_at(extra.len().checked_sub(2)?);
-    if thd != ["thd_db", "thd_floor_db"] || pairs.len() % 2 != 0 {
+    let thd = extra.iter().position(|n| *n == "thd_db")?;
+    let (pairs, rest) = extra.split_at(thd);
+    let refs = rest.strip_prefix(&["thd_db", "thd_floor_db"][..])?;
+    Some((order_pairs(pairs, "h")?, order_pairs(refs, "ref_h")?))
+}
+
+/// Orders of `<prefix><k>_db,<prefix><k>_floor_db` pairs.
+fn order_pairs(pairs: &[&str], prefix: &str) -> Option<Vec<u8>> {
+    if !pairs.len().is_multiple_of(2) {
         return None;
     }
     pairs
         .chunks(2)
         .map(|p| {
-            let k: u8 = p[0].strip_prefix('h')?.strip_suffix("_db")?.parse().ok()?;
-            (p[1] == format!("h{k}_floor_db") && k >= 2).then_some(k)
+            let k: u8 = p[0]
+                .strip_prefix(prefix)?
+                .strip_suffix("_db")?
+                .parse()
+                .ok()?;
+            (p[1] == format!("{prefix}{k}_floor_db") && k >= 2).then_some(k)
         })
         .collect()
 }

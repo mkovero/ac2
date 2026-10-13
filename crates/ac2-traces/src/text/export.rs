@@ -267,6 +267,7 @@ pub fn export_csv(t: &StoredTrace) -> String {
             .iter()
             .map(|h| &h.curve)
             .chain(std::iter::once(&s.thd))
+            .chain(s.reference_harmonics.iter().flatten().map(|h| &h.curve))
             .collect()
     });
     if let Some(s) = &t.sweep {
@@ -274,6 +275,9 @@ pub fn export_csv(t: &StoredTrace) -> String {
             let _ = write!(out, ",h{0}_db,h{0}_floor_db", h.order);
         }
         out.push_str(",thd_db,thd_floor_db");
+        for h in s.reference_harmonics.iter().flatten() {
+            let _ = write!(out, ",ref_h{0}_db,ref_h{0}_floor_db", h.order);
+        }
     }
     out.push('\n');
     for (i, f) in frequencies(&t.grid).iter().enumerate() {

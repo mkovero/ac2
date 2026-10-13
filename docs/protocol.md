@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 50`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 51`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -889,6 +889,9 @@ analysed band; responses are reported from `start`. `name` nil names the trace `
   `sweep` (`SweepData`): `harmonics` ([`HarmonicCurve` {`order`, `curve`}], H2…H5), `thd`,
   each `DistortionCurve` {`level_db`, `floor_db`} in dB re the fundamental per grid column
   (harmonic k at k·f is reported at the fundamental f; NaN where that order is not measured);
+  `reference_harmonics` ([`HarmonicCurve`] \| nil: the reference input's own H2…H5,
+  separated against the emitted sweep as the measurement's are, re its own fundamental; nil
+  only for a sweep imported from an export written without them);
   `ir` (`TraceIr` {`t0`, `dt` re the arrival (the trace's `delay`), `linear`, `etc_db`}, from H5's window to the
   end of the linear window, at most 16384 points, peak-preserving); `info` (`SweepInfo`:
   `sample_rate`, `rate` (L: harmonic k's impulse at −L·ln k), `duration`, `repeats`,
@@ -1560,7 +1563,7 @@ columns) = `0x79ec3d16ae0e94d0`.
 ### 7.1 Trace text (`trace.import` / `trace.export`)
 
 **ac2 CSV** (`ac2_csv`, what `trace.export` writes): the first line is exactly
-`# ac2 trace export v5` (`v4`, `v3`, `v2` and `v1` are read too; another version is `bad_header`); then
+`# ac2 trace export v6` (`v5`, `v4`, `v3`, `v2` and `v1` are read too; another version is `bad_header`); then
 `# key: value` lines with every metadata field (`name`, `kind`, `source`, `time_base`,
 `delay_ms`, `delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not
 applied), `depth`, `cal`, `mic` (`name (curve: <label>, …; file …, hash …)`: in the
@@ -1574,7 +1577,8 @@ trace with an impulse response adds `transfer_ir` (JSON `{sample_rate, t0, dt, p
 header
 `freq_hz,mag_db[,phase_deg][,coherence]` and one row per grid column; a sweep trace
 (`kind: sweep`) adds `h2_db,h2_floor_db,…,h5_db,h5_floor_db,thd_db,thd_floor_db` after
-`phase_deg` (dB re the fundamental at the row's fundamental frequency), and after the
+`phase_deg` (dB re the fundamental at the row's fundamental frequency), then the reference's
+own `ref_h2_db,ref_h2_floor_db,…,ref_h5_db,ref_h5_floor_db`, and after the
 frequency rows its impulse response: the header `t_s,linear,etc_db` and `points` rows
 (`t_s` = `t0 + i·dt`, for reading; a transfer trace's impulse response is the same table,
 `t_s` re its `delay_ms`), then the room parameters as comment lines for reading
@@ -1586,7 +1590,7 @@ reads `name`, `kind`, `grid`, `delay_ms` and, for a sweep, `sweep_info`, `sweep_
 `room_metrics`, the distortion columns and the impulse response, for a transfer trace
 `transfer_ir` and its impulse response (`sweep_ir` on another kind than `sweep`, or
 `transfer_ir` on another than `transfer`, is `bad_header`; as a target, nothing of it is
-kept); a v4 sweep export imports without `unresolved`; a v3 export imports as written (no transfer trace in it has an IR); a v2 sweep export imports
+kept); a v5 sweep export imports without `reference_harmonics`; a v4 sweep export imports without `unresolved`; a v3 export imports as written (no transfer trace in it has an IR); a v2 sweep export imports
 as a sweep without room parameters; a v1 sweep export (no `sweep_info`) imports as
 its transfer function (note `sweep_without_analysis`).
 

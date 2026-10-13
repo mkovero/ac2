@@ -472,6 +472,17 @@ pub fn print_summary(out: &mut Out<'_>, data: &TraceData, freqs: &[f64]) {
                 "hz": p.map(|x| x.0),
                 "db": p.map(|x| x.1),
             })).collect::<Vec<_>>(),
+            "reference_max": sum.reference_peaks.iter().map(|(k, p)| json!({
+                "order": k,
+                "hz": p.map(|x| x.0),
+                "db": p.map(|x| x.1),
+            })).collect::<Vec<_>>(),
+            "near_reference": sum.near_reference.iter().map(|n| json!({
+                "order": n.order,
+                "points": n.columns,
+                "lo_hz": n.span_hz.0,
+                "hi_hz": n.span_hz.1,
+            })).collect::<Vec<_>>(),
             "room": s.room,
         });
         let _ = out.json_line(&j);
@@ -520,6 +531,25 @@ pub fn print_summary(out: &mut Out<'_>, data: &TraceData, freqs: &[f64]) {
             ),
         };
         t.push_str(&line);
+    }
+    for (k, p) in &sum.reference_peaks {
+        let name = distortion::reference_order_name(*k);
+        let line = match p {
+            Some((f, v)) => format!(
+                "  max {name:<12}{:>12}  {} at {}\n",
+                distortion::db_text(*v),
+                distortion::percent_text(*v),
+                ac2_scene::format::freq_readout(*f)
+            ),
+            None => format!("  max {name:<12} below the noise floor everywhere\n"),
+        };
+        t.push_str(&line);
+    }
+    for n in &sum.near_reference {
+        t.push_str(&format!(
+            "  {}: the loopback's own distortion may be in it\n",
+            distortion::near_reference_text(n)
+        ));
     }
     if let Some(r) = &s.room {
         for l in room_table(r, BandSet::Octave).text().lines() {
@@ -762,6 +792,14 @@ mod tests {
         assert!(human.contains("THD at  1.00 kHz"), "{human}");
         assert!(human.contains("THD at  10.0 kHz             —"), "{human}");
         assert!(human.contains("max H2 "), "{human}");
+        // The loopback's own orders, each a line of its own (a clean digital loopback: within
+        // the noise or far below the driver's).
+        assert_eq!(
+            done["reference_max"].as_array().map(Vec::len),
+            Some(4),
+            "{done}"
+        );
+        assert!(human.contains("max reference H2"), "{human}");
         // Released and disarmed.
         let st = c.snapshot().await?.state;
         assert!(st.generator.owner.is_none() && !st.generator.armed);
@@ -773,7 +811,7 @@ mod tests {
         assert_eq!(code, 0, "{text}");
         let csv = std::fs::read_to_string(&path)?;
         assert!(csv.contains("# kind: sweep"));
-        assert!(csv.contains(",h2_db,h2_floor_db,h3_db,h3_floor_db,h4_db,h4_floor_db,h5_db,h5_floor_db,thd_db,thd_floor_db"));
+        assert!(csv.contains(",h2_db,h2_floor_db,h3_db,h3_floor_db,h4_db,h4_floor_db,h5_db,h5_floor_db,thd_db,thd_floor_db,ref_h2_db,ref_h2_floor_db,"));
         assert!(csv.contains("\n# room_metrics: {"));
 
         // The rig's hall (in 3, T60 0.8 s): a sweep with 2 s of silence after it, then its

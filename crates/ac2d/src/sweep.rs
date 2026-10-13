@@ -103,16 +103,18 @@ pub(crate) fn trace_data(a: &SweepAnalysis, resolution: Resolution) -> (Columns,
         level_db: f32s(level),
         floor_db: f32s(floor),
     };
-    let data = SweepData {
-        harmonics: a
-            .harmonics
-            .iter()
+    let curves = |hs: &[ac2_core::sweep::HarmonicCurve]| -> Vec<HarmonicCurve> {
+        hs.iter()
             .map(|h| HarmonicCurve {
                 order: h.order,
                 curve: curve(&h.level_db, &h.floor_db),
             })
-            .collect(),
+            .collect()
+    };
+    let data = SweepData {
+        harmonics: curves(&a.harmonics),
         thd: curve(&a.thd_db, &a.thd_floor_db),
+        reference_harmonics: Some(curves(&a.reference_harmonics)),
         ir: TraceIr {
             t0: Seconds(a.ir_t0_s),
             dt: Seconds(a.ir_dt_s),

@@ -88,6 +88,7 @@ pub(crate) fn data() -> TraceData {
                 },
             ],
             thd: curve(-39.9, -67.0, 2000.0),
+            reference_harmonics: None,
             ir: TraceIr {
                 t0: Seconds(-0.75),
                 dt: Seconds(0.001),
@@ -179,6 +180,58 @@ fn readings_and_their_text() {
     assert!((sum.peaks[0].1.unwrap().1 + 40.0).abs() < 1e-9);
     // H3 never leaves the noise: no peak.
     assert_eq!(sum.peaks[1], (3, None));
+}
+
+#[test]
+fn the_summary_names_orders_near_the_references_own() {
+    let mut d = data();
+    let f = column_frequencies(&grid());
+    let curve = |level: f32, floor: f32, top: f64| DistortionCurve {
+        level_db: f
+            .iter()
+            .map(|x| if *x <= top { level } else { f32::NAN })
+            .collect(),
+        floor_db: f
+            .iter()
+            .map(|x| if *x <= top { floor } else { f32::NAN })
+            .collect(),
+    };
+    let s = d.sweep.as_mut().unwrap();
+    // The loopback's own H2 4 dB under the measured −40 dB up to 1 kHz; its H3 valid but the
+    // measured H3 within the noise, so nothing to compare.
+    s.reference_harmonics = Some(vec![
+        HarmonicCurve {
+            order: 2,
+            curve: curve(-44.0, -90.0, 1000.0),
+        },
+        HarmonicCurve {
+            order: 3,
+            curve: curve(-90.0, -110.0, 1333.0),
+        },
+    ]);
+    let sum = summary(s, &f);
+    assert_eq!(sum.reference_peaks[0].0, 2);
+    assert!((sum.reference_peaks[0].1.unwrap().1 + 44.0).abs() < 1e-9);
+    assert_eq!(sum.near_reference.len(), 1);
+    let n = &sum.near_reference[0];
+    assert_eq!(n.order, 2);
+    assert_eq!(n.span_hz.0, f[0]);
+    assert!(n.span_hz.1 <= 1000.0);
+    assert_eq!(
+        near_reference_text(n),
+        format!(
+            "H2 within 6 dB of reference H2 at {} points, {} – {}",
+            n.columns,
+            format::freq_readout(n.span_hz.0),
+            format::freq_readout(n.span_hz.1)
+        )
+    );
+    assert_eq!(reference_order_name(3), "reference H3");
+
+    // Without the reference's own orders: nothing to compare.
+    s.reference_harmonics = None;
+    let sum = summary(s, &f);
+    assert!(sum.reference_peaks.is_empty() && sum.near_reference.is_empty());
 }
 
 #[test]

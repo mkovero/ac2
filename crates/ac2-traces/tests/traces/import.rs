@@ -119,7 +119,7 @@ fn typed_refusals() {
     assert_eq!(e.problem, ImportProblem::NoData);
     let e = bad("20 1 0 1.5\n30 2 0 0.5\n");
     assert_eq!(e.problem, ImportProblem::BadCoherence);
-    let e = bad("# ac2 trace export v6\nfreq_hz,mag_db\n20,1\n30,2\n");
+    let e = bad("# ac2 trace export v7\nfreq_hz,mag_db\n20,1\n30,2\n");
     assert_eq!((e.line, e.problem), (Some(1), ImportProblem::BadHeader));
     let e = import(b"20 1\n30 2\n", ImportFormat::Ac2Csv, ImportRole::Trace).unwrap_err();
     assert_eq!(e.problem, ImportProblem::BadHeader);
@@ -136,7 +136,7 @@ fn ac2_csv_round_trips_bit_for_bit() {
     t.columns.mag_db[11] = -2.718_281_7e-3;
     t.meta.edit.name = "Main L, pre EQ".into();
     let csv = export_csv(&t);
-    assert!(csv.starts_with("# ac2 trace export v5\n# name: Main L, pre EQ\n"));
+    assert!(csv.starts_with("# ac2 trace export v6\n# name: Main L, pre EQ\n"));
     assert!(csv.contains("# delay_ms: 12\n"));
     assert!(csv.contains("freq_hz,mag_db,phase_deg,coherence\n"));
     let back = import(csv.as_bytes(), ImportFormat::Auto, ImportRole::Trace).unwrap();

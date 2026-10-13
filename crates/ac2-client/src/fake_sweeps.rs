@@ -247,9 +247,24 @@ fn synthetic_sweep(grid: &GridDef, f2: f64, rate: f64, repeats: u8) -> (Columns,
             etc_db[i] = 20.0 * a.log10();
         }
     }
+    // A loopback far cleaner than the system: its own floor 40 dB lower.
+    let reference_harmonics = (2u8..=5)
+        .map(|order| {
+            let k = f64::from(order);
+            let c = curve(k, &|_| -96.0 - 6.0 * (k - 2.0));
+            HarmonicCurve {
+                order,
+                curve: DistortionCurve {
+                    floor_db: c.floor_db.iter().map(|v| v - 40.0).collect(),
+                    ..c
+                },
+            }
+        })
+        .collect();
     let sweep = SweepData {
         harmonics,
         thd,
+        reference_harmonics: Some(reference_harmonics),
         ir: TraceIr {
             t0: Seconds(t0),
             dt: Seconds(dt),

@@ -3,7 +3,7 @@
 //! # ac2 CSV
 //!
 //! ```text
-//! # ac2 trace export v5
+//! # ac2 trace export v6
 //! # name: Main L pre EQ
 //! # kind: transfer
 //! # source: captured from "main-l" (measurement 1), session epoch 3, sample 480000
@@ -23,7 +23,8 @@
 //!
 //! A sweep trace adds `h2_db,h2_floor_db,…,thd_db,thd_floor_db` after `phase_deg`: each
 //! harmonic order's level and noise floor in dB re the fundamental at the row's (fundamental)
-//! frequency, then the total. Its analysis facts are one JSON header line
+//! frequency, then the total, then the reference input's own orders
+//! (`ref_h2_db,ref_h2_floor_db,…`, absent from an export written without them). Its analysis facts are one JSON header line
 //! (`# sweep_info: {…}`, [`SweepInfo`]), its decimated impulse response a second table after
 //! the frequency rows, announced by `# sweep_ir: {"t0":…,"dt":…,"points":n}`:
 //!
@@ -45,7 +46,8 @@
 //! `t_s,linear,etc_db` table after the frequency rows, `t_s` re the trace's `delay_ms` (the
 //! inserted delay at capture). It re-imports with the trace.
 //!
-//! A version 4 export (written before sweeps said where their columns are finer than
+//! A version 5 export (written before sweeps kept the reference input's own harmonics)
+//! imports as a sweep without them. A version 4 export (written before sweeps said where their columns are finer than
 //! their windows resolve) imports as a sweep without that. A version 3 export (written before transfer traces kept their impulse response) imports
 //! as it was. A version 2 export (written before
 //! the room parameters were exported) imports as a sweep without them. A version 1 export
@@ -89,7 +91,10 @@ use ac2::import_ac2;
 use table::{on_import_grid, table, validate};
 
 /// First line of an ac2 CSV file of this format version.
-pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v5";
+pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v6";
+/// First line of the previous version, still read: no sweep in it has the reference
+/// input's own harmonics (and nothing else differs).
+const AC2_CSV_MAGIC_V5: &str = "# ac2 trace export v5";
 /// First line of the previous version, still read: no sweep in it says where its columns
 /// are finer than its windows resolve (and nothing else differs).
 const AC2_CSV_MAGIC_V4: &str = "# ac2 trace export v4";

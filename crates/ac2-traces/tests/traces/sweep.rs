@@ -45,6 +45,16 @@ pub(super) fn sweep_trace(id: u32) -> StoredTrace {
                 },
             ],
             thd: curve(ramp(-39.6)),
+            reference_harmonics: Some(vec![
+                HarmonicCurve {
+                    order: 2,
+                    curve: curve(ramp(-95.0)),
+                },
+                HarmonicCurve {
+                    order: 3,
+                    curve: curve(ramp(-101.0)),
+                },
+            ]),
             ir: TraceIr {
                 t0: Seconds(-0.75),
                 dt: Seconds(1.0 / 48_000.0),
@@ -135,7 +145,8 @@ fn sweep_csv_and_session_round_trip() {
     assert!(csv.contains("# sweep_ir: {\"t0\":-0.75,\"dt\":"));
     assert!(
         csv.contains(
-            "freq_hz,mag_db,phase_deg,h2_db,h2_floor_db,h3_db,h3_floor_db,thd_db,thd_floor_db\n"
+            "freq_hz,mag_db,phase_deg,h2_db,h2_floor_db,h3_db,h3_floor_db,thd_db,thd_floor_db,\
+             ref_h2_db,ref_h2_floor_db,ref_h3_db,ref_h3_floor_db\n"
         ),
         "{}",
         &csv[..800]
@@ -160,6 +171,7 @@ fn sweep_csv_and_session_round_trip() {
     assert_eq!(back.harmonics[1], s.harmonics[1]);
     assert!(back.harmonics[0].curve.level_db.last().unwrap().is_nan());
     assert_eq!(back.thd, s.thd);
+    assert_eq!(back.reference_harmonics, s.reference_harmonics);
     assert_eq!(back.ir, s.ir);
     assert_eq!(back.info, s.info);
     assert_eq!(back.room, s.room);
@@ -168,18 +180,41 @@ fn sweep_csv_and_session_round_trip() {
     // An export written before sweeps said where they are unresolved (v4) is the same
     // sweep without that.
     let v4: String = csv
-        .replacen("# ac2 trace export v5", "# ac2 trace export v4", 1)
+        .replacen("# ac2 trace export v6", "# ac2 trace export v4", 1)
         .lines()
         .filter(|l| !l.starts_with("# sweep_unresolved"))
         .map(|l| format!("{l}\n"))
         .collect();
+    // An export written before sweeps kept the reference's own harmonics (v5) is the same
+    // sweep without them.
+    let v5 = csv
+        .replacen("# ac2 trace export v6", "# ac2 trace export v5", 1)
+        .replace(
+            ",ref_h2_db,ref_h2_floor_db,ref_h3_db,ref_h3_floor_db\n",
+            "\n",
+        );
+    let v5: String = v5
+        .lines()
+        .map(|l| {
+            let cells: Vec<&str> = l.split(',').collect();
+            if l.starts_with('#') || cells.len() != 13 {
+                format!("{l}\n")
+            } else {
+                format!("{}\n", cells[..9].join(","))
+            }
+        })
+        .collect();
+    let old = import(v5.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
+    let old = old.sweep.unwrap();
+    assert!(old.reference_harmonics.is_none());
+    assert_eq!(old.harmonics[1], back.harmonics[1]);
     let old = import(v4.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
     let old = old.sweep.unwrap();
     assert!(old.unresolved.is_none());
     assert_eq!(old.room, s.room);
     // An export written before the room parameters (v2) is the same sweep without them.
     let v2: String = csv
-        .replacen("# ac2 trace export v5", "# ac2 trace export v2", 1)
+        .replacen("# ac2 trace export v6", "# ac2 trace export v2", 1)
         .lines()
         .filter(|l| !l.starts_with("# room_metrics"))
         .map(|l| format!("{l}\n"))
@@ -264,7 +299,7 @@ pub(super) fn transfer_with_ir(id: u32) -> StoredTrace {
 fn transfer_ir_csv_and_session_round_trip() {
     let t = transfer_with_ir(6);
     let csv = export_csv(&t);
-    assert!(csv.starts_with("# ac2 trace export v5\n"));
+    assert!(csv.starts_with("# ac2 trace export v6\n"));
     assert!(
         csv.contains("\n# transfer_ir: {\"sample_rate\":48000.0,\"t0\":-0.042666666666666665,"),
         "{}",
@@ -285,7 +320,7 @@ fn transfer_ir_csv_and_session_round_trip() {
     assert!(tgt.ir.is_none());
     // An export written before transfer traces kept their IR (v3) imports without one.
     let v3: String = csv[..csv.find("# impulse response").unwrap()]
-        .replacen("# ac2 trace export v5", "# ac2 trace export v3", 1)
+        .replacen("# ac2 trace export v6", "# ac2 trace export v3", 1)
         .lines()
         .filter(|l| !l.starts_with("# transfer_ir"))
         .map(|l| format!("{l}\n"))

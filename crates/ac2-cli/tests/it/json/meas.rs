@@ -250,7 +250,7 @@ async fn session_meas_delay_trace_flow() -> R {
     assert_eq!(csv.code, 0);
     assert!(
         csv.stdout
-            .starts_with("# ac2 trace export v5\n# name: l-pre-eq\n# kind: transfer\n"),
+            .starts_with("# ac2 trace export v6\n# name: l-pre-eq\n# kind: transfer\n"),
         "{}",
         csv.stdout
     );

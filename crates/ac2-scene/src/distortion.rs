@@ -115,6 +115,23 @@ pub fn reading_at(c: &DistortionCurve, freqs: &[f64], hz: f64, margin_db: f64) -
     }
 }
 
+/// A measured harmonic less than this far above the reference input's own is flagged, dB.
+/// Where the loopback shares the measured path's converters, their distortion is in both:
+/// 6 dB above it, the converters' share adds at most 1 dB to the measured level (power sum,
+/// 10·log10(1 + 10^−0.6)); closer, the system's own harmonic cannot be told from theirs.
+pub const REFERENCE_BOUND_DB: f64 = 6.0;
+
+/// Where one order of the measurement reads within [`REFERENCE_BOUND_DB`] of the reference's
+/// own valid level.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NearReference {
+    pub order: u8,
+    /// Columns flagged.
+    pub columns: usize,
+    /// Lowest and highest flagged fundamental, Hz.
+    pub span_hz: (f64, f64),
+}
+
 /// Short summary of a sweep: THD at a few frequencies, each order's highest point.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Summary {
@@ -122,11 +139,18 @@ pub struct Summary {
     pub thd: Vec<(f64, Reading)>,
     /// `(order, highest valid point (frequency, dB))`.
     pub peaks: Vec<(u8, Option<(f64, f64)>)>,
+    /// The reference input's own orders, as [`Summary::peaks`]; empty when the sweep has
+    /// none.
+    pub reference_peaks: Vec<(u8, Option<(f64, f64)>)>,
+    /// Orders that read within [`REFERENCE_BOUND_DB`] of the reference's own somewhere.
+    pub near_reference: Vec<NearReference>,
 }
 
-/// THD at 100 Hz, 1 kHz and 10 kHz and every order's highest point.
+/// THD at 100 Hz, 1 kHz and 10 kHz and every order's highest point, the reference's own,
+/// and where the measurement comes near those.
 pub fn summary(s: &SweepData, freqs: &[f64]) -> Summary {
     let m = s.info.floor_margin.0;
+    let reference = s.reference_harmonics.as_deref().unwrap_or_default();
     Summary {
         thd: [100.0, 1000.0, 10_000.0]
             .into_iter()
@@ -137,12 +161,63 @@ pub fn summary(s: &SweepData, freqs: &[f64]) -> Summary {
             .iter()
             .map(|h| (h.order, peak(&h.curve, freqs, m)))
             .collect(),
+        reference_peaks: reference
+            .iter()
+            .map(|h| (h.order, peak(&h.curve, freqs, m)))
+            .collect(),
+        near_reference: s
+            .harmonics
+            .iter()
+            .filter_map(|h| {
+                let r = reference.iter().find(|r| r.order == h.order)?;
+                let near: Vec<f64> = (0..freqs.len())
+                    .filter(
+                        |&i| match (reading(&h.curve, i, m), reading(&r.curve, i, m)) {
+                            (Reading::Level(v), Reading::Level(rv)) => v < rv + REFERENCE_BOUND_DB,
+                            _ => false,
+                        },
+                    )
+                    .map(|i| freqs[i])
+                    .collect();
+                Some(NearReference {
+                    order: h.order,
+                    columns: near.len(),
+                    span_hz: (*near.first()?, *near.last()?),
+                })
+            })
+            .collect(),
     }
 }
 
 /// `H2`, …, `THD`.
 pub fn order_name(order: u8) -> String {
     format!("H{order}")
+}
+
+/// `reference H2`: the reference input's own order.
+pub fn reference_order_name(order: u8) -> String {
+    format!("reference {}", order_name(order))
+}
+
+/// `H2 within 6 dB of reference H2 at 12 points, 100 Hz – 1.00 kHz`.
+pub fn near_reference_text(n: &NearReference) -> String {
+    let (lo, hi) = n.span_hz;
+    let span = if lo == hi {
+        format!("at {}", format::freq_readout(lo))
+    } else {
+        format!(
+            "at {} points, {} – {}",
+            n.columns,
+            format::freq_readout(lo),
+            format::freq_readout(hi)
+        )
+    };
+    format!(
+        "{} within {} dB of {} {span}",
+        order_name(n.order),
+        format::fixed(REFERENCE_BOUND_DB, 0),
+        reference_order_name(n.order)
+    )
 }
 
 /// One sweep trace to draw.

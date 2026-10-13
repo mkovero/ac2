@@ -252,6 +252,11 @@ pub struct SweepData {
     pub harmonics: Vec<HarmonicCurve>,
     /// Total harmonic distortion (power sum of the orders in band).
     pub thd: DistortionCurve,
+    /// The reference input's own H2 … H5, separated against the emitted sweep as the
+    /// measurement's are: the loopback path's distortion, which bounds what the measurement's
+    /// harmonics can claim where the two paths share converters. `None` for a sweep imported
+    /// from an export written without them.
+    pub reference_harmonics: Option<Vec<HarmonicCurve>>,
     /// Impulse response.
     pub ir: TraceIr,
     /// Analysis facts.

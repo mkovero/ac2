@@ -226,6 +226,10 @@ pub(super) fn sweep_data() -> SweepData {
             },
         ],
         thd: curve(-39.5),
+        reference_harmonics: Some(vec![HarmonicCurve {
+            order: 2,
+            curve: curve(-95.0),
+        }]),
         ir: TraceIr {
             t0: Seconds(-0.75),
             dt: Seconds(1.0 / 48_000.0),

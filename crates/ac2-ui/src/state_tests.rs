@@ -678,6 +678,7 @@ fn sweep_data(id: u32) -> (Arc<TraceData>, Arc<GridDef>) {
                 curve: curve(-40.0),
             }],
             thd: curve(-40.0),
+            reference_harmonics: None,
             ir: TraceIr {
                 t0: Seconds(-0.1),
                 dt: Seconds(0.001),
