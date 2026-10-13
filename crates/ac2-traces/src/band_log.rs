@@ -35,6 +35,37 @@ const FIXED_COLUMNS: &str =
     "start_utc,start_ns,measured_s,unit,period,correction_db,sensitivity_db";
 const FIXED: usize = 7;
 
+/// Largest §13 correction, dB: impulse +10 dB with tonal +6 dB
+/// ([`ac2_proto::model::BandCorrection::db`]).
+pub const MAX_CORRECTION_DB: f64 = 16.0;
+
+/// Checks a row against what the band meter writes: a second with something measured (a
+/// row is only written when `measured > 0`), band levels per [`crate::spl_log::level_ok`],
+/// a correction within 0 … [`MAX_CORRECTION_DB`], a finite sensitivity, a start within
+/// [`crate::spl_log::MAX_START_NS`].
+pub fn check_row(r: &BandLogRow) -> Result<(), &'static str> {
+    if !(r.measured.0 > 0.0 && r.measured.0 <= 1.0) {
+        return Err("measured_s outside (0, 1]");
+    }
+    if r.start.0 > crate::spl_log::MAX_START_NS {
+        return Err("start_ns past the wall clock's range");
+    }
+    if !r
+        .levels
+        .iter()
+        .all(|l| crate::spl_log::level_ok(f64::from(*l)))
+    {
+        return Err("band level not finite or above 771 dBFS");
+    }
+    if !(0.0..=MAX_CORRECTION_DB).contains(&r.correction.0) {
+        return Err("correction_db outside 0 … 16 dB");
+    }
+    if r.sensitivity.is_some_and(|s| !s.0.is_finite()) {
+        return Err("sensitivity_db not finite");
+    }
+    Ok(())
+}
+
 /// One logged second of the band meter.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandLogRow {
@@ -209,14 +240,16 @@ pub fn import_csv(bytes: &[u8]) -> Result<BandLogRead, SplLogError> {
             };
             *o = (v - off) as f32;
         }
-        rows.push(BandLogRow {
+        let row = BandLogRow {
             start: WallNs(start),
             measured: Seconds(measured),
             levels,
             correction: Db(correction),
             period,
             sensitivity: sensitivity.map(Db),
-        });
+        };
+        check_row(&row).map_err(bad)?;
+        rows.push(row);
     }
     if !seen_columns {
         return Err(SplLogError::Line {

@@ -535,6 +535,10 @@ pub fn load_named(dir: &Path, name: &str) -> Result<(Session, Vec<SplLogOnDisk>)
         }
         let mic_curve = match (&t.meta.mic_curve, &t.mic_curve_points) {
             (Some(mc), Some(p)) => {
+                crate::check::mic_f_norm(mc.f_norm.0).map_err(|e| SessionError::Corrupt {
+                    path: dir.join(name),
+                    msg: format!("trace {}: {e}", t.meta.id),
+                })?;
                 Some(
                     crate::mic::correction(p, mc.f_norm.0).map_err(|e| SessionError::Corrupt {
                         path: dir.join(name),
@@ -550,14 +554,16 @@ pub fn load_named(dir: &Path, name: &str) -> Result<(Session, Vec<SplLogOnDisk>)
                 });
             }
         };
-        traces.push(StoredTrace {
+        let trace = StoredTrace {
             meta: t.meta.clone(),
             grid: t.grid.clone(),
             columns: imp.columns,
             sweep: imp.sweep,
             ir: imp.ir,
             mic_curve,
-        });
+        };
+        crate::check::trace(&trace).map_err(|e| corrupt(format!("trace {}: {e}", t.meta.id)))?;
+        traces.push(trace);
     }
     let mut spl_logs = Vec::with_capacity(m.spl_logs.len());
     let mut on_disk = Vec::with_capacity(m.spl_logs.len());
@@ -567,6 +573,12 @@ pub fn load_named(dir: &Path, name: &str) -> Result<(Session, Vec<SplLogOnDisk>)
             return Err(SessionError::Corrupt {
                 path: dir.join(name),
                 msg: format!("SPL log file {f:?} is outside the session"),
+            });
+        }
+        if m.spl_logs.iter().filter(|o| o.meas == l.meas).count() > 1 {
+            return Err(SessionError::Corrupt {
+                path: dir.join(name),
+                msg: format!("measurement {} has two SPL logs", l.meas),
             });
         }
         let Some(sm) = m.measurements.iter().find(|sm| sm.id == l.meas) else {

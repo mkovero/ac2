@@ -113,7 +113,11 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
             if let Some(v) = m.strip_prefix("name: ") {
                 name = Some(v.to_owned());
             } else if let Some(v) = m.strip_prefix("grid: ") {
-                grid = Some(serde_json::from_str::<GridDef>(v).map_err(|e| bad(no, "grid", &e))?);
+                let g = serde_json::from_str::<GridDef>(v).map_err(|e| bad(no, "grid", &e))?;
+                // Before anything is formed on it: a crafted grid may hold no columns,
+                // billions of them, or none at a finite frequency.
+                crate::check::grid(&g).map_err(|e| bad(no, "grid", &e))?;
+                grid = Some(g);
             } else if let Some(v) = m.strip_prefix("kind: ") {
                 kind = kind_from_header(v).ok_or_else(|| {
                     fail(Some(no), ImportProblem::BadHeader, format!("kind {v:?}"))
@@ -124,7 +128,9 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
                     .ok_or_else(|| bad(no, "delay_ms", &format!("{v:?} is not a number")))?;
                 delay = Some(Seconds(ms / 1000.0));
             } else if let Some(v) = m.strip_prefix("sweep_info: ") {
-                info = Some(serde_json::from_str(v).map_err(|e| bad(no, "sweep_info", &e))?);
+                let i = serde_json::from_str(v).map_err(|e| bad(no, "sweep_info", &e))?;
+                crate::check::sweep_info(&i).map_err(|e| bad(no, "sweep_info", &e))?;
+                info = Some(i);
             } else if let Some(v) = m.strip_prefix("sweep_unresolved: ") {
                 unresolved =
                     Some(serde_json::from_str(v).map_err(|e| bad(no, "sweep_unresolved", &e))?);
@@ -132,10 +138,14 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
                 room = Some(serde_json::from_str(v).map_err(|e| bad(no, "room_metrics", &e))?);
             } else if let Some(v) = m.strip_prefix("sweep_ir: ") {
                 let h = serde_json::from_str(v).map_err(|e| bad(no, "sweep_ir", &e))?;
-                ir_head = Some((no, IrAnnounce::Sweep(h)));
+                let a = IrAnnounce::Sweep(h);
+                a.check().map_err(|e| bad(no, "sweep_ir", &e))?;
+                ir_head = Some((no, a));
             } else if let Some(v) = m.strip_prefix("transfer_ir: ") {
                 let h = serde_json::from_str(v).map_err(|e| bad(no, "transfer_ir", &e))?;
-                ir_head = Some((no, IrAnnounce::Transfer(h)));
+                let a = IrAnnounce::Transfer(h);
+                a.check().map_err(|e| bad(no, "transfer_ir", &e))?;
+                ir_head = Some((no, a));
             } else if m.starts_with("mic_curve: ") {
                 mic_curve = true;
             }
@@ -203,6 +213,19 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
         level_db: column(i),
         floor_db: column(i + 1),
     };
+    // Distortion levels share the frequency rows (`table` refused ±∞ text); a finite level
+    // beyond what any math keeps finite is refused here.
+    if let Some((no, _)) = t
+        .rows
+        .iter()
+        .find(|(_, r)| r[base..].iter().any(|v| !crate::check::db_ok(number32(v))))
+    {
+        return Err(fail(
+            Some(*no),
+            ImportProblem::OutOfRange,
+            "distortion level out of range",
+        ));
+    }
     let distortion = (!orders.is_empty()).then(|| {
         let harmonics = orders
             .iter()
@@ -304,9 +327,12 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
 }
 
 /// The impulse-response table whose column header is line `at` (`t_s,linear,etc_db`).
-/// Exactly `h.points` rows; `inf` is accepted here, as a dB of an all-zero stretch.
+/// Exactly `h.points` rows (the announcement was checked before: the vectors are sized
+/// from it); finite samples, and an ETC finite or `-inf` (the dB of an all-zero stretch).
 fn ir_table(lines: &[(usize, &str)], at: usize, a: IrAnnounce) -> Result<TraceIr, ImportError> {
     let h = a.table();
+    a.check()
+        .map_err(|e| fail(Some(at), ImportProblem::BadHeader, e))?;
     let mut linear = Vec::with_capacity(h.points as usize);
     let mut etc_db = Vec::with_capacity(h.points as usize);
     for &(no, l) in lines.iter().filter(|(n, _)| *n > at) {
@@ -331,8 +357,16 @@ fn ir_table(lines: &[(usize, &str)], at: usize, a: IrAnnounce) -> Result<TraceIr
                 )
             })
         };
-        linear.push(v(f[1])?);
-        etc_db.push(v(f[2])?);
+        let (l, e) = (v(f[1])?, v(f[2])?);
+        if !l.is_finite() || !(e.is_finite() || e == f32::NEG_INFINITY) {
+            return Err(fail(
+                Some(no),
+                ImportProblem::OutOfRange,
+                "impulse-response sample not finite or ETC NaN / +inf",
+            ));
+        }
+        linear.push(l);
+        etc_db.push(e);
         if linear.len() > TraceIr::MAX_POINTS as usize {
             return Err(fail(
                 Some(no),

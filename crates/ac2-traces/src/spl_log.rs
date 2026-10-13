@@ -26,6 +26,47 @@ pub const HEADER_LINE: &str = "# ac2 spl log v2";
 const COLUMNS: &str = "start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,\
                        sensitivity_db,position_db,position_peak_db";
 
+/// Highest level a row can hold, dBFS. The meter squares f32 samples, so no mean square or
+/// peak exceeds `f32::MAX²`: 20·log10(f32::MAX) ≈ 770.6 dB. A higher level is not a
+/// measurement, and its energy (10^(L/10)) summed over a log's seconds would overflow.
+pub const MAX_LEVEL_DBFS: f64 = 771.0;
+
+/// Latest row start, Unix ns: the wall clock's signed 64-bit range (year 2262). Leaves room
+/// for the second a row spans (`start + 1 s`) in u64 arithmetic.
+pub const MAX_START_NS: u64 = i64::MAX as u64;
+
+/// Whether `v` is a level the meter writes: finite and at most [`MAX_LEVEL_DBFS`], or −∞
+/// (a second without energy or without a peak). NaN and +∞ never come from a measured
+/// second.
+pub fn level_ok(v: f64) -> bool {
+    v == f64::NEG_INFINITY || (v.is_finite() && v <= MAX_LEVEL_DBFS)
+}
+
+/// Checks a row against what the meter writes: a second with something measured (a row is
+/// only written when `measured > 0`), levels per [`level_ok`], a finite sensitivity, a
+/// valid measuring-position correction, a start within [`MAX_START_NS`].
+pub fn check_row(r: &SplLogRow) -> Result<(), &'static str> {
+    if !(r.measured.0 > 0.0 && r.measured.0 <= 1.0) {
+        return Err("measured_s outside (0, 1]");
+    }
+    if r.start.0 > MAX_START_NS {
+        return Err("start_ns past the wall clock's range");
+    }
+    if ![r.laeq, r.lceq, r.lzeq, r.lcpeak, r.lafmax]
+        .iter()
+        .all(|l| level_ok(l.0))
+    {
+        return Err("level not finite or above 771 dBFS");
+    }
+    if r.sensitivity.is_some_and(|s| !s.0.is_finite()) {
+        return Err("sensitivity_db not finite");
+    }
+    if r.position.is_some_and(|p| !p.is_valid()) {
+        return Err("position correction not finite or beyond ±30 dB");
+    }
+    Ok(())
+}
+
 /// What the header names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplLogInfo {
@@ -194,9 +235,6 @@ pub fn import_csv(bytes: &[u8]) -> Result<SplLogRead, SplLogError> {
         }
         let start: u64 = f[1].parse().map_err(|_| bad("bad start_ns"))?;
         let measured: f64 = f[2].parse().map_err(|_| bad("bad measured_s"))?;
-        if !(0.0..=1.0).contains(&measured) {
-            return Err(bad("measured_s outside 0…1"));
-        }
         let opt_db = |t: &str, what: &str| {
             if t.is_empty() {
                 Ok(None)
@@ -228,7 +266,7 @@ pub fn import_csv(bytes: &[u8]) -> Result<SplLogRead, SplLogError> {
                 .map(|v| Dbfs(v - off))
                 .ok_or_else(|| bad("bad level"))
         };
-        rows.push(SplLogRow {
+        let row = SplLogRow {
             start: WallNs(start),
             measured: Seconds(measured),
             laeq: lv(f[4])?,
@@ -238,7 +276,9 @@ pub fn import_csv(bytes: &[u8]) -> Result<SplLogRead, SplLogError> {
             lafmax: lv(f[8])?,
             sensitivity: sensitivity.map(Db),
             position,
-        });
+        };
+        check_row(&row).map_err(bad)?;
+        rows.push(row);
     }
     if !seen_columns {
         return Err(SplLogError::Line {

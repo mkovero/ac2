@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn session_sample() -> Session {
+pub(super) fn session_sample() -> Session {
     let mut a = delayed(4, 2, 0.0125, 0.0125, 0.95);
     a.meta.edit.slot = Some(1);
     a.columns.mag_db[200] = 9.0;

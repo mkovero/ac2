@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn curve_points() -> Vec<[f64; 2]> {
+pub(super) fn curve_points() -> Vec<[f64; 2]> {
     // A mic reading +3 dB at 10 kHz and −2 dB at 50 Hz, flat at 1 kHz.
     vec![[50.0, -2.0], [1000.0, 0.0], [10_000.0, 3.0]]
 }
@@ -20,7 +20,7 @@ fn curve_ref() -> MicCurveRef {
     }
 }
 
-fn with_curve(mut t: StoredTrace) -> StoredTrace {
+pub(super) fn with_curve(mut t: StoredTrace) -> StoredTrace {
     t.mic_curve = Some(ac2_traces::mic::correction(&curve_points(), 1000.0).unwrap());
     t.meta.mic_curve = Some(Box::new(TraceMicCurve {
         mic: "MM1 34804".into(),

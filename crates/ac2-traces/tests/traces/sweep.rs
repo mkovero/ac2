@@ -230,7 +230,7 @@ fn sweep_csv_and_session_round_trip() {
 
 /// A transfer trace as captured with the IR pane's impulse response: 4096 samples at
 /// 48 kHz, time zero at the inserted delay, a decaying arrival 2.5 ms after it.
-fn transfer_with_ir(id: u32) -> StoredTrace {
+pub(super) fn transfer_with_ir(id: u32) -> StoredTrace {
     let mut t = delayed(id, 2, 0.0125, 0.0100, 0.95);
     let fs = 48_000.0;
     let n = 4096;

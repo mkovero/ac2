@@ -150,6 +150,20 @@ impl IrAnnounce {
         }
     }
 
+    /// The announced table's length and timing, checked before the table is read (its
+    /// vectors are sized from `points`), and a transfer IR's sample rate.
+    fn check(self) -> Result<(), String> {
+        let h = self.table();
+        crate::check::ir_points(h.points)?;
+        crate::check::ir_timing(h.t0.0, h.dt.0)?;
+        if let Self::Transfer(t) = self
+            && !(t.sample_rate.0.is_finite() && t.sample_rate.0 > 0.0)
+        {
+            return Err("impulse response sample rate must be finite and above 0".into());
+        }
+        Ok(())
+    }
+
     fn table(self) -> IrHeader {
         match self {
             Self::Sweep(h) => h,

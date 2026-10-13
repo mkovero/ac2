@@ -11,6 +11,7 @@
 
 pub mod band_levels;
 pub mod band_log;
+pub mod check;
 pub mod columns;
 pub mod ir_wav;
 pub mod math;

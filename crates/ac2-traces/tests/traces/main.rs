@@ -16,6 +16,7 @@ use ac2_traces::text::{export_csv, import};
 
 mod averaging;
 mod import;
+mod load_checks;
 mod mic_curve;
 mod sessions;
 mod smoothing;

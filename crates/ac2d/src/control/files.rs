@@ -657,7 +657,49 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
             ));
         }
     }
+    // An SPL log belongs to an SPL meter of the session, one log each, and holds rows the
+    // meter could have written: a log is the record of a meter, never kept without one.
+    for l in &data.spl_logs {
+        let id = l.info.meas;
+        match data.measurements.iter().find(|m| m.id == id) {
+            None => {
+                return Err(perr(
+                    ErrorCode::Invalid,
+                    format!("SPL log of measurement {id}, which the session does not hold"),
+                ));
+            }
+            Some(m) if !matches!(m.config.kind, MeasKind::Spl { .. }) => {
+                return Err(perr(
+                    ErrorCode::Invalid,
+                    format!("SPL log of measurement {id}, which is not an SPL meter"),
+                ));
+            }
+            Some(_) => {}
+        }
+        if data.spl_logs.iter().filter(|o| o.info.meas == id).count() > 1 {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("measurement {id} has two SPL logs"),
+            ));
+        }
+        let row = |i: usize, e: &str| {
+            perr(
+                ErrorCode::Invalid,
+                format!("SPL log of measurement {id}, row {}: {e}", i + 1),
+            )
+        };
+        for (i, r) in l.rows.iter().enumerate() {
+            ac2_traces::spl_log::check_row(r).map_err(|e| row(i, e))?;
+        }
+        for (i, r) in l.bands.iter().enumerate() {
+            ac2_traces::band_log::check_row(r).map_err(|e| row(i, e))?;
+        }
+    }
     for t in &data.traces {
+        // Data a crafted file could hold that no capture produces (columns off the grid,
+        // non-finite values, an unbounded impulse response).
+        ac2_traces::check::trace(t)
+            .map_err(|e| perr(ErrorCode::Invalid, format!("trace {}: {e}", t.meta.id)))?;
         // A saved edit meets the limits `trace.update` enforces.
         meta::check_values(&t.meta.edit)
             .map_err(|e| perr(ErrorCode::Invalid, format!("trace {}: {e}", t.meta.id)))?;

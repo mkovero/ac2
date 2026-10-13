@@ -239,7 +239,8 @@ pub(super) fn validate(t: &Table) -> Result<Raw, ImportError> {
         }
         freqs.push(f);
         let m = number32(&r[lay.mag]);
-        if m.is_infinite() {
+        // A finite f64 text can still be ±∞ as f32, or beyond what later math keeps finite.
+        if !crate::check::db_ok(m) {
             return Err(fail(
                 Some(*no),
                 ImportProblem::OutOfRange,
