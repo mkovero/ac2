@@ -385,6 +385,49 @@ against the sine.
   it rebuilds the results tables of `comparison.md` from the baselines, and a test fails
   while they are stale.
 
+## Recordings
+
+The runs behind the baselines and `reports/` can be fetched and re-analysed without the rig:
+no JACK, REW, ac2d or audio device, only Python with numpy (matplotlib for the plots). Each run
+is one `<run>.tar.gz`; `manifest.json` beside them gives each archive's and each file's
+SHA-256 and size, and which baseline or report cites which run (`cites`). An archive holds
+what an analysis-only re-run reads: the captures and REW exports, the sine stage's results
+and noise, the ac2 exports, `cal/`, the run's `manifest.json` and `rig.toml`, and
+`report/results.json` (which `repeats`, `dutcov`, `compare` and `baseline` read). The
+rewritable report (`report.md`, plots), `ac2.log` and REW's `rec_meas.wav`/`rec_ref.wav` (the
+two columns of `rec.wav`, split for REW's import) stay out.
+
+Not published yet: the manifest's URL template is a placeholder (`recordings.invalid`), so
+`fetch` refuses it until the archives have a home; pass `--url-template` for a local copy.
+
+```
+# into $CROSSCHECK_RUNS, else runs/ here (where osm.toml's recordings are looked up too)
+python -m crosscheck data fetch --manifest <URL>/manifest.json [RUN ...]
+python -m crosscheck data fetch --manifest manifest.json --url-template 'file:///mnt/usb/{archive}'
+python -m crosscheck data verify --manifest <URL>/manifest.json   # re-hash what is unpacked
+
+python -m crosscheck compare runs/20261011T191033Z       # the published results against baselines/
+python -m crosscheck analyse runs/20261011T191033Z       # re-analyse: rewrites the run's report/
+python -m crosscheck compare runs/20261011T191033Z       # this suite's analysis against baselines/
+python -m crosscheck repeats runs/20261009T232923Z runs/20261010T1*Z        # reports/genelec-30-repeats.md
+python -m crosscheck dutcov runs/20261011T005229Z runs/20261011T010051Z    # reports/dut-coverage.md
+```
+
+Before `analyse`, `repeats` and `dutcov` read the published `report/results.json` and
+reproduce the committed reports; after it they read this suite's analysis (`analyse --out
+DIR` keeps the published copy, `data verify` says whether it is still the published one).
+`fetch` downloads each archive to a
+`.part` file, refuses it when its size or SHA-256 differs from the manifest, and unpacks it to
+a staging directory, accepting only regular files under `<run>/` that the manifest lists, at
+their listed size and hash, within the listed entry count and bytes; the run directory appears
+only when all of that held. A run already present and matching is skipped.
+
+Packing (operator, from the rig's runs): `python -m crosscheck data pack <run or dir> ...
+--out DIR [--url-template 'https://…/{archive}'] [--all-files]`. The archives are
+byte-reproducible (fixed times, owners and order), so a re-pack of the same files hashes the
+same. Runs that the baselines or reports cite but that were not packed are listed in the
+manifest (`cited_not_packed`).
+
 ## Fixtures (2026-10-07)
 
 `python -m crosscheck analyse /work/ac2-scratch/crosscheck-fixtures` loads the hand run:
