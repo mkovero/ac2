@@ -21,7 +21,7 @@ use crate::primitives::{
     Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
-use crate::view::{LeqLayout, LeqStatusText, LeqStyle};
+use crate::view::{LeqLayout, LeqStyle, PlotChrome};
 
 mod caption;
 mod columns;
@@ -325,7 +325,7 @@ pub(crate) fn leq_scene_under<T>(
             range,
             tiles_area,
             v.stale.is_some(),
-            v.layout.status,
+            v.chrome,
             theme,
         ));
     } else {
@@ -339,7 +339,7 @@ pub(crate) fn leq_scene_under<T>(
         let lines_below = v
             .tiles
             .iter()
-            .map(|t| tile_below(t, v.layout.status).len())
+            .map(|t| tile_below(t, v.chrome).len())
             .max()
             .unwrap_or(0);
         for (i, t) in v.tiles.iter().enumerate() {
@@ -357,7 +357,7 @@ pub(crate) fn leq_scene_under<T>(
                 v.stale.is_some(),
                 shared.as_deref(),
                 lines_below,
-                v.layout.status,
+                v.chrome,
                 theme,
             );
             rects.push(r);

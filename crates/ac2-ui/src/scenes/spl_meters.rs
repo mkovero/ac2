@@ -107,9 +107,10 @@ fn easing_from<'a>(st: &'a AppState, tf: &TopicFrame, now: Now) -> Option<(&'a F
     ac2_scene::bar_ease::easing(since).then_some((from.as_ref(), since))
 }
 
-/// What the band view shows of meter `m`, with its `band_leq` frame.
+/// What the band view of pane `pane` shows of meter `m`, with its `band_leq` frame.
 fn band_view<'a>(
     st: &'a AppState,
+    pane: PaneId,
     m: &Measurement,
     now: Now,
 ) -> Option<(BandLeqView, &'a TopicFrame)> {
@@ -127,7 +128,7 @@ fn band_view<'a>(
         Freshness::AudioStopped { .. } => Some("AUDIO STOPPED".into()),
         Freshness::Fresh { .. } => None,
     };
-    let mut text = band_leq_text(bands, f, st.view.spl.layout.status);
+    let mut text = band_leq_text(bands, f, st.pane_modes(pane).chrome);
     if let Some((from, since)) = easing_from(st, tf, now)
         && let FrameData::BandLeq(p) = &from.data
     {
@@ -156,7 +157,7 @@ pub fn band_leq(
     size: Viewport,
     now: Now,
 ) -> Option<BandLeqScene> {
-    let (v, tf) = spl_meters(st, pane).find_map(|m| band_view(st, m, now))?;
+    let (v, tf) = spl_meters(st, pane).find_map(|m| band_view(st, pane, m, now))?;
     let status = status(st, &[tf], None, now);
     Some(band_leq_scene(&v, &status, theme, size))
 }

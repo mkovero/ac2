@@ -137,11 +137,7 @@ impl AppState {
             }
             LeqMsg::Cycle(f, step) => {
                 d.focus = f;
-                if f == crate::leq_dialog::Focus::StatusText {
-                    self.toggle_leq_status_text();
-                } else {
-                    d.cycle(step);
-                }
+                d.cycle(step);
             }
             LeqMsg::Add(f) => {
                 d.focus = f;

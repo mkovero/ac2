@@ -443,9 +443,10 @@ impl AppState {
             }
             C::PlotChrome => {
                 let title = self.layout.focused().title();
+                let spl = self.layout.focus_kind() == PaneKind::Spl;
                 let c = &mut self.modes_mut().chrome;
                 *c = c.next();
-                let name = c.name();
+                let name = if spl { c.spl_name() } else { c.name() };
                 self.toast(format!("{title}: {name}"));
             }
             // An IR picture navigates its time and value axes with the same keys.
@@ -642,7 +643,6 @@ impl AppState {
             | C::SplShowBands
             | C::SplLeqStyle
             | C::SplLeqHistory
-            | C::SplLeqStatusText
             | C::SplNewLog
             | C::SplTimeWeighting
             | C::SplWeighting

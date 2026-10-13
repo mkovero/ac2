@@ -641,33 +641,11 @@ pub enum LeqStyle {
     Tiles,
 }
 
-/// What the Leq views write beside their colours.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum LeqStatusText {
-    /// The state words (`OK`, `NEAR`, `OVER`), what to stay under (`stay ≤ 101.5 dB`) and
-    /// the limit (`limit 99.0 dB`), besides the colours.
-    #[default]
-    WordsAndLimits,
-    /// The colours carry the state alone: read live from a distance, the bar's colour and
-    /// its limit line say it. Every other word (on course, cooling down, not calibrated,
-    /// the values and window names) stays.
-    ColoursOnly,
-}
-
-impl LeqStatusText {
-    /// The state words and the limit texts are written.
-    pub fn words(self) -> bool {
-        self == LeqStatusText::WordsAndLimits
-    }
-}
-
-/// The Leq view's layout: the windows' style, whether the history strip is under them, and
-/// whether the state is written out or left to the colours.
+/// The Leq view's layout: the windows' style and whether the history strip is under them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct LeqLayout {
     pub style: LeqStyle,
     pub history: bool,
-    pub status: LeqStatusText,
 }
 
 /// What the SPL pane shows.
@@ -774,6 +752,23 @@ impl PlotChrome {
     /// The cursor line and its readout.
     pub fn cursor(self) -> bool {
         self != Self::Bare
+    }
+
+    /// The SPL views' state words (`OK`, `NEAR`, `OVER`) and limit texts (`stay ≤ … dB`,
+    /// `limit … dB`). Read across a room, a bar's colour and its limit line already say
+    /// the state, so the words go with the grid; every other word (on course, cooling
+    /// down, not calibrated, the values and window names) stays.
+    pub fn limit_text(self) -> bool {
+        self == Self::Full
+    }
+
+    /// [`Self::name`] on an SPL pane, where the step past full takes the limit text too.
+    pub fn spl_name(self) -> &'static str {
+        match self {
+            Self::Full => "words and limits",
+            Self::NoGrid => "no limit text",
+            Self::Bare => "no limit text, traces only",
+        }
     }
 }
 

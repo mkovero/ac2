@@ -223,8 +223,6 @@ mod tests {
             ("leq columns", CommandId::SplLeqStyle),
             ("leq tiles", CommandId::SplLeqStyle),
             ("leq history", CommandId::SplLeqHistory),
-            ("colours only", CommandId::SplLeqStatusText),
-            ("leq status text", CommandId::SplLeqStatusText),
             ("meter + leq", CommandId::SplShowMeterLeq),
             ("pane: the meter", CommandId::SplShowMeter),
             ("pane: the leq", CommandId::SplShowLeq),

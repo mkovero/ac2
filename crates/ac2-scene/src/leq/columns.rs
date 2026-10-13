@@ -19,7 +19,7 @@ use crate::format;
 use crate::primitives::{Color, FillRect, HAlign, Polyline, Rect, Stroke, VAlign};
 use crate::theme::{Theme, contrast_ratio};
 
-use super::{LeqStatusText, LeqTile, TileKind, TileState, length, w_letter};
+use super::{LeqTile, PlotChrome, TileKind, TileState, length, w_letter};
 
 /// A judged scale starts this far below the lowest limit…
 pub const BELOW_LIMIT_DB: f64 = 30.0;
@@ -296,11 +296,11 @@ impl Row {
 /// what it holds for (the next minute, or until the window is full): the level to stay
 /// under is what is acted on, and a second line competes with it.
 ///
-/// With colours only (`status`) the column's colour is the state and its limit line the
+/// Without limit text (`chrome`) the column's colour is the state and its limit line the
 /// limit: `OK`, `NEAR`, `OVER`, the level to stay under and the limit are not written; on
 /// course, cooling down and not calibrated are, as no colour says them.
-pub(super) fn detail_lines(t: &LeqTile, status: LeqStatusText) -> [Vec<String>; 3] {
-    let words = status.words();
+pub(super) fn detail_lines(t: &LeqTile, chrome: PlotChrome) -> [Vec<String>; 3] {
+    let words = chrome.limit_text();
     let state = match t.state {
         TileState::Over | TileState::Ok if !words => vec![],
         TileState::Near if !words && !t.on_course => vec![],
@@ -464,7 +464,7 @@ pub(super) fn draw_columns(
     range: Range,
     area: Rect,
     stale: bool,
-    status: LeqStatusText,
+    chrome: PlotChrome,
     theme: &Theme,
 ) -> LeqColumns {
     // Windows by length, then the peak limits (LCpeak, LAFmax) at the right: a peak is
@@ -556,7 +556,7 @@ pub(super) fn draw_columns(
 
     // Header rows: which exist in any column, then drop the least important while the bar
     // would be too short. Unreadably small text is not drawn at all.
-    let lines: Vec<[Vec<String>; 3]> = sorted.iter().map(|t| detail_lines(t, status)).collect();
+    let lines: Vec<[Vec<String>; 3]> = sorted.iter().map(|t| detail_lines(t, chrome)).collect();
     let progress: Vec<Vec<String>> = sorted.iter().map(|t| progress_line(t)).collect();
     let readable = small >= READABLE;
     let mut rows = [0, 1, 2].map(|r| readable && lines.iter().any(|l| !l[r].is_empty()));

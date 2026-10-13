@@ -9,7 +9,7 @@ use ac2_proto::units::{Db, DbSpl, Hz, MeasId, Seconds, WallNs};
 use super::*;
 use crate::banner::Status;
 use crate::theme::Theme;
-use crate::view::LeqStatusText;
+use crate::view::PlotChrome;
 
 fn flags(j: LeqJudgement, on_course: bool) -> LeqFlags {
     let f = match j {
@@ -153,7 +153,7 @@ fn frame() -> BandLeqFrame {
 
 #[test]
 fn a_band_over_is_named_with_its_window_and_how_long_to_back_off() {
-    let t = band_leq_text(&cfg(), &frame(), LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &frame(), PlotChrome::Full);
     assert_eq!(t.rows.len(), 2);
     let w = &t.rows[0];
     assert_eq!(w.bars.len(), 11);
@@ -194,7 +194,7 @@ fn a_band_over_is_named_with_its_window_and_how_long_to_back_off() {
 
 #[test]
 fn a_second_window_has_its_own_weighting_caption_and_judgement() {
-    let t = band_leq_text(&cfg(), &frame(), LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &frame(), PlotChrome::Full);
     let w = &t.rows[1];
     assert_eq!(w.name, "LAeq 15 min");
     // One limit day and night: no period; filling half way.
@@ -219,7 +219,7 @@ fn the_headline_follows_the_worst_window() {
     f.flags[k] = flags(LeqJudgement::Over, false);
     f.leq[k] = 91.0;
     f.recover[k] = 90.0;
-    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &f, PlotChrome::Full);
     assert_eq!(t.worst, Some((1, 5)));
     assert_eq!(
         t.headline,
@@ -229,7 +229,7 @@ fn the_headline_follows_the_worst_window() {
     f.flags[k] = flags(LeqJudgement::Ok, false);
     f.leq[k] = 62.0;
     f.recover[k] = f32::NAN;
-    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &f, PlotChrome::Full);
     assert_eq!(t.worst, Some((0, 4)));
     assert_eq!(
         t.headline,
@@ -241,7 +241,7 @@ fn the_headline_follows_the_worst_window() {
 
 #[test]
 fn near_on_course_ok_and_unlimited_bands() {
-    let t = band_leq_text(&cfg(), &frame(), LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &frame(), PlotChrome::Full);
     let w = &t.rows[0];
     let near = &w.bars[4];
     assert_eq!(near.state_text.as_deref(), Some("ON COURSE"));
@@ -266,7 +266,7 @@ fn without_a_transfer_the_limits_are_judged_at_the_mic_and_nothing_asks_for_one(
     let mut f = frame();
     f.meta.limits_from = BandLimitPlace::AtMic;
     f.meta.predicted = None;
-    let t = band_leq_text(&c, &f, LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&c, &f, PlotChrome::Full);
     assert_eq!(t.limits_from, None);
     assert_eq!(t.predicted, None);
     assert!(t.headline.starts_with("63 Hz band LZeq 60 min 3.2 dB over"));
@@ -277,7 +277,7 @@ fn without_a_transfer_the_limits_are_judged_at_the_mic_and_nothing_asks_for_one(
         ..transfer("receiving room")
     });
     assert_eq!(
-        band_leq_text(&c, &f, LeqStatusText::WordsAndLimits)
+        band_leq_text(&c, &f, PlotChrome::Full)
             .limits_from
             .as_deref(),
         Some(
@@ -297,7 +297,7 @@ fn filling_period_change_correction_and_offline() {
         w.period_after_horizon = BandPeriod::Night;
     }
     f.meta.correction = Db(8.0);
-    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &f, PlotChrome::Full);
     let w = &t.rows[0];
     assert_eq!(
         w.caption(),
@@ -314,7 +314,7 @@ fn filling_period_change_correction_and_offline() {
         w.period_after_horizon = BandPeriod::Day;
     }
     assert_eq!(
-        band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits).rows[0]
+        band_leq_text(&cfg(), &f, PlotChrome::Full).rows[0]
             .period
             .as_deref(),
         Some("night limits (22–07) · headroom for the day limits")
@@ -339,7 +339,7 @@ fn uncalibrated_bands_are_dbfs_and_not_judged() {
         limit: Some(DbSpl(25.0)),
         judgement: LeqJudgement::NotCalibrated,
     });
-    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &f, PlotChrome::Full);
     assert_eq!(
         t.headline,
         "not calibrated: band levels in dBFS, limits not judged"
@@ -360,7 +360,7 @@ fn uncalibrated_bands_are_dbfs_and_not_judged() {
 fn nothing_measured_no_band_limits_and_no_windows() {
     let mut f = frame();
     f.leq.iter_mut().for_each(|l| *l = f32::NAN);
-    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &f, PlotChrome::Full);
     assert_eq!(t.headline, "waiting for the first second");
     assert_eq!(t.rows[0].bars[0].value, "—");
     let mut f = frame();
@@ -375,7 +375,7 @@ fn nothing_measured_no_band_limits_and_no_windows() {
         limit: None,
         judgement: LeqJudgement::NoLimit,
     });
-    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &f, PlotChrome::Full);
     assert_eq!(t.headline, "no band limits");
     assert_eq!(
         t.predicted.expect("predicted").line,
@@ -383,11 +383,11 @@ fn nothing_measured_no_band_limits_and_no_windows() {
     );
     f.meta.windows.clear();
     f.leq.clear();
-    let t = band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &f, PlotChrome::Full);
     assert!(t.rows.is_empty());
     assert_eq!(t.bands, "no bands");
     assert_eq!(
-        band_leq_text(&cfg(), &f, LeqStatusText::WordsAndLimits).headline,
+        band_leq_text(&cfg(), &f, PlotChrome::Full).headline,
         "no band windows"
     );
 }
@@ -460,7 +460,7 @@ fn view(c: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqView {
     BandLeqView {
         meter: "FOH SPL".into(),
         cal: "M30 · calibrated".into(),
-        text: band_leq_text(c, f, LeqStatusText::WordsAndLimits),
+        text: band_leq_text(c, f, PlotChrome::Full),
         stale: None,
     }
 }
@@ -639,7 +639,7 @@ fn a_single_band_window_is_one_bar_named_by_its_band() {
     f.allowed = vec![f32::NAN];
     f.recover = vec![f32::NAN];
     f.flags = vec![flags(LeqJudgement::Ok, false)];
-    let t = band_leq_text(&c, &f, LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&c, &f, PlotChrome::Full);
     assert_eq!(t.bands, "20 Hz");
     assert_eq!(t.rows.len(), 1);
     let w = &t.rows[0];
@@ -672,7 +672,7 @@ fn a_single_band_window_is_one_bar_named_by_its_band() {
 /// another weighting or another way of judging day and night is a row of its own.
 #[test]
 fn windows_are_grouped_by_length_and_weighting_low_band_to_high() {
-    let t = band_leq_text(&cfg(), &frame(), LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&cfg(), &frame(), PlotChrome::Full);
     assert_eq!(t.rows.len(), 2);
     for r in &t.rows {
         let hz: Vec<f64> = r.bars.iter().map(|b| b.nominal_hz).collect();
@@ -684,7 +684,7 @@ fn windows_are_grouped_by_length_and_weighting_low_band_to_high() {
     // 63 Hz LZeq 60 min without a day offset: one limit day and night, its own row.
     let mut c = cfg();
     c.windows[5].day_offset = None;
-    let t = band_leq_text(&c, &frame(), LeqStatusText::WordsAndLimits);
+    let t = band_leq_text(&c, &frame(), PlotChrome::Full);
     let names: Vec<String> = t.rows.iter().map(BandRowText::caption).collect();
     assert_eq!(
         names,
@@ -734,13 +734,15 @@ fn an_easing_bar_moves_only_its_length() {
     assert!(a.iter().zip(&b).all(|(a, b)| a.bottom() == b.bottom()));
 }
 
-/// Colours only: the state words, what to stay under and the limits are not written —
+/// T past full: the state words, what to stay under and the limits are not written —
 /// not on the bars, under their labels, in the headline or on the predicted line; the
 /// colours, the limit marks, the values and every other word stay.
 #[test]
-fn colours_only_leaves_the_state_to_the_colours() {
-    let words = band_leq_text(&cfg(), &frame(), LeqStatusText::WordsAndLimits);
-    let t = band_leq_text(&cfg(), &frame(), LeqStatusText::ColoursOnly);
+fn past_full_leaves_the_state_to_the_colours() {
+    let words = band_leq_text(&cfg(), &frame(), PlotChrome::Full);
+    let t = band_leq_text(&cfg(), &frame(), PlotChrome::NoGrid);
+    // The band view has nothing else for traces only to take away.
+    assert_eq!(t, band_leq_text(&cfg(), &frame(), PlotChrome::Bare));
     let w = &t.rows[0];
     let over = &w.bars[5];
     assert_eq!(over.state, TileState::Over);
@@ -784,7 +786,7 @@ fn colours_only_leaves_the_state_to_the_colours() {
     f.flags[k] = flags(LeqJudgement::Ok, false);
     f.leq[k] = 70.0;
     f.recover[k] = f32::NAN;
-    let t = band_leq_text(&cfg(), &f, LeqStatusText::ColoursOnly);
+    let t = band_leq_text(&cfg(), &f, PlotChrome::NoGrid);
     assert_eq!(
         t.headline,
         "50 Hz band LZeq 60 min 1.5 dB under its limit · on course to go over"
@@ -792,18 +794,20 @@ fn colours_only_leaves_the_state_to_the_colours() {
     assert_eq!(t.headline_state, TileState::Near);
 }
 
-/// The band view in colours only draws the same colours and marks, without the words.
+/// The band view past full draws the same colours, limit marks and allowed-level marks,
+/// without the words.
 #[test]
-fn colours_only_band_scene() {
-    let at = |status| {
+fn past_full_band_scene() {
+    let at = |chrome| {
         let v = BandLeqView {
-            text: band_leq_text(&cfg(), &frame(), status),
+            text: band_leq_text(&cfg(), &frame(), chrome),
             ..view(&cfg(), &frame())
         };
         band_leq_scene(&v, &Status::default(), &Theme::dark(), SIZE)
     };
-    let words = at(LeqStatusText::WordsAndLimits);
-    let colours = at(LeqStatusText::ColoursOnly);
+    let words = at(PlotChrome::Full);
+    let colours = at(PlotChrome::NoGrid);
+    assert_eq!(colours, at(PlotChrome::Bare));
     let said = |t: &String| {
         matches!(t.as_str(), "OK" | "NEAR" | "OVER")
             || t.contains("stay ≤ ")

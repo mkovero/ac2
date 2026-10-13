@@ -1,10 +1,10 @@
-//! Colours only: the state words and limit texts go, every colour, value and other word
-//! stays.
+//! T past full on the Leq views: the state words and limit texts go, every colour, value
+//! and other word stays.
 
 use super::*;
-use crate::view::LeqStatusText;
+use crate::view::PlotChrome;
 
-/// The texts colours only leaves out: the three state words, what to stay under (in any
+/// The texts T past full leaves out: the three state words, what to stay under (in any
 /// of its shortenings) and the limit.
 fn status_words<'a>(texts: &[&'a str]) -> Vec<&'a str> {
     texts
@@ -19,44 +19,23 @@ fn status_words<'a>(texts: &[&'a str]) -> Vec<&'a str> {
         .collect()
 }
 
-fn with(v: &LeqView<'_>, style: LeqStyle, status: LeqStatusText) -> LeqScene {
+fn with(v: &LeqView<'_>, style: LeqStyle, chrome: PlotChrome) -> LeqScene {
     let v = LeqView {
-        layout: LeqLayout {
-            style,
-            status,
-            ..v.layout
-        },
+        layout: LeqLayout { style, ..v.layout },
+        chrome,
         ..v.clone()
     };
     leq_scene(&v, &Status::default(), &Theme::dark(), size(1920.0, 1080.0))
 }
 
 #[test]
-fn words_and_limits_are_the_default() {
-    assert_eq!(LeqLayout::default().status, LeqStatusText::WordsAndLimits);
+fn full_chrome_writes_the_words_and_limits() {
+    assert_eq!(PlotChrome::default(), PlotChrome::Full);
     let (c, f) = many(8, false, LevelScale::DbSpl);
     let v = columns_view(&c, &f, None);
     for style in [LeqStyle::Columns, LeqStyle::Tiles] {
-        let explicit = with(&v, style, LeqStatusText::WordsAndLimits);
-        let default = leq_scene(
-            &LeqView {
-                layout: LeqLayout {
-                    style,
-                    ..LeqLayout::default()
-                },
-                ..v.clone()
-            },
-            &Status::default(),
-            &Theme::dark(),
-            size(1920.0, 1080.0),
-        );
-        // (Scenes hold NaN for an unmeasured bar: compared by what they draw.)
-        assert_eq!(texts(&default.scene), texts(&explicit.scene), "{style:?}");
-        assert_eq!(
-            default.scene.layers[0].rects, explicit.scene.layers[0].rects,
-            "{style:?}"
-        );
-        let all = texts(&default.scene);
+        let s = with(&v, style, PlotChrome::Full);
+        let all = texts(&s.scene);
         let words = status_words(&all);
         for want in ["OVER", "NEAR", "OK"] {
             assert!(words.contains(&want), "{style:?}: {want} in {all:?}");
@@ -72,30 +51,37 @@ fn words_and_limits_are_the_default() {
 }
 
 #[test]
-fn colours_only_drops_the_words_and_keeps_the_colours() {
+fn past_full_drops_the_words_and_keeps_the_colours() {
     let (c, f) = many(8, false, LevelScale::DbSpl);
     let v = columns_view(&c, &f, None);
-    for style in [LeqStyle::Columns, LeqStyle::Tiles] {
-        let words = with(&v, style, LeqStatusText::WordsAndLimits);
-        let colours = with(&v, style, LeqStatusText::ColoursOnly);
+    for (style, chrome) in [LeqStyle::Columns, LeqStyle::Tiles]
+        .into_iter()
+        .flat_map(|s| [(s, PlotChrome::NoGrid), (s, PlotChrome::Bare)])
+    {
+        let words = with(&v, style, PlotChrome::Full);
+        let colours = with(&v, style, chrome);
         let all = texts(&colours.scene);
-        assert_eq!(status_words(&all), Vec::<&str>::new(), "{style:?}: {all:?}");
+        assert_eq!(
+            status_words(&all),
+            Vec::<&str>::new(),
+            "{style:?} {chrome:?}: {all:?}"
+        );
         // The values, the names and every word that is not one of them stay: on course
         // and cooling down say what no colour does.
         let before = texts(&words.scene);
         for t in &before {
             if status_words(&[t]).is_empty() {
-                assert!(all.contains(t), "{style:?}: {t} kept in {all:?}");
+                assert!(all.contains(t), "{style:?} {chrome:?}: {t} kept in {all:?}");
             }
         }
         assert!(
             all.iter()
                 .any(|t| t.starts_with("ON COURSE") || t.starts_with("over in")),
-            "{style:?}: {all:?}"
+            "{style:?} {chrome:?}: {all:?}"
         );
         assert!(
             all.iter().any(|t| t.starts_with("cooling")),
-            "{style:?}: {all:?}"
+            "{style:?} {chrome:?}: {all:?}"
         );
         for t in leq_tiles(&c, &f) {
             assert!(all.contains(&t.value.as_str()), "{}", t.value);
@@ -128,25 +114,25 @@ fn colours_only_drops_the_words_and_keeps_the_colours() {
 /// Without a limit nothing is judged: the tiles say the same either way; uncalibrated, the
 /// word that says so stays.
 #[test]
-fn colours_only_keeps_what_no_colour_says() {
+fn past_full_keeps_what_no_colour_says() {
     let c = cfg();
     let f = frame(LevelScale::DbSpl);
     let v = columns_view(&c, &f, None);
     let t = leq_tiles(&c, &f);
     assert_eq!(t[0].state, TileState::NoLimit);
-    assert_eq!(t[0].state_word(LeqStatusText::ColoursOnly), None);
-    assert_eq!(t[1].state_word(LeqStatusText::ColoursOnly), None);
-    assert_eq!(t[1].state_word(LeqStatusText::WordsAndLimits), Some("NEAR"));
+    assert_eq!(t[0].state_word(PlotChrome::NoGrid), None);
+    assert_eq!(t[1].state_word(PlotChrome::NoGrid), None);
+    assert_eq!(t[1].state_word(PlotChrome::Full), Some("NEAR"));
     let (c, f) = many(4, false, LevelScale::Dbfs);
     let t = leq_tiles(&c, &f);
     assert!(t.iter().all(|t| t.state == TileState::NotCalibrated));
     assert!(
         t.iter()
-            .all(|t| t.state_word(LeqStatusText::ColoursOnly) == Some("not calibrated"))
+            .all(|t| t.state_word(PlotChrome::NoGrid) == Some("not calibrated"))
     );
     let v2 = columns_view(&c, &f, None);
     for style in [LeqStyle::Columns, LeqStyle::Tiles] {
-        let s = with(&v2, style, LeqStatusText::ColoursOnly);
+        let s = with(&v2, style, PlotChrome::NoGrid);
         let all = texts(&s.scene);
         assert!(
             all.iter().any(|t| *t == "not calibrated" || *t == "uncal."),
@@ -155,7 +141,7 @@ fn colours_only_keeps_what_no_colour_says() {
         assert_eq!(status_words(&all), Vec::<&str>::new(), "{style:?}: {all:?}");
     }
     // The meter's caption and the windows' values are untouched.
-    let s = with(&v, LeqStyle::Tiles, LeqStatusText::ColoursOnly);
+    let s = with(&v, LeqStyle::Tiles, PlotChrome::NoGrid);
     let all = texts(&s.scene);
     for want in ["97.8", "1 min", "so far · 12:30 / 30:00"] {
         assert!(all.contains(&want), "{want} in {all:?}");

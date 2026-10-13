@@ -375,26 +375,12 @@ enum StyleFile {
     Tiles,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum StatusTextFile {
-    #[default]
-    WordsAndLimits,
-    ColoursOnly,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LeqFile {
     style: StyleFile,
     #[serde(default)]
     history: bool,
-    #[serde(default, skip_serializing_if = "is_words_and_limits")]
-    status_text: StatusTextFile,
-}
-
-fn is_words_and_limits(s: &StatusTextFile) -> bool {
-    *s == StatusTextFile::WordsAndLimits
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -518,10 +504,6 @@ impl UiPrefs {
                 StyleFile::Tiles => LeqStyle::Tiles,
             },
             history: l.history,
-            status: match l.status_text {
-                StatusTextFile::WordsAndLimits => LeqStatusText::WordsAndLimits,
-                StatusTextFile::ColoursOnly => LeqStatusText::ColoursOnly,
-            },
         });
         if let Some(ms) = f.spl_hold_ms
             && !SPL_HOLD_MS.contains(&ms)
@@ -642,10 +624,6 @@ impl UiPrefs {
                     LeqStyle::Tiles => StyleFile::Tiles,
                 },
                 history: self.leq.history,
-                status_text: match self.leq.status {
-                    LeqStatusText::WordsAndLimits => StatusTextFile::WordsAndLimits,
-                    LeqStatusText::ColoursOnly => StatusTextFile::ColoursOnly,
-                },
             }),
         };
         toml::to_string(&f).unwrap_or_default()

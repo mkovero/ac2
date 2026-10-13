@@ -71,7 +71,7 @@ pub async fn bands(
                     key,
                 };
             };
-            let t = band_leq_text(cfg, f, ac2_scene::view::LeqStatusText::WordsAndLimits);
+            let t = band_leq_text(cfg, f, ac2_scene::view::PlotChrome::Full);
             let meta = &f.meta;
             let offset = view.clock_offset_ns.map_or(0, |o| {
                 o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64

@@ -3,7 +3,7 @@
 
 use ac2_proto::Command;
 use ac2_proto::model::OutputSetup;
-use ac2_scene::view::{CoherencePlacement, DistortionUnit, LeqStatusText, LeqStyle};
+use ac2_scene::view::{CoherencePlacement, DistortionUnit, LeqStyle};
 use eframe::egui::Key;
 
 use super::{AppState, Overlay, PaneKind, StimPhase, typed_char};
@@ -198,10 +198,6 @@ impl AppState {
             // On the range row Enter adds its bands; the dialog is sent from elsewhere.
             Key::Enter if d.on_range() => d.add_range(),
             Key::Enter => self.submit_leq(out),
-            // The app's display, not the meter's: changed at once, nothing sent.
-            Key::ArrowLeft | Key::ArrowRight | Key::Space if d.focus == Focus::StatusText => {
-                self.toggle_leq_status_text();
-            }
             Key::ArrowUp => d.move_row(-1),
             Key::ArrowDown => d.move_row(1),
             Key::Tab if chord.shift => d.move_cell(-1),
@@ -699,20 +695,6 @@ impl AppState {
         }
         self.prefs.leq = self.view.spl.layout;
         self.prefs_dirty = true;
-    }
-
-    /// The state words and limit texts on the Leq views, or the colours alone; remembered
-    /// in the prefs.
-    pub(super) fn toggle_leq_status_text(&mut self) {
-        let l = &mut self.view.spl.layout;
-        l.status = match l.status {
-            LeqStatusText::WordsAndLimits => LeqStatusText::ColoursOnly,
-            LeqStatusText::ColoursOnly => LeqStatusText::WordsAndLimits,
-        };
-        let status = l.status;
-        self.prefs.leq = self.view.spl.layout;
-        self.prefs_dirty = true;
-        self.toast(crate::leq_dialog::status_text_toast(status));
     }
 
     pub(super) fn toggle_distortion_unit(&mut self) {

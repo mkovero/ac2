@@ -95,10 +95,10 @@ pub struct LeqTile {
 }
 
 impl LeqTile {
-    /// The state word as written under `status`: with colours only, `OK`, `NEAR` and
+    /// The state word as written under `chrome`: without limit text, `OK`, `NEAR` and
     /// `OVER` are left to the tile's colour; `ON COURSE` and `not calibrated` say what no
     /// colour does, so they stay.
-    pub fn state_word(&self, status: LeqStatusText) -> Option<&str> {
+    pub fn state_word(&self, chrome: PlotChrome) -> Option<&str> {
         let coloured = match self.state {
             TileState::Ok | TileState::Over => true,
             TileState::Near => !self.on_course,
@@ -106,7 +106,7 @@ impl LeqTile {
         };
         self.state_text
             .as_deref()
-            .filter(|_| status.words() || !coloured)
+            .filter(|_| chrome.limit_text() || !coloured)
     }
 
     /// The window has not covered its whole length yet.

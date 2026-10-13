@@ -547,7 +547,13 @@ the grey resolution marker and a multi-resolution spectrum's window changes (`17
 `85 ms` …): they go with the grid, and come back with it. A toast names the step
 (`Transfer: no grid or marks`). Axis ranges and cursor keys keep working in every step. The step
 belongs to the pane (kept when **Tab** changes its measurement, copied by a split) and
-covers the spectrograph, the Leq history strip and the sweep's IR too. The theme is in
+covers the spectrograph, the Leq history strip and the sweep's IR too. On the SPL pane the
+step past full also takes the limit text: OK / NEAR / OVER, "stay ≤ … dB" and "limit … dB"
+leave the Leq columns, tiles, meter + Leq and band bars, and the colours, limit lines and
+the band view's allowed-level marks say it (`SPL: no limit text`, then
+`SPL: no limit text, traces only`, `SPL: words and limits`); on course, cooling down and
+not calibrated stay. The windows and band bars keep their scale at every step, so outside
+the history strip traces only looks like the step before. The theme is in
 Settings › Display and the palette (*Theme*).
 
 #### The transfer legend
@@ -1823,10 +1829,8 @@ the time before.
 - Settings › Display › **Leq bars**: each column (and band bar) glides to a new reading over
   0.3 s; the number, colours and limit lines change at once. "jump to each new reading"
   turns it off.
-- Settings › SPL / Leq (**Shift+L**) › **Status text** (palette *SPL Leq status text: words
-  and limits / colours only*): **colours only** drops OK / NEAR / OVER, "stay ≤ … dB" and
-  "limit … dB" from every Leq view (columns, tiles, meter + Leq, band bars), leaving the
-  colours and limit lines to say it; on course, cooling down and not calibrated stay.
+- **T** (as on a graph): the colours alone, without OK / NEAR / OVER, "stay ≤" or "limit"
+  text; per pane, kept with the layout (see *Grid, labels and cursor (T)*).
 - **W**, then **W** or **F**: the **stage view**, nothing but the columns (in meter + Leq,
   the number above them). The grey caption shows there only with the history strip on, or
   with STALE.
@@ -1852,9 +1856,7 @@ and limits stay. It asks first, naming the run that ends. The ended log can be e
 **Shift+L** (palette *Leq windows and limits…*) opens Settings › SPL / Leq: window lengths
 and weightings (←/→), limits and warn margins typed in dB (empty: no limit), a **preset**
 row and the headroom horizon, and under the windows the **LCpeak** and **LAFmax** limits and
-the **position correction**; after the band meter, last, this app's **Status text** (words
-and limits, or colours only: changed at once with ←/→, remembered in `ui.toml`, not sent to
-the meter).
+the **position correction**.
 
 | Key | Does |
 |---|---|
@@ -1936,7 +1938,7 @@ bedroom"; "receiving room" until then).
 
 #### Turning it on
 
-**Shift+L**, ↑ from the preset row past the status text to the **Band meter** rows:
+**Shift+L**, ↑ from the preset row to the **Band meter** rows:
 
 - ←/→ picks off, **on** or a preset: **Finland STM 545/2015, low frequencies** (eleven LZeq
   60 min windows 20 … 200 Hz with the table's limits, predicted LAeq ≤ 25 dB at night) or
@@ -2251,7 +2253,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+Shift+Z` | Redo the pane change last undone | `redo` |
 | `Tab` | Select the next row in the measurement list (the focused pane shows its measurement) | `next_in_tree` |
 | `Shift+Tab` | Select the previous row in the measurement list (the focused pane shows its measurement) | `prev_in_tree` |
-| `T` | Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only | `plot_chrome` |
+| `T` | Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only (SPL: the limit text goes with the grid) | `plot_chrome` |
 | `I` | Zoom frequency in (IR: time) | `zoom_in` |
 | `O` | Zoom frequency out (IR: time) | `zoom_out` |
 | `←` | Pan frequency down (IR: earlier) | `pan_left` |
@@ -2450,7 +2452,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | SPL pane: the band Leq bars (20 Hz … 10 kHz) | `spl_show_bands` |
 | SPL Leq windows: columns / tiles | `spl_leq_style` |
 | SPL Leq windows: history strip on / off | `spl_leq_history` |
-| SPL Leq status text: words and limits / colours only | `spl_leq_status_text` |
 | Distortion in dB re fundamental / percent | `distortion_unit` |
 
 #### Key hint lines (Settings › Display › Key hints)

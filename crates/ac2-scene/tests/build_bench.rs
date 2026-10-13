@@ -127,7 +127,6 @@ fn leq_view_with_four_hours_of_four_windows() {
             layout: LeqLayout {
                 style: LeqStyle::Columns,
                 history: true,
-                ..Default::default()
             },
             run: None,
             stage: false,

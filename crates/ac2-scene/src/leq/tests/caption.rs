@@ -13,7 +13,6 @@ fn run_stays_centred_beside_a_long_calibration() {
             layout: LeqLayout {
                 style: LeqStyle::Columns,
                 history: true,
-                ..Default::default()
             },
             ..columns_view(&c, &f, None)
         };
@@ -57,7 +56,6 @@ fn caption_run_fits_every_width() {
                     layout: LeqLayout {
                         style,
                         history: true,
-                        ..Default::default()
                     },
                     ..columns_view(&c, &f, None)
                 };
@@ -113,7 +111,6 @@ fn caption_run_fits_every_width() {
             layout: LeqLayout {
                 style: LeqStyle::Columns,
                 history: true,
-                ..Default::default()
             },
             ..columns_view(&c, &f, None)
         },
@@ -136,7 +133,6 @@ fn caption_run_fits_every_width() {
             layout: LeqLayout {
                 style: LeqStyle::Columns,
                 history: true,
-                ..Default::default()
             },
             ..columns_view(&c, &f, None)
         },
@@ -480,7 +476,6 @@ fn peak_tiles_and_the_correction() {
         layout: LeqLayout {
             style: LeqStyle::Tiles,
             history: false,
-            ..Default::default()
         },
         ..columns_view(&c, &f, None)
     };
@@ -541,11 +536,7 @@ fn the_run_shows_only_with_the_history() {
             let at = format!("{style:?} at {w}×{h}");
             let scene = |history| {
                 let v = LeqView {
-                    layout: LeqLayout {
-                        style,
-                        history,
-                        ..Default::default()
-                    },
+                    layout: LeqLayout { style, history },
                     ..columns_view(&c, &f, None)
                 };
                 leq_scene(&v, &Status::default(), &th, size(w, h))
@@ -597,11 +588,7 @@ fn the_stage_has_no_caption_without_the_history() {
             let at = format!("{style:?} at {w}×{h}");
             let scene = |stage, history, stale: Option<&str>| {
                 let v = LeqView {
-                    layout: LeqLayout {
-                        style,
-                        history,
-                        ..Default::default()
-                    },
+                    layout: LeqLayout { style, history },
                     stage,
                     stale: stale.map(str::to_owned),
                     ..columns_view(&c, &f, None)

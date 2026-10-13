@@ -1,9 +1,8 @@
 //! UI preferences kept between runs (`ui.toml` in the ac2 config directory): the stimulus
 //! outputs last used on each output device (decision K4), the session dialog's choices
 //! per device — which inputs and outputs were in the session, their roles and the mic
-//! names — the Leq view's layout and whether it writes the state or leaves it to the
-//! colours, whether the panes show their key hints, how long the SPL meter's number holds a
-//! reading, the theme, the record toggle's time limit, the
+//! names — the Leq view's layout, whether the panes show their key hints, how long the SPL
+//! meter's number holds a reading, the theme, the record toggle's time limit, the
 //! spectrograph's history span, the layout and window as last left: the pane tree, the
 //! focused pane, maximised or full screen, what each pane shows (its kind, measurement,
 //! modes and how much of its plot: grid, labels, cursor, and its own level axis range: a fit
@@ -32,7 +31,6 @@
 //! [leq]
 //! style = "tiles"
 //! history = true
-//! status_text = "colours_only"
 //!
 //! [layout]
 //! focus = 2
@@ -94,8 +92,8 @@ use std::path::Path;
 use ac2_scene::axis::Range;
 use ac2_scene::legend::LegendView;
 use ac2_scene::view::{
-    DistortionUnit, IrMode, LeqLayout, LeqStatusText, LeqStyle, PlotChrome, SpectrumMode, SplMode,
-    SweepMode, ViewState, level,
+    DistortionUnit, IrMode, LeqLayout, LeqStyle, PlotChrome, SpectrumMode, SplMode, SweepMode,
+    ViewState, level,
 };
 use serde::{Deserialize, Serialize};
 

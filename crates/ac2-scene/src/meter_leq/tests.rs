@@ -4,7 +4,7 @@ use crate::leq::{LeqHistory, leq_tiles, run_text};
 use crate::primitives::{Label, Scene};
 use crate::spl::spl_readout;
 use crate::time::Freshness;
-use crate::view::{LeqLayout, LeqStatusText, LeqStyle};
+use crate::view::{LeqLayout, LeqStyle, PlotChrome};
 use ac2_proto::frame::{LeqFlags, LeqFrame, LeqMeta, LeqRun, SplFrame, SplMeta};
 use ac2_proto::model::{
     CalBasis, CalStatus, LeqConfig, LeqWindow, LevelScale, PeakWeighting, TimeWeighting, Weighting,
@@ -165,22 +165,18 @@ fn layouts() -> [LeqLayout; 4] {
         LeqLayout {
             style: LeqStyle::Columns,
             history: false,
-            ..Default::default()
         },
         LeqLayout {
             style: LeqStyle::Columns,
             history: true,
-            ..Default::default()
         },
         LeqLayout {
             style: LeqStyle::Tiles,
             history: false,
-            ..Default::default()
         },
         LeqLayout {
             style: LeqStyle::Tiles,
             history: true,
-            ..Default::default()
         },
     ]
 }
@@ -481,10 +477,10 @@ fn check(
     }
 }
 
-/// Colours only on meter + Leq: the windows lose their state words and limit texts, the
+/// T past full on meter + Leq: the windows lose their state words and limit texts, the
 /// meter's number and the windows' values and colours stay.
 #[test]
-fn colours_only_under_the_meter() {
+fn past_full_under_the_meter() {
     let th = Theme::dark();
     let (c, f) = leq();
     let r = readout(None);
@@ -494,22 +490,25 @@ fn colours_only_under_the_meter() {
             || t.starts_with("≤ ")
             || t.starts_with("limit ")
     };
-    for style in [LeqStyle::Columns, LeqStyle::Tiles] {
-        let at = |status| {
-            let v = view(
+    for (style, chrome) in [LeqStyle::Columns, LeqStyle::Tiles]
+        .into_iter()
+        .flat_map(|s| [(s, PlotChrome::NoGrid), (s, PlotChrome::Bare)])
+    {
+        let at = |chrome| {
+            let mut v = view(
                 &c,
                 &f,
                 None,
                 LeqLayout {
                     style,
-                    status,
                     ..LeqLayout::default()
                 },
             );
+            v.chrome = chrome;
             meter_leq_scene(&r, &v, &Status::default(), &th, vp(1920.0, 1080.0))
         };
-        let words = at(LeqStatusText::WordsAndLimits);
-        let colours = at(LeqStatusText::ColoursOnly);
+        let words = at(PlotChrome::Full);
+        let colours = at(chrome);
         let texts = |s: &MeterLeqScene| -> Vec<String> {
             labels(&s.leq.scene)
                 .iter()
@@ -519,10 +518,10 @@ fn colours_only_under_the_meter() {
         let (a, b) = (texts(&words), texts(&colours));
         let a: Vec<&str> = a.iter().map(String::as_str).collect();
         let b: Vec<&str> = b.iter().map(String::as_str).collect();
-        assert!(a.iter().any(status_word), "{style:?}: {a:?}");
-        assert!(!b.iter().any(status_word), "{style:?}: {b:?}");
+        assert!(a.iter().any(status_word), "{style:?} {chrome:?}: {a:?}");
+        assert!(!b.iter().any(status_word), "{style:?} {chrome:?}: {b:?}");
         for t in a.iter().filter(|t| !status_word(t)) {
-            assert!(b.contains(t), "{style:?}: {t} kept in {b:?}");
+            assert!(b.contains(t), "{style:?} {chrome:?}: {t} kept in {b:?}");
         }
         if style == LeqStyle::Columns {
             let (x, y) = (
