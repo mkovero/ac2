@@ -341,6 +341,16 @@ impl<'a> WavReader<io::Cursor<&'a [u8]>> {
     }
 }
 
+/// Bytes of a `ds64` chunk every RF64 file carries: RIFF, data and sample-count sizes.
+const DS64_FIXED: usize = 24;
+
+/// Moves `n` bytes ahead without reading them into memory.
+fn skip(input: &mut impl Seek, n: u64) -> Result<(), WavError> {
+    let n = i64::try_from(n).map_err(|_| WavError::Malformed(format!("chunk of {n} bytes")))?;
+    input.seek(SeekFrom::Current(n))?;
+    Ok(())
+}
+
 impl<R: Read + Seek> WavReader<R> {
     /// Reads the header of the `len`-byte file `input` is at the start of.
     pub fn from_reader(mut input: R, len: u64) -> Result<Self, WavError> {
@@ -364,22 +374,44 @@ impl<R: Read + Seek> WavReader<R> {
                 .map_err(|_| WavError::Malformed("no data chunk".into()))?;
             let size = u64::from(u32_at(&ch, 4));
             at += 8;
+            // Chunks are word aligned: an odd-sized chunk is followed by one pad byte.
+            let padded = size + (size & 1);
+            // The size is the file's own claim; nothing is sized from it before it is checked
+            // against what the input holds.
+            let available = len.saturating_sub(at);
             match &ch[0..4] {
                 b"ds64" => {
-                    let mut b = vec![0u8; usize::try_from(size).unwrap_or(0).max(24)];
+                    if size < DS64_FIXED as u64 {
+                        return Err(WavError::Malformed(format!("ds64 chunk of {size} bytes")));
+                    }
+                    if size > available {
+                        return Err(WavError::Malformed(format!(
+                            "ds64 chunk states {size} bytes, the file holds {available}"
+                        )));
+                    }
+                    let mut b = [0u8; DS64_FIXED];
                     input
-                        .read_exact(&mut b[..usize::try_from(size).unwrap_or(0)])
+                        .read_exact(&mut b)
                         .map_err(|_| WavError::Malformed("short ds64 chunk".into()))?;
                     ds64_data = Some(u64_at(&b, 8));
+                    // The rest (table length and the chunk-size table) says nothing a single
+                    // data chunk needs.
+                    skip(&mut input, padded - DS64_FIXED as u64)?;
                 }
                 b"fmt " => {
                     if !(16..=1024).contains(&size) {
                         return Err(WavError::Malformed(format!("fmt chunk of {size} bytes")));
                     }
+                    if size > available {
+                        return Err(WavError::Malformed(format!(
+                            "fmt chunk states {size} bytes, the file holds {available}"
+                        )));
+                    }
                     let mut b = vec![0u8; usize::try_from(size).unwrap_or(0)];
                     input
                         .read_exact(&mut b)
                         .map_err(|_| WavError::Malformed("short fmt chunk".into()))?;
+                    skip(&mut input, padded - size)?;
                     let tag = u16_at(&b, 0);
                     let channels = u16_at(&b, 2);
                     let rate = u32_at(&b, 4);
@@ -410,7 +442,6 @@ impl<R: Read + Seek> WavReader<R> {
                 b"data" => {
                     let (channels, sample_rate, encoding) =
                         fmt.ok_or_else(|| WavError::Malformed("data before fmt".into()))?;
-                    let available = len.saturating_sub(at);
                     let stated = if rf64 && size == RIFF_LIMIT {
                         ds64_data.ok_or_else(|| {
                             WavError::Malformed("RF64 without a ds64 chunk".into())
@@ -436,15 +467,9 @@ impl<R: Read + Seek> WavReader<R> {
                         bytes: Vec::new(),
                     });
                 }
-                _ => {
-                    // Chunks are word aligned.
-                    let skip = size + (size & 1);
-                    input.seek(SeekFrom::Current(i64::try_from(skip).unwrap_or(i64::MAX)))?;
-                    at += skip;
-                    continue;
-                }
+                _ => skip(&mut input, padded)?,
             }
-            at += size;
+            at += padded;
         }
     }
 
@@ -641,5 +666,86 @@ mod tests {
         build(FORMAT_PCM, 8, &mut wav);
         std::fs::write(&p, &wav).expect("write");
         assert!(matches!(WavReader::open(&p), Err(WavError::Format(_))));
+    }
+
+    /// A RIFF header and the given chunks, each written with its stated size.
+    fn chunks(magic: &[u8; 4], list: &[(&[u8; 4], u32, &[u8])]) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(magic);
+        b.extend_from_slice(&u32::MAX.to_le_bytes());
+        b.extend_from_slice(b"WAVE");
+        for (id, size, body) in list {
+            b.extend_from_slice(*id);
+            b.extend_from_slice(&size.to_le_bytes());
+            b.extend_from_slice(body);
+        }
+        b
+    }
+
+    fn fmt_float_mono() -> Vec<u8> {
+        let mut f = Vec::new();
+        f.extend_from_slice(&FORMAT_FLOAT.to_le_bytes());
+        f.extend_from_slice(&1u16.to_le_bytes());
+        f.extend_from_slice(&48_000u32.to_le_bytes());
+        f.extend_from_slice(&(48_000u32 * 4).to_le_bytes());
+        f.extend_from_slice(&4u16.to_le_bytes());
+        f.extend_from_slice(&32u16.to_le_bytes());
+        f
+    }
+
+    #[test]
+    fn a_ds64_chunk_stating_more_than_the_file_holds_is_malformed() {
+        // 44 bytes stating a 4 GiB ds64 chunk: rejected from the stated size, never sized
+        // into a buffer.
+        let b = chunks(b"RF64", &[(b"ds64", u32::MAX, &[0; 24])]);
+        assert_eq!(b.len(), 44);
+        assert!(matches!(
+            WavReader::from_bytes(&b),
+            Err(WavError::Malformed(m)) if m.contains("ds64")
+        ));
+    }
+
+    #[test]
+    fn a_ds64_chunk_shorter_than_its_fixed_fields_is_malformed() {
+        let b = chunks(b"RF64", &[(b"ds64", 8, &[0; 8])]);
+        assert!(matches!(
+            WavReader::from_bytes(&b),
+            Err(WavError::Malformed(m)) if m.contains("ds64")
+        ));
+    }
+
+    #[test]
+    fn an_unknown_chunk_stating_more_than_the_file_holds_is_malformed() {
+        let b = chunks(b"RIFF", &[(b"LIST", u32::MAX, &[0; 4])]);
+        assert!(matches!(
+            WavReader::from_bytes(&b),
+            Err(WavError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn odd_sized_chunks_are_followed_by_their_pad_byte() {
+        // A 41-byte ds64 (fixed fields, a table length and part of a table) and a 17-byte
+        // fmt, each padded to an even size, then RF64 data whose size comes from ds64.
+        let mut ds64 = vec![0u8; 42];
+        ds64[8..16].copy_from_slice(&8u64.to_le_bytes());
+        let mut fmt = fmt_float_mono();
+        fmt.extend_from_slice(&[0, 0]);
+        let mut data = Vec::new();
+        data.extend_from_slice(&0.5f32.to_le_bytes());
+        data.extend_from_slice(&(-0.25f32).to_le_bytes());
+        let b = chunks(
+            b"RF64",
+            &[
+                (b"ds64", 41, &ds64),
+                (b"fmt ", 17, &fmt),
+                (b"data", u32::MAX, &data),
+            ],
+        );
+        let mut r = WavReader::from_bytes(&b).expect("open");
+        assert_eq!(r.info().frames, 2);
+        let mut back = [0.0f32; 2];
+        r.read(&mut back).expect("read");
+        assert_eq!(back, [0.5, -0.25]);
     }
 }
