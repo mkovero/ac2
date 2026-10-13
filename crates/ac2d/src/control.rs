@@ -172,6 +172,12 @@ pub(crate) enum ControlMsg {
         token: u64,
         done: Box<file_jobs::FileDone>,
     },
+    /// The autosave writer put the recovery copy kept under `token` in place on disk, or
+    /// why it could not.
+    RecoverInstalled {
+        token: u64,
+        result: Result<(), String>,
+    },
     /// Orderly shutdown.
     Shutdown,
 }
@@ -591,6 +597,9 @@ impl Control {
                 Ok(ControlMsg::RecordingProgress { token }) => self.recording_progress(token),
                 Ok(ControlMsg::RecordingEnded { token }) => self.recording_ended(token),
                 Ok(ControlMsg::FileDone { token, done }) => self.file_done(token, *done),
+                Ok(ControlMsg::RecoverInstalled { token, result }) => {
+                    self.recover_installed(token, result);
+                }
                 Ok(ControlMsg::Fatal(why)) => {
                     tracing::error!("fatal: {why}");
                     break;

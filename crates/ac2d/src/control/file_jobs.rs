@@ -1,5 +1,7 @@
 //! Session file work off the control thread: `file.save`, `file.load`, `file.new`,
-//! `file.import`, `file.download_begin` and `file.list`.
+//! `file.recover`, `file.salvage`, `file.import`, `file.download_begin` and `file.list`.
+//! (The small writes of the working state's session — `working.json`, the recovery copy
+//! put in place — run on the autosave's write thread: [`super::working`].)
 //!
 //! The control thread also refreshes leases, stops the generator and answers every other
 //! client; a big session on a slow disk must not hold any of that up (an unrefreshed lease
@@ -15,9 +17,11 @@
 //!   (`refused`, nothing changed) until it is answered. `file.list` only reads, and runs
 //!   beside anything.
 //! - A save writes the content as it was when it began; edits made meanwhile stay unsaved.
-//! - A load or new commits only onto the working state it began on: when the content or its
-//!   saved standing changed meanwhile, it is refused (`conflict`, nothing changed) and the
-//!   client asks again (the unsaved-changes guard then sees the edits).
+//! - A load, new or recover commits only onto the working state it began on: when the
+//!   content or its saved standing changed meanwhile, it is refused (`conflict`, nothing
+//!   changed) and the client asks again (the unsaved-changes guard then sees the edits).
+//! - A salvage only adds traces: it imports what its worker read onto the state as it is
+//!   when the read comes back.
 //! - A retry of the request still pending never reaches here: the request's reservation
 //!   (`Dedup::admit`) attaches it, and the one result answers every copy.
 
@@ -31,6 +35,7 @@ use ac2_proto::units::{ClientId, RequestId, TransferId, WallNs};
 use ac2_proto::{Command, ErrorCode, ProtoError, ReplyBody};
 use ac2_traces::session::{Manifest, Session as SessionData};
 
+use super::files::SalvageRead;
 use super::working::Staged;
 use super::{Control, ControlMsg, PendingReply};
 use crate::util::perr;
@@ -55,6 +60,16 @@ pub(super) enum Pending {
         from: ReplaceFrom,
         /// [`Control::standing`] when it began.
         standing: (u64, u64),
+    },
+    /// `file.recover`.
+    Recover {
+        client: ClientId,
+        /// [`Control::standing`] when it began.
+        standing: (u64, u64),
+    },
+    /// `file.salvage`; the upload it read, removed when it is answered well.
+    Salvage {
+        transfer: Option<TransferId>,
     },
     Import {
         transfer: TransferId,
@@ -87,8 +102,8 @@ pub(super) enum ReplaceFrom {
     Empty,
 }
 
-/// A replace's worker result: the session read (with its manifest; `None` for
-/// `file.new`) and the recovery copy written.
+/// A replace's (or recover's) worker result: the session read (with its manifest; `None`
+/// for `file.new` and `file.recover`) and the recovery copy written.
 pub(crate) struct ReplaceRead {
     pub(super) read: Result<(Option<Manifest>, SessionData), ProtoError>,
     pub(super) kept: Option<Staged>,
@@ -99,6 +114,7 @@ pub(crate) enum FileDone {
     List(Result<ReplyBody, ProtoError>),
     Save(Result<Manifest, ProtoError>),
     Replace(ReplaceRead),
+    Salvage(Result<SalvageRead, ProtoError>),
     Import(Result<Manifest, ProtoError>),
     Download(Result<Vec<u8>, ProtoError>),
 }
@@ -162,6 +178,14 @@ impl Control {
             Command::FileNew { discard } => {
                 self.file_idle(command)?;
                 self.begin_new(client, discard)?
+            }
+            Command::FileRecover => {
+                self.file_idle(command)?;
+                self.begin_recover(client)?
+            }
+            Command::FileSalvage { session } => {
+                self.file_idle(command)?;
+                self.begin_salvage(client, &session)?
             }
             Command::FileImport {
                 transfer,
@@ -238,6 +262,12 @@ impl Control {
                 },
                 FileDone::Replace(r),
             ) => self.finish_replace(&client, discard, from, standing, r),
+            (Pending::Recover { client, standing }, FileDone::Replace(r)) => {
+                self.finish_recover(&client, standing, r)
+            }
+            (Pending::Salvage { transfer }, FileDone::Salvage(r)) => {
+                self.finish_salvage(transfer, r)
+            }
             (
                 Pending::Import {
                     transfer,

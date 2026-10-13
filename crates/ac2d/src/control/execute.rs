@@ -446,14 +446,14 @@ impl Control {
             Command::FileSave { .. }
             | Command::FileLoad { .. }
             | Command::FileNew { .. }
+            | Command::FileRecover
+            | Command::FileSalvage { .. }
             | Command::FileList
             | Command::FileImport { .. }
             | Command::FileDownloadBegin { .. } => Err(perr(
                 ErrorCode::Internal,
                 "session file work is answered asynchronously",
             )),
-            Command::FileRecover => self.file_recover(client),
-            Command::FileSalvage { session } => self.file_salvage(client, &session),
             Command::FileUploadBegin {
                 file,
                 bytes,

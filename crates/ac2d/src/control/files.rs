@@ -17,7 +17,7 @@ use ac2_proto::model::{
     SalvageRefusal, Session, SessionFile, SessionOrigin, SessionRef, SweepFailure, TraceKind,
     TraceOwner,
 };
-use ac2_proto::units::{ClientId, MeasId, Rev, Seconds, SessionEpoch, WallNs};
+use ac2_proto::units::{ClientId, MeasId, Rev, Seconds, SessionEpoch, TransferId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 use ac2_traces::meta;
 use ac2_traces::session::{
@@ -99,31 +99,6 @@ impl Control {
             SessionRef::Path { .. } | SessionRef::Upload { .. } => SessionOrigin::Path {
                 path: dir.to_string_lossy().into_owned(),
             },
-        }
-    }
-
-    /// The directory of `r` to read: a staging directory for an upload (removed by the
-    /// caller), with the client's path as the name.
-    fn read_dir_of(
-        &mut self,
-        client: &ClientId,
-        r: &SessionRef,
-    ) -> Result<(String, PathBuf, SessionOrigin, bool), ProtoError> {
-        match r {
-            SessionRef::Upload { transfer } => {
-                let (file, dir) = self.unpack_upload(client, *transfer)?;
-                Ok((
-                    file.clone(),
-                    dir,
-                    SessionOrigin::Client { path: file },
-                    true,
-                ))
-            }
-            _ => {
-                let (name, dir) = self.session_path(r)?;
-                let origin = Self::origin_of(r, &dir);
-                Ok((name, dir, origin, false))
-            }
         }
     }
 
@@ -380,59 +355,44 @@ impl Control {
         }
     }
 
-    /// `file.salvage`: each trace file of the session through `trace.import`'s reader.
-    pub(super) fn file_salvage(
+    /// `file.salvage`: each trace file of the session through `trace.import`'s reader. A
+    /// worker reads the files (an upload unpacked first); [`Self::finish_salvage`] imports.
+    pub(super) fn begin_salvage(
         &mut self,
         client: &ClientId,
         r: &SessionRef,
-    ) -> Result<ReplyBody, ProtoError> {
-        self.file_idle("file.salvage")?;
-        let (_, dir, _, staged) = self.read_dir_of(client, r)?;
-        let result = self.salvage_dir(&dir);
-        if staged {
-            super::transfer::remove_dir(&dir);
-            if result.is_ok()
-                && let SessionRef::Upload { transfer } = r
-            {
-                self.transfers.remove(*transfer);
+    ) -> Result<(Pending, Work), ProtoError> {
+        let (transfer, src) = match r {
+            SessionRef::Upload { transfer } => {
+                let bytes = self.transfers.upload(client, *transfer)?.1.to_vec();
+                (
+                    Some(*transfer),
+                    Source::Upload(self.stage_path("upload"), bytes),
+                )
             }
-        }
-        result
+            _ => (None, Source::Dir(self.session_path(r)?.1)),
+        };
+        let work: Work = Box::new(move || FileDone::Salvage(src.read_traces()));
+        Ok((Pending::Salvage { transfer }, work))
     }
 
-    fn salvage_dir(&mut self, dir: &Path) -> Result<ReplyBody, ProtoError> {
-        if !dir.join(session::MANIFEST).is_file() {
-            return Err(session_err(SessionError::NotASession(dir.to_owned())));
-        }
-        let version = session::peek(dir).map(|p| p.version);
-        let tdir = dir.join("traces");
-        let mut files: Vec<PathBuf> = match std::fs::read_dir(&tdir) {
-            Ok(rd) => rd
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.extension().is_some_and(|e| e.eq_ignore_ascii_case("csv")) && p.is_file()
-                })
-                .collect(),
-            Err(_) => Vec::new(),
-        };
-        files.sort();
+    pub(super) fn finish_salvage(
+        &mut self,
+        transfer: Option<TransferId>,
+        read: Result<SalvageRead, ProtoError>,
+    ) -> Result<ReplyBody, ProtoError> {
+        let SalvageRead {
+            dir,
+            version,
+            files,
+        } = read?;
         let mut imported = Vec::new();
         let mut refused = Vec::new();
-        for p in files {
-            let rel = format!(
-                "traces/{}",
-                p.file_name()
-                    .map(|n| n.to_string_lossy())
-                    .unwrap_or_default()
-            );
-            let content = match std::fs::read(&p) {
+        for (rel, content) in files {
+            let content = match content {
                 Ok(c) => c,
-                Err(e) => {
-                    refused.push(SalvageRefusal {
-                        file: rel,
-                        reason: e.to_string(),
-                    });
+                Err(reason) => {
+                    refused.push(SalvageRefusal { file: rel, reason });
                     continue;
                 }
             };
@@ -451,10 +411,13 @@ impl Control {
                 }),
             }
         }
+        if let Some(t) = transfer {
+            self.transfers.remove(t);
+        }
         tracing::info!(
             "salvaged {} traces from {} ({} refused)",
             imported.len(),
-            dir.display(),
+            dir,
             refused.len()
         );
         Ok(ReplyBody::Salvage(Salvage {
@@ -722,7 +685,64 @@ pub(super) enum Source {
     Empty,
 }
 
+/// What `file.salvage`'s worker read: where from (for the log), the session's format
+/// version, and each trace file (`traces/<file>`) with its content or why it was not read.
+pub(crate) struct SalvageRead {
+    dir: String,
+    version: Option<u32>,
+    files: Vec<(String, Result<Vec<u8>, String>)>,
+}
+
+/// The trace files of session directory `dir`. Disk work.
+fn read_traces(dir: &Path) -> Result<SalvageRead, ProtoError> {
+    if !dir.join(session::MANIFEST).is_file() {
+        return Err(session_err(SessionError::NotASession(dir.to_owned())));
+    }
+    let version = session::peek(dir).map(|p| p.version);
+    let mut paths: Vec<PathBuf> = match std::fs::read_dir(dir.join("traces")) {
+        Ok(rd) => rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("csv")) && !p.is_dir())
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    paths.sort();
+    let files = paths
+        .into_iter()
+        .map(|p| {
+            let rel = format!(
+                "traces/{}",
+                p.file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default()
+            );
+            (rel, std::fs::read(&p).map_err(|e| e.to_string()))
+        })
+        .collect();
+    Ok(SalvageRead {
+        dir: dir.display().to_string(),
+        version,
+        files,
+    })
+}
+
 impl Source {
+    /// `file.salvage`'s read (an upload unpacked into the staging directory first, removed
+    /// after). Disk work.
+    fn read_traces(self) -> Result<SalvageRead, ProtoError> {
+        match self {
+            Self::Dir(dir) => read_traces(&dir),
+            Self::Upload(stage, bytes) => {
+                let r =
+                    super::transfer::unpack_into(&bytes, &stage).and_then(|()| read_traces(&stage));
+                super::transfer::remove_dir(&stage);
+                r
+            }
+            Self::Empty => Err(perr(ErrorCode::Internal, "nothing to salvage")),
+        }
+    }
+
     /// The session (with its manifest), checked as a load checks it. Disk work.
     fn read(self) -> Result<(Option<Manifest>, SessionData), ProtoError> {
         let read_dir = |dir: &Path| {

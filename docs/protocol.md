@@ -961,15 +961,16 @@ with the autosave (§7.3).
   channel's trace becomes an imported trace), file by file. Reply `salvage` {`version`:
   the manifest's version | nil, `imported`: [TraceMeta], `refused`: [{file, reason}]}.
 - `file.list`: the sessions in the session directory, by name.
-- Disk and archive work (`file.save`, `file.load`, `file.new`, `file.import`,
-  `file.download_begin`, `file.list`) runs beside the other commands: lease refreshes,
+- Disk and archive work (`file.save`, `file.load`, `file.new`, `file.recover`,
+  `file.salvage`, `file.import`, `file.download_begin`, `file.list`) runs beside the other commands: lease refreshes,
   `gen.stop` and other clients are answered while it waits on the disk, and its reply
   follows when it is done. One such operation at a time: while one is under way, another
   `file.save` / `file.load` / `file.new` / `file.recover` / `file.salvage` / `file.import` /
   `file.download_begin` is `refused` (nothing changed; ask again once it is answered);
   `file.list` is never refused for it. A save writes the content as it was when it began
-  (edits made meanwhile stay unsaved). A load or new whose working state changed (content
-  or saved standing) while it read is refused with `conflict`, nothing changed.
+  (edits made meanwhile stay unsaved). A load, new or recover whose working state changed
+  (content or saved standing) while it read is refused with `conflict`, nothing changed.
+  A salvage imports onto the working state as it is when its read is done.
 - Archives travel in chunks of at most `chunk_bytes` (1 MiB). Upload: `file.upload_begin`
   (at most 64 MiB, else `invalid`) → `transfer` {`transfer`, `file_name`, `bytes`, `sha256`,
   `chunk_bytes`}; `file.upload_chunk` in order (`offset` = bytes so far, else `invalid`);

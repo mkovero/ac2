@@ -179,29 +179,9 @@ impl Control {
         ))
     }
 
-    /// A fresh staging directory path, made room for (not created).
-    pub(super) fn stage_dir(&mut self, tag: &str) -> Result<PathBuf, ProtoError> {
-        let p = self.stage_path(tag);
-        prepare_stage(&p)?;
-        Ok(p)
-    }
-
     /// Removes what an earlier run left in the staging directory.
     pub(super) fn clear_staging(&self) {
         remove_dir(&self.s.session_dir.join(STAGING));
-    }
-
-    /// Unpacks complete upload `id` into a new staging directory; returns the client's path
-    /// of it and the directory.
-    pub(super) fn unpack_upload(
-        &mut self,
-        client: &ClientId,
-        id: TransferId,
-    ) -> Result<(String, PathBuf), ProtoError> {
-        let dir = self.stage_dir("upload")?;
-        let (file, data) = self.transfers.upload(client, id)?;
-        unpack_into(data, &dir)?;
-        Ok((file, dir))
     }
 
     pub(super) fn file_upload_begin(

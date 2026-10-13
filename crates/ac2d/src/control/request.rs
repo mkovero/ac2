@@ -210,6 +210,8 @@ impl Control {
                 cmd @ (Command::FileSave { .. }
                 | Command::FileLoad { .. }
                 | Command::FileNew { .. }
+                | Command::FileRecover
+                | Command::FileSalvage { .. }
                 | Command::FileList
                 | Command::FileImport { .. }
                 | Command::FileDownloadBegin { .. }) => {

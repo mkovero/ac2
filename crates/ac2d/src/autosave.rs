@@ -23,6 +23,8 @@
 //!
 //! Writes run on their own thread: a session with long sweeps holds megabytes of impulse
 //! response, and the control thread must keep answering while that reaches the disk.
+//! The working state's small files (`working.json`, the recovery copy put in place) are
+//! written on the same thread ([`Autosaver::run`]), in the order the control thread asks.
 
 mod spl_files;
 
@@ -207,6 +209,10 @@ enum Job {
         data: SessionData,
         logs: Vec<LogSpec>,
     },
+    /// Small disk work beside the autosave (the working state's `working.json`, the
+    /// recovery copy put in place or removed): in the order asked, after the writes asked
+    /// before it, and finished before shutdown like a write.
+    Run(Box<dyn FnOnce() + Send>),
 }
 
 /// The write thread: one write at a time, each result reported to the control thread, the
@@ -247,6 +253,7 @@ impl Writer {
                                 result: Box::new(result),
                             });
                         }
+                        Ok(Job::Run(work)) => work(),
                         Err(RecvTimeoutError::Timeout) => files.tick(Instant::now()),
                         Err(RecvTimeoutError::Disconnected) => break,
                     }
@@ -360,6 +367,12 @@ impl Autosaver {
             }
         }
         self.dirty.is_some()
+    }
+
+    /// Runs `work` on the write thread, after everything asked of it before. Returns
+    /// whether it was queued (`false`: the thread is gone).
+    pub(crate) fn run(&self, work: Box<dyn FnOnce() + Send>) -> bool {
+        self.writer.send(Job::Run(work))
     }
 
     /// Whether anything is unwritten or being written.
