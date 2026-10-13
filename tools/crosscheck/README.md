@@ -1,6 +1,6 @@
 # crosscheck: ac2 against REW and steady-sine truth
 
-An on-demand suite, not run in CI. It measures the same paths with ac2, with REW (offline
+The rig stages run on demand; CI runs the host stage on a dummy server ("CI and releases"). It measures the same paths with ac2, with REW (offline
 import of a recording), with steady sines analysed in numpy, and from the raw recordings
 themselves, and compares the numbers against the tolerances in `tolerances.toml`. What the
 committed results show (a summary per quantity, the evidence tables, definitions and open
