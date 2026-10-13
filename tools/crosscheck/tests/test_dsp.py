@@ -523,3 +523,59 @@ def test_sweep_harmonics_ripple_the_whole_capture_estimate_until_cut():
     assert np.all(-10 * np.log10(coh) < 0.01)            # invisible to the coherence gate
     assert np.max(np.abs(raw)) > 0.05                     # ripple from H2 at −40 dBr
     assert np.max(np.abs(lin)) < 0.005
+
+
+def _ess_h3_band_read(rate_s: float, f0: float = 50.0, fs: float = 8000.0):
+    """A floor-like Wiener DUT (20 Hz hp1 ahead of a polynomial whose T_3 and T_5 are equal at
+    −10 dBFS) under an exponential sweep, H3 at f0 read as ac2 defines it: 0.1 s window (pre
+    1/30 s, taper rise over pre and fall over post/5), band 3·f0 ± 1/48 oct widened to 3
+    cells (30 Hz), over the fundamental's band ÷ 3."""
+    amp = 10 ** (-10 / 20)
+    cfg = {"poly": dut.chebyshev_poly([-60.0, -60.0, -60.0, -60.0], amp),
+           "pre": dut.design_chain([{"type": "hp1", "hz": 20.0}], fs), "post": []}
+    # Up to 0.4·fs: every harmonic the DUT makes lies where the reference has energy to
+    # divide by (what folds lands after the linear impulse, outside the harmonic windows).
+    f1, f2 = 5.0, 0.4 * fs
+    t = np.arange(int(rate_s * np.log(f2 / f1) * fs)) / fs
+    x = amp * np.sin(2 * np.pi * f1 * rate_s * (np.exp(t / rate_s) - 1))
+    nf = int(0.01 * fs)
+    x[-nf:] *= 0.5 + 0.5 * np.cos(np.pi * np.arange(nf) / nf)
+    x = np.concatenate([np.zeros(int(0.5 * fs)), x, np.zeros(int(1.0 * fs))])
+    y = dut.poly(cfg["poly"], dut.biquad(cfg["pre"], x))
+    h = dsp.deconvolve(x, y, eps_rel=1e-12)
+    d = int(np.argmax(np.abs(h[: int(0.05 * fs)])))
+    pre_n, post_n = round(fs / 30), round(fs / 15)
+    w = dsp._taper(pre_n + post_n, pre_n, post_n // 5)
+    nw = 4 * (1 << int(np.ceil(np.log2(len(w)))))
+
+    def spec(k):
+        s = d - round(rate_s * np.log(k) * fs) - pre_n
+        return np.abs(np.fft.rfft(h[(s + np.arange(len(w))) % len(h)] * w, nw)) ** 2
+    lo, hi = 3 * f0 - 15.0, 3 * f0 + 15.0
+    a, b = int(np.ceil(lo * nw / fs)), int(np.floor(hi * nw / fs))
+    ia, ib = int(np.ceil(lo / 3 * nw / fs)), int(np.floor(hi / 3 * nw / fs))
+    read = 10 * np.log10(spec(3)[a:b + 1].mean() / spec(1)[ia:ib + 1].mean())
+    return read, dut.analytic(f0, amp, cfg, fs)[3], dut.sweep_analytic(f0, amp, cfg, fs, rate_s, 0.1)[3]
+
+
+@pytest.mark.parametrize("rate_s", [0.7, 1.3])
+def test_a_sweep_reads_a_wiener_harmonic_by_its_chirp_term_and_band_not_the_steady_sine(rate_s):
+    # At 50 Hz the hp1 lowers the polynomial's input to r = 0.93 of its design amplitude, where
+    # T_5's leak into H3 cancels most of T_3: H3 moves ~30 dB per dB of input amplitude. The
+    # sweep's first-order chirp term (+0.01 dB of amplitude at rate 0.7) and the band mean
+    # across the steep H3(f) put the reading tenths of a dB over the steady sine's truth;
+    # the sweep truth holds it to what its first-order expansion and band mean (no window
+    # kernel) leave out.
+    read, steady, sweep = _ess_h3_band_read(rate_s)
+    assert read - steady > 0.3
+    assert abs(read - sweep) < min(0.1, 0.2 * (read - steady))
+
+
+def test_the_sweep_amplitude_chirp_term_falls_as_one_over_the_rate():
+    fs = 96000.0
+    pre = dut.design_chain([{"type": "hp1", "hz": 20.0}], fs)
+    steady = abs(dut.response(pre, [50.0], fs)[0])
+    e = [20 * np.log10(dut.sweep_amplitude([50.0], 1.0, pre, fs, L)[0] / steady) for L in (0.7, 1.4, 1e9)]
+    assert 0.005 < e[0] < 0.02            # hundredths of a dB of amplitude at 50 Hz, rate 0.7
+    assert e[1] == pytest.approx(e[0] / 2, rel=0.02)
+    assert abs(e[2]) < 1e-9               # a steady sine: none

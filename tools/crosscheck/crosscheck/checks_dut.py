@@ -17,6 +17,21 @@ from .checks_common import (
 from .model import PathData
 
 
+def _sweep_truth(s, coef: dict, fs: float):
+    """The truth an ac2 sweep's harmonic reading is judged against (dut.sweep_analytic): the
+    sweep's own rate and harmonic window from its export; the steady sine's where the export
+    carries no rate."""
+    info = s.trace.sweep_info or {}
+    rate = info.get("rate")
+    if not rate:
+        return lambda fc, amp: dut.analytic(fc, amp, coef, fs)
+    pre, post = info.get("window_pre"), info.get("window_post")
+    window = pre + post if pre is not None and post is not None else None
+    own = ({k: sum(dsp.lf_window(float(rate), k)) for k in range(2, 6)}
+           if window is not None and s.lf_harmonics == "fine" else None)
+    return lambda fc, amp: dut.sweep_analytic(fc, amp, coef, fs, float(rate), window, own)
+
+
 class DutChecks:
     """Digital DUT truth and LF H2 onset; mixed into Analysis."""
 
@@ -70,14 +85,15 @@ class DutChecks:
                 hi = (s.end_hz or fs / 2) * 2 ** (-1 / 12)
                 curves.append((f"ac2 sweep {name}", s.level_dbfs, b["freq_hz"],
                                {k: (b[f"h{k}_db"], b[f"h{k}_floor_db"]) for k in range(2, 6) if f"h{k}_db" in b},
-                               lo, hi, 1 / 24, hi))
+                               lo, hi, 1 / 24, hi, _sweep_truth(s, coef, fs)))
         if p.rew is not None and p.rew.meas_dist is not None and np.isfinite(p.rew.level_dbfs):
             r = p.rew.meas_dist
             nf = r.cols.get("Noise", np.full(len(r.f), np.nan))
             curves.append((p.rew.label, p.rew.level_dbfs, r.f,
                            {k: (r.cols[f"H{k}"], nf) for k in range(2, 6) if f"H{k}" in r.cols},
-                           10.0 * 2 ** (1 / 12), 40000.0 * 2 ** (-1 / 12), 1 / 6, 40000.0 * 2 ** (-1 / 12)))
-        for name, lvl, f, hs, lo, hi, near, top in curves:
+                           10.0 * 2 ** (1 / 12), 40000.0 * 2 ** (-1 / 12), 1 / 6, 40000.0 * 2 ** (-1 / 12),
+                           lambda fc, amp: dut.analytic(fc, amp, coef, fs)))
+        for name, lvl, f, hs, lo, hi, near, top, truth_at in curves:
             amp = levels.peak_amplitude(float(lvl))
             for fc in tones:
                 for k in range(2, 6):
@@ -91,7 +107,7 @@ class DutChecks:
                             self._cmp_dut(p, name, fc, fc, k, {"kind": "none"}, tr, tw, rows, coef, fs, sweep=True,
                                           level=float(lvl))
                         continue
-                    tr = dut.analytic(float(f[i]), amp, coef, fs).get(k)
+                    tr = truth_at(float(f[i]), amp).get(k)
                     if tr is None:
                         continue
                     self._cmp_dut(p, name, fc, float(f[i]), k, dsp.classify(hv[i], hf[i], margin), tr, tw, rows,
@@ -107,7 +123,7 @@ class DutChecks:
                     if i is None or i in seen:
                         continue
                     seen.add(i)
-                    tr = dut.analytic(float(f[i]), amp, coef, fs).get(k)
+                    tr = truth_at(float(f[i]), amp).get(k)
                     if tr is None:
                         continue
                     ca = dsp.classify(hv[i], hf[i], margin)
@@ -148,7 +164,9 @@ class DutChecks:
                                  "model_limited": [[a, b] for a, b in mds], "model_bound_fails_hz": mfails})
         self.table(f"{p.name}: harmonics vs the DUT's analytic truth (dBr)",
                    ["f Hz", "H", "source", "reading", "floor", "truth", "Δ", "pre-filter"], rows,
-                   "Truth: dut.py's analytic Hk at each source's own level and at the column's frequency. "
+                   "Truth: dut.py's analytic Hk at each source's own level and at the column's frequency; for "
+                   "ac2 sweeps the sweep's own (dut.sweep_analytic: the pre-filter's first-order chirp term at "
+                   "the sweep's rate, ac2's band-mean reading over its harmonic window). "
                    "Δ = reading − truth, only where the reading is a value (floor + margin).")
 
     def _cmp_dut(self, p, name, fc, fcol, k, ca, truth, tol, rows, coef, fs, sweep: bool, level: float):

@@ -197,8 +197,12 @@ then SIGTERM, then kill), keeping its `xruns <n>` line.
   analysers, not the rig.
 - **Wiener vs Hammerstein:** the pre-filter sits ahead of the polynomial. A steady sine's
   harmonics are then exactly the analytic truth; a sweep sees the pre-filter only in the
-  instantaneous-frequency approximation. Rows where the pre-filter's gain exceeds 0.1 dB say
-  so: a deviation there can be the model, not the analyser. The post-filter has no such caveat.
+  instantaneous-frequency approximation. An ac2 sweep's rows are judged against the sweep's
+  own truth (`dut.sweep_analytic`): the pre-filter's first-order chirp term at the sweep's rate
+  (∝ 1/rate) and ac2's band-mean reading over its harmonic window. Both are tenths of a dB
+  only where Hk is very sensitive to the input amplitude (`floor-hp` H3 at 50 Hz: T_5 leaks
+  into H3 and cancels most of T_3). Rows where the pre-filter's gain exceeds 0.1 dB still say
+  so: what the first-order term leaves out is the model's. The post-filter has no such caveat.
 - **Ports:** the suite's own player and recorder use `[paths.dut].ports` (the DUT's ports). For
   the ac2 stages the suite records what feeds `ac2:in_<meas_in>` and `ac2:in_<ref_in>`
   (3 and 2), disconnects it, patches `ac2-dut:dut_out → ac2:in_3`, `ac2-dut:ref_out → ac2:in_2`,

@@ -84,7 +84,7 @@ the same steady sine.
 | Phase at the tones | −0.01° pass | 1 / 3° |
 | Phase 20 Hz–20 kHz | 0.08° pass | 1 / 3° |
 | Arrival | −0.03 µs pass | 0.3 / 1 µs |
-| Harmonics H2–H5 vs exact | +0.607 dB **warn** | 0.5 / 1 dB |
+| Harmonics H2–H5 vs exact | −0.248 dB pass | 0.5 / 1 dB |
 | Harmonics H2–H5 vs the steady sine | +0.842 dB pass | 3 / 6 dB |
 
 **OSM fixtures.** Synthetic WAV pairs (identity, a peaking biquad, two delays, a polarity flip, uncorrelated noise at three SNRs, a 1 kHz sine), analysed by ac2 and by OSM's DSP. Truth: each fixture's closed form; in noise, each estimator's expected value.
@@ -131,18 +131,6 @@ off: ac2 divides by the measured reference, REW's export is the measurement inpu
 each is held to the sine on its own definition. The reference loopback's own H2 at this tone
 accounts for most of the gap, the rest is within each tool's limit against the sine. The
 ac2 − REW check compares the two definitions directly; closed as a convention difference.
-
-### digital DUT: Harmonics H2–H5 vs exact: ac2 vs truth
-
-In the `dut-floor-hp` case at −10 dBFS, the 10 Hz / 5.5 s sweep reads H3 of the 50 Hz tone
-+0.61 dB<!--= b host/dut-10dbfs // dut-floor-hp.dut.h3.ac2 sweep 10Hz-5.5s.50 --> over its
-exact value; the 10 Hz / 11 s sweep reads
-+0.35 dB<!--= b host/dut-10dbfs // dut-floor-hp.dut.h3.ac2 sweep 10Hz-11s.50 --> and the
-steady sine
-−0.05 dB<!--= b host/dut-10dbfs // dut-floor-hp.dut.h3.steady sine.50 -->. There the device's
-pre-filter changes faster than a short sweep's instantaneous-frequency reading can follow, so
-the cell sits at the edge of the sweep model, not of ac2's analysis
-([reports/dut-coverage.md](reports/dut-coverage.md)). Open (scatter about the limit not shown).
 
 ## Reproducing
 

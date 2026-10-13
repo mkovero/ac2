@@ -20,8 +20,9 @@ pre-filter's transient response: the sweep's harmonic at instantaneous frequency
 |G_pre(f)| only as far as the filter is quasi-static over the time the sweep spends near f
 (the instantaneous-frequency approximation). Near the pre-filter's corner, and for fast
 sweeps, a sweep may read a different Hk than the steady sine without either analyser being
-wrong; the post-filter (Hammerstein part) has no such caveat. The report says so where it
-compares sweeps with this truth.
+wrong; the post-filter (Hammerstein part) has no such caveat. `sweep_analytic` is the sweep's
+own truth: the first-order chirp term of the pre-filter and ac2's band-mean reading; the
+report still marks the columns where the pre-filter is not flat.
 
 numpy only: it runs on the rig (the run designs the coefficients and writes the truth table)
 and in the analysis."""
@@ -103,13 +104,14 @@ def poly(c: list[float], u: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------- the truth
 
 
-def poly_harmonics(c: list[float], a: float, kmax: int = KMAX) -> np.ndarray:
-    """|h_k| of poly(a·cos θ) for k = 0..kmax (h_0 the DC term, h_k peak amplitudes)."""
+def poly_harmonics(c: list[float], a, kmax: int = KMAX) -> np.ndarray:
+    """|h_k| of poly(a·cos θ) for k = 0..kmax (h_0 the DC term, h_k peak amplitudes); for an
+    array of amplitudes, one row per amplitude."""
     n = max(64, 4 * (len(c) + kmax))
     th = 2 * np.pi * np.arange(n) / n
-    y = np.fft.rfft(poly(c, a * np.cos(th))) / n
-    h = np.abs(y[:kmax + 1]) * 2
-    h[0] /= 2
+    y = np.fft.rfft(poly(c, np.multiply.outer(a, np.cos(th))), axis=-1) / n
+    h = np.abs(y[..., :kmax + 1]) * 2
+    h[..., 0] /= 2
     return h
 
 
@@ -129,6 +131,66 @@ def analytic(f: float, amp: float, cfg: dict, fs: float, kmax: int = KMAX) -> di
             continue
         v = h[k] * g[k - 1]
         out[k] = float(20 * np.log10(v / fund)) if v > 0 else float("-inf")
+    return out
+
+
+def sweep_amplitude(f, amp: float, pre: list[list[float]], fs: float, rate_s: float) -> np.ndarray:
+    """The amplitude an exponential sweep reaches the polynomial with at instantaneous
+    frequency f, to first order in the sweep rate.
+
+    A chirp x = Re e^{jθ(t)}, θ' = ω(t), through a filter G: expanding θ(t − τ) to second
+    order in τ gives u = Re e^{jθ}·[G(ω) − (j/2)·ω'·G''(ω)] (G'' the second derivative in ω).
+    An exponential sweep has ω' = ω/L (L the rate, s per neper of frequency), so in hertz the
+    bracket is G(f) − j·f·G_ff(f)/(4π·L). The correction falls as 1/L: a sweep twice as slow
+    sees half of it, a steady sine (L → ∞) none."""
+    f = np.asarray(f, dtype=float)
+    if not pre:
+        return np.full_like(f, amp)
+    h = 1e-3 * f
+    g = response(pre, f, fs)
+    gff = (response(pre, f + h, fs) - 2 * g + response(pre, f - h, fs)) / h ** 2
+    return amp * np.abs(g - 1j * f * gff / (4 * np.pi * rate_s))
+
+
+def sweep_analytic(f: float, amp: float, cfg: dict, fs: float, rate_s: float, window_s: float | None = None,
+                   own_windows: dict[int, float] | None = None, kmax: int = KMAX) -> dict[int, float]:
+    """{k: Hk in dBr} that an exponential sweep of rate `rate_s` reads at fundamental f, as
+    ac2 defines the reading. Where the pre-filter is flat this is `analytic`.
+
+    Two terms separate it from the steady sine's truth:
+    - the sweep drives the polynomial with `sweep_amplitude`, not A·|G_pre(f)| (the linear
+      response, deconvolved, is the exact G and has no such term);
+    - given `window_s` (the harmonic window, s), the reading is ac2's band ratio: the mean
+      power of harmonic k over k·f ± 1/48 octave, widened to 3 cells of the window
+      (3/window_s Hz), over the fundamental's mean power across that band ÷ k. Where Hk
+      changes fast with f, the band mean is not the value at f. `own_windows` {k: s} are the
+      orders read in their own window where the shared band was widened (LF harmonics fine).
+
+    Both matter where Hk is very sensitive to the polynomial's input amplitude: a polynomial
+    whose orders cancel on one harmonic (T_5 leaking into H3 at r = a/a_design < 1 against
+    T_3) turns the chirp term's hundredths of a dB into tenths."""
+    pre, post = cfg.get("pre", []), cfg.get("post", [])
+    out = {}
+    for k in range(2, kmax + 1):
+        if k * f >= fs / 2:
+            continue
+        if window_s is None:
+            fund = np.array([f])
+        else:
+            half = 2 ** (1 / 48)
+            lo, hi = k * f / half, k * f * half
+            ws = window_s
+            if own_windows and k in own_windows and 3 / window_s > hi - lo:
+                ws = own_windows[k]
+            if hi - lo < 3 / ws:
+                c = 0.5 * (lo + hi)
+                lo, hi = max(c - 1.5 / ws, 0.0), c + 1.5 / ws
+            fund = np.linspace(lo, hi, 33) / k
+        hk = poly_harmonics(cfg["poly"], sweep_amplitude(fund, amp, pre, fs, rate_s))[:, k]
+        h1 = poly_harmonics(cfg["poly"], amp * np.abs(response(pre, fund, fs)))[:, 1]
+        pk = np.mean((hk * np.abs(response(post, k * fund, fs))) ** 2)
+        p1 = np.mean((h1 * np.abs(response(post, fund, fs))) ** 2)
+        out[k] = float(10 * np.log10(pk / p1)) if pk > 0 else float("-inf")
     return out
 
 

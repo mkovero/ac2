@@ -44,7 +44,7 @@ def _run(tmp: Path, sine_err=None, sweep_err=None, xruns=0) -> Path:
              "freq_hz,mag_db,phase_deg,h2_db,h2_floor_db,h3_db,h3_floor_db,h4_db,h4_floor_db,h5_db,h5_floor_db"]
     sweep_err = sweep_err or (lambda fc, k: 0.0)
     for fc in f:
-        t = dut.analytic(float(fc), AMP, coef, FS)
+        t = dut.sweep_analytic(float(fc), AMP, coef, FS, info["rate"])  # the sweep's own truth
         row = [fc, 0.0, 0.0]
         for k in range(2, 6):
             row += [t[k] + sweep_err(fc, k), -105.0] if k in t else [np.nan, np.nan]

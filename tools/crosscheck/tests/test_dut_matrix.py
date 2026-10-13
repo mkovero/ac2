@@ -164,7 +164,7 @@ def _case_run(tmp: Path, cases: dict, drop=None) -> Path:
         lines = ["# ac2 trace export v3", "# kind: sweep", "# sweep_info: " + json.dumps(info),
                  "freq_hz,mag_db,phase_deg,h2_db,h2_floor_db,h3_db,h3_floor_db,h4_db,h4_floor_db,h5_db,h5_floor_db"]
         for fc in dsp.log_centres(10.0, 40000.0, 48):
-            t = dut.analytic(float(fc), amp, coef, FS)
+            t = dut.sweep_analytic(float(fc), amp, coef, FS, info["rate"])  # the sweep's own truth
             row = [fc, 0.0, 0.0]
             for k in range(2, 6):
                 gone = k not in t or k * fc > 40000.0 or (drop and drop(name, fc, k))
