@@ -354,9 +354,11 @@ fn keepalives_carry_the_host_the_callback_load_and_the_xruns() {
     // The first window ends with the first keepalive after the open; the next one a second
     // later holds the blocks just run.
     let deadline = std::time::Instant::now() + 3 * T;
+    // A keepalive sent before the open was handled can still be queued: it has no audio
+    // figures yet.
     let audio = loop {
-        let a = health(&sub).audio.expect("a session is open");
-        if a.load.is_some() && a.xruns == 1 {
+        let a = health(&sub).audio;
+        if let Some(a) = a.filter(|a| a.load.is_some() && a.xruns == 1) {
             break a;
         }
         assert!(std::time::Instant::now() < deadline, "{a:?}");
