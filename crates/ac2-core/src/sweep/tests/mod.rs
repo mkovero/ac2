@@ -206,5 +206,6 @@ fn record(
 }
 
 mod harmonics;
+mod ideal;
 mod noise;
 mod response;

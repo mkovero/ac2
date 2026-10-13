@@ -4,14 +4,40 @@
 //!
 //! # Deconvolution
 //!
-//! Each repeat is deconvolved by regularised spectral division of the measurement record by
-//! the reference record of the same capture, `H = M·R* / (|R|² + ε)`. Dividing by the
-//! measured reference cancels every latency and the converters' own response, so t = 0 is
-//! "when the loopback heard it" (the transfer function's time base). The reference is a clean
-//! sweep, so the division separates harmonics exactly as Farina's inverse filter does: with
-//! `f1·L` an integer, `sin(k·φ(t)) = sin φ(t + L·ln k)`, i.e. the k-th harmonic of the sweep is
-//! the sweep advanced by `L·ln k`, and its impulse response appears at `−L·ln k`. Repeats are
-//! averaged as complex spectra.
+//! Each repeat is deconvolved twice, by regularised spectral division of a record by a
+//! sweep, `H = X·S* / (|S|² + ε)`, and repeats are averaged as complex spectra.
+//!
+//! The **linear response** (magnitude, phase, IR, arrival, room) divides the measurement
+//! record by the reference record of the same capture. Dividing by the measured reference
+//! cancels every latency and the converters' own response, so t = 0 is "when the loopback
+//! heard it" (the transfer function's time base).
+//!
+//! The **harmonics** divide each input by the emitted sweep itself, synthesised sample for
+//! sample as the generator played it (fades included). With `f1·L` an integer,
+//! `sin(k·φ(t)) = sin φ(t + L·ln k)`: the k-th harmonic of the sweep is the sweep advanced by
+//! `L·ln k`, and its impulse response appears at `−L·ln k` (Farina). That holds only for a
+//! divisor that is the clean sweep. The loopback is not one: its converters distort too, and a
+//! divisor `s + ε·s²` puts its H2 into the quotient with the opposite sign, so distortion both
+//! paths share (the interface's DAC) cancels and distortion on the reference input alone is
+//! added. The emitted sweep is aligned to the capture by the reference's own delay against it,
+//! its linear impulse's peak to a fraction of a sample (as the arrival is found): the two time
+//! bases then coincide and the measurement's harmonic impulses sit at `d − L·ln k`, `d` the
+//! arrival found re the reference. The reference lends its timing, not its distortion. A
+//! drift ε between the output and the input clock is not cancelled against the emitted sweep:
+//! it smears each harmonic impulse over ε times the sweep's length (0.5 ms at 50 ppm over
+//! 10 s), far inside a harmonic window, so the band powers do not change.
+//!
+//! Both terms of the distortion ratio come from the same division. The fundamental `P_1` is
+//! the measurement's linear response re the emitted sweep, not re the reference: the
+//! interface's output response then sits in `P_1(f)` and `P_k(k·f)` alike and cancels in the
+//! ratio wherever it is flat over `f … k·f`, so the dBr is the measured chain's own (as a
+//! steady sine's harmonics re its own fundamental), whatever the loopback's gain. A `P_1` re
+//! the reference would carry the loopback's level and response into every ratio.
+//!
+//! The reference input's own harmonics are separated the same way
+//! ([`SweepAnalysis::reference_harmonics`]). Where the loopback shares the measured path's
+//! converters, its distortion bounds what the measurement can claim: a harmonic within a few
+//! dB of the reference's own is the interface's, not the system's.
 //!
 //! # Windows
 //!
@@ -27,8 +53,8 @@
 //! window's resolution cells at low frequencies. Harmonic `k` at fundamental `f` is
 //! `P_k(k·f) / P_1(f)`, `P_1` averaged over the fundamentals whose harmonic lies in `P_k`'s
 //! band (`1/k` of its width in hertz); THD is the sum of those ratios over the orders in band.
-//! An order is reported only where its whole band lies below the fade-out, where the reference
-//! still carries the sweep at full level. The
+//! An order is reported only where its whole band lies below the fade-out, where the emitted
+//! sweep still plays at full level. The
 //! noise floor is the same window cut from the deconvolved silence after the response; a
 //! point counts when it is [`FLOOR_MARGIN_DB`] above that floor ([`is_valid`]).
 //!
@@ -404,8 +430,9 @@ pub struct SweepAnalysis {
     pub arrival_s: f64,
     /// The reference's sweep re the emitted level (loopback gain), dB.
     pub reference_db: f64,
-    /// Onset of the first sweep in the recording, s (output → reference latency plus
-    /// whatever preceded the sweep in the recording).
+    /// Onset of the first sweep in the recording, s, to a fraction of a sample (output →
+    /// reference latency plus whatever preceded the sweep in the recording): where the
+    /// emitted sweep aligns with the reference.
     pub first_onset_s: f64,
     /// Harmonic window before and after `t_k`, s.
     pub harmonic_window_s: (f64, f64),
@@ -426,6 +453,10 @@ pub struct SweepAnalysis {
     pub thd_db: Vec<f64>,
     /// Power sum of the orders' noise floors re the fundamental, dB.
     pub thd_floor_db: Vec<f64>,
+    /// The reference input's own H2 … H`max_order`, separated the same way: the distortion
+    /// of the loopback path, which bounds what the measurement's harmonics can claim where
+    /// that path is also part of the measured one.
+    pub reference_harmonics: Vec<HarmonicCurve>,
     /// Impulse response from the highest order's window to the end of the linear window,
     /// decimated to at most [`IR_POINTS`] (signed extreme per bucket).
     pub ir: Vec<f64>,

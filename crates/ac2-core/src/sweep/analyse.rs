@@ -4,6 +4,7 @@ use std::f64::consts::{LN_2, TAU};
 
 use num_complex::Complex64;
 
+use crate::generator::dbfs_to_rms;
 use crate::ir_view::ImpulseResponse;
 
 use super::locate::locate;
@@ -108,19 +109,289 @@ pub fn analyse_recording(
     let longest = cuts.iter().map(|(a, b)| b - a).max().unwrap_or(1);
     let n = 2 * longest.next_power_of_two();
 
-    // Complex mean of the per-repeat spectral divisions.
-    let mut acc = vec![Complex64::new(0.0, 0.0); n / 2 + 1];
-    for &(a, b) in &cuts {
+    // Per repeat: the measurement re the recorded reference (the linear response), and both
+    // inputs re the emitted sweep itself, advanced by the reference's own delay against it (the
+    // harmonic separation).
+    let amp = dbfs_to_rms(spec.level_dbfs) * std::f64::consts::SQRT_2;
+    let zero = Complex64::new(0.0, 0.0);
+    let mut acc = vec![zero; n / 2 + 1];
+    let mut acc_m = vec![zero; n / 2 + 1];
+    let mut acc_r = vec![zero; n / 2 + 1];
+    let mut first_shift = 0.0;
+    for (j, (&(a, b), &o)) in cuts.iter().zip(&onsets).enumerate() {
         let r = fft_forward(&reference[a..b], n);
         let mm = fft_forward(&measurement[a..b], n);
-        let peak = r.iter().fold(0.0f64, |p, z| p.max(z.norm_sqr()));
-        let eps = REGULARISATION * peak;
-        for ((h, rz), mz) in acc.iter_mut().zip(&r).zip(&mm) {
-            *h += mz * rz.conj() / (rz.norm_sqr() + eps);
+        divide_into(&mut acc, &mm, &r);
+        let lead = o - a;
+        let ideal: Vec<f64> = (0..b - a)
+            .map(|i| {
+                i.checked_sub(lead)
+                    .map_or(0.0, |s| amp * timing.plan.sample(s))
+            })
+            .collect();
+        let s = fft_forward(&ideal, n);
+        let gr = divided(&r, &s);
+        let shift = delay_of(&gr, n, fs, post_roll);
+        if j == 0 {
+            first_shift = shift;
         }
+        let gm = divided(&mm, &s);
+        advance_into(&mut acc_r, &gr, shift, n);
+        advance_into(&mut acc_m, &gm, shift, n);
     }
     let scale = 1.0 / cuts.len() as f64;
-    acc.iter_mut().for_each(|z| *z *= scale);
+    for a in [&mut acc, &mut acc_m, &mut acc_r] {
+        a.iter_mut().for_each(|z| *z *= scale);
+    }
+    let h = fft_inverse(acc, n);
+
+    // Arrival: the strongest sample from slightly before the reference to half the
+    // post-roll after it.
+    let at = |i: i64| h[i.rem_euclid(n as i64) as usize];
+    let Some(d) = strongest(at, fs, post_roll) else {
+        return Err(SweepError::NoSignal);
+    };
+    // The arrival `D = d + phi`: windows stay anchored on the whole sample `d`, times and the
+    // phase are referred to `D`.
+    let phi = fine_peak(at, d);
+
+    let l = timing.plan.rate_s;
+    let k_max = spec.max_order;
+    let win = SharedWindow::new(&timing, fs);
+    let (pre_n, w_len) = (win.pre_n, win.w_len);
+    let (noise_end, _) = noise_region(timing.shared_roll_s, fs);
+    let noise_start = noise_end - w_len as i64;
+    let freqs = spec.grid.frequencies();
+    let (f1, f2) = (spec.ess.start_hz, spec.ess.end_hz);
+    // The measurement's harmonics in its own impulse response re the emitted sweep, anchored
+    // on the arrival found re the reference (the two time bases coincide once advanced by the
+    // reference's delay); the reference's own at its peak, where the advance put it.
+    let meas = separate(spec, &timing, &win, acc_m, n, d);
+    let refd = separate(spec, &timing, &win, acc_r, n, 0);
+
+    // Linear response: from just after H2's window to the gate (default: the noise window).
+    let lin_pre = ((PRE_FRACTION * l * LN_2 * fs).round() as usize).max(1);
+    let lin_end = match spec.gate_s {
+        Some(g) => (d + (g * fs).round() as i64).min(noise_start),
+        None => noise_start,
+    };
+    let lin_end = lin_end.max(d + 2);
+    let lin_post = (lin_end - d) as usize;
+    let lin_len = lin_pre + lin_post;
+    let lw = taper(lin_len, lin_pre, (lin_post / 10).max(1));
+    let nl = 2 * lin_len.next_power_of_two();
+    let s1 = fft_forward(&segment(&h, d - lin_pre as i64, &lw), nl);
+    let bin_l = fs / nl as f64;
+    // Refer the phase to the arrival: the segment starts `lin_pre + phi` samples before it.
+    let lead = lin_pre as f64 + phi;
+    let rot = |k: usize| {
+        let z = s1[k];
+        z * Complex64::from_polar(1.0, TAU * k as f64 * lead / nl as f64)
+    };
+    let mut magnitude_db = vec![f64::NAN; freqs.len()];
+    let mut phase_deg = vec![f64::NAN; freqs.len()];
+    for (i, &f) in freqs.iter().enumerate() {
+        if f < f1 || f > f2 {
+            continue;
+        }
+        let (e_lo, e_hi) = spec.grid.edges(i);
+        let (a, b) = (e_lo / bin_l, e_hi / bin_l);
+        if b + 1.0 >= s1.len() as f64 {
+            continue;
+        }
+        let p = column_mean(|k| s1[k].norm_sqr(), a, b);
+        let z = column_mean(rot, a, b);
+        if p > 0.0 {
+            magnitude_db[i] = db10(p);
+            phase_deg[i] = wrap_deg(z.arg().to_degrees());
+        }
+    }
+
+    // One cell of the linear window wherever the response is reported.
+    let lin_cell = fs / lin_len as f64;
+    let unresolved_response = crate::resolution::unresolved_ranges(&spec.grid, |f| {
+        (f1..=f2).contains(&f).then_some(lin_cell)
+    });
+
+    // IR from the highest order's window to the end of the linear window.
+    let ir_start = d - (l * f64::from(k_max).ln() * fs).round() as i64 - pre_n as i64;
+    let span: Vec<f64> = (ir_start..lin_end).map(at).collect();
+    let env = ImpulseResponse {
+        samples: span.clone(),
+        sample_rate: fs,
+        inserted_delay_s: 0.0,
+    }
+    .envelope();
+    let bucket = span.len().div_ceil(IR_POINTS).max(1);
+    let ir: Vec<f64> = span
+        .chunks(bucket)
+        .map(|c| {
+            c.iter()
+                .fold(0.0f64, |a, &v| if v.abs() > a.abs() { v } else { a })
+        })
+        .collect();
+    let ir_etc_db: Vec<f64> = env
+        .chunks(bucket)
+        .map(|c| {
+            let m = c.iter().fold(0.0f64, |a, &v| a.max(v));
+            if m > 0.0 {
+                (20.0 * m.log10()).max(crate::ir_view::FLOOR_DB)
+            } else {
+                crate::ir_view::FLOOR_DB
+            }
+        })
+        .collect();
+
+    // Room parameters: from half-way to H2's impulse (at most 100 ms before the arrival, room
+    // for the band filters' pre-ringing) to the end of the silence.
+    let room_start = d - ((0.5 * l * LN_2).min(ROOM_PRE_S) * fs).round() as i64;
+    let room_end = (((timing.shared_roll_s - NOISE_MARGIN_S) * fs).floor() as i64).max(d + 2);
+    let room_ir: Vec<f64> = (room_start..room_end).map(at).collect();
+    let excited = (
+        timing.full_level_hz(),
+        f2 * (-spec.ess.fade_out_s / l).exp(),
+    );
+    let re_arrival = |i: i64| ((i - d) as f64 - phi) / fs;
+    let room = crate::room::analyse(&room_ir, fs, re_arrival(room_start), excited);
+
+    Ok(SweepAnalysis {
+        sample_rate: fs,
+        rate_s: l,
+        duration_s: timing.plan.duration_s(),
+        repeats: cuts.len(),
+        arrival_s: (d as f64 + phi) / fs,
+        reference_db,
+        first_onset_s: (onsets[0] as f64 + first_shift) / fs,
+        harmonic_window_s: (pre_n as f64 / fs, win.post_n as f64 / fs),
+        linear_window_s: (lin_pre as f64 / fs, lin_post as f64 / fs),
+        noise_window_s: re_arrival(noise_end - (win.noise_windows(&timing, fs) * w_len) as i64),
+        frequencies: freqs,
+        magnitude_db,
+        phase_deg,
+        harmonics: meas.harmonics,
+        thd_db: meas.thd_db,
+        thd_floor_db: meas.thd_floor_db,
+        reference_harmonics: refd.harmonics,
+        ir,
+        ir_etc_db,
+        ir_t0_s: re_arrival(ir_start),
+        ir_dt_s: bucket as f64 / fs,
+        clipped,
+        room,
+        room_end_s: re_arrival(room_end),
+        unresolved_response,
+        unresolved_harmonics: crate::resolution::unresolved_columns(&spec.grid, |i| meas.cell[i]),
+    })
+}
+
+/// `acc += num·den* / (|den|² + ε)`, ε relative to `den`'s peak bin power.
+fn divide_into(acc: &mut [Complex64], num: &[Complex64], den: &[Complex64]) {
+    let peak = den.iter().fold(0.0f64, |p, z| p.max(z.norm_sqr()));
+    let eps = REGULARISATION * peak;
+    for ((h, d), m) in acc.iter_mut().zip(den).zip(num) {
+        *h += m * d.conj() / (d.norm_sqr() + eps);
+    }
+}
+
+/// `num ÷ den`, regularised as [`divide_into`].
+fn divided(num: &[Complex64], den: &[Complex64]) -> Vec<Complex64> {
+    let mut out = vec![Complex64::new(0.0, 0.0); num.len()];
+    divide_into(&mut out, num, den);
+    out
+}
+
+/// `acc += g` advanced by `shift` samples (a spectrum of an `n`-point transform): what sat
+/// at `shift` moves to 0.
+fn advance_into(acc: &mut [Complex64], g: &[Complex64], shift: f64, n: usize) {
+    for (k, (a, z)) in acc.iter_mut().zip(g).enumerate() {
+        *a += z * Complex64::from_polar(1.0, TAU * k as f64 * shift / n as f64);
+    }
+}
+
+/// The whole sample of the largest |h| from slightly before the reference to half the
+/// post-roll after it; `None` when the response is silent.
+fn strongest(at: impl Fn(i64) -> f64, fs: f64, post_roll: usize) -> Option<i64> {
+    let earliest = -((EARLIEST_ARRIVAL_S * fs).round() as i64);
+    let latest = (post_roll / 2) as i64;
+    let (d, peak) = (earliest..latest).fold((0i64, 0.0f64), |(bi, bv), i| {
+        let v = at(i).abs();
+        if v > bv { (i, v) } else { (bi, bv) }
+    });
+    (peak.partial_cmp(&0.0) == Some(std::cmp::Ordering::Greater)).then_some(d)
+}
+
+/// Delay of the linear peak of the response `g` (spectrum of an `n`-point transform),
+/// samples to a fraction of one; 0 when silent.
+fn delay_of(g: &[Complex64], n: usize, fs: f64, post_roll: usize) -> f64 {
+    let h = fft_inverse(g.to_vec(), n);
+    let at = |i: i64| h[i.rem_euclid(n as i64) as usize];
+    strongest(at, fs, post_roll).map_or(0.0, |d| d as f64 + fine_peak(at, d))
+}
+
+/// The shared harmonic window: rise, fall, the taper and its transform length.
+struct SharedWindow {
+    pre_n: usize,
+    post_n: usize,
+    w_len: usize,
+    w: Vec<f64>,
+    nw: usize,
+}
+
+impl SharedWindow {
+    fn new(timing: &SweepTiming, fs: f64) -> Self {
+        let pre_n = ((timing.pre_s * fs).round() as usize).max(1);
+        let post_n = ((timing.post_s * fs).round() as usize).max(1);
+        let w_len = pre_n + post_n;
+        Self {
+            pre_n,
+            post_n,
+            w_len,
+            w: taper(w_len, pre_n, (post_n / 5).max(1)),
+            nw: 4 * w_len.next_power_of_two(),
+        }
+    }
+
+    /// Noise windows that fit in the shared region of the post-roll (at least one).
+    fn noise_windows(&self, timing: &SweepTiming, fs: f64) -> usize {
+        let (end, first) = noise_region(timing.shared_roll_s, fs);
+        usize::try_from((end - first) / self.w_len as i64)
+            .unwrap_or(0)
+            .max(1)
+    }
+}
+
+/// The noise region of a post-roll of `roll_s`: (end, first sample) re the arrival. Windows
+/// like the harmonic ones tile back from just before its end (which every repeat's record
+/// covers fully) over its second half, where the system's own decay has ended.
+fn noise_region(roll_s: f64, fs: f64) -> (i64, i64) {
+    let end = ((roll_s - NOISE_MARGIN_S) * fs).floor() as i64;
+    (end, (NOISE_REGION_START * roll_s * fs).ceil() as i64)
+}
+
+/// Distortion curves of one input.
+struct Distortion {
+    harmonics: Vec<HarmonicCurve>,
+    thd_db: Vec<f64>,
+    thd_floor_db: Vec<f64>,
+    /// Per column, the widest cell (on the fundamental's axis) of a window a reported order
+    /// was read from.
+    cell: Vec<Option<f64>>,
+}
+
+/// Harmonic separation of `acc`, an input's response re the emitted sweep (spectrum of an
+/// `n`-point transform), its linear impulse at the whole sample `d`.
+fn separate(
+    spec: &SweepSpec,
+    timing: &SweepTiming,
+    win: &SharedWindow,
+    acc: Vec<Complex64>,
+    n: usize,
+    d: i64,
+) -> Distortion {
+    let fs = spec.sample_rate;
+    let l = timing.plan.rate_s;
+    let k_max = spec.max_order;
+    let (pre_n, w_len, nw, w) = (win.pre_n, win.w_len, win.nw, &win.w);
     // Lowest fundamental analysed for distortion.
     let f_lo = timing.full_level_hz().max(2.0 / timing.window_s());
     let h_harm = fft_inverse(
@@ -129,30 +400,6 @@ pub fn analyse_recording(
     );
     let acc_lf = (spec.lf_harmonics == LfHarmonics::Fine).then(|| acc.clone());
     let h = fft_inverse(acc, n);
-
-    // Arrival: the strongest sample from slightly before the reference to half the
-    // post-roll after it.
-    let at = |i: i64| h[i.rem_euclid(n as i64) as usize];
-    let earliest = -((EARLIEST_ARRIVAL_S * fs).round() as i64);
-    let latest = (post_roll / 2) as i64;
-    let (d, peak) = (earliest..latest).fold((0i64, 0.0f64), |(bi, bv), i| {
-        let v = at(i).abs();
-        if v > bv { (i, v) } else { (bi, bv) }
-    });
-    if peak.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-        return Err(SweepError::NoSignal);
-    }
-    // The arrival `D = d + phi`: windows stay anchored on the whole sample `d`, times and the
-    // phase are referred to `D`.
-    let phi = fine_peak(at, d);
-
-    let l = timing.plan.rate_s;
-    let k_max = spec.max_order;
-    let pre_n = ((timing.pre_s * fs).round() as usize).max(1);
-    let post_n = ((timing.post_s * fs).round() as usize).max(1);
-    let w_len = pre_n + post_n;
-    let w = taper(w_len, pre_n, (post_n / 5).max(1));
-    let nw = 4 * w_len.next_power_of_two();
     let bin_w = fs / nw as f64;
     let t_k = |k: u8| d - (l * f64::from(k).ln() * fs).round() as i64;
 
@@ -161,29 +408,19 @@ pub fn analyse_recording(
     let spectra: Vec<Vec<f64>> = (1..=k_max)
         .map(|k| {
             let src = if k == 1 { &h } else { &h_harm };
-            power_spectrum(&segment(src, t_k(k) - pre_n as i64, &w), nw)
+            power_spectrum(&segment(src, t_k(k) - pre_n as i64, w), nw)
         })
         .collect();
-    // Noise: windows like the harmonic ones, tiled back from just before the end of the
-    // post-roll (which every repeat's record covers fully) over its second half, where the
-    // system's own decay has ended. With the window at most MAX_WINDOW_S and the post-roll at
-    // least MIN_POST_ROLL_S, at least four fit.
-    let region = |roll_s: f64| {
-        let end = ((roll_s - NOISE_MARGIN_S) * fs).floor() as i64;
-        (end, (NOISE_REGION_START * roll_s * fs).ceil() as i64)
-    };
-    let (noise_end, noise_first) = region(timing.shared_roll_s);
-    let noise_start = noise_end - w_len as i64;
-    let noise_windows = usize::try_from((noise_end - noise_first) / w_len as i64)
-        .unwrap_or(0)
-        .max(1);
-    let noise = noise_power(&h_harm, noise_end, noise_windows, &w, nw);
+    // Noise: with the window at most MAX_WINDOW_S and the post-roll at least
+    // MIN_POST_ROLL_S, at least four windows fit in its second half.
+    let (noise_end, _) = noise_region(timing.shared_roll_s, fs);
+    let noise = noise_power(&h_harm, noise_end, win.noise_windows(timing, fs), w, nw);
     let gaps: Vec<Vec<Vec<f64>>> = (2..=k_max)
-        .map(|k| gap_spectra(&h_harm, t_k, k, pre_n, &w, nw))
+        .map(|k| gap_spectra(&h_harm, t_k, k, pre_n, w, nw))
         .collect();
 
     let freqs = spec.grid.frequencies();
-    let (f1, f2) = (spec.ess.start_hz, spec.ess.end_hz);
+    let f2 = spec.ess.end_hz;
     let f_top = (f2 * (-spec.ess.fade_out_s / l).exp()).min(HARMONIC_FS_FRACTION * fs);
     let mut harmonics: Vec<HarmonicCurve> = (2..=k_max)
         .map(|order| HarmonicCurve {
@@ -211,7 +448,7 @@ pub fn analyse_recording(
             let (pre, post) = lf_window(l, k);
             let (pre_n, post_n) = ((pre * fs).round() as usize, (post * fs).round() as usize);
             let w_len = pre_n + post_n;
-            let (end, first) = region(timing.post_roll_s);
+            let (end, first) = noise_region(timing.post_roll_s, fs);
             let count = usize::try_from((end - first) / w_len as i64).unwrap_or(0);
             if count == 0 {
                 return None;
@@ -261,8 +498,8 @@ pub fn analyse_recording(
                 continue;
             }
             let (lo, hi) = band(kf, DISTORTION_BAND_OCT, x.min_hz);
-            // The whole band below the fade-out: dividing by a reference faded there while
-            // the harmonic was driven by the fundamental at full level reads it too high.
+            // The whole band below the fade-out: dividing by a sweep faded there while the
+            // harmonic was driven by the fundamental at full level reads it too high.
             if hi > f_top {
                 continue;
             }
@@ -298,118 +535,10 @@ pub fn analyse_recording(
         }
     }
 
-    // Linear response: from just after H2's window to the gate (default: the noise window).
-    let lin_pre = ((PRE_FRACTION * l * LN_2 * fs).round() as usize).max(1);
-    let lin_end = match spec.gate_s {
-        Some(g) => (d + (g * fs).round() as i64).min(noise_start),
-        None => noise_start,
-    };
-    let lin_end = lin_end.max(d + 2);
-    let lin_post = (lin_end - d) as usize;
-    let lin_len = lin_pre + lin_post;
-    let lw = taper(lin_len, lin_pre, (lin_post / 10).max(1));
-    let nl = 2 * lin_len.next_power_of_two();
-    let s1 = fft_forward(&segment(&h, d - lin_pre as i64, &lw), nl);
-    let bin_l = fs / nl as f64;
-    // Refer the phase to the arrival: the segment starts `lin_pre + phi` samples before it.
-    let lead = lin_pre as f64 + phi;
-    let rot = |k: usize| {
-        let z = s1[k];
-        z * Complex64::from_polar(1.0, TAU * k as f64 * lead / nl as f64)
-    };
-    let mut magnitude_db = vec![f64::NAN; freqs.len()];
-    let mut phase_deg = vec![f64::NAN; freqs.len()];
-    for (i, &f) in freqs.iter().enumerate() {
-        if f < f1 || f > f2 {
-            continue;
-        }
-        let (e_lo, e_hi) = spec.grid.edges(i);
-        let (a, b) = (e_lo / bin_l, e_hi / bin_l);
-        if b + 1.0 >= s1.len() as f64 {
-            continue;
-        }
-        let p = column_mean(|k| s1[k].norm_sqr(), a, b);
-        let z = column_mean(rot, a, b);
-        if p > 0.0 {
-            magnitude_db[i] = db10(p);
-            phase_deg[i] = wrap_deg(z.arg().to_degrees());
-        }
-    }
-
-    // One cell of the linear window wherever the response is reported.
-    let lin_cell = fs / lin_len as f64;
-    let unresolved_response = crate::resolution::unresolved_ranges(&spec.grid, |f| {
-        (f1..=f2).contains(&f).then_some(lin_cell)
-    });
-
-    // IR from the highest order's window to the end of the linear window.
-    let ir_start = t_k(k_max) - pre_n as i64;
-    let span: Vec<f64> = (ir_start..lin_end).map(at).collect();
-    let env = ImpulseResponse {
-        samples: span.clone(),
-        sample_rate: fs,
-        inserted_delay_s: 0.0,
-    }
-    .envelope();
-    let bucket = span.len().div_ceil(IR_POINTS).max(1);
-    let ir: Vec<f64> = span
-        .chunks(bucket)
-        .map(|c| {
-            c.iter()
-                .fold(0.0f64, |a, &v| if v.abs() > a.abs() { v } else { a })
-        })
-        .collect();
-    let ir_etc_db: Vec<f64> = env
-        .chunks(bucket)
-        .map(|c| {
-            let m = c.iter().fold(0.0f64, |a, &v| a.max(v));
-            if m > 0.0 {
-                (20.0 * m.log10()).max(crate::ir_view::FLOOR_DB)
-            } else {
-                crate::ir_view::FLOOR_DB
-            }
-        })
-        .collect();
-
-    // Room parameters: from half-way to H2's impulse (at most 100 ms before the arrival, room
-    // for the band filters' pre-ringing) to the end of the silence.
-    let room_start = d - ((0.5 * l * LN_2).min(ROOM_PRE_S) * fs).round() as i64;
-    let room_end = (((timing.shared_roll_s - NOISE_MARGIN_S) * fs).floor() as i64).max(d + 2);
-    let room_ir: Vec<f64> = (room_start..room_end).map(at).collect();
-    let excited = (
-        timing.full_level_hz(),
-        f2 * (-spec.ess.fade_out_s / l).exp(),
-    );
-    let re_arrival = |i: i64| ((i - d) as f64 - phi) / fs;
-    let room = crate::room::analyse(&room_ir, fs, re_arrival(room_start), excited);
-
-    Ok(SweepAnalysis {
-        sample_rate: fs,
-        rate_s: l,
-        duration_s: timing.plan.duration_s(),
-        repeats: cuts.len(),
-        arrival_s: (d as f64 + phi) / fs,
-        reference_db,
-        first_onset_s: onsets[0] as f64 / fs,
-        harmonic_window_s: (pre_n as f64 / fs, post_n as f64 / fs),
-        linear_window_s: (lin_pre as f64 / fs, lin_post as f64 / fs),
-        noise_window_s: re_arrival(noise_end - (noise_windows * w_len) as i64),
-        frequencies: freqs,
-        magnitude_db,
-        phase_deg,
+    Distortion {
         harmonics,
         thd_db,
         thd_floor_db,
-        ir,
-        ir_etc_db,
-        ir_t0_s: re_arrival(ir_start),
-        ir_dt_s: bucket as f64 / fs,
-        clipped,
-        room,
-        room_end_s: re_arrival(room_end),
-        unresolved_response,
-        unresolved_harmonics: crate::resolution::unresolved_columns(&spec.grid, |i| {
-            harmonic_cell[i]
-        }),
-    })
+        cell: harmonic_cell,
+    }
 }

@@ -37,28 +37,56 @@ One synchronised exponential sine sweep per repeat (`ac2_core::generator::EssPla
   carries the room's tail and the noise estimate; `repeats` (1…8) sweeps are averaged
   (complex mean of the deconvolved spectra: noise falls 3 dB per doubling, distortion stays).
 
-## Reference: deconvolve the measured loopback
+## Deconvolution: the loopback for the response, the emitted sweep for the harmonics
 
-`H(f) = M(f)·R*(f) / (|R(f)|² + ε)` per repeat, `M` = mic record, `R` = the loopback reference
-record of the same capture, both zero-padded to `2·next_pow2(len)`; `ε = 10⁻⁶·max|R|²`.
+Each repeat is divided twice, `H = X(f)·S*(f) / (|S(f)|² + ε)`, both records zero-padded to
+`2·next_pow2(len)`, `ε = 10⁻⁶·max|S|²`, and repeats are averaged as complex spectra.
 
-Dividing by the **measured** reference (instead of convolving with the emitted sweep's inverse
-and a loopback-derived latency):
+**Linear response** (magnitude, phase, IR, arrival, room parameters): the mic record `M` over
+the loopback reference record `R` of the same capture. Dividing by the **measured** reference:
 
 - cancels every latency of the chain (DAC/ADC, driver buffering, two devices' callback start
   offset) sample-exactly, without estimating it; t = 0 is "when the loopback heard it", the
   same time base as the transfer function, so the sweep's arrival equals the delay finder's;
 - cancels the converters' and the loopback's own response and level (the transfer-function
-  convention: mic re reference);
-- needs no assumption that the emitted samples arrived unaltered (sample-rate converters,
-  dropped output frames during a capture show up as a bad reference instead of a wrong IR).
+  convention: mic re reference).
 
-The reference is a clean copy of the sweep (its own distortion ≪ the speaker's), so dividing by
-it is dividing by the sweep: the harmonic separation is the same as Farina's inverse filter.
-`ε` keeps out-of-band bins (no excitation) from amplifying noise; in band `|R|²` spans 30 dB
-(pink sweep) and the bias at the top is < 0.01 dB. The emitted sweep's inverse is still used
-once: a matched filter on the reference locates each repeat's onset (to cut the repeats apart
-and to check the reference actually carries the sweep: refused below −40 dB).
+**Harmonics**: each input over the emitted sweep itself, synthesised sample for sample as the
+generator played it (onset extension and fades included). Farina's separation holds for a
+divisor that is the clean sweep; the loopback is not one. Its converters distort too (on an
+FF400 loopback H2 about −97 dBr at 1 kHz), and a divisor `s + ε·s²` puts its H2 into the
+quotient with the opposite sign: distortion both paths share (the interface's DAC) cancels,
+distortion on the reference input alone is added. Measured on the Xone path against REW
+(which always separates against its generated sweep): ac2's H3 at 30–100 Hz read 4–9 dB low
+and its H2 at 100 Hz–1 kHz 3–5 dB high; against the emitted sweep both agree with REW.
+
+The emitted sweep is aligned to the capture by the reference's own delay against it: placed at
+the onset the matched filter found, divided into `R`, the peak of that linear impulse refined
+to a fraction of a sample (`fine_peak`, as the arrival), and both inputs' quotients advanced by
+it. The time bases then coincide: the measurement's harmonic impulses sit at `d − L·ln k`,
+`d` the arrival found re the reference, the reference's at `−L·ln k`. The reference lends its
+timing, not its distortion. A drift `ε` between the output and the input clock is not
+cancelled against the emitted sweep: the recorded sweep is stretched by `1 + ε`, which smears
+each harmonic impulse over `ε` times the sweep's length (0.5 ms at 50 ppm over 10 s), far
+inside a harmonic window (≥ several ms, up to 100 ms), so the band powers do not change.
+
+Both terms of the ratio come from the same division: `P_1` is the measurement's own
+fundamental re the emitted sweep, not the response re the reference. The interface's output
+response is then in `P_1(f)` and `P_k(k·f)` alike and cancels in the ratio where it is flat over
+`f … k·f`, so the dBr is the measured chain's own (as a steady sine's harmonic re its own
+fundamental) whatever the loopback's gain; a `P_1` re the reference would carry the loopback's
+level and response into every ratio.
+
+The reference input's own harmonics are separated the same way (`reference_harmonics`, its
+own fundamental, windows and floor) and stored with the run. Where the loopback shares the
+measured path's converters their distortion is in both inputs: a measured harmonic less than
+6 dB above the reference's own (`ac2_scene::distortion::REFERENCE_BOUND_DB`; 6 dB above, the
+converters add at most 1 dB) may be theirs, and `ac2 sweep run` says where.
+
+`ε` keeps out-of-band bins (no excitation) from amplifying noise; in band `|S|²` spans 30 dB
+(pink sweep) and the bias at the top is < 0.01 dB. The emitted sweep's inverse filter also
+locates each repeat's onset on the reference (to cut the repeats apart and to check the
+reference actually carries the sweep: refused below −40 dB).
 
 ## Separating the harmonics
 
@@ -190,6 +218,9 @@ recorder → analysis, f32 audio):
 | memoryless, 50 Hz–6 kHz, 3 s, emitted from 11.5 Hz | HD2 / HD3, 50–100 Hz | ±0.5 dB | 0.13 / 0.07 dB |
 | 1/f noise, 32 seeds, capped window, 1 s post-roll | floor spread, 4 windows vs 1 | < 0.7× | 0.86 vs 1.89 dB |
 | daemon + fake rig (H2 −40 dB, H3 −50 dB at −20 dBFS), 100 Hz–5 kHz, 1 s | HD2 / HD3, 200 Hz–1.4 kHz | ±0.5 dB | 0.10 / 0.15 dB |
+| reference path H2 −60 dB, meas path H2 −70 / H3 −65 dB, 50 Hz–6 kHz, 3 s (`tests/ideal.rs`) | meas HD2 / HD3; reference HD2 | ±0.1 dB | 0.005 / 0.004 dB; 0.003 dB (re the reference: −60.9 dB) |
+| H2 −60 / H3 −70 dB before the split (both paths) | HD2 / HD3 of both inputs | ±0.1 dB | ≤ 0.008 dB (re the reference: cancelled) |
+| both paths delayed N + 0.37 samples, 2 repeats | onset; HD2 / HD3 | 0.01 sample; ±0.1 dB | 0.0008 sample; 0.004 dB |
 
 ## Protocol and storage
 
@@ -214,7 +245,7 @@ that input (`q7-calibration.md` §9).
 
 `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2` (about
 15 s: two 6 s sweeps, each with 1 s of silence after it). Out 2 must play the sweep too: it is
-the loopback the analysis divides by. 6 s and two repeats put the floor 6 dB under a single 3 s
+the loopback the response is divided by and the harmonics are aligned with. 6 s and two repeats put the floor 6 dB under a single 3 s
 sweep (window 100 ms, fundamentals from 20 Hz). The level stays at the speaker ceiling
 (−50 dBFS); a 1083 at that level is expected to show H2/H3 well under 1 % (−40 dB) in the
 mid band, so where the summary prints `< −…` (below the floor) the next step is more repeats

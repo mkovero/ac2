@@ -56,10 +56,12 @@ samples on the output clock; the capture runs on the input clock. With a rate ra
 
 - *Transfer function with the measured loopback reference*: unaffected. Reference and
   measurement both hear the same drifting stimulus on one input clock; H = M/R cancels the
-  common time warp exactly as it cancels latency. Same for the sweep IR, which divides by
-  the recorded reference (`ac2-core::sweep`): the sweep is stretched by `1 + ε` (50 ppm over
-  a 10 s sweep: 0.5 ms), which shifts harmonic IR positions by a negligible fraction of
-  their spacing.
+  common time warp exactly as it cancels latency. Same for the sweep's linear response,
+  which divides by the recorded reference (`ac2-core::sweep`). Its harmonics are separated
+  against the emitted sweep, aligned by the reference's delay: the recorded sweep is
+  stretched by `1 + ε` (50 ppm over a 10 s sweep: 0.5 ms), which smears each harmonic
+  impulse by that much and shifts its position by a negligible fraction of their spacing,
+  inside harmonic windows of several to 100 ms.
 - *Internal reference* (generator as reference, P1): broken. Over an averaging time T the
   stimulus slides by `ε·T`; the phase error at f is `360°·f·ε·T` — at 10 kHz, 2 ppm over
   1 s is already 7°. Refused whenever drift is detected (`TimingTracker::
