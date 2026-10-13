@@ -17,6 +17,7 @@ use crate::backend::{
 };
 use crate::error::{AudioError, Operation, Unavailability, Unsupported};
 use crate::events::{BackendEvents, EventLatch, ResetReason};
+use crate::load::LoadTimer;
 use crate::stream::{DuplexStream, Plumbing, StreamParts};
 
 pub(crate) fn backend_err(operation: Operation, e: impl std::fmt::Display) -> AudioError {
@@ -406,6 +407,13 @@ pub(crate) fn open_stream(
         renderer: plumbing.renderer,
     });
     let engine = |capture: Option<Capture>, render: Option<Render>, shared: &Arc<Shared>| Engine {
+        // The capture IOProc paces the stream; a separate output IOProc runs over the same
+        // time and adds only its own time.
+        load: if capture.is_some() {
+            LoadTimer::new(Arc::clone(&events), rate)
+        } else {
+            LoadTimer::beside(Arc::clone(&events), rate)
+        },
         capture,
         render,
         latch: EventLatch::new(Arc::clone(&events)),

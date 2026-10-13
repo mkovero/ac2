@@ -203,6 +203,11 @@ impl DuplexStream {
         self.events.snapshot()
     }
 
+    /// A reader of the callback's load and the xruns, for a health meter.
+    pub fn health(&self) -> crate::load::StreamHealth {
+        crate::load::StreamHealth::new(Arc::clone(&self.events))
+    }
+
     /// Capture transport counters.
     pub fn transport_stats(&self) -> TransportStats {
         self.capture.stats()

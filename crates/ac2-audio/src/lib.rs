@@ -40,6 +40,7 @@ pub mod fake;
 pub mod generator;
 pub mod history;
 pub mod level;
+mod load;
 pub mod output;
 pub mod replay;
 pub mod stream;
@@ -78,6 +79,7 @@ pub use jack_host::libjack_error_for_test;
 #[cfg(target_os = "linux")]
 pub use jack_host::{JackBackend, JackConfig, pipewire_socket};
 pub use level::{Gain, LevelError, MaxLevel};
+pub use load::{LoadTotals, StreamHealth};
 pub use output::{FADE_SECONDS, OutputSource, OutputState, OutputStats, OutputTick};
 pub use replay::{FrameSource, OpenSource, ReplayBackend, ReplayConfig, ReplayMark, ReplaySpeed};
 pub use stream::{DuplexStream, OutputPatch, PatchLink, PatchState, StopOutcome};

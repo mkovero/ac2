@@ -32,6 +32,7 @@ use crate::block::{BlockProducer, BlockStamp};
 use crate::clock::FrameCounterClock;
 use crate::error::{AudioError, Operation, Unavailability, Unsupported};
 use crate::events::{BackendEvents, EventLatch};
+use crate::load::LoadTimer;
 use crate::output::{OutputRenderer, OutputStamp};
 use crate::stream::{DuplexStream, OutputPatch, PatchLink, PatchState, Plumbing, StreamParts};
 
@@ -487,6 +488,7 @@ impl Backend for JackBackend {
             renderer: plumbing.renderer,
             clock: FrameCounterClock::new(),
             latch: EventLatch::new(Arc::clone(&events)),
+            load: LoadTimer::new(Arc::clone(&events), rate),
             events: Arc::clone(&events),
             capture_latency_ns: frames_to_ns(cap_lat.max),
             playback_latency_ns: frames_to_ns(play_lat.max),
@@ -655,6 +657,7 @@ struct Process {
     renderer: OutputRenderer,
     clock: FrameCounterClock,
     latch: EventLatch,
+    load: LoadTimer,
     events: Arc<BackendEvents>,
     capture_latency_ns: u64,
     playback_latency_ns: u64,
@@ -663,6 +666,7 @@ struct Process {
 
 impl jack::ProcessHandler for Process {
     fn process(&mut self, client: &Client, ps: &ProcessScope) -> Control {
+        let started = self.load.start();
         // jack_get_time: a vDSO clock read, no syscall. Used as the callback time.
         let wake_ns = client.time() * 1000;
         let frames = ps.n_frames();
@@ -710,6 +714,7 @@ impl jack::ProcessHandler for Process {
                 }
             },
         );
+        self.load.finish(started, frames);
         Control::Continue
     }
 

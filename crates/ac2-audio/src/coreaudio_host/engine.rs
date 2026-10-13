@@ -1,4 +1,5 @@
-//! The IOProc closure: capture into the ring, render the generator, latch events. Nothing
+//! The IOProc closure: capture into the ring, render the generator, latch events, time
+//! itself for the load meter. Nothing
 //! here allocates, locks or makes a system call.
 
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use cahal::{Cycle, Gap};
 
 use crate::block::{BlockFlags, BlockProducer, BlockStamp};
 use crate::events::{BackendEvents, EventLatch};
+use crate::load::LoadTimer;
 use crate::output::{OutputRenderer, OutputStamp};
 
 /// What the closure shares with the control side.
@@ -60,6 +62,7 @@ pub(crate) struct Engine {
     pub(crate) capture: Option<Capture>,
     pub(crate) render: Option<Render>,
     pub(crate) latch: EventLatch,
+    pub(crate) load: LoadTimer,
     pub(crate) events: Arc<BackendEvents>,
     pub(crate) shared: Arc<Shared>,
 }
@@ -77,6 +80,7 @@ pub(crate) fn gap_flags(gap: Gap) -> BlockFlags {
 impl Engine {
     /// One IOProc cycle.
     pub(crate) fn cycle(&mut self, mut c: Cycle<'_, '_>) {
+        let started = self.load.start();
         let t = c.time;
         for _ in 0..t.overloads {
             self.events.xrun();
@@ -125,5 +129,6 @@ impl Engine {
                 |f, ch, v| out.channel_mut(ch).set(f, v),
             );
         }
+        self.load.finish(started, t.frames);
     }
 }

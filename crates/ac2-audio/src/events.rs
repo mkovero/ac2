@@ -23,6 +23,9 @@ pub struct BackendEvents {
     ended: AtomicBool,
     /// The first [`ResetReason`] reported, as [`ResetReason::to_u8`]; 0 for none.
     reset: AtomicU8,
+    /// The callbacks' own time against their blocks' period: every callback already
+    /// shares this, so the load meter needs no plumbing of its own.
+    pub(crate) load: crate::load::LoadCounters,
 }
 
 /// What the driver did that ended the stream as a driver reset. Every one of them means

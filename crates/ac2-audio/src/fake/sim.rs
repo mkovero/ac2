@@ -4,6 +4,7 @@ use crate::backend::DuplexRequest;
 use crate::block::{BlockProducer, BlockStamp};
 use crate::clock::FrameCounterClock;
 use crate::events::{BackendEvents, EventLatch};
+use crate::load::LoadTimer;
 use crate::output::{OutputRenderer, OutputStamp};
 use crate::rng::Rng;
 
@@ -92,6 +93,7 @@ pub(super) struct Sim {
     renderer: OutputRenderer,
     clock: FrameCounterClock,
     latch: EventLatch,
+    load: LoadTimer,
     pub(super) events: Arc<BackendEvents>,
     input_map: Box<[usize]>,
     stream_outputs: usize,
@@ -186,6 +188,7 @@ impl Sim {
             renderer,
             clock: FrameCounterClock::new(),
             latch,
+            load: LoadTimer::new(Arc::clone(&events), cfg.sample_rate),
             events,
             input_map: req.input_map.iter().map(|&c| usize::from(c)).collect(),
             stream_outputs: usize::from(req.output_channels),
@@ -214,6 +217,7 @@ impl Sim {
 
     /// One callback. Allocation-free.
     fn step(&mut self) {
+        let started = self.load.start();
         let block_no = self.stats.blocks;
         let frames = self.cfg.block_frames;
         for i in 0..self.block_faults.len() {
@@ -274,6 +278,7 @@ impl Sim {
         );
         self.raw_counter = self.raw_counter.wrapping_add(frames);
         self.stats.blocks += 1;
+        self.load.finish(started, frames);
     }
 
     /// Frames that pass while no callback runs: the DAC plays silence, the ADC's samples

@@ -15,6 +15,7 @@ use super::format::Format;
 use super::position::PositionClock;
 use crate::block::{BlockProducer, BlockStamp};
 use crate::events::{BackendEvents, EventLatch, ResetReason};
+use crate::load::LoadTimer;
 use crate::output::{OutputRenderer, OutputShared, OutputStamp};
 
 /// The calls a switch makes into the driver.
@@ -55,6 +56,7 @@ pub(crate) struct Rt {
     pub(crate) renderer: OutputRenderer,
     pub(crate) clock: PositionClock,
     pub(crate) latch: EventLatch,
+    load: LoadTimer,
     pub(crate) driver: Box<dyn RtDriver>,
     pub(crate) output_ready: bool,
     last: Option<(i32, Option<i64>)>,
@@ -79,7 +81,8 @@ impl Rt {
             producer,
             renderer,
             clock: PositionClock::new(rate),
-            latch: EventLatch::new(events),
+            latch: EventLatch::new(Arc::clone(&events)),
+            load: LoadTimer::new(events, rate),
             driver,
             output_ready: true,
             last: None,
@@ -176,6 +179,7 @@ impl Engine {
     }
 
     fn switch_inner(&self, rt: &mut Rt, half: i32, time: Option<TimeInfo>, callback_ns: u64) {
+        let started = rt.load.start();
         let h = (half & 1) as usize;
         let frames = rt.frames as usize;
         if self.phase.load(Ordering::Acquire) != RUNNING {
@@ -248,6 +252,8 @@ impl Engine {
             rt.output_ready = false;
         }
         self.indexed.fetch_add(1, Ordering::Release);
+        // Only a switch that produced a block counts: a skipped repeat covers no period.
+        rt.load.finish(started, rt.frames);
     }
 
     /// Whether a driver request should end the stream now: not while it starts (drivers
