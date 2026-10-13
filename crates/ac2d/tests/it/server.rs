@@ -168,6 +168,82 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
 }
 
 #[test]
+fn a_revoked_connection_stays_refused_when_its_name_goes_to_a_new_key() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = KeyPair::generate().unwrap();
+    let old_tablet = KeyPair::generate().unwrap();
+    let new_tablet = KeyPair::generate().unwrap();
+    let mut keys = AuthorizedKeys::new();
+    keys.insert("laptop", laptop.public).unwrap();
+    keys.insert("tablet", old_tablet.public).unwrap();
+    let file = dir.path().join("authorized_clients");
+    keys.save(&file).unwrap();
+    let listen = Listen::Network {
+        ctrl: "tcp://127.0.0.1:0".into(),
+        data: "tcp://127.0.0.1:0".into(),
+        security: NetworkSecurity {
+            server_key_file: dir.path().join("server.key"),
+            authorized_clients_file: file,
+        },
+    };
+    let h = Daemon::start(config(manual_rig(), listen)).unwrap();
+    let server_key = h.server_public_key().unwrap();
+    let ctx = Context::new().unwrap();
+    let curve = |keys: &KeyPair| CurveClient {
+        keys: keys.clone(),
+        server_key,
+    };
+    let mut c = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve(&laptop)));
+    let mut old = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve(&old_tablet)));
+    old.ok(Command::SessionStatus);
+
+    c.ok(Command::ServerRevoke {
+        name: "tablet".into(),
+    });
+    let e = old.call(Command::SessionStatus).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused);
+
+    // The name goes to a different key while the old connection is still open: the new key
+    // holds that authorization, the old connection does not get it back.
+    c.ok(Command::ServerAuthorize {
+        name: "tablet".into(),
+        key: new_tablet.public.to_z85(),
+    });
+    let e = old
+        .call(Command::MeasCreate {
+            config: transfer("from a revoked key"),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused);
+    let e = old.call(Command::SessionStatus).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused);
+
+    // The new key's request ids start where the old key's did: it is answered on its own,
+    // never with a reply stored for the revoked key.
+    let mut new = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve(&new_tablet)));
+    match new.ok(Command::MeasCreate {
+        config: transfer("from the new key"),
+    }) {
+        ReplyBody::Measurement(_) => {}
+        other => panic!("{other:?}"),
+    }
+    match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => {
+            let names: Vec<_> = s
+                .state
+                .measurements
+                .iter()
+                .map(|m| m.config.name.clone())
+                .collect();
+            assert_eq!(names, vec!["from the new key".to_owned()]);
+        }
+        other => panic!("{other:?}"),
+    }
+    h.shutdown();
+}
+
+#[test]
 fn a_local_daemon_has_no_client_keys() {
     init_log();
     let dir = tempfile::tempdir().unwrap();

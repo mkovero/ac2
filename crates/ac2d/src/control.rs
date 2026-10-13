@@ -29,7 +29,7 @@ use ac2_proto::units::{
     SweepId, WallNs,
 };
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
-use ac2_zmq::Context;
+use ac2_zmq::{Context, PublicKey};
 
 use crate::autosave::Autosaver;
 use crate::calstore::{self, CalStore};
@@ -70,12 +70,22 @@ use validate::{
     lease_required, mutation_conflict, not_found, static_grid, upsert_inputs, validate_meas,
 };
 
+/// The authenticated peer of a network-mode (CURVE) connection, as the ZAP handler granted
+/// it at the handshake.
+pub(crate) struct CurvePeer {
+    /// The authorized name the key had at the handshake.
+    pub(crate) name: String,
+    /// The key the connection authenticated with.
+    pub(crate) key: PublicKey,
+}
+
 /// Everything that reaches the control thread.
 pub(crate) enum ControlMsg {
     /// A ctrl request from the I/O thread.
     Request {
         routing_id: Vec<u8>,
-        user_id: Option<String>,
+        /// `None` on connections without ZAP (embedded, local).
+        peer: Option<CurvePeer>,
         payload: Vec<u8>,
     },
     /// The stream of `epoch` reported a configuration change.
@@ -494,9 +504,9 @@ impl Control {
             match rx.recv_timeout(wake.saturating_duration_since(Instant::now())) {
                 Ok(ControlMsg::Request {
                     routing_id,
-                    user_id,
+                    peer,
                     payload,
-                }) => self.on_request(&routing_id, user_id, &payload),
+                }) => self.on_request(&routing_id, peer, &payload),
                 Ok(ControlMsg::DeviceChanged { epoch }) => {
                     if self.session.as_ref().is_some_and(|r| r.epoch == epoch) {
                         tracing::warn!("device or configuration change: reopening the session");

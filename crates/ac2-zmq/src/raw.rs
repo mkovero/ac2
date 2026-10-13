@@ -196,6 +196,7 @@ pub(crate) struct RawFrame {
     pub(crate) data: Vec<u8>,
     pub(crate) more: bool,
     pub(crate) user_id: Option<String>,
+    pub(crate) client_key: Option<String>,
     pub(crate) peer_address: Option<String>,
 }
 
@@ -334,10 +335,14 @@ impl RawSocket {
                 let p = zmq_msg_gets(&msg, name.as_ptr());
                 (!p.is_null()).then(|| CStr::from_ptr(p).to_string_lossy().into_owned())
             };
-            let (user_id, peer_address) = if metadata {
-                (property(c"User-Id"), property(c"Peer-Address"))
+            let (user_id, client_key, peer_address) = if metadata {
+                (
+                    property(c"User-Id"),
+                    property(crate::zap::CLIENT_KEY_PROPERTY),
+                    property(c"Peer-Address"),
+                )
             } else {
-                (None, None)
+                (None, None, None)
             };
             let more = zmq_msg_more(&msg) == 1;
             zmq_msg_close(&mut msg);
@@ -345,6 +350,7 @@ impl RawSocket {
                 data,
                 more,
                 user_id,
+                client_key,
                 peer_address,
             })
         }

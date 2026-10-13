@@ -188,7 +188,9 @@ WallNs}], newest first, at most 32}; `recording_dir`: string | nil (where `rec.s
 records on the daemon host). `server.authorize` adds `key` under `name` to the
 authorized-clients file (atomic write) and to the running handshake check; `server.revoke`
 removes `name`: its requests are `refused` at once and it cannot connect again (a
-connection already up keeps receiving data frames until it drops). Both answer the new
+connection already up keeps receiving data frames until it drops). A connection is bound to
+the key it authenticated with, so authorizing a different key under a revoked name does not
+let a connection made with the old key act again. Both answer the new
 `server` info; outside network mode they are `unsupported`. A name is 1–64 characters
 without whitespace; `invalid` for a duplicate name or key, a malformed key, revoking an
 unknown name (`not_found`) or the requesting client's own name (`refused`: that would lock

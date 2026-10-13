@@ -14,7 +14,7 @@ use ac2_proto::{
 use crate::health::SessionStream;
 use crate::util::{hex, perr, wall_ns};
 
-use super::{Control, PendingFind, PendingReply, mutation_conflict};
+use super::{Control, CurvePeer, PendingFind, PendingReply, mutation_conflict};
 
 impl Control {
     pub(super) fn send_ka(&mut self) {
@@ -69,7 +69,7 @@ impl Control {
     pub(super) fn on_request(
         &mut self,
         routing_id: &[u8],
-        user_id: Option<String>,
+        peer: Option<CurvePeer>,
         payload: &[u8],
     ) {
         let now = Instant::now();
@@ -96,8 +96,8 @@ impl Control {
                 return;
             }
         };
-        if let Some(name) = &user_id
-            && self.s.server.revoked(name)
+        if let Some(CurvePeer { name, key }) = &peer
+            && self.s.server.revoked(name, key)
         {
             // The handshake check refuses it from now on; a connection already up must
             // not keep acting on the rig until it drops.
@@ -114,7 +114,8 @@ impl Control {
             );
             return;
         }
-        let client = ClientId(user_id.unwrap_or_else(|| format!("local-{}", hex(routing_id))));
+        let client =
+            ClientId(peer.map_or_else(|| format!("local-{}", hex(routing_id)), |p| p.name));
         if let Some(stored) = self.dedup.get(&client, req.id, now) {
             let stored = stored.to_vec();
             tracing::debug!("{} retried request {}; stored reply", client.0, req.id.0);

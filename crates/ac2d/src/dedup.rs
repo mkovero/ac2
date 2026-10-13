@@ -49,6 +49,12 @@ impl Dedup {
         w.replies.get(&id).map(Vec::as_slice)
     }
 
+    /// Drops every reply stored for `client`. A revoked name can be given to a different
+    /// key, whose requests must not be answered with replies meant for the old one.
+    pub(crate) fn forget(&mut self, client: &ClientId) {
+        self.clients.remove(client);
+    }
+
     /// Remembers the reply to `id`.
     pub(crate) fn insert(
         &mut self,

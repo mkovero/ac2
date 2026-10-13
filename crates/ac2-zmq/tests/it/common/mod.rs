@@ -218,6 +218,11 @@ fn serve(router: &Socket, control: &Socket, seen: &Seen) -> ac2_zmq::Result<()> 
                     text.to_vec()
                 } else if cmd == b"whoami" {
                     m.user_id().unwrap_or_default().as_bytes().to_vec()
+                } else if cmd == b"whokey" {
+                    m.client_key()
+                        .map(|k| k.to_z85())
+                        .unwrap_or_default()
+                        .into_bytes()
                 } else if let Some([gate]) = cmd.strip_prefix(b"slow:") {
                     parked.push((*gate, rid.clone(), *id));
                     continue;

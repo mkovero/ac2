@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use crate::curve::CurveClient;
+use crate::curve::{CurveClient, PublicKey};
 use crate::error::{Error, Result, zmq};
 use crate::monitor::Monitor;
 use crate::poll::{PollItem, poll};
@@ -74,6 +74,7 @@ impl SocketType {
 pub struct Message {
     frames: Vec<Vec<u8>>,
     user_id: Option<String>,
+    client_key: Option<PublicKey>,
     peer_address: Option<String>,
 }
 
@@ -102,6 +103,14 @@ impl Message {
     /// authenticated identity of the peer.
     pub fn user_id(&self) -> Option<&str> {
         self.user_id.as_deref()
+    }
+
+    /// The CURVE public key the sending connection authenticated with, as the ZAP handler
+    /// attached it. `None` wherever [`Self::user_id`] is `None`. A name in the authorized
+    /// list can later belong to a different key; this is what pins a connection to the
+    /// authorization it was granted.
+    pub fn client_key(&self) -> Option<PublicKey> {
+        self.client_key
     }
 
     /// The peer's address as libzmq reports it (`Peer-Address`; tcp and ipc only). For logs.
@@ -566,6 +575,7 @@ impl Socket {
         let mut msg = Message {
             frames: vec![first.data],
             user_id: first.user_id,
+            client_key: first.client_key.and_then(|k| PublicKey::from_z85(&k).ok()),
             peer_address: first.peer_address,
         };
         while more {

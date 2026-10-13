@@ -22,7 +22,7 @@ use ac2_zmq::{
     Error as ZmqError, Message, Part, PollItem, SecureContext, Socket, SubscriptionTracker, poll,
 };
 
-use crate::control::ControlMsg;
+use crate::control::{ControlMsg, CurvePeer};
 use crate::outbox::{TAG_CLEAR, TAG_EVENT, TAG_FRAME, TAG_KA, TAG_REPLY, TAG_STOP};
 
 /// Topics with at least one subscriber, shared with jobs that compute optional derivations
@@ -329,7 +329,19 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
 }
 
 fn forward_request(m: Message, to_control: &Sender<ControlMsg>) {
-    let user_id = m.user_id().map(str::to_owned);
+    let peer = match (m.user_id(), m.client_key()) {
+        (None, _) => None,
+        (Some(name), Some(key)) => Some(CurvePeer {
+            name: name.to_owned(),
+            key,
+        }),
+        // Our ZAP handler attaches both or neither; without the key the connection cannot
+        // be tied to the authorization it was granted, so it is not served.
+        (Some(name), None) => {
+            tracing::warn!("ctrl message from {name:?} without its client key dropped");
+            return;
+        }
+    };
     let mut f = m.into_frames();
     if f.len() != 2 {
         tracing::warn!(
@@ -342,7 +354,7 @@ fn forward_request(m: Message, to_control: &Sender<ControlMsg>) {
     let routing_id = f.pop().unwrap_or_default();
     let _ = to_control.send(ControlMsg::Request {
         routing_id,
-        user_id,
+        peer,
         payload,
     });
 }

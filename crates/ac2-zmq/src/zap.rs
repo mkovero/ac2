@@ -2,8 +2,8 @@
 //!
 //! libzmq asks the handler bound at `inproc://zeromq.zap.01` *in the same context* to approve
 //! every CURVE handshake. The handler sees the client's long-term public key and answers 200
-//! (with a user id that libzmq attaches to every message of that connection, see
-//! [`crate::Message::user_id`]) or 400 (libzmq sends an ERROR command and drops the
+//! (with a user id and the client's key that libzmq attaches to every message of that
+//! connection, see [`crate::Message::user_id`] and [`crate::Message::client_key`]) or 400 (libzmq sends an ERROR command and drops the
 //! connection).
 //!
 //! **libzmq fails open:** when no handler is bound, it skips ZAP and a CURVE server accepts
@@ -21,6 +21,7 @@
 //!   open; [`SecureContext::zap_status`] reports the exit, and no further CURVE server socket
 //!   can be created. The owner treats that as fatal and closes its network sockets.
 
+use std::ffi::CStr;
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
@@ -98,7 +99,8 @@ pub enum DenyReason {
 /// The handler's answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Verdict {
-    /// Accepted; `user_id` (the authorized key's name) is attached to every message.
+    /// Accepted; `user_id` (the authorized key's name) and the key itself are attached to
+    /// every message.
     Allowed {
         /// Name of the authorized key.
         user_id: String,
@@ -484,21 +486,50 @@ fn internal_denial(request: &Message) -> ZapDecision {
     }
 }
 
+/// Connection metadata property carrying the authenticated client's public key (Z85).
+///
+/// A name can be revoked and later given to a different key while a connection made with
+/// the old key is still open; only the key itself says which authorization a connection
+/// holds.
+pub(crate) const CLIENT_KEY_PROPERTY: &CStr = c"X-Client-Key";
+
 /// Reply frames (RFC 27): version, request id, status code, status text, user id, metadata.
 fn reply(request: &Message, decision: &ZapDecision) -> [Vec<u8>; 6] {
     let request_id = request.frames().get(1).cloned().unwrap_or_default();
-    let (code, text, user_id): (&[u8], &[u8], &[u8]) = match &decision.verdict {
-        Verdict::Allowed { user_id } => (b"200", b"OK", user_id.as_bytes()),
-        Verdict::Denied(_) => (b"400", b"not authorized", b""),
-    };
+    let (code, text, user_id, metadata): (&[u8], &[u8], &[u8], Vec<u8>) =
+        match (&decision.verdict, &decision.client_key) {
+            (Verdict::Allowed { user_id }, Some(key)) => (
+                b"200",
+                b"OK",
+                user_id.as_bytes(),
+                metadata_property(CLIENT_KEY_PROPERTY.to_bytes(), key.to_z85().as_bytes()),
+            ),
+            // Every accepted handshake is CURVE with a key; anything else is refused.
+            (Verdict::Allowed { .. }, None) | (Verdict::Denied(_), _) => {
+                (b"400", b"not authorized", b"", Vec::new())
+            }
+        };
     [
         b"1.0".to_vec(),
         request_id,
         code.to_vec(),
         text.to_vec(),
         user_id.to_vec(),
-        Vec::new(),
+        metadata,
     ]
+}
+
+/// One ZMTP metadata property: name length (1 byte), name, value length (4 bytes, network
+/// order), value.
+fn metadata_property(name: &[u8], value: &[u8]) -> Vec<u8> {
+    let name_len = u8::try_from(name.len()).expect("property names are short constants");
+    let value_len = u32::try_from(value.len()).expect("property values are short");
+    let mut out = Vec::with_capacity(1 + name.len() + 4 + value.len());
+    out.push(name_len);
+    out.extend_from_slice(name);
+    out.extend_from_slice(&value_len.to_be_bytes());
+    out.extend_from_slice(value);
+    out
 }
 
 #[cfg(test)]

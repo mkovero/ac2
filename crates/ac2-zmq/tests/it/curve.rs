@@ -115,6 +115,10 @@ fn authorized_client_works_on_ctrl_and_data_with_zap_identity() -> TestResult {
     // and audit entries to an authenticated identity, not to a self-declared name.
     assert_eq!(recv_reply(&ctrl)?, (1, "alice".to_owned()));
     assert_eq!(d.ctrl.seen(), vec![(Some("alice".to_owned()), 1)]);
+    // The key travels too: a name can be revoked and given to another key while this
+    // connection stays open, so the key is what pins the connection's authorization.
+    send_req(&ctrl, 2, b"whokey")?;
+    assert_eq!(recv_reply(&ctrl)?, (2, alice.public.to_z85()));
 
     let s = sub(&ctx, &d.xpub_ep, Some(&cfg), &["d/"])?;
     let subs = wait_sub_event(&d.xpub, &subscribed("d/"))?;

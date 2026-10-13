@@ -51,10 +51,12 @@ pub(crate) struct NetworkSetup {
 }
 
 impl ServerSetup {
-    /// Whether `name` (a CURVE client's authorized name) is no longer authorized.
-    pub(crate) fn revoked(&self, name: &str) -> bool {
+    /// Whether the authorization a CURVE connection was granted (`key` under `name`) is gone.
+    /// The name alone is not enough: a revoked name can later be given to a different key,
+    /// and that must not revive a connection the old key still holds open.
+    pub(crate) fn revoked(&self, name: &str, key: &PublicKey) -> bool {
         match self {
-            Self::Network(n) => n.authorized.get().get(name).is_none(),
+            Self::Network(n) => n.authorized.get().get(name) != Some(key),
             _ => false,
         }
     }
@@ -314,6 +316,7 @@ impl Control {
             )
         })?;
         n.authorized.set(keys);
+        self.dedup.forget(&ClientId(name.to_owned()));
         tracing::warn!(
             target: "ac2d::audit",
             "client {name:?} (fingerprint {}) revoked by {}",
