@@ -8,9 +8,12 @@
 //! each, so two measurements laid out side by side keep the arrangement whichever of them
 //! is selected.
 //!
-//! A selection this app made by itself — the first one, or a stand-in for one the daemon
-//! lost (a restart, a session reopened or salvaged) — never brings a measurement's panes:
-//! the kiosk showing a meter keeps showing it until the meter is back.
+//! A selection this app made by itself — the first one, the measurement a remembered pane
+//! shows, or a stand-in for one the daemon lost (a restart, a session reopened or salvaged)
+//! — never brings a measurement's panes, and an edit of the panes gives it none. Another
+//! client's layout for the selected measurement goes on screen only while its own panes are
+//! there because the operator chose its row here (or edited them with it selected): the
+//! kiosk showing a meter keeps its pane whoever lays out that meter elsewhere.
 //!
 //! Only the arrangement and what each pane draws travel: the measurement each pane was
 //! picked for, the focus, W and F stay this app's. A layout received is put on screen, never
@@ -128,6 +131,7 @@ impl AppState {
     ) {
         self.settle_layout_calls();
         if std::mem::take(&mut self.own_panes_due) {
+            self.own_panes = self.selected;
             if let Some(l) = self
                 .selected
                 .and_then(|id| self.own_layout(id))
@@ -136,6 +140,10 @@ impl AppState {
                 self.show_layout(&l);
             }
             return;
+        }
+        // The panes on screen are a measurement's own only while it stays selected.
+        if self.own_panes != self.selected {
+            self.own_panes = None;
         }
         // A selection moved by a pane (clicked, picked) or a child row: about that pane, and
         // a pane it turned into another kind is no edit.
@@ -147,6 +155,11 @@ impl AppState {
             return;
         };
         if !conn && self.pane_layout() != before.panes {
+            // A stand-in is this app's pick, not the operator's: the panes are not its.
+            if self.selection_is_standin() {
+                return;
+            }
+            self.own_panes = Some(sel);
             // Those whose own panes were the ones on screen share them: the edit is theirs too.
             let mut ids = vec![sel];
             ids.extend(
@@ -165,9 +178,10 @@ impl AppState {
             }
             return;
         }
-        // A stand-in selected while the operator's choice is gone (or before any): its
-        // panes are the operator's to bring, by its row.
-        if theirs == before.theirs || self.selection_is_standin() {
+        // Only the panes the operator put on screen for it follow its layout: those of a
+        // selection this app made by itself (a stand-in, the measurement a remembered pane
+        // shows) or one a pane or child row moved to are the operator's to bring, by its row.
+        if theirs == before.theirs || self.own_panes != Some(sel) {
             return;
         }
         // This app's own, come back: on screen already, or older than the screen.

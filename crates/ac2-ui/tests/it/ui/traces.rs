@@ -312,6 +312,9 @@ fn smoothed_phase_and_spectrum() {
     // The phase drawn in its pane of the transfer stack, under the magnitude.
     let tf = crate::common::pane(&h.state().state, ac2_ui::state::PaneKind::Transfer);
     h.state_mut().state.layout.set_focus(tf);
+    // Main L's row chosen: the app's own first pick takes no panes, the operator's does.
+    h.state_mut()
+        .dispatch(ac2_ui::state::Msg::SelectMeas(MeasId(1)));
     h.state_mut().dispatch(ac2_ui::state::Msg::Command(
         ac2_ui::keys::CommandId::TransferStack,
     ));

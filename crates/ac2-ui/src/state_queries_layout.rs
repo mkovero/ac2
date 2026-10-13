@@ -61,6 +61,9 @@ impl AppState {
             if self.layout.focus == pane && (self.selected.is_none() || self.selection_is_standin())
             {
                 self.select_on(pane, id);
+                // Still this app's pick: a viewer nobody touches neither takes this
+                // measurement's own panes nor gives it its own.
+                self.standin = Some(id);
             }
         }
     }

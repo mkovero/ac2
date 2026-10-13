@@ -386,3 +386,29 @@ fn a_restarted_daemon_keeps_the_kiosk_on_its_meter() -> R {
     handle.shutdown();
     Ok(())
 }
+
+/// The desk lays out `FOH SPL`'s own panes (its row chosen there, a pane split, a view
+/// stepped) while the kiosk shows it: the kiosk keeps its one SPL pane on `FOH SPL`, as
+/// nobody chose that measurement's row on the kiosk.
+#[test]
+fn a_desk_laying_out_the_kiosk_meter_keeps_the_kiosk_on_its_meter() -> R {
+    let dir = tempfile::tempdir()?;
+    let (handle, ep) = daemon(dir.path(), &any_port(), true)?;
+    let cli = Cli::connect(&ep)?;
+    let (mut desk, mut kiosk) = rig(&ep, &cli)?;
+    let spl = meas_named(&desk.st, SPL).ok_or("FOH SPL on the desk")?;
+    desk.send(Msg::SelectMeas(spl));
+    for key in ["N", "G"] {
+        desk.key(key);
+        let edited = desk.st.pane_layout();
+        until_kiosk(&mut desk, &mut kiosk, "FOH SPL's new panes", |s| {
+            meas_named(s, SPL)
+                .is_some_and(|id| s.meas(id).and_then(|m| m.layout.as_ref()) == Some(&edited))
+        })?;
+        shown_kiosk(&kiosk.st)?;
+    }
+
+    drop((desk, kiosk, cli));
+    handle.shutdown();
+    Ok(())
+}

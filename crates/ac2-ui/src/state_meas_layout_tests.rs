@@ -321,3 +321,185 @@ fn a_layout_of_the_same_panes_keeps_the_picks() {
     assert_eq!(t.st.pane_layout(), one);
     assert_eq!(picks(&t), [Some(MeasId(2))]);
 }
+
+/// Magnitude, phase and coherence in three columns: `TF 1`'s own panes on the rig.
+fn three_transfer() -> PaneLayout {
+    let pane = |transfer_view| PaneLayout::Pane {
+        pane: wire::LayoutPane {
+            kind: wire::PaneKind::Transfer,
+            transfer_view,
+            spectrum_view: wire::SpectrumView::Spectrograph,
+            spl_view: wire::SplView::Leq,
+            sweep_view: wire::SweepView::Response,
+            chrome: wire::PlotChrome::TracesOnly,
+        },
+    };
+    PaneLayout::Split {
+        axis: wire::SplitAxis::Column,
+        ratio: 0.5,
+        a: Box::new(pane(wire::TransferView::Magnitude)),
+        b: Box::new(PaneLayout::Split {
+            axis: wire::SplitAxis::Column,
+            ratio: 0.5,
+            a: Box::new(pane(wire::TransferView::Phase)),
+            b: Box::new(pane(wire::TransferView::Coherence)),
+        }),
+    }
+}
+
+/// The rig's daemon: the SPL meter `FOH SPL` first, `TF 1` with three panes of its own, a
+/// spectrum.
+fn rig() -> State {
+    let mut s = daemon_state();
+    s.measurements = vec![
+        meas(1, "FOH SPL", spl_meter()),
+        meas(2, "TF 1", transfer()),
+        meas(3, "Spectrum 1", spectrum()),
+    ];
+    s.measurements[1].layout = Some(three_transfer());
+    s
+}
+
+/// The rig with `FOH SPL` laid out as `layout`.
+fn rig_with_spl_layout(layout: PaneLayout) -> State {
+    let mut s = rig();
+    s.measurements[0].layout = Some(layout);
+    s
+}
+
+/// The Pi kiosk as its `ui.toml` starts it: one SPL pane in its bands view, maximised and
+/// full screen, remembered on `meas` (or on nothing), connected to the rig.
+fn kiosk(meas: Option<&str>) -> T {
+    let mut t = T::fresh();
+    let mut toml = String::from(
+        "[layout]\nfocus = 1\nmaximized = true\nfullscreen = true\n\n\
+         [layout.tree]\npane = 1\n\n\
+         [[layout.panes]]\nid = 1\nkind = \"spl\"\nspl_view = \"bands\"\n",
+    );
+    if let Some(m) = meas {
+        toml.push_str(&format!("measurement = \"{m}\"\n"));
+    }
+    let prefs = crate::prefs::UiPrefs::from_toml(&toml).expect("the kiosk's ui.toml");
+    t.st.set_prefs(prefs);
+    t.connect(rig());
+    t
+}
+
+/// The kiosk's one SPL pane, showing `FOH SPL`.
+fn kiosk_on_its_meter(t: &T, what: &str) {
+    let panes = t.st.layout.panes();
+    assert_eq!(panes.len(), 1, "{what}: {:?}", t.st.pane_layout());
+    assert_eq!(t.st.layout.kind(panes[0]), PaneKind::Spl, "{what}");
+    assert_eq!(
+        t.st.pane_meas(panes[0]).map(|m| m.config.name.as_str()),
+        Some("FOH SPL"),
+        "{what}"
+    );
+    let saved = t.st.layout_prefs().panes.expect("panes saved");
+    assert_eq!(saved.views.len(), 1, "{what}: saves {saved:?}");
+    assert_eq!(saved.views[0].kind, PaneKind::Spl, "{what}");
+}
+
+/// The Pi kiosk shows `FOH SPL` and nobody touches it. Another client laying out
+/// `FOH SPL`'s own panes, a split then a view stepped, as the desk app does, leaves the
+/// kiosk's one SPL pane as it is: the kiosk selected `FOH SPL` by itself (its remembered
+/// pane shows it), and only a measurement's row chosen here brings its panes.
+#[test]
+fn a_viewer_keeps_its_pane_when_another_client_lays_out_its_measurement() {
+    let mut t = kiosk(Some("FOH SPL"));
+    kiosk_on_its_meter(&t, "connected");
+    assert_eq!(t.st.selected, Some(MeasId(1)));
+    let mut phase = three_transfer();
+    if let PaneLayout::Split { b, .. } = &mut phase
+        && let PaneLayout::Split { b, .. } = b.as_mut()
+        && let PaneLayout::Pane { pane } = b.as_mut()
+    {
+        pane.transfer_view = wire::TransferView::Phase;
+    }
+    for l in [phase, three_transfer()] {
+        let r = t.conn(mirror(rig_with_spl_layout(l)));
+        assert!(layout_calls(&r).is_empty(), "{r:?}");
+        kiosk_on_its_meter(&t, "FOH SPL laid out elsewhere");
+    }
+    // TF 1's own panes changed elsewhere too: nothing to do with the kiosk.
+    let mut s = rig_with_spl_layout(three_transfer());
+    s.measurements[1].layout = Some(two_transfer());
+    t.conn(mirror(s));
+    kiosk_on_its_meter(&t, "TF 1 laid out elsewhere");
+}
+
+/// G on the kiosk (its touch panel) steps the SPL pane's view and nothing else: the
+/// measurement it selected by itself (the remembered pane's, or the stand-in `TF 1` when no
+/// pane remembers one) is not given the kiosk's pane as its own panes.
+#[test]
+fn g_on_a_viewer_gives_no_measurement_its_pane() {
+    for remembered in [Some("FOH SPL"), None] {
+        let mut t = kiosk(remembered);
+        let before = t.st.pane_layout();
+        for _ in 0..3 {
+            let r = t.key("G");
+            assert!(layout_calls(&r).is_empty(), "{remembered:?}: {r:?}");
+        }
+        assert_ne!(t.st.pane_layout(), before, "the view stepped");
+        kiosk_on_its_meter(&t, "after G");
+        // TF 1 laid out elsewhere afterwards still leaves the kiosk as it is.
+        let mut s = rig();
+        s.measurements[1].layout = Some(two_transfer());
+        t.conn(mirror(s));
+        kiosk_on_its_meter(&t, "TF 1 laid out elsewhere after G");
+    }
+}
+
+/// A measurement selected by clicking a pane that shows it is about that pane: another
+/// client's layout for it stays off this screen. Its row chosen here, the screen follows
+/// its layout again.
+#[test]
+fn a_layout_received_for_a_measurement_picked_by_its_pane_waits_for_its_row() {
+    let mut t = T::new();
+    select(&mut t, 1);
+    let sub = t.pane(PaneKind::Spectrum);
+    t.st.update(Msg::FocusPane(sub), &t.keys);
+    assert_eq!(t.st.selected, Some(MeasId(2)));
+    let grid = t.st.pane_layout();
+    t.conn(mirror(with_layout(2, Some(two_transfer()))));
+    assert_eq!(t.st.pane_layout(), grid, "Sub picked by its pane");
+    select(&mut t, 2);
+    assert_eq!(t.st.pane_layout(), two_transfer(), "Sub's row chosen");
+    let mut other = two_transfer();
+    if let PaneLayout::Split { ratio, .. } = &mut other {
+        *ratio = 0.25;
+    }
+    t.conn(mirror(with_layout(2, Some(other.clone()))));
+    assert_eq!(
+        t.st.pane_layout(),
+        other,
+        "followed once its own panes are on screen"
+    );
+}
+
+/// The measurement whose row the operator chose goes for a while (a daemon restarted, a
+/// session salvaged) and comes back under its name: its panes still follow its layout.
+#[test]
+fn a_chosen_measurement_back_after_a_restart_still_follows_its_layout() {
+    let mut t = T::new();
+    t.conn(mirror(with_layout(1, Some(two_transfer()))));
+    select(&mut t, 1);
+    assert_eq!(t.st.pane_layout(), two_transfer());
+    // Another daemon: its ids are its own, the measurements come back by name.
+    t.conn(mirror_of(
+        with_layout(1, Some(two_transfer())),
+        2,
+        Some("c1"),
+    ));
+    assert_eq!(t.st.selected, Some(MeasId(1)));
+    let mut other = two_transfer();
+    if let PaneLayout::Split { ratio, .. } = &mut other {
+        *ratio = 0.25;
+    }
+    t.conn(mirror_of(
+        with_layout(1, Some(other.clone())),
+        2,
+        Some("c1"),
+    ));
+    assert_eq!(t.st.pane_layout(), other);
+}

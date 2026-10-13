@@ -108,6 +108,9 @@ impl AppState {
                     self.selected = Some(id);
                     self.standin = None;
                     self.lost_selection = None;
+                    if std::mem::take(&mut self.lost_own_panes) {
+                        self.own_panes = Some(id);
+                    }
                 }
                 if !waiting && self.selected.is_none() {
                     self.selected = self
@@ -546,6 +549,7 @@ impl AppState {
                 && let Some(n) = names.get(&id)
             {
                 self.lost_selection = Some(n.clone());
+                self.lost_own_panes = self.own_panes == Some(id);
             }
             self.selected = None;
             self.standin = None;
@@ -558,6 +562,7 @@ impl AppState {
         if self.own_panes_due || self.selected.is_some_and(|s| Some(s) != self.standin) {
             self.standin = None;
             self.lost_selection = None;
+            self.lost_own_panes = false;
         }
     }
 

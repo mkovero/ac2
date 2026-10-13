@@ -330,6 +330,12 @@ pub struct AppState {
     /// The selected measurement that went, by name, while a stand-in (or nothing) is
     /// selected: one of that name coming back is selected again.
     lost_selection: Option<String>,
+    /// The measurement whose own panes the operator put on screen here (its row chosen, or
+    /// the panes edited while it was selected): another client's edit of its layout shows
+    /// here too. No other measurement's does: a viewer nobody touches keeps its panes.
+    own_panes: Option<MeasId>,
+    /// The lost selection's own panes were on screen: they follow it when it comes back.
+    lost_own_panes: bool,
     /// Names of the measurements the daemon has listed since this app started: a pane
     /// remembered on one of them waits for it to come back.
     meas_seen: BTreeSet<String>,
@@ -436,6 +442,8 @@ impl AppState {
             own_panes_due: false,
             standin: None,
             lost_selection: None,
+            own_panes: None,
+            lost_own_panes: false,
             meas_seen: BTreeSet::new(),
         }
     }
