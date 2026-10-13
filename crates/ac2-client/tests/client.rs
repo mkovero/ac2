@@ -764,21 +764,19 @@ async fn traces_and_sessions_against_the_fake() -> R {
     };
     assert_eq!(d.mag_db.len(), 240);
     assert!(d.phase_deg.is_some() && d.coherence.is_some());
-    let avg = c
+    let avg = match c
         .call(Command::TraceAverage {
             traces: vec![a.id, b.id],
             method: AverageMethod::Power,
             reference: DelayReference::Trace { trace: a.id },
             name: "avg".into(),
         })
-        .await?;
-    assert!(matches!(
-        avg,
-        ReplyBody::Trace(TraceMeta {
-            source: TraceSource::Average { .. },
-            ..
-        })
-    ));
+        .await?
+    {
+        ReplyBody::Trace(t) => t,
+        other => return Err(format!("{other:?}").into()),
+    };
+    assert!(matches!(avg.source, TraceSource::Average { .. }));
     let csv = match c
         .call(Command::TraceExport {
             trace: a.id,
@@ -815,6 +813,18 @@ async fn traces_and_sessions_against_the_fake() -> R {
         .await;
     assert_eq!(bad.err().and_then(|e| e.code()), Some(ErrorCode::Invalid));
 
+    // A reply can arrive before the events that put its trace in the mirror: the snapshot
+    // compared after the load must hold every trace the save writes.
+    let ids = [a.id, b.id, avg.id, imp.id];
+    until("every trace mirrored", || {
+        let v = c.view();
+        async move {
+            v.state
+                .as_ref()
+                .is_some_and(|s| ids.iter().all(|id| s.traces.iter().any(|t| t.id == *id)))
+        }
+    })
+    .await?;
     let saved = c.view().state.clone().ok_or("no state")?;
     c.call(Command::FileSave {
         session: SessionRef::Name { name: "s1".into() },
