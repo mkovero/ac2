@@ -339,9 +339,11 @@ pub struct AppState {
     /// The selected measurement that went, by name, while a stand-in (or nothing) is
     /// selected: one of that name coming back is selected again.
     lost_selection: Option<String>,
-    /// The measurement whose own panes the operator put on screen here (its row chosen, or
-    /// the panes edited while it was selected): another client's edit of its layout shows
-    /// here too. No other measurement's does: a viewer nobody touches keeps its panes.
+    /// The measurement whose own panes the operator put on screen here by choosing its row.
+    /// An edit of the panes is stored as its layout (while a pane still shows it), even
+    /// after a pane or child row selected another measurement: that one is a guest in its
+    /// panes. While it is selected, another client's edit of its layout shows here too; no
+    /// other measurement's does: a viewer nobody touches keeps its panes.
     own_panes: Option<MeasId>,
     /// The lost selection's own panes were on screen: they follow it when it comes back.
     lost_own_panes: bool,

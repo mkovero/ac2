@@ -286,8 +286,9 @@ fn a_child_row_goes_to_the_focused_pane_from_an_empty_daemon() -> R {
     d.send(Msg::SelectMeas(s1));
     d.key("N");
     let b = d.st.layout.focus;
-    // Spectrum 2 on B: captured, and given panes of its own (B to its spectrum +
-    // spectrograph and back).
+    // Spectrum 2 on B: captured, and given panes of its own once its row is chosen (B to
+    // its spectrum + spectrograph and back). Picked on B's chip it is a guest in Spectrum
+    // 1's panes: an edit then is never its own layout.
     d.send(Msg::PanePick(b, PaneMenuRow::Meas(s2)));
     let topic = Topic::Data {
         meas: s2,
@@ -315,6 +316,8 @@ fn a_child_row_goes_to_the_focused_pane_from_an_empty_daemon() -> R {
         .find(|t| matches!(t.edit.owner, ac2_proto::model::TraceOwner::Meas { meas } if meas == s2))
         .map(|t| t.id)
         .ok_or("the capture")?;
+    d.send(Msg::SelectMeas(s2));
+    assert_eq!(d.st.layout.focus, b, "Spectrum 2's row: B keeps the focus");
     d.key("G");
     d.key("Shift+G");
     d.until("Spectrum 2's own panes", |s| {

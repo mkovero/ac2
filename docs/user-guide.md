@@ -458,14 +458,16 @@ larger than the screen is shrunk to fit. On Wayland the system places the window
 
 #### Layouts follow the measurement
 
-A measurement can carry its own panes. Edit the panes while a measurement is selected —
-split, close, change a pane's kind or view, **T**, drag a split, lay out the transfer
-stack — and the layout is stored on that measurement. Selecting its row (click, **Tab**)
+A measurement can carry its own panes. Choose its row (click, **Tab**), then edit the
+panes — split, close, change a pane's kind or view, **T**, drag a split, lay out the
+transfer stack — and the layout is stored on that measurement. Choosing its row again
 brings its panes back; a measurement without a layout keeps the panes on screen. Only a
-measurement row brings panes: a pane click, a chip pick or a child row change one pane. The
-list says it: `· 3 own panes`. Measurements whose own panes are the ones on screen share
-them: an edit goes to each, so two measurements laid out side by side keep the arrangement
-whichever is selected.
+measurement row brings panes: a pane click, a chip pick or a child row change one pane, and
+the measurement they select is a guest there — an edit afterwards is still stored on the
+measurement whose row was chosen, never on the guest. An edit after which no pane shows
+that measurement is stored on nobody. The list says it: `· 3 own panes`. Measurements
+whose own panes are the ones on screen share them: an edit goes to each one a pane shows,
+so two measurements laid out side by side keep the arrangement whichever is chosen.
 
 The layout lives in the session with the measurement: saved and opened with it, and shown
 by every app that selects it (another laptop, the kiosk), edits included. What travels is

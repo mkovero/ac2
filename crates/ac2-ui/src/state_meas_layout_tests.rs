@@ -503,3 +503,154 @@ fn a_chosen_measurement_back_after_a_restart_still_follows_its_layout() {
     ));
     assert_eq!(t.st.pane_layout(), other);
 }
+
+/// The rig's `TF 1` with its three transfer panes on screen, its row chosen.
+fn desk_on_tf1() -> T {
+    let mut t = T::fresh();
+    t.connect(rig());
+    select(&mut t, 2);
+    assert_eq!(t.st.pane_layout(), three_transfer(), "TF 1's own panes");
+    t
+}
+
+/// The measurements `r` sends a layout to.
+fn layout_targets(r: &[Request]) -> Vec<MeasId> {
+    layout_calls(r).into_iter().map(|(m, _)| m).collect()
+}
+
+/// Spectrum, spectrograph and spectrum in three columns: `Spectrum 2`'s own panes on the
+/// rig.
+fn three_spectrum() -> PaneLayout {
+    let pane = |spectrum_view| PaneLayout::Pane {
+        pane: wire::LayoutPane {
+            kind: wire::PaneKind::Spectrum,
+            transfer_view: wire::TransferView::Coherence,
+            spectrum_view,
+            spl_view: wire::SplView::Leq,
+            sweep_view: wire::SweepView::Response,
+            chrome: wire::PlotChrome::TracesOnly,
+        },
+    };
+    PaneLayout::Split {
+        axis: wire::SplitAxis::Column,
+        ratio: 0.5,
+        a: Box::new(pane(wire::SpectrumView::Spectrum)),
+        b: Box::new(PaneLayout::Split {
+            axis: wire::SplitAxis::Column,
+            ratio: 0.5,
+            a: Box::new(pane(wire::SpectrumView::Spectrograph)),
+            b: Box::new(pane(wire::SpectrumView::Spectrum)),
+        }),
+    }
+}
+
+/// The rig with `Spectrum 2` and its three spectrum panes, its row chosen on the desk.
+fn desk_on_spectrum_2() -> T {
+    let mut s = rig();
+    let mut m = meas(4, "Spectrum 2", spectrum());
+    m.layout = Some(three_spectrum());
+    s.measurements.push(m);
+    let mut t = T::fresh();
+    t.connect(s);
+    select(&mut t, 4);
+    assert_eq!(
+        t.st.pane_layout(),
+        three_spectrum(),
+        "Spectrum 2's own panes"
+    );
+    t
+}
+
+/// Every `meas.layout` call in `r` answered: the next edit goes out at once.
+fn answer_layout_calls(t: &mut T, r: &[Request]) {
+    for r in r {
+        if let Request::Call {
+            cmd: Command::MeasLayout { .. },
+            what,
+        } = r
+        {
+            t.conn(ConnEvent::Reply {
+                what: what.clone(),
+                result: Ok(()),
+            });
+        }
+    }
+}
+
+/// The operator's sequence: `Spectrum 2`'s own panes on screen, the lower pane focused (a
+/// click inside it), `FOH SPL` picked on that pane's title chip. The pick selects `FOH SPL`
+/// and turns the pane into an SPL pane, which is about that pane and sends nothing; the
+/// edits after it (G, N, T) are `Spectrum 2`'s, the SPL pane included, and never
+/// `FOH SPL`'s own layout.
+#[test]
+fn a_chip_pick_into_another_measurements_panes_leaves_its_own_layout() {
+    let mut t = desk_on_spectrum_2();
+    let lower = *t.st.layout.root.reading_order().last().expect("a pane");
+    let r = t.st.update(Msg::FocusPane(lower), &t.keys);
+    assert!(
+        layout_calls(&r).is_empty(),
+        "a click moves the focus: {r:?}"
+    );
+    let r =
+        t.st.update(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+    assert_eq!(t.st.selected, Some(MeasId(1)), "FOH SPL selected");
+    assert_eq!(t.st.layout.kind(lower), PaneKind::Spl);
+    assert!(layout_calls(&r).is_empty(), "the pick: {r:?}");
+    for k in ["G", "N", "T"] {
+        let r = t.key(k);
+        let to = layout_targets(&r);
+        assert_eq!(to, [MeasId(4)], "{k} is Spectrum 2's edit");
+        answer_layout_calls(&mut t, &r);
+    }
+}
+
+/// The same with a click inside the pane: `FOH SPL` put into the lower pane, the focus
+/// moved away and back by clicks (each selecting what its pane shows), then G.
+#[test]
+fn a_click_on_a_guest_pane_then_an_edit_leaves_its_own_layout() {
+    let mut t = desk_on_spectrum_2();
+    let order = t.st.layout.root.reading_order();
+    let lower = *order.last().expect("a pane");
+    t.st.update(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+    t.st.update(Msg::FocusPane(order[0]), &t.keys);
+    assert_eq!(t.st.selected, Some(MeasId(4)));
+    t.st.update(Msg::FocusPane(lower), &t.keys);
+    assert_eq!(t.st.selected, Some(MeasId(1)));
+    let r = t.key("G");
+    assert_eq!(layout_targets(&r), [MeasId(4)], "{r:?}");
+}
+
+/// `FOH SPL`'s row chosen (it has no panes of its own: the focused pane turns into an SPL
+/// pane), then that pane closed: no pane shows `FOH SPL` any more, so an edit is not its
+/// layout — nothing is sent, and its own panes have ended.
+#[test]
+fn an_edit_with_no_pane_showing_the_measurement_is_not_its_layout() {
+    let mut t = desk_on_tf1();
+    select(&mut t, 1);
+    assert_eq!(t.st.layout.focus_kind(), PaneKind::Spl);
+    let r = t.key("Q");
+    assert!(layout_calls(&r).is_empty(), "Q: {r:?}");
+    assert!(
+        !t.st
+            .layout
+            .panes()
+            .iter()
+            .any(|p| t.st.layout.kind(*p) == PaneKind::Spl),
+        "the SPL pane closed"
+    );
+    for k in ["G", "N"] {
+        let r = t.key(k);
+        assert!(layout_calls(&r).is_empty(), "{k}: {r:?}");
+    }
+}
+
+/// `FOH SPL`'s own layout already the same as `TF 1`'s (an earlier overwrite): an edit of
+/// `TF 1`'s panes goes to `TF 1` alone, since none of them shows `FOH SPL`.
+#[test]
+fn panes_shared_with_a_measurement_none_of_them_shows_are_not_its_layout() {
+    let mut t = T::fresh();
+    t.connect(rig_with_spl_layout(three_transfer()));
+    select(&mut t, 2);
+    let r = t.key("G");
+    assert_eq!(layout_targets(&r), [MeasId(2)], "{r:?}");
+}

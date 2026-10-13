@@ -222,6 +222,9 @@ impl AppState {
                 }
                 self.selected = Some(m.id);
                 self.pending_select = Some(m.id);
+                // Made here, by the operator: as if its row were chosen, the panes on screen
+                // are its own from now (it has none yet to bring).
+                self.own_panes = Some(m.id);
                 if self.stack_on_create.as_ref() == Some(&m.config.name) {
                     self.stack_on_create = None;
                     self.pending_stack = Some(m.id);
@@ -575,6 +578,10 @@ impl AppState {
             }
             self.selected = None;
             self.standin = None;
+        }
+        // Its panes stay on screen, nobody's own until a row is chosen.
+        if self.own_panes.is_some_and(&gone) {
+            self.own_panes = None;
         }
     }
 

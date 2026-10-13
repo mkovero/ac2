@@ -2,9 +2,11 @@
 //! puts its panes on screen; one without keeps the panes there are. Anything else that
 //! moves the selection — a pane clicked or picked from its chip, a child row (live curve,
 //! math channel, stored trace) — keeps the panes: it is about one pane. Editing the panes
-//! (N, Q, a pane's kind or view, T, a split dragged, the transfer stack) while a
-//! measurement is selected gives it that layout, and every client that selects it shows the
-//! same. Measurements whose own panes are the ones on screen share them: an edit goes to
+//! (N, Q, a pane's kind or view, T, a split dragged, the transfer stack) gives the
+//! measurement whose row was chosen that layout, and every client that selects it shows the
+//! same. A measurement a pane or child row selected since is a guest in those panes: the
+//! edit is still the chosen one's, never the guest's own layout. Panes none of which shows
+//! the measurement are no layout of its: nothing is sent, and they stop being its own. Measurements whose own panes are the ones on screen share them: an edit goes to
 //! each, so two measurements laid out side by side keep the arrangement whichever of them
 //! is selected.
 //!
@@ -141,30 +143,25 @@ impl AppState {
             }
             return;
         }
-        // The panes on screen are a measurement's own only while it stays selected.
-        if self.own_panes != self.selected {
-            self.own_panes = None;
-        }
         // A selection moved by a pane (clicked, picked) or a child row: about that pane, and
         // a pane it turned into another kind is no edit.
         if self.selected != before.selected {
             return;
         }
-        let theirs = self.meas_layout(self.selected);
-        let Some(sel) = self.selected else {
-            return;
-        };
         if !conn && self.pane_layout() != before.panes {
-            // A stand-in is this app's pick, not the operator's: the panes are not its.
-            if self.selection_is_standin() {
+            // The panes are the own panes of the measurement whose row was chosen here. One
+            // a pane (clicked, picked on its chip) or a child row selected since is a guest
+            // in them: an edit now is of the chosen one's panes, never the guest's own
+            // layout. With no row chosen (a stand-in, the measurement a remembered pane
+            // shows) the panes are nobody's.
+            let Some(owner) = self.own_panes else {
                 return;
-            }
-            self.own_panes = Some(sel);
+            };
             // Those whose own panes were the ones on screen share them: the edit is theirs too.
-            let mut ids = vec![sel];
+            let mut ids = vec![owner];
             ids.extend(
                 self.measurements().iter().map(|m| m.id).filter(|id| {
-                    *id != sel && self.own_layout(*id).as_ref() == Some(&before.panes)
+                    *id != owner && self.own_layout(*id).as_ref() == Some(&before.panes)
                 }),
             );
             if drag {
@@ -178,6 +175,10 @@ impl AppState {
             }
             return;
         }
+        let theirs = self.meas_layout(self.selected);
+        let Some(sel) = self.selected else {
+            return;
+        };
         // Only the panes the operator put on screen for it follow its layout: those of a
         // selection this app made by itself (a stand-in, the measurement a remembered pane
         // shows) or one a pane or child row moved to are the operator's to bring, by its row.
@@ -263,7 +264,15 @@ impl AppState {
 
     /// The panes on screen sent as measurement `id`'s layout, unless it has them already;
     /// held until the call in flight for it is answered.
+    /// Panes none of which shows `id` are no layout of its: nothing is sent, and they are
+    /// not its own panes any more.
     fn store_layout(&mut self, id: MeasId, out: &mut Vec<Request>) {
+        if !self.panes_show(id) {
+            if self.own_panes == Some(id) {
+                self.own_panes = None;
+            }
+            return;
+        }
         let l = self.pane_layout();
         if self
             .layout_calls
@@ -274,6 +283,14 @@ impl AppState {
             return;
         }
         self.send_layout(id, l, out);
+    }
+
+    /// Some pane on screen shows measurement `id`: one of a kind that draws it, showing it.
+    fn panes_show(&self, id: MeasId) -> bool {
+        self.layout
+            .panes()
+            .into_iter()
+            .any(|p| self.pane_meas(p).is_some_and(|m| m.id == id))
     }
 
     fn send_layout(&mut self, id: MeasId, l: PaneLayout, out: &mut Vec<Request>) {
