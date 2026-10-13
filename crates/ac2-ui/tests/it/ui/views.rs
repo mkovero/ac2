@@ -164,6 +164,73 @@ fn top_bar_never_overlaps() {
     }
 }
 
+/// The health meter after the session line: the daemon's host CPU, its callback load and
+/// xruns, the data rate and the window's frame rate, from figures the test sets (the fake
+/// daemon's keepalives and this window's own, fed at chosen instants).
+#[test]
+fn top_bar_health_meter() {
+    use std::sync::atomic::Ordering;
+
+    use ac2_proto::frame::{AudioHealth, DaemonHealth};
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::{By, NodeT};
+    if !have_gpu("top_bar_health_meter") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    rig.fake.lock().health = DaemonHealth {
+        host: "pupu".into(),
+        cpu: Some(0.23),
+        audio: Some(AudioHealth {
+            load: Some(0.14),
+            peak: Some(0.31),
+            session_load: Some(0.12),
+            session_peak: Some(0.48),
+            xruns: 0,
+        }),
+    };
+    step_until(&mut h, "the daemon's figures", |a| {
+        a.state
+            .mirror
+            .as_ref()
+            .and_then(|m| m.health.as_ref())
+            .is_some_and(|h| h.cpu.is_some())
+    });
+    {
+        let app = h.state_mut();
+        // A counter of the test's own: the link keeps adding to the one it was given.
+        app.health.received = std::sync::Arc::default();
+        let t0 = Instant::now() + Duration::from_secs(10);
+        app.health.data_arrived();
+        app.health.frame(t0, false);
+        app.health.received.fetch_add(1_800_000, Ordering::Relaxed);
+        for k in 1..=30u64 {
+            app.health.data_arrived();
+            app.health
+                .frame(t0 + Duration::from_secs(1) * k as u32 / 30, false);
+        }
+    }
+    for _ in 0..3 {
+        h.step();
+    }
+    let bar: Vec<String> = h
+        .query_all(By::new().predicate(|n| n.role() == Role::Label))
+        .filter(|n| n.rect().max.y <= 34.0)
+        .map(|n| {
+            let a = n.accesskit_node();
+            a.label().or_else(|| a.value()).unwrap_or_default()
+        })
+        .collect();
+    assert!(
+        bar.iter()
+            .any(|t| t == "· CPU pupu 23 % · DSP 14 % · 0 xruns · 1.8 MB/s · 30 fps"),
+        "{bar:?}"
+    );
+    snapshot(&mut h, "top_bar_health");
+}
+
 /// The key hints on a crowded grid: the sweep pane shown beside the others (four narrow
 /// panes under the transfer pane at 1280 px), the SPL meter focused with its hint line cut
 /// to what fits, its footer naming the mic and its curve without running into the readouts,

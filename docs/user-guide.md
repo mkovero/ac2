@@ -190,6 +190,16 @@ output device, rate, buffer), channels, system max level; **↑/↓** walk them 
   details) until the session is next opened. The clock sources the driver offers are listed
   under the device, the one in use marked; choose among them in the driver's panel (Audio
   MIDI Setup on macOS).
+- After the session line the top bar shows how the rig holds up:
+  `CPU pupu 23 % · here 41 % · DSP 14 % · 0 xruns · 1.8 MB/s · 30 fps`. **CPU** is the
+  whole daemon host's use (every process, every core), and with the daemon on another
+  computer **here** is this one's; **DSP** is the share of each buffer period ac2d's own
+  audio callback takes (not the whole JACK graph's load); **xruns** count since the session
+  opened; the data rate is what this window receives from the daemon (left out with the
+  daemon inside the app); **fps** is shown while live data arrives. CPU past 85 %, DSP past
+  70 %, a frame rate under a third of the data's and an xrun in the last 5 s show in the
+  warning colour; the hover names the host and gives the means and peaks since the session
+  opened. A figure not known yet is left out, never shown as zero.
 - **Enter** opens; what is missing is said in words (*Pick a reference input: the loopback
   from your stimulus output*). Roles and mic names are remembered per device (`ui.toml`).
   With a Reference, at least one mic and no measurements yet, one more **Enter** creates

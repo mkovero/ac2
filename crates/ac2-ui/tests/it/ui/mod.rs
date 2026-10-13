@@ -90,6 +90,9 @@ fn harness(opts: AppOptions) -> Harness<'static, App> {
     h.state_mut().state.local_zone = ac2_ui::scenes::LocalZone::Fixed { offset_s: 0 };
     // The build id names the commit: pinned, or every commit would change the pictures.
     h.state_mut().state.build_id = "0.0.0+test".into();
+    // The window's own frame rate and data rate move run to run: a test that shows them
+    // feeds them.
+    h.state_mut().health_measured = false;
     h
 }
 

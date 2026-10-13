@@ -54,6 +54,24 @@ pub fn mirror_differs(a: &MirrorView, b: &MirrorView) -> bool {
         || a.since_requests != b.since_requests
         || a.incarnation_changes != b.incarnation_changes
         || a.client_id != b.client_id
+        || health_shown(a) != health_shown(b)
+}
+
+/// Host, whole-percent CPU, whole-percent callback load, xruns.
+type HealthShown<'a> = (&'a str, Option<i64>, Option<i64>, Option<u64>);
+
+/// What the health meter shows of the daemon's figures, in whole percent: the finer
+/// figures behind it change with every keepalive and would wake the UI for nothing.
+fn health_shown(v: &MirrorView) -> Option<HealthShown<'_>> {
+    let pct = |x: f64| (x * 100.0).round() as i64;
+    v.health.as_ref().map(|h| {
+        (
+            h.host.as_str(),
+            h.cpu.map(pct),
+            h.audio.and_then(|a| a.load).map(pct),
+            h.audio.map(|a| a.xruns),
+        )
+    })
 }
 
 /// Whether two frames of a topic draw the same: equal content, protection, grid and

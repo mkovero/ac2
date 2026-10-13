@@ -32,7 +32,7 @@ struct Item {
     /// Higher stays longer.
     prio: u8,
     /// Longest first; the bar shows one of them.
-    variants: Vec<RichText>,
+    variants: Vec<egui::WidgetText>,
     /// May disappear entirely once its shortest text does not fit.
     droppable: bool,
     /// A status dot before the text.
@@ -46,6 +46,10 @@ struct Item {
 
 impl Item {
     fn new(prio: u8, variants: Vec<RichText>) -> Self {
+        Self::of(prio, variants.into_iter().map(Into::into).collect())
+    }
+
+    fn of(prio: u8, variants: Vec<egui::WidgetText>) -> Self {
         Self {
             prio,
             variants,
@@ -111,8 +115,8 @@ fn fit_bar(widths: &[(u8, Vec<f32>, bool)], available: f32) -> Vec<Option<usize>
     pick
 }
 
-fn text_width(ui: &egui::Ui, t: &RichText) -> f32 {
-    egui::WidgetText::from(t.clone())
+fn text_width(ui: &egui::Ui, t: &egui::WidgetText) -> f32 {
+    t.clone()
         .into_galley(
             ui,
             Some(egui::TextWrapMode::Extend),
@@ -265,6 +269,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         it.click = Some(CommandId::Sessions);
         it
     });
+    let health = health_item(app, ui, ch, now);
     let mut left = vec![
         Item::new(100, vec![RichText::new("ac2").strong().size(16.0)])
             .kept()
@@ -273,6 +278,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     ];
     left.extend(working);
     left.push(session);
+    left.extend(health);
 
     // Right side, from the edge inwards.
     let mut keys = Item::new(
@@ -383,6 +389,44 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     if let Some(c) = run {
         app.dispatch(crate::state::Msg::Command(c));
     }
+}
+
+/// The health meter after the session line: its figures, warnings in the warning colour,
+/// and a short form that keeps the essential ones.
+fn health_item(app: &App, ui: &egui::Ui, ch: &Chrome, now: std::time::Instant) -> Option<Item> {
+    let st = &app.state;
+    // A daemon that stopped answering has no current figures.
+    let daemon = st
+        .mirror
+        .as_ref()
+        .filter(|m| m.responding(now))
+        .and_then(|m| m.health.as_ref());
+    let wanted_fps = 1.0 / st.display_period().as_secs_f64();
+    let inputs = app
+        .health
+        .inputs(daemon, app.link_embedded, wanted_fps, now);
+    let line = ac2_scene::health::health_line(&inputs)?;
+    let job = |essential_only: bool| {
+        let mut job = egui::text::LayoutJob::default();
+        let mut add = |t: RichText| {
+            t.append_to(
+                &mut job,
+                ui.style(),
+                egui::FontSelection::Default,
+                egui::Align::Center,
+            );
+        };
+        let shown = line.parts.iter().filter(|p| p.essential || !essential_only);
+        for (k, p) in shown.enumerate() {
+            add(RichText::new(if k == 0 { "· " } else { " · " }).color(ch.dim));
+            let color = if p.warn { ch.warn } else { ch.dim };
+            add(RichText::new(p.text.clone()).color(color));
+        }
+        egui::WidgetText::from(job)
+    };
+    let mut it = Item::of(35, vec![job(false), job(true)]);
+    it.hover = Some(line.detail);
+    Some(it)
 }
 
 /// Room the Settings gear takes at the bar's right edge.

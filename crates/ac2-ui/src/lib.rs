@@ -27,6 +27,7 @@ pub mod electrical_dialog;
 pub mod embedded;
 pub mod forms;
 pub mod gpu;
+pub mod health;
 pub mod hints;
 pub mod ir_import_dialog;
 pub mod keys;

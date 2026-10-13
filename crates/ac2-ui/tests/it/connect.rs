@@ -82,6 +82,7 @@ fn harness(dialog: ConnectDialog) -> Harness<'static, App> {
         .wgpu()
         .build_eframe(move |cc| {
             let mut app = App::new(cc, opts);
+            app.health_measured = false;
             if let Some(d) = dialog.take() {
                 app.open_connect(d);
             }

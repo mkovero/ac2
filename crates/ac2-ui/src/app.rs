@@ -178,6 +178,14 @@ pub struct App {
     connect_setup: Option<ConnectSetup>,
     /// Least time between two frames asked for by data or animation (zero on a GPU).
     frame_interval: Duration,
+    /// This window's side of the health meter.
+    pub health: crate::health::LocalHealth,
+    /// The window measures its own health figures on every pass. Reference renders turn it
+    /// off and feed [`App::health`] figures at chosen instants: measured ones move run to
+    /// run.
+    pub health_measured: bool,
+    /// The link reaches a daemon inside this process: no network between, the same host.
+    pub(crate) link_embedded: bool,
 }
 
 impl std::fmt::Debug for App {
@@ -251,9 +259,12 @@ impl App {
             .target
             .as_ref()
             .map_or_else(|| "no daemon".to_string(), |t| t.describe.clone());
-        let conn = opts
-            .target
-            .and_then(|t| Conn::start(t, link_wake(ctx, frame_interval)).ok());
+        let health = crate::health::LocalHealth::new();
+        let link_embedded = opts.target.as_ref().is_some_and(embedded_target);
+        let conn = opts.target.and_then(|mut t| {
+            t.config.received_bytes = Arc::clone(&health.received);
+            Conn::start(t, link_wake(ctx, frame_interval)).ok()
+        });
         let mut state = AppState::new(opts.theme, describe);
         state.set_prefs(opts.prefs);
         state.open_session_when_empty = opts.open_session_dialog;
@@ -298,6 +309,9 @@ impl App {
             window_checked: false,
             connect_setup: opts.connect,
             frame_interval,
+            health,
+            health_measured: true,
+            link_embedded,
         }
     }
 
@@ -398,6 +412,9 @@ impl App {
             },
         };
         self.conn = None;
+        let mut target = target;
+        target.config.received_bytes = Arc::clone(&self.health.received);
+        self.link_embedded = embedded_target(&target);
         match Conn::start(target, link_wake(ctx.clone(), self.frame_interval)) {
             Ok(c) => {
                 self.conn = Some(c);
@@ -501,6 +518,9 @@ impl App {
     fn pump_link(&mut self) {
         let events = self.conn.as_ref().map(Conn::drain).unwrap_or_default();
         for e in events {
+            if matches!(e, crate::conn::ConnEvent::Data(_)) {
+                self.health.data_arrived();
+            }
             self.dispatch(Msg::Conn(Box::new(e)));
         }
     }
@@ -755,6 +775,12 @@ fn link_wake(ctx: egui::Context, interval: Duration) -> crate::conn::Wake {
     Arc::new(move || ctx.request_repaint_after(after))
 }
 
+/// Whether `t` reaches a daemon inside this process: an `inproc://` daemon is reachable
+/// only through the context it shares.
+fn embedded_target(t: &Target) -> bool {
+    t.config.context.is_some()
+}
+
 fn dialog_error(d: &mut Option<ConnectDialog>, msg: String) {
     if let Some(d) = d {
         d.error = Some(msg);
@@ -828,6 +854,14 @@ impl eframe::App for App {
         self.pump_link();
         // Ages keep counting between the link's snapshots.
         let now = Instant::now();
+        let daemon_health = self.state.mirror.as_ref().and_then(|m| m.health.as_ref());
+        let remote_host = daemon_health
+            .is_some_and(|h| !self.link_embedded && h.host != self.health.local_host());
+        let xruns = daemon_health.and_then(|h| h.audio).map(|a| a.xruns);
+        if self.health_measured {
+            self.health.frame(now, remote_host);
+        }
+        self.health.daemon_xruns(xruns, now);
         if let Some(d) = &self.state.data
             && d.drained < now
         {
@@ -902,6 +936,13 @@ impl eframe::App for App {
         }
         if let Some(wait) = self.save_prefs(Instant::now()) {
             ctx.request_repaint_after(wait);
+        }
+        if let Some(t) = self.health.xrun_warning_until() {
+            let now = Instant::now();
+            if t > now {
+                // The xrun count leaves its warning colour then.
+                ctx.request_repaint_after(t - now);
+            }
         }
         if self.state.animating()
             || self.state.bars_easing(Instant::now())
