@@ -206,20 +206,26 @@ class HarmonicChecks:
         # is long enough, else the silent recording of the sine stage (same inputs, same chain).
         if a0 - int(0.2 * fs) >= n_cut:
             q = slice(a0 - int(0.2 * fs) - n_cut, a0 - int(0.2 * fs))
-            noise_meas, noise_ref, src = meas[q], ref[q], "the capture's silence before the sweep"
+            noise_meas, src = meas[q], "the capture's silence before the sweep"
         elif p.noise is not None and len(p.noise.meas) >= n_cut:
-            noise_meas, noise_ref, src = p.noise.meas[:n_cut], p.noise.ref[:n_cut], "the sine stage's silent recording"
+            noise_meas, src = p.noise.meas[:n_cut], "the sine stage's silent recording"
         else:
             self.notes.append(f"{p.name}: {name}: no noise-only recording as long as the sweep's record "
                               f"({n_cut/fs:.1f} s): floor cross-check skipped")
             return
+        if None in (s.start_hz, s.end_hz, s.duration_s, s.fade_in_s, s.fade_out_s):
+            self.notes.append(f"{p.name}: {name}: the sweep's asked fades are not in its info.json: "
+                              "floor cross-check skipped")
+            return
         # A constant offset on an input is not noise: it has no power in any harmonic band, but
-        # divided by the reference's regularised spectrum near 0 Hz it spreads into the LF
-        # windows. Each noise-only record is taken about its own mean.
-        noise_meas, noise_ref = noise_meas - np.mean(noise_meas), noise_ref - np.mean(noise_ref)
-        h = dsp.deconvolve(seg_ref, seg_meas)
-        # both inputs' noise: ac2 divides by its captured reference, whose noise lands in the floor too
-        hn = dsp.deconvolve_noise(seg_ref, seg_meas, noise_ref, noise_meas)
+        # divided by the sweep's regularised spectrum near 0 Hz it spreads into the LF windows.
+        # The noise-only record is taken about its own mean.
+        noise_meas = noise_meas - np.mean(noise_meas)
+        # ac2 separates harmonics against its emitted sweep, aligned by the reference's delay:
+        # the meas input's noise alone reaches the floor, none of the reference input's.
+        sweep = np.concatenate([np.zeros(start - a0), dsp.emitted_sweep(
+            fs, s.start_hz, s.end_hz, s.duration_s, s.fade_in_s, s.fade_out_s)])
+        _, (h, hn) = dsp.deconvolve_emitted(sweep, seg_ref, seg_meas, noise_meas)
         d = int(np.argmax(np.abs(h[: int(0.05 * fs)])))
         b = s.trace.freq
         fsel = b["freq_hz"][(b["freq_hz"] >= 20) & (b["freq_hz"] <= 10000)][::max(1, self.ppo // 12)]
@@ -247,8 +253,8 @@ class HarmonicChecks:
                      title=f"ac2 sweep {name}: H{k} floor vs raw-capture floor", value=float(np.nanmedian(dd)),
                      unit="dB", tol=(lim / 2, lim), status=judge(float(np.nanmedian(dd)), (lim / 2, lim)),
                      meaning="ac2's floor: noise windows in the silence after its linear response. This one: "
-                             f"{src}, as long as ac2's record ({n_cut/fs:.2f} s), deconvolved by the same reference with "
-                             "the reference input's noise scaled by the response (ac2 divides by a noisy reference too), "
+                             f"{src}, as long as ac2's record ({n_cut/fs:.2f} s), divided like the sweep by ac2's emitted "
+                             "sweep aligned to the reference's delay (the meas input's noise only), "
                              f"8 windows at the harmonic's own lag, the floor band 1/3 octave like ac2's"
                              + (", each order in its own window where ac2 uses it (LF harmonics fine)" if fine else "")
                              + (f", ÷ {repeats} for the mean of {repeats} repeats" if repeats > 1 else "")

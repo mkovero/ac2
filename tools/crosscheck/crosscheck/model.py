@@ -48,6 +48,8 @@ class Sweep:
     duration_s: float | None = None
     repeats: int = 1
     lf_harmonics: str = "standard"
+    fade_in_s: float | None = None
+    fade_out_s: float | None = None
 
 
 @dataclass
@@ -204,7 +206,9 @@ def load_run(root: Path) -> RunData:
                           level_dbfs=info.get("level_dbfs", np.nan), done=_json(v / "done.json"),
                           plan=_json(v / "plan.json"), start_hz=info.get("from_hz"), end_hz=info.get("to_hz"),
                           duration_s=info.get("duration_s"), repeats=int(info.get("repeats") or 1),
-                          lf_harmonics=info.get("lf_harmonics") or "standard")
+                          lf_harmonics=info.get("lf_harmonics") or "standard",
+                          fade_in_s=info.get("fade_in_s"),
+                          fade_out_s=(((info.get("armed") or {}).get("settings") or {}).get("sweep") or {}).get("fade_out"))
                 rec_cols = info.get("rec_columns")  # [meas col, ref col] in ac2's raw file
                 if rec_cols and (v / "rec.wav").exists():
                     s.raw = _raw(v / "rec.wav", rec_cols[0], rec_cols[1])

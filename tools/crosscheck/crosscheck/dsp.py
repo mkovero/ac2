@@ -593,19 +593,49 @@ def deconvolve(ref: np.ndarray, meas: np.ndarray, eps_rel: float = 1e-6) -> np.n
     return np.fft.irfft(M * np.conj(R) / (np.abs(R) ** 2 + eps), n)
 
 
-def deconvolve_noise(ref: np.ndarray, meas: np.ndarray, noise_ref: np.ndarray,
-                     noise_meas: np.ndarray, eps_rel: float = 1e-6) -> np.ndarray:
-    """The noise part of deconvolve(ref, meas), from noise-only recordings of both inputs.
+def emitted_sweep(fs: float, start_hz: float, end_hz: float, duration_s: float, fade_in_s: float,
+                  fade_out_s: float, onset_extension: float = 4.0, min_start_hz: float = 1.0) -> np.ndarray:
+    """ac2's emitted sweep for an asked one, unit peak, fades included: the same rate started
+    up to `onset_extension` lower on a whole number of cycles per rate constant, fading in
+    (half-cosine in time) up to the asked start, which replaces the asked fade-in."""
+    rate = np.round(start_hz * duration_s / np.log(end_hz / start_hz)) / start_hz
+    cycles = np.round(start_hz * rate)
+    lowest = max(np.floor(cycles / onset_extension), np.ceil(min_start_hz * rate), 1.0)
+    f0 = start_hz
+    if lowest < cycles:
+        f0 = lowest / rate
+        duration_s, fade_in_s = rate * np.log(end_hz / f0), rate * np.log(start_hz / f0)
+    rate = np.round(f0 * duration_s / np.log(end_hz / f0)) / f0
+    m = int(np.floor(rate * np.log(end_hz / f0) * fs))
+    n = np.arange(m)
+    x = np.sin(2 * np.pi * f0 * rate * np.expm1(n / fs / rate))
+    fi, fo = int(round(fade_in_s * fs)), int(round(fade_out_s * fs))
+    if fi:
+        x[:fi] *= 0.5 - 0.5 * np.cos(np.pi * n[:fi] / fi)
+    if fo:
+        x[m - fo:] *= 0.5 - 0.5 * np.cos(np.pi * (m - 1 - n[m - fo:]) / fo)
+    return x
 
-    Dividing by a captured reference S + Nr gives H + (Nm − H·Nr)/S to first order: the
-    reference input's noise enters scaled by the response, and where |H| ≈ 1 with equal noise
-    on both inputs it doubles the floor's power (+3 dB) over the measurement noise alone."""
+
+def deconvolve_emitted(sweep: np.ndarray, ref: np.ndarray, *xs: np.ndarray,
+                       eps_rel: float = 1e-6) -> tuple[float, list[np.ndarray]]:
+    """Each of `xs` divided by the emitted `sweep` (placed where it starts in `ref`) and
+    advanced by the reference's own delay against it, as ac2 separates harmonics: the
+    noiseless divisor keeps the reference input's noise and distortion out, and the
+    loopback's sub-sample delay puts the meas path's arrival where the reference's is.
+    Returns that delay, samples, and the aligned responses (circular over 2× the length:
+    harmonic IRs land before t=0)."""
     n = 2 * (1 << int(np.ceil(np.log2(len(ref)))))
-    R, M = np.fft.rfft(ref, n), np.fft.rfft(meas, n)
-    nm, nr = np.fft.rfft(noise_meas, n), np.fft.rfft(noise_ref, n)
-    den = np.abs(R) ** 2 + eps_rel * np.max(np.abs(R) ** 2)
-    H = M * np.conj(R) / den
-    return np.fft.irfft((nm - H * nr) * np.conj(R) / den, n)
+    S = np.fft.rfft(sweep, n)
+    den = np.abs(S) ** 2 + eps_rel * np.max(np.abs(S) ** 2)
+
+    def div(x):
+        return np.fft.rfft(x, n) * np.conj(S) / den
+
+    delay, _ = fractional_peak(np.fft.irfft(div(ref), n))
+    delay = delay - n if delay > n / 2 else delay
+    adv = np.exp(2j * np.pi * np.arange(n // 2 + 1) * delay / n)
+    return delay, [np.fft.irfft(div(x) * adv, n) for x in xs]
 
 
 def _taper(n, rise, fall):

@@ -188,28 +188,43 @@ def test_sweep_noise_floor_matches_the_noise_inside_the_record():
     assert np.allclose(r8["floor"][2], r["floor"][2] - 10 * np.log10(8))
 
 
-def test_sweep_noise_floor_counts_the_reference_inputs_noise():
-    # Unity path with equal noise on both inputs (a digital loop): dividing by the noisy
-    # reference doubles the noise in h, so the floor reads 3 dB above the measurement noise.
-    fs, L = 48000.0, 0.4
-    s = _ess(fs, 20.0, 20000.0, L)
+def test_emitted_sweep_is_the_one_ac2_plays():
+    # A 10 Hz – 40 kHz, 5.5 s sweep at 96 kHz: ac2 reported rate 0.7 s and an emitted length
+    # of 7.16796875 s (it starts 4× lower, at 2.857 Hz, and fades in up to 10 Hz).
+    x = dsp.emitted_sweep(96000.0, 10.0, 40000.0, 5.5, 0.0766, 0.01915)
+    assert len(x) / 96000.0 == 7.16796875
+    assert abs(x[0]) < 1e-12 and np.max(np.abs(x)) <= 1.0
+
+
+def test_sweep_floor_against_the_emitted_sweep_is_the_meas_inputs_noise_alone():
+    # Divided by the emitted sweep, the reference input's noise stays out of h: the floor from
+    # the meas input's noise-only record equals the noise h carries in its own silence, however
+    # noisy the reference. The reference's fractional delay is found and advanced away.
+    fs = 48000.0
+    s = dsp.emitted_sweep(fs, 20.0, 20000.0, 2.0, 0.0, 0.01)
+    L = np.round(20.0 * 2.0 / np.log(1000.0)) / 20.0
     pre, post = int(0.1 * fs), int(1.0 * fs)
     clean = np.concatenate([np.zeros(pre), s, np.zeros(post)])
+    n = len(clean)
+    delay = 37.37
+    f = np.fft.rfftfreq(n)
+    late = np.fft.irfft(np.fft.rfft(clean) * np.exp(-2j * np.pi * f * delay), n)
     rng = np.random.default_rng(4)
     sigma = 1e-4
-    ref = clean + sigma * rng.standard_normal(len(clean))
-    meas = clean + sigma * rng.standard_normal(len(clean))
-    n_ref, n_meas = (sigma * rng.standard_normal(len(clean)) for _ in range(2))
-    h = dsp.deconvolve(ref, meas)
+    ref = late + 30 * sigma * rng.standard_normal(n)
+    meas = 0.5 * late + sigma * rng.standard_normal(n)
+    n_meas = sigma * rng.standard_normal(n)
+    sweep = np.concatenate([np.zeros(pre), s])
+    found, (h, hn) = dsp.deconvolve_emitted(sweep, ref, meas, n_meas)
+    assert abs(found - delay) < 0.01, found
+    assert int(np.argmax(np.abs(h[:1000]))) == 0
     freqs = np.array([300.0, 1000.0, 3000.0])
     kw = dict(kmax=3, pre=0.02, post=0.06)
-    both = dsp.sweep_harmonics(h, 0, fs, L, freqs, noise_h=dsp.deconvolve_noise(ref, meas, n_ref, n_meas), **kw)
-    meas_only = dsp.sweep_harmonics(h, 0, fs, L, freqs, noise_h=dsp.deconvolve(ref, n_meas), **kw)
+    r = dsp.sweep_harmonics(h, 0, fs, L, freqs, noise_h=hn, **kw)
     start2 = -round(L * np.log(2) * fs) - int(0.02 * fs)
     h_quiet = np.roll(h, -(int(0.6 * fs) - start2))
     inside = dsp.sweep_harmonics(h, 0, fs, L, freqs, noise_h=h_quiet, **kw)
-    assert np.all(np.abs(both["floor"][2] - inside["floor"][2]) < 1.5), (both["floor"][2], inside["floor"][2])
-    assert np.all(np.abs(both["floor"][2] - meas_only["floor"][2] - 3.0) < 1.0)
+    assert np.all(np.abs(r["floor"][2] - inside["floor"][2]) < 1.5), (r["floor"][2], inside["floor"][2])
 
 
 def test_gd_slope_err_and_sine_sigma():
