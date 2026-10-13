@@ -336,7 +336,10 @@ fn band_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: 
         }
         let range = ui
             .small_button(RichText::new("+ range…").strong())
-            .on_hover_text("add a band window for each band from … to (Shift+Insert)");
+            .on_hover_text(format!(
+                "add a band window for each band from … to ({})",
+                crate::keys::Chord::shift(egui::Key::Insert).label()
+            ));
         if range.clicked() {
             *msg = Some(LeqMsg::OpenRange);
         }

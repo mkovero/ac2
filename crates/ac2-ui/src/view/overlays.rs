@@ -4,7 +4,7 @@ use eframe::egui::{self, Color32, RichText, text::LayoutJob};
 
 use crate::app::App;
 use crate::forms::Value;
-use crate::keys::STOP_ANYWHERE;
+use crate::keys::{CommandId, Keymap, LabelStyle, STOP_ANYWHERE, Scope};
 use crate::state::{FormMsg, HELP_LINE, Msg, Overlay};
 use crate::theme::{Chrome, c32};
 
@@ -463,15 +463,31 @@ fn delay_pick(app: &App, ctx: &egui::Context, ch: &Chrome) {
                     .color(ch.dim),
                 );
                 ui.label(
-                    RichText::new(format!(
-                        "{} or ↑↓ Enter inserts · Shift+X strongest · Esc closes",
-                        ac2_scene::finding::pick_keys(rows.len())
+                    RichText::new(delay_pick_keys(
+                        &app.keymap,
+                        app.state.scope(),
+                        rows.len(),
+                        crate::keys::label_style(),
                     ))
                     .small()
                     .color(ch.dim),
                 );
             });
         });
+}
+
+/// The delay candidates' key line: the fixed picks, then the strongest peak by whatever
+/// chord runs it with the view's keys (none when it is unbound: the window takes the
+/// remaining keys only while it is open, so the palette is no way to it then).
+fn delay_pick_keys(keymap: &Keymap, scope: Scope, rows: usize, style: LabelStyle) -> String {
+    let strongest = keymap
+        .first_chord(CommandId::InsertStrongest, scope)
+        .map(|c| format!(" · {} strongest", c.label_in(style)))
+        .unwrap_or_default();
+    format!(
+        "{} or ↑↓ Enter inserts{strongest} · Esc closes",
+        ac2_scene::finding::pick_keys(rows)
+    )
 }
 
 /// Whole rows the wheel moved this frame (down positive), for lists that show a window of
@@ -674,4 +690,27 @@ fn notice_row(
     });
     ui.add(egui::Label::new(RichText::new(&n.text).color(ch.text)).wrap());
     ui.add_space(6.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The strongest-peak hint names the chord the keymap runs it by, and goes with it.
+    #[test]
+    fn delay_pick_hint_follows_the_insert_strongest_binding() {
+        let (t, pc) = (Scope::Transfer, LabelStyle::Pc);
+        let default = delay_pick_keys(&Keymap::default(), t, 3, pc);
+        assert!(default.contains(" · Shift+X strongest · "), "{default}");
+        let mac = delay_pick_keys(&Keymap::default(), t, 3, LabelStyle::Mac);
+        assert!(mac.contains(" · ⇧X strongest · "), "{mac}");
+        let moved = Keymap::from_toml("[transfer]\ninsert_strongest = \"Alt+J\"\n").expect("valid");
+        let moved = delay_pick_keys(&moved, t, 3, pc);
+        assert!(moved.contains(" · Alt+J strongest · "), "{moved}");
+        assert!(!moved.contains("Shift+X"), "{moved}");
+        let gone = Keymap::from_toml("[transfer]\ninsert_strongest = []\n").expect("valid");
+        let gone = delay_pick_keys(&gone, t, 3, pc);
+        assert!(!gone.contains("strongest"), "{gone}");
+        assert!(gone.ends_with("Enter inserts · Esc closes"), "{gone}");
+    }
 }

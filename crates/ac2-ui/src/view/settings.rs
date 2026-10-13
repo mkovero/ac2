@@ -6,6 +6,7 @@
 use eframe::egui::{self, RichText};
 
 use crate::app::App;
+use crate::keys::{Chord, LabelStyle, STOP_ANYWHERE};
 use crate::settings::{
     ConnLine, DisplayRow, Page, RecordingRow, Settings, conn_line_text, display_rows, link_lines,
     recording_rows,
@@ -75,7 +76,7 @@ fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) 
             .color(if on { ch.focus } else { ch.text });
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(format!("Alt+{}", i + 1))
+                RichText::new(page_key(i).label())
                     .small()
                     .monospace()
                     .color(ch.dim),
@@ -91,7 +92,7 @@ fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) 
     }
     ui.add_space(14.0);
     ui.label(
-        RichText::new("Ctrl+PgUp / Ctrl+PgDn: pages\nEsc closes · Shift+Esc stops the stimulus")
+        RichText::new(pages_hint(crate::keys::label_style()))
             .small()
             .color(ch.dim),
     );
@@ -99,6 +100,24 @@ fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) 
     if ui.button("Close (Esc)").clicked() {
         *msg = Some(Msg::Settings(SettingsMsg::Close));
     }
+}
+
+/// The chord that jumps to page `i` (0-based): Alt with its digit.
+fn page_key(i: usize) -> Chord {
+    use egui::Key as K;
+    const DIGITS: [K; 6] = [K::Num1, K::Num2, K::Num3, K::Num4, K::Num5, K::Num6];
+    Chord::alt(DIGITS[i.min(DIGITS.len() - 1)])
+}
+
+/// The window's fixed keys, written in `style` as the dispatch reads them (the page step is
+/// the Command modifier: ⌘ on macOS).
+fn pages_hint(style: LabelStyle) -> String {
+    let [up, down] =
+        [egui::Key::PageUp, egui::Key::PageDown].map(|k| Chord::command(k).label_in(style));
+    format!(
+        "{up} / {down}: pages\nEsc closes · {} stops the stimulus",
+        STOP_ANYWHERE.label_in(style)
+    )
 }
 
 fn page(
@@ -461,5 +480,23 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
         if let Some(t) = text {
             ui.label(RichText::new(t).color(color));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The page keys read as the dispatch takes them: the Command modifier, ⌘ on macOS.
+    #[test]
+    fn settings_key_hints_use_the_label_style() {
+        let pc = pages_hint(LabelStyle::Pc);
+        assert!(pc.starts_with("Ctrl+PageUp / Ctrl+PageDown: pages"), "{pc}");
+        assert!(pc.contains("Shift+Esc stops"), "{pc}");
+        let mac = pages_hint(LabelStyle::Mac);
+        assert!(mac.starts_with("⌘PageUp / ⌘PageDown: pages"), "{mac}");
+        assert!(mac.contains("⇧Esc stops"), "{mac}");
+        assert_eq!(page_key(0).label_in(LabelStyle::Pc), "Alt+1");
+        assert_eq!(page_key(3).label_in(LabelStyle::Mac), "⌥4");
     }
 }

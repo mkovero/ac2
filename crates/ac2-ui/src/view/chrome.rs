@@ -442,13 +442,16 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
         .filter(|_| !mine)
         .map(|o| o.0.clone());
     // The mirrored generator is the truth; the local phase only adds "requested".
-    let (badge, color) = match (generator.map(|g| (g.armed, g.firing)), st.stimulus.phase) {
-        (Some((_, true)), _) => ("FIRING", ch.fault),
-        (Some((true, false)), StimPhase::FireRequested) => ("FIRE…", ch.armed),
-        (Some((true, false)), _) => ("ARMED", ch.armed),
-        (_, StimPhase::Arming) => ("ARMING…", ch.armed),
-        (_, StimPhase::Stopping) => ("STOPPING…", ch.dim),
-        _ => ("STIM OFF", ch.dim),
+    // A lit badge is a filled chip: banner fills with their own text colour.
+    let firing = (ch.fault_fill, ch.on_fault_fill);
+    let armed = (ch.warn_fill, ch.on_warn_fill);
+    let (badge, (fill, ink)) = match (generator.map(|g| (g.armed, g.firing)), st.stimulus.phase) {
+        (Some((_, true)), _) => ("FIRING", firing),
+        (Some((true, false)), StimPhase::FireRequested) => ("FIRE…", armed),
+        (Some((true, false)), _) => ("ARMED", armed),
+        (_, StimPhase::Arming) => ("ARMING…", armed),
+        (_, StimPhase::Stopping) => ("STOPPING…", (ch.dim, ch.panel)),
+        _ => ("STIM OFF", (Color32::TRANSPARENT, ch.dim)),
     };
     let level = st.stimulus.level.map_or_else(
         || "no level".to_string(),
@@ -481,11 +484,10 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
     // While anything is armed or playing: the stop that works from anywhere, windows
     // included (Esc stops too while no window is open).
     let live = run.is_some() || st.stimulus_live();
-    let off = badge == "STIM OFF";
     let badge_text = RichText::new(badge)
         .strong()
-        .color(if off { ch.dim } else { Color32::BLACK })
-        .background_color(if off { Color32::TRANSPARENT } else { color });
+        .color(ink)
+        .background_color(fill);
     let prefix = if sweep { "sweep " } else { "" };
     let mut v = vec![
         Item::new(100, vec![badge_text]).kept(),
@@ -598,9 +600,9 @@ fn progress(app: &mut App, ui: &mut egui::Ui, ch: &Chrome, p: &ac2_scene::progre
             let b = egui::Button::new(
                 RichText::new(format!("■ Stop ({stop_key})"))
                     .strong()
-                    .color(Color32::BLACK),
+                    .color(ch.on_fault_fill),
             )
-            .fill(ch.fault)
+            .fill(ch.fault_fill)
             .min_size(egui::vec2(96.0, 22.0));
             if ui
                 .add(b)
