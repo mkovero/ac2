@@ -105,6 +105,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
+| c03e40dc | 2026-10-14 | 51 / 25 | app only (ketunkolo, Pi; pupu daemon stays on 70655493): the sweep's reference harmonics dotted in the distortion pane, E hides them |
 | 70655493 | 2026-10-13 | 51 / 25 | sweep harmonics against the ideal emitted sweep, reference harmonics on the wire (PROTO 51); autosave restored as is (5 measurements, 3 traces), session reopened `--in 1-8 --outputs 6`; crosscheck rig run follows |
 | f530d1f9 | 2026-10-13 | 50 / 25 | app only (ketunkolo, Pi; pupu daemon stays on 438048f2): T also takes the band view's and Leq columns' 10 dB lines (no grid) and scale numbers (traces only) |
 | 47d7298a | 2026-10-13 | 50 / 25 | app only (ketunkolo, Pi; pupu daemon stays on 438048f2): T on an SPL pane hides the limit text (OK/NEAR/OVER, stay ≤, limit), the Shift+L status-text row is gone; no `ui.toml` had `[leq] status_text`; stray own layouts of FOH SPL, Spectrum 1 and Spectrum 2 cleared with `meas layout clear` |
