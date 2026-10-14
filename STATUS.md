@@ -11,7 +11,7 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   `docs/design/asio.md` §4c); tester guide and dev.13 MSI in `testing/windows/`. macOS: no
   audio interface yet; tester guide and dev.13 disk image in `testing/macos/`.
 - CI on push is Linux only; macOS/Windows run before a release or on dispatch
-  (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 6d5a4275 on pupu,
+  (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 70655493 (PROTO 51) on pupu,
   ketunkolo and the Pi (`docs/rigs/pupu.md`, *Deploy log*). A session format change on deploy is restored
   with `ac2 session salvage`.
 - macOS: the direct Core Audio backend (`coreaudio`, the HAL through `cahal`: its own
@@ -19,11 +19,15 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   `docs/design/coreaudio.md` §11); exact on BlackHole in the all-OS CI run (`all_os=true`).
   Open on real hardware: the tester round (`testing/macos/`, Test 6: stated vs measured
   latency, replug, rate change, streams).
-- Newest features: a health meter in the top bar after the session line (daemon host CPU,
+- Newest features: drag a measurement-list row onto a pane (an edge drop splits, Shift-drop
+  compares on a transfer pane) and Ctrl+Z / Ctrl+Shift+Z undo pane edits (`docs/user-guide.md`
+  *Dragging a row onto a pane*, *Undo and redo*); T on an SPL pane takes the limit text
+  (OK / NEAR / OVER, stay ≤, limit), the 10 dB lines and the scale like a graph's grid; Ctrl+S
+  saves the session. A health meter in the top bar after the session line (daemon host CPU,
   this computer's with a remote daemon, ac2d's callback load, xruns, data rate, fps;
   `docs/user-guide.md`, the paragraph after the driver-change one; health in the keepalive,
-  `docs/protocol.md`). Its ASIO and Core Audio callback timing and `sysinfo` are not yet
-  built in an all-OS CI run. Per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
+  `docs/protocol.md`). Green in the all-OS CI run on 00bae469.
+  Per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
   with a grey resolution marker where the estimate is coarser than the grid (`docs/user-guide.md`
   *Resolution and the resolution marker*); mic curve applied to sweeps; settable spectrum/RTA
   averaging; multi-resolution spectrum (683 ms windows at LF … 21 ms at HF, window changes

@@ -3,6 +3,10 @@
 Items moved here from `backlog.md` when they land, newest first, one line each with the
 commit; `git show <commit>` and the linked design notes have the rest.
 
+- T on an SPL pane takes the limit text, the band view's and Leq columns' 10 dB lines and scale, like a graph's chrome; the Shift+L status-text row it replaced is gone (47d7298a, f530d1f9).
+- Drag a list row onto a pane, edge drop splits, Shift-drop compares; Ctrl+Z / Ctrl+Shift+Z undo pane edits, 50 steps per app (903713e4).
+- Layout edits go only to the chosen row's own panes; a viewer keeps its panes (6630842e, 5c168ab3, 26508046).
+- Top bar: marquee when it overflows, fixed number slots, CPU remote / local wording, rate in bits; Ctrl+S saves; T's no-grid step takes the resolution marks (da0ce41a … 3784e9f3).
 - Top-bar health meter: host CPU (daemon's, and this computer's when remote), ac2d's callback load, xruns, data rate, fps; health in the keepalive (PROTO 50; 950d3504 … 6d5a4275).
 - Sub-sample sweep arrival, fractional delay tracking, `ac2 trace delay-diff`, fitted group delay (5505d703; `subsample-arrival-group-delay.md`).
 - Band Leq per 1/3-octave band (STM 545/2015): core, daemon, scene, CLI (86aca6e … ba731d1); FOH → place transfer without a cable, `ac2 rec import` (35f6ca4); band windows like Leq windows (ae54f65); one band per window, ranges expand to single bands, frame header cap 8 KiB (502f87e, eb74253; `band-leq.md`).
