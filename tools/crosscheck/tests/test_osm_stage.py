@@ -1,5 +1,6 @@
 """The OSM stage: its models and fixtures always; one small end-to-end case when the external
 osm-harness (OSM_HARNESS) and the ac2 binaries (AC2_BIN_DIR or PATH) are there."""
+import json
 import math
 import os
 import shutil
@@ -74,3 +75,23 @@ def test_identity_case_end_to_end(tmp_path):
     assert ids["osm.identity.columns_judged"]["status"] == "INFO" and ids["osm.identity.columns_judged"]["value"] > 100
     assert ids["osm.identity.masked_ac2_non_finite_columns"]["status"] == "INFO"
     assert (tmp_path / "run" / "report" / "report.md").exists()
+
+
+def test_mic_curve_for_osm_is_ac2s_curve_at_0db_1k(tmp_path, monkeypatch):
+    run = tmp_path / "runs" / "r1" / "cal"
+    run.mkdir(parents=True)
+    pts = [[100.0, 1.0], [1000.0, -0.5], [10000.0, 2.5]]
+    (run / "store_excerpt.json").write_text(json.dumps({"mic": "M", "curve_label": "90°", "curve_points": pts}))
+    monkeypatch.setenv("CROSSCHECK_RUNS", str(tmp_path / "runs"))
+    c = osm.load_mic_curve({"mic_curve": "r1/cal/store_excerpt.json"})
+    assert (c["mic"], c["label"], c["points"]) == ("M", "90°", pts)
+    p = osm.write_osm_cal_file(c["points"], tmp_path / "osm.txt")
+    rows = [list(map(float, ln.split("\t"))) for ln in p.read_text().splitlines()]
+    assert [r[1] for r in rows] == pytest.approx([1.5, 0.0, 3.0])
+    # OSM's gain divided out equals ac2's correction where the two interpolations meet (the rows)
+    assert dsp.mic_correction_db(pts, np.array([100.0, 10000.0])) == pytest.approx([-1.5, -3.0])
+    assert osm.curve_interp_gap_db(pts, np.array([100.0, 1000.0, 10000.0])) == pytest.approx(0.0)
+    assert osm.curve_interp_gap_db(pts, np.array([316.0])) > 0.1
+    (run / "store_excerpt.json").write_text(json.dumps({"mic": "M", "curve_label": None, "curve_points": None}))
+    with pytest.raises(RuntimeError):
+        osm.load_mic_curve({"mic_curve": "r1/cal/store_excerpt.json"})

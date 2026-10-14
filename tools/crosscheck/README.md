@@ -535,6 +535,17 @@ closed form holds at every frequency:
 part where the reference plays is cut out, and only ac2 vs OSM is compared. A missing file is
 noted and skipped.
 
+A speaker take's `mic_curve` names its run's `cal/store_excerpt.json`, the curve ac2 had active
+on the mic input. Both analysers measure with it, as each one's user would:
+- **ac2**: `ac2 cal curve import … --input 1` in the private daemon, so its TF carries the
+  curve in its columns (checked from the export's `mic` line).
+- **OSM**: `osm-harness --calibration`, OSM's Measurement calibration, with the curve shifted
+  to 0 dB at 1 kHz (where ac2 defines sensitivity; the file REW gets).
+
+The calibrated TFs are compared as they are; nothing is taken out. OSM reads the file linearly
+in Hz and ac2 linearly in log f, so their difference on OSM's bins is an INFO row. Synthetic
+cases are uncalibrated.
+
 **Matched settings** (`[settings]`, recorded per case in the report):
 - **OSM**: FFT 2^16, Hann, FIFO 16 ticks.
 - **ac2 spectrum**: `--fft 65536samples --window hann`, with a FIFO of the same span of audio:

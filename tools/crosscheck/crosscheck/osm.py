@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import dsp, osm_fixtures, wav
+from . import dsp, model, osm_fixtures, wav
 from .ac2 import Ac2, Ac2Error
 from .analyse import TOLERANCES, Check, _tol, judge
 from .formats import read_ac2_csv
@@ -77,10 +77,56 @@ def run_harness(harness: Path, wav_path: Path, out: Path, s: dict) -> dict:
             "--averageType", "fifo", "--average", str(s["osm_average"]), "--out", str(out)]
     if s.get("osm_delay"):
         argv += ["--delay", str(int(s["osm_delay"]))]
+    if s.get("osm_calibration"):
+        argv += ["--calibration", str(s["osm_calibration"])]
     p = subprocess.run(argv, capture_output=True, text=True, timeout=600)
     if p.returncode != 0:
         raise RuntimeError(f"osm-harness exit {p.returncode}: {p.stderr.strip()[-500:]}")
     return json.loads(out.read_text())
+
+
+def load_mic_curve(rc: dict) -> dict:
+    """A recording's `mic_curve`: the store excerpt (`<run>/cal/store_excerpt.json`) of the run
+    that recorded it, i.e. the curve ac2 had active on the mic input."""
+    src = runs_dir() / os.path.expanduser(rc["mic_curve"])
+    ex = json.loads(src.read_text())
+    if not ex.get("curve_points"):
+        raise RuntimeError(f"{src}: no active curve")
+    return {"source": str(src), "mic": ex["mic"], "label": ex.get("curve_label") or "curve",
+            "points": [[float(f), float(v)] for f, v in ex["curve_points"]]}
+
+
+def write_osm_cal_file(points, path: Path) -> Path:
+    """OSM's Measurement calibration divides by the file's gain as written; ac2 takes its curve
+    as 0 dB at 1 kHz (the sensitivity is defined there), so OSM gets the curve shifted the
+    same way (the file REW gets)."""
+    from .stages import write_rew_cal_file
+    write_rew_cal_file(points, path)
+    return path
+
+
+def curve_interp_gap_db(points, f: np.ndarray) -> float:
+    """Largest difference between ac2's reading of the curve (linear in log f) and OSM's
+    (linear in Hz between rows, held flat outside them) on OSM's bins: how far the two can
+    differ from the file alone."""
+    c = np.asarray(points, float)
+    f = f[(f >= c[0, 0]) & (f <= c[-1, 0])]
+    if not len(f):
+        return 0.0
+    return float(np.max(np.abs(np.interp(np.log(f), np.log(c[:, 0]), c[:, 1]) - np.interp(f, c[:, 0], c[:, 1]))))
+
+
+def ac2_use_curve(ac2: Ac2, d: Path, curve: dict | None, active: bool) -> bool:
+    """Puts the recording's mic curve on input 1 (the meas column) of the private daemon, or
+    turns a previous one off; returns whether a curve is now active."""
+    if curve is None:
+        if active:
+            ac2.run("cal", "use", 1, "off")
+        return False
+    pts = d / "mic_curve_ac2.txt"
+    pts.write_text("".join(f"{f:.3f}\t{v:.3f}\n" for f, v in curve["points"]))
+    ac2.run("cal", "curve", "import", str(pts), "--mic", curve["mic"], "--label", curve["label"], "--input", 1)
+    return True
 
 
 @contextmanager
@@ -340,6 +386,26 @@ class OsmAnalysis:
         self.checks.append(Check(id=f"osm.{case}.{_slug(title)}", group=f"osm {case}", path=case, title=title, value=value, unit=unit, tol=tol,
                                  status=st, meaning=meaning, detail=detail or {}))
         return st
+
+    # ------------------------------------------------------------ mic curve
+    def mic_curve(self, name: str, d: Path, curve: dict, osm: dict):
+        """Both analysers had the curve: ac2's TF must say it is in its columns, OSM's output
+        must name the file it loaded. Their comparison then needs no curve taken out."""
+        meta = read_ac2_csv(d / "tf.csv").meta
+        in_cols = model.mic_curve_in_columns(meta)
+        loaded = (osm.get("harness") or {}).get("calibration")
+        self.add(name, "Mic curve in ac2's TF columns", in_cols, "", None,
+                 f"ac2's export: {meta.get('mic', '—')}", status="PASS" if in_cols else "FAIL")
+        self.add(name, "Mic curve loaded by OSM", bool(loaded), "", None,
+                 f"osm-harness --calibration {loaded or '— (not loaded)'}", status="PASS" if loaded else "FAIL")
+        f = np.array([r[0] for r in osm["ftdata"]], float)
+        gap = curve_interp_gap_db(curve["points"], f[f > 0])
+        self.add(name, "Mic curve: interpolation difference", gap, "dB", None,
+                 "max |ac2's log-f reading − OSM's linear-Hz reading| of the same file on OSM's bins",
+                 status="INFO")
+        self.notes.append(f"{name}: mic curve {curve['mic']} {curve['label']} ({len(curve['points'])} points) from "
+                          f"{curve['source']}; ac2: in 1's curve, OSM: Measurement calibration "
+                          f"{Path(loaded).name if loaded else '—'} (0 dB at 1 kHz)")
 
     # ------------------------------------------------------------ one TF case
     def tf_case(self, name: str, d: Path, x: np.ndarray, osm: dict, ac2info: dict, case: osm_fixtures.Case | None,
@@ -703,11 +769,22 @@ def run_stage(out: Path, cfg_path: Path | None = None, tolerances: dict | None =
                 continue
             d = out / "osm" / rc["name"]
             d.mkdir(parents=True, exist_ok=True)
+            s = dict(base)
+            if rc.get("mic_curve"):
+                try:
+                    s["mic_curve"] = load_mic_curve(rc)
+                except (OSError, ValueError, KeyError, RuntimeError) as e:
+                    an.notes.append(f"recording {rc['name']}: mic curve {rc['mic_curve']}: {e}; skipped")
+                    continue
+                s["osm_calibration"] = str(write_osm_cal_file(s["mic_curve"]["points"], d / "mic_curve_osm.txt"))
             cut_recording(src, list(rc.get("columns", [0, 1])), d / "pair.wav")
-            jobs.append((rc["name"], d, None, dict(base), bool(rc.get("align"))))
+            jobs.append((rc["name"], d, None, s, bool(rc.get("align"))))
+        curve_on = False
         for name, d, case, s, align in jobs:
             try:
                 fs, x = wav.read(d / "pair.wav")
+                curve = s.get("mic_curve")
+                curve_on = ac2_use_curve(ac2, d, curve, curve_on)
                 ac2info = run_ac2(ac2, recdir, name, d / "pair.wav", len(x), s, d, align)
                 if align:
                     # OSM's operator sets OSM's own finder result (whole samples) as its delay
@@ -715,11 +792,15 @@ def run_stage(out: Path, cfg_path: Path | None = None, tolerances: dict | None =
                     s["osm_delay"] = int(raw.get("estimated") or 0)
                 osm = run_harness(harness, d / "pair.wav", d / "osm.json", s)
                 manifest["osm_version"] = manifest["osm_version"] or osm.get("version")
+                if curve is not None:
+                    an.mic_curve(name, d, curve, osm)
                 an.rows["settings"].append([
                     name,
                     f"FFT{s['fft']} {s['window']}, FIFO {s['osm_average']} ticks (hop {osm['harness']['hop']})"
-                    + (f", --delay {s['osm_delay']} (its finder)" if s.get("osm_delay") else ""),
-                    f"MTW, --blocks {s['ac2_tf_blocks']}" + (", its finder's delay inserted" if align else ""),
+                    + (f", --delay {s['osm_delay']} (its finder)" if s.get("osm_delay") else "")
+                    + (f", --calibration {Path(s['osm_calibration']).name}" if s.get("osm_calibration") else ""),
+                    f"MTW, --blocks {s['ac2_tf_blocks']}" + (", its finder's delay inserted" if align else "")
+                    + (f", in 1 curve {curve['mic']} {curve['label']}" if curve else ""),
                     f"--fft {2 ** int(s['fft'])}samples --window {s['window']} --average fifo:{ac2info['spectrum_fifo']}",
                     f"{fs:g}"])
                 if case is None or case.kind == "tf":

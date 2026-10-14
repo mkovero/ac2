@@ -29,6 +29,10 @@ run = ["identity", "biquad", "delay48", "delay10_5", "polarity", "snr20", "snr10
 # as an operator of either would. A missing file is skipped with a note. A relative `wav` is
 # under the runs directory rig-run.sh fetches into: $CROSSCHECK_RUNS, else
 # /work/ac2-crosscheck/runs when it exists, else runs/ here.
+# `mic_curve` (a speaker take): that run's cal/store_excerpt.json, the curve ac2 had active on
+# the mic input. ac2 gets it on in 1 (its TF carries it in the columns), OSM as its Measurement
+# calibration shifted to 0 dB at 1 kHz, as an OSM user would load the mic's file; the two
+# calibrated TFs are compared as they are. Unreadable: the take is skipped with a note.
 [[recordings]]
 name = "xone-rig"
 wav = "20261008T213854Z/xone/ac2_tf/rec.wav"
@@ -38,4 +42,5 @@ align = false
 name = "genelec-rig"
 wav = "20261009T232923Z/genelec/ac2_tf/rec.wav"
 columns = [0, 1]
+mic_curve = "20261009T232923Z/cal/store_excerpt.json"
 align = true
