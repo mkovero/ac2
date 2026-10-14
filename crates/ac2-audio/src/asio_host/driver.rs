@@ -11,13 +11,13 @@ use std::ffi::{c_long, c_void};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use azo::Host;
 use azo::driver::{CallbackHandle, Driver, Metadata, Proxy};
 use azo::dto::{ChannelId, Granularity};
 use azo::future::{CanReportOverload, GetInternalBufferSamples};
 use azo::sys::{
     Bool, Callbacks, InternalBufferInfo, MessageSelector, SampleRate, Time, TimeInfoFlags,
 };
-use azo::utils::Host;
 
 use super::backend::{AsioHost, DriverSource};
 use super::engine::{RtDriver, Slot, TimeInfo, answer};
@@ -336,7 +336,7 @@ impl DriverSource for AzoSource {
             .ok_or_else(|| super::open::not_found(&crate::DeviceId(name.into())))?;
         let proxy = self
             .host()?
-            .create_driver(meta.clsid)
+            .create_driver(&meta.clsid)
             .map_err(|e| backend_err(Operation::Open, format!("{name}: {e}")))?;
         Ok(Arc::new(AzoDriver { proxy }))
     }

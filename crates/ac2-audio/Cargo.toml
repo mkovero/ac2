@@ -25,10 +25,12 @@ jack = "0.13"
 log = "0.4"
 
 # Windows: ASIO is the only backend. ASIO drivers over COM directly, without the Steinberg
-# SDK, through ac2's fork of azo (MIT), pinned: a named apartment thread, a callback-side handle for
-# getSamplePosition/outputReady, and names that fill their buffer taken whole.
+# SDK, through ac2's fork of azo 0.5.1 (MIT), pinned: a named apartment thread, a callback-side
+# handle for getSamplePosition/outputReady, drivers created with their CLSID as the IID and held
+# in Rc across re-entrant calls, names that fill their buffer taken whole (with room for a driver
+# that overruns it), and clock sources in one call with names cut at NUL.
 [target.'cfg(windows)'.dependencies]
-azo = { git = "https://github.com/mkovero/azo", rev = "8ccc197966df0528db38c911655c89d1bd96d1c8" }
+azo = { git = "https://github.com/mkovero/azo", rev = "d6192431409e5c1c702111e12c860261421d1760" }
 # Millisecond timer resolution and MMCSS registration (src/timer.rs).
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Media", "Win32_System_Threading"] }
 
