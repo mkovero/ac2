@@ -1265,11 +1265,21 @@ shown only where it is at least 6 dB above the noise in its window; elsewhere it
 `< −72.0 dB` (`< 0.0251 %`). Lower the floor with repeats or a longer sweep, not with more
 level than the speaker should take.
 
+Behind the measurement's orders, **dotted and faint** in each order's colour, are the
+reference input's own (*reference H2* … in the legend's *reference* mark, the cursor readout
+and `ac2 ir`): the loopback's distortion against the ideal sweep, drawn where it is valid.
+It is the converters' and the path's share. Where an order reads within 6 dB of the
+reference's own, a note along the bottom of the plot says so (*H2 within 6 dB of reference
+H2 at 12 points, 100 Hz – 1.00 kHz*): there the system's harmonic cannot be told from the
+interface's. **E** hides the reference's lines in the focused pane (and shows them again);
+the note stays.
+
 | Key | Does |
 |---|---|
 | the **dB \| %** toggle in the title (or Settings › Display › Distortion in) | distortion in dB re fundamental or percent (log axis), readouts included |
 | **G** / **Shift+G** | response & distortion → **impulse response** (harmonics' impulses marked) linear → log → ETC → **room parameters** table alone, as large as it fits (read across a room; **W** maximises) → back |
 | **Shift+I** | straight to the impulse response and back |
+| **E** | the reference input's own harmonics shown / hidden in this pane |
 | **V** / **Shift+V** | step through stored sweeps, selecting each |
 
 ### Low-frequency harmonics (LF harmonics: fine)
@@ -2381,6 +2391,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 | `Shift+I` | Sweep pane: impulse response (again: response & distortion) | `sweep_ir` |
+| `E` | Distortion: the reference input's own harmonics shown / hidden | `reference_harmonics` |
 
 #### Command palette only (`Ctrl+K`)
 
@@ -2466,7 +2477,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Spectrum / RTA | `S` start/stop · `P` peak hold · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next · `Q` close pane · `W` maximise · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
-| Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `G/Shift+G` view · `W` maximise · `Q` close pane · `H` all keys |
+| Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
 
 <!-- keymap:end -->
 

@@ -163,6 +163,7 @@ mod tests {
                 "Shift+S new sweep",
                 "V next sweep",
                 "G/Shift+G view",
+                "E reference",
                 "W maximise",
                 "Q close pane",
                 "H all keys"

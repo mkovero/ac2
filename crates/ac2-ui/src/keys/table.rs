@@ -237,6 +237,8 @@ pub fn defaults() -> Vec<Binding> {
         // Plain L types the stimulus level; Shift+L is the Leq windows.
         (C::LeqWindows, S::Global, sh(K::L)),
         (C::SweepIr, S::Distortion, sh(K::I)),
+        // E, as the transfer pane's phase reference: the reference input's own harmonics.
+        (C::ReferenceHarmonics, S::Distortion, k(K::E)),
     ];
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
     v.into_iter()
@@ -334,6 +336,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::SweepNew, "new sweep", 90),
                     hint(C::NextTrace, "next sweep", 80),
                     hint(C::NextView, "view", 75),
+                    hint(C::ReferenceHarmonics, "reference", 60),
                     hint(C::MaximizePane, "maximise", 50),
                     hint(C::ClosePane, "close pane", 40),
                 ]

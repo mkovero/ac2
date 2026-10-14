@@ -291,6 +291,32 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     t.key("Shift+I");
     assert_eq!(sweep(&t), SweepMode::Response);
 
+    // E hides the reference input's own harmonics in this pane, and shows them again; the
+    // layout keeps the choice.
+    let reference = |t: &T| t.st.kind_modes(PaneKind::Distortion).sweep_reference;
+    let pane = t.st.layout.focus;
+    assert!(reference(&t), "shown by default");
+    assert!(t.st.view_for(pane).distortion.reference);
+    let r = t.key("E");
+    assert!(r.is_empty(), "display only: {r:?}");
+    assert!(!reference(&t));
+    assert!(!t.st.view_for(pane).distortion.reference);
+    assert!(
+        t.last_toast().ends_with(": reference harmonics hidden"),
+        "{}",
+        t.last_toast()
+    );
+    let prefs = t.st.layout_prefs().panes.expect("a layout");
+    assert!(
+        prefs
+            .views
+            .iter()
+            .any(|v| v.kind == PaneKind::Distortion && !v.modes.sweep_reference)
+    );
+    t.key("E");
+    assert!(reference(&t));
+    assert!(t.last_toast().ends_with(": reference harmonics shown"));
+
     // The dialog turned the focused transfer pane into the sweep pane; its list turns it
     // back.
     t.show(PaneKind::Transfer);

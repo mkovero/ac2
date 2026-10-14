@@ -673,3 +673,130 @@ fn unresolved_ranges_mark_both_panes() {
     assert!(off.unresolved_response.is_empty() && off.unresolved_harmonics.is_empty());
     assert!(!off.cursor.unwrap().freq.contains("coarser"));
 }
+
+/// `data()` with the loopback's own H2 4 dB under the measured −40 dB up to 1 kHz and its
+/// own H3 valid at −90 dB.
+fn with_reference() -> TraceData {
+    let mut d = data();
+    let f = column_frequencies(&grid());
+    let curve = |level: f32, floor: f32, top: f64| DistortionCurve {
+        level_db: f
+            .iter()
+            .map(|x| if *x <= top { level } else { f32::NAN })
+            .collect(),
+        floor_db: f
+            .iter()
+            .map(|x| if *x <= top { floor } else { f32::NAN })
+            .collect(),
+    };
+    d.sweep.as_mut().unwrap().reference_harmonics = Some(vec![
+        HarmonicCurve {
+            order: 2,
+            curve: curve(-44.0, -90.0, 1000.0),
+        },
+        HarmonicCurve {
+            order: 3,
+            curve: curve(-90.0, -110.0, 1333.0),
+        },
+    ]);
+    d
+}
+
+#[test]
+fn the_references_own_orders_are_drawn_dotted_and_hide() {
+    let d = with_reference();
+    let f = column_frequencies(&grid());
+    let mut view = ViewState {
+        cursor_hz: Some(500.0),
+        ..ViewState::default()
+    };
+    let scene = |view: &ViewState| {
+        distortion_scene(
+            Some(SweepView {
+                data: &d,
+                freqs: &f,
+                color: Color::from_rgba8([1, 2, 3, 255]),
+            }),
+            &status(),
+            view,
+            &Theme::dark(),
+            SIZE,
+        )
+    };
+    let sc = scene(&view);
+    let names: Vec<&str> = sc.legend.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["H2", "H3", "THD", "reference", "< floor", "noise"]);
+    assert_eq!(sc.legend[3].mark, LegendMark::Dotted);
+    // Each reference order dotted, faint, in its order's colour, at its own level.
+    let at = |db: f64| sc.y_axis.mapping.to_px(db);
+    let on = |p: &Polyline, y: f32| p.points.iter().all(|q| (q[1] - y).abs() < 0.01);
+    let data_layer = &sc.scene.layers[1];
+    for (order, db) in [(2u8, -44.0), (3, -90.0)] {
+        let r = data_layer
+            .polylines
+            .iter()
+            .find(|p| p.clip == Some(sc.plot) && on(p, at(db)))
+            .unwrap_or_else(|| panic!("reference H{order}"));
+        assert_eq!(
+            r.stroke.color,
+            order_color(&Theme::dark(), order).with_alpha(0.45)
+        );
+        assert!(r.stroke.dash.is_some_and(|d| d.on < 2.0), "dotted");
+    }
+    let cur = sc.cursor.as_ref().expect("cursor");
+    let row = |n: &str| cur.rows.iter().find(|r| r.0 == n).map(|r| r.1.clone());
+    assert_eq!(row("reference H2").as_deref(), Some("−44.0 dB"));
+    assert_eq!(row("reference H3").as_deref(), Some("−90.0 dB"));
+    // H2 within 6 dB of the loopback's own: the note, in the pane.
+    assert_eq!(sc.near_reference.len(), 1);
+    assert!(
+        sc.near_reference[0].starts_with("H2 within 6 dB of reference H2 at "),
+        "{}",
+        sc.near_reference[0]
+    );
+    let texts: Vec<&str> = sc.scene.layers[2]
+        .labels
+        .iter()
+        .map(|l| l.text.as_str())
+        .collect();
+    assert!(texts.contains(&sc.near_reference[0].as_str()), "{texts:?}");
+
+    // Hidden: no lines, no legend mark, no readout; the note stays (it is about the
+    // measurement).
+    view.distortion.reference = false;
+    let hidden = scene(&view);
+    let names: Vec<&str> = hidden.legend.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["H2", "H3", "THD", "< floor", "noise"]);
+    let in_plot = |sc: &DistortionScene| {
+        sc.scene.layers[1]
+            .polylines
+            .iter()
+            .filter(|p| p.clip == Some(sc.plot))
+            .count()
+    };
+    assert_eq!(in_plot(&sc), in_plot(&hidden) + 2);
+    let cur = hidden.cursor.as_ref().expect("cursor");
+    assert!(!cur.rows.iter().any(|r| r.0.starts_with("reference")));
+    assert_eq!(hidden.near_reference, sc.near_reference);
+    assert_eq!(reference_toast(false), "reference harmonics hidden");
+    assert_eq!(reference_toast(true), "reference harmonics shown");
+}
+
+#[test]
+fn a_sweep_without_the_references_own_orders_draws_no_reference() {
+    let d = data();
+    let f = column_frequencies(&grid());
+    let sc = distortion_scene(
+        Some(SweepView {
+            data: &d,
+            freqs: &f,
+            color: Color::from_rgba8([1, 2, 3, 255]),
+        }),
+        &status(),
+        &ViewState::default(),
+        &Theme::dark(),
+        SIZE,
+    );
+    assert!(!sc.legend.iter().any(|e| e.name == REFERENCE));
+    assert!(sc.near_reference.is_empty());
+}

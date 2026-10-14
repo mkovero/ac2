@@ -239,6 +239,8 @@ pub enum LegendMark {
     Dashed,
     /// A shaded sample: under the lowest order's floor.
     Shade,
+    /// A dotted sample: the reference input's own orders, each in its order's colour.
+    Dotted,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -252,13 +254,24 @@ pub struct LegendEntry {
 pub const BELOW_FLOOR: &str = "< floor";
 /// Legend name of the shading under every order's floor.
 pub const NOISE: &str = "noise";
+/// Legend name of the dotted lines of the reference input's own orders: each is
+/// [`reference_order_name`] in the cursor readout and the notes.
+pub const REFERENCE: &str = "reference";
+
+/// What showing or hiding the reference input's own orders says: `reference harmonics
+/// hidden`.
+pub fn reference_toast(shown: bool) -> String {
+    let state = if shown { "shown" } else { "hidden" };
+    format!("{REFERENCE} harmonics {state}")
+}
 
 /// Cursor readout of the distortion view.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DistortionCursor {
     pub freq_hz: f64,
     pub freq: String,
-    /// `(name, value)`: the fundamental, every order, THD.
+    /// `(name, value)`: the fundamental, every order, THD, then the reference's own orders
+    /// when drawn.
     pub rows: Vec<(String, String)>,
 }
 
@@ -272,7 +285,8 @@ pub struct DistortionScene {
     pub x_axis: Axis,
     pub y_fundamental: Axis,
     pub y_axis: Axis,
-    /// The orders (each name in its colour), THD, then the two floor marks.
+    /// The orders (each name in its colour), THD, the reference's dotted mark when its
+    /// orders are drawn, then the two floor marks.
     pub legend: Vec<LegendEntry>,
     /// `Main L sweep · arrival 3.32 ms · 2 × 3.10 s · window 8 + 87 ms`.
     pub info: String,
@@ -280,6 +294,10 @@ pub struct DistortionScene {
     /// nothing does).
     pub caption: String,
     pub cursor: Option<DistortionCursor>,
+    /// Where an order reads within [`REFERENCE_BOUND_DB`] of the reference's own
+    /// ([`near_reference_text`]), one line each, along the bottom of the distortion plot;
+    /// shown whether or not the reference's lines are.
+    pub near_reference: Vec<String>,
     /// Ranges the sweep's response does not resolve at its grid (shaded in the fundamental's
     /// pane) and those its harmonics do not (shaded in the distortion pane); empty when the
     /// marker is off or the trace does not say.
@@ -389,6 +407,12 @@ fn draw_legend(
                 stroke: floor_stroke(e.color, theme),
                 clip: None,
             }),
+            LegendMark::Dotted => c.overlay.polylines.push(Polyline {
+                points: vec![[x, mid], [x + SAMPLE_W, mid]],
+                alpha: vec![],
+                stroke: reference_stroke(e.color, theme),
+                clip: None,
+            }),
             LegendMark::Shade => c.overlay.rects.push(FillRect {
                 rect: Rect::new(x, mid - 4.0, SAMPLE_W, 8.0),
                 color: noise_color(theme),
@@ -414,6 +438,20 @@ fn floor_stroke(color: Color, theme: &Theme) -> Stroke {
         width: theme.trace_width * 0.75,
         dash: Some(Dash {
             on: 4.0,
+            off: 3.0,
+            offset: 0.0,
+        }),
+    }
+}
+
+/// The reference input's own order: dotted and fainter than a floor line, so it reads as
+/// context behind the measurement rather than as one.
+fn reference_stroke(color: Color, theme: &Theme) -> Stroke {
+    Stroke {
+        color: color.with_alpha(0.45),
+        width: theme.trace_width * 0.75,
+        dash: Some(Dash {
+            on: 1.5,
             off: 3.0,
             offset: 0.0,
         }),
@@ -564,6 +602,24 @@ pub fn distortion_scene(
     let mut legend = Vec::new();
     let mut info = String::new();
     let mut caption = String::new();
+    let near_reference: Vec<String> = sweep
+        .map(|(t, s)| summary(s, t.freqs).near_reference)
+        .unwrap_or_default()
+        .iter()
+        .map(near_reference_text)
+        .collect();
+    // The reference input's own orders, those the measurement has, when shown.
+    let reference: Vec<&ac2_proto::model::HarmonicCurve> = sweep
+        .filter(|_| view.distortion.reference)
+        .and_then(|(_, s)| {
+            let r = s.reference_harmonics.as_deref()?;
+            Some(
+                r.iter()
+                    .filter(|r| s.harmonics.iter().any(|h| h.order == r.order))
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
     let note = match sweep {
         None => Some("no sweep result".to_string()),
         Some(_) => None,
@@ -609,6 +665,26 @@ pub fn distortion_scene(
             color: noise_color(theme),
             clip: Some(plot),
         });
+        // Behind the measurement's own: only where the reference's order is valid (its
+        // floor would be noise drawn as context).
+        for r in &reference {
+            let ys: Vec<f32> = cols
+                .clone()
+                .map(|i| match reading(&r.curve, i, margin) {
+                    Reading::Level(v) => ym.to_px(y_value(v, unit)),
+                    _ => f32::NAN,
+                })
+                .collect();
+            let points = runs(&xs, &ys);
+            if !points.is_empty() {
+                c.data.polylines.push(Polyline {
+                    points,
+                    alpha: vec![],
+                    stroke: reference_stroke(order_color(theme, r.order), theme),
+                    clip: Some(plot),
+                });
+            }
+        }
         let curves: Vec<(String, u8, &DistortionCurve)> = s
             .harmonics
             .iter()
@@ -663,6 +739,13 @@ pub fn distortion_scene(
                 name: name.clone(),
                 color,
                 mark: LegendMark::Name,
+            });
+        }
+        if !reference.is_empty() {
+            legend.push(LegendEntry {
+                name: REFERENCE.to_string(),
+                color: theme.text_dim,
+                mark: LegendMark::Dotted,
             });
         }
         legend.push(LegendEntry {
@@ -736,6 +819,12 @@ pub fn distortion_scene(
             "THD".to_string(),
             reading_text(reading(&s.thd, i, margin), unit),
         ));
+        for r in &reference {
+            rows.push((
+                reference_order_name(r.order),
+                reading_text(reading(&r.curve, i, margin), unit),
+            ));
+        }
         // The harmonics' note first: the plate reads mostly harmonics.
         let freq = match crate::unresolved::at(&unresolved_harmonics, f)
             .or_else(|| crate::unresolved::at(&unresolved_response, f))
@@ -763,6 +852,17 @@ pub fn distortion_scene(
             theme.text,
         ));
     }
+    // Bottom up from the plot's lower edge, clear of the frequency labels under it.
+    let row_h = legend_row_h(theme);
+    for (k, line) in near_reference.iter().rev().enumerate() {
+        c.overlay.labels.push(label(
+            line.clone(),
+            [plot.x + 6.0, plot.bottom() - 4.0 - row_h * k as f32],
+            anchor(HAlign::Left, VAlign::Bottom),
+            theme.small_font_size,
+            theme.text_dim,
+        ));
+    }
     if let Some(n) = &note {
         c.overlay.labels.push(label(
             n.clone(),
@@ -783,6 +883,7 @@ pub fn distortion_scene(
         info,
         caption,
         cursor,
+        near_reference,
         unresolved_response,
         unresolved_harmonics,
         note,

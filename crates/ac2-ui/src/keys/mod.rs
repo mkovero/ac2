@@ -302,4 +302,5 @@ commands! {
 
     DistortionUnit => "distortion_unit", "Distortion in dB re fundamental / percent", [Distortion];
     SweepIr => "sweep_ir", "Sweep pane: impulse response (again: response & distortion)", [Distortion];
+    ReferenceHarmonics => "reference_harmonics", "Distortion: the reference input's own harmonics shown / hidden", [Distortion];
 }

@@ -48,6 +48,7 @@ impl AppState {
             _ => modes.ir(IrPane::Live),
         };
         v.chrome = modes.chrome;
+        v.distortion.reference = modes.sweep_reference;
         // The transfer scene lays out the plots it is asked for: one alone fills the pane.
         // The coherence rides on the magnitude view only when placed over it.
         let over =

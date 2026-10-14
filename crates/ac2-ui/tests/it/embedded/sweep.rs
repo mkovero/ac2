@@ -118,6 +118,17 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
         .parse()?;
     assert!((h2 + 40.0).abs() < 1.0, "{db:?}");
     assert!(value(&db, "THD").ends_with(" dB"), "{db:?}");
+    // The reference input's own orders read beside the measurement's, as `ac2 ir` names
+    // them; E hides them in the pane (and their readouts), E again shows them.
+    assert!(!value(&db, "reference H2").is_empty(), "{db:?}");
+    d.key("E");
+    let hidden = rows(&d)?;
+    assert!(
+        !hidden.iter().any(|r| r.0.starts_with("reference")),
+        "{hidden:?}"
+    );
+    d.key("E");
+    assert_eq!(rows(&d)?, db);
     // The pane's dB | % toggle.
     d.send(Msg::DistortionUnit(
         ac2_scene::view::DistortionUnit::Percent,

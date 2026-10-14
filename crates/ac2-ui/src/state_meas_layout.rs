@@ -566,6 +566,8 @@ fn ui_view(p: &wire::LayoutPane) -> View {
                 wire::SweepView::Etc => SweepMode::Ir(IrMode::Etc),
                 wire::SweepView::Room => SweepMode::Room,
             },
+            // Context, not part of what the measurement's layout shows: as a new pane.
+            sweep_reference: true,
             chrome: match p.chrome {
                 wire::PlotChrome::Full => PlotChrome::Full,
                 wire::PlotChrome::NoGrid => PlotChrome::NoGrid,

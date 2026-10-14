@@ -375,6 +375,16 @@ impl AppState {
                     _ => SweepMode::Ir(IrMode::Linear),
                 };
             }
+            C::ReferenceHarmonics => {
+                let title = self.layout.focused().title();
+                let m = self.modes_mut();
+                m.sweep_reference = !m.sweep_reference;
+                let shown = m.sweep_reference;
+                self.toast(format!(
+                    "{title}: {}",
+                    ac2_scene::distortion::reference_toast(shown)
+                ));
+            }
             C::MaximizePane => self.cycle_layout(),
             C::NextInTree => self.cycle_tree_row(1),
             C::PrevInTree => self.cycle_tree_row(-1),

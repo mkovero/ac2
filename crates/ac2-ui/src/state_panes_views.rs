@@ -98,6 +98,8 @@ pub struct PaneModes {
     pub spectrum: SpectrumMode,
     pub spl: SplMode,
     pub sweep: SweepMode,
+    /// The sweep's reference input's own harmonics behind the measurement's (E).
+    pub sweep_reference: bool,
     /// Grid, labels and cursor (T), whatever the pane shows.
     pub chrome: PlotChrome,
 }
@@ -109,6 +111,7 @@ impl Default for PaneModes {
             spectrum: SpectrumMode::Spectrum,
             spl: SplMode::MeterLeq,
             sweep: SweepMode::Response,
+            sweep_reference: true,
             chrome: PlotChrome::Full,
         }
     }

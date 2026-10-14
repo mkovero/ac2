@@ -75,6 +75,8 @@ struct PaneEntryFile {
     spectrum_view: SpectrumViewFile,
     #[serde(default)]
     sweep_view: SweepViewFile,
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    sweep_reference: bool,
     #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
     chrome: ChromeFile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,6 +116,7 @@ impl PaneEntryFile {
                 SweepMode::Ir(IrMode::Etc) => SweepViewFile::Etc,
                 SweepMode::Room => SweepViewFile::Room,
             },
+            sweep_reference: m.sweep_reference,
             chrome: ChromeFile::of(m.chrome),
             levels: PaneLevelsFile::of(&p.levels),
         }
@@ -151,6 +154,7 @@ impl PaneEntryFile {
                     SweepViewFile::Etc => SweepMode::Ir(IrMode::Etc),
                     SweepViewFile::Room => SweepMode::Room,
                 },
+                sweep_reference: self.sweep_reference,
                 chrome: self.chrome.chrome(),
             },
             levels: PaneLevelsFile::parse(self.levels.as_ref(), self.id),
@@ -189,6 +193,14 @@ fn spl_meter_leq() -> SplViewFile {
 
 fn unit_db() -> UnitFile {
     UnitFile::Db
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 /// The `[layout]` table if it parses, else none and a warning naming why.
