@@ -1,6 +1,6 @@
 # Coherence study: ac2 and OSM γ² against finite-average expectations
 
-Run: `python -m crosscheck coherence-study --seeds 8` (ac2 c0244e4 release, osm-harness OSM v1.5.2),
+Run: `python -m crosscheck coherence-study --seeds 8` (ac2 70655493 release, osm-harness OSM v1.5.2; run 2026-10-14),
 96 kHz white-noise fixtures, M = R + uncorrelated noise, 20 s each, 8 independent seeds per row
 (seeds paired across settings). Means over 1–20 kHz (ac2: its finite 48-ppo columns; OSM: its
 FFT bins, squared γ). Residual = observed mean − model; ± sem = seed sd/√8.
@@ -38,10 +38,10 @@ weighted-column model accounts for it.
 Findings:
 - ac2: observed mean agrees with its per-bin, Gxx-weighted column model in every row within
   ~1.4 sem (largest −0.0041 ± 0.0030 at 0 dB, A).
-- Against the true γ², ac2 now reads +0.048 at 0 dB SNR with --blocks 8 (was +0.012 with the
-  column-sum estimator, 0.5124 → 0.5478): a column no longer pools its bins into one larger
-  average, so its bias is the per-bin one (n ≈ 7.6, not 7.6–48) plus the weight's. In
-  exchange γ² no longer drops where the phase turns across a column or at coarse resolution.
+- Against the true γ², ac2 reads +0.048 at 0 dB SNR with --blocks 8: a column does not pool
+  its bins into one larger average, so its bias is the per-bin one (n ≈ 7.6, not 7.6–48) plus
+  the weight's. In exchange γ² does not drop where the phase turns across a column or at
+  coarse resolution.
 - OSM FFT14 (19.4): residuals within ~1.4 sem, model holds.
 - OSM FFT16 (5.4): residual consistently negative, −0.0026/−0.0032/−0.0060 at +3/0/−3 dB
   (3–5 sem); OSM behaves like ≈5.8 averages, not 5.4.
@@ -51,8 +51,7 @@ Open:
    harness/OSM accumulates its 21 ticks (first ticks partly empty? running-sum reset), or the
    Welch formula's triangular lag weighting vs OSM's actual sum. Current stage tolerance
    (coh_osm_model) still passes; the model is slightly pessimistic.
-2. ac2 sub-bands: all within 1.9 sem (largest 2.1–20 kHz at 0 dB, A: −0.0069, −1.9 sem); the
-   earlier column-sum study's 1.9-sem sub-band residual sat in the same row. Watch with more
+2. ac2 sub-bands: all within 1.9 sem (largest 2.1–20 kHz at 0 dB, A: −0.0069, −1.9 sem). Watch with more
    seeds; not established.
 3. The model is white-noise stationary (as ac2's own); coloured or non-stationary signals (rig
    takes) are not covered by this study.
