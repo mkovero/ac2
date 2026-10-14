@@ -293,8 +293,11 @@ import only with `applyCal`, the same switch as the mic cal, so every import tak
 `applyCal` and the mic curve is set only while the mic channel is imported. The meas import
 is then the path's response with the converters taken out, as a REW user measures it, and
 the analysis compares it alone as "REW offline", over one number: the interface's 1 kHz
-gain, which the cal file (0 dB at 1 kHz) leaves in and the reference input reads. A / B is
-unchanged (the cal divides out) and stays the reference-divided source "REW ÷ ref". A run
+gain, which the cal file (0 dB at 1 kHz) leaves in and the reference input reads. A / B stays
+the reference-divided source "REW ÷ ref", formed from a second pair of imports made without
+the cal: REW 5.40's A / B of two corrected imports reads the right magnitude but subtracts
+the cal's phase twice more (−49.5° at 20 Hz on the FF400, where the cal holds +24.7°),
+although the cal divides out of the quotient exactly. A run
 without the cal (`play.json` has no `soundcard_cal`) keeps "REW offline" = meas ÷ ref formed by the suite: REW's raw meas
 import carries the interface's LF roll-off (+11.5° phase, −0.13 dB mean at 20–100 Hz on the
 FF400).

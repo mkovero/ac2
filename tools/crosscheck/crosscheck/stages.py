@@ -444,7 +444,9 @@ def rew_import(rew, d: Path, stim_path: str, pname: str, speaker: bool, keep: bo
     fetches the three as `meas_*`, `ref_*` and `div_*`. Only the meas import gets the mic
     calibration (the mic channel); the quotient carries it from A. With a `soundcard_cal`
     both imports take it, as a REW user's measurement would: the meas import is then the
-    interface-corrected response, and the quotient is unchanged since the cal divides out.
+    interface-corrected response. The quotient is formed from a second pair imported without
+    it: REW 5.40's A / B of two soundcard-corrected imports subtracts the cal's phase twice
+    more (its magnitude is right), while in exact arithmetic the cal divides out.
     Every measurement made here is deleted again unless `keep`, by UUID (REW's index ids
     renumber on a delete). Writes and returns `rew_ids.json`: which REW measurements were used."""
     ids: dict = {"meas": None, "ref": None, "div": None, "kept": bool(keep), "soundcard_cal": soundcard_cal}
@@ -471,7 +473,17 @@ def rew_import(rew, d: Path, stim_path: str, pname: str, speaker: bool, keep: bo
         ids["ref"] = rid
         rew.put(f"/measurements/{rid}", {"title": f"xc {pname} ref"})
         rew.fetch(rid, d, "ref")
-        qid = rew.divide(mid, rid)
+        if soundcard_cal:
+            rew.set_output_cal("")
+            rew.set_input_cal_file(mic_cal_file)
+            dm = rew.import_response(stim_path, str((d / "rec_meas.wav").resolve()), 1, apply_cal=speaker)
+            made.append(dm)
+            dr = rew.import_response(stim_path, str((d / "rec_ref.wav").resolve()), 1, apply_cal=False)
+            made.append(dr)
+            ids["div_pair"] = {"meas": dm, "ref": dr, "soundcard_cal": None}
+            qid = rew.divide(dm, dr)
+        else:
+            qid = rew.divide(mid, rid)
         made.append(qid)
         ids["div"] = qid
         rew.put(f"/measurements/{qid}", {"title": f"xc {pname} meas / ref"})

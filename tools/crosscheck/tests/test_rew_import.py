@@ -144,13 +144,16 @@ def test_soundcard_cal_goes_on_every_import_and_the_curve_on_the_mic_only(tmp_pa
     _recordings(d)
     ids = stages.rew_import(r, d, "/stim.wav", "genelec", speaker=True, soundcard_cal="/sc.cal", mic_cal_file="/mic.txt")
     imports = [b for m, p, b in r.calls if p == "/import/sweep-recordings/response"]
-    assert [b["applyCal"] for b in imports] == [True, True]
-    assert r.imported_with == [("/mic.txt", "/sc.cal"), ("", "/sc.cal")]
+    # the corrected pair, then the pair A / B is formed from (no soundcard cal, curve on the mic)
+    assert [b["applyCal"] for b in imports] == [True, True, True, False]
+    assert r.imported_with == [("/mic.txt", "/sc.cal"), ("", "/sc.cal"), ("/mic.txt", ""), ("/mic.txt", "")]
+    assert set(ids["div_pair"]) == {"meas", "ref", "soundcard_cal"}
     assert r.input_cal["calDataAllInputs"]["calFilePath"] == "/mic.txt"  # back for later stages
     assert ids["soundcard_cal"] == "/sc.cal"
     d2 = tmp_path / "xone" / "rew"
     _recordings(d2)
     r.imported_with.clear()
     stages.rew_import(r, d2, "/stim.wav", "xone", speaker=False, soundcard_cal="/sc.cal", mic_cal_file="/mic.txt")
-    assert r.imported_with == [("", "/sc.cal"), ("", "/sc.cal")]
+    assert r.imported_with[:2] == [("", "/sc.cal"), ("", "/sc.cal")]
+    assert [sc for _, sc in r.imported_with[2:]] == ["", ""]
     assert r.restore(snap) == [] and r.output_cal["calData"]["calFilePath"] == ""
