@@ -94,7 +94,8 @@ class BandChecks:
                 m_all &= self.coh["ac2 TF"] >= 0.99
             # phase after removing any pure delay difference left between the two (every source is
             # on the absolute reference already): the delay itself is judged in the delay checks
-            rm = (f >= 1000) & (f <= 20000) & m_all if elec else (f >= 200) & (f <= 5000) & m_all
+            fit_lo, fit_hi = (1000, 20000) if elec else (200, 5000)
+            rm = (f >= fit_lo) & (f <= fit_hi) & m_all
             tau = dsp.delay_from_phase(f[rm], (Ha / Hb)[rm], 0, np.inf) if rm.sum() > 10 else 0.0
             ratio = Ha / Hb * np.exp(2j * np.pi * f * tau)
             # The nulls are the path's: found once on ac2's primary sweep, used for every pair.
@@ -164,7 +165,7 @@ class BandChecks:
                          title=f"{a} − {b}, {lo}–{hi} Hz, phase", value=max(abs(pmean), pspread), unit="°", tol=tp,
                          status=st_p,
                          meaning=f"phase difference after removing a pure delay difference of {tau*1e6:+.2f} µs "
-                                 f"(fitted 1–20 kHz); mean {pmean:+.3f}°, spread ±{pspread:.3f}°",
+                                 f"(fitted {fit_lo / 1000:g}–{fit_hi / 1000:g} kHz); mean {pmean:+.3f}°, spread ±{pspread:.3f}°",
                          detail={"mean": pmean, "spread": pspread, "n": int(m.sum()), "of": nall,
                                  "delay_removed_s": tau})
                 rows.append([f"{a} − {b}", f"{lo}–{hi}", f"{mean:+.3f} ± {spread:.3f}", f"{pmean:+.2f} ± {pspread:.2f}",
