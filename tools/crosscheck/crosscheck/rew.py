@@ -19,7 +19,20 @@ class Rew:
         self.api = api.rstrip("/")
         self.timeout = timeout
 
-    def _req(self, method: str, path: str, body=None):
+    def _req(self, method: str, path: str, body=None, busy_wait_s: float = 120.0):
+        """An import runs on after its measurement appears in the list; REW refuses arithmetic
+        or a delete until it ends ("… is running, it must complete before …"), so such a
+        refusal is retried until the import is done."""
+        t0 = time.monotonic()
+        while True:
+            try:
+                return self._req_once(method, path, body)
+            except RewError as e:
+                if "must complete before" not in str(e) or time.monotonic() - t0 > busy_wait_s:
+                    raise
+                time.sleep(0.5)
+
+    def _req_once(self, method: str, path: str, body=None):
         data = None if body is None else json.dumps(body).encode()
         r = urllib.request.Request(self.api + path, data=data, method=method,
                                    headers={"Content-Type": "application/json", "Accept": "application/json"})
