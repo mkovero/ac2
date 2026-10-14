@@ -62,9 +62,15 @@ class LevelChecks:
                 self.coh["ac2 TF"] = np.interp(np.log(f), np.log(b["freq_hz"][ok]), b["coherence"][ok],
                                                left=np.nan, right=np.nan)
         if p.rew and p.rew.meas_fr is not None:
-            if p.rew.ref_fr is not None:
+            if p.rew.ref_fr is not None and not p.rew.meas_alone:
                 Hr = p.rew.meas_fr.H / p.rew.ref_fr.H
                 src["REW offline"] = dsp.band_mean(p.rew.meas_fr.f, Hr, f, self.frac)
+            elif p.rew.ref_fr is not None:
+                # REW's soundcard cal is 0 dB at 1 kHz, so the interface's own gain stays in the
+                # meas import; the reference input reads that gain, one real number taken out
+                # so the comparison is of the corrected import's shape and phase alone
+                g = abs(dsp.band_mean(p.rew.ref_fr.f, p.rew.ref_fr.H, np.array([1000.0]), self.frac)[0])
+                src["REW offline"] = dsp.band_mean(p.rew.meas_fr.f, p.rew.meas_fr.H, f, self.frac) / g
             else:
                 src["REW offline"] = dsp.band_mean(p.rew.meas_fr.f, p.rew.meas_fr.H, f, self.frac)
         if p.rew_div is not None and p.rew_div.meas_fr is not None:

@@ -112,6 +112,9 @@ api = "http://localhost:4735"
 stimulus = "/home/mui/rew-dl/sweep96k.wav"   # REW-generated 10 Hz - 40 kHz, 512k, peak -50 dBFS, 96 kHz float
 stimulus_speaker = "/home/mui/rew-dl/sweep96k-20-20k.wav"  # 20 Hz - 20 kHz for the speaker (README); 10 Hz is refused
 stimulus_channel = 1
+# REW's loopback calibration of the FF400 (Preferences > Soundcard > Calibrate soundcard,
+# out 2 -> in 2, 512k at -10 dBFS, 96 kHz): every import takes it, as a REW user's would
+soundcard_cal = "/home/mui/rew-dl/ff400_loopback_cal-20261014.cal"
 keep_measurements = false                    # delete the suite's imports from REW afterwards
 
 [pipewire]

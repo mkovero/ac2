@@ -58,6 +58,9 @@ class RewSet:
     level_dbfs: float  # level the stimulus was played at (sine convention)
     meas_fr: formats.RewCurve | None = None
     ref_fr: formats.RewCurve | None = None  # None: a live measurement with the loopback as cal ref
+    # an offline import made with REW's soundcard cal: the meas import alone is the
+    # interface-corrected response, compared as is (ref_fr stays for the level checks)
+    meas_alone: bool = False
     meas_fr_spl: formats.RewCurve | None = None
     meas_ir: formats.RewIR | None = None
     ref_ir: formats.RewIR | None = None
@@ -236,7 +239,7 @@ def load_run(root: Path) -> RunData:
                 # imported with the cal file applied (speaker): its dBFS response carries the curve
                 meas_fr.mag = _remove_curve(meas_fr.mag, meas_fr.f, curve)
             p.rew = RewSet(label="REW offline import", level_dbfs=play.get("level_dbfs", np.nan),
-                           meas_fr=meas_fr,
+                           meas_fr=meas_fr, meas_alone=bool(play.get("soundcard_cal")),
                            ref_fr=_maybe(formats.read_rew_curve, rd / "ref_fr.json"),
                            meas_fr_spl=_maybe(formats.read_rew_curve, rd / "meas_fr_spl.json"),
                            meas_ir=_maybe(formats.read_rew_ir, rd / "meas_ir.json"),

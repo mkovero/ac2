@@ -16,6 +16,8 @@ class FakeRew(Rew):
         self.ms = [{"title": t, "uuid": str(uuid.uuid4())} for t in own]
         self.calls = []
         self.input_cal = {"calDataAllInputs": {"dBFSAt94dBSPL": -20.0, "fullScaleSineVrms": 1.0, "calFilePath": ""}}
+        self.output_cal = {"currentOutputSelection": "out", "calData": {"calFilePath": "", "sampleRate": {"value": 96000.0}}}
+        self.imported_with = []  # (input cal file, soundcard cal file) at each import
         self.result = {"processName": "", "message": "There is no process"}
         self.n = 0
 
@@ -30,6 +32,8 @@ class FakeRew(Rew):
         if path == "/measurements" and method == "GET":
             return {str(i + 1): m for i, m in enumerate(self.ms)}
         if path == "/import/sweep-recordings/response":
+            self.imported_with.append((self.input_cal["calDataAllInputs"]["calFilePath"],
+                                       self.output_cal["calData"]["calFilePath"]))
             self.ms.append({"title": body["path"].rsplit("/", 1)[-1][:-4], "uuid": str(uuid.uuid4())})
             return {}
         if path == "/measurements/process-measurements":
@@ -48,6 +52,11 @@ class FakeRew(Rew):
                 self.input_cal = json.loads(json.dumps(body))
                 return {}
             return json.loads(json.dumps(self.input_cal))
+        if path == "/audio/output-cal":
+            if method == "PUT":
+                self.output_cal = json.loads(json.dumps(body))
+                return {}
+            return json.loads(json.dumps(self.output_cal))
         if path == "/version":
             return {"message": "fake 0.9.8"}
         if path.startswith("/measurements/"):
@@ -126,3 +135,22 @@ def test_reimport_sets_the_runs_cal_and_restores(tmp_path):
     side = json.loads((run / rewimport.SIDECAR).read_text())
     assert side[-1]["stages"]["xone"]["rew_ids"]["div"]
     assert len(r.ms) == 2
+
+
+def test_soundcard_cal_goes_on_every_import_and_the_curve_on_the_mic_only(tmp_path):
+    r = FakeRew()
+    snap = r.snapshot()
+    d = tmp_path / "genelec" / "rew"
+    _recordings(d)
+    ids = stages.rew_import(r, d, "/stim.wav", "genelec", speaker=True, soundcard_cal="/sc.cal", mic_cal_file="/mic.txt")
+    imports = [b for m, p, b in r.calls if p == "/import/sweep-recordings/response"]
+    assert [b["applyCal"] for b in imports] == [True, True]
+    assert r.imported_with == [("/mic.txt", "/sc.cal"), ("", "/sc.cal")]
+    assert r.input_cal["calDataAllInputs"]["calFilePath"] == "/mic.txt"  # back for later stages
+    assert ids["soundcard_cal"] == "/sc.cal"
+    d2 = tmp_path / "xone" / "rew"
+    _recordings(d2)
+    r.imported_with.clear()
+    stages.rew_import(r, d2, "/stim.wav", "xone", speaker=False, soundcard_cal="/sc.cal", mic_cal_file="/mic.txt")
+    assert r.imported_with == [("", "/sc.cal"), ("", "/sc.cal")]
+    assert r.restore(snap) == [] and r.output_cal["calData"]["calFilePath"] == ""

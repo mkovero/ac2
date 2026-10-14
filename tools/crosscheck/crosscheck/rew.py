@@ -61,7 +61,8 @@ class Rew:
 
     def snapshot(self) -> dict:
         """Everything the suite may change, to put back afterwards."""
-        s = {"input_cal": self.get("/audio/input-cal"), "stimulus": self.get("/import/sweep-recordings/stimulus"),
+        s = {"input_cal": self.get("/audio/input-cal"), "output_cal": self.get("/audio/output-cal"),
+             "stimulus": self.get("/import/sweep-recordings/stimulus"),
              "spl": {}, "blocking": self.get("/application/blocking")}
         for m in ("1", "2", "3"):
             try:
@@ -77,6 +78,7 @@ class Rew:
     def restore(self, s: dict) -> list[str]:
         errs = []
         for what, fn in (("input-cal", lambda: self.put("/audio/input-cal", s["input_cal"])),
+                         ("output-cal", lambda: s.get("output_cal") and self.put("/audio/output-cal", s["output_cal"])),
                          ("stimulus", lambda: s.get("stimulus") and self.post("/import/sweep-recordings/stimulus", s["stimulus"])),
                          ("rta", lambda: s.get("rta") and self.put("/rta/configuration", s["rta"]))):
             try:
@@ -106,6 +108,28 @@ class Rew:
         got = (back or {}).get("calDataAllInputs") or {}
         if abs(got.get("dBFSAt94dBSPL", 1e9) - dbfs_at_94) > 1e-3 or abs(got.get("fullScaleSineVrms", 1e9) - fs_sine_vrms) > 1e-6:
             raise RewError(f"REW did not take the input calibration: {got}")
+        return back
+
+    def set_input_cal_file(self, cal_file: str) -> None:
+        """Only the mic curve, the levels kept: an import with `applyCal` takes the input cal
+        and the soundcard cal together, so a channel without a mic is imported with no curve."""
+        cur = self.get("/audio/input-cal") or {}
+        cur["separateCalFileForEachInput"] = False
+        cur["calDataAllInputs"] = {**(cur.get("calDataAllInputs") or {}), "calFilePath": cal_file}
+        self.put("/audio/input-cal", cur)
+        got = ((self.get("/audio/input-cal") or {}).get("calDataAllInputs") or {}).get("calFilePath", "")
+        if got != cal_file:
+            raise RewError(f"REW did not take the input cal file {cal_file!r}: {got!r}")
+
+    def set_output_cal(self, cal_file: str) -> dict:
+        """The soundcard cal file of the current output (REW's loopback calibration of the
+        interface); an import applies it with `applyCal` only."""
+        cur = self.get("/audio/output-cal") or {}
+        cur["calData"] = {**(cur.get("calData") or {}), "calFilePath": cal_file}
+        self.put("/audio/output-cal", cur)
+        back = self.get("/audio/output-cal") or {}
+        if (back.get("calData") or {}).get("calFilePath", "") != cal_file:
+            raise RewError(f"REW did not take the soundcard cal {cal_file!r}: {back}")
         return back
 
     # ---------------------------------------------------------------- import

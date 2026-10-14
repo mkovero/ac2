@@ -146,7 +146,9 @@ def write_rew_cal_file(points, path: Path) -> None:
     path.write_text("".join(f"{f:.3f}\t{v - at1k:.3f}\n" for f, v in c))
 
 
-def cal_mapping(ex: dict, cal_file: str | None) -> list[list[str]]:
+def cal_mapping(ex: dict, cal_file: str | None, soundcard_cal: str | None = None) -> list[list[str]]:
+    sc = [["interface", "meas ÷ ref (the reference input)", f"soundcard cal {soundcard_cal}",
+           "applyCal on every REW import: the meas import is interface-corrected, A / B unchanged"]] if soundcard_cal else []
     return [
         ["sensitivity", f"{ex['sensitivity_db']:.3f} dB SPL at 0 dBFS", f"dBFSAt94dBSPL {ex['rew_dbfs_at_94']:.3f}",
          "94 − sensitivity"],
@@ -156,8 +158,8 @@ def cal_mapping(ex: dict, cal_file: str | None) -> list[list[str]]:
         ["mic curve", f"{ex.get('curve_label')} ({len(ex.get('curve_points') or [])} points), 0 dB at 1 kHz",
          f"calFilePath {cal_file or '—'}", "same points shifted to 0 dB at 1 kHz"],
         ["applied to", f"input {ex['input']} ({ex['mic']})", "applyCal on the mic channel's import only",
-         "REW's loopback/Xone imports are uncalibrated ratios"],
-    ]
+         "REW's loopback/Xone imports carry no mic cal"],
+    ] + sc
 
 
 # ---------------------------------------------------------------- daemon bound
@@ -426,28 +428,45 @@ def rew_stage(ctx: Ctx, pname: str, cal_file: str | None):
     wav.write(d / "rec.wav", fs, avg)
     wav.write(d / "rec_meas.wav", fs, avg[:, :1])
     wav.write(d / "rec_ref.wav", fs, avg[:, 1:2])
+    sc = rig["rew"].get("soundcard_cal") or None
     _j(d / "play.json", {"level_dbfs": played_peak, "gain_db": gain_db, "stimulus": stim_path, "file_peak_dbfs": peak,
-                         "repeats": reps, "speaker": speaker, "cal_file": cal_file if speaker else None})
-    rew_import(ctx.rew, d, stim_path, pname, speaker, keep=rig["rew"].get("keep_measurements", False))
+                         "repeats": reps, "speaker": speaker, "cal_file": cal_file if speaker else None,
+                         "soundcard_cal": sc})
+    rew_import(ctx.rew, d, stim_path, pname, speaker, keep=rig["rew"].get("keep_measurements", False),
+               soundcard_cal=sc, mic_cal_file=cal_file or "")
     return d
 
 
-def rew_import(rew, d: Path, stim_path: str, pname: str, speaker: bool, keep: bool = False) -> dict:
+def rew_import(rew, d: Path, stim_path: str, pname: str, speaker: bool, keep: bool = False,
+               soundcard_cal: str | None = None, mic_cal_file: str = "") -> dict:
     """Imports a REW stage's saved recordings (`rec_meas.wav`, `rec_ref.wav` in `d`) into REW,
     each against the stimulus, then REW's own reference division `A / B` (meas ÷ ref), and
-    fetches the three as `meas_*`, `ref_*` and `div_*`. Only the meas import gets the input
-    calibration (the mic channel); the quotient carries it from A. Every measurement made
-    here is deleted again unless `keep`, by UUID (REW's index ids renumber on a delete).
-    Writes and returns `rew_ids.json`: which REW measurements were used."""
-    ids: dict = {"meas": None, "ref": None, "div": None, "kept": bool(keep)}
+    fetches the three as `meas_*`, `ref_*` and `div_*`. Only the meas import gets the mic
+    calibration (the mic channel); the quotient carries it from A. With a `soundcard_cal`
+    both imports take it, as a REW user's measurement would: the meas import is then the
+    interface-corrected response, and the quotient is unchanged since the cal divides out.
+    Every measurement made here is deleted again unless `keep`, by UUID (REW's index ids
+    renumber on a delete). Writes and returns `rew_ids.json`: which REW measurements were used."""
+    ids: dict = {"meas": None, "ref": None, "div": None, "kept": bool(keep), "soundcard_cal": soundcard_cal}
     made = []
+
+    def imp(name: str, mic: bool) -> str:
+        if soundcard_cal:
+            # applyCal is REW's one switch for the soundcard and the mic cal: the curve is set
+            # for the mic channel's import and cleared for the others
+            rew.set_input_cal_file(mic_cal_file if mic else "")
+        return rew.import_response(stim_path, str((d / f"rec_{name}.wav").resolve()), 1,
+                                   apply_cal=mic or bool(soundcard_cal))
+
     try:
-        mid = rew.import_response(stim_path, str((d / "rec_meas.wav").resolve()), 1, apply_cal=speaker)
+        if soundcard_cal:
+            rew.set_output_cal(soundcard_cal)
+        mid = imp("meas", speaker)
         made.append(mid)
         ids["meas"] = mid
         rew.put(f"/measurements/{mid}", {"title": f"xc {pname} meas"})
         rew.fetch(mid, d, "meas", spl=speaker)
-        rid = rew.import_response(stim_path, str((d / "rec_ref.wav").resolve()), 1, apply_cal=False)
+        rid = imp("ref", False)
         made.append(rid)
         ids["ref"] = rid
         rew.put(f"/measurements/{rid}", {"title": f"xc {pname} ref"})
@@ -458,6 +477,11 @@ def rew_import(rew, d: Path, stim_path: str, pname: str, speaker: bool, keep: bo
         rew.put(f"/measurements/{qid}", {"title": f"xc {pname} meas / ref"})
         rew.fetch(qid, d, "div", dist=False)
     finally:
+        if soundcard_cal:
+            try:
+                rew.set_input_cal_file(mic_cal_file)
+            except RewError as e:
+                ids["input_cal_error"] = str(e)
         if not keep:
             errs = []
             for u in made:

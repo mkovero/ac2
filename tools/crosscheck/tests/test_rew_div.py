@@ -117,3 +117,39 @@ def test_comparison_columns_pick_rew_div_and_its_difference():
     assert [round(h.value, 3) for h in cols["ac2 − REW"]] == [0.03]
     hf = dict(zip(C.COLUMNS, C.row_hits([b], C.MAG_BANDS[2])))
     assert len(hf["REW ÷ ref vs truth"]) == 1 and len(hf["ac2 − REW ÷ ref"]) == 1 and not hf["REW vs truth"]
+
+
+def test_soundcard_corrected_rew_import_is_compared_alone(tmp_path):
+    """With REW's soundcard cal the meas import is the path's response by itself, the
+    interface's 1 kHz gain (−3 dB here, what the reference input reads) aside: "REW offline" is
+    that import over the one number, not meas ÷ ref (the ref's slope here would show), and its
+    lost delay is put back like the quotient's."""
+    p = _path()
+    fl = np.arange(1, 48000) * 0.5
+    curve = lambda db: formats.RewCurve(f=fl, mag=np.asarray(db) + np.zeros(len(fl)), phase=np.zeros(len(fl)), unit="dBFS")
+    slope = 0.5 * np.log2(fl / 1000.0)  # a ref that is no longer flat: dividing by it would show
+    p.rew = RewSet(label="REW offline import", level_dbfs=-10.0, meas_fr=curve(GAIN_DB - 3.0),
+                   ref_fr=curve(-3.0 + slope), meas_alone=True)
+    a = Analysis(model.RunData(root=None, paths={"xone": p}, manifest={}))
+    a.sources(p)
+    assert abs(a.rew_put_back - D / FS) < 0.05 / FS
+    a.bands(p)
+    by = {c.id: c for c in a.checks}
+    for lo, hi in ((20, 100), (100, 1000), (1000, 20000)):
+        for g in ("mag", "phase"):
+            assert by[f"xone.{g}.ac2 sweep s|REW offline.{lo}-{hi}"].status == "PASS"
+            assert by[f"xone.{g}.REW offline|direct (REW recording).{lo}-{hi}"].status == "PASS"
+    assert "soundcard cal" in by["xone.mag.ac2 sweep s|REW offline.100-1000"].meaning
+
+
+def test_loader_marks_a_soundcard_corrected_import(tmp_path):
+    run = tmp_path / "run"
+    rd = run / "xone" / "rew"
+    rd.mkdir(parents=True)
+    z = np.zeros(10)
+    for q in ("meas", "ref"):
+        (rd / f"{q}_fr.json").write_text(json.dumps(_curve_json(20.0, 0.5, z, z)))
+    (run / "manifest.json").write_text(json.dumps({"paths": {"xone": {"kind": "electrical"}}}))
+    assert not model.load(run).paths["xone"].rew.meas_alone  # an older run: meas ÷ ref as before
+    (rd / "play.json").write_text(json.dumps({"level_dbfs": -10.0, "soundcard_cal": "/sc.cal"}))
+    assert model.load(run).paths["xone"].rew.meas_alone

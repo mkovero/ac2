@@ -31,7 +31,9 @@ class BandChecks:
             pass
         if "REW offline" in S:
             pairs.append((primary, "REW offline", False, "ac2's sweep against REW's offline import "
-                          "(REW meas ÷ REW ref, each referred to REW's own timing marker)"))
+                          + ("(REW's meas import with its soundcard cal, referred to REW's own timing marker)"
+                             if p.rew.meas_alone else
+                             "(REW meas ÷ REW ref, each referred to REW's own timing marker)")))
         if "REW ÷ ref" in S:
             pairs.append((primary, "REW ÷ ref", False, "ac2's sweep against REW's own reference division "
                           "(REW's Arithmetic A / B of its meas and ref imports)"))

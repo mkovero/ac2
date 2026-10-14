@@ -127,10 +127,11 @@ class DelayChecks:
                 Hr = S["REW offline"]
                 m = np.isfinite(Hr)
                 tau = dsp.delay_from_phase(f[m], Hr[m], lo, hi)
-                rows.append([f"{rs.label}: meas÷ref phase slope", f"{tau*1e6:.3f}",
+                what = "meas (soundcard cal)" if rs.meas_alone else "meas÷ref"
+                rows.append([f"{rs.label}: {what} phase slope", f"{tau*1e6:.3f}",
                              "offline import: each channel re its own timing marker, so the in5−in2 delay is gone"])
                 self.add(id=f"{p.name}.delay.rew_offline_phase", group="delay", path=p.name,
-                         title=f"{rs.label}: delay left in meas÷ref phase", value=tau * 1e6, unit="µs", tol=None, status="INFO",
+                         title=f"{rs.label}: delay left in {what} phase", value=tau * 1e6, unit="µs", tol=None, status="INFO",
                          meaning="REW's offline import removes each channel's own delay; expected ≈ 0, not the path delay")
         self.table(f"{p.name}: delay / arrival (µs)", ["source", "µs", "how"], rows)
 
@@ -225,7 +226,8 @@ class DelayChecks:
             if rs is None or rs.meas_fr is None:
                 continue
             offline = rs.ref_fr is not None
-            Hr = rs.meas_fr.H / rs.ref_fr.H if offline else rs.meas_fr.H
+            div = offline and not rs.meas_alone
+            Hr = rs.meas_fr.H / rs.ref_fr.H if div else rs.meas_fr.H
             Hr = Hr * np.exp(-2j * np.pi * rs.meas_fr.f * (tau if offline else 0.0))
             keep = ~dsp.mains_columns(rs.meas_fr.f, self.mains_hz, 1 / 48, guard_hz=MAINS_GUARD_HZ)
             ests[f"{rs.label} ±1/12-oct fit"], sig[f"{rs.label} ±1/12-oct fit"], _ = dsp.gd_slope_err(
@@ -233,15 +235,16 @@ class DelayChecks:
             if rs.meas_gd is not None:
                 # REW's export is the group delay of one channel re the stimulus: for an offline
                 # import meas ÷ ref is the difference of the two exports, plus the delay put back
+                # (a soundcard-corrected meas import alone: its own export plus that delay)
                 gm = rs.meas_gd
-                gr = rs.ref_gd if offline else None
+                gr = rs.ref_gd if div else None
                 v = []
                 for c in fc:
                     sel = (gm.f >= c * 2 ** (-1 / 12)) & (gm.f <= c * 2 ** (1 / 12))
                     if not sel.any():
                         v.append(np.nan)
                         continue
-                    x = np.nanmean(gm.mag[sel])
+                    x = np.nanmean(gm.mag[sel]) + (tau if offline and not div else 0.0)
                     if gr is not None:
                         sr = (gr.f >= c * 2 ** (-1 / 12)) & (gr.f <= c * 2 ** (1 / 12))
                         x = x - np.nanmean(gr.mag[sr]) + tau if sr.any() else np.nan

@@ -203,6 +203,14 @@ def main(a) -> int:
             snap = rew.snapshot()
             (out / "cal").mkdir(exist_ok=True)
             (out / "cal" / "rew_input_cal.before.json").write_text(json.dumps(snap["input_cal"], indent=1))
+            sc = rig["rew"].get("soundcard_cal")
+            if sc:
+                if not Path(sc).is_file():
+                    raise RuntimeError(f"[rew].soundcard_cal {sc} does not exist")
+                (out / "cal" / "rew_output_cal.before.json").write_text(json.dumps(snap["output_cal"], indent=1))
+                applied = rew.set_output_cal(sc)
+                (out / "cal" / "rew_output_cal.applied.json").write_text(json.dumps(applied, indent=1))
+                man["rew_soundcard_cal"] = sc
         if set(want) & {"ambient", "genelec"}:
             cal = stages.cal_excerpt(rig)
             (out / "cal").mkdir(exist_ok=True)
@@ -212,7 +220,7 @@ def main(a) -> int:
                 cf = out / "cal" / "mic_curve_rew.txt"
                 stages.write_rew_cal_file(cal["curve_points"], cf)
                 cal_file = str(cf.resolve())
-            man["cal_mapping"] = stages.cal_mapping(cal, cal_file)
+            man["cal_mapping"] = stages.cal_mapping(cal, cal_file, (rig.get("rew") or {}).get("soundcard_cal"))
             if rew is not None:
                 applied = rew.set_input_cal(cal["rew_dbfs_at_94"], cal.get("full_scale_vrms", 1.0), cal_file or "")
                 (out / "cal" / "rew_input_cal.applied.json").write_text(json.dumps(applied, indent=1))

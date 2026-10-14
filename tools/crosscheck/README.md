@@ -166,16 +166,15 @@ Each path stage runs these sub-stages (`--skip` takes their names):
 - **rew**:
   - The stimulus is played (and repeated if `[stages.rew].repeats` > 1, then averaged
     sample-synchronously) and recorded on both inputs.
-  - Each channel is imported into REW against the stimulus: the mic with `applyCal`, the
-    others uncalibrated. Exports: FR, IR, GD, distortion, RT60 (`meas_*`, `ref_*`).
+  - Each channel is imported into REW against the stimulus, with `applyCal` when
+    `[rew].soundcard_cal` is set (else the mic only). Exports: FR, IR, GD, distortion, RT60
+    (`meas_*`, `ref_*`).
   - Then REW's own reference division: Arithmetic `A / B` (meas ÷ ref) of the two imports,
     `POST /measurements/process-measurements` with
     `{"processName": "Arithmetic", "measurementUUIDs": [meas, ref], "parameters": {"function": "A / B"}}`.
     Exports FR, IR and GD as `div_*`; a quotient has no distortion data, so REW's harmonics
     stay those of the meas import (meas against the stimulus). The analysis judges it as the
-    source "REW ÷ ref" beside "REW offline" (the two imports divided by the suite).
-  - REW's soundcard calibration (`/audio/output-cal`) is not applied to an import, so the
-    reference division is the only way to take the interface out of REW's response here.
+    source "REW ÷ ref" beside "REW offline" (see Calibration for what that one is).
   - `rew_ids.json` names the REW measurements used (UUIDs). Unless `[rew].keep_measurements`,
     all three are deleted afterwards, by UUID: REW's index ids renumber on every delete.
   - `python -m crosscheck rew-import <run dir> [--stages xone,genelec]`, on the rig, redoes
@@ -284,7 +283,21 @@ calibration from it:
 It checks the convention against the mic's stated mV/Pa and refuses a mismatch over 0.5 dB.
 REW's calibration is read at the start (`cal/rew_input_cal.before.json`) and put back at the
 end, with the SPL-meter and RTA settings. The report shows the mapping table. The Xone stages
-are uncalibrated ratio comparisons.
+carry no mic cal.
+
+`[rew].soundcard_cal` is REW's own loopback calibration of the interface (Preferences >
+Soundcard > *Calibrate soundcard…* on the out 2 → in 2 pair, saved as a `.cal` file). The
+run sets it as REW's output cal (`cal/rew_output_cal.before.json`, `.applied.json`, the
+manifest's `rew_soundcard_cal`) and puts the old one back. REW applies it to an offline
+import only with `applyCal`, the same switch as the mic cal, so every import takes
+`applyCal` and the mic curve is set only while the mic channel is imported. The meas import
+is then the path's response with the converters taken out, as a REW user measures it, and
+the analysis compares it alone as "REW offline", over one number: the interface's 1 kHz
+gain, which the cal file (0 dB at 1 kHz) leaves in and the reference input reads. A / B is
+unchanged (the cal divides out) and stays the reference-divided source "REW ÷ ref". A run
+without the cal (`play.json` has no `soundcard_cal`) keeps "REW offline" = meas ÷ ref formed by the suite: REW's raw meas
+import carries the interface's LF roll-off (+11.5° phase, −0.13 dB mean at 20–100 Hz on the
+FF400).
 
 The curve is in some columns and not in others: ac2's live TF carries it ("in the columns"
 in its export), its sweeps do not (ac2 applies the input's curve to a sweep after capture, as

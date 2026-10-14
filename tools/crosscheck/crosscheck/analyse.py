@@ -4,8 +4,10 @@ Every comparison becomes a Check with a value, its tolerance and a sentence sayi
 number means. Sources:
 
 - ac2 sweep (each variant), ac2 live transfer (TF) — ac2's own exports;
-- REW offline import (meas and ref imported separately, meas/ref formed here); REW ÷ ref, REW's
-  own Arithmetic A / B of those two imports (FR, IR, GD; no harmonics); REW live
+- REW offline import: with REW's soundcard cal (the run's `[rew].soundcard_cal`) the meas
+  import alone, as a REW user measures; without it meas and ref imported separately and
+  meas/ref formed here. REW ÷ ref, REW's own Arithmetic A / B of those two imports (FR, IR,
+  GD; no harmonics); REW live
   (fixtures only: needs REW Pro to start over the API);
 - direct: numpy cross-spectrum Σ M·R*/Σ|R|² of a raw recording (REW's stage, or ac2's own
   capture of its sweep) in the same bands, ac2's column width (`--resolution`, 1/48 octave by default);

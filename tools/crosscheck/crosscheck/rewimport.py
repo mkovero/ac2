@@ -1,7 +1,8 @@
 """`python -m crosscheck rew-import <run dir>`: redoes a run's REW import step on the rig from the
 recordings the run saved (`<stage>/rew/rec_meas.wav`, `rec_ref.wav`): each channel against the
 stimulus, then REW's `A / B`. Nothing is played. REW's input calibration is set from the run's
-own `cal/` as the run set it, and REW's settings are put back afterwards. The run records it in
+own `cal/` as the run set it, the soundcard cal from the run's rig file, and REW's settings are
+put back afterwards. The run records it in
 `rew_reimport.json`."""
 from __future__ import annotations
 
@@ -36,6 +37,7 @@ def reimport(run: Path, want: list[str] | None = None, rew: Rew | None = None, s
     cf = run / "cal" / "mic_curve_rew.txt"
     cal_file = str(cf) if cf.exists() else ""
     keep = bool(rig["rew"].get("keep_measurements", False))
+    sc = rig["rew"].get("soundcard_cal") or None
     rec = {"when": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
            "suite_commit": suite_commit or os.environ.get("CROSSCHECK_SUITE_COMMIT") or None,
            "rew_version": rew.version(), "run_rew_version": man.get("rew_version"),
@@ -43,6 +45,7 @@ def reimport(run: Path, want: list[str] | None = None, rew: Rew | None = None, s
                    "then REW's Arithmetic A / B (meas ÷ ref); nothing played",
            "input_cal": {"dBFSAt94dBSPL": ex["rew_dbfs_at_94"], "fullScaleSineVrms": ex.get("full_scale_vrms", 1.0),
                          "calFilePath": cal_file},
+           "soundcard_cal": sc,
            "stages": {}}
     snap = rew.snapshot()
     try:
@@ -51,8 +54,8 @@ def reimport(run: Path, want: list[str] | None = None, rew: Rew | None = None, s
             d = run / s / "rew"
             play = json.loads((d / "play.json").read_text())
             speaker = bool(play.get("speaker"))
-            ids = stages.rew_import(rew, d, play["stimulus"], s, speaker, keep=keep)
-            rec["stages"][s] = {"stimulus": play["stimulus"], "apply_cal": speaker, "rew_ids": ids}
+            ids = stages.rew_import(rew, d, play["stimulus"], s, speaker, keep=keep, soundcard_cal=sc, mic_cal_file=cal_file)
+            rec["stages"][s] = {"stimulus": play["stimulus"], "apply_cal": speaker or bool(sc), "rew_ids": ids}
     finally:
         errs = rew.restore(snap)
         rec["rew_restored"] = not errs
