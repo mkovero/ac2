@@ -120,6 +120,22 @@ The hardware acceptance runs are still open ([status table](PLAN.md#90-status)):
 - Builds are not code-signed, and there are no GitHub Releases: installers are artifacts of
   the Release workflow ([Get it](#get-it)).
 
+## Validation
+
+ac2 is cross-checked against REW 5.40 and Open Sound Meter on the same signals, and every tool
+is held to a truth that depends on none of them: steady sines and direct cross-spectra
+analysed in numpy, closed-form test signals, and a software device with exactly known
+distortion ([tools/crosscheck](tools/crosscheck/README.md)). On the current baselines, ac2's
+sweep response, phase, group delay and harmonics agree with REW to within about 0.01 dB and
+0.1° on an electrical path, and to tenths of a decibel on a speaker in a room; ac2's live
+transfer function agrees with OSM's to a median well under 0.01 dB on the electrical path.
+Results per quantity, limits and every open difference: [comparison.md](tools/crosscheck/comparison.md).
+
+What this does not show: REW was given ac2's recordings through its import (live measurement
+over its API needs REW Pro); absolute SPL rests on ac2's own electrical calibration, not an
+acoustic calibrator; there is no IEC 61672-1 / 61260-1 class test; and it is one rig (RME
+Fireface 400, one microphone, one room).
+
 ## Building from source
 
 Rust (version pinned in `rust-toolchain.toml`) and a C/C++ toolchain; on Linux also
