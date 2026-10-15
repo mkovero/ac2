@@ -212,6 +212,8 @@ def make_baseline(results: dict, stage: str, run_id: str) -> dict:
             v = det.get(k)
             if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
                 e[k] = v if k in ("n", "of") else _num(v)
+        if det.get("extreme"):
+            e["extreme"] = True
         sh = det.get("shared")
         if sh:
             e["shared"] = {"ac2": _num(sh["ac2"]), "REW": _num(sh["REW"]), "diff": _num(sh["diff"]),
@@ -307,7 +309,10 @@ def diff(base: dict, cur: dict, tol: dict) -> dict:
             (worse if RANK.get(c["status"], 0) > RANK.get(b["status"], 0) else better).append(row)
         if b["value"] is not None and c["value"] is not None and b.get("unit") == c.get("unit"):
             st = step_for(c if c.get("tol") else b, steps, frac)
-            d = c["value"] - b["value"]
+            # A signed extreme (the column of largest |Δ|) takes its sign from whichever noisy
+            # column wins this take: what the limit judges, and what can move, is its size.
+            d = (abs(c["value"]) - abs(b["value"]) if c.get("extreme") or b.get("extreme")
+                 else c["value"] - b["value"])
             if abs(d) > st:
                 judged = b["status"] in JUDGED and c["status"] in JUDGED
                 (moved if judged else drift).append({**row, "delta": d, "step": st})

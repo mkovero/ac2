@@ -291,3 +291,20 @@ def test_calibration_carries_the_loading_and_rews_value():
     assert abs(c["loading_db"] - 20 * math.log10(2000 / 2330)) < 1e-4
     assert abs(c["rew_dbfs_at_94"] - (94 - c["sensitivity_db"])) < 1e-3
     assert B.calibration({"preflight": {}}) is None
+
+
+def test_a_signed_extreme_moves_by_its_size():
+    def run(v, extreme=True):
+        c = chk("xone.dut.grid.h3.ac2 sweep", "dut", v, tol=(0.5, 1.0))
+        if extreme:
+            c["detail"] = {"extreme": True}
+        return B.make_baseline(B.annotate(results([c]), {}), "xone", "r")
+    # the column of largest |Δ| flips sign from take to take: −0.14 → +0.16 is 0.02 dB larger
+    assert run(-0.14)["checks"]["xone.dut.grid.h3.ac2 sweep"]["extreme"] is True
+    assert not B.gates(B.diff(run(-0.14), run(0.16), TOL))
+    # growing past the step still moves, whichever sign either take has
+    assert [r["delta"] for r in B.diff(run(-0.14), run(0.45), TOL)["moved"]] == [pytest.approx(0.31)]
+    # a baseline written before the flag compares by size once the run carries it
+    assert not B.gates(B.diff(run(-0.14, extreme=False), run(0.16), TOL))
+    # an ordinary signed value keeps its sign
+    assert B.gates(B.diff(run(-0.14, extreme=False), run(0.16, extreme=False), TOL))

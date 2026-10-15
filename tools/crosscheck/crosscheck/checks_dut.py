@@ -159,7 +159,7 @@ class DutChecks:
                                   + (f"; the truth stands above the reading's bound at {', '.join(f'{x:.0f}' for x in fails)} Hz"
                                      if fails else "")
                                   + mnote),
-                         detail={"columns": [[a, b] for a, b in ds], "bound_fails_hz": fails,
+                         detail={"extreme": True, "columns": [[a, b] for a, b in ds], "bound_fails_hz": fails,
                                  "model_limited": [[a, b] for a, b in mds], "model_bound_fails_hz": mfails})
         self.table(f"{p.name}: harmonics vs the DUT's analytic truth (dBr)",
                    ["f Hz", "H", "source", "reading", "floor", "truth", "Δ", "pre-filter"], rows,

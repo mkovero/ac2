@@ -423,7 +423,9 @@ against the sine.
   6 %. A stage is compared only with the baseline of the same stage and level.
 - **compare** lists, per stage, the build pair, status changes (worse / better), judged
   values that moved more than max(unit step, half the pass limit) (`[compare]` in
-  `tolerances.toml`), INFO / INCONCLUSIVE values that moved (context only), and checks new or
+  `tolerances.toml`; a signed extreme, such as the DUT grid's column of largest |Δ|, moves by
+  its size, since its sign is whichever noisy column wins the take), INFO / INCONCLUSIVE values
+  that moved (context only), and checks new or
   missing. It writes `report/compare.md` and exits 1 when a status got worse or a judged value
   moved, so it can gate.
 - **Updating a baseline**: after a run on a new build has been reviewed and its differences
