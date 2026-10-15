@@ -64,23 +64,28 @@ licence open; §1 below settles it.
    NUL, `channel_info` reports inactive until buffers exist, the driver handle is `!Send`.
    Had azo failed, the fallback was ac2's own binding over a pinned SDK, shipped as a
    GPLv3 build; with azo that branch is moot.
-   **The fork.** ac2 builds azo from <https://github.com/mkovero/azo>, branch `ac2`,
+   **The fork.** ac2 builds azo from <https://github.com/mkovero/azo>, branch `ac2-0.5.1`,
    pinned by commit in `crates/ac2-audio/Cargo.toml` (git dependency, Windows only). It
-   starts at upstream azo 0.4.1, which posts host commands as `WM_APP`: `WM_USER` on the
-   apartment thread also arrives from the system, and its `wParam` was read as a command
-   (a FlexASIO soak aborted on it). Upstream is maintained and answered within a day, so
-   each fork change is offered upstream; the fork carries what is not merged yet: the host (COM)
-   thread can be named; a channel or driver name that fills its whole fixed buffer is read
-   instead of panicking; `Proxy::callback_handle` gives the callback a `Send + Sync` handle
-   for `getSamplePosition` / `outputReady` without a round trip to the host thread; and a
-   driver is created with its CLSID as the IID, as the SDK's host code does, so no
-   reference is released before `init`. wineasio 1.3.0 reads uninitialised state in
-   `Release` before `init`: with azo's `IUnknown`-then-query creation, the second driver
-   load in one process (enumerate, then open) double-freed inside wineasio. Commands go to
-   a message-only window rather than the thread, because a modal loop on the apartment
-   thread (a driver's control panel) dispatches window messages and drops thread messages.
-   Drivers are held in `Rc`, since wineasio tears an instance down on every `Release`, not
-   only the last. Clock source names are cut at the first NUL.
+   starts at upstream azo 0.5.1, which posts host commands as `WM_APP` (`WM_USER` on the
+   apartment thread also arrives from the system, and its `wParam` was read as a command; a
+   FlexASIO soak aborted on it) to a message-only window owned by the apartment thread, since
+   a modal loop there (a driver's control panel) dispatches window messages and drops thread
+   messages. Upstream is maintained and answers within a day; bugs go upstream as issues
+   with a repro. The fork carries: the host (COM) thread can be named;
+   `Proxy::callback_handle` gives the callback a `Send + Sync` handle for
+   `getSamplePosition` / `outputReady` without a round trip to the host thread; `Host` and
+   `Proxy` are `Send + Sync` (a window accepts sent and posted messages from any thread); a
+   driver is created with its CLSID as the IID, as the SDK's host code does, so no reference
+   is released before `init` — wineasio 1.3.0 reads uninitialised state in `Release` before
+   `init`, and with `IUnknown`-then-query creation the second driver load in one process
+   (enumerate, then open) double-freed inside wineasio. Drivers are held in `Rc` and no
+   borrow of the driver map is held across a driver call: commands run re-entrantly inside a
+   modal loop, and wineasio tears an instance down on every `Release`, not only the last. A
+   channel or driver name that fills its whole fixed buffer is read instead of panicking,
+   and drivers get spare room past each buffer (a 64-byte buffer for the 32-byte driver name,
+   a spare entry after channel info and clock sources), because a name of exactly 32 bytes
+   means the driver wrote its NUL past the array. Clock sources are read in one call (up to
+   64) and their names are cut at the first NUL.
    **azo-sys provenance.** `azo-sys` is a Rust re-declaration of the ASIO interface, not a
    copy of the SDK header: its identifiers are its own (`PCM_I16_LSB` for
    `ASIOSTInt16LSB`, `IIASIORedecl`), its comments are its own, and it uses `bitflags` and a
