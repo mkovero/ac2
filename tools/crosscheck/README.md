@@ -437,8 +437,10 @@ against the sine.
   new rig build), and rewrites each number quoted in its prose from the baseline or tolerance
   it names (`crosscheck/comparison_quotes.py`). It lists, and `--check` (and a test) fails on: a
   stale table or number, a measured number or build hash in the prose with no source, a warn
-  or FAIL cell with no `### <quantity>: <column>` section under "Disparities", and such a
-  section whose cell no longer warns or fails.
+  or FAIL cell with no `### <path>: <quantity>: <column>` section under "Disparities", a warn or
+  FAIL check that no row shows with no `### <path>: <check>` section, and such a section whose
+  cell or check no longer warns or fails. A cell names, where it is short of all, how many of its
+  checks were judged and how many of its band's columns the worst check kept.
 
 ## Reproducing the results
 

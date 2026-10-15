@@ -55,6 +55,9 @@ class Row:
     ac2_rew_div: tuple = ()
     ac2_osm: tuple = ()
     unit: str | None = None  # only checks in this unit: a quantity judged in two units is two rows
+    # INFO checks printed after the cell they belong to, as (label, pattern): the tails of a
+    # median, the population it is taken over
+    context: tuple = ()
 
     def columns(self) -> tuple[tuple, ...]:
         return self.ac2, self.rew, self.rew_div, self.osm, self.ac2_rew, self.ac2_rew_div, self.ac2_osm
@@ -104,7 +107,7 @@ MAG_BANDS = tuple(Row(f"Magnitude {name}, sweeps", ac2=(rf"mag\.{SWEEP_DIRECT}\.
                       rew_div=(rf"mag\.{REW_DIV_DIRECT}\.{key}$",),
                       ac2_rew_div=(rf"mag\.{SWEEP}\|{REW_DIV}\.{key}$",))
                   for key, name in BANDS)
-MAG_TF = Row("Magnitude 20 Hz–20 kHz, live TF", ac2=(rf"mag\.{TF_DIRECT}\.",))
+MAG_TF = tuple(Row(f"Magnitude {name}, live TF", ac2=(rf"mag\.{TF_DIRECT}\.{key}$",)) for key, name in BANDS)
 PHASE_TONES = _tones("sine_phase", "Phase at the tones", rew_div=REW_DIV)
 PHASE = Row("Phase 20 Hz–20 kHz", ac2=(rf"phase\.(?:{SWEEP_DIRECT}|{TF_DIRECT})\.",),
             rew=(rf"phase\.{REW_DIRECT}\.",), ac2_rew=(rf"phase\.{SWEEP}\|REW offline\.",),
@@ -120,9 +123,14 @@ HARMONICS = Row("Harmonics H2–H5", ac2=(rf"h[2-5]\.{SWEEP}@",), rew=(r"h[2-5]\
 FIX = r"(?![^.]*-rig\.)[^.]+"
 
 
+def _tails(rig: str, q: str) -> tuple:
+    return (("columns", rf"{rig}-rig\.columns_judged$"), ("95th percentile", rf"{rig}-rig\.ac2_vs_osm_{q}_95th_percentile_difference$"),
+            ("max", rf"{rig}-rig\.ac2_vs_osm_{q}_max_difference$"), ("at", rf"{rig}-rig\.ac2_vs_osm_{q}_max_difference_frequency$"))
+
+
 def _rig_osm(rig: str, label: str) -> tuple[Row, ...]:
-    return (Row(f"{label}: magnitude", ac2_osm=(rf"{rig}-rig\.ac2_vs_osm_h$",)),
-            Row(f"{label}: phase", ac2_osm=(rf"{rig}-rig\.ac2_vs_osm_phase$",)),
+    return (Row(f"{label}: magnitude, median", ac2_osm=(rf"{rig}-rig\.ac2_vs_osm_h$",), context=_tails(rig, "h")),
+            Row(f"{label}: phase, median", ac2_osm=(rf"{rig}-rig\.ac2_vs_osm_phase$",), context=_tails(rig, "phase")),
             Row(f"{label}: delay finder", ac2_osm=(rf"{rig}-rig\.ac2_delay_finder_vs_osm_s$",)))
 
 
@@ -132,11 +140,11 @@ RIG_TRUTH = ("Truth: the steady sine at each tone, analysed in numpy, for the le
 PATHS: tuple[SignalPath, ...] = (
     SignalPath("Xone", "xone", "Xone (electrical)",
                "Out of the interface, through the Xone:62 and back in. " + RIG_TRUTH,
-               (REF_LEVEL, GAIN, MAG_TONES, *MAG_BANDS, MAG_TF, PHASE_TONES, PHASE, *GD, ARRIVAL, HARMONICS)),
+               (REF_LEVEL, GAIN, MAG_TONES, *MAG_BANDS, *MAG_TF, PHASE_TONES, PHASE, *GD, ARRIVAL, HARMONICS)),
     SignalPath("Genelec", "genelec", "Genelec (speaker at 56 cm)",
                "The Genelec 1083 in the room, the MM1 on its tweeter axis. " + RIG_TRUTH
                + " SPL: the steady sine through the stored calibration.",
-               (REF_LEVEL, GAIN, SPL, MAG_TONES, *MAG_BANDS, MAG_TF, PHASE_TONES, PHASE, ARRIVAL, HARMONICS)),
+               (REF_LEVEL, GAIN, SPL, MAG_TONES, *MAG_BANDS, *MAG_TF, PHASE_TONES, PHASE, ARRIVAL, HARMONICS)),
     SignalPath("ambient", "ambient", "Ambient (silent room)",
                "The room's own noise at the MM1, nothing played. Truth: numpy's Leq of the same recording "
                "with analytic weightings; for the RTA, ac2's own band filters applied to the recording.",
@@ -319,11 +327,42 @@ def fmt_value(v: float, unit: str, signed: bool = True) -> str:
     return s.replace("-", "−", 1)
 
 
+def population(hs: list[Hit], w: Hit) -> str:
+    """How much of the cell the verdict stands on: judged checks of all the cell's checks, and
+    the worst check's surviving columns of its band, wherever either is short of all."""
+    k = sum(h.status in JUDGED and h.value is not None for h in hs)
+    e = w.b["checks"].get(w.key.partition(" minus ")[0], {})
+    parts = [f"{k} of {len(hs)} judged"] if k < len(hs) else []
+    if isinstance(e.get("n"), int) and isinstance(e.get("of"), int) and e["n"] < e["of"]:
+        parts.append(f"{e['n']} of {e['of']} columns")
+    return f" ({'; '.join(parts)})" if parts else ""
+
+
+def context_text(bs: list[dict], row: Row) -> str:
+    vals = []
+    for label, pat in row.context:
+        for b in bs:
+            for _, _, e in _matches(b, pat):
+                if e["value"] is not None:
+                    vals.append((label, e["value"], e.get("unit") or ""))
+    if not vals:
+        return ""
+    out = []
+    for label, v, u in vals:
+        if label == "columns":
+            out.append(f"{v:.0f} columns")
+        elif label == "at":
+            out[-1] += f" at {v:.1f} Hz"
+        else:
+            out.append(f"{label} {fmt_value(v, u, False)}")
+    return "; " + ", ".join(out)
+
+
 def cell_text(hs: list[Hit]) -> str:
     if not hs:
         return "—"
     w = worst(hs)
-    return "not judged" if w is None else f"{fmt_value(w.value, w.unit, w.signed)} {WORD[w.status]}"
+    return "not judged" if w is None else f"{fmt_value(w.value, w.unit, w.signed)} {WORD[w.status]}{population(hs, w)}"
 
 
 def limits(hs: list[Hit]) -> list[tuple[str, tuple[float, float]]]:
@@ -360,7 +399,8 @@ def path_table(bs: list[dict], path: SignalPath) -> str:
     out = ["| quantity | " + " | ".join(COLUMNS[i] for i in used) + " | limit (pass / warn) |",
            "|---|" + "---|" * (len(used) + 1)]
     for row, cols in grid:
-        out.append(f"| {row.label} | " + " | ".join(cell_text(cols[i]) for i in used)
+        ctx = context_text(pbs, row)
+        out.append(f"| {row.label} | " + " | ".join(cell_text(cols[i]) + (ctx if cols[i] else "") for i in used)
                    + f" | {limit_text(limits([h for c in cols for h in c]))} |")
     return head + "\n\n" + "\n".join(out)
 
@@ -370,14 +410,22 @@ def table(bs: list[dict]) -> str:
 
 
 def disparities(bs: list[dict]) -> list[str]:
-    """`<path>: <quantity>: <column>` of every warn or FAIL cell."""
-    out = []
+    """`<path>: <quantity>: <column>` of every warn or FAIL cell, then `<path>: <check>` of every
+    warn or FAIL check that no row shows: a judged exception outside the tables still needs its
+    section, or a reader of the tables would not know it is there."""
+    out, shown = [], set()
     for p in PATHS:
         for row in p.rows:
             for col, hs in zip(COLUMNS, row_hits(path_bs(bs, p), row)):
+                shown.update((id(h.b), k) for h in hs for k in h.key.split(" minus "))
                 w = worst(hs)
                 if w is not None and w.status in ("WARN", "FAIL"):
                     out.append(f"{p.name}: {row.label}: {col}")
+    for b in bs:
+        p = next((p for p in PATHS if p.stage == b["stage"]), None)
+        for k, e in b["checks"].items():
+            if p is not None and e["status"] in ("WARN", "FAIL") and (id(b), k) not in shown:
+                out.append(f"{p.name}: {k.partition('.')[2]}")
     return out
 
 

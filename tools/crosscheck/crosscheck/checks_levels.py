@@ -46,6 +46,7 @@ class LevelChecks:
         src = {f"ac2 sweep {p.primary}": src.pop(f"ac2 sweep {p.primary}"), **src}
         self.coh = {}
         self.sine_u = {}  # path → (source, tone) → its magnitude row's uncertainty against the sine, dB
+        self.sine_noise_u = {}  # path → (source, tone) → of that, its column noise alone, dB
         self.coh_by_path = getattr(self, "coh_by_path", {})
         self.coh_by_path[p.name] = self.coh
         tf_delay = 0.0

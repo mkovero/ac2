@@ -36,6 +36,7 @@ ALLOWED: list[tuple[str, str]] = [
     (r"6167[23]-1|61260-1", "standard numbers"),
     (r"γ² ≥ 0\.9[59]", "the coherence gates the suite applies (README)"),
     (r"\d+ Hz / \d+(?:\.\d+)? s", "sweep names: start frequency and length"),
+    (r"\d+Hz-\d+(?:\.\d+)?s", "sweep names as check keys carry them"),
     (r"90° grazing", "the microphone's orientation"),
     (r"94 dB SPL", "the calibrator level REW's calibration is set at"),
     (r"loading into the input \(−1\.33 dB\)", "the mic's loading divider, measured once (docs/rigs/pupu.md)"),

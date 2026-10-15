@@ -39,7 +39,12 @@ def _baselines(tmp_path):
     osm = {"schema": 1, "rig": "none (offline)", "stage": "osm", "level_dbfs": None,
            "provenance": {**pv, "run": "osm-x", "ac2_build": "ac2d (build 0.0.0+26388938b456)"},
            "summary": {}, "checks": {"osm.identity.ac2_vs_osm_h": e(0.0),
-                                     "osm.genelec-rig.ac2_vs_osm_h": e(0.2, tol=(0.3, 1.0))}}
+                                     "osm.genelec-rig.ac2_vs_osm_h": e(0.2, tol=(0.3, 1.0)),
+                                     "osm.genelec-rig.columns_judged": e(384.0, "INFO", "columns", None),
+                                     "osm.genelec-rig.ac2_vs_osm_h_95th_percentile_difference": e(0.662429, "INFO", tol=None),
+                                     "osm.genelec-rig.ac2_vs_osm_h_max_difference": e(1.86824, "INFO", tol=None),
+                                     "osm.genelec-rig.ac2_vs_osm_h_max_difference_frequency":
+                                         e(76.5033, "INFO", "Hz", None)}}
     # an older build: not shown, its stage named as not run
     ambient = {"schema": 1, "rig": "r", "stage": "ambient", "level_dbfs": None,
                "provenance": {**pv, "started": "2026-10-01T00:00:00Z", "ac2_build": "0.0.0+0123456789ab"},
@@ -73,15 +78,19 @@ def test_tables_per_path_worst_value_and_verdict(tmp_path):
     # only the columns some row has a value in, the row's one limit
     assert "| quantity | ac2 vs truth | REW vs truth | ac2 − REW | limit (pass / warn) |" in xone
     # worst verdict first; ac2 − REW at a tone is the difference of the two readings vs the sine
+    # a cell partly judged says how much of it the verdict stands on
     assert _row(xone, "Magnitude at the tones") == ("| Magnitude at the tones | −0.060 dB **warn** | −0.030 dB pass "
-                                                    "| −0.030 dB pass | 0.05 / 0.2 dB |")
+                                                    "(1 of 2 judged) | −0.030 dB pass | 0.05 / 0.2 dB |")
     # a band is its own row, held to its own limit; a band's max(|mean|, spread) is unsigned
     assert _row(xone, "Magnitude 20–100 Hz, sweeps") == "| Magnitude 20–100 Hz, sweeps | — | — | 0.020 dB pass | 0.03 / 0.1 dB |"
     # only bounds: not judged
     assert _row(xone, "Harmonics H2–H5") == "| Harmonics H2–H5 | not judged | — | — | — |"
     # OSM's synthetic fixtures and its rig recordings are separate tables
     assert _row(_path(text, "OSM fixtures."), "Magnitude") == "| Magnitude | 0.000 dB pass | 0.05 / 0.2 dB |"
-    assert _row(_path(text, "OSM on the rig recordings."), "Genelec: magnitude") == "| Genelec: magnitude | 0.200 dB pass | 0.3 / 1 dB |"
+    # a rig median carries its population and tails as context
+    assert _row(_path(text, "OSM on the rig recordings."), "Genelec: magnitude, median") == (
+        "| Genelec: magnitude, median | 0.200 dB pass; 384 columns, 95th percentile 0.662 dB, max 1.868 dB at 76.5 Hz "
+        "| 0.3 / 1 dB |")
     # a path not on the build: not run, no table
     assert _path(text, "Ambient (silent room).").endswith("Not run on this build.")
     assert "2638893" not in text
@@ -176,3 +185,22 @@ def test_missing_markers_refused(tmp_path):
     doc.write_text("no markers\n")
     with pytest.raises(ValueError, match="marker"):
         C.update(doc, tmp_path)
+
+
+def test_band_population_and_exceptions_outside_the_tables(tmp_path):
+    root = _baselines(tmp_path)
+    b = json.loads((root / "r" / "xone-30dbfs.json").read_text())
+    # a live-TF band on few surviving columns, the other bands not judged
+    b["checks"]["xone.mag.ac2 TF|direct (TF capture).100-1000"] = e(0.034, tol=(0.1, 0.3), n=15, of=159, spread=0.034)
+    b["checks"]["xone.mag.ac2 TF|direct (TF capture).1000-20000"] = e(None, "INCONCLUSIVE", tol=(0.1, 0.3))
+    # a judged WARN no row shows
+    b["checks"]["xone.mag.ac2 sweep a|ac2 sweep b.1000-20000"] = e(0.379, "WARN", tol=(0.3, 1.0), spread=0.379)
+    _write(root, "r", "xone-30dbfs.json", b)
+    text = C.blocks(root)["table"]
+    xone = _path(text, "Xone (electrical), −30 dBFS.")
+    assert _row(xone, "Magnitude 100 Hz–1 kHz, live TF").startswith(
+        "| Magnitude 100 Hz–1 kHz, live TF | 0.034 dB pass (15 of 159 columns) |")
+    assert _row(xone, "Magnitude 1–20 kHz, live TF").startswith("| Magnitude 1–20 kHz, live TF | not judged |")
+    bs = [x for _, x in C.current(C.load(root))]
+    assert "Xone: mag.ac2 sweep a|ac2 sweep b.1000-20000" in C.disparities(bs)
+    assert not any("TF capture" in d for d in C.disparities(bs))

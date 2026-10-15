@@ -256,6 +256,7 @@ class BandChecks:
                     ud, up = sine_uncertainty(ud, tk_db, nz_db), sine_uncertainty(up, tk_deg, nz_deg)
                     if not narrow_row:
                         self.sine_u.setdefault(p.name, {})[(name, fc)] = ud
+                        self.sine_noise_u.setdefault(p.name, {})[(name, fc)] = nz_db
                     # the readings the REW recording's narrow one does not carry: context for the
                     # column-to-tone split, not judged
                     info_only = name in ("direct (TF capture)", f"direct (ac2 capture {p.primary})") or (
