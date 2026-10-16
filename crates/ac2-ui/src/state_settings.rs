@@ -67,7 +67,7 @@ impl AppState {
             .map_or_else(CalView::default, |s| CalView::new(s, on));
         let leq = self.kind_meas(PaneKind::Spl).cloned().and_then(|m| {
             let calibrated = self.leq_calibrated(m.id);
-            LeqDialog::new(&m, calibrated)
+            LeqDialog::new(&m, calibrated, self.leq_cues_shown)
         });
         let mut settings = Settings::new(page, session, cal, leq);
         settings.rig = RigPage::new(self.daemon().map(|s| &s.rig));

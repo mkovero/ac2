@@ -334,6 +334,9 @@ pub struct AppState {
     pub settings_reveal: bool,
     /// The Settings page last shown: the Settings key opens it again.
     settings_page_last: Page,
+    /// The SPL / Leq page's cue fold as the operator last set it, for the app's run: Apply,
+    /// closing and another meter keep it (a meter with a cue set opens shown anyway).
+    leq_cues_shown: bool,
     /// The SPL / Leq page last applied, with what its call is named: a conflict brings it
     /// back with its edits.
     leq_sent: Option<(String, Box<LeqDialog>)>,
@@ -474,6 +477,7 @@ impl AppState {
             tree_reveal: false,
             settings_reveal: false,
             settings_page_last: Page::AudioIo,
+            leq_cues_shown: false,
             leq_sent: None,
             layout_calls: std::collections::VecDeque::new(),
             layout_queued: BTreeMap::new(),
@@ -519,6 +523,9 @@ impl AppState {
         self.ran_command = None;
         self.undoing = false;
         self.update_inner(msg, keymap, &mut out);
+        if let Some(c) = self.overlay.leq().and_then(|d| d.cues_chosen) {
+            self.leq_cues_shown = c;
+        }
         if tick {
             self.poll_settings(&mut out);
             self.layout_drag_due(&mut out);

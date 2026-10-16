@@ -2183,8 +2183,10 @@ levels ([Art-Net cues](#art-net-cues)), or both:
 The messages go over UDP to the rig's OSC target, an IP address and port (no host names: a
 name lookup could stall the meter). The daemon keeps the target in its rig settings, so it
 survives restarts and no client has to stay connected; send a test message to check the
-receiver before the show. A message may append the level the state was judged on (dB SPL) as
-a trailing float.
+receiver before the show. A message may carry the measured level (dB SPL) as its last float
+argument (`--append-level`; the **+ dB SPL** toggle of a cue row on the SPL / Leq page): every
+OSC message of that cue gets it except fault's, which has no level to send; DMX levels never
+do.
 
 The meter's own cue shows the worst of its limits, `over` first, then `fault`, `near`, `ok`:
 an overload always lights, even while another limit cannot be judged. That is the cue for a

@@ -267,6 +267,9 @@ pub struct LeqDialog {
     pub on_rig: bool,
     /// The OSC cue rows are shown.
     pub cues_shown: bool,
+    /// The fold as the operator last set it on this page (`None`: untouched): the app
+    /// keeps it for the next time the page opens.
+    pub cues_chosen: Option<bool>,
     /// The meter-wide cue: the worst state of all its limits.
     pub meter_cue: CueEdit,
     /// The peak limits' cues, in [`PeakQuantity::ALL`] order.
@@ -281,7 +284,8 @@ pub struct LeqDialog {
 
 impl LeqDialog {
     /// The dialog over SPL meter `m`; `None` for another kind of measurement.
-    pub fn new(m: &Measurement, calibrated: bool) -> Option<Self> {
+    /// The cues open shown when any is set, else as `shown` (the fold last chosen).
+    pub fn new(m: &Measurement, calibrated: bool, shown: bool) -> Option<Self> {
         let MeasKind::Spl { config } = &m.config.kind else {
             return None;
         };
@@ -303,7 +307,7 @@ impl LeqDialog {
             Some(p) => (number_text(p.level.0), number_text(p.peak.0)),
             None => (String::new(), String::new()),
         };
-        Some(Self {
+        let mut d = Self {
             meas: m.id,
             name: m.config.name.clone(),
             calibrated,
@@ -324,7 +328,8 @@ impl LeqDialog {
             notice: None,
             transfer: None,
             on_rig: m.config.scope == ac2_proto::model::MeasScope::Rig,
-            cues_shown: false,
+            cues_shown: shown,
+            cues_chosen: None,
             meter_cue: CueEdit::of(config.cue.as_deref()),
             peak_cues: PeakQuantity::ALL
                 .map(|q| CueEdit::of(config.leq.peaks.get(q).and_then(|l| l.cue.as_deref()))),
@@ -337,7 +342,17 @@ impl LeqDialog {
             ),
             base_rev: m.config_rev,
             base: config.clone(),
-        })
+        };
+        d.cues_shown |= d.any_cue_set();
+        Some(d)
+    }
+
+    /// Any cue row holds a message or DMX levels.
+    pub fn any_cue_set(&self) -> bool {
+        self.cue_rows()
+            .into_iter()
+            .filter_map(|r| self.cue_edit(r))
+            .any(|c| c.set() + c.dmx_set() > 0)
     }
 
     /// The headroom horizon chosen, s.
@@ -644,7 +659,10 @@ impl LeqDialog {
             Focus::Extra(_) => return,
             // Two-way toggles: → on, ← off.
             Focus::Scope => self.on_rig = d > 0,
-            Focus::CueFold => self.cues_shown = d > 0,
+            Focus::CueFold => {
+                self.cues_shown = d > 0;
+                self.cues_chosen = Some(self.cues_shown);
+            }
             Focus::Cue { row, col } => {
                 let Some(c) = self.cue_edit_mut(row) else {
                     return;

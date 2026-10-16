@@ -25,7 +25,7 @@ fn meter() -> Measurement {
 
 #[test]
 fn opens_on_the_meter_windows() {
-    let d = LeqDialog::new(&meter(), true).expect("spl");
+    let d = LeqDialog::new(&meter(), true, false).expect("spl");
     let names: Vec<String> = d.rows.iter().map(|r| r.cell(Col::Length)).collect();
     assert_eq!(
         names,
@@ -44,13 +44,13 @@ fn opens_on_the_meter_windows() {
     tf.config.kind = MeasKind::Transfer {
         config: ac2_proto::model::TransferConfig::with_inputs(0, 1),
     };
-    assert!(LeqDialog::new(&tf, true).is_none());
+    assert!(LeqDialog::new(&tf, true, false).is_none());
 }
 
 /// Keys only: a preset, a typed limit, a new window, a removal.
 #[test]
 fn keyboard_flow() {
-    let mut d = LeqDialog::new(&meter(), true).expect("spl");
+    let mut d = LeqDialog::new(&meter(), true, false).expect("spl");
     assert!(d.preset_note().contains("replaces the windows"));
     // → on the preset row: DIN 15905-5 is its 30 min window, nothing else.
     d.cycle(1);
@@ -136,7 +136,7 @@ fn names(d: &LeqDialog) -> Vec<String> {
 /// first; back to "none" the meter's windows return as they were.
 #[test]
 fn cycles_through_every_preset() {
-    let mut d = LeqDialog::new(&meter(), true).expect("spl");
+    let mut d = LeqDialog::new(&meter(), true, false).expect("spl");
     d.rows[0].limit = "110".into();
     let start = d.rows.clone();
     for (i, p) in LeqPreset::ALL.iter().enumerate() {
@@ -174,7 +174,7 @@ fn cycles_through_every_preset() {
 /// back to "none", and the next preset replaces them in turn.
 #[test]
 fn an_edit_keeps_the_preset() {
-    let mut d = LeqDialog::new(&meter(), true).expect("spl");
+    let mut d = LeqDialog::new(&meter(), true, false).expect("spl");
     d.cycle(1);
     assert_eq!(names(&d), ["LAeq 30 min 99"]);
     d.focus_cell(0, Col::Limit);
@@ -193,7 +193,7 @@ fn an_edit_keeps_the_preset() {
 
 #[test]
 fn refusals_name_the_window() {
-    let mut d = LeqDialog::new(&meter(), true).expect("spl");
+    let mut d = LeqDialog::new(&meter(), true, false).expect("spl");
     d.focus_cell(3, Col::Limit);
     d.type_text("loud");
     let e = d.leq_config().expect_err("a word is no limit");
@@ -220,7 +220,7 @@ fn refusals_name_the_window() {
 /// one per band, typing sets a limit, Enter sends them with the windows.
 #[test]
 fn the_band_meter_rows() {
-    let mut d = LeqDialog::new(&meter(), true).expect("spl");
+    let mut d = LeqDialog::new(&meter(), true, false).expect("spl");
     d.move_cell(-3);
     let meter_row = Focus::Band(BandFocus::Field(BandField::Meter));
     assert_eq!(d.focus, meter_row);
@@ -296,7 +296,7 @@ fn the_band_meter_rows() {
 /// correction is the operator's and no preset touches it.
 #[test]
 fn peak_limits_and_the_position_correction() {
-    let mut d = LeqDialog::new(&meter(), true).expect("spl");
+    let mut d = LeqDialog::new(&meter(), true, false).expect("spl");
     // ↑ from the preset row wraps to the rig's rows (the cues' fold, the scope), then the
     // band meter (off: its one row); above it the peaks' correction.
     d.move_row(-1);
@@ -381,7 +381,7 @@ fn peak_limits_and_the_position_correction() {
     if let MeasKind::Spl { config } = &mut m.config.kind {
         config.position = Some(PositionCorrection::both(-2.5));
     }
-    let d = LeqDialog::new(&m, true).expect("spl");
+    let d = LeqDialog::new(&m, true, false).expect("spl");
     assert_eq!(
         (
             d.extra_text(Extra::Position),

@@ -368,6 +368,7 @@ fn rig_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: &
         return;
     }
     ui.add(egui::Label::new(RichText::new(osc::CUES_NOTE).small().color(ch.dim)).wrap());
+    ui.add(egui::Label::new(RichText::new(osc::APPEND_NOTE).small().color(ch.dim)).wrap());
     egui::Grid::new("ac2-leq-cues")
         .num_columns(6)
         .spacing(egui::vec2(8.0, 6.0))

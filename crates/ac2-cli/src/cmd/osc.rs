@@ -225,7 +225,7 @@ fn show_cue(
     Ok(())
 }
 
-/// One state's action as `cue` shows it: `/light/red i:1 + level · dmx 12=255 13=0`, or
+/// One state's action as `cue` shows it: `/light/red i:1 + dB SPL · dmx 12=255 13=0`, or
 /// `none`.
 fn action_text(a: Option<&CueAction>) -> String {
     let Some(a) = a.filter(|a| !a.is_empty()) else {
@@ -412,7 +412,7 @@ pub(crate) fn cue_state(s: CueState) -> &'static str {
     }
 }
 
-/// A message as `cue` takes it: `/light/red i:1 f:0.5 s:stage`, `+ level` when the level
+/// A message as `cue` takes it: `/light/red i:1 f:0.5 s:stage`, `+ dB SPL` when the level
 /// is appended.
 pub(crate) fn message_text(m: &OscMessage) -> String {
     let mut s = m.path.to_string();
@@ -425,7 +425,7 @@ pub(crate) fn message_text(m: &OscMessage) -> String {
         });
     }
     if m.append_level {
-        s.push_str(" + level");
+        s.push_str(" + dB SPL");
     }
     s
 }

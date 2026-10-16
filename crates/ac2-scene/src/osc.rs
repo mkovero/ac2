@@ -34,9 +34,14 @@ pub const TEST_NOTE: &str = "Enter sends this message once: an address, then its
 pub const CUES_TITLE: &str = "Cues";
 /// What a cue's two lines are, under the cues' heading.
 pub const CUES_NOTE: &str = "OSC: sent to the rig's OSC target when a state begins, then every \
-                             second: an address, then arguments (/light/1 1.0); Level appends \
-                             the level in dB SPL. DMX: channel=value levels (12=255 13=0) held \
-                             in the rig's Art-Net universe while the state is current";
+                             second: an address, then arguments (/light/1 1.0). DMX: \
+                             channel=value levels (12=255 13=0) held in the rig's Art-Net \
+                             universe while the state is current";
+/// The heading of a cue row's toggle that appends the measured level (`--append-level`).
+pub const APPEND_TITLE: &str = "+ dB SPL";
+/// What that toggle does, under the cues' heading.
+pub const APPEND_NOTE: &str = "+ dB SPL: each OSC message of this row gets the measured level \
+                               (dB SPL) as a last float argument; fault and DMX don't";
 /// The heading over the rig's meters on the Rig monitor page.
 pub const METERS_TITLE: &str = "Meters on the rig";
 /// The Rig monitor page with no rig meter.
@@ -283,7 +288,7 @@ pub fn scope_text(on_rig: bool) -> &'static str {
 
 /// The append-level toggle's value as shown.
 pub fn append_text(on: bool) -> &'static str {
-    if on { "+ level" } else { "no level" }
+    if on { "on" } else { "off" }
 }
 
 /// The rig group's header detail, longest first: the meters and how sending fares.

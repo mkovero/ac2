@@ -574,3 +574,54 @@ fn the_limit_editor_sends_dmx_cue_levels() {
     assert_eq!(ac2_proto::model::dmx_list_text(&near.dmx), "14=40");
     assert!(cue.ok.is_none() && cue.fault.is_none());
 }
+
+/// The cue fold is the operator's for the app's run: unfolded, it stays shown after Apply
+/// and when the page opens again; folded again, a meter without a cue opens folded.
+#[test]
+fn the_cue_fold_survives_apply_and_reopening() {
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    t.type_key("Shift+L", "L");
+    let shown = |t: &T| t.st.overlay.leq().expect("open").cues_shown;
+    assert!(!shown(&t), "no cue set: folded");
+    t.st.update(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
+    t.key("ArrowRight");
+    assert!(shown(&t));
+    let r = t.key("Enter");
+    assert!(matches!(call(&r), Some((Command::MeasUpdate { .. }, _))));
+    assert!(t.st.overlay.leq().is_none(), "applied: the page closes");
+    t.type_key("Shift+L", "L");
+    assert!(shown(&t), "the unfold is kept across Apply");
+    t.st.update(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
+    t.key("ArrowLeft");
+    t.key("Escape");
+    assert!(t.st.overlay.leq().is_none(), "closed");
+    t.type_key("Shift+L", "L");
+    assert!(!shown(&t), "folded by the operator: stays folded");
+}
+
+/// A meter with any cue set opens its cues shown, whatever the fold last chosen.
+#[test]
+fn a_meter_with_a_cue_opens_its_cues_shown() {
+    use ac2_proto::model::{Cue, CueAction, DmxChannel, DmxSet};
+    let mut s = with_spl();
+    let MeasKind::Spl { config } = &mut s.measurements[2].config.kind else {
+        panic!()
+    };
+    config.cue = Some(Box::new(Cue {
+        over: Some(CueAction {
+            osc: None,
+            dmx: vec![DmxSet {
+                channel: DmxChannel::new(12).expect("test value"),
+                value: 255,
+            }],
+        }),
+        ..Cue::default()
+    }));
+    let mut t = T::new();
+    t.conn(mirror(s));
+    t.type_key("Shift+L", "L");
+    let d = t.st.overlay.leq().expect("open");
+    assert!(d.cues_shown);
+    assert_eq!(d.cue_fold_text(), "shown · no message set · DMX in 1 state");
+}

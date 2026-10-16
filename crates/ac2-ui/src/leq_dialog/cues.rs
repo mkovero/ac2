@@ -41,7 +41,7 @@ impl CueCol {
     pub fn title(self) -> &'static str {
         match self {
             CueCol::State(s) | CueCol::Dmx(s) => ac2_scene::osc::field_title(s),
-            CueCol::Append => "Level",
+            CueCol::Append => ac2_scene::osc::APPEND_TITLE,
         }
     }
 
@@ -296,6 +296,21 @@ mod tests {
         assert_eq!(
             e.checked("the meter"),
             Err("DMX cue of the meter: \"12=300\": the value is a number 0–255".into())
+        );
+    }
+
+    /// The append toggle reads as what it adds, in the words of `--append-level`'s level
+    /// (dB SPL), and the note under the cues says what gets it.
+    #[test]
+    fn the_append_toggle_names_db_spl() {
+        assert_eq!(CueCol::Append.title(), "+ dB SPL");
+        assert_eq!(CueCol::Append.field_name(), "+ dB SPL");
+        assert_eq!(ac2_scene::osc::append_text(true), "on");
+        assert_eq!(ac2_scene::osc::append_text(false), "off");
+        assert_eq!(
+            ac2_scene::osc::APPEND_NOTE,
+            "+ dB SPL: each OSC message of this row gets the measured level (dB SPL) as a \
+             last float argument; fault and DMX don't"
         );
     }
 }
