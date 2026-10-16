@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 
 use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop};
 use ac2_proto::model::{
-    CueState, CueSubject, GeneratorDesired, GeneratorSettings, LeqConfig, LeqWindow, MeasConfig,
-    MeasKind, OscArg, OscCue, OscMessage, OscPath, OwnedTraces, PeakWeighting, Signal, SplConfig,
-    TimeWeighting, Weighting,
+    Cue, CueAction, CueState, CueSubject, GeneratorDesired, GeneratorSettings, LeqConfig,
+    LeqWindow, MeasConfig, MeasKind, OscArg, OscMessage, OscPath, OwnedTraces, PeakWeighting,
+    Signal, SplConfig, TimeWeighting, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MeasId, Rev, Seconds};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody};
@@ -93,9 +93,14 @@ fn msg(path: &str, append_level: bool) -> OscMessage {
 }
 
 /// `/<name>/<state>` for every state, the level appended.
-fn cue(name: &str) -> Option<Box<OscCue>> {
-    let m = |s: &str| Some(msg(&format!("/{name}/{s}"), true));
-    Some(Box::new(OscCue {
+fn cue(name: &str) -> Option<Box<Cue>> {
+    let m = |s: &str| {
+        Some(CueAction {
+            osc: Some(msg(&format!("/{name}/{s}"), true)),
+            dmx: vec![],
+        })
+    };
+    Some(Box::new(Cue {
         ok: m("ok"),
         near: m("near"),
         over: m("over"),
@@ -113,7 +118,7 @@ fn window(limit: Option<f64>, name: &str) -> LeqWindow {
     }
 }
 
-fn meter(name: &str, windows: Vec<LeqWindow>, meter_cue: Option<Box<OscCue>>) -> MeasConfig {
+fn meter(name: &str, windows: Vec<LeqWindow>, meter_cue: Option<Box<Cue>>) -> MeasConfig {
     MeasConfig {
         scope: ac2_proto::model::MeasScope::Session,
         name: name.into(),

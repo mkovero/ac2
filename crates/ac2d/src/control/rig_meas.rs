@@ -157,10 +157,12 @@ impl Control {
             monitor_at_start: self.store.state().rig.monitor_at_start,
             monitor_session: self.rigm.session.clone(),
             osc_target: self.store.state().rig.osc_target,
+            artnet_target: self.store.state().rig.artnet_target,
         }
     }
 
-    /// `conflict` unless `base` is the rig's rev (`osc.target`, `rig.monitor_start`).
+    /// `conflict` unless `base` is the rig's rev (`osc.target`, `artnet.target`,
+    /// `rig.monitor_start`).
     pub(super) fn rig_base(&self, base: Rev) -> Result<(), ProtoError> {
         let rev = self.store.state().rig.rev;
         if base == rev {

@@ -6,7 +6,7 @@
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 
-use ac2_proto::model::{OscArg, OscMessage, OscStatus};
+use ac2_proto::model::{OscArg, OscMessage, OutputStatus};
 use rosc::{OscPacket, OscType};
 
 /// The OSC packet for `msg`, with `level` (dB SPL) appended as a float when the message
@@ -38,7 +38,7 @@ pub(crate) fn encode(msg: &OscMessage, level: Option<f32>) -> Result<Vec<u8>, St
 pub(crate) struct OscSender {
     v4: Option<UdpSocket>,
     v6: Option<UdpSocket>,
-    status: OscStatus,
+    status: OutputStatus,
 }
 
 impl OscSender {
@@ -69,7 +69,7 @@ impl OscSender {
     }
 
     /// Sent count and the latest error.
-    pub(crate) fn status(&self) -> &OscStatus {
+    pub(crate) fn status(&self) -> &OutputStatus {
         &self.status
     }
 

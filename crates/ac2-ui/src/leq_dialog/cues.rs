@@ -3,7 +3,7 @@
 //! window and the predicted window — with a typed message per state (`/light/1 1.0`,
 //! [`ac2_scene::osc::parse_message`]) and whether the level is appended.
 
-use ac2_proto::model::{CueState, OscCue, OscMessage, PeakQuantity};
+use ac2_proto::model::{Cue, CueAction, CueState, OscMessage, PeakQuantity};
 use ac2_scene::osc::{STATES, message_text, parse_message};
 
 /// A column of a cue row, left to right.
@@ -65,20 +65,20 @@ pub struct CueEdit {
     pub append: bool,
     /// The cue as it came: given back untouched while nothing was edited (a cue set from
     /// the CLI may append the level to some messages only).
-    before: Option<Box<OscCue>>,
+    before: Option<Box<Cue>>,
 }
 
 impl CueEdit {
-    pub fn of(c: Option<&OscCue>) -> Self {
+    pub fn of(c: Option<&Cue>) -> Self {
         let Some(c) = c else {
             return Self::default();
         };
-        let msg = |s| c.get(s).map_or_else(String::new, message_text);
+        let msg = |s| c.osc(s).map_or_else(String::new, message_text);
         Self {
             text: STATES.map(msg),
             append: STATES
                 .iter()
-                .any(|s| c.get(*s).is_some_and(|m| m.append_level)),
+                .any(|s| c.osc(*s).is_some_and(|m| m.append_level)),
             before: Some(Box::new(c.clone())),
         }
     }
@@ -106,17 +106,18 @@ impl CueEdit {
         })
     }
 
-    /// The cue as typed: `None` when no state has a message.
-    pub fn cue(&self) -> Result<Option<Box<OscCue>>, String> {
-        let mut c = OscCue::default();
+    /// The cue as typed, each state keeping the Art-Net levels it came with (this dialog
+    /// edits the OSC messages only): `None` when no state does anything.
+    pub fn cue(&self) -> Result<Option<Box<Cue>>, String> {
+        let mut c = Cue::default();
         for s in STATES {
-            let m: Option<OscMessage> = parse_message(self.text_of(s), self.append)?;
-            *match s {
-                CueState::Ok => &mut c.ok,
-                CueState::Near => &mut c.near,
-                CueState::Over => &mut c.over,
-                CueState::Fault => &mut c.fault,
-            } = m;
+            let osc: Option<OscMessage> = parse_message(self.text_of(s), self.append)?;
+            let dmx = self
+                .before
+                .as_ref()
+                .map_or_else(Vec::new, |b| b.dmx(s).to_vec());
+            let act = CueAction { osc, dmx };
+            *c.get_mut(s) = (!act.is_empty()).then_some(act);
         }
         if let Some(b) = &self.before {
             let shown = Self::of(Some(b));
@@ -124,11 +125,11 @@ impl CueEdit {
                 return Ok(Some(b.clone()));
             }
         }
-        Ok((c != OscCue::default()).then(|| Box::new(c)))
+        Ok((c != Cue::default()).then(|| Box::new(c)))
     }
 
     /// [`Self::cue`] with the subject named in the refusal.
-    pub(super) fn checked(&self, name: &str) -> Result<Option<Box<OscCue>>, String> {
+    pub(super) fn checked(&self, name: &str) -> Result<Option<Box<Cue>>, String> {
         self.cue().map_err(|e| format!("OSC cue of {name}: {e}"))
     }
 }
@@ -149,9 +150,19 @@ mod tests {
     #[test]
     fn a_cue_reads_back_and_an_untouched_one_stays_as_it_came() {
         // Appended on one message only: no single toggle says that, so it stays untouched.
-        let c = OscCue {
-            over: Some(m("/light/red", true)),
-            ok: Some(m("/light/green", false)),
+        let act = |m| {
+            Some(CueAction {
+                osc: Some(m),
+                dmx: vec![],
+            })
+        };
+        let c = Cue {
+            over: act(m("/light/red", true)),
+            ok: act(m("/light/green", false)),
+            fault: Some(CueAction {
+                osc: None,
+                dmx: ac2_proto::model::parse_dmx_list("12=255").expect("test value"),
+            }),
             ..Default::default()
         };
         let e = CueEdit::of(Some(&c));
@@ -164,12 +175,17 @@ mod tests {
         let mut e2 = e.clone();
         e2.text_mut(CueState::Near).push_str("/light/amber 1.0");
         let got = e2.cue().expect("test value").expect("test value");
-        assert!(got.ok.as_ref().expect("test value").append_level);
-        assert_eq!(got.near, Some(m("/light/amber", true)));
-        // Emptied: no cue.
+        assert!(got.osc(CueState::Ok).expect("test value").append_level);
+        assert_eq!(got.osc(CueState::Near), Some(&m("/light/amber", true)));
+        // The levels this dialog does not edit are kept.
+        assert_eq!(got.fault, c.fault);
+        // Emptied: only the levels are left.
         let mut e3 = e;
         e3.text = Default::default();
-        assert_eq!(e3.cue(), Ok(None));
+        let got = e3.cue().expect("test value").expect("test value");
+        assert_eq!(got.fault, c.fault);
+        assert_eq!(got.over, None);
+        assert_eq!(CueEdit::default().cue(), Ok(None));
     }
 
     #[test]

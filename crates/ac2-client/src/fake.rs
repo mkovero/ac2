@@ -459,7 +459,9 @@ impl Shared {
     fn rig_cmd(&mut self, c: Command) -> Result<ReplyBody, ProtoError> {
         let mut rig = self.state.rig.clone();
         let base = match &c {
-            Command::OscTarget { base, .. } | Command::RigMonitorStart { base, .. } => *base,
+            Command::OscTarget { base, .. }
+            | Command::ArtnetTarget { base, .. }
+            | Command::RigMonitorStart { base, .. } => *base,
             _ => rig.rev,
         };
         if base != rig.rev {
@@ -467,12 +469,19 @@ impl Shared {
         }
         match c {
             Command::OscTarget { addr, .. } => rig.osc_target = addr,
+            Command::ArtnetTarget { target, .. } => rig.artnet_target = target,
             Command::RigMonitorStart { on, .. } => rig.monitor_at_start = on,
             Command::OscTest { .. } => {
                 if rig.osc_target.is_none() {
                     return Err(err(ErrorCode::Invalid, "no OSC target"));
                 }
                 rig.osc.sent += 1;
+            }
+            Command::ArtnetTest { .. } => {
+                if rig.artnet_target.is_none() {
+                    return Err(err(ErrorCode::Invalid, "no Art-Net target"));
+                }
+                rig.artnet.sent += 1;
             }
             _ => unreachable!("rig_cmd is called with rig commands only"),
         }
@@ -511,9 +520,11 @@ impl Shared {
             | C::GenRelease { .. }
             | C::GenStop
             | C::GenCeiling { .. }) => self.generator_cmd(client, c)?,
-            c @ (C::OscTarget { .. } | C::OscTest { .. } | C::RigMonitorStart { .. }) => {
-                self.rig_cmd(c)?
-            }
+            c @ (C::OscTarget { .. }
+            | C::OscTest { .. }
+            | C::ArtnetTarget { .. }
+            | C::ArtnetTest { .. }
+            | C::RigMonitorStart { .. }) => self.rig_cmd(c)?,
             c @ (C::MeasCreate { .. }
             | C::MeasUpdate { .. }
             | C::MeasColour { .. }

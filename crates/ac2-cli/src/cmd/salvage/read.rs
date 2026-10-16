@@ -280,6 +280,7 @@ fn meas_config(v: &Value, notes: &mut Vec<String>) -> Result<MeasConfig, String>
     if let Some(o) = v.as_object_mut() {
         o.entry("scope").or_insert_with(|| Value::from("session"));
     }
+    cue_messages_as_actions(&mut v);
     let mut own = Vec::new();
     let c = lenient(&v, base.as_ref(), "", &mut own);
     match c {
@@ -488,6 +489,34 @@ fn overlay(
     }
 }
 
+/// A cue of format 26 held one OSC message per state; this version holds an action (an OSC
+/// message and DMX levels) per state. Every state that is an old message becomes an action
+/// sending that message and holding no levels, wherever a `cue` sits in the config.
+fn cue_messages_as_actions(v: &mut Value) {
+    match v {
+        Value::Object(o) => {
+            for (k, child) in o.iter_mut() {
+                if k == "cue"
+                    && let Value::Object(cue) = child
+                {
+                    for state in ["ok", "near", "over", "fault"] {
+                        if let Some(m) = cue.get_mut(state)
+                            && m.get("path").is_some()
+                        {
+                            let msg = m.take();
+                            *m = serde_json::json!({ "osc": msg, "dmx": [] });
+                        }
+                    }
+                } else {
+                    cue_messages_as_actions(child);
+                }
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(cue_messages_as_actions),
+        _ => {}
+    }
+}
+
 /// Settings an earlier version kept under another key or shape, as this version has them.
 /// Tried only where this version has no field of the old name.
 fn moved(key: &str, v: &Value) -> Option<(&'static str, Value)> {
@@ -528,6 +557,32 @@ mod tests {
             scope: ac2_proto::model::MeasScope::Session,
             name: "FOH SPL".into(),
             kind: MeasKind::Spl { config: c },
+        }
+    }
+
+    #[test]
+    fn an_osc_cue_of_format_26_becomes_an_action_with_no_levels() {
+        let c = spl();
+        let msg = json!({ "path": "/light/red", "args": [{ "type": "int", "value": 1 }],
+                          "append_level": true });
+        let mut v = serde_json::to_value(&c).unwrap();
+        let old_cue = json!({ "ok": null, "near": null, "over": msg, "fault": null });
+        v["kind"]["config"]["cue"] = old_cue.clone();
+        v["kind"]["config"]["leq"]["windows"][0]["cue"] = old_cue;
+        let mut notes = Vec::new();
+        let got = meas_config(&v, &mut notes).unwrap();
+        assert!(notes.is_empty(), "{notes:?}");
+        let MeasKind::Spl { config: got } = got.kind else {
+            panic!("an spl meter")
+        };
+        let want = ac2_proto::model::CueAction {
+            osc: Some(serde_json::from_value(msg).unwrap()),
+            dmx: vec![],
+        };
+        for cue in [got.cue.as_deref(), got.leq.windows[0].cue.as_deref()] {
+            let cue = cue.expect("the cue is kept");
+            assert_eq!(cue.over.as_ref(), Some(&want));
+            assert_eq!(cue.ok, None);
         }
     }
 

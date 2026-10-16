@@ -271,7 +271,7 @@ pub struct PredictedWindow {
     /// "Near" within this much below the limit (≥ 0).
     pub warn_margin: Db,
     /// Cue sent when its state changes.
-    pub cue: Option<Box<super::OscCue>>,
+    pub cue: Option<Box<super::Cue>>,
 }
 
 /// One rolling band window: the Leq of one 1/3-octave band over a length and weighting,
@@ -297,7 +297,7 @@ pub struct BandWindow {
     /// "Near" within this much below the limit (≥ 0).
     pub warn_margin: Db,
     /// Cue sent when its state changes.
-    pub cue: Option<Box<super::OscCue>>,
+    pub cue: Option<Box<super::Cue>>,
 }
 
 impl BandWindow {

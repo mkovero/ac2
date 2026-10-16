@@ -31,6 +31,7 @@
 //! path itself ([`stimulus`]).
 #![deny(unsafe_code)]
 
+mod artnet;
 mod authlog;
 mod autosave;
 mod backend;

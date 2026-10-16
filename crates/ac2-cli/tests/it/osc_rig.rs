@@ -1,4 +1,4 @@
-//! `ac2 osc …`, `ac2 rig …` and `ac2 meas scope` against a real daemon on the simulated rig:
+//! `ac2 osc …`, `ac2 cue …`, `ac2 rig …` and `ac2 meas scope` against a real daemon on the simulated rig:
 //! a meter made the rig's, its cues set and shown by name, the OSC target and the monitor
 //! at start, and the warning a `session close` prints while a rig meter runs.
 #![allow(clippy::unwrap_used)]
@@ -12,7 +12,7 @@ use clap::Parser;
 use serde_json::Value;
 
 /// Exit code, stdout as JSON, stderr.
-async fn ac2(ep: &Endpoints, args: &[&str]) -> (u8, Value, String) {
+pub(crate) async fn ac2(ep: &Endpoints, args: &[&str]) -> (u8, Value, String) {
     let argv: Vec<&str> = [
         "ac2",
         "--json",
@@ -36,7 +36,7 @@ async fn ac2(ep: &Endpoints, args: &[&str]) -> (u8, Value, String) {
     (code, v, se)
 }
 
-async fn ok(ep: &Endpoints, args: &[&str]) -> (Value, String) {
+pub(crate) async fn ok(ep: &Endpoints, args: &[&str]) -> (Value, String) {
     let (code, v, se) = ac2(ep, args).await;
     assert_eq!(code, 0, "{args:?}: {v} {se}");
     (v, se)
@@ -91,7 +91,6 @@ async fn rig_meter_cues_status_and_close_warning() {
     let (q, _) = ok(
         &ep,
         &[
-            "osc",
             "cue",
             "Stage",
             "window:1min",
@@ -104,13 +103,12 @@ async fn rig_meter_cues_status_and_close_warning() {
     )
     .await;
     assert_eq!(q["label"], "LAeq 1 min", "{q}");
-    assert_eq!(q["cue"]["over"]["path"], "/light/red", "{q}");
-    assert_eq!(q["cue"]["over"]["args"][0]["value"], 1, "{q}");
-    assert_eq!(q["cue"]["over"]["append_level"], true, "{q}");
+    assert_eq!(q["cue"]["over"]["osc"]["path"], "/light/red", "{q}");
+    assert_eq!(q["cue"]["over"]["osc"]["args"][0]["value"], 1, "{q}");
+    assert_eq!(q["cue"]["over"]["osc"]["append_level"], true, "{q}");
     let (q, _) = ok(
         &ep,
         &[
-            "osc",
             "cue",
             "Stage",
             "window:1",
@@ -119,16 +117,12 @@ async fn rig_meter_cues_status_and_close_warning() {
         ],
     )
     .await;
-    assert_eq!(q["cue"]["near"]["args"][0]["type"], "float", "{q}");
-    assert_eq!(q["cue"]["near"]["args"][1]["value"], "stage", "{q}");
-    assert_eq!(q["cue"]["over"]["path"], "/light/red", "kept: {q}");
-    ok(
-        &ep,
-        &["osc", "cue", "Stage", "meter", "--fault", "/light/blink"],
-    )
-    .await;
+    assert_eq!(q["cue"]["near"]["osc"]["args"][0]["type"], "float", "{q}");
+    assert_eq!(q["cue"]["near"]["osc"]["args"][1]["value"], "stage", "{q}");
+    assert_eq!(q["cue"]["over"]["osc"]["path"], "/light/red", "kept: {q}");
+    ok(&ep, &["cue", "Stage", "meter", "--fault", "/light/blink"]).await;
     // No such window: named in words.
-    let (code, e, _) = ac2(&ep, &["osc", "cue", "Stage", "window:30min", "--ok", "/x"]).await;
+    let (code, e, _) = ac2(&ep, &["cue", "Stage", "window:30min", "--ok", "/x"]).await;
     assert_eq!(code, 1, "{e}");
     let msg = e["error"]["msg"].as_str().unwrap();
     assert!(msg.contains("no LAeq 30 min window"), "{msg}");
@@ -159,7 +153,7 @@ async fn rig_meter_cues_status_and_close_warning() {
     assert_eq!(subjects, ["meter", "LAeq 1 min"], "{st}");
 
     // Clearing one cue.
-    let (q, _) = ok(&ep, &["osc", "cue", "Stage", "meter", "--clear"]).await;
+    let (q, _) = ok(&ep, &["cue", "Stage", "meter", "--clear"]).await;
     assert!(q["cue"].is_null(), "{q}");
 
     // Closing the session leaves the rig meter blind: the reply's warning, by name.

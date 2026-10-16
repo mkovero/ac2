@@ -24,22 +24,38 @@ def osc_message(path, args, append_level):
     return {"path": path, "args": args, "append_level": append_level}
 
 
-OSC_CUE = {
-    "ok": osc_message("/light/red", [{"type": "int", "value": 0}], False),
-    "near": osc_message(
-        "/light/red",
-        [{"type": "float", "value": 0.5}, {"type": "str", "value": "near"}],
-        False,
-    ),
-    "over": osc_message("/light/red", [{"type": "int", "value": 1}], True),
-    "fault": None,
+def dmx(pairs):
+    return [{"channel": c, "value": v} for c, v in pairs]
+
+
+LIGHT_CUE = {
+    "ok": {
+        "osc": osc_message("/light/red", [{"type": "int", "value": 0}], False),
+        "dmx": dmx([(12, 0), (13, 255)]),
+    },
+    "near": {
+        "osc": osc_message(
+            "/light/red",
+            [{"type": "float", "value": 0.5}, {"type": "str", "value": "near"}],
+            False,
+        ),
+        "dmx": [],
+    },
+    "over": {
+        "osc": osc_message("/light/red", [{"type": "int", "value": 1}], True),
+        "dmx": dmx([(12, 255), (14, 40)]),
+    },
+    "fault": {"osc": None, "dmx": dmx([(512, 255)])},
 }
 
 RIG = {
     "rev": 38,
     "osc_target": "192.168.9.20:9000",
+    "artnet_target": {"addr": "192.168.9.255:6454", "universe": 1},
     "monitor_at_start": True,
     "osc": {"sent": 12, "last_error": "Connection refused (os error 111)"},
+    "artnet": {"sent": 340, "last_error": None},
+    "dmx": dmx([(12, 255), (14, 40)]),
     "cues": [
         {"meas": 4, "subject": {"type": "meter"}, "state": "over"},
         {
@@ -91,7 +107,7 @@ BAND_LEQ_CONFIG = {
             "limit": 30.5,
             "day_offset": None,
             "warn_margin": 2.0,
-            "cue": OSC_CUE,
+            "cue": LIGHT_CUE,
         }
     ],
     "predicted": {
@@ -153,7 +169,7 @@ SPL_MEASUREMENT = {
                 },
                 "position": {"level": 2.5, "peak": 1.5},
                 "bands": BAND_LEQ_CONFIG,
-                "cue": OSC_CUE,
+                "cue": LIGHT_CUE,
             },
         },
     },
@@ -574,6 +590,12 @@ def requests():
             {"msg": osc_message("/light/red", [{"type": "int", "value": 1}], True)},
         ),
         req(76, "rig.monitor_start", {"base": 38, "on": True}),
+        req(
+            77,
+            "artnet.target",
+            {"base": 38, "target": {"addr": "2.255.255.255:6454", "universe": 18}},
+        ),
+        req(78, "artnet.test", {"channels": dmx([(12, 255), (13, 40)])}),
     ]
 
 

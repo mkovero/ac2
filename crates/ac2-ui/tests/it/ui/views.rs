@@ -763,8 +763,8 @@ fn rig_monitor_views() {
     use ac2_proto::Change;
     use ac2_proto::Patch;
     use ac2_proto::model::{
-        CueState, CueSubject, MeasConfig, MeasKind, MeasScope, Measurement, OscStatus, Rig, RigCue,
-        SplConfig, TimeWeighting, Weighting,
+        CueState, CueSubject, MeasConfig, MeasKind, MeasScope, Measurement, OutputStatus, Rig,
+        RigCue, SplConfig, TimeWeighting, Weighting,
     };
     use ac2_proto::units::{MeasId, Rev};
     if !have_gpu("rig_monitor_views") {
@@ -793,7 +793,7 @@ fn rig_monitor_views() {
             rev: Rev(5),
             osc_target: Some("192.168.1.20:9000".parse().expect("addr")),
             monitor_at_start: true,
-            osc: OscStatus {
+            osc: OutputStatus {
                 sent: 128,
                 last_error: None,
             },
@@ -802,6 +802,7 @@ fn rig_monitor_views() {
                 subject: CueSubject::Meter,
                 state: CueState::Near,
             }],
+            ..Default::default()
         }));
     }
     let mut h = harness(options(Some(&rig)));

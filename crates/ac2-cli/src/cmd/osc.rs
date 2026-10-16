@@ -1,5 +1,5 @@
-//! `ac2 osc target|test|cue`, `ac2 rig status|monitor-at-start` and `ac2 meas scope`: the
-//! rig monitor and its OSC cues.
+//! `ac2 osc target|test`, `ac2 cue`, `ac2 rig status|monitor-at-start` and `ac2 meas
+//! scope`: the rig monitor and its cues.
 
 use ac2_client::{Client, ClientError, expect_body};
 use ac2_proto::model::*;
@@ -44,7 +44,6 @@ pub(crate) async fn osc(cli: &Cli, cmd: &OscCmd, out: &mut Out<'_>) -> Result<()
                 s
             })?;
         }
-        OscCmd::Cue(a) => cue(&c, a, out).await?,
     }
     Ok(())
 }
@@ -84,8 +83,11 @@ pub(crate) async fn rig(cli: &Cli, cmd: &RigCmd, out: &mut Out<'_>) -> Result<()
                 .collect();
             let json = json!({
                 "osc_target": st.rig.osc_target.map(|a| a.to_string()),
+                "artnet_target": st.rig.artnet_target,
                 "monitor_at_start": st.rig.monitor_at_start,
                 "osc": st.rig.osc,
+                "artnet": st.rig.artnet,
+                "dmx": st.rig.dmx,
                 "meters": meters.iter().map(|(m, cues)| json!({
                     "id": m.id,
                     "name": m.config.name,
@@ -96,14 +98,18 @@ pub(crate) async fn rig(cli: &Cli, cmd: &RigCmd, out: &mut Out<'_>) -> Result<()
             });
             out.emit(&json, || {
                 let mut s = format!(
-                    "OSC target: {}\nsent: {}\nlast error: {}\nmonitor at start: {}\n",
+                    "OSC target: {}\nsent: {}\nlast error: {}\n",
                     st.rig
                         .osc_target
                         .map_or_else(|| "off".to_owned(), |a| a.to_string()),
                     st.rig.osc.sent,
                     st.rig.osc.last_error.as_deref().unwrap_or("none"),
-                    if st.rig.monitor_at_start { "on" } else { "off" },
                 );
+                s.push_str(&super::artnet::status_text(&st.rig));
+                s.push_str(&format!(
+                    "monitor at start: {}\n",
+                    if st.rig.monitor_at_start { "on" } else { "off" }
+                ));
                 if meters.is_empty() {
                     s.push_str("rig SPL meters: none (`ac2 meas scope <meter> rig`)");
                 }
@@ -158,11 +164,14 @@ pub(crate) async fn meas_scope(
     Ok(())
 }
 
-async fn cue(c: &Client, a: &OscCueArgs, out: &mut Out<'_>) -> Result<(), CliError> {
+/// `cue`.
+pub(crate) async fn cue(cli: &Cli, a: &CueArgs, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = &connect(cli, false).await?;
     let show_only = !a.clear
-        && [&a.ok, &a.near, &a.over, &a.fault]
-            .iter()
-            .all(|m| m.is_none());
+        && CueState::ALL.iter().all(|s| {
+            let (m, d) = a.given(*s);
+            m.is_none() && d.is_none()
+        });
     if show_only {
         // Nothing to change: show the cue as it is.
         let st = state(c).await?;
@@ -194,7 +203,7 @@ fn show_cue(
     out: &mut Out<'_>,
     m: &Measurement,
     subject: CueSubject,
-    cue: Option<&OscCue>,
+    cue: Option<&Cue>,
 ) -> Result<(), CliError> {
     let label = subject_label(subject);
     out.emit(
@@ -204,20 +213,11 @@ fn show_cue(
             match cue {
                 None => format!("{head}: no cue"),
                 Some(q) => {
-                    let line = |name: &str, msg: Option<&OscMessage>| {
-                        format!(
-                            "  {name:<5} {}",
-                            msg.map_or_else(|| "none".to_owned(), message_text)
-                        )
-                    };
-                    [
-                        format!("{head}:"),
-                        line("ok", q.ok.as_ref()),
-                        line("near", q.near.as_ref()),
-                        line("over", q.over.as_ref()),
-                        line("fault", q.fault.as_ref()),
-                    ]
-                    .join("\n")
+                    let mut lines = vec![format!("{head}:")];
+                    for st in CueState::ALL {
+                        lines.push(format!("  {:<5} {}", cue_state(st), action_text(q.get(st))));
+                    }
+                    lines.join("\n")
                 }
             }
         },
@@ -225,30 +225,49 @@ fn show_cue(
     Ok(())
 }
 
-/// `old` with the messages `a` gives; `None` when no state has a message left.
-fn edited(old: Option<&OscCue>, a: &OscCueArgs) -> Option<OscCue> {
+/// One state's action as `cue` shows it: `/light/red i:1 + level · dmx 12=255 13=0`, or
+/// `none`.
+fn action_text(a: Option<&CueAction>) -> String {
+    let Some(a) = a.filter(|a| !a.is_empty()) else {
+        return "none".to_owned();
+    };
+    let mut parts = Vec::new();
+    if let Some(m) = &a.osc {
+        parts.push(message_text(m));
+    }
+    if !a.dmx.is_empty() {
+        parts.push(format!("dmx {}", dmx_list_text(&a.dmx)));
+    }
+    parts.join(" · ")
+}
+
+/// `old` with the messages and levels `a` gives; a state left with neither is `None`, and
+/// the cue is `None` when no state does anything.
+fn edited(old: Option<&Cue>, a: &CueArgs) -> Option<Cue> {
     if a.clear {
         return None;
     }
     let mut q = old.cloned().unwrap_or_default();
-    let set = |slot: &mut Option<OscMessage>, given: &Option<CueMsgArg>| {
-        if let Some(g) = given {
-            *slot = g.message(a.append_level);
+    for st in CueState::ALL {
+        let (msg, dmx) = a.given(st);
+        let slot = q.get_mut(st);
+        let mut act = slot.take().unwrap_or_default();
+        if let Some(m) = msg {
+            act.osc = m.message(a.append_level);
         }
-    };
-    set(&mut q.ok, &a.ok);
-    set(&mut q.near, &a.near);
-    set(&mut q.over, &a.over);
-    set(&mut q.fault, &a.fault);
-    let empty = q.ok.is_none() && q.near.is_none() && q.over.is_none() && q.fault.is_none();
-    (!empty).then_some(q)
+        if let Some(d) = dmx {
+            act.dmx = d.0.clone();
+        }
+        *slot = (!act.is_empty()).then_some(act);
+    }
+    (q != Cue::default()).then_some(q)
 }
 
 /// The subject `s` names in `cfg`, and its cue to edit.
 fn cue_slot(
     cfg: &mut SplConfig,
     s: CueSubjectArg,
-) -> Result<(CueSubject, &mut Option<Box<OscCue>>), CliError> {
+) -> Result<(CueSubject, &mut Option<Box<Cue>>), CliError> {
     let usage = |m: String| CliError::Usage(m);
     let same = |a: f64, b: u32| (a - f64::from(b)).abs() < 1e-6;
     match s {
@@ -384,7 +403,7 @@ pub(crate) fn subject_label(s: CueSubject) -> String {
     }
 }
 
-fn cue_state(s: CueState) -> &'static str {
+pub(crate) fn cue_state(s: CueState) -> &'static str {
     match s {
         CueState::Ok => "ok",
         CueState::Near => "near",
@@ -393,7 +412,7 @@ fn cue_state(s: CueState) -> &'static str {
     }
 }
 
-/// A message as `osc cue` takes it: `/light/red i:1 f:0.5 s:stage`, `+ level` when the level
+/// A message as `cue` takes it: `/light/red i:1 f:0.5 s:stage`, `+ level` when the level
 /// is appended.
 pub(crate) fn message_text(m: &OscMessage) -> String {
     let mut s = m.path.to_string();
@@ -417,7 +436,7 @@ fn conflict(e: &CliError) -> bool {
 
 /// A rev-guarded rig edit made on the current `rig.rev`; on `conflict` (another client
 /// edited the rig meanwhile) made once more on the new one. Returns the rig after it.
-async fn rig_edit(c: &Client, cmd: impl Fn(Rev) -> Command) -> Result<Rig, CliError> {
+pub(super) async fn rig_edit(c: &Client, cmd: impl Fn(Rev) -> Command) -> Result<Rig, CliError> {
     let mut tries = 0;
     loop {
         let base = state(c).await?.rig.rev;
@@ -496,8 +515,8 @@ pub(crate) fn warning_text(w: &Warning, st: Option<&State>) -> String {
     };
     match w {
         Warning::RigMonitorBlind { meas } => format!(
-            "rig SPL meter(s) {} stop metering until a session opens again; their OSC cues \
-             report fault",
+            "rig SPL meter(s) {} stop metering until a session opens again; their cues report \
+             fault",
             names(meas)
         ),
         Warning::RigMonitorMoved { meas } => format!(

@@ -14,7 +14,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use ac2_proto::model::{MeasKind, MeasScope, OutputSetup, SessionConfig};
+use ac2_proto::model::{ArtnetTarget, MeasKind, MeasScope, OutputSetup, SessionConfig};
 use ac2_proto::{ErrorCode, ProtoError};
 use ac2_traces::session::SavedMeasurement;
 use serde::{Deserialize, Serialize};
@@ -45,6 +45,9 @@ struct RigFile {
     /// Where OSC cues go; absent: nowhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     osc_target: Option<SocketAddr>,
+    /// Where the Art-Net universe goes; absent: nowhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    artnet_target: Option<ArtnetTarget>,
 }
 
 /// Just enough of any file to tell its format and version.
@@ -69,6 +72,8 @@ pub(crate) struct RigSettings {
     pub(crate) monitor_session: Option<SessionConfig>,
     /// Where OSC cues go; `None`: nowhere.
     pub(crate) osc_target: Option<SocketAddr>,
+    /// Where the Art-Net universe goes; `None`: nowhere.
+    pub(crate) artnet_target: Option<ArtnetTarget>,
 }
 
 /// Where the rig settings live.
@@ -137,6 +142,7 @@ impl RigStore {
                     monitor_at_start: f.monitor_at_start,
                     monitor_session: f.monitor_session,
                     osc_target: f.osc_target,
+                    artnet_target: f.artnet_target,
                 };
                 match check(&s) {
                     Ok(()) => (store, s),
@@ -200,6 +206,7 @@ impl RigStore {
             monitor_at_start: s.monitor_at_start,
             monitor_session: s.monitor_session.clone(),
             osc_target: s.osc_target,
+            artnet_target: s.artnet_target,
         };
         let text = serde_json::to_vec_pretty(&file)
             .map_err(|e| perr(ErrorCode::Internal, format!("rig settings: {e}")))?;
@@ -225,6 +232,9 @@ fn check(s: &RigSettings) -> Result<(), String> {
         && (a.ip().is_unspecified() || a.port() == 0)
     {
         return Err(format!("osc_target {a} is not an address to send to"));
+    }
+    if let Some(t) = s.artnet_target {
+        crate::control::check_artnet_addr(t.addr).map_err(|e| format!("artnet_target {e}"))?;
     }
     for (i, o) in s.outputs.iter().enumerate() {
         if s.outputs[..i].iter().any(|x| x.channel == o.channel) {
@@ -305,6 +315,10 @@ mod tests {
             ceiling_dbfs: Some(-40.0),
             outputs: vec![label(0, "Main L"), label(3, "Sub")],
             osc_target: Some("192.168.1.20:9000".parse().expect("addr")),
+            artnet_target: Some(ArtnetTarget {
+                addr: "2.255.255.255:6454".parse().expect("addr"),
+                universe: ac2_proto::model::PortAddress::new(1).expect("universe"),
+            }),
             ..RigSettings::default()
         };
         store.persist(&want).expect("write");

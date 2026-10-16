@@ -2170,7 +2170,8 @@ measured". Measure it as soon as the place can be reached.
 The rig can tell other gear when an SPL limit's state changes: a red light the performers
 see, a stage display, a lighting desk. Each limit of an SPL meter (a Leq window, a peak
 limit, a band window, the predicted level) can carry a cue, and so can the meter as a whole;
-a cue is one OSC message for each state, any of them left out:
+a cue says what each state does, any of them left out: send an OSC message, hold Art-Net
+levels ([Art-Net cues](#art-net-cues)), or both:
 
 | state | when |
 |---|---|
@@ -2198,19 +2199,19 @@ restart the window: its level and state carry on.
 repeats make silence meaningful: a crashed daemon, a pulled network cable or a powered-off
 rig then shows as a fault instead of a frozen last state.
 
-From the terminal (`ac2 osc cue --help` has the whole syntax):
+From the terminal (`ac2 cue --help` has the whole syntax):
 
 ```
 ac2 osc target 192.168.1.50:9000          # `off`: send nothing
 ac2 osc test /light/red i:1               # one message now, to check the receiver
-ac2 osc cue Stage window:15min --near "/light/amber i:1" --over "/light/red i:1" \
+ac2 cue Stage window:15min --near "/light/amber i:1" --over "/light/red i:1" \
     --ok "/light/off" --fault "/light/blink i:1" --append-level
-ac2 osc cue Stage meter --over "/stage/display s:OVER"
-ac2 osc cue Stage peak:lcpeak --over "/light/strobe 1"
-ac2 osc cue Stage band:63hz:60min --near "/light/amber 2"
-ac2 osc cue Stage window:15min            # show the cue
-ac2 osc cue Stage window:15min --near off # no message in that state
-ac2 osc cue Stage meter --clear           # remove the cue
+ac2 cue Stage meter --over "/stage/display s:OVER"
+ac2 cue Stage peak:lcpeak --over "/light/strobe 1"
+ac2 cue Stage band:63hz:60min --near "/light/amber 2"
+ac2 cue Stage window:15min                # show the cue
+ac2 cue Stage window:15min --near off     # no message in that state
+ac2 cue Stage meter --clear               # remove the cue
 ac2 rig status
 ```
 
@@ -2224,6 +2225,40 @@ the same moment makes the CLI read it again and retry once. In the app, the SPL 
 Rig monitor target whose Apply another client's edit beat comes back with your edits and the
 line "changed elsewhere: Apply again overwrites with your edits"; Apply (Enter) again sends
 them on the newer settings.
+
+#### Art-Net cues
+
+A cue state can also hold DMX levels in one Art-Net universe that ac2 owns: a lamp, an LED
+bar or a relay on a DMX node lights straight from the meter, with no OSC receiver in between.
+Each state lists channels and levels (`12=255 13=0 14=40`: channel 1–512 = level 0–255). The
+universe is the highest level any cue's current state gives a channel (HTP, as lighting
+desks merge), and 0 for every channel no current state lists. A cue that goes away stops
+holding its levels; a clean daemon stop sends one last frame of every cue's `ok` levels.
+
+ac2 sends all 512 channels whenever the frame changes, and the same frame again every second
+(nodes give up on a source silent for a few seconds). Set the target to a node's address or
+to a broadcast address (`2.255.255.255`, or your LAN's), with the universe as a number
+0–32767 or as net.sub.uni (`0.0.1`). The levels of a channel no cue sets are 0, so keep ac2's
+universe apart from the desk's and merge the two downstream:
+
+- **QLC+**: add an Art-Net *input* on ac2's universe (Inputs/Outputs, the network interface,
+  the universe number), and patch the cue channels to the fixtures there; QLC+ merges it
+  with its own output.
+- **A node with HTP merge** (most Art-Net nodes take two sources per port): send the desk and
+  ac2 to the same port-address; the brighter of the two wins on each channel.
+
+```
+ac2 artnet target 2.255.255.255 0.0.1     # broadcast, universe 1; `off`: send nothing
+ac2 artnet target 192.168.1.40:6454 17    # one node, port given
+ac2 artnet test 12=255 13=40              # light these channels for 5 s to find a fixture
+ac2 cue Stage meter --over-dmx "12=255 13=0" --ok-dmx "12=0 13=255" --fault-dmx "14=255"
+ac2 cue Stage window:15min --near-dmx "12=80"
+ac2 cue Stage meter --fault-dmx off       # no levels in that state
+ac2 rig status                            # target, frames sent, the channels above 0
+```
+
+The target is kept in the rig settings like the OSC target. `ac2 artnet test` holds its
+frame for 5 s, or until a cue changes state, then the cues' frame comes back.
 
 ## Keyboard
 

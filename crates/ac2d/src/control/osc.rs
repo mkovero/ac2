@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    CueState, CueSubject, LeqJudgement, MeasKind, OscCue, OscMessage, OscStatus, PeakQuantity,
-    RigCue, SplConfig,
+    Cue, CueState, CueSubject, DMX_CHANNELS, LeqJudgement, MeasKind, OscMessage, OutputStatus,
+    PeakQuantity, RigCue, SplConfig, dmx_htp, dmx_nonzero,
 };
 use ac2_proto::units::{MeasId, Rev};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
@@ -34,7 +34,7 @@ use crate::util::perr;
 /// How often the current states are sent again.
 pub(crate) const REPEAT: Duration = Duration::from_secs(1);
 
-/// The longest `rig.osc` waits to show a moved sent counter.
+/// The longest `rig.osc` (and `rig.artnet`) waits to show a moved sent counter.
 pub(crate) const STATUS_EVERY: Duration = Duration::from_secs(10);
 
 /// A cued meter reports every second; one silent this long has stopped judging (a stalled
@@ -66,7 +66,7 @@ pub(crate) fn has_cue(cfg: &SplConfig) -> bool {
 }
 
 /// Every cue of `cfg` with its subject, the meter's first.
-fn cues_of(cfg: &SplConfig) -> Vec<(CueSubject, &OscCue)> {
+fn cues_of(cfg: &SplConfig) -> Vec<(CueSubject, &Cue)> {
     let mut out = Vec::new();
     if let Some(c) = &cfg.cue {
         out.push((CueSubject::Meter, &**c));
@@ -135,7 +135,7 @@ fn severity(s: CueState) -> u8 {
 pub(crate) struct Desired {
     pub(crate) meas: MeasId,
     pub(crate) subject: CueSubject,
-    pub(crate) cue: OscCue,
+    pub(crate) cue: Cue,
     pub(crate) state: Option<CueState>,
     pub(crate) level: Option<f64>,
 }
@@ -178,7 +178,7 @@ pub(crate) fn desired(
 struct Entry {
     meas: MeasId,
     subject: CueSubject,
-    cue: OscCue,
+    cue: Cue,
     state: CueState,
     level: Option<f64>,
 }
@@ -186,13 +186,29 @@ struct Entry {
 /// One message to send: what, and the level to append.
 pub(crate) type Send = (OscMessage, Option<f32>);
 
-fn send_of(cue: &OscCue, state: CueState, level: Option<f64>) -> Option<Send> {
+fn send_of(cue: &Cue, state: CueState, level: Option<f64>) -> Option<Send> {
     let level = match state {
         // A fault has no level to speak of.
         CueState::Fault => None,
         _ => level.map(|l| l as f32),
     };
-    cue.get(state).map(|m| (m.clone(), level))
+    cue.osc(state).map(|m| (m.clone(), level))
+}
+
+/// Whether a sending status must be committed now: when an error appears, changes or clears,
+/// and otherwise at most every [`STATUS_EVERY`] while the counter moves (it moves with every
+/// repeat, and an event a second to every client for it alone is noise). `now_too`: an
+/// operator's command shows its sends at once.
+pub(super) fn status_due(
+    cur: &OutputStatus,
+    new: &OutputStatus,
+    at: Option<Instant>,
+    now_too: bool,
+    now: Instant,
+) -> bool {
+    new.last_error != cur.last_error
+        || (new.sent != cur.sent
+            && (now_too || at.is_none_or(|t| now.saturating_duration_since(t) >= STATUS_EVERY)))
 }
 
 /// The cued subjects' states, the latest reports and the sender.
@@ -300,8 +316,18 @@ impl Cues {
         }
     }
 
-    pub(crate) fn status(&self) -> &OscStatus {
+    pub(crate) fn status(&self) -> &OutputStatus {
         self.sender.status()
+    }
+
+    /// The universe the current states make (HTP over their levels).
+    pub(crate) fn frame(&self) -> [u8; DMX_CHANNELS] {
+        dmx_htp(self.entries.iter().map(|e| e.cue.dmx(e.state)))
+    }
+
+    /// The universe every cue's `ok` levels make: the clean-shutdown frame.
+    pub(crate) fn ok_frame(&self) -> [u8; DMX_CHANNELS] {
+        dmx_htp(self.entries.iter().map(|e| e.cue.dmx(CueState::Ok)))
     }
 }
 
@@ -344,17 +370,23 @@ impl Control {
         let sends = self.osc.apply(want);
         let target = self.store.state().rig.osc_target;
         self.osc.send_all(target, sends);
+        self.artnet_sync(now);
         if self.osc.entries.is_empty() {
             self.osc.next_repeat = None;
         } else if self.osc.next_repeat.is_none() {
             self.osc.next_repeat = Some(Instant::now() + REPEAT);
         }
         let cues = self.osc.rig_cues();
-        if cues != self.store.state().rig.cues {
-            let mut rig = self.store.state().rig.clone();
+        let dmx = dmx_nonzero(&self.osc.frame());
+        let cur = &self.store.state().rig;
+        if cues != cur.cues || dmx != cur.dmx {
+            let mut rig = cur.clone();
             rig.cues = cues;
+            rig.dmx = dmx;
             rig.osc = self.osc.status().clone();
+            rig.artnet = self.artnet.status().clone();
             self.osc.status_at = Some(now);
+            self.artnet.status_at = Some(now);
             self.commit(Change::Rig(rig));
         }
     }
@@ -371,21 +403,17 @@ impl Control {
         }
     }
 
-    /// Commits `rig.osc` when a send error appears, changes or clears, and otherwise at
-    /// most every [`STATUS_EVERY`]: the counter moves with every repeat, and an event a
-    /// second to every client for it alone is noise. `now_too`: an operator's command
-    /// (`osc.test`, `osc.target`) shows its sends at once.
+    /// Commits `rig.osc` when [`status_due`]; `now_too` for an operator's command
+    /// (`osc.test`, `osc.target`).
     fn commit_osc_status(&mut self, now_too: bool) {
         let now = Instant::now();
-        let cur = &self.store.state().rig.osc;
-        let status = self.osc.status();
-        let due = status.last_error != cur.last_error
-            || (status.sent != cur.sent && now_too)
-            || (status.sent != cur.sent
-                && self
-                    .osc
-                    .status_at
-                    .is_none_or(|t| now.saturating_duration_since(t) >= STATUS_EVERY));
+        let due = status_due(
+            &self.store.state().rig.osc,
+            self.osc.status(),
+            self.osc.status_at,
+            now_too,
+            now,
+        );
         if due {
             self.osc.status_at = Some(now);
             let mut rig = self.store.state().rig.clone();
@@ -399,8 +427,10 @@ impl Control {
         self.osc.next_repeat
     }
 
-    /// Clean shutdown: every cue sends its `ok` once.
+    /// Clean shutdown: every cue sends its `ok` once (the Art-Net frame of `ok` levels
+    /// first, while the cues are still known).
     pub(super) fn osc_shutdown(&mut self) {
+        self.artnet_shutdown();
         let sends = self.osc.clear();
         let target = self.store.state().rig.osc_target;
         self.osc.send_all(target, sends);
@@ -464,7 +494,7 @@ impl Control {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ac2_proto::model::{OscPath, Weighting};
+    use ac2_proto::model::{CueAction, OscPath, Weighting};
     use ac2_proto::units::Seconds;
 
     fn msg(p: &str) -> OscMessage {
@@ -475,12 +505,19 @@ mod tests {
         }
     }
 
-    fn cue() -> OscCue {
-        OscCue {
-            ok: Some(msg("/ok")),
-            near: Some(msg("/near")),
-            over: Some(msg("/over")),
-            fault: Some(msg("/fault")),
+    fn act(p: &str) -> Option<CueAction> {
+        Some(CueAction {
+            osc: Some(msg(p)),
+            dmx: vec![],
+        })
+    }
+
+    fn cue() -> Cue {
+        Cue {
+            ok: act("/ok"),
+            near: act("/near"),
+            over: act("/over"),
+            fault: act("/fault"),
         }
     }
 
@@ -568,7 +605,7 @@ mod tests {
         let mut c = Cues::default();
         c.apply(vec![want(win(), Some(CueState::Over))]);
         let mut d = want(win(), Some(CueState::Over));
-        d.cue.over = Some(msg("/red"));
+        d.cue.over = act("/red");
         assert_eq!(paths(&c.apply(vec![d])), ["/red"]);
     }
 

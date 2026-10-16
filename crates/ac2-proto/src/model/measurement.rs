@@ -117,7 +117,7 @@ pub struct SplConfig {
     /// `None`: off.
     pub bands: Option<Box<super::BandLeqConfig>>,
     /// Cue for the meter as a whole: the worst state of all its limits.
-    pub cue: Option<Box<super::OscCue>>,
+    pub cue: Option<Box<super::Cue>>,
 }
 
 /// The level difference from where the mic is to where a limit applies (the loudest
@@ -180,7 +180,7 @@ pub struct PeakLimit {
     /// "Near" within this much below the limit (≥ 0).
     pub warn_margin: Db,
     /// Cue sent when its state changes.
-    pub cue: Option<Box<super::OscCue>>,
+    pub cue: Option<Box<super::Cue>>,
 }
 
 /// The peak limits of an SPL meter.
@@ -224,7 +224,7 @@ pub struct LeqWindow {
     /// The window is "near" within this much below the limit (≥ 0).
     pub warn_margin: Db,
     /// Cue sent when its state changes.
-    pub cue: Option<Box<super::OscCue>>,
+    pub cue: Option<Box<super::Cue>>,
 }
 
 /// The Leq windows of an SPL meter and the horizon of their headroom figure.

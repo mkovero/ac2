@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 52`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 53`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -102,6 +102,8 @@ Lease column: **L** = `lease_token` required (Q6).
 | `osc.target` | `base: Rev` (`rig.rev`), `addr: "ip:port" \| nil` | `ack` (`rig` event) | |
 | `osc.test` | `msg: OscMessage` | `ack` (`rig` event: the sent count) | |
 | `rig.monitor_start` | `base: Rev` (`rig.rev`), `on: bool` | `ack` (`rig` event) | |
+| `artnet.target` | `base: Rev` (`rig.rev`), `target: ArtnetTarget \| nil` | `ack` (`rig` event) | |
+| `artnet.test` | `channels: [DmxSet]` | `ack` (`rig` event: the sent count) | |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
 | `meas.update` | `meas`, `base: Rev` (the `config_rev` the edit was made on), `config` | `measurement` | |
 | `meas.colour` | `meas`, `colour: ColourFamily \| nil` | `measurement` | |
@@ -198,24 +200,31 @@ the rig settings (not in sessions) by channel number, whatever the device. A lab
 characters, no control characters, no surrounding space (`invalid` otherwise); `nil` clears
 it. `state.outputs` lists the labelled outputs, sorted by channel.
 
-**Rig monitor and OSC cues (`osc.*`, `rig.*`).** The `rig` entity (`Rig`) holds what belongs
+**Rig monitor, OSC and Art-Net cues (`osc.*`, `artnet.*`, `rig.*`).** The `rig` entity (`Rig`) holds what belongs
 to the daemon's machine rather than to a session: `rev` (the rev of its last settings change),
-`osc_target` (`"ip:port"` \| nil: where cues go; an IP literal, never a name to look up),
-`monitor_at_start` (at start the daemon reopens the last session's device capture-only so the
-rig measurements meter with no client connected; the generator stays disarmed), `osc`
-(`OscStatus` {`sent`: u64 since the daemon started, `last_error`: str \| nil, the latest send
-error as the operating system said it}) and `cues` ([`RigCue`] {`meas`, `subject`:
+`osc_target` (`"ip:port"` \| nil: where OSC cues go; an IP literal, never a name to look up),
+`artnet_target` (`ArtnetTarget` \| nil: where the Art-Net universe goes), `monitor_at_start` (at start the daemon reopens the last session's device capture-only so the
+rig measurements meter with no client connected; the generator stays disarmed), `osc` and
+`artnet` (each an `OutputStatus` {`sent`: packets since the daemon started, u64,
+`last_error`: str \| nil, the latest send error as the operating system said it}), `dmx`
+([`DmxSet`]: the cue universe's channels above 0, in channel order, whether or not a target is
+set) and `cues` ([`RigCue`] {`meas`, `subject`:
 `CueSubject`, `state`: `CueState`}: every cued subject's state as last sent). `CueSubject` is
 tagged by `type`: `meter` (the whole meter: the worst state of its limits), `window`
 {duration, weighting}, `peak` {quantity}, `band` {duration, weighting, nominal},
 `predicted`. `CueState` is `ok` (under the limit, or none), `near`, `over` or `fault` (the rig
 cannot judge: no audio, device lost, not calibrated).
-`osc.target` and `rig.monitor_start` carry the `rig.rev` they were made on; another is
+`osc.target`, `artnet.target` and `rig.monitor_start` carry the `rig.rev` they were made on; another is
 `conflict` with `detail: conflict {rev}` (the current one). `osc.test` sends one message to
 the target now (setup); `invalid` without a target, `internal` with the operating system's
 reason when the send fails; `append_level` appends 0 dB. `osc.target` refuses an unspecified
 address or port 0 (`invalid`), writes the rig settings file before it takes effect, and sends
-the current state of every cue to the new target at once.
+the current state of every cue to the new target at once. `artnet.target` likewise refuses
+an unspecified address or port 0, persists, and sends the current frame at once.
+`artnet.test` sends one frame holding `channels` (every other channel 0) now, to find a
+fixture's channels; the keepalive repeats it for 5 s, then the cue frame comes back (at once
+when a cue changes state meanwhile); `invalid` without a target or with a channel listed
+twice, `internal` when the send fails.
 Cue rules: a state change is sent at once, and every cued subject's current message is sent
 again every second, so a lost datagram heals within a second and a receiver can treat
 silence (a few seconds) as a fault. A meter whose job is not running (no session, the device
@@ -228,10 +237,20 @@ then). The meter cue takes the worst state of all its subjects, cued or not, in 
 a limit that cannot be judged. `append_level` appends the level the state was judged on (the
 worst subject's for the meter cue), when one is known. A cue that goes away (its measurement
 deleted, a session measurement replaced by a load, the cue removed by `meas.update`, the daemon stopping cleanly)
-sends its `ok` message once. Only subjects with a cue are listed in `rig.cues` or sent; a cue
+sends its `ok` message once and stops holding its levels. Only subjects with a cue are listed in `rig.cues` or sent; a cue
 edit keeps the window's state and history (it changes what is sent, not what is judged).
-`rig.osc` is committed when `last_error` is set or cleared, and otherwise at most every 10 s
-while the sent counter moves (`rig.cues` state changes are committed at once).
+`rig.osc` and `rig.artnet` are committed when `last_error` is set or cleared, and otherwise at
+most every 10 s while the sent counter moves (`rig.cues` and `rig.dmx` changes are committed at
+once).
+Art-Net: ac2 owns one universe and sends all 512 channels as ArtDmx (OpCode 0x5000, protocol
+14, `Sequence` 0) from an ephemeral UDP port to `artnet_target`. Each channel is the highest
+level any cue's current state lists for it (HTP), 0 where none lists it; a frame is sent at
+once when it changes, and the current frame again every second while a target is set (nodes
+drop a source silent for about 4 s). `Sequence` stays 0 (no reordering check): every frame is
+the whole universe and is resent within a second, so a reordered datagram heals by itself, and
+a restarted daemon is never ignored by a node that remembers a higher sequence. Mix ac2's
+universe with a lighting desk at the receiver (an Art-Net input merged HTP, or a node's HTP
+merge). A daemon stopping cleanly sends one frame of every cue's `ok` levels.
 With `monitor_at_start` on, each `session.open` that succeeds while rig measurements exist is
 recorded in the rig settings (turning it on with a session open records that one). A daemon
 started with it on and a recorded session opens that device itself, after restoring the
@@ -243,8 +262,13 @@ a `session.open` of another backend or input device, are allowed while rig measu
 run; the daemon logs a warning and the reply carries one (§3.1): `rig_monitor_blind` (the rig
 meters stop metering) or `rig_monitor_moved` (they meter the new device's inputs), each
 listing the rig measurements (`meas`).
-An `OscCue` = {`ok`, `near`, `over`, `fault`: `OscMessage` \| nil} is the message sent in each
-state; it sits on each limit (`LeqWindow.cue`, `PeakLimit.cue`, `BandWindow.cue`,
+A `Cue` = {`ok`, `near`, `over`, `fault`: `CueAction` \| nil} says what each state does;
+`CueAction` = {`osc`: `OscMessage` \| nil (sent on entering the state and repeated), `dmx`:
+[`DmxSet`] (the levels the state holds while it is current)}. `DmxSet` = {`channel`: u16
+1–512, `value`: u8}; a channel outside 1–512 fails to decode. `ArtnetTarget` = {`addr`:
+`"ip:port"` (a node's address or a subnet's broadcast address; Art-Net's port is 6454),
+`universe`: u16 0–32767, the 15-bit Port-Address: net (bits 14–8) · sub-net (7–4) ·
+universe (3–0); above 32767 fails to decode}. The cue sits on each limit (`LeqWindow.cue`, `PeakLimit.cue`, `BandWindow.cue`,
 `PredictedWindow.cue`) and on the meter (`SplConfig.cue`). `OscMessage` = {`path`: str (a
 leading `/`, then printable ASCII without space or any of `#*,?[]{}`, at most 128 bytes;
 anything else fails to decode), `args`: [`OscArg`], `append_level`: bool (append the judged
@@ -450,9 +474,9 @@ Design: `docs/design/leq.md`. `LeqConfig` = {`windows`: [`LeqWindow`] (at most 8
 display order), `horizon`: Seconds (1 s … 1 h, whole seconds; default 60), `peaks`:
 `PeakLimits` {`lcpeak`, `lafmax`: `PeakLimit` \| nil}}. `LeqWindow` =
 {`duration`: Seconds (1 s … 24 h, whole seconds), `weighting`: `a` \| `c` \| `z`, `limit`:
-DbSpl \| nil, `warn_margin`: Db ≥ 0 (default 3), `cue`: `OscCue` \| nil}. `PeakLimit` = {`limit`:
-DbSpl, `warn_margin`: Db ≥ 0, `cue`: `OscCue` \| nil}. `SplConfig.cue`: `OscCue` \| nil, the
-meter's own cue (§3.2 *Rig monitor and OSC cues*). `SplConfig.position`: `PositionCorrection` \| nil = {`level`: Db, `peak`: Db, each
+DbSpl \| nil, `warn_margin`: Db ≥ 0 (default 3), `cue`: `Cue` \| nil}. `PeakLimit` = {`limit`:
+DbSpl, `warn_margin`: Db ≥ 0, `cue`: `Cue` \| nil}. `SplConfig.cue`: `Cue` \| nil, the
+meter's own cue (§3.2 *Rig monitor, OSC and Art-Net cues*). `SplConfig.position`: `PositionCorrection` \| nil = {`level`: Db, `peak`: Db, each
 within ±30}: the measuring-position correction (`docs/design/leq.md`, *Measuring-position
 correction*), added to every level the meter reports while calibrated — `level` to the
 energy levels (the time-weighted levels, Leq, the windows, headroom, run totals, LAFmax),
@@ -576,10 +600,10 @@ Seconds (whole seconds, 1 s … 24 h), `weighting`: `a` \| `c` \| `z` (the weigh
 band's exact mid-band frequency added to its unweighted level), `limit`: DbSpl \| nil,
 `day_offset`: Db \| nil (nil: `limit` holds day and night; else `limit` is the night's,
 22:00–07:00 local time, and 07:00–22:00 it is `limit` plus this), `warn_margin`: Db ≥ 0,
-`cue`: `OscCue` \| nil}; the
+`cue`: `Cue` \| nil}; the
 limit is at the transfer's place with a transfer, else at the mic. A range of bands is a
 front-end convenience that adds one window per band; nothing range-shaped is on the wire. `PredictedWindow` = {`duration`:
-Seconds, `day`, `night`: DbSpl \| nil, `warn_margin`: Db, `cue`: `OscCue` \| nil} (the A-weighted level predicted at
+Seconds, `day`, `night`: DbSpl \| nil, `warn_margin`: Db, `cue`: `Cue` \| nil} (the A-weighted level predicted at
 the place, judged only with a transfer). `BandTransferSet` = {`place`: str (the operator's
 name of the place the limits are for, 1 … 40 characters, `receiving room` unless named;
 every line naming the place uses it), `measured_at`: WallNs, `origin`: `TransferOrigin`
@@ -1341,7 +1365,7 @@ committed when the warning flips, the span first reaches the judged length or th
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
 nil`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2), `working`
 (`WorkingSession`: the working state's session and unsaved changes, §3.2 sessions), `rig`
-(`Rig`: rig settings, OSC sending and cue states, §3.2 *Rig monitor and OSC cues*).
+(`Rig`: rig settings, OSC and Art-Net sending and cue states, §3.2 *Rig monitor, OSC and Art-Net cues*).
 
 
 #### 4.1.1 Audio stopped and recovery

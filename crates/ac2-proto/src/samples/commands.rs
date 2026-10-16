@@ -323,5 +323,15 @@ pub fn commands() -> Vec<Command> {
             base: Rev(38),
             on: true,
         },
+        Command::ArtnetTarget {
+            base: Rev(38),
+            target: Some(ArtnetTarget {
+                addr: "2.255.255.255:6454".parse().expect("valid sample address"),
+                universe: PortAddress::from_parts(0, 1, 2).expect("valid sample universe"),
+            }),
+        },
+        Command::ArtnetTest {
+            channels: dmx("12=255 13=40"),
+        },
     ]
 }

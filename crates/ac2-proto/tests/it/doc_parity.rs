@@ -229,8 +229,24 @@ fn protocol_doc_names_everything() {
             names_of::<model::Rig, _>(&Bogus { bogus_field: 0 }),
         ),
         (
-            "osc cue field",
-            names_of::<model::OscCue, _>(&Bogus { bogus_field: 0 }),
+            "cue field",
+            names_of::<model::Cue, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "cue action field",
+            names_of::<model::CueAction, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "dmx set field",
+            names_of::<model::DmxSet, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "artnet target field",
+            names_of::<model::ArtnetTarget, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "output status field",
+            names_of::<model::OutputStatus, _>(&Bogus { bogus_field: 0 }),
         ),
         (
             "spl log row field",

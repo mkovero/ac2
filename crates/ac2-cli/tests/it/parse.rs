@@ -769,13 +769,10 @@ fn osc_and_rig_grammar() {
     assert!(parse(&["osc", "test", "/a", "f:inf"]).is_err(), "finite");
 
     let cue = |args: &[&str]| match ok(args).cmd {
-        Cmd::Osc {
-            cmd: OscCmd::Cue(a),
-        } => a,
+        Cmd::Cue(a) => a,
         other => panic!("{other:?}"),
     };
     let a = cue(&[
-        "osc",
         "cue",
         "Stage",
         "window:c:15min",
@@ -804,47 +801,62 @@ fn osc_and_rig_grammar() {
     assert_eq!(a.ok, Some(CueMsgArg(None)));
     assert!(a.near.is_none() && a.fault.is_none() && !a.clear);
 
+    assert_eq!(cue(&["cue", "1", "meter"]).subject, CueSubjectArg::Meter);
     assert_eq!(
-        cue(&["osc", "cue", "1", "meter"]).subject,
-        CueSubjectArg::Meter
-    );
-    assert_eq!(
-        cue(&["osc", "cue", "1", "window:2"]).subject,
+        cue(&["cue", "1", "window:2"]).subject,
         CueSubjectArg::WindowIndex(2)
     );
     assert_eq!(
-        cue(&["osc", "cue", "1", "peak:lafmax"]).subject,
+        cue(&["cue", "1", "peak:lafmax"]).subject,
         CueSubjectArg::Peak(PeakQuantity::LafMax)
     );
     assert_eq!(
-        cue(&["osc", "cue", "1", "predicted"]).subject,
+        cue(&["cue", "1", "predicted"]).subject,
         CueSubjectArg::Predicted
     );
-    let CueSubjectArg::Band { band, window } = cue(&["osc", "cue", "1", "band:63hz:60min"]).subject
-    else {
+    let CueSubjectArg::Band { band, window } = cue(&["cue", "1", "band:63hz:60min"]).subject else {
         panic!("band");
     };
     assert_eq!(BAND_NOMINAL_HZ_63, ac2_proto::model::BAND_NOMINAL_HZ[band]);
     assert_eq!(window.weighting, Some(Weighting::Z), "Z unless given");
     assert_eq!(window.seconds, 3600);
-    let CueSubjectArg::Band { window, .. } = cue(&["osc", "cue", "1", "band:63hz:a:15min"]).subject
-    else {
+    let CueSubjectArg::Band { window, .. } = cue(&["cue", "1", "band:63hz:a:15min"]).subject else {
         panic!("band");
     };
     assert_eq!(window.weighting, Some(Weighting::A));
-    assert!(cue(&["osc", "cue", "1", "meter", "--clear"]).clear);
+    assert!(cue(&["cue", "1", "meter", "--clear"]).clear);
     for bad in [
-        &["osc", "cue", "1", "window:0"][..],
-        &["osc", "cue", "1", "peak:lzpeak"],
-        &["osc", "cue", "1", "band:64hz:60min"],
-        &["osc", "cue", "1", "band:63hz"],
-        &["osc", "cue", "1", "everything"],
-        &["osc", "cue", "1", "meter", "--ok", "light"],
-        &["osc", "cue", "1", "meter", "--ok", ""],
-        &["osc", "cue", "1", "meter", "--clear", "--ok", "/x"],
+        &["cue", "1", "window:0"][..],
+        &["cue", "1", "peak:lzpeak"],
+        &["cue", "1", "band:64hz:60min"],
+        &["cue", "1", "band:63hz"],
+        &["cue", "1", "everything"],
+        &["cue", "1", "meter", "--ok", "light"],
+        &["cue", "1", "meter", "--ok", ""],
+        &["cue", "1", "meter", "--clear", "--ok", "/x"],
+        &["cue", "1", "meter", "--clear", "--over-dmx", "1=1"],
+        &["cue", "1", "meter", "--over-dmx", ""],
+        &["cue", "1", "meter", "--over-dmx", "0=1"],
+        &["cue", "1", "meter", "--over-dmx", "513=1"],
+        &["cue", "1", "meter", "--over-dmx", "1=256"],
+        &["cue", "1", "meter", "--over-dmx", "1=2 1=3"],
+        &["osc", "cue", "1", "meter"],
     ] {
         assert!(parse(bad).is_err(), "{bad:?}");
     }
+    let a = cue(&[
+        "cue",
+        "1",
+        "meter",
+        "--over-dmx",
+        "12=255 13=0,14=40",
+        "--ok-dmx",
+        "off",
+    ]);
+    let over = a.over_dmx.expect("--over-dmx").0;
+    assert_eq!(ac2_proto::model::dmx_list_text(&over), "12=255 13=0 14=40");
+    assert_eq!(a.ok_dmx, Some(DmxListArg(vec![])));
+    assert!(a.near_dmx.is_none() && a.fault_dmx.is_none() && a.over.is_none());
 
     assert!(matches!(
         ok(&["meas", "scope", "Stage", "rig"]).cmd,
@@ -871,3 +883,50 @@ fn osc_and_rig_grammar() {
 }
 
 const BAND_NOMINAL_HZ_63: f64 = 63.0;
+
+#[test]
+fn artnet_grammar() {
+    let target = |args: &[&str]| match ok(args).cmd {
+        Cmd::Artnet {
+            cmd: ArtnetCmd::Target { addr, universe },
+        } => (addr.0, universe.map(|u| u.0.get())),
+        other => panic!("{other:?}"),
+    };
+    let (a, u) = target(&["artnet", "target", "2.255.255.255", "0.0.1"]);
+    assert_eq!(a, Some("2.255.255.255:6454".parse().expect("test value")));
+    assert_eq!(u, Some(1));
+    let (a, u) = target(&["artnet", "target", "192.168.1.40:7000", "17"]);
+    assert_eq!(a.map(|a| a.port()), Some(7000));
+    assert_eq!(u, Some(17));
+    assert_eq!(
+        target(&["artnet", "target", "1.2.3.4", "1.0.0"]).1,
+        Some(256)
+    );
+    assert_eq!(
+        target(&["artnet", "target", "1.2.3.4", "32767"]).1,
+        Some(32767)
+    );
+    assert_eq!(target(&["artnet", "target", "off"]), (None, None));
+    for bad in [
+        &["artnet", "target", "1.2.3.4", "32768"][..],
+        &["artnet", "target", "1.2.3.4", "128.0.0"],
+        &["artnet", "target", "1.2.3.4", "0.16.0"],
+        &["artnet", "target", "1.2.3.4", "0.0.16"],
+        &["artnet", "target", "1.2.3.4", "0.1"],
+        &["artnet", "target", "[::1]:6454", "1"],
+        &["artnet", "target", "node.local", "1"],
+        &["artnet", "test"],
+        &["artnet", "test", "0=1"],
+        &["artnet", "test", "12"],
+        &["artnet", "test", "12=300"],
+    ] {
+        assert!(parse(bad).is_err(), "{bad:?}");
+    }
+    let Cmd::Artnet {
+        cmd: ArtnetCmd::Test { channels },
+    } = ok(&["artnet", "test", "12=255", "13=40"]).cmd
+    else {
+        panic!("artnet test");
+    };
+    assert_eq!(ac2_proto::model::dmx_list_text(&channels), "12=255 13=40");
+}

@@ -385,40 +385,75 @@
           "warn_margin": 2.0,
           "cue": {
            "ok": {
-            "path": "/light/red",
-            "args": [
+            "osc": {
+             "path": "/light/red",
+             "args": [
+              {
+               "type": "int",
+               "value": 0
+              }
+             ],
+             "append_level": false
+            },
+            "dmx": [
              {
-              "type": "int",
+              "channel": 12,
               "value": 0
-             }
-            ],
-            "append_level": false
-           },
-           "near": {
-            "path": "/light/red",
-            "args": [
-             {
-              "type": "float",
-              "value": 0.5
              },
              {
-              "type": "str",
-              "value": "near"
+              "channel": 13,
+              "value": 255
              }
-            ],
-            "append_level": false
+            ]
+           },
+           "near": {
+            "osc": {
+             "path": "/light/red",
+             "args": [
+              {
+               "type": "float",
+               "value": 0.5
+              },
+              {
+               "type": "str",
+               "value": "near"
+              }
+             ],
+             "append_level": false
+            },
+            "dmx": []
            },
            "over": {
-            "path": "/light/red",
-            "args": [
+            "osc": {
+             "path": "/light/red",
+             "args": [
+              {
+               "type": "int",
+               "value": 1
+              }
+             ],
+             "append_level": true
+            },
+            "dmx": [
              {
-              "type": "int",
-              "value": 1
+              "channel": 12,
+              "value": 255
+             },
+             {
+              "channel": 14,
+              "value": 40
              }
-            ],
-            "append_level": true
+            ]
            },
-           "fault": null
+           "fault": {
+            "osc": null,
+            "dmx": [
+             {
+              "channel": 512,
+              "value": 255
+             }
+            ]
+           }
           }
          }
         ],
@@ -532,40 +567,75 @@
        },
        "cue": {
         "ok": {
-         "path": "/light/red",
-         "args": [
+         "osc": {
+          "path": "/light/red",
+          "args": [
+           {
+            "type": "int",
+            "value": 0
+           }
+          ],
+          "append_level": false
+         },
+         "dmx": [
           {
-           "type": "int",
+           "channel": 12,
            "value": 0
-          }
-         ],
-         "append_level": false
-        },
-        "near": {
-         "path": "/light/red",
-         "args": [
-          {
-           "type": "float",
-           "value": 0.5
           },
           {
-           "type": "str",
-           "value": "near"
+           "channel": 13,
+           "value": 255
           }
-         ],
-         "append_level": false
+         ]
+        },
+        "near": {
+         "osc": {
+          "path": "/light/red",
+          "args": [
+           {
+            "type": "float",
+            "value": 0.5
+           },
+           {
+            "type": "str",
+            "value": "near"
+           }
+          ],
+          "append_level": false
+         },
+         "dmx": []
         },
         "over": {
-         "path": "/light/red",
-         "args": [
+         "osc": {
+          "path": "/light/red",
+          "args": [
+           {
+            "type": "int",
+            "value": 1
+           }
+          ],
+          "append_level": true
+         },
+         "dmx": [
           {
-           "type": "int",
-           "value": 1
+           "channel": 12,
+           "value": 255
+          },
+          {
+           "channel": 14,
+           "value": 40
           }
-         ],
-         "append_level": true
+         ]
         },
-        "fault": null
+        "fault": {
+         "osc": null,
+         "dmx": [
+          {
+           "channel": 512,
+           "value": 255
+          }
+         ]
+        }
        }
       }
      }
@@ -870,11 +940,29 @@
   "payload": {
    "rev": 38,
    "osc_target": "192.168.9.20:9000",
+   "artnet_target": {
+    "addr": "192.168.9.255:6454",
+    "universe": 1
+   },
    "monitor_at_start": true,
    "osc": {
     "sent": 12,
     "last_error": "Connection refused (os error 111)"
    },
+   "artnet": {
+    "sent": 340,
+    "last_error": null
+   },
+   "dmx": [
+    {
+     "channel": 12,
+     "value": 255
+    },
+    {
+     "channel": 14,
+     "value": 40
+    }
+   ],
    "cues": [
     {
      "meas": 4,

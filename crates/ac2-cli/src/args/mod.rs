@@ -1,5 +1,6 @@
 //! Command-line grammar.
 
+mod artnet;
 mod cal;
 mod delay;
 mod gen_;
@@ -11,6 +12,7 @@ mod session;
 mod spl;
 mod trace;
 
+pub use artnet::*;
 pub use cal::*;
 pub use delay::*;
 pub use gen_::*;
@@ -144,13 +146,25 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: TraceCmd,
     },
-    /// OSC cues the rig sends to external gear (lights, a stage display) when an SPL
-    /// limit's state changes: the target, a test message, each limit's messages.
+    /// Where the rig sends OSC cues, and a test message.
     Osc {
         /// Action.
         #[command(subcommand)]
         cmd: OscCmd,
     },
+    /// The rig's Art-Net universe: where it goes, and a test frame.
+    Artnet {
+        /// Action.
+        #[command(subcommand)]
+        cmd: ArtnetCmd,
+    },
+    /// What an SPL meter's limit (or the whole meter) does for external gear when its state
+    /// changes: ok (under the limit), near (within the warn margin), over, fault (the rig
+    /// cannot judge: no audio, device lost, not calibrated). Each state sends an OSC message
+    /// and/or holds Art-Net levels. States not given keep theirs; with none given (and no
+    /// --clear) it shows the cue.
+    #[command(after_help = osc::CUE_HELP)]
+    Cue(CueArgs),
     /// The rig monitor: its status, and whether a restarted daemon reopens the audio for the
     /// rig SPL meters.
     Rig {

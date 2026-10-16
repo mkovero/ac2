@@ -2,6 +2,7 @@
 //! links the whole dependency graph, so one link replaces one per file. A single area:
 //! `cargo nextest run -p ac2d -E 'test(/^autosave::/)'` or `cargo test -p ac2d --test it autosave::`.
 
+mod artnet;
 mod autosave;
 mod band_leq;
 mod calibration;

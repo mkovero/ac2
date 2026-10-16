@@ -1,9 +1,9 @@
-//! `ac2 osc …` and `ac2 rig …`: the rig monitor's OSC cues and settings.
+//! `ac2 osc …`, `ac2 cue …` and `ac2 rig …`: the rig monitor's cues and settings.
 
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use ac2_proto::model::{OscArg, OscMessage, OscPath, PeakQuantity};
+use ac2_proto::model::{DmxSet, OscArg, OscMessage, OscPath, PeakQuantity, parse_dmx_list};
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::MeasRef;
@@ -27,41 +27,87 @@ pub enum OscCmd {
         #[arg(allow_negative_numbers = true)]
         args: Vec<OscArgText>,
     },
-    /// Set the OSC messages an SPL meter's limit (or the whole meter) sends when its state
-    /// changes: ok (under the limit), near (within the warn margin), over, fault (the rig
-    /// cannot judge: no audio, device lost, not calibrated). States not given keep their
-    /// message; with none given (and no --clear) it shows the cue.
-    #[command(after_help = OSC_CUE_HELP)]
-    Cue(OscCueArgs),
 }
 
-/// `osc cue`.
+/// `cue`.
 #[derive(Debug, Args)]
-pub struct OscCueArgs {
+pub struct CueArgs {
     /// SPL meter: id or name.
     pub meas: MeasRef,
     /// What the cue is about: `meter`, `window:<N|window>`, `peak:lcpeak|lafmax`,
     /// `band:<hz>:<window>`, `predicted`.
     pub subject: CueSubjectArg,
-    /// Message in the ok state: `"/path arg …"`, or `off` for none.
+    /// OSC message in the ok state: `"/path arg …"`, or `off` for none.
     #[arg(long, value_name = "MSG", allow_hyphen_values = true)]
     pub ok: Option<CueMsgArg>,
-    /// Message in the near state.
+    /// OSC message in the near state.
     #[arg(long, value_name = "MSG", allow_hyphen_values = true)]
     pub near: Option<CueMsgArg>,
-    /// Message in the over state.
+    /// OSC message in the over state.
     #[arg(long, value_name = "MSG", allow_hyphen_values = true)]
     pub over: Option<CueMsgArg>,
-    /// Message in the fault state.
+    /// OSC message in the fault state.
     #[arg(long, value_name = "MSG", allow_hyphen_values = true)]
     pub fault: Option<CueMsgArg>,
+    /// Art-Net levels held in the ok state: `"12=0 13=255"` (channel 1–512 = level 0–255),
+    /// or `off` for none.
+    #[arg(long, value_name = "LEVELS")]
+    pub ok_dmx: Option<DmxListArg>,
+    /// Art-Net levels held in the near state.
+    #[arg(long, value_name = "LEVELS")]
+    pub near_dmx: Option<DmxListArg>,
+    /// Art-Net levels held in the over state.
+    #[arg(long, value_name = "LEVELS")]
+    pub over_dmx: Option<DmxListArg>,
+    /// Art-Net levels held in the fault state.
+    #[arg(long, value_name = "LEVELS")]
+    pub fault_dmx: Option<DmxListArg>,
     /// The messages given here also carry the level the state was judged on, dB SPL, as a
     /// trailing float.
     #[arg(long)]
     pub append_level: bool,
     /// Remove the cue: nothing is sent for this subject.
-    #[arg(long, conflicts_with_all = ["ok", "near", "over", "fault", "append_level"])]
+    #[arg(long, conflicts_with_all = [
+        "ok", "near", "over", "fault", "ok_dmx", "near_dmx", "over_dmx", "fault_dmx",
+        "append_level",
+    ])]
     pub clear: bool,
+}
+
+impl CueArgs {
+    /// The OSC message and the levels given for `state` (`None`: not given, kept).
+    pub fn given(
+        &self,
+        state: ac2_proto::model::CueState,
+    ) -> (Option<&CueMsgArg>, Option<&DmxListArg>) {
+        use ac2_proto::model::CueState as S;
+        match state {
+            S::Ok => (self.ok.as_ref(), self.ok_dmx.as_ref()),
+            S::Near => (self.near.as_ref(), self.near_dmx.as_ref()),
+            S::Over => (self.over.as_ref(), self.over_dmx.as_ref()),
+            S::Fault => (self.fault.as_ref(), self.fault_dmx.as_ref()),
+        }
+    }
+}
+
+/// Art-Net levels: `channel=value …` (space- or comma-separated), or `off` for none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DmxListArg(pub Vec<DmxSet>);
+
+impl FromStr for DmxListArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        if s.trim().eq_ignore_ascii_case("off") {
+            return Ok(Self(Vec::new()));
+        }
+        let l = parse_dmx_list(s).map_err(|e| UnitError(e.to_string()))?;
+        if l.is_empty() {
+            return Err(UnitError(
+                "no levels: give channel=value (e.g. \"12=255 13=0\") or off".into(),
+            ));
+        }
+        Ok(Self(l))
+    }
 }
 
 const OSC_ARGS_HELP: &str = "\
@@ -71,7 +117,7 @@ number is an integer without a decimal point or exponent (`1`, `-3`) and a float
 
 Example: ac2 osc test /light/red i:1 0.75 s:stage";
 
-const OSC_CUE_HELP: &str = "\
+pub(super) const CUE_HELP: &str = "\
 Subjects: meter (the worst state of all its limits), window:<N> (the meter's Nth Leq window,
 from 1) or window:<window> (`window:15min`, `window:c:30s`; A unless a weighting is given),
 peak:lcpeak or peak:lafmax, band:<hz>:<window> (a band window: `band:63hz:60min`, Z unless
@@ -81,14 +127,19 @@ MSG: an OSC address and its arguments as one quoted argument: \"/light/red i:1\"
 or `off` for no message in that state. Arguments: i:<int>, f:<float>, s:<text> (no spaces),
 a bare number (integer without a decimal point, else float) or a bare word (string).
 
-Example: ac2 osc cue Stage window:15min --near \"/light/amber i:1\" --over \"/light/red i:1\" \\
-           --ok \"/light/off\" --fault \"/light/blink i:1\"";
+LEVELS: Art-Net channel=value pairs held while the state is current, as one quoted argument:
+\"12=255 13=0\" (channel 1-512, value 0-255), or `off` for none. Each channel of the universe
+is the highest level any cue's current state gives it, 0 where none does (`ac2 artnet`).
+
+Example: ac2 cue Stage window:15min --near \"/light/amber i:1\" --over \"/light/red i:1\" \\
+           --ok \"/light/off\" --fault \"/light/blink i:1\" --over-dmx \"12=255 13=0\" \\
+           --ok-dmx \"12=0 13=255\"";
 
 /// `rig …`.
 #[derive(Debug, Subcommand)]
 pub enum RigCmd {
-    /// OSC target and counters, the monitor at start, and every rig SPL meter with the
-    /// state of each of its cues.
+    /// OSC and Art-Net targets and counters, the universe's lit channels, the monitor at
+    /// start, and every rig SPL meter with the state of each of its cues.
     Status,
     /// With it on, a restarted daemon reopens the last session's device capture-only and
     /// the rig SPL meters meter with no client connected.

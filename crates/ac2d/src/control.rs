@@ -45,6 +45,7 @@ use crate::stimulus::{LeaseGate, LeasedSource, SweepTrain};
 use crate::sweep::Recording;
 use crate::util::perr;
 
+mod artnet;
 mod autosave;
 mod cal;
 mod execute;
@@ -68,6 +69,7 @@ mod transfer;
 mod validate;
 mod working;
 
+pub(crate) use artnet::check_addr as check_artnet_addr;
 pub(crate) use osc::{Judged, has_cue};
 pub(crate) use validate::validate_meas;
 use validate::{
@@ -370,6 +372,8 @@ pub(crate) struct Control {
     file_jobs: file_jobs::FileJobs,
     /// The OSC cues' states and their sender.
     osc: osc::Cues,
+    /// The Art-Net universe the cue states make, and its sender.
+    artnet: artnet::Universe,
 }
 
 impl Control {
@@ -424,6 +428,7 @@ impl Control {
             .with_rig(ac2_proto::model::Rig {
                 monitor_at_start: saved.monitor_at_start,
                 osc_target: saved.osc_target,
+                artnet_target: saved.artnet_target,
                 ..Default::default()
             })
             .with_calibrations(contents)
@@ -473,6 +478,7 @@ impl Control {
             transfers: transfer::Transfers::default(),
             file_jobs: file_jobs::FileJobs::default(),
             osc: osc::Cues::default(),
+            artnet: artnet::Universe::default(),
             rig,
             rigm,
             ceiling_set: saved.ceiling_dbfs,
@@ -524,8 +530,12 @@ impl Control {
             }
             self.osc_sync();
             self.osc_tick(now);
+            self.artnet_tick(now);
             let mut wake = self.next_ka;
             if let Some(t) = self.osc_wake() {
+                wake = wake.min(t);
+            }
+            if let Some(t) = self.artnet_wake() {
                 wake = wake.min(t);
             }
             if let Some(l) = &self.lease {

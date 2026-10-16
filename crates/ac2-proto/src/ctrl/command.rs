@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    AverageMethod, BackendKind, CalKey, ColourFamily, DelayPick, DelayReference, DeviceId,
-    ElectricalConnection, ExportFormat, FinderBand, GeneratorDesired, ImportFormat, ImportRole,
-    InputSetup, IrImport, MeasConfig, MicCurveId, MicLoading, OscMessage, OutputSetup, OwnedTraces,
-    PaneLayout, RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef, SplLogWhich,
-    TraceEdit,
+    ArtnetTarget, AverageMethod, BackendKind, CalKey, ColourFamily, DelayPick, DelayReference,
+    DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand, GeneratorDesired,
+    ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId, MicLoading, OscMessage,
+    OutputSetup, OwnedTraces, PaneLayout, RecordRequest, RecordingRef, ReplayPace, SessionConfig,
+    SessionRef, SplLogWhich, TraceEdit,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, Rev, Seconds, TraceId, TransferId,
@@ -148,7 +148,7 @@ pub enum Command {
         confirm_raise: bool,
     },
 
-    // -- rig / osc ----------------------------------------------------------------------
+    // -- rig / osc / artnet -------------------------------------------------------------
     /// Set where OSC cues go (`rig.osc_target`), or stop sending (`None`). Kept by the
     /// daemon across restarts.
     #[serde(rename = "osc.target")]
@@ -165,6 +165,24 @@ pub enum Command {
     OscTest {
         /// Message.
         msg: OscMessage,
+    },
+    /// Set where the rig's Art-Net universe goes (`rig.artnet_target`), or stop sending
+    /// (`None`). Kept by the daemon across restarts.
+    #[serde(rename = "artnet.target")]
+    ArtnetTarget {
+        /// The `rig.rev` the edit was made on; another is refused with `conflict`.
+        base: Rev,
+        /// Address and universe; `None`: send nowhere.
+        target: Option<ArtnetTarget>,
+    },
+    /// Send one frame with these levels (every other channel 0) to the Art-Net target now,
+    /// to find a fixture's channels (setup). The cue frame comes back once the test has been
+    /// held a few seconds, or at once when a cue changes state. Refused (`invalid`) without
+    /// a target.
+    #[serde(rename = "artnet.test")]
+    ArtnetTest {
+        /// Levels.
+        channels: Vec<DmxSet>,
     },
     /// Whether the daemon reopens the last session's device capture-only when it starts,
     /// so the rig measurements meter with no client connected (`rig.monitor_at_start`).
@@ -723,6 +741,8 @@ impl Command {
             Self::GenCeiling { .. } => "gen.ceiling",
             Self::OscTarget { .. } => "osc.target",
             Self::OscTest { .. } => "osc.test",
+            Self::ArtnetTarget { .. } => "artnet.target",
+            Self::ArtnetTest { .. } => "artnet.test",
             Self::RigMonitorStart { .. } => "rig.monitor_start",
             Self::MeasCreate { .. } => "meas.create",
             Self::MeasUpdate { .. } => "meas.update",

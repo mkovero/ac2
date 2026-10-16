@@ -188,7 +188,7 @@ pub(super) fn timing() -> TimingStatus {
 /// An SPL meter with two Leq windows, one limited.
 pub fn spl_config() -> SplConfig {
     SplConfig {
-        cue: Some(Box::new(osc_cue())),
+        cue: Some(Box::new(light_cue())),
         input: 1,
         weighting: Weighting::A,
         time_weighting: TimeWeighting::Fast,
@@ -239,7 +239,7 @@ pub fn band_leq_config() -> BandLeqConfig {
     bands[3] = BandTransferBand::Unusable { at_least: Db(35.0) };
     let mut cfg = BandLeqPreset::Finland545Lf.apply(None);
     cfg.windows.push(BandWindow {
-        cue: Some(Box::new(osc_cue())),
+        cue: Some(Box::new(light_cue())),
         band: Hz(1000.0),
         duration: Seconds(900.0),
         weighting: Weighting::A,
@@ -476,17 +476,34 @@ pub fn osc_message(path: &str, args: Vec<OscArg>, append_level: bool) -> OscMess
     }
 }
 
-/// The usual red-light cue.
-pub fn osc_cue() -> OscCue {
-    OscCue {
-        ok: Some(osc_message("/light/red", vec![OscArg::Int(0)], false)),
-        near: Some(osc_message(
-            "/light/red",
-            vec![OscArg::Float(0.5), OscArg::Str("near".into())],
-            false,
-        )),
-        over: Some(osc_message("/light/red", vec![OscArg::Int(1)], true)),
-        fault: None,
+/// A DMX level list from `channel=value` text.
+pub fn dmx(text: &str) -> Vec<DmxSet> {
+    parse_dmx_list(text).expect("valid sample levels")
+}
+
+/// The usual red-light cue: OSC to a stage display and levels on a lamp's channels.
+pub fn light_cue() -> Cue {
+    Cue {
+        ok: Some(CueAction {
+            osc: Some(osc_message("/light/red", vec![OscArg::Int(0)], false)),
+            dmx: dmx("12=0 13=255"),
+        }),
+        near: Some(CueAction {
+            osc: Some(osc_message(
+                "/light/red",
+                vec![OscArg::Float(0.5), OscArg::Str("near".into())],
+                false,
+            )),
+            dmx: vec![],
+        }),
+        over: Some(CueAction {
+            osc: Some(osc_message("/light/red", vec![OscArg::Int(1)], true)),
+            dmx: dmx("12=255 14=40"),
+        }),
+        fault: Some(CueAction {
+            osc: None,
+            dmx: dmx("512=255"),
+        }),
     }
 }
 
@@ -495,11 +512,20 @@ pub fn rig() -> Rig {
     Rig {
         rev: Rev(38),
         osc_target: Some("192.168.9.20:9000".parse().expect("valid sample address")),
+        artnet_target: Some(ArtnetTarget {
+            addr: "192.168.9.255:6454".parse().expect("valid sample address"),
+            universe: PortAddress::from_parts(0, 0, 1).expect("valid sample universe"),
+        }),
         monitor_at_start: true,
-        osc: OscStatus {
+        osc: OutputStatus {
             sent: 12,
             last_error: Some("Connection refused (os error 111)".into()),
         },
+        artnet: OutputStatus {
+            sent: 340,
+            last_error: None,
+        },
+        dmx: dmx("12=255 14=40"),
         cues: vec![
             RigCue {
                 meas: MeasId(4),

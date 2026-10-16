@@ -357,7 +357,7 @@ pub fn warning_meas(w: &Warning) -> &[MeasId] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ac2_proto::model::{CueSubject, OscStatus, PeakQuantity, RigCue};
+    use ac2_proto::model::{CueSubject, OutputStatus, PeakQuantity, RigCue};
 
     fn msg(path: &str, args: Vec<OscArg>) -> OscMessage {
         OscMessage {
@@ -456,7 +456,7 @@ mod tests {
         let mut rig = Rig::default();
         assert_eq!(status_line(&rig), "OSC off");
         rig.osc_target = Some("10.0.0.5:9000".parse().expect("test value"));
-        rig.osc = OscStatus {
+        rig.osc = OutputStatus {
             sent: 12,
             last_error: None,
         };

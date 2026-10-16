@@ -295,14 +295,9 @@ fn the_limit_editor_sets_scope_and_cues_on_its_opening_rev() {
         panic!()
     };
     let cue = config.cue.as_ref().expect("meter cue");
-    assert_eq!(
-        cue.over.as_ref().expect("test value").path.as_str(),
-        "/light/red"
-    );
-    assert_eq!(
-        cue.over.as_ref().expect("test value").args,
-        vec![OscArg::Int(1)]
-    );
+    let over = cue.osc(CueState::Over).expect("test value");
+    assert_eq!(over.path.as_str(), "/light/red");
+    assert_eq!(over.args, vec![OscArg::Int(1)]);
     assert!(cue.near.is_none());
 }
 
