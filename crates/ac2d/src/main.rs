@@ -33,9 +33,11 @@ on macOS, ASIO on Windows.
   --max-level <dBFS>     hard upper bound of the system max level, dBFS RMS (default -10);
                          clients lower the level in force at run time (and raise it up
                          to this bound after a confirmation), kept in the rig settings
-  --settings <path>      rig settings: system max level, output labels (default
-                         rig.json in the ac2 config directory); an unreadable file is
-                         never overwritten
+  --settings <path>      rig settings: system max level, output labels, rig SPL
+                         meters, monitor at start (default rig.json in the ac2 config
+                         directory); an unreadable file is never overwritten
+  --rig-logs <dir>       where the rig SPL meters keep their logs (default: rig-logs in
+                         the ac2 data directory, ~/.local/share/ac2 on Linux)
   --cal-store <path>     calibration store (default calibrations.json in the ac2 config
                          directory, ~/.config/ac2 on Linux); an unreadable
                          file is never overwritten
@@ -65,6 +67,7 @@ struct Args {
     max_level: f64,
     cal_store: Option<PathBuf>,
     settings: Option<PathBuf>,
+    rig_logs: Option<PathBuf>,
     name: Option<String>,
     mdns: bool,
     autosave: Option<PathBuf>,
@@ -86,6 +89,7 @@ fn parse() -> Result<Option<Args>, String> {
         max_level: -10.0,
         cal_store: None,
         settings: None,
+        rig_logs: None,
         name: None,
         mdns: true,
         autosave: None,
@@ -113,6 +117,7 @@ fn parse() -> Result<Option<Args>, String> {
             "--authorized" => a.authorized = Some(PathBuf::from(val()?)),
             "--cal-store" => a.cal_store = Some(PathBuf::from(val()?)),
             "--settings" => a.settings = Some(PathBuf::from(val()?)),
+            "--rig-logs" => a.rig_logs = Some(PathBuf::from(val()?)),
             "--name" => a.name = Some(val()?),
             "--no-mdns" => a.mdns = false,
             "--autosave" => a.autosave = Some(PathBuf::from(val()?)),
@@ -216,6 +221,7 @@ fn main() -> ExitCode {
             .clone()
             .unwrap_or_else(ac2_paths::rig_settings),
     );
+    config.rig_logs = Some(args.rig_logs.clone().unwrap_or_else(ac2_paths::rig_log_dir));
     config.autosave = (!args.no_autosave).then(|| AutosaveConfig {
         dir: args
             .autosave

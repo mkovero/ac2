@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use ac2_proto::event::Change;
-use ac2_proto::model::{Autosave, AutosaveState};
+use ac2_proto::model::{Autosave, AutosaveState, MeasScope};
 use ac2_proto::units::WallNs;
 
 use super::Control;
@@ -15,7 +15,7 @@ impl Control {
         (
             self.saved_measurements(),
             self.store.state().traces.clone(),
-            self.spl_log_ids(),
+            self.spl_log_ids(MeasScope::Session),
         )
     }
 
@@ -60,7 +60,7 @@ impl Control {
                     epoch.0
                 );
                 let fp = self.fingerprint();
-                let specs = self.spl_log_specs(&logs);
+                let specs = self.spl_log_specs(MeasScope::Session, &logs);
                 if let Some(a) = self.autosave.as_mut() {
                     a.restored(fp, specs);
                 }
@@ -82,6 +82,7 @@ impl Control {
 
     /// The measurements or traces changed.
     pub(super) fn autosave_changed(&mut self) {
+        self.rig_logs_changed();
         if self.autosave.is_none() {
             return;
         }
@@ -115,7 +116,7 @@ impl Control {
             }
         };
         let fp = self.fingerprint();
-        let specs = self.spl_log_specs(&[]);
+        let specs = self.spl_log_specs(MeasScope::Session, &[]);
         let Some(a) = self.autosave.as_mut() else {
             return;
         };
@@ -153,9 +154,13 @@ impl Control {
             return;
         };
         let data = if a.busy() || self.store.state().autosave.state != AutosaveState::Saved {
-            self.session_data(false)
-                .ok()
-                .map(|d| (d, self.fingerprint(), self.spl_log_specs(&[])))
+            self.session_data(false).ok().map(|d| {
+                (
+                    d,
+                    self.fingerprint(),
+                    self.spl_log_specs(MeasScope::Session, &[]),
+                )
+            })
         } else {
             None
         };

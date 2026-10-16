@@ -370,10 +370,11 @@ impl Control {
 
     /// Which log each SPL meter has, for the autosave's change check: a log's growth is
     /// not a change (the autosave appends it), another log is.
-    pub(super) fn spl_log_ids(&self) -> Vec<(MeasId, u64)> {
+    pub(super) fn spl_log_ids(&self, scope: ac2_proto::model::MeasScope) -> Vec<(MeasId, u64)> {
         let mut v: Vec<(MeasId, u64)> = self
             .spl_logs
             .iter()
+            .filter(|(id, _)| self.meas_scope(**id) == scope)
             .map(|(id, l)| (*id, leq_log::lock(l).id()))
             .collect();
         v.sort_by_key(|(id, _)| *id);
@@ -381,11 +382,15 @@ impl Control {
     }
 
     /// Each SPL meter's log with what its file header names, by measurement.
-    fn spl_log_infos(&self) -> Vec<(SplLogInfo, &crate::leq_log::SharedLog)> {
+    fn spl_log_infos(
+        &self,
+        scope: ac2_proto::model::MeasScope,
+    ) -> Vec<(SplLogInfo, &crate::leq_log::SharedLog)> {
         let st = self.store.state();
         let mut out: Vec<_> = self
             .spl_logs
             .iter()
+            .filter(|(id, _)| self.meas_scope(**id) == scope)
             .filter_map(|(id, log)| {
                 let (name, config) = self.spl_config(*id)?;
                 let mic = st
@@ -409,8 +414,8 @@ impl Control {
     }
 
     /// Every SPL meter's log as a session saves it.
-    pub(super) fn saved_spl_logs(&self) -> Vec<SavedSplLog> {
-        self.spl_log_infos()
+    pub(super) fn saved_spl_logs(&self, scope: ac2_proto::model::MeasScope) -> Vec<SavedSplLog> {
+        self.spl_log_infos(scope)
             .into_iter()
             .map(|(info, log)| {
                 let l = leq_log::lock(log);
@@ -425,8 +430,12 @@ impl Control {
 
     /// Every SPL meter's log for the autosave to keep on disk; `resume` says where the
     /// files of restored logs stand.
-    pub(super) fn spl_log_specs(&self, resume: &[SplLogOnDisk]) -> Vec<LogSpec> {
-        self.spl_log_infos()
+    pub(super) fn spl_log_specs(
+        &self,
+        scope: ac2_proto::model::MeasScope,
+        resume: &[SplLogOnDisk],
+    ) -> Vec<LogSpec> {
+        self.spl_log_infos(scope)
             .into_iter()
             .map(|(info, log)| {
                 let on_disk = resume.iter().find(|r| r.meas == info.meas);

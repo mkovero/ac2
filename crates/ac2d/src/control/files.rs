@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
-    DelayState, GenAction, ImportFormat, ImportRole, MeasKind, Measurement, Salvage,
+    DelayState, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement, Salvage,
     SalvageRefusal, Session, SessionFile, SessionOrigin, SessionRef, SweepFailure, TraceKind,
     TraceOwner,
 };
@@ -102,23 +102,20 @@ impl Control {
         }
     }
 
-    /// The measurements as a session saves them.
+    /// The measurements as a session saves them: the session's only, none filed under a
+    /// rig meter ([`super::rig_meas`]).
     pub(super) fn saved_measurements(&self) -> Vec<SavedMeasurement> {
         self.store
             .state()
             .measurements
             .iter()
-            .map(|m| SavedMeasurement {
-                id: m.id,
-                config: m.config.clone(),
-                running: m.running,
-                delay: m.delay.as_ref().map(|d| SavedDelay {
-                    applied: d.applied,
-                    nudged: d.nudged,
-                    tracking: d.tracking,
-                }),
-                colour: m.colour,
-                layout: m.layout.clone(),
+            .filter(|m| m.config.scope == MeasScope::Session)
+            .map(|m| {
+                let mut sm = super::rig_meas::saved_of(m);
+                if let MeasKind::Math { config } = &mut sm.config.kind {
+                    config.owner = self.session_owner(config.owner);
+                }
+                sm
             })
             .collect()
     }
@@ -131,13 +128,18 @@ impl Control {
             .state()
             .traces
             .iter()
-            .map(|t| self.stored(t.id))
+            .map(|t| {
+                self.stored(t.id).map(|mut s| {
+                    s.meta.edit.owner = self.session_owner(s.meta.edit.owner);
+                    s
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(SessionData {
             saved_at: WallNs(wall_ns()),
             measurements: self.saved_measurements(),
             spl_logs: if with_logs {
-                self.saved_spl_logs()
+                self.saved_spl_logs(MeasScope::Session)
             } else {
                 Vec::new()
             },
@@ -427,15 +429,16 @@ impl Control {
         }))
     }
 
-    /// Replaces every measurement and trace with `data`, disarmed (module docs). Returns the
-    /// new session epoch.
+    /// Replaces every session measurement and every trace with `data`, disarmed (module
+    /// docs); the rig meters go on ([`super::rig_meas`]). Returns the new session epoch.
     pub(super) fn replace_session(
         &mut self,
         client: Option<&ClientId>,
-        data: SessionData,
+        mut data: SessionData,
     ) -> Result<SessionEpoch, ProtoError> {
         // Everything is checked before anything changes: a refused load leaves the state
         // as it was.
+        self.prepare_load(&mut data)?;
         let mut grids = check_session(&data)?;
 
         // Disarmed, no owner; a sweep run in progress is discarded.
@@ -451,12 +454,13 @@ impl Control {
             self.commit(Change::Generator(g));
         }
 
-        // Out with the old.
+        // Out with the old; the rig meters, their jobs and logs stay.
         let old_meas: Vec<MeasId> = self
             .store
             .state()
             .measurements
             .iter()
+            .filter(|m| m.config.scope == MeasScope::Session)
             .map(|m| m.id)
             .collect();
         for id in old_meas {

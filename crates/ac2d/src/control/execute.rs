@@ -21,6 +21,7 @@ impl Control {
         cmd: Command,
     ) -> Result<ReplyBody, ProtoError> {
         let ack = |rev: Rev| Ok(ReplyBody::Ack { rev });
+        self.rig_preflight(&cmd)?;
         match cmd {
             Command::Hello { client: software } => {
                 tracing::info!("hello from {} ({software})", client.0);
@@ -50,8 +51,9 @@ impl Control {
                 ErrorCode::Internal,
                 "session.control_panel is answered asynchronously",
             )),
-            Command::SessionOpen { config } => self.session_open(client, config),
+            Command::SessionOpen { config } => self.rig_session_open(client, config),
             Command::SessionClose => {
+                self.rig_session_closing();
                 self.session_close(client);
                 ack(self.store.rev())
             }
@@ -93,10 +95,9 @@ impl Control {
             Command::ServerInfo => Ok(ReplyBody::Server(self.server_info())),
             Command::ServerAuthorize { name, key } => self.server_authorize(client, &name, &key),
             Command::ServerRevoke { name } => self.server_revoke(client, &name),
-            // todo: step 2 (monitor at start) and step 3 (OSC sender) of the rig monitor plan.
-            Command::OscTarget { .. }
-            | Command::OscTest { .. }
-            | Command::RigMonitorStart { .. } => Err(perr(
+            Command::RigMonitorStart { base, on } => self.rig_monitor_start(base, on),
+            // todo: step 3 (OSC sender) of the rig monitor plan.
+            Command::OscTarget { .. } | Command::OscTest { .. } => Err(perr(
                 ErrorCode::Unsupported,
                 "the rig monitor and OSC cues are not implemented yet",
             )),

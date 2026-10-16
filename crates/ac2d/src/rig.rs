@@ -1,6 +1,8 @@
 //! The rig's settings the daemon keeps across restarts: the system max level (the
-//! generator ceiling) and the output labels. They belong to the rig, not to a session: a
-//! loaded session must never raise the level limit, and the wiring outlives any session.
+//! generator ceiling), the output labels, the rig's own SPL meters and whether the daemon
+//! reopens their audio at start. They belong to the rig, not to a session: a loaded session
+//! must never raise the level limit, the wiring outlives any session, and a meter watching
+//! a noise limit must keep watching whatever session a client loads.
 //!
 //! One small JSON file in the daemon's config directory, written atomically (temporary file,
 //! synced, renamed). Like the calibration store, a file that cannot be read is never
@@ -11,14 +13,15 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use ac2_proto::model::OutputSetup;
+use ac2_proto::model::{MeasKind, MeasScope, OutputSetup, SessionConfig};
 use ac2_proto::{ErrorCode, ProtoError};
+use ac2_traces::session::SavedMeasurement;
 use serde::{Deserialize, Serialize};
 
 use crate::util::perr;
 
 const FORMAT: &str = "ac2-rig-settings";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -29,6 +32,12 @@ struct RigFile {
     ceiling_dbfs: Option<f64>,
     /// Labelled outputs, sorted by channel.
     outputs: Vec<OutputSetup>,
+    /// The rig's SPL meters (`MeasScope::Rig`), with their ids.
+    measurements: Vec<SavedMeasurement>,
+    /// Reopen `monitor_session` capture-only at start.
+    monitor_at_start: bool,
+    /// The audio configuration of the last `session.open` while rig meters existed.
+    monitor_session: Option<SessionConfig>,
 }
 
 /// Just enough of any file to tell its format and version.
@@ -45,6 +54,12 @@ pub(crate) struct RigSettings {
     pub(crate) ceiling_dbfs: Option<f64>,
     /// Labelled outputs, sorted by channel.
     pub(crate) outputs: Vec<OutputSetup>,
+    /// The rig's SPL meters, with their ids; session files never hold them.
+    pub(crate) measurements: Vec<SavedMeasurement>,
+    /// Reopen `monitor_session` capture-only when the daemon starts.
+    pub(crate) monitor_at_start: bool,
+    /// The audio configuration of the last `session.open` while rig meters existed.
+    pub(crate) monitor_session: Option<SessionConfig>,
 }
 
 /// Where the rig settings live.
@@ -109,6 +124,9 @@ impl RigStore {
                 let s = RigSettings {
                     ceiling_dbfs: f.ceiling_dbfs,
                     outputs: f.outputs,
+                    measurements: f.measurements,
+                    monitor_at_start: f.monitor_at_start,
+                    monitor_session: f.monitor_session,
                 };
                 match check(&s) {
                     Ok(()) => (store, s),
@@ -129,7 +147,7 @@ impl RigStore {
         }
     }
 
-    fn refuse(&mut self, reason: String) {
+    pub(crate) fn refuse(&mut self, reason: String) {
         if let Some(p) = &self.path {
             tracing::error!(
                 "rig settings {} are unreadable ({reason}); they will not be written — the \
@@ -168,6 +186,9 @@ impl RigStore {
             version: VERSION,
             ceiling_dbfs: s.ceiling_dbfs,
             outputs: s.outputs.clone(),
+            measurements: s.measurements.clone(),
+            monitor_at_start: s.monitor_at_start,
+            monitor_session: s.monitor_session.clone(),
         };
         let text = serde_json::to_vec_pretty(&file)
             .map_err(|e| perr(ErrorCode::Internal, format!("rig settings: {e}")))?;
@@ -198,6 +219,20 @@ fn check(s: &RigSettings) -> Result<(), String> {
                 .map_err(|e| format!("output {}: {e}", o.channel + 1))?,
             None => return Err(format!("output {} has no label", o.channel + 1)),
         }
+    }
+    // A meter the commands would refuse never runs from a file a person edited.
+    for (i, m) in s.measurements.iter().enumerate() {
+        if s.measurements[..i].iter().any(|x| x.id == m.id) {
+            return Err(format!("measurement {} is listed twice", m.id));
+        }
+        if m.config.scope != MeasScope::Rig || !matches!(m.config.kind, MeasKind::Spl { .. }) {
+            return Err(format!("measurement {} is not a rig SPL meter", m.id));
+        }
+        crate::control::validate_meas(&m.config)
+            .map_err(|e| format!("measurement {}: {}", m.id, e.msg))?;
+    }
+    if let Some(c) = &s.monitor_session {
+        crate::session::validate(c).map_err(|e| format!("monitor session: {}", e.msg))?;
     }
     Ok(())
 }
@@ -253,6 +288,7 @@ mod tests {
         let want = RigSettings {
             ceiling_dbfs: Some(-40.0),
             outputs: vec![label(0, "Main L"), label(3, "Sub")],
+            ..RigSettings::default()
         };
         store.persist(&want).expect("write");
         let (_, got) = RigStore::open(&p);
@@ -261,6 +297,57 @@ mod tests {
         // A lower bound given at start wins over the value kept.
         assert_eq!(start_ceiling(got.ceiling_dbfs, -50.0), -50.0);
         assert_eq!(start_ceiling(None, -10.0), -10.0);
+    }
+
+    fn rig_meter(id: u32, scope: MeasScope) -> SavedMeasurement {
+        use ac2_proto::model::{MeasConfig, SplConfig, TimeWeighting, Weighting};
+        SavedMeasurement {
+            id: ac2_proto::units::MeasId(id),
+            config: MeasConfig {
+                name: "Stage".into(),
+                kind: MeasKind::Spl {
+                    config: SplConfig::on_input(1, Weighting::A, TimeWeighting::Fast),
+                },
+                scope,
+            },
+            running: true,
+            delay: None,
+            colour: None,
+            layout: None,
+        }
+    }
+
+    #[test]
+    fn rig_meters_and_the_monitor_roundtrip_and_are_checked() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let p = dir.path().join("rig.json");
+        let (store, _) = RigStore::open(&p);
+        let want = RigSettings {
+            measurements: vec![rig_meter(4, MeasScope::Rig)],
+            monitor_at_start: true,
+            ..RigSettings::default()
+        };
+        store.persist(&want).expect("write");
+        let (store, got) = RigStore::open(&p);
+        assert_eq!(got, want);
+        assert!(store.check().is_ok());
+
+        // A session measurement, or one listed twice, makes the file unreadable.
+        for bad in [
+            vec![rig_meter(4, MeasScope::Session)],
+            vec![rig_meter(4, MeasScope::Rig), rig_meter(4, MeasScope::Rig)],
+        ] {
+            store
+                .persist(&RigSettings {
+                    measurements: bad,
+                    ..RigSettings::default()
+                })
+                .expect("write");
+            let (store, got) = RigStore::open(&p);
+            assert_eq!(got, RigSettings::default());
+            assert!(store.check().is_err());
+            std::fs::remove_file(&p).expect("remove");
+        }
     }
 
     #[test]
@@ -287,7 +374,7 @@ mod tests {
         // Values a command would refuse make the file unreadable, not half-applied.
         std::fs::write(
             &p,
-            r#"{"format":"ac2-rig-settings","version":1,"ceiling_dbfs":3.0,"outputs":[]}"#,
+            r#"{"format":"ac2-rig-settings","version":2,"ceiling_dbfs":3.0,"outputs":[],"measurements":[],"monitor_at_start":false,"monitor_session":null}"#,
         )
         .expect("write");
         let (store, s) = RigStore::open(&p);

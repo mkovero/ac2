@@ -21,6 +21,7 @@ mod publish;
 mod recording;
 mod recovery;
 mod remote_stimulus;
+mod rig_meas;
 mod server;
 mod sessions;
 mod stimulus;

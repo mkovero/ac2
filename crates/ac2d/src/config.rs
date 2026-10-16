@@ -24,6 +24,10 @@ pub struct DaemonConfig {
     /// Rig settings file (system max level, output labels); `None` keeps them in memory
     /// only, and the system max level starts at `max_level_dbfs`.
     pub rig_settings: Option<PathBuf>,
+    /// Where the rig's SPL meters keep their logs (in the session directory format, apart
+    /// from the autosave so that no load, new session or set-aside autosave ends them);
+    /// `None` keeps them in memory only.
+    pub rig_logs: Option<PathBuf>,
     /// Stimulus lease expiry after the last refresh (Q6: 1.5 s).
     pub lease_expiry: Duration,
     /// State-event replay buffer.
@@ -124,6 +128,7 @@ impl fmt::Debug for DaemonConfig {
             .field("listen", &self.listen)
             .field("max_level_dbfs", &self.max_level_dbfs)
             .field("rig_settings", &self.rig_settings)
+            .field("rig_logs", &self.rig_logs)
             .field("lease_expiry", &self.lease_expiry)
             .field("replay", &self.replay)
             .field("dedup", &self.dedup)
@@ -151,6 +156,7 @@ impl DaemonConfig {
             listen,
             max_level_dbfs,
             rig_settings: None,
+            rig_logs: None,
             lease_expiry: Duration::from_millis(1500),
             replay: ReplayLimits::default(),
             dedup: DedupLimits::default(),

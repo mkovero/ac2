@@ -1473,6 +1473,7 @@ it is back to its last few minutes; after a daemon crash, 30 s).
 | `ac2d --no-restore` | starts empty |
 | `--autosave <dir>` | puts the autosave elsewhere (one daemon per directory) |
 | `--no-autosave` | keeps everything in memory only |
+| `--rig-logs <dir>` | where rig SPL meters keep their logs ([rig measurements](#rig-measurements); not affected by the three above) |
 
 ## Recording and replay
 
@@ -1782,6 +1783,21 @@ ac2 spl watch --input 3 --weight a       # --json: one JSON line per update; --f
 ```
 
 With `--input` the command runs its own meter while it runs; `--meas` shows an existing one.
+
+#### Rig measurements
+
+An SPL meter can belong to the rig instead of the session (its `scope` is `rig`). A rig meter
+watches a noise limit whatever happens to the session: loading a session, starting a new one
+or the daemon restarting leaves it running, with its limits, its log and its Leq history. It is
+kept with the daemon's rig settings (`rig.json`), never in a session file, and its log in its
+own directory (`ac2d --rig-logs`, default `rig-logs` in the ac2 data directory). Traces stay
+the session's: a trace captured under a rig meter is saved with the session as an import.
+
+With **monitor at start** on, the daemon remembers the device of the last session opened while
+rig meters exist, and opens it again by itself when it starts, capture only (no outputs, so
+nothing can be played), so the rig meters meter with no app or terminal connected. Closing
+the session, or opening another device, while rig meters run is allowed; the daemon log
+says what the rig meters lost.
 
 ### Leq windows and limits
 

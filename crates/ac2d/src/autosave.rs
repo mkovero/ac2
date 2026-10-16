@@ -26,6 +26,7 @@
 //! The working state's small files (`working.json`, the recovery copy put in place) are
 //! written on the same thread ([`Autosaver::run`]), in the order the control thread asks.
 
+mod rig_logs;
 mod spl_files;
 
 use std::fs;
@@ -41,6 +42,7 @@ use ac2_traces::session::{
     SessionError, SplLogOnDisk,
 };
 
+pub(crate) use self::rig_logs::RigLogs;
 use self::spl_files::SplFiles;
 pub(crate) use self::spl_files::{LogSpec, Resume};
 use crate::control::ControlMsg;
@@ -223,10 +225,20 @@ pub(crate) struct Writer {
 }
 
 impl Writer {
+    /// The autosave's writer, reporting each write to `done`.
     pub(crate) fn spawn(dir: PathBuf, done: Sender<ControlMsg>) -> std::io::Result<Self> {
+        Self::spawn_named(dir, Some(done), "ac2d-autosave")
+    }
+
+    /// A writer whose writes are reported to `done` when given (else only logged).
+    fn spawn_named(
+        dir: PathBuf,
+        done: Option<Sender<ControlMsg>>,
+        name: &str,
+    ) -> std::io::Result<Self> {
         let (tx, rx) = mpsc::channel::<Job>();
         let thread = std::thread::Builder::new()
-            .name("ac2d-autosave".into())
+            .name(name.into())
             .spawn(move || {
                 let mut files = SplFiles::new(dir.clone(), Instant::now());
                 loop {
@@ -245,13 +257,15 @@ impl Writer {
                                 .map(|()| at)
                                 .map_err(|e| e.to_string());
                             if let Err(e) = &result {
-                                tracing::warn!("autosave failed: {e}");
+                                tracing::warn!("{} failed: {e}", dir.display());
                             } else {
-                                tracing::debug!("autosaved to {}", dir.display());
+                                tracing::debug!("saved to {}", dir.display());
                             }
-                            let _ = done.send(ControlMsg::Autosaved {
-                                result: Box::new(result),
-                            });
+                            if let Some(done) = &done {
+                                let _ = done.send(ControlMsg::Autosaved {
+                                    result: Box::new(result),
+                                });
+                            }
                         }
                         Ok(Job::Run(work)) => work(),
                         Err(RecvTimeoutError::Timeout) => files.tick(Instant::now()),

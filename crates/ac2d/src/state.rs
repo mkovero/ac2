@@ -93,6 +93,12 @@ impl Store {
         self
     }
 
+    /// The initial rig entity, from the rig settings (rev 0, no events).
+    pub(crate) fn with_rig(mut self, rig: Rig) -> Self {
+        self.state.rig = rig;
+        self
+    }
+
     /// The initial autosave status (rev 0, no events).
     pub(crate) fn with_autosave(mut self, autosave: Autosave) -> Self {
         self.state.autosave = autosave;

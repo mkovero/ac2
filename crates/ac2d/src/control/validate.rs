@@ -135,17 +135,10 @@ pub(super) fn gen_err(e: GeneratorError) -> ProtoError {
 }
 
 /// Checks a measurement configuration without a session.
-pub(super) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
+pub(crate) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
     let inv = |m: &str| Err(perr(ErrorCode::Invalid, m.to_owned()));
-    if c.scope == MeasScope::Rig {
-        if !matches!(c.kind, MeasKind::Spl { .. }) {
-            return inv("only an SPL meter can be the rig's");
-        }
-        // todo: step 2 of the rig monitor plan (rig-scoped measurements).
-        return Err(perr(
-            ErrorCode::Unsupported,
-            "rig measurements are not implemented yet",
-        ));
+    if c.scope == MeasScope::Rig && !matches!(c.kind, MeasKind::Spl { .. }) {
+        return inv("only an SPL meter can be the rig's");
     }
     match &c.kind {
         MeasKind::Transfer { config } => {

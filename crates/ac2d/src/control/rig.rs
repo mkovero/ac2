@@ -123,7 +123,7 @@ impl Control {
         // worse than a refused change.
         self.rig.persist(&RigSettings {
             ceiling_dbfs: Some(new),
-            outputs: self.store.state().outputs.clone(),
+            ..self.rig_settings_now()
         })?;
         self.ceiling_set = Some(new);
         self.s.ceiling_dbfs = new;
@@ -193,8 +193,8 @@ impl Control {
         let all = upsert_outputs(&self.store.state().outputs, &rows);
         if all != self.store.state().outputs {
             self.rig.persist(&RigSettings {
-                ceiling_dbfs: self.ceiling_set,
                 outputs: all.clone(),
+                ..self.rig_settings_now()
             })?;
             self.commit(Change::Outputs(all));
         }

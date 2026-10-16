@@ -59,6 +59,7 @@ mod recording;
 mod recovery;
 mod request;
 pub(crate) mod rig;
+mod rig_meas;
 mod session_ctl;
 mod sweeps;
 mod traces;
@@ -66,9 +67,10 @@ mod transfer;
 mod validate;
 mod working;
 
+pub(crate) use validate::validate_meas;
 use validate::{
     MAX_CAL_UNSETTLED_DB, MAX_DELAY_S, check_delay, check_find, delay_samples, gen_err,
-    lease_required, mutation_conflict, not_found, static_grid, upsert_inputs, validate_meas,
+    lease_required, mutation_conflict, not_found, static_grid, upsert_inputs,
 };
 
 /// The authenticated peer of a network-mode (CURVE) connection, as the ZAP handler granted
@@ -197,6 +199,8 @@ pub(crate) struct Setup {
     pub(crate) bound_level: MaxLevel,
     /// Rig settings file; `None`: in memory only.
     pub(crate) rig_settings: Option<std::path::PathBuf>,
+    /// Where the rig's SPL meters keep their logs (`DaemonConfig::rig_logs`).
+    pub(crate) rig_logs: Option<std::path::PathBuf>,
     /// How the daemon serves clients (`server.*`).
     pub(crate) server: rig::ServerSetup,
     pub(crate) lease_expiry: Duration,
@@ -343,6 +347,8 @@ pub(crate) struct Control {
     recording: Option<recording::ActiveRecording>,
     /// Where the rig settings are kept.
     rig: crate::rig::RigStore,
+    /// The rig's SPL meters and the monitor at start.
+    rigm: rig_meas::RigMeas,
     /// The system max level a client last set (kept in the rig settings); `None`: never
     /// set, the bound applies.
     ceiling_set: Option<f64>,
@@ -406,13 +412,18 @@ impl Control {
             );
         }
         let store = Store::new(Dbfs(s.ceiling_dbfs), Dbfs(s.ceiling_bound), s.replay)
-            .with_outputs(saved.outputs)
+            .with_outputs(saved.outputs.clone())
+            .with_rig(ac2_proto::model::Rig {
+                monitor_at_start: saved.monitor_at_start,
+                ..Default::default()
+            })
             .with_calibrations(contents)
             .with_autosave(Autosave {
                 state: status,
                 saved_at: None,
             });
         let dedup = Dedup::new(s.dedup);
+        let rigm = rig_meas::RigMeas::new(&saved, s.rig_logs.as_deref());
         Self {
             store,
             cal,
@@ -427,7 +438,7 @@ impl Control {
             detecting: None,
             panels: HashMap::new(),
             next_fanout_id: 1,
-            next_meas: 1,
+            next_meas: rigm.next_id(),
             lease: None,
             gate: Arc::new(LeaseGate::new()),
             level: None,
@@ -452,13 +463,16 @@ impl Control {
             transfers: transfer::Transfers::default(),
             file_jobs: file_jobs::FileJobs::default(),
             rig,
+            rigm,
             ceiling_set: saved.ceiling_dbfs,
             s,
         }
     }
 
     pub(crate) fn run(mut self, rx: &Receiver<ControlMsg>) {
+        self.load_rig_meas();
         self.start_autosave();
+        self.start_rig_monitor();
         self.recover_recordings();
         loop {
             let now = Instant::now();
@@ -492,6 +506,7 @@ impl Control {
             {
                 self.start_probe();
             }
+            self.rig_tick(now);
             if self.preview.as_ref().is_some_and(|p| p.deadline <= now) {
                 tracing::info!("preview not renewed: closing it");
                 self.close_preview();
@@ -507,6 +522,9 @@ impl Control {
                 wake = wake.min(d);
             }
             if let Some(d) = self.recovery.as_ref().and_then(recovery::Recovery::due) {
+                wake = wake.min(d);
+            }
+            if let Some(d) = self.rig_due() {
                 wake = wake.min(d);
             }
             if let Some(d) = self
@@ -624,6 +642,7 @@ impl Control {
         }
         self.flush_file_jobs();
         self.flush_autosave();
+        self.finish_rig_logs();
         self.s.outbox.stop();
     }
 
@@ -632,6 +651,7 @@ impl Control {
     fn commit(&mut self, change: Change) -> Rev {
         let saved = matches!(change, Change::Measurement(_) | Change::Trace(_));
         self.note_for_recording(&change);
+        self.rig_meas_committing(&change);
         let ev = self.store.commit(change, Instant::now());
         match ac2_proto::encode_event(&ev) {
             Ok(b) => self.s.outbox.event(&b),

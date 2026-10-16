@@ -205,6 +205,15 @@ cannot judge: no audio, device lost, not calibrated).
 `osc.target` and `rig.monitor_start` carry the `rig.rev` they were made on; another is
 `conflict` with `detail: conflict {rev}` (the current one). `osc.test` sends one message to
 the target now (setup); `invalid` without a target.
+With `monitor_at_start` on, each `session.open` that succeeds while rig measurements exist is
+recorded in the rig settings (turning it on with a session open records that one). A daemon
+started with it on and a recorded session opens that device itself, after restoring the
+autosave: the same inputs, rate and buffer, no output channels and no loopback, so the
+generator has nothing to play on (`gen.set` is `invalid`) until a client opens a session of
+its own. A failed open is logged and tried again on the audio recovery's backoff (1 s
+doubling to 30 s) until it opens or a client opens or closes a session. `session.close`, and
+a `session.open` of another device, are allowed while rig measurements run; the daemon logs a
+warning (the rig meters stop metering, or meter the new device's inputs).
 An `OscCue` = {`ok`, `near`, `over`, `fault`: `OscMessage` \| nil} is the message sent in each
 state; it sits on each limit (`LeqWindow.cue`, `PeakLimit.cue`, `BandWindow.cue`,
 `PredictedWindow.cue`) and on the meter (`SplConfig.cue`). `OscMessage` = {`path`: str (a
@@ -265,8 +274,16 @@ panes; a session file's layout that is either is dropped on load.
 
 `MeasConfig` = {`name`, `kind`, `scope`: `MeasScope`}. `scope` is `session` (the working
 session's: saved in session files, replaced by a load) or `rig` (the rig's, SPL meters only:
-kept with the daemon's rig settings, never in a session file; a load or a new session leaves
-it running).
+kept with the daemon's rig settings, never in a session file; a load, a new session, a salvage
+or the autosave restore leaves it running with its log, Leq history and judgements, and a
+restarted daemon brings it back with its id). A `meas.update` changing `scope` moves the
+measurement between them under the same id; a change to a rig measurement is refused
+(`refused`) when the rig settings cannot be written. Session and rig measurements share one id
+counter; a loaded session file whose ids rig measurements hold has those measurements (and
+every reference to them) numbered past the counter. Its SPL log is kept apart from the
+autosave (`ac2d --rig-logs`) and carries on after a restart. Traces are always the session's:
+a trace or math channel filed under a rig measurement is saved in a session file without an
+owner (as an import), and a load replaces it like any other.
 
 `meas.update` carries `base`, the measurement's `config_rev` the edit was made on. Another
 `config_rev` (a client changed it since) is `conflict` with `detail: conflict {rev}` (the
@@ -977,8 +994,8 @@ untitled: holds anything), `saved_at` (when the origin's content was saved), `re
 last `file.new` / `file.load` replaced while it was dirty). It survives a daemon restart
 with the autosave (§7.3).
 
-- `file.save` writes measurement configurations (applied delay, tracking,
-  running) and every trace with metadata, edits, slots and columns (format §7.2). Never
+- `file.save` writes the session measurements' configurations (applied delay, tracking,
+  running; never a rig measurement's) and every trace with metadata, edits, slots and columns (format §7.2). Never
   generator state; calibrations belong to the calibration store. An existing session other
   than the working state's origin: `conflict` with `detail: {type: session_exists, name,
   saved_at}` unless `overwrite`. Afterwards `working.origin` is that session, clean.
@@ -986,14 +1003,14 @@ with the autosave (§7.3).
   {type: unsaved_changes, origin}`, nothing changed. Otherwise it checks the whole session
   first (a refusal changes nothing), keeps a dirty working state for `file.recover`, then
   stops and disarms the generator and drops its owner (the old lease is gone), deletes
-  every measurement and trace, starts a new session epoch newer than every epoch recorded
+  every session measurement and every trace (rig measurements stay), starts a new session epoch newer than every epoch recorded
   in the loaded traces (an open stream reopens without generator routes), and recreates
   the measurements (same ids, restarted when they were running) and traces (same ids).
   `working.origin` becomes the session (`client` {file name} for an upload), clean. Errors:
   `not_found`; `invalid` (not a session, bad name, damaged files or archive); `unsupported`
   with `detail: {type: session_version, found, supported}` for another format version.
-- `file.new`: guarded as `file.load`; deletes every measurement and trace (generator
-  disarmed, the audio session stays open); untitled.
+- `file.new`: guarded as `file.load`; deletes every session measurement and every trace
+  (generator disarmed, the audio session stays open, rig measurements stay); untitled.
 - `file.recover`: swaps the working state with `working.recover` (which then holds the
   state it replaced, so a second recover undoes the first); `not_found` without one.
 - `file.salvage`: imports each `traces/*.csv` of the session — any format version — into

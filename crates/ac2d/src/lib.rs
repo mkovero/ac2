@@ -438,6 +438,7 @@ impl Daemon {
             ceiling_bound: config.max_level_dbfs,
             bound_level,
             rig_settings: config.rig_settings.clone(),
+            rig_logs: config.rig_logs.clone(),
             server,
             lease_expiry: config.lease_expiry,
             keepalive: config.keepalive,
