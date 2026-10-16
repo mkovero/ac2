@@ -105,6 +105,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
+| b4415bfe | 2026-10-17 | 55 / 27 | Leq history strip browsable over the whole log (wheel/drag/I/O/←/→, Home live), `spl.history_get` range, Ctrl+K "Export Leq log (CSV, on this computer)…"; monitor at start opened capture-only, session reopened `--in 1-8 --outputs 6`; FOH SPL Leq history exported before to ketunkolo `~/ac2-test/foh-spl-leq-pre-b4415bfe.csv`; Pi `ui.toml` kept `chrome = "no_grid"`. FF400 auto-recovery (sys repo `pupu/`: udev stop on removal, `ff400-recover` restores the mixer and starts JACK, card found by id prefix) passed a quick and a ~22 s unplug: audio back 22 s / 37 s after the cut |
 | f483381e | 2026-10-16 | 54 / 27 | Art-Net cue changes fade over a rig-wide time (default 1 s, gamma 2.2, `ac2 artnet fade`, Rig monitor "Fade (s)" row); autosave restored as is, monitor at start opened capture-only then session reopened `--in 1-8 --outputs 6`; rig kept Art-Net target 192.168.9.82 universe 0.0.2, OSC target off; FOH SPL Leq history exported before to ketunkolo `~/ac2-test/foh-spl-leq-pre-f483381e.csv` (not needed) |
 | e3269ade | 2026-10-16 | 53 / 27 | app only (ketunkolo, Pi; pupu daemon stays on af019f24): cue lines and Rig monitor texts edited at a caret, "+ dB SPL" toggle (was "Level"), cue fold kept across Apply |
 | af019f24 | 2026-10-16 | 53 / 27 | Art-Net DMX cues (one universe, channel=value per cue state, HTP, on change + 1 s keepalive; `ac2 artnet`, `ac2 cue`, Rig monitor page rows); `autosave.v26` salvaged: 5 measurements + 3 traces, FOH SPL Leq history skipped (exported to ketunkolo `~/ac2-test/foh-spl-leq-pre-af019f24.csv`); session reopened `--in 1-8 --outputs 6`; `rig.json` kept the OSC target 192.168.9.25:7700 |
@@ -204,24 +205,26 @@ used the old wiring (out 3 → Xone, unbalanced, −14.8 dB → in 5; outs 4–6
 In 1 is the MM1 (phantom, mic gain 20); ins 3–4 are empty. Session:
 `session open --backend jack --in 1-8 --outputs 6 --loopback-out 2 --loopback-in 2 --mic "1=MM1 34804"`.
 
-**An FF400 reset (front-panel or bus) takes three steps to recover.** ac2 does its part by
-itself (`docs/design/audio-recovery.md`): within a second of the last block the app shows AUDIO
-STOPPED (`ac2 status`: `audio STOPPED: …`), ac2d closes its JACK client off its control thread
-and keeps reopening the same session (backoff 1 s … 30 s, reopening at once when JACK reports
-the device back), so after step 1 the session, its measurements and the SPL log (with the outage
-as a gap) come back without `session open`; the generator comes back disarmed. Verified on the
-rig by stopping and restarting jackd. Restarting jackd and steps 2–3 stay the operator's:
-1. The FireWire layer re-creates the device, but jackd keeps the old card open: `snd_card_free`
-   blocks in the kernel (`hung task … fw_device_shutdown`), jackd stops answering (`jack_lsp`
-   times out) and ac2 gets no audio and no error — the app shows STALE. A hung jackd is not a
-   failed one, so its unit does not restart it: `systemctl --user restart jack-ac` once the
-   bus has settled (it exits cleanly on SIGTERM).
-2. The control service dies with the reset: `systemctl --user restart snd-fireface-ctl`.
-3. The device is back at driver defaults (phantom off, gains 0: the mic reads a dead −102 dBFS;
-   no output reaches any input) while ALSA readback still shows the old values. Restore with
-   the toggle writes in `~/src/ac/docs/rigs/pupu.md` ("Restore with toggle writes"; not
-   `ff400.sh`, which forces phantom off) and verify by emission: the table above, mic room
-   noise ≈ −67 dBFS RMS.
+**An FF400 reset or unplug recovers by itself** (verified 2026-10-17: a quick and a ~22 s
+unplug, audio back 22 s / 37 s after the cut). ac2's part (`docs/design/audio-recovery.md`):
+within a second of the last block the app shows AUDIO STOPPED, ac2d closes its JACK client and
+keeps reopening the same session (backoff 1 s … 30 s, at once when the device probe sees it
+back), so the session, its measurements and the SPL log (with the outage as a gap) come back
+without `session open`; the generator comes back disarmed. The host's part lives in the sys
+repo (`~/src/sys/pupu/`, installed on pupu):
+1. The card's removal (`80-ac2-ff400.rules`) stops `jack-ac`. jackd never exits on SIGTERM
+   with the device gone ("Cannot stop driver"): `TimeoutStopSec=3` kills it, which frees the
+   old card (a jackd left holding it blocks `snd_card_free`, `hung task … fw_device_shutdown`).
+2. The card's return (its udev "change" event, when `ID_BUS` is known) starts
+   `ff400-recover`: it waits for `jack-ac` to be stopped and for the card (`ff400-card`, by id
+   prefix: a fast replug can name it `Fireface400_1`), restarts `snd-fireface-ctl`, writes the
+   mixer baseline with toggle writes (the device is back at driver defaults — phantom off,
+   gains 0 — while ALSA readback still shows the old values; `~/src/ac/docs/rigs/pupu.md`
+   "Restore with toggle writes"), then starts `jack-ac` (`ff400-jackd`, card by prefix).
+3. Check after one: `amixer -c Fireface400 cget numid=81` → 20,0 and `numid=90` → on,off; mic
+   room noise ≈ −67 dBFS RMS. Journal: `journalctl --user -u jack-ac -u ff400-recover`.
+By hand, if the automation is off: `systemctl --user stop jack-ac`, `systemctl --user start
+ff400-recover` (it does steps 2–3).
 
 ## Phase 1 hardware run (2026-10-05)
 
