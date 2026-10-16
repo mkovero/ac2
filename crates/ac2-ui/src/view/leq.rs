@@ -287,6 +287,10 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
     band_section(ui, d, &mut msg, ch);
     ui.add_space(10.0);
     rig_section(ui, d, &mut msg, ch);
+    if let Some(n) = &d.notice {
+        ui.add_space(4.0);
+        ui.label(RichText::new(n).color(ch.warn));
+    }
     if let Some(e) = &d.error {
         ui.add_space(4.0);
         ui.label(RichText::new(e).color(ch.fault));

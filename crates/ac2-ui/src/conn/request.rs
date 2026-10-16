@@ -47,22 +47,31 @@ pub(super) fn request_name(r: &Request) -> String {
     }
 }
 
+/// The warnings a reply carried, to the UI ahead of the reply itself.
+fn send_warnings(o: &Out, warnings: Vec<ac2_proto::Warning>) {
+    if !warnings.is_empty() {
+        o.send(ConnEvent::Warnings(warnings));
+    }
+}
+
 pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out: &Out) {
     match r {
         Request::Call { cmd, what } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
-                match c.call(cmd).await {
+                match c.call_warned(cmd).await {
                     Err(e) if e.code() == Some(ac2_proto::ErrorCode::Conflict) => {
                         o.send(ConnEvent::Conflict {
                             what,
                             error: e.to_string(),
                         });
                     }
-                    r => o.send(ConnEvent::Reply {
-                        what,
-                        result: r.map(drop).map_err(|e| e.to_string()),
-                    }),
+                    r => {
+                        let result = r
+                            .map(|(_, warnings)| send_warnings(&o, warnings))
+                            .map_err(|e| e.to_string());
+                        o.send(ConnEvent::Reply { what, result });
+                    }
                 }
             });
         }
@@ -226,12 +235,15 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
         } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
-                if let Err(e) = c.call(Command::SessionOpen { config }).await {
-                    o.send(ConnEvent::Reply {
-                        what,
-                        result: Err(e.to_string()),
-                    });
-                    return;
+                match c.call_warned(Command::SessionOpen { config }).await {
+                    Ok((_, warnings)) => send_warnings(&o, warnings),
+                    Err(e) => {
+                        o.send(ConnEvent::Reply {
+                            what,
+                            result: Err(e.to_string()),
+                        });
+                        return;
+                    }
                 }
                 if !inputs.is_empty()
                     && let Err(e) = c.call(Command::SessionInputs { inputs }).await

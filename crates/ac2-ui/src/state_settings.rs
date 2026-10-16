@@ -130,36 +130,80 @@ impl AppState {
                 s.rig.follow(r);
             }
         }
+        // A page kept after a conflict follows the meter's configuration until applied.
+        let fresh = self
+            .overlay
+            .leq()
+            .filter(|d| d.notice.is_some())
+            .and_then(|d| self.meas(d.meas).cloned());
+        if let (Some(m), Some(d)) = (fresh, self.overlay.leq_mut()) {
+            d.rebase(&m);
+        }
     }
 
-    /// The daemon refused `what` as made on settings another client changed first: the
-    /// open pages show the rig's settings again, and a toast says so.
-    pub(super) fn conflict_reload(&mut self, what: &str) {
+    /// The daemon refused `what` as made on settings another client changed first. The SPL
+    /// / Leq page or the Rig monitor target it came from comes back with the operator's
+    /// edits, made on the newer settings so Apply again overwrites; otherwise the Rig
+    /// monitor page shows the rig's settings again. A toast says which, even with the
+    /// warning toasts off: the edit did not land.
+    pub(super) fn conflict(&mut self, what: &str, out: &mut Vec<Request>) {
         let rig = self.daemon().map(|s| s.rig.clone());
-        let fresh = |st: &Self, id| {
-            st.meas(id)
-                .cloned()
-                .and_then(|m| LeqDialog::new(&m, st.leq_calibrated(m.id)))
+        let mut kept = self.leq_conflict(what, out);
+        if let (Overlay::Settings(s), Some(r)) = (&mut self.overlay, &rig)
+            && !kept
+        {
+            kept = s.rig.rebase(what, r);
+            if !kept {
+                s.rig.follow(r);
+            }
+        }
+        let text = if kept {
+            ac2_scene::osc::conflict_kept_toast(what)
+        } else {
+            ac2_scene::osc::conflict_toast(what)
         };
-        let leq = match &self.overlay {
-            Overlay::Settings(s) => s.leq.as_ref().map(|d| d.meas),
-            _ => None,
+        self.notify(super::Severity::Warning, text, super::Muted::Never);
+    }
+
+    /// The SPL / Leq page whose Apply `what` was refused: open again with its edits, on the
+    /// meter's current configuration. False when no such Apply is waiting, or another
+    /// window is up.
+    fn leq_conflict(&mut self, what: &str, out: &mut Vec<Request>) -> bool {
+        let Some((_, d)) = self.leq_sent.take_if(|(w, _)| w == what) else {
+            return false;
+        };
+        let Some(m) = self.meas(d.meas).cloned() else {
+            return false;
+        };
+        if !matches!(self.overlay, Overlay::None | Overlay::Settings(_)) {
+            return false;
         }
-        .and_then(|id| fresh(self, id));
+        let mut d = *d;
+        d.rebase(&m);
+        self.open_settings(Page::Leq, out);
         if let Overlay::Settings(s) = &mut self.overlay {
-            if let Some(r) = &rig {
-                s.rig.reload(r);
-            }
-            if let Some(d) = leq {
-                s.leq = Some(d);
-            }
+            s.leq = Some(d);
         }
-        // The operator's edit was dropped: said even with the warning toasts off.
-        self.notify(
-            super::Severity::Warning,
-            ac2_scene::osc::conflict_toast(what),
-            super::Muted::Never,
-        );
+        true
+    }
+
+    /// A reply's warnings, the rig meters by name: shown even with the warning toasts off,
+    /// as the meters going blind or moving is what the operator did not ask for.
+    pub(super) fn reply_warnings(&mut self, warnings: &[ac2_proto::Warning]) {
+        for w in warnings {
+            let names: Vec<String> = ac2_scene::osc::warning_meas(w)
+                .iter()
+                .map(|id| {
+                    self.meas(*id)
+                        .map_or_else(|| id.0.to_string(), |m| m.config.name.clone())
+                })
+                .collect();
+            self.notify(
+                super::Severity::Warning,
+                ac2_scene::osc::reply_warning(w, &names),
+                super::Muted::Never,
+            );
+        }
     }
 
     /// Enter (or a click) on a row of the Rig monitor page.

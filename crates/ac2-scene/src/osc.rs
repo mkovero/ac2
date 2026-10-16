@@ -4,6 +4,7 @@
 
 use std::net::SocketAddr;
 
+use ac2_proto::Warning;
 use ac2_proto::model::{CueState, MeasScope, Measurement, OscArg, OscMessage, OscPath, Rig};
 use ac2_proto::units::MeasId;
 
@@ -317,6 +318,42 @@ pub fn conflict_toast(what: &str) -> String {
     format!("{what}: changed elsewhere — reloaded")
 }
 
+/// The toast when the refused edit stays on its page, rebased on the newer settings.
+pub fn conflict_kept_toast(what: &str) -> String {
+    format!("{what}: changed elsewhere — not applied, your edits kept")
+}
+
+/// The line under a page whose Apply was refused as made on settings another client changed
+/// first: the edits stay, and the next Apply is made on the newer settings.
+pub const CHANGED_ELSEWHERE: &str = "changed elsewhere: Apply again overwrites with your edits";
+
+/// [`CHANGED_ELSEWHERE`] on the Rig monitor page, where Enter applies a row.
+pub const CHANGED_ELSEWHERE_ENTER: &str =
+    "changed elsewhere: Enter again overwrites with your edit";
+
+/// A reply's warning in words, the rig meters it lists by `names` (in its order); the same
+/// sentences the CLI prints.
+pub fn reply_warning(w: &Warning, names: &[String]) -> String {
+    match w {
+        Warning::RigMonitorBlind { .. } => format!(
+            "rig SPL meter(s) {} stop metering until a session opens again; their OSC cues \
+             report fault",
+            names.join(", ")
+        ),
+        Warning::RigMonitorMoved { .. } => format!(
+            "rig SPL meter(s) {} now meter this device's inputs",
+            names.join(", ")
+        ),
+    }
+}
+
+/// The meters a reply's warning lists.
+pub fn warning_meas(w: &Warning) -> &[MeasId] {
+    match w {
+        Warning::RigMonitorBlind { meas } | Warning::RigMonitorMoved { meas } => meas,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,5 +503,30 @@ mod tests {
         assert_eq!(cue_colors(CueState::Over, &t), tile(TileState::Over));
         assert_eq!(cue_colors(CueState::Near, &t), tile(TileState::Near));
         assert_eq!(cue_colors(CueState::Ok, &t).0, tile(TileState::Ok).0);
+    }
+
+    #[test]
+    fn reply_warnings_name_the_meters() {
+        let names = ["Stage".to_owned(), "FOH".to_owned()];
+        let blind = Warning::RigMonitorBlind {
+            meas: vec![MeasId(1), MeasId(2)],
+        };
+        assert_eq!(warning_meas(&blind), &[MeasId(1), MeasId(2)]);
+        assert_eq!(
+            reply_warning(&blind, &names),
+            "rig SPL meter(s) Stage, FOH stop metering until a session opens again; their OSC \
+             cues report fault"
+        );
+        let moved = Warning::RigMonitorMoved {
+            meas: vec![MeasId(1)],
+        };
+        assert_eq!(
+            reply_warning(&moved, &names[..1]),
+            "rig SPL meter(s) Stage now meter this device's inputs"
+        );
+        assert_eq!(
+            conflict_kept_toast("FOH SPL: Leq windows set"),
+            "FOH SPL: Leq windows set: changed elsewhere — not applied, your edits kept"
+        );
     }
 }

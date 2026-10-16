@@ -89,9 +89,10 @@ fn the_rig_page_sends_its_edits_on_the_rev_it_shows() {
 }
 
 /// Another client changed the rig settings while this one typed a target: the daemon
-/// refuses the stale edit, a toast says so and the page shows the rig's again.
+/// refuses the stale edit, the page keeps the typed target on the rig's newer rev with a
+/// line saying Enter again overwrites, and a toast says so.
 #[test]
-fn a_conflict_reloads_the_page_and_says_so() {
+fn a_conflict_keeps_the_typed_target_on_the_newer_rev() {
     let mut t = T::new();
     t.conn(mirror(with_rig(3)));
     t.st.update(Msg::OpenRig, &t.keys);
@@ -99,7 +100,7 @@ fn a_conflict_reloads_the_page_and_says_so() {
     // Typed: a mirror change leaves the edit (and its base) alone.
     let mut s = with_rig(4);
     s.rig.osc_target = Some("10.0.0.9:9000".parse().expect("test value"));
-    t.conn(mirror(s));
+    t.conn(mirror(s.clone()));
     assert_eq!(rig_page(&t).target, "10.0.0.5:9000");
     let r = t.key("Enter");
     assert!(matches!(
@@ -112,10 +113,130 @@ fn a_conflict_reloads_the_page_and_says_so() {
     });
     assert_eq!(
         t.last_toast(),
-        "OSC target 10.0.0.5:9000: changed elsewhere — reloaded"
+        "OSC target 10.0.0.5:9000: changed elsewhere — not applied, your edits kept"
     );
-    assert_eq!(rig_page(&t).target, "10.0.0.9:9000");
+    assert_eq!(rig_page(&t).target, "10.0.0.5:9000");
     assert_eq!(rig_page(&t).rev, Rev(4));
+    assert_eq!(
+        rig_page(&t).notice.as_deref(),
+        Some("changed elsewhere: Enter again overwrites with your edit")
+    );
+    // Another mirror change while the kept target waits: still the operator's text, on
+    // the newest rev.
+    s.rig.rev = Rev(5);
+    t.conn(mirror(s));
+    assert_eq!(rig_page(&t).target, "10.0.0.5:9000");
+    let r = t.key("Enter");
+    assert!(matches!(
+        call(&r),
+        Some((Command::OscTarget { base: Rev(5), .. }, _))
+    ));
+    assert_eq!(rig_page(&t).notice, None);
+}
+
+/// A conflict on a toggle the page holds nothing typed for: the page shows the rig's
+/// settings again.
+#[test]
+fn a_conflict_on_monitor_at_start_reloads_the_page() {
+    let mut t = T::new();
+    t.conn(mirror(with_rig(3)));
+    t.st.update(Msg::OpenRig, &t.keys);
+    t.key("ArrowDown");
+    assert!(call(&t.key("ArrowRight")).is_some());
+    t.conn(ConnEvent::Conflict {
+        what: "monitor at start on".into(),
+        error: "conflict: stale base".into(),
+    });
+    assert_eq!(
+        t.last_toast(),
+        "monitor at start on: changed elsewhere — reloaded"
+    );
+    assert_eq!(rig_page(&t).notice, None);
+}
+
+/// Another client changed the meter while the SPL / Leq page was applied: the page comes
+/// back with the operator's edits on the meter's newer rev, a line says Apply again
+/// overwrites, and the second Apply goes through on that rev.
+#[test]
+fn a_conflict_on_apply_keeps_the_leq_page_and_its_edits() {
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    t.type_key("Shift+L", "L");
+    let opened = t.st.overlay.leq().expect("test value").base_rev;
+    t.st.update(Msg::Leq(LeqMsg::Focus(Focus::Scope)), &t.keys);
+    t.key("ArrowRight");
+    assert!(t.st.overlay.leq().expect("test value").on_rig);
+    // Elsewhere: the meter's configuration moves on.
+    let mut s = with_spl();
+    s.measurements[2].config_rev = Rev(opened.0 + 5);
+    t.conn(mirror(s.clone()));
+    let r = t.key("Enter");
+    let Some((Command::MeasUpdate { base, .. }, what)) = call(&r) else {
+        panic!("{r:?}")
+    };
+    assert_eq!(*base, opened);
+    let what = what.to_owned();
+    assert!(t.st.overlay.leq().is_none(), "applied: the page closes");
+    t.conn(ConnEvent::Conflict {
+        what: what.clone(),
+        error: "conflict: stale base".into(),
+    });
+    assert_eq!(
+        t.last_toast(),
+        format!("{what}: changed elsewhere — not applied, your edits kept")
+    );
+    let d = t.st.overlay.leq().expect("the page is back");
+    assert!(d.on_rig, "the edit is kept");
+    assert_eq!(d.base_rev, Rev(opened.0 + 5));
+    assert_eq!(
+        d.notice.as_deref(),
+        Some("changed elsewhere: Apply again overwrites with your edits")
+    );
+    // A later change elsewhere: the kept page follows its rev.
+    s.measurements[2].config_rev = Rev(opened.0 + 6);
+    t.conn(mirror(s));
+    let r = t.key("Enter");
+    let Some((Command::MeasUpdate { base, config, .. }, _)) = call(&r) else {
+        panic!("{r:?}")
+    };
+    assert_eq!(*base, Rev(opened.0 + 6));
+    assert_eq!(config.scope, MeasScope::Rig);
+    assert!(t.st.overlay.leq().is_none());
+}
+
+/// A reply's warnings toast with the rig meters' names, even with the warning toasts off.
+#[test]
+fn reply_warnings_toast_with_meter_names() {
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    t.st.prefs.warning_toasts = false;
+    let name =
+        t.st.meas(MeasId(4))
+            .expect("test value")
+            .config
+            .name
+            .clone();
+    t.conn(ConnEvent::Warnings(vec![
+        ac2_proto::Warning::RigMonitorBlind {
+            meas: vec![MeasId(4), MeasId(99)],
+        },
+    ]));
+    assert_eq!(
+        t.last_toast(),
+        format!(
+            "rig SPL meter(s) {name}, 99 stop metering until a session opens again; their \
+             OSC cues report fault"
+        )
+    );
+    t.conn(ConnEvent::Warnings(vec![
+        ac2_proto::Warning::RigMonitorMoved {
+            meas: vec![MeasId(4)],
+        },
+    ]));
+    assert_eq!(
+        t.last_toast(),
+        format!("rig SPL meter(s) {name} now meter this device's inputs")
+    );
 }
 
 /// The limit editor moves the meter onto the rig and sets its meter-wide cue; Enter names

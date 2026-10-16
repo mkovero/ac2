@@ -269,9 +269,10 @@ impl AppState {
             }
             ConnEvent::Conflict { what, error } => {
                 if !self.layout_reply(&what, &Err(error), out) {
-                    self.conflict_reload(&what);
+                    self.conflict(&what, out);
                 }
             }
+            ConnEvent::Warnings(w) => self.reply_warnings(&w),
             ConnEvent::DelayFound {
                 meas,
                 pick,

@@ -259,6 +259,8 @@ pub struct LeqDialog {
     pub selected: bool,
     /// Why the last Enter was refused.
     pub error: Option<String>,
+    /// The last Apply was refused as made on a configuration changed since: the edits stay.
+    pub notice: Option<String>,
     /// The band transfer step, open over the dialog.
     pub transfer: Option<TransferStep>,
     /// The rig keeps the meter: it survives session loads.
@@ -319,6 +321,7 @@ impl LeqDialog {
             focus: Focus::Preset,
             selected: false,
             error: None,
+            notice: None,
             transfer: None,
             on_rig: m.config.scope == ac2_proto::model::MeasScope::Rig,
             cues_shown: false,
@@ -962,6 +965,18 @@ fn peak_index(q: PeakQuantity) -> usize {
 }
 
 impl LeqDialog {
+    /// The meter changed elsewhere while these edits were made: they stay, now on its
+    /// current configuration (what the dialog does not edit comes from there), and a line
+    /// says Apply again overwrites.
+    pub fn rebase(&mut self, m: &Measurement) {
+        if let MeasKind::Spl { config } = &m.config.kind {
+            self.base = config.clone();
+        }
+        self.base_rev = m.config_rev;
+        self.name = m.config.name.clone();
+        self.notice = Some(ac2_scene::osc::CHANGED_ELSEWHERE.to_owned());
+    }
+
     /// The `meas.update` Enter sends: on the rev the dialog was opened on, with the scope
     /// the dialog chose.
     pub fn command(&self) -> Result<ac2_proto::Command, String> {

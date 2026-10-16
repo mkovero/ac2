@@ -109,6 +109,9 @@ pub enum ConnEvent {
         what: String,
         error: String,
     },
+    /// A command succeeded with warnings the operator should hear about (sent before its
+    /// `Reply`).
+    Warnings(Vec<ac2_proto::Warning>),
     /// A `delay.find` answered; `pick` is what the operator asked to insert.
     DelayFound {
         meas: MeasId,

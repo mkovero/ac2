@@ -1797,8 +1797,8 @@ With **monitor at start** on, the daemon remembers the device of the last sessio
 rig meters exist, and opens it again by itself when it starts, capture only (no outputs, so
 nothing can be played), so the rig meters meter with no app or terminal connected. Closing
 the session, or opening another device, while rig meters run is allowed; the reply warns
-(the CLI prints it, the daemon logs it) that the rig meters stop metering, or meter the new
-device's inputs.
+(the CLI prints it, the app shows it as a toast even with warning toasts off, the daemon
+logs it) that the rig meters stop metering, or meter the new device's inputs.
 
 From the terminal:
 
@@ -2220,7 +2220,10 @@ unless a weighting is given: `band:63hz:a:15min`) or `predicted`. A message is t
 and its arguments in one quoted argument: `i:1` an integer, `f:0.5` a float, `s:text` a
 string; a bare number is an integer without a decimal point and a float with one, any other
 bare word a string. States not given keep their message. Another client editing the meter at
-the same moment makes the CLI read it again and retry once.
+the same moment makes the CLI read it again and retry once. In the app, the SPL / Leq page or the
+Rig monitor target whose Apply another client's edit beat comes back with your edits and the
+line "changed elsewhere: Apply again overwrites with your edits"; Apply (Enter) again sends
+them on the newer settings.
 
 ## Keyboard
 

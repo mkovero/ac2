@@ -330,6 +330,9 @@ pub struct AppState {
     pub tree_reveal: bool,
     /// The Settings page last shown: the Settings key opens it again.
     settings_page_last: Page,
+    /// The SPL / Leq page last applied, with what its call is named: a conflict brings it
+    /// back with its edits.
+    leq_sent: Option<(String, Box<LeqDialog>)>,
     /// `meas.layout` calls not answered yet, oldest first.
     layout_calls: std::collections::VecDeque<meas_layout::LayoutCall>,
     /// Edits waiting for the `meas.layout` call in flight for their measurement: the newest.
@@ -466,6 +469,7 @@ impl AppState {
             want_connect_dialog: false,
             tree_reveal: false,
             settings_page_last: Page::AudioIo,
+            leq_sent: None,
             layout_calls: std::collections::VecDeque::new(),
             layout_queued: BTreeMap::new(),
             layout_due: None,

@@ -34,6 +34,11 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   marked: `docs/design/multires-spectrum.md`), shown as tone or density (dBFS/Hz; the
   multi-resolution default, so broadband sound reads as on a fixed FFT). Band Leq per
   1/3-octave band (STM 545/2015): `docs/design/band-leq.md`.
+- Rig monitor: SPL meters kept on the rig (`rig.json`, survive session loads) send OSC cues
+  (ok / near / over / fault, resent each second) to a typed target; the monitor can reopen its
+  device capture-only at daemon start. Settings page 7 (Rig monitor), the tree's Rig group,
+  cues on the SPL / Leq page, `ac2 osc` / `ac2 rig` (`docs/user-guide.md` *Rig measurements*,
+  *OSC cues*; decisions R1–R4).
 - REW cross-check (`tools/crosscheck`, `docs/rigs/pupu.md`): electrical and Genelec at −30 dBFS
   agree with REW and numpy (FAIL 0 on 8b87f49).
 - Panes are a tiling tree (one pane at first start, N split, Shift+N turns a split, Alt+←/→ or

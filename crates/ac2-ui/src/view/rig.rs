@@ -111,6 +111,9 @@ pub(super) fn rig_page(
         }
         ui.add_space(4.0);
     }
+    if let Some(n) = &p.notice {
+        ui.label(RichText::new(n).color(ch.warn));
+    }
     if let Some(e) = &p.error {
         ui.label(RichText::new(e).color(ch.fault));
     }

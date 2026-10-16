@@ -48,6 +48,11 @@ pub struct RigPage {
     pub selected: bool,
     /// Why the last Enter was refused.
     pub error: Option<String>,
+    /// The target sent by the last Enter, with what its call is named: a conflict types it
+    /// again.
+    sent: Option<(String, String)>,
+    /// The last target was refused as made on settings changed since: the typed one stays.
+    pub notice: Option<String>,
 }
 
 impl Default for RigPage {
@@ -60,6 +65,8 @@ impl Default for RigPage {
             edited: false,
             selected: true,
             error: None,
+            sent: None,
+            notice: None,
         }
     }
 }
@@ -80,13 +87,32 @@ impl RigPage {
         self.rev = rig.rev;
         self.edited = false;
         self.selected = self.focus.is_text();
+        self.notice = None;
     }
 
-    /// The mirror changed: the page follows the rig unless the operator is typing a target.
+    /// The mirror changed: the page follows the rig unless the operator is typing a target;
+    /// a target kept after a conflict is made on the rig's newest settings.
     pub fn follow(&mut self, rig: &Rig) {
         if !self.edited {
             self.reload(rig);
+        } else if self.notice.is_some() {
+            self.rev = rig.rev;
         }
+    }
+
+    /// The daemon refused `what` as made on settings changed since: the target it sent is
+    /// typed again on the rig's current rev, and a line says Enter again overwrites. False
+    /// when `what` is not the page's last target.
+    pub fn rebase(&mut self, what: &str, rig: &Rig) -> bool {
+        let Some((_, typed)) = self.sent.take_if(|(w, _)| w == what) else {
+            return false;
+        };
+        self.target = typed;
+        self.rev = rig.rev;
+        self.edited = true;
+        self.selected = false;
+        self.notice = Some(ac2_scene::osc::CHANGED_ELSEWHERE_ENTER.to_owned());
+        true
     }
 
     pub fn typing(&self) -> bool {
@@ -146,6 +172,7 @@ impl RigPage {
     /// Monitor at start set to `on`: the command, or nothing when it already is.
     pub fn monitor(&mut self, rig: &Rig, on: bool) -> Option<(Command, String)> {
         self.focus_row(RigRow::Monitor);
+        self.sent = None;
         (rig.monitor_at_start != on).then(|| {
             let word = if on { "on" } else { "off" };
             (
@@ -159,6 +186,8 @@ impl RigPage {
     /// (a refusal says why in [`Self::error`]).
     pub fn enter(&mut self, rig: &Rig) -> Option<(Command, String)> {
         self.error = None;
+        self.notice = None;
+        self.sent = None;
         match self.focus {
             RigRow::Target => match parse_target(&self.target) {
                 Ok(addr) => {
@@ -172,6 +201,7 @@ impl RigPage {
                     };
                     // Sent: the page shows the rig's target again as the mirror brings it.
                     self.edited = false;
+                    self.sent = Some((what.clone(), self.target.clone()));
                     Some((cmd, what))
                 }
                 Err(e) => {

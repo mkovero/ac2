@@ -163,12 +163,14 @@ impl AppState {
         };
         match d.command() {
             Ok(cmd) => {
-                let name = d.name.clone();
+                let what = format!("{}: Leq windows set", d.name);
+                d.notice = None;
+                self.leq_sent = Some((what.clone(), Box::new(d.clone())));
                 self.overlay = Overlay::None;
                 self.focus_kind(PaneKind::Spl);
                 let m = self.modes_mut();
                 m.spl = m.spl.with_leq();
-                self.call(out, cmd, format!("{name}: Leq windows set"));
+                self.call(out, cmd, what);
             }
             Err(e) => d.error = Some(e),
         }
