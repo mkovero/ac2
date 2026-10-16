@@ -96,7 +96,7 @@ impl Shared {
                 .iter()
                 .filter_map(|m| match &m.config.kind {
                     MeasKind::Spl { config } => Some(session::SavedSplLog {
-                        info: ac2_traces::spl_log::SplLogInfo {
+                        info: ac2_proto::spl_log::SplLogInfo {
                             meas: m.id,
                             name: m.config.name.clone(),
                             input: config.input,

@@ -693,7 +693,7 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
             )
         };
         for (i, r) in l.rows.iter().enumerate() {
-            ac2_traces::spl_log::check_row(r).map_err(|e| row(i, e))?;
+            ac2_proto::spl_log::check_row(r).map_err(|e| row(i, e))?;
         }
         for (i, r) in l.bands.iter().enumerate() {
             ac2_traces::band_log::check_row(r).map_err(|e| row(i, e))?;

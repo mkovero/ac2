@@ -420,47 +420,12 @@ async fn log_page(
     Ok(expect_body!("spl.log_get", r, ReplyBody::SplLogPage(p) => p)?)
 }
 
-/// Every row of one of the meter's logs, paged.
-pub(crate) async fn all_rows(
-    c: &Client,
-    meas: ac2_proto::units::MeasId,
-    log: SplLogWhich,
-) -> Result<Vec<SplLogRow>, CliError> {
-    let mut rows = Vec::new();
-    let mut from = 0;
-    loop {
-        let r = c
-            .call(Command::SplLogGet {
-                meas,
-                log,
-                from,
-                max: SplLogPage::MAX_ROWS,
-            })
-            .await?;
-        let p = expect_body!("spl.log_get", r, ReplyBody::SplLogPage(p) => p)?;
-        let n = p.rows.len() as u64;
-        rows.extend(p.rows);
-        from = p.from + n;
-        if n == 0 || from >= p.total {
-            return Ok(rows);
-        }
-    }
-}
-
 /// The CSV of `rows` of meter `m` (the session file's format).
 fn log_csv(st: &State, m: &Measurement, rows: &[SplLogRow]) -> Result<String, CliError> {
-    let cfg = spl_config(m)?;
-    let info = ac2_traces::spl_log::SplLogInfo {
-        meas: m.id,
-        name: m.config.name.clone(),
-        input: cfg.input,
-        mic: st
-            .inputs
-            .iter()
-            .find(|i| i.channel == cfg.input)
-            .and_then(|i| i.mic.clone()),
-    };
-    Ok(ac2_traces::spl_log::export_csv(&info, rows))
+    spl_config(m)?;
+    let info = ac2_client::spl_log::log_info(st, m)
+        .ok_or_else(|| CliError::Usage(format!("{} is not an SPL meter", m.config.name)))?;
+    Ok(ac2_proto::spl_log::export_csv(&info, rows))
 }
 
 /// `spl leq new`: without `--yes`, says what would end and refuses; with it, ends the log
@@ -480,7 +445,7 @@ async fn new_log(cli: &Cli, n: &LeqNew, out: &mut Out<'_>) -> Result<(), CliErro
             "{} seconds logged over {} since {}",
             head.total,
             ac2_scene::leq::clock(now.saturating_sub(r.start.0) as f64 / 1e9),
-            ac2_traces::spl_log::utc_iso(r.start.0)
+            ac2_proto::spl_log::utc_iso(r.start.0)
         ),
         None => "nothing logged yet".to_owned(),
     };
@@ -495,7 +460,7 @@ async fn new_log(cli: &Cli, n: &LeqNew, out: &mut Out<'_>) -> Result<(), CliErro
     c.call(Command::SplLogNew { meas: m.id }).await?;
     let file = match &n.export {
         Some(path) => {
-            let rows = all_rows(&c, m.id, SplLogWhich::Previous).await?;
+            let rows = ac2_client::spl_log::all_rows(&c, m.id, SplLogWhich::Previous).await?;
             let csv = log_csv(&st, &m, &rows)?;
             std::fs::write(path, csv.as_bytes()).map_err(|e| {
                 CliError::Usage(format!(
@@ -512,7 +477,7 @@ async fn new_log(cli: &Cli, n: &LeqNew, out: &mut Out<'_>) -> Result<(), CliErro
         &json!({
             "meas": m.id.0,
             "ended_rows": head.total,
-            "ended_started_at": head.rows.first().map(|r| ac2_traces::spl_log::utc_iso(r.start.0)),
+            "ended_started_at": head.rows.first().map(|r| ac2_proto::spl_log::utc_iso(r.start.0)),
             "file": file.as_ref().map(|(p, _)| p.to_string_lossy()),
             "exported_rows": file.as_ref().map(|(_, k)| *k),
         }),
@@ -543,15 +508,13 @@ async fn export(cli: &Cli, e: &LeqExport, out: &mut Out<'_>) -> Result<(), CliEr
     } else {
         SplLogWhich::Current
     };
-    let rows = all_rows(&c, m.id, log).await?;
+    let rows = ac2_client::spl_log::all_rows(&c, m.id, log).await?;
     let csv = log_csv(&st, m, &rows)?;
     match &e.out {
         Some(path) => {
             std::fs::write(path, csv.as_bytes())?;
-            let first = rows
-                .first()
-                .map(|r| ac2_traces::spl_log::utc_iso(r.start.0));
-            let last = rows.last().map(|r| ac2_traces::spl_log::utc_iso(r.start.0));
+            let first = rows.first().map(|r| ac2_proto::spl_log::utc_iso(r.start.0));
+            let last = rows.last().map(|r| ac2_proto::spl_log::utc_iso(r.start.0));
             out.emit(
                 &json!({
                     "meas": m.id.0,

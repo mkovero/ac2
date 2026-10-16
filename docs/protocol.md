@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 54`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 55`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -136,7 +136,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `cal.delete` | `key: CalKey` | `ack` | |
 | `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
 | `spl.log_new` | `meas` | `ack` | |
-| `spl.history_get` | `meas`, `seconds: u32` | `spl_history` | |
+| `spl.history_get` | `meas`, `span: HistorySpan` | `spl_history` | non-mutating |
 | `spl.band_transfer` | `meas`, `foh`, `at_place: BandLevelSource`, `background: BandLevelSource \| nil`, `place: str` | `measurement` (as `meas.update`) | |
 | `spl.band_log_get` | `meas`, `from`, `until: WallNs`, `step: u32 \| nil` | `spl_band_log` | non-mutating |
 | `sweep.run` | `lease_token`, `meas` (a sweep measurement), `name: string \| nil` | `sweep` (the run as started) | L (held for the run), armed |
@@ -559,23 +559,58 @@ limit) carry {`level`: f64, that held value in the frame's `scale` (NaN before a
 measured), `judgement`: `LeqJudgement`}.
 
 `spl.history_get` returns `SplHistory` {`meas`, `windows`: [`LeqWindow`] (the meter's, in
-configuration order), `scale`: `LevelScale`, `at`: [WallNs], `leq`: [[f32]], `over`:
-[[bool]]}: each window second by second over the newest `seconds` (at most 14400, 4 h) of
-the meter's current log, as its `leq` frames carried them — `at` the end of each second
-(oldest first; a second without a row has no entry, as no frame was sent for it), `leq[w][k]`
-window `w`'s Leq at `at[k]` in `scale` (NaN when nothing was measured in it), `over[w][k]`
-whether it was over its limit then. The daemon replays the log as the meter's job computed
-it (`docs/design/leq.md`, *The history strip*): a second lost while running is a gap in the
-windows, a stretch without rows a restart whose windows were refilled from the rows in their
-span; each second judged with the window's limit, the row's sensitivity and its position
-correction, a filling window on its budget, with the hysteresis above (begun part way
-through a log, a state held from before the first row read can be released up to 10 s
-early). `leq` includes the row's position correction. Only seconds after the last change of
-unit (a calibration, or a change of the position correction) are
+configuration order), `scale`: `LevelScale`, `step_s`: u32, `log_start`, `log_until`: WallNs
+\| nil, `at`: [WallNs], `leq`: [[f32]], `over`: [[bool]]}: each window over a span of the
+meter's current log, as its `leq` frames carried them. `span` (`HistorySpan`, tagged by
+`type`) is `newest` {`seconds`: u32}, the newest `seconds` (at most 14400, 4 h; more is
+clamped) a point a second, or `range` {`from`, `to`: WallNs, `step_s`: u32}, the seconds
+ending after `from` and at or before `to`, anywhere in the log. With `step_s` 1 each second
+is a point; with more, each point is a bucket of `step_s` whole seconds of Unix time (a
+second belongs to the bucket its end falls in; `at` is the bucket's end, a multiple of
+`step_s` s), `leq[w][k]` window `w`'s **highest** Leq in the bucket and `over[w][k]` true
+when it was over in any second of it — a limit is about the worst moment. A range of more
+than 4000 points (`SplHistory::MAX_POINTS`: `(to − from) / step_s`, rounded up), `step_s`
+0 or `to` ≤ `from` is `invalid`. `step_s` in the reply is 1 for `newest`. `at` is the end of
+each second (bucket), oldest first; a second without a row has no entry, as no frame was
+sent for it, and a bucket without any second neither. `leq[w][k]` is in `scale` (NaN when
+nothing was measured in the window), `over[w][k]` whether the window was over its limit
+then. `log_start` and `log_until` are the start of the log's oldest kept second and the end
+of its newest (nil for an empty log), whatever the span: a client knows the whole extent it
+can ask for. The daemon replays the log as the meter's job computed it
+(`docs/design/leq.md`, *The history strip*), from the rows of the span and the longest
+window before it: a second lost while running is a gap in the windows, a stretch without
+rows a restart whose windows were refilled from the rows in their span; each second judged
+with the window's limit, the row's sensitivity and its position correction, a filling
+window on its budget, with the hysteresis above (begun part way through a log, a state held
+from before the first row read can be released up to 10 s early; the seconds before the
+longest window holds only rows read are left out, unless the span starts at the log's first
+row). `leq` includes the row's position correction. Only seconds after the last change of
+unit within what was replayed (a calibration, or a change of the position correction) are
 returned; `scale` is theirs. The windows are the meter's current ones, also for seconds
-logged before they were set. Empty `at` for an empty log. `invalid` for a measurement that
-is not an SPL meter. A client that was not connected (an app restarted) draws the history
-from it and continues with the frames.
+logged before they were set. Empty `at` for an empty log or a span without rows. `invalid`
+for a measurement that is not an SPL meter. A client that was not connected (an app
+restarted) draws the history from `newest` and continues with the frames; a client looking
+back over the log asks `range` at its screen's resolution.
+
+##### Downloading a meter's whole log
+
+A client that gathers a meter's log for investigation (another machine, a phone viewer)
+reads it with three non-mutating commands, none of which disturbs the meter:
+
+1. **Every second, exactly:** `spl.log_get` with `log: current`, `from: 0`, `max: 20000`,
+   then again with `from` = the reply's `from` + its number of rows, until that reaches the
+   reply's `total` (or a page is empty). The first reply's `from` is the oldest row still
+   kept (rows older than 48 h are dropped, so it is above 0 on a long log). New seconds
+   keep arriving while paging: `total` grows, and the last page ends at the newest. These
+   rows are the record (§7.4 writes them as CSV, as `ac2 spl leq export` does); the log
+   `spl.log_new` ended last is read the same way with `log: previous`.
+2. **Band levels:** `spl.band_log_get` over `[from, until)` with `step: 1` returns each
+   logged second's 28 band levels, at most 3600 rows a reply: walk the span an hour at a
+   time.
+3. **The windows as the meter judged them:** `spl.history_get` with `range` over
+   [`log_start`, `log_until`] (from any first reply) at a `step_s` that keeps it within
+   4000 points, or in slices at `step_s` 1, gives each window's Leq and over-limit state
+   without replaying the log client-side.
 
 The meter's `spl_log` entity (§4.1) changes when a window's judgement changes (each window's
 `LeqWindowState` {`duration`, `weighting`, `judgement`, `since`}; `LeqJudgement`: `no_limit`

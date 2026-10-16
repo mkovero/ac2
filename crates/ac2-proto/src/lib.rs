@@ -13,12 +13,13 @@ pub mod grid;
 pub mod model;
 mod packing;
 pub mod samples;
+pub mod spl_log;
 pub mod topic;
 pub mod units;
 
 /// The one protocol version this build speaks. Peers on any other version are refused
 /// (`version_mismatch`); there is no negotiation and no fallback.
-pub const PROTO_VERSION: u16 = 54;
+pub const PROTO_VERSION: u16 = 55;
 
 pub use ctrl::{
     Command, CtrlError, Envelope, ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason,

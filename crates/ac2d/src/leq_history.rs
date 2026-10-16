@@ -43,6 +43,82 @@ pub(crate) fn history(
     from_log_start: bool,
     seconds: u32,
 ) -> SplHistory {
+    let mut h = replay(meas, cfg, rows, from_log_start);
+    if let Some(newest) = h.at.last().copied() {
+        let from =
+            h.at.partition_point(|t| t.0 + u64::from(seconds) * NS < newest.0);
+        h.at.drain(..from);
+        h.leq.iter_mut().for_each(|v| drop(v.drain(..from)));
+        h.over.iter_mut().for_each(|v| drop(v.drain(..from)));
+    }
+    h
+}
+
+/// Each window of `cfg` over the seconds of `rows` (as [`history`]) ending after `from` and
+/// at or before `to`: with `step_s` 1 each second as the frames carried it, else a point per
+/// bucket of `step_s` whole seconds of Unix time (a second falls in the bucket its end is
+/// in, the bucket's end is the point's time), with each window's highest Leq in the bucket
+/// and over when any second of it was. A bucket without a second has no point. `rows` must
+/// begin the longest window before `from` (or at the log's start) for the first seconds to
+/// be what the job computed; the seconds before the replay settles are left out.
+pub(crate) fn range_history(
+    meas: MeasId,
+    cfg: &LeqConfig,
+    rows: &[SplLogRow],
+    from_log_start: bool,
+    (from, to, step_s): (WallNs, WallNs, u32),
+) -> SplHistory {
+    let full = replay(meas, cfg, rows, from_log_start);
+    let lo = full.at.partition_point(|t| t.0 <= from.0);
+    let hi = full.at.partition_point(|t| t.0 <= to.0);
+    let n = full.windows.len();
+    let mut h = SplHistory {
+        meas,
+        windows: full.windows.clone(),
+        scale: full.scale,
+        step_s: step_s.max(1),
+        log_start: None,
+        log_until: None,
+        at: Vec::new(),
+        leq: vec![Vec::new(); n],
+        over: vec![Vec::new(); n],
+    };
+    if step_s <= 1 {
+        h.at = full.at[lo..hi].to_vec();
+        for i in 0..n {
+            h.leq[i] = full.leq[i][lo..hi].to_vec();
+            h.over[i] = full.over[i][lo..hi].to_vec();
+        }
+        return h;
+    }
+    let step = u64::from(step_s) * NS;
+    let mut k = lo;
+    while k < hi {
+        // The bucket whose end is the first multiple of the step at or after this second's
+        // end: buckets on whole multiples of Unix time stay put as a client pans.
+        let end = full.at[k].0.div_ceil(step) * step;
+        let mut j = k;
+        while j < hi && full.at[j].0 <= end {
+            j += 1;
+        }
+        h.at.push(WallNs(end));
+        for i in 0..n {
+            let worst = full.leq[i][k..j]
+                .iter()
+                .copied()
+                .filter(|v| !v.is_nan())
+                .fold(f32::NAN, f32::max);
+            h.leq[i].push(worst);
+            h.over[i].push(full.over[i][k..j].iter().any(|o| *o));
+        }
+        k = j;
+    }
+    h
+}
+
+/// Each window of `cfg` second by second over every row of `rows` (see [`history`]), the
+/// seconds before the replay settles and before the last change of unit left out.
+fn replay(meas: MeasId, cfg: &LeqConfig, rows: &[SplLogRow], from_log_start: bool) -> SplHistory {
     let specs: Vec<WindowSpec> = cfg
         .windows
         .iter()
@@ -57,6 +133,9 @@ pub(crate) fn history(
         meas,
         windows: cfg.windows.clone(),
         scale: LevelScale::Dbfs,
+        step_s: 1,
+        log_start: None,
+        log_until: None,
         at: Vec::new(),
         leq: vec![Vec::new(); n],
         over: vec![Vec::new(); n],
@@ -119,13 +198,6 @@ pub(crate) fn history(
             h.leq[i].push((v.leq_dbfs + offset.unwrap_or(0.0)) as f32);
             h.over[i].push(over);
         }
-    }
-    if let Some(newest) = h.at.last().copied() {
-        let from =
-            h.at.partition_point(|t| t.0 + u64::from(seconds) * NS < newest.0);
-        h.at.drain(..from);
-        h.leq.iter_mut().for_each(|v| drop(v.drain(..from)));
-        h.over.iter_mut().for_each(|v| drop(v.drain(..from)));
     }
     h.scale = scale.map_or(LevelScale::Dbfs, |s| s.0);
     h
@@ -316,5 +388,54 @@ mod tests {
         assert_eq!(h.at.len(), rows.len() - 500);
         let h = history(MeasId(4), &c, &[], true, SplHistory::MAX_SECONDS);
         assert!(h.at.is_empty() && h.leq.iter().all(Vec::is_empty));
+    }
+
+    /// A range at one second is the live seconds within it; in buckets, each point is the
+    /// bucket's highest Leq per window and over when any second of it was, at the bucket's
+    /// end on a whole multiple of the step.
+    #[test]
+    fn range_buckets_take_the_worst_second() {
+        let (c, rows) = (cfg(), rows());
+        let full = history(MeasId(4), &c, &rows, true, u32::MAX);
+        let (from, to) = (WallNs(full.at[100].0), WallNs(full.at[900].0));
+        let one = range_history(MeasId(4), &c, &rows, true, (from, to, 1));
+        assert_eq!(one.step_s, 1);
+        assert_eq!(one.at, full.at[101..=900].to_vec());
+        assert_eq!(one.leq[1], full.leq[1][101..=900].to_vec());
+        let step = 60u32;
+        let b = range_history(MeasId(4), &c, &rows, true, (from, to, step));
+        assert_eq!(b.step_s, step);
+        assert!(b.at.len() >= 13 && b.at.len() <= 15, "{}", b.at.len());
+        let mut overs = 0;
+        for (k, end) in b.at.iter().enumerate() {
+            assert_eq!(end.0 % (u64::from(step) * NS), 0);
+            let start = end.0 - u64::from(step) * NS;
+            let inside: Vec<usize> = (101..=900)
+                .filter(|&j| full.at[j].0 > start && full.at[j].0 <= end.0)
+                .collect();
+            assert!(!inside.is_empty(), "bucket {k} has seconds");
+            for w in 0..c.windows.len() {
+                let max = inside
+                    .iter()
+                    .map(|&j| full.leq[w][j])
+                    .fold(f32::NAN, f32::max);
+                assert_eq!(
+                    b.leq[w][k].to_bits(),
+                    max.to_bits(),
+                    "bucket {k} window {w}"
+                );
+                let over = inside.iter().any(|&j| full.over[w][j]);
+                assert_eq!(b.over[w][k], over, "bucket {k} window {w}");
+                overs += usize::from(over);
+            }
+        }
+        assert!(
+            overs > 3,
+            "the loud stretch is over in some buckets: {overs}"
+        );
+        // Nothing logged in the range: no points.
+        let late = WallNs(full.at.last().expect("seconds").0 + 3600 * NS);
+        let none = range_history(MeasId(4), &c, &rows, true, (late, WallNs(late.0 + NS), 1));
+        assert!(none.at.is_empty() && none.leq.iter().all(Vec::is_empty));
     }
 }

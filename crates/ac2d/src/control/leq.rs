@@ -7,13 +7,14 @@ use std::sync::{Arc, Mutex};
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    AlarmSubject, BAND_COUNT, BandLevelSource, BandTransferSet, LeqAlarm, LeqAlarmKind, LeqConfig,
-    LeqJudgement, MeasKind, Measurement, PeakQuantity, SplHistory, SplLog, SplLogWhich, Weighting,
+    AlarmSubject, BAND_COUNT, BandLevelSource, BandTransferSet, HistorySpan, LeqAlarm,
+    LeqAlarmKind, LeqConfig, LeqJudgement, MeasKind, Measurement, PeakQuantity, SplHistory, SplLog,
+    SplLogWhich, Weighting,
 };
+use ac2_proto::spl_log::SplLogInfo;
 use ac2_proto::units::{ClientId, MeasId, Rev, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 use ac2_traces::session::{SavedSplLog, SplLogOnDisk};
-use ac2_traces::spl_log::SplLogInfo;
 
 use super::Control;
 use crate::autosave::{LogSpec, Resume};
@@ -21,6 +22,8 @@ use crate::jobs::spl::LeqSetup;
 use crate::leq_history;
 use crate::leq_log::{self, LeqLog};
 use crate::util::{perr, wall_ns};
+
+const NS: u64 = 1_000_000_000;
 
 /// `LAeq 30 min`, `LCpeak`, for the daemon's own log.
 fn subject_name(s: &AlarmSubject) -> String {
@@ -300,29 +303,68 @@ impl Control {
         Ok(ReplyBody::SplLogPage(page))
     }
 
-    /// `spl.history_get`: the meter's windows second by second over the newest `seconds`
-    /// of its current log, replayed from rows copied out of it (the job goes on logging).
+    /// `spl.history_get`: the meter's windows over a span of its current log, replayed
+    /// from rows copied out of it (the job goes on logging): the newest seconds, or a range
+    /// anywhere in the log at a resolution, from the rows of the range and the longest
+    /// window before it.
     pub(super) fn spl_history_get(
         &self,
         meas: MeasId,
-        seconds: u32,
+        span: HistorySpan,
     ) -> Result<ReplyBody, ProtoError> {
         let m = self.spl_meter(meas)?;
         let MeasKind::Spl { config } = &m.config.kind else {
             return Err(perr(ErrorCode::Internal, "SPL meter without its config"));
         };
-        let seconds = seconds.min(SplHistory::MAX_SECONDS);
-        let (rows, from_log_start) = match self.spl_logs.get(&meas) {
-            Some(l) => leq_log::lock(l).tail(leq_history::rows_needed(&config.leq, seconds)),
-            None => (Vec::new(), true),
+        let log = self.spl_logs.get(&meas);
+        let extent = log.and_then(|l| leq_log::lock(l).extent());
+        let mut h = match span {
+            HistorySpan::Newest { seconds } => {
+                let seconds = seconds.min(SplHistory::MAX_SECONDS);
+                let (rows, from_log_start) = match log {
+                    Some(l) => {
+                        leq_log::lock(l).tail(leq_history::rows_needed(&config.leq, seconds))
+                    }
+                    None => (Vec::new(), true),
+                };
+                leq_history::history(meas, &config.leq, &rows, from_log_start, seconds)
+            }
+            HistorySpan::Range { from, to, step_s } => {
+                if step_s == 0 || to.0 <= from.0 {
+                    return Err(perr(
+                        ErrorCode::Invalid,
+                        "spl.history_get range: `to` must be after `from` and `step_s` at \
+                         least 1",
+                    ));
+                }
+                let points = (to.0 - from.0).div_ceil(u64::from(step_s) * NS);
+                if points > u64::from(SplHistory::MAX_POINTS) {
+                    return Err(perr(
+                        ErrorCode::Invalid,
+                        format!(
+                            "spl.history_get range: {points} points of {step_s} s, at most \
+                             {}: take a larger step_s",
+                            SplHistory::MAX_POINTS
+                        ),
+                    ));
+                }
+                // The first second wanted is computed over the longest window before it.
+                let back = leq_history::rows_needed(&config.leq, 0) as u64 * NS;
+                let (rows, from_log_start) = match log {
+                    Some(l) => leq_log::lock(l).rows_between(from.0.saturating_sub(back), to.0),
+                    None => (Vec::new(), true),
+                };
+                leq_history::range_history(
+                    meas,
+                    &config.leq,
+                    &rows,
+                    from_log_start,
+                    (from, to, step_s),
+                )
+            }
         };
-        Ok(ReplyBody::SplHistory(Box::new(leq_history::history(
-            meas,
-            &config.leq,
-            &rows,
-            from_log_start,
-            seconds,
-        ))))
+        (h.log_start, h.log_until) = (extent.map(|e| e.0), extent.map(|e| e.1));
+        Ok(ReplyBody::SplHistory(Box::new(h)))
     }
 
     /// `spl.log_new`: the current log becomes the previous one and an empty log starts;
@@ -348,7 +390,7 @@ impl Control {
                 "SPL meter {meas} ({}): new log; the one ended ran {:.0} s from {} ({} rows)",
                 m.config.name,
                 (run.until.0.saturating_sub(run.started_at.0)) as f64 / 1e9,
-                ac2_traces::spl_log::utc_iso(run.started_at.0),
+                ac2_proto::spl_log::utc_iso(run.started_at.0),
                 ended.total()
             );
         }

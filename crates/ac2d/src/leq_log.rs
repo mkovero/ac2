@@ -262,6 +262,26 @@ impl LeqLog {
         (self.rows.iter().skip(skip).copied().collect(), first == 0)
     }
 
+    /// The rows held that start at or after `from_ns` and before `until_ns` (wall time),
+    /// oldest first, and whether the first of them is the log's first row.
+    pub(crate) fn rows_between(&self, from_ns: u64, until_ns: u64) -> (Vec<SplLogRow>, bool) {
+        let lo = self.rows.partition_point(|r| r.start.0 < from_ns);
+        let hi = self.rows.partition_point(|r| r.start.0 < until_ns);
+        let first = self.total - self.rows.len() as u64 + lo as u64;
+        (
+            self.rows.range(lo..hi.max(lo)).copied().collect(),
+            first == 0,
+        )
+    }
+
+    /// Start of the oldest second held and end of the newest; `None` while empty.
+    pub(crate) fn extent(&self) -> Option<(WallNs, WallNs)> {
+        Some((
+            self.rows.front()?.start,
+            WallNs(self.rows.back()?.start.0 + NS),
+        ))
+    }
+
     /// Up to `max` rows from row number `from` (or the oldest held).
     pub(crate) fn page(&self, meas: MeasId, from: u64, max: u32) -> SplLogPage {
         let oldest = self.total - self.rows.len() as u64;

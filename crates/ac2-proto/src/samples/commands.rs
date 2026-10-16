@@ -202,7 +202,11 @@ pub fn commands() -> Vec<Command> {
         },
         Command::SplHistoryGet {
             meas: MeasId(4),
-            seconds: 14_400,
+            span: HistorySpan::Range {
+                from: WallNs(1_789_500_000_000_000_000),
+                to: WallNs(1_789_510_800_000_000_000),
+                step_s: 30,
+            },
         },
         Command::DelayNudge {
             meas: MeasId(1),

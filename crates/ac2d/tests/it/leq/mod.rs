@@ -11,9 +11,9 @@ use std::time::{Duration, Instant};
 use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop, StimulusLease};
 use ac2_proto::frame::{FrameData, LeqFlags, LeqFrame};
 use ac2_proto::model::{
-    GeneratorDesired, GeneratorSettings, LeqAlarmKind, LeqConfig, LeqJudgement, LeqWindow,
-    LevelScale, MeasConfig, MeasKind, PeakWeighting, SessionRef, Signal, SplConfig, SplHistory,
-    SplLog, SplLogPage, SplLogWhich, State, TimeWeighting, Weighting,
+    GeneratorDesired, GeneratorSettings, HistorySpan, LeqAlarmKind, LeqConfig, LeqJudgement,
+    LeqWindow, LevelScale, MeasConfig, MeasKind, PeakWeighting, SessionRef, Signal, SplConfig,
+    SplHistory, SplLog, SplLogPage, SplLogWhich, State, TimeWeighting, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MeasId, Seconds};
 use ac2_proto::{Command, ErrorCode, ReplyBody, Stream, Subscription, Topic};

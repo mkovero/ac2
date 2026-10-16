@@ -205,9 +205,33 @@ impl SplLogPage {
     pub const MAX_ROWS: u32 = 20_000;
 }
 
-/// Each Leq window of an SPL meter second by second, as its `leq` frames carried them
-/// (`spl.history_get`): what a client that was not connected missed, computed by the daemon
-/// from the meter's current log.
+/// Which seconds of an SPL meter's log `spl.history_get` returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HistorySpan {
+    /// The newest `seconds` (at most [`SplHistory::MAX_SECONDS`]), a point a second.
+    Newest {
+        /// Seconds wanted.
+        seconds: u32,
+    },
+    /// The seconds that end after `from` and at or before `to`, anywhere in the log, a
+    /// point per `step_s` seconds: buckets of `step_s` whole seconds of Unix time, each
+    /// window's highest Leq in the bucket and over when it was over in any second of it
+    /// (a limit is about the worst moment). At most [`SplHistory::MAX_POINTS`] buckets,
+    /// else refused.
+    Range {
+        /// Start (exclusive), wall time.
+        from: WallNs,
+        /// End (inclusive), wall time.
+        to: WallNs,
+        /// Seconds per point, ≥ 1 (1: each second as the frames carried it).
+        step_s: u32,
+    },
+}
+
+/// Each Leq window of an SPL meter second by second (or bucket by bucket), as its `leq`
+/// frames carried them (`spl.history_get`): what a client that was not connected missed, or
+/// any span of the log looked back at, computed by the daemon from the meter's current log.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SplHistory {
@@ -215,20 +239,30 @@ pub struct SplHistory {
     pub meas: MeasId,
     /// The windows the series are of: the meter's, in configuration order.
     pub windows: Vec<LeqWindow>,
-    /// Unit of `leq`: the meter's as of the newest second (the series start after the
-    /// last change of unit).
+    /// Unit of `leq`: the meter's as of the newest second returned (the series start after
+    /// the last change of unit).
     pub scale: LevelScale,
-    /// End of each second, oldest first. A second without a row (nothing measured) has
-    /// none, as no frame was sent for it.
+    /// Seconds per point: 1, or the `step_s` of a [`HistorySpan::Range`].
+    pub step_s: u32,
+    /// Start of the oldest second the log holds; `None` for an empty log.
+    pub log_start: Option<WallNs>,
+    /// End of the newest second the log holds; `None` for an empty log.
+    pub log_until: Option<WallNs>,
+    /// End of each second (of each bucket, with `step_s` > 1), oldest first. A second
+    /// without a row (nothing measured) has none, as no frame was sent for it; a bucket
+    /// without any row neither.
     pub at: Vec<WallNs>,
-    /// Per window (as `windows`), its Leq at each second of `at` in `scale`; NaN when
-    /// nothing was measured in the window.
+    /// Per window (as `windows`), its Leq at each point of `at` in `scale` (the highest in
+    /// the bucket); NaN when nothing was measured in the window.
     pub leq: Vec<Vec<f32>>,
-    /// Per window, whether it was over its limit at each second of `at`.
+    /// Per window, whether it was over its limit at each point of `at` (in any second of
+    /// the bucket).
     pub over: Vec<Vec<bool>>,
 }
 
 impl SplHistory {
-    /// Longest history one reply covers: 4 h.
+    /// Longest history a [`HistorySpan::Newest`] covers: 4 h.
     pub const MAX_SECONDS: u32 = 4 * 3600;
+    /// Most points a [`HistorySpan::Range`] reply carries: a few screen widths.
+    pub const MAX_POINTS: u32 = 4000;
 }

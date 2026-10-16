@@ -17,8 +17,8 @@
 //! sensitivity. The levels are what was measured: a measuring-position correction in force
 //! is recorded beside them (energy, peak), never added in.
 
-use ac2_proto::model::{PositionCorrection, SplLogRow};
-use ac2_proto::units::{Db, Dbfs, MeasId, Seconds, WallNs};
+use crate::model::{PositionCorrection, SplLogRow};
+use crate::units::{Db, Dbfs, MeasId, Seconds, WallNs};
 use thiserror::Error;
 
 /// First line of every SPL log file.

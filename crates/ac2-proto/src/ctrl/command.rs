@@ -494,15 +494,15 @@ pub enum Command {
         /// Most rows wanted.
         max: u32,
     },
-    /// Each Leq window of an SPL meter second by second over the newest `seconds` (at most
-    /// [`crate::model::SplHistory::MAX_SECONDS`]) of its current log, as the meter's job
-    /// computed them and its `leq` frames carried them.
+    /// Each Leq window of an SPL meter over a span of its current log, as the meter's job
+    /// computed them and its `leq` frames carried them: the newest seconds one by one, or
+    /// any span of the whole log at a resolution ([`crate::model::HistorySpan`]).
     #[serde(rename = "spl.history_get")]
     SplHistoryGet {
         /// SPL measurement.
         meas: MeasId,
-        /// Seconds of history wanted.
-        seconds: u32,
+        /// Which seconds, at which resolution.
+        span: crate::model::HistorySpan,
     },
     /// Ends an SPL meter's log and starts a new one: the windows, their states, the alarms,
     /// the run clock and the total start over; the windows and limits are kept. The ended

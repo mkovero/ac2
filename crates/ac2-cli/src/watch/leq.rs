@@ -237,7 +237,7 @@ pub async fn leq(
                     "run": run.as_ref().map(|(r, rt)| {
                         let num = |v: f64| v.is_finite().then_some(v);
                         json!({
-                            "started_at": ac2_traces::spl_log::utc_iso(r.started_at.0),
+                            "started_at": ac2_proto::spl_log::utc_iso(r.started_at.0),
                             "started_at_ns": r.started_at.0,
                             "until_ns": r.until.0,
                             "running_s": r.until.0.saturating_sub(r.started_at.0) as f64 / 1e9,

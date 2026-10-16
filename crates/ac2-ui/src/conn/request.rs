@@ -331,7 +331,9 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                 let result = c
                     .call(Command::SplHistoryGet {
                         meas,
-                        seconds: ac2_scene::leq::HISTORY_S as u32,
+                        span: ac2_proto::model::HistorySpan::Newest {
+                            seconds: ac2_scene::leq::HISTORY_S as u32,
+                        },
                     })
                     .await
                     .and_then(|r| expect_body!("spl.history_get", r, ReplyBody::SplHistory(h) => h))

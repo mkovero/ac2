@@ -6,9 +6,9 @@
 //! [`FLUSH_EVERY`]; it syncs the files every [`SYNC_EVERY`], when a file is closed and at
 //! shutdown. Syncing is what costs flash wear and battery, and what it protects against is
 //! a power cut, after which a log loses at most its last few minutes and reads up to its
-//! last whole line ([`ac2_traces::spl_log::import_csv`]).
+//! last whole line ([`ac2_proto::spl_log::import_csv`]).
 //!
-//! Each meter has two files: its A/C/Z log ([`ac2_traces::spl_log`]) and its band meter's
+//! Each meter has two files: its A/C/Z log ([`ac2_proto::spl_log`]) and its band meter's
 //! log beside it ([`ac2_traces::band_log`]), kept the same way from the same shared log.
 //!
 //! A file is written whole only when it starts (a new meter, a loaded session, a new log),
@@ -23,10 +23,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::SplLogPage;
+use ac2_proto::spl_log::{self, SplLogInfo};
 use ac2_proto::units::MeasId;
 use ac2_traces::band_log;
 use ac2_traces::session::{self, SPL_DIR, SavedMeasurement, SavedSplLogFile};
-use ac2_traces::spl_log::{self, SplLogInfo};
 
 use crate::leq_log::{self, SharedLog};
 

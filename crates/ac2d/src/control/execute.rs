@@ -420,7 +420,7 @@ impl Control {
                 background,
                 place,
             } => self.spl_band_transfer(client, meas, &foh, &at_place, background.as_ref(), &place),
-            Command::SplHistoryGet { meas, seconds } => self.spl_history_get(meas, seconds),
+            Command::SplHistoryGet { meas, span } => self.spl_history_get(meas, span),
             Command::SplBandLogGet {
                 meas,
                 from,

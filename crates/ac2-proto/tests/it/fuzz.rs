@@ -3,7 +3,7 @@
 use ac2_proto::frame::{
     ClipFlags, IrFrame, LevelsFrame, LevelsMeta, ProtectionFlags, TfFrame, TfMeta,
 };
-use ac2_proto::model::{DelayPick, SplLogWhich};
+use ac2_proto::model::{DelayPick, HistorySpan, SplLogWhich};
 use ac2_proto::units::*;
 use ac2_proto::*;
 use proptest::prelude::*;
@@ -264,7 +264,18 @@ proptest! {
                 max: u32::from(idx),
             },
             Command::SplLogNew { meas: m },
-            Command::SplHistoryGet { meas: m, seconds: u32::from(idx) },
+            Command::SplHistoryGet {
+                meas: m,
+                span: if flag {
+                    HistorySpan::Newest { seconds: u32::from(idx) }
+                } else {
+                    HistorySpan::Range {
+                        from: WallNs(u64::from(idx)),
+                        to: WallNs(u64::from(meas)),
+                        step_s: u32::from(idx),
+                    }
+                },
+            },
         ];
         for cmd in cmds {
             let mut req = Request::new(RequestId(u64::from(meas)), cmd);

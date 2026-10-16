@@ -133,7 +133,7 @@ impl Mark {
         Self {
             session_sample: SampleIndex(session_sample),
             wall_ns: WallNs(wall_ns),
-            utc: crate::spl_log::utc_iso(wall_ns),
+            utc: ac2_proto::spl_log::utc_iso(wall_ns),
         }
     }
 }

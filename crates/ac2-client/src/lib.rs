@@ -24,6 +24,7 @@ pub mod keys;
 mod lease;
 pub mod mirror;
 pub mod sessions;
+pub mod spl_log;
 
 #[cfg(feature = "test-support")]
 pub mod fake;

@@ -708,7 +708,7 @@ fn crafted_copy(
 /// magnitude is the protocol's "no value" and loads.
 #[test]
 fn a_session_with_crafted_logs_or_trace_data_refuses_to_load() {
-    use ac2_traces::spl_log::{SplLogInfo, export_csv};
+    use ac2_proto::spl_log::{SplLogInfo, export_csv};
     let dir = tempfile::tempdir().unwrap();
     let h = start("load-crafted", dir.path(), true);
     let (mut c, _sub) = connect(&h, &[]);

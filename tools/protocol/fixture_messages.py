@@ -507,7 +507,20 @@ def requests():
                 "replace_acoustic": False,
             },
         ),
-        req(49, "spl.history_get", {"meas": 4, "seconds": 14400}, mutation=False),
+        req(
+            49,
+            "spl.history_get",
+            {
+                "meas": 4,
+                "span": {
+                    "type": "range",
+                    "from": 1789500000000000000,
+                    "to": 1789510800000000000,
+                    "step_s": 30,
+                },
+            },
+            mutation=False,
+        ),
         req(50, "delay.nudge", {"meas": 1, "by": -0.25 / 48000.0}),
         req(
             51,

@@ -174,7 +174,7 @@ fn autosave_in_place_writes_only_what_changed() {
     let log = s.spl_logs.pop().unwrap();
     std::fs::create_dir_all(dir.join(session::SPL_DIR)).unwrap();
     let rel = format!("{}/2-live.csv", session::SPL_DIR);
-    let mut text = ac2_traces::spl_log::export_csv(&log.info, &log.rows);
+    let mut text = ac2_proto::spl_log::export_csv(&log.info, &log.rows);
     let whole_len = text.len();
     text.push_str("2026-09-21T14:17:2"); // An append cut short.
     std::fs::write(dir.join(&rel), &text).unwrap();

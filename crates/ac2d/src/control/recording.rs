@@ -63,7 +63,7 @@ fn raw_err(e: RawError) -> ProtoError {
 
 /// `rec-YYYY-MM-DDThh-mm-ss` of Unix ns, a valid recording name.
 fn default_name(ns: u64) -> String {
-    let iso = ac2_traces::spl_log::utc_iso(ns);
+    let iso = ac2_proto::spl_log::utc_iso(ns);
     format!("rec-{}", iso.get(..19).unwrap_or(&iso).replace(':', "-"))
 }
 

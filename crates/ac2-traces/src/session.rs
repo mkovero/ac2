@@ -4,7 +4,7 @@
 //! <dir>/session.json                 manifest (format, version, measurements, trace metadata)
 //! <dir>/session.prev.json            the autosave's previous manifest ([`save_autosave`])
 //! <dir>/traces/<id>-<hash>.csv       one ac2 CSV per trace (columns; header repeats metadata)
-//! <dir>/spl/<name>.csv               one per-second log per SPL meter ([`crate::spl_log`])
+//! <dir>/spl/<name>.csv               one per-second log per SPL meter ([`ac2_proto::spl_log`])
 //! <dir>/spl/<name>.bands.csv         its band meter's per-second log ([`crate::band_log`])
 //! ```
 //!
@@ -52,8 +52,8 @@ use thiserror::Error;
 
 use crate::band_log::{self, BandLogRow};
 use crate::columns::StoredTrace;
-use crate::spl_log::{self, SplLogInfo};
 use crate::text::{export_csv, import};
+use ac2_proto::spl_log::{self, SplLogInfo};
 
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";

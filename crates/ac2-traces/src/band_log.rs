@@ -1,6 +1,6 @@
 //! The per-second 1/3-octave band log of an SPL meter's band meter as CSV
 //! (`docs/design/band-leq.md`, *Stored per second*): kept next to the meter's SPL log
-//! ([`crate::spl_log`]) by the session and the autosave, read back to rebuild the band
+//! ([`ac2_proto::spl_log`]) by the session and the autosave, read back to rebuild the band
 //! windows by wall time.
 //!
 //! ```text
@@ -27,7 +27,7 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{Db, DbSpl, MeasId, Seconds, WallNs};
 
-use crate::spl_log::{SplLogError, SplLogInfo, utc_iso};
+use ac2_proto::spl_log::{SplLogError, SplLogInfo, utc_iso};
 
 /// First line of every band log file.
 pub const HEADER_LINE: &str = "# ac2 band log v1";
@@ -40,20 +40,20 @@ const FIXED: usize = 7;
 pub const MAX_CORRECTION_DB: f64 = 16.0;
 
 /// Checks a row against what the band meter writes: a second with something measured (a
-/// row is only written when `measured > 0`), band levels per [`crate::spl_log::level_ok`],
+/// row is only written when `measured > 0`), band levels per [`ac2_proto::spl_log::level_ok`],
 /// a correction within 0 … [`MAX_CORRECTION_DB`], a finite sensitivity, a start within
-/// [`crate::spl_log::MAX_START_NS`].
+/// [`ac2_proto::spl_log::MAX_START_NS`].
 pub fn check_row(r: &BandLogRow) -> Result<(), &'static str> {
     if !(r.measured.0 > 0.0 && r.measured.0 <= 1.0) {
         return Err("measured_s outside (0, 1]");
     }
-    if r.start.0 > crate::spl_log::MAX_START_NS {
+    if r.start.0 > ac2_proto::spl_log::MAX_START_NS {
         return Err("start_ns past the wall clock's range");
     }
     if !r
         .levels
         .iter()
-        .all(|l| crate::spl_log::level_ok(f64::from(*l)))
+        .all(|l| ac2_proto::spl_log::level_ok(f64::from(*l)))
     {
         return Err("band level not finite or above 771 dBFS");
     }
@@ -174,7 +174,7 @@ pub struct BandLogRead {
 }
 
 /// Reads rows back (the header lines are checked, not returned); an unterminated last line
-/// is neither a row nor an error, as for [`crate::spl_log::import_csv`].
+/// is neither a row nor an error, as for [`ac2_proto::spl_log::import_csv`].
 pub fn import_csv(bytes: &[u8]) -> Result<BandLogRead, SplLogError> {
     let complete_len = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
     let text = std::str::from_utf8(&bytes[..complete_len]).map_err(|_| SplLogError::Header)?;

@@ -473,7 +473,7 @@ pub(crate) fn levels_file_text(
     Ok(ac2_traces::band_levels::format(
         &format!(
             "{name} band log {span}, {} UTC: energy average per band, dB SPL",
-            ac2_traces::spl_log::utc_iso(l.from.0)
+            ac2_proto::spl_log::utc_iso(l.from.0)
         ),
         &levels,
     ))

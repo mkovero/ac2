@@ -414,8 +414,8 @@ mod tests {
     use ac2_proto::model::{
         MeasConfig, MeasKind, PeakWeighting, SplConfig, SplLogRow, TimeWeighting, Weighting,
     };
+    use ac2_proto::spl_log::SplLogInfo;
     use ac2_proto::units::{Db, Dbfs, MeasId, Seconds, WallNs};
-    use ac2_traces::spl_log::SplLogInfo;
     use std::sync::{Arc, Mutex};
 
     const NS: u64 = 1_000_000_000;

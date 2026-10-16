@@ -42,9 +42,19 @@ impl Shared {
                     rows: rows.into_iter().skip(from as usize).take(n).collect(),
                 })
             }
-            C::SplHistoryGet { meas, .. } => {
-                // The fake computes no windows: its meters have no history to replay.
+            C::SplHistoryGet { meas, span } => {
+                // The fake computes no windows: its meters have no history to replay, but
+                // a reply says the log's extent and the resolution asked for.
                 let m = self.spl_meter(meas)?;
+                let step_s = match span {
+                    HistorySpan::Newest { .. } => 1,
+                    HistorySpan::Range { step_s, .. } => step_s.max(1),
+                };
+                let rows = self.spl_rows.get(&meas);
+                let log_start = rows.and_then(|r| r.first()).map(|r| r.start);
+                let log_until = rows
+                    .and_then(|r| r.last())
+                    .map(|r| WallNs(r.start.0 + 1_000_000_000));
                 let windows = match &m.config.kind {
                     MeasKind::Spl { config } => config.leq.windows.clone(),
                     _ => Vec::new(),
@@ -54,6 +64,9 @@ impl Shared {
                     meas,
                     windows,
                     scale: LevelScale::Dbfs,
+                    step_s,
+                    log_start,
+                    log_until,
                     at: Vec::new(),
                     leq: vec![Vec::new(); n],
                     over: vec![Vec::new(); n],

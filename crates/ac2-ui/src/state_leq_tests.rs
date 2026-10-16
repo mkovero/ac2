@@ -403,6 +403,9 @@ fn rebuilt(seconds: u64, end_s: u64) -> SplHistory {
         meas: MeasId(4),
         windows,
         scale: LevelScale::DbSpl,
+        step_s: 1,
+        log_start: Some(WallNs((end_s - seconds) * 1_000_000_000)),
+        log_until: Some(WallNs(end_s * 1_000_000_000)),
         at: (0..seconds)
             .map(|k| WallNs((end_s - seconds + 1 + k) * 1_000_000_000))
             .collect(),

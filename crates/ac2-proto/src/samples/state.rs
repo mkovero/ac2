@@ -367,6 +367,9 @@ pub(super) fn spl_history() -> SplHistory {
             },
         ],
         scale: LevelScale::DbSpl,
+        step_s: 1,
+        log_start: Some(WallNs(1_790_000_000_000_000_000)),
+        log_until: Some(WallNs(1_790_000_122_000_000_000)),
         at: vec![
             WallNs(1_790_000_121_000_000_000),
             WallNs(1_790_000_122_000_000_000),

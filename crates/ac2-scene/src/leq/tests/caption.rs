@@ -254,6 +254,9 @@ fn rebuilt(n: u64, end_s: u64, leq: f32) -> SplHistory {
         meas: MeasId(4),
         windows: c.windows.clone(),
         scale: LevelScale::DbSpl,
+        step_s: 1,
+        log_start: at.first().map(|t| WallNs(t.0 - 1_000_000_000)),
+        log_until: at.last().copied(),
         leq: vec![vec![leq; at.len()]; c.windows.len()],
         over: c
             .windows
