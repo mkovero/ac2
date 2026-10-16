@@ -232,8 +232,9 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
     d.key("Shift+L");
     d.send(Msg::Text("L".into()));
     d.until("the Leq dialog", |s| s.overlay.leq().is_some())?;
-    // Up wraps to the last rows: the band meter (off: its one row), then the Extras.
-    for _ in 0..3 {
+    // Up wraps to the last rows: the cue fold, the rig scope, the band meter (off: its one
+    // row), then the Extras.
+    for _ in 0..5 {
         d.key("ArrowUp");
     }
     let Some(x) = d.st.overlay.leq() else {

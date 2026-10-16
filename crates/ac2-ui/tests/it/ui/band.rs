@@ -234,13 +234,15 @@ fn slow_band_leq_from_an_empty_daemon() {
     h.state_mut().state.local_zone = SHOW_ZONE;
     let meas = spl_meter_from_an_empty_daemon(&mut h);
 
-    // Shift+L, ↑: from the preset row up past the wrap to the band meter's row (off: its
-    // only one).
+    // Shift+L, ↑↑↑: from the preset row up past the wrap, the cue fold and the rig scope to
+    // the band meter's row (off: its only one).
     h.key_press_modifiers(Modifiers::SHIFT, Key::L);
     step_until(&mut h, "the Leq dialog", |a| {
         a.state.overlay.leq().is_some()
     });
-    h.key_press(Key::ArrowUp);
+    for _ in 0..3 {
+        h.key_press(Key::ArrowUp);
+    }
     h.key_press(Key::ArrowRight);
     h.key_press(Key::ArrowRight);
     step_until(&mut h, "the 545 low-frequency preset", |a| {
@@ -713,7 +715,10 @@ fn band_transfer_step(h: &mut Harness<'_, App>, fake: &ac2_client::fake::FakeDae
     h.key_press(Key::W);
     h.key_press_modifiers(Modifiers::SHIFT, Key::L);
     step_until(h, "the Leq dialog", |a| a.state.overlay.leq().is_some());
-    h.key_press(Key::ArrowUp);
+    // ↑ past the wrap, the cue fold and the rig scope to the last band row.
+    for _ in 0..3 {
+        h.key_press(Key::ArrowUp);
+    }
     h.key_press(Key::T);
     step_until(h, "the band transfer step", |a| {
         step_of(a).is_some_and(|t| t.focus == SpanRole::Foh)
