@@ -189,6 +189,7 @@ impl Control {
         judgements: &[LeqJudgement],
         peak_judgements: [LeqJudgement; 2],
         alarms: Vec<LeqAlarm>,
+        judged: Vec<super::osc::Judged>,
     ) {
         let current = self
             .store
@@ -212,6 +213,7 @@ impl Control {
         else {
             return;
         };
+        self.osc.reported(meas, judged);
         let mut l = prev;
         for (w, &j) in l.windows.iter_mut().zip(judgements) {
             if w.judgement != j {

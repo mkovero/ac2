@@ -17,6 +17,7 @@ mod jack;
 mod leq;
 mod math_channels;
 mod network;
+mod osc;
 mod publish;
 mod recording;
 mod recovery;

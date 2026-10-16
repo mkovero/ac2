@@ -96,11 +96,8 @@ impl Control {
             Command::ServerAuthorize { name, key } => self.server_authorize(client, &name, &key),
             Command::ServerRevoke { name } => self.server_revoke(client, &name),
             Command::RigMonitorStart { base, on } => self.rig_monitor_start(base, on),
-            // todo: step 3 (OSC sender) of the rig monitor plan.
-            Command::OscTarget { .. } | Command::OscTest { .. } => Err(perr(
-                ErrorCode::Unsupported,
-                "the rig monitor and OSC cues are not implemented yet",
-            )),
+            Command::OscTarget { base, addr } => self.osc_target(base, addr),
+            Command::OscTest { msg } => self.osc_test(&msg),
             Command::GenStop => {
                 self.abort_sweep(SweepFailure::Stopped, "the stimulus was stopped");
                 self.stop_output();

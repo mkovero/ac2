@@ -24,8 +24,8 @@ use ac2_proto::frame::{
     SplFrame, SplMeta,
 };
 use ac2_proto::model::{
-    AlarmSubject, LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale, PeakQuantity,
-    PositionCorrection, SplConfig, SplLogRow,
+    AlarmSubject, CueSubject, LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale,
+    PeakQuantity, PositionCorrection, SplConfig, SplLogRow,
 };
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{DbSpl, Dbfs, MeasId, Rev, Seconds, WallNs};
@@ -33,7 +33,7 @@ use ac2_proto::units::{DbSpl, Dbfs, MeasId, Rev, Seconds, WallNs};
 use super::{Analysis, Due, Emitter, Flush, JobCmd, LevelsMeter, Pace, StampArgs, channel_f64};
 use crate::calstore::InputCal;
 use crate::config::LocalClock;
-use crate::control::ControlMsg;
+use crate::control::{ControlMsg, Judged};
 use crate::conv;
 use crate::fanout::Block;
 use crate::leq_log::{self, SharedLog};
@@ -198,7 +198,7 @@ impl LeqWindows {
                 old_cfg
                     .windows
                     .iter()
-                    .position(|o| o == w)
+                    .position(|o| leq_log::same_window(o, w))
                     .and_then(|i| old.get(i).copied())
                     .unwrap_or(LeqJudgement::NoLimit)
             })
@@ -207,7 +207,7 @@ impl LeqWindows {
         self.on_course = vec![false; self.judgements.len()];
         // A peak limit set as before keeps its state; a new or changed one is judged anew.
         for q in PeakQuantity::ALL {
-            if old_cfg.peaks.get(q) != self.cfg.peaks.get(q) {
+            if !leq_log::same_peak(old_cfg.peaks.get(q), self.cfg.peaks.get(q)) {
                 self.peak_judgements[q_index(q)] = LeqJudgement::NoLimit;
             }
         }
@@ -403,6 +403,7 @@ impl Spl {
         let per = self.meter.seconds().samples_per_second();
         let mut seconds = std::mem::take(&mut bm.done);
         let mut alarms = Vec::new();
+        let (mut changed, mut at) = (false, None);
         for s in &seconds {
             let start = bm.second_start.unwrap_or(0);
             let end = start + per;
@@ -411,12 +412,12 @@ impl Spl {
                 self.leq.wall_of(start, self.fs),
                 self.leq.wall_of(end, self.fs),
             );
-            bm.second(s, span, &self.leq.log, self.cal.sensitivity, &mut alarms);
+            changed |= bm.second(s, span, &self.leq.log, self.cal.sensitivity, &mut alarms);
+            at = Some(WallNs(span.1));
         }
         seconds.clear();
         bm.done = seconds;
-        if !alarms.is_empty() {
-            let at = alarms[alarms.len() - 1].at;
+        if let (true, Some(at)) = (changed, at) {
             self.report(at, alarms);
         }
     }
@@ -592,7 +593,9 @@ impl Spl {
                 });
             }
         }
-        if changed {
+        // A cued meter reports every second: the levels a cue appends move on between
+        // the changes.
+        if changed || crate::control::has_cue(&self.cfg) {
             self.report(at, alarms);
         }
     }
@@ -606,7 +609,38 @@ impl Spl {
             judgements: self.leq.judgements.clone(),
             peak_judgements: self.leq.peak_judgements,
             alarms,
+            judged: self.judged(),
         });
+    }
+
+    /// Every subject's judgement and level (dB SPL), for the OSC cues.
+    fn judged(&self) -> Vec<Judged> {
+        let offset = self.level_offset();
+        let mut out = Vec::new();
+        for (i, w) in self.leq.cfg.windows.iter().enumerate() {
+            let level = offset.map_or(f64::NAN, |o| self.leq.ring.value(i).leq_dbfs + o);
+            out.push(Judged::new(
+                CueSubject::Window {
+                    duration: w.duration,
+                    weighting: w.weighting,
+                },
+                self.leq.judgements[i],
+                level,
+            ));
+        }
+        let held = self.leq.peaks.max_dbfs();
+        for q in PeakQuantity::ALL {
+            let level = self.offset_of(q).map_or(f64::NAN, |o| held[q_index(q)] + o);
+            out.push(Judged::new(
+                CueSubject::Peak { quantity: q },
+                self.leq.peak_judgements[q_index(q)],
+                level,
+            ));
+        }
+        if let Some(bm) = &self.band {
+            bm.judged(self.cal.sensitivity, &mut out);
+        }
+        out
     }
 
     fn spl_frame(&self) -> SplFrame {
@@ -764,7 +798,9 @@ impl Analysis for Spl {
                     conv::time_weighting(config.time_weighting),
                     conv::peak_weighting(config.peak_weighting),
                 );
-                let leq_changed = config.leq != self.cfg.leq;
+                // A cue edit leaves the windows as they are: it only changes what the
+                // control thread sends about their states.
+                let leq_changed = !leq_log::same_judging(&config.leq, &self.cfg.leq);
                 let position_changed = config.position != self.cfg.position;
                 let bands_changed = config.bands != self.cfg.bands;
                 self.cfg = *config;
@@ -777,10 +813,11 @@ impl Analysis for Spl {
                     // The horizon is the Leq configuration's.
                     self.set_bands(self.cfg.bands.as_deref().cloned());
                     let mut alarms = Vec::new();
-                    if let Some(bm) = &mut self.band {
-                        bm.judge(WallNs(at), self.cal.sensitivity, &mut alarms);
-                    }
-                    if !alarms.is_empty() {
+                    let changed = self
+                        .band
+                        .as_mut()
+                        .is_some_and(|bm| bm.judge(WallNs(at), self.cal.sensitivity, &mut alarms));
+                    if changed {
                         self.report(WallNs(at), alarms);
                     }
                 }

@@ -105,17 +105,6 @@ pub(super) fn saved_of(m: &Measurement) -> SavedMeasurement {
 }
 
 /// A `rig.*` command made on rig settings that have changed since.
-fn stale_rig(rev: Rev) -> ProtoError {
-    perr_detail(
-        ErrorCode::Conflict,
-        format!(
-            "the rig settings changed since (now at rev {}); re-read them",
-            rev.0
-        ),
-        ErrorDetail::Conflict { rev },
-    )
-}
-
 /// `cfg` without outputs: the monitor at start opens the capture side only.
 fn capture_only(cfg: &SessionConfig) -> SessionConfig {
     SessionConfig {
@@ -162,7 +151,24 @@ impl Control {
             measurements: self.rigm.saved.clone(),
             monitor_at_start: self.store.state().rig.monitor_at_start,
             monitor_session: self.rigm.session.clone(),
+            osc_target: self.store.state().rig.osc_target,
         }
+    }
+
+    /// `conflict` unless `base` is the rig's rev (`osc.target`, `rig.monitor_start`).
+    pub(super) fn rig_base(&self, base: Rev) -> Result<(), ProtoError> {
+        let rev = self.store.state().rig.rev;
+        if base == rev {
+            return Ok(());
+        }
+        Err(perr_detail(
+            ErrorCode::Conflict,
+            format!(
+                "the rig settings changed since (now at rev {}); re-read them",
+                rev.0
+            ),
+            ErrorDetail::Conflict { rev },
+        ))
     }
 
     /// Commits the rig entity changed by `f`, under a new `rig.rev`.
@@ -355,11 +361,8 @@ impl Control {
         base: Rev,
         on: bool,
     ) -> Result<ReplyBody, ProtoError> {
-        let rig = self.store.state().rig.clone();
-        if base != rig.rev {
-            return Err(stale_rig(rig.rev));
-        }
-        if rig.monitor_at_start == on {
+        self.rig_base(base)?;
+        if self.store.state().rig.monitor_at_start == on {
             return Ok(ReplyBody::Ack {
                 rev: self.store.rev(),
             });

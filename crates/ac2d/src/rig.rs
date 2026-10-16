@@ -11,6 +11,7 @@
 //! format version is set aside (renamed, never deleted).
 
 use std::io;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use ac2_proto::model::{MeasKind, MeasScope, OutputSetup, SessionConfig};
@@ -21,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::util::perr;
 
 const FORMAT: &str = "ac2-rig-settings";
-const VERSION: u32 = 2;
+const VERSION: u32 = 1;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -33,11 +34,17 @@ struct RigFile {
     /// Labelled outputs, sorted by channel.
     outputs: Vec<OutputSetup>,
     /// The rig's SPL meters (`MeasScope::Rig`), with their ids.
+    #[serde(default)]
     measurements: Vec<SavedMeasurement>,
     /// Reopen `monitor_session` capture-only at start.
+    #[serde(default)]
     monitor_at_start: bool,
     /// The audio configuration of the last `session.open` while rig meters existed.
+    #[serde(default)]
     monitor_session: Option<SessionConfig>,
+    /// Where OSC cues go; absent: nowhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    osc_target: Option<SocketAddr>,
 }
 
 /// Just enough of any file to tell its format and version.
@@ -60,6 +67,8 @@ pub(crate) struct RigSettings {
     pub(crate) monitor_at_start: bool,
     /// The audio configuration of the last `session.open` while rig meters existed.
     pub(crate) monitor_session: Option<SessionConfig>,
+    /// Where OSC cues go; `None`: nowhere.
+    pub(crate) osc_target: Option<SocketAddr>,
 }
 
 /// Where the rig settings live.
@@ -127,6 +136,7 @@ impl RigStore {
                     measurements: f.measurements,
                     monitor_at_start: f.monitor_at_start,
                     monitor_session: f.monitor_session,
+                    osc_target: f.osc_target,
                 };
                 match check(&s) {
                     Ok(()) => (store, s),
@@ -189,6 +199,7 @@ impl RigStore {
             measurements: s.measurements.clone(),
             monitor_at_start: s.monitor_at_start,
             monitor_session: s.monitor_session.clone(),
+            osc_target: s.osc_target,
         };
         let text = serde_json::to_vec_pretty(&file)
             .map_err(|e| perr(ErrorCode::Internal, format!("rig settings: {e}")))?;
@@ -209,6 +220,11 @@ fn check(s: &RigSettings) -> Result<(), String> {
         return Err(format!(
             "ceiling_dbfs {c} is not a level at or below 0 dBFS"
         ));
+    }
+    if let Some(a) = s.osc_target
+        && (a.ip().is_unspecified() || a.port() == 0)
+    {
+        return Err(format!("osc_target {a} is not an address to send to"));
     }
     for (i, o) in s.outputs.iter().enumerate() {
         if s.outputs[..i].iter().any(|x| x.channel == o.channel) {
@@ -288,6 +304,7 @@ mod tests {
         let want = RigSettings {
             ceiling_dbfs: Some(-40.0),
             outputs: vec![label(0, "Main L"), label(3, "Sub")],
+            osc_target: Some("192.168.1.20:9000".parse().expect("addr")),
             ..RigSettings::default()
         };
         store.persist(&want).expect("write");
@@ -297,6 +314,40 @@ mod tests {
         // A lower bound given at start wins over the value kept.
         assert_eq!(start_ceiling(got.ceiling_dbfs, -50.0), -50.0);
         assert_eq!(start_ceiling(None, -10.0), -10.0);
+        // A file without a target (written before there were cues) reads as none.
+        std::fs::write(
+            &p,
+            r#"{"format":"ac2-rig-settings","version":1,"ceiling_dbfs":null,"outputs":[]}"#,
+        )
+        .expect("write");
+        assert_eq!(RigStore::open(&p).1, RigSettings::default());
+    }
+
+    /// A file written before rig meters and cues existed keeps its lowered ceiling and labels:
+    /// resetting it would put the generator back at the `--max-level` bound, louder than the
+    /// operator set.
+    #[test]
+    fn a_file_without_meters_or_cues_reads_intact() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let p = dir.path().join("rig.json");
+        std::fs::write(
+            &p,
+            r#"{"format":"ac2-rig-settings","version":1,"ceiling_dbfs":-30.0,
+                "outputs":[{"channel":0,"label":"Main L"},{"channel":3,"label":"Sub"}]}"#,
+        )
+        .expect("write");
+        let (store, got) = RigStore::open(&p);
+        assert_eq!(
+            got,
+            RigSettings {
+                ceiling_dbfs: Some(-30.0),
+                outputs: vec![label(0, "Main L"), label(3, "Sub")],
+                ..RigSettings::default()
+            }
+        );
+        assert!(store.check().is_ok());
+        assert_eq!(start_ceiling(got.ceiling_dbfs, -10.0), -30.0);
+        assert!(!dir.path().join("rig.json.v1").exists());
     }
 
     fn rig_meter(id: u32, scope: MeasScope) -> SavedMeasurement {
@@ -374,7 +425,7 @@ mod tests {
         // Values a command would refuse make the file unreadable, not half-applied.
         std::fs::write(
             &p,
-            r#"{"format":"ac2-rig-settings","version":2,"ceiling_dbfs":3.0,"outputs":[],"measurements":[],"monitor_at_start":false,"monitor_session":null}"#,
+            r#"{"format":"ac2-rig-settings","version":1,"ceiling_dbfs":3.0,"outputs":[],"measurements":[],"monitor_at_start":false,"monitor_session":null}"#,
         )
         .expect("write");
         let (store, s) = RigStore::open(&p);
