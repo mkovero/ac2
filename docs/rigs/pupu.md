@@ -105,6 +105,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
+| ad18076e | 2026-10-16 | 52 / 26 | rig monitor + OSC cues (rig-scoped SPL meters in `rig.json`, `osc.target`/`osc.test`, ok/near/over/fault cues resent each 1 s), rev-guarded `meas.update`, reply warnings; `autosave.v25` salvaged: 5 measurements + 3 traces restored, FOH SPL Leq history skipped (exported before to ketunkolo `~/ac2-test/foh-spl-leq-pre-ad18076e.csv`); session reopened `--in 1-8 --outputs 6`; `rig.json` read as is (no OSC target, monitor at start off) |
 | c03e40dc | 2026-10-14 | 51 / 25 | app only (ketunkolo, Pi; pupu daemon stays on 70655493): the sweep's reference harmonics dotted in the distortion pane, E hides them |
 | 70655493 | 2026-10-13 | 51 / 25 | sweep harmonics against the ideal emitted sweep, reference harmonics on the wire (PROTO 51); autosave restored as is (5 measurements, 3 traces), session reopened `--in 1-8 --outputs 6`; crosscheck rig run follows |
 | f530d1f9 | 2026-10-13 | 50 / 25 | app only (ketunkolo, Pi; pupu daemon stays on 438048f2): T also takes the band view's and Leq columns' 10 dB lines (no grid) and scale numbers (traces only) |
