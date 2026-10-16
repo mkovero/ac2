@@ -115,6 +115,7 @@ pub fn alarm_text(meter: &str, a: &LeqAlarm) -> (bool, String) {
             duration,
             weighting,
         } => window_name(&LeqWindow {
+            cue: None,
             duration,
             weighting,
             limit: None,

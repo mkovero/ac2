@@ -132,6 +132,7 @@ impl SessionDialog {
             Some(r) if !stimulus.is_empty() => mics
                 .iter()
                 .map(|m| MeasConfig {
+                    scope: ac2_proto::model::MeasScope::Session,
                     name: format!("Reference → {}", m.label()),
                     kind: MeasKind::Transfer {
                         config: TransferConfig::with_inputs(r, m.channel),

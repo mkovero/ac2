@@ -253,6 +253,7 @@ fn archives_round_trip_in_checked_chunks() {
     // A measurement's own panes travel in the archive.
     let meter = match c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "FOH SPL".into(),
             kind: MeasKind::Spl {
                 config: SplConfig::on_input(0, Weighting::A, TimeWeighting::Fast),

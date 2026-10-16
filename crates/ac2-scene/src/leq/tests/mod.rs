@@ -10,6 +10,7 @@ mod tiles;
 
 fn w(minutes: f64, limit: Option<f64>) -> LeqWindow {
     LeqWindow {
+        cue: None,
         duration: Seconds(minutes * 60.0),
         weighting: Weighting::A,
         limit: limit.map(DbSpl),

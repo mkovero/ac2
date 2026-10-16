@@ -92,8 +92,8 @@ impl AppState {
                     _ => {}
                 }
                 let what = format!("{label}: {}", SmoothTarget::Meas(m.clone()).caption());
-                let (meas, config) = (m.id, m.config);
-                self.call(out, Command::MeasUpdate { meas, config }, what);
+                let cmd = self.meas_update(m.id, m.config);
+                self.call(out, cmd, what);
             }
         }
     }

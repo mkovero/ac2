@@ -203,6 +203,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     });
     c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "spec".into(),
             kind: MeasKind::Spectrum {
                 config: SpectrumConfig::on_input(1),
@@ -211,6 +212,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     });
     c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "rta".into(),
             kind: MeasKind::Rta {
                 config: RtaConfig::on_input(1, BandFraction::Third),
@@ -270,6 +272,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
             // A configuration change in the middle: it lands in the timeline.
             c.ok(Command::MeasCreate {
                 config: MeasConfig {
+                    scope: ac2_proto::model::MeasScope::Session,
                     name: "late".into(),
                     kind: MeasKind::Spectrum {
                         config: SpectrumConfig::on_input(0),
@@ -472,6 +475,7 @@ fn replayed_rta_reads_a_steady_tone_alike() {
     };
     c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "rta".into(),
             kind: MeasKind::Rta {
                 // A steady tone's band power over one publish interval ripples at 2f by about

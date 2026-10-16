@@ -225,6 +225,7 @@ const IR_FRAME_BUDGET: u64 = 17_000;
 
 fn spectrum(name: &str) -> MeasConfig {
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: name.into(),
         kind: MeasKind::Spectrum {
             config: SpectrumConfig::on_input(1),
@@ -239,6 +240,7 @@ fn slow_live_streams_stay_display_sized() {
             transfer("tf"),
             spectrum("spec"),
             MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: "rta".into(),
                 kind: MeasKind::Rta {
                     config: RtaConfig::on_input(1, BandFraction::Third),
@@ -267,6 +269,7 @@ fn short_spectrum(name: &str) -> MeasConfig {
     let mut config = SpectrumConfig::on_input(2);
     config.resolution = ac2_proto::model::SpecResolution::Fixed { fft_len: 4096 };
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: name.into(),
         kind: MeasKind::Spectrum { config },
     }
@@ -290,6 +293,7 @@ fn tuning_session() -> Vec<MeasConfig> {
         m
     };
     let spec_on = |name: &str, input: u16| MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: name.into(),
         kind: MeasKind::Spectrum {
             config: SpectrumConfig::on_input(input),
@@ -300,6 +304,7 @@ fn tuning_session() -> Vec<MeasConfig> {
         tf("main R", 2),
         tf("sub", 3),
         MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "avg".into(),
             kind: MeasKind::Math {
                 config: MathConfig::power_average(
@@ -314,6 +319,7 @@ fn tuning_session() -> Vec<MeasConfig> {
         spec_on("spec 3", 3),
         short_spectrum("spec short"),
         MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "rta".into(),
             kind: MeasKind::Rta {
                 config: RtaConfig::on_input(1, BandFraction::Third),

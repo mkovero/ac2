@@ -31,6 +31,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
         spl("meter", 1),
         transfer("tf"),
         MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "spec".into(),
             kind: MeasKind::Spectrum {
                 config: SpectrumConfig {
@@ -44,6 +45,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
             },
         },
         MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "rta".into(),
             kind: MeasKind::Rta {
                 config: RtaConfig {

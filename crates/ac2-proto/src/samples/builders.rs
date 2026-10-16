@@ -85,6 +85,7 @@ pub(super) fn sweep() -> EssSpec {
 
 pub(super) fn meas_config() -> MeasConfig {
     MeasConfig {
+        scope: crate::model::MeasScope::Session,
         name: "Main L".into(),
         kind: MeasKind::Transfer {
             config: TransferConfig {
@@ -201,6 +202,7 @@ pub fn sweep_measurement() -> Measurement {
     Measurement {
         id: MeasId(7),
         config: MeasConfig {
+            scope: crate::model::MeasScope::Session,
             name: "Genelec 1 m".into(),
             kind: MeasKind::Sweep {
                 config: sweep_config(),
@@ -221,6 +223,7 @@ pub fn math_measurement() -> Measurement {
     Measurement {
         id: MeasId(6),
         config: MeasConfig {
+            scope: crate::model::MeasScope::Session,
             name: "FOH average".into(),
             kind: MeasKind::Math {
                 config: MathConfig {
@@ -325,6 +328,7 @@ pub(super) fn spectrum_measurement() -> Measurement {
     Measurement {
         id: MeasId(4),
         config: MeasConfig {
+            scope: crate::model::MeasScope::Session,
             name: "Spectrum".into(),
             kind: MeasKind::Spectrum {
                 config: SpectrumConfig {

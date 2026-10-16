@@ -30,6 +30,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &MathCmd, out: &mut Out<'_>) -> Result<(
                 &c,
                 Command::MeasUpdate {
                     meas: existing.id,
+                    base: existing.config_rev,
                     config,
                 },
             )
@@ -311,6 +312,7 @@ pub(crate) fn math_config(
         (None, false, None) => default_owner(s, first),
     };
     Ok(MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name,
         kind: MeasKind::Math {
             config: MathConfig {

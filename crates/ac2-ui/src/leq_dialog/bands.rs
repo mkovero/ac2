@@ -158,6 +158,8 @@ pub struct BandRow {
     pub day_offset: String,
     /// Typed warn margin.
     pub margin: String,
+    /// Its OSC cue, kept as it is (set from the CLI).
+    pub cue: Option<Box<ac2_proto::model::OscCue>>,
 }
 
 impl BandRow {
@@ -169,6 +171,7 @@ impl BandRow {
             limit: w.limit.map_or_else(String::new, |l| number_text(l.0)),
             day_offset: w.day_offset.map_or_else(String::new, |o| number_text(o.0)),
             margin: number_text(w.warn_margin.0),
+            cue: w.cue.clone(),
         }
     }
 
@@ -245,6 +248,7 @@ impl BandRow {
             ));
         }
         Ok(BandWindow {
+            cue: self.cue.clone(),
             band: Hz(BAND_NOMINAL_HZ[self.band]),
             duration: Seconds(f64::from(self.seconds)),
             weighting: self.weighting,
@@ -303,6 +307,7 @@ impl RangeRow {
             limit: String::new(),
             day_offset: String::new(),
             margin: String::new(),
+            cue: None,
         };
         (self.from..=self.to)
             .filter(|&b| !rows.iter().any(|r| r.same(b, &like)))
@@ -342,7 +347,7 @@ impl BandSection {
             rows: base.map_or_else(Vec::new, |c| c.windows.iter().map(BandRow::of).collect()),
             impulse: base.map(|c| c.correction.impulse).unwrap_or_default(),
             tonal: base.map(|c| c.correction.tonal).unwrap_or_default(),
-            predicted: base.and_then(|c| c.predicted),
+            predicted: base.and_then(|c| c.predicted.clone()),
             transfer: base.and_then(|c| c.transfer.clone()),
             range: None,
         }
@@ -528,13 +533,14 @@ impl BandSection {
         }
         self.edited();
         let row = after.map_or(0, |i| i + 1);
-        // Its own limit, typed: none yet.
+        // Its own limit and cue: none yet.
         self.rows.insert(
             row,
             BandRow {
                 band,
                 limit: String::new(),
                 day_offset: String::new(),
+                cue: None,
                 ..from
             },
         );
@@ -604,6 +610,7 @@ impl BandSection {
             limit: String::new(),
             day_offset: String::new(),
             margin: margin.clone(),
+            cue: None,
         }));
         self.edited();
         self.range = None;
@@ -722,7 +729,7 @@ impl BandSection {
             .collect::<Result<Vec<_>, _>>()?;
         let c = BandLeqConfig {
             windows,
-            predicted: self.predicted,
+            predicted: self.predicted.clone(),
             correction: BandCorrection {
                 impulse: self.impulse,
                 tonal: self.tonal,
@@ -830,7 +837,7 @@ mod tests {
         *s.text_mut(at(0, BandCol::Limit)).expect("text") = "80".into();
         let c = s.config().expect("valid").expect("on");
         assert_eq!(c.windows.len(), 4);
-        let w = c.windows[0];
+        let w = c.windows[0].clone();
         assert_eq!(w.band, Hz(20.0));
         assert_eq!(w.duration, Seconds(60.0));
         assert_eq!(w.weighting, Weighting::Z);

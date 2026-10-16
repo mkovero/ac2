@@ -3,8 +3,8 @@
 use ac2_core::generator::GeneratorError;
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
-    InputSetup, MeasConfig, MeasKind, Measurement, SpecAveraging, SpecResolution, SpectrumConfig,
-    SweepConfig,
+    InputSetup, MeasConfig, MeasKind, MeasScope, Measurement, SpecAveraging, SpecResolution,
+    SpectrumConfig, SweepConfig,
 };
 use ac2_proto::units::{MeasId, Rev, Seconds};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError};
@@ -100,6 +100,19 @@ pub(super) fn mutation_conflict(rev: Rev) -> ProtoError {
     )
 }
 
+/// A `meas.update` made on a config that has changed since: the client re-reads it rather
+/// than overwrite the other edit.
+pub(super) fn stale_meas(meas: MeasId, rev: Rev) -> ProtoError {
+    perr_detail(
+        ErrorCode::Conflict,
+        format!(
+            "measurement {} changed since (now at rev {}); re-read it",
+            meas.0, rev.0
+        ),
+        ErrorDetail::Conflict { rev },
+    )
+}
+
 pub(super) fn not_found(meas: MeasId) -> ProtoError {
     perr(ErrorCode::NotFound, format!("no measurement {}", meas.0))
 }
@@ -124,6 +137,16 @@ pub(super) fn gen_err(e: GeneratorError) -> ProtoError {
 /// Checks a measurement configuration without a session.
 pub(super) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
     let inv = |m: &str| Err(perr(ErrorCode::Invalid, m.to_owned()));
+    if c.scope == MeasScope::Rig {
+        if !matches!(c.kind, MeasKind::Spl { .. }) {
+            return inv("only an SPL meter can be the rig's");
+        }
+        // todo: step 2 of the rig monitor plan (rig-scoped measurements).
+        return Err(perr(
+            ErrorCode::Unsupported,
+            "rig measurements are not implemented yet",
+        ));
+    }
     match &c.kind {
         MeasKind::Transfer { config } => {
             if config.reference_input == config.measurement_input {
@@ -320,6 +343,7 @@ mod tests {
 
     fn meas(kind: MeasKind) -> MeasConfig {
         MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "m".into(),
             kind,
         }

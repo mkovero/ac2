@@ -45,14 +45,7 @@ async fn slow_weightings_change_in_place_and_keep_the_log() {
     config.weighting = Weighting::C;
     config.time_weighting = TimeWeighting::Slow;
     config.peak_weighting = PeakWeighting::Z;
-    let ReplyBody::Measurement(m) = c
-        .call(Command::MeasUpdate {
-            meas: M,
-            config: cfg,
-        })
-        .await
-        .unwrap()
-    else {
+    let ReplyBody::Measurement(m) = common::meas_update(&c, M, cfg).await.unwrap() else {
         panic!()
     };
     assert!(m.running);
@@ -113,6 +106,7 @@ async fn slow_peak_limits_and_the_position_correction() {
     .unwrap();
     let limit = |l: f64| {
         Some(PeakLimit {
+            cue: None,
             limit: DbSpl(l),
             warn_margin: Db(3.0),
         })
@@ -135,11 +129,7 @@ async fn slow_peak_limits_and_the_position_correction() {
     let l = log_until(&c, "entity", |_| true).await;
     assert_eq!(l.peaks.lcpeak.judgement, LeqJudgement::NotCalibrated);
     // A correction beyond ±30 dB is refused.
-    let e = c
-        .call(Command::MeasUpdate {
-            meas: M,
-            config: with(Some(PositionCorrection::both(31.0))),
-        })
+    let e = common::meas_update(&c, M, with(Some(PositionCorrection::both(31.0))))
         .await
         .unwrap_err();
     assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
@@ -210,13 +200,7 @@ async fn slow_peak_limits_and_the_position_correction() {
         level: Db(5.0),
         peak: Db(1.0),
     };
-    let ReplyBody::Measurement(m) = c
-        .call(Command::MeasUpdate {
-            meas: M,
-            config: with(Some(pos)),
-        })
-        .await
-        .unwrap()
+    let ReplyBody::Measurement(m) = common::meas_update(&c, M, with(Some(pos))).await.unwrap()
     else {
         panic!()
     };

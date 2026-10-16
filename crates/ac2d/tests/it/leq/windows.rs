@@ -155,13 +155,13 @@ async fn slow_windows_go_over_and_recover_and_survive() {
     let before = state(&c).await;
     let rev_before = before.measurements[0].config_rev;
     let rows_before = page(&c, 0).await.total;
-    let r = c
-        .call(Command::MeasUpdate {
-            meas: M,
-            config: meter(vec![window(5.0, Some(70.0)), window(20.0, None)]),
-        })
-        .await
-        .unwrap();
+    let r = common::meas_update(
+        &c,
+        M,
+        meter(vec![window(5.0, Some(70.0)), window(20.0, None)]),
+    )
+    .await
+    .unwrap();
     let ReplyBody::Measurement(m) = r else {
         panic!()
     };

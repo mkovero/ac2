@@ -171,16 +171,14 @@ fn traces_survive_a_restart() {
         "a split that leaves one side no room"
     );
     // A settings change keeps it.
-    let kept_layout = match c.ok(Command::MeasUpdate {
-        meas: MeasId(1),
-        config: after.config.clone(),
-    }) {
+    let kept_layout = match c.update_ok(MeasId(1), after.config.clone()) {
         ReplyBody::Measurement(m) => m.layout,
         other => panic!("{other:?}"),
     };
     assert_eq!(kept_layout, Some(layout.clone()));
     // A sweep measurement is restored with its settings (and never as running).
     let sweep = MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: "Genelec 1 m".into(),
         kind: MeasKind::Sweep {
             config: SweepConfig {

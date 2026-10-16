@@ -122,6 +122,7 @@ async fn slow_remote_client_fires_reroutes_and_recovers_from_expiry() {
     let ReplyBody::Measurement(m) = c
         .call(Command::MeasCreate {
             config: ac2_proto::model::MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: "output path".into(),
                 kind: ac2_proto::model::MeasKind::Spl {
                     config: SplConfig::on_input(0, Weighting::Z, TimeWeighting::Fast),

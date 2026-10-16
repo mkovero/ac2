@@ -82,7 +82,15 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             };
             if !set.is_empty() || colour.is_none() {
                 let config = meas_set(&m.config, set)?;
-                m = meas_call(&c, Command::MeasUpdate { meas: m.id, config }).await?;
+                m = meas_call(
+                    &c,
+                    Command::MeasUpdate {
+                        meas: m.id,
+                        base: m.config_rev,
+                        config,
+                    },
+                )
+                .await?;
             }
             if let Some(colour) = colour {
                 m = meas_call(

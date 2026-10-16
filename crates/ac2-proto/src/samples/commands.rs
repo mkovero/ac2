@@ -39,7 +39,9 @@ pub fn commands() -> Vec<Command> {
         },
         Command::MeasUpdate {
             meas: MeasId(3),
+            base: Rev(40),
             config: MeasConfig {
+                scope: crate::model::MeasScope::Session,
                 name: "RTA".into(),
                 kind: MeasKind::Rta {
                     config: RtaConfig {
@@ -309,6 +311,17 @@ pub fn commands() -> Vec<Command> {
         Command::SessionControlPanel {
             backend: BackendKind::Asio,
             device: DeviceId("Fireface USB".into()),
+        },
+        Command::OscTarget {
+            base: Rev(38),
+            addr: Some("[fe80::1]:9000".parse().expect("valid sample address")),
+        },
+        Command::OscTest {
+            msg: osc_message("/light/red", vec![OscArg::Int(1)], true),
+        },
+        Command::RigMonitorStart {
+            base: Rev(38),
+            on: true,
         },
     ]
 }

@@ -8,6 +8,7 @@ fn meter() -> Measurement {
     Measurement {
         id: MeasId(4),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "FOH SPL".into(),
             kind: MeasKind::Spl {
                 config: SplConfig::on_input(1, Weighting::A, TimeWeighting::Fast),
@@ -314,9 +315,12 @@ fn peak_limits_and_the_position_correction() {
     let MeasKind::Spl { config } = d.meas_config().expect("valid").kind else {
         panic!()
     };
-    assert_eq!(config.leq.peaks.lcpeak.map(|l| l.limit), Some(DbSpl(130.0)));
     assert_eq!(
-        config.leq.peaks.lcpeak.map(|l| l.warn_margin),
+        config.leq.peaks.lcpeak.as_ref().map(|l| l.limit),
+        Some(DbSpl(130.0))
+    );
+    assert_eq!(
+        config.leq.peaks.lcpeak.as_ref().map(|l| l.warn_margin),
         Some(Db(3.0))
     );
     assert_eq!(config.leq.peaks.lafmax, None);

@@ -88,9 +88,11 @@ fn b63(f: &BandLeqFrame) -> (f64, Option<f64>, LeqJudgement) {
 
 fn meter(bands: Option<BandLeqConfig>) -> MeasConfig {
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: "FOH SPL".into(),
         kind: MeasKind::Spl {
             config: SplConfig {
+                cue: None,
                 input: 1,
                 weighting: Weighting::A,
                 time_weighting: TimeWeighting::Fast,
@@ -220,6 +222,7 @@ fn two_windows() -> BandLeqConfig {
     let mut c = bands();
     c.windows = c.windows[3..=6].to_vec();
     c.windows.push(BandWindow {
+        cue: None,
         band: Hz(63.0),
         duration: Seconds(3.0),
         weighting: Weighting::A,
@@ -244,7 +247,7 @@ async fn slow_two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_mo
     let mut bad_band = two_windows();
     bad_band.windows[A63W].band = Hz(1100.0);
     let mut twice = two_windows();
-    twice.windows.push(twice.windows[Z63]);
+    twice.windows.push(twice.windows[Z63].clone());
     for cfg in [bad, bad_band, twice] {
         let e = c
             .call(Command::MeasCreate {
@@ -336,12 +339,9 @@ async fn slow_two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_mo
             .windows
             .push(BandWindow::minutes(Hz(hz), 1, Weighting::C));
     }
-    c.call(Command::MeasUpdate {
-        meas: M,
-        config: meter(Some(three)),
-    })
-    .await
-    .unwrap();
+    common::meas_update(&c, M, meter(Some(three)))
+        .await
+        .unwrap();
     let f = band_until(&c, "the added windows", |f| f.meta.windows.len() == 9).await;
     let c63 = A63W + 3;
     assert_eq!(f.meta.windows[c63].band, Hz(63.0));
@@ -397,12 +397,9 @@ async fn slow_two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_mo
     assert!(rows.iter().all(|r| r.levels.len() == BAND_COUNT));
 
     // The preset again: one LZeq window on 20 … 200 Hz, judged at the mic.
-    c.call(Command::MeasUpdate {
-        meas: M,
-        config: meter(Some(bands())),
-    })
-    .await
-    .unwrap();
+    common::meas_update(&c, M, meter(Some(bands())))
+        .await
+        .unwrap();
     let f = band_until(&c, "the preset's bands", |f| f.meta.windows.len() == 11).await;
     assert_eq!(f.meta.limits_from, BandLimitPlace::AtMic);
     assert_eq!(b63(&f).1, Some(47.0));
@@ -517,12 +514,7 @@ async fn slow_two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_mo
         .await
         .unwrap_err();
     assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
-    c.call(Command::MeasUpdate {
-        meas: M,
-        config: meter(None),
-    })
-    .await
-    .unwrap();
+    common::meas_update(&c, M, meter(None)).await.unwrap();
     let e = c
         .call(Command::SplBandTransfer {
             meas: M,

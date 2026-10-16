@@ -48,8 +48,8 @@ impl AppState {
         // switching to the meter would read as the windows having changed. The daemon's
         // reply names the new metric either way.
         self.focus_kind(PaneKind::Spl);
-        let (meas, config) = (m.id, m.config);
-        self.call(out, Command::MeasUpdate { meas, config }, what);
+        let cmd = self.meas_update(m.id, m.config);
+        self.call(out, cmd, what);
     }
 
     /// How long the SPL meter's number holds a reading under time weighting `t`: the
@@ -166,13 +166,10 @@ impl AppState {
                 let (meas, name) = (d.meas, d.name.clone());
                 self.overlay = Overlay::None;
                 self.focus_kind(PaneKind::Spl);
+                let cmd = self.meas_update(meas, config);
                 let m = self.modes_mut();
                 m.spl = m.spl.with_leq();
-                self.call(
-                    out,
-                    Command::MeasUpdate { meas, config },
-                    format!("{name}: Leq windows set"),
-                );
+                self.call(out, cmd, format!("{name}: Leq windows set"));
             }
             Err(e) => d.error = Some(e),
         }

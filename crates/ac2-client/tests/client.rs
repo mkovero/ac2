@@ -44,9 +44,11 @@ async fn connect(f: &FakeDaemon) -> R<Client> {
 
 fn meas_config(name: &str) -> MeasConfig {
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: name.into(),
         kind: MeasKind::Spl {
             config: SplConfig {
+                cue: None,
                 bands: None,
                 input: 2,
                 weighting: Weighting::A,
@@ -61,6 +63,7 @@ fn meas_config(name: &str) -> MeasConfig {
 
 fn tf_config() -> MeasConfig {
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: "tf".into(),
         kind: MeasKind::Transfer {
             config: TransferConfig {
@@ -896,6 +899,7 @@ async fn band_transfer_from_typed_levels() -> R {
         unreachable!()
     };
     let with_bands = MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: m.config.name.clone(),
         kind: MeasKind::Spl {
             config: SplConfig {
@@ -906,6 +910,7 @@ async fn band_transfer_from_typed_levels() -> R {
     };
     c.call(Command::MeasUpdate {
         meas: m.id,
+        base: m.config_rev,
         config: with_bands,
     })
     .await?;

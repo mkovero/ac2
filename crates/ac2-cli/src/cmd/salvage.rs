@@ -486,6 +486,7 @@ fn remap_math(
         r @ MathReference::Fixed { .. } => r,
     };
     Ok(MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: config.name.clone(),
         kind: MeasKind::Math {
             config: MathConfig {

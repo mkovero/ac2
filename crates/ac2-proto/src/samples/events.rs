@@ -70,5 +70,6 @@ pub fn events() -> Vec<Event> {
                 recover: None,
             }),
         ),
+        ev(68, Change::Rig(rig())),
     ]
 }

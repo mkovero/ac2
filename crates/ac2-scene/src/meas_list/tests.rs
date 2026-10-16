@@ -6,6 +6,7 @@ pub(crate) fn tf(id: u32, name: &str) -> Measurement {
     Measurement {
         id: MeasId(id),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: name.into(),
             kind: MeasKind::Transfer {
                 config: TransferConfig {
@@ -241,6 +242,7 @@ pub(crate) fn with_kind(id: u32, name: &str, kind: MeasKind, running: bool) -> M
     Measurement {
         id: MeasId(id),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: name.into(),
             kind,
         },

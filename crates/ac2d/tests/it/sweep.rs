@@ -61,6 +61,7 @@ fn request(level: f64) -> SweepConfig {
 fn create(c: &mut Client, name: &str, config: SweepConfig) -> MeasId {
     match c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: name.into(),
             kind: MeasKind::Sweep { config },
         },
@@ -190,6 +191,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let e = c
         .call(Command::MeasCreate {
             config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: "no level".into(),
                 kind: bad,
             },

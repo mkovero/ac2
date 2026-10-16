@@ -198,7 +198,8 @@ pub enum Request {
         meas: MeasId,
         /// The measurement's name, for messages.
         label: String,
-        update: Option<Box<ac2_proto::model::MeasConfig>>,
+        /// With the `config_rev` it was made on.
+        update: Option<(ac2_proto::units::Rev, Box<ac2_proto::model::MeasConfig>)>,
     },
     /// `delay.find` on `meas` in `band` over `observation`, to insert `pick` from; the
     /// reducer decides what to insert once the finding is back.
@@ -291,6 +292,9 @@ pub enum Request {
     SessionList,
 }
 
+// One message per operator action, moved once through the channel: boxing the request
+// would add an allocation per action and buy nothing.
+#[allow(clippy::large_enum_variant)]
 enum Ctl {
     Req(Request),
     Shutdown,

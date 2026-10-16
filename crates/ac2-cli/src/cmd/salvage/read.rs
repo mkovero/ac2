@@ -175,6 +175,7 @@ fn meas_keys() -> Vec<String> {
     let sample = SavedMeasurement {
         id: MeasId(0),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: String::new(),
             kind: MeasKind::Spectrum {
                 config: SpectrumConfig::on_input(0),
@@ -269,9 +270,18 @@ fn meas_config(v: &Value, notes: &mut Vec<String>) -> Result<MeasConfig, String>
         }),
         _ => None,
     };
-    let base = kind.map(|kind| MeasConfig { name, kind });
+    let base = kind.map(|kind| MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
+        name,
+        kind,
+    });
+    // Every measurement of a format without `scope` was the session's: nothing to note.
+    let mut v = v.clone();
+    if let Some(o) = v.as_object_mut() {
+        o.entry("scope").or_insert_with(|| Value::from("session"));
+    }
     let mut own = Vec::new();
-    let c = lenient(v, base.as_ref(), "", &mut own);
+    let c = lenient(&v, base.as_ref(), "", &mut own);
     match c {
         Some(c) => {
             notes.extend(own);
@@ -515,6 +525,7 @@ mod tests {
     fn spl() -> MeasConfig {
         let c = SplConfig::on_input(2, Weighting::C, TimeWeighting::Slow);
         MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "FOH SPL".into(),
             kind: MeasKind::Spl { config: c },
         }

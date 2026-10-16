@@ -53,6 +53,7 @@ fn tone(level: f64) -> GeneratorDesired {
 
 fn window(seconds: f64, limit: Option<f64>) -> LeqWindow {
     LeqWindow {
+        cue: None,
         duration: Seconds(seconds),
         weighting: Weighting::A,
         limit: limit.map(DbSpl),
@@ -62,9 +63,11 @@ fn window(seconds: f64, limit: Option<f64>) -> LeqWindow {
 
 fn meter(windows: Vec<LeqWindow>) -> MeasConfig {
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: "FOH SPL".into(),
         kind: MeasKind::Spl {
             config: SplConfig {
+                cue: None,
                 bands: None,
                 input: 1,
                 weighting: Weighting::A,

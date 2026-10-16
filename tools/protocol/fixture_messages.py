@@ -20,8 +20,39 @@ def req(idx, op, args=None, mutation=True):
     return {"v": p.PROTO_VERSION, "id": idx, "cmd": cmd, "expect_rev": 41 if mutation else None}
 
 
+def osc_message(path, args, append_level):
+    return {"path": path, "args": args, "append_level": append_level}
+
+
+OSC_CUE = {
+    "ok": osc_message("/light/red", [{"type": "int", "value": 0}], False),
+    "near": osc_message(
+        "/light/red",
+        [{"type": "float", "value": 0.5}, {"type": "str", "value": "near"}],
+        False,
+    ),
+    "over": osc_message("/light/red", [{"type": "int", "value": 1}], True),
+    "fault": None,
+}
+
+RIG = {
+    "rev": 38,
+    "osc_target": "192.168.9.20:9000",
+    "monitor_at_start": True,
+    "osc": {"sent": 12, "last_error": "Connection refused (os error 111)"},
+    "cues": [
+        {"meas": 4, "subject": {"type": "meter"}, "state": "over"},
+        {
+            "meas": 4,
+            "subject": {"type": "window", "duration": 1800.0, "weighting": "a"},
+            "state": "near",
+        },
+    ],
+}
+
 MEAS_CONFIG = {
     "name": "Main L",
+    "scope": "session",
     "kind": {
         "type": "transfer",
         "config": {
@@ -48,6 +79,7 @@ BAND_LEQ_CONFIG = {
             "limit": night,
             "day_offset": 5.0,
             "warn_margin": 3.0,
+            "cue": None,
         }
         for hz, night in zip(FINLAND_545_BANDS, FINLAND_545_NIGHT)
     ]
@@ -59,9 +91,16 @@ BAND_LEQ_CONFIG = {
             "limit": 30.5,
             "day_offset": None,
             "warn_margin": 2.0,
+            "cue": OSC_CUE,
         }
     ],
-    "predicted": {"duration": 3600.0, "day": None, "night": 25.0, "warn_margin": 3.0},
+    "predicted": {
+        "duration": 3600.0,
+        "day": None,
+        "night": 25.0,
+        "warn_margin": 3.0,
+        "cue": None,
+    },
     "correction": {"impulse": "plus5", "tonal": "none"},
     "transfer": {
         "place": "flat 4 bedroom",
@@ -81,6 +120,7 @@ SPL_MEASUREMENT = {
     "id": 4,
     "config": {
         "name": "FOH SPL",
+        "scope": "session",
         "kind": {
             "type": "spl",
             "config": {
@@ -90,17 +130,30 @@ SPL_MEASUREMENT = {
                 "peak_weighting": "c",
                 "leq": {
                     "windows": [
-                        {"duration": 60.0, "weighting": "a", "limit": None, "warn_margin": 3.0},
-                        {"duration": 1800.0, "weighting": "a", "limit": 99.0, "warn_margin": 3.0},
+                        {
+                            "duration": 60.0,
+                            "weighting": "a",
+                            "limit": None,
+                            "warn_margin": 3.0,
+                            "cue": None,
+                        },
+                        {
+                            "duration": 1800.0,
+                            "weighting": "a",
+                            "limit": 99.0,
+                            "warn_margin": 3.0,
+                            "cue": None,
+                        },
                     ],
                     "horizon": 60.0,
                     "peaks": {
-                        "lcpeak": {"limit": 135.0, "warn_margin": 3.0},
+                        "lcpeak": {"limit": 135.0, "warn_margin": 3.0, "cue": None},
                         "lafmax": None,
                     },
                 },
                 "position": {"level": 2.5, "peak": 1.5},
                 "bands": BAND_LEQ_CONFIG,
+                "cue": OSC_CUE,
             },
         },
     },
@@ -253,6 +306,7 @@ MATH_MEASUREMENT = {
     "id": 6,
     "config": {
         "name": "FOH average",
+        "scope": "session",
         "kind": {
             "type": "math",
             "config": {
@@ -287,6 +341,7 @@ SWEEP_MEASUREMENT = {
     "id": 7,
     "config": {
         "name": "Genelec 1 m",
+        "scope": "session",
         "kind": {
             "type": "sweep",
             "config": {
@@ -512,6 +567,13 @@ def requests():
             {"backend": "asio", "device": "Fireface USB"},
             mutation=False,
         ),
+        req(74, "osc.target", {"base": 38, "addr": "[fe80::1]:9000"}),
+        req(
+            75,
+            "osc.test",
+            {"msg": osc_message("/light/red", [{"type": "int", "value": 1}], True)},
+        ),
+        req(76, "rig.monitor_start", {"base": 38, "on": True}),
     ]
 
 
@@ -601,6 +663,7 @@ def events():
             "rev": 67,
             "payload": {"origin": None, "dirty": False, "saved_at": None, "recover": None},
         },
+        {"kind": "rig", "rev": 68, "payload": RIG},
         {
             "kind": "autosave",
             "rev": 57,

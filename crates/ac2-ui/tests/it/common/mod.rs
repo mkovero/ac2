@@ -262,6 +262,7 @@ fn measurement(
     Measurement {
         id: MeasId(id),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: name.into(),
             kind,
         },
@@ -396,6 +397,7 @@ impl Rig {
                     "FOH SPL",
                     MeasKind::Spl {
                         config: SplConfig {
+                            cue: None,
                             bands: None,
                             input: 1,
                             weighting: Weighting::A,

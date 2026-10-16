@@ -171,12 +171,12 @@ async fn check_common(r: &Rig, report: &Value) {
     assert_eq!(windows, [(60.0, None), (3600.0, Some(80.0))]);
     assert_eq!(config.leq.horizon.0, 600.0);
     let peaks = &config.leq.peaks;
-    assert_eq!(peaks.lcpeak.map(|p| p.limit.0), Some(140.0));
-    assert_eq!(peaks.lafmax.map(|p| p.limit.0), Some(115.0));
+    assert_eq!(peaks.lcpeak.as_ref().map(|p| p.limit.0), Some(140.0));
+    assert_eq!(peaks.lafmax.as_ref().map(|p| p.limit.0), Some(115.0));
     let bands = config.bands.as_ref().expect("band meter");
     assert_eq!(bands.windows.len(), 11);
     assert_eq!(
-        bands.predicted.map(|p| p.night.map(|n| n.0)),
+        bands.predicted.as_ref().map(|p| p.night.map(|n| n.0)),
         Some(Some(25.0))
     );
     assert!(

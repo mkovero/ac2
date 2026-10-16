@@ -51,6 +51,7 @@ pub(crate) async fn spl(cli: &Cli, cmd: &SplCmd, out: &mut Out<'_>) -> Result<()
                         &c,
                         Command::MeasCreate {
                             config: MeasConfig {
+                                scope: ac2_proto::model::MeasScope::Session,
                                 name: format!("spl-in{input}"),
                                 kind: MeasKind::Spl { config: want },
                             },

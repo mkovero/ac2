@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 51`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 52`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -91,8 +91,11 @@ Lease column: **L** = `lease_token` required (Q6).
 | `gen.release` | `lease_token` | `ack` | L |
 | `gen.stop` | — | `ack` | universal |
 | `gen.ceiling` | `ceiling: Dbfs`, `confirm_raise: bool` | `generator` | any client |
+| `osc.target` | `base: Rev` (`rig.rev`), `addr: "ip:port" \| nil` | `ack` (`rig` event) | |
+| `osc.test` | `msg: OscMessage` | `ack` (`rig` event) | |
+| `rig.monitor_start` | `base: Rev` (`rig.rev`), `on: bool` | `ack` (`rig` event) | |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
-| `meas.update` | `meas`, `config` | `measurement` | |
+| `meas.update` | `meas`, `base: Rev` (the `config_rev` the edit was made on), `config` | `measurement` | |
 | `meas.colour` | `meas`, `colour: ColourFamily \| nil` | `measurement` | |
 | `meas.layout` | `meas`, `layout: PaneLayout \| nil` | `measurement` | |
 | `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the traces and math channels it owns) | `ack` | |
@@ -187,6 +190,29 @@ the rig settings (not in sessions) by channel number, whatever the device. A lab
 characters, no control characters, no surrounding space (`invalid` otherwise); `nil` clears
 it. `state.outputs` lists the labelled outputs, sorted by channel.
 
+**Rig monitor and OSC cues (`osc.*`, `rig.*`).** The `rig` entity (`Rig`) holds what belongs
+to the daemon's machine rather than to a session: `rev` (the rev of its last settings change),
+`osc_target` (`"ip:port"` \| nil: where cues go; an IP literal, never a name to look up),
+`monitor_at_start` (at start the daemon reopens the last session's device capture-only so the
+rig measurements meter with no client connected; the generator stays disarmed), `osc`
+(`OscStatus` {`sent`: u64 since the daemon started, `last_error`: str \| nil, the latest send
+error as the operating system said it}) and `cues` ([`RigCue`] {`meas`, `subject`:
+`CueSubject`, `state`: `CueState`}: every cued subject's state as last sent). `CueSubject` is
+tagged by `type`: `meter` (the whole meter: the worst state of its limits), `window`
+{duration, weighting}, `peak` {quantity}, `band` {duration, weighting, nominal},
+`predicted`. `CueState` is `ok` (under the limit, or none), `near`, `over` or `fault` (the rig
+cannot judge: no audio, device lost, not calibrated).
+`osc.target` and `rig.monitor_start` carry the `rig.rev` they were made on; another is
+`conflict` with `detail: conflict {rev}` (the current one). `osc.test` sends one message to
+the target now (setup); `invalid` without a target.
+An `OscCue` = {`ok`, `near`, `over`, `fault`: `OscMessage` \| nil} is the message sent in each
+state; it sits on each limit (`LeqWindow.cue`, `PeakLimit.cue`, `BandWindow.cue`,
+`PredictedWindow.cue`) and on the meter (`SplConfig.cue`). `OscMessage` = {`path`: str (a
+leading `/`, then printable ASCII without space or any of `#*,?[]{}`, at most 128 bytes;
+anything else fails to decode), `args`: [`OscArg`], `append_level`: bool (append the judged
+level, dB SPL, as a trailing float)}; `OscArg` = {`type`: `int` \| `float` \| `str`, `value`:
+i32 \| f32 \| str}.
+
 **Server (`server.*`).** `server.info` → `ServerInfo`: `mode` (tagged by `type`):
 `embedded` (in an app's process) \| `local` {`ctrl`} (this machine only; the OS user is the
 trust boundary, there are no client keys) \| `network` {`ctrl`, `data`, `server_key` (Z85),
@@ -236,6 +262,15 @@ column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on
 `ac2_proto::model::layout`): its kind and the view of each kind it may be turned into. Which measurement a pane shows, the focused pane, a maximised or full-screen pane and
 the window are each client's. `invalid` for a ratio out of range and for more than 16
 panes; a session file's layout that is either is dropped on load.
+
+`MeasConfig` = {`name`, `kind`, `scope`: `MeasScope`}. `scope` is `session` (the working
+session's: saved in session files, replaced by a load) or `rig` (the rig's, SPL meters only:
+kept with the daemon's rig settings, never in a session file; a load or a new session leaves
+it running).
+
+`meas.update` carries `base`, the measurement's `config_rev` the edit was made on. Another
+`config_rev` (a client changed it since) is `conflict` with `detail: conflict {rev}` (the
+current `config_rev`): the client re-reads the measurement rather than overwrite that edit.
 
 `meas.update` replaces the configuration and restarts a running job (averages start over;
 a spectrum's new `resolution` (§3.2 *Spectrum resolution*) or `window` included: frames of
@@ -369,8 +404,9 @@ Design: `docs/design/leq.md`. `LeqConfig` = {`windows`: [`LeqWindow`] (at most 8
 display order), `horizon`: Seconds (1 s … 1 h, whole seconds; default 60), `peaks`:
 `PeakLimits` {`lcpeak`, `lafmax`: `PeakLimit` \| nil}}. `LeqWindow` =
 {`duration`: Seconds (1 s … 24 h, whole seconds), `weighting`: `a` \| `c` \| `z`, `limit`:
-DbSpl \| nil, `warn_margin`: Db ≥ 0 (default 3)}. `PeakLimit` = {`limit`: DbSpl, `warn_margin`:
-Db ≥ 0}. `SplConfig.position`: `PositionCorrection` \| nil = {`level`: Db, `peak`: Db, each
+DbSpl \| nil, `warn_margin`: Db ≥ 0 (default 3), `cue`: `OscCue` \| nil}. `PeakLimit` = {`limit`:
+DbSpl, `warn_margin`: Db ≥ 0, `cue`: `OscCue` \| nil}. `SplConfig.cue`: `OscCue` \| nil, the
+meter's own cue (§3.2 *Rig monitor and OSC cues*). `SplConfig.position`: `PositionCorrection` \| nil = {`level`: Db, `peak`: Db, each
 within ±30}: the measuring-position correction (`docs/design/leq.md`, *Measuring-position
 correction*), added to every level the meter reports while calibrated — `level` to the
 energy levels (the time-weighted levels, Leq, the windows, headroom, run totals, LAFmax),
@@ -493,10 +529,11 @@ judged and alarmed; every band is integrated and logged whatever the windows), `
 Seconds (whole seconds, 1 s … 24 h), `weighting`: `a` \| `c` \| `z` (the weighting at the
 band's exact mid-band frequency added to its unweighted level), `limit`: DbSpl \| nil,
 `day_offset`: Db \| nil (nil: `limit` holds day and night; else `limit` is the night's,
-22:00–07:00 local time, and 07:00–22:00 it is `limit` plus this), `warn_margin`: Db ≥ 0}; the
+22:00–07:00 local time, and 07:00–22:00 it is `limit` plus this), `warn_margin`: Db ≥ 0,
+`cue`: `OscCue` \| nil}; the
 limit is at the transfer's place with a transfer, else at the mic. A range of bands is a
 front-end convenience that adds one window per band; nothing range-shaped is on the wire. `PredictedWindow` = {`duration`:
-Seconds, `day`, `night`: DbSpl \| nil, `warn_margin`: Db} (the A-weighted level predicted at
+Seconds, `day`, `night`: DbSpl \| nil, `warn_margin`: Db, `cue`: `OscCue` \| nil} (the A-weighted level predicted at
 the place, judged only with a transfer). `BandTransferSet` = {`place`: str (the operator's
 name of the place the limits are for, 1 … 40 characters, `receiving room` unless named;
 every line naming the place uses it), `measured_at`: WallNs, `origin`: `TransferOrigin`
@@ -1257,7 +1294,8 @@ WallNs of the newest window; kept after the stimulus stops and for the rest of t
 committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `sweep` (`SweepRun` | nil: the latest `sweep.run` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
 nil`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2), `working`
-(`WorkingSession`: the working state's session and unsaved changes, §3.2 sessions).
+(`WorkingSession`: the working state's session and unsaved changes, §3.2 sessions), `rig`
+(`Rig`: rig settings, OSC sending and cue states, §3.2 *Rig monitor and OSC cues*).
 
 
 #### 4.1.1 Audio stopped and recovery

@@ -4,7 +4,7 @@ use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{Change, Command, ErrorCode, GridDef, Patch, ProtoError, ReplyBody};
 
-use super::{FakeFinding, Shared, err};
+use super::{FakeFinding, Shared, conflict, err};
 
 impl Shared {
     pub(super) fn meas_cmd(&mut self, cmd: Command) -> Result<ReplyBody, ProtoError> {
@@ -49,8 +49,11 @@ impl Shared {
                 };
                 self.put_meas(m)
             }
-            C::MeasUpdate { meas, config } => {
+            C::MeasUpdate { meas, base, config } => {
                 let mut m = self.meas(meas)?;
+                if base != m.config_rev {
+                    return Err(conflict(m.config_rev));
+                }
                 m.config = config;
                 m.config_rev = Rev(self.rev.0 + 1);
                 self.put_meas(m)

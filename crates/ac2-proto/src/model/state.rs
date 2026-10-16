@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    CalEntry, Generator, InputSetup, Measurement, Mic, OutputSetup, RecordingRun, Session, SplLog,
-    SweepRun, TraceMeta, WorkingSession,
+    CalEntry, Generator, InputSetup, Measurement, Mic, OutputSetup, RecordingRun, Rig, Session,
+    SplLog, SweepRun, TraceMeta, WorkingSession,
 };
 use crate::units::{SampleIndex, Samples, Seconds, WallNs};
 
@@ -112,6 +112,8 @@ pub struct State {
     pub working: WorkingSession,
     /// The latest recording, if any.
     pub recording: Option<RecordingRun>,
+    /// Rig settings, OSC sending and cue states.
+    pub rig: Rig,
 }
 
 /// Autosave of the measurements and traces: the daemon writes them, in the session file

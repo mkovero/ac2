@@ -142,6 +142,7 @@ mod tests {
 
     fn cfg() -> LeqConfig {
         let w = |seconds: f64, weighting, limit: Option<f64>| LeqWindow {
+            cue: None,
             duration: Seconds(seconds),
             weighting,
             limit: limit.map(DbSpl),

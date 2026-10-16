@@ -97,10 +97,7 @@ fn live_smoothing_and_resmoothed_captures() {
     if let MeasKind::Transfer { config } = &mut cfg.kind {
         config.smoothing = Some(sixth());
     }
-    let m = match c.ok(Command::MeasUpdate {
-        meas: MeasId(1),
-        config: cfg,
-    }) {
+    let m = match c.update_ok(MeasId(1), cfg) {
         ReplyBody::Measurement(m) => m,
         other => panic!("{other:?}"),
     };

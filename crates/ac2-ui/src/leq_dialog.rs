@@ -153,6 +153,8 @@ pub struct Row {
     pub limit: String,
     /// Typed warn margin.
     pub margin: String,
+    /// Its OSC cue, kept as it is (set from the CLI).
+    pub cue: Option<Box<ac2_proto::model::OscCue>>,
 }
 
 fn number_text(v: f64) -> String {
@@ -167,6 +169,7 @@ impl Row {
             weighting: w.weighting,
             limit: w.limit.map_or_else(String::new, |l| number_text(l.0)),
             margin: number_text(w.warn_margin.0),
+            cue: w.cue.clone(),
         }
     }
 
@@ -204,6 +207,7 @@ impl Row {
             return Err(format!("window {n} ({name}): the warn margin is 0 … 20 dB"));
         }
         Ok(LeqWindow {
+            cue: self.cue.clone(),
             duration: Seconds(f64::from(self.seconds)),
             weighting: self.weighting,
             limit,
@@ -592,6 +596,7 @@ impl LeqDialog {
             weighting: Weighting::A,
             limit: String::new(),
             margin: "3".into(),
+            cue: None,
         });
         let seconds = LENGTHS
             .iter()
@@ -604,6 +609,7 @@ impl LeqDialog {
             Row {
                 seconds,
                 limit: String::new(),
+                cue: None,
                 ..from
             },
         );
@@ -703,14 +709,12 @@ impl LeqDialog {
                     "{name}: a limit is 60 … 170 dB SPL (empty for none)"
                 ));
             }
-            // A margin set before (from the CLI) stays; a new limit warns 3 dB under.
-            let warn_margin = self
-                .base
-                .leq
-                .peaks
-                .get(q)
-                .map_or(Db(LeqWindow::DEFAULT_WARN_MARGIN_DB), |l| l.warn_margin);
+            // A margin and cue set before (from the CLI) stay; a new limit warns 3 dB under.
+            let before = self.base.leq.peaks.get(q);
+            let warn_margin =
+                before.map_or(Db(LeqWindow::DEFAULT_WARN_MARGIN_DB), |l| l.warn_margin);
             *peaks.get_mut(q) = Some(PeakLimit {
+                cue: before.and_then(|l| l.cue.clone()),
                 limit: DbSpl(v),
                 warn_margin,
             });
@@ -761,6 +765,7 @@ impl LeqDialog {
     /// The meter's configuration with the new windows, peak limits and correction.
     pub fn meas_config(&self) -> Result<MeasConfig, String> {
         Ok(MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: self.name.clone(),
             kind: MeasKind::Spl {
                 config: SplConfig {

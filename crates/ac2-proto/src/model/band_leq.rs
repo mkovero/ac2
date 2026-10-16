@@ -259,7 +259,7 @@ impl SplBandLog {
 /// The predicted A-weighted level at the transfer's place, a rolling window judged against
 /// a day and a night limit (§12: music at night ≤ LAeq,1h 25 dB in rooms meant for sleeping;
 /// Liite 2 Taulukko 1 in living rooms). Only with a transfer.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PredictedWindow {
     /// Length: whole seconds, 1 s … [`LeqWindow::MAX_SECONDS`].
@@ -270,11 +270,13 @@ pub struct PredictedWindow {
     pub night: Option<DbSpl>,
     /// "Near" within this much below the limit (≥ 0).
     pub warn_margin: Db,
+    /// Cue sent when its state changes.
+    pub cue: Option<Box<super::OscCue>>,
 }
 
 /// One rolling band window: the Leq of one 1/3-octave band over a length and weighting,
 /// against its own limit.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BandWindow {
     /// The band's nominal centre, one of [`BAND_NOMINAL_HZ`]. Every band is integrated and
@@ -294,6 +296,8 @@ pub struct BandWindow {
     pub day_offset: Option<Db>,
     /// "Near" within this much below the limit (≥ 0).
     pub warn_margin: Db,
+    /// Cue sent when its state changes.
+    pub cue: Option<Box<super::OscCue>>,
 }
 
 impl BandWindow {
@@ -301,6 +305,7 @@ impl BandWindow {
     /// default warn margin.
     pub fn minutes(band: Hz, minutes: u32, weighting: Weighting) -> Self {
         Self {
+            cue: None,
             band,
             duration: Seconds(f64::from(minutes) * 60.0),
             weighting,
@@ -486,7 +491,9 @@ impl BandLeqConfig {
 
     /// The predicted window's length in whole seconds, when it has one in range.
     pub fn predicted_seconds(&self) -> Option<u32> {
-        self.predicted.and_then(|p| whole_seconds(p.duration))
+        self.predicted
+            .as_ref()
+            .and_then(|p| whole_seconds(p.duration))
     }
 }
 
@@ -550,6 +557,7 @@ impl BandLeqPreset {
             BandLeqPreset::Finland545LivingRoom => (Some(DbSpl(35.0)), Some(DbSpl(30.0))),
         };
         PredictedWindow {
+            cue: None,
             duration: Seconds(3600.0),
             day,
             night,

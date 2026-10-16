@@ -185,6 +185,7 @@ pub(crate) async fn sweep_meas_for(
         c,
         Command::MeasCreate {
             config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name,
                 kind: MeasKind::Sweep {
                     config: config.clone(),

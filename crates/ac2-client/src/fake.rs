@@ -203,6 +203,7 @@ pub fn empty_state() -> State {
             saved_at: None,
             recover: None,
         },
+        rig: Rig::default(),
     }
 }
 
@@ -278,6 +279,15 @@ pub fn fake_detection() -> LoopbackDetection {
         ],
         loopback: Some(0),
         clock: ClockRelation::SingleCallback,
+    }
+}
+
+/// A stale `base`: someone changed the entity since; the current rev rides along.
+pub(super) fn conflict(rev: Rev) -> ProtoError {
+    ProtoError {
+        code: ErrorCode::Conflict,
+        msg: "changed since; re-read it".into(),
+        detail: Some(ErrorDetail::Conflict { rev }),
     }
 }
 
@@ -445,6 +455,32 @@ impl Shared {
             .ok_or_else(|| err(ErrorCode::NotFound, format!("no measurement {id}")))
     }
 
+    /// Rig commands: settings are kept (rev-guarded); nothing is sent.
+    fn rig_cmd(&mut self, c: Command) -> Result<ReplyBody, ProtoError> {
+        let mut rig = self.state.rig.clone();
+        let base = match &c {
+            Command::OscTarget { base, .. } | Command::RigMonitorStart { base, .. } => *base,
+            _ => rig.rev,
+        };
+        if base != rig.rev {
+            return Err(conflict(rig.rev));
+        }
+        match c {
+            Command::OscTarget { addr, .. } => rig.osc_target = addr,
+            Command::RigMonitorStart { on, .. } => rig.monitor_at_start = on,
+            Command::OscTest { .. } => {
+                if rig.osc_target.is_none() {
+                    return Err(err(ErrorCode::Invalid, "no OSC target"));
+                }
+                rig.osc.sent += 1;
+            }
+            _ => unreachable!("rig_cmd is called with rig commands only"),
+        }
+        rig.rev = Rev(self.rev.0 + 1);
+        self.commit(Change::Rig(rig));
+        Ok(ReplyBody::Ack { rev: self.rev })
+    }
+
     fn put_meas(&mut self, m: Measurement) -> ReplyBody {
         self.commit(Change::Measurement(Patch::Set(m.clone())));
         self.spl_log_for(&m);
@@ -475,6 +511,9 @@ impl Shared {
             | C::GenRelease { .. }
             | C::GenStop
             | C::GenCeiling { .. }) => self.generator_cmd(client, c)?,
+            c @ (C::OscTarget { .. } | C::OscTest { .. } | C::RigMonitorStart { .. }) => {
+                self.rig_cmd(c)?
+            }
             c @ (C::MeasCreate { .. }
             | C::MeasUpdate { .. }
             | C::MeasColour { .. }

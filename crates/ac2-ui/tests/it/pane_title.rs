@@ -24,6 +24,7 @@ fn transfer(id: u32, name: &str) -> Measurement {
     Measurement {
         id: MeasId(id),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: name.into(),
             kind: MeasKind::Transfer {
                 config: TransferConfig {

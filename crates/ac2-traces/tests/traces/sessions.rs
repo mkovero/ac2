@@ -18,6 +18,7 @@ pub(super) fn session_sample() -> Session {
             SavedMeasurement {
                 id: MeasId(1),
                 config: MeasConfig {
+                    scope: ac2_proto::model::MeasScope::Session,
                     name: "main".into(),
                     kind: MeasKind::Transfer {
                         config: TransferConfig {
@@ -42,6 +43,7 @@ pub(super) fn session_sample() -> Session {
             SavedMeasurement {
                 id: MeasId(2),
                 config: MeasConfig {
+                    scope: ac2_proto::model::MeasScope::Session,
                     name: "FOH SPL".into(),
                     kind: MeasKind::Spl {
                         config: SplConfig::on_input(1, Weighting::A, TimeWeighting::Fast),

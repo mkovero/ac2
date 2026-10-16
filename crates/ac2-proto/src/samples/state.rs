@@ -188,6 +188,7 @@ pub(super) fn timing() -> TimingStatus {
 /// An SPL meter with two Leq windows, one limited.
 pub fn spl_config() -> SplConfig {
     SplConfig {
+        cue: Some(Box::new(osc_cue())),
         input: 1,
         weighting: Weighting::A,
         time_weighting: TimeWeighting::Fast,
@@ -196,6 +197,7 @@ pub fn spl_config() -> SplConfig {
             windows: vec![
                 LeqWindow::minutes(1),
                 LeqWindow {
+                    cue: None,
                     duration: Seconds(1800.0),
                     weighting: Weighting::A,
                     limit: Some(DbSpl(99.0)),
@@ -205,6 +207,7 @@ pub fn spl_config() -> SplConfig {
             horizon: Seconds(60.0),
             peaks: PeakLimits {
                 lcpeak: Some(PeakLimit {
+                    cue: None,
                     limit: DbSpl(135.0),
                     warn_margin: Db(3.0),
                 }),
@@ -236,6 +239,7 @@ pub fn band_leq_config() -> BandLeqConfig {
     bands[3] = BandTransferBand::Unusable { at_least: Db(35.0) };
     let mut cfg = BandLeqPreset::Finland545Lf.apply(None);
     cfg.windows.push(BandWindow {
+        cue: Some(Box::new(osc_cue())),
         band: Hz(1000.0),
         duration: Seconds(900.0),
         weighting: Weighting::A,
@@ -263,6 +267,7 @@ pub fn spl_measurement() -> Measurement {
     Measurement {
         id: MeasId(4),
         config: MeasConfig {
+            scope: crate::model::MeasScope::Session,
             name: "FOH SPL".into(),
             kind: MeasKind::Spl {
                 config: spl_config(),
@@ -458,5 +463,57 @@ pub fn state() -> State {
             ..recording_run()
         }),
         working: working(),
+        rig: rig(),
+    }
+}
+
+/// An OSC message.
+pub fn osc_message(path: &str, args: Vec<OscArg>, append_level: bool) -> OscMessage {
+    OscMessage {
+        path: OscPath::new(path).expect("valid sample path"),
+        args,
+        append_level,
+    }
+}
+
+/// The usual red-light cue.
+pub fn osc_cue() -> OscCue {
+    OscCue {
+        ok: Some(osc_message("/light/red", vec![OscArg::Int(0)], false)),
+        near: Some(osc_message(
+            "/light/red",
+            vec![OscArg::Float(0.5), OscArg::Str("near".into())],
+            false,
+        )),
+        over: Some(osc_message("/light/red", vec![OscArg::Int(1)], true)),
+        fault: None,
+    }
+}
+
+/// The rig entity.
+pub fn rig() -> Rig {
+    Rig {
+        rev: Rev(38),
+        osc_target: Some("192.168.9.20:9000".parse().expect("valid sample address")),
+        monitor_at_start: true,
+        osc: OscStatus {
+            sent: 12,
+            last_error: Some("Connection refused (os error 111)".into()),
+        },
+        cues: vec![
+            RigCue {
+                meas: MeasId(4),
+                subject: CueSubject::Meter,
+                state: CueState::Over,
+            },
+            RigCue {
+                meas: MeasId(4),
+                subject: CueSubject::Window {
+                    duration: Seconds(1800.0),
+                    weighting: Weighting::A,
+                },
+                state: CueState::Near,
+            },
+        ],
     }
 }

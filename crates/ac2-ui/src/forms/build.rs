@@ -565,6 +565,7 @@ impl Form {
             return Err("type a name".into());
         }
         Ok(MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: name.to_owned(),
             kind: MeasKind::Sweep {
                 config: SweepConfig {
@@ -708,6 +709,7 @@ impl Form {
             return Err("type a name".into());
         }
         Ok(MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: name.to_owned(),
             kind,
         })

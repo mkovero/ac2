@@ -102,6 +102,7 @@ async fn watch_cmd(cli: &Cli, w: &LeqWatch, out: &mut Out<'_>) -> Result<(), Cli
             let r = c
                 .call(Command::MeasCreate {
                     config: MeasConfig {
+                        scope: ac2_proto::model::MeasScope::Session,
                         name: format!("SPL in {input}"),
                         kind: MeasKind::Spl {
                             config: SplConfig::on_input(input.0, Weighting::A, TimeWeighting::Fast),
@@ -187,6 +188,7 @@ pub(crate) fn apply_position(
 pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> {
     let mut cfg = cur.clone();
     let blank = |w: &crate::units::LeqWindowArg| LeqWindow {
+        cue: None,
         duration: Seconds(f64::from(w.seconds)),
         weighting: w.weighting(),
         limit: None,
@@ -214,7 +216,7 @@ pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> 
                 cur.windows
                     .iter()
                     .find(|o| o.duration == b.duration && o.weighting == b.weighting)
-                    .copied()
+                    .cloned()
                     .unwrap_or(b)
             })
             .collect();
@@ -228,6 +230,7 @@ pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> 
             .find(|w| w.duration == d && w.weighting == wt)
         else {
             let name = ac2_scene::leq::window_name(&LeqWindow {
+                cue: None,
                 duration: d,
                 weighting: wt,
                 limit: None,
@@ -245,6 +248,7 @@ pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> 
             .get(p.quantity)
             .map_or(Db(LeqWindow::DEFAULT_WARN_MARGIN_DB), |l| l.warn_margin);
         *cfg.peaks.get_mut(p.quantity) = p.limit.map(|limit| PeakLimit {
+            cue: None,
             limit,
             warn_margin: margin,
         });
@@ -312,7 +316,9 @@ async fn set(cli: &Cli, s: &LeqSet, out: &mut Out<'_>) -> Result<(), CliError> {
     let r = c
         .call(Command::MeasUpdate {
             meas: m.id,
+            base: m.config_rev,
             config: MeasConfig {
+                scope: m.config.scope,
                 name: m.config.name.clone(),
                 kind: MeasKind::Spl {
                     config: SplConfig {
@@ -374,7 +380,9 @@ pub(crate) async fn set_weightings(
     let r = c
         .call(Command::MeasUpdate {
             meas: m.id,
+            base: m.config_rev,
             config: MeasConfig {
+                scope: m.config.scope,
                 name: m.config.name.clone(),
                 kind: MeasKind::Spl {
                     config: config.clone(),
@@ -641,10 +649,10 @@ mod tests {
         cur.windows[0].limit = Some(ac2_proto::units::DbSpl(110.0));
         let c = apply(&cur, &set_args(&["--preset", "din15905"])).expect("valid");
         assert_eq!(names(&c), ["LAeq 30 min ≤ 99"]);
-        assert_eq!(c.peaks.lcpeak.map(|l| l.limit.0), Some(135.0));
+        assert_eq!(c.peaks.lcpeak.as_ref().map(|l| l.limit.0), Some(135.0));
         assert_eq!(c.peaks.lafmax, None);
         let c = apply(&cur, &set_args(&["--preset", "swiss100"])).expect("valid");
-        assert_eq!(c.peaks.lafmax.map(|l| l.limit.0), Some(125.0));
+        assert_eq!(c.peaks.lafmax.as_ref().map(|l| l.limit.0), Some(125.0));
         assert_eq!(c.peaks.lcpeak, None, "a preset's peaks replace the meter's");
         assert_eq!(c.horizon, cur.horizon);
         let c = apply(&cur, &set_args(&["--preset", "france"])).expect("valid");
@@ -691,15 +699,21 @@ mod tests {
             "lafmax=125db",
         ]);
         let c = apply(&cur, &s).expect("valid");
-        assert_eq!(c.peaks.lcpeak.map(|l| l.limit.0), Some(135.0));
-        assert_eq!(c.peaks.lafmax.map(|l| l.warn_margin), Some(Db(3.0)));
+        assert_eq!(c.peaks.lcpeak.as_ref().map(|l| l.limit.0), Some(135.0));
+        assert_eq!(
+            c.peaks.lafmax.as_ref().map(|l| l.warn_margin),
+            Some(Db(3.0))
+        );
         let d = apply(
             &c,
             &set_args(&["--peak-limit", "lcpeak=none", "--warn", "2db"]),
         )
         .expect("valid");
         assert_eq!(d.peaks.lcpeak, None);
-        assert_eq!(d.peaks.lafmax.map(|l| l.warn_margin), Some(Db(2.0)));
+        assert_eq!(
+            d.peaks.lafmax.as_ref().map(|l| l.warn_margin),
+            Some(Db(2.0))
+        );
         let table = windows_table(&c, Some(PositionCorrection::both(4.0)));
         assert!(table.contains("LCpeak (highest second of 10 s)"), "{table}");
         assert!(table.contains("position: corrected +4.0 dB"), "{table}");

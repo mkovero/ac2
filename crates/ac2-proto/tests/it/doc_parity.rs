@@ -189,10 +189,42 @@ fn protocol_doc_names_everything() {
         &doc,
         &mut missing,
     );
+    check(
+        "meas scope",
+        &names_of::<model::MeasScope, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "cue state",
+        &names_of::<model::CueState, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "cue subject",
+        &names_of::<model::CueSubject, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "osc arg",
+        &names_of::<model::OscArg, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
     for (group, fields) in [
         (
             "leq window field",
             names_of::<model::LeqWindow, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "rig field",
+            names_of::<model::Rig, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "osc cue field",
+            names_of::<model::OscCue, _>(&Bogus { bogus_field: 0 }),
         ),
         (
             "spl log row field",

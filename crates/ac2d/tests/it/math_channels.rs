@@ -65,6 +65,7 @@ fn meas(m: u32) -> Operand {
 
 fn math(name: &str, domain: MathDomain, expr: MathExpr) -> MeasConfig {
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: name.into(),
         kind: MeasKind::Math {
             config: MathConfig::of(ac2_proto::model::TraceOwner::Imported, domain, expr),
@@ -74,6 +75,7 @@ fn math(name: &str, domain: MathDomain, expr: MathExpr) -> MeasConfig {
 
 fn average(name: &str, members: &[u32]) -> MeasConfig {
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: name.into(),
         kind: MeasKind::Math {
             config: MathConfig::power_average(
@@ -321,12 +323,7 @@ fn power_average_of_three_positions() {
     if let MeasKind::Transfer { config } = &mut other_grid.kind {
         config.resolution = ac2_proto::model::Resolution::TwentyFourth;
     }
-    let e = c
-        .call(Command::MeasUpdate {
-            meas: MeasId(2),
-            config: other_grid,
-        })
-        .unwrap_err();
+    let e = c.update(MeasId(2), other_grid).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     let e = c.call(Command::MeasReset { meas: MeasId(4) }).unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
@@ -427,16 +424,16 @@ fn ratio_edit_capture_and_summation() {
         other => panic!("{other:?}"),
     }
     assert_eq!(captured.source.shared_epoch(), None, "a ratio is relative");
-    c.ok(Command::MeasUpdate {
-        meas: q,
-        config: binary(
+    c.update_ok(
+        q,
+        binary(
             "Seat 1 × Seat 2",
             MathDomain::Transfer,
             meas(1),
             MathOp::Multiply,
             meas(2),
         ),
-    });
+    );
     play(&mut r.d, c, r.tok, 1.0);
     let [f] = newest(&r.sub, &r.d, [4]);
     let t = tf(&f);
@@ -561,6 +558,7 @@ fn spectrum_difference_on_the_spectrum_stream() {
     for input in [1u16, 2] {
         c.ok(Command::MeasCreate {
             config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: format!("Spectrum {input}"),
                 kind: MeasKind::Spectrum {
                     config: SpectrumConfig::on_input(input),
@@ -633,9 +631,10 @@ fn spectrum_difference_on_the_spectrum_stream() {
     assert!(matches!(t.kind, TraceKind::Spectrum { .. }), "{:?}", t.kind);
     // An operand keeps its FFT length while named.
     let e = c
-        .call(Command::MeasUpdate {
-            meas: MeasId(4),
-            config: MeasConfig {
+        .update(
+            MeasId(4),
+            MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: "Spectrum 1".into(),
                 kind: MeasKind::Spectrum {
                     config: SpectrumConfig {
@@ -644,13 +643,14 @@ fn spectrum_difference_on_the_spectrum_stream() {
                     },
                 },
             },
-        })
+        )
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     // Its window is no part of the grid: that changes freely.
-    c.ok(Command::MeasUpdate {
-        meas: MeasId(4),
-        config: MeasConfig {
+    c.update_ok(
+        MeasId(4),
+        MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "Spectrum 1".into(),
             kind: MeasKind::Spectrum {
                 config: SpectrumConfig {
@@ -659,7 +659,7 @@ fn spectrum_difference_on_the_spectrum_stream() {
                 },
             },
         },
-    });
+    );
     // A math channel is drawn in its measurement's colours: it has none of its own.
     let e = c
         .call(Command::MeasColour {
@@ -684,6 +684,7 @@ fn density_spectrum_frames_captures_and_level_mismatch() {
     for (input, level) in [(1u16, SpecLevel::Tone), (2, SpecLevel::Density)] {
         c.ok(Command::MeasCreate {
             config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: format!("Spectrum {input}"),
                 kind: MeasKind::Spectrum {
                     config: SpectrumConfig {
@@ -755,6 +756,7 @@ fn an_imported_impulse_response_filters_live_measurements() {
     let c = &mut r.c;
     c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "Spectrum 1".into(),
             kind: MeasKind::Spectrum {
                 config: SpectrumConfig::on_input(1),

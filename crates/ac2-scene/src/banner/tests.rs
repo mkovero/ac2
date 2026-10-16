@@ -191,6 +191,7 @@ fn no_delay_estimate_says_why() {
     let mut m = Measurement {
         id: MeasId(1),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "tf".into(),
             kind: MeasKind::Transfer {
                 config: TransferConfig {

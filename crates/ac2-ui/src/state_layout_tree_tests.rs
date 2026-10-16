@@ -323,7 +323,7 @@ fn move_files_a_trace_under_another_measurement() {
     let moved = match r.as_slice() {
         [
             Request::Call {
-                cmd: Command::MeasUpdate { meas, config },
+                cmd: Command::MeasUpdate { meas, config, .. },
                 ..
             },
         ] => (*meas, config.kind.clone()),

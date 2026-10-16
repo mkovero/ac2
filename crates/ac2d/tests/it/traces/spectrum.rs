@@ -9,6 +9,7 @@ fn spectrum_fft_length_and_window_change_restart_it() {
     let mut r = rig("spec-fft");
     let (mut c2, sub) = connect(&r.h, &[b"d/2/spec"]);
     let spec = |fft_len, window| MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: "fft".into(),
         kind: MeasKind::Spectrum {
             config: SpectrumConfig {
@@ -30,10 +31,7 @@ fn spectrum_fft_length_and_window_change_restart_it() {
         .frame(T, |f| matches!(f.data, FrameData::Spec(_)))
         .expect("spec frame");
     let at_update = end_sample(&r.d);
-    let m = match c2.ok(Command::MeasUpdate {
-        meas: MeasId(2),
-        config: spec(1024, Window::FlatTop),
-    }) {
+    let m = match c2.update_ok(MeasId(2), spec(1024, Window::FlatTop)) {
         ReplyBody::Measurement(m) => m,
         other => panic!("{other:?}"),
     };
@@ -59,10 +57,7 @@ fn spectrum_fft_length_and_window_change_restart_it() {
     assert_eq!(live.meta.window, Window::FlatTop);
     // An out-of-range length is refused and the spectrum stays as it is.
     let e = c2
-        .call(Command::MeasUpdate {
-            meas: MeasId(2),
-            config: spec(131_072, Window::Hann),
-        })
+        .update(MeasId(2), spec(131_072, Window::Hann))
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid);
     assert!(e.msg.contains("power of two in 64..=65536"), "{e:?}");
@@ -78,6 +73,7 @@ fn spectrum_smoothing_live_and_captured() {
     let mut r = rig("spec-smoothing");
     let (mut c2, sub) = connect(&r.h, &[b"d/2/spec"]);
     let spec = |smoothing| MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: "fft".into(),
         kind: MeasKind::Spectrum {
             config: SpectrumConfig {
@@ -90,10 +86,7 @@ fn spectrum_smoothing_live_and_captured() {
     c2.ok(Command::MeasCreate { config: spec(None) });
     c2.ok(Command::MeasStart { meas: MeasId(2) });
     run(&mut r.d, 0.5);
-    let m = match c2.ok(Command::MeasUpdate {
-        meas: MeasId(2),
-        config: spec(Some(SmoothingFraction::Sixth)),
-    }) {
+    let m = match c2.update_ok(MeasId(2), spec(Some(SmoothingFraction::Sixth))) {
         ReplyBody::Measurement(m) => m,
         other => panic!("{other:?}"),
     };
@@ -207,6 +200,7 @@ fn multires_spectrum_live_and_captured() {
     let mut r = rig("spec-multires");
     let (mut c2, sub) = connect(&r.h, &[b"d/2/spec"]);
     let spec = |resolution, smoothing| MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: "multi".into(),
         kind: MeasKind::Spectrum {
             config: SpectrumConfig {
@@ -224,10 +218,7 @@ fn multires_spectrum_live_and_captured() {
     let multi = SpecResolution::Multi {
         grid: Resolution::TwentyFourth,
     };
-    let m = match c2.ok(Command::MeasUpdate {
-        meas: MeasId(2),
-        config: spec(multi, Some(SmoothingFraction::Sixth)),
-    }) {
+    let m = match c2.update_ok(MeasId(2), spec(multi, Some(SmoothingFraction::Sixth))) {
         ReplyBody::Measurement(m) => m,
         other => panic!("{other:?}"),
     };
@@ -272,9 +263,10 @@ fn multires_spectrum_live_and_captured() {
     assert_ne!(raw.mag_db, served.mag_db, "the capture is unsmoothed");
     // A FIFO deeper than the bands' memory bound is refused.
     let e = c2
-        .call(Command::MeasUpdate {
-            meas: MeasId(2),
-            config: MeasConfig {
+        .update(
+            MeasId(2),
+            MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: "multi".into(),
                 kind: MeasKind::Spectrum {
                     config: SpectrumConfig {
@@ -284,7 +276,7 @@ fn multires_spectrum_live_and_captured() {
                     },
                 },
             },
-        })
+        )
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid);
     assert!(e.msg.contains("multi-resolution"), "{e:?}");
@@ -314,6 +306,7 @@ fn spectrum_live_columns_are_the_captured_bins_maxima() {
     });
     c2.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "fft".into(),
             kind: MeasKind::Spectrum {
                 config: SpectrumConfig::on_input(1),

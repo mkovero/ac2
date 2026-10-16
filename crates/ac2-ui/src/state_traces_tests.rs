@@ -137,7 +137,7 @@ fn smoothing_set(r: &[Request]) -> (String, Option<Smoothing>) {
     match r {
         [
             Request::Call {
-                cmd: Command::MeasUpdate { meas, config },
+                cmd: Command::MeasUpdate { meas, config, .. },
                 ..
             },
         ] => match &config.kind {

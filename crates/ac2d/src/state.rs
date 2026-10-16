@@ -10,7 +10,8 @@ use std::time::Instant;
 
 use ac2_proto::event::{Change, Event, Patch, StateSnapshot};
 use ac2_proto::model::{
-    Autosave, AutosaveState, Generator, Session, State, TimingState, TimingStatus, WorkingSession,
+    Autosave, AutosaveState, Generator, Rig, Session, State, TimingState, TimingStatus,
+    WorkingSession,
 };
 use ac2_proto::units::{DaemonIncarnation, Dbfs, Rev, SessionEpoch};
 
@@ -70,6 +71,7 @@ impl Store {
                     saved_at: None,
                     recover: None,
                 },
+                rig: Rig::default(),
             },
             rev: Rev(0),
             replay: VecDeque::new(),
@@ -192,6 +194,7 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::Autosave(a) => s.autosave = a.clone(),
         Change::Recording(r) => s.recording = Some(r.clone()),
         Change::Working(w) => s.working = w.clone(),
+        Change::Rig(r) => s.rig = r.clone(),
     }
 }
 

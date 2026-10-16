@@ -319,6 +319,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         return Err(CliError::Usage("--name must not be empty".into()));
     }
     Ok(MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: n.name.clone(),
         kind,
     })

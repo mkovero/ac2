@@ -129,6 +129,7 @@ fn measurement_defaults_match_the_cli() {
         c.kind,
         MeasKind::Spl {
             config: SplConfig {
+                cue: None,
                 bands: None,
                 input: 1,
                 weighting: Weighting::A,
@@ -188,6 +189,7 @@ fn spectrum_and_rta_dialogs_set_averaging_and_edit_keeps_the_rest() {
     let m = Measurement {
         id: MeasId(7),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "Room".into(),
             kind: MeasKind::Rta {
                 config: RtaConfig {
@@ -249,6 +251,7 @@ fn a_spectrums_fft_size_and_window_are_editable() {
     let m = Measurement {
         id: MeasId(2),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "Mic".into(),
             kind: MeasKind::Spectrum {
                 config: SpectrumConfig {
@@ -447,6 +450,7 @@ fn resolution_in_the_transfer_and_sweep_dialogs() {
     let m = Measurement {
         id: MeasId(3),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "Main".into(),
             kind: MeasKind::Transfer {
                 config: TransferConfig {
@@ -493,6 +497,7 @@ fn resolution_in_the_transfer_and_sweep_dialogs() {
     let sm = Measurement {
         id: MeasId(4),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "Sweep 1".into(),
             kind: MeasKind::Sweep { config: c },
         },

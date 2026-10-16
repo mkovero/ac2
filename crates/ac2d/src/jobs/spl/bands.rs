@@ -168,7 +168,7 @@ impl BandMeter {
                     headroom: None,
                 };
                 Some(Win {
-                    spec: *spec,
+                    spec: spec.clone(),
                     seconds,
                     band,
                     limits: transfer.as_ref().map_or(own, |t| t.foh_limits(&own)),
@@ -180,7 +180,7 @@ impl BandMeter {
                 })
             })
             .collect();
-        let predicted = transfer.zip(cfg.predicted).and_then(|(t, spec)| {
+        let predicted = transfer.zip(cfg.predicted.clone()).and_then(|(t, spec)| {
             let seconds = cfg.predicted_seconds()?;
             let ch = [
                 (seconds, PredictedSecond::ESTIMATE),
@@ -220,7 +220,7 @@ impl BandMeter {
                     .iter()
                     .map(|w| (w.band, w.duration, w.weighting, w.limit, w.day_offset))
                     .collect::<Vec<_>>(),
-                c.predicted.map(|p| (p.duration, p.day, p.night)),
+                c.predicted.as_ref().map(|p| (p.duration, p.day, p.night)),
                 c.transfer.clone(),
             )
         };
@@ -235,10 +235,10 @@ impl BandMeter {
     /// Takes a configuration [`Self::same_windows`] allows.
     pub(super) fn set_light(&mut self, cfg: BandLeqConfig) {
         for (w, spec) in self.wins.iter_mut().zip(&cfg.windows) {
-            w.spec = *spec;
+            w.spec = spec.clone();
         }
-        if let (Some(p), Some(spec)) = (&mut self.predicted, cfg.predicted) {
-            p.spec = spec;
+        if let (Some(p), Some(spec)) = (&mut self.predicted, &cfg.predicted) {
+            p.spec = spec.clone();
         }
         self.cfg = cfg;
         self.fresh = true;

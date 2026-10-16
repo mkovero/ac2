@@ -420,9 +420,11 @@ mod tests {
         SavedMeasurement {
             id: MeasId(1),
             config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: "x".into(),
                 kind: MeasKind::Spl {
                     config: SplConfig {
+                        cue: None,
                         bands: None,
                         input: 0,
                         weighting: Weighting::A,
@@ -878,9 +880,11 @@ mod tests {
             vec![SavedMeasurement {
                 id: MeasId(1),
                 config: MeasConfig {
+                    scope: ac2_proto::model::MeasScope::Session,
                     name: "x".into(),
                     kind: MeasKind::Spl {
                         config: SplConfig {
+                            cue: None,
                             bands: None,
                             input: 0,
                             weighting: Weighting::A,

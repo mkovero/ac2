@@ -127,6 +127,7 @@ impl SplConfig {
     /// `input` with the given weightings, a C-weighted peak and the default Leq windows.
     pub fn on_input(input: u16, weighting: Weighting, time_weighting: TimeWeighting) -> Self {
         Self {
+            cue: None,
             input,
             weighting,
             time_weighting,
@@ -162,6 +163,7 @@ impl LeqWindow {
     /// A-weighted, `minutes` long, no limit.
     pub fn minutes(minutes: u32) -> Self {
         Self {
+            cue: None,
             duration: Seconds(f64::from(minutes) * 60.0),
             weighting: Weighting::A,
             limit: None,
@@ -246,8 +248,8 @@ impl LeqConfig {
         let bad = |p: &PeakLimit| {
             !(p.limit.0.is_finite() && p.warn_margin.0.is_finite() && p.warn_margin.0 >= 0.0)
         };
-        if [self.peaks.lcpeak, self.peaks.lafmax]
-            .iter()
+        if [&self.peaks.lcpeak, &self.peaks.lafmax]
+            .into_iter()
             .flatten()
             .any(bad)
         {
@@ -392,6 +394,7 @@ impl LeqPreset {
     pub fn peaks(self) -> PeakLimits {
         let p = |l: f64| {
             Some(PeakLimit {
+                cue: None,
                 limit: DbSpl(l),
                 warn_margin: Db(LeqWindow::DEFAULT_WARN_MARGIN_DB),
             })
@@ -420,9 +423,9 @@ impl LeqPreset {
         for p in presets.iter().map(|p| p.peaks()) {
             for q in PeakQuantity::ALL {
                 let slot = out.get_mut(q);
-                *slot = match (*slot, p.get(q)) {
-                    (Some(a), Some(b)) => Some(if b.limit.0 < a.limit.0 { b } else { a }),
-                    (a, b) => a.or(b),
+                *slot = match (slot.take(), p.get(q)) {
+                    (Some(a), Some(b)) => Some(if b.limit.0 < a.limit.0 { b.clone() } else { a }),
+                    (a, b) => a.or_else(|| b.cloned()),
                 };
             }
         }

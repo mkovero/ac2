@@ -11,7 +11,7 @@ use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Welcome}
 use crate::jobs::JobCmd;
 use crate::util::{perr, perr_detail};
 
-use super::validate::{not_a_sweep, smoothing_only, spl_in_place, validate_meas};
+use super::validate::{not_a_sweep, smoothing_only, spl_in_place, stale_meas, validate_meas};
 use super::{Control, DelaySource, cal, owners};
 
 impl Control {
@@ -93,6 +93,13 @@ impl Control {
             Command::ServerInfo => Ok(ReplyBody::Server(self.server_info())),
             Command::ServerAuthorize { name, key } => self.server_authorize(client, &name, &key),
             Command::ServerRevoke { name } => self.server_revoke(client, &name),
+            // todo: step 2 (monitor at start) and step 3 (OSC sender) of the rig monitor plan.
+            Command::OscTarget { .. }
+            | Command::OscTest { .. }
+            | Command::RigMonitorStart { .. } => Err(perr(
+                ErrorCode::Unsupported,
+                "the rig monitor and OSC cues are not implemented yet",
+            )),
             Command::GenStop => {
                 self.abort_sweep(SweepFailure::Stopped, "the stimulus was stopped");
                 self.stop_output();
@@ -133,9 +140,12 @@ impl Control {
                 self.ensure_spl_log(&m, None);
                 Ok(ReplyBody::Measurement(m))
             }
-            Command::MeasUpdate { meas, config } => {
+            Command::MeasUpdate { meas, base, config } => {
                 validate_meas(&config)?;
                 let mut m = self.meas(meas)?.clone();
+                if base != m.config_rev {
+                    return Err(stale_meas(meas, m.config_rev));
+                }
                 self.check_meas_owner(Some(meas), &config.kind)?;
                 self.check_operand_update(meas, &config.kind)?;
                 if owners::owner_only(&m.config, &config) {

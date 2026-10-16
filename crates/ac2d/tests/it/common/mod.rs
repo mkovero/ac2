@@ -13,7 +13,7 @@ use ac2_proto::model::{
     DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, Resolution, SessionConfig, SplConfig,
     TfAveraging, TransferConfig,
 };
-use ac2_proto::units::RequestId;
+use ac2_proto::units::{MeasId, RequestId, Rev};
 use ac2_proto::{
     Command, DataMessage, Event, ProtoError, Reply, ReplyBody, Request, decode_data_message,
     decode_reply, encode_request,
@@ -137,6 +137,7 @@ pub fn session(loopback: bool) -> SessionConfig {
 
 pub fn transfer(name: &str) -> MeasConfig {
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: name.into(),
         kind: MeasKind::Transfer {
             config: TransferConfig {
@@ -153,9 +154,11 @@ pub fn transfer(name: &str) -> MeasConfig {
 
 pub fn spl(name: &str, input: u16) -> MeasConfig {
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: name.into(),
         kind: MeasKind::Spl {
             config: SplConfig {
+                cue: None,
                 bands: None,
                 input,
                 weighting: ac2_proto::model::Weighting::Z,
@@ -234,6 +237,43 @@ impl Client {
         self.call(cmd)
             .unwrap_or_else(|e| panic!("{name} failed: {e:?}"))
     }
+
+    /// The measurement's current `config_rev`: the `base` of an edit of it.
+    pub fn config_rev(&mut self, meas: MeasId) -> Rev {
+        let ReplyBody::Snapshot(s) = self.ok(Command::StateSnapshot) else {
+            panic!("state.snapshot answered with something else")
+        };
+        let m = s.state.measurements.iter().find(|m| m.id == meas);
+        m.unwrap_or_else(|| panic!("no measurement {meas}"))
+            .config_rev
+    }
+
+    /// `meas.update` on the measurement's current configuration.
+    pub fn update(&mut self, meas: MeasId, config: MeasConfig) -> Result<ReplyBody, ProtoError> {
+        let base = self.config_rev(meas);
+        self.call(Command::MeasUpdate { meas, base, config })
+    }
+
+    /// A `meas.update` that must succeed.
+    pub fn update_ok(&mut self, meas: MeasId, config: MeasConfig) -> ReplyBody {
+        self.update(meas, config)
+            .unwrap_or_else(|e| panic!("meas.update failed: {e:?}"))
+    }
+}
+
+/// `meas.update` through the async client on the measurement's current configuration (read
+/// from a snapshot, not the mirror, which may not have the latest commit yet).
+pub async fn meas_update(
+    c: &ac2_client::Client,
+    meas: MeasId,
+    config: MeasConfig,
+) -> Result<ReplyBody, ac2_client::ClientError> {
+    let s = c.snapshot().await?;
+    let m = s.state.measurements.iter().find(|m| m.id == meas);
+    let base = m
+        .unwrap_or_else(|| panic!("no measurement {meas}"))
+        .config_rev;
+    c.call(Command::MeasUpdate { meas, base, config }).await
 }
 
 /// A data subscriber.

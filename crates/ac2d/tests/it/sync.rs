@@ -153,10 +153,7 @@ fn snapshot_events_missed_final_patch_and_expired_replay() {
             config: transfer(&format!("m{i}")),
         });
     }
-    b.ok(Command::MeasUpdate {
-        meas: MeasId(2),
-        config: spl("now an spl", 0),
-    });
+    b.update_ok(MeasId(2), spl("now an spl", 0));
     b.ok(Command::MeasDelete {
         meas: MeasId(1),
         traces: ac2_proto::model::OwnedTraces::Keep,
@@ -277,6 +274,51 @@ fn request_dedup_and_expect_rev() {
     read.expect_rev = Some(Rev(0));
     assert!(c.call_req(read).result.is_ok());
     h.shutdown();
+}
+
+/// Two clients edit the same measurement: the second edit, made on the config the first
+/// replaced, is refused with the current `config_rev` instead of silently undoing it.
+#[test]
+fn a_stale_meas_update_is_a_conflict() {
+    init_log();
+    let h = Daemon::start(config(manual_rig(), inproc("stale-edit"))).unwrap();
+    let (mut a, _s) = connect(&h, &[]);
+    let mut b = Client::connect(h.context(), h.ctrl_endpoint());
+    let ReplyBody::Measurement(m) = a.ok(Command::MeasCreate {
+        config: spl("FOH", 1),
+    }) else {
+        panic!("measurement")
+    };
+    let ReplyBody::Measurement(after_a) = a.ok(Command::MeasUpdate {
+        meas: m.id,
+        base: m.config_rev,
+        config: spl("FOH by A", 1),
+    }) else {
+        panic!("measurement")
+    };
+    assert!(after_a.config_rev > m.config_rev);
+    let e = b
+        .call(Command::MeasUpdate {
+            meas: m.id,
+            base: m.config_rev,
+            config: spl("FOH by B", 1),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Conflict, "{e:?}");
+    assert_eq!(
+        e.detail,
+        Some(ErrorDetail::Conflict {
+            rev: after_a.config_rev
+        })
+    );
+    let (s, _, _) = snapshot(&mut b);
+    assert_eq!(s.measurements[0].config.name, "FOH by A");
+    // Re-read, then the edit goes through.
+    b.ok(Command::MeasUpdate {
+        meas: m.id,
+        base: after_a.config_rev,
+        config: spl("FOH by B", 1),
+    });
 }
 
 #[test]

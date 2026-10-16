@@ -196,7 +196,9 @@ fn rig(ep: &Endpoints, cli: &Cli) -> R<(Driver, Driver)> {
     let spl = desk.st.measurements()[0].clone();
     cli.call(Command::MeasUpdate {
         meas: spl.id,
+        base: spl.config_rev,
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: SPL.into(),
             kind: spl.config.kind.clone(),
         },

@@ -462,6 +462,7 @@ pub fn apply_change(s: &mut State, c: Change) {
         Change::Autosave(a) => s.autosave = a,
         Change::Working(w) => s.working = w,
         Change::Recording(r) => s.recording = Some(r),
+        Change::Rig(r) => s.rig = r,
     }
 }
 

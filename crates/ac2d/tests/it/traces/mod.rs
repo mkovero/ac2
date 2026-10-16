@@ -99,6 +99,7 @@ fn math_capture(r: &mut Rig, a: TraceId, op: MathOp, b: TraceId, name: &str) -> 
     let c = &mut r.c;
     let m = match c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: name.into(),
             kind: MeasKind::Math {
                 config: MathConfig::of(

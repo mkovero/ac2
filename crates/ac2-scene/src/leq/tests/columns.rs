@@ -37,7 +37,7 @@ fn columns_are_the_default_and_go_shortest_left() {
     let mut c2 = c.clone();
     c2.windows[1] = LeqWindow {
         weighting: Weighting::C,
-        ..c2.windows[0]
+        ..c2.windows[0].clone()
     };
     let tiles = leq_tiles(&c2, &f);
     let v = LeqView {

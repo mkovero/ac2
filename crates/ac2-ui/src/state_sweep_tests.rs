@@ -620,7 +620,7 @@ fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
             },
         ] => {
             assert_eq!((*meas, label.as_str()), (MeasId(5), "Sweep 1"));
-            let Some(MeasKind::Sweep { config }) = update.as_ref().map(|u| &u.kind) else {
+            let Some(MeasKind::Sweep { config }) = update.as_ref().map(|(_, u)| &u.kind) else {
                 panic!("{update:?}");
             };
             assert_eq!(config.level, Dbfs(-51.0));

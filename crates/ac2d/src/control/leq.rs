@@ -581,11 +581,15 @@ impl Control {
                 .count()
         );
         let mut config = m.config.clone();
+        let base = m.config_rev;
         if let MeasKind::Spl { config: c } = &mut config.kind
             && let Some(b) = &mut c.bands
         {
             b.transfer = Some(set);
         }
-        self.execute(client, ac2_proto::Command::MeasUpdate { meas, config })
+        self.execute(
+            client,
+            ac2_proto::Command::MeasUpdate { meas, base, config },
+        )
     }
 }

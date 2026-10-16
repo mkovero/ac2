@@ -28,6 +28,7 @@ fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
     Measurement {
         id: MeasId(id),
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: name.into(),
             kind,
         },

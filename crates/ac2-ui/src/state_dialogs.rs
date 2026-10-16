@@ -42,7 +42,7 @@ impl AppState {
                     let req = match edit {
                         Some(meas) => Request::Call {
                             what: format!("{} changed: its next run uses it", config.name),
-                            cmd: Command::MeasUpdate { meas, config },
+                            cmd: self.meas_update(meas, config),
                         },
                         None => {
                             self.sweep_pane_on_create = Some(config.name.clone());
@@ -77,23 +77,27 @@ impl AppState {
         }
         let edit = f.edits();
         let transfer = f.kind == FormKind::Transfer && edit.is_none();
-        let r = f.meas_config(open.as_ref()).map(|config| match edit {
+        let config = match f.meas_config(open.as_ref()) {
+            Ok(c) => c,
+            Err(e) => {
+                f.error = Some(e);
+                return;
+            }
+        };
+        let req = match edit {
             Some(meas) => Request::Call {
                 what: format!("{} changed", config.name),
-                cmd: Command::MeasUpdate { meas, config },
+                cmd: self.meas_update(meas, config),
             },
-            None => Request::CreateMeas { config },
-        });
-        match r {
-            Ok(req) => {
-                if transfer && let Request::CreateMeas { config } = &req {
+            None => {
+                if transfer {
                     self.stack_on_create = Some(config.name.clone());
                 }
-                out.push(req);
-                self.overlay = Overlay::None;
+                Request::CreateMeas { config }
             }
-            Err(e) => f.error = Some(e),
-        }
+        };
+        out.push(req);
+        self.overlay = Overlay::None;
     }
 
     /// Keys of the calibrations view.

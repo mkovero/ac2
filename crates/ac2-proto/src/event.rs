@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::model::{
     Autosave, CalEntry, CalKey, Generator, InputSetup, Measurement, Mic, OutputSetup, RecordingRun,
-    Session, SplLog, State, SweepRun, TimingStatus, TraceMeta, WorkingSession,
+    Rig, Session, SplLog, State, SweepRun, TimingStatus, TraceMeta, WorkingSession,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId};
 
@@ -62,6 +62,8 @@ pub enum Change {
     Recording(RecordingRun),
     /// The working state's session and unsaved changes (never deleted).
     Working(WorkingSession),
+    /// Rig settings, OSC sending and cue states (never deleted).
+    Rig(Rig),
 }
 
 /// One committed state change.
@@ -176,6 +178,13 @@ pub enum WireEvent {
         /// Payload.
         payload: WorkingSession,
     },
+    /// [`Change::Rig`].
+    Rig {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Rig,
+    },
 }
 
 impl From<Event> for WireEvent {
@@ -196,6 +205,7 @@ impl From<Event> for WireEvent {
             Change::Autosave(payload) => Self::Autosave { rev, payload },
             Change::Recording(payload) => Self::Recording { rev, payload },
             Change::Working(payload) => Self::Working { rev, payload },
+            Change::Rig(payload) => Self::Rig { rev, payload },
         }
     }
 }
@@ -217,6 +227,7 @@ impl From<WireEvent> for Event {
             WireEvent::Autosave { rev, payload } => (rev, Change::Autosave(payload)),
             WireEvent::Recording { rev, payload } => (rev, Change::Recording(payload)),
             WireEvent::Working { rev, payload } => (rev, Change::Working(payload)),
+            WireEvent::Rig { rev, payload } => (rev, Change::Rig(payload)),
         };
         Event { rev, change }
     }
@@ -240,6 +251,7 @@ impl Change {
             Self::Autosave(_) => "autosave",
             Self::Recording(_) => "recording",
             Self::Working(_) => "working",
+            Self::Rig(_) => "rig",
         }
     }
 }

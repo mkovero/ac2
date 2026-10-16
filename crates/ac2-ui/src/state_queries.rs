@@ -21,6 +21,19 @@ impl AppState {
         self.daemon()?.measurements.iter().find(|m| m.id == id)
     }
 
+    /// `meas.update` of `meas` to `config`, made on the configuration the mirror holds (the
+    /// daemon refuses it with `conflict` when another client changed it since). The
+    /// measurement stays the session's or the rig's, as it is.
+    pub fn meas_update(&self, meas: MeasId, mut config: ac2_proto::model::MeasConfig) -> Command {
+        let m = self.meas(meas);
+        if let Some(m) = m {
+            config.scope = m.config.scope;
+        }
+        // No such measurement: the daemon answers `not_found` before it looks at the base.
+        let base = m.map_or(ac2_proto::units::Rev(0), |m| m.config_rev);
+        Command::MeasUpdate { meas, base, config }
+    }
+
     pub fn selected_meas(&self) -> Option<&Measurement> {
         self.meas(self.selected?)
     }

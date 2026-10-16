@@ -110,6 +110,9 @@ pub(crate) struct ReplaceRead {
 }
 
 /// What a worker reports back.
+// One message per worker job, moved once through the channel and never stored in bulk:
+// boxing the larger variants would buy nothing.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum FileDone {
     List(Result<ReplyBody, ProtoError>),
     Save(Result<Manifest, ProtoError>),

@@ -1,13 +1,16 @@
 //! Every ctrl command and its wire name, mutation flag and lease token.
 
+use std::net::SocketAddr;
+
 use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
     AverageMethod, BackendKind, CalKey, ColourFamily, DelayPick, DelayReference, DeviceId,
     ElectricalConnection, ExportFormat, FinderBand, GeneratorDesired, ImportFormat, ImportRole,
-    InputSetup, IrImport, MeasConfig, MicCurveId, MicLoading, OutputSetup, OwnedTraces, PaneLayout,
-    RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef, SplLogWhich, TraceEdit,
+    InputSetup, IrImport, MeasConfig, MicCurveId, MicLoading, OscMessage, OutputSetup, OwnedTraces,
+    PaneLayout, RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef, SplLogWhich,
+    TraceEdit,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, Rev, Seconds, TraceId, TransferId,
@@ -145,6 +148,34 @@ pub enum Command {
         confirm_raise: bool,
     },
 
+    // -- rig / osc ----------------------------------------------------------------------
+    /// Set where OSC cues go (`rig.osc_target`), or stop sending (`None`). Kept by the
+    /// daemon across restarts.
+    #[serde(rename = "osc.target")]
+    OscTarget {
+        /// The `rig.rev` the edit was made on; another is refused with `conflict`.
+        base: Rev,
+        /// An IP literal and port (no name lookup); `None`: send nowhere.
+        #[serde(with = "crate::model::opt_addr")]
+        addr: Option<SocketAddr>,
+    },
+    /// Send one message to the OSC target now, to check the receiver (setup). Refused
+    /// (`invalid`) without a target; `append_level` appends 0 dB SPL.
+    #[serde(rename = "osc.test")]
+    OscTest {
+        /// Message.
+        msg: OscMessage,
+    },
+    /// Whether the daemon reopens the last session's device capture-only when it starts,
+    /// so the rig measurements meter with no client connected (`rig.monitor_at_start`).
+    #[serde(rename = "rig.monitor_start")]
+    RigMonitorStart {
+        /// The `rig.rev` the edit was made on; another is refused with `conflict`.
+        base: Rev,
+        /// On or off.
+        on: bool,
+    },
+
     // -- meas ---------------------------------------------------------------------------
     /// Create a measurement.
     #[serde(rename = "meas.create")]
@@ -157,6 +188,9 @@ pub enum Command {
     MeasUpdate {
         /// Measurement.
         meas: MeasId,
+        /// The `config_rev` the edit was made on; another (someone changed it since) is
+        /// refused with `conflict`, and the client re-reads it.
+        base: Rev,
         /// New configuration.
         config: MeasConfig,
     },
@@ -687,6 +721,9 @@ impl Command {
             Self::GenRelease { .. } => "gen.release",
             Self::GenStop => "gen.stop",
             Self::GenCeiling { .. } => "gen.ceiling",
+            Self::OscTarget { .. } => "osc.target",
+            Self::OscTest { .. } => "osc.test",
+            Self::RigMonitorStart { .. } => "rig.monitor_start",
             Self::MeasCreate { .. } => "meas.create",
             Self::MeasUpdate { .. } => "meas.update",
             Self::MeasColour { .. } => "meas.colour",

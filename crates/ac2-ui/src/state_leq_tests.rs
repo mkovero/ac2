@@ -61,7 +61,7 @@ fn leq_windows_from_the_keyboard() {
         .iter()
         .find_map(|r| match r {
             Request::Call {
-                cmd: Command::MeasUpdate { meas, config },
+                cmd: Command::MeasUpdate { meas, config, .. },
                 what,
             } => Some((*meas, config.clone(), what.clone())),
             _ => None,

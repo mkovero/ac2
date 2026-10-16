@@ -127,6 +127,7 @@ async fn slow_bands_set_watch_and_transfer() {
     let ReplyBody::Measurement(m) = c
         .call(Command::MeasCreate {
             config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: "FOH SPL".into(),
                 kind: MeasKind::Spl {
                     config: SplConfig::on_input(1, Weighting::A, TimeWeighting::Fast),

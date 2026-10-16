@@ -413,11 +413,18 @@ impl AppState {
         if let Signal::Ess { sweep } = self.stimulus.signal {
             c.sweep = sweep;
         }
+        let base = self
+            .meas(plan.meas)
+            .map_or(ac2_proto::units::Rev(0), |m| m.config_rev);
         let update = (c != plan.config).then(|| {
-            Box::new(ac2_proto::model::MeasConfig {
-                name: plan.name.clone(),
-                kind: MeasKind::Sweep { config: c },
-            })
+            (
+                base,
+                Box::new(ac2_proto::model::MeasConfig {
+                    name: plan.name.clone(),
+                    kind: MeasKind::Sweep { config: c },
+                    scope: ac2_proto::model::MeasScope::Session,
+                }),
+            )
         });
         let (meas, label) = (plan.meas, plan.name.clone());
         self.stimulus.phase = StimPhase::FireRequested;

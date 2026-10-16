@@ -388,11 +388,8 @@ impl AppState {
                         if let MeasKind::Math { config: mc } = &mut config.kind {
                             mc.owner = owner;
                         }
-                        self.call(
-                            out,
-                            Command::MeasUpdate { meas: id, config },
-                            format!("{} moved to {place}", c.label),
-                        );
+                        let cmd = self.meas_update(id, config);
+                        self.call(out, cmd, format!("{} moved to {place}", c.label));
                     }
                 }
             }

@@ -116,6 +116,8 @@ pub struct SplConfig {
     /// 1/3-octave band windows against per-band limits (`docs/design/band-leq.md`);
     /// `None`: off.
     pub bands: Option<Box<super::BandLeqConfig>>,
+    /// Cue for the meter as a whole: the worst state of all its limits.
+    pub cue: Option<Box<super::OscCue>>,
 }
 
 /// The level difference from where the mic is to where a limit applies (the loudest
@@ -170,17 +172,19 @@ impl PeakQuantity {
 
 /// A limit on the highest LCpeak or LAFmax of any second: over as soon as one second
 /// exceeds it (`docs/design/leq.md`, *Peak limits*).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PeakLimit {
     /// Limit; judged only while the meter reads dB SPL.
     pub limit: DbSpl,
     /// "Near" within this much below the limit (≥ 0).
     pub warn_margin: Db,
+    /// Cue sent when its state changes.
+    pub cue: Option<Box<super::OscCue>>,
 }
 
 /// The peak limits of an SPL meter.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PeakLimits {
     /// On LCpeak.
@@ -191,10 +195,10 @@ pub struct PeakLimits {
 
 impl PeakLimits {
     /// The limit on `q`.
-    pub fn get(&self, q: PeakQuantity) -> Option<PeakLimit> {
+    pub fn get(&self, q: PeakQuantity) -> Option<&PeakLimit> {
         match q {
-            PeakQuantity::LcPeak => self.lcpeak,
-            PeakQuantity::LafMax => self.lafmax,
+            PeakQuantity::LcPeak => self.lcpeak.as_ref(),
+            PeakQuantity::LafMax => self.lafmax.as_ref(),
         }
     }
 
@@ -208,7 +212,7 @@ impl PeakLimits {
 }
 
 /// One rolling Leq window of an SPL meter.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LeqWindow {
     /// Length: whole seconds, 1 s … [`LeqWindow::MAX_SECONDS`].
@@ -219,6 +223,8 @@ pub struct LeqWindow {
     pub limit: Option<DbSpl>,
     /// The window is "near" within this much below the limit (≥ 0).
     pub warn_margin: Db,
+    /// Cue sent when its state changes.
+    pub cue: Option<Box<super::OscCue>>,
 }
 
 /// The Leq windows of an SPL meter and the horizon of their headroom figure.
@@ -591,6 +597,20 @@ pub struct MeasConfig {
     pub name: String,
     /// Analysis.
     pub kind: MeasKind,
+    /// Whose it is: the working session's, or the rig's (SPL meters only).
+    pub scope: MeasScope,
+}
+
+/// Whose a measurement is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MeasScope {
+    /// The working session's: saved in session files, replaced by a load.
+    #[default]
+    Session,
+    /// The rig's: kept in the daemon's rig settings, never in a session file; a load or a
+    /// new session leaves it running.
+    Rig,
 }
 
 /// The colour family a measurement's curves are drawn in, chosen by the operator in place

@@ -12,7 +12,8 @@ pub(super) enum StimOp {
     Detect(crate::session_dialog::DetectRequest),
     Sweep {
         meas: MeasId,
-        update: Option<Box<ac2_proto::model::MeasConfig>>,
+        /// With the `config_rev` it was made on.
+        update: Option<(ac2_proto::units::Rev, Box<ac2_proto::model::MeasConfig>)>,
     },
 }
 
@@ -44,10 +45,11 @@ pub(super) async fn stimulus_task(
                     StimOp::Stop => stop(&client, &mut lease).await,
                     StimOp::Sweep { meas, update } => match &lease {
                         Some(l) => match async {
-                            if let Some(config) = update {
+                            if let Some((base, config)) = update {
                                 client
                                     .call(Command::MeasUpdate {
                                         meas,
+                                        base,
                                         config: *config,
                                     })
                                     .await?;

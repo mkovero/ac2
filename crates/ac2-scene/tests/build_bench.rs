@@ -55,6 +55,7 @@ fn time(n: usize, mut f: impl FnMut()) -> Duration {
 
 fn leq_window(minutes: f64, limit: f64) -> LeqWindow {
     LeqWindow {
+        cue: None,
         duration: Seconds(minutes * 60.0),
         weighting: Weighting::A,
         limit: Some(DbSpl(limit)),

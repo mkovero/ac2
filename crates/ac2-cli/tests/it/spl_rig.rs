@@ -87,9 +87,11 @@ async fn slow_spl_watch_reads_its_input_on_a_fresh_meter() {
     let ReplyBody::Measurement(stale) = c
         .call(Command::MeasCreate {
             config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: "spl-in2".into(),
                 kind: MeasKind::Spl {
                     config: SplConfig {
+                        cue: None,
                         bands: None,
                         input: 1,
                         weighting: Weighting::Z,
@@ -209,6 +211,7 @@ async fn spl_set_changes_the_weightings_in_place() {
     let ReplyBody::Measurement(m) = c
         .call(Command::MeasCreate {
             config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: "FOH SPL".into(),
                 kind: MeasKind::Spl {
                     config: SplConfig::on_input(1, Weighting::A, TimeWeighting::Fast),

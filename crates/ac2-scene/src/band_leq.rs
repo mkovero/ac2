@@ -496,7 +496,10 @@ pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame, chrome: PlotChrome) 
         limits_from: limits_from_text(m.limits_from, place),
         correction: (m.correction.0 != 0.0)
             .then(|| format!("§13 correction {} dB", format::signed(m.correction.0, 0))),
-        predicted: m.predicted.map(|p| predicted_text(&p, place, chrome)),
+        predicted: m
+            .predicted
+            .as_ref()
+            .map(|p| predicted_text(p, place, chrome)),
     }
 }
 

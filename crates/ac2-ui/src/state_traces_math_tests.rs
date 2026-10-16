@@ -241,7 +241,7 @@ fn math_channel_edit() {
     let r = t.key("Enter");
     let [
         Request::Call {
-            cmd: Command::MeasUpdate { meas, config },
+            cmd: Command::MeasUpdate { meas, config, .. },
             ..
         },
     ] = r.as_slice()
@@ -300,7 +300,7 @@ fn edit_meas_on_a_spectrum_changes_its_averaging_and_keeps_the_rest() {
     let r = t.key("Enter");
     let [
         Request::Call {
-            cmd: Command::MeasUpdate { meas, config },
+            cmd: Command::MeasUpdate { meas, config, .. },
             what,
         },
     ] = r.as_slice()

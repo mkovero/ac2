@@ -43,6 +43,7 @@ fn session_save_load_round_trip() {
     // sweep measurement (settings only) owning nothing yet.
     c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "pre ÷ target".into(),
             kind: MeasKind::Math {
                 config: MathConfig::of(
@@ -59,6 +60,7 @@ fn session_save_load_round_trip() {
     });
     c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "Genelec 1 m".into(),
             kind: MeasKind::Sweep {
                 config: SweepConfig {

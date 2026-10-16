@@ -26,6 +26,7 @@ fn owners_capture_move_and_delete() {
     // A math channel made on the measurement: listed and captured under it.
     let math = match c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "pre ÷ post".into(),
             kind: MeasKind::Math {
                 config: MathConfig::of(
@@ -85,6 +86,7 @@ fn owners_capture_move_and_delete() {
     let e = c
         .call(Command::MeasCreate {
             config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: "nested".into(),
                 kind: MeasKind::Math {
                     config: under_math.clone(),
@@ -98,9 +100,10 @@ fn owners_capture_move_and_delete() {
     let MeasKind::Math { config } = &math.config.kind else {
         unreachable!()
     };
-    let moved = match c.ok(Command::MeasUpdate {
-        meas: math.id,
-        config: MeasConfig {
+    let moved = match c.update_ok(
+        math.id,
+        MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: math.config.name.clone(),
             kind: MeasKind::Math {
                 config: MathConfig {
@@ -109,7 +112,7 @@ fn owners_capture_move_and_delete() {
                 },
             },
         },
-    }) {
+    ) {
         ReplyBody::Measurement(m) => m,
         other => panic!("{other:?}"),
     };
@@ -122,10 +125,7 @@ fn owners_capture_move_and_delete() {
     assert_eq!(moved.config_rev, before_rev);
     assert!(moved.running);
     // Back under the measurement for the delete below.
-    c.ok(Command::MeasUpdate {
-        meas: math.id,
-        config: math.config.clone(),
-    });
+    c.update_ok(math.id, math.config.clone());
 
     // A second measurement and a math channel elsewhere computing from one of its traces.
     c.ok(Command::MeasCreate {
@@ -149,6 +149,7 @@ fn owners_capture_move_and_delete() {
     };
     let user = match c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "side ÷ avg".into(),
             kind: MeasKind::Math { config: under_math },
         },

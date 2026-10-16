@@ -50,6 +50,7 @@ pub fn demo_session() -> SessionConfig {
 /// defaults of `ac2 meas new tf`.
 pub fn demo_measurement() -> MeasConfig {
     MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
         name: "demo".into(),
         kind: MeasKind::Transfer {
             config: TransferConfig::with_inputs(0, 1),

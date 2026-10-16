@@ -8,6 +8,7 @@
     "id": 1,
     "config": {
      "name": "Main L",
+     "scope": "session",
      "kind": {
       "type": "transfer",
       "config": {
@@ -235,6 +236,7 @@
     "id": 4,
     "config": {
      "name": "FOH SPL",
+     "scope": "session",
      "kind": {
       "type": "spl",
       "config": {
@@ -248,20 +250,23 @@
           "duration": 60.0,
           "weighting": "a",
           "limit": null,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "duration": 1800.0,
           "weighting": "a",
           "limit": 99.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          }
         ],
         "horizon": 60.0,
         "peaks": {
          "lcpeak": {
           "limit": 135.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          "lafmax": null
         }
@@ -278,7 +283,8 @@
           "weighting": "z",
           "limit": 74.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 25.0,
@@ -286,7 +292,8 @@
           "weighting": "z",
           "limit": 64.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 31.5,
@@ -294,7 +301,8 @@
           "weighting": "z",
           "limit": 56.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 40.0,
@@ -302,7 +310,8 @@
           "weighting": "z",
           "limit": 49.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 50.0,
@@ -310,7 +319,8 @@
           "weighting": "z",
           "limit": 44.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 63.0,
@@ -318,7 +328,8 @@
           "weighting": "z",
           "limit": 42.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 80.0,
@@ -326,7 +337,8 @@
           "weighting": "z",
           "limit": 40.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 100.0,
@@ -334,7 +346,8 @@
           "weighting": "z",
           "limit": 38.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 125.0,
@@ -342,7 +355,8 @@
           "weighting": "z",
           "limit": 36.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 160.0,
@@ -350,7 +364,8 @@
           "weighting": "z",
           "limit": 34.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 200.0,
@@ -358,7 +373,8 @@
           "weighting": "z",
           "limit": 32.0,
           "day_offset": 5.0,
-          "warn_margin": 3.0
+          "warn_margin": 3.0,
+          "cue": null
          },
          {
           "band": 1000.0,
@@ -366,14 +382,52 @@
           "weighting": "a",
           "limit": 30.5,
           "day_offset": null,
-          "warn_margin": 2.0
+          "warn_margin": 2.0,
+          "cue": {
+           "ok": {
+            "path": "/light/red",
+            "args": [
+             {
+              "type": "int",
+              "value": 0
+             }
+            ],
+            "append_level": false
+           },
+           "near": {
+            "path": "/light/red",
+            "args": [
+             {
+              "type": "float",
+              "value": 0.5
+             },
+             {
+              "type": "str",
+              "value": "near"
+             }
+            ],
+            "append_level": false
+           },
+           "over": {
+            "path": "/light/red",
+            "args": [
+             {
+              "type": "int",
+              "value": 1
+             }
+            ],
+            "append_level": true
+           },
+           "fault": null
+          }
          }
         ],
         "predicted": {
          "duration": 3600.0,
          "day": null,
          "night": 25.0,
-         "warn_margin": 3.0
+         "warn_margin": 3.0,
+         "cue": null
         },
         "correction": {
          "impulse": "plus5",
@@ -475,6 +529,43 @@
           }
          ]
         }
+       },
+       "cue": {
+        "ok": {
+         "path": "/light/red",
+         "args": [
+          {
+           "type": "int",
+           "value": 0
+          }
+         ],
+         "append_level": false
+        },
+        "near": {
+         "path": "/light/red",
+         "args": [
+          {
+           "type": "float",
+           "value": 0.5
+          },
+          {
+           "type": "str",
+           "value": "near"
+          }
+         ],
+         "append_level": false
+        },
+        "over": {
+         "path": "/light/red",
+         "args": [
+          {
+           "type": "int",
+           "value": 1
+          }
+         ],
+         "append_level": true
+        },
+        "fault": null
        }
       }
      }
@@ -497,6 +588,7 @@
     "id": 6,
     "config": {
      "name": "FOH average",
+     "scope": "session",
      "kind": {
       "type": "math",
       "config": {
@@ -697,6 +789,7 @@
     "id": 7,
     "config": {
      "name": "Genelec 1 m",
+     "scope": "session",
      "kind": {
       "type": "sweep",
       "config": {
@@ -769,6 +862,37 @@
    "dirty": false,
    "saved_at": null,
    "recover": null
+  }
+ },
+ {
+  "kind": "rig",
+  "rev": 68,
+  "payload": {
+   "rev": 38,
+   "osc_target": "192.168.9.20:9000",
+   "monitor_at_start": true,
+   "osc": {
+    "sent": 12,
+    "last_error": "Connection refused (os error 111)"
+   },
+   "cues": [
+    {
+     "meas": 4,
+     "subject": {
+      "type": "meter"
+     },
+     "state": "over"
+    },
+    {
+     "meas": 4,
+     "subject": {
+      "type": "window",
+      "duration": 1800.0,
+      "weighting": "a"
+     },
+     "state": "near"
+    }
+   ]
   }
  },
  {

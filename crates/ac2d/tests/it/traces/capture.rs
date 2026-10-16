@@ -195,6 +195,7 @@ fn capture_average_math_export_import() {
         let e = c
             .call(Command::MeasCreate {
                 config: MeasConfig {
+                    scope: ac2_proto::model::MeasScope::Session,
                     name: "x".into(),
                     kind: MeasKind::Math {
                         config: MathConfig::of(

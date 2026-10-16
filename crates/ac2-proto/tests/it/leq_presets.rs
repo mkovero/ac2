@@ -148,6 +148,6 @@ fn presets_carry_their_peak_limits() {
     }
     // Together: both quantities.
     let both = LeqPreset::peaks_of(&[LeqPreset::Din15905, LeqPreset::Swiss100]);
-    assert_eq!(both.lcpeak.map(|l| l.limit), Some(DbSpl(135.0)));
-    assert_eq!(both.lafmax.map(|l| l.limit), Some(DbSpl(125.0)));
+    assert_eq!(both.lcpeak.as_ref().map(|l| l.limit), Some(DbSpl(135.0)));
+    assert_eq!(both.lafmax.as_ref().map(|l| l.limit), Some(DbSpl(125.0)));
 }

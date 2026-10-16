@@ -126,10 +126,7 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
     if let MeasKind::Transfer { config } = &mut m.kind {
         config.resolution = Resolution::NinetySixth;
     }
-    c.ok(Command::MeasUpdate {
-        meas: MeasId(1),
-        config: m,
-    });
+    c.update_ok(MeasId(1), m);
     let f = run_tf(&mut d, &sub, 0.5, rev + 1);
     let t = tf(&f);
     assert_eq!(t.mag.len(), 960);

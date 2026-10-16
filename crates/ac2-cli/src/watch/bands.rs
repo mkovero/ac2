@@ -210,7 +210,7 @@ pub async fn bands(
                     "limits_from": meta.limits_from,
                     "bands_hz": bands_hz,
                     "worst": worst,
-                    "predicted": meta.predicted.map(|p| json!({
+                    "predicted": meta.predicted.as_ref().map(|p| json!({
                         "duration_s": p.duration.0,
                         "estimate": p.estimate.is_finite().then_some(p.estimate),
                         "at_most": p.at_most.is_finite().then_some(p.at_most),

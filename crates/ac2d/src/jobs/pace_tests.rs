@@ -473,6 +473,7 @@ fn spl() -> Spl {
     Spl::new(
         MeasId(1),
         SplConfig {
+            cue: None,
             bands: None,
             input: 0,
             weighting: Weighting::Z,

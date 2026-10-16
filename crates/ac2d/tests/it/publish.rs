@@ -210,6 +210,7 @@ fn a_slow_spectrum_goes_when_it_is_formed() {
     });
     c.ok(Command::MeasCreate {
         config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: "spectrum".into(),
             kind: MeasKind::Spectrum {
                 config: SpectrumConfig {

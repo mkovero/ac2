@@ -591,6 +591,7 @@ impl Form {
             return Err("type a name".into());
         }
         Ok(MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
             name: name.to_owned(),
             kind: MeasKind::Math { config },
         })
@@ -644,6 +645,7 @@ mod tests {
         Measurement {
             id: MeasId(id),
             config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
                 name: name.into(),
                 kind,
             },

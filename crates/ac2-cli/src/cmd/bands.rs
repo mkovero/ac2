@@ -151,7 +151,7 @@ pub(crate) fn apply(
                     c.windows
                         .iter()
                         .find(|x| x.same_as(&new))
-                        .copied()
+                        .cloned()
                         .unwrap_or(new),
                 );
             }
@@ -242,7 +242,9 @@ async fn set(cli: &Cli, s: &BandsSet, out: &mut Out<'_>) -> Result<(), CliError>
     let r = c
         .call(Command::MeasUpdate {
             meas: m.id,
+            base: m.config_rev,
             config: MeasConfig {
+                scope: m.config.scope,
                 name: m.config.name.clone(),
                 kind: MeasKind::Spl {
                     config: SplConfig {
@@ -502,7 +504,9 @@ async fn estimate(cli: &Cli, e: &BandsEstimate, out: &mut Out<'_>) -> Result<(),
     let r = c
         .call(Command::MeasUpdate {
             meas: m.id,
+            base: m.config_rev,
             config: MeasConfig {
+                scope: m.config.scope,
                 name: m.config.name.clone(),
                 kind: MeasKind::Spl {
                     config: SplConfig {
@@ -612,7 +616,10 @@ mod tests {
         .expect("test value")
         .expect("test value");
         assert_eq!(c.transfer, measured.transfer);
-        assert_eq!(c.predicted.and_then(|p| p.night), Some(DbSpl(30.0)));
+        assert_eq!(
+            c.predicted.as_ref().and_then(|p| p.night),
+            Some(DbSpl(30.0))
+        );
         assert_eq!(c.correction.db(), 13.0);
         // The correction alone: the rest carries on.
         let d = apply(Some(&c), &set_args(&["--impulse", "none"]))

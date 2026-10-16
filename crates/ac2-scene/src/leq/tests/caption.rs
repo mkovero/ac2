@@ -325,6 +325,7 @@ fn with_peaks(position: Option<PositionCorrection>) -> (LeqConfig, LeqFrame) {
     let mut c = cfg();
     let l = |v: f64| {
         Some(PeakLimit {
+            cue: None,
             limit: DbSpl(v),
             warn_margin: Db(3.0),
         })

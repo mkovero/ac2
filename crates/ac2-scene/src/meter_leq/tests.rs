@@ -52,6 +52,7 @@ fn leq() -> (LeqConfig, LeqFrame) {
     let windows = minutes
         .iter()
         .map(|m| LeqWindow {
+            cue: None,
             duration: Seconds(m * 60.0),
             weighting: Weighting::A,
             limit: Some(DbSpl(99.0)),
