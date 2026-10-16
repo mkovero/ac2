@@ -41,6 +41,7 @@ pub mod math;
 pub mod meas_list;
 pub mod meter;
 pub mod meter_leq;
+pub mod osc;
 pub mod pane_edit;
 pub mod primitives;
 pub mod progress;

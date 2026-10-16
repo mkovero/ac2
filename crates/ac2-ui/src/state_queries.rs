@@ -346,6 +346,7 @@ impl AppState {
             live_selected: self.live_row_selected(),
             sweep: self.daemon().and_then(|s| s.sweep.as_ref()),
             compared: self.compared_rows(),
+            rig: self.daemon().map(|s| &s.rig),
         })
     }
 

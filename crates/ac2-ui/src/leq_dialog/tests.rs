@@ -215,13 +215,13 @@ fn refusals_name_the_window() {
     assert!(d.error.as_deref().is_some_and(|e| e.contains("at most 8")));
 }
 
-/// The band meter's rows come last: Tab reaches them, ←/→ turn it on with a preset,
+/// The band meter's rows come before the rig's two (scope, cues): Tab reaches them, ←/→ turn it on with a preset,
 /// ↓ walks its windows, Insert adds a band window there, Shift+Insert's range row adds
 /// one per band, typing sets a limit, Enter sends them with the windows.
 #[test]
 fn the_band_meter_rows() {
     let mut d = LeqDialog::new(&meter(), true).expect("spl");
-    d.move_cell(-1);
+    d.move_cell(-3);
     let meter_row = Focus::Band(BandFocus::Field(BandField::Meter));
     assert_eq!(d.focus, meter_row);
     d.cycle(2);
@@ -297,8 +297,12 @@ fn the_band_meter_rows() {
 #[test]
 fn peak_limits_and_the_position_correction() {
     let mut d = LeqDialog::new(&meter(), true).expect("spl");
-    // ↑ from the preset row wraps to the band meter, last (off: its one row); above it
-    // the peaks' correction.
+    // ↑ from the preset row wraps to the rig's rows (the cues' fold, the scope), then the
+    // band meter (off: its one row); above it the peaks' correction.
+    d.move_row(-1);
+    assert_eq!(d.focus, Focus::CueFold);
+    d.move_row(-1);
+    assert_eq!(d.focus, Focus::Scope);
     d.move_row(-1);
     assert_eq!(d.focus, Focus::Band(BandFocus::Field(BandField::Meter)));
     d.move_row(-1);

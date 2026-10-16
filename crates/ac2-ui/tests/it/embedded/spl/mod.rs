@@ -2,6 +2,7 @@
 
 mod limits;
 mod log;
+mod rig;
 
 use super::harness::{Driver, NAME, R, measure_from_empty, scene_texts};
 use ac2_proto::FrameData;

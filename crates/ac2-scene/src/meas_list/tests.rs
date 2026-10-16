@@ -406,6 +406,7 @@ fn rows(
         live_selected: false,
         sweep: None,
         compared: Vec::new(),
+        rig: None,
     })
 }
 
@@ -433,6 +434,7 @@ fn compared_rows_are_marked() {
         live_selected: false,
         sweep: None,
         compared: vec![TreeKey::Trace(TraceId(5)), TreeKey::Live(MeasId(1))],
+        rig: None,
     });
     for (a, b) in plain.iter().zip(&marked) {
         if matches!(b.key, TreeKey::Trace(TraceId(5)) | TreeKey::Live(MeasId(1))) {
@@ -541,6 +543,7 @@ fn a_live_row_selected_is_marked_and_its_header_outlined() {
         live_selected: true,
         sweep: None,
         compared: Vec::new(),
+        rig: None,
     };
     let mark = |t: &[TreeRow], k: TreeKey| t.iter().find(|x| x.key == k).expect("row").mark;
     let t = tree_rows(&input(None));
@@ -633,6 +636,7 @@ fn hidden_curves_read_hidden_and_a_sweep_says_it_plays() {
         live_selected: false,
         sweep: Some(&playing),
         compared: Vec::new(),
+        rig: None,
     });
     assert_eq!(t[0].details[0], "running · hidden");
     assert!(t[0].hidden && t[1].hidden);
@@ -677,4 +681,97 @@ fn deleting_a_measurement_with_traces_asks_keep_delete_or_cancel() {
     );
     assert_eq!(c.default, CANCEL, "Keep is refused: Enter cancels");
     assert_eq!(owned_words(0, 2), "2 math channels");
+}
+
+/// A meter kept by the rig is listed first, under a Rig header that says where cues go;
+/// the session's measurements follow under their own header; a cued meter's row carries
+/// its chip and says the state.
+#[test]
+fn rig_meters_lead_the_tree_with_their_cue_chip() {
+    let mut r = rig();
+    let foh = r
+        .meas
+        .iter_mut()
+        .find(|m| m.id == MeasId(3))
+        .expect("test value");
+    foh.config.scope = MeasScope::Rig;
+    let mut osc = ac2_proto::model::Rig {
+        osc_target: Some("10.0.0.5:9000".parse().expect("test value")),
+        ..Default::default()
+    };
+    osc.cues.push(RigCue {
+        meas: MeasId(3),
+        subject: CueSubject::Meter,
+        state: CueState::Over,
+    });
+    let none = BTreeSet::new();
+    let rows = tree_rows(&TreeInput {
+        meas: r.meas.iter().map(item).collect(),
+        traces: Vec::new(),
+        collapsed: &none,
+        selected: None,
+        selected_trace: None,
+        keys_on_trace: false,
+        live_selected: false,
+        sweep: None,
+        compared: Vec::new(),
+        rig: Some(&osc),
+    });
+    let names: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.depth == 0)
+        .map(|r| r.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Rig",
+            "SPL  FOH SPL",
+            "Session",
+            "TF  Main L",
+            "SWEEP  Genelec 1 m"
+        ]
+    );
+    assert_eq!(rows[0].key, TreeKey::Rig);
+    assert_eq!(rows[0].details[0], "1 meter · OSC to 10.0.0.5:9000");
+    let foh = rows
+        .iter()
+        .find(|r| r.key == TreeKey::Meas(MeasId(3)))
+        .expect("test value");
+    assert_eq!(foh.chip, Some(CueState::Over));
+    assert!(foh.describe.ends_with("OSC cue OVER"), "{}", foh.describe);
+    assert!(
+        rows.iter()
+            .filter(|r| r.key != TreeKey::Meas(MeasId(3)))
+            .all(|r| r.chip.is_none())
+    );
+    // V steps through the rig's groups first, as listed.
+    let all: Vec<&Measurement> = r.meas.iter().collect();
+    assert_eq!(group_order(&all)[0], TraceOwner::Meas { meas: MeasId(3) });
+    // With no rig meter, no headers: the tree reads as before.
+    r.meas
+        .iter_mut()
+        .for_each(|m| m.config.scope = MeasScope::Session);
+    let plain = rows_of(&r, &osc);
+    assert!(
+        plain
+            .iter()
+            .all(|r| !matches!(r.key, TreeKey::Rig | TreeKey::Session))
+    );
+}
+
+fn rows_of(r: &Rig, osc: &ac2_proto::model::Rig) -> Vec<TreeRow> {
+    let none = BTreeSet::new();
+    tree_rows(&TreeInput {
+        meas: r.meas.iter().map(item).collect(),
+        traces: Vec::new(),
+        collapsed: &none,
+        selected: None,
+        selected_trace: None,
+        keys_on_trace: false,
+        live_selected: false,
+        sweep: None,
+        compared: Vec::new(),
+        rig: Some(osc),
+    })
 }

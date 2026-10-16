@@ -158,8 +158,8 @@ pub struct BandRow {
     pub day_offset: String,
     /// Typed warn margin.
     pub margin: String,
-    /// Its OSC cue, kept as it is (set from the CLI).
-    pub cue: Option<Box<ac2_proto::model::OscCue>>,
+    /// Its OSC cue.
+    pub cue: super::CueEdit,
 }
 
 impl BandRow {
@@ -171,7 +171,7 @@ impl BandRow {
             limit: w.limit.map_or_else(String::new, |l| number_text(l.0)),
             day_offset: w.day_offset.map_or_else(String::new, |o| number_text(o.0)),
             margin: number_text(w.warn_margin.0),
-            cue: w.cue.clone(),
+            cue: super::CueEdit::of(w.cue.as_deref()),
         }
     }
 
@@ -248,7 +248,7 @@ impl BandRow {
             ));
         }
         Ok(BandWindow {
-            cue: self.cue.clone(),
+            cue: self.cue.checked(&name)?,
             band: Hz(BAND_NOMINAL_HZ[self.band]),
             duration: Seconds(f64::from(self.seconds)),
             weighting: self.weighting,
@@ -307,7 +307,7 @@ impl RangeRow {
             limit: String::new(),
             day_offset: String::new(),
             margin: String::new(),
-            cue: None,
+            cue: super::CueEdit::default(),
         };
         (self.from..=self.to)
             .filter(|&b| !rows.iter().any(|r| r.same(b, &like)))
@@ -359,6 +359,11 @@ impl BandSection {
         b.sort_unstable();
         b.dedup();
         b
+    }
+
+    /// Whether the band meter has a predicted window (a preset's or the CLI's).
+    pub fn has_predicted(&self) -> bool {
+        self.is_on() && self.predicted.is_some()
     }
 
     pub fn is_on(&self) -> bool {
@@ -540,7 +545,7 @@ impl BandSection {
                 band,
                 limit: String::new(),
                 day_offset: String::new(),
-                cue: None,
+                cue: super::CueEdit::default(),
                 ..from
             },
         );
@@ -610,7 +615,7 @@ impl BandSection {
             limit: String::new(),
             day_offset: String::new(),
             margin: margin.clone(),
-            cue: None,
+            cue: super::CueEdit::default(),
         }));
         self.edited();
         self.range = None;

@@ -721,6 +721,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         });
         ui.add_space(4.0);
         let rows = st.tree_rows();
+        let theme = ac2_scene::theme::Theme::by_name(st.theme);
         if rows.is_empty() {
             ui.label(RichText::new("none").color(ch.dim));
         }
@@ -731,7 +732,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                     row.key,
                     TreeKey::Meas(_) | TreeKey::Live(_) | TreeKey::Math(_)
                 );
-            if let Some(m) = tree_row(ui, row, &tips, ch, reveal, dragging) {
+            if let Some(m) = tree_row(ui, row, &tips, ch, &theme, reveal, dragging) {
                 msg = Some(m);
             }
         }
@@ -778,6 +779,7 @@ fn tree_row(
     row: &TreeRow,
     tips: &RowTips,
     ch: &Chrome,
+    theme: &ac2_scene::theme::Theme,
     reveal: bool,
     dragging: bool,
 ) -> Option<Msg> {
@@ -819,6 +821,9 @@ fn tree_row(
             if r.clicked() {
                 click = Some(Msg::ToggleGroup(g));
             }
+        } else if row.depth == 0 {
+            // A header with nothing to fold (the rig's, the session's).
+            ui.add_space(EYE_W);
         } else {
             ui.add_space(INDENT);
             ui.label(
@@ -826,6 +831,10 @@ fn tree_row(
                     .color(ch.dim)
                     .monospace(),
             );
+        }
+        if let Some(c) = row.chip {
+            super::rig::cue_chip(ui, c, theme)
+                .on_hover_text(format!("OSC cue {}", ac2_scene::osc::state_word(c)));
         }
         // A curve's dot: filled when shown, a ring when hidden; a click shows or hides it.
         if let Some((color, shown)) = row.dot.map(|(c, shown)| (to_color32(c), shown)) {
@@ -852,7 +861,9 @@ fn tree_row(
                 click = Some(match row.key {
                     TreeKey::Trace(id) => Msg::ToggleShown(id),
                     TreeKey::Live(id) | TreeKey::Math(id) => Msg::ToggleMeasShown(id),
-                    TreeKey::Meas(_) | TreeKey::Imported => return,
+                    TreeKey::Meas(_) | TreeKey::Imported | TreeKey::Rig | TreeKey::Session => {
+                        return;
+                    }
                 });
             }
         }
@@ -900,7 +911,7 @@ fn tree_row(
             TreeKey::Trace(_) => format!("{}\n{}", row.describe, tips.select),
             _ => format!("{}\n{}", row.describe, tips.meas),
         };
-        let draggable = row.key != TreeKey::Imported;
+        let draggable = !row.key.is_heading();
         let sense = if draggable {
             egui::Sense::click_and_drag()
         } else {
@@ -938,6 +949,8 @@ fn tree_row(
                 TreeKey::Live(id) => Msg::SelectLive(id),
                 TreeKey::Trace(id) => Msg::SelectTrace(id),
                 TreeKey::Imported => Msg::ToggleGroup(TraceOwner::Imported),
+                TreeKey::Rig => Msg::OpenRig,
+                TreeKey::Session => return,
             });
         }
     });

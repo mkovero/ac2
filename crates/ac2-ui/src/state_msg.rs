@@ -329,6 +329,8 @@ pub enum Msg {
     /// A measurement's row clicked in the list: selected, and its own panes on screen (or
     /// the focused pane shows it).
     SelectMeas(MeasId),
+    /// The rig group's header in the list: the Rig monitor settings.
+    OpenRig,
     /// A measurement's live-curve row clicked in the list: a child row, shown by the
     /// focused pane alone, the live row marked as what the keys act on.
     SelectLive(MeasId),

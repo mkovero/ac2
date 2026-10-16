@@ -30,10 +30,12 @@ use crate::leq_dialog::LeqDialog;
 use crate::session_dialog::SessionDialog;
 
 mod connection;
+mod rig;
 pub use connection::{
     ClientKey, ConnAction, ConnEdit, ConnLine, ConnectionPage, SERVER_INFO_EVERY_S, conn_line_text,
     conn_lines, link_lines,
 };
+pub use rig::{RigPage, RigRow};
 
 /// Whose a setting is: this computer's app alone.
 pub const THIS_APP: &str = "this app";
@@ -58,16 +60,19 @@ pub enum Page {
     Display,
     /// The daemon link, this client's key, the server's mode and keys.
     Connection,
+    /// Where the rig's OSC cues go, monitoring from daemon start, the rig's meters.
+    Rig,
 }
 
 impl Page {
-    pub const ALL: [Page; 6] = [
+    pub const ALL: [Page; 7] = [
         Page::AudioIo,
         Page::Calibration,
         Page::Leq,
         Page::Recording,
         Page::Display,
         Page::Connection,
+        Page::Rig,
     ];
 
     pub fn title(self) -> &'static str {
@@ -78,6 +83,7 @@ impl Page {
             Page::Recording => "Recording",
             Page::Display => "Display",
             Page::Connection => "Connection",
+            Page::Rig => ac2_scene::osc::PAGE,
         }
     }
 
@@ -88,7 +94,7 @@ impl Page {
                 "the device, channels, labels, the reference and the max level: the rig — all \
                  clients · stimulus outputs: this app"
             }
-            Page::Calibration | Page::Leq => THE_RIG,
+            Page::Calibration | Page::Leq | Page::Rig => THE_RIG,
             Page::Recording => "the limit: this app · the folder: the rig — all clients",
             Page::Display => THIS_APP,
             Page::Connection => {
@@ -132,6 +138,10 @@ impl Page {
             Page::Connection => {
                 "↑↓ move · Enter acts on the line · A authorizes a refused key (type its name) · \
                  Delete revokes a client (twice) · Esc closes"
+            }
+            Page::Rig => {
+                "↑↓ move · type the target or the test message · Enter applies the target, \
+                 sends the test · ←→ or Enter on Monitor at start · Esc closes"
             }
         };
         text.to_owned()
@@ -564,6 +574,7 @@ pub struct Settings {
     pub display: DisplayRow,
     pub recording: RecordingPage,
     pub connection: ConnectionPage,
+    pub rig: RigPage,
     /// Opened for channel rows before the device's rows arrived: the focus goes to them
     /// once they do.
     pub focus_want: Option<FocusWant>,
@@ -590,6 +601,7 @@ impl Settings {
             display: DisplayRow::Theme,
             recording: RecordingPage::default(),
             connection: ConnectionPage::default(),
+            rig: RigPage::default(),
             focus_want: None,
         };
         s.show(page);
@@ -648,6 +660,7 @@ impl Settings {
             Page::Recording => self.recording.focus == RecordingRow::Limit,
             Page::Display => false,
             Page::Connection => self.connection.typing(),
+            Page::Rig => self.rig.typing(),
         }
     }
 

@@ -399,7 +399,7 @@ impl AppState {
             TreeKey::Math(id) => Some(Stop::Math(id)),
             TreeKey::Live(id) => Some(Stop::Live(id)),
             TreeKey::Trace(id) => Some(Stop::Trace(id)),
-            TreeKey::Imported => None,
+            TreeKey::Imported | TreeKey::Rig | TreeKey::Session => None,
         };
         let stops = |rows: Vec<ac2_scene::meas_list::TreeRow>| {
             let mut v: Vec<Stop> = Vec::new();

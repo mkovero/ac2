@@ -52,8 +52,18 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
         Request::Call { cmd, what } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
-                let result = c.call(cmd).await.map(drop).map_err(|e| e.to_string());
-                o.send(ConnEvent::Reply { what, result });
+                match c.call(cmd).await {
+                    Err(e) if e.code() == Some(ac2_proto::ErrorCode::Conflict) => {
+                        o.send(ConnEvent::Conflict {
+                            what,
+                            error: e.to_string(),
+                        });
+                    }
+                    r => o.send(ConnEvent::Reply {
+                        what,
+                        result: r.map(drop).map_err(|e| e.to_string()),
+                    }),
+                }
             });
         }
         Request::FindDelay {

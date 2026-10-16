@@ -907,6 +907,9 @@ mod panes;
 #[path = "state_meas_layout_tests.rs"]
 mod meas_layout;
 
+#[path = "state_rig_tests.rs"]
+mod rig;
+
 #[path = "state_drag_undo_tests.rs"]
 mod drag_undo;
 

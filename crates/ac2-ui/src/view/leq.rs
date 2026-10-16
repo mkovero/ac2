@@ -6,7 +6,9 @@
 use eframe::egui::{self, RichText};
 
 use crate::app::App;
-use crate::leq_dialog::{BandCol, BandField, BandFocus, Col, Extra, Focus, LeqDialog, RangeCol};
+use crate::leq_dialog::{
+    BandCol, BandField, BandFocus, Col, CueCol, Extra, Focus, LeqDialog, RangeCol,
+};
 use crate::state::{LeqMsg, Msg, Overlay};
 use crate::theme::Chrome;
 
@@ -283,6 +285,8 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
     ui.add_space(10.0);
     ui.label(RichText::new("Band Leq (1/3-octave bands against per-band limits)").strong());
     band_section(ui, d, &mut msg, ch);
+    ui.add_space(10.0);
+    rig_section(ui, d, &mut msg, ch);
     if let Some(e) = &d.error {
         ui.add_space(4.0);
         ui.label(RichText::new(e).color(ch.fault));
@@ -297,6 +301,116 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
         }
     });
     msg
+}
+
+/// A two-way toggle: its value; a click flips it (→ on, ← off, as the arrows set it).
+fn toggle(
+    ui: &mut egui::Ui,
+    text: &str,
+    on: bool,
+    focused: bool,
+    at: Focus,
+    msg: &mut Option<LeqMsg>,
+    ch: &Chrome,
+) {
+    let r = ui.add(egui::Button::selectable(
+        focused,
+        RichText::new(text).color(ch.text),
+    ));
+    if focused {
+        r.scroll_to_me(None);
+    }
+    if r.clicked() {
+        *msg = Some(LeqMsg::Cycle(at, if on { -1 } else { 1 }));
+    }
+}
+
+/// The rig's rows: whether the rig keeps the meter, then the OSC cues — folded until
+/// shown, one row per cued subject (the meter first) with a line per state and the level
+/// toggle, a bad line's reason beside its row.
+fn rig_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: &Chrome) {
+    use ac2_scene::osc;
+    ui.label(RichText::new("Rig").strong());
+    egui::Grid::new("ac2-leq-rig")
+        .num_columns(2)
+        .spacing(egui::vec2(12.0, 6.0))
+        .show(ui, |ui| {
+            let f = d.focus == Focus::Scope;
+            ui.label(RichText::new(osc::KEEP_ON_RIG).color(if f { ch.text } else { ch.dim }));
+            toggle(
+                ui,
+                osc::scope_text(d.on_rig),
+                d.on_rig,
+                f,
+                Focus::Scope,
+                msg,
+                ch,
+            );
+            ui.end_row();
+            let f = d.focus == Focus::CueFold;
+            ui.label(RichText::new(osc::CUES_TITLE).color(if f { ch.text } else { ch.dim }));
+            toggle(
+                ui,
+                &d.cue_fold_text(),
+                d.cues_shown,
+                f,
+                Focus::CueFold,
+                msg,
+                ch,
+            );
+            ui.end_row();
+        });
+    if !d.cues_shown {
+        return;
+    }
+    ui.add(egui::Label::new(RichText::new(osc::CUES_NOTE).small().color(ch.dim)).wrap());
+    egui::Grid::new("ac2-leq-cues")
+        .num_columns(6)
+        .spacing(egui::vec2(8.0, 6.0))
+        .show(ui, |ui| {
+            ui.label("");
+            for c in CueCol::ALL {
+                ui.label(RichText::new(c.title()).small().color(ch.dim));
+            }
+            ui.end_row();
+            for row in d.cue_rows() {
+                let Some(c) = d.cue_edit(row) else {
+                    continue;
+                };
+                let error = c.error();
+                ui.label(RichText::new(d.cue_name(row)).color(ch.text));
+                for col in CueCol::ALL {
+                    let at = Focus::Cue { row, col };
+                    let f = d.focus == at;
+                    match col {
+                        CueCol::State(s) => sized_text_cell(
+                            ui,
+                            130.0,
+                            c.text_of(s),
+                            f,
+                            d.selected,
+                            "—",
+                            at,
+                            msg,
+                            ch,
+                        ),
+                        CueCol::Append => {
+                            toggle(ui, osc::append_text(c.append), c.append, f, at, msg, ch);
+                        }
+                    }
+                }
+                ui.end_row();
+                if let Some((s, e)) = error {
+                    ui.label("");
+                    ui.label(
+                        RichText::new(format!("{}: {e}", osc::field_title(s)))
+                            .small()
+                            .color(ch.fault),
+                    );
+                    ui.end_row();
+                }
+            }
+        });
 }
 
 /// The band meter's rows: the meter, then its windows under a heading with a + and a

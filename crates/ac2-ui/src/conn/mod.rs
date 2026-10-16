@@ -103,6 +103,12 @@ pub enum ConnEvent {
         what: String,
         result: Result<(), String>,
     },
+    /// A command was refused as made on a configuration (or the rig settings) another
+    /// client changed first: the daemon's `conflict`.
+    Conflict {
+        what: String,
+        error: String,
+    },
     /// A `delay.find` answered; `pick` is what the operator asked to insert.
     DelayFound {
         meas: MeasId,
