@@ -45,7 +45,7 @@ sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time", "macros"] }
 tracing = "0.1"
-toml = "0.8"
+toml = "1.1"
 
 # Millisecond timer resolution for the app's lifetime (src/main.rs).
 [target.'cfg(windows)'.dependencies]
