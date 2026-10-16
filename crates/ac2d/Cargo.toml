@@ -29,7 +29,7 @@ ac2-traces = { path = "../ac2-traces" }
 ac2-zmq = { path = "../ac2-zmq" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 ctrlc = { version = "3", features = ["termination"] }
-getrandom = "0.3"
+getrandom = "0.4"
 # OSC cues: encoding only; the socket is ours (non-blocking, never on the audio thread).
 rosc = "0.11"
 num-complex = "0.4"
