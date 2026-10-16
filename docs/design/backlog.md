@@ -3,6 +3,11 @@
 Work found in use, not yet scheduled into a phase. Newest first. When an item lands, move it
 to `backlog-done.md` as one line with the commit.
 
+## Sound labels (design `sound-labels.md`)
+
+- **Not started.** YAMNet labels on the spectrum pane; open: toggle key, model bundled or
+  fetched, `classify` feature default, class folding for display.
+
 ## Band Leq (design `band-leq.md`)
 
 - **The daemon drops a frame that fails to encode without a word.** With 22 band windows the
