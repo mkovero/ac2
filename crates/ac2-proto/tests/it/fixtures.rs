@@ -74,7 +74,7 @@ fn rust_fixtures() -> Vec<(String, Vec<u8>)> {
     let reps: Vec<Vec<u8>> = samples::replies()
         .into_iter()
         .enumerate()
-        .map(|(i, r)| encode_reply(&Reply::new(RequestId(i as u64), r)).expect("fixture"))
+        .map(|(i, r)| encode_reply(&samples::reply(i, r)).expect("fixture"))
         .collect();
     out.push(("rust_replies.bin".into(), container(&reps)));
     let evts: Vec<Vec<u8>> = samples::events()

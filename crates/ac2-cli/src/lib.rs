@@ -105,8 +105,18 @@ pub async fn run(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
 }
 
 /// Runs `cli`, printing an error (as JSON with `--json`) to `err`; returns the exit code.
+/// Reply warnings go to `err` too, as `ac2: warning: …` lines (with `--json` one
+/// `{"warning": "…"}` line each), after the command's output.
 pub async fn run_reporting(cli: &Cli, out: &mut Out<'_>, err: &mut dyn Write) -> u8 {
-    match run(cli, out).await {
+    let r = run(cli, out).await;
+    for w in std::mem::take(&mut out.warnings) {
+        if cli.json {
+            let _ = writeln!(err, "{}", serde_json::json!({ "warning": w }));
+        } else {
+            let _ = writeln!(err, "ac2: warning: {w}");
+        }
+    }
+    match r {
         Ok(()) => 0,
         // The report is the command's one JSON document and already says why.
         Err(e @ CliError::CheckFailed) if cli.json => e.exit_code(),

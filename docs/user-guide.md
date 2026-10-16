@@ -1796,8 +1796,20 @@ the session's: a trace captured under a rig meter is saved with the session as a
 With **monitor at start** on, the daemon remembers the device of the last session opened while
 rig meters exist, and opens it again by itself when it starts, capture only (no outputs, so
 nothing can be played), so the rig meters meter with no app or terminal connected. Closing
-the session, or opening another device, while rig meters run is allowed; the daemon log
-says what the rig meters lost.
+the session, or opening another device, while rig meters run is allowed; the reply warns
+(the CLI prints it, the daemon logs it) that the rig meters stop metering, or meter the new
+device's inputs.
+
+From the terminal:
+
+```
+ac2 meas new spl --input 1 --name Stage
+ac2 meas scope Stage rig          # the rig's from now on (`session` makes it the session's again)
+ac2 rig monitor-at-start on       # a restarted daemon reopens the device for it
+ac2 rig status                    # OSC target, counters, monitor at start, rig meters and cues
+ac2 session close
+ac2: warning: rig SPL meter(s) Stage (1) stop metering until a session opens again; their OSC cues report fault
+```
 
 ### Leq windows and limits
 
@@ -2185,6 +2197,30 @@ restart the window: its level and state carry on.
 **Tip:** have the receiver treat more than 3 s without a message as a fault (a watchdog). The
 repeats make silence meaningful: a crashed daemon, a pulled network cable or a powered-off
 rig then shows as a fault instead of a frozen last state.
+
+From the terminal (`ac2 osc cue --help` has the whole syntax):
+
+```
+ac2 osc target 192.168.1.50:9000          # `off`: send nothing
+ac2 osc test /light/red i:1               # one message now, to check the receiver
+ac2 osc cue Stage window:15min --near "/light/amber i:1" --over "/light/red i:1" \
+    --ok "/light/off" --fault "/light/blink i:1" --append-level
+ac2 osc cue Stage meter --over "/stage/display s:OVER"
+ac2 osc cue Stage peak:lcpeak --over "/light/strobe 1"
+ac2 osc cue Stage band:63hz:60min --near "/light/amber 2"
+ac2 osc cue Stage window:15min            # show the cue
+ac2 osc cue Stage window:15min --near off # no message in that state
+ac2 osc cue Stage meter --clear           # remove the cue
+ac2 rig status
+```
+
+The subject is `meter`, `window:<N>` (the Nth Leq window) or `window:<window>`
+(`window:15min`, `window:c:30s`), `peak:lcpeak` or `peak:lafmax`, `band:<hz>:<window>` (Z
+unless a weighting is given: `band:63hz:a:15min`) or `predicted`. A message is the address
+and its arguments in one quoted argument: `i:1` an integer, `f:0.5` a float, `s:text` a
+string; a bare number is an integer without a decimal point and a float with one, any other
+bare word a string. States not given keep their message. Another client editing the meter at
+the same moment makes the CLI read it again and retry once.
 
 ## Keyboard
 

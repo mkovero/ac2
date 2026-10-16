@@ -6,6 +6,7 @@ mod gen_;
 mod ir;
 mod math;
 mod meas;
+mod osc;
 mod session;
 mod spl;
 mod trace;
@@ -16,6 +17,7 @@ pub use gen_::*;
 pub use ir::*;
 pub use math::*;
 pub use meas::*;
+pub use osc::*;
 pub use session::*;
 pub use spl::*;
 pub use trace::*;
@@ -141,6 +143,20 @@ pub enum Cmd {
         /// Action.
         #[command(subcommand)]
         cmd: TraceCmd,
+    },
+    /// OSC cues the rig sends to external gear (lights, a stage display) when an SPL
+    /// limit's state changes: the target, a test message, each limit's messages.
+    Osc {
+        /// Action.
+        #[command(subcommand)]
+        cmd: OscCmd,
+    },
+    /// The rig monitor: its status, and whether a restarted daemon reopens the audio for the
+    /// rig SPL meters.
+    Rig {
+        /// Action.
+        #[command(subcommand)]
+        cmd: RigCmd,
     },
     /// Daemon state.
     State {

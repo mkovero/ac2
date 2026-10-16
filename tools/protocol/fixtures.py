@@ -163,6 +163,8 @@ def check():
     for b in p.read_container(os.path.join(FIX, "rust_replies.bin")):
         r = p.msgpack.unpackb(b, raw=False)
         ok(r["v"] == p.PROTO_VERSION and list(r["result"]) in (["Ok"], ["Err"]), f"reply {r.get('id')}")
+        ok(isinstance(r["warnings"], list) and all(isinstance(w["type"], str) for w in r["warnings"]),
+           f"reply {r.get('id')} warnings")
 
     rust_evts = {}
     for b in p.read_container(os.path.join(FIX, "rust_events.bin")):

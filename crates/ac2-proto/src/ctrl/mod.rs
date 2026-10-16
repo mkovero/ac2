@@ -8,10 +8,12 @@
 mod command;
 mod error;
 mod reply;
+mod warning;
 
 pub use command::Command;
 pub use error::{ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason, ProtoError};
 pub use reply::{Reply, ReplyBody, Welcome};
+pub use warning::Warning;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

@@ -87,6 +87,12 @@ fn protocol_doc_names_everything() {
         &mut missing,
     );
     check(
+        "reply warning",
+        &names_of::<ac2_proto::Warning, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
         "error code",
         &names_of::<ErrorCode, _>(&"no_such"),
         &doc,

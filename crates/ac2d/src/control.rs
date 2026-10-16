@@ -325,6 +325,8 @@ pub(crate) struct Control {
     detecting: Option<(u64, PendingReply)>,
     /// Driver control panel calls under way, by token.
     panels: HashMap<u64, PendingReply>,
+    /// Warnings the command executing now raised; the next reply carries them.
+    reply_warnings: Vec<ac2_proto::Warning>,
     next_fanout_id: u64,
     next_meas: u32,
     lease: Option<Lease>,
@@ -444,6 +446,7 @@ impl Control {
             preview: None,
             detecting: None,
             panels: HashMap::new(),
+            reply_warnings: Vec::new(),
             next_fanout_id: 1,
             next_meas: rigm.next_id(),
             lease: None,

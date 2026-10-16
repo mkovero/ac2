@@ -85,7 +85,7 @@ fn op_on_the_wire_is_the_command_name() {
 #[test]
 fn every_reply_roundtrips() {
     for (i, r) in samples::replies().into_iter().enumerate() {
-        let rep = Reply::new(RequestId(i as u64), r);
+        let rep = samples::reply(i, r);
         let b = encode_reply(&rep).expect("sample message");
         let back = decode_reply(&b).expect("sample message");
         // TraceData holds NaN: compare re-encoded bytes.

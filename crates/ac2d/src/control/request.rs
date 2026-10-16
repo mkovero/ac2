@@ -236,7 +236,7 @@ impl Control {
         result: Result<ReplyBody, ProtoError>,
         now: Instant,
     ) {
-        let reply = Reply::new(id, result);
+        let reply = Reply::new(id, result).with_warnings(std::mem::take(&mut self.reply_warnings));
         let bytes = match encode_reply(&reply) {
             Ok(b) => b,
             Err(e) => {

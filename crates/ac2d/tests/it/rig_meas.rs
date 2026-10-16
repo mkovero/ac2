@@ -322,3 +322,73 @@ fn monitor_at_start_meters_with_no_client() {
     drop((c, sub, d));
     h.shutdown();
 }
+
+/// Reply warnings: `session.close`, and `session.open` of another input device, while a rig
+/// meter exists say so in the reply; the same device again, or no rig meter, says nothing.
+#[test]
+fn session_close_and_device_change_warn_of_rig_meters() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, _backend) = start("rig-meas-warnings", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    let warned = |c: &mut Client, cmd: Command| {
+        let id = c.next_id();
+        let r = c.call_req(ac2_proto::Request::new(id, cmd));
+        assert!(r.result.is_ok(), "{:?}", r.result);
+        r.warnings
+    };
+    // No rig meter: nothing to warn about.
+    assert!(
+        warned(
+            &mut c,
+            Command::SessionOpen {
+                config: session(false)
+            }
+        )
+        .is_empty()
+    );
+    assert!(warned(&mut c, Command::SessionClose).is_empty());
+
+    c.ok(Command::MeasCreate {
+        config: rig_meter("Stage"),
+    });
+    assert!(
+        warned(
+            &mut c,
+            Command::SessionOpen {
+                config: session(false)
+            }
+        )
+        .is_empty()
+    );
+    // The same device again.
+    assert!(
+        warned(
+            &mut c,
+            Command::SessionOpen {
+                config: session(false)
+            }
+        )
+        .is_empty()
+    );
+    let dev = state(&mut c).session.open.unwrap().input_device;
+    let other = SessionConfig {
+        input_device: DeviceSelector::Id { id: dev },
+        ..session(false)
+    };
+    assert_eq!(
+        warned(&mut c, Command::SessionOpen { config: other }),
+        vec![ac2_proto::Warning::RigMonitorMoved {
+            meas: vec![MeasId(1)]
+        }]
+    );
+    assert_eq!(
+        warned(&mut c, Command::SessionClose),
+        vec![ac2_proto::Warning::RigMonitorBlind {
+            meas: vec![MeasId(1)]
+        }]
+    );
+    // Already closed: the meters were blind before this close.
+    assert!(warned(&mut c, Command::SessionClose).is_empty());
+    drop(c);
+    h.shutdown();
+}

@@ -52,9 +52,17 @@ Frame headers carry `v` too; a frame at another version is refused.
 
 ```
 Request { v: u16, id: u64, cmd: {op: "<name>", args?: {…}}, expect_rev: u64 | nil }
-Reply   { v: u16, id: u64, result: {"Ok": {type: "<body>", value?: …}} | {"Err": ProtoError} }
+Reply   { v: u16, id: u64, result: {"Ok": {type: "<body>", value?: …}} | {"Err": ProtoError},
+          warnings: [Warning] }
 ProtoError { code: ErrorCode, msg: string, detail: ErrorDetail | nil }
+Warning { type: "<name>", … }
 ```
+
+- `warnings` lists what a command that succeeded did that the caller should know about;
+  it is empty for almost every reply, and always present. `type` is one of
+  `rig_monitor_blind` {meas: [MeasId]} (`session.close` while rig measurements run) and
+  `rig_monitor_moved` {meas: [MeasId]} (`session.open` of another backend or input device
+  while they run). A client shows them to the operator; they change nothing in `result`.
 
 - `args` is absent for commands without arguments.
 - `id` is unique per client (a network client's authorized name; a local connection) within
@@ -231,8 +239,10 @@ autosave: the same inputs, rate and buffer, no output channels and no loopback, 
 generator has nothing to play on (`gen.set` is `invalid`) until a client opens a session of
 its own. A failed open is logged and tried again on the audio recovery's backoff (1 s
 doubling to 30 s) until it opens or a client opens or closes a session. `session.close`, and
-a `session.open` of another device, are allowed while rig measurements run; the daemon logs a
-warning (the rig meters stop metering, or meter the new device's inputs).
+a `session.open` of another backend or input device, are allowed while rig measurements
+run; the daemon logs a warning and the reply carries one (§3.1): `rig_monitor_blind` (the rig
+meters stop metering) or `rig_monitor_moved` (they meter the new device's inputs), each
+listing the rig measurements (`meas`).
 An `OscCue` = {`ok`, `near`, `over`, `fault`: `OscMessage` \| nil} is the message sent in each
 state; it sits on each limit (`LeqWindow.cue`, `PeakLimit.cue`, `BandWindow.cue`,
 `PredictedWindow.cue`) and on the meter (`SplConfig.cue`). `OscMessage` = {`path`: str (a

@@ -184,6 +184,15 @@ pub enum MeasCmd {
         #[arg(long, value_name = "N|grey|auto")]
         colour: Option<ColourArg>,
     },
+    /// Make an SPL meter the rig's (kept by the rig across session loads, new sessions and
+    /// restarts, and metering whatever session is open) or the session's again.
+    Scope {
+        /// Id or name.
+        meas: MeasRef,
+        /// `rig` or `session`.
+        #[arg(value_enum)]
+        scope: super::ScopeArg,
+    },
     /// Start a measurement.
     Start {
         /// Id or name.

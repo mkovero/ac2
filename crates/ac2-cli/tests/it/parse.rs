@@ -703,3 +703,171 @@ proptest! {
         prop_assert_eq!(channels_text(&parsed.0), text);
     }
 }
+
+#[test]
+fn osc_and_rig_grammar() {
+    use ac2_proto::model::{OscArg, PeakQuantity, Weighting};
+    let c = ok(&["osc", "target", "192.168.1.50:9000"]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Osc { cmd: OscCmd::Target { addr: OscTargetArg(Some(a)) } } if a.port() == 9000
+    ));
+    assert!(matches!(
+        ok(&["osc", "target", "off"]).cmd,
+        Cmd::Osc {
+            cmd: OscCmd::Target {
+                addr: OscTargetArg(None)
+            }
+        }
+    ));
+    assert!(
+        parse(&["osc", "target", "lights.local:9000"]).is_err(),
+        "no names"
+    );
+    assert!(parse(&["osc", "target", "192.168.1.50"]).is_err(), "a port");
+
+    let Cmd::Osc {
+        cmd: OscCmd::Test { path, args },
+    } = ok(&[
+        "osc",
+        "test",
+        "/light/red",
+        "i:1",
+        "f:2",
+        "s:a:b",
+        "-3",
+        "0.5",
+        "1e3",
+        "red",
+    ])
+    .cmd
+    else {
+        panic!("osc test");
+    };
+    assert_eq!(path.0.as_str(), "/light/red");
+    let args: Vec<OscArg> = args.into_iter().map(|a| a.0).collect();
+    assert_eq!(
+        args,
+        [
+            OscArg::Int(1),
+            OscArg::Float(2.0),
+            OscArg::Str("a:b".into()),
+            OscArg::Int(-3),
+            OscArg::Float(0.5),
+            OscArg::Float(1000.0),
+            OscArg::Str("red".into()),
+        ]
+    );
+    assert!(parse(&["osc", "test", "light"]).is_err(), "a leading slash");
+    assert!(parse(&["osc", "test", "/a b"]).is_err(), "no space");
+    assert!(parse(&["osc", "test", "/a", "i:x"]).is_err());
+    assert!(parse(&["osc", "test", "/a", "i:1.5"]).is_err());
+    assert!(
+        parse(&["osc", "test", "/a", "99999999999"]).is_err(),
+        "32-bit"
+    );
+    assert!(parse(&["osc", "test", "/a", "f:inf"]).is_err(), "finite");
+
+    let cue = |args: &[&str]| match ok(args).cmd {
+        Cmd::Osc {
+            cmd: OscCmd::Cue(a),
+        } => a,
+        other => panic!("{other:?}"),
+    };
+    let a = cue(&[
+        "osc",
+        "cue",
+        "Stage",
+        "window:c:15min",
+        "--over",
+        "/light/red i:1",
+        "--ok",
+        "off",
+        "--append-level",
+    ]);
+    assert_eq!(a.meas.0, "Stage");
+    assert_eq!(
+        a.subject,
+        CueSubjectArg::Window(LeqWindowArg {
+            weighting: Some(Weighting::C),
+            seconds: 900
+        })
+    );
+    let over = a
+        .over
+        .expect("--over")
+        .message(a.append_level)
+        .expect("a message");
+    assert_eq!(over.path.as_str(), "/light/red");
+    assert_eq!(over.args, [OscArg::Int(1)]);
+    assert!(over.append_level);
+    assert_eq!(a.ok, Some(CueMsgArg(None)));
+    assert!(a.near.is_none() && a.fault.is_none() && !a.clear);
+
+    assert_eq!(
+        cue(&["osc", "cue", "1", "meter"]).subject,
+        CueSubjectArg::Meter
+    );
+    assert_eq!(
+        cue(&["osc", "cue", "1", "window:2"]).subject,
+        CueSubjectArg::WindowIndex(2)
+    );
+    assert_eq!(
+        cue(&["osc", "cue", "1", "peak:lafmax"]).subject,
+        CueSubjectArg::Peak(PeakQuantity::LafMax)
+    );
+    assert_eq!(
+        cue(&["osc", "cue", "1", "predicted"]).subject,
+        CueSubjectArg::Predicted
+    );
+    let CueSubjectArg::Band { band, window } = cue(&["osc", "cue", "1", "band:63hz:60min"]).subject
+    else {
+        panic!("band");
+    };
+    assert_eq!(BAND_NOMINAL_HZ_63, ac2_proto::model::BAND_NOMINAL_HZ[band]);
+    assert_eq!(window.weighting, Some(Weighting::Z), "Z unless given");
+    assert_eq!(window.seconds, 3600);
+    let CueSubjectArg::Band { window, .. } = cue(&["osc", "cue", "1", "band:63hz:a:15min"]).subject
+    else {
+        panic!("band");
+    };
+    assert_eq!(window.weighting, Some(Weighting::A));
+    assert!(cue(&["osc", "cue", "1", "meter", "--clear"]).clear);
+    for bad in [
+        &["osc", "cue", "1", "window:0"][..],
+        &["osc", "cue", "1", "peak:lzpeak"],
+        &["osc", "cue", "1", "band:64hz:60min"],
+        &["osc", "cue", "1", "band:63hz"],
+        &["osc", "cue", "1", "everything"],
+        &["osc", "cue", "1", "meter", "--ok", "light"],
+        &["osc", "cue", "1", "meter", "--ok", ""],
+        &["osc", "cue", "1", "meter", "--clear", "--ok", "/x"],
+    ] {
+        assert!(parse(bad).is_err(), "{bad:?}");
+    }
+
+    assert!(matches!(
+        ok(&["meas", "scope", "Stage", "rig"]).cmd,
+        Cmd::Meas {
+            cmd: MeasCmd::Scope {
+                scope: ScopeArg::Rig,
+                ..
+            }
+        }
+    ));
+    assert!(parse(&["meas", "scope", "Stage", "global"]).is_err());
+    assert!(matches!(
+        ok(&["rig", "monitor-at-start", "on"]).cmd,
+        Cmd::Rig {
+            cmd: RigCmd::MonitorAtStart { on: OnOffArg::On }
+        }
+    ));
+    assert!(matches!(
+        ok(&["rig", "status"]).cmd,
+        Cmd::Rig {
+            cmd: RigCmd::Status
+        }
+    ));
+}
+
+const BAND_NOMINAL_HZ_63: f64 = 63.0;

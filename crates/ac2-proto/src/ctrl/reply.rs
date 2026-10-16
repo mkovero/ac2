@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ErrorCode, ErrorDetail, ProtoError};
+use super::{ErrorCode, ErrorDetail, ProtoError, Warning};
 use crate::PROTO_VERSION;
 use crate::event::{Event, StateSnapshot};
 use crate::grid::GridDef;
@@ -131,6 +131,8 @@ pub struct Reply {
     pub id: RequestId,
     /// Outcome.
     pub result: Result<ReplyBody, ProtoError>,
+    /// What a successful command did that the caller should know about (empty mostly).
+    pub warnings: Vec<Warning>,
 }
 
 impl Reply {
@@ -140,7 +142,15 @@ impl Reply {
             v: PROTO_VERSION,
             id,
             result,
+            warnings: Vec::new(),
         }
+    }
+
+    /// This reply carrying `warnings`.
+    #[must_use]
+    pub fn with_warnings(mut self, warnings: Vec<Warning>) -> Self {
+        self.warnings = warnings;
+        self
     }
 
     /// The daemon's answer to a request at another version (or without one).

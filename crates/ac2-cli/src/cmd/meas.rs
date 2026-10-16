@@ -119,6 +119,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             .await?;
             out.emit(&m, || output::measurement(&m))?;
         }
+        MeasCmd::Scope { meas, scope } => super::osc::meas_scope(&c, meas, *scope, out).await?,
         MeasCmd::Start { meas } | MeasCmd::Stop { meas } => {
             let s = state(&c).await?;
             let id = find_meas(&s, meas)?.id;

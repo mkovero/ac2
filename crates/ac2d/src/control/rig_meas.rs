@@ -35,7 +35,7 @@ use ac2_proto::model::{
     TraceSource,
 };
 use ac2_proto::units::{MeasId, Rev, WallNs};
-use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody};
+use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Warning};
 use ac2_traces::session::{SavedMeasurement, Session as SessionData, SplLogOnDisk};
 
 use super::{Control, recovery};
@@ -133,6 +133,11 @@ impl Control {
     /// Whether the rig has meters.
     fn has_rig_meters(&self) -> bool {
         !self.rigm.saved.is_empty()
+    }
+
+    /// The rig meters' ids, ascending.
+    fn rig_meter_ids(&self) -> Vec<MeasId> {
+        self.rigm.saved.iter().map(|m| m.id).collect()
     }
 
     /// `o` as a session file keeps it: a rig meter is no owner the file could name.
@@ -402,17 +407,21 @@ impl Control {
         client: &ac2_proto::units::ClientId,
         config: SessionConfig,
     ) -> Result<ReplyBody, ProtoError> {
-        if self.has_rig_meters()
-            && let Some(old) = self.open_config()
-            && (old.backend != config.backend || old.input_device != config.input_device)
-        {
+        let moved = self.has_rig_meters()
+            && self.open_config().is_some_and(|old| {
+                old.backend != config.backend || old.input_device != config.input_device
+            });
+        let r = self.session_open(client, config.clone())?;
+        if moved {
             tracing::warn!(
                 "session.open on another device while {} rig SPL meter(s) run: they meter its \
                  inputs from now on",
                 self.rigm.saved.len()
             );
+            self.reply_warnings.push(Warning::RigMonitorMoved {
+                meas: self.rig_meter_ids(),
+            });
         }
-        let r = self.session_open(client, config.clone())?;
         self.rigm.retry = None;
         if self.store.state().rig.monitor_at_start
             && self.has_rig_meters()
@@ -438,6 +447,9 @@ impl Control {
                 "session.close: {} rig SPL meter(s) stop metering until a session opens again",
                 self.rigm.saved.len()
             );
+            self.reply_warnings.push(Warning::RigMonitorBlind {
+                meas: self.rig_meter_ids(),
+            });
         }
     }
 

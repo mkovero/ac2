@@ -5,11 +5,34 @@ use super::events::events;
 use super::state::*;
 use super::traces::*;
 use crate::ctrl::{
-    ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason, ProtoError, ReplyBody, Welcome,
+    ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason, ProtoError, Reply, ReplyBody,
+    Warning, Welcome,
 };
 use crate::event::StateSnapshot;
 use crate::model::*;
 use crate::units::*;
+
+/// One example of every [`Warning`] variant.
+pub fn warnings() -> Vec<Warning> {
+    vec![
+        Warning::RigMonitorBlind {
+            meas: vec![MeasId(3), MeasId(7)],
+        },
+        Warning::RigMonitorMoved {
+            meas: vec![MeasId(3)],
+        },
+    ]
+}
+
+/// Sample reply `i` around `result`; the first carries every [`Warning`].
+pub fn reply(i: usize, result: Result<ReplyBody, ProtoError>) -> Reply {
+    let r = Reply::new(RequestId(i as u64), result);
+    if i == 0 {
+        r.with_warnings(warnings())
+    } else {
+        r
+    }
+}
 
 /// One example of every [`ReplyBody`] variant, plus an error.
 pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {

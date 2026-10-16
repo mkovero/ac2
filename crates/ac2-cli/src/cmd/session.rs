@@ -102,8 +102,9 @@ pub(crate) async fn session(
                 buffer_frames: buffer,
                 loopback,
             };
-            let r = c.call(Command::SessionOpen { config }).await?;
+            let (r, warnings) = c.call_warned(Command::SessionOpen { config }).await?;
             let s = expect_body!("session.open", r, ReplyBody::Session(s) => s)?;
+            super::osc::note_warnings(&c, &warnings, out).await;
             let inputs = if o.mics.is_empty() {
                 None
             } else {
@@ -119,8 +120,9 @@ pub(crate) async fn session(
             })?;
         }
         SessionCmd::Close => {
-            let r = c.call(Command::SessionClose).await?;
+            let (r, warnings) = c.call_warned(Command::SessionClose).await?;
             let rev = expect_body!("session.close", r, ReplyBody::Ack { rev } => rev)?;
+            super::osc::note_warnings(&c, &warnings, out).await;
             out.emit(&json!({ "rev": rev }), || "session closed".to_owned())?;
         }
         SessionCmd::Status => {

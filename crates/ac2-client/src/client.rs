@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use ac2_proto::model::State;
 use ac2_proto::units::{ClientId, RequestId, Rev};
 use ac2_proto::{
-    Command, ErrorCode, GridDef, GridId, ReplyBody, Request, StateSnapshot, Subscription, Welcome,
-    encode_request,
+    Command, ErrorCode, GridDef, GridId, ReplyBody, Request, StateSnapshot, Subscription, Warning,
+    Welcome, encode_request,
 };
 use ac2_zmq::{Context, CurveClient, Socket, SocketType, TcpLiveness};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -165,6 +165,18 @@ impl CallCore {
         expect_rev: Option<Rev>,
         retry: Retry,
     ) -> Result<ReplyBody, ClientError> {
+        self.call_warned(cmd, expect_rev, retry)
+            .await
+            .map(|(body, _)| body)
+    }
+
+    /// [`Self::call`], with the reply's warnings.
+    pub(crate) async fn call_warned(
+        &self,
+        cmd: Command,
+        expect_rev: Option<Rev>,
+        retry: Retry,
+    ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
         let op = cmd.name();
         let mut req = Request::new(self.next_id(), cmd);
         req.expect_rev = expect_rev;
@@ -191,8 +203,9 @@ impl CallCore {
             self.io.send(&bytes)?;
             match tokio::time::timeout(retry.timeout, &mut rx).await {
                 Ok(Ok(reply)) => {
-                    return match reply?.result {
-                        Ok(body) => Ok(body),
+                    let reply = reply?;
+                    return match reply.result {
+                        Ok(body) => Ok((body, reply.warnings)),
                         Err(e) => Err(ClientError::from_proto(e)),
                     };
                 }
@@ -410,6 +423,17 @@ impl Client {
     pub async fn call(&self, cmd: Command) -> Result<ReplyBody, ClientError> {
         let r = self.inner.core.retry;
         self.inner.core.call(cmd, None, r).await
+    }
+
+    /// Sends `cmd` with the default retry policy; the reply body with the warnings the
+    /// daemon attached (what the command did that the operator should hear about, e.g. a
+    /// `session.close` leaving the rig meters blind).
+    pub async fn call_warned(
+        &self,
+        cmd: Command,
+    ) -> Result<(ReplyBody, Vec<Warning>), ClientError> {
+        let r = self.inner.core.retry;
+        self.inner.core.call_warned(cmd, None, r).await
     }
 
     /// Sends a mutation guarded by `expect_rev`: refused with `conflict` if the daemon state

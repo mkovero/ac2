@@ -23,6 +23,9 @@ pub struct Out<'a> {
     pub json: bool,
     /// Destination.
     pub w: &'a mut dyn Write,
+    /// Reply warnings met on the way, in words; [`crate::run_reporting`] prints them on
+    /// stderr once the command is done.
+    pub warnings: Vec<String>,
 }
 
 impl std::fmt::Debug for Out<'_> {
@@ -34,7 +37,11 @@ impl std::fmt::Debug for Out<'_> {
 impl<'a> Out<'a> {
     /// A sink.
     pub fn new(json: bool, w: &'a mut dyn Write) -> Self {
-        Self { json, w }
+        Self {
+            json,
+            w,
+            warnings: Vec::new(),
+        }
     }
 
     /// Prints `value` as pretty JSON, or the human text.
