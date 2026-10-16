@@ -54,6 +54,7 @@ mod generator;
 mod leq;
 mod maths;
 mod meas_jobs;
+mod osc;
 mod owners;
 mod recording;
 mod recovery;
@@ -65,6 +66,8 @@ mod traces;
 mod transfer;
 mod validate;
 mod working;
+
+pub(crate) use osc::{Judged, has_cue};
 
 use validate::{
     MAX_CAL_UNSETTLED_DB, MAX_DELAY_S, check_delay, check_find, delay_samples, gen_err,
@@ -160,6 +163,8 @@ pub(crate) enum ControlMsg {
         /// The peak limits' judgements (`PeakQuantity::ALL` order).
         peak_judgements: [ac2_proto::model::LeqJudgement; 2],
         alarms: Vec<ac2_proto::model::LeqAlarm>,
+        /// Every subject's judgement and level, for the OSC cues.
+        judged: Vec<osc::Judged>,
     },
     /// The recording under `token` has more audio in its file.
     RecordingProgress { token: u64 },
@@ -356,6 +361,8 @@ pub(crate) struct Control {
     transfers: transfer::Transfers,
     /// File operations whose disk work runs on a worker, by token.
     file_jobs: file_jobs::FileJobs,
+    /// The OSC cues' states and their sender.
+    osc: osc::Cues,
 }
 
 impl Control {
@@ -407,6 +414,7 @@ impl Control {
         }
         let store = Store::new(Dbfs(s.ceiling_dbfs), Dbfs(s.ceiling_bound), s.replay)
             .with_outputs(saved.outputs)
+            .with_osc_target(saved.osc_target)
             .with_calibrations(contents)
             .with_autosave(Autosave {
                 state: status,
@@ -451,6 +459,7 @@ impl Control {
             recover: None,
             transfers: transfer::Transfers::default(),
             file_jobs: file_jobs::FileJobs::default(),
+            osc: osc::Cues::default(),
             rig,
             ceiling_set: saved.ceiling_dbfs,
             s,
@@ -496,7 +505,12 @@ impl Control {
                 tracing::info!("preview not renewed: closing it");
                 self.close_preview();
             }
+            self.osc_sync();
+            self.osc_tick(now);
             let mut wake = self.next_ka;
+            if let Some(t) = self.osc_wake() {
+                wake = wake.min(t);
+            }
             if let Some(l) = &self.lease {
                 wake = wake.min(l.deadline);
             }
@@ -585,6 +599,7 @@ impl Control {
                     judgements,
                     peak_judgements,
                     alarms,
+                    judged,
                 }) => self.leq_reported(
                     meas,
                     epoch,
@@ -593,6 +608,7 @@ impl Control {
                     &judgements,
                     peak_judgements,
                     alarms,
+                    judged,
                 ),
                 Ok(ControlMsg::RecordingProgress { token }) => self.recording_progress(token),
                 Ok(ControlMsg::RecordingEnded { token }) => self.recording_ended(token),
@@ -613,6 +629,7 @@ impl Control {
 
     fn shutdown(&mut self) {
         tracing::info!("shutting down");
+        self.osc_shutdown();
         self.abort_sweep(SweepFailure::Stopped, "the daemon is shutting down");
         self.end_recording(ac2_proto::model::RecordingEnd::DaemonShutdown);
         self.close_preview();

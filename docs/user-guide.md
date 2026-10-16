@@ -2137,6 +2137,39 @@ ac2 spl bands estimate --attenuation guess.txt --place "flat 4 bedroom"
 It is stored as an estimated transfer, shown everywhere as "estimated … typed, not
 measured". Measure it as soon as the place can be reached.
 
+### OSC cues
+
+The rig can tell other gear when an SPL limit's state changes: a red light the performers
+see, a stage display, a lighting desk. Each limit of an SPL meter (a Leq window, a peak
+limit, a band window, the predicted level) can carry a cue, and so can the meter as a whole;
+a cue is one OSC message for each state, any of them left out:
+
+| state | when |
+|---|---|
+| `ok` | under the limit, or no limit set |
+| `near` | within the warn margin below the limit |
+| `over` | over the limit |
+| `fault` | the rig cannot judge: no session open, the device lost, the meter stopped, or the limit set on an uncalibrated input |
+
+The messages go over UDP to the rig's OSC target, an IP address and port (no host names: a
+name lookup could stall the meter). The daemon keeps the target in its rig settings, so it
+survives restarts and no client has to stay connected; send a test message to check the
+receiver before the show. A message may append the level the state was judged on (dB SPL) as
+a trailing float.
+
+The meter's own cue shows the worst of its limits, `over` first, then `fault`, `near`, `ok`:
+an overload always lights, even while another limit cannot be judged. That is the cue for a
+single red light.
+
+A change is sent at once, and every cue's current message is sent again every second. A
+deleted measurement or a removed cue sends its `ok` once, and so does a clean daemon stop,
+so a light is never left red by a meter that no longer exists. Editing a cue does not
+restart the window: its level and state carry on.
+
+**Tip:** have the receiver treat more than 3 s without a message as a fault (a watchdog). The
+repeats make silence meaningful: a crashed daemon, a pulled network cable or a powered-off
+rig then shows as a fault instead of a frozen last state.
+
 ## Keyboard
 
 Everything in the app is reachable from the keyboard.

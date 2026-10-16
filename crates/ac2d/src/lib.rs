@@ -50,6 +50,7 @@ mod jobs;
 pub mod keys;
 mod leq_history;
 mod leq_log;
+mod osc;
 mod outbox;
 mod preview;
 mod rig;

@@ -14,8 +14,8 @@ use ac2_core::band_leq::{BandSecond, Period, Placed};
 use ac2_core::leq::{LogTotal, PEAK_HOLD_S, PeakHold, RollingLeq, Second};
 use ac2_proto::model::BandPeriod;
 use ac2_proto::model::{
-    LeqConfig, LeqJudgement, LeqPeakState, LeqWindow, LeqWindowState, PeakQuantity, PeakStates,
-    SplLogPage, SplLogRow,
+    LeqConfig, LeqJudgement, LeqPeakState, LeqWindow, LeqWindowState, PeakLimit, PeakQuantity,
+    PeakStates, SplLogPage, SplLogRow,
 };
 use ac2_proto::units::{MeasId, WallNs};
 use ac2_traces::band_log::BandLogRow;
@@ -345,7 +345,7 @@ pub(crate) fn peak_states(
 ) -> PeakStates {
     let state = |q: PeakQuantity| {
         let kept = match (old_cfg, old) {
-            (Some(oc), Some(o)) if oc.peaks.get(q) == cfg.peaks.get(q) => Some(o.get(q)),
+            (Some(oc), Some(o)) if same_peak(oc.peaks.get(q), cfg.peaks.get(q)) => Some(o.get(q)),
             _ => None,
         };
         kept.unwrap_or(LeqPeakState {
@@ -357,6 +357,37 @@ pub(crate) fn peak_states(
         lcpeak: state(PeakQuantity::LcPeak),
         lafmax: state(PeakQuantity::LafMax),
     }
+}
+
+/// Whether two windows are judged alike: a cue says what to send about a state, it is not
+/// part of what is judged, so editing one keeps the window's state.
+pub(crate) fn same_window(a: &LeqWindow, b: &LeqWindow) -> bool {
+    a.duration == b.duration
+        && a.weighting == b.weighting
+        && a.limit == b.limit
+        && a.warn_margin == b.warn_margin
+}
+
+/// The same for a peak limit.
+pub(crate) fn same_peak(a: Option<&PeakLimit>, b: Option<&PeakLimit>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => a.limit == b.limit && a.warn_margin == b.warn_margin,
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// Whether two Leq configurations judge alike (they differ in cues at most).
+pub(crate) fn same_judging(a: &LeqConfig, b: &LeqConfig) -> bool {
+    a.horizon == b.horizon
+        && a.windows.len() == b.windows.len()
+        && a.windows
+            .iter()
+            .zip(&b.windows)
+            .all(|(x, y)| same_window(x, y))
+        && PeakQuantity::ALL
+            .into_iter()
+            .all(|q| same_peak(a.peaks.get(q), b.peaks.get(q)))
 }
 
 /// Judgement of a window without a value to judge yet: what its limit and the
@@ -384,7 +415,7 @@ pub(crate) fn window_states(
             let kept = old_cfg.and_then(|oc| {
                 oc.windows
                     .iter()
-                    .position(|o| o == w)
+                    .position(|o| same_window(o, w))
                     .and_then(|i| old.get(i))
                     .copied()
             });

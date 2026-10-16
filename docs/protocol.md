@@ -92,7 +92,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `gen.stop` | — | `ack` | universal |
 | `gen.ceiling` | `ceiling: Dbfs`, `confirm_raise: bool` | `generator` | any client |
 | `osc.target` | `base: Rev` (`rig.rev`), `addr: "ip:port" \| nil` | `ack` (`rig` event) | |
-| `osc.test` | `msg: OscMessage` | `ack` (`rig` event) | |
+| `osc.test` | `msg: OscMessage` | `ack` (`rig` event: the sent count) | |
 | `rig.monitor_start` | `base: Rev` (`rig.rev`), `on: bool` | `ack` (`rig` event) | |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
 | `meas.update` | `meas`, `base: Rev` (the `config_rev` the edit was made on), `config` | `measurement` | |
@@ -204,7 +204,25 @@ tagged by `type`: `meter` (the whole meter: the worst state of its limits), `win
 cannot judge: no audio, device lost, not calibrated).
 `osc.target` and `rig.monitor_start` carry the `rig.rev` they were made on; another is
 `conflict` with `detail: conflict {rev}` (the current one). `osc.test` sends one message to
-the target now (setup); `invalid` without a target.
+the target now (setup); `invalid` without a target, `internal` with the operating system's
+reason when the send fails; `append_level` appends 0 dB. `osc.target` refuses an unspecified
+address or port 0 (`invalid`), writes the rig settings file before it takes effect, and sends
+the current state of every cue to the new target at once.
+Cue rules: a state change is sent at once, and every cued subject's current message is sent
+again every second, so a lost datagram heals within a second and a receiver can treat
+silence (a few seconds) as a fault. A meter whose job is not running (no session, the device
+lost and being reopened, the meter stopped, or no judgement from it for 3 s: a stalled
+device) is `fault` on every cue, with no level appended;
+a running meter's subjects follow its judgements (`no_limit` → `ok`, `not_calibrated` →
+`fault`), from its first judged second (a cue added while it runs keeps its last state until
+then). The meter cue takes the worst state of all its subjects, cued or not, in the order
+`over` > `fault` > `near` > `ok`: an overload is a fact about the sound and is never masked by
+a limit that cannot be judged. `append_level` appends the level the state was judged on (the
+worst subject's for the meter cue), when one is known. A cue that goes away (its measurement
+deleted or replaced by a load, the cue removed by `meas.update`, the daemon stopping cleanly)
+sends its `ok` message once. Only subjects with a cue are listed in `rig.cues` or sent; a cue
+edit keeps the window's state and history (it changes what is sent, not what is judged).
+`rig.osc` is committed at most once a second when it changed.
 An `OscCue` = {`ok`, `near`, `over`, `fault`: `OscMessage` \| nil} is the message sent in each
 state; it sits on each limit (`LeqWindow.cue`, `PeakLimit.cue`, `BandWindow.cue`,
 `PredictedWindow.cue`) and on the meter (`SplConfig.cue`). `OscMessage` = {`path`: str (a

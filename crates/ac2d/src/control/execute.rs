@@ -93,10 +93,10 @@ impl Control {
             Command::ServerInfo => Ok(ReplyBody::Server(self.server_info())),
             Command::ServerAuthorize { name, key } => self.server_authorize(client, &name, &key),
             Command::ServerRevoke { name } => self.server_revoke(client, &name),
-            // todo: step 2 (monitor at start) and step 3 (OSC sender) of the rig monitor plan.
-            Command::OscTarget { .. }
-            | Command::OscTest { .. }
-            | Command::RigMonitorStart { .. } => Err(perr(
+            Command::OscTarget { base, addr } => self.osc_target(base, addr),
+            Command::OscTest { msg } => self.osc_test(&msg),
+            // todo: step 2 (monitor at start) of the rig monitor plan.
+            Command::RigMonitorStart { .. } => Err(perr(
                 ErrorCode::Unsupported,
                 "the rig monitor and OSC cues are not implemented yet",
             )),

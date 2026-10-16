@@ -13,13 +13,15 @@ use ac2_core::leq::{Headroom, Judgement, Latch, RollingLeq, judge_window};
 use ac2_core::spectrum::power_dbfs;
 use ac2_proto::frame::{BandLeqFrame, BandLeqMeta, BandWindowState, LeqFlags};
 use ac2_proto::model::{
-    AlarmSubject, BAND_NOMINAL_HZ, BandLeqConfig, BandLimitPlace, BandWindow, CalStatus, LeqAlarm,
-    LeqAlarmKind, LeqJudgement, LevelScale, PredictedLeq, PredictedWindow, TransferOrigin,
+    AlarmSubject, BAND_NOMINAL_HZ, BandLeqConfig, BandLimitPlace, BandWindow, CalStatus,
+    CueSubject, LeqAlarm, LeqAlarmKind, LeqJudgement, LevelScale, PredictedLeq, PredictedWindow,
+    TransferOrigin,
 };
 use ac2_proto::units::{Db, DbSpl, Hz, MeasId, Seconds, WallNs};
 use ac2_traces::band_log::BandLogRow;
 
 use crate::config::LocalClock;
+use crate::control::Judged;
 use crate::conv;
 use crate::leq_log::{self, SharedLog};
 
@@ -272,7 +274,7 @@ impl BandMeter {
 
     /// One completed second from wall `start` to `end` (ns): logged (when anything was
     /// measured), pushed into the windows with the correction in force, judged. Alarms
-    /// raised go to `alarms`.
+    /// raised go to `alarms`. Whether a judgement changed.
     pub(super) fn second(
         &mut self,
         s: &BandSecond,
@@ -280,7 +282,7 @@ impl BandMeter {
         log: &SharedLog,
         sensitivity: Option<f64>,
         alarms: &mut Vec<LeqAlarm>,
-    ) {
+    ) -> bool {
         let period = self.period_at(start);
         let correction = self.cfg.correction.db();
         let epoch = {
@@ -322,19 +324,20 @@ impl BandMeter {
         if let Some(p) = &mut self.predicted {
             p.push(&c, period);
         }
-        self.judge(WallNs(end), sensitivity, alarms);
+        self.judge(WallNs(end), sensitivity, alarms)
     }
 
     /// Judges every band of every window and the predicted window at `at`: the limits of
     /// the period each window is in, the headroom against those in force once the horizon
     /// has passed. Without a sensitivity a band with a limit is `not_calibrated` (the
-    /// limits are SPL).
+    /// limits are SPL). Whether a judgement changed.
     pub(super) fn judge(
         &mut self,
         at: WallNs,
         sensitivity: Option<f64>,
         alarms: &mut Vec<LeqAlarm>,
-    ) {
+    ) -> bool {
+        let mut changed = false;
         let o = sensitivity.unwrap_or(0.0);
         let at_horizon = self.period_at(at.0 + u64::from(self.horizon) * NS);
         for w in &mut self.wins {
@@ -364,6 +367,7 @@ impl BandMeter {
                 if j == prev {
                     continue;
                 }
+                changed = true;
                 if let (Some(kind), Some(limit)) = (alarm_kind(prev, j), st.limit_db) {
                     alarms.push(LeqAlarm {
                         at,
@@ -400,6 +404,7 @@ impl BandMeter {
                 }
             };
             let prev = std::mem::replace(&mut p.judgement, j);
+            changed |= j != prev;
             if let (Some(kind), Some(l)) = (alarm_kind(prev, j), limit)
                 && j != prev
             {
@@ -414,6 +419,33 @@ impl BandMeter {
             }
         }
         self.fresh = true;
+        changed
+    }
+
+    /// Every band window's and the predicted window's judgement and level (dB SPL), for
+    /// the OSC cues.
+    pub(super) fn judged(&self, sensitivity: Option<f64>, out: &mut Vec<Judged>) {
+        for w in &self.wins {
+            let level = match (sensitivity, w.states.first()) {
+                (Some(_), Some(st)) => st.level_db,
+                _ => f64::NAN,
+            };
+            out.push(Judged::new(
+                CueSubject::Band {
+                    duration: w.spec.duration,
+                    weighting: w.spec.weighting,
+                    nominal: w.spec.band,
+                },
+                w.judgement,
+                level,
+            ));
+        }
+        if let Some(p) = &self.predicted {
+            let level = sensitivity.map_or(f64::NAN, |o| {
+                p.ring.value(PredictedSecond::ESTIMATE).leq_dbfs + o
+            });
+            out.push(Judged::new(CueSubject::Predicted, p.judgement, level));
+        }
     }
 
     /// The `band_leq` frame: levels in dB SPL with a sensitivity, else dBFS.

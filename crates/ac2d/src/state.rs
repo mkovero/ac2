@@ -93,6 +93,12 @@ impl Store {
         self
     }
 
+    /// The initial state carries the rig settings' OSC target (rev 0, no events).
+    pub(crate) fn with_osc_target(mut self, target: Option<std::net::SocketAddr>) -> Self {
+        self.state.rig.osc_target = target;
+        self
+    }
+
     /// The initial autosave status (rev 0, no events).
     pub(crate) fn with_autosave(mut self, autosave: Autosave) -> Self {
         self.state.autosave = autosave;

@@ -124,6 +124,7 @@ impl Control {
         self.rig.persist(&RigSettings {
             ceiling_dbfs: Some(new),
             outputs: self.store.state().outputs.clone(),
+            osc_target: self.store.state().rig.osc_target,
         })?;
         self.ceiling_set = Some(new);
         self.s.ceiling_dbfs = new;
@@ -195,6 +196,7 @@ impl Control {
             self.rig.persist(&RigSettings {
                 ceiling_dbfs: self.ceiling_set,
                 outputs: all.clone(),
+                osc_target: self.store.state().rig.osc_target,
             })?;
             self.commit(Change::Outputs(all));
         }

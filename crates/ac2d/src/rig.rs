@@ -9,6 +9,7 @@
 //! format version is set aside (renamed, never deleted).
 
 use std::io;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use ac2_proto::model::OutputSetup;
@@ -29,6 +30,9 @@ struct RigFile {
     ceiling_dbfs: Option<f64>,
     /// Labelled outputs, sorted by channel.
     outputs: Vec<OutputSetup>,
+    /// Where OSC cues go; absent: nowhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    osc_target: Option<SocketAddr>,
 }
 
 /// Just enough of any file to tell its format and version.
@@ -45,6 +49,8 @@ pub(crate) struct RigSettings {
     pub(crate) ceiling_dbfs: Option<f64>,
     /// Labelled outputs, sorted by channel.
     pub(crate) outputs: Vec<OutputSetup>,
+    /// Where OSC cues go; `None`: nowhere.
+    pub(crate) osc_target: Option<SocketAddr>,
 }
 
 /// Where the rig settings live.
@@ -109,6 +115,7 @@ impl RigStore {
                 let s = RigSettings {
                     ceiling_dbfs: f.ceiling_dbfs,
                     outputs: f.outputs,
+                    osc_target: f.osc_target,
                 };
                 match check(&s) {
                     Ok(()) => (store, s),
@@ -168,6 +175,7 @@ impl RigStore {
             version: VERSION,
             ceiling_dbfs: s.ceiling_dbfs,
             outputs: s.outputs.clone(),
+            osc_target: s.osc_target,
         };
         let text = serde_json::to_vec_pretty(&file)
             .map_err(|e| perr(ErrorCode::Internal, format!("rig settings: {e}")))?;
@@ -188,6 +196,11 @@ fn check(s: &RigSettings) -> Result<(), String> {
         return Err(format!(
             "ceiling_dbfs {c} is not a level at or below 0 dBFS"
         ));
+    }
+    if let Some(a) = s.osc_target
+        && (a.ip().is_unspecified() || a.port() == 0)
+    {
+        return Err(format!("osc_target {a} is not an address to send to"));
     }
     for (i, o) in s.outputs.iter().enumerate() {
         if s.outputs[..i].iter().any(|x| x.channel == o.channel) {
@@ -253,6 +266,7 @@ mod tests {
         let want = RigSettings {
             ceiling_dbfs: Some(-40.0),
             outputs: vec![label(0, "Main L"), label(3, "Sub")],
+            osc_target: Some("192.168.1.20:9000".parse().expect("addr")),
         };
         store.persist(&want).expect("write");
         let (_, got) = RigStore::open(&p);
@@ -261,6 +275,13 @@ mod tests {
         // A lower bound given at start wins over the value kept.
         assert_eq!(start_ceiling(got.ceiling_dbfs, -50.0), -50.0);
         assert_eq!(start_ceiling(None, -10.0), -10.0);
+        // A file without a target (written before there were cues) reads as none.
+        std::fs::write(
+            &p,
+            r#"{"format":"ac2-rig-settings","version":1,"ceiling_dbfs":null,"outputs":[]}"#,
+        )
+        .expect("write");
+        assert_eq!(RigStore::open(&p).1, RigSettings::default());
     }
 
     #[test]
