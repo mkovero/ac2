@@ -17,6 +17,7 @@
 //! [`spl::spl_readout`].
 #![forbid(unsafe_code)]
 
+pub mod artnet;
 pub mod audio;
 pub mod autosave;
 pub mod axis;

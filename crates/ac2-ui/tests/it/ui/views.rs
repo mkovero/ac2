@@ -797,12 +797,20 @@ fn rig_monitor_views() {
                 sent: 128,
                 last_error: None,
             },
+            artnet_target: Some(ac2_proto::model::ArtnetTarget {
+                addr: "192.168.1.50:6454".parse().expect("addr"),
+                universe: "0.0.1".parse().expect("universe"),
+            }),
+            artnet: OutputStatus {
+                sent: 64,
+                last_error: None,
+            },
+            dmx: ac2_proto::model::parse_dmx_list("12=255 14=40").expect("levels"),
             cues: vec![RigCue {
                 meas: MeasId(40),
                 subject: CueSubject::Meter,
                 state: CueState::Near,
             }],
-            ..Default::default()
         }));
     }
     let mut h = harness(options(Some(&rig)));
@@ -834,7 +842,7 @@ fn leq_page_holds_its_scroll_while_the_rig_meters() {
     use ac2_proto::Change;
     use ac2_proto::Patch;
     use ac2_proto::model::{
-        BandLeqPreset, CueState, CueSubject, MeasKind, MeasScope, OscStatus, Rig, RigCue,
+        BandLeqPreset, CueState, CueSubject, MeasKind, MeasScope, OutputStatus, Rig, RigCue,
     };
     use ac2_proto::units::{MeasId, Rev};
     if !have_gpu("leq_page_holds_its_scroll_while_the_rig_meters") {
@@ -844,10 +852,17 @@ fn leq_page_holds_its_scroll_while_the_rig_meters() {
         rev: Rev(5),
         osc_target: Some("192.168.1.20:9000".parse().expect("addr")),
         monitor_at_start: true,
-        osc: OscStatus {
+        osc: OutputStatus {
             sent: n,
             last_error: None,
         },
+        artnet: OutputStatus {
+            sent: n,
+            last_error: None,
+        },
+        dmx: ac2_proto::model::parse_dmx_list(if n.is_multiple_of(2) { "12=80" } else { "" })
+            .expect("levels"),
+        artnet_target: None,
         cues: vec![RigCue {
             meas,
             subject: CueSubject::Meter,

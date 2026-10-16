@@ -329,3 +329,248 @@ fn the_tree_lists_rig_meters_first_with_their_chip() {
     t.st.update(Msg::OpenRig, &t.keys);
     assert_eq!(t.st.overlay.settings().map(|s| s.page), Some(Page::Rig));
 }
+
+/// The Art-Net rows: the address and the universe go out together as one `artnet.target`
+/// on the rev the page shows, Enter on either row; a bad address or universe says why under
+/// its row and sends nothing; an empty address turns sending off.
+#[test]
+fn the_rig_page_sends_the_artnet_target_on_the_rev_it_shows() {
+    let mut t = T::new();
+    t.conn(mirror(with_rig(7)));
+    t.st.update(Msg::OpenRig, &t.keys);
+    let focus = |t: &mut T, row| {
+        t.st.update(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
+    };
+    focus(&mut t, RigRow::ArtnetTarget);
+    t.text("node.local");
+    assert!(call(&t.key("Enter")).is_none());
+    assert!(
+        rig_page(&t)
+            .error
+            .as_deref()
+            .expect("a refusal")
+            .contains("IPv4 address")
+    );
+    for _ in 0.."node.local".len() {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    t.text("2.255.255.255");
+    // No universe yet: Enter says to type one.
+    assert!(call(&t.key("Enter")).is_none());
+    assert_eq!(
+        rig_page(&t).error.as_deref(),
+        Some("type the universe too, like 0.0.1 or 1")
+    );
+    t.key("ArrowDown");
+    assert_eq!(rig_page(&t).focus, RigRow::Universe);
+    assert_eq!(rig_page(&t).error, None, "the refusal stays with its row");
+    t.text("0.16.0");
+    assert!(call(&t.key("Enter")).is_none());
+    assert_eq!(
+        rig_page(&t).error.as_deref(),
+        Some("\"0.16.0\": net is 0–127, sub-net 0–15, universe 0–15")
+    );
+    // Enter left the text selected: the next key replaces it.
+    assert!(rig_page(&t).selected);
+    t.text("0.0.1");
+    let r = t.key("Enter");
+    let (cmd, what) = call(&r).expect("artnet.target");
+    assert_eq!(
+        cmd,
+        &Command::ArtnetTarget {
+            base: Rev(7),
+            target: Some(ac2_proto::model::ArtnetTarget {
+                addr: "2.255.255.255:6454".parse().expect("test value"),
+                universe: ac2_proto::model::PortAddress::new(1).expect("test value"),
+            }),
+        }
+    );
+    assert_eq!(what, "Art-Net target 2.255.255.255:6454 universe 0.0.1 (1)");
+    // The mirror brings it: the rows show the rig's target, the universe as net.sub.uni.
+    let mut s = with_rig(8);
+    s.rig.artnet_target =
+        ac2_scene::artnet::parse_target("2.255.255.255", "1").expect("test value");
+    t.conn(mirror(s));
+    let p = rig_page(&t);
+    assert_eq!(
+        (p.artnet.as_str(), p.universe.as_str(), p.rev),
+        ("2.255.255.255:6454", "0.0.1", Rev(8))
+    );
+    // Emptied: off, whatever the universe says.
+    focus(&mut t, RigRow::ArtnetTarget);
+    t.st.update(Msg::Backspace, &t.keys);
+    let r = t.key("Enter");
+    assert_eq!(
+        call(&r),
+        Some((
+            &Command::ArtnetTarget {
+                base: Rev(8),
+                target: None,
+            },
+            "Art-Net target off"
+        ))
+    );
+}
+
+/// Send DMX test: the typed levels go out as `artnet.test`; with no target, or levels that
+/// do not read, Enter says why and sends nothing.
+#[test]
+fn the_rig_page_sends_a_dmx_test() {
+    let mut t = T::new();
+    t.conn(mirror(with_rig(7)));
+    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.update(
+        Msg::Settings(SettingsMsg::RigFocus(RigRow::DmxTest)),
+        &t.keys,
+    );
+    assert_eq!(rig_page(&t).dmx_test, "1=255");
+    assert!(call(&t.key("Enter")).is_none());
+    assert_eq!(
+        rig_page(&t).error.as_deref(),
+        Some("no Art-Net target: set one above first")
+    );
+    let mut s = with_rig(7);
+    s.rig.artnet_target = ac2_scene::artnet::parse_target("10.0.0.40", "0").expect("test value");
+    t.conn(mirror(s));
+    let r = t.key("Enter");
+    let Some((Command::ArtnetTest { channels }, what)) = call(&r) else {
+        panic!("{r:?}")
+    };
+    assert_eq!(ac2_proto::model::dmx_list_text(channels), "1=255");
+    assert_eq!(what, "DMX test 1=255 sent");
+    t.text("1=255 2=300");
+    assert!(call(&t.key("Enter")).is_none());
+    assert_eq!(
+        rig_page(&t).error.as_deref(),
+        Some("\"2=300\": the value is a number 0–255")
+    );
+}
+
+/// Another client changed the rig settings while this one typed an Art-Net target: the
+/// stale edit is refused, both typed rows stay on the rig's newer rev with the line saying
+/// Enter again overwrites.
+#[test]
+fn a_conflict_keeps_the_typed_artnet_target() {
+    let mut t = T::new();
+    t.conn(mirror(with_rig(3)));
+    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.update(
+        Msg::Settings(SettingsMsg::RigFocus(RigRow::ArtnetTarget)),
+        &t.keys,
+    );
+    t.text("10.0.0.40:6455");
+    t.key("ArrowDown");
+    t.text("17");
+    let mut s = with_rig(4);
+    s.rig.artnet_target = ac2_scene::artnet::parse_target("10.0.0.9", "2").expect("test value");
+    t.conn(mirror(s.clone()));
+    assert_eq!(rig_page(&t).universe, "17", "typed: the mirror leaves it");
+    let r = t.key("Enter");
+    let Some((Command::ArtnetTarget { base, .. }, what)) = call(&r) else {
+        panic!("{r:?}")
+    };
+    assert_eq!(*base, Rev(3));
+    let what = what.to_owned();
+    assert_eq!(what, "Art-Net target 10.0.0.40:6455 universe 0.1.1 (17)");
+    t.conn(ConnEvent::Conflict {
+        what: what.clone(),
+        error: "conflict: stale base".into(),
+    });
+    assert_eq!(
+        t.last_toast(),
+        format!("{what}: changed elsewhere — not applied, your edits kept")
+    );
+    let p = rig_page(&t);
+    assert_eq!(
+        (p.artnet.as_str(), p.universe.as_str(), p.rev),
+        ("10.0.0.40:6455", "17", Rev(4))
+    );
+    assert_eq!(
+        p.notice.as_deref(),
+        Some("changed elsewhere: Enter again overwrites with your edit")
+    );
+    s.rig.rev = Rev(5);
+    t.conn(mirror(s));
+    assert_eq!(rig_page(&t).artnet, "10.0.0.40:6455");
+    let r = t.key("Enter");
+    assert!(matches!(
+        call(&r),
+        Some((
+            Command::ArtnetTarget {
+                base: Rev(5),
+                target: Some(_)
+            },
+            _
+        ))
+    ));
+}
+
+/// A cue row's DMX line: ↓ from a state's message reaches its levels; levels that do not
+/// read refuse Enter naming the subject; typed levels go out in `meas.update` on the rev
+/// the editor opened on, beside the message of the same state.
+#[test]
+fn the_limit_editor_sends_dmx_cue_levels() {
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    t.type_key("Shift+L", "L");
+    let opened = t.st.overlay.leq().expect("test value").base_rev;
+    t.st.update(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
+    t.key("ArrowRight");
+    t.key("ArrowDown");
+    t.text("/light/red 1");
+    t.key("ArrowDown");
+    assert_eq!(
+        t.st.overlay.leq().expect("test value").focus,
+        Focus::Cue {
+            row: CueRow::Meter,
+            col: CueCol::Dmx(CueState::Over),
+        }
+    );
+    assert_eq!(
+        t.st.overlay.leq().expect("test value").cue_fold_text(),
+        "shown · 1 message set"
+    );
+    t.text("12=255 13=300");
+    t.key("Enter");
+    assert_eq!(
+        t.st.overlay.leq().expect("still open").error.as_deref(),
+        Some("DMX cue of the meter: \"13=300\": the value is a number 0–255")
+    );
+    for _ in 0.."300".len() {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    t.text("0");
+    // Tab: the next state's levels.
+    t.key("Tab");
+    assert_eq!(
+        t.st.overlay.leq().expect("test value").focus,
+        Focus::Cue {
+            row: CueRow::Meter,
+            col: CueCol::Dmx(CueState::Near),
+        }
+    );
+    t.text("14=40");
+    assert_eq!(
+        t.st.overlay.leq().expect("test value").cue_fold_text(),
+        "shown · 1 message set · DMX in 2 states"
+    );
+    let r = t.key("Enter");
+    let Some((Command::MeasUpdate { base, config, .. }, _)) = call(&r) else {
+        panic!("{r:?}")
+    };
+    assert_eq!(*base, opened);
+    let MeasKind::Spl { config } = &config.kind else {
+        panic!()
+    };
+    let cue = config.cue.as_ref().expect("meter cue");
+    let over = cue.over.as_ref().expect("over");
+    assert_eq!(
+        over.osc.as_ref().map(|m| m.path.as_str()),
+        Some("/light/red")
+    );
+    assert_eq!(ac2_proto::model::dmx_list_text(&over.dmx), "12=255 13=0");
+    let near = cue.near.as_ref().expect("near");
+    assert_eq!(near.osc, None);
+    assert_eq!(ac2_proto::model::dmx_list_text(&near.dmx), "14=40");
+    assert!(cue.ok.is_none() && cue.fault.is_none());
+}

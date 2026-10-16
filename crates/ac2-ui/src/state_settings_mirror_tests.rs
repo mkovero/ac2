@@ -27,6 +27,12 @@ fn tick(s: &mut State, n: u64) {
         },
     }];
     s.rig.osc.sent = n;
+    s.rig.artnet.sent = n;
+    s.rig.dmx = if n.is_multiple_of(2) {
+        ac2_proto::model::parse_dmx_list("12=255 14=40").expect("test value")
+    } else {
+        vec![]
+    };
     s.rig.cues = vec![RigCue {
         meas: MeasId(4),
         subject: CueSubject::Meter,
@@ -129,7 +135,8 @@ fn the_rig_page_types_through_mirror_updates() {
     assert_eq!(msg.path.as_str(), "/fx/go");
     assert!(what.contains("/fx/go 4"), "{what}");
     // The target: the rig's is selected, typed over key by key through updates.
-    t.key("ArrowDown");
+    t.key("ArrowUp");
+    t.key("ArrowUp");
     assert_eq!(settings(&t).rig.focus, RigRow::Target);
     assert_eq!(settings(&t).rig.target, "10.0.0.9:9000");
     for (n, c) in "10.0.0.5:9001".chars().enumerate() {
@@ -142,6 +149,56 @@ fn the_rig_page_types_through_mirror_updates() {
             r,
             Request::Call { cmd: Command::OscTarget { addr: Some(a), .. }, .. }
                 if a.to_string() == "10.0.0.5:9001"
+        )),
+        "{r:?}"
+    );
+}
+
+/// The Art-Net rows while the rig meters and its frame count and channels move: the
+/// address, the universe and the test levels type as keys come, and Enter sends them.
+#[test]
+fn the_rig_page_types_artnet_through_mirror_updates() {
+    let mut t = T::new();
+    let mut s = with_spl();
+    s.rig.artnet_target = ac2_scene::artnet::parse_target("10.0.0.9", "3").expect("test value");
+    tick(&mut s, 0);
+    t.conn(mirror(s.clone()));
+    t.st.update(Msg::OpenRig, &t.keys);
+    let mut n = 1;
+    for (row, typed) in [
+        (RigRow::ArtnetTarget, "2.255.255.255"),
+        (RigRow::Universe, "0.0.1"),
+        (RigRow::DmxTest, "12=255 13=40"),
+    ] {
+        t.st.update(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
+        // The rig's text is selected: the first key replaces it.
+        for c in typed.chars() {
+            t.text(&c.to_string());
+            update_holds(&mut t, &mut s, n);
+            n += 1;
+        }
+    }
+    let p = &settings(&t).rig;
+    assert_eq!(
+        (p.artnet.as_str(), p.universe.as_str(), p.dmx_test.as_str()),
+        ("2.255.255.255", "0.0.1", "12=255 13=40")
+    );
+    let r = t.key("Enter");
+    assert!(
+        r.iter().any(|r| matches!(
+            r,
+            Request::Call { cmd: Command::ArtnetTest { channels }, .. }
+                if ac2_proto::model::dmx_list_text(channels) == "12=255 13=40"
+        )),
+        "{r:?}"
+    );
+    t.key("ArrowUp");
+    let r = t.key("Enter");
+    assert!(
+        r.iter().any(|r| matches!(
+            r,
+            Request::Call { cmd: Command::ArtnetTarget { target: Some(a), .. }, .. }
+                if a.addr.to_string() == "2.255.255.255:6454" && a.universe.get() == 1
         )),
         "{r:?}"
     );
@@ -167,4 +224,19 @@ fn no_settings_page_resets_on_mirror_updates() {
             n += 1;
         }
     }
+    // The Rig monitor page's Art-Net rows, each with something typed; and the Art-Net
+    // target changed elsewhere while the universe is typed leaves the typed rows alone.
+    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Rig)), &t.keys);
+    for row in [RigRow::ArtnetTarget, RigRow::Universe, RigRow::DmxTest] {
+        t.st.update(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
+        t.text("7");
+        for _ in 0..3 {
+            update_holds(&mut t, &mut s, n);
+            n += 1;
+        }
+    }
+    s.rig.artnet_target = ac2_scene::artnet::parse_target("10.0.0.9", "3").expect("test value");
+    update_holds(&mut t, &mut s, n);
+    let p = &settings(&t).rig;
+    assert_eq!((p.artnet.as_str(), p.universe.as_str()), ("7", "7"));
 }

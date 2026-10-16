@@ -1,9 +1,9 @@
 //! The Rig monitor page and the cue chip the tree and the page draw. Every text comes from
-//! `ac2_scene::osc` and [`crate::settings::RigPage`].
+//! `ac2_scene::osc`, `ac2_scene::artnet` and [`crate::settings::RigPage`].
 
 use ac2_proto::model::{CueState, Rig};
-use ac2_scene::osc;
 use ac2_scene::theme::Theme;
+use ac2_scene::{artnet, osc};
 use eframe::egui::{self, RichText};
 
 use crate::settings::{RigRow, Settings};
@@ -33,6 +33,9 @@ pub(super) fn rig_page(
     let p = &s.rig;
     for row in RigRow::ALL {
         let focused = p.focus == row;
+        if row == RigRow::ArtnetTarget {
+            ui.add_space(10.0);
+        }
         ui.horizontal(|ui| {
             let marker = if focused { "▸" } else { " " };
             ui.label(RichText::new(marker).color(ch.focus).monospace());
@@ -49,11 +52,26 @@ pub(super) fn rig_page(
                 },
             );
             match row {
-                RigRow::Target | RigRow::Test => {
-                    let text = if row == RigRow::Target {
-                        &p.target
-                    } else {
-                        &p.test
+                RigRow::Monitor => {
+                    let on = rig.monitor_at_start;
+                    let r = ui.add(egui::Button::selectable(
+                        focused,
+                        RichText::new(osc::monitor_text(on)).color(ch.text),
+                    ));
+                    if focused {
+                        super::settings::reveal_focused(&r);
+                    }
+                    if r.clicked() {
+                        *msg = Some(Msg::Settings(SettingsMsg::RigMonitor(!on)));
+                    }
+                }
+                _ => {
+                    let text = match row {
+                        RigRow::Target => &p.target,
+                        RigRow::Test => &p.test,
+                        RigRow::ArtnetTarget => &p.artnet,
+                        RigRow::Universe => &p.universe,
+                        _ => &p.dmx_test,
                     };
                     let sel = focused && p.selected && !text.is_empty();
                     let shown = if sel {
@@ -72,28 +90,18 @@ pub(super) fn rig_page(
                         t.color(ch.text)
                     };
                     let r = ui.add_sized([220.0, 20.0], egui::Button::selectable(focused, t));
+                    if focused {
+                        super::settings::reveal_focused(&r);
+                    }
                     if r.clicked() {
                         *msg = Some(Msg::Settings(SettingsMsg::RigFocus(row)));
                     }
-                    let action = if row == RigRow::Target {
-                        "Apply"
-                    } else {
-                        "Send"
+                    let action = match row {
+                        RigRow::Test | RigRow::DmxTest => "Send",
+                        _ => "Apply",
                     };
                     if ui.button(action).clicked() {
                         *msg = Some(Msg::Settings(SettingsMsg::RigApply(row)));
-                    }
-                }
-                RigRow::Monitor => {
-                    let on = rig.monitor_at_start;
-                    if ui
-                        .add(egui::Button::selectable(
-                            focused,
-                            RichText::new(osc::monitor_text(on)).color(ch.text),
-                        ))
-                        .clicked()
-                    {
-                        *msg = Some(Msg::Settings(SettingsMsg::RigMonitor(!on)));
                     }
                 }
             }
@@ -101,29 +109,41 @@ pub(super) fn rig_page(
         let note = match row {
             RigRow::Target => Some(osc::TARGET_NOTE),
             RigRow::Test => Some(osc::TEST_NOTE),
+            RigRow::ArtnetTarget => Some(artnet::TARGET_NOTE),
+            RigRow::Universe => Some(artnet::UNIVERSE_NOTE),
+            RigRow::DmxTest => Some(artnet::TEST_NOTE),
             RigRow::Monitor => None,
         };
-        if let Some(n) = note {
-            ui.horizontal(|ui| {
-                ui.add_space(190.0);
-                ui.label(RichText::new(n).small().color(ch.dim));
-            });
+        let error = p.error.as_deref().filter(|_| focused);
+        for (text, color) in [(note, ch.dim), (error, ch.fault)] {
+            if let Some(n) = text {
+                ui.horizontal(|ui| {
+                    ui.add_space(190.0);
+                    ui.label(RichText::new(n).small().color(color));
+                });
+            }
+        }
+        // A kept target's line, under its own group.
+        if let Some(n) = &p.notice
+            && ((row == RigRow::Test && p.edited) || (row == RigRow::DmxTest && !p.edited))
+        {
+            ui.label(RichText::new(n).color(ch.warn));
         }
         ui.add_space(4.0);
+        let status = |ui: &mut egui::Ui, line: String, err: bool| {
+            ui.label(RichText::new(line).color(if err { ch.warn } else { ch.dim }));
+        };
+        if row == RigRow::Test {
+            status(ui, osc::status_line(rig), rig.osc.last_error.is_some());
+        } else if row == RigRow::DmxTest {
+            status(
+                ui,
+                artnet::status_line(rig),
+                rig.artnet.last_error.is_some(),
+            );
+            status(ui, artnet::channels_line(rig), false);
+        }
     }
-    if let Some(n) = &p.notice {
-        ui.label(RichText::new(n).color(ch.warn));
-    }
-    if let Some(e) = &p.error {
-        ui.label(RichText::new(e).color(ch.fault));
-    }
-    ui.add_space(8.0);
-    let status_color = if rig.osc.last_error.is_some() {
-        ch.warn
-    } else {
-        ch.dim
-    };
-    ui.label(RichText::new(osc::status_line(rig)).color(status_color));
     ui.add_space(10.0);
     ui.label(RichText::new(osc::METERS_TITLE).strong().color(ch.text));
     if meters.is_empty() {

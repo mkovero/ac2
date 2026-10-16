@@ -329,11 +329,11 @@ fn toggle(
     }
 }
 
-/// The rig's rows: whether the rig keeps the meter, then the OSC cues — folded until
-/// shown, one row per cued subject (the meter first) with a line per state and the level
-/// toggle, a bad line's reason beside its row.
+/// The rig's rows: whether the rig keeps the meter, then the cues — folded until shown, one
+/// row per cued subject (the meter first): a message per state and the level toggle, under
+/// it the DMX levels per state, a bad field's reason under the row.
 fn rig_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: &Chrome) {
-    use ac2_scene::osc;
+    use ac2_scene::{artnet, osc};
     ui.label(RichText::new("Rig").strong());
     egui::Grid::new("ac2-leq-rig")
         .num_columns(2)
@@ -401,13 +401,31 @@ fn rig_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: &
                         CueCol::Append => {
                             toggle(ui, osc::append_text(c.append), c.append, f, at, msg, ch);
                         }
+                        CueCol::Dmx(_) => {}
                     }
                 }
                 ui.end_row();
-                if let Some((s, e)) = error {
+                ui.label(RichText::new(artnet::CUE_LINE).small().color(ch.dim));
+                for col in CueCol::DMX {
+                    let CueCol::Dmx(s) = col else { continue };
+                    let at = Focus::Cue { row, col };
+                    sized_text_cell(
+                        ui,
+                        130.0,
+                        c.dmx_of(s),
+                        d.focus == at,
+                        d.selected,
+                        "—",
+                        at,
+                        msg,
+                        ch,
+                    );
+                }
+                ui.end_row();
+                if let Some((col, e)) = error {
                     ui.label("");
                     ui.label(
-                        RichText::new(format!("{}: {e}", osc::field_title(s)))
+                        RichText::new(format!("{}: {e}", col.field_name()))
                             .small()
                             .color(ch.fault),
                     );

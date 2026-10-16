@@ -31,11 +31,12 @@ pub const TARGET_NOTE: &str =
 /// Under the test row.
 pub const TEST_NOTE: &str = "Enter sends this message once: an address, then its arguments";
 /// The cues' section of an SPL meter's limit editor.
-pub const CUES_TITLE: &str = "OSC cues";
-/// What a cue line is, under the cues' heading.
-pub const CUES_NOTE: &str = "sent to the rig's OSC target when a state begins, then every second: \
-                             an address, then arguments (/light/1 1.0); Level appends the level \
-                             in dB SPL";
+pub const CUES_TITLE: &str = "Cues";
+/// What a cue's two lines are, under the cues' heading.
+pub const CUES_NOTE: &str = "OSC: sent to the rig's OSC target when a state begins, then every \
+                             second: an address, then arguments (/light/1 1.0); Level appends \
+                             the level in dB SPL. DMX: channel=value levels (12=255 13=0) held \
+                             in the rig's Art-Net universe while the state is current";
 /// The heading over the rig's meters on the Rig monitor page.
 pub const METERS_TITLE: &str = "Meters on the rig";
 /// The Rig monitor page with no rig meter.

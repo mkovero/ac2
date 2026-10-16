@@ -60,7 +60,8 @@ pub enum Page {
     Display,
     /// The daemon link, this client's key, the server's mode and keys.
     Connection,
-    /// Where the rig's OSC cues go, monitoring from daemon start, the rig's meters.
+    /// Where the rig's OSC cues and Art-Net universe go, monitoring from daemon start, the
+    /// rig's meters.
     Rig,
 }
 
@@ -140,8 +141,8 @@ impl Page {
                  Delete revokes a client (twice) · Esc closes"
             }
             Page::Rig => {
-                "↑↓ move · type the target or the test message · Enter applies the target, \
-                 sends the test · ←→ or Enter on Monitor at start · Esc closes"
+                "↑↓ move · type a target or a test · Enter applies the target, sends the \
+                 test · ←→ or Enter on Monitor at start · Esc closes"
             }
         };
         text.to_owned()

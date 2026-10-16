@@ -5,7 +5,7 @@
 //! measuring-position correction, typed; last the band meter ([`bands`]): off, on or a
 //! rule's preset, its windows (one band each, a row like a Leq window's; a range row adds
 //! one per band), the §13 corrections, the transfer as it stands; then the rig: whether
-//! the rig keeps the meter across session loads, and the OSC cues ([`cues`]), folded until
+//! the rig keeps the meter across session loads, and the cues ([`cues`]), folded until
 //! shown.
 //! Pure data; the reducer routes keys here and the view draws it. Enter sends the meter's
 //! configuration with the new windows (`meas.update`, applied in place by the daemon).
@@ -148,7 +148,7 @@ pub enum Focus {
     Band(BandFocus),
     /// Whether the rig keeps the meter ([`ac2_scene::osc::KEEP_ON_RIG`]).
     Scope,
-    /// The OSC cues' fold: shown or hidden.
+    /// The cues' fold: shown or hidden.
     CueFold,
     /// A cell of a cue row, last.
     Cue { row: CueRow, col: CueCol },
@@ -163,7 +163,7 @@ pub struct Row {
     pub limit: String,
     /// Typed warn margin.
     pub margin: String,
-    /// Its OSC cue.
+    /// Its cue.
     pub cue: CueEdit,
 }
 
@@ -382,6 +382,7 @@ impl LeqDialog {
         if self.cues_shown {
             for row in self.cue_rows() {
                 t.push(CueCol::ALL.map(|col| Focus::Cue { row, col }).to_vec());
+                t.push(CueCol::DMX.map(|col| Focus::Cue { row, col }).to_vec());
             }
         }
         t
@@ -453,12 +454,25 @@ impl LeqDialog {
             .filter_map(|r| self.cue_edit(r))
             .map(CueEdit::set)
             .sum();
+        let dmx: usize = self
+            .cue_rows()
+            .into_iter()
+            .filter_map(|r| self.cue_edit(r))
+            .map(CueEdit::dmx_set)
+            .sum();
         let shown = if self.cues_shown { "shown" } else { "hidden" };
-        match n {
-            0 => format!("{shown} · none set"),
-            1 => format!("{shown} · 1 message set"),
-            n => format!("{shown} · {n} messages set"),
+        let mut t = match (n, dmx) {
+            (0, 0) => return format!("{shown} · none set"),
+            (0, _) => format!("{shown} · no message set"),
+            (1, _) => format!("{shown} · 1 message set"),
+            (n, _) => format!("{shown} · {n} messages set"),
+        };
+        match dmx {
+            0 => {}
+            1 => t.push_str(" · DMX in 1 state"),
+            k => t.push_str(&format!(" · DMX in {k} states")),
         }
+        t
     }
 
     /// The band section's row and cell of `b`.
@@ -542,7 +556,7 @@ impl LeqDialog {
         let cell = match self.focus {
             Focus::Band(b) => self.band_at(b).1,
             Focus::Window { col, .. } => Col::ALL.iter().position(|c| *c == col).unwrap_or(0),
-            Focus::Cue { col, .. } => CueCol::ALL.iter().position(|c| *c == col).unwrap_or(0),
+            Focus::Cue { col, .. } => col.cell(),
             _ => 0,
         };
         self.set_row(i, self.col(), cell);
@@ -637,7 +651,7 @@ impl LeqDialog {
                 };
                 match col {
                     CueCol::Append => c.append = d > 0,
-                    CueCol::State(_) => return,
+                    CueCol::State(_) | CueCol::Dmx(_) => return,
                 }
             }
             Focus::Window { row, col } => {
@@ -677,12 +691,8 @@ impl LeqDialog {
     }
 
     fn text_mut(&mut self) -> Option<&mut String> {
-        if let Focus::Cue {
-            row,
-            col: CueCol::State(s),
-        } = self.focus
-        {
-            return self.cue_edit_mut(row).map(|c| c.text_mut(s));
+        if let Focus::Cue { row, col } = self.focus {
+            return self.cue_edit_mut(row).and_then(|c| c.cell_mut(col));
         }
         if let Focus::Band(b) = self.focus {
             return self.bands.text_mut(b);

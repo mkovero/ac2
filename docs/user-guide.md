@@ -2260,6 +2260,13 @@ ac2 rig status                            # target, frames sent, the channels ab
 The target is kept in the rig settings like the OSC target. `ac2 artnet test` holds its
 frame for 5 s, or until a cue changes state, then the cues' frame comes back.
 
+In the app, Settings › Rig monitor has the same controls under the OSC ones: **Art-Net
+target** (`ip[:port]`, IPv4; empty: off) and **Universe** (`N` or `net.sub.uni`), applied
+together by Enter on either row; **Send DMX test** (`1=255` to start), which Enter sends;
+and a status line with the target, the frames sent, the last error and the channels above 0.
+On the SPL / Leq page each cue row has a DMX line under its OSC line, one field per state
+(`12=255 13=0`); a field that does not read keeps Enter from applying and says which.
+
 ## Keyboard
 
 Everything in the app is reachable from the keyboard.
