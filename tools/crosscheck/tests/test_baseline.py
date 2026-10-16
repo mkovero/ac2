@@ -308,3 +308,20 @@ def test_a_signed_extreme_moves_by_its_size():
     assert not B.gates(B.diff(run(-0.14, extreme=False), run(0.16), TOL))
     # an ordinary signed value keeps its sign
     assert B.gates(B.diff(run(-0.14, extreme=False), run(0.16, extreme=False), TOL))
+
+
+def test_a_reading_near_its_floor_moves_by_more_than_its_noise():
+    def run(v, nu=None):
+        c = chk("xone.dut.h2.steady sine.50", "dut", v, tol=(0.1, 0.3))
+        if nu is not None:
+            c["detail"] = {"noise_u": nu}
+        return B.make_baseline(B.annotate(results([c]), {}), "xone", "r")
+    # 42 dB above the floor: one take within ±0.066 dB, so +0.033 → −0.032 is the noise
+    assert run(0.033, 0.066)["checks"]["xone.dut.h2.steady sine.50"]["noise_u"] == pytest.approx(0.066)
+    assert not B.gates(B.diff(run(0.033, 0.066), run(-0.032, 0.066), TOL))
+    # a baseline written before noise_u takes the run's
+    assert not B.gates(B.diff(run(0.033), run(-0.032, 0.066), TOL))
+    # beyond twice the noise it moved
+    assert B.gates(B.diff(run(0.033, 0.066), run(-0.12, 0.066), TOL))
+    # without noise the unit step and half the pass limit hold
+    assert B.gates(B.diff(run(0.033), run(-0.032), TOL))

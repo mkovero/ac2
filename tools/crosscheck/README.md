@@ -424,7 +424,9 @@ against the sine.
 - **compare** lists, per stage, the build pair, status changes (worse / better), judged
   values that moved more than max(unit step, half the pass limit) (`[compare]` in
   `tolerances.toml`; a signed extreme, such as the DUT grid's column of largest |Δ|, moves by
-  its size, since its sign is whichever noisy column wins the take), INFO / INCONCLUSIVE values
+  its size, since its sign is whichever noisy column wins the take; a DUT harmonic near its
+  floor carries `noise_u`, the most the floor's noise shifts one take, and may move by twice
+  that), INFO / INCONCLUSIVE values
   that moved (context only), and checks new or
   missing. It writes `report/compare.md` and exits 1 when a status got worse or a judged value
   moved, so it can gate.

@@ -32,7 +32,7 @@ STATUSES = ("FAIL", "WARN", "INCONCLUSIVE", "PASS", "INFO")
 # Kept from a check's detail: the population a statistic was taken over (`n` columns, bins or
 # bands, `of` the band's columns before any mask) and, where the value folds a signed mean and a spread into one number, both parts: a
 # max(|mean|, spread) alone hides the sign a residual's direction needs across takes.
-DETAIL_KEPT = ("n", "of", "mean", "spread")
+DETAIL_KEPT = ("n", "of", "mean", "spread", "noise_u")
 # A host stage needs no rig (it runs the analysers offline on files), so a run of it is one
 # stage whatever paths its checks carry (the OSM stage's paths are its cases), it plays nothing
 # (no level), and its baseline lives under `baselines/host/`.
@@ -262,14 +262,16 @@ def compare_settings(tol: dict) -> tuple[dict[str, float], float]:
     return {str(k): float(v) for k, v in c.get("step", {}).items()}, float(c.get("pass_fraction", 0.5))
 
 
-def step_for(entry: dict, steps: dict[str, float], frac: float) -> float:
+def step_for(entry: dict, steps: dict[str, float], frac: float, noise_u: float = 0.0) -> float:
     """A value has moved when it changed by more than the unit's step or `frac` of the check's
     pass limit, whichever is larger: a reading whose limit is wide (a harmonic vs the sine,
-    within 3 dB) is that much noisier take to take than a band mean held to 0.03 dB."""
+    within 3 dB) is that much noisier take to take than a band mean held to 0.03 dB. A reading
+    near its noise floor (`noise_u`, the most one take's noise can shift it) may differ by
+    twice that between two takes."""
     s = steps.get(entry.get("unit") or "", steps.get("", 0.0))
     if entry.get("tol"):
         s = max(s, frac * abs(entry["tol"][0]))
-    return s
+    return max(s, 2 * noise_u)
 
 
 def _base(key: str):
@@ -308,7 +310,8 @@ def diff(base: dict, cur: dict, tol: dict) -> dict:
         if b["status"] != c["status"]:
             (worse if RANK.get(c["status"], 0) > RANK.get(b["status"], 0) else better).append(row)
         if b["value"] is not None and c["value"] is not None and b.get("unit") == c.get("unit"):
-            st = step_for(c if c.get("tol") else b, steps, frac)
+            st = step_for(c if c.get("tol") else b, steps, frac,
+                          max(b.get("noise_u") or 0.0, c.get("noise_u") or 0.0))
             # A signed extreme (the column of largest |Δ|) takes its sign from whichever noisy
             # column wins this take: what the limit judges, and what can move, is its size.
             d = (abs(c["value"]) - abs(b["value"]) if c.get("extreme") or b.get("extreme")

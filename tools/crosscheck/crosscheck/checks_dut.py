@@ -187,9 +187,15 @@ class DutChecks:
                     title=f"{name} H{k} at {fc:g} Hz vs analytic", unit="dB", tol=tol)
         if d is not None:
             st = judge(d, tol)
+            # Noise at the floor adds to the harmonic's phasor in any phase: one take reads up to
+            # 20·lg(1 + 10^((floor − reading)/20)) off, which compare allows twice between takes.
+            fl = ca.get("floor")
+            nu = (float(20 * np.log10(1 + 10 ** ((fl - ca["value"]) / 20)))
+                  if fl is not None and np.isfinite(fl) else None)
             self.add(**base, value=d, status=st,
                      meaning=f"{name} {ca['value']:.2f} dBr{where}, truth {truth:.2f} dBr"
-                             + (f"; {note}" if note else ""))
+                             + (f"; {note}" if note else ""),
+                     detail={"noise_u": nu} if nu is not None else {})
         elif truth > ca["bound"] + tol[1]:
             st = "FAIL"
             self.add(**base, value=None, status=st,
