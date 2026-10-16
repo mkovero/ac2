@@ -105,6 +105,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
+| e3269ade | 2026-10-16 | 53 / 27 | app only (ketunkolo, Pi; pupu daemon stays on af019f24): cue lines and Rig monitor texts edited at a caret, "+ dB SPL" toggle (was "Level"), cue fold kept across Apply |
 | af019f24 | 2026-10-16 | 53 / 27 | Art-Net DMX cues (one universe, channel=value per cue state, HTP, on change + 1 s keepalive; `ac2 artnet`, `ac2 cue`, Rig monitor page rows); `autosave.v26` salvaged: 5 measurements + 3 traces, FOH SPL Leq history skipped (exported to ketunkolo `~/ac2-test/foh-spl-leq-pre-af019f24.csv`); session reopened `--in 1-8 --outputs 6`; `rig.json` kept the OSC target 192.168.9.25:7700 |
 | dec18de7 | 2026-10-16 | 52 / 26 | app only (ketunkolo, Pi; pupu daemon stays on ad18076e): Settings pages keep scroll and typed text while the mirror updates (Leq page reaches its Rig section, Send test types), Rig monitor sidebar entry aligned |
 | ad18076e | 2026-10-16 | 52 / 26 | rig monitor + OSC cues (rig-scoped SPL meters in `rig.json`, `osc.target`/`osc.test`, ok/near/over/fault cues resent each 1 s), rev-guarded `meas.update`, reply warnings; `autosave.v25` salvaged: 5 measurements + 3 traces restored, FOH SPL Leq history skipped (exported before to ketunkolo `~/ac2-test/foh-spl-leq-pre-ad18076e.csv`); session reopened `--in 1-8 --outputs 6`; `rig.json` read as is (no OSC target, monitor at start off) |
