@@ -207,3 +207,71 @@ pub(super) fn draw_history(
         x += canvas::text_width(name, theme.small_font_size) + 12.0;
     }
 }
+
+/// The caption of a strip looking back, along its top right in the dim text.
+pub(super) fn history_note(c: &mut Canvas, s: &HistoryStrip, text: &str, theme: &Theme) {
+    c.overlay.labels.push(label(
+        text.to_string(),
+        [s.plot.right() - 6.0, s.plot.y + 4.0],
+        anchor(HAlign::Right, VAlign::Top),
+        theme.small_font_size,
+        theme.text_dim,
+    ));
+}
+
+/// The cursor at daemon wall time `t` over the strip: a line across it and the readout
+/// beside it (on the side with room), a line per window in its colour, red where over.
+pub(super) fn history_cursor(
+    c: &mut Canvas,
+    s: &HistoryStrip,
+    t: f64,
+    r: &StripReadout,
+    theme: &Theme,
+) {
+    let span = (s.to - s.from).max(1e-9);
+    let x = s.plot.x + ((t - s.from) / span) as f32 * s.plot.w;
+    canvas::vline(
+        &mut c.overlay,
+        s.plot,
+        x,
+        Stroke::solid(theme.text_dim, 1.0),
+    );
+    let fs = theme.small_font_size;
+    let line_h = fs * 1.35;
+    let lines: Vec<(&str, Color)> = std::iter::once((r.time.as_str(), theme.text))
+        .chain(r.rows.iter().map(|row| {
+            let color = if row.over {
+                theme.banner_fault.background
+            } else {
+                theme.trace_color(row.window)
+            };
+            (row.text.as_str(), color)
+        }))
+        .collect();
+    let w = lines
+        .iter()
+        .map(|(t, _)| canvas::text_width(t, fs))
+        .fold(0.0, f32::max)
+        + 12.0;
+    let h = line_h * lines.len() as f32 + 8.0;
+    let left = if x + 8.0 + w <= s.plot.right() {
+        x + 8.0
+    } else {
+        (x - 8.0 - w).max(s.plot.x)
+    };
+    let top = s.plot.y + 20.0;
+    c.overlay.rects.push(FillRect {
+        rect: Rect::new(left, top, w, h),
+        color: theme.plot_background.with_alpha(0.88),
+        clip: None,
+    });
+    for (i, (text, color)) in lines.into_iter().enumerate() {
+        c.overlay.labels.push(label(
+            text.to_string(),
+            [left + 6.0, top + 4.0 + i as f32 * line_h],
+            anchor(HAlign::Left, VAlign::Top),
+            fs,
+            color,
+        ));
+    }
+}

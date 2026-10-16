@@ -1864,8 +1864,19 @@ the time before.
 - Settings › Display › **Leq windows** (palette *SPL Leq windows: columns / tiles*): columns
   or **tiles** (a grid with every figure written out).
 - Settings › Display › **Leq history strip** (palette *… history strip on / off*): each
-  window over time against its limit (dashed), red where over; the log's last 4 hours,
-  rebuilt by the daemon for a restarted or second app. A new log clears it.
+  window over time against its limit (dashed), red where over; live, it shows twice the
+  longest window (2 min … 2 h) up to the newest second, its last 4 hours rebuilt by the
+  daemon for a restarted or second app. A new log clears it.
+- **The strip as a graph**, over the whole log the daemon keeps (48 hours): the **wheel**
+  zooms time about the pointer, a **drag** pans it, **I** / **O** zoom and **←** / **→** pan
+  the focused pane's strip. Looking back, the caption at its top right says
+  **`history · 14:02–15:10 · Home: live`** (local times; seconds under 10 minutes, "loading"
+  while the span is fetched) and the axis reads the clock; **Home** returns to live. Older
+  spans come from the daemon at the strip's resolution: a point per second when zoomed in,
+  else each point the **highest** of its seconds, red if any of them was over.
+- **The pointer on the strip** reads that time: the second (or `16:42:00–16:43:00 ·
+  highest` span) and each window's Leq, limit and state (`LAeq 15 min 101.0 dB · limit
+  100.0 · over`). **T** hides it with the grid.
 - Settings › Display › **Leq bars**: each column (and band bar) glides to a new reading over
   0.3 s; the number, colours and limit lines change at once. "jump to each new reading"
   turns it off.
@@ -1959,7 +1970,15 @@ Each command takes `--meas` or `--input` when there is more than one meter.
 | `ac2 spl leq watch` | big numbers; `--json` for one line per second |
 | `ac2 spl leq set --preset france --windows 1min --limit 1min=102db` | the preset's windows plus an LAeq 1 min of your own. Several `--preset` give the windows of all, a shared window at the lower limit; without `--preset`, `--windows 1min,5min,c:30s` sets the windows. Also `--warn 3db`, `--horizon 1min`, `--peak-limit lcpeak=135db`, `--position 4db [--position-peak 2db]`. |
 | `ac2 spl leq export -o show.csv` | the per-second log as CSV, for the record |
+| `ac2 spl leq export --previous -o soundcheck.csv` | the ended log (until the next new log or daemon restart) |
 | `ac2 spl leq new --yes --export soundcheck.csv` | a new log, the ended one written first; without `--yes` it only says what would end |
+
+The app writes the same CSV on the computer it runs on: palette (Ctrl+K) **Export Leq log
+(CSV, on this computer)…** for the focused (or only) SPL meter, with an editable name such
+as `~/ac2-exports/FOH-SPL-leq-2026-10-17-0012.csv` (local time; the folder is made). The
+toast says `43200 seconds of FOH SPL written to …`. **Export the previous Leq log…** does the
+same for the ended log. Both read the log page by page (`spl.log_get`) without holding up
+the app.
 
 ### Band Leq: band limits at a neighbour's
 
@@ -2606,6 +2625,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | SPL pane: the band Leq bars (20 Hz … 10 kHz) | `spl_show_bands` |
 | SPL Leq windows: columns / tiles | `spl_leq_style` |
 | SPL Leq windows: history strip on / off | `spl_leq_history` |
+| Export Leq log (CSV, on this computer)… | `spl_log_export` |
+| Export the previous Leq log (CSV, on this computer)… | `spl_log_export_previous` |
 | Distortion in dB re fundamental / percent | `distortion_unit` |
 
 #### Key hint lines (Settings › Display › Key hints)

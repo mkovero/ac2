@@ -29,7 +29,10 @@ mod spl_meters;
 #[cfg(test)]
 pub(crate) use spectrum_pane::with_spectrum;
 pub use spectrum_pane::{spectrograph, spectrum, spectrum_scale};
-pub use spl_meters::{LocalZone, band_leq, has_band_meter, has_spl, leq, meter_leq, spl, spl_pane};
+pub use spl_meters::{
+    LocalZone, StripPlace, band_leq, has_band_meter, has_spl, leq, leq_keyed, leq_meter, meter_leq,
+    spl, spl_pane,
+};
 
 /// Inputs that come from the clock, passed in so the assembly stays testable.
 #[derive(Clone, Copy, Debug)]

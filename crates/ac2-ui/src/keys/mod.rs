@@ -297,6 +297,8 @@ commands! {
     SplLeqStyle => "spl_leq_style", "SPL Leq windows: columns / tiles", [Spl];
     SplLeqHistory => "spl_leq_history", "SPL Leq windows: history strip on / off", [Spl];
     SplNewLog => "spl_new_log", "Start a new SPL log…", [Spl];
+    SplLogExport => "spl_log_export", "Export Leq log (CSV, on this computer)…", [Spl];
+    SplLogExportPrevious => "spl_log_export_previous", "Export the previous Leq log (CSV, on this computer)…", [Spl];
     SplTimeWeighting => "spl_time_weighting", "SPL meter: time weighting Fast → Slow → Impulse", [Spl];
     SplWeighting => "spl_weighting", "SPL meter: frequency weighting A → C → Z", [Spl];
 

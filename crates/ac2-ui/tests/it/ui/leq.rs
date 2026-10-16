@@ -490,6 +490,17 @@ fn leq_tiles_from_an_empty_daemon() {
             }
     });
     snapshot_when(&mut h, "leq_tiles_over", pin, first_is(true));
+    // The strip looked back at (the wheel and a drag on it): 20 minutes around the loud
+    // passage, the pointer on it reading each window.
+    let looking_back = move |a: &mut ac2_ui::App| {
+        pin(a);
+        let pane = a.state.layout.focus;
+        a.state.leq_strips.insert(pane, (900.0, 2100.0));
+        a.state.leq_cursor = Some((pane, 1850.0));
+    };
+    snapshot_when(&mut h, "leq_tiles_history", looking_back, first_is(true));
+    h.state_mut().state.leq_strips.clear();
+    h.state_mut().state.leq_cursor = None;
 
     // Back under: the 1 min window plain again, the 30 min one near its limit.
     leq.set(leq_frame(

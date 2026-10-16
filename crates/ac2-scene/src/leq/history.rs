@@ -24,6 +24,9 @@ pub struct LeqHistory {
     /// The columns' scale as of the newest frame ([`column_range`] keeps it while the
     /// levels allow).
     range: Option<Range>,
+    /// Seconds per point: 1 for what was received, more for a span of the log fetched in
+    /// buckets ([`LeqHistory::from_span`]); 0 reads as 1.
+    step: u32,
     /// Bumped by every change of the points, so a laid-out strip is reused until the next
     /// frame arrives however often the view is rebuilt.
     generation: u64,
@@ -40,6 +43,8 @@ impl PartialEq for LeqHistory {
 #[derive(Clone, Debug, PartialEq)]
 struct StripKey {
     generation: u64,
+    span: Option<(f64, f64)>,
+    utc_offset_s: i32,
     windows: Vec<LeqWindow>,
     judged: bool,
     plot: Rect,
@@ -184,6 +189,51 @@ impl LeqHistory {
         self.series.iter().all(|(_, s)| s.is_empty())
     }
 
+    /// Oldest time of any point.
+    pub fn oldest(&self) -> Option<f64> {
+        self.series
+            .iter()
+            .filter_map(|(_, s)| s.front().map(|p| p.t))
+            .fold(None, |a: Option<f64>, t| Some(a.map_or(t, |a| a.min(t))))
+    }
+
+    /// Seconds per point.
+    pub fn step(&self) -> u32 {
+        self.step.max(1)
+    }
+
+    /// A span of the log as the daemon computed it (`spl.history_get` with a range), every
+    /// point kept: what a strip looking back draws. Each point stands for the `step_s`
+    /// seconds up to it.
+    pub fn from_span(h: &SplHistory) -> Self {
+        let series = h
+            .windows
+            .iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let pts =
+                    h.at.iter()
+                        .zip(h.leq.get(i).into_iter().flatten())
+                        .zip(h.over.get(i).into_iter().flatten())
+                        .map(|((t, l), o)| HistoryPoint {
+                            t: t.0 as f64 / 1e9,
+                            leq: *l,
+                            over: *o,
+                        })
+                        .collect();
+                (key(w), pts)
+            })
+            .collect();
+        Self {
+            series,
+            scale: Some(h.scale),
+            range: None,
+            step: h.step_s.max(1),
+            generation: 1,
+            strip: StripCache::default(),
+        }
+    }
+
     /// The columns' scale as of the newest frame.
     pub fn range(&self) -> Option<Range> {
         self.range
@@ -237,6 +287,9 @@ pub struct HistoryLine {
 #[derive(Clone, Debug, PartialEq)]
 pub struct HistoryStrip {
     pub plot: Rect,
+    /// The time shown, daemon wall clock s: from the plot's left edge to its right.
+    pub from: f64,
+    pub to: f64,
     pub x: Axis,
     pub y: Axis,
     pub lines: Vec<HistoryLine>,
@@ -250,9 +303,12 @@ pub fn history_strip(
     judged: bool,
     plot: Rect,
     theme: &Theme,
+    look: StripSpan,
 ) -> HistoryStrip {
     let key = StripKey {
         generation: h.generation,
+        span: look.span,
+        utc_offset_s: look.utc_offset_s,
         windows: cfg.windows.clone(),
         judged,
         plot,
@@ -264,7 +320,7 @@ pub fn history_strip(
     {
         return s.clone();
     }
-    let s = lay_out_strip(cfg, h, judged, plot, theme);
+    let s = lay_out_strip(cfg, h, judged, plot, theme, look);
     *cache = Some((key, s.clone()));
     s
 }
@@ -325,30 +381,53 @@ pub(super) fn lay_out_strip(
     judged: bool,
     plot: Rect,
     theme: &Theme,
+    look: StripSpan,
 ) -> HistoryStrip {
-    let span = history_span(cfg);
-    let now = h.newest().unwrap_or(0.0);
-    let in_minutes = span > 180.0;
-    let unit = if in_minutes { 60.0 } else { 1.0 };
-    let xm = Mapping::new(
-        Range::new(-span / unit, 0.0),
-        Scale::Linear,
-        plot.x,
-        plot.right(),
-    );
-    let x = Axis {
-        ticks: axis::linear_ticks(&xm, Steps::Decimal, 70.0, 12.0, |v, _| {
-            ago_label(v, in_minutes)
-        }),
-        mapping: xm,
-        title: String::new(),
+    let step = f64::from(h.step());
+    let (from, to, x, to_x): (f64, f64, Axis, Box<dyn Fn(f64) -> f64>) = match look.span {
+        None => {
+            let span = history_span(cfg);
+            let now = h.newest().unwrap_or(0.0);
+            let in_minutes = span > 180.0;
+            let unit = if in_minutes { 60.0 } else { 1.0 };
+            let xm = Mapping::new(
+                Range::new(-span / unit, 0.0),
+                Scale::Linear,
+                plot.x,
+                plot.right(),
+            );
+            let x = Axis {
+                ticks: axis::linear_ticks(&xm, Steps::Decimal, 70.0, 12.0, |v, _| {
+                    ago_label(v, in_minutes)
+                }),
+                mapping: xm,
+                title: String::new(),
+            };
+            (now - span, now, x, Box::new(move |t| (t - now) / unit))
+        }
+        Some((from, to)) => {
+            // Looking back: local clock time along the axis.
+            let off = f64::from(look.utc_offset_s);
+            let xm = Mapping::new(
+                Range::new(from + off, to + off),
+                Scale::Linear,
+                plot.x,
+                plot.right(),
+            );
+            let x = Axis {
+                ticks: clock_ticks(&xm, 70.0),
+                mapping: xm,
+                title: String::new(),
+            };
+            (from, to, x, Box::new(move |t| t + off))
+        }
     };
     // y from what is in view: values and limits, at least 20 dB, on 5 dB steps.
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
     for w in &cfg.windows {
         if let Some(ps) = h.points(w) {
-            for p in since(ps, now - span) {
+            for p in since(ps, from).take_while(|p| p.t <= to + step) {
                 let v = f64::from(p.leq);
                 if v.is_finite() {
                     lo = lo.min(v);
@@ -385,10 +464,11 @@ pub(super) fn lay_out_strip(
             for p in h
                 .points(w)
                 .into_iter()
-                .flat_map(|ps| since(ps, now - span - 1.0))
+                .flat_map(|ps| since(ps, from - step))
+                .take_while(|p| p.t <= to + 2.0 * step)
             {
-                // More than two seconds without a frame: a break, not a line across.
-                if last_t.is_some_and(|lt| p.t - lt > 2.5)
+                // More than two points' time without one: a break, not a line across.
+                if last_t.is_some_and(|lt| p.t - lt > 2.5 * step)
                     && pts.last().is_some_and(|q| q[0].is_finite())
                 {
                     pts.push([f32::NAN, f32::NAN]);
@@ -409,7 +489,7 @@ pub(super) fn lay_out_strip(
                     run.clear();
                     continue;
                 }
-                let xy = [x.mapping.to_px((p.t - now) / unit), y.mapping.to_px(v)];
+                let xy = [x.mapping.to_px(to_x(p.t)), y.mapping.to_px(v)];
                 pts.push(xy);
                 if p.over {
                     run.push(xy);
@@ -442,5 +522,179 @@ pub(super) fn lay_out_strip(
             }
         })
         .collect();
-    HistoryStrip { plot, x, y, lines }
+    HistoryStrip {
+        plot,
+        from,
+        to,
+        x,
+        y,
+        lines,
+    }
+}
+
+/// Which time a history strip shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StripSpan {
+    /// From and to, daemon wall clock s; `None`: live, the newest [`history_span`]
+    /// following each new second.
+    pub span: Option<(f64, f64)>,
+    /// Local time's offset from UTC, s: the clock labels of a span looked back at.
+    pub utc_offset_s: i32,
+}
+
+/// Local `HH:MM` (`HH:MM:SS` with `seconds`) of local seconds `v`.
+fn hms(v: f64, seconds: bool) -> String {
+    let s = v.floor().rem_euclid(86_400.0) as u64;
+    if seconds {
+        format!("{:02}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60)
+    } else {
+        format!("{:02}:{:02}", s / 3600, (s % 3600) / 60)
+    }
+}
+
+/// Clock ticks along `m` (local seconds): the finest of whole seconds, minutes and hours
+/// that leaves `min_label_px` between labels, labelled `14:30` (`14:30:15` under a minute).
+fn clock_ticks(m: &Mapping, min_label_px: f32) -> Vec<axis::Tick> {
+    const STEPS: [f64; 17] = [
+        1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 900.0, 1800.0, 3600.0, 7200.0,
+        10_800.0, 21_600.0, 43_200.0,
+    ];
+    let span = m.range.span().abs().max(1e-9);
+    let px_per_s = m.len_px() / span as f32;
+    let step = STEPS
+        .iter()
+        .copied()
+        .find(|s| *s as f32 * px_per_s >= min_label_px)
+        .unwrap_or(86_400.0);
+    let mut out = Vec::new();
+    let mut v = (m.range.lo / step).ceil() * step;
+    while v <= m.range.hi + 1e-6 {
+        out.push(axis::Tick {
+            value: v,
+            pos: m.to_px(v),
+            kind: axis::TickKind::Major,
+            label: Some(hms(v, step < 60.0)),
+        });
+        v += step;
+    }
+    out
+}
+
+/// What the caption of a strip looking back says: `history · 14:02–15:10 · Home: live`
+/// (`loading` while its span is fetched).
+pub fn history_caption(
+    from: f64,
+    to: f64,
+    utc_offset_s: i32,
+    live_key: Option<&str>,
+    loading: bool,
+) -> String {
+    let off = f64::from(utc_offset_s);
+    let fine = to - from < 600.0;
+    let mut s = format!(
+        "history · {}–{}",
+        hms(from + off, fine),
+        hms(to + off, fine)
+    );
+    if loading {
+        s.push_str(" · loading");
+    }
+    if let Some(k) = live_key {
+        s.push_str(&format!(" · {k}: live"));
+    }
+    s
+}
+
+/// One window's line of a strip's cursor readout.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReadoutRow {
+    /// Its index in the configuration (its colour).
+    pub window: usize,
+    /// `LAeq 15 min 97.3 dB · limit 99 · over`.
+    pub text: String,
+    pub over: bool,
+}
+
+/// The cursor readout of a strip at daemon wall time `t`: the local time (of the bucket,
+/// with points of more than a second), and per window its Leq there with its limit and
+/// whether it was over. `None` with no point near `t`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StripReadout {
+    /// `14:32:05`, or `14:31:30–14:32:00 · highest` for a bucket.
+    pub time: String,
+    pub rows: Vec<ReadoutRow>,
+}
+
+/// The readout at `t` (s) of history `h` drawn for `cfg`: each window's point nearest `t`
+/// within a point's time. `judged`: the limits are in force (a calibrated meter).
+pub fn strip_readout(
+    cfg: &LeqConfig,
+    h: &LeqHistory,
+    judged: bool,
+    t: f64,
+    utc_offset_s: i32,
+) -> Option<StripReadout> {
+    let step = f64::from(h.step());
+    let unit = match h.scale {
+        Some(LevelScale::Dbfs) => "dBFS",
+        _ => "dB",
+    };
+    let mut at = None;
+    let mut rows = Vec::new();
+    for (i, w) in cfg.windows.iter().enumerate() {
+        let Some(ps) = h.points(w) else {
+            continue;
+        };
+        // A point stands for the time up to it: the first at or after `t`.
+        let k = ps.partition_point(|p| p.t < t);
+        let Some(p) = ps.get(k).filter(|p| p.t - t < step + 0.5) else {
+            continue;
+        };
+        at.get_or_insert(p.t);
+        let v = f64::from(p.leq);
+        let mut text = format!(
+            "{} {}",
+            window_name(w),
+            if v.is_finite() {
+                format!("{} {unit}", format::fixed(v, 1))
+            } else {
+                format::NO_VALUE.to_string()
+            }
+        );
+        if judged && let Some(l) = w.limit {
+            text.push_str(&format!(" · limit {}", format::fixed(l.0, 1)));
+            if p.over {
+                text.push_str(" · over");
+            }
+        }
+        rows.push(ReadoutRow {
+            window: i,
+            text,
+            over: p.over,
+        });
+    }
+    let end = at? + f64::from(utc_offset_s);
+    let time = if step > 1.0 {
+        format!("{}–{} · highest", hms(end - step, true), hms(end, true))
+    } else {
+        // A point is a second's end: the second it stands for starts a second before.
+        hms(end - 1.0, true)
+    };
+    Some(StripReadout { time, rows })
+}
+
+/// How the Leq view's history strip looks: live or back at a span, with what it draws
+/// then and the pointer over it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LeqStripView<'a> {
+    pub span: StripSpan,
+    /// The points of a span looked back at, fetched from the log; `None`: the history
+    /// received (it covers the span, or nothing better arrived yet).
+    pub points: Option<&'a LeqHistory>,
+    /// A fetch of the span is under way.
+    pub loading: bool,
+    /// The pointer over the strip, daemon wall clock s.
+    pub cursor: Option<f64>,
+    /// The key that returns the strip to live (`Home`).
+    pub live_key: Option<String>,
 }

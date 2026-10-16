@@ -19,6 +19,11 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   `docs/design/coreaudio.md` §11); exact on BlackHole in the all-OS CI run (`all_os=true`).
   Open on real hardware: the tester round (`testing/macos/`, Test 6: stated vs measured
   latency, replug, rate change, streams).
+- Newest (PROTO 55): the Leq history strip browses the whole log like a graph (wheel, drag,
+  I/O/←/→, Home to live, a cursor readout), `spl.history_get` takes a `HistorySpan` (newest
+  seconds, or a range in buckets of each window's highest Leq); palette *Export Leq log…*
+  writes the log CSV on the app's computer (`docs/user-guide.md` *Tiles, history and the
+  stage view*, *Leq from the terminal*; `docs/protocol.md` *Downloading a meter's whole log*).
 - Newest features: drag a measurement-list row onto a pane (an edge drop splits, Shift-drop
   compares on a transfer pane) and Ctrl+Z / Ctrl+Shift+Z undo pane edits (`docs/user-guide.md`
   *Dragging a row onto a pane*, *Undo and redo*); T on an SPL pane takes the limit text

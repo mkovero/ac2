@@ -40,7 +40,7 @@ use request::*;
 use stimulus::*;
 
 pub use pacing::{mirror_differs, same_picture};
-pub use request::export_format;
+pub use request::{export_format, write_new_file};
 
 /// Where to connect.
 #[derive(Clone, Debug)]
@@ -150,6 +150,13 @@ pub enum ConnEvent {
     /// The Leq history of SPL meter `meas` as the daemon rebuilt it from the meter's log
     /// ([`Request::LeqBackfill`] number `ask`).
     LeqBackfill {
+        meas: MeasId,
+        ask: u64,
+        result: Result<Box<SplHistory>, String>,
+    },
+    /// A span of an SPL meter's log at a resolution, for a history strip looking back
+    /// ([`Request::LeqSpan`] number `ask`).
+    LeqSpan {
         meas: MeasId,
         ask: u64,
         result: Result<Box<SplHistory>, String>,
@@ -272,6 +279,23 @@ pub enum Request {
     /// `spl.history_get` of SPL meter `meas` over the history the strip keeps
     /// ([`ConnEvent::LeqBackfill`]).
     LeqBackfill { meas: MeasId, ask: u64 },
+    /// `spl.history_get` of a range of SPL meter `meas`'s log at `step_s` seconds a point
+    /// ([`ConnEvent::LeqSpan`]).
+    LeqSpan {
+        meas: MeasId,
+        from: ac2_proto::units::WallNs,
+        to: ac2_proto::units::WallNs,
+        step_s: u32,
+        ask: u64,
+    },
+    /// Every row of one of SPL meter `info.meas`'s logs (`spl.log_get`, paged), written as
+    /// the log CSV to `path` on this computer, its folder made first; a reply toast says
+    /// how many seconds went where.
+    ExportLeqLog {
+        info: ac2_proto::spl_log::SplLogInfo,
+        log: ac2_proto::model::SplLogWhich,
+        path: std::path::PathBuf,
+    },
     /// `spl.band_log_get` of a span, its average alone ([`ConnEvent::BandLog`]).
     BandLogGet(crate::leq_dialog::Ask),
     /// `spl.band_transfer` into `meas` ([`ConnEvent::BandTransfer`]).
@@ -643,6 +667,11 @@ async fn wait_retry(
                 Some(Ctl::Req(Request::DisplayPeriod(p))) => wants.period = p,
                 // Asked again once connected: the history follows the daemon's log.
                 Some(Ctl::Req(Request::LeqBackfill { .. })) => {}
+                Some(Ctl::Req(Request::LeqSpan { meas, ask, .. })) => out.send(ConnEvent::LeqSpan {
+                    meas,
+                    ask,
+                    result: Err("not connected".into()),
+                }),
                 Some(Ctl::Req(Request::BandLogGet(ask))) => out.send(ConnEvent::BandLog {
                     ask,
                     result: Err("not connected".into()),

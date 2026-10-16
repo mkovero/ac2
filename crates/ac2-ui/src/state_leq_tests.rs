@@ -387,7 +387,7 @@ fn leq_history_and_alarm_toasts() {
 }
 
 /// The history rebuild the reducer asked for, if any: (meter, number).
-fn backfill_asked(r: &[Request]) -> Option<(MeasId, u64)> {
+pub(super) fn backfill_asked(r: &[Request]) -> Option<(MeasId, u64)> {
     r.iter().find_map(|r| match r {
         Request::LeqBackfill { meas, ask } => Some((*meas, *ask)),
         _ => None,
@@ -396,7 +396,7 @@ fn backfill_asked(r: &[Request]) -> Option<(MeasId, u64)> {
 
 /// The history the daemon rebuilt for meter 4's default windows: `seconds` seconds at
 /// 80 dB SPL ending at wall second `end_s`.
-fn rebuilt(seconds: u64, end_s: u64) -> SplHistory {
+pub(super) fn rebuilt(seconds: u64, end_s: u64) -> SplHistory {
     let windows = LeqConfig::default_windows().windows;
     let n = windows.len();
     SplHistory {

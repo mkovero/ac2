@@ -227,6 +227,8 @@ mod tests {
             ("pane: the meter", CommandId::SplShowMeter),
             ("pane: the leq", CommandId::SplShowLeq),
             ("new log", CommandId::SplNewLog),
+            ("export leq", CommandId::SplLogExport),
+            ("export the previous leq", CommandId::SplLogExportPrevious),
             ("full screen", CommandId::Fullscreen),
             ("key hints", CommandId::KeyHints),
             ("warning toasts", CommandId::WarningToasts),

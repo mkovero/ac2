@@ -76,6 +76,12 @@ mod keys;
 pub use glide::SpecGlide;
 #[path = "state_leq.rs"]
 mod leq;
+#[path = "state_leq_strip.rs"]
+mod leq_strip;
+pub use leq_strip::{LeqSpan, STRIP_MIN_S, StripMsg};
+#[path = "state_leq_export.rs"]
+mod leq_export;
+pub use leq_export::{EXPORT_DIR, export_path, leq_export_name};
 #[path = "state_link.rs"]
 mod link;
 #[path = "state_meas_layout.rs"]
@@ -296,6 +302,19 @@ pub struct AppState {
     /// Each SPL meter's Leq windows over time, from the `leq` frames received (with the
     /// last `seq` folded in) over the history rebuilt from the meter's log.
     pub leq_history: BTreeMap<MeasId, (u64, ac2_scene::leq::LeqHistory)>,
+    /// The span (daemon wall clock, s) each SPL pane's history strip looks back at; a
+    /// pane not here follows live.
+    pub leq_strips: BTreeMap<PaneId, (f64, f64)>,
+    /// The pointer over a history strip: its pane and time (s).
+    pub leq_cursor: Option<(PaneId, f64)>,
+    /// Spans of each meter's log fetched for strips looking back, oldest first.
+    pub leq_spans: BTreeMap<MeasId, Vec<leq_strip::LeqSpan>>,
+    /// The span fetch under way.
+    leq_span_pending: Option<leq_strip::SpanAsk>,
+    /// Number of the newest span fetch.
+    leq_span_ask: u64,
+    /// Width of the strip last moved by the mouse, px: the resolution fetched at.
+    pub leq_strip_px: f32,
     /// Which log and windows each SPL meter's history was last rebuilt for.
     leq_logs: BTreeMap<MeasId, LeqLogSeen>,
     /// Number of the newest history rebuild asked for.
@@ -455,6 +474,12 @@ impl AppState {
             preview_sent_s: f64::NEG_INFINITY,
             devices_for: None,
             leq_history: BTreeMap::new(),
+            leq_strips: BTreeMap::new(),
+            leq_cursor: None,
+            leq_spans: BTreeMap::new(),
+            leq_span_pending: None,
+            leq_span_ask: 0,
+            leq_strip_px: 600.0,
             tf_display: Default::default(),
             leq_logs: BTreeMap::new(),
             leq_backfill_ask: 0,
@@ -572,6 +597,7 @@ impl AppState {
             Msg::Leq(m) => self.leq_msg(m, out),
             Msg::Settings(m) => self.settings_msg(m, out),
             Msg::IrNav(p, m) => self.ir_nav(p, m),
+            Msg::LeqStrip(p, m) => self.leq_strip_msg(p, m, out),
             Msg::Tick { now_s, dt_s } => {
                 let held = (now_s - self.now_s).max(0.0);
                 self.now_s = now_s;

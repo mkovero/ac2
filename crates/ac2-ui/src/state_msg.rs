@@ -35,6 +35,12 @@ pub enum PromptKind {
     FinderBand,
     /// Delay-finder observation.
     FinderObservation,
+    /// Where an SPL meter's current (or previous) Leq log is written as CSV on this
+    /// computer.
+    LeqExport {
+        meas: MeasId,
+        previous: bool,
+    },
 }
 
 impl PromptKind {
@@ -69,6 +75,12 @@ impl PromptKind {
                 "Mic curve for the selected trace: mic and curve, e.g. MM1 34804 90° (none removes)"
             }
             PromptKind::FinderBand => "Delay finder band edges (Hz, e.g. 80-800)",
+            PromptKind::LeqExport {
+                previous: false, ..
+            } => "Export the Leq log as CSV on this computer to (file path)",
+            PromptKind::LeqExport { previous: true, .. } => {
+                "Export the previous Leq log as CSV on this computer to (file path)"
+            }
             PromptKind::FinderObservation => {
                 "Delay finder observation (s; empty = automatic; sub band: 2, 4 or 8)"
             }
@@ -417,6 +429,8 @@ pub enum Msg {
     Settings(SettingsMsg),
     /// Mouse on an impulse-response picture (the transfer and sweep panes' IR views).
     IrNav(ac2_scene::view::IrPane, IrNavMsg),
+    /// The mouse on an SPL pane's Leq history strip.
+    LeqStrip(PaneId, StripMsg),
 }
 
 /// What the mouse does on the Leq windows dialog.

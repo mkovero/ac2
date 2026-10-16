@@ -17,7 +17,7 @@ use crate::plot::{self, PlotSlot};
 use crate::scenes;
 use crate::state::{
     Axis, DragMsg, HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow,
-    PaneRect, drop_target,
+    PaneRect, StripMsg, drop_target,
 };
 use crate::theme::Chrome;
 
@@ -80,6 +80,8 @@ struct Axes {
     time: Option<Mapping>,
     /// An IR picture: which one, its time axis and its value axis.
     ir: Option<(IrPane, Mapping, Mapping)>,
+    /// An SPL pane's Leq history strip: where and over what time.
+    strip: Option<scenes::StripPlace>,
 }
 
 /// Scene for `pane` at `size`, from the cache when nothing changed.
@@ -102,6 +104,7 @@ fn scene_for(
             y_level: c.y_level,
             time: c.time_axis,
             ir: c.ir_axes,
+            strip: c.strip,
         };
         return Some((c.scene.clone(), axes));
     }
@@ -145,6 +148,7 @@ fn scene_for(
                     y_level: y,
                     time: None,
                     ir: None,
+                    strip: None,
                 },
             )
         }
@@ -167,6 +171,7 @@ fn scene_for(
                     y_level: s.spectrum.as_ref().map(|sp| sp.y_axis.mapping),
                     time: Some(s.time_axis.mapping),
                     ir: None,
+                    strip: None,
                 },
             )
         }
@@ -187,13 +192,20 @@ fn scene_for(
                     y_level: Some(s.y_axis.mapping),
                     time: None,
                     ir: None,
+                    strip: None,
                 },
             )
         }
-        PaneKind::Spl => (
-            scenes::spl_pane(st, id, &app.keymap, theme, vp, now)?,
-            Axes::default(),
-        ),
+        PaneKind::Spl => {
+            let (scene, strip) = scenes::spl_pane(st, id, &app.keymap, theme, vp, now)?;
+            (
+                scene,
+                Axes {
+                    strip,
+                    ..Axes::default()
+                },
+            )
+        }
         PaneKind::Distortion => {
             let s = scenes::sweep(st, id, theme, vp, now);
             let axes = Axes {
@@ -201,6 +213,7 @@ fn scene_for(
                 y_level: s.y_level(),
                 time: None,
                 ir: s.ir_axes().map(|(x, y)| (IrPane::Sweep, x, y)),
+                strip: None,
             };
             (s.scene(), axes)
         }
@@ -218,6 +231,7 @@ fn scene_for(
             y_level: axes.y_level,
             time_axis: axes.time,
             ir_axes: axes.ir,
+            strip: axes.strip,
             unit_tip,
             legend,
             legend_hits,

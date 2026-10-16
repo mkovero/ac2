@@ -5,6 +5,7 @@ use ac2_client::TopicFrame;
 use ac2_proto::frame::BandLeqFrame;
 use ac2_proto::model::{MeasKind, Measurement};
 use ac2_proto::topic::Stream;
+use ac2_proto::units::MeasId;
 use ac2_proto::{Frame, FrameData};
 use ac2_scene::band_leq::{BandLeqScene, BandLeqView, band_leq_scene, band_leq_text};
 use ac2_scene::format;
@@ -177,6 +178,7 @@ fn leq_view<'a>(
     st: &'a AppState,
     pane: PaneId,
     m: &'a Measurement,
+    keymap: Option<&crate::keys::Keymap>,
     now: Now,
 ) -> Option<LeqView<'a>> {
     let tf = frame(st, m.id, Stream::Leq)?;
@@ -220,7 +222,26 @@ fn leq_view<'a>(
             .map(|r| ac2_scene::leq::run_text(&r, cfg, |t| st.local_zone.offset_s(t))),
         stage: st.stage_view(),
         chrome: st.pane_modes(pane).chrome,
+        strip: st.strip_view(pane, m.id, live_key(keymap)),
     })
+}
+
+/// The key that brings a history strip back to live, named.
+fn live_key(keymap: Option<&crate::keys::Keymap>) -> Option<String> {
+    keymap?
+        .first_chord(
+            crate::keys::CommandId::ResetView,
+            crate::keys::Scope::Global,
+        )
+        .map(|c| c.label())
+}
+
+/// The SPL meter whose Leq windows pane `pane` shows: the one it shows, else the first one
+/// with a `leq` frame.
+pub fn leq_meter(st: &AppState, pane: PaneId) -> Option<MeasId> {
+    spl_meters(st, pane)
+        .find(|m| frame(st, m.id, Stream::Leq).is_some())
+        .map(|m| m.id)
 }
 
 /// The meter readout of meter `m` (the held reading, [`ac2_scene::spl::SplHold`]), with its
@@ -272,7 +293,19 @@ pub fn leq(
     size: Viewport,
     now: Now,
 ) -> Option<LeqScene> {
-    let v = spl_meters(st, pane).find_map(|m| leq_view(st, pane, m, now))?;
+    leq_keyed(st, pane, None, theme, size, now)
+}
+
+/// [`leq`], with `keymap` naming the key back to live on a strip looking back.
+pub fn leq_keyed(
+    st: &AppState,
+    pane: PaneId,
+    keymap: Option<&crate::keys::Keymap>,
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> Option<LeqScene> {
+    let v = spl_meters(st, pane).find_map(|m| leq_view(st, pane, m, keymap, now))?;
     let status = status(st, &[], None, now);
     Some(leq_scene(&v, &status, theme, size))
 }
@@ -304,14 +337,32 @@ pub fn meter_leq(
 ) -> Option<MeterLeqScene> {
     let (r, tf, v) = spl_meters(st, pane).find_map(|m| {
         let (r, tf) = spl_readout_of(st, m, keymap, now)?;
-        Some((r, tf, leq_view(st, pane, m, now)?))
+        Some((r, tf, leq_view(st, pane, m, Some(keymap), now)?))
     })?;
     let status = status(st, &[tf], None, now);
     Some(meter_leq_scene(&r, &v, &status, theme, size))
 }
 
-/// The SPL pane's picture in the chosen view ([`SplMode`]). The meter + Leq view shows
-/// whichever part has frames until both have (the windows' first second).
+/// Where an SPL pane's Leq history strip is drawn and the time it spans (daemon wall
+/// clock, s, left edge to right): what the mouse on it moves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StripPlace {
+    pub plot: ac2_scene::primitives::Rect,
+    pub from: f64,
+    pub to: f64,
+}
+
+fn strip_place(s: &LeqScene) -> Option<StripPlace> {
+    s.history.as_ref().map(|h| StripPlace {
+        plot: h.plot,
+        from: h.from,
+        to: h.to,
+    })
+}
+
+/// The SPL pane's picture in the chosen view ([`SplMode`]), with its history strip's place
+/// when one is drawn. The meter + Leq view shows whichever part has frames until both have
+/// (the windows' first second).
 pub fn spl_pane(
     st: &AppState,
     pane: PaneId,
@@ -319,14 +370,18 @@ pub fn spl_pane(
     theme: &Theme,
     size: Viewport,
     now: Now,
-) -> Option<Scene> {
+) -> Option<(Scene, Option<StripPlace>)> {
+    let leq = |s: LeqScene| {
+        let place = strip_place(&s);
+        (s.scene, place)
+    };
     match st.pane_modes(pane).spl {
-        SplMode::Meter => spl(st, pane, keymap, theme, size, now).map(|s| s.scene),
-        SplMode::Leq => leq(st, pane, theme, size, now).map(|s| s.scene),
-        SplMode::Bands => band_leq(st, pane, theme, size, now).map(|s| s.scene),
+        SplMode::Meter => spl(st, pane, keymap, theme, size, now).map(|s| (s.scene, None)),
+        SplMode::Leq => leq_keyed(st, pane, Some(keymap), theme, size, now).map(leq),
+        SplMode::Bands => band_leq(st, pane, theme, size, now).map(|s| (s.scene, None)),
         SplMode::MeterLeq => meter_leq(st, pane, keymap, theme, size, now)
-            .map(|s| s.leq.scene)
-            .or_else(|| spl(st, pane, keymap, theme, size, now).map(|s| s.scene))
-            .or_else(|| leq(st, pane, theme, size, now).map(|s| s.scene)),
+            .map(|s| leq(s.leq))
+            .or_else(|| spl(st, pane, keymap, theme, size, now).map(|s| (s.scene, None)))
+            .or_else(|| leq_keyed(st, pane, Some(keymap), theme, size, now).map(leq)),
     }
 }

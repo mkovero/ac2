@@ -245,7 +245,7 @@ fn new_log_confirmation_names_what_ends() {
 
 /// The history the daemon rebuilt from the log of `cfg()`'s meter: `n` seconds ending at
 /// wall second `end_s`, each window at `leq`, the 15 min window over from the 5th second.
-fn rebuilt(n: u64, end_s: u64, leq: f32) -> SplHistory {
+pub(super) fn rebuilt(n: u64, end_s: u64, leq: f32) -> SplHistory {
     let c = cfg();
     let at: Vec<WallNs> = (0..n)
         .map(|k| WallNs((end_s - n + 1 + k) * 1_000_000_000))

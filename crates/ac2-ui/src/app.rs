@@ -117,6 +117,8 @@ pub(crate) struct CachedScene {
         ac2_scene::axis::Mapping,
         ac2_scene::axis::Mapping,
     )>,
+    /// Where an SPL pane drew its Leq history strip and the time it spans.
+    pub strip: Option<crate::scenes::StripPlace>,
     /// Where on the scene the level axis's unit is drawn and what it means, for a tooltip.
     pub unit_tip: Option<(egui::Rect, String)>,
     /// Where the scene put its legend, for moving, resizing and scrolling it.
@@ -645,10 +647,11 @@ impl Touches {
                 Self::Toasts
             }
             Msg::Legend(_) => Self::Legend,
+            Msg::LeqStrip(..) => Self::Spl,
             Msg::Conn(e) => match **e {
                 ConnEvent::Data(_) => Self::Data,
                 ConnEvent::Mirror(_) => Self::Mirror,
-                ConnEvent::LeqBackfill { .. } => Self::Spl,
+                ConnEvent::LeqBackfill { .. } | ConnEvent::LeqSpan { .. } => Self::Spl,
                 _ => Self::All,
             },
             _ => Self::All,

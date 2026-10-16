@@ -35,6 +35,8 @@ pub(super) fn request_name(r: &Request) -> String {
         Request::DetectLoopback(_) => "detect loopback".into(),
         Request::CreateMeas { config } => format!("new measurement {}", config.name),
         Request::LeqBackfill { .. } => "SPL history".into(),
+        Request::LeqSpan { .. } => "SPL history span".into(),
+        Request::ExportLeqLog { info, .. } => format!("export {} log", info.name),
         Request::BandLogGet(_) => "band log".into(),
         Request::BandTransfer { .. } => "band transfer".into(),
         Request::Topics(_) => "subscribe".into(),
@@ -341,6 +343,40 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                 o.send(ConnEvent::LeqBackfill { meas, ask, result });
             });
         }
+        Request::LeqSpan {
+            meas,
+            from,
+            to,
+            step_s,
+            ask,
+        } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let result = c
+                    .call(Command::SplHistoryGet {
+                        meas,
+                        span: ac2_proto::model::HistorySpan::Range { from, to, step_s },
+                    })
+                    .await
+                    .and_then(|r| expect_body!("spl.history_get", r, ReplyBody::SplHistory(h) => h))
+                    .map_err(|e| e.to_string());
+                o.send(ConnEvent::LeqSpan { meas, ask, result });
+            });
+        }
+        Request::ExportLeqLog { info, log, path } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let name = info.name.clone();
+                let result = export_leq_log(&c, info, log, path).await;
+                o.send(ConnEvent::Reply {
+                    what: match &result {
+                        Ok((p, n)) => format!("{n} seconds of {name} written to {}", p.display()),
+                        Err(_) => format!("export {name} log"),
+                    },
+                    result: result.map(|_| ()),
+                });
+            });
+        }
         Request::BandLogGet(ask) => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
@@ -617,6 +653,37 @@ pub(super) async fn export_trace(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Every row of one of a meter's logs, paged off the daemon, written as the log CSV to
+/// `path` (its folder made first); returns the absolute path and the rows written.
+pub(super) async fn export_leq_log(
+    c: &Client,
+    info: ac2_proto::spl_log::SplLogInfo,
+    log: ac2_proto::model::SplLogWhich,
+    path: std::path::PathBuf,
+) -> Result<(std::path::PathBuf, usize), String> {
+    let rows = ac2_client::spl_log::all_rows(c, info.meas, log)
+        .await
+        .map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        let csv = ac2_proto::spl_log::export_csv(&info, &rows);
+        write_new_file(&path, csv.as_bytes()).map(|p| (p, rows.len()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Writes `bytes` to `path`, making its folder first; returns the path made absolute (a
+/// relative one is relative to where the app was started).
+pub fn write_new_file(path: &std::path::Path, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, bytes)
+        .map(|()| path.clone())
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 /// Reads `path` and imports it into the mic library; returns the curve's label.

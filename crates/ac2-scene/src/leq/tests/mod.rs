@@ -6,6 +6,7 @@ use ac2_proto::units::{Db, DbSpl, MeasId, Seconds, WallNs};
 mod caption;
 mod colours;
 mod columns;
+mod strip;
 mod tiles;
 
 fn w(minutes: f64, limit: Option<f64>) -> LeqWindow {
@@ -193,6 +194,7 @@ fn columns_view<'a>(c: &'a LeqConfig, f: &LeqFrame, h: Option<&'a LeqHistory>) -
         run: run_of(c, f),
         stage: false,
         chrome: crate::view::PlotChrome::Full,
+        strip: Default::default(),
     }
 }
 

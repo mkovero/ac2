@@ -36,7 +36,8 @@ pub use columns::{
 };
 use draw::{columns, draw_history, draw_tile, tile_below};
 pub use history::{
-    HISTORY_S, HistoryLine, HistoryPoint, HistoryStrip, LeqHistory, history_span, history_strip,
+    HISTORY_S, HistoryLine, HistoryPoint, HistoryStrip, LeqHistory, LeqStripView, ReadoutRow,
+    StripReadout, StripSpan, history_caption, history_span, history_strip, strip_readout,
 };
 #[cfg(test)]
 use history::{decimate, lay_out_strip};
@@ -190,6 +191,8 @@ pub struct LeqView<'a> {
     pub stage: bool,
     /// Grid and labels of the history strip.
     pub chrome: crate::view::PlotChrome,
+    /// Where the history strip looks and the pointer over it.
+    pub strip: LeqStripView<'a>,
 }
 
 /// The Leq view as drawn.
@@ -208,6 +211,10 @@ pub struct LeqScene {
     pub caption: Rect,
     /// The run's wording as drawn, if there was room for any.
     pub run: Option<String>,
+    /// The strip's caption while it looks back (`history · 14:02–15:10 · Home: live`).
+    pub strip_caption: Option<String>,
+    /// The cursor readout drawn over the strip.
+    pub strip_readout: Option<StripReadout>,
 }
 
 /// Lays the view out in `size` below the banner strip: the meter and calibration on one
@@ -414,10 +421,32 @@ pub(crate) fn leq_scene_under<T>(
         .tiles
         .iter()
         .any(|t| matches!(t.state, TileState::Ok | TileState::Near | TileState::Over));
+    let mut strip_caption = None;
+    let mut readout = None;
     let history = match (hist_area, v.history) {
         (Some(r), Some(h)) => {
-            let s = history_strip(v.cfg, h, judged, r, theme);
+            let pts = v.strip.points.unwrap_or(h);
+            let s = history_strip(v.cfg, pts, judged, r, theme, v.strip.span);
             draw_history(&mut c, &s, shared.as_deref(), v.chrome, theme);
+            let off = v.strip.span.utc_offset_s;
+            if v.strip.span.span.is_some() {
+                let text = history_caption(
+                    s.from,
+                    s.to,
+                    off,
+                    v.strip.live_key.as_deref(),
+                    v.strip.loading,
+                );
+                draw::history_note(&mut c, &s, &text, theme);
+                strip_caption = Some(text);
+            }
+            if v.chrome.cursor()
+                && let Some(t) = v.strip.cursor.filter(|t| *t >= s.from && *t <= s.to)
+                && let Some(r) = strip_readout(v.cfg, pts, judged, t, off)
+            {
+                draw::history_cursor(&mut c, &s, t, &r, theme);
+                readout = Some(r);
+            }
             Some(s)
         }
         _ => None,
@@ -431,6 +460,8 @@ pub(crate) fn leq_scene_under<T>(
         banners: strip.rows,
         caption: Rect::new(0.0, top, size.width, cap.height),
         run: cap.run.map(|(t, ..)| t),
+        strip_caption,
+        strip_readout: readout,
     };
     (scene, extra)
 }

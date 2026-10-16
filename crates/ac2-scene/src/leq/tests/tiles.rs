@@ -125,6 +125,7 @@ fn scene_lays_tiles_out_and_colours_them() {
         run: run_of(&c, &f),
         stage: false,
         chrome: crate::view::PlotChrome::Full,
+        strip: Default::default(),
     };
     let th = Theme::dark();
     let s = leq_scene(&v, &Status::default(), &th, size(1200.0, 700.0));
@@ -267,7 +268,7 @@ fn history_marks_over_segments_and_limits() {
     h.push(&c, &mk(74.0, false), 54.0);
     assert_eq!(h.points(&c.windows[0]).expect("series").len(), 35);
     let plot = Rect::new(50.0, 10.0, 600.0, 200.0);
-    let s = history_strip(&c, &h, true, plot, &Theme::dark());
+    let s = history_strip(&c, &h, true, plot, &Theme::dark(), StripSpan::default());
     assert_eq!(history_span(&c), 120.0);
     let l = &s.lines[0];
     assert_eq!(l.name, "LAeq 10 s");
@@ -290,7 +291,7 @@ fn history_marks_over_segments_and_limits() {
             .any(|t| t.ends_with(" s") && t.starts_with('−'))
     );
     // Unjudged: no limit line.
-    let s = history_strip(&c, &h, false, plot, &Theme::dark());
+    let s = history_strip(&c, &h, false, plot, &Theme::dark(), StripSpan::default());
     assert_eq!(s.lines[0].limit_y, None);
     // A change of unit (a calibration) starts the history over.
     let mut f = mk(-20.0, false);
@@ -366,7 +367,7 @@ fn hours_of_history_draw_a_few_points_per_column_and_are_laid_out_once_per_frame
     }
     let plot = Rect::new(40.0, 10.0, 600.0, 160.0);
     let th = Theme::dark();
-    let s = history_strip(&c, &h, true, plot, &th);
+    let s = history_strip(&c, &h, true, plot, &th, StripSpan::default());
     let l = &s.lines[0];
     assert!(l.points.len() <= 2 * 600 + 4, "{} points", l.points.len());
     // The peak is drawn, at its height and time.
@@ -386,14 +387,20 @@ fn hours_of_history_draw_a_few_points_per_column_and_are_laid_out_once_per_frame
         assert!(r.len() >= 2);
     }
     // The same inputs reuse the strip; a new frame lays it out again.
-    assert_eq!(history_strip(&c, &h, true, plot, &th), s);
+    assert_eq!(
+        history_strip(&c, &h, true, plot, &th, StripSpan::default()),
+        s
+    );
     h.push(&c, &mk(99.0), f64::from(n));
-    let s2 = history_strip(&c, &h, true, plot, &th);
+    let s2 = history_strip(&c, &h, true, plot, &th, StripSpan::default());
     assert_ne!(s2, s);
-    assert_eq!(s2, lay_out_strip(&c, &h, true, plot, &th));
+    assert_eq!(
+        s2,
+        lay_out_strip(&c, &h, true, plot, &th, StripSpan::default())
+    );
     let wider = Rect::new(40.0, 10.0, 700.0, 160.0);
     assert_eq!(
-        history_strip(&c, &h, true, wider, &th),
-        lay_out_strip(&c, &h, true, wider, &th)
+        history_strip(&c, &h, true, wider, &th, StripSpan::default()),
+        lay_out_strip(&c, &h, true, wider, &th, StripSpan::default())
     );
 }

@@ -219,6 +219,8 @@ impl AppState {
                 let m = self.modes_mut();
                 m.spl = m.spl.with_leq();
             }
+            C::SplLogExport => self.ask_leq_export(false),
+            C::SplLogExportPrevious => self.ask_leq_export(true),
             C::SplNewLog => match self.kind_meas(PaneKind::Spl).cloned() {
                 Some(m) => {
                     let MeasKind::Spl { config } = &m.config.kind else {

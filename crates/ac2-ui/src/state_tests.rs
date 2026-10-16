@@ -895,6 +895,9 @@ mod sweep;
 #[path = "state_leq_tests.rs"]
 mod leq;
 
+#[path = "state_leq_strip_tests.rs"]
+mod leq_strip;
+
 #[path = "state_layout_tests.rs"]
 mod layout;
 

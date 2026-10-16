@@ -209,6 +209,9 @@ impl AppState {
             ConnEvent::LeqBackfill { meas, ask, result } => {
                 self.leq_backfilled(meas, ask, result);
             }
+            ConnEvent::LeqSpan { meas, ask, result } => {
+                self.leq_span_fetched(meas, ask, result);
+            }
             ConnEvent::BandLog { ask, result } => self.band_log_answered(ask, result),
             ConnEvent::BandTransfer(result) => self.band_transfer_answered(result),
             ConnEvent::Sessions(o) => self.session_outcome(*o, out),

@@ -137,3 +137,70 @@ fn preview_requests_reach_the_daemon_in_order() {
     assert_eq!(ops, want);
     assert_eq!(fake.lock().preview, Some((BackendKind::Fake, dev)));
 }
+
+/// "Export Leq log…": every row of the meter's log, read a page at a time off the UI
+/// thread, written as the log CSV in a folder made for it; the toast counts the seconds.
+#[test]
+fn the_leq_log_exports_as_csv_in_a_new_folder() {
+    use ac2_proto::model::{SplLogRow, SplLogWhich};
+    use ac2_proto::spl_log::SplLogInfo;
+    use ac2_proto::units::{Dbfs, MeasId, Seconds, WallNs};
+    let fake = FakeDaemon::start(FakeOptions::default()).unwrap();
+    let m = ac2_proto::samples::spl_measurement();
+    // More than a page of `spl.log_get`.
+    let n = 25_000;
+    let rows: Vec<SplLogRow> = (0..n)
+        .map(|k| SplLogRow {
+            start: WallNs((1_792_000_000 + k) * 1_000_000_000),
+            measured: Seconds(1.0),
+            laeq: Dbfs(-20.0),
+            lceq: Dbfs(-18.0),
+            lzeq: Dbfs(-17.0),
+            lcpeak: Dbfs(-5.0),
+            lafmax: Dbfs(-12.0),
+            sensitivity: None,
+            position: None,
+        })
+        .collect();
+    {
+        let mut s = fake.lock();
+        s.state.measurements.push(m.clone());
+        s.spl_rows.insert(m.id, rows);
+    }
+    let conn = link(&fake);
+    wait_for(&conn, "connected", |e| {
+        matches!(e, ConnEvent::Connected { .. })
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ac2-exports").join("FOH-SPL-leq.csv");
+    conn.send(Request::ExportLeqLog {
+        info: SplLogInfo {
+            meas: MeasId(4),
+            name: "FOH SPL".into(),
+            input: 1,
+            mic: None,
+        },
+        log: SplLogWhich::Current,
+        path: path.clone(),
+    });
+    let mut said = String::new();
+    wait_for(&conn, "the export", |e| match e {
+        ConnEvent::Reply { what, .. } if what.contains("written to") => {
+            said = what.clone();
+            true
+        }
+        _ => false,
+    });
+    assert!(
+        said.starts_with("25000 seconds of FOH SPL written to "),
+        "{said}"
+    );
+    assert!(said.ends_with("FOH-SPL-leq.csv"), "{said}");
+    let csv = std::fs::read_to_string(&path).unwrap();
+    let data = csv
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.is_empty())
+        .count();
+    // The rows and the column header.
+    assert_eq!(data, n as usize + 1, "{}", &csv[..300.min(csv.len())]);
+}

@@ -191,6 +191,10 @@ pub(super) fn navigate(
         navigate_ir(app, ui, resp, plot_rect, which, x, y);
         return;
     }
+    if pane == PaneKind::Spl {
+        navigate_strip(app, ui, resp, id, plot_rect, axes.strip);
+        return;
+    }
     if resp.hovered()
         && app.state.level_range(id).is_some()
         && (pane != PaneKind::Distortion
@@ -363,6 +367,77 @@ pub(super) fn navigate_ir(
             IrNavMsg::Zoom {
                 about_ms: ms_at(p),
                 factor: f64::from((scroll / 200.0).exp()),
+            },
+        ));
+    }
+}
+
+/// The mouse on an SPL pane's Leq history strip, as on the other graphs' time axes: the
+/// wheel zooms time about the pointer, a drag pans it, the pointer reads the windows at its
+/// time. Off the strip it does nothing.
+pub(super) fn navigate_strip(
+    app: &mut App,
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    id: PaneId,
+    plot_rect: egui::Rect,
+    strip: Option<scenes::StripPlace>,
+) {
+    let Some(s) = strip else {
+        if app.state.leq_cursor.is_some_and(|(p, _)| p == id) {
+            app.dispatch(Msg::LeqStrip(id, StripMsg::Hover(None)));
+        }
+        return;
+    };
+    let r = egui::Rect::from_min_size(
+        plot_rect.min + egui::vec2(s.plot.x, s.plot.y),
+        egui::vec2(s.plot.w, s.plot.h),
+    );
+    let span = s.to - s.from;
+    if r.width() <= 1.0 || span.is_nan() || span <= 0.0 {
+        return;
+    }
+    let t_at = |p: egui::Pos2| s.from + f64::from((p.x - r.min.x) / r.width()) * span;
+    let shown = (s.from, s.to);
+    let width_px = r.width();
+    let from_strip = ui
+        .input(|i| i.pointer.press_origin())
+        .is_some_and(|p| r.contains(p));
+    if resp.dragged() && from_strip {
+        let dx = resp.drag_delta().x;
+        if dx != 0.0 {
+            app.dispatch(Msg::LeqStrip(
+                id,
+                StripMsg::Pan {
+                    shown,
+                    by: -f64::from(dx / width_px) * span,
+                    width_px,
+                },
+            ));
+        }
+    }
+    let pos = resp.hover_pos().filter(|p| r.contains(*p));
+    let t = pos.map(t_at);
+    if app
+        .state
+        .leq_cursor
+        .filter(|(p, _)| *p == id)
+        .map(|(_, t)| t)
+        != t
+    {
+        app.dispatch(Msg::LeqStrip(id, StripMsg::Hover(t)));
+    }
+    let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+    if scroll != 0.0
+        && let Some(about) = t
+    {
+        app.dispatch(Msg::LeqStrip(
+            id,
+            StripMsg::Zoom {
+                shown,
+                about,
+                factor: f64::from((scroll / 200.0).exp()),
+                width_px,
             },
         ));
     }

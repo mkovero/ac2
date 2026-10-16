@@ -293,6 +293,7 @@ impl AppState {
                     s.started = started.unwrap_or(s.started);
                 }
                 _ => {
+                    self.forget_leq_spans(meas);
                     self.leq_backfill_ask += 1;
                     let ask = self.leq_backfill_ask;
                     self.leq_logs.insert(

@@ -459,6 +459,12 @@ impl AppState {
                 let name = if spl { c.spl_name() } else { c.name() };
                 self.toast(format!("{title}: {name}"));
             }
+            // A Leq history strip on the focused pane walks its log with the same keys.
+            c if leq_strip::is_strip_nav(c) && self.leq_strip_target().is_some() => {
+                if let Some(p) = self.leq_strip_target() {
+                    self.leq_strip_key(p, c, out);
+                }
+            }
             // An IR picture navigates its time and value axes with the same keys.
             c if ir_nav::is_nav(c) && self.ir_target().is_some() => {
                 if let Some(p) = self.ir_target() {
@@ -654,6 +660,8 @@ impl AppState {
             | C::SplLeqStyle
             | C::SplLeqHistory
             | C::SplNewLog
+            | C::SplLogExport
+            | C::SplLogExportPrevious
             | C::SplTimeWeighting
             | C::SplWeighting
             | C::SplFast
