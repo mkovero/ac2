@@ -32,13 +32,13 @@ app runs). Profiles in `.config/nextest.toml`:
 | `ac2-core` | pure DSP/acoustics math (MTW, delay finder, spectrum/RTA, SPL, rolling Leq, sweep, mic curves, generator); no I/O, no threads, `forbid(unsafe_code)` |
 | `ac2-audio` | backend trait + capabilities, sample-indexed blocks; jack (Linux only), asio (Windows, azo), coreaudio (macOS), fake, replay (a recording as a capture-only device) |
 | `cahal` | external: github.com/mkovero/cahal, crates.io — Core Audio HAL binding (macOS); ac2-audio's `coreaudio` backend runs on it |
-| `ac2-proto` | typed protocol: commands, events, frame headers, version |
+| `ac2-proto` | typed protocol: commands, events, frame headers, version; the SPL log CSV format (`spl_log`) |
 | `ac2-zmq` | the only crate linking libzmq: safe typed sockets, CURVE behind `SecureContext` (ZAP handler first) |
 | `ac2-client` | async client |
 | `ac2-discovery` | mDNS advert (`_ac2._tcp`, network mode only) and browse; names rigs, never trusts them |
 | `ac2d` | daemon (`ac2d` binary): session, jobs, state, calibration store, autosave, SPL log and Leq history |
 | `ac2-cli` | CLI (`ac2` binary); `ac2 selftest duplex` opens `ac2-audio` in process (no daemon) |
-| `ac2-traces` | stored traces and their math, text import/export, SPL log files, session files, raw capture files (f32 WAV/RF64 + sidecar) |
+| `ac2-traces` | stored traces and their math, text import/export, band log files, session files, raw capture files (f32 WAV/RF64 + sidecar) |
 | `ac2-archive` | `.ac2session` archives: pack a session folder, unpack within size/entry limits, SHA-256 (no DSP, so the app links it) |
 | `ac2-paths` | platform config / data dirs, atomic writes (daemon and UI) |
 | `ac2-scene` | pure display truth: every displayed number/string, tested headless |
