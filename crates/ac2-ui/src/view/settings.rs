@@ -20,6 +20,8 @@ pub(super) fn settings(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32
         return;
     };
     let s: Settings = (**s).clone();
+    let reveal = std::mem::take(&mut app.state.settings_reveal);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(REVEAL), reveal));
     let screen = ctx.content_rect();
     let rect = egui::Rect::from_min_max(egui::pos2(screen.min.x, top), screen.max);
     let mut msg: Option<Msg> = None;
@@ -66,9 +68,40 @@ pub(super) fn settings(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32
     }
 }
 
+/// Where this frame's "bring the focused row into view" lives for the page's rows.
+const REVEAL: &str = "ac2-settings-reveal";
+
+/// The focused row of a Settings page comes into view only when a key moved the focus (or
+/// the page was just shown): scrolled every frame, it would pull the page back to it over
+/// the wheel each time the mirror repaints.
+pub(super) fn reveal_focused(r: &egui::Response) {
+    if r.ctx
+        .data(|d| d.get_temp::<bool>(egui::Id::new(REVEAL)))
+        .unwrap_or(false)
+    {
+        r.scroll_to_me(None);
+    }
+}
+
 fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) {
     ui.label(RichText::new("Settings").strong().size(20.0).color(ch.text));
     ui.add_space(10.0);
+    // The keys are a column of their own: a page without one keeps its name in line.
+    let key_text = |k: String| RichText::new(k).small().monospace().color(ch.dim);
+    let key_w = (0..Page::ALL.len())
+        .filter_map(page_key)
+        .map(|k| {
+            egui::WidgetText::from(key_text(k.label()))
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Body,
+                )
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max);
     for (i, p) in Page::ALL.iter().enumerate() {
         let on = s.page == *p;
         let t = RichText::new(p.title())
@@ -76,7 +109,8 @@ fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) 
             .color(if on { ch.focus } else { ch.text });
         ui.horizontal(|ui| {
             let key = page_key(i).map(|k| k.label()).unwrap_or_default();
-            ui.label(RichText::new(key).small().monospace().color(ch.dim));
+            let w = ui.label(key_text(key)).rect.width();
+            ui.add_space((key_w - w).max(0.0));
             if ui
                 .add(egui::Button::selectable(on, t).min_size(egui::vec2(150.0, 26.0)))
                 .clicked()

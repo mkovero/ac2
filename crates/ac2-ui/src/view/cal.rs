@@ -61,7 +61,7 @@ pub(super) fn cal_page(app: &App, ui: &mut egui::Ui, v: &CalView, ch: &Chrome) {
                 ui.label(RichText::new(&r.extra).small().color(ch.dim));
                 ui.end_row();
                 if focused {
-                    resp.scroll_to_me(None);
+                    super::settings::reveal_focused(&resp);
                 }
             }
         });

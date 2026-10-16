@@ -91,10 +91,19 @@ impl RigPage {
     }
 
     /// The mirror changed: the page follows the rig unless the operator is typing a target;
-    /// a target kept after a conflict is made on the rig's newest settings.
+    /// a target kept after a conflict is made on the rig's newest settings. The focus, the
+    /// selection and the test message stay: the mirror changes every second while the rig
+    /// meters, and selecting the focused text again would make the next key replace what
+    /// was typed. Only a new target from the rig selects it again, so typing replaces it.
     pub fn follow(&mut self, rig: &Rig) {
         if !self.edited {
-            self.reload(rig);
+            let target = target_text(rig.osc_target);
+            if target != self.target {
+                self.target = target;
+                self.selected |= self.focus == RigRow::Target;
+            }
+            self.rev = rig.rev;
+            self.notice = None;
         } else if self.notice.is_some() {
             self.rev = rig.rev;
         }

@@ -418,7 +418,7 @@ fn channel_grid(
                     })
                     .inner;
                 if focused {
-                    resp.scroll_to_me(None);
+                    super::settings::reveal_focused(&resp);
                 }
                 ui.horizontal(|ui| {
                     let m = meters
@@ -497,7 +497,7 @@ fn channel_grid(
                     *msg = Some(SessionMsg::EditMic(row));
                 }
                 if focused {
-                    resp.scroll_to_me(None);
+                    super::settings::reveal_focused(&resp);
                 }
                 ui.label("");
                 if chip(ui, r.stimulus, "S", ch.armed, ch)

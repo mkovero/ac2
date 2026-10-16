@@ -328,6 +328,10 @@ pub struct AppState {
     pub want_connect_dialog: bool,
     /// The selection moved by key: the tree brings its row into view (the view takes it).
     pub tree_reveal: bool,
+    /// A key moved the Settings page's focus (or a page was shown): the page brings the
+    /// focused row into view once (the view takes it), so the wheel and the mirror's
+    /// updates leave the scroll where the operator put it.
+    pub settings_reveal: bool,
     /// The Settings page last shown: the Settings key opens it again.
     settings_page_last: Page,
     /// The SPL / Leq page last applied, with what its call is named: a conflict brings it
@@ -468,6 +472,7 @@ impl AppState {
             client_key: None,
             want_connect_dialog: false,
             tree_reveal: false,
+            settings_reveal: false,
             settings_page_last: Page::AudioIo,
             leq_sent: None,
             layout_calls: std::collections::VecDeque::new(),

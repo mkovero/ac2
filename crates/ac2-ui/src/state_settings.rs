@@ -44,6 +44,7 @@ impl AppState {
     /// Opens Settings at `page` (or shows `page` of the open view).
     pub(super) fn open_settings(&mut self, page: Page, out: &mut Vec<Request>) {
         self.settings_page_last = page;
+        self.settings_reveal = true;
         if let Overlay::Settings(s) = &mut self.overlay {
             s.show(page);
             self.settings_entered(out);
@@ -245,6 +246,7 @@ impl AppState {
 
     fn settings_page(&mut self, page: Page, out: &mut Vec<Request>) {
         self.settings_page_last = page;
+        self.settings_reveal = true;
         if let Overlay::Settings(s) = &mut self.overlay {
             s.show(page);
         }
@@ -259,6 +261,10 @@ impl AppState {
         keymap: &Keymap,
         out: &mut Vec<Request>,
     ) {
+        if !matches!(self.overlay, Overlay::Settings(_)) {
+            return;
+        }
+        self.settings_reveal = true;
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };

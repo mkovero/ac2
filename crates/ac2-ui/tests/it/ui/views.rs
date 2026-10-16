@@ -824,3 +824,114 @@ fn rig_monitor_views() {
     h.step();
     snapshot(&mut h, "settings_rig");
 }
+
+/// The SPL / Leq page taller than the window (the band meter's 11 windows) holds where the
+/// wheel scrolled it while the rig's updates arrive: the Rig section at its bottom stays in
+/// view. A key moving the focus brings the focused row back into view.
+#[test]
+fn leq_page_holds_its_scroll_while_the_rig_meters() {
+    use ac2_proto::Change;
+    use ac2_proto::Patch;
+    use ac2_proto::model::{
+        BandLeqPreset, CueState, CueSubject, MeasKind, MeasScope, OscStatus, Rig, RigCue,
+    };
+    use ac2_proto::units::{MeasId, Rev};
+    if !have_gpu("leq_page_holds_its_scroll_while_the_rig_meters") {
+        return;
+    }
+    let rig_state = |meas: MeasId, n: u64| Rig {
+        rev: Rev(5),
+        osc_target: Some("192.168.1.20:9000".parse().expect("addr")),
+        monitor_at_start: true,
+        osc: OscStatus {
+            sent: n,
+            last_error: None,
+        },
+        cues: vec![RigCue {
+            meas,
+            subject: CueSubject::Meter,
+            state: if n.is_multiple_of(2) {
+                CueState::Near
+            } else {
+                CueState::Ok
+            },
+        }],
+    };
+    let rig = common::Rig::start();
+    let meas;
+    {
+        // The rig's SPL meter, the page's, with the band meter's 545 windows.
+        let mut f = rig.fake.lock();
+        let mut m = f
+            .state
+            .measurements
+            .iter()
+            .find(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
+            .cloned()
+            .expect("the rig's SPL meter");
+        if let MeasKind::Spl { config } = &mut m.config.kind {
+            config.bands = Some(Box::new(BandLeqPreset::Finland545Lf.apply(None)));
+        }
+        m.config.scope = MeasScope::Rig;
+        meas = m.id;
+        f.commit(Change::Measurement(Patch::Set(m)));
+        f.commit(Change::Rig(rig_state(meas, 0)));
+    }
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.state_mut().dispatch(ac2_ui::state::Msg::OpenRig);
+    h.state_mut().dispatch(ac2_ui::state::Msg::Settings(
+        ac2_ui::state::SettingsMsg::Page(ac2_ui::settings::Page::Leq),
+    ));
+    step_until(&mut h, "the SPL / Leq page with 11 band windows", |a| {
+        a.state
+            .overlay
+            .leq()
+            .is_some_and(|d| d.bands.rows.len() == 11)
+    });
+    h.step();
+    let keep = |h: &Harness<'_, App>| {
+        h.query_by_label(ac2_scene::osc::KEEP_ON_RIG)
+            .map(|n| n.rect())
+            .expect("the Keep on rig row")
+    };
+    let below = keep(&h);
+    assert!(
+        below.min.y > SIZE.y,
+        "the Rig section starts below the window: {below:?}"
+    );
+    h.event(Event::PointerMoved(egui::pos2(700.0, 400.0)));
+    for _ in 0..20 {
+        h.event(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -400.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        h.step();
+    }
+    settle(&mut h, 10);
+    let scrolled = keep(&h);
+    assert!(
+        scrolled.max.y < SIZE.y,
+        "the wheel brought the Rig section up: {scrolled:?}"
+    );
+    // The rig's updates, one a frame: the page stays where the wheel left it.
+    for n in 1..=30 {
+        rig.fake.lock().commit(Change::Rig(rig_state(meas, n)));
+        h.step();
+    }
+    step_until(&mut h, "the rig's updates", |a| {
+        a.state.daemon().is_some_and(|s| s.rig.osc.sent == 30)
+    });
+    settle(&mut h, 5);
+    assert_eq!(keep(&h), scrolled, "a mirror update moved the page");
+    // ↑ from the preset row wraps to the last row; ↓ back to the preset brings it into view.
+    h.key_press(Key::ArrowUp);
+    h.key_press(Key::ArrowDown);
+    settle(&mut h, 10);
+    assert!(
+        keep(&h).min.y > SIZE.y,
+        "the focused preset row came back into view"
+    );
+}

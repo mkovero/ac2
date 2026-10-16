@@ -45,7 +45,7 @@ fn choice(
     let r = ui.add(egui::Button::selectable(focused, t));
     if focused {
         // The keys move the focus: the page follows it.
-        r.scroll_to_me(None);
+        super::settings::reveal_focused(&r);
     }
     if r.clicked() {
         *msg = Some(LeqMsg::Cycle(at, 1));
@@ -126,7 +126,7 @@ fn sized_text_cell(
     };
     let r = ui.add_sized([width, 20.0], egui::Button::selectable(focused, t));
     if focused {
-        r.scroll_to_me(None);
+        super::settings::reveal_focused(&r);
     }
     if r.clicked() {
         *msg = Some(LeqMsg::Focus(at));
@@ -322,7 +322,7 @@ fn toggle(
         RichText::new(text).color(ch.text),
     ));
     if focused {
-        r.scroll_to_me(None);
+        super::settings::reveal_focused(&r);
     }
     if r.clicked() {
         *msg = Some(LeqMsg::Cycle(at, if on { -1 } else { 1 }));
