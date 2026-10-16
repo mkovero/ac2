@@ -461,6 +461,7 @@ impl Shared {
         let base = match &c {
             Command::OscTarget { base, .. }
             | Command::ArtnetTarget { base, .. }
+            | Command::ArtnetFade { base, .. }
             | Command::RigMonitorStart { base, .. } => *base,
             _ => rig.rev,
         };
@@ -470,6 +471,10 @@ impl Shared {
         match c {
             Command::OscTarget { addr, .. } => rig.osc_target = addr,
             Command::ArtnetTarget { target, .. } => rig.artnet_target = target,
+            Command::ArtnetFade { seconds, .. } => {
+                rig.artnet_fade = ac2_proto::model::ArtnetFade::new(seconds.0)
+                    .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?;
+            }
             Command::RigMonitorStart { on, .. } => rig.monitor_at_start = on,
             Command::OscTest { .. } => {
                 if rig.osc_target.is_none() {
@@ -523,6 +528,7 @@ impl Shared {
             c @ (C::OscTarget { .. }
             | C::OscTest { .. }
             | C::ArtnetTarget { .. }
+            | C::ArtnetFade { .. }
             | C::ArtnetTest { .. }
             | C::RigMonitorStart { .. }) => self.rig_cmd(c)?,
             c @ (C::MeasCreate { .. }

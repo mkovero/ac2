@@ -14,7 +14,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use ac2_proto::model::{ArtnetTarget, MeasKind, MeasScope, OutputSetup, SessionConfig};
+use ac2_proto::model::{ArtnetFade, ArtnetTarget, MeasKind, MeasScope, OutputSetup, SessionConfig};
 use ac2_proto::{ErrorCode, ProtoError};
 use ac2_traces::session::SavedMeasurement;
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,10 @@ struct RigFile {
     /// Where the Art-Net universe goes; absent: nowhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     artnet_target: Option<ArtnetTarget>,
+    /// How long the DMX channels take to move to a new cue frame; absent (a file written
+    /// before fades): [`ArtnetFade::DEFAULT`].
+    #[serde(default)]
+    artnet_fade: ArtnetFade,
 }
 
 /// Just enough of any file to tell its format and version.
@@ -74,6 +78,8 @@ pub(crate) struct RigSettings {
     pub(crate) osc_target: Option<SocketAddr>,
     /// Where the Art-Net universe goes; `None`: nowhere.
     pub(crate) artnet_target: Option<ArtnetTarget>,
+    /// How long the DMX channels take to move to a new cue frame.
+    pub(crate) artnet_fade: ArtnetFade,
 }
 
 /// Where the rig settings live.
@@ -143,6 +149,7 @@ impl RigStore {
                     monitor_session: f.monitor_session,
                     osc_target: f.osc_target,
                     artnet_target: f.artnet_target,
+                    artnet_fade: f.artnet_fade,
                 };
                 match check(&s) {
                     Ok(()) => (store, s),
@@ -207,6 +214,7 @@ impl RigStore {
             monitor_session: s.monitor_session.clone(),
             osc_target: s.osc_target,
             artnet_target: s.artnet_target,
+            artnet_fade: s.artnet_fade,
         };
         let text = serde_json::to_vec_pretty(&file)
             .map_err(|e| perr(ErrorCode::Internal, format!("rig settings: {e}")))?;
@@ -319,6 +327,7 @@ mod tests {
                 addr: "2.255.255.255:6454".parse().expect("addr"),
                 universe: ac2_proto::model::PortAddress::new(1).expect("universe"),
             }),
+            artnet_fade: ArtnetFade::new(0.0).expect("fade"),
             ..RigSettings::default()
         };
         store.persist(&want).expect("write");
@@ -360,6 +369,9 @@ mod tests {
             }
         );
         assert!(store.check().is_ok());
+        // Written before fades: the default fade, not a jump and not a refusal.
+        assert_eq!(got.artnet_fade, ArtnetFade::DEFAULT);
+        assert_eq!(got.artnet_fade.seconds(), 1.0);
         assert_eq!(start_ceiling(got.ceiling_dbfs, -10.0), -30.0);
         assert!(!dir.path().join("rig.json.v1").exists());
     }
@@ -440,6 +452,14 @@ mod tests {
         std::fs::write(
             &p,
             r#"{"format":"ac2-rig-settings","version":1,"ceiling_dbfs":3.0,"outputs":[],"measurements":[],"monitor_at_start":false,"monitor_session":null}"#,
+        )
+        .expect("write");
+        let (store, s) = RigStore::open(&p);
+        assert_eq!(s, RigSettings::default());
+        assert!(store.check().is_err());
+        std::fs::write(
+            &p,
+            r#"{"format":"ac2-rig-settings","version":1,"ceiling_dbfs":-3.0,"outputs":[],"artnet_fade":99.0}"#,
         )
         .expect("write");
         let (store, s) = RigStore::open(&p);

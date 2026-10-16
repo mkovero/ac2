@@ -52,6 +52,7 @@ RIG = {
     "rev": 38,
     "osc_target": "192.168.9.20:9000",
     "artnet_target": {"addr": "192.168.9.255:6454", "universe": 1},
+    "artnet_fade": 1.5,
     "monitor_at_start": True,
     "osc": {"sent": 12, "last_error": "Connection refused (os error 111)"},
     "artnet": {"sent": 340, "last_error": None},
@@ -596,6 +597,7 @@ def requests():
             {"base": 38, "target": {"addr": "2.255.255.255:6454", "universe": 18}},
         ),
         req(78, "artnet.test", {"channels": dmx([(12, 255), (13, 40)])}),
+        req(79, "artnet.fade", {"base": 38, "seconds": 2.5}),
     ]
 
 

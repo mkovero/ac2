@@ -1,7 +1,8 @@
-//! `ac2 artnet target|test`: where the rig's Art-Net universe goes.
+//! `ac2 artnet target|fade|test`: where the rig's Art-Net universe goes and how it moves.
 
 use ac2_client::expect_body;
-use ac2_proto::model::{ArtnetTarget, Rig, dmx_list_text};
+use ac2_proto::model::{ArtnetFade, ArtnetTarget, Rig, dmx_list_text};
+use ac2_proto::units::Seconds;
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
 
@@ -37,6 +38,17 @@ pub(crate) async fn artnet(cli: &Cli, cmd: &ArtnetCmd, out: &mut Out<'_>) -> Res
             out.emit(&rig, || match rig.artnet_target {
                 Some(t) => format!("Art-Net universe {} goes to {}", universe_text(&t), t.addr),
                 None => "Art-Net target off: no frames are sent".to_owned(),
+            })?;
+        }
+        ArtnetCmd::Fade { seconds } => {
+            let c = connect(cli, false).await?;
+            let seconds = Seconds(seconds.0.seconds());
+            let rig = rig_edit(&c, |base| Command::ArtnetFade { base, seconds }).await?;
+            out.emit(&rig, || match fade_text(rig.artnet_fade) {
+                t if rig.artnet_fade.seconds() == 0.0 => {
+                    format!("Art-Net fade {t}: cue changes jump")
+                }
+                t => format!("Art-Net fade {t}: cue changes fade over it"),
             })?;
         }
         ArtnetCmd::Test { channels } => {
@@ -75,6 +87,11 @@ fn universe_text(t: &ArtnetTarget) -> String {
     format!("{} ({})", t.universe, t.universe.get())
 }
 
+/// A fade as `rig status` and `artnet fade` say it: `1.5 s`.
+fn fade_text(f: ArtnetFade) -> String {
+    format!("{} s", f.seconds())
+}
+
 /// The Art-Net lines of `rig status`.
 pub(crate) fn status_text(rig: &Rig) -> String {
     let lit = if rig.dmx.is_empty() {
@@ -83,11 +100,12 @@ pub(crate) fn status_text(rig: &Rig) -> String {
         dmx_list_text(&rig.dmx)
     };
     format!(
-        "Art-Net target: {}\nsent: {}\nlast error: {}\nchannels above 0: {lit}\n",
+        "Art-Net target: {}\nfade: {}\nsent: {}\nlast error: {}\nchannels above 0: {lit}\n",
         rig.artnet_target.map_or_else(
             || "off".to_owned(),
             |t| format!("{} universe {}", t.addr, universe_text(&t))
         ),
+        fade_text(rig.artnet_fade),
         rig.artnet.sent,
         rig.artnet.last_error.as_deref().unwrap_or("none"),
     )

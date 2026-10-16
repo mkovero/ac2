@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use ac2_client::{Client, ClientConfig, ClientError, Endpoints};
 use ac2_proto::model::{
-    ArtnetTarget, Cue, CueAction, LeqConfig, LeqWindow, MeasConfig, MeasKind, PeakWeighting,
-    PortAddress, SplConfig, TimeWeighting, Weighting, dmx_list_text, parse_dmx_list,
+    ArtnetFade, ArtnetTarget, Cue, CueAction, LeqConfig, LeqWindow, MeasConfig, MeasKind,
+    PeakWeighting, PortAddress, SplConfig, TimeWeighting, Weighting, dmx_list_text, parse_dmx_list,
 };
 use ac2_proto::units::{Db, DbSpl, MeasId, Rev, Seconds};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody};
@@ -64,7 +64,7 @@ impl Node {
     }
 
     /// The next frame `want` accepts (others are skipped).
-    fn until(&self, what: &str, want: impl Fn(&Frame) -> bool) -> Frame {
+    fn until(&self, what: &str, mut want: impl FnMut(&Frame) -> bool) -> Frame {
         let deadline = Instant::now() + WAIT;
         let mut buf = [0u8; 1024];
         loop {
@@ -313,4 +313,94 @@ async fn targets_and_tests_are_checked() {
         .await
         .unwrap_err();
     assert_eq!(refused(e), ErrorCode::Invalid);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_cue_change_fades_and_a_zero_fade_jumps() {
+    init_log();
+    let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
+    let c = connect(&h).await;
+    let refused = |e: ClientError| match e {
+        ClientError::Daemon(p) => p.code,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        c.view().state.clone().unwrap().rig.artnet_fade,
+        ArtnetFade::DEFAULT
+    );
+    for bad in [-1.0, 60.5, f64::NAN] {
+        let e = c
+            .call(Command::ArtnetFade {
+                base: rig_rev(&c),
+                seconds: Seconds(bad),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused(e), ErrorCode::Invalid, "{bad}");
+    }
+    let stale = rig_rev(&c);
+    c.call(Command::ArtnetFade {
+        base: stale,
+        seconds: Seconds(0.3),
+    })
+    .await
+    .unwrap();
+    let deadline = Instant::now() + WAIT;
+    while c.view().state.clone().unwrap().rig.artnet_fade.seconds() != 0.3 {
+        assert!(Instant::now() < deadline, "rig.artnet_fade never 0.3 s");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let e = c
+        .call(Command::ArtnetFade {
+            base: stale,
+            seconds: Seconds(0.0),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(refused(e), ErrorCode::Conflict);
+
+    let node = Node::new();
+    c.call(Command::ArtnetTarget {
+        base: rig_rev(&c),
+        target: Some(target_on(&node)),
+    })
+    .await
+    .unwrap();
+    node.until("the first frame", |_| true);
+
+    // A meter with no session goes to fault: channel 20 climbs through several steps over
+    // the fade, never down, and stops at its level.
+    create(&c, meter("A", None, cue("", "", "", "20=255"))).await;
+    let first = node.until("the fade's first step", |f| f.ch(20) > 0);
+    let mut steps = vec![first.ch(20)];
+    let last = node.until("the fade's end", |f| {
+        steps.push(f.ch(20));
+        f.ch(20) == 255
+    });
+    let took = last.at - first.at;
+    let between: Vec<u8> = steps.iter().copied().filter(|v| *v < 255).collect();
+    assert!(between.len() >= 4, "steps {steps:?}");
+    assert!(steps.windows(2).all(|w| w[0] <= w[1]), "steps {steps:?}");
+    assert!(
+        took > Duration::from_millis(150) && took < Duration::from_millis(1000),
+        "{took:?}"
+    );
+
+    // No fade: the next change is one frame at its level.
+    c.call(Command::ArtnetFade {
+        base: rig_rev(&c),
+        seconds: Seconds(0.0),
+    })
+    .await
+    .unwrap();
+    create(&c, meter("B", None, cue("", "", "", "40=255"))).await;
+    let f = node.until("B's fault", |f| f.ch(40) > 0);
+    assert_eq!((f.ch(40), f.ch(20)), (255, 255));
+}
+
+fn target_on(node: &Node) -> ArtnetTarget {
+    ArtnetTarget {
+        addr: node.addr(),
+        universe: PortAddress::new(0).unwrap(),
+    }
 }

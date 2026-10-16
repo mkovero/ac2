@@ -71,6 +71,7 @@ pub(super) fn rig_page(
                         RigRow::Test => &p.test,
                         RigRow::ArtnetTarget => &p.artnet,
                         RigRow::Universe => &p.universe,
+                        RigRow::Fade => &p.fade,
                         _ => &p.dmx_test,
                     };
                     let caret = focused.then_some(p.caret);
@@ -96,6 +97,7 @@ pub(super) fn rig_page(
             RigRow::Test => Some(osc::TEST_NOTE),
             RigRow::ArtnetTarget => Some(artnet::TARGET_NOTE),
             RigRow::Universe => Some(artnet::UNIVERSE_NOTE),
+            RigRow::Fade => Some(artnet::FADE_NOTE),
             RigRow::DmxTest => Some(artnet::TEST_NOTE),
             RigRow::Monitor => None,
         };

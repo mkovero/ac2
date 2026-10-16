@@ -176,6 +176,7 @@ fn the_rig_page_types_artnet_through_mirror_updates() {
     for (row, typed) in [
         (RigRow::ArtnetTarget, "2.255.255.255"),
         (RigRow::Universe, "0.0.1"),
+        (RigRow::Fade, "2.5"),
         (RigRow::DmxTest, "12=255 13=40"),
     ] {
         t.st.update(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
@@ -191,8 +192,13 @@ fn the_rig_page_types_artnet_through_mirror_updates() {
     }
     let p = &settings(&t).rig;
     assert_eq!(
-        (p.artnet.as_str(), p.universe.as_str(), p.dmx_test.as_str()),
-        ("2.255.255.255", "0.0.1", "12=255 13=40")
+        (
+            p.artnet.as_str(),
+            p.universe.as_str(),
+            p.fade.as_str(),
+            p.dmx_test.as_str()
+        ),
+        ("2.255.255.255", "0.0.1", "2.5", "12=255 13=40")
     );
     let r = t.key("Enter");
     assert!(
@@ -200,6 +206,15 @@ fn the_rig_page_types_artnet_through_mirror_updates() {
             r,
             Request::Call { cmd: Command::ArtnetTest { channels }, .. }
                 if ac2_proto::model::dmx_list_text(channels) == "12=255 13=40"
+        )),
+        "{r:?}"
+    );
+    t.key("ArrowUp");
+    let r = t.key("Enter");
+    assert!(
+        r.iter().any(|r| matches!(
+            r,
+            Request::Call { cmd: Command::ArtnetFade { seconds, .. }, .. } if seconds.0 == 2.5
         )),
         "{r:?}"
     );
@@ -238,7 +253,12 @@ fn no_settings_page_resets_on_mirror_updates() {
     // The Rig monitor page's Art-Net rows, each with something typed; and the Art-Net
     // target changed elsewhere while the universe is typed leaves the typed rows alone.
     t.st.update(Msg::Settings(SettingsMsg::Page(Page::Rig)), &t.keys);
-    for row in [RigRow::ArtnetTarget, RigRow::Universe, RigRow::DmxTest] {
+    for row in [
+        RigRow::ArtnetTarget,
+        RigRow::Universe,
+        RigRow::Fade,
+        RigRow::DmxTest,
+    ] {
         t.st.update(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
         t.text("7");
         for _ in 0..3 {
@@ -247,7 +267,11 @@ fn no_settings_page_resets_on_mirror_updates() {
         }
     }
     s.rig.artnet_target = ac2_scene::artnet::parse_target("10.0.0.9", "3").expect("test value");
+    s.rig.artnet_fade = ac2_proto::model::ArtnetFade::new(4.0).expect("test value");
     update_holds(&mut t, &mut s, n);
     let p = &settings(&t).rig;
-    assert_eq!((p.artnet.as_str(), p.universe.as_str()), ("7", "7"));
+    assert_eq!(
+        (p.artnet.as_str(), p.universe.as_str(), p.fade.as_str()),
+        ("7", "7", "17")
+    );
 }

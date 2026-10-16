@@ -57,6 +57,13 @@ async fn artnet_target_test_cue_levels_and_status() {
     assert_eq!(rig["artnet_target"]["universe"], 18, "{rig}");
     let saved = std::fs::read_to_string(dir.path().join("rig.json")).unwrap();
     assert!(saved.contains(&addr), "{saved}");
+    assert_eq!(rig["artnet_fade"], 1.0, "{rig}");
+
+    // The fade is kept by the rig, and status says it.
+    let (rig, _) = ok(&ep, &["artnet", "fade", "250ms"]).await;
+    assert_eq!(rig["artnet_fade"], 0.25, "{rig}");
+    let saved = std::fs::read_to_string(dir.path().join("rig.json")).unwrap();
+    assert!(saved.contains("\"artnet_fade\": 0.25"), "{saved}");
 
     // A test frame.
     let (t, _) = ok(&ep, &["artnet", "test", "12=255", "13=40"]).await;
@@ -108,6 +115,7 @@ async fn artnet_target_test_cue_levels_and_status() {
     assert_eq!(st["artnet_target"]["addr"], addr.as_str(), "{st}");
     assert!(st["artnet"]["sent"].as_u64().unwrap() >= 2, "{st}");
     assert_eq!(st["dmx"][0]["channel"], 20, "{st}");
+    assert_eq!(st["artnet_fade"], 0.25, "{st}");
 
     let (rig, _) = ok(&ep, &["artnet", "target", "off"]).await;
     assert!(rig["artnet_target"].is_null(), "{rig}");

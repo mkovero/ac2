@@ -944,6 +944,7 @@
     "addr": "192.168.9.255:6454",
     "universe": 1
    },
+   "artnet_fade": 1.5,
    "monitor_at_start": true,
    "osc": {
     "sent": 12,

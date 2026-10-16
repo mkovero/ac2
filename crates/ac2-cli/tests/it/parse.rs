@@ -919,6 +919,10 @@ fn artnet_grammar() {
         &["artnet", "test", "0=1"],
         &["artnet", "test", "12"],
         &["artnet", "test", "12=300"],
+        &["artnet", "fade", "-1"],
+        &["artnet", "fade", "61"],
+        &["artnet", "fade", "nan"],
+        &["artnet", "fade", "2min"],
     ] {
         assert!(parse(bad).is_err(), "{bad:?}");
     }
@@ -929,4 +933,14 @@ fn artnet_grammar() {
         panic!("artnet test");
     };
     assert_eq!(ac2_proto::model::dmx_list_text(&channels), "12=255 13=40");
+    let fade = |args: &[&str]| match ok(args).cmd {
+        Cmd::Artnet {
+            cmd: ArtnetCmd::Fade { seconds },
+        } => seconds.0.seconds(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(fade(&["artnet", "fade", "1.5"]), 1.5);
+    assert_eq!(fade(&["artnet", "fade", "0"]), 0.0);
+    assert_eq!(fade(&["artnet", "fade", "500ms"]), 0.5);
+    assert_eq!(fade(&["artnet", "fade", "60s"]), 60.0);
 }

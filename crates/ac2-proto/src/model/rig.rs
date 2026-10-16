@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ArtnetTarget, DmxSet, RigCue};
+use super::{ArtnetFade, ArtnetTarget, DmxSet, RigCue};
 use crate::units::Rev;
 
 /// How sending to one kind of receiver (OSC, Art-Net) fares.
@@ -23,14 +23,16 @@ pub struct OutputStatus {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rig {
-    /// Rev at which these settings were last committed; `osc.target`, `artnet.target` and
-    /// `rig.monitor_start` name it as their `base`.
+    /// Rev at which these settings were last committed; `osc.target`, `artnet.target`,
+    /// `artnet.fade` and `rig.monitor_start` name it as their `base`.
     pub rev: Rev,
     /// Where OSC cues go (an IP literal and port); `None`: nowhere.
     #[serde(with = "opt_addr")]
     pub osc_target: Option<SocketAddr>,
     /// Where the Art-Net universe goes; `None`: nowhere.
     pub artnet_target: Option<ArtnetTarget>,
+    /// How long the DMX channels take to move to a new cue frame (0: they jump).
+    pub artnet_fade: ArtnetFade,
     /// At start the daemon reopens the last session's device capture-only, so the rig
     /// measurements meter with no client connected.
     pub monitor_at_start: bool,
@@ -87,6 +89,7 @@ mod tests {
                 addr: "192.168.1.255:6454".parse().expect("valid"),
                 universe: PortAddress::from_parts(0, 0, 1).expect("valid"),
             }),
+            artnet_fade: ArtnetFade::new(2.5).expect("valid"),
             monitor_at_start: true,
             osc: OutputStatus {
                 sent: 3,

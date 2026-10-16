@@ -516,6 +516,7 @@ pub fn rig() -> Rig {
             addr: "192.168.9.255:6454".parse().expect("valid sample address"),
             universe: PortAddress::from_parts(0, 0, 1).expect("valid sample universe"),
         }),
+        artnet_fade: ArtnetFade::new(1.5).expect("valid sample fade"),
         monitor_at_start: true,
         osc: OutputStatus {
             sent: 12,

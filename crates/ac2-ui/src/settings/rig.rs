@@ -1,6 +1,7 @@
 //! The Rig monitor page: where the rig's OSC cues go (typed `ip:port`, empty: off), whether
 //! the daemon starts metering on its own at start, a one-off test message, where the rig's
-//! Art-Net universe goes (an address and a universe, applied together) and a test frame,
+//! Art-Net universe goes (an address and a universe, applied together), how long its
+//! channels fade to a new cue state and a test frame,
 //! how sending fares, and the meters the rig keeps. Every edit names the rig settings' rev
 //! the page showed, so a change another client made first is refused, not overwritten.
 
@@ -19,16 +20,18 @@ pub enum RigRow {
     Test,
     ArtnetTarget,
     Universe,
+    Fade,
     DmxTest,
 }
 
 impl RigRow {
-    pub const ALL: [RigRow; 6] = [
+    pub const ALL: [RigRow; 7] = [
         RigRow::Target,
         RigRow::Monitor,
         RigRow::Test,
         RigRow::ArtnetTarget,
         RigRow::Universe,
+        RigRow::Fade,
         RigRow::DmxTest,
     ];
 
@@ -39,6 +42,7 @@ impl RigRow {
             RigRow::Test => ac2_scene::osc::TEST_TITLE,
             RigRow::ArtnetTarget => artnet::TARGET_TITLE,
             RigRow::Universe => artnet::UNIVERSE_TITLE,
+            RigRow::Fade => artnet::FADE_TITLE,
             RigRow::DmxTest => artnet::TEST_TITLE,
         }
     }
@@ -58,6 +62,7 @@ impl RigRow {
 enum Typed {
     Osc(String),
     Artnet(String, String),
+    Fade(String),
 }
 
 /// The page being edited.
@@ -72,6 +77,8 @@ pub struct RigPage {
     pub artnet: String,
     /// The Art-Net target's universe as typed (the rig's while not edited).
     pub universe: String,
+    /// The Art-Net fade as typed, seconds (the rig's while not edited).
+    pub fade: String,
     /// The test frame's levels as typed.
     pub dmx_test: String,
     /// The rig settings' rev the page shows: edits name it as their base.
@@ -80,6 +87,8 @@ pub struct RigPage {
     pub edited: bool,
     /// The Art-Net target was typed since the rig's was shown: a mirror change leaves it.
     pub artnet_edited: bool,
+    /// The fade was typed since the rig's was shown: a mirror change leaves it.
+    pub fade_edited: bool,
     /// Where typing goes in the focused text: at its end when the row is entered.
     pub caret: Caret,
     /// Why the last Enter on the focused row was refused (shown under it).
@@ -98,10 +107,12 @@ impl Default for RigPage {
             test: DEFAULT_TEST.to_owned(),
             artnet: String::new(),
             universe: String::new(),
+            fade: artnet::fade_text(ac2_proto::model::ArtnetFade::DEFAULT),
             dmx_test: artnet::DEFAULT_TEST.to_owned(),
             rev: Rev(0),
             edited: false,
             artnet_edited: false,
+            fade_edited: false,
             caret: Caret::default(),
             error: None,
             sent: None,
@@ -124,9 +135,11 @@ impl RigPage {
     pub fn reload(&mut self, rig: &Rig) {
         self.target = target_text(rig.osc_target);
         (self.artnet, self.universe) = artnet::target_texts(rig.artnet_target);
+        self.fade = artnet::fade_text(rig.artnet_fade);
         self.rev = rig.rev;
         self.edited = false;
         self.artnet_edited = false;
+        self.fade_edited = false;
         self.caret_to_end();
         self.notice = None;
     }
@@ -154,7 +167,16 @@ impl RigPage {
                 }
             }
         }
-        if !self.edited && !self.artnet_edited {
+        if !self.fade_edited {
+            let f = artnet::fade_text(rig.artnet_fade);
+            if f != self.fade {
+                self.fade = f;
+                if self.focus == RigRow::Fade {
+                    self.caret_to_end();
+                }
+            }
+        }
+        if !self.edited && !self.artnet_edited && !self.fade_edited {
             self.rev = rig.rev;
             self.notice = None;
         } else if self.notice.is_some() {
@@ -178,6 +200,10 @@ impl RigPage {
                 self.artnet = a;
                 self.universe = u;
                 self.artnet_edited = true;
+            }
+            Typed::Fade(f) => {
+                self.fade = f;
+                self.fade_edited = true;
             }
         }
         self.rev = rig.rev;
@@ -224,6 +250,10 @@ impl RigPage {
                 self.artnet_edited = true;
                 Some(&mut self.universe)
             }
+            RigRow::Fade => {
+                self.fade_edited = true;
+                Some(&mut self.fade)
+            }
             RigRow::DmxTest => Some(&mut self.dmx_test),
             RigRow::Monitor => None,
         }
@@ -236,6 +266,7 @@ impl RigPage {
             RigRow::Test => Some(&self.test),
             RigRow::ArtnetTarget => Some(&self.artnet),
             RigRow::Universe => Some(&self.universe),
+            RigRow::Fade => Some(&self.fade),
             RigRow::DmxTest => Some(&self.dmx_test),
             RigRow::Monitor => None,
         }
@@ -360,6 +391,18 @@ impl RigPage {
                     )
                 })
             }
+            RigRow::Fade => artnet::parse_fade(&self.fade).map(|fade| {
+                let what = artnet::fade_toast(fade);
+                self.fade_edited = false;
+                self.sent = Some((what.clone(), Typed::Fade(self.fade.clone())));
+                (
+                    Command::ArtnetFade {
+                        base: self.rev,
+                        seconds: ac2_proto::units::Seconds(fade.seconds()),
+                    },
+                    what,
+                )
+            }),
             RigRow::Monitor => return self.monitor(rig, !rig.monitor_at_start),
             RigRow::Test => match parse_message(&self.test, false) {
                 Ok(Some(msg)) => {

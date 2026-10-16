@@ -517,6 +517,80 @@ fn a_conflict_keeps_the_typed_artnet_target() {
     ));
 }
 
+/// The fade row: the rig's fade shown in seconds, typed over and sent as `artnet.fade` on
+/// the rev the page shows; a value out of range says why; a conflict keeps the typed one;
+/// emptied, the fade is off (0 s).
+#[test]
+fn the_rig_page_sets_the_artnet_fade() {
+    let mut t = T::new();
+    t.conn(mirror(with_rig(7)));
+    t.st.update(Msg::OpenRig, &t.keys);
+    assert_eq!(rig_page(&t).fade, "1", "the default a rig starts with");
+    t.st.update(
+        Msg::Settings(SettingsMsg::RigFocus(RigRow::Universe)),
+        &t.keys,
+    );
+    t.key("ArrowDown");
+    assert_eq!(rig_page(&t).focus, RigRow::Fade);
+    // The caret at the end of the rig's text: typing adds to it.
+    t.text("5");
+    assert_eq!(rig_page(&t).fade, "15");
+    t.text("0");
+    assert!(call(&t.key("Enter")).is_none());
+    assert_eq!(
+        rig_page(&t).error.as_deref(),
+        Some("Art-Net fade 150 s is outside 0–60 s")
+    );
+    for _ in 0..3 {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    t.text("0.5");
+    let r = t.key("Enter");
+    assert_eq!(
+        call(&r),
+        Some((
+            &Command::ArtnetFade {
+                base: Rev(7),
+                seconds: Seconds(0.5),
+            },
+            "Art-Net fade 0.5 s"
+        ))
+    );
+    let mut s = with_rig(8);
+    s.rig.artnet_fade = ac2_proto::model::ArtnetFade::new(0.5).expect("test value");
+    t.conn(mirror(s.clone()));
+    assert_eq!(
+        (rig_page(&t).fade.as_str(), rig_page(&t).rev),
+        ("0.5", Rev(8))
+    );
+    // Emptied: off. Refused as stale, the empty row stays on the newer rev.
+    for _ in 0..3 {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    let r = t.key("Enter");
+    let Some((cmd, what)) = call(&r) else {
+        panic!("{r:?}")
+    };
+    assert_eq!(
+        cmd,
+        &Command::ArtnetFade {
+            base: Rev(8),
+            seconds: Seconds(0.0),
+        }
+    );
+    let what = what.to_owned();
+    assert_eq!(what, "Art-Net fade off: cue changes jump");
+    s.rig.rev = Rev(9);
+    t.conn(mirror(s));
+    t.conn(ConnEvent::Conflict {
+        what: what.clone(),
+        error: "conflict: stale base".into(),
+    });
+    let p = rig_page(&t);
+    assert_eq!((p.fade.as_str(), p.rev), ("", Rev(9)));
+    assert!(p.notice.is_some());
+}
+
 /// A cue row's DMX line: ↓ from a state's message reaches its levels; levels that do not
 /// read refuse Enter naming the subject; typed levels go out in `meas.update` on the rev
 /// the editor opened on, beside the message of the same state.

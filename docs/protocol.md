@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 53`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 54`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -104,6 +104,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `rig.monitor_start` | `base: Rev` (`rig.rev`), `on: bool` | `ack` (`rig` event) | |
 | `artnet.target` | `base: Rev` (`rig.rev`), `target: ArtnetTarget \| nil` | `ack` (`rig` event) | |
 | `artnet.test` | `channels: [DmxSet]` | `ack` (`rig` event: the sent count) | |
+| `artnet.fade` | `base: Rev` (`rig.rev`), `seconds: f64` | `ack` (`rig` event) | |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
 | `meas.update` | `meas`, `base: Rev` (the `config_rev` the edit was made on), `config` | `measurement` | |
 | `meas.colour` | `meas`, `colour: ColourFamily \| nil` | `measurement` | |
@@ -203,7 +204,9 @@ it. `state.outputs` lists the labelled outputs, sorted by channel.
 **Rig monitor, OSC and Art-Net cues (`osc.*`, `artnet.*`, `rig.*`).** The `rig` entity (`Rig`) holds what belongs
 to the daemon's machine rather than to a session: `rev` (the rev of its last settings change),
 `osc_target` (`"ip:port"` \| nil: where OSC cues go; an IP literal, never a name to look up),
-`artnet_target` (`ArtnetTarget` \| nil: where the Art-Net universe goes), `monitor_at_start` (at start the daemon reopens the last session's device capture-only so the
+`artnet_target` (`ArtnetTarget` \| nil: where the Art-Net universe goes), `artnet_fade` (f64
+seconds, 0–60: how long the DMX channels take to move to a new cue frame; 0 jumps; 1 until
+set), `monitor_at_start` (at start the daemon reopens the last session's device capture-only so the
 rig measurements meter with no client connected; the generator stays disarmed), `osc` and
 `artnet` (each an `OutputStatus` {`sent`: packets since the daemon started, u64,
 `last_error`: str \| nil, the latest send error as the operating system said it}), `dmx`
@@ -214,13 +217,16 @@ tagged by `type`: `meter` (the whole meter: the worst state of its limits), `win
 {duration, weighting}, `peak` {quantity}, `band` {duration, weighting, nominal},
 `predicted`. `CueState` is `ok` (under the limit, or none), `near`, `over` or `fault` (the rig
 cannot judge: no audio, device lost, not calibrated).
-`osc.target`, `artnet.target` and `rig.monitor_start` carry the `rig.rev` they were made on; another is
+`osc.target`, `artnet.target`, `artnet.fade` and `rig.monitor_start` carry the `rig.rev` they were made on; another is
 `conflict` with `detail: conflict {rev}` (the current one). `osc.test` sends one message to
 the target now (setup); `invalid` without a target, `internal` with the operating system's
 reason when the send fails; `append_level` appends 0 dB. `osc.target` refuses an unspecified
 address or port 0 (`invalid`), writes the rig settings file before it takes effect, and sends
 the current state of every cue to the new target at once. `artnet.target` likewise refuses
 an unspecified address or port 0, persists, and sends the current frame at once.
+`artnet.fade` sets `rig.artnet_fade` and persists it; `seconds` outside 0–60 or not finite is
+`invalid`. It applies from the next change of the cue frame (a fade in progress keeps its
+length).
 `artnet.test` sends one frame holding `channels` (every other channel 0) now, to find a
 fixture's channels; the keepalive repeats it for 5 s, then the cue frame comes back (at once
 when a cue changes state meanwhile); `invalid` without a target or with a channel listed
@@ -244,9 +250,16 @@ most every 10 s while the sent counter moves (`rig.cues` and `rig.dmx` changes a
 once).
 Art-Net: ac2 owns one universe and sends all 512 channels as ArtDmx (OpCode 0x5000, protocol
 14, `Sequence` 0) from an ephemeral UDP port to `artnet_target`. Each channel is the highest
-level any cue's current state lists for it (HTP), 0 where none lists it; a frame is sent at
-once when it changes, and the current frame again every second while a target is set (nodes
-drop a source silent for about 4 s). `Sequence` stays 0 (no reordering check): every frame is
+level any cue's current state lists for it (HTP), 0 where none lists it. When the cue frame
+changes, every channel fades from the level last output to its new level over `artnet_fade`,
+evenly in perceived brightness: with p = (v/255)^(1/2.2), p moves linearly from start to end
+and each frame carries round(255·p^2.2); a frame goes out every 25 ms while fading, the last
+one exactly the cue frame. A change during a fade starts a new full fade from the levels
+output at that moment. With `artnet_fade` 0, the first frame to a target, a test frame, the
+cue frame returning after a test and the clean-stop frame, the frame is sent at once with no
+fade. Otherwise the current frame is sent again every second while a target is set (nodes
+drop a source silent for about 4 s). Fade frames count in `rig.artnet.sent` under the same
+10 s commit rule. `Sequence` stays 0 (no reordering check): every frame is
 the whole universe and is resent within a second, so a reordered datagram heals by itself, and
 a restarted daemon is never ignored by a node that remembers a higher sequence. Mix ac2's
 universe with a lighting desk at the receiver (an Art-Net input merged HTP, or a node's HTP

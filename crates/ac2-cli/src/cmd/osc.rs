@@ -84,6 +84,7 @@ pub(crate) async fn rig(cli: &Cli, cmd: &RigCmd, out: &mut Out<'_>) -> Result<()
             let json = json!({
                 "osc_target": st.rig.osc_target.map(|a| a.to_string()),
                 "artnet_target": st.rig.artnet_target,
+                "artnet_fade": st.rig.artnet_fade,
                 "monitor_at_start": st.rig.monitor_at_start,
                 "osc": st.rig.osc,
                 "artnet": st.rig.artnet,

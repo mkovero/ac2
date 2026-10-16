@@ -2240,7 +2240,12 @@ desks merge), and 0 for every channel no current state lists. A cue that goes aw
 holding its levels; a clean daemon stop sends one last frame of every cue's `ok` levels.
 
 ac2 sends all 512 channels whenever the frame changes, and the same frame again every second
-(nodes give up on a source silent for a few seconds). Set the target to a node's address or
+(nodes give up on a source silent for a few seconds). A change fades: every channel moves
+from its level to the new one over the rig's fade time (1 s until you set another, 0–60 s;
+0 jumps), evenly as the eye sees brightness rather than evenly in DMX steps, so a lamp does
+not rush through its dark end. A state change during a fade starts a new fade from where
+the lights are. Test frames, the cue frame coming back after a test and the last frame of
+a clean stop jump. Set the target to a node's address or
 to a broadcast address (`2.255.255.255`, or your LAN's), with the universe as a number
 0–32767 or as net.sub.uni (`0.0.1`). The levels of a channel no cue sets are 0, so keep ac2's
 universe apart from the desk's and merge the two downstream:
@@ -2254,19 +2259,21 @@ universe apart from the desk's and merge the two downstream:
 ```
 ac2 artnet target 2.255.255.255 0.0.1     # broadcast, universe 1; `off`: send nothing
 ac2 artnet target 192.168.1.40:6454 17    # one node, port given
+ac2 artnet fade 1.5                       # cue changes fade over 1.5 s; 0: they jump
 ac2 artnet test 12=255 13=40              # light these channels for 5 s to find a fixture
 ac2 cue Stage meter --over-dmx "12=255 13=0" --ok-dmx "12=0 13=255" --fault-dmx "14=255"
 ac2 cue Stage window:15min --near-dmx "12=80"
 ac2 cue Stage meter --fault-dmx off       # no levels in that state
-ac2 rig status                            # target, frames sent, the channels above 0
+ac2 rig status                            # target, fade, frames sent, the channels above 0
 ```
 
-The target is kept in the rig settings like the OSC target. `ac2 artnet test` holds its
+The target and the fade are kept in the rig settings like the OSC target. `ac2 artnet test` holds its
 frame for 5 s, or until a cue changes state, then the cues' frame comes back.
 
 In the app, Settings › Rig monitor has the same controls under the OSC ones: **Art-Net
 target** (`ip[:port]`, IPv4; empty: off) and **Universe** (`N` or `net.sub.uni`), applied
-together by Enter on either row; **Send DMX test** (`1=255` to start), which Enter sends;
+together by Enter on either row; **Fade (s)** (seconds, 0–60; 0 or empty: jump), which Enter
+applies; **Send DMX test** (`1=255` to start), which Enter sends;
 and a status line with the target, the frames sent, the last error and the channels above 0.
 On the SPL / Leq page each cue row has a DMX line under its OSC line, one field per state
 (`12=255 13=0`); a field that does not read keeps Enter from applying and says which.

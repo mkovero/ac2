@@ -293,6 +293,66 @@ pub struct ArtnetTarget {
     pub universe: PortAddress,
 }
 
+/// How long the rig's DMX channels take to move to a new cue frame, 0–60 s; 0 jumps.
+/// Without a setting it is [`ArtnetFade::DEFAULT`]: a light that changes over a second
+/// reads as a change of state, not a flicker.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "f64", into = "f64")]
+pub struct ArtnetFade(f64);
+
+/// Why a number is not an [`ArtnetFade`].
+#[derive(Debug, Clone, Copy, PartialEq, Error)]
+#[error("Art-Net fade {0} s is outside 0–60 s")]
+pub struct ArtnetFadeError(pub f64);
+
+impl ArtnetFade {
+    /// Longest fade, seconds.
+    pub const MAX: f64 = 60.0;
+    /// The fade of a rig that has not set one.
+    pub const DEFAULT: Self = Self(1.0);
+    /// No fade: every change jumps.
+    pub const SNAP: Self = Self(0.0);
+
+    /// Validates `seconds` (finite, 0–60).
+    pub fn new(seconds: f64) -> Result<Self, ArtnetFadeError> {
+        if seconds.is_finite() && (0.0..=Self::MAX).contains(&seconds) {
+            // -0.0 reads as 0 everywhere it is shown.
+            Ok(Self(seconds + 0.0))
+        } else {
+            Err(ArtnetFadeError(seconds))
+        }
+    }
+
+    /// Seconds.
+    pub fn seconds(self) -> f64 {
+        self.0
+    }
+
+    /// As a duration.
+    pub fn duration(self) -> std::time::Duration {
+        std::time::Duration::from_secs_f64(self.0)
+    }
+}
+
+impl Default for ArtnetFade {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+impl TryFrom<f64> for ArtnetFade {
+    type Error = ArtnetFadeError;
+    fn try_from(s: f64) -> Result<Self, Self::Error> {
+        Self::new(s)
+    }
+}
+
+impl From<ArtnetFade> for f64 {
+    fn from(f: ArtnetFade) -> Self {
+        f.0
+    }
+}
+
 /// `SocketAddr` as `"ip:port"` text (see [`super::opt_addr`]).
 mod addr_text {
     use std::net::SocketAddr;
@@ -315,6 +375,26 @@ mod tests {
 
     fn ch(n: u16) -> DmxChannel {
         DmxChannel::new(n).expect("valid")
+    }
+
+    #[test]
+    fn fades_are_0_to_60_s() {
+        assert_eq!(ArtnetFade::new(0.0).map(ArtnetFade::seconds), Ok(0.0));
+        assert_eq!(ArtnetFade::new(60.0).map(ArtnetFade::seconds), Ok(60.0));
+        assert!(
+            ArtnetFade::new(-0.0)
+                .expect("valid")
+                .seconds()
+                .is_sign_positive()
+        );
+        for bad in [-0.1, 60.01, f64::NAN, f64::INFINITY] {
+            assert!(ArtnetFade::new(bad).is_err(), "{bad}");
+        }
+        assert_eq!(ArtnetFade::default().seconds(), 1.0);
+        let b = rmp_serde::to_vec_named(&61.0f64).expect("valid");
+        assert!(rmp_serde::from_slice::<ArtnetFade>(&b).is_err());
+        let b = rmp_serde::to_vec_named(&ArtnetFade::new(0.5).expect("valid")).expect("valid");
+        assert_eq!(rmp_serde::from_slice::<f64>(&b).expect("valid"), 0.5);
     }
 
     #[test]

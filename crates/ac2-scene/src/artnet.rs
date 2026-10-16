@@ -6,12 +6,13 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use ac2_proto::model::{
-    ARTNET_PORT, ArtnetTarget, DmxSet, PortAddress, Rig, dmx_list_text, parse_dmx_list,
+    ARTNET_PORT, ArtnetFade, ArtnetTarget, DmxSet, PortAddress, Rig, dmx_list_text, parse_dmx_list,
 };
 
 /// The Rig monitor page's Art-Net rows.
 pub const TARGET_TITLE: &str = "Art-Net target";
 pub const UNIVERSE_TITLE: &str = "Universe";
+pub const FADE_TITLE: &str = "Fade (s)";
 pub const TEST_TITLE: &str = "Send DMX test";
 /// The levels Send DMX test starts with.
 pub const DEFAULT_TEST: &str = "1=255";
@@ -21,6 +22,9 @@ pub const TARGET_NOTE: &str = "IPv4 address of a node or a broadcast address (2.
 /// Under the universe row.
 pub const UNIVERSE_NOTE: &str =
     "a number 0–32767 or net.sub.uni (0.0.1); Enter on either row applies both";
+/// Under the fade row.
+pub const FADE_NOTE: &str = "seconds the lights take to move to a new cue state, evenly in \
+                             brightness, 0–60; 0 or empty: they jump";
 /// Under the test row.
 pub const TEST_NOTE: &str = "Enter sends these levels, every other channel 0: the test frame \
                              holds 5 s, then the cue levels return";
@@ -81,6 +85,36 @@ pub fn target_text(t: Option<ArtnetTarget>) -> String {
             universe_text(t.universe)
         ),
         None => "Art-Net off".to_owned(),
+    }
+}
+
+/// The fade as typed: seconds 0–60, an `s` after the number allowed; empty (or `off`)
+/// jumps.
+pub fn parse_fade(text: &str) -> Result<ArtnetFade, String> {
+    let t = text.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("off") {
+        return Ok(ArtnetFade::SNAP);
+    }
+    let n = t.strip_suffix('s').unwrap_or(t).trim();
+    let sec = n
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite())
+        .ok_or_else(|| format!("{t:?}: type the fade in seconds, like 1 or 0.5 (0: jump)"))?;
+    ArtnetFade::new(sec).map_err(|e| e.to_string())
+}
+
+/// The fade on its row: the seconds as a plain number (`1`, `0.25`).
+pub fn fade_text(f: ArtnetFade) -> String {
+    format!("{}", f.seconds())
+}
+
+/// The fade as its toast says it: `Art-Net fade 1.5 s`, or `Art-Net fade off` for 0.
+pub fn fade_toast(f: ArtnetFade) -> String {
+    if f.seconds() == 0.0 {
+        "Art-Net fade off: cue changes jump".to_owned()
+    } else {
+        format!("Art-Net fade {} s", f.seconds())
     }
 }
 
@@ -180,6 +214,39 @@ mod tests {
             parse_target("10.0.0.1", "one")
                 .expect_err("a word")
                 .contains("net.sub.uni")
+        );
+    }
+
+    #[test]
+    fn the_fade_is_seconds_0_to_60_or_off() {
+        let secs = |t: &str| parse_fade(t).map(ArtnetFade::seconds);
+        assert_eq!(secs("1.5"), Ok(1.5));
+        assert_eq!(secs(" 2s "), Ok(2.0));
+        assert_eq!(secs(""), Ok(0.0));
+        assert_eq!(secs("off"), Ok(0.0));
+        assert_eq!(secs("60"), Ok(60.0));
+        assert_eq!(
+            secs("61"),
+            Err("Art-Net fade 61 s is outside 0–60 s".into())
+        );
+        assert_eq!(
+            secs("-1"),
+            Err("Art-Net fade -1 s is outside 0–60 s".into())
+        );
+        assert_eq!(
+            secs("slow"),
+            Err("\"slow\": type the fade in seconds, like 1 or 0.5 (0: jump)".into())
+        );
+        assert!(secs("inf").is_err() && secs("NaN").is_err());
+        assert_eq!(fade_text(ArtnetFade::DEFAULT), "1");
+        assert_eq!(fade_text(ArtnetFade::new(0.25).expect("valid")), "0.25");
+        assert_eq!(
+            fade_toast(ArtnetFade::new(0.25).expect("valid")),
+            "Art-Net fade 0.25 s"
+        );
+        assert_eq!(
+            fade_toast(ArtnetFade::SNAP),
+            "Art-Net fade off: cue changes jump"
         );
     }
 

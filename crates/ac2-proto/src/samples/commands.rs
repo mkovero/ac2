@@ -333,5 +333,9 @@ pub fn commands() -> Vec<Command> {
         Command::ArtnetTest {
             channels: dmx("12=255 13=40"),
         },
+        Command::ArtnetFade {
+            base: Rev(38),
+            seconds: Seconds(2.5),
+        },
     ]
 }

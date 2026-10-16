@@ -429,6 +429,7 @@ impl Control {
                 monitor_at_start: saved.monitor_at_start,
                 osc_target: saved.osc_target,
                 artnet_target: saved.artnet_target,
+                artnet_fade: saved.artnet_fade,
                 ..Default::default()
             })
             .with_calibrations(contents)

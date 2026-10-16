@@ -3,10 +3,10 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::str::FromStr;
 
-use ac2_proto::model::{ARTNET_PORT, DmxSet, PortAddress};
+use ac2_proto::model::{ARTNET_PORT, ArtnetFade, DmxSet, PortAddress};
 use clap::Subcommand;
 
-use crate::units::UnitError;
+use crate::units::{Time, UnitError};
 
 /// `artnet …`.
 #[derive(Debug, Subcommand)]
@@ -20,6 +20,12 @@ pub enum ArtnetCmd {
         addr: ArtnetAddrArg,
         /// Universe: `N` (0–32767) or `net.sub.uni` (e.g. `0.0.1`); required unless `off`.
         universe: Option<PortAddressArg>,
+    },
+    /// How long the lights take to move to a new cue frame: each channel fades from its
+    /// level to the new one evenly in brightness. 0–60 s; 0 jumps. Kept by the rig.
+    Fade {
+        /// Seconds (`1.5`) or with a unit (`1.5s`, `500ms`).
+        seconds: ArtnetFadeArg,
     },
     /// Send one frame with these levels (every other channel 0) now, to find a fixture's
     /// channels. It holds 5 s, then the cues' frame comes back.
@@ -60,6 +66,23 @@ impl FromStr for ArtnetAddrArg {
                      2.255.255.255, 192.168.1.40:6454) or off"
                 ))
             })
+    }
+}
+
+/// An Art-Net fade: seconds, bare or with a unit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArtnetFadeArg(pub ArtnetFade);
+
+impl FromStr for ArtnetFadeArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        let sec = match s.trim().parse::<f64>() {
+            Ok(n) => n,
+            Err(_) => s.parse::<Time>()?.0.0,
+        };
+        ArtnetFade::new(sec)
+            .map(Self)
+            .map_err(|e| UnitError(e.to_string()))
     }
 }
 

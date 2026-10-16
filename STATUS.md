@@ -36,7 +36,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   1/3-octave band (STM 545/2015): `docs/design/band-leq.md`.
 - Rig monitor: SPL meters kept on the rig (`rig.json`, survive session loads) send OSC cues
   (ok / near / over / fault, resent each second) to a typed target, and hold DMX levels in one
-  Art-Net universe (HTP over the cues' current states, sent on change and each second); the
+  Art-Net universe (HTP over the cues' current states, sent on change and each second, a
+  change faded over the rig's fade time in perceived brightness); the
   monitor can reopen its device capture-only at daemon start. Settings page 7 (Rig monitor),
   the tree's Rig group, cues on the SPL / Leq page (OSC only so far), `ac2 osc` / `ac2 artnet`
   / `ac2 cue` / `ac2 rig` (`docs/user-guide.md` *Rig measurements*, *OSC cues*, *Art-Net

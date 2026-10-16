@@ -792,6 +792,7 @@ fn rig_monitor_views() {
         f.commit(Change::Rig(Rig {
             rev: Rev(5),
             osc_target: Some("192.168.1.20:9000".parse().expect("addr")),
+            artnet_fade: ac2_proto::model::ArtnetFade::new(1.5).expect("fade"),
             monitor_at_start: true,
             osc: OutputStatus {
                 sent: 128,
@@ -851,6 +852,7 @@ fn leq_page_holds_its_scroll_while_the_rig_meters() {
     let rig_state = |meas: MeasId, n: u64| Rig {
         rev: Rev(5),
         osc_target: Some("192.168.1.20:9000".parse().expect("addr")),
+        artnet_fade: ac2_proto::model::ArtnetFade::DEFAULT,
         monitor_at_start: true,
         osc: OutputStatus {
             sent: n,

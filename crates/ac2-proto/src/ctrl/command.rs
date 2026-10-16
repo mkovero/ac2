@@ -175,6 +175,16 @@ pub enum Command {
         /// Address and universe; `None`: send nowhere.
         target: Option<ArtnetTarget>,
     },
+    /// Set how long the DMX channels take to move to a new cue frame (`rig.artnet_fade`),
+    /// 0–60 s, 0: they jump; out of range or not finite is refused (`invalid`). Kept by the
+    /// daemon across restarts.
+    #[serde(rename = "artnet.fade")]
+    ArtnetFade {
+        /// The `rig.rev` the edit was made on; another is refused with `conflict`.
+        base: Rev,
+        /// Fade time.
+        seconds: Seconds,
+    },
     /// Send one frame with these levels (every other channel 0) to the Art-Net target now,
     /// to find a fixture's channels (setup). The cue frame comes back once the test has been
     /// held a few seconds, or at once when a cue changes state. Refused (`invalid`) without
@@ -742,6 +752,7 @@ impl Command {
             Self::OscTarget { .. } => "osc.target",
             Self::OscTest { .. } => "osc.test",
             Self::ArtnetTarget { .. } => "artnet.target",
+            Self::ArtnetFade { .. } => "artnet.fade",
             Self::ArtnetTest { .. } => "artnet.test",
             Self::RigMonitorStart { .. } => "rig.monitor_start",
             Self::MeasCreate { .. } => "meas.create",
