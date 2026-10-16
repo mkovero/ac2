@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 56`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 57`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -211,8 +211,13 @@ rig measurements meter with no client connected; the generator stays disarmed), 
 `artnet` (each an `OutputStatus` {`sent`: packets since the daemon started, u64,
 `last_error`: str \| nil, the latest send error as the operating system said it}), `dmx`
 ([`DmxSet`]: the cue universe's channels above 0, in channel order, whether or not a target is
-set) and `cues` ([`RigCue`] {`meas`, `subject`:
-`CueSubject`, `state`: `CueState`}: every cued subject's state as last sent). `CueSubject` is
+set), `cues` ([`RigCue`] {`meas`, `subject`:
+`CueSubject`, `state`: `CueState`}: every cued subject's state as last sent) and
+`damaged_files` ([`DamagedFile`] {`kind`: `StateFile`, `path`, `set_aside_as`: str \| nil,
+`reason`, `at`: `WallNs`}: state files found damaged at this start, set aside and replaced
+by their previous copy or a default; empty on a sound start, kept until the daemon restarts).
+`StateFile` is `autosave`, `trace`, `spl_log`, `band_log`, `working`, `rig_settings`,
+`rig_logs`, `calibrations`, `server_key` or `authorized_clients`. `CueSubject` is
 tagged by `type`: `meter` (the whole meter: the worst state of its limits), `window`
 {duration, weighting}, `peak` {quantity}, `band` {duration, weighting, nominal},
 `predicted`. `CueState` is `ok` (under the limit, or none), `near`, `over` or `fault` (the rig

@@ -23,18 +23,23 @@ pub(crate) fn everything() -> Status {
         no_delay_estimate: Some(NoDelayEstimate::NotFound),
         math: None,
         log_not_saved: None,
+        file_damaged: None,
         drive: Default::default(),
     }
 }
 
 #[test]
-fn a_log_not_saved_is_a_warning_under_the_measurement_warnings() {
+fn a_log_not_saved_is_a_warning_under_the_measurement_warnings_a_damaged_file_last() {
     let log = crate::autosave::LogFailureText {
         banner: "LOG NOT SAVED · disk full".into(),
         detail: "SPL log of Main not saved for 12 min: disk full; retried every 30 s".into(),
     };
     let b = banners(&Status {
         log_not_saved: Some(log.clone()),
+        file_damaged: Some(crate::autosave::DamageText {
+            banner: "FILE DAMAGED · rig settings".into(),
+            detail: "rig settings rig.json damaged: torn".into(),
+        }),
         no_delay_estimate: Some(NoDelayEstimate::NotFound),
         clock_drift_ppm: Some(3.24),
         ..Status::default()
@@ -44,10 +49,12 @@ fn a_log_not_saved_is_a_warning_under_the_measurement_warnings() {
         [
             "CLOCK DRIFT · 3.2 ppm",
             "LOG NOT SAVED · disk full",
-            "NO DELAY ESTIMATE"
+            "NO DELAY ESTIMATE",
+            "FILE DAMAGED · rig settings"
         ]
     );
     assert_eq!(b[1].severity, Severity::Warning);
+    assert_eq!(b[3].severity, Severity::Info);
     assert_eq!(b[1].detail.as_deref(), Some(log.detail.as_str()));
 }
 

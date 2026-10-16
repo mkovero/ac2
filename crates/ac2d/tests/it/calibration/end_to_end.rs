@@ -368,8 +368,10 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
         .unwrap();
 }
 
+/// A store torn by a power cut is set aside (kept, never overwritten) and the daemon starts
+/// with an empty, writable one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unreadable_store_is_refused_and_untouched() {
+async fn a_damaged_store_is_set_aside_and_a_new_one_written() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let store = dir.path().join("calibrations.json");
@@ -377,41 +379,28 @@ async fn unreadable_store_is_refused_and_untouched() {
     std::fs::write(&store, garbage).unwrap();
     let h = start(&store);
     let c = connect(&h).await;
-    for cmd in [
-        Command::CalList,
-        Command::CalDelete {
-            key: CalKey {
-                device: ac2_proto::model::DeviceId("fake:loop".into()),
-                channel: 1,
-                mic: "M30".into(),
-            },
-        },
-        Command::SessionInputs {
-            inputs: vec![InputSetup {
-                channel: 0,
-                mic: Some("M30".into()),
-                curve: CurveChoice::NotChosen,
-            }],
-        },
-        Command::CalCurveImport {
-            mic: "M30".into(),
-            label: None,
-            file_name: "c.txt".into(),
-            content: Blob(CURVE.as_bytes().to_vec()),
-            input: None,
-        },
-    ] {
-        let e = c.call(cmd).await.unwrap_err();
-        let ClientError::Daemon(p) = e else {
-            panic!("{e:?}")
-        };
-        assert_eq!(p.code, ErrorCode::Refused);
-        assert!(
-            matches!(p.detail, Some(ErrorDetail::CalStore { .. })),
-            "{p:?}"
-        );
-    }
-    assert_eq!(std::fs::read(&store).unwrap(), garbage);
+    c.call(Command::CalList).await.unwrap();
+    c.call(Command::CalCurveImport {
+        mic: "M30".into(),
+        label: None,
+        file_name: "c.txt".into(),
+        content: Blob(CURVE.as_bytes().to_vec()),
+        input: None,
+    })
+    .await
+    .unwrap();
+    let aside: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("calibrations.json.damaged-")
+        })
+        .collect();
+    assert_eq!(aside.len(), 1);
+    assert_eq!(std::fs::read(aside[0].path()).unwrap(), garbage);
+    assert_ne!(std::fs::read(&store).unwrap(), garbage);
     drop(c);
     tokio::task::spawn_blocking(move || h.shutdown())
         .await

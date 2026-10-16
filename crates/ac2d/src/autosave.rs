@@ -7,7 +7,8 @@
 //! <dir>/session.prev.json   the one before it, kept as a backup
 //! <dir>/traces/, <dir>/spl/ the files either names
 //! <dir>.v<N>                an autosave of session format N that this build cannot read, set aside
-//! <dir>.damaged             an unreadable autosave, set aside
+//! <dir>.damaged-<time>      an unreadable autosave, set aside
+//! <dir>.damaged-files/      trace and log files an autosave named but could not read
 //! <dir>.unrestored          the autosave a `--no-restore` start did not load
 //! ```
 //!
@@ -35,17 +36,19 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use ac2_proto::model::TraceMeta;
+use ac2_proto::model::{StateFile, TraceMeta};
 use ac2_proto::units::MeasId;
 use ac2_traces::session::{
     self, MANIFEST, PREV_MANIFEST, SavedMeasurement, SavedSplLogFile, Session as SessionData,
     SessionError, SplLogOnDisk,
 };
+use ac2_traces::session::{Dropped, DroppedKind};
 
 pub(crate) use self::rig_logs::RigLogs;
 use self::spl_files::SplFiles;
 pub(crate) use self::spl_files::{LogSpec, Resume};
 use crate::control::ControlMsg;
+use crate::damage::Damage;
 
 /// Quiet time after the last change before a write: a burst of edits (a slot moved, a
 /// rename, a delay typed) becomes one write.
@@ -149,57 +152,113 @@ pub(crate) struct Restored {
     pub(crate) logs: Vec<SplLogOnDisk>,
 }
 
+/// Damage found by [`restore`] for an unreadable whole (`path`, `to`).
+fn whole(e: &SessionError, path: &Path, to: Option<PathBuf>, what: &str) -> Damage {
+    let d = Damage {
+        kind: StateFile::Autosave,
+        path: path.to_owned(),
+        set_aside_as: to,
+        reason: format!("{e}; {what}"),
+    };
+    d.log();
+    d
+}
+
+/// Moves the files a lenient read left out (`dropped`, relative to `dir`) out of the
+/// autosave, where the next write would delete them as unnamed: into `<dir>.damaged-files/`,
+/// each named `<file>.damaged-<time>`.
+pub(crate) fn set_dropped_aside(dir: &Path, dropped: Vec<Dropped>) -> Vec<Damage> {
+    let into = sibling(dir, "", ".damaged-files");
+    dropped
+        .into_iter()
+        .map(|d| {
+            let from = dir.join(&d.file);
+            let moved = fs::create_dir_all(&into)
+                .and_then(|()| {
+                    let flat = into.join(d.file.replace(['/', '\\'], "_"));
+                    fs::rename(&from, &flat)?;
+                    ac2_paths::set_aside_damaged(&flat)
+                })
+                .and_then(|to| ac2_paths::sync_dir(dir).map(|()| to));
+            let (set_aside_as, what) = match moved {
+                Ok(to) => (Some(to), "left out"),
+                Err(_) if !from.exists() => (None, "left out"),
+                Err(e) => {
+                    tracing::warn!("autosave: cannot set {} aside: {e}", from.display());
+                    (None, "left out (it could not be set aside)")
+                }
+            };
+            let what = match d.kind {
+                DroppedKind::Trace => format!("{what}; the trace is not restored"),
+                DroppedKind::SplLog => format!("{what}; the meter starts a new log"),
+                DroppedKind::BandLog => format!("{what}; the meter starts without band history"),
+            };
+            let damage = Damage {
+                kind: match d.kind {
+                    DroppedKind::Trace => StateFile::Trace,
+                    DroppedKind::SplLog => StateFile::SplLog,
+                    DroppedKind::BandLog => StateFile::BandLog,
+                },
+                path: from,
+                set_aside_as,
+                reason: format!("{}; {what}", d.reason),
+            };
+            damage.log();
+            damage
+        })
+        .collect()
+}
+
+/// The autosave in `dir`: its current manifest, else the previous one. An autosave of
+/// another session format version is set aside, as is an unreadable one; neither is
+/// deleted. A trace or log file that cannot be read costs only itself (moved out by
+/// [`set_dropped_aside`]). What was damaged comes back beside the autosave.
+pub(crate) fn restore(dir: &Path) -> (Option<Restored>, Vec<Damage>) {
+    let (cur, prev) = (dir.join(MANIFEST), dir.join(PREV_MANIFEST));
+    if !cur.exists() && !prev.exists() {
+        // Nothing, or the SPL logs of a first write that never completed.
+        return (None, Vec::new());
+    }
+    let restored = |data, from, logs, dropped| {
+        let damage = set_dropped_aside(dir, dropped);
+        (Some(Restored { data, from, logs }), damage)
+    };
+    let e = match session::load_lenient(dir, MANIFEST) {
+        Ok((data, logs, dropped)) => return restored(data, cur, logs, dropped),
+        Err(e @ SessionError::Version { found, .. }) => {
+            // Not damage: another build's autosave, kept for it.
+            warn_aside(&e, dir, set_aside(dir, &format!("v{found}")));
+            return (None, Vec::new());
+        }
+        Err(e) => e,
+    };
+    match session::load_lenient(dir, PREV_MANIFEST) {
+        Ok((data, logs, dropped)) => {
+            let mut damage = Vec::new();
+            if cur.exists() {
+                // Kept for inspection; a manifest of that name is not read.
+                let to = ac2_paths::set_aside_damaged(&cur).ok();
+                damage.push(whole(&e, &cur, to, "restored the previous manifest"));
+            }
+            let (r, more) = restored(data, prev, logs, dropped);
+            damage.extend(more);
+            (r, damage)
+        }
+        Err(_) => {
+            let to = ac2_paths::set_aside_damaged(dir).ok();
+            (
+                None,
+                vec![whole(&e, dir, to, "started with an empty session")],
+            )
+        }
+    }
+}
+
 fn warn_aside(e: &SessionError, p: &Path, to: Option<PathBuf>) {
     tracing::warn!(
         "autosave not restored: {e}; set aside as {}",
         to.map_or_else(|| p.display().to_string(), |t| t.display().to_string())
     );
-}
-
-/// The autosave in `dir`: its current manifest, else the previous one. An autosave of
-/// another session format version is set aside, as is an unreadable one, with a warning;
-/// neither is deleted.
-pub(crate) fn restore(dir: &Path) -> Option<Restored> {
-    let (cur, prev) = (dir.join(MANIFEST), dir.join(PREV_MANIFEST));
-    if !cur.exists() && !prev.exists() {
-        // Nothing, or the SPL logs of a first write that never completed.
-        return None;
-    }
-    let e = match session::load_named(dir, MANIFEST) {
-        Ok((data, logs)) => {
-            return Some(Restored {
-                data,
-                from: cur,
-                logs,
-            });
-        }
-        Err(e @ SessionError::Version { found, .. }) => {
-            warn_aside(&e, dir, set_aside(dir, &format!("v{found}")));
-            return None;
-        }
-        Err(e) => e,
-    };
-    match session::load_named(dir, PREV_MANIFEST) {
-        Ok((data, logs)) => {
-            tracing::warn!(
-                "autosave: {e}; restoring the previous one ({})",
-                prev.display()
-            );
-            if cur.exists() {
-                // Kept for inspection; a manifest of that name is not read.
-                let _ = fs::rename(&cur, dir.join("session.damaged.json"));
-            }
-            Some(Restored {
-                data,
-                from: prev,
-                logs,
-            })
-        }
-        Err(_) => {
-            warn_aside(&e, dir, set_aside(dir, "damaged"));
-            None
-        }
-    }
 }
 
 /// What the write thread is asked to do.
@@ -527,7 +586,7 @@ mod tests {
                 .saved_at,
             WallNs(2)
         );
-        let r = restore(&dir).expect("restore");
+        let r = restore(&dir).0.expect("restore");
         assert_eq!((r.data.saved_at, r.from), (WallNs(3), dir.join(MANIFEST)));
     }
 
@@ -538,24 +597,37 @@ mod tests {
         write(&dir, &data(1), &[]).expect("first");
         write(&dir, &data(2), &[]).expect("second");
         fs::write(dir.join(MANIFEST), b"{ not json").expect("damage");
-        let r = restore(&dir).expect("restore");
+        let (r, damage) = restore(&dir);
+        let r = r.expect("restore");
         assert_eq!(
             (r.data.saved_at, r.from),
             (WallNs(1), dir.join(PREV_MANIFEST))
         );
-        assert!(dir.join("session.damaged.json").exists());
+        assert_eq!(damage.len(), 1);
+        assert_eq!(damage[0].kind, StateFile::Autosave);
+        assert_eq!(set_aside_count(&dir, "session.json.damaged-"), 1);
         assert!(!dir.join(MANIFEST).exists());
         // Restored again (nothing written in between): the backup still.
-        assert_eq!(restore(&dir).expect("again").data.saved_at, WallNs(1));
+        assert_eq!(restore(&dir).0.expect("again").data.saved_at, WallNs(1));
         // The next write goes on from there.
         write(&dir, &data(3), &[]).expect("third");
-        assert_eq!(restore(&dir).expect("third").data.saved_at, WallNs(3));
+        assert_eq!(restore(&dir).0.expect("third").data.saved_at, WallNs(3));
         // Both unreadable: the directory is set aside.
         fs::write(dir.join(MANIFEST), b"{ not json").expect("damage");
         fs::write(dir.join(PREV_MANIFEST), b"{ not json").expect("damage");
-        assert!(restore(&dir).is_none());
+        let (r, damage) = restore(&dir);
+        assert!(r.is_none());
+        assert_eq!(damage.len(), 1);
         assert!(!dir.exists());
-        assert!(root.path().join("autosave.damaged").exists());
+        assert_eq!(set_aside_count(root.path(), "autosave.damaged-"), 1);
+    }
+
+    fn set_aside_count(dir: &Path, prefix: &str) -> usize {
+        fs::read_dir(dir)
+            .expect("read_dir")
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
+            .count()
     }
 
     /// A write interrupted between the manifest's two renames leaves only the previous
@@ -567,11 +639,11 @@ mod tests {
         let dir = root.path().join("autosave");
         write(&dir, &data(1), &[]).expect("first");
         fs::rename(dir.join(MANIFEST), dir.join(PREV_MANIFEST)).expect("cut");
-        assert_eq!(restore(&dir).expect("restore").data.saved_at, WallNs(1));
+        assert_eq!(restore(&dir).0.expect("restore").data.saved_at, WallNs(1));
         let fresh = root.path().join("fresh");
         fs::create_dir_all(fresh.join("spl")).expect("dir");
         fs::write(fresh.join("spl/1-5.csv"), b"# ac2 spl log v2\n").expect("log");
-        assert!(restore(&fresh).is_none());
+        assert!(restore(&fresh).0.is_none());
         assert!(fresh.exists());
     }
 
@@ -588,7 +660,7 @@ mod tests {
         );
         assert_ne!(text, other);
         fs::write(&m, other).expect("version");
-        assert!(restore(&dir).is_none());
+        assert!(restore(&dir).0.is_none());
         assert!(!dir.exists());
         let aside = root.path().join("autosave.v999");
         assert!(aside.join(session::MANIFEST).exists());
@@ -607,7 +679,7 @@ mod tests {
                 .join(session::MANIFEST)
                 .exists()
         );
-        assert!(restore(&dir).is_none());
+        assert!(restore(&dir).0.is_none());
     }
 
     /// A meter with a day of log runs for an hour of simulated minutes, each minute's rows
@@ -692,7 +764,7 @@ mod tests {
         text.extend_from_slice(b"2026-09-21T14:20:00.000Z,17900001");
         fs::write(&path, &text).expect("cut");
 
-        let r = restore(&dir).expect("restore");
+        let r = restore(&dir).0.expect("restore");
         let rows = &r.data.spl_logs[0].rows;
         assert_eq!(rows.len(), 150);
         let restored = LeqLog::from_rows(rows.clone(), Vec::new());
@@ -765,7 +837,7 @@ mod tests {
         write(&dir, &with_meter(2), &files.linked(&[meter()])).expect("second");
         files.close_all();
 
-        let r = restore(&dir).expect("restore");
+        let r = restore(&dir).0.expect("restore");
         let bands = &r.data.spl_logs[0].bands;
         assert_eq!(bands.len(), 60);
         for (k, b) in bands.iter().enumerate() {

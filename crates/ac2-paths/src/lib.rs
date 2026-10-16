@@ -155,6 +155,15 @@ pub fn keymap() -> PathBuf {
 /// same directory, flushed and synced, renamed over `path`, the directory synced. A crash
 /// leaves the old file or the new one, never a mix. The file is owner-only on Unix.
 pub fn write_private_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
+    write_atomic_mode(path, contents, true)
+}
+
+/// As [`write_private_atomic`], readable by others as the umask allows (public keys).
+pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
+    write_atomic_mode(path, contents, false)
+}
+
+fn write_atomic_mode(path: &Path, contents: &[u8], private: bool) -> io::Result<()> {
     let dir = match path.parent() {
         Some(d) if !d.as_os_str().is_empty() => d,
         _ => Path::new("."),
@@ -174,10 +183,12 @@ pub fn write_private_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
         let mut opts = fs::OpenOptions::new();
         opts.write(true).create_new(true);
         #[cfg(unix)]
-        {
+        if private {
             use std::os::unix::fs::OpenOptionsExt;
             opts.mode(0o600);
         }
+        #[cfg(not(unix))]
+        let _ = private;
         let mut f = opts.open(&tmp)?;
         f.write_all(contents)?;
         f.sync_all()?;
@@ -188,15 +199,65 @@ pub fn write_private_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
         let _ = fs::remove_file(&tmp);
     }
     written?;
-    // Persists the rename itself; directories cannot be opened for sync on Windows.
+    sync_dir(dir)
+}
+
+/// Syncs directory `dir`, so that a rename or a new file in it survives a power cut.
+/// Nothing on Windows, where directories cannot be opened for sync (NTFS journals them).
+pub fn sync_dir(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
     fs::File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
     Ok(())
+}
+
+/// Moves a damaged file out of the way, keeping it for inspection: to
+/// `<name>.damaged-<unix seconds>` beside it (`-2`, `-3`… when taken), the directory synced.
+/// Returns where it went.
+pub fn set_aside_damaged(path: &Path) -> io::Result<PathBuf> {
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?
+        .to_string_lossy()
+        .into_owned();
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let mut to = path.with_file_name(format!("{name}.damaged-{t}"));
+    let mut n = 2;
+    while to.exists() {
+        to = path.with_file_name(format!("{name}.damaged-{t}-{n}"));
+        n += 1;
+    }
+    fs::rename(path, &to)?;
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        // The file is moved either way; a failed sync only risks the rename being undone by
+        // another power cut, which the next start sets aside again.
+        let _ = sync_dir(dir);
+    }
+    Ok(to)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_damaged_file_is_set_aside_with_a_time_and_never_replaced() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let p = dir.path().join("rig.json");
+        fs::write(&p, b"{").expect("write");
+        let a = set_aside_damaged(&p).expect("aside");
+        assert!(!p.exists());
+        let name = a.file_name().expect("name").to_string_lossy().into_owned();
+        assert!(name.starts_with("rig.json.damaged-"), "{name}");
+        fs::write(&p, b"[").expect("write");
+        let b = set_aside_damaged(&p).expect("aside");
+        assert_ne!(a, b);
+        assert_eq!(fs::read(&a).expect("first"), b"{");
+        assert_eq!(fs::read(&b).expect("second"), b"[");
+    }
 
     #[test]
     fn files_live_in_their_directories() {

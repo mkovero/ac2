@@ -14,7 +14,9 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use ac2_proto::model::{ArtnetFade, ArtnetTarget, MeasKind, MeasScope, OutputSetup, SessionConfig};
+use ac2_proto::model::{
+    ArtnetFade, ArtnetTarget, MeasKind, MeasScope, OutputSetup, SessionConfig, StateFile,
+};
 use ac2_proto::{ErrorCode, ProtoError};
 use ac2_traces::session::SavedMeasurement;
 use serde::{Deserialize, Serialize};
@@ -88,6 +90,8 @@ pub(crate) struct RigStore {
     path: Option<PathBuf>,
     /// Why the file could not be read; the store is then read-only.
     unreadable: Option<String>,
+    /// The file was damaged at start and set aside.
+    damage: Option<crate::damage::Damage>,
 }
 
 impl RigStore {
@@ -96,15 +100,24 @@ impl RigStore {
         Self {
             path: None,
             unreadable: None,
+            damage: None,
         }
     }
 
+    /// What was found damaged at start, once.
+    pub(crate) fn take_damage(&mut self) -> Option<crate::damage::Damage> {
+        self.damage.take()
+    }
+
     /// Reads `path`. Missing → nothing set. Another format version → set aside, nothing
-    /// set. Unreadable → nothing set and read-only.
+    /// set. Damaged (torn, garbage, values the commands would refuse) → set aside and the
+    /// previous copy read ([`crate::damage::recover`]), else nothing set. A file that
+    /// cannot be read at all (or moved) → nothing set and read-only.
     pub(crate) fn open(path: &Path) -> (Self, RigSettings) {
         let mut store = Self {
             path: Some(path.to_owned()),
             unreadable: None,
+            damage: None,
         };
         let text = match std::fs::read(path) {
             Ok(t) => t,
@@ -139,33 +152,19 @@ impl RigStore {
             }
             return (store, RigSettings::default());
         }
-        match serde_json::from_slice::<RigFile>(&text) {
-            Ok(f) if f.format == FORMAT => {
-                let s = RigSettings {
-                    ceiling_dbfs: f.ceiling_dbfs,
-                    outputs: f.outputs,
-                    measurements: f.measurements,
-                    monitor_at_start: f.monitor_at_start,
-                    monitor_session: f.monitor_session,
-                    osc_target: f.osc_target,
-                    artnet_target: f.artnet_target,
-                    artnet_fade: f.artnet_fade,
-                };
-                match check(&s) {
-                    Ok(()) => (store, s),
+        match parse(&text) {
+            Ok(s) => (store, s),
+            Err(reason) => {
+                match crate::damage::recover(path, StateFile::RigSettings, &reason, parse) {
+                    Ok((s, d)) => {
+                        store.damage = Some(d);
+                        (store, s.unwrap_or_default())
+                    }
                     Err(reason) => {
                         store.refuse(reason);
                         (store, RigSettings::default())
                     }
                 }
-            }
-            Ok(f) => {
-                store.refuse(format!("not a rig settings file (format {:?})", f.format));
-                (store, RigSettings::default())
-            }
-            Err(e) => {
-                store.refuse(e.to_string());
-                (store, RigSettings::default())
             }
         }
     }
@@ -218,13 +217,39 @@ impl RigStore {
         };
         let text = serde_json::to_vec_pretty(&file)
             .map_err(|e| perr(ErrorCode::Internal, format!("rig settings: {e}")))?;
-        ac2_paths::write_private_atomic(path, &text).map_err(|e| {
+        crate::damage::write_with_prev(path, &text).map_err(|e| {
             perr(
                 ErrorCode::Internal,
                 format!("cannot write rig settings {}: {e}", path.display()),
             )
         })
     }
+}
+
+/// The settings in `text`, checked.
+fn parse(text: &[u8]) -> Result<RigSettings, String> {
+    let f = serde_json::from_slice::<RigFile>(text).map_err(|e| e.to_string())?;
+    if f.format != FORMAT {
+        return Err(format!("not a rig settings file (format {:?})", f.format));
+    }
+    if f.version != VERSION {
+        return Err(format!(
+            "format version {} (this ac2d reads {VERSION})",
+            f.version
+        ));
+    }
+    let s = RigSettings {
+        ceiling_dbfs: f.ceiling_dbfs,
+        outputs: f.outputs,
+        measurements: f.measurements,
+        monitor_at_start: f.monitor_at_start,
+        monitor_session: f.monitor_session,
+        osc_target: f.osc_target,
+        artnet_target: f.artnet_target,
+        artnet_fade: f.artnet_fade,
+    };
+    check(&s)?;
+    Ok(s)
 }
 
 /// A file a person edited may hold anything: the same rules as the commands.
@@ -409,7 +434,8 @@ mod tests {
         assert_eq!(got, want);
         assert!(store.check().is_ok());
 
-        // A session measurement, or one listed twice, makes the file unreadable.
+        // A session measurement, or one listed twice, makes the file damaged: it is set
+        // aside and the copy before the last write read instead.
         for bad in [
             vec![rig_meter(4, MeasScope::Session)],
             vec![rig_meter(4, MeasScope::Rig), rig_meter(4, MeasScope::Rig)],
@@ -420,22 +446,39 @@ mod tests {
                     ..RigSettings::default()
                 })
                 .expect("write");
-            let (store, got) = RigStore::open(&p);
-            assert_eq!(got, RigSettings::default());
-            assert!(store.check().is_err());
-            std::fs::remove_file(&p).expect("remove");
+            let (mut store, got) = RigStore::open(&p);
+            assert_eq!(got, want);
+            assert!(store.check().is_ok());
+            let d = store.take_damage().expect("damage");
+            assert!(d.reason.contains("previous copy"), "{}", d.reason);
+            assert!(!p.exists());
+            std::fs::remove_file(d.set_aside_as.expect("aside")).expect("remove");
         }
     }
 
     #[test]
-    fn unreadable_is_never_written_and_other_versions_are_set_aside() {
+    fn damaged_is_set_aside_and_other_versions_are_kept() {
         let dir = tempfile::tempdir().expect("tempdir");
         let p = dir.path().join("rig.json");
-        std::fs::write(&p, "garbage").expect("write");
-        let (store, s) = RigStore::open(&p);
-        assert_eq!(s, RigSettings::default());
-        assert!(store.persist(&RigSettings::default()).is_err());
-        assert_eq!(std::fs::read_to_string(&p).expect("read"), "garbage");
+        for bad in [
+            &b"garbage"[..],
+            b"",
+            b"{\"format\":\"ac2-rig-se",
+            b"\0\0\0\0",
+        ] {
+            std::fs::write(&p, bad).expect("write");
+            let (mut store, s) = RigStore::open(&p);
+            assert_eq!(s, RigSettings::default());
+            assert!(store.check().is_ok());
+            let d = store.take_damage().expect("damage");
+            assert_eq!(d.kind, StateFile::RigSettings);
+            assert_eq!(
+                std::fs::read(d.set_aside_as.expect("aside")).expect("kept"),
+                bad
+            );
+            store.persist(&RigSettings::default()).expect("writable");
+            std::fs::remove_file(&p).expect("remove");
+        }
 
         std::fs::write(
             &p,
@@ -454,17 +497,19 @@ mod tests {
             r#"{"format":"ac2-rig-settings","version":1,"ceiling_dbfs":3.0,"outputs":[],"measurements":[],"monitor_at_start":false,"monitor_session":null}"#,
         )
         .expect("write");
-        let (store, s) = RigStore::open(&p);
+        let (mut store, s) = RigStore::open(&p);
         assert_eq!(s, RigSettings::default());
-        assert!(store.check().is_err());
+        assert!(store.check().is_ok());
+        assert!(store.take_damage().is_some());
         std::fs::write(
             &p,
             r#"{"format":"ac2-rig-settings","version":1,"ceiling_dbfs":-3.0,"outputs":[],"artnet_fade":99.0}"#,
         )
         .expect("write");
-        let (store, s) = RigStore::open(&p);
+        let (mut store, s) = RigStore::open(&p);
         assert_eq!(s, RigSettings::default());
-        assert!(store.check().is_err());
+        assert!(store.check().is_ok());
+        assert!(store.take_damage().is_some());
     }
 
     #[test]

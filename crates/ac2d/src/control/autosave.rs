@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use ac2_proto::event::Change;
-use ac2_proto::model::{Autosave, AutosaveState, LogWriteFailure, MeasScope, MeterLog};
+use ac2_proto::model::{Autosave, AutosaveState, LogWriteFailure, MeasScope, MeterLog, StateFile};
 use ac2_proto::units::{MeasId, WallNs};
 
 use super::Control;
@@ -62,7 +62,11 @@ impl Control {
             self.start_working(false);
             return;
         }
-        let Some(autosave::Restored { data, from, logs }) = autosave::restore(&dir) else {
+        let (restored, damage) = autosave::restore(&dir);
+        for d in damage {
+            self.note_damage(d);
+        }
+        let Some(autosave::Restored { data, from, logs }) = restored else {
             tracing::info!("autosave: nothing to restore in {}", dir.display());
             self.start_working(false);
             return;
@@ -89,13 +93,15 @@ impl Control {
                 self.start_working(true);
             }
             Err(e) => {
-                let to = autosave::set_aside(&dir, "damaged");
-                tracing::warn!(
-                    "autosave in {} not restored: {}; set aside as {}",
-                    from.display(),
-                    e.msg,
-                    to.map_or_else(|| "-".into(), |t| t.display().to_string())
-                );
+                let to = ac2_paths::set_aside_damaged(&dir).ok();
+                let d = crate::damage::Damage {
+                    kind: StateFile::Autosave,
+                    path: from,
+                    set_aside_as: to,
+                    reason: format!("{}; started with an empty session", e.msg),
+                };
+                d.log();
+                self.note_damage(d);
                 self.start_working(false);
             }
         }

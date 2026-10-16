@@ -2,14 +2,19 @@
 //!
 //! Both are written atomically (temporary file in the same directory, synced, renamed over
 //! the target) and, on Unix, created with mode 0600 so the secret key is never readable by
-//! other users even for an instant. An existing file that does not parse is an error and is
-//! never overwritten.
+//! other users even for an instant. A damaged file (torn by a power cut, or garbage) never
+//! stops the daemon: a key pair that does not parse is set aside and a new pair generated
+//! (clients must pin the new key), and authorized-clients lines that do not parse are
+//! dropped, the original file set aside first.
 
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::damage::Damage;
+
+use ac2_proto::model::StateFile;
 use ac2_zmq::{AuthorizedKeys, KeyPair, KeyStoreError, PublicKey, SecretKey};
 
 /// A key file problem.
@@ -93,10 +98,14 @@ fn parse_key_file(path: &Path, text: &str) -> Result<KeyPair, KeyFileError> {
     }
 }
 
-/// Loads the server key pair, generating and saving one if the file does not exist.
-pub fn load_or_create_server_keys(path: &Path) -> Result<KeyPair, KeyFileError> {
-    match fs::read_to_string(path) {
-        Ok(text) => {
+/// Loads the server key pair, generating and saving one if the file does not exist or is
+/// damaged (the damaged file set aside and reported).
+pub(crate) fn load_or_create_server_keys(
+    path: &Path,
+) -> Result<(KeyPair, Option<Damage>), KeyFileError> {
+    let mut damage = None;
+    match fs::read(path) {
+        Ok(bytes) => {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -109,28 +118,96 @@ pub fn load_or_create_server_keys(path: &Path) -> Result<KeyPair, KeyFileError> 
                     );
                 }
             }
-            parse_key_file(path, &text)
+            let parsed = match String::from_utf8(bytes) {
+                Ok(text) => parse_key_file(path, &text),
+                Err(_) => Err(KeyFileError::Parse {
+                    path: path.to_owned(),
+                    reason: "not text".to_owned(),
+                }),
+            };
+            match parsed {
+                Ok(kp) => return Ok((kp, None)),
+                Err(KeyFileError::Parse { reason, .. }) => {
+                    let to = ac2_paths::set_aside_damaged(path).map_err(io_err(path))?;
+                    damage = Some(Damage {
+                        kind: StateFile::ServerKey,
+                        path: path.to_owned(),
+                        set_aside_as: Some(to),
+                        reason: format!(
+                            "{reason}; generated a new key pair, clients must pin the new key"
+                        ),
+                    });
+                }
+                Err(e) => return Err(e),
+            }
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            let kp = KeyPair::generate().map_err(|e| KeyFileError::Generate(e.to_string()))?;
-            ac2_paths::write_private_atomic(path, key_text(&kp).as_bytes())
-                .map_err(io_err(path))?;
-            tracing::info!(
-                "generated server key pair {} (public {})",
-                path.display(),
-                kp.public.to_z85()
-            );
-            Ok(kp)
-        }
-        Err(e) => Err(io_err(path)(e)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(io_err(path)(e)),
     }
+    let kp = KeyPair::generate().map_err(|e| KeyFileError::Generate(e.to_string()))?;
+    ac2_paths::write_private_atomic(path, key_text(&kp).as_bytes()).map_err(io_err(path))?;
+    tracing::info!(
+        "generated server key pair {} (public {})",
+        path.display(),
+        kp.public.to_z85()
+    );
+    if let Some(d) = &damage {
+        d.log();
+    }
+    Ok((kp, damage))
+}
+
+/// Parses the authorized-clients list line by line, keeping every line that parses: a torn
+/// last line must not lock out every client. The reasons of the dropped lines come back.
+fn parse_authorized_lenient(text: &str) -> (AuthorizedKeys, Vec<String>) {
+    let mut keys = AuthorizedKeys::new();
+    let mut dropped = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let one = AuthorizedKeys::parse(line).and_then(|one| {
+            for (name, key) in one.iter() {
+                keys.insert(name, *key)?;
+            }
+            Ok(())
+        });
+        if let Err(e) = one {
+            dropped.push(format!("line {}: {e}", i + 1));
+        }
+    }
+    (keys, dropped)
 }
 
 /// Loads the authorized-clients list; a missing file is created empty (no client can
-/// connect until one is added).
-pub fn load_or_create_authorized(path: &Path) -> Result<AuthorizedKeys, KeyFileError> {
-    match fs::metadata(path) {
-        Ok(_) => AuthorizedKeys::load(path).map_err(KeyFileError::Authorized),
+/// connect until one is added). Lines that do not parse are dropped and the file rewritten
+/// without them, the original set aside and reported.
+pub(crate) fn load_or_create_authorized(
+    path: &Path,
+) -> Result<(AuthorizedKeys, Option<Damage>), KeyFileError> {
+    match fs::read(path) {
+        Ok(bytes) => {
+            let text = String::from_utf8_lossy(&bytes);
+            let (keys, dropped) = parse_authorized_lenient(&text);
+            let not_utf8 = matches!(text, std::borrow::Cow::Owned(_));
+            if dropped.is_empty() && !not_utf8 {
+                return Ok((keys, None));
+            }
+            let to = ac2_paths::set_aside_damaged(path).map_err(io_err(path))?;
+            ac2_paths::write_private_atomic(path, keys.to_text().as_bytes())
+                .map_err(io_err(path))?;
+            let mut reason = if dropped.is_empty() {
+                "not valid UTF-8".to_owned()
+            } else {
+                format!("dropped {} line(s): {}", dropped.len(), dropped.join("; "))
+            };
+            reason.push_str(&format!("; kept {} client(s)", keys.len()));
+            let d = Damage {
+                kind: StateFile::AuthorizedClients,
+                path: path.to_owned(),
+                set_aside_as: Some(to),
+                reason,
+            };
+            d.log();
+            Ok((keys, Some(d)))
+        }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             let keys = AuthorizedKeys::new();
             ac2_paths::write_private_atomic(path, keys.to_text().as_bytes())
@@ -139,7 +216,7 @@ pub fn load_or_create_authorized(path: &Path) -> Result<AuthorizedKeys, KeyFileE
                 "{}: created an empty authorized-clients list; no client can connect until one is added",
                 path.display()
             );
-            Ok(keys)
+            Ok((keys, None))
         }
         Err(e) => Err(io_err(path)(e)),
     }
@@ -153,8 +230,10 @@ mod tests {
     fn server_keys_roundtrip_and_are_private() {
         let dir = tempfile::tempdir().expect("tempdir");
         let p = dir.path().join("keys").join("server.key");
-        let a = load_or_create_server_keys(&p).expect("create");
-        let b = load_or_create_server_keys(&p).expect("load");
+        let (a, none) = load_or_create_server_keys(&p).expect("create");
+        assert!(none.is_none());
+        let (b, none) = load_or_create_server_keys(&p).expect("load");
+        assert!(none.is_none());
         assert_eq!(a.public, b.public);
         assert_eq!(a.secret, b.secret);
         #[cfg(unix)]
@@ -163,18 +242,51 @@ mod tests {
             let mode = fs::metadata(&p).expect("meta").permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
-        // A corrupt file is refused and left alone.
-        fs::write(&p, "garbage").expect("write");
-        assert!(load_or_create_server_keys(&p).is_err());
-        assert_eq!(fs::read_to_string(&p).expect("read"), "garbage");
+        // A damaged file (garbage, torn, empty) is set aside and a new pair generated.
+        for bad in [&b"garbage"[..], b"", b"public abc", b"\xff\0\0"] {
+            fs::write(&p, bad).expect("write");
+            let (c, d) = load_or_create_server_keys(&p).expect("recover");
+            let d = d.expect("damage reported");
+            assert_eq!(d.kind, StateFile::ServerKey);
+            assert_ne!(c.public, a.public);
+            let aside = d.set_aside_as.expect("set aside");
+            assert_eq!(fs::read(&aside).expect("kept"), bad);
+            fs::remove_file(aside).expect("rm");
+            let (again, none) = load_or_create_server_keys(&p).expect("reload");
+            assert_eq!(again.public, c.public);
+            assert!(none.is_none());
+        }
+    }
+
+    #[test]
+    fn authorized_drops_only_the_bad_lines() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let p = dir.path().join("authorized_clients");
+        let kp = KeyPair::generate().expect("gen");
+        let good = format!("# list\nlaptop {}\n", kp.public.to_z85());
+        fs::write(&p, format!("{good}phone abc\ntorn")).expect("write");
+        let (keys, d) = load_or_create_authorized(&p).expect("recover");
+        assert_eq!(keys.len(), 1);
+        let d = d.expect("damage");
+        assert_eq!(d.kind, StateFile::AuthorizedClients);
+        assert!(d.reason.contains("dropped 2 line(s)"), "{}", d.reason);
+        assert!(d.set_aside_as.expect("aside").exists());
+        let (again, none) = load_or_create_authorized(&p).expect("reload");
+        assert_eq!(again.len(), 1);
+        assert!(none.is_none());
+
+        fs::write(&p, b"\0\0\0\0").expect("nul");
+        let (keys, d) = load_or_create_authorized(&p).expect("recover nul");
+        assert!(keys.is_empty());
+        assert!(d.is_some());
     }
 
     #[test]
     fn authorized_created_empty() {
         let dir = tempfile::tempdir().expect("tempdir");
         let p = dir.path().join("authorized_clients");
-        assert!(load_or_create_authorized(&p).expect("create").is_empty());
+        assert!(load_or_create_authorized(&p).expect("create").0.is_empty());
         assert!(p.exists());
-        assert!(load_or_create_authorized(&p).expect("load").is_empty());
+        assert!(load_or_create_authorized(&p).expect("load").0.is_empty());
     }
 }

@@ -273,7 +273,10 @@ impl Control {
         // Out while the meters load: their logs are handed over once, with where their
         // files stand.
         let mut logs = self.rigm.logs.take();
-        let read = logs.as_ref().and_then(RigLogs::read);
+        let (read, damage) = logs.as_ref().map(RigLogs::read).unwrap_or_default();
+        for d in damage {
+            self.note_damage(d);
+        }
         let (mut spl_logs, resume): (Vec<_>, Vec<SplLogOnDisk>) =
             read.map(|r| (r.data.spl_logs, r.logs)).unwrap_or_default();
         spl_logs.retain(|l| saved.iter().any(|m| m.id == l.info.meas));

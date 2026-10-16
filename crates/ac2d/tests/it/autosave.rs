@@ -57,7 +57,7 @@ fn autosave_event(sub: &Sub, pred: impl Fn(&Autosave) -> bool) -> Autosave {
 }
 
 /// Session open, a running transfer measurement with a result, a capture into slot 1.
-fn capture(h: &Handle, backend: &ac2_audio::FakeBackend, c: &mut Client) -> TraceMeta {
+pub(super) fn capture(h: &Handle, backend: &ac2_audio::FakeBackend, c: &mut Client) -> TraceMeta {
     c.ok(Command::SessionOpen {
         config: session(true),
     });

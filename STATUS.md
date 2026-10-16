@@ -19,7 +19,11 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   `docs/design/coreaudio.md` §11); exact on BlackHole in the all-OS CI run (`all_os=true`).
   Open on real hardware: the tester round (`testing/macos/`, Test 6: stated vs measured
   latency, replug, rate change, streams).
-- Newest (PROTO 56): failing loud. `ac2d` and `ac2-ui` speak systemd's notify protocol (READY,
+- Newest (PROTO 57): power cuts. A torn, empty or garbage state file never stops `ac2d` or `ac2-ui`:
+  it is set aside (`.damaged-<time>`), its previous copy or a default read, and it is listed
+  in `rig.damaged_files` (FILE DAMAGED banner, `ac2 status`); one damaged trace or log costs
+  only itself; atomic writes sync the directory (`docs/design/watchdogs.md` *Power cuts*).
+- PROTO 56: failing loud. `ac2d` and `ac2-ui` speak systemd's notify protocol (READY,
   a watchdog pinged from the control loop / each presented frame, STOPPING), release builds
   abort on a panic, and an SPL log the daemon cannot write is `autosave.log_failures` (LOG NOT
   SAVED banner, `ac2 status`) (`docs/design/watchdogs.md`).

@@ -981,6 +981,15 @@
      },
      "state": "near"
     }
+   ],
+   "damaged_files": [
+    {
+     "kind": "rig_settings",
+     "path": "/home/op/.config/ac2/rig.json",
+     "set_aside_as": "/home/op/.config/ac2/rig.json.damaged-1790000000",
+     "reason": "EOF while parsing an object at line 3 column 0; restored the previous copy",
+     "at": 1790000000000000000
+    }
    ]
   }
  },

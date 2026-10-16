@@ -19,6 +19,7 @@ mod leq;
 mod math_channels;
 mod network;
 mod osc;
+mod power_cut;
 mod publish;
 mod recording;
 mod recovery;

@@ -126,6 +126,9 @@ pub fn status(
         no_delay_estimate: tf_meas.and_then(no_delay_estimate),
         math: None,
         log_not_saved: log_not_saved(st, now.wall),
+        file_damaged: st
+            .daemon()
+            .and_then(|d| ac2_scene::autosave::damage_text(&d.rig.damaged_files)),
         drive: st.drive(),
     }
 }

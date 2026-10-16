@@ -180,9 +180,12 @@ fn main() -> ExitCode {
     } else {
         match target(&args, &mut embedded, &mut notices) {
             Ok(t) => Some(t),
+            // The window opens anyway, saying why it is not connected: a program that
+            // exits here is restarted into the same error by its unit.
             Err(e) => {
                 tracing::error!("ac2-ui: {e}");
-                return ExitCode::from(2);
+                notices.push(e);
+                None
             }
         }
     };

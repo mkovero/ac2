@@ -442,10 +442,29 @@ fn load_and_atomic_save() {
         .map(|e| e.expect("entry").file_name())
         .collect();
     assert_eq!(names.len(), 1, "{names:?}");
-    std::fs::write(&path, "garbage =").expect("write");
-    let (q, err) = UiPrefs::load(Some(&path));
-    assert_eq!(q, UiPrefs::default());
-    assert!(err.is_some_and(|e| e.contains("ui.toml")));
+    // Garbage, a zero-filled tail after a power cut, bytes that are not text: defaults,
+    // the reason said once, the file kept aside for inspection.
+    for bad in [&b"garbage ="[..], &[0u8; 64][..], &[0xff, 0xfe, b'a'][..]] {
+        std::fs::write(&path, bad).expect("write");
+        let (q, err) = UiPrefs::load(Some(&path));
+        assert_eq!(q, UiPrefs::default());
+        assert!(err.is_some_and(|e| e.contains("ui.toml") && e.contains("set aside")));
+        assert!(!path.exists());
+    }
+    let aside = std::fs::read_dir(path.parent().expect("dir"))
+        .expect("list")
+        .filter(|e| {
+            e.as_ref()
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .starts_with("ui.toml.damaged-")
+        })
+        .count();
+    assert_eq!(aside, 3);
+    // Zero length is an empty file: the defaults, nothing to say.
+    std::fs::write(&path, b"").expect("write");
+    assert_eq!(UiPrefs::load(Some(&path)), (UiPrefs::default(), None));
 }
 
 /// A file from before the panes-only step: `fullscreen = true` alone is the window full

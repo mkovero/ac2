@@ -86,3 +86,35 @@ again every 30 s (one notification per run of failures).
 The log files themselves (`ac2d.log`, `ac2-ui.log`) are capped at 16 MiB in a run: past it the
 file moves to `.1` and a fresh one starts, so a repeating warning in a weeks-long run cannot
 fill the disk the autosave needs.
+
+## Power cuts
+
+A standalone meter is switched off at the wall every night for years: any state file can
+come back zero-length, torn half-way, full of NUL blocks (a filesystem that committed the
+size before the data) or garbage. Neither program may refuse to start or panic on one.
+
+Writes: every state file is written to a temporary file in the same directory, synced,
+renamed over the target, and the directory synced (`ac2_paths::write_private_atomic` /
+`write_atomic`, `ac2_traces::session::write_atomic`, the SPL log rewrite, the client key
+files). Appended SPL logs are synced every 5 min and at stop; their torn last row is
+dropped on read.
+
+Reads, when a file is damaged:
+
+| file | what happens |
+|---|---|
+| `rig.json`, `calibrations.json` | set aside as `<name>.damaged-<unix s>`; the previous copy (`<name>.prev`, the file before its last write) is read instead, else defaults; the store stays writable |
+| autosave `session.json` | set aside; `session.prev.json` restored; both damaged: the directory is set aside and the daemon starts empty |
+| a trace / SPL log / band log the manifest names | that file alone is moved to `<autosave>.damaged-files/`; the trace is left out, the meter starts a new log or goes on without its band history |
+| rig meters' log manifest | as the autosave; the rig meters (from `rig.json`) run either way |
+| `working.json` | set aside; the session reads as untitled |
+| network `server.key` | set aside, a new pair generated (clients must pin it again) |
+| `authorized_clients` | the lines that parse are kept and the file rewritten with them, the original set aside |
+| client `client.key` / `known_servers` (ac2-client) | a damaged pair is set aside and a new one made; a torn pin line is skipped |
+| `ui.toml` | set aside, defaults; a notice in the app |
+
+Each damage is logged as an error and, in the daemon, listed in `rig.damaged_files` until
+the next start: the app shows FILE DAMAGED · what (an info banner, last), `ac2 status` a
+`damaged` line per file. Another build's file (a newer format version) is not damage: it is
+set aside under its version (`.v<N>`) as before. Set-aside files are never deleted by the
+programs.

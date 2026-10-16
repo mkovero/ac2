@@ -341,6 +341,15 @@ pub fn autosave(a: &Autosave, now: WallNs) -> String {
     format!("autosave     {text}")
 }
 
+/// The state files the daemon found damaged at start, a line each:
+/// `damaged      rig settings rig.json damaged: …; set aside as rig.json.damaged-…`.
+pub fn damaged_files(rig: &ac2_proto::model::Rig) -> Vec<String> {
+    ac2_scene::autosave::damaged_file_lines(&rig.damaged_files)
+        .into_iter()
+        .map(|l| format!("damaged      {l}"))
+        .collect()
+}
+
 /// The SPL logs the daemon cannot write, a line each:
 /// `log          NOT SAVED: SPL log of Main not saved for 12 min: disk full`. Empty while
 /// every log is on disk.
@@ -987,6 +996,27 @@ mod tests {
         assert_eq!(
             log_failures(&a, &[], now),
             ["log          NOT SAVED: band log of measurement 3 not saved for 10 min: disk full"]
+        );
+    }
+
+    #[test]
+    fn damaged_file_lines() {
+        use ac2_proto::model::{DamagedFile, Rig, StateFile};
+        let mut rig = Rig::default();
+        assert!(damaged_files(&rig).is_empty());
+        rig.damaged_files.push(DamagedFile {
+            kind: StateFile::Calibrations,
+            path: "/c/calibrations.json".into(),
+            set_aside_as: Some("/c/calibrations.json.damaged-5".into()),
+            reason: "expected value; started without it".into(),
+            at: WallNs(0),
+        });
+        assert_eq!(
+            damaged_files(&rig),
+            [
+                "damaged      calibrations calibrations.json damaged: expected value; started \
+              without it; set aside as calibrations.json.damaged-5"
+            ]
         );
     }
 }

@@ -497,7 +497,21 @@ impl Control {
             return;
         };
         let p = if restored {
-            read_json::<Persist>(&dir.join(WORKING_FILE)).unwrap_or_else(Persist::untitled)
+            let f = dir.join(WORKING_FILE);
+            match fs::read(&f) {
+                Err(_) => Persist::untitled(),
+                Ok(b) => serde_json::from_slice::<Persist>(&b).unwrap_or_else(|e| {
+                    let d = crate::damage::Damage {
+                        kind: ac2_proto::model::StateFile::Working,
+                        set_aside_as: ac2_paths::set_aside_damaged(&f).ok(),
+                        path: f,
+                        reason: format!("{e}; the session is untitled"),
+                    };
+                    d.log();
+                    self.note_damage(d);
+                    Persist::untitled()
+                }),
+            }
         } else {
             Persist::untitled()
         };

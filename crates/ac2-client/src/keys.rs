@@ -13,7 +13,6 @@
 //! prove it holds the pinned key's secret half.
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use ac2_zmq::{CurveClient, KeyPair, PublicKey, SecretKey};
@@ -108,10 +107,25 @@ impl KeyDir {
     }
 
     /// This client's keypair, generating and storing one if none exists. Returns whether it
-    /// was created.
+    /// was created. A damaged pair (a power cut while it was written, a truncated file) is
+    /// set aside and a new one made: the daemons must authorize the new key.
     pub fn ensure_client_keypair(&self) -> Result<(KeyPair, bool), ClientError> {
         if self.secret_path().exists() {
-            return Ok((self.client_keypair()?, false));
+            match self.client_keypair() {
+                Ok(kp) => return Ok((kp, false)),
+                Err(e) => {
+                    for p in [self.secret_path(), self.public_path()] {
+                        if p.exists() {
+                            let _ = ac2_paths::set_aside_damaged(&p);
+                        }
+                    }
+                    tracing::error!(
+                        "client key pair in {} is damaged ({e}); set aside, a new one is made — \
+                         authorize it again on each daemon",
+                        self.dir.display()
+                    );
+                }
+            }
         }
         fs::create_dir_all(&self.dir).map_err(io_err(&self.dir))?;
         let kp = KeyPair::generate()?;
@@ -120,14 +134,17 @@ impl KeyDir {
         Ok((kp, true))
     }
 
-    /// Every pinned server key, in file order.
+    /// Every pinned server key, in file order. A line that is not a pin (a torn last line
+    /// after a power cut) is skipped with a warning: that host reads as not paired, never as
+    /// paired to something else.
     pub fn known_servers(&self) -> Result<Vec<(String, PublicKey)>, ClientError> {
         let path = self.known_path();
-        let text = match fs::read_to_string(&path) {
-            Ok(t) => t,
+        let bytes = match fs::read(&path) {
+            Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => return Err(io_err(&path)(e)),
         };
+        let text = String::from_utf8_lossy(&bytes);
         let mut out = Vec::new();
         for (i, line) in text.lines().enumerate() {
             let line = line.trim();
@@ -136,15 +153,17 @@ impl KeyDir {
             }
             let mut f = line.split_ascii_whitespace();
             let (Some(host), Some(key), None) = (f.next(), f.next(), f.next()) else {
-                return Err(ClientError::Keys(format!(
-                    "{} line {}: expected `<host> <Z85 key>`",
+                tracing::warn!(
+                    "{} line {}: expected `<host> <Z85 key>`; skipped",
                     path.display(),
                     i + 1
-                )));
+                );
+                continue;
             };
-            let key = PublicKey::from_z85(key).map_err(|_| {
-                ClientError::Keys(format!("{} line {}: not a Z85 key", path.display(), i + 1))
-            })?;
+            let Ok(key) = PublicKey::from_z85(key) else {
+                tracing::warn!("{} line {}: not a Z85 key; skipped", path.display(), i + 1);
+                continue;
+            };
             out.push((host.to_owned(), key));
         }
         Ok(out)
@@ -258,21 +277,12 @@ pub fn unauthorized_hint(curve: &CurveClient) -> String {
 }
 
 fn write_file(path: &Path, text: &str, secret: bool) -> Result<(), ClientError> {
-    let tmp = path.with_extension("tmp");
-    let mut opts = fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(if secret { 0o600 } else { 0o644 });
+    if secret {
+        ac2_paths::write_private_atomic(path, text.as_bytes())
+    } else {
+        ac2_paths::write_atomic(path, text.as_bytes())
     }
-    #[cfg(not(unix))]
-    let _ = secret;
-    let mut f = opts.open(&tmp).map_err(io_err(&tmp))?;
-    f.write_all(text.as_bytes()).map_err(io_err(&tmp))?;
-    f.sync_all().map_err(io_err(&tmp))?;
-    drop(f);
-    fs::rename(&tmp, path).map_err(io_err(path))
+    .map_err(io_err(path))
 }
 
 #[cfg(test)]
@@ -306,6 +316,45 @@ mod tests {
         let cc = kd.curve_client("rig")?;
         assert_eq!(cc.server_key, other);
         assert_eq!(kd.known_servers()?.len(), 1);
+        Ok(())
+    }
+
+    /// A power cut can leave any of the files torn or garbage: a damaged key pair is set
+    /// aside and replaced, a torn pin line is skipped.
+    #[test]
+    fn damaged_key_files_are_recovered() -> Result<(), ClientError> {
+        let tmp = tempfile::tempdir().map_err(|e| ClientError::Keys(e.to_string()))?;
+        let dir = tmp.path().join("keys");
+        let kd = KeyDir::new(dir.clone());
+        let (kp, _) = kd.ensure_client_keypair()?;
+        let server = KeyPair::generate()?.public;
+        kd.pin_server("rig", server)?;
+        let w =
+            |p: PathBuf, b: &[u8]| fs::write(p, b).map_err(|e| ClientError::Keys(e.to_string()));
+        for bad in [&b""[..], b"secret abc", b"\0\0\0\0\xff"] {
+            w(dir.join("client.key"), bad)?;
+            let (new, created) = kd.ensure_client_keypair()?;
+            assert!(created);
+            assert_ne!(new, kp);
+            let aside = fs::read_dir(&dir)
+                .map_err(|e| ClientError::Keys(e.to_string()))?
+                .flatten()
+                .filter(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .starts_with("client.key.damaged-")
+                })
+                .count();
+            assert!(aside >= 1);
+        }
+        let known =
+            fs::read(dir.join("known_servers")).map_err(|e| ClientError::Keys(e.to_string()))?;
+        let mut torn = known.clone();
+        torn.extend_from_slice(b"other AbC\0\xff");
+        w(dir.join("known_servers"), &torn)?;
+        assert_eq!(kd.known_servers()?, vec![("rig".to_owned(), server)]);
+        w(dir.join("known_servers"), &known[..known.len() / 2])?;
+        assert!(kd.known_servers()?.is_empty());
         Ok(())
     }
 

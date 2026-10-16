@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use serde::{Deserialize, Serialize};
 
 use super::{ArtnetFade, ArtnetTarget, DmxSet, RigCue};
-use crate::units::Rev;
+use crate::units::{Rev, WallNs};
 
 /// How sending to one kind of receiver (OSC, Art-Net) fares.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -45,6 +45,52 @@ pub struct Rig {
     pub dmx: Vec<DmxSet>,
     /// Every cued subject's state.
     pub cues: Vec<RigCue>,
+    /// State files the daemon found damaged when it started (a power cut, a full disk, a
+    /// hand edit) and set aside or left out, so that it started and metered anyway; for
+    /// the daemon's lifetime.
+    pub damaged_files: Vec<DamagedFile>,
+}
+
+/// A state file found damaged at start.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DamagedFile {
+    /// What the file held.
+    pub kind: StateFile,
+    /// The file as found, on the daemon host.
+    pub path: String,
+    /// Where it was moved; `None`: left where it was (overwritten by the next write).
+    pub set_aside_as: Option<String>,
+    /// What was wrong with it, and what the daemon did instead.
+    pub reason: String,
+    /// When the daemon found it.
+    pub at: WallNs,
+}
+
+/// Which of the daemon's state files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateFile {
+    /// The autosave's manifest (the measurements and traces).
+    Autosave,
+    /// One trace's data in the autosave.
+    Trace,
+    /// An SPL meter's log (autosave or rig logs).
+    SplLog,
+    /// An SPL meter's band log.
+    BandLog,
+    /// The working state (`working.json`: origin, unsaved changes).
+    Working,
+    /// The rig settings (`rig.json`: rig meters, monitor at start, max level, cue targets).
+    RigSettings,
+    /// The rig meters' logs' manifest.
+    RigLogs,
+    /// The calibration store.
+    Calibrations,
+    /// The server key pair (network mode).
+    ServerKey,
+    /// The clients allowed to connect (network mode).
+    AuthorizedClients,
 }
 
 /// `Option<SocketAddr>` as `"ip:port"` text: msgpack has no address type, and the text
@@ -91,6 +137,7 @@ mod tests {
             }),
             artnet_fade: ArtnetFade::new(2.5).expect("valid"),
             monitor_at_start: true,
+            damaged_files: Vec::new(),
             osc: OutputStatus {
                 sent: 3,
                 last_error: Some("unreachable".into()),

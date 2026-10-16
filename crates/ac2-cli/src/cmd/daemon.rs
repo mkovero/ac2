@@ -107,6 +107,10 @@ fn status_text(
         s.push('\n');
         s.push_str(&l);
     }
+    for l in output::damaged_files(&st.rig) {
+        s.push('\n');
+        s.push_str(&l);
+    }
     let inputs = output::inputs(st, crate::watch::now_wall());
     if !st.inputs.is_empty() || session.open.is_some() {
         s.push_str("\ninputs\n");

@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use ac2_core::mic_curve::{Correction, MicCurve, MicCurveFileError};
 use ac2_proto::cal::{self, InputUse};
+use ac2_proto::model::StateFile;
 use ac2_proto::model::{
     CalEntry, CalStatus, DeviceId, InputSetup, Mic, MicCurveId, MicCurveRef, State,
 };
@@ -107,6 +108,8 @@ pub(crate) struct CalStore {
     /// Why the file could not be read; the store is then read-only.
     unreadable: Option<String>,
     curves: Curves,
+    /// The file was damaged at start and set aside.
+    damage: Option<crate::damage::Damage>,
 }
 
 /// Validates a mic name: 1 … 64 characters, no control characters, no surrounding space.
@@ -169,16 +172,24 @@ impl CalStore {
             path: None,
             unreadable: None,
             curves: HashMap::new(),
+            damage: None,
         }
     }
 
-    /// Reads `path`. Missing → empty. Another format version → set aside, empty.
-    /// Unreadable → empty and read-only, never written.
+    /// What was found damaged at start, once.
+    pub(crate) fn take_damage(&mut self) -> Option<crate::damage::Damage> {
+        self.damage.take()
+    }
+
+    /// Reads `path`. Missing → empty. Another format version → set aside, empty. Damaged
+    /// (torn, garbage) → set aside and the previous copy read ([`crate::damage::recover`]),
+    /// else empty. A file that cannot be read at all (or moved) → empty and read-only.
     pub(crate) fn open(path: &Path) -> (Self, Contents) {
         let mut store = Self {
             path: Some(path.to_owned()),
             unreadable: None,
             curves: HashMap::new(),
+            damage: None,
         };
         let text = match std::fs::read(path) {
             Ok(t) => t,
@@ -229,8 +240,18 @@ impl CalStore {
                 (store, contents)
             }
             Err(reason) => {
-                store.refuse(reason);
-                (store, Contents::default())
+                match crate::damage::recover(path, StateFile::Calibrations, &reason, parse) {
+                    Ok((got, d)) => {
+                        store.damage = Some(d);
+                        let (contents, curves) = got.unwrap_or_default();
+                        store.curves = curves;
+                        (store, contents)
+                    }
+                    Err(reason) => {
+                        store.refuse(reason);
+                        (store, Contents::default())
+                    }
+                }
             }
         }
     }
@@ -312,7 +333,7 @@ impl CalStore {
             };
             let text = serde_json::to_vec_pretty(&file)
                 .map_err(|e| perr(ErrorCode::Internal, format!("calibration store: {e}")))?;
-            ac2_paths::write_private_atomic(path, &text).map_err(|e| {
+            crate::damage::write_with_prev(path, &text).map_err(|e| {
                 perr(
                     ErrorCode::Internal,
                     format!("cannot write calibration store {}: {e}", path.display()),

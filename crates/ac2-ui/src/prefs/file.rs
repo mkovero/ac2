@@ -629,25 +629,39 @@ impl UiPrefs {
         toml::to_string(&f).unwrap_or_default()
     }
 
-    /// Reads `path`. A missing file is the defaults; an unreadable one is the defaults plus
-    /// the reason, shown once (the next save replaces it).
+    /// Reads `path`. A missing file is the defaults; a damaged one (garbage, a torn write)
+    /// is set aside as `ui.toml.damaged-<time>` for inspection and the defaults used, the
+    /// reason shown once; one that cannot be read at all is the defaults plus the reason.
     pub fn load(path: Option<&Path>) -> (Self, Option<String>) {
         let Some(path) = path else {
             return (Self::default(), None);
         };
-        match std::fs::read_to_string(path) {
-            Ok(text) => match Self::from_toml(&text) {
-                Ok(p) => (p, None),
-                Err(e) => (
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Self::default(), None),
+            Err(e) => {
+                return (
                     Self::default(),
-                    Some(format!("{e} ({}); using defaults", path.display())),
-                ),
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Self::default(), None),
-            Err(e) => (
-                Self::default(),
-                Some(format!("cannot read {}: {e}", path.display())),
-            ),
+                    Some(format!("cannot read {}: {e}", path.display())),
+                );
+            }
+        };
+        let parsed = std::str::from_utf8(&bytes)
+            .map_err(|e| e.to_string())
+            .and_then(|t| Self::from_toml(t).map_err(|e| e.to_string()));
+        match parsed {
+            Ok(p) => (p, None),
+            Err(e) => {
+                let aside = match ac2_paths::set_aside_damaged(path) {
+                    Ok(to) => format!("set aside as {}", to.display()),
+                    Err(err) => format!("cannot be set aside ({err})"),
+                };
+                tracing::error!("{}: {e}; {aside}; using defaults", path.display());
+                (
+                    Self::default(),
+                    Some(format!("{e} ({}); {aside}; using defaults", path.display())),
+                )
+            }
         }
     }
 

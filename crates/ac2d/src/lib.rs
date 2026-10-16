@@ -41,6 +41,7 @@ mod calstore;
 pub mod config;
 mod control;
 mod conv;
+mod damage;
 mod dedup;
 mod detect;
 mod fanout;
@@ -316,6 +317,7 @@ impl Daemon {
 
         // Network mode: what `server.*` reports and changes while the daemon runs.
         let mut network_parts = None;
+        let mut key_damage = Vec::new();
         let (ctx, secure, router, xpub, server_key) = match &config.listen {
             Listen::Inproc { name } => {
                 let ctx = Context::new().map_err(zerr("context"))?;
@@ -333,10 +335,13 @@ impl Daemon {
                 (ctx, None, router, xpub, None)
             }
             Listen::Network { security, .. } => {
-                let kp = keys::load_or_create_server_keys(&security.server_key_file)
+                let (kp, d) = keys::load_or_create_server_keys(&security.server_key_file)
                     .map_err(StartError::Keys)?;
-                let authorized = keys::load_or_create_authorized(&security.authorized_clients_file)
-                    .map_err(StartError::Keys)?;
+                key_damage.extend(d);
+                let (authorized, d) =
+                    keys::load_or_create_authorized(&security.authorized_clients_file)
+                        .map_err(StartError::Keys)?;
+                key_damage.extend(d);
                 tracing::info!(
                     "network mode: {} authorized client(s); server key {} (fingerprint {})",
                     authorized.len(),
@@ -459,6 +464,7 @@ impl Daemon {
             recording_dir: config.recording_dir.clone(),
             local_clock: config.local_clock,
             systemd_notify: config.systemd_notify,
+            damaged: key_damage,
         });
         let control = std::thread::Builder::new()
             .name("ac2d-control".into())

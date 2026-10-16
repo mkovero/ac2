@@ -1481,6 +1481,13 @@ To spare SD cards and batteries, a write adds only changed traces; an SPL meter'
 per-second log is appended every 30 s and synced every 5 min and at stop (after a power cut
 it is back to its last few minutes; after a daemon crash, 30 s).
 
+After a power cut a state file may be torn. The daemon never refuses to start over one: it
+sets the file aside as `<name>.damaged-<time>` (never deleted), reads the copy before the
+last write where it keeps one (`rig.json.prev`, `calibrations.json.prev`) or starts without
+it, and goes on metering. A damaged trace or SPL log costs only itself (moved to
+`<autosave>.damaged-files/`). The app shows **FILE DAMAGED · what** until the daemon
+restarts, and `ac2 status` prints a `damaged` line for each file with what was done.
+
 | Flag | Does |
 |---|---|
 | `ac2d --no-restore` | starts empty |

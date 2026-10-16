@@ -547,5 +547,14 @@ pub fn rig() -> Rig {
                 state: CueState::Near,
             },
         ],
+        damaged_files: vec![DamagedFile {
+            kind: StateFile::RigSettings,
+            path: "/home/op/.config/ac2/rig.json".into(),
+            set_aside_as: Some("/home/op/.config/ac2/rig.json.damaged-1790000000".into()),
+            reason: "EOF while parsing an object at line 3 column 0; restored the previous \
+                     copy"
+                .into(),
+            at: WallNs(1_790_000_000_000_000_000),
+        }],
     }
 }

@@ -374,28 +374,39 @@ fn a_store_of_the_previous_format_is_set_aside() {
 }
 
 #[test]
-fn unreadable_file_is_refused_and_never_written() {
+fn a_damaged_file_is_set_aside_and_its_previous_copy_read() {
     let dir = tempfile::tempdir().expect("tmp");
     let path = dir.path().join("calibrations.json");
+    let good = Contents {
+        calibrations: vec![entry(key("hw:A", 2, "M30"), spl(1.0, 1, 1000.0))],
+        ..Contents::default()
+    };
     for bad in [
         &b"{ not json"[..],
+        b"",
+        b"\0\0\0\0\0\0",
         br#"{"format":"other","version":2,"sensitivities":[],"mics":[],"inputs":[]}"#,
         br#"{"format":"ac2-calibrations","version":3,"sensitivities":[],"mics":[{"name":"m","curves":[{"reference":{"label":"0deg","file_name":"c","content_hash":"0","points":2,"f_lo":20.0,"f_hi":10.0,"imported_at":1,"stated_sensitivity":null},"points":[[20.0,0.0],[10.0,0.0]]}]}],"inputs":[]}"#,
         br#"{"format":"ac2-calibrations","version":3,"sensitivities":[],"mics":[{"name":"m","curves":[]}],"inputs":[]}"#,
     ] {
+        // No previous copy: an empty store, writable.
+        let _ = std::fs::remove_file(crate::damage::prev_path(&path));
         std::fs::write(&path, bad).expect("write");
         let (mut s, c) = CalStore::open(&path);
         assert_eq!(c, Contents::default());
-        let err = s.check().expect_err("refused");
-        assert_eq!(err.code, ErrorCode::Refused);
-        assert!(matches!(err.detail, Some(ErrorDetail::CalStore { .. })), "{err:?}");
-        assert!(err.msg.contains("never overwritten"), "{}", err.msg);
-        let c = Contents {
-            calibrations: vec![entry(key("hw:A", 2, "M30"), spl(1.0, 1, 1000.0))],
-            ..Contents::default()
-        };
-        assert!(s.persist(&c, HashMap::new()).is_err());
-        assert_eq!(std::fs::read(&path).expect("read"), bad, "file must be untouched");
+        s.check().expect("writable");
+        let d = s.take_damage().expect("damage");
+        assert_eq!(d.kind, ac2_proto::model::StateFile::Calibrations);
+        assert_eq!(std::fs::read(d.set_aside_as.expect("aside")).expect("kept"), bad);
+        s.persist(&good, HashMap::new()).expect("write");
+        s.persist(&Contents::default(), HashMap::new()).expect("write again");
+
+        // A previous copy: what the store held before its last write.
+        std::fs::write(&path, bad).expect("write");
+        let (mut s, c) = CalStore::open(&path);
+        assert_eq!(c, good);
+        assert!(s.take_damage().expect("damage").reason.contains("previous copy"));
+        std::fs::remove_file(&path).ok();
     }
 }
 

@@ -256,26 +256,38 @@ pub fn validate_name(name: &str) -> Result<(), SessionError> {
 }
 
 /// Writes `bytes` to `path` atomically: a temporary file in the same directory, synced,
-/// then renamed over the target.
+/// renamed over the target, the directory synced, so that after a power cut the file is the
+/// old one or the new one and a manifest written after it never names a file that is gone.
+/// The temporary file goes on failure (on a full disk it would hold the space a retry needs).
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), SessionError> {
-    let dir = path.parent().unwrap_or(Path::new("."));
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d,
+        _ => Path::new("."),
+    };
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let tmp = dir.join(format!(".{name}.tmp-{}", std::process::id()));
-    {
-        let mut f = fs::File::create(&tmp).map_err(io(&tmp))?;
-        f.write_all(bytes).map_err(io(&tmp))?;
-        f.sync_all().map_err(io(&tmp))?;
-    }
-    fs::rename(&tmp, path).map_err(|e| {
+    let written = fs::File::create(&tmp)
+        .and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()))
+        .map_err(io(&tmp))
+        .and_then(|()| fs::rename(&tmp, path).map_err(io(path)));
+    if written.is_err() {
         let _ = fs::remove_file(&tmp);
-        SessionError::Io {
-            path: path.to_owned(),
-            msg: e.to_string(),
-        }
-    })
+    }
+    written?;
+    sync_dir(dir).map_err(io(dir))
+}
+
+/// Syncs directory `dir` (a rename or new file in it survives a power cut); nothing on
+/// Windows, where directories cannot be opened for sync.
+fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    fs::File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
 }
 
 /// FNV-1a, 64 bits: names a trace file by its content. Only equal content must give equal
@@ -505,8 +517,122 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
 }
 
 /// Loads the session the manifest `name` of `dir` describes, with where each SPL log was
-/// read from.
+/// read from. Any damaged file fails the load.
 pub fn load_named(dir: &Path, name: &str) -> Result<(Session, Vec<SplLogOnDisk>), SessionError> {
+    load_inner(dir, name, None)
+}
+
+/// A file [`load_lenient`] left out, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dropped {
+    /// What the file held.
+    pub kind: DroppedKind,
+    /// The file, relative to the session directory.
+    pub file: String,
+    /// What was wrong with it.
+    pub reason: String,
+}
+
+/// What a [`Dropped`] file held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DroppedKind {
+    /// A trace's data.
+    Trace,
+    /// An SPL meter's log.
+    SplLog,
+    /// An SPL meter's band log.
+    BandLog,
+}
+
+/// As [`load_named`], for what the daemon keeps itself (the autosave, the rig logs), where
+/// one damaged file must not cost the rest: a trace file that cannot be read is left out,
+/// an SPL log that cannot be read leaves its meter with an empty log, a band log the meter
+/// without its band history. The manifest itself must read.
+pub fn load_lenient(
+    dir: &Path,
+    name: &str,
+) -> Result<(Session, Vec<SplLogOnDisk>, Vec<Dropped>), SessionError> {
+    let mut dropped = Vec::new();
+    let (s, on_disk) = load_inner(dir, name, Some(&mut dropped))?;
+    Ok((s, on_disk, dropped))
+}
+
+/// `Err` passes up, or (lenient) is recorded under `file` and gives `None`.
+fn keep<T>(
+    r: Result<T, SessionError>,
+    kind: DroppedKind,
+    file: &str,
+    dropped: &mut Option<&mut Vec<Dropped>>,
+) -> Result<Option<T>, SessionError> {
+    match (r, dropped) {
+        (Ok(v), _) => Ok(Some(v)),
+        (Err(e), Some(d)) => {
+            d.push(Dropped {
+                kind,
+                file: file.to_owned(),
+                reason: e.to_string(),
+            });
+            Ok(None)
+        }
+        (Err(e), None) => Err(e),
+    }
+}
+
+fn load_trace(dir: &Path, name: &str, t: &SavedTrace) -> Result<StoredTrace, SessionError> {
+    let p = dir.join(&t.file);
+    let bytes = fs::read(&p).map_err(io(&p))?;
+    let corrupt = |msg: String| SessionError::Corrupt {
+        path: p.clone(),
+        msg,
+    };
+    let imp = import(&bytes, ImportFormat::Ac2Csv, ImportRole::Trace)
+        .map_err(|e| corrupt(e.to_string()))?;
+    if imp.grid != t.grid || t.grid.id() != t.meta.grid_id {
+        return Err(corrupt("data is not on the trace's grid".into()));
+    }
+    if (t.meta.kind == TraceKind::Sweep) != imp.sweep.is_some() {
+        return Err(corrupt(
+            "a sweep trace without its distortion, analysis facts or impulse response".into(),
+        ));
+    }
+    let mic_curve = match (&t.meta.mic_curve, &t.mic_curve_points) {
+        (Some(mc), Some(p)) => {
+            crate::check::mic_f_norm(mc.f_norm.0).map_err(|e| SessionError::Corrupt {
+                path: dir.join(name),
+                msg: format!("trace {}: {e}", t.meta.id),
+            })?;
+            Some(
+                crate::mic::correction(p, mc.f_norm.0).map_err(|e| SessionError::Corrupt {
+                    path: dir.join(name),
+                    msg: format!("trace {}: mic curve: {e}", t.meta.id),
+                })?,
+            )
+        }
+        (None, None) => None,
+        _ => {
+            return Err(SessionError::Corrupt {
+                path: dir.join(name),
+                msg: format!("trace {}: mic curve and its points disagree", t.meta.id),
+            });
+        }
+    };
+    let trace = StoredTrace {
+        meta: t.meta.clone(),
+        grid: t.grid.clone(),
+        columns: imp.columns,
+        sweep: imp.sweep,
+        ir: imp.ir,
+        mic_curve,
+    };
+    crate::check::trace(&trace).map_err(|e| corrupt(format!("trace {}: {e}", t.meta.id)))?;
+    Ok(trace)
+}
+
+fn load_inner(
+    dir: &Path,
+    name: &str,
+    mut dropped: Option<&mut Vec<Dropped>>,
+) -> Result<(Session, Vec<SplLogOnDisk>), SessionError> {
     let m = read_manifest_named(dir, name)?;
     let mut traces = Vec::with_capacity(m.traces.len());
     for t in &m.traces {
@@ -517,53 +643,14 @@ pub fn load_named(dir: &Path, name: &str) -> Result<(Session, Vec<SplLogOnDisk>)
                 msg: format!("trace file {f:?} is outside the session"),
             });
         }
-        let p = dir.join(&t.file);
-        let bytes = fs::read(&p).map_err(io(&p))?;
-        let corrupt = |msg: String| SessionError::Corrupt {
-            path: p.clone(),
-            msg,
-        };
-        let imp = import(&bytes, ImportFormat::Ac2Csv, ImportRole::Trace)
-            .map_err(|e| corrupt(e.to_string()))?;
-        if imp.grid != t.grid || t.grid.id() != t.meta.grid_id {
-            return Err(corrupt("data is not on the trace's grid".into()));
+        if let Some(trace) = keep(
+            load_trace(dir, name, t),
+            DroppedKind::Trace,
+            f,
+            &mut dropped,
+        )? {
+            traces.push(trace);
         }
-        if (t.meta.kind == TraceKind::Sweep) != imp.sweep.is_some() {
-            return Err(corrupt(
-                "a sweep trace without its distortion, analysis facts or impulse response".into(),
-            ));
-        }
-        let mic_curve = match (&t.meta.mic_curve, &t.mic_curve_points) {
-            (Some(mc), Some(p)) => {
-                crate::check::mic_f_norm(mc.f_norm.0).map_err(|e| SessionError::Corrupt {
-                    path: dir.join(name),
-                    msg: format!("trace {}: {e}", t.meta.id),
-                })?;
-                Some(
-                    crate::mic::correction(p, mc.f_norm.0).map_err(|e| SessionError::Corrupt {
-                        path: dir.join(name),
-                        msg: format!("trace {}: mic curve: {e}", t.meta.id),
-                    })?,
-                )
-            }
-            (None, None) => None,
-            _ => {
-                return Err(SessionError::Corrupt {
-                    path: dir.join(name),
-                    msg: format!("trace {}: mic curve and its points disagree", t.meta.id),
-                });
-            }
-        };
-        let trace = StoredTrace {
-            meta: t.meta.clone(),
-            grid: t.grid.clone(),
-            columns: imp.columns,
-            sweep: imp.sweep,
-            ir: imp.ir,
-            mic_curve,
-        };
-        crate::check::trace(&trace).map_err(|e| corrupt(format!("trace {}: {e}", t.meta.id)))?;
-        traces.push(trace);
     }
     let mut spl_logs = Vec::with_capacity(m.spl_logs.len());
     let mut on_disk = Vec::with_capacity(m.spl_logs.len());
@@ -599,33 +686,47 @@ pub fn load_named(dir: &Path, name: &str) -> Result<(Session, Vec<SplLogOnDisk>)
                 ),
             });
         };
+        if let Some(bf) = &l.bands
+            && (bf.contains("..") || Path::new(bf).is_absolute())
+        {
+            return Err(SessionError::Corrupt {
+                path: dir.join(name),
+                msg: format!("band log file {bf:?} is outside the session"),
+            });
+        }
         let p = dir.join(f);
-        let bytes = fs::read(&p).map_err(io(&p))?;
-        let read = spl_log::import_csv(&bytes).map_err(|e| SessionError::Corrupt {
-            path: p.clone(),
-            msg: e.to_string(),
-        })?;
+        let read = fs::read(&p).map_err(io(&p)).and_then(|bytes| {
+            spl_log::import_csv(&bytes).map_err(|e| SessionError::Corrupt {
+                path: p.clone(),
+                msg: e.to_string(),
+            })
+        });
+        // A meter whose log is lost keeps running with an empty one, which the daemon
+        // writes to a new file.
+        let Some(read) = keep(read, DroppedKind::SplLog, f, &mut dropped)? else {
+            continue;
+        };
         let (bands, bands_on_disk) = match &l.bands {
             None => (Vec::new(), None),
             Some(bf) => {
-                if bf.contains("..") || Path::new(bf).is_absolute() {
-                    return Err(SessionError::Corrupt {
-                        path: dir.join(name),
-                        msg: format!("band log file {bf:?} is outside the session"),
-                    });
-                }
                 let bp = dir.join(bf);
-                let bytes = fs::read(&bp).map_err(io(&bp))?;
-                let read = band_log::import_csv(&bytes).map_err(|e| SessionError::Corrupt {
-                    path: bp.clone(),
-                    msg: e.to_string(),
-                })?;
-                let on = BandLogOnDisk {
-                    file: bf.clone(),
-                    rows: read.rows.len() as u64,
-                    complete_len: read.complete_len as u64,
-                };
-                (read.rows, Some(on))
+                let read = fs::read(&bp).map_err(io(&bp)).and_then(|bytes| {
+                    band_log::import_csv(&bytes).map_err(|e| SessionError::Corrupt {
+                        path: bp.clone(),
+                        msg: e.to_string(),
+                    })
+                });
+                match keep(read, DroppedKind::BandLog, bf, &mut dropped)? {
+                    Some(read) => {
+                        let on = BandLogOnDisk {
+                            file: bf.clone(),
+                            rows: read.rows.len() as u64,
+                            complete_len: read.complete_len as u64,
+                        };
+                        (read.rows, Some(on))
+                    }
+                    None => (Vec::new(), None),
+                }
             }
         };
         on_disk.push(SplLogOnDisk {

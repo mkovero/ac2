@@ -106,6 +106,32 @@ fn a_log_the_daemon_cannot_write_shows_until_it_is_written() {
     assert!(ac2_scene::banner::banners(&crate::scenes::status(&t.st, &[], None, now())).is_empty());
 }
 
+/// A state file the daemon found damaged at start is a FILE DAMAGED banner naming it.
+#[test]
+fn a_damaged_state_file_shows_a_banner() {
+    use ac2_proto::model::{DamagedFile, StateFile};
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.rig.damaged_files = vec![DamagedFile {
+        kind: StateFile::Working,
+        path: "/var/lib/ac2/autosave/working.json".into(),
+        set_aside_as: Some("/var/lib/ac2/autosave/working.json.damaged-9".into()),
+        reason: "EOF while parsing a value; the session is untitled".into(),
+        at: WallNs(0),
+    }];
+    t.conn(mirror(s));
+    let b = ac2_scene::banner::banners(&crate::scenes::status(&t.st, &[], None, now()));
+    assert_eq!(b.len(), 1, "{b:?}");
+    assert_eq!(b[0].text, "FILE DAMAGED · working state");
+    assert_eq!(
+        b[0].detail.as_deref(),
+        Some(
+            "working state working.json damaged: EOF while parsing a value; the session is \
+             untitled; set aside as working.json.damaged-9"
+        )
+    );
+}
+
 /// A stopped session's audio reaches every pane's banners in place of STALE, and the top
 /// bar's texts; it clears when the daemon reopens the session.
 #[test]

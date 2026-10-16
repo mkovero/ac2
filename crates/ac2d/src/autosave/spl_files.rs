@@ -44,7 +44,8 @@ pub(crate) const SYNC_EVERY: Duration = Duration::from_secs(300);
 /// more than three days of rows.
 pub(crate) const COMPACT_SLACK: u64 = 24 * 3600;
 
-/// Writes `bytes` to `path` whole: a temporary file beside it, synced, renamed over it. The
+/// Writes `bytes` to `path` whole: a temporary file beside it, synced, renamed over it, the
+/// directory synced. The
 /// temporary file goes on failure too: on a full disk it would hold the space a retry needs.
 fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let name = path
@@ -58,7 +59,9 @@ fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if written.is_err() {
         let _ = fs::remove_file(&tmp);
     }
-    written
+    written?;
+    // The manifest written next names this file: its directory entry must survive a cut.
+    path.parent().map_or(Ok(()), ac2_paths::sync_dir)
 }
 
 /// Where a restored log's file stands, so that appending carries on in it.

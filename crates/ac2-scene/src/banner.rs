@@ -18,6 +18,7 @@
 //! | 11 | CLOCK DRIFT · ppm | warning | loopback timing drift `warning` (output and input on different clocks) |
 //! | 12 | LOG NOT SAVED · reason | warning | the daemon cannot write an SPL meter's log (`autosave.log_failures`; the detail names the logs and for how long) |
 //! | 13 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
+//! | 14 | FILE DAMAGED · what | info | the daemon started on a damaged state file, set it aside and went on (`rig.damaged_files`; the detail names each file and what was done) |
 //!
 //! AUDIO STOPPED comes right after the daemon itself: no audio invalidates everything
 //! measured, and the daemon is already working on it. It replaces STALE, whose cause it
@@ -32,6 +33,10 @@
 //! copy on disk (which a restart restores and a report is built from) misses a stretch, so
 //! it ranks under every measurement warning. It shows on every pane, like the daemon's
 //! own faults: the operator must free space before more of the history is lost.
+//!
+//! FILE DAMAGED is history: the daemon already recovered (a power cut tore a file), and
+//! what is measured now is sound. It ranks last, and stays until the daemon restarts so
+//! the operator who next looks learns that a trace, a log or a setting may be missing.
 //!
 //! CHECK ROUTING sits right under NO REFERENCE: a mis-patched reference invalidates every
 //! transfer value just as a missing one does, and fixing the patch comes before any other
@@ -85,6 +90,7 @@ pub enum BannerKind {
     ClockDrift,
     LogNotSaved,
     NoDelayEstimate,
+    FileDamaged,
 }
 
 impl BannerKind {
@@ -102,7 +108,7 @@ impl BannerKind {
             | Self::OutputTimingJump
             | Self::ClockDrift
             | Self::LogNotSaved => Severity::Warning,
-            Self::NoDelayEstimate => Severity::Info,
+            Self::NoDelayEstimate | Self::FileDamaged => Severity::Info,
         }
     }
 }
@@ -139,6 +145,8 @@ pub struct Status {
     pub math: Option<(String, MathStatus)>,
     /// SPL logs the daemon cannot write ([`crate::autosave::log_failure_text`]).
     pub log_not_saved: Option<crate::autosave::LogFailureText>,
+    /// State files the daemon found damaged at start ([`crate::autosave::damage_text`]).
+    pub file_damaged: Option<crate::autosave::DamageText>,
     /// What this app's stimulus is doing: NO REFERENCE's detail names the keys that start
     /// it while nothing here plays.
     pub drive: crate::stimulus::Drive,
@@ -299,6 +307,13 @@ pub fn banners(s: &Status) -> Vec<Banner> {
             BannerKind::NoDelayEstimate,
             "NO DELAY ESTIMATE".into(),
             Some(detail),
+        ));
+    }
+    if let Some(d) = &s.file_damaged {
+        out.push(banner(
+            BannerKind::FileDamaged,
+            d.banner.clone(),
+            Some(d.detail.clone()),
         ));
     }
     out.sort_by_key(|b| b.kind);

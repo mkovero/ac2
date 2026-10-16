@@ -239,6 +239,8 @@ pub(crate) struct Setup {
     /// Local time of day for the band meters' day and night limits.
     pub(crate) local_clock: crate::config::LocalClock,
     pub(crate) systemd_notify: bool,
+    /// State files found damaged before the control thread started (the server keys).
+    pub(crate) damaged: Vec<crate::damage::Damage>,
 }
 
 impl Setup {
@@ -352,6 +354,8 @@ pub(crate) struct Control {
     /// systemd's readiness and watchdog, pinged from this loop's keepalive tick so that a
     /// stuck loop stops the pings and gets the daemon restarted.
     notify: ac2_paths::notify::Notifier,
+    /// State files found damaged, not yet in the rig entity.
+    damaged: Vec<crate::damage::Damage>,
     traces: traces::TraceStore,
     sweep: Option<ActiveSweep>,
     next_sweep: u32,
@@ -389,7 +393,7 @@ pub(crate) struct Control {
 
 impl Control {
     pub(crate) fn new(s: Setup) -> Self {
-        let (cal, contents) = match &s.cal_store {
+        let (mut cal, contents) = match &s.cal_store {
             Some(p) => CalStore::open(p),
             None => (CalStore::memory(), calstore::Contents::default()),
         };
@@ -409,7 +413,7 @@ impl Control {
             },
         };
         let restore = s.autosave.as_ref().is_some_and(|c| c.restore);
-        let (rig, saved) = match &s.rig_settings {
+        let (mut rig, saved) = match &s.rig_settings {
             Some(p) => crate::rig::RigStore::open(p),
             None => (
                 crate::rig::RigStore::memory(),
@@ -417,6 +421,9 @@ impl Control {
             ),
         };
         let mut s = s;
+        let mut damaged = std::mem::take(&mut s.damaged);
+        damaged.extend(cal.take_damage());
+        damaged.extend(rig.take_damage());
         let ceiling = crate::rig::start_ceiling(saved.ceiling_dbfs, s.ceiling_bound);
         match crate::stimulus::peak_limit(ceiling) {
             Ok(m) => {
@@ -477,6 +484,7 @@ impl Control {
             pending_finds: HashMap::new(),
             next_token: 1,
             next_ka: Instant::now(),
+            damaged,
             notify: if s.systemd_notify {
                 ac2_paths::notify::Notifier::from_env()
             } else {
@@ -509,6 +517,7 @@ impl Control {
         self.start_autosave();
         self.start_rig_monitor();
         self.recover_recordings();
+        self.publish_damage();
         // The sockets were bound before this thread started; the restore and the rig
         // monitor's start are done or under way.
         if let Some(e) = self.notify.ready() {
@@ -684,6 +693,22 @@ impl Control {
             }
         }
         self.shutdown();
+    }
+
+    /// A state file found damaged (logged already); clients see it with the next
+    /// [`Self::publish_damage`].
+    pub(super) fn note_damage(&mut self, d: crate::damage::Damage) {
+        self.damaged.push(d);
+    }
+
+    /// Puts the damaged files noted so far in the rig entity.
+    fn publish_damage(&mut self) {
+        if self.damaged.is_empty() {
+            return;
+        }
+        let at = WallNs(crate::util::wall_ns());
+        let found: Vec<_> = self.damaged.drain(..).map(|d| d.wire(at)).collect();
+        self.commit_rig(|r| r.damaged_files.extend(found));
     }
 
     fn shutdown(&mut self) {

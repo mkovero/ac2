@@ -1,8 +1,11 @@
 //! The autosave indicator: `autosaved 5 min ago`, `saving…`, `autosave failed: <reason>`.
 //! Shared by the app's top bar and `ac2 session status`. Also the SPL logs the daemon
-//! cannot write (`LOG NOT SAVED · disk full`), for the banner and `ac2 status`.
+//! cannot write (`LOG NOT SAVED · disk full`), and the state files the daemon found damaged
+//! at start (`FILE DAMAGED · rig settings`), for the banners and `ac2 status`.
 
-use ac2_proto::model::{Autosave, AutosaveState, LogWriteFailure, MeterLog};
+use ac2_proto::model::{
+    Autosave, AutosaveState, DamagedFile, LogWriteFailure, MeterLog, StateFile,
+};
 use ac2_proto::units::{MeasId, WallNs};
 
 use crate::format;
@@ -151,9 +154,106 @@ pub fn log_failure_text(
     })
 }
 
+/// What the FILE DAMAGED banner says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DamageText {
+    /// `FILE DAMAGED · <what>` (one file), or `FILE DAMAGED · <n> files`.
+    pub banner: String,
+    /// A [`damaged_file_lines`] line per file.
+    pub detail: String,
+}
+
+/// What a state file holds, as the operator calls it.
+pub fn state_file_name(k: StateFile) -> &'static str {
+    match k {
+        StateFile::Autosave => "autosave",
+        StateFile::Trace => "trace file",
+        StateFile::SplLog => "SPL log",
+        StateFile::BandLog => "band log",
+        StateFile::Working => "working state",
+        StateFile::RigSettings => "rig settings",
+        StateFile::RigLogs => "rig meters' logs",
+        StateFile::Calibrations => "calibrations",
+        StateFile::ServerKey => "server key",
+        StateFile::AuthorizedClients => "authorized clients",
+    }
+}
+
+fn file_name(p: &str) -> &str {
+    p.rsplit(['/', '\\']).next().unwrap_or(p)
+}
+
+/// One line per damaged file: `rig settings rig.json damaged: <reason>; set aside as
+/// rig.json.damaged-1792191433`.
+pub fn damaged_file_lines(files: &[DamagedFile]) -> Vec<String> {
+    files
+        .iter()
+        .map(|d| {
+            let aside = d
+                .set_aside_as
+                .as_deref()
+                .map_or_else(String::new, |a| format!("; set aside as {}", file_name(a)));
+            format!(
+                "{} {} damaged: {}{aside}",
+                state_file_name(d.kind),
+                file_name(&d.path),
+                d.reason
+            )
+        })
+        .collect()
+}
+
+/// The FILE DAMAGED banner, or `None` when the daemon started on sound files. It stays
+/// until the daemon restarts: what was lost (a trace, a log, a setting) is for the operator
+/// to check, whenever they next look.
+pub fn damage_text(files: &[DamagedFile]) -> Option<DamageText> {
+    let what = match files {
+        [] => return None,
+        [one] => state_file_name(one.kind).to_owned(),
+        many => format!("{} files", many.len()),
+    };
+    Some(DamageText {
+        banner: format!("FILE DAMAGED · {what}"),
+        detail: damaged_file_lines(files).join("; "),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn damaged_files() {
+        assert_eq!(damage_text(&[]), None);
+        let rig = DamagedFile {
+            kind: StateFile::RigSettings,
+            path: "/home/m/.config/ac2/rig.json".into(),
+            set_aside_as: Some("/home/m/.config/ac2/rig.json.damaged-17".into()),
+            reason: "EOF while parsing; read the previous copy".into(),
+            at: WallNs(1),
+        };
+        let t = damage_text(std::slice::from_ref(&rig)).expect("text");
+        assert_eq!(t.banner, "FILE DAMAGED · rig settings");
+        assert_eq!(
+            t.detail,
+            "rig settings rig.json damaged: EOF while parsing; read the previous copy; \
+             set aside as rig.json.damaged-17"
+        );
+        let log = DamagedFile {
+            kind: StateFile::SplLog,
+            path: "spl/1.csv".into(),
+            set_aside_as: None,
+            reason: "missing".into(),
+            at: WallNs(1),
+        };
+        let t = damage_text(&[rig, log]).expect("text");
+        assert_eq!(t.banner, "FILE DAMAGED · 2 files");
+        assert!(
+            t.detail.ends_with("; SPL log 1.csv damaged: missing"),
+            "{}",
+            t.detail
+        );
+    }
 
     const S: u64 = 1_000_000_000;
 

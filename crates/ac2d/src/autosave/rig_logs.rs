@@ -14,9 +14,11 @@
 
 use std::path::{Path, PathBuf};
 
+use ac2_proto::model::StateFile;
 use ac2_traces::session::Session as SessionData;
 
 use super::{Fingerprint, Job, LogSpec, Restored, Writer};
+use crate::damage::Damage;
 
 /// The rig meters' log directory and its write thread.
 pub(crate) struct RigLogs {
@@ -42,9 +44,15 @@ impl RigLogs {
     }
 
     /// What the directory holds, read at start (a damaged one is set aside, never
-    /// deleted).
-    pub(crate) fn read(&self) -> Option<Restored> {
-        super::restore(&self.dir)
+    /// deleted, as is a damaged log file), and what was damaged.
+    pub(crate) fn read(&self) -> (Option<Restored>, Vec<Damage>) {
+        let (r, mut damage) = super::restore(&self.dir);
+        for d in &mut damage {
+            if d.kind == StateFile::Autosave {
+                d.kind = StateFile::RigLogs;
+            }
+        }
+        (r, damage)
     }
 
     /// `fp` is on disk already (just read back), its logs `logs` carrying on in their files.
