@@ -195,6 +195,7 @@ pub fn empty_state() -> State {
         autosave: Autosave {
             state: AutosaveState::Off,
             saved_at: None,
+            log_failures: Vec::new(),
         },
         recording: None,
         working: WorkingSession {

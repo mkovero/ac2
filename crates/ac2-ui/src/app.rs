@@ -147,8 +147,14 @@ pub struct App {
     last_tick: Option<Instant>,
     /// When `ui.toml` was last written ([`PREFS_SAVE_INTERVAL`]).
     prefs_saved: Option<Instant>,
+    /// The last write of `ui.toml` failed; the preferences stay dirty and are retried.
+    prefs_failing: bool,
     pub startup: StartupTiming,
     bench_startup: bool,
+    /// systemd's readiness and watchdog (nothing without `NOTIFY_SOCKET`), pinged from the
+    /// frame itself: a pass runs only after the previous frame was presented, so a hung
+    /// reducer, renderer or GPU present stops the pings and the unit restarts the app.
+    notify: ac2_paths::notify::Notifier,
     smoke: bool,
     applied_theme: Option<ThemeName>,
     /// The full-screen state last sent to the window.
@@ -298,8 +304,10 @@ impl App {
             started: opts.started,
             last_tick: None,
             prefs_saved: None,
+            prefs_failing: false,
             startup: StartupTiming::default(),
             bench_startup: opts.bench_startup,
+            notify: ac2_paths::notify::Notifier::from_env(),
             smoke: opts.smoke,
             applied_theme: None,
             applied_fullscreen: false,
@@ -505,27 +513,53 @@ impl App {
 
     /// Writes `ui.toml` when a preference changed, at most once per
     /// [`PREFS_SAVE_INTERVAL`]; `Some(wait)` while a write waits.
+    /// A frame was presented: systemd hears the app is ready (the first time) and alive.
+    fn notify_frame(&mut self, now: Instant) {
+        if let Some(e) = self.notify.ready() {
+            tracing::warn!("systemd notification failed: {e}");
+        }
+        if let Some(e) = self.notify.ping(now) {
+            tracing::warn!("systemd watchdog ping failed: {e}");
+        }
+    }
+
     fn save_prefs(&mut self, now: Instant) -> Option<Duration> {
         if !self.state.prefs_dirty {
             return None;
         }
+        let interval = if self.prefs_failing {
+            PREFS_RETRY_INTERVAL
+        } else {
+            PREFS_SAVE_INTERVAL
+        };
         if let Some(t) = self.prefs_saved
-            && now.duration_since(t) < PREFS_SAVE_INTERVAL
+            && now.duration_since(t) < interval
         {
-            return Some(PREFS_SAVE_INTERVAL - now.duration_since(t));
+            return Some(interval - now.duration_since(t));
         }
-        self.state.prefs_dirty = false;
         self.prefs_saved = Some(now);
         // A few hundred bytes, written only when the operator changes a preference.
-        if let Some(path) = &self.prefs_path
-            && let Err(e) = self.state.prefs.save(path)
-        {
-            self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
-                what: "preferences".into(),
-                result: Err(e),
-            })));
+        let Some(path) = &self.prefs_path else {
+            self.state.prefs_dirty = false;
+            return None;
+        };
+        match self.state.prefs.save(path) {
+            Ok(()) => {
+                self.state.prefs_dirty = false;
+                self.prefs_failing = false;
+                None
+            }
+            // Still unsaved: written again later, said once per run of failures.
+            Err(e) => {
+                if !std::mem::replace(&mut self.prefs_failing, true) {
+                    self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
+                        what: "preferences".into(),
+                        result: Err(e),
+                    })));
+                }
+                Some(PREFS_RETRY_INTERVAL)
+            }
         }
-        None
     }
 
     fn pump_link(&mut self) {
@@ -784,6 +818,8 @@ const SLOW_REFRESH: Duration = Duration::from_secs(10);
 /// Shortest time between two writes of `ui.toml`: a wheel or drag on a level axis changes
 /// it on every event, and each write is synced to disk.
 const PREFS_SAVE_INTERVAL: Duration = Duration::from_secs(1);
+/// How often `ui.toml` is tried again after a failed write (a full or read-only disk).
+const PREFS_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Wakes the UI for what the link reports: one pass. egui answers a plain
 /// `request_repaint` with two passes (for responses that land a frame late), which on a
@@ -868,6 +904,9 @@ impl eframe::App for App {
                 );
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+        }
+        if self.startup.first_frame.is_some() {
+            self.notify_frame(Instant::now());
         }
         if self.smoke {
             self.smoke_step(&ctx);
@@ -1008,6 +1047,10 @@ impl eframe::App for App {
         {
             let wait = (next - self.state.now_s).max(0.0);
             ctx.request_repaint_after(Duration::from_secs_f64(wait));
+        }
+        // An idle, healthy app still draws often enough to keep the watchdog fed.
+        if let Some(idle) = self.notify.max_idle() {
+            ctx.request_repaint_after(idle);
         }
     }
 }

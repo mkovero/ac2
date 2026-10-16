@@ -710,6 +710,14 @@ def events():
                     "reason": "No space left on device (os error 28)",
                 },
                 "saved_at": 1790000000000000000,
+                "log_failures": [
+                    {
+                        "meas": 4,
+                        "log": "bands",
+                        "reason": "disk full",
+                        "since": 1790000030000000000,
+                    }
+                ],
             },
         },
     ]

@@ -129,6 +129,7 @@ fn status() -> Status {
         audio_stopped: None,
         no_delay_estimate: None,
         math: None,
+        log_not_saved: None,
         drive: Default::default(),
     }
 }

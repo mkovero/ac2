@@ -125,8 +125,28 @@ pub fn status(
         audio_stopped: audio_stopped(st, now.wall),
         no_delay_estimate: tf_meas.and_then(no_delay_estimate),
         math: None,
+        log_not_saved: log_not_saved(st, now.wall),
         drive: st.drive(),
     }
+}
+
+/// The LOG NOT SAVED banner's text while the daemon cannot write an SPL meter's log.
+pub fn log_not_saved(
+    st: &AppState,
+    client_now: WallNs,
+) -> Option<ac2_scene::autosave::LogFailureText> {
+    let d = st.daemon()?;
+    ac2_scene::autosave::log_failure_text(
+        &d.autosave.log_failures,
+        |m| {
+            d.measurements
+                .iter()
+                .find(|x| x.id == m)
+                .map(|x| x.config.name.clone())
+        },
+        client_now,
+        clock_offset(st),
+    )
 }
 
 /// The daemon's offset estimate as the scene takes it.

@@ -1,5 +1,5 @@
 //! Reducer tests of the banners a pane shows: STALE against a stopped measurement,
-//! clock drift, stopped audio, and why the IR pane has no IR.
+//! clock drift, stopped audio, a log not saved, and why the IR pane has no IR.
 
 use super::*;
 
@@ -73,6 +73,37 @@ fn committed_clock_drift_shows_a_banner() {
         .map(|b| b.text)
         .collect();
     assert_eq!(texts, ["CLOCK DRIFT · 50 ppm"]);
+}
+
+/// An SPL log the daemon cannot write is a LOG NOT SAVED banner on every pane, naming the
+/// meter, the reason and for how long; it clears when the daemon writes the log again.
+#[test]
+fn a_log_the_daemon_cannot_write_shows_until_it_is_written() {
+    use ac2_proto::model::{LogWriteFailure, MeterLog};
+    let mut t = T::new();
+    let mut s = daemon_state();
+    t.conn(mirror(s.clone()));
+    assert_eq!(
+        crate::scenes::status(&t.st, &[], None, now()).log_not_saved,
+        None
+    );
+    s.autosave.log_failures = vec![LogWriteFailure {
+        meas: MeasId(2),
+        log: MeterLog::Spl,
+        reason: "disk full".into(),
+        since: WallNs(0),
+    }];
+    t.conn(mirror(s.clone()));
+    let b = ac2_scene::banner::banners(&crate::scenes::status(&t.st, &[], None, now()));
+    assert_eq!(b.len(), 1, "{b:?}");
+    assert_eq!(b[0].text, "LOG NOT SAVED · disk full");
+    assert_eq!(
+        b[0].detail.as_deref(),
+        Some("SPL log of Sub not saved for 0.0 s: disk full; retried every 30 s")
+    );
+    s.autosave.log_failures.clear();
+    t.conn(mirror(s));
+    assert!(ac2_scene::banner::banners(&crate::scenes::status(&t.st, &[], None, now())).is_empty());
 }
 
 /// A stopped session's audio reaches every pane's banners in place of STALE, and the top

@@ -13,10 +13,11 @@ workspace = true
 
 [features]
 # The shared tracing subscriber for the daemon and the UI (stderr plus a log file).
-log = ["dep:tracing-core", "dep:tracing-subscriber"]
+log = ["dep:tracing", "dep:tracing-core", "dep:tracing-subscriber"]
 
 [dependencies]
 directories = "6"
+tracing = { version = "0.1", optional = true }
 tracing-core = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }
 

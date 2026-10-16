@@ -68,7 +68,10 @@ attach it to a bug report:
 
 `ac2-ui.log` is the app's (with the daemon it hosts), `ac2d.log` a standalone daemon's. Each
 start moves the previous file to `ac2-ui.log.1` / `ac2d.log.1`, so a bad run survives one
-restart. A daemon under systemd (`systemctl --user`) logs to the journal
+restart; a file that reaches 16 MiB during a run is moved there too and a fresh one started,
+so a weeks-long run keeps at most 32 MiB of log. A panic is logged with its thread and a
+backtrace before the program exits (release builds stop on any panic; under systemd the unit
+restarts it: [Watchdogs](#watchdogs-under-systemd)). A daemon under systemd (`systemctl --user`) logs to the journal
 (`journalctl --user -u ac2d`). `RUST_LOG` chooses what is logged (default `warn,ac2=info`;
 `RUST_LOG=debug` for everything); `AC2_LOG_DIR` moves the files. The app's notifications are
 not in the file; *Recent notifications…* lists them ([Notifications](#notifications)).
@@ -1464,6 +1467,16 @@ Support/ac2` on macOS, `%APPDATA%\ac2\data` on Windows):
 
 Any of these loads by path: `ac2 session load ~/.local/share/ac2/autosave.unrestored`.
 
+When an SPL meter's log cannot be written (a full disk, a read-only or missing directory)
+every pane shows **LOG NOT SAVED · disk full** in the warning colour, and `ac2 status` /
+`ac2 session status` print `log          NOT SAVED: SPL log of Main not saved for 12 min:
+disk full`. The meter and its Leq history on screen are complete; the file misses the
+seconds since then until a write succeeds again (tried every 30 s and with each autosave),
+when the banner goes by itself. Free space and wait, or save the session elsewhere.
+
+The app's own preferences (`ui.toml`) that cannot be written stay unsaved and are tried
+again every 30 s; the first failure is a notification.
+
 To spare SD cards and batteries, a write adds only changed traces; an SPL meter's
 per-second log is appended every 30 s and synced every 5 min and at stop (after a power cut
 it is back to its last few minutes; after a daemon crash, 30 s).
@@ -1473,6 +1486,25 @@ it is back to its last few minutes; after a daemon crash, 30 s).
 | `ac2d --no-restore` | starts empty |
 | `--autosave <dir>` | puts the autosave elsewhere (one daemon per directory) |
 | `--no-autosave` | keeps everything in memory only |
+
+### Watchdogs under systemd
+
+Under systemd `ac2d` and `ac2-ui` tell the unit when they are ready and keep a watchdog
+fed, so a frozen program is restarted instead of showing a stuck value: `ac2d` pings from
+its control loop (what answers clients and sends keepalives), `ac2-ui` after each frame it
+draws (it draws at least once a second while a watchdog is set). A unit for them:
+
+```ini
+[Service]
+Type=notify
+WatchdogSec=10          # ac2d; 5 for ac2-ui
+TimeoutStartSec=60      # ac2-ui: its first frame waits for the GPU
+Restart=always
+```
+
+`NotifyAccess=main` (the default) is right when the program is the unit's main process,
+also through a wrapper script that `exec`s it. Without `NOTIFY_SOCKET` (a desktop, macOS,
+Windows) none of this does anything. Design: `docs/design/watchdogs.md`.
 | `--rig-logs <dir>` | where rig SPL meters keep their logs ([rig measurements](#rig-measurements); not affected by the three above) |
 
 ## Recording and replay

@@ -458,6 +458,7 @@ impl Daemon {
             autosave: config.autosave.clone(),
             recording_dir: config.recording_dir.clone(),
             local_clock: config.local_clock,
+            systemd_notify: config.systemd_notify,
         });
         let control = std::thread::Builder::new()
             .name("ac2d-control".into())

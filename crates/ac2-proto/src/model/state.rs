@@ -6,7 +6,7 @@ use super::{
     CalEntry, Generator, InputSetup, Measurement, Mic, OutputSetup, RecordingRun, Rig, Session,
     SplLog, SweepRun, TraceMeta, WorkingSession,
 };
-use crate::units::{SampleIndex, Samples, Seconds, WallNs};
+use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
 
 /// Loopback timing monitor state (Q3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,6 +127,35 @@ pub struct Autosave {
     /// When the autosave on disk was written (after a restore: when the restored one was).
     /// `None` until something has been written.
     pub saved_at: Option<WallNs>,
+    /// The SPL meters' log files that cannot be written at the moment: the Leq history on
+    /// disk misses the seconds logged since each `since` until its write succeeds again
+    /// (retried every 30 s). Empty while every log is on disk.
+    pub log_failures: Vec<LogWriteFailure>,
+}
+
+/// An SPL meter's log file the daemon fails to write.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogWriteFailure {
+    /// The meter.
+    pub meas: MeasId,
+    /// Which of its logs.
+    pub log: MeterLog,
+    /// Why, short: `disk full`, `read-only file system`, `permission denied`, else as the
+    /// file system said it.
+    pub reason: String,
+    /// When the first write of this run of failures failed.
+    pub since: WallNs,
+}
+
+/// One of an SPL meter's two log files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MeterLog {
+    /// The A/C/Z seconds.
+    Spl,
+    /// The band meter's seconds.
+    Bands,
 }
 
 /// State of the autosave.

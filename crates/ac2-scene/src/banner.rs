@@ -16,7 +16,8 @@
 //! | 9 | AVERAGE · n OF m POSITIONS | warning | the shown spatial average left positions out (the detail names them and why) |
 //! | 10 | OUTPUT TIMING JUMP | warning | loopback timing `jumped` |
 //! | 11 | CLOCK DRIFT · ppm | warning | loopback timing drift `warning` (output and input on different clocks) |
-//! | 12 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
+//! | 12 | LOG NOT SAVED · reason | warning | the daemon cannot write an SPL meter's log (`autosave.log_failures`; the detail names the logs and for how long) |
+//! | 13 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
 //!
 //! AUDIO STOPPED comes right after the daemon itself: no audio invalidates everything
 //! measured, and the daemon is already working on it. It replaces STALE, whose cause it
@@ -26,6 +27,11 @@
 //! newer event, and drift does not touch a transfer function on the measured loopback
 //! reference (reference and measurement hear the same drifting stimulus on one input clock),
 //! which the detail says so the operator does not distrust a valid trace.
+//!
+//! LOG NOT SAVED is about the disk, not the signal: what is on screen is valid, only its
+//! copy on disk (which a restart restores and a report is built from) misses a stretch, so
+//! it ranks under every measurement warning. It shows on every pane, like the daemon's
+//! own faults: the operator must free space before more of the history is lost.
 //!
 //! CHECK ROUTING sits right under NO REFERENCE: a mis-patched reference invalidates every
 //! transfer value just as a missing one does, and fixing the patch comes before any other
@@ -77,6 +83,7 @@ pub enum BannerKind {
     MathIncomplete,
     OutputTimingJump,
     ClockDrift,
+    LogNotSaved,
     NoDelayEstimate,
 }
 
@@ -90,9 +97,11 @@ impl BannerKind {
             | Self::CheckRouting
             | Self::NoSignal
             | Self::NoMathResult => Severity::Fault,
-            Self::Stale | Self::MathIncomplete | Self::OutputTimingJump | Self::ClockDrift => {
-                Severity::Warning
-            }
+            Self::Stale
+            | Self::MathIncomplete
+            | Self::OutputTimingJump
+            | Self::ClockDrift
+            | Self::LogNotSaved => Severity::Warning,
             Self::NoDelayEstimate => Severity::Info,
         }
     }
@@ -128,6 +137,8 @@ pub struct Status {
     pub no_delay_estimate: Option<NoDelayEstimate>,
     /// The shown math channel (its name and what its newest frame combined).
     pub math: Option<(String, MathStatus)>,
+    /// SPL logs the daemon cannot write ([`crate::autosave::log_failure_text`]).
+    pub log_not_saved: Option<crate::autosave::LogFailureText>,
     /// What this app's stimulus is doing: NO REFERENCE's detail names the keys that start
     /// it while nothing here plays.
     pub drive: crate::stimulus::Drive,
@@ -265,6 +276,13 @@ pub fn banners(s: &Status) -> Vec<Banner> {
                 "output and input clocks differ ({} per 10 s); loopback TF unaffected",
                 format::ms(ppm.abs() * 1e-6 * 10.0, 2)
             )),
+        ));
+    }
+    if let Some(l) = &s.log_not_saved {
+        out.push(banner(
+            BannerKind::LogNotSaved,
+            l.banner.clone(),
+            Some(l.detail.clone()),
         ));
     }
     if let Some(why) = &s.no_delay_estimate {

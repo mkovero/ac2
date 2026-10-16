@@ -103,6 +103,10 @@ fn status_text(
     }
     s.push('\n');
     s.push_str(&output::autosave(&st.autosave, crate::watch::now_wall()));
+    for l in output::log_failures(&st.autosave, &st.measurements, crate::watch::now_wall()) {
+        s.push('\n');
+        s.push_str(&l);
+    }
     let inputs = output::inputs(st, crate::watch::now_wall());
     if !st.inputs.is_empty() || session.open.is_some() {
         s.push_str("\ninputs\n");

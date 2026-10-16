@@ -22,6 +22,7 @@
 
 #[cfg(feature = "log")]
 pub mod log;
+pub mod notify;
 
 use std::fs;
 use std::io::{self, Write};

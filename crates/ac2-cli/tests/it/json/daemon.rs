@@ -68,7 +68,7 @@ async fn status_reports_build_ids() -> R {
     );
     assert_eq!(
         v["autosave"],
-        json!({ "state": { "type": "off" }, "saved_at": null })
+        json!({ "state": { "type": "off" }, "saved_at": null, "log_failures": [] })
     );
     let s = ok_json(&f, &["session", "status", "--json"]).await?;
     assert_eq!(
@@ -78,7 +78,7 @@ async fn status_reports_build_ids() -> R {
             "open": null,
             "recording": null,
             "stopped": null,
-            "autosave": { "state": { "type": "off" }, "saved_at": null },
+            "autosave": { "state": { "type": "off" }, "saved_at": null, "log_failures": [] },
             "working": { "origin": null, "dirty": false, "saved_at": null, "recover": null },
         })
     );

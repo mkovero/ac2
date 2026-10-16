@@ -480,6 +480,7 @@ fn autosave_indicator_follows_the_daemon() {
     st.autosave = Autosave {
         state: AutosaveState::Saved,
         saved_at: Some(WallNs(1_000 * S - 3 * S)),
+        log_failures: Vec::new(),
     };
     t.conn(mirror(st.clone()));
     let l = t.st.autosave_label(now).expect("label");

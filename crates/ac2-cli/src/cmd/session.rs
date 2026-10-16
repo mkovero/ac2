@@ -129,6 +129,8 @@ pub(crate) async fn session(
             let r = c.call(Command::SessionStatus).await?;
             let s = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
             let st = state(&c).await?;
+            let logs =
+                output::log_failures(&st.autosave, &st.measurements, crate::watch::now_wall());
             let (autosave, recording, working) = (st.autosave, st.recording, st.working);
             let mut j = json!(s);
             j["autosave"] = json!(autosave);
@@ -140,6 +142,10 @@ pub(crate) async fn session(
                     output::session(&s),
                     output::autosave(&autosave, crate::watch::now_wall())
                 );
+                for l in &logs {
+                    t.push('\n');
+                    t.push_str(l);
+                }
                 t.push('\n');
                 t.push_str(&super::sessions::status_lines(
                     &working,

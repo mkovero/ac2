@@ -4,8 +4,8 @@
 use std::time::Instant;
 
 use ac2_proto::event::Change;
-use ac2_proto::model::{Autosave, AutosaveState, MeasScope};
-use ac2_proto::units::WallNs;
+use ac2_proto::model::{Autosave, AutosaveState, LogWriteFailure, MeasScope, MeterLog};
+use ac2_proto::units::{MeasId, WallNs};
 
 use super::Control;
 use crate::autosave::{self, Fingerprint};
@@ -21,7 +21,28 @@ impl Control {
 
     /// Commits the autosave status if it changed.
     fn set_autosave(&mut self, state: AutosaveState, saved_at: Option<WallNs>) {
-        let a = Autosave { state, saved_at };
+        let a = Autosave {
+            state,
+            saved_at,
+            log_failures: self.store.state().autosave.log_failures.clone(),
+        };
+        if self.store.state().autosave != a {
+            self.commit(Change::Autosave(a));
+        }
+    }
+
+    /// The write thread failed to write an SPL meter's log, or wrote it again: clients see
+    /// which stretch of the Leq history is missing from the disk.
+    pub(super) fn log_write(
+        &mut self,
+        meas: MeasId,
+        log: MeterLog,
+        failure: Option<LogWriteFailure>,
+    ) {
+        let mut a = self.store.state().autosave.clone();
+        a.log_failures.retain(|f| (f.meas, f.log) != (meas, log));
+        a.log_failures.extend(failure);
+        a.log_failures.sort_by_key(|f| (f.meas, f.log));
         if self.store.state().autosave != a {
             self.commit(Change::Autosave(a));
         }

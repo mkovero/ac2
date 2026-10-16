@@ -4,6 +4,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError};
 
+/// Why a file could not be written, short where the operator's remedy is the same whatever
+/// the path: a full disk reads `disk full`, not `No space left on device (os error 28)`.
+pub(crate) fn io_reason(e: &std::io::Error) -> String {
+    use std::io::ErrorKind;
+    match e.kind() {
+        ErrorKind::StorageFull => "disk full".into(),
+        ErrorKind::QuotaExceeded => "disk quota exceeded".into(),
+        ErrorKind::ReadOnlyFilesystem => "read-only file system".into(),
+        ErrorKind::PermissionDenied => "permission denied".into(),
+        _ => e.to_string(),
+    }
+}
+
 /// Daemon wall clock, Unix nanoseconds.
 pub(crate) fn wall_ns() -> u64 {
     SystemTime::now()
@@ -61,4 +74,22 @@ pub(crate) fn perr_detail(
 /// Lower-case hex of `b`.
 pub(crate) fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+#[cfg(test)]
+mod io_reason_tests {
+    use super::io_reason;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn a_full_disk_reads_disk_full() {
+        assert_eq!(io_reason(&Error::from(ErrorKind::StorageFull)), "disk full");
+        #[cfg(target_os = "linux")]
+        assert_eq!(io_reason(&Error::from_raw_os_error(28)), "disk full");
+        assert_eq!(
+            io_reason(&Error::from(ErrorKind::ReadOnlyFilesystem)),
+            "read-only file system"
+        );
+        assert_eq!(io_reason(&Error::other("odd")), "odd");
+    }
 }

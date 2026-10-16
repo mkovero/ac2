@@ -24,8 +24,12 @@ unwrap_used = "warn"
 # redo all codegen serially in each final binary link, and the default 16 codegen units.
 # The DSP and scene math keep a single codegen unit: their hot loops lose inlining across unit
 # boundaries otherwise (1/3- and 1/24-octave RTA, band Leq ~5-17 % slower at 16 units).
+# A panic in a release build aborts the process (logged first by the panic hook, see
+# docs/design/watchdogs.md): systemd restarts it, where an unwound thread would leave the
+# rest running half-dead, a stuck value on screen.
 [profile.release]
 lto = false
+panic = "abort"
 
 [profile.release.package.ac2-core]
 codegen-units = 1

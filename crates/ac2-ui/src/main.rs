@@ -154,6 +154,7 @@ fn main() -> ExitCode {
     if let Some(path) = ac2_paths::log::init("ac2-ui") {
         tracing::info!("{NAME}: logging to {}", path.display());
     }
+    ac2_paths::log::install_panic_hook("ac2-ui");
     let mut notices = Vec::new();
     // Lives until the window closes; dropping it shuts the daemon down.
     let mut embedded = None;

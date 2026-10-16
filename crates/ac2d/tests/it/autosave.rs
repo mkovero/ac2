@@ -119,7 +119,8 @@ fn traces_survive_a_restart() {
         first,
         Autosave {
             state: AutosaveState::Saved,
-            saved_at: None
+            saved_at: None,
+            log_failures: Vec::new(),
         }
     );
 
@@ -234,7 +235,8 @@ fn traces_survive_a_restart() {
         st.autosave,
         Autosave {
             state: AutosaveState::Saved,
-            saved_at: Some(saved_at)
+            saved_at: Some(saved_at),
+            log_failures: Vec::new(),
         }
     );
 
@@ -340,6 +342,44 @@ fn an_unwritable_directory_is_reported() {
     assert!(reason.contains("blocker"), "{reason}");
     assert_eq!(a.saved_at, None);
     assert_eq!(state(&mut c).autosave, a);
+    drop((c, sub));
+    h.shutdown();
+}
+
+/// An SPL meter's log the daemon cannot write shows in the `autosave` entity (which meter,
+/// which log, a reason, since when) and clears once the log is written again.
+#[test]
+fn a_log_that_cannot_be_written_is_reported_until_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    // A file where the log directory should be.
+    let blocker = dir
+        .path()
+        .join("autosave")
+        .join(ac2_traces::session::SPL_DIR);
+    std::fs::create_dir_all(blocker.parent().unwrap()).unwrap();
+    std::fs::write(&blocker, b"").unwrap();
+    let (h, _backend) = start("autosave-log-fail", dir.path(), true);
+    let (mut c, sub) = connect(&h, &[b"evt"]);
+    c.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    c.ok(Command::MeasCreate {
+        config: spl("meter", 1),
+    });
+    let a = autosave_event(&sub, |a| !a.log_failures.is_empty());
+    let f = &a.log_failures[0];
+    assert_eq!((f.meas, f.log), (MeasId(1), MeterLog::Spl));
+    assert!(!f.reason.is_empty());
+    assert!(f.since.0 > 0);
+    assert_eq!(state(&mut c).autosave.log_failures, a.log_failures);
+
+    // The disk is fixed; the next write of the autosave tries the log again.
+    let _ = std::fs::remove_file(&blocker);
+    c.ok(Command::MeasCreate {
+        config: spl("other", 1),
+    });
+    autosave_event(&sub, |a| a.log_failures.is_empty());
+    assert!(state(&mut c).autosave.log_failures.is_empty());
     drop((c, sub));
     h.shutdown();
 }

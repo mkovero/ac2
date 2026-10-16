@@ -56,6 +56,10 @@ pub struct DaemonConfig {
     pub advertise: Option<Advertise>,
     /// Local time of day, which decides each band-meter second's day or night limits.
     pub local_clock: LocalClock,
+    /// Tell systemd when the daemon serves, ping its watchdog from the control loop and say
+    /// when it stops (`ac2_paths::notify`; nothing without `NOTIFY_SOCKET`). Only the `ac2d`
+    /// program: a daemon embedded in the UI must not ping for the UI's unit.
+    pub systemd_notify: bool,
 }
 
 /// How the daemon tells the local time of day from its wall clock: the band meter's day
@@ -140,6 +144,7 @@ impl fmt::Debug for DaemonConfig {
             .field("recording_dir", &self.recording_dir)
             .field("advertise", &self.advertise)
             .field("local_clock", &self.local_clock)
+            .field("systemd_notify", &self.systemd_notify)
             .finish()
     }
 }
@@ -168,6 +173,7 @@ impl DaemonConfig {
             recording_dir: None,
             advertise: None,
             local_clock: LocalClock::Host,
+            systemd_notify: false,
         }
     }
 }

@@ -1,8 +1,9 @@
 //! The autosave indicator: `autosaved 5 min ago`, `saving…`, `autosave failed: <reason>`.
-//! Shared by the app's top bar and `ac2 session status`.
+//! Shared by the app's top bar and `ac2 session status`. Also the SPL logs the daemon
+//! cannot write (`LOG NOT SAVED · disk full`), for the banner and `ac2 status`.
 
-use ac2_proto::model::{Autosave, AutosaveState};
-use ac2_proto::units::WallNs;
+use ac2_proto::model::{Autosave, AutosaveState, LogWriteFailure, MeterLog};
+use ac2_proto::units::{MeasId, WallNs};
 
 use crate::format;
 use crate::time::{self, ClockOffset};
@@ -88,6 +89,68 @@ pub fn autosave_label(
     })
 }
 
+/// What the LOG NOT SAVED banner says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogFailureText {
+    /// `LOG NOT SAVED · <reason>` (the longest-failing log's reason).
+    pub banner: String,
+    /// Which logs, for how long, and that it is retried.
+    pub detail: String,
+}
+
+/// How often the daemon tries a failing log again (its append interval).
+pub const LOG_RETRY_S: u64 = 30;
+
+fn log_name(log: MeterLog) -> &'static str {
+    match log {
+        MeterLog::Spl => "SPL log",
+        MeterLog::Bands => "band log",
+    }
+}
+
+/// One line per failing log: `SPL log of Main not saved for 12 min: disk full`. `name`
+/// gives a meter's name (`None`: the id is shown). Ages are on the daemon clock
+/// (`offset`).
+pub fn log_failure_lines(
+    failures: &[LogWriteFailure],
+    name: impl Fn(MeasId) -> Option<String>,
+    client_now: WallNs,
+    offset: ClockOffset,
+) -> Vec<String> {
+    failures
+        .iter()
+        .map(|f| {
+            let who = name(f.meas).unwrap_or_else(|| format!("measurement {}", f.meas.0));
+            format!(
+                "{} of {who} not saved for {}: {}",
+                log_name(f.log),
+                format::age(time::age_s(f.since, client_now, offset)),
+                f.reason
+            )
+        })
+        .collect()
+}
+
+/// The LOG NOT SAVED banner, or `None` while every log is on disk. The Leq history on
+/// screen is complete either way; what is missing is its copy on disk, which a restart, a
+/// session save or an export would need.
+pub fn log_failure_text(
+    failures: &[LogWriteFailure],
+    name: impl Fn(MeasId) -> Option<String>,
+    client_now: WallNs,
+    offset: ClockOffset,
+) -> Option<LogFailureText> {
+    let oldest = failures.iter().min_by_key(|f| f.since)?;
+    let lines = log_failure_lines(failures, name, client_now, offset);
+    Some(LogFailureText {
+        banner: format!(
+            "LOG NOT SAVED · {}",
+            shorten(&oldest.reason, MAX_REASON_CHARS)
+        ),
+        detail: format!("{}; retried every {LOG_RETRY_S} s", lines.join("; ")),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,6 +161,7 @@ mod tests {
         Autosave {
             state,
             saved_at: saved_at.map(WallNs),
+            log_failures: Vec::new(),
         }
     }
 
@@ -170,6 +234,39 @@ mod tests {
         )
         .expect("label");
         assert_eq!(short.text, "autosave failed: disk full");
+    }
+
+    #[test]
+    fn failing_logs_name_the_meter_the_reason_and_how_long() {
+        let now = WallNs(10_000 * S);
+        let off = ClockOffset::default();
+        let name = |m: MeasId| (m == MeasId(1)).then(|| "Main".to_owned());
+        assert_eq!(log_failure_text(&[], name, now, off), None);
+        let fails = [
+            LogWriteFailure {
+                meas: MeasId(1),
+                log: MeterLog::Spl,
+                reason: "disk full".into(),
+                since: WallNs(10_000 * S - 720 * S),
+            },
+            LogWriteFailure {
+                meas: MeasId(7),
+                log: MeterLog::Bands,
+                reason: "permission denied".into(),
+                since: WallNs(10_000 * S - 5 * S),
+            },
+        ];
+        let t = log_failure_text(&fails, name, now, off).expect("banner");
+        assert_eq!(t.banner, "LOG NOT SAVED · disk full");
+        assert_eq!(
+            t.detail,
+            "SPL log of Main not saved for 12 min: disk full; band log of measurement 7 \
+             not saved for 5.0 s: permission denied; retried every 30 s"
+        );
+        assert_eq!(
+            log_failure_lines(&fails[..1], name, now, off),
+            ["SPL log of Main not saved for 12 min: disk full"]
+        );
     }
 
     /// Ages are on the daemon clock: a daemon 2 min ahead wrote "just now" in its time.

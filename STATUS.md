@@ -19,7 +19,11 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   `docs/design/coreaudio.md` §11); exact on BlackHole in the all-OS CI run (`all_os=true`).
   Open on real hardware: the tester round (`testing/macos/`, Test 6: stated vs measured
   latency, replug, rate change, streams).
-- Newest (PROTO 55): the Leq history strip browses the whole log like a graph (wheel, drag,
+- Newest (PROTO 56): failing loud. `ac2d` and `ac2-ui` speak systemd's notify protocol (READY,
+  a watchdog pinged from the control loop / each presented frame, STOPPING), release builds
+  abort on a panic, and an SPL log the daemon cannot write is `autosave.log_failures` (LOG NOT
+  SAVED banner, `ac2 status`) (`docs/design/watchdogs.md`).
+- PROTO 55: the Leq history strip browses the whole log like a graph (wheel, drag,
   I/O/←/→, Home to live, a cursor readout), `spl.history_get` takes a `HistorySpan` (newest
   seconds, or a range in buckets of each window's highest Leq); palette *Export Leq log…*
   writes the log CSV on the app's computer (`docs/user-guide.md` *Tiles, history and the

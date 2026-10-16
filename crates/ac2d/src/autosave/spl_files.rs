@@ -17,17 +17,19 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-use ac2_proto::model::SplLogPage;
+use ac2_proto::model::{LogWriteFailure, MeterLog, SplLogPage};
 use ac2_proto::spl_log::{self, SplLogInfo};
-use ac2_proto::units::MeasId;
+use ac2_proto::units::{MeasId, WallNs};
 use ac2_traces::band_log;
-use ac2_traces::session::{self, SPL_DIR, SavedMeasurement, SavedSplLogFile};
+use ac2_traces::session::{SPL_DIR, SavedMeasurement, SavedSplLogFile};
 
+use crate::control::ControlMsg;
 use crate::leq_log::{self, SharedLog};
 
 /// How often logged rows are appended to their files. The kernel holds them in memory
@@ -41,6 +43,23 @@ pub(crate) const SYNC_EVERY: Duration = Duration::from_secs(300);
 /// only: a day of logging, so the rewrite happens once a day and a restore never reads
 /// more than three days of rows.
 pub(crate) const COMPACT_SLACK: u64 = 24 * 3600;
+
+/// Writes `bytes` to `path` whole: a temporary file beside it, synced, renamed over it. The
+/// temporary file goes on failure too: on a full disk it would hold the space a retry needs.
+fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.tmp-{}", std::process::id()));
+    let written = File::create(&tmp)
+        .and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()))
+        .and_then(|()| fs::rename(&tmp, path));
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    written
+}
 
 /// Where a restored log's file stands, so that appending carries on in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +140,20 @@ impl Kind {
         (text, n as u64)
     }
 
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Spl => "SPL",
+            Kind::Bands => "band",
+        }
+    }
+
+    fn wire(self) -> MeterLog {
+        match self {
+            Kind::Spl => MeterLog::Spl,
+            Kind::Bands => MeterLog::Bands,
+        }
+    }
+
     fn suffix(self) -> &'static str {
         match self {
             Kind::Spl => "csv",
@@ -153,8 +186,11 @@ pub(crate) struct SplFiles {
     next_sync: Instant,
     /// Bytes written so far (whole files and appends).
     pub(crate) bytes: u64,
-    /// A failure was logged and nothing has succeeded since.
-    failing: bool,
+    /// The logs whose last write failed, and since when (daemon wall clock).
+    failing: BTreeMap<(MeasId, Kind), WallNs>,
+    /// Where each log's failure and recovery are reported (the control thread, which
+    /// shows them to clients).
+    report: Option<Sender<ControlMsg>>,
 }
 
 impl SplFiles {
@@ -165,8 +201,15 @@ impl SplFiles {
             next_flush: now + FLUSH_EVERY,
             next_sync: now + SYNC_EVERY,
             bytes: 0,
-            failing: false,
+            failing: BTreeMap::new(),
+            report: None,
         }
+    }
+
+    /// Reports each log's failure and recovery to `to`.
+    pub(crate) fn reporting(mut self, to: Option<Sender<ControlMsg>>) -> Self {
+        self.report = to;
+        self
     }
 
     /// When the next append or sync is due; `None` without logs.
@@ -199,6 +242,7 @@ impl SplFiles {
             if let Some(f) = self.files.remove(&k) {
                 self.close(f);
             }
+            self.forget(k);
         }
         for s in specs {
             let id = leq_log::lock(&s.log).id();
@@ -317,13 +361,13 @@ impl SplFiles {
         let p = self.dir.join(&rel);
         let spl_dir = self.dir.join(SPL_DIR);
         let result = fs::create_dir_all(&spl_dir)
-            .map_err(|e| e.to_string())
-            .and_then(|()| session::write_atomic(&p, text.as_bytes()).map_err(|e| e.to_string()))
+            .map_err(|e| (spl_dir.clone(), e))
+            .and_then(|()| write_whole(&p, text.as_bytes()).map_err(|e| (p.clone(), e)))
             .and_then(|()| {
                 OpenOptions::new()
                     .append(true)
                     .open(&p)
-                    .map_err(|e| format!("{}: {e}", p.display()))
+                    .map_err(|e| (p.clone(), e))
             });
         match result {
             Ok(file) => {
@@ -335,26 +379,63 @@ impl SplFiles {
                 f.rows_in_file = rows;
                 // `write_atomic` synced it.
                 f.unsynced = false;
-                self.succeeded();
+                self.succeeded(f);
             }
-            Err(e) => self.failed(&format!("cannot write SPL log: {e}")),
+            Err((path, e)) => self.failed(f, &path, &e),
         }
     }
 
-    fn succeeded(&mut self) {
-        if self.failing {
-            tracing::info!("autosave: SPL logs are written again");
-            self.failing = false;
-        }
-    }
-
-    fn failed(&mut self, what: &str) {
-        if !self.failing {
-            tracing::warn!(
-                "autosave: {what}; retried every {} s",
-                FLUSH_EVERY.as_secs()
+    fn succeeded(&mut self, f: &LogFile) {
+        let key = (f.info.meas, f.kind);
+        if self.failing.remove(&key).is_some() {
+            tracing::info!(
+                "autosave: the {} log of measurement {} is written again",
+                f.kind.name(),
+                key.0.0
             );
-            self.failing = true;
+            self.send(key, None);
+        }
+    }
+
+    fn failed(&mut self, f: &LogFile, path: &Path, e: &io::Error) {
+        let key = (f.info.meas, f.kind);
+        if self.failing.contains_key(&key) {
+            return;
+        }
+        tracing::warn!(
+            "autosave: cannot write the {} log of measurement {} ({}: {e}); retried every {} s",
+            f.kind.name(),
+            key.0.0,
+            path.display(),
+            FLUSH_EVERY.as_secs()
+        );
+        let since = WallNs(crate::util::wall_ns());
+        self.failing.insert(key, since);
+        self.send(
+            key,
+            Some(LogWriteFailure {
+                meas: key.0,
+                log: key.1.wire(),
+                reason: crate::util::io_reason(e),
+                since,
+            }),
+        );
+    }
+
+    /// A log that is gone is no longer failing.
+    fn forget(&mut self, key: (MeasId, Kind)) {
+        if self.failing.remove(&key).is_some() {
+            self.send(key, None);
+        }
+    }
+
+    fn send(&self, (meas, kind): (MeasId, Kind), failure: Option<LogWriteFailure>) {
+        if let Some(to) = &self.report {
+            let _ = to.send(ControlMsg::LogWrite {
+                meas,
+                log: kind.wire(),
+                failure,
+            });
         }
     }
 
@@ -407,13 +488,17 @@ impl SplFiles {
                 f.written = total;
                 f.rows_in_file += rows;
                 f.unsynced = true;
-                self.succeeded();
+                self.succeeded(f);
             }
             Err(e) => {
                 // What reached the file may end in part of a line: the next append
                 // rewrites the file whole.
                 f.file = None;
-                self.failed(&format!("cannot append to SPL log: {e}"));
+                let path = f
+                    .rel
+                    .as_ref()
+                    .map_or_else(PathBuf::new, |r| self.dir.join(r));
+                self.failed(f, &path, &e);
                 return;
             }
         }

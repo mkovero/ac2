@@ -36,6 +36,12 @@ pub fn events() -> Vec<Event> {
                     reason: "No space left on device (os error 28)".into(),
                 },
                 saved_at: Some(WallNs(1_790_000_000_000_000_000)),
+                log_failures: vec![LogWriteFailure {
+                    meas: MeasId(4),
+                    log: MeterLog::Bands,
+                    reason: "disk full".into(),
+                    since: WallNs(1_790_000_030_000_000_000),
+                }],
             }),
         ),
         ev(58, Change::Mic(Patch::Deleted("ECM".into()))),

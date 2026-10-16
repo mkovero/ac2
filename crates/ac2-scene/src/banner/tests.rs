@@ -22,8 +22,33 @@ pub(crate) fn everything() -> Status {
         audio_stopped: None,
         no_delay_estimate: Some(NoDelayEstimate::NotFound),
         math: None,
+        log_not_saved: None,
         drive: Default::default(),
     }
+}
+
+#[test]
+fn a_log_not_saved_is_a_warning_under_the_measurement_warnings() {
+    let log = crate::autosave::LogFailureText {
+        banner: "LOG NOT SAVED · disk full".into(),
+        detail: "SPL log of Main not saved for 12 min: disk full; retried every 30 s".into(),
+    };
+    let b = banners(&Status {
+        log_not_saved: Some(log.clone()),
+        no_delay_estimate: Some(NoDelayEstimate::NotFound),
+        clock_drift_ppm: Some(3.24),
+        ..Status::default()
+    });
+    assert_eq!(
+        texts(&b),
+        [
+            "CLOCK DRIFT · 3.2 ppm",
+            "LOG NOT SAVED · disk full",
+            "NO DELAY ESTIMATE"
+        ]
+    );
+    assert_eq!(b[1].severity, Severity::Warning);
+    assert_eq!(b[1].detail.as_deref(), Some(log.detail.as_str()));
 }
 
 #[test]

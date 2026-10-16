@@ -167,6 +167,7 @@ fn main() -> ExitCode {
             path.display()
         );
     }
+    ac2_paths::log::install_panic_hook("ac2d");
     let backends = match ac2d::backends(args.backend) {
         Ok(b) => b,
         Err(e) => {
@@ -214,6 +215,7 @@ fn main() -> ExitCode {
     });
     let mut config = DaemonConfig::new(Arc::clone(&backends[0]), listen, args.max_level);
     config.backends = backends;
+    config.systemd_notify = true;
     config.advertise = advertise;
     config.cal_store = Some(args.cal_store.clone().unwrap_or_else(ac2_paths::cal_store));
     config.rig_settings = Some(

@@ -460,6 +460,8 @@ pub fn state() -> State {
         autosave: Autosave {
             state: AutosaveState::Saved,
             saved_at: Some(WallNs(1_790_000_000_000_000_000)),
+
+            log_failures: Vec::new(),
         },
         recording: Some(RecordingRun {
             status: RecordingStatus::Recording,

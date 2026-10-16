@@ -154,6 +154,13 @@ pub(crate) enum ControlMsg {
     },
     /// The autosave write finished: the time it was written, or why it failed.
     Autosaved { result: Box<Result<WallNs, String>> },
+    /// An SPL meter's log file failed to be written (`Some`, the first failure of a run), or
+    /// is written again or gone (`None`).
+    LogWrite {
+        meas: MeasId,
+        log: ac2_proto::model::MeterLog,
+        failure: Option<ac2_proto::model::LogWriteFailure>,
+    },
     /// An SPL meter's job judged its Leq windows after a second (configuration
     /// `config_rev`): a judgement changed, the windows changed or the log began.
     Leq {
@@ -231,6 +238,7 @@ pub(crate) struct Setup {
     pub(crate) recording_dir: Option<std::path::PathBuf>,
     /// Local time of day for the band meters' day and night limits.
     pub(crate) local_clock: crate::config::LocalClock,
+    pub(crate) systemd_notify: bool,
 }
 
 impl Setup {
@@ -341,6 +349,9 @@ pub(crate) struct Control {
     pending_finds: HashMap<u64, PendingFind>,
     next_token: u64,
     next_ka: Instant,
+    /// systemd's readiness and watchdog, pinged from this loop's keepalive tick so that a
+    /// stuck loop stops the pings and gets the daemon restarted.
+    notify: ac2_paths::notify::Notifier,
     traces: traces::TraceStore,
     sweep: Option<ActiveSweep>,
     next_sweep: u32,
@@ -436,6 +447,7 @@ impl Control {
             .with_autosave(Autosave {
                 state: status,
                 saved_at: None,
+                log_failures: Vec::new(),
             });
         let dedup = Dedup::new(s.dedup);
         let rigm = rig_meas::RigMeas::new(&saved, s.rig_logs.as_deref());
@@ -465,6 +477,11 @@ impl Control {
             pending_finds: HashMap::new(),
             next_token: 1,
             next_ka: Instant::now(),
+            notify: if s.systemd_notify {
+                ac2_paths::notify::Notifier::from_env()
+            } else {
+                ac2_paths::notify::Notifier::disabled()
+            },
             traces: traces::TraceStore::default(),
             sweep: None,
             next_sweep: 1,
@@ -492,6 +509,11 @@ impl Control {
         self.start_autosave();
         self.start_rig_monitor();
         self.recover_recordings();
+        // The sockets were bound before this thread started; the restore and the rig
+        // monitor's start are done or under way.
+        if let Some(e) = self.notify.ready() {
+            tracing::warn!("systemd notification failed: {e}");
+        }
         loop {
             let now = Instant::now();
             if self
@@ -507,6 +529,9 @@ impl Control {
             if now >= self.next_ka {
                 self.send_ka();
                 self.next_ka = now + self.s.keepalive;
+                if let Some(e) = self.notify.ping(now) {
+                    tracing::warn!("systemd watchdog ping failed: {e}");
+                }
             }
             if self
                 .recovery
@@ -622,6 +647,9 @@ impl Control {
                 Ok(ControlMsg::SweepRecorded { id, result }) => self.sweep_recorded(id, *result),
                 Ok(ControlMsg::SweepAnalysed { id, result }) => self.sweep_analysed(id, *result),
                 Ok(ControlMsg::Autosaved { result }) => self.autosaved(*result),
+                Ok(ControlMsg::LogWrite { meas, log, failure }) => {
+                    self.log_write(meas, log, failure);
+                }
                 Ok(ControlMsg::Leq {
                     meas,
                     epoch,
@@ -660,6 +688,9 @@ impl Control {
 
     fn shutdown(&mut self) {
         tracing::info!("shutting down");
+        if let Some(e) = self.notify.stopping() {
+            tracing::warn!("systemd notification failed: {e}");
+        }
         self.osc_shutdown();
         self.abort_sweep(SweepFailure::Stopped, "the daemon is shutting down");
         self.end_recording(ac2_proto::model::RecordingEnd::DaemonShutdown);

@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 55`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 56`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1411,7 +1411,7 @@ meter: `meas`, `started_at`, `windows`, `peaks`, `alarms`; §3.2), `timing` (`Ti
 WallNs of the newest window; kept after the stimulus stops and for the rest of the session;
 committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `sweep` (`SweepRun` | nil: the latest `sweep.run` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
-nil`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2), `working`
+nil`, `log_failures: [LogWriteFailure]`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2), `working`
 (`WorkingSession`: the working state's session and unsaved changes, §3.2 sessions), `rig`
 (`Rig`: rig settings, OSC and Art-Net sending and cue states, §3.2 *Rig monitor, OSC and Art-Net cues*).
 
@@ -1827,6 +1827,14 @@ state; `saved_at` nil until the first write), `pending` (a change is waiting or 
 written), `failed{reason}` (the last write failed; shown until a write succeeds, retried
 10 s later). `saved_at` is when the autosave on disk was written (after a restore, when the
 restored one was). Status changes are ordinary events, so they bump `rev`.
+
+`log_failures` lists the SPL meters' log files the daemon cannot write at the moment, each
+`{meas: MeasId, log: "spl" | "bands", reason, since: WallNs}`: `reason` is short where the
+remedy is the same whatever the path (`disk full`, `disk quota exceeded`, `read-only file
+system`, `permission denied`), else the file system's message; `since` is the first failed
+write of the run. The Leq history in memory is complete; the log on disk misses the seconds
+since `since` until a write succeeds (retried every 30 s and with each autosave write), when
+the entry goes. An entry also goes with its meter. Each change is an `autosave` event.
 
 ### 7.4 SPL log (CSV)
 

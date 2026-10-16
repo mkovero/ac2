@@ -240,7 +240,7 @@ impl Writer {
         let thread = std::thread::Builder::new()
             .name(name.into())
             .spawn(move || {
-                let mut files = SplFiles::new(dir.clone(), Instant::now());
+                let mut files = SplFiles::new(dir.clone(), Instant::now()).reporting(done.clone());
                 loop {
                     let job = match files.due() {
                         Some(at) => rx.recv_timeout(at.saturating_duration_since(Instant::now())),
@@ -864,6 +864,67 @@ mod tests {
         fs::write(&blocker, b"").expect("file");
         let dir = blocker.join("autosave");
         assert!(write(&dir, &data(1), &[]).is_err());
+    }
+
+    /// A log that cannot be written is reported once, with a short reason and since when;
+    /// written again, it is reported cleared; a meter that goes clears its failure too.
+    #[test]
+    fn a_failing_log_is_reported_and_cleared() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let dir = root.path().join("autosave");
+        fs::create_dir_all(&dir).expect("dir");
+        // A file where the log directory should be.
+        let blocker = dir.join(ac2_traces::session::SPL_DIR);
+        fs::write(&blocker, b"").expect("file");
+        let log: SharedLog = Arc::new(Mutex::new(LeqLog::default()));
+        push(&log, 0, 10);
+        let (tx, rx) = mpsc::channel();
+        let mut files = SplFiles::new(dir.clone(), Instant::now()).reporting(Some(tx));
+        files.apply(vec![spec(&log, None)]);
+        let failure = match rx.try_recv() {
+            Ok(ControlMsg::LogWrite {
+                meas: MeasId(1),
+                log: ac2_proto::model::MeterLog::Spl,
+                failure: Some(f),
+            }) => f,
+            other => panic!("{other:?}"),
+        };
+        assert!(failure.since.0 > T0, "{failure:?}");
+        assert!(!failure.reason.is_empty());
+        // Retries that fail again say nothing new.
+        files.append_all();
+        assert!(rx.try_recv().is_err());
+
+        fs::remove_file(&blocker).expect("unblock");
+        push(&log, 10, 5);
+        files.append_all();
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ControlMsg::LogWrite {
+                meas: MeasId(1),
+                failure: None,
+                ..
+            })
+        ));
+        assert!(files.path_of(MeasId(1)).is_some_and(|p| p.exists()));
+
+        // Failing again, then the meter goes: cleared.
+        fs::remove_dir_all(dir.join(ac2_traces::session::SPL_DIR)).expect("rm");
+        fs::write(&blocker, b"").expect("file");
+        files.apply(vec![]);
+        files.apply(vec![spec(&log, None)]);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ControlMsg::LogWrite {
+                failure: Some(_),
+                ..
+            })
+        ));
+        files.apply(vec![]);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ControlMsg::LogWrite { failure: None, .. })
+        ));
     }
 
     #[test]
