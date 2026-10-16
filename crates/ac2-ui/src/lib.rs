@@ -21,6 +21,7 @@ pub mod acoustic_dialog;
 pub mod anim;
 pub mod app;
 pub mod cal_view;
+pub mod caret;
 pub mod conn;
 pub mod connect;
 pub mod electrical_dialog;

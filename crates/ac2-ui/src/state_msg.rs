@@ -423,6 +423,8 @@ pub enum Msg {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LeqMsg {
     Focus(crate::leq_dialog::Focus),
+    /// A click on a cue line: focused, the caret before its character `usize`.
+    Caret(crate::leq_dialog::Focus, usize),
     /// ‹/› on a choice.
     Cycle(crate::leq_dialog::Focus, i32),
     /// Insert, or the plus at a section's heading: a window in the section of this focus,

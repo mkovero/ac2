@@ -16,6 +16,8 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{Db, DbSpl, MeasId, Rev, Seconds};
 
+use crate::caret::Caret;
+
 mod bands;
 mod cues;
 mod transfer;
@@ -257,6 +259,9 @@ pub struct LeqDialog {
     pub focus: Focus,
     /// The focused text cell's text is selected: typing replaces it.
     pub selected: bool,
+    /// Where typing goes in a focused cue line (a message or DMX levels): those lines run
+    /// long, so they are edited in place rather than replaced.
+    pub caret: Caret,
     /// Why the last Enter was refused.
     pub error: Option<String>,
     /// The last Apply was refused as made on a configuration changed since: the edits stay.
@@ -324,6 +329,7 @@ impl LeqDialog {
             before_preset: None,
             focus: Focus::Preset,
             selected: false,
+            caret: Caret::default(),
             error: None,
             notice: None,
             transfer: None,
@@ -561,7 +567,7 @@ impl LeqDialog {
                 Focus::Band(cells[cell.min(cells.len() - 1)])
             }
         };
-        self.selected = self.on_text();
+        self.entered();
     }
 
     /// ↑ / ↓: the row above or below, keeping the column; wraps.
@@ -610,7 +616,7 @@ impl LeqDialog {
             k if k < 2 + w + x + b => Focus::Band(band[(k - 2 - w - x) as usize]),
             k => tail[(k - 2 - w - x - b) as usize],
         };
-        self.selected = self.on_text();
+        self.entered();
     }
 
     /// Focuses window `row`, column `col` (the mouse).
@@ -733,28 +739,121 @@ impl LeqDialog {
         }
     }
 
-    /// Typed text into the focused limit or margin; replaces a selected text.
-    pub fn type_text(&mut self, s: &str) {
-        let selected = std::mem::take(&mut self.selected);
-        if let Some(t) = self.text_mut() {
-            if selected {
-                t.clear();
-            }
-            t.push_str(s);
-            self.error = None;
+    /// The focus is on a cue line, edited at the caret.
+    pub fn on_caret_text(&self) -> bool {
+        matches!(self.focus, Focus::Cue { col, .. } if col.is_text())
+    }
+
+    /// The focused cue line's text.
+    pub fn caret_text(&self) -> Option<&str> {
+        let Focus::Cue { row, col } = self.focus else {
+            return None;
+        };
+        let c = self.cue_edit(row)?;
+        match col {
+            CueCol::State(s) => Some(c.text_of(s)),
+            CueCol::Dmx(s) => Some(c.dmx_of(s)),
+            CueCol::Append => None,
         }
     }
 
-    /// Deletes the last character, or the selected text.
-    pub fn backspace(&mut self) {
+    /// The focus arrived on a cell: a cue line puts the caret at its end, other text is
+    /// selected (typing replaces it).
+    pub fn entered(&mut self) {
+        if let Some(t) = self.caret_text() {
+            self.caret = Caret::end_of(t);
+            self.selected = false;
+        } else {
+            self.selected = self.on_text();
+        }
+    }
+
+    /// A click on cue line `at`, before its character `n`.
+    pub fn caret_at(&mut self, at: Focus, n: usize) {
+        self.focus = at;
+        self.entered();
+        if let Some(t) = self.caret_text() {
+            self.caret = Caret::at(t, n);
+        }
+    }
+
+    /// Applies `f` to the focused text and the caret, kept apart from `self` meanwhile.
+    fn edit_text(&mut self, f: impl FnOnce(&mut String, &mut Caret, bool)) {
         let selected = std::mem::take(&mut self.selected);
+        let mut c = self.caret;
         if let Some(t) = self.text_mut() {
+            f(t, &mut c, selected);
+            self.error = None;
+        }
+        self.caret = c;
+    }
+
+    /// Typed text into the focused cell: at the caret on a cue line, else replacing a
+    /// selected text or after the text.
+    pub fn type_text(&mut self, s: &str) {
+        let caret = self.on_caret_text();
+        self.edit_text(|t, c, selected| {
             if selected {
                 t.clear();
+                *c = Caret::default();
+            }
+            if caret {
+                c.insert(t, s);
+            } else {
+                t.push_str(s);
+            }
+        });
+    }
+
+    /// Backspace: the character before the caret on a cue line, else the last one; or the
+    /// selected text.
+    pub fn backspace(&mut self) {
+        let caret = self.on_caret_text();
+        self.edit_text(|t, c, selected| {
+            if selected {
+                t.clear();
+                *c = Caret::default();
+            } else if caret {
+                c.backspace(t);
             } else {
                 t.pop();
             }
-            self.error = None;
+        });
+    }
+
+    /// Delete on a cue line: the character after the caret, or the selected text.
+    pub fn delete_char(&mut self) {
+        self.edit_text(|t, c, selected| {
+            if selected {
+                t.clear();
+                *c = Caret::default();
+            } else {
+                c.delete(t);
+            }
+        });
+    }
+
+    /// ←/→ on a cue line: the caret a character left or right.
+    pub fn caret_step(&mut self, d: i32) {
+        self.selected = false;
+        if let Some(t) = self.caret_text() {
+            let mut c = self.caret;
+            c.step(t, d);
+            self.caret = c;
+        }
+    }
+
+    /// Home / End on a cue line.
+    pub fn caret_edge(&mut self, end: bool) {
+        self.selected = false;
+        if let Some(t) = self.caret_text() {
+            let mut c = self.caret;
+            if end {
+                c.end(t);
+            } else {
+                c.home();
+            }
+            self.caret = c;
         }
     }
 
@@ -863,7 +962,7 @@ impl LeqDialog {
         }
         if let Focus::Band(BandFocus::Window { row, col }) = self.focus {
             self.focus = Focus::Band(self.bands.remove_window(row, col));
-            self.selected = self.on_text();
+            self.entered();
             self.error = None;
             return;
         }

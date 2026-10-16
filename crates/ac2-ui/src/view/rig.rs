@@ -73,28 +73,13 @@ pub(super) fn rig_page(
                         RigRow::Universe => &p.universe,
                         _ => &p.dmx_test,
                     };
-                    let sel = focused && p.selected && !text.is_empty();
-                    let shown = if sel {
-                        text.clone()
-                    } else if focused {
-                        format!("{text}▏")
-                    } else if text.is_empty() {
-                        "off".to_owned()
-                    } else {
-                        text.clone()
-                    };
-                    let mut t = RichText::new(shown).monospace();
-                    t = if sel {
-                        t.color(ch.panel).background_color(ch.focus)
-                    } else {
-                        t.color(ch.text)
-                    };
-                    let r = ui.add_sized([220.0, 20.0], egui::Button::selectable(focused, t));
+                    let caret = focused.then_some(p.caret);
+                    let (r, click) = super::leq::caret_cell(ui, 220.0, text, caret, "off", ch);
                     if focused {
                         super::settings::reveal_focused(&r);
                     }
-                    if r.clicked() {
-                        *msg = Some(Msg::Settings(SettingsMsg::RigFocus(row)));
+                    if let Some(n) = click {
+                        *msg = Some(Msg::Settings(SettingsMsg::RigCaret(row, n)));
                     }
                     let action = match row {
                         RigRow::Test | RigRow::DmxTest => "Send",

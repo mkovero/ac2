@@ -129,9 +129,10 @@ impl Page {
                 let range = crate::keys::Chord::shift(eframe::egui::Key::Insert).label_in(style);
                 return format!(
                     "Enter applies (the log and the windows carry on) · ↑↓ row · Tab cell · ←→ \
-                     choose · Insert or + adds a window to the section · {range} or + range… a \
-                     band window per band from … to · Delete or − removes the focused one · T on \
-                     a band row: band transfer · Esc closes"
+                     choose · in a cue line ←→ Home End move the caret, Delete deletes at it · \
+                     Insert or + adds a window to the section · {range} or + range… a band \
+                     window per band from … to · Delete or − removes the focused one · T on a \
+                     band row: band transfer · Esc closes"
                 );
             }
             Page::Recording => "↑↓ move · type minutes, Enter applies · Esc closes",
@@ -141,8 +142,9 @@ impl Page {
                  Delete revokes a client (twice) · Esc closes"
             }
             Page::Rig => {
-                "↑↓ move · type a target or a test · Enter applies the target, sends the \
-                 test · ←→ or Enter on Monitor at start · Esc closes"
+                "↑↓ Tab move · type a target or a test, ←→ Home End move the caret, Delete \
+                 deletes at it · Enter applies the target, sends the test · ←→ or Enter on \
+                 Monitor at start · Esc closes"
             }
         };
         text.to_owned()

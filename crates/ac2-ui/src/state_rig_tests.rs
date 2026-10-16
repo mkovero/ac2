@@ -370,9 +370,17 @@ fn the_rig_page_sends_the_artnet_target_on_the_rev_it_shows() {
         rig_page(&t).error.as_deref(),
         Some("\"0.16.0\": net is 0–127, sub-net 0–15, universe 0–15")
     );
-    // Enter left the text selected: the next key replaces it.
-    assert!(rig_page(&t).selected);
-    t.text("0.0.1");
+    // The caret stays where it was: edited in place, the "16" becomes "0" and the last 0
+    // a 1.
+    t.key("ArrowLeft");
+    t.key("ArrowLeft");
+    t.st.update(Msg::Backspace, &t.keys);
+    t.st.update(Msg::Backspace, &t.keys);
+    t.text("0");
+    t.key("End");
+    t.st.update(Msg::Backspace, &t.keys);
+    t.text("1");
+    assert_eq!(rig_page(&t).universe, "0.0.1");
     let r = t.key("Enter");
     let (cmd, what) = call(&r).expect("artnet.target");
     assert_eq!(
@@ -398,7 +406,9 @@ fn the_rig_page_sends_the_artnet_target_on_the_rev_it_shows() {
     );
     // Emptied: off, whatever the universe says.
     focus(&mut t, RigRow::ArtnetTarget);
-    t.st.update(Msg::Backspace, &t.keys);
+    for _ in 0.."2.255.255.255:6454".len() {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
     let r = t.key("Enter");
     assert_eq!(
         call(&r),
@@ -438,7 +448,9 @@ fn the_rig_page_sends_a_dmx_test() {
     };
     assert_eq!(ac2_proto::model::dmx_list_text(channels), "1=255");
     assert_eq!(what, "DMX test 1=255 sent");
-    t.text("1=255 2=300");
+    // The caret at the end of the levels: typing adds to them.
+    t.text(" 2=300");
+    assert_eq!(rig_page(&t).dmx_test, "1=255 2=300");
     assert!(call(&t.key("Enter")).is_none());
     assert_eq!(
         rig_page(&t).error.as_deref(),
@@ -624,4 +636,60 @@ fn a_meter_with_a_cue_opens_its_cues_shown() {
     let d = t.st.overlay.leq().expect("open");
     assert!(d.cues_shown);
     assert_eq!(d.cue_fold_text(), "shown · no message set · DMX in 1 state");
+}
+
+/// A cue's DMX line is edited in place: ←/→ move the caret, Backspace and Delete remove at
+/// it, typing inserts at it, Home/End go to the ends; coming back to the line puts the
+/// caret at its end and the first key adds to it. The edited line goes out in
+/// `meas.update`.
+#[test]
+fn a_dmx_cue_line_is_edited_at_its_caret() {
+    use crate::caret::Shown;
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    t.type_key("Shift+L", "L");
+    t.st.update(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
+    t.key("ArrowRight");
+    t.key("ArrowDown");
+    t.key("ArrowDown");
+    let over = Focus::Cue {
+        row: CueRow::Meter,
+        col: CueCol::Dmx(CueState::Over),
+    };
+    assert_eq!(t.st.overlay.leq().expect("open").focus, over);
+    t.text("12=255 13=0 14=40");
+    let shown = |t: &T| {
+        let d = t.st.overlay.leq().expect("open");
+        Shown::new(d.caret_text().expect("a cue line"), d.caret, 40).text
+    };
+    assert_eq!(shown(&t), "12=255 13=0 14=40▏");
+    for _ in 0.." 14=40".len() {
+        t.key("ArrowLeft");
+    }
+    assert_eq!(shown(&t), "12=255 13=0▏ 14=40");
+    t.st.update(Msg::Backspace, &t.keys);
+    t.text("128");
+    assert_eq!(shown(&t), "12=255 13=128▏ 14=40");
+    t.key("Home");
+    t.key("Delete");
+    t.text("1");
+    assert_eq!(shown(&t), "1▏2=255 13=128 14=40");
+    // Away and back: the caret at the end, the line kept, the first key adds to it.
+    t.key("Tab");
+    t.key("Shift+Tab");
+    assert_eq!(t.st.overlay.leq().expect("open").focus, over);
+    assert_eq!(shown(&t), "12=255 13=128 14=40▏");
+    t.text(" 15=9");
+    let r = t.key("Enter");
+    let Some((Command::MeasUpdate { config, .. }, _)) = call(&r) else {
+        panic!("{r:?}")
+    };
+    let MeasKind::Spl { config } = &config.kind else {
+        panic!()
+    };
+    let cue = config.cue.as_ref().expect("meter cue");
+    assert_eq!(
+        ac2_proto::model::dmx_list_text(&cue.over.as_ref().expect("over").dmx),
+        "12=255 13=128 14=40 15=9"
+    );
 }

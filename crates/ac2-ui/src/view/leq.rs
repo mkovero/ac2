@@ -6,6 +6,7 @@
 use eframe::egui::{self, RichText};
 
 use crate::app::App;
+use crate::caret::{Caret, Shown};
 use crate::leq_dialog::{
     BandCol, BandField, BandFocus, Col, CueCol, Extra, Focus, LeqDialog, RangeCol,
 };
@@ -131,6 +132,61 @@ fn sized_text_cell(
     if r.clicked() {
         *msg = Some(LeqMsg::Focus(at));
     }
+}
+
+/// A typed line edited at its caret (`Some` while focused), `width` px wide: a line too
+/// long for it shows a window around the caret, cut with `…`. Returns the cell and, on a
+/// click, the character of the line the click landed before.
+pub(super) fn caret_cell(
+    ui: &mut egui::Ui,
+    width: f32,
+    text: &str,
+    caret: Option<Caret>,
+    empty: &str,
+    ch: &Chrome,
+) -> (egui::Response, Option<usize>) {
+    let font = egui::TextStyle::Monospace.resolve(ui.style());
+    let glyph = ui.fonts_mut(|f| f.glyph_width(&font, '0')).max(1.0);
+    let cols = ((width - 2.0 * ui.spacing().button_padding.x) / glyph).floor() as usize;
+    let shown = caret.map(|c| Shown::new(text, c, cols));
+    let label = match &shown {
+        Some(s) => s.text.clone(),
+        None if text.is_empty() => empty.to_owned(),
+        None if text.chars().count() > cols.max(2) => {
+            let mut t: String = text.chars().take(cols.max(2) - 1).collect();
+            t.push('…');
+            t
+        }
+        None => text.to_owned(),
+    };
+    let color = if text.is_empty() && caret.is_none() {
+        ch.dim
+    } else {
+        ch.text
+    };
+    let r = ui.add_sized(
+        [width, 20.0],
+        egui::Button::selectable(
+            caret.is_some(),
+            RichText::new(&label).monospace().color(color),
+        ),
+    );
+    let mut at = None;
+    if r.clicked()
+        && let Some(p) = r.interact_pointer_pos()
+    {
+        let galley =
+            ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), font.clone(), egui::Color32::WHITE));
+        // The button centres its text.
+        let left = r.rect.center().x - galley.size().x / 2.0;
+        let col = galley.cursor_from_pos(egui::vec2(p.x - left, 0.0)).index.0;
+        at = Some(match (&shown, caret) {
+            (Some(s), Some(c)) => s.index_at(col, c.index(text)),
+            _ if text.is_empty() => 0,
+            _ => col,
+        });
+    }
+    (r, at)
 }
 
 /// The SPL / Leq page: the Leq windows and limits of the SPL pane's meter.
@@ -388,17 +444,7 @@ fn rig_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: &
                     let at = Focus::Cue { row, col };
                     let f = d.focus == at;
                     match col {
-                        CueCol::State(s) => sized_text_cell(
-                            ui,
-                            130.0,
-                            c.text_of(s),
-                            f,
-                            d.selected,
-                            "—",
-                            at,
-                            msg,
-                            ch,
-                        ),
+                        CueCol::State(s) => cue_line(ui, d, c.text_of(s), at, msg, ch),
                         CueCol::Append => {
                             toggle(ui, osc::append_text(c.append), c.append, f, at, msg, ch);
                         }
@@ -410,17 +456,7 @@ fn rig_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: &
                 for col in CueCol::DMX {
                     let CueCol::Dmx(s) = col else { continue };
                     let at = Focus::Cue { row, col };
-                    sized_text_cell(
-                        ui,
-                        130.0,
-                        c.dmx_of(s),
-                        d.focus == at,
-                        d.selected,
-                        "—",
-                        at,
-                        msg,
-                        ch,
-                    );
+                    cue_line(ui, d, c.dmx_of(s), at, msg, ch);
                 }
                 ui.end_row();
                 if let Some((col, e)) = error {
@@ -637,5 +673,34 @@ pub(super) fn new_log(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         });
     if let Some(m) = msg {
         app.dispatch(Msg::NewLog(m));
+    }
+}
+
+/// A cue line's cell (a message or DMX levels): edited at the caret while focused.
+fn cue_line(
+    ui: &mut egui::Ui,
+    d: &LeqDialog,
+    text: &str,
+    at: Focus,
+    msg: &mut Option<LeqMsg>,
+    ch: &Chrome,
+) {
+    let f = d.focus == at;
+    let caret = (f && !d.selected).then_some(d.caret);
+    let (r, click) = caret_cell(ui, 130.0, text, caret, "—", ch);
+    if f && d.selected && !text.is_empty() {
+        // Ctrl+A: the line selected, as other cells show it.
+        ui.painter().rect_stroke(
+            r.rect,
+            2.0,
+            egui::Stroke::new(1.0, ch.focus),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if f {
+        super::settings::reveal_focused(&r);
+    }
+    if let Some(n) = click {
+        *msg = Some(LeqMsg::Caret(at, n));
     }
 }

@@ -4,6 +4,7 @@
 //! how sending fares, and the meters the rig keeps. Every edit names the rig settings' rev
 //! the page showed, so a change another client made first is refused, not overwritten.
 
+use crate::caret::Caret;
 use ac2_proto::Command;
 use ac2_proto::model::Rig;
 use ac2_proto::units::Rev;
@@ -79,8 +80,8 @@ pub struct RigPage {
     pub edited: bool,
     /// The Art-Net target was typed since the rig's was shown: a mirror change leaves it.
     pub artnet_edited: bool,
-    /// The focused text is selected: typing replaces it.
-    pub selected: bool,
+    /// Where typing goes in the focused text: at its end when the row is entered.
+    pub caret: Caret,
     /// Why the last Enter on the focused row was refused (shown under it).
     pub error: Option<String>,
     /// The target sent by the last Enter, with what its call is named.
@@ -101,7 +102,7 @@ impl Default for RigPage {
             rev: Rev(0),
             edited: false,
             artnet_edited: false,
-            selected: true,
+            caret: Caret::default(),
             error: None,
             sent: None,
             notice: None,
@@ -126,29 +127,31 @@ impl RigPage {
         self.rev = rig.rev;
         self.edited = false;
         self.artnet_edited = false;
-        self.selected = self.focus.is_text();
+        self.caret_to_end();
         self.notice = None;
     }
 
     /// The mirror changed: the page follows the rig except for a target the operator is
     /// typing; a target kept after a conflict is made on the rig's newest settings. The
-    /// focus, the selection and the test texts stay: the mirror changes every second while
-    /// the rig meters, and selecting the focused text again would make the next key replace
-    /// what was typed. Only a new target from the rig selects it again, so typing replaces
-    /// it.
+    /// focus, the caret and the test texts stay: the mirror changes every second while the
+    /// rig meters. Only a new target from the rig moves the caret, to its end.
     pub fn follow(&mut self, rig: &Rig) {
         if !self.edited {
             let target = target_text(rig.osc_target);
             if target != self.target {
                 self.target = target;
-                self.selected |= self.focus == RigRow::Target;
+                if self.focus == RigRow::Target {
+                    self.caret_to_end();
+                }
             }
         }
         if !self.artnet_edited {
             let (a, u) = artnet::target_texts(rig.artnet_target);
             if (&a, &u) != (&self.artnet, &self.universe) {
                 (self.artnet, self.universe) = (a, u);
-                self.selected |= self.focus.is_artnet();
+                if self.focus.is_artnet() {
+                    self.caret_to_end();
+                }
             }
         }
         if !self.edited && !self.artnet_edited {
@@ -178,7 +181,7 @@ impl RigPage {
             }
         }
         self.rev = rig.rev;
-        self.selected = false;
+        self.caret_to_end();
         self.notice = Some(ac2_scene::osc::CHANGED_ELSEWHERE_ENTER.to_owned());
         true
     }
@@ -203,7 +206,7 @@ impl RigPage {
             self.error = None;
         }
         self.focus = row;
-        self.selected = row.is_text();
+        self.caret_to_end();
     }
 
     fn text_mut(&mut self) -> Option<&mut String> {
@@ -226,27 +229,75 @@ impl RigPage {
         }
     }
 
-    pub fn type_text(&mut self, s: &str) {
-        let selected = std::mem::take(&mut self.selected);
-        if let Some(t) = self.text_mut() {
-            if selected {
-                t.clear();
-            }
-            t.push_str(s);
+    /// The focused row's text.
+    fn text(&self) -> Option<&str> {
+        match self.focus {
+            RigRow::Target => Some(&self.target),
+            RigRow::Test => Some(&self.test),
+            RigRow::ArtnetTarget => Some(&self.artnet),
+            RigRow::Universe => Some(&self.universe),
+            RigRow::DmxTest => Some(&self.dmx_test),
+            RigRow::Monitor => None,
         }
+    }
+
+    fn caret_to_end(&mut self) {
+        self.caret = Caret::end_of(self.text().unwrap_or(""));
+    }
+
+    /// Applies `f` to the focused text and the caret, kept apart from `self` meanwhile.
+    fn edit_text(&mut self, f: impl FnOnce(&mut String, &mut Caret)) {
+        let mut c = self.caret;
+        if let Some(t) = self.text_mut() {
+            f(t, &mut c);
+        }
+        self.caret = c;
         self.error = None;
     }
 
+    /// Typed text, at the caret.
+    pub fn type_text(&mut self, s: &str) {
+        self.edit_text(|t, c| c.insert(t, s));
+    }
+
+    /// Backspace: the character before the caret.
     pub fn backspace(&mut self) {
-        let selected = std::mem::take(&mut self.selected);
-        if let Some(t) = self.text_mut() {
-            if selected {
-                t.clear();
+        self.edit_text(|t, c| c.backspace(t));
+    }
+
+    /// Delete: the character after the caret.
+    pub fn delete_char(&mut self) {
+        self.edit_text(|t, c| c.delete(t));
+    }
+
+    /// ←/→: the caret a character left or right.
+    pub fn caret_step(&mut self, d: i32) {
+        let mut c = self.caret;
+        if let Some(t) = self.text() {
+            c.step(t, d);
+        }
+        self.caret = c;
+    }
+
+    /// Home / End.
+    pub fn caret_edge(&mut self, end: bool) {
+        let mut c = self.caret;
+        if let Some(t) = self.text() {
+            if end {
+                c.end(t);
             } else {
-                t.pop();
+                c.home();
             }
         }
-        self.error = None;
+        self.caret = c;
+    }
+
+    /// A click on `row`'s text, before its character `n`.
+    pub fn caret_at(&mut self, row: RigRow, n: usize) {
+        self.focus_row(row);
+        if let Some(t) = self.text() {
+            self.caret = Caret::at(t, n);
+        }
     }
 
     /// Monitor at start set to `on`: the command, or nothing when it already is.

@@ -34,6 +34,9 @@ pub enum SettingsMsg {
     Connection(usize),
     /// A row of the Rig monitor page focused.
     RigFocus(RigRow),
+    /// A click on a text row of the Rig monitor page: focused, the caret before its
+    /// character `usize`.
+    RigCaret(RigRow, usize),
     /// A row of the Rig monitor page acted on (Enter).
     RigApply(RigRow),
     /// Monitor at start set.
@@ -240,6 +243,11 @@ impl AppState {
             Key::Enter => self.rig_apply(focus, out),
             Key::ArrowLeft if focus == RigRow::Monitor => self.rig_monitor(false, out),
             Key::ArrowRight if focus == RigRow::Monitor => self.rig_monitor(true, out),
+            Key::ArrowLeft => s.rig.caret_step(-1),
+            Key::ArrowRight => s.rig.caret_step(1),
+            Key::Home => s.rig.caret_edge(false),
+            Key::End => s.rig.caret_edge(true),
+            Key::Delete => s.rig.delete_char(),
             _ => self.swallow_text = swallow,
         }
     }
@@ -332,6 +340,12 @@ impl AppState {
             Key::ArrowDown => d.move_row(1),
             Key::Tab if chord.shift => d.move_cell(-1),
             Key::Tab => d.move_cell(1),
+            // A cue line is edited in place: ←/→, Home/End and Delete work on its text.
+            Key::ArrowLeft if d.on_caret_text() => d.caret_step(-1),
+            Key::ArrowRight if d.on_caret_text() => d.caret_step(1),
+            Key::Home if d.on_caret_text() => d.caret_edge(false),
+            Key::End if d.on_caret_text() => d.caret_edge(true),
+            Key::Delete if d.on_caret_text() => d.delete_char(),
             Key::ArrowLeft => d.cycle(-1),
             Key::ArrowRight => d.cycle(1),
             Key::Insert if chord.shift => d.open_range(),
@@ -770,6 +784,11 @@ impl AppState {
             SettingsMsg::RigFocus(row) => {
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.rig.focus_row(row);
+                }
+            }
+            SettingsMsg::RigCaret(row, n) => {
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    s.rig.caret_at(row, n);
                 }
             }
             SettingsMsg::RigApply(row) => self.rig_apply(row, out),

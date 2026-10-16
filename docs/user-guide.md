@@ -2186,7 +2186,9 @@ survives restarts and no client has to stay connected; send a test message to ch
 receiver before the show. A message may carry the measured level (dB SPL) as its last float
 argument (`--append-level`; the **+ dB SPL** toggle of a cue row on the SPL / Leq page): every
 OSC message of that cue gets it except fault's, which has no level to send; DMX levels never
-do.
+do. On the SPL / Leq page and the Rig monitor page a typed line is edited in place: the
+caret starts at its end, **←/→** and **Home/End** move it (or a click), **Backspace** and
+**Delete** remove at it; **Tab** moves to the next cell, **↑/↓** to the next row.
 
 The meter's own cue shows the worst of its limits, `over` first, then `fault`, `near`, `ok`:
 an overload always lights, even while another limit cannot be judged. That is the cue for a

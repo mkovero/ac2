@@ -133,8 +133,9 @@ impl AppState {
         match m {
             LeqMsg::Focus(f) => {
                 d.focus = f;
-                d.select_all();
+                d.entered();
             }
+            LeqMsg::Caret(f, n) => d.caret_at(f, n),
             LeqMsg::Cycle(f, step) => {
                 d.focus = f;
                 d.cycle(step);

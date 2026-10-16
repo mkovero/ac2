@@ -113,7 +113,10 @@ fn the_rig_page_types_through_mirror_updates() {
     t.key("ArrowDown");
     t.key("ArrowDown");
     assert_eq!(settings(&t).rig.focus, RigRow::Test);
-    // The default message is selected: the first key replaces it, the rest append.
+    // The caret at the end of the default message: Backspace empties it, keys append.
+    for _ in 0..settings(&t).rig.test.chars().count() {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
     for (n, c) in "/fx/go 3".chars().enumerate() {
         t.text(&c.to_string());
         update_holds(&mut t, &mut s, n as u64 + 1);
@@ -134,11 +137,16 @@ fn the_rig_page_types_through_mirror_updates() {
     };
     assert_eq!(msg.path.as_str(), "/fx/go");
     assert!(what.contains("/fx/go 4"), "{what}");
-    // The target: the rig's is selected, typed over key by key through updates.
+    // The target: the rig's, edited in place key by key through updates (Home, then
+    // Delete the old one away).
     t.key("ArrowUp");
     t.key("ArrowUp");
     assert_eq!(settings(&t).rig.focus, RigRow::Target);
     assert_eq!(settings(&t).rig.target, "10.0.0.9:9000");
+    t.key("Home");
+    for _ in 0.."10.0.0.9:9000".len() {
+        t.key("Delete");
+    }
     for (n, c) in "10.0.0.5:9001".chars().enumerate() {
         t.text(&c.to_string());
         update_holds(&mut t, &mut s, n as u64 + 30);
@@ -171,7 +179,10 @@ fn the_rig_page_types_artnet_through_mirror_updates() {
         (RigRow::DmxTest, "12=255 13=40"),
     ] {
         t.st.update(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
-        // The rig's text is selected: the first key replaces it.
+        // The rig's text with the caret at its end: emptied, then typed key by key.
+        for _ in 0..64 {
+            t.st.update(Msg::Backspace, &t.keys);
+        }
         for c in typed.chars() {
             t.text(&c.to_string());
             update_holds(&mut t, &mut s, n);
