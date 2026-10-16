@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use ac2_proto::model::*;
+use ac2_proto::units::MeasId;
 use ac2_proto::{Command, ReplyBody};
 use ac2d::{AutosaveConfig, Daemon, Handle, Listen, NetworkSecurity};
 use common::*;
@@ -108,6 +109,10 @@ fn seed(dir: &Path) {
 
 /// The restored session is disarmed: opened again, every meter started, a second of audio.
 fn meter_on(c: &mut Client, backend: &ac2_audio::FakeBackend) {
+    meter_for(c, backend, 1.0);
+}
+
+fn meter_for(c: &mut Client, backend: &ac2_audio::FakeBackend, seconds: f64) {
     c.ok(Command::SessionOpen {
         config: session(false),
     });
@@ -117,7 +122,7 @@ fn meter_on(c: &mut Client, backend: &ac2_audio::FakeBackend) {
         }
     }
     let mut d = driver(backend);
-    run(&mut d, 1.0);
+    run(&mut d, seconds);
     assert!(state(c).measurements.iter().all(|m| m.running));
 }
 
@@ -178,61 +183,182 @@ fn log_files(dir: &Path) -> (PathBuf, PathBuf) {
     (a.join(&l.file), a.join(l.bands.as_ref().unwrap()))
 }
 
-/// A torn, empty or garbage SPL log or band log costs only itself: the meter is restored,
-/// meters on into a new log, and the file is moved out of the autosave.
+/// Ways a power cut leaves a whole log unreadable (its header gone).
+fn header_damages() -> Vec<(&'static str, Vec<u8>)> {
+    vec![
+        ("zero-length", Vec::new()),
+        ("NUL blocks", vec![0; 4096]),
+        ("garbage", b"\xff\xfe not this file at all \x01".to_vec()),
+    ]
+}
+
+/// An SPL log or band log whose header is gone (empty, zeros, garbage) costs only itself:
+/// the meter is restored, meters on into a new log, and the file is moved out of the
+/// autosave.
 #[test]
-fn a_damaged_log_costs_only_itself() {
+fn a_log_without_its_header_costs_only_itself() {
     let root = tempfile::tempdir().unwrap();
     let seeded = root.path().join("seed");
     seed(&seeded);
-    let (spl0, bands0) = log_files(&seeded);
-    let (spl_good, bands_good) = (
-        std::fs::read(&spl0).unwrap(),
-        std::fs::read(&bands0).unwrap(),
-    );
-    for (i, (what, spl_bad)) in damages(&spl_good).into_iter().enumerate() {
-        let dir = root.path().join(format!("run{i}"));
-        copy_tree(&seeded, &dir);
-        let (spl, bands) = log_files(&dir);
-        std::fs::write(&spl, &spl_bad).unwrap();
-        let (h, backend) = start("power-cut-log", &dir);
-        let (mut c, _sub) = connect(&h, &[b"evt"]);
-        assert_eq!(names(&mut c), ["bands", "stage left"], "{what}");
-        let d = damaged(&mut c);
-        // A torn tail is not damage: the rows before the cut are read.
-        if what == "torn" && d.is_empty() {
+    for (i, (what, bad)) in header_damages().into_iter().enumerate() {
+        for band in [false, true] {
+            let dir = root.path().join(format!("run{i}-{band}"));
+            copy_tree(&seeded, &dir);
+            let (spl, bands) = log_files(&dir);
+            let f = if band { &bands } else { &spl };
+            std::fs::write(f, &bad).unwrap();
+            let (h, backend) = start("power-cut-log", &dir);
+            let (mut c, _sub) = connect(&h, &[b"evt"]);
+            assert_eq!(names(&mut c), ["bands", "stage left"], "{what}");
+            let d = damaged(&mut c);
+            let want = if band {
+                StateFile::BandLog
+            } else {
+                StateFile::SplLog
+            };
+            assert_eq!(kinds(&d), [want], "{what}: {d:?}");
+            assert!(d[0].set_aside_as.is_some(), "{what}");
+            meter_on(&mut c, &backend);
             drop(c);
             h.shutdown();
-            continue;
         }
-        assert_eq!(kinds(&d), [StateFile::SplLog], "{what}: {d:?}");
-        assert!(d[0].set_aside_as.is_some(), "{what}");
-        assert!(
-            !spl.exists() || std::fs::read(&spl).unwrap() != spl_bad,
-            "{what}"
-        );
-        meter_on(&mut c, &backend);
-        drop(c);
-        h.shutdown();
-        let _ = bands;
     }
-    for (i, (what, bad)) in damages(&bands_good).into_iter().enumerate() {
-        let dir = root.path().join(format!("bands{i}"));
-        copy_tree(&seeded, &dir);
-        let (_, bands) = log_files(&dir);
-        std::fs::write(&bands, &bad).unwrap();
-        let (h, _backend) = start("power-cut-bands", &dir);
-        let (mut c, _sub) = connect(&h, &[b"evt"]);
-        assert_eq!(names(&mut c), ["bands", "stage left"], "{what}");
-        let d = damaged(&mut c);
-        if what == "torn" && d.is_empty() {
-            drop(c);
-            h.shutdown();
-            continue;
+}
+
+/// The rows of a session meter's SPL log and band log on disk, and the files' bytes.
+fn read_logs(dir: &Path) -> (usize, usize, Vec<u8>, Vec<u8>) {
+    let (spl, bands) = log_files(dir);
+    let (s, b) = (std::fs::read(spl).unwrap(), std::fs::read(bands).unwrap());
+    let sr = ac2_proto::spl_log::import_csv(&s).unwrap().rows.len();
+    let br = ac2_traces::band_log::import_csv(&b).unwrap().rows.len();
+    (sr, br, s, b)
+}
+
+/// Cuts `p` inside its last row (`frac` of the way in) and, with `zeros`, extends it with
+/// zero blocks as a file system that committed the length before the data does. Returns
+/// the rows left whole.
+fn cut_last_row(p: &Path, frac: f64, zeros: bool) -> usize {
+    let mut b = std::fs::read(p).unwrap();
+    let whole = ac2_traces::band_log::import_csv(&b)
+        .map(|r| r.rows.len())
+        .or_else(|_| ac2_proto::spl_log::import_csv(&b).map(|r| r.rows.len()))
+        .unwrap();
+    let last = b[..b.len() - 1].iter().rposition(|&c| c == b'\n').unwrap() + 1;
+    let row = b.len() - last;
+    let keep = last + 1 + ((row - 2) as f64 * frac) as usize;
+    b.truncate(keep);
+    if zeros {
+        b.extend([0u8; 4096]);
+        b.push(b'\n');
+        b.extend([0u8; 1024]);
+    }
+    std::fs::write(p, b).unwrap();
+    whole - 1
+}
+
+/// The rig meter's SPL log file.
+fn rig_log_file(dir: &Path) -> PathBuf {
+    let d = dir.join("rig-logs");
+    let m = ac2_traces::session::read_manifest(&d).unwrap();
+    d.join(&m.spl_logs[0].file)
+}
+
+fn no_damaged_files(dir: &Path) {
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        assert!(!n.contains(".damaged"), "{}", e.path().display());
+        if e.file_type().unwrap().is_dir() {
+            no_damaged_files(&e.path());
         }
-        assert_eq!(kinds(&d), [StateFile::BandLog], "{what}: {d:?}");
+    }
+}
+
+fn log_total(c: &mut Client, meas: MeasId) -> u64 {
+    match c.ok(Command::SplLogGet {
+        meas,
+        log: SplLogWhich::Current,
+        from: 0,
+        max: 1000,
+    }) {
+        ReplyBody::SplLogPage(p) => p.total,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The nightly case, ten nights over: the log is cut inside its last row (mid-number,
+/// mid-field), alone or followed by kilobytes of zeros. Every whole row before the cut is
+/// read back into the meter's history, nothing is reported damaged or set aside, the tail
+/// is cut off before the next append, and the rows only grow.
+#[test]
+fn slow_torn_and_zero_filled_tails_keep_every_whole_row() {
+    nights(10);
+}
+
+/// [`slow_torn_and_zero_filled_tails_keep_every_whole_row`] for one torn and one
+/// zero-filled night, in the quick tier.
+#[test]
+fn a_torn_and_a_zero_filled_tail_keep_every_whole_row() {
+    nights(2);
+}
+
+fn nights(n: usize) {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("rig");
+    seed(&dir);
+    let mut prev = 0;
+    for night in 0..n {
+        let (spl, bands) = log_files(&dir);
+        let frac = [0.05, 0.5, 0.95, 0.3, 0.7][night % 5];
+        let zeros = night % 2 == 1;
+        let want = cut_last_row(&spl, frac, zeros);
+        let want_bands = cut_last_row(&bands, 1.0 - frac, !zeros);
+        let rig_log = rig_log_file(&dir);
+        let want_rig = cut_last_row(&rig_log, frac, !zeros);
+        assert!(
+            want > prev || night == 0,
+            "night {night}: {want} after {prev}"
+        );
+        prev = want;
+
+        let (h, backend) = start("power-cut-night", &dir);
+        let (mut c, _sub) = connect(&h, &[b"evt"]);
+        let st = state(&mut c);
+        assert!(
+            st.rig.damaged_files.is_empty(),
+            "night {night}: {:?}",
+            st.rig.damaged_files
+        );
+        let meter = st
+            .measurements
+            .iter()
+            .find(|m| m.config.name == "bands")
+            .unwrap()
+            .id;
+        assert_eq!(log_total(&mut c, meter), want as u64, "night {night}");
+        // A day of metering: rows appended after the cut.
+        meter_for(&mut c, &backend, 3.0);
         drop(c);
         h.shutdown();
+
+        let (rows, band_rows, s, b) = read_logs(&dir);
+        assert!(rows > want, "night {night}: {rows} rows after {want}");
+        assert!(
+            band_rows > want_bands,
+            "night {night}: {band_rows} band rows"
+        );
+        assert!(
+            !s.contains(&0) && !b.contains(&0),
+            "night {night}: zeros left in a log"
+        );
+        assert_eq!(s.last(), Some(&b'\n'));
+        let r = std::fs::read(rig_log_file(&dir)).unwrap();
+        let rig_rows = ac2_proto::spl_log::import_csv(&r).unwrap().rows.len();
+        assert!(
+            rig_rows > want_rig,
+            "night {night}: rig log {rig_rows} after {want_rig}"
+        );
+        assert!(!r.contains(&0), "night {night}: zeros left in the rig log");
+        no_damaged_files(root.path());
     }
 }
 

@@ -169,87 +169,83 @@ pub fn export_csv(info: &SplLogInfo, rows: &[BandLogRow]) -> String {
 pub struct BandLogRead {
     /// Rows, oldest first.
     pub rows: Vec<BandLogRow>,
-    /// Bytes up to the end of the last whole line: where an append carries on.
+    /// Bytes up to the end of the last whole row: where an append carries on.
     pub complete_len: usize,
+    /// Bytes after it (a torn row, zeros, garbage), cut off before the next append.
+    pub tail: usize,
 }
 
-/// Reads rows back (the header lines are checked, not returned); an unterminated last line
-/// is neither a row nor an error, as for [`ac2_proto::spl_log::import_csv`].
+/// Reads rows back (the header lines are checked, not returned). A log grows a line at a
+/// time and a power cut keeps an unpredictable part of the last appends: a torn last row,
+/// zeros a file system extended the file with (possibly after a torn row, possibly with
+/// newlines among them), bytes that are not text. The rows before the first such line are
+/// the log; that line and everything after it are the tail, cut off
+/// before the next append ([`BandLogRead::complete_len`]). Only a log whose header lines are
+/// unreadable is an error.
 pub fn import_csv(bytes: &[u8]) -> Result<BandLogRead, SplLogError> {
-    let complete_len = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-    let text = std::str::from_utf8(&bytes[..complete_len]).map_err(|_| SplLogError::Header)?;
-    let mut lines = text.lines().enumerate();
-    match lines.next() {
-        Some((_, l)) if l.trim_end() == HEADER_LINE => {}
-        _ => return Err(SplLogError::Header),
-    }
+    let whole = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
     let cols = columns();
     let mut rows = Vec::new();
+    let mut header = false;
     let mut seen_columns = false;
-    for (i, l) in lines {
+    let mut complete_len = 0;
+    let mut off = 0;
+    for (i, raw) in bytes[..whole].split_inclusive(|&b| b == b'\n').enumerate() {
         let line = i + 1;
-        let bad = |msg: &str| SplLogError::Line {
-            line,
-            msg: msg.to_owned(),
-        };
-        let l = l.trim_end();
-        if l.is_empty() || l.starts_with('#') {
+        let start = off;
+        off += raw.len();
+        let text = std::str::from_utf8(raw).map(str::trim_end);
+        if !header {
+            match text {
+                Ok(l) if l == HEADER_LINE => header = true,
+                _ => return Err(SplLogError::Header),
+            }
+            complete_len = off;
+            continue;
+        }
+        if let Ok(l) = text
+            && (l.is_empty() || l.starts_with('#'))
+        {
+            complete_len = off;
             continue;
         }
         if !seen_columns {
-            if l != cols {
-                return Err(bad("expected the column header"));
+            if text != Ok(cols.as_str()) {
+                return Err(SplLogError::Line {
+                    line,
+                    msg: "expected the column header".to_owned(),
+                });
             }
             seen_columns = true;
+            complete_len = off;
             continue;
         }
-        let f: Vec<&str> = l.split(',').collect();
-        if f.len() != FIXED + BAND_COUNT {
-            return Err(bad(&format!("expected {} fields", FIXED + BAND_COUNT)));
-        }
-        let start: u64 = f[1].parse().map_err(|_| bad("bad start_ns"))?;
-        let measured: f64 = f[2].parse().map_err(|_| bad("bad measured_s"))?;
-        if !(0.0..=1.0).contains(&measured) {
-            return Err(bad("measured_s outside 0…1"));
-        }
-        let period = match f[4] {
-            "day" => BandPeriod::Day,
-            "night" => BandPeriod::Night,
-            _ => return Err(bad("period is day or night")),
+        // What a cut leaves past the last whole row: zeros (a file system that committed the
+        // length before the data) or bytes that are not text. A whole line of text that is
+        // not a row was written so, and is an error.
+        let junk = raw.contains(&0) || text.is_err();
+        let parsed = match text {
+            Ok(l) => parse_row(l, line),
+            Err(_) => Err(SplLogError::Header),
         };
-        let correction: f64 = f[5].parse().map_err(|_| bad("bad correction_db"))?;
-        if !correction.is_finite() {
-            return Err(bad("bad correction_db"));
+        match parsed {
+            Ok(row) => {
+                check_row(&row).map_err(|msg| SplLogError::Line {
+                    line,
+                    msg: msg.to_owned(),
+                })?;
+                rows.push(row);
+                complete_len = off;
+            }
+            Err(_) if junk => {
+                complete_len = start;
+                break;
+            }
+            Err(e) => return Err(e),
         }
-        let sensitivity = if f[6].is_empty() {
-            None
-        } else {
-            Some(f[6].parse::<f64>().map_err(|_| bad("bad sensitivity_db"))?)
-        };
-        match (f[3], sensitivity) {
-            ("dB SPL", Some(_)) | ("dBFS", None) => {}
-            _ => return Err(bad("unit and sensitivity disagree")),
-        }
-        let off = sensitivity.unwrap_or(0.0);
-        let mut levels = [0f32; BAND_COUNT];
-        for (o, t) in levels.iter_mut().zip(&f[FIXED..]) {
-            let v = match *t {
-                "-inf" => f64::NEG_INFINITY,
-                "nan" => f64::NAN,
-                t => t.parse::<f64>().map_err(|_| bad("bad level"))?,
-            };
-            *o = (v - off) as f32;
-        }
-        let row = BandLogRow {
-            start: WallNs(start),
-            measured: Seconds(measured),
-            levels,
-            correction: Db(correction),
-            period,
-            sensitivity: sensitivity.map(Db),
-        };
-        check_row(&row).map_err(bad)?;
-        rows.push(row);
+    }
+    if !header {
+        return Err(SplLogError::Header);
     }
     if !seen_columns {
         return Err(SplLogError::Line {
@@ -257,7 +253,64 @@ pub fn import_csv(bytes: &[u8]) -> Result<BandLogRead, SplLogError> {
             msg: "no column header".into(),
         });
     }
-    Ok(BandLogRead { rows, complete_len })
+    Ok(BandLogRead {
+        rows,
+        complete_len,
+        tail: bytes.len() - complete_len,
+    })
+}
+
+fn parse_row(l: &str, line: usize) -> Result<BandLogRow, SplLogError> {
+    let bad = |msg: &str| SplLogError::Line {
+        line,
+        msg: msg.to_owned(),
+    };
+    let f: Vec<&str> = l.split(',').collect();
+    if f.len() != FIXED + BAND_COUNT {
+        return Err(bad(&format!("expected {} fields", FIXED + BAND_COUNT)));
+    }
+    let start: u64 = f[1].parse().map_err(|_| bad("bad start_ns"))?;
+    let measured: f64 = f[2].parse().map_err(|_| bad("bad measured_s"))?;
+    if !(0.0..=1.0).contains(&measured) {
+        return Err(bad("measured_s outside 0…1"));
+    }
+    let period = match f[4] {
+        "day" => BandPeriod::Day,
+        "night" => BandPeriod::Night,
+        _ => return Err(bad("period is day or night")),
+    };
+    let correction: f64 = f[5].parse().map_err(|_| bad("bad correction_db"))?;
+    if !correction.is_finite() {
+        return Err(bad("bad correction_db"));
+    }
+    let sensitivity = if f[6].is_empty() {
+        None
+    } else {
+        Some(f[6].parse::<f64>().map_err(|_| bad("bad sensitivity_db"))?)
+    };
+    match (f[3], sensitivity) {
+        ("dB SPL", Some(_)) | ("dBFS", None) => {}
+        _ => return Err(bad("unit and sensitivity disagree")),
+    }
+    let off = sensitivity.unwrap_or(0.0);
+    let mut levels = [0f32; BAND_COUNT];
+    for (o, t) in levels.iter_mut().zip(&f[FIXED..]) {
+        let v = match *t {
+            "-inf" => f64::NEG_INFINITY,
+            "nan" => f64::NAN,
+            t => t.parse::<f64>().map_err(|_| bad("bad level"))?,
+        };
+        *o = (v - off) as f32;
+    }
+    let row = BandLogRow {
+        start: WallNs(start),
+        measured: Seconds(measured),
+        levels,
+        correction: Db(correction),
+        period,
+        sensitivity: sensitivity.map(Db),
+    };
+    Ok(row)
 }
 
 /// The energy average of band seconds over the time they measured
@@ -475,6 +528,17 @@ mod tests {
         let cut = &text.as_bytes()[..text.len() - 7];
         let back = import_csv(cut).unwrap();
         assert_eq!(back.rows.len(), 1);
+        let one = back.complete_len;
+        // A torn row then zeros with newlines among them: the rows before, cut there.
+        let mut z = cut.to_vec();
+        z.extend([0u8; 3000]);
+        z.push(b'\n');
+        z.extend([0u8; 100]);
+        let r = import_csv(&z).unwrap();
+        assert_eq!(
+            (r.rows.len(), r.complete_len, r.tail),
+            (1, one, z.len() - one)
+        );
         assert!(import_csv(b"# ac2 spl log v2\n").is_err());
         let bad = text.replace(",night,", ",evening,");
         assert!(matches!(

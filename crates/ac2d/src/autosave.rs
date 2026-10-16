@@ -209,6 +209,28 @@ pub(crate) fn set_dropped_aside(dir: &Path, dropped: Vec<Dropped>) -> Vec<Damage
         .collect()
 }
 
+/// Logs the logs a power cut left a partial tail on (a torn row, zeros). Not damage: every
+/// whole row was read, and the tail is cut off before the next append.
+fn note_torn_tails(dir: &Path, logs: &[SplLogOnDisk]) {
+    let files = logs.iter().flat_map(|l| {
+        std::iter::once((l.file.as_str(), l.complete_len))
+            .chain(l.bands.iter().map(|b| (b.file.as_str(), b.complete_len)))
+    });
+    for (file, complete) in files {
+        let p = dir.join(file);
+        if let Ok(m) = fs::metadata(&p)
+            && m.len() > complete
+        {
+            tracing::warn!(
+                "{}: a partial tail of {} bytes after the last whole row (a cut write) is left \
+                 out and cut off before the next append",
+                p.display(),
+                m.len() - complete
+            );
+        }
+    }
+}
+
 /// The autosave in `dir`: its current manifest, else the previous one. An autosave of
 /// another session format version is set aside, as is an unreadable one; neither is
 /// deleted. A trace or log file that cannot be read costs only itself (moved out by
@@ -219,7 +241,8 @@ pub(crate) fn restore(dir: &Path) -> (Option<Restored>, Vec<Damage>) {
         // Nothing, or the SPL logs of a first write that never completed.
         return (None, Vec::new());
     }
-    let restored = |data, from, logs, dropped| {
+    let restored = |data, from, logs: Vec<SplLogOnDisk>, dropped| {
+        note_torn_tails(dir, &logs);
         let damage = set_dropped_aside(dir, dropped);
         (Some(Restored { data, from, logs }), damage)
     };

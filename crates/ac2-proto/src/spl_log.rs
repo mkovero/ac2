@@ -194,91 +194,82 @@ fn parse_level(s: &str) -> Option<f64> {
 pub struct SplLogRead {
     /// Rows, oldest first.
     pub rows: Vec<SplLogRow>,
-    /// Bytes up to the end of the last whole line: where an append carries on.
+    /// Bytes up to the end of the last whole row: where an append carries on.
     pub complete_len: usize,
+    /// Bytes after it (a torn row, zeros, garbage), cut off before the next append.
+    pub tail: usize,
 }
 
 /// Reads rows back (the header lines are checked, not returned). A log grows a line at a
-/// time and a power cut may keep only part of the last append, so an unterminated last line
-/// (and whatever follows the last newline, such as the zeros some file systems leave) is
-/// neither a row nor an error.
+/// time and a power cut keeps an unpredictable part of the last appends: a torn last row,
+/// zeros a file system extended the file with (possibly after a torn row, possibly with
+/// newlines among them), bytes that are not text. The rows before the first such line are
+/// the log; that line and everything after it are the tail, cut off
+/// before the next append ([`SplLogRead::complete_len`]). Only a log whose header lines are
+/// unreadable is an error.
 pub fn import_csv(bytes: &[u8]) -> Result<SplLogRead, SplLogError> {
-    let complete_len = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-    let text = std::str::from_utf8(&bytes[..complete_len]).map_err(|_| SplLogError::Header)?;
-    let mut lines = text.lines().enumerate();
-    match lines.next() {
-        Some((_, l)) if l.trim_end() == HEADER_LINE => {}
-        _ => return Err(SplLogError::Header),
-    }
+    let whole = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
     let mut rows = Vec::new();
+    let mut header = false;
     let mut seen_columns = false;
-    for (i, l) in lines {
+    let mut complete_len = 0;
+    let mut off = 0;
+    for (i, raw) in bytes[..whole].split_inclusive(|&b| b == b'\n').enumerate() {
         let line = i + 1;
-        let bad = |msg: &str| SplLogError::Line {
-            line,
-            msg: msg.to_owned(),
-        };
-        let l = l.trim_end();
-        if l.is_empty() || l.starts_with('#') {
+        let start = off;
+        off += raw.len();
+        let text = std::str::from_utf8(raw).map(str::trim_end);
+        if !header {
+            match text {
+                Ok(l) if l == HEADER_LINE => header = true,
+                _ => return Err(SplLogError::Header),
+            }
+            complete_len = off;
+            continue;
+        }
+        if let Ok(l) = text
+            && (l.is_empty() || l.starts_with('#'))
+        {
+            complete_len = off;
             continue;
         }
         if !seen_columns {
-            if l != COLUMNS {
-                return Err(bad("expected the column header"));
+            if text != Ok(COLUMNS) {
+                return Err(SplLogError::Line {
+                    line,
+                    msg: "expected the column header".to_owned(),
+                });
             }
             seen_columns = true;
+            complete_len = off;
             continue;
         }
-        let f: Vec<&str> = l.split(',').collect();
-        if f.len() != 12 {
-            return Err(bad("expected 12 fields"));
-        }
-        let start: u64 = f[1].parse().map_err(|_| bad("bad start_ns"))?;
-        let measured: f64 = f[2].parse().map_err(|_| bad("bad measured_s"))?;
-        let opt_db = |t: &str, what: &str| {
-            if t.is_empty() {
-                Ok(None)
-            } else {
-                t.parse::<f64>()
-                    .map(Some)
-                    .map_err(|_| bad(&format!("bad {what}")))
+        // What a cut leaves past the last whole row: zeros (a file system that committed the
+        // length before the data) or bytes that are not text. A whole line of text that is
+        // not a row was written so, and is an error.
+        let junk = raw.contains(&0) || text.is_err();
+        let parsed = match text {
+            Ok(l) => parse_row(l, line),
+            Err(_) => Err(SplLogError::Header),
+        };
+        match parsed {
+            Ok(row) => {
+                check_row(&row).map_err(|msg| SplLogError::Line {
+                    line,
+                    msg: msg.to_owned(),
+                })?;
+                rows.push(row);
+                complete_len = off;
             }
-        };
-        let sensitivity = opt_db(f[9], "sensitivity_db")?;
-        let position = match (
-            opt_db(f[10], "position_db")?,
-            opt_db(f[11], "position_peak_db")?,
-        ) {
-            (None, None) => None,
-            (Some(level), Some(peak)) => Some(PositionCorrection {
-                level: Db(level),
-                peak: Db(peak),
-            }),
-            _ => return Err(bad("position_db and position_peak_db go together")),
-        };
-        match (f[3], sensitivity) {
-            ("dB SPL", Some(_)) | ("dBFS", None) => {}
-            _ => return Err(bad("unit and sensitivity disagree")),
+            Err(_) if junk => {
+                complete_len = start;
+                break;
+            }
+            Err(e) => return Err(e),
         }
-        let off = sensitivity.unwrap_or(0.0);
-        let lv = |s: &str| {
-            parse_level(s)
-                .map(|v| Dbfs(v - off))
-                .ok_or_else(|| bad("bad level"))
-        };
-        let row = SplLogRow {
-            start: WallNs(start),
-            measured: Seconds(measured),
-            laeq: lv(f[4])?,
-            lceq: lv(f[5])?,
-            lzeq: lv(f[6])?,
-            lcpeak: lv(f[7])?,
-            lafmax: lv(f[8])?,
-            sensitivity: sensitivity.map(Db),
-            position,
-        };
-        check_row(&row).map_err(bad)?;
-        rows.push(row);
+    }
+    if !header {
+        return Err(SplLogError::Header);
     }
     if !seen_columns {
         return Err(SplLogError::Line {
@@ -286,7 +277,67 @@ pub fn import_csv(bytes: &[u8]) -> Result<SplLogRead, SplLogError> {
             msg: "no column header".into(),
         });
     }
-    Ok(SplLogRead { rows, complete_len })
+    Ok(SplLogRead {
+        rows,
+        complete_len,
+        tail: bytes.len() - complete_len,
+    })
+}
+
+fn parse_row(l: &str, line: usize) -> Result<SplLogRow, SplLogError> {
+    let bad = |msg: &str| SplLogError::Line {
+        line,
+        msg: msg.to_owned(),
+    };
+    let f: Vec<&str> = l.split(',').collect();
+    if f.len() != 12 {
+        return Err(bad("expected 12 fields"));
+    }
+    let start: u64 = f[1].parse().map_err(|_| bad("bad start_ns"))?;
+    let measured: f64 = f[2].parse().map_err(|_| bad("bad measured_s"))?;
+    let opt_db = |t: &str, what: &str| {
+        if t.is_empty() {
+            Ok(None)
+        } else {
+            t.parse::<f64>()
+                .map(Some)
+                .map_err(|_| bad(&format!("bad {what}")))
+        }
+    };
+    let sensitivity = opt_db(f[9], "sensitivity_db")?;
+    let position = match (
+        opt_db(f[10], "position_db")?,
+        opt_db(f[11], "position_peak_db")?,
+    ) {
+        (None, None) => None,
+        (Some(level), Some(peak)) => Some(PositionCorrection {
+            level: Db(level),
+            peak: Db(peak),
+        }),
+        _ => return Err(bad("position_db and position_peak_db go together")),
+    };
+    match (f[3], sensitivity) {
+        ("dB SPL", Some(_)) | ("dBFS", None) => {}
+        _ => return Err(bad("unit and sensitivity disagree")),
+    }
+    let off = sensitivity.unwrap_or(0.0);
+    let lv = |s: &str| {
+        parse_level(s)
+            .map(|v| Dbfs(v - off))
+            .ok_or_else(|| bad("bad level"))
+    };
+    let row = SplLogRow {
+        start: WallNs(start),
+        measured: Seconds(measured),
+        laeq: lv(f[4])?,
+        lceq: lv(f[5])?,
+        lzeq: lv(f[6])?,
+        lcpeak: lv(f[7])?,
+        lafmax: lv(f[8])?,
+        sensitivity: sensitivity.map(Db),
+        position,
+    };
+    Ok(row)
 }
 
 #[cfg(test)]
@@ -399,6 +450,18 @@ mod tests {
         zeros.extend([0u8; 300]);
         let r = import_csv(&zeros).expect("zeros");
         assert_eq!((r.rows.len(), r.complete_len), (1, one));
+        // Zeros after a torn row, with newlines among them, several KiB: the rows before.
+        for tail in [
+            [&b"2026-10-1"[..], &[0u8; 4096], b"\n", &[0u8; 512], b"\n"].concat(),
+            [&[0u8; 8192][..], b"\n"].concat(),
+            b"\xff\xfe\x00garbage\n\x01\n".to_vec(),
+        ] {
+            let mut b = csv.clone().into_bytes();
+            b.extend(&tail);
+            let r = import_csv(&b).expect("zero tail");
+            assert_eq!((r.rows.len(), r.complete_len), (2, csv.len()));
+            assert_eq!(r.tail, tail.len());
+        }
         // A malformed whole line is damage, not a cut.
         let bad = format!("{csv}x,1\n");
         assert!(import_csv(bad.as_bytes()).is_err());

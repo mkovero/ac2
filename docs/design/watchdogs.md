@@ -96,8 +96,16 @@ size before the data) or garbage. Neither program may refuse to start or panic o
 Writes: every state file is written to a temporary file in the same directory, synced,
 renamed over the target, and the directory synced (`ac2_paths::write_private_atomic` /
 `write_atomic`, `ac2_traces::session::write_atomic`, the SPL log rewrite, the client key
-files). Appended SPL logs are synced every 5 min and at stop; their torn last row is
-dropped on read.
+files). Appended SPL and band logs (the session's and the rig meters') are synced every 5
+min and at stop.
+
+A cut append is not damage. What it leaves past the last whole row (a row torn anywhere,
+mid-number or mid-field; zero blocks a file system extended the file with, possibly after a
+torn row and with newlines among them; bytes that are not text) is the tail: every whole row
+before it is read into the meter's history, a warning names the bytes left out, and the
+tail is cut off before the next append, so no zeros stay mid-file. Only a log whose header
+is unreadable is damage. A whole line of text that is not a row was written so and is an
+error.
 
 Reads, when a file is damaged:
 
@@ -105,7 +113,7 @@ Reads, when a file is damaged:
 |---|---|
 | `rig.json`, `calibrations.json` | set aside as `<name>.damaged-<unix s>`; the previous copy (`<name>.prev`, the file before its last write) is read instead, else defaults; the store stays writable |
 | autosave `session.json` | set aside; `session.prev.json` restored; both damaged: the directory is set aside and the daemon starts empty |
-| a trace / SPL log / band log the manifest names | that file alone is moved to `<autosave>.damaged-files/`; the trace is left out, the meter starts a new log or goes on without its band history |
+| a trace, or an SPL / band log without its header | that file alone is moved to `<autosave>.damaged-files/`; the trace is left out, the meter starts a new log or goes on without its band history |
 | rig meters' log manifest | as the autosave; the rig meters (from `rig.json`) run either way |
 | `working.json` | set aside; the session reads as untitled |
 | network `server.key` | set aside, a new pair generated (clients must pin it again) |
