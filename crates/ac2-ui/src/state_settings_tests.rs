@@ -60,6 +60,8 @@ fn the_old_dialog_keys_open_their_pages_and_ctrl_p_the_last_one() {
     t.key("Alt+6");
     assert_eq!(page(&t), Page::Connection);
     t.key("Ctrl+Tab");
+    assert_eq!(page(&t), Page::Rig, "the seventh page: no Alt digit");
+    t.key("Ctrl+Tab");
     assert_eq!(page(&t), Page::AudioIo, "wraps");
     // The mouse picks a page too; Ctrl+P again closes the view.
     t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);

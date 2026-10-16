@@ -267,6 +267,11 @@ impl AppState {
                     Err(e) => self.fault(format!("{what}: {e}")),
                 }
             }
+            ConnEvent::Conflict { what, error } => {
+                if !self.layout_reply(&what, &Err(error), out) {
+                    self.conflict_reload(&what);
+                }
+            }
             ConnEvent::DelayFound {
                 meas,
                 pick,

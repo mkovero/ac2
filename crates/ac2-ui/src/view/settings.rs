@@ -75,12 +75,8 @@ fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) 
             .size(15.0)
             .color(if on { ch.focus } else { ch.text });
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(page_key(i).label())
-                    .small()
-                    .monospace()
-                    .color(ch.dim),
-            );
+            let key = page_key(i).map(|k| k.label()).unwrap_or_default();
+            ui.label(RichText::new(key).small().monospace().color(ch.dim));
             if ui
                 .add(egui::Button::selectable(on, t).min_size(egui::vec2(150.0, 26.0)))
                 .clicked()
@@ -102,11 +98,12 @@ fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) 
     }
 }
 
-/// The chord that jumps to page `i` (0-based): Alt with its digit.
-fn page_key(i: usize) -> Chord {
+/// The chord that jumps to page `i` (0-based): Alt with its digit; the pages after the
+/// sixth have none.
+fn page_key(i: usize) -> Option<Chord> {
     use egui::Key as K;
     const DIGITS: [K; 6] = [K::Num1, K::Num2, K::Num3, K::Num4, K::Num5, K::Num6];
-    Chord::alt(DIGITS[i.min(DIGITS.len() - 1)])
+    DIGITS.get(i).map(|k| Chord::alt(*k))
 }
 
 /// The window's fixed keys, written in `style` as the dispatch reads them (the page step is
@@ -171,6 +168,21 @@ fn page(
             Page::Recording => recording_page(app, ui, s, ch),
             Page::Display => display_page(app, ui, s, ch, msg),
             Page::Connection => connection_page(app, ui, s, ch, msg),
+            Page::Rig => {
+                let st = &app.state;
+                let rig = st.daemon().map(|d| d.rig.clone()).unwrap_or_default();
+                let meters: Vec<&ac2_proto::model::Measurement> = st
+                    .daemon()
+                    .map(|d| {
+                        d.measurements
+                            .iter()
+                            .filter(|m| ac2_scene::osc::on_rig(m))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let theme = ac2_scene::theme::Theme::by_name(st.theme);
+                super::rig::rig_page(ui, s, &rig, &meters, &theme, ch, msg);
+            }
         });
     ui.separator();
     ui.label(RichText::new(s.page.keys()).small().color(ch.dim));
@@ -497,7 +509,13 @@ mod tests {
         let mac = pages_hint(LabelStyle::Mac);
         assert!(mac.starts_with("⌘PageUp / ⌘PageDown: pages"), "{mac}");
         assert!(mac.contains("⇧Esc stops"), "{mac}");
-        assert_eq!(page_key(0).label_in(LabelStyle::Pc), "Alt+1");
-        assert_eq!(page_key(3).label_in(LabelStyle::Mac), "⌥4");
+        assert_eq!(
+            page_key(0).expect("a page key").label_in(LabelStyle::Pc),
+            "Alt+1"
+        );
+        assert_eq!(
+            page_key(3).expect("a page key").label_in(LabelStyle::Mac),
+            "⌥4"
+        );
     }
 }

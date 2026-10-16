@@ -7,8 +7,8 @@
 use std::collections::BTreeSet;
 
 use ac2_proto::model::{
-    MeasKind, Measurement, Resolution, SpecAveraging, SpecResolution, SweepRun, TraceMeta,
-    TraceOwner, TraceSource,
+    CueState, MeasKind, Measurement, Resolution, Rig, SpecAveraging, SpecResolution, SweepRun,
+    TraceMeta, TraceOwner, TraceSource,
 };
 use ac2_proto::units::{MeasId, TraceId};
 
@@ -219,6 +219,18 @@ pub enum TreeKey {
     Math(MeasId),
     /// The imported group's header.
     Imported,
+    /// The rig group's header, over the meters the rig keeps across session loads: opens
+    /// the Rig monitor settings.
+    Rig,
+    /// The header of the session's measurements, under the rig group.
+    Session,
+}
+
+impl TreeKey {
+    /// A header that stands for no measurement or curve: nothing to select, drag or show.
+    pub fn is_heading(self) -> bool {
+        matches!(self, TreeKey::Imported | TreeKey::Rig | TreeKey::Session)
+    }
 }
 
 /// One row of the tree.
@@ -244,6 +256,8 @@ pub struct TreeRow {
     /// they stand for a group, not a curve. A curve no visible pane draws right now keeps
     /// its colour, so it reads the same when its pane comes back.
     pub dot: Option<(Color, bool)>,
+    /// A meter's OSC cue state ([`crate::osc::meter_state`]), shown as a chip.
+    pub chip: Option<CueState>,
     /// Everything about the row in one sentence (the tooltip, and what a screen reader says).
     pub describe: String,
 }
@@ -268,6 +282,8 @@ pub struct TreeInput<'a> {
     /// Rows compared on the transfer pane (live curves, math channels, stored traces): marked
     /// [`crate::trace::COMPARED`], as the legend tags their curves.
     pub compared: Vec<TreeKey>,
+    /// The rig entity: which meters' cues are in which state, where cues go.
+    pub rig: Option<&'a Rig>,
 }
 
 /// The group a trace is listed in: its owner, or the imported group when its owner is gone.
@@ -330,16 +346,17 @@ pub fn compare_toast(name: &str, on: bool, shown: bool) -> String {
     }
 }
 
-/// The groups in tree order: the measurements that are not math channels by id, then the
-/// imported group.
+/// The groups in tree order: the measurements that are not math channels — the rig's
+/// first, then the session's, each by id — then the imported group.
 pub fn group_order(meas: &[&Measurement]) -> Vec<TraceOwner> {
-    let mut ids: Vec<MeasId> = meas
+    let mut ids: Vec<(bool, MeasId)> = meas
         .iter()
         .filter(|m| !matches!(m.config.kind, MeasKind::Math { .. }))
-        .map(|m| m.id)
+        .map(|m| (!crate::osc::on_rig(m), m.id))
         .collect();
     ids.sort();
     ids.into_iter()
+        .map(|(_, id)| id)
         .map(|meas| TraceOwner::Meas { meas })
         .chain(std::iter::once(TraceOwner::Imported))
         .collect()
@@ -378,6 +395,8 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
         (true, false) => Mark::Active,
     };
     let mut rows = Vec::new();
+    let rig_meters = meas.iter().filter(|m| crate::osc::on_rig(m)).count();
+    let (mut rig_said, mut session_said) = (false, false);
     for g in group_order(&meas) {
         let mut children: Vec<TreeRow> = Vec::new();
         let header_item = g
@@ -404,6 +423,7 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                     Mark::None
                 },
                 dot: Some((item.color, !item.hidden)),
+                chip: None,
                 describe: format!("{}: the live curve, {state}", m.config.name),
             });
         }
@@ -427,6 +447,7 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 hidden: !r.shown,
                 mark: if r.selected { Mark::Active } else { Mark::None },
                 dot: Some((r.color, r.shown)),
+                chip: None,
                 describe: r.describe.clone(),
             });
         }
@@ -466,6 +487,7 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 hidden: item.hidden,
                 mark: mark(m.id),
                 dot: Some((item.color, !item.hidden)),
+                chip: None,
             });
         }
         for c in &mut children {
@@ -501,17 +523,28 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                     || (!has_live_curve(&m.config.kind)
                         && n > 0
                         && children.iter().all(|c| c.hidden));
+                let chip = input.rig.and_then(|r| crate::osc::meter_state(r, m.id));
+                let describe = match chip {
+                    Some(c) => format!(
+                        "{} {}: {detail}, OSC cue {}",
+                        kind_name(&m.config.kind),
+                        m.config.name,
+                        crate::osc::state_word(c)
+                    ),
+                    None => format!("{} {}: {detail}", kind_name(&m.config.kind), m.config.name),
+                };
                 TreeRow {
                     key: TreeKey::Meas(m.id),
                     depth: 0,
                     last: false,
                     name: format!("{}  {}", kind_tag(&m.config.kind), m.config.name),
-                    describe: format!("{} {}: {detail}", kind_name(&m.config.kind), m.config.name),
+                    describe,
                     details: vec![detail],
                     collapsed: Some(folded),
                     hidden,
                     mark: mark(m.id),
                     dot: None,
+                    chip,
                 }
             }
             None => {
@@ -540,15 +573,57 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                     hidden: false,
                     mark: Mark::None,
                     dot: None,
+                    chip: None,
                 }
             }
         };
+        let rig_group = header_item.is_some_and(|i| crate::osc::on_rig(i.meas));
+        if rig_group && !rig_said {
+            rig_said = true;
+            rows.push(rig_header(rig_meters, input.rig));
+        } else if !rig_group && rig_said && !session_said {
+            session_said = true;
+            rows.push(heading_row(
+                TreeKey::Session,
+                crate::osc::SESSION,
+                vec!["saved and loaded with the session".into()],
+                "Session: the measurements saved and loaded with the session".into(),
+            ));
+        }
         rows.push(header);
         if !folded {
             rows.extend(children);
         }
     }
     rows
+}
+
+/// The rig group's header: its meters and where their cues go.
+fn rig_header(meters: usize, rig: Option<&Rig>) -> TreeRow {
+    let rig = rig.cloned().unwrap_or_default();
+    let details = crate::osc::rig_details(meters, &rig);
+    let describe = format!(
+        "Rig: meters kept by the rig across session loads, {}; opens the Rig monitor settings",
+        crate::osc::status_line(&rig)
+    );
+    heading_row(TreeKey::Rig, crate::osc::RIG, details, describe)
+}
+
+/// A header that stands for no measurement: the rig's, the session's.
+fn heading_row(key: TreeKey, name: &str, details: Vec<String>, describe: String) -> TreeRow {
+    TreeRow {
+        key,
+        depth: 0,
+        last: false,
+        name: name.to_owned(),
+        details,
+        collapsed: None,
+        hidden: false,
+        mark: Mark::None,
+        dot: None,
+        chip: None,
+        describe,
+    }
 }
 
 /// A compared row says so the way the legend does: ` · cmp` after each detail line.

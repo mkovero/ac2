@@ -582,6 +582,7 @@ impl AppState {
                 self.toasts_held = false;
             }
             Msg::SelectMeas(id) => self.select_meas_row(id),
+            Msg::OpenRig => self.open_settings(crate::settings::Page::Rig, out),
             Msg::SelectLive(id) => self.select_live_row(id),
             Msg::SelectMath(id) => self.select_math_row(id),
             Msg::SelectTrace(id) => {

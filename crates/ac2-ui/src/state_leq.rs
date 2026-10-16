@@ -161,12 +161,11 @@ impl AppState {
         let Some(d) = self.overlay.leq_mut() else {
             return;
         };
-        match d.meas_config() {
-            Ok(config) => {
-                let (meas, name) = (d.meas, d.name.clone());
+        match d.command() {
+            Ok(cmd) => {
+                let name = d.name.clone();
                 self.overlay = Overlay::None;
                 self.focus_kind(PaneKind::Spl);
-                let cmd = self.meas_update(meas, config);
                 let m = self.modes_mut();
                 m.spl = m.spl.with_leq();
                 self.call(out, cmd, format!("{name}: Leq windows set"));

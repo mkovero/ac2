@@ -18,8 +18,9 @@ fn generator(ceiling: f64, bound: f64) -> Generator {
 #[test]
 fn pages_step_and_wrap() {
     assert_eq!(Page::AudioIo.step(1), Page::Calibration);
-    assert_eq!(Page::AudioIo.step(-1), Page::Connection);
-    assert_eq!(Page::Connection.step(1), Page::AudioIo);
+    assert_eq!(Page::AudioIo.step(-1), Page::Rig);
+    assert_eq!(Page::Connection.step(1), Page::Rig);
+    assert_eq!(Page::Rig.step(1), Page::AudioIo);
     for p in Page::ALL {
         assert!(!p.title().is_empty() && !p.keys().is_empty());
         assert!(p.whose().contains(THIS_APP) || p.whose().contains(THE_RIG));

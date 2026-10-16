@@ -102,7 +102,7 @@ impl AppState {
                 self.meas(id).map(|m| m.config.name.clone())
             }
             TreeKey::Trace(id) => self.trace_meta(id).ok().map(|t| trace_label(&t)),
-            TreeKey::Imported => None,
+            TreeKey::Imported | TreeKey::Rig | TreeKey::Session => None,
         }
     }
 
@@ -151,7 +151,7 @@ impl AppState {
     pub(super) fn row_drag_msg(&mut self, m: DragMsg) {
         match m {
             DragMsg::Start(item) => {
-                if self.row_drag.is_none() && item != TreeKey::Imported {
+                if self.row_drag.is_none() && !item.is_heading() {
                     self.row_drag = Some(RowDrag {
                         item,
                         over: None,
@@ -225,7 +225,7 @@ impl AppState {
             TreeKey::Live(id) => self.select_live_row(id),
             TreeKey::Math(id) => self.select_math_row(id),
             TreeKey::Trace(id) => self.select_trace_row(id),
-            TreeKey::Imported => {}
+            TreeKey::Imported | TreeKey::Rig | TreeKey::Session => {}
         }
     }
 
@@ -275,7 +275,7 @@ impl AppState {
                 self.compared_meas.insert(id);
                 !self.meas_hidden(&m)
             }
-            TreeKey::Imported => return,
+            TreeKey::Imported | TreeKey::Rig | TreeKey::Session => return,
         };
         self.layout.set_focus(p);
         self.toast(ac2_scene::meas_list::compare_toast(&name, true, shown));

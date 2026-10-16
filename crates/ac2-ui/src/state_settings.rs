@@ -13,8 +13,8 @@ use crate::keys::{Chord, CommandId, Keymap, Scope};
 use crate::leq_dialog::{Focus, LeqDialog};
 use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
 use crate::settings::{
-    ConnAction, DisplayRow, Page, RecordingRow, SERVER_INFO_EVERY_S, Settings, step_hold,
-    step_span, step_theme,
+    ConnAction, DisplayRow, Page, RecordingRow, RigPage, RigRow, SERVER_INFO_EVERY_S, Settings,
+    step_hold, step_span, step_theme,
 };
 
 /// What the mouse does on the Settings view (the hosted pages keep their own messages).
@@ -32,6 +32,12 @@ pub enum SettingsMsg {
     Display(DisplayRow, i32),
     /// A line of the Connection page: focused and acted on.
     Connection(usize),
+    /// A row of the Rig monitor page focused.
+    RigFocus(RigRow),
+    /// A row of the Rig monitor page acted on (Enter).
+    RigApply(RigRow),
+    /// Monitor at start set.
+    RigMonitor(bool),
 }
 
 impl AppState {
@@ -62,7 +68,9 @@ impl AppState {
             let calibrated = self.leq_calibrated(m.id);
             LeqDialog::new(&m, calibrated)
         });
-        self.overlay = Overlay::Settings(Box::new(Settings::new(page, session, cal, leq)));
+        let mut settings = Settings::new(page, session, cal, leq);
+        settings.rig = RigPage::new(self.daemon().map(|s| &s.rig));
+        self.overlay = Overlay::Settings(Box::new(settings));
         if self.connected() {
             out.push(Request::Devices);
         }
@@ -112,11 +120,82 @@ impl AppState {
         }
     }
 
-    /// The pages a mirror change reaches: the rig's output labels.
+    /// The pages a mirror change reaches: the rig's output labels, the Rig monitor page.
     pub(super) fn follow_settings(&mut self) {
         let labels = self.daemon().map(|s| s.outputs.clone()).unwrap_or_default();
+        let rig = self.daemon().map(|s| s.rig.clone());
         if let Overlay::Settings(s) = &mut self.overlay {
             s.session.set_labels(&labels);
+            if let Some(r) = &rig {
+                s.rig.follow(r);
+            }
+        }
+    }
+
+    /// The daemon refused `what` as made on settings another client changed first: the
+    /// open pages show the rig's settings again, and a toast says so.
+    pub(super) fn conflict_reload(&mut self, what: &str) {
+        let rig = self.daemon().map(|s| s.rig.clone());
+        let fresh = |st: &Self, id| {
+            st.meas(id)
+                .cloned()
+                .and_then(|m| LeqDialog::new(&m, st.leq_calibrated(m.id)))
+        };
+        let leq = match &self.overlay {
+            Overlay::Settings(s) => s.leq.as_ref().map(|d| d.meas),
+            _ => None,
+        }
+        .and_then(|id| fresh(self, id));
+        if let Overlay::Settings(s) = &mut self.overlay {
+            if let Some(r) = &rig {
+                s.rig.reload(r);
+            }
+            if let Some(d) = leq {
+                s.leq = Some(d);
+            }
+        }
+        // The operator's edit was dropped: said even with the warning toasts off.
+        self.notify(
+            super::Severity::Warning,
+            ac2_scene::osc::conflict_toast(what),
+            super::Muted::Never,
+        );
+    }
+
+    /// Enter (or a click) on a row of the Rig monitor page.
+    fn rig_apply(&mut self, row: RigRow, out: &mut Vec<Request>) {
+        let rig = self.daemon().map(|s| s.rig.clone()).unwrap_or_default();
+        let Overlay::Settings(s) = &mut self.overlay else {
+            return;
+        };
+        s.rig.focus_row(row);
+        if let Some((cmd, what)) = s.rig.enter(&rig) {
+            self.call(out, cmd, what);
+        }
+    }
+
+    fn rig_monitor(&mut self, on: bool, out: &mut Vec<Request>) {
+        let rig = self.daemon().map(|s| s.rig.clone()).unwrap_or_default();
+        let Overlay::Settings(s) = &mut self.overlay else {
+            return;
+        };
+        if let Some((cmd, what)) = s.rig.monitor(&rig, on) {
+            self.call(out, cmd, what);
+        }
+    }
+
+    fn rig_key(&mut self, chord: Chord, swallow: Option<char>, out: &mut Vec<Request>) {
+        let Overlay::Settings(s) = &mut self.overlay else {
+            return;
+        };
+        let focus = s.rig.focus;
+        match chord.key {
+            Key::ArrowUp => s.rig.move_row(-1),
+            Key::ArrowDown | Key::Tab => s.rig.move_row(1),
+            Key::Enter => self.rig_apply(focus, out),
+            Key::ArrowLeft if focus == RigRow::Monitor => self.rig_monitor(false, out),
+            Key::ArrowRight if focus == RigRow::Monitor => self.rig_monitor(true, out),
+            _ => self.swallow_text = swallow,
         }
     }
 
@@ -180,6 +259,7 @@ impl AppState {
             Page::Recording => self.recording_key(chord, swallow),
             Page::Display => self.display_key(chord),
             Page::Connection => self.connection_key(chord, swallow, out),
+            Page::Rig => self.rig_key(chord, swallow, out),
         }
     }
 
@@ -566,6 +646,7 @@ impl AppState {
                 }
             }
             Page::Connection => s.connection.type_text(t),
+            Page::Rig => s.rig.type_text(t),
             Page::Display => {}
         }
     }
@@ -601,6 +682,7 @@ impl AppState {
                     self.connection_action(a, out);
                 }
             }
+            Page::Rig => s.rig.backspace(),
             Page::Display => {}
         }
     }
@@ -635,6 +717,13 @@ impl AppState {
                     self.connection_action(a, out);
                 }
             }
+            SettingsMsg::RigFocus(row) => {
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    s.rig.focus_row(row);
+                }
+            }
+            SettingsMsg::RigApply(row) => self.rig_apply(row, out),
+            SettingsMsg::RigMonitor(on) => self.rig_monitor(on, out),
         }
     }
 }

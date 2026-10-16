@@ -4,7 +4,9 @@
 //! the headroom horizon, and under the windows the LCpeak and LAFmax limits and the
 //! measuring-position correction, typed; last the band meter ([`bands`]): off, on or a
 //! rule's preset, its windows (one band each, a row like a Leq window's; a range row adds
-//! one per band), the §13 corrections, the transfer as it stands.
+//! one per band), the §13 corrections, the transfer as it stands; then the rig: whether
+//! the rig keeps the meter across session loads, and the OSC cues ([`cues`]), folded until
+//! shown.
 //! Pure data; the reducer routes keys here and the view draws it. Enter sends the meter's
 //! configuration with the new windows (`meas.update`, applied in place by the daemon).
 
@@ -12,13 +14,15 @@ use ac2_proto::model::{
     LeqConfig, LeqPreset, LeqWindow, MeasConfig, MeasKind, Measurement, PeakLimit, PeakLimits,
     PeakQuantity, PositionCorrection, SplConfig, Weighting,
 };
-use ac2_proto::units::{Db, DbSpl, MeasId, Seconds};
+use ac2_proto::units::{Db, DbSpl, MeasId, Rev, Seconds};
 
 mod bands;
+mod cues;
 mod transfer;
 pub use bands::{
     BandCol, BandField, BandFocus, BandMeter, BandRow, BandSection, RangeCol, RangeRow,
 };
+pub use cues::{CueCol, CueEdit, CueRow};
 pub use transfer::{Ask, Sources, Span, TransferStep};
 
 /// Window lengths offered, shortest first (→ longer). A length outside the list (from the
@@ -140,8 +144,14 @@ pub enum Focus {
     Window { row: usize, col: Col },
     /// A setting under the windows.
     Extra(Extra),
-    /// A cell of the band meter's section, last.
+    /// A cell of the band meter's section.
     Band(BandFocus),
+    /// Whether the rig keeps the meter ([`ac2_scene::osc::KEEP_ON_RIG`]).
+    Scope,
+    /// The OSC cues' fold: shown or hidden.
+    CueFold,
+    /// A cell of a cue row, last.
+    Cue { row: CueRow, col: CueCol },
 }
 
 /// One window being edited.
@@ -153,8 +163,8 @@ pub struct Row {
     pub limit: String,
     /// Typed warn margin.
     pub margin: String,
-    /// Its OSC cue, kept as it is (set from the CLI).
-    pub cue: Option<Box<ac2_proto::model::OscCue>>,
+    /// Its OSC cue.
+    pub cue: CueEdit,
 }
 
 fn number_text(v: f64) -> String {
@@ -169,7 +179,7 @@ impl Row {
             weighting: w.weighting,
             limit: w.limit.map_or_else(String::new, |l| number_text(l.0)),
             margin: number_text(w.warn_margin.0),
-            cue: w.cue.clone(),
+            cue: CueEdit::of(w.cue.as_deref()),
         }
     }
 
@@ -207,7 +217,7 @@ impl Row {
             return Err(format!("window {n} ({name}): the warn margin is 0 … 20 dB"));
         }
         Ok(LeqWindow {
-            cue: self.cue.clone(),
+            cue: self.cue.checked(&name)?,
             duration: Seconds(f64::from(self.seconds)),
             weighting: self.weighting,
             limit,
@@ -251,6 +261,19 @@ pub struct LeqDialog {
     pub error: Option<String>,
     /// The band transfer step, open over the dialog.
     pub transfer: Option<TransferStep>,
+    /// The rig keeps the meter: it survives session loads.
+    pub on_rig: bool,
+    /// The OSC cue rows are shown.
+    pub cues_shown: bool,
+    /// The meter-wide cue: the worst state of all its limits.
+    pub meter_cue: CueEdit,
+    /// The peak limits' cues, in [`PeakQuantity::ALL`] order.
+    pub peak_cues: [CueEdit; 2],
+    /// The predicted window's cue.
+    pub predicted_cue: CueEdit,
+    /// The meter's configuration rev the dialog was opened on: Enter names it, so an edit
+    /// made meanwhile by another client is refused rather than overwritten.
+    pub base_rev: Rev,
     base: SplConfig,
 }
 
@@ -297,6 +320,19 @@ impl LeqDialog {
             selected: false,
             error: None,
             transfer: None,
+            on_rig: m.config.scope == ac2_proto::model::MeasScope::Rig,
+            cues_shown: false,
+            meter_cue: CueEdit::of(config.cue.as_deref()),
+            peak_cues: PeakQuantity::ALL
+                .map(|q| CueEdit::of(config.leq.peaks.get(q).and_then(|l| l.cue.as_deref()))),
+            predicted_cue: CueEdit::of(
+                config
+                    .bands
+                    .as_deref()
+                    .and_then(|b| b.predicted.as_ref())
+                    .and_then(|p| p.cue.as_deref()),
+            ),
+            base_rev: m.config_rev,
             base: config.clone(),
         })
     }
@@ -327,8 +363,99 @@ impl LeqDialog {
     }
 
     fn rows_count(&self) -> usize {
-        // Preset, horizon, the windows, the settings under them, the band meter.
+        // Preset, horizon, the windows, the settings under them, the band meter, the rig.
+        self.head_rows() + self.tail().len()
+    }
+
+    /// The rows above the rig's.
+    fn head_rows(&self) -> usize {
         2 + self.rows.len() + Extra::ALL.len() + self.bands.grid().len()
+    }
+
+    /// The rig's rows, each its cells left to right: the scope, the cues' fold, the cue
+    /// rows while shown.
+    fn tail(&self) -> Vec<Vec<Focus>> {
+        let mut t = vec![vec![Focus::Scope], vec![Focus::CueFold]];
+        if self.cues_shown {
+            for row in self.cue_rows() {
+                t.push(CueCol::ALL.map(|col| Focus::Cue { row, col }).to_vec());
+            }
+        }
+        t
+    }
+
+    /// The cued subjects, top to bottom: the meter, the Leq windows, the peak limits that
+    /// have a limit, the band windows, the predicted window.
+    pub fn cue_rows(&self) -> Vec<CueRow> {
+        let mut v = vec![CueRow::Meter];
+        v.extend((0..self.rows.len()).map(CueRow::Window));
+        for (k, q) in PeakQuantity::ALL.into_iter().enumerate() {
+            if !self.extra[k].trim().is_empty() {
+                v.push(CueRow::Peak(q));
+            }
+        }
+        if self.bands.is_on() {
+            v.extend((0..self.bands.rows.len()).map(CueRow::Band));
+        }
+        if self.bands.has_predicted() {
+            v.push(CueRow::Predicted);
+        }
+        v
+    }
+
+    /// A cue row's subject as named everywhere.
+    pub fn cue_name(&self, r: CueRow) -> String {
+        match r {
+            CueRow::Meter => "Meter (worst of all)".into(),
+            CueRow::Window(i) => self
+                .rows
+                .get(i)
+                .map_or_else(String::new, |w| w.cell(Col::Length)),
+            CueRow::Peak(q) => ac2_scene::leq::peak_name(q).to_owned(),
+            CueRow::Band(i) => self
+                .bands
+                .rows
+                .get(i)
+                .map_or_else(String::new, |b| b.name()),
+            CueRow::Predicted => "Predicted LAeq".into(),
+        }
+    }
+
+    /// A cue row's cue.
+    pub fn cue_edit(&self, r: CueRow) -> Option<&CueEdit> {
+        match r {
+            CueRow::Meter => Some(&self.meter_cue),
+            CueRow::Window(i) => self.rows.get(i).map(|w| &w.cue),
+            CueRow::Peak(q) => Some(&self.peak_cues[peak_index(q)]),
+            CueRow::Band(i) => self.bands.rows.get(i).map(|b| &b.cue),
+            CueRow::Predicted => Some(&self.predicted_cue),
+        }
+    }
+
+    fn cue_edit_mut(&mut self, r: CueRow) -> Option<&mut CueEdit> {
+        match r {
+            CueRow::Meter => Some(&mut self.meter_cue),
+            CueRow::Window(i) => self.rows.get_mut(i).map(|w| &mut w.cue),
+            CueRow::Peak(q) => Some(&mut self.peak_cues[peak_index(q)]),
+            CueRow::Band(i) => self.bands.rows.get_mut(i).map(|b| &mut b.cue),
+            CueRow::Predicted => Some(&mut self.predicted_cue),
+        }
+    }
+
+    /// The cues' fold row as shown: `hidden · 3 cues set`.
+    pub fn cue_fold_text(&self) -> String {
+        let n: usize = self
+            .cue_rows()
+            .into_iter()
+            .filter_map(|r| self.cue_edit(r))
+            .map(CueEdit::set)
+            .sum();
+        let shown = if self.cues_shown { "shown" } else { "hidden" };
+        match n {
+            0 => format!("{shown} · none set"),
+            1 => format!("{shown} · 1 message set"),
+            n => format!("{shown} · {n} messages set"),
+        }
     }
 
     /// The band section's row and cell of `b`.
@@ -348,6 +475,14 @@ impl LeqDialog {
             Focus::Window { row, .. } => 2 + row,
             Focus::Extra(e) => 2 + self.rows.len() + e.index(),
             Focus::Band(b) => 2 + self.rows.len() + Extra::ALL.len() + self.band_at(b).0,
+            Focus::Scope | Focus::CueFold | Focus::Cue { .. } => {
+                self.head_rows()
+                    + self
+                        .tail()
+                        .iter()
+                        .position(|r| r.contains(&self.focus))
+                        .unwrap_or(0)
+            }
         }
     }
 
@@ -362,7 +497,8 @@ impl LeqDialog {
             Focus::Window { col, .. } => col.is_text(),
             Focus::Extra(_) => true,
             Focus::Band(b) => b.is_text(),
-            Focus::Preset | Focus::Horizon => false,
+            Focus::Cue { col, .. } => col.is_text(),
+            Focus::Preset | Focus::Horizon | Focus::Scope | Focus::CueFold => false,
         }
     }
 
@@ -376,11 +512,17 @@ impl LeqDialog {
     /// Row `i`: a window row in column `col`, a band row in its cell `cell` (or its last).
     fn set_row(&mut self, i: usize, col: Col, cell: usize) {
         let n = self.rows.len();
+        let head = self.head_rows();
         self.focus = match i {
             0 => Focus::Preset,
             1 => Focus::Horizon,
             r if r < 2 + n => Focus::Window { row: r - 2, col },
             r if r < 2 + n + Extra::ALL.len() => Focus::Extra(Extra::ALL[r - 2 - n]),
+            r if r >= head => {
+                let t = self.tail();
+                let cells = &t[(r - head).min(t.len() - 1)];
+                cells[cell.min(cells.len() - 1)]
+            }
             r => {
                 let g = self.bands.grid();
                 let cells = &g[(r - 2 - n - Extra::ALL.len()).min(g.len() - 1)];
@@ -397,6 +539,7 @@ impl LeqDialog {
         let cell = match self.focus {
             Focus::Band(b) => self.band_at(b).1,
             Focus::Window { col, .. } => Col::ALL.iter().position(|c| *c == col).unwrap_or(0),
+            Focus::Cue { col, .. } => CueCol::ALL.iter().position(|c| *c == col).unwrap_or(0),
             _ => 0,
         };
         self.set_row(i, self.col(), cell);
@@ -408,7 +551,9 @@ impl LeqDialog {
         let w = 4 * self.rows.len() as i32;
         let x = Extra::ALL.len() as i32;
         let band: Vec<BandFocus> = self.bands.grid().into_iter().flatten().collect();
-        let cells = 2 + w + x + band.len() as i32;
+        let tail: Vec<Focus> = self.tail().into_iter().flatten().collect();
+        let b = band.len() as i32;
+        let cells = 2 + w + x + b + tail.len() as i32;
         let at = match self.focus {
             Focus::Preset => 0,
             Focus::Horizon => 1,
@@ -417,6 +562,9 @@ impl LeqDialog {
             }
             Focus::Extra(e) => 2 + w + e.index() as i32,
             Focus::Band(b) => 2 + w + x + band.iter().position(|c| *c == b).unwrap_or(0) as i32,
+            f @ (Focus::Scope | Focus::CueFold | Focus::Cue { .. }) => {
+                2 + w + x + b + tail.iter().position(|c| *c == f).unwrap_or(0) as i32
+            }
         };
         let next = (at + d).rem_euclid(cells);
         self.focus = match next {
@@ -427,7 +575,8 @@ impl LeqDialog {
                 col: Col::ALL[((k - 2) % 4) as usize],
             },
             k if k < 2 + w + x => Focus::Extra(Extra::ALL[(k - 2 - w) as usize]),
-            k => Focus::Band(band[(k - 2 - w - x) as usize]),
+            k if k < 2 + w + x + b => Focus::Band(band[(k - 2 - w - x) as usize]),
+            k => tail[(k - 2 - w - x - b) as usize],
         };
         self.selected = self.on_text();
     }
@@ -476,6 +625,18 @@ impl LeqDialog {
             Focus::Horizon => self.horizon = step(self.horizon, HORIZONS.len()),
             Focus::Band(b) => self.bands.cycle(b, d),
             Focus::Extra(_) => return,
+            // Two-way toggles: → on, ← off.
+            Focus::Scope => self.on_rig = d > 0,
+            Focus::CueFold => self.cues_shown = d > 0,
+            Focus::Cue { row, col } => {
+                let Some(c) = self.cue_edit_mut(row) else {
+                    return;
+                };
+                match col {
+                    CueCol::Append => c.append = d > 0,
+                    CueCol::State(_) => return,
+                }
+            }
             Focus::Window { row, col } => {
                 self.before_preset = None;
                 let Some(r) = self.rows.get_mut(row) else {
@@ -513,6 +674,13 @@ impl LeqDialog {
     }
 
     fn text_mut(&mut self) -> Option<&mut String> {
+        if let Focus::Cue {
+            row,
+            col: CueCol::State(s),
+        } = self.focus
+        {
+            return self.cue_edit_mut(row).map(|c| c.text_mut(s));
+        }
         if let Focus::Band(b) = self.focus {
             return self.bands.text_mut(b);
         }
@@ -596,7 +764,7 @@ impl LeqDialog {
             weighting: Weighting::A,
             limit: String::new(),
             margin: "3".into(),
-            cue: None,
+            cue: CueEdit::default(),
         });
         let seconds = LENGTHS
             .iter()
@@ -609,7 +777,7 @@ impl LeqDialog {
             Row {
                 seconds,
                 limit: String::new(),
-                cue: None,
+                cue: CueEdit::default(),
                 ..from
             },
         );
@@ -709,12 +877,12 @@ impl LeqDialog {
                     "{name}: a limit is 60 … 170 dB SPL (empty for none)"
                 ));
             }
-            // A margin and cue set before (from the CLI) stay; a new limit warns 3 dB under.
+            // A margin set before (from the CLI) stays; a new limit warns 3 dB under.
             let before = self.base.leq.peaks.get(q);
             let warn_margin =
                 before.map_or(Db(LeqWindow::DEFAULT_WARN_MARGIN_DB), |l| l.warn_margin);
             *peaks.get_mut(q) = Some(PeakLimit {
-                cue: before.and_then(|l| l.cue.clone()),
+                cue: self.peak_cues[peak_index(q)].checked(name)?,
                 limit: DbSpl(v),
                 warn_margin,
             });
@@ -762,19 +930,45 @@ impl LeqDialog {
         Ok(Some(p))
     }
 
-    /// The meter's configuration with the new windows, peak limits and correction.
+    /// The meter's configuration with the new windows, peak limits, correction, scope and
+    /// cues.
     pub fn meas_config(&self) -> Result<MeasConfig, String> {
+        let mut bands = self.bands.config()?;
+        if let Some(p) = bands.as_mut().and_then(|b| b.predicted.as_mut()) {
+            p.cue = self.predicted_cue.checked("the predicted LAeq")?;
+        }
         Ok(MeasConfig {
-            scope: ac2_proto::model::MeasScope::Session,
+            scope: if self.on_rig {
+                ac2_proto::model::MeasScope::Rig
+            } else {
+                ac2_proto::model::MeasScope::Session
+            },
             name: self.name.clone(),
             kind: MeasKind::Spl {
                 config: SplConfig {
                     leq: self.leq_config()?,
                     position: self.position()?,
-                    bands: self.bands.config()?.map(Box::new),
+                    bands: bands.map(Box::new),
+                    cue: self.meter_cue.checked("the meter")?,
                     ..self.base.clone()
                 },
             },
+        })
+    }
+}
+
+fn peak_index(q: PeakQuantity) -> usize {
+    PeakQuantity::ALL.iter().position(|x| *x == q).unwrap_or(0)
+}
+
+impl LeqDialog {
+    /// The `meas.update` Enter sends: on the rev the dialog was opened on, with the scope
+    /// the dialog chose.
+    pub fn command(&self) -> Result<ac2_proto::Command, String> {
+        Ok(ac2_proto::Command::MeasUpdate {
+            meas: self.meas,
+            base: self.base_rev,
+            config: self.meas_config()?,
         })
     }
 }
