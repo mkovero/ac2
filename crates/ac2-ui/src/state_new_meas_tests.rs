@@ -177,7 +177,9 @@ fn empty_texts_name_the_chooser() {
     s.measurements.clear();
     t.conn(mirror(s));
     assert_eq!(
-        t.st.empty_hint(&t.keys).map(|h| h.text).as_deref(),
+        t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
+            .map(|h| h.text)
+            .as_deref(),
         Some(
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \
              sweep, math channel)"
