@@ -170,11 +170,11 @@ pub(crate) fn spectrum_scene_in(
         let cols = visible_columns(&t.freqs[..n], xm.range.lo, xm.range.hi);
         // Bars are band power (RTA). A narrowband bin is a tone level, and thousands of bins
         // share a pixel at the top of a log axis: drawn as bars, a single-bin tone becomes a
-        // sub-pixel sliver. Tone traces are always the max-per-pixel line.
-        let style = if t.quantity.is_narrow() {
-            SpectrumStyle::Line
-        } else {
-            view.spectrum.style
+        // sub-pixel sliver. A tone trace asked for bars gets the max-per-pixel line, which
+        // keeps a tone a spike.
+        let style = match view.spectrum.style {
+            SpectrumStyle::Bars if t.quantity.is_narrow() => SpectrumStyle::Line,
+            s => s,
         };
         match style {
             SpectrumStyle::Bars => {
@@ -202,11 +202,27 @@ pub(crate) fn spectrum_scene_in(
                     });
                 }
             }
-            SpectrumStyle::Line => {
+            SpectrumStyle::Line | SpectrumStyle::Fill => {
                 let xs: Vec<f32> = t.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
                 let ys: Vec<f32> = cols.clone().map(|i| ym.to_px(t.drawn_value(i))).collect();
                 let (xs, ys) = max_per_pixel(&xs, &ys);
                 let (points, _) = gapped(&xs, &ys, None, |_, _| false);
+                if style == SpectrumStyle::Fill && !points.is_empty() {
+                    // The area under the same thinned points as the line, so a tone stays a
+                    // spike and a gap in the line (a NaN break) is a gap in the fill.
+                    c.data.bands.push(Band {
+                        points: points
+                            .iter()
+                            .map(|&[x, y]| BandPoint {
+                                x,
+                                y0: y,
+                                y1: plot.bottom(),
+                            })
+                            .collect(),
+                        color: color.with_alpha(theme.fill_alpha),
+                        clip: Some(plot),
+                    });
+                }
                 if !points.is_empty() {
                     c.data.polylines.push(Polyline {
                         points,
@@ -247,7 +263,7 @@ pub(crate) fn spectrum_scene_in(
                     }
                     pts
                 }
-                SpectrumStyle::Line => {
+                SpectrumStyle::Line | SpectrumStyle::Fill => {
                     let xs: Vec<f32> = t.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
                     let ys: Vec<f32> = cols
                         .clone()
@@ -264,7 +280,7 @@ pub(crate) fn spectrum_scene_in(
                     stroke: Stroke {
                         color: pc,
                         width: (theme.trace_width * 0.75).max(1.0),
-                        dash: (style == SpectrumStyle::Line).then_some(Dash {
+                        dash: (style != SpectrumStyle::Bars).then_some(Dash {
                             on: 4.0,
                             off: 3.0,
                             offset: 0.0,

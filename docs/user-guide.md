@@ -668,6 +668,13 @@ over the time between them (30–200 ms); the cursor, peak hold and captures use
 spectrum itself, and stale, stopped or reconfigured measurements are drawn as they are.
 Settings › Display › Spectrum "jumps to each new frame" turns gliding off (RTAs too).
 
+**B** steps the curves through three styles: **line**, **fill** (the same line over a faint
+area in the trace colour down to the bottom of the plot) and **bars**. Bars show band power,
+so only RTA traces become bars; a narrowband spectrum in bars is drawn as the line, since a
+one-bin tone as a bar would be thinner than a pixel. The fill follows the line exactly: a
+tone stays a spike, a gap in the line is a gap in the fill, stale traces dim, and the peak
+hold stays a line on top.
+
 #### Fixed or multi-resolution
 
 A spectrum's **Resolution** is one FFT (`64 pt` … `65536 pt`, default 65 536) or
@@ -2587,7 +2594,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `J` | Type dB offset of selected trace… | `offset` |
 | `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
 | `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
-| `B` | RTA: bars / line | `spectrum_style` |
+| `B` | Spectrum: line / fill / bars | `spectrum_style` |
 | `P` | Peak hold on / off | `peak_hold` |
 | `Shift+B` | Spectrograph history: 10 → 30 → 60 → 120 s | `spectrograph_span` |
 | `G` | Next view | `next_view` |

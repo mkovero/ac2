@@ -227,7 +227,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::PrevView, S::Spl, sh(K::G)),
         (C::NextView, S::Distortion, k(K::G)),
         (C::PrevView, S::Distortion, sh(K::G)),
-        // Shift+B, beside B (bars / line): the spectrograph's history length.
+        // Shift+B, beside B (line / fill / bars): the spectrograph's history length.
         (C::SpectrographSpan, S::Spectrum, sh(K::B)),
         // R resets the meter's display; Shift+R, a step further, starts a new log (after a
         // confirmation: it discards show data).
@@ -298,7 +298,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                 &[
                     hint(C::StartStop, "start/stop", 70),
                     hint(C::PeakHold, "peak hold", 75),
-                    // The RTA's bars / line (B) is in the help and the palette: the line
+                    // The spectrum style (B) is in the help and the palette: the line
                     // holds eight.
                     hint(C::NextView, "view", 65),
                     hint(C::SmoothCoarser, "smoothing", 60),

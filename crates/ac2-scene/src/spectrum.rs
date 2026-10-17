@@ -20,7 +20,7 @@ use crate::canvas::{
 use crate::format;
 use crate::grid::column_at;
 use crate::primitives::{
-    Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
+    Band, BandPoint, Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::tf::LegendEntry;
 use crate::theme::Theme;

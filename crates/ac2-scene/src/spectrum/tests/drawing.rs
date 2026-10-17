@@ -410,6 +410,56 @@ fn line_thinning_keeps_peaks() {
     }
 }
 
+/// Fill draws, per trace, an area whose top edge is exactly the line (the same thinned
+/// points and the same gaps) and whose bottom is the plot bottom; a stale trace's fill dims
+/// with its line, and the peak hold stays a line.
+#[test]
+fn fill_is_the_line_over_an_area_to_the_bottom() {
+    let g = third_octaves();
+    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let mut level: Vec<f32> = vec![-40.0; f.len()];
+    level[15] = f32::NAN;
+    let peak = vec![-30.0f32; f.len()];
+    let mut a = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    a.peak = Some(&peak);
+    let mut b = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    b.name = "Main L S1".into();
+    b.offset_db = 6.0;
+    b.freshness = Some(Freshness::Stale { age_s: 3.0 });
+    let view = ViewState {
+        spectrum: SpectrumView {
+            style: SpectrumStyle::Fill,
+            level: Range::new(-60.0, 0.0),
+            peak_hold: true,
+            ..SpectrumView::default()
+        },
+        ..ViewState::default()
+    };
+    let theme = Theme::dark();
+    let s = spectrum_scene(&[a, b], &Status::default(), &view, &theme, SIZE);
+    let data = &s.scene.layers[1];
+    assert!(data.rects.is_empty());
+    assert_eq!(data.bands.len(), 2);
+    // Line A, A's peak hold, line B.
+    assert_eq!(data.polylines.len(), 3);
+    assert!(data.polylines[1].stroke.dash.is_some());
+    for (band, line) in data
+        .bands
+        .iter()
+        .zip([&data.polylines[0], &data.polylines[2]])
+    {
+        assert_eq!(band.points.len(), line.points.len());
+        for (bp, lp) in band.points.iter().zip(&line.points) {
+            assert!(bp.x == lp[0] || (bp.x.is_nan() && lp[0].is_nan()));
+            assert!(bp.y0 == lp[1] || (bp.y0.is_nan() && lp[1].is_nan()));
+            assert_eq!(bp.y1, s.plot.bottom());
+        }
+        assert_eq!(crate::canvas::tests::segments(&line.points).len(), 2);
+        assert_eq!(band.color, line.stroke.color.with_alpha(theme.fill_alpha));
+    }
+    assert!(data.bands[1].color.a < data.bands[0].color.a);
+}
+
 #[test]
 fn tone_traces_ignore_bar_style() {
     // 4096-point FFT at 48 kHz: a 1 kHz tone in one bin, ~0.5 px wide on this axis.
@@ -428,6 +478,8 @@ fn tone_traces_ignore_bar_style() {
     let line = &s.scene.layers[1].polylines[0];
     let want = [s.x_axis.mapping.to_px(f[k]), s.y_axis.mapping.to_px(-30.0)];
     assert!(line.points.contains(&want));
+    // The plain line: a fill is only drawn when Fill is chosen.
+    assert!(s.scene.layers[1].bands.is_empty());
 }
 
 #[test]
