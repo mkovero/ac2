@@ -250,6 +250,8 @@ fn no_delay_estimate_says_why() {
         grid_id: None,
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
     };
     let why = no_delay_estimate(&m);
     assert_eq!(

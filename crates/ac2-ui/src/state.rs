@@ -84,6 +84,8 @@ mod leq_export;
 pub use leq_export::{EXPORT_DIR, export_path, leq_export_name};
 #[path = "state_link.rs"]
 mod link;
+#[path = "state_meas_display.rs"]
+mod meas_display;
 #[path = "state_meas_layout.rs"]
 mod meas_layout;
 #[path = "state_new_meas.rs"]
@@ -217,12 +219,6 @@ pub struct AppState {
     /// By id: names may repeat, and hiding one `Main` must not hide another. `ui.toml`
     /// keeps them by name ([`AppState::restore_meas_choices`]).
     pub hidden_meas: BTreeSet<MeasId>,
-    /// Measurements (live curves, math channels) every transfer pane draws besides its own
-    /// group, by id as hidden ones are (compare, C): an overlay, never an operand.
-    pub compared_meas: BTreeSet<MeasId>,
-    /// Stored traces every transfer pane draws besides its own group (compare, C), whatever
-    /// their owner. Ids are the daemon's: kept while the app runs, not in `ui.toml`.
-    pub compared_traces: BTreeSet<TraceId>,
     /// Groups of the measurement tree folded in this app (their rows not listed).
     pub collapsed: BTreeSet<ac2_proto::model::TraceOwner>,
     pub edits: BTreeMap<MeasId, LiveEdit>,
@@ -332,8 +328,6 @@ pub struct AppState {
     /// from `ui.toml`, or a hidden one the daemon took away (a session reopening, a daemon
     /// restarting renumbers them).
     pending_hidden: BTreeSet<String>,
-    /// Compared measurements by name, waiting as hidden ones do.
-    pending_compared: BTreeSet<String>,
     /// Each pane's level axis ranges, by pane: a pane not here draws on the defaults.
     pane_levels: BTreeMap<PaneId, PaneLevels>,
     /// Spectrum panes whose level axis is framed for what they show, or set by the operator:
@@ -434,10 +428,9 @@ fn typed_char(c: &Chord) -> Option<char> {
 }
 
 impl AppState {
-    /// The theme the panes are drawn with: the chosen theme with the chosen spectrograph
-    /// colours.
+    /// The theme the panes are drawn with.
     pub fn scene_theme(&self) -> ac2_scene::theme::Theme {
-        ac2_scene::theme::Theme::by_name(self.theme).with_colormap(self.prefs.spectrograph_colours)
+        ac2_scene::theme::Theme::by_name(self.theme)
     }
 
     pub fn new(theme: ThemeName, target: String) -> Self {
@@ -509,10 +502,7 @@ impl AppState {
             pending_hidden: BTreeSet::new(),
             pane_levels: BTreeMap::new(),
             spectrum_hold: BTreeMap::new(),
-            pending_compared: BTreeSet::new(),
             hidden_meas: BTreeSet::new(),
-            compared_meas: BTreeSet::new(),
-            compared_traces: BTreeSet::new(),
             collapsed: BTreeSet::new(),
             link_wants: crate::link_wants::Sent::default(),
             spectrum_running: BTreeSet::new(),
@@ -586,7 +576,6 @@ impl AppState {
             // An undo or redo stores what it restores itself, on the owner of the edit only.
             let undoing = std::mem::take(&mut self.undoing);
             self.sync_meas_layout(panes_before, conn || undoing, drag, &mut out);
-            self.prune_compared();
             if let Some(w) = edit.filter(|_| !undoing) {
                 let ran = self.ran_command;
                 self.record_edit(w, ran);
@@ -694,7 +683,7 @@ impl AppState {
             Msg::DragSplit { path, ratio } => self.drag_split(&path, ratio),
             // The drag's step was closed before the message, as any other message closes it.
             Msg::DragSplitEnd => {}
-            Msg::RowDrag(m) => self.row_drag_msg(m),
+            Msg::RowDrag(m) => self.row_drag_msg(m, out),
             Msg::Zoom { about_hz, factor } => {
                 let t = self.nav.target.zoom(about_hz, factor);
                 self.nav.set_target(t);

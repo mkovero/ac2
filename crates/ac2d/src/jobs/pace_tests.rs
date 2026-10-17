@@ -114,6 +114,7 @@ fn spectrum_config() -> SpectrumConfig {
         averaging: SpecAveraging::Off,
         smoothing: None,
         level: ac2_proto::model::SpecLevel::Tone,
+        display: Default::default(),
     }
 }
 
@@ -181,6 +182,7 @@ fn rta() -> Rta {
             f_hi: Hz(16_000.0),
             weighting: Weighting::Z,
             averaging: SpecAveraging::Off,
+            display: Default::default(),
         },
         FS,
         0,

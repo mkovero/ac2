@@ -111,7 +111,6 @@ impl AppState {
                 .collect(),
         });
         let hidden = self.remembered_names(&self.hidden_meas, &self.pending_hidden);
-        let compared = self.remembered_names(&self.compared_meas, &self.pending_compared);
         crate::prefs::LayoutPrefs {
             panes,
             maximized: self.layout.maximized,
@@ -119,11 +118,10 @@ impl AppState {
             panes_only: self.panes_only,
             distortion_unit: self.view.distortion.unit,
             hidden,
-            compared,
         }
     }
 
-    /// The names `ui.toml` keeps for the measurements `ids` (hidden or compared) and the
+    /// The names `ui.toml` keeps for the measurements `ids` (hidden) and the
     /// names still waiting in `pending`. A name only when it is that measurement's alone: a
     /// name several measurements share would apply to none of them in the next run
     /// ([`Self::restore_meas_choices`]), and kept, it would come to mean whichever of them
@@ -152,10 +150,9 @@ impl AppState {
         names
     }
 
-    /// Hidden and compared measurements remembered by name (`ui.toml`, or ones the daemon
-    /// took away) become ids once the daemon lists a measurement of that name; after that,
-    /// a rename keeps the choice on the measurement and a new one of an old name starts
-    /// shown and uncompared.
+    /// Hidden measurements remembered by name (`ui.toml`, or ones the daemon took away)
+    /// become ids once the daemon lists a measurement of that name; after that, a rename
+    /// keeps the choice on the measurement and a new one of an old name starts shown.
     ///
     /// A name several measurements share applies to none of them, and is forgotten: the
     /// name cannot say which was meant, and a hide is the riskier guess (a curve missing
@@ -165,9 +162,7 @@ impl AppState {
     /// name no measurement has waits as a pane's remembered measurement does: while the
     /// daemon lists none, or once listed (it comes back with a session reopening).
     pub(super) fn restore_meas_choices(&mut self) {
-        if self.daemon().is_none()
-            || (self.pending_hidden.is_empty() && self.pending_compared.is_empty())
-        {
+        if self.daemon().is_none() || self.pending_hidden.is_empty() {
             return;
         }
         let ms: Vec<(MeasId, String)> = self
@@ -190,7 +185,6 @@ impl AppState {
             });
         };
         resolve(&mut self.pending_hidden, &mut self.hidden_meas);
-        resolve(&mut self.pending_compared, &mut self.compared_meas);
     }
 
     /// Saves the layout (with each pane's level axes), the IR axes and the legend with the
@@ -322,14 +316,9 @@ impl AppState {
         // Before any frame: a spectrum that starts still fits its axis on its first one.
         prefs.ir_levels.apply(&mut self.view);
         prefs.legend.apply(&mut self.view.tf.legend);
-        if let Some(s) = prefs.spectrograph_span_s {
-            self.view.spectrum.spectrograph.span_s = s;
-        }
         self.view.unresolved = prefs.resolution_marker;
         self.hidden_meas.clear();
-        self.compared_meas.clear();
         self.pending_hidden = l.hidden.clone();
-        self.pending_compared = l.compared.clone();
         self.prefs = prefs;
         self.restore_meas_choices();
     }

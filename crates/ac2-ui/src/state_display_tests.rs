@@ -120,23 +120,34 @@ fn offset_steps_change_the_selected_trace() {
     );
 }
 
+/// The offset keys with no trace selected: the pane's measurement's offset, which the
+/// daemon keeps with it (`meas.offset`).
 #[test]
 fn offset_steps_change_the_pane_measurement_without_a_trace() {
     let mut t = T::new();
-    // The transfer pane: its measurement, display only (nothing is sent).
-    assert!(t.key("Alt+Up").is_empty());
-    assert_eq!(t.st.edit(MeasId(1)).offset_db, 1.0);
-    assert_eq!(t.last_toast(), "Main L: offset +1.0 dB (display)");
-    t.key("Alt+Shift+Up");
-    assert_eq!(t.st.edit(MeasId(1)).offset_db, 4.0);
+    let offset = |r: &[Request]| match calls(r).first() {
+        Some((Command::MeasOffset { meas, offset }, what)) => (*meas, offset.0, what.to_string()),
+        other => panic!("{other:?}"),
+    };
+    // The transfer pane: its measurement.
+    let r = t.key_answered("Alt+Up");
+    assert_eq!(
+        offset(&r),
+        (MeasId(1), 1.0, "Main L: offset +1.0 dB (display)".into())
+    );
+    assert_eq!(t.st.meas_offset(MeasId(1)), 1.0);
+    t.key_answered("Alt+Shift+Up");
+    assert_eq!(t.st.meas_offset(MeasId(1)), 4.0);
     // The spectrum pane: the spectrum.
     t.key("Alt+2");
-    assert!(t.key("Alt+Shift+Down").is_empty());
-    assert_eq!(t.st.edit(MeasId(2)).offset_db, -3.0);
-    assert_eq!(t.last_toast(), "Sub: offset −3.0 dB (display)");
-    assert_eq!(t.st.edit(MeasId(1)).offset_db, 4.0);
-    t.key("Alt+Home");
-    assert_eq!(t.st.edit(MeasId(2)).offset_db, 0.0);
+    let r = t.key_answered("Alt+Shift+Down");
+    assert_eq!(
+        offset(&r),
+        (MeasId(2), -3.0, "Sub: offset −3.0 dB (display)".into())
+    );
+    assert_eq!(t.st.meas_offset(MeasId(1)), 4.0);
+    t.key_answered("Alt+Home");
+    assert_eq!(t.st.meas_offset(MeasId(2)), 0.0);
     assert_eq!(t.last_toast(), "Sub: no offset (display)");
     // J types it there too.
     t.type_key("J", "j");
@@ -145,9 +156,12 @@ fn offset_steps_change_the_pane_measurement_without_a_trace() {
         Overlay::Prompt(p) if p.kind == PromptKind::Offset(MeasId(2))
     ));
     t.text("-2.5");
-    assert!(t.key("Enter").is_empty());
-    assert_eq!(t.st.edit(MeasId(2)).offset_db, -2.5);
-    assert_eq!(t.last_toast(), "Sub: offset −2.5 dB (display)");
+    let r = t.key_answered("Enter");
+    assert_eq!(
+        offset(&r),
+        (MeasId(2), -2.5, "Sub: offset −2.5 dB (display)".into())
+    );
+    assert_eq!(t.st.meas_offset(MeasId(2)), -2.5);
 }
 
 /// The offset is written next to the curve, so a spread trace is never read as a level
@@ -380,17 +394,22 @@ mod axis;
 #[path = "state_display_delete_tests.rs"]
 mod delete;
 
-/// B steps the spectrum style line → fill → bars → line.
+/// B steps the spectrum pane's measurement's style line → fill → bars → line.
 #[test]
 fn b_cycles_spectrum_line_fill_bars() {
-    use ac2_scene::view::SpectrumStyle;
+    use ac2_proto::model::SpectrumStyle;
     let mut t = T::new();
     t.go(PaneKind::Spectrum);
-    t.st.view.spectrum.style = SpectrumStyle::Line;
+    t.remirror(|s| {
+        if let Some(d) = s.measurements[0].config.kind.display_mut() {
+            d.style = SpectrumStyle::Line;
+        }
+    });
     let mut seen = Vec::new();
     for _ in 0..3 {
-        t.key("B");
-        seen.push(t.st.view.spectrum.style);
+        t.key_answered("B");
+        let m = t.st.meas(MeasId(2)).expect("Sub");
+        seen.push(t.st.display_of(m).style);
     }
     assert_eq!(
         seen,
@@ -400,6 +419,7 @@ fn b_cycles_spectrum_line_fill_bars() {
             SpectrumStyle::Line
         ]
     );
+    assert_eq!(t.last_toast(), "Sub: line");
 }
 
 #[path = "state_display_select_tests.rs"]

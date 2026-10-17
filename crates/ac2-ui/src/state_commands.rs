@@ -456,12 +456,12 @@ impl AppState {
                 self.prefs.theme = Some(self.theme);
                 self.prefs_dirty = true;
             }
-            C::SpectrographColours => self.step_spectrograph_colours(1),
-            C::SpectrographViridis => self.set_spectrograph_colours(Colormap::Viridis),
-            C::SpectrographMagma => self.set_spectrograph_colours(Colormap::Magma),
-            C::SpectrographInferno => self.set_spectrograph_colours(Colormap::Inferno),
-            C::SpectrographCividis => self.set_spectrograph_colours(Colormap::Cividis),
-            C::SpectrographGrey => self.set_spectrograph_colours(Colormap::Grey),
+            C::SpectrographColours => self.spectrograph_colours(Err(1), out),
+            C::SpectrographViridis => self.spectrograph_colours(Ok(Colormap::Viridis), out),
+            C::SpectrographMagma => self.spectrograph_colours(Ok(Colormap::Magma), out),
+            C::SpectrographInferno => self.spectrograph_colours(Ok(Colormap::Inferno), out),
+            C::SpectrographCividis => self.spectrograph_colours(Ok(Colormap::Cividis), out),
+            C::SpectrographGrey => self.spectrograph_colours(Ok(Colormap::Grey), out),
             C::PlotChrome => {
                 let title = self.layout.focused().title();
                 let spl = self.layout.focus_kind() == PaneKind::Spl;
@@ -519,8 +519,8 @@ impl AppState {
                 }
                 self.level_key(c)
             }
-            C::Compare => self.toggle_compare(keymap),
-            C::ClearCompare => self.clear_compare(),
+            C::Compare => self.open_compare(keymap),
+            C::ClearCompare => self.clear_compare(out),
             C::ToggleCursor => {
                 let t = self.nav.target;
                 self.view.cursor_hz = match self.view.cursor_hz {

@@ -284,7 +284,7 @@ fn two_mains() -> State {
     s
 }
 
-/// Hiding or comparing one of two measurements of one name is that measurement's alone.
+/// Hiding one of two measurements of one name is that measurement's alone.
 #[test]
 fn hiding_one_of_two_same_named_measurements_hides_only_it() {
     let mut t = T::new();
@@ -293,13 +293,6 @@ fn hiding_one_of_two_same_named_measurements_hides_only_it() {
     let m = |t: &T, id| t.st.meas(MeasId(id)).cloned().expect("meas");
     assert!(t.st.meas_hidden(&m(&t, 1)));
     assert!(!t.st.meas_hidden(&m(&t, 3)), "hiding id 1 also hid id 3");
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
-    t.key("C");
-    assert!(t.st.meas_compared(&m(&t, 3)));
-    assert!(
-        !t.st.meas_compared(&m(&t, 1)),
-        "comparing id 3 also compared id 1"
-    );
 }
 
 /// A hidden measurement deleted elsewhere does not pass its choice to another of its name.
@@ -353,7 +346,6 @@ fn remembered_names_resolve_to_ids_and_a_shared_name_applies_to_none() {
     let p = crate::prefs::UiPrefs {
         layout: crate::prefs::LayoutPrefs {
             hidden: ["Main".to_owned(), "Sub".to_owned()].into(),
-            compared: ["Main".to_owned()].into(),
             ..Default::default()
         },
         ..Default::default()
@@ -365,13 +357,11 @@ fn remembered_names_resolve_to_ids_and_a_shared_name_applies_to_none() {
     u.st.set_prefs(p);
     u.connect(two_mains());
     assert_eq!(u.st.hidden_meas, [MeasId(2)].into());
-    assert!(u.st.compared_meas.is_empty());
     // One Main deleted elsewhere: the other does not take the forgotten choice.
     let mut s = two_mains();
     s.measurements.retain(|m| m.id != MeasId(3));
     u.conn(mirror(s));
     assert!(!u.st.meas_hidden(u.st.meas(MeasId(1)).expect("Main")));
-    assert!(u.st.compared_meas.is_empty());
 }
 
 /// A daemon restarting numbers its measurements afresh: a hidden one waits by name and

@@ -193,7 +193,32 @@ impl Shared {
         self.traces.irs.remove(&id);
         self.traces.mic_curves.remove(&id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
+        let rev = self.prune_compared().unwrap_or(rev);
         Ok(ReplyBody::Ack { rev })
+    }
+
+    /// Drops what is gone from every compare list, as the daemon does.
+    pub(super) fn prune_compared(&mut self) -> Option<Rev> {
+        let changed: Vec<Measurement> = self
+            .state
+            .measurements
+            .iter()
+            .filter_map(|m| {
+                let keep = |c: &Compared| match *c {
+                    Compared::Meas { meas } => self.state.measurements.iter().any(|o| o.id == meas),
+                    Compared::Trace { trace } => self.state.traces.iter().any(|t| t.id == trace),
+                };
+                let mut m = m.clone();
+                let n = m.compared.len();
+                m.compared.retain(keep);
+                (m.compared.len() != n).then_some(m)
+            })
+            .collect();
+        let mut rev = None;
+        for m in changed {
+            rev = Some(self.commit(Change::Measurement(Patch::Set(m))));
+        }
+        rev
     }
 
     fn derived(

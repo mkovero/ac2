@@ -38,6 +38,8 @@ fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
         grid_id: None,
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
     }
 }
 
@@ -65,6 +67,7 @@ fn spectrum() -> MeasKind {
             averaging: SpecAveraging::Off,
             smoothing: None,
             level: ac2_proto::model::SpecLevel::Tone,
+            display: Default::default(),
         },
     }
 }
@@ -302,6 +305,65 @@ impl T {
     fn last_toast(&self) -> &str {
         self.st.toasts.last().map_or("", |t| t.text.as_str())
     }
+
+    /// The daemon's state changed by `f`, as the next mirror shows it.
+    fn remirror(&mut self, f: impl FnOnce(&mut State)) {
+        let mut s = self.st.daemon().cloned().expect("a daemon state");
+        f(&mut s);
+        self.conn(mirror(s));
+    }
+
+    /// What the daemon makes of the measurement calls in `r` (display, offset, compare), as
+    /// its mirror then shows: the success toast each names, as the reply brings it.
+    fn answer(&mut self, r: &[Request]) {
+        for r in r {
+            let Request::Call { cmd, what } = r else {
+                continue;
+            };
+            let what = what.clone();
+            match cmd.clone() {
+                Command::MeasUpdate { meas, config, .. } => {
+                    self.remirror(|s| {
+                        if let Some(m) = s.measurements.iter_mut().find(|m| m.id == meas) {
+                            m.config = config;
+                        }
+                    });
+                }
+                Command::MeasOffset { meas, offset } => self.remirror(|s| {
+                    if let Some(m) = s.measurements.iter_mut().find(|m| m.id == meas) {
+                        m.offset = offset;
+                    }
+                }),
+                Command::MeasCompare { meas, compared } => self.remirror(|s| {
+                    if let Some(m) = s.measurements.iter_mut().find(|m| m.id == meas) {
+                        m.compared = compared;
+                    }
+                }),
+                _ => continue,
+            }
+            self.conn(ConnEvent::Reply {
+                what,
+                result: Ok(()),
+            });
+        }
+    }
+
+    /// A key, and the daemon's answer to what it asked.
+    fn key_answered(&mut self, s: &str) -> Vec<Request> {
+        let r = self.key(s);
+        self.answer(&r);
+        r
+    }
+}
+
+/// The measurement calls in `r`, with their success toasts.
+fn calls(r: &[Request]) -> Vec<(&Command, &str)> {
+    r.iter()
+        .filter_map(|r| match r {
+            Request::Call { cmd, what } => Some((cmd, what.as_str())),
+            _ => None,
+        })
+        .collect()
 }
 
 fn set_level(r: &Request) -> Option<(f64, bool, bool)> {
@@ -991,3 +1053,6 @@ fn shift_c_steps_the_selected_measurements_colour() {
         other => panic!("{other:?}"),
     }
 }
+
+#[path = "state_meas_display_tests.rs"]
+mod meas_display;

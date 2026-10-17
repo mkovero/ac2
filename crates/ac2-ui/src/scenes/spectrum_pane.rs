@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use ac2_client::TopicFrame;
 use ac2_proto::FrameData;
-use ac2_proto::model::{LevelScale, Measurement, TraceKind};
+use ac2_proto::model::{Compared, LevelScale, Measurement, TraceKind};
 use ac2_proto::units::MeasId;
 use ac2_scene::banner::Status;
 use ac2_scene::grid::{GridColumns, columns};
@@ -85,16 +85,22 @@ pub fn spectrograph(
         let stream = crate::state::spectrum_stream(m)?;
         Some((m, stream))
     });
-    let empty = SpectrographHistory::new(st.view.spectrum.spectrograph.span_s);
+    let display = shown.map(|(m, _)| st.display_of(m)).unwrap_or_default();
+    let empty = SpectrographHistory::new(display.spectrograph_span_s);
     let input = shown.map(|(m, stream)| {
-        let history = st.spectrographs.get(&m.id).unwrap_or(&empty);
+        let history = st
+            .spectrographs
+            .get(&m.id)
+            .filter(|h| h.span_s() == display.spectrograph_span_s)
+            .unwrap_or(&empty);
         let scale = history.scale().unwrap_or_else(|| spectrum_scale(st, pane));
         SpectrographInput {
             history,
             name: m.config.name.clone(),
             range: st.view_for(pane).spectrum.range(scale),
-            offset_db: st.edit(m.id).offset_db,
+            offset_db: st.meas_offset(m.id),
             freshness: frame(st, m.id, stream).map(|tf| freshness(st, tf)),
+            colours: display.spectrograph_colours,
         }
     });
     with_spectrum(st, pane, theme, now, |traces, status, view| {
@@ -102,11 +108,13 @@ pub fn spectrograph(
     })
 }
 
-/// Calls `f` with the spectrum pane's traces (live, then stored), its banner status and
-/// the view on the level range of the scale its curves are in. The pane draws its
-/// measurement's group — its live curve, the math channels made on it, its shown stored
-/// spectra and band sets — and the curves compared (C), tagged so; never another
-/// measurement's otherwise, nor an imported trace.
+/// Calls `f` with the spectrum pane's traces, its banner status and the view on the level
+/// range of the scale its curves are in. The pane draws its measurement's group — its live
+/// curve, the math channels made on it, its shown stored spectra and band sets — and the
+/// curves compared into that measurement (C), tagged so; never another measurement's
+/// otherwise, nor an imported trace. Its own group comes first (live, then stored), then
+/// the compared curves in compare order: the order they stack in, top first. Each draws
+/// with its own measurement's style and peak hold (a stored one with its owner's).
 pub(crate) fn with_spectrum<R>(
     st: &AppState,
     pane: PaneId,
@@ -200,10 +208,13 @@ pub(crate) fn with_spectrum<R>(
             _ => continue,
         };
         t.drawn = drawn.as_deref();
-        if st.view.spectrum.peak_hold {
+        let display = st.display_of(c.meas);
+        t.style = display.style;
+        if display.peak_hold {
             t.peak = st.peaks.get(&c.meas.id).map(|p| p.2.values());
         }
-        t.offset_db = st.edit(c.meas.id).offset_db;
+        // Its own offset, compared into another measurement's pane too.
+        t.offset_db = st.meas_offset(c.meas.id);
         // A math channel's caption is its expression and what it means.
         if let Some(m) = math_status(st, c.meas, &c.tf.frame.data) {
             t.caption = m.tag();
@@ -212,6 +223,9 @@ pub(crate) fn with_spectrum<R>(
             t.bin_hz = c.cols.bin_hz;
         }
         t.compared = st.live_compared_on(kind, c.meas, shown);
+        if t.compared {
+            t.layer = st.compare_layer(shown, Compared::Meas { meas: c.meas.id });
+        }
         traces.push(t);
     }
     // Stored spectra / RTA bands, drawn under the live ones' axis rules.
@@ -252,6 +266,7 @@ pub(crate) fn with_spectrum<R>(
         cols,
     } in &stored
     {
+        let compared = st.trace_compared_on(kind, &data.meta, shown);
         traces.push(SpectrumTrace {
             key: TraceKey::Stored(data.meta.id),
             name: data.meta.edit.name.clone(),
@@ -278,10 +293,23 @@ pub(crate) fn with_spectrum<R>(
             freshness: None,
             offset_db: data.meta.edit.offset.0,
             selected: st.selected_trace == Some(data.meta.id),
-            compared: st.trace_compared_on(kind, &data.meta, shown),
+            compared,
             bands: None,
+            style: st.trace_display(&data.meta).style,
+            layer: if compared {
+                st.compare_layer(
+                    shown,
+                    Compared::Trace {
+                        trace: data.meta.id,
+                    },
+                )
+            } else {
+                0
+            },
         });
     }
+    // Stable: the own group keeps live before stored.
+    traces.sort_by_key(|t| t.layer);
     let drawn_frames: Vec<&TopicFrame> = cols.iter().map(|c| c.tf).collect();
     let mut status = status(st, &drawn_frames, None, now);
     let frames: Vec<(MeasId, &TopicFrame)> = cols.iter().map(|c| (c.meas.id, c.tf)).collect();

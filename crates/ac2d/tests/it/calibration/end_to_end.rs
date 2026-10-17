@@ -41,6 +41,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
                     averaging: SpecAveraging::Off,
                     smoothing: None,
                     level: ac2_proto::model::SpecLevel::Tone,
+                    display: Default::default(),
                 },
             },
         },
@@ -57,6 +58,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
                     averaging: SpecAveraging::Exponential {
                         time_constant: Seconds(1.0),
                     },
+                    display: Default::default(),
                 },
             },
         },

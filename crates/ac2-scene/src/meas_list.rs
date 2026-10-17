@@ -333,28 +333,71 @@ pub fn imported_hint(n: usize, move_key: Option<&str>) -> String {
     format!("{what} not on this pane — select it, then {how}")
 }
 
-/// What C says: `Main R compared on the transfer pane (cmp)`, or that compare is off.
-/// `panes` names the panes that draw it (`the transfer pane`, `the transfer and sweep
-/// panes`). A hidden curve is compared but not drawn until shown.
-pub fn compare_toast(name: &str, panes: &str, on: bool, shown: bool) -> String {
+/// What a compare toggle says: `Spectrum 2 compared into Spectrum 1 (cmp)`, or that it is
+/// off there. A hidden curve is compared but not drawn until shown.
+pub fn compare_toast(name: &str, target: &str, on: bool, shown: bool) -> String {
     let tag = crate::trace::COMPARED;
     match (on, shown) {
-        (false, _) => format!("{name}: compare off"),
-        (true, true) => format!("{name} compared on {panes} ({tag})"),
+        (false, _) => format!("{name}: no longer compared into {target}"),
+        (true, true) => format!("{name} compared into {target} ({tag})"),
         (true, false) => {
-            format!("{name} compared on {panes} ({tag}) — hidden: A shows it")
+            format!("{name} compared into {target} ({tag}) — hidden: A shows it")
         }
     }
 }
 
-/// Where a compared curve is drawn, from what the panes that draw it show:
-/// `the transfer pane`, `the transfer and sweep panes`.
-pub fn compare_panes(whats: &[&str]) -> String {
-    match whats {
-        [] => "no pane".to_owned(),
-        [one] => format!("the {one} pane"),
-        [rest @ .., last] => format!("the {} and {last} panes", rest.join(", ")),
+/// A measurement C offers to compare a curve into.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompareTarget {
+    pub name: String,
+    /// A pane on screen shows it.
+    pub shown: bool,
+    /// The curve is compared into it already.
+    pub on: bool,
+}
+
+/// The question C asks: which measurement's panes draw the curve. A tick marks those it is
+/// compared into; Enter adds or removes the highlighted one and the list stays open.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompareChoices {
+    /// `Compare Spectrum 2 with…`
+    pub title: String,
+    pub lines: Vec<String>,
+    /// One per target, in the order given (those on screen first).
+    pub choices: Vec<Choice>,
+    pub hint: String,
+}
+
+/// Mark of a target the curve is compared into.
+pub const COMPARE_TICK: &str = "\u{2713}";
+
+/// The compare chooser for curve `name` over `targets` (on screen first).
+pub fn compare_choices(name: &str, targets: &[CompareTarget]) -> CompareChoices {
+    CompareChoices {
+        title: format!("Compare {name} with…"),
+        lines: vec![format!(
+            "{name} is drawn over the panes of each measurement ticked, under its own curves."
+        )],
+        choices: targets
+            .iter()
+            .map(|t| Choice {
+                label: format!(
+                    "{} {}{}",
+                    if t.on { COMPARE_TICK } else { " " },
+                    t.name,
+                    if t.shown { " · on screen" } else { "" }
+                ),
+                blocked: None,
+            })
+            .collect(),
+        hint: "Enter adds or removes · Esc closes".to_owned(),
     }
+}
+
+/// What C says when no measurement's panes could draw curve `name` (`what`: `spectrum or
+/// RTA`, `transfer`, `sweep`).
+pub fn compare_no_target(name: &str, what: &str) -> String {
+    format!("{name}: no other {what} measurement to compare it with — make one first")
 }
 
 /// What C on a stored trace under Imported says: compare draws over a measurement's
@@ -364,7 +407,7 @@ pub fn imported_compare_hint(name: &str, move_key: Option<&str>) -> String {
         || "Move to measurement…".to_owned(),
         |k| format!("Move to measurement… ({k})"),
     );
-    format!("{name} is under Imported: no pane draws it — select it, then {how}")
+    format!("{name} is under Imported: it is no measurement's to compare — select it, then {how}")
 }
 
 /// What C on an SPL meter says: a meter is a number, compared by seeing two side by side.

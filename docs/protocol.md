@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 57`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 58`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -109,6 +109,8 @@ Lease column: **L** = `lease_token` required (Q6).
 | `meas.update` | `meas`, `base: Rev` (the `config_rev` the edit was made on), `config` | `measurement` | |
 | `meas.colour` | `meas`, `colour: ColourFamily \| nil` | `measurement` | |
 | `meas.layout` | `meas`, `layout: PaneLayout \| nil` | `measurement` | |
+| `meas.compare` | `meas`, `compared: [Compared]` | `measurement` | |
+| `meas.offset` | `meas`, `offset: Db` | `measurement` | |
 | `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the traces and math channels it owns) | `ack` | |
 | `meas.start` | `meas` | `measurement` | |
 | `meas.stop` | `meas` | `measurement` | |
@@ -343,6 +345,23 @@ column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on
 the window are each client's. `invalid` for a ratio out of range and for more than 16
 panes; a session file's layout that is either is dropped on load.
 
+`meas.compare` sets the curves drawn compared into the measurement's panes, first compared
+first (drawn above the later ones, under the measurement's own curves): `Compared` is
+`{type: meas, meas}` (another measurement's live curve or a math channel) or `{type: trace,
+trace}` (a stored trace). It is `Measurement.compared`, kept in sessions and the autosave;
+the job, its averages and `config_rev` are untouched. Every client draws the same list; a
+pane showing a math channel draws its owner's. `invalid` for an SPL meter, more than 32
+entries, an entry twice or the measurement itself; `not_found` for an entry naming no
+measurement or trace. Deleting a measurement or a trace drops it from every list (one
+more `measurement` change per list it was in); a session file's list is cut to what
+`meas.compare` takes and pruned of what is gone on load.
+
+`meas.offset` sets the display offset of the measurement's live curves, in dB: display
+only (its frames carry the measured levels), drawn wherever the curve is, compared into
+another measurement's panes too. It is `Measurement.offset`, kept in sessions and the
+autosave; the job, its averages and `config_rev` are untouched. `invalid` unless finite and
+within ±200 dB; a session file's that is not is 0 on load.
+
 `MeasConfig` = {`name`, `kind`, `scope`: `MeasScope`}. `scope` is `session` (the working
 session's: saved in session files, replaced by a load) or `rig` (the rig's, SPL meters only:
 kept with the daemon's rig settings, never in a session file; a load, a new session, a salvage
@@ -385,6 +404,16 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   no longer the tone level of that bin: frames say so (`SpecMeta.smoothing`) and clients
   label it. A density (`level: density`, below) is smoothed as a density: the kernel
   averages power per hertz.
+- **Spectrum and RTA display** (`SpectrumConfig.display`, `RtaConfig.display`:
+  `SpectrumDisplay`): how clients draw the measurement, kept with it so every client draws
+  it the same and a session file restores it. `style` (`SpectrumStyle`: `line` \| `fill` \|
+  `bars`; narrowband curves asked for `bars` draw as `line`), `peak_hold` (bool: clients
+  draw a peak-hold curve they keep themselves), `spectrograph_span_s` (u32: 10 \| 30 \| 60
+  \| 120, `invalid` otherwise) and `spectrograph_colours` (`Colormap`: `viridis` \| `magma`
+  \| `inferno` \| `cividis` \| `grey`). A configuration that differs only in `display`
+  (and the name) changes nothing the daemon computes: the job, its averages and the
+  measurement's `config_rev` stay as they are. A math channel on the spectrum pane draws
+  with its owner's display.
 - **SPL** (`SplConfig`): any change on the same `input` — `weighting`, `time_weighting`,
   `peak_weighting`, the Leq windows and peak limits (`leq: LeqConfig`), the measuring-position
   correction (`position`), the name — applies in place; the

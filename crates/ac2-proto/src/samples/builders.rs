@@ -214,6 +214,8 @@ pub fn sweep_measurement() -> Measurement {
         grid_id: None,
         colour: Some(ColourFamily::Neutral),
         layout: None,
+        compared: Vec::new(),
+        offset: Db(0.0),
     }
 }
 
@@ -253,6 +255,8 @@ pub fn math_measurement() -> Measurement {
         grid_id: Some(log_grid().id()),
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: Db(0.0),
     }
 }
 
@@ -321,6 +325,8 @@ pub(super) fn measurement() -> Measurement {
         grid_id: Some(log_grid().id()),
         colour: Some(ColourFamily::Hue { index: 5 }),
         layout: Some(pane_layout()),
+        compared: Vec::new(),
+        offset: Db(0.0),
     }
 }
 
@@ -338,6 +344,10 @@ pub(super) fn spectrum_measurement() -> Measurement {
                     averaging: SpecAveraging::Fifo { frames: 4 },
                     smoothing: None,
                     level: SpecLevel::Density,
+                    display: crate::model::SpectrumDisplay {
+                        style: crate::model::SpectrumStyle::Line,
+                        ..Default::default()
+                    },
                 },
             },
         },
@@ -347,6 +357,8 @@ pub(super) fn spectrum_measurement() -> Measurement {
         grid_id: None,
         colour: None,
         layout: None,
+        compared: vec![crate::model::Compared::Meas { meas: MeasId(1) }],
+        offset: Db(-6.5),
     }
 }
 

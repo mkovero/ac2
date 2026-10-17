@@ -274,8 +274,6 @@ pub enum DisplayRow {
     LeqBars,
     SpectrumView,
     SpectrumGlide,
-    Spectrograph,
-    SpectrographColours,
     SweepView,
     DistortionUnit,
     Coherence,
@@ -284,7 +282,7 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 16] = [
+    pub const ALL: [DisplayRow; 14] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -294,8 +292,6 @@ impl DisplayRow {
         DisplayRow::LeqBars,
         DisplayRow::SpectrumView,
         DisplayRow::SpectrumGlide,
-        DisplayRow::Spectrograph,
-        DisplayRow::SpectrographColours,
         DisplayRow::SweepView,
         DisplayRow::DistortionUnit,
         DisplayRow::Coherence,
@@ -315,8 +311,6 @@ impl DisplayRow {
             DisplayRow::SpectrumView => "Spectrum pane shows",
             DisplayRow::SpectrumGlide => "Spectrum",
             DisplayRow::SweepView => "Sweep pane shows",
-            DisplayRow::Spectrograph => "Spectrograph history",
-            DisplayRow::SpectrographColours => "Spectrograph colours",
             DisplayRow::DistortionUnit => "Distortion in",
             DisplayRow::Coherence => "Coherence",
             DisplayRow::ResolutionMarker => "Resolution marker",
@@ -347,13 +341,6 @@ pub fn theme_name(t: ThemeName) -> &'static str {
 pub fn step_hold(h: Option<u32>, d: i32) -> Option<u32> {
     let i = SPL_HOLDS_MS.iter().position(|x| *x == h).unwrap_or(0) as i32;
     SPL_HOLDS_MS[(i + d).clamp(0, SPL_HOLDS_MS.len() as i32 - 1) as usize]
-}
-
-/// The spectrograph span ←/→ choose, s.
-pub fn step_span(s: u32, d: i32) -> u32 {
-    let all = ac2_scene::view::SPECTROGRAPH_SPANS_S;
-    let i = all.iter().position(|x| *x == s).unwrap_or(0) as i32;
-    all[(i + d).clamp(0, all.len() as i32 - 1) as usize]
 }
 
 /// What the spectrum pane's view is called (G steps it).
@@ -437,8 +424,6 @@ pub fn display_rows(
     theme: ThemeName,
     switches: DisplaySwitches,
     spl_hold_ms: Option<u32>,
-    span_s: u32,
-    colours: ac2_scene::primitives::Colormap,
     views: PaneViews,
 ) -> Vec<(DisplayRow, String)> {
     DisplayRow::ALL
@@ -473,8 +458,6 @@ pub fn display_rows(
                 }
                 DisplayRow::LeqBars => bar_ease_text(switches.bar_ease).into(),
                 DisplayRow::SpectrumGlide => spec_ease_text(switches.spec_ease).into(),
-                DisplayRow::Spectrograph => format!("last {span_s} s"),
-                DisplayRow::SpectrographColours => colours.name().to_owned(),
                 DisplayRow::DistortionUnit => match views.distortion_unit {
                     DistortionUnit::Db => "dB re fundamental".into(),
                     DistortionUnit::Percent => "% of fundamental".into(),

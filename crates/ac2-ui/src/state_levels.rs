@@ -371,7 +371,7 @@ impl AppState {
                             ac2_proto::FrameData::Rta(r) => &r.level,
                             _ => continue,
                         };
-                        add(&freqs, level, self.edit(m.id).offset_db);
+                        add(&freqs, level, self.meas_offset(m.id));
                     }
                 }
                 for (t, g) in self.traces.values() {

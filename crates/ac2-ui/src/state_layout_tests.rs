@@ -511,7 +511,12 @@ fn the_link_receives_what_the_panes_draw() {
     );
     assert_eq!(t.st.display_period(), crate::link_wants::SPL_ONLY_PERIOD);
     // Peak hold folds every spectrum frame, shown or not.
-    t.st.view.spectrum.peak_hold = true;
+    t.remirror(|s| {
+        let m = s.measurements.iter_mut().find(|m| m.id == MeasId(2));
+        if let Some(d) = m.and_then(|m| m.config.kind.display_mut()) {
+            d.peak_hold = true;
+        }
+    });
     assert!(t.st.wanted_topics().contains(&topic(2, Stream::Spec)));
     assert!(t.st.wanted_topics().contains(&topic(4, Stream::Rta)));
 }

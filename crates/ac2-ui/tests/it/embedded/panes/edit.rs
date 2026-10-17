@@ -243,12 +243,20 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.tf_frames(second.id, 240)?;
-    // The transfer pane draws one measurement's group; C on each keeps both curves on it
-    // whichever measurement the pane follows.
+    // The transfer pane draws one measurement's group; each compared into the other (C,
+    // Enter on the one target) keeps both curves on it whichever measurement it follows.
     d.key("C");
+    d.key("Enter");
+    d.key("Escape");
     d.send(Msg::SelectMeas(first.id));
     d.key("C");
-    assert_eq!(d.st.compared_meas.len(), 2);
+    d.key("Enter");
+    d.key("Escape");
+    d.until("each compared into the other", |s| {
+        [first.id, second.id]
+            .iter()
+            .all(|id| s.meas(*id).is_some_and(|m| m.compared.len() == 1))
+    })?;
 
     let theme = Theme::dark();
     let size = ac2_scene::primitives::Viewport {

@@ -19,7 +19,11 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   `docs/design/coreaudio.md` §11); exact on BlackHole in the all-OS CI run (`all_os=true`).
   Open on real hardware: the tester round (`testing/macos/`, Test 6: stated vs measured
   latency, replug, rate change, streams).
-- Newest (PROTO 57): power cuts. A torn, empty or garbage state file never stops `ac2d` or `ac2-ui`:
+- Newest (PROTO 58, session format 28): a measurement keeps how it is drawn. A spectrum's
+  style, peak hold and spectrograph span and colours, its display offset and the ordered list
+  of curves compared into its panes live on the daemon (`meas.update` display block,
+  `meas.offset`, `meas.compare`); **C** asks which measurement to compare into.
+- PROTO 57: power cuts. A torn, empty or garbage state file never stops `ac2d` or `ac2-ui`:
   it is set aside (`.damaged-<time>`), its previous copy or a default read, and it is listed
   in `rig.damaged_files` (FILE DAMAGED banner, `ac2 status`); one damaged trace or log costs
   only itself; atomic writes sync the directory (`docs/design/watchdogs.md` *Power cuts*).

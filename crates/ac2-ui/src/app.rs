@@ -97,7 +97,7 @@ pub struct StartupTiming {
 }
 
 /// Cached pane scene: rebuilt when what the pane shows, its kind's generation
-/// ([`App::pane_generation`]), size, theme or spectrograph colours change.
+/// ([`App::pane_generation`]), size or theme change.
 pub(crate) struct CachedScene {
     pub view: crate::state::View,
     pub generation: u64,
@@ -106,7 +106,6 @@ pub(crate) struct CachedScene {
     /// view moves this pane's plot edge too.
     pub freq_right: f32,
     pub theme: ThemeName,
-    pub colormap: ac2_scene::primitives::Colormap,
     pub scene: Arc<Scene>,
     /// The frequency axis mapping of the scene (TF / spectrum), for mouse navigation.
     pub x_axis: Option<ac2_scene::axis::Mapping>,

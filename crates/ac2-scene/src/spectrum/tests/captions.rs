@@ -265,6 +265,8 @@ fn tone_unit_names_the_bin_and_fits_narrow_panes() {
         selected: false,
         compared: false,
         bands: None,
+        style: ac2_proto::model::SpectrumStyle::Line,
+        layer: 0,
     };
     let theme = Theme::dark();
     let scene = |traces: &[SpectrumTrace<'_>], w: f32| {
@@ -385,6 +387,8 @@ fn density_unit_is_per_hertz_on_any_resolution() {
             selected: false,
             compared: false,
             bands: None,
+            style: ac2_proto::model::SpectrumStyle::Line,
+            layer: 0,
         }
     }
     let (ta, tb) = (trace(&a, &la, 1), trace(&b, &lb, 2));
@@ -464,6 +468,8 @@ fn a_long_calibration_caption_leaves_the_unit_room() {
         selected: false,
         compared: false,
         bands: None,
+        style: ac2_proto::model::SpectrumStyle::Line,
+        layer: 0,
     };
     let theme = Theme::dark();
     let mut captions = Vec::new();

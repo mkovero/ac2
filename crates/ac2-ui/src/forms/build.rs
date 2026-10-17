@@ -677,6 +677,7 @@ impl Form {
                             .choice_index(FieldId::SpecLevel)
                             .and_then(|i| SPEC_LEVELS.get(i))
                             .map_or(base.level, |l| l.1),
+                        display: Default::default(),
                     },
                 }
             }

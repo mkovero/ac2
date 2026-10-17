@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AverageMethod, BandFraction, DelayState, PeakWeighting, Resolution, Smoothing,
-    SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SweepConfig, TfAveraging,
-    TimeWeighting, Weighting, Window,
+    SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SpectrumDisplay, SweepConfig,
+    TfAveraging, TimeWeighting, Weighting, Window,
 };
 use crate::grid::GridId;
 use crate::topic::Stream;
@@ -75,6 +75,8 @@ pub struct SpectrumConfig {
     pub smoothing: Option<SmoothingFraction>,
     /// Tone level or power spectral density.
     pub level: SpecLevel,
+    /// How clients draw it.
+    pub display: SpectrumDisplay,
 }
 
 /// Fractional-octave RTA.
@@ -93,6 +95,8 @@ pub struct RtaConfig {
     pub weighting: Weighting,
     /// Averaging.
     pub averaging: SpecAveraging,
+    /// How clients draw it.
+    pub display: SpectrumDisplay,
 }
 
 /// Sound level meter.
@@ -369,6 +373,25 @@ impl MeasKind {
         matches!(self.stream(), Some(Stream::Spec | Stream::Rta))
     }
 
+    /// How its curves are drawn, for a spectrum or RTA measurement (a math channel draws
+    /// with its owner's).
+    pub fn display(&self) -> Option<&SpectrumDisplay> {
+        match self {
+            MeasKind::Spectrum { config } => Some(&config.display),
+            MeasKind::Rta { config } => Some(&config.display),
+            _ => None,
+        }
+    }
+
+    /// [`Self::display`], to change.
+    pub fn display_mut(&mut self) -> Option<&mut SpectrumDisplay> {
+        match self {
+            MeasKind::Spectrum { config } => Some(&mut config.display),
+            MeasKind::Rta { config } => Some(&mut config.display),
+            _ => None,
+        }
+    }
+
     /// Whether it runs as a job (`meas.start`): every kind but a sweep measurement, which
     /// plays only when `sweep.run` fires it.
     pub fn is_job(&self) -> bool {
@@ -641,6 +664,28 @@ impl ColourFamily {
     }
 }
 
+/// A curve compared into a measurement's panes (`meas.compare`): drawn there over the
+/// measurement's own group, never on another measurement's panes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Compared {
+    /// A measurement's live curve, or a math channel.
+    Meas {
+        /// The measurement.
+        meas: MeasId,
+    },
+    /// A stored trace.
+    Trace {
+        /// The trace.
+        trace: TraceId,
+    },
+}
+
+impl Compared {
+    /// Most curves one measurement compares.
+    pub const MAX: usize = 32;
+}
+
 /// Measurement entity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -663,4 +708,21 @@ pub struct Measurement {
     /// The panes a client shows while this measurement is selected (`meas.layout`);
     /// `None`: none of its own, a client keeps the panes it has.
     pub layout: Option<super::PaneLayout>,
+    /// Curves its panes draw compared (`meas.compare`), first compared first.
+    pub compared: Vec<Compared>,
+    /// Display offset of its live curves (`meas.offset`), wherever they are drawn (in
+    /// another measurement's panes too, compared): display only, its frames carry the
+    /// measured levels. At most [`Measurement::OFFSET_MAX_DB`] either way.
+    pub offset: Db,
+}
+
+impl Measurement {
+    /// The largest display offset either way: wider than any level axis, so an offset
+    /// never takes a curve somewhere no axis reaches.
+    pub const OFFSET_MAX_DB: f64 = 200.0;
+
+    /// A display offset `meas.offset` takes: finite, within [`Self::OFFSET_MAX_DB`].
+    pub fn offset_ok(offset: Db) -> bool {
+        offset.0.is_finite() && offset.0.abs() <= Self::OFFSET_MAX_DB
+    }
 }

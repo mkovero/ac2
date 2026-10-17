@@ -343,7 +343,7 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
             freshness(st, l.tf),
         );
         let e = st.edit(l.meas.id);
-        t.offset_db = e.offset_db;
+        t.offset_db = st.meas_offset(l.meas.id);
         t.polarity = if e.inverted {
             Polarity::Inverted
         } else {

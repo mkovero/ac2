@@ -225,23 +225,28 @@ fn a_new_grid_or_scale_starts_over() {
 }
 
 fn scene_of(h: &SpectrographHistory, view: &ViewState) -> SpectrographScene {
-    scene_themed(h, view, &Theme::dark())
+    scene_coloured(h, view, Colormap::default())
 }
 
-fn scene_themed(h: &SpectrographHistory, view: &ViewState, theme: &Theme) -> SpectrographScene {
+fn scene_coloured(
+    h: &SpectrographHistory,
+    view: &ViewState,
+    colours: Colormap,
+) -> SpectrographScene {
     let input = SpectrographInput {
         history: h,
         name: "Main".into(),
         range: Range::new(-100.0, 0.0),
         offset_db: 0.0,
         freshness: None,
+        colours,
     };
     spectrograph_scene(
         &[],
         &Status::default(),
         Some(&input),
         view,
-        theme,
+        &Theme::dark(),
         Viewport {
             width: 800.0,
             height: 500.0,
@@ -249,8 +254,8 @@ fn scene_themed(h: &SpectrographHistory, view: &ViewState, theme: &Theme) -> Spe
     )
 }
 
-/// The chosen colours reach the history and its colour bar alike, under the spectrum and
-/// alone, so the bar always reads the picture it stands beside.
+/// The measurement's colours reach the history and its colour bar alike, under the
+/// spectrum and alone, so the bar always reads the picture it stands beside.
 #[test]
 fn the_chosen_colours_reach_the_picture_and_its_bar() {
     let mut h = SpectrographHistory::new(30);
@@ -260,14 +265,12 @@ fn the_chosen_colours_reach_the_picture_and_its_bar() {
     let maps = |s: &SpectrographScene| -> Vec<Colormap> {
         heatmaps(&s.scene).iter().map(|m| m.colormap).collect()
     };
-    assert_eq!(Theme::dark().colormap, Colormap::Viridis);
     assert_eq!(maps(&scene_of(&h, &view)), vec![Colormap::Viridis; 2]);
     for mode in [SpectrumMode::Split, SpectrumMode::Spectrograph] {
         view.spectrum.mode = mode;
         for map in Colormap::ALL {
-            let theme = Theme::dark().with_colormap(map);
             assert_eq!(
-                maps(&scene_themed(&h, &view, &theme)),
+                maps(&scene_coloured(&h, &view, map)),
                 vec![map; 2],
                 "{mode:?}"
             );
@@ -369,6 +372,7 @@ fn stale_dims_offset_shifts_and_empty_says_so() {
             range: Range::new(-90.0, -10.0),
             offset_db: off,
             freshness: fr,
+            colours: Default::default(),
         };
         spectrograph_scene(&[], &Status::default(), Some(&s), &view, &theme, size)
     };
@@ -417,6 +421,8 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
         selected,
         compared: false,
         bands: None,
+        style: ac2_proto::model::SpectrumStyle::Line,
+        layer: 0,
     };
     let traces = [trace(1, "Main L S1", false), trace(2, "Main L S2", true)];
     let h = SpectrographHistory::new(30);
@@ -426,6 +432,7 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
         range: Range::new(-100.0, 0.0),
         offset_db: 0.0,
         freshness: None,
+        colours: Default::default(),
     };
     let theme = Theme::dark();
     let s = spectrograph_scene(
@@ -449,7 +456,8 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
         sp.plot.bottom() < s.plot.y,
         "the spectrum part is above the spectrograph"
     );
-    // The selected curve is drawn twice as wide in the spectrum part.
+    // The selected curve is drawn twice as wide in the spectrum part; the first listed
+    // draws last, on top.
     let widths: Vec<f32> = s
         .scene
         .layers
@@ -461,8 +469,8 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
     assert_eq!(
         widths,
         [
-            theme.trace_width,
-            theme.trace_width * crate::tf::SELECTED_WIDTH
+            theme.trace_width * crate::tf::SELECTED_WIDTH,
+            theme.trace_width
         ]
     );
 }
@@ -516,6 +524,8 @@ fn the_spectrograph_alone_takes_the_pane() {
         selected: false,
         compared: false,
         bands: None,
+        style: ac2_proto::model::SpectrumStyle::Line,
+        layer: 0,
     };
     let input = SpectrographInput {
         history: &h,
@@ -523,6 +533,7 @@ fn the_spectrograph_alone_takes_the_pane() {
         range: Range::new(-100.0, 0.0),
         offset_db: 0.0,
         freshness: Some(Freshness::AudioStopped { age_s: 4.8 }),
+        colours: Default::default(),
     };
     view.cursor_hz = None;
     let status = Status {
@@ -627,6 +638,8 @@ fn multires_stitches_cross_the_history() {
         selected: false,
         compared: false,
         bands: Some(&bands),
+        style: ac2_proto::model::SpectrumStyle::Line,
+        layer: 0,
     };
     let mut view = ViewState::default();
     let size = Viewport {

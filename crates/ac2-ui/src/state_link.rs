@@ -234,9 +234,7 @@ impl AppState {
                 }
             }
             ConnEvent::Data(d) => {
-                if self.view.spectrum.peak_hold {
-                    self.fold_peaks(&d);
-                }
+                self.fold_peaks(&d);
                 if self.spectrograph_shown() {
                     self.fold_spectrographs(&d);
                 }
@@ -457,13 +455,14 @@ impl AppState {
     pub(super) fn fold_spectrographs(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
         use ac2_scene::spectrograph::{SpectrographFrame, SpectrographHistory};
-        let span = self.view.spectrum.spectrograph.span_s;
-        let running: BTreeMap<MeasId, bool> = self
+        // Each measurement's own span; a history of another span cannot hold its slots.
+        let running: BTreeMap<MeasId, (bool, u32)> = self
             .measurements()
             .iter()
-            .map(|m| (m.id, m.running))
+            .map(|m| (m.id, (m.running, self.display_of(m).spectrograph_span_s)))
             .collect();
-        self.spectrographs.retain(|id, _| running.contains_key(id));
+        self.spectrographs
+            .retain(|id, h| running.get(id).is_some_and(|(_, s)| h.span_s() == *s));
         for tf in d.latest.frames.values() {
             let (meas, scale, spec_level, level, validity) = match &tf.frame.data {
                 FrameData::Spec(f) => (f.meas, f.meta.scale, Some(f.meta.level), &f.level, None),
@@ -476,7 +475,7 @@ impl AppState {
                 ),
                 _ => continue,
             };
-            let Some(&live) = running.get(&meas) else {
+            let Some(&(live, span)) = running.get(&meas) else {
                 continue;
             };
             let Some((grid, def)) = tf
@@ -511,12 +510,26 @@ impl AppState {
 
     pub(super) fn fold_peaks(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
+        // Held only for the measurements whose peak hold is on (P), from when it went on.
+        let held: BTreeSet<MeasId> = self
+            .measurements()
+            .iter()
+            .filter(|m| self.display_of(m).peak_hold)
+            .map(|m| m.id)
+            .collect();
+        self.peaks.retain(|id, _| held.contains(id));
+        if held.is_empty() {
+            return;
+        }
         for tf in d.latest.frames.values() {
             let (meas, level, validity) = match &tf.frame.data {
                 FrameData::Spec(f) => (f.meas, &f.level, None),
                 FrameData::Rta(f) => (f.meas, &f.level, Some(f.validity.as_slice())),
                 _ => continue,
             };
+            if !held.contains(&meas) {
+                continue;
+            }
             let seq = tf.frame.stamp.seq;
             let at = tf.frame.stamp.capture_wall_ns.0;
             let e = self
@@ -555,7 +568,7 @@ impl AppState {
                 }
             }
         }
-        // Hidden and compared ones wait by name as a pane's measurement does, unless one
+        // Hidden ones wait by name as a pane's measurement does, unless one
         // that stays has that name: it is another measurement, and the choice was not its.
         let staying: BTreeSet<String> = self
             .measurements()
@@ -563,20 +576,16 @@ impl AppState {
             .filter(|m| !gone(m.id))
             .map(|m| m.config.name.clone())
             .collect();
-        for (ids, pending) in [
-            (&mut self.hidden_meas, &mut self.pending_hidden),
-            (&mut self.compared_meas, &mut self.pending_compared),
-        ] {
-            ids.retain(|id| {
-                if !gone(*id) {
-                    return true;
-                }
-                if let Some(n) = names.get(id).filter(|n| !staying.contains(*n)) {
-                    pending.insert(n.clone());
-                }
-                false
-            });
-        }
+        let pending = &mut self.pending_hidden;
+        self.hidden_meas.retain(|id| {
+            if !gone(*id) {
+                return true;
+            }
+            if let Some(n) = names.get(id).filter(|n| !staying.contains(*n)) {
+                pending.insert(n.clone());
+            }
+            false
+        });
         if let Some(id) = self.selected.filter(|id| gone(*id)) {
             // A stand-in going leaves the operator's choice waiting.
             if self.standin != Some(id)

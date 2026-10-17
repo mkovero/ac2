@@ -145,7 +145,9 @@
        "chrome": "no_grid"
       }
      }
-    }
+    },
+    "compared": [],
+    "offset": 0.0
    }
   }
  },
@@ -645,7 +647,9 @@
     "delay": null,
     "grid_id": null,
     "colour": null,
-    "layout": null
+    "layout": null,
+    "compared": [],
+    "offset": 0.0
    }
   }
  },
@@ -704,7 +708,9 @@
     "delay": null,
     "grid_id": 8785464140711761104,
     "colour": null,
-    "layout": null
+    "layout": null,
+    "compared": [],
+    "offset": 0.0
    }
   }
  },
@@ -892,7 +898,9 @@
     "colour": {
      "type": "neutral"
     },
-    "layout": null
+    "layout": null,
+    "compared": [],
+    "offset": 0.0
    }
   }
  },

@@ -84,20 +84,18 @@ fn resolution_marker_round_trip() {
     assert_eq!(UiPrefs::from_toml(&text), Ok(p));
 }
 
+/// A file from before the spectrograph settings and compare moved to the measurements
+/// still loads: those keys are dropped with a warning, the rest (the pane tree too) kept.
 #[test]
-fn spectrograph_colours_round_trip() {
-    use ac2_scene::primitives::Colormap;
-    let mut p = UiPrefs::default();
-    assert_eq!(p.spectrograph_colours, Colormap::Viridis);
-    assert!(!p.to_toml().contains("spectrograph_colours"));
-    for map in Colormap::ALL.into_iter().skip(1) {
-        p.spectrograph_colours = map;
-        let text = p.to_toml();
-        assert!(
-            text.contains(&format!("spectrograph_colours = \"{}\"", map.name())),
-            "{text}"
-        );
-        assert_eq!(UiPrefs::from_toml(&text), Ok(p.clone()));
+fn settings_now_the_measurements_are_dropped_and_the_rest_kept() {
+    let text = "key_hints = false\nspectrograph_span_s = 60\nspectrograph_colours = \"magma\"\n\n\
+                [layout]\nfocus = 2\nhidden = [\"Sub\"]\ncompared = [\"Main\"]\n";
+    let p = UiPrefs::from_toml(text).expect("loads");
+    assert!(!p.key_hints);
+    assert_eq!(p.layout.hidden, ["Sub".to_owned()].into());
+    let out = p.to_toml();
+    for gone in ["spectrograph_span_s", "spectrograph_colours", "compared"] {
+        assert!(!out.contains(gone), "{out}");
     }
 }
 
@@ -198,7 +196,6 @@ fn layout_window_and_hold_round_trip() {
         panes_only: true,
         distortion_unit: DistortionUnit::Percent,
         hidden: ["TF 2".to_owned()].into(),
-        compared: ["Main R".to_owned()].into(),
     };
     p.window = Some(WindowPrefs {
         width: 1600,
@@ -214,7 +211,6 @@ fn layout_window_and_hold_round_trip() {
         "panes_only = true",
         "distortion_unit = \"percent\"",
         "hidden = [\"TF 2\"]",
-        "compared = [\"Main R\"]",
         "[layout.tree]",
         "split = \"row\"",
         "[[layout.panes]]",

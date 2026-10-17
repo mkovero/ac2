@@ -794,29 +794,31 @@ fn g_steps_the_spectrum_panes_views() {
     );
 }
 
-/// Shift+B in the spectrum pane steps the spectrograph's history length (10 → 30 → 60 →
-/// 120 s → 10 s), remembered as the Settings › Display row remembers it; the view stays.
+/// Shift+B in the spectrum pane steps its measurement's spectrograph history length (10 →
+/// 30 → 60 → 120 s → 10 s), which the daemon keeps with the measurement; the view stays.
 #[test]
 fn shift_b_steps_the_spectrograph_span() {
     use ac2_scene::view::SpectrumMode;
     let mut t = T::new();
     t.key("Alt+2");
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
-    let before = t.st.view.spectrum.spectrograph.span_s;
+    let span = |t: &T| {
+        let m = t.st.meas(MeasId(2)).expect("Sub");
+        t.st.display_of(m).spectrograph_span_s
+    };
+    let before = span(&t);
     let mut spans = vec![];
     for _ in 0..4 {
-        t.key("Shift+B");
-        spans.push(t.st.view.spectrum.spectrograph.span_s);
+        t.key_answered("Shift+B");
+        spans.push(span(&t));
     }
     assert_eq!(spans.last(), Some(&before), "{spans:?}");
     let mut sorted = spans.clone();
     sorted.sort_unstable();
-    assert_eq!(sorted, ac2_scene::view::SPECTROGRAPH_SPANS_S);
-    assert_eq!(t.st.prefs.spectrograph_span_s, Some(before));
-    assert!(
-        t.last_toast().contains("spectrograph: last"),
-        "{}",
-        t.last_toast()
+    assert_eq!(sorted, SpectrumDisplay::SPANS_S);
+    assert_eq!(
+        t.last_toast(),
+        format!("Sub: spectrograph: last {before} s")
     );
     assert_eq!(
         t.st.kind_modes(PaneKind::Spectrum).spectrum,

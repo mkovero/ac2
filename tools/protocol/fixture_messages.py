@@ -189,6 +189,8 @@ SPL_MEASUREMENT = {
     "grid_id": None,
     "colour": None,
     "layout": None,
+    "compared": [],
+    "offset": 0.0,
 }
 
 SPL_LOG = {
@@ -325,6 +327,8 @@ def measurement():
         "grid_id": p.grid_id(LOG_GRID),
         "colour": {"type": "hue", "index": 5},
         "layout": PANE_LAYOUT,
+        "compared": [],
+        "offset": 0.0,
     }
 
 
@@ -358,6 +362,8 @@ MATH_MEASUREMENT = {
     "grid_id": p.grid_id(LOG_GRID),
     "colour": None,
     "layout": None,
+    "compared": [],
+    "offset": 0.0,
 }
 
 
@@ -390,6 +396,8 @@ SWEEP_MEASUREMENT = {
     "grid_id": None,
     "colour": {"type": "neutral"},
     "layout": None,
+    "compared": [],
+    "offset": 0.0,
 }
 
 

@@ -54,6 +54,17 @@ pub enum ChoicePurpose {
     /// New measurement: the answer is a kind, in [`ac2_scene::new_meas::NewKind::ALL`]'s
     /// order; its form opens.
     NewMeasurement,
+    /// Compare `item` with…: each answer is a measurement in `targets` whose panes draw it
+    /// (`on`) or not; taking one toggles it and the question stays.
+    Compare {
+        item: ac2_proto::model::Compared,
+        /// Its curve is shown (a hidden one is compared but not drawn until shown).
+        visible: bool,
+        targets: Vec<MeasId>,
+        /// A pane on screen shows the target.
+        shown: Vec<bool>,
+        on: Vec<bool>,
+    },
 }
 
 /// What "Move to measurement…" moves.
@@ -111,9 +122,10 @@ pub(super) fn home_pane(kind: TraceKind) -> PaneKind {
 impl AppState {
     // ----- display offsets ---------------------------------------------------------------
 
-    /// The selected stored trace (any kind: every curve takes an offset), else the live
-    /// measurement of the focused pane (the spectrum pane's when it has focus, else the
-    /// transfer pane's). A locked trace refuses, saying so.
+    /// The selected stored trace (any kind: every curve takes an offset), else the selected
+    /// live curve when the focused pane draws it compared (picked in the legend or the
+    /// list), else the live measurement of the focused pane (the spectrum pane's when it has
+    /// focus, else the transfer pane's). A locked trace refuses, saying so.
     fn offset_target(&mut self) -> Option<OffsetTarget> {
         if let Some(t) = self.selected_trace_meta().cloned() {
             if t.edit.locked {
@@ -122,10 +134,18 @@ impl AppState {
             }
             return Some(OffsetTarget::Trace(t));
         }
-        let pane = match self.layout.focus_kind() {
+        let focus = self.layout.focus_kind();
+        let pane = match focus {
             PaneKind::Spectrum => PaneKind::Spectrum,
             _ => PaneKind::Transfer,
         };
+        let shown = self.pane_meas(self.layout.focus);
+        if let Some(m) = self.selected_meas()
+            && focus == pane
+            && self.live_compared_on(pane, m, shown)
+        {
+            return Some(OffsetTarget::Live(m.clone()));
+        }
         match self.kind_meas(pane).cloned() {
             Some(m) => Some(OffsetTarget::Live(m)),
             None => {
@@ -159,10 +179,8 @@ impl AppState {
                 self.call(out, Command::TraceUpdate { trace: t.id, edit }, what);
             }
             OffsetTarget::Live(m) => {
-                let e = self.edits.entry(m.id).or_default();
-                e.offset_db = new(e.offset_db);
-                let v = e.offset_db;
-                self.toast(format!("{}: {} (display)", m.config.name, offset_words(v)));
+                let v = new(m.offset.0);
+                self.set_live_offset(m.id, v, out);
             }
         }
     }
@@ -175,19 +193,30 @@ impl AppState {
                 self.prompt(super::PromptKind::TraceOffset(t.id), text);
             }
             Some(OffsetTarget::Live(m)) => {
-                let text = super::offset_text(self.edit(m.id).offset_db);
+                let text = super::offset_text(m.offset.0);
                 self.prompt(super::PromptKind::Offset(m.id), text);
             }
             None => {}
         }
     }
 
-    /// The typed offset of a live measurement.
-    pub(super) fn set_live_offset(&mut self, id: MeasId, v: f64) {
-        self.edits.entry(id).or_default().offset_db = v;
-        if let Some(name) = self.meas(id).map(|m| m.config.name.clone()) {
-            self.toast(format!("{name}: {} (display)", offset_words(v)));
-        }
+    /// The offset of a live measurement, typed or stepped: the daemon keeps it with the
+    /// measurement (display only, the levels it measures stay), clamped to what it takes.
+    pub(super) fn set_live_offset(&mut self, id: MeasId, v: f64, out: &mut Vec<Request>) {
+        let Some(name) = self.meas(id).map(|m| m.config.name.clone()) else {
+            return;
+        };
+        let max = Measurement::OFFSET_MAX_DB;
+        let v = v.clamp(-max, max);
+        let what = format!("{name}: {} (display)", offset_words(v));
+        self.call(
+            out,
+            Command::MeasOffset {
+                meas: id,
+                offset: Db(v),
+            },
+            what,
+        );
     }
 
     // ----- the selected curve: show / hide, delete ----------------------------------------
@@ -340,6 +369,7 @@ impl AppState {
         }
         self.overlay = Overlay::None;
         match c.purpose {
+            ChoicePurpose::Compare { .. } => self.compare_pick(c, i, out),
             ChoicePurpose::NewMeasurement => self.new_measurement_pick(i, out),
             p @ (ChoicePurpose::Unsaved { .. }
             | ChoicePurpose::Replace { .. }
@@ -351,7 +381,6 @@ impl AppState {
                     _ => return,
                 };
                 self.hidden_meas.remove(&meas);
-                self.compared_meas.remove(&meas);
                 let mut what = match traces {
                     OwnedTraces::Keep => {
                         format!("{} deleted; its traces are under Imported", c.label)
@@ -523,7 +552,6 @@ impl AppState {
             DeleteTarget::Trace(id) => self.delete_trace(id, label, out),
             DeleteTarget::Meas(meas) => {
                 self.hidden_meas.remove(&meas);
-                self.compared_meas.remove(&meas);
                 // It owns nothing (else the three-answer question was asked).
                 let mut what = format!("{label} deleted");
                 self.stimulus_with_deleted(meas, &mut what, out);
@@ -550,98 +578,9 @@ impl AppState {
         }
     }
 
-    /// C: compares what is selected in the tree (a stored trace selected last, else the
-    /// selected measurement or math channel), or stops comparing it. Every pane of a kind
-    /// that draws it draws it besides its own group, whoever owns it; display only (never
-    /// an average's or a math channel's operand). An imported trace is no measurement's,
-    /// so it is not compared until moved under one; an SPL meter is a number, compared by
-    /// putting two side by side.
-    pub(super) fn toggle_compare(&mut self, keymap: &crate::keys::Keymap) {
-        if let Some(t) = self.selected_trace_meta().cloned() {
-            let label = trace_label(&t);
-            let imported =
-                ac2_scene::meas_list::group_of(&t, &self.measurements()) == TraceOwner::Imported;
-            if imported && !self.compared_traces.contains(&t.id) {
-                let key = keymap
-                    .chords(
-                        crate::keys::CommandId::MoveTrace,
-                        crate::keys::Scope::Global,
-                    )
-                    .first()
-                    .map(|c| c.label());
-                self.warn(ac2_scene::meas_list::imported_compare_hint(
-                    &label,
-                    key.as_deref(),
-                ));
-                return;
-            }
-            let on = self.compared_traces.insert(t.id);
-            if !on {
-                self.compared_traces.remove(&t.id);
-            }
-            let panes = compare_panes(&trace_compare_kinds(&t));
-            self.toast(ac2_scene::meas_list::compare_toast(
-                &label,
-                &panes,
-                on,
-                t.edit.visible,
-            ));
-            return;
-        }
-        let Some(m) = self.selected_meas().cloned() else {
-            self.warn(self.select_first("to compare"));
-            return;
-        };
-        let name = m.config.name.clone();
-        if matches!(m.config.kind, MeasKind::Spl { .. }) {
-            self.warn(ac2_scene::meas_list::meter_compare_hint(&name));
-            return;
-        }
-        let kinds = meas_compare_kinds(&m);
-        if kinds.is_empty() {
-            self.warn(format!(
-                "{name}: no live curve to compare — select one of its runs or traces"
-            ));
-            return;
-        }
-        let on = self.compared_meas.insert(m.id);
-        if !on {
-            self.compared_meas.remove(&m.id);
-        }
-        self.toast(ac2_scene::meas_list::compare_toast(
-            &name,
-            &compare_panes(&kinds),
-            on,
-            !self.meas_hidden(&m),
-        ));
-    }
-
-    /// Clear compare: every pane draws its own group alone again.
-    pub(super) fn clear_compare(&mut self) {
-        let n = self.compared_meas.len() + self.compared_traces.len();
-        self.compared_meas.clear();
-        self.pending_compared.clear();
-        self.compared_traces.clear();
-        self.toast(match n {
-            0 => "nothing compared".to_owned(),
-            1 => "compare cleared: 1 curve".to_owned(),
-            n => format!("compare cleared: {n} curves"),
-        });
-    }
-
-    /// A stored trace gone from the daemon (deleted here or elsewhere) drops out of compare.
-    pub(super) fn prune_compared(&mut self) {
-        let Some(st) = self.mirror.as_ref().and_then(|m| m.state.as_deref()) else {
-            return;
-        };
-        let ids: std::collections::BTreeSet<TraceId> = st.traces.iter().map(|t| t.id).collect();
-        self.compared_traces.retain(|id| ids.contains(id));
-    }
-
     /// Deletes stored trace `id`; the selection moves to the next shown trace in the list,
     /// else the one before it, else the live measurement.
     fn delete_trace(&mut self, id: TraceId, label: String, out: &mut Vec<Request>) {
-        self.compared_traces.remove(&id);
         let list: Vec<(TraceId, bool)> = self
             .trace_list()
             .iter()
@@ -708,10 +647,4 @@ pub(super) fn meas_compare_kinds(m: &Measurement) -> Vec<PaneKind> {
         .into_iter()
         .filter(|k| AppState::live_drawn_in(m, *k))
         .collect()
-}
-
-/// `the transfer pane`, `the transfer and sweep panes`: where a compared curve is drawn.
-pub(super) fn compare_panes(kinds: &[PaneKind]) -> String {
-    let whats: Vec<&str> = kinds.iter().map(|k| k.what()).collect();
-    ac2_scene::meas_list::compare_panes(&whats)
 }

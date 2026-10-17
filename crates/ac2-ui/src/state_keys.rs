@@ -413,7 +413,7 @@ impl AppState {
             }),
             PromptKind::FinderObservation => self.set_observation(&text),
             PromptKind::Offset(id) => {
-                parse_number(&text, &["db"]).map(|v| self.set_live_offset(id, v))
+                parse_number(&text, &["db"]).map(|v| self.set_live_offset(id, v, out))
             }
             PromptKind::TraceOffset(id) => parse_number(&text, &["db"]).and_then(|v| {
                 let t = self.trace_meta(id)?;

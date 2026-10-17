@@ -8,12 +8,13 @@ use crate::common;
 use ac2_plot::Viewport;
 use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::Polarity;
+use ac2_proto::model::SpectrumStyle;
 use ac2_proto::units::{MeasId, Seconds, SessionEpoch};
 use ac2_scene::banner::Status;
 use ac2_scene::theme::Theme;
 use ac2_scene::time::Freshness;
 use ac2_scene::trace::{TfTrace, TimeBase, TraceKey, wrap_deg};
-use ac2_scene::view::{CoherencePlacement, SpectrumStyle, ViewState};
+use ac2_scene::view::{CoherencePlacement, ViewState};
 use ac2_testkit::image::ImageTolerance;
 use common::{golden, gpu, render_on, renderer};
 
@@ -281,7 +282,7 @@ fn spectrum_golden(name: &str, style: SpectrumStyle) {
         },
         level,
     };
-    let t = SpectrumTrace::spectrum(
+    let mut t = SpectrumTrace::spectrum(
         &spec,
         WallNs(0),
         None,
@@ -292,11 +293,11 @@ fn spectrum_golden(name: &str, style: SpectrumStyle) {
         Freshness::from_age(0.0),
     );
     let theme = Theme::dark();
-    let mut view = ViewState {
+    t.style = style;
+    let view = ViewState {
         cursor_hz: Some(1000.0),
         ..ViewState::default()
     };
-    view.spectrum.style = style;
     let size = Viewport {
         width: 560.0,
         height: 360.0,
