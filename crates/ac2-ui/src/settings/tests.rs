@@ -92,7 +92,14 @@ fn display_and_recording_texts() {
         bar_ease: false,
         spec_ease: false,
     };
-    let rows = display_rows(ThemeName::Light, switches, Some(500), 30, views);
+    let rows = display_rows(
+        ThemeName::Light,
+        switches,
+        Some(500),
+        30,
+        ac2_scene::primitives::Colormap::Magma,
+        views,
+    );
     let texts: Vec<&str> = rows.iter().map(|(_, v)| v.as_str()).collect();
     assert_eq!(
         texts,
@@ -107,6 +114,7 @@ fn display_and_recording_texts() {
             "the spectrum over its spectrograph",
             "jumps to each new frame",
             "last 30 s",
+            "magma",
             "the room parameters",
             "% of fundamental",
             "over the magnitude",

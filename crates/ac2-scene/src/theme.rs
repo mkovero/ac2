@@ -299,6 +299,13 @@ impl Theme {
         }
     }
 
+    /// The same theme with the spectrograph's colours the operator chose: a matter of
+    /// taste and room light, so it is a preference of its own, not part of the theme.
+    pub fn with_colormap(mut self, colormap: Colormap) -> Self {
+        self.colormap = colormap;
+        self
+    }
+
     /// Colour for the `i`-th live trace (wraps around the palette).
     pub fn trace_color(&self, i: usize) -> Color {
         self.traces[i % self.traces.len()]

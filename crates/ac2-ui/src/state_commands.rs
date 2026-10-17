@@ -2,6 +2,7 @@
 //! on to `commands_meas` and `commands_tf`.
 
 use super::*;
+use ac2_scene::primitives::Colormap;
 
 impl AppState {
     /// The list of pane `p`, the shown measurement highlighted.
@@ -451,6 +452,12 @@ impl AppState {
                 self.prefs.theme = Some(self.theme);
                 self.prefs_dirty = true;
             }
+            C::SpectrographColours => self.step_spectrograph_colours(1),
+            C::SpectrographViridis => self.set_spectrograph_colours(Colormap::Viridis),
+            C::SpectrographMagma => self.set_spectrograph_colours(Colormap::Magma),
+            C::SpectrographInferno => self.set_spectrograph_colours(Colormap::Inferno),
+            C::SpectrographCividis => self.set_spectrograph_colours(Colormap::Cividis),
+            C::SpectrographGrey => self.set_spectrograph_colours(Colormap::Grey),
             C::PlotChrome => {
                 let title = self.layout.focused().title();
                 let spl = self.layout.focus_kind() == PaneKind::Spl;

@@ -421,6 +421,12 @@ fn typed_char(c: &Chord) -> Option<char> {
 }
 
 impl AppState {
+    /// The theme the panes are drawn with: the chosen theme with the chosen spectrograph
+    /// colours.
+    pub fn scene_theme(&self) -> ac2_scene::theme::Theme {
+        ac2_scene::theme::Theme::by_name(self.theme).with_colormap(self.prefs.spectrograph_colours)
+    }
+
     pub fn new(theme: ThemeName, target: String) -> Self {
         Self {
             conn: ConnState::Connecting { target },

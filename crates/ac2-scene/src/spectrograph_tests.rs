@@ -1,5 +1,6 @@
 use super::*;
 use crate::grid::column_edges;
+use crate::primitives::Colormap;
 use crate::view::FreqRange;
 use ac2_proto::GridDef;
 use ac2_proto::units::Hz;
@@ -224,6 +225,10 @@ fn a_new_grid_or_scale_starts_over() {
 }
 
 fn scene_of(h: &SpectrographHistory, view: &ViewState) -> SpectrographScene {
+    scene_themed(h, view, &Theme::dark())
+}
+
+fn scene_themed(h: &SpectrographHistory, view: &ViewState, theme: &Theme) -> SpectrographScene {
     let input = SpectrographInput {
         history: h,
         name: "Main".into(),
@@ -236,12 +241,48 @@ fn scene_of(h: &SpectrographHistory, view: &ViewState) -> SpectrographScene {
         &Status::default(),
         Some(&input),
         view,
-        &Theme::dark(),
+        theme,
         Viewport {
             width: 800.0,
             height: 500.0,
         },
     )
+}
+
+/// The chosen colours reach the history and its colour bar alike, under the spectrum and
+/// alone, so the bar always reads the picture it stands beside.
+#[test]
+fn the_chosen_colours_reach_the_picture_and_its_bar() {
+    let mut h = SpectrographHistory::new(30);
+    let mut f = Feed::new(&log_bins());
+    f.push(&mut h, T0, -40.0);
+    let mut view = ViewState::default();
+    let maps = |s: &SpectrographScene| -> Vec<Colormap> {
+        heatmaps(&s.scene).iter().map(|m| m.colormap).collect()
+    };
+    assert_eq!(Theme::dark().colormap, Colormap::Viridis);
+    assert_eq!(maps(&scene_of(&h, &view)), vec![Colormap::Viridis; 2]);
+    for mode in [SpectrumMode::Split, SpectrumMode::Spectrograph] {
+        view.spectrum.mode = mode;
+        for map in Colormap::ALL {
+            let theme = Theme::dark().with_colormap(map);
+            assert_eq!(
+                maps(&scene_themed(&h, &view, &theme)),
+                vec![map; 2],
+                "{mode:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn colour_maps_step_round_and_have_names() {
+    assert_eq!(Colormap::default(), Colormap::Viridis);
+    assert_eq!(Colormap::Viridis.step(1), Colormap::Magma);
+    assert_eq!(Colormap::Viridis.step(-1), Colormap::Grey);
+    assert_eq!(Colormap::Grey.step(1), Colormap::Viridis);
+    let names: Vec<_> = Colormap::ALL.iter().map(|m| m.name()).collect();
+    assert_eq!(names, ["viridis", "magma", "inferno", "cividis", "grey"]);
 }
 
 fn heatmaps(s: &Scene) -> Vec<&Heatmap> {

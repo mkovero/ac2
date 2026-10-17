@@ -85,6 +85,23 @@ fn resolution_marker_round_trip() {
 }
 
 #[test]
+fn spectrograph_colours_round_trip() {
+    use ac2_scene::primitives::Colormap;
+    let mut p = UiPrefs::default();
+    assert_eq!(p.spectrograph_colours, Colormap::Viridis);
+    assert!(!p.to_toml().contains("spectrograph_colours"));
+    for map in Colormap::ALL.into_iter().skip(1) {
+        p.spectrograph_colours = map;
+        let text = p.to_toml();
+        assert!(
+            text.contains(&format!("spectrograph_colours = \"{}\"", map.name())),
+            "{text}"
+        );
+        assert_eq!(UiPrefs::from_toml(&text), Ok(p.clone()));
+    }
+}
+
+#[test]
 fn spec_ease_round_trip() {
     let mut p = UiPrefs::default();
     assert!(p.spec_ease);

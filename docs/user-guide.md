@@ -121,7 +121,7 @@ once).
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
-| Display | theme, key hints, warning toasts, how long the SPL number holds, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, spectrograph history, distortion unit, coherence placement, resolution marker, level axes | |
+| Display | theme, key hints, warning toasts, how long the SPL number holds, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, spectrograph history and colours, distortion unit, coherence placement, resolution marker, level axes | |
 | Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
 #### System max level
@@ -735,9 +735,14 @@ ac2 meas set live --fft 65536samples                                # back to on
 
 **G** in the spectrum pane steps spectrum → spectrum + **spectrograph** → spectrograph
 alone ([spectrograph.md](design/spectrograph.md)). Frequency runs across on the spectrum's
-axis, time down with the newest at the top, level as colour (viridis, perceptual and
-colour-blind safe). The colour bar spans the pane's level axis, so the level-axis keys
-change the colours.
+axis, time down with the newest at the top, level as colour (viridis by default). The colour
+bar spans the pane's level axis, so the level-axis keys change the colours.
+
+- **Settings › Display › Spectrograph colours** (or the palette: `spectrograph colours`,
+  `magma`, …) picks the colour map: viridis, magma, inferno, cividis or grey. Magma, inferno
+  and grey stay dark for most of their range, easier on the eyes in a dark room; all five
+  are perceptual (brighter is always louder) and colour-blind safe. The choice is this
+  app's, remembered with its other display settings, and the colour bar follows it.
 
 - **Shift+B** (or Settings › Display › Spectrograph history) steps the history 10, 30
   (default), 60, 120 s; every length keeps a row per 33 ms. It starts afresh at each length
@@ -2659,6 +2664,12 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Smoothing: 1/12 oct | `smooth_12` |
 | Smoothing: 1/6 oct | `smooth_6` |
 | Smoothing: 1/3 oct | `smooth_3` |
+| Spectrograph colours: the next colour map | `spectrograph_colours` |
+| Spectrograph colours: viridis (blue, green, yellow) | `spectrograph_colours_viridis` |
+| Spectrograph colours: magma (black, purple, orange; dark) | `spectrograph_colours_magma` |
+| Spectrograph colours: inferno (black, purple, red, yellow; dark) | `spectrograph_colours_inferno` |
+| Spectrograph colours: cividis (dark blue to yellow) | `spectrograph_colours_cividis` |
+| Spectrograph colours: grey (black to light grey) | `spectrograph_colours_grey` |
 | SPL pane: the meter | `spl_show_meter` |
 | SPL pane: the Leq windows | `spl_show_leq` |
 | SPL pane: meter + Leq windows | `spl_show_meter_leq` |

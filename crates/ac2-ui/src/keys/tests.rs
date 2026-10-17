@@ -130,6 +130,12 @@ fn every_command_is_reachable() {
         CommandId::SplLeqStyle,
         CommandId::SplLeqHistory,
         CommandId::DistortionUnit,
+        CommandId::SpectrographColours,
+        CommandId::SpectrographViridis,
+        CommandId::SpectrographMagma,
+        CommandId::SpectrographInferno,
+        CommandId::SpectrographCividis,
+        CommandId::SpectrographGrey,
         // Once a show: the palette's "export leq".
         CommandId::SplLogExport,
         CommandId::SplLogExportPrevious,

@@ -447,6 +447,7 @@ impl AppState {
             DisplayRow::LeqHistory if d != 0 => self.toggle_leq_layout(true),
             DisplayRow::LeqBars if d != 0 => self.toggle_bar_ease(),
             DisplayRow::SpectrumGlide if d != 0 => self.toggle_spec_ease(),
+            DisplayRow::SpectrographColours if d != 0 => self.step_spectrograph_colours(d),
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
@@ -817,6 +818,19 @@ impl AppState {
             "Spectrum {}",
             crate::settings::spec_ease_text(self.prefs.spec_ease)
         ));
+    }
+
+    /// The Display page's spectrograph colours line (←/→ `d`) and its palette command
+    /// (`1`).
+    pub(super) fn step_spectrograph_colours(&mut self, d: i32) {
+        self.set_spectrograph_colours(self.prefs.spectrograph_colours.step(d));
+    }
+
+    /// The spectrograph's colours, remembered in the prefs; the palette's commands by name.
+    pub(super) fn set_spectrograph_colours(&mut self, c: ac2_scene::primitives::Colormap) {
+        self.prefs.spectrograph_colours = c;
+        self.prefs_dirty = true;
+        self.toast(format!("Spectrograph colours: {}", c.name()));
     }
 
     /// The Display page's Leq bars line; remembered in the prefs.
