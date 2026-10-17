@@ -43,7 +43,10 @@ impl AppState {
 
     pub(super) fn step_level(&mut self, db: f64, out: &mut Vec<Request>) {
         let Some(l) = self.stimulus.level else {
-            self.warn("no stimulus level yet: type one (L)");
+            let l = self
+                .keys
+                .reach(CommandId::StimulusLevel, CommandId::StimulusLevel.title());
+            self.warn(format!("no stimulus level yet: type one ({l})"));
             return;
         };
         let ceiling = self.ceiling().map_or(0.0, |c| c.0);

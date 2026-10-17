@@ -212,26 +212,31 @@ impl SessionDialog {
                             input: i.channel,
                         });
                 format!(
-                    "Reference (loopback): input {} · {} ← output {} · {}{}",
-                    i.channel + 1,
+                    "{} (input {}) is the reference: it records what {} (output {}) plays.{}",
                     i.label(),
-                    o.channel + 1,
+                    i.channel + 1,
                     o.label(),
+                    o.channel + 1,
                     if now {
                         ""
                     } else {
-                        " — applies when the session opens (Enter)"
+                        " Applies when the session opens."
                     }
                 )
             }
             (Some(i), None) => format!(
-                "Reference: input {} · {} — tick the output that feeds its loopback (S)",
+                "{} (input {}) is the reference: S on the output its loopback cable comes from.",
+                i.label(),
                 i.channel + 1,
-                i.label()
             ),
-            (None, _) => "No reference: R on the input the stimulus's loopback cable returns on \
-                          (or D detects it)"
+            (None, _) => "No reference yet: R on the input the loopback cable returns on, or D \
+                          finds it."
                 .to_owned(),
         }
     }
 }
+
+/// Under the reference: why it matters, as the one choice on the page that is not obvious.
+pub const REFERENCE_HELP: &str = "The reference is a copy of the stimulus fed straight back to \
+     an input (a loopback cable or a console send). Transfer measurements compare each mic \
+     against it; spectrum, RTA and SPL meters do not need one.";

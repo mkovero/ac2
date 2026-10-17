@@ -195,10 +195,10 @@ fn leq_tiles_from_an_empty_daemon() {
             && a.state.input_meters().len() == 4
     });
     h.key_press(Key::Enter);
-    step_until(&mut h, "session open", |a| a.state.open_session().is_some());
-    if matches!(h.state().state.overlay, Overlay::Offer(_)) {
-        h.key_press(Key::N);
-    }
+    step_until(&mut h, "session open, the New measurement chooser", |a| {
+        a.state.open_session().is_some() && new_meas_chooser(a)
+    });
+    h.key_press(Key::Escape);
     step_until(&mut h, "no dialog", |a| a.state.overlay == Overlay::None);
 
     // An SPL meter from the palette: Ctrl+K, "new spl", Enter, Enter.

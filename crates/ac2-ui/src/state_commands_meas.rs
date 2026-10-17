@@ -209,7 +209,14 @@ impl AppState {
                         .unwrap_or_default();
                     self.prompt(PromptKind::TraceMicCurve(t.id), text);
                 }
-                None => self.warn("select a stored trace first (V, or click it in the list)"),
+                None => {
+                    let v = self
+                        .keys
+                        .reach(CommandId::NextTrace, CommandId::NextTrace.title());
+                    self.warn(format!(
+                        "select a stored trace first ({v}, or click it in the list)"
+                    ));
+                }
             },
             C::CalDelete => {
                 let text = self.cal_delete_text();

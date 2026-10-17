@@ -2,7 +2,7 @@
 //! record and replay.
 
 use super::{hint_line, new_spectrum, spectrum_panes};
-use crate::embedded::harness::{Driver, NAME, R, measure_from_empty};
+use crate::embedded::harness::{Driver, NAME, R, measure_from_empty, session_from_empty};
 use ac2_client::{ClientConfig, Endpoints};
 use ac2_proto::FrameData;
 use ac2_proto::model::MeasKind;
@@ -401,7 +401,8 @@ fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
     use ac2_ui::state::PaneMenuRow;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    // No transfer measurement: its own panes would come with its row on the Tab round.
+    session_from_empty(&mut d)?;
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
     let of = |s: &AppState, id: MeasId| {

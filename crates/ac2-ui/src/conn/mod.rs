@@ -134,11 +134,8 @@ pub enum ConnEvent {
     },
     /// `session.detect_loopback` answered (or could not run).
     LoopbackDetected(Result<LoopbackDetection, String>),
-    /// The session dialog's session is open (and its mic names set); `transfers` are the
-    /// measurements it offers to create.
-    SessionOpened {
-        transfers: Vec<MeasConfig>,
-    },
+    /// The session dialog's session is open (and its mic names set).
+    SessionOpened,
     /// A measurement was created (and, unless a reply says otherwise, started).
     MeasCreated(Box<Measurement>),
     /// `server.info` (`what: None`), or a `server.*` change named `what`, answered with the
@@ -256,11 +253,10 @@ pub enum Request {
     /// `session.devices`, for the session dialog.
     Devices,
     /// `session.open`, then `session.inputs` with the mic names; [`ConnEvent::SessionOpened`]
-    /// carries `transfers` back once both succeeded.
+    /// once both succeeded.
     OpenSession {
         config: SessionConfig,
         inputs: Vec<InputSetup>,
-        transfers: Vec<MeasConfig>,
         what: String,
     },
     /// Open or renew the capture-only preview of a device.

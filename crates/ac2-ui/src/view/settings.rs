@@ -222,12 +222,14 @@ fn page(
     ui.label(RichText::new(s.page.keys()).small().color(ch.dim));
 }
 
-/// A section title with whose its settings are.
-fn section(ui: &mut egui::Ui, title: &str, whose: &str, ch: &Chrome) {
+/// A section title with whose its settings are (`whose` empty: the page header's).
+pub(super) fn section(ui: &mut egui::Ui, title: &str, whose: &str, ch: &Chrome) {
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         ui.label(RichText::new(title).strong().size(16.0).color(ch.text));
-        ui.label(RichText::new(format!("· {whose}")).small().color(ch.dim));
+        if !whose.is_empty() {
+            ui.label(RichText::new(format!("· {whose}")).small().color(ch.dim));
+        }
     });
     ui.add_space(4.0);
 }
@@ -236,14 +238,8 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
     let mut m = None;
     // One focus marker on the page: the max level row's, or a session row's.
     let focus = (!s.on_ceiling).then_some(s.session.focus);
-    section(ui, "Device", crate::settings::THE_RIG, ch);
+    section(ui, "Device", "", ch);
     super::session::device_section(ui, &s.session, focus, ch, &mut m);
-    section(
-        ui,
-        "Channels",
-        "the rig — all clients · stimulus outputs: this app",
-        ch,
-    );
     super::session::channels_section(app, ui, &s.session, focus, ch, &mut m);
     if let Some(m) = m {
         *msg = Some(Msg::Session(m));

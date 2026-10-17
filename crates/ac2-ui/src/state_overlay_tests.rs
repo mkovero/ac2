@@ -40,7 +40,7 @@ enum Window {
     Sweep,
     Session,
     PaneMenu,
-    Offer,
+    NewMeas,
     Calibrations,
     Electrical,
     Acoustic,
@@ -59,7 +59,7 @@ const WINDOWS: [Window; 16] = [
     Window::Sweep,
     Window::Session,
     Window::PaneMenu,
-    Window::Offer,
+    Window::NewMeas,
     Window::Calibrations,
     Window::Electrical,
     Window::Acoustic,
@@ -111,11 +111,7 @@ fn with_window(w: Window) -> T {
         Window::PaneMenu => {
             t.st.update(Msg::PaneMenu(t.pane(PaneKind::Transfer)), &t.keys);
         }
-        Window::Offer => {
-            t.st.overlay = Overlay::Offer(Box::new(Offer {
-                transfers: Vec::new(),
-            }));
-        }
+        Window::NewMeas => cmd(&mut t, CommandId::NewMeasurement),
         Window::Calibrations => cmd(&mut t, CommandId::Calibrations),
         Window::Electrical => {
             cmd(&mut t, CommandId::Calibrations);
@@ -150,7 +146,7 @@ fn with_window(w: Window) -> T {
             | (Window::DelayPick, Overlay::DelayPick(_))
             | (Window::Form | Window::Sweep, Overlay::Form(_))
             | (Window::PaneMenu, Overlay::PaneMenu(_))
-            | (Window::Offer, Overlay::Offer(_))
+            | (Window::NewMeas, Overlay::Choose(_))
             | (
                 Window::Session
                     | Window::Calibrations

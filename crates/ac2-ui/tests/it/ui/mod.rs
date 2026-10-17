@@ -337,6 +337,12 @@ impl Drop for Meters {
 fn session_dialog_of(a: &App) -> Option<&ac2_ui::session_dialog::SessionDialog> {
     a.state.overlay.settings().map(|s| &s.session)
 }
+
+/// Whether the New measurement chooser is open (as a fresh session opens it).
+fn new_meas_chooser(a: &App) -> bool {
+    matches!(&a.state.overlay, Overlay::Choose(c)
+        if c.purpose == ac2_ui::state::ChoicePurpose::NewMeasurement)
+}
 /// The pictures' local time: UTC+2, so the show starts at 19:02 on any machine.
 const SHOW_ZONE: ac2_ui::scenes::LocalZone = ac2_ui::scenes::LocalZone::Fixed { offset_s: 7200 };
 

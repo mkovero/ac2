@@ -33,6 +33,21 @@ impl AppState {
         }));
     }
 
+    /// After the session dialog opened a session, once the daemon's state shows it (the
+    /// chooser says which kinds can be made from that state): a fresh session's first step
+    /// is choosing what to measure; one with measurements, or a window open, asks nothing.
+    pub(super) fn choose_first(&mut self) {
+        if !self.choose_when_open || self.open_session().is_none() {
+            return;
+        }
+        self.choose_when_open = false;
+        let none_yet = self.daemon().is_some_and(|s| s.measurements.is_empty());
+        if none_yet && self.overlay == Overlay::None {
+            let keymap = self.keys.clone();
+            self.open_new_measurement(self.layout.focus, &keymap);
+        }
+    }
+
     /// The measurement list with nothing in it: how to make the first one.
     pub fn empty_list_text(&self) -> String {
         ac2_scene::new_meas::empty_list(&self.new_meas_reach())

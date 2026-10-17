@@ -8,7 +8,7 @@ use ac2_proto::units::MeasId;
 use ac2_ui::conn::{Conn, Target};
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::{Chord, CommandId, Keymap};
-use ac2_ui::state::{AppState, Msg, Overlay, StimPhase};
+use ac2_ui::state::{AppState, ChoicePurpose, Msg, Overlay, StimPhase};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -147,9 +147,61 @@ impl Driver {
     }
 }
 
+/// A session just opened on a daemon without measurements: the New measurement chooser it
+/// opens, Enter on Transfer (highlighted on the transfer pane), Enter on its form; until the
+/// measurement runs. The form lays out the transfer stack (magnitude, phase, coherence) in
+/// the focused transfer pane: Q on phase and coherence, so the tests that follow start on
+/// the panes they had, the first focused.
+pub fn first_transfer(d: &mut Driver) -> R {
+    let panes = crate::common::visible(&d.st);
+    d.until(
+        "the New measurement chooser",
+        |s| matches!(&s.overlay, Overlay::Choose(c) if c.purpose == ChoicePurpose::NewMeasurement),
+    )?;
+    d.key("Enter");
+    d.until(
+        "the transfer form",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Transfer),
+    )?;
+    d.key("Enter");
+    d.until("the measurement, running and selected", |s| {
+        s.selected_meas().is_some_and(|m| m.running)
+    })?;
+    d.until("the transfer stack", |s| {
+        crate::common::visible(s).len() == panes.len() + 2
+    })?;
+    for _ in 0..2 {
+        d.key("Alt+2");
+        d.key("Q");
+    }
+    d.key("Alt+1");
+    assert_eq!(crate::common::visible(&d.st), panes);
+    Ok(())
+}
+
+/// From a daemon with no session to an open one and no measurement: Shift+O, Enter on the
+/// simulated rig's roles, Esc on the New measurement chooser the session opens.
+pub fn session_from_empty(d: &mut Driver) -> R {
+    d.synced()?;
+    d.key("Shift+O");
+    d.send(Msg::Text("O".into()));
+    d.until("the device list", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.session.device_info().is_some())
+    })?;
+    d.key("Enter");
+    d.until(
+        "the New measurement chooser",
+        |s| matches!(&s.overlay, Overlay::Choose(c) if c.purpose == ChoicePurpose::NewMeasurement),
+    )?;
+    d.key("Escape");
+    Ok(())
+}
+
 /// From a daemon with no session to frames, using only the app: the hint, Shift+O, the
-/// dialog's roles for the simulated rig with its meters, Enter; the offered transfer
-/// measurement, Enter; the stimulus.
+/// dialog's roles for the simulated rig with its meters, Enter; the chooser's transfer
+/// measurement, Enter twice; the stimulus.
 pub fn measure_from_empty(d: &mut Driver) -> R {
     d.synced()?;
     assert!(d.st.open_session().is_none());
@@ -183,16 +235,9 @@ pub fn measure_from_empty(d: &mut Driver) -> R {
         open.config.loopback.map(|l| (l.output, l.input)),
         Some((0, 0))
     );
-    // One key: a transfer measurement per mic.
-    d.until("the measurement offer", |s| {
-        matches!(s.overlay, Overlay::Offer(_))
-    })?;
-    d.key("Enter");
-    d.until("the measurement, running and selected", |s| {
-        s.selected_meas().is_some_and(|m| m.running)
-    })?;
+    first_transfer(d)?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
-    assert_eq!(m.config.name, "Reference \u{2192} Room mic");
+    assert_eq!(m.config.name, "TF 1");
     assert_eq!(d.st.empty_hint(d.st.layout.focus, &d.keys), None);
     let MeasKind::Transfer { config } = &m.config.kind else {
         return Err("not a transfer measurement".into());

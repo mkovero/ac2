@@ -126,6 +126,15 @@ pub fn empty_list(reach: &str) -> String {
     format!("none — {reach}: {TITLE}…")
 }
 
+/// Q on the only pane: it stays, and what does bring more to the screen (`split`: the
+/// split key, if bound; `reach`: the chooser's key, or its palette entry).
+pub fn last_pane_stays(split: Option<&str>, reach: &str) -> String {
+    match split {
+        Some(n) => format!("the last pane stays: {n} splits it · {reach}: {TITLE}…"),
+        None => format!("the last pane stays · {reach}: {TITLE}…"),
+    }
+}
+
 /// The empty transfer pane on a session without measurements (`reach`: the chooser's key,
 /// else the palette's): where every kind is made.
 pub fn no_measurements(reach: &str) -> String {
@@ -181,6 +190,14 @@ mod tests {
         assert_eq!(q.default, 0);
         assert_eq!(menu_row(Some("Ctrl+M")), "New measurement…  Ctrl+M");
         assert_eq!(empty_list("Ctrl+M"), "none — Ctrl+M: New measurement…");
+        assert_eq!(
+            last_pane_stays(Some("N"), "Ctrl+M"),
+            "the last pane stays: N splits it · Ctrl+M: New measurement…"
+        );
+        assert_eq!(
+            last_pane_stays(None, "Ctrl+M"),
+            "the last pane stays · Ctrl+M: New measurement…"
+        );
         assert_eq!(
             no_measurements("Ctrl+M"),
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \

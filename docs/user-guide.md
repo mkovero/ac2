@@ -153,17 +153,19 @@ keys it refused lately (fingerprint, address, how often, when).
 
 ### Audio & I/O
 
-Nothing on this page is a channel number to type. Rows run device (backend, input and
-output device, rate, buffer), channels, system max level; **↑/↓** walk them and wrap;
-**Enter** opens (or reopens) the session as shown.
+Nothing on this page is a channel number to type. Rows run in the order you decide them:
+device (backend, input and output device), inputs, outputs, the reference (loopback), sample
+rate and buffer, then the system max level; **↑/↓** walk them and wrap; **Enter** (or the
+*Open session* button) opens, or reopens, the session as shown; **Esc** closes without
+opening.
 
 - **Backend** (**←/→**): every backend the daemon offers; one it cannot use now says why and
   what to do (*PipeWire is running but its JACK library isn't in use: install pipewire-jack …
   or start the daemon with `pw-jack ac2d`*). The simulated rig only appears on a daemon
   started on it.
-- **Input** (**←/→**): the capture device, with *N in / M out · rate · buffer*. Output-only
+- **Input device** (**←/→**): the capture device, with *N in / M out · rate · buffer*. Output-only
   devices are not offered.
-- **Output** (**←/→**): where the stimulus plays. It starts as *same device as the input*
+- **Output device** (**←/→**): where the stimulus plays. It starts as *same device as the input*
   when that device has outputs (one device, one clock), else the system's default output —
   a USB mic has no outputs. With two devices the clocks may differ, and Settings says so: the loopback
   reference keeps the transfer function right, and the loopback monitor measures their
@@ -172,16 +174,17 @@ output device, rate, buffer), channels, system max level; **↑/↓** walk them 
   names, the channel names a Core Audio or ASIO device gives; without them *Input 3*); inputs have a **live meter** (RMS bar, peak
   tick, *CLIP* held 1 s). The meters run before the session opens (the daemon opens the
   device capture-only, no output stream), so you can find a mic by tapping it.
-- **Roles**: **R** Reference (the loopback return, one input); **M** measurement mic (any
+- **Roles**: **R** *Reference* (the loopback return, one input); **M** *Mic*, a measurement mic (any
   number; **N** names one — the name is the mic's identity for calibrations; a named mic's
   row says its curve and calibration, and **←/→** choose the curve: off, 0°, 90° …);
-  **S** Stimulus (the outputs the stimulus plays on; this app's choice, remembered per
+  **S** *Stimulus* (the outputs the stimulus plays on; this app's choice, remembered per
   device; applied at once when the open session has the output). **Space** puts a row in or
-  out of the session. The mouse works too: boxes, R / M / S chips, double click on a name.
+  out of the session. The mouse works too: boxes, the *Reference* / *Mic* / *Stimulus* chips,
+  double click on a name.
 - **Output names**: **N** on an output names it for the whole rig (`Main L`; empty clears
   it); the top bar names the stimulus outputs by it (`→ Main L, Main R`).
-- **Reference**: the line under the channels names the reference pair
-  (`Reference (loopback): input 1 · Loop ← output 1 · Main L`).
+- **Reference (loopback)**: names the reference pair in words (`Loop return (input 1) is the
+  reference: it records what Main L (output 1) plays.`), with a line on what it is for.
 - **Detect loopback…** (**D**): asks for a level (no default; your last stimulus level is
   offered), then on **Enter** plays a 0.5 s band-limited noise burst on the stimulus output —
   under the stimulus lease and the ceiling, faded — and marks the input it returns on as the
@@ -213,8 +216,9 @@ output device, rate, buffer), channels, system max level; **↑/↓** walk them 
   through it; resting the pointer on them holds them still.
 - **Enter** opens; what is missing is said in words (*Pick a reference input: the loopback
   from your stimulus output*). Roles and mic names are remembered per device (`ui.toml`).
-  With a Reference, at least one mic and no measurements yet, one more **Enter** creates
-  *Reference → <mic>* transfer measurements.
+  On a daemon with no measurements yet, the session opening brings up the **New
+  measurement** chooser (as **Ctrl+M** does): **Enter** on a kind opens its settings, **Esc**
+  leaves the empty panes, which say how to come back to it.
 
 The measurement dialogs pick inputs the same way: by name, with meters, **←/→**.
 
@@ -333,7 +337,7 @@ pane on an empty daemon).
 | **N** | splits the focused pane along its longer side; the new half shows the same measurement and views and takes the focus |
 | **Shift+N** | turns the split holding the focused pane: side by side ↔ stacked; sizes and order stay |
 | **Alt+→** / **Alt+←** | grows / shrinks the focused pane by a tenth of its split, down to the smallest readable size (the one **N** refuses to split below); dragging the gap between panes does the same |
-| **Q** | closes the focused pane; its neighbour takes the space and focus. The last pane stays |
+| **Q** | closes the focused pane; its neighbour takes the space and focus. The last pane stays (**N** splits it, **Ctrl+M** makes a new measurement) |
 | **Tab** / **Shift+Tab** | steps through the measurement list as a click on that row does ([below](#choosing-what-a-pane-shows)) |
 | **G** / **Shift+G** | steps the focused pane's views forward / back (chains below) |
 | **Alt+1 … Alt+9** | focus the panes in reading order: top to bottom, then left to right |

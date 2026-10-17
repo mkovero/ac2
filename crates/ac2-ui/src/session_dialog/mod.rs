@@ -23,8 +23,8 @@ use std::collections::BTreeMap;
 
 use ac2_proto::model::{
     Availability, BackendInfo, BackendKind, ClockRelation, CurveChoice, DeviceId, DeviceInfo,
-    DeviceSelector, InputSetup, LoopbackDetection, LoopbackRoute, MAX_OUTPUT_LABEL, MeasConfig,
-    MeasKind, Mic, OpenSession, OutputSetup, SessionConfig, TransferConfig,
+    DeviceSelector, InputSetup, LoopbackDetection, LoopbackRoute, MAX_OUTPUT_LABEL, Mic,
+    OpenSession, OutputSetup, SessionConfig,
 };
 use ac2_proto::units::Dbfs;
 use ac2_scene::format;
@@ -37,6 +37,8 @@ mod detect;
 mod devices;
 mod edit;
 mod plan;
+
+pub use detect::REFERENCE_HELP;
 
 /// Longest mic name the daemon accepts.
 pub const MAX_MIC_NAME: usize = 64;
@@ -171,8 +173,6 @@ pub struct SessionPlan {
     pub roles: DeviceRoles,
     /// Mic names of the session's inputs (`session.inputs`).
     pub inputs: Vec<InputSetup>,
-    /// One transfer measurement per mic, against the reference.
-    pub transfers: Vec<MeasConfig>,
 }
 
 /// A loopback detection to run.

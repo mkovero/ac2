@@ -22,7 +22,6 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32) {
         Overlay::DelayPick(_) => delay_pick(app, ctx, ch),
         Overlay::Form(_) => form(app, ctx, ch),
         Overlay::Settings(_) => super::settings::settings(app, ctx, ch, top),
-        Overlay::Offer(_) => super::session::offer(app, ctx, ch),
         Overlay::NewLog(_) => super::leq::new_log(app, ctx, ch),
         Overlay::Delete(_) => delete(app, ctx, ch),
         Overlay::Choose(_) => choose(app, ctx, ch),

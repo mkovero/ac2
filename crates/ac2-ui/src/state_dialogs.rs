@@ -329,7 +329,6 @@ impl AppState {
     /// Enter on the session dialog: opens the session its roles describe, remembers them
     /// for the device, and points the stimulus at the chosen outputs (K4).
     pub(super) fn submit_session(&mut self, out: &mut Vec<Request>) {
-        let no_measurements = self.daemon().is_some_and(|s| s.measurements.is_empty());
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
@@ -363,11 +362,6 @@ impl AppState {
         out.push(Request::OpenSession {
             config: plan.config,
             inputs: plan.inputs,
-            transfers: if no_measurements {
-                plan.transfers
-            } else {
-                Vec::new()
-            },
             what: format!("audio session open on {}", plan.device_name),
         });
         self.overlay = Overlay::None;
@@ -381,19 +375,6 @@ impl AppState {
         if go {
             let (meas, what) = (p.meas, format!("{}: new SPL log started", p.meter));
             self.call(out, Command::SplLogNew { meas }, what);
-        }
-        self.overlay = Overlay::None;
-    }
-
-    /// The measurement offer: create every transfer measurement, or skip.
-    pub(super) fn offer(&mut self, create: bool, out: &mut Vec<Request>) {
-        let Overlay::Offer(o) = &self.overlay else {
-            return;
-        };
-        if create {
-            for config in o.transfers.clone() {
-                out.push(Request::CreateMeas { config });
-            }
         }
         self.overlay = Overlay::None;
     }

@@ -91,10 +91,7 @@ impl Page {
     /// Whose the page's settings are, as its header says.
     pub fn whose(self) -> &'static str {
         match self {
-            Page::AudioIo => {
-                "the device, channels, labels, the reference and the max level: the rig — all \
-                 clients · stimulus outputs: this app"
-            }
+            Page::AudioIo => "the rig — all clients · stimulus outputs: this app",
             Page::Calibration | Page::Leq | Page::Rig => THE_RIG,
             Page::Recording => "the limit: this app · the folder: the rig — all clients",
             Page::Display => THIS_APP,

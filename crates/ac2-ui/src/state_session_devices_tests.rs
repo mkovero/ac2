@@ -143,7 +143,7 @@ fn an_input_only_device_plays_on_another_output_device() {
     assert_eq!(dialog(&t).inputs[0].role, InputRole::Reference);
 
     let r = t.key("Enter");
-    let (config, _, _) = opened(&r).expect("session.open");
+    let (config, _) = opened(&r).expect("session.open");
     assert_eq!(
         config.input_device,
         DeviceSelector::Id {
@@ -191,7 +191,7 @@ fn a_duplex_device_plays_on_itself() {
     t.key("Right");
     assert_eq!(dialog(&t).out_device, OutputDevice::SameAsInput);
     let r = t.key("Enter");
-    let (config, _, _) = opened(&r).expect("session.open");
+    let (config, _) = opened(&r).expect("session.open");
     assert_eq!(config.input_device, config.output_device);
 }
 

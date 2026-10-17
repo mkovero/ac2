@@ -152,6 +152,45 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     );
 }
 
+/// Every key a hint or a refusal names is the one the keymap binds: rebound, the text
+/// follows, and no default chord is left behind.
+#[test]
+fn hints_name_the_keys_the_keymap_binds() {
+    let keys = Keymap::from_toml(
+        "[global]\nmeas_new = \"F5\"\nsplit_pane = \"F6\"\nclose_pane = \"F7\"\n\
+         next_trace = \"F8\"\nstimulus_level = \"F9\"\n",
+    )
+    .expect("keys");
+    let mut t = T::new();
+    t.keys = keys;
+    let mut s = daemon_state();
+    s.measurements.clear();
+    t.conn(mirror(s));
+    let hint =
+        t.st.empty_hint(t.st.layout.focus, &t.keys)
+            .map(|h| h.text)
+            .unwrap_or_default();
+    assert!(
+        hint.starts_with("No measurements — F5 → New measurement…"),
+        "{hint}"
+    );
+    // Q, as rebound, down to the last pane: it stays, and says what brings more.
+    let panes = t.st.layout.views.len();
+    for _ in 0..panes {
+        t.key("F7");
+    }
+    assert_eq!(t.st.layout.views.len(), 1);
+    assert_eq!(
+        t.last_toast(),
+        "the last pane stays: F6 splits it · F5: New measurement…"
+    );
+    t.key("Alt+9");
+    assert_eq!(t.last_toast(), "no pane 9: 1 on screen (F6 splits)");
+    t.st.stimulus.level = None;
+    t.key("Up");
+    assert_eq!(t.last_toast(), "no stimulus level yet: type one (F9)");
+}
+
 #[test]
 fn arming_without_a_session_names_the_key() {
     let mut t = T::new();
@@ -207,7 +246,7 @@ fn session_dialog_opens_a_session_from_roles() {
     assert_eq!(dialog(&t).inputs[1].mic, "M30 FOH");
     assert_eq!(dialog(&t).edit, None);
     let r = t.key("Enter");
-    let (config, inputs, transfers) = opened(&r).expect("session.open");
+    let (config, inputs) = opened(&r).expect("session.open");
     assert_eq!(config.backend, Some(BackendKind::Fake));
     assert_eq!(config.input_channels, vec![0, 1]);
     assert_eq!(config.output_channels, 2);
@@ -239,8 +278,6 @@ fn session_dialog_opens_a_session_from_roles() {
             },
         ]
     );
-    assert_eq!(transfers.len(), 1);
-    assert_eq!(transfers[0].name, "Reference → M30 FOH");
     // Closing the dialog closes the preview and the meter subscription.
     assert!(r.iter().any(|x| matches!(x, Request::PreviewStop)), "{r:?}");
     assert!(
@@ -346,12 +383,11 @@ fn mic_names_must_differ_and_the_mouse_assigns_roles() {
     t.key("N");
     assert_eq!(dialog(&t).edit, None);
     let r = t.st.update(Msg::Session(SessionMsg::Submit), &t.keys);
-    let (config, inputs, transfers) = opened(&r).expect("open");
+    let (config, inputs) = opened(&r).expect("open");
     assert_eq!(config.loopback.map(|l| l.input), Some(2));
     assert_eq!(config.input_channels, vec![0, 1, 2]);
     assert_eq!(inputs[1].mic.as_deref(), Some("ECM"));
     assert_eq!(inputs[2].mic, None);
-    assert_eq!(transfers[0].name, "Reference → ECM");
     // Cancel closes without touching the stimulus (Esc would stop it).
     t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
     t.st.stimulus.phase = StimPhase::Armed;
@@ -385,7 +421,7 @@ fn roles_are_remembered_per_device() {
     assert!(!d.inputs[1].in_session);
     assert!(d.outputs[1].stimulus && !d.outputs[0].stimulus);
     let r = t.key("Enter");
-    let (config, _, transfers) = opened(&r).expect("open");
+    let (config, _) = opened(&r).expect("open");
     assert_eq!(
         config.loopback,
         Some(LoopbackRoute {
@@ -393,12 +429,6 @@ fn roles_are_remembered_per_device() {
             input: 3
         })
     );
-    let names: Vec<&str> = transfers.iter().map(|m| m.name.as_str()).collect();
-    assert_eq!(names, ["Reference → M30", "Reference → KM184"]);
-    assert!(matches!(
-        &transfers[1].kind,
-        MeasKind::Transfer { config } if config.reference_input == 3 && config.measurement_input == 2
-    ));
 }
 
 #[test]
@@ -601,37 +631,33 @@ fn detect_loopback_needs_a_stimulus_output_and_a_typed_level() {
 }
 
 #[test]
-fn opening_offers_one_transfer_per_mic_on_an_empty_daemon() {
+fn opening_on_an_empty_daemon_asks_what_to_measure() {
     let mut t = T::new();
     open_dialog(&mut t, backends(true));
-    focus(&mut t, Row::Input(2));
-    t.key("M");
     let r = t.key("Enter");
-    let (_, _, transfers) = opened(&r).expect("open");
-    assert_eq!(transfers.len(), 2);
-    let transfers = transfers.to_vec();
-    t.conn(ConnEvent::SessionOpened {
-        transfers: transfers.clone(),
-    });
-    assert!(matches!(&t.st.overlay, Overlay::Offer(o) if o.transfers == transfers));
-    let r = t.key("Enter");
-    let made: Vec<&str> = r
-        .iter()
-        .filter_map(|x| match x {
-            Request::CreateMeas { config } => Some(config.name.as_str()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(made, ["Reference → Room mic", "Reference → Line 3"]);
+    assert!(opened(&r).is_some(), "{r:?}");
+    // The reply can come before the state shows the session: the chooser waits for it, as
+    // which kinds can be made is read from that state.
+    t.conn(ConnEvent::SessionOpened);
     assert_eq!(t.st.overlay, Overlay::None);
-    // N skips; a daemon that has measurements by then gets no offer.
-    t.conn(ConnEvent::SessionOpened {
-        transfers: transfers.clone(),
-    });
-    assert!(t.key("N").is_empty());
+    let mut s = daemon_state();
+    s.measurements.clear();
+    t.conn(mirror(s));
+    assert!(
+        matches!(&t.st.overlay, Overlay::Choose(c) if c.purpose == ChoicePurpose::NewMeasurement),
+        "{:?}",
+        t.st.overlay
+    );
+    // Esc leaves the empty state as it was, nothing created.
+    let r = t.key("Escape");
+    assert!(
+        !r.iter().any(|x| matches!(x, Request::CreateMeas { .. })),
+        "{r:?}"
+    );
     assert_eq!(t.st.overlay, Overlay::None);
+    // A daemon that has measurements by then asks nothing.
     t.conn(mirror(daemon_state()));
-    t.conn(ConnEvent::SessionOpened { transfers });
+    t.conn(ConnEvent::SessionOpened);
     assert_eq!(t.st.overlay, Overlay::None);
 }
 

@@ -9,7 +9,7 @@ use ac2_scene::theme::Theme;
 use ac2_ui::embedded::{EmbeddedBackend, Setup, start_embedded_with};
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::CommandId;
-use ac2_ui::state::{AppState, Msg, Overlay, StimPhase};
+use ac2_ui::state::{AppState, ChoicePurpose, Msg, Overlay, StimPhase};
 use std::time::{Duration, Instant};
 
 /// From an empty daemon to a stored sweep using only the app, on the simulated rig whose
@@ -193,9 +193,10 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     d.until("the session", |s| s.open_session().is_some())?;
     let open = d.st.open_session().cloned().ok_or("session")?;
     assert_eq!(open.config.input_channels, vec![0, 1, 2]);
-    d.until("the measurement offer", |s| {
-        matches!(s.overlay, Overlay::Offer(_))
-    })?;
+    d.until(
+        "the New measurement chooser",
+        |s| matches!(&s.overlay, Overlay::Choose(c) if c.purpose == ChoicePurpose::NewMeasurement),
+    )?;
     d.key("Escape");
 
     let sweeps_before = sweep_count(&d.st);
