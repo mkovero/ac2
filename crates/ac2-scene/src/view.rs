@@ -810,6 +810,10 @@ pub struct ViewState {
     /// Mark the frequency ranges a curve's analysis does not resolve at its grid
     /// ([`crate::unresolved`]).
     pub unresolved: bool,
+    /// Least right margin of a frequency plot, logical pixels: set by the pane layout (not
+    /// the operator) to the widest margin among the panes stacked in this pane's column, so
+    /// they all put one frequency at one x ([`crate::freq_column`]). 0 keeps the plot's own.
+    pub freq_right: f32,
 }
 
 impl Default for ViewState {
@@ -825,6 +829,7 @@ impl Default for ViewState {
             temperature_c: 20.0,
             chrome: PlotChrome::Full,
             unresolved: true,
+            freq_right: 0.0,
         }
     }
 }

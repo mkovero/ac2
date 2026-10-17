@@ -584,9 +584,10 @@ pub fn distortion_scene(
     size: Viewport,
 ) -> DistortionScene {
     let mut c = Canvas::new(size, theme);
-    let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
+    let right = crate::freq_column::right(MARGINS.right, view);
+    let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
-    let area = canvas::plot_area(size, strip.rect.bottom(), MARGINS.right);
+    let area = canvas::plot_area(size, strip.rect.bottom(), right);
     // Fundamental : distortion heights 1 : 2.
     let top_h = ((area.h - PANE_GAP) / 3.0).max(1.0);
     let fundamental = Rect::new(area.x, area.y, area.w, top_h);
