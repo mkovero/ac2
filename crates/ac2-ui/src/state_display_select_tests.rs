@@ -85,14 +85,16 @@ fn picking_a_trace_while_maximised_brings_up_its_pane() {
     t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
     t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
     assert_eq!(t.visible(), [PaneKind::Distortion]);
-    // V steps the same way (from the SPL pane: the sweep pane's V steps its runs), in the
-    // tree's order: from the sweep's run on to Sub's spectrum.
+    // V only selects (from the SPL pane: the sweep pane's V steps its runs), in the tree's
+    // order: from the sweep's run on to Sub's spectrum, the maximised pane kept.
     t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
     t.key("Alt+4");
+    let shown = t.visible();
+    let layout = t.st.layout.clone();
     t.key("V");
     assert_eq!(t.st.selected_trace, Some(TraceId(16)));
-    assert_eq!(t.visible(), [PaneKind::Spectrum]);
-    assert!(t.st.layout.maximized);
+    assert_eq!(t.visible(), shown);
+    assert_eq!(t.st.layout, layout);
     // Split (W: full screen, W: split): the focus stays.
     t.key("W");
     t.key("W");

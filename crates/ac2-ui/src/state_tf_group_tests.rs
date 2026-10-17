@@ -174,6 +174,38 @@ fn the_transfer_pane_draws_its_measurements_group_only() {
     assert_eq!(legend(&t), ["L ÷ tower", "t10", "t13"]);
 }
 
+/// V only selects, as a child row's click does: stepping across the captures of Main L and
+/// Delay tower moves no pane, changes what no pane shows and asks the daemon for nothing.
+#[test]
+fn v_steps_the_selection_and_moves_no_pane() {
+    let mut t = loaded(two_groups());
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    let layout = t.st.layout.clone();
+    let mut seen = Vec::new();
+    for key in [
+        "V", "V", "V", "V", "V", "Shift+V", "Shift+V", "Alt+V", "Alt+V",
+    ] {
+        let out = t.key(key);
+        assert!(out.is_empty(), "{key}: {out:?}");
+        assert_eq!(t.st.layout, layout, "{key} moved a pane");
+        assert!(!t.st.own_panes_due, "{key} synced the layout");
+        assert_eq!(transfer_group(&t), Some(MeasId(1)));
+        seen.extend(t.st.selected_trace);
+    }
+    assert!(seen.contains(&TraceId(10)), "{seen:?}");
+    assert!(seen.contains(&TraceId(11)), "{seen:?}");
+    // Delay tower's capture is selected while the pane keeps Main L's group.
+    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    for _ in 0..6 {
+        if t.st.selected_trace == Some(TraceId(11)) {
+            break;
+        }
+        t.key("V");
+    }
+    assert_eq!(t.st.selected_trace, Some(TraceId(11)));
+    assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
+}
+
 /// An import shows on the transfer pane once moved under the pane's measurement.
 #[test]
 fn a_moved_import_joins_its_measurements_pane() {

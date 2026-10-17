@@ -483,11 +483,23 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
         ]
     );
 
-    // Live again, the transfer pane focused: V selects the first sweep, then the second;
-    // the sweep pane shows whichever is selected.
+    // Live again, the transfer pane focused and given the sweep by its chip (V only
+    // selects): V selects the first sweep, then the second; the sweep pane shows whichever
+    // is selected.
     d.key("Escape");
     d.key("Alt+1");
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
+    assert_eq!(d.st.selected_trace, None);
+    let sweep_meas =
+        d.st.trace_meta(first)
+            .ok()
+            .and_then(|t| t.edit.owner.meas())
+            .ok_or("the run's sweep")?;
+    let tf = crate::common::pane(&d.st, PaneKind::Transfer);
+    d.send(Msg::PanePick(
+        tf,
+        ac2_ui::state::PaneMenuRow::Meas(sweep_meas),
+    ));
     assert_eq!(d.st.selected_trace, None);
     d.key("V");
     assert_eq!(d.st.selected_trace, Some(first));
@@ -555,7 +567,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     assert_eq!(d.st.selected_trace, Some(second));
     assert_eq!(shown(&d.st), Some(second));
 
-    // V on the sweep pane steps the sweep runs and selects them for the transfer pane.
+    // V on the sweep pane steps the sweep runs and selects them.
     d.key("Alt+5");
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
     d.key("V");

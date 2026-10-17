@@ -666,8 +666,9 @@ impl AppState {
         v
     }
 
-    /// V / Shift+V on the sweep pane: the next / previous stored sweep run, selected (the
-    /// transfer pane and the trace keys follow it).
+    /// V / Shift+V on the sweep pane: the next / previous stored sweep run, selected as a
+    /// click on its row selects it (the sweep pane draws the selected run; the trace keys
+    /// follow it; no other pane changes).
     pub(super) fn cycle_sweep(&mut self, d: i32) {
         let pane = self.layout.focus;
         let ids: Vec<TraceId> = self
@@ -684,7 +685,7 @@ impl AppState {
             .and_then(|c| ids.iter().position(|x| *x == c))
             .unwrap_or(0) as i32;
         let id = ids[(i + d).rem_euclid(ids.len() as i32) as usize];
-        self.select_trace(Some(id));
+        self.select_trace_row(id);
         if let Some((t, _)) = self.pane_sweep(pane) {
             let name = trace_label(&t.meta);
             self.toast(format!("{name} selected"));

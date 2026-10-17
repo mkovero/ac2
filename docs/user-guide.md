@@ -1161,7 +1161,9 @@ unsmoothed.
   measurement slotted traces come first by slot, then the rest oldest first. A click selects
   (again: deselects).
 - **V** / **Shift+V** select the next / previous **shown** trace in tree order, with the live
-  measurement between last and first; **Alt+V** / **Alt+Shift+V** include hidden ones.
+  measurement between last and first; **Alt+V** / **Alt+Shift+V** include hidden ones. Like
+  a click on a child row, **V** only selects: no pane changes, and a trace no pane draws
+  stays selected all the same.
 - **Esc** (no window open) goes back to the live measurement — and stops the stimulus;
   palette *Deselect the stored trace* does it without touching the stimulus.
 - **A** shows or hides the selected trace.

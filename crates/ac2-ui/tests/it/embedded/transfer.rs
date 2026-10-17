@@ -464,6 +464,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.key("Alt+1");
     let f = d.st.layout.focus;
     d.send(Msg::PanePick(f, ac2_ui::state::PaneMenuRow::Meas(m.id)));
+    // The chip leaves the selection on the sweep; the measurement's row selects it.
+    d.send(Msg::SelectMeas(m.id));
     assert_eq!(d.st.selected, Some(m.id));
     let running = |s: &AppState| {
         s.daemon()
@@ -603,8 +605,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     );
 
     // The sweep run as the reference: the steps move the live curve against it, alone.
-    // The run takes the transfer pane to the sweep's group, so the live curve is compared
-    // onto it first.
+    // The pane's chip gives it the sweep's group (V only selects the run), so the live curve
+    // is compared onto it first.
     d.send(Msg::SelectMeas(m.id));
     assert_eq!(d.st.selected_trace, None);
     let sweep =
@@ -640,6 +642,18 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         d.send(Msg::Command(CommandId::NextTrace));
     }
     assert_eq!(d.st.selected_trace, Some(run));
+    assert_eq!(
+        d.st.kind_meas(PaneKind::Transfer).map(|x| x.id),
+        Some(m.id),
+        "V moved no pane"
+    );
+    let tf = crate::common::pane(&d.st, PaneKind::Transfer);
+    d.send(Msg::PanePick(tf, ac2_ui::state::PaneMenuRow::Meas(sweep)));
+    assert_eq!(
+        d.st.selected_trace,
+        Some(run),
+        "the chip keeps the selection"
+    );
     d.send(Msg::Command(CommandId::PhaseReference));
     let pre = drawn_phase(&d.st, 240);
     let live_pre = drawn_curve(&d.st, live);
@@ -676,8 +690,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     }
     d.stop()?;
 
-    // Stopped: no live curve to move, so the keys change nothing and say why. The pane went
-    // to the sweep with its run; its list puts the measurement back first.
+    // Stopped: no live curve to move, so the keys change nothing and say why. The pane was
+    // given the sweep; its list puts the measurement back first.
     let tf = crate::common::pane(&d.st, PaneKind::Transfer);
     d.send(Msg::PanePick(tf, ac2_ui::state::PaneMenuRow::Meas(m.id)));
     assert_eq!(d.st.kind_meas(PaneKind::Transfer).map(|x| x.id), Some(m.id));

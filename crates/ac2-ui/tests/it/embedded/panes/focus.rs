@@ -375,3 +375,73 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// From an empty daemon: two transfer measurements, each with a capture, the transfer pane
+/// on the first. V and Shift+V step the selection across both captures (and the live stop)
+/// as a click on their rows would: no pane moves or changes what it shows, the pane keeping
+/// the first's group while the second's capture is selected.
+#[test]
+fn v_only_selects_from_an_empty_daemon() -> R {
+    use ac2_proto::model::TraceOwner;
+    use ac2_ui::state::{PaneKind, PaneMenuRow, StimPhase};
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let first = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new transfer".into()));
+    d.key("Enter");
+    assert!(matches!(&d.st.overlay, Overlay::Form(f) if f.kind == FormKind::Transfer));
+    d.key("Enter");
+    d.until("the second measurement, running", |s| {
+        s.measurements().len() == 2
+            && s.selected_meas()
+                .is_some_and(|m| m.id != first && m.running)
+    })?;
+    let second = d.st.selected_meas().map(|m| m.id).ok_or("second")?;
+    // The level typed for the first is kept: arm and fire.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.tf_frames(first, 240)?;
+    d.tf_frames(second, 240)?;
+    let owned = |s: &AppState, meas: MeasId| {
+        s.daemon().and_then(|x| {
+            x.traces
+                .iter()
+                .find(|t| t.edit.owner == TraceOwner::Meas { meas })
+                .map(|t| t.id)
+        })
+    };
+    for (meas, slot) in [(first, "Ctrl+1"), (second, "Ctrl+2")] {
+        d.send(Msg::SelectMeas(meas));
+        d.key(slot);
+        d.until("the capture", |s| owned(s, meas).is_some())?;
+    }
+    let t1 = owned(&d.st, first).ok_or("first's capture")?;
+    let t2 = owned(&d.st, second).ok_or("second's capture")?;
+    // The transfer pane given the first by its chip.
+    let tf = crate::common::pane(&d.st, PaneKind::Transfer);
+    d.send(Msg::PanePick(tf, PaneMenuRow::Meas(first)));
+    d.pump();
+    let layout = d.st.layout.clone();
+    let panes = d.st.pane_layout();
+    let mut seen = Vec::new();
+    for key in ["V", "V", "V", "Shift+V", "Shift+V", "Shift+V"] {
+        d.key(key);
+        d.pump();
+        assert_eq!(d.st.layout, layout, "{key} moved a pane");
+        assert_eq!(d.st.pane_layout(), panes, "{key} changed a pane");
+        assert_eq!(
+            d.st.kind_meas(PaneKind::Transfer).map(|m| m.id),
+            Some(first),
+            "{key}: the transfer pane keeps the first"
+        );
+        seen.extend(d.st.selected_trace);
+    }
+    assert!(seen.contains(&t1) && seen.contains(&t2), "{seen:?}");
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

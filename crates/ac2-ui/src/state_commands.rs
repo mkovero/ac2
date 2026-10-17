@@ -101,7 +101,9 @@ impl AppState {
 
     /// V / Shift+V: the next / previous shown stored trace in the list's order (slotted
     /// or not), with the live measurement as the stop between the last and the first;
-    /// `hidden` (Alt) steps through the hidden ones too.
+    /// `hidden` (Alt) steps through the hidden ones too. It only selects, as a click on the
+    /// trace's row does: no pane moves or changes what it shows (a pane is given a curve by
+    /// its chip or a row dragged onto it), so the trace keys may act on a trace no pane draws.
     pub(super) fn cycle_trace(&mut self, d: i32, hidden: bool) {
         let ids: Vec<TraceId> = self
             .trace_list()
@@ -144,8 +146,7 @@ impl AppState {
         match (i.unwrap_or(0) + d).rem_euclid(n) {
             0 => self.select_live(),
             k => {
-                self.select_trace(Some(ids[(k - 1) as usize]));
-                self.reveal_trace();
+                self.select_trace_row(ids[(k - 1) as usize]);
                 if let Some(t) = self.selected_trace_meta() {
                     let hidden = if t.edit.visible { "" } else { " (hidden)" };
                     let label = trace_label(t);
