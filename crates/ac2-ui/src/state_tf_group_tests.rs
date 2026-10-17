@@ -206,6 +206,45 @@ fn v_steps_the_selection_and_moves_no_pane() {
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
 }
 
+/// Deleting the selected trace selects the next one as a click on its row would: the
+/// transfer pane keeps the group it draws (Delay tower's) while Main L's capture becomes
+/// the selection, and the layout stays as it was, maximised or split.
+#[test]
+fn the_trace_selected_after_a_delete_moves_no_pane() {
+    for maximised in [true, false] {
+        let mut s = two_groups();
+        s.traces[2].edit.visible = false;
+        let mut t = loaded(s);
+        t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+        if maximised {
+            t.key("W");
+        }
+        assert_eq!(t.st.layout.maximized, maximised);
+        t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+        let layout = t.st.layout.clone();
+        assert_eq!(transfer_group(&t), Some(MeasId(3)));
+        assert!(t.key("Delete").is_empty());
+        let out = t.key("Enter");
+        assert!(
+            matches!(
+                out.as_slice(),
+                [Request::Call {
+                    cmd: Command::TraceDelete { trace: TraceId(11) },
+                    ..
+                }]
+            ),
+            "{out:?}"
+        );
+        assert_eq!(
+            t.st.selected_trace,
+            Some(TraceId(13)),
+            "the next shown trace"
+        );
+        assert_eq!(t.st.layout, layout, "maximised {maximised}");
+        assert_eq!(transfer_group(&t), Some(MeasId(3)));
+    }
+}
+
 /// An import shows on the transfer pane once moved under the pane's measurement.
 #[test]
 fn a_moved_import_joins_its_measurements_pane() {

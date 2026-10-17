@@ -595,7 +595,10 @@ impl AppState {
             .chain(list[..at.min(list.len())].iter().rev())
             .find(|(x, shown)| *x != id && *shown)
             .map(|(x, _)| *x);
-        self.select_trace(next);
+        match next {
+            Some(n) => self.select_trace_row(n),
+            None => self.set_selected_trace(None),
+        }
         let then = match self.selected_trace_meta() {
             Some(t) => format!(" · {} selected", trace_label(t)),
             None => " · keys act on the live measurement".to_owned(),
@@ -605,31 +608,6 @@ impl AppState {
             Command::TraceDelete { trace: id },
             format!("{label} deleted{then}"),
         );
-    }
-
-    // ----- which pane a selection brings up ----------------------------------------------
-
-    /// After a stored trace was selected with the layout maximised: the focus goes to a pane that draws it (the transfer pane draws sweeps
-    /// too; else a sweep's home is the sweep pane), the focused pane turning into one when
-    /// none is on screen. The split layout keeps the focus: every pane is on screen.
-    pub(super) fn reveal_trace(&mut self) {
-        if !self.layout.maximized {
-            return;
-        }
-        let Some(t) = self.selected_trace_meta().cloned() else {
-            return;
-        };
-        if drawn_in(&t, self.layout.focus_kind()) {
-            return;
-        }
-        let p = home_pane(t.kind);
-        match self.layout.lead(p) {
-            Some(id) => self.layout.set_focus(id),
-            None => {
-                let f = self.layout.focus;
-                self.set_pane_kind(f, p);
-            }
-        }
     }
 }
 

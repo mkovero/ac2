@@ -221,7 +221,7 @@ impl AppState {
     }
 
     pub(super) fn select_live(&mut self) {
-        self.select_trace(None);
+        self.set_selected_trace(None);
         self.toast("keys act on the live measurement");
     }
 

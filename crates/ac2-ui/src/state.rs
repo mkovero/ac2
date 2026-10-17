@@ -647,11 +647,10 @@ impl AppState {
             Msg::SelectMath(id) => self.select_math_row(id),
             Msg::SelectTrace(id) => {
                 if self.selected_trace == Some(id) {
-                    self.select_trace(None);
+                    self.set_selected_trace(None);
                 } else {
                     self.select_trace_row(id);
                 }
-                self.reveal_trace();
             }
             Msg::ToggleShown(id) => self.toggle_shown(id, out),
             Msg::ToggleGroup(g) => {
@@ -665,7 +664,6 @@ impl AppState {
             Msg::RenameTrace(id) => {
                 if self.selected_trace != Some(id) {
                     self.select_trace_row(id);
-                    self.reveal_trace();
                 }
                 if let Ok(t) = self.trace_meta(id) {
                     self.prompt(PromptKind::TraceRename(id), t.edit.name.clone());

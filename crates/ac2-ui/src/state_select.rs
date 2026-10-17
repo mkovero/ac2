@@ -3,36 +3,9 @@
 use super::*;
 
 impl AppState {
-    /// The one trace selection: a sweep selected is also what the sweep pane shows.
-    /// A transfer-like trace selected brings its measurement's group to the transfer pane,
-    /// which draws only that group: a selected curve the pane leaves out would take the
-    /// trace keys while nothing on screen moves.
-    pub(super) fn select_trace(&mut self, id: Option<TraceId>) {
-        self.set_selected_trace(id);
-        let owner = self
-            .selected_trace_meta()
-            .filter(|t| drawn_in(t, PaneKind::Transfer))
-            .and_then(|t| match t.edit.owner {
-                TraceOwner::Meas { meas } => Some(meas),
-                TraceOwner::Imported => None,
-            })
-            .filter(|m| {
-                self.meas(*m)
-                    .is_some_and(|m| PaneKind::Transfer.shows(&m.config.kind))
-            });
-        // The transfer pane worked in last shows the trace's measurement, so the trace is
-        // drawn in its group.
-        if let Some(m) = owner
-            && let Some(p) = self.layout.lead(PaneKind::Transfer)
-            && let Some(v) = self.layout.view_mut(p)
-        {
-            v.meas = Some(m);
-        }
-    }
-
     /// The trace selection alone, every pane keeping what it shows: a sweep selected is
     /// also what the sweep pane shows.
-    fn set_selected_trace(&mut self, id: Option<TraceId>) {
+    pub(super) fn set_selected_trace(&mut self, id: Option<TraceId>) {
         self.selected_trace = id;
         if let Some(id) = id
             && self.daemon().is_some_and(|s| {
@@ -351,7 +324,7 @@ impl AppState {
     /// wrapping. A measurement's header and its live curve are two stops, as they are two
     /// rows: the live curve is selected as a click on its row (or legend row) selects it.
     /// A measurement row is chosen as a click on it is; a stored trace row selects the
-    /// trace as a click does, the focused pane first showing its measurement.
+    /// trace as a click does, no pane changing.
     pub(super) fn cycle_tree_row(&mut self, d: i32) {
         use ac2_scene::meas_list::TreeKey;
         #[derive(Clone, Copy, PartialEq)]
@@ -407,10 +380,7 @@ impl AppState {
             Some(Stop::Meas(id)) => self.select_meas_row(id),
             Some(Stop::Math(id)) => self.select_math_row(id),
             Some(Stop::Live(id)) => self.select_live_row(id),
-            Some(Stop::Trace(id)) => {
-                self.select_trace_row(id);
-                self.reveal_trace();
-            }
+            Some(Stop::Trace(id)) => self.select_trace_row(id),
             None => {}
         }
         self.tree_reveal = true;

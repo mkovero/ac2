@@ -467,12 +467,16 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
         Some(sweep_a),
         "the pane keeps sweep A"
     );
-    let compared: Vec<TraceId> =
-        d.st.compared_sweeps(pane)
-            .iter()
-            .map(|(t, _)| t.meta.id)
-            .collect();
-    assert_eq!(compared, [run_b]);
+    // The compared list lives on sweep A on the daemon: the pane draws run B once the
+    // daemon's answer is mirrored.
+    d.until("run B compared into sweep A", |s| {
+        s.meas(sweep_a)
+            .is_some_and(|m| m.compared == [ac2_proto::model::Compared::Trace { trace: run_b }])
+            && s.compared_sweeps(pane)
+                .iter()
+                .map(|(t, _)| t.meta.id)
+                .eq([run_b])
+    })?;
     let name_b = d.st.trace_meta(run_b).map(|m| m.edit.name.clone())?;
     let ac2_ui::scenes::SweepPane::Distortion(x) =
         ac2_ui::scenes::sweep(&d.st, pane, &Theme::dark(), SIZE, now())

@@ -64,44 +64,48 @@ fn picking_a_measurement_puts_it_in_the_focused_pane() {
     }
 }
 
-/// A stored trace picked with the layout maximised: the pane that draws it comes up (a
-/// sweep stays on the transfer pane, which draws it too, else the maximised pane turns into
-/// the sweep pane). The split layout keeps its focus: every pane is on screen.
+/// A stored trace's row chosen, by a click or by Tab, only selects, maximised or split: the
+/// layout stays as it was, no refocus and no pane turning into the trace's kind (the pane
+/// chip picker and a drop are what put a trace in a pane).
 #[test]
-fn picking_a_trace_while_maximised_brings_up_its_pane() {
-    let mut t = T::new();
-    t.conn(with_sweeps(vec![
-        stored(13, None, 2),
-        spec_meta(16),
-        sweep_meta(14),
-    ]));
-    t.key("W");
-    t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
-    assert_eq!(t.visible(), [PaneKind::Spectrum]);
-    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
-    assert_eq!(t.visible(), [PaneKind::Transfer]);
-    t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
-    assert_eq!(t.visible(), [PaneKind::Transfer]);
-    t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
-    t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
-    assert_eq!(t.visible(), [PaneKind::Distortion]);
-    // V only selects (from the SPL pane: the sweep pane's V steps its runs), in the tree's
-    // order: from the sweep's run on to Sub's spectrum, the maximised pane kept.
-    t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
-    t.key("Alt+4");
-    let shown = t.visible();
-    let layout = t.st.layout.clone();
-    t.key("V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(16)));
-    assert_eq!(t.visible(), shown);
-    assert_eq!(t.st.layout, layout);
-    // Split (W: full screen, W: split): the focus stays.
-    t.key("W");
-    t.key("W");
-    assert!(!t.st.layout.maximized);
-    t.key("Alt+3");
-    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
-    assert!(t.st.layout.focused().shows_ir());
+fn a_trace_row_click_or_tab_only_selects_maximised_or_not() {
+    for maximised in [true, false] {
+        let mut t = T::new();
+        t.conn(with_sweeps(vec![
+            stored(13, None, 2),
+            spec_meta(16),
+            sweep_meta(14),
+        ]));
+        if maximised {
+            t.key("W");
+        }
+        assert_eq!(t.st.layout.maximized, maximised);
+        // The IR view focused: a click on a trace it does not draw leaves it.
+        t.key("Alt+3");
+        let layout = t.st.layout.clone();
+        for id in [16, 13, 14, 16, 14] {
+            t.st.update(Msg::SelectTrace(TraceId(id)), &t.keys);
+            assert_eq!(t.st.selected_trace, Some(TraceId(id)));
+            assert_eq!(t.st.layout, layout, "click on t{id}, maximised {maximised}");
+        }
+        // Tab: every step that lands on a trace row leaves the layout as the step found it
+        // (a measurement row brings its own panes, a trace row nothing).
+        let mut seen = Vec::new();
+        for _ in 0..16 {
+            let before = t.st.layout.clone();
+            t.key("Tab");
+            if let Some(id) = t.st.selected_trace {
+                assert_eq!(
+                    t.st.layout, before,
+                    "Tab onto {id:?}, maximised {maximised}"
+                );
+                seen.push(id);
+            }
+        }
+        for id in [13, 14, 16] {
+            assert!(seen.contains(&TraceId(id)), "Tab skipped t{id}: {seen:?}");
+        }
+    }
 }
 
 /// TF and spectrum frames of measurements 1 (Main L) and 2 (Sub).
