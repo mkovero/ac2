@@ -35,12 +35,12 @@ run = ["identity", "biquad", "delay48", "delay10_5", "polarity", "snr20", "snr10
 # calibrated TFs are compared as they are. Unreadable: the take is skipped with a note.
 [[recordings]]
 name = "xone-rig"
-wav = "20261014T021152Z/xone/ac2_tf/rec.wav"
+wav = "20261017T045716Z/xone/ac2_tf/rec.wav"
 columns = [0, 1]         # meas, ref
 align = false
 [[recordings]]
 name = "genelec-rig"
-wav = "20261014T021152Z/genelec/ac2_tf/rec.wav"
+wav = "20261017T045716Z/genelec/ac2_tf/rec.wav"
 columns = [0, 1]
-mic_curve = "20261014T021152Z/cal/store_excerpt.json"
+mic_curve = "20261017T045716Z/cal/store_excerpt.json"
 align = true
