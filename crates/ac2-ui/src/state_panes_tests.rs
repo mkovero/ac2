@@ -220,7 +220,7 @@ fn the_focused_pane_takes_a_measurement_of_any_kind() {
             .into_iter()
             .filter_map(|(r, _)| match r {
                 PaneMenuRow::Meas(m) => Some(m),
-                PaneMenuRow::Kind(_) => None,
+                PaneMenuRow::Kind(_) | PaneMenuRow::NewMeasurement => None,
             })
             .collect();
     assert_eq!(rows, t.st.tree_meas_order());

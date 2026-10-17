@@ -51,6 +51,9 @@ pub enum ChoicePurpose {
     },
     /// A session of another format version: import its traces.
     Salvage { from: crate::sessions::Source },
+    /// New measurement: the answer is a kind, in [`ac2_scene::new_meas::NewKind::ALL`]'s
+    /// order; its form opens.
+    NewMeasurement,
 }
 
 /// What "Move to measurement…" moves.
@@ -337,6 +340,7 @@ impl AppState {
         }
         self.overlay = Overlay::None;
         match c.purpose {
+            ChoicePurpose::NewMeasurement => self.new_measurement_pick(i, out),
             p @ (ChoicePurpose::Unsaved { .. }
             | ChoicePurpose::Replace { .. }
             | ChoicePurpose::Salvage { .. }) => self.session_answer(p, i, out),

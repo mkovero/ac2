@@ -78,6 +78,9 @@ pub fn defaults() -> Vec<Binding> {
         (C::GrowPane, S::Global, alt(K::ArrowRight)),
         (C::ShrinkPane, S::Global, alt(K::ArrowLeft)),
         (C::SweepNew, S::Global, sh(K::S)),
+        // Ctrl+M (the operator's choice): every kind of measurement in one list, so the
+        // kinds without a key of their own are found without the palette's words.
+        (C::NewMeasurement, S::Global, cmd(K::M)),
         // Shift+M, a step on from M (average the shown traces): a math channel by name.
         (C::NewMath, S::Global, sh(K::M)),
         // Tab walks the measurement list row by row, the way it walks a form's fields, and

@@ -96,7 +96,10 @@ fn choose(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
         .show(ctx, |ui| {
             card(ch).show(ui, |ui| {
-                ui.set_width(520.0);
+                // The New measurement rows carry a line of description each: room for it
+                // on one line.
+                let wide = matches!(p.purpose, crate::state::ChoicePurpose::NewMeasurement);
+                ui.set_width(if wide { 640.0 } else { 520.0 });
                 ui.label(RichText::new(&p.title).strong().size(16.0));
                 ui.add_space(6.0);
                 for (i, l) in p.lines.iter().enumerate() {

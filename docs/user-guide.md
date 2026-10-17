@@ -39,9 +39,12 @@ requires pairing ([install.md](install.md#remote-use-foh--stage)).
 A **session** is the open audio stream: one device, a sample rate, a buffer size and the
 inputs to capture. **Measurements** run on it: transfer functions (`tf`), spectrum, RTA,
 SPL meters and sweeps. In the app, every setting lives in **Settings** (**Ctrl+P**, the ⚙ in
-the top bar); **Shift+O** opens its Audio & I/O page; the palette (**Ctrl+K**) has *New
-transfer measurement…*, *New spectrum…*, *New RTA…*, *New SPL meter…* (created, started and
-selected on **Enter**) and *Close audio session*; **Delete** (or **Backspace**) deletes the
+the top bar); **Shift+O** opens its Audio & I/O page; **Ctrl+M** (*New measurement…*, also
+the last row of every pane's list) lists every kind — transfer, spectrum, RTA, SPL meter,
+sweep, math channel — with what each measures, and opens the chosen kind's settings (created,
+started and selected on **Enter**, in a pane of its own); the palette (**Ctrl+K**) also has
+*New transfer measurement…*, *New spectrum…*, *New RTA…*, *New SPL meter…* directly, and
+*Close audio session*; **Delete** (or **Backspace**) deletes the
 selected measurement after asking. Until there is a session or a measurement, the transfer
 pane says which comes next. The CLI does the same with the same defaults:
 
@@ -2538,6 +2541,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+S` | Sessions: new, open, save, recent sessions… | `sessions` |
 | `Ctrl+S` | Save session (where it came from; untitled: Save as) | `session_save` |
 | `Shift+O` | Open audio session: Settings › Audio & I/O… | `session_open` |
+| `Ctrl+M` | New measurement… | `meas_new` |
 | `Shift+M` | New math channel: A ÷ × + − B, or the average of several (mic positions)… | `meas_new_math` |
 | `Shift+C` | Next colour for the selected measurement (one no other measurement has; grey last) | `meas_colour_next` |
 | `Shift+A` | Show / hide the selected measurement with every trace under it | `hide_group` |

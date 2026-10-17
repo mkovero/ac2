@@ -923,6 +923,9 @@ mod sessions;
 #[path = "state_sweep_tests.rs"]
 mod sweep;
 
+#[path = "state_new_meas_tests.rs"]
+mod new_meas;
+
 #[path = "state_leq_tests.rs"]
 mod leq;
 

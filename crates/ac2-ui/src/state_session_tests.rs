@@ -132,10 +132,7 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
             .map(|h| h.text)
             .unwrap_or_default();
     assert!(
-        hint.starts_with(&format!(
-            "No measurements — {} → New transfer measurement…",
-            palette_key()
-        )),
+        hint.starts_with("No measurements — Ctrl+M → New measurement…"),
         "{hint}"
     );
     t.conn(mirror(daemon_state()));

@@ -104,7 +104,7 @@ fn panes_show_and_select_their_measurement() {
     t.key("Esc");
     assert_eq!(t.st.overlay, Overlay::None);
     // No measurement of its kind: the list offers every measurement, then the kinds of pane
-    // none of them needs (a sweep pane here).
+    // none of them needs (a sweep pane here), then the New measurement chooser.
     let spl = t.pane(PaneKind::Spl);
     t.st.update(Msg::PaneMenu(spl), &t.keys);
     assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == spl && m.index == 0));
@@ -114,6 +114,7 @@ fn panes_show_and_select_their_measurement() {
             .map(PaneMenuRow::Meas)
             .collect();
     want.push(PaneMenuRow::Kind(PaneKind::Distortion));
+    want.push(PaneMenuRow::NewMeasurement);
     let rows: Vec<PaneMenuRow> =
         t.st.pane_menu_rows(spl)
             .into_iter()

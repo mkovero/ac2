@@ -213,6 +213,7 @@ mod tests {
             ("close session", CommandId::CloseSession),
             ("record", CommandId::Record),
             ("replay", CommandId::ReplayRecording),
+            ("new measurement", CommandId::NewMeasurement),
             ("new transfer", CommandId::NewTransfer),
             ("new rta", CommandId::NewRta),
             ("new spl", CommandId::NewSpl),

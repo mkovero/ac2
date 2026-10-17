@@ -86,6 +86,8 @@ pub use leq_export::{EXPORT_DIR, export_path, leq_export_name};
 mod link;
 #[path = "state_meas_layout.rs"]
 mod meas_layout;
+#[path = "state_new_meas.rs"]
+mod new_meas;
 #[path = "state_panes.rs"]
 mod panes;
 #[path = "state_panes_ops.rs"]
@@ -286,9 +288,9 @@ pub struct AppState {
     stack_on_create: Option<String>,
     /// That measurement, created: stacked once the mirror lists it.
     pending_stack: Option<MeasId>,
-    /// The name of a sweep measurement submitted from its form: its creation brings up a
-    /// sweep pane for it.
-    sweep_pane_on_create: Option<String>,
+    /// The name of a sweep, spectrum, RTA or SPL meter submitted from its form: its
+    /// creation brings up a pane of its kind for it.
+    pane_on_create: Option<String>,
     /// Open the audio setup ([`Self::open_audio_setup`]) once the daemon's state shows no
     /// audio session (an embedded daemon on real audio starts without one).
     pub open_session_when_empty: bool,
@@ -473,7 +475,7 @@ impl AppState {
             armed_with: None,
             pending_select: None,
             stack_on_create: None,
-            sweep_pane_on_create: None,
+            pane_on_create: None,
             pending_stack: None,
             open_session_when_empty: false,
             devices: None,

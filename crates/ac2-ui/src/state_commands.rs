@@ -604,6 +604,7 @@ impl AppState {
             | C::Record
             | C::ReplayRecording
             | C::CloseSession
+            | C::NewMeasurement
             | C::NewTransfer
             | C::NewSpectrum
             | C::NewRta

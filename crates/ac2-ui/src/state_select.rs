@@ -152,7 +152,7 @@ impl AppState {
             Some(m) if want.iter().any(|f| f(&m.config.kind)) => Some(m.clone()),
             _ => {
                 let to_it = self.to_it();
-                let new = self.keys.palette_entry("New …");
+                let new = self.new_meas_reach();
                 self.warn(format!(
                     "select a {what} measurement first ({to_it}; {new} makes one)"
                 ));
