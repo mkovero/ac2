@@ -2,8 +2,8 @@
 //! outputs last used on each output device (decision K4), the session dialog's choices
 //! per device — which inputs and outputs were in the session, their roles and the mic
 //! names — the Leq view's layout, whether the panes show their key hints, how long the SPL
-//! meter's number holds a reading, the theme, the record toggle's time limit, the
-//! spectrograph's history span, the layout and window as last left: the pane tree, the
+//! meter's number holds a reading, the theme, the record toggle's time limit, the layout
+//! and window as last left: the pane tree, the
 //! focused pane, maximised or full screen, what each pane shows (its kind, measurement,
 //! modes and how much of its plot: grid, labels, cursor, and its own level axis range: a fit
 //! made for one show is a fair start for the next), the window's size and position, the
@@ -15,7 +15,6 @@
 //! spl_hold_ms = 250
 //! theme = "light"
 //! record_limit_min = 90
-//! spectrograph_span_s = 30
 //!
 //! [stimulus_outputs]
 //! "hw:UMC1820" = [1, 2]
@@ -140,9 +139,6 @@ pub struct LayoutPrefs {
     pub distortion_unit: DistortionUnit,
     /// Measurements whose live curves are hidden (A), by name.
     pub hidden: BTreeSet<String>,
-    /// Measurements whose live curves every transfer pane draws besides its own group
-    /// (compare, C), by name.
-    pub compared: BTreeSet<String>,
 }
 
 impl Default for LayoutPrefs {
@@ -154,7 +150,6 @@ impl Default for LayoutPrefs {
             panes_only: false,
             distortion_unit: DistortionUnit::Db,
             hidden: BTreeSet::new(),
-            compared: BTreeSet::new(),
         }
     }
 }
@@ -266,12 +261,6 @@ pub struct UiPrefs {
     /// How long the record toggle records before it stops by itself, minutes (`None`: an
     /// hour, [`crate::state::RECORD_MAX_S`]).
     pub record_limit_min: Option<u32>,
-    /// The spectrograph's history span, s (one of
-    /// [`ac2_scene::view::SPECTROGRAPH_SPANS_S`]; `None`: its default).
-    pub spectrograph_span_s: Option<u32>,
-    /// The spectrograph's colour map (and its colour bar's); a matter of eyes and room
-    /// light, so this app's, not the daemon's.
-    pub spectrograph_colours: ac2_scene::primitives::Colormap,
     /// The transfer pane's legend as last left.
     pub legend: LegendPrefs,
     /// Session files and folders on this machine the app opened or exported, most recent
@@ -327,8 +316,6 @@ impl Default for UiPrefs {
             window: None,
             theme: None,
             record_limit_min: None,
-            spectrograph_span_s: None,
-            spectrograph_colours: ac2_scene::primitives::Colormap::default(),
             legend: LegendPrefs::default(),
             recent_sessions: Vec::new(),
         }

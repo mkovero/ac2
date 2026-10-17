@@ -200,10 +200,15 @@ fn spectrograph_from_an_empty_daemon() -> R {
     d.send(Msg::Command(CommandId::ToggleCursor));
     assert_eq!(d.st.view.spectrum.spectrograph.cursor_s, None);
 
-    // A minute of history (Shift+B, Settings › Display), started afresh.
+    // A minute of history (Shift+B), the measurement's, started afresh.
     d.send(Msg::Command(CommandId::SpectrographSpan));
-    assert_eq!(d.st.view.spectrum.spectrograph.span_s, 60);
-    assert!(!filled(&d.st, 1));
+    d.until("the measurement's minute", |s| {
+        s.meas(sp)
+            .is_some_and(|m| s.display_of(m).spectrograph_span_s == 60)
+    })?;
+    d.until("a history of a minute", |s| {
+        s.spectrographs.get(&sp).is_some_and(|h| h.span_s() == 60)
+    })?;
     d.until("frames in the minute", |s| filled(s, 10))?;
     let s = ac2_ui::scenes::spectrograph(
         &d.st,

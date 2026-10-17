@@ -357,6 +357,8 @@ pub struct SpectrographInput<'a> {
     /// The measurement's display offset, dB, added to its levels as on its curve.
     pub offset_db: f64,
     pub freshness: Option<Freshness>,
+    /// The measurement's colour map ([`ac2_proto::model::SpectrumDisplay`]).
+    pub colours: crate::primitives::Colormap,
 }
 
 /// Cursor values in the spectrograph.
@@ -473,7 +475,10 @@ pub fn spectrograph_scene(
         (size.height - top - CAPTION_H - MARGINS.bottom).max(1.0),
     );
     let x_axis = axis::freq_axis(view.freq.range(), plot.x, plot.right());
-    let span = sg.map_or(view.spectrum.spectrograph.span_s, |s| s.history.span_s());
+    let span = sg.map_or(ac2_proto::model::SpectrumDisplay::DEFAULT_SPAN_S, |s| {
+        s.history.span_s()
+    });
+    let colormap = sg.map_or_else(Default::default, |s| s.colours);
     let mut time_axis = axis::linear_axis(
         Range::new(0.0, f64::from(span)),
         plot.y,
@@ -525,7 +530,7 @@ pub fn spectrograph_scene(
             axes: HeatmapAxes::TimeAcross,
             scroll: 0,
             range: [range.lo as f32, range.hi as f32],
-            colormap: theme.colormap,
+            colormap,
             opacity: 1.0,
             data: vec![Some(values)],
         });
@@ -585,7 +590,7 @@ pub fn spectrograph_scene(
                         scroll: s.history.scroll(),
                         // The colours are those of the displayed (offset) level.
                         range: [(range.lo - off) as f32, (range.hi - off) as f32],
-                        colormap: theme.colormap,
+                        colormap,
                         opacity: if s.freshness.is_some_and(|f| f.is_stale()) {
                             theme.stale_alpha
                         } else {

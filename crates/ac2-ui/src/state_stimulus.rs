@@ -646,15 +646,24 @@ impl AppState {
         }
         let own = self.pane_sweep(pane).map(|(t, _)| t.meta.id);
         let ms = self.measurements();
-        self.sweep_traces()
+        let compared = self.compared_into(self.pane_meas(pane));
+        let mut v: Vec<_> = self
+            .sweep_traces()
             .into_iter()
             .filter(|(t, _)| {
-                self.compared_traces.contains(&t.meta.id)
+                compared.contains(&ac2_proto::model::Compared::Trace { trace: t.meta.id })
                     && Some(t.meta.id) != own
                     && ac2_scene::meas_list::group_of(&t.meta, &ms)
                         != ac2_proto::model::TraceOwner::Imported
             })
-            .collect()
+            .collect();
+        // First compared first: drawn above the later ones.
+        v.sort_by_key(|(t, _)| {
+            compared
+                .iter()
+                .position(|c| *c == ac2_proto::model::Compared::Trace { trace: t.meta.id })
+        });
+        v
     }
 
     /// V / Shift+V on the sweep pane: the next / previous stored sweep run, selected (the

@@ -518,6 +518,7 @@ impl Control {
         self.check_trace_operand_delete(id)?;
         self.traces.remove(id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
+        let rev = self.prune_compared().unwrap_or(rev);
         Ok(ReplyBody::Ack { rev })
     }
 

@@ -185,6 +185,8 @@ fn meas_keys() -> Vec<String> {
         delay: None,
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
     };
     match serde_json::to_value(sample) {
         Ok(Value::Object(m)) => m.keys().cloned().collect(),
@@ -684,8 +686,38 @@ mod tests {
         // Before format 25 every spectrum read tone power: the level is filled in as
         // tone and named.
         assert_eq!(config.level, SpecLevel::Tone);
-        assert_eq!(notes.len(), 1, "{notes:?}");
-        assert!(notes[0].contains("kind.config.level"), "{notes:?}");
+        // The display settings of format 28 take their defaults too.
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(notes[0].contains("kind.config.display"), "{notes:?}");
+        assert!(notes[1].contains("kind.config.level"), "{notes:?}");
+    }
+
+    #[test]
+    fn a_measurement_of_format_27_draws_with_the_defaults() {
+        // Format 27 kept no display settings, compare list or offset with a measurement.
+        let mut config = serde_json::to_value(MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
+            name: "Spectrum 1".into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig::on_input(3),
+            },
+        })
+        .unwrap();
+        config["kind"]["config"]
+            .as_object_mut()
+            .unwrap()
+            .remove("display");
+        let v = json!({"id": 4, "config": config, "running": true, "delay": null,
+                       "colour": null, "layout": null});
+        let m = old_meas(&v).unwrap();
+        assert_eq!(m.old_id, Some(MeasId(4)));
+        assert!(m.running);
+        assert_eq!(
+            m.config.kind.display(),
+            Some(&ac2_proto::model::SpectrumDisplay::default())
+        );
+        assert_eq!(m.notes.len(), 1, "{:?}", m.notes);
+        assert!(m.notes[0].contains("kind.config.display"), "{:?}", m.notes);
     }
 
     #[test]

@@ -100,6 +100,7 @@ impl SpectrumConfig {
             averaging: SpecAveraging::Off,
             smoothing: None,
             level: SpecLevel::Tone,
+            display: Default::default(),
         }
     }
 }
@@ -119,6 +120,7 @@ impl RtaConfig {
             f_hi: Hz(Self::DEFAULT_F_HI_HZ),
             weighting: Weighting::Z,
             averaging: SpecAveraging::Off,
+            display: Default::default(),
         }
     }
 }

@@ -283,8 +283,17 @@ fn keys_follow_the_focused_pane() {
     // Spectrum pane: P is peak hold.
     t.key("Alt+2");
     assert_eq!(t.st.scope(), Scope::Spectrum);
-    t.key("P");
-    assert!(t.st.view.spectrum.peak_hold);
+    let r = t.key("P");
+    assert!(matches!(
+        calls(&r).first(),
+        Some((
+            Command::MeasUpdate {
+                meas: MeasId(2),
+                ..
+            },
+            "Sub: peak hold on"
+        ))
+    ));
     // X means nothing there.
     assert!(t.key("X").is_empty());
     // A transfer pane's IR view has the IR's keys; Shift+G back past its response's
@@ -345,8 +354,17 @@ fn transfer_commands() {
     assert!(t.st.edit(MeasId(1)).inverted);
     t.type_key("J", "j");
     t.text("+3,5 dB");
-    t.key("Enter");
-    assert_eq!(t.st.edit(MeasId(1)).offset_db, 3.5);
+    let r = t.key("Enter");
+    assert!(matches!(
+        calls(&r).first(),
+        Some((
+            Command::MeasOffset {
+                meas: MeasId(1),
+                offset: Db(3.5)
+            },
+            _
+        ))
+    ));
     // A measurement has one delay, the daemon's: plain , . step it by 0.1 ms, Ctrl / Alt on
     // the same keys by a whole sample or a tenth. The mirror is at the arrival (12.50 ms)
     // and gets no reply here, so each toast is one step from there.

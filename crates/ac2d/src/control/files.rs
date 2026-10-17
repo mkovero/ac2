@@ -13,11 +13,11 @@ use std::path::{Path, PathBuf};
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
-    DelayState, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement, Salvage,
-    SalvageRefusal, Session, SessionFile, SessionOrigin, SessionRef, SweepFailure, TraceKind,
-    TraceOwner,
+    Compared, DelayState, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement,
+    Salvage, SalvageRefusal, Session, SessionFile, SessionOrigin, SessionRef, SweepFailure,
+    TraceKind, TraceOwner,
 };
-use ac2_proto::units::{ClientId, MeasId, Rev, Seconds, SessionEpoch, TransferId, WallNs};
+use ac2_proto::units::{ClientId, Db, MeasId, Rev, Seconds, SessionEpoch, TransferId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 use ac2_traces::meta;
 use ac2_traces::session::{
@@ -545,6 +545,17 @@ impl Control {
                 .filter(|c| c.is_valid() && !matches!(sm.config.kind, MeasKind::Math { .. }));
             // A layout no client could draw is no layout.
             let layout = sm.layout.filter(|l| l.check().is_ok());
+            // A list naming itself, an entry twice or past the cap is cut to what
+            // `meas.compare` takes; entries already gone are pruned once all is loaded.
+            let mut compared: Vec<Compared> = Vec::new();
+            for c in sm.compared {
+                if c != (Compared::Meas { meas: sm.id })
+                    && !compared.contains(&c)
+                    && compared.len() < Compared::MAX
+                {
+                    compared.push(c);
+                }
+            }
             let mut meas = Measurement {
                 id: sm.id,
                 config: sm.config,
@@ -555,6 +566,11 @@ impl Control {
                 grid_id,
                 colour,
                 layout,
+                compared,
+                // One no command could set is none.
+                offset: Some(sm.offset)
+                    .filter(|o| Measurement::offset_ok(*o))
+                    .unwrap_or(Db(0.0)),
             };
             self.ensure_spl_log(&meas, None);
             meas.config_rev = Rev(self.store.rev().0 + 1);
@@ -578,6 +594,7 @@ impl Control {
                 }
             }
         }
+        self.prune_compared();
         Ok(epoch)
     }
 }

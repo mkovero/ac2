@@ -161,7 +161,9 @@ async fn session_meas_delay_trace_flow() -> R {
             "delay": null,
             "grid_id": null,
             "colour": null,
-            "layout": null
+            "layout": null,
+            "compared": [],
+            "offset": 0.0
         })
     );
     // Clearing panes it never had leaves it as it is.
@@ -277,6 +279,46 @@ async fn session_meas_delay_trace_flow() -> R {
         dump["state"]["measurements"].as_array().map(Vec::len),
         Some(1)
     );
+
+    // How a spectrum is drawn and its display offset: kept with it, not a new config.
+    let sp = ok_json(
+        &f,
+        &[
+            "meas", "new", "spectrum", "--input", "1", "--name", "fft", "--json",
+        ],
+    )
+    .await?;
+    let m = ok_json(
+        &f,
+        &[
+            "meas",
+            "set",
+            "fft",
+            "--style",
+            "fill",
+            "--peak-hold",
+            "on",
+            "--span",
+            "60",
+            "--colours",
+            "magma",
+            "--offset",
+            "-3",
+            "--json",
+        ],
+    )
+    .await?;
+    assert_eq!(
+        m["config"]["kind"]["config"]["display"],
+        json!({"style": "fill", "peak_hold": true, "spectrograph_span_s": 60,
+               "spectrograph_colours": "magma"})
+    );
+    assert_eq!(m["offset"], -3.0);
+    assert_eq!(m["config_rev"], sp["config_rev"]);
+    let r = ac2(&f, &["meas", "set", "fft", "--span", "45", "--json"]).await?;
+    assert_eq!(r.code, 1);
+    let r = ac2(&f, &["meas", "set", "main-l", "--style", "line", "--json"]).await?;
+    assert_eq!(r.code, 1);
     Ok(())
 }
 

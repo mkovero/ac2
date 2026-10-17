@@ -44,9 +44,10 @@ use std::path::{Path, PathBuf};
 
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    ColourFamily, ImportFormat, ImportRole, MeasConfig, PaneLayout, SplLogRow, TraceKind, TraceMeta,
+    ColourFamily, Compared, ImportFormat, ImportRole, MeasConfig, PaneLayout, SplLogRow, TraceKind,
+    TraceMeta,
 };
-use ac2_proto::units::{MeasId, Seconds, WallNs};
+use ac2_proto::units::{Db, MeasId, Seconds, WallNs};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -83,6 +84,10 @@ pub struct SavedMeasurement {
     pub colour: Option<ColourFamily>,
     /// The panes clients show while it is selected; `None`: none of its own.
     pub layout: Option<PaneLayout>,
+    /// Curves its panes draw compared, first compared first.
+    pub compared: Vec<Compared>,
+    /// Display offset of its live curves.
+    pub offset: Db,
 }
 
 /// Delay of a saved transfer measurement.

@@ -655,6 +655,8 @@ mod tests {
             grid_id: None,
             colour: None,
             layout: None,
+            compared: Vec::new(),
+            offset: ac2_proto::units::Db(0.0),
         }
     }
 

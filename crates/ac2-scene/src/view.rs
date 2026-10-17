@@ -358,38 +358,14 @@ impl Default for TfView {
     }
 }
 
-/// How spectrum / RTA traces are drawn.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SpectrumStyle {
-    /// The max-per-pixel line.
-    Line,
-    /// The line over a faint area down to the plot bottom.
-    Fill,
-    /// Band power as bars (RTA traces); narrowband traces draw as `Line`.
-    Bars,
-}
-
-impl SpectrumStyle {
-    /// The next style in the B cycle: line → fill → bars → line.
-    pub fn next(self) -> Self {
-        match self {
-            Self::Line => Self::Fill,
-            Self::Fill => Self::Bars,
-            Self::Bars => Self::Line,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpectrumView {
-    pub style: SpectrumStyle,
     /// Level axis while the pane shows dBFS.
     pub level: Range,
     /// Level axis while the pane shows dB SPL (calibrated): the same zoom and pan keys act on
     /// it, and each scale keeps its own range, so calibrating doesn't push the curves off
     /// a dBFS-sized axis.
     pub level_spl: Range,
-    pub peak_hold: bool,
     /// What the pane shows: the spectrum, the spectrograph or both.
     pub mode: SpectrumMode,
     pub spectrograph: SpectrographView,
@@ -436,36 +412,12 @@ impl SpectrumMode {
     }
 }
 
-/// The history lengths the spectrograph steps through, seconds.
-pub const SPECTROGRAPH_SPANS_S: [u32; 4] = [10, 30, 60, 120];
-
-/// The spectrograph: how much history it keeps, and the time of the cursor in it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// The spectrograph's cursor. How much history it keeps and its colours are its
+/// measurement's ([`ac2_proto::model::SpectrumDisplay`]).
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct SpectrographView {
-    /// History shown, seconds (one of [`SPECTROGRAPH_SPANS_S`]).
-    pub span_s: u32,
     /// The cursor's time, seconds before the newest frame (with `cursor_hz`, a point).
     pub cursor_s: Option<f64>,
-}
-
-impl Default for SpectrographView {
-    fn default() -> Self {
-        Self {
-            span_s: 30,
-            cursor_s: None,
-        }
-    }
-}
-
-impl SpectrographView {
-    /// The next history length, wrapping to the shortest.
-    pub fn next_span(span_s: u32) -> u32 {
-        SPECTROGRAPH_SPANS_S
-            .iter()
-            .copied()
-            .find(|s| *s > span_s)
-            .unwrap_or(SPECTROGRAPH_SPANS_S[0])
-    }
 }
 
 impl SpectrumView {
@@ -488,10 +440,8 @@ impl SpectrumView {
 impl Default for SpectrumView {
     fn default() -> Self {
         Self {
-            style: SpectrumStyle::Bars,
             level: Range::new(-100.0, 0.0),
             level_spl: Range::new(20.0, 120.0),
-            peak_hold: false,
             mode: SpectrumMode::Spectrum,
             spectrograph: SpectrographView::default(),
         }

@@ -52,5 +52,7 @@ fn rta_trace<'a>(
         selected: false,
         compared: false,
         bands: None,
+        style: SpectrumStyle::Bars,
+        layer: 0,
     }
 }

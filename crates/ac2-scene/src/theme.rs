@@ -5,7 +5,7 @@
 //! the light theme, darkened so every trace keeps at least 3:1 contrast against the plot
 //! background (WCAG non-text contrast) — tested below.
 
-use crate::primitives::{Color, Colormap, Dash, Stroke};
+use crate::primitives::{Color, Dash, Stroke};
 
 /// How many measurement colour families a theme has before they repeat.
 pub const FAMILIES: usize = ac2_proto::model::ColourFamily::HUES as usize;
@@ -80,9 +80,6 @@ pub struct Theme {
     pub big_font_size: f32,
     /// A level judged within its limit (the Leq columns' bars).
     pub level_ok: Color,
-    /// Level → colour of the spectrograph: perceptually uniform, so equal steps in dB look
-    /// like equal steps, and readable with the common colour-vision deficiencies.
-    pub colormap: Colormap,
 }
 
 fn hex(v: u32) -> Color {
@@ -155,7 +152,6 @@ impl Theme {
             small_font_size: 10.5,
             big_font_size: 64.0,
             level_ok: hex(0x2fa66a),
-            colormap: Colormap::Viridis,
         }
     }
 
@@ -224,7 +220,6 @@ impl Theme {
             small_font_size: 10.5,
             big_font_size: 64.0,
             level_ok: hex(0x1b7a45),
-            colormap: Colormap::Viridis,
         }
     }
 
@@ -293,7 +288,6 @@ impl Theme {
             small_font_size: 12.0,
             big_font_size: 72.0,
             level_ok: hex(0x00e676),
-            colormap: Colormap::Viridis,
         }
     }
 
@@ -303,13 +297,6 @@ impl Theme {
             ThemeName::Light => Self::light(),
             ThemeName::HighContrast => Self::high_contrast(),
         }
-    }
-
-    /// The same theme with the spectrograph's colours the operator chose: a matter of
-    /// taste and room light, so it is a preference of its own, not part of the theme.
-    pub fn with_colormap(mut self, colormap: Colormap) -> Self {
-        self.colormap = colormap;
-        self
     }
 
     /// Colour for the `i`-th live trace (wraps around the palette).

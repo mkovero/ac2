@@ -4,7 +4,9 @@
 //! becomes of what a measurement owns.
 
 use ac2_proto::event::{Change, Patch};
-use ac2_proto::model::{MeasConfig, MeasKind, Operand, OwnedTraces, TraceOwner, TraceSource};
+use ac2_proto::model::{
+    Compared, MeasConfig, MeasKind, Measurement, Operand, OwnedTraces, TraceOwner, TraceSource,
+};
 use ac2_proto::units::{MeasId, TraceId};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 
@@ -220,7 +222,77 @@ impl Control {
             }
         );
         let rev = self.remove_meas(meas);
+        let rev = self.prune_compared().unwrap_or(rev);
         Ok(ReplyBody::Ack { rev })
+    }
+
+    /// Refuses a compare list for `m` that names something gone, `m` itself, an entry
+    /// twice, or more than [`Compared::MAX`]; and any for an SPL meter, a number with no
+    /// curve to draw over.
+    pub(super) fn check_compared(
+        &self,
+        m: &Measurement,
+        compared: &[Compared],
+    ) -> Result<(), ProtoError> {
+        let inv = |msg: String| Err(perr(ErrorCode::Invalid, msg));
+        if matches!(m.config.kind, MeasKind::Spl { .. }) && !compared.is_empty() {
+            return inv(format!(
+                "{} is an SPL meter: nothing is compared into it",
+                m.config.name
+            ));
+        }
+        if compared.len() > Compared::MAX {
+            return inv(format!("at most {} compared curves", Compared::MAX));
+        }
+        let st = self.store.state();
+        for (i, c) in compared.iter().enumerate() {
+            if compared[..i].contains(c) {
+                return inv(format!("{c:?} is listed twice"));
+            }
+            match *c {
+                Compared::Meas { meas } if meas == m.id => {
+                    return inv(format!(
+                        "{} is drawn on its own panes already",
+                        m.config.name
+                    ));
+                }
+                Compared::Meas { meas } if !st.measurements.iter().any(|o| o.id == meas) => {
+                    return Err(perr(ErrorCode::NotFound, format!("no measurement {meas}")));
+                }
+                Compared::Trace { trace } if !st.traces.iter().any(|t| t.id == trace) => {
+                    return Err(perr(ErrorCode::NotFound, format!("no trace {trace}")));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Drops from every measurement's compare list the measurements and traces that are
+    /// gone; the rev of the last change, if any.
+    pub(super) fn prune_compared(&mut self) -> Option<ac2_proto::units::Rev> {
+        let st = self.store.state();
+        let changed: Vec<Measurement> = st
+            .measurements
+            .iter()
+            .filter_map(|m| {
+                let keep = |c: &Compared| match *c {
+                    Compared::Meas { meas } => st.measurements.iter().any(|o| o.id == meas),
+                    Compared::Trace { trace } => st.traces.iter().any(|t| t.id == trace),
+                };
+                if m.compared.iter().all(keep) {
+                    return None;
+                }
+                let mut m = m.clone();
+                m.compared.retain(keep);
+                Some(m)
+            })
+            .collect();
+        let mut rev = None;
+        for m in changed {
+            rev = Some(self.commit(Change::Measurement(Patch::Set(m))));
+        }
+        rev
     }
 
     /// Stops measurement `id`'s job, drops what it published and its log, and deletes it.

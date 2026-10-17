@@ -607,8 +607,32 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     // onto it first.
     d.send(Msg::SelectMeas(m.id));
     assert_eq!(d.st.selected_trace, None);
+    let sweep =
+        d.st.trace_meta(run)
+            .ok()
+            .and_then(|t| t.edit.owner.meas())
+            .ok_or("the run's sweep")?;
+    let sweep_name =
+        d.st.meas(sweep)
+            .map(|x| x.config.name.clone())
+            .ok_or("the sweep")?;
     d.key("C");
-    assert!(d.st.compared_meas.contains(&m.id));
+    let Overlay::Choose(c) = &mut d.st.overlay else {
+        return Err(format!("no compare chooser: {:?}", d.st.overlay).into());
+    };
+    c.index = c
+        .choices
+        .iter()
+        .position(|c| c.label.contains(&sweep_name))
+        .ok_or("the sweep among the targets")?;
+    d.key("Enter");
+    d.key("Escape");
+    d.until("the live curve compared into the sweep", |s| {
+        s.meas(sweep).is_some_and(|x| {
+            x.compared
+                .contains(&ac2_proto::model::Compared::Meas { meas: m.id })
+        })
+    })?;
     for _ in 0..8 {
         if d.st.selected_trace == Some(run) {
             break;

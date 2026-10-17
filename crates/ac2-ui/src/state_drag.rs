@@ -7,6 +7,7 @@
 //! of the panes afterwards still goes to the measurement whose row was chosen
 //! ([`super::meas_layout`]).
 
+use ac2_proto::model::Compared;
 use ac2_scene::meas_list::TreeKey;
 use ac2_scene::pane_edit::{self, CompareRefusal, DropSpot, Edge};
 
@@ -148,7 +149,7 @@ impl AppState {
         }
     }
 
-    pub(super) fn row_drag_msg(&mut self, m: DragMsg) {
+    pub(super) fn row_drag_msg(&mut self, m: DragMsg, out: &mut Vec<Request>) {
         match m {
             DragMsg::Start(item) => {
                 if self.row_drag.is_none() && !item.is_heading() {
@@ -171,7 +172,7 @@ impl AppState {
                     && !d.cancelled
                     && let Some(t) = d.over
                 {
-                    self.drop_row(d.item, t, compare);
+                    self.drop_row(d.item, t, compare, out);
                 }
             }
         }
@@ -202,12 +203,18 @@ impl AppState {
 
     /// `item` dropped on `target`: shown by that pane (or a half split off it), or with
     /// `compare` drawn compared over it.
-    pub(super) fn drop_row(&mut self, item: TreeKey, target: DropTarget, compare: bool) {
+    pub(super) fn drop_row(
+        &mut self,
+        item: TreeKey,
+        target: DropTarget,
+        compare: bool,
+        out: &mut Vec<Request>,
+    ) {
         if self.layout.view(target.pane).is_none() {
             return;
         }
         if compare {
-            self.drop_compare(item, target.pane);
+            self.drop_compare(item, target.pane, out);
             return;
         }
         let mut p = target.pane;
@@ -254,10 +261,11 @@ impl AppState {
         }
     }
 
-    /// `item` drawn compared over pane `p`, as C compares it: a graph pane draws compared
-    /// curves of its kind; an SPL pane has none (meters are compared side by side), and an
-    /// imported trace is no measurement's until moved under one.
-    fn drop_compare(&mut self, item: TreeKey, p: PaneId) {
+    /// `item` compared into the measurement pane `p` shows, as the C chooser compares it: a
+    /// graph pane draws compared curves of its kind; an SPL pane has none (meters are
+    /// compared side by side), and an imported trace is no measurement's until moved under
+    /// one.
+    fn drop_compare(&mut self, item: TreeKey, p: PaneId, out: &mut Vec<Request>) {
         let Some(name) = self.row_name(item) else {
             return;
         };
@@ -272,46 +280,60 @@ impl AppState {
             return;
         }
         let no_curve = CompareRefusal::NoCurve { what: kind.what() };
-        let (panes, shown) = match item {
+        let ms = self.measurements();
+        let (compared, group, shown) = match item {
             TreeKey::Trace(id) => {
                 let Ok(t) = self.trace_meta(id) else {
                     return;
                 };
-                let kinds = super::display::trace_compare_kinds(&t);
-                if !kinds.contains(&kind) {
+                if !super::display::trace_compare_kinds(&t).contains(&kind) {
                     self.warn(pane_edit::compare_refused(&name, no_curve));
                     return;
                 }
-                if ac2_scene::meas_list::group_of(&t, &self.measurements())
-                    == ac2_proto::model::TraceOwner::Imported
-                {
+                let group = ac2_scene::meas_list::group_of(&t, &ms);
+                if group == ac2_proto::model::TraceOwner::Imported {
                     self.warn(pane_edit::compare_refused(&name, CompareRefusal::Imported));
                     return;
                 }
-                self.compared_traces.insert(id);
-                (kinds, t.edit.visible)
+                (Compared::Trace { trace: id }, group, t.edit.visible)
             }
             TreeKey::Meas(id) | TreeKey::Live(id) | TreeKey::Math(id) => {
                 let Some(m) = self.meas(id).cloned() else {
                     return;
                 };
-                let kinds = super::display::meas_compare_kinds(&m);
-                if !kinds.contains(&kind) {
+                if !super::display::meas_compare_kinds(&m).contains(&kind) {
                     self.warn(pane_edit::compare_refused(&name, no_curve));
                     return;
                 }
-                self.compared_meas.insert(id);
-                (kinds, !self.meas_hidden(&m))
+                let group = ac2_scene::meas_list::meas_group(&m, &ms);
+                (Compared::Meas { meas: id }, group, !self.meas_hidden(&m))
             }
             TreeKey::Imported | TreeKey::Rig | TreeKey::Session => return,
         };
+        let Some(target) = self
+            .pane_meas(p)
+            .map(|m| self.compare_owner(m))
+            .and_then(|id| self.meas(id))
+            .cloned()
+        else {
+            self.warn(format!(
+                "{name} not compared: the pane shows no measurement yet"
+            ));
+            return;
+        };
+        if ac2_scene::meas_list::meas_group(&target, &ms) == group {
+            self.warn(pane_edit::compare_refused(&name, CompareRefusal::OwnGroup));
+            return;
+        }
         self.layout.set_focus(p);
-        self.toast(ac2_scene::meas_list::compare_toast(
-            &name,
-            &super::display::compare_panes(&panes),
-            true,
-            shown,
-        ));
+        if target.compared.contains(&compared) {
+            self.toast(format!(
+                "{name}: already compared into {}",
+                target.config.name
+            ));
+            return;
+        }
+        self.set_compared(target.id, compared, true, &name, shown, out);
     }
 }
 

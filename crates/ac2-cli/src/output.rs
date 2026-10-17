@@ -275,6 +275,21 @@ pub fn measurement(m: &Measurement) -> String {
             }
         }
     }
+    if let Some(d) = m.config.kind.display() {
+        s.push_str(&format!(
+            "  {}{} · spectrograph {} s {}",
+            d.style.name(),
+            if d.peak_hold { ", peak hold" } else { "" },
+            d.spectrograph_span_s,
+            d.spectrograph_colours.name()
+        ));
+    }
+    if m.offset.0 != 0.0 {
+        s.push_str(&format!("  offset {}", format::db_readout(m.offset.0)));
+    }
+    if !m.compared.is_empty() {
+        s.push_str(&format!("  {} compared", m.compared.len()));
+    }
     s
 }
 

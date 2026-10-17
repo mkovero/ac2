@@ -202,11 +202,10 @@ pub enum ConnState {
     },
 }
 
-/// Display edits of a live trace: offset and polarity are display only and go to the
-/// scene, which applies them. Its delay is the measurement's, in the daemon.
+/// Display edits of a live trace this app keeps: polarity is display only and goes to the
+/// scene, which applies it. Its offset and delay are the measurement's, in the daemon.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LiveEdit {
-    pub offset_db: f64,
     pub inverted: bool,
 }
 

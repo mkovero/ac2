@@ -343,39 +343,84 @@ fn tree_detail(t: &T, key: ac2_scene::meas_list::TreeKey) -> String {
         .expect("row")
 }
 
-/// C compares what the tree has selected: another measurement's live curve and capture are
-/// drawn on the transfer pane besides its group, tagged `cmp` in the legend and the tree;
-/// an imported trace is not compared (it is no measurement's until moved under one); C
-/// again stops; average still takes the group only; Clear compare drops every one.
+/// The labels of the compare chooser open now.
+fn chooser(t: &T) -> (String, Vec<String>) {
+    match &t.st.overlay {
+        Overlay::Choose(c) => (
+            c.title.clone(),
+            // Whether a target is on screen depends on what the selection put there.
+            c.choices
+                .iter()
+                .map(|c| c.label.replace(" · on screen", ""))
+                .collect(),
+        ),
+        o => panic!("no chooser: {o:?}"),
+    }
+}
+
+/// C on what the tree has selected asks which measurement's panes draw it, and nothing is
+/// drawn until one is ticked: then another measurement's live curve and capture are drawn
+/// on that measurement's transfer pane besides its group, tagged `cmp` in the legend and
+/// the tree; an imported trace is not compared (it is no measurement's until moved under
+/// one); the pane's own group is not offered; Enter on a ticked row takes it out; average
+/// still takes the group only; Clear compare drops every one.
 #[test]
 fn c_compares_the_selection_on_the_transfer_pane() {
     use ac2_scene::meas_list::TreeKey;
     let mut t = loaded(two_groups());
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
-    t.key("C");
-    assert_eq!(
-        t.last_toast(),
-        "Delay tower compared on the transfer pane (cmp)"
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
+        &t.keys,
     );
+    let before = legend(&t);
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    assert!(t.key("C").is_empty(), "nothing is compared before a target");
+    let (title, rows) = chooser(&t);
+    assert_eq!(title, "Compare Delay tower with…");
+    assert_eq!(
+        rows.first().map(String::as_str),
+        Some("  Main L"),
+        "{rows:?}"
+    );
+    assert!(rows.iter().all(|r| !r.contains("Delay tower")), "{rows:?}");
+    // The row chosen put Delay tower on the pane; Main L back there draws as before.
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
+        &t.keys,
+    );
+    assert_eq!(legend(&t), before);
+    let r = t.key("Enter");
+    assert_eq!(
+        calls(&r).first().map(|(c, _)| (*c).clone()),
+        Some(Command::MeasCompare {
+            meas: MeasId(1),
+            compared: vec![Compared::Meas { meas: MeasId(3) }],
+        })
+    );
+    t.answer(&r);
+    assert_eq!(t.last_toast(), "Delay tower compared into Main L (cmp)");
+    assert_eq!(chooser(&t).1[0], "\u{2713} Main L");
+    t.key("Escape");
+    assert_eq!(t.st.overlay, Overlay::None);
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
-    t.key("C");
-    assert_eq!(
-        t.last_toast(),
-        "t12 is under Imported: no pane draws it — select it, then Move to measurement… (Shift+F2)"
+    assert!(t.key("C").is_empty());
+    assert!(
+        t.last_toast().starts_with("t12 is under Imported"),
+        "{}",
+        t.last_toast()
     );
-    assert!(t.st.compared_traces.is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
     t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("C");
+    let r = t.key("Enter");
+    t.answer(&r);
+    t.key("Escape");
     t.st.update(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
         &t.keys,
     );
     assert_eq!(transfer_group(&t), Some(MeasId(1)));
-    assert_eq!(
-        legend(&t),
-        ["Delay tower", "L ÷ tower", "Main L", "t10", "t11", "t13"]
-    );
     let tagged: Vec<String> = legend_text(&t)
         .into_iter()
         .filter(|s| s.contains("cmp"))
@@ -396,53 +441,68 @@ fn c_compares_the_selection_on_the_transfer_pane() {
         ),
         "{r:?}"
     );
-    // A compared curve of the pane's own group is drawn once, without the tag.
+    // The pane's own group is not offered: C on Main L lists Delay tower only.
     t.key("C");
-    assert!(
-        legend_text(&t)
-            .iter()
-            .all(|s| !s.starts_with("Main L · cmp")),
-        "{:?}",
-        legend_text(&t)
-    );
-    t.key("C");
-    // C again un-compares.
+    let (_, rows) = chooser(&t);
+    assert!(rows.iter().all(|r| !r.contains("Main L")), "{rows:?}");
+    t.key("Escape");
+    // Enter on a ticked row takes it out.
     t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("C");
-    assert_eq!(t.last_toast(), "t11: compare off");
+    assert_eq!(chooser(&t).1[0], "\u{2713} Main L");
+    let r = t.key("Enter");
+    t.answer(&r);
+    assert_eq!(t.last_toast(), "t11: no longer compared into Main L");
+    t.key("Escape");
     t.st.update(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
         &t.keys,
     );
-    assert_eq!(
-        legend(&t),
-        ["Delay tower", "L ÷ tower", "Main L", "t10", "t13"]
+    assert!(
+        legend_text(&t).iter().all(|s| !s.starts_with("t11")),
+        "{:?}",
+        legend_text(&t)
     );
     // Clear compare from the palette drops the rest.
     t.key("Ctrl+K");
     t.text("clear compare");
-    t.key("Enter");
+    let r = t.key("Enter");
+    t.answer(&r);
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
-    assert!(t.st.compared_meas.is_empty() && t.st.compared_traces.is_empty());
+    assert_eq!(t.st.meas(MeasId(1)).map(|m| m.compared.len()), Some(0));
 }
 
-/// A compared trace deleted (here or by another client) drops out of compare; the compared
-/// measurements are kept by name in `ui.toml`, as hidden ones are.
+/// A compare list is the daemon's, with the measurement: an app connecting draws it as
+/// listed, and an entry whose trace is gone draws nothing (the daemon prunes it).
 #[test]
-fn compare_forgets_deleted_traces_and_keeps_names() {
-    let mut t = loaded(two_groups());
-    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
-    t.key("C");
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
-    t.key("C");
+fn compare_lists_come_from_the_daemon() {
     let mut s = two_groups();
+    s.measurements
+        .iter_mut()
+        .find(|m| m.id == MeasId(1))
+        .expect("Main L")
+        .compared = vec![
+        Compared::Trace { trace: TraceId(11) },
+        Compared::Meas { meas: MeasId(3) },
+    ];
+    let mut t = loaded(s.clone());
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
+        &t.keys,
+    );
+    let tagged: Vec<String> = legend_text(&t)
+        .into_iter()
+        .filter(|s| s.contains("cmp"))
+        .collect();
+    assert_eq!(tagged.len(), 2, "{tagged:?}");
     s.traces.retain(|x| x.id != TraceId(11));
     t.conn(mirror(s));
-    assert!(t.st.compared_traces.is_empty());
-    assert_eq!(
-        t.st.layout_prefs().compared,
-        ["Delay tower".to_owned()].into()
-    );
+    let tagged: Vec<String> = legend_text(&t)
+        .into_iter()
+        .filter(|s| s.contains("cmp"))
+        .collect();
+    assert_eq!(tagged.len(), 1, "{tagged:?}");
+    assert!(tagged[0].starts_with("Delay tower · cmp"), "{tagged:?}");
 }
 
 /// Plain C is compare now: the comparison cursor is on the palette only.
@@ -452,6 +512,7 @@ fn the_cursor_is_on_the_palette_not_c() {
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("C");
     assert_eq!(t.st.view.cursor_hz, None);
+    t.key("Escape");
     t.key("Ctrl+K");
     t.text("comparison cursor");
     t.key("Enter");
@@ -513,10 +574,14 @@ fn a_legend_row_click_selects_its_curve_for_a() {
     use ac2_scene::meas_list::{Mark, TreeKey};
     use ac2_scene::trace::TraceKey;
     let mut t = loaded(two_groups());
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
-    t.key("C");
-    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
-    t.key("C");
+    t.remirror(|s| {
+        if let Some(m) = s.measurements.iter_mut().find(|m| m.id == MeasId(1)) {
+            m.compared = vec![
+                Compared::Meas { meas: MeasId(3) },
+                Compared::Trace { trace: TraceId(11) },
+            ];
+        }
+    });
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     let pane = t.pane(PaneKind::Transfer);
     // The click as the pane makes it: the scene's row under the pointer.

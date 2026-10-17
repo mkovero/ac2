@@ -140,6 +140,14 @@ pub(crate) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
     if c.scope == MeasScope::Rig && !matches!(c.kind, MeasKind::Spl { .. }) {
         return inv("only an SPL meter can be the rig's");
     }
+    if let Some(d) = c.kind.display()
+        && !d.span_ok()
+    {
+        return inv(&format!(
+            "spectrograph_span_s must be one of {:?}",
+            ac2_proto::model::SpectrumDisplay::SPANS_S
+        ));
+    }
     match &c.kind {
         MeasKind::Transfer { config } => {
             if config.reference_input == config.measurement_input {
@@ -266,6 +274,27 @@ pub(super) fn spl_in_place(old: &MeasKind, new: &MeasKind) -> Option<ac2_proto::
     }
 }
 
+/// Whether `new` is `old` with only how clients draw it changed (a spectrum or RTA
+/// measurement's `display`): nothing the daemon computes depends on it, so the job, its
+/// averages and the config rev go on.
+pub(super) fn display_only(old: &MeasKind, new: &MeasKind) -> bool {
+    match (old, new) {
+        (MeasKind::Spectrum { config: a }, MeasKind::Spectrum { config: b }) => {
+            ac2_proto::model::SpectrumConfig {
+                display: b.display,
+                ..a.clone()
+            } == *b
+        }
+        (MeasKind::Rta { config: a }, MeasKind::Rta { config: b }) => {
+            ac2_proto::model::RtaConfig {
+                display: b.display,
+                ..a.clone()
+            } == *b
+        }
+        _ => false,
+    }
+}
+
 /// The new smoothing when `new` is `old` with only the display smoothing changed (a
 /// transfer or spectrum measurement); such an update is applied in place instead of
 /// restarting the job.
@@ -282,6 +311,7 @@ pub(super) fn smoothing_only(old: &MeasKind, new: &MeasKind) -> Option<Smoothing
         (MeasKind::Spectrum { config: a }, MeasKind::Spectrum { config: b })
             if ac2_proto::model::SpectrumConfig {
                 smoothing: b.smoothing,
+                display: b.display,
                 ..a.clone()
             } == *b =>
         {

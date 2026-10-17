@@ -17,6 +17,7 @@ mod file_jobs;
 mod jack;
 mod leq;
 mod math_channels;
+mod meas_display;
 mod network;
 mod osc;
 mod power_cut;

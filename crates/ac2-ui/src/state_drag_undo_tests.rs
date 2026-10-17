@@ -332,15 +332,20 @@ fn a_drop_is_never_the_dropped_measurements_layout() {
     assert_eq!(layout_targets(&r), [MeasId(1)], "{r:?}");
 }
 
-/// Shift held on the drop: the row is compared over the pane, which keeps what it shows.
+/// Shift held on the drop: the row is compared into the measurement the pane shows, which
+/// keeps what it shows.
 #[test]
 fn a_shift_drop_compares() {
     let mut t = desk();
     let tf = pane_n(&t, 1);
     let view = t.st.layout.view(tf).copied();
     t.st.update(Msg::FocusPane(pane_n(&t, 2)), &t.keys);
-    drop_on(&mut t, TreeKey::Meas(MeasId(5)), tf, None, true);
-    assert!(t.st.compared_meas.contains(&MeasId(5)));
+    let r = drop_on(&mut t, TreeKey::Meas(MeasId(5)), tf, None, true);
+    t.answer(&r);
+    assert_eq!(
+        t.st.meas(MeasId(1)).map(|m| m.compared.clone()),
+        Some(vec![Compared::Meas { meas: MeasId(5) }])
+    );
     assert_eq!(
         t.st.layout.view(tf).copied(),
         view,
@@ -348,7 +353,7 @@ fn a_shift_drop_compares() {
     );
     assert_eq!(shows(&t, tf), Some(MeasId(1)));
     assert!(
-        t.last_toast().starts_with("Main R compared"),
+        t.last_toast().starts_with("Main R compared into "),
         "{}",
         t.last_toast()
     );
@@ -415,13 +420,6 @@ fn undo_and_redo_round_trip_every_pane_edit() {
                 drop_on(t, TreeKey::Meas(MeasId(5)), p, Some(Edge::Top), false);
             }),
         ),
-        (
-            "shift drop",
-            Box::new(|t: &mut T| {
-                let p = pane_n(t, 1);
-                drop_on(t, TreeKey::Meas(MeasId(5)), p, None, true);
-            }),
-        ),
         ("N", key("N")),
         ("Shift+N", key("Shift+N")),
         ("Q", key("Q")),
@@ -455,16 +453,6 @@ fn undo_and_redo_round_trip_every_pane_edit() {
         ),
         ("W", key("W")),
         ("F", key("F")),
-        (
-            "C",
-            Box::new(|t: &mut T| {
-                t.st.update(Msg::SelectMeas(MeasId(5)), &t.keys);
-                let before = t.st.history.undo_len();
-                t.key("C");
-                assert_eq!(t.st.history.undo_len(), before + 1, "C is a step");
-                // Undo the C alone below: the row pick before it is a step of its own.
-            }),
-        ),
     ];
     for (name, edit) in edits {
         let mut t = desk();
@@ -478,14 +466,7 @@ fn undo_and_redo_round_trip_every_pane_edit() {
             "{name}: {}",
             t.last_toast()
         );
-        if name == "C" {
-            assert!(t.st.compared_meas.is_empty(), "C undone");
-            t.key("Ctrl+Z");
-        }
         assert_eq!(t.st.pane_snap(), before, "{name} undone");
-        if name == "C" {
-            t.key("Ctrl+Shift+Z");
-        }
         t.key("Ctrl+Shift+Z");
         assert!(
             t.last_toast().starts_with("Redid: "),
@@ -493,11 +474,7 @@ fn undo_and_redo_round_trip_every_pane_edit() {
             t.last_toast()
         );
         assert_eq!(t.st.pane_snap(), after, "{name} redone");
-        assert_eq!(
-            t.st.history.undo_len(),
-            if name == "C" { 2 } else { 1 },
-            "{name}"
-        );
+        assert_eq!(t.st.history.undo_len(), 1, "{name}");
     }
 }
 

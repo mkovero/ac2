@@ -69,6 +69,11 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             resolution,
             level,
             colour,
+            style,
+            peak_hold,
+            span,
+            colours,
+            offset,
         } => {
             let s = state(&c).await?;
             let mut m = find_meas(&s, meas)?.clone();
@@ -79,8 +84,12 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                 window: win.map(window),
                 resolution: *resolution,
                 level: level.map(spec_level),
+                style: style.map(Into::into),
+                peak_hold: peak_hold.map(|p| p.on()),
+                span_s: *span,
+                colours: colours.map(Into::into),
             };
-            if !set.is_empty() || colour.is_none() {
+            if !set.is_empty() || (colour.is_none() && offset.is_none()) {
                 let config = meas_set(&m.config, set)?;
                 m = meas_call(
                     &c,
@@ -98,6 +107,16 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                     Command::MeasColour {
                         meas: m.id,
                         colour: colour.0,
+                    },
+                )
+                .await?;
+            }
+            if let Some(offset) = offset {
+                m = meas_call(
+                    &c,
+                    Command::MeasOffset {
+                        meas: m.id,
+                        offset: ac2_proto::units::Db(*offset),
                     },
                 )
                 .await?;

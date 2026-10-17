@@ -124,7 +124,7 @@ once).
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
-| Display | theme, key hints, warning toasts, how long the SPL number holds, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, spectrograph history and colours, distortion unit, coherence placement, resolution marker, level axes | |
+| Display | theme, key hints, warning toasts, how long the SPL number holds, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, level axes | |
 | Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
 #### System max level
@@ -383,19 +383,25 @@ measurement…**, **Shift+F2**); while shown traces of the kind a pane draws wai
 Imported, that pane says so. A stored trace selected in the list changes no pane: drag its
 row onto a pane, or pick its measurement on the chip, to see it there.
 
-**Compare (C)** draws something else over the group, on every pane of a kind that draws it:
-select a measurement, math channel or stored trace and press **C**; it is drawn tagged
-`cmp` in the legend (its tree row too). A transfer curve is compared on transfer panes, a
-spectrum or band set on spectrum panes, a sweep run on transfer panes and over the sweep
-pane's run (its fundamental and harmonics in the run's own colour). **C** again stops,
-palette *Clear compare* drops all. A compared curve of the pane's own group is drawn once,
-untagged. An Imported trace is not compared: **C** says to move it under a measurement
-first. SPL meters are not compared either: a meter is a number, read side by side. Compare
-is display only: **M**, math operands and the phase reference use the group's own curves.
-Compare follows the measurement, not its name: a renamed one stays compared, and of two with
-the same name only the one chosen is. Compared measurements are remembered by name in
-`ui.toml` (see hidden ones below for how a name comes back); compared stored traces while
-the app runs.
+**Compare (C)** draws a curve of another group in a measurement's panes. Select a
+measurement or stored trace and press **C**: *Compare Main R with…* lists the measurements
+it can be drawn over, those on screen first (`· on screen`), a tick on the ones it is
+already compared into. **Enter** ticks or unticks a row, **Esc** closes. Its own group is
+not offered. From then on every pane showing that measurement draws it, tagged `cmp` in the
+legend (its tree row too), and no other pane does. A transfer curve is compared into a
+transfer measurement or a sweep, a spectrum or band set into a spectrum or RTA, a sweep run
+into a transfer measurement or over another sweep's run (its fundamental and harmonics in
+the run's own colour). Palette *Clear compare* empties the focused pane's measurement's
+list. An Imported trace is not compared: **C** says to move it under a measurement first.
+SPL meters are neither compared nor compared into: a meter is a number, read side by side.
+Compare is display only: **M**, math operands and the phase reference use the group's own
+curves.
+
+Each measurement keeps its compare list on the daemon, in order, first compared first: every
+app connected draws the same, a session saves it, and a deleted measurement or trace leaves
+every list. A pane draws its own group on top, then the compared curves in that order, each a
+layer further back: a fill or bar under every line, and a fill or bar drawn fainter the
+further back it is (never below about half), so the pane's own curves stay readable.
 
 To put another measurement in a pane:
 
@@ -523,10 +529,11 @@ measurement whose row was chosen, as in *Layouts follow the measurement*.
 Dropped within about the outer fifth of a pane (`FOH SPL → new pane below`), the pane splits
 on that side as **N** would and the new half shows the row. A pane too small for **N** to
 split takes a plain drop instead, and the label names the pane. **Shift** held on release
-compares the row over the pane, as **C** does, and the pane keeps what it shows
-(`Main R → compare in pane 2`); the row needs a curve of the kind the pane draws, an SPL
-pane draws no compared meters and an Imported trace is not compared, so anything else is
-refused with a toast that says why. Two SPL meters side by side: add a pane (**N**) and
+compares the row into the pane's measurement, as ticking it in **C**'s list does, and the
+pane keeps what it shows (`Main R → compare in pane 2`); the row needs a curve of the kind
+the pane draws, an SPL pane draws no compared meters, a row of the pane's own group is drawn
+there already and an Imported trace is not compared, so anything else is refused with a
+toast that says why. Two SPL meters side by side: add a pane (**N**) and
 drop the other meter on it without **Shift**. **Esc** cancels the drag; a drop outside the panes does nothing.
 
 #### Undo and redo (Ctrl+Z, Ctrl+Shift+Z)
@@ -535,8 +542,8 @@ drop the other meter on it without **Shift**. **Esc** cancels the drag; a drop o
 toast names it (`Undid: FOH SPL → pane 2`, `Redid: split pane 1`, `Nothing to undo`).
 Covered: drops and edge drops, **N** / **Shift+N**, **Q**, chip picks, measurement rows
 (click, **Tab** / **Shift+Tab**), **G** / **Shift+G**, **T**, a dragged split (one step per drag),
-**Alt+←/→**, **W**, **F**, the transfer stack, and compare on / off (**C**, clear compare).
-Daemon actions (start, stop, delete, capture, rename, delay, smoothing) are not undone. The
+**Alt+←/→**, **W**, **F** and the transfer stack. Daemon actions (start, stop, delete,
+capture, rename, delay, smoothing, compare lists, styles and offsets) are not undone. The
 history keeps 50 steps per app instance, is not saved, and a new change drops whatever was
 undone after it.
 
@@ -685,7 +692,17 @@ area in the trace colour down to the bottom of the plot) and **bars**. Bars show
 so only RTA traces become bars; a narrowband spectrum in bars is drawn as the line, since a
 one-bin tone as a bar would be thinner than a pixel. The fill follows the line exactly: a
 tone stays a spike, a gap in the line is a gap in the fill, stale traces dim, and the peak
-hold stays a line on top.
+hold stays a line on top. **P** turns the peak hold on or off: the highest level of each bin
+since it was turned on, drawn as a thin line over the curve.
+
+The style, the peak hold and the spectrograph's history and colours belong to the
+measurement, not the app or the pane: **B**, **P**, **Shift+B** and the colour maps change
+the spectrum pane's measurement and say so (`Spectrum 1: fill`). The daemon keeps them, so
+every connected app draws it alike and a session restores them; a curve compared into
+another measurement's pane, and each stored trace, draws with its own measurement's style.
+The pane's own view (**G**) and plot chrome (**T**) stay the pane's: they are about the space
+on this screen, and two panes on one measurement may well want a spectrograph in one and the
+plain spectrum in the other.
 
 #### Fixed or multi-resolution
 
@@ -776,14 +793,13 @@ alone ([spectrograph.md](design/spectrograph.md)). Frequency runs across on the 
 axis, time down with the newest at the top, level as colour (viridis by default). The colour
 bar spans the pane's level axis, so the level-axis keys change the colours.
 
-- **Settings › Display › Spectrograph colours** (or the palette: `spectrograph colours`,
-  `magma`, …) picks the colour map: viridis, magma, inferno, cividis or grey. Magma, inferno
-  and grey stay dark for most of their range, easier on the eyes in a dark room; all five
-  are perceptual (brighter is always louder) and colour-blind safe. The choice is this
-  app's, remembered with its other display settings, and the colour bar follows it.
-
-- **Shift+B** (or Settings › Display › Spectrograph history) steps the history 10, 30
-  (default), 60, 120 s; every length keeps a row per 33 ms. It starts afresh at each length
+- The palette (`spectrograph colours`, `magma`, …) picks the colour map of the pane's
+  measurement: viridis, magma, inferno, cividis or grey. Magma, inferno and grey stay dark
+  for most of their range, easier on the eyes in a dark room; all five are perceptual
+  (brighter is always louder) and colour-blind safe. The measurement keeps it (`ac2 meas set
+  <meas> --colours magma`), and the colour bar follows it.
+- **Shift+B** steps the measurement's history 10, 30 (default), 60, 120 s (`ac2 meas set
+  <meas> --span 60`); every length keeps a row per 33 ms. It starts afresh at each length
   and when the spectrograph comes into view.
 - A click puts the cursor: `1.00 kHz · 4.2 s ago · −32.0 dBFS`.
 - Time without frames (STALE, stopped) is a gap, never the last spectrum stretched. Where a
@@ -1139,9 +1155,12 @@ a line twice as wide).
 | **Alt+Home** | back to 0 dB |
 | **J** | to a typed value (transfer and spectrum panes) |
 
-The selected curve is the selected stored trace (any kind), else the focused pane's live
+The selected curve is the selected stored trace (any kind), else a live curve compared
+into the focused pane once picked there (legend or list), else the focused pane's
 measurement. A trace's offset is part of its record (`ac2 trace list`, sessions, exports); a
-live measurement's is this app's display only. The plot says it beside the curve
+live measurement's is kept with the measurement on the daemon (`ac2 meas set <meas> --offset
+6`, sessions), levels as measured: the curve keeps it wherever it is drawn, compared into
+another measurement's pane too. The plot says it beside the curve
 (`Main L S2 · Δt 0.00 ms · +3.0 dB`, `Main L S2 · offset +3.0 dB`), so a spread is never read
 as a level difference. A locked trace keeps its offset.
 
@@ -1168,8 +1187,9 @@ as a level difference. A locked trace keeps its offset.
   between traces stays visible.
 - A click (or palette *Comparison cursor on / off*) puts the comparison cursor, synchronised
   across panes; **Shift+←/→** move it.
-- **C** compares the selected trace or measurement on the panes of its kind whatever its
-  group (not an Imported trace: move it under a measurement first).
+- **C** compares the selected trace or measurement into the measurement you choose; its
+  panes draw it whatever its group (not an Imported trace: move it under a measurement
+  first).
 - **M** averages the shown stored traces of the transfer pane's group (power; complex and
   coherence-weighted in the palette). For ÷ × + −, **Shift+M** with the trace selected
   starts with it as A.
@@ -2508,7 +2528,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+→` | Grow the focused pane (within its split) | `grow_pane` |
 | `Alt+←` | Shrink the focused pane (within its split) | `shrink_pane` |
 | `W` | Layout: split → one pane → full screen | `maximize_pane` |
-| `Ctrl+Z` | Undo the last change to the panes (split, close, drop, pick, view, size, W / F, compare) | `undo` |
+| `Ctrl+Z` | Undo the last change to the panes (split, close, drop, pick, view, size, W / F) | `undo` |
 | `Ctrl+Shift+Z` | Redo the pane change last undone | `redo` |
 | `Tab` | Select the next row in the measurement list (a measurement row brings its panes, as a click does) | `next_in_tree` |
 | `Shift+Tab` | Select the previous row in the measurement list (a measurement row brings its panes, as a click does) | `prev_in_tree` |
@@ -2524,7 +2544,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+↓` | Pan level axis down (towards lower levels) | `level_pan_down` |
 | `Shift+Home` | Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz (IR: the whole IR) | `level_fit` |
 | `Ctrl+Home` | Level and frequency axes back to the pane's default | `level_reset` |
-| `C` | Compare the selected measurement or trace over the panes that draw its kind (on / off) | `compare` |
+| `C` | Compare the selected measurement or trace into a measurement's panes: choose which… | `compare` |
 | `Shift+←` | Cursor 1/12 octave down (IR: earlier) | `cursor_left` |
 | `Shift+→` | Cursor 1/12 octave up (IR: later) | `cursor_right` |
 | `Ctrl+1` | Capture selected measurement to slot 1 | `slot_1` |
@@ -2654,7 +2674,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Choose the measurement the focused pane shows… | `pane_measurement` |
 | Theme: dark → light → high contrast | `cycle_theme` |
 | Comparison cursor on / off (IR: a time cursor) | `toggle_cursor` |
-| Clear compare: no compared curves | `clear_compare` |
+| Clear compare: nothing compared into the focused pane's measurement | `clear_compare` |
 | Move the selected trace to slot… (1 … 9, none frees its slot) | `trace_slot` |
 | Export the selected trace (CSV or IR WAV) to a file… | `trace_export` |
 | Deselect the stored trace: keys act on the live measurement again | `select_live` |
