@@ -280,6 +280,7 @@ impl AppState {
         let l = &prefs.layout;
         self.pending_pane_meas.clear();
         self.pane_levels.clear();
+        self.spectrum_hold.clear();
         match &l.panes {
             Some(p) => {
                 let views = p

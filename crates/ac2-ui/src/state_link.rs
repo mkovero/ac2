@@ -247,7 +247,7 @@ impl AppState {
                 self.keep_bar_from(&d);
                 self.keep_spec_glide(&d);
                 self.data = Some(d);
-                self.fit_started_spectra();
+                self.fit_first_shows();
             }
             ConnEvent::Trace(mut t, g) => {
                 if let Some(m) = self
