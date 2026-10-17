@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::settings::{ConnLine, DisplayRow, Page};
+use ac2_scene::primitives::Colormap;
 
 fn settings(t: &T) -> &Settings {
     t.st.overlay.settings().expect("Settings open")
@@ -34,6 +35,32 @@ fn with_ceiling(ceiling: f64, bound: f64, armed: bool) -> State {
     s.generator.ceiling_bound = Dbfs(bound);
     s.generator.armed = armed;
     s
+}
+
+/// The palette names the spectrograph colours as the Display page does; the choice is
+/// remembered and is the colour map the panes are drawn with.
+#[test]
+fn spectrograph_colours_from_the_palette() {
+    let mut t = T::new();
+    let keys = t.keys.clone();
+    let scope = t.focus_kind().scope();
+    let mut p = crate::palette::Palette::default();
+    p.type_text("magma");
+    assert_eq!(
+        p.entries(&keys, scope).first().map(|e| e.command),
+        Some(CommandId::SpectrographMagma)
+    );
+    assert_eq!(t.st.scene_theme().colormap, Colormap::Viridis);
+    t.st.prefs_dirty = false;
+    t.st.update(Msg::Command(CommandId::SpectrographMagma), &keys);
+    assert_eq!(t.st.prefs.spectrograph_colours, Colormap::Magma);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(t.last_toast(), "Spectrograph colours: magma");
+    assert_eq!(t.st.scene_theme().colormap, Colormap::Magma);
+    t.st.update(Msg::Command(CommandId::SpectrographColours), &keys);
+    assert_eq!(t.last_toast(), "Spectrograph colours: inferno");
+    t.st.update(Msg::Command(CommandId::SpectrographGrey), &keys);
+    assert_eq!(t.st.scene_theme().colormap, Colormap::Grey);
 }
 
 #[test]
@@ -272,6 +299,18 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Right");
     assert_eq!(t.st.view.spectrum.spectrograph.span_s, 60);
     assert_eq!(t.st.prefs.spectrograph_span_s, Some(60));
+    t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::SpectrographColours);
+    t.st.prefs_dirty = false;
+    t.key("Right");
+    assert_eq!(t.st.prefs.spectrograph_colours, Colormap::Magma);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(t.st.scene_theme().colormap, Colormap::Magma);
+    t.key("Left");
+    t.key("Left");
+    assert_eq!(t.st.prefs.spectrograph_colours, Colormap::Grey);
+    t.key("Right");
+    assert_eq!(t.st.prefs.spectrograph_colours, Colormap::Viridis);
     t.key("Down");
     t.key("Right");
     assert_eq!(

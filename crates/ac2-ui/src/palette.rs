@@ -232,6 +232,9 @@ mod tests {
             ("full screen", CommandId::Fullscreen),
             ("key hints", CommandId::KeyHints),
             ("warning toasts", CommandId::WarningToasts),
+            ("magma", CommandId::SpectrographMagma),
+            ("spectrograph grey", CommandId::SpectrographGrey),
+            ("spectrograph colours next", CommandId::SpectrographColours),
         ] {
             let r = search(q, &k, Scope::Transfer);
             assert_eq!(r.first().map(|e| e.command), Some(want), "{q}: {r:?}");

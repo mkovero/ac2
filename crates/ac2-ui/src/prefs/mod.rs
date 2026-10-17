@@ -267,6 +267,9 @@ pub struct UiPrefs {
     /// The spectrograph's history span, s (one of
     /// [`ac2_scene::view::SPECTROGRAPH_SPANS_S`]; `None`: its default).
     pub spectrograph_span_s: Option<u32>,
+    /// The spectrograph's colour map (and its colour bar's); a matter of eyes and room
+    /// light, so this app's, not the daemon's.
+    pub spectrograph_colours: ac2_scene::primitives::Colormap,
     /// The transfer pane's legend as last left.
     pub legend: LegendPrefs,
     /// Session files and folders on this machine the app opened or exported, most recent
@@ -323,6 +326,7 @@ impl Default for UiPrefs {
             theme: None,
             record_limit_min: None,
             spectrograph_span_s: None,
+            spectrograph_colours: ac2_scene::primitives::Colormap::default(),
             legend: LegendPrefs::default(),
             recent_sessions: Vec::new(),
         }

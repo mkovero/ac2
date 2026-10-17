@@ -275,6 +275,7 @@ pub enum DisplayRow {
     SpectrumView,
     SpectrumGlide,
     Spectrograph,
+    SpectrographColours,
     SweepView,
     DistortionUnit,
     Coherence,
@@ -283,7 +284,7 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 15] = [
+    pub const ALL: [DisplayRow; 16] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -294,6 +295,7 @@ impl DisplayRow {
         DisplayRow::SpectrumView,
         DisplayRow::SpectrumGlide,
         DisplayRow::Spectrograph,
+        DisplayRow::SpectrographColours,
         DisplayRow::SweepView,
         DisplayRow::DistortionUnit,
         DisplayRow::Coherence,
@@ -314,6 +316,7 @@ impl DisplayRow {
             DisplayRow::SpectrumGlide => "Spectrum",
             DisplayRow::SweepView => "Sweep pane shows",
             DisplayRow::Spectrograph => "Spectrograph history",
+            DisplayRow::SpectrographColours => "Spectrograph colours",
             DisplayRow::DistortionUnit => "Distortion in",
             DisplayRow::Coherence => "Coherence",
             DisplayRow::ResolutionMarker => "Resolution marker",
@@ -435,6 +438,7 @@ pub fn display_rows(
     switches: DisplaySwitches,
     spl_hold_ms: Option<u32>,
     span_s: u32,
+    colours: ac2_scene::primitives::Colormap,
     views: PaneViews,
 ) -> Vec<(DisplayRow, String)> {
     DisplayRow::ALL
@@ -470,6 +474,7 @@ pub fn display_rows(
                 DisplayRow::LeqBars => bar_ease_text(switches.bar_ease).into(),
                 DisplayRow::SpectrumGlide => spec_ease_text(switches.spec_ease).into(),
                 DisplayRow::Spectrograph => format!("last {span_s} s"),
+                DisplayRow::SpectrographColours => colours.name().to_owned(),
                 DisplayRow::DistortionUnit => match views.distortion_unit {
                     DistortionUnit::Db => "dB re fundamental".into(),
                     DistortionUnit::Percent => "% of fundamental".into(),

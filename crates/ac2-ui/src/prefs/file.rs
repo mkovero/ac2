@@ -2,6 +2,7 @@
 
 use super::layout::*;
 use super::*;
+use ac2_scene::primitives::Colormap;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct File {
@@ -28,6 +29,9 @@ struct File {
     record_limit_min: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spectrograph_span_s: Option<u32>,
+    /// Written only when not the default (viridis).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spectrograph_colours: Option<ColormapFile>,
     /// One-based channels per device id.
     #[serde(default)]
     stimulus_outputs: BTreeMap<String, Vec<u32>>,
@@ -145,6 +149,38 @@ impl ThemeFile {
             T::Dark => Self::Dark,
             T::Light => Self::Light,
             T::HighContrast => Self::HighContrast,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ColormapFile {
+    Viridis,
+    Magma,
+    Inferno,
+    Cividis,
+    Grey,
+}
+
+impl ColormapFile {
+    fn map(self) -> Colormap {
+        match self {
+            Self::Viridis => Colormap::Viridis,
+            Self::Magma => Colormap::Magma,
+            Self::Inferno => Colormap::Inferno,
+            Self::Cividis => Colormap::Cividis,
+            Self::Grey => Colormap::Grey,
+        }
+    }
+
+    fn of(m: Colormap) -> Self {
+        match m {
+            Colormap::Viridis => Self::Viridis,
+            Colormap::Magma => Self::Magma,
+            Colormap::Inferno => Self::Inferno,
+            Colormap::Cividis => Self::Cividis,
+            Colormap::Grey => Self::Grey,
         }
     }
 }
@@ -569,6 +605,10 @@ impl UiPrefs {
             theme: f.theme.map(ThemeFile::name),
             record_limit_min: f.record_limit_min,
             spectrograph_span_s: f.spectrograph_span_s,
+            spectrograph_colours: f
+                .spectrograph_colours
+                .map(ColormapFile::map)
+                .unwrap_or_default(),
             legend: f
                 .legend
                 .as_ref()
@@ -597,6 +637,8 @@ impl UiPrefs {
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,
             spectrograph_span_s: self.spectrograph_span_s,
+            spectrograph_colours: (self.spectrograph_colours != Colormap::default())
+                .then(|| ColormapFile::of(self.spectrograph_colours)),
             layout: (self.layout != LayoutPrefs::default())
                 .then(|| LayoutFile::from_prefs(&self.layout)),
             ir_levels: IrLevelsFile::from_prefs(&self.ir_levels),

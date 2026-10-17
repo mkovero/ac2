@@ -286,6 +286,12 @@ commands! {
     SpectrumStyle => "spectrum_style", "RTA: bars / line", [Spectrum];
     PeakHold => "peak_hold", "Peak hold on / off", [Spectrum];
     SpectrographSpan => "spectrograph_span", "Spectrograph history: 10 → 30 → 60 → 120 s", [Spectrum];
+    SpectrographColours => "spectrograph_colours", "Spectrograph colours: the next colour map", [Spectrum];
+    SpectrographViridis => "spectrograph_colours_viridis", "Spectrograph colours: viridis (blue, green, yellow)", [Spectrum];
+    SpectrographMagma => "spectrograph_colours_magma", "Spectrograph colours: magma (black, purple, orange; dark)", [Spectrum];
+    SpectrographInferno => "spectrograph_colours_inferno", "Spectrograph colours: inferno (black, purple, red, yellow; dark)", [Spectrum];
+    SpectrographCividis => "spectrograph_colours_cividis", "Spectrograph colours: cividis (dark blue to yellow)", [Spectrum];
+    SpectrographGrey => "spectrograph_colours_grey", "Spectrograph colours: grey (black to light grey)", [Spectrum];
 
     NextView => "next_view", "Next view", [Transfer, Spectrum, Ir, Spl, Distortion];
     PrevView => "prev_view", "Previous view", [Transfer, Spectrum, Ir, Spl, Distortion];

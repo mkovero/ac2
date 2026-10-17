@@ -98,6 +98,7 @@ fn scene_for(
         && c.generation == app.pane_generation(pane)
         && c.size == size
         && c.theme == app.state.theme
+        && c.colormap == theme.colormap
     {
         let axes = Axes {
             x: c.x_axis,
@@ -226,6 +227,7 @@ fn scene_for(
             generation: app.pane_generation(pane),
             size,
             theme: app.state.theme,
+            colormap: theme.colormap,
             scene: scene.clone(),
             x_axis: axes.x,
             y_level: axes.y_level,
