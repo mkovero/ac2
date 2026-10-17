@@ -219,9 +219,9 @@ impl AppState {
             ConnEvent::SessionList(r) => self.session_list(r),
             ConnEvent::MeasCreated(m) => {
                 // Before it is selected: focusing a sweep pane selects what that pane shows.
-                if self.sweep_pane_on_create.as_ref() == Some(&m.config.name) {
-                    self.sweep_pane_on_create = None;
-                    self.open_created_sweep(m.id);
+                if self.pane_on_create.as_ref() == Some(&m.config.name) {
+                    self.pane_on_create = None;
+                    self.open_created(m.id, PaneKind::for_kind(&m.config.kind));
                 }
                 self.selected = Some(m.id);
                 self.pending_select = Some(m.id);

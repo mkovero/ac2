@@ -413,10 +413,11 @@ impl Layout {
 /// measures the focused pane's longer side in until the view says.
 pub const DEFAULT_PANE_AREA: (f32, f32) = (1280.0, 760.0);
 
-/// A row of a pane's list (its title chip, `PaneMeasurement`): a measurement to show, or
-/// another kind of pane to turn into.
+/// A row of a pane's list (its title chip, `PaneMeasurement`): a measurement to show,
+/// another kind of pane to turn into, or the New measurement chooser.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaneMenuRow {
     Meas(MeasId),
     Kind(PaneKind),
+    NewMeasurement,
 }

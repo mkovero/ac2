@@ -83,6 +83,7 @@ impl Section {
             | C::OffsetUpCoarse
             | C::OffsetDownCoarse
             | C::OffsetClear
+            | C::NewMeasurement
             | C::NewTransfer
             | C::NewSpectrum
             | C::NewRta

@@ -45,7 +45,7 @@ impl AppState {
                             cmd: self.meas_update(meas, config),
                         },
                         None => {
-                            self.sweep_pane_on_create = Some(config.name.clone());
+                            self.pane_on_create = Some(config.name.clone());
                             Request::CreateMeas { config }
                         }
                     };
@@ -92,6 +92,9 @@ impl AppState {
             None => {
                 if transfer {
                     self.stack_on_create = Some(config.name.clone());
+                } else if !matches!(config.kind, MeasKind::Math { .. }) {
+                    // A math channel is drawn on the pane of what it computes from.
+                    self.pane_on_create = Some(config.name.clone());
                 }
                 Request::CreateMeas { config }
             }

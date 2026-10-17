@@ -564,7 +564,7 @@ fn need_meas_names_the_keys_that_reach_a_measurement() {
     let w = t.last_toast().to_owned();
     for (c, chord) in [
         (CommandId::NextInTree, "Tab"),
-        (CommandId::Palette, "Ctrl+K"),
+        (CommandId::NewMeasurement, "Ctrl+M"),
     ] {
         let want = Chord::parse(chord).expect(chord);
         assert_eq!(t.keys.first_chord(c, Scope::Global), Some(want), "{c:?}");

@@ -723,7 +723,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         let rows = st.tree_rows();
         let theme = ac2_scene::theme::Theme::by_name(st.theme);
         if rows.is_empty() {
-            ui.label(RichText::new("none").color(ch.dim));
+            ui.label(RichText::new(st.empty_list_text()).color(ch.dim));
         }
         for row in &rows {
             let reveal = reveal

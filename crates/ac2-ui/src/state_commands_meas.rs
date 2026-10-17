@@ -104,36 +104,11 @@ impl AppState {
                     }
                 }
             }
-            C::NewMath => {
-                // The channel lives under the measurement selected now (a selected trace's
-                // or math channel's owner): its live curve and traces are offered first.
-                let owner = self
-                    .selected_group()
-                    .unwrap_or(ac2_proto::model::TraceOwner::Imported);
-                // A starts as what the focused pane shows: its measurement, or the selected
-                // trace.
-                let first = self
-                    .selected_trace_meta()
-                    .map(|t| Operand::Trace { trace: t.id })
-                    .or_else(|| {
-                        let p = match self.layout.focus_kind() {
-                            PaneKind::Spectrum => PaneKind::Spectrum,
-                            _ => PaneKind::Transfer,
-                        };
-                        // A sweep has no live curve to be an operand: its runs are traces.
-                        self.kind_meas(p)
-                            .filter(|m| m.config.kind.is_job())
-                            .map(|m| Operand::Meas { meas: m.id })
-                    });
-                match Form::math(self.math_candidates(Some(owner)), first, owner) {
-                    Some(f) => self.overlay = Overlay::Form(Box::new(f)),
-                    None => self.warn(format!(
-                        "a math channel needs two transfer functions, spectra or RTAs of one \
-                         kind, live or stored: make a measurement or capture one ({}) first",
-                        self.capture_keys()
-                    )),
-                }
-            }
+            C::NewMath => match self.math_form() {
+                Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
+                Err(why) => self.warn(why),
+            },
+            C::NewMeasurement => self.open_new_measurement(self.layout.focus, keymap),
             C::NextColour | C::PrevColour => self.step_colour(c == C::NextColour, out),
             C::EditMeas => {
                 // A sweep measurement selected (or the sweep pane's) edits its settings.

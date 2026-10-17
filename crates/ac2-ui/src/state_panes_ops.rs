@@ -310,19 +310,22 @@ impl AppState {
         Some(new)
     }
 
-    /// A sweep measurement this app created, shown on the sweep pane worked in last; with
+    /// A measurement this app created, shown on the pane of its kind worked in last; with
     /// none, on a pane of its own split off the focused one as N splits it, so the panes
-    /// already there keep their kinds. Only a pane too small to split turns into it.
-    pub(super) fn open_created_sweep(&mut self, meas: MeasId) {
-        if self.layout.lead(PaneKind::Distortion).is_none()
+    /// already there keep their kinds. A sweep's pane takes the focus, as its runs are armed
+    /// there: with no room to split, the focused pane turns into it.
+    pub(super) fn open_created(&mut self, meas: MeasId, kind: PaneKind) {
+        if self.layout.lead(kind).is_none()
             && let Some(new) = self.split_focused_pane()
         {
-            self.set_pane_kind(new, PaneKind::Distortion);
+            self.set_pane_kind(new, kind);
             if let Some(v) = self.layout.view_mut(new) {
                 v.meas = Some(meas);
             }
         }
-        self.focus_kind(PaneKind::Distortion);
+        if kind == PaneKind::Distortion {
+            self.focus_kind(kind);
+        }
     }
 
     /// Q: the focused pane closed, its neighbour taking its place and the focus; the
@@ -525,7 +528,8 @@ impl AppState {
 
     /// The rows of pane `id`'s list: every measurement in the tree's order (the pane turns
     /// into the kind a picked one needs), then the kinds of pane no measurement brings, so
-    /// a pane can still be readied for a measurement not yet made.
+    /// a pane can still be readied for a measurement not yet made; last, the New
+    /// measurement chooser, where a list of what exists is looked in for what does not.
     pub fn pane_menu_rows(&self, id: PaneId) -> Vec<(PaneMenuRow, String)> {
         let kind = self.layout.kind(id);
         let meas: Vec<&Measurement> = self
@@ -557,6 +561,11 @@ impl AppState {
                 .filter(|k| *k != kind && !meas.iter().any(|m| k.shows(&m.config.kind)))
                 .map(|k| (PaneMenuRow::Kind(k), format!("pane  {}", k.title()))),
         );
+        let key = self.keys.label(CommandId::NewMeasurement, Scope::Global);
+        v.push((
+            PaneMenuRow::NewMeasurement,
+            ac2_scene::new_meas::menu_row(key.as_deref()),
+        ));
         v
     }
 
@@ -571,6 +580,13 @@ impl AppState {
             PaneMenuRow::Kind(k) => {
                 self.set_pane_kind(id, k);
                 self.focus_pane(id);
+            }
+            PaneMenuRow::NewMeasurement => {
+                // The pane whose list it was is the one the chooser's guess is about, and
+                // the one the new measurement's pane splits off.
+                self.focus_pane(id);
+                let keymap = self.keys.clone();
+                self.open_new_measurement(id, &keymap);
             }
         }
     }

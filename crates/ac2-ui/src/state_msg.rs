@@ -141,7 +141,7 @@ pub enum Overlay {
     Delete(Box<DeletePrompt>),
     /// A question with a few answers (←/→ or ↑/↓ pick, Enter takes it, Esc cancels):
     /// what deleting a measurement does with its traces, where a trace moves, unsaved
-    /// changes before a session is replaced.
+    /// changes before a session is replaced, the kind of a new measurement.
     Choose(Box<ChoicePrompt>),
     /// The Sessions dialog (Alt+S): new, open, save, recents, the file browser.
     Sessions(Box<crate::sessions::SessionsDialog>),

@@ -83,10 +83,9 @@ impl AppState {
                     self.keys
                         .reach(CommandId::NewTransfer, "New transfer measurement…")
                 ),
-                PaneKind::Spectrum => format!(
-                    "no spectrum or RTA: {}",
-                    self.keys.palette_entry("New spectrum… / New RTA…")
-                ),
+                PaneKind::Spectrum => {
+                    format!("no spectrum or RTA: {} makes one", self.new_meas_reach())
+                }
                 _ => format!(
                     "no SPL meter: {}",
                     self.keys.reach(CommandId::NewSpl, "New SPL meter…")
@@ -468,13 +467,11 @@ impl AppState {
         let text = if st.session.open.is_none() {
             format!("No audio session — {}", open_session_hint(keymap))
         } else if st.measurements.is_empty() {
-            let palette = keymap
-                .chords(CommandId::Palette, Scope::Global)
-                .first()
-                .map_or_else(|| "Command palette".to_owned(), |c| c.label());
-            format!(
-                "No measurements — {palette} → New transfer measurement… (or New spectrum, RTA, SPL meter)"
-            )
+            let reach = [CommandId::NewMeasurement, CommandId::Palette]
+                .into_iter()
+                .find_map(|c| keymap.label(c, Scope::Global))
+                .unwrap_or_else(|| "Command palette".to_owned());
+            ac2_scene::new_meas::no_measurements(&reach)
         } else if !self.transfer_shows_stored()
             && let n @ 1.. = self.imported_transfer_traces()
         {

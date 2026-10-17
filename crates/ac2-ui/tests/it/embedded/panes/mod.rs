@@ -2,6 +2,7 @@
 
 mod edit;
 mod focus;
+mod new_meas;
 mod streams;
 
 use super::harness::{Driver, R};
