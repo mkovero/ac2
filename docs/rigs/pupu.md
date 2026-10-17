@@ -370,3 +370,30 @@ ac2d's bound only for the speaker stage; `gen ceiling` read bound −50 after ev
 - Ambient with an averaged RTA (`--average fifo:N` over the Leq window): LZ / LA / LC within
   0.005 dB of numpy, LAeq ac2 vs REW −0.009 dB; worst third octave +1.69 dB at 79 Hz (filter
   skirts against ideal band edges in a falling LF ambient).
+
+### Genelec cold start, harmonics over the first hour (2026-10-17)
+
+The operator powered the Genelec on from cold at about 03:55Z; the mic had moved (about 54 cm)
+and a second Genelec now stands beside the 1083, so the room response differs from the
+2026-10-14 baselines (1 kHz fundamental at the mic 6 dB lower). Steady-sine harmonics at
+−30 dBFS, dBr re the fundamental at the mic (runs `20261017T041201Z`, `T042549Z`, `T044015Z`):
+
+| on for | H2 @ 501.5 Hz | H3 @ 501.5 Hz | H2 @ 201.3 Hz | H3 @ 1001.5 Hz |
+|---|---|---|---|---|
+| ~20 min | −71.4 | −42.0 | −68.1 | −51.1 |
+| ~35 min | −70.4 | −42.1 | −68.7 | −50.9 |
+| ~50 min | −70.6 | −42.1 | −71.7 | −50.9 |
+| days (2026-10-14) | −67.6 | −43.2 | −72.3 | −56.2 |
+
+No drift within the first hour (all within ±1 dB, H2 @ 200 Hz ±2 dB). The operator reports
+the audible distortion has come only after days on, so the 2026-10-17 numbers are a day-0
+reference for a long-term trend, not a test of the drift itself.
+
+The ac2 sweep's H2 @ 500 Hz read −66.4 dBr (`dist` variant) between the sines that read
+−70.4 and −70.6: a 4 dB excess that the sines rule out as warming. The 2026-10-14 run had
++2.2 dB on the same cell; REW's import is floor-bound there (< −64.6 dBr), so it cannot
+confirm or refute it. Open.
+
+Xone −10 dBFS: three LF FAILs in `T042549Z` (REW H2 at 35 / 40.5 Hz, ac2 3 Hz-sweep H3 at
+40.5 Hz, all at −92…−100 dBr against a sine near its own floor) did not repeat in
+`T044349Z` (FAIL 0, WARN 0): one-take noise of the hum-burst kind described above.
