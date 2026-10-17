@@ -85,9 +85,12 @@ the channels, with *applies when the session opens (Enter)* until it is the open
 - **Persisted** by the daemon in `rig.json` (config directory, `ac2_paths`; `ac2d --settings` names
   another file), atomic write, before the change applies (a level that would come back
   different after a restart is worse than a refused change). At start the level in force is
-  min(kept, bound): a later, lower `--max-level` wins. A file that cannot be read is never
-  written (the daemon starts at the bound and refuses changes with the reason); one of
-  another format version is set aside.
+  min(kept, bound): a later, lower `--max-level` wins. The file is read section by section:
+  a ceiling that cannot be read is taken from the previous copy (`rig.json.prev`) where it
+  reads there, else the daemon starts at the bound, as with no file. A file that cannot be
+  moved out of the way is never written (the daemon refuses changes with the reason); one
+  of a newer format version is set aside, one of the previous version is read and kept as
+  `rig.json.v1`.
 - Every emitting path keeps enforcing it: `gen.set`, `sweep.run`, `session.detect_loopback`
   refuse levels above it; the peak limit of the running stream and of the detection burst's
   stream follow it.

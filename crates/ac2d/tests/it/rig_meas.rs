@@ -107,8 +107,8 @@ fn rig_meter_survives_loads_and_stays_out_of_session_files() {
     // The meter becomes the rig's: it keeps its id, and the rig settings hold it.
     c.update_ok(MeasId(1), rig_meter("FOH"));
     let rj = rig_json(dir.path());
-    assert_eq!(rj["measurements"].as_array().unwrap().len(), 1);
-    assert_eq!(rj["measurements"][0]["id"], 1);
+    assert_eq!(rj["meters"].as_array().unwrap().len(), 1);
+    assert_eq!(rj["meters"][0]["id"], 1);
 
     // A session meter beside it; a save holds that one only.
     c.ok(Command::MeasCreate {
@@ -150,7 +150,7 @@ fn rig_meter_survives_loads_and_stays_out_of_session_files() {
     // Back to the session: the rig settings let it go.
     c.update_ok(MeasId(1), spl("FOH", 1));
     assert!(
-        rig_json(dir.path())["measurements"]
+        rig_json(dir.path())["meters"]
             .as_array()
             .unwrap()
             .is_empty()
