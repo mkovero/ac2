@@ -111,7 +111,8 @@ Reads, when a file is damaged:
 
 | file | what happens |
 |---|---|
-| `rig.json`, `calibrations.json` | set aside as `<name>.damaged-<unix s>`; the previous copy (`<name>.prev`, the file before its last write) is read instead, else defaults; the store stays writable |
+| `rig.json`, a section unreadable (a meter, the outputs, the ceiling…) | set aside as `rig.json.damaged-<unix s>`; that section (or meter) alone is taken from the previous copy where it reads there, else left out; every other section is read and the file written again; the reason names each section lost |
+| `rig.json`, `calibrations.json`, not readable at all | set aside as `<name>.damaged-<unix s>`; the previous copy (`<name>.prev`, the file before its last write) is read instead, else defaults; the store stays writable |
 | autosave `session.json` | set aside; `session.prev.json` restored; both damaged: the directory is set aside and the daemon starts empty |
 | a trace, or an SPL / band log without its header | that file alone is moved to `<autosave>.damaged-files/`; the trace is left out, the meter starts a new log or goes on without its band history |
 | rig meters' log manifest | as the autosave; the rig meters (from `rig.json`) run either way |

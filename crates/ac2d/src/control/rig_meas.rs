@@ -40,13 +40,13 @@ use ac2_traces::session::{SavedMeasurement, Session as SessionData, SplLogOnDisk
 
 use super::{Control, recovery};
 use crate::autosave::RigLogs;
-use crate::rig::RigSettings;
+use crate::rig::{RigMeter, RigSettings};
 use crate::util::{perr, perr_detail, wall_ns};
 
 /// The control thread's rig meter state.
 pub(crate) struct RigMeas {
     /// What the rig settings hold of the rig's meters, by id.
-    saved: Vec<SavedMeasurement>,
+    saved: Vec<RigMeter>,
     /// The audio configuration the monitor at start reopens.
     session: Option<SessionConfig>,
     /// Their logs on disk; `None`: in memory only.
@@ -68,7 +68,7 @@ impl RigMeas {
                 None
             }
         });
-        let mut saved = s.measurements.clone();
+        let mut saved = s.meters.clone();
         saved.sort_by_key(|m| m.id);
         Self {
             saved,
@@ -88,7 +88,7 @@ impl RigMeas {
     }
 }
 
-/// A measurement as a session file or the rig settings keep it.
+/// A measurement as a session file keeps it.
 pub(super) fn saved_of(m: &Measurement) -> SavedMeasurement {
     SavedMeasurement {
         id: m.id,
@@ -132,6 +132,11 @@ impl Control {
             .map_or(MeasScope::Session, |m| m.config.scope)
     }
 
+    /// The rig meters as a session file keeps measurements (the rig log manifest).
+    fn rig_saved(&self) -> Vec<SavedMeasurement> {
+        self.rigm.saved.iter().map(RigMeter::saved).collect()
+    }
+
     /// Whether the rig has meters.
     fn has_rig_meters(&self) -> bool {
         !self.rigm.saved.is_empty()
@@ -155,7 +160,7 @@ impl Control {
         RigSettings {
             ceiling_dbfs: self.ceiling_set,
             outputs: self.store.state().outputs.clone(),
-            measurements: self.rigm.saved.clone(),
+            meters: self.rigm.saved.clone(),
             monitor_at_start: self.store.state().rig.monitor_at_start,
             monitor_session: self.rigm.session.clone(),
             osc_target: self.store.state().rig.osc_target,
@@ -219,7 +224,7 @@ impl Control {
             Patch::Set(m) => {
                 next.retain(|s| s.id != m.id);
                 if m.config.scope == MeasScope::Rig {
-                    next.push(saved_of(m));
+                    next.push(RigMeter::of(m));
                     next.sort_by_key(|s| s.id);
                 }
             }
@@ -229,7 +234,7 @@ impl Control {
             return;
         }
         let s = RigSettings {
-            measurements: next.clone(),
+            meters: next.clone(),
             ..self.rig_settings_now()
         };
         if let Err(e) = self.rig.persist(&s) {
@@ -284,7 +289,7 @@ impl Control {
         spl_logs.retain(|l| saved.iter().any(|m| m.id == l.info.meas));
         let mut data = SessionData {
             saved_at: WallNs(wall_ns()),
-            measurements: saved.clone(),
+            measurements: saved.iter().map(RigMeter::saved).collect(),
             spl_logs,
             traces: Vec::new(),
         };
@@ -312,12 +317,10 @@ impl Control {
                 config_rev: Rev(0),
                 delay: None,
                 grid_id,
-                colour: sm.colour.filter(|c| c.is_valid()),
-                layout: sm.layout.filter(|l| l.check().is_ok()),
+                colour: sm.colour,
+                layout: sm.layout,
                 compared: Vec::new(),
-                offset: Some(sm.offset)
-                    .filter(|o| Measurement::offset_ok(*o))
-                    .unwrap_or(Db(0.0)),
+                offset: Db(0.0),
             };
             self.ensure_spl_log(&m, None);
             m.config_rev = Rev(self.store.rev().0 + 1);
@@ -340,12 +343,12 @@ impl Control {
     fn rig_logs_manifest(&self) -> (SessionData, crate::autosave::Fingerprint) {
         let data = SessionData {
             saved_at: WallNs(wall_ns()),
-            measurements: self.rigm.saved.clone(),
+            measurements: self.rig_saved(),
             spl_logs: Vec::new(),
             traces: Vec::new(),
         };
         let fp = (
-            self.rigm.saved.clone(),
+            self.rig_saved(),
             Vec::new(),
             self.spl_log_ids(MeasScope::Rig),
         );

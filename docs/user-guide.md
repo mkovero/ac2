@@ -1591,7 +1591,9 @@ it is back to its last few minutes; after a daemon crash, 30 s).
 After a power cut a state file may be torn. The daemon never refuses to start over one: it
 sets the file aside as `<name>.damaged-<time>` (never deleted), reads the copy before the
 last write where it keeps one (`rig.json.prev`, `calibrations.json.prev`) or starts without
-it, and goes on metering. An SPL log cut mid-row keeps every whole row and carries on
+it, and goes on metering. In `rig.json` a part that cannot be read (one rig meter, the
+outputs, the system max level…) costs only that part: the rest is read, and the copy set
+aside keeps what was lost. An SPL log cut mid-row keeps every whole row and carries on
 after it (nothing is reported). A damaged trace or SPL log costs only itself (moved to
 `<autosave>.damaged-files/`). The app shows **FILE DAMAGED · what** until the daemon
 restarts, and `ac2 status` prints a `damaged` line for each file with what was done.
