@@ -422,9 +422,11 @@ pub fn spectrograph_scene(
     let chrome = view.chrome;
     let cursor_hz = view.cursor_hz.filter(|_| chrome.cursor());
     let alone = view.spectrum.mode == SpectrumMode::Spectrograph;
+    // The colour bar sits right of the plots; a column neighbour may reserve more.
+    let right = crate::freq_column::right(RIGHT_MARGIN, view);
     let (spectrum, mut layers, banners, top) = if alone {
         let mut c0 = Canvas::new(size, theme);
-        let plot_w = (size.width - MARGINS.left - RIGHT_MARGIN).max(1.0);
+        let plot_w = (size.width - MARGINS.left - right).max(1.0);
         let strip = canvas::banner_strip(&mut c0, status, MARGINS.left, plot_w, size, theme);
         let top = strip.rect.bottom() + MARGINS.top;
         (None, c0.into_scene(size).layers, strip.rows, top)
@@ -439,7 +441,7 @@ pub fn spectrograph_scene(
                 width: size.width,
                 height: top_h,
             },
-            RIGHT_MARGIN,
+            right,
         );
         let layers = std::mem::take(&mut spectrum.scene.layers);
         (Some(spectrum), layers, Vec::new(), top_h + PANE_GAP)
@@ -460,7 +462,7 @@ pub fn spectrograph_scene(
     let plot = Rect::new(
         MARGINS.left,
         top + CAPTION_H,
-        (size.width - MARGINS.left - RIGHT_MARGIN).max(1.0),
+        (size.width - MARGINS.left - right).max(1.0),
         (size.height - top - CAPTION_H - MARGINS.bottom).max(1.0),
     );
     let x_axis = axis::freq_axis(view.freq.range(), plot.x, plot.right());

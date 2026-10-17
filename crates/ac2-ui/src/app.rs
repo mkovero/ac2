@@ -102,6 +102,9 @@ pub(crate) struct CachedScene {
     pub view: crate::state::View,
     pub generation: u64,
     pub size: egui::Vec2,
+    /// The column's frequency-plot margin it was laid out with: a neighbour's change of
+    /// view moves this pane's plot edge too.
+    pub freq_right: f32,
     pub theme: ThemeName,
     pub colormap: ac2_scene::primitives::Colormap,
     pub scene: Arc<Scene>,

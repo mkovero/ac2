@@ -93,10 +93,12 @@ fn scene_for(
 ) -> Option<(Arc<ac2_plot::Scene>, Axes)> {
     let view = app.state.layout.view(id)?.to_owned();
     let pane = view.kind;
+    let freq_right = app.state.column_right(id);
     if let Some(c) = app.scenes.get(&id)
         && c.view == view
         && c.generation == app.pane_generation(pane)
         && c.size == size
+        && c.freq_right == freq_right
         && c.theme == app.state.theme
         && c.colormap == theme.colormap
     {
@@ -226,6 +228,7 @@ fn scene_for(
             view,
             generation: app.pane_generation(pane),
             size,
+            freq_right,
             theme: app.state.theme,
             colormap: theme.colormap,
             scene: scene.clone(),

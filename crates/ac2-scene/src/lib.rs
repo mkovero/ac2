@@ -32,6 +32,7 @@ pub mod distortion;
 pub mod families;
 pub mod finding;
 pub mod format;
+pub mod freq_column;
 pub mod grid;
 pub mod health;
 pub mod ir;

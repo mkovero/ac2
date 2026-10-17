@@ -702,3 +702,51 @@ fn a_density_reads_per_hertz_and_a_level_change_starts_over() {
     assert_eq!(h.ring().iter().flatten().count(), 1);
     assert_eq!(h.unit(), Some("dBFS"));
 }
+
+/// A column's reserve gives every frequency picture in it the spectrograph's plot edges:
+/// one frequency at one x in a spectrum, a spectrograph, a transfer and a distortion pane
+/// of one width. Without one, the spectrum keeps its narrow margin.
+#[test]
+fn a_column_reserve_lines_up_the_frequency_axes() {
+    use crate::freq_column::{FreqPlot, natural_right};
+    let size = Viewport {
+        width: 800.0,
+        height: 500.0,
+    };
+    let theme = Theme::dark();
+    let status = Status::default();
+    let h = SpectrographHistory::new(30);
+    let mut sg_view = ViewState::default();
+    sg_view.spectrum.mode = SpectrumMode::Spectrograph;
+    let reserve = natural_right(FreqPlot::Spectrum, &sg_view);
+    assert_eq!(reserve, RIGHT_MARGIN);
+    let spectrum_view = ViewState::default();
+    let alone = crate::spectrum::spectrum_scene(&[], &status, &spectrum_view, &theme, size);
+    assert_eq!(alone.plot.right(), size.width - MARGINS.right);
+
+    let column = |v: ViewState| ViewState {
+        freq_right: reserve,
+        ..v
+    };
+    let sg = scene_of(&h, &column(sg_view));
+    let sp = crate::spectrum::spectrum_scene(&[], &status, &column(spectrum_view), &theme, size);
+    let cache = crate::trace::DisplayCache::default();
+    let all = column(ViewState::default());
+    let tf = crate::tf::transfer_scene(&[], &cache, &status, &all, &theme, size);
+    let dist = crate::distortion::distortion_scene(None, &[], &status, &all, &theme, size);
+    // The spectrograph's own reserve changes nothing on it.
+    assert_eq!(sg.plot.right(), size.width - RIGHT_MARGIN);
+    let tf_right = tf.panes[0].plot.right();
+    for (name, right, x_1k) in [
+        ("spectrum", sp.plot.right(), sp.x_axis.mapping.to_px(1000.0)),
+        ("transfer", tf_right, tf.x_axis.mapping.to_px(1000.0)),
+        (
+            "distortion",
+            dist.plot.right(),
+            dist.x_axis.mapping.to_px(1000.0),
+        ),
+    ] {
+        assert_eq!(right, sg.plot.right(), "{name}");
+        assert_eq!(x_1k, sg.x_axis.mapping.to_px(1000.0), "{name}");
+    }
+}

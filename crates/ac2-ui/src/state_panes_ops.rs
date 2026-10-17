@@ -3,6 +3,7 @@
 
 use super::panes::MIN_RATIO;
 use super::*;
+use ac2_scene::freq_column::{FreqPlot, natural_right};
 
 impl AppState {
     /// Measurement `own` among those pane kind `kind` can show; else the selected one when
@@ -37,8 +38,50 @@ impl AppState {
     }
 
     /// The view state pane `id` is drawn with: the shared one (the frequency axis, read
-    /// across panes) with the pane's own modes and level axis.
+    /// across panes) with the pane's own modes and level axis, its frequency plot as wide
+    /// as its column's ([`Self::column_right`]).
     pub fn view_for(&self, id: PaneId) -> ViewState {
+        ViewState {
+            freq_right: self.column_right(id),
+            ..self.own_view(id)
+        }
+    }
+
+    /// What pane `id` draws on a log-frequency x axis, if anything.
+    fn freq_plot(&self, id: PaneId) -> Option<FreqPlot> {
+        let v = self.layout.view(id)?;
+        match v.kind {
+            PaneKind::Spectrum => Some(FreqPlot::Spectrum),
+            PaneKind::Transfer if !v.shows_ir() => Some(FreqPlot::Transfer),
+            PaneKind::Distortion if v.modes.sweep == ac2_scene::view::SweepMode::Response => {
+                Some(FreqPlot::Distortion)
+            }
+            PaneKind::Transfer | PaneKind::Distortion | PaneKind::Spl => None,
+        }
+    }
+
+    /// The right margin pane `id`'s frequency plot keeps: the widest any frequency pane
+    /// stacked in its column (same left edge and width, within a pixel) needs on its own,
+    /// so one frequency is at one x down the column. A pane alone, or one without a
+    /// frequency axis, keeps its own (0).
+    pub fn column_right(&self, id: PaneId) -> f32 {
+        if self.freq_plot(id).is_none() {
+            return 0.0;
+        }
+        let (w, h) = self.pane_area;
+        let rects = self.pane_rects(PaneRect::new(0.0, 0.0, w, h), 0.0);
+        let Some(&(_, mine)) = rects.iter().find(|(p, _)| *p == id) else {
+            return 0.0;
+        };
+        rects
+            .iter()
+            .filter(|(_, r)| (r.x - mine.x).abs() < 1.0 && (r.w - mine.w).abs() < 1.0)
+            .filter_map(|&(p, _)| Some(natural_right(self.freq_plot(p)?, &self.own_view(p))))
+            .fold(0.0, f32::max)
+    }
+
+    /// [`Self::view_for`] before the column's margin.
+    fn own_view(&self, id: PaneId) -> ViewState {
         let mut v = self.view;
         self.pane_levels(id).apply(&mut v);
         let modes = self.pane_modes(id);

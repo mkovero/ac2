@@ -10,7 +10,8 @@ pub fn spectrum_scene(
     theme: &Theme,
     size: Viewport,
 ) -> SpectrumScene {
-    spectrum_scene_in(traces, status, view, theme, size, MARGINS.right)
+    let right = crate::freq_column::right(MARGINS.right, view);
+    spectrum_scene_in(traces, status, view, theme, size, right)
 }
 
 /// [`spectrum_scene`] with `right` logical pixels right of the plot: room for what a

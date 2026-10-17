@@ -251,6 +251,16 @@ const OVERLAY_MARGIN_RIGHT: f32 = 30.0;
 /// same colour.
 pub const OVERLAY_ALPHA: f32 = 0.6;
 
+/// What the transfer picture keeps right of its plots on its own: room for the overlaid
+/// coherence axis when it is drawn.
+pub(crate) fn right_margin(view: &ViewState) -> f32 {
+    if overlaid(view) {
+        OVERLAY_MARGIN_RIGHT
+    } else {
+        MARGINS.right
+    }
+}
+
 fn overlaid(view: &ViewState) -> bool {
     view.tf.show_coherence
         && view.tf.show_magnitude
@@ -470,11 +480,7 @@ pub fn transfer_scene(
         display_traces(traces, cache, view.tf.phase_reference, &view.tf.coherence);
     let selected = traces.iter().find(|t| t.selected).map(|t| t.key);
     let overlay = overlaid(view);
-    let right = if overlay {
-        OVERLAY_MARGIN_RIGHT
-    } else {
-        MARGINS.right
-    };
+    let right = crate::freq_column::right(right_margin(view), view);
     let plot_x = MARGINS.left;
     let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, plot_x, plot_w, size, theme);
