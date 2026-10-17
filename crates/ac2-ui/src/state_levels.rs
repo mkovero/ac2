@@ -77,6 +77,20 @@ impl Default for PaneLevels {
     }
 }
 
+/// A spectrum pane's level axis was framed automatically, or set by the operator
+/// (`operator`), while the pane showed `shown`: it is left as it is until the pane shows
+/// something else.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct SpectrumHold {
+    shown: SpectrumShown,
+    operator: bool,
+}
+
+/// What a spectrum pane's level axis is framed for: the measurement it shows, by name (the
+/// identity a pane keeps across daemons, so a reconnect or a restarted daemon is no new
+/// measurement), and the scale its curves are in (each scale has a range of its own).
+pub(super) type SpectrumShown = (Option<String>, LevelScale);
+
 impl AppState {
     /// Pane `pane`'s level ranges (a pane never zoomed: the defaults).
     pub fn pane_levels(&self, pane: PaneId) -> PaneLevels {
@@ -104,12 +118,47 @@ impl AppState {
         if let Some(l) = self.pane_levels.get(&from).copied() {
             self.pane_levels.insert(to, l);
         }
+        if let Some(h) = self.spectrum_hold.get(&from).cloned() {
+            self.spectrum_hold.insert(to, h);
+        }
     }
 
     /// Ranges of panes no longer in the layout go.
     pub(super) fn prune_levels(&mut self) {
         let views = &self.layout.views;
         self.pane_levels.retain(|id, _| views.contains_key(id));
+        self.spectrum_hold.retain(|id, _| views.contains_key(id));
+    }
+
+    /// What spectrum pane `pane`'s level axis frames now.
+    fn spectrum_shown(&self, pane: PaneId) -> SpectrumShown {
+        (
+            self.pane_meas(pane).map(|m| m.config.name.clone()),
+            crate::scenes::spectrum_scale(self, pane),
+        )
+    }
+
+    /// The operator set pane `pane`'s level axis: a spectrum pane keeps it until it shows
+    /// another measurement.
+    fn hold_level(&mut self, pane: PaneId) {
+        if self.layout.kind(pane) != PaneKind::Spectrum {
+            return;
+        }
+        let shown = self.spectrum_shown(pane);
+        self.spectrum_hold.insert(
+            pane,
+            SpectrumHold {
+                shown,
+                operator: true,
+            },
+        );
+    }
+
+    /// Every pane's level axis is back at its default by the operator's hand: kept so.
+    pub(super) fn hold_all_levels(&mut self) {
+        for pane in self.layout.root.leaves() {
+            self.hold_level(pane);
+        }
     }
 
     // ----- reducer -----------------------------------------------------------------------
@@ -139,6 +188,7 @@ impl AppState {
     /// Zoom pane `pane`'s level axis by `factor` (> 1 in) about `about` (dB; `None`: the
     /// middle).
     pub(super) fn level_zoom(&mut self, pane: PaneId, about: Option<f64>, factor: f64) {
+        self.hold_level(pane);
         self.change_level(pane, |r| {
             level::zoom(r, about.unwrap_or((r.lo + r.hi) / 2.0), factor)
         });
@@ -146,6 +196,7 @@ impl AppState {
 
     /// Pan pane `pane`'s level axis by `db`.
     pub(super) fn level_pan(&mut self, pane: PaneId, db: f64) {
+        self.hold_level(pane);
         self.change_level(pane, |r| level::pan(r, db));
     }
 
@@ -166,11 +217,13 @@ impl AppState {
             C::LevelReset => {
                 let scale = crate::scenes::spectrum_scale(self, p);
                 if let Some(d) = PaneLevels::default().range(kind, scale) {
+                    self.hold_level(p);
                     self.change_level(p, |_| d);
                 }
             }
             C::LevelFit => match level::fit(self.level_values(p)) {
                 Some(fit) => {
+                    self.hold_level(p);
                     self.change_level(p, |_| fit);
                     self.toast(format!(
                         "{}: level {} … {} dB",
@@ -197,10 +250,46 @@ impl AppState {
         }
     }
 
-    /// A started spectrum / RTA measurement's first frame is in: the spectrum panes' level
-    /// axes frame what they show, as Shift+Home does (frequency left as it is). A level
-    /// range that suits one signal rarely suits the next, so each start begins framed.
-    pub(super) fn fit_started_spectra(&mut self) {
+    /// A frame is in: each spectrum pane showing something it has not framed yet frames it
+    /// on its level axis, as Shift+Home does (frequency left as it is: the axis is shared,
+    /// and another pane's measurement would lose its zoom). A level range kept from another
+    /// measurement or the defaults rarely suits this one, so each first show begins framed;
+    /// a range the operator set stays until the pane shows another measurement.
+    pub(super) fn fit_first_shows(&mut self) {
+        self.rearm_started_spectra();
+        for pane in self.layout.root.leaves() {
+            // A pane waiting for its remembered measurement shows a stand-in.
+            if self.layout.kind(pane) != PaneKind::Spectrum
+                || self.pending_pane_meas.contains_key(&pane)
+            {
+                continue;
+            }
+            let shown = self.spectrum_shown(pane);
+            if self
+                .spectrum_hold
+                .get(&pane)
+                .is_some_and(|h| h.shown == shown)
+            {
+                continue;
+            }
+            let Some(fit) = level::fit(self.level_values(pane)) else {
+                continue;
+            };
+            self.change_level(pane, |_| fit);
+            self.spectrum_hold.insert(
+                pane,
+                SpectrumHold {
+                    shown,
+                    operator: false,
+                },
+            );
+        }
+    }
+
+    /// A started spectrum / RTA measurement's first new frame is in: panes framed
+    /// automatically on its last run frame it again. A new run is often a new signal
+    /// (another source, another gain); a range the operator set stays.
+    fn rearm_started_spectra(&mut self) {
         let arrived: Vec<_> = self
             .spectrum_fit
             .iter()
@@ -213,13 +302,14 @@ impl AppState {
             })
             .map(|(id, _)| *id)
             .collect();
-        if arrived.is_empty() {
-            return;
+        for id in arrived {
+            self.spectrum_fit.remove(&id);
+            let Some(name) = self.meas(id).map(|m| m.config.name.clone()) else {
+                continue;
+            };
+            self.spectrum_hold
+                .retain(|_, h| h.operator || h.shown.0.as_ref() != Some(&name));
         }
-        for id in &arrived {
-            self.spectrum_fit.remove(id);
-        }
-        self.fit_panes(PaneKind::Spectrum);
     }
 
     /// A finished sweep's data is in: the sweep panes' level axes frame its harmonics and

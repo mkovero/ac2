@@ -336,6 +336,9 @@ pub struct AppState {
     pending_compared: BTreeSet<String>,
     /// Each pane's level axis ranges, by pane: a pane not here draws on the defaults.
     pane_levels: BTreeMap<PaneId, PaneLevels>,
+    /// Spectrum panes whose level axis is framed for what they show, or set by the operator:
+    /// a pane not here frames its next frame.
+    spectrum_hold: BTreeMap<PaneId, levels::SpectrumHold>,
     /// No layout was remembered: the one pane takes the kind of the first measurement once
     /// the daemon's state is known.
     pane_auto: bool,
@@ -497,6 +500,7 @@ impl AppState {
             pane_auto: true,
             pending_hidden: BTreeSet::new(),
             pane_levels: BTreeMap::new(),
+            spectrum_hold: BTreeMap::new(),
             pending_compared: BTreeSet::new(),
             hidden_meas: BTreeSet::new(),
             compared_meas: BTreeSet::new(),

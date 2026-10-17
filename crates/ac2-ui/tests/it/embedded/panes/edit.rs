@@ -378,6 +378,76 @@ fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
     Ok(())
 }
 
+/// From an empty daemon: a new spectrum's pane shows its first frames on a fitted level
+/// axis (its labels are the fit's, not the default's), and frames after that leave it.
+#[test]
+fn a_new_spectrum_pane_shows_a_fitted_level_axis() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spectrum".into()));
+    d.key("Enter");
+    d.until(
+        "the spectrum dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spectrum),
+    )?;
+    d.key("Enter");
+    let default = ac2_scene::view::ViewState::default().spectrum.level;
+    let level = |s: &AppState| crate::common::spectrum_level(s);
+    d.until("the spectrum's level axis fitted", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+            && level(s) != default
+    })?;
+    let fit = level(&d.st);
+    // The labels the pane draws span the fitted range.
+    let labels = |s: &AppState| -> Vec<f64> {
+        let pane = ac2_ui::scenes::spectrum(
+            s,
+            crate::common::pane(s, PaneKind::Spectrum),
+            &Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1200.0,
+                height: 600.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        pane.y_axis
+            .labels()
+            .into_iter()
+            .filter_map(|l| l.replace('\u{2212}', "-").parse().ok())
+            .collect()
+    };
+    let shown = labels(&d.st);
+    let (lo, hi) = shown
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| {
+            (a.min(*x), b.max(*x))
+        });
+    assert!(lo >= fit.lo && hi <= fit.hi, "{shown:?} on {fit:?}");
+    assert_ne!((lo, hi), (default.lo, default.hi), "{shown:?}");
+    // Later frames leave the range alone.
+    let seq = |s: &AppState| {
+        let sp = s
+            .measurements()
+            .iter()
+            .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+            .map(|m| m.id)?;
+        ac2_ui::scenes::frame(s, sp, Stream::Spec).map(|f| f.frame.stamp.seq)
+    };
+    let first = seq(&d.st);
+    d.until("more spectrum frames", |s| seq(s) > first)?;
+    assert_eq!(level(&d.st), fit);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 /// Types `text` into the open prompt in place of what it holds.
 fn retype(d: &mut Driver, text: &str) {
     while matches!(&d.st.overlay, Overlay::Prompt(p) if !p.text.is_empty()) {

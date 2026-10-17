@@ -114,38 +114,122 @@ fn fit_frames_low_signals_in_the_spectrum() {
     );
 }
 
-/// Each start of a spectrum fits the level axis on its first frame, as Shift+Home; frames
-/// after it leave the operator's range alone.
+/// What Shift+Home frames for a spectrum frame of `level` on bins at 0, 6, 12, 18 and
+/// 24 kHz: only 6–18 kHz is in 20 Hz – 20 kHz.
+fn fit_of(level: &[f32]) -> Range {
+    ac2_scene::view::level::fit(level[1..4].iter().map(|x| f64::from(*x))).expect("finite levels")
+}
+
+/// A spectrum pane frames its first frame on its level axis, exactly as Shift+Home does;
+/// later frames leave the range alone.
 #[test]
-fn a_started_spectrum_fits_its_level_axis_once() {
+fn a_spectrum_pane_fits_its_first_frame_once() {
     let mut t = T::new();
-    let default = ViewState::default().spectrum.level;
-    // Bins at 0, 6, 12, 18 and 24 kHz: only 6–18 kHz is in 20 Hz – 20 kHz.
+    assert_eq!(
+        t.level(PaneKind::Spectrum),
+        ViewState::default().spectrum.level
+    );
+    let first = vec![0.0, -138.0, -120.0, -95.0, 0.0];
+    spec_frame(&mut t, 2, first.clone());
+    let fit = t.level(PaneKind::Spectrum);
+    assert_eq!(fit, fit_of(&first));
+    spec_frame(&mut t, 2, vec![0.0, -40.0, -30.0, -20.0, 0.0]);
+    assert_eq!(
+        t.level(PaneKind::Spectrum),
+        fit,
+        "a later frame is no first show"
+    );
+
+    // The key on that first frame gives the same range.
+    let mut u = T::new();
+    spec_frame(&mut u, 2, first);
+    u.key("Alt+2");
+    u.key("Ctrl+Home");
+    u.key("Shift+Home");
+    assert_eq!(u.level(PaneKind::Spectrum), fit);
+}
+
+/// A range the operator set (zoom, pan, Ctrl+Home) stays through later frames, a stop and
+/// a start, and a reconnect: only another measurement on the pane frames again.
+#[test]
+fn an_operator_level_range_is_not_refitted() {
+    let mut t = T::new();
     spec_frame(&mut t, 2, vec![0.0, -138.0, -120.0, -95.0, 0.0]);
-    let r = t.level(PaneKind::Spectrum);
-    assert_ne!(r, default);
-    assert!(r.lo <= -138.0 && r.lo >= -150.0, "{r:?}");
-    assert!(r.hi >= -95.0 && r.hi <= -85.0, "{r:?}");
-
-    // The operator's own range stays while the run goes on.
     t.key("Alt+2");
-    t.key("Ctrl+Home");
-    spec_frame(&mut t, 2, vec![0.0, -40.0, -40.0, -40.0, 0.0]);
-    assert_eq!(t.level(PaneKind::Spectrum), default);
+    t.key("Ctrl+I");
+    let zoomed = t.level(PaneKind::Spectrum);
+    spec_frame(&mut t, 2, vec![0.0, -40.0, -30.0, -20.0, 0.0]);
+    assert_eq!(t.level(PaneKind::Spectrum), zoomed);
 
-    // Stopped: nothing fits; started again: the first new frame does.
+    t.conn(with_running(2, false));
+    t.conn(with_running(2, true));
+    spec_frame(&mut t, 2, vec![0.0, -30.0, -35.0, -40.0, 0.0]);
+    assert_eq!(t.level(PaneKind::Spectrum), zoomed, "a new run keeps it");
+
+    t.conn(ConnEvent::Failed {
+        target: "local daemon".into(),
+        error: "gone".into(),
+        retry_in: std::time::Duration::from_secs(1),
+    });
+    t.connect(daemon_state());
+    spec_frame(&mut t, 2, vec![0.0, -10.0, -10.0, -10.0, 0.0]);
+    assert_eq!(t.level(PaneKind::Spectrum), zoomed, "a reconnect keeps it");
+
+    // Ctrl+Home is the operator's range too.
+    t.key("Ctrl+Home");
+    spec_frame(&mut t, 2, vec![0.0, -12.0, -12.0, -12.0, 0.0]);
+    assert_eq!(
+        t.level(PaneKind::Spectrum),
+        ViewState::default().spectrum.level
+    );
+}
+
+/// A pane framed automatically frames a measurement's new run again on its first new
+/// frame (a new run is often a new signal); a stop alone, or the old frame, does not.
+#[test]
+fn a_started_spectrum_refits_an_automatically_framed_pane() {
+    let mut t = T::new();
+    spec_frame(&mut t, 2, vec![0.0, -138.0, -120.0, -95.0, 0.0]);
+    let fit = t.level(PaneKind::Spectrum);
     t.conn(with_running(2, false));
     spec_frame(&mut t, 2, vec![0.0, -40.0, -40.0, -40.0, 0.0]);
-    assert_eq!(t.level(PaneKind::Spectrum), default);
+    assert_eq!(t.level(PaneKind::Spectrum), fit);
     t.conn(with_running(2, true));
     assert_eq!(
         t.level(PaneKind::Spectrum),
-        default,
+        fit,
         "the old frame is no start"
     );
-    spec_frame(&mut t, 2, vec![0.0, -30.0, -35.0, -40.0, 0.0]);
-    let r = t.level(PaneKind::Spectrum);
-    assert!(r.lo <= -40.0 && r.hi >= -30.0 && r.hi <= -20.0, "{r:?}");
+    let new = vec![0.0, -30.0, -35.0, -40.0, 0.0];
+    spec_frame(&mut t, 2, new.clone());
+    assert_eq!(t.level(PaneKind::Spectrum), fit_of(&new));
+}
+
+/// Another measurement picked on a pane is a first show: its first frame frames the pane,
+/// even after the operator zoomed it on the measurement before.
+#[test]
+fn a_measurement_picked_on_a_pane_fits_its_first_frame() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.measurements.push(meas(4, "Sub 2", spectrum()));
+    t.conn(mirror(s));
+    spec_frame(&mut t, 2, vec![0.0, -138.0, -120.0, -95.0, 0.0]);
+    t.key("Alt+2");
+    t.key("Ctrl+I");
+    let sp = t.pane(PaneKind::Spectrum);
+    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+    let zoomed = t.st.level_range(sp);
+    // Its first frame is the measurement's first show here, not the other's frame.
+    spec_frame(&mut t, 2, vec![0.0, -10.0, -10.0, -10.0, 0.0]);
+    assert_eq!(t.st.level_range(sp), zoomed);
+    let other = vec![0.0, -60.0, -50.0, -45.0, 0.0];
+    spec_frame(&mut t, 4, other.clone());
+    assert_eq!(t.st.level_range(sp), Some(fit_of(&other)));
+    // And back: the first one frames again.
+    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    let back = vec![0.0, -90.0, -80.0, -70.0, 0.0];
+    spec_frame(&mut t, 2, back.clone());
+    assert_eq!(t.st.level_range(sp), Some(fit_of(&back)));
 }
 
 /// Each pane has its own level axis: zooming one of two transfer panes split from one
