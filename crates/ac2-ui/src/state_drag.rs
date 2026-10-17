@@ -229,56 +229,64 @@ impl AppState {
         }
     }
 
-    /// `item` drawn compared over pane `p`, as C compares it: only a transfer pane draws
-    /// compared curves, and only a transfer curve can be one.
+    /// `item` drawn compared over pane `p`, as C compares it: a graph pane draws compared
+    /// curves of its kind; an SPL pane has none (meters are compared side by side), and an
+    /// imported trace is no measurement's until moved under one.
     fn drop_compare(&mut self, item: TreeKey, p: PaneId) {
         let Some(name) = self.row_name(item) else {
             return;
         };
         let kind = self.layout.kind(p);
-        if kind != PaneKind::Transfer {
+        if kind == PaneKind::Spl {
             self.warn(pane_edit::compare_refused(
                 &name,
-                CompareRefusal::NotTransferPane {
+                CompareRefusal::MeterPane {
                     pane: self.pane_number(p),
-                    kind: kind.title(),
                 },
             ));
             return;
         }
-        let shown = match item {
+        let no_curve = CompareRefusal::NoCurve { what: kind.what() };
+        let (panes, shown) = match item {
             TreeKey::Trace(id) => {
                 let Ok(t) = self.trace_meta(id) else {
                     return;
                 };
-                if !drawn_in(&t, PaneKind::Transfer) {
-                    self.warn(pane_edit::compare_refused(
-                        &name,
-                        CompareRefusal::NoTransferCurve,
-                    ));
+                let kinds = super::display::trace_compare_kinds(&t);
+                if !kinds.contains(&kind) {
+                    self.warn(pane_edit::compare_refused(&name, no_curve));
+                    return;
+                }
+                if ac2_scene::meas_list::group_of(&t, &self.measurements())
+                    == ac2_proto::model::TraceOwner::Imported
+                {
+                    self.warn(pane_edit::compare_refused(&name, CompareRefusal::Imported));
                     return;
                 }
                 self.compared_traces.insert(id);
-                t.edit.visible
+                (kinds, t.edit.visible)
             }
             TreeKey::Meas(id) | TreeKey::Live(id) | TreeKey::Math(id) => {
                 let Some(m) = self.meas(id).cloned() else {
                     return;
                 };
-                if !m.config.kind.publishes_tf() {
-                    self.warn(pane_edit::compare_refused(
-                        &name,
-                        CompareRefusal::NoTransferCurve,
-                    ));
+                let kinds = super::display::meas_compare_kinds(&m);
+                if !kinds.contains(&kind) {
+                    self.warn(pane_edit::compare_refused(&name, no_curve));
                     return;
                 }
                 self.compared_meas.insert(id);
-                !self.meas_hidden(&m)
+                (kinds, !self.meas_hidden(&m))
             }
             TreeKey::Imported | TreeKey::Rig | TreeKey::Session => return,
         };
         self.layout.set_focus(p);
-        self.toast(ac2_scene::meas_list::compare_toast(&name, true, shown));
+        self.toast(ac2_scene::meas_list::compare_toast(
+            &name,
+            &super::display::compare_panes(&panes),
+            true,
+            shown,
+        ));
     }
 }
 

@@ -30,8 +30,8 @@ mod spl_meters;
 pub(crate) use spectrum_pane::with_spectrum;
 pub use spectrum_pane::{spectrograph, spectrum, spectrum_scale};
 pub use spl_meters::{
-    LocalZone, StripPlace, band_leq, has_band_meter, has_spl, leq, leq_keyed, leq_meter, meter_leq,
-    spl, spl_pane,
+    LocalZone, StripPlace, band_leq, has_band_meter, leq, leq_keyed, leq_meter, meter_leq, spl,
+    spl_pane, spl_placeholder,
 };
 
 /// Inputs that come from the clock, passed in so the assembly stays testable.
@@ -264,7 +264,8 @@ struct LiveTf<'a> {
 
 /// The transfer view: the group of the measurement the pane shows — its live curve, the
 /// math channels made on it, its shown stored traces — and the curves compared (C), tagged
-/// so. Other groups (Imported too) wait until theirs is the pane's measurement.
+/// so. Other groups wait until theirs is the pane's measurement; Imported until moved under
+/// a measurement.
 pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: Now) -> TfScene {
     let grids = st.data.as_ref().map(|d| &d.grids);
     let colours = st.curve_colours(theme);
@@ -274,7 +275,8 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
         // The pane's group (its measurement and the math channels made on it), and what is
         // compared. A hidden measurement keeps its colour: showing it again brings back the
         // same curve.
-        if !(st.live_on_transfer_pane(m, pane_shows) || st.live_compared_on_transfer(m, pane_shows))
+        if !(st.live_on_pane(PaneKind::Transfer, m, pane_shows)
+            || st.live_compared_on(PaneKind::Transfer, m, pane_shows))
         {
             continue;
         }
@@ -299,8 +301,8 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
         .traces
         .values()
         .filter(|(t, _)| {
-            st.on_transfer_pane(&t.meta, pane_shows)
-                || st.trace_compared_on_transfer(&t.meta, pane_shows)
+            st.on_pane(PaneKind::Transfer, &t.meta, pane_shows)
+                || st.trace_compared_on(PaneKind::Transfer, &t.meta, pane_shows)
         })
         .map(|(t, g)| (t, columns(g)))
         .collect();
@@ -348,7 +350,7 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
             Polarity::Normal
         };
         t.note = math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag());
-        t.compared = st.live_compared_on_transfer(l.meas, pane_shows);
+        t.compared = st.live_compared_on(PaneKind::Transfer, l.meas, pane_shows);
         // A ratio or cascade of operands without a shared time base has each operand's
         // own alignment in its phase, not a time base of this session.
         if f.meta
@@ -364,7 +366,7 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
         ranks.push(rank(ac2_scene::meas_list::group_of(&data.meta, &ms)));
         let mut t = TfTrace::stored(data, &cols.freqs, colours.trace(data.meta.id));
         t.selected = st.selected_trace == Some(data.meta.id);
-        t.compared = st.trace_compared_on_transfer(&data.meta, pane_shows);
+        t.compared = st.trace_compared_on(PaneKind::Transfer, &data.meta, pane_shows);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (Some(epoch), Some(cur)) = (
             data.meta.source.shared_epoch(),
@@ -530,11 +532,12 @@ impl SweepPane {
     }
 }
 
-/// The sweep pane: the shown sweep trace's distortion, its impulse response or its room
-/// parameters.
+/// The sweep pane: the distortion, impulse response or room parameters of the run of its
+/// sweep measurement it shows ([`AppState::pane_sweep`]); the distortion view draws the
+/// runs compared (C) over it. Never another measurement's run otherwise.
 pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: Now) -> SweepPane {
     let status = status(st, &[], None, now);
-    let shown = st.shown_sweep();
+    let shown = st.pane_sweep(pane);
     let pv = st.view_for(pane);
     if st.pane_modes(pane).sweep == ac2_scene::view::SweepMode::Room {
         let room = shown.and_then(|(d, _)| d.sweep.as_ref()?.room.as_ref());
@@ -565,5 +568,18 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
         freqs: &freqs,
         color: colours.trace(d.meta.id),
     });
-    SweepPane::Distortion(Box::new(distortion_scene(view, &status, &pv, theme, size)))
+    let others = st.compared_sweeps(pane);
+    let other_freqs: Vec<Vec<f64>> = others.iter().map(|(_, g)| column_frequencies(g)).collect();
+    let compared: Vec<SweepView<'_>> = others
+        .iter()
+        .zip(&other_freqs)
+        .map(|((d, _), freqs)| SweepView {
+            data: d,
+            freqs,
+            color: colours.trace(d.meta.id),
+        })
+        .collect();
+    SweepPane::Distortion(Box::new(distortion_scene(
+        view, &compared, &status, &pv, theme, size,
+    )))
 }

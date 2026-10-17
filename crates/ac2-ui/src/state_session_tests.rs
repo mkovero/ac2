@@ -62,7 +62,10 @@ fn empty_hint_yields_to_stored_traces() {
     s.measurements = vec![meas(1, "Main L", transfer())];
     s.traces = vec![meta.clone()];
     t.conn(mirror(s));
-    let place = |t: &T| t.st.empty_hint(&t.keys).map(|h| h.place);
+    let place = |t: &T| {
+        t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
+            .map(|h| h.place)
+    };
     // Listed, but its data has not arrived: nothing drawn yet.
     assert_eq!(place(&t), Some(HintPlace::Centre));
     let grid = Arc::new(GridDef::Log {
@@ -81,8 +84,10 @@ fn empty_hint_yields_to_stored_traces() {
         })
     };
     t.conn(ConnEvent::Trace(data(&meta), grid.clone()));
-    assert!(t.st.transfer_shows_stored());
-    let hint = t.st.empty_hint(&t.keys).expect("hint");
+    assert!(t.st.pane_shows_stored(t.pane(PaneKind::Transfer)));
+    let hint =
+        t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
+            .expect("hint");
     assert_eq!(hint.place, HintPlace::Title);
     assert!(
         hint.text.starts_with("No audio session — "),
@@ -103,13 +108,15 @@ fn empty_hint_yields_to_stored_traces() {
 #[test]
 fn empty_hints_guide_to_a_session_then_a_measurement() {
     let mut t = T::disconnected();
-    assert_eq!(t.st.empty_hint(&t.keys), None);
+    assert_eq!(t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys), None);
     connected_to(&mut t, "local daemon");
     // Connected but not synced: nothing to say yet.
-    assert_eq!(t.st.empty_hint(&t.keys), None);
+    assert_eq!(t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys), None);
     t.conn(mirror(no_session_state()));
     assert_eq!(
-        t.st.empty_hint(&t.keys).map(|h| h.text).as_deref(),
+        t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
+            .map(|h| h.text)
+            .as_deref(),
         Some(format!(
             "No audio session — press {} (or {} → Open audio session)",
             open_key(),
@@ -120,7 +127,10 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     let mut s = daemon_state();
     s.measurements.clear();
     t.conn(mirror(s));
-    let hint = t.st.empty_hint(&t.keys).map(|h| h.text).unwrap_or_default();
+    let hint =
+        t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
+            .map(|h| h.text)
+            .unwrap_or_default();
     assert!(
         hint.starts_with(&format!(
             "No measurements — {} → New transfer measurement…",
@@ -129,12 +139,14 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
         "{hint}"
     );
     t.conn(mirror(daemon_state()));
-    assert_eq!(t.st.empty_hint(&t.keys), None);
+    assert_eq!(t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys), None);
     // The hint follows the keymap: palette only when Shift+O is unbound.
     let keys = Keymap::from_toml("[global]\nsession_open = []").expect("keys");
     t.conn(mirror(no_session_state()));
     assert_eq!(
-        t.st.empty_hint(&keys).map(|h| h.text).as_deref(),
+        t.st.empty_hint(t.pane(PaneKind::Transfer), &keys)
+            .map(|h| h.text)
+            .as_deref(),
         Some(format!(
             "No audio session — {} → Open audio session",
             palette_key()

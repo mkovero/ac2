@@ -47,21 +47,29 @@ pub fn drop_label(item: &str, spot: DropSpot) -> String {
 /// Why a row dropped with Shift is not compared.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompareRefusal {
-    /// Pane `pane` is of kind `kind` (its title): compare draws over transfer panes only.
-    NotTransferPane { pane: usize, kind: &'static str },
-    /// The item has no transfer curve (an SPL meter, a spectrum).
-    NoTransferCurve,
+    /// Pane `pane` is an SPL pane: a meter is a number, not a curve to overlay; two meters
+    /// are compared side by side, each on a pane of its own.
+    MeterPane { pane: usize },
+    /// The item has no curve of the kind the pane draws (`what`: `transfer`, `spectrum or
+    /// RTA`, `sweep`).
+    NoCurve { what: &'static str },
+    /// The item is a stored trace under Imported: it belongs to no measurement, so no pane
+    /// draws it until it is moved under one.
+    Imported,
 }
 
-/// The toast of a refused Shift-drop: `FOH SPL not compared: pane 2 shows SPL; compare
-/// draws over transfer panes only`.
+/// The toast of a refused Shift-drop: `FOH SPL not compared: pane 2 shows SPL; meters are
+/// compared side by side — drop it without Shift on a pane of its own`.
 pub fn compare_refused(item: &str, why: CompareRefusal) -> String {
     match why {
-        CompareRefusal::NotTransferPane { pane, kind } => format!(
-            "{item} not compared: pane {pane} shows {kind}; compare draws over transfer panes only"
+        CompareRefusal::MeterPane { pane } => format!(
+            "{item} not compared: pane {pane} shows SPL; meters are compared side by side — drop it without Shift on a pane of its own"
         ),
-        CompareRefusal::NoTransferCurve => {
-            format!("{item} not compared: it has no transfer curve to draw over the pane")
+        CompareRefusal::NoCurve { what } => {
+            format!("{item} not compared: it has no {what} curve to draw over the pane")
+        }
+        CompareRefusal::Imported => {
+            format!("{item} not compared: it is under Imported — Move to measurement… first")
         }
     }
 }
@@ -205,18 +213,16 @@ mod tests {
     #[test]
     fn a_refused_compare_says_why() {
         assert_eq!(
-            compare_refused(
-                "FOH SPL",
-                CompareRefusal::NotTransferPane {
-                    pane: 2,
-                    kind: "SPL"
-                }
-            ),
-            "FOH SPL not compared: pane 2 shows SPL; compare draws over transfer panes only"
+            compare_refused("FOH SPL", CompareRefusal::MeterPane { pane: 2 }),
+            "FOH SPL not compared: pane 2 shows SPL; meters are compared side by side — drop it without Shift on a pane of its own"
         );
         assert_eq!(
-            compare_refused("FOH SPL", CompareRefusal::NoTransferCurve),
+            compare_refused("FOH SPL", CompareRefusal::NoCurve { what: "transfer" }),
             "FOH SPL not compared: it has no transfer curve to draw over the pane"
+        );
+        assert_eq!(
+            compare_refused("1083 94cm", CompareRefusal::Imported),
+            "1083 94cm not compared: it is under Imported — Move to measurement… first"
         );
     }
 }

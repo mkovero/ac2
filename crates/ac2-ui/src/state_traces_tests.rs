@@ -444,16 +444,15 @@ fn trace_keys_act_on_the_selected_trace() {
 #[test]
 fn the_sweep_pane_follows_the_selection_and_selects() {
     let mut t = T::new();
-    t.conn(with_traces(vec![
-        stored(10, Some(1), 2),
-        sweep_meta(14),
-        sweep_meta(15),
-    ]));
+    // The capture is Main L's: the tree (and V) list it before the sweep's runs.
+    let mut capture = stored(10, Some(1), 2);
+    capture.edit.owner = TraceOwner::Meas { meas: MeasId(1) };
+    t.conn(with_sweeps(vec![capture, sweep_meta(14), sweep_meta(15)]));
     for id in [14, 15] {
         let (d, g) = sweep_data(id);
         t.conn(ConnEvent::Trace(d, g));
     }
-    let shown = |t: &T| t.st.shown_sweep().map(|(d, _)| d.meta.id.0);
+    let shown = |t: &T| t.st.kind_sweep().map(|(d, _)| d.meta.id.0);
     // Nothing chosen: the newest.
     assert_eq!(shown(&t), Some(15));
     // V in the transfer pane: slot 1, then the first sweep, which the sweep pane shows.

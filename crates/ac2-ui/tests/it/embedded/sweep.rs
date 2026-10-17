@@ -63,9 +63,9 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
     d.until("the sweep stored and shown", |s| {
         s.sweep.run.is_none()
             && s.layout.focus_kind() == PaneKind::Distortion
-            && s.shown_sweep().is_some()
+            && s.kind_sweep().is_some()
     })?;
-    let (data, grid) = d.st.shown_sweep().ok_or("no sweep")?;
+    let (data, grid) = d.st.kind_sweep().ok_or("no sweep")?;
     let freqs = ac2_scene::grid::column_frequencies(grid);
     let s = data.sweep.as_ref().ok_or("no sweep data")?;
     let m = s.info.floor_margin.0;
@@ -227,7 +227,7 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     d.until("the sweep stored and shown", |s| {
         s.sweep.run.is_none()
             && s.layout.focus_kind() == PaneKind::Distortion
-            && s.shown_sweep().is_some()
+            && s.kind_sweep().is_some()
     })?;
     d.key("Shift+I");
     assert_eq!(
@@ -457,7 +457,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     let first = sweep_from_the_dialog(&mut d)?;
     let second = run_again(&mut d)?;
     assert_ne!(first, second);
-    let shown = |s: &AppState| s.shown_sweep().map(|(t, _)| t.meta.id);
+    let shown = |s: &AppState| s.kind_sweep().map(|(t, _)| t.meta.id);
     let name = |s: &AppState, id| {
         s.trace_list()
             .iter()

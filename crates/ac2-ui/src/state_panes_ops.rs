@@ -476,15 +476,12 @@ impl AppState {
             if !drawn_in(t, kind) {
                 return false;
             }
-            let drawn = match kind {
-                PaneKind::Transfer => {
-                    self.on_transfer_pane(t, Some(shown))
-                        || self.trace_compared_on_transfer(t, Some(shown))
-                }
-                // The spectrum pane draws every shown stored spectrum and band set.
-                PaneKind::Spectrum => t.edit.visible,
-                PaneKind::Distortion | PaneKind::Spl => false,
-            };
+            let drawn = self.on_pane(kind, t, Some(shown))
+                || self.trace_compared_on(kind, t, Some(shown))
+                || self
+                    .compared_sweeps(p)
+                    .iter()
+                    .any(|(d, _)| d.meta.id == t.id);
             return drawn || ac2_scene::meas_list::group_of(t, &ms) == group;
         }
         self.selected

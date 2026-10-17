@@ -255,7 +255,7 @@ impl T {
         let pane = self.st.layout.lead(kind).unwrap_or(self.st.layout.focus);
         self.st
             .pane_levels(pane)
-            .range(kind, crate::scenes::spectrum_scale(&self.st))
+            .range(kind, crate::scenes::spectrum_scale(&self.st, pane))
             .expect("level axis")
     }
 
@@ -410,6 +410,37 @@ fn with_traces(traces: Vec<TraceMeta>) -> ConnEvent {
     let mut s = daemon_state();
     s.traces = traces;
     mirror(s)
+}
+
+/// `with_traces` with the sweep measurement that owns the `sweep_meta` runs listed too.
+fn with_sweeps(traces: Vec<TraceMeta>) -> ConnEvent {
+    let mut s = daemon_state();
+    s.measurements.push(sweep_measurement());
+    s.traces = traces;
+    mirror(s)
+}
+
+/// The sweep measurement the dialog makes in the sweep tests, as the mirror lists it: the
+/// owner of every `sweep_meta` run.
+fn sweep_measurement() -> Measurement {
+    meas(
+        5,
+        "Sweep 1",
+        MeasKind::Sweep {
+            config: SweepConfig {
+                reference_input: 0,
+                measurement_input: 1,
+                outputs: vec![0],
+                level: Dbfs(-50.0),
+                sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
+                repeats: 1,
+                gate: None,
+                tail: Some(Seconds(1.0)),
+                lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
+                resolution: ac2_proto::model::Resolution::FortyEighth,
+            },
+        },
+    )
 }
 
 impl T {

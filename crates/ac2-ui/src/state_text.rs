@@ -162,14 +162,10 @@ pub(super) fn drawn_in(t: &TraceMeta, p: PaneKind) -> bool {
     }
 }
 
-/// A shown transfer-like stored curve: what the transfer pane draws when it is also in the
-/// pane's group ([`super::AppState::on_transfer_pane`]).
-pub fn transfer_kind_shown(t: &TraceMeta) -> bool {
-    t.edit.visible
-        && matches!(
-            t.kind,
-            TraceKind::Transfer | TraceKind::Target | TraceKind::Sweep
-        )
+/// A shown stored curve of a kind pane `p` draws: what a pane of that kind draws when it is
+/// also of the pane's group ([`super::AppState::on_pane`]).
+pub fn kind_shown(t: &TraceMeta, p: PaneKind) -> bool {
+    t.edit.visible && drawn_in(t, p)
 }
 
 pub fn open_session_hint(keymap: &Keymap) -> String {

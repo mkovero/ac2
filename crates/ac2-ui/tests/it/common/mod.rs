@@ -275,6 +275,24 @@ fn measurement(
     }
 }
 
+/// A transfer measurement `Main L` (no frames) committed to `fake`, every stored trace filed
+/// under it: imported curves draw on no pane until they have a measurement.
+pub fn file_traces_under_main_l(fake: &FakeDaemon) {
+    let mut s = fake.lock();
+    s.commit(Change::Measurement(Patch::Set(measurement(
+        1,
+        "Main L",
+        transfer(1),
+        None,
+        None,
+    ))));
+    let traces: Vec<TraceMeta> = s.state.traces.clone();
+    for mut t in traces {
+        t.edit.owner = TraceOwner::Meas { meas: MeasId(1) };
+        s.commit(Change::Trace(Patch::Set(t)));
+    }
+}
+
 fn transfer(meas_in: u16) -> MeasKind {
     MeasKind::Transfer {
         config: TransferConfig {

@@ -79,10 +79,15 @@ const ENTRY_GAP: f32 = 16.0;
 pub(super) const LEGEND_SHARE: f32 = 0.25;
 pub(super) const LEGEND_MAX_ROWS: usize = 4;
 
-/// Legend line of one curve: its name and what sets it apart — `stopped`, `STALE 3.2 s`,
-/// `offset +3.0 dB` (a spread is never read as a level difference).
+/// Legend line of one curve: its name and what sets it apart — `cmp`, `stopped`,
+/// `STALE 3.2 s`, `offset +3.0 dB` (a spread is never read as a level difference).
 pub(super) fn legend_entry(t: &SpectrumTrace<'_>) -> LegendEntry {
-    let mut tags = Vec::new();
+    // A compared curve is not of the pane's group: said first, as the transfer legend does.
+    let mut tags: Vec<String> = t
+        .compared
+        .then(|| crate::trace::COMPARED.to_owned())
+        .into_iter()
+        .collect();
     if t.offset_db != 0.0 {
         tags.push(format!("offset {}", format::db_readout(t.offset_db)));
     }

@@ -169,25 +169,29 @@ impl AppState {
             trace_label(t),
             if edit.visible { "shown" } else { "hidden" }
         );
-        // The transfer pane draws one group: a trace shown outside it says where it is.
+        // A pane draws one group: a trace shown outside it says where it is.
         let shown = TraceMeta {
             edit: edit.clone(),
             ..t.clone()
         };
+        let pane = [PaneKind::Transfer, PaneKind::Spectrum]
+            .into_iter()
+            .find(|k| drawn_in(&shown, *k));
         if edit.visible
-            && drawn_in(&shown, PaneKind::Transfer)
-            && !self.on_transfer_pane(&shown, self.kind_meas(PaneKind::Transfer))
-            && !self.compared_traces.contains(&shown.id)
+            && let Some(kind) = pane
+            && !self.on_pane(kind, &shown, self.kind_meas(kind))
+            && !self.trace_compared_on(kind, &shown, self.kind_meas(kind))
         {
             let ms = self.measurements();
             what.push_str(&match ac2_scene::meas_list::group_of(&shown, &ms) {
                 TraceOwner::Meas { meas } => format!(
-                    " · on the transfer pane with {}",
+                    " · on the {} pane with {}",
+                    kind.what(),
                     self.meas(meas)
                         .map_or("its measurement", |m| &m.config.name)
                 ),
                 TraceOwner::Imported => {
-                    " · under Imported: compare it (C) or Move to measurement… to see it".to_owned()
+                    " · under Imported: Move to measurement… to see it".to_owned()
                 }
             });
         }
@@ -508,7 +512,7 @@ impl AppState {
                 }
                 self.level_key(c)
             }
-            C::Compare => self.toggle_compare(),
+            C::Compare => self.toggle_compare(keymap),
             C::ClearCompare => self.clear_compare(),
             C::ToggleCursor => {
                 let t = self.nav.target;

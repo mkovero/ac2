@@ -250,6 +250,7 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
             freqs: &f,
             color: Color::from_rgba8([1, 2, 3, 255]),
         }),
+        &[],
         &status(),
         &view,
         &Theme::dark(),
@@ -323,6 +324,7 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
             freqs: &f,
             color: Color::from_rgba8([1, 2, 3, 255]),
         }),
+        &[],
         &status(),
         &view,
         &Theme::dark(),
@@ -393,6 +395,7 @@ fn caption_and_legend_never_overlap_in_small_panes() {
                     freqs: &f,
                     color: Color::from_rgba8([1, 2, 3, 255]),
                 }),
+                &[],
                 &status(),
                 &view,
                 &Theme::dark(),
@@ -465,6 +468,7 @@ fn lone_valid_points_are_short_lines_and_noise_is_dashed() {
             freqs: &f,
             color: Color::from_rgba8([1, 2, 3, 255]),
         }),
+        &[],
         &status(),
         &ViewState::default(),
         &Theme::dark(),
@@ -526,7 +530,14 @@ fn runs_join_neighbours_and_widen_lone_points() {
 
 #[test]
 fn without_a_sweep_the_view_says_so() {
-    let sc = distortion_scene(None, &status(), &ViewState::default(), &Theme::dark(), SIZE);
+    let sc = distortion_scene(
+        None,
+        &[],
+        &status(),
+        &ViewState::default(),
+        &Theme::dark(),
+        SIZE,
+    );
     assert_eq!(sc.note.as_deref(), Some("no sweep result"));
     assert!(sc.legend.is_empty());
 }
@@ -632,6 +643,7 @@ fn unresolved_ranges_mark_both_panes() {
                 freqs: &f,
                 color: Color::from_rgba8([1, 2, 3, 255]),
             }),
+            &[],
             &status(),
             view,
             &theme,
@@ -719,6 +731,7 @@ fn the_references_own_orders_are_drawn_dotted_and_hide() {
                 freqs: &f,
                 color: Color::from_rgba8([1, 2, 3, 255]),
             }),
+            &[],
             &status(),
             view,
             &Theme::dark(),
@@ -794,6 +807,7 @@ fn a_sweep_without_the_references_own_orders_draws_no_reference() {
             freqs: &f,
             color: Color::from_rgba8([1, 2, 3, 255]),
         }),
+        &[],
         &status(),
         &ViewState::default(),
         &Theme::dark(),

@@ -365,7 +365,14 @@ fn a_wrong_kind_shift_drop_is_refused() {
     drop_on(&mut t, TreeKey::Meas(MeasId(5)), spec, None, true);
     assert_eq!(
         t.last_toast(),
-        "Main R not compared: pane 2 shows Spectrum / RTA; compare draws over transfer panes only"
+        "Main R not compared: it has no spectrum or RTA curve to draw over the pane"
+    );
+    assert_eq!(t.st.pane_snap(), before);
+    let spl = pane_n(&t, 4);
+    drop_on(&mut t, TreeKey::Meas(MeasId(4)), spl, None, true);
+    assert_eq!(
+        t.last_toast(),
+        "FOH SPL not compared: pane 4 shows SPL; meters are compared side by side — drop it without Shift on a pane of its own"
     );
     assert_eq!(t.st.pane_snap(), before);
     assert_eq!(t.st.history.undo_len(), 0);

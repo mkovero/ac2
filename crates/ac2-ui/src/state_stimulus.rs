@@ -263,7 +263,7 @@ impl AppState {
             .filter(is)
             .or_else(|| self.selected_trace_meta().and_then(owner_of).filter(is))
             .or_else(|| {
-                self.shown_sweep()
+                self.kind_sweep()
                     .and_then(|(t, _)| owner_of(&t.meta))
                     .filter(is)
             })
@@ -593,45 +593,84 @@ impl AppState {
             .collect()
     }
 
-    /// The sweep trace the distortion pane shows: the selected trace when it is a sweep,
-    /// else the newest run of the selected sweep measurement, else the sweep selected last,
-    /// else the newest.
-    pub fn shown_sweep(&self) -> Option<(&TraceData, &GridDef)> {
-        let all = self.sweep_traces();
-        let find = |id: TraceId| all.iter().find(|(t, _)| t.meta.id == id).copied();
-        let newest_of = |m: &Measurement| {
-            let owner = ac2_proto::model::TraceOwner::Meas { meas: m.id };
-            all.iter()
-                .filter(|(t, _)| t.meta.edit.owner == owner)
-                .max_by_key(|(t, _)| t.meta.id)
-                .copied()
+    /// The runs of the group a sweep pane showing `shown` draws (its sweep measurement's),
+    /// oldest first.
+    fn group_sweeps(&self, shown: Option<&Measurement>) -> Vec<(&TraceData, &GridDef)> {
+        let Some(group) = self.group_of_shown(shown) else {
+            return Vec::new();
         };
+        let ms = self.measurements();
+        let mine = ac2_proto::model::TraceOwner::Meas { meas: group };
+        self.sweep_traces()
+            .into_iter()
+            .filter(|(t, _)| ac2_scene::meas_list::group_of(&t.meta, &ms) == mine)
+            .collect()
+    }
+
+    /// The run sweep pane `pane` shows, of its sweep measurement's group only: the selected
+    /// trace when it is one of them, else the run of theirs selected last, else their
+    /// newest. Never another measurement's run: that one is drawn only compared.
+    pub fn pane_sweep(&self, pane: PaneId) -> Option<(&TraceData, &GridDef)> {
+        self.sweep_shown_by(self.pane_meas(pane))
+    }
+
+    /// The run a sweep pane showing `shown` draws ([`Self::pane_sweep`]).
+    fn sweep_shown_by(&self, shown: Option<&Measurement>) -> Option<(&TraceData, &GridDef)> {
+        let runs = self.group_sweeps(shown);
+        let find = |id: TraceId| runs.iter().find(|(t, _)| t.meta.id == id).copied();
         self.selected_trace
             .and_then(find)
-            .or_else(|| {
-                self.selected_meas()
-                    .filter(|m| matches!(m.config.kind, MeasKind::Sweep { .. }))
-                    .and_then(newest_of)
-            })
             .or_else(|| self.sweep.shown.and_then(find))
-            .or_else(|| all.last().copied())
+            .or_else(|| runs.iter().max_by_key(|(t, _)| t.meta.id).copied())
+    }
+
+    /// The run "the sweep pane" shows, for what is about the kind rather than one pane (the
+    /// sweep IR keys, Space's sweep): the focused sweep pane's, else the one focused last;
+    /// with none on screen, what one would show.
+    pub fn kind_sweep(&self) -> Option<(&TraceData, &GridDef)> {
+        self.sweep_shown_by(self.kind_meas(PaneKind::Distortion))
+    }
+
+    /// The runs sweep pane `pane` draws over its own for compare (C), oldest first: compared
+    /// runs filed under a measurement other than the one it shows. An imported run is no
+    /// measurement's: it is not drawn until moved under one.
+    pub fn compared_sweeps(&self, pane: PaneId) -> Vec<(&TraceData, &GridDef)> {
+        if self.layout.kind(pane) != PaneKind::Distortion {
+            return Vec::new();
+        }
+        let own = self.pane_sweep(pane).map(|(t, _)| t.meta.id);
+        let ms = self.measurements();
+        self.sweep_traces()
+            .into_iter()
+            .filter(|(t, _)| {
+                self.compared_traces.contains(&t.meta.id)
+                    && Some(t.meta.id) != own
+                    && ac2_scene::meas_list::group_of(&t.meta, &ms)
+                        != ac2_proto::model::TraceOwner::Imported
+            })
+            .collect()
     }
 
     /// V / Shift+V on the sweep pane: the next / previous stored sweep run, selected (the
     /// transfer pane and the trace keys follow it).
     pub(super) fn cycle_sweep(&mut self, d: i32) {
-        let ids: Vec<TraceId> = self.sweep_traces().iter().map(|(t, _)| t.meta.id).collect();
+        let pane = self.layout.focus;
+        let ids: Vec<TraceId> = self
+            .group_sweeps(self.pane_meas(pane))
+            .iter()
+            .map(|(t, _)| t.meta.id)
+            .collect();
         if ids.is_empty() {
             self.warn(ac2_scene::room::no_sweep_results(&self.new_sweep_key()));
             return;
         }
-        let cur = self.shown_sweep().map(|(t, _)| t.meta.id);
+        let cur = self.pane_sweep(pane).map(|(t, _)| t.meta.id);
         let i = cur
             .and_then(|c| ids.iter().position(|x| *x == c))
             .unwrap_or(0) as i32;
         let id = ids[(i + d).rem_euclid(ids.len() as i32) as usize];
         self.select_trace(Some(id));
-        if let Some((t, _)) = self.shown_sweep() {
+        if let Some((t, _)) = self.pane_sweep(pane) {
             let name = trace_label(&t.meta);
             self.toast(format!("{name} selected"));
         }

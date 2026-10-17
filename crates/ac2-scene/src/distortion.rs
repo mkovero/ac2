@@ -506,9 +506,78 @@ fn runs(xs: &[f32], ys: &[f32]) -> Vec<[f32; 2]> {
     out
 }
 
+/// A compared run's legend name: `Run 2 · cmp`.
+pub fn compared_name(name: &str) -> String {
+    format!("{name} · {}", crate::trace::COMPARED)
+}
+
+/// A compared run (C) over the pane's own: its fundamental in the upper pane, and its
+/// orders and THD where they are valid, all in the run's own colour — the order colours
+/// belong to the pane's run, and a compared run's floors would be clutter read as levels.
+#[allow(clippy::too_many_arguments)]
+fn draw_compared(
+    c: &mut Canvas,
+    v: &SweepView<'_>,
+    s: &SweepData,
+    plot: Rect,
+    fundamental: Rect,
+    xm: &axis::Mapping,
+    ym: &axis::Mapping,
+    fm: &axis::Mapping,
+    unit: DistortionUnit,
+    theme: &Theme,
+) {
+    let margin = s.info.floor_margin.0;
+    let cols = visible_columns(v.freqs, xm.range.lo, xm.range.hi);
+    let xs: Vec<f32> = v.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
+    let curves = s
+        .harmonics
+        .iter()
+        .map(|h| (h.order, &h.curve))
+        .chain(std::iter::once((0u8, &s.thd)));
+    for (order, curve) in curves {
+        let ys: Vec<f32> = cols
+            .clone()
+            .map(|i| match reading(curve, i, margin) {
+                Reading::Level(l) => ym.to_px(y_value(l, unit)),
+                _ => f32::NAN,
+            })
+            .collect();
+        let points = runs(&xs, &ys);
+        if !points.is_empty() {
+            let width = if order == 0 { 1.2 } else { 0.8 } * theme.trace_width;
+            c.data.polylines.push(Polyline {
+                points,
+                alpha: vec![],
+                stroke: Stroke::solid(v.color.with_alpha(0.8), width),
+                clip: Some(plot),
+            });
+        }
+    }
+    let ys: Vec<f32> = cols
+        .map(|i| {
+            v.data
+                .mag_db
+                .get(i)
+                .map_or(f32::NAN, |m| fm.to_px(f64::from(*m)))
+        })
+        .collect();
+    let (points, _) = gapped(&xs, &ys, None, |_, _| false);
+    if !points.is_empty() {
+        c.data.polylines.push(Polyline {
+            points,
+            alpha: vec![],
+            stroke: Stroke::solid(v.color, theme.trace_width),
+            clip: Some(fundamental),
+        });
+    }
+}
+
 /// The distortion view of `t`: the fundamental's magnitude above, the distortion below.
+/// `compared` runs (C) are drawn over it in their own colours, tagged `cmp` in the legend.
 pub fn distortion_scene(
     t: Option<SweepView<'_>>,
+    compared: &[SweepView<'_>],
     status: &Status,
     view: &ViewState,
     theme: &Theme,
@@ -533,15 +602,19 @@ pub fn distortion_scene(
     let sweep = t.and_then(|t| t.data.sweep.as_ref().map(|s| (t, s)));
     let (unresolved_response, unresolved_harmonics) = unresolved_marks(sweep, view);
 
-    // Fundamental: its own range, 40 dB under its maximum.
-    let fund_max = sweep.map_or(f64::NAN, |(t, _)| {
-        t.data
-            .mag_db
-            .iter()
-            .map(|v| f64::from(*v))
-            .filter(|v| v.is_finite())
-            .fold(f64::NEG_INFINITY, f64::max)
-    });
+    let compared: Vec<(&SweepView<'_>, &SweepData)> = compared
+        .iter()
+        .filter_map(|v| Some((v, v.data.sweep.as_ref()?)))
+        .collect();
+    // Fundamental: its own range, 40 dB under its maximum (the pane's run's, else the
+    // highest compared one's).
+    let fund_max = sweep
+        .map(|(t, _)| t)
+        .into_iter()
+        .chain(compared.iter().map(|(v, _)| **v))
+        .flat_map(|t| t.data.mag_db.iter().map(|v| f64::from(*v)))
+        .filter(|v| v.is_finite())
+        .fold(f64::NAN, f64::max);
     let fund_range = if fund_max.is_finite() {
         let hi = (fund_max / 5.0).ceil() * 5.0 + 5.0;
         Range::new(hi - 45.0, hi)
@@ -624,6 +697,21 @@ pub fn distortion_scene(
         None => Some("no sweep result".to_string()),
         Some(_) => None,
     };
+    // Under the pane's own run, so that one stays on top.
+    for (v, s) in &compared {
+        draw_compared(
+            &mut c,
+            v,
+            s,
+            plot,
+            fundamental,
+            &xm,
+            &ym,
+            &y_fundamental.mapping,
+            unit,
+            theme,
+        );
+    }
     if let Some((t, s)) = sweep {
         let lines = info_lines(t.data, s);
         info = lines[0].clone();
@@ -741,6 +829,11 @@ pub fn distortion_scene(
                 mark: LegendMark::Name,
             });
         }
+        legend.extend(compared.iter().map(|(v, _)| LegendEntry {
+            name: compared_name(&v.data.meta.edit.name),
+            color: v.color,
+            mark: LegendMark::Name,
+        }));
         if !reference.is_empty() {
             legend.push(LegendEntry {
                 name: REFERENCE.to_string(),
@@ -780,6 +873,13 @@ pub fn distortion_scene(
         }
     }
 
+    if sweep.is_none() {
+        legend.extend(compared.iter().map(|(v, _)| LegendEntry {
+            name: compared_name(&v.data.meta.edit.name),
+            color: v.color,
+            mark: LegendMark::Name,
+        }));
+    }
     // Legend along the top of the distortion plot, beside its axis title, wrapping under it
     // in a narrow pane.
     let legend_bottom = draw_legend(

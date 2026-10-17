@@ -2,28 +2,6 @@
 
 use super::*;
 
-/// The sweep measurement the dialog makes in these tests, as the mirror lists it.
-fn sweep_measurement() -> Measurement {
-    meas(
-        5,
-        "Sweep 1",
-        MeasKind::Sweep {
-            config: SweepConfig {
-                reference_input: 0,
-                measurement_input: 1,
-                outputs: vec![0],
-                level: Dbfs(-50.0),
-                sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
-                repeats: 1,
-                gate: None,
-                tail: Some(Seconds(1.0)),
-                lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
-                resolution: ac2_proto::model::Resolution::FortyEighth,
-            },
-        },
-    )
-}
-
 /// The daemon's state with the sweep measurement, the lease this client's.
 fn sweep_state() -> State {
     let mut s = daemon_state();
@@ -234,7 +212,7 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     assert_eq!(t.st.sweep.shown, Some(TraceId(7)));
     let (d, g) = sweep_data(7);
     t.conn(ConnEvent::Trace(d, g));
-    assert_eq!(t.st.shown_sweep().map(|(d, _)| d.meta.id), Some(TraceId(7)));
+    assert_eq!(t.st.kind_sweep().map(|(d, _)| d.meta.id), Some(TraceId(7)));
     // The sweep is drawn like a transfer function in the transfer pane too.
     assert_eq!(t.st.view.distortion.unit, DistortionUnit::Db);
     t.st.update(Msg::Command(CommandId::DistortionUnit), &t.keys);

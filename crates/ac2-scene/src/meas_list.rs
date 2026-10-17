@@ -279,7 +279,7 @@ pub struct TreeInput<'a> {
     pub live_selected: bool,
     /// The latest sweep run (a sweep measurement's header says it plays).
     pub sweep: Option<&'a SweepRun>,
-    /// Rows compared on the transfer pane (live curves, math channels, stored traces): marked
+    /// Rows compared (live curves, math channels, stored traces): marked
     /// [`crate::trace::COMPARED`], as the legend tags their curves.
     pub compared: Vec<TreeKey>,
     /// The rig entity: which meters' cues are in which state, where cues go.
@@ -317,9 +317,9 @@ pub fn meas_group(m: &Measurement, meas: &[&Measurement]) -> TraceOwner {
     math_group(m, meas).unwrap_or(TraceOwner::Meas { meas: m.id })
 }
 
-/// What the transfer pane says while it draws no stored trace of its measurement's group but
-/// `n` shown transfer traces wait under Imported: a pane draws only its measurement's group,
-/// so they show once moved under it. `move_key` is the chord of "Move to measurement…".
+/// What a pane says while it draws no stored trace of its measurement's group but `n` shown
+/// traces of a kind it draws wait under Imported: a pane draws only its measurement's group
+/// (and what is compared from other measurements), so they show once moved under one. `move_key` is the chord of "Move to measurement…".
 pub fn imported_hint(n: usize, move_key: Option<&str>) -> String {
     let what = if n == 1 {
         "1 trace under Imported is".to_owned()
@@ -334,16 +334,44 @@ pub fn imported_hint(n: usize, move_key: Option<&str>) -> String {
 }
 
 /// What C says: `Main R compared on the transfer pane (cmp)`, or that compare is off.
-/// A hidden curve is compared but not drawn until shown.
-pub fn compare_toast(name: &str, on: bool, shown: bool) -> String {
+/// `panes` names the panes that draw it (`the transfer pane`, `the transfer and sweep
+/// panes`). A hidden curve is compared but not drawn until shown.
+pub fn compare_toast(name: &str, panes: &str, on: bool, shown: bool) -> String {
     let tag = crate::trace::COMPARED;
     match (on, shown) {
         (false, _) => format!("{name}: compare off"),
-        (true, true) => format!("{name} compared on the transfer pane ({tag})"),
+        (true, true) => format!("{name} compared on {panes} ({tag})"),
         (true, false) => {
-            format!("{name} compared on the transfer pane ({tag}) — hidden: A shows it")
+            format!("{name} compared on {panes} ({tag}) — hidden: A shows it")
         }
     }
+}
+
+/// Where a compared curve is drawn, from what the panes that draw it show:
+/// `the transfer pane`, `the transfer and sweep panes`.
+pub fn compare_panes(whats: &[&str]) -> String {
+    match whats {
+        [] => "no pane".to_owned(),
+        [one] => format!("the {one} pane"),
+        [rest @ .., last] => format!("the {} and {last} panes", rest.join(", ")),
+    }
+}
+
+/// What C on a stored trace under Imported says: compare draws over a measurement's
+/// panes, and an import is no measurement's until moved under one.
+pub fn imported_compare_hint(name: &str, move_key: Option<&str>) -> String {
+    let how = move_key.map_or_else(
+        || "Move to measurement…".to_owned(),
+        |k| format!("Move to measurement… ({k})"),
+    );
+    format!("{name} is under Imported: no pane draws it — select it, then {how}")
+}
+
+/// What C on an SPL meter says: a meter is a number, compared by seeing two side by side.
+pub fn meter_compare_hint(name: &str) -> String {
+    format!(
+        "{name}: meters are not compared — add a pane and drag the meter onto it to see two side by side"
+    )
 }
 
 /// The groups in tree order: the measurements that are not math channels — the rig's
@@ -635,8 +663,7 @@ fn mark_compared(r: &mut TreeRow) {
     if r.details.is_empty() {
         r.details.push(tag.to_owned());
     }
-    r.describe
-        .push_str(&format!(", compared on the transfer pane ({tag})"));
+    r.describe.push_str(&format!(", compared ({tag})"));
 }
 
 /// What a measurement owns, for the question Delete asks: `3 traces`, `2 traces and 1 math

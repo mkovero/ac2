@@ -546,25 +546,39 @@ impl AppState {
         }
     }
 
-    /// Deletes stored trace `id`; the selection moves to the next shown trace in the list,
-    /// else the one before it, else the live measurement.
     /// C: compares what is selected in the tree (a stored trace selected last, else the
-    /// selected measurement or math channel) on the transfer pane, or stops comparing it.
-    /// The pane draws compared curves besides its own group, whoever owns them; display
-    /// only (never an average's or a math channel's operand).
-    pub(super) fn toggle_compare(&mut self) {
+    /// selected measurement or math channel), or stops comparing it. Every pane of a kind
+    /// that draws it draws it besides its own group, whoever owns it; display only (never
+    /// an average's or a math channel's operand). An imported trace is no measurement's,
+    /// so it is not compared until moved under one; an SPL meter is a number, compared by
+    /// putting two side by side.
+    pub(super) fn toggle_compare(&mut self, keymap: &crate::keys::Keymap) {
         if let Some(t) = self.selected_trace_meta().cloned() {
             let label = trace_label(&t);
-            if !drawn_in(&t, PaneKind::Transfer) {
-                self.warn(format!("{label}: compare draws transfer curves only"));
+            let imported =
+                ac2_scene::meas_list::group_of(&t, &self.measurements()) == TraceOwner::Imported;
+            if imported && !self.compared_traces.contains(&t.id) {
+                let key = keymap
+                    .chords(
+                        crate::keys::CommandId::MoveTrace,
+                        crate::keys::Scope::Global,
+                    )
+                    .first()
+                    .map(|c| c.label());
+                self.warn(ac2_scene::meas_list::imported_compare_hint(
+                    &label,
+                    key.as_deref(),
+                ));
                 return;
             }
             let on = self.compared_traces.insert(t.id);
             if !on {
                 self.compared_traces.remove(&t.id);
             }
+            let panes = compare_panes(&trace_compare_kinds(&t));
             self.toast(ac2_scene::meas_list::compare_toast(
                 &label,
+                &panes,
                 on,
                 t.edit.visible,
             ));
@@ -575,8 +589,15 @@ impl AppState {
             return;
         };
         let name = m.config.name.clone();
-        if !m.config.kind.publishes_tf() {
-            self.warn(format!("{name}: no live transfer curve to compare"));
+        if matches!(m.config.kind, MeasKind::Spl { .. }) {
+            self.warn(ac2_scene::meas_list::meter_compare_hint(&name));
+            return;
+        }
+        let kinds = meas_compare_kinds(&m);
+        if kinds.is_empty() {
+            self.warn(format!(
+                "{name}: no live curve to compare — select one of its runs or traces"
+            ));
             return;
         }
         let on = self.compared_meas.insert(m.id);
@@ -585,12 +606,13 @@ impl AppState {
         }
         self.toast(ac2_scene::meas_list::compare_toast(
             &name,
+            &compare_panes(&kinds),
             on,
             !self.meas_hidden(&m),
         ));
     }
 
-    /// Clear compare: the transfer pane draws its own group alone again.
+    /// Clear compare: every pane draws its own group alone again.
     pub(super) fn clear_compare(&mut self) {
         let n = self.compared_meas.len() + self.compared_traces.len();
         self.compared_meas.clear();
@@ -612,6 +634,8 @@ impl AppState {
         self.compared_traces.retain(|id| ids.contains(id));
     }
 
+    /// Deletes stored trace `id`; the selection moves to the next shown trace in the list,
+    /// else the one before it, else the live measurement.
     fn delete_trace(&mut self, id: TraceId, label: String, out: &mut Vec<Request>) {
         self.compared_traces.remove(&id);
         let list: Vec<(TraceId, bool)> = self
@@ -664,4 +688,26 @@ impl AppState {
             }
         }
     }
+}
+
+/// The graph pane kinds that draw stored trace `t` when compared.
+pub(super) fn trace_compare_kinds(t: &TraceMeta) -> Vec<PaneKind> {
+    [PaneKind::Transfer, PaneKind::Spectrum, PaneKind::Distortion]
+        .into_iter()
+        .filter(|k| drawn_in(t, *k))
+        .collect()
+}
+
+/// The graph pane kinds that draw measurement `m`'s live curve when compared.
+pub(super) fn meas_compare_kinds(m: &Measurement) -> Vec<PaneKind> {
+    [PaneKind::Transfer, PaneKind::Spectrum]
+        .into_iter()
+        .filter(|k| AppState::live_drawn_in(m, *k))
+        .collect()
+}
+
+/// `the transfer pane`, `the transfer and sweep panes`: where a compared curve is drawn.
+pub(super) fn compare_panes(kinds: &[PaneKind]) -> String {
+    let whats: Vec<&str> = kinds.iter().map(|k| k.what()).collect();
+    ac2_scene::meas_list::compare_panes(&whats)
 }

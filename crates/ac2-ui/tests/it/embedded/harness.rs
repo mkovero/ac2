@@ -153,7 +153,10 @@ impl Driver {
 pub fn measure_from_empty(d: &mut Driver) -> R {
     d.synced()?;
     assert!(d.st.open_session().is_none());
-    let hint = d.st.empty_hint(&d.keys).map(|h| h.text).unwrap_or_default();
+    let hint =
+        d.st.empty_hint(d.st.layout.focus, &d.keys)
+            .map(|h| h.text)
+            .unwrap_or_default();
     assert!(
         hint.starts_with(&format!(
             "No audio session — press {}",
@@ -190,7 +193,7 @@ pub fn measure_from_empty(d: &mut Driver) -> R {
     })?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     assert_eq!(m.config.name, "Reference \u{2192} Room mic");
-    assert_eq!(d.st.empty_hint(&d.keys), None);
+    assert_eq!(d.st.empty_hint(d.st.layout.focus, &d.keys), None);
     let MeasKind::Transfer { config } = &m.config.kind else {
         return Err("not a transfer measurement".into());
     };

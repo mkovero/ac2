@@ -109,7 +109,7 @@ fn simulated_rig_starts_measuring() -> R {
         &m.config.kind,
         MeasKind::Transfer { config } if (config.reference_input, config.measurement_input) == (0, 1)
     ));
-    assert_eq!(d.st.empty_hint(&d.keys), None);
+    assert_eq!(d.st.empty_hint(d.st.layout.focus, &d.keys), None);
 
     d.fire()?;
     d.tf_frames(m.id, 240)?;

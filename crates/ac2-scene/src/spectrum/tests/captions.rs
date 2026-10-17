@@ -263,6 +263,7 @@ fn tone_unit_names_the_bin_and_fits_narrow_panes() {
         freshness: None,
         offset_db: 0.0,
         selected: false,
+        compared: false,
         bands: None,
     };
     let theme = Theme::dark();
@@ -382,6 +383,7 @@ fn density_unit_is_per_hertz_on_any_resolution() {
             freshness: None,
             offset_db: 0.0,
             selected: false,
+            compared: false,
             bands: None,
         }
     }
@@ -460,6 +462,7 @@ fn a_long_calibration_caption_leaves_the_unit_room() {
         freshness: None,
         offset_db: 0.0,
         selected: false,
+        compared: false,
         bands: None,
     };
     let theme = Theme::dark();

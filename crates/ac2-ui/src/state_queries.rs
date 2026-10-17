@@ -200,7 +200,7 @@ impl AppState {
                     });
                 meas_input(&m.config.kind).and_then(|i| self.curve_note(i, applied))
             }
-            PaneKind::Distortion => self.shown_sweep().and_then(|(d, _)| stored(&d.meta)),
+            PaneKind::Distortion => self.pane_sweep(id).and_then(|(d, _)| stored(&d.meta)),
             PaneKind::Spl => None,
         }
     }
@@ -431,7 +431,7 @@ impl AppState {
         let mut v: Vec<&TraceMeta> = self
             .stored_traces()
             .into_iter()
-            .filter(|t| self.on_transfer_pane(t, self.kind_meas(PaneKind::Transfer)))
+            .filter(|t| self.on_pane(PaneKind::Transfer, t, self.kind_meas(PaneKind::Transfer)))
             .collect();
         v.sort_by_key(|t| (t.edit.slot.unwrap_or(u8::MAX), t.edit.order, t.id));
         v
@@ -456,18 +456,20 @@ impl AppState {
         self.daemon().and_then(|s| s.session.open.as_ref())
     }
 
-    /// What the transfer pane says when there is nothing to measure yet: no audio session,
-    /// or a session without measurements; or, with no stored curve of the pane's group
-    /// drawn, that shown traces wait under Imported. `None` once there is something (or no
-    /// daemon). Over drawn curves it moves to the pane's title strip, out of their way.
-    pub fn empty_hint(&self, keymap: &Keymap) -> Option<EmptyHint> {
+    /// What pane `pane` says when there is nothing to draw yet. A transfer pane: no audio
+    /// session, or a session without measurements. Any graph pane: with no stored curve of
+    /// its group drawn, that shown traces of a kind it draws wait under Imported. `None` once
+    /// there is something (or no daemon). Over drawn curves it moves to the pane's title
+    /// strip, out of their way.
+    pub fn empty_hint(&self, pane: PaneId, keymap: &Keymap) -> Option<EmptyHint> {
         if !self.connected() {
             return None;
         }
         let st = self.daemon()?;
-        let text = if st.session.open.is_none() {
+        let kind = self.layout.kind(pane);
+        let text = if kind == PaneKind::Transfer && st.session.open.is_none() {
             format!("No audio session — {}", open_session_hint(keymap))
-        } else if st.measurements.is_empty() {
+        } else if kind == PaneKind::Transfer && st.measurements.is_empty() {
             let palette = keymap
                 .chords(CommandId::Palette, Scope::Global)
                 .first()
@@ -475,8 +477,8 @@ impl AppState {
             format!(
                 "No measurements — {palette} → New transfer measurement… (or New spectrum, RTA, SPL meter)"
             )
-        } else if !self.transfer_shows_stored()
-            && let n @ 1.. = self.imported_transfer_traces()
+        } else if !self.pane_shows_stored(pane)
+            && let n @ 1.. = self.imported_traces(kind)
         {
             // An imported file draws nowhere until it has a measurement: say where it went.
             let key = keymap
@@ -484,16 +486,40 @@ impl AppState {
                 .first()
                 .map(|c| c.label());
             let text = ac2_scene::meas_list::imported_hint(n, key.as_deref());
-            let place = if self.transfer_shows_live() {
+            let place = if self.pane_shows_live(pane) {
                 HintPlace::Title
             } else {
                 HintPlace::Centre
             };
             return Some(EmptyHint { text, place });
+        } else if kind == PaneKind::Spectrum
+            // The spectrograph says it under its own history.
+            && !self.pane_modes(pane).spectrum.spectrograph()
+            && !self.pane_shows_live(pane)
+            && !self.pane_shows_stored(pane)
+            && let Some(m) = self.pane_meas(pane)
+        {
+            // Its own measurement has nothing to draw: say why, never draw another's.
+            use ac2_scene::missing::{Missing, missing_text};
+            let (why, command, scope) = if self.meas_hidden(m) {
+                (Missing::Hidden, CommandId::ToggleSelected, Scope::Global)
+            } else if !m.running {
+                (Missing::Stopped, CommandId::StartStop, Scope::Spectrum)
+            } else {
+                let what = Missing::NotYet {
+                    what: "frames",
+                    after: None,
+                };
+                (what, CommandId::StartStop, Scope::Spectrum)
+            };
+            let key = keymap
+                .first_chord(command, scope)
+                .map_or_else(|| "the palette".to_owned(), |c| c.label());
+            missing_text(&m.config.name, why, &key)
         } else {
             return None;
         };
-        let place = if self.transfer_shows_stored() {
+        let place = if self.pane_shows_stored(pane) {
             HintPlace::Title
         } else {
             HintPlace::Centre
@@ -501,16 +527,21 @@ impl AppState {
         Some(EmptyHint { text, place })
     }
 
-    /// Whether the transfer pane draws any stored curve (a shown capture, target or sweep
-    /// of its group, or a compared one, whose data has arrived).
-    pub fn transfer_shows_stored(&self) -> bool {
-        let tf = self.kind_meas(PaneKind::Transfer);
+    /// Whether pane `pane` draws any stored curve whose data has arrived: a shown capture,
+    /// target or sweep of its group, or a compared one; on the sweep pane, a run.
+    pub fn pane_shows_stored(&self, pane: PaneId) -> bool {
+        let kind = self.layout.kind(pane);
+        if kind == PaneKind::Distortion {
+            return self.pane_sweep(pane).is_some();
+        }
+        let shown = self.pane_meas(pane);
         self.traces.values().any(|(t, _)| {
-            self.on_transfer_pane(&t.meta, tf) || self.trace_compared_on_transfer(&t.meta, tf)
+            self.on_pane(kind, &t.meta, shown) || self.trace_compared_on(kind, &t.meta, shown)
         })
     }
 
-    /// The measurement whose group a transfer pane showing `shown` draws.
+    /// The measurement whose group a pane showing `shown` draws: `shown`, or the owner of
+    /// the math channel it is. `None` with nothing shown (or a math channel under Imported).
     pub fn group_of_shown(&self, shown: Option<&Measurement>) -> Option<MeasId> {
         let m = shown?;
         match ac2_scene::meas_list::meas_group(m, &self.measurements()) {
@@ -519,25 +550,40 @@ impl AppState {
         }
     }
 
-    /// Whether a transfer pane showing `shown` draws stored trace `t`: a shown
-    /// transfer-like curve of the pane's group. Every other group's, Imported's too, waits
-    /// until its measurement is the pane's (or the trace is moved under it). With no
-    /// measurement to show at all, the pane's group is Imported: files looked at without a
-    /// rig are drawn.
-    pub fn on_transfer_pane(&self, t: &TraceMeta, shown: Option<&Measurement>) -> bool {
-        transfer_kind_shown(t)
+    /// Whether a pane of kind `kind` showing `shown` draws stored trace `t` as its own: a
+    /// shown curve of a kind the pane draws, of the pane's group. Every other group's waits
+    /// until its measurement is the pane's (or is compared); Imported's until moved under a
+    /// measurement, since a file without one belongs to no pane. The sweep pane draws one
+    /// run of its group instead ([`Self::pane_sweep`]).
+    pub fn on_pane(&self, kind: PaneKind, t: &TraceMeta, shown: Option<&Measurement>) -> bool {
+        kind != PaneKind::Distortion
+            && kind_shown(t, kind)
             && match ac2_scene::meas_list::group_of(t, &self.measurements()) {
                 TraceOwner::Meas { meas } => Some(meas) == self.group_of_shown(shown),
-                TraceOwner::Imported => shown.is_none(),
+                TraceOwner::Imported => false,
             }
     }
 
-    /// Whether a transfer pane showing `shown` draws measurement `m`'s live curve: it
-    /// publishes one, is not hidden, and is the pane's measurement or a math channel of the
-    /// pane's group. Stopped, it keeps its last curve, tagged `stopped` as a spectrum's is:
-    /// hiding it is the operator's call (A).
-    pub fn live_on_transfer_pane(&self, m: &Measurement, shown: Option<&Measurement>) -> bool {
-        if !m.config.kind.publishes_tf() || self.meas_hidden(m) {
+    /// Whether measurement `m` publishes a live curve a pane of kind `kind` draws.
+    pub fn live_drawn_in(m: &Measurement, kind: PaneKind) -> bool {
+        match kind {
+            PaneKind::Transfer => m.config.kind.publishes_tf(),
+            PaneKind::Spectrum => spectrum_stream(m).is_some(),
+            PaneKind::Spl | PaneKind::Distortion => false,
+        }
+    }
+
+    /// Whether a pane of kind `kind` showing `shown` draws measurement `m`'s live curve as
+    /// its own: it publishes one the pane draws, is not hidden, and is the pane's
+    /// measurement or a math channel of the pane's group. Stopped, it keeps its last curve,
+    /// tagged `stopped`: hiding it is the operator's call (A).
+    pub fn live_on_pane(
+        &self,
+        kind: PaneKind,
+        m: &Measurement,
+        shown: Option<&Measurement>,
+    ) -> bool {
+        if !Self::live_drawn_in(m, kind) || self.meas_hidden(m) {
             return false;
         }
         if shown.map(|p| p.id) == Some(m.id) {
@@ -554,21 +600,36 @@ impl AppState {
         self.compared_meas.contains(&m.id)
     }
 
-    /// Whether the transfer pane draws `m`'s live curve for compare only: compared, not
-    /// hidden, and not of the pane's group (drawn there anyway, once, unmarked).
-    pub fn live_compared_on_transfer(&self, m: &Measurement, shown: Option<&Measurement>) -> bool {
-        m.config.kind.publishes_tf()
+    /// Whether a pane of kind `kind` showing `shown` draws `m`'s live curve for compare
+    /// only: compared, not hidden, a curve the pane draws, and not of the pane's group
+    /// (drawn there anyway, once, unmarked).
+    pub fn live_compared_on(
+        &self,
+        kind: PaneKind,
+        m: &Measurement,
+        shown: Option<&Measurement>,
+    ) -> bool {
+        Self::live_drawn_in(m, kind)
             && !self.meas_hidden(m)
             && self.meas_compared(m)
-            && !self.live_on_transfer_pane(m, shown)
+            && !self.live_on_pane(kind, m, shown)
     }
 
-    /// Whether the transfer pane draws stored trace `t` for compare only: compared, shown,
-    /// a transfer-like curve, and not of the pane's group.
-    pub fn trace_compared_on_transfer(&self, t: &TraceMeta, shown: Option<&Measurement>) -> bool {
-        self.compared_traces.contains(&t.id)
-            && transfer_kind_shown(t)
-            && !self.on_transfer_pane(t, shown)
+    /// Whether a pane of kind `kind` showing `shown` draws stored trace `t` for compare
+    /// only: compared, shown, of a kind the pane draws, filed under a measurement, and not
+    /// of the pane's group. An imported one is not drawn even compared: it is no
+    /// measurement's yet. The sweep pane's compared runs are [`Self::compared_sweeps`].
+    pub fn trace_compared_on(
+        &self,
+        kind: PaneKind,
+        t: &TraceMeta,
+        shown: Option<&Measurement>,
+    ) -> bool {
+        kind != PaneKind::Distortion
+            && self.compared_traces.contains(&t.id)
+            && kind_shown(t, kind)
+            && ac2_scene::meas_list::group_of(t, &self.measurements()) != TraceOwner::Imported
+            && !self.on_pane(kind, t, shown)
     }
 
     /// The tree rows compared (C), for their mark.
@@ -587,34 +648,36 @@ impl AppState {
         v
     }
 
-    /// Shown transfer-like stored traces under Imported the transfer pane leaves out: they
-    /// show once moved under a measurement (or compared).
-    fn imported_transfer_traces(&self) -> usize {
+    /// Stored traces under Imported of a kind a pane of kind `kind` draws (shown ones; any
+    /// sweep run for the sweep pane, which picks runs whether shown or not): no pane draws
+    /// them until they are moved under a measurement.
+    fn imported_traces(&self, kind: PaneKind) -> usize {
         let ms = self.measurements();
         self.stored_traces()
             .into_iter()
             .filter(|t| {
-                transfer_kind_shown(t)
-                    && ac2_scene::meas_list::group_of(t, &ms) == TraceOwner::Imported
-                    && !self.compared_traces.contains(&t.id)
+                (if kind == PaneKind::Distortion {
+                    drawn_in(t, kind)
+                } else {
+                    kind_shown(t, kind)
+                }) && ac2_scene::meas_list::group_of(t, &ms) == TraceOwner::Imported
             })
             .count()
     }
 
-    /// Whether the transfer pane draws a live curve now (one with a frame).
-    fn transfer_shows_live(&self) -> bool {
+    /// Whether pane `pane` draws a live curve now (one with a frame).
+    fn pane_shows_live(&self, pane: PaneId) -> bool {
         let Some(d) = self.data.as_ref() else {
             return false;
         };
-        let tf = self.kind_meas(PaneKind::Transfer);
+        let kind = self.layout.kind(pane);
+        let shown = self.pane_meas(pane);
         self.measurements().into_iter().any(|m| {
-            (self.live_on_transfer_pane(m, tf) || self.live_compared_on_transfer(m, tf))
-                && d.latest
-                    .get(&Topic::Data {
-                        meas: m.id,
-                        stream: Stream::Tf,
-                    })
-                    .is_some()
+            let Some(stream) = m.config.kind.stream() else {
+                return false;
+            };
+            (self.live_on_pane(kind, m, shown) || self.live_compared_on(kind, m, shown))
+                && d.latest.get(&Topic::Data { meas: m.id, stream }).is_some()
         })
     }
 

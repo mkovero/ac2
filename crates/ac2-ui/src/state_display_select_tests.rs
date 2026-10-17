@@ -70,7 +70,7 @@ fn picking_a_measurement_puts_it_in_the_focused_pane() {
 #[test]
 fn picking_a_trace_while_maximised_brings_up_its_pane() {
     let mut t = T::new();
-    t.conn(with_traces(vec![
+    t.conn(with_sweeps(vec![
         stored(13, None, 2),
         spec_meta(16),
         sweep_meta(14),
@@ -85,12 +85,13 @@ fn picking_a_trace_while_maximised_brings_up_its_pane() {
     t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
     t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
     assert_eq!(t.visible(), [PaneKind::Distortion]);
-    // V steps the same way (from the SPL pane: the sweep pane's V steps its runs).
+    // V steps the same way (from the SPL pane: the sweep pane's V steps its runs), in the
+    // tree's order: from the sweep's run on to Sub's spectrum.
     t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
     t.key("Alt+4");
     t.key("V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(13)));
-    assert_eq!(t.visible(), [PaneKind::Transfer]);
+    assert_eq!(t.st.selected_trace, Some(TraceId(16)));
+    assert_eq!(t.visible(), [PaneKind::Spectrum]);
     assert!(t.st.layout.maximized);
     // Split (W: full screen, W: split): the focus stays.
     t.key("W");

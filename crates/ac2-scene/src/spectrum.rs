@@ -110,6 +110,9 @@ pub struct SpectrumTrace<'a> {
     pub offset_db: f64,
     /// The selected stored trace: marked in the legend and drawn with a thicker line.
     pub selected: bool,
+    /// Drawn for compare only (not of the pane's group): the legend tags it
+    /// [`crate::trace::COMPARED`].
+    pub compared: bool,
     /// A live multi-resolution spectrum's bands: where its windows change, and which
     /// columns resolve less than their grid.
     pub bands: Option<&'a SpecBands>,
@@ -163,6 +166,7 @@ impl<'a> SpectrumTrace<'a> {
             freshness: Some(freshness),
             offset_db: 0.0,
             selected: false,
+            compared: false,
             bands: None,
         }
     }
@@ -210,6 +214,7 @@ impl<'a> SpectrumTrace<'a> {
             freshness: Some(freshness),
             offset_db: 0.0,
             selected: false,
+            compared: false,
             bands: frame.meta.bands.as_deref(),
         }
     }

@@ -8,7 +8,7 @@ use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 use eframe::egui;
 
-use ac2_scene::view::{DistortionUnit, IrPane, SplMode};
+use ac2_scene::view::{DistortionUnit, IrPane};
 
 use crate::app::{App, CachedScene, LegendDrag};
 use crate::hints::{self, KeyHint};
@@ -240,24 +240,12 @@ fn scene_for(
     Some((scene, axes))
 }
 
-fn placeholder(id: PaneId, app: &App) -> &'static str {
-    let pane = app.state.layout.kind(id);
+fn placeholder(id: PaneId, app: &App) -> String {
     let modes = app.state.pane_modes(id);
-    let spl = modes.spl;
-    match pane {
-        PaneKind::Transfer if modes.transfer.ir().is_some() => "no transfer measurement",
-        PaneKind::Spl if spl == SplMode::Leq && scenes::has_spl(&app.state) => {
-            "no Leq windows yet: they show once the meter has measured a second"
-        }
-        PaneKind::Spl if spl == SplMode::Bands && !scenes::has_band_meter(&app.state) => {
-            "no band meter: turn it on in the SPL / Leq settings (or `ac2 spl bands set`)"
-        }
-        PaneKind::Spl if spl == SplMode::Bands => {
-            "no band frame yet: the bands show once the meter has measured a second"
-        }
-        PaneKind::Spl if scenes::has_spl(&app.state) => "no SPL frame yet",
-        PaneKind::Spl => "no SPL meter",
-        _ => "",
+    match app.state.layout.kind(id) {
+        PaneKind::Transfer if modes.transfer.ir().is_some() => "no transfer measurement".into(),
+        PaneKind::Spl => scenes::spl_placeholder(&app.state, id, &app.keymap),
+        _ => String::new(),
     }
 }
 
@@ -466,7 +454,7 @@ fn pane(
             let text = if app.plots {
                 placeholder(id, app)
             } else {
-                "plots need the wgpu renderer"
+                "plots need the wgpu renderer".to_owned()
             };
             ui.painter().text(
                 plot_rect.center(),
@@ -478,9 +466,8 @@ fn pane(
         }
     }
     // Hidden under a dialog, which is already the next step.
-    if pane == PaneKind::Transfer
-        && app.state.overlay == crate::state::Overlay::None
-        && let Some(hint) = app.state.empty_hint(&app.keymap)
+    if app.state.overlay == crate::state::Overlay::None
+        && let Some(hint) = app.state.empty_hint(id, &app.keymap)
     {
         match hint.place {
             HintPlace::Centre => empty_hint(ui, plot_rect, &hint.text, ch),

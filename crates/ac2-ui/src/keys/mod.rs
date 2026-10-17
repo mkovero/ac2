@@ -163,7 +163,7 @@ commands! {
     LevelFit => "level_fit", "Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz (IR: the whole IR)", [Global];
     LevelReset => "level_reset", "Level and frequency axes back to the pane's default", [Global];
     ToggleCursor => "toggle_cursor", "Comparison cursor on / off (IR: a time cursor)", [Global];
-    Compare => "compare", "Compare the selected measurement or trace on the transfer pane (on / off)", [Global];
+    Compare => "compare", "Compare the selected measurement or trace over the panes that draw its kind (on / off)", [Global];
     ClearCompare => "clear_compare", "Clear compare: no compared curves", [Global];
     CursorLeft => "cursor_left", "Cursor 1/12 octave down (IR: earlier)", [Global];
     CursorRight => "cursor_right", "Cursor 1/12 octave up (IR: later)", [Global];

@@ -439,7 +439,7 @@ fn compared_rows_are_marked() {
     for (a, b) in plain.iter().zip(&marked) {
         if matches!(b.key, TreeKey::Trace(TraceId(5)) | TreeKey::Live(MeasId(1))) {
             assert!(b.details.iter().all(|d| d.ends_with(" · cmp")), "{b:?}");
-            assert!(b.describe.ends_with("compared on the transfer pane (cmp)"));
+            assert!(b.describe.ends_with("compared (cmp)"));
         } else {
             assert_eq!(a, b);
         }

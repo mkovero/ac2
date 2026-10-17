@@ -155,7 +155,7 @@ fn session_dialog() {
     });
     h.key_press(Key::Enter);
     step_until(&mut h, "sweep stored and shown", |a| {
-        a.state.layout.focus_kind() == PaneKind::Distortion && a.state.shown_sweep().is_some()
+        a.state.layout.focus_kind() == PaneKind::Distortion && a.state.kind_sweep().is_some()
     });
     assert_eq!(fake.executions("sweep.run"), 1);
     // The sweep left nothing armed: the stimulus is off (STIM OFF) and the lease was given

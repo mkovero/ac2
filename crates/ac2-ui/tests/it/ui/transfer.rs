@@ -347,6 +347,16 @@ fn transfer_legend_many_curves() {
             a.state.traces.len() == n && a.state.overlay == Overlay::None
         });
     }
+    // Filed under a transfer measurement: under Imported no pane would draw them.
+    common::file_traces_under_main_l(&fake);
+    step_until(&mut h, "every curve under Main L", |a| {
+        a.state.traces.values().all(|(d, _)| {
+            d.meta.edit.owner
+                == ac2_proto::model::TraceOwner::Meas {
+                    meas: ac2_proto::units::MeasId(1),
+                }
+        }) && a.state.pane_shows_stored(a.state.layout.focus)
+    });
     // The transfer pane alone.
     h.key_press(Key::W);
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
