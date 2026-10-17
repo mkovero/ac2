@@ -376,6 +376,28 @@ mod axis;
 #[path = "state_display_delete_tests.rs"]
 mod delete;
 
+/// B steps the spectrum style line → fill → bars → line.
+#[test]
+fn b_cycles_spectrum_line_fill_bars() {
+    use ac2_scene::view::SpectrumStyle;
+    let mut t = T::new();
+    t.go(PaneKind::Spectrum);
+    t.st.view.spectrum.style = SpectrumStyle::Line;
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        t.key("B");
+        seen.push(t.st.view.spectrum.style);
+    }
+    assert_eq!(
+        seen,
+        [
+            SpectrumStyle::Fill,
+            SpectrumStyle::Bars,
+            SpectrumStyle::Line
+        ]
+    );
+}
+
 #[path = "state_display_select_tests.rs"]
 mod select;
 

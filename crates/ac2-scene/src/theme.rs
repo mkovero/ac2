@@ -69,6 +69,9 @@ pub struct Theme {
     pub stale_alpha: f32,
     /// Opacity of RTA bars (lines on top stay opaque).
     pub bar_alpha: f32,
+    /// Opacity of the area under a filled spectrum line: faint, so where compared curves'
+    /// fills overlap the lines on top still read and the overlap stays lighter than a bar.
+    pub fill_alpha: f32,
     /// Opacity of the peak-hold overlay.
     pub peak_alpha: f32,
     pub font_size: f32,
@@ -146,6 +149,7 @@ impl Theme {
             trace_width: 1.6,
             stale_alpha: 0.35,
             bar_alpha: 0.55,
+            fill_alpha: 0.18,
             peak_alpha: 0.8,
             font_size: 12.0,
             small_font_size: 10.5,
@@ -214,6 +218,7 @@ impl Theme {
             trace_width: 1.6,
             stale_alpha: 0.35,
             bar_alpha: 0.5,
+            fill_alpha: 0.14,
             peak_alpha: 0.8,
             font_size: 12.0,
             small_font_size: 10.5,
@@ -282,6 +287,7 @@ impl Theme {
             trace_width: 2.6,
             stale_alpha: 0.45,
             bar_alpha: 0.7,
+            fill_alpha: 0.25,
             peak_alpha: 1.0,
             font_size: 14.0,
             small_font_size: 12.0,

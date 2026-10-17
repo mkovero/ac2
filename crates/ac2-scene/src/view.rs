@@ -358,11 +358,26 @@ impl Default for TfView {
     }
 }
 
-/// Bars or a line for spectrum / RTA traces.
+/// How spectrum / RTA traces are drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpectrumStyle {
-    Bars,
+    /// The max-per-pixel line.
     Line,
+    /// The line over a faint area down to the plot bottom.
+    Fill,
+    /// Band power as bars (RTA traces); narrowband traces draw as `Line`.
+    Bars,
+}
+
+impl SpectrumStyle {
+    /// The next style in the B cycle: line → fill → bars → line.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Line => Self::Fill,
+            Self::Fill => Self::Bars,
+            Self::Bars => Self::Line,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

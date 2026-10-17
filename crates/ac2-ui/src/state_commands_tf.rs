@@ -181,10 +181,7 @@ impl AppState {
                 };
             }
             C::SpectrumStyle => {
-                self.view.spectrum.style = match self.view.spectrum.style {
-                    SpectrumStyle::Bars => SpectrumStyle::Line,
-                    SpectrumStyle::Line => SpectrumStyle::Bars,
-                };
+                self.view.spectrum.style = self.view.spectrum.style.next();
             }
             C::PeakHold => {
                 self.view.spectrum.peak_hold = !self.view.spectrum.peak_hold;

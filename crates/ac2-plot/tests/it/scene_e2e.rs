@@ -13,7 +13,7 @@ use ac2_scene::banner::Status;
 use ac2_scene::theme::Theme;
 use ac2_scene::time::Freshness;
 use ac2_scene::trace::{TfTrace, TimeBase, TraceKey, wrap_deg};
-use ac2_scene::view::{CoherencePlacement, ViewState};
+use ac2_scene::view::{CoherencePlacement, SpectrumStyle, ViewState};
 use ac2_testkit::image::ImageTolerance;
 use common::{golden, gpu, render_on, renderer};
 
@@ -208,12 +208,22 @@ fn transfer_view_unresolved() {
 /// longest window resolves, in the valid-resolution marker's style.
 #[test]
 fn spectrum_multires_stitches() {
+    spectrum_golden("spectrum_multires_stitches", SpectrumStyle::Line);
+}
+
+/// The same spectrum filled: a faint area in the trace colour under the line, down to the
+/// plot bottom, with the 1 kHz tone still a spike.
+#[test]
+fn spectrum_fill() {
+    spectrum_golden("spectrum_fill", SpectrumStyle::Fill);
+}
+
+fn spectrum_golden(name: &str, style: SpectrumStyle) {
     use ac2_proto::GridDef;
     use ac2_proto::frame::{SpecBand, SpecBands, SpecFrame, SpecMeta};
     use ac2_proto::model::{CalStatus, FreqRange, LevelScale, Resolution, Unresolved, Window};
     use ac2_proto::units::{Hz, WallNs};
     use ac2_scene::spectrum::{SpectrumTrace, spectrum_scene};
-    let name = "spectrum_multires_stitches";
     let Some(gpu) = gpu(name) else {
         return;
     };
@@ -282,10 +292,11 @@ fn spectrum_multires_stitches() {
         Freshness::from_age(0.0),
     );
     let theme = Theme::dark();
-    let view = ViewState {
+    let mut view = ViewState {
         cursor_hz: Some(1000.0),
         ..ViewState::default()
     };
+    view.spectrum.style = style;
     let size = Viewport {
         width: 560.0,
         height: 360.0,
