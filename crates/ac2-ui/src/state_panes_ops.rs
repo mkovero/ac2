@@ -572,6 +572,7 @@ impl AppState {
         if matches!(self.overlay, Overlay::PaneMenu(_)) {
             self.overlay = Overlay::None;
         }
+        self.pane_picked = true;
         match row {
             PaneMenuRow::Meas(m) => self.pane_show(id, m),
             PaneMenuRow::Kind(k) => {

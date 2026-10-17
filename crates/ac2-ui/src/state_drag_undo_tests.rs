@@ -290,8 +290,9 @@ fn esc_or_a_drop_off_the_panes_does_nothing() {
     assert_eq!(t.st.history.undo_len(), 0);
 }
 
-/// A drop is a guest pick: Main L's row chosen, FOH SPL dropped on pane 2 sends no layout
-/// for FOH SPL, and the G after it is stored on Main L only.
+/// A drop is a guest pick: Main L's row chosen, FOH SPL dropped on pane 2 turns it into an
+/// SPL pane, an edit of Main L's panes stored on Main L and never on FOH SPL, as is the G
+/// after it.
 #[test]
 fn a_drop_is_never_the_dropped_measurements_layout() {
     let mut t = desk();
@@ -303,6 +304,8 @@ fn a_drop_is_never_the_dropped_measurements_layout() {
         !layout_targets(&r).contains(&MeasId(4)),
         "the drop is no layout of FOH SPL's: {r:?}"
     );
+    assert_eq!(layout_targets(&r), [MeasId(1)], "Main L's panes: {r:?}");
+    answer(&mut t, &r);
     assert_eq!(
         t.st.selected,
         Some(MeasId(4)),

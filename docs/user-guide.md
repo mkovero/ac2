@@ -495,7 +495,10 @@ by every app that selects it (another laptop, the kiosk), edits included. What t
 the split and each pane's kind and view; which measurement each pane shows, the focus,
 **W**, **F** and the window stay per app. When incoming panes match the screen's split and
 kinds (only a view or size differs), each pane keeps its measurement; otherwise the
-measurement goes into the first pane of its kind.
+measurement goes into the first pane of its kind. A chip pick or a dropped row is
+remembered (by this app) with the chosen row's panes: choosing that row again brings each
+pane back to what it showed, and the focus stays where it was. A child row, as **Tab**
+walks the list, changes a pane for a look and is not remembered.
 
 `ac2 meas list` has a `layout` column; `ac2 meas layout clear <meas>` removes a
 measurement's own panes. Deleting a measurement deletes its layout; editing it keeps it.

@@ -462,3 +462,57 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// From an empty daemon: `Spectrum 2`'s row chosen and its spectrum pane split, so it has
+/// panes of its own with two spectrum panes; `Spectrum 1` picked on the right one's chip. `Spectrum 1`'s row, then
+/// `Spectrum 2`'s again: its panes come back with the right one still on `Spectrum 1`, and
+/// `Spectrum 1` was never given them.
+#[test]
+fn a_chip_pick_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let s1 = new_spectrum(&mut d, false)?;
+    let s2 = new_spectrum(&mut d, true)?;
+    d.key("Alt+2");
+    d.send(Msg::SelectMeas(s2));
+    d.key("N");
+    d.until("Spectrum 2's own panes", |s| {
+        s.meas(s2)
+            .and_then(|m| m.layout.as_ref())
+            .is_some_and(|l| *l == s.pane_layout())
+    })?;
+    let [_, right] = spectrum_panes(&d.st)[..] else {
+        return Err(format!("{:?}", spectrum_panes(&d.st)).into());
+    };
+    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s1)));
+    let shown = |s: &AppState| -> Vec<Option<MeasId>> {
+        spectrum_panes(s)
+            .into_iter()
+            .map(|p| s.pane_meas(p).map(|m| m.id))
+            .collect()
+    };
+    assert_eq!(
+        shown(&d.st),
+        [Some(s2), Some(s1)],
+        "the pick: that pane alone"
+    );
+    assert_eq!(d.st.selected, Some(s1));
+    d.send(Msg::SelectMeas(s1));
+    d.send(Msg::SelectMeas(s2));
+    assert_eq!(d.st.selected, Some(s2));
+    assert_eq!(spectrum_panes(&d.st).len(), 2);
+    assert_eq!(
+        shown(&d.st),
+        [Some(s2), Some(s1)],
+        "the right pane keeps the pick"
+    );
+    assert_eq!(d.st.layout.focus, right, "the focus stays");
+    assert!(
+        d.st.meas(s1).is_some_and(|m| m.layout.is_none()),
+        "Spectrum 1 has no panes of its own"
+    );
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

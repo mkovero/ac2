@@ -366,5 +366,12 @@ impl AppState {
         if let Some(o) = owner.filter(|o| self.own_panes == Some(*o)) {
             self.store_layout(o, out);
         }
+        // A pick undone is no pick the own panes come back with.
+        if self
+            .own_panes
+            .is_some_and(|o| self.own_picks.contains_key(&o))
+        {
+            self.remember_own_picks();
+        }
     }
 }

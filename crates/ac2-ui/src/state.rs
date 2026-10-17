@@ -384,6 +384,14 @@ pub struct AppState {
     own_panes: Option<MeasId>,
     /// The lost selection's own panes were on screen: they follow it when it comes back.
     lost_own_panes: bool,
+    /// Each of a measurement's own panes' picks (reading order) as a chip pick or a drop
+    /// left them, with the panes they were: its row brings them back with those picks.
+    /// Which measurement a pane shows is this app's, not part of the layout the daemon
+    /// keeps. A child row (Tab walking the list) changes a pane for a look only.
+    own_picks: BTreeMap<MeasId, (ac2_proto::model::PaneLayout, Vec<Option<MeasId>>)>,
+    /// A pane was given a measurement by its chip or a row dropped on it: the own panes on
+    /// screen remember what each pane shows after the message.
+    pane_picked: bool,
     /// Names of the measurements the daemon has listed since this app started: a pane
     /// remembered on one of them waits for it to come back.
     meas_seen: BTreeSet<String>,
@@ -520,6 +528,8 @@ impl AppState {
             lost_selection: None,
             own_panes: None,
             lost_own_panes: false,
+            own_picks: BTreeMap::new(),
+            pane_picked: false,
             meas_seen: BTreeSet::new(),
             keys: Keymap::default(),
             row_drag: None,

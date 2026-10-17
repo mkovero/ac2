@@ -579,9 +579,8 @@ fn answer_layout_calls(t: &mut T, r: &[Request]) {
 
 /// The operator's sequence: `Spectrum 2`'s own panes on screen, the lower pane focused (a
 /// click inside it), `FOH SPL` picked on that pane's title chip. The pick selects `FOH SPL`
-/// and turns the pane into an SPL pane, which is about that pane and sends nothing; the
-/// edits after it (G, N, T) are `Spectrum 2`'s, the SPL pane included, and never
-/// `FOH SPL`'s own layout.
+/// and turns the pane into an SPL pane: an edit of `Spectrum 2`'s panes, stored on it, as
+/// are the edits after it (G, N, T), and never `FOH SPL`'s own layout.
 #[test]
 fn a_chip_pick_into_another_measurements_panes_leaves_its_own_layout() {
     let mut t = desk_on_spectrum_2();
@@ -595,7 +594,8 @@ fn a_chip_pick_into_another_measurements_panes_leaves_its_own_layout() {
         t.st.update(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(1)), "FOH SPL selected");
     assert_eq!(t.st.layout.kind(lower), PaneKind::Spl);
-    assert!(layout_calls(&r).is_empty(), "the pick: {r:?}");
+    assert_eq!(layout_targets(&r), [MeasId(4)], "the pick: {r:?}");
+    answer_layout_calls(&mut t, &r);
     for k in ["G", "N", "T"] {
         let r = t.key(k);
         let to = layout_targets(&r);
@@ -611,7 +611,10 @@ fn a_click_on_a_guest_pane_then_an_edit_leaves_its_own_layout() {
     let mut t = desk_on_spectrum_2();
     let order = t.st.layout.root.reading_order();
     let lower = *order.last().expect("a pane");
-    t.st.update(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+    let r =
+        t.st.update(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+    assert_eq!(layout_targets(&r), [MeasId(4)], "the pick: {r:?}");
+    answer_layout_calls(&mut t, &r);
     t.st.update(Msg::FocusPane(order[0]), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(4)));
     t.st.update(Msg::FocusPane(lower), &t.keys);
@@ -653,4 +656,106 @@ fn panes_shared_with_a_measurement_none_of_them_shows_are_not_its_layout() {
     select(&mut t, 2);
     let r = t.key("G");
     assert_eq!(layout_targets(&r), [MeasId(2)], "{r:?}");
+}
+
+/// What each pane shows, in reading order.
+fn shown(t: &T) -> Vec<Option<MeasId>> {
+    t.st.layout
+        .root
+        .reading_order()
+        .iter()
+        .map(|p| t.st.pane_meas(*p).map(|m| m.id))
+        .collect()
+}
+
+/// `Spectrum 2`'s own panes, `Spectrum 1` put into its spectrograph by `put`; then
+/// `Spectrum 1`'s row and `Spectrum 2`'s again: the spectrograph still shows `Spectrum 1`,
+/// and `Spectrum 1` (which has no panes of its own) was never given these.
+fn guest_in_spectrograph_survives_the_rows(put: fn(&mut T, PaneId) -> Vec<Request>) {
+    let mut t = desk_on_spectrum_2();
+    let graph = t.st.layout.root.reading_order()[1];
+    let s1 = MeasId(3);
+    let s2 = MeasId(4);
+    let r = put(&mut t, graph);
+    assert!(!layout_targets(&r).contains(&s1), "the pick: {r:?}");
+    assert_eq!(t.st.pane_meas(graph).map(|m| m.id), Some(s1));
+    let r = select(&mut t, 3);
+    assert!(layout_calls(&r).is_empty(), "Spectrum 1's row: {r:?}");
+    let r = select(&mut t, 4);
+    assert!(layout_calls(&r).is_empty(), "Spectrum 2's row: {r:?}");
+    assert_eq!(t.st.selected, Some(s2));
+    assert_eq!(
+        t.st.pane_layout(),
+        three_spectrum(),
+        "Spectrum 2's own panes"
+    );
+    assert_eq!(
+        shown(&t),
+        [Some(s2), Some(s1), Some(s2)],
+        "the spectrograph keeps the pick"
+    );
+    assert_eq!(t.st.layout.focus, graph, "the focus stays");
+    assert!(t.st.meas(s1).expect("Spectrum 1").layout.is_none());
+}
+
+/// The operator's sequence: a chip pick on the spectrograph of `Spectrum 2`'s own panes.
+#[test]
+fn a_chip_pick_in_own_panes_is_kept_by_their_row() {
+    guest_in_spectrograph_survives_the_rows(|t, p| {
+        t.st.update(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(3))), &t.keys)
+    });
+}
+
+/// The same with `Spectrum 1`'s row dragged onto the spectrograph.
+#[test]
+fn a_row_dropped_in_own_panes_is_kept_by_their_row() {
+    guest_in_spectrograph_survives_the_rows(|t, p| {
+        use ac2_scene::meas_list::TreeKey;
+        let mut r = t.st.update(
+            Msg::RowDrag(DragMsg::Start(TreeKey::Meas(MeasId(3)))),
+            &t.keys,
+        );
+        r.extend(t.st.update(
+            Msg::RowDrag(DragMsg::Over {
+                target: Some(DropTarget {
+                    pane: p,
+                    edge: None,
+                }),
+                compare: false,
+            }),
+            &t.keys,
+        ));
+        r.extend(t.st.update(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys));
+        r
+    });
+}
+
+/// `FOH SPL` picked on the last pane of `Spectrum 2`'s own panes turns it into an SPL pane,
+/// stored on `Spectrum 2`; `TF 1`'s row and `Spectrum 2`'s again bring the SPL pane back
+/// showing `FOH SPL`, and `FOH SPL` was never given the panes.
+#[test]
+fn a_pick_turning_a_pane_into_another_kind_comes_back_with_the_row() {
+    let mut t = desk_on_spectrum_2();
+    let last = *t.st.layout.root.reading_order().last().expect("a pane");
+    let r =
+        t.st.update(Msg::PanePick(last, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+    assert_eq!(layout_targets(&r), [MeasId(4)], "{r:?}");
+    let stored = t.st.pane_layout();
+    answer_layout_calls(&mut t, &r);
+    let mut s = rig();
+    let mut m = meas(4, "Spectrum 2", spectrum());
+    m.layout = Some(stored.clone());
+    s.measurements.push(m);
+    t.conn(mirror(s));
+    let r = select(&mut t, 2);
+    assert!(layout_calls(&r).is_empty(), "TF 1's row: {r:?}");
+    assert_eq!(t.st.pane_layout(), three_transfer());
+    let r = select(&mut t, 4);
+    assert!(layout_calls(&r).is_empty(), "Spectrum 2's row: {r:?}");
+    assert_eq!(t.st.pane_layout(), stored);
+    assert_eq!(
+        shown(&t),
+        [Some(MeasId(4)), Some(MeasId(4)), Some(MeasId(1))]
+    );
+    assert!(t.st.meas(MeasId(1)).expect("FOH SPL").layout.is_none());
 }

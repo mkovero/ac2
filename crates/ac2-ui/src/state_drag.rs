@@ -220,6 +220,7 @@ impl AppState {
         // The same as a pick on that pane: the chip's pick for a measurement row, the child
         // row's for the others, which act on the focused pane.
         self.layout.set_focus(p);
+        self.pane_picked = true;
         match item {
             TreeKey::Meas(id) => self.pane_show(p, id),
             TreeKey::Live(id) => self.select_live_row(id),

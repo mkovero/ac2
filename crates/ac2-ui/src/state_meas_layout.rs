@@ -18,8 +18,10 @@
 //! kiosk showing a meter keeps its pane whoever lays out that meter elsewhere.
 //!
 //! Only the arrangement and what each pane draws travel: the measurement each pane was
-//! picked for, the focus, W and F stay this app's. A layout received is put on screen, never
-//! sent back: only what the operator does here is sent.
+//! picked for, the focus, W and F stay this app's. What a chip pick or a dropped row left
+//! each of the chosen row's panes showing is remembered here, and its row brings it back.
+//! A layout received is put on screen, never sent back: only what the operator does here
+//! is sent.
 //!
 //! One call per measurement is in flight at a time, the newest edit waiting behind it: each
 //! call is a task of its own on the link, so two in flight could reach the daemon in either
@@ -120,6 +122,16 @@ impl AppState {
         }
     }
 
+    /// Each pane's own pick, in reading order (none: it draws the selected measurement).
+    fn pane_picks(&self) -> Vec<Option<MeasId>> {
+        self.layout
+            .root
+            .reading_order()
+            .iter()
+            .map(|p| self.layout.view(*p).and_then(|v| v.meas))
+            .collect()
+    }
+
     /// After a message: the selected measurement's layout on screen when its row was chosen
     /// or another client changed it; the panes sent as its layout when the operator edited
     /// them (`conn`: the message came from the daemon, which edits nothing; `drag`: a split
@@ -132,20 +144,27 @@ impl AppState {
         out: &mut Vec<Request>,
     ) {
         self.settle_layout_calls();
+        let picked = std::mem::take(&mut self.pane_picked);
         if std::mem::take(&mut self.own_panes_due) {
             self.own_panes = self.selected;
-            if let Some(l) = self
-                .selected
-                .and_then(|id| self.own_layout(id))
-                .filter(|l| *l != self.pane_layout())
-            {
-                self.show_layout(&l);
+            let own = self.selected.and_then(|id| self.own_layout(id));
+            if let Some(l) = own.as_ref().filter(|l| **l != self.pane_layout()) {
+                self.show_layout(l);
+            }
+            if own.is_some() {
+                self.restore_own_picks();
             }
             return;
         }
-        // A selection moved by a pane (clicked, picked) or a child row: about that pane, and
-        // a pane it turned into another kind is no edit.
-        if self.selected != before.selected {
+        if picked && !conn {
+            self.remember_own_picks();
+        }
+        // A pick on a pane's chip or a row dropped on it edits the panes of the row chosen
+        // before, whichever measurement it selects: what the pane now draws is stored on that
+        // row's measurement below, never on the one picked. A selection moved by a child row
+        // (Tab walking the list) or a pane clicked is a look, about that pane: a pane it
+        // turned into another kind is no edit.
+        if self.selected != before.selected && !picked {
             return;
         }
         if !conn && self.pane_layout() != before.panes {
@@ -174,6 +193,18 @@ impl AppState {
                     self.store_layout(id, out);
                 }
             }
+            // Picks remembered for the panes before keep up with what they became.
+            if self
+                .own_panes
+                .is_some_and(|o| self.own_picks.contains_key(&o))
+            {
+                self.remember_own_picks();
+            }
+            return;
+        }
+        // A selection moved by a pick is no change of the selected one's layout: its copy
+        // before is another measurement's.
+        if self.selected != before.selected {
             return;
         }
         let theirs = self.meas_layout(self.selected);
@@ -366,6 +397,59 @@ impl AppState {
             self.send_layout(meas, l, out);
         }
         true
+    }
+
+    /// What each pane shows remembered for the own panes on screen.
+    pub(super) fn remember_own_picks(&mut self) {
+        if let Some(o) = self.own_panes {
+            self.own_picks
+                .insert(o, (self.pane_layout(), self.pane_picks()));
+        }
+    }
+
+    /// The selected measurement's own panes, just on screen, show what a chip pick or a drop
+    /// left them showing (when laid out the same way since): a guest picked into one is
+    /// still there. The focus stays where the operator looks; with no pane left showing
+    /// the selected measurement, the focused pane shows it, as its row puts it there.
+    fn restore_own_picks(&mut self) {
+        let ids: BTreeSet<MeasId> = self.measurements().iter().map(|m| m.id).collect();
+        self.own_picks.retain(|id, _| ids.contains(id));
+        let Some(sel) = self.selected else {
+            return;
+        };
+        let Some((_, picks)) = self
+            .own_picks
+            .get(&sel)
+            .filter(|(l, _)| same_shape(l, &self.pane_layout()))
+            .cloned()
+        else {
+            return;
+        };
+        let order = self.layout.root.reading_order();
+        for (p, pick) in order.iter().zip(picks) {
+            // A pick gone since, or of a kind the pane no longer draws, leaves it drawing the
+            // selected measurement.
+            let pick = pick.filter(|id| {
+                self.meas(*id).is_some_and(|m| {
+                    self.layout
+                        .view(*p)
+                        .is_some_and(|v| v.kind.shows(&m.config.kind))
+                })
+            });
+            if let Some(v) = self.layout.view_mut(*p) {
+                v.meas = pick;
+            }
+        }
+        if order
+            .iter()
+            .any(|p| self.pane_meas(*p).is_some_and(|m| m.id == sel))
+        {
+            return;
+        }
+        let f = self.layout.focus;
+        if let Some(v) = self.layout.view_mut(f) {
+            v.meas = Some(sel);
+        }
     }
 
     /// The link went down or came up: no answer to an earlier call comes.
