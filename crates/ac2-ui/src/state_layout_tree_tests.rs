@@ -437,25 +437,34 @@ fn tab_steps_through_the_trees_rows() {
     assert_eq!(t.st.selected_trace, None);
     assert_eq!(tab(&mut t, "Shift+Tab"), "t5");
 
-    // The focused pane shows the row's measurement, as on a click on its row, turning into
-    // its kind; the focus stays.
-    assert_eq!(tab(&mut t, "Shift+Tab"), "l2");
+    // A measurement's row puts it on the focused pane, turning that into its kind, the
+    // focus staying; a child row (a live curve, a math channel, a stored trace) only
+    // selects.
     let pane = t.st.layout.focus;
-    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
-    assert_eq!(t.st.pane_meas(pane).map(|m| m.id), Some(MeasId(2)));
+    let before = t.st.layout.view(pane).copied();
+    assert_eq!(tab(&mut t, "Shift+Tab"), "l2");
+    assert_eq!(
+        t.st.layout.view(pane).copied(),
+        before,
+        "a live curve's row"
+    );
     assert_eq!(tab(&mut t, "Shift+Tab"), "m2");
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
+    assert_eq!(t.st.pane_meas(pane).map(|m| m.id), Some(MeasId(2)));
+    let before = t.st.layout.view(pane).copied();
     assert_eq!(tab(&mut t, "Shift+Tab"), "m6");
     assert_eq!(
-        (t.st.layout.focus, t.focus_kind()),
-        (pane, PaneKind::Transfer)
+        t.st.layout.view(pane).copied(),
+        before,
+        "a math channel's row"
     );
-    assert_eq!(t.st.pane_meas(pane).map(|m| m.id), Some(MeasId(6)));
-    // A stored trace of another measurement: the pane shows that measurement, the trace
-    // selected in it.
     assert_eq!(tab(&mut t, "Shift+Tab"), "t4");
     assert_eq!(t.st.layout.focus, pane);
-    assert_eq!(t.st.pane_meas(pane).map(|m| m.id), Some(MeasId(1)));
+    assert_eq!(
+        t.st.layout.view(pane).copied(),
+        before,
+        "a stored trace's row"
+    );
 }
 
 /// From a selected trace, Tab goes on from its row; from the imported trace (the tree's

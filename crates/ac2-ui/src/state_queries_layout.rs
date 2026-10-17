@@ -105,7 +105,7 @@ impl AppState {
                         kind: v.kind,
                         measurement,
                         modes: v.modes,
-                        levels: self.pane_levels(id),
+                        levels: self.operator_levels(id),
                     })
                 })
                 .collect(),
@@ -280,6 +280,7 @@ impl AppState {
         let l = &prefs.layout;
         self.pending_pane_meas.clear();
         self.pane_levels.clear();
+        self.level_set.clear();
         self.spectrum_hold.clear();
         match &l.panes {
             Some(p) => {
@@ -299,9 +300,7 @@ impl AppState {
                     .collect();
                 self.layout = Layout::of(p.root.clone(), views, p.focus);
                 for v in &p.views {
-                    if v.levels != PaneLevels::default() {
-                        self.pane_levels.insert(v.id, v.levels);
-                    }
+                    self.set_operator_levels(v.id, &v.levels);
                     if let Some(n) = &v.measurement
                         && self.layout.views.contains_key(&v.id)
                     {

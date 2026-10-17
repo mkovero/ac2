@@ -368,9 +368,9 @@ pub struct AppState {
     layout_calls: std::collections::VecDeque<meas_layout::LayoutCall>,
     /// Edits waiting for the `meas.layout` call in flight for their measurement: the newest.
     layout_queued: BTreeMap<MeasId, ac2_proto::model::PaneLayout>,
-    /// A split dragged: the measurements whose layout takes it, and when (`now_s`) the drag
+    /// A split dragged: the measurement whose layout takes it, and when (`now_s`) the drag
     /// counts as done.
-    layout_due: Option<(Vec<MeasId>, f64)>,
+    layout_due: Option<(MeasId, f64)>,
     /// A measurement's row was chosen: its own panes go on screen after the message.
     own_panes_due: bool,
     /// The measurement this app selected by itself, the one it had gone (or none chosen
@@ -387,14 +387,14 @@ pub struct AppState {
     own_panes: Option<MeasId>,
     /// The lost selection's own panes were on screen: they follow it when it comes back.
     lost_own_panes: bool,
-    /// Each of a measurement's own panes' picks (reading order) as a chip pick or a drop
-    /// left them, with the panes they were: its row brings them back with those picks.
-    /// Which measurement a pane shows is this app's, not part of the layout the daemon
-    /// keeps. A child row (Tab walking the list) changes a pane for a look only.
-    own_picks: BTreeMap<MeasId, (ac2_proto::model::PaneLayout, Vec<Option<MeasId>>)>,
-    /// A pane was given a measurement by its chip or a row dropped on it: the own panes on
-    /// screen remember what each pane shows after the message.
-    pane_picked: bool,
+    /// The measurement whose row was chosen last (or that this app selected by itself, a
+    /// measurement made, a sweep just run): a pane with no pick of its own shows it. A child
+    /// row, a chip pick or a click in a pane never moves it, so they change no pane but the
+    /// one picked.
+    chosen: Option<MeasId>,
+    /// The level ranges the operator set, by pane: each is stored with the panes and kept
+    /// (never framed again automatically) until the pane shows another measurement.
+    level_set: BTreeSet<(PaneId, levels::LevelSlot)>,
     /// Names of the measurements the daemon has listed since this app started: a pane
     /// remembered on one of them waits for it to come back.
     meas_seen: BTreeSet<String>,
@@ -532,8 +532,8 @@ impl AppState {
             lost_selection: None,
             own_panes: None,
             lost_own_panes: false,
-            own_picks: BTreeMap::new(),
-            pane_picked: false,
+            chosen: None,
+            level_set: BTreeSet::new(),
             meas_seen: BTreeSet::new(),
             keys: Keymap::default(),
             row_drag: None,
@@ -668,21 +668,16 @@ impl AppState {
             Msg::Sessions(m) => self.sessions_msg(m, out),
             Msg::RenameTrace(id) => {
                 if self.selected_trace != Some(id) {
-                    self.select_trace(Some(id));
+                    self.select_trace_row(id);
                     self.reveal_trace();
                 }
                 if let Ok(t) = self.trace_meta(id) {
                     self.prompt(PromptKind::TraceRename(id), t.edit.name.clone());
                 }
             }
-            Msg::FocusPane(p) => {
-                self.layout.set_focus(p);
-                // A click on a pane of another measurement is about what it shows; one on
-                // the pane of the selection only moves the focus.
-                if !self.selection_on_pane(p) {
-                    self.select_shown(p);
-                }
-            }
+            // A click in a pane gives it the keyboard; the selection stays on the row the
+            // operator chose (the pane's keys act on what it shows).
+            Msg::FocusPane(p) => self.layout.set_focus(p),
             Msg::LegendPick(p, key) => self.legend_pick(p, key),
             Msg::PaneMenu(p) => {
                 self.overlay = match self.overlay {

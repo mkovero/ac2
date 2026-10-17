@@ -2,7 +2,12 @@
 //! by the keys and the wheel on that pane alone, so two panes of one kind (two transfer
 //! measurements side by side) keep scales of their own. The frequency axis stays shared:
 //! panes read against each other at the same frequencies.
+//!
+//! A range the operator set (zoom, pan, reset, fit) is kept with the panes: in the layout of
+//! the measurement whose row brought them (`meas.layout`) and in `ui.toml`. A range framed
+//! automatically is not: wherever the panes come back, a pane frames its first curve.
 
+use ac2_proto::model::layout::{LayoutLevels, LevelRange};
 use ac2_proto::model::{LevelScale, Measurement};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_scene::axis::Range;
@@ -77,6 +82,64 @@ impl Default for PaneLevels {
     }
 }
 
+/// One of a pane's level ranges ([`PaneLevels`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LevelSlot {
+    Transfer,
+    SpectrumDbfs,
+    SpectrumSpl,
+    Distortion,
+}
+
+impl LevelSlot {
+    const ALL: [LevelSlot; 4] = [
+        LevelSlot::Transfer,
+        LevelSlot::SpectrumDbfs,
+        LevelSlot::SpectrumSpl,
+        LevelSlot::Distortion,
+    ];
+
+    /// The range a pane of `kind` draws on in `scale`; the SPL pane has none.
+    fn of(kind: PaneKind, scale: LevelScale) -> Option<Self> {
+        match kind {
+            PaneKind::Transfer => Some(Self::Transfer),
+            PaneKind::Spectrum => Some(match scale {
+                LevelScale::Dbfs => Self::SpectrumDbfs,
+                LevelScale::DbSpl => Self::SpectrumSpl,
+            }),
+            PaneKind::Distortion => Some(Self::Distortion),
+            PaneKind::Spl => None,
+        }
+    }
+
+    fn get(self, l: &PaneLevels) -> Range {
+        match self {
+            Self::Transfer => l.transfer,
+            Self::SpectrumDbfs => l.spectrum_dbfs,
+            Self::SpectrumSpl => l.spectrum_spl,
+            Self::Distortion => l.distortion,
+        }
+    }
+
+    fn set(self, l: &mut PaneLevels, r: Range) {
+        match self {
+            Self::Transfer => l.transfer = r,
+            Self::SpectrumDbfs => l.spectrum_dbfs = r,
+            Self::SpectrumSpl => l.spectrum_spl = r,
+            Self::Distortion => l.distortion = r,
+        }
+    }
+
+    fn wire(self, l: &mut LayoutLevels) -> &mut Option<LevelRange> {
+        match self {
+            Self::Transfer => &mut l.transfer,
+            Self::SpectrumDbfs => &mut l.spectrum_dbfs,
+            Self::SpectrumSpl => &mut l.spectrum_spl,
+            Self::Distortion => &mut l.distortion,
+        }
+    }
+}
+
 /// A spectrum pane's level axis was framed automatically, or set by the operator
 /// (`operator`), while the pane showed `shown`: it is left as it is until the pane shows
 /// something else.
@@ -121,6 +184,11 @@ impl AppState {
         if let Some(h) = self.spectrum_hold.get(&from).cloned() {
             self.spectrum_hold.insert(to, h);
         }
+        for s in LevelSlot::ALL {
+            if self.level_set.contains(&(from, s)) {
+                self.level_set.insert((to, s));
+            }
+        }
     }
 
     /// Ranges of panes no longer in the layout go.
@@ -128,6 +196,40 @@ impl AppState {
         let views = &self.layout.views;
         self.pane_levels.retain(|id, _| views.contains_key(id));
         self.spectrum_hold.retain(|id, _| views.contains_key(id));
+        self.level_set.retain(|(id, _)| views.contains_key(id));
+    }
+
+    /// The ranges the operator set on pane `pane`, as the panes are kept.
+    pub fn operator_levels(&self, pane: PaneId) -> LayoutLevels {
+        let l = self.pane_levels(pane);
+        let mut w = LayoutLevels::default();
+        for s in LevelSlot::ALL {
+            if self.level_set.contains(&(pane, s)) {
+                let r = s.get(&l);
+                *s.wire(&mut w) = Some(LevelRange { lo: r.lo, hi: r.hi });
+            }
+        }
+        w
+    }
+
+    /// Pane `pane` (just on screen) takes the ranges the operator set on it when its panes
+    /// were kept; the others are framed when it first shows a curve.
+    pub(super) fn set_operator_levels(&mut self, pane: PaneId, w: &LayoutLevels) {
+        let mut w = *w;
+        let mut l = self.pane_levels(pane);
+        for s in LevelSlot::ALL {
+            if let Some(r) = *s.wire(&mut w) {
+                s.set(&mut l, Range::new(r.lo, r.hi));
+                self.level_set.insert((pane, s));
+            } else {
+                self.level_set.remove(&(pane, s));
+            }
+        }
+        if l == PaneLevels::default() {
+            self.pane_levels.remove(&pane);
+        } else {
+            self.pane_levels.insert(pane, l);
+        }
     }
 
     /// What spectrum pane `pane`'s level axis frames now.
@@ -138,9 +240,13 @@ impl AppState {
         )
     }
 
-    /// The operator set pane `pane`'s level axis: a spectrum pane keeps it until it shows
-    /// another measurement.
+    /// The operator set pane `pane`'s level axis: it is kept with the panes, and a spectrum
+    /// pane keeps it until it shows another measurement.
     fn hold_level(&mut self, pane: PaneId) {
+        let scale = crate::scenes::spectrum_scale(self, pane);
+        if let Some(s) = LevelSlot::of(self.layout.kind(pane), scale) {
+            self.level_set.insert((pane, s));
+        }
         if self.layout.kind(pane) != PaneKind::Spectrum {
             return;
         }
@@ -245,6 +351,11 @@ impl AppState {
                 continue;
             }
             if let Some(fit) = level::fit(self.level_values(pane)) {
+                // Framed for the new curves: no longer a range the operator set.
+                let scale = crate::scenes::spectrum_scale(self, pane);
+                if let Some(s) = LevelSlot::of(kind, scale) {
+                    self.level_set.remove(&(pane, s));
+                }
                 self.change_level(pane, |_| fit);
             }
         }
@@ -265,16 +376,31 @@ impl AppState {
                 continue;
             }
             let shown = self.spectrum_shown(pane);
-            if self
-                .spectrum_hold
-                .get(&pane)
-                .is_some_and(|h| h.shown == shown)
-            {
+            let hold = self.spectrum_hold.get(&pane);
+            if hold.is_some_and(|h| h.shown == shown) {
+                continue;
+            }
+            let slot = LevelSlot::of(PaneKind::Spectrum, shown.1);
+            let set = slot.is_some_and(|s| self.level_set.contains(&(pane, s)));
+            // A pane just put on screen with a range the operator set (the panes kept with a
+            // measurement, or in ui.toml) shows its first curve on it: that range is the
+            // operator's, framed for this curve already.
+            if hold.is_none() && set {
+                self.spectrum_hold.insert(
+                    pane,
+                    SpectrumHold {
+                        shown,
+                        operator: true,
+                    },
+                );
                 continue;
             }
             let Some(fit) = level::fit(self.level_values(pane)) else {
                 continue;
             };
+            if let Some(s) = slot {
+                self.level_set.remove(&(pane, s));
+            }
             self.change_level(pane, |_| fit);
             self.spectrum_hold.insert(
                 pane,

@@ -89,6 +89,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use ac2_proto::model::layout::{LayoutLevels, LevelRange};
 use ac2_scene::axis::Range;
 use ac2_scene::legend::LegendView;
 use ac2_scene::view::{
@@ -97,7 +98,7 @@ use ac2_scene::view::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::{Axis, PaneId, PaneKind, PaneLevels, PaneModes, PaneNode, TransferView};
+use crate::state::{Axis, PaneId, PaneKind, PaneModes, PaneNode, TransferView};
 
 mod file;
 mod layout;
@@ -175,8 +176,9 @@ pub struct PanePrefs {
     /// The measurement it showed, by name.
     pub measurement: Option<String>,
     pub modes: PaneModes,
-    /// Its own level axis ranges.
-    pub levels: PaneLevels,
+    /// The level axis ranges the operator set on it (one not set is framed when the pane
+    /// first shows a curve).
+    pub levels: LayoutLevels,
 }
 
 /// The impulse-response views' dB axes (log / ETC), dB re peak: one for the transfer

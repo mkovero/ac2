@@ -107,10 +107,12 @@ fn a_drop_changes_only_the_pane_under_it() {
     }
     assert_eq!(t.st.layout.panes().len(), 4);
     // A stored trace or a live curve goes the same way: the IR pane shows Main R's group.
+    // A drop selects nothing: the selection stays on its row.
+    let selected = (t.st.selected, t.st.selected_live);
     let ir = pane_n(&t, 3);
     drop_on(&mut t, TreeKey::Live(MeasId(5)), ir, None, false);
     assert_eq!(shows(&t, ir), Some(MeasId(5)));
-    assert_eq!(t.st.selected_live, Some(MeasId(5)));
+    assert_eq!((t.st.selected, t.st.selected_live), selected);
     assert_eq!(
         t.st.layout.view(spl).map(|v| v.kind),
         Some(PaneKind::Spectrum)
@@ -308,15 +310,15 @@ fn a_drop_is_never_the_dropped_measurements_layout() {
     answer(&mut t, &r);
     assert_eq!(
         t.st.selected,
-        Some(MeasId(4)),
-        "selected as a chip pick selects"
+        Some(MeasId(1)),
+        "the selection stays on the row"
     );
     assert_eq!(t.st.layout.focus_kind(), PaneKind::Spl);
     let r = t.key("G");
     assert_eq!(layout_targets(&r), [MeasId(1)], "{r:?}");
     answer(&mut t, &r);
-    // An edge drop is no edit of FOH SPL's either: with FOH SPL selected already, the
-    // split is an edit of Main L's panes, as a chip pick of the selection would be.
+    // An edge drop is no edit of FOH SPL's either: the split is an edit of Main L's
+    // panes.
     let r = drop_on(
         &mut t,
         TreeKey::Meas(MeasId(4)),
@@ -386,6 +388,18 @@ fn a_wrong_kind_shift_drop_is_refused() {
 fn undo_and_redo_round_trip_every_pane_edit() {
     type Edit = Box<dyn Fn(&mut T)>;
     let key = |k: &'static str| -> Edit { Box::new(move |t: &mut T| drop(t.key(k))) };
+    // Tab on to the next measurement row: a child row on the way only selects.
+    let tab_to_meas = |k: &'static str| -> Edit {
+        Box::new(move |t: &mut T| {
+            let before = t.st.pane_snap();
+            for _ in 0..t.st.tree_rows().len() {
+                t.key(k);
+                if t.st.pane_snap() != before {
+                    break;
+                }
+            }
+        })
+    };
     let edits: Vec<(&str, Edit)> = vec![
         (
             "drop",
@@ -418,14 +432,8 @@ fn undo_and_redo_round_trip_every_pane_edit() {
                 t.st.update(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(4))), &t.keys);
             }),
         ),
-        (
-            "row pick",
-            Box::new(|t: &mut T| {
-                t.st.update(Msg::SelectLive(MeasId(5)), &t.keys);
-            }),
-        ),
-        ("Tab", key("Tab")),
-        ("Shift+Tab", key("Shift+Tab")),
+        ("Tab", tab_to_meas("Tab")),
+        ("Shift+Tab", tab_to_meas("Shift+Tab")),
         ("G", key("G")),
         ("Shift+G", key("Shift+G")),
         ("T", key("T")),
@@ -535,22 +543,25 @@ fn undo_restores_the_own_layout_of_the_chosen_measurement_only() {
     answer(&mut t, &r);
     // FOH SPL picked into pane 4 is a guest: the G after it, undone, goes to Main L.
     let four = pane_n(&t, 5);
-    t.st.update(Msg::PanePick(four, PaneMenuRow::Meas(MeasId(4))), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(4)));
+    let r =
+        t.st.update(Msg::PanePick(four, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(layout_targets(&r), [MeasId(1)], "the pick: {r:?}");
+    answer(&mut t, &r);
     let r = t.key("G");
     assert_eq!(layout_targets(&r), [MeasId(1)], "{r:?}");
     answer(&mut t, &r);
     let r = t.key("Ctrl+Z");
     assert_eq!(layout_targets(&r), [MeasId(1)], "{r:?}");
     answer(&mut t, &r);
-    // The pick itself was stored on nobody: undoing it sends nothing.
+    // The pick is part of Main L's layout: undoing it goes to Main L too.
     let r = t.key("Ctrl+Z");
     assert!(
         t.last_toast().starts_with("Undid: FOH SPL"),
         "{}",
         t.last_toast()
     );
-    assert!(layout_targets(&r).is_empty(), "{r:?}");
+    assert_eq!(layout_targets(&r), [MeasId(1)], "{r:?}");
 }
 
 /// With no measurement's row chosen the panes are nobody's: undo sends nothing.

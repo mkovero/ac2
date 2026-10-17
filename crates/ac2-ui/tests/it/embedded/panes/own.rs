@@ -413,8 +413,8 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     let pane = crate::common::pane(&d.st, PaneKind::Distortion);
     d.send(Msg::FocusPane(pane));
     d.send(Msg::PanePick(pane, PaneMenuRow::Meas(sweep_a)));
-    // Sweep B's run selected with the transfer pane focused (a child row goes to the
-    // focused pane only): the sweep pane keeps sweep A.
+    // Sweep B's run selected with the transfer pane focused (a child row moves no pane):
+    // the sweep pane keeps sweep A.
     d.send(Msg::FocusPane(crate::common::pane(
         &d.st,
         PaneKind::Transfer,
@@ -497,7 +497,7 @@ fn a_chip_pick_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> 
         [Some(s2), Some(s1)],
         "the pick: that pane alone"
     );
-    assert_eq!(d.st.selected, Some(s1));
+    assert_eq!(d.st.selected, Some(s2), "a pick moves no selection");
     d.send(Msg::SelectMeas(s1));
     d.send(Msg::SelectMeas(s2));
     assert_eq!(d.st.selected, Some(s2));
@@ -507,11 +507,81 @@ fn a_chip_pick_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> 
         [Some(s2), Some(s1)],
         "the right pane keeps the pick"
     );
-    assert_eq!(d.st.layout.focus, right, "the focus stays");
+    assert_eq!(
+        spectrum_panes(&d.st).get(1),
+        Some(&d.st.layout.focus),
+        "the focus stays on the right one"
+    );
     assert!(
         d.st.meas(s1).is_some_and(|m| m.layout.is_none()),
         "Spectrum 1 has no panes of its own"
     );
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// From an empty daemon: two spectra, `Spectrum 2`'s row chosen and its pane split, the
+/// right half stepped to the spectrograph, `Spectrum 1` picked on it and its level axis
+/// zoomed. The app restarts (a new client on the same daemon) and chooses `Spectrum 2`'s
+/// row: the pick and the zoom come back from the daemon, the zoom kept as frames arrive,
+/// and the selection never left `Spectrum 2`'s row.
+#[test]
+fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let s1 = new_spectrum(&mut d, false)?;
+    let s2 = new_spectrum(&mut d, true)?;
+    d.key("Alt+2");
+    d.send(Msg::SelectMeas(s2));
+    d.key("N");
+    let [_, right] = spectrum_panes(&d.st)[..] else {
+        return Err(format!("{:?}", spectrum_panes(&d.st)).into());
+    };
+    d.send(Msg::FocusPane(right));
+    d.key("G");
+    d.key("G");
+    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s1)));
+    assert_eq!(d.st.selected, Some(s2), "the pick leaves the row selected");
+    let before = d.st.level_range(right).ok_or("level axis")?;
+    d.key("Ctrl+I");
+    let zoomed = d.st.level_range(right).ok_or("level axis")?;
+    assert_ne!(zoomed, before, "the zoom");
+    assert_eq!(d.st.selected, Some(s2));
+    d.until("Spectrum 2's layout on the daemon", |s| {
+        s.meas(s2)
+            .and_then(|m| m.layout.as_ref())
+            .is_some_and(|l| *l == s.pane_layout())
+    })?;
+    let saved = d.st.pane_layout();
+    drop(d);
+
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    d.synced()?;
+    d.until("both spectra", |s| {
+        s.meas(s1).is_some() && s.meas(s2).is_some()
+    })?;
+    d.send(Msg::SelectMeas(s2));
+    assert_eq!(d.st.selected, Some(s2));
+    assert_eq!(d.st.pane_layout(), saved, "Spectrum 2's panes, as left");
+    let [left, right] = spectrum_panes(&d.st)[..] else {
+        return Err(format!("{:?}", spectrum_panes(&d.st)).into());
+    };
+    assert_eq!(d.st.pane_meas(left).map(|m| m.id), Some(s2));
+    assert_eq!(d.st.pane_meas(right).map(|m| m.id), Some(s1), "the pick");
+    assert_eq!(d.st.level_range(right), Some(zoomed), "the zoom");
+    d.until("Spectrum 1's spectrograph filling", |s| {
+        s.spectrographs
+            .get(&s1)
+            .is_some_and(|h| h.ring().iter().flatten().count() >= 10)
+    })?;
+    assert_eq!(
+        d.st.level_range(right),
+        Some(zoomed),
+        "an operator's range is not refitted"
+    );
+    assert_eq!(d.st.selected, Some(s2), "the selection stayed on the row");
     drop(d);
     drop(daemon);
     Ok(())

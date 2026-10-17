@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn panes_show_and_select_their_measurement() {
+fn panes_show_their_measurement_and_leave_the_selection() {
     let mut t = T::new();
     t.conn(mirror(four()));
     let shown = |t: &T, p: PaneKind| t.st.kind_meas(p).map(|m| m.id.0);
@@ -14,31 +14,32 @@ fn panes_show_and_select_their_measurement() {
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(2));
     assert_eq!(shown(&t, PaneKind::Spl), None);
 
-    // A click in a pane focuses it and selects what it shows.
+    // A click in a pane focuses it and selects nothing.
     t.st.update(Msg::FocusPane(t.pane(PaneKind::Spectrum)), &t.keys);
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
-    assert_eq!(t.st.selected, Some(MeasId(2)));
-    // Its list offers the measurements of its kind: spectrum and RTA here.
+    assert_eq!(t.st.selected, Some(MeasId(1)));
+    // Its list offers the measurements of its kind: spectrum and RTA here. A pick shows
+    // one there, the selection staying on its row.
     let sp = t.pane(PaneKind::Spectrum);
     t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(4)));
+    assert_eq!(t.st.selected, Some(MeasId(1)));
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
     t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(2)));
+    assert_eq!(t.st.selected, Some(MeasId(1)));
     // The transfer pane kept its own measurement.
     t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(1)));
     t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(3)));
     assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
-    assert_eq!(ir(&t), Some(3), "an unchosen IR view follows the selection");
-    // Focus by key selects too.
+    assert_eq!(
+        ir(&t),
+        Some(3),
+        "an unchosen IR view follows the chosen row"
+    );
+    // Focus by key selects nothing either.
     t.key("Alt+2");
-    assert_eq!(t.st.selected, Some(MeasId(2)));
-    // The IR view follows the selection, a spectrum now: it leads with the first transfer
-    // measurement.
     t.key("Alt+3");
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(t.st.selected, Some(MeasId(3)));
 
     // A list selection goes into the focused pane; the others keep theirs.
     t.key("Alt+2");
@@ -73,7 +74,7 @@ fn panes_show_and_select_their_measurement() {
     }
     t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(t.st.selected, Some(MeasId(4)));
     assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
     // A click on the chip again closes the list; a pick by mouse shows it.
     t.st.update(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
@@ -89,7 +90,7 @@ fn panes_show_and_select_their_measurement() {
     );
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
-    assert_eq!(t.st.selected, Some(MeasId(2)));
+    assert_eq!(t.st.selected, Some(MeasId(4)));
     // A measurement the pane cannot draw turns it into the kind that does, and back.
     let sp = t.pane(PaneKind::Spectrum);
     t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(3))), &t.keys);
@@ -426,16 +427,10 @@ fn trace_keys_act_on_the_selected_trace() {
         t.st.pane_caption(t.pane(PaneKind::Transfer)).as_deref(),
         Some("t15")
     );
-    // A spectrum trace's row: the focused pane turns into a spectrum pane to draw it.
+    // A spectrum trace's row moves no pane: the focused transfer pane does not draw it, so
+    // the keys act on the live measurement.
     t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
-    assert_eq!(t.st.layout.focus_kind(), PaneKind::Spectrum);
-    // The pane back to a transfer pane, which does not draw it: the keys act on the live
-    // measurement.
-    let f = t.st.layout.focus;
-    t.st.update(
-        Msg::PanePick(f, PaneMenuRow::Kind(PaneKind::Transfer)),
-        &t.keys,
-    );
+    assert_eq!(t.st.layout.focus_kind(), PaneKind::Transfer);
     assert!(t.key("U").is_empty());
     assert!(t.st.edit(MeasId(1)).inverted);
 }

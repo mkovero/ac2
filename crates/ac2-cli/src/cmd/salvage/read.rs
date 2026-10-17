@@ -586,6 +586,25 @@ mod tests {
         }
     }
 
+    /// A layout saved before panes carried a pick and level ranges reads whole: each pane
+    /// follows its measurement, with no level range of the operator's.
+    #[test]
+    fn a_layout_of_format_27_reads_with_no_picks_or_levels() {
+        let pane = json!({ "kind": "spectrum", "transfer_view": "magnitude",
+                           "spectrum_view": "spectrograph", "spl_view": "meter_leq",
+                           "sweep_view": "response", "chrome": "full" });
+        let v = json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
+                        "running": false, "delay": null, "colour": null,
+                        "layout": { "type": "pane", "pane": pane } });
+        let m = old_meas(&v).unwrap();
+        assert!(m.notes.is_empty(), "{:?}", m.notes);
+        let layout = m.layout.expect("the layout");
+        let panes = layout.panes();
+        assert_eq!(panes.len(), 1);
+        assert_eq!(panes[0].meas, None);
+        assert!(panes[0].levels.is_empty());
+    }
+
     #[test]
     fn a_config_that_fits_is_taken_whole() {
         let c = spl();

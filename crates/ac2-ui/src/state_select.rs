@@ -225,7 +225,17 @@ impl AppState {
         );
     }
 
+    /// The transfer measurement a delay key acts on: the one the focused transfer pane
+    /// shows (a pane key acts on its pane, whatever row is selected), else the selected one.
     pub(super) fn need_tf(&mut self) -> Option<Measurement> {
+        let f = self.layout.focus;
+        if self.layout.kind(f) == PaneKind::Transfer
+            && let Some(m) = self
+                .pane_meas(f)
+                .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
+        {
+            return Some(m.clone());
+        }
         self.need_meas(
             &[|k| matches!(k, MeasKind::Transfer { .. })],
             "transfer-function",
@@ -287,15 +297,6 @@ impl AppState {
         }
     }
 
-    /// Selects the measurement pane `p` shows, if any, leaving the pane's choice as it is.
-    pub(super) fn select_shown(&mut self, p: PaneId) {
-        if let Some(id) = self.pane_meas(p).map(|m| m.id) {
-            self.selected = Some(id);
-            self.selected_trace = None;
-            self.selected_live = None;
-        }
-    }
-
     /// A measurement's row in the tree chosen (click, Enter, Tab): selected, and its own
     /// panes on screen when it has them; else the focused pane shows it, turning into the
     /// kind of pane that measurement belongs in. The operator's eyes are on the focused
@@ -310,73 +311,39 @@ impl AppState {
         self.own_panes_due = true;
     }
 
-    /// A child row of the tree chosen (a live curve, a math channel, a stored trace's
-    /// measurement): the focused pane shows measurement `id`, turning into a kind that draws
-    /// it when it cannot. Only that pane changes: the focus stays and no measurement's own
-    /// panes come, so a pane can be given another curve without the others moving.
-    pub(super) fn focused_pane_shows(&mut self, id: MeasId) {
-        let Some(m) = self.meas(id) else {
-            return;
-        };
-        let f = self.layout.focus;
-        if !self.layout.kind(f).shows(&m.config.kind) {
-            let kind = PaneKind::for_kind(&m.config.kind);
-            self.set_pane_kind(f, kind);
-        }
-        if let Some(v) = self.layout.view_mut(f) {
-            v.meas = Some(id);
-        }
-    }
-
-    /// A measurement's live-curve row chosen (click, Tab): a child row, shown by the
-    /// focused pane; the live curve is what the keys act on, as a click on its legend row
-    /// makes it.
+    /// A measurement's live-curve row chosen (click, Tab): a child row, selected so the keys
+    /// act on the live curve, as a click on its legend row makes it. No pane changes: a pane
+    /// is given a curve by its chip or a row dragged onto it.
     pub(super) fn select_live_row(&mut self, id: MeasId) {
         if self.meas(id).is_none() {
             return;
         }
-        self.focused_pane_shows(id);
         self.selected = Some(id);
         self.selected_trace = None;
         self.selected_live = Some(id);
     }
 
-    /// A math channel's row chosen (click, Tab): a child row of its owner, shown by the
-    /// focused pane; the channel is what the keys act on.
+    /// A math channel's row chosen (click, Tab): a child row of its owner, selected so the
+    /// keys act on the channel; no pane changes.
     pub(super) fn select_math_row(&mut self, id: MeasId) {
         if self.meas(id).is_none() {
             return;
         }
-        self.focused_pane_shows(id);
         self.selected = Some(id);
         self.selected_trace = None;
         self.selected_live = None;
     }
 
-    /// A stored trace's row chosen (click, Tab): a child row, its measurement shown by the
-    /// focused pane (turned into the kind that draws the trace), the trace selected; the
-    /// measurement selection stays.
+    /// A stored trace's row chosen (click, Tab): a child row, the trace selected so the trace
+    /// keys act on it; the measurement selection stays and no pane changes (a selected sweep
+    /// is the run its measurement's sweep pane draws).
     pub(super) fn select_trace_row(&mut self, id: TraceId) {
-        let Some(t) = self
+        if self
             .daemon()
-            .and_then(|s| s.traces.iter().find(|t| t.id == id))
-            .cloned()
-        else {
-            return;
-        };
-        let f = self.layout.focus;
-        if !drawn_in(&t, self.layout.kind(f)) {
-            self.set_pane_kind(f, display::home_pane(t.kind));
-        }
-        if let TraceOwner::Meas { meas } = ac2_scene::meas_list::group_of(&t, &self.measurements())
-            && self
-                .meas(meas)
-                .is_some_and(|m| self.layout.kind(f).shows(&m.config.kind))
-            && let Some(v) = self.layout.view_mut(f)
+            .is_some_and(|s| s.traces.iter().any(|t| t.id == id))
         {
-            v.meas = Some(meas);
+            self.set_selected_trace(Some(id));
         }
-        self.select_trace(Some(id));
     }
 
     /// Tab / Shift+Tab: the next / previous row of the measurement list as it is shown
@@ -449,9 +416,11 @@ impl AppState {
         self.tree_reveal = true;
     }
 
-    /// Pane `p` shows `id`; it gets the focus and `id` is selected. A pane that cannot draw
-    /// it turns into the kind of pane it belongs in; one that can keeps its kind (a sweep
-    /// picked on the transfer pane has its runs drawn there).
+    /// Pane `p` shows `id` (its chip, a row dropped on it) and gets the focus; nothing
+    /// else changes: no other pane, and not the selection, which stays on the row the
+    /// operator chose. A pane that cannot draw it turns into the kind of pane it belongs in;
+    /// one that can keeps its kind (a sweep picked on the transfer pane has its runs drawn
+    /// there, as the pane's own measurement).
     pub(super) fn pane_show(&mut self, p: PaneId, id: MeasId) {
         if matches!(self.overlay, Overlay::PaneMenu(_)) {
             self.overlay = Overlay::None;
@@ -467,17 +436,20 @@ impl AppState {
             self.set_pane_kind(p, kind);
         }
         self.layout.set_focus(p);
-        self.select_on(p, id);
+        if let Some(v) = self.layout.view_mut(p) {
+            v.meas = Some(id);
+        }
     }
 
-    /// Selects `id` as what pane `p` shows: a sweep picked on the transfer pane is that
-    /// pane's (its runs drawn there).
+    /// Selects `id` as what pane `p` shows, and as the measurement panes with no pick of
+    /// their own show: its row chosen, or this app's own choice (a remembered pane's).
     pub(super) fn select_on(&mut self, p: PaneId, id: MeasId) {
         // A pane closed since (a stale menu or click) has nothing to show it on.
         if self.layout.view(p).is_none() {
             return;
         }
         self.selected = Some(id);
+        self.chosen = Some(id);
         self.selected_trace = None;
         self.selected_live = None;
         if let Some(v) = self.layout.view_mut(p) {

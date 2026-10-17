@@ -162,7 +162,7 @@ fn two_panes() -> PanesPrefs {
                     transfer: TransferView::Ir(IrMode::Log),
                     ..PaneModes::default()
                 },
-                levels: PaneLevels::default(),
+                levels: LayoutLevels::default(),
             },
             PanePrefs {
                 id: PaneId(2),
@@ -176,7 +176,7 @@ fn two_panes() -> PanesPrefs {
                     sweep_reference: false,
                     chrome: PlotChrome::Bare,
                 },
-                levels: PaneLevels::default(),
+                levels: LayoutLevels::default(),
             },
         ],
     }
@@ -370,9 +370,9 @@ fn bad_files_are_reported() {
     assert!(UiPrefs::from_toml("[ir_levels]\nphase = [-10.0, 10.0]\n").is_err());
 }
 
-/// The impulse-response dB axes and each pane's own level axes moved off their defaults
-/// are written, the rest left out; an out-of-limits range is brought within the axis
-/// limits on reading.
+/// The impulse-response dB axes moved off their defaults and each pane's level axes the
+/// operator set are written, the rest left out; an out-of-limits range is brought within the
+/// axis limits on reading.
 #[test]
 fn level_ranges_round_trip() {
     let d = UiPrefs::default();
@@ -380,8 +380,14 @@ fn level_ranges_round_trip() {
     let mut p = UiPrefs::default();
     p.ir_levels.sweep = Range::new(-90.0, 0.0);
     let mut panes = two_panes();
-    panes.views[0].levels.transfer = Range::new(-24.5, 12.0);
-    panes.views[1].levels.spectrum_dbfs = Range::new(-140.0, -40.0);
+    panes.views[0].levels.transfer = Some(LevelRange {
+        lo: -24.5,
+        hi: 12.0,
+    });
+    panes.views[1].levels.spectrum_dbfs = Some(LevelRange {
+        lo: -140.0,
+        hi: -40.0,
+    });
     p.layout.panes = Some(panes);
     let text = p.to_toml();
     assert!(text.contains("[ir_levels]"), "{text}");
@@ -404,9 +410,16 @@ fn level_ranges_round_trip() {
     )
     .expect("parse");
     let v = far.layout.panes.expect("panes").views[0].levels;
-    assert_eq!(v.distortion, Range::new(-300.0, -200.0));
-    // Low above high is no range: that one is the default, the layout stays.
-    assert_eq!(v.transfer, PaneLevels::default().transfer);
+    assert_eq!(
+        v.distortion,
+        Some(LevelRange {
+            lo: -300.0,
+            hi: -200.0
+        })
+    );
+    // Low above high is no range: that one is left out (framed on first show), the layout
+    // stays.
+    assert_eq!(v.transfer, None);
 }
 
 /// A kind-wide `[levels]` table is no setting: logged and left out (the panes start on
