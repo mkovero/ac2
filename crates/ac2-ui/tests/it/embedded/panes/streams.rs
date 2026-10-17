@@ -166,7 +166,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
         size,
         now(),
     );
-    assert_eq!(s.caption, format!("{name} · last 30 s · dBFS"));
+    assert_eq!(s.caption, format!("{name} · last 30 s · dBFS (tone)"));
     assert_eq!(s.message, None);
     let history = s
         .scene
@@ -193,7 +193,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
     );
     let text = s.cursor.ok_or("cursor")?.text;
     assert!(
-        text.starts_with("1.00 kHz · 0.1 s ago · ") && text.ends_with(" dBFS"),
+        text.starts_with("1.00 kHz · 0.1 s ago · ") && text.ends_with(" dBFS (tone)"),
         "{text}"
     );
     // The cursor toggle turns it off, time and all.
@@ -258,7 +258,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
     assert!(
         alone
             .caption
-            .starts_with(&format!("{name} · last 60 s · dBFS · stopped · ")),
+            .starts_with(&format!("{name} · last 60 s · dBFS (tone) · stopped · ")),
         "{}",
         alone.caption
     );

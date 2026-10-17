@@ -215,19 +215,26 @@ impl SpectrographHistory {
         self.scale
     }
 
+    /// What the levels held are: tone or density.
+    fn quantity(&self) -> crate::spectrum::Quantity {
+        if self.spec_level == Some(SpecLevel::Density) {
+            crate::spectrum::Quantity::Density
+        } else {
+            crate::spectrum::Quantity::Tone
+        }
+    }
+
     /// The unit of the levels held: `dBFS`, `dB SPL/Hz`, …
     pub fn unit(&self) -> Option<&'static str> {
-        let density = self.spec_level == Some(SpecLevel::Density);
-        self.scale.map(|s| {
-            crate::spectrum::value_unit(
-                s,
-                if density {
-                    crate::spectrum::Quantity::Density
-                } else {
-                    crate::spectrum::Quantity::Tone
-                },
-            )
-        })
+        self.scale
+            .map(|s| crate::spectrum::value_unit(s, self.quantity()))
+    }
+
+    /// The unit with what the levels are, as the spectrum's cursor reads it:
+    /// `dBFS (tone)`, `dB SPL/Hz (density)`.
+    pub fn unit_noted(&self) -> Option<String> {
+        self.unit()
+            .map(|u| format!("{u} ({})", crate::spectrum::quantity_note(self.quantity())))
     }
 
     pub fn rows(&self) -> Option<&RowMap> {
@@ -550,7 +557,7 @@ pub fn spectrograph_scene(
                 s.name.clone()
             };
             caption = format!("{name} · last {span} s");
-            if let Some(unit) = s.history.unit() {
+            if let Some(unit) = s.history.unit_noted() {
                 caption.push_str(&format!(" · {unit}"));
             }
             // In the split the spectrum's legend tags the curve; alone, the caption does.
@@ -596,7 +603,7 @@ pub fn spectrograph_scene(
                     .history
                     .value_at(hz, before)
                     .map_or(f64::NAN, |v| f64::from(v) + s.offset_db);
-                let level = match s.history.unit() {
+                let level = match s.history.unit_noted() {
                     Some(unit) if v.is_finite() => {
                         format!("{} {unit}", format::level(v))
                     }

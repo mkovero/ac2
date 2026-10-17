@@ -306,7 +306,11 @@ pub(crate) fn spectrum_scene_in(
                 let v = t.value(j);
                 let s = format::level(v);
                 let s = if v.is_finite() {
-                    format!("{s} {}", value_unit(t.scale, t.quantity))
+                    format!(
+                        "{s} {} ({})",
+                        value_unit(t.scale, t.quantity),
+                        quantity_note(t.quantity)
+                    )
                 } else {
                     s
                 };

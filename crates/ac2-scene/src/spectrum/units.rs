@@ -13,6 +13,21 @@ pub fn value_unit(scale: LevelScale, q: Quantity) -> &'static str {
     }
 }
 
+/// What a value of `q` is, as the axis unit's parentheses say it: `tone`, `density`,
+/// `band`, with the smoothing when there is one. A tone and a density of the same signal
+/// differ by the bin width in dB, so a reading without it can't be compared.
+pub fn quantity_note(q: Quantity) -> String {
+    match q {
+        Quantity::Tone => "tone".to_string(),
+        Quantity::Density => "density".to_string(),
+        Quantity::Band => "band".to_string(),
+        Quantity::SmoothedTone(f) => format!("tone, {} smoothed", format::octave_fraction(f)),
+        Quantity::SmoothedDensity(f) => {
+            format!("density, {} smoothed", format::octave_fraction(f))
+        }
+    }
+}
+
 /// Caption suffix for a calibrated trace (decisions 7a/7b): the calibration's age when it
 /// belongs to this device + input + mic, the mismatch warning when it belongs to another mic
 /// or input, and the mic-curve note ([`crate::cal::curve_note`]: which curve was

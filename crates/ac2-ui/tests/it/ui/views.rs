@@ -619,10 +619,10 @@ fn spectrograph() {
             size,
             now,
         );
-        assert_eq!(s.caption, "Mic 1 FFT · last 30 s · dBFS · stopped");
+        assert_eq!(s.caption, "Mic 1 FFT · last 30 s · dBFS (tone) · stopped");
         assert_eq!(
             s.cursor.expect("cursor").text,
-            "1.00 kHz · 8.0 s ago · \u{2212}32.0 dBFS"
+            "1.00 kHz · 8.0 s ago · \u{2212}32.0 dBFS (tone)"
         );
     }
     snapshot_when(&mut h, "spectrograph", pin, same);
@@ -658,7 +658,7 @@ fn spectrograph() {
         assert!(s.spectrum.is_none());
         assert_eq!(
             s.caption,
-            "Mic 1 FFT · last 30 s · dBFS · stopped · Hann window"
+            "Mic 1 FFT · last 30 s · dBFS (tone) · stopped · Hann window"
         );
     }
     snapshot_when(&mut h, "spectrograph_alone", pin, same);

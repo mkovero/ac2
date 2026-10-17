@@ -58,7 +58,7 @@ fn line_style_gaps_and_cursor() {
     assert_eq!(cur.freq, "1.00 kHz");
     assert_eq!(
         cur.rows,
-        vec![("RTA".to_string(), "−40.0 dB SPL".to_string())]
+        vec![("RTA".to_string(), "−40.0 dB SPL (band)".to_string())]
     );
 }
 
@@ -90,7 +90,7 @@ fn a_gliding_curve_is_drawn_between_frames_and_read_at_the_newest() {
     let cur = s.cursor.expect("cursor");
     assert_eq!(
         cur.rows,
-        vec![("RTA".to_string(), "−40.0 dBFS".to_string())]
+        vec![("RTA".to_string(), "−40.0 dBFS (band)".to_string())]
     );
 }
 
@@ -134,10 +134,10 @@ fn offset_traces_move_and_say_so() {
     assert_eq!(
         cur.rows,
         [
-            ("RTA".to_string(), "−40.0 dBFS".to_string()),
+            ("RTA".to_string(), "−40.0 dBFS (band)".to_string()),
             (
                 "Main L S1 · offset +3.0 dB".to_string(),
-                "−37.0 dBFS".to_string()
+                "−37.0 dBFS (band)".to_string()
             ),
         ]
     );
@@ -636,6 +636,45 @@ fn cursor_stays_where_it_was_put_and_reads_the_bin_holding_it() {
     assert_eq!(cur.freq, "59.9 Hz");
     assert_eq!(
         cur.rows,
-        vec![("RTA".to_string(), "−10.0 dB SPL".to_string())]
+        vec![("RTA".to_string(), "−10.0 dB SPL (band)".to_string())]
+    );
+}
+
+/// Compared curves of different quantities read the same number differently, so each
+/// cursor row names its own: a tone, a density, a smoothed tone.
+#[test]
+fn cursor_rows_name_tone_or_density() {
+    let g = third_octaves();
+    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let level: Vec<f32> = vec![-40.0; f.len()];
+    let mut tone = rta_trace(&f, &e, &level, LevelScale::DbSpl);
+    tone.quantity = Quantity::Tone;
+    tone.name = "Spectrum 1".to_string();
+    let mut density = tone.clone();
+    density.quantity = Quantity::Density;
+    density.name = "Spectrum 2".to_string();
+    let mut smoothed = tone.clone();
+    smoothed.quantity = Quantity::SmoothedTone(SmoothingFraction::Sixth);
+    smoothed.name = "Spectrum 3".to_string();
+    let view = ViewState {
+        cursor_hz: Some(1000.0),
+        ..ViewState::default()
+    };
+    let s = spectrum_scene(
+        &[tone, density, smoothed],
+        &Status::default(),
+        &view,
+        &Theme::dark(),
+        SIZE,
+    );
+    let cur = s.cursor.expect("cursor");
+    let values: Vec<&str> = cur.rows.iter().map(|(_, v)| v.as_str()).collect();
+    assert_eq!(
+        values,
+        [
+            "−40.0 dB SPL (tone)",
+            "−40.0 dB SPL/Hz (density)",
+            "−40.0 dB SPL (tone, 1/6 oct smoothed)",
+        ]
     );
 }
