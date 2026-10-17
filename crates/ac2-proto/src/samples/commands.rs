@@ -53,6 +53,12 @@ pub fn commands() -> Vec<Command> {
                         averaging: SpecAveraging::Exponential {
                             time_constant: Seconds(1.0),
                         },
+                        display: crate::model::SpectrumDisplay {
+                            style: crate::model::SpectrumStyle::Fill,
+                            peak: crate::model::PeakMode::Track,
+                            spectrograph_span_s: 60,
+                            spectrograph_colours: crate::model::Colormap::Magma,
+                        },
                     },
                 },
             },
@@ -340,6 +346,19 @@ pub fn commands() -> Vec<Command> {
         Command::ArtnetFade {
             base: Rev(38),
             seconds: Seconds(2.5),
+        },
+        Command::MeasCompare {
+            meas: MeasId(4),
+            compared: vec![
+                crate::model::Compared::Meas { meas: MeasId(5) },
+                crate::model::Compared::Trace {
+                    trace: crate::units::TraceId(7),
+                },
+            ],
+        },
+        Command::MeasOffset {
+            meas: MeasId(4),
+            offset: crate::units::Db(6.0),
         },
     ]
 }

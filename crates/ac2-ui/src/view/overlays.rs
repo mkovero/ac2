@@ -118,9 +118,10 @@ fn choose(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                     } else if i == p.index {
                         text = text.strong();
                     }
-                    let r = ui.add_sized(
-                        [ui.available_width(), 24.0],
-                        egui::Button::selectable(i == p.index, text),
+                    // Full width to click, text read from the left edge like a list.
+                    let r = ui.add(
+                        egui::Button::selectable(i == p.index, text)
+                            .min_size(egui::vec2(ui.available_width(), 24.0)),
                     );
                     if r.clicked() {
                         msg = Some(Some(i));

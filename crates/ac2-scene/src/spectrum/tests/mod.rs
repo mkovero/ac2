@@ -1,7 +1,7 @@
 use super::*;
 use crate::axis::Range;
 use crate::grid::{column_edges, column_frequencies};
-use crate::view::{PeakMode, PlotChrome, SpectrumView};
+use crate::view::{PlotChrome, SpectrumView};
 use ac2_proto::GridDef;
 use ac2_proto::units::{Hz, MeasId};
 
@@ -54,5 +54,7 @@ fn rta_trace<'a>(
         selected: false,
         compared: false,
         bands: None,
+        style: SpectrumStyle::Bars,
+        layer: 0,
     }
 }

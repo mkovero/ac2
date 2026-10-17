@@ -6,8 +6,9 @@ use super::*;
 use ac2_scene::freq_column::{FreqPlot, natural_right};
 
 impl AppState {
-    /// Measurement `own` among those pane kind `kind` can show; else the selected one when
-    /// its home is that kind's; else the first whose home it is, else the first it can show.
+    /// Measurement `own` among those pane kind `kind` can show; else the one whose row was
+    /// chosen when its home is that kind's; else the first whose home it is, else the first
+    /// it can show.
     /// Unchosen, a pane leads with its own kind: the transfer pane shows a sweep's runs only
     /// once picked for it, a live curve before that.
     fn resolve_meas(&self, kind: PaneKind, own: Option<MeasId>) -> Option<&Measurement> {
@@ -15,13 +16,13 @@ impl AppState {
         let pick = |id: Option<MeasId>| id.and_then(|id| c.iter().find(|m| m.id == id).copied());
         let home = |m: &Measurement| PaneKind::for_kind(&m.config.kind) == kind;
         pick(own)
-            .or_else(|| pick(self.selected).filter(|m| home(m)))
+            .or_else(|| pick(self.chosen).filter(|m| home(m)))
             .or_else(|| c.iter().find(|m| home(m)).copied())
             .or_else(|| c.first().copied())
     }
 
-    /// The measurement pane `id` shows: its own choice, else the selected measurement if it
-    /// fits, else the first that fits.
+    /// The measurement pane `id` shows: its own choice, else the one whose row was chosen if
+    /// it fits, else the first that fits.
     pub fn pane_meas(&self, id: PaneId) -> Option<&Measurement> {
         let v = self.layout.view(id)?;
         self.resolve_meas(v.kind, v.meas)
@@ -337,8 +338,8 @@ impl AppState {
         if !self.can_split(p, axis) {
             return None;
         }
-        // Both halves keep showing what the pane did, whatever is selected later: an
-        // unchosen pane would follow the selection.
+        // Both halves keep showing what the pane did, whatever row is chosen later: an
+        // unchosen pane would follow it.
         let shown = self.pane_meas(p).map(|m| m.id);
         if let Some(v) = self.layout.view_mut(p) {
             v.meas = v.meas.or(shown);
@@ -382,10 +383,8 @@ impl AppState {
         if matches!(self.overlay, Overlay::PaneMenu(m) if m.pane == gone) {
             self.overlay = Overlay::None;
         }
-        let f = self.layout.focus;
         self.pending_pane_meas
             .retain(|id, _| self.layout.views.contains_key(id));
-        self.select_shown(f);
     }
 
     /// The panes' area last drawn, without gaps: what resizing keeps every pane readable in.
@@ -489,50 +488,10 @@ impl AppState {
         }
     }
 
-    /// Focuses pane `id` from the keyboard: it selects the measurement the pane shows,
-    /// unless the selected stored trace is drawn there (the sweep chosen on the sweep pane
-    /// stays selected on the way to the transfer pane).
+    /// Focuses pane `id` from the keyboard: it takes the keys; the selection stays on the
+    /// row the operator chose.
     pub(super) fn focus_pane(&mut self, id: PaneId) {
         self.layout.set_focus(id);
-        let p = self.layout.kind(id);
-        let keep = self
-            .selected_trace_meta()
-            .filter(|t| drawn_in(t, p))
-            .map(|t| t.id);
-        self.select_shown(id);
-        if keep.is_some() {
-            self.selected_trace = keep;
-        }
-    }
-
-    /// Whether the selection (a stored trace, else a measurement) is of what pane `p`
-    /// shows: of its measurement's group, or a stored curve the pane draws. A click there
-    /// keeps it, so the trace the keys act on does not jump to the live curve under it.
-    pub(super) fn selection_on_pane(&self, p: PaneId) -> bool {
-        use ac2_proto::model::TraceOwner;
-        let Some(shown) = self.pane_meas(p) else {
-            return false;
-        };
-        let ms = self.measurements();
-        let group = TraceOwner::Meas {
-            meas: self.group_of_shown(Some(shown)).unwrap_or(shown.id),
-        };
-        let kind = self.layout.kind(p);
-        if let Some(t) = self.selected_trace_meta() {
-            if !drawn_in(t, kind) {
-                return false;
-            }
-            let drawn = self.on_pane(kind, t, Some(shown))
-                || self.trace_compared_on(kind, t, Some(shown))
-                || self
-                    .compared_sweeps(p)
-                    .iter()
-                    .any(|(d, _)| d.meta.id == t.id);
-            return drawn || ac2_scene::meas_list::group_of(t, &ms) == group;
-        }
-        self.selected
-            .and_then(|id| self.meas(id))
-            .is_some_and(|m| m.id == shown.id || ac2_scene::meas_list::meas_group(m, &ms) == group)
     }
 
     /// Brings up a pane of kind `p` (a command about that kind: the sweep's views, the SPL
@@ -615,7 +574,6 @@ impl AppState {
         if matches!(self.overlay, Overlay::PaneMenu(_)) {
             self.overlay = Overlay::None;
         }
-        self.pane_picked = true;
         match row {
             PaneMenuRow::Meas(m) => self.pane_show(id, m),
             PaneMenuRow::Kind(k) => {

@@ -98,9 +98,9 @@ fn key_hints_follow_the_focused_pane() {
     assert_eq!(hint_texts(&u, PaneKind::Transfer), None);
 }
 
-/// Every pane's level axis is remembered in the preferences with its pane as it moves, and
-/// the next start comes back to it; Ctrl+Home's defaults are remembered as such (left out of
-/// the file).
+/// Every pane's level axis the operator moves is remembered in the preferences with its
+/// pane, and the next start comes back to it; Ctrl+Home's defaults are remembered as set by
+/// hand too (a spectrum pane keeps them rather than framing its first curve).
 #[test]
 fn level_axes_are_remembered_for_the_next_start() {
     let mut t = T::new();
@@ -108,7 +108,9 @@ fn level_axes_are_remembered_for_the_next_start() {
     let remembered = |t: &T, kind: PaneKind| {
         let pane = t.st.layout.lead(kind).expect("pane");
         let p = t.st.prefs.layout.panes.as_ref().expect("panes");
-        p.views.iter().find(|v| v.id == pane).expect("view").levels
+        let l = p.views.iter().find(|v| v.id == pane).expect("view").levels;
+        let r = |r: Option<ac2_proto::model::layout::LevelRange>| r.map(|r| Range::new(r.lo, r.hi));
+        (r(l.transfer), r(l.spectrum_dbfs))
     };
     t.key("Alt+2");
     t.st.prefs_dirty = false;
@@ -116,12 +118,12 @@ fn level_axes_are_remembered_for_the_next_start() {
     let spectrum = t.level(PaneKind::Spectrum);
     assert_ne!(spectrum, default.spectrum_dbfs);
     assert!(t.st.prefs_dirty);
-    assert_eq!(remembered(&t, PaneKind::Spectrum).spectrum_dbfs, spectrum);
+    assert_eq!(remembered(&t, PaneKind::Spectrum).1, Some(spectrum));
     t.key("Alt+1");
     t.key("Ctrl+I");
     let transfer = t.level(PaneKind::Transfer);
     assert_ne!(transfer, default.transfer);
-    assert_eq!(remembered(&t, PaneKind::Transfer).transfer, transfer);
+    assert_eq!(remembered(&t, PaneKind::Transfer).0, Some(transfer));
     let text = t.st.prefs.to_toml();
     assert!(text.contains("[layout.panes.levels]"), "{text}");
     assert!(!text.contains("[levels]"), "{text}");
@@ -134,13 +136,9 @@ fn level_axes_are_remembered_for_the_next_start() {
     assert_eq!(u.st.pane_levels(sp).spectrum_spl, default.spectrum_spl);
     // Nothing changed by the start itself.
     u.key("Alt+1");
-    assert_eq!(remembered(&u, PaneKind::Transfer).transfer, transfer);
+    assert_eq!(remembered(&u, PaneKind::Transfer).0, Some(transfer));
     u.key("Ctrl+Home");
-    assert_eq!(
-        remembered(&u, PaneKind::Transfer).transfer,
-        default.transfer
-    );
-    assert!(!u.st.prefs.to_toml().contains("transfer = ["));
+    assert_eq!(remembered(&u, PaneKind::Transfer).0, Some(default.transfer));
 }
 
 /// A remapped key shows its new chord on the line; the stage view has no line.
@@ -511,7 +509,12 @@ fn the_link_receives_what_the_panes_draw() {
     );
     assert_eq!(t.st.display_period(), crate::link_wants::SPL_ONLY_PERIOD);
     // Peak hold folds every spectrum frame, shown or not.
-    t.st.view.spectrum.peak_mode = ac2_scene::view::PeakMode::Hold;
+    t.remirror(|s| {
+        let m = s.measurements.iter_mut().find(|m| m.id == MeasId(2));
+        if let Some(d) = m.and_then(|m| m.config.kind.display_mut()) {
+            d.peak = ac2_proto::model::PeakMode::Hold;
+        }
+    });
     assert!(t.st.wanted_topics().contains(&topic(2, Stream::Spec)));
     assert!(t.st.wanted_topics().contains(&topic(4, Stream::Rta)));
 }

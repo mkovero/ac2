@@ -277,23 +277,22 @@ fn opening_key_is_not_typed_into_the_prompt() {
     assert_eq!(t.st.stimulus.level, Some(Dbfs(-19.0)));
 }
 
-/// P on the spectrum pane steps off → peak hold → peak hold + tracking → off, the toast
-/// naming each step; each step starts the hold and the marks over.
+/// P on the spectrum pane steps the focused pane's measurement off → peak hold → peak
+/// hold + tracking → off, the toast naming each step.
 #[test]
 fn p_cycles_peak_hold_and_tracking() {
-    use ac2_scene::view::PeakMode;
+    use ac2_proto::model::PeakMode;
     let mut t = T::new();
     t.key("Alt+2");
     for (want, toast) in [
-        (PeakMode::Hold, "peak hold"),
-        (PeakMode::Track, "peak hold + peak tracking"),
-        (PeakMode::Off, "peak hold off"),
+        (PeakMode::Hold, "Sub: peak hold"),
+        (PeakMode::Track, "Sub: peak hold + peak tracking"),
+        (PeakMode::Off, "Sub: peak hold off"),
     ] {
-        t.st.peak_tracks.entry(MeasId(3)).or_default();
-        t.key("P");
-        assert_eq!(t.st.view.spectrum.peak_mode, want);
+        t.key_answered("P");
+        let sub = t.st.meas(MeasId(2)).expect("Sub");
+        assert_eq!(t.st.display_of(sub).peak, want);
         assert_eq!(t.last_toast(), toast);
-        assert!(t.st.peak_tracks.is_empty() && t.st.peaks.is_empty());
     }
 }
 
@@ -325,11 +324,17 @@ fn keys_follow_the_focused_pane() {
     // Spectrum pane: P is peak hold.
     t.key("Alt+2");
     assert_eq!(t.st.scope(), Scope::Spectrum);
-    t.key("P");
-    assert_eq!(
-        t.st.view.spectrum.peak_mode,
-        ac2_scene::view::PeakMode::Hold
-    );
+    let r = t.key("P");
+    assert!(matches!(
+        calls(&r).first(),
+        Some((
+            Command::MeasUpdate {
+                meas: MeasId(2),
+                ..
+            },
+            "Sub: peak hold"
+        ))
+    ));
     // X means nothing there.
     assert!(t.key("X").is_empty());
     // A transfer pane's IR view has the IR's keys; Shift+G back past its response's
@@ -390,8 +395,17 @@ fn transfer_commands() {
     assert!(t.st.edit(MeasId(1)).inverted);
     t.type_key("J", "j");
     t.text("+3,5 dB");
-    t.key("Enter");
-    assert_eq!(t.st.edit(MeasId(1)).offset_db, 3.5);
+    let r = t.key("Enter");
+    assert!(matches!(
+        calls(&r).first(),
+        Some((
+            Command::MeasOffset {
+                meas: MeasId(1),
+                offset: Db(3.5)
+            },
+            _
+        ))
+    ));
     // A measurement has one delay, the daemon's: plain , . step it by 0.1 ms, Ctrl / Alt on
     // the same keys by a whole sample or a tenth. The mirror is at the arrival (12.50 ms)
     // and gets no reply here, so each toast is one step from there.

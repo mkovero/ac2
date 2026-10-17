@@ -84,20 +84,18 @@ fn resolution_marker_round_trip() {
     assert_eq!(UiPrefs::from_toml(&text), Ok(p));
 }
 
+/// A file from before the spectrograph settings and compare moved to the measurements
+/// still loads: those keys are dropped with a warning, the rest (the pane tree too) kept.
 #[test]
-fn spectrograph_colours_round_trip() {
-    use ac2_scene::primitives::Colormap;
-    let mut p = UiPrefs::default();
-    assert_eq!(p.spectrograph_colours, Colormap::Viridis);
-    assert!(!p.to_toml().contains("spectrograph_colours"));
-    for map in Colormap::ALL.into_iter().skip(1) {
-        p.spectrograph_colours = map;
-        let text = p.to_toml();
-        assert!(
-            text.contains(&format!("spectrograph_colours = \"{}\"", map.name())),
-            "{text}"
-        );
-        assert_eq!(UiPrefs::from_toml(&text), Ok(p.clone()));
+fn settings_now_the_measurements_are_dropped_and_the_rest_kept() {
+    let text = "key_hints = false\nspectrograph_span_s = 60\nspectrograph_colours = \"magma\"\n\n\
+                [layout]\nfocus = 2\nhidden = [\"Sub\"]\ncompared = [\"Main\"]\n";
+    let p = UiPrefs::from_toml(text).expect("loads");
+    assert!(!p.key_hints);
+    assert_eq!(p.layout.hidden, ["Sub".to_owned()].into());
+    let out = p.to_toml();
+    for gone in ["spectrograph_span_s", "spectrograph_colours", "compared"] {
+        assert!(!out.contains(gone), "{out}");
     }
 }
 
@@ -162,7 +160,7 @@ fn two_panes() -> PanesPrefs {
                     transfer: TransferView::Ir(IrMode::Log),
                     ..PaneModes::default()
                 },
-                levels: PaneLevels::default(),
+                levels: LayoutLevels::default(),
             },
             PanePrefs {
                 id: PaneId(2),
@@ -176,7 +174,7 @@ fn two_panes() -> PanesPrefs {
                     sweep_reference: false,
                     chrome: PlotChrome::Bare,
                 },
-                levels: PaneLevels::default(),
+                levels: LayoutLevels::default(),
             },
         ],
     }
@@ -198,7 +196,6 @@ fn layout_window_and_hold_round_trip() {
         panes_only: true,
         distortion_unit: DistortionUnit::Percent,
         hidden: ["TF 2".to_owned()].into(),
-        compared: ["Main R".to_owned()].into(),
     };
     p.window = Some(WindowPrefs {
         width: 1600,
@@ -214,7 +211,6 @@ fn layout_window_and_hold_round_trip() {
         "panes_only = true",
         "distortion_unit = \"percent\"",
         "hidden = [\"TF 2\"]",
-        "compared = [\"Main R\"]",
         "[layout.tree]",
         "split = \"row\"",
         "[[layout.panes]]",
@@ -370,9 +366,9 @@ fn bad_files_are_reported() {
     assert!(UiPrefs::from_toml("[ir_levels]\nphase = [-10.0, 10.0]\n").is_err());
 }
 
-/// The impulse-response dB axes and each pane's own level axes moved off their defaults
-/// are written, the rest left out; an out-of-limits range is brought within the axis
-/// limits on reading.
+/// The impulse-response dB axes moved off their defaults and each pane's level axes the
+/// operator set are written, the rest left out; an out-of-limits range is brought within the
+/// axis limits on reading.
 #[test]
 fn level_ranges_round_trip() {
     let d = UiPrefs::default();
@@ -380,8 +376,14 @@ fn level_ranges_round_trip() {
     let mut p = UiPrefs::default();
     p.ir_levels.sweep = Range::new(-90.0, 0.0);
     let mut panes = two_panes();
-    panes.views[0].levels.transfer = Range::new(-24.5, 12.0);
-    panes.views[1].levels.spectrum_dbfs = Range::new(-140.0, -40.0);
+    panes.views[0].levels.transfer = Some(LevelRange {
+        lo: -24.5,
+        hi: 12.0,
+    });
+    panes.views[1].levels.spectrum_dbfs = Some(LevelRange {
+        lo: -140.0,
+        hi: -40.0,
+    });
     p.layout.panes = Some(panes);
     let text = p.to_toml();
     assert!(text.contains("[ir_levels]"), "{text}");
@@ -404,9 +406,16 @@ fn level_ranges_round_trip() {
     )
     .expect("parse");
     let v = far.layout.panes.expect("panes").views[0].levels;
-    assert_eq!(v.distortion, Range::new(-300.0, -200.0));
-    // Low above high is no range: that one is the default, the layout stays.
-    assert_eq!(v.transfer, PaneLevels::default().transfer);
+    assert_eq!(
+        v.distortion,
+        Some(LevelRange {
+            lo: -300.0,
+            hi: -200.0
+        })
+    );
+    // Low above high is no range: that one is left out (framed on first show), the layout
+    // stays.
+    assert_eq!(v.transfer, None);
 }
 
 /// A kind-wide `[levels]` table is no setting: logged and left out (the panes start on

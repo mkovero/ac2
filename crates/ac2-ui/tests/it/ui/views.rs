@@ -1,6 +1,7 @@
 //! The top bar, key hints, the SPL meter, the spectrograph and settings.
 
 use super::*;
+use ac2_proto::model::PeakMode;
 
 /// A set of sweeps running while the transfer pane is maximised: the progress strip shows
 /// which sweep of how many, the bar and the time left, and the sidebar marks the sweep's
@@ -619,10 +620,10 @@ fn spectrograph() {
             size,
             now,
         );
-        assert_eq!(s.caption, "Mic 1 FFT · last 30 s · dBFS · stopped");
+        assert_eq!(s.caption, "Mic 1 FFT · last 30 s · dBFS (tone) · stopped");
         assert_eq!(
             s.cursor.expect("cursor").text,
-            "1.00 kHz · 8.0 s ago · \u{2212}32.0 dBFS"
+            "1.00 kHz · 8.0 s ago · \u{2212}32.0 dBFS (tone)"
         );
     }
     snapshot_when(&mut h, "spectrograph", pin, same);
@@ -658,7 +659,7 @@ fn spectrograph() {
         assert!(s.spectrum.is_none());
         assert_eq!(
             s.caption,
-            "Mic 1 FFT · last 30 s · dBFS · stopped · Hann window"
+            "Mic 1 FFT · last 30 s · dBFS (tone) · stopped · Hann window"
         );
     }
     snapshot_when(&mut h, "spectrograph_alone", pin, same);
@@ -788,6 +789,8 @@ fn rig_monitor_views() {
             grid_id: None,
             colour: None,
             layout: None,
+            compared: Vec::new(),
+            offset: ac2_proto::units::Db(0.0),
         })));
         f.commit(Change::Rig(Rig {
             rev: Rev(5),
@@ -969,11 +972,14 @@ fn spectrum_peak_tracking() {
     step_until(&mut h, "live frames", live);
     h.key_press_modifiers(Modifiers::ALT, Key::Num2);
     h.key_press(Key::W);
+    let peak = |a: &App| a.state.meas(MeasId(3)).map(|m| a.state.display_of(m).peak);
     h.key_press(Key::P);
+    // The second P steps from what the daemon took, not from what was asked.
+    step_until(&mut h, "peak hold", |a| peak(a) == Some(PeakMode::Hold));
     h.key_press(Key::P);
     h.state_mut().state.view.cursor_hz = Some(1000.0);
     step_until(&mut h, "peaks tracked", |a| {
-        a.state.view.spectrum.peak_mode == ac2_scene::view::PeakMode::Track
+        peak(a) == Some(PeakMode::Track)
             && a.state
                 .peak_tracks
                 .get(&MeasId(3))
@@ -998,7 +1004,7 @@ fn spectrum_peak_tracking() {
     let s = scene(&h);
     let list = s.peak_list.clone().expect("the list is up");
     // The tone is in the 996 Hz bin (11.7 Hz bins), its neighbours equal: no shift.
-    assert!(list.starts_with("1  996 Hz  −32.0 dBFS"), "{list}");
+    assert!(list.starts_with("1  996 Hz  −32.0 dBFS (tone)"), "{list}");
     assert!(s.peaks[0].rows[0].mark.is_some());
     h.state_mut().state.toasts.clear();
     snapshot(&mut h, "spectrum_peak_tracking");

@@ -37,12 +37,13 @@ fn with_ceiling(ceiling: f64, bound: f64, armed: bool) -> State {
     s
 }
 
-/// The palette names the spectrograph colours as the Display page does; the choice is
-/// remembered and is the colour map the panes are drawn with.
+/// The palette names the spectrograph colours; taking one sets the colour map of the
+/// spectrum pane's measurement, which the daemon keeps with it.
 #[test]
 fn spectrograph_colours_from_the_palette() {
     let mut t = T::new();
     let keys = t.keys.clone();
+    t.key("Alt+2");
     let scope = t.focus_kind().scope();
     let mut p = crate::palette::Palette::default();
     p.type_text("magma");
@@ -50,17 +51,24 @@ fn spectrograph_colours_from_the_palette() {
         p.entries(&keys, scope).first().map(|e| e.command),
         Some(CommandId::SpectrographMagma)
     );
-    assert_eq!(t.st.scene_theme().colormap, Colormap::Viridis);
-    t.st.prefs_dirty = false;
-    t.st.update(Msg::Command(CommandId::SpectrographMagma), &keys);
-    assert_eq!(t.st.prefs.spectrograph_colours, Colormap::Magma);
-    assert!(t.st.prefs_dirty);
-    assert_eq!(t.last_toast(), "Spectrograph colours: magma");
-    assert_eq!(t.st.scene_theme().colormap, Colormap::Magma);
-    t.st.update(Msg::Command(CommandId::SpectrographColours), &keys);
-    assert_eq!(t.last_toast(), "Spectrograph colours: inferno");
-    t.st.update(Msg::Command(CommandId::SpectrographGrey), &keys);
-    assert_eq!(t.st.scene_theme().colormap, Colormap::Grey);
+    let colours = |t: &T| {
+        let m = t.st.meas(MeasId(2)).expect("Sub");
+        t.st.display_of(m).spectrograph_colours
+    };
+    assert_eq!(colours(&t), Colormap::Viridis);
+    let r =
+        t.st.update(Msg::Command(CommandId::SpectrographMagma), &keys);
+    t.answer(&r);
+    assert_eq!(colours(&t), Colormap::Magma);
+    assert_eq!(t.last_toast(), "Sub: spectrograph colours: magma");
+    let r =
+        t.st.update(Msg::Command(CommandId::SpectrographColours), &keys);
+    t.answer(&r);
+    assert_eq!(t.last_toast(), "Sub: spectrograph colours: inferno");
+    let r =
+        t.st.update(Msg::Command(CommandId::SpectrographGrey), &keys);
+    t.answer(&r);
+    assert_eq!(colours(&t), Colormap::Grey);
 }
 
 #[test]
@@ -295,22 +303,6 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     assert!(t.st.prefs_dirty);
     t.key("Left");
     assert!(t.st.prefs.spec_ease);
-    t.key("Down");
-    t.key("Right");
-    assert_eq!(t.st.view.spectrum.spectrograph.span_s, 60);
-    assert_eq!(t.st.prefs.spectrograph_span_s, Some(60));
-    t.key("Down");
-    assert_eq!(settings(&t).display, DisplayRow::SpectrographColours);
-    t.st.prefs_dirty = false;
-    t.key("Right");
-    assert_eq!(t.st.prefs.spectrograph_colours, Colormap::Magma);
-    assert!(t.st.prefs_dirty);
-    assert_eq!(t.st.scene_theme().colormap, Colormap::Magma);
-    t.key("Left");
-    t.key("Left");
-    assert_eq!(t.st.prefs.spectrograph_colours, Colormap::Grey);
-    t.key("Right");
-    assert_eq!(t.st.prefs.spectrograph_colours, Colormap::Viridis);
     t.key("Down");
     t.key("Right");
     assert_eq!(

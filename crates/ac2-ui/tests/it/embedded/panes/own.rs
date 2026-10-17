@@ -98,8 +98,8 @@ fn capture(d: &mut Driver, meas: MeasId, slot: u8) -> R<TraceId> {
 }
 
 /// From an empty daemon, two spectrum measurements side by side, a capture each: each pane
-/// draws its own measurement's curves only. C on the right one's capture draws it over the
-/// left pane tagged `cmp`. Moved under Imported it is drawn on no pane (C refused, the
+/// draws its own measurement's curves only. C on the right one's capture asks where; ticked
+/// into the left one's measurement, the left pane draws it tagged `cmp`. Moved under Imported it is drawn on no pane (C refused, the
 /// pane's hint says it waits there); moved back it is drawn again.
 #[test]
 fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
@@ -145,9 +145,28 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
         names(s, left) == [n1.clone(), l1.clone()] && names(s, right) == [n2.clone(), l2.clone()]
     })?;
 
-    // C on Spectrum 2's capture: drawn over the left pane, tagged.
+    // C on Spectrum 2's capture asks where to compare it, and nothing is drawn until a
+    // measurement is ticked; then Spectrum 1's pane draws it, tagged, and Spectrum 2's
+    // pane is as it was.
     select(&mut d, t2);
     d.key("C");
+    let Overlay::Choose(c) = &d.st.overlay else {
+        return Err(format!("no chooser: {:?}", d.st.overlay).into());
+    };
+    assert_eq!(c.title, format!("Compare {} with…", c.label));
+    assert_eq!(
+        c.choices
+            .iter()
+            .map(|c| c.label.clone())
+            .collect::<Vec<_>>(),
+        [format!("  {n1} · on screen")]
+    );
+    assert_eq!(names(&d.st, left), [n1.clone(), l1.clone()]);
+    d.key("Enter");
+    d.until("the capture compared into Spectrum 1", |s| {
+        s.meas(s1).is_some_and(|m| !m.compared.is_empty())
+    })?;
+    d.key("Escape");
     d.send(Msg::PanePick(left, PaneMenuRow::Meas(s1)));
     let legend = spectrum_legend(&d.st, left);
     assert!(
@@ -160,9 +179,15 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
             .all(|e| e.split(" · ").next() != Some(n2.as_str())),
         "Spectrum 2's live curve not compared: {legend:?}"
     );
+    assert_eq!(names(&d.st, right), [n2.clone(), l2.clone()]);
+    // Enter on its ticked row takes it out again.
     select(&mut d, t2);
     d.key("C");
-    assert!(d.st.compared_traces.is_empty());
+    d.key("Enter");
+    d.until("compare off", |s| {
+        s.meas(s1).is_some_and(|m| m.compared.is_empty())
+    })?;
+    d.key("Escape");
 
     // Under Imported: on no pane, C refused, the hint says where it waits.
     move_selected(&mut d, t2, TraceOwner::Imported)?;
@@ -177,15 +202,16 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
     }
     select(&mut d, t2);
     d.key("C");
-    assert!(
-        d.st.compared_traces.is_empty(),
+    assert_eq!(
+        d.st.overlay,
+        Overlay::None,
         "an Imported trace is not compared"
     );
     assert!(
         d.st.toasts
             .iter()
             .any(|t| t.text.ends_with(&format!(
-                "({l2}) is under Imported: no pane draws it — select it, then Move to measurement… (Shift+F2)"
+                "({l2}) is under Imported: it is no measurement's to compare — select it, then Move to measurement… (Shift+F2)"
             ))),
         "{:?}",
         d.st.toasts
@@ -413,8 +439,8 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     let pane = crate::common::pane(&d.st, PaneKind::Distortion);
     d.send(Msg::FocusPane(pane));
     d.send(Msg::PanePick(pane, PaneMenuRow::Meas(sweep_a)));
-    // Sweep B's run selected with the transfer pane focused (a child row goes to the
-    // focused pane only): the sweep pane keeps sweep A.
+    // Sweep B's run selected with the transfer pane focused (a child row moves no pane):
+    // the sweep pane keeps sweep A.
     d.send(Msg::FocusPane(crate::common::pane(
         &d.st,
         PaneKind::Transfer,
@@ -497,7 +523,7 @@ fn a_chip_pick_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> 
         [Some(s2), Some(s1)],
         "the pick: that pane alone"
     );
-    assert_eq!(d.st.selected, Some(s1));
+    assert_eq!(d.st.selected, Some(s2), "a pick moves no selection");
     d.send(Msg::SelectMeas(s1));
     d.send(Msg::SelectMeas(s2));
     assert_eq!(d.st.selected, Some(s2));
@@ -507,11 +533,170 @@ fn a_chip_pick_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> 
         [Some(s2), Some(s1)],
         "the right pane keeps the pick"
     );
-    assert_eq!(d.st.layout.focus, right, "the focus stays");
+    assert_eq!(
+        spectrum_panes(&d.st).get(1),
+        Some(&d.st.layout.focus),
+        "the focus stays on the right one"
+    );
     assert!(
         d.st.meas(s1).is_some_and(|m| m.layout.is_none()),
         "Spectrum 1 has no panes of its own"
     );
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// From an empty daemon: two spectra, `Spectrum 2`'s row chosen and its pane split, the
+/// right half stepped to the spectrograph, `Spectrum 1` picked on it and its level axis
+/// zoomed. The app restarts (a new client on the same daemon) and chooses `Spectrum 2`'s
+/// row: the pick and the zoom come back from the daemon, the zoom kept as frames arrive,
+/// and the selection never left `Spectrum 2`'s row.
+#[test]
+fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let s1 = new_spectrum(&mut d, false)?;
+    let s2 = new_spectrum(&mut d, true)?;
+    d.key("Alt+2");
+    d.send(Msg::SelectMeas(s2));
+    d.key("N");
+    let [_, right] = spectrum_panes(&d.st)[..] else {
+        return Err(format!("{:?}", spectrum_panes(&d.st)).into());
+    };
+    d.send(Msg::FocusPane(right));
+    d.key("G");
+    d.key("G");
+    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s1)));
+    assert_eq!(d.st.selected, Some(s2), "the pick leaves the row selected");
+    let before = d.st.level_range(right).ok_or("level axis")?;
+    d.key("Ctrl+I");
+    let zoomed = d.st.level_range(right).ok_or("level axis")?;
+    assert_ne!(zoomed, before, "the zoom");
+    assert_eq!(d.st.selected, Some(s2));
+    d.until("Spectrum 2's layout on the daemon", |s| {
+        s.meas(s2)
+            .and_then(|m| m.layout.as_ref())
+            .is_some_and(|l| *l == s.pane_layout())
+    })?;
+    let saved = d.st.pane_layout();
+    drop(d);
+
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    d.synced()?;
+    d.until("both spectra", |s| {
+        s.meas(s1).is_some() && s.meas(s2).is_some()
+    })?;
+    d.send(Msg::SelectMeas(s2));
+    assert_eq!(d.st.selected, Some(s2));
+    assert_eq!(d.st.pane_layout(), saved, "Spectrum 2's panes, as left");
+    let [left, right] = spectrum_panes(&d.st)[..] else {
+        return Err(format!("{:?}", spectrum_panes(&d.st)).into());
+    };
+    assert_eq!(d.st.pane_meas(left).map(|m| m.id), Some(s2));
+    assert_eq!(d.st.pane_meas(right).map(|m| m.id), Some(s1), "the pick");
+    assert_eq!(d.st.level_range(right), Some(zoomed), "the zoom");
+    d.until("Spectrum 1's spectrograph filling", |s| {
+        s.spectrographs
+            .get(&s1)
+            .is_some_and(|h| h.ring().iter().flatten().count() >= 10)
+    })?;
+    assert_eq!(
+        d.st.level_range(right),
+        Some(zoomed),
+        "an operator's range is not refitted"
+    );
+    assert_eq!(d.st.selected, Some(s2), "the selection stayed on the row");
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// From an empty daemon, two spectra side by side: B on the left changes only Spectrum 1's
+/// style, the offset keys on the right only Spectrum 2's offset; Spectrum 2 compared into
+/// Spectrum 1 draws in the left pane at its own offset. A client connecting afresh finds
+/// the styles, the compare list and the offset kept by the daemon.
+#[test]
+fn display_settings_and_compare_lists_live_on_the_daemon_from_an_empty_daemon() -> R {
+    use ac2_proto::model::{Compared, SpectrumStyle};
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let s1 = new_spectrum(&mut d, false)?;
+    let s2 = new_spectrum(&mut d, true)?;
+    d.key("Alt+2");
+    d.send(Msg::SelectMeas(s1));
+    d.key("N");
+    let right = d.st.layout.focus;
+    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s2)));
+    let [left, _] = spectrum_panes(&d.st)[..] else {
+        return Err(format!("{:?}", spectrum_panes(&d.st)).into());
+    };
+    let style = |s: &AppState, m: MeasId| {
+        s.meas(m)
+            .and_then(|m| m.config.kind.display().map(|d| d.style))
+    };
+    let name =
+        |s: &AppState, m: MeasId| s.meas(m).map(|m| m.config.name.clone()).unwrap_or_default();
+    let (n1, n2) = (name(&d.st, s1), name(&d.st, s2));
+    let before = style(&d.st, s2);
+
+    d.send(Msg::FocusPane(left));
+    d.send(Msg::PanePick(left, PaneMenuRow::Meas(s1)));
+    d.key("B");
+    d.until("Spectrum 1 drawn as a line", |s| {
+        style(s, s1) == Some(SpectrumStyle::Line)
+    })?;
+    assert_eq!(style(&d.st, s2), before, "Spectrum 2 keeps its style");
+
+    d.send(Msg::FocusPane(right));
+    d.key("Alt+Up");
+    d.until("Spectrum 2 offset +1 dB", |s| s.meas_offset(s2) == 1.0)?;
+    assert_eq!(d.st.meas_offset(s1), 0.0);
+
+    d.send(Msg::SelectMeas(s2));
+    d.key("C");
+    let Overlay::Choose(c) = &mut d.st.overlay else {
+        return Err(format!("no chooser: {:?}", d.st.overlay).into());
+    };
+    c.index = c
+        .choices
+        .iter()
+        .position(|c| c.label.trim_start().starts_with(&n1))
+        .ok_or("Spectrum 1 among the targets")?;
+    d.key("Enter");
+    d.key("Escape");
+    let compared = vec![Compared::Meas { meas: s2 }];
+    d.until("Spectrum 2 compared into Spectrum 1", |s| {
+        s.meas(s1).is_some_and(|m| m.compared == compared)
+    })?;
+    let at_offset = |s: &AppState, p: PaneId| {
+        spectrum_legend(s, p)
+            .iter()
+            .any(|e| e.starts_with(&n2) && e.contains("offset +1.0 dB"))
+    };
+    d.send(Msg::PanePick(left, PaneMenuRow::Meas(s1)));
+    d.until("Spectrum 2 at +1 dB in Spectrum 1's pane", |s| {
+        at_offset(s, left)
+    })?;
+    drop(d);
+
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    d.synced()?;
+    assert_eq!(style(&d.st, s1), Some(SpectrumStyle::Line));
+    assert_eq!(style(&d.st, s2), before);
+    assert_eq!(d.st.meas(s1).map(|m| m.compared.clone()), Some(compared));
+    assert_eq!(d.st.meas_offset(s2), 1.0);
+    d.key("Alt+2");
+    let p = spectrum_panes(&d.st)
+        .first()
+        .copied()
+        .ok_or("a spectrum pane")?;
+    d.send(Msg::PanePick(p, PaneMenuRow::Meas(s1)));
+    d.until("Spectrum 2 at +1 dB after reconnecting", |s| {
+        at_offset(s, p)
+    })?;
     drop(d);
     drop(daemon);
     Ok(())

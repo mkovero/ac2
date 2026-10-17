@@ -131,7 +131,17 @@
        "spectrum_view": "spectrograph",
        "spl_view": "meter_leq",
        "sweep_view": "response",
-       "chrome": "full"
+       "chrome": "full",
+       "meas": null,
+       "levels": {
+        "transfer": {
+         "lo": -24.0,
+         "hi": 12.0
+        },
+        "spectrum_dbfs": null,
+        "spectrum_spl": null,
+        "distortion": null
+       }
       }
      },
      "b": {
@@ -142,10 +152,19 @@
        "spectrum_view": "spectrograph",
        "spl_view": "meter_leq",
        "sweep_view": "response",
-       "chrome": "no_grid"
+       "chrome": "no_grid",
+       "meas": 2,
+       "levels": {
+        "transfer": null,
+        "spectrum_dbfs": null,
+        "spectrum_spl": null,
+        "distortion": null
+       }
       }
      }
-    }
+    },
+    "compared": [],
+    "offset": 0.0
    }
   }
  },
@@ -645,7 +664,9 @@
     "delay": null,
     "grid_id": null,
     "colour": null,
-    "layout": null
+    "layout": null,
+    "compared": [],
+    "offset": 0.0
    }
   }
  },
@@ -704,7 +725,9 @@
     "delay": null,
     "grid_id": 8785464140711761104,
     "colour": null,
-    "layout": null
+    "layout": null,
+    "compared": [],
+    "offset": 0.0
    }
   }
  },
@@ -892,7 +915,9 @@
     "colour": {
      "type": "neutral"
     },
-    "layout": null
+    "layout": null,
+    "compared": [],
+    "offset": 0.0
    }
   }
  },

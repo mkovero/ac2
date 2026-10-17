@@ -279,6 +279,8 @@ pub fn spl_measurement() -> Measurement {
         grid_id: None,
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: Db(0.0),
     }
 }
 

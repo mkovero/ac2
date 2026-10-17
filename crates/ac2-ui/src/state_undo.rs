@@ -22,12 +22,11 @@ use super::*;
 /// that the copies of the layout cost nothing.
 pub const HISTORY_LEN: usize = 50;
 
-/// What undo restores: the panes and what is drawn over them.
+/// What undo restores: the panes and how they are shown. What is compared into a
+/// measurement's panes is the measurement's, on the daemon, as its smoothing is.
 #[derive(Clone, Debug)]
 pub(crate) struct PaneSnap {
     layout: Layout,
-    compared_meas: BTreeSet<MeasId>,
-    compared_traces: BTreeSet<TraceId>,
     fullscreen: bool,
     panes_only: bool,
     /// Whose own panes these were: a measurement row brings its panes, and undoing that
@@ -46,8 +45,6 @@ impl PaneSnap {
     /// The same on screen (whoever's own panes they are).
     fn same_screen(&self, o: &PaneSnap) -> bool {
         self.layout.same_panes(&o.layout)
-            && self.compared_meas == o.compared_meas
-            && self.compared_traces == o.compared_traces
             && self.fullscreen == o.fullscreen
             && self.panes_only == o.panes_only
     }
@@ -126,8 +123,6 @@ impl AppState {
     pub(super) fn pane_snap(&self) -> PaneSnap {
         PaneSnap {
             layout: self.layout.clone(),
-            compared_meas: self.compared_meas.clone(),
-            compared_traces: self.compared_traces.clone(),
             fullscreen: self.fullscreen,
             panes_only: self.panes_only,
             own_panes: self.own_panes,
@@ -244,8 +239,6 @@ impl AppState {
                         };
                         put(item.unwrap_or_default(), focus)
                     }
-                    C::Compare => self.compare_edit(&w.before)?,
-                    C::ClearCompare => PaneEdit::ClearCompare,
                     _ => return None,
                 },
             },
@@ -263,28 +256,6 @@ impl AppState {
             item,
             spot: DropSpot::Pane(self.pane_number(p)),
         }
-    }
-
-    /// C: the curve that went into compare or out of it.
-    fn compare_edit(&self, before: &PaneSnap) -> Option<PaneEdit> {
-        let meas = |ids: &BTreeSet<MeasId>, other: &BTreeSet<MeasId>| {
-            ids.difference(other)
-                .next()
-                .and_then(|id| self.row_name(TreeKey::Meas(*id)))
-        };
-        let traces = |ids: &BTreeSet<TraceId>, other: &BTreeSet<TraceId>| {
-            ids.difference(other)
-                .next()
-                .and_then(|id| self.row_name(TreeKey::Trace(*id)))
-        };
-        if let Some(item) = meas(&self.compared_meas, &before.compared_meas)
-            .or_else(|| traces(&self.compared_traces, &before.compared_traces))
-        {
-            return Some(PaneEdit::Compare { item, on: true });
-        }
-        let item = meas(&before.compared_meas, &self.compared_meas)
-            .or_else(|| traces(&before.compared_traces, &self.compared_traces))?;
-        Some(PaneEdit::Compare { item, on: false })
     }
 
     /// The first step of a split dragged: the panes before it.
@@ -354,8 +325,6 @@ impl AppState {
         {
             self.overlay = Overlay::None;
         }
-        self.compared_meas = s.compared_meas.intersection(&ids).copied().collect();
-        self.compared_traces = s.compared_traces.clone();
         self.fullscreen = s.fullscreen;
         self.panes_only = s.panes_only;
         self.own_panes = s.own_panes.filter(|m| ids.contains(m));
@@ -365,13 +334,6 @@ impl AppState {
         }
         if let Some(o) = owner.filter(|o| self.own_panes == Some(*o)) {
             self.store_layout(o, out);
-        }
-        // A pick undone is no pick the own panes come back with.
-        if self
-            .own_panes
-            .is_some_and(|o| self.own_picks.contains_key(&o))
-        {
-            self.remember_own_picks();
         }
     }
 }

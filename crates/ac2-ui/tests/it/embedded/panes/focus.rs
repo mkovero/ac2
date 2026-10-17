@@ -255,14 +255,14 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
     Ok(())
 }
 
-/// A child row of the list — a live curve, a stored trace — goes to the focused pane and
-/// nowhere else, from an empty daemon: Spectrum 1 on both halves of a split spectrum pane
-/// (the left one its spectrograph), Spectrum 2 with a capture and panes of its own. Pane B
-/// (the right half) clicked, then Spectrum 2's live row: B shows Spectrum 2, pane A is as it
-/// was, the focus stays on B and no measurement's panes come. Back to Spectrum 1 on B from
-/// its chip, then Spectrum 2's stored trace row: the same, the measurement selection kept.
+/// A child row of the list — a live curve, a stored trace — only selects, from an empty
+/// daemon: Spectrum 1 on both halves of a split spectrum pane (the left one its
+/// spectrograph), Spectrum 2 with a capture and panes of its own. Pane B (the right half)
+/// clicked, then Spectrum 2's live row: no pane changes, the focus stays on B. Then
+/// Spectrum 2's stored trace row: the same, the trace selected. A pane gets Spectrum 2 from
+/// its chip; Spectrum 2's header row brings its own panes.
 #[test]
-fn a_child_row_goes_to_the_focused_pane_from_an_empty_daemon() -> R {
+fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
     use ac2_ui::state::PaneMenuRow;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
@@ -286,9 +286,8 @@ fn a_child_row_goes_to_the_focused_pane_from_an_empty_daemon() -> R {
     d.send(Msg::SelectMeas(s1));
     d.key("N");
     let b = d.st.layout.focus;
-    // Spectrum 2 on B: captured, and given panes of its own once its row is chosen (B to
-    // its spectrum + spectrograph and back). Picked on B's chip it is a guest in Spectrum
-    // 1's panes: an edit then is never its own layout.
+    // Spectrum 2 on B: captured (with its row chosen: a capture is of the selected
+    // measurement), and given panes of its own (B to its spectrum + spectrograph and back).
     d.send(Msg::PanePick(b, PaneMenuRow::Meas(s2)));
     let topic = Topic::Data {
         meas: s2,
@@ -299,6 +298,8 @@ fn a_child_row_goes_to_the_focused_pane_from_an_empty_daemon() -> R {
             .as_ref()
             .is_some_and(|x| x.latest.get(&topic).is_some())
     })?;
+    d.send(Msg::SelectMeas(s2));
+    assert_eq!(d.st.layout.focus, b, "Spectrum 2's row: B keeps the focus");
     d.key("Ctrl+1");
     d.until("Spectrum 2's capture", |s| {
         s.daemon().is_some_and(|x| {
@@ -316,8 +317,6 @@ fn a_child_row_goes_to_the_focused_pane_from_an_empty_daemon() -> R {
         .find(|t| matches!(t.edit.owner, ac2_proto::model::TraceOwner::Meas { meas } if meas == s2))
         .map(|t| t.id)
         .ok_or("the capture")?;
-    d.send(Msg::SelectMeas(s2));
-    assert_eq!(d.st.layout.focus, b, "Spectrum 2's row: B keeps the focus");
     d.key("G");
     d.key("Shift+G");
     d.until("Spectrum 2's own panes", |s| {
@@ -334,34 +333,35 @@ fn a_child_row_goes_to_the_focused_pane_from_an_empty_daemon() -> R {
         (Some(s1), SpectrumMode::Spectrum),
     ];
     assert_eq!(shown(&d.st), before);
-    let after = [
-        (Some(s1), SpectrumMode::Spectrograph),
-        (Some(s2), SpectrumMode::Spectrum),
-    ];
-
-    // Pane B clicked, then Spectrum 2's live row.
+    // Pane B clicked, then Spectrum 2's live row: nothing moves.
     let b = half(&d.st, 1).ok_or("pane B")?;
     d.send(Msg::FocusPane(b));
     let panes = d.st.pane_layout();
     d.send(Msg::SelectLive(s2));
     d.pump();
-    assert_eq!(shown(&d.st), after, "the live row");
+    assert_eq!(d.st.selected_live, Some(s2));
+    assert_eq!(shown(&d.st), before, "the live row");
     assert_eq!(d.st.layout.focus, b, "the focus stays on B");
-    assert_eq!(d.st.pane_layout(), panes, "no measurement's panes came");
+    assert_eq!(d.st.pane_layout(), panes, "no pane changed");
 
-    // B back on Spectrum 1 from its chip: A stays.
-    d.send(Msg::PanePick(b, PaneMenuRow::Meas(s1)));
-    assert_eq!(shown(&d.st), before, "the chip");
-    let selected = d.st.selected;
-    let panes = d.st.pane_layout();
-    // Spectrum 2's stored trace row: B shows Spectrum 2 with the trace selected.
+    // Spectrum 2's stored trace row: the trace selected, nothing moves.
     d.send(Msg::SelectTrace(trace));
     d.pump();
-    assert_eq!(shown(&d.st), after, "the trace row");
     assert_eq!(d.st.selected_trace, Some(trace));
-    assert_eq!(d.st.selected, selected, "the measurement selection stays");
+    assert_eq!(shown(&d.st), before, "the trace row");
     assert_eq!(d.st.layout.focus, b, "the focus stays on B");
-    assert_eq!(d.st.pane_layout(), panes, "no measurement's panes came");
+    assert_eq!(d.st.pane_layout(), panes, "no pane changed");
+
+    // B's chip puts Spectrum 2 there.
+    d.send(Msg::PanePick(b, PaneMenuRow::Meas(s2)));
+    assert_eq!(
+        shown(&d.st),
+        [
+            (Some(s1), SpectrumMode::Spectrograph),
+            (Some(s2), SpectrumMode::Spectrum),
+        ],
+        "the chip"
+    );
 
     // Spectrum 2's header row: selected, its own panes on screen.
     d.send(Msg::SelectMeas(s2));

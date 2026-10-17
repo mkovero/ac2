@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use ac2_proto::GridDef;
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
-    ClockRelation, DelayReference, DepthPolicy, LevelScale, MeasKind, Measurement, Mic,
+    ClockRelation, DelayReference, DepthPolicy, LevelScale, MeasKind, Measurement, Mic, PeakMode,
     PeakWeighting, Polarity, RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile,
     SmoothingFraction, SmoothingMode, State, TimeWeighting, TimingState, TimingStatus, TraceData,
     TraceKind, TraceMeta, TraceSource, Weighting,
@@ -261,6 +261,37 @@ pub fn measurement(m: &Measurement) -> String {
     }
     if let Some(l) = &m.layout {
         s.push_str(&format!("  {}", format::own_panes(l.panes().len())));
+        // Panes numbered in reading order, as the app numbers them.
+        for (i, p) in l.panes().iter().enumerate() {
+            let mut said = Vec::new();
+            if let Some(id) = p.meas.filter(|id| *id != m.id) {
+                said.push(format!("shows {id}"));
+            }
+            if !p.levels.is_empty() {
+                said.push("level axis set".to_owned());
+            }
+            if !said.is_empty() {
+                s.push_str(&format!(" · pane {}: {}", i + 1, said.join(", ")));
+            }
+        }
+    }
+    if let Some(d) = m.config.kind.display() {
+        s.push_str(&format!(
+            "  {}{} · spectrograph {} s {}",
+            d.style.name(),
+            match d.peak {
+                PeakMode::Off => String::new(),
+                p => format!(", {}", p.name()),
+            },
+            d.spectrograph_span_s,
+            d.spectrograph_colours.name()
+        ));
+    }
+    if m.offset.0 != 0.0 {
+        s.push_str(&format!("  offset {}", format::db_readout(m.offset.0)));
+    }
+    if !m.compared.is_empty() {
+        s.push_str(&format!("  {} compared", m.compared.len()));
     }
     s
 }

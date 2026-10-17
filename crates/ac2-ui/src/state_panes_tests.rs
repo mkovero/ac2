@@ -167,9 +167,10 @@ fn tab_puts_the_next_measurement_in_the_focused_pane() {
     assert_eq!(others(&t), before);
 }
 
-/// Two transfer panes and a spectrum measurement: Tab, a list pick and the pane's own list
-/// each put what is picked in the focused pane, which changes kind to draw it; the focus
-/// stays and the other pane keeps what it shows.
+/// Two transfer panes and a spectrum measurement: Tab to a measurement's row, a list pick
+/// and the pane's own list each put what is picked in the focused pane, which changes kind
+/// to draw it; the focus stays and the other pane keeps what it shows. The pane's own list
+/// leaves the selection on the row.
 #[test]
 fn the_focused_pane_takes_a_measurement_of_any_kind() {
     let mut t = empty();
@@ -237,7 +238,7 @@ fn the_focused_pane_takes_a_measurement_of_any_kind() {
     t.key("Enter");
     assert_eq!(kinds(&t), [PaneKind::Transfer, PaneKind::Transfer]);
     assert_eq!((t.st.layout.focus, shows(&t, b)), (b, Some(3)));
-    assert_eq!(t.st.selected, Some(MeasId(3)));
+    assert_eq!(t.st.selected, Some(MeasId(2)), "a pick selects nothing");
     assert_eq!(t.st.layout.views[&a], a_view);
 }
 
@@ -443,7 +444,11 @@ fn two_transfer_panes_keep_their_measurements_and_views() {
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
     t.key("Alt+1");
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(
+        t.st.selected,
+        Some(MeasId(3)),
+        "a focus key selects nothing"
+    );
     assert_eq!(legend(&t, a), ["Main L"]);
     assert_eq!(legend(&t, b), ["Delay tower"]);
 
@@ -922,9 +927,8 @@ fn a_turned_and_resized_layout_comes_back_from_ui_toml() {
     assert_eq!((*axis, (ratio * 10.0).round()), (Axis::Column, 6.0));
 }
 
-/// A click on the pane that draws the selected capture moves the focus there and keeps the
-/// selection (the keys go on acting on the capture); a click on a pane of another
-/// measurement selects that one, as before.
+/// A click in a pane moves the focus there and selects nothing: the keys go on acting on
+/// the selected capture or measurement, whichever pane the click was in.
 #[test]
 fn a_pane_click_keeps_a_selection_the_pane_shows() {
     let mut t = empty();
@@ -936,7 +940,7 @@ fn a_pane_click_keeps_a_selection_the_pane_shows() {
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("N");
     let b = t.st.layout.focus;
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.update(Msg::PanePick(b, PaneMenuRow::Meas(MeasId(3))), &t.keys);
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
     t.key("Alt+1");
     t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
@@ -948,20 +952,12 @@ fn a_pane_click_keeps_a_selection_the_pane_shows() {
     assert_eq!(t.st.layout.focus, a);
     assert_eq!(t.st.selected_trace, Some(TraceId(10)));
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
-    // The selected measurement on its own pane stays selected too.
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
-    t.st.update(Msg::FocusPane(a), &t.keys);
-    assert_eq!(
-        (t.st.selected, t.st.selected_trace),
-        (Some(MeasId(1)), None)
-    );
-    // A click on the pane of another measurement selects that measurement.
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    // A click on the pane of another measurement: the selection as it was too.
     t.st.update(Msg::FocusPane(b), &t.keys);
     assert_eq!(t.st.layout.focus, b);
     assert_eq!(
         (t.st.selected, t.st.selected_trace),
-        (Some(MeasId(3)), None)
+        (Some(MeasId(1)), Some(TraceId(10)))
     );
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
 }

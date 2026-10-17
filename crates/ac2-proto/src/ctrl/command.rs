@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    ArtnetTarget, AverageMethod, BackendKind, CalKey, ColourFamily, DelayPick, DelayReference,
-    DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand, GeneratorDesired,
-    ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId, MicLoading, OscMessage,
-    OutputSetup, OwnedTraces, PaneLayout, RecordRequest, RecordingRef, ReplayPace, SessionConfig,
-    SessionRef, SplLogWhich, TraceEdit,
+    ArtnetTarget, AverageMethod, BackendKind, CalKey, ColourFamily, Compared, DelayPick,
+    DelayReference, DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand,
+    GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId,
+    MicLoading, OscMessage, OutputSetup, OwnedTraces, PaneLayout, RecordRequest, RecordingRef,
+    ReplayPace, SessionConfig, SessionRef, SplLogWhich, TraceEdit,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, Rev, Seconds, TraceId, TransferId,
@@ -240,6 +240,25 @@ pub enum Command {
         meas: MeasId,
         /// Layout, or `None` for none of its own.
         layout: Option<PaneLayout>,
+    },
+    /// Set the curves drawn compared into the measurement's panes, first compared first
+    /// (drawn above the later ones). Its job and config rev go on.
+    #[serde(rename = "meas.compare")]
+    MeasCompare {
+        /// Measurement whose panes draw them.
+        meas: MeasId,
+        /// Live curves, math channels and stored traces of other measurements, at most
+        /// [`Compared::MAX`].
+        compared: Vec<Compared>,
+    },
+    /// Set the display offset of the measurement's live curves, wherever they are drawn.
+    /// Its job and config rev go on.
+    #[serde(rename = "meas.offset")]
+    MeasOffset {
+        /// Measurement.
+        meas: MeasId,
+        /// Offset, finite and at most [`crate::model::Measurement::OFFSET_MAX_DB`] either way.
+        offset: Db,
     },
     /// Delete a measurement, and say what becomes of the stored traces and math channels
     /// it owns. Refused while a math channel that stays computes from it or from a trace
@@ -758,6 +777,8 @@ impl Command {
             Self::MeasCreate { .. } => "meas.create",
             Self::MeasUpdate { .. } => "meas.update",
             Self::MeasColour { .. } => "meas.colour",
+            Self::MeasCompare { .. } => "meas.compare",
+            Self::MeasOffset { .. } => "meas.offset",
             Self::MeasLayout { .. } => "meas.layout",
             Self::MeasDelete { .. } => "meas.delete",
             Self::MeasStart { .. } => "meas.start",

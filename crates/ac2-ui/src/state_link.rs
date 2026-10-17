@@ -85,6 +85,7 @@ impl AppState {
                     && ids.contains(&p)
                 {
                     self.selected = Some(p);
+                    self.chosen = Some(p);
                     self.pending_select = None;
                 }
                 if let Some(p) = self.pending_stack
@@ -106,6 +107,7 @@ impl AppState {
                         .map(|m| m.id)
                 }) {
                     self.selected = Some(id);
+                    self.chosen = Some(id);
                     self.standin = None;
                     self.lost_selection = None;
                     if std::mem::take(&mut self.lost_own_panes) {
@@ -119,6 +121,7 @@ impl AppState {
                         .find(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
                         .or(self.measurements().first())
                         .map(|m| m.id);
+                    self.chosen = self.selected;
                     self.standin = self.selected;
                 }
                 self.edits.retain(|k, _| ids.contains(k));
@@ -224,6 +227,7 @@ impl AppState {
                     self.open_created(m.id, PaneKind::for_kind(&m.config.kind));
                 }
                 self.selected = Some(m.id);
+                self.chosen = Some(m.id);
                 self.pending_select = Some(m.id);
                 // Made here, by the operator: as if its row were chosen, the panes on screen
                 // are its own from now (it has none yet to bring).
@@ -234,12 +238,8 @@ impl AppState {
                 }
             }
             ConnEvent::Data(d) => {
-                if self.view.spectrum.peak_mode.holds() {
-                    self.fold_peaks(&d);
-                }
-                if self.view.spectrum.peak_mode.tracks() {
-                    self.fold_peak_tracks(&d);
-                }
+                self.fold_peaks(&d);
+                self.fold_peak_tracks(&d);
                 if self.spectrograph_shown() {
                     self.fold_spectrographs(&d);
                 }
@@ -460,13 +460,14 @@ impl AppState {
     pub(super) fn fold_spectrographs(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
         use ac2_scene::spectrograph::{SpectrographFrame, SpectrographHistory};
-        let span = self.view.spectrum.spectrograph.span_s;
-        let running: BTreeMap<MeasId, bool> = self
+        // Each measurement's own span; a history of another span cannot hold its slots.
+        let running: BTreeMap<MeasId, (bool, u32)> = self
             .measurements()
             .iter()
-            .map(|m| (m.id, m.running))
+            .map(|m| (m.id, (m.running, self.display_of(m).spectrograph_span_s)))
             .collect();
-        self.spectrographs.retain(|id, _| running.contains_key(id));
+        self.spectrographs
+            .retain(|id, h| running.get(id).is_some_and(|(_, s)| h.span_s() == *s));
         for tf in d.latest.frames.values() {
             let (meas, scale, spec_level, level, validity) = match &tf.frame.data {
                 FrameData::Spec(f) => (f.meas, f.meta.scale, Some(f.meta.level), &f.level, None),
@@ -479,7 +480,7 @@ impl AppState {
                 ),
                 _ => continue,
             };
-            let Some(&live) = running.get(&meas) else {
+            let Some(&(live, span)) = running.get(&meas) else {
                 continue;
             };
             let Some((grid, def)) = tf
@@ -514,12 +515,26 @@ impl AppState {
 
     pub(super) fn fold_peaks(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
+        // Held only for the measurements whose peak hold is on (P), from when it went on.
+        let held: BTreeSet<MeasId> = self
+            .measurements()
+            .iter()
+            .filter(|m| self.display_of(m).peak.holds())
+            .map(|m| m.id)
+            .collect();
+        self.peaks.retain(|id, _| held.contains(id));
+        if held.is_empty() {
+            return;
+        }
         for tf in d.latest.frames.values() {
             let (meas, level, validity) = match &tf.frame.data {
                 FrameData::Spec(f) => (f.meas, &f.level, None),
                 FrameData::Rta(f) => (f.meas, &f.level, Some(f.validity.as_slice())),
                 _ => continue,
             };
+            if !held.contains(&meas) {
+                continue;
+            }
             let seq = tf.frame.stamp.seq;
             let at = tf.frame.stamp.capture_wall_ns.0;
             let e = self
@@ -535,10 +550,21 @@ impl AppState {
         }
     }
 
-    /// Chooses each spectrum / RTA measurement's tracked peaks again from its newest frame.
+    /// Chooses the tracked peaks again from each newest frame of the measurements whose peak
+    /// mode tracks (P), from when it went on.
     pub(super) fn fold_peak_tracks(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
         use ac2_scene::spectrum::peaks::{PeakInput, find_peaks};
+        let tracked: BTreeSet<MeasId> = self
+            .measurements()
+            .iter()
+            .filter(|m| self.display_of(m).peak.tracks())
+            .map(|m| m.id)
+            .collect();
+        self.peak_tracks.retain(|id, _| tracked.contains(id));
+        if tracked.is_empty() {
+            return;
+        }
         for tf in d.latest.frames.values() {
             let (meas, level, validity, unresolved, narrow) = match &tf.frame.data {
                 FrameData::Spec(f) => (
@@ -551,6 +577,9 @@ impl AppState {
                 FrameData::Rta(f) => (f.meas, &f.level, Some(f.validity.as_slice()), None, false),
                 _ => continue,
             };
+            if !tracked.contains(&meas) {
+                continue;
+            }
             let Some(grid) = tf.frame.stamp.grid_id.and_then(|g| d.grids.get(&g)) else {
                 continue;
             };
@@ -594,7 +623,7 @@ impl AppState {
                 }
             }
         }
-        // Hidden and compared ones wait by name as a pane's measurement does, unless one
+        // Hidden ones wait by name as a pane's measurement does, unless one
         // that stays has that name: it is another measurement, and the choice was not its.
         let staying: BTreeSet<String> = self
             .measurements()
@@ -602,20 +631,16 @@ impl AppState {
             .filter(|m| !gone(m.id))
             .map(|m| m.config.name.clone())
             .collect();
-        for (ids, pending) in [
-            (&mut self.hidden_meas, &mut self.pending_hidden),
-            (&mut self.compared_meas, &mut self.pending_compared),
-        ] {
-            ids.retain(|id| {
-                if !gone(*id) {
-                    return true;
-                }
-                if let Some(n) = names.get(id).filter(|n| !staying.contains(*n)) {
-                    pending.insert(n.clone());
-                }
-                false
-            });
-        }
+        let pending = &mut self.pending_hidden;
+        self.hidden_meas.retain(|id| {
+            if !gone(*id) {
+                return true;
+            }
+            if let Some(n) = names.get(id).filter(|n| !staying.contains(*n)) {
+                pending.insert(n.clone());
+            }
+            false
+        });
         if let Some(id) = self.selected.filter(|id| gone(*id)) {
             // A stand-in going leaves the operator's choice waiting.
             if self.standin != Some(id)
@@ -626,6 +651,9 @@ impl AppState {
             }
             self.selected = None;
             self.standin = None;
+        }
+        if self.chosen.is_some_and(&gone) {
+            self.chosen = None;
         }
         // Its panes stay on screen, nobody's own until a row is chosen.
         if self.own_panes.is_some_and(&gone) {

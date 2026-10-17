@@ -272,6 +272,8 @@ fn measurement(
         grid_id: grid.map(GridDef::id),
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
     }
 }
 
@@ -405,6 +407,7 @@ impl Rig {
                             averaging: SpecAveraging::Off,
                             smoothing: smoothed.then_some(SmoothingFraction::Sixth),
                             level: ac2_proto::model::SpecLevel::Tone,
+                            display: Default::default(),
                         },
                     },
                     None,
@@ -506,6 +509,21 @@ impl Rig {
         *self.tf_protection.lock().unwrap() = flags;
     }
 
+    /// The curves compared into measurement `meas` (`meas.compare`, as the C chooser sets
+    /// them), first compared first.
+    pub fn compare_into(&self, meas: u32, compared: Vec<ac2_proto::model::Compared>) {
+        let mut s = self.fake.lock();
+        let mut m = s
+            .state
+            .measurements
+            .iter()
+            .find(|m| m.id == MeasId(meas))
+            .cloned()
+            .expect("the measurement");
+        m.compared = compared;
+        s.commit(Change::Measurement(Patch::Set(m)));
+    }
+
     /// Adds a third transfer position "Seat 3" (5, stopped) and "Audience" (6), a math
     /// channel: the power average of Main L, Delay tower and Seat 3, whose frames say Seat 3
     /// was left out (stopped): two of three positions averaged.
@@ -579,6 +597,7 @@ impl Rig {
                         averaging: SpecAveraging::Off,
                         smoothing: None,
                         level: ac2_proto::model::SpecLevel::Tone,
+                        display: Default::default(),
                     },
                 },
                 None,

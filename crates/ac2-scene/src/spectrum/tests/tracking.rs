@@ -29,7 +29,6 @@ fn levels(f: &[f64]) -> Vec<f32> {
 fn view(chrome: PlotChrome) -> ViewState {
     ViewState {
         spectrum: SpectrumView {
-            peak_mode: PeakMode::Track,
             level: Range::new(-100.0, 0.0),
             ..SpectrumView::default()
         },
@@ -56,7 +55,9 @@ fn tracked_peaks_are_listed_under_the_cursor_and_marked() {
     );
     assert_eq!(
         s.peak_list.as_deref(),
-        Some("1  1.00 kHz  −32.0 dBFS\n2  100 Hz  −40.0 dBFS\n3  3.98 kHz  −50.0 dBFS")
+        Some(
+            "1  1.00 kHz  −32.0 dBFS (band)\n2  100 Hz  −40.0 dBFS (band)\n3  3.98 kHz  −50.0 dBFS (band)"
+        )
     );
     assert_eq!(s.peaks.len(), 1);
     let rows = &s.peaks[0].rows;
@@ -123,15 +124,12 @@ fn plot_chrome_off_leaves_only_the_marks() {
 }
 
 #[test]
-fn peak_hold_alone_tracks_nothing() {
+fn an_untracked_curve_lists_nothing() {
     let g = third_octaves();
     let (f, e) = (column_frequencies(&g), column_edges(&g));
     let level = levels(&f);
-    let peaks = tracked_rta(&f, &level);
-    let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
-    t.tracked = Some(&peaks);
-    let mut v = view(PlotChrome::Full);
-    v.spectrum.peak_mode = PeakMode::Hold;
+    let t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    let v = view(PlotChrome::Full);
     let s = spectrum_scene(&[t], &Status::default(), &v, &Theme::dark(), SIZE);
     assert!(s.peaks.is_empty());
     assert_eq!(s.peak_list, None);
@@ -151,7 +149,7 @@ fn an_offset_curve_lists_its_displayed_levels_under_its_name() {
     let s = spectrum_scene(&[t], &Status::default(), &v, &Theme::dark(), SIZE);
     let list = s.peak_list.expect("list");
     assert!(
-        list.starts_with("RTA · offset +6.0 dB\n1  1.00 kHz  −26.0 dBFS"),
+        list.starts_with("RTA · offset +6.0 dB\n1  1.00 kHz  −26.0 dBFS (band)"),
         "{list}"
     );
 }

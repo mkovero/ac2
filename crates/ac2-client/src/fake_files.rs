@@ -88,6 +88,8 @@ impl Shared {
                     }),
                     colour: m.colour,
                     layout: m.layout.clone(),
+                    compared: m.compared.clone(),
+                    offset: m.offset,
                 })
                 .collect(),
             spl_logs: self
@@ -253,6 +255,8 @@ impl Shared {
                 grid_id,
                 colour: sm.colour,
                 layout: sm.layout,
+                compared: sm.compared,
+                offset: sm.offset,
             };
             self.put_meas(meas);
         }

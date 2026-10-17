@@ -416,6 +416,8 @@ mod tests {
             delay: None,
             colour: None,
             layout: None,
+            compared: Vec::new(),
+            offset: ac2_proto::units::Db(0.0),
         }
     }
 

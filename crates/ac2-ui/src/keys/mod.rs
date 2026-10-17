@@ -144,10 +144,10 @@ commands! {
     ShrinkPane => "shrink_pane", "Shrink the focused pane (within its split)", [Global];
     TransferStack => "transfer_stack", "Transfer stack: magnitude / phase / coherence (in place of the focused pane)", [Global];
     MaximizePane => "maximize_pane", "Layout: split → one pane → full screen", [Global];
-    Undo => "undo", "Undo the last change to the panes (split, close, drop, pick, view, size, W / F, compare)", [Global];
+    Undo => "undo", "Undo the last change to the panes (split, close, drop, pick, view, size, W / F)", [Global];
     Redo => "redo", "Redo the pane change last undone", [Global];
-    NextInTree => "next_in_tree", "Select the next row in the measurement list (the focused pane shows its measurement)", [Global];
-    PrevInTree => "prev_in_tree", "Select the previous row in the measurement list (the focused pane shows its measurement)", [Global];
+    NextInTree => "next_in_tree", "Select the next row in the measurement list (a measurement row brings its panes, as a click does)", [Global];
+    PrevInTree => "prev_in_tree", "Select the previous row in the measurement list (a measurement row brings its panes, as a click does)", [Global];
     PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];
     CycleTheme => "cycle_theme", "Theme: dark → light → high contrast", [Global];
     PlotChrome => "plot_chrome", "Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only (SPL: the limit text goes with the grid, the scale with the labels)", [Global];
@@ -163,8 +163,8 @@ commands! {
     LevelFit => "level_fit", "Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz (IR: the whole IR)", [Global];
     LevelReset => "level_reset", "Level and frequency axes back to the pane's default", [Global];
     ToggleCursor => "toggle_cursor", "Comparison cursor on / off (IR: a time cursor)", [Global];
-    Compare => "compare", "Compare the selected measurement or trace over the panes that draw its kind (on / off)", [Global];
-    ClearCompare => "clear_compare", "Clear compare: no compared curves", [Global];
+    Compare => "compare", "Compare the selected measurement or trace into a measurement's panes: choose which…", [Global];
+    ClearCompare => "clear_compare", "Clear compare: nothing compared into the focused pane's measurement", [Global];
     CursorLeft => "cursor_left", "Cursor 1/12 octave down (IR: earlier)", [Global];
     CursorRight => "cursor_right", "Cursor 1/12 octave up (IR: later)", [Global];
     Slot1 => "slot_1", "Capture selected measurement to slot 1", [Global];

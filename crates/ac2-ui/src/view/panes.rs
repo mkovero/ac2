@@ -100,7 +100,6 @@ fn scene_for(
         && c.size == size
         && c.freq_right == freq_right
         && c.theme == app.state.theme
-        && c.colormap == theme.colormap
     {
         let axes = Axes {
             x: c.x_axis,
@@ -230,7 +229,6 @@ fn scene_for(
             size,
             freq_right,
             theme: app.state.theme,
-            colormap: theme.colormap,
             scene: scene.clone(),
             x_axis: axes.x,
             y_level: axes.y_level,

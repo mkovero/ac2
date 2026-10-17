@@ -334,6 +334,10 @@ pub(crate) struct MeasSet {
     pub(crate) window: Option<Window>,
     pub(crate) resolution: Option<ResolutionArg>,
     pub(crate) level: Option<SpecLevel>,
+    pub(crate) style: Option<SpectrumStyle>,
+    pub(crate) peak: Option<PeakMode>,
+    pub(crate) span_s: Option<u32>,
+    pub(crate) colours: Option<Colormap>,
 }
 
 impl MeasSet {
@@ -345,6 +349,10 @@ impl MeasSet {
             && self.window.is_none()
             && self.resolution.is_none()
             && self.level.is_none()
+            && self.style.is_none()
+            && self.peak.is_none()
+            && self.span_s.is_none()
+            && self.colours.is_none()
     }
 }
 
@@ -353,8 +361,8 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
     if set.is_empty() {
         return Err(CliError::Usage(
             "say what changes: --average (spectrum, rta), --blocks (tf), --fft, --window or \
-             --level (spectrum), --resolution (tf, sweep; multi[:1/N] for a spectrum) or \
-             --colour"
+             --level (spectrum), --resolution (tf, sweep; multi[:1/N] for a spectrum), \
+             --style, --peak, --span or --colours (spectrum, rta), --colour or --offset"
                 .into(),
         ));
     }
@@ -446,6 +454,31 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
             return not("level", "spectrum");
         };
         c.level = l;
+    }
+    let display =
+        set.style.is_some() || set.peak.is_some() || set.span_s.is_some() || set.colours.is_some();
+    if display {
+        let Some(d) = config.kind.display_mut() else {
+            return not("style, --peak, --span and --colours", "spectrum and rta");
+        };
+        if let Some(s) = set.style {
+            d.style = s;
+        }
+        if let Some(p) = set.peak {
+            d.peak = p;
+        }
+        if let Some(s) = set.span_s {
+            if !SpectrumDisplay::SPANS_S.contains(&s) {
+                return Err(CliError::Usage(format!(
+                    "--span is one of {:?} seconds",
+                    SpectrumDisplay::SPANS_S
+                )));
+            }
+            d.spectrograph_span_s = s;
+        }
+        if let Some(c) = set.colours {
+            d.spectrograph_colours = c;
+        }
     }
     Ok(config)
 }

@@ -235,51 +235,8 @@ pub struct Label {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct HeatmapId(pub u64);
 
-/// Colour lookup for heatmap values. Every map rises monotonically in lightness, so a
-/// louder cell always reads brighter, and none relies on telling red from green.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum Colormap {
-    /// Dark blue through green to yellow: the most hues, so the finest level steps.
-    #[default]
-    Viridis,
-    /// Black through purple and orange to pale yellow: dark for most of its range.
-    Magma,
-    /// Black through purple and red to pale yellow: like magma, more saturated.
-    Inferno,
-    /// Dark blue through grey to yellow: the same for normal and red-green-deficient vision.
-    Cividis,
-    /// Black to light grey; stops short of white, which glares in a dark room.
-    Grey,
-}
-
-impl Colormap {
-    /// In the order ←/→ and the palette step through them.
-    pub const ALL: [Colormap; 5] = [
-        Colormap::Viridis,
-        Colormap::Magma,
-        Colormap::Inferno,
-        Colormap::Cividis,
-        Colormap::Grey,
-    ];
-
-    /// What the settings, the palette and the toasts call it.
-    pub fn name(self) -> &'static str {
-        match self {
-            Colormap::Viridis => "viridis",
-            Colormap::Magma => "magma",
-            Colormap::Inferno => "inferno",
-            Colormap::Cividis => "cividis",
-            Colormap::Grey => "grey",
-        }
-    }
-
-    /// `d` places on in [`Colormap::ALL`], wrapping.
-    pub fn step(self, d: i32) -> Colormap {
-        let n = Self::ALL.len() as i32;
-        let i = Self::ALL.iter().position(|m| *m == self).unwrap_or(0) as i32;
-        Self::ALL[(i + d).rem_euclid(n) as usize]
-    }
-}
+/// Colour lookup for heatmap values: a spectrograph's map is its measurement's setting.
+pub use ac2_proto::model::Colormap;
 
 /// One column of a heatmap: `rows` values, from row 0 (the start of the value axis)
 /// onwards, NaN where a cell has no data (drawn transparent). Shared with whatever keeps

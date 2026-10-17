@@ -34,7 +34,7 @@ use ac2_proto::model::{
     MathExpr, MeasKind, MeasScope, Measurement, Operand, Rig, SessionConfig, TraceOwner,
     TraceSource,
 };
-use ac2_proto::units::{MeasId, Rev, WallNs};
+use ac2_proto::units::{Db, MeasId, Rev, WallNs};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Warning};
 use ac2_traces::session::{SavedMeasurement, Session as SessionData, SplLogOnDisk};
 
@@ -101,6 +101,8 @@ pub(super) fn saved_of(m: &Measurement) -> SavedMeasurement {
         }),
         colour: m.colour,
         layout: m.layout.clone(),
+        compared: m.compared.clone(),
+        offset: m.offset,
     }
 }
 
@@ -312,6 +314,10 @@ impl Control {
                 grid_id,
                 colour: sm.colour.filter(|c| c.is_valid()),
                 layout: sm.layout.filter(|l| l.check().is_ok()),
+                compared: Vec::new(),
+                offset: Some(sm.offset)
+                    .filter(|o| Measurement::offset_ok(*o))
+                    .unwrap_or(Db(0.0)),
             };
             self.ensure_spl_log(&m, None);
             m.config_rev = Rev(self.store.rev().0 + 1);

@@ -5,13 +5,15 @@ use std::time::Instant;
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{ColourFamily, DelayState, GenAction, MeasKind, Measurement, SweepFailure};
-use ac2_proto::units::{ClientId, MeasId, Rev, Seconds};
+use ac2_proto::units::{ClientId, Db, MeasId, Rev, Seconds};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Welcome};
 
 use crate::jobs::JobCmd;
 use crate::util::{perr, perr_detail};
 
-use super::validate::{not_a_sweep, smoothing_only, spl_in_place, stale_meas, validate_meas};
+use super::validate::{
+    display_only, not_a_sweep, smoothing_only, spl_in_place, stale_meas, validate_meas,
+};
 use super::{Control, DelaySource, cal, owners};
 
 impl Control {
@@ -136,6 +138,8 @@ impl Control {
                     grid_id,
                     colour: None,
                     layout: None,
+                    compared: Vec::new(),
+                    offset: Db(0.0),
                 };
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 self.ensure_spl_log(&m, None);
@@ -172,6 +176,13 @@ impl Control {
                     }
                     self.commit(Change::Measurement(Patch::Set(m.clone())));
                     self.ensure_spl_log(&m, old_leq.as_ref());
+                    return Ok(ReplyBody::Measurement(m));
+                }
+                if display_only(&m.config.kind, &config.kind) {
+                    // Only how clients draw it changes: the job, its averages and the
+                    // config rev its frames carry go on.
+                    m.config = config;
+                    self.commit(Change::Measurement(Patch::Set(m.clone())));
                     return Ok(ReplyBody::Measurement(m));
                 }
                 if let Some(change) = smoothing_only(&m.config.kind, &config.kind) {
@@ -252,6 +263,30 @@ impl Control {
                 }
                 // Only what clients show changes: the job and its frames go on.
                 m.layout = layout;
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+            Command::MeasCompare { meas, compared } => {
+                let mut m = self.meas(meas)?.clone();
+                self.check_compared(&m, &compared)?;
+                // Only what its panes draw changes: the job and its frames go on.
+                m.compared = compared;
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+            Command::MeasOffset { meas, offset } => {
+                let mut m = self.meas(meas)?.clone();
+                if !Measurement::offset_ok(offset) {
+                    return Err(perr(
+                        ErrorCode::Invalid,
+                        format!(
+                            "the offset must be finite and within ±{} dB",
+                            Measurement::OFFSET_MAX_DB
+                        ),
+                    ));
+                }
+                // Display only: the job and its frames go on, levels as measured.
+                m.offset = offset;
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 Ok(ReplyBody::Measurement(m))
             }

@@ -2,7 +2,6 @@
 
 use super::layout::*;
 use super::*;
-use ac2_scene::primitives::Colormap;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct File {
@@ -27,11 +26,6 @@ struct File {
     theme: Option<ThemeFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     record_limit_min: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    spectrograph_span_s: Option<u32>,
-    /// Written only when not the default (viridis).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    spectrograph_colours: Option<ColormapFile>,
     /// One-based channels per device id.
     #[serde(default)]
     stimulus_outputs: BTreeMap<String, Vec<u32>>,
@@ -153,38 +147,6 @@ impl ThemeFile {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ColormapFile {
-    Viridis,
-    Magma,
-    Inferno,
-    Cividis,
-    Grey,
-}
-
-impl ColormapFile {
-    fn map(self) -> Colormap {
-        match self {
-            Self::Viridis => Colormap::Viridis,
-            Self::Magma => Colormap::Magma,
-            Self::Inferno => Colormap::Inferno,
-            Self::Cividis => Colormap::Cividis,
-            Self::Grey => Colormap::Grey,
-        }
-    }
-
-    fn of(m: Colormap) -> Self {
-        match m {
-            Colormap::Viridis => Self::Viridis,
-            Colormap::Magma => Self::Magma,
-            Colormap::Inferno => Self::Inferno,
-            Colormap::Cividis => Self::Cividis,
-            Colormap::Grey => Self::Grey,
-        }
-    }
-}
-
 /// `[low, high]` dB as a range: finite, low below high, within what the axis can show.
 fn level_range([lo, hi]: [f64; 2]) -> Option<Range> {
     (lo.is_finite() && hi.is_finite() && lo < hi).then(|| level::clamp(Range::new(lo, hi)))
@@ -228,8 +190,9 @@ impl IrLevelsFile {
     }
 }
 
-/// A pane's own level axes (`[layout.panes.levels]` under its `[[layout.panes]]` entry),
-/// `[low, high]` dB; one left out is the default.
+/// A pane's level axes the operator set (`[layout.panes.levels]` under its
+/// `[[layout.panes]]` entry), `[low, high]` dB; one left out is framed when the pane first
+/// shows a curve.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PaneLevelsFile {
@@ -244,39 +207,38 @@ pub(super) struct PaneLevelsFile {
 }
 
 impl PaneLevelsFile {
-    /// The ranges; one that is no range is the default, logged (a layout is a convenience,
+    /// The ranges; one that is no range is left out, logged (a layout is a convenience,
     /// read leniently).
-    pub(super) fn parse(f: Option<&Self>, pane: u32) -> PaneLevels {
-        let d = PaneLevels::default();
+    pub(super) fn parse(f: Option<&Self>, pane: u32) -> LayoutLevels {
         let Some(f) = f else {
-            return d;
+            return LayoutLevels::default();
         };
-        let range = |name: &str, v: Option<[f64; 2]>, default: Range| match v {
-            None => default,
-            Some(v) => level_range(v).unwrap_or_else(|| {
+        let range = |name: &str, v: Option<[f64; 2]>| {
+            let v = v?;
+            let r = level_range(v);
+            if r.is_none() {
                 tracing::warn!(
-                    "ui.toml: pane {pane}'s levels.{name} is not [low, high] in dB; default"
+                    "ui.toml: pane {pane}'s levels.{name} is not [low, high] in dB; left out"
                 );
-                default
-            }),
+            }
+            r.map(|r| LevelRange { lo: r.lo, hi: r.hi })
         };
-        PaneLevels {
-            transfer: range("transfer", f.transfer, d.transfer),
-            spectrum_dbfs: range("spectrum_dbfs", f.spectrum_dbfs, d.spectrum_dbfs),
-            spectrum_spl: range("spectrum_spl", f.spectrum_spl, d.spectrum_spl),
-            distortion: range("distortion", f.distortion, d.distortion),
+        LayoutLevels {
+            transfer: range("transfer", f.transfer),
+            spectrum_dbfs: range("spectrum_dbfs", f.spectrum_dbfs),
+            spectrum_spl: range("spectrum_spl", f.spectrum_spl),
+            distortion: range("distortion", f.distortion),
         }
     }
 
-    /// Only the ranges moved off their defaults; `None` when all are at them.
-    pub(super) fn of(l: &PaneLevels) -> Option<Self> {
-        let d = PaneLevels::default();
-        let v = |r: Range, default: Range| (r != default).then_some([r.lo, r.hi]);
-        (*l != d).then(|| Self {
-            transfer: v(l.transfer, d.transfer),
-            spectrum_dbfs: v(l.spectrum_dbfs, d.spectrum_dbfs),
-            spectrum_spl: v(l.spectrum_spl, d.spectrum_spl),
-            distortion: v(l.distortion, d.distortion),
+    /// The ranges set; `None` when there are none.
+    pub(super) fn of(l: &LayoutLevels) -> Option<Self> {
+        let v = |r: Option<LevelRange>| r.map(|r| [r.lo, r.hi]);
+        (!l.is_empty()).then(|| Self {
+            transfer: v(l.transfer),
+            spectrum_dbfs: v(l.spectrum_dbfs),
+            spectrum_spl: v(l.spectrum_spl),
+            distortion: v(l.distortion),
         })
     }
 }
@@ -559,14 +521,6 @@ impl UiPrefs {
                 RECORD_LIMIT_MIN.end()
             ));
         }
-        if let Some(s) = f.spectrograph_span_s
-            && !ac2_scene::view::SPECTROGRAPH_SPANS_S.contains(&s)
-        {
-            return Err(format!(
-                "ui.toml: spectrograph_span_s must be one of {:?}",
-                ac2_scene::view::SPECTROGRAPH_SPANS_S
-            ));
-        }
         let window = match f.window {
             Some(w) if w.width >= WindowPrefs::MIN.0 && w.height >= WindowPrefs::MIN.1 => {
                 Some(WindowPrefs {
@@ -604,11 +558,6 @@ impl UiPrefs {
             window,
             theme: f.theme.map(ThemeFile::name),
             record_limit_min: f.record_limit_min,
-            spectrograph_span_s: f.spectrograph_span_s,
-            spectrograph_colours: f
-                .spectrograph_colours
-                .map(ColormapFile::map)
-                .unwrap_or_default(),
             legend: f
                 .legend
                 .as_ref()
@@ -636,9 +585,6 @@ impl UiPrefs {
             spl_hold_ms: self.spl_hold_ms,
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,
-            spectrograph_span_s: self.spectrograph_span_s,
-            spectrograph_colours: (self.spectrograph_colours != Colormap::default())
-                .then(|| ColormapFile::of(self.spectrograph_colours)),
             layout: (self.layout != LayoutPrefs::default())
                 .then(|| LayoutFile::from_prefs(&self.layout)),
             ir_levels: IrLevelsFile::from_prefs(&self.ir_levels),

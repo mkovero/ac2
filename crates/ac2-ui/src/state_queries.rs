@@ -266,6 +266,12 @@ impl AppState {
         v
     }
 
+    /// The display offset of measurement `id`'s live curves, dB: the daemon keeps it with
+    /// the measurement, so it follows the curve into every pane it is drawn in.
+    pub fn meas_offset(&self, id: MeasId) -> f64 {
+        self.meas(id).map_or(0.0, |m| m.offset.0)
+    }
+
     pub fn edit(&self, id: MeasId) -> LiveEdit {
         self.edits.get(&id).copied().unwrap_or_default()
     }
@@ -369,7 +375,7 @@ impl AppState {
                 ac2_scene::meas_list::MeasItem {
                     meas: m,
                     expression,
-                    offset_db: e.offset_db,
+                    offset_db: m.offset.0,
                     inverted: e.inverted,
                     hidden: self.meas_hidden(m),
                     color: colours.meas(m.id),
@@ -592,14 +598,9 @@ impl AppState {
         }
     }
 
-    /// Whether measurement `m` (a live curve or math channel) is compared (C).
-    pub fn meas_compared(&self, m: &Measurement) -> bool {
-        self.compared_meas.contains(&m.id)
-    }
-
     /// Whether a pane of kind `kind` showing `shown` draws `m`'s live curve for compare
-    /// only: compared, not hidden, a curve the pane draws, and not of the pane's group
-    /// (drawn there anyway, once, unmarked).
+    /// only: compared into `shown` (C), not hidden, a curve the pane draws, and not of the
+    /// pane's group (drawn there anyway, once, unmarked).
     pub fn live_compared_on(
         &self,
         kind: PaneKind,
@@ -608,12 +609,14 @@ impl AppState {
     ) -> bool {
         Self::live_drawn_in(m, kind)
             && !self.meas_hidden(m)
-            && self.meas_compared(m)
+            && self
+                .compared_into(shown)
+                .contains(&ac2_proto::model::Compared::Meas { meas: m.id })
             && !self.live_on_pane(kind, m, shown)
     }
 
     /// Whether a pane of kind `kind` showing `shown` draws stored trace `t` for compare
-    /// only: compared, shown, of a kind the pane draws, filed under a measurement, and not
+    /// only: compared into `shown`, shown, of a kind the pane draws, filed under a measurement, and not
     /// of the pane's group. An imported one is not drawn even compared: it is no
     /// measurement's yet. The sweep pane's compared runs are [`Self::compared_sweeps`].
     pub fn trace_compared_on(
@@ -623,26 +626,28 @@ impl AppState {
         shown: Option<&Measurement>,
     ) -> bool {
         kind != PaneKind::Distortion
-            && self.compared_traces.contains(&t.id)
+            && self
+                .compared_into(shown)
+                .contains(&ac2_proto::model::Compared::Trace { trace: t.id })
             && kind_shown(t, kind)
             && ac2_scene::meas_list::group_of(t, &self.measurements()) != TraceOwner::Imported
             && !self.on_pane(kind, t, shown)
     }
 
-    /// The tree rows compared (C), for their mark.
+    /// The tree rows compared (C) into the focused pane's measurement, for their mark.
     pub(super) fn compared_rows(&self) -> Vec<ac2_scene::meas_list::TreeKey> {
+        use ac2_proto::model::Compared;
         use ac2_scene::meas_list::TreeKey;
-        let mut v: Vec<TreeKey> = self
-            .measurements()
-            .into_iter()
-            .filter(|m| self.meas_compared(m))
-            .map(|m| match m.config.kind {
-                MeasKind::Math { .. } => TreeKey::Math(m.id),
-                _ => TreeKey::Live(m.id),
+        self.compared_into(self.pane_meas(self.layout.focus))
+            .iter()
+            .filter_map(|c| match *c {
+                Compared::Meas { meas } => self.meas(meas).map(|m| match m.config.kind {
+                    MeasKind::Math { .. } => TreeKey::Math(meas),
+                    _ => TreeKey::Live(meas),
+                }),
+                Compared::Trace { trace } => Some(TreeKey::Trace(trace)),
             })
-            .collect();
-        v.extend(self.compared_traces.iter().map(|id| TreeKey::Trace(*id)));
-        v
+            .collect()
     }
 
     /// Stored traces under Imported of a kind a pane of kind `kind` draws (shown ones; any

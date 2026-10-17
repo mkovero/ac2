@@ -254,13 +254,18 @@ impl AppState {
         self.arm(force, keymap, out);
     }
 
-    /// The sweep measurement Space on the sweep view runs: the selected measurement when
-    /// it is one, else the owner of the selected (or shown) run, else the pane's.
+    /// The sweep measurement Space on the sweep view runs: the focused sweep pane's (a pane
+    /// key acts on what its pane shows), else the selected measurement when it is one, else
+    /// the owner of the selected (or shown) run, else the sweep pane's.
     pub fn sweep_meas(&self) -> Option<&Measurement> {
         let is = |m: &&Measurement| matches!(m.config.kind, MeasKind::Sweep { .. });
         let owner_of = |t: &TraceMeta| t.edit.owner.meas().and_then(|id| self.meas(id));
-        self.selected_meas()
+        let f = self.layout.focus;
+        (self.layout.kind(f) == PaneKind::Distortion)
+            .then(|| self.pane_meas(f))
+            .flatten()
             .filter(is)
+            .or_else(|| self.selected_meas().filter(is))
             .or_else(|| self.selected_trace_meta().and_then(owner_of).filter(is))
             .or_else(|| {
                 self.kind_sweep()
@@ -475,6 +480,7 @@ impl AppState {
                 // The new result is selected under its measurement: listed highlighted,
                 // named in the captions, and what the trace keys change.
                 self.selected = Some(r.meas);
+                self.chosen = Some(r.meas);
                 self.collapsed
                     .remove(&ac2_proto::model::TraceOwner::Meas { meas: r.meas });
                 self.selected_trace = Some(trace);
@@ -640,15 +646,24 @@ impl AppState {
         }
         let own = self.pane_sweep(pane).map(|(t, _)| t.meta.id);
         let ms = self.measurements();
-        self.sweep_traces()
+        let compared = self.compared_into(self.pane_meas(pane));
+        let mut v: Vec<_> = self
+            .sweep_traces()
             .into_iter()
             .filter(|(t, _)| {
-                self.compared_traces.contains(&t.meta.id)
+                compared.contains(&ac2_proto::model::Compared::Trace { trace: t.meta.id })
                     && Some(t.meta.id) != own
                     && ac2_scene::meas_list::group_of(&t.meta, &ms)
                         != ac2_proto::model::TraceOwner::Imported
             })
-            .collect()
+            .collect();
+        // First compared first: drawn above the later ones.
+        v.sort_by_key(|(t, _)| {
+            compared
+                .iter()
+                .position(|c| *c == ac2_proto::model::Compared::Trace { trace: t.meta.id })
+        });
+        v
     }
 
     /// V / Shift+V on the sweep pane: the next / previous stored sweep run, selected (the

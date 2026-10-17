@@ -166,7 +166,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
         size,
         now(),
     );
-    assert_eq!(s.caption, format!("{name} · last 30 s · dBFS"));
+    assert_eq!(s.caption, format!("{name} · last 30 s · dBFS (tone)"));
     assert_eq!(s.message, None);
     let history = s
         .scene
@@ -193,17 +193,22 @@ fn spectrograph_from_an_empty_daemon() -> R {
     );
     let text = s.cursor.ok_or("cursor")?.text;
     assert!(
-        text.starts_with("1.00 kHz · 0.1 s ago · ") && text.ends_with(" dBFS"),
+        text.starts_with("1.00 kHz · 0.1 s ago · ") && text.ends_with(" dBFS (tone)"),
         "{text}"
     );
     // The cursor toggle turns it off, time and all.
     d.send(Msg::Command(CommandId::ToggleCursor));
     assert_eq!(d.st.view.spectrum.spectrograph.cursor_s, None);
 
-    // A minute of history (Shift+B, Settings › Display), started afresh.
+    // A minute of history (Shift+B), the measurement's, started afresh.
     d.send(Msg::Command(CommandId::SpectrographSpan));
-    assert_eq!(d.st.view.spectrum.spectrograph.span_s, 60);
-    assert!(!filled(&d.st, 1));
+    d.until("the measurement's minute", |s| {
+        s.meas(sp)
+            .is_some_and(|m| s.display_of(m).spectrograph_span_s == 60)
+    })?;
+    d.until("a history of a minute", |s| {
+        s.spectrographs.get(&sp).is_some_and(|h| h.span_s() == 60)
+    })?;
     d.until("frames in the minute", |s| filled(s, 10))?;
     let s = ac2_ui::scenes::spectrograph(
         &d.st,
@@ -258,7 +263,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
     assert!(
         alone
             .caption
-            .starts_with(&format!("{name} · last 60 s · dBFS · stopped · ")),
+            .starts_with(&format!("{name} · last 60 s · dBFS (tone) · stopped · ")),
         "{}",
         alone.caption
     );

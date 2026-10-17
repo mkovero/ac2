@@ -164,16 +164,20 @@ pub(crate) fn spectrum_scene_in(
     crate::unresolved::draw(&mut c, plot, &xm, &unresolved, theme);
     crate::stitch::draw(&mut c, plot, &xm, &stitches, true, theme);
 
-    for t in traces {
+    // Later shapes draw over earlier ones, and `traces` lists the pane's own group first,
+    // then the compared ones in compare order: drawn last to first, the pane's own curves
+    // come out on top and the first compared above the second.
+    for t in traces.iter().rev() {
         let dim = if t.is_stale() { theme.stale_alpha } else { 1.0 };
         let color = t.color.with_alpha(dim);
+        let back = super::layer_alpha(t.layer);
         let n = t.freqs.len().min(t.level.len());
         let cols = visible_columns(&t.freqs[..n], xm.range.lo, xm.range.hi);
         // Bars are band power (RTA). A narrowband bin is a tone level, and thousands of bins
         // share a pixel at the top of a log axis: drawn as bars, a single-bin tone becomes a
         // sub-pixel sliver. A tone trace asked for bars gets the max-per-pixel line, which
         // keeps a tone a spike.
-        let style = match view.spectrum.style {
+        let style = match t.style {
             SpectrumStyle::Bars if t.quantity.is_narrow() => SpectrumStyle::Line,
             s => s,
         };
@@ -198,7 +202,7 @@ pub(crate) fn spectrum_scene_in(
                             (x1 - x0 - gap).max(0.5),
                             plot.bottom() - y,
                         ),
-                        color: color.with_alpha(theme.bar_alpha),
+                        color: color.with_alpha(theme.bar_alpha * back),
                         clip: Some(plot),
                     });
                 }
@@ -220,7 +224,7 @@ pub(crate) fn spectrum_scene_in(
                                 y1: plot.bottom(),
                             })
                             .collect(),
-                        color: color.with_alpha(theme.fill_alpha),
+                        color: color.with_alpha(theme.fill_alpha * back),
                         clip: Some(plot),
                     });
                 }
@@ -242,7 +246,7 @@ pub(crate) fn spectrum_scene_in(
                 }
             }
         }
-        if view.spectrum.peak_mode.holds() && t.peak.is_some() {
+        if t.peak.is_some() {
             let pc = color.with_alpha(theme.peak_alpha);
             let points = match style {
                 // A cap across each band.
@@ -306,7 +310,11 @@ pub(crate) fn spectrum_scene_in(
                 let v = t.value(j);
                 let s = format::level(v);
                 let s = if v.is_finite() {
-                    format!("{s} {}", value_unit(t.scale, t.quantity))
+                    format!(
+                        "{s} {} ({})",
+                        value_unit(t.scale, t.quantity),
+                        quantity_note(t.quantity)
+                    )
                 } else {
                     s
                 };
@@ -350,11 +358,7 @@ pub(crate) fn spectrum_scene_in(
             theme.text,
         ));
     }
-    let peaks = if view.spectrum.peak_mode.tracks() {
-        tracked_peaks(traces, &xm, &ym, plot)
-    } else {
-        Vec::new()
-    };
+    let peaks = tracked_peaks(traces, &xm, &ym, plot);
     let list_on = view.chrome.peak_list();
     for (t, p) in traces.iter().filter(|t| t.tracked.is_some()).zip(&peaks) {
         let color = t
@@ -478,11 +482,12 @@ fn tracked_peaks(
                         freq_hz: p.freq_hz,
                         level,
                         text: format!(
-                            "{}  {}  {} {}",
+                            "{}  {}  {} {} ({})",
                             k + 1,
                             format::freq_readout(p.freq_hz),
                             format::level(level),
-                            value_unit(t.scale, t.quantity)
+                            value_unit(t.scale, t.quantity),
+                            quantity_note(t.quantity)
                         ),
                         mark: inside.then(|| {
                             Rect::new(

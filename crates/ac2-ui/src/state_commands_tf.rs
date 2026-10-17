@@ -178,28 +178,9 @@ impl AppState {
                     "min / max tracking off"
                 });
             }
-            C::SpectrumStyle => {
-                self.view.spectrum.style = self.view.spectrum.style.next();
-            }
-            C::PeakHold => {
-                let next = self.view.spectrum.peak_mode.next();
-                self.view.spectrum.peak_mode = next;
-                self.peaks.clear();
-                self.peak_tracks.clear();
-                self.toast(next.name());
-            }
-            C::SpectrographSpan => {
-                let sg = &mut self.view.spectrum.spectrograph;
-                sg.span_s = ac2_scene::view::SpectrographView::next_span(sg.span_s);
-                sg.cursor_s = sg.cursor_s.filter(|t| *t <= f64::from(sg.span_s));
-                let span = sg.span_s;
-                // Slots of another length cannot hold the frames already placed.
-                self.spectrographs.clear();
-                // Remembered as the Settings › Display row remembers it: one setting.
-                self.prefs.spectrograph_span_s = Some(span);
-                self.prefs_dirty = true;
-                self.toast(format!("spectrograph: last {span} s"));
-            }
+            C::SpectrumStyle => self.step_spectrum_style(out),
+            C::PeakHold => self.step_peak_mode(out),
+            C::SpectrographSpan => self.step_spectrograph_span(out),
             C::SplShowMeter | C::SplShowLeq | C::SplShowMeterLeq | C::SplShowBands => {
                 self.focus_kind(PaneKind::Spl);
                 let m = self.modes_mut();

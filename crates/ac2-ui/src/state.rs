@@ -87,6 +87,8 @@ mod leq_export;
 pub use leq_export::{EXPORT_DIR, export_path, leq_export_name};
 #[path = "state_link.rs"]
 mod link;
+#[path = "state_meas_display.rs"]
+mod meas_display;
 #[path = "state_meas_layout.rs"]
 mod meas_layout;
 #[path = "state_new_meas.rs"]
@@ -220,12 +222,6 @@ pub struct AppState {
     /// By id: names may repeat, and hiding one `Main` must not hide another. `ui.toml`
     /// keeps them by name ([`AppState::restore_meas_choices`]).
     pub hidden_meas: BTreeSet<MeasId>,
-    /// Measurements (live curves, math channels) every transfer pane draws besides its own
-    /// group, by id as hidden ones are (compare, C): an overlay, never an operand.
-    pub compared_meas: BTreeSet<MeasId>,
-    /// Stored traces every transfer pane draws besides its own group (compare, C), whatever
-    /// their owner. Ids are the daemon's: kept while the app runs, not in `ui.toml`.
-    pub compared_traces: BTreeSet<TraceId>,
     /// Groups of the measurement tree folded in this app (their rows not listed).
     pub collapsed: BTreeSet<ac2_proto::model::TraceOwner>,
     pub edits: BTreeMap<MeasId, LiveEdit>,
@@ -338,8 +334,6 @@ pub struct AppState {
     /// from `ui.toml`, or a hidden one the daemon took away (a session reopening, a daemon
     /// restarting renumbers them).
     pending_hidden: BTreeSet<String>,
-    /// Compared measurements by name, waiting as hidden ones do.
-    pending_compared: BTreeSet<String>,
     /// Each pane's level axis ranges, by pane: a pane not here draws on the defaults.
     pane_levels: BTreeMap<PaneId, PaneLevels>,
     /// Spectrum panes whose level axis is framed for what they show, or set by the operator:
@@ -374,9 +368,9 @@ pub struct AppState {
     layout_calls: std::collections::VecDeque<meas_layout::LayoutCall>,
     /// Edits waiting for the `meas.layout` call in flight for their measurement: the newest.
     layout_queued: BTreeMap<MeasId, ac2_proto::model::PaneLayout>,
-    /// A split dragged: the measurements whose layout takes it, and when (`now_s`) the drag
+    /// A split dragged: the measurement whose layout takes it, and when (`now_s`) the drag
     /// counts as done.
-    layout_due: Option<(Vec<MeasId>, f64)>,
+    layout_due: Option<(MeasId, f64)>,
     /// A measurement's row was chosen: its own panes go on screen after the message.
     own_panes_due: bool,
     /// The measurement this app selected by itself, the one it had gone (or none chosen
@@ -393,14 +387,14 @@ pub struct AppState {
     own_panes: Option<MeasId>,
     /// The lost selection's own panes were on screen: they follow it when it comes back.
     lost_own_panes: bool,
-    /// Each of a measurement's own panes' picks (reading order) as a chip pick or a drop
-    /// left them, with the panes they were: its row brings them back with those picks.
-    /// Which measurement a pane shows is this app's, not part of the layout the daemon
-    /// keeps. A child row (Tab walking the list) changes a pane for a look only.
-    own_picks: BTreeMap<MeasId, (ac2_proto::model::PaneLayout, Vec<Option<MeasId>>)>,
-    /// A pane was given a measurement by its chip or a row dropped on it: the own panes on
-    /// screen remember what each pane shows after the message.
-    pane_picked: bool,
+    /// The measurement whose row was chosen last (or that this app selected by itself, a
+    /// measurement made, a sweep just run): a pane with no pick of its own shows it. A child
+    /// row, a chip pick or a click in a pane never moves it, so they change no pane but the
+    /// one picked.
+    chosen: Option<MeasId>,
+    /// The level ranges the operator set, by pane: each is stored with the panes and kept
+    /// (never framed again automatically) until the pane shows another measurement.
+    level_set: BTreeSet<(PaneId, levels::LevelSlot)>,
     /// Names of the measurements the daemon has listed since this app started: a pane
     /// remembered on one of them waits for it to come back.
     meas_seen: BTreeSet<String>,
@@ -440,10 +434,9 @@ fn typed_char(c: &Chord) -> Option<char> {
 }
 
 impl AppState {
-    /// The theme the panes are drawn with: the chosen theme with the chosen spectrograph
-    /// colours.
+    /// The theme the panes are drawn with.
     pub fn scene_theme(&self) -> ac2_scene::theme::Theme {
-        ac2_scene::theme::Theme::by_name(self.theme).with_colormap(self.prefs.spectrograph_colours)
+        ac2_scene::theme::Theme::by_name(self.theme)
     }
 
     pub fn new(theme: ThemeName, target: String) -> Self {
@@ -516,10 +509,7 @@ impl AppState {
             pending_hidden: BTreeSet::new(),
             pane_levels: BTreeMap::new(),
             spectrum_hold: BTreeMap::new(),
-            pending_compared: BTreeSet::new(),
             hidden_meas: BTreeSet::new(),
-            compared_meas: BTreeSet::new(),
-            compared_traces: BTreeSet::new(),
             collapsed: BTreeSet::new(),
             link_wants: crate::link_wants::Sent::default(),
             spectrum_running: BTreeSet::new(),
@@ -539,8 +529,8 @@ impl AppState {
             lost_selection: None,
             own_panes: None,
             lost_own_panes: false,
-            own_picks: BTreeMap::new(),
-            pane_picked: false,
+            chosen: None,
+            level_set: BTreeSet::new(),
             meas_seen: BTreeSet::new(),
             keys: Keymap::default(),
             row_drag: None,
@@ -593,7 +583,6 @@ impl AppState {
             // An undo or redo stores what it restores itself, on the owner of the edit only.
             let undoing = std::mem::take(&mut self.undoing);
             self.sync_meas_layout(panes_before, conn || undoing, drag, &mut out);
-            self.prune_compared();
             if let Some(w) = edit.filter(|_| !undoing) {
                 let ran = self.ran_command;
                 self.record_edit(w, ran);
@@ -675,21 +664,16 @@ impl AppState {
             Msg::Sessions(m) => self.sessions_msg(m, out),
             Msg::RenameTrace(id) => {
                 if self.selected_trace != Some(id) {
-                    self.select_trace(Some(id));
+                    self.select_trace_row(id);
                     self.reveal_trace();
                 }
                 if let Ok(t) = self.trace_meta(id) {
                     self.prompt(PromptKind::TraceRename(id), t.edit.name.clone());
                 }
             }
-            Msg::FocusPane(p) => {
-                self.layout.set_focus(p);
-                // A click on a pane of another measurement is about what it shows; one on
-                // the pane of the selection only moves the focus.
-                if !self.selection_on_pane(p) {
-                    self.select_shown(p);
-                }
-            }
+            // A click in a pane gives it the keyboard; the selection stays on the row the
+            // operator chose (the pane's keys act on what it shows).
+            Msg::FocusPane(p) => self.layout.set_focus(p),
             Msg::LegendPick(p, key) => self.legend_pick(p, key),
             Msg::PaneMenu(p) => {
                 self.overlay = match self.overlay {
@@ -701,7 +685,7 @@ impl AppState {
             Msg::DragSplit { path, ratio } => self.drag_split(&path, ratio),
             // The drag's step was closed before the message, as any other message closes it.
             Msg::DragSplitEnd => {}
-            Msg::RowDrag(m) => self.row_drag_msg(m),
+            Msg::RowDrag(m) => self.row_drag_msg(m, out),
             Msg::Zoom { about_hz, factor } => {
                 let t = self.nav.target.zoom(about_hz, factor);
                 self.nav.set_target(t);

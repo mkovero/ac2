@@ -26,7 +26,8 @@ use crate::tf::LegendEntry;
 use crate::theme::Theme;
 use crate::time::Freshness;
 use crate::trace::TraceKey;
-use crate::view::{SpectrumStyle, ViewState};
+use crate::view::ViewState;
+use ac2_proto::model::SpectrumStyle;
 
 mod draw;
 mod legend;
@@ -41,7 +42,7 @@ use legend::{
 };
 pub use units::{
     BinWidth, cal_caption, density_unit_help, fraction_label, level_unit, level_unit_forms,
-    narrow_unit_help, tone_unit_help, value_unit, weighting_label, window_label,
+    narrow_unit_help, quantity_note, tone_unit_help, value_unit, weighting_label, window_label,
 };
 
 /// What a level value means.
@@ -97,8 +98,8 @@ pub struct SpectrumTrace<'a> {
     pub validity: Option<&'a [ValidityMask]>,
     /// Peak-hold values, column-aligned ([`PeakHold`]).
     pub peak: Option<&'a [f32]>,
-    /// Tracked peaks ([`peaks::PeakTracker`]), loudest first; marked while peak tracking is
-    /// on.
+    /// Tracked peaks ([`peaks::PeakTracker`]), loudest first; `Some` while its
+    /// measurement's peak mode tracks, and then marked and listed.
     pub tracked: Option<&'a [peaks::Peak]>,
     pub scale: LevelScale,
     pub quantity: Quantity,
@@ -117,9 +118,24 @@ pub struct SpectrumTrace<'a> {
     /// Drawn for compare only (not of the pane's group): the legend tags it
     /// [`crate::trace::COMPARED`].
     pub compared: bool,
+    /// How it is drawn: its measurement's style (a stored trace: its owner's).
+    pub style: SpectrumStyle,
+    /// Stacking: 0 for the pane's own group, `n` for the `n`-th curve compared. A higher
+    /// layer is drawn beneath a lower one, its bars and fill lighter
+    /// ([`layer_alpha`]), so the first compared shows over the second and a fill beneath
+    /// still shows through.
+    pub layer: u8,
     /// A live multi-resolution spectrum's bands: where its windows change, and which
     /// columns resolve less than their grid.
     pub bands: Option<&'a SpecBands>,
+}
+
+/// Opacity multiplier of a curve's bars and fill on stacking layer `layer`
+/// ([`SpectrumTrace::layer`]): each layer down a step lighter, so a fill or bar beneath
+/// reads as further back, down to a floor where it still shows on every theme (dark fill
+/// 0.18 → 0.08, high-contrast bars 0.7 → 0.31).
+pub fn layer_alpha(layer: u8) -> f32 {
+    (1.0 - 0.3 * f32::from(layer)).max(0.45)
 }
 
 /// ` · stopped` after a stopped measurement's caption: its curve is the final result.
@@ -172,6 +188,8 @@ impl<'a> SpectrumTrace<'a> {
             offset_db: 0.0,
             selected: false,
             compared: false,
+            style: SpectrumStyle::default(),
+            layer: 0,
             bands: None,
         }
     }
@@ -221,6 +239,8 @@ impl<'a> SpectrumTrace<'a> {
             offset_db: 0.0,
             selected: false,
             compared: false,
+            style: SpectrumStyle::default(),
+            layer: 0,
             bands: frame.meta.bands.as_deref(),
         }
     }

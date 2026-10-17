@@ -40,12 +40,11 @@ fn line_style_gaps_and_cursor() {
     let mut validity = vec![ValidityMask::NONE; f.len()];
     validity[20] = ValidityMask::INSUFFICIENT_RESOLUTION;
     let mut t = rta_trace(&f, &e, &level, LevelScale::DbSpl);
+    t.style = SpectrumStyle::Line;
     t.validity = Some(&validity);
     let view = ViewState {
         spectrum: SpectrumView {
-            style: SpectrumStyle::Line,
             level: Range::new(-60.0, 0.0),
-            peak_mode: PeakMode::Off,
             ..SpectrumView::default()
         },
         cursor_hz: Some(1000.0),
@@ -58,7 +57,7 @@ fn line_style_gaps_and_cursor() {
     assert_eq!(cur.freq, "1.00 kHz");
     assert_eq!(
         cur.rows,
-        vec![("RTA".to_string(), "−40.0 dB SPL".to_string())]
+        vec![("RTA".to_string(), "−40.0 dB SPL (band)".to_string())]
     );
 }
 
@@ -71,12 +70,11 @@ fn a_gliding_curve_is_drawn_between_frames_and_read_at_the_newest() {
     let level = vec![-40.0f32; f.len()];
     let drawn = vec![-50.0f32; f.len()];
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    t.style = SpectrumStyle::Line;
     t.drawn = Some(&drawn);
     let view = ViewState {
         spectrum: SpectrumView {
-            style: SpectrumStyle::Line,
             level: Range::new(-60.0, 0.0),
-            peak_mode: PeakMode::Off,
             ..SpectrumView::default()
         },
         cursor_hz: Some(1000.0),
@@ -90,7 +88,7 @@ fn a_gliding_curve_is_drawn_between_frames_and_read_at_the_newest() {
     let cur = s.cursor.expect("cursor");
     assert_eq!(
         cur.rows,
-        vec![("RTA".to_string(), "−40.0 dBFS".to_string())]
+        vec![("RTA".to_string(), "−40.0 dBFS (band)".to_string())]
     );
 }
 
@@ -102,16 +100,16 @@ fn offset_traces_move_and_say_so() {
     let (f, e) = (column_frequencies(&g), column_edges(&g));
     let level = vec![-40.0f32; f.len()];
     let peak = vec![-30.0f32; f.len()];
-    let a = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    let mut a = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    a.style = SpectrumStyle::Line;
     let mut b = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    b.style = SpectrumStyle::Line;
     b.name = "Main L S1".into();
     b.offset_db = 3.0;
     b.peak = Some(&peak);
     let view = ViewState {
         spectrum: SpectrumView {
-            style: SpectrumStyle::Line,
             level: Range::new(-60.0, 0.0),
-            peak_mode: PeakMode::Hold,
             ..SpectrumView::default()
         },
         cursor_hz: Some(1000.0),
@@ -123,21 +121,22 @@ fn offset_traces_move_and_say_so() {
     let ym = s.y_axis.mapping;
     let lines = &s.scene.layers[1].polylines;
     let y_of = |l: &Polyline| l.points.iter().find(|p| p[1].is_finite()).map(|p| p[1]);
-    assert_eq!(y_of(&lines[0]), Some(ym.to_px(-40.0)));
-    assert_eq!(y_of(&lines[1]), Some(ym.to_px(-37.0)));
+    // Drawn last to first: B (its line, its peak hold) under A.
+    assert_eq!(y_of(&lines[0]), Some(ym.to_px(-37.0)));
     assert_eq!(
-        y_of(&lines[2]),
+        y_of(&lines[1]),
         Some(ym.to_px(-27.0)),
         "peak hold moves too"
     );
+    assert_eq!(y_of(&lines[2]), Some(ym.to_px(-40.0)));
     let cur = s.cursor.expect("cursor");
     assert_eq!(
         cur.rows,
         [
-            ("RTA".to_string(), "−40.0 dBFS".to_string()),
+            ("RTA".to_string(), "−40.0 dBFS (band)".to_string()),
             (
                 "Main L S1 · offset +3.0 dB".to_string(),
-                "−37.0 dBFS".to_string()
+                "−37.0 dBFS (band)".to_string()
             ),
         ]
     );
@@ -182,8 +181,7 @@ fn peak_overlay_drawn_when_enabled() {
     let level = vec![-40.0f32; f.len()];
     let peak = vec![-20.0f32; f.len()];
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
-    t.peak = Some(&peak);
-    let mut view = ViewState::default();
+    let view = ViewState::default();
     let s = spectrum_scene(
         &[t.clone()],
         &Status::default(),
@@ -192,7 +190,7 @@ fn peak_overlay_drawn_when_enabled() {
         SIZE,
     );
     assert!(s.scene.layers[1].polylines.is_empty());
-    view.spectrum.peak_mode = PeakMode::Hold;
+    t.peak = Some(&peak);
     let s = spectrum_scene(&[t], &Status::default(), &view, &Theme::dark(), SIZE);
     let caps = &s.scene.layers[1].polylines[0];
     assert_eq!(crate::canvas::tests::segments(&caps.points).len(), 31);
@@ -377,14 +375,13 @@ fn line_thinning_keeps_peaks() {
     let mut validity = vec![ValidityMask::NONE; n];
     validity[k1 + 1] = ValidityMask::SETTLING;
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    t.style = SpectrumStyle::Line;
     t.quantity = Quantity::Tone;
     t.validity = Some(&validity);
     t.peak = Some(&level);
     let view = ViewState {
         spectrum: SpectrumView {
-            style: SpectrumStyle::Line,
             level: Range::new(-100.0, 0.0),
-            peak_mode: PeakMode::Hold,
             ..SpectrumView::default()
         },
         ..ViewState::default()
@@ -421,16 +418,16 @@ fn fill_is_the_line_over_an_area_to_the_bottom() {
     level[15] = f32::NAN;
     let peak = vec![-30.0f32; f.len()];
     let mut a = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    a.style = SpectrumStyle::Fill;
     a.peak = Some(&peak);
     let mut b = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    b.style = SpectrumStyle::Fill;
     b.name = "Main L S1".into();
     b.offset_db = 6.0;
     b.freshness = Some(Freshness::Stale { age_s: 3.0 });
     let view = ViewState {
         spectrum: SpectrumView {
-            style: SpectrumStyle::Fill,
             level: Range::new(-60.0, 0.0),
-            peak_mode: PeakMode::Hold,
             ..SpectrumView::default()
         },
         ..ViewState::default()
@@ -440,13 +437,13 @@ fn fill_is_the_line_over_an_area_to_the_bottom() {
     let data = &s.scene.layers[1];
     assert!(data.rects.is_empty());
     assert_eq!(data.bands.len(), 2);
-    // Line A, A's peak hold, line B.
+    // Drawn last to first: line B, line A, A's peak hold.
     assert_eq!(data.polylines.len(), 3);
-    assert!(data.polylines[1].stroke.dash.is_some());
+    assert!(data.polylines[2].stroke.dash.is_some());
     for (band, line) in data
         .bands
         .iter()
-        .zip([&data.polylines[0], &data.polylines[2]])
+        .zip([&data.polylines[0], &data.polylines[1]])
     {
         assert_eq!(band.points.len(), line.points.len());
         for (bp, lp) in band.points.iter().zip(&line.points) {
@@ -457,7 +454,10 @@ fn fill_is_the_line_over_an_area_to_the_bottom() {
         assert_eq!(crate::canvas::tests::segments(&line.points).len(), 2);
         assert_eq!(band.color, line.stroke.color.with_alpha(theme.fill_alpha));
     }
-    assert!(data.bands[1].color.a < data.bands[0].color.a);
+    assert!(
+        data.bands[0].color.a < data.bands[1].color.a,
+        "stale B dims"
+    );
 }
 
 #[test]
@@ -472,7 +472,7 @@ fn tone_traces_ignore_bar_style() {
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
     t.quantity = Quantity::Tone;
     let bars = ViewState::default();
-    assert_eq!(bars.spectrum.style, SpectrumStyle::Bars);
+    assert_eq!(t.style, SpectrumStyle::Bars);
     let s = spectrum_scene(&[t], &Status::default(), &bars, &Theme::dark(), SIZE);
     assert!(s.scene.layers[1].rects.is_empty());
     let line = &s.scene.layers[1].polylines[0];
@@ -636,6 +636,92 @@ fn cursor_stays_where_it_was_put_and_reads_the_bin_holding_it() {
     assert_eq!(cur.freq, "59.9 Hz");
     assert_eq!(
         cur.rows,
-        vec![("RTA".to_string(), "−10.0 dB SPL".to_string())]
+        vec![("RTA".to_string(), "−10.0 dB SPL (band)".to_string())]
     );
+}
+
+/// Compared curves of different quantities read the same number differently, so each
+/// cursor row names its own: a tone, a density, a smoothed tone.
+#[test]
+fn cursor_rows_name_tone_or_density() {
+    let g = third_octaves();
+    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let level: Vec<f32> = vec![-40.0; f.len()];
+    let mut tone = rta_trace(&f, &e, &level, LevelScale::DbSpl);
+    tone.quantity = Quantity::Tone;
+    tone.name = "Spectrum 1".to_string();
+    let mut density = tone.clone();
+    density.quantity = Quantity::Density;
+    density.name = "Spectrum 2".to_string();
+    let mut smoothed = tone.clone();
+    smoothed.quantity = Quantity::SmoothedTone(SmoothingFraction::Sixth);
+    smoothed.name = "Spectrum 3".to_string();
+    let view = ViewState {
+        cursor_hz: Some(1000.0),
+        ..ViewState::default()
+    };
+    let s = spectrum_scene(
+        &[tone, density, smoothed],
+        &Status::default(),
+        &view,
+        &Theme::dark(),
+        SIZE,
+    );
+    let cur = s.cursor.expect("cursor");
+    let values: Vec<&str> = cur.rows.iter().map(|(_, v)| v.as_str()).collect();
+    assert_eq!(
+        values,
+        [
+            "−40.0 dB SPL (tone)",
+            "−40.0 dB SPL/Hz (density)",
+            "−40.0 dB SPL (tone, 1/6 oct smoothed)",
+        ]
+    );
+}
+
+/// The pane's own curve draws over the compared ones, the first compared over the second,
+/// and each layer down has a lighter fill / bars; every curve keeps its own style.
+#[test]
+fn compared_layers_stack_in_compare_order_and_lighten() {
+    let g = third_octaves();
+    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let level = vec![-40.0f32; f.len()];
+    let mut own = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    own.style = SpectrumStyle::Fill;
+    own.color = Color::rgb(1.0, 0.0, 0.0);
+    let mut first = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    first.style = SpectrumStyle::Fill;
+    first.color = Color::rgb(0.0, 1.0, 0.0);
+    (first.compared, first.layer) = (true, 1);
+    let mut second = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    second.color = Color::rgb(0.0, 0.0, 1.0);
+    (second.compared, second.layer) = (true, 2);
+    let theme = Theme::dark();
+    let s = spectrum_scene(
+        &[own, first, second],
+        &Status::default(),
+        &ViewState::default(),
+        &theme,
+        SIZE,
+    );
+    let data = &s.scene.layers[1];
+    // The second compared keeps its bars; the two fills draw over them.
+    assert!(data.rects.iter().all(|r| r.color.b == 1.0));
+    assert!(
+        (data.rects[0].color.a - theme.bar_alpha * layer_alpha(2)).abs() < 1e-6,
+        "{}",
+        data.rects[0].color.a
+    );
+    // Fills (and lines) in drawing order: the first compared, then the pane's own on top.
+    let fills: Vec<(f32, f32)> = data.bands.iter().map(|b| (b.color.g, b.color.a)).collect();
+    assert_eq!(
+        fills,
+        [
+            (1.0, theme.fill_alpha * layer_alpha(1)),
+            (0.0, theme.fill_alpha)
+        ]
+    );
+    assert_eq!(data.polylines.len(), 2);
+    assert_eq!(data.polylines[1].stroke.color.r, 1.0, "own line on top");
+    assert!(layer_alpha(1) < 1.0 && layer_alpha(9) >= 0.45 && layer_alpha(0) == 1.0);
 }
