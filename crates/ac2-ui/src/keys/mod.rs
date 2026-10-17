@@ -273,7 +273,8 @@ commands! {
     Average => "average", "Average shown stored traces (power)", [Transfer];
     AverageComplex => "average_complex", "Average shown stored traces (complex)", [Transfer];
     AverageCoherence => "average_coherence", "Average shown stored traces (coherence-weighted)", [Transfer];
-    PhaseUnwrap => "phase_unwrap", "Phase wrapped / unwrapped", [Transfer];
+    MinMax => "min_max", "Min / max tracking on / off (top 5 peaks and dips)", [Transfer];
+    PhaseView => "phase_view", "Phase: wrapped → unwrapped → group delay", [Transfer];
     SmoothCoarser => "smooth_coarser", "Smoothing coarser (selected trace or pane's measurement)", [Transfer, Spectrum];
     SmoothFiner => "smooth_finer", "Smoothing finer (selected trace or pane's measurement)", [Transfer, Spectrum];
     SmoothOff => "smooth_off", "Smoothing: off", [Transfer, Spectrum];
@@ -282,7 +283,6 @@ commands! {
     Smooth12 => "smooth_12", "Smoothing: 1/12 oct", [Transfer, Spectrum];
     Smooth6 => "smooth_6", "Smoothing: 1/6 oct", [Transfer, Spectrum];
     Smooth3 => "smooth_3", "Smoothing: 1/3 oct", [Transfer, Spectrum];
-    GroupDelay => "group_delay", "Phase / group delay", [Transfer];
 
     SpectrumStyle => "spectrum_style", "Spectrum: line / fill / bars", [Spectrum];
     PeakHold => "peak_hold", "Peaks: off → peak hold → hold + top 5 tracked → off", [Spectrum];

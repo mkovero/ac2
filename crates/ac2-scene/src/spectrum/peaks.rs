@@ -1,6 +1,7 @@
-//! Peak tracking: the few highest peaks of a spectrum or RTA curve, kept steady from frame
-//! to frame. Display logic on the values the curve already shows (local maxima of the
+//! Peak tracking: the few highest peaks (or deepest dips) of a curve, kept steady from frame
+//! to frame. Display logic on the values the curve already shows (local extremes of the
 //! drawn columns), not analysis: nothing here is measured that the curve does not show.
+//! A dip is a peak of the curve turned upside down, so both follow the same rules.
 
 use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::Unresolved;
@@ -30,7 +31,27 @@ pub const HOLD_DB: f64 = 3.0;
 /// two peaks of about the same level keep their rows instead of swapping every frame.
 pub const ORDER_DB: f64 = 1.0;
 
-/// One peak: where it is and the curve's level there (without any display offset).
+/// Which way an extreme points.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Extreme {
+    /// A peak: higher than the curve around it.
+    #[default]
+    Max,
+    /// A dip: lower than the curve around it.
+    Min,
+}
+
+impl Extreme {
+    /// `level` as a height: how far it stands out in this direction.
+    fn height(self, level: f64) -> f64 {
+        match self {
+            Self::Max => level,
+            Self::Min => -level,
+        }
+    }
+}
+
+/// One peak (or dip): where it is and the curve's level there.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Peak {
     pub freq_hz: f64,
@@ -75,6 +96,16 @@ impl PeakInput<'_> {
 pub fn find_peaks(input: &PeakInput<'_>) -> Vec<Peak> {
     let n = input.freqs.len().min(input.level.len());
     let v: Vec<f64> = (0..n).map(|i| input.value(i)).collect();
+    find_extremes(&input.freqs[..n], &v, Extreme::Max, input.narrow)
+}
+
+/// Every extreme of `values` (dB, column-aligned with `freqs`; NaN where no extreme may
+/// be) pointing `dir` that stands out by [`PROMINENCE_DB`], merged to one per
+/// [`SPACING_OCT`], the most outstanding (highest peak, deepest dip) first. `narrow`: the
+/// columns are points on a curve, not bands, and the frequency is interpolated.
+pub fn find_extremes(freqs: &[f64], values: &[f64], dir: Extreme, narrow: bool) -> Vec<Peak> {
+    let n = freqs.len().min(values.len());
+    let v: Vec<f64> = values[..n].iter().map(|x| dir.height(*x)).collect();
     let mut found: Vec<(usize, Peak)> = Vec::new();
     for i in 0..n {
         let b = v[i];
@@ -91,16 +122,22 @@ pub fn find_peaks(input: &PeakInput<'_>) -> Vec<Peak> {
         if prominence(&v, i) < PROMINENCE_DB {
             continue;
         }
-        let freq_hz = if input.narrow {
-            interpolated_freq(input.freqs, &v, i)
+        let freq_hz = if narrow {
+            interpolated_freq(freqs, &v, i)
         } else {
             // A band's level is the power in the whole band: no point in it is the peak's
             // frequency more than another, so it reads the band's centre.
-            input.freqs[i]
+            freqs[i]
         };
-        found.push((i, Peak { freq_hz, level: b }));
+        found.push((
+            i,
+            Peak {
+                freq_hz,
+                level: dir.height(b),
+            },
+        ));
     }
-    found.sort_by(|a, b| b.1.level.total_cmp(&a.1.level));
+    found.sort_by(|a, b| dir.height(b.1.level).total_cmp(&dir.height(a.1.level)));
     let mut kept: Vec<Peak> = Vec::new();
     for (_, p) in found {
         if !kept.iter().any(|k| near(k.freq_hz, p.freq_hz)) {
@@ -158,34 +195,86 @@ fn interpolated_freq(freqs: &[f64], v: &[f64], i: usize) -> f64 {
     }
 }
 
+/// How closely the gaps between dips must agree to be read as a comb, as a fraction of
+/// their mean. A delayed copy summed with the direct sound cancels wherever the delay is an
+/// odd number of half periods: notches exactly every `1/τ` Hz. Dip frequencies come within
+/// a percent or so of the notch on a 1/48-octave grid, so a real comb agrees far better
+/// than 10 %.
+pub const COMB_TOLERANCE: f64 = 0.1;
+
+/// How many neighbouring dips in a row must be evenly spaced to be read as a comb. Two
+/// gaps agreeing within 10 % happens by chance among unrelated dips often enough; three in
+/// a row seldom does.
+pub const COMB_MIN_DIPS: usize = 4;
+
+/// The spacing of the longest run of at least [`COMB_MIN_DIPS`] neighbouring `dips` (all
+/// the dips found, not only the marked ones: the deepest few of a comb are seldom
+/// neighbours) evenly spaced on a linear frequency axis, as a comb's notches are; `None`
+/// when there is no such run — an uneven set says nothing about one delay. Of two runs as
+/// long, the lower: the comb is clearest where its notches are furthest apart in octaves.
+pub fn comb_spacing(dips: &[Peak]) -> Option<f64> {
+    let mut f: Vec<f64> = dips.iter().map(|p| p.freq_hz).collect();
+    f.sort_by(f64::total_cmp);
+    let mut best: Option<(usize, f64)> = None;
+    for a in 0..f.len() {
+        for b in a + COMB_MIN_DIPS - 1..f.len() {
+            let run = &f[a..=b];
+            let mean = (run[run.len() - 1] - run[0]) / (run.len() - 1) as f64;
+            let even = mean > 0.0
+                && run
+                    .windows(2)
+                    .all(|w| (w[1] - w[0] - mean).abs() <= COMB_TOLERANCE * mean);
+            if even && best.is_none_or(|(n, _)| run.len() > n) {
+                best = Some((run.len(), mean));
+            }
+        }
+    }
+    best.map(|(_, spacing)| spacing)
+}
+
 /// The marked peaks of one curve, kept by the UI between frames like a peak hold: display
 /// state, it only remembers what was marked.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PeakTracker {
+    dir: Extreme,
     peaks: Vec<Peak>,
 }
 
 impl PeakTracker {
+    /// A tracker of peaks ([`Extreme::Max`]) or dips ([`Extreme::Min`]).
+    pub fn new(dir: Extreme) -> Self {
+        Self {
+            dir,
+            peaks: Vec::new(),
+        }
+    }
+
     pub fn reset(&mut self) {
         self.peaks.clear();
     }
 
-    /// The marks, in list order: loudest first, two within [`ORDER_DB`] in the order they
-    /// had.
+    /// The marks, in list order: the most outstanding first, two within [`ORDER_DB`] in
+    /// the order they had.
     pub fn peaks(&self) -> &[Peak] {
         &self.peaks
     }
 
-    /// Chooses the marks again from a frame's `found` peaks ([`find_peaks`]). A peak within
+    /// Chooses the marks again from a frame's `found` extremes ([`find_extremes`], in the
+    /// tracker's direction); choosing again from the same ones changes nothing. One within
     /// [`SPACING_OCT`] of a mark is that mark, moved: it gets [`HOLD_DB`] of head start and
     /// keeps its row unless it falls behind by more than [`ORDER_DB`].
     pub fn update(&mut self, found: &[Peak]) {
+        let dir = self.dir;
         let was = |p: &Peak| self.peaks.iter().position(|q| near(q.freq_hz, p.freq_hz));
         let mut scored: Vec<(f64, Option<usize>, Peak)> = found
             .iter()
             .map(|p| {
                 let w = was(p);
-                (p.level + if w.is_some() { HOLD_DB } else { 0.0 }, w, *p)
+                (
+                    dir.height(p.level) + if w.is_some() { HOLD_DB } else { 0.0 },
+                    w,
+                    *p,
+                )
             })
             .collect();
         scored.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -196,13 +285,14 @@ impl PeakTracker {
         scored.sort_by(|a, b| {
             let ka = a.1.unwrap_or(usize::MAX);
             let kb = b.1.unwrap_or(usize::MAX);
-            ka.cmp(&kb).then(b.2.level.total_cmp(&a.2.level))
+            ka.cmp(&kb)
+                .then(dir.height(b.2.level).total_cmp(&dir.height(a.2.level)))
         });
         let mut next: Vec<Peak> = scored.into_iter().map(|s| s.2).collect();
         loop {
             let mut swapped = false;
             for k in 1..next.len() {
-                if next[k].level > next[k - 1].level + ORDER_DB {
+                if dir.height(next[k].level) > dir.height(next[k - 1].level) + ORDER_DB {
                     next.swap(k, k - 1);
                     swapped = true;
                 }

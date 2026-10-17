@@ -850,7 +850,8 @@ transfer legend row say the smoothing.
   residual delay of more than about 34 periods (3.4 ms at 10 kHz) turns the phase more than
   half a turn between columns, beyond unwrapping — set the delay (**X**, **D**) first.
   `ac2 meas new tf … --smooth 6 --smooth-magnitude-only` smooths magnitude only (`mag only`).
-- **Group delay** (**Shift+P**) is the slope of a coherence-weighted line fit to the
+- **Shift+P** steps the phase view: **wrapped → unwrapped → group delay → wrapped**.
+- **Group delay** is the slope of a coherence-weighted line fit to the
   unwrapped phase over a span around each column, not a two-neighbour difference: on a
   48/octave grid neighbours are 3 % apart, so hundredths of a degree of phase error would
   swing LF group delay by tens of percent. The span is 1/12 octave or the phase smoothing
@@ -876,6 +877,20 @@ Banners say what is wrong rather than show a misleading curve: **NO REFERENCE**,
 SIGNAL**, **CHECK ROUTING**, **CLIP**, **STALE** (with the age: `STALE · 3.2 s`), **NO DELAY
 ESTIMATE**, **CLOCK DRIFT** (in ppm), **OUTPUT TIMING JUMP**, **AUDIO STOPPED** (with the
 reason), **DAEMON NOT RESPONDING**, and for math channels **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE** / **NO RESULT**.
+
+### Min / max tracking on the transfer function
+
+**P** on a transfer pane turns min / max tracking on or off. It marks the five highest
+peaks (▲) and the five deepest dips (▼) of one curve's magnitude (the selected curve, else
+the pane's own) and lists them on a plate in a bottom corner of the magnitude view, clear
+of the legend and the cursor values: `max` and `min`, each row rank, frequency and dB. It
+reads the magnitude as drawn: smoothed, with its offset, without coherence-blanked or
+invalid columns. Peaks and dips follow the spectrum's rules (6 dB prominence, 1/6 octave
+merge, marks that do not hop; see [Peak hold and peak tracking](#peak-hold-and-peak-tracking)).
+When four or more neighbouring dips are evenly spaced on a linear axis (within 10 %), as the
+notches of a comb are (a copy of the sound arriving `τ` later cancels every `1/τ` Hz), the
+list ends with the spacing and the delay it implies: `comb Δf 1.00 kHz · 1.00 ms`. An
+uneven set shows nothing. **T** to traces only takes the list away and keeps the marks.
 
 ### Math channels
 
@@ -2601,10 +2616,10 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Z` | Load a target curve file… | `target` |
 | `B` | Coherence mask: off → 0.3 → 0.5 → 0.7 → 0.9 | `coherence_mask` |
 | `M` | Average shown stored traces (power) | `average` |
-| `P` | Phase wrapped / unwrapped | `phase_unwrap` |
+| `P` | Min / max tracking on / off (top 5 peaks and dips) | `min_max` |
+| `Shift+P` | Phase: wrapped → unwrapped → group delay | `phase_view` |
 | `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
 | `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
-| `Shift+P` | Phase / group delay | `group_delay` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 
@@ -2740,7 +2755,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 
 | Pane | Hint line |
 |---|---|
-| Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `H` all keys |
+| Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` min/max · `K` smoothing · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `P` peak hold/track · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next · `Q` close pane · `W` maximise · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |

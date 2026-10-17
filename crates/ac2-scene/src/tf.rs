@@ -107,6 +107,12 @@ pub struct TfScene {
     pub cursor: Option<CursorReadout>,
     /// The cursor values' plate.
     pub readout_box: Option<Rect>,
+    /// Min / max tracking's peaks and dips of the tracked curve; `None` while it is off or
+    /// the magnitude is not shown.
+    pub extremes: Option<TfExtremes>,
+    /// Their list as drawn; `None` also while plot chrome is off (T), when only the marks
+    /// stay.
+    pub extremes_list: Option<String>,
     /// Reference trace's delay: `ref m1 12.34 ms · 4.24 m @ 20 °C`.
     pub delay: Option<String>,
     /// Present when coherence is drawn over the magnitude pane.
@@ -699,6 +705,40 @@ pub fn transfer_scene(
         }
         legend_box = placed;
     }
+    let mag = panes.iter().find(|p| p.kind == TfPaneKind::Magnitude);
+    let extremes = match mag.filter(|_| view.tf.extremes) {
+        Some(p) => extremes::extremes(
+            &mut c,
+            traces,
+            &shown,
+            cache,
+            p.plot,
+            &xm,
+            &p.y_axis.mapping,
+            view.chrome.peak_list(),
+            theme,
+        ),
+        None => {
+            if !view.tf.extremes {
+                cache.clear_extremes();
+            }
+            None
+        }
+    };
+    let extremes_list = extremes
+        .as_ref()
+        .filter(|e| view.chrome.peak_list() && !(e.max.is_empty() && e.min.is_empty()))
+        .zip(mag)
+        .map(|(e, p)| {
+            let text = extremes::list_text(e, shown.len() > 1);
+            let avoid: Vec<Rect> = legend_box
+                .iter()
+                .map(|b| b.rect)
+                .chain(readout_box)
+                .collect();
+            extremes::draw_list(&mut c, &text, p.plot, &avoid, theme);
+            text
+        });
     let legend_hits = legend_box.as_ref().map_or_else(Vec::new, |b| {
         let keys: Vec<TraceKey> = legend.iter().map(|e| e.key).collect();
         b.hits(&keys)
@@ -715,6 +755,8 @@ pub fn transfer_scene(
         legend_hits,
         cursor,
         readout_box,
+        extremes,
+        extremes_list,
         delay,
         coherence_overlay,
         strip: strip.rect,
@@ -722,6 +764,9 @@ pub fn transfer_scene(
         unresolved: marks,
     }
 }
+
+mod extremes;
+pub use extremes::{Comb, TfExtremes};
 
 #[cfg(test)]
 mod tests;

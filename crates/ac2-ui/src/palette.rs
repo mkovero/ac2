@@ -198,7 +198,7 @@ mod tests {
         let k = Keymap::default();
         for (q, want) in [
             ("insert", CommandId::InsertDelay),
-            ("group", CommandId::GroupDelay),
+            ("unwrapped", CommandId::PhaseView),
             ("theme", CommandId::CycleTheme),
             ("grid", CommandId::PlotChrome),
             ("quit", CommandId::Quit),

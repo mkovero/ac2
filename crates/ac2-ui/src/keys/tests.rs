@@ -160,7 +160,7 @@ fn learned_bindings_carry_over() {
         ("Z", CommandId::Target),
         ("B", CommandId::CoherenceMask),
         ("M", CommandId::Average),
-        ("Shift+P", CommandId::GroupDelay),
+        ("Shift+P", CommandId::PhaseView),
         ("Ctrl+1", CommandId::Slot1),
         ("Ctrl+9", CommandId::Slot9),
         ("1", CommandId::ShowSlot1),
@@ -192,11 +192,13 @@ fn learned_bindings_carry_over() {
     ] {
         assert_eq!(m.lookup(t, c(chord)), Some(cmd), "{chord}");
     }
-    // Scoped lookup: P means peak hold in the spectrum pane, phase in the transfer pane.
+    // Scoped lookup: P tracks extremes in both plots — peak hold and peaks on the
+    // spectrum, min / max on the transfer function; Shift+P is the phase view there.
     assert_eq!(m.lookup(Scope::Spectrum, c("P")), Some(CommandId::PeakHold));
+    assert_eq!(m.lookup(Scope::Transfer, c("P")), Some(CommandId::MinMax));
     assert_eq!(
-        m.lookup(Scope::Transfer, c("P")),
-        Some(CommandId::PhaseUnwrap)
+        m.lookup(Scope::Transfer, c("Shift+P")),
+        Some(CommandId::PhaseView)
     );
     // H is help in every pane; Shift+I is the impulse response wherever there is one.
     for scope in Scope::ALL {

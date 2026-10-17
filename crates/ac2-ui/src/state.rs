@@ -23,15 +23,18 @@ use ac2_proto::model::{
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
 pub use ac2_scene::banner::Severity;
+use ac2_scene::format;
+// The reducer tests read these through `super::*`.
 use ac2_scene::spectrum::PeakHold;
 use ac2_scene::stimulus::{Drive, Next as NextKey, Stimulus as NextStimulus};
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
 use ac2_scene::view::{
-    DistortionUnit, FreqRange, IrMode, IrPane, PhaseView, PlotChrome, SpectrumMode, SplMode,
-    SweepMode, ViewState,
+    DistortionUnit, FreqRange, IrMode, IrPane, PlotChrome, SpectrumMode, SplMode, SweepMode,
+    ViewState,
 };
-use ac2_scene::{axis::Range, format};
+#[cfg(test)]
+use ac2_scene::{axis::Range, view::PhaseView};
 
 use crate::anim::FreqNav;
 use crate::cal_view::{CalAction, CalView};

@@ -297,6 +297,28 @@ fn p_cycles_peak_hold_and_tracking() {
     }
 }
 
+/// On the transfer pane P is min / max tracking on / off, and Shift+P steps the phase view
+/// wrapped → unwrapped → group delay → wrapped; each toast names the new state.
+#[test]
+fn p_tracks_min_max_and_shift_p_steps_the_phase_view() {
+    use ac2_scene::view::PhaseView;
+    let mut t = T::new();
+    assert_eq!(t.st.scope(), Scope::Transfer);
+    t.key("P");
+    assert!(t.st.view.tf.extremes);
+    assert_eq!(t.last_toast(), "min / max tracking");
+    t.key("P");
+    assert!(!t.st.view.tf.extremes);
+    assert_eq!(t.last_toast(), "min / max tracking off");
+    assert_eq!(t.st.view.tf.phase, PhaseView::Wrapped);
+    for want in ["phase: unwrapped", "group delay", "phase: wrapped"] {
+        t.key("Shift+P");
+        assert_eq!(t.last_toast(), want);
+        assert_eq!(t.st.view.tf.phase.name(), want);
+    }
+    assert_eq!(t.st.view.tf.phase, PhaseView::Wrapped);
+}
+
 #[test]
 fn keys_follow_the_focused_pane() {
     let mut t = T::new();
@@ -444,12 +466,14 @@ fn transfer_commands() {
     // View toggles.
     t.key("B");
     assert_eq!(t.st.view.tf.coherence.blank_below, Some(0.3));
+    // Shift+P steps wrapped → unwrapped → group delay → wrapped.
+    t.key("Shift+P");
+    assert!(matches!(t.st.view.tf.phase, PhaseView::Unwrapped { .. }));
     t.key("Shift+P");
     assert!(matches!(t.st.view.tf.phase, PhaseView::GroupDelay { .. }));
-    // P leaves group delay for wrapped phase, then toggles wrapped / unwrapped.
-    t.key("P");
+    t.key("Shift+P");
     assert_eq!(t.st.view.tf.phase, PhaseView::Wrapped);
-    t.key("P");
+    t.key("Shift+P");
     assert!(matches!(t.st.view.tf.phase, PhaseView::Unwrapped { .. }));
     t.st.update(Msg::Command(CommandId::CoherencePlacement), &t.keys);
     assert_eq!(

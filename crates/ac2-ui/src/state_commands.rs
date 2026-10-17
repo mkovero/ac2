@@ -660,8 +660,8 @@ impl AppState {
             | C::LegendBottomLeft
             | C::LegendBottomRight
             | C::LegendHide
-            | C::PhaseUnwrap
-            | C::GroupDelay
+            | C::PhaseView
+            | C::MinMax
             | C::SpectrumStyle
             | C::PeakHold
             | C::SpectrographSpan

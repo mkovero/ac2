@@ -232,3 +232,71 @@ fn a_mark_that_drifts_within_the_spacing_keeps_its_row() {
     t.update(&[]);
     assert!(t.peaks().is_empty());
 }
+
+/// The magnitude of a direct sound plus a copy `gain` as loud, `tau` seconds later, on a
+/// 1/48-octave grid from 20 Hz to 20 kHz: `|1 + g·e^(−j2πfτ)|`, dB.
+fn comb(tau: f64, gain: f64) -> (Vec<f64>, Vec<f64>) {
+    let f: Vec<f64> = (0..)
+        .map(|i| 20.0 * 2f64.powf(f64::from(i) / 48.0))
+        .take_while(|f| *f <= 20_000.0)
+        .collect();
+    let m = f
+        .iter()
+        .map(|f| {
+            let w = 2.0 * std::f64::consts::PI * f * tau;
+            10.0 * (1.0 + gain * gain + 2.0 * gain * w.cos()).log10()
+        })
+        .collect();
+    (f, m)
+}
+
+#[test]
+fn a_combs_dips_sit_on_its_notches() {
+    // 1 ms: notches at odd multiples of 1/(2τ) = 500 Hz.
+    let (f, m) = comb(1e-3, 0.9);
+    let dips = find_extremes(&f, &m, Extreme::Min, true);
+    let mut t = PeakTracker::new(Extreme::Min);
+    t.update(&dips);
+    assert_eq!(t.peaks().len(), TRACKED);
+    for p in t.peaks() {
+        let k = (p.freq_hz / 1000.0 - 0.5).round();
+        let notch = (k + 0.5) * 1000.0;
+        assert!(
+            (p.freq_hz - notch).abs() < 0.01 * notch,
+            "{p:?} is not on a notch"
+        );
+        // 1 − 0.9 = 0.1: −20 dB at the notch, read near it on the grid.
+        assert!(p.level < -12.0, "{p:?}");
+    }
+    // Deepest first.
+    assert!(t.peaks().windows(2).all(|w| w[0].level <= w[1].level));
+    let spacing = comb_spacing(&dips).expect("a comb");
+    assert!((spacing - 1000.0).abs() < 10.0, "{spacing}");
+    // The peaks between, at whole multiples of 1 kHz.
+    let peaks = find_extremes(&f, &m, Extreme::Max, true);
+    assert!(!peaks.is_empty());
+    for p in &peaks {
+        let k = (p.freq_hz / 1000.0).round();
+        assert!((p.freq_hz - k * 1000.0).abs() < 0.01 * p.freq_hz, "{p:?}");
+    }
+}
+
+#[test]
+fn uneven_dips_are_no_comb() {
+    let d = |hz| Peak {
+        freq_hz: hz,
+        level: -20.0,
+    };
+    assert_eq!(
+        comb_spacing(&[d(500.0), d(1500.0), d(2500.0)]),
+        None,
+        "too few"
+    );
+    assert_eq!(
+        comb_spacing(&[d(500.0), d(1500.0), d(2600.0), d(4500.0)]),
+        None
+    );
+    // A room-mode dip beside a comb does not hide it.
+    let s = comb_spacing(&[d(80.0), d(500.0), d(1500.0), d(2510.0), d(3490.0)]);
+    assert!(s.is_some_and(|s| (s - 996.67).abs() < 0.1), "{s:?}");
+}

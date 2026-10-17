@@ -6,10 +6,10 @@ use super::*;
 fn palette_runs_commands() {
     let mut t = T::new();
     t.key("Ctrl+K");
-    t.text("group");
+    t.text("unwrapped");
     t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
-    assert!(matches!(t.st.view.tf.phase, PhaseView::GroupDelay { .. }));
+    assert!(matches!(t.st.view.tf.phase, PhaseView::Unwrapped { .. }));
     // Keys do not act while the palette is open; arrows move the highlight.
     t.key("Ctrl+K");
     let r = t.type_key("X", "x");

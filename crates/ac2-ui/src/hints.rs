@@ -114,7 +114,7 @@ mod tests {
                 "Ctrl+1 capture",
                 "X find delay",
                 "B coherence mask",
-                "P wrap/unwrap",
+                "P min/max",
                 "K smoothing",
                 "H all keys"
             ]

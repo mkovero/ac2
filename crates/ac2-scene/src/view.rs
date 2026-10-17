@@ -289,6 +289,30 @@ pub enum PhaseView {
     GroupDelay { range_ms: Range },
 }
 
+impl PhaseView {
+    /// Shift+P: wrapped → unwrapped → group delay → wrapped, each view at its default range.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Wrapped => Self::Unwrapped {
+                range: Range::new(-720.0, 180.0),
+            },
+            Self::Unwrapped { .. } => Self::GroupDelay {
+                range_ms: Range::new(-2.0, 10.0),
+            },
+            Self::GroupDelay { .. } => Self::Wrapped,
+        }
+    }
+
+    /// What the operator reads when stepping (toast).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Wrapped => "phase: wrapped",
+            Self::Unwrapped { .. } => "phase: unwrapped",
+            Self::GroupDelay { .. } => "group delay",
+        }
+    }
+}
+
 /// Coherence-driven display of TF traces (magnitude and phase panes).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CoherenceStyle {
@@ -340,6 +364,9 @@ pub struct TfView {
     pub phase_reference: Option<TraceKey>,
     /// Where the legend sits over the magnitude pane, how large it may be.
     pub legend: LegendView,
+    /// Min / max tracking (P): the highest peaks and deepest dips of the magnitude marked
+    /// and listed.
+    pub extremes: bool,
 }
 
 impl Default for TfView {
@@ -354,6 +381,7 @@ impl Default for TfView {
             coherence_placement: CoherencePlacement::Pane,
             phase_reference: None,
             legend: LegendView::default(),
+            extremes: false,
         }
     }
 }

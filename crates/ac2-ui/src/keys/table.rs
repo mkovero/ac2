@@ -198,13 +198,15 @@ pub fn defaults() -> Vec<Binding> {
         // Shift+I shows or hides the impulse response wherever there is one (plain I zooms).
         (C::CoherenceMask, S::Transfer, k(K::B)),
         (C::Average, S::Transfer, k(K::M)),
-        (C::PhaseUnwrap, S::Transfer, k(K::P)),
+        // P tracks extremes in both plots: min / max here, peak hold and peaks on the
+        // spectrum. The phase views share Shift+P.
+        (C::MinMax, S::Transfer, k(K::P)),
         // K steps smoothing coarser, Shift+K finer (off → 1/48 … 1/3 octave).
         (C::SmoothCoarser, S::Transfer, k(K::K)),
         (C::SmoothFiner, S::Transfer, sh(K::K)),
         (C::SmoothCoarser, S::Spectrum, k(K::K)),
         (C::SmoothFiner, S::Spectrum, sh(K::K)),
-        (C::GroupDelay, S::Transfer, sh(K::P)),
+        (C::PhaseView, S::Transfer, sh(K::P)),
         (C::ResetAverage, S::Transfer, k(K::R)),
         (C::ResetAverage, S::Spectrum, k(K::R)),
         (C::ResetAverage, S::Spl, k(K::R)),
@@ -288,7 +290,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::Slot1, "capture", 85),
                     hint(C::InsertDelay, "find delay", 70),
                     hint(C::CoherenceMask, "coherence mask", 65),
-                    hint(C::PhaseUnwrap, "wrap/unwrap", 55),
+                    hint(C::MinMax, "min/max", 55),
                     hint(C::SmoothCoarser, "smoothing", 60),
                 ]
             }

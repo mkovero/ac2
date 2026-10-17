@@ -6,6 +6,7 @@ use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::{Polarity, Smoothing, SmoothingFraction, SmoothingMode};
 use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
 
+mod extremes;
 mod layout;
 mod panes;
 

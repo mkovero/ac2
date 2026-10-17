@@ -164,21 +164,19 @@ impl AppState {
                     "legend shown"
                 });
             }
-            C::PhaseUnwrap => {
-                self.view.tf.phase = match self.view.tf.phase {
-                    PhaseView::Wrapped => PhaseView::Unwrapped {
-                        range: Range::new(-720.0, 180.0),
-                    },
-                    _ => PhaseView::Wrapped,
-                };
+            C::PhaseView => {
+                let next = self.view.tf.phase.next();
+                self.view.tf.phase = next;
+                self.toast(next.name());
             }
-            C::GroupDelay => {
-                self.view.tf.phase = match self.view.tf.phase {
-                    PhaseView::GroupDelay { .. } => PhaseView::Wrapped,
-                    _ => PhaseView::GroupDelay {
-                        range_ms: Range::new(-2.0, 10.0),
-                    },
-                };
+            C::MinMax => {
+                let on = !self.view.tf.extremes;
+                self.view.tf.extremes = on;
+                self.toast(if on {
+                    "min / max tracking"
+                } else {
+                    "min / max tracking off"
+                });
             }
             C::SpectrumStyle => {
                 self.view.spectrum.style = self.view.spectrum.style.next();

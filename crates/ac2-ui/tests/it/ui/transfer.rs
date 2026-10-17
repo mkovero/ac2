@@ -431,3 +431,37 @@ fn transfer_legend_many_curves() {
     assert_eq!([kept.x, kept.y], [1.0, 1.0]);
     assert!(kept.max_width < width);
 }
+
+/// P on the transfer pane: min / max tracking marks the magnitude's peak (▲) and lists it on
+/// a plate in a bottom corner, clear of the legend.
+#[test]
+fn transfer_min_max_tracking() {
+    if !have_gpu("transfer_min_max_tracking") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press(Key::P);
+    step_until(&mut h, "min / max on", |a| a.state.view.tf.extremes);
+    {
+        let st = &h.state().state;
+        let s = ac2_ui::scenes::transfer(
+            st,
+            crate::common::pane(st, PaneKind::Transfer),
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 450.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        let list = s.extremes_list.expect("the list is up");
+        assert!(list.starts_with("max\n1  "), "{list}");
+    }
+    h.state_mut().state.toasts.clear();
+    snapshot(&mut h, "transfer_min_max");
+}
