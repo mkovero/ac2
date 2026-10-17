@@ -955,3 +955,63 @@ fn leq_page_holds_its_scroll_while_the_rig_meters() {
         "the focused preset row came back into view"
     );
 }
+
+/// P twice on the spectrum pane: peak hold and peak tracking. The rig's tone near 1 kHz gets a
+/// box on the curve and a row in the list under the cursor readout; T to traces only takes
+/// the list (and the cursor) away and leaves the box.
+#[test]
+fn spectrum_peak_tracking() {
+    if !have_gpu("spectrum_peak_tracking") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::ALT, Key::Num2);
+    h.key_press(Key::W);
+    h.key_press(Key::P);
+    h.key_press(Key::P);
+    h.state_mut().state.view.cursor_hz = Some(1000.0);
+    step_until(&mut h, "peaks tracked", |a| {
+        a.state.view.spectrum.peak_mode == ac2_scene::view::PeakMode::Track
+            && a.state
+                .peak_tracks
+                .get(&MeasId(3))
+                .is_some_and(|t| !t.1.peaks().is_empty())
+    });
+    let scene = |h: &Harness<'_, App>| {
+        let st = &h.state().state;
+        ac2_ui::scenes::spectrum(
+            st,
+            crate::common::pane(st, PaneKind::Spectrum),
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 450.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        )
+    };
+    let s = scene(&h);
+    let list = s.peak_list.clone().expect("the list is up");
+    // The tone is in the 996 Hz bin (11.7 Hz bins), its neighbours equal: no shift.
+    assert!(list.starts_with("1  996 Hz  −32.0 dBFS"), "{list}");
+    assert!(s.peaks[0].rows[0].mark.is_some());
+    h.state_mut().state.toasts.clear();
+    snapshot(&mut h, "spectrum_peak_tracking");
+    h.key_press(Key::T);
+    h.key_press(Key::T);
+    step_until(&mut h, "traces only", |a| {
+        let p = crate::common::pane(&a.state, PaneKind::Spectrum);
+        a.state.view_for(p).chrome == ac2_scene::view::PlotChrome::Bare
+    });
+    let s = scene(&h);
+    assert_eq!(s.peak_list, None);
+    assert!(s.cursor.is_none());
+    assert!(s.peaks[0].rows[0].mark.is_some(), "the box stays");
+    h.state_mut().state.toasts.clear();
+    snapshot(&mut h, "spectrum_peak_tracking_bare");
+}

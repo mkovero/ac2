@@ -41,7 +41,7 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     // Each pane its own line.
     d.key("Alt+2");
     let sp = hint_line(&d.st);
-    assert!(sp.contains(&"P peak hold".to_owned()), "{sp:?}");
+    assert!(sp.contains(&"P peak hold/track".to_owned()), "{sp:?}");
     d.key("Alt+3");
     let ir = hint_line(&d.st);
     assert_eq!(ir.first().map(String::as_str), Some("G/Shift+G view"));

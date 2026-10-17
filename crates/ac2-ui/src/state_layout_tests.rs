@@ -43,7 +43,7 @@ fn key_hints_follow_the_focused_pane() {
     t.key("Alt+2");
     assert_eq!(hint_texts(&t, PaneKind::Transfer), None);
     let sp = hint_texts(&t, PaneKind::Spectrum).expect("spectrum focused");
-    assert!(sp.contains(&"P peak hold".to_owned()), "{sp:?}");
+    assert!(sp.contains(&"P peak hold/track".to_owned()), "{sp:?}");
     t.key("Alt+3");
     let ir = hints_of(&t, t.ir_pane()).expect("IR view focused");
     assert!(ir.contains(&"G/Shift+G view".to_owned()), "{ir:?}");
@@ -511,7 +511,7 @@ fn the_link_receives_what_the_panes_draw() {
     );
     assert_eq!(t.st.display_period(), crate::link_wants::SPL_ONLY_PERIOD);
     // Peak hold folds every spectrum frame, shown or not.
-    t.st.view.spectrum.peak_hold = true;
+    t.st.view.spectrum.peak_mode = ac2_scene::view::PeakMode::Hold;
     assert!(t.st.wanted_topics().contains(&topic(2, Stream::Spec)));
     assert!(t.st.wanted_topics().contains(&topic(4, Stream::Rta)));
 }

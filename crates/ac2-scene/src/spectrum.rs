@@ -30,6 +30,7 @@ use crate::view::{SpectrumStyle, ViewState};
 
 mod draw;
 mod legend;
+pub mod peaks;
 mod units;
 pub use draw::spectrum_scene;
 pub(crate) use draw::spectrum_scene_in;
@@ -96,6 +97,9 @@ pub struct SpectrumTrace<'a> {
     pub validity: Option<&'a [ValidityMask]>,
     /// Peak-hold values, column-aligned ([`PeakHold`]).
     pub peak: Option<&'a [f32]>,
+    /// Tracked peaks ([`peaks::PeakTracker`]), loudest first; marked while peak tracking is
+    /// on.
+    pub tracked: Option<&'a [peaks::Peak]>,
     pub scale: LevelScale,
     pub quantity: Quantity,
     /// FFT bin spacing of a narrowband trace's grid ([`crate::grid::bin_spacing`]): its
@@ -153,6 +157,7 @@ impl<'a> SpectrumTrace<'a> {
             drawn: None,
             validity: Some(&frame.validity),
             peak: None,
+            tracked: None,
             scale: frame.meta.scale,
             quantity: Quantity::Band,
             bin_hz: None,
@@ -195,6 +200,7 @@ impl<'a> SpectrumTrace<'a> {
             drawn: None,
             validity: None,
             peak: None,
+            tracked: None,
             scale: frame.meta.scale,
             quantity: Quantity::narrow(frame.meta.level, frame.meta.smoothing),
             bin_hz: None,
@@ -346,6 +352,27 @@ pub struct SpectrumCursor {
     pub rows: Vec<(String, String)>,
 }
 
+/// One tracked curve's peaks as listed and marked.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpectrumPeaks {
+    /// The curve, with its display offset when it has one ([`offset_note`]).
+    pub name: String,
+    pub rows: Vec<PeakRow>,
+}
+
+/// A tracked peak: where it is, what the list says about it, and its mark.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PeakRow {
+    pub freq_hz: f64,
+    /// The displayed level (with the display offset).
+    pub level: f64,
+    /// `1  1.00 kHz  −32.0 dBFS`.
+    pub text: String,
+    /// The box drawn around the point on the curve; `None` off the plot (zoomed past it),
+    /// when only the list names it.
+    pub mark: Option<Rect>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpectrumScene {
     pub scene: Scene,
@@ -361,6 +388,11 @@ pub struct SpectrumScene {
     /// The caption as drawn ([`caption_forms`]: the longest that leaves the unit room).
     pub caption: String,
     pub cursor: Option<SpectrumCursor>,
+    /// Tracked peaks, per tracked curve; empty unless peak tracking is on.
+    pub peaks: Vec<SpectrumPeaks>,
+    /// The peak list as drawn under the cursor readout; `None` with no tracked peaks or
+    /// while plot chrome is off (T), when only the marks stay.
+    pub peak_list: Option<String>,
     /// One entry per curve, in drawing order: name, colour and tags (`stopped`,
     /// `STALE 3.2 s`, `offset +3.0 dB`). Drawn in rows above the plot, never over a curve.
     pub legend: Vec<LegendEntry>,

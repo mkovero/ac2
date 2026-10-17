@@ -45,7 +45,7 @@ fn line_style_gaps_and_cursor() {
         spectrum: SpectrumView {
             style: SpectrumStyle::Line,
             level: Range::new(-60.0, 0.0),
-            peak_hold: false,
+            peak_mode: PeakMode::Off,
             ..SpectrumView::default()
         },
         cursor_hz: Some(1000.0),
@@ -76,7 +76,7 @@ fn a_gliding_curve_is_drawn_between_frames_and_read_at_the_newest() {
         spectrum: SpectrumView {
             style: SpectrumStyle::Line,
             level: Range::new(-60.0, 0.0),
-            peak_hold: false,
+            peak_mode: PeakMode::Off,
             ..SpectrumView::default()
         },
         cursor_hz: Some(1000.0),
@@ -111,7 +111,7 @@ fn offset_traces_move_and_say_so() {
         spectrum: SpectrumView {
             style: SpectrumStyle::Line,
             level: Range::new(-60.0, 0.0),
-            peak_hold: true,
+            peak_mode: PeakMode::Hold,
             ..SpectrumView::default()
         },
         cursor_hz: Some(1000.0),
@@ -192,7 +192,7 @@ fn peak_overlay_drawn_when_enabled() {
         SIZE,
     );
     assert!(s.scene.layers[1].polylines.is_empty());
-    view.spectrum.peak_hold = true;
+    view.spectrum.peak_mode = PeakMode::Hold;
     let s = spectrum_scene(&[t], &Status::default(), &view, &Theme::dark(), SIZE);
     let caps = &s.scene.layers[1].polylines[0];
     assert_eq!(crate::canvas::tests::segments(&caps.points).len(), 31);
@@ -384,7 +384,7 @@ fn line_thinning_keeps_peaks() {
         spectrum: SpectrumView {
             style: SpectrumStyle::Line,
             level: Range::new(-100.0, 0.0),
-            peak_hold: true,
+            peak_mode: PeakMode::Hold,
             ..SpectrumView::default()
         },
         ..ViewState::default()
@@ -430,7 +430,7 @@ fn fill_is_the_line_over_an_area_to_the_bottom() {
         spectrum: SpectrumView {
             style: SpectrumStyle::Fill,
             level: Range::new(-60.0, 0.0),
-            peak_hold: true,
+            peak_mode: PeakMode::Hold,
             ..SpectrumView::default()
         },
         ..ViewState::default()

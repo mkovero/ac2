@@ -285,7 +285,7 @@ commands! {
     GroupDelay => "group_delay", "Phase / group delay", [Transfer];
 
     SpectrumStyle => "spectrum_style", "Spectrum: line / fill / bars", [Spectrum];
-    PeakHold => "peak_hold", "Peak hold on / off", [Spectrum];
+    PeakHold => "peak_hold", "Peaks: off → peak hold → hold + top 5 tracked → off", [Spectrum];
     SpectrographSpan => "spectrograph_span", "Spectrograph history: 10 → 30 → 60 → 120 s", [Spectrum];
     SpectrographColours => "spectrograph_colours", "Spectrograph colours: the next colour map", [Spectrum];
     SpectrographViridis => "spectrograph_colours_viridis", "Spectrograph colours: viridis (blue, green, yellow)", [Spectrum];

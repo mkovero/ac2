@@ -234,8 +234,11 @@ impl AppState {
                 }
             }
             ConnEvent::Data(d) => {
-                if self.view.spectrum.peak_hold {
+                if self.view.spectrum.peak_mode.holds() {
                     self.fold_peaks(&d);
+                }
+                if self.view.spectrum.peak_mode.tracks() {
+                    self.fold_peak_tracks(&d);
                 }
                 if self.spectrograph_shown() {
                     self.fold_spectrographs(&d);
@@ -529,6 +532,42 @@ impl AppState {
                 e.0 = seq;
                 e.1 = at;
             }
+        }
+    }
+
+    /// Chooses each spectrum / RTA measurement's tracked peaks again from its newest frame.
+    pub(super) fn fold_peak_tracks(&mut self, d: &DataSnapshot) {
+        use ac2_proto::FrameData;
+        use ac2_scene::spectrum::peaks::{PeakInput, find_peaks};
+        for tf in d.latest.frames.values() {
+            let (meas, level, validity, unresolved, narrow) = match &tf.frame.data {
+                FrameData::Spec(f) => (
+                    f.meas,
+                    &f.level,
+                    None,
+                    f.meta.bands.as_deref().map(|b| &b.unresolved),
+                    true,
+                ),
+                FrameData::Rta(f) => (f.meas, &f.level, Some(f.validity.as_slice()), None, false),
+                _ => continue,
+            };
+            let Some(grid) = tf.frame.stamp.grid_id.and_then(|g| d.grids.get(&g)) else {
+                continue;
+            };
+            let seq = tf.frame.stamp.seq;
+            let e = self.peak_tracks.entry(meas).or_default();
+            if e.0 != 0 && seq <= e.0 {
+                continue;
+            }
+            let cols = ac2_scene::grid::columns(grid);
+            e.1.update(&find_peaks(&PeakInput {
+                freqs: &cols.freqs,
+                level,
+                validity,
+                unresolved,
+                narrow,
+            }));
+            e.0 = seq;
         }
     }
 }

@@ -1,5 +1,5 @@
 //! Drawing the spectrum scene: the axes, each curve as bars or a line, peak hold, the
-//! valid-resolution marker, the legend and the cursor.
+//! valid-resolution marker, the legend, the cursor and the tracked peaks.
 
 use super::*;
 
@@ -242,7 +242,7 @@ pub(crate) fn spectrum_scene_in(
                 }
             }
         }
-        if view.spectrum.peak_hold && t.peak.is_some() {
+        if view.spectrum.peak_mode.holds() && t.peak.is_some() {
             let pc = color.with_alpha(theme.peak_alpha);
             let points = match style {
                 // A cap across each band.
@@ -334,15 +334,81 @@ pub(crate) fn spectrum_scene_in(
             rows,
         })
     });
+    // The readouts stack down the plot's right side from here: the cursor's, then the
+    // peak list under it.
+    let mut readout_y = plot.y + 22.0;
     if let Some(cur) = &cursor {
         canvas::vline(&mut c.overlay, plot, xm.to_px(cur.freq_hz), theme.cursor);
         let mut lines = vec![cur.freq.clone()];
         lines.extend(cur.rows.iter().map(|(n, v)| format!("{n}  {v}")));
+        readout_y += (lines.len() as f32 * LINE_EM + GAP_EM) * font;
         c.overlay.labels.push(label(
             lines.join("\n"),
             [plot.right() - 8.0, plot.y + 22.0],
             anchor(HAlign::Right, VAlign::Top),
             theme.small_font_size,
+            theme.text,
+        ));
+    }
+    let peaks = if view.spectrum.peak_mode.tracks() {
+        tracked_peaks(traces, &xm, &ym, plot)
+    } else {
+        Vec::new()
+    };
+    let list_on = view.chrome.peak_list();
+    for (t, p) in traces.iter().filter(|t| t.tracked.is_some()).zip(&peaks) {
+        let color = t
+            .color
+            .with_alpha(if t.is_stale() { theme.stale_alpha } else { 1.0 });
+        for (k, r) in p.rows.iter().enumerate() {
+            let Some(m) = r.mark else { continue };
+            c.overlay.polylines.push(Polyline {
+                points: vec![
+                    [m.x, m.y],
+                    [m.right(), m.y],
+                    [m.right(), m.bottom()],
+                    [m.x, m.bottom()],
+                    [m.x, m.y],
+                ],
+                alpha: vec![],
+                stroke: Stroke::solid(color, 1.5),
+                clip: Some(plot),
+            });
+            // The rank ties a mark to its row; with the list gone (T) it would point at
+            // nothing.
+            if list_on {
+                c.overlay.labels.push(label(
+                    (k + 1).to_string(),
+                    [m.x + m.w / 2.0, m.y - 2.0],
+                    anchor(HAlign::Center, VAlign::Bottom),
+                    font,
+                    theme.text,
+                ));
+            }
+        }
+    }
+    let several = peaks.len() > 1;
+    let peak_list = (list_on && peaks.iter().any(|p| !p.rows.is_empty())).then(|| {
+        let mut lines = Vec::new();
+        for (t, p) in traces.iter().filter(|t| t.tracked.is_some()).zip(&peaks) {
+            if p.rows.is_empty() {
+                continue;
+            }
+            // A curve's name heads its rows when the list could be read against another
+            // curve's, or its levels are spread by an offset.
+            if several || t.offset_db != 0.0 {
+                lines.push(p.name.clone());
+            }
+            lines.extend(p.rows.iter().map(|r| r.text.clone()));
+        }
+        lines.join("\n")
+    });
+    if let Some(list) = &peak_list {
+        c.overlay.labels.push(label(
+            list.clone(),
+            [plot.right() - 8.0, readout_y],
+            anchor(HAlign::Right, VAlign::Top),
+            font,
             theme.text,
         ));
     }
@@ -362,6 +428,8 @@ pub(crate) fn spectrum_scene_in(
         unit_help,
         caption,
         cursor,
+        peaks,
+        peak_list,
         legend,
         legend_shown,
         legend_rect,
@@ -371,4 +439,68 @@ pub(crate) fn spectrum_scene_in(
         stitches,
         unresolved,
     }
+}
+
+/// Line height of a multi-line label, in ems, and the gap left between two stacked ones.
+const LINE_EM: f32 = 1.25;
+const GAP_EM: f32 = 0.5;
+
+/// Half the side of a peak's box, logical pixels: big enough to find on a busy curve,
+/// small enough that marks a [`peaks::SPACING_OCT`] apart do not touch on a wide pane.
+const MARK_HALF: f32 = 4.0;
+
+/// Each tracked curve's peaks, in [`SpectrumTrace::tracked`] order: a row per peak with
+/// its displayed level (offset included, as the cursor reads) and its box where it is on
+/// the plot.
+fn tracked_peaks(
+    traces: &[SpectrumTrace<'_>],
+    xm: &crate::axis::Mapping,
+    ym: &crate::axis::Mapping,
+    plot: Rect,
+) -> Vec<SpectrumPeaks> {
+    traces
+        .iter()
+        .filter_map(|t| {
+            let tracked = t.tracked?;
+            let rows = tracked
+                .iter()
+                .enumerate()
+                .map(|(k, p)| {
+                    let level = p.level + t.offset_db;
+                    let (x, y) = (xm.to_px(p.freq_hz), ym.to_px(level));
+                    let inside = x.is_finite()
+                        && y.is_finite()
+                        && x >= plot.x
+                        && x <= plot.right()
+                        && y >= plot.y
+                        && y <= plot.bottom();
+                    PeakRow {
+                        freq_hz: p.freq_hz,
+                        level,
+                        text: format!(
+                            "{}  {}  {} {}",
+                            k + 1,
+                            format::freq_readout(p.freq_hz),
+                            format::level(level),
+                            value_unit(t.scale, t.quantity)
+                        ),
+                        mark: inside.then(|| {
+                            Rect::new(
+                                x - MARK_HALF,
+                                y - MARK_HALF,
+                                2.0 * MARK_HALF,
+                                2.0 * MARK_HALF,
+                            )
+                        }),
+                    }
+                })
+                .collect();
+            let name = if t.offset_db != 0.0 {
+                offset_note(&t.name, t.offset_db)
+            } else {
+                t.name.clone()
+            };
+            Some(SpectrumPeaks { name, rows })
+        })
+        .collect()
 }

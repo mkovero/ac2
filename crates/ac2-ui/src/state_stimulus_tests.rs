@@ -277,6 +277,26 @@ fn opening_key_is_not_typed_into_the_prompt() {
     assert_eq!(t.st.stimulus.level, Some(Dbfs(-19.0)));
 }
 
+/// P on the spectrum pane steps off → peak hold → peak hold + tracking → off, the toast
+/// naming each step; each step starts the hold and the marks over.
+#[test]
+fn p_cycles_peak_hold_and_tracking() {
+    use ac2_scene::view::PeakMode;
+    let mut t = T::new();
+    t.key("Alt+2");
+    for (want, toast) in [
+        (PeakMode::Hold, "peak hold"),
+        (PeakMode::Track, "peak hold + peak tracking"),
+        (PeakMode::Off, "peak hold off"),
+    ] {
+        t.st.peak_tracks.entry(MeasId(3)).or_default();
+        t.key("P");
+        assert_eq!(t.st.view.spectrum.peak_mode, want);
+        assert_eq!(t.last_toast(), toast);
+        assert!(t.st.peak_tracks.is_empty() && t.st.peaks.is_empty());
+    }
+}
+
 #[test]
 fn keys_follow_the_focused_pane() {
     let mut t = T::new();
@@ -284,7 +304,10 @@ fn keys_follow_the_focused_pane() {
     t.key("Alt+2");
     assert_eq!(t.st.scope(), Scope::Spectrum);
     t.key("P");
-    assert!(t.st.view.spectrum.peak_hold);
+    assert_eq!(
+        t.st.view.spectrum.peak_mode,
+        ac2_scene::view::PeakMode::Hold
+    );
     // X means nothing there.
     assert!(t.key("X").is_empty());
     // A transfer pane's IR view has the IR's keys; Shift+G back past its response's

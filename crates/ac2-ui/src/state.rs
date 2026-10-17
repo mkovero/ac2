@@ -229,6 +229,9 @@ pub struct AppState {
     /// Peak hold per spectrum / RTA measurement, with the last folded-in `seq` and capture
     /// time.
     pub peaks: BTreeMap<MeasId, (u64, u64, PeakHold)>,
+    /// Tracked peaks per spectrum / RTA measurement, with the last folded-in `seq`, kept
+    /// while peak tracking is on.
+    pub peak_tracks: BTreeMap<MeasId, (u64, ac2_scene::spectrum::peaks::PeakTracker)>,
     /// Spectrograph history per spectrum / RTA measurement, kept while the spectrograph is
     /// shown.
     pub spectrographs: BTreeMap<MeasId, ac2_scene::spectrograph::SpectrographHistory>,
@@ -459,6 +462,7 @@ impl AppState {
             selected_live: None,
             edits: BTreeMap::new(),
             peaks: BTreeMap::new(),
+            peak_tracks: BTreeMap::new(),
             spectrographs: BTreeMap::new(),
             stimulus: Stimulus::default(),
             sweep: SweepUi::default(),

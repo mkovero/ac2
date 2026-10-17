@@ -1,12 +1,13 @@
 use super::*;
 use crate::axis::Range;
 use crate::grid::{column_edges, column_frequencies};
-use crate::view::SpectrumView;
+use crate::view::{PeakMode, PlotChrome, SpectrumView};
 use ac2_proto::GridDef;
 use ac2_proto::units::{Hz, MeasId};
 
 mod captions;
 mod drawing;
+mod tracking;
 
 const SIZE: Viewport = Viewport {
     width: 800.0,
@@ -39,6 +40,7 @@ fn rta_trace<'a>(
         drawn: None,
         validity: None,
         peak: None,
+        tracked: None,
         scale,
         quantity: Quantity::Band,
         bin_hz: None,

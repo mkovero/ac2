@@ -184,8 +184,11 @@ impl AppState {
                 self.view.spectrum.style = self.view.spectrum.style.next();
             }
             C::PeakHold => {
-                self.view.spectrum.peak_hold = !self.view.spectrum.peak_hold;
+                let next = self.view.spectrum.peak_mode.next();
+                self.view.spectrum.peak_mode = next;
                 self.peaks.clear();
+                self.peak_tracks.clear();
+                self.toast(next.name());
             }
             C::SpectrographSpan => {
                 let sg = &mut self.view.spectrum.spectrograph;

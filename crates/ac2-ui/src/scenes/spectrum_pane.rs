@@ -172,6 +172,10 @@ pub(crate) fn with_spectrum<R>(
                 .drawn(&c.tf.frame, now.instant)
         })
         .collect();
+    let tracked = shown
+        .map(|m| m.id)
+        .filter(|id| cols.iter().any(|c| c.meas.id == *id))
+        .or_else(|| cols.first().map(|c| c.meas.id));
     let mut traces = Vec::new();
     for ((c, note), drawn) in cols.iter().zip(&notes).zip(&drawn) {
         let name = c.meas.config.name.clone();
@@ -200,8 +204,14 @@ pub(crate) fn with_spectrum<R>(
             _ => continue,
         };
         t.drawn = drawn.as_deref();
-        if st.view.spectrum.peak_hold {
+        if st.view.spectrum.peak_mode.holds() {
             t.peak = st.peaks.get(&c.meas.id).map(|p| p.2.values());
+        }
+        // One curve's peaks: the pane's own measurement's (the first live curve without
+        // one). Five marks per curve on several curves crowd the plot, and a list of
+        // fifteen rows is no longer read at a glance.
+        if st.view.spectrum.peak_mode.tracks() && Some(c.meas.id) == tracked {
+            t.tracked = st.peak_tracks.get(&c.meas.id).map(|p| p.1.peaks());
         }
         t.offset_db = st.edit(c.meas.id).offset_db;
         // A math channel's caption is its expression and what it means.
@@ -262,6 +272,7 @@ pub(crate) fn with_spectrum<R>(
             drawn: None,
             validity: None,
             peak: None,
+            tracked: None,
             scale: *scale,
             quantity: *quantity,
             bin_hz: match quantity {

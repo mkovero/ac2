@@ -678,6 +678,26 @@ one-bin tone as a bar would be thinner than a pixel. The fill follows the line e
 tone stays a spike, a gap in the line is a gap in the fill, stale traces dim, and the peak
 hold stays a line on top.
 
+#### Peak hold and peak tracking
+
+**P** steps the spectrum pane through **off → peak hold → peak hold + peak tracking → off**.
+Tracking marks the five highest peaks of the pane's own live curve (the first live curve
+when the pane's measurement has none) with a small box on the curve and lists them under
+the cursor readout, loudest first: `1  1.00 kHz  −32.0 dBFS`. One curve is tracked, not
+every curve shown: five boxes per curve on several curves crowd the plot and the list would
+no longer read at a glance.
+
+A peak is a maximum that stands at least 6 dB above the dips on both sides of it (each
+dip the lowest point before the curve rises higher than the peak; an averaged noise floor
+ripples by a few dB, so a mark always sits on something that stands out); peaks closer than 1/6 octave count as one, the
+stronger. A narrowband peak's frequency is the vertex of the parabola through its bin and
+the two beside it (within a fraction of a bin of a tone between bins); an RTA peak reads
+its band's centre. The level is the curve's own at that column, what the cursor reads. Gaps,
+invalid columns and a multi-resolution spectrum's unresolved columns hold no peak. Marks do
+not hop: a marked peak keeps its place unless a rival beats it by more than 3 dB, and keeps
+its row unless the one below beats it by more than 1 dB. **T** to traces only takes the list
+and the rank numbers away; the boxes stay on the curve.
+
 #### Fixed or multi-resolution
 
 A spectrum's **Resolution** is one FFT (`64 pt` … `65536 pt`, default 65 536) or
@@ -2598,7 +2618,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
 | `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
 | `B` | Spectrum: line / fill / bars | `spectrum_style` |
-| `P` | Peak hold on / off | `peak_hold` |
+| `P` | Peaks: off → peak hold → hold + top 5 tracked → off | `peak_hold` |
 | `Shift+B` | Spectrograph history: 10 → 30 → 60 → 120 s | `spectrograph_span` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
@@ -2721,7 +2741,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Pane | Hint line |
 |---|---|
 | Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `H` all keys |
-| Spectrum / RTA | `S` start/stop · `P` peak hold · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
+| Spectrum / RTA | `S` start/stop · `P` peak hold/track · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next · `Q` close pane · `W` maximise · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |

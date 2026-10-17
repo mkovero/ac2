@@ -389,10 +389,52 @@ pub struct SpectrumView {
     /// it, and each scale keeps its own range, so calibrating doesn't push the curves off
     /// a dBFS-sized axis.
     pub level_spl: Range,
-    pub peak_hold: bool,
+    pub peak_mode: PeakMode,
     /// What the pane shows: the spectrum, the spectrograph or both.
     pub mode: SpectrumMode,
     pub spectrograph: SpectrographView,
+}
+
+/// What P draws over the spectrum's curves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PeakMode {
+    #[default]
+    Off,
+    /// The highest level each column has reached.
+    Hold,
+    /// The peak hold, and the highest peaks of the pane's live curve marked and listed
+    /// ([`crate::spectrum::peaks`]).
+    Track,
+}
+
+impl PeakMode {
+    /// P: off → hold → hold + tracking → off.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Hold,
+            Self::Hold => Self::Track,
+            Self::Track => Self::Off,
+        }
+    }
+
+    /// The peak-hold line is drawn.
+    pub fn holds(self) -> bool {
+        self != Self::Off
+    }
+
+    /// Peaks are marked and listed.
+    pub fn tracks(self) -> bool {
+        self == Self::Track
+    }
+
+    /// What the operator reads when stepping (toast).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Off => "peak hold off",
+            Self::Hold => "peak hold",
+            Self::Track => "peak hold + peak tracking",
+        }
+    }
 }
 
 /// What the spectrum pane shows.
@@ -491,7 +533,7 @@ impl Default for SpectrumView {
             style: SpectrumStyle::Bars,
             level: Range::new(-100.0, 0.0),
             level_spl: Range::new(20.0, 120.0),
-            peak_hold: false,
+            peak_mode: PeakMode::Off,
             mode: SpectrumMode::Spectrum,
             spectrograph: SpectrographView::default(),
         }
@@ -769,6 +811,12 @@ impl PlotChrome {
 
     /// The cursor line and its readout.
     pub fn cursor(self) -> bool {
+        self != Self::Bare
+    }
+
+    /// The spectrum's peak list and the rank beside each mark; the marks themselves are on
+    /// the curve and stay with it, like the traces.
+    pub fn peak_list(self) -> bool {
         self != Self::Bare
     }
 
