@@ -278,13 +278,14 @@ pub(crate) fn spectrum_scene_in(
 
     let cursor_hz = view.cursor_hz.filter(|_| view.chrome.cursor());
     let cursor = cursor_hz.and_then(|hz| {
-        let first = traces.first()?;
-        let i = nearest_column(first.freqs, hz)?;
-        let f = first.freqs[i];
+        // The line and the frequency stay where the cursor was put, as on the spectrograph
+        // beside it; each curve reads the column whose band holds that frequency.
+        traces.first()?;
+        let f = hz;
         let rows = traces
             .iter()
             .filter_map(|t| {
-                let j = nearest_column(t.freqs, hz)?;
+                let j = column_at(t.freqs, t.edges, hz)?;
                 let v = t.value(j);
                 let s = format::level(v);
                 let s = if v.is_finite() {

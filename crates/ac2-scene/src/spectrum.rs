@@ -18,7 +18,7 @@ use crate::canvas::{
     self, Canvas, MARGINS, anchor, cut_to, gapped, label, text_width, visible_columns,
 };
 use crate::format;
-use crate::grid::nearest_column;
+use crate::grid::column_at;
 use crate::primitives::{
     Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };

@@ -559,3 +559,31 @@ fn multires_spectrum_marks_where_its_windows_change() {
     );
     assert!(s.stitches.is_empty() && s.unresolved.is_empty());
 }
+
+/// The cursor stays at the frequency it was put at, as on the spectrograph beside the
+/// spectrum, and reads the bin whose band holds it: 59.9 Hz on 5.86 Hz bins is bin 10
+/// (55.7–61.5 Hz), not that bin's centre, nor the nearest centre's neighbour.
+#[test]
+fn cursor_stays_where_it_was_put_and_reads_the_bin_holding_it() {
+    let bin = 48_000.0 / 8192.0;
+    let f: Vec<f64> = (1..40).map(|k| f64::from(k) * bin).collect();
+    let e: Vec<(f64, f64)> = f.iter().map(|c| (c - bin / 2.0, c + bin / 2.0)).collect();
+    let level: Vec<f32> = (1..40).map(|k| -(k as f32)).collect();
+    let t = rta_trace(&f, &e, &level, LevelScale::DbSpl);
+    let view = ViewState {
+        spectrum: SpectrumView {
+            level: Range::new(-60.0, 0.0),
+            ..SpectrumView::default()
+        },
+        cursor_hz: Some(59.9),
+        ..ViewState::default()
+    };
+    let s = spectrum_scene(&[t], &Status::default(), &view, &Theme::dark(), SIZE);
+    let cur = s.cursor.expect("cursor");
+    assert_eq!(cur.freq_hz, 59.9);
+    assert_eq!(cur.freq, "59.9 Hz");
+    assert_eq!(
+        cur.rows,
+        vec![("RTA".to_string(), "−10.0 dB SPL".to_string())]
+    );
+}

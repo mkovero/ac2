@@ -105,6 +105,20 @@ pub fn columns(g: &GridDef) -> Arc<GridColumns> {
     c
 }
 
+/// Index of the column whose band holds `hz` (`edges` are each column's `(lo, hi)`), else
+/// the nearest one on a log scale. A wide low-frequency bin is one value over its whole band,
+/// so a cursor anywhere in it reads that bin, while the cursor itself stays where it was put.
+pub fn column_at(freqs: &[f64], edges: &[(f64, f64)], hz: f64) -> Option<usize> {
+    if hz.is_nan() || hz <= 0.0 {
+        return None;
+    }
+    let i = edges.partition_point(|e| e.1 <= hz);
+    match edges.get(i) {
+        Some(&(lo, _)) if lo <= hz && i < freqs.len() => Some(i),
+        _ => nearest_column(freqs, hz),
+    }
+}
+
 /// Index of the column nearest to `hz` on a log scale (the way the axis shows distance).
 /// `None` for an empty grid or a non-positive frequency.
 pub fn nearest_column(freqs: &[f64], hz: f64) -> Option<usize> {
