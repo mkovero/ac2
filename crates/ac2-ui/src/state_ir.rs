@@ -64,7 +64,9 @@ impl AppState {
             PaneKind::Transfer if self.layout.focused().shows_ir() => Some(IrPane::Live),
             PaneKind::Distortion
                 if self.modes().sweep.ir().is_some()
-                    && self.shown_sweep().is_some_and(|(d, _)| d.sweep.is_some()) =>
+                    && self
+                        .pane_sweep(self.layout.focus)
+                        .is_some_and(|(d, _)| d.sweep.is_some()) =>
             {
                 Some(IrPane::Sweep)
             }
@@ -91,8 +93,8 @@ impl AppState {
         let (d, _) = self.traces.get(&self.selected_trace?)?;
         (d.meta.kind == TraceKind::Transfer
             && d.ir.is_some()
-            && (self.on_transfer_pane(&d.meta, shown)
-                || self.trace_compared_on_transfer(&d.meta, shown)))
+            && (self.on_pane(PaneKind::Transfer, &d.meta, shown)
+                || self.trace_compared_on(PaneKind::Transfer, &d.meta, shown)))
         .then_some(d.as_ref())
     }
 
@@ -116,7 +118,7 @@ impl AppState {
                 }
             }
             IrPane::Sweep => {
-                let (d, _) = self.shown_sweep()?;
+                let (d, _) = self.kind_sweep()?;
                 ac2_scene::distortion::ir_frame(d).map(Cow::Owned)
             }
         }
@@ -129,7 +131,7 @@ impl AppState {
                 .ir_frame_of(p)
                 .map(|f| ac2_scene::ir::extent(f.as_ref())),
             IrPane::Sweep => {
-                let s = self.shown_sweep()?.0.sweep.as_ref()?;
+                let s = self.kind_sweep()?.0.sweep.as_ref()?;
                 Some(IrExtent::of(s.ir.t0.0, s.ir.dt.0, s.ir.linear.len()))
             }
         }

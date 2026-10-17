@@ -207,7 +207,7 @@ fn sweep_with_ir(t: &mut T) {
     if let Some(s) = d.sweep.as_mut() {
         s.ir.linear[100] = 1.0;
     }
-    t.conn(with_traces(vec![sweep_meta(14)]));
+    t.conn(with_sweeps(vec![sweep_meta(14)]));
     t.conn(ConnEvent::Trace(Arc::new(d), g));
 }
 

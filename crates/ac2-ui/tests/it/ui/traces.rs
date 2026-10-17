@@ -2,8 +2,8 @@
 
 use super::*;
 
-/// Two captures in slots 1 and 2 and an imported target curve, drawn with the live traces
-/// (the other group and the target compared):
+/// Two captures in slots 1 and 2 and an imported target curve, moved under Main L, drawn
+/// with the live traces (the other group and the target compared):
 /// captures share the epoch's time base (Δt to the reference), the target is independent.
 #[test]
 fn stored_traces_and_target() {
@@ -41,8 +41,41 @@ fn stored_traces_and_target() {
         a.state.slots()[1].is_some_and(|t| t.edit.visible)
             && a.state.traces.values().all(|(d, _)| d.meta.edit.visible)
     });
-    // The pane shows Delay tower's group (N chose it): Main L, its capture and the imported
-    // target join it compared (C).
+    // An imported trace is drawn on no pane: the target moved under Main L (Shift+F2).
+    let target = h
+        .state()
+        .state
+        .traces
+        .values()
+        .find(|(d, _)| d.meta.edit.name == "house_curve")
+        .map(|(d, _)| d.meta.id)
+        .expect("the target");
+    h.state_mut()
+        .dispatch(ac2_ui::state::Msg::SelectTrace(target));
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::MoveTrace,
+    ));
+    {
+        let Overlay::Choose(c) = &mut h.state_mut().state.overlay else {
+            panic!("no move dialog");
+        };
+        c.index = c
+            .owners
+            .iter()
+            .position(|o| *o == ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) })
+            .expect("Main L among the owners");
+    }
+    h.key_press(Key::Enter);
+    step_until(&mut h, "the target under Main L", |a| {
+        a.state.traces.get(&target).is_some_and(|(d, _)| {
+            d.meta.edit.owner == ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) }
+        })
+    });
+    // A click on its row again: nothing selected, as before the move.
+    h.state_mut()
+        .dispatch(ac2_ui::state::Msg::SelectTrace(target));
+    // The pane shows Delay tower's group (N chose it): Main L, its capture and the target
+    // join it compared (C).
     {
         let st = &mut h.state_mut().state;
         st.compared_meas.insert(MeasId(1));
@@ -344,7 +377,7 @@ fn smoothed_phase_and_spectrum() {
 }
 
 /// A daemon with no audio session (a fresh local daemon, an embedded one on real audio):
-/// the transfer pane says how to open one.
+/// the transfer pane says how to open one, also once a file is imported.
 #[test]
 fn empty_session_hint() {
     if !have_gpu("empty_session_hint") {
@@ -354,12 +387,14 @@ fn empty_session_hint() {
     let mut h = harness(options_at(Some(fake.endpoints())));
     step_until(&mut h, "synced, no session", |a| {
         a.state.mirror.as_ref().is_some_and(|m| m.synced())
-            && a.state.empty_hint(&a.keymap).is_some()
+            && a.state
+                .empty_hint(a.state.layout.focus, &a.keymap)
+                .is_some()
     });
     assert_eq!(
         h.state()
             .state
-            .empty_hint(&h.state().keymap)
+            .empty_hint(h.state().state.layout.focus, &h.state().keymap)
             .map(|h| h.text)
             .as_deref(),
         Some("No audio session — press Shift+O (or Ctrl+K → Open audio session)")
@@ -368,8 +403,8 @@ fn empty_session_hint() {
     h.step();
     snapshot(&mut h, "empty_session_hint");
 
-    // A stored curve (an imported target) is drawn without a session: the hint moves to
-    // the pane's title strip, out of the curve's way.
+    // An imported target, without a session to file it under, is under Imported: no pane
+    // draws it, and the pane's hint still says how to open a session.
     h.key_press(Key::Z);
     step_until(&mut h, "target prompt", |a| {
         matches!(a.state.overlay, Overlay::Prompt(_))
@@ -378,19 +413,23 @@ fn empty_session_hint() {
         .join("../ac2-traces/tests/fixtures/house_curve.txt");
     h.event(Event::Text(path.to_string_lossy().into_owned()));
     h.key_press(Key::Enter);
-    step_until(&mut h, "the target drawn", |a| {
-        a.state.transfer_shows_stored() && a.state.overlay == Overlay::None
+    step_until(&mut h, "the target stored", |a| {
+        a.state.traces.len() == 1 && a.state.overlay == Overlay::None
     });
+    let st = &h.state().state;
+    assert!(!st.pane_shows_stored(st.layout.focus));
+    let hint = st.empty_hint(st.layout.focus, &h.state().keymap);
     assert_eq!(
-        h.state()
-            .state
-            .empty_hint(&h.state().keymap)
-            .map(|h| h.place),
-        Some(ac2_ui::state::HintPlace::Title)
+        hint.as_ref().map(|h| h.place),
+        Some(ac2_ui::state::HintPlace::Centre)
+    );
+    assert!(
+        hint.is_some_and(|h| h.text.starts_with("No audio session")),
+        "the session hint stays"
     );
     h.state_mut().state.toasts.clear();
     h.step();
-    snapshot(&mut h, "empty_session_hint_over_traces");
+    snapshot(&mut h, "empty_session_hint_imported");
 }
 
 /// The Traces list: every stored trace by name with what it is, its slot, shown or hidden

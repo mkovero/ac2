@@ -17,16 +17,21 @@ use ac2_scene::theme::Theme;
 use ac2_scene::time::Freshness;
 use ac2_scene::trace::TraceKey;
 
-use crate::state::{AppState, PaneId};
+use crate::state::{AppState, PaneId, PaneKind};
 
 use super::{Now, frame, freshness, math_status, pane_order, shown_math, status};
 
-/// The spectrum / RTA view.
-/// The scale the spectrum pane shows its curves in: dB SPL when every curve it draws (live
-/// and stored) is calibrated, else dBFS. Picks which of the pane's two level ranges applies.
-pub fn spectrum_scale(st: &AppState) -> LevelScale {
+/// The scale spectrum pane `pane` shows its curves in: dB SPL when every curve it draws
+/// (its group's, live and stored, and those compared) is calibrated, else dBFS. Picks which
+/// of the pane's two level ranges applies.
+pub fn spectrum_scale(st: &AppState, pane: PaneId) -> LevelScale {
+    let kind = PaneKind::Spectrum;
+    let shown = st.pane_meas(pane);
     let mut scales = Vec::new();
     for m in st.measurements() {
+        if !(st.live_on_pane(kind, m, shown) || st.live_compared_on(kind, m, shown)) {
+            continue;
+        }
         let Some(stream) = crate::state::spectrum_stream(m) else {
             continue;
         };
@@ -37,7 +42,7 @@ pub fn spectrum_scale(st: &AppState) -> LevelScale {
         }
     }
     for (t, _) in st.traces.values() {
-        if !t.meta.edit.visible {
+        if !(st.on_pane(kind, &t.meta, shown) || st.trace_compared_on(kind, &t.meta, shown)) {
             continue;
         }
         match t.meta.kind {
@@ -52,6 +57,7 @@ pub fn spectrum_scale(st: &AppState) -> LevelScale {
     }
 }
 
+/// The spectrum / RTA view.
 pub fn spectrum(
     st: &AppState,
     pane: PaneId,
@@ -82,7 +88,7 @@ pub fn spectrograph(
     let empty = SpectrographHistory::new(st.view.spectrum.spectrograph.span_s);
     let input = shown.map(|(m, stream)| {
         let history = st.spectrographs.get(&m.id).unwrap_or(&empty);
-        let scale = history.scale().unwrap_or_else(|| spectrum_scale(st));
+        let scale = history.scale().unwrap_or_else(|| spectrum_scale(st, pane));
         SpectrographInput {
             history,
             name: m.config.name.clone(),
@@ -97,7 +103,10 @@ pub fn spectrograph(
 }
 
 /// Calls `f` with the spectrum pane's traces (live, then stored), its banner status and
-/// the view on the level range of the scale its curves are in.
+/// the view on the level range of the scale its curves are in. The pane draws its
+/// measurement's group — its live curve, the math channels made on it, its shown stored
+/// spectra and band sets — and the curves compared (C), tagged so; never another
+/// measurement's otherwise, nor an imported trace.
 pub(crate) fn with_spectrum<R>(
     st: &AppState,
     pane: PaneId,
@@ -112,9 +121,11 @@ pub(crate) fn with_spectrum<R>(
         cols: Arc<GridColumns>,
     }
     let colours = st.curve_colours(theme);
+    let kind = PaneKind::Spectrum;
+    let shown = st.pane_meas(pane);
     let mut cols = Vec::new();
     for (_, m) in pane_order(st, pane) {
-        if st.meas_hidden(m) {
+        if !(st.live_on_pane(kind, m, shown) || st.live_compared_on(kind, m, shown)) {
             continue;
         }
         let Some(stream) = crate::state::spectrum_stream(m) else {
@@ -200,6 +211,7 @@ pub(crate) fn with_spectrum<R>(
         if t.quantity.is_narrow() {
             t.bin_hz = c.cols.bin_hz;
         }
+        t.compared = st.live_compared_on(kind, c.meas, shown);
         traces.push(t);
     }
     // Stored spectra / RTA bands, drawn under the live ones' axis rules.
@@ -212,7 +224,9 @@ pub(crate) fn with_spectrum<R>(
     let stored: Vec<Stored<'_>> = st
         .traces
         .values()
-        .filter(|(t, _)| t.meta.edit.visible)
+        .filter(|(t, _)| {
+            st.on_pane(kind, &t.meta, shown) || st.trace_compared_on(kind, &t.meta, shown)
+        })
         .filter_map(|(t, g)| {
             let (scale, q) = match t.meta.kind {
                 TraceKind::Spectrum { scale, level } => (
@@ -264,15 +278,16 @@ pub(crate) fn with_spectrum<R>(
             freshness: None,
             offset_db: data.meta.edit.offset.0,
             selected: st.selected_trace == Some(data.meta.id),
+            compared: st.trace_compared_on(kind, &data.meta, shown),
             bands: None,
         });
     }
-    let shown: Vec<&TopicFrame> = cols.iter().map(|c| c.tf).collect();
-    let mut status = status(st, &shown, None, now);
+    let drawn_frames: Vec<&TopicFrame> = cols.iter().map(|c| c.tf).collect();
+    let mut status = status(st, &drawn_frames, None, now);
     let frames: Vec<(MeasId, &TopicFrame)> = cols.iter().map(|c| (c.meas.id, c.tf)).collect();
-    status.math = shown_math(st, st.pane_meas(pane), &frames);
+    status.math = shown_math(st, shown, &frames);
     // The pane draws on the level range of the scale its curves are in.
     let mut view = st.view_for(pane);
-    view.spectrum.level = view.spectrum.range(spectrum_scale(st));
+    view.spectrum.level = view.spectrum.range(spectrum_scale(st, pane));
     f(&traces, &status, &view)
 }

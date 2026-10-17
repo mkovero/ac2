@@ -19,7 +19,7 @@ use ac2_scene::view::SplMode;
 
 use crate::state::{AppState, PaneId};
 
-use super::{Now, frame, freshness, pane_order, status};
+use super::{Now, frame, freshness, status};
 
 /// Calibration text of an SPL meter's input: the daemon's verdict with the input's mic.
 fn spl_cal(
@@ -77,13 +77,6 @@ impl LocalZone {
             LocalZone::Fixed { offset_s } => offset_s,
         }
     }
-}
-
-/// Whether the daemon has an SPL meter.
-pub fn has_spl(st: &AppState) -> bool {
-    st.measurements()
-        .iter()
-        .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
 }
 
 /// Whether any SPL meter has a band meter.
@@ -152,7 +145,7 @@ fn band_view<'a>(
     ))
 }
 
-/// The band meter of the SPL meter the pane shows (else the first one with a band frame).
+/// The band meter of the SPL meter the pane shows.
 pub fn band_leq(
     st: &AppState,
     pane: PaneId,
@@ -160,17 +153,71 @@ pub fn band_leq(
     size: Viewport,
     now: Now,
 ) -> Option<BandLeqScene> {
-    let (v, tf) = spl_meters(st, pane).find_map(|m| band_view(st, pane, m, now))?;
+    let (v, tf) = band_view(st, pane, pane_meter(st, pane)?, now)?;
     let status = status(st, &[tf], None, now);
     Some(band_leq_scene(&v, &status, theme, size))
 }
 
-/// The SPL meters in the order the pane picks them: the one it shows first.
-fn spl_meters(st: &AppState, pane: PaneId) -> impl Iterator<Item = &Measurement> {
-    pane_order(st, pane)
-        .into_iter()
-        .map(|(_, m)| m)
+/// The SPL meter pane `pane` shows, unless hidden. Only its own: a meter is a number, not
+/// a curve to overlay, so two meters are compared side by side, each on a pane of its own;
+/// one standing in for another would be read as the wrong place's level.
+fn pane_meter(st: &AppState, pane: PaneId) -> Option<&Measurement> {
+    st.pane_meas(pane)
+        .filter(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && !st.meas_hidden(m))
+}
+
+/// What SPL pane `pane` says while it draws nothing: no meter, or why its own meter has
+/// nothing to show in the pane's view.
+pub fn spl_placeholder(st: &AppState, pane: PaneId, keymap: &crate::keys::Keymap) -> String {
+    use ac2_scene::missing::{Missing, missing_text};
+    let Some(m) = st
+        .pane_meas(pane)
         .filter(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
+    else {
+        return "no SPL meter".to_owned();
+    };
+    let mode = st.pane_modes(pane).spl;
+    let has = |stream| frame(st, m.id, stream).is_some();
+    let bands = matches!(&m.config.kind, MeasKind::Spl { config } if config.bands.is_some());
+    let a_second = Some("they show once the meter has measured a second");
+    let why = if st.meas_hidden(m) {
+        Missing::Hidden
+    } else if mode == SplMode::Bands && !bands {
+        Missing::NoBandMeter
+    } else if !m.running {
+        Missing::Stopped
+    } else {
+        match mode {
+            SplMode::Leq => Missing::NotYet {
+                what: "Leq windows",
+                after: a_second,
+            },
+            SplMode::Bands => Missing::NotYet {
+                what: "band frame",
+                after: Some("the bands show once the meter has measured a second"),
+            },
+            SplMode::Meter | SplMode::MeterLeq if !has(Stream::Spl) => Missing::NotYet {
+                what: "SPL frame",
+                after: None,
+            },
+            SplMode::Meter | SplMode::MeterLeq => Missing::NotYet {
+                what: "Leq windows",
+                after: a_second,
+            },
+        }
+    };
+    let (command, scope) = if why == Missing::Hidden {
+        (
+            crate::keys::CommandId::ToggleSelected,
+            crate::keys::Scope::Global,
+        )
+    } else {
+        (crate::keys::CommandId::StartStop, crate::keys::Scope::Spl)
+    };
+    let key = keymap
+        .first_chord(command, scope)
+        .map_or_else(|| "the palette".to_owned(), |c| c.label());
+    missing_text(&m.config.name, why, &key)
 }
 
 /// What the Leq view shows of meter `m`, with its `leq` frame.
@@ -236,11 +283,11 @@ fn live_key(keymap: Option<&crate::keys::Keymap>) -> Option<String> {
         .map(|c| c.label())
 }
 
-/// The SPL meter whose Leq windows pane `pane` shows: the one it shows, else the first one
-/// with a `leq` frame.
+/// The SPL meter whose Leq windows pane `pane` shows: the one it shows, once it has a
+/// `leq` frame.
 pub fn leq_meter(st: &AppState, pane: PaneId) -> Option<MeasId> {
-    spl_meters(st, pane)
-        .find(|m| frame(st, m.id, Stream::Leq).is_some())
+    pane_meter(st, pane)
+        .filter(|m| frame(st, m.id, Stream::Leq).is_some())
         .map(|m| m.id)
 }
 
@@ -285,7 +332,7 @@ fn spl_readout_of<'a>(
     Some((r, tf))
 }
 
-/// The Leq windows of the SPL meter the pane shows (else the first one with a `leq` frame).
+/// The Leq windows of the SPL meter the pane shows.
 pub fn leq(
     st: &AppState,
     pane: PaneId,
@@ -305,13 +352,13 @@ pub fn leq_keyed(
     size: Viewport,
     now: Now,
 ) -> Option<LeqScene> {
-    let v = spl_meters(st, pane).find_map(|m| leq_view(st, pane, m, keymap, now))?;
+    let v = leq_view(st, pane, pane_meter(st, pane)?, keymap, now)?;
     let status = status(st, &[], None, now);
     Some(leq_scene(&v, &status, theme, size))
 }
 
-/// The SPL measurement the pane shows (else the first one with a frame). `keymap` names the
-/// key that resets the meter's statistics.
+/// The SPL measurement the pane shows. `keymap` names the key that resets the meter's
+/// statistics.
 pub fn spl(
     st: &AppState,
     pane: PaneId,
@@ -320,13 +367,13 @@ pub fn spl(
     size: Viewport,
     now: Now,
 ) -> Option<SplScene> {
-    let (r, tf) = spl_meters(st, pane).find_map(|m| spl_readout_of(st, m, keymap, now))?;
+    let (r, tf) = spl_readout_of(st, pane_meter(st, pane)?, keymap, now)?;
     let status = status(st, &[tf], None, now);
     Some(spl_scene(&r, st.stage_view(), &status, theme, size))
 }
 
-/// The meter + Leq view of the SPL meter the pane shows (else the first one with both
-/// frames): its held number over its Leq windows.
+/// The meter + Leq view of the SPL meter the pane shows, once it has both frames: its held
+/// number over its Leq windows.
 pub fn meter_leq(
     st: &AppState,
     pane: PaneId,
@@ -335,10 +382,9 @@ pub fn meter_leq(
     size: Viewport,
     now: Now,
 ) -> Option<MeterLeqScene> {
-    let (r, tf, v) = spl_meters(st, pane).find_map(|m| {
-        let (r, tf) = spl_readout_of(st, m, keymap, now)?;
-        Some((r, tf, leq_view(st, pane, m, Some(keymap), now)?))
-    })?;
+    let m = pane_meter(st, pane)?;
+    let (r, tf) = spl_readout_of(st, m, keymap, now)?;
+    let v = leq_view(st, pane, m, Some(keymap), now)?;
     let status = status(st, &[tf], None, now);
     Some(meter_leq_scene(&r, &v, &status, theme, size))
 }

@@ -2,6 +2,7 @@
 
 mod edit;
 mod focus;
+mod own;
 mod streams;
 
 use super::harness::{Driver, R};

@@ -50,6 +50,7 @@ fn rta_trace<'a>(
         freshness: None,
         offset_db: 0.0,
         selected: false,
+        compared: false,
         bands: None,
     }
 }

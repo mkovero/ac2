@@ -359,25 +359,40 @@ focused one. A finished sweep opens no pane: the toast says to **Tab** to it.
 
 ### Choosing what a pane shows
 
-Each pane's title has a **chip** naming its measurement. The transfer pane draws that
-measurement's **group** as the measurement tree lists it, and nothing else: its live curve
-(unless hidden), the math channels filed under it, and its shown stored traces. A math
-channel chosen on the chip draws its owner's group; a sweep measurement draws its shown runs
-(no live curve). A stopped measurement keeps its last curve, tagged `stopped` in the legend
-and list; **S** starts it again.
+Each pane's title has a **chip** naming its measurement. Every pane draws that
+measurement's **group** as the measurement tree lists it, and nothing else of its own
+accord: its live curve (unless hidden), the math channels filed under it, and its shown
+stored traces of the kinds the pane draws. A math channel chosen on the chip draws its
+owner's group. A stopped measurement keeps its last curve, tagged `stopped` in the legend
+and list; **S** starts it again. A pane never borrows another measurement's data: while its
+own has nothing to draw (hidden, stopped before its first frame, or not measured yet) it
+says so (`Spectrum 2: no frames yet`, `FOH SPL hidden — A shows it`).
 
-**Imported** traces show only when compared or moved into a group (select, **Move to
-measurement…**, **Shift+F2**); while shown traces wait under Imported the pane says so.
-Selecting a stored trace (click, **V**) brings its measurement's group to the pane.
+| Pane | Draws |
+|---|---|
+| **Transfer** | the group's live transfer curve, math channels, captures, targets and sweep runs (a sweep measurement on the chip: its shown runs, no live curve) |
+| **Spectrum / RTA** | the group's live spectrum or RTA, math channels and stored spectra / band sets; two spectrum measurements are two panes, each with its own curves |
+| **Sweep / distortion** | one run of its sweep measurement: the selected run when it is one of that sweep's, else the run of it picked last, else its newest; never another sweep's run |
+| **SPL** | its own meter only (no compare); to see two meters, add a pane and drag the other SPL measurement onto it |
 
-**Compare (C)** draws something else over the group: select a measurement, math channel,
-stored or Imported trace and press **C**; it is drawn tagged `cmp` (its tree row too). **C**
-again stops, palette *Clear compare* drops all. A compared curve of the pane's own group is
-drawn once, untagged. Compare is display only: **M**, math operands and the phase reference
-use the group's own curves. Compare follows the measurement, not its name: a renamed one
-stays compared, and of two with the same name only the one chosen is. Compared measurements
-are remembered by name in `ui.toml` (see hidden ones below for how a name comes back);
-compared stored traces while the app runs.
+**Imported** traces draw on no pane until moved under a measurement (select, **Move to
+measurement…**, **Shift+F2**); while shown traces of the kind a pane draws wait under
+Imported, that pane says so. Selecting a stored trace (click, **V**) brings its
+measurement's group to the pane.
+
+**Compare (C)** draws something else over the group, on every pane of a kind that draws it:
+select a measurement, math channel or stored trace and press **C**; it is drawn tagged
+`cmp` in the legend (its tree row too). A transfer curve is compared on transfer panes, a
+spectrum or band set on spectrum panes, a sweep run on transfer panes and over the sweep
+pane's run (its fundamental and harmonics in the run's own colour). **C** again stops,
+palette *Clear compare* drops all. A compared curve of the pane's own group is drawn once,
+untagged. An Imported trace is not compared: **C** says to move it under a measurement
+first. SPL meters are not compared either: a meter is a number, read side by side. Compare
+is display only: **M**, math operands and the phase reference use the group's own curves.
+Compare follows the measurement, not its name: a renamed one stays compared, and of two with
+the same name only the one chosen is. Compared measurements are remembered by name in
+`ui.toml` (see hidden ones below for how a name comes back); compared stored traces while
+the app runs.
 
 To pick another measurement:
 
@@ -497,9 +512,10 @@ Dropped within about the outer fifth of a pane (`FOH SPL → new pane below`), t
 on that side as **N** would and the new half shows the row. A pane too small for **N** to
 split takes a plain drop instead, and the label names the pane. **Shift** held on release
 compares the row over the pane, as **C** does, and the pane keeps what it shows
-(`FOH SPL → compare in pane 2`); only a transfer pane draws compared curves and only a
-measurement or trace with a transfer curve can be one, so anything else is refused with a
-toast that says why. **Esc** cancels the drag; a drop outside the panes does nothing.
+(`Main R → compare in pane 2`); the row needs a curve of the kind the pane draws, an SPL
+pane draws no compared meters and an Imported trace is not compared, so anything else is
+refused with a toast that says why. Two SPL meters side by side: add a pane (**N**) and
+drop the other meter on it without **Shift**. **Esc** cancels the drag; a drop outside the panes does nothing.
 
 #### Undo and redo (Ctrl+Z, Ctrl+Shift+Z)
 
@@ -1117,14 +1133,16 @@ as a level difference. A locked trace keeps its offset.
 
 ### Comparing traces
 
-- A sweep selected in the list or with **V** is the one the **Sweep / distortion** pane
-  shows; **V** / **Shift+V** on that pane select the sweep they step to. A finished sweep is
-  selected.
+- A run selected in the list or with **V** is the one the **Sweep / distortion** pane of
+  its sweep measurement shows; **V** / **Shift+V** on that pane step through that sweep's
+  runs and select them. A finished sweep is selected. **C** on another run draws it over
+  the pane's run, tagged `cmp`.
 - Overlays are drawn relative to the selected trace's measured delay, so relative arrival
   between traces stays visible.
 - A click (or palette *Comparison cursor on / off*) puts the comparison cursor, synchronised
   across panes; **Shift+←/→** move it.
-- **C** compares the selected trace or measurement on the transfer pane whatever its group.
+- **C** compares the selected trace or measurement on the panes of its kind whatever its
+  group (not an Imported trace: move it under a measurement first).
 - **M** averages the shown stored traces of the transfer pane's group (power; complex and
   coherence-weighted in the palette). For ÷ × + −, **Shift+M** with the trace selected
   starts with it as A.
@@ -1261,8 +1279,10 @@ transfer pane like any capture.
 
 ### The Sweep / distortion pane
 
-It shows the newest (or the selected) run of the selected sweep measurement: the
-fundamental's response above, distortion below. An order within the noise is drawn dashed
+It shows one run of the sweep measurement on its chip — the selected run when it is one of
+that sweep's, else its newest — the fundamental's response above, distortion below; runs
+compared (**C**) are drawn over it in their own colours and listed `Run 2 · cmp` in the
+legend. An order within the noise is drawn dashed
 at its own floor; the shading is the noise under every order's floor. A distortion value is
 shown only where it is at least 6 dB above the noise in its window; elsewhere it reads
 `< −72.0 dB` (`< 0.0251 %`). Lower the floor with repeats or a longer sweep, not with more
@@ -1283,7 +1303,7 @@ the note stays.
 | **G** / **Shift+G** | response & distortion → **impulse response** (harmonics' impulses marked) linear → log → ETC → **room parameters** table alone, as large as it fits (read across a room; **W** maximises) → back |
 | **Shift+I** | straight to the impulse response and back |
 | **E** | the reference input's own harmonics shown / hidden in this pane |
-| **V** / **Shift+V** | step through stored sweeps, selecting each |
+| **V** / **Shift+V** | step through the pane's sweep's runs, selecting each |
 
 ### Low-frequency harmonics (LF harmonics: fine)
 
@@ -2477,7 +2497,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+↓` | Pan level axis down (towards lower levels) | `level_pan_down` |
 | `Shift+Home` | Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz (IR: the whole IR) | `level_fit` |
 | `Ctrl+Home` | Level and frequency axes back to the pane's default | `level_reset` |
-| `C` | Compare the selected measurement or trace on the transfer pane (on / off) | `compare` |
+| `C` | Compare the selected measurement or trace over the panes that draw its kind (on / off) | `compare` |
 | `Shift+←` | Cursor 1/12 octave down (IR: earlier) | `cursor_left` |
 | `Shift+→` | Cursor 1/12 octave up (IR: later) | `cursor_right` |
 | `Ctrl+1` | Capture selected measurement to slot 1 | `slot_1` |

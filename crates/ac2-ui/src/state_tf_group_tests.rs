@@ -216,7 +216,9 @@ fn the_pane_points_at_imported_traces() {
     let mut s = daemon_state();
     s.traces = vec![owned(12, TraceOwner::Imported)];
     let mut t = loaded(s);
-    let hint = t.st.empty_hint(&t.keys).expect("hint");
+    let hint =
+        t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
+            .expect("hint");
     assert_eq!(
         hint.text,
         "1 trace under Imported is not on this pane — select it, then Move to measurement… (Shift+F2)"
@@ -234,7 +236,7 @@ fn the_pane_points_at_imported_traces() {
     assert!(
         matches!(
             r.as_slice(),
-            [Request::Call { what, .. }] if what.ends_with("under Imported: compare it (C) or Move to measurement… to see it")
+            [Request::Call { what, .. }] if what.ends_with("under Imported: Move to measurement… to see it")
         ),
         "{r:?}"
     );
@@ -242,7 +244,7 @@ fn the_pane_points_at_imported_traces() {
     let mut s = daemon_state();
     s.traces = vec![owned(12, under(1))];
     t.conn(mirror(s));
-    assert_eq!(t.st.empty_hint(&t.keys), None);
+    assert_eq!(t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys), None);
     assert_eq!(legend(&t), ["Main L", "t12"]);
 }
 
@@ -338,10 +340,10 @@ fn tree_detail(t: &T, key: ac2_scene::meas_list::TreeKey) -> String {
         .expect("row")
 }
 
-/// C compares what the tree has selected: another measurement's live curve and an
-/// imported trace are drawn on the transfer pane besides its group, tagged `cmp` in the
-/// legend and the tree; C again stops; average still takes the group only; Clear compare
-/// drops every one.
+/// C compares what the tree has selected: another measurement's live curve and capture are
+/// drawn on the transfer pane besides its group, tagged `cmp` in the legend and the tree;
+/// an imported trace is not compared (it is no measurement's until moved under one); C
+/// again stops; average still takes the group only; Clear compare drops every one.
 #[test]
 fn c_compares_the_selection_on_the_transfer_pane() {
     use ac2_scene::meas_list::TreeKey;
@@ -355,10 +357,21 @@ fn c_compares_the_selection_on_the_transfer_pane() {
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
     t.key("C");
+    assert_eq!(
+        t.last_toast(),
+        "t12 is under Imported: no pane draws it — select it, then Move to measurement… (Shift+F2)"
+    );
+    assert!(t.st.compared_traces.is_empty());
+    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    t.key("C");
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
+        &t.keys,
+    );
     assert_eq!(transfer_group(&t), Some(MeasId(1)));
     assert_eq!(
         legend(&t),
-        ["Delay tower", "L ÷ tower", "Main L", "t10", "t12", "t13"]
+        ["Delay tower", "L ÷ tower", "Main L", "t10", "t11", "t13"]
     );
     let tagged: Vec<String> = legend_text(&t)
         .into_iter()
@@ -366,9 +379,9 @@ fn c_compares_the_selection_on_the_transfer_pane() {
         .collect();
     assert_eq!(tagged.len(), 2, "{tagged:?}");
     assert!(tagged[0].starts_with("Delay tower · cmp"), "{tagged:?}");
-    assert!(tagged[1].starts_with("t12 · cmp"), "{tagged:?}");
+    assert!(tagged[1].starts_with("t11 · cmp"), "{tagged:?}");
     assert!(tree_detail(&t, TreeKey::Live(MeasId(3))).ends_with(" · cmp"));
-    assert!(tree_detail(&t, TreeKey::Trace(TraceId(12))).ends_with(" · cmp"));
+    assert!(tree_detail(&t, TreeKey::Trace(TraceId(11))).ends_with(" · cmp"));
     // Compare is an overlay: M averages the group's own traces.
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     let r = t.key("M");
@@ -391,9 +404,13 @@ fn c_compares_the_selection_on_the_transfer_pane() {
     );
     t.key("C");
     // C again un-compares.
-    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("C");
-    assert_eq!(t.last_toast(), "t12: compare off");
+    assert_eq!(t.last_toast(), "t11: compare off");
+    t.st.update(
+        Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
+        &t.keys,
+    );
     assert_eq!(
         legend(&t),
         ["Delay tower", "L ÷ tower", "Main L", "t10", "t13"]
@@ -411,12 +428,12 @@ fn c_compares_the_selection_on_the_transfer_pane() {
 #[test]
 fn compare_forgets_deleted_traces_and_keeps_names() {
     let mut t = loaded(two_groups());
-    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("C");
     t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
     t.key("C");
     let mut s = two_groups();
-    s.traces.retain(|x| x.id != TraceId(12));
+    s.traces.retain(|x| x.id != TraceId(11));
     t.conn(mirror(s));
     assert!(t.st.compared_traces.is_empty());
     assert_eq!(
@@ -485,7 +502,8 @@ fn a_stopped_transfer_measurement_keeps_its_curve_tagged() {
 }
 
 /// A click on a transfer legend row selects that row's curve, wherever it comes from —
-/// a capture of the group, its math channel, a compared measurement, a compared import —
+/// a capture of the group, its math channel, a compared measurement, another measurement's
+/// compared capture —
 /// the list marks it (a live curve: its measurement's row), the pane keeps its group, and A hides exactly that curve.
 #[test]
 fn a_legend_row_click_selects_its_curve_for_a() {
@@ -494,7 +512,7 @@ fn a_legend_row_click_selects_its_curve_for_a() {
     let mut t = loaded(two_groups());
     t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
     t.key("C");
-    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("C");
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     let pane = t.pane(PaneKind::Transfer);
@@ -527,9 +545,9 @@ fn a_legend_row_click_selects_its_curve_for_a() {
             TreeKey::Trace(TraceId(13)),
         ),
         (
-            "t12",
-            TraceKey::Stored(TraceId(12)),
-            TreeKey::Trace(TraceId(12)),
+            "t11",
+            TraceKey::Stored(TraceId(11)),
+            TreeKey::Trace(TraceId(11)),
         ),
         (
             "L ÷ tower",
@@ -569,13 +587,13 @@ fn a_legend_row_click_selects_its_curve_for_a() {
     assert!(!legend(&t).contains(&"Delay tower".to_owned()));
     t.key("A");
     assert!(legend(&t).contains(&"Delay tower".to_owned()));
-    // A on a compared import picked in the legend asks the daemon to hide that trace.
-    click(&mut t, "t12");
+    // A on a compared capture picked in the legend asks the daemon to hide that trace.
+    click(&mut t, "t11");
     let r = t.key("A");
     assert!(
         matches!(
             r.as_slice(),
-            [Request::Call { cmd: Command::TraceUpdate { trace: TraceId(12), edit }, .. }]
+            [Request::Call { cmd: Command::TraceUpdate { trace: TraceId(11), edit }, .. }]
                 if !edit.visible
         ),
         "{r:?}"

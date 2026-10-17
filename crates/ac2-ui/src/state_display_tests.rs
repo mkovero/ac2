@@ -5,14 +5,18 @@ use super::*;
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 
+/// A stored spectrum filed under Sub (2), the spectrum pane's measurement: a pane draws
+/// its own group's traces only.
 fn spec_meta(id: u32) -> TraceMeta {
-    TraceMeta {
+    let mut t = TraceMeta {
         kind: TraceKind::Spectrum {
             scale: LevelScale::Dbfs,
             level: ac2_proto::model::SpecLevel::Tone,
         },
         ..stored(id, None, 2)
-    }
+    };
+    t.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(2) };
+    t
 }
 
 fn with_offset(mut t: TraceMeta, db: f64) -> TraceMeta {

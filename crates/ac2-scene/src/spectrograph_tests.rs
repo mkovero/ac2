@@ -374,6 +374,7 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
         freshness: None,
         offset_db: 0.0,
         selected,
+        compared: false,
         bands: None,
     };
     let traces = [trace(1, "Main L S1", false), trace(2, "Main L S2", true)];
@@ -472,6 +473,7 @@ fn the_spectrograph_alone_takes_the_pane() {
         freshness: None,
         offset_db: 0.0,
         selected: false,
+        compared: false,
         bands: None,
     };
     let input = SpectrographInput {
@@ -582,6 +584,7 @@ fn multires_stitches_cross_the_history() {
         freshness: None,
         offset_db: 0.0,
         selected: false,
+        compared: false,
         bands: Some(&bands),
     };
     let mut view = ViewState::default();

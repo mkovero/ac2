@@ -92,8 +92,6 @@ fn tree_dots_have_the_colours_of_their_curves() {
         grids,
         drained: Instant::now(),
     })));
-    // The import is under no measurement: the transfer pane draws it when compared.
-    t.st.compared_traces.insert(TraceId(5));
 
     let theme = ac2_scene::theme::Theme::by_name(t.st.theme);
     let size = Viewport {
@@ -122,6 +120,12 @@ fn tree_dots_have_the_colours_of_their_curves() {
                 .map(|d| (d.name.clone(), d.color))
                 .collect::<Vec<_>>()
         },
+    ));
+    // The import is under no measurement, so no pane draws it: the colour it is drawn in
+    // once moved under one.
+    drawn.push((
+        "1083 94cm".to_owned(),
+        t.st.curve_colours(&theme).trace(TraceId(5)),
     ));
     let curve = |name: &str| {
         drawn

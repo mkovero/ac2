@@ -3,7 +3,7 @@
 //! measurements side by side) keep scales of their own. The frequency axis stays shared:
 //! panes read against each other at the same frequencies.
 
-use ac2_proto::model::{LevelScale, Measurement, TraceKind};
+use ac2_proto::model::{LevelScale, Measurement};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_scene::axis::Range;
 use ac2_scene::format;
@@ -85,14 +85,14 @@ impl AppState {
 
     /// The level range pane `pane` draws on now, if its kind has a level axis.
     pub fn level_range(&self, pane: PaneId) -> Option<Range> {
-        let scale = crate::scenes::spectrum_scale(self);
+        let scale = crate::scenes::spectrum_scale(self, pane);
         self.pane_levels(pane).range(self.layout.kind(pane), scale)
     }
 
     /// Sets the range pane `pane` draws on now to what `f` makes of it.
     pub(super) fn change_level(&mut self, pane: PaneId, f: impl FnOnce(Range) -> Range) {
         let kind = self.layout.kind(pane);
-        let scale = crate::scenes::spectrum_scale(self);
+        let scale = crate::scenes::spectrum_scale(self, pane);
         let levels = self.pane_levels.entry(pane).or_default();
         if let Some(r) = levels.range_mut(kind, scale) {
             *r = f(*r);
@@ -164,7 +164,7 @@ impl AppState {
             C::LevelPanUp => self.level_pan(p, level::pan_step(r)),
             C::LevelPanDown => self.level_pan(p, -level::pan_step(r)),
             C::LevelReset => {
-                let scale = crate::scenes::spectrum_scale(self);
+                let scale = crate::scenes::spectrum_scale(self, p);
                 if let Some(d) = PaneLevels::default().range(kind, scale) {
                     self.change_level(p, |_| d);
                 }
@@ -235,7 +235,11 @@ impl AppState {
             return;
         }
         self.sweep.fit = None;
-        if self.shown_sweep().map(|(t, _)| t.meta.id) != Some(id) {
+        let shown = self.layout.root.leaves().into_iter().any(|p| {
+            self.layout.kind(p) == PaneKind::Distortion
+                && self.pane_sweep(p).map(|(t, _)| t.meta.id) == Some(id)
+        });
+        if !shown {
             return;
         }
         self.fit_panes(PaneKind::Distortion);
@@ -263,38 +267,16 @@ impl AppState {
         };
         let shown = self.pane_meas(pane);
         match self.layout.kind(pane) {
-            PaneKind::Transfer => {
+            kind @ (PaneKind::Transfer | PaneKind::Spectrum) => {
                 for m in self.measurements().into_iter().filter(|m| {
-                    self.live_on_transfer_pane(m, shown) || self.live_compared_on_transfer(m, shown)
+                    self.live_on_pane(kind, m, shown) || self.live_compared_on(kind, m, shown)
                 }) {
-                    if let Some((f, freqs)) = live(Stream::Tf, m)
-                        && let ac2_proto::FrameData::Tf(tf) = &f.data
-                    {
-                        add(&freqs, &tf.mag, self.edit(m.id).offset_db);
-                    }
-                }
-                for (t, g) in self.traces.values() {
-                    if self.on_transfer_pane(&t.meta, shown)
-                        || self.trace_compared_on_transfer(&t.meta, shown)
-                    {
-                        add(&column_frequencies(g), &t.mag_db, t.meta.edit.offset.0);
-                    }
-                }
-            }
-            PaneKind::Spectrum => {
-                for m in self
-                    .measurements()
-                    .into_iter()
-                    .filter(|m| !self.meas_hidden(m))
-                {
-                    if !m.config.kind.publishes_levels() {
-                        continue;
-                    }
                     let Some(stream) = m.config.kind.stream() else {
                         continue;
                     };
                     if let Some((f, freqs)) = live(stream, m) {
                         let level = match &f.data {
+                            ac2_proto::FrameData::Tf(tf) => &tf.mag,
                             ac2_proto::FrameData::Spec(s) => &s.level,
                             ac2_proto::FrameData::Rta(r) => &r.level,
                             _ => continue,
@@ -303,20 +285,22 @@ impl AppState {
                     }
                 }
                 for (t, g) in self.traces.values() {
-                    if t.meta.edit.visible
-                        && matches!(
-                            t.meta.kind,
-                            TraceKind::Spectrum { .. } | TraceKind::Rta { .. }
-                        )
+                    if self.on_pane(kind, &t.meta, shown)
+                        || self.trace_compared_on(kind, &t.meta, shown)
                     {
                         add(&column_frequencies(g), &t.mag_db, t.meta.edit.offset.0);
                     }
                 }
             }
             PaneKind::Distortion => {
-                if let Some((t, g)) = self.shown_sweep()
-                    && let Some(s) = &t.sweep
-                {
+                let runs = self
+                    .pane_sweep(pane)
+                    .into_iter()
+                    .chain(self.compared_sweeps(pane));
+                for (t, g) in runs {
+                    let Some(s) = &t.sweep else {
+                        continue;
+                    };
                     let freqs = column_frequencies(g);
                     for c in s.harmonics.iter().map(|h| &h.curve).chain([&s.thd]) {
                         add(&freqs, &c.level_db, 0.0);
