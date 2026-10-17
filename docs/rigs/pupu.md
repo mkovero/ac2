@@ -375,7 +375,11 @@ ac2d's bound only for the speaker stage; `gen ceiling` read bound −50 after ev
 
 The operator powered the Genelec on from cold at about 03:55Z; the mic had moved (about 54 cm)
 and a second Genelec now stands beside the 1083, so the room response differs from the
-2026-10-14 baselines (1 kHz fundamental at the mic 6 dB lower). Steady-sine harmonics at
+2026-10-14 baselines (1 kHz fundamental at the mic 6 dB lower). The loss is a reflection: in IRs
+from REW's recordings (meas ÷ loopback), the 1 kHz third octave gated 1.5 ms after the direct
+sound differs by only −0.44 dB between the two runs, but by −4.4 dB with a 3 ms gate and
+−3.8 dB ungated. The ETC has an arrival at +2.69 ms (≈ 92 cm extra path, −21 dB; +2.80 ms at
+−23 dB before), whose comb notches fall at 186, 558, 929 and 1301 Hz. Steady-sine harmonics at
 −30 dBFS, dBr re the fundamental at the mic (runs `20261017T041201Z`, `T042549Z`, `T044015Z`):
 
 | on for | H2 @ 501.5 Hz | H3 @ 501.5 Hz | H2 @ 201.3 Hz | H3 @ 1001.5 Hz |
