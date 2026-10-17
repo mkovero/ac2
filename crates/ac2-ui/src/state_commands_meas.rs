@@ -210,9 +210,7 @@ impl AppState {
                     self.prompt(PromptKind::TraceMicCurve(t.id), text);
                 }
                 None => {
-                    let v = self
-                        .keys
-                        .reach(CommandId::NextTrace, CommandId::NextTrace.title());
+                    let v = self.keys.reach(CommandId::NextTrace);
                     self.warn(format!(
                         "select a stored trace first ({v}, or click it in the list)"
                     ));

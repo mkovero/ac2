@@ -43,9 +43,7 @@ impl AppState {
 
     pub(super) fn step_level(&mut self, db: f64, out: &mut Vec<Request>) {
         let Some(l) = self.stimulus.level else {
-            let l = self
-                .keys
-                .reach(CommandId::StimulusLevel, CommandId::StimulusLevel.title());
+            let l = self.keys.reach(CommandId::StimulusLevel);
             self.warn(format!("no stimulus level yet: type one ({l})"));
             return;
         };

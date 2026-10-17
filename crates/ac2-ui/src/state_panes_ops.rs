@@ -236,9 +236,7 @@ impl AppState {
         let least = t.panes().iter().map(|x| x.2).fold(f32::INFINITY, f32::min);
         let total: f32 = t.panes().iter().map(|x| x.2).sum();
         if rect.h * least / total < MIN_RATIO * self.pane_area.1 {
-            let close = self
-                .keys
-                .reach(CommandId::ClosePane, CommandId::ClosePane.title());
+            let close = self.keys.reach(CommandId::ClosePane);
             self.warn(format!(
                 "the pane is too small for the {}: {close} closes one to make room",
                 t.label()
@@ -317,9 +315,7 @@ impl AppState {
     /// all panes.
     pub(super) fn split_pane(&mut self) {
         if self.split_focused_pane().is_none() {
-            let close = self
-                .keys
-                .reach(CommandId::ClosePane, CommandId::ClosePane.title());
+            let close = self.keys.reach(CommandId::ClosePane);
             self.warn(format!(
                 "the pane is too small to split: {close} closes one to make room"
             ));
@@ -431,9 +427,7 @@ impl AppState {
             }
             _ => {
                 self.layout.root = before;
-                let close = self
-                    .keys
-                    .reach(CommandId::ClosePane, CommandId::ClosePane.title());
+                let close = self.keys.reach(CommandId::ClosePane);
                 self.warn(format!(
                     "the panes would be too small turned: {close} closes one to make room"
                 ));
@@ -501,9 +495,7 @@ impl AppState {
                 self.focus_pane(id);
             }
             None => {
-                let split = self
-                    .keys
-                    .reach(CommandId::SplitPane, CommandId::SplitPane.title());
+                let split = self.keys.reach(CommandId::SplitPane);
                 self.warn(format!(
                     "no pane {n}: {} on screen ({split} splits)",
                     panes.len()
