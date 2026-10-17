@@ -171,6 +171,17 @@ fn traces_survive_a_restart() {
         .is_err(),
         "a split that leaves one side no room"
     );
+    let mut bad = layout.clone();
+    bad.panes_mut()[0].levels.transfer =
+        Some(ac2_proto::model::layout::LevelRange { lo: 6.0, hi: -24.0 });
+    assert!(
+        c.call(Command::MeasLayout {
+            meas: MeasId(1),
+            layout: Some(bad),
+        })
+        .is_err(),
+        "a level range upside down"
+    );
     // A settings change keeps it.
     let kept_layout = match c.update_ok(MeasId(1), after.config.clone()) {
         ReplyBody::Measurement(m) => m.layout,

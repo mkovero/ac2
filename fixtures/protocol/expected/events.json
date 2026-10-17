@@ -131,7 +131,17 @@
        "spectrum_view": "spectrograph",
        "spl_view": "meter_leq",
        "sweep_view": "response",
-       "chrome": "full"
+       "chrome": "full",
+       "meas": null,
+       "levels": {
+        "transfer": {
+         "lo": -24.0,
+         "hi": 12.0
+        },
+        "spectrum_dbfs": null,
+        "spectrum_spl": null,
+        "distortion": null
+       }
       }
      },
      "b": {
@@ -142,7 +152,14 @@
        "spectrum_view": "spectrograph",
        "spl_view": "meter_leq",
        "sweep_view": "response",
-       "chrome": "no_grid"
+       "chrome": "no_grid",
+       "meas": 2,
+       "levels": {
+        "transfer": null,
+        "spectrum_dbfs": null,
+        "spectrum_spl": null,
+        "distortion": null
+       }
       }
      }
     }

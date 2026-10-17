@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 57`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 58`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -338,10 +338,16 @@ layout it receives for the measurement it has selected on screen and never sends
 A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axis: row |
 column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
 `ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is {`kind`,
-`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `chrome`} (snake_case enums,
-`ac2_proto::model::layout`): its kind and the view of each kind it may be turned into. Which measurement a pane shows, the focused pane, a maximised or full-screen pane and
-the window are each client's. `invalid` for a ratio out of range and for more than 16
-panes; a session file's layout that is either is dropped on load.
+`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `chrome`, `meas`, `levels`}
+(snake_case enums, `ac2_proto::model::layout`): its kind, the view of each kind it may be
+turned into, the measurement it was picked to show (`meas`: a `MeasId` or nil, nil being
+the measurement whose layout it is; a pick of a measurement gone since shows that one too)
+and the level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
+`spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
+when the pane first shows a curve). The focused pane, a maximised or full-screen pane and
+the window are each client's. `invalid` for a ratio out of range, for more than 16 panes
+and for a level range not finite with `hi` above `lo`; a session file's layout that is any
+of these is dropped on load.
 
 `MeasConfig` = {`name`, `kind`, `scope`: `MeasScope`}. `scope` is `session` (the working
 session's: saved in session files, replaced by a load) or `rig` (the rig's, SPL meters only:
@@ -1774,7 +1780,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 25, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 28, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
 ColourFamily | null, layout: PaneLayout | null}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,

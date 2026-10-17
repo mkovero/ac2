@@ -180,9 +180,15 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     d.key("Ctrl+Home");
     assert_eq!(level(&d.st), start);
 
-    // Delete slot 1: asked first, then gone; the selection moves to slot 2.
+    // Delete slot 1: asked first, then gone; the selection moves to slot 2. (Slot 2 is
+    // still selected, the focus keys leaving it: V steps round to slot 1.)
     d.key("Alt+1");
-    d.key("V");
+    for _ in 0..3 {
+        if d.st.selected_trace == Some(a) {
+            break;
+        }
+        d.key("V");
+    }
     assert_eq!(d.st.selected_trace, Some(a));
     d.key("Delete");
     assert!(
@@ -346,13 +352,15 @@ fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
         let v = panes.views.iter().find(|v| v.kind == PaneKind::Spectrum);
         v.expect("a spectrum pane").levels
     };
+    let as_level =
+        |r: ac2_scene::axis::Range| ac2_proto::model::layout::LevelRange { lo: r.lo, hi: r.hi };
     if let Some(v) = prefs
         .layout
         .panes
         .as_mut()
         .and_then(|p| p.views.iter_mut().find(|v| v.kind == PaneKind::Spectrum))
     {
-        v.levels.spectrum_dbfs = remembered;
+        v.levels.spectrum_dbfs = Some(as_level(remembered));
     }
     let prefs = ac2_ui::prefs::UiPrefs::from_toml(&prefs.to_toml())?;
     d.st.set_prefs(prefs);
@@ -371,8 +379,9 @@ fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
     d.until("the started spectrum fitted", |s| level(s) != remembered)?;
     let fit = level(&d.st);
     assert!(fit.is_valid() && fit.hi > -150.0, "{fit:?}");
-    // The fit is what the next start comes back to.
-    assert_eq!(spectrum_pane(&d.st.prefs).spectrum_dbfs, fit);
+    // The fit is the app's, not the operator's: not remembered, the next start frames the
+    // pane's first curve again.
+    assert_eq!(spectrum_pane(&d.st.prefs).spectrum_dbfs, None);
     drop(d);
     drop(daemon);
     Ok(())

@@ -217,16 +217,40 @@ impl AppState {
                 p = new;
             }
         }
-        // The same as a pick on that pane: the chip's pick for a measurement row, the child
-        // row's for the others, which act on the focused pane.
+        // The same as a pick on that pane's chip: the pane shows the row's measurement (a
+        // stored trace's, in the kind of pane that draws the trace); the selection stays.
         self.layout.set_focus(p);
-        self.pane_picked = true;
         match item {
-            TreeKey::Meas(id) => self.pane_show(p, id),
-            TreeKey::Live(id) => self.select_live_row(id),
-            TreeKey::Math(id) => self.select_math_row(id),
-            TreeKey::Trace(id) => self.select_trace_row(id),
+            TreeKey::Meas(id) | TreeKey::Live(id) | TreeKey::Math(id) => self.pane_show(p, id),
+            TreeKey::Trace(id) => self.pane_show_trace(p, id),
             TreeKey::Imported | TreeKey::Rig | TreeKey::Session => {}
+        }
+    }
+
+    /// Stored trace `id` dropped on pane `p`: the pane shows its measurement, turning into
+    /// the kind that draws the trace when it cannot; a sweep run is the one its sweep pane
+    /// draws.
+    fn pane_show_trace(&mut self, p: PaneId, id: TraceId) {
+        let Some(t) = self
+            .daemon()
+            .and_then(|s| s.traces.iter().find(|t| t.id == id))
+            .cloned()
+        else {
+            return;
+        };
+        if !drawn_in(&t, self.layout.kind(p)) {
+            self.set_pane_kind(p, display::home_pane(t.kind));
+        }
+        if let TraceOwner::Meas { meas } = ac2_scene::meas_list::group_of(&t, &self.measurements())
+            && self
+                .meas(meas)
+                .is_some_and(|m| self.layout.kind(p).shows(&m.config.kind))
+            && let Some(v) = self.layout.view_mut(p)
+        {
+            v.meas = Some(meas);
+        }
+        if t.kind == TraceKind::Sweep {
+            self.sweep.shown = Some(id);
         }
     }
 

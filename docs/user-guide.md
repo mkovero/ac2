@@ -380,8 +380,8 @@ says so (`Spectrum 2: no frames yet`, `FOH SPL hidden — A shows it`).
 
 **Imported** traces draw on no pane until moved under a measurement (select, **Move to
 measurement…**, **Shift+F2**); while shown traces of the kind a pane draws wait under
-Imported, that pane says so. Selecting a stored trace (click, **V**) brings its
-measurement's group to the pane.
+Imported, that pane says so. A stored trace selected in the list changes no pane: drag its
+row onto a pane, or pick its measurement on the chip, to see it there.
 
 **Compare (C)** draws something else over the group, on every pane of a kind that draws it:
 select a measurement, math channel or stored trace and press **C**; it is drawn tagged
@@ -397,33 +397,40 @@ the same name only the one chosen is. Compared measurements are remembered by na
 `ui.toml` (see hidden ones below for how a name comes back); compared stored traces while
 the app runs.
 
-To pick another measurement:
+To put another measurement in a pane:
 
 - click the chip: every measurement in tree order, tagged with its kind, then the pane kinds
-  no measurement needs yet. The pane turns into the kind picked; only it changes;
-- or click a row of the measurement list (or **Tab** / **Shift+Tab**):
-  - a **child row** — a live curve, stored trace or math channel — goes into the focused
-    pane only (turning it into the kind that draws it); the focus stays and no other pane
-    moves. A stored trace row selects the trace and leaves the measurement selection alone;
-  - a **measurement row** selects the measurement and shows it: its own panes when it has
-    them ([Layouts follow the measurement](#layouts-follow-the-measurement)), else in the
-    focused pane;
+  no measurement needs yet. The pane turns into the kind picked; only it changes, and the
+  selection in the list stays where it was;
+- or drag a row of the measurement list onto the pane
+  ([below](#dragging-a-row-onto-a-pane));
 - or palette *Choose the measurement the focused pane shows…*.
+
+A row of the measurement list clicked (or reached with **Tab** / **Shift+Tab**):
+
+- a **measurement row** selects the measurement and shows it: its own panes when it has
+  them ([Layouts follow the measurement](#layouts-follow-the-measurement)), else in the
+  focused pane; panes no chip or drop has given a measurement show it too, when it is of
+  their kind;
+- a **child row** — a live curve, stored trace or math channel — only selects it, for the
+  keys below; no pane changes. One no pane draws stays selected all the same.
 
 Which measurement the keys act on:
 
-- A click inside a pane selects its measurement, as a click in the list does — unless the
-  selection already belongs to that pane's group; then the click only focuses.
-- **S** and **R** act on the focused pane's measurement, and say what to create when it
-  shows none.
-- **X** and the delay keys act on the selected measurement and say which kind they need.
+- A click inside a pane focuses it; the selection stays on the row chosen in the list.
+- Keys of a pane act on what that pane shows: **S** and **R** on the focused pane's
+  measurement (they say what to create when it shows none), **X** and the delay keys on the
+  focused transfer pane's measurement (on another pane: the selected one), **Space** on the
+  sweep view on the focused sweep pane's sweep.
+- Keys of the selection (**A**, **C**, **K**, **Delete**, the offset, colour, capture
+  **Ctrl+1…9**, mic curve) act on the row selected in the list, whatever pane has the focus.
 
 #### What A and Delete act on: the item selected last
 
 One measurement and at most one stored trace are selected; the one selected last gets the
 keys that act on "the selected curve". A click on a measurement row, live curve or math
-channel (or **Tab**, a chip, a click in a pane) gives them to the measurement; a click on a
-trace (or **V**, **Alt+V**) to the trace; **Esc** with no window open hands them back to
+channel (or **Tab** onto one) gives them to the measurement; a click on a trace (or **V**,
+**Alt+V**) to the trace; **Esc** with no window open hands them back to
 the measurement. The tree shows which: the measurement row is filled while it has the keys,
 only outlined while a later-selected trace has them.
 
@@ -462,15 +469,15 @@ the first **F** already gives the stage view and the next one returns to windowe
 focused one and stays full screen. The hidden lists still answer their keys (**Tab**,
 **V**), a click focuses a pane.
 
-With a pane maximised, picking a measurement or a stored trace puts it in that pane, turning
-it into the kind that shows it (a sweep stays on a transfer pane, which draws sweeps too);
-the layout stays maximised.
+With a pane maximised, a chip pick puts the measurement in that pane, turning it into the
+kind that shows it (a sweep stays on a transfer pane, which draws sweeps too); the layout
+stays maximised.
 
 #### The layout comes back
 
 `ui.toml` (written on layout change and exit) keeps the panes (split, kind, focus,
 maximised / full screen / panes only), each pane's measurement by name, its views and **T**
-step, its own level axis (`[layout.panes.levels]`), the Leq style and the sweep pane's
+step, the level axis ranges set on it by hand (`[layout.panes.levels]`), the Leq style and the sweep pane's
 dB / %, the IR views' dB axes (`[ir_levels]`), and the window's size and position. The next start restores them without arming anything. A measurement
 that is gone leaves its pane on its usual choice; one the daemon loses while the app runs
 (restart, reopened or salvaged session) comes back to its pane and selection as soon as one
@@ -481,24 +488,22 @@ larger than the screen is shrunk to fit. On Wayland the system places the window
 
 A measurement can carry its own panes. Choose its row (click, **Tab**), then edit the
 panes — split, close, change a pane's kind or view, **T**, drag a split, lay out the
-transfer stack — and the layout is stored on that measurement. Choosing its row again
+transfer stack, pick another measurement on a pane's chip or drop a row on it, zoom or pan
+a pane's level axis — and the layout is stored on that measurement. Choosing its row again
 brings its panes back; a measurement without a layout keeps the panes on screen. Only a
-measurement row brings panes: a pane click, a chip pick or a child row change one pane, and
-the measurement they select is a guest there — an edit afterwards is still stored on the
-measurement whose row was chosen, never on the guest. An edit after which no pane shows
-that measurement is stored on nobody. The list says it: `· 3 own panes`. Measurements
-whose own panes are the ones on screen share them: an edit goes to each one a pane shows,
-so two measurements laid out side by side keep the arrangement whichever is chosen.
+measurement row brings panes. A measurement picked into one of its panes is a guest there:
+the edit is stored on the measurement whose row was chosen, never on the guest, and never on
+any other measurement, even one whose panes happen to look the same. An edit after which no
+pane shows that measurement is stored on nobody. The list says it: `· 3 own panes`.
 
 The layout lives in the session with the measurement: saved and opened with it, and shown
 by every app that selects it (another laptop, the kiosk), edits included. What travels is
-the split and each pane's kind and view; which measurement each pane shows, the focus,
-**W**, **F** and the window stay per app. When incoming panes match the screen's split and
-kinds (only a view or size differs), each pane keeps its measurement; otherwise the
-measurement goes into the first pane of its kind. A chip pick or a dropped row is
-remembered (by this app) with the chosen row's panes: choosing that row again brings each
-pane back to what it showed, and the focus stays where it was. A child row, as **Tab**
-walks the list, changes a pane for a look and is not remembered.
+the split, each pane's kind and view, the measurement each pane was picked for (a pick of a
+measurement deleted since shows the layout's own measurement again) and the level ranges
+set on it by hand; the focus, **W**, **F** and the window stay per app. A pane given no
+measurement by a chip or a drop shows the measurement whose row was chosen. A level range
+not set by hand is not kept: a spectrum pane frames its first curve when its panes come
+back, as on first show; one set by hand stays until the pane shows another measurement.
 
 `ac2 meas list` has a `layout` column; `ac2 meas layout clear <meas>` removes a
 measurement's own panes. Deleting a measurement deletes its layout; editing it keeps it.
@@ -509,9 +514,10 @@ Any row of the measurement list (a measurement, its live curve, a math channel, 
 trace) can be dragged onto a pane: hold the button and move a few pixels. A label beside
 the pointer says where it lands (`FOH SPL → pane 2`) and the target is shaded faintly with
 a dashed edge. Dropped in the middle of a pane, that pane shows the row as a pick from its
-chip (or a child row) would, turning into the kind that draws it; focus moves there and no
-other pane changes. A dropped measurement is selected as a chip pick selects it. A drop is a
-guest pick: it never brings the measurement's own panes, and the edit is stored on the
+chip would (a live curve or math channel: that measurement; a stored trace: its
+measurement, in the kind of pane that draws the trace), turning into the kind that draws
+it; focus moves there and no other pane changes. The selection in the list stays. A drop is
+a guest pick: it never brings the measurement's own panes, and the edit is stored on the
 measurement whose row was chosen, as in *Layouts follow the measurement*.
 
 Dropped within about the outer fifth of a pane (`FOH SPL → new pane below`), the pane splits
@@ -527,8 +533,8 @@ drop the other meter on it without **Shift**. **Esc** cancels the drag; a drop o
 
 **Ctrl+Z** takes back the last change to the panes and **Ctrl+Shift+Z** does it again; the
 toast names it (`Undid: FOH SPL → pane 2`, `Redid: split pane 1`, `Nothing to undo`).
-Covered: drops and edge drops, **N** / **Shift+N**, **Q**, chip picks and list-row picks,
-**Tab** / **Shift+Tab**, **G** / **Shift+G**, **T**, a dragged split (one step per drag),
+Covered: drops and edge drops, **N** / **Shift+N**, **Q**, chip picks, measurement rows
+(click, **Tab** / **Shift+Tab**), **G** / **Shift+G**, **T**, a dragged split (one step per drag),
 **Alt+←/→**, **W**, **F**, the transfer stack, and compare on / off (**C**, clear compare).
 Daemon actions (start, stop, delete, capture, rename, delay, smoothing) are not undone. The
 history keeps 50 steps per app instance, is not saved, and a new change drops whatever was
@@ -546,12 +552,15 @@ resets to 20 Hz – 20 kHz; the wheel zooms about the pointer, a drag pans.
 Each pane's **level axis** (transfer magnitude, spectrum / RTA level, sweep distortion) is
 its own: two transfer panes side by side zoom and pan apart, and the keys and the wheel move
 only the pane they act on. A pane split off (**N**) starts on the range of the pane it came
-from. The axis is remembered with its pane in `ui.toml` once the panes are a layout of the
-operator's (the app's own first pane, still taking the first measurement's kind, keeps its
-axis only while the app runs; **Ctrl+Home** forgets it; Settings
-→ Display → *level axes* resets every pane's). A spectrum that starts fits the spectrum
-panes' level axes on the first frame, and a new sweep result fits the sweep panes' (as
-**Shift+Home**, frequency left alone). The impulse-response views' axes are shared by kind:
+from. A range set by hand (zoom, pan, **Shift+Home**, **Ctrl+Home**) is remembered with
+its pane: in `ui.toml` once the panes are a layout of the operator's (the app's own first
+pane, still taking the first measurement's kind, keeps its axis only while the app runs),
+and with the chosen measurement's own panes in the session, so its row brings the range
+back on any app; Settings → Display → *level axes* resets every pane's. A range the app
+framed by itself is not remembered: a spectrum pane fits its level axis to the first frame
+it shows, a spectrum that starts fits the spectrum panes' on its first frame, and a new
+sweep result fits the sweep panes' (as **Shift+Home**, frequency left alone); a range set
+by hand stays until the pane shows another measurement (or the next sweep result). The impulse-response views' axes are shared by kind:
 one for the transfer panes' IR views, one for the sweep panes'.
 
 - **Ctrl+I** / **Ctrl+O** zoom it about its middle; **Ctrl+wheel** about the pointer.
@@ -1055,7 +1064,7 @@ Imported              1 trace
 - A row's dot is its curve's colour (a ring when hidden): a click on it shows or hides the
   curve (a live curve: this app's display; a stored trace: the daemon's). A click on the row
   selects it: a measurement row also brings its own panes, a child row (live curve, stored
-  trace, math channel) goes into the focused pane only and no other pane moves
+  trace, math channel) only selects and no pane changes
   ([Choosing what a pane shows](#choosing-what-a-pane-shows)); a click on the selected trace
   deselects it. A double click on a trace renames it.
 - **Tab** / **Shift+Tab** select the next / previous listed row, wrapping (hidden rows too;
@@ -2501,8 +2510,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `W` | Layout: split → one pane → full screen | `maximize_pane` |
 | `Ctrl+Z` | Undo the last change to the panes (split, close, drop, pick, view, size, W / F, compare) | `undo` |
 | `Ctrl+Shift+Z` | Redo the pane change last undone | `redo` |
-| `Tab` | Select the next row in the measurement list (the focused pane shows its measurement) | `next_in_tree` |
-| `Shift+Tab` | Select the previous row in the measurement list (the focused pane shows its measurement) | `prev_in_tree` |
+| `Tab` | Select the next row in the measurement list (a measurement row brings its panes, as a click does) | `next_in_tree` |
+| `Shift+Tab` | Select the previous row in the measurement list (a measurement row brings its panes, as a click does) | `prev_in_tree` |
 | `T` | Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only (SPL: the limit text goes with the grid, the scale with the labels) | `plot_chrome` |
 | `I` | Zoom frequency in (IR: time) | `zoom_in` |
 | `O` | Zoom frequency out (IR: time) | `zoom_out` |

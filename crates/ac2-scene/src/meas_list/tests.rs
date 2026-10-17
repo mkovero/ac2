@@ -52,7 +52,7 @@ fn rows_say_a_measurement_has_its_own_panes() {
         "TF  TF 2\n     running · 2 own panes"
     );
     m.layout = Some(ac2_proto::model::PaneLayout::Pane {
-        pane: *ac2_proto::samples::pane_layout().panes()[0],
+        pane: Box::new(*ac2_proto::samples::pane_layout().panes()[0]),
     });
     assert!(
         meas_row(&item(&m), None, true)

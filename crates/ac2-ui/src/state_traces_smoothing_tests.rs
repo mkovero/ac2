@@ -199,9 +199,11 @@ fn smoothing_keys_change_a_selected_slot() {
     t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
     assert_eq!(t.st.selected_trace, None);
     assert_eq!(smoothing_set(&t.key("K")).0, "m1");
-    // Selecting a measurement (list, pane click, N) deselects the slot.
+    // A pane click keeps the slot selected; a measurement's row deselects it.
     t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
     t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert_eq!(t.st.selected_trace, None);
     // A selected trace that goes away is forgotten.
     t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);

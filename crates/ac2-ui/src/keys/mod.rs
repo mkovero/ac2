@@ -146,8 +146,8 @@ commands! {
     MaximizePane => "maximize_pane", "Layout: split → one pane → full screen", [Global];
     Undo => "undo", "Undo the last change to the panes (split, close, drop, pick, view, size, W / F, compare)", [Global];
     Redo => "redo", "Redo the pane change last undone", [Global];
-    NextInTree => "next_in_tree", "Select the next row in the measurement list (the focused pane shows its measurement)", [Global];
-    PrevInTree => "prev_in_tree", "Select the previous row in the measurement list (the focused pane shows its measurement)", [Global];
+    NextInTree => "next_in_tree", "Select the next row in the measurement list (a measurement row brings its panes, as a click does)", [Global];
+    PrevInTree => "prev_in_tree", "Select the previous row in the measurement list (a measurement row brings its panes, as a click does)", [Global];
     PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];
     CycleTheme => "cycle_theme", "Theme: dark → light → high contrast", [Global];
     PlotChrome => "plot_chrome", "Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only (SPL: the limit text goes with the grid, the scale with the labels)", [Global];

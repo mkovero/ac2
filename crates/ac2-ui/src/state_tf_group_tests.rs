@@ -144,7 +144,8 @@ fn legend(t: &T) -> Vec<String> {
 
 /// The pane draws its measurement's group only: Main L's live curve, its math channel and
 /// its two captures; neither Delay tower's capture nor the import. Choosing Delay tower
-/// switches the whole set; selecting a capture of Main L brings its group back.
+/// switches the whole set; selecting a capture of Main L leaves it (a child row moves no
+/// pane).
 #[test]
 fn the_transfer_pane_draws_its_measurements_group_only() {
     let mut t = loaded(two_groups());
@@ -156,10 +157,10 @@ fn the_transfer_pane_draws_its_measurements_group_only() {
         &t.keys,
     );
     assert_eq!(legend(&t), ["Delay tower", "t11"]);
-    // A trace selected brings its measurement's group with it.
+    // A trace's row only selects it.
     t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
-    assert_eq!(transfer_group(&t), Some(MeasId(1)));
-    assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
+    assert_eq!(transfer_group(&t), Some(MeasId(3)));
+    assert_eq!(legend(&t), ["Delay tower", "t11"]);
     // The math channel shown on the pane draws its owner's group.
     t.st.update(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(6))),
@@ -304,8 +305,10 @@ fn a_sweeps_runs_show_when_the_sweep_is_the_panes() {
         &t.keys,
     );
     assert_eq!(legend(&t), ["Main L"]);
+    // A run's row only selects it: the pane keeps Main L.
     t.st.update(Msg::SelectTrace(TraceId(20)), &t.keys);
-    assert_eq!(legend(&t), [run.edit.name.as_str()]);
+    assert_eq!(t.st.selected_trace, Some(TraceId(20)));
+    assert_eq!(legend(&t), ["Main L"]);
 }
 
 /// The legend's `name · tags` lines, sorted.

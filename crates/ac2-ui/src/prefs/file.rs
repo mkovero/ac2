@@ -228,8 +228,9 @@ impl IrLevelsFile {
     }
 }
 
-/// A pane's own level axes (`[layout.panes.levels]` under its `[[layout.panes]]` entry),
-/// `[low, high]` dB; one left out is the default.
+/// A pane's level axes the operator set (`[layout.panes.levels]` under its
+/// `[[layout.panes]]` entry), `[low, high]` dB; one left out is framed when the pane first
+/// shows a curve.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PaneLevelsFile {
@@ -244,39 +245,38 @@ pub(super) struct PaneLevelsFile {
 }
 
 impl PaneLevelsFile {
-    /// The ranges; one that is no range is the default, logged (a layout is a convenience,
+    /// The ranges; one that is no range is left out, logged (a layout is a convenience,
     /// read leniently).
-    pub(super) fn parse(f: Option<&Self>, pane: u32) -> PaneLevels {
-        let d = PaneLevels::default();
+    pub(super) fn parse(f: Option<&Self>, pane: u32) -> LayoutLevels {
         let Some(f) = f else {
-            return d;
+            return LayoutLevels::default();
         };
-        let range = |name: &str, v: Option<[f64; 2]>, default: Range| match v {
-            None => default,
-            Some(v) => level_range(v).unwrap_or_else(|| {
+        let range = |name: &str, v: Option<[f64; 2]>| {
+            let v = v?;
+            let r = level_range(v);
+            if r.is_none() {
                 tracing::warn!(
-                    "ui.toml: pane {pane}'s levels.{name} is not [low, high] in dB; default"
+                    "ui.toml: pane {pane}'s levels.{name} is not [low, high] in dB; left out"
                 );
-                default
-            }),
+            }
+            r.map(|r| LevelRange { lo: r.lo, hi: r.hi })
         };
-        PaneLevels {
-            transfer: range("transfer", f.transfer, d.transfer),
-            spectrum_dbfs: range("spectrum_dbfs", f.spectrum_dbfs, d.spectrum_dbfs),
-            spectrum_spl: range("spectrum_spl", f.spectrum_spl, d.spectrum_spl),
-            distortion: range("distortion", f.distortion, d.distortion),
+        LayoutLevels {
+            transfer: range("transfer", f.transfer),
+            spectrum_dbfs: range("spectrum_dbfs", f.spectrum_dbfs),
+            spectrum_spl: range("spectrum_spl", f.spectrum_spl),
+            distortion: range("distortion", f.distortion),
         }
     }
 
-    /// Only the ranges moved off their defaults; `None` when all are at them.
-    pub(super) fn of(l: &PaneLevels) -> Option<Self> {
-        let d = PaneLevels::default();
-        let v = |r: Range, default: Range| (r != default).then_some([r.lo, r.hi]);
-        (*l != d).then(|| Self {
-            transfer: v(l.transfer, d.transfer),
-            spectrum_dbfs: v(l.spectrum_dbfs, d.spectrum_dbfs),
-            spectrum_spl: v(l.spectrum_spl, d.spectrum_spl),
-            distortion: v(l.distortion, d.distortion),
+    /// The ranges set; `None` when there are none.
+    pub(super) fn of(l: &LayoutLevels) -> Option<Self> {
+        let v = |r: Option<LevelRange>| r.map(|r| [r.lo, r.hi]);
+        (!l.is_empty()).then(|| Self {
+            transfer: v(l.transfer),
+            spectrum_dbfs: v(l.spectrum_dbfs),
+            spectrum_spl: v(l.spectrum_spl),
+            distortion: v(l.distortion),
         })
     }
 }

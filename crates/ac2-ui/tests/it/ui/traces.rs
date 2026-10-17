@@ -207,9 +207,13 @@ fn pane_measurement_chip_and_list() {
     h.get_by_label("TF  Delay tower").click();
     step_until(&mut h, "delay tower shown", |a| {
         a.state.overlay == Overlay::None
-            && a.state.selected == Some(MeasId(2))
             && a.state.kind_meas(PaneKind::Transfer).map(|m| m.id) == Some(MeasId(2))
     });
+    assert_eq!(
+        h.state().state.selected,
+        Some(MeasId(1)),
+        "a pick selects nothing"
+    );
     // The pane now leads with it: first legend row, IR of it.
     let st = &h.state().state;
     let s = ac2_ui::scenes::transfer(

@@ -261,6 +261,19 @@ pub fn measurement(m: &Measurement) -> String {
     }
     if let Some(l) = &m.layout {
         s.push_str(&format!("  {}", format::own_panes(l.panes().len())));
+        // Panes numbered in reading order, as the app numbers them.
+        for (i, p) in l.panes().iter().enumerate() {
+            let mut said = Vec::new();
+            if let Some(id) = p.meas.filter(|id| *id != m.id) {
+                said.push(format!("shows {id}"));
+            }
+            if !p.levels.is_empty() {
+                said.push("level axis set".to_owned());
+            }
+            if !said.is_empty() {
+                s.push_str(&format!(" · pane {}: {}", i + 1, said.join(", ")));
+            }
+        }
     }
     s
 }

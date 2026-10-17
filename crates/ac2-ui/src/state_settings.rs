@@ -453,6 +453,7 @@ impl AppState {
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
             DisplayRow::LevelAxes if d == 0 => {
                 self.pane_levels.clear();
+                self.level_set.clear();
                 self.hold_all_levels();
                 crate::prefs::IrLevelPrefs::default().apply(&mut self.view);
                 self.toast("every pane's level axis is back at its default");

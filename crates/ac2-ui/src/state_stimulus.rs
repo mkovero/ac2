@@ -254,13 +254,18 @@ impl AppState {
         self.arm(force, keymap, out);
     }
 
-    /// The sweep measurement Space on the sweep view runs: the selected measurement when
-    /// it is one, else the owner of the selected (or shown) run, else the pane's.
+    /// The sweep measurement Space on the sweep view runs: the focused sweep pane's (a pane
+    /// key acts on what its pane shows), else the selected measurement when it is one, else
+    /// the owner of the selected (or shown) run, else the sweep pane's.
     pub fn sweep_meas(&self) -> Option<&Measurement> {
         let is = |m: &&Measurement| matches!(m.config.kind, MeasKind::Sweep { .. });
         let owner_of = |t: &TraceMeta| t.edit.owner.meas().and_then(|id| self.meas(id));
-        self.selected_meas()
+        let f = self.layout.focus;
+        (self.layout.kind(f) == PaneKind::Distortion)
+            .then(|| self.pane_meas(f))
+            .flatten()
             .filter(is)
+            .or_else(|| self.selected_meas().filter(is))
             .or_else(|| self.selected_trace_meta().and_then(owner_of).filter(is))
             .or_else(|| {
                 self.kind_sweep()
@@ -475,6 +480,7 @@ impl AppState {
                 // The new result is selected under its measurement: listed highlighted,
                 // named in the captions, and what the trace keys change.
                 self.selected = Some(r.meas);
+                self.chosen = Some(r.meas);
                 self.collapsed
                     .remove(&ac2_proto::model::TraceOwner::Meas { meas: r.meas });
                 self.selected_trace = Some(trace);

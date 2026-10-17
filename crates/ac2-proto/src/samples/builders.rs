@@ -152,7 +152,8 @@ pub(super) fn sweep_config() -> SweepConfig {
     }
 }
 
-/// A transfer pane beside an SPL meter, the transfer one in its phase view.
+/// A transfer pane beside an SPL meter, the transfer one in its phase view with its level
+/// axis zoomed, the meter picked for measurement 2.
 pub fn pane_layout() -> PaneLayout {
     use crate::model::layout::*;
     let pane = |kind, transfer_view| LayoutPane {
@@ -162,18 +163,30 @@ pub fn pane_layout() -> PaneLayout {
         spl_view: SplView::MeterLeq,
         sweep_view: SweepView::Response,
         chrome: PlotChrome::Full,
+        meas: None,
+        levels: LayoutLevels::default(),
     };
     PaneLayout::Split {
         axis: SplitAxis::Row,
         ratio: 0.625,
         a: Box::new(PaneLayout::Pane {
-            pane: pane(PaneKind::Transfer, TransferView::Phase),
+            pane: Box::new(LayoutPane {
+                levels: LayoutLevels {
+                    transfer: Some(LevelRange {
+                        lo: -24.0,
+                        hi: 12.0,
+                    }),
+                    ..LayoutLevels::default()
+                },
+                ..pane(PaneKind::Transfer, TransferView::Phase)
+            }),
         }),
         b: Box::new(PaneLayout::Pane {
-            pane: LayoutPane {
+            pane: Box::new(LayoutPane {
                 chrome: PlotChrome::NoGrid,
+                meas: Some(MeasId(2)),
                 ..pane(PaneKind::Spl, TransferView::Magnitude)
-            },
+            }),
         }),
     }
 }

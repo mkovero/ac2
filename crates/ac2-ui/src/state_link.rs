@@ -85,6 +85,7 @@ impl AppState {
                     && ids.contains(&p)
                 {
                     self.selected = Some(p);
+                    self.chosen = Some(p);
                     self.pending_select = None;
                 }
                 if let Some(p) = self.pending_stack
@@ -106,6 +107,7 @@ impl AppState {
                         .map(|m| m.id)
                 }) {
                     self.selected = Some(id);
+                    self.chosen = Some(id);
                     self.standin = None;
                     self.lost_selection = None;
                     if std::mem::take(&mut self.lost_own_panes) {
@@ -119,6 +121,7 @@ impl AppState {
                         .find(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
                         .or(self.measurements().first())
                         .map(|m| m.id);
+                    self.chosen = self.selected;
                     self.standin = self.selected;
                 }
                 self.edits.retain(|k, _| ids.contains(k));
@@ -224,6 +227,7 @@ impl AppState {
                     self.open_created(m.id, PaneKind::for_kind(&m.config.kind));
                 }
                 self.selected = Some(m.id);
+                self.chosen = Some(m.id);
                 self.pending_select = Some(m.id);
                 // Made here, by the operator: as if its row were chosen, the panes on screen
                 // are its own from now (it has none yet to bring).
@@ -587,6 +591,9 @@ impl AppState {
             }
             self.selected = None;
             self.standin = None;
+        }
+        if self.chosen.is_some_and(&gone) {
+            self.chosen = None;
         }
         // Its panes stay on screen, nobody's own until a row is chosen.
         if self.own_panes.is_some_and(&gone) {
