@@ -80,16 +80,12 @@ impl AppState {
             let make = match p {
                 PaneKind::Transfer => format!(
                     "no transfer measurement: {}",
-                    self.keys
-                        .reach(CommandId::NewTransfer, "New transfer measurement…")
+                    self.keys.reach(CommandId::NewTransfer)
                 ),
                 PaneKind::Spectrum => {
                     format!("no spectrum or RTA: {} makes one", self.new_meas_reach())
                 }
-                _ => format!(
-                    "no SPL meter: {}",
-                    self.keys.reach(CommandId::NewSpl, "New SPL meter…")
-                ),
+                _ => format!("no SPL meter: {}", self.keys.reach(CommandId::NewSpl)),
             };
             self.warn(make);
         }

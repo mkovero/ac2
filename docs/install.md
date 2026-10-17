@@ -202,9 +202,9 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
    device's defaults unless you type them. The roles and names are remembered per device.
 3. **Enter** (on either page) opens the session. With a reference and at least one mic, and
    no measurements yet, the app offers *Reference → M30 FOH* — one transfer measurement per
-   mic; **Enter** creates and starts them. Later, **Ctrl+K** → *New transfer measurement…*
+   mic; **Enter** creates and starts them. Later, **Ctrl+K** → *New transfer…*
    (or *New spectrum…*, *New RTA…*, *New SPL meter…*) picks inputs by name with their meters
-   (**←/→**); *Delete selected measurement or trace…* and *Close audio session* are in the
+   (**←/→**); *Delete selected…* and *Close audio session* are in the
    palette too. While the session is open, the **Inputs** list on the left keeps a named
    meter per input with its role (*reference*, *mic*), so levels stay in sight while you
    measure.

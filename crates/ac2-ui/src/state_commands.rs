@@ -582,9 +582,9 @@ impl AppState {
                             .label(text::CAPTURE_SLOT[usize::from(slot - 1)], Scope::Global)
                             .map_or_else(
                                 || {
-                                    self.keys.palette_entry(&format!(
-                                        "Capture selected measurement to slot {slot}"
-                                    ))
+                                    self.keys.palette_entry(
+                                        text::CAPTURE_SLOT[usize::from(slot - 1)].title(),
+                                    )
                                 },
                                 |k| format!("{k} captures into it"),
                             );

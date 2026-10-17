@@ -109,7 +109,7 @@ fn delete_asks_then_deletes_the_selected_trace() {
     t.conn(with_traces(vec![stored(11, None, 2)]));
     t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("Ctrl+K");
-    t.text("delete selected measurement or trace");
+    t.text("delete selected");
     t.key("Enter");
     assert!(
         matches!(&t.st.overlay, Overlay::Delete(p) if p.target == DeleteTarget::Trace(TraceId(11)))

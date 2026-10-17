@@ -40,10 +40,7 @@ impl AppState {
 
     /// How message text says to open the chooser: its key, else its palette entry.
     pub(super) fn new_meas_reach(&self) -> String {
-        self.keys.reach(
-            CommandId::NewMeasurement,
-            &format!("{}…", ac2_scene::new_meas::TITLE),
-        )
+        self.keys.reach(CommandId::NewMeasurement)
     }
 
     /// A row of the chooser taken: that kind's own command opens its form.

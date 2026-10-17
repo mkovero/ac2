@@ -421,7 +421,7 @@ fn transfer_legend_many_curves() {
     });
 
     // Snapped to a corner from the palette, in the light theme.
-    palette(&mut h, "legend: bottom-right");
+    palette(&mut h, "legend bottom-right");
     assert_eq!(legend(&h).corner(), Some(LegendCorner::BottomRight));
     palette(&mut h, "theme");
     step_until(&mut h, "light", |a| a.state.theme == ThemeName::Light);
@@ -431,7 +431,7 @@ fn transfer_legend_many_curves() {
     dense_snapshot(&mut h, "transfer_legend_many_curves_light");
 
     // Hidden, and kept so.
-    palette(&mut h, "legend: hide");
+    palette(&mut h, "hide legend");
     assert!(legend(&h).hidden);
     assert!(h.state().legend_rects().is_none());
     let kept = h.state().state.prefs.legend;

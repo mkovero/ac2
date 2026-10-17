@@ -103,7 +103,7 @@ the minimal honest form: `ac2 spl leq new --yes --export FILE` writes the ended 
 the reset, whole, with no second lost between an export and the reset; `ac2 spl leq export
 --previous` gets it later. The meter's job sees the new log at its next second (each log has
 an epoch) and starts its windows over; judgement reports from before the reset are dropped.
-The app asks first (Shift+R in the SPL pane, "Start a new SPL log…"), naming the run that
+The app asks first (Shift+R in the SPL pane, "New SPL log…"), naming the run that
 ends and what starts over; the CLI wants `--yes`.
 
 ## Limits

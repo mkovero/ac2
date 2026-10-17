@@ -221,15 +221,16 @@ impl Keymap {
         self.palette_entry_in(entry, label_style())
     }
 
-    /// How message text names global `command`: its chord, else its palette entry `entry`.
-    pub fn reach_in(&self, command: CommandId, entry: &str, style: LabelStyle) -> String {
+    /// How message text names global `command`: its chord, else its palette entry (its
+    /// title, so the message and the palette use the same words).
+    pub fn reach_in(&self, command: CommandId, style: LabelStyle) -> String {
         self.label_in(command, Scope::Global, style)
-            .unwrap_or_else(|| self.palette_entry_in(entry, style))
+            .unwrap_or_else(|| self.palette_entry_in(command.title(), style))
     }
 
     /// [`Keymap::reach_in`] in the current label style.
-    pub fn reach(&self, command: CommandId, entry: &str) -> String {
-        self.reach_in(command, entry, label_style())
+    pub fn reach(&self, command: CommandId) -> String {
+        self.reach_in(command, label_style())
     }
 
     /// Key text for the palette: the chord in `active` scope (or global), else the chord in

@@ -194,7 +194,7 @@ fn math_channel_dialog_by_name() {
     // From the palette too; with nothing of a kind to pair, it says what is missing.
     t.conn(with_traces(vec![]));
     t.key("Ctrl+K");
-    t.text("new math channel");
+    t.text("new math");
     t.key("Enter");
     assert!(matches!(t.st.overlay, Overlay::None));
     assert!(

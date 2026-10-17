@@ -488,7 +488,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     let dir = tempfile::tempdir()?;
     let export = |d: &mut Driver| {
         d.key("Ctrl+K");
-        d.send(Msg::Text("export the selected".into()));
+        d.send(Msg::Text("export trace".into()));
         d.key("Enter");
     };
 
@@ -570,7 +570,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     let b = d.st.slots()[1].map(|t| t.id).ok_or("slot 2")?;
     d.send(Msg::SelectTrace(b));
     d.key("Ctrl+K");
-    d.send(Msg::Text("move the selected trace to slot".into()));
+    d.send(Msg::Text("move trace to slot".into()));
     d.key("Enter");
     retype(&mut d, "none");
     d.key("Enter");

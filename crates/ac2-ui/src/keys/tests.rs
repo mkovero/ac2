@@ -615,12 +615,9 @@ fn stop_anywhere_is_safe_on_every_layout() {
 fn message_text_names_keys_in_the_label_style() {
     use LabelStyle::{Mac, Pc};
     let m = Keymap::default();
-    assert_eq!(m.reach_in(CommandId::SweepNew, "New sweep…", Pc), "Shift+S");
-    assert_eq!(m.reach_in(CommandId::SweepNew, "New sweep…", Mac), "⇧S");
-    assert_eq!(
-        m.reach_in(CommandId::NewSpl, "New SPL meter…", Mac),
-        "New SPL meter… in ⌘K"
-    );
+    assert_eq!(m.reach_in(CommandId::SweepNew, Pc), "Shift+S");
+    assert_eq!(m.reach_in(CommandId::SweepNew, Mac), "⇧S");
+    assert_eq!(m.reach_in(CommandId::NewSpl, Mac), "New SPL meter… in ⌘K");
     assert_eq!(
         m.label_in(CommandId::SweepIr, Scope::Distortion, Mac)
             .as_deref(),
@@ -629,7 +626,53 @@ fn message_text_names_keys_in_the_label_style() {
     assert_eq!(m.label_in(CommandId::SweepIr, Scope::Transfer, Pc), None);
     let bare = Keymap::from_toml("[global]\npalette = []\nsweep_new = []\n").expect("valid");
     assert_eq!(
-        bare.reach_in(CommandId::SweepNew, "New sweep…", Mac),
+        bare.reach_in(CommandId::SweepNew, Mac),
         "New sweep… in the command palette"
     );
+}
+
+/// Palette lines are labels, not a manual: short, no asides, every title its own, and one
+/// shape per genre so a family reads (and searches) alike.
+#[test]
+fn palette_titles_are_terse_and_uniform() {
+    use CommandId as C;
+    let mut seen = std::collections::HashSet::new();
+    for &c in CommandId::ALL {
+        let t = c.title();
+        assert!(t.chars().count() <= 28, "too long: {t}");
+        assert!(!t.contains(['(', ')', ':', ';']), "aside in: {t}");
+        assert!(
+            !t.contains(" / ") && !t.contains('→'),
+            "manual text in: {t}"
+        );
+        assert!(!t.ends_with("...") && t.matches('…').count() <= 1, "{t}");
+        assert!(t.chars().next().is_some_and(char::is_uppercase), "{t}");
+        assert!(seen.insert(t), "two commands read {t}");
+    }
+    for c in [
+        C::NewMeasurement,
+        C::NewTransfer,
+        C::NewSpectrum,
+        C::NewRta,
+        C::NewSpl,
+        C::NewMath,
+        C::SweepNew,
+    ] {
+        let t = c.title();
+        assert!(t.starts_with("New ") && t.ends_with('…'), "{t}");
+    }
+    for (c, t) in [
+        (C::SessionLoad, "Open session…"),
+        (C::SessionSave, "Save session"),
+        (C::SessionSaveAs, "Save session as…"),
+        (C::SessionExport, "Export session…"),
+        (C::SplitPane, "Split pane"),
+        (C::ClosePane, "Close pane"),
+        (C::MaximizePane, "Maximise pane"),
+        (C::PeakHold, "Peak hold"),
+        (C::CoherenceMask, "Coherence mask"),
+        (C::PhaseView, "Phase view"),
+    ] {
+        assert_eq!(c.title(), t);
+    }
 }

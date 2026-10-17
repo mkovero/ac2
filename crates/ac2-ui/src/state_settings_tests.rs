@@ -438,16 +438,9 @@ fn the_audio_and_channels_are_one_page() {
     assert_eq!(Page::AudioIo.title(), "Audio & I/O");
     let titles: Vec<&str> = Page::ALL.iter().map(|p| p.title()).collect();
     assert!(!titles.contains(&"Audio") && !titles.contains(&"Inputs & outputs"));
-    for c in [
-        CommandId::OpenSession,
-        CommandId::InputSetup,
-        CommandId::StimulusOutputs,
-    ] {
-        assert!(
-            c.title().contains("Settings › Audio & I/O"),
-            "{}",
-            c.title()
-        );
+    // Palette lines are terse and never name a page by an old title.
+    for c in CommandId::ALL {
+        assert!(!c.title().contains("Inputs & outputs"), "{}", c.title());
     }
 }
 

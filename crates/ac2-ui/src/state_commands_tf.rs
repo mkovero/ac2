@@ -159,7 +159,7 @@ impl AppState {
                 let hidden = !self.view.tf.legend.hidden;
                 self.view.tf.legend.hidden = hidden;
                 self.toast(if hidden {
-                    "legend hidden (Legend: hide / show brings it back)"
+                    "legend hidden (Show/hide legend brings it back)"
                 } else {
                     "legend shown"
                 });

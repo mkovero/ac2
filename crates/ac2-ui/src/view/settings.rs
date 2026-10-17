@@ -189,7 +189,7 @@ fn page(
                     }
                 }
                 None => {
-                    let new = app.keymap.reach(CommandId::NewSpl, "New SPL meter…");
+                    let new = app.keymap.reach(CommandId::NewSpl);
                     ui.label(
                         RichText::new(format!(
                             "No SPL meter: make one first ({new}); its Leq windows and limits \

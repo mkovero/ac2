@@ -123,8 +123,8 @@ Neither the output labels nor the system max level are session content: both are
 
 ## 6. Open
 
-- Bulk palette prompts (*Input setup: type mic names (3=M30, 4=ECM)…*, *Mic curve on input
-  N…*, *Calibration: delete … (input=mic)…*) stay as typed shortcuts; their effect is visible
+- Bulk palette prompts (*Set input mics…*, *Set input mic curve…*,
+  *Delete calibration…*) stay as typed shortcuts; their effect is visible
   on the pages. Remove them if operators never use them.
 - Labels follow channel numbers, not devices; per-device labels if rigs switch interfaces.
 - A revoked client keeps its data stream until it reconnects.

@@ -333,7 +333,7 @@ Checks the file writes and the replay path on Windows.
    *Record: raw audio of every input on / off*. The top bar shows `REC 0:12 · … MB`. After
    a minute, the same command again stops it; the top bar names the recording
    (`recorded rec-… · 1:00 · … MB`).
-2. Stop the noise. **Ctrl+K → Replay a recording as the session (name or path)…**, type
+2. Stop the noise. **Ctrl+K → Replay recording…**, type
    that name, **Enter**. The measurements should show the same curves as live. Note what
    the app shows when the recording ends.
 3. The files are in `%APPDATA%\ac2\data\recordings\`. Note their size.

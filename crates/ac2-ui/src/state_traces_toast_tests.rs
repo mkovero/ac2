@@ -6,7 +6,7 @@ use super::*;
 fn palette_runs_commands() {
     let mut t = T::new();
     t.key("Ctrl+K");
-    t.text("unwrapped");
+    t.text("phase view");
     t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
     assert!(matches!(t.st.view.tf.phase, PhaseView::Unwrapped { .. }));
@@ -175,7 +175,7 @@ fn the_notification_log_keeps_the_last_ones_and_opens_from_the_palette() {
     let keys = t.keys.clone();
     let scope = t.focus_kind().scope();
     let mut p = crate::palette::Palette::default();
-    p.type_text("recent notif");
+    p.type_text("notif");
     assert_eq!(
         p.entries(&keys, scope).first().map(|e| e.command),
         Some(CommandId::Notifications)
@@ -261,8 +261,5 @@ fn toasts_name_the_keys_the_keymap_binds() {
     assert_eq!(t.last_toast(), "no SPL meter: make one first (F8)");
     t.keys = Keymap::from_toml("[global]\nslot_5 = []\npalette = \"F9\"\n").expect("valid");
     t.key("5");
-    assert_eq!(
-        t.last_toast(),
-        "slot 5 is empty (Capture selected measurement to slot 5 in F9)"
-    );
+    assert_eq!(t.last_toast(), "slot 5 is empty (Capture to slot 5 in F9)");
 }

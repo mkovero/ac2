@@ -43,7 +43,7 @@ the top bar); **Shift+O** opens its Audio & I/O page; **Ctrl+M** (*New measureme
 the last row of every pane's list) lists every kind — transfer, spectrum, RTA, SPL meter,
 sweep, math channel — with what each measures, and opens the chosen kind's settings (created,
 started and selected on **Enter**, in a pane of its own); the palette (**Ctrl+K**) also has
-*New transfer measurement…*, *New spectrum…*, *New RTA…*, *New SPL meter…* directly, and
+*New transfer…*, *New spectrum…*, *New RTA…*, *New SPL meter…* directly, and
 *Close audio session*; **Delete** (or **Backspace**) deletes the
 selected measurement after asking. Until there is a session or a measurement, the transfer
 pane says which comes next. The CLI does the same with the same defaults:
@@ -410,7 +410,7 @@ To put another measurement in a pane:
   selection in the list stays where it was;
 - or drag a row of the measurement list onto the pane
   ([below](#dragging-a-row-onto-a-pane));
-- or palette *Choose the measurement the focused pane shows…*.
+- or palette *Choose pane measurement…*.
 
 A row of the measurement list clicked (or reached with **Tab** / **Shift+Tab**):
 
@@ -607,8 +607,8 @@ the legend. **Drag** the plate anywhere; **drag its corner grip** to set how lar
 grow (longer rows are cut with `…`). By default it is at most 70 % of the pane tall; more
 rows **scroll with the wheel** and its last line counts the rest (`3 above · 9 below`), so
 every curve stays reachable by name. **Click** a row to select its curve (then **A** hides
-it; a hidden curve leaves the legend, bring it back from the list). Palette: *Legend:
-top-left / top-right / bottom-left / bottom-right corner*, *Legend: hide / show*. Position,
+it; a hidden curve leaves the legend, bring it back from the list). Palette: *Legend
+top-left* / *top-right* / *bottom-left* / *bottom-right*, *Show/hide legend*. Position,
 size and hidden state are kept in `ui.toml` (`[legend.transfer]`).
 
 #### Impulse-response pictures
@@ -869,7 +869,7 @@ shows where: a faint grey shade with dashed edges, and the cursor says it
 ### Smoothing
 
 **K** coarser (off → 1/48 → 1/24 → 1/12 → 1/6 → 1/3 octave), **Shift+K** finer, palette
-*Smoothing: 1/6 oct* … sets a step. Transfer and spectrum panes; the title and each
+*Smoothing 1/6 oct* … sets a step. Transfer and spectrum panes; the title and each
 transfer legend row say the smoothing.
 
 - **Transfer functions** smooth the magnitude (power) **and the phase**, so phase, unwrapped
@@ -1206,9 +1206,9 @@ as a level difference. A locked trace keeps its offset.
 
 ### Rename, export, delete
 
-- **F2** (palette *Rename the selected trace…*, or a double click) renames the selected
+- **F2** (palette *Rename trace…*, or a double click) renames the selected
   trace; `ac2 trace rename <trace> <name>`.
-- Palette *Export the selected trace (CSV or IR WAV) to a file…* writes it as `ac2 trace
+- Palette *Export trace…* writes it as `ac2 trace
   export --csv` does: a file path, or a folder (named after the trace, `Main L S1.csv`); a
   path ending in `.wav` writes its impulse response. The prompt starts in the last export's
   folder (first: home); the file is written on this computer, also with a remote daemon.
@@ -1260,7 +1260,7 @@ ac2 trace import room.wav --gate 10ms --gate-pre 1ms   # only 1 ms before … 10
 ac2 trace import a.wav --keep-delay                    # phase re the file's first sample
 ```
 
-In the app, palette *Import a trace file (CSV, analyzer text, IR WAV)…*; a WAV (recognised by
+In the app, palette *Import trace…* (CSV, analyzer text, IR WAV); a WAV (recognised by
 its header) opens the **Import impulse response** dialog. The app reads the file and sends
 it, so it works with a remote daemon.
 
@@ -1658,7 +1658,7 @@ Files go to `recordings/` in the ac2 data directory on the daemon's machine (`ac
 **Replay** opens a session on a recording instead of a device: the running measurements
 analyse it with the recorded device's calibrations and mic curves, no outputs.
 
-- **App:** palette *Replay a recording as the session (name or path)…*.
+- **App:** palette *Replay recording…* (a name or a path).
 - **CLI:** `ac2 session replay <name|path> [--fast]` (a name from `ac2 rec list`, or a
   `.wav` / `.ac2rec.json` path). Real time by default; `--fast` goes as fast as the
   measurements allow, never dropping audio.
@@ -1889,7 +1889,7 @@ weighting **A**, **C** or **Z**, with Leq, LCpeak, Lmax and Lmin. A new meter re
 #### Three views, G steps them
 
 **G** steps meter → Leq windows → meter + Leq (→ bands, with a band meter) → meter; the
-palette has each by name (*SPL pane: meter + Leq windows*).
+palette has each by name (*Meter view*, *Leq view*, *Meter + Leq view*, *Band Leq view*).
 
 | View | Shows |
 |---|---|
@@ -2010,7 +2010,7 @@ the time before.
 
 #### Tiles, history and the stage view
 
-- Settings › Display › **Leq windows** (palette *SPL Leq windows: columns / tiles*): columns
+- Settings › Display › **Leq windows** (palette *Leq style*): columns
   or **tiles** (a grid with every figure written out).
 - Settings › Display › **Leq history strip** (palette *… history strip on / off*): each
   window over time against its limit (dashed), red where over; live, it shows twice the
@@ -2046,7 +2046,7 @@ Without the history strip it is not shown; `ac2 spl leq watch` always prints it.
 
 #### A new log (Shift+R)
 
-**Shift+R** in the SPL pane (palette *Start a new SPL log…*) starts a **new log**, for the
+**Shift+R** in the SPL pane (palette *New SPL log…*) starts a **new log**, for the
 show after a loud soundcheck: windows, states, alarms, clock and total start over; windows
 and limits stay. It asks first, naming the run that ends. The ended log can be exported
 (`ac2 spl leq export --previous`) until the next new log or daemon restart.
@@ -2506,7 +2506,7 @@ is listed at the end of the [keyboard map](#keyboard-map)). It shows the keys bo
 (macOS: `⌘ ⌥ ⇧`); on a narrow pane the least used drop first, **H all keys** stays. Hovering
 over the line lists the keys with what each does; hovering over a clickable control (the
 **dB | %** toggle, **Stop**, a colour dot or row, a pane's chip) names its key. Settings ›
-Display › Key hints (palette *Key hints on / off*) turns it off (`key_hints = false` in
+Display › Key hints (palette *Key hints*) turns it off (`key_hints = false` in
 `ui.toml`). The stage view never shows it.
 
 ### Notifications
@@ -2541,21 +2541,21 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `H` or `F1` | Show / hide key bindings | `help` |
+| `H` or `F1` | Key bindings | `help` |
 | `Ctrl+K` | Command palette | `palette` |
-| `Ctrl+P` | Settings: inputs & outputs, audio, calibration, Leq, recording, display, connection… | `settings` |
+| `Ctrl+P` | Settings… | `settings` |
 | `Ctrl+Q` | Quit | `quit` |
-| `F` or `F11` | Full screen: window → panes only → off | `fullscreen` |
-| `Space` | Stimulus: arm what the view plays (sweep view: a run of the selected sweep measurement; others: the generator) | `stimulus_arm` |
-| `Enter` | Stimulus: fire what is armed (named in the top bar) | `stimulus_fire` |
-| `Esc` | Stimulus: stop and disarm (no window open) | `stimulus_stop` |
-| `Shift+Esc` | Stimulus: stop and disarm, also with a window open | `stimulus_stop_anywhere` |
+| `F` or `F11` | Full screen | `fullscreen` |
+| `Space` | Arm stimulus | `stimulus_arm` |
+| `Enter` | Fire stimulus | `stimulus_fire` |
+| `Esc` | Stop stimulus | `stimulus_stop` |
+| `Shift+Esc` | Stop stimulus anywhere | `stimulus_stop_anywhere` |
 | `↑` | Stimulus level +1 dB | `level_up` |
 | `↓` | Stimulus level −1 dB | `level_down` |
 | `Shift+↑` | Stimulus level +3 dB | `level_up_coarse` |
 | `Shift+↓` | Stimulus level −3 dB | `level_down_coarse` |
-| `L` | Stimulus: type level (dBFS)… | `stimulus_level` |
-| `Alt+1` | Focus pane 1 (panes count in reading order) | `focus_pane_1` |
+| `L` | Set stimulus level… | `stimulus_level` |
+| `Alt+1` | Focus pane 1 | `focus_pane_1` |
 | `Alt+2` | Focus pane 2 | `focus_pane_2` |
 | `Alt+3` | Focus pane 3 | `focus_pane_3` |
 | `Alt+4` | Focus pane 4 | `focus_pane_4` |
@@ -2564,98 +2564,98 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+7` | Focus pane 7 | `focus_pane_7` |
 | `Alt+8` | Focus pane 8 | `focus_pane_8` |
 | `Alt+9` | Focus pane 9 | `focus_pane_9` |
-| `N` | Split the focused pane in two (along its longer side) | `split_pane` |
-| `Q` | Close the focused pane | `close_pane` |
-| `Shift+N` | Turn the focused pane's split (side by side ↔ stacked) | `turn_split` |
-| `Alt+→` | Grow the focused pane (within its split) | `grow_pane` |
-| `Alt+←` | Shrink the focused pane (within its split) | `shrink_pane` |
-| `W` | Layout: split → one pane → full screen | `maximize_pane` |
-| `Ctrl+Z` | Undo the last change to the panes (split, close, drop, pick, view, size, W / F) | `undo` |
-| `Ctrl+Shift+Z` | Redo the pane change last undone | `redo` |
-| `Tab` | Select the next row in the measurement list (a measurement row brings its panes, as a click does) | `next_in_tree` |
-| `Shift+Tab` | Select the previous row in the measurement list (a measurement row brings its panes, as a click does) | `prev_in_tree` |
-| `T` | Plot of the focused pane: grid, labels and cursor → no grid or marks → traces only (SPL: the limit text goes with the grid, the scale with the labels) | `plot_chrome` |
-| `I` | Zoom frequency in (IR: time) | `zoom_in` |
-| `O` | Zoom frequency out (IR: time) | `zoom_out` |
-| `←` | Pan frequency down (IR: earlier) | `pan_left` |
-| `→` | Pan frequency up (IR: later) | `pan_right` |
-| `Home` | Reset zoom (20 Hz – 20 kHz; IR: the whole IR) | `reset_view` |
-| `Ctrl+I` | Zoom level axis in (vertical; IR: amplitude or dB) | `level_zoom_in` |
-| `Ctrl+O` | Zoom level axis out (vertical; IR: amplitude or dB) | `level_zoom_out` |
-| `Ctrl+↑` | Pan level axis up (towards higher levels) | `level_pan_up` |
-| `Ctrl+↓` | Pan level axis down (towards lower levels) | `level_pan_down` |
-| `Shift+Home` | Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz (IR: the whole IR) | `level_fit` |
-| `Ctrl+Home` | Level and frequency axes back to the pane's default | `level_reset` |
-| `C` | Compare the selected measurement or trace into a measurement's panes: choose which… | `compare` |
-| `Shift+←` | Cursor 1/12 octave down (IR: earlier) | `cursor_left` |
-| `Shift+→` | Cursor 1/12 octave up (IR: later) | `cursor_right` |
-| `Ctrl+1` | Capture selected measurement to slot 1 | `slot_1` |
-| `Ctrl+2` | Capture selected measurement to slot 2 | `slot_2` |
-| `Ctrl+3` | Capture selected measurement to slot 3 | `slot_3` |
-| `Ctrl+4` | Capture selected measurement to slot 4 | `slot_4` |
-| `Ctrl+5` | Capture selected measurement to slot 5 | `slot_5` |
-| `Ctrl+6` | Capture selected measurement to slot 6 | `slot_6` |
-| `Ctrl+7` | Capture selected measurement to slot 7 | `slot_7` |
-| `Ctrl+8` | Capture selected measurement to slot 8 | `slot_8` |
-| `Ctrl+9` | Capture selected measurement to slot 9 | `slot_9` |
-| `1` | Show / hide slot 1 | `show_slot_1` |
-| `2` | Show / hide slot 2 | `show_slot_2` |
-| `3` | Show / hide slot 3 | `show_slot_3` |
-| `4` | Show / hide slot 4 | `show_slot_4` |
-| `5` | Show / hide slot 5 | `show_slot_5` |
-| `6` | Show / hide slot 6 | `show_slot_6` |
-| `7` | Show / hide slot 7 | `show_slot_7` |
-| `8` | Show / hide slot 8 | `show_slot_8` |
-| `9` | Show / hide slot 9 | `show_slot_9` |
-| `V` | Select next shown stored trace (then live) | `next_trace` |
-| `Shift+V` | Select previous shown stored trace (then live) | `prev_trace` |
-| `Alt+V` | Select next trace incl. hidden (then live) | `next_any_trace` |
-| `Alt+Shift+V` | Select previous trace incl. hidden (then live) | `prev_any_trace` |
-| `A` | Show / hide the selected curve | `toggle_selected` |
-| `F2` | Rename the selected trace… | `trace_rename` |
-| `Delete` or `Backspace` | Delete selected measurement or trace… | `delete_selected` |
-| `Alt+↑` | Display offset +1 dB of the selected curve | `offset_up` |
-| `Alt+↓` | Display offset −1 dB of the selected curve | `offset_down` |
-| `Alt+Shift+↑` | Display offset +3 dB of the selected curve | `offset_up_coarse` |
-| `Alt+Shift+↓` | Display offset −3 dB of the selected curve | `offset_down_coarse` |
-| `Alt+Home` | Display offset of the selected curve back to 0 | `offset_clear` |
-| `Alt+S` | Sessions: new, open, save, recent sessions… | `sessions` |
-| `Ctrl+S` | Save session (where it came from; untitled: Save as) | `session_save` |
-| `Shift+O` | Open audio session: Settings › Audio & I/O… | `session_open` |
+| `N` | Split pane | `split_pane` |
+| `Q` | Close pane | `close_pane` |
+| `Shift+N` | Turn split | `turn_split` |
+| `Alt+→` | Grow pane | `grow_pane` |
+| `Alt+←` | Shrink pane | `shrink_pane` |
+| `W` | Maximise pane | `maximize_pane` |
+| `Ctrl+Z` | Undo pane change | `undo` |
+| `Ctrl+Shift+Z` | Redo pane change | `redo` |
+| `Tab` | Next list row | `next_in_tree` |
+| `Shift+Tab` | Previous list row | `prev_in_tree` |
+| `T` | Plot chrome | `plot_chrome` |
+| `I` | Zoom in | `zoom_in` |
+| `O` | Zoom out | `zoom_out` |
+| `←` | Pan left | `pan_left` |
+| `→` | Pan right | `pan_right` |
+| `Home` | Reset zoom | `reset_view` |
+| `Ctrl+I` | Zoom level in | `level_zoom_in` |
+| `Ctrl+O` | Zoom level out | `level_zoom_out` |
+| `Ctrl+↑` | Pan level up | `level_pan_up` |
+| `Ctrl+↓` | Pan level down | `level_pan_down` |
+| `Shift+Home` | Fit level | `level_fit` |
+| `Ctrl+Home` | Reset axes | `level_reset` |
+| `C` | Compare… | `compare` |
+| `Shift+←` | Cursor left | `cursor_left` |
+| `Shift+→` | Cursor right | `cursor_right` |
+| `Ctrl+1` | Capture to slot 1 | `slot_1` |
+| `Ctrl+2` | Capture to slot 2 | `slot_2` |
+| `Ctrl+3` | Capture to slot 3 | `slot_3` |
+| `Ctrl+4` | Capture to slot 4 | `slot_4` |
+| `Ctrl+5` | Capture to slot 5 | `slot_5` |
+| `Ctrl+6` | Capture to slot 6 | `slot_6` |
+| `Ctrl+7` | Capture to slot 7 | `slot_7` |
+| `Ctrl+8` | Capture to slot 8 | `slot_8` |
+| `Ctrl+9` | Capture to slot 9 | `slot_9` |
+| `1` | Show/hide slot 1 | `show_slot_1` |
+| `2` | Show/hide slot 2 | `show_slot_2` |
+| `3` | Show/hide slot 3 | `show_slot_3` |
+| `4` | Show/hide slot 4 | `show_slot_4` |
+| `5` | Show/hide slot 5 | `show_slot_5` |
+| `6` | Show/hide slot 6 | `show_slot_6` |
+| `7` | Show/hide slot 7 | `show_slot_7` |
+| `8` | Show/hide slot 8 | `show_slot_8` |
+| `9` | Show/hide slot 9 | `show_slot_9` |
+| `V` | Next trace | `next_trace` |
+| `Shift+V` | Previous trace | `prev_trace` |
+| `Alt+V` | Next trace incl. hidden | `next_any_trace` |
+| `Alt+Shift+V` | Previous trace incl. hidden | `prev_any_trace` |
+| `A` | Show/hide curve | `toggle_selected` |
+| `F2` | Rename trace… | `trace_rename` |
+| `Delete` or `Backspace` | Delete selected… | `delete_selected` |
+| `Alt+↑` | Offset +1 dB | `offset_up` |
+| `Alt+↓` | Offset −1 dB | `offset_down` |
+| `Alt+Shift+↑` | Offset +3 dB | `offset_up_coarse` |
+| `Alt+Shift+↓` | Offset −3 dB | `offset_down_coarse` |
+| `Alt+Home` | Clear offset | `offset_clear` |
+| `Alt+S` | Sessions… | `sessions` |
+| `Ctrl+S` | Save session | `session_save` |
+| `Shift+O` | Open audio session… | `session_open` |
 | `Ctrl+M` | New measurement… | `meas_new` |
-| `Shift+M` | New math channel: A ÷ × + − B, or the average of several (mic positions)… | `meas_new_math` |
-| `Shift+C` | Next colour for the selected measurement (one no other measurement has; grey last) | `meas_colour_next` |
-| `Shift+A` | Show / hide the selected measurement with every trace under it | `hide_group` |
-| `Shift+F2` | Move the selected trace or math channel to another measurement (or Imported)… | `move_trace` |
-| `Shift+S` | New sweep measurement: response and harmonic distortion… | `sweep_new` |
-| `Shift+L` | Leq windows and limits of the SPL meter: Settings › SPL / Leq… | `leq_windows` |
+| `Shift+M` | New math… | `meas_new_math` |
+| `Shift+C` | Next colour | `meas_colour_next` |
+| `Shift+A` | Show/hide measurement | `hide_group` |
+| `Shift+F2` | Move trace… | `move_trace` |
+| `Shift+S` | New sweep… | `sweep_new` |
+| `Shift+L` | Leq settings… | `leq_windows` |
 
 #### Transfer function
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `R` | Reset averaging of selected measurement | `reset_average` |
-| `S` | Start / stop selected measurement | `start_stop` |
-| `X` | Delay: find and insert first arrival | `insert_delay` |
-| `Shift+X` | Delay: find and insert strongest peak | `insert_strongest` |
-| `D` | Delay: type value (ms)… | `type_delay` |
-| `Y` | Delay tracking on / off | `track_delay` |
-| `Ctrl+,` | Delay of the measurement −1 sample (the curve moves at once) | `delay_down` |
-| `Ctrl+.` | Delay of the measurement +1 sample (the curve moves at once) | `delay_up` |
-| `Alt+,` | Delay of the measurement −0.1 sample | `delay_down_fine` |
-| `Alt+.` | Delay of the measurement +0.1 sample | `delay_up_fine` |
-| `U` | Invert polarity of selected trace (display) | `invert` |
-| `J` | Type dB offset of selected trace… | `offset` |
-| `,` | Delay −0.1 ms of the measurement, or of the selected stored trace | `nudge_earlier` |
-| `.` | Delay +0.1 ms of the measurement, or of the selected stored trace | `nudge_later` |
-| `E` | Make selected trace the phase reference | `phase_reference` |
-| `Z` | Load a target curve file… | `target` |
-| `B` | Coherence mask: off → 0.3 → 0.5 → 0.7 → 0.9 | `coherence_mask` |
-| `M` | Average shown stored traces (power) | `average` |
-| `P` | Min / max tracking on / off (top 5 peaks and dips) | `min_max` |
-| `Shift+P` | Phase: wrapped → unwrapped → group delay | `phase_view` |
-| `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
-| `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
+| `R` | Reset averaging | `reset_average` |
+| `S` | Start/stop | `start_stop` |
+| `X` | Find first arrival | `insert_delay` |
+| `Shift+X` | Find strongest peak | `insert_strongest` |
+| `D` | Set delay… | `type_delay` |
+| `Y` | Delay tracking | `track_delay` |
+| `Ctrl+,` | Delay −1 sample | `delay_down` |
+| `Ctrl+.` | Delay +1 sample | `delay_up` |
+| `Alt+,` | Delay −0.1 sample | `delay_down_fine` |
+| `Alt+.` | Delay +0.1 sample | `delay_up_fine` |
+| `U` | Invert polarity | `invert` |
+| `J` | Set offset… | `offset` |
+| `,` | Delay −0.1 ms | `nudge_earlier` |
+| `.` | Delay +0.1 ms | `nudge_later` |
+| `E` | Set phase reference | `phase_reference` |
+| `Z` | Import target… | `target` |
+| `B` | Coherence mask | `coherence_mask` |
+| `M` | Average power | `average` |
+| `P` | Min/max tracking | `min_max` |
+| `Shift+P` | Phase view | `phase_view` |
+| `K` | Smoothing coarser | `smooth_coarser` |
+| `Shift+K` | Smoothing finer | `smooth_finer` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 
@@ -2663,14 +2663,14 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `R` | Reset averaging of selected measurement | `reset_average` |
-| `S` | Start / stop selected measurement | `start_stop` |
-| `J` | Type dB offset of selected trace… | `offset` |
-| `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
-| `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
-| `B` | Spectrum: line / fill / bars | `spectrum_style` |
-| `P` | Peaks: off → peak hold → hold + top 5 tracked → off | `peak_hold` |
-| `Shift+B` | Spectrograph history: 10 → 30 → 60 → 120 s | `spectrograph_span` |
+| `R` | Reset averaging | `reset_average` |
+| `S` | Start/stop | `start_stop` |
+| `J` | Set offset… | `offset` |
+| `K` | Smoothing coarser | `smooth_coarser` |
+| `Shift+K` | Smoothing finer | `smooth_finer` |
+| `B` | Spectrum style | `spectrum_style` |
+| `P` | Peak hold | `peak_hold` |
+| `Shift+B` | Spectrograph span | `spectrograph_span` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 
@@ -2678,7 +2678,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `S` | Start / stop selected measurement | `start_stop` |
+| `S` | Start/stop | `start_stop` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 
@@ -2686,13 +2686,13 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `R` | Reset averaging of selected measurement | `reset_average` |
-| `S` | Start / stop selected measurement | `start_stop` |
+| `R` | Reset averaging | `reset_average` |
+| `S` | Start/stop | `start_stop` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
-| `Shift+R` | Start a new SPL log… | `spl_new_log` |
-| `Shift+F` | SPL meter: time weighting Fast → Slow → Impulse | `spl_time_weighting` |
-| `Z` | SPL meter: frequency weighting A → C → Z | `spl_weighting` |
+| `Shift+R` | New SPL log… | `spl_new_log` |
+| `Shift+F` | Time weighting | `spl_time_weighting` |
+| `Z` | Frequency weighting | `spl_weighting` |
 
 #### Sweep / distortion
 
@@ -2700,90 +2700,90 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|---|
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
-| `Shift+I` | Sweep pane: impulse response (again: response & distortion) | `sweep_ir` |
-| `E` | Distortion: the reference input's own harmonics shown / hidden | `reference_harmonics` |
+| `Shift+I` | Sweep IR view | `sweep_ir` |
+| `E` | Reference harmonics | `reference_harmonics` |
 
 #### Command palette only (`Ctrl+K`)
 
 | Command | `keys.toml` |
 |---|---|
-| Recent notifications… (the messages that went by in the corner) | `notifications` |
-| Key hints on / off | `key_hints` |
-| Warning toasts on / off (off: warnings and Leq limit alarms go only to the notification log) | `warning_toasts` |
-| Stimulus outputs: tick them in Settings › Audio & I/O… | `stimulus_outputs` |
-| Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
-| Transfer stack: magnitude / phase / coherence (in place of the focused pane) | `transfer_stack` |
-| Choose the measurement the focused pane shows… | `pane_measurement` |
-| Theme: dark → light → high contrast | `cycle_theme` |
-| Comparison cursor on / off (IR: a time cursor) | `toggle_cursor` |
-| Clear compare: nothing compared into the focused pane's measurement | `clear_compare` |
-| Move the selected trace to slot… (1 … 9, none frees its slot) | `trace_slot` |
-| Export the selected trace (CSV or IR WAV) to a file… | `trace_export` |
-| Deselect the stored trace: keys act on the live measurement again | `select_live` |
-| Import a trace file (CSV, analyzer text, IR WAV)… | `import_trace` |
-| New session (asks about unsaved changes), then the audio settings | `session_new` |
-| Sessions: open a file or folder on this computer, disarmed… | `session_load` |
-| Save session as: a new session on the daemon… | `session_save_as` |
-| Export session: an .ac2session file on this computer… | `session_export` |
-| Reconnect to the daemon now | `reconnect` |
+| Notifications… | `notifications` |
+| Key hints | `key_hints` |
+| Warning toasts | `warning_toasts` |
+| Stimulus outputs… | `stimulus_outputs` |
+| Take over stimulus | `stimulus_take_over` |
+| Transfer stack | `transfer_stack` |
+| Choose pane measurement… | `pane_measurement` |
+| Theme | `cycle_theme` |
+| Comparison cursor | `toggle_cursor` |
+| Clear compare | `clear_compare` |
+| Move trace to slot… | `trace_slot` |
+| Export trace… | `trace_export` |
+| Select live | `select_live` |
+| Import trace… | `import_trace` |
+| New session… | `session_new` |
+| Open session… | `session_load` |
+| Save session as… | `session_save_as` |
+| Export session… | `session_export` |
+| Reconnect | `reconnect` |
 | Close audio session | `session_close` |
-| Record: raw audio of every input on / off (stops by itself at the limit in Settings › Recording) | `record` |
-| Replay a recording as the session (name or path)… | `replay_recording` |
-| New transfer measurement… | `meas_new_transfer` |
+| Record | `record` |
+| Replay recording… | `replay_recording` |
+| New transfer… | `meas_new_transfer` |
 | New spectrum… | `meas_new_spectrum` |
 | New RTA… | `meas_new_rta` |
 | New SPL meter… | `meas_new_spl` |
 | Edit measurement… | `meas_edit` |
-| Previous colour for the selected measurement | `meas_colour_prev` |
-| Fold / unfold the selected measurement in the list | `toggle_group` |
-| Input setup: Settings › Audio & I/O (names, roles, mics, max level)… | `input_setup` |
-| Calibrations: Settings › Calibration (mics, curves, sensitivities)… | `calibrations` |
-| Input setup: type mic names (3=M30, 4=ECM)… | `input_mics` |
-| Mic curve: next curve on the selected measurement's input (off → 0° → 90° …) | `mic_curve` |
-| Mic curve on input N… (e.g. 2=90°, 2=off) | `mic_curve_input` |
-| Calibration: delete a sensitivity calibration (input=mic)… | `cal_delete` |
-| Mic curve on the selected trace (e.g. MM1 34804 90°; none removes)… | `trace_mic_curve` |
-| SPL meter: Fast time weighting (125 ms) | `spl_fast` |
-| SPL meter: Slow time weighting (1 s) | `spl_slow` |
-| SPL meter: Impulse time weighting (35 ms / 1.5 s) | `spl_impulse` |
-| SPL meter: A weighting | `spl_a` |
-| SPL meter: C weighting | `spl_c` |
-| SPL meter: Z weighting (flat) | `spl_z` |
-| Delay finder: auto band (full → mid → sub) | `finder_auto` |
-| Delay finder: full band (2–16 kHz) | `finder_full` |
-| Delay finder: mid band (300 Hz – 3 kHz) | `finder_mid` |
-| Delay finder: sub band (20–120 Hz) | `finder_sub` |
-| Delay finder: custom band (Hz)… | `finder_custom` |
-| Delay finder: observation length (s)… | `finder_observation` |
-| Coherence: its own view / over the magnitude | `coherence_placement` |
-| Legend: top-left corner (drag it anywhere; its corner grip resizes) | `legend_top_left` |
-| Legend: top-right corner | `legend_top_right` |
-| Legend: bottom-left corner | `legend_bottom_left` |
-| Legend: bottom-right corner | `legend_bottom_right` |
-| Legend: hide / show | `legend_hide` |
-| Average shown stored traces (complex) | `average_complex` |
-| Average shown stored traces (coherence-weighted) | `average_coherence` |
-| Smoothing: off | `smooth_off` |
-| Smoothing: 1/48 oct | `smooth_48` |
-| Smoothing: 1/24 oct | `smooth_24` |
-| Smoothing: 1/12 oct | `smooth_12` |
-| Smoothing: 1/6 oct | `smooth_6` |
-| Smoothing: 1/3 oct | `smooth_3` |
-| Spectrograph colours: the next colour map | `spectrograph_colours` |
-| Spectrograph colours: viridis (blue, green, yellow) | `spectrograph_colours_viridis` |
-| Spectrograph colours: magma (black, purple, orange; dark) | `spectrograph_colours_magma` |
-| Spectrograph colours: inferno (black, purple, red, yellow; dark) | `spectrograph_colours_inferno` |
-| Spectrograph colours: cividis (dark blue to yellow) | `spectrograph_colours_cividis` |
-| Spectrograph colours: grey (black to light grey) | `spectrograph_colours_grey` |
-| SPL pane: the meter | `spl_show_meter` |
-| SPL pane: the Leq windows | `spl_show_leq` |
-| SPL pane: meter + Leq windows | `spl_show_meter_leq` |
-| SPL pane: the band Leq bars (20 Hz … 10 kHz) | `spl_show_bands` |
-| SPL Leq windows: columns / tiles | `spl_leq_style` |
-| SPL Leq windows: history strip on / off | `spl_leq_history` |
-| Export Leq log (CSV, on this computer)… | `spl_log_export` |
-| Export the previous Leq log (CSV, on this computer)… | `spl_log_export_previous` |
-| Distortion in dB re fundamental / percent | `distortion_unit` |
+| Previous colour | `meas_colour_prev` |
+| Fold/unfold measurement | `toggle_group` |
+| Input setup… | `input_setup` |
+| Calibrations… | `calibrations` |
+| Set input mics… | `input_mics` |
+| Next mic curve | `mic_curve` |
+| Set input mic curve… | `mic_curve_input` |
+| Delete calibration… | `cal_delete` |
+| Set trace mic curve… | `trace_mic_curve` |
+| Fast time weighting | `spl_fast` |
+| Slow time weighting | `spl_slow` |
+| Impulse time weighting | `spl_impulse` |
+| A weighting | `spl_a` |
+| C weighting | `spl_c` |
+| Z weighting | `spl_z` |
+| Finder band auto | `finder_auto` |
+| Finder band full | `finder_full` |
+| Finder band mid | `finder_mid` |
+| Finder band sub | `finder_sub` |
+| Finder band custom… | `finder_custom` |
+| Finder observation… | `finder_observation` |
+| Coherence placement | `coherence_placement` |
+| Legend top-left | `legend_top_left` |
+| Legend top-right | `legend_top_right` |
+| Legend bottom-left | `legend_bottom_left` |
+| Legend bottom-right | `legend_bottom_right` |
+| Show/hide legend | `legend_hide` |
+| Average complex | `average_complex` |
+| Average coherence-weighted | `average_coherence` |
+| Smoothing off | `smooth_off` |
+| Smoothing 1/48 oct | `smooth_48` |
+| Smoothing 1/24 oct | `smooth_24` |
+| Smoothing 1/12 oct | `smooth_12` |
+| Smoothing 1/6 oct | `smooth_6` |
+| Smoothing 1/3 oct | `smooth_3` |
+| Next colour map | `spectrograph_colours` |
+| Colour map viridis | `spectrograph_colours_viridis` |
+| Colour map magma | `spectrograph_colours_magma` |
+| Colour map inferno | `spectrograph_colours_inferno` |
+| Colour map cividis | `spectrograph_colours_cividis` |
+| Colour map grey | `spectrograph_colours_grey` |
+| Meter view | `spl_show_meter` |
+| Leq view | `spl_show_leq` |
+| Meter + Leq view | `spl_show_meter_leq` |
+| Band Leq view | `spl_show_bands` |
+| Leq style | `spl_leq_style` |
+| Leq history | `spl_leq_history` |
+| Export Leq log… | `spl_log_export` |
+| Export previous Leq log… | `spl_log_export_previous` |
+| Distortion unit | `distortion_unit` |
 
 #### Key hint lines (Settings › Display › Key hints)
 

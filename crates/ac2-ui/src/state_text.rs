@@ -26,7 +26,7 @@ pub(super) const CAPTURE_SLOT: [CommandId; 9] = {
     ]
 };
 
-/// Show / hide slot 1 … 9.
+/// Show/hide slot 1 … 9.
 pub(super) const SHOW_SLOT: [CommandId; 9] = {
     use CommandId as C;
     [
@@ -76,16 +76,13 @@ impl AppState {
 
     /// How message text says to capture into a slot: its keys, else the palette entry.
     pub(super) fn capture_keys(&self) -> String {
-        self.slot_keys(&CAPTURE_SLOT).unwrap_or_else(|| {
-            self.keys
-                .palette_entry("Capture selected measurement to slot …")
-        })
+        self.slot_keys(&CAPTURE_SLOT)
+            .unwrap_or_else(|| self.keys.palette_entry("Capture to slot …"))
     }
 
     /// How message text says to set up a sweep: its key, else the palette entry.
     pub fn new_sweep_key(&self) -> String {
-        self.keys
-            .reach(CommandId::SweepNew, "New sweep measurement…")
+        self.keys.reach(CommandId::SweepNew)
     }
 
     /// The working session's label in the top bar and the sessions dialog, naming the key
@@ -122,7 +119,7 @@ impl AppState {
     pub(super) fn no_spl_meter(&self) -> String {
         format!(
             "no SPL meter: make one first ({})",
-            self.keys.reach(CommandId::NewSpl, "New SPL meter…")
+            self.keys.reach(CommandId::NewSpl)
         )
     }
 }

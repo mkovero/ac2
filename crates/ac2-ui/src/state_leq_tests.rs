@@ -111,7 +111,7 @@ fn leq_windows_from_the_keyboard() {
     assert!(d.error.as_deref().is_some_and(|e| e.contains("LAeq 1 min")));
 }
 
-/// Shift+R in the SPL pane (or "Start a new SPL log…" in Ctrl+K) asks first, naming the
+/// Shift+R in the SPL pane (or "New SPL log…" in Ctrl+K) asks first, naming the
 /// run that ends and what starts over; N keeps the log, Enter sends `spl.log_new`.
 #[test]
 fn new_spl_log_asks_first() {
