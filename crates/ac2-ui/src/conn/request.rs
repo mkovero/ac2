@@ -232,7 +232,6 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
         Request::OpenSession {
             config,
             inputs,
-            transfers,
             what,
         } => {
             let (c, o) = (client.clone(), out.clone());
@@ -260,7 +259,7 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                     what,
                     result: Ok(()),
                 });
-                o.send(ConnEvent::SessionOpened { transfers });
+                o.send(ConnEvent::SessionOpened);
             });
         }
         // Ordered through `preview_task`.

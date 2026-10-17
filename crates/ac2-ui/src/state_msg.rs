@@ -131,9 +131,6 @@ pub enum Overlay {
     Settings(Box<Settings>),
     /// A pane's measurement list, opened from its title chip.
     PaneMenu(PaneMenu),
-    /// After a session opened with a reference and mics on a daemon without measurements:
-    /// one key creates a transfer measurement per mic.
-    Offer(Box<Offer>),
     /// The confirmation before a new SPL log.
     NewLog(Box<NewLogPrompt>),
     /// The confirmation before the selected measurement or stored trace is deleted (or,
@@ -233,12 +230,6 @@ pub struct NewLogPrompt {
     pub meas: MeasId,
     pub meter: String,
     pub confirm: ac2_scene::leq::NewLogConfirm,
-}
-
-/// Transfer measurements offered after the session dialog opened a session.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Offer {
-    pub transfers: Vec<ac2_proto::model::MeasConfig>,
 }
 
 /// Seconds between renewals of the device preview (the daemon closes one not renewed
@@ -398,8 +389,6 @@ pub enum Msg {
     Form(FormMsg),
     /// Mouse on the session dialog.
     Session(SessionMsg),
-    /// Mouse on the measurement offer: `true` creates, `false` skips.
-    Offer(bool),
     /// Mouse on the new SPL log confirmation: `true` starts it, `false` keeps the log.
     NewLog(bool),
     /// Mouse on the delete confirmation: `true` deletes, `false` keeps it.

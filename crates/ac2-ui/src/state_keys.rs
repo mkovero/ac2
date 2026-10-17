@@ -33,8 +33,6 @@ impl AppState {
             Overlay::Settings(_) => self.settings_backspace(out),
             Overlay::Sessions(_) => self.sessions_backspace(),
             Overlay::Delete(_) => self.delete(true, out),
-            // The safe answer, as N.
-            Overlay::Offer(_) => self.offer(false, out),
             Overlay::NewLog(_) => self.new_log(false, out),
             Overlay::Prompt(p) => {
                 p.text.pop();
@@ -143,14 +141,6 @@ impl AppState {
             }
             Overlay::Sessions(_) => {
                 self.sessions_key(chord, swallow, out);
-                return;
-            }
-            Overlay::Offer(_) => {
-                if chord.key == Key::Enter {
-                    self.offer(true, out);
-                } else if chord.key == Key::N {
-                    self.offer(false, out);
-                }
                 return;
             }
             Overlay::NewLog(_) => {

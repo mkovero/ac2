@@ -2,7 +2,7 @@
 //! steps through the measurements.
 
 use super::{hint_line, new_spectrum, spectrum_panes};
-use crate::embedded::harness::{Driver, NAME, R, measure_from_empty};
+use crate::embedded::harness::{Driver, NAME, R, first_transfer, measure_from_empty};
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::MeasId;
@@ -32,11 +32,7 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
             .is_some_and(|x| x.session.device_info().is_some())
     })?;
     d.key("Enter");
-    d.until("the measurement offer", |s| {
-        matches!(s.overlay, Overlay::Offer(_))
-    })?;
-    d.key("Enter");
-    d.until("the measurement", |s| s.selected_meas().is_some())?;
+    first_transfer(&mut d)?;
     assert_eq!(hint_line(&d.st), tf);
     // Each pane its own line.
     d.key("Alt+2");
@@ -107,11 +103,7 @@ fn the_focused_pane_takes_any_pick_from_an_empty_daemon() -> R {
             .is_some_and(|x| x.session.device_info().is_some())
     })?;
     d.key("Enter");
-    d.until("the measurement offer", |s| {
-        matches!(s.overlay, Overlay::Offer(_))
-    })?;
-    d.key("Enter");
-    d.until("the measurement", |s| s.selected_meas().is_some())?;
+    first_transfer(&mut d)?;
     let tf = d.st.selected_meas().map(|m| m.id).ok_or("transfer")?;
     d.key("Ctrl+K");
     d.send(Msg::Text("new spectrum".into()));
@@ -151,9 +143,10 @@ fn the_focused_pane_takes_any_pick_from_an_empty_daemon() -> R {
     );
     assert_eq!(d.st.layout.focus, f);
     assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(sp));
-    // Tab on to the transfer measurement: the same pane turns back.
+    // Tab on to the transfer measurement: its row brings its own panes (as its form laid
+    // them out), the focus on its transfer pane.
     for _ in 0..d.st.tree_meas_order().len() {
-        if d.st.layout.kind(f) == Transfer {
+        if d.st.selected == Some(tf) {
             break;
         }
         d.key("Tab");
@@ -162,7 +155,8 @@ fn the_focused_pane_takes_any_pick_from_an_empty_daemon() -> R {
         crate::common::visible(&d.st),
         [Transfer, Spectrum, Transfer, Spl]
     );
-    assert_eq!(d.st.layout.focus, f);
+    let f = d.st.layout.focus;
+    assert_eq!(d.st.layout.kind(f), Transfer);
     assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(tf));
     drop(d);
     drop(daemon);

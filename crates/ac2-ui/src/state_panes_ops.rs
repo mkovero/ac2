@@ -236,8 +236,11 @@ impl AppState {
         let least = t.panes().iter().map(|x| x.2).fold(f32::INFINITY, f32::min);
         let total: f32 = t.panes().iter().map(|x| x.2).sum();
         if rect.h * least / total < MIN_RATIO * self.pane_area.1 {
+            let close = self
+                .keys
+                .reach(CommandId::ClosePane, CommandId::ClosePane.title());
             self.warn(format!(
-                "the pane is too small for the {}: Q closes one to make room",
+                "the pane is too small for the {}: {close} closes one to make room",
                 t.label()
             ));
             return false;
@@ -314,7 +317,12 @@ impl AppState {
     /// all panes.
     pub(super) fn split_pane(&mut self) {
         if self.split_focused_pane().is_none() {
-            self.warn("the pane is too small to split: Q closes one to make room");
+            let close = self
+                .keys
+                .reach(CommandId::ClosePane, CommandId::ClosePane.title());
+            self.warn(format!(
+                "the pane is too small to split: {close} closes one to make room"
+            ));
         }
     }
 
@@ -377,7 +385,10 @@ impl AppState {
     pub(super) fn close_pane(&mut self) {
         let gone = self.layout.focus;
         if !self.layout.close_focused() {
-            self.warn("the last pane stays: Tab puts another measurement in it");
+            let split = self.keys.label(CommandId::SplitPane, Scope::Global);
+            let text =
+                ac2_scene::new_meas::last_pane_stays(split.as_deref(), &self.new_meas_reach());
+            self.warn(text);
             return;
         }
         if matches!(self.overlay, Overlay::PaneMenu(m) if m.pane == gone) {
@@ -420,7 +431,12 @@ impl AppState {
             }
             _ => {
                 self.layout.root = before;
-                self.warn("the panes would be too small turned: Q closes one to make room");
+                let close = self
+                    .keys
+                    .reach(CommandId::ClosePane, CommandId::ClosePane.title());
+                self.warn(format!(
+                    "the panes would be too small turned: {close} closes one to make room"
+                ));
             }
         }
     }
@@ -484,7 +500,15 @@ impl AppState {
                 let id = *id;
                 self.focus_pane(id);
             }
-            None => self.warn(format!("no pane {n}: {} on screen (N splits)", panes.len())),
+            None => {
+                let split = self
+                    .keys
+                    .reach(CommandId::SplitPane, CommandId::SplitPane.title());
+                self.warn(format!(
+                    "no pane {n}: {} on screen ({split} splits)",
+                    panes.len()
+                ));
+            }
         }
     }
 

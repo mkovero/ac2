@@ -140,7 +140,7 @@ use types::{dbfs, trace_mic_request};
 mod msg;
 pub use msg::{
     CAL_PAGE, COHERENCE_MASKS, DELAY_FINE_STEP, DelayChoice, FormMsg, HELP_LINE, HELP_PAGE,
-    LEVEL_FLOOR, LegendMsg, LeqMsg, MAX_TOASTS, Msg, NUDGE_S, NewLogPrompt, Notice, Offer, Overlay,
+    LEVEL_FLOOR, LegendMsg, LeqMsg, MAX_TOASTS, Msg, NUDGE_S, NewLogPrompt, Notice, Overlay,
     PAN_OCTAVES, PREVIEW_RENEW_S, Prompt, PromptKind, RECORD_MAX_S, SessionMsg, Toast, ZOOM_FACTOR,
 };
 use msg::{LeqLogSeen, Muted};
@@ -296,6 +296,9 @@ pub struct AppState {
     /// Open the audio setup ([`Self::open_audio_setup`]) once the daemon's state shows no
     /// audio session (an embedded daemon on real audio starts without one).
     pub open_session_when_empty: bool,
+    /// The session dialog's session opened: ask what to measure ([`Self::choose_first`])
+    /// once the daemon's state shows it open.
+    choose_when_open: bool,
     /// The daemon's backends and devices as last listed (channel names for the dialogs).
     pub devices: Option<Vec<ac2_proto::model::BackendInfo>>,
     /// When the device preview was last asked for.
@@ -489,6 +492,7 @@ impl AppState {
             pane_on_create: None,
             pending_stack: None,
             open_session_when_empty: false,
+            choose_when_open: false,
             devices: None,
             preview_sent_s: f64::NEG_INFINITY,
             devices_for: None,
@@ -603,7 +607,6 @@ impl AppState {
             Msg::Conn(e) => self.conn_event(*e, out),
             Msg::Form(m) => self.form_msg(m, out),
             Msg::Session(m) => self.session_msg(m, out),
-            Msg::Offer(create) => self.offer(create, out),
             Msg::NewLog(go) => self.new_log(go, out),
             Msg::Delete(go) => self.delete(go, out),
             Msg::LevelZoom {

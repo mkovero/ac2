@@ -159,6 +159,7 @@ impl AppState {
                         self.open_audio_setup(out);
                     }
                 }
+                self.choose_first();
             }
             ConnEvent::Devices(r) => {
                 if let Ok(d) = &r {
@@ -203,11 +204,9 @@ impl AppState {
                     self.fault(format!("detect loopback: {e}"));
                 }
             }
-            ConnEvent::SessionOpened { transfers } => {
-                let none_yet = self.daemon().is_some_and(|s| s.measurements.is_empty());
-                if none_yet && !transfers.is_empty() && self.overlay == Overlay::None {
-                    self.overlay = Overlay::Offer(Box::new(Offer { transfers }));
-                }
+            ConnEvent::SessionOpened => {
+                self.choose_when_open = true;
+                self.choose_first();
             }
             ConnEvent::LeqBackfill { meas, ask, result } => {
                 self.leq_backfilled(meas, ask, result);

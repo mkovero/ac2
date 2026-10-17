@@ -4,7 +4,7 @@ use super::*;
 
 /// Shift+O: the session dialog lists the backends and the rig's channels by name with their
 /// live meters and roles; the mic is named inline, the loopback detected after a typed
-/// level, Enter opens and one more key creates the transfer measurement.
+/// level, Enter opens and the New measurement chooser asks what to measure.
 #[test]
 fn session_dialog() {
     if !have_gpu("settings_audio_mic_named") {
@@ -29,12 +29,12 @@ fn session_dialog() {
                 && fake.lock().preview.is_some()
         },
     );
-    // Audio & I/O on the input device; ↓ past output device, rate, buffer and input 1 to
-    // input 2, N names its mic.
+    // Audio & I/O on the input device; ↓ past output device and input 1 to input 2, N names
+    // its mic.
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "settings_audio");
-    for _ in 0..5 {
+    for _ in 0..3 {
         h.key_press(Key::ArrowDown);
     }
     h.key_press(Key::N);
@@ -80,8 +80,8 @@ fn session_dialog() {
     snapshot(&mut h, "settings_detected");
 
     h.key_press(Key::Enter);
-    step_until(&mut h, "session open, offer shown", |a| {
-        a.state.open_session().is_some() && matches!(a.state.overlay, Overlay::Offer(_))
+    step_until(&mut h, "session open, the New measurement chooser", |a| {
+        a.state.open_session().is_some() && new_meas_chooser(a)
     });
     assert_eq!(fake.executions("session.open"), 1);
     assert_eq!(fake.executions("session.inputs"), 1);
@@ -89,13 +89,23 @@ fn session_dialog() {
         fake.lock().preview.is_none(),
         "the session replaced the preview"
     );
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "session_new_measurement");
+    // Enter on Transfer (highlighted on the transfer pane), Enter on its form.
+    h.key_press(Key::Enter);
+    step_until(
+        &mut h,
+        "the transfer form",
+        |a| matches!(&a.state.overlay, Overlay::Form(f) if f.kind == ac2_ui::forms::FormKind::Transfer),
+    );
     h.key_press(Key::Enter);
     // Created, then started by a second command: the picture shows it running.
     step_until(&mut h, "measurement created and running", |a| {
         a.state
             .measurements()
             .iter()
-            .any(|m| m.config.name == "Reference → M30 FOH" && m.running)
+            .any(|m| m.config.name == "TF 1" && m.running)
     });
 
     // The new-measurement dialog picks inputs by name, with the session's meters.

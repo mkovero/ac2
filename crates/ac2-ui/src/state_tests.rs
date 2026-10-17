@@ -662,14 +662,9 @@ fn created(r: &[Request]) -> Option<&MeasConfig> {
     })
 }
 
-fn opened(r: &[Request]) -> Option<(&SessionConfig, &[InputSetup], &[MeasConfig])> {
+fn opened(r: &[Request]) -> Option<(&SessionConfig, &[InputSetup])> {
     r.iter().find_map(|r| match r {
-        Request::OpenSession {
-            config,
-            inputs,
-            transfers,
-            ..
-        } => Some((config, inputs.as_slice(), transfers.as_slice())),
+        Request::OpenSession { config, inputs, .. } => Some((config, inputs.as_slice())),
         _ => None,
     })
 }

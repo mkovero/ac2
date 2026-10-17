@@ -1,6 +1,6 @@
 //! Mic curves and electrical/acoustic calibration from the app.
 
-use super::harness::{DEADLINE, Driver, NAME, R, measure_from_empty, scene_texts};
+use super::harness::{DEADLINE, Driver, NAME, R, first_transfer, measure_from_empty, scene_texts};
 use ac2_client::ClientConfig;
 use ac2_proto::FrameData;
 use ac2_proto::model::MeasKind;
@@ -48,7 +48,7 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
             .is_some_and(|x| x.session.device_info().is_some())
     })?;
     // The rig's mic is on input 2, below the device rows: N names it.
-    for _ in 0..5 {
+    for _ in 0..3 {
         d.key("ArrowDown");
     }
     d.key("N");
@@ -57,15 +57,9 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     d.key("Enter");
     d.key("Enter");
     d.until("the session", |s| s.open_session().is_some())?;
-    d.until("the measurement offer", |s| {
-        matches!(s.overlay, Overlay::Offer(_))
-    })?;
-    d.key("Enter");
-    d.until("the measurement, running and selected", |s| {
-        s.selected_meas().is_some_and(|m| m.running)
-    })?;
+    first_transfer(&mut d)?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
-    assert_eq!(m.config.name, "Reference \u{2192} MM1 34804");
+    assert_eq!(m.config.name, "TF 1");
     // No curve stored yet: the label and the caption say so instead of nothing.
     d.until("the input labelled", |s| {
         meter_label(s, 1) == "MM1 34804 · no curve stored · mic (in 2)"

@@ -465,15 +465,10 @@ fn up_down_walk_device_channels_then_the_max_level() {
         settings(&t).session.outputs.len(),
     );
     assert!(ni > 0 && no > 0);
-    let mut want = vec![
-        Row::Backend,
-        Row::Device,
-        Row::OutputDevice,
-        Row::Rate,
-        Row::Buffer,
-    ];
+    let mut want = vec![Row::Backend, Row::Device, Row::OutputDevice];
     want.extend((0..ni).map(Row::Input));
     want.extend((0..no).map(Row::Output));
+    want.extend([Row::Rate, Row::Buffer]);
     assert_eq!(rows, want);
     // Shift+O lands on the input device.
     assert_eq!(settings(&t).session.focus, Row::Device);
@@ -491,13 +486,13 @@ fn up_down_walk_device_channels_then_the_max_level() {
     }
     assert_eq!(walked, want);
     t.key("ArrowDown");
-    assert!(at(&t).0, "the max level row after the last output");
+    assert!(at(&t).0, "the max level row after the buffer");
     t.key("ArrowDown");
     assert_eq!(at(&t), (false, Row::Backend), "wraps to the backend");
     t.key("ArrowUp");
     assert!(at(&t).0, "↑ from the backend: the max level row");
     t.key("ArrowUp");
-    assert_eq!(at(&t), (false, Row::Output(no - 1)));
+    assert_eq!(at(&t), (false, Row::Buffer));
     assert_eq!(page(&t), Page::AudioIo);
 }
 
