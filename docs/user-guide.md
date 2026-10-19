@@ -167,8 +167,8 @@ keys it refused lately (fingerprint, address, how often, when).
 Nothing on this page is a channel number to type. Rows run in the order you decide them:
 device (backend, input and output device), inputs, outputs, the reference (loopback), sample
 rate and buffer, then the system max level; **↑/↓** walk them and wrap; **Enter** (or the
-*Open session* button) opens, or reopens, the session as shown; **Esc** closes without
-opening.
+*Open session* button, kept in view at the foot of the page — *Open new session* after
+Sessions › New) opens, or reopens, the session as shown; **Esc** closes without opening.
 
 - **Backend** (**←/→**): every backend the daemon offers; one it cannot use now says why and
   what to do (*PipeWire is running but its JACK library isn't in use: install pipewire-jack …

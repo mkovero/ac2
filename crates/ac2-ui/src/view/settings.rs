@@ -174,7 +174,9 @@ fn page(
             .color(ch.dim),
     );
     ui.add_space(8.0);
-    let footer_h = 44.0;
+    // Audio & I/O ends in what Enter does, kept in view below the scrolling settings.
+    let opens = s.page == Page::AudioIo && s.session.backends.is_some();
+    let footer_h = if opens { 44.0 + 46.0 } else { 44.0 };
     egui::ScrollArea::both()
         .id_salt(("ac2-settings-page", s.page.index()))
         .max_height((body.height() - 70.0 - footer_h).max(120.0))
@@ -218,6 +220,13 @@ fn page(
                 super::rig::rig_page(ui, s, &rig, &meters, &theme, ch, msg);
             }
         });
+    if opens {
+        let mut m = None;
+        super::session::open_row(ui, &s.session, s.new_session, ch, &mut m);
+        if let Some(m) = m {
+            *msg = Some(Msg::Session(m));
+        }
+    }
     ui.separator();
     ui.label(RichText::new(s.page.keys()).small().color(ch.dim));
 }
@@ -304,6 +313,10 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
     }
     if let Some(e) = &s.ceiling.error {
         ui.label(RichText::new(e).color(ch.fault));
+    }
+    // The max level is the page's last section: focused, it and its prompt stay in view.
+    if focused {
+        ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
     }
 }
 

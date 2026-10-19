@@ -80,9 +80,17 @@ fn session_dialog() {
     snapshot(&mut h, "settings_detected");
 
     h.key_press(Key::Enter);
-    step_until(&mut h, "session open, the New measurement chooser", |a| {
-        a.state.open_session().is_some() && new_meas_chooser(a)
-    });
+    // The chooser opens on the session's answer, before its first level frame: the
+    // snapshot waits for the session's two meters too.
+    step_until(
+        &mut h,
+        "session open, the New measurement chooser, its meters",
+        |a| {
+            a.state.open_session().is_some()
+                && new_meas_chooser(a)
+                && a.state.input_meters().len() == 2
+        },
+    );
     assert_eq!(fake.executions("session.open"), 1);
     assert_eq!(fake.executions("session.inputs"), 1);
     assert!(

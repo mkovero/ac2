@@ -207,9 +207,23 @@ pub(super) fn channels_section(
     rate_rows(ui, d, focus, ch, msg);
     ui.add_space(8.0);
     notices(ui, d, ch);
-    ui.add_space(4.0);
+}
+
+/// The page's last row: what Enter does here, set apart from the settings above it.
+pub(super) fn open_row(
+    ui: &mut egui::Ui,
+    d: &SessionDialog,
+    new_session: bool,
+    ch: &Chrome,
+    msg: &mut Option<SessionMsg>,
+) {
+    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(8.0);
     ui.horizontal(|ui| {
-        let open = if d.is_open_device() {
+        let open = if new_session {
+            "Open new session  Enter"
+        } else if d.is_open_device() {
             "Reopen session  Enter"
         } else {
             "Open session  Enter"
