@@ -1,4 +1,4 @@
-//! Command palette: fuzzy matching over every command's title and name.
+//! Command palette: fuzzy matching over every command's title, name and hidden keywords.
 
 use crate::keys::{CommandId, Keymap, Scope};
 
@@ -90,7 +90,12 @@ pub struct Entry {
     pub positions: Vec<usize>,
 }
 
-/// Commands matching `query`, best first; all commands in table order for an empty query.
+/// How far a keyword match ranks below the same match on a title: more than the bonus for
+/// a command of the focused pane, so a title hit elsewhere still leads a keyword hit here.
+const KEYWORD_PENALTY: i32 = 10;
+
+/// Commands matching `query` by title, keys.toml name or hidden keyword
+/// ([`CommandId::keywords`]), best first; all commands in table order for an empty query.
 pub fn search(query: &str, keymap: &Keymap, active: Scope) -> Vec<Entry> {
     let mut rows: Vec<(i32, usize, Entry)> = CommandId::ALL
         .iter()
@@ -103,10 +108,21 @@ pub fn search(query: &str, keymap: &Keymap, active: Scope) -> Vec<Entry> {
                 score: m.score - 5,
                 positions: vec![],
             });
-            let m = match (by_title, by_name) {
-                (Some(a), Some(b)) => Some(if b.score > a.score { b } else { a }),
-                (a, b) => a.or(b),
-            }?;
+            // Hidden keywords match too, a little below the title so a title hit leads, and
+            // never highlight: they are not on the row.
+            let by_keyword = c
+                .keywords()
+                .iter()
+                .filter_map(|k| fuzzy(query, k))
+                .map(|m| Match {
+                    score: m.score - KEYWORD_PENALTY,
+                    positions: vec![],
+                })
+                .max_by_key(|m| m.score);
+            let m = [by_title, by_name, by_keyword]
+                .into_iter()
+                .flatten()
+                .reduce(|a, b| if b.score > a.score { b } else { a })?;
             // Commands that act in the focused pane rank above the others.
             let here = c.scopes().contains(&active) || c.scopes().contains(&Scope::Global);
             Some((
@@ -255,6 +271,55 @@ mod tests {
             Some("X (transfer)")
         );
         assert_eq!(row(CommandId::Reconnect).key, None);
+    }
+
+    /// Words the terse titles dropped still find their command, from any pane.
+    #[test]
+    fn hidden_keywords_find_the_command() {
+        let k = Keymap::default();
+        for (q, want) in [
+            ("unwrap", CommandId::PhaseView),
+            ("unwrapped", CommandId::PhaseView),
+            ("group delay", CommandId::PhaseView),
+            ("grid", CommandId::PlotChrome),
+            ("polarity", CommandId::Invert),
+            ("coherence", CommandId::CoherenceMask),
+            ("hold", CommandId::PeakHold),
+            ("dip", CommandId::MinMax),
+            ("remove", CommandId::DeleteSelected),
+            ("microphone", CommandId::Calibrations),
+            ("calibration", CommandId::Calibrations),
+            ("thd", CommandId::SweepNew),
+        ] {
+            for active in [Scope::Transfer, Scope::Spectrum, Scope::Spl] {
+                let r = search(q, &k, active);
+                assert_eq!(r.first().map(|e| e.command), Some(want), "{q}: {r:?}");
+            }
+        }
+    }
+
+    /// A keyword is never on the row: the row is the command's title and key, nothing of
+    /// it highlighted when only a keyword matched.
+    #[test]
+    fn keywords_are_not_shown() {
+        let k = Keymap::default();
+        for &c in CommandId::ALL {
+            for &w in c.keywords() {
+                for e in search(w, &k, Scope::Transfer) {
+                    assert_eq!(e.title, e.command.title());
+                    let by_shown =
+                        fuzzy(w, e.title).is_some() || fuzzy(w, e.command.name()).is_some();
+                    if !by_shown {
+                        assert!(e.positions.is_empty(), "{w}: {e:?}");
+                    }
+                }
+            }
+        }
+        let r = search("unwrap", &k, Scope::Transfer);
+        let top = r.first().expect("a row");
+        assert_eq!(top.title, "Phase view");
+        assert!(top.positions.is_empty());
+        assert!(!top.title.to_lowercase().contains("unwrap"));
     }
 
     #[test]

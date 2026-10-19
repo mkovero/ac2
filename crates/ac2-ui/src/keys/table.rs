@@ -299,7 +299,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::StartStop, "start/stop", 70),
-                    hint(C::PeakHold, "peak hold/track", 75),
+                    hint(C::PeakHold, "peaks", 75),
                     // The spectrum style (B) is in the help and the palette: the line
                     // holds eight.
                     hint(C::NextView, "view", 65),

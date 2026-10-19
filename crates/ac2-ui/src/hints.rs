@@ -123,7 +123,7 @@ mod tests {
             pc(Scope::Spectrum),
             [
                 "S start/stop",
-                "P peak hold/track",
+                "P peaks",
                 "G/Shift+G view",
                 "K smoothing",
                 "Shift+Home fit level",

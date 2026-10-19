@@ -106,7 +106,7 @@ pub enum PeakArg {
     Off,
     /// Each bin's highest level over the live curve.
     Hold,
-    /// The hold, and the live curve's highest peaks marked and listed.
+    /// The live curve's highest peaks marked and listed (no hold line).
     Track,
 }
 
@@ -255,7 +255,7 @@ pub enum MeasCmd {
         /// Spectrum and RTA: how every client draws its curves (the app's B).
         #[arg(long, value_enum)]
         style: Option<StyleArg>,
-        /// Spectrum and RTA: peak hold, peak hold + peak tracking, or neither (the app's P).
+        /// Spectrum and RTA: peak hold, peak tracking, or neither (the app's P).
         #[arg(long, value_enum)]
         peak: Option<PeakArg>,
         /// Spectrum and RTA: spectrograph history shown, seconds: 10, 30, 60 or 120 (the

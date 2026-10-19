@@ -669,7 +669,7 @@ fn palette_titles_are_terse_and_uniform() {
         (C::SplitPane, "Split pane"),
         (C::ClosePane, "Close pane"),
         (C::MaximizePane, "Maximise pane"),
-        (C::PeakHold, "Peak hold"),
+        (C::PeakHold, "Peaks"),
         (C::CoherenceMask, "Coherence mask"),
         (C::PhaseView, "Phase view"),
     ] {

@@ -93,7 +93,7 @@ impl AppState {
     }
 
     /// P: peak hold, then peak tracking, then off (the hold and the tracked peaks are this
-    /// app's, kept while the mode asks for them).
+    /// app's, kept while the mode asks for them, so each hold starts afresh).
     pub(super) fn step_peak_mode(&mut self, out: &mut Vec<Request>) {
         self.edit_display(
             |d| {

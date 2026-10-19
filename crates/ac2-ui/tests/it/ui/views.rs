@@ -959,9 +959,9 @@ fn leq_page_holds_its_scroll_while_the_rig_meters() {
     );
 }
 
-/// P twice on the spectrum pane: peak hold and peak tracking. The rig's tone near 1 kHz gets a
-/// box on the curve and a row in the list under the cursor readout; T to traces only takes
-/// the list (and the cursor) away and leaves the box.
+/// P twice on the spectrum pane: peak hold, then peak tracking, which drops the hold line.
+/// The rig's tone near 1 kHz gets a box on the curve and a row in the list under the cursor
+/// readout; T to traces only takes the list (and the cursor) away and leaves the box.
 #[test]
 fn spectrum_peak_tracking() {
     if !have_gpu("spectrum_peak_tracking") {
@@ -985,6 +985,10 @@ fn spectrum_peak_tracking() {
                 .get(&MeasId(3))
                 .is_some_and(|t| !t.1.peaks().is_empty())
     });
+    assert!(
+        !h.state().state.peaks.contains_key(&MeasId(3)),
+        "tracking keeps no hold"
+    );
     let scene = |h: &Harness<'_, App>| {
         let st = &h.state().state;
         ac2_ui::scenes::spectrum(

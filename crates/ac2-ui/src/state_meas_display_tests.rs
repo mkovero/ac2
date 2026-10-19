@@ -284,3 +284,36 @@ fn c_asks_which_measurement_first() {
         [("Sub", false), ("Sub 2", true)]
     );
 }
+
+/// P steps hold → tracking → off: the hold line is drawn only while the mode holds, tracking
+/// shows the marks alone, and a hold turned on again starts afresh, not from an old one.
+#[test]
+fn tracking_draws_no_hold_and_a_new_hold_starts_afresh() {
+    use ac2_proto::model::PeakMode;
+    let mut t = on_sub(two_spectra(false));
+    let hold = |t: &T| -> Option<Vec<f32>> {
+        let p = t.pane(PaneKind::Spectrum);
+        crate::scenes::with_spectrum(&t.st, p, &Theme::dark(), now(), |traces, _, _| {
+            traces
+                .iter()
+                .find(|c| c.name == "Sub")
+                .and_then(|c| c.peak.map(<[f32]>::to_vec))
+        })
+    };
+    let mode = |t: &T| t.st.meas(MeasId(2)).map(|m| t.st.display_of(m).peak);
+    t.key_answered("P");
+    assert_eq!(mode(&t), Some(PeakMode::Hold));
+    spectra(&mut t, &[(2, -40.0)]);
+    assert_eq!(hold(&t), Some(vec![-40.0; 5]));
+    t.key_answered("P");
+    assert_eq!(mode(&t), Some(PeakMode::Track));
+    spectra(&mut t, &[(2, -60.0)]);
+    assert_eq!(hold(&t), None, "tracking draws no hold line");
+    assert!(!t.st.peaks.contains_key(&MeasId(2)), "nor keeps one");
+    t.key_answered("P");
+    assert_eq!(mode(&t), Some(PeakMode::Off));
+    t.key_answered("P");
+    assert_eq!(mode(&t), Some(PeakMode::Hold));
+    spectra(&mut t, &[(2, -60.0)]);
+    assert_eq!(hold(&t), Some(vec![-60.0; 5]), "a fresh hold");
+}

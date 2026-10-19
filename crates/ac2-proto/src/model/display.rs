@@ -92,12 +92,13 @@ pub enum PeakMode {
     Off,
     /// The highest level each column has reached.
     Hold,
-    /// The peak hold, and the highest peaks of the live curve marked and listed.
+    /// The highest peaks of the live curve marked and listed, without the hold: the marks
+    /// and the list are the statement, a hold line under them would only crowd it.
     Track,
 }
 
 impl PeakMode {
-    /// P: off → hold → hold + tracking → off.
+    /// P: off → hold → tracking → off.
     pub fn next(self) -> Self {
         match self {
             Self::Off => Self::Hold,
@@ -106,9 +107,9 @@ impl PeakMode {
         }
     }
 
-    /// The peak-hold line is drawn.
+    /// The peak-hold line is kept and drawn.
     pub fn holds(self) -> bool {
-        self != Self::Off
+        self == Self::Hold
     }
 
     /// Peaks are marked and listed.
@@ -119,9 +120,9 @@ impl PeakMode {
     /// What toasts and the CLI call it.
     pub fn name(self) -> &'static str {
         match self {
-            Self::Off => "peak hold off",
-            Self::Hold => "peak hold",
-            Self::Track => "peak hold + peak tracking",
+            Self::Off => "peaks off",
+            Self::Hold => "peaks: hold",
+            Self::Track => "peaks: tracking",
         }
     }
 }

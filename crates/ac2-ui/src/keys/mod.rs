@@ -18,6 +18,7 @@ use serde::Deserialize;
 
 mod chord;
 mod keymap;
+mod keywords;
 mod table;
 #[cfg(test)]
 mod tests;
@@ -285,7 +286,7 @@ commands! {
     Smooth3 => "smooth_3", "Smoothing 1/3 oct", [Transfer, Spectrum];
 
     SpectrumStyle => "spectrum_style", "Spectrum style", [Spectrum];
-    PeakHold => "peak_hold", "Peak hold", [Spectrum];
+    PeakHold => "peak_hold", "Peaks", [Spectrum];
     SpectrographSpan => "spectrograph_span", "Spectrograph span", [Spectrum];
     SpectrographColours => "spectrograph_colours", "Next colour map", [Spectrum];
     SpectrographViridis => "spectrograph_colours_viridis", "Colour map viridis", [Spectrum];

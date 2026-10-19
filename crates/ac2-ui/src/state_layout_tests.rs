@@ -43,7 +43,7 @@ fn key_hints_follow_the_focused_pane() {
     t.key("Alt+2");
     assert_eq!(hint_texts(&t, PaneKind::Transfer), None);
     let sp = hint_texts(&t, PaneKind::Spectrum).expect("spectrum focused");
-    assert!(sp.contains(&"P peak hold/track".to_owned()), "{sp:?}");
+    assert!(sp.contains(&"P peaks".to_owned()), "{sp:?}");
     t.key("Alt+3");
     let ir = hints_of(&t, t.ir_pane()).expect("IR view focused");
     assert!(ir.contains(&"G/Shift+G view".to_owned()), "{ir:?}");

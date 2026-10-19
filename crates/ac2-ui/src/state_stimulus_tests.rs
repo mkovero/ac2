@@ -278,16 +278,16 @@ fn opening_key_is_not_typed_into_the_prompt() {
 }
 
 /// P on the spectrum pane steps the focused pane's measurement off → peak hold → peak
-/// hold + tracking → off, the toast naming each step.
+/// tracking → off, the toast naming each step.
 #[test]
 fn p_cycles_peak_hold_and_tracking() {
     use ac2_proto::model::PeakMode;
     let mut t = T::new();
     t.key("Alt+2");
     for (want, toast) in [
-        (PeakMode::Hold, "Sub: peak hold"),
-        (PeakMode::Track, "Sub: peak hold + peak tracking"),
-        (PeakMode::Off, "Sub: peak hold off"),
+        (PeakMode::Hold, "Sub: peaks: hold"),
+        (PeakMode::Track, "Sub: peaks: tracking"),
+        (PeakMode::Off, "Sub: peaks off"),
     ] {
         t.key_answered("P");
         let sub = t.st.meas(MeasId(2)).expect("Sub");
@@ -332,7 +332,7 @@ fn keys_follow_the_focused_pane() {
                 meas: MeasId(2),
                 ..
             },
-            "Sub: peak hold"
+            "Sub: peaks: hold"
         ))
     ));
     // X means nothing there.

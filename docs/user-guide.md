@@ -708,12 +708,14 @@ The pane's own view (**G**) and plot chrome (**T**) stay the pane's: they are ab
 on this screen, and two panes on one measurement may well want a spectrograph in one and the
 plain spectrum in the other.
 
-#### Peak hold and peak tracking
+#### Peaks: hold and tracking
 
-**P** steps the spectrum pane's measurement through **off → peak hold → peak hold + peak
-tracking → off** (`ac2 meas set <meas> --peak off|hold|track`). The mode is the
-measurement's; the hold and the tracked peaks are each app's own, started when the mode
-asks for them. Tracking marks the five highest peaks of the pane's own live curve (the first live curve
+**P** (palette *Peaks*) steps the spectrum pane's measurement through **off → peak hold →
+peak tracking → off** (`ac2 meas set <meas> --peak off|hold|track`), the toast naming the
+step (`Sub: peaks: hold`). The mode is the measurement's; the hold and the tracked peaks
+are each app's own, started when the mode asks for them, so a hold turned on again starts
+afresh. Tracking draws no hold line: the boxes and the list say where the peaks are, and a
+hold line under them would only crowd them. Tracking marks the five highest peaks of the pane's own live curve (the first live curve
 when the pane's measurement has none) with a small box on the curve and lists them under
 the cursor readout, loudest first: `1  1.00 kHz  −32.0 dBFS (band)`, the value's
 quantity in parentheses as the cursor readout gives it. One curve is tracked, not
@@ -918,7 +920,7 @@ the pane's own) and lists them on a plate in a bottom corner of the magnitude vi
 of the legend and the cursor values: `max` and `min`, each row rank, frequency and dB. It
 reads the magnitude as drawn: smoothed, with its offset, without coherence-blanked or
 invalid columns. Peaks and dips follow the spectrum's rules (6 dB prominence, 1/6 octave
-merge, marks that do not hop; see [Peak hold and peak tracking](#peak-hold-and-peak-tracking)).
+merge, marks that do not hop; see [Peaks: hold and tracking](#peaks-hold-and-tracking)).
 When four or more neighbouring dips are evenly spaced on a linear axis (within 10 %), as the
 notches of a comb are (a copy of the sound arriving `τ` later cancels every `1/τ` Hz), the
 list ends with the spacing and the delay it implies: `comb Δf 1.00 kHz · 1.00 ms`. An
@@ -2457,7 +2459,10 @@ Everything in the app is reachable from the keyboard.
 - **H** (or **F1**) shows the keys that work now: the focused pane's first, then the global
   ones grouped (stimulus; measurements, traces and slots; zoom, axes and cursor; panes and
   window; dialogs and app). The full table is the [keyboard map](#keyboard-map).
-- **Ctrl+K** opens the command palette: every command by name, with its key.
+- **Ctrl+K** opens the command palette: every command by name, with its key. Typing finds
+  a command by its title, its `keys.toml` name or the words a terse title leaves out
+  (`unwrap` finds *Phase view*, `grid` *Plot chrome*, `polarity` *Invert polarity*); those
+  words are matched, never shown.
 - Choices made once and left (key hints, Leq layout and history strip, spectrograph
   history, sweep dB / %, coherence placement) have no key: they are rows of Settings ›
   Display and palette commands.
@@ -2673,7 +2678,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `K` | Smoothing coarser | `smooth_coarser` |
 | `Shift+K` | Smoothing finer | `smooth_finer` |
 | `B` | Spectrum style | `spectrum_style` |
-| `P` | Peak hold | `peak_hold` |
+| `P` | Peaks | `peak_hold` |
 | `Shift+B` | Spectrograph span | `spectrograph_span` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
@@ -2796,7 +2801,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Pane | Hint line |
 |---|---|
 | Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` min/max · `K` smoothing · `H` all keys |
-| Spectrum / RTA | `S` start/stop · `P` peak hold/track · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
+| Spectrum / RTA | `S` start/stop · `P` peaks · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next · `Q` close pane · `W` maximise · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
