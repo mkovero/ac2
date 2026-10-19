@@ -105,7 +105,7 @@ fn session_dialog() {
         a.state
             .measurements()
             .iter()
-            .any(|m| m.config.name == "TF 1" && m.running)
+            .any(|m| m.config.name == "Reference → M30 FOH" && m.running)
     });
 
     // The new-measurement dialog picks inputs by name, with the session's meters.

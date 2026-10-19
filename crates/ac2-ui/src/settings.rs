@@ -43,6 +43,8 @@ pub const THIS_APP: &str = "this app";
 pub const THE_RIG: &str = "the rig — all clients";
 /// The page with the audio device, the channels and the max level, as every text names it.
 pub const AUDIO_IO: &str = "Audio & I/O";
+/// The Audio & I/O page's heading when the Sessions dialog's New opened it.
+pub const NEW_SESSION_AUDIO: &str = "New session — audio";
 
 /// A page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -566,6 +568,8 @@ pub struct Settings {
     /// Opened for channel rows before the device's rows arrived: the focus goes to them
     /// once they do.
     pub focus_want: Option<FocusWant>,
+    /// Opened by the Sessions dialog's New: the Audio & I/O page says it starts a new session.
+    pub new_session: bool,
 }
 
 /// Channel rows a command opened the Audio & I/O page for.
@@ -591,6 +595,7 @@ impl Settings {
             connection: ConnectionPage::default(),
             rig: RigPage::default(),
             focus_want: None,
+            new_session: false,
         };
         s.show(page);
         s
@@ -636,6 +641,16 @@ impl Settings {
     /// Shows `page`.
     pub fn show(&mut self, page: Page) {
         self.page = page;
+    }
+
+    /// The shown page's heading: its title, or on Audio & I/O after the Sessions dialog's
+    /// New, that it opens a new session.
+    pub fn heading(&self) -> &'static str {
+        if self.new_session && self.page == Page::AudioIo {
+            NEW_SESSION_AUDIO
+        } else {
+            self.page.title()
+        }
     }
 
     /// Whether a typed edit or text row owns the keys that otherwise act on the page.

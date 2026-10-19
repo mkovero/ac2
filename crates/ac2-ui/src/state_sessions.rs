@@ -121,6 +121,17 @@ impl AppState {
         out.push(Request::SessionList);
     }
 
+    /// With no audio session open, a command that needs one opens the Sessions dialog
+    /// instead (its New leads to the audio setup, then the New measurement chooser); `true`
+    /// when it did.
+    pub(super) fn sessions_first(&mut self, out: &mut Vec<Request>) -> bool {
+        if !self.connected() || self.daemon().is_none() || self.open_session().is_some() {
+            return false;
+        }
+        self.open_sessions(Page::Main, out);
+        true
+    }
+
     /// The rows of the first page as shown now.
     pub fn sessions_rows(&self, client_now: WallNs) -> Vec<crate::sessions::MainRow> {
         self.sessions_dialog().map_or_else(Vec::new, |d| {
@@ -554,6 +565,9 @@ impl AppState {
                     // The new session picks its interface and channels; an opened one keeps
                     // the audio it finds.
                     self.open_audio_setup(out);
+                    if let Overlay::Settings(s) = &mut self.overlay {
+                        s.new_session = true;
+                    }
                 }
             }
             Some(f) => self.session_failed(f),

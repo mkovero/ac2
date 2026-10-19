@@ -293,8 +293,8 @@ pub struct AppState {
     /// The name of a sweep, spectrum, RTA or SPL meter submitted from its form: its
     /// creation brings up a pane of its kind for it.
     pane_on_create: Option<String>,
-    /// Open the audio setup ([`Self::open_audio_setup`]) once the daemon's state shows no
-    /// audio session (an embedded daemon on real audio starts without one).
+    /// Open the Sessions dialog once the daemon's state shows no audio session (an embedded
+    /// daemon on real audio starts without one): its New leads on to the audio setup.
     pub open_session_when_empty: bool,
     /// The session dialog's session opened: ask what to measure ([`Self::choose_first`])
     /// once the daemon's state shows it open.

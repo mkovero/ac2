@@ -59,7 +59,7 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     d.until("the session", |s| s.open_session().is_some())?;
     first_transfer(&mut d)?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
-    assert_eq!(m.config.name, "TF 1");
+    assert_eq!(m.config.name, "Reference → MM1 34804");
     // No curve stored yet: the label and the caption say so instead of nothing.
     d.until("the input labelled", |s| {
         meter_label(s, 1) == "MM1 34804 · no curve stored · mic (in 2)"

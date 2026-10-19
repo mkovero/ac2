@@ -134,23 +134,78 @@ fn enter_opens_the_kinds_form_and_a_refused_kind_stays_listed() {
     assert!(matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::Math));
 }
 
+/// From an empty daemon: every command that makes a measurement opens the Sessions dialog
+/// rather than a chooser that could only refuse; its New opens the audio setup, headed as a
+/// new session, and the opened session asks what to measure.
 #[test]
-fn without_a_session_the_kinds_say_how_to_open_one() {
+fn without_a_session_new_measurement_goes_through_the_sessions_dialog() {
     let mut t = T::new();
     t.conn(mirror(no_session_state()));
+    for c in [
+        CommandId::NewMeasurement,
+        CommandId::NewTransfer,
+        CommandId::NewSpectrum,
+        CommandId::NewRta,
+        CommandId::NewSpl,
+        CommandId::SweepNew,
+    ] {
+        let r = t.st.update(Msg::Command(c), &t.keys);
+        assert!(
+            matches!(r.as_slice(), [Request::SessionList]),
+            "{c:?}: {r:?}"
+        );
+        assert!(
+            t.st.sessions_dialog().is_some(),
+            "{c:?}: {:?}",
+            t.st.overlay
+        );
+        t.key("Escape");
+        assert_eq!(t.st.overlay, Overlay::None);
+    }
     t.key("Ctrl+M");
-    let c = chooser(&t).clone();
-    let hint = open_session_hint(&t.keys);
-    assert_eq!(
-        c.choices[1].blocked.as_deref(),
-        Some(format!("no audio session to measure: {hint}").as_str())
+    let i =
+        t.st.sessions_rows(WallNs(10))
+            .iter()
+            .position(|r| r.title == "New session")
+            .expect("New session row");
+    let r = t.st.update(Msg::Sessions(SessionsMsg::Row(i)), &t.keys);
+    assert!(
+        matches!(r.as_slice(), [Request::Sessions(j)]
+            if j.steps == [crate::sessions::SessionStep::New { discard: false }]),
+        "{r:?}"
     );
-    assert_eq!(
-        c.choices[4].blocked.as_deref(),
-        Some(format!("no audio session to sweep: {hint}").as_str())
-    );
-    t.key("Enter");
-    assert!(matches!(t.st.overlay, Overlay::Choose(_)));
+    t.conn(ConnEvent::Sessions(Box::new(
+        crate::sessions::SessionOutcome {
+            done: vec![crate::sessions::SessionDone::New],
+            failed: None,
+        },
+    )));
+    let s = t.st.overlay.settings().expect("the audio setup");
+    assert_eq!(s.page, crate::settings::Page::AudioIo);
+    assert_eq!(s.heading(), crate::settings::NEW_SESSION_AUDIO);
+    assert_eq!(s.heading(), "New session — audio");
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    let r = t.key("Enter");
+    assert!(opened(&r).is_some(), "{r:?}");
+    t.conn(ConnEvent::SessionOpened);
+    let mut s = daemon_state();
+    s.measurements.clear();
+    t.conn(mirror(s));
+    assert_eq!(chooser(&t).purpose, ChoicePurpose::NewMeasurement);
+    // With the session open, the chooser opens directly again.
+    t.key("Escape");
+    t.key("Ctrl+M");
+    assert_eq!(chooser(&t).purpose, ChoicePurpose::NewMeasurement);
+}
+
+/// Shift+O opens the audio page under its own name: only the Sessions dialog's New heads
+/// it as a new session.
+#[test]
+fn the_audio_page_is_a_new_session_only_after_new() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    let s = t.st.overlay.settings().expect("the audio setup");
+    assert_eq!(s.heading(), crate::settings::AUDIO_IO);
 }
 
 #[test]

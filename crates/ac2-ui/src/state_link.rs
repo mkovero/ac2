@@ -156,7 +156,7 @@ impl AppState {
                 if self.open_session_when_empty && self.connected() && self.daemon().is_some() {
                     self.open_session_when_empty = false;
                     if self.open_session().is_none() && self.overlay == Overlay::None {
-                        self.open_audio_setup(out);
+                        self.open_sessions(crate::sessions::Page::Main, out);
                     }
                 }
                 self.choose_first();

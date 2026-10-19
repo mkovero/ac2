@@ -39,8 +39,8 @@ pub struct AppOptions {
     pub bench_startup: bool,
     /// Print the daemon's device list once it arrives and quit (`--smoke`).
     pub smoke: bool,
-    /// Open the audio setup (Settings › Audio & I/O on the device) once connected if the
-    /// daemon has no audio session (an embedded daemon on real audio starts without one).
+    /// Open the Sessions dialog once connected if the daemon has no audio session (an
+    /// embedded daemon on real audio starts without one); its New leads to the audio setup.
     pub open_session_dialog: bool,
     /// The app hosts its daemon (`Some(true)`: that daemon autosaves): quitting with
     /// unsaved changes asks first.

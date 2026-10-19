@@ -152,9 +152,48 @@ pub fn no_measurements(reach: &str) -> String {
     )
 }
 
+/// A new transfer's default name: what it compares, `Reference → M30 FOH` (`mic`: the
+/// measurement input's name), numbered ` 2`, ` 3` … past the names already `taken`; `TF n`
+/// when the input has no name.
+pub fn transfer_name(mic: Option<&str>, taken: &[&str], n: usize) -> String {
+    let Some(mic) = mic.map(str::trim).filter(|m| !m.is_empty()) else {
+        return format!("TF {n}");
+    };
+    let base = format!("Reference → {mic}");
+    if !taken.contains(&base.as_str()) {
+        return base;
+    }
+    (2..)
+        .map(|i| format!("{base} {i}"))
+        .find(|c| !taken.contains(&c.as_str()))
+        .unwrap_or(base)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_transfer_is_named_after_what_it_compares() {
+        assert_eq!(
+            transfer_name(Some("M30 FOH"), &[], 1),
+            "Reference → M30 FOH"
+        );
+        assert_eq!(
+            transfer_name(Some("M30 FOH"), &["Reference → M30 FOH", "TF 1"], 3),
+            "Reference → M30 FOH 2"
+        );
+        assert_eq!(
+            transfer_name(
+                Some("M30 FOH"),
+                &["Reference → M30 FOH", "Reference → M30 FOH 2"],
+                3
+            ),
+            "Reference → M30 FOH 3"
+        );
+        assert_eq!(transfer_name(None, &[], 2), "TF 2");
+        assert_eq!(transfer_name(Some(" "), &[], 1), "TF 1");
+    }
 
     #[test]
     fn rows_name_every_kind_with_its_key_and_reason() {

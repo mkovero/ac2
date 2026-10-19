@@ -457,6 +457,22 @@ impl AppState {
         self.daemon().and_then(|s| s.session.open.as_ref())
     }
 
+    /// The top bar with no audio session: with nothing kept, the Sessions dialog starts
+    /// one; with measurements kept, the audio is what is missing.
+    pub fn no_audio_line(&self, keymap: &Keymap) -> String {
+        if self.measurements().is_empty() {
+            format!(
+                "no session · {}, then New session",
+                keymap.reach(CommandId::Sessions)
+            )
+        } else {
+            format!(
+                "no audio session · {} opens one",
+                keymap.reach(CommandId::OpenSession)
+            )
+        }
+    }
+
     /// What pane `pane` says when there is nothing to draw yet. A transfer pane: no audio
     /// session, or a session without measurements. Any graph pane: with no stored curve of
     /// its group drawn, that shown traces of a kind it draws wait under Imported. `None` once
@@ -468,7 +484,13 @@ impl AppState {
         }
         let st = self.daemon()?;
         let kind = self.layout.kind(pane);
-        let text = if kind == PaneKind::Transfer && st.session.open.is_none() {
+        let text = if kind == PaneKind::Transfer
+            && st.session.open.is_none()
+            && st.measurements.is_empty()
+        {
+            // Nothing to keep: a new session is the way in.
+            ac2_scene::sessions::no_session_hint(&keymap.reach(CommandId::Sessions))
+        } else if kind == PaneKind::Transfer && st.session.open.is_none() {
             format!("No audio session — {}", open_session_hint(keymap))
         } else if kind == PaneKind::Transfer && st.measurements.is_empty() {
             let reach = [CommandId::NewMeasurement, CommandId::Palette]

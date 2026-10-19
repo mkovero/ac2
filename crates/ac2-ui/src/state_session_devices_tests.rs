@@ -2,32 +2,26 @@
 
 use super::*;
 
-/// A fresh start on a daemon with no audio session lands on Settings › Audio & I/O with the
-/// input device focused, once; a daemon with audio open (a rig, the kiosk) opens nothing.
+/// A fresh start on a daemon with no audio session lands on the Sessions dialog, once: its
+/// New leads to the audio setup; Esc leaves a calm empty app naming the Sessions key. A
+/// daemon with audio open (a rig, the kiosk) opens nothing.
 #[test]
-fn a_daemon_without_audio_opens_the_audio_setup_once() {
+fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
     let mut t = T::disconnected();
     t.st.open_session_when_empty = true;
     connected_to(&mut t, "embedded daemon (coreaudio)");
     let r = t.conn(mirror(no_session_state()));
-    assert!(
-        matches!(r.as_slice(), [Request::Devices, Request::Meters(true)]),
-        "{r:?}"
-    );
-    assert!(dialog(&t).backends.is_none());
-    let s = t.st.overlay.settings().expect("Settings");
-    assert_eq!(s.page, crate::settings::Page::AudioIo);
-    assert_eq!(s.session.focus, Row::Device);
-    t.conn(ConnEvent::Devices(Ok(real_backends())));
-    assert_eq!(
-        dialog(&t).focus,
-        Row::Device,
-        "the device list keeps the focus"
-    );
+    assert!(r.iter().any(|x| matches!(x, Request::SessionList)), "{r:?}");
+    assert!(t.st.sessions_dialog().is_some(), "{:?}", t.st.overlay);
     t.key("Escape");
-    // Only once: the operator closed it.
-    assert!(t.conn(mirror(no_session_state())).is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
+    // Only once: the operator closed it.
+    t.conn(mirror(no_session_state()));
+    assert_eq!(t.st.overlay, Overlay::None);
+    let hint =
+        t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
+            .expect("hint");
+    assert_eq!(hint.text, "No session open — Alt+S, then New session");
 
     // A daemon that already has a session: no dialog; its input meters and the channel
     // names for them.

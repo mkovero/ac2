@@ -97,6 +97,13 @@ adds an entry to `moved()` in `salvage/read.rs` and a fixture under
 
 ## App
 
+- **At start**: an app that connects to a daemon with no audio session open shows the
+  Sessions dialog (not the audio settings). *New session* leads on to Settings › Audio & I/O
+  headed *New session — audio*, then (an empty session) the New measurement chooser; Open…
+  and the recents open the saved session as it is; Esc leaves the empty app with a hint
+  naming the dialog's key. Any command that needs an audio session to make a measurement
+  (New measurement, New transfer/spectrum/RTA/SPL meter, New sweep) opens the dialog the
+  same way while none is open.
 - **Sessions dialog** (Alt+S, the palette, or a click on the session name in the top bar):
   the current session's name and *unsaved changes*; New, Open…, Save, Save as…, Export…,
   Recover previous; **Recents** below, most recent first: the daemon's named sessions

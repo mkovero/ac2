@@ -103,9 +103,20 @@ arrives in bursts on …*) with the device and buffer to change.
 
 In the app's connect dialog, *Simulated rig* starts ready to measure (session open, a
 transfer measurement "demo" running); *This computer's audio* starts with no session.
-Whenever the app connects to a daemon with no audio session open, Settings opens once on
-the Audio & I/O page with the input device focused (a real interface preselected); a daemon
-with audio open (a rig, the Pi kiosk) opens nothing.
+Whenever the app connects to a daemon with no audio session open, the **Sessions** dialog
+(**Alt+S**) opens once; a daemon with audio open (a rig, the Pi kiosk) opens nothing. Its
+*New session* opens Settings on the Audio & I/O page, headed *New session — audio*, with the
+input device focused (a real interface preselected); Enter opens the session, and an empty
+one then offers the New measurement chooser. *Open…* or a recent session opens that one with
+the audio the daemon has. Esc leaves an empty app whose transfer pane says *No session open
+— Alt+S, then New session*. With no audio session, **Ctrl+M** and the *New transfer…*,
+*New spectrum…*, *New RTA…*, *New SPL meter…* and sweep entries open the Sessions dialog too.
+**Shift+O** still opens the Audio & I/O page directly (under its own name), to change the
+audio of the session at hand.
+
+A new transfer is named after what it compares: *Reference → M30 FOH* (the measurement
+input's name), numbered *Reference → M30 FOH 2* … when that name is taken; *TF n* only when
+the input has no name.
 
 ### Settings
 

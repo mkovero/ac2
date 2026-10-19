@@ -163,7 +163,7 @@ fn page(
     // within the page.
     ui.set_max_width(body.width());
     ui.label(
-        RichText::new(s.page.title())
+        RichText::new(s.heading())
             .strong()
             .size(20.0)
             .color(ch.text),

@@ -371,7 +371,7 @@ fn new_measurements_start_and_become_selected() {
     let r = t.key("Enter");
     let c = created(&r).expect("meas.create");
     // One transfer exists, so this is the second; inputs from the session (1 → 2).
-    assert_eq!(c.name, "TF 2");
+    assert_eq!(c.name, "Reference → Input 2");
     assert!(matches!(
         &c.kind,
         MeasKind::Transfer { config } if config.reference_input == 0
@@ -380,7 +380,7 @@ fn new_measurements_start_and_become_selected() {
     ));
     assert_eq!(t.st.overlay, Overlay::None);
     // Created: selected at once, kept while the mirror has not caught up, then confirmed.
-    let m = meas(7, "TF 2", transfer());
+    let m = meas(7, "Reference → Input 2", transfer());
     t.conn(ConnEvent::MeasCreated(Box::new(m.clone())));
     assert_eq!(t.st.selected, Some(MeasId(7)));
     t.conn(mirror(daemon_state()));
@@ -460,12 +460,9 @@ fn new_measurements_start_and_become_selected() {
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
 
-    // No session: nothing to measure, and the toast says how to open one.
+    // No session: nothing to measure on; the Sessions dialog, where one is started.
     t.conn(mirror(no_session_state()));
-    assert!(
-        t.st.update(Msg::Command(CommandId::NewRta), &t.keys)
-            .is_empty()
-    );
-    assert_eq!(t.st.overlay, Overlay::None);
-    assert!(t.last_toast().contains(&open_key()), "{}", t.last_toast());
+    let r = t.st.update(Msg::Command(CommandId::NewRta), &t.keys);
+    assert!(matches!(r.as_slice(), [Request::SessionList]), "{r:?}");
+    assert!(t.st.sessions_dialog().is_some(), "{:?}", t.st.overlay);
 }
