@@ -407,7 +407,7 @@ fn empty_session_hint() {
             .empty_hint(h.state().state.layout.focus, &h.state().keymap)
             .map(|h| h.text)
             .as_deref(),
-        Some("No audio session — press Shift+O (or Ctrl+K → Open audio session)")
+        Some("No session open — Alt+S, then New session")
     );
     h.state_mut().state.toasts.clear();
     h.step();
@@ -434,7 +434,7 @@ fn empty_session_hint() {
         Some(ac2_ui::state::HintPlace::Centre)
     );
     assert!(
-        hint.is_some_and(|h| h.text.starts_with("No audio session")),
+        hint.is_some_and(|h| h.text.starts_with("No session open")),
         "the session hint stays"
     );
     h.state_mut().state.toasts.clear();

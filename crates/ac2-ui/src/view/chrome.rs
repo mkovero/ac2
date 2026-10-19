@@ -225,15 +225,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         }
         (None, _) if st.daemon().is_some() => (
             60,
-            Part::single(
-                ui,
-                dim(format!(
-                    "no audio session · {} opens one",
-                    key_hint(app, CommandId::OpenSession)
-                ))
-                .into(),
-                None,
-            ),
+            Part::single(ui, dim(st.no_audio_line(&app.keymap)).into(), None),
         ),
         (None, _) => (40, Part::single(ui, dim("—".into()).into(), None)),
     };

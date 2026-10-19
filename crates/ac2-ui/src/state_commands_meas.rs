@@ -4,6 +4,25 @@
 use super::*;
 
 impl AppState {
+    /// A new transfer form's default name: the reference → the measurement input's name.
+    fn name_transfer(&self, f: &mut Form) {
+        let mic = f.channel(crate::forms::FieldId::Measurement).and_then(|c| {
+            self.session_input_labels()
+                .into_iter()
+                .find(|(ch, _)| *ch == c)
+                .map(|(_, l)| l)
+        });
+        let ms = self.measurements();
+        let taken: Vec<&str> = ms.iter().map(|m| m.config.name.as_str()).collect();
+        let n = ms
+            .iter()
+            .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
+            .count()
+            + 1;
+        let name = ac2_scene::new_meas::transfer_name(mic.as_deref(), &taken, n);
+        f.set_text(crate::forms::FieldId::Name, &name);
+    }
+
     /// The session, measurement, input and finder [`CommandId`]s [`AppState::command`] routes here.
     pub(super) fn command_meas(&mut self, c: CommandId, keymap: &Keymap, out: &mut Vec<Request>) {
         use CommandId as C;
@@ -94,8 +113,11 @@ impl AppState {
                                     .collect()
                             })
                             .unwrap_or_default();
-                        let f =
+                        let mut f =
                             Form::measurement(kind, Some(&o), &self.measurements(), &names, &mics);
+                        if kind == FormKind::Transfer {
+                            self.name_transfer(&mut f);
+                        }
                         self.overlay = Overlay::Form(Box::new(f));
                         if self.devices.is_none() {
                             // Channel names arrive with the device list.

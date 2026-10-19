@@ -93,6 +93,12 @@ pub fn working_label(
     }
 }
 
+/// What an empty app says with no session open: `reach` is how to open the Sessions
+/// dialog (its key, else its palette entry), whose New starts one.
+pub fn no_session_hint(reach: &str) -> String {
+    format!("No session open — {reach}, then New session")
+}
+
 /// `2 measurements · 5 traces`.
 pub fn counts(measurements: u32, traces: u32) -> String {
     let n = |v: u32, one: &str| {
@@ -408,6 +414,14 @@ mod tests {
 
     fn name(n: &str) -> Option<SessionOrigin> {
         Some(SessionOrigin::Name { name: n.into() })
+    }
+
+    #[test]
+    fn the_empty_app_names_the_key_to_the_sessions_dialog() {
+        assert_eq!(
+            no_session_hint("Alt+S"),
+            "No session open — Alt+S, then New session"
+        );
     }
 
     #[test]

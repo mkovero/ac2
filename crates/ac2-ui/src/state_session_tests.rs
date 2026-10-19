@@ -117,12 +117,30 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
         t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
             .map(|h| h.text)
             .as_deref(),
+        Some("No session open — Alt+S, then New session")
+    );
+    assert_eq!(
+        t.st.no_audio_line(&t.keys),
+        "no session · Alt+S, then New session"
+    );
+    // Measurements kept without audio: the audio is what is missing.
+    let mut s = no_session_state();
+    s.measurements = vec![meas(1, "Main L", transfer())];
+    t.conn(mirror(s));
+    assert_eq!(
+        t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
+            .map(|h| h.text)
+            .as_deref(),
         Some(format!(
             "No audio session — press {} (or {} → Open audio session)",
             open_key(),
             palette_key()
         ))
         .as_deref()
+    );
+    assert_eq!(
+        t.st.no_audio_line(&t.keys),
+        format!("no audio session · {} opens one", open_key())
     );
     let mut s = daemon_state();
     s.measurements.clear();
@@ -137,15 +155,15 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     );
     t.conn(mirror(daemon_state()));
     assert_eq!(t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys), None);
-    // The hint follows the keymap: palette only when Shift+O is unbound.
-    let keys = Keymap::from_toml("[global]\nsession_open = []").expect("keys");
+    // The hint follows the keymap: the palette entry when Alt+S is unbound.
+    let keys = Keymap::from_toml("[global]\nsessions = []").expect("keys");
     t.conn(mirror(no_session_state()));
     assert_eq!(
         t.st.empty_hint(t.pane(PaneKind::Transfer), &keys)
             .map(|h| h.text)
             .as_deref(),
         Some(format!(
-            "No audio session — {} → Open audio session",
+            "No session open — Sessions… in {}, then New session",
             palette_key()
         ))
         .as_deref()

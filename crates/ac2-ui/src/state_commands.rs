@@ -265,6 +265,9 @@ impl AppState {
     pub(super) fn command(&mut self, c: CommandId, keymap: &Keymap, out: &mut Vec<Request>) {
         use CommandId as C;
         self.ran_command.get_or_insert(c);
+        if needs_session(c) && self.sessions_first(out) {
+            return;
+        }
         match c {
             C::Undo => self.undo(out),
             C::Redo => self.redo(out),
@@ -686,4 +689,14 @@ impl AppState {
             | C::LeqWindows) => self.command_tf(c, out),
         }
     }
+}
+
+/// Commands that make a measurement on the audio session: with none open they lead to the
+/// Sessions dialog rather than a form or chooser that could only refuse.
+fn needs_session(c: CommandId) -> bool {
+    use CommandId as C;
+    matches!(
+        c,
+        C::NewMeasurement | C::NewTransfer | C::NewSpectrum | C::NewRta | C::NewSpl | C::SweepNew
+    )
 }

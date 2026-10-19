@@ -199,8 +199,8 @@ pub fn session_from_empty(d: &mut Driver) -> R {
     Ok(())
 }
 
-/// From a daemon with no session to frames, using only the app: the hint, Shift+O, the
-/// dialog's roles for the simulated rig with its meters, Enter; the chooser's transfer
+/// From a daemon with no session to frames, using only the app: the hint, Alt+S and its
+/// New session, the audio dialog's roles for the simulated rig with its meters, Enter; the chooser's transfer
 /// measurement, Enter twice; the stimulus.
 pub fn measure_from_empty(d: &mut Driver) -> R {
     d.synced()?;
@@ -209,16 +209,23 @@ pub fn measure_from_empty(d: &mut Driver) -> R {
         d.st.empty_hint(d.st.layout.focus, &d.keys)
             .map(|h| h.text)
             .unwrap_or_default();
-    assert!(
-        hint.starts_with(&format!(
-            "No audio session — press {}",
-            Chord::parse("Shift+O")?.label()
-        )),
-        "{hint}"
+    assert_eq!(
+        hint,
+        format!(
+            "No session open — {}, then New session",
+            Chord::parse("Alt+S")?.label()
+        )
     );
 
-    d.key("Shift+O");
-    d.send(Msg::Text("O".into()));
+    d.key("Alt+S");
+    d.until("the Sessions dialog", |s| s.sessions_dialog().is_some())?;
+    // The first row: New session, then the audio settings.
+    d.key("Enter");
+    d.until("the new session's audio", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.heading() == ac2_ui::settings::NEW_SESSION_AUDIO)
+    })?;
     d.until("the device list", |s| {
         s.overlay
             .settings()
@@ -237,7 +244,11 @@ pub fn measure_from_empty(d: &mut Driver) -> R {
     );
     first_transfer(d)?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
-    assert_eq!(m.config.name, "TF 1");
+    assert!(
+        m.config.name.starts_with("Reference → "),
+        "{}",
+        m.config.name
+    );
     assert_eq!(d.st.empty_hint(d.st.layout.focus, &d.keys), None);
     let MeasKind::Transfer { config } = &m.config.kind else {
         return Err("not a transfer measurement".into());
