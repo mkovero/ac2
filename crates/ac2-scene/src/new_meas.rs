@@ -46,7 +46,7 @@ impl NewKind {
             NewKind::Rta => "one input's level in fractional-octave bands",
             NewKind::Spl => "sound level: A / C / Z weighting, Leq windows and limits",
             NewKind::Sweep => "a played sweep: response and harmonic distortion",
-            NewKind::Math => "A ÷ × + − B of two curves, or the average of several",
+            NewKind::Math => "A ÷ × + − B of two curves, align A ↔ B, or the average of several",
         }
     }
 
@@ -211,7 +211,7 @@ mod tests {
                 "RTA — one input's level in fractional-octave bands",
                 "SPL meter — sound level: A / C / Z weighting, Leq windows and limits",
                 "Sweep — a played sweep: response and harmonic distortion  ·  Shift+S",
-                "Math channel — A ÷ × + − B of two curves, or the average of several",
+                "Math channel — A ÷ × + − B of two curves, align A ↔ B, or the average of several",
             ]
         );
         assert_eq!(q.default, 1);

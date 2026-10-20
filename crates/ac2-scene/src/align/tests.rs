@@ -67,12 +67,12 @@ fn suggestion_names_who_to_delay_metres_and_polarity() {
     let c = cand(4.21, AlignSide::B, false, 12.0);
     assert_eq!(
         suggestion(&c, "Sub", "Main", 20.0),
-        "Delay Main by 4.21 ms · 1.44 m @ 20 °C · polarity normal"
+        "Main: delay 4.21 ms · 1.44 m @ 20 °C · polarity normal"
     );
     let c = cand(1.2, AlignSide::A, true, 14.0);
     assert_eq!(
         suggestion(&c, "Sub", "Main", 20.0),
-        "Delay Sub by 1.20 ms · 0.41 m @ 20 °C · invert Sub"
+        "Sub: delay 1.20 ms · 0.41 m @ 20 °C · polarity inverted"
     );
     assert_eq!(short(&c, "Sub", "Main"), "Sub +1.20 ms inverted, ±14°");
 }
@@ -83,7 +83,7 @@ fn readout_of_a_fit() {
     assert!(r.fit);
     assert_eq!(
         r.headline,
-        "Delay Main by 4.21 ms · 1.44 m @ 20 °C · polarity normal"
+        "Main: delay 4.21 ms · 1.44 m @ 20 °C · polarity normal"
     );
     assert_eq!(
         r.lines,
@@ -206,7 +206,7 @@ fn view_shows_the_readout_and_two_plots() {
     );
     let t = texts(&s.scene);
     assert!(
-        t.contains(&"Delay Main by 4.21 ms · 1.44 m @ 20 °C · polarity normal"),
+        t.contains(&"Main: delay 4.21 ms · 1.44 m @ 20 °C · polarity normal"),
         "{t:?}"
     );
     assert!(

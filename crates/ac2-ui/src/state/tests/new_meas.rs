@@ -35,7 +35,7 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
             "RTA — one input's level in fractional-octave bands",
             "SPL meter — sound level: A / C / Z weighting, Leq windows and limits",
             "Sweep — a played sweep: response and harmonic distortion  ·  Shift+S",
-            "Math channel — A ÷ × + − B of two curves, or the average of several  ·  Shift+M",
+            "Math channel — A ÷ × + − B of two curves, align A ↔ B, or the average of several  ·  Shift+M",
         ]
     );
     assert_eq!(c.index, 0, "the transfer pane's kind");

@@ -78,7 +78,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &AlignCmd, out: &mut Out<'_>) -> Result<
         "readout": { "headline": r.headline, "lines": r.lines },
     });
     out.emit(&doc, || {
-        let mut t = format!("{}: {}\n", m.config.name, r.headline);
+        let mut t = format!("{}\n  {}\n", m.config.name, r.headline);
         for l in &r.lines {
             t.push_str(&format!("  {l}\n"));
         }

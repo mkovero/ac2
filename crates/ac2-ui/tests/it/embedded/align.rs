@@ -72,10 +72,13 @@ fn alignment_from_an_empty_daemon() -> R {
     );
     d.until("the alignment's fit", |s| readout(s).is_some_and(|r| r.fit))?;
     let r = readout(&d.st).ok_or("readout")?;
-    assert!(r.headline.starts_with("Delay "), "{r:?}");
+    assert!(
+        r.headline.starts_with("Reference → Room mic S1: delay "),
+        "{r:?}"
+    );
     // One path twice: no delay, to the delay readout's last digit.
     assert!(
-        r.headline.contains(" by 0.00") && r.headline.contains(" ms · "),
+        r.headline.contains(": delay 0.00") && r.headline.contains(" ms · "),
         "{r:?}"
     );
     assert!(r.headline.ends_with("polarity normal"), "{r:?}");

@@ -234,7 +234,7 @@ fn alignment_view() {
         let r = s.readout.expect("the readout");
         assert_eq!(
             r.headline,
-            "Delay Delay tower by 4.21 ms · 1.44 m @ 20 °C · polarity normal"
+            "Delay tower: delay 4.21 ms · 1.44 m @ 20 °C · polarity normal"
         );
         assert_eq!(
             r.lines[1],

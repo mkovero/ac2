@@ -1058,7 +1058,7 @@ alignment) shows the phase difference before (faint) and after, the summation be
 after (0 dB: they add fully), the band shaded, and the readout:
 
 ```
-Delay Main by 4.21 ms · 1.44 m @ 20 °C · polarity normal
+Main: delay 4.21 ms · 1.44 m @ 20 °C · polarity normal
 residual ±12° over 60–120 Hz · summation −7.9 dB → −0.3 dB (worst −21.0 dB → −1.2 dB)
 other polarity: Main +9.80 ms inverted, ±41°
 also fits: Main +15.30 ms, ±14° — the band is too narrow to tell: pick by distance

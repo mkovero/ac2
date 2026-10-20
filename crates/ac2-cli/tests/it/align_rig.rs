@@ -160,13 +160,16 @@ async fn alignment_by_name() {
     assert_eq!(doc["band"]["lo"], 60.0);
     assert_eq!(doc["band"]["hi"], 120.0);
     let headline = doc["readout"]["headline"].as_str().unwrap();
-    assert!(headline.starts_with("Delay "), "{text}");
+    assert!(headline.contains(": delay "), "{text}");
     assert!(headline.contains(" @ 20 °C · "), "{text}");
     assert_eq!(doc["align"]["outcome"]["type"], "fit", "{text}");
 
     let (code, text) = run(&ep, false, &["align", "show", "Sub ↔ Main"]).await;
     assert_eq!(code, 0, "{text}");
-    assert!(text.starts_with("Sub ↔ Main: Delay "), "{text}");
+    assert!(
+        text.starts_with("Sub ↔ Main\n  ") && text.contains(": delay "),
+        "{text}"
+    );
     assert!(text.contains("\n  residual ±"), "{text}");
     assert!(text.contains(" over 60–120 Hz · summation "), "{text}");
 

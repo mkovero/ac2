@@ -46,16 +46,13 @@ pub fn delayed<'a>(c: &AlignCandidate, a: &'a str, b: &'a str) -> &'a str {
     }
 }
 
-/// `Delay Main by 4.21 ms · 1.45 m @ 20 °C · polarity normal`; `… · invert Main`.
+/// `Main: delay 4.21 ms · 1.45 m @ 20 °C · polarity normal`; `… · polarity inverted`. The
+/// name leads so that a system named "Delay tower" never reads "Delay Delay tower".
 pub fn suggestion(c: &AlignCandidate, a: &str, b: &str, temp_c: f64) -> String {
     let who = delayed(c, a, b);
-    let polarity = if c.inverted {
-        format!("invert {who}")
-    } else {
-        "polarity normal".into()
-    };
+    let polarity = if c.inverted { "inverted" } else { "normal" };
     format!(
-        "Delay {who} by {} · {polarity}",
+        "{who}: delay {} · polarity {polarity}",
         delay_readout(c.delay.0, temp_c)
     )
 }

@@ -106,7 +106,7 @@ one period away; a band outside the data is `no fit`.
   phase difference A − B before (faint) and after the suggested alignment, ±180°; bottom,
   the summation before and after (dB, 0 = full addition). The band is a gentle hint (faint
   grey shade + dashed edges) in both. Readout plate:
-  `Delay Main by 4.21 ms · 1.44 m @ 20 °C · polarity normal`,
+  `Main: delay 4.21 ms · 1.44 m @ 20 °C · polarity normal`,
   `residual ±12° over 60–120 Hz · summation −7.9 dB → −0.3 dB (worst −21.0 dB → −1.2 dB)`,
   `other polarity: Main +9.80 ms inverted, ±41°`, and when close
   `also fits: Main +15.30 ms, ±14° — the band is too narrow to tell: pick by distance`. No fit:
