@@ -421,11 +421,7 @@ impl AppState {
             "avg {}",
             shown.iter().map(|t| label(t)).collect::<Vec<_>>().join("+")
         );
-        let m = match method {
-            AverageMethod::Power => "power",
-            AverageMethod::Complex => "complex",
-            AverageMethod::CoherenceWeighted => "coherence-weighted",
-        };
+        let m = method.label();
         let what = format!("{name} ({m}) created");
         self.call(
             out,

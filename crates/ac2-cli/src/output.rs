@@ -6,9 +6,8 @@ use ac2_proto::GridDef;
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
     ClockRelation, DelayReference, DepthPolicy, LevelScale, MeasKind, Measurement, Mic, PeakMode,
-    PeakWeighting, Polarity, RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile,
-    SmoothingFraction, SmoothingMode, State, TimeWeighting, TimingState, TimingStatus, TraceData,
-    TraceKind, TraceMeta, TraceSource, Weighting,
+    Polarity, RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile, SmoothingFraction,
+    SmoothingMode, State, TimingState, TimingStatus, TraceData, TraceMeta, TraceSource,
 };
 use ac2_proto::units::WallNs;
 use ac2_scene::format;
@@ -93,34 +92,12 @@ pub fn level(v: f64, scale: LevelScale) -> String {
         LevelScale::Dbfs => format::dbfs(v),
         LevelScale::DbSpl => {
             let s = format::level(v);
-            if s == format::NO_VALUE { s } else { format!("{s} dB SPL") }
+            if s == format::NO_VALUE {
+                s
+            } else {
+                format!("{s} dB SPL")
+            }
         }
-    }
-}
-
-/// `A`, `C`, `Z`.
-pub fn weighting(w: Weighting) -> &'static str {
-    match w {
-        Weighting::A => "A",
-        Weighting::C => "C",
-        Weighting::Z => "Z",
-    }
-}
-
-/// `F`, `S`, `I`.
-pub fn time_weighting(t: TimeWeighting) -> &'static str {
-    match t {
-        TimeWeighting::Fast => "F",
-        TimeWeighting::Slow => "S",
-        TimeWeighting::Impulse => "I",
-    }
-}
-
-/// `C`, `Z`.
-pub fn peak_weighting(p: PeakWeighting) -> &'static str {
-    match p {
-        PeakWeighting::C => "C",
-        PeakWeighting::Z => "Z",
     }
 }
 
@@ -153,14 +130,14 @@ pub fn meas_kind(k: &MeasKind) -> String {
             "rta 1/{} oct in {} ({}){}",
             config.fraction.b(),
             config.input + 1,
-            weighting(config.weighting),
+            config.weighting.letter(),
             spec_averaging(config.averaging)
         ),
         MeasKind::Spl { config } => format!(
             "spl in {} (L{}{})",
             config.input + 1,
-            weighting(config.weighting),
-            time_weighting(config.time_weighting)
+            config.weighting.letter(),
+            config.time_weighting.letter()
         ),
         MeasKind::Math { config } => {
             let what = match config.domain {
@@ -174,7 +151,7 @@ pub fn meas_kind(k: &MeasKind) -> String {
             });
             match &config.expr {
                 ac2_proto::model::MathExpr::Average { method, .. } => {
-                    format!("{what} math: {} {e}", average_method(*method))
+                    format!("{what} math: {} {e}", method.label())
                 }
                 ac2_proto::model::MathExpr::Binary { .. } => format!("{what} math: {e}"),
             }
@@ -198,15 +175,6 @@ pub fn owner_text(o: ac2_proto::model::TraceOwner) -> String {
     match o {
         ac2_proto::model::TraceOwner::Meas { meas } => format!("#{meas}"),
         ac2_proto::model::TraceOwner::Imported => "imported".into(),
-    }
-}
-
-/// `power`, `complex`, `coherence-weighted`.
-pub fn average_method(m: ac2_proto::model::AverageMethod) -> &'static str {
-    match m {
-        ac2_proto::model::AverageMethod::Power => "power",
-        ac2_proto::model::AverageMethod::Complex => "complex",
-        ac2_proto::model::AverageMethod::CoherenceWeighted => "coherence-weighted",
     }
 }
 

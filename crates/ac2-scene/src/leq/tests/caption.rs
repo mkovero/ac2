@@ -1,4 +1,5 @@
 use super::*;
+use ac2_proto::model::AlarmSubject;
 
 /// A long calibration text (mic, data sheet, curve) on the right still leaves the run centred
 /// on the pane, as the meter's number under it is: a shorter wording centred beats a longer

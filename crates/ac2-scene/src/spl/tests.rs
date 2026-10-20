@@ -1,6 +1,7 @@
 use super::*;
 use crate::canvas::tests::{intersects, label_box};
 use ac2_proto::frame::SplMeta;
+use ac2_proto::model::PeakWeighting;
 use ac2_proto::units::{MeasId, Seconds};
 
 const H: u64 = 3600 * 1_000_000_000;

@@ -18,7 +18,10 @@ pub const RAISE_WORD: &str = "raise";
 /// at the bound, `−10.0 dBFS · the rig's bound (ac2d --max-level)`.
 pub fn ceiling_line(g: &Generator) -> String {
     if g.ceiling.0 >= g.ceiling_bound.0 {
-        format!("{} · the rig's bound (ac2d --max-level)", format::dbfs(g.ceiling.0))
+        format!(
+            "{} · the rig's bound (ac2d --max-level)",
+            format::dbfs(g.ceiling.0)
+        )
     } else {
         format!(
             "{} · bound {} (ac2d --max-level)",

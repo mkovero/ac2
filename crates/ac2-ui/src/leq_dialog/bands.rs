@@ -12,7 +12,7 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{Db, DbSpl, Hz, Seconds};
 
-use super::{LENGTHS, WEIGHTINGS, number_text, weighting_letter};
+use super::{LENGTHS, WEIGHTINGS, number_text};
 
 /// A setting of the band section outside its windows, top to bottom.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -205,7 +205,7 @@ impl BandRow {
             BandCol::Length => {
                 ac2_scene::band_leq::window_name(f64::from(self.seconds), self.weighting)
             }
-            BandCol::Weighting => weighting_letter(self.weighting).to_owned(),
+            BandCol::Weighting => self.weighting.letter().to_owned(),
             BandCol::Limit => self.limit.clone(),
             BandCol::DayOffset => self.day_offset.clone(),
             BandCol::Margin => self.margin.clone(),
@@ -279,7 +279,7 @@ impl RangeRow {
             RangeCol::Length => {
                 ac2_scene::band_leq::window_name(f64::from(self.seconds), self.weighting)
             }
-            RangeCol::Weighting => weighting_letter(self.weighting).to_owned(),
+            RangeCol::Weighting => self.weighting.letter().to_owned(),
         }
     }
 

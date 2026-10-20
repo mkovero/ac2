@@ -144,8 +144,8 @@ pub fn time_to(seconds: f64) -> String {
 /// A unit with the window's own weighting, `dB(A)`, `dBFS (C)`, marked when corrected.
 fn weighted_unit(scale: LevelScale, w: Weighting, corrected: bool) -> String {
     let u = match scale {
-        LevelScale::DbSpl => format!("dB({})", w_letter(w)),
-        LevelScale::Dbfs => format!("dBFS ({})", w_letter(w)),
+        LevelScale::DbSpl => format!("dB({})", w.letter()),
+        LevelScale::Dbfs => format!("dBFS ({})", w.letter()),
     };
     if corrected {
         format!("{u} {CORRECTED_MARK}")
@@ -167,10 +167,10 @@ fn peak_tile(
     let hold = f64::from(LeqPeak::HOLD_S);
     LeqTile {
         kind: TileKind::Peak(q),
-        name: peak_name(q).to_owned(),
+        name: q.name().to_owned(),
         value: format::level(p.level),
         unit: unit_of(scale).to_owned(),
-        weighted_unit: weighted_unit(scale, peak_weighting(q), corrected.is_some()),
+        weighted_unit: weighted_unit(scale, q.weighting(), corrected.is_some()),
         state,
         state_text: state_text(state, false),
         course: None,
@@ -181,7 +181,7 @@ fn peak_tile(
         incomplete: None,
         held: Some(format!("highest of the last {}", length(hold))),
         corrected,
-        weighting: peak_weighting(q),
+        weighting: q.weighting(),
         duration_s: hold,
         leq_db: if p.level.is_finite() {
             (p.level * 10.0).round() / 10.0

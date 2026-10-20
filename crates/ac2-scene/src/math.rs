@@ -12,15 +12,6 @@ use ac2_proto::model::{
     AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, NamedOperand, Operand, PhaseBasis,
 };
 
-/// `power`, `complex`, `coherence-weighted`.
-pub fn method_name(m: AverageMethod) -> &'static str {
-    match m {
-        AverageMethod::Power => "power",
-        AverageMethod::Complex => "complex",
-        AverageMethod::CoherenceWeighted => "coherence-weighted",
-    }
-}
-
 /// `÷`, `×`, `+`, `−`.
 pub fn op_symbol(op: MathOp) -> &'static str {
     match op {
@@ -229,7 +220,7 @@ impl MathStatus {
     /// `Main L ÷ Sub · arrival Δ +3.7 µs · +1.3 mm @ 20 °C`.
     pub fn tag(&self) -> String {
         let head = match self.method {
-            Some(m) => format!("{} · {} avg", self.count(), method_name(m)),
+            Some(m) => format!("{} · {} avg", self.count(), m.label()),
             None => self.expression.clone(),
         };
         std::iter::once(head.as_str())
@@ -285,11 +276,7 @@ pub fn capture_note(
     let head = match expr {
         MathExpr::Binary { .. } => expression(expr, name_of),
         MathExpr::Average { method, .. } => {
-            format!(
-                "{} positions · {} avg",
-                operands.len(),
-                method_name(*method)
-            )
+            format!("{} positions · {} avg", operands.len(), method.label())
         }
     };
     let notes = if transfer {

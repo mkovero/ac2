@@ -285,7 +285,7 @@ fn windows_table(cfg: &LeqConfig, position: Option<PositionCorrection>) -> Strin
     for q in PeakQuantity::ALL {
         if let Some(l) = cfg.peaks.get(q) {
             t.add_row(vec![
-                format!("{} (highest second of 10 s)", ac2_scene::leq::peak_name(q)),
+                format!("{} (highest second of 10 s)", q.name()),
                 db(l.limit.0),
                 db(l.warn_margin.0),
             ]);

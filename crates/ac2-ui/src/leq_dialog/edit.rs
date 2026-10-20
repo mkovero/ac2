@@ -289,7 +289,7 @@ impl LeqDialog {
             if t.is_empty() {
                 continue;
             }
-            let name = ac2_scene::leq::peak_name(q);
+            let name = q.name();
             let v = crate::state::parse_number(t, &["db spl", "dbspl", "db"])
                 .map_err(|err| format!("{name} limit: {err}"))?;
             if !(60.0..=170.0).contains(&v) {

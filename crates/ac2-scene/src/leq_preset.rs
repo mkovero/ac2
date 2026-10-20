@@ -20,7 +20,7 @@ pub fn summary(p: LeqPreset) -> String {
     let peaks = p.peaks();
     for q in PeakQuantity::ALL {
         if let Some(l) = peaks.get(q) {
-            windows.push(format!("{} ≤ {} dB", crate::leq::peak_name(q), l.limit.0));
+            windows.push(format!("{} ≤ {} dB", q.name(), l.limit.0));
         }
     }
     format!("{}: {}", p.name(), windows.join(", "))

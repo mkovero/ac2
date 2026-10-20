@@ -19,7 +19,7 @@ use crate::format;
 use crate::primitives::{Color, FillRect, HAlign, Polyline, Rect, Stroke, VAlign};
 use crate::theme::{Theme, contrast_ratio};
 
-use super::{LeqTile, PlotChrome, TileKind, TileState, length, w_letter};
+use super::{LeqTile, PlotChrome, TileKind, TileState, length};
 
 /// A judged scale starts this far below the lowest limit…
 pub const BELOW_LIMIT_DB: f64 = 30.0;
@@ -193,11 +193,11 @@ fn name_levels(tiles: &[&LeqTile]) -> Vec<(Vec<String>, bool)> {
     };
     let pre = |w: Weighting| match one {
         Some(_) => String::new(),
-        None => w_letter(w).to_string(),
+        None => w.letter().to_string(),
     };
     let sep = |w: Weighting| match one {
         Some(_) => String::new(),
-        None => format!("{} ", w_letter(w)),
+        None => format!("{} ", w.letter()),
     };
     // One weighting for every window: the caption names it once (`LAeq`), the columns only
     // their lengths; mixed weightings keep it on every name.
@@ -479,7 +479,7 @@ pub(super) fn draw_columns(
                 tiles[a]
                     .duration_s
                     .total_cmp(&tiles[b].duration_s)
-                    .then_with(|| w_letter(tiles[a].weighting).cmp(w_letter(tiles[b].weighting)))
+                    .then_with(|| tiles[a].weighting.letter().cmp(tiles[b].weighting.letter()))
             }
         })
     });
@@ -550,7 +550,7 @@ pub(super) fn draw_columns(
         sorted
             .iter()
             .find(|t| t.kind == TileKind::Window)
-            .map(|t| format!("L{}eq", w_letter(t.weighting)))
+            .map(|t| format!("L{}eq", t.weighting.letter()))
             .unwrap_or_default()
     });
 

@@ -191,10 +191,10 @@ impl Row {
         match c {
             Col::Length => format!(
                 "L{}eq {}",
-                weighting_letter(self.weighting),
+                self.weighting.letter(),
                 ac2_scene::leq::length(f64::from(self.seconds))
             ),
-            Col::Weighting => weighting_letter(self.weighting).to_owned(),
+            Col::Weighting => self.weighting.letter().to_owned(),
             Col::Limit => self.limit.clone(),
             Col::Margin => self.margin.clone(),
         }
@@ -226,14 +226,6 @@ impl Row {
             limit,
             warn_margin: Db(margin),
         })
-    }
-}
-
-fn weighting_letter(w: Weighting) -> &'static str {
-    match w {
-        Weighting::A => "A",
-        Weighting::C => "C",
-        Weighting::Z => "Z",
     }
 }
 
@@ -437,7 +429,7 @@ impl LeqDialog {
                 .rows
                 .get(i)
                 .map_or_else(String::new, |w| w.cell(Col::Length)),
-            CueRow::Peak(q) => ac2_scene::leq::peak_name(q).to_owned(),
+            CueRow::Peak(q) => q.name().to_owned(),
             CueRow::Band(i) => self
                 .bands
                 .rows

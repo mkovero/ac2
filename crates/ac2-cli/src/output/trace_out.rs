@@ -21,7 +21,7 @@ fn source_text(s: &TraceSource) -> String {
                 .map_or_else(|| "?".to_owned(), |n| n.name.clone()))
         ),
         TraceSource::Average { traces, method, .. } => {
-            let m = average_method(*method);
+            let m = method.label();
             format!(
                 "{m} average of {}",
                 traces
@@ -34,23 +34,6 @@ fn source_text(s: &TraceSource) -> String {
         TraceSource::Sweep {
             meas_name, number, ..
         } => format!("run {number} of {meas_name}"),
-    }
-}
-
-fn kind_text(k: TraceKind) -> &'static str {
-    match k {
-        TraceKind::Transfer => "transfer",
-        TraceKind::Target => "target",
-        TraceKind::Spectrum {
-            level: ac2_proto::model::SpecLevel::Tone,
-            ..
-        } => "spectrum",
-        TraceKind::Spectrum {
-            level: ac2_proto::model::SpecLevel::Density,
-            ..
-        } => "spectrum density",
-        TraceKind::Rta { .. } => "rta",
-        TraceKind::Sweep => "sweep",
     }
 }
 
@@ -73,7 +56,7 @@ pub fn traces(t_: &[TraceMeta]) -> String {
             owner_text(tr.edit.owner),
             tr.edit.slot.map(|s| s.to_string()).unwrap_or_default(),
             tr.edit.name.clone(),
-            kind_text(tr.kind).to_owned(),
+            tr.kind.label().to_owned(),
             source_text(&tr.source),
             format::delay(tr.delay.0),
             time_base(&tr.source).to_owned(),
@@ -171,7 +154,7 @@ pub fn trace_meta(t: &TraceMeta) -> String {
             .slot
             .map_or_else(String::new, |s| format!(" (slot {s})")),
         owner_text(t.edit.owner),
-        kind_text(t.kind),
+        t.kind.label(),
         source_text(&t.source),
         time_base(&t.source),
         format::delay(t.delay.0),

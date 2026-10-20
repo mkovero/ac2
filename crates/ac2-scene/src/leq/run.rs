@@ -6,7 +6,7 @@ use ac2_proto::frame::LeqRun;
 use ac2_proto::model::{LeqConfig, Weighting};
 use ac2_proto::units::WallNs;
 
-use super::{length, w_letter};
+use super::length;
 use crate::format;
 
 /// Hours a full log holds (`SplLogPage::RETAINED_ROWS`).
@@ -77,7 +77,7 @@ pub fn run_text(run: &LeqRun, cfg: &LeqConfig, offset_s: impl Fn(WallNs) -> i32)
     let mut totals = vec![("LAeq".to_owned(), format::level(run.laeq))];
     for (w, v) in [(Weighting::C, run.lceq), (Weighting::Z, run.lzeq)] {
         if used(w) {
-            totals.push((format!("L{}eq", w_letter(w)), format::level(v)));
+            totals.push((format!("L{}eq", w.letter()), format::level(v)));
         }
     }
     let gaps = run.gaps.0.max(0.0);

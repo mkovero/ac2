@@ -63,7 +63,7 @@ impl fmt::Display for OpError {
                 f,
                 "these traces cannot be combined (transfer and target combine with each other; spectra and RTA only with their own kind and scale, a spectrum only with one of the same level: tone or density)"
             ),
-            Self::KindNotSupported(k) => write!(f, "not supported for {} traces", kind_name(*k)),
+            Self::KindNotSupported(k) => write!(f, "not supported for {} traces", k.label()),
             Self::GridMismatch => write!(
                 f,
                 "spectrum / RTA traces must share one grid (band powers are not interpolated)"
@@ -85,17 +85,6 @@ impl fmt::Display for OpError {
 }
 
 impl std::error::Error for OpError {}
-
-/// Lower-case name of a kind for messages.
-pub fn kind_name(k: TraceKind) -> &'static str {
-    match k {
-        TraceKind::Transfer => "transfer",
-        TraceKind::Target => "target",
-        TraceKind::Spectrum { .. } => "spectrum",
-        TraceKind::Rta { .. } => "RTA",
-        TraceKind::Sweep => "sweep",
-    }
-}
 
 /// Transfer functions and sweep responses (a sweep's fundamental is a transfer function on
 /// the same time base) combine with each other.

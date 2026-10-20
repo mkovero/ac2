@@ -20,7 +20,7 @@ use ac2_proto::model::{
 use crate::banner::{BannerRow, Status};
 use crate::canvas::{self, Canvas, anchor, label};
 use crate::format;
-use crate::leq::{TileState, clock, column_colors, length, tile_colors, w_letter};
+use crate::leq::{TileState, clock, column_colors, length, tile_colors};
 use crate::primitives::{Color, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport};
 use crate::theme::Theme;
 use crate::view::PlotChrome;
@@ -35,7 +35,7 @@ pub use summary::{
 
 /// A band window's name, as a Leq window's: `LZeq 60 min`.
 pub fn window_name(duration_s: f64, weighting: Weighting) -> String {
-    format!("L{}eq {}", w_letter(weighting), length(duration_s))
+    ac2_proto::model::window_name(duration_s, weighting)
 }
 
 /// A band of a band window as the alarms, the CLI and the app say it: `63 Hz band LZeq 60

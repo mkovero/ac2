@@ -291,18 +291,14 @@ pub async fn spl(
                 };
             };
             let m = &f.meta;
-            let name = format!(
-                "L{}{}",
-                output::weighting(m.weighting),
-                output::time_weighting(m.time_weighting)
-            );
+            let name = format!("L{}{}", m.weighting.letter(), m.time_weighting.letter());
             lines.push(format!(
                 "{name} {}   Leq {}   Lmax {}   Lmin {}   L{}peak {}",
                 output::level(m.level, m.scale),
                 format::level(m.leq),
                 format::level(m.lmax),
                 format::level(m.lmin),
-                output::peak_weighting(m.peak_weighting),
+                m.peak_weighting.letter(),
                 format::level(m.lpeak),
             ));
             lines.push(format!(

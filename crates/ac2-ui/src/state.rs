@@ -130,12 +130,12 @@ pub use undo::HISTORY_LEN;
 #[path = "state_types.rs"]
 mod types;
 pub(crate) use types::STIMULUS_STOPPED_TOO;
+use types::trace_mic_request;
 pub use types::{
     ConnState, FinderChoice, LiveEdit, MAX_OBSERVATION_S, PaneKind, PaneMenu, SMOOTHING_STEPS,
     SUB_OBSERVATIONS_S, SmoothTarget, Smoothable, StimPhase, Stimulus, outputs_text, parse_curve,
     parse_input_curve, spectrum_smoothing,
 };
-use types::trace_mic_request;
 #[path = "state_msg.rs"]
 mod msg;
 pub use msg::{

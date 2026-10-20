@@ -7,9 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    AlarmSubject, BAND_COUNT, BandLevelSource, BandTransferSet, HistorySpan, LeqAlarm,
-    LeqAlarmKind, LeqConfig, LeqJudgement, MeasKind, Measurement, PeakQuantity, SplHistory, SplLog,
-    SplLogWhich, Weighting,
+    BAND_COUNT, BandLevelSource, BandTransferSet, HistorySpan, LeqAlarm, LeqAlarmKind, LeqConfig,
+    LeqJudgement, MeasKind, Measurement, PeakQuantity, SplHistory, SplLog, SplLogWhich,
 };
 use ac2_proto::spl_log::SplLogInfo;
 use ac2_proto::units::{ClientId, MeasId, Rev, WallNs};
@@ -24,47 +23,6 @@ use crate::leq_log::{self, LeqLog};
 use crate::util::{perr, wall_ns};
 
 const NS: u64 = 1_000_000_000;
-
-/// `LAeq 30 min`, `LCpeak`, for the daemon's own log.
-fn subject_name(s: &AlarmSubject) -> String {
-    match s {
-        AlarmSubject::Window {
-            duration,
-            weighting,
-        } => {
-            let w = match weighting {
-                Weighting::A => "A",
-                Weighting::C => "C",
-                Weighting::Z => "Z",
-            };
-            let secs = duration.0;
-            let len = if secs >= 60.0 && secs % 60.0 == 0.0 {
-                format!("{} min", secs / 60.0)
-            } else {
-                format!("{secs} s")
-            };
-            format!("L{w}eq {len}")
-        }
-        AlarmSubject::Peak {
-            quantity: PeakQuantity::LcPeak,
-        } => "LCpeak".into(),
-        AlarmSubject::Peak {
-            quantity: PeakQuantity::LafMax,
-        } => "LAFmax".into(),
-        AlarmSubject::Band {
-            duration,
-            weighting,
-            nominal,
-        } => {
-            let window = subject_name(&AlarmSubject::Window {
-                duration: *duration,
-                weighting: *weighting,
-            });
-            format!("{} Hz band {window}", nominal.0)
-        }
-        AlarmSubject::Predicted => "predicted LAeq at the transfer's place".into(),
-    }
-}
 
 impl Control {
     fn spl_config(&self, id: MeasId) -> Option<(String, ac2_proto::model::SplConfig)> {
@@ -239,13 +197,13 @@ impl Control {
             match a.kind {
                 LeqAlarmKind::Over => tracing::warn!(
                     "SPL meter {meas} ({name}): {} over its limit: {:.1} dB > {:.1} dB{corrected}",
-                    subject_name(&a.subject),
+                    a.subject,
                     a.level.0,
                     a.limit.0
                 ),
                 LeqAlarmKind::Recovered => tracing::info!(
                     "SPL meter {meas} ({name}): {} back within its limit: {:.1} dB ≤ {:.1} dB{corrected}",
-                    subject_name(&a.subject),
+                    a.subject,
                     a.level.0,
                     a.limit.0
                 ),
