@@ -12,6 +12,7 @@ use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 use ac2_ui::embedded::{EmbeddedBackend, Setup, start_embedded_with};
 use ac2_ui::forms::FormKind;
+use ac2_ui::keys::Chord;
 use ac2_ui::keys::Keymap;
 use ac2_ui::state::{AppState, DragMsg, DropTarget, Msg, Overlay, PaneId, PaneKind, PaneMenuRow};
 use std::time::Instant;
@@ -207,11 +208,13 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
         Overlay::None,
         "an Imported trace is not compared"
     );
+    // The key is named the platform's way (`⇧F2` on macOS).
+    let move_key = Chord::parse("Shift+F2")?.label();
     assert!(
         d.st.toasts
             .iter()
             .any(|t| t.text.ends_with(&format!(
-                "({l2}) is under Imported: it is no measurement's to compare — select it, then Move to measurement… (Shift+F2)"
+                "({l2}) is under Imported: it is no measurement's to compare — select it, then Move to measurement… ({move_key})"
             ))),
         "{:?}",
         d.st.toasts
