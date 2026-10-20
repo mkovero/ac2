@@ -342,7 +342,7 @@ fn close_session_and_delete_measurement() {
         "{r:?}"
     );
     t.st.update(Msg::Command(CommandId::DeleteSelected), &t.keys);
-    let r = t.key("Enter");
+    let r = t.key("Delete");
     assert!(
         matches!(r.as_slice(), [Request::Call { cmd: Command::MeasDelete { meas: MeasId(1), traces: ac2_proto::model::OwnedTraces::Keep }, what }]
             if what == "Main L deleted"),

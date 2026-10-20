@@ -201,7 +201,7 @@ pub fn delete_confirm(row: &TraceRow) -> DeleteConfirm {
              it cannot be undone."
                 .to_owned(),
         ],
-        hint: "Delete, Backspace or Enter deletes it · Esc or N keeps it".to_owned(),
+        hint: "Delete or Backspace deletes it · Esc or N keeps it".to_owned(),
         refused: false,
     }
 }

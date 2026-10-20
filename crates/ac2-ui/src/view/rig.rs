@@ -86,7 +86,11 @@ pub(super) fn rig_page(
                         RigRow::Test | RigRow::DmxTest => "Send",
                         _ => "Apply",
                     };
-                    if ui.button(action).clicked() {
+                    if ui
+                        .button(action)
+                        .on_hover_text(super::keys_cue(&[egui::Key::Enter]))
+                        .clicked()
+                    {
                         *msg = Some(Msg::Settings(SettingsMsg::RigApply(row)));
                     }
                 }

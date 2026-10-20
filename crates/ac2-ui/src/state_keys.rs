@@ -142,8 +142,9 @@ impl AppState {
                 self.sessions_key(chord, swallow, out);
                 return;
             }
+            // The key that asked confirms (Enter is the stimulus's: never a discard by reflex).
             Overlay::NewLog(_) => {
-                if chord.key == Key::Enter {
+                if self.new_log_confirms(chord) {
                     self.new_log(true, out);
                 } else if chord.key == Key::N {
                     self.new_log(false, out);
@@ -166,9 +167,11 @@ impl AppState {
                 }
                 return;
             }
-            // Delete twice deletes, as in the calibrations view (Backspace is Delete here).
-            Overlay::Delete(_) => {
-                if matches!(chord.key, Key::Enter | Key::Delete) {
+            // Delete twice deletes, as in the calibrations view (Backspace is Delete here, the
+            // app routes it above). Enter is the stimulus's: it deletes nothing by reflex, and
+            // only closes the window that refuses.
+            Overlay::Delete(p) => {
+                if chord.key == Key::Delete || (chord.key == Key::Enter && p.confirm.refused) {
                     self.delete(true, out);
                 } else if chord.key == Key::N {
                     self.delete(false, out);

@@ -275,7 +275,7 @@ fn hidden_measurements_are_remembered_by_name() {
     assert!(u.st.meas_hidden(u.st.meas(MeasId(2)).expect("Sub")));
     u.st.update(Msg::SelectMeas(MeasId(2)), &u.keys);
     u.key("Delete");
-    assert!(meas_deleted(&u.key("Enter")).is_some());
+    assert!(meas_deleted(&u.key("Delete")).is_some());
     assert!(u.st.hidden_meas.is_empty());
 }
 

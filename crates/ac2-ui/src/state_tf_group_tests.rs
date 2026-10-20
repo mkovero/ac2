@@ -224,7 +224,7 @@ fn the_trace_selected_after_a_delete_moves_no_pane() {
         let layout = t.st.layout.clone();
         assert_eq!(transfer_group(&t), Some(MeasId(3)));
         assert!(t.key("Delete").is_empty());
-        let out = t.key("Enter");
+        let out = t.key("Delete");
         assert!(
             matches!(
                 out.as_slice(),

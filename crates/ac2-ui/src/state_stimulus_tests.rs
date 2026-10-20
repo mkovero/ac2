@@ -816,7 +816,7 @@ fn deleting_the_last_transfer_stops_the_stimulus() {
         t.st.overlay
     );
     assert_eq!(
-        meas_delete(&t.key("Enter")),
+        meas_delete(&t.key("Delete")),
         (
             "Main L deleted · stimulus stopped (no transfer measurement left running)".into(),
             true
@@ -853,7 +853,7 @@ fn deleting_keeps_the_stimulus_when_a_stop_would() {
     let delete = |t: &mut T, meas: u32| {
         t.st.update(Msg::SelectMeas(MeasId(meas)), &t.keys);
         t.key("Delete");
-        meas_delete(&t.key("Enter"))
+        meas_delete(&t.key("Delete"))
     };
     // Another transfer measurement still running.
     let mut t = T::new();

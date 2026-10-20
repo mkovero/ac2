@@ -22,6 +22,16 @@ use eframe::egui;
 use crate::app::App;
 use crate::scenes::Now;
 
+/// A button's key cue (its hover text): the window's fixed keys that do what it does, as
+/// this keyboard labels them (`Enter`, `↩` on macOS). A command's key comes from the keymap
+/// (`Keymap::key_hint`) instead, so the cue follows a rebinding.
+pub(crate) fn keys_cue(keys: &[egui::Key]) -> String {
+    keys.iter()
+        .map(|k| crate::keys::Chord::key(*k).label())
+        .collect::<Vec<_>>()
+        .join(" or ")
+}
+
 pub(crate) fn now() -> Now {
     let wall = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

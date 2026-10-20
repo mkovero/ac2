@@ -176,8 +176,14 @@ pub struct NewLogConfirm {
 }
 
 /// The confirmation before `spl.log_new` on `meter`: it discards show data, so it names
-/// the run that ends and everything that starts over.
-pub fn new_log_confirm(meter: &str, cfg: &LeqConfig, run: Option<&LeqRunText>) -> NewLogConfirm {
+/// the run that ends and everything that starts over. `key` confirms: the key that asked,
+/// pressed again, so the stimulus's Enter never discards a log by reflex.
+pub fn new_log_confirm(
+    meter: &str,
+    cfg: &LeqConfig,
+    run: Option<&LeqRunText>,
+    key: &str,
+) -> NewLogConfirm {
     let n = cfg.windows.len();
     let ends = match run {
         Some(r) => format!("The current log ends: {}.", r.line()),
@@ -201,6 +207,6 @@ pub fn new_log_confirm(meter: &str, cfg: &LeqConfig, run: Option<&LeqRunText>) -
              ac2 spl leq export --previous"
                 .to_owned(),
         ],
-        hint: "Enter starts the new log · N or Esc keeps the current one".to_owned(),
+        hint: format!("{key} starts the new log · N or Esc keeps the current one"),
     }
 }

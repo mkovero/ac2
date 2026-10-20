@@ -373,7 +373,7 @@ fn leq_columns(s: &AppState) -> Option<ac2_scene::leq::LeqColumns> {
 
 /// Filling windows judged on their budgets, from an empty daemon, using the app: an SPL
 /// meter from the palette, calibrated; its default windows (1, 5, 10, 30, 60 min) limited to
-/// 80 dB in the Leq dialog; Shift+R, Enter: a new log, so every window fills from nothing.
+/// 80 dB in the Leq dialog; Shift+R twice: a new log, so every window fills from nothing.
 /// Pink noise at −20 dBFS (about 91 dB(A), 12 times the limit's power) puts every window's
 /// Leq so far over 80 at once: all amber, "ON COURSE". The 1 min window has spent its budget
 /// after about 5 s and turns red; the 5 min one after about 25 s; the 10, 30 and 60 min ones
@@ -439,7 +439,7 @@ fn slow_filling_windows_go_red_only_when_their_budget_is_spent() -> R {
 
     // A new log: the calibrator's seconds go, every window fills from nothing.
     d.key("Shift+R");
-    d.key("Enter");
+    d.key("Shift+R");
     d.until("the new log", |s| {
         s.toasts
             .iter()

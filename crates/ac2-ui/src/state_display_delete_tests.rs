@@ -48,7 +48,7 @@ fn delete_asks_then_deletes_the_selected_trace() {
     assert_eq!(p.confirm.lines[0], "capture · slot 1 · no data yet");
     assert_eq!(
         p.confirm.hint,
-        "Delete, Backspace or Enter deletes it · Esc or N keeps it"
+        "Delete or Backspace deletes it · Esc or N keeps it"
     );
     // Esc keeps it (the stimulus untouched); so does N.
     assert!(t.key("Esc").is_empty());
@@ -71,9 +71,12 @@ fn delete_asks_then_deletes_the_selected_trace() {
     assert_eq!(what, "slot 1 (t10) deleted · t11 selected");
     assert_eq!(t.st.selected_trace, Some(TraceId(11)));
     assert_eq!(t.st.overlay, Overlay::None);
-    // Enter confirms too; past a hidden trace to the next shown one.
+    // Enter, the stimulus's key, deletes nothing; Delete again does, past a hidden trace
+    // to the next shown one.
     t.key("Delete");
-    let (id, what) = deleted(&t.key("Enter")).expect("deleted");
+    assert!(t.key("Enter").is_empty());
+    assert!(matches!(t.st.overlay, Overlay::Delete(_)));
+    let (id, what) = deleted(&t.key("Delete")).expect("deleted");
     assert_eq!(
         (id, what.as_str()),
         (TraceId(11), "t11 deleted · t14 selected")
@@ -117,7 +120,7 @@ fn delete_asks_then_deletes_the_selected_trace() {
 }
 
 /// Delete and Backspace act on what was selected last: a measurement asks first (naming
-/// it and what goes), Esc or N keeps it, Delete / Backspace / Enter deletes it; a stored
+/// it and what goes), Esc or N keeps it, Delete / Backspace deletes it (Enter does not); a stored
 /// trace selected after it is what they delete instead.
 #[test]
 fn delete_and_backspace_ask_then_delete_the_selected_measurement() {
@@ -146,9 +149,14 @@ fn delete_and_backspace_ask_then_delete_the_selected_measurement() {
     t.key("Backspace");
     assert!(t.key("N").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
-    // Delete then Enter, Backspace twice, Delete twice: each deletes it.
+    // Enter deletes nothing.
+    t.key("Delete");
+    assert!(t.key("Enter").is_empty());
+    assert!(matches!(t.st.overlay, Overlay::Delete(_)));
+    t.key("Esc");
+    // Delete then Backspace, Backspace twice, Delete twice: each deletes it.
     for (first, second) in [
-        ("Delete", "Enter"),
+        ("Delete", "Backspace"),
         ("Backspace", "Backspace"),
         ("Delete", "Delete"),
     ] {
@@ -226,7 +234,7 @@ fn deleting_a_math_operand_says_which_channel_uses_it() {
     t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
     t.key("Delete");
     assert_eq!(
-        meas_deleted(&t.key("Enter")),
+        meas_deleted(&t.key("Delete")),
         Some((MeasId(3), "Sum deleted".to_owned()))
     );
 }

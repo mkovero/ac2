@@ -111,8 +111,15 @@ fn leq_windows_from_the_keyboard() {
     assert!(d.error.as_deref().is_some_and(|e| e.contains("LAeq 1 min")));
 }
 
+fn p_hint(t: &T) -> String {
+    match &t.st.overlay {
+        Overlay::NewLog(p) => p.confirm.hint.clone(),
+        other => panic!("{other:?}"),
+    }
+}
+
 /// Shift+R in the SPL pane (or "New SPL log…" in Ctrl+K) asks first, naming the
-/// run that ends and what starts over; N keeps the log, Enter sends `spl.log_new`.
+/// run that ends and what starts over; N keeps the log, Shift+R again sends `spl.log_new`.
 #[test]
 fn new_spl_log_asks_first() {
     let mut t = T::new();
@@ -163,7 +170,15 @@ fn new_spl_log_asks_first() {
         "{:?}",
         t.st.overlay
     );
+    // Enter, the stimulus's key, discards nothing; Shift+R again, the key that asked, does.
+    assert_eq!(
+        p_hint(&t),
+        "Shift+R starts the new log · N or Esc keeps the current one"
+    );
     let r = t.key("Enter");
+    assert!(r.is_empty(), "{r:?}");
+    assert!(matches!(t.st.overlay, Overlay::NewLog(_)));
+    let r = t.key("Shift+R");
     assert_eq!(t.st.overlay, Overlay::None);
     assert!(
         r.iter().any(|r| matches!(

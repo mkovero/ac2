@@ -640,10 +640,18 @@ fn detect_panel(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Opt
                         p.level.clone()
                     };
                     ui.label(RichText::new(shown).monospace().size(15.0).color(ch.text));
-                    if ui.button("Play burst").clicked() {
+                    if ui
+                        .button("Play burst")
+                        .on_hover_text(super::keys_cue(&[egui::Key::Enter]))
+                        .clicked()
+                    {
                         *msg = Some(SessionMsg::DetectConfirm);
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui
+                        .button("Cancel")
+                        .on_hover_text(super::keys_cue(&[egui::Key::ArrowUp]))
+                        .clicked()
+                    {
                         *msg = Some(SessionMsg::DetectCancel);
                     }
                 });

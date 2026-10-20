@@ -221,8 +221,8 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
 /// starts still fits the axis on its first frame.
 /// The keys act on what was selected last: from an empty daemon, two transfer
 /// measurements; the first selected, A hides its curve from the transfer pane while it keeps
-/// running and measuring, A shows it again; Backspace asks before it goes and Enter deletes
-/// it, the other measuring on.
+/// running and measuring, A shows it again; Backspace asks before it goes and Backspace
+/// again deletes it (Enter does not), the other measuring on.
 #[test]
 fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     use ac2_ui::state::{DeleteTarget, PaneKind};
@@ -326,7 +326,7 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     assert_eq!(names(&d.st).len(), 2);
     d.key("A");
 
-    // Backspace asks first; Enter deletes it.
+    // Backspace asks first; Enter, the stimulus's key, deletes nothing; Backspace again does.
     d.key("Backspace");
     assert!(
         matches!(&d.st.overlay, Overlay::Delete(p) if p.target == DeleteTarget::Meas(first.id)),
@@ -334,6 +334,8 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
         d.st.overlay
     );
     d.key("Enter");
+    assert!(matches!(&d.st.overlay, Overlay::Delete(_)));
+    d.key("Backspace");
     assert_eq!(d.st.overlay, Overlay::None);
     d.until("the first measurement gone", |s| {
         s.measurements().len() == 1 && s.meas(first.id).is_none()

@@ -209,6 +209,7 @@ impl AppState {
                     let run = self
                         .leq_run(m.id)
                         .map(|r| ac2_scene::leq::run_text(&r, &config.leq, |t| zone.offset_s(t)));
+                    let key = self.new_log_key();
                     self.overlay = Overlay::NewLog(Box::new(NewLogPrompt {
                         meas: m.id,
                         meter: m.config.name.clone(),
@@ -216,6 +217,7 @@ impl AppState {
                             &m.config.name,
                             &config.leq,
                             run.as_ref(),
+                            &key,
                         ),
                     }));
                 }

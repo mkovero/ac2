@@ -353,10 +353,18 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
     }
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        if ui.button("Apply").clicked() {
+        if ui
+            .button("Apply")
+            .on_hover_text(super::keys_cue(&[egui::Key::Enter]))
+            .clicked()
+        {
             msg = Some(LeqMsg::Submit);
         }
-        if ui.button("Cancel").clicked() {
+        if ui
+            .button("Cancel")
+            .on_hover_text(super::keys_cue(&[egui::Key::Escape]))
+            .clicked()
+        {
             msg = Some(LeqMsg::Cancel);
         }
     });
@@ -638,6 +646,8 @@ pub(super) fn new_log(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         return;
     };
     let k = p.confirm.clone();
+    // The confirming key follows the keymap: the key that asked, again.
+    let start_key = app.state.new_log_key();
     backdrop(ctx);
     let mut msg = None;
     egui::Area::new(egui::Id::new("ac2-new-log"))
@@ -660,11 +670,16 @@ pub(super) fn new_log(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.horizontal(|ui| {
                     if ui
                         .button(RichText::new("Start a new log").strong())
+                        .on_hover_text(&start_key)
                         .clicked()
                     {
                         msg = Some(true);
                     }
-                    if ui.button("Keep the current log").clicked() {
+                    if ui
+                        .button("Keep the current log")
+                        .on_hover_text(super::keys_cue(&[egui::Key::N, egui::Key::Escape]))
+                        .clicked()
+                    {
                         msg = Some(false);
                     }
                 });

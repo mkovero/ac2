@@ -55,7 +55,7 @@ fn run_seconds(s: &AppState) -> Option<u64> {
 /// The run clock and a new log from an empty daemon, using the app: a session and an SPL
 /// meter from the app; the Leq view's caption counts the meter's log (`running 0:00:05
 /// since … · LAeq total …`); Shift+R asks first, naming the run that ends; N keeps it,
-/// Shift+R and Enter start a new log, and the clock starts again from zero.
+/// Shift+R twice starts a new log, and the clock starts again from zero.
 #[test]
 fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     use ac2_ui::state::PaneKind;
@@ -124,9 +124,9 @@ fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     })?;
     let ended = run_seconds(&d.st).ok_or("clock")?;
 
-    // Shift+R, Enter: a new log; the clock starts from zero again.
+    // Shift+R, Shift+R again: a new log; the clock starts from zero again.
     d.key("Shift+R");
-    d.key("Enter");
+    d.key("Shift+R");
     assert_eq!(d.st.overlay, Overlay::None);
     d.until("the new log toasted", |s| {
         s.toasts
@@ -295,7 +295,7 @@ fn slow_a_restarted_app_shows_the_history_from_the_log() -> R {
         history_points(s).is_some_and(|(_, p)| p.first().is_some_and(|x| x.t <= first + 0.5))
     })?;
     d.key("Shift+R");
-    d.key("Enter");
+    d.key("Shift+R");
     d.until("the new log toasted", |s| {
         s.toasts
             .iter()

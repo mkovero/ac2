@@ -226,7 +226,11 @@ fn run_wordings() {
 fn new_log_confirmation_names_what_ends() {
     let c = cfg();
     let r = run_text(&run(), &c, |_| UTC_PLUS_2);
-    let k = new_log_confirm("FOH SPL", &c, Some(&r));
+    let k = new_log_confirm("FOH SPL", &c, Some(&r), "Shift+R");
+    assert_eq!(
+        k.hint,
+        "Shift+R starts the new log · N or Esc keeps the current one"
+    );
     assert_eq!(k.title, "Start a new SPL log for FOH SPL?");
     assert_eq!(
         k.lines[0],
@@ -239,7 +243,7 @@ fn new_log_confirmation_names_what_ends() {
     );
     assert!(k.lines[2].starts_with("Kept: the windows, limits"));
     assert!(k.lines[3].contains("ac2 spl leq export --previous"));
-    let k = new_log_confirm("FOH SPL", &c, None);
+    let k = new_log_confirm("FOH SPL", &c, None, "Shift+R");
     assert_eq!(k.lines[0], "The current log ends (no seconds logged yet).");
 }
 

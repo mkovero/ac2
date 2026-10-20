@@ -367,6 +367,22 @@ impl AppState {
         self.overlay = Overlay::None;
     }
 
+    /// Whether `chord` starts the new SPL log in its confirmation: the key that asked
+    /// (Shift+R), pressed again; Enter only where the keymap leaves the command without a key.
+    pub(super) fn new_log_confirms(&self, chord: Chord) -> bool {
+        match self.keys.key_hint(CommandId::SplNewLog, Scope::Spl) {
+            Some(_) => self.keys.lookup(Scope::Spl, chord) == Some(CommandId::SplNewLog),
+            None => chord == Chord::key(eframe::egui::Key::Enter),
+        }
+    }
+
+    /// The confirming key as the confirmation names it ([`Self::new_log_confirms`]).
+    pub(crate) fn new_log_key(&self) -> String {
+        self.keys
+            .key_hint(CommandId::SplNewLog, Scope::Spl)
+            .unwrap_or_else(|| Chord::key(eframe::egui::Key::Enter).label())
+    }
+
     /// The new SPL log confirmation: start it, or keep the current log.
     pub(super) fn new_log(&mut self, go: bool, out: &mut Vec<Request>) {
         let Overlay::NewLog(p) = &self.overlay else {

@@ -2,6 +2,7 @@
 
 use eframe::egui::{self, Color32, RichText, text::LayoutJob};
 
+use super::keys_cue;
 use crate::app::App;
 use crate::forms::Value;
 use crate::keys::{CommandId, Keymap, LabelStyle, STOP_ANYWHERE, Scope};
@@ -60,15 +61,27 @@ fn delete(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if k.refused {
-                        if ui.button("Close").clicked() {
+                        if ui
+                            .button("Close")
+                            .on_hover_text(keys_cue(&[egui::Key::Enter, egui::Key::Escape]))
+                            .clicked()
+                        {
                             msg = Some(false);
                         }
                         return;
                     }
-                    if ui.button(RichText::new("Delete").strong()).clicked() {
+                    if ui
+                        .button(RichText::new("Delete").strong())
+                        .on_hover_text(keys_cue(&[egui::Key::Delete, egui::Key::Backspace]))
+                        .clicked()
+                    {
                         msg = Some(true);
                     }
-                    if ui.button("Keep it").clicked() {
+                    if ui
+                        .button("Keep it")
+                        .on_hover_text(keys_cue(&[egui::Key::N, egui::Key::Escape]))
+                        .clicked()
+                    {
                         msg = Some(false);
                     }
                 });
@@ -137,7 +150,10 @@ fn choose(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.horizontal(|ui| {
                     // A question whose answers include Cancel needs no second one.
                     if !p.choices.iter().any(|c| c.label == "Cancel")
-                        && ui.button("Cancel").clicked()
+                        && ui
+                            .button("Cancel")
+                            .on_hover_text(keys_cue(&[egui::Key::Escape]))
+                            .clicked()
                     {
                         msg = Some(None);
                     }
@@ -389,10 +405,18 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     let verb = f.kind.verb();
-                    if ui.button(verb).clicked() {
+                    if ui
+                        .button(verb)
+                        .on_hover_text(keys_cue(&[egui::Key::Enter]))
+                        .clicked()
+                    {
                         msg = Some(FormMsg::Submit);
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui
+                        .button("Cancel")
+                        .on_hover_text(keys_cue(&[egui::Key::Escape]))
+                        .clicked()
+                    {
                         msg = Some(FormMsg::Cancel);
                     }
                 });

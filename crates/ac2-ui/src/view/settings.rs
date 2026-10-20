@@ -310,7 +310,11 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
                             .size(15.0)
                             .color(ch.text),
                     );
-                    if ui.button("Raise").clicked() {
+                    if ui
+                        .button("Raise")
+                        .on_hover_text(super::keys_cue(&[egui::Key::Enter]))
+                        .clicked()
+                    {
                         *msg = Some(Msg::Settings(SettingsMsg::CeilingApply));
                     }
                 });

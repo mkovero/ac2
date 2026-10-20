@@ -469,8 +469,8 @@ only outlined while a later-selected trace has them.
 - **Shift+A** hides a measurement and everything under it (live curve, traces, math
   channels), and shows them all when all are hidden (with a trace selected: its group).
 - **Delete** / **Backspace** on a measurement that owns no stored traces asks: *Delete
-  measurement TF 2? Its live curve and settings go; it owns no stored traces.* **Delete**,
-  **Backspace** or **Enter** deletes, **Esc** or **N** keeps. One that owns traces or math
+  measurement TF 2? Its live curve and settings go; it owns no stored traces.* **Delete**
+  or **Backspace** deletes (**Enter** does nothing there), **Esc** or **N** keeps. One that owns traces or math
   channels asks what happens to them
   ([below](#deleting-a-measurement-that-owns-traces)). A measurement a math channel computes from cannot be deleted; the
   window names the channel to edit or delete first.
@@ -1229,8 +1229,8 @@ as a level difference. A locked trace keeps its offset.
   export --csv` does: a file path, or a folder (named after the trace, `Main L S1.csv`); a
   path ending in `.wav` writes its impulse response. The prompt starts in the last export's
   folder (first: home); the file is written on this computer, also with a remote daemon.
-- **Delete** / **Backspace** asks, naming the trace; **Delete**, **Backspace** or **Enter**
-  deletes, **N** or **Esc** keeps. The selection moves to the next shown trace (else the one
+- **Delete** / **Backspace** asks, naming the trace; **Delete** or **Backspace** deletes
+  (**Enter** does nothing there: it is the stimulus's key), **N** or **Esc** keeps. The selection moves to the next shown trace (else the one
   before, else live). A locked trace is not deleted. With a measurement selected after the
   trace, the keys are about the measurement.
 
@@ -2065,7 +2065,8 @@ Without the history strip it is not shown; `ac2 spl leq watch` always prints it.
 
 **Shift+R** in the SPL pane (palette *New SPL log…*) starts a **new log**, for the
 show after a loud soundcheck: windows, states, alarms, clock and total start over; windows
-and limits stay. It asks first, naming the run that ends. The ended log can be exported
+and limits stay. It asks first, naming the run that ends; **Shift+R** again starts it (**Enter** does
+nothing there), **N** or **Esc** keeps the current log. The ended log can be exported
 (`ac2 spl leq export --previous`) until the next new log or daemon restart.
 
 #### Setting windows and limits (Shift+L)

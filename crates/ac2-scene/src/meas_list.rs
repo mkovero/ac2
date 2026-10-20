@@ -892,7 +892,7 @@ pub fn delete_confirm(m: &Measurement) -> DeleteConfirm {
             format!("{} · {}", kind_name(&m.config.kind), state_word(m)),
             "Its live curve and settings go; it owns no stored traces.".to_owned(),
         ],
-        hint: "Delete, Backspace or Enter deletes it · Esc or N keeps it".to_owned(),
+        hint: "Delete or Backspace deletes it · Esc or N keeps it".to_owned(),
         refused: false,
     }
 }

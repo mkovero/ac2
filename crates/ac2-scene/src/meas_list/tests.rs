@@ -213,10 +213,7 @@ fn delete_asks_and_a_math_operand_refuses() {
             "Its live curve and settings go; it owns no stored traces."
         ]
     );
-    assert_eq!(
-        c.hint,
-        "Delete, Backspace or Enter deletes it · Esc or N keeps it"
-    );
+    assert_eq!(c.hint, "Delete or Backspace deletes it · Esc or N keeps it");
     assert!(!c.refused);
     let r = delete_refused(&m, &["Avg".to_owned()]);
     assert_eq!(r.title, "TF 2 cannot be deleted");
