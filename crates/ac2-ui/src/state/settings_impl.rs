@@ -448,6 +448,14 @@ impl AppState {
                 self.prefs.jump_prominence_db = db;
                 self.prefs_dirty = true;
             }
+            DisplayRow::Advice
+            | DisplayRow::AdviceRefHeadroom
+            | DisplayRow::AdviceLowCoherence
+            | DisplayRow::AdviceLowLevel
+                if d != 0 =>
+            {
+                self.step_advice(row, d);
+            }
             DisplayRow::LevelAxes if d == 0 => {
                 self.pane_levels.clear();
                 self.level_set.clear();
@@ -842,6 +850,44 @@ impl AppState {
             "resolution marker {}",
             crate::settings::resolution_marker_text(self.view.unresolved)
         ));
+    }
+
+    /// The Display page's headroom advice lines; remembered in the prefs. A new threshold
+    /// starts every measurement's advice afresh: what was shown was judged on the old one.
+    pub(super) fn step_advice(&mut self, row: DisplayRow, d: i32) {
+        use ac2_scene::advice::{
+            LOW_COHERENCE, LOW_LEVEL_DBFS, REF_HEADROOM_DB, low_coherence_text, low_level_text,
+            on_text, ref_headroom_text, step_choice,
+        };
+        let a = &mut self.prefs.advice;
+        let said = match row {
+            DisplayRow::Advice => {
+                a.on = !a.on;
+                format!("headroom advice {}", on_text(a.on))
+            }
+            DisplayRow::AdviceRefHeadroom => {
+                a.ref_headroom_db = step_choice(&REF_HEADROOM_DB, a.ref_headroom_db, d);
+                format!(
+                    "advise lowering at {}",
+                    ref_headroom_text(a.ref_headroom_db)
+                )
+            }
+            DisplayRow::AdviceLowCoherence => {
+                a.low_coherence = step_choice(&LOW_COHERENCE, a.low_coherence, d);
+                format!("advise raising at {}", low_coherence_text(a.low_coherence))
+            }
+            DisplayRow::AdviceLowLevel => {
+                a.low_level_dbfs = step_choice(&LOW_LEVEL_DBFS, a.low_level_dbfs, d);
+                format!(
+                    "advise raising with the {}",
+                    low_level_text(a.low_level_dbfs)
+                )
+            }
+            _ => return,
+        };
+        self.advice.clear();
+        self.prefs_dirty = true;
+        self.toast(said);
     }
 
     /// Columns ↔ tiles, or the history strip on / off; remembered in the prefs.

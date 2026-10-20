@@ -253,6 +253,8 @@ pub struct UiPrefs {
     /// How long the SPL meter's number holds a reading; `None`: by its time weighting
     /// (`ac2_scene::spl::display_period_s`).
     pub spl_hold_ms: Option<u32>,
+    /// The transfer panes' headroom advice: on or off and its thresholds.
+    pub advice: ac2_scene::advice::AdviceSettings,
     /// The layout as last left.
     pub layout: LayoutPrefs,
     /// The impulse-response dB axes as last left.
@@ -315,6 +317,7 @@ impl Default for UiPrefs {
             spec_ease: true,
             jump_prominence_db: ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB,
             spl_hold_ms: None,
+            advice: ac2_scene::advice::AdviceSettings::default(),
             layout: LayoutPrefs::default(),
             ir_levels: IrLevelPrefs::default(),
             window: None,

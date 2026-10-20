@@ -280,10 +280,14 @@ pub enum DisplayRow {
     ResolutionMarker,
     CursorJump,
     LevelAxes,
+    Advice,
+    AdviceRefHeadroom,
+    AdviceLowCoherence,
+    AdviceLowLevel,
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 15] = [
+    pub const ALL: [DisplayRow; 19] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -299,6 +303,10 @@ impl DisplayRow {
         DisplayRow::ResolutionMarker,
         DisplayRow::CursorJump,
         DisplayRow::LevelAxes,
+        DisplayRow::Advice,
+        DisplayRow::AdviceRefHeadroom,
+        DisplayRow::AdviceLowCoherence,
+        DisplayRow::AdviceLowLevel,
     ];
 
     pub fn title(self) -> &'static str {
@@ -318,6 +326,10 @@ impl DisplayRow {
             DisplayRow::ResolutionMarker => "Resolution marker",
             DisplayRow::CursorJump => "Peak / notch jumps",
             DisplayRow::LevelAxes => "Level axes",
+            DisplayRow::Advice => "Headroom advice",
+            DisplayRow::AdviceRefHeadroom => "Advise lowering at",
+            DisplayRow::AdviceLowCoherence => "Advise raising at",
+            DisplayRow::AdviceLowLevel => "… and",
         }
     }
 }
@@ -429,6 +441,7 @@ pub fn display_rows(
     spl_hold_ms: Option<u32>,
     views: PaneViews,
     jump_prominence_db: f64,
+    advice: ac2_scene::advice::AdviceSettings,
 ) -> Vec<(DisplayRow, String)> {
     DisplayRow::ALL
         .iter()
@@ -480,6 +493,16 @@ pub fn display_rows(
                 DisplayRow::SweepView => sweep_view_name(views.sweep).to_owned(),
                 DisplayRow::LevelAxes => {
                     "each pane's as last left · Enter resets them to the defaults".into()
+                }
+                DisplayRow::Advice => ac2_scene::advice::on_text(advice.on).into(),
+                DisplayRow::AdviceRefHeadroom => {
+                    ac2_scene::advice::ref_headroom_text(advice.ref_headroom_db)
+                }
+                DisplayRow::AdviceLowCoherence => {
+                    ac2_scene::advice::low_coherence_text(advice.low_coherence)
+                }
+                DisplayRow::AdviceLowLevel => {
+                    ac2_scene::advice::low_level_text(advice.low_level_dbfs)
                 }
             };
             (*r, v)

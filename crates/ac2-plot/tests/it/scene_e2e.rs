@@ -96,8 +96,9 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
     }
 }
 
-/// Two traces with a cursor and a STALE banner, rendered and compared with `name`.
-fn transfer_golden(name: &str, view: ViewState, status: Status) {
+/// Two traces with a cursor under `status`'s banners (the first reading `first`), rendered
+/// and compared with `name`.
+fn transfer_golden(name: &str, view: ViewState, status: Status, first: &str) {
     let Some(gpu) = gpu(name) else {
         return;
     };
@@ -122,7 +123,7 @@ fn transfer_golden(name: &str, view: ViewState, status: Status) {
         &theme,
         size,
     );
-    assert_eq!(s.banners[0].text, "STALE · 2.4 s");
+    assert_eq!(s.banners[0].text, first);
     // The strip sits above every pane.
     assert!(s.panes.iter().all(|p| p.plot.y > s.strip.bottom()));
     let mut r = renderer(gpu);
@@ -139,7 +140,12 @@ fn stale() -> Status {
 
 #[test]
 fn transfer_view() {
-    transfer_golden("transfer_view", ViewState::default(), stale());
+    transfer_golden(
+        "transfer_view",
+        ViewState::default(),
+        stale(),
+        "STALE · 2.4 s",
+    );
 }
 
 /// The cursor read against its mark on the bump's top: the mark's dashed line in every
@@ -150,7 +156,7 @@ fn transfer_view_cursor_mark() {
         cursor_mark_hz: Some(2000.0),
         ..ViewState::default()
     };
-    transfer_golden("transfer_view_cursor_mark", view, stale());
+    transfer_golden("transfer_view_cursor_mark", view, stale(), "STALE · 2.4 s");
 }
 
 #[test]
@@ -162,7 +168,38 @@ fn transfer_view_coherence_overlay() {
         no_delay_estimate: Some(ac2_scene::banner::NoDelayEstimate::NotFound),
         ..stale()
     };
-    transfer_golden("transfer_view_coherence_overlay", view, status);
+    transfer_golden(
+        "transfer_view_coherence_overlay",
+        view,
+        status,
+        "STALE · 2.4 s",
+    );
+}
+
+/// Headroom advice: an info banner under the delay notice, the cap by the max level said.
+#[test]
+fn transfer_view_advice() {
+    use ac2_scene::advice::{Advice, Stimulus};
+    let status = Status {
+        no_delay_estimate: Some(ac2_scene::banner::NoDelayEstimate::NotFound),
+        advice: Some(Advice::Raise {
+            want_db: 18.0,
+            coherence: 0.42,
+            meas_rms_dbfs: -64.3,
+            stimulus: Some(Stimulus {
+                level_dbfs: -54.5,
+                max_level_dbfs: -50.0,
+            }),
+            meas_calibrated: false,
+        }),
+        ..Status::default()
+    };
+    transfer_golden(
+        "transfer_view_advice",
+        ViewState::default(),
+        status,
+        "NO DELAY ESTIMATE",
+    );
 }
 
 /// The valid-resolution marker of a 1/96-oct curve at 96 kHz: faint shade and dashed edges

@@ -132,6 +132,7 @@ pub fn status(
             .daemon()
             .and_then(|d| ac2_scene::autosave::damage_text(&d.rig.damaged_files)),
         drive: st.drive(),
+        advice: None,
     }
 }
 
@@ -300,10 +301,16 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
         // The shown math channel's operands.
         let frames: Vec<(MeasId, &TopicFrame)> = live.iter().map(|l| (l.meas.id, l.tf)).collect();
         status.math = shown_math(st, focus, &frames);
+        // Headroom advice is about the measurement the pane shows, from live levels; a stored
+        // trace or math channel has no stimulus to change.
+        status.advice = focus
+            .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
+            .and_then(|m| st.advice_of(m.id));
         // Under the stack's top pane, which says it for the column. Faults (clipping,
         // STALE, audio stopped) stay in every pane: each must be seen wherever one looks.
         if st.stacked_under(pane) {
             status.no_delay_estimate = None;
+            status.advice = None;
         }
         transfer_scene(
             traces,

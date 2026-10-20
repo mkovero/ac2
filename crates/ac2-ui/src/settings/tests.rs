@@ -95,7 +95,14 @@ fn display_and_recording_texts() {
         bar_ease: false,
         spec_ease: false,
     };
-    let rows = display_rows(ThemeName::Light, switches, Some(500), views, 6.0);
+    let rows = display_rows(
+        ThemeName::Light,
+        switches,
+        Some(500),
+        views,
+        6.0,
+        ac2_scene::advice::AdviceSettings::default(),
+    );
     let texts: Vec<&str> = rows.iter().map(|(_, v)| v.as_str()).collect();
     assert_eq!(
         texts,
@@ -115,6 +122,10 @@ fn display_and_recording_texts() {
             "off",
             "stands out by 6 dB",
             "each pane's as last left · Enter resets them to the defaults",
+            "on: a notice suggests lowering or raising the stimulus (never changes it)",
+            "reference peak within 3 dB of full scale",
+            "coherence under γ² 0.70",
+            "measurement input under −70.0 dBFS RMS",
         ]
     );
     let rows = recording_rows(60, None);

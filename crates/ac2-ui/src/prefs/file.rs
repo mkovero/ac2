@@ -37,6 +37,9 @@ struct File {
     sessions: BTreeMap<String, RolesFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     leq: Option<LeqFile>,
+    /// Written only when not the defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    advice: Option<AdviceFile>,
     /// A `[layout]` that does not parse as a pane tree is dropped (with a warning in the
     /// log): the panes are a convenience, so the app starts with one pane instead of
     /// refusing the hold times, sessions and devices the rest of the file keeps.
@@ -385,6 +388,68 @@ struct LeqFile {
     history: bool,
 }
 
+/// The headroom advice; a missing key keeps its default.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdviceFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    on: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ref_headroom_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    low_coherence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    low_level_dbfs: Option<f64>,
+}
+
+impl AdviceFile {
+    fn parse(&self) -> Result<ac2_scene::advice::AdviceSettings, String> {
+        use ac2_scene::advice::{AdviceSettings, LOW_COHERENCE, LOW_LEVEL_DBFS, REF_HEADROOM_DB};
+        let d = AdviceSettings::default();
+        let within = |key: &str, v: Option<f64>, choices: &[f64], default: f64| {
+            let (lo, hi) = (choices[0], choices[choices.len() - 1]);
+            match v {
+                None => Ok(default),
+                Some(v) if (lo..=hi).contains(&v) => Ok(v),
+                Some(_) => Err(format!("ui.toml: advice.{key} must be {lo} … {hi}")),
+            }
+        };
+        Ok(AdviceSettings {
+            on: self.on.unwrap_or(d.on),
+            ref_headroom_db: within(
+                "ref_headroom_db",
+                self.ref_headroom_db,
+                &REF_HEADROOM_DB,
+                d.ref_headroom_db,
+            )?,
+            low_coherence: within(
+                "low_coherence",
+                self.low_coherence,
+                &LOW_COHERENCE,
+                d.low_coherence,
+            )?,
+            low_level_dbfs: within(
+                "low_level_dbfs",
+                self.low_level_dbfs,
+                &LOW_LEVEL_DBFS,
+                d.low_level_dbfs,
+            )?,
+        })
+    }
+
+    fn from_prefs(a: &ac2_scene::advice::AdviceSettings) -> Option<Self> {
+        let d = ac2_scene::advice::AdviceSettings::default();
+        let changed = |v: f64, d: f64| ((v - d).abs() > 1e-9).then_some(v);
+        let f = Self {
+            on: (a.on != d.on).then_some(a.on),
+            ref_headroom_db: changed(a.ref_headroom_db, d.ref_headroom_db),
+            low_coherence: changed(a.low_coherence, d.low_coherence),
+            low_level_dbfs: changed(a.low_level_dbfs, d.low_level_dbfs),
+        };
+        (*a != d).then_some(f)
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RolesFile {
@@ -558,6 +623,12 @@ impl UiPrefs {
                 .filter(|d| d.is_finite() && *d > 0.0 && *d <= 60.0)
                 .unwrap_or(ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB),
             spl_hold_ms: f.spl_hold_ms,
+            advice: f
+                .advice
+                .as_ref()
+                .map(AdviceFile::parse)
+                .transpose()?
+                .unwrap_or_default(),
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
             ir_levels: f
                 .ir_levels
@@ -596,6 +667,7 @@ impl UiPrefs {
                 != ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB)
                 .then_some(self.jump_prominence_db),
             spl_hold_ms: self.spl_hold_ms,
+            advice: AdviceFile::from_prefs(&self.advice),
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,
             layout: (self.layout != LayoutPrefs::default())

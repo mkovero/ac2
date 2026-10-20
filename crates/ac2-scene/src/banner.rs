@@ -19,6 +19,7 @@
 //! | 12 | LOG NOT SAVED · reason | warning | the daemon cannot write an SPL meter's log (`autosave.log_failures`; the detail names the logs and for how long) |
 //! | 13 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
 //! | 14 | FILE DAMAGED · what | info | the daemon started on a damaged state file, set it aside and went on (`rig.damaged_files`; the detail names each file and what was done) |
+//! | 15 | LOWER STIMULUS / RAISE STIMULUS · step / STIMULUS AT MAX LEVEL | info | transfer pane headroom advice ([`crate::advice`]); never with a fault or STALE up |
 //!
 //! AUDIO STOPPED comes right after the daemon itself: no audio invalidates everything
 //! measured, and the daemon is already working on it. It replaces STALE, whose cause it
@@ -37,6 +38,10 @@
 //! FILE DAMAGED is history: the daemon already recovered (a power cut tore a file), and
 //! what is measured now is sound. It ranks last, and stays until the daemon restarts so
 //! the operator who next looks learns that a trace, a log or a setting may be missing.
+//!
+//! Headroom advice ranks last: it is a suggestion, not a state, and every other banner
+//! names something already wrong or missing. It never shows beside a fault or STALE: the
+//! fault names what to fix first, and stale levels are no basis for advice.
 //!
 //! CHECK ROUTING sits right under NO REFERENCE: a mis-patched reference invalidates every
 //! transfer value just as a missing one does, and fixing the patch comes before any other
@@ -91,6 +96,7 @@ pub enum BannerKind {
     LogNotSaved,
     NoDelayEstimate,
     FileDamaged,
+    Headroom,
 }
 
 impl BannerKind {
@@ -108,7 +114,7 @@ impl BannerKind {
             | Self::OutputTimingJump
             | Self::ClockDrift
             | Self::LogNotSaved => Severity::Warning,
-            Self::NoDelayEstimate | Self::FileDamaged => Severity::Info,
+            Self::NoDelayEstimate | Self::FileDamaged | Self::Headroom => Severity::Info,
         }
     }
 }
@@ -150,6 +156,8 @@ pub struct Status {
     /// What this app's stimulus is doing: NO REFERENCE's detail names the keys that start
     /// it while nothing here plays.
     pub drive: crate::stimulus::Drive,
+    /// The shown transfer measurement's headroom advice ([`crate::advice::Hold::shown`]).
+    pub advice: Option<crate::advice::Advice>,
 }
 
 /// Why a TF measurement has no delay the operator can rely on.
@@ -315,6 +323,14 @@ pub fn banners(s: &Status) -> Vec<Banner> {
             d.banner.clone(),
             Some(d.detail.clone()),
         ));
+    }
+    if let Some(a) = &s.advice
+        && !out
+            .iter()
+            .any(|b| b.severity == Severity::Fault || b.kind == BannerKind::Stale)
+    {
+        let (text, detail) = crate::advice::text(a);
+        out.push(banner(BannerKind::Headroom, text, Some(detail)));
     }
     out.sort_by_key(|b| b.kind);
     out

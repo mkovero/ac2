@@ -384,6 +384,7 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
             coherence: st.view.tf.coherence_placement,
         },
         st.view.jump_prominence_db,
+        st.prefs.advice,
     );
     for (row, value) in rows {
         let focused = s.display == row;
