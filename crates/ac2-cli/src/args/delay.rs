@@ -3,7 +3,7 @@
 use clap::Subcommand;
 
 use super::{BandArg, MeasRef, PickArg, Switch};
-use crate::units::{Celsius, DelayAmount, Time};
+use ac2_scene::unit_text::{Celsius, DelayAmount, Time};
 
 /// `delay …`.
 #[derive(Debug, Subcommand)]

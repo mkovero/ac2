@@ -119,7 +119,9 @@ fn volts_and_sensitivities() {
     assert_eq!(ok::<MicSensitivityArg>("0.05V/Pa").0, MvPerPa(50.0));
     let db = ok::<MicSensitivityArg>("-36.5dBV/Pa").0.0;
     assert!((db - 14.962).abs() < 1e-3, "{db}");
-    for bad in ["15", "15mv", "0mv/pa", "15pa"] {
+    assert_eq!(ok::<MicSensitivityArg>("15 mV").0, MvPerPa(15.0));
+    assert_eq!(ok::<MicSensitivityArg>("15.0 mV / Pa").0, MvPerPa(15.0));
+    for bad in ["15", "15v", "0mv/pa", "15pa"] {
         assert!(bad.parse::<MicSensitivityArg>().is_err(), "{bad}");
     }
 }
@@ -132,7 +134,9 @@ fn impedances() {
     assert_eq!(ok::<OhmsArg>("2kohm").0, Ohms(2000.0));
     assert_eq!(ok::<OhmsArg>("2kΩ").0, Ohms(2000.0));
     assert_eq!(ok::<OhmsArg>("1.5KOhm").0, Ohms(1500.0));
-    for bad in ["330", "0ohm", "-330ohm", "2mohm", "20000kohm", "2k"] {
+    assert_eq!(ok::<OhmsArg>("2 k").0, Ohms(2000.0));
+    assert_eq!(ok::<OhmsArg>("2,2 kohm").0, Ohms(2200.0));
+    for bad in ["330", "0ohm", "-330ohm", "2mohm", "20000kohm", "2kv"] {
         assert!(bad.parse::<OhmsArg>().is_err(), "{bad}");
     }
 }
@@ -208,7 +212,10 @@ fn channel_lists() {
     assert_eq!(ok::<Channel>("3").0, 2);
     assert_eq!(Channel(2).to_string(), "3");
     assert_eq!(channels_text(&[0, 3]), "1,4");
-    for bad in ["0", "1,,2", "3-1", "1,1", "a", "", "257", "1-", "-2"] {
+    assert_eq!(ok::<Channels>("1, 2 4-5").0, vec![0, 1, 3, 4]);
+    for bad in [
+        "0", "1,,2", "3-1", "1,1", "1 1", "a", "", "257", "1-", "-2", "1 - 2",
+    ] {
         assert!(bad.parse::<Channels>().is_err(), "{bad}");
     }
 }
@@ -232,4 +239,55 @@ fn leq_windows_and_limits() {
     for bad in ["30min", "30min=99", "=99db"] {
         assert!(bad.parse::<LeqLimitArg>().is_err(), "{bad}");
     }
+}
+
+#[test]
+fn locale_and_spacing() {
+    assert_eq!(ok::<LevelDbfs>("\u{2212}12,5 dBFS").0, Dbfs(-12.5));
+    assert_eq!(ok::<SplLevel>("94 dB SPL").0, DbSpl(94.0));
+    assert_eq!(ok::<Freq>("1,5 kHz").0, Hz(1500.0));
+    assert!(bad::<Freq>("1,2,3hz").contains("expected a number"));
+    assert_eq!(ok::<LeqWindowArg>("30 min").seconds, 1800);
+}
+
+#[test]
+fn bare_numbers_only_in_a_field() {
+    assert_eq!(in_field::<Freq>("400", "hz"), Ok(Freq(Hz(400.0))));
+    assert_eq!(in_field::<Freq>("1 kHz", "hz"), Ok(Freq(Hz(1000.0))));
+    assert_eq!(in_field::<OhmsArg>("330", "ohm"), Ok(OhmsArg(Ohms(330.0))));
+    assert_eq!(in_field::<Gain>("-3", "db"), Ok(Gain(Db(-3.0))));
+    assert_eq!(in_field::<Time>("3", "ms"), Ok(Time(Seconds(0.003))));
+    assert_eq!(
+        in_field::<DelayAmount>("-2", "ms"),
+        Ok(DelayAmount::Time(Seconds(-0.002)))
+    );
+    // A field names the unit of a bare number, never another unit: dB is not dBFS.
+    let e = in_field::<LevelDbfs>("-20 dB", "dbfs").expect_err("db in a dBFS field");
+    assert_eq!(e.0, "\"-20 dB\": unknown unit \"db\" (expected dbfs)");
+    assert_eq!(
+        in_field::<Freq>("0", "hz").expect_err("zero").0,
+        "\"0\": frequency must be positive"
+    );
+    assert!(in_field::<Freq>("", "hz").is_err());
+    assert!("400".parse::<Freq>().is_err(), "the CLI wants the unit");
+}
+
+#[test]
+fn calendar_dates() {
+    assert!(matches!(
+        ok::<TimeRef>("2024-02-29T12:00"),
+        TimeRef::Local {
+            date: Some((2024, 2, 29)),
+            seconds: 43_200
+        }
+    ));
+    for bad in [
+        "2025-02-29T12:00",
+        "1900-02-29T00:00",
+        "2026-04-31T00:00",
+        "2026-00-01T00:00",
+    ] {
+        assert!(bad.parse::<TimeRef>().is_err(), "{bad}");
+    }
+    assert!("2000-02-29T00:00".parse::<TimeRef>().is_ok());
 }

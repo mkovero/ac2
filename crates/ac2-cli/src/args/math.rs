@@ -5,7 +5,7 @@ use std::str::FromStr;
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::{AverageArg, FractionArg, MeasRef};
-use crate::units::{Freq, Time};
+use ac2_scene::unit_text::{Freq, Time};
 
 /// `math …`.
 #[derive(Debug, Subcommand)]
@@ -157,8 +157,12 @@ impl FromStr for BandArg {
                 let bad =
                     || format!("{s:?}: expected full, mid, sub, auto or edges like 80hz-800hz");
                 let (lo, hi) = edges.split_once('-').ok_or_else(bad)?;
-                let lo: Freq = lo.parse().map_err(|e: crate::units::UnitError| e.0)?;
-                let hi: Freq = hi.parse().map_err(|e: crate::units::UnitError| e.0)?;
+                let lo: Freq = lo
+                    .parse()
+                    .map_err(|e: ac2_scene::unit_text::UnitError| e.0)?;
+                let hi: Freq = hi
+                    .parse()
+                    .map_err(|e: ac2_scene::unit_text::UnitError| e.0)?;
                 if hi.0.0 <= lo.0.0 {
                     return Err(format!("{s:?}: the upper edge must be above the lower"));
                 }

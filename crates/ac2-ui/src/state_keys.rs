@@ -406,19 +406,26 @@ impl AppState {
             }),
             PromptKind::FinderObservation => self.set_observation(&text),
             PromptKind::Offset(id) => {
-                parse_number(&text, &["db"]).map(|v| self.set_live_offset(id, v, out))
+                ac2_scene::unit_text::in_field::<ac2_scene::unit_text::Gain>(&text, "db")
+                    .map_err(String::from)
+                    .map(|v| self.set_live_offset(id, v.0.0, out))
             }
-            PromptKind::TraceOffset(id) => parse_number(&text, &["db"]).and_then(|v| {
-                let t = self.trace_meta(id)?;
-                let mut edit = t.edit.clone();
-                edit.offset = Db(v);
-                let what = format!("{}: offset {}", trace_label(&t), format::db_readout(v));
-                out.push(Request::Call {
-                    cmd: Command::TraceUpdate { trace: id, edit },
-                    what,
-                });
-                Ok(())
-            }),
+            PromptKind::TraceOffset(id) => {
+                ac2_scene::unit_text::in_field::<ac2_scene::unit_text::Gain>(&text, "db")
+                    .map_err(String::from)
+                    .and_then(|v| {
+                        let v = v.0.0;
+                        let t = self.trace_meta(id)?;
+                        let mut edit = t.edit.clone();
+                        edit.offset = Db(v);
+                        let what = format!("{}: offset {}", trace_label(&t), format::db_readout(v));
+                        out.push(Request::Call {
+                            cmd: Command::TraceUpdate { trace: id, edit },
+                            what,
+                        });
+                        Ok(())
+                    })
+            }
             PromptKind::TraceRename(id) => {
                 let name = text.trim();
                 if name.is_empty() {
@@ -541,30 +548,35 @@ impl AppState {
                     cmd: Command::SessionInputs { inputs },
                 });
             }),
-            PromptKind::Delay(id) => parse_number(&text, &["ms"]).and_then(|v| {
-                // Negative is the measurement leading the reference (a mic ahead of the
-                // reference tap): the aligner buffers the measurement leg instead.
-                if !(-10_000.0..=10_000.0).contains(&v) {
-                    return Err("delay must be −10000 … 10000 ms".to_string());
-                }
-                let delay = v / 1000.0;
-                // A typed delay keeps the arrival: the daemon moves the offset from it.
-                let (name, offset) = self.meas(id).map_or((String::new(), 0.0), |m| {
-                    let offset = m
-                        .delay
-                        .as_ref()
-                        .map_or(0.0, |d| d.nudged.0 + delay - d.applied.0);
-                    (m.config.name.clone(), offset)
-                });
-                out.push(Request::Call {
-                    cmd: Command::DelaySet {
-                        meas: id,
-                        delay: Seconds(delay),
-                    },
-                    what: format::typed_delay_toast(&name, delay, offset),
-                });
-                Ok(())
-            }),
+            PromptKind::Delay(id) => {
+                ac2_scene::unit_text::in_field::<ac2_scene::unit_text::DelayAmount>(&text, "ms")
+                    .map_err(String::from)
+                    .and_then(|v| {
+                        // Negative is the measurement leading the reference (a mic ahead of the
+                        // reference tap): the aligner buffers the measurement leg instead. The
+                        // shared parser bounds a time to ±10 s.
+                        let ac2_scene::unit_text::DelayAmount::Time(delay) = v else {
+                            return Err("type the delay as a time, e.g. 12.5 ms".to_string());
+                        };
+                        let delay = delay.0;
+                        // A typed delay keeps the arrival: the daemon moves the offset from it.
+                        let (name, offset) = self.meas(id).map_or((String::new(), 0.0), |m| {
+                            let offset = m
+                                .delay
+                                .as_ref()
+                                .map_or(0.0, |d| d.nudged.0 + delay - d.applied.0);
+                            (m.config.name.clone(), offset)
+                        });
+                        out.push(Request::Call {
+                            cmd: Command::DelaySet {
+                                meas: id,
+                                delay: Seconds(delay),
+                            },
+                            what: format::typed_delay_toast(&name, delay, offset),
+                        });
+                        Ok(())
+                    })
+            }
         };
         match r {
             Ok(()) => {

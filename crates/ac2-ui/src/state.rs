@@ -125,7 +125,7 @@ pub use panes_views::{
 };
 pub use text::{
     curve_what, kind_shown, meas_input, mics_text, open_session_hint, parse_band, parse_mics,
-    parse_number, parse_outputs, parse_session_ref, parse_slot, trace_label,
+    parse_session_ref, parse_slot, trace_label,
 };
 use text::{drawn_in, offset_text, slot_of};
 pub use undo::HISTORY_LEN;

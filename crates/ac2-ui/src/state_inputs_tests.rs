@@ -17,14 +17,12 @@ fn link_failure_clears_live_state() {
 }
 
 #[test]
-fn parsers() {
-    assert_eq!(parse_number(" −12,5 dBFS", &["dbfs", "db"]), Ok(-12.5));
-    assert_eq!(parse_number("3ms", &["ms"]), Ok(3.0));
-    assert!(parse_number("loud", &[]).is_err());
-    assert!(parse_number("inf", &[]).is_err());
-    assert_eq!(parse_outputs("1, 2 2"), Ok(vec![0, 1]));
-    assert!(parse_outputs("0").is_err());
-    assert!(parse_outputs("").is_err());
+fn finder_band_text() {
+    assert_eq!(parse_band("80-800"), Ok((80.0, 800.0)));
+    assert_eq!(parse_band(" 80 – 1,2 kHz"), Ok((80.0, 1200.0)));
+    assert!(parse_band("800-80").is_err());
+    assert!(parse_band("inf-800").is_err());
+    assert!(parse_band("loud").is_err());
 }
 
 #[test]

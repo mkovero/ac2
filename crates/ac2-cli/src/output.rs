@@ -14,7 +14,7 @@ use ac2_scene::format;
 use comfy_table::{Table, presets};
 use serde::Serialize;
 
-use crate::units::channels_text;
+use ac2_scene::unit_text::channels_text;
 
 mod trace_out;
 pub use trace_out::{trace_columns, trace_meta, traces};
@@ -150,7 +150,7 @@ pub fn meas_kind(k: &MeasKind) -> String {
             format::fixed(config.sweep.duration.0, 1),
             config.repeats,
             format::dbfs(config.level.0),
-            crate::units::channels_text(&config.outputs)
+            ac2_scene::unit_text::channels_text(&config.outputs)
         ),
     }
 }

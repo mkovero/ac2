@@ -2,7 +2,7 @@
 
 use clap::{Args, Subcommand, ValueEnum};
 
-use crate::units::{Channels, Freq, LevelDbfs, SampleCount};
+use ac2_scene::unit_text::{Channels, Freq, LevelDbfs, SampleCount};
 
 /// `gen …`.
 #[derive(Debug, Subcommand)]

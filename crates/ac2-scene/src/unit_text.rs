@@ -1,10 +1,14 @@
-//! Typed, unit-suffixed command-line values: `20hz`, `1.5khz`, `-12dbfs`, `3db`, `94db`,
-//! `15.0mv`, `15mv/pa`, `1.5ms`, `480samples`, `3.4m`, `20c`, channel lists `1,2,5-6`.
+//! Typed-in values with units, the one parser behind the CLI's flags and the app's fields:
+//! `20hz`, `1.5 kHz`, `-12dbfs`, `3db`, `94 dB SPL`, `15.0mv`, `15 mV/Pa`, `1.5ms`,
+//! `480samples`, `3.4m`, `20c`, channel lists `1,2,5-6`.
 //!
-//! Every value must carry its unit (a bare `-20` is refused: is it dBFS or dB?), units are
-//! case-insensitive, and parsers never panic: any input yields a value or a message.
-//! Channels are 1-based on the command line (as printed on interfaces) and zero-based on the
-//! wire.
+//! On its own ([`FromStr`]) a value must carry its unit: a bare `-20` is refused (is it dBFS
+//! or dB?). A field whose label names the unit takes a bare number in that unit
+//! ([`in_field`]); the grammar, ranges and messages are the same. Units are case-insensitive
+//! and may be spaced (`dB SPL`); a decimal comma (`12,5`) and the minus sign `−` read as `.`
+//! and `-`. Parsers never panic: any input yields a value or a message, and the message is
+//! what the CLI prints and the app shows. Channels are 1-based as typed (as printed on
+//! interfaces) and zero-based on the wire.
 
 use std::fmt;
 use std::str::FromStr;
@@ -29,14 +33,47 @@ impl fmt::Display for UnitError {
 
 impl std::error::Error for UnitError {}
 
+impl From<UnitError> for String {
+    fn from(e: UnitError) -> Self {
+        e.0
+    }
+}
+
+/// A value that a field labelled with its unit may take as a bare number.
+pub trait UnitText: Sized {
+    /// Parses `s`; an empty unit reads as `bare` when given, else is refused.
+    fn parse_text(s: &str, bare: Option<&str>) -> Result<Self, UnitError>;
+}
+
+/// `s` typed into a field whose unit is `unit`: `400` there reads as `400 unit`.
+pub fn in_field<T: UnitText>(s: &str, unit: &str) -> Result<T, UnitError> {
+    T::parse_text(s, Some(unit))
+}
+
+/// Implements [`FromStr`] as [`UnitText::parse_text`] with the unit required.
+macro_rules! from_unit_text {
+    ($($t:ty),*) => {$(
+        impl FromStr for $t {
+            type Err = UnitError;
+            fn from_str(s: &str) -> Result<Self, UnitError> {
+                Self::parse_text(s, None)
+            }
+        }
+    )*};
+}
+
+from_unit_text!(Freq, LevelDbfs, Gain, SplLevel, OhmsArg, Time, DelayAmount);
+
 fn fail<T>(msg: impl Into<String>) -> Result<T, UnitError> {
     Err(UnitError(msg.into()))
 }
 
-/// Splits `s` into a finite number and a lowercase unit suffix. The number is
-/// `[+-]digits[.digits][e[+-]digits]` — no `inf`, `nan`, hex or locale forms.
+/// Splits `s` into a finite number and a lowercase unit suffix without spaces. The number is
+/// `[+-]digits[.digits][e[+-]digits]` — no `inf`, `nan` or hex; `−` (U+2212) reads as `-`
+/// and a decimal comma as `.` (one only: `1,2,3` stays an error, never a thousands mark).
 fn split(s: &str) -> Result<(f64, String), UnitError> {
-    let t = s.trim();
+    let t = s.trim().replace('\u{2212}', "-").replace(',', ".");
+    let t = t.as_str();
     let b = t.as_bytes();
     let mut i = 0;
     if matches!(b.first(), Some(b'+' | b'-')) {
@@ -71,8 +108,17 @@ fn split(s: &str) -> Result<(f64, String), UnitError> {
     if !num.is_finite() {
         return fail(format!("{s:?}: out of range"));
     }
-    let unit = t[i..].trim().to_lowercase();
-    Ok((num, unit))
+    let unit: String = t[i..].split_whitespace().collect();
+    Ok((num, unit.to_lowercase()))
+}
+
+/// [`split`], an empty unit read as `bare` when the field names one.
+fn split_in(s: &str, bare: Option<&str>) -> Result<(f64, String), UnitError> {
+    let (n, u) = split(s)?;
+    match bare {
+        Some(b) if u.is_empty() => Ok((n, b.to_lowercase())),
+        _ => Ok((n, u)),
+    }
 }
 
 fn need_unit<T>(s: &str, unit: &str, expected: &str) -> Result<T, UnitError> {
@@ -97,10 +143,9 @@ fn in_range(s: &str, v: f64, lo: f64, hi: f64, what: &str) -> Result<f64, UnitEr
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Freq(pub Hz);
 
-impl FromStr for Freq {
-    type Err = UnitError;
-    fn from_str(s: &str) -> Result<Self, UnitError> {
-        let (n, u) = split(s)?;
+impl UnitText for Freq {
+    fn parse_text(s: &str, bare: Option<&str>) -> Result<Self, UnitError> {
+        let (n, u) = split_in(s, bare)?;
         let hz = match u.as_str() {
             "hz" => n,
             "khz" | "k" => n * 1e3,
@@ -117,10 +162,9 @@ impl FromStr for Freq {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LevelDbfs(pub Dbfs);
 
-impl FromStr for LevelDbfs {
-    type Err = UnitError;
-    fn from_str(s: &str) -> Result<Self, UnitError> {
-        let (n, u) = split(s)?;
+impl UnitText for LevelDbfs {
+    fn parse_text(s: &str, bare: Option<&str>) -> Result<Self, UnitError> {
+        let (n, u) = split_in(s, bare)?;
         if u != "dbfs" {
             return need_unit(s, &u, "dbfs");
         }
@@ -154,10 +198,9 @@ impl FromStr for MeasLevel {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Gain(pub Db);
 
-impl FromStr for Gain {
-    type Err = UnitError;
-    fn from_str(s: &str) -> Result<Self, UnitError> {
-        let (n, u) = split(s)?;
+impl UnitText for Gain {
+    fn parse_text(s: &str, bare: Option<&str>) -> Result<Self, UnitError> {
+        let (n, u) = split_in(s, bare)?;
         if u != "db" {
             return need_unit(s, &u, "db");
         }
@@ -169,10 +212,9 @@ impl FromStr for Gain {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SplLevel(pub DbSpl);
 
-impl FromStr for SplLevel {
-    type Err = UnitError;
-    fn from_str(s: &str) -> Result<Self, UnitError> {
-        let (n, u) = split(s)?;
+impl UnitText for SplLevel {
+    fn parse_text(s: &str, bare: Option<&str>) -> Result<Self, UnitError> {
+        let (n, u) = split_in(s, bare)?;
         if u != "db" && u != "dbspl" {
             return need_unit(s, &u, "db or dbspl");
         }
@@ -201,7 +243,8 @@ impl FromStr for VoltsArg {
     }
 }
 
-/// A mic sensitivity as data sheets state it: `15.0mv/pa`, `0.015v/pa`, `-36.5dbv/pa`.
+/// A mic sensitivity as data sheets state it: `15.0mv/pa`, `0.015v/pa`, `-36.5dbv/pa` (the
+/// `/pa` may go: `15mv`, `-36.5dbv`).
 /// 0.01 … 10 000 mV/Pa.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MicSensitivityArg(pub MvPerPa);
@@ -210,8 +253,8 @@ impl FromStr for MicSensitivityArg {
     type Err = UnitError;
     fn from_str(s: &str) -> Result<Self, UnitError> {
         let (n, u) = split(s)?;
-        let mv = match u.replace(' ', "").as_str() {
-            "mv/pa" => n,
+        let mv = match u.as_str() {
+            "mv/pa" | "mv" => n,
             "v/pa" => n * 1e3,
             "dbv/pa" | "dbv" => 1e3 * 10f64.powf(n / 20.0),
             _ => return need_unit(s, &u, "mv/pa, v/pa or dbv/pa"),
@@ -223,19 +266,18 @@ impl FromStr for MicSensitivityArg {
     }
 }
 
-/// An impedance as data sheets and manuals state it: `330ohm`, `2kohm`, `330Ω`, `2kΩ`.
+/// An impedance as data sheets and manuals state it: `330ohm`, `2kohm`, `330Ω`, `2kΩ`, `2k`.
 /// 0 < z ≤ 10 MΩ.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OhmsArg(pub Ohms);
 
-impl FromStr for OhmsArg {
-    type Err = UnitError;
-    fn from_str(s: &str) -> Result<Self, UnitError> {
-        let (n, u) = split(s)?;
+impl UnitText for OhmsArg {
+    fn parse_text(s: &str, bare: Option<&str>) -> Result<Self, UnitError> {
+        let (n, u) = split_in(s, bare)?;
         // `split` lowercases, and Ω (U+03A9 or the ohm sign U+2126) lowercases to ω.
         let z = match u.as_str() {
             "ohm" | "ω" => n,
-            "kohm" | "kω" => n * 1e3,
+            "kohm" | "kω" | "k" => n * 1e3,
             _ => return need_unit(s, &u, "ohm, kohm, Ω or kΩ"),
         };
         if !(z > 0.0 && z <= 1e7) {
@@ -262,10 +304,9 @@ fn seconds_of(n: f64, u: &str) -> Option<f64> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Time(pub Seconds);
 
-impl FromStr for Time {
-    type Err = UnitError;
-    fn from_str(s: &str) -> Result<Self, UnitError> {
-        let (n, u) = split(s)?;
+impl UnitText for Time {
+    fn parse_text(s: &str, bare: Option<&str>) -> Result<Self, UnitError> {
+        let (n, u) = split_in(s, bare)?;
         let Some(sec) = seconds_of(n, &u) else {
             return need_unit(s, &u, "s, ms or us");
         };
@@ -415,10 +456,9 @@ pub enum DelayAmount {
     Distance(f64),
 }
 
-impl FromStr for DelayAmount {
-    type Err = UnitError;
-    fn from_str(s: &str) -> Result<Self, UnitError> {
-        let (n, u) = split(s)?;
+impl UnitText for DelayAmount {
+    fn parse_text(s: &str, bare: Option<&str>) -> Result<Self, UnitError> {
+        let (n, u) = split_in(s, bare)?;
         if let Some(sec) = seconds_of(n, &u) {
             return Ok(Self::Time(Seconds(in_range(s, sec, -10.0, 10.0, "delay")?)));
         }
@@ -482,8 +522,8 @@ impl fmt::Display for Channel {
     }
 }
 
-/// A list of 1-based channels: `1,2`, `3-6`, `1,4-5`. Stored zero-based, unique, in order
-/// given.
+/// A list of 1-based channels: `1,2`, `1 2`, `3-6`, `1,4-5`. Stored zero-based, unique, in
+/// order given; a channel listed twice is refused (likely a typo for another one).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Channels(pub Vec<u16>);
 
@@ -491,8 +531,11 @@ impl FromStr for Channels {
     type Err = UnitError;
     fn from_str(s: &str) -> Result<Self, UnitError> {
         let mut out: Vec<u16> = Vec::new();
-        for part in s.split(',') {
-            let part = part.trim();
+        let parts = s.split(',').flat_map(|p| {
+            let words: Vec<&str> = p.split_whitespace().collect();
+            if words.is_empty() { vec![""] } else { words }
+        });
+        for part in parts {
             if part.is_empty() {
                 return fail(format!("{s:?}: empty channel in list"));
             }

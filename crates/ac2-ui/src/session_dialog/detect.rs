@@ -77,7 +77,12 @@ impl SessionDialog {
         if d.phase != DetectPhase::Confirm {
             return None;
         }
-        let level = match crate::state::parse_number(&d.level, &["dbfs", "db"]) {
+        let level = match ac2_scene::unit_text::in_field::<ac2_scene::unit_text::LevelDbfs>(
+            &d.level, "dbfs",
+        )
+        .map(|l| l.0.0)
+        .map_err(String::from)
+        {
             Err(_) if d.level.trim().is_empty() => {
                 d.error = Some(
                     "type the burst level in dBFS (e.g. -30): there is no default level".into(),

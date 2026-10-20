@@ -22,7 +22,7 @@ mod options;
 use options::*;
 
 pub(crate) use options::resolution_field;
-pub use options::{LF_HARMONICS_HINT, RESOLUTION_HINT, parse_buffer, parse_freq, parse_rate};
+pub use options::{LF_HARMONICS_HINT, RESOLUTION_HINT, parse_buffer, parse_rate};
 
 /// Which dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

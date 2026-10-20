@@ -224,22 +224,6 @@ pub fn parse_session_ref(text: &str) -> Result<SessionRef, String> {
     })
 }
 
-/// A number with an optional unit suffix (case-insensitive); accepts `−` and `,` decimal.
-pub fn parse_number(text: &str, units: &[&str]) -> Result<f64, String> {
-    let mut t = text.trim().to_ascii_lowercase().replace(format::MINUS, "-");
-    for u in units {
-        if let Some(s) = t.strip_suffix(u) {
-            t = s.trim().to_string();
-            break;
-        }
-    }
-    let t = t.replace(',', ".");
-    match t.parse::<f64>() {
-        Ok(v) if v.is_finite() => Ok(v),
-        _ => Err(format!("not a number: {:?}", text.trim())),
-    }
-}
-
 /// The input a measurement's mic curve belongs to (a transfer function's measurement
 /// input); a math channel has its operands', none of its own.
 pub fn meas_input(k: &MeasKind) -> Option<u16> {
@@ -313,36 +297,18 @@ pub fn parse_mics(text: &str) -> Result<Vec<(u16, Option<String>)>, String> {
     Ok(v)
 }
 
-/// `80-800`, `80 – 800 Hz`: band edges in Hz, lower first.
+/// `80-800`, `80 – 800 Hz`, `80-1.2k`: band edges in Hz, lower first.
 pub fn parse_band(text: &str) -> Result<(f64, f64), String> {
+    use ac2_scene::unit_text::{Freq, in_field};
     let t = text.replace(['–', '—'], "-");
     let (a, b) = t
         .split_once('-')
         .ok_or_else(|| format!("{:?}: expected low-high, e.g. 80-800", text.trim()))?;
-    let lo = parse_number(a, &["hz"])?;
-    let hi = parse_number(b, &["hz"])?;
-    if !(lo > 0.0 && hi > lo) {
+    let Freq(lo) = in_field(a, "hz")?;
+    let Freq(hi) = in_field(b, "hz")?;
+    let (lo, hi) = (lo.0, hi.0);
+    if hi <= lo {
         return Err("band edges must be above 0 Hz, the upper above the lower".into());
     }
     Ok((lo, hi))
-}
-
-/// `1, 2` (one-based) → `[0, 1]`.
-pub fn parse_outputs(text: &str) -> Result<Vec<u16>, String> {
-    let mut v = Vec::new();
-    for part in text.split([',', ' ']).filter(|s| !s.is_empty()) {
-        let n: u16 = part
-            .parse()
-            .map_err(|_| format!("not a channel number: {part:?}"))?;
-        if n == 0 {
-            return Err("channels count from 1".into());
-        }
-        if !v.contains(&(n - 1)) {
-            v.push(n - 1);
-        }
-    }
-    if v.is_empty() {
-        return Err("at least one output channel".into());
-    }
-    Ok(v)
 }

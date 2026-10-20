@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use ac2_client::RemoteAddr;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::units::{Channel, Channels, Freq, LevelDbfs, SampleCount, Time};
+use ac2_scene::unit_text::{Channel, Channels, Freq, LevelDbfs, SampleCount, Time};
 
 /// ac2: live dual-channel analyzer — command-line client.
 #[derive(Debug, Parser)]

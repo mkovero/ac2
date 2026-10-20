@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::{CalSpl, MeasRef, TimeWeightArg, WeightArg};
-use crate::units::{
+use ac2_scene::unit_text::{
     BandLimitArg, BandSourceArg, BandWindowArg, Channel, DayOffsetArg, Gain, LeqLimitArg,
     LeqWindowArg, PeakLimitArg, PositionArg, Time, TimeRef,
 };

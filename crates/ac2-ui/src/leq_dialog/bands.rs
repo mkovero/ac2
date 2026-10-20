@@ -215,7 +215,8 @@ impl BandRow {
     fn window(&self, n: usize) -> Result<BandWindow, String> {
         let name = self.name();
         let parse = |t: &str, what: &str| {
-            crate::state::parse_number(t, &["db spl", "dbspl", "db"])
+            ac2_scene::unit_text::in_field::<ac2_scene::unit_text::SplLevel>(t, "db")
+                .map(|l| l.0.0)
                 .map_err(|e| format!("band window {n} ({name}) {what}: {e}"))
         };
         let limit = if self.limit.trim().is_empty() {
@@ -854,7 +855,7 @@ mod tests {
         s.rows[1].limit = "loud".into();
         assert_eq!(
             s.config(),
-            Err("band window 2 (25 Hz band LZeq 1 min) limit: not a number: \"loud\"".into())
+            Err("band window 2 (25 Hz band LZeq 1 min) limit: \"loud\": expected a number followed by a unit".into())
         );
         s.rows[1].limit.clear();
         // The same band twice over one length and weighting is refused.

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::CurveArg;
-use crate::units::{Channel, Freq, Gain, MicSensitivityArg, OhmsArg, SplLevel, VoltsArg};
+use ac2_scene::unit_text::{Channel, Freq, Gain, MicSensitivityArg, OhmsArg, SplLevel, VoltsArg};
 
 /// `cal …`.
 #[derive(Debug, Subcommand)]

@@ -38,8 +38,18 @@ fn date(s: &str) -> Option<(i32, u32, u32)> {
     let [y, m, d] = f.as_slice() else {
         return None;
     };
-    let (y, m, d) = (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?);
-    chrono::NaiveDate::from_ymd_opt(y, m, d).map(|_| (y, m, d))
+    let (y, m, d): (i32, u32, u32) = (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?);
+    // Proleptic Gregorian: February has 29 days in years divisible by 4, except centuries
+    // not divisible by 400.
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let days = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    };
+    ((1..=days).contains(&d) && (1..=9999).contains(&y)).then_some((y, m, d))
 }
 
 impl FromStr for TimeRef {
@@ -89,38 +99,6 @@ impl FromStr for TimeRef {
             },
             None => bad(),
         }
-    }
-}
-
-impl TimeRef {
-    /// Unix ns, given now (Unix ns).
-    pub fn resolve(&self, now_ns: u64) -> Result<u64, UnitError> {
-        use chrono::TimeZone;
-        let at = |d: (i32, u32, u32), sec: u32| {
-            chrono::NaiveDate::from_ymd_opt(d.0, d.1, d.2)
-                .and_then(|d| d.and_hms_opt(sec / 3600, (sec % 3600) / 60, sec % 60))
-        };
-        let ns = |ts: i64| u64::try_from(ts).map(|t| t * 1_000_000_000).ok();
-        let out = match *self {
-            Self::Now => Some(now_ns),
-            Self::Ago(s) => Some(now_ns.saturating_sub((s * 1e9).round() as u64)),
-            Self::Utc { date, seconds } => {
-                at(date, seconds).and_then(|t| ns(t.and_utc().timestamp()))
-            }
-            Self::Local { date, seconds } => {
-                let date = date.unwrap_or_else(|| {
-                    let today = chrono::Local
-                        .timestamp_nanos(i64::try_from(now_ns).unwrap_or(i64::MAX))
-                        .date_naive();
-                    use chrono::Datelike;
-                    (today.year(), today.month(), today.day())
-                });
-                at(date, seconds)
-                    .and_then(|t| chrono::Local.from_local_datetime(&t).earliest())
-                    .and_then(|t| ns(t.timestamp()))
-            }
-        };
-        out.ok_or_else(|| UnitError(format!("{self:?}: not a time this host can place")))
     }
 }
 
