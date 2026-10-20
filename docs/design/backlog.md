@@ -122,6 +122,9 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   `/w/ok` cue carried 87.0004 against the test's `< 87.0` (run 39383093276); the ok edge
   sits at the limit's hysteresis, so the bound or the edge's comparison is off by rounding.
   Seen once.
+- **ac2-cli `json::trace::trace_commands_json` on Windows CI**: `session save-as` exited 3,
+  "daemon did not answer `file.save` (3 attempts)" (run 39387937301, c7ba3b04); passed on
+  rerun. Seen once.
 - **ac2d `remote_stimulus` "timed out waiting for the tone"**: once in a full workspace run
   at load ~30; passed 4/4 alone.
 - **ac2d `traces::capture::capture_average_math_export_import`, unaligned capture at 301.6 Hz:
