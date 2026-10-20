@@ -32,6 +32,7 @@ impl AppState {
             Overlay::Form(f) => f.backspace(),
             Overlay::Settings(_) => self.settings_backspace(out),
             Overlay::Sessions(_) => self.sessions_backspace(),
+            Overlay::Eq(_) => self.eq_backspace(out),
             Overlay::Delete(_) => self.delete(true, out),
             Overlay::NewLog(_) => self.new_log(false, out),
             Overlay::Prompt(p) => {
@@ -140,6 +141,10 @@ impl AppState {
             }
             Overlay::Sessions(_) => {
                 self.sessions_key(chord, swallow, out);
+                return;
+            }
+            Overlay::Eq(_) => {
+                self.eq_key(chord, swallow, keymap, out);
                 return;
             }
             // The key that asked confirms (Enter is the stimulus's: never a discard by reflex).
@@ -318,11 +323,14 @@ impl AppState {
             Overlay::Settings(s) if s.inner_open() => {
                 s.close_inner();
             }
+            // Esc cancels the mark question, not the editor.
+            Overlay::Eq(e) if e.confirm_mark => e.confirm_mark = false,
             _ => self.overlay = Overlay::None,
         }
     }
 
-    pub(in crate::state) fn text(&mut self, t: &str) {
+    /// Typed text, to the open window; the EQ editor sends a typed value at once.
+    pub(in crate::state) fn text_with(&mut self, t: &str, out: &mut Vec<Request>) {
         let mut t = t.to_string();
         if let Some(c) = self.swallow_text.take() {
             let mut chars = t.chars();
@@ -338,6 +346,7 @@ impl AppState {
             Overlay::Form(f) => f.type_text(&t),
             Overlay::Settings(_) => self.settings_text(&t),
             Overlay::Sessions(_) => self.sessions_text(&t),
+            Overlay::Eq(_) => self.eq_text(&t, out),
             Overlay::Prompt(p) => {
                 p.text.push_str(&t);
                 p.error = None;

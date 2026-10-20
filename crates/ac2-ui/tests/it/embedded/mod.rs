@@ -9,6 +9,7 @@
 #![cfg(feature = "embedded")]
 
 mod calibration;
+mod eq;
 mod harness;
 mod keep;
 mod math;

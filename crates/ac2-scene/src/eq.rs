@@ -216,6 +216,165 @@ pub fn section_text(
     t
 }
 
+/// One field of the editor's selected section.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldKind {
+    Shape,
+    Freq,
+    Gain,
+    /// Q or bandwidth (peaking, notch, band-pass, all-pass, high/low-pass Q, shelf slope).
+    Q,
+    /// How a peaking Q is read.
+    QMeasured,
+    /// High/low-pass alignment.
+    Alignment,
+    /// High/low-pass order.
+    Order,
+    Delay,
+}
+
+/// The fields a shape has, in Tab order.
+pub fn fields(shape: &EqShape) -> &'static [FieldKind] {
+    use FieldKind as F;
+    match shape {
+        EqShape::Peaking { .. } => &[F::Shape, F::Freq, F::Gain, F::Q, F::QMeasured],
+        EqShape::LowShelf { .. } | EqShape::HighShelf { .. } => &[F::Shape, F::Freq, F::Gain, F::Q],
+        EqShape::HighPass { .. } | EqShape::LowPass { .. } => {
+            &[F::Shape, F::Freq, F::Alignment, F::Order]
+        }
+        EqShape::HighPassQ { .. }
+        | EqShape::LowPassQ { .. }
+        | EqShape::Notch { .. }
+        | EqShape::BandPass { .. }
+        | EqShape::AllPass2 { .. } => &[F::Shape, F::Freq, F::Q],
+        EqShape::AllPass1 { .. } => &[F::Shape, F::Freq],
+        EqShape::Gain { .. } => &[F::Shape, F::Gain],
+        EqShape::Delay { .. } => &[F::Shape, F::Delay],
+        EqShape::Polarity | EqShape::Biquad { .. } | EqShape::Response { .. } => &[F::Shape],
+    }
+}
+
+/// Octaves of bandwidth a Q spans: `n = 2/ln2 · asinh(1/(2Q))`, exact for the s-domain
+/// prototype, whose band edges are geometric about f₀.
+pub fn octaves_of_q(q: f64) -> f64 {
+    2.0 / std::f64::consts::LN_2 * (1.0 / (2.0 * q)).asinh()
+}
+
+/// The Q of `n` octaves, the inverse of [`octaves_of_q`].
+pub fn q_of_octaves(n: f64) -> f64 {
+    1.0 / (2.0 * (std::f64::consts::LN_2 / 2.0 * n).sinh())
+}
+
+/// `Q 2.0 · 0.71 oct`: a Q with the bandwidth it spans.
+pub fn q_with_octaves(q: f64) -> String {
+    let n = octaves_of_q(q);
+    format!("{} · {} oct", q_text(q), format::fixed(n, 2))
+}
+
+/// A field as the editor shows it: `f 1.25 kHz`, `gain −4.0 dB`, `Q 2.0 · 0.71 oct`.
+pub fn field_text(shape: &EqShape, field: FieldKind, peak_q: PeakQ) -> String {
+    use FieldKind as F;
+    let bw = |b: Bandwidth| match b {
+        Bandwidth::Q { value } => q_with_octaves(value),
+        Bandwidth::Octaves { n } => format!("{} oct", format::fixed(n, 2)),
+    };
+    match (field, *shape) {
+        (F::Shape, s) => shape_word(&s).to_owned(),
+        (
+            F::Freq,
+            EqShape::Peaking { f, .. }
+            | EqShape::LowShelf { f, .. }
+            | EqShape::HighShelf { f, .. }
+            | EqShape::HighPass { f, .. }
+            | EqShape::LowPass { f, .. }
+            | EqShape::HighPassQ { f, .. }
+            | EqShape::LowPassQ { f, .. }
+            | EqShape::Notch { f, .. }
+            | EqShape::BandPass { f, .. }
+            | EqShape::AllPass1 { f }
+            | EqShape::AllPass2 { f, .. },
+        ) => format!("f {}", format::freq_readout(f.0)),
+        (
+            F::Gain,
+            EqShape::Peaking { gain, .. }
+            | EqShape::LowShelf { gain, .. }
+            | EqShape::HighShelf { gain, .. }
+            | EqShape::Gain { gain },
+        ) => format!("gain {}", gain_text(gain.0)),
+        (
+            F::Q,
+            EqShape::Peaking { bw: b, .. }
+            | EqShape::Notch { bw: b, .. }
+            | EqShape::BandPass { bw: b, .. },
+        ) => bw(b),
+        (F::Q, EqShape::LowShelf { order, f_at, .. } | EqShape::HighShelf { order, f_at, .. }) => {
+            shelf_text(order, f_at)
+        }
+        (
+            F::Q,
+            EqShape::HighPassQ { q, .. }
+            | EqShape::LowPassQ { q, .. }
+            | EqShape::AllPass2 { q, .. },
+        ) => q_text(q),
+        (F::QMeasured, EqShape::Peaking { q_measured, .. }) => {
+            format!("Q measured {}", peak_q_text(q_measured.unwrap_or(peak_q)))
+        }
+        (
+            F::Alignment,
+            EqShape::HighPass { alignment, .. } | EqShape::LowPass { alignment, .. },
+        ) => match alignment {
+            Alignment::Butterworth => "Butterworth".to_owned(),
+            Alignment::LinkwitzRiley => "Linkwitz-Riley".to_owned(),
+            Alignment::Bessel { norm } => format!(
+                "Bessel ({})",
+                match norm {
+                    BesselNorm::Phase => "phase",
+                    BesselNorm::Delay => "delay",
+                    BesselNorm::Minus3db => "−3 dB",
+                }
+            ),
+        },
+        (F::Order, EqShape::HighPass { order, .. } | EqShape::LowPass { order, .. }) => {
+            format!("order {order}")
+        }
+        (F::Delay, EqShape::Delay { seconds }) => format::delay(seconds.0),
+        _ => format::NO_VALUE.to_owned(),
+    }
+}
+
+/// The editor's curve row: `[x] capture 2 · change since rev 4`.
+pub fn curve_row(name: &str, predicted: bool, set_name: &str, basis: EqBasis) -> String {
+    let tick = if predicted { "[x]" } else { "[ ]" };
+    let b = match basis {
+        EqBasis::Whole => "assumes none in".to_owned(),
+        b => basis_tag(set_name, b),
+    };
+    format!("{tick} {name} · {b}")
+}
+
+/// The question M asks before marking.
+pub fn mark_question(set: &EqSet, meas_name: &str) -> String {
+    let n = set.body.sections.len();
+    format!(
+        "Mark {} rev {} ({n} section{}) as in the console? Captures of {meas_name} from now on \
+         record it; predictions show only later changes. M marks, Shift+M clears the mark, Esc \
+         cancels",
+        set.body.name,
+        set.rev,
+        if n == 1 { "" } else { "s" }
+    )
+}
+
+/// The editor's key line.
+pub const EDITOR_KEYS: &str = "↑/↓ rows · Tab fields · ←/→ step (Shift coarser, Alt finer) · \
+     type a number · Insert add · Delete remove · B bypass (Shift+B the set) · [ ] move · \
+     P predict a curve · M mark in console · Shift+Insert new set · Esc closes";
+
+/// The editor's title.
+pub fn editor_title(meas_name: &str) -> String {
+    format!("EQ · {meas_name}")
+}
+
 /// The parts of a prediction (`curve × EQ`): its measurement, set and curve.
 pub fn prediction(expr: &MathExpr) -> Option<(MeasId, EqSetId, &Operand)> {
     match expr {

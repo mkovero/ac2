@@ -72,6 +72,7 @@ mod panes;
 mod queries;
 pub(crate) mod sessions_impl;
 pub use sessions_impl::SessionsMsg;
+mod eq_impl;
 mod stimulus;
 mod text;
 mod undo;
@@ -513,7 +514,7 @@ impl AppState {
         let out = &mut *out;
         match msg {
             Msg::Key(chord) => self.key(chord, keymap, out),
-            Msg::Text(t) => self.text(&t),
+            Msg::Text(t) => self.text_with(&t, out),
             Msg::Backspace => self.backspace(out),
             Msg::Wheel { rows } => self.wheel(rows, keymap),
             Msg::Command(c) => self.command(c, keymap, out),

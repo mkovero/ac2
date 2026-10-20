@@ -147,6 +147,8 @@ pub enum Overlay {
     Choose(Box<ChoicePrompt>),
     /// The Sessions dialog (Alt+S): new, open, save, recents, the file browser.
     Sessions(Box<crate::sessions::SessionsDialog>),
+    /// The EQ what-if editor (Alt+E): the selected measurement's set, live.
+    Eq(Box<crate::eq_editor::EqEditor>),
 }
 
 impl Overlay {
@@ -161,9 +163,11 @@ impl Overlay {
     /// keep a held Backspace from climbing several folders.
     pub fn takes_text(&self) -> bool {
         match self {
-            Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_) | Overlay::Settings(_) => {
-                true
-            }
+            Overlay::Palette(_)
+            | Overlay::Prompt(_)
+            | Overlay::Form(_)
+            | Overlay::Settings(_)
+            | Overlay::Eq(_) => true,
             Overlay::Sessions(d) => matches!(d.page, crate::sessions::Page::Name(_)),
             _ => false,
         }

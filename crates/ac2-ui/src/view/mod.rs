@@ -5,6 +5,7 @@ mod autosave;
 mod band_transfer;
 mod cal;
 mod chrome;
+mod eq;
 mod help;
 mod leq;
 mod overlays;

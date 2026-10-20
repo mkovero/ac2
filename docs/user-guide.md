@@ -2675,6 +2675,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `R` | Reset averaging | `reset_average` |
 | `S` | Start/stop | `start_stop` |
 | `X` | Find first arrival | `insert_delay` |
+| `Alt+E` | EQ… | `eq_editor` |
 | `Shift+X` | Find strongest peak | `insert_strongest` |
 | `D` | Set delay… | `type_delay` |
 | `Y` | Delay tracking | `track_delay` |
