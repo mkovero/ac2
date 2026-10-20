@@ -113,6 +113,84 @@ impl AppState {
             )
         })
     }
+
+    /// The math channel form with its operator on align (Alt+M), A a transfer curve, the
+    /// band prefilled from the curves drawn now; or why it cannot open.
+    pub(super) fn alignment_form(&self) -> Result<Form, String> {
+        let owner = self
+            .selected_group()
+            .unwrap_or(ac2_proto::model::TraceOwner::Imported);
+        let candidates = self.math_candidates(Some(owner));
+        let transfer = |o: &Operand| {
+            candidates
+                .iter()
+                .any(|c| c.operand == *o && c.domain == ac2_proto::model::MathDomain::Transfer)
+        };
+        let first = self
+            .selected_trace_meta()
+            .map(|t| Operand::Trace { trace: t.id })
+            .or_else(|| {
+                self.kind_meas(PaneKind::Transfer)
+                    .filter(|m| m.config.kind.is_job())
+                    .map(|m| Operand::Meas { meas: m.id })
+            })
+            .filter(transfer)
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .find(|c| c.domain == ac2_proto::model::MathDomain::Transfer)
+                    .map(|c| c.operand)
+            });
+        let mut f = first
+            .and_then(|_| Form::math(candidates.clone(), first, owner))
+            .filter(|_| candidates.iter().filter(|c| transfer(&c.operand)).count() >= 2)
+            .ok_or_else(|| {
+                format!(
+                    "an alignment needs two transfer curves, live or stored: make a transfer \
+                     measurement or capture one ({}) first",
+                    self.capture_keys()
+                )
+            })?;
+        f.set_levels(self.transfer_levels());
+        f.choose_align();
+        Ok(f)
+    }
+
+    /// Every transfer curve's magnitude as drawn now, live and stored: what an alignment's
+    /// band is prefilled from.
+    pub(super) fn transfer_levels(&self) -> Vec<crate::math_dialog::Level> {
+        use ac2_scene::grid::columns;
+        let mut v = Vec::new();
+        if let Some(d) = self.data.as_ref() {
+            for m in self.measurements() {
+                let Some(tf) = d.latest.get(&Topic::Data {
+                    meas: m.id,
+                    stream: Stream::Tf,
+                }) else {
+                    continue;
+                };
+                let (ac2_proto::FrameData::Tf(f), Some(g)) = (
+                    &tf.frame.data,
+                    tf.frame.stamp.grid_id.and_then(|g| d.grids.get(&g)),
+                ) else {
+                    continue;
+                };
+                v.push(crate::math_dialog::Level {
+                    operand: Operand::Meas { meas: m.id },
+                    cols: columns(g),
+                    db: f.mag.clone(),
+                });
+            }
+        }
+        for (t, g) in self.traces.values() {
+            v.push(crate::math_dialog::Level {
+                operand: Operand::Trace { trace: t.meta.id },
+                cols: columns(g),
+                db: t.mag_db.clone(),
+            });
+        }
+        v
+    }
 }
 
 /// The command that opens kind `k`'s form.

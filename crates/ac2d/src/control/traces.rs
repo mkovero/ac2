@@ -432,7 +432,7 @@ impl Control {
             })
             .collect();
         let enough = match &config.expr {
-            MathExpr::Binary { .. } => included.len() == 2,
+            MathExpr::Binary { .. } | MathExpr::Align { .. } => included.len() == 2,
             MathExpr::Average { .. } => included.len() >= MathConfig::MIN_AVERAGE,
         };
         if !enough || columns.mag_db.iter().all(|v| v.is_nan()) {

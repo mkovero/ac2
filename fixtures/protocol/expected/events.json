@@ -1019,6 +1019,62 @@
   }
  },
  {
+  "kind": "measurement",
+  "rev": 69,
+  "payload": {
+   "type": "set",
+   "value": {
+    "id": 9,
+    "config": {
+     "name": "Sub \u2194 Main",
+     "scope": "session",
+     "kind": {
+      "type": "math",
+      "config": {
+       "owner": {
+        "type": "meas",
+        "meas": 1
+       },
+       "domain": "transfer",
+       "expr": {
+        "type": "align",
+        "a": {
+         "type": "trace",
+         "trace": 7
+        },
+        "b": {
+         "type": "meas",
+         "meas": 1
+        },
+        "band": {
+         "lo": 60.0,
+         "hi": 120.0
+        },
+        "max_delay": 0.05
+       },
+       "reference": {
+        "type": "operand",
+        "operand": {
+         "type": "trace",
+         "trace": 7
+        }
+       },
+       "smoothing": null
+      }
+     }
+    },
+    "config_rev": 62,
+    "running": true,
+    "delay": null,
+    "grid_id": 8785464140711761104,
+    "colour": null,
+    "layout": null,
+    "compared": [],
+    "offset": 0.0
+   }
+  }
+ },
+ {
   "kind": "autosave",
   "rev": 57,
   "payload": {

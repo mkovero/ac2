@@ -236,6 +236,7 @@ mod tests {
             ("new spl", CommandId::NewSpl),
             ("new sweep", CommandId::SweepNew),
             ("new math", CommandId::NewMath),
+            ("new align", CommandId::NewAlignment),
             ("delete sel", CommandId::DeleteSelected),
             ("hide curve", CommandId::ToggleSelected),
             ("leq settings", CommandId::LeqWindows),

@@ -6,13 +6,16 @@
 //! combine, saying why.
 
 use ac2_proto::model::{
-    AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference, MeasConfig, MeasKind,
-    Measurement, Operand, Smoothing, SmoothingFraction, SmoothingMode, TraceKind, TraceMeta,
-    TraceOwner,
+    ALIGN_MAX_DELAY_DEFAULT, AlignBand, AverageMethod, MathConfig, MathDomain, MathExpr, MathOp,
+    MathReference, MeasConfig, MeasKind, Measurement, Operand, Smoothing, SmoothingFraction,
+    SmoothingMode, TraceKind, TraceMeta, TraceOwner,
 };
 use ac2_proto::units::MeasId;
 
 use crate::forms::{Field, FieldId, Form, FormKind, Value};
+
+mod align;
+pub use align::Level;
 
 /// Something a math channel can combine.
 #[derive(Clone, Debug, PartialEq)]
@@ -86,6 +89,8 @@ impl Candidate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Choice {
     Binary(MathOp),
+    /// Two systems aligned in their overlap (`docs/design/alignment.md`).
+    Align,
     Average,
 }
 
@@ -100,6 +105,10 @@ fn operators(domain: MathDomain) -> Vec<(&'static str, Choice)> {
                 Choice::Binary(MathOp::Add),
             ),
             ("−  complex difference", Choice::Binary(MathOp::Subtract)),
+            (
+                "↔  aligned: the delay and polarity that make A and B add in their overlap",
+                Choice::Align,
+            ),
             ("average of several", Choice::Average),
         ],
         MathDomain::Spectrum | MathDomain::Rta => vec![
@@ -161,6 +170,10 @@ pub struct MathForm {
     auto_name: String,
     /// The smoothing mode kept from the channel being edited.
     mode: SmoothingMode,
+    /// The transfer curves an alignment's band is prefilled from.
+    levels: Vec<Level>,
+    /// The band the dialog last prefilled: while the rows still hold it, it follows A and B.
+    auto_band: (String, String),
 }
 
 /// What the rows currently say.
@@ -175,6 +188,9 @@ struct Picks {
     method: AverageMethod,
     reference: Option<Operand>,
     smoothing: Option<SmoothingFraction>,
+    /// An alignment's overlap band and max delay, as typed.
+    band: (String, String),
+    max_delay: String,
     name: String,
 }
 
@@ -245,6 +261,8 @@ impl Form {
             method: AverageMethod::Power,
             reference: None,
             smoothing: None,
+            band: Default::default(),
+            max_delay: align::default_max_delay(),
             name: String::new(),
         };
         let mut f = Form::new(FormKind::Math, Vec::new());
@@ -254,6 +272,8 @@ impl Form {
             owner,
             auto_name: String::new(),
             mode: SmoothingMode::MagnitudePhase,
+            levels: Vec::new(),
+            auto_band: Default::default(),
         }));
         f.lay_out(picks, Some(FieldId::OperandA));
         Some(f)
@@ -264,6 +284,8 @@ impl Form {
         let MeasKind::Math { config } = &m.config.kind else {
             return Err(format!("{} is not a math channel", m.config.name));
         };
+        let mut band = Default::default();
+        let mut max_delay = align::default_max_delay();
         let (choice, a, b, of, method) = match &config.expr {
             MathExpr::Binary { a, op, b } => (
                 Choice::Binary(*op),
@@ -272,6 +294,22 @@ impl Form {
                 Vec::new(),
                 AverageMethod::Power,
             ),
+            MathExpr::Align {
+                a,
+                b,
+                band: aligned,
+                max_delay: most,
+            } => {
+                band = align::band_texts(*aligned);
+                max_delay = align::ms_text(*most);
+                (
+                    Choice::Align,
+                    Some(*a),
+                    Some(*b),
+                    Vec::new(),
+                    AverageMethod::Power,
+                )
+            }
             MathExpr::Average { of, method } => (
                 Choice::Average,
                 of.first().copied(),
@@ -292,6 +330,8 @@ impl Form {
                 MathReference::Fixed { .. } => None,
             },
             smoothing: config.smoothing.map(|s| s.fraction),
+            band,
+            max_delay,
             name: m.config.name.clone(),
         };
         let mut f = Form::new(FormKind::MathEdit, Vec::new());
@@ -304,6 +344,8 @@ impl Form {
             mode: config
                 .smoothing
                 .map_or(SmoothingMode::MagnitudePhase, |s| s.mode),
+            levels: Vec::new(),
+            auto_band: Default::default(),
         }));
         f.lay_out(picks, Some(FieldId::OperandA));
         Ok(f)
@@ -347,7 +389,7 @@ impl Form {
         let b = choice_of(FieldId::OperandB)
             .and_then(|(i, _)| m.bs(domain, choice, a).get(i).map(|c| c.operand));
         let in_expr: Vec<Operand> = match choice {
-            Choice::Binary(_) => [a, b].into_iter().flatten().collect(),
+            Choice::Binary(_) | Choice::Align => [a, b].into_iter().flatten().collect(),
             Choice::Average => of.clone(),
         };
         let reference = choice_of(FieldId::PhaseRef).and_then(|(i, _)| in_expr.get(i).copied());
@@ -363,6 +405,14 @@ impl Form {
             reference,
             smoothing: choice_of(FieldId::Smoothing)
                 .and_then(|(i, _)| SMOOTHING.get(i).and_then(|s| s.1)),
+            band: (
+                self.text(FieldId::AlignFrom).to_owned(),
+                self.text(FieldId::AlignTo).to_owned(),
+            ),
+            max_delay: match self.field(FieldId::MaxDelay) {
+                Some(_) => self.text(FieldId::MaxDelay).to_owned(),
+                None => align::default_max_delay(),
+            },
             name: self.text(FieldId::Name).to_owned(),
         })
     }
@@ -397,7 +447,7 @@ impl Form {
             ops.iter().position(|o| o.1 == p.choice).unwrap_or(0),
         );
         match p.choice {
-            Choice::Binary(_) => {
+            Choice::Binary(_) | Choice::Align => {
                 let all: Vec<&Candidate> = m.candidates.iter().collect();
                 let ai =
                     p.a.and_then(|a| all.iter().position(|c| c.operand == a))
@@ -432,6 +482,9 @@ impl Form {
                     .into();
                 }
                 fields.push(b);
+                if p.choice == Choice::Align {
+                    m.align_fields(&mut p, &mut fields);
+                }
             }
             Choice::Average => {
                 fields.push(op_field);
@@ -457,7 +510,7 @@ impl Form {
             }
         }
         let in_expr: Vec<Operand> = match p.choice {
-            Choice::Binary(_) => [p.a, p.b].into_iter().flatten().collect(),
+            Choice::Binary(_) | Choice::Align => [p.a, p.b].into_iter().flatten().collect(),
             Choice::Average => p.of.clone(),
         };
         let transfer = domain == MathDomain::Transfer;
@@ -491,7 +544,9 @@ impl Form {
             f.hint = "the arrival the result's phase is relative to".into();
             fields.push(f);
         }
-        if domain != MathDomain::Rta {
+        // An alignment's sum is read against its own fit: smoothing would blur the cancellation
+        // it shows.
+        if domain != MathDomain::Rta && p.choice != Choice::Align {
             fields.push(Field::choice(
                 FieldId::Smoothing,
                 "Smoothing",
@@ -504,6 +559,15 @@ impl Form {
         }
         let expr = match p.choice {
             Choice::Binary(op) => p.a.zip(p.b).map(|(a, b)| MathExpr::Binary { a, op, b }),
+            Choice::Align => p.a.zip(p.b).map(|(a, b)| MathExpr::Align {
+                a,
+                b,
+                band: AlignBand {
+                    lo: ac2_proto::units::Hz(0.0),
+                    hi: ac2_proto::units::Hz(0.0),
+                },
+                max_delay: ALIGN_MAX_DELAY_DEFAULT,
+            }),
             Choice::Average => Some(MathExpr::Average {
                 of: p.of.clone(),
                 method: p.method,
@@ -556,6 +620,18 @@ impl Form {
                     ));
                 };
                 MathExpr::Binary { a, op, b }
+            }
+            Choice::Align => {
+                let (Some(a), Some(b)) = (p.a, p.b) else {
+                    return Err("choose B: the other system to align with A".into());
+                };
+                let (band, max_delay) = self.align_rows()?;
+                MathExpr::Align {
+                    a,
+                    b,
+                    band,
+                    max_delay,
+                }
             }
             Choice::Average => {
                 if p.of.len() < MathConfig::MIN_AVERAGE {
@@ -636,216 +712,4 @@ impl Form {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use ac2_proto::model::{MeasConfig, SpectrumConfig, TransferConfig};
-    use ac2_proto::units::{Rev, TraceId};
-
-    fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
-        Measurement {
-            id: MeasId(id),
-            config: MeasConfig {
-                scope: ac2_proto::model::MeasScope::Session,
-                name: name.into(),
-                kind,
-            },
-            config_rev: Rev(1),
-            running: true,
-            delay: None,
-            grid_id: None,
-            colour: None,
-            layout: None,
-            compared: Vec::new(),
-            offset: ac2_proto::units::Db(0.0),
-        }
-    }
-
-    fn tf(id: u32, name: &str) -> Measurement {
-        meas(
-            id,
-            name,
-            MeasKind::Transfer {
-                config: TransferConfig::with_inputs(0, 1),
-            },
-        )
-    }
-
-    fn spec(id: u32, name: &str) -> Measurement {
-        meas(
-            id,
-            name,
-            MeasKind::Spectrum {
-                config: SpectrumConfig::on_input(1),
-            },
-        )
-    }
-
-    fn candidates() -> Vec<Candidate> {
-        let ms = [
-            tf(1, "Main L"),
-            tf(2, "Sub"),
-            spec(3, "Spec 1"),
-            spec(4, "Spec 2"),
-        ];
-        let refs: Vec<&Measurement> = ms.iter().collect();
-        Candidate::all(&refs, &[], None)
-    }
-
-    fn focus(f: &mut Form, id: FieldId) {
-        let i = f.fields.iter().position(|x| x.id == id).unwrap_or(0);
-        f.focus_field(i);
-    }
-
-    fn math_of(f: &Form) -> MathConfig {
-        match f.math_config().map(|c| c.kind) {
-            Ok(MeasKind::Math { config }) => config,
-            other => panic!("{other:?}"),
-        }
-    }
-
-    /// A ÷ B by default, named after itself; B follows A's kind.
-    #[test]
-    fn defaults_and_names() {
-        let f = Form::math(candidates(), None, TraceOwner::Imported).expect("two candidates");
-        let c = f.math_config().unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(c.name, "Main L ÷ Sub");
-        let MeasKind::Math { config } = c.kind else {
-            panic!()
-        };
-        assert_eq!(config.domain, MathDomain::Transfer);
-        assert_eq!(
-            config.expr,
-            MathExpr::Binary {
-                a: Operand::Meas { meas: MeasId(1) },
-                op: MathOp::Divide,
-                b: Operand::Meas { meas: MeasId(2) },
-            }
-        );
-        // A spectrum as A: its operators are − and +, B a spectrum.
-        let mut f = Form::math(
-            candidates(),
-            Some(Operand::Meas { meas: MeasId(3) }),
-            TraceOwner::Imported,
-        )
-        .expect("two candidates");
-        let c = math_of(&f);
-        assert_eq!(c.domain, MathDomain::Spectrum);
-        assert_eq!(
-            c.expr,
-            MathExpr::Binary {
-                a: Operand::Meas { meas: MeasId(3) },
-                op: MathOp::Subtract,
-                b: Operand::Meas { meas: MeasId(4) },
-            }
-        );
-        assert_eq!(f.text(FieldId::Name), "Spec 1 − Spec 2");
-        // The operator steps on to +: the name follows.
-        focus(&mut f, FieldId::Operator);
-        f.cycle(1);
-        assert_eq!(f.text(FieldId::Name), "Spec 1 + Spec 2");
-        // A typed name stays.
-        f.set_text(FieldId::Name, "Sum");
-        f.cycle(-1);
-        assert_eq!(f.text(FieldId::Name), "Sum");
-    }
-
-    /// The average ticks every operand of A's kind; leaving all but one out is refused.
-    #[test]
-    fn average_ticks() {
-        let mut f = Form::math(candidates(), None, TraceOwner::Imported).expect("two candidates");
-        focus(&mut f, FieldId::Operator);
-        f.cycle(4);
-        let c = math_of(&f);
-        assert_eq!(
-            c.expr,
-            MathExpr::Average {
-                of: vec![
-                    Operand::Meas { meas: MeasId(1) },
-                    Operand::Meas { meas: MeasId(2) }
-                ],
-                method: AverageMethod::Power,
-            }
-        );
-        assert!(f.fields.iter().any(|x| x.id == FieldId::Method));
-        assert!(f.fields.iter().any(|x| x.id == FieldId::PhaseRef));
-        assert_eq!(f.text(FieldId::Name), "Average of 2");
-        focus(&mut f, FieldId::Member(Operand::Meas { meas: MeasId(2) }));
-        f.cycle(1);
-        assert!(f.math_config().is_err());
-    }
-
-    /// Editing keeps the channel's name and expression.
-    #[test]
-    fn edit_prefills() {
-        let mut m = tf(9, "Main + Sub");
-        let mut c = MathConfig::of(
-            TraceOwner::Meas { meas: MeasId(1) },
-            MathDomain::Transfer,
-            MathExpr::Binary {
-                a: Operand::Meas { meas: MeasId(1) },
-                op: MathOp::Add,
-                b: Operand::Trace { trace: TraceId(5) },
-            },
-        );
-        c.reference = MathReference::Operand {
-            operand: Operand::Trace { trace: TraceId(5) },
-        };
-        m.config.kind = MeasKind::Math { config: c.clone() };
-        let ms = [tf(1, "Main L"), tf(2, "Sub")];
-        let refs: Vec<&Measurement> = ms.iter().collect();
-        let mut cands = Candidate::all(&refs, &[], None);
-        cands.push(Candidate {
-            operand: Operand::Trace { trace: TraceId(5) },
-            name: "Sub alone".into(),
-            label: "Sub alone (stored)".into(),
-            domain: MathDomain::Transfer,
-        });
-        let f = Form::edit_math(&m, cands).unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(f.math_edit(), Some(MeasId(9)));
-        let got = f.math_config().unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(got.name, "Main + Sub");
-        assert_eq!(got.kind, MeasKind::Math { config: c });
-    }
-
-    /// A spectrum × or ÷ takes B among the stored transfer traces (a speaker's IR): a level
-    /// through a filter, or with it removed.
-    #[test]
-    fn a_level_goes_through_a_stored_transfer_trace() {
-        let mut cands = candidates();
-        cands.push(Candidate {
-            operand: Operand::Trace { trace: TraceId(7) },
-            name: "speaker".into(),
-            label: "speaker (stored)".into(),
-            domain: MathDomain::Transfer,
-        });
-        let mut f = Form::math(
-            cands,
-            Some(Operand::Meas { meas: MeasId(3) }),
-            TraceOwner::Imported,
-        )
-        .expect("two candidates");
-        focus(&mut f, FieldId::Operator);
-        f.cycle(2);
-        let c = math_of(&f);
-        assert_eq!(c.domain, MathDomain::Spectrum);
-        assert_eq!(
-            c.expr,
-            MathExpr::Binary {
-                a: Operand::Meas { meas: MeasId(3) },
-                op: MathOp::Multiply,
-                b: Operand::Trace { trace: TraceId(7) },
-            }
-        );
-        assert_eq!(f.text(FieldId::Name), "Spec 1 × speaker");
-        // A live transfer function is no filter: B offers the stored one only.
-        assert!(!f.pick_operand(FieldId::OperandB, Operand::Meas { meas: MeasId(1) }));
-        f.cycle(1);
-        assert!(matches!(
-            math_of(&f).expr,
-            MathExpr::Binary {
-                op: MathOp::Divide,
-                ..
-            }
-        ));
-    }
-}
+mod tests;

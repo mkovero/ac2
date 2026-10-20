@@ -90,6 +90,7 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
         phase,
         coh,
         validity: vec![ValidityMask::NONE; freqs.len()],
+        align: None,
     }
 }
 
@@ -568,7 +569,108 @@ impl Rig {
                 .map(|(operand, status)| OperandState { operand, status })
                 .collect(),
             phase: PhaseBasis::SharedTimeBase,
+            align: None,
         }));
+        self.extra
+            .lock()
+            .unwrap()
+            .push((FrameData::Tf(f), Some(TF_GRID.id())));
+    }
+
+    /// Adds "Delay tower ↔ Main L" (9), an alignment of the two in 60–120 Hz: Main L 4.21 ms
+    /// late, the fit's curves where both play (30–400 Hz).
+    pub fn add_alignment(&self) {
+        use ac2_proto::frame::{MathState, OperandState, OperandStatus};
+        use ac2_proto::model::{
+            AlignBand, AlignCandidate, AlignCurves, AlignFit, AlignOutcome, AlignSide, AlignState,
+            MathConfig, MathDomain, MathExpr, Operand, PhaseBasis, Summation,
+        };
+        let (a, b) = (
+            Operand::Meas { meas: MeasId(2) },
+            Operand::Meas { meas: MeasId(1) },
+        );
+        let tau = 0.00421;
+        {
+            let mut s = self.fake.lock();
+            let config = MathConfig::of(
+                ac2_proto::model::TraceOwner::Meas { meas: MeasId(2) },
+                MathDomain::Transfer,
+                MathExpr::Align {
+                    a,
+                    b,
+                    band: AlignBand {
+                        lo: Hz(60.0),
+                        hi: Hz(120.0),
+                    },
+                    max_delay: Seconds(0.05),
+                },
+            );
+            let m = measurement(
+                9,
+                "Delay tower ↔ Main L",
+                MeasKind::Math { config },
+                None,
+                Some(&TF_GRID),
+            );
+            s.commit(Change::Measurement(Patch::Set(m)));
+        }
+        let freqs = TF_GRID.centres();
+        let both = |f: f64| (30.0..=400.0).contains(&f);
+        let sum = |deg: f64| (20.0 * (deg.to_radians() / 2.0).cos().abs().log10()).max(-30.0);
+        let before: Vec<f64> = freqs
+            .iter()
+            .map(|f| wrap(-360.0 * f * tau + 20.0))
+            .collect();
+        let after: Vec<f64> = freqs.iter().map(|f| 14.0 * (f / 25.0).ln().sin()).collect();
+        let only = |v: &[f64], g: &dyn Fn(f64) -> f64| -> Vec<f32> {
+            freqs
+                .iter()
+                .zip(v)
+                .map(|(f, x)| if both(*f) { g(*x) as f32 } else { f32::NAN })
+                .collect()
+        };
+        let curves = AlignCurves {
+            phase_before: only(&before, &|x| x),
+            phase_after: only(&after, &|x| x),
+            sum_before: only(&before, &sum),
+            sum_after: only(&after, &sum),
+        };
+        let candidate = |ms: f64, inverted: bool, res: f64, score: f64| AlignCandidate {
+            delay: Seconds(ms / 1000.0),
+            delayed: AlignSide::A,
+            inverted,
+            residual_deg: res,
+            score,
+        };
+        let fit = AlignFit {
+            best: candidate(4.21, false, 11.0, 0.98),
+            other_polarity: Some(candidate(9.8, true, 41.0, 0.71)),
+            runner_up: None,
+            before: Summation {
+                mean_db: -7.9,
+                worst_db: -21.0,
+            },
+            after: Summation {
+                mean_db: -0.3,
+                worst_db: -1.2,
+            },
+            columns: 24,
+        };
+        let mut f = tf_frame(9, 0.0, 0.0, 90.0);
+        f.coh = vec![f32::NAN; f.coh.len()];
+        f.meta.math = Some(Box::new(MathState {
+            operands: [a, b]
+                .map(|operand| OperandState {
+                    operand,
+                    status: OperandStatus::Included,
+                })
+                .to_vec(),
+            phase: PhaseBasis::SharedTimeBase,
+            align: Some(Box::new(AlignState {
+                outcome: AlignOutcome::Fit { fit },
+            })),
+        }));
+        f.align = Some(curves);
         self.extra
             .lock()
             .unwrap()
@@ -636,6 +738,7 @@ impl Rig {
                 })
                 .to_vec(),
             phase: PhaseBasis::NoPhase,
+            align: None,
         }));
         self.extra
             .lock()

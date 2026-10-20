@@ -403,6 +403,7 @@ fn live_frame(freqs: &[f64], tau: f64, applied: f64, nudged: f64) -> TfFrame {
         phase: measured_phase(freqs, tau, applied),
         coh: vec![1.0; n],
         validity: vec![ValidityMask::NONE; n],
+        align: None,
     }
 }
 

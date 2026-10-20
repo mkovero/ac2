@@ -33,6 +33,16 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
                 desc(ArrayName::Validity, Unit::Bitmask),
                 Col::U(mask_slice(&f.validity)),
             ));
+            if let Some(al) = &f.align {
+                for (name, unit, v) in [
+                    (ArrayName::AlignPhaseBefore, Unit::Deg, &al.phase_before),
+                    (ArrayName::AlignPhaseAfter, Unit::Deg, &al.phase_after),
+                    (ArrayName::AlignSumBefore, Unit::Db, &al.sum_before),
+                    (ArrayName::AlignSumAfter, Unit::Db, &al.sum_after),
+                ] {
+                    cols.push((desc(name, unit), Col::F(v)));
+                }
+            }
             FrameMeta::Tf(f.meta.clone())
         }
         FrameData::Ir(f) => {

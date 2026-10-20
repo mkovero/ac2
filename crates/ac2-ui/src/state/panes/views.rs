@@ -16,26 +16,42 @@ pub enum TransferView {
     Magnitude,
     Phase,
     Coherence,
+    /// An alignment of two curves in their overlap: the phase difference and the summation
+    /// before and after the suggested delay (`docs/design/alignment.md`).
+    Alignment,
     /// The impulse response of the measurement the pane shows, drawn as this.
     Ir(IrMode),
 }
 
 impl TransferView {
-    pub const ALL: [TransferView; 6] = [
+    pub const ALL: [TransferView; 7] = [
         TransferView::Magnitude,
         TransferView::Phase,
         TransferView::Coherence,
+        TransferView::Alignment,
         TransferView::Ir(IrMode::Linear),
         TransferView::Ir(IrMode::Log),
         TransferView::Ir(IrMode::Etc),
     ];
 
-    pub fn next(self) -> Self {
-        ac2_scene::view::step(&Self::ALL, self, 1)
+    /// G: the next view; the alignment view only while the pane's group has an alignment
+    /// (`alignment`), so G reaches the impulse response as it did before one is made.
+    pub fn next(self, alignment: bool) -> Self {
+        self.walk(1, alignment)
     }
 
-    pub fn prev(self) -> Self {
-        ac2_scene::view::step(&Self::ALL, self, -1)
+    /// Shift+G: [`Self::next`] backwards.
+    pub fn prev(self, alignment: bool) -> Self {
+        self.walk(-1, alignment)
+    }
+
+    fn walk(self, d: isize, alignment: bool) -> Self {
+        let v = ac2_scene::view::step(&Self::ALL, self, d);
+        if v == TransferView::Alignment && !alignment {
+            ac2_scene::view::step(&Self::ALL, v, d)
+        } else {
+            v
+        }
     }
 
     /// The impulse-response display, in an IR view.
@@ -52,6 +68,7 @@ impl TransferView {
             TransferView::Magnitude => "magnitude",
             TransferView::Phase => "phase",
             TransferView::Coherence => "coherence",
+            TransferView::Alignment => "alignment",
             TransferView::Ir(IrMode::Linear) => "impulse response",
             TransferView::Ir(IrMode::Log) => "impulse response (log)",
             TransferView::Ir(IrMode::Etc) => "ETC",

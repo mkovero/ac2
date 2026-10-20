@@ -325,6 +325,7 @@ fn pane_views_default_and_keep_a_choice() {
         "magnitude",
         "phase",
         "coherence",
+        "alignment",
         "ir_linear",
         "ir_log",
         "etc",

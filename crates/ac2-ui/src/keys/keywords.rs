@@ -130,6 +130,7 @@ impl CommandId {
             C::NewRta => &["add", "octave", "bands"],
             C::NewSpl => &["add", "level", "leq", "sound level"],
             C::NewMath => &["add", "average", "sum", "difference"],
+            C::NewAlignment => &["crossover", "subwoofer", "time align", "phase align"],
             C::EditMeas => &["settings", "configure", "change"],
             C::NextColour | C::PrevColour => &["color"],
             C::HideGroup => &["visible", "hide"],

@@ -1,5 +1,6 @@
 //! Command-line grammar.
 
+mod align;
 mod artnet;
 mod cal;
 mod delay;
@@ -12,6 +13,7 @@ mod session;
 mod spl;
 mod trace;
 
+pub use align::*;
 pub use artnet::*;
 pub use cal::*;
 pub use delay::*;
@@ -95,6 +97,13 @@ pub enum Cmd {
         /// Action.
         #[command(subcommand)]
         cmd: MathCmd,
+    },
+    /// Alignment of two systems in their overlap (sub/main, main/fill): the delay and
+    /// polarity that make two transfer curves add.
+    Align {
+        /// Action.
+        #[command(subcommand)]
+        cmd: AlignCmd,
     },
     /// Delay finder and compensation of a transfer measurement.
     Delay {

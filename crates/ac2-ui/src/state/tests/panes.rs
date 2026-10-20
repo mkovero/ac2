@@ -287,8 +287,12 @@ fn g_steps_the_transfer_views() {
     }
     t.key("G");
     assert_eq!(view(&t), TransferView::Magnitude);
-    // Shift+G walks the same chain back, wrapping at the response.
-    for want in TransferView::ALL.iter().rev() {
+    // Shift+G walks the same chain back, wrapping at the response. Without an alignment in
+    // the pane's group, both skip its view.
+    let chain = TransferView::ALL
+        .iter()
+        .filter(|v| **v != TransferView::Alignment);
+    for want in chain.rev() {
         t.key("Shift+G");
         assert_eq!(view(&t), *want);
     }

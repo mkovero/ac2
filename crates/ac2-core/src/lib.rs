@@ -6,6 +6,7 @@ pub mod grid;
 pub mod window;
 
 // Filled by phase 2 work; each module owns one concern from PLAN.md §5.
+pub mod align;
 pub mod average;
 pub mod band_leq;
 pub mod delay;

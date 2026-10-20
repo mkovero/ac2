@@ -98,7 +98,7 @@ impl AppState {
         let over =
             v.tf.coherence_placement == ac2_scene::view::CoherencePlacement::OverlayOnMagnitude;
         let shown = match modes.transfer {
-            TransferView::Ir(_) => None,
+            TransferView::Ir(_) | TransferView::Alignment => None,
             TransferView::Magnitude => Some((true, false, over)),
             TransferView::Phase => Some((false, true, false)),
             TransferView::Coherence => Some((false, false, true)),
@@ -383,6 +383,24 @@ impl AppState {
         }
         if kind == PaneKind::Distortion {
             self.focus_kind(kind);
+        }
+    }
+
+    /// A new alignment's own pane: the focused pane split, the new half showing the
+    /// alignment view of `meas` (the focused pane keeps what it shows).
+    pub(in crate::state) fn open_alignment(&mut self, meas: MeasId) {
+        let Some(new) = self.split_focused_pane() else {
+            let g = self.keys.label(CommandId::NextView, Scope::Transfer);
+            self.warn(format!(
+                "no room to split the pane for the alignment: {} on a transfer pane steps to its view",
+                g.as_deref().unwrap_or("Next view")
+            ));
+            return;
+        };
+        self.set_pane_kind(new, PaneKind::Transfer);
+        if let Some(v) = self.layout.view_mut(new) {
+            v.meas = Some(meas);
+            v.modes.transfer = TransferView::Alignment;
         }
     }
 

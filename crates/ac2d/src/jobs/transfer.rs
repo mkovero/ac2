@@ -428,6 +428,7 @@ impl Transfer {
             phase,
             coh: f.coherence.iter().map(|v| *v as f32).collect(),
             validity,
+            align: None,
         }
     }
 

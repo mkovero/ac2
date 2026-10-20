@@ -83,6 +83,9 @@ pub fn defaults() -> Vec<Binding> {
         (C::NewMeasurement, S::Global, cmd(K::M)),
         // Shift+M, a step on from M (average the shown traces): a math channel by name.
         (C::NewMath, S::Global, sh(K::M)),
+        // Alt+M, the same dialog with its operator on align: two systems' delay and polarity
+        // in their overlap.
+        (C::NewAlignment, S::Global, alt(K::M)),
         // Tab walks the measurement list row by row, the way it walks a form's fields, and
         // the focused pane shows the measurement of each row it reaches.
         (C::NextInTree, S::Global, k(K::Tab)),

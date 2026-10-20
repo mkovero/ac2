@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use ac2_proto::grid::{BinColumns, GridDef};
 use ac2_proto::model::{
-    AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference, MeasKind, Measurement,
-    Operand, TraceKind, TraceMeta,
+    ALIGN_MAX_DELAY_LIMIT, AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference,
+    MeasKind, Measurement, Operand, TraceKind, TraceMeta,
 };
 use ac2_proto::units::{MeasId, SessionEpoch, TraceId};
 use ac2_proto::{ErrorCode, ProtoError};
@@ -64,6 +64,32 @@ pub(super) fn validate(c: &MathConfig) -> Result<(), ProtoError> {
             }
             if c.domain != MathDomain::Transfer && *method != AverageMethod::Power {
                 return Err(invalid("spectra and RTA bands average on power only"));
+            }
+        }
+        MathExpr::Align {
+            a,
+            b,
+            band,
+            max_delay,
+        } => {
+            if a == b {
+                return Err(invalid("A and B are the same operand"));
+            }
+            if c.domain != MathDomain::Transfer {
+                return Err(invalid(
+                    "an alignment compares the phase of two transfer functions; levels have none",
+                ));
+            }
+            if !band.is_valid() {
+                return Err(invalid(
+                    "the overlap band needs 0 < from < to (Hz): where both systems play",
+                ));
+            }
+            if !(max_delay.0 > 0.0 && max_delay.0 <= ALIGN_MAX_DELAY_LIMIT.0) {
+                return Err(invalid(format!(
+                    "the largest delay searched is above 0 and at most {} ms",
+                    ALIGN_MAX_DELAY_LIMIT.0 * 1e3
+                )));
             }
         }
     }
@@ -227,8 +253,8 @@ pub(super) fn check_operands(
             return Err(invalid(format!(
                 "{name} shares no time base with the other operands (an import, or a capture \
                  from an earlier audio I/O): their relative arrival is unknown, so they \
-                 cannot be summed, differenced or averaged with phase; use ÷, ×, or a power \
-                 average"
+                 cannot be summed, differenced, aligned or averaged with phase; use ÷, ×, \
+                 or a power average"
             )));
         }
     }

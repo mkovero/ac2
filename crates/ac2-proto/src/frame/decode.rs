@@ -15,6 +15,33 @@ use super::{
     SpecFrame, SplFrame, TfFrame, Unit,
 };
 
+/// An alignment's four view curves: all of them or none.
+fn align_curves(a: &mut Arrays<'_>) -> Result<Option<crate::model::AlignCurves>, DecodeError> {
+    let got = [
+        a.opt_f32(ArrayName::AlignPhaseBefore, Unit::Deg)?,
+        a.opt_f32(ArrayName::AlignPhaseAfter, Unit::Deg)?,
+        a.opt_f32(ArrayName::AlignSumBefore, Unit::Db)?,
+        a.opt_f32(ArrayName::AlignSumAfter, Unit::Db)?,
+    ];
+    match got {
+        [None, None, None, None] => Ok(None),
+        [
+            Some(phase_before),
+            Some(phase_after),
+            Some(sum_before),
+            Some(sum_after),
+        ] => Ok(Some(crate::model::AlignCurves {
+            phase_before,
+            phase_after,
+            sum_before,
+            sum_after,
+        })),
+        _ => Err(DecodeError::Schema(
+            "tf: an alignment's curves come all four or none".into(),
+        )),
+    }
+}
+
 struct Arrays<'a> {
     descs: &'a [ArrayDesc],
     /// Each array's bytes in the inflated payload.
@@ -203,6 +230,7 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
             phase: a.f32(ArrayName::Phase, Unit::Deg)?,
             coh: a.f32(ArrayName::Coh, Unit::Coherence)?,
             validity: a.mask(ArrayName::Validity)?,
+            align: align_curves(&mut a)?,
         }),
         FrameMeta::Ir(meta) => FrameData::Ir(IrFrame {
             meas,

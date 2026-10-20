@@ -2,6 +2,7 @@
 //! links the whole dependency graph, so one link replaces one per file. A single area:
 //! `cargo nextest run -p ac2-cli -E 'test(/^band_rig::/)'` or `cargo test -p ac2-cli --test it band_rig::`.
 
+mod align_rig;
 mod artnet_rig;
 mod band_rig;
 mod discover;

@@ -17,7 +17,7 @@ use crate::plot::{self, PlotSlot};
 use crate::scenes;
 use crate::state::{
     Axis, DragMsg, HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow,
-    PaneRect, StripMsg, drop_target,
+    PaneRect, StripMsg, TransferView, drop_target,
 };
 use crate::theme::Chrome;
 
@@ -130,6 +130,16 @@ fn scene_for(
                 s.scene,
                 Axes {
                     ir,
+                    ..Axes::default()
+                },
+            )
+        }
+        PaneKind::Transfer if view.modes.transfer == TransferView::Alignment => {
+            let s = scenes::alignment(st, id, theme, vp, now);
+            (
+                s.scene,
+                Axes {
+                    x: Some(s.x_axis.mapping),
                     ..Axes::default()
                 },
             )

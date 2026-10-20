@@ -226,10 +226,11 @@ impl AppState {
         let kind = self.layout.focus_kind();
         let before = self.spectrograph_shown();
         let bands = crate::scenes::has_band_meter(self);
+        let aligned = crate::scenes::pane_alignment(self, self.layout.focus).is_some();
         let m = self.modes_mut();
         match (kind, forward) {
-            (PaneKind::Transfer, true) => m.transfer = m.transfer.next(),
-            (PaneKind::Transfer, false) => m.transfer = m.transfer.prev(),
+            (PaneKind::Transfer, true) => m.transfer = m.transfer.next(aligned),
+            (PaneKind::Transfer, false) => m.transfer = m.transfer.prev(aligned),
             (PaneKind::Spectrum, true) => m.spectrum = m.spectrum.next(),
             (PaneKind::Spectrum, false) => m.spectrum = m.spectrum.prev(),
             (PaneKind::Spl, true) => m.spl = m.spl.next(bands),

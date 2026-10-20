@@ -92,6 +92,9 @@ impl AppState {
             None => {
                 if transfer {
                     self.stack_on_create = Some(config.name.clone());
+                } else if matches!(&config.kind, MeasKind::Math { config: m } if matches!(m.expr, ac2_proto::model::MathExpr::Align { .. }))
+                {
+                    self.align_on_create = Some(config.name.clone());
                 } else if !matches!(config.kind, MeasKind::Math { .. }) {
                     // A math channel is drawn on the pane of what it computes from.
                     self.pane_on_create = Some(config.name.clone());

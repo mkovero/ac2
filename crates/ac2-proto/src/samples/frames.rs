@@ -83,6 +83,36 @@ pub fn tf_frame() -> Frame {
                         },
                     ],
                     phase: PhaseBasis::SharedTimeBase,
+                    align: Some(Box::new(AlignState {
+                        outcome: AlignOutcome::Fit {
+                            fit: AlignFit {
+                                best: AlignCandidate {
+                                    delay: Seconds(0.004_21),
+                                    delayed: AlignSide::B,
+                                    inverted: false,
+                                    residual_deg: 12.5,
+                                    score: 0.97,
+                                },
+                                other_polarity: Some(AlignCandidate {
+                                    delay: Seconds(0.009_8),
+                                    delayed: AlignSide::B,
+                                    inverted: true,
+                                    residual_deg: 41.0,
+                                    score: 0.61,
+                                }),
+                                runner_up: None,
+                                before: Summation {
+                                    mean_db: -7.9,
+                                    worst_db: -21.0,
+                                },
+                                after: Summation {
+                                    mean_db: -0.3,
+                                    worst_db: -1.25,
+                                },
+                                columns: 48,
+                            },
+                        },
+                    })),
                 })),
             },
             // On the wire's grids (hundredths of a dB and degree, ten-thousandths of γ²), so
@@ -107,6 +137,14 @@ pub fn tf_frame() -> Frame {
                     }
                 })
                 .collect(),
+            align: Some(AlignCurves {
+                phase_before: (0..n)
+                    .map(|i| val(i, ((i * 7) % 360) as f32 - 180.0))
+                    .collect(),
+                phase_after: (0..n).map(|i| val(i, (i % 21) as f32 - 10.0)).collect(),
+                sum_before: (0..n).map(|i| val(i, -((i % 60) as f32) / 2.0)).collect(),
+                sum_after: (0..n).map(|i| val(i, -((i % 5) as f32) / 4.0)).collect(),
+            }),
         }),
     }
 }
@@ -180,6 +218,7 @@ pub fn frames() -> Vec<Frame> {
                             },
                         ],
                         phase: PhaseBasis::NoPhase,
+                        align: None,
                     })),
                     bands: Some(Box::new(SpecBands {
                         bands: vec![

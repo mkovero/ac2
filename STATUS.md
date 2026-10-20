@@ -22,6 +22,7 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - Rig monitor (OSC / Art-Net cues from SPL meters kept on the rig): `docs/user-guide.md` *Rig measurements*.
 - REW cross-check: `tools/crosscheck`, `docs/rigs/pupu.md`.
 - Panes (tiling tree, a measurement's own panes): `PLAN.md` §8.1, `docs/user-guide.md` *Panes: split, close…*.
+- Two-system alignment (delay, polarity, summation in an overlap band; Alt+M, `ac2 align`): `docs/design/alignment.md`, `docs/user-guide.md` *Alignment*.
 - Power cuts and watchdogs: `docs/design/watchdogs.md`.
 
 ## Where to look
