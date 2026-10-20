@@ -17,6 +17,8 @@ use ac2d::{AutosaveConfig, Daemon, Handle};
 use common::*;
 
 const T: Duration = Duration::from_secs(10);
+/// The daemon's wait before writing again after a failed autosave write.
+const RETRY: Duration = Duration::from_secs(10);
 
 fn start(name: &str, dir: &Path, restore: bool) -> (Handle, ac2_audio::FakeBackend) {
     init_log();
@@ -358,9 +360,10 @@ fn an_unwritable_directory_is_reported() {
 }
 
 /// An SPL meter's log the daemon cannot write shows in the `autosave` entity (which meter,
-/// which log, a reason, since when) and clears once the log is written again.
+/// which log, a reason, since when) and clears once the log is written again: the write
+/// after a failed one waits out `RETRY` (10 s), hence `slow_`.
 #[test]
-fn a_log_that_cannot_be_written_is_reported_until_it_is() {
+fn slow_a_log_that_cannot_be_written_is_reported_until_it_is() {
     let dir = tempfile::tempdir().unwrap();
     // A file where the log directory should be.
     let blocker = dir
@@ -384,12 +387,18 @@ fn a_log_that_cannot_be_written_is_reported_until_it_is() {
     assert!(f.since.0 > 0);
     assert_eq!(state(&mut c).autosave.log_failures, a.log_failures);
 
-    // The disk is fixed; the next write of the autosave tries the log again.
+    // The disk is fixed; the next write of the autosave tries the log again. The whole
+    // autosave failed on the same path, so that write waits out the retry delay counted
+    // from the failure, which a slow runner can place right at the edge of `T`.
     let _ = std::fs::remove_file(&blocker);
     c.ok(Command::MeasCreate {
         config: spl("other", 1),
     });
-    autosave_event(&sub, |a| a.log_failures.is_empty());
+    sub.event(
+        RETRY + T,
+        |e| matches!(&e.change, Change::Autosave(a) if a.log_failures.is_empty()),
+    )
+    .expect("autosave event without log failures");
     assert!(state(&mut c).autosave.log_failures.is_empty());
     drop((c, sub));
     h.shutdown();

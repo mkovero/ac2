@@ -45,8 +45,10 @@ fn the_pane_export_prompt_hands_the_export_to_the_app() {
     };
     assert!(p.text.starts_with(&stem), "{} vs {stem}", p.text);
     assert!(p.text.ends_with(".png"), "{}", p.text);
+    // An absolute path on this OS (`/tmp/…` on Windows is relative to the home's drive).
+    let typed = std::env::temp_dir().join("report").join("foh");
     if let Overlay::Prompt(p) = &mut t.st.overlay {
-        p.text = "/tmp/report/foh".into();
+        p.text = typed.display().to_string();
     }
     let r = t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
@@ -55,7 +57,7 @@ fn the_pane_export_prompt_hands_the_export_to_the_app() {
         t.st.pane_export,
         Some(crate::state::PaneExport {
             pane,
-            path: "/tmp/report/foh.png".into()
+            path: typed.with_extension("png")
         })
     );
 }
