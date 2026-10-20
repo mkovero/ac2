@@ -229,6 +229,15 @@ impl App {
             );
             true
         } else {
+            // The smoke asks for the list itself: which dialog the app opens at start (and
+            // whether that dialog lists devices) depends on the daemon's state, not on it.
+            if !self.smoke_asked
+                && self.state.connected()
+                && let Some(c) = &self.conn
+            {
+                self.smoke_asked = true;
+                c.send(crate::conn::Request::Devices);
+            }
             // Nothing else may ask for a frame while the link connects.
             ctx.request_repaint_after(Duration::from_millis(100));
             false

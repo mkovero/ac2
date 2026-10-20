@@ -159,6 +159,8 @@ pub struct App {
     /// reducer, renderer or GPU present stops the pings and the unit restarts the app.
     notify: ac2_paths::notify::Notifier,
     smoke: bool,
+    /// `--smoke` sent its own device-list request (once the link is up).
+    smoke_asked: bool,
     applied_theme: Option<ThemeName>,
     /// The full-screen state last sent to the window.
     applied_fullscreen: bool,
@@ -272,6 +274,7 @@ impl App {
             bench_startup: opts.bench_startup,
             notify: ac2_paths::notify::Notifier::from_env(),
             smoke: opts.smoke,
+            smoke_asked: false,
             applied_theme: None,
             applied_fullscreen: false,
             generation: 0,
