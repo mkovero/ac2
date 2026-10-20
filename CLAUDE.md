@@ -70,6 +70,8 @@ What an agent reads stays in its context for the rest of the session; keep reads
 - Locate before reading: `grep -n` the symbol, then read about 60 lines around it. Never page
   through a file top to bottom. Big docs (`PLAN.md`, `docs/protocol.md`, `docs/user-guide.md`):
   `grep -n '^#'` first, read one section.
+- Type names repeat across crates (`State`, `Transfer`, `Stimulus`, `Rig`, …): grep the definition
+  in one crate, `grep -rnE 'pub (struct|enum) X\b' crates/<crate>`.
 - Iterate with `cargo nextest run -p <crate> <filter>`; quick tier before commit/push (see *Tests*).
   Long commands run in the background (notified on exit) — no `until`/`sleep` polling loops.
 - UI changes: assert the `ac2-scene` text first; view a snapshot PNG only for the final look.

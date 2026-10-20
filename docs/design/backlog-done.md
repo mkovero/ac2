@@ -3,6 +3,11 @@
 Items moved here from `backlog.md` when they land, newest first, one line each with the
 commit; `git show <commit>` and the linked design notes have the rest.
 
+- A measurement keeps how it is drawn: spectrum style, peak hold, spectrograph span and colours, display offset and the compared curves live on the daemon (`meas.update` display block, `meas.offset`, `meas.compare`); **C** asks which measurement to compare into (PROTO 58, session format 28; 30d85a73).
+- Power cuts: a torn, empty or garbage state file is set aside (`.damaged-<time>`) and listed in `rig.damaged_files`, never stops `ac2d` or `ac2-ui`; atomic writes sync the directory (PROTO 57; 7cd91a17; `watchdogs.md` *Power cuts*).
+- Failing loud: systemd notify (READY, watchdog, STOPPING), release builds abort on a panic, an unwritable SPL log is `autosave.log_failures` (PROTO 56; 35ea53cf; `watchdogs.md`).
+- Leq history strip browses the whole log like a graph; `spl.history_get` takes a `HistorySpan`; palette *Export Leq log…* (PROTO 55; c842c6ab).
+- Per-measurement Resolution (1/12 … 1/96 octave) with a grey resolution marker (684d6108); mic curve applied to sweeps (15621f9f); multi-resolution spectrum, tone or density (e42871a3; `multires-spectrum.md`).
 - T on an SPL pane takes the limit text, the band view's and Leq columns' 10 dB lines and scale, like a graph's chrome; the Shift+L status-text row it replaced is gone (47d7298a, f530d1f9).
 - Drag a list row onto a pane, edge drop splits, Shift-drop compares; Ctrl+Z / Ctrl+Shift+Z undo pane edits, 50 steps per app (903713e4).
 - Layout edits go only to the chosen row's own panes; a viewer keeps its panes (6630842e, 5c168ab3, 26508046).

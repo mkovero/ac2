@@ -433,8 +433,9 @@ cap, the fade-out on stop, counted limiting. `DuplexStream::stop` fades, waits `
 call, so a cycle that the adapter skips (panic, stopping) plays silence. Nothing in
 `cahal` emits on its own.
 
-**Unsafe.** All of it is in `cahal`, in four files, each block with a `// SAFETY:` comment
-(`clippy::undocumented_unsafe_blocks` denied in the crate):
+**Unsafe.** All of it is in `cahal` (its own repository, github.com/mkovero/cahal, from
+crates.io; no longer in this workspace), in four files there, each block with a `// SAFETY:`
+comment (`clippy::undocumented_unsafe_blocks` denied in the crate):
 - `property.rs`: typed `get` / `set` / `size` over `AudioObject…PropertyData`, checking the
   returned size against the type; `CFString` reads release what they get.
 - `ioproc.rs`: create, start, stop, destroy; the trampoline; building slices from the
@@ -495,7 +496,8 @@ cap; the one-hour run with 0 discontinuities. Until it passes, the backend ships
 on the wire). A kind names the implementation, so the new backend gets its own from the
 start instead of running under `Cpal` until a rename; (c) then removes `Cpal`. Both exist
 for (a)–(b) so BlackHole CI and a tester can compare them on one build.
-- `crates/cahal/` (new): `Cargo.toml`, `README.md`, `LICENSE`, `src/{lib.rs, types.rs,
+- `cahal` (new; first `crates/cahal/`, since moved to its own repository
+  github.com/mkovero/cahal): `Cargo.toml`, `README.md`, `LICENSE`, `src/{lib.rs, types.rs,
   index.rs, layout.rs, system.rs, device.rs, property.rs, ioproc.rs, listener.rs,
   consent.rs}`.
 - `crates/ac2-audio/Cargo.toml` (`cahal = { path = "../cahal" }` for macOS),
