@@ -576,6 +576,118 @@ impl Rig {
             .push((FrameData::Tf(f), Some(TF_GRID.id())));
     }
 
+    /// Gives Main L (1) the set "EQ 1" (a 2 kHz cut over its bump, a gentle top shelf), the
+    /// set's dashed filter curve (trace 40) and "Main L after EQ 1" (6), the prediction of
+    /// the live curve, as the daemon would make them.
+    pub fn add_eq(&self) {
+        use ac2_proto::model::{MathConfig, MathDomain, MathExpr, MathOp, Operand};
+        let body = EqBody {
+            name: "EQ 1".into(),
+            realisation: EqRealisation::Digital { rate: Hz(48_000.0) },
+            peak_q: PeakQ::HalfGain,
+            enabled: true,
+            sections: vec![
+                EqSection {
+                    enabled: true,
+                    shape: EqShape::Peaking {
+                        f: Hz(2000.0),
+                        gain: Db(-4.5),
+                        bw: Bandwidth::Q { value: 1.4 },
+                        q_measured: None,
+                    },
+                },
+                EqSection {
+                    enabled: true,
+                    shape: EqShape::HighShelf {
+                        f: Hz(10_000.0),
+                        gain: Db(2.0),
+                        order: ShelfOrder::Second {
+                            slope: ShelfSlope::S { value: 1.0 },
+                        },
+                        f_at: ShelfFreq::Midpoint,
+                    },
+                },
+            ],
+        };
+        let freqs = TF_GRID.centres();
+        let none = |_| Err(String::from("no response sections here"));
+        let h = ac2_traces::eq::response(&body, &freqs, &none).unwrap();
+        let set = EqSet {
+            id: EqSetId(1),
+            rev: 3,
+            body,
+            in_console: None,
+            trace: TraceId(40),
+        };
+        {
+            let mut s = self.fake.lock();
+            let mut main = s
+                .state
+                .measurements
+                .iter()
+                .find(|m| m.id == MeasId(1))
+                .cloned()
+                .unwrap();
+            main.eq = vec![set];
+            s.commit(Change::Measurement(Patch::Set(main)));
+            let mut edit = ac2_traces::meta::new_edit(
+                TraceId(40),
+                "EQ 1".into(),
+                None,
+                TraceOwner::Meas { meas: MeasId(1) },
+            );
+            edit.locked = true;
+            let curve = TraceMeta {
+                id: TraceId(40),
+                edit,
+                kind: TraceKind::Transfer,
+                source: TraceSource::Eq {
+                    meas: MeasId(1),
+                    set: EqSetId(1),
+                    rev: 3,
+                },
+                grid_id: TF_GRID.id(),
+                delay: Seconds(0.0),
+                depth: None,
+                cal: CalState::Uncalibrated,
+                mic: None,
+                mic_curve: None,
+                created_at: WallNs(0),
+                eq_in: Vec::new(),
+            };
+            s.put_trace(curve, TF_GRID, ac2_traces::eq::columns(&h));
+            let config = MathConfig::of(
+                TraceOwner::Meas { meas: MeasId(1) },
+                MathDomain::Transfer,
+                MathExpr::Binary {
+                    a: Operand::Meas { meas: MeasId(1) },
+                    op: MathOp::Multiply,
+                    b: Operand::Eq {
+                        meas: MeasId(1),
+                        set: EqSetId(1),
+                    },
+                },
+            );
+            let after = measurement(
+                6,
+                "Main L after EQ 1",
+                MeasKind::Math { config },
+                None,
+                Some(&TF_GRID),
+            );
+            s.commit(Change::Measurement(Patch::Set(after)));
+        }
+        let mut f = tf_frame(6, 0.0, 0.0, 2000.0);
+        for ((m, p), v) in f.mag.iter_mut().zip(f.phase.iter_mut()).zip(&h) {
+            *m += (20.0 * v.norm().log10()) as f32;
+            *p = wrap(f64::from(*p) + v.arg().to_degrees()) as f32;
+        }
+        self.extra
+            .lock()
+            .unwrap()
+            .push((FrameData::Tf(f), Some(TF_GRID.id())));
+    }
+
     /// Adds "Mic 1 − Mic 2" (7), spectrum math: the level difference of Mic 1 FFT and a
     /// second spectrum "Mic 2 FFT" (8), a gently rising difference of a few dB.
     pub fn add_spectrum_math(&self) {
