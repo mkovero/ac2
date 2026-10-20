@@ -5,7 +5,7 @@
 //! that starts at the places: home and removable media.
 //!
 //! Pure data except the browser's directory listing; the reducer
-//! (`state_sessions.rs`) routes keys and clicks here and turns choices into
+//! (`state/sessions_impl.rs`) routes keys and clicks here and turns choices into
 //! [`SessionJob`]s, which the link runs step by step ([`crate::conn`]).
 
 use std::path::{Path, PathBuf};

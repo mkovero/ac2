@@ -1,0 +1,554 @@
+//! Reducer tests of the Settings view: opening it at a page from the old dialogs' keys,
+//! paging, each page's keys and the requests they make, and that the view owns the
+//! keyboard (the stimulus is never touched by its keys; Shift+Esc still stops).
+
+use super::*;
+use crate::settings::{ConnLine, DisplayRow, Page};
+use ac2_scene::primitives::Colormap;
+
+fn settings(t: &T) -> &Settings {
+    t.st.overlay.settings().expect("Settings open")
+}
+
+fn page(t: &T) -> Page {
+    settings(t).page
+}
+
+fn ceiling_call(r: &[Request]) -> Option<(f64, bool)> {
+    r.iter().find_map(|r| match r {
+        Request::Call {
+            cmd:
+                Command::GenCeiling {
+                    ceiling,
+                    confirm_raise,
+                },
+            ..
+        } => Some((ceiling.0, *confirm_raise)),
+        _ => None,
+    })
+}
+
+/// The daemon state with the generator's ceiling and bound.
+fn with_ceiling(ceiling: f64, bound: f64, armed: bool) -> State {
+    let mut s = daemon_state();
+    s.generator.ceiling = Dbfs(ceiling);
+    s.generator.ceiling_bound = Dbfs(bound);
+    s.generator.armed = armed;
+    s
+}
+
+/// The palette names the spectrograph colours; taking one sets the colour map of the
+/// spectrum pane's measurement, which the daemon keeps with it.
+#[test]
+fn spectrograph_colours_from_the_palette() {
+    let mut t = T::new();
+    let keys = t.keys.clone();
+    t.key("Alt+2");
+    let scope = t.focus_kind().scope();
+    let mut p = crate::palette::Palette::default();
+    p.type_text("magma");
+    assert_eq!(
+        p.entries(&keys, scope).first().map(|e| e.command),
+        Some(CommandId::SpectrographMagma)
+    );
+    let colours = |t: &T| {
+        let m = t.st.meas(MeasId(2)).expect("Sub");
+        t.st.display_of(m).spectrograph_colours
+    };
+    assert_eq!(colours(&t), Colormap::Viridis);
+    let r =
+        t.st.update(Msg::Command(CommandId::SpectrographMagma), &keys);
+    t.answer(&r);
+    assert_eq!(colours(&t), Colormap::Magma);
+    assert_eq!(t.last_toast(), "Sub: spectrograph colours: magma");
+    let r =
+        t.st.update(Msg::Command(CommandId::SpectrographColours), &keys);
+    t.answer(&r);
+    assert_eq!(t.last_toast(), "Sub: spectrograph colours: inferno");
+    let r =
+        t.st.update(Msg::Command(CommandId::SpectrographGrey), &keys);
+    t.answer(&r);
+    assert_eq!(colours(&t), Colormap::Grey);
+}
+
+#[test]
+fn the_old_dialog_keys_open_their_pages_and_ctrl_p_the_last_one() {
+    let mut t = T::new();
+    t.type_key("Shift+O", "O");
+    assert_eq!(page(&t), Page::AudioIo);
+    t.key("Escape");
+    assert_eq!(t.st.overlay, Overlay::None);
+    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    assert_eq!(page(&t), Page::AudioIo);
+    t.key("Escape");
+    t.st.update(Msg::Command(CommandId::Calibrations), &t.keys);
+    assert_eq!(page(&t), Page::Calibration);
+    t.key("Escape");
+    // Ctrl+P opens the page last shown; Ctrl+PgDn / PgUp and Alt+digit move between pages.
+    t.key("Ctrl+P");
+    assert_eq!(page(&t), Page::Calibration);
+    t.key("Ctrl+PageDown");
+    assert_eq!(page(&t), Page::Leq);
+    t.key("Ctrl+PageUp");
+    t.key("Ctrl+PageUp");
+    assert_eq!(page(&t), Page::AudioIo);
+    t.key("Alt+6");
+    assert_eq!(page(&t), Page::Connection);
+    t.key("Alt+Right");
+    assert_eq!(page(&t), Page::Rig);
+    t.key("Alt+Right");
+    assert_eq!(page(&t), Page::AudioIo, "wraps");
+    t.key("Alt+Left");
+    assert_eq!(page(&t), Page::Rig, "back, wrapping");
+    t.key("Alt+1");
+    t.key("Alt+7");
+    assert_eq!(page(&t), Page::Rig, "the seventh page has its Alt digit");
+    // Desktops take Ctrl+Tab: it steps no page.
+    t.key("Ctrl+Tab");
+    assert_eq!(page(&t), Page::Rig);
+    // The mouse picks a page too; Ctrl+P again closes the view.
+    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
+    assert_eq!(page(&t), Page::Display);
+    t.key("Ctrl+P");
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
+#[test]
+fn the_view_owns_the_keys_and_shift_esc_still_stops() {
+    let mut t = T::new();
+    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.key("Space");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    t.key("Ctrl+P");
+    for k in ["Space", "Enter", "Up", "Down", "Shift+Up", "Left", "Right"] {
+        let r = t.key(k);
+        assert!(
+            !r.iter()
+                .any(|x| matches!(x, Request::StimSet(_) | Request::StimStop)),
+            "{k}: {r:?}"
+        );
+        assert_eq!(t.st.stimulus.level, Some(Dbfs(-20.0)), "{k}");
+    }
+    assert!(t.st.overlay.settings().is_some());
+    let r = t.key("Shift+Escape");
+    assert!(r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
+    assert!(
+        t.st.overlay.settings().is_some(),
+        "the stop leaves the view open"
+    );
+}
+
+#[test]
+fn lowering_the_max_level_goes_out_at_once_a_raise_needs_the_word() {
+    let mut t = T::new();
+    t.conn(mirror(with_ceiling(-30.0, -10.0, false)));
+    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    // The max level row is below the channels: ↑ from the first channel wraps to it.
+    t.st.update(Msg::Settings(SettingsMsg::Ceiling), &t.keys);
+    assert!(settings(&t).on_ceiling);
+    // Typed text goes to the row, R / M / S do not act.
+    t.type_key("Minus", "-");
+    t.text("40");
+    let r = t.key("Enter");
+    assert_eq!(ceiling_call(&r), Some((-40.0, false)));
+    // Above the bound: refused here with where the bound comes from.
+    t.text("-6");
+    assert_eq!(ceiling_call(&t.key("Enter")), None);
+    assert!(
+        settings(&t)
+            .ceiling
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("--max-level"))
+    );
+    // A refused value stays for correcting; Backspace takes it back.
+    assert_eq!(settings(&t).ceiling.text, "-6");
+    t.st.update(Msg::Backspace, &t.keys);
+    t.st.update(Msg::Backspace, &t.keys);
+    // A raise: the confirmation first; Esc keeps the level and the view.
+    t.text("-20");
+    assert_eq!(ceiling_call(&t.key("Enter")), None);
+    assert!(settings(&t).ceiling.confirm.is_some());
+    t.key("Escape");
+    assert!(
+        t.st.overlay.settings().is_some(),
+        "Esc closed the confirmation only"
+    );
+    assert!(settings(&t).ceiling.confirm.is_none());
+    t.text("-20");
+    t.key("Enter");
+    t.text("raise");
+    let r = t.key("Enter");
+    assert_eq!(ceiling_call(&r), Some((-20.0, true)));
+    // Never while anything is armed.
+    t.conn(mirror(with_ceiling(-30.0, -10.0, true)));
+    t.text("-20");
+    assert_eq!(ceiling_call(&t.key("Enter")), None);
+    assert_eq!(
+        settings(&t).ceiling.error.as_deref(),
+        Some(ac2_scene::rig::RAISE_WHILE_LIVE)
+    );
+    // Lowering is never refused for that.
+    for _ in 0..3 {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    t.text("-35");
+    assert_eq!(ceiling_call(&t.key("Enter")), Some((-35.0, false)));
+}
+
+#[test]
+fn an_output_is_named_for_every_client_on_enter() {
+    let mut t = T::new();
+    t.st.update(Msg::Command(CommandId::StimulusOutputs), &t.keys);
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    assert_eq!(dialog(&t).focus, Row::Output(0));
+    t.type_key("N", "n");
+    t.text("Main L");
+    let r = t.key("Enter");
+    let sent = r.iter().find_map(|r| match r {
+        Request::Call {
+            cmd: Command::SessionOutputs { outputs },
+            what,
+        } => Some((outputs.clone(), what.clone())),
+        _ => None,
+    });
+    assert_eq!(
+        sent,
+        Some((
+            vec![OutputSetup {
+                channel: 0,
+                label: Some("Main L".into())
+            }],
+            "output 1: named Main L (every client)".into()
+        ))
+    );
+    // The mirror brings the label back: the row and the top bar's outputs say it.
+    let mut s = daemon_state();
+    s.outputs = vec![OutputSetup {
+        channel: 0,
+        label: Some("Main L".into()),
+    }];
+    t.conn(mirror(s));
+    assert_eq!(dialog(&t).outputs[0].label(), "Main L");
+    // ↓ drops an edit unsent; an empty label clears.
+    t.type_key("N", "n");
+    t.text("x");
+    t.key("Down");
+    assert_eq!(dialog(&t).edit, None);
+    t.key("Up");
+    t.type_key("N", "n");
+    for _ in 0.."Main L".len() {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    let r = t.key("Enter");
+    assert!(r.iter().any(|r| matches!(r,
+        Request::Call { cmd: Command::SessionOutputs { outputs }, .. }
+            if outputs == &[OutputSetup { channel: 0, label: None }])));
+}
+
+#[test]
+fn display_page_changes_apply_at_once_and_are_remembered() {
+    let mut t = T::new();
+    // The sweep view row sets the view of a sweep pane: one on screen.
+    t.go(PaneKind::Distortion);
+    t.key("Alt+1");
+    t.key("Ctrl+P");
+    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
+    assert_eq!(page(&t), Page::Display);
+    t.st.prefs_dirty = false;
+    t.key("Right");
+    assert_eq!(t.st.theme, ThemeName::Light);
+    assert_eq!(t.st.prefs.theme, Some(ThemeName::Light));
+    t.key("Down");
+    t.key("Space");
+    assert!(!t.st.prefs.key_hints);
+    t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::WarningToasts);
+    t.key("Right");
+    assert!(!t.st.prefs.warning_toasts);
+    t.key("Left");
+    assert!(t.st.prefs.warning_toasts);
+    t.key("Down");
+    t.key("Right");
+    assert_eq!(t.st.prefs.spl_hold_ms, Some(250));
+    t.st.prefs_dirty = false;
+    let focus = t.focus_kind();
+    t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::LeqStyle);
+    t.key("Right");
+    assert_eq!(t.st.view.spl.layout.style, ac2_scene::view::LeqStyle::Tiles);
+    assert_eq!(t.st.prefs.leq, t.st.view.spl.layout);
+    assert!(t.st.prefs_dirty);
+    t.key("Down");
+    t.key("Right");
+    assert!(t.st.prefs.leq.history);
+    // A layout row leaves the pane's view and the focus as they were.
+    assert_eq!(t.focus_kind(), focus);
+    t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::LeqBars);
+    assert!(t.st.prefs.bar_ease);
+    t.key("Right");
+    assert!(!t.st.prefs.bar_ease);
+    t.key("Left");
+    assert!(t.st.prefs.bar_ease);
+    t.key("Down");
+    t.key("Right");
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Spectrum).spectrum,
+        ac2_scene::view::SpectrumMode::Split
+    );
+    t.key("Left");
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Spectrum).spectrum,
+        ac2_scene::view::SpectrumMode::Spectrum
+    );
+    t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::SpectrumGlide);
+    assert!(t.st.prefs.spec_ease);
+    t.st.prefs_dirty = false;
+    t.key("Right");
+    assert!(!t.st.prefs.spec_ease);
+    assert!(t.st.prefs_dirty);
+    t.key("Left");
+    assert!(t.st.prefs.spec_ease);
+    t.key("Down");
+    t.key("Right");
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Distortion).sweep,
+        ac2_scene::view::SweepMode::Ir(ac2_scene::view::IrMode::Linear)
+    );
+    t.key("Down");
+    t.key("Right");
+    assert_eq!(
+        t.st.view.distortion.unit,
+        ac2_scene::view::DistortionUnit::Percent
+    );
+    t.key("Down");
+    t.key("Right");
+    assert_eq!(
+        t.st.view.tf.coherence_placement,
+        ac2_scene::view::CoherencePlacement::OverlayOnMagnitude
+    );
+    t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::ResolutionMarker);
+    assert!(t.st.view.unresolved);
+    t.key("Right");
+    assert!(!t.st.view.unresolved && !t.st.prefs.resolution_marker);
+    t.key("Left");
+    assert!(t.st.view.unresolved && t.st.prefs.resolution_marker);
+    t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::LevelAxes);
+    let f = t.st.layout.focus;
+    t.st.pane_levels.insert(
+        f,
+        PaneLevels {
+            transfer: ac2_scene::axis::Range { lo: -3.0, hi: 3.0 },
+            ..PaneLevels::default()
+        },
+    );
+    t.st.view.ir.axes.level_db = ac2_scene::axis::Range { lo: -40.0, hi: 0.0 };
+    t.key("Enter");
+    assert_eq!(t.st.pane_levels(f), PaneLevels::default());
+    assert_eq!(
+        crate::prefs::IrLevelPrefs::of(&t.st.view),
+        crate::prefs::IrLevelPrefs::default()
+    );
+    assert!(t.st.prefs_dirty);
+}
+
+#[test]
+fn recording_limit_is_this_apps_and_the_record_key_uses_it() {
+    let mut t = T::new();
+    t.key("Ctrl+P");
+    t.key("Alt+4");
+    assert_eq!(page(&t), Page::Recording);
+    // Opening it asks the daemon where it records.
+    t.text("90");
+    t.key("Enter");
+    assert_eq!(t.st.prefs.record_limit_min, Some(90));
+    t.key("Escape");
+    let r = t.st.update(Msg::Command(CommandId::Record), &t.keys);
+    let max = r.iter().find_map(|r| match r {
+        Request::Call {
+            cmd: Command::RecStart { request },
+            ..
+        } => Some(request.max_duration.0),
+        _ => None,
+    });
+    assert_eq!(max, Some(5400.0));
+}
+
+#[test]
+fn connection_page_asks_the_daemon_authorizes_and_revokes() {
+    let mut t = T::new();
+    t.key("Ctrl+P");
+    let r = t.key("Alt+6");
+    assert!(r.iter().any(|r| matches!(r, Request::ServerInfo)), "{r:?}");
+    // Asked again while the page is shown.
+    t.st.update(
+        Msg::Tick {
+            now_s: 1.0,
+            dt_s: 1.0,
+        },
+        &t.keys,
+    );
+    let r = t.st.update(
+        Msg::Tick {
+            now_s: 2.5,
+            dt_s: 1.5,
+        },
+        &t.keys,
+    );
+    assert!(r.iter().any(|r| matches!(r, Request::ServerInfo)), "{r:?}");
+    let info = ac2_proto::samples::server_info();
+    t.conn(ConnEvent::Server {
+        what: None,
+        result: Ok(info.clone()),
+    });
+    let lines = settings(&t).connection.lines();
+    assert_eq!(lines[2], ConnLine::Authorized("laptop".into()));
+    // Enter on Reconnect; Enter on Connect… asks the app for the connect dialog.
+    assert!(
+        t.key("Enter")
+            .iter()
+            .any(|r| matches!(r, Request::Reconnect))
+    );
+    t.key("Down");
+    t.key("Enter");
+    assert!(t.st.want_connect_dialog);
+    // Delete twice revokes the focused client.
+    t.key("Down");
+    assert!(t.key("Delete").is_empty());
+    let r = t.key("Delete");
+    assert!(r.iter().any(|r| matches!(r,
+        Request::ServerCall { cmd: Command::ServerRevoke { name }, .. } if name == "laptop")));
+    // A on a refused key, a name, Enter authorizes it.
+    t.key("Down");
+    t.type_key("A", "a");
+    t.text("tablet");
+    let r = t.key("Enter");
+    assert!(r.iter().any(|r| matches!(r,
+        Request::ServerCall { cmd: Command::ServerAuthorize { name, .. }, .. } if name == "tablet")));
+    // The answer to a change replaces the info; a failure leaves it and says why.
+    t.conn(ConnEvent::Server {
+        what: Some("client tablet authorized".into()),
+        result: Err("invalid: client name \"tablet\" is already authorized".into()),
+    });
+    assert!(t.last_toast().contains("already authorized"));
+    assert_eq!(settings(&t).connection.server, Some(Ok(info)));
+}
+
+/// One page holds the audio device and the channels; its title is the name every text uses.
+#[test]
+fn the_audio_and_channels_are_one_page() {
+    assert_eq!(Page::ALL[0], Page::AudioIo);
+    assert_eq!(Page::AudioIo.title(), crate::settings::AUDIO_IO);
+    assert_eq!(Page::AudioIo.title(), "Audio I/O");
+    let titles: Vec<&str> = Page::ALL.iter().map(|p| p.title()).collect();
+    assert!(!titles.contains(&"Audio") && !titles.contains(&"Inputs & outputs"));
+    // Palette lines are terse and never name a page by an old title.
+    for c in CommandId::ALL {
+        assert!(!c.title().contains("Inputs & outputs"), "{}", c.title());
+    }
+}
+
+/// ↑/↓ walk the device rows, then the inputs, the outputs, the max level row, and wrap.
+#[test]
+fn up_down_walk_device_channels_then_the_max_level() {
+    use crate::session_dialog::Row;
+    let mut t = T::new();
+    t.conn(mirror(with_ceiling(-30.0, -10.0, false)));
+    t.type_key("Shift+O", "O");
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    let rows = settings(&t).session.rows();
+    let (ni, no) = (
+        settings(&t).session.inputs.len(),
+        settings(&t).session.outputs.len(),
+    );
+    assert!(ni > 0 && no > 0);
+    let mut want = vec![Row::Backend, Row::Device, Row::OutputDevice];
+    want.extend((0..ni).map(Row::Input));
+    want.extend((0..no).map(Row::Output));
+    want.extend([Row::Rate, Row::Buffer]);
+    assert_eq!(rows, want);
+    // Shift+O lands on the input device.
+    assert_eq!(settings(&t).session.focus, Row::Device);
+    assert!(!settings(&t).on_ceiling);
+    let at = |t: &T| {
+        let s = settings(t);
+        (s.on_ceiling, s.session.focus)
+    };
+    t.key("ArrowUp");
+    assert_eq!(at(&t), (false, Row::Backend));
+    let mut walked = vec![at(&t).1];
+    for _ in 1..want.len() {
+        t.key("ArrowDown");
+        walked.push(at(&t).1);
+    }
+    assert_eq!(walked, want);
+    t.key("ArrowDown");
+    assert!(at(&t).0, "the max level row after the buffer");
+    t.key("ArrowDown");
+    assert_eq!(at(&t), (false, Row::Backend), "wraps to the backend");
+    t.key("ArrowUp");
+    assert!(at(&t).0, "↑ from the backend: the max level row");
+    t.key("ArrowUp");
+    assert_eq!(at(&t), (false, Row::Buffer));
+    assert_eq!(page(&t), Page::AudioIo);
+}
+
+/// The commands that opened either old page open this one on their row.
+#[test]
+fn commands_open_the_page_on_their_row() {
+    use crate::session_dialog::Row;
+    let mut t = T::new();
+    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    // The device's rows arrive after the page opens: the focus waits for them.
+    assert_eq!(
+        settings(&t).focus_want,
+        Some(crate::settings::FocusWant::Inputs)
+    );
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    assert_eq!(page(&t), Page::AudioIo);
+    assert_eq!(settings(&t).session.focus, Row::Input(0));
+    assert_eq!(settings(&t).focus_want, None);
+    // Shift+O on the open view moves to the input device.
+    t.key("Escape");
+    t.type_key("Shift+O", "O");
+    assert_eq!(page(&t), Page::AudioIo);
+    assert_eq!(settings(&t).session.focus, Row::Device);
+    t.key("Escape");
+    t.st.update(Msg::Command(CommandId::StimulusOutputs), &t.keys);
+    assert!(matches!(settings(&t).session.focus, Row::Output(_)));
+}
+
+/// Shift+Tab goes back on every Settings page that Tab walks: the Recording, Display and
+/// Connection pages (Rig: `state::tests::rig`).
+#[test]
+fn shift_tab_steps_back_on_the_settings_pages() {
+    let mut t = T::new();
+    t.key("Ctrl+P");
+    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
+    let first = settings(&t).display;
+    t.key("Tab");
+    t.key("Tab");
+    assert_ne!(settings(&t).display, first);
+    t.key("Shift+Tab");
+    t.key("Shift+Tab");
+    assert_eq!(settings(&t).display, first, "Display");
+
+    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Recording)), &t.keys);
+    let first = settings(&t).recording.focus;
+    t.key("Tab");
+    assert_ne!(settings(&t).recording.focus, first);
+    t.key("Shift+Tab");
+    assert_eq!(settings(&t).recording.focus, first, "Recording");
+
+    t.key("Alt+6");
+    assert_eq!(page(&t), Page::Connection);
+    let first = settings(&t).connection.focus;
+    t.key("Tab");
+    assert_ne!(settings(&t).connection.focus, first);
+    t.key("Shift+Tab");
+    assert_eq!(settings(&t).connection.focus, first, "Connection");
+}

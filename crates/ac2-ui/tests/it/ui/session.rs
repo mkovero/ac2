@@ -313,7 +313,7 @@ fn sessions_dialog_save_as() {
     h.step();
     snapshot(&mut h, "sessions_dialog_save_as");
     // The fake keeps no session directory, so the save itself is the reducer tests'
-    // (`state_sessions_tests`); Esc backs out to the actions, a second Esc closes.
+    // (`state::tests::sessions`); Esc backs out to the actions, a second Esc closes.
     h.key_press(Key::Escape);
     step_until(&mut h, "back on the actions", |a| {
         a.state

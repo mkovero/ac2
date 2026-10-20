@@ -1,0 +1,410 @@
+//! The SPL meter and Leq: weightings, folding their frames, the Leq dialog, logs and alarms.
+
+pub(super) mod export;
+pub(super) mod strip;
+
+use super::*;
+
+/// The SPL meters' Leq history, history strips, logs and alarms as this client follows them.
+#[derive(Clone, Debug)]
+pub struct LeqUi {
+    /// Each SPL meter's Leq windows over time, from the `leq` frames received (with the
+    /// last `seq` folded in) over the history rebuilt from the meter's log.
+    pub history: BTreeMap<MeasId, (u64, ac2_scene::leq::LeqHistory)>,
+    /// The span (daemon wall clock, s) each SPL pane's history strip looks back at; a
+    /// pane not here follows live.
+    pub strips: BTreeMap<PaneId, (f64, f64)>,
+    /// The pointer over a history strip: its pane and time (s).
+    pub cursor: Option<(PaneId, f64)>,
+    /// Spans of each meter's log fetched for strips looking back, oldest first.
+    pub spans: BTreeMap<MeasId, Vec<strip::LeqSpan>>,
+    /// The span fetch under way.
+    pub(super) span_pending: Option<strip::SpanAsk>,
+    /// Number of the newest span fetch.
+    pub(super) span_ask: u64,
+    /// Width of the strip last moved by the mouse, px: the resolution fetched at.
+    pub strip_px: f32,
+    /// Which log and windows each SPL meter's history was last rebuilt for.
+    pub(super) logs: BTreeMap<MeasId, LeqLogSeen>,
+    /// Number of the newest history rebuild asked for.
+    pub(super) backfill_ask: u64,
+    /// The newest over / recovered alarm of each meter already shown (`None`: none yet).
+    pub(super) alarms_seen: BTreeMap<MeasId, Option<ac2_proto::model::LeqAlarm>>,
+    /// The SPL / Leq page's cue fold as the operator last set it, for the app's run: Apply,
+    /// closing and another meter keep it (a meter with a cue set opens shown anyway).
+    pub(super) cues_shown: bool,
+    /// The SPL / Leq page last applied, with what its call is named: a conflict brings it
+    /// back with its edits.
+    pub(super) sent: Option<(String, Box<LeqDialog>)>,
+}
+
+impl AppState {
+    /// F / Z in the SPL pane (or the palette's direct choices): the meter the pane shows
+    /// takes the next (or the named) time or frequency weighting, in place — its Leq
+    /// windows, log and interval carry on. The pane keeps showing what it showed.
+    pub(super) fn spl_weightings(&mut self, c: CommandId, out: &mut Vec<Request>) {
+        use CommandId as C;
+        use ac2_proto::model::{TimeWeighting as T, Weighting as W};
+        let Some(mut m) = self.kind_meas(PaneKind::Spl).cloned() else {
+            self.warn(self.no_spl_meter());
+            return;
+        };
+        let MeasKind::Spl { config } = &mut m.config.kind else {
+            return;
+        };
+        match c {
+            C::SplTimeWeighting => {
+                config.time_weighting = match config.time_weighting {
+                    T::Fast => T::Slow,
+                    T::Slow => T::Impulse,
+                    T::Impulse => T::Fast,
+                }
+            }
+            C::SplWeighting => {
+                config.weighting = match config.weighting {
+                    W::A => W::C,
+                    W::C => W::Z,
+                    W::Z => W::A,
+                }
+            }
+            C::SplFast => config.time_weighting = T::Fast,
+            C::SplSlow => config.time_weighting = T::Slow,
+            C::SplImpulse => config.time_weighting = T::Impulse,
+            C::SplA => config.weighting = W::A,
+            C::SplC => config.weighting = W::C,
+            C::SplZ => config.weighting = W::Z,
+            _ => return,
+        }
+        let what = format!(
+            "{}: {}",
+            m.config.name,
+            ac2_scene::spl::metric_name(config.weighting, config.time_weighting)
+        );
+        // The pane keeps its view: the Leq windows do not follow the meter's weightings, so
+        // switching to the meter would read as the windows having changed. The daemon's
+        // reply names the new metric either way.
+        self.focus_kind(PaneKind::Spl);
+        let cmd = self.meas_update(m.id, m.config);
+        self.call(out, cmd, what);
+    }
+
+    /// How long the SPL meter's number holds a reading under time weighting `t`: the
+    /// preference when set, else the time weighting's own display period.
+    pub fn spl_display_period_s(&self, t: ac2_proto::model::TimeWeighting) -> f64 {
+        self.prefs.spl_hold_ms.map_or_else(
+            || ac2_scene::spl::display_period_s(t),
+            |ms| f64::from(ms) / 1e3,
+        )
+    }
+
+    /// Takes each SPL meter's newest frame as its displayed reading when the display
+    /// period has passed ([`ac2_scene::spl::SplHold`]).
+    pub(super) fn fold_spl(&mut self, d: &DataSnapshot) {
+        use ac2_proto::FrameData;
+        if let Some(st) = self.daemon() {
+            let ids: Vec<MeasId> = st.measurements.iter().map(|m| m.id).collect();
+            self.spl_hold.retain(|k, _| ids.contains(k));
+        }
+        for tf in d.latest.frames.values() {
+            let FrameData::Spl(f) = &tf.frame.data else {
+                continue;
+            };
+            let period = self.spl_display_period_s(f.meta.time_weighting);
+            let mut held = self.spl_hold.remove(&f.meas);
+            ac2_scene::spl::SplHold::update(
+                &mut held,
+                f,
+                tf.frame.stamp.capture_wall_ns.0,
+                tf.frame.stamp.config_rev,
+                period,
+            );
+            if let Some(h) = held {
+                self.spl_hold.insert(f.meas, h);
+            }
+        }
+    }
+
+    /// The run of SPL meter `meas`'s log, from its newest `leq` frame.
+    pub(super) fn leq_run(&self, meas: MeasId) -> Option<ac2_proto::frame::LeqRun> {
+        use ac2_proto::FrameData;
+        self.data
+            .as_ref()
+            .and_then(|d| {
+                d.latest.get(&Topic::Data {
+                    meas,
+                    stream: Stream::Leq,
+                })
+            })
+            .and_then(|f| match &f.frame.data {
+                FrameData::Leq(l) => l.meta.run,
+                _ => None,
+            })
+    }
+
+    /// Whether SPL meter `meas` reads dB SPL (its newest frame says so).
+    pub(super) fn leq_calibrated(&self, meas: MeasId) -> bool {
+        use ac2_proto::FrameData;
+        use ac2_proto::model::LevelScale;
+        let scale = |s: Stream| {
+            self.data
+                .as_ref()
+                .and_then(|d| d.latest.get(&Topic::Data { meas, stream: s }))
+                .and_then(|f| match &f.frame.data {
+                    FrameData::Leq(l) => Some(l.meta.scale),
+                    FrameData::Spl(l) => Some(l.meta.scale),
+                    _ => None,
+                })
+        };
+        scale(Stream::Leq).or_else(|| scale(Stream::Spl)) == Some(LevelScale::DbSpl)
+    }
+
+    pub(super) fn leq_msg(&mut self, m: LeqMsg, out: &mut Vec<Request>) {
+        if m == LeqMsg::Submit {
+            self.submit_leq(out);
+            return;
+        }
+        let Some(d) = self.overlay.leq_mut() else {
+            return;
+        };
+        match m {
+            LeqMsg::Focus(f) => {
+                d.focus = f;
+                d.entered();
+            }
+            LeqMsg::Caret(f, n) => d.caret_at(f, n),
+            LeqMsg::Cycle(f, step) => {
+                d.focus = f;
+                d.cycle(step);
+            }
+            LeqMsg::Add(f) => {
+                d.focus = f;
+                d.add_window();
+            }
+            LeqMsg::Remove(f) => {
+                d.focus = f;
+                d.remove_window();
+            }
+            LeqMsg::OpenRange => d.open_range(),
+            LeqMsg::AddRange => d.add_range(),
+            LeqMsg::CloseRange => d.close_range(),
+            LeqMsg::Cancel => self.overlay = Overlay::None,
+            LeqMsg::Submit => {}
+        }
+    }
+
+    /// Enter on the Leq dialog: the meter's windows go out (applied in place: its log and
+    /// windows carry on) and the SPL pane shows them; or the dialog says what is wrong.
+    pub(super) fn submit_leq(&mut self, out: &mut Vec<Request>) {
+        let Some(d) = self.overlay.leq_mut() else {
+            return;
+        };
+        match d.command() {
+            Ok(cmd) => {
+                let what = format!("{}: Leq windows set", d.name);
+                d.notice = None;
+                self.leq.sent = Some((what.clone(), Box::new(d.clone())));
+                self.overlay = Overlay::None;
+                self.focus_kind(PaneKind::Spl);
+                let m = self.modes_mut();
+                m.spl = m.spl.with_leq();
+                self.call(out, cmd, what);
+            }
+            Err(e) => d.error = Some(e),
+        }
+    }
+
+    /// Folds the newest `leq` frame of each SPL meter into its history.
+    /// Keeps, per Leq and band Leq topic, the frame a new one replaces, for its bars to
+    /// ease from. A frame from another session, daemon or configuration is not the same
+    /// bars moving: none is kept, and the new one is drawn as received.
+    pub(super) fn keep_bar_from(&mut self, d: &DataSnapshot) {
+        let old = self.data.as_deref();
+        self.bar_from.retain(|t, _| d.latest.get(t).is_some());
+        for tf in d.latest.frames.values() {
+            let Topic::Data {
+                stream: Stream::Leq | Stream::BandLeq,
+                ..
+            } = tf.topic
+            else {
+                continue;
+            };
+            let Some(prev) = old.and_then(|o| o.latest.get(&tf.topic)) else {
+                continue;
+            };
+            let (a, b) = (&prev.frame.stamp, &tf.frame.stamp);
+            if a.seq == b.seq {
+                continue;
+            }
+            if a.session_epoch == b.session_epoch
+                && a.daemon_incarnation == b.daemon_incarnation
+                && a.config_rev == b.config_rev
+            {
+                self.bar_from.insert(tf.topic, prev.frame.clone());
+            } else {
+                self.bar_from.remove(&tf.topic);
+            }
+        }
+    }
+
+    pub(super) fn fold_leq(&mut self, d: &DataSnapshot) {
+        use ac2_proto::FrameData;
+        // Without a synced daemon state (a resync, a short drop) the meter list is unknown,
+        // not empty: keep every history until the state says a meter is gone.
+        if self.daemon().is_none() {
+            return;
+        }
+        let cfgs: BTreeMap<MeasId, ac2_proto::model::LeqConfig> = self
+            .measurements()
+            .iter()
+            .filter_map(|m| match &m.config.kind {
+                MeasKind::Spl { config } => Some((m.id, config.leq.clone())),
+                _ => None,
+            })
+            .collect();
+        self.leq.history.retain(|k, _| cfgs.contains_key(k));
+        for tf in d.latest.frames.values() {
+            let FrameData::Leq(f) = &tf.frame.data else {
+                continue;
+            };
+            let Some(cfg) = cfgs.get(&f.meas) else {
+                continue;
+            };
+            let seq = tf.frame.stamp.seq;
+            let e = self.leq.history.entry(f.meas).or_default();
+            if seq > e.0 {
+                e.0 = seq;
+                e.1.push(cfg, f, tf.frame.stamp.capture_wall_ns.0 as f64 / 1e9);
+            }
+        }
+    }
+
+    /// Rebuilds each SPL meter's history from its log when the app first sees the meter
+    /// (connected, resynced, created), when its windows change and when a new log starts
+    /// (from this app or any other client: the log empties, or its row count starts over);
+    /// a new log first clears the history. The frames received go on folding in meanwhile.
+    pub(super) fn follow_leq_logs(&mut self, data: Option<&DataSnapshot>, out: &mut Vec<Request>) {
+        use ac2_proto::FrameData;
+        let Some(st) = self.daemon() else {
+            // Resyncing: the daemon may have restarted with other logs; ask again once synced.
+            self.leq.logs.clear();
+            return;
+        };
+        let mut logged: BTreeMap<MeasId, u64> = BTreeMap::new();
+        if let Some(d) = data {
+            for tf in d.latest.frames.values() {
+                if let FrameData::Leq(f) = &tf.frame.data {
+                    logged.insert(f.meas, f.meta.logged);
+                }
+            }
+        }
+        let meters: Vec<(MeasId, ac2_proto::model::LeqConfig, Option<bool>)> = st
+            .measurements
+            .iter()
+            .filter_map(|m| match &m.config.kind {
+                MeasKind::Spl { config } => Some((
+                    m.id,
+                    config.leq.clone(),
+                    st.spl_logs
+                        .iter()
+                        .find(|l| l.meas == m.id)
+                        .map(|l| l.started_at.is_some()),
+                )),
+                _ => None,
+            })
+            .collect();
+        self.leq
+            .logs
+            .retain(|k, _| meters.iter().any(|(id, ..)| id == k));
+        for (meas, config, started) in meters {
+            let logged = logged.get(&meas).copied();
+            let seen = self.leq.logs.get(&meas);
+            let new_log = seen.is_some_and(|s| {
+                logged.is_some_and(|l| l < s.logged) || (s.started && started == Some(false))
+            });
+            if new_log && let Some((_, h)) = self.leq.history.get_mut(&meas) {
+                h.clear();
+            }
+            match self.leq.logs.get_mut(&meas) {
+                Some(s) if !new_log && s.config == config => {
+                    s.logged = logged.unwrap_or(s.logged).max(s.logged);
+                    s.started = started.unwrap_or(s.started);
+                }
+                _ => {
+                    self.forget_leq_spans(meas);
+                    self.leq.backfill_ask += 1;
+                    let ask = self.leq.backfill_ask;
+                    self.leq.logs.insert(
+                        meas,
+                        LeqLogSeen {
+                            config,
+                            logged: logged.unwrap_or(0),
+                            started: started.unwrap_or(false),
+                            ask,
+                        },
+                    );
+                    out.push(Request::LeqBackfill { meas, ask });
+                }
+            }
+        }
+    }
+
+    /// A meter's history rebuilt from its log: under the frames received, unless a newer
+    /// rebuild was asked for meanwhile.
+    pub(super) fn leq_backfilled(
+        &mut self,
+        meas: MeasId,
+        ask: u64,
+        result: Result<Box<ac2_proto::model::SplHistory>, String>,
+    ) {
+        if self.leq.logs.get(&meas).is_none_or(|s| s.ask != ask) {
+            return;
+        }
+        match result {
+            Ok(h) => self.leq.history.entry(meas).or_default().1.backfill(&h),
+            Err(e) => {
+                let name = self
+                    .measurements()
+                    .iter()
+                    .find(|m| m.id == meas)
+                    .map(|m| m.config.name.clone())
+                    .unwrap_or_default();
+                self.fault(format!("{name}: Leq history from the log: {e}"));
+            }
+        }
+    }
+
+    /// Toasts each window that went over its limit or came back since the last mirror; the
+    /// alarms already there when the app connected are history, not news.
+    pub(super) fn follow_leq_alarms(&mut self) {
+        let Some(st) = self.daemon() else {
+            return;
+        };
+        let names: BTreeMap<MeasId, String> = st
+            .measurements
+            .iter()
+            .map(|m| (m.id, m.config.name.clone()))
+            .collect();
+        let mut news = Vec::new();
+        let mut seen = BTreeMap::new();
+        for l in &st.spl_logs {
+            let newest = l.alarms.last().copied();
+            match self.leq.alarms_seen.get(&l.meas) {
+                None => {}
+                Some(prev) => {
+                    let from = match prev {
+                        None => 0,
+                        Some(p) => l.alarms.iter().rposition(|a| a == p).map_or(0, |i| i + 1),
+                    };
+                    let name = names.get(&l.meas).cloned().unwrap_or_default();
+                    news.extend(l.alarms[from..].iter().map(|a| (name.clone(), *a)));
+                }
+            }
+            seen.insert(l.meas, newest);
+        }
+        self.leq.alarms_seen = seen;
+        for (name, a) in news {
+            let (over, text) = ac2_scene::leq::alarm_text(&name, &a);
+            self.leq_alarm(over, text);
+        }
+    }
+}

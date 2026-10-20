@@ -132,7 +132,7 @@ fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) 
     }
 }
 
-/// The chord that jumps to page `i` (0-based): Alt with its digit (`state_settings`
+/// The chord that jumps to page `i` (0-based): Alt with its digit (`state/settings_impl.rs`
 /// dispatches the same seven).
 fn page_key(i: usize) -> Option<Chord> {
     use egui::Key as K;

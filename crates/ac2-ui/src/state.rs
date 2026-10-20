@@ -47,85 +47,38 @@ use crate::prefs::UiPrefs;
 use crate::session_dialog::{RoleKey, Row, SessionDialog};
 use crate::settings::{FocusWant, Page, Settings};
 
-#[path = "state_display.rs"]
 mod display;
 pub use display::{ChoicePrompt, ChoicePurpose, DeletePrompt, DeleteTarget, MoveWhat};
-#[path = "state_levels.rs"]
-mod levels;
-pub use levels::{LEVEL_ZOOM_FACTOR, PaneLevels};
-#[path = "state_settings.rs"]
+pub use panes::levels::{LEVEL_ZOOM_FACTOR, PaneLevels};
 mod settings_impl;
 pub use settings_impl::SettingsMsg;
-#[path = "state_ir.rs"]
 mod ir_nav;
 pub use ir_nav::IrNavMsg;
-#[path = "state_band_transfer.rs"]
 mod band_transfer;
-#[path = "state_commands.rs"]
 mod commands;
-#[path = "state_commands_meas.rs"]
-mod commands_meas;
-#[path = "state_commands_tf.rs"]
-mod commands_tf;
-#[path = "state_dialogs.rs"]
-mod dialogs;
-#[path = "state_drag.rs"]
-mod drag;
-pub use drag::{DragMsg, DropTarget, EDGE_SHARE, RowDrag, drop_target};
-#[path = "state_glide.rs"]
+pub use panes::drag::{DragMsg, DropTarget, EDGE_SHARE, RowDrag, drop_target};
 mod glide;
-#[path = "state_keys.rs"]
-mod keys;
 pub use glide::SpecGlide;
-#[path = "state_leq.rs"]
 mod leq;
 pub use leq::LeqUi;
-#[path = "state_leq_strip.rs"]
-mod leq_strip;
-pub use leq_strip::{LeqSpan, STRIP_MIN_S, StripMsg};
-#[path = "state_leq_export.rs"]
-mod leq_export;
-pub use leq_export::{EXPORT_DIR, export_path, leq_export_name};
-#[path = "state_pane_export.rs"]
-mod pane_export;
-pub use pane_export::{PaneExport, pane_export_name};
-#[path = "state_link.rs"]
+pub use leq::export::{EXPORT_DIR, export_path, leq_export_name};
+pub use leq::strip::{LeqSpan, STRIP_MIN_S, StripMsg};
+pub use panes::pane_export::{PaneExport, pane_export_name};
 mod link;
 use link::Pending;
-#[path = "state_meas_display.rs"]
-mod meas_display;
-#[path = "state_meas_layout.rs"]
-mod meas_layout;
-use meas_layout::LayoutQueue;
-#[path = "state_new_meas.rs"]
+use panes::meas_layout::LayoutQueue;
 mod new_meas;
-#[path = "state_panes.rs"]
 mod panes;
-#[path = "state_panes_ops.rs"]
-mod panes_ops;
-#[path = "state_panes_views.rs"]
-mod panes_views;
-#[path = "state_queries.rs"]
 mod queries;
-#[path = "state_queries_inputs.rs"]
-mod queries_inputs;
-#[path = "state_queries_layout.rs"]
-mod queries_layout;
-#[path = "state_select.rs"]
-mod select;
-#[path = "state_sessions.rs"]
 pub(crate) mod sessions_impl;
 pub use sessions_impl::SessionsMsg;
-#[path = "state_stimulus.rs"]
 mod stimulus;
-#[path = "state_text.rs"]
 mod text;
-#[path = "state_undo.rs"]
 mod undo;
-pub use panes::{Axis, PaneId, PaneNode, PaneRect, Side, SplitGap};
-pub use panes_views::{
+pub use panes::views::{
     DEFAULT_PANE_AREA, Layout, PaneMenuRow, PaneModes, PaneTemplate, TransferView, View,
 };
+pub use panes::{Axis, PaneId, PaneNode, PaneRect, Side, SplitGap};
 pub use text::{
     curve_what, kind_shown, meas_input, mics_text, open_session_hint, parse_band, parse_mics,
     parse_session_ref, parse_slot, trace_label,
@@ -133,7 +86,6 @@ pub use text::{
 use text::{drawn_in, offset_text, slot_of};
 pub use undo::HISTORY_LEN;
 
-#[path = "state_types.rs"]
 mod types;
 pub(crate) use types::STIMULUS_STOPPED_TOO;
 use types::trace_mic_request;
@@ -142,7 +94,6 @@ pub use types::{
     SUB_OBSERVATIONS_S, SmoothTarget, Smoothable, StimPhase, Stimulus, outputs_text, parse_curve,
     parse_input_curve, spectrum_smoothing,
 };
-#[path = "state_msg.rs"]
 mod msg;
 pub use msg::{
     CAL_PAGE, COHERENCE_MASKS, DELAY_FINE_STEP, DelayChoice, FormMsg, HELP_LINE, HELP_PAGE,
@@ -316,7 +267,7 @@ pub struct AppState {
     pane_levels: BTreeMap<PaneId, PaneLevels>,
     /// Spectrum panes whose level axis is framed for what they show, or set by the operator:
     /// a pane not here frames its next frame.
-    spectrum_hold: BTreeMap<PaneId, levels::SpectrumHold>,
+    spectrum_hold: BTreeMap<PaneId, panes::levels::SpectrumHold>,
     /// No layout was remembered: the one pane takes the kind of the first measurement once
     /// the daemon's state is known.
     pane_auto: bool,
@@ -363,7 +314,7 @@ pub struct AppState {
     chosen: Option<MeasId>,
     /// The level ranges the operator set, by pane: each is stored with the panes and kept
     /// (never framed again automatically) until the pane shows another measurement.
-    level_set: BTreeSet<(PaneId, levels::LevelSlot)>,
+    level_set: BTreeSet<(PaneId, panes::levels::LevelSlot)>,
     /// Names of the measurements the daemon has listed since this app started: a pane
     /// remembered on one of them waits for it to come back.
     meas_seen: BTreeSet<String>,
@@ -804,5 +755,4 @@ pub enum HintPlace {
 }
 
 #[cfg(test)]
-#[path = "state_tests.rs"]
 mod tests;
