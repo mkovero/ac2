@@ -33,9 +33,10 @@ capture. A measurement kind of its own would duplicate all of that.
 - Its curve (stream `tf`) is the **aligned sum** `A + B` with the suggested delay and
   polarity applied to the delayed one — drawn on the magnitude and phase views like any
   sum, its phase referred to A's delay. Coherence: none (as a sum).
-- The fit and the alignment view's curves ride in the frame:
-  `MathState.align: AlignState {fit: Result<AlignFit, AlignNoFit>, phase_before,
-  phase_after, sum_before}` (per column, the frame's grid).
+- The fit rides in the frame's meta, `MathState.align: AlignState` (`AlignOutcome`: a fit
+  or the reason there is none); the alignment view's four per-column curves ride as i16
+  frame arrays on the frame's grid, `align_phase_before/after` (degrees, wrapped) and
+  `align_sum_before/after` (dB) — all four or none.
 - The UI does no maths (`tests/it/no_dsp.rs`): the fit is `ac2_core::align` (pure, tested
   analytically), the per-column combination `ac2_traces::math::align`, run by the daemon's
   math job; the scene only formats and draws.
@@ -100,13 +101,15 @@ one period away; a band outside the data is `no fit`.
   measurement…* reopens it.
 - A new alignment opens its own pane: the focused pane is split and the new half shows the
   owner's **alignment view** (never taking over the focused pane).
-- **Alignment view** (a transfer-pane view, **G** steps to it after coherence): top, the
+- **Alignment view** (a transfer-pane view; **G** steps to it only when the pane's group
+  has an alignment, so other panes cycle as before): top, the
   phase difference A − B before (faint) and after the suggested alignment, ±180°; bottom,
   the summation before and after (dB, 0 = full addition). The band is a gentle hint (faint
   grey shade + dashed edges) in both. Readout plate:
-  `Delay Main by 4.21 ms · 1.45 m @ 20 °C · polarity normal`,
-  `residual ±12° over 60–120 Hz · summation −7.9 → −0.3 dB (worst −21.0 → −1.2)`,
-  `inverted: Main +9.80 ms, ±41°`, `also fits: Main +15.3 ms (±14°)` when close. No fit:
+  `Delay Main by 4.21 ms · 1.44 m @ 20 °C · polarity normal`,
+  `residual ±12° over 60–120 Hz · summation −7.9 dB → −0.3 dB (worst −21.0 dB → −1.2 dB)`,
+  `other polarity: Main +9.80 ms inverted, ±41°`, and when close
+  `also fits: Main +15.30 ms, ±14° — the band is too narrow to tell: pick by distance`. No fit:
   `NO FIT · fewer than 3 columns in 60–120 Hz` (warning banner). The view shows the selected
   alignment of the pane's group, else its first; with none, it says how to make one.
 - Legend of the aligned sum: `Sub ↔ Main aligned · Main +4.21 ms`.

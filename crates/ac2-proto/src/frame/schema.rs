@@ -44,6 +44,14 @@ pub enum ArrayName {
     Phase,
     /// TF coherence γ².
     Coh,
+    /// An alignment's phase difference as measured.
+    AlignPhaseBefore,
+    /// An alignment's phase difference with its fit applied.
+    AlignPhaseAfter,
+    /// An alignment's summation as measured.
+    AlignSumBefore,
+    /// An alignment's summation with its fit applied.
+    AlignSumAfter,
     /// Validity bitmask.
     Validity,
     /// IR samples, linear.
@@ -144,7 +152,17 @@ pub(super) fn desc(name: ArrayName, unit: Unit) -> ArrayDesc {
     // as numbers or summed further and stay f32.
     let elem = match (name, unit) {
         (_, Unit::Bitmask) => Elem::U32,
-        (ArrayName::Mag | ArrayName::Phase | ArrayName::Level | ArrayName::IrEtc, _) => Elem::I16,
+        (
+            ArrayName::Mag
+            | ArrayName::Phase
+            | ArrayName::Level
+            | ArrayName::IrEtc
+            | ArrayName::AlignPhaseBefore
+            | ArrayName::AlignPhaseAfter
+            | ArrayName::AlignSumBefore
+            | ArrayName::AlignSumAfter,
+            _,
+        ) => Elem::I16,
         (ArrayName::Coh, _) => Elem::U16,
         (ArrayName::IrLinear, _) => Elem::Bfp16,
         _ => Elem::F32,

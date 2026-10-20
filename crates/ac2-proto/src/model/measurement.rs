@@ -512,7 +512,7 @@ impl MathDomain {
 }
 
 /// A math channel's expression.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MathExpr {
     /// `a op b`.
@@ -532,13 +532,26 @@ pub enum MathExpr {
         /// How they are combined (spectrum and RTA: power only).
         method: AverageMethod,
     },
+    /// The delay and polarity that align `b` with `a` (or `a` with `b`) in `band`
+    /// (`docs/design/alignment.md`), transfer only: the curve is their sum aligned so, the
+    /// frame's [`crate::frame::MathState::align`] says what was found.
+    Align {
+        /// First system.
+        a: Operand,
+        /// Second system.
+        b: Operand,
+        /// Where the two overlap.
+        band: super::AlignBand,
+        /// Largest delay searched either way.
+        max_delay: Seconds,
+    },
 }
 
 impl MathExpr {
     /// Every operand, in expression order.
     pub fn operands(&self) -> Vec<Operand> {
         match self {
-            MathExpr::Binary { a, b, .. } => vec![*a, *b],
+            MathExpr::Binary { a, b, .. } | MathExpr::Align { a, b, .. } => vec![*a, *b],
             MathExpr::Average { of, .. } => of.clone(),
         }
     }

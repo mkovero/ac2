@@ -187,6 +187,70 @@ fn recording_indicator() {
     snapshot(&mut h, "recording_indicator");
 }
 
+/// The alignment view of "Delay tower ↔ Main L": the readout says what to do, the phase
+/// difference and the summation before (dim) and after (bright), the band shaded.
+#[test]
+fn alignment_view() {
+    if !have_gpu("alignment_view") {
+        return;
+    }
+    let rig = common::Rig::start();
+    rig.add_alignment();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "the alignment's frames", |a| {
+        live_with(a, 5)
+            && a.state.data.as_ref().is_some_and(|d| {
+                d.latest
+                    .get(&Topic::Data {
+                        meas: MeasId(9),
+                        stream: Stream::Tf,
+                    })
+                    .is_some()
+            })
+    });
+    {
+        let st = &mut h.state_mut().state;
+        common::show_on(st, PaneKind::Transfer, MeasId(9));
+        let p = common::pane(st, PaneKind::Transfer);
+        if let Some(v) = st.layout.view_mut(p) {
+            v.modes.transfer = ac2_ui::state::TransferView::Alignment;
+        }
+    }
+    {
+        let st = &h.state().state;
+        let s = ac2_ui::scenes::alignment(
+            st,
+            crate::common::pane(st, PaneKind::Transfer),
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 600.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        let r = s.readout.expect("the readout");
+        assert_eq!(
+            r.headline,
+            "Delay Delay tower by 4.21 ms · 1.44 m @ 20 °C · polarity normal"
+        );
+        assert_eq!(
+            r.lines[1],
+            "other polarity: Delay tower +9.80 ms inverted, ±41°"
+        );
+        assert_eq!(
+            s.titles,
+            [
+                "phase difference Delay tower − Main L (°)",
+                "summation (dB, 0 = they add fully)"
+            ]
+        );
+    }
+    snapshot(&mut h, "transfer_alignment");
+}
+
 #[test]
 fn math_average_legend_and_banner() {
     if !have_gpu("math_average_legend_and_banner") {

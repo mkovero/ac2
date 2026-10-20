@@ -61,6 +61,7 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
             phase,
             coh: vec![0.9; f.len()],
             validity: vec![ValidityMask::NONE; f.len()],
+            align: None,
         }),
     }))
 }

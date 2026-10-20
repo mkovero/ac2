@@ -550,6 +550,7 @@ fn math_average_banners() {
                 })
                 .collect(),
             phase: PhaseBasis::SharedTimeBase,
+            align: None,
         };
         Some((
             "Audience".to_string(),

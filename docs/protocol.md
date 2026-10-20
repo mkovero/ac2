@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 58`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 59`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -440,9 +440,16 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   levels on one bin grid) or `rta` (`rta`, band powers on one band layout). Its `grid_id`
   is the published grid (a transfer result's is known before it runs; a spectrum's is the
   display grid of its operands' FFT, its capture every bin).
-  - `expr` (`MathExpr`, tagged by `type`): `binary` {`a`, `op`, `b`} or `average` {`of`:
-    2 … 16 distinct operands, `method` `power` \| `complex` \| `coherence_weighted`}. An
-    operand (`Operand`, tagged by `type`) is `meas` {`meas`} or `trace` {`trace`}.
+  - `expr` (`MathExpr`, tagged by `type`): `binary` {`a`, `op`, `b`}, `average` {`of`:
+    2 … 16 distinct operands, `method` `power` \| `complex` \| `coherence_weighted`} or
+    `align` {`a`, `b`, `band`: `AlignBand` {`lo`, `hi`} (Hz, 0 < `lo` < `hi`), `max_delay`
+    (Seconds, 0 < … ≤ 1)}. An operand (`Operand`, tagged by `type`) is `meas` {`meas`} or
+    `trace` {`trace`}.
+  - `align` (transfer only; `docs/design/alignment.md`): the delay and polarity that make
+    two systems add in their overlap `band`. Its frame's `math.align` holds the fit
+    (`AlignState`, §5.4) and the frame's `align_*` arrays the per-column curves; its `tf`
+    curve is the aligned sum `A + B` with the fit applied to the delayed one, phase
+    referred to A's delay, coherence none. Needs phase and one time base, as a sum does.
   - `op` (`MathOp`): `divide` (A ÷ B: A relative to B), `multiply` (A × B: the cascade),
     `add` (transfer: the complex sum, what A and B sum to acoustically; levels: the power
     sum `10·lg(10^{a/10} + 10^{b/10})`), `subtract` (transfer: the complex difference;
@@ -1572,8 +1579,8 @@ code from the previous column's (the first from 0), modulo 2¹⁶, as two planes
 high byte of every difference. Neighbouring columns of a curve are close, so the high plane
 is mostly 0x00 / 0xff and deflates to little.
 
-Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec) and
-`ir_etc` are `i16`; `coh` is `u16`; `ir_linear` is `bfp16`; bitmasks are `u32`;
+Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec),
+`ir_etc` and the `align_*` arrays are `i16`; `coh` is `u16`; `ir_linear` is `bfp16`; bitmasks are `u32`;
 everything else (meters, Leq and band Leq windows) is `f32`. Precision: `i16` is within
 0.005 dB or 0.005° of the value computed, `u16` within 5·10⁻⁵ of γ² — below the readouts
 (0.1 dB, 1°, 0.01) and, for a group delay fitted to the phase over 1/12 octave of
@@ -1628,7 +1635,7 @@ layout as code.
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*) |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column) | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
 | `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil) |
@@ -1666,7 +1673,16 @@ without a usable result: no valid column yet, or no answer in time), `refused`
 {`protection`: the operand's fault flags among `CLIP`, `NO_REFERENCE`, `CHECK_ROUTING`,
 `NO_SIGNAL`}, `mismatch` (does not combine with the others: another level scale, spectrum
 level (`tone` / `density`), grid or time base). A math channel's own `protection` is always 0: its operands' faults are in their
-statuses. A spectrum math result's live frame gathers its bins into display columns like a
+statuses. `align` (`AlignState` \| nil, an `align` expression's): `outcome` (tagged by
+`type`) `fit` {`fit`: `AlignFit`} or `no_fit` {`why`: `AlignNoFit`, tagged by `type`:
+`few_operands`, `few_columns` {`found`}, `no_weight`}. `AlignFit`: `best`,
+`other_polarity` (\| nil), `runner_up` (\| nil: another delay of the same polarity whose
+score is within 0.1 of the best — the band is too narrow to tell), `before`, `after`
+(`Summation` {`mean_db`, `worst_db`}: `20·lg(|A+B|/(|A|+|B|))` in the band, its weighted
+mean and minimum, before and after the suggestion) and `columns`. `AlignCandidate`:
+`delay` (Seconds ≥ 0), `delayed` (`a` \| `b`: the one to delay), `inverted` (its polarity
+flipped), `residual_deg` (weighted RMS of the remaining phase difference) and `score`
+(weighted mean cosine of it, −1 … 1). A spectrum math result's live frame gathers its bins into display columns like a
 spectrum's, each the highest value among its bins (a level difference: the largest in the
 column; the mean power for a density result, as a density spectrum's); its capture keeps
 every bin. Its `level` is its operands'.

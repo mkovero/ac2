@@ -38,13 +38,15 @@ pub struct TfMeta {
 }
 
 /// What a math channel's frame combined.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MathState {
     /// Every operand of the expression, in expression order, with whether it went in.
     pub operands: Vec<OperandState>,
     /// What the result's phase is relative to.
     pub phase: PhaseBasis,
+    /// An alignment's fit and its view's curves; `None` for every other expression.
+    pub align: Option<Box<crate::model::AlignState>>,
 }
 
 impl MathState {

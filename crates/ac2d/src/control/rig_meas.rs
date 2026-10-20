@@ -577,7 +577,7 @@ pub(super) fn remap_ids(
     };
     let expr = |e: &mut MathExpr| {
         let ops: Vec<&mut Operand> = match e {
-            MathExpr::Binary { a, b, .. } => vec![a, b],
+            MathExpr::Binary { a, b, .. } | MathExpr::Align { a, b, .. } => vec![a, b],
             MathExpr::Average { of, .. } => of.iter_mut().collect(),
         };
         for o in ops {

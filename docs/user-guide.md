@@ -13,6 +13,7 @@ Scripting: [protocol.md](protocol.md), the normative description of what the dae
 | play pink noise safely, and stop it | [Stimulus](#stimulus) |
 | see magnitude, phase and coherence of a speaker | [Transfer measurement](#transfer-measurement) |
 | time-align a speaker | [Delay finder](#delay-finder) |
+| align two systems in their overlap (sub and main, a delay tower) | [Alignment](#alignment-delay-and-polarity-of-two-systems) |
 | keep a curve to compare against | [Traces and slots](#traces-and-slots) |
 | measure response and harmonic distortion with a sweep | [Sweep measurement](#sweep-measurement-response-and-harmonic-distortion) |
 | read dB SPL and Leq | [Calibration and SPL](#calibration-and-spl), [SPL meter](#spl-meter), [Leq windows and limits](#leq-windows-and-limits) |
@@ -1036,6 +1037,44 @@ A math channel is filed under `--under MEAS` (or `--imported`); without it under
 operand when that is a measurement, else where that trace is filed (the app: the
 measurement selected when Shift+M was pressed). Operands are names or ids; `trace:NAME` /
 `meas:NAME` when a measurement and trace share a name.
+
+#### Alignment: delay and polarity of two systems
+
+Two systems that overlap in a band — sub and main, main and front fill, main and a delay
+tower — add fully there only when they arrive in phase
+([alignment.md](design/alignment.md)). **Alt+M** (palette *New alignment…*) is the math
+dialog with the operator **↔ aligned**: **A** and **B** are any two transfer traces, live
+`(live)` or stored (captures, sweeps, imports, two under one measurement too), on one time
+base; **Overlap from / to** (Hz) is the band to fit; **Max delay** (default 50 ms) the
+longest delay looked at. The band is never assumed: it is prefilled with where both curves
+are alike (within 6 dB of each other and 20 dB of their own peak, *where both curves are
+alike: check it*), or left empty to type. **Enter** creates it and opens its own pane, split
+from the focused one, on the **alignment view**.
+
+The daemon fits the delay over the band, weighting each frequency by `|A|·|B|` and the lower
+coherence (where one system is far below the other nothing can cancel), and tries both
+polarities. The view (**G** on a transfer pane reaches it only when its group has an
+alignment) shows the phase difference before (faint) and after, the summation before and
+after (0 dB: they add fully), the band shaded, and the readout:
+
+```
+Delay Main by 4.21 ms · 1.44 m @ 20 °C · polarity normal
+residual ±12° over 60–120 Hz · summation −7.9 dB → −0.3 dB (worst −21.0 dB → −1.2 dB)
+other polarity: Main +9.80 ms inverted, ±41°
+also fits: Main +15.30 ms, ±14° — the band is too narrow to tell: pick by distance
+```
+
+The last line appears when a delay one period away fits almost as well: a narrow band cannot
+tell them apart, the distance between the boxes can. A live operand keeps the result live.
+The curve of the alignment itself is the aligned sum (legend `Sub ↔ Main aligned · Main
++4.21 ms`), drawn and captured like any sum. Without three usable columns in the band it
+reads **NO FIT** with the reason. ac2 applies no delay itself: dial it into the DSP and
+measure again.
+
+```
+ac2 align new "Sub" "trace:Main alone" --band 60..120 [--max-delay 50ms] [--temp 20c] [--json]
+ac2 align show "Sub ↔ Main alone" [--temp 18c] [--json]
+```
 
 ## Delay finder
 
@@ -2662,6 +2701,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+O` | Open audio I/O… | `session_open` |
 | `Ctrl+M` | New measurement… | `meas_new` |
 | `Shift+M` | New math… | `meas_new_math` |
+| `Alt+M` | New alignment… | `meas_new_alignment` |
 | `Shift+C` | Next colour | `meas_colour_next` |
 | `Shift+A` | Show/hide measurement | `hide_group` |
 | `Shift+F2` | Move trace… | `move_trace` |

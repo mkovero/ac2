@@ -135,6 +135,10 @@ impl AppState {
                 Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
                 Err(why) => self.warn(why),
             },
+            C::NewAlignment => match self.alignment_form() {
+                Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
+                Err(why) => self.warn(why),
+            },
             C::NewMeasurement => self.open_new_measurement(self.layout.focus, keymap),
             C::NextColour | C::PrevColour => self.step_colour(c == C::NextColour, out),
             C::EditMeas => {
@@ -193,7 +197,13 @@ impl AppState {
                     _ => None,
                 });
                 let candidates = self.math_candidates(owner);
-                match m.map(|m| Form::edit_math(&m, candidates)) {
+                let levels = self.transfer_levels();
+                match m.map(|m| {
+                    Form::edit_math(&m, candidates).map(|mut f| {
+                        f.set_levels(levels);
+                        f
+                    })
+                }) {
                     Some(Ok(f)) => self.overlay = Overlay::Form(Box::new(f)),
                     Some(Err(e)) => self.warn(e),
                     None => self.warn(

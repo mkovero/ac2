@@ -120,14 +120,14 @@ impl MathError {
         match self {
             Self::Count => "this operator takes two operands".into(),
             Self::NoPhase(k) => format!(
-                "{} has no phase: a sum or difference adds complex values (use ÷ for a \
-                 magnitude comparison)",
+                "{} has no phase: a sum, difference or alignment combines complex values \
+                 (use ÷ for a magnitude comparison)",
                 name(*k)
             ),
             Self::NoSharedTimeBase => "the operands share no time base (an import, or a \
                 capture from an earlier audio I/O): their relative arrival is unknown, so \
-                they cannot be summed, differenced or averaged with phase; use ÷, ×, or a \
-                power average"
+                they cannot be summed, differenced, aligned or averaged with phase; use ÷, \
+                ×, or a power average"
                 .into(),
             Self::NoCoherence(k) => {
                 format!("{} has no coherence to weight by", name(*k))
@@ -595,6 +595,9 @@ fn average(
         phase: PhaseBasis::NoPhase,
     })
 }
+
+mod align;
+pub use align::align;
 
 #[cfg(test)]
 mod tests;

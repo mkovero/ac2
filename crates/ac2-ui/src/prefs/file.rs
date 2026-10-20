@@ -297,6 +297,7 @@ pub(super) enum TransferViewFile {
     Magnitude,
     Phase,
     Coherence,
+    Alignment,
     IrLinear,
     IrLog,
     Etc,

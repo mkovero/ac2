@@ -89,6 +89,7 @@ impl Section {
             | C::NewRta
             | C::NewSpl
             | C::NewMath
+            | C::NewAlignment
             | C::SweepNew
             | C::EditMeas
             | C::Slot1

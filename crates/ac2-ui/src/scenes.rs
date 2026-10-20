@@ -24,8 +24,10 @@ use ac2_scene::trace::{TfTrace, TimeBase};
 
 use crate::state::{AppState, PaneId, PaneKind};
 
+mod alignment;
 mod spectrum_pane;
 mod spl_meters;
+pub use alignment::{alignment, is_alignment, pane_alignment};
 #[cfg(test)]
 pub(crate) use spectrum_pane::with_spectrum;
 pub use spectrum_pane::{spectrograph, spectrum, spectrum_scale};

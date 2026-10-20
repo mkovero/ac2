@@ -106,7 +106,7 @@ fn math_channels_from_an_empty_daemon() -> R {
     assert_eq!(rows[1], ("Operator".into(), "÷  A relative to B".into()));
     assert_eq!(rows[2].0, "B");
     d.key("Down");
-    for _ in 0..4 {
+    for _ in 0..5 {
         d.key("Right");
     }
     let Overlay::Form(f) = &d.st.overlay else {
@@ -167,7 +167,7 @@ fn math_channels_from_an_empty_daemon() -> R {
         "{:?}",
         d.st.overlay
     );
-    for _ in 0..4 {
+    for _ in 0..5 {
         d.key("Left");
     }
     d.key("Enter");

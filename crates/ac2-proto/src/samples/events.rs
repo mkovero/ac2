@@ -77,5 +77,6 @@ pub fn events() -> Vec<Event> {
             }),
         ),
         ev(68, Change::Rig(rig())),
+        ev(69, Change::Measurement(Patch::Set(align_measurement()))),
     ]
 }

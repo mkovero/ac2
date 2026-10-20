@@ -380,6 +380,32 @@ MATH_MEASUREMENT = {
 }
 
 
+ALIGN_MEASUREMENT = {
+    **MATH_MEASUREMENT,
+    "id": 9,
+    "config": {
+        "name": "Sub ↔ Main",
+        "scope": "session",
+        "kind": {
+            "type": "math",
+            "config": {
+                "owner": {"type": "meas", "meas": 1},
+                "domain": "transfer",
+                "expr": {
+                    "type": "align",
+                    "a": {"type": "trace", "trace": 7},
+                    "b": {"type": "meas", "meas": 1},
+                    "band": {"lo": 60.0, "hi": 120.0},
+                    "max_delay": 0.05,
+                },
+                "reference": {"type": "operand", "operand": {"type": "trace", "trace": 7}},
+                "smoothing": None,
+            },
+        },
+    },
+}
+
+
 SWEEP = {"start": 20.0, "end": 20000.0, "duration": 5.0, "fade_in": 0.01, "fade_out": 0.01}
 
 SWEEP_MEASUREMENT = {
@@ -731,6 +757,11 @@ def events():
             "payload": {"origin": None, "dirty": False, "saved_at": None, "recover": None},
         },
         {"kind": "rig", "rev": 68, "payload": RIG},
+        {
+            "kind": "measurement",
+            "rev": 69,
+            "payload": {"type": "set", "value": ALIGN_MEASUREMENT},
+        },
         {
             "kind": "autosave",
             "rev": 57,

@@ -220,6 +220,7 @@ commands! {
     NewRta => "meas_new_rta", "New RTA…", [Global];
     NewSpl => "meas_new_spl", "New SPL meter…", [Global];
     NewMath => "meas_new_math", "New math…", [Global];
+    NewAlignment => "meas_new_alignment", "New alignment…", [Global];
     EditMeas => "meas_edit", "Edit measurement…", [Global];
     NextColour => "meas_colour_next", "Next colour", [Global];
     PrevColour => "meas_colour_prev", "Previous colour", [Global];

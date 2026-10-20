@@ -130,6 +130,8 @@ pub enum TransferView {
     Magnitude,
     Phase,
     Coherence,
+    /// An alignment's phase difference and summation (`docs/design/alignment.md`).
+    Alignment,
     IrLinear,
     IrLog,
     Etc,

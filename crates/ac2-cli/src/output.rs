@@ -139,6 +139,10 @@ pub fn meas_kind(k: &MeasKind) -> String {
                     format!("{what} math: {} {e}", method.label())
                 }
                 ac2_proto::model::MathExpr::Binary { .. } => format!("{what} math: {e}"),
+                ac2_proto::model::MathExpr::Align { band, .. } => format!(
+                    "{what} alignment: {e} over {}",
+                    ac2_scene::align::band_text(*band)
+                ),
             }
         }
         MeasKind::Sweep { config } => format!(

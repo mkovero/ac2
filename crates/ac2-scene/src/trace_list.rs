@@ -20,6 +20,7 @@ pub fn kind_name(t: &TraceMeta) -> &'static str {
         (_, TraceSource::Average { .. }) => "average",
         (_, TraceSource::Math { expr, .. }) => match expr {
             MathExpr::Average { .. } => "math average",
+            MathExpr::Align { .. } => "aligned sum",
             MathExpr::Binary { op, .. } => match op {
                 MathOp::Divide => "A ÷ B",
                 MathOp::Multiply => "A × B",

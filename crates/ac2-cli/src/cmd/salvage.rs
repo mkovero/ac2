@@ -508,6 +508,17 @@ fn remap_math(
             of: of.iter().map(|o| operand(*o)).collect::<Result<_, _>>()?,
             method: *method,
         },
+        MathExpr::Align {
+            a,
+            b,
+            band,
+            max_delay,
+        } => MathExpr::Align {
+            a: operand(*a)?,
+            b: operand(*b)?,
+            band: *band,
+            max_delay: *max_delay,
+        },
     };
     let reference = match m.reference {
         MathReference::Operand { operand: o } => MathReference::Operand {

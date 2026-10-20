@@ -620,6 +620,7 @@ impl AppState {
             | C::NewRta
             | C::NewSpl
             | C::NewMath
+            | C::NewAlignment
             | C::NextColour
             | C::PrevColour
             | C::EditMeas

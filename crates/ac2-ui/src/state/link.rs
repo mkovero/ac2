@@ -254,6 +254,10 @@ impl AppState {
                     self.pane_on_create = None;
                     self.open_created(m.id, PaneKind::for_kind(&m.config.kind));
                 }
+                if self.align_on_create.as_ref() == Some(&m.config.name) {
+                    self.align_on_create = None;
+                    self.open_alignment(m.id);
+                }
                 // Its header row is the selection, unfolded with its live curve under it,
                 // and the list scrolls to it.
                 self.selected = Some(m.id);

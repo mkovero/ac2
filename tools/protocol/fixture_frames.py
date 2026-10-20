@@ -45,6 +45,8 @@ def arr(name, unit, elem=None):
     """The element encoding is fixed per array (docs/protocol.md §5.3)."""
     if elem is None:
         elem = {"mag": "i16", "phase": "i16", "level": "i16", "ir_etc": "i16", "coh": "u16", "ir_linear": "bfp16"}.get(name, "f32")
+        if name.startswith("align_"):
+            elem = "i16"
     return {"name": name, "unit": unit, "elem": elem}
 
 
@@ -97,6 +99,31 @@ def tf_frame():
                     {"operand": {"type": "meas", "meas": 5}, "status": {"type": "stopped"}},
                 ],
                 "phase": "shared_time_base",
+                "align": {
+                    "outcome": {
+                        "type": "fit",
+                        "fit": {
+                            "best": {
+                                "delay": 0.00421,
+                                "delayed": "b",
+                                "inverted": False,
+                                "residual_deg": 12.5,
+                                "score": 0.97,
+                            },
+                            "other_polarity": {
+                                "delay": 0.0098,
+                                "delayed": "b",
+                                "inverted": True,
+                                "residual_deg": 41.0,
+                                "score": 0.61,
+                            },
+                            "runner_up": None,
+                            "before": {"mean_db": -7.9, "worst_db": -21.0},
+                            "after": {"mean_db": -0.3, "worst_db": -1.25},
+                            "columns": 48,
+                        },
+                    }
+                },
             },
             "unresolved": {
                 "resolution": "ninety_sixth",
@@ -111,6 +138,10 @@ def tf_frame():
                 arr("validity", "bitmask", "u32"),
                 [THINNED if i < 4 else OUT_OF_BAND if i >= 470 else 0 for i in range(n)],
             ),
+            (arr("align_phase_before", "deg"), [val(i, float((i * 7) % 360) - 180.0) for i in range(n)]),
+            (arr("align_phase_after", "deg"), [val(i, float(i % 21) - 10.0) for i in range(n)]),
+            (arr("align_sum_before", "db"), [val(i, -float(i % 60) / 2.0) for i in range(n)]),
+            (arr("align_sum_after", "db"), [val(i, -float(i % 5) / 4.0) for i in range(n)]),
         ],
     )
 
@@ -178,6 +209,7 @@ def frames():
                         {"operand": {"type": "trace", "trace": 8}, "status": {"type": "mismatch"}},
                     ],
                     "phase": "no_phase",
+                    "align": None,
                 },
                 "bands": {
                     "bands": [

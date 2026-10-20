@@ -273,6 +273,29 @@ pub fn math_measurement() -> Measurement {
     }
 }
 
+/// An alignment: the live main against a stored sub capture, 60–120 Hz.
+pub(super) fn align_measurement() -> Measurement {
+    let mut m = math_measurement();
+    m.id = MeasId(9);
+    m.config.name = "Sub ↔ Main".into();
+    m.config.kind = MeasKind::Math {
+        config: MathConfig::of(
+            TraceOwner::Meas { meas: MeasId(1) },
+            MathDomain::Transfer,
+            MathExpr::Align {
+                a: Operand::Trace { trace: TraceId(7) },
+                b: Operand::Meas { meas: MeasId(1) },
+                band: AlignBand {
+                    lo: Hz(60.0),
+                    hi: Hz(120.0),
+                },
+                max_delay: ALIGN_MAX_DELAY_DEFAULT,
+            },
+        ),
+    };
+    m
+}
+
 /// A capture of the math channel `Main L ÷ Sub` (a live measurement over a stored trace).
 pub(super) fn spectrum_trace_meta() -> TraceMeta {
     TraceMeta {
