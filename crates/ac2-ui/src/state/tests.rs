@@ -601,6 +601,8 @@ mod ir_nav_tests;
 
 mod settings;
 
+mod eq_edits;
+
 /// The measurement tree as the operator sees it: Main L with two captures and a math
 /// channel made on it, the spectrum, an import; captures stay under Main L.
 fn tree_state() -> State {
