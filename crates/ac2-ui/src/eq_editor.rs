@@ -45,11 +45,16 @@ pub struct EqEditor {
     pub meas: MeasId,
     /// The set shown; `None` until the daemon has made the first one.
     pub set: Option<EqSetId>,
-    /// What the editor last sent, while replies are outstanding: the mirror catches up
+    /// The newest body, sent or queued, while a `put` is outstanding: the mirror catches up
     /// behind it, so a quick second step builds on the first.
     pub working: Option<EqBody>,
-    /// `put`s not answered yet.
+    /// `put`s not answered yet: at most one, since each replaces the whole body and calls
+    /// travel independently, so a second one sent at once could land first and be undone
+    /// by the older body.
     pub pending: u32,
+    /// The body to send when the outstanding `put` is answered; steps taken meanwhile fold
+    /// into it, so only the newest is sent.
+    pub queued: Option<EqBody>,
     pub row: Row,
     /// Field index on the header or the selected section.
     pub field: usize,
@@ -75,6 +80,7 @@ impl EqEditor {
             set,
             working: None,
             pending: 0,
+            queued: None,
             row: Row::Header,
             field: 0,
             typed: None,

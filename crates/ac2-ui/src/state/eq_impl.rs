@@ -1,7 +1,8 @@
 //! The EQ editor's keys and replies ([`crate::eq_editor`]): every change is one `meas.eq`
-//! of the working copy, sent at once; the daemon's refusal shows in the editor verbatim.
+//! of the working copy, one unanswered at a time; the daemon's refusal shows in the editor verbatim.
 
 use ac2_proto::model::{EqBody, EqEdit, Measurement};
+use ac2_proto::units::{EqSetId, MeasId};
 
 use crate::eq_editor::{self as ed, EqEditor, HeaderField, Row, Step};
 use crate::state::*;
@@ -61,7 +62,8 @@ impl AppState {
         }
     }
 
-    /// Sends `body` as the set's new content.
+    /// Sends `body` as the set's new content, or queues it while an earlier `put` is
+    /// unanswered.
     fn eq_put(&mut self, m: &Measurement, body: EqBody, out: &mut Vec<Request>) {
         let Some(e) = self.eq_editor() else {
             return;
@@ -71,20 +73,36 @@ impl AppState {
         };
         e.set = Some(set);
         e.working = Some(body.clone());
-        e.pending += 1;
         e.refusal = None;
+        if e.pending > 0 {
+            e.queued = Some(body);
+            return;
+        }
+        self.eq_send(m.id, set, body, out);
+    }
+
+    fn eq_send(&mut self, meas: MeasId, set: EqSetId, body: EqBody, out: &mut Vec<Request>) {
+        if let Some(e) = self.eq_editor() {
+            e.pending += 1;
+        }
         self.call(
             out,
             Command::MeasEq {
-                meas: m.id,
+                meas,
                 edit: EqEdit::Put { set, body },
             },
             EQ_EDIT.to_owned(),
         );
     }
 
-    /// A reply to an editor `put`: `true` when it was one.
-    pub(in crate::state) fn eq_reply(&mut self, what: &str, result: &Result<(), String>) -> bool {
+    /// A reply to an editor `put`: `true` when it was one. An answered `put` lets the
+    /// queued body go.
+    pub(in crate::state) fn eq_reply(
+        &mut self,
+        what: &str,
+        result: &Result<(), String>,
+        out: &mut Vec<Request>,
+    ) -> bool {
         if what != EQ_EDIT {
             return false;
         }
@@ -93,9 +111,16 @@ impl AppState {
                 e.pending = e.pending.saturating_sub(1);
                 if let Err(r) = result {
                     e.refusal = Some(r.clone());
-                    // What is shown again is what the daemon holds.
+                    // What is shown again is what the daemon holds; steps queued on the
+                    // refused body are dropped with it.
                     e.working = None;
+                    e.queued = None;
                     e.pending = 0;
+                } else if e.pending == 0
+                    && let (Some(set), Some(body)) = (e.set, e.queued.take())
+                {
+                    let meas = e.meas;
+                    self.eq_send(meas, set, body, out);
                 }
             }
             None => {
@@ -179,7 +204,7 @@ impl AppState {
                             let k = (at as i32 + d).rem_euclid(m.eq.len() as i32) as usize;
                             e.set = Some(m.eq[k].id);
                             e.working = None;
-                            e.pending = 0;
+                            e.queued = None;
                             return;
                         }
                         Some(HeaderField::Realisation) => {

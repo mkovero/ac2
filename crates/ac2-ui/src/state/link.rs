@@ -302,7 +302,7 @@ impl AppState {
                 self.fit_new_sweep();
             }
             ConnEvent::Reply { what, result } if self.layout_reply(&what, &result, out) => {}
-            ConnEvent::Reply { what, result } if self.eq_reply(&what, &result) => {}
+            ConnEvent::Reply { what, result } if self.eq_reply(&what, &result, out) => {}
             ConnEvent::Reply { what, result } => {
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.cal.reply(&what, &result);
@@ -313,7 +313,9 @@ impl AppState {
                 }
             }
             ConnEvent::Conflict { what, error } => {
-                if !self.layout_reply(&what, &Err(error), out) {
+                if !self.layout_reply(&what, &Err(error.clone()), out)
+                    && !self.eq_reply(&what, &Err(error), out)
+                {
                     self.conflict(&what, out);
                 }
             }
