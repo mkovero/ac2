@@ -1037,6 +1037,71 @@ operand when that is a measurement, else where that trace is filed (the app: the
 measurement selected when Shift+M was pressed). Operands are names or ids; `trace:NAME` /
 `meas:NAME` when a measurement and trace share a name.
 
+### EQ what-if
+
+What would this EQ do to this curve? An EQ set is a list of filter sections on a transfer
+measurement; ac2 draws its filter curve (dashed, `EQ 1`) and a prediction of the curve
+after it (`Main L after EQ 1`), a math channel `curve × EQ`. Nothing is sent to a console:
+the set is a model of what you dial in.
+
+**Alt+E** on a transfer pane (palette **EQ…**) opens the editor over the plot, making `EQ 1`
+with a prediction of the live curve when the measurement has none.
+
+| key | does |
+|---|---|
+| ↑ ↓ | header, sections, curves |
+| Tab / Shift+Tab | the row's fields (shape, frequency, gain, Q or octaves …) |
+| ← → | step the field (Shift coarser, Alt finer); digits type a value |
+| Insert / Delete | add a peaking section after this one / remove it |
+| `[` `]` | move the section |
+| B / Shift+B | bypass the section / the set |
+| P (on a curve row) | predict that curve (the live one or a stored capture), or stop |
+| M, then M | mark the set as in the console |
+| Shift+Insert | another set |
+| Esc / Alt+E | close |
+
+Shapes: peaking, low and high shelf (first order, or second order by S, Q or octaves; the
+frequency the midpoint or `--corner`), high- and low-pass (Butterworth, Linkwitz-Riley,
+Bessel of order 1–8, or second order of a Q), notch, band-pass, all-pass, gain, polarity,
+delay, a raw biquad, and a stored transfer trace as a measured response. A set is digital
+at a rate (default the session's) or analog. A peaking Q is read as half-gain (APO / REW),
+−3 dB from the peak (analog consoles) or band-pass Q, per set or per section.
+
+**Double counting.** Once the console has the EQ, the live curve already contains it: a
+prediction of the whole set would apply it twice. **M** marks the set as it is now "in the
+console". Every legend says what its prediction assumes is in:
+
+- `assumes none of it in` — the whole set is applied (nothing marked, or a capture taken
+  before the mark);
+- `EQ 1 in · no change` — the curve already contains the set as it is; the prediction is
+  the curve;
+- `change since rev 4` — only what changed since the mark is applied.
+
+A capture records the marks in force when it was taken, so its prediction stays right
+after later marks. Bypassing a marked set predicts the EQ taken out again.
+
+```
+ac2 meas eq new "Main L" [--name "EQ 1"] [--rate 48k | --analog] [--q-measured half-gain]
+ac2 meas eq add "Main L" peaking 1.25k -4 --q 2
+ac2 meas eq add "Main L" high-pass 40 --lr 4
+ac2 meas eq set "Main L" 1 --gain -3 | --off | --on
+ac2 meas eq rm "Main L" 2
+ac2 meas eq bypass "Main L" [--off]
+ac2 meas eq on "Main L" live | "Main L 1"       # predict a curve; --off stops
+ac2 meas eq mark "Main L" [--clear]
+ac2 meas eq show "Main L"
+ac2 meas eq copy "Main L" --to "Main R"
+ac2 meas eq export "Main L" eq.txt [--format apo [--skip-unsupported]]
+ac2 meas eq import "Main L" eq.txt [--set "EQ 1"]
+ac2 meas eq delete "Main L"
+```
+
+`--set NAME` picks a set when a measurement has several. `--format apo` reads and writes
+Equalizer APO / REW "Generic" filter text (`Filter 1: ON PK Fc 1250 Hz Gain -4.0 dB Q
+2.00`); what that format cannot say (a Bessel, an octave bandwidth, a response section) is
+refused with the section named, or listed as comments with `--skip-unsupported`. The ac2
+format keeps the whole set.
+
 ## Delay finder
 
 Phase is readable only after the propagation delay from speaker to mic is compensated. The
