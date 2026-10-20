@@ -348,10 +348,16 @@ pub(crate) fn spectrum_scene_in(
     // The readouts stack down the plot's right side from here: the cursor's, then the
     // peak list under it.
     let mut readout_y = plot.y + 22.0;
+    let mark = cursor.as_ref().and_then(|_| mark::readout(traces, view));
     if let Some(cur) = &cursor {
         canvas::vline(&mut c.overlay, plot, xm.to_px(cur.freq_hz), theme.cursor);
         let mut lines = vec![cur.freq.clone()];
         lines.extend(cur.rows.iter().map(|(n, v)| format!("{n}  {v}")));
+        if let Some(m) = &mark {
+            let x = xm.to_px(m.freq_hz);
+            canvas::vline(&mut c.overlay, plot, x, canvas::mark_stroke(theme));
+            lines.extend(m.lines.iter().cloned());
+        }
         readout_y += (lines.len() as f32 * LINE_EM + GAP_EM) * font;
         c.overlay.labels.push(label(
             lines.join("\n"),
@@ -435,6 +441,7 @@ pub(crate) fn spectrum_scene_in(
         unit_help,
         caption,
         cursor,
+        mark,
         peaks,
         peak_list,
         legend,

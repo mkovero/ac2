@@ -108,6 +108,11 @@ pub struct TfScene {
     pub cursor: Option<CursorReadout>,
     /// The cursor values' plate.
     pub readout_box: Option<Rect>,
+    /// The cursor read against its mark ([`ViewState::cursor_mark_hz`]) on the tracked
+    /// curve; `None` without a mark, or while the cursor is off or hidden.
+    pub mark: Option<readout::MarkReadout>,
+    /// The mark's plate, in a bottom corner of the magnitude view.
+    pub mark_box: Option<Rect>,
     /// Min / max tracking's peaks and dips of the tracked curve; `None` while it is off or
     /// the magnitude is not shown.
     pub extremes: Option<TfExtremes>,
@@ -720,6 +725,26 @@ pub fn transfer_scene(
         legend_box = placed;
     }
     let mag = panes.iter().find(|p| p.kind == TfPaneKind::Magnitude);
+    let mark = cursor
+        .as_ref()
+        .and_then(|_| mark::readout(traces, &shown, view));
+    let mark_box = mark.as_ref().and_then(|m| {
+        let plots: Vec<Rect> = panes_at.iter().map(|(_, r)| *r).collect();
+        mark::line(&mut c, &plots, xm.to_px(m.freq_hz), theme);
+        let plot = mag.map_or(*plots.first()?, |p| p.plot);
+        let avoid: Vec<Rect> = legend_box
+            .iter()
+            .map(|b| b.rect)
+            .chain(readout_box)
+            .collect();
+        Some(extremes::draw_list(
+            &mut c,
+            &m.lines.join("\n"),
+            plot,
+            &avoid,
+            theme,
+        ))
+    });
     let extremes = match mag.filter(|_| view.tf.extremes) {
         Some(p) => extremes::extremes(
             &mut c,
@@ -730,6 +755,7 @@ pub fn transfer_scene(
             &xm,
             &p.y_axis.mapping,
             view.chrome.peak_list(),
+            view.temperature_c,
             theme,
         ),
         None => {
@@ -749,6 +775,7 @@ pub fn transfer_scene(
                 .iter()
                 .map(|b| b.rect)
                 .chain(readout_box)
+                .chain(mark_box)
                 .collect();
             extremes::draw_list(&mut c, &text, p.plot, &avoid, theme);
             text
@@ -769,6 +796,8 @@ pub fn transfer_scene(
         legend_hits,
         cursor,
         readout_box,
+        mark,
+        mark_box,
         extremes,
         extremes_list,
         delay,
@@ -780,7 +809,9 @@ pub fn transfer_scene(
 }
 
 mod extremes;
+mod mark;
 pub use extremes::{Comb, TfExtremes};
+pub use mark::jump;
 
 #[cfg(test)]
 mod tests;

@@ -30,6 +30,7 @@ pub mod cal;
 pub mod cal_notice;
 mod canvas;
 pub mod chrome;
+pub mod cursor_jump;
 pub mod curve_ease;
 pub mod distortion;
 pub mod eq;

@@ -25,7 +25,7 @@ pub struct TfExtremes {
 pub struct Comb {
     pub spacing_hz: f64,
     pub delay_s: f64,
-    /// `comb Δf 1.00 kHz · 1.00 ms`.
+    /// `comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C` ([`crate::readout::comb_text`]).
     pub text: String,
 }
 
@@ -35,7 +35,7 @@ const MARK: f32 = 4.5;
 /// The curve min / max tracking follows: the selected one when shown, else the first of
 /// the pane's own (not compared), else the first. One curve, so the marks and the list stay
 /// one statement.
-fn tracked(traces: &[TfTrace<'_>]) -> Option<usize> {
+pub(super) fn tracked(traces: &[TfTrace<'_>]) -> Option<usize> {
     traces
         .iter()
         .position(|t| t.selected)
@@ -55,6 +55,7 @@ pub(super) fn extremes(
     xm: &crate::axis::Mapping,
     ym: &crate::axis::Mapping,
     ranks: bool,
+    temp_c: f64,
     theme: &Theme,
 ) -> Option<TfExtremes> {
     let d = shown.get(tracked(traces)?)?;
@@ -65,11 +66,7 @@ pub(super) fn extremes(
     let comb = peaks::comb_spacing(&min).map(|spacing_hz| Comb {
         spacing_hz,
         delay_s: 1.0 / spacing_hz,
-        text: format!(
-            "comb Δf {} · {}",
-            format::freq_readout(spacing_hz),
-            format::ms(1.0 / spacing_hz, 2)
-        ),
+        text: crate::readout::comb_text(spacing_hz, temp_c),
     });
     let (max, min) = cache.track_extremes(d.key, &max, &min);
     let color = d

@@ -31,6 +31,7 @@ use ac2_proto::model::SpectrumStyle;
 
 mod draw;
 mod legend;
+mod mark;
 pub mod peaks;
 mod units;
 pub use draw::spectrum_scene;
@@ -40,6 +41,7 @@ use legend::{
     LEGEND_MAX_ROWS, LEGEND_ROW, LEGEND_SHARE, SWATCH_GAP, SWATCH_W, entry_width, legend_entry,
     legend_layout, unit_forms,
 };
+pub use mark::jump;
 pub use units::{
     BinWidth, cal_caption, density_unit_help, fraction_label, level_unit, level_unit_forms,
     narrow_unit_help, quantity_note, tone_unit_help, value_unit, weighting_label, window_label,
@@ -420,6 +422,9 @@ pub struct SpectrumScene {
     /// The caption as drawn ([`caption_forms`]: the longest that leaves the unit room).
     pub caption: String,
     pub cursor: Option<SpectrumCursor>,
+    /// The cursor read against its mark ([`ViewState::cursor_mark_hz`]) on the selected
+    /// curve (else the pane's own); its lines follow the cursor's values.
+    pub mark: Option<crate::readout::MarkReadout>,
     /// Tracked peaks, per tracked curve; empty unless peak tracking is on.
     pub peaks: Vec<SpectrumPeaks>,
     /// The peak list as drawn under the cursor readout; `None` with no tracked peaks or

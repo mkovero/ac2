@@ -8,6 +8,7 @@ use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
 
 mod extremes;
 mod layout;
+mod mark;
 mod panes;
 
 const SIZE: Viewport = Viewport {

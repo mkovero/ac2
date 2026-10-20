@@ -154,7 +154,7 @@ fn near(a: f64, b: f64) -> bool {
 
 /// Height of `v[i]` above the higher of the lowest points on each side before a higher
 /// point; a gap (NaN) ends a side as the curve's end does: across a gap nothing is known.
-fn prominence(v: &[f64], i: usize) -> f64 {
+pub(crate) fn prominence(v: &[f64], i: usize) -> f64 {
     let peak = v[i];
     let side = |it: &mut dyn Iterator<Item = usize>| {
         let mut low = peak;

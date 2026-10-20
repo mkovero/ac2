@@ -794,6 +794,11 @@ pub struct ViewState {
     pub spl: SplView,
     /// Comparison cursor, Hz; synchronised across traces and panes.
     pub cursor_hz: Option<f64>,
+    /// The cursor's mark, Hz: while set, the cursor reads how it differs from there.
+    pub cursor_mark_hz: Option<f64>,
+    /// How far a peak or notch must stand out for the cursor to jump to it, dB
+    /// ([`crate::cursor_jump`]).
+    pub jump_prominence_db: f64,
     /// Air temperature for the delay → distance readout (decision A).
     pub temperature_c: f64,
     /// Grid, labels and cursor of the pane being drawn.
@@ -817,6 +822,8 @@ impl Default for ViewState {
             distortion: DistortionView::default(),
             spl: SplView::default(),
             cursor_hz: None,
+            cursor_mark_hz: None,
+            jump_prominence_db: crate::cursor_jump::DEFAULT_PROMINENCE_DB,
             temperature_c: 20.0,
             chrome: PlotChrome::Full,
             unresolved: true,

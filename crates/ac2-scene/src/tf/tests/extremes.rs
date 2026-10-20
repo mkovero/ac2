@@ -3,7 +3,7 @@ use crate::view::PlotChrome;
 
 /// A direct sound plus a copy 0.9 as loud 1 ms later, on 1/48 octave from 20 Hz to 20 kHz:
 /// notches at odd multiples of 500 Hz, peaks at multiples of 1 kHz.
-fn comb_cols() -> Cols {
+pub(super) fn comb_cols() -> Cols {
     let freqs: Vec<f64> = (0..)
         .map(|i| 20.0 * 2f64.powf(f64::from(i) / 48.0))
         .take_while(|f| *f <= 20_000.0)
@@ -46,7 +46,10 @@ fn the_list_names_peaks_dips_and_the_comb() {
     assert_eq!(lines[6], "min", "{list}");
     assert_eq!(lines.len(), 13, "{list}");
     // 999 Hz: the notches read on the 1/48-octave grid; the delay is 1.00 ms.
-    assert_eq!(lines[12], "comb Δf 999 Hz · 1.00 ms", "{list}");
+    assert_eq!(
+        lines[12], "comb Δf 999 Hz · 1.00 ms · 0.34 m @ 20 °C",
+        "{list}"
+    );
     // Rows: rank, frequency, dB.
     assert!(
         lines[1].starts_with("1  ") && lines[1].ends_with(" +5.6 dB"),

@@ -6,6 +6,7 @@ use ac2_proto::units::{Hz, MeasId};
 
 mod captions;
 mod drawing;
+mod mark;
 mod tracking;
 
 const SIZE: Viewport = Viewport {

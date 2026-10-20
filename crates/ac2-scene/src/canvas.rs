@@ -244,6 +244,19 @@ pub(crate) fn vline(layer: &mut Layer, plot: Rect, x: f32, stroke: Stroke) {
     }
 }
 
+/// The cursor mark's line: the cursor's colour, dashed so the two never read as one
+/// another.
+pub(crate) fn mark_stroke(theme: &Theme) -> Stroke {
+    Stroke {
+        dash: Some(crate::primitives::Dash {
+            on: 4.0,
+            off: 3.0,
+            offset: 0.0,
+        }),
+        ..theme.cursor
+    }
+}
+
 /// Points with gaps: a non-finite coordinate becomes one NaN break point (runs collapse);
 /// `split(prev, cur)` can request an extra break between two finite neighbours (wrapped
 /// phase jumps). Leading and trailing breaks are dropped. `alpha` (if given) follows the

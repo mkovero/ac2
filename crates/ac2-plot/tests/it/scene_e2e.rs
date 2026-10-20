@@ -142,6 +142,17 @@ fn transfer_view() {
     transfer_golden("transfer_view", ViewState::default(), stale());
 }
 
+/// The cursor read against its mark on the bump's top: the mark's dashed line in every
+/// pane, its plate in a bottom corner of the magnitude view.
+#[test]
+fn transfer_view_cursor_mark() {
+    let view = ViewState {
+        cursor_mark_hz: Some(2000.0),
+        ..ViewState::default()
+    };
+    transfer_golden("transfer_view_cursor_mark", view, stale());
+}
+
 #[test]
 fn transfer_view_coherence_overlay() {
     let mut view = ViewState::default();
