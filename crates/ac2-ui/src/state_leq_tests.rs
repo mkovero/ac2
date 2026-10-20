@@ -842,3 +842,38 @@ fn t_on_the_spl_pane_takes_the_limit_text() {
     v.st.set_prefs(t.st.prefs.clone());
     assert_eq!(v.st.pane_modes(spl).chrome, PlotChrome::NoGrid);
 }
+
+/// The band transfer step over the Leq dialog: Tab walks the place's name and the spans,
+/// Shift+Tab back.
+#[test]
+fn shift_tab_steps_back_on_the_band_transfer_step() {
+    use ac2_proto::model::{BandCorrection, BandLeqConfig};
+    let mut t = T::new();
+    let mut s = with_spl();
+    let spl = s.measurements.iter_mut().find(|m| m.id == MeasId(4));
+    if let Some(MeasKind::Spl { config }) = spl.map(|m| &mut m.config.kind) {
+        config.bands = Some(Box::new(BandLeqConfig {
+            windows: vec![],
+            predicted: None,
+            correction: BandCorrection::default(),
+            transfer: None,
+        }));
+    }
+    t.conn(mirror(s));
+    t.key("Alt+4");
+    t.type_key("Shift+L", "L");
+    t.st.open_band_transfer();
+    let at = |t: &T| {
+        let s =
+            t.st.overlay
+                .leq()
+                .and_then(|d| d.transfer.as_ref())
+                .expect("the step");
+        (s.on_place, s.focus)
+    };
+    let first = at(&t);
+    t.key("Tab");
+    assert_ne!(at(&t), first);
+    t.key("Shift+Tab");
+    assert_eq!(at(&t), first);
+}

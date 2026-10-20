@@ -371,3 +371,16 @@ fn a_gone_measurements_fold_is_forgotten() {
     assert!(!t.st.collapsed.contains(&sub));
     assert!(t.st.collapsed.contains(&TraceOwner::Imported));
 }
+
+/// Tab steps the chooser's rows down, Shift+Tab up.
+#[test]
+fn shift_tab_steps_the_chooser_back() {
+    let mut t = T::new();
+    t.put(PaneKind::Transfer);
+    t.key("Ctrl+M");
+    let first = chooser(&t).index;
+    t.key("Tab");
+    assert_eq!(chooser(&t).index, first + 1);
+    t.key("Shift+Tab");
+    assert_eq!(chooser(&t).index, first);
+}

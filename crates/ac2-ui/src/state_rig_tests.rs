@@ -767,3 +767,16 @@ fn a_dmx_cue_line_is_edited_at_its_caret() {
         "12=255 13=128 14=40 15=9"
     );
 }
+
+/// Tab walks the Rig page's rows, Shift+Tab back.
+#[test]
+fn shift_tab_steps_back_on_the_rig_page() {
+    let mut t = T::new();
+    t.conn(mirror(with_rig(7)));
+    t.st.update(Msg::OpenRig, &t.keys);
+    assert_eq!(rig_page(&t).focus, RigRow::Target);
+    t.key("Tab");
+    assert_ne!(rig_page(&t).focus, RigRow::Target);
+    t.key("Shift+Tab");
+    assert_eq!(rig_page(&t).focus, RigRow::Target);
+}

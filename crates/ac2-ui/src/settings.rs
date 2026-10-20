@@ -5,8 +5,8 @@
 //! Keyboard-first like every window (decision K9): the view owns the keyboard while open;
 //! ↑/↓ move within the page, ←/→ change a choice, Enter applies, Esc closes the topmost
 //! window (a calibration dialog or a confirmation over a page, else the view);
-//! Ctrl+PageUp / Ctrl+PageDown (or Ctrl+Tab / Ctrl+Shift+Tab) step through the pages and
-//! Alt+1 … Alt+6 jump to one. Shift+Esc still stops the stimulus from anywhere. The keys
+//! Ctrl+PageUp / Ctrl+PageDown (or Alt+← / Alt+→) step through the pages and Alt+1 … Alt+7
+//! jump to one (no Ctrl+Tab: desktops take it). Shift+Esc still stops the stimulus from anywhere. The keys
 //! that used to open a dialog open its page: Shift+O the Audio & I/O page (focused on the device), Shift+L the SPL / Leq
 //! page, the palette's input setup and calibrations their pages.
 //!

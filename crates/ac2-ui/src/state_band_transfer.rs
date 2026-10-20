@@ -91,6 +91,10 @@ impl AppState {
                 t.move_focus(-1);
                 None
             }
+            (Key::Tab, _) if chord.shift => {
+                t.move_focus(-1);
+                None
+            }
             (Key::ArrowDown | Key::Tab, _) => {
                 t.move_focus(1);
                 None

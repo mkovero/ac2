@@ -132,11 +132,19 @@ fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) 
     }
 }
 
-/// The chord that jumps to page `i` (0-based): Alt with its digit; the pages after the
-/// sixth have none.
+/// The chord that jumps to page `i` (0-based): Alt with its digit (`state_settings`
+/// dispatches the same seven).
 fn page_key(i: usize) -> Option<Chord> {
     use egui::Key as K;
-    const DIGITS: [K; 6] = [K::Num1, K::Num2, K::Num3, K::Num4, K::Num5, K::Num6];
+    const DIGITS: [K; 7] = [
+        K::Num1,
+        K::Num2,
+        K::Num3,
+        K::Num4,
+        K::Num5,
+        K::Num6,
+        K::Num7,
+    ];
     DIGITS.get(i).map(|k| Chord::alt(*k))
 }
 
@@ -145,8 +153,10 @@ fn page_key(i: usize) -> Option<Chord> {
 fn pages_hint(style: LabelStyle) -> String {
     let [up, down] =
         [egui::Key::PageUp, egui::Key::PageDown].map(|k| Chord::command(k).label_in(style));
+    let [left, right] =
+        [egui::Key::ArrowLeft, egui::Key::ArrowRight].map(|k| Chord::alt(k).label_in(style));
     format!(
-        "{up} / {down}: pages\nEsc closes · {} stops the stimulus",
+        "{up} / {down} or {left} / {right}: pages\nEsc closes · {} stops the stimulus",
         STOP_ANYWHERE.label_in(style)
     )
 }
@@ -546,10 +556,16 @@ mod tests {
     #[test]
     fn settings_key_hints_use_the_label_style() {
         let pc = pages_hint(LabelStyle::Pc);
-        assert!(pc.starts_with("Ctrl+PageUp / Ctrl+PageDown: pages"), "{pc}");
+        assert!(
+            pc.starts_with("Ctrl+PageUp / Ctrl+PageDown or Alt+← / Alt+→: pages"),
+            "{pc}"
+        );
         assert!(pc.contains("Shift+Esc stops"), "{pc}");
         let mac = pages_hint(LabelStyle::Mac);
-        assert!(mac.starts_with("⌘PageUp / ⌘PageDown: pages"), "{mac}");
+        assert!(
+            mac.starts_with("⌘PageUp / ⌘PageDown or ⌥← / ⌥→: pages"),
+            "{mac}"
+        );
         assert!(mac.contains("⇧Esc stops"), "{mac}");
         assert_eq!(
             page_key(0).expect("a page key").label_in(LabelStyle::Pc),
@@ -558,6 +574,12 @@ mod tests {
         assert_eq!(
             page_key(3).expect("a page key").label_in(LabelStyle::Mac),
             "⌥4"
+        );
+        assert_eq!(
+            page_key(6)
+                .expect("the Rig page's key")
+                .label_in(LabelStyle::Pc),
+            "Alt+7"
         );
     }
 }

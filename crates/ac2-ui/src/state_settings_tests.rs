@@ -94,10 +94,18 @@ fn the_old_dialog_keys_open_their_pages_and_ctrl_p_the_last_one() {
     assert_eq!(page(&t), Page::AudioIo);
     t.key("Alt+6");
     assert_eq!(page(&t), Page::Connection);
-    t.key("Ctrl+Tab");
-    assert_eq!(page(&t), Page::Rig, "the seventh page: no Alt digit");
-    t.key("Ctrl+Tab");
+    t.key("Alt+Right");
+    assert_eq!(page(&t), Page::Rig);
+    t.key("Alt+Right");
     assert_eq!(page(&t), Page::AudioIo, "wraps");
+    t.key("Alt+Left");
+    assert_eq!(page(&t), Page::Rig, "back, wrapping");
+    t.key("Alt+1");
+    t.key("Alt+7");
+    assert_eq!(page(&t), Page::Rig, "the seventh page has its Alt digit");
+    // Desktops take Ctrl+Tab: it steps no page.
+    t.key("Ctrl+Tab");
+    assert_eq!(page(&t), Page::Rig);
     // The mouse picks a page too; Ctrl+P again closes the view.
     t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
     assert_eq!(page(&t), Page::Display);
@@ -512,4 +520,35 @@ fn commands_open_the_page_on_their_row() {
     t.key("Escape");
     t.st.update(Msg::Command(CommandId::StimulusOutputs), &t.keys);
     assert!(matches!(settings(&t).session.focus, Row::Output(_)));
+}
+
+/// Shift+Tab goes back on every Settings page that Tab walks: the Recording, Display and
+/// Connection pages (Rig: `state_rig_tests`).
+#[test]
+fn shift_tab_steps_back_on_the_settings_pages() {
+    let mut t = T::new();
+    t.key("Ctrl+P");
+    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
+    let first = settings(&t).display;
+    t.key("Tab");
+    t.key("Tab");
+    assert_ne!(settings(&t).display, first);
+    t.key("Shift+Tab");
+    t.key("Shift+Tab");
+    assert_eq!(settings(&t).display, first, "Display");
+
+    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Recording)), &t.keys);
+    let first = settings(&t).recording.focus;
+    t.key("Tab");
+    assert_ne!(settings(&t).recording.focus, first);
+    t.key("Shift+Tab");
+    assert_eq!(settings(&t).recording.focus, first, "Recording");
+
+    t.key("Alt+6");
+    assert_eq!(page(&t), Page::Connection);
+    let first = settings(&t).connection.focus;
+    t.key("Tab");
+    assert_ne!(settings(&t).connection.focus, first);
+    t.key("Shift+Tab");
+    assert_eq!(settings(&t).connection.focus, first, "Connection");
 }

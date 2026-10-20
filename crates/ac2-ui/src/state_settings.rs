@@ -239,6 +239,7 @@ impl AppState {
         let focus = s.rig.focus;
         match chord.key {
             Key::ArrowUp => s.rig.move_row(-1),
+            Key::Tab if chord.shift => s.rig.move_row(-1),
             Key::ArrowDown | Key::Tab => s.rig.move_row(1),
             Key::Enter => self.rig_apply(focus, out),
             Key::ArrowLeft if focus == RigRow::Monitor => self.rig_monitor(false, out),
@@ -277,16 +278,16 @@ impl AppState {
             return;
         };
         let page = s.page;
-        // Pages: Ctrl+PageUp / PageDown and Ctrl+Tab step, Alt+digit jumps.
-        if chord.command
-            && !chord.alt
-            && matches!(chord.key, Key::PageUp | Key::PageDown | Key::Tab)
-        {
-            let d = if chord.key == Key::PageUp || (chord.key == Key::Tab && chord.shift) {
-                -1
-            } else {
-                1
-            };
+        // Pages: Ctrl+PageUp / PageDown and Alt+← / → step, Alt+digit jumps. No Ctrl+Tab:
+        // desktops take it for themselves.
+        let step = match chord.key {
+            Key::PageUp if chord.command && !chord.alt => Some(-1),
+            Key::PageDown if chord.command && !chord.alt => Some(1),
+            Key::ArrowLeft if chord.alt && !chord.command && !chord.shift => Some(-1),
+            Key::ArrowRight if chord.alt && !chord.command && !chord.shift => Some(1),
+            _ => None,
+        };
+        if let Some(d) = step {
             self.settings_page(page.step(d), out);
             return;
         }
@@ -298,6 +299,7 @@ impl AppState {
                 Key::Num4 => Some(3),
                 Key::Num5 => Some(4),
                 Key::Num6 => Some(5),
+                Key::Num7 => Some(6),
                 _ => None,
             };
             if let Some(&p) = n.and_then(|n| Page::ALL.get(n)) {
@@ -361,6 +363,7 @@ impl AppState {
             return;
         };
         match chord.key {
+            // Two rows: back (↑, Shift+Tab) and on (↓, Tab) both reach the other one.
             Key::ArrowUp | Key::ArrowDown | Key::Tab => s.recording_move(),
             Key::Enter => {
                 if let Some(m) = s.recording.enter() {
@@ -380,6 +383,7 @@ impl AppState {
         let row = s.display;
         match chord.key {
             Key::ArrowUp => s.display_move(-1),
+            Key::Tab if chord.shift => s.display_move(-1),
             Key::ArrowDown | Key::Tab => s.display_move(1),
             Key::ArrowLeft => self.display_change(row, -1),
             Key::ArrowRight | Key::Space => self.display_change(row, 1),
@@ -457,6 +461,10 @@ impl AppState {
         let p = &mut s.connection;
         let action = match chord.key {
             Key::ArrowUp => {
+                p.move_focus(-1);
+                None
+            }
+            Key::Tab if chord.shift => {
                 p.move_focus(-1);
                 None
             }

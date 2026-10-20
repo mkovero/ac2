@@ -153,6 +153,7 @@ impl AppState {
             Overlay::Choose(c) => {
                 let n = c.choices.len();
                 match chord.key {
+                    Key::Tab if chord.shift && n > 0 => c.index = c.index.saturating_sub(1),
                     Key::ArrowDown | Key::ArrowRight | Key::Tab if n > 0 => {
                         c.index = (c.index + 1).min(n - 1);
                     }
