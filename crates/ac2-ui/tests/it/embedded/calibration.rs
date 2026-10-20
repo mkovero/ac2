@@ -323,7 +323,13 @@ fn slow_electrical_calibration_from_the_app() -> R {
         })
     });
     if r.is_err() {
-        return Err(format!("{r:?}; the meter shows {:?}", texts(&d.st)).into());
+        return Err(format!(
+            "{r:?}; the meter shows {}",
+            texts(&d.st).map_or("no SPL view".to_owned(), |t| {
+                crate::common::scene_texts_excerpt(&t, crate::common::TEXTS_SHOWN)
+            })
+        )
+        .into());
     }
     d.until("the Leq caption naming the electrical calibration", |s| {
         ac2_ui::scenes::leq(
@@ -506,7 +512,13 @@ fn slow_acoustic_calibration_from_the_app() -> R {
         })
     });
     if r.is_err() {
-        return Err(format!("{r:?}; the meter shows {:?}", texts(&d.st)).into());
+        return Err(format!(
+            "{r:?}; the meter shows {}",
+            texts(&d.st).map_or("no SPL view".to_owned(), |t| {
+                crate::common::scene_texts_excerpt(&t, crate::common::TEXTS_SHOWN)
+            })
+        )
+        .into());
     }
     drop(tone);
     drop(d);

@@ -290,7 +290,8 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
     let texts = scene_texts(&scene.scene);
     assert!(
         texts.iter().any(|t| t.contains("corrected +4.0 dB")),
-        "{texts:?}"
+        "{}",
+        crate::common::scene_texts_excerpt(&texts, crate::common::TEXTS_SHOWN)
     );
 
     // The calibrator's seconds (97 dB peaks, 101 corrected) leave the 10 s hold first.

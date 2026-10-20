@@ -395,13 +395,18 @@ fn slow_band_leq_from_an_empty_daemon() {
     assert!(
         texts
             .contains(&"63 Hz band LZeq 60 min 3.2 dB over its limit · cooling down in 6 min 52 s"),
-        "{texts:?}"
+        "{}",
+        common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
     );
     for want in [
         "LZeq 60 min · night limits (22–07)",
         "LAeq 15 min · so far · 7:30 / 15:00",
     ] {
-        assert!(texts.contains(&want), "{want:?} not in {texts:?}");
+        assert!(
+            texts.contains(&want),
+            "{want:?} not in {}",
+            common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
+        );
     }
     // One row per length and weighting: the hour's eleven bars, the quarter's three.
     assert_eq!(
@@ -412,15 +417,21 @@ fn slow_band_leq_from_an_empty_daemon() {
         !texts
             .iter()
             .any(|t| t.contains("transfer") || t.contains("bedroom")),
-        "{texts:?}"
+        "{}",
+        common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
     );
     // The key to the two marks across the columns.
-    assert!(texts.contains(&"limit"), "{texts:?}");
+    assert!(
+        texts.contains(&"limit"),
+        "{}",
+        common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
+    );
     assert!(
         texts
             .iter()
             .any(|t| t.starts_with("next ") && t.ends_with(": stay ≤")),
-        "{texts:?}"
+        "{}",
+        common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
     );
     snapshot_when(
         &mut h,
@@ -634,7 +645,11 @@ fn a_single_band_window_with_plus_and_minus() {
         "25",
         "72.0",
     ] {
-        assert!(texts.contains(&want), "{want:?} not in {texts:?}");
+        assert!(
+            texts.contains(&want),
+            "{want:?} not in {}",
+            common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
+        );
     }
     // − on each row: gone.
     h.key_press_modifiers(Modifiers::SHIFT, Key::L);

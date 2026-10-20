@@ -790,3 +790,17 @@ pub fn layout_of(p: &ac2_ui::prefs::PanesPrefs) -> ac2_ui::state::Layout {
         .collect();
     ac2_ui::state::Layout::of(p.root.clone(), views, p.focus)
 }
+
+/// How many of a scene's texts an assert message shows.
+pub const TEXTS_SHOWN: usize = 20;
+
+/// The first `n` texts and how many there are, for an assert message: a whole pane's labels
+/// run to a hundred lines and more, printed again on every failing assert.
+pub fn scene_texts_excerpt<S: AsRef<str>>(texts: &[S], n: usize) -> String {
+    let shown: Vec<&str> = texts.iter().take(n).map(AsRef::as_ref).collect();
+    if texts.len() > n {
+        format!("{shown:?} … ({n} of {} texts)", texts.len())
+    } else {
+        format!("{shown:?} ({} texts)", texts.len())
+    }
+}
