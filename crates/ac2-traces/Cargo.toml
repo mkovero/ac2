@@ -14,11 +14,11 @@ workspace = true
 [dependencies]
 ac2-core = { path = "../ac2-core" }
 ac2-proto = { path = "../ac2-proto" }
-num-complex = "0.4"
-serde = { version = "1", features = ["derive"] }
+num-complex = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 # Session manifests must read back the exact f64 they wrote (delays, frequencies).
-serde_json = { version = "1", features = ["float_roundtrip"] }
-thiserror = "2"
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+thiserror = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }

@@ -13,16 +13,16 @@ workspace = true
 
 [dependencies]
 rtrb = "0.4"
-serde = { version = "1", features = ["derive"] }
-thiserror = "2"
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
 
 # Linux: JACK is the only real backend (JACK2, or PipeWire through pipewire-jack). The crate
 # loads libjack at run time, so a missing library or server is reported as
 # `AudioError::Unavailable`, not as a link error. jack-sys's build script still asks pkg-config
 # for jack, so building needs JACK's development package. No ALSA: nothing links libasound.
 [target.'cfg(target_os = "linux")'.dependencies]
-jack = "0.13"
-log = "0.4"
+jack = { workspace = true }
+log = { workspace = true }
 
 # Windows: ASIO is the only backend. ASIO drivers over COM directly, without the Steinberg
 # SDK, through ac2's fork of azo 0.5.1 (MIT), pinned: a named apartment thread, a callback-side
@@ -32,12 +32,12 @@ log = "0.4"
 [target.'cfg(windows)'.dependencies]
 azo = { git = "https://github.com/mkovero/azo", rev = "d6192431409e5c1c702111e12c860261421d1760" }
 # Millisecond timer resolution and MMCSS registration (src/timer.rs).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Media", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Media", "Win32_System_Threading"] }
 
 # macOS: Core Audio through the HAL (cahal, src/coreaudio_host), and kqueue timers that opt out of coalescing (see src/timer.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 cahal = "0.1.0"
-libc = "0.2"
+libc = { workspace = true }
 
 # The Core Audio adapter's tests run on every OS against scripted devices, on cahal's pure
 # part (types, indexer, channel tables).
@@ -46,5 +46,5 @@ cahal = { version = "0.1.0", default-features = false }
 
 # Linux: tests/jack_cancel.rs cancels a thread inside the libjack log callback.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-libc = "0.2"
-log = "0.4"
+libc = { workspace = true }
+log = { workspace = true }

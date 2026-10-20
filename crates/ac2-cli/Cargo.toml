@@ -34,16 +34,16 @@ ac2-archive = { path = "../ac2-archive" }
 ac2-traces = { path = "../ac2-traces" }
 ac2-zmq = { path = "../ac2-zmq" }
 # Local time of day (the SPL log's start): the UTC offset in force at an instant.
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
-clap = { version = "4.5", features = ["derive"] }
+chrono = { workspace = true, features = ["clock"] }
+clap = { workspace = true, features = ["derive"] }
 comfy-table = "7.1"
 crossterm = "0.29"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
 
 [dev-dependencies]
 ac2-client = { path = "../ac2-client", features = ["test-support"] }
 ac2d = { path = "../ac2d" }
-proptest = "1.11"
-tempfile = "3"
+proptest = { workspace = true }
+tempfile = { workspace = true }

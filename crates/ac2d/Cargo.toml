@@ -27,24 +27,24 @@ ac2-paths = { path = "../ac2-paths", features = ["log"] }
 ac2-proto = { path = "../ac2-proto" }
 ac2-traces = { path = "../ac2-traces" }
 ac2-zmq = { path = "../ac2-zmq" }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
-ctrlc = { version = "3", features = ["termination"] }
-getrandom = "0.3"
+chrono = { workspace = true, features = ["clock"] }
+ctrlc = { workspace = true, features = ["termination"] }
+getrandom = { workspace = true }
 # OSC cues: encoding only; the socket is ours (non-blocking, never on the audio thread).
 rosc = "0.11"
-num-complex = "0.4"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["float_roundtrip"] }
+num-complex = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 # Whole-host CPU use for the health meter (only its CPU figures are read).
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
-tracing = "0.1"
+sysinfo = { workspace = true, features = ["system"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 ac2-client = { path = "../ac2-client" }
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "time"] }
-rmp-serde = "1.3"
-tempfile = "3"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+rmp-serde = { workspace = true }
+tempfile = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-jack = "0.13"
+jack = { workspace = true }

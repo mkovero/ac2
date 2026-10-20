@@ -123,7 +123,7 @@ dependencies = [
  "ac2-testkit",
  "bytemuck",
  "glyphon",
- "pollster 0.4.0",
+ "pollster",
  "wgpu",
 ]
 
@@ -132,7 +132,7 @@ name = "ac2-proto"
 version = "0.0.0"
 dependencies = [
  "bytemuck",
- "miniz_oxide 0.8.9",
+ "miniz_oxide 0.9.1",
  "proptest",
  "rmp-serde",
  "serde",
@@ -1437,7 +1437,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "pollster 1.0.1",
+ "pollster",
  "profiling",
  "raw-window-handle",
  "static_assertions",
@@ -1538,7 +1538,7 @@ dependencies = [
  "kittest",
  "log",
  "open",
- "pollster 1.0.1",
+ "pollster",
  "serde",
  "tempfile",
  "toml 1.1.6+spec-1.1.0",
@@ -3399,12 +3399,6 @@ dependencies = [
  "rustix 1.1.5",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "pollster"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
 name = "pollster"

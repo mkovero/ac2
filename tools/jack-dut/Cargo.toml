@@ -12,10 +12,10 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
+clap = { workspace = true, features = ["derive"] }
 
 # Linux only, as in ac2-audio: the crate loads libjack at run time, so builds never need it
 # and a missing library or server is a run-time error, not a link error.
 [target.'cfg(target_os = "linux")'.dependencies]
-jack = "0.13"
-ctrlc = { version = "3", features = ["termination"] }
+jack = { workspace = true }
+ctrlc = { workspace = true, features = ["termination"] }

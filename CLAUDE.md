@@ -55,8 +55,9 @@ app runs). Profiles in `.config/nextest.toml`:
 - Comments explain why the math/physics requires something — never issue numbers or history.
 - `ac` is a source of ideas and test material, never code to copy file-for-file, and never
   the oracle for expected results (use `tools/refgen` / analytic models).
-- Put a new dependency in the crate's own `Cargo.toml`; don't edit `[workspace.dependencies]`
-  in parallel branches.
+- Put a new dependency in the crate's own `Cargo.toml`. One used by several crates lives in the
+  root `[workspace.dependencies]` (members: `x = { workspace = true, features = [..] }`), and
+  only one branch at a time edits that table.
 - Audio callback: no allocation, locks or syscalls.
 - CI must stay green: after pushing, check the run (`gh run list --branch main`). Pushes run
   Linux only; macOS/Windows run before each release or on demand
