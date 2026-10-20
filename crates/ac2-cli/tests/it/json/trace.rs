@@ -64,6 +64,7 @@ async fn trace_commands_json() -> R {
                 "epoch": 1,
                 "at_sample": 48000
             },
+            "eq_in": [],
             "grid_id": 0x79ec_3d16_ae0e_94d0u64,
             "delay": 0.01,
             "depth": { "type": "equal_confidence" },
