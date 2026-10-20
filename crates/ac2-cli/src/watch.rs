@@ -431,8 +431,8 @@ pub async fn timing(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
                 ),
                 w.psr
                     .map_or_else(|| format::NO_VALUE.to_owned(), |p| format::db_readout(p.0)),
-                output::dbfs(w.loopback.0),
-                output::dbfs(w.stimulus.0),
+                ac2_scene::format::dbfs(w.loopback.0),
+                ac2_scene::format::dbfs(w.stimulus.0),
             ));
         }
         lines.push(format!("age {}", age_text(tf.age, tf.stale)));

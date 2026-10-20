@@ -30,7 +30,7 @@ use super::gen_::{Input, input, say};
 use super::{connect, find_meas, find_trace, state};
 use crate::CliError;
 use crate::args::{Cli, IrCaptureArgs, IrCmd, IrMetricsArgs, SweepCmd, SweepRunArgs};
-use crate::output::{self, Out};
+use crate::output::Out;
 use crate::units::channels_text;
 use crate::watch::{Key, RawTerm, quit_signal};
 
@@ -154,7 +154,7 @@ fn describe(r: &SweepConfig) -> String {
         ac2_scene::format::freq_readout(r.sweep.end.0),
         ac2_scene::format::fixed(r.sweep.duration.0, 1),
         r.repeats,
-        output::dbfs(r.level.0),
+        ac2_scene::format::dbfs(r.level.0),
         channels_text(&r.outputs),
         r.measurement_input + 1,
         r.reference_input + 1,
@@ -202,8 +202,8 @@ fn check_runnable(st: &State, config: &SweepConfig) -> Result<(), CliError> {
     if config.level.0 > ceiling.0 {
         return Err(CliError::Refused(format!(
             "level {} is above the daemon's ceiling {}",
-            output::dbfs(config.level.0),
-            output::dbfs(ceiling.0)
+            ac2_scene::format::dbfs(config.level.0),
+            ac2_scene::format::dbfs(ceiling.0)
         )));
     }
     if st.session.open.is_none() {

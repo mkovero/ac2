@@ -87,25 +87,14 @@ pub fn ms(seconds: f64) -> String {
     format::ms(seconds, 2)
 }
 
-/// `−20.0 dBFS`.
-pub fn dbfs(v: f64) -> String {
-    let s = format::level(v);
-    if s == format::NO_VALUE {
-        s
-    } else {
-        format!("{s} dBFS")
-    }
-}
-
 /// Level with its scale's unit.
 pub fn level(v: f64, scale: LevelScale) -> String {
-    let s = format::level(v);
-    if s == format::NO_VALUE {
-        return s;
-    }
     match scale {
-        LevelScale::Dbfs => format!("{s} dBFS"),
-        LevelScale::DbSpl => format!("{s} dB SPL"),
+        LevelScale::Dbfs => format::dbfs(v),
+        LevelScale::DbSpl => {
+            let s = format::level(v);
+            if s == format::NO_VALUE { s } else { format!("{s} dB SPL") }
+        }
     }
 }
 
@@ -198,7 +187,7 @@ pub fn meas_kind(k: &MeasKind) -> String {
             format::freq_readout(config.sweep.end.0),
             format::fixed(config.sweep.duration.0, 1),
             config.repeats,
-            dbfs(config.level.0),
+            format::dbfs(config.level.0),
             crate::units::channels_text(&config.outputs)
         ),
     }
@@ -569,7 +558,7 @@ pub fn calibrations(c: &[CalEntry]) -> String {
             format::db_readout(e.spl.sensitivity.0),
             ac2_scene::cal::method_cell(e),
             ac2_scene::cal::uncertainty_cell(e),
-            dbfs(e.spl.measured.0),
+            format::dbfs(e.spl.measured.0),
             utc(e.spl.calibrated_at.0),
         ]);
     }

@@ -135,7 +135,7 @@ pub use types::{
     SUB_OBSERVATIONS_S, SmoothTarget, Smoothable, StimPhase, Stimulus, outputs_text, parse_curve,
     parse_input_curve, spectrum_smoothing,
 };
-use types::{dbfs, trace_mic_request};
+use types::trace_mic_request;
 #[path = "state_msg.rs"]
 mod msg;
 pub use msg::{

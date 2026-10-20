@@ -425,7 +425,7 @@ fn input_grid(
         .show(ui, |ui| {
             ui.label("");
             ui.label(RichText::new("name").small().color(ch.dim));
-            ui.label(RichText::new("level (dBFS RMS)").small().color(ch.dim));
+            ui.label(RichText::new("level (dBFS RMS · peak tick)").small().color(ch.dim));
             ui.label(RichText::new("role").small().color(ch.dim));
             ui.label("");
             ui.end_row();

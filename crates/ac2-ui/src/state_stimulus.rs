@@ -15,11 +15,11 @@ impl AppState {
         if let Some(c) = self.ceiling()
             && v > c.0
         {
-            return Err(format!("above the daemon's ceiling {}", dbfs(c.0)));
+            return Err(format!("above the daemon's ceiling {}", format::dbfs(c.0)));
         }
         self.stimulus.level = Some(Dbfs(v));
         if self.stimulus.phase == StimPhase::Idle {
-            self.toast(format!("level {} · Space arms", dbfs(v)));
+            self.toast(format!("level {} · Space arms", format::dbfs(v)));
         }
         self.resend_stimulus(out);
         Ok(())
@@ -53,7 +53,7 @@ impl AppState {
         let v = (v * 10.0).round() / 10.0;
         if v == l.0 {
             if db > 0.0 {
-                self.toast(format!("at the ceiling {}", dbfs(ceiling)));
+                self.toast(format!("at the ceiling {}", format::dbfs(ceiling)));
             }
             return;
         }
@@ -209,8 +209,8 @@ impl AppState {
                 "{}'s level {} is above the daemon's ceiling {}: edit it (palette: edit the \
                  selected measurement)",
                 plan.name,
-                dbfs(plan.config.level.0),
-                dbfs(c.0)
+                format::dbfs(plan.config.level.0),
+                format::dbfs(c.0)
             ));
             return;
         }

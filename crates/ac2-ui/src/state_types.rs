@@ -286,7 +286,7 @@ impl Stimulus {
         };
         let level = self
             .level
-            .map_or_else(|| "no level".to_string(), |l| dbfs(l.0));
+            .map_or_else(|| "no level".to_string(), |l| format::dbfs(l.0));
         format!("{sig} {level} → out {}", outputs_text(&self.outputs))
     }
 }
@@ -344,10 +344,6 @@ impl FinderChoice {
         );
         format!("{band} · {obs}")
     }
-}
-
-pub(super) fn dbfs(v: f64) -> String {
-    format!("{} dBFS", format::signed(v, 1))
 }
 
 /// One-based channel list: `1, 2`.

@@ -192,7 +192,7 @@ impl CeilingEdit {
             if !c.typed.trim().eq_ignore_ascii_case(RAISE_WORD) {
                 self.error = Some(format!(
                     "type {RAISE_WORD} to confirm, or Esc to keep {}",
-                    ac2_scene::rig::dbfs(c.from.0)
+                    ac2_scene::format::dbfs(c.from.0)
                 ));
                 return None;
             }
@@ -221,7 +221,7 @@ impl CeilingEdit {
             self.error = Some(format!(
                 "above this rig's bound {} (ac2d --max-level; only a restart with a higher bound \
                  raises it)",
-                ac2_scene::rig::dbfs(g.ceiling_bound.0)
+                ac2_scene::format::dbfs(g.ceiling_bound.0)
             ));
             return None;
         }

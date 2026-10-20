@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 use super::connect;
 use crate::CliError;
 use crate::args::{Cli, GenCmd, GenOpts, SlopeArg};
-use crate::output::{self, Out};
+use crate::output::Out;
 use crate::units::LevelDbfs;
 use crate::units::channels_text;
 use crate::watch::{Key, RawTerm, quit_signal};
@@ -90,7 +90,7 @@ fn signal_text(s: &GeneratorSettings) -> String {
     };
     format!(
         "{sig} at {} on out {}",
-        output::dbfs(s.level.0),
+        ac2_scene::format::dbfs(s.level.0),
         channels_text(&s.outputs)
     )
 }
@@ -192,8 +192,8 @@ async fn ceiling(
     if to.0 > g.ceiling.0 && !yes {
         return Err(CliError::Refused(format!(
             "raising the system max level from {} to {} needs --yes",
-            rig::dbfs(g.ceiling.0),
-            rig::dbfs(to.0)
+            ac2_scene::format::dbfs(g.ceiling.0),
+            ac2_scene::format::dbfs(to.0)
         )));
     }
     let r = c
@@ -240,8 +240,8 @@ pub(crate) async fn run(cli: &Cli, cmd: &GenCmd, out: &mut Out<'_>) -> Result<()
     if settings.level.0 > ceiling.0 {
         return Err(CliError::Refused(format!(
             "level {} is above the daemon's ceiling {}",
-            output::dbfs(settings.level.0),
-            output::dbfs(ceiling.0)
+            ac2_scene::format::dbfs(settings.level.0),
+            ac2_scene::format::dbfs(ceiling.0)
         )));
     }
     if st.session.open.is_none() {

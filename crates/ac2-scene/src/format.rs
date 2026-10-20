@@ -428,6 +428,12 @@ pub fn level(v: f64) -> String {
     fixed(v, 1)
 }
 
+/// A digital level, signed so a level above full scale cannot read as one below it:
+/// `−40.0 dBFS`, `+3.0 dBFS`, `0.0 dBFS`.
+pub fn dbfs(v: f64) -> String {
+    with_unit(signed(v, 1), " dBFS")
+}
+
 fn with_unit(num: String, unit: &str) -> String {
     if num == NO_VALUE { num } else { num + unit }
 }
