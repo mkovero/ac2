@@ -15,14 +15,15 @@
 
 use crate::common;
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ac2_audio::fake::FakePath;
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
-use ac2_proto::frame::{Frame, FrameData, TfFrame};
+use ac2_proto::frame::{FrameData, TfFrame};
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, DataMessage, ErrorCode, ReplyBody, Stream, Topic};
 use ac2d::Daemon;
 use common::*;
 use num_complex::Complex64;
@@ -51,11 +52,14 @@ fn h(gain_db: f64, f: f64) -> Complex64 {
     (b[0] + b[1] * z1 + b[2] * z1 * z1) / (1.0 + a[0] * z1 + a[1] * z1 * z1)
 }
 
-/// Its impulse response, long enough to have decayed below the noise.
+/// Its impulse response, long enough to have decayed below the noise: the poles' radius is
+/// about `1 − π·f0/(Q·fs)`, so the tail past 512 taps is near 1e−11, six decades under the
+/// path's 1e−5 noise. Every tap costs a multiply per sample in the fake device, which runs
+/// unoptimised on the test's own thread, so a longer one only slows the test.
 fn impulse(gain_db: f64, scale: f32) -> Vec<f32> {
     let (b, a) = cookbook(gain_db);
     let (mut x1, mut x2, mut y1, mut y2) = (0.0, 0.0, 0.0, 0.0);
-    (0..4096)
+    (0..512)
         .map(|n| {
             let x0 = if n == 0 { 1.0 } else { 0.0 };
             let y0 = b[0] * x0 + b[1] * x1 + b[2] * x2 - a[0] * y1 - a[1] * y2;
@@ -113,6 +117,8 @@ struct Rig {
     h: ac2d::Handle,
     c: Client,
     sub: Sub,
+    /// The newest transfer frame heard of each measurement, with its last audio sample.
+    heard: HashMap<MeasId, (u64, TfFrame)>,
     d: FakeDriver,
     tok: LeaseToken,
     _dir: tempfile::TempDir,
@@ -126,7 +132,8 @@ fn rig() -> Rig {
     cfg.lease_expiry = Duration::from_secs(60);
     cfg.session_dir = dir.path().join("sessions");
     let h = Daemon::start(cfg).unwrap();
-    let (mut c, sub) = connect(&h, &[b"d/"]);
+    let (mut c, sub) = connect(&h, &[]);
+    sub_tf(&sub, MeasId(1));
     let mut s = session(false);
     s.input_channels = vec![0, 1, 2];
     c.ok(Command::SessionOpen { config: s });
@@ -160,48 +167,70 @@ fn rig() -> Rig {
         h,
         c,
         sub,
+        heard: HashMap::new(),
         d,
         tok,
         _dir: dir,
     }
 }
 
+/// Subscribes `sub` to `meas`'s transfer frames, the only stream the test reads.
+fn sub_tf(sub: &Sub, meas: MeasId) {
+    let topic = Topic::Data {
+        meas,
+        stream: Stream::Tf,
+    };
+    sub.sock.subscribe(&topic.to_bytes()).unwrap();
+}
+
 impl Rig {
+    /// Plays `seconds` of device time in ~50 ms steps, reading the frames as they come. The
+    /// daemon drops frames for a subscriber whose queue is full, and once the audio stops a
+    /// job sends nothing more of a result it believes sent: a frame covering the last block
+    /// lost to a queue filled during a long play would never come again.
     fn play(&mut self, seconds: f64) {
-        let mut left = seconds;
-        while left > 0.0 {
-            let s = left.min(0.5);
-            run(&mut self.d, s);
+        const STEP: u64 = 10;
+        let blocks = (seconds * f64::from(FS) / f64::from(BLOCK)).ceil() as u64;
+        let mut done = 0;
+        while done < blocks {
+            let n = STEP.min(blocks - done);
+            self.d.run_blocks(n);
+            taken(&self.d);
+            self.drain();
             self.c.ok(Command::GenRefresh {
                 lease_token: self.tok,
             });
-            left -= s;
+            done += n;
+        }
+    }
+
+    /// Takes every frame queued now into `heard`.
+    fn drain(&mut self) {
+        while let Some(m) = self.sub.next(Duration::ZERO) {
+            if let DataMessage::Frame(f) = m
+                && let FrameData::Tf(t) = f.data
+            {
+                self.heard.insert(t.meas, (f.stamp.audio_sample.0, t));
+            }
         }
     }
 
     /// The newest frame of each measurement in `metas`, covering the audio played so far.
-    fn newest<const N: usize>(&self, metas: [MeasId; N]) -> [TfFrame; N] {
+    fn newest<const N: usize>(&mut self, metas: [MeasId; N]) -> [TfFrame; N] {
         let end = end_sample(&self.d);
-        let mut got: [Option<TfFrame>; N] = std::array::from_fn(|_| None);
         let deadline = Instant::now() + T;
-        while got.iter().any(Option::is_none) {
-            let left = deadline.checked_duration_since(Instant::now());
-            let Some(f): Option<Frame> =
-                left.and_then(|l| self.sub.frame(l, |f| f.stamp.audio_sample.0 + 1 >= end))
-            else {
-                let missing: Vec<MeasId> = (0..N)
-                    .filter(|&i| got[i].is_none())
-                    .map(|i| metas[i])
-                    .collect();
+        loop {
+            self.drain();
+            let covered = |m: &MeasId| self.heard.get(m).is_some_and(|(s, _)| s + 1 >= end);
+            if metas.iter().all(covered) {
+                return metas.map(|m| self.heard[&m].1.clone());
+            }
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                let missing: Vec<MeasId> = metas.into_iter().filter(|m| !covered(m)).collect();
                 panic!("no frame up to sample {end} of {missing:?}");
             };
-            if let FrameData::Tf(t) = f.data
-                && let Some(i) = metas.iter().position(|&m| m == t.meas)
-            {
-                got[i].get_or_insert(t);
-            }
+            self.sub.sock.wait_readable(left).unwrap();
         }
-        got.map(|f| f.expect("every one"))
     }
 
     fn eq(&mut self, edit: EqEdit) -> Measurement {
@@ -230,10 +259,11 @@ impl Rig {
         }
     }
 
-    /// The math channel named `name`.
+    /// The math channel named `name`, its frames subscribed to.
     fn channel(&mut self, name: &str) -> MeasId {
         let s = self.state();
-        s.measurements
+        let id = s
+            .measurements
             .iter()
             .find(|m| m.config.name == name)
             .unwrap_or_else(|| {
@@ -245,7 +275,9 @@ impl Rig {
                         .collect::<Vec<_>>()
                 )
             })
-            .id
+            .id;
+        sub_tf(&self.sub, id);
+        id
     }
 
     fn data(&mut self, id: TraceId) -> TraceData {
