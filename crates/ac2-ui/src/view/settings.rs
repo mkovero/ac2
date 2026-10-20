@@ -86,38 +86,21 @@ pub(super) fn reveal_focused(r: &egui::Response) {
 fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) {
     ui.label(RichText::new("Settings").strong().size(20.0).color(ch.text));
     ui.add_space(10.0);
-    // The keys are a column of their own: a page without one keeps its name in line.
-    let key_text = |k: String| RichText::new(k).small().monospace().color(ch.dim);
-    let key_w = (0..Page::ALL.len())
-        .filter_map(page_key)
-        .map(|k| {
-            egui::WidgetText::from(key_text(k.label()))
-                .into_galley(
-                    ui,
-                    Some(egui::TextWrapMode::Extend),
-                    f32::INFINITY,
-                    egui::TextStyle::Body,
-                )
-                .size()
-                .x
-        })
-        .fold(0.0, f32::max);
     for (i, p) in Page::ALL.iter().enumerate() {
         let on = s.page == *p;
         let t = RichText::new(p.title())
             .size(15.0)
             .color(if on { ch.focus } else { ch.text });
-        ui.horizontal(|ui| {
-            let key = page_key(i).map(|k| k.label()).unwrap_or_default();
-            let w = ui.label(key_text(key)).rect.width();
-            ui.add_space((key_w - w).max(0.0));
-            if ui
-                .add(egui::Button::selectable(on, t).min_size(egui::vec2(150.0, 26.0)))
-                .clicked()
-            {
-                *msg = Some(Msg::Settings(SettingsMsg::Page(*p)));
-            }
-        });
+        // A page's key stays out of the list (a column of chords read as a second list);
+        // hovering the page names it.
+        let b = ui.add(egui::Button::selectable(on, t).min_size(egui::vec2(150.0, 26.0)));
+        let b = match page_key(i) {
+            Some(k) => b.on_hover_text(k.label()),
+            None => b,
+        };
+        if b.clicked() {
+            *msg = Some(Msg::Settings(SettingsMsg::Page(*p)));
+        }
         ui.add_space(2.0);
     }
     ui.add_space(14.0);

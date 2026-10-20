@@ -123,7 +123,8 @@ the input has no name.
 **Ctrl+P** (palette *Settings…*, or the ⚙) opens every setting in one view below the top
 bar, so what drives the speakers stays in sight. Pages are in a sidebar:
 **Ctrl+PgUp / Ctrl+PgDn** (or **Alt+←** / **Alt+→**) step, **Alt+1 … Alt+7**
-jump, a click picks; Ctrl+P reopens the page last shown, and closes the view again. Esc
+jump (hovering a page names its key), a click picks; Ctrl+P reopens the page last shown,
+and closes the view again. Esc
 closes the view (a dialog or confirmation over a page first); **Shift+Esc** still stops the
 stimulus. Each page says whose its settings are: **this app** (`ui.toml` on this computer)
 or **the rig — all clients** (kept by the daemon; every connected app sees a change at
