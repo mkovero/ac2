@@ -54,6 +54,8 @@ jobs:
       - name: Install pinned toolchain
         run: rustup toolchain install
       - run: cargo fmt --all --check
+      - name: No Rust file over 1000 lines
+        run: tools/release/loc-check.sh
 
   # clippy is a check build and shares no artifacts with the test build, so on the slow runners
   # it runs in its own job beside the tests instead of before them. macOS runs it inline (see
