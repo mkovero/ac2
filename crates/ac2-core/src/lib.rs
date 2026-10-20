@@ -10,6 +10,7 @@ pub mod align;
 pub mod average;
 pub mod band_leq;
 pub mod delay;
+pub mod eq;
 pub mod generator;
 pub mod ir_response;
 pub mod ir_view;

@@ -24,6 +24,7 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - Panes (tiling tree, a measurement's own panes): `PLAN.md` §8.1, `docs/user-guide.md` *Panes: split, close…*.
 - Two-system alignment (delay, polarity, summation in an overlap band; Alt+M, `ac2 align`): `docs/design/alignment.md`, `docs/user-guide.md` *Alignment*.
 - Power cuts and watchdogs: `docs/design/watchdogs.md`.
+- EQ what-if (sets, prediction, console mark, APO text): `docs/design/eq-overlay.md`, `docs/user-guide.md` *EQ what-if*.
 
 ## Where to look
 | need | file |

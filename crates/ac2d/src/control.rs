@@ -48,6 +48,7 @@ use crate::util::perr;
 mod artnet;
 mod autosave;
 mod cal;
+mod eq;
 mod execute;
 mod file_jobs;
 mod files;

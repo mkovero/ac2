@@ -1,0 +1,324 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "eq_sections",
+  "description": "EQ sections on a 1/12-octave grid: scipy butter/bessel (analog and digital, prewarped at Wn), Linkwitz-Riley as squared Butterworth, cookbook biquads at 48 kHz, and a peaking Q read 3 dB from the peak solved by root-finding.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_eq_sections"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "grid": "f = 1000 * 2^(k/12), 10 Hz … 20 kHz",
+    "analog": "scipy.signal.freqs at w = 2 pi f",
+    "digital": "scipy.signal.freqz at fs (butter/bessel digital: bilinear prewarped at Wn)",
+    "cookbook": "RBJ Audio EQ Cookbook coefficients written out",
+    "minus3db": "cookbook Q found by brentq so the 3 dB-from-peak band is f0/Q3",
+    "cases": {
+      "bw_hp4_80_analog": "butter(4, 80 Hz, high, analog)",
+      "bw_lp3_2k_digital": "butter(3, 2 kHz, low, fs)",
+      "lr4_lp_1k_digital": "butter(2, 1 kHz, low, fs) squared",
+      "bessel5_hp_100_<norm>_analog": "bessel(5, 100 Hz, high, analog, norm)",
+      "bessel4_lp_3k_phase_digital": "bessel(4, 3 kHz, low, fs, norm=phase)",
+      "peak_1k_m6_q2": "cookbook peaking 1 kHz -6 dB Q 2",
+      "peak_8k_p9_q07": "cookbook peaking 8 kHz +9 dB Q 0.7",
+      "ls_120_p6_s1": "cookbook low shelf 120 Hz +6 dB S 1 (Q 0.7071)",
+      "hs_6k_m4_q09": "cookbook high shelf 6 kHz -4 dB Q 0.9",
+      "notch_60_q8": "cookbook notch 60 Hz Q 8",
+      "bp_500_q14": "cookbook band-pass (0 dB peak) 500 Hz Q 1.4",
+      "ap2_1k_q07": "cookbook all-pass 1 kHz Q 0.7071",
+      "peak3db_2k_p12_q3_analog": "symmetric peaking 2 kHz +12 dB, Q read 3 dB from peak = 3"
+    }
+  },
+  "references": [
+    "docs/design/eq-overlay.md 1, 5",
+    "scipy.signal.butter / bessel / freqs / freqz / freqs_zpk",
+    "R. Bristow-Johnson, Audio EQ Cookbook"
+  ],
+  "scalars": {
+    "fs_hz": 48000.0,
+    "peak3db_cookbook_q": 1.6084705530062133
+  },
+  "blob": {
+    "file": "eq_sections.bin",
+    "nbytes": 32984,
+    "sha256": "e8863f52428237f0eac6806d946c643d23f316eb26192ae877f9d7234a57ecbb"
+  },
+  "arrays": [
+    {
+      "name": "freq_hz",
+      "dtype": "f64",
+      "shape": [
+        133
+      ],
+      "offset": 0,
+      "nbytes": 1064,
+      "unit": "Hz",
+      "description": "evaluation frequencies",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-12
+      }
+    },
+    {
+      "name": "bw_hp4_80_analog",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 1064,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "Butterworth HP 4th order 80 Hz, analog",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "bw_lp3_2k_digital",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 3192,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "Butterworth LP 3rd order 2 kHz, 48 kHz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "lr4_lp_1k_digital",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 5320,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "Linkwitz-Riley LP 4th order 1 kHz, 48 kHz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "bessel5_hp_100_phase_analog",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 7448,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "Bessel HP 5 100 Hz norm=phase, analog",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "bessel5_hp_100_delay_analog",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 9576,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "Bessel HP 5 100 Hz norm=delay, analog",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "bessel5_hp_100_mag_analog",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 11704,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "Bessel HP 5 100 Hz norm=mag, analog",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "bessel4_lp_3k_phase_digital",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 13832,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "Bessel LP 4 3 kHz norm=phase, 48 kHz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "peak_1k_m6_q2",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 15960,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "cookbook peaking 1000 Hz -6 dB Q 2, 48 kHz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "peak_8k_p9_q07",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 18088,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "cookbook peaking 8000 Hz 9 dB Q 0.7, 48 kHz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "ls_120_p6_s1",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 20216,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "cookbook low_shelf 120 Hz 6 dB Q 0.7071067811865475, 48 kHz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "hs_6k_m4_q09",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 22344,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "cookbook high_shelf 6000 Hz -4 dB Q 0.9, 48 kHz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "notch_60_q8",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 24472,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "cookbook notch 60 Hz 0 dB Q 8, 48 kHz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "bp_500_q14",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 26600,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "cookbook band_pass 500 Hz 0 dB Q 1.4, 48 kHz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "ap2_1k_q07",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 28728,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "cookbook all_pass 1000 Hz 0 dB Q 0.7071067811865475, 48 kHz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "peak3db_2k_p12_q3_analog",
+      "dtype": "c128",
+      "shape": [
+        133
+      ],
+      "offset": 30856,
+      "nbytes": 2128,
+      "unit": "1",
+      "description": "symmetric peaking 2 kHz +12 dB with Q 3 read 3 dB from the peak, analog",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    }
+  ]
+}

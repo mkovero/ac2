@@ -111,6 +111,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `meas.layout` | `meas`, `layout: PaneLayout \| nil` | `measurement` | |
 | `meas.compare` | `meas`, `compared: [Compared]` | `measurement` | |
 | `meas.offset` | `meas`, `offset: Db` | `measurement` | |
+| `meas.eq` | `meas`, `edit: EqEdit` | `measurement` | |
 | `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the traces and math channels it owns) | `ack` | |
 | `meas.start` | `meas` | `measurement` | |
 | `meas.stop` | `meas` | `measurement` | |
@@ -368,6 +369,37 @@ another measurement's panes too. It is `Measurement.offset`, kept in sessions an
 autosave; the job, its averages and `config_rev` are untouched. `invalid` unless finite and
 within ±200 dB; a session file's that is not is 0 on load.
 
+`meas.eq` edits the measurement's EQ what-if sets (`Measurement.eq: [EqSet]`, transfer and
+sweep measurements; `docs/design/eq-overlay.md`); the job and `config_rev` are untouched.
+`EqEdit` (tagged by `type`): `new` {`name` \| nil (the next free `EQ n`), `realisation` \|
+nil (digital at the session rate), `peak_q` \| nil (`half_gain`), `sections`} — also
+predicts the live curve —, `put` {`set`, `body`: `EqBody`} (replaces what the set holds,
+`rev` + 1), `delete` {`set`} (its filter curve and predictions go with it), `mark` {`set`,
+`clear`} (snapshots the set as `in_console`, or clears it), `predict` {`set`, `curve`:
+`Operand` (`meas` = this measurement's live curve, or `trace` = one of its transfer
+traces), `on`} (creates or deletes the math channel `curve × EQ`), `copy` {`set`, `to`}.
+`EqSet` = {`id`: `EqSetId`, `rev`, `body`, `in_console`: `EqSnapshot` \| nil, `trace`: the
+set's filter curve, a locked transfer trace with `source.eq` {`meas`, `set`, `rev`} whose
+columns the daemon recomputes on every edit and load (`rev`: the set's rev they are of; a
+client refetches the data when it changes)}. `EqBody` = {`name`, `realisation`
+(`digital` {`rate`} \| `analog`), `peak_q`: `PeakQ` (`half_gain` \| `minus3db_from_peak` \|
+`band_pass`, the default reading of a peaking section's Q), `enabled`, `sections`:
+[`EqSection` {`enabled`, `shape`: `EqShape`}]}; `EqSnapshot` = {`set`, `rev`, `body`}.
+`EqShape` (tagged by `type`): `peaking` {`f`, `gain`, `bw`, `q_measured`: `PeakQ` \| nil},
+`low_shelf` / `high_shelf` {`f`, `gain`, `order`: `first` \| `second` {`slope`:
+`ShelfSlope`}, `f_at`: `midpoint` \| `corner`}, `high_pass` / `low_pass` {`f`,
+`alignment`: `butterworth` \| `linkwitz_riley` \| `bessel` {`norm`: `phase` \| `delay` \|
+`minus3db`}, `order`}, `high_pass_q` / `low_pass_q` {`f`, `q`}, `notch` / `band_pass` {`f`,
+`bw`}, `all_pass_1` {`f`}, `all_pass_2` {`f`, `q`}, `gain` {`gain`}, `polarity`, `delay`
+{`seconds`}, `biquad` {`b0`, `b1`, `b2`, `a1`, `a2`, `rate`}, `response` {`trace`}.
+`Bandwidth`: `q` {`value`} \| `octaves` {`n`}; `ShelfSlope`: `q` {`value`} \| `s` {`value`} \|
+`octaves` {`n`}. `invalid` with the section's number and reason for a refused section (f at
+or above fs/2, Q outside 0 … 100, gain beyond ±30 dB, an order the alignment lacks, an
+unstable biquad, a `response` naming no transfer trace…), for more than 8 sets or 64
+sections, and for a `predict` curve not of this measurement. A capture records the marked
+snapshots of its measurement in `TraceMeta.eq_in`; a math capture of a prediction records
+the set as it was (its columns contain it).
+
 `MeasConfig` = {`name`, `kind`, `scope`: `MeasScope`}. `scope` is `session` (the working
 session's: saved in session files, replaced by a load) or `rig` (the rig's, SPL meters only:
 kept with the daemon's rig settings, never in a session file; a load, a new session, a salvage
@@ -443,8 +475,10 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   - `expr` (`MathExpr`, tagged by `type`): `binary` {`a`, `op`, `b`}, `average` {`of`:
     2 … 16 distinct operands, `method` `power` \| `complex` \| `coherence_weighted`} or
     `align` {`a`, `b`, `band`: `AlignBand` {`lo`, `hi`} (Hz, 0 < `lo` < `hi`), `max_delay`
-    (Seconds, 0 < … ≤ 1)}. An operand (`Operand`, tagged by `type`) is `meas` {`meas`} or
-    `trace` {`trace`}.
+    (Seconds, 0 < … ≤ 1)}. An operand (`Operand`, tagged by `type`) is `meas` {`meas`},
+    `trace` {`trace`} or `eq` {`meas`, `set`} (an EQ set: `B` of a transfer `multiply`
+    only; the set's response, or its change `H_now / H_in` when `A` recorded the set in
+    console — `TraceMeta.eq_in`, or the set's `in_console` for a live `A`).
   - `align` (transfer only; `docs/design/alignment.md`): the delay and polarity that make
     two systems add in their overlap `band`. Its frame's `math.align` holds the fit
     (`AlignState`, §5.4) and the frame's `align_*` arrays the per-column curves; its `tf`
@@ -1440,10 +1474,11 @@ saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
 The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`, `stopped:
 AudioStopped | nil`; §4.1.1),
 `measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`, `colour`,
-`layout`),
+`layout`, `compared`, `offset`, `eq`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
-math | average | sweep}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
+math | average | sweep | eq}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`,
+`eq_in` ([`EqSnapshot`]: the EQ sets marked in the console when captured);
 `kind` one of
 `transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `ceiling_bound`, `last_action` {`action`: acquire

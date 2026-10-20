@@ -34,6 +34,7 @@ fn source_text(s: &TraceSource) -> String {
         TraceSource::Sweep {
             meas_name, number, ..
         } => format!("run {number} of {meas_name}"),
+        TraceSource::Eq { set, rev, .. } => format!("EQ {} (rev {rev})", set.0),
     }
 }
 

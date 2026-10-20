@@ -660,6 +660,7 @@ impl AppState {
             | C::NudgeEarlier
             | C::NudgeLater
             | C::PhaseReference
+            | C::EqEditor
             | C::Target
             | C::Average
             | C::AverageComplex

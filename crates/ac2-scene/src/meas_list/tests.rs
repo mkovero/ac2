@@ -29,6 +29,7 @@ pub(crate) fn tf(id: u32, name: &str) -> Measurement {
         layout: None,
         compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
     }
 }
 
@@ -294,6 +295,7 @@ pub(crate) fn trace(id: u32, name: &str, owner: TraceOwner, source: TraceSource)
         mic: None,
         mic_curve: None,
         created_at: WallNs(0),
+        eq_in: Vec::new(),
     }
 }
 

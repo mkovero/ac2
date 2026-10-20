@@ -234,7 +234,15 @@ fn signed_ms(s: f64) -> String {
 fn trace_stroke(t: &DisplayTrace, selected: bool, theme: &Theme) -> Stroke {
     let a = if t.is_stale() { theme.stale_alpha } else { 1.0 };
     let w = if selected { SELECTED_WIDTH } else { 1.0 };
-    Stroke::solid(t.color.with_alpha(a), theme.trace_width * w)
+    let dash = t.dashed.then_some(Dash {
+        on: 6.0,
+        off: 4.0,
+        offset: 0.0,
+    });
+    Stroke {
+        dash,
+        ..Stroke::solid(t.color.with_alpha(a), theme.trace_width * w)
+    }
 }
 
 /// Coherence overlaid on the magnitude pane: γ² 0…1 maps linearly onto `band`, the top

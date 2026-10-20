@@ -489,6 +489,9 @@ fn remap_math(
             .get(&old)
             .map(|&trace| Operand::Trace { trace })
             .ok_or_else(|| format!("computes from trace (old id {}), not restored", old.0)),
+        // An EQ set lives in the session, not in a recording: its prediction cannot be
+        // rebuilt from what salvage reads.
+        Operand::Eq { set, .. } => Err(format!("predicts after EQ {}, not restored", set.0)),
     };
     let owner = match m.owner {
         TraceOwner::Meas { meas: old } => TraceOwner::Meas {

@@ -164,7 +164,8 @@
      }
     },
     "compared": [],
-    "offset": 0.0
+    "offset": 0.0,
+    "eq": []
    }
   }
  },
@@ -666,7 +667,8 @@
     "colour": null,
     "layout": null,
     "compared": [],
-    "offset": 0.0
+    "offset": 0.0,
+    "eq": []
    }
   }
  },
@@ -727,7 +729,8 @@
     "colour": null,
     "layout": null,
     "compared": [],
-    "offset": 0.0
+    "offset": 0.0,
+    "eq": []
    }
   }
  },
@@ -917,7 +920,8 @@
     },
     "layout": null,
     "compared": [],
-    "offset": 0.0
+    "offset": 0.0,
+    "eq": []
    }
   }
  },
@@ -1070,7 +1074,8 @@
     "colour": null,
     "layout": null,
     "compared": [],
-    "offset": 0.0
+    "offset": 0.0,
+    "eq": []
    }
   }
  },

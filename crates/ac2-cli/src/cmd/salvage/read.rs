@@ -187,6 +187,7 @@ fn meas_keys() -> Vec<String> {
         layout: None,
         compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
     };
     match serde_json::to_value(sample) {
         Ok(Value::Object(m)) => m.keys().cloned().collect(),

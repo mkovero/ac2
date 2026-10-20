@@ -133,6 +133,7 @@ pub fn meas_kind(k: &MeasKind) -> String {
             let e = ac2_scene::math::expression(&config.expr, |o| match o {
                 ac2_proto::model::Operand::Meas { meas } => format!("#{meas}"),
                 ac2_proto::model::Operand::Trace { trace } => format!("trace {trace}"),
+                ac2_proto::model::Operand::Eq { set, .. } => format!("EQ {}", set.0),
             });
             match &config.expr {
                 ac2_proto::model::MathExpr::Average { method, .. } => {

@@ -448,6 +448,10 @@ impl AppState {
                 .daemon()
                 .and_then(|s| s.traces.iter().find(|t| t.id == trace))
                 .map_or_else(|| format!("trace {trace}"), |t| t.edit.name.clone()),
+            Operand::Eq { meas, set } => self
+                .meas(meas)
+                .and_then(|m| m.eq.iter().find(|s| s.id == set))
+                .map_or_else(|| format!("EQ {}", set.0), |s| s.body.name.clone()),
         }
     }
 
@@ -462,6 +466,8 @@ impl AppState {
                 .iter()
                 .find(|t| t.id == trace)
                 .map(|t| t.delay.0),
+            // A filter shares no arrival with a curve: it is applied, not aligned.
+            Operand::Eq { .. } => None,
         }
     }
 

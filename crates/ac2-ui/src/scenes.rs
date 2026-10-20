@@ -188,6 +188,30 @@ pub fn daemon_wall(st: &AppState, client_now: WallNs) -> WallNs {
 
 /// What a math channel's frame combined, operands named as the lists name them; `None`
 /// for any other frame.
+/// A prediction's legend tag: what its curve already contains of the set
+/// (`assumes none of it in`, `change since rev 4`, `EQ 1 in · no change`).
+fn eq_prediction_note(st: &AppState, m: &Measurement) -> Option<String> {
+    let MeasKind::Math { config } = &m.config.kind else {
+        return None;
+    };
+    let (meas, set, curve) = ac2_scene::eq::prediction(&config.expr)?;
+    let set = st.meas(meas)?.eq.iter().find(|s| s.id == set)?;
+    let basis =
+        ac2_scene::eq::curve_basis(set, curve, |id| st.traces.get(&id).map(|(t, _)| &t.meta));
+    Some(ac2_scene::eq::basis_tag(&set.body.name, basis))
+}
+
+/// An EQ set's filter curve's tags (`bypassed`, `in console (rev 4)`); `None` for any other
+/// trace.
+fn eq_curve_tags(st: &AppState, meta: &ac2_proto::model::TraceMeta) -> Option<String> {
+    let ac2_proto::model::TraceSource::Eq { meas, set, .. } = meta.source else {
+        return None;
+    };
+    let set = st.meas(meas)?.eq.iter().find(|s| s.id == set)?;
+    let tags = ac2_scene::eq::set_tags(set);
+    (!tags.is_empty()).then(|| tags.join(" · "))
+}
+
 fn math_status(st: &AppState, m: &Measurement, frame: &FrameData) -> Option<MathStatus> {
     let MeasKind::Math { config } = &m.config.kind else {
         return None;
@@ -351,7 +375,8 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
         } else {
             Polarity::Normal
         };
-        t.note = math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag());
+        t.note = eq_prediction_note(st, l.meas)
+            .or_else(|| math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag()));
         t.compared = st.live_compared_on(PaneKind::Transfer, l.meas, pane_shows);
         // A ratio or cascade of operands without a shared time base has each operand's
         // own alignment in its phase, not a time base of this session.
@@ -368,6 +393,9 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
         ranks.push(rank(ac2_scene::meas_list::group_of(&data.meta, &ms)));
         let mut t = TfTrace::stored(data, &cols.freqs, colours.trace(data.meta.id));
         t.selected = st.selected_trace == Some(data.meta.id);
+        if let Some(tags) = eq_curve_tags(st, &data.meta) {
+            t.note = Some(tags);
+        }
         t.compared = st.trace_compared_on(PaneKind::Transfer, &data.meta, pane_shows);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (Some(epoch), Some(cur)) = (

@@ -70,6 +70,9 @@ fn source_text(s: &TraceSource) -> String {
             }
             t
         }
+        TraceSource::Eq { meas, set, rev } => {
+            format!("filter response of EQ set {set} (rev {rev}) of measurement {meas}")
+        }
         TraceSource::Average {
             traces,
             method,

@@ -247,6 +247,7 @@ commands! {
     StartStop => "start_stop", "Start/stop", [Transfer, Spectrum, Ir, Spl];
 
     InsertDelay => "insert_delay", "Find first arrival", [Transfer];
+    EqEditor => "eq_editor", "EQ…", [Transfer];
     InsertStrongest => "insert_strongest", "Find strongest peak", [Transfer];
     TypeDelay => "type_delay", "Set delay…", [Transfer];
     TrackDelay => "track_delay", "Delay tracking", [Transfer];

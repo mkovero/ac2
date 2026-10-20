@@ -158,6 +158,7 @@ mod tests {
             freshness: None,
             smoothing: None,
             note: None,
+            dashed: false,
         }
     }
 

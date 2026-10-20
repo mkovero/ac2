@@ -136,6 +136,7 @@ impl AppState {
                     }
                 }
             },
+            C::EqEditor => self.open_eq(out),
             C::Target => self.prompt(PromptKind::ImportFile(ImportRole::Target), String::new()),
             C::Average => self.average(AverageMethod::Power, out),
             C::AverageComplex => self.average(AverageMethod::Complex, out),

@@ -270,6 +270,15 @@ pub enum Command {
         /// Its traces and math channels: kept (moved to the imported group) or deleted.
         traces: OwnedTraces,
     },
+    /// Edit a measurement's EQ what-if sets (transfer and sweep measurements). Its job and
+    /// config rev go on; replies with the measurement.
+    #[serde(rename = "meas.eq")]
+    MeasEq {
+        /// Measurement.
+        meas: MeasId,
+        /// The edit.
+        edit: crate::model::EqEdit,
+    },
     /// Start the job (refused for a sweep measurement: `sweep.run` plays it).
     #[serde(rename = "meas.start")]
     MeasStart {
@@ -781,6 +790,7 @@ impl Command {
             Self::MeasOffset { .. } => "meas.offset",
             Self::MeasLayout { .. } => "meas.layout",
             Self::MeasDelete { .. } => "meas.delete",
+            Self::MeasEq { .. } => "meas.eq",
             Self::MeasStart { .. } => "meas.start",
             Self::MeasStop { .. } => "meas.stop",
             Self::MeasReset { .. } => "meas.reset",

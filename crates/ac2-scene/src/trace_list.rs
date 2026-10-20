@@ -18,6 +18,7 @@ pub fn kind_name(t: &TraceMeta) -> &'static str {
         (TraceKind::Sweep, TraceSource::Imported { .. }) => "imported sweep",
         (_, TraceSource::Imported { .. }) => "imported",
         (_, TraceSource::Average { .. }) => "average",
+        (_, TraceSource::Eq { .. }) => "EQ",
         (_, TraceSource::Math { expr, .. }) => match expr {
             MathExpr::Average { .. } => "math average",
             MathExpr::Align { .. } => "aligned sum",
@@ -260,6 +261,7 @@ mod tests {
             mic: None,
             mic_curve: None,
             created_at: WallNs(0),
+            eq_in: Vec::new(),
         }
     }
 

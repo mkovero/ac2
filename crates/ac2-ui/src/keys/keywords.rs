@@ -172,6 +172,7 @@ impl CommandId {
             C::Invert => &["polarity", "flip", "phase"],
             C::Offset => &["gain", "level"],
             C::PhaseReference => &["phase"],
+            C::EqEditor => &["equaliser", "equalizer", "filter", "what-if", "predict"],
             C::Target => &["curve", "house curve", "reference"],
             C::CoherenceMask => &["coherence", "blank", "gamma"],
             C::CoherencePlacement => &["coherence", "overlay", "gamma"],

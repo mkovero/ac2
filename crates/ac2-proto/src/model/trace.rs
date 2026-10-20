@@ -212,6 +212,16 @@ pub enum TraceSource {
         /// What the phase is relative to.
         phase: PhaseBasis,
     },
+    /// An EQ set's filter curve, kept by the daemon (locked: the set is the truth, the
+    /// columns are recomputed from it).
+    Eq {
+        /// The measurement holding the set.
+        meas: MeasId,
+        /// The set.
+        set: crate::units::EqSetId,
+        /// The set's rev its columns are of: a client refetches the data when it changes.
+        rev: u32,
+    },
     /// Average of other traces.
     Average {
         /// Inputs.
@@ -269,7 +279,9 @@ impl TraceSource {
                 );
                 (*phase == PhaseBasis::SharedTimeBase && !relative).then_some(*epoch)
             }
-            TraceSource::Imported { .. } | TraceSource::Average { .. } => None,
+            TraceSource::Imported { .. } | TraceSource::Average { .. } | TraceSource::Eq { .. } => {
+                None
+            }
         }
     }
 }
@@ -419,6 +431,9 @@ pub struct TraceMeta {
     pub mic_curve: Option<Box<TraceMicCurve>>,
     /// When captured / created.
     pub created_at: WallNs,
+    /// The EQ sets marked "in the console" when it was captured (one per marked set of its
+    /// measurement): what of them its columns contain.
+    pub eq_in: Vec<super::EqSnapshot>,
 }
 
 /// A session saved by `file.save` (reply to `file.save` / `file.load`, rows of `file.list`).

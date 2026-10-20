@@ -5,6 +5,7 @@
 
 mod builders;
 mod commands;
+mod eq;
 mod events;
 mod frames;
 mod replies;
@@ -13,6 +14,7 @@ mod traces;
 
 pub use builders::{grids, log_grid, math_measurement, pane_layout, sweep_measurement, working};
 pub use commands::commands;
+pub use eq::{eq_edits, eq_measurement};
 pub use events::events;
 pub use frames::{frames, stamp, tf_frame};
 pub use replies::{replies, reply, warnings};

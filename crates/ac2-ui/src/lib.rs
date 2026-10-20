@@ -26,6 +26,7 @@ pub mod conn;
 pub mod connect;
 pub mod electrical_dialog;
 pub mod embedded;
+pub mod eq_editor;
 pub mod forms;
 pub mod gpu;
 pub mod health;

@@ -115,6 +115,9 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   dialog are not pinned.
 - **ac2-ui `embedded::calibration::mic_curves_imported_and_switched_in_the_input_setup`**:
   failed once on its first try in a full workspace run (passed on retry); 10/10 alone.
+- **macOS CI "ac2 on BlackHole (Core Audio)"**: `selftest duplex` failed once with
+  `config_changed` count 1 (run 39364032668, 1ee6a366); BlackHole reported a configuration
+  change mid-run, the levels were exact. Seen once.
 - **ac2d `remote_stimulus` "timed out waiting for the tone"**: once in a full workspace run
   at load ~30; passed 4/4 alone.
 - **ac2d `traces::capture::capture_average_math_export_import`, unaligned capture at 301.6 Hz:

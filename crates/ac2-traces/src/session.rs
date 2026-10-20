@@ -88,6 +88,8 @@ pub struct SavedMeasurement {
     pub compared: Vec<Compared>,
     /// Display offset of its live curves.
     pub offset: Db,
+    /// EQ what-if sets (their filter curves are recomputed on load).
+    pub eq: Vec<ac2_proto::model::EqSet>,
 }
 
 /// Delay of a saved transfer measurement.

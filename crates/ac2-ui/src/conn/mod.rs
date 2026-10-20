@@ -24,7 +24,7 @@ use ac2_proto::model::{
     BackendInfo, BackendKind, DelayFinding, DelayPick, DeviceId, FinderBand, GeneratorDesired,
     GeneratorSettings, ImportFormat, ImportRole, InputSetup, LoopbackDetection, MeasConfig,
     Measurement, OwnedTraces, Preview, SessionConfig, Smoothing, SplHistory, TraceData, TraceMeta,
-    TraceMicCurve,
+    TraceMicCurve, TraceSource,
 };
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, MeasId, Seconds, TraceId};
@@ -712,10 +712,10 @@ async fn session(
     let mut shown_mirror: Option<Arc<MirrorView>> = None;
     let mut poll = DataPoll::default();
     let mut clock = PollClock::new(tokio::time::Instant::now());
-    // Served columns carry the trace's display smoothing and mic curve: a new setting means
-    // new data.
-    let mut fetched: HashMap<TraceId, (Option<Smoothing>, Option<Box<TraceMicCurve>>)> =
-        HashMap::new();
+    // Served columns carry the trace's display smoothing and mic curve, and an EQ curve its
+    // set's rev: a new setting means new data.
+    type Shown = (Option<Smoothing>, Option<Box<TraceMicCurve>>, Option<u32>);
+    let mut fetched: HashMap<TraceId, Shown> = HashMap::new();
     let next = loop {
         tokio::select! {
             c = ctl.recv() => match c {
@@ -753,7 +753,12 @@ async fn session(
                 let v = mirror.borrow_and_update().clone();
                 if let Some(st) = &v.state {
                     for t in &st.traces {
-                        let shown = (t.edit.smoothing, t.mic_curve.clone());
+                        // An EQ set's filter curve is recomputed on every edit of the set.
+                        let eq_rev = match t.source {
+                            TraceSource::Eq { rev, .. } => Some(rev),
+                            _ => None,
+                        };
+                        let shown = (t.edit.smoothing, t.mic_curve.clone(), eq_rev);
                         if fetched.insert(t.id, shown.clone()) != Some(shown) {
                             tokio::spawn(fetch_trace(client.clone(), t.id, t.grid_id, out.clone()));
                         }

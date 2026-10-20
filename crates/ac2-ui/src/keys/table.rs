@@ -205,6 +205,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::DelayDownFine, S::Transfer, alt(K::Comma)),
         (C::DelayUpFine, S::Transfer, alt(K::Period)),
         (C::PhaseReference, S::Transfer, k(K::E)),
+        // Alt+E: the EQ what-if editor (E is the phase reference, Shift+E notifications).
+        (C::EqEditor, S::Transfer, alt(K::E)),
         (C::Target, S::Transfer, k(K::Z)),
         (C::CoherenceMask, S::Transfer, k(K::B)),
         (C::Average, S::Transfer, k(K::M)),

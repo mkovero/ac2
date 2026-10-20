@@ -71,6 +71,7 @@ impl RigMeter {
             layout: self.layout.clone(),
             compared: Vec::new(),
             offset: Db(0.0),
+            eq: Vec::new(),
         }
     }
 }

@@ -320,6 +320,7 @@ mod tests {
         match o {
             Operand::Meas { meas } => format!("Seat {}", meas.0),
             Operand::Trace { trace } => format!("S{}", trace.0),
+            Operand::Eq { set, .. } => format!("EQ {}", set.0),
         }
     }
 
@@ -505,6 +506,7 @@ mod tests {
         let delay_of = |o: Operand| match o {
             Operand::Meas { .. } => Some(600.37 / 48_000.0),
             Operand::Trace { .. } => Some(600.0 / 48_000.0),
+            Operand::Eq { .. } => None,
         };
         let tag = |op, b, phase: PhaseBasis| {
             let (c, s) = (cfg(op, b), state(b, phase));

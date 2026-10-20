@@ -25,6 +25,7 @@ use egui_kittest::{Harness, SnapshotOptions};
 
 mod band;
 mod drag;
+mod eq;
 mod export;
 mod leq;
 mod overlays;

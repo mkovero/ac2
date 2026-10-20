@@ -1,4 +1,4 @@
-//! `ac2 meas new|list|set|layout|start|stop|rm`.
+//! `ac2 meas new|list|set|eq|layout|start|stop|rm`.
 
 use ac2_client::{Client, expect_body};
 use ac2_proto::model::*;
@@ -138,6 +138,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             .await?;
             out.emit(&m, || output::measurement(&m))?;
         }
+        MeasCmd::Eq { cmd } => super::eq::meas_eq(&c, cmd, out).await?,
         MeasCmd::Scope { meas, scope } => super::osc::meas_scope(&c, meas, *scope, out).await?,
         MeasCmd::Start { meas } | MeasCmd::Stop { meas } => {
             let s = state(&c).await?;
