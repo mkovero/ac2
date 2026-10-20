@@ -31,6 +31,7 @@ mod canvas;
 pub mod chrome;
 pub mod curve_ease;
 pub mod distortion;
+pub mod eq;
 pub mod families;
 pub mod finding;
 pub mod format;

@@ -340,6 +340,8 @@ pub struct DisplayTrace {
     pub smoothing: Option<Smoothing>,
     /// See [`TfTrace::note`].
     pub note: Option<String>,
+    /// An EQ set's filter curve: drawn dashed, so it does not read as a measured curve.
+    pub dashed: bool,
 }
 
 impl DisplayTrace {
@@ -546,6 +548,9 @@ pub fn display_trace(
         freshness: t.freshness,
         smoothing: t.smoothing,
         note: t.note.clone(),
+        dashed: t
+            .stored
+            .is_some_and(|d| matches!(d.meta.source, TraceSource::Eq { .. })),
     }
 }
 

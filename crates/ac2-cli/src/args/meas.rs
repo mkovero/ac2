@@ -291,6 +291,11 @@ pub enum MeasCmd {
         /// Id or name.
         meas: MeasRef,
     },
+    /// EQ what-if sets: predict a curve after an EQ before it is applied.
+    Eq {
+        #[command(subcommand)]
+        cmd: super::MeasEqCmd,
+    },
     /// A measurement's own panes: the app shows them while it is selected (edited in the
     /// app).
     Layout {

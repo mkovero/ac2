@@ -8,6 +8,7 @@ mod daemon;
 mod delay;
 mod devsel;
 mod discover;
+mod eq;
 mod gen_;
 mod ir;
 mod leq;

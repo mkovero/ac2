@@ -3,6 +3,7 @@
 mod artnet;
 mod cal;
 mod delay;
+mod eq;
 mod gen_;
 mod ir;
 mod math;
@@ -15,6 +16,7 @@ mod trace;
 pub use artnet::*;
 pub use cal::*;
 pub use delay::*;
+pub use eq::*;
 pub use gen_::*;
 pub use ir::*;
 pub use math::*;
