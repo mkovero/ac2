@@ -121,6 +121,10 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   Next: log `eff_avg` and the block count the low-frequency stage averaged when the band
   check fails.
 
+- **ac2d `artnet::the_universe_follows_the_cues_and_keeps_alive` "Conflict rev 1 vs 0"**: once
+  in a quick-tier workspace run while two other agents built (2026-10-20); passed on rerun
+  and in the next full run. A write raced the rig revision the test expects.
+
 ## Parked
 
 - **Genelec 1083 on pupu: 2–6 kHz dip of −5…−9.5 dB** (`docs/rigs/pupu.md`). Same within

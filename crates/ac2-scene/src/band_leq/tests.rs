@@ -173,7 +173,7 @@ fn a_band_over_is_named_with_its_window_and_how_long_to_back_off() {
     let b = &w.bars[5];
     assert_eq!(b.name, "63 Hz band LZeq 60 min");
     assert_eq!(b.value, "83.2");
-    assert_eq!(b.limit.as_deref(), Some("limit 80.0 dB"));
+    assert_eq!(b.limit.as_deref(), Some("limit 80.0 dB SPL"));
     assert_eq!(b.state_text.as_deref(), Some("OVER"));
     assert_eq!(b.headroom, None);
     assert_eq!(b.recover.as_deref(), Some("cooling down in 6 min 52 s"));
@@ -234,7 +234,7 @@ fn the_headline_follows_the_worst_window() {
     assert_eq!(
         t.headline,
         "50 Hz band LZeq 60 min 1.5 dB under its limit · on course to go over · next 1 min: \
-         stay ≤ 81.2 dB"
+         stay ≤ 81.2 dB SPL"
     );
     assert_eq!(t.headline_state, TileState::Near);
 }
@@ -246,7 +246,10 @@ fn near_on_course_ok_and_unlimited_bands() {
     let near = &w.bars[4];
     assert_eq!(near.state_text.as_deref(), Some("ON COURSE"));
     // 85.27 − 4 floored to 0.1 dB: a ceiling to stay under.
-    assert_eq!(near.headroom.as_deref(), Some("next 1 min: stay ≤ 81.2 dB"));
+    assert_eq!(
+        near.headroom.as_deref(),
+        Some("next 1 min: stay ≤ 81.2 dB SPL")
+    );
     assert_eq!(near.over_db, Some(-1.5));
     let ok = &w.bars[0];
     assert_eq!(ok.state_text.as_deref(), Some("OK"));
@@ -307,7 +310,7 @@ fn filling_period_change_correction_and_offline() {
     assert_eq!(t.correction.as_deref(), Some("§13 correction +8 dB"));
     assert_eq!(
         w.bars[4].headroom.as_deref(),
-        Some("until full: stay ≤ 81.2 dB")
+        Some("until full: stay ≤ 81.2 dB SPL")
     );
     for w in &mut f.meta.windows[..LF_BAND_COUNT] {
         w.period = BandPeriod::Night;
@@ -648,7 +651,7 @@ fn a_single_band_window_is_one_bar_named_by_its_band() {
     assert_eq!(w.bars.len(), 1);
     assert_eq!(w.bars[0].label, "20");
     assert_eq!(w.bars[0].name, "20 Hz band LZeq 1 min");
-    assert_eq!(w.bars[0].limit.as_deref(), Some("limit 80.0 dB"));
+    assert_eq!(w.bars[0].limit.as_deref(), Some("limit 80.0 dB SPL"));
     assert_eq!(t.worst, Some((0, 0)));
     assert_eq!(t.headline, "20 Hz band LZeq 1 min 8.0 dB under its limit");
     let s = band_leq_scene(&view(&c, &f), &Status::default(), &Theme::default(), SIZE);

@@ -112,7 +112,7 @@ pub struct BandBar {
     pub on_course: bool,
     /// Floored steady level allowed (a ceiling to stay under).
     pub allowed_db: Option<f64>,
-    /// `next 1 min: stay ≤ 41.3 dB`, `until full: stay ≤ 40.2 dB`; none without limit text.
+    /// `next 1 min: stay ≤ 41.3 dB SPL`, `until full: stay ≤ 40.2 dB SPL`; none without limit text.
     pub headroom: Option<String>,
     pub recover_s: Option<f64>,
     /// `cooling down in 6 min 52 s` when it cannot recover within the horizon.
@@ -330,11 +330,11 @@ fn bar(f: &BandLeqFrame, k: usize, chrome: PlotChrome) -> BandBar {
         .filter(|_| is_judged)
         .map(|a| (a * 10.0 + 1e-6).floor() / 10.0);
     let headroom = allowed_db.filter(|_| chrome.limit_text()).map(|a| {
-        let a = format::level(a);
+        let a = format::scaled_level(a, m.scale);
         if until_full {
-            format!("until full: stay ≤ {a} dB")
+            format!("until full: stay ≤ {a}")
         } else {
-            format!("next {horizon}: stay ≤ {a} dB")
+            format!("next {horizon}: stay ≤ {a}")
         }
     });
     let recover_s = finite(f.recover[k]).filter(|_| is_judged);
@@ -358,7 +358,7 @@ fn bar(f: &BandLeqFrame, k: usize, chrome: PlotChrome) -> BandBar {
         limit_db,
         limit: limit
             .filter(|_| chrome.limit_text())
-            .map(|l| format!("limit {} dB", format::level(l))),
+            .map(|l| format!("limit {}", format::scaled_level(l, m.scale))),
         state,
         state_text: state_text(state, on_course, chrome),
         on_course,
