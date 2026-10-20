@@ -30,7 +30,9 @@ use ac2_proto::model::{
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{DbSpl, Dbfs, MeasId, Rev, Seconds, WallNs};
 
-use super::{Analysis, Due, Emitter, Flush, JobCmd, LevelsMeter, Pace, StampArgs, channel_f64};
+use super::{
+    Analysis, Due, Emitter, Flush, JobCmd, JobCtx, LevelsMeter, Pace, StampArgs, channel_f64,
+};
 use crate::calstore::InputCal;
 use crate::config::LocalClock;
 use crate::control::{ControlMsg, Judged};
@@ -221,16 +223,19 @@ impl LeqWindows {
 }
 
 impl Spl {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        meas: MeasId,
-        cfg: SplConfig,
+        ctx: JobCtx<SplConfig>,
         sample_rate: u32,
         idx: usize,
         cal: InputCal,
-        config_rev: Rev,
         leq: LeqSetup,
     ) -> Result<Self, String> {
+        let JobCtx {
+            meas,
+            cfg,
+            config_rev,
+            ..
+        } = ctx;
         let fs = f64::from(sample_rate);
         let mut meter = SplMeter::new(SplMeterConfig {
             fs,

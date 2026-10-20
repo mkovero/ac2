@@ -19,6 +19,7 @@ use crate::primitives::{
     Band, BandPoint, Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
+use crate::view::Style;
 use crate::view::{DistortionUnit, ViewState};
 
 mod reading;
@@ -392,8 +393,10 @@ pub fn distortion_scene(
         &y_fundamental,
         false,
         FUNDAMENTAL_TITLE,
-        view.chrome,
-        theme,
+        Style {
+            chrome: view.chrome,
+            theme,
+        },
     );
     crate::unresolved::draw(
         &mut c,
@@ -428,8 +431,10 @@ pub fn distortion_scene(
         &y_axis,
         true,
         title,
-        view.chrome,
-        theme,
+        Style {
+            chrome: view.chrome,
+            theme,
+        },
     );
     crate::unresolved::draw(&mut c, plot, &xm, &unresolved_harmonics, theme);
     let ym = y_axis.mapping;

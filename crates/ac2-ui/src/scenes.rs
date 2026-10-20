@@ -424,12 +424,16 @@ pub fn ir(
         return ac2_scene::ir::stored_ir_scene(
             d,
             st.curve_colours(theme).trace(d.meta.id),
-            &status,
-            &view,
-            &view.ir.axes,
-            view.chrome,
-            theme,
-            size,
+            &ac2_scene::ir::IrCtx {
+                status: &status,
+                view: &view,
+                axes: &view.ir.axes,
+                style: ac2_scene::view::Style {
+                    chrome: view.chrome,
+                    theme,
+                },
+                size,
+            },
         );
     }
     let m = st.pane_meas(pane)?;
@@ -446,12 +450,16 @@ pub fn ir(
             f,
             meas_color(st, theme, m.id),
             Some(freshness(st, ir)),
-            &status,
-            &view,
-            &view.ir.axes,
-            view.chrome,
-            theme,
-            size,
+            &ac2_scene::ir::IrCtx {
+                status: &status,
+                view: &view,
+                axes: &view.ir.axes,
+                style: ac2_scene::view::Style {
+                    chrome: view.chrome,
+                    theme,
+                },
+                size,
+            },
         ));
     }
     let hidden = st.meas_hidden(m);
@@ -483,8 +491,10 @@ pub fn ir(
         missing_text(&m.config.name, why, &start),
         &status,
         &view.ir.axes,
-        view.chrome,
-        theme,
+        ac2_scene::view::Style {
+            chrome: view.chrome,
+            theme,
+        },
         size,
     ))
 }

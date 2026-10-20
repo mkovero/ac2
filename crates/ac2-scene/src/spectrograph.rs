@@ -36,6 +36,7 @@ use crate::primitives::{
 use crate::spectrum::{SpectrumScene, SpectrumTrace, offset_note, spectrum_scene_in};
 use crate::theme::Theme;
 use crate::time::Freshness;
+use crate::view::Style;
 use crate::view::{FREQ_LIMIT_HI, FREQ_LIMIT_LO, SpectrumMode, ViewState};
 
 /// Time slots a second: one per 33 ms, the period frames are published at over the
@@ -507,8 +508,7 @@ pub fn spectrograph_scene(
         &major(&time_axis),
         true,
         "",
-        chrome,
-        theme,
+        Style { chrome, theme },
     );
 
     let range = sg.map_or(view.spectrum.level, |s| s.range);

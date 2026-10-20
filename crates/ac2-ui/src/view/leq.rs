@@ -5,6 +5,7 @@
 
 use eframe::egui::{self, RichText};
 
+use super::CellCtx;
 use crate::app::App;
 use crate::caret::{Caret, Shown};
 use crate::leq_dialog::{
@@ -80,33 +81,31 @@ fn remove_button(ui: &mut egui::Ui, at: Focus, msg: &mut Option<LeqMsg>) {
 }
 
 /// A typed cell; the selected text (typing replaces it) shows inverted.
-#[allow(clippy::too_many_arguments)]
 fn text_cell(
     ui: &mut egui::Ui,
     text: &str,
-    focused: bool,
     selected: bool,
     empty: &str,
-    at: Focus,
-    msg: &mut Option<LeqMsg>,
-    ch: &Chrome,
+    cell: CellCtx<'_, Focus, LeqMsg>,
 ) {
-    sized_text_cell(ui, 90.0, text, focused, selected, empty, at, msg, ch);
+    sized_text_cell(ui, 90.0, text, selected, empty, cell);
 }
 
 /// [`text_cell`] `width` wide.
-#[allow(clippy::too_many_arguments)]
 fn sized_text_cell(
     ui: &mut egui::Ui,
     width: f32,
     text: &str,
-    focused: bool,
     selected: bool,
     empty: &str,
-    at: Focus,
-    msg: &mut Option<LeqMsg>,
-    ch: &Chrome,
+    cell: CellCtx<'_, Focus, LeqMsg>,
 ) {
+    let CellCtx {
+        focused,
+        at,
+        msg,
+        ch,
+    } = cell;
     let sel = focused && selected && !text.is_empty();
     let shown = if sel {
         text.to_owned()
@@ -291,22 +290,26 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
                 text_cell(
                     ui,
                     &r.limit,
-                    fo(Col::Limit),
                     d.selected,
                     "no limit",
-                    at(Col::Limit),
-                    &mut msg,
-                    ch,
+                    CellCtx {
+                        focused: fo(Col::Limit),
+                        at: at(Col::Limit),
+                        msg: &mut msg,
+                        ch,
+                    },
                 );
                 text_cell(
                     ui,
                     &r.margin,
-                    fo(Col::Margin),
                     d.selected,
                     "0",
-                    at(Col::Margin),
-                    &mut msg,
-                    ch,
+                    CellCtx {
+                        focused: fo(Col::Margin),
+                        at: at(Col::Margin),
+                        msg: &mut msg,
+                        ch,
+                    },
                 );
                 remove_button(ui, at(Col::Length), &mut msg);
                 ui.end_row();
@@ -327,12 +330,14 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
                 text_cell(
                     ui,
                     &d.extra_text(e),
-                    f,
                     d.selected,
                     e.empty(),
-                    at,
-                    &mut msg,
-                    ch,
+                    CellCtx {
+                        focused: f,
+                        at,
+                        msg: &mut msg,
+                        ch,
+                    },
                 );
                 ui.add(egui::Label::new(RichText::new(e.note()).small().color(ch.dim)).wrap());
                 ui.end_row();
@@ -605,16 +610,18 @@ fn band_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: 
                     BandCol::Limit | BandCol::DayOffset | BandCol::Margin => text_cell(
                         ui,
                         &r.cell(col),
-                        fo(col),
                         d.selected,
                         match col {
                             BandCol::Limit => "no limit",
                             BandCol::DayOffset => "day = night",
                             _ => "0",
                         },
-                        at(col),
-                        msg,
-                        ch,
+                        CellCtx {
+                            focused: fo(col),
+                            at: at(col),
+                            msg: &mut *msg,
+                            ch,
+                        },
                     ),
                 });
             }

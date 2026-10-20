@@ -473,21 +473,24 @@ fn capture_works_with_nobody_subscribed() {
 fn spl() -> Spl {
     let (to_control, _) = std::sync::mpsc::channel();
     Spl::new(
-        MeasId(1),
-        SplConfig {
-            cue: None,
-            bands: None,
-            input: 0,
-            weighting: Weighting::Z,
-            time_weighting: TimeWeighting::Fast,
-            peak_weighting: PeakWeighting::Z,
-            leq: LeqConfig::default_windows(),
-            position: None,
+        super::JobCtx {
+            meas: MeasId(1),
+            cfg: SplConfig {
+                cue: None,
+                bands: None,
+                input: 0,
+                weighting: Weighting::Z,
+                time_weighting: TimeWeighting::Fast,
+                peak_weighting: PeakWeighting::Z,
+                leq: LeqConfig::default_windows(),
+                position: None,
+            },
+            config_rev: Rev(1),
+            epoch: ac2_proto::units::SessionEpoch(1),
         },
         FS,
         0,
         InputCal::none(),
-        Rev(1),
         LeqSetup {
             log: Arc::new(Mutex::new(crate::leq_log::LeqLog::default())),
             to_control,

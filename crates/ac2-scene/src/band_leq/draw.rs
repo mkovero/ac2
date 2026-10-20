@@ -2,6 +2,7 @@
 //! window.
 
 use super::*;
+use crate::view::Style;
 
 // ---------------------------------------------------------------------------------------
 // Scene
@@ -181,7 +182,19 @@ pub fn band_leq_scene(
             .map(|(_, i)| i)
             .or(win.worst);
         let section = (top, section_h);
-        let cols = draw_window(&mut c, win, worst, range, section, pad, w, v.chrome, theme);
+        let cols = draw_window(
+            &mut c,
+            win,
+            worst,
+            range,
+            section,
+            pad,
+            w,
+            Style {
+                chrome: v.chrome,
+                theme,
+            },
+        );
         columns.push(cols);
         ranges.push(range);
     }
@@ -204,9 +217,9 @@ fn draw_window(
     (top, height): (f32, f32),
     pad: f32,
     w: f32,
-    chrome: PlotChrome,
-    theme: &Theme,
+    style: Style,
 ) -> Vec<Rect> {
+    let Style { chrome, theme } = style;
     let fs = theme.font_size;
     let sfs = theme.small_font_size.max(fs * 0.85);
     let mut y = top;

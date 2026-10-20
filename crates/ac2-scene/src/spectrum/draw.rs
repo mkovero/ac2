@@ -2,6 +2,7 @@
 //! valid-resolution marker, the legend, the cursor and the tracked peaks.
 
 use super::*;
+use crate::view::Style;
 
 pub fn spectrum_scene(
     traces: &[SpectrumTrace<'_>],
@@ -138,8 +139,10 @@ pub(crate) fn spectrum_scene_in(
         &y_axis,
         true,
         &unit,
-        view.chrome,
-        theme,
+        Style {
+            chrome: view.chrome,
+            theme,
+        },
     );
     c.base.labels.push(label(
         caption.clone(),

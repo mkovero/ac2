@@ -13,7 +13,7 @@ use ac2_proto::frame::{
     FrameData, IrFrame, IrMeta, ProtectionFlags, TfFrame, TfMeta, ValidityMask,
 };
 use ac2_proto::grid::GridId;
-use ac2_proto::model::TransferConfig;
+use ac2_proto::model::{DelayState, TransferConfig};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Hz, MeasId, Rev, Seconds};
 use num_complex::Complex64;
@@ -24,7 +24,9 @@ use std::time::{Duration, Instant};
 use ac2_proto::units::SessionEpoch;
 
 use super::finder::Finder;
-use super::{Analysis, Due, Emitter, Flush, JobCmd, LevelsMeter, Pace, SmoothingChange, StampArgs};
+use super::{
+    Analysis, Due, Emitter, Flush, JobCmd, JobCtx, LevelsMeter, Pace, SmoothingChange, StampArgs,
+};
 use crate::control::ControlMsg;
 use crate::conv;
 use crate::fanout::Block;
@@ -211,23 +213,23 @@ fn held(delay_samples: f64, nudged_samples: f64) -> i64 {
 pub(crate) type StartError = String;
 
 impl Transfer {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        meas: MeasId,
-        cfg: TransferConfig,
+        ctx: JobCtx<TransferConfig>,
         sample_rate: u32,
         ref_idx: usize,
         meas_idx: usize,
-        delay_samples: f64,
-        delay_s: f64,
-        nudged_samples: f64,
-        config_rev: Rev,
-        tracking: bool,
-        awaiting_pick: bool,
-        epoch: SessionEpoch,
+        delay: &DelayState,
         to_control: Sender<ControlMsg>,
         correction: Option<&Correction>,
     ) -> Result<Self, StartError> {
+        let JobCtx {
+            meas,
+            cfg,
+            config_rev,
+            epoch,
+        } = ctx;
+        let (delay_samples, delay_s, nudged_samples) =
+            (delay.applied_samples, delay.applied.0, delay.nudged_samples);
         let fs = f64::from(sample_rate);
         let grid = LogGrid {
             ppo: cfg.grid().ppo,
@@ -252,8 +254,8 @@ impl Transfer {
         }
         .id();
         let mut finder = Finder::new(fs);
-        finder.track(tracking, held(delay_samples, nudged_samples));
-        finder.set_paused(awaiting_pick);
+        finder.track(delay.tracking, held(delay_samples, nudged_samples));
+        finder.set_paused(delay.awaiting_pick);
         let frame = mtw.frame();
         let unresolved =
             crate::sweep::unresolved(cfg.resolution, &mtw.layout().unresolved_ranges(&grid));

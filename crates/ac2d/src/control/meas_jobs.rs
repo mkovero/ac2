@@ -119,18 +119,11 @@ impl Control {
                     last_finding: None,
                 });
                 let a = jobs::transfer::Transfer::new(
-                    m.id,
-                    config.clone(),
+                    job_ctx(m, rt.epoch, config.clone()),
                     fs,
                     idx(config.reference_input)?,
                     idx(config.measurement_input)?,
-                    d.applied_samples,
-                    d.applied.0,
-                    d.nudged_samples,
-                    m.config_rev,
-                    d.tracking,
-                    d.awaiting_pick,
-                    rt.epoch,
+                    &d,
                     self.s.to_self.clone(),
                     self.input_cal(rt, config.measurement_input)
                         .correction
@@ -171,7 +164,7 @@ impl Control {
                 let leq = leq
                     .take()
                     .ok_or_else(|| perr(ErrorCode::Internal, "SPL meter without its log"))?;
-                let a = jobs::spl::Spl::new(m.id, config, fs, input, cal, m.config_rev, leq)
+                let a = jobs::spl::Spl::new(job_ctx(m, rt.epoch, config), fs, input, cal, leq)
                     .map_err(inv)?;
                 (Box::new(a), None)
             }
@@ -184,13 +177,10 @@ impl Control {
                     .as_ref()
                     .map_or_else(|| grids.grid.clone(), |(g, _)| g.clone());
                 let a = jobs::math::MathJob::new(
-                    m.id,
-                    config.clone(),
+                    job_ctx(m, rt.epoch, config.clone()),
                     grids,
                     stored,
-                    rt.epoch,
                     Arc::clone(&self.probes),
-                    m.config_rev,
                 );
                 (Box::new(a), Some(shown))
             }
@@ -456,5 +446,15 @@ impl Control {
         {
             tracing::warn!("tracked delay not applied: {}", e.msg);
         }
+    }
+}
+
+/// The measurement `m` as its job starts with it, in session `epoch`.
+fn job_ctx<C>(m: &Measurement, epoch: SessionEpoch, cfg: C) -> jobs::JobCtx<C> {
+    jobs::JobCtx {
+        meas: m.id,
+        cfg,
+        config_rev: m.config_rev,
+        epoch,
     }
 }

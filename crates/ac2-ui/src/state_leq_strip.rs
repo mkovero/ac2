@@ -92,6 +92,16 @@ fn step_for(raw: f64) -> u32 {
         .unwrap_or(1)
 }
 
+/// The strip a zoom or pan moves: pane `pane`'s, of meter `meas` with `cfg`, `width_px`
+/// wide (0 or less: the width last seen).
+#[derive(Clone, Copy)]
+struct StripTarget<'a> {
+    pane: PaneId,
+    meas: MeasId,
+    cfg: &'a LeqConfig,
+    width_px: f32,
+}
+
 impl AppState {
     /// The SPL meter pane `pane`'s Leq view shows and its windows.
     pub(crate) fn strip_meter(&self, pane: PaneId) -> Option<(MeasId, LeqConfig)> {
@@ -164,24 +174,39 @@ impl AppState {
                 } else {
                     1.0 / ZOOM_FACTOR
                 };
-                self.zoom_strip(pane, meas, &cfg, (from, to), about, f, px, out);
+                self.zoom_strip(
+                    StripTarget {
+                        pane,
+                        meas,
+                        cfg: &cfg,
+                        width_px: px,
+                    },
+                    (from, to),
+                    about,
+                    f,
+                    out,
+                );
             }
             C::PanLeft => self.move_strip(
-                pane,
-                meas,
-                &cfg,
+                StripTarget {
+                    pane,
+                    meas,
+                    cfg: &cfg,
+                    width_px: px,
+                },
                 from - span / 10.0,
                 to - span / 10.0,
-                px,
                 out,
             ),
             C::PanRight => self.move_strip(
-                pane,
-                meas,
-                &cfg,
+                StripTarget {
+                    pane,
+                    meas,
+                    cfg: &cfg,
+                    width_px: px,
+                },
                 from + span / 10.0,
                 to + span / 10.0,
-                px,
                 out,
             ),
             C::ResetView if self.leq_strips.remove(&pane).is_some() => {
@@ -204,7 +229,18 @@ impl AppState {
                 width_px,
             } => {
                 if let Some((meas, cfg)) = self.strip_meter(pane) {
-                    self.zoom_strip(pane, meas, &cfg, shown, about, factor, width_px, out);
+                    self.zoom_strip(
+                        StripTarget {
+                            pane,
+                            meas,
+                            cfg: &cfg,
+                            width_px,
+                        },
+                        shown,
+                        about,
+                        factor,
+                        out,
+                    );
                 }
             }
             StripMsg::Pan {
@@ -213,22 +249,28 @@ impl AppState {
                 width_px,
             } => {
                 if let Some((meas, cfg)) = self.strip_meter(pane) {
-                    self.move_strip(pane, meas, &cfg, shown.0 + by, shown.1 + by, width_px, out);
+                    self.move_strip(
+                        StripTarget {
+                            pane,
+                            meas,
+                            cfg: &cfg,
+                            width_px,
+                        },
+                        shown.0 + by,
+                        shown.1 + by,
+                        out,
+                    );
                 }
             }
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn zoom_strip(
         &mut self,
-        pane: PaneId,
-        meas: MeasId,
-        cfg: &LeqConfig,
+        t: StripTarget<'_>,
         (from, to): (f64, f64),
         about: f64,
         factor: f64,
-        width_px: f32,
         out: &mut Vec<Request>,
     ) {
         if !(factor.is_finite() && factor > 0.0) {
@@ -238,23 +280,19 @@ impl AppState {
         let span = ((to - from) / factor).max(STRIP_MIN_S);
         let k = (about - from) / (to - from).max(1e-9);
         let from = about - k * span;
-        self.move_strip(pane, meas, cfg, from, from + span, width_px, out);
+        self.move_strip(t, from, from + span, out);
     }
 
     /// Pane `pane`'s strip looks at `[from, to]`, kept within the log (a span no wider
     /// than the log or the live span, none of it after the newest second) and at least
     /// [`STRIP_MIN_S`]; then the span is fetched if what is held does not cover it.
-    #[allow(clippy::too_many_arguments)]
-    fn move_strip(
-        &mut self,
-        pane: PaneId,
-        meas: MeasId,
-        cfg: &LeqConfig,
-        from: f64,
-        to: f64,
-        width_px: f32,
-        out: &mut Vec<Request>,
-    ) {
+    fn move_strip(&mut self, t: StripTarget<'_>, from: f64, to: f64, out: &mut Vec<Request>) {
+        let StripTarget {
+            pane,
+            meas,
+            cfg,
+            width_px,
+        } = t;
         if !(from.is_finite() && to.is_finite()) {
             return;
         }

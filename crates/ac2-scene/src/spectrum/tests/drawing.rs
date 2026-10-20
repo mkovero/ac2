@@ -525,13 +525,15 @@ fn multires_spectrum_marks_where_its_windows_change() {
     };
     let t = SpectrumTrace::spectrum(
         &spec,
-        WallNs(0),
-        None,
-        &freqs,
-        &edges,
-        "Main L",
-        Color::WHITE,
-        Freshness::from_age(0.0),
+        LiveMeta {
+            captured: WallNs(0),
+            curve: None,
+            freqs: &freqs,
+            edges: &edges,
+            name: "Main L".into(),
+            color: Color::WHITE,
+            freshness: Freshness::from_age(0.0),
+        },
     );
     assert_eq!(t.caption, "Hann window · multi-res 1/48 oct");
     let view = ViewState {

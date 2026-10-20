@@ -52,12 +52,16 @@ pub fn sweep_ir_scene(
         &frame,
         color,
         None,
-        status,
-        view,
-        &view.distortion.ir,
-        view.chrome,
-        theme,
-        ir_size,
+        &crate::ir::IrCtx {
+            status,
+            view,
+            axes: &view.distortion.ir,
+            style: crate::view::Style {
+                chrome: view.chrome,
+                theme,
+            },
+            size: ir_size,
+        },
     );
     sc.room = table.clone();
     if let Some(t) = &table {

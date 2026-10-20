@@ -1,4 +1,5 @@
 use super::*;
+use crate::view::PlotChrome;
 
 /// A direct sound plus a copy 0.9 as loud 1 ms later, on 1/48 octave from 20 Hz to 20 kHz:
 /// notches at odd multiples of 500 Hz, peaks at multiples of 1 kHz.

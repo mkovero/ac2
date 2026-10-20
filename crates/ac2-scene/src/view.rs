@@ -703,6 +703,13 @@ pub struct SplView {
     pub layout: LeqLayout,
 }
 
+/// How a pane draws: its plot furniture and the colours and sizes it draws in.
+#[derive(Clone, Copy, Debug)]
+pub struct Style<'a> {
+    pub chrome: PlotChrome,
+    pub theme: &'a crate::theme::Theme,
+}
+
 /// How much of a plot's furniture a pane draws around its traces. Fewer lines let a
 /// screenshot or a crowded overlay read as curves alone; the axes stay as they are, so
 /// nothing about the picture's scale changes between the steps.

@@ -188,27 +188,18 @@ pub(crate) fn with_spectrum<R>(
     for ((c, note), drawn) in cols.iter().zip(&notes).zip(&drawn) {
         let name = c.meas.config.name.clone();
         let color = colours.meas(c.meas.id);
+        let meta = ac2_scene::spectrum::LiveMeta {
+            captured: c.tf.frame.stamp.capture_wall_ns,
+            curve: note.as_deref(),
+            freqs: &c.cols.freqs,
+            edges: &c.cols.edges,
+            name,
+            color,
+            freshness: freshness(st, c.tf),
+        };
         let mut t = match &c.tf.frame.data {
-            FrameData::Spec(f) => SpectrumTrace::spectrum(
-                f,
-                c.tf.frame.stamp.capture_wall_ns,
-                note.as_deref(),
-                &c.cols.freqs,
-                &c.cols.edges,
-                name,
-                color,
-                freshness(st, c.tf),
-            ),
-            FrameData::Rta(f) => SpectrumTrace::rta(
-                f,
-                c.tf.frame.stamp.capture_wall_ns,
-                note.as_deref(),
-                &c.cols.freqs,
-                &c.cols.edges,
-                name,
-                color,
-                freshness(st, c.tf),
-            ),
+            FrameData::Spec(f) => SpectrumTrace::spectrum(f, meta),
+            FrameData::Rta(f) => SpectrumTrace::rta(f, meta),
             _ => continue,
         };
         t.drawn = drawn.as_deref();
