@@ -75,6 +75,8 @@ What an agent reads stays in its context for the rest of the session; keep reads
 - Iterate with `cargo nextest run -p <crate> <filter>`; quick tier before commit/push (see *Tests*).
   Long commands run in the background (notified on exit) — no `until`/`sleep` polling loops.
 - UI changes: assert the `ac2-scene` text first; view a snapshot PNG only for the final look.
+- UI-only tests without the daemon (no ac2d/DSP/audio build):
+  `cargo nextest run -p ac2-ui --no-default-features -E 'test(/^ui::/)'`.
 - Delegation: one task per agent with the files and functions named in the brief; the agent
   ends when the task is done. Unrelated follow-ups go to a fresh agent, not via SendMessage.
 
