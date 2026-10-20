@@ -294,7 +294,7 @@ pub async fn spl(
             let name = format!("L{}{}", m.weighting.letter(), m.time_weighting.letter());
             lines.push(format!(
                 "{name} {}   Leq {}   Lmax {}   Lmin {}   L{}peak {}",
-                output::level(m.level, m.scale),
+                format::scaled_level(m.level, m.scale),
                 format::level(m.leq),
                 format::level(m.lmax),
                 format::level(m.lmin),

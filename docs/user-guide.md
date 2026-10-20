@@ -604,7 +604,7 @@ the grey resolution marker and a multi-resolution spectrum's window changes (`17
 (`Transfer: no grid or marks`). Axis ranges and cursor keys keep working in every step. The step
 belongs to the pane (kept when **Tab** changes its measurement, copied by a split) and
 covers the spectrograph, the Leq history strip and the sweep's IR too. On the SPL pane the
-step past full also takes the limit text: OK / NEAR / OVER, "stay ≤ … dB" and "limit … dB"
+step past full also takes the limit text: OK / NEAR / OVER, "stay ≤ … dB SPL" and "limit … dB SPL"
 leave the Leq columns, tiles, meter + Leq and band bars, and the colours, limit lines and
 the band view's allowed-level marks say it; on course, cooling down and not calibrated
 stay. The 10 dB lines across the Leq columns and band bars go with the grid, and traces
@@ -1989,7 +1989,7 @@ reopen and daemon restart (the log is in the autosave and sessions). How it is c
 
 The windows show as **columns**, made to read from the stage: one full-height column per
 window, shortest on the left, each with a bar filling with the window's Leq, the value in
-large digits with its unit and weighting beside it (**dB(A)**, **dB(C)**, **dB(Z)**, or
+large digits with its unit and weighting beside it (**dB SPL (A)**, **dB SPL (C)**, **dB SPL (Z)**, or
 **dBFS (A)** uncalibrated — never left out, since the meter above may read another
 weighting), the window's name at the bottom ("LAeq 30 min", shortened when narrow), and the
 limit as a line. A column turns **amber** within the warn margin (3 dB default) and **red**
@@ -1997,7 +1997,7 @@ over the limit; each going over and recovering also shows as a message.
 
 Each column (and tile) says, large: its **state** (OK, NEAR, OVER, or "over in 47 s" when a
 filling window is on course to go over); the **headroom**, the highest steady level for the
-next minute that keeps the window at or under its limit (**"stay ≤ 101.5 dB"**); or, over and
+next minute that keeps the window at or under its limit (**"stay ≤ 101.5 dB SPL"**); or, over and
 unable to recover within the minute, **"cooling down in 7 min 30 s"** (time back under if the
 level stays at the limit). Smaller: the limit; the window's Leq low on the bar; while
 filling, how much there is; **"offline for 1 min 20 s"** when part of the window has no audio
@@ -2018,7 +2018,7 @@ limit allows over the whole window.
 - Before that, a Leq so far above the limit is **amber, "ON COURSE — over in 12 min"**:
   turning down now still keeps it under.
 - Its bar shows the budget spent; its headroom is the level that uses exactly what is left
-  by the time it is full ("stay ≤ 98.2 dB"; the CLI says "until full: …").
+  by the time it is full ("stay ≤ 98.2 dB SPL"; the CLI says "until full: …").
 
 Example: 70 dB against 60 dB limits on a fresh log is ten times the limit's power: the
 1 min window is red after about 6 s, the 60 min one after about 6 min. The regulations
@@ -2095,7 +2095,7 @@ back only 0.3 dB under the line or after 10 s under it.
 **Position correction:** the difference from your mic to where the limit applies (the
 loudest audience spot, measured with pink noise at both places beforehand), e.g. *4* dB, and
 for LCpeak when different (DIN 15905-5's K2; LAFmax takes the level correction). Every level then includes it and says so
-(*corrected +4.0 dB*, `dB(A) corr.`); limits are judged on it. The per-second log keeps what
+(*corrected +4.0 dB*, `dB SPL (A) corr.`); limits are judged on it. The per-second log keeps what
 the mic measured, with the correction beside each second.
 
 #### Presets

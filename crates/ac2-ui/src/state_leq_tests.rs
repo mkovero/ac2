@@ -363,7 +363,7 @@ fn leq_history_and_alarm_toasts() {
     t.conn(mirror(s.clone()));
     assert_eq!(
         t.last_toast(),
-        "FOH SPL: LAeq 30 min over its limit — 99.4 dB > 99.0 dB"
+        "FOH SPL: LAeq 30 min over its limit — 99.4 dB SPL > 99.0 dB SPL"
     );
     assert!(
         t.st.toasts
@@ -381,7 +381,7 @@ fn leq_history_and_alarm_toasts() {
     t.conn(mirror(s.clone()));
     assert_eq!(
         t.last_toast(),
-        "FOH SPL: LAeq 30 min back within its limit — 98.9 dB"
+        "FOH SPL: LAeq 30 min back within its limit — 98.9 dB SPL"
     );
     // Warning toasts off: the alarms go to the log only, the over one still an error.
     t.st.prefs.warning_toasts = false;
@@ -396,7 +396,7 @@ fn leq_history_and_alarm_toasts() {
     let n = t.st.notices.back().expect("logged");
     assert_eq!(
         n.text,
-        "FOH SPL: LAeq 30 min over its limit — 99.8 dB > 99.0 dB"
+        "FOH SPL: LAeq 30 min over its limit — 99.8 dB SPL > 99.0 dB SPL"
     );
     assert_eq!(n.severity, Severity::Fault);
 }

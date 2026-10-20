@@ -448,10 +448,7 @@ fn row_text(
 /// or without limit text (`chrome`).
 pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame, chrome: PlotChrome) -> BandLeqText {
     let m = &f.meta;
-    let unit = match m.scale {
-        LevelScale::DbSpl => "dB SPL",
-        LevelScale::Dbfs => "dBFS",
-    };
+    let unit = m.scale.unit();
     let keys: Vec<(f64, _)> = (0..m.windows.len())
         .map(|w| {
             let st = m.windows[w];

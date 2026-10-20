@@ -40,7 +40,7 @@ pub(super) fn tile_below(t: &LeqTile, chrome: PlotChrome) -> Vec<String> {
     below
 }
 
-/// One tile: the name and state on top; in the middle, large, what to do (`stay ≤ 101.5 dB`,
+/// One tile: the name and state on top; in the middle, large, what to do (`stay ≤ 101.5 dB SPL`,
 /// or how long it cools down); under it, at a fixed place low in the body and smaller than
 /// the name, the window's value — on stage the instruction is acted on, the value only
 /// explains it, and a meter's number shown above the tiles must stay the big one; below,

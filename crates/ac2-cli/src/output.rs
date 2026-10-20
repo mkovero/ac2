@@ -5,8 +5,8 @@ use std::io::{self, Write};
 use ac2_proto::GridDef;
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
-    ClockRelation, DelayReference, DepthPolicy, LevelScale, MeasKind, Measurement, Mic, PeakMode,
-    Polarity, RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile, SmoothingFraction,
+    ClockRelation, DelayReference, DepthPolicy, MeasKind, Measurement, Mic, PeakMode, Polarity,
+    RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile, SmoothingFraction,
     SmoothingMode, State, TimingState, TimingStatus, TraceData, TraceMeta, TraceSource,
 };
 use ac2_proto::units::WallNs;
@@ -84,21 +84,6 @@ pub fn table(header: &[&str]) -> Table {
 /// `12.50 ms`.
 pub fn ms(seconds: f64) -> String {
     format::ms(seconds, 2)
-}
-
-/// Level with its scale's unit.
-pub fn level(v: f64, scale: LevelScale) -> String {
-    match scale {
-        LevelScale::Dbfs => format::dbfs(v),
-        LevelScale::DbSpl => {
-            let s = format::level(v);
-            if s == format::NO_VALUE {
-                s
-            } else {
-                format!("{s} dB SPL")
-            }
-        }
-    }
 }
 
 /// ` · avg FIFO 16 frames`, as the measurement list in the app says it; nothing when off.

@@ -332,7 +332,7 @@ fn logged(s: &AppState) -> Option<u64> {
 }
 
 /// A preset chosen in the Leq dialog replaces the meter's windows: DIN 15905-5 from the
-/// preset row, Enter, and the meter has only LAeq 30 min ≤ 99 dB. The log carries on (in
+/// preset row, Enter, and the meter has only LAeq 30 min ≤ 99 dB SPL. The log carries on (in
 /// place, not a new log), and the history of the new window is rebuilt from it.
 #[test]
 fn slow_a_preset_replaces_the_windows_from_the_app() -> R {
@@ -365,7 +365,7 @@ fn slow_a_preset_replaces_the_windows_from_the_app() -> R {
     };
     assert_eq!(
         x.preset_text(),
-        "DIN 15905-5: LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB"
+        "DIN 15905-5: LAeq 30 min ≤ 99 dB SPL, LCpeak ≤ 135 dB SPL"
     );
     assert!(x.preset_note().contains("replaces the windows"));
     let shown: Vec<(String, String)> = x
@@ -376,7 +376,7 @@ fn slow_a_preset_replaces_the_windows_from_the_app() -> R {
     assert_eq!(shown, [("LAeq 30 min".to_owned(), "99".to_owned())]);
     d.key("Enter");
     assert_eq!(d.st.overlay, Overlay::None);
-    d.until("only LAeq 30 min ≤ 99 dB", |s| {
+    d.until("only LAeq 30 min ≤ 99 dB SPL", |s| {
         s.measurements().iter().any(|m| match &m.config.kind {
             MeasKind::Spl { config } => config.leq.windows == LeqPreset::Din15905.windows(),
             _ => false,

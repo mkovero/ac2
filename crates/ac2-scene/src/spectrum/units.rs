@@ -91,7 +91,7 @@ pub fn level_unit(scale: LevelScale, q: Quantity, bin: BinWidth) -> String {
 /// one: what goes first is what the pane title or the RTA's own axis also says (`tone`,
 /// the smoothing), the scale always stays.
 pub fn level_unit_forms(scale: LevelScale, q: Quantity, bin: BinWidth) -> Vec<String> {
-    let s = scale_unit(scale);
+    let s = scale.unit();
     let smoothed = match q {
         Quantity::SmoothedTone(f) | Quantity::SmoothedDensity(f) => {
             Some(format!("{} smoothed", format::octave_fraction(f)))
@@ -198,13 +198,6 @@ pub fn tone_unit_help(bin: BinWidth) -> String {
          or total level, and lower with finer bins (3 dB per doubling of the FFT length). \
          Use an RTA for band levels in dB SPL."
     )
-}
-
-pub(crate) fn scale_unit(scale: LevelScale) -> &'static str {
-    match scale {
-        LevelScale::Dbfs => "dBFS",
-        LevelScale::DbSpl => "dB SPL",
-    }
 }
 
 /// `1/3 oct`.

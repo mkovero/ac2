@@ -45,7 +45,7 @@ pub struct LeqTile {
     pub value: String,
     /// `dB SPL` or `dBFS`.
     pub unit: String,
-    /// The unit with the window's own weighting, shown with its value — `dB(A)`, `dBFS (C)` —
+    /// The unit with the window's own weighting, shown with its value — `dB SPL (A)`, `dBFS (C)` —
     /// so a window is never read in the weighting of an SPL meter shown beside it.
     pub weighted_unit: String,
     pub state: TileState,
@@ -53,9 +53,9 @@ pub struct LeqTile {
     pub state_text: Option<String>,
     /// `on course — over in 12 min` while a filling window's Leq so far is above its limit.
     pub course: Option<String>,
-    /// `limit 99.0 dB`.
+    /// `limit 99.0 dB SPL`.
     pub limit: Option<String>,
-    /// `next 1 min: stay ≤ 101.5 dB`; `until full: stay ≤ 98.2 dB` while the window fills
+    /// `next 1 min: stay ≤ 101.5 dB SPL`; `until full: stay ≤ 98.2 dB SPL` while the window fills
     /// for longer than the horizon (the level that, held to the end of the fill, spends what
     /// is left of its budget). None when it cannot recover within the horizon.
     pub headroom: Option<String>,
@@ -141,12 +141,9 @@ pub fn time_to(seconds: f64) -> String {
     }
 }
 
-/// A unit with the window's own weighting, `dB(A)`, `dBFS (C)`, marked when corrected.
+/// A unit with the window's own weighting, `dB SPL (A)`, `dBFS (C)`, marked when corrected.
 fn weighted_unit(scale: LevelScale, w: Weighting, corrected: bool) -> String {
-    let u = match scale {
-        LevelScale::DbSpl => format!("dB({})", w.letter()),
-        LevelScale::Dbfs => format!("dBFS ({})", w.letter()),
-    };
+    let u = scale.weighted_unit(w);
     if corrected {
         format!("{u} {CORRECTED_MARK}")
     } else {
@@ -169,12 +166,12 @@ fn peak_tile(
         kind: TileKind::Peak(q),
         name: q.name().to_owned(),
         value: format::level(p.level),
-        unit: unit_of(scale).to_owned(),
+        unit: scale.unit().to_owned(),
         weighted_unit: weighted_unit(scale, q.weighting(), corrected.is_some()),
         state,
         state_text: state_text(state, false),
         course: None,
-        limit: Some(format!("limit {} dB", format::level(limit))),
+        limit: Some(format!("limit {}", format::spl(limit))),
         headroom: None,
         recover: None,
         filling: None,
@@ -197,13 +194,6 @@ fn peak_tile(
         on_course: false,
         over_in_s: None,
         drawn_db: None,
-    }
-}
-
-fn unit_of(scale: LevelScale) -> &'static str {
-    match scale {
-        LevelScale::DbSpl => "dB SPL",
-        LevelScale::Dbfs => "dBFS",
     }
 }
 
@@ -238,7 +228,7 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
     {
         return Vec::new();
     }
-    let unit = unit_of(f.meta.scale);
+    let unit = f.meta.scale.unit();
     let corrected = f.meta.position.as_ref().map(position_text);
     let horizon = length(f.meta.horizon.0);
     let mut tiles: Vec<LeqTile> = cfg
@@ -263,11 +253,11 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                 .then(|| (f64::from(f.allowed[i]) * 10.0 + 1e-3).floor() / 10.0)
                 .filter(|a| a.is_finite());
             let headroom = (judged && !cannot).then(|| {
-                let a = format::level(allowed_db.unwrap_or(f64::NAN));
+                let a = format::spl(allowed_db.unwrap_or(f64::NAN));
                 if until_full {
-                    format!("until full: stay ≤ {a} dB")
+                    format!("until full: stay ≤ {a}")
                 } else {
-                    format!("next {horizon}: stay ≤ {a} dB")
+                    format!("next {horizon}: stay ≤ {a}")
                 }
             });
             let recover_s = (judged && cannot)
@@ -293,7 +283,7 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                     Some(t) => format!("on course — over in {}", time_to(t)),
                     None => "on course to go over".into(),
                 }),
-                limit: w.limit.map(|l| format!("limit {} dB", format::level(l.0))),
+                limit: w.limit.map(|l| format!("limit {}", format::spl(l.0))),
                 headroom,
                 recover,
                 filling: filling

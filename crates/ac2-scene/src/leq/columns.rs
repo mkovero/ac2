@@ -2,7 +2,7 @@
 //! full-height column per window, shortest window left, each a bar filling bottom → top
 //! with the window's Leq — like a meter that fills — the window's name at the bottom, and
 //! on top, large, what a performer acts on: the state (`OVER`) and how loud the next stretch
-//! may be (`stay ≤ 101.5 dB`). The window's value is a small figure held still low on its
+//! may be (`stay ≤ 101.5 dB SPL`). The window's value is a small figure held still low on its
 //! bar, inked for what is behind it: the value of each window matters less on stage than
 //! whether to back off, a figure riding the bar's top draws the eye as it moves, and the
 //! meter's number above the windows stays the one big number.
@@ -275,9 +275,9 @@ fn shared_level(all: &[&Vec<String>], width: f32, size: f32, floor: f32) -> usiz
 enum Row {
     /// `OVER`, `NEAR`, `ON COURSE — over in 12 min`, `OK`: large.
     State,
-    /// What to do: `stay ≤ 101.5 dB`, or how long until back under: large.
+    /// What to do: `stay ≤ 101.5 dB SPL`, or how long until back under: large.
     Instruction,
-    /// `limit 99.0 dB`: small and dim, the line on the bar says it too; `not calibrated`
+    /// `limit 99.0 dB SPL`: small and dim, the line on the bar says it too; `not calibrated`
     /// when nothing is judged.
     Limit,
 }
@@ -325,7 +325,7 @@ pub(super) fn detail_lines(t: &LeqTile, chrome: PlotChrome) -> [Vec<String>; 3] 
         Some(_) if !words => vec![],
         Some(l) => {
             let l = format::level(l);
-            vec![format!("limit {l} dB"), format!("limit {l}"), l]
+            vec![format!("limit {l} dB SPL"), format!("limit {l}"), l]
         }
         None if t.state == TileState::NotCalibrated => {
             vec!["not calibrated".to_string(), "uncal.".to_string()]
@@ -335,7 +335,7 @@ pub(super) fn detail_lines(t: &LeqTile, chrome: PlotChrome) -> [Vec<String>; 3] 
     let stay = |a: f64| {
         let a = format::level(a);
         vec![
-            format!("stay ≤ {a} dB"),
+            format!("stay ≤ {a} dB SPL"),
             format!("stay ≤ {a}"),
             format!("≤ {a}"),
         ]
@@ -520,7 +520,7 @@ pub(super) fn draw_columns(
         .max()
         .unwrap_or(0)
         .max(5) as f32;
-    // The value carries its unit and weighting on its baseline (`dB(A)`), so the value's
+    // The value carries its unit and weighting on its baseline (`dB SPL (A)`), so the value's
     // size leaves room for the widest unit; the bar it sits on is narrower than the column.
     let unit_w1 = sorted
         .iter()

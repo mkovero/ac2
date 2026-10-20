@@ -226,11 +226,7 @@ pub fn spl_readout(
         label,
         value: format::level(v),
     };
-    let unit = match m.scale {
-        LevelScale::Dbfs => "dBFS",
-        LevelScale::DbSpl => "dB SPL",
-    }
-    .to_string();
+    let unit = m.scale.unit().to_string();
     let corrected = m.position.as_ref().map(crate::leq::position_text);
     SplReadout {
         caption: match &corrected {

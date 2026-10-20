@@ -256,7 +256,7 @@ async fn slow_leq_set_watch_and_export() {
         .filter(|l| !l.starts_with('#') && !l.starts_with("start_utc"))
         .collect();
     assert_eq!(rows.len() as u64, n);
-    // The newest seconds: calibrated, the tone at 94 dB(A).
+    // The newest seconds: calibrated, the tone at 94 dB SPL (A).
     let f: Vec<&str> = rows.last().unwrap().split(',').collect();
     assert_eq!(f[3], "dB SPL");
     assert!((f[4].parse::<f64>().unwrap() - 94.0).abs() < 0.2, "{f:?}");
@@ -408,7 +408,7 @@ async fn slow_leq_set_watch_and_export() {
     assert_eq!(p["name"], "LCpeak", "{p}");
     assert_eq!(p["judgement"], "over", "{p}");
     assert!((p["level"].as_f64().unwrap() - 98.0).abs() < 0.3, "{p}");
-    assert_eq!(p["text"]["unit"], "dB(C) corr.", "{p}");
+    assert_eq!(p["text"]["unit"], "dB SPL (C) corr.", "{p}");
     assert_eq!(p["text"]["held"], "highest of the last 10 s", "{p}");
     let w0 = &last["windows"][0];
     assert!((w0["leq"].as_f64().unwrap() - 97.0).abs() < 0.3, "{w0}");

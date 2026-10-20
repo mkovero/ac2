@@ -67,9 +67,9 @@ pub fn position_text(p: &PositionCorrection) -> String {
 /// corrected number never reads as a measured one (the caption says by how much).
 const CORRECTED_MARK: &str = "corr.";
 
-/// What an alarm says: `FOH SPL: LAeq 30 min over its limit — 101.2 dB > 99.0 dB`,
-/// `FOH SPL: LCpeak back within its limit — 133.0 dB (corrected +2.0 dB)`. `true` for an
-/// over, which the app shows as an error.
+/// What an alarm says: `FOH SPL: LAeq 30 min over its limit — 101.2 dB SPL > 99.0 dB SPL`,
+/// `FOH SPL: LCpeak back within its limit — 133.0 dB SPL (corrected +2.0 dB)`. `true` for
+/// an over, which the app shows as an error.
 pub fn alarm_text(meter: &str, a: &LeqAlarm) -> (bool, String) {
     let what = a.subject.to_string();
     let corrected = match a.position {
@@ -80,16 +80,16 @@ pub fn alarm_text(meter: &str, a: &LeqAlarm) -> (bool, String) {
         LeqAlarmKind::Over => (
             true,
             format!(
-                "{meter}: {what} over its limit — {} dB > {} dB{corrected}",
-                format::level(a.level.0),
-                format::level(a.limit.0)
+                "{meter}: {what} over its limit — {} > {}{corrected}",
+                format::spl(a.level.0),
+                format::spl(a.limit.0)
             ),
         ),
         LeqAlarmKind::Recovered => (
             false,
             format!(
-                "{meter}: {what} back within its limit — {} dB{corrected}",
-                format::level(a.level.0)
+                "{meter}: {what} back within its limit — {}{corrected}",
+                format::spl(a.level.0)
             ),
         ),
     }

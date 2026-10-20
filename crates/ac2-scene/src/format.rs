@@ -434,6 +434,24 @@ pub fn dbfs(v: f64) -> String {
     with_unit(signed(v, 1), " dBFS")
 }
 
+/// A level with its scale's unit: `94.0 dB SPL`, `−20.0 dBFS` (signed, as [`dbfs`]). The
+/// unit has no weighting: a level is shown this way next to its quantity's name (`LAeq`),
+/// which carries it; without the name, [`LevelScale::weighted_unit`] says it. Bare `dB` is
+/// for differences only.
+///
+/// [`LevelScale::weighted_unit`]: ac2_proto::model::LevelScale::weighted_unit
+pub fn scaled_level(v: f64, scale: ac2_proto::model::LevelScale) -> String {
+    match scale {
+        ac2_proto::model::LevelScale::Dbfs => dbfs(v),
+        ac2_proto::model::LevelScale::DbSpl => with_unit(level(v), " dB SPL"),
+    }
+}
+
+/// A sound level in dB SPL, as limits are: `99.0 dB SPL`.
+pub fn spl(v: f64) -> String {
+    scaled_level(v, ac2_proto::model::LevelScale::DbSpl)
+}
+
 fn with_unit(num: String, unit: &str) -> String {
     if num == NO_VALUE { num } else { num + unit }
 }

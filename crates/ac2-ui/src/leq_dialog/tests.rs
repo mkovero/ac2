@@ -58,7 +58,7 @@ fn keyboard_flow() {
     d.cycle(1);
     assert_eq!(
         d.preset_text(),
-        "DIN 15905-5: LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB"
+        "DIN 15905-5: LAeq 30 min ≤ 99 dB SPL, LCpeak ≤ 135 dB SPL"
     );
     assert!(
         d.preset_source()
@@ -70,7 +70,10 @@ fn keyboard_flow() {
     for _ in 0..4 {
         d.cycle(1);
     }
-    assert_eq!(d.preset_text(), "WHO safe listening: LAeq 15 min ≤ 100 dB");
+    assert_eq!(
+        d.preset_text(),
+        "WHO safe listening: LAeq 15 min ≤ 100 dB SPL"
+    );
     assert_eq!(names(&d), ["LAeq 15 min 100"]);
     // ↓ ↓ to the window; Insert adds a longer one after it, without a limit.
     d.move_row(1);
@@ -345,7 +348,7 @@ fn peak_limits_and_the_position_correction() {
     }
     assert_eq!(
         d.preset_text(),
-        "Swiss V-NISSG 100 dB: LAeq 60 min ≤ 100 dB, LAFmax ≤ 125 dB"
+        "Swiss V-NISSG 100 dB: LAeq 60 min ≤ 100 dB SPL, LAFmax ≤ 125 dB SPL"
     );
     assert_eq!(d.extra_text(Extra::LcPeak), "");
     assert_eq!(d.extra_text(Extra::LafMax), "125");
