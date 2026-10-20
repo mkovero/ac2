@@ -92,20 +92,6 @@ impl StoredTrace {
     }
 }
 
-/// Centre frequency of every column of `g`, in column order.
-pub fn frequencies(g: &GridDef) -> Vec<f64> {
-    match g {
-        GridDef::Log { ppo, k_min, k_max } => (*k_min..=*k_max)
-            .map(|k| 1000.0 * 2f64.powf(f64::from(k) / f64::from(*ppo)))
-            .collect(),
-        GridDef::IecBands { centres, .. } => centres.iter().map(|c| c.0).collect(),
-        GridDef::Linear { fs, n } => (0..=*n / 2)
-            .map(|k| f64::from(k) * fs.0 / f64::from(*n))
-            .collect(),
-        GridDef::LogBins { fs, n, ppo } => ac2_proto::BinColumns::new(fs.0, *n, *ppo).centres,
-    }
-}
-
 /// Unwraps degrees along the columns (NaN gaps restart nothing: the next finite value is
 /// unwrapped against the last finite one).
 fn unwrap_deg(p: &[f32]) -> Vec<f64> {
@@ -197,19 +183,6 @@ pub fn resample(from: &[f64], c: &Columns, to: &[f64]) -> Columns {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn log_grid_frequencies() {
-        let f = frequencies(&GridDef::Log {
-            ppo: 3,
-            k_min: -3,
-            k_max: 3,
-        });
-        assert_eq!(f.len(), 7);
-        assert!((f[0] - 500.0).abs() < 1e-9);
-        assert!((f[3] - 1000.0).abs() < 1e-9);
-        assert!((f[6] - 2000.0).abs() < 1e-9);
-    }
 
     #[test]
     fn resample_is_exact_on_shared_points_and_linear_in_log_f() {

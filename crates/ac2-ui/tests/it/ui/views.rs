@@ -494,8 +494,8 @@ fn spl_meter_big_and_stage() {
 /// picture that does not depend on when the frames arrived.
 fn sweep_history(def: &ac2_proto::GridDef) -> ac2_scene::spectrograph::SpectrographHistory {
     use ac2_scene::spectrograph::{SpectrographFrame, SpectrographHistory};
-    let edges = ac2_scene::grid::column_edges(def);
-    let freqs = ac2_scene::grid::column_frequencies(def);
+    let edges = def.edges();
+    let freqs = def.centres();
     let mut h = SpectrographHistory::new(30);
     let t0 = common::SPL_SINCE.0;
     for i in 0..750u64 {

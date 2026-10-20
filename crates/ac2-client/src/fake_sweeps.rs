@@ -5,7 +5,7 @@
 use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{Change, ErrorCode, GridDef, ProtoError, ReplyBody};
-use ac2_traces::columns::{Columns, frequencies};
+use ac2_traces::columns::Columns;
 use ac2_traces::meta;
 
 use super::traces::synthetic;
@@ -185,7 +185,7 @@ impl Shared {
 /// A synthetic sweep result on `grid`: the capture response, H2 at −40 dB rising 12 dB/oct
 /// below 100 Hz, H3 at −50 dB, H4 and H5 below the −80 dB floor, nothing above `f2 / k`.
 fn synthetic_sweep(grid: &GridDef, f2: f64, rate: f64, repeats: u8) -> (Columns, SweepData) {
-    let f = frequencies(grid);
+    let f = grid.centres();
     let mut columns = synthetic(grid);
     columns.coherence = None;
     let curve = |k: f64, level: &dyn Fn(f64) -> f64| DistortionCurve {

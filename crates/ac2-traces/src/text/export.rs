@@ -8,7 +8,7 @@ use ac2_proto::model::{
     TraceSource,
 };
 
-use crate::columns::{StoredTrace, frequencies};
+use crate::columns::StoredTrace;
 
 use super::ac2::kind_header;
 use super::{AC2_CSV_MAGIC, IR_HEADER, IrHeader, TransferIrHeader};
@@ -280,7 +280,7 @@ pub fn export_csv(t: &StoredTrace) -> String {
         }
     }
     out.push('\n');
-    for (i, f) in frequencies(&t.grid).iter().enumerate() {
+    for (i, f) in t.grid.centres().iter().enumerate() {
         let _ = write!(
             out,
             "{f},{}",

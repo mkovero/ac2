@@ -1,5 +1,4 @@
 use super::*;
-use crate::grid::column_edges;
 use crate::primitives::Colormap;
 use crate::view::FreqRange;
 use ac2_proto::GridDef;
@@ -35,7 +34,7 @@ struct Feed {
 impl Feed {
     fn new(g: &GridDef) -> Self {
         Self {
-            edges: column_edges(g),
+            edges: g.edges(),
             grid: g.id(),
             seq: 0,
         }
@@ -76,14 +75,14 @@ fn at(h: &SpectrographHistory, back: usize) -> Option<f32> {
 #[test]
 fn rows_are_even_in_log_frequency_and_keep_narrow_peaks() {
     let g = log_bins();
-    let edges = column_edges(&g);
+    let edges = g.edges();
     let m = RowMap::new(&edges).expect("rows");
     let octaves = (m.hi_hz() / m.lo_hz()).log2();
     assert_eq!(m.rows(), (octaves * ROWS_PER_OCTAVE).ceil() as usize);
     // Up to the top column's upper edge, half a bin above Nyquist.
     assert!(m.lo_hz() > 0.0 && m.hi_hz() < 24_002.0, "{}", m.hi_hz());
     // A tone in one column near 10 kHz keeps its level in its row; elsewhere the floor.
-    let freqs = crate::grid::column_frequencies(&g);
+    let freqs = g.centres();
     let k = crate::grid::nearest_column(&freqs, 10_000.0).expect("column");
     let mut level = vec![-100.0f32; edges.len()];
     level[k] = -20.0;
@@ -107,7 +106,7 @@ fn rows_are_even_in_log_frequency_and_keep_narrow_peaks() {
 #[test]
 fn bands_fill_their_rows_and_invalid_bands_are_gaps() {
     let g = third_octaves();
-    let edges = column_edges(&g);
+    let edges = g.edges();
     let m = RowMap::new(&edges).expect("rows");
     let level: Vec<f32> = (0..edges.len()).map(|i| i as f32).collect();
     let mut validity = vec![ValidityMask::NONE; edges.len()];
@@ -503,7 +502,7 @@ fn the_spectrograph_alone_takes_the_pane() {
 
     // Banners above it, and the calibration of the pane's curve in its caption.
     let g = third_octaves();
-    let (freqs, edges) = (crate::grid::column_frequencies(&g), column_edges(&g));
+    let (freqs, edges) = (g.centres(), g.edges());
     let level = vec![-40.0f32; freqs.len()];
     let rig = "1/3 oct · Z · electrical cal 1 kHz (data sheet 15.0 mV/Pa) ±1 dB · 2 d ago";
     let trace = SpectrumTrace {

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn bars_cover_band_edges() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level: Vec<f32> = vec![-40.0; f.len()];
     let t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
     let s = spectrum_scene(
@@ -34,7 +34,7 @@ fn bars_cover_band_edges() {
 #[test]
 fn line_style_gaps_and_cursor() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let mut level: Vec<f32> = vec![-40.0; f.len()];
     level[15] = f32::NAN;
     let mut validity = vec![ValidityMask::NONE; f.len()];
@@ -66,7 +66,7 @@ fn line_style_gaps_and_cursor() {
 #[test]
 fn a_gliding_curve_is_drawn_between_frames_and_read_at_the_newest() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = vec![-40.0f32; f.len()];
     let drawn = vec![-50.0f32; f.len()];
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
@@ -97,7 +97,7 @@ fn a_gliding_curve_is_drawn_between_frames_and_read_at_the_newest() {
 #[test]
 fn offset_traces_move_and_say_so() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = vec![-40.0f32; f.len()];
     let peak = vec![-30.0f32; f.len()];
     let mut a = rta_trace(&f, &e, &level, LevelScale::Dbfs);
@@ -177,7 +177,7 @@ fn peak_hold_decays_and_restarts() {
 #[test]
 fn peak_overlay_drawn_when_enabled() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = vec![-40.0f32; f.len()];
     let peak = vec![-20.0f32; f.len()];
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
@@ -206,7 +206,7 @@ fn peak_overlay_drawn_when_enabled() {
 #[test]
 fn banners_sit_above_the_plot() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = vec![-40.0f32; f.len()];
     let view = ViewState {
         cursor_hz: Some(1000.0),
@@ -241,7 +241,7 @@ fn banners_sit_above_the_plot() {
 #[test]
 fn legend_names_every_curve_and_fits_small_panes() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = vec![-40.0f32; f.len()];
     let names = ["Main L", "Main R", "Sub array", "Front fill", "Delay tower"];
     let mut traces: Vec<SpectrumTrace<'_>> = names
@@ -413,7 +413,7 @@ fn line_thinning_keeps_peaks() {
 #[test]
 fn fill_is_the_line_over_an_area_to_the_bottom() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let mut level: Vec<f32> = vec![-40.0; f.len()];
     level[15] = f32::NAN;
     let peak = vec![-30.0f32; f.len()];
@@ -507,8 +507,8 @@ fn multires_spectrum_marks_where_its_windows_change() {
         k_min: -7 * 48,
         k_max: 263,
     };
-    let freqs = column_frequencies(&grid);
-    let edges = column_edges(&grid);
+    let freqs = grid.centres();
+    let edges = grid.edges();
     let spec = SpecFrame {
         meas: MeasId(3),
         meta: ac2_proto::frame::SpecMeta {
@@ -645,7 +645,7 @@ fn cursor_stays_where_it_was_put_and_reads_the_bin_holding_it() {
 #[test]
 fn cursor_rows_name_tone_or_density() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level: Vec<f32> = vec![-40.0; f.len()];
     let mut tone = rta_trace(&f, &e, &level, LevelScale::DbSpl);
     tone.quantity = Quantity::Tone;
@@ -684,7 +684,7 @@ fn cursor_rows_name_tone_or_density() {
 #[test]
 fn compared_layers_stack_in_compare_order_and_lighten() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = vec![-40.0f32; f.len()];
     let mut own = rta_trace(&f, &e, &level, LevelScale::Dbfs);
     own.style = SpectrumStyle::Fill;

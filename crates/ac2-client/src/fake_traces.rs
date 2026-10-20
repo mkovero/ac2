@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{Change, ErrorCode, ErrorDetail, GridDef, Patch, ProtoError, ReplyBody};
-use ac2_traces::columns::{Columns, StoredTrace, frequencies};
+use ac2_traces::columns::{Columns, StoredTrace};
 use ac2_traces::meta;
 use ac2_traces::ops::{self, Derived};
 use ac2_traces::text;
@@ -32,7 +32,7 @@ pub(super) struct FakeTraces {
 
 /// Synthetic transfer columns on `grid`.
 pub(super) fn synthetic(grid: &GridDef) -> Columns {
-    let f = frequencies(grid);
+    let f = grid.centres();
     Columns {
         mag_db: f
             .iter()

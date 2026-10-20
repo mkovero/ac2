@@ -297,12 +297,13 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let fund = a + 0.75 * c3 * a.powi(3);
     let h2 = 20.0 * (0.5 * c2 * a * a / fund).log10();
     let h3 = 20.0 * (0.25 * c3 * a.powi(3) / fund).log10();
-    let freqs = ac2_traces::frequencies(&match c.ok(Command::GridGet {
+    let freqs = match c.ok(Command::GridGet {
         grid_id: data.meta.grid_id,
     }) {
         ReplyBody::Grid(g) => g,
         other => panic!("{other:?}"),
-    });
+    }
+    .centres();
     let mut worst = (0.0f64, 0.0f64);
     for (i, f) in freqs.iter().enumerate() {
         if (200.0..=5000.0 / 3.0 / 1.2).contains(f) {
@@ -665,12 +666,13 @@ fn slow_fine_lf_harmonics_report_h2_below_20_hz() {
             panic!("{:?}", data.meta.source);
         };
         let s = data.sweep.expect("sweep data");
-        let freqs = ac2_traces::frequencies(&match c.ok(Command::GridGet {
+        let freqs = match c.ok(Command::GridGet {
             grid_id: data.meta.grid_id,
         }) {
             ReplyBody::Grid(g) => g,
             other => panic!("{other:?}"),
-        });
+        }
+        .centres();
         let h2 = s.harmonics.iter().find(|h| h.order == 2).expect("H2");
         let lowest = (0..freqs.len())
             .find(|&i| h2.curve.valid(i, s.info.floor_margin))

@@ -58,8 +58,11 @@ impl LogGrid {
     }
 
     /// Centre frequency of column `i`.
+    ///
+    /// `exp2`, not `2.powf`: an optimiser may turn one into the other and the two can differ in
+    /// the last bit; `ac2_proto::GridDef::centres` computes the same columns the same way.
     pub fn frequency(&self, i: usize) -> f64 {
-        F_REF_HZ * OCTAVE_BASE2.powf(f64::from(self.k_min + i as i32) / f64::from(self.ppo))
+        F_REF_HZ * (f64::from(self.k_min + i as i32) / f64::from(self.ppo)).exp2()
     }
 
     /// All centre frequencies.
@@ -69,7 +72,7 @@ impl LogGrid {
 
     /// Lower and upper edge of column `i` (geometric midpoints to neighbours).
     pub fn edges(&self, i: usize) -> (f64, f64) {
-        let half = OCTAVE_BASE2.powf(0.5 / f64::from(self.ppo));
+        let half = (0.5 / f64::from(self.ppo)).exp2();
         let f = self.frequency(i);
         (f / half, f * half)
     }

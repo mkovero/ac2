@@ -89,7 +89,7 @@ pub struct SpectrumTrace<'a> {
     pub name: String,
     pub color: Color,
     pub freqs: &'a [f64],
-    /// Band edges per column ([`crate::grid::column_edges`]), for bars.
+    /// Band edges per column ([`GridDef::edges`](ac2_proto::GridDef::edges)), for bars.
     pub edges: &'a [(f64, f64)],
     pub level: &'a [f32],
     /// The levels the curve is drawn at while it glides to `level` ([`crate::curve_ease`]);

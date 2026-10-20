@@ -174,6 +174,53 @@ impl GridDef {
         self.len() == 0
     }
 
+    /// Centre frequency of every column, Hz, in column order.
+    ///
+    /// Log columns use `exp2`, not `2.powf`, like ac2-core's display grid: an optimiser may
+    /// turn one into the other and the two can differ in the last bit.
+    pub fn centres(&self) -> Vec<f64> {
+        match self {
+            Self::Log { ppo, k_min, k_max } => (*k_min..=*k_max)
+                .map(|k| 1000.0 * (f64::from(k) / f64::from(*ppo)).exp2())
+                .collect(),
+            Self::IecBands { centres, .. } => centres.iter().map(|c| c.0).collect(),
+            Self::Linear { fs, n } => (0..=*n / 2)
+                .map(|k| f64::from(k) * fs.0 / f64::from(*n))
+                .collect(),
+            Self::LogBins { fs, n, ppo } => BinColumns::new(fs.0, *n, *ppo).centres,
+        }
+    }
+
+    /// Lower and upper edge of every column, Hz: the band a column covers.
+    ///
+    /// Log grids: geometric midpoints to the neighbours (`f · 2^(±1/(2·ppo))`). IEC bands:
+    /// the IEC 61260-1 band edges `fm · G^(±1/(2b))`, G = 10^(3/10). Linear (FFT) grids: half
+    /// a bin either side, the lowest edge clamped at 0 Hz. Log-bin grids: the edges the bins
+    /// were gathered by.
+    pub fn edges(&self) -> Vec<(f64, f64)> {
+        let around = |h: f64| -> Vec<(f64, f64)> {
+            self.centres().iter().map(|&c| (c / h, c * h)).collect()
+        };
+        match self {
+            Self::Log { ppo, .. } => around((0.5 / f64::from(*ppo)).exp2()),
+            Self::IecBands { fraction, .. } => {
+                around(10f64.powf(0.3).powf(0.5 / f64::from(fraction.b())))
+            }
+            Self::Linear { fs, n } => {
+                let half = fs.0 / f64::from(*n) / 2.0;
+                self.centres()
+                    .iter()
+                    .map(|&c| ((c - half).max(0.0), c + half))
+                    .collect()
+            }
+            Self::LogBins { fs, n, ppo } => BinColumns::new(fs.0, *n, *ppo)
+                .edges
+                .windows(2)
+                .map(|w| (w[0], w[1]))
+                .collect(),
+        }
+    }
+
     /// Canonical byte encoding hashed into the id: a tag byte (1 log, 2 IEC bands,
     /// 3 linear, 4 log bins) followed by the fields little-endian; floats as IEEE-754 f64 bits.
     pub fn canonical_bytes(&self) -> Vec<u8> {
@@ -232,6 +279,54 @@ mod tests {
         };
         assert_eq!(log.len(), 480);
         assert_eq!(log.id(), GridId(0x79ec_3d16_ae0e_94d0), "{}", log.id());
+    }
+
+    #[test]
+    fn log_grid_centres() {
+        let f = GridDef::Log {
+            ppo: 3,
+            k_min: -3,
+            k_max: 3,
+        }
+        .centres();
+        assert_eq!(f.len(), 7);
+        assert!((f[0] - 500.0).abs() < 1e-9);
+        assert!((f[3] - 1000.0).abs() < 1e-9);
+        assert!((f[6] - 2000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn centres_and_edges_have_a_column_each() {
+        let iec = |fraction: BandFraction| GridDef::IecBands {
+            fraction,
+            centres: (-10..=10)
+                .map(|x| Hz(1000.0 * 10f64.powf(0.3 * f64::from(x) / f64::from(fraction.b()))))
+                .collect(),
+        };
+        for g in [
+            GridDef::Log {
+                ppo: 48,
+                k_min: -240,
+                k_max: 239,
+            },
+            GridDef::Linear {
+                fs: Hz(48_000.0),
+                n: 4096,
+            },
+            GridDef::LogBins {
+                fs: Hz(48_000.0),
+                n: 65_536,
+                ppo: 96,
+            },
+            iec(BandFraction::Third),
+            iec(BandFraction::TwentyFourth),
+        ] {
+            let (c, e) = (g.centres(), g.edges());
+            assert_eq!((c.len(), e.len()), (g.len(), g.len()), "{g:?}");
+            for (f, (lo, hi)) in c.iter().zip(&e) {
+                assert!(lo <= f && f < hi, "{g:?} {f} {lo} {hi}");
+            }
+        }
     }
 
     #[test]

@@ -8,13 +8,14 @@ use ac2_proto::model::*;
 use ac2_proto::spl_log::SplLogInfo;
 use ac2_proto::units::*;
 use ac2_proto::{GridDef, ImportProblem};
-use ac2_traces::columns::{Columns, StoredTrace, frequencies};
+use ac2_traces::columns::{Columns, StoredTrace};
 use ac2_traces::math::{self, Combine, Input, MathResult, trace_on_grid};
 use ac2_traces::ops::{OpError, average};
 use ac2_traces::session::{self, SavedDelay, SavedMeasurement, SavedSplLog, Session, SessionError};
 use ac2_traces::text::{export_csv, import};
 
 mod averaging;
+mod core_proto;
 mod import;
 mod load_checks;
 mod mic_curve;
@@ -85,7 +86,7 @@ fn captured(epoch: u32) -> TraceSource {
 /// delay: stored phase = −360·f·(arrival − inserted).
 fn delayed(id: u32, epoch: u32, arrival: f64, inserted: f64, coh: f32) -> StoredTrace {
     let g = grid();
-    let f = frequencies(&g);
+    let f = g.centres();
     StoredTrace {
         meta: meta(id, captured(epoch), inserted, TraceKind::Transfer, &g),
         columns: Columns {
@@ -107,7 +108,7 @@ fn delayed(id: u32, epoch: u32, arrival: f64, inserted: f64, coh: f32) -> Stored
 }
 
 fn col(g: &GridDef, hz: f64) -> usize {
-    frequencies(g)
+    g.centres()
         .iter()
         .position(|f| (f - hz).abs() < 1e-6 * hz)
         .unwrap()

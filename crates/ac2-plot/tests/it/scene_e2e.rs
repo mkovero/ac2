@@ -254,8 +254,8 @@ fn spectrum_golden(name: &str, style: SpectrumStyle) {
         k_min: -7 * 48,
         k_max: 263,
     };
-    let freqs = ac2_scene::grid::column_frequencies(&grid);
-    let edges = ac2_scene::grid::column_edges(&grid);
+    let freqs = grid.centres();
+    let edges = grid.edges();
     // Pink-like noise floor with a sine at 1 kHz.
     let level = freqs
         .iter()

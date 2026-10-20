@@ -38,7 +38,7 @@ fn smaart_tab_export_maps_columns_by_header() {
     assert!(finite.iter().all(|v| (0.6..=1.0).contains(v)), "{finite:?}");
     // Outside the file's 31.25 Hz … 16 kHz span the grid has no values.
     assert!(t.columns.mag_db[col(&t.grid, 1000.0 * 2f64.powf(-5.0))].is_finite());
-    let first = frequencies(&t.grid)[0];
+    let first = t.grid.centres()[0];
     assert!(first >= 31.25 - 1e-9, "{first}");
 }
 
@@ -86,7 +86,7 @@ fn target_curve_is_magnitude_only_and_interpolates_in_log_f() {
     .unwrap();
     assert_eq!(t.kind, TraceKind::Target);
     assert!(t.columns.phase_deg.is_none() && t.columns.coherence.is_none());
-    let f = frequencies(&t.grid);
+    let f = t.grid.centres();
     let at = |hz: f64| {
         let i = f
             .iter()
@@ -161,7 +161,7 @@ fn linear_grid_spectrum_round_trips_with_dc_bin() {
         fs: Hz(48_000.0),
         n: 64,
     };
-    let n = frequencies(&g).len();
+    let n = g.centres().len();
     let t = StoredTrace {
         meta: meta(
             3,

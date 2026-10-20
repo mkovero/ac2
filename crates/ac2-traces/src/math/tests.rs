@@ -74,7 +74,7 @@ fn check(r: &MathResult, freqs: &[f64], want: impl Fn(f64) -> Complex64) {
 #[test]
 fn ratio_of_two_filters() {
     let g = grid();
-    let f = frequencies(&g);
+    let f = g.centres();
     let (ta, tb) = (0.0123, 0.0103);
     let a = tf(&f, lowpass(1000.0), 0.9);
     let b = tf(&f, highpass(200.0), 0.6);
@@ -101,7 +101,7 @@ fn ratio_of_two_filters() {
 #[test]
 fn ratio_across_time_bases_is_marked() {
     let g = grid();
-    let f = frequencies(&g);
+    let f = g.centres();
     let a = tf(&f, lowpass(1000.0), 0.9);
     let b = tf(&f, highpass(200.0), 0.9);
     let r = transfer(
@@ -120,7 +120,7 @@ fn ratio_across_time_bases_is_marked() {
 #[test]
 fn product_is_the_cascade() {
     let g = grid();
-    let f = frequencies(&g);
+    let f = g.centres();
     let a = tf(&f, lowpass(1000.0), 0.9);
     let b = tf(&f, highpass(200.0), 0.9);
     let r = transfer(
@@ -141,7 +141,7 @@ fn product_is_the_cascade() {
 #[test]
 fn sum_of_two_delayed_copies_is_a_comb() {
     let g = grid();
-    let f = frequencies(&g);
+    let f = g.centres();
     let tau = 0.000_37;
     let flat = tf(&f, |_| Complex64::new(1.0, 0.0), 0.95);
     let ins = [input(&flat, 0.010, EPOCH), input(&flat, 0.010 + tau, EPOCH)];
@@ -200,7 +200,7 @@ fn sum_of_two_delayed_copies_is_a_comb() {
 #[test]
 fn sum_without_a_shared_time_base_is_refused() {
     let g = grid();
-    let f = frequencies(&g);
+    let f = g.centres();
     let a = tf(&f, lowpass(1000.0), 0.9);
     let mut target = tf(&f, lowpass(500.0), 0.9);
     target.phase_deg = None;
@@ -254,7 +254,7 @@ fn sum_without_a_shared_time_base_is_refused() {
 #[test]
 fn averages_match_the_spatial_average() {
     let g = grid();
-    let f = frequencies(&g);
+    let f = g.centres();
     let up = tf(&f, |_| Complex64::new(10f64.powf(3.0 / 20.0), 0.0), 0.9);
     let down = tf(&f, |_| Complex64::new(10f64.powf(-3.0 / 20.0), 0.0), 0.9);
     let r = transfer(
@@ -315,7 +315,7 @@ fn averages_match_the_spatial_average() {
 #[test]
 fn gaps_stay_gaps() {
     let g = grid();
-    let f = frequencies(&g);
+    let f = g.centres();
     let a = tf(&f, lowpass(1000.0), 0.9);
     let mut b = tf(&f, lowpass(2000.0), 0.9);
     b.mag_db[5] = f32::NAN;
@@ -417,7 +417,7 @@ fn a_transfer_function_through_an_imported_ir_is_the_analytic_product() {
     .unwrap();
     assert_eq!(imp.delay.unwrap().0, 0.0);
     let g = imp.grid.clone();
-    let f = frequencies(&g);
+    let f = g.centres();
     let live = tf(&f, lowpass(2000.0), 0.95);
     let r = transfer(
         Combine::Binary(MathOp::Multiply),
@@ -488,12 +488,12 @@ fn a_spectrum_through_a_filter_adds_its_gain_per_bin() {
         k_min: -240,
         k_max: 239,
     };
-    let h = level_trace(g.clone(), tf(&frequencies(&g), lowpass(1000.0), 1.0));
+    let h = level_trace(g.clone(), tf(&g.centres(), lowpass(1000.0), 1.0));
     let bins = GridDef::Linear {
         fs: ac2_proto::units::Hz(48_000.0),
         n: 8192,
     };
-    let bf = frequencies(&bins);
+    let bf = bins.centres();
     let gain = filter_gain_on_grid(&h, &bins, &bf);
     // Bin 0 (DC) and bins below the filter's first column have no gain.
     assert!(gain[0].is_nan() && gain[1].is_nan());
@@ -534,7 +534,7 @@ fn an_rta_band_through_a_filter_takes_the_band_mean_of_its_power() {
         k_max: 479,
     };
     let fc = 1000.0;
-    let h = level_trace(g.clone(), tf(&frequencies(&g), lowpass(fc), 1.0));
+    let h = level_trace(g.clone(), tf(&g.centres(), lowpass(fc), 1.0));
     let centres = ac2_core::grid::iec_band_centres(3, 40.0, 20_000.0);
     let bands = GridDef::IecBands {
         fraction: BandFraction::Third,

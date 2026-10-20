@@ -165,7 +165,7 @@ pub(super) fn sweep_data(id: u32) -> (Arc<TraceData>, Arc<GridDef>) {
         k_min: -60,
         k_max: 50,
     };
-    let n = ac2_scene::grid::column_frequencies(&grid).len();
+    let n = grid.centres().len();
     let curve = |l: f32| DistortionCurve {
         level_db: vec![l; n],
         floor_db: vec![-80.0; n],

@@ -23,7 +23,7 @@ pub mod session;
 pub mod smooth;
 pub mod text;
 
-pub use columns::{Columns, StoredTrace, frequencies, resample};
+pub use columns::{Columns, StoredTrace, resample};
 pub use ops::{OpError, average, capture_columns};
 pub use session::SessionError;
 pub use text::{ImportError, Imported, export_csv, import};

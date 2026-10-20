@@ -41,7 +41,7 @@ fn view(chrome: PlotChrome) -> ViewState {
 #[test]
 fn tracked_peaks_are_listed_under_the_cursor_and_marked() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = levels(&f);
     let peaks = tracked_rta(&f, &level);
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
@@ -90,7 +90,7 @@ fn tracked_peaks_are_listed_under_the_cursor_and_marked() {
 #[test]
 fn plot_chrome_off_leaves_only_the_marks() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = levels(&f);
     let peaks = tracked_rta(&f, &level);
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
@@ -126,7 +126,7 @@ fn plot_chrome_off_leaves_only_the_marks() {
 #[test]
 fn an_untracked_curve_lists_nothing() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = levels(&f);
     let t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
     let v = view(PlotChrome::Full);
@@ -138,7 +138,7 @@ fn an_untracked_curve_lists_nothing() {
 #[test]
 fn an_offset_curve_lists_its_displayed_levels_under_its_name() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = levels(&f);
     let peaks = tracked_rta(&f, &level);
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);

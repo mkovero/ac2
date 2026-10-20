@@ -34,7 +34,7 @@ use ac2_proto::model::{
 };
 use ac2_proto::topic::Topic;
 use ac2_proto::units::{MeasId, Rev, Seconds, SessionEpoch};
-use ac2_traces::columns::{Columns, frequencies};
+use ac2_traces::columns::Columns;
 use ac2_traces::math::{self, Combine, Input};
 use ac2_traces::ops::capture_columns;
 
@@ -129,7 +129,7 @@ impl MathJob {
         let seen_delay = stored.iter().map(|s| s.as_ref().map(|h| h.delay)).collect();
         Self {
             meas,
-            freqs: frequencies(&grids.grid),
+            freqs: grids.grid.centres(),
             grid_id: grids.grid.id(),
             display_id: grids.display.as_ref().map(|(g, _)| g.id()),
             grids,

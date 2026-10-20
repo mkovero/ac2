@@ -13,7 +13,7 @@ use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, WallNs};
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
-use ac2_scene::grid::{GridColumns, column_frequencies, columns};
+use ac2_scene::grid::{GridColumns, columns};
 use ac2_scene::ir::{IrScene, ir_scene};
 use ac2_scene::math::MathStatus;
 use ac2_scene::primitives::Viewport;
@@ -559,9 +559,7 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
             return SweepPane::Ir(Box::new(s));
         }
     }
-    let freqs = shown
-        .map(|(_, g)| column_frequencies(g))
-        .unwrap_or_default();
+    let freqs = shown.map(|(_, g)| g.centres()).unwrap_or_default();
     let colours = st.curve_colours(theme);
     let view = shown.map(|(d, _)| SweepView {
         data: d,
@@ -569,7 +567,7 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
         color: colours.trace(d.meta.id),
     });
     let others = st.compared_sweeps(pane);
-    let other_freqs: Vec<Vec<f64>> = others.iter().map(|(_, g)| column_frequencies(g)).collect();
+    let other_freqs: Vec<Vec<f64>> = others.iter().map(|(_, g)| g.centres()).collect();
     let compared: Vec<SweepView<'_>> = others
         .iter()
         .zip(&other_freqs)

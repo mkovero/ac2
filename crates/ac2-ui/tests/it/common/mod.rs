@@ -55,7 +55,7 @@ fn wrap(d: f64) -> f64 {
 }
 
 fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
-    let freqs = ac2_scene::grid::column_frequencies(&TF_GRID);
+    let freqs = TF_GRID.centres();
     let mag = freqs
         .iter()
         .map(|f| {
@@ -202,7 +202,7 @@ fn ir_frame(meas: u32) -> IrFrame {
 }
 
 fn spec_frame(meas: u32) -> SpecFrame {
-    let freqs = ac2_scene::grid::column_frequencies(&SPEC_GRID);
+    let freqs = SPEC_GRID.centres();
     let level = freqs
         .iter()
         .map(|f| {
@@ -623,7 +623,7 @@ impl Rig {
             s.commit(Change::Measurement(Patch::Set(m)));
         }
         let mut f = spec_frame(7);
-        let freqs = ac2_scene::grid::column_frequencies(&SPEC_GRID);
+        let freqs = SPEC_GRID.centres();
         f.level = freqs
             .iter()
             .map(|x| (2.0 * (x.max(20.0) / 1000.0).log2()).clamp(-6.0, 6.0) as f32)

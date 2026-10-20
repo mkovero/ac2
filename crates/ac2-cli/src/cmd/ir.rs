@@ -417,7 +417,7 @@ async fn foreground(
     let data = c.call(Command::TraceGet { trace }).await?;
     let data = expect_body!("trace.get", data, ReplyBody::TraceData(d) => d)?;
     let grid = c.grid(data.meta.grid_id).await?;
-    let freqs = ac2_scene::grid::column_frequencies(&grid);
+    let freqs = grid.centres();
     print_summary(out, &data, &freqs);
     Ok(())
 }
@@ -763,7 +763,7 @@ mod tests {
         let ReplyBody::TraceData(data) = data else {
             return Err("trace data".into());
         };
-        let freqs = ac2_scene::grid::column_frequencies(&*c.grid(data.meta.grid_id).await?);
+        let freqs = c.grid(data.meta.grid_id).await?.centres();
         // The rig's H3 is c3·A²/4 re the fundamental (A = 0.1 at −20 dBFS, the fundamental
         // itself gaining 3/4·c3·A²): −50.08 dB at every frequency. Its median over the band
         // where H3 lies inside the sweep (3·f ≤ 5 kHz) reads it without the noise's bias.

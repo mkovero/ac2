@@ -12,7 +12,6 @@ use ac2_proto::model::{LevelScale, Measurement};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_scene::axis::Range;
 use ac2_scene::format;
-use ac2_scene::grid::column_frequencies;
 use ac2_scene::view::{ViewState, level};
 
 use super::{AppState, PaneId, PaneKind};
@@ -479,7 +478,7 @@ impl AppState {
             let d = self.data.as_ref()?;
             let f = d.latest.get(&Topic::Data { meas: m.id, stream })?;
             let g = d.grids.get(&f.frame.stamp.grid_id?)?;
-            Some((f.frame.clone(), column_frequencies(g)))
+            Some((f.frame.clone(), g.centres()))
         };
         let shown = self.pane_meas(pane);
         match self.layout.kind(pane) {
@@ -504,7 +503,7 @@ impl AppState {
                     if self.on_pane(kind, &t.meta, shown)
                         || self.trace_compared_on(kind, &t.meta, shown)
                     {
-                        add(&column_frequencies(g), &t.mag_db, t.meta.edit.offset.0);
+                        add(&g.centres(), &t.mag_db, t.meta.edit.offset.0);
                     }
                 }
             }
@@ -517,7 +516,7 @@ impl AppState {
                     let Some(s) = &t.sweep else {
                         continue;
                     };
-                    let freqs = column_frequencies(g);
+                    let freqs = g.centres();
                     for c in s.harmonics.iter().map(|h| &h.curve).chain([&s.thd]) {
                         add(&freqs, &c.level_db, 0.0);
                         add(&freqs, &c.floor_db, 0.0);

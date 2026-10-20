@@ -86,7 +86,7 @@ pub struct TfTrace<'a> {
     pub key: TraceKey,
     pub name: String,
     pub color: Color,
-    /// Column frequencies (from the frame's grid, [`crate::grid::column_frequencies`]).
+    /// Column frequencies (from the frame's grid, [`GridDef::centres`](ac2_proto::GridDef::centres)).
     pub freqs: &'a [f64],
     pub mag_db: &'a [f32],
     pub phase_deg: Option<&'a [f32]>,

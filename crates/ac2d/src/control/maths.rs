@@ -15,7 +15,6 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{MeasId, SessionEpoch, TraceId};
 use ac2_proto::{ErrorCode, ProtoError};
-use ac2_traces::columns::frequencies;
 use ac2_traces::math::trace_on_grid;
 
 use super::{Control, static_grid};
@@ -351,7 +350,7 @@ impl Control {
             }
         }
         let (grid, _) = grid.ok_or_else(|| invalid("a math channel needs operands"))?;
-        let freqs = frequencies(&grid);
+        let freqs = grid.centres();
         let mut stored = Vec::with_capacity(operands.len());
         for o in &operands {
             let Operand::Trace { trace } = o else {

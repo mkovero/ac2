@@ -150,7 +150,7 @@ pub struct SpectrographFrame<'a> {
     /// not by when the link delivered them.
     pub at: WallNs,
     pub grid: GridId,
-    /// Band edges of the grid's columns ([`crate::grid::column_edges`]).
+    /// Band edges of the grid's columns ([`GridDef::edges`](ac2_proto::GridDef::edges)).
     pub edges: &'a [(f64, f64)],
     pub scale: LevelScale,
     /// A narrowband spectrum's tone level or density; `None` for RTA bands.

@@ -10,7 +10,7 @@ use ac2_proto::GridDef;
 use ac2_proto::frame::MAX_N;
 use ac2_proto::model::{DistortionCurve, SweepData, SweepInfo, TraceIr, TransferIr};
 
-use crate::columns::{Columns, StoredTrace, frequencies};
+use crate::columns::{Columns, StoredTrace};
 
 /// Largest magnitude a column may hold, ±dB. Within it every power (10^(L/10)) and
 /// amplitude a trace's math forms stays finite in f64, summed over a whole grid of
@@ -51,7 +51,7 @@ pub fn grid(g: &GridDef) -> Result<(), String> {
     if !(1..=max).contains(&columns) {
         return Err(format!("grid of {columns} columns (1 … {max})"));
     }
-    let f = frequencies(g);
+    let f = g.centres();
     if f.is_empty() {
         return Err("grid without columns".into());
     }

@@ -110,7 +110,7 @@ pub(super) fn binary(
     b: &StoredTrace,
     op: MathOp,
 ) -> Result<MathResult, math::MathError> {
-    let f = frequencies(&a.grid);
+    let f = a.grid.centres();
     let (ca, cb) = (trace_on_grid(a, &a.grid, &f), trace_on_grid(b, &a.grid, &f));
     let input = |t: &StoredTrace, c| Input {
         columns: c,
@@ -180,7 +180,7 @@ fn a_over_b_of_stored_traces() {
 
 /// A spectrum or RTA trace at -20 dB on `g`.
 pub(super) fn level_trace(id: u32, kind: TraceKind, g: GridDef) -> StoredTrace {
-    let n = frequencies(&g).len();
+    let n = g.centres().len();
     StoredTrace {
         meta: meta(id, captured(2), 0.0, kind, &g),
         columns: Columns {
@@ -283,7 +283,7 @@ fn spectrum_and_rta_averages_across_grids_are_refused() {
 fn time_base_average_of_plus_minus_three_db() {
     use ac2_core::average::DelayReference as CoreRef;
     let g = grid();
-    let f = frequencies(&g);
+    let f = g.centres();
     let flat = |db: f32| Columns {
         mag_db: vec![db; f.len()],
         phase_deg: Some(vec![0.0; f.len()]),

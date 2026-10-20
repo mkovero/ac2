@@ -11,7 +11,7 @@ use ac2_core::mic_curve::MicCurve;
 use ac2_proto::GridDef;
 use ac2_proto::model::{BandFraction, DistortionCurve, MicState, SweepData, TraceKind, TraceMeta};
 
-use crate::columns::{StoredTrace, frequencies};
+use crate::columns::StoredTrace;
 
 /// Why a mic curve cannot be applied to (or removed from) a trace.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,7 +102,7 @@ pub fn column_db(grid: &GridDef, k: &Correction) -> Vec<f64> {
                 k.band_db(lo, hi)
             })
             .collect(),
-        _ => frequencies(grid).iter().map(|f| k.db(*f)).collect(),
+        _ => grid.centres().iter().map(|f| k.db(*f)).collect(),
     }
 }
 
@@ -119,7 +119,7 @@ pub fn correct(grid: &GridDef, mag_db: &mut [f32], k: &Correction) {
 /// same fundamental) shifts the same way. THD is re-summed from the corrected orders as
 /// the analysis sums them: the power sum of the orders measured in that column.
 pub fn correct_sweep(grid: &GridDef, s: &SweepData, k: &Correction) -> SweepData {
-    let f = frequencies(grid);
+    let f = grid.centres();
     let mut out = s.clone();
     for h in &mut out.harmonics {
         let n = f64::from(h.order);

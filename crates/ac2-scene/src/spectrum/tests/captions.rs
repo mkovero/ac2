@@ -221,7 +221,7 @@ fn unit_labels() {
 #[test]
 fn mixed_units_are_flagged() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = vec![-40.0f32; f.len()];
     let a = rta_trace(&f, &e, &level, LevelScale::Dbfs);
     let b = rta_trace(&f, &e, &level, LevelScale::DbSpl);

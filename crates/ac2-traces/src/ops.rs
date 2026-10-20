@@ -23,7 +23,7 @@ use ac2_proto::model::{AverageMethod, DelayReference, TraceKind};
 use ac2_proto::units::{Seconds, SessionEpoch, TraceId};
 use num_complex::Complex64;
 
-use crate::columns::{Columns, StoredTrace, frequencies, resample};
+use crate::columns::{Columns, StoredTrace, resample};
 
 /// Why an operation was refused.
 #[derive(Debug, Clone, PartialEq)]
@@ -178,7 +178,7 @@ fn on_grid(t: &StoredTrace, grid: &GridDef, freqs: &[f64]) -> Columns {
     if t.grid.id() == grid.id() {
         t.columns.clone()
     } else {
-        resample(&frequencies(&t.grid), &t.columns, freqs)
+        resample(&t.grid.centres(), &t.columns, freqs)
     }
 }
 
@@ -222,7 +222,7 @@ pub fn average(
         return Err(OpError::MixedKinds);
     }
     let grid = traces[0].grid.clone();
-    let freqs = frequencies(&grid);
+    let freqs = grid.centres();
     match kind {
         TraceKind::Target => Err(OpError::KindNotSupported(kind)),
         TraceKind::Spectrum { .. } | TraceKind::Rta { .. } => {

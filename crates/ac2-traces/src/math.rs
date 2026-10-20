@@ -58,7 +58,7 @@ use ac2_proto::model::{AverageMethod, MathOp, PhaseBasis};
 use ac2_proto::units::{Seconds, SessionEpoch};
 use num_complex::Complex64;
 
-use crate::columns::{Columns, StoredTrace, frequencies, resample};
+use crate::columns::{Columns, StoredTrace, resample};
 use crate::ops::{OpError, average_on_time_base};
 
 /// How the operands are combined.
@@ -170,7 +170,7 @@ pub fn trace_on_grid(t: &StoredTrace, grid: &GridDef, freqs: &[f64]) -> Columns 
     if t.grid.id() == grid.id() {
         t.columns
     } else {
-        resample(&frequencies(&t.grid), &t.columns, freqs)
+        resample(&t.grid.centres(), &t.columns, freqs)
     }
 }
 
@@ -181,7 +181,7 @@ pub fn trace_on_grid(t: &StoredTrace, grid: &GridDef, freqs: &[f64]) -> Columns 
 /// band reaching past its first or last column, a bin outside it).
 pub fn filter_gain_on_grid(t: &StoredTrace, grid: &GridDef, freqs: &[f64]) -> Vec<f32> {
     let t = crate::mic::bake(t);
-    let from = frequencies(&t.grid);
+    let from = t.grid.centres();
     let point = resample(&from, &t.columns, freqs).mag_db;
     let GridDef::IecBands { fraction, .. } = grid else {
         return point;

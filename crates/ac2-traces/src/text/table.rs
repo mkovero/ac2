@@ -5,7 +5,7 @@ use ac2_proto::GridDef;
 use ac2_proto::ImportProblem;
 use ac2_proto::frame::MAX_N;
 
-use crate::columns::{Columns, frequencies, resample, wrap_deg};
+use crate::columns::{Columns, resample, wrap_deg};
 
 use super::{ImportError, fail};
 
@@ -334,7 +334,7 @@ pub(super) fn on_import_grid(
     known: Option<GridDef>,
 ) -> Result<(GridDef, Columns), ImportError> {
     if let Some(g) = known {
-        let gf = frequencies(&g);
+        let gf = g.centres();
         let same = gf.len() == raw.freqs.len()
             && gf
                 .iter()
@@ -345,6 +345,6 @@ pub(super) fn on_import_grid(
         }
     }
     let g = import_grid(&raw.freqs)?;
-    let c = resample(&raw.freqs, &raw.columns, &frequencies(&g));
+    let c = resample(&raw.freqs, &raw.columns, &g.centres());
     Ok((g, c))
 }

@@ -66,7 +66,7 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
             && s.kind_sweep().is_some()
     })?;
     let (data, grid) = d.st.kind_sweep().ok_or("no sweep")?;
-    let freqs = ac2_scene::grid::column_frequencies(grid);
+    let freqs = grid.centres();
     let s = data.sweep.as_ref().ok_or("no sweep data")?;
     let m = s.info.floor_margin.0;
     for (order, want) in [(2u8, -40.0), (3, -50.0)] {

@@ -4,7 +4,7 @@ use super::*;
 
 pub(super) fn sweep_trace(id: u32) -> StoredTrace {
     let g = grid();
-    let n = frequencies(&g).len();
+    let n = g.centres().len();
     let source = TraceSource::Sweep {
         meas: ac2_proto::units::MeasId(1),
         meas_name: "Sweep".into(),

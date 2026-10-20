@@ -189,7 +189,7 @@ pub fn trace_meta(t: &TraceMeta) -> String {
 
 /// A trace's columns.
 pub fn trace_columns(d: &TraceData, g: &GridDef) -> String {
-    let f = ac2_scene::grid::column_frequencies(g);
+    let f = g.centres();
     let mut head = vec!["freq", "mag"];
     if d.phase_deg.is_some() {
         head.push("phase");
