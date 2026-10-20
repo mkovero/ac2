@@ -315,7 +315,7 @@ jobs:
 
       - name: Upload virtual-audio logs
         if: runner.os != 'Linux' && !cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: virtual-audio-logs-${{ runner.os }}
           path: virtual-audio-logs/
@@ -328,7 +328,7 @@ jobs:
 
       - name: Upload golden-image diffs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: golden-images-${{ matrix.os }}
           # ac2-testkit's comparisons, and egui_kittest's UI snapshots beside their goldens.
@@ -392,7 +392,7 @@ jobs:
 
       - name: Upload crosscheck reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: crosscheck-host
           path: |
