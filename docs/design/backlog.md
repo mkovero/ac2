@@ -141,3 +141,6 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   summing axis. Left: heights through the reference axis, 15–30° off axis, rear-panel
   settings, listening position;
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
+- **Per-device latency offset** (audit 2026-10-20 F4e): a user-entered latency per device for
+  a two-device rig without a loopback reference. Parked: the loopback measures that latency,
+  and an external reference on the input device needs none; the PA rigs here use loopback.
