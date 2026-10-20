@@ -191,7 +191,8 @@ ac2 meas eq on   "Main L" "capture 2" [--off]               # predict for this c
 ac2 meas eq mark "Main L" [--clear]                          # "in the console"
 ac2 meas eq copy "Main L" --to "Main R"
 ac2 meas eq show "Main L"                                    # sections, basis per curve
-ac2 meas eq export "Main L" eq1.txt ;  ac2 meas eq import "Main L" eq1.txt [--format rew]
+ac2 meas eq export "Main L" eq1.txt [--format ac2|apo [--skip-unsupported]]
+ac2 meas eq import "Main L" eq1.txt [--format ac2|apo]   # default: by content
 ```
 `--set` picks among several sets (default: the only one, else refused naming them).
 
@@ -205,10 +206,48 @@ high_pass f=80 alignment=linkwitz_riley order=4
 low_shelf f=120 gain=3.0 s=1.0 f_at=midpoint   off
 ```
 Keys are the serde field names; unknown keys and shapes are refused with the line number.
-**REW import** (cheap): its filter-settings text (`Filter  1: ON  PK  Fc 1250 Hz  Gain -4.0 dB
-Q 2.00` under an `Equaliser:` header) maps `PK LS HS LP HP LPQ HPQ NO AP` for the `Generic`
-equaliser; another equaliser or an unmapped type refuses with the line (its per-equaliser Q
-conventions are not guessed). Export writes the ac2 text only.
+The ac2 text carries the full model; the APO format below is for exchange.
+
+**Equalizer APO / REW filter text** (`--format apo`, `ac2_traces::text::apo`): the
+`Filter: ON PK Fc 1250 Hz Gain -4.0 dB Q 2.00` line grammar Equalizer APO's `config.txt` reads
+and REW's "export filter settings as text" writes; one reader for both. Spellings marked † are
+to be verified against Equalizer APO's documentation and a REW export before the parser is
+written (the test plan writes sample files from them).
+
+| read | maps to |
+|---|---|
+| `Filter:` or `Filter N:` (N ignored), then `ON` / `OFF` | a section, `enabled` = ON |
+| `PK Fc Gain` + `Q q` or `BW Oct n` | `peaking`, `q_measured: half_gain` (APO's PK is the cookbook peaking EQ †); `BW Oct` by the cookbook's bandwidth relation † (whether APO warps it with `w0/sin w0` at the device rate decides the conversion) |
+| `LP` / `HP Fc` | `low_pass_q` / `high_pass_q` with APO's fixed Q † (0.7071 expected: Butterworth 2nd order) |
+| `LPQ` / `HPQ Fc Q` | `low_pass_q` / `high_pass_q` |
+| `LS` / `HS Fc Gain` (and `LS 6dB`, `LS 12dB`, `HS …` †) | `low_shelf` / `high_shelf`: 6 dB → first order, 12 dB / plain → second order with APO's fixed slope † |
+| `LSC` / `HSC [x dB] Fc Gain [Q q]` † | second-order shelf with the given Q; the `x dB` slope form as APO defines it † (refused by line until verified, not guessed) |
+| `NO Fc [Q q]`, `AP Fc [Q q]`, `BP Fc [Q q]` | `notch`, `all_pass_2`, `band_pass` (APO's default Q when absent †) |
+| `Preamp: g dB` | a `gain` section first in the list |
+| `#` comment lines; REW's header lines (`Filter Settings file`, `Room EQ V…`, `Dated:`, `Equaliser:`, `Notes:` †); REW's `Filter N: ON None` | ignored; REW's `Equaliser:` other than `Generic` is refused (its Q conventions differ and are not guessed) |
+| `Delay: t ms` † | `delay` (the same operation; it does not depend on channels) |
+| any other command (`Include`, `Channel`, `Device`, `Copy`, `Stage`, `If` / `Eval`, `GraphicEQ`, `Convolution`, …) or an unknown filter type | **refused with the line number**: they select channels / devices or reference other files, so the list would not be the filter one output sees |
+
+An import refused anywhere imports nothing. Export writes the set as APO lines, and
+**only what the grammar expresses exactly**:
+- `peaking`: `half_gain` as is; `minus_3db_from_peak` converted to the cookbook Q by the
+  closed form (same filter); `band_pass` reading refused (another filter family).
+- `high_pass` / `low_pass` Butterworth or Linkwitz-Riley of even order: cascaded `HPQ` / `LPQ`
+  lines at the same Fc with the prototype's section Qs (exact: APO prewarps each biquad at its
+  Fc, which is the section's f). Odd orders refused unless a 1st-order line exists †. Bessel
+  refused: its sections sit at different frequencies, so per-line prewarping differs from
+  ac2's near Nyquist.
+- Shelves: second order → `LSC` / `HSC` with Q (S and the corner reading converted exactly);
+  first order → `LS 6dB` † only if APO's definition matches; else refused.
+- `notch`, `all_pass_2`, `band_pass`, `high_pass_q`/`low_pass_q` as lines; `gain` sections summed
+  into one `Preamp`; `delay` → `Delay` †; `polarity` (channel `Copy` in APO), `all_pass_1`,
+  `biquad`, `response` refused; an `analog` set refused (APO filters are digital); a digital
+  set's rate written as a comment (APO runs at the device's rate).
+- Disabled sections are written `OFF`. The in-console mark is not a filter and is not written
+  (the reply says so).
+A refused section is named with its reason (`3 · bessel high-pass: per-line prewarp differs`)
+and nothing is written; `--skip-unsupported` writes the rest and lists every skipped section as
+a `#` comment at the top of the file. Never approximated.
 
 ## 5. Tests
 
@@ -224,8 +263,10 @@ conventions are not guessed). Export writes the ac2 text only.
 - `tools/refgen/sets/eq.py`: golden vectors from scipy (`signal.bilinear_zpk`, `freqz`,
   `freqs`, `butter`/`bessel(norm=…)`) and the cookbook formulas written out independently, so
   the Rust and the reference do not share code; compared with `ac2-testkit` tolerances.
-- `ac2-traces`: text format round-trip, every refusal by line; a REW sample file (written by
-  hand from REW's documented format, no rig data).
+- `ac2-traces`: ac2 text round-trip, every refusal by line. APO: sample files written from
+  Equalizer APO's documentation and a REW export (no rig data), one per † spelling above;
+  import → export → import identity for every expressible shape; every export refusal named;
+  `--skip-unsupported` comments; an APO `Channel` / `Include` line refused by number.
 - `ac2-proto`: wire fixtures for `EqShape`, `Operand::Eq`, `TraceSource::Eq`, WIRE_LOCK bumped.
 - `ac2d` `tests/it/eq.rs` from an empty daemon on the fake backend: a transfer measurement on a
   flat fake path; `eq new` + peaking −6 dB @ 1 kHz → the prediction reads −6 dB at 1 kHz and
