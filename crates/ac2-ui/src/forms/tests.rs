@@ -238,7 +238,7 @@ fn spectrum_and_rta_dialogs_set_averaging_and_edit_keeps_the_rest() {
         "In 6 (not captured)"
     );
     let e = f.meas_config(Some(&o)).expect_err("refused");
-    assert!(e.contains("not captured by the session"), "{e}");
+    assert!(e.contains("not captured by the audio I/O"), "{e}");
 }
 
 #[test]

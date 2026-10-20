@@ -1,4 +1,4 @@
-//! Devices, backends and the audio session: selection, opening, stops, recovery, loopback detection (mirrors of ac2-audio).
+//! Devices, backends and the audio I/O: selection, opening, stops, recovery, loopback detection (mirrors of ac2-audio).
 
 use serde::{Deserialize, Serialize};
 

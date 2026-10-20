@@ -3,7 +3,7 @@
 What the operator saves and opens: the measurements (configurations, applied delays, running
 flags), every stored trace with its display edits and slots, and each SPL meter's per-second
 log. Not saved: calibrations (the calibration store's), the generator (a loaded session is
-always disarmed), the audio device (the audio session). File format:
+always disarmed), the audio device (the audio I/O). File format:
 `ac2_traces::session` (a directory, `session.json` format 25). Wire: `docs/protocol.md`
 §3.2 *Sessions*. User guide: *Sessions*.
 
@@ -97,11 +97,11 @@ adds an entry to `moved()` in `salvage/read.rs` and a fixture under
 
 ## App
 
-- **At start**: an app that connects to a daemon with no audio session open shows the
-  Sessions dialog (not the audio settings). *New session* leads on to Settings › Audio & I/O
+- **At start**: an app that connects to a daemon with no audio I/O open shows the
+  Sessions dialog (not the audio settings). *New session* leads on to Settings › Audio I/O
   headed *New session — audio*, then (an empty session) the New measurement chooser; Open…
   and the recents open the saved session as it is; Esc leaves the empty app with a hint
-  naming the dialog's key. Any command that needs an audio session to make a measurement
+  naming the dialog's key. Any command that needs an audio I/O to make a measurement
   (New measurement, New transfer/spectrum/RTA/SPL meter, New sweep) opens the dialog the
   same way while none is open.
 - **Sessions dialog** (Alt+S, the palette, or a click on the session name in the top bar):

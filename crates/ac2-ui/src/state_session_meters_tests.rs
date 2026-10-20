@@ -312,7 +312,7 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
         t.st.update(Msg::Command(CommandId::Record), &t.keys)
             .is_empty()
     );
-    assert!(t.last_toast().contains("no audio session to record"));
+    assert!(t.last_toast().contains("no audio I/O to record"));
 
     // Replay asks for the recording and plays it in real time.
     t.st.update(Msg::Command(CommandId::ReplayRecording), &t.keys);
@@ -353,7 +353,7 @@ fn close_session_and_delete_measurement() {
         t.st.update(Msg::Command(CommandId::CloseSession), &t.keys)
             .is_empty()
     );
-    assert!(t.last_toast().contains("no audio session"));
+    assert!(t.last_toast().contains("no audio I/O"));
     assert!(
         t.st.update(Msg::Command(CommandId::DeleteSelected), &t.keys)
             .is_empty()

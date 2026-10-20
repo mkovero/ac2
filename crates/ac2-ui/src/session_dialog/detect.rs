@@ -40,7 +40,7 @@ impl SessionDialog {
             return Err("this device has no inputs to listen on".into());
         }
         if self.output_info().is_none() {
-            return Err("choose an output device first (Audio & I/O page)".into());
+            return Err("choose an output device first (Audio I/O page)".into());
         }
         self.detect = Some(DetectPanel {
             output,
@@ -220,7 +220,7 @@ impl SessionDialog {
                     if now {
                         ""
                     } else {
-                        " Applies when the session opens."
+                        " Applies when the audio I/O opens."
                     }
                 )
             }

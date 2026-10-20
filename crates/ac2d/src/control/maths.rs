@@ -226,7 +226,7 @@ pub(super) fn check_operands(
         if let Some((_, name)) = time_bases.iter().find(|(t, _)| t.is_none() || *t != first) {
             return Err(invalid(format!(
                 "{name} shares no time base with the other operands (an import, or a capture \
-                 from an earlier audio session): their relative arrival is unknown, so they \
+                 from an earlier audio I/O): their relative arrival is unknown, so they \
                  cannot be summed, differenced or averaged with phase; use ÷, ×, or a power \
                  average"
             )));

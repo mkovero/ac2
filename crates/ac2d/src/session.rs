@@ -1,4 +1,4 @@
-//! The open audio session: one duplex stream, its generator handle and the capture fan-out.
+//! The open audio I/O: one duplex stream, its generator handle and the capture fan-out.
 
 use std::sync::Arc;
 use std::sync::mpsc::Sender;

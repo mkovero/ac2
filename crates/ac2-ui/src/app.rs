@@ -39,7 +39,7 @@ pub struct AppOptions {
     pub bench_startup: bool,
     /// Print the daemon's device list once it arrives and quit (`--smoke`).
     pub smoke: bool,
-    /// Open the Sessions dialog once connected if the daemon has no audio session (an
+    /// Open the Sessions dialog once connected if the daemon has no audio I/O (an
     /// embedded daemon on real audio starts without one); its New leads to the audio setup.
     pub open_session_dialog: bool,
     /// The app hosts its daemon (`Some(true)`: that daemon autosaves): quitting with
@@ -361,7 +361,7 @@ impl App {
         };
         let target = match choice {
             Choice::Target(t) => {
-                // Another daemon: if it has no audio session, the audio setup once.
+                // Another daemon: if it has no audio I/O, the audio setup once.
                 self.state.open_session_when_empty = true;
                 *t
             }
@@ -379,7 +379,7 @@ impl App {
                     self.state.open_session_when_empty = b != EmbeddedBackend::Fake;
                     if b == EmbeddedBackend::Fake {
                         self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
-                            what: "simulated rig: session open, \"demo\" measuring · L types a \
+                            what: "simulated rig: audio I/O open, \"demo\" measuring · L types a \
                                    level, Space arms, Enter fires"
                                 .into(),
                             result: Ok(()),

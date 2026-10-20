@@ -7,7 +7,7 @@
 //! window (a calibration dialog or a confirmation over a page, else the view);
 //! Ctrl+PageUp / Ctrl+PageDown (or Alt+← / Alt+→) step through the pages and Alt+1 … Alt+7
 //! jump to one (no Ctrl+Tab: desktops take it). Shift+Esc still stops the stimulus from anywhere. The keys
-//! that used to open a dialog open its page: Shift+O the Audio & I/O page (focused on the device), Shift+L the SPL / Leq
+//! that used to open a dialog open its page: Shift+O the Audio I/O page (focused on the device), Shift+L the SPL / Leq
 //! page, the palette's input setup and calibrations their pages.
 //!
 //! Every setting says whose it is: [`THIS_APP`] (kept in `ui.toml` on this computer) or
@@ -42,9 +42,9 @@ pub const THIS_APP: &str = "this app";
 /// Whose a setting is: the rig, for every client.
 pub const THE_RIG: &str = "the rig — all clients";
 /// The page with the audio device, the channels and the max level, as every text names it.
-pub const AUDIO_IO: &str = "Audio & I/O";
-/// The Audio & I/O page's heading when the Sessions dialog's New opened it.
-pub const NEW_SESSION_AUDIO: &str = "New session — audio";
+pub const AUDIO_IO: &str = "Audio I/O";
+/// The Audio I/O page's heading when the Sessions dialog's New opened it.
+pub const NEW_SESSION_AUDIO: &str = "New session — Audio I/O";
 
 /// A page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,7 +169,7 @@ pub struct RaiseConfirm {
     pub typed: String,
 }
 
-/// The system max level row of the Audio & I/O page.
+/// The system max level row of the Audio I/O page.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CeilingEdit {
     /// The level being typed; empty shows the level in force.
@@ -553,9 +553,9 @@ pub fn recording_rows(limit_min: u32, server: Option<&ServerInfo>) -> Vec<(Recor
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub page: Page,
-    /// The Audio & I/O page's device and channel rows.
+    /// The Audio I/O page's device and channel rows.
     pub session: SessionDialog,
-    /// The max level row is focused on the Audio & I/O page (below the channels).
+    /// The max level row is focused on the Audio I/O page (below the channels).
     pub on_ceiling: bool,
     pub ceiling: CeilingEdit,
     pub cal: CalView,
@@ -568,11 +568,11 @@ pub struct Settings {
     /// Opened for channel rows before the device's rows arrived: the focus goes to them
     /// once they do.
     pub focus_want: Option<FocusWant>,
-    /// Opened by the Sessions dialog's New: the Audio & I/O page says it starts a new session.
+    /// Opened by the Sessions dialog's New: the Audio I/O page says it starts a new session.
     pub new_session: bool,
 }
 
-/// Channel rows a command opened the Audio & I/O page for.
+/// Channel rows a command opened the Audio I/O page for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FocusWant {
     /// The first input.
@@ -630,7 +630,7 @@ impl Settings {
         }
     }
 
-    /// Shows the Audio & I/O page focused on `row`.
+    /// Shows the Audio I/O page focused on `row`.
     pub fn focus_session_row(&mut self, row: crate::session_dialog::Row) {
         self.show(Page::AudioIo);
         self.on_ceiling = false;
@@ -643,7 +643,7 @@ impl Settings {
         self.page = page;
     }
 
-    /// The shown page's heading: its title, or on Audio & I/O after the Sessions dialog's
+    /// The shown page's heading: its title, or on Audio I/O after the Sessions dialog's
     /// New, that it opens a new session.
     pub fn heading(&self) -> &'static str {
         if self.new_session && self.page == Page::AudioIo {
@@ -693,7 +693,7 @@ impl Settings {
         }
     }
 
-    /// ↑/↓ on the Audio & I/O page: the device rows, the channel rows, then the max level
+    /// ↑/↓ on the Audio I/O page: the device rows, the channel rows, then the max level
     /// row, wrapping.
     pub fn io_move(&mut self, d: i32) {
         let rows = self.session.rows();

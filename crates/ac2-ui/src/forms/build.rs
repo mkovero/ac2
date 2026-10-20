@@ -490,16 +490,16 @@ impl Form {
         open: Option<&OpenSession>,
         ceiling: Option<Dbfs>,
     ) -> Result<MeasConfig, String> {
-        let open = open.ok_or("no open audio session")?;
+        let open = open.ok_or("audio I/O not open")?;
         let captured = &open.config.input_channels;
         let input = |id: FieldId, what: &str| -> Result<u16, String> {
             let c = self
                 .channel(id)
-                .ok_or_else(|| format!("{what}: the session captures no input"))?;
+                .ok_or_else(|| format!("{what}: the audio I/O captures no input"))?;
             if captured.contains(&c) {
                 Ok(c)
             } else {
-                Err(format!("{what} {} is not captured by the session", c + 1))
+                Err(format!("{what} {} is not captured by the audio I/O", c + 1))
             }
         };
         if self.channel(FieldId::Reference).is_none() {
@@ -601,10 +601,10 @@ impl Form {
         let input = |id: FieldId, what: &str| -> Result<u16, String> {
             let c = self
                 .channel(id)
-                .ok_or_else(|| format!("{what}: the session captures no input"))?;
+                .ok_or_else(|| format!("{what}: the audio I/O captures no input"))?;
             match captured {
                 Some(cap) if !cap.contains(&c) => Err(format!(
-                    "{what} {} is not captured by the session: reopen it with that input (Space on its row)",
+                    "{what} {} is not captured by the audio I/O: reopen it with that input (Space on its row)",
                     c + 1
                 )),
                 _ => Ok(c),

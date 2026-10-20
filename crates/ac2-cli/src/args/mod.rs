@@ -71,7 +71,7 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: DaemonCmd,
     },
-    /// Open or close the audio session.
+    /// Audio I/O (open, close, status, inputs, replay) and saved session files.
     Session {
         /// Action.
         #[command(subcommand)]

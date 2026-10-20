@@ -11,11 +11,11 @@ use crate::units::{Channel, Channels, Freq, SampleCount};
 /// `session …`.
 #[derive(Debug, Subcommand)]
 pub enum SessionCmd {
-    /// Open the session on one device of an explicitly named backend.
+    /// Open the audio I/O on one device of an explicitly named backend.
     Open(SessionOpen),
-    /// Close the session.
+    /// Close the audio I/O.
     Close,
-    /// Current session.
+    /// The audio I/O and the working session: name, unsaved changes, what could be recovered.
     Status,
     /// Start a new session: no measurements or traces. Refused while there are unsaved
     /// changes, unless --discard (what it replaces stays recoverable: `session recover`).
@@ -52,7 +52,7 @@ pub enum SessionCmd {
     /// Bring a session that cannot be opened (another format version) into the current
     /// measurements and traces. From a folder or .ac2session file on this machine: its
     /// measurements with their settings, colours, layouts and delays, its traces under
-    /// their measurements, and the running ones started where the audio session captures
+    /// their measurements, and the running ones started where the audio I/O captures
     /// their inputs, with a summary of what was restored, skipped or not read as saved.
     /// From a name or a path of the daemon's host: its traces only.
     Salvage {

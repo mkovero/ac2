@@ -443,7 +443,7 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
 fn the_audio_and_channels_are_one_page() {
     assert_eq!(Page::ALL[0], Page::AudioIo);
     assert_eq!(Page::AudioIo.title(), crate::settings::AUDIO_IO);
-    assert_eq!(Page::AudioIo.title(), "Audio & I/O");
+    assert_eq!(Page::AudioIo.title(), "Audio I/O");
     let titles: Vec<&str> = Page::ALL.iter().map(|p| p.title()).collect();
     assert!(!titles.contains(&"Audio") && !titles.contains(&"Inputs & outputs"));
     // Palette lines are terse and never name a page by an old title.

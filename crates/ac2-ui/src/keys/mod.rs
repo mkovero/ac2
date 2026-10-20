@@ -209,8 +209,8 @@ commands! {
     SessionSaveAs => "session_save_as", "Save session as…", [Global];
     SessionExport => "session_export", "Export session…", [Global];
     Reconnect => "reconnect", "Reconnect", [Global];
-    OpenSession => "session_open", "Open audio session…", [Global];
-    CloseSession => "session_close", "Close audio session", [Global];
+    OpenSession => "session_open", "Open audio I/O…", [Global];
+    CloseSession => "session_close", "Close audio I/O", [Global];
     Record => "record", "Record", [Global];
     ReplayRecording => "replay_recording", "Replay recording…", [Global];
     NewMeasurement => "meas_new", "New measurement…", [Global];

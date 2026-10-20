@@ -446,7 +446,7 @@ impl DelayAmount {
             Self::Time(t) => Ok(t),
             Self::Samples(n) => match rate_hz {
                 Some(r) if r > 0 => Ok(Seconds(n / f64::from(r))),
-                _ => fail("a delay in samples needs an open session (sample rate)"),
+                _ => fail("a delay in samples needs an open audio I/O (sample rate)"),
             },
             Self::Distance(m) => Ok(Seconds(m / temp.speed_of_sound())),
         }

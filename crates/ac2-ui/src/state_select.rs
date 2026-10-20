@@ -75,7 +75,7 @@ impl AppState {
             .map(|o| o.input_device.clone())
         else {
             return Err(
-                "no open session: calibrations of other devices are deleted with `ac2 cal rm --device`"
+                "no audio I/O open: calibrations of other devices are deleted with `ac2 cal rm --device`"
                     .into(),
             );
         };
@@ -172,7 +172,7 @@ impl AppState {
         }
         let Some(rate) = self.open_session().map(|s| f64::from(s.sample_rate_hz)) else {
             self.warn(format!(
-                "{}: no audio session (a delay is applied in samples of its rate)",
+                "{}: no audio I/O (a delay is applied in samples of its rate)",
                 m.config.name
             ));
             return;

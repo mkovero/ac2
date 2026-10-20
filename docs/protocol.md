@@ -1152,7 +1152,7 @@ with the autosave (§7.3).
   `not_found`; `invalid` (not a session, bad name, damaged files or archive); `unsupported`
   with `detail: {type: session_version, found, supported}` for another format version.
 - `file.new`: guarded as `file.load`; deletes every session measurement and every trace
-  (generator disarmed, the audio session stays open, rig measurements stay); untitled.
+  (generator disarmed, the audio I/O stays open, rig measurements stay); untitled.
 - `file.recover`: swaps the working state with `working.recover` (which then holds the
   state it replaced, so a second recover undoes the first); `not_found` without one.
 - `file.salvage`: imports each `traces/*.csv` of the session — any format version — into
@@ -1850,7 +1850,7 @@ daemon crash the last 30 s.
 
 At start the daemon loads `<dir>/session.json` (else `session.prev.json`, renaming a
 damaged `session.json` to `session.damaged.json`) exactly as `file.load` does — disarmed,
-no owner, a new session epoch, no audio session opened — logs what it restored, and carries
+no owner, a new session epoch, no audio I/O opened — logs what it restored, and carries
 on appending to the restored logs' files after their last whole line. An autosave of
 another session format version is renamed to `<dir>.v<N>`, an unreadable one to
 `<dir>.damaged` (a name taken gets the time appended), with a warning; neither is deleted.

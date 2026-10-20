@@ -5,7 +5,7 @@
 //! data; the reducer routes keys here and the view draws them. Every default is the CLI's
 //! (`ac2 meas new`, `ac2 ir capture`), taken from the shared constructors in `ac2-proto`.
 //!
-//! The audio session dialog is [`crate::session_dialog`]; the rate and buffer parsers it
+//! The audio I/O dialog is [`crate::session_dialog`]; the rate and buffer parsers it
 //! shares live here.
 
 use ac2_proto::model::{

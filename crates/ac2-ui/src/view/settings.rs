@@ -184,7 +184,7 @@ fn page(
             .color(ch.dim),
     );
     ui.add_space(8.0);
-    // Audio & I/O ends in what Enter does, kept in view below the scrolling settings.
+    // Audio I/O ends in what Enter does, kept in view below the scrolling settings.
     let opens = s.page == Page::AudioIo && s.session.backends.is_some();
     let footer_h = if opens { 44.0 + 46.0 } else { 44.0 };
     egui::ScrollArea::both()

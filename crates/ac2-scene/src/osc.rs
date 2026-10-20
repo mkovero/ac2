@@ -273,7 +273,7 @@ pub fn monitor_text(on: bool) -> &'static str {
     if on {
         "on: the rig meters run from daemon start, no client needed"
     } else {
-        "off: the rig meters run while a client has the audio session open"
+        "off: the rig meters run while a client has the audio I/O open"
     }
 }
 

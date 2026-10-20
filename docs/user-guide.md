@@ -8,7 +8,7 @@ Scripting: [protocol.md](protocol.md), the normative description of what the dae
 
 | I want to… | Go to |
 |---|---|
-| connect the audio interface and open a session | [Audio & I/O](#audio--io) |
+| connect the audio interface and open a session | [Audio I/O](#audio--io) |
 | wire the loopback so transfer functions work | [Reference wiring and loopback](#reference-wiring-and-loopback) |
 | play pink noise safely, and stop it | [Stimulus](#stimulus) |
 | see magnitude, phase and coherence of a speaker | [Transfer measurement](#transfer-measurement) |
@@ -39,12 +39,12 @@ requires pairing ([install.md](install.md#remote-use-foh--stage)).
 A **session** is the open audio stream: one device, a sample rate, a buffer size and the
 inputs to capture. **Measurements** run on it: transfer functions (`tf`), spectrum, RTA,
 SPL meters and sweeps. In the app, every setting lives in **Settings** (**Ctrl+P**, the ⚙ in
-the top bar); **Shift+O** opens its Audio & I/O page; **Ctrl+M** (*New measurement…*, also
+the top bar); **Shift+O** opens its Audio I/O page; **Ctrl+M** (*New measurement…*, also
 the last row of every pane's list) lists every kind — transfer, spectrum, RTA, SPL meter,
 sweep, math channel — with what each measures, and opens the chosen kind's settings (created,
 started and selected on **Enter**, in a pane of its own); the palette (**Ctrl+K**) also has
 *New transfer…*, *New spectrum…*, *New RTA…*, *New SPL meter…* directly, and
-*Close audio session*; **Delete** (or **Backspace**) deletes the
+*Close audio I/O*; **Delete** (or **Backspace**) deletes the
 selected measurement after asking. Until there is a session or a measurement, the transfer
 pane says which comes next. The CLI does the same with the same defaults:
 
@@ -101,17 +101,17 @@ launchd or over ssh gets no prompt; allow its app by hand first ([install.md](in
 Should a host still deliver audio in lumps, the daemon log says so once a minute (*audio
 arrives in bursts on …*) with the device and buffer to change.
 
-In the app's connect dialog, *Simulated rig* starts ready to measure (session open, a
+In the app's connect dialog, *Simulated rig* starts ready to measure (audio I/O open, a
 transfer measurement "demo" running); *This computer's audio* starts with no session.
-Whenever the app connects to a daemon with no audio session open, the **Sessions** dialog
+Whenever the app connects to a daemon with no audio I/O open, the **Sessions** dialog
 (**Alt+S**) opens once; a daemon with audio open (a rig, the Pi kiosk) opens nothing. Its
-*New session* opens Settings on the Audio & I/O page, headed *New session — audio*, with the
-input device focused (a real interface preselected); Enter opens the session, and an empty
-one then offers the New measurement chooser. *Open…* or a recent session opens that one with
-the audio the daemon has. Esc leaves an empty app whose transfer pane says *No session open
-— Alt+S, then New session*. With no audio session, **Ctrl+M** and the *New transfer…*,
+*New session* opens Settings on the Audio I/O page, headed *New session — Audio I/O*, with the
+input device focused (a real interface preselected); Enter opens the audio I/O, and the empty
+session then offers the New measurement chooser. *Open…* or a recent session opens that one with
+the audio I/O the daemon has. Esc leaves an empty app whose transfer pane says *No session open
+— Alt+S, then New session*. With no audio I/O, **Ctrl+M** and the *New transfer…*,
 *New spectrum…*, *New RTA…*, *New SPL meter…* and sweep entries open the Sessions dialog too.
-**Shift+O** still opens the Audio & I/O page directly (under its own name), to change the
+**Shift+O** still opens the Audio I/O page directly (under its own name), to change the
 audio of the session at hand.
 
 A new transfer is named after what it compares: *Reference → M30 FOH* (the measurement
@@ -131,7 +131,7 @@ once).
 
 | Page | What | Opened also by |
 |---|---|---|
-| Audio & I/O | backend, input and output device, rate, buffer; inputs and outputs by name, roles, mics, the stimulus outputs, the reference; the **system max level**; Enter opens the session | **Shift+O** (on the input device), palette *Input setup…* (on the first input), *Stimulus outputs…* (on the stimulus output) |
+| Audio I/O | backend, input and output device, rate, buffer; inputs and outputs by name, roles, mics, the stimulus outputs, the reference; the **system max level**; Enter opens the audio I/O | **Shift+O** (on the input device), palette *Input setup…* (on the first input), *Stimulus outputs…* (on the stimulus output) |
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
@@ -162,13 +162,13 @@ keys it refused lately (fingerprint, address, how often, when).
 - **Delete** twice revokes a client: its requests are refused at once. You cannot revoke
   your own.
 
-### Audio & I/O
+### Audio I/O
 
 Nothing on this page is a channel number to type. Rows run in the order you decide them:
 device (backend, input and output device), inputs, outputs, the reference (loopback), sample
 rate and buffer, then the system max level; **↑/↓** walk them and wrap; **Enter** (or the
-*Open session* button, kept in view at the foot of the page — *Open new session* after
-Sessions › New) opens, or reopens, the session as shown; **Esc** closes without opening.
+*Open audio I/O* button, kept in view at the foot of the page — *Open new session* after
+Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes without opening.
 
 - **Backend** (**←/→**): every backend the daemon offers; one it cannot use now says why and
   what to do (*PipeWire is running but its JACK library isn't in use: install pipewire-jack …
@@ -204,7 +204,7 @@ Sessions › New) opens, or reopens, the session as shown; **Esc** closes withou
   window (sample rate, buffer size, clock source, routing). On a Core Audio device the same
   key is **Audio MIDI Setup…**: it brings up macOS's Audio MIDI Setup, where the device's
   rate, format and clock source are set (for every app using it). A change there resets the
-  driver; the open session reopens at the driver's new rate and buffer by itself, its
+  driver; the open audio I/O reopens at the driver's new rate and buffer by itself, its
   measurements restart at them, and the top bar says what changed in the warning colour
   (`… · 44.1 kHz · 512 frames · driver changed from 48.0 kHz`, the hover has the
   details) until the session is next opened. The clock sources the driver offers are listed
@@ -1501,7 +1501,7 @@ Click the name, **Alt+S** or palette *Sessions* opens the Sessions dialog
 
 | Row | Does |
 |---|---|
-| **New session** | no measurements or traces, then the **Audio & I/O** settings for the new session's interface and channels |
+| **New session** | no measurements or traces, then the **Audio I/O** settings for the new session's interface and channels |
 | **Open…** | a session file (`.ac2session`) or folder on this computer (home, USB sticks and other removable media) in a browser with finger-sized rows |
 | **Save** | back to where it came from; untitled: asks for a name first |
 | **Save as…** | a new session on the daemon; it then belongs to that one |
@@ -1518,18 +1518,18 @@ Backspace goes up a folder; Esc goes back or closes.
   saving** / **Cancel**. Changes left unsaved come back from the autosave when the app starts
   again; on the simulated rig, which keeps no autosave, they are lost.
 - **Save as** onto an existing session asks first (**Cancel** is the default).
-- An opened session comes up disarmed and keeps the open audio session.
+- An opened session comes up disarmed and keeps the open audio I/O.
 - A session of another format version is refused, naming the version, and the dialog offers
   **Import its traces** (they arrive as imported traces; nothing is converted). For its
   measurements too, use `ac2 session salvage`.
 
 | CLI | Does |
 |---|---|
-| `ac2 session status` | the audio session and the working state: name, *unsaved changes*, when saved, what could be recovered |
+| `ac2 session status` | the audio I/O and the working state: name, *unsaved changes*, when saved, what could be recovered |
 | `ac2 session new [--discard]` | new, empty measurements and traces |
 | `ac2 session save` | saves to the session it belongs to |
 | `ac2 session save-as <session> [--force]` | saves as another session; `--force` replaces an existing one |
-| `ac2 session load <session> [--discard]` | opens one, disarmed (`load`, because `session open` opens the audio session) |
+| `ac2 session load <session> [--discard]` | opens one, disarmed (`load`, because `session open` opens the audio I/O) |
 | `ac2 session recover` | brings back what the last `new` or `load` replaced |
 | `ac2 session salvage <session>` | brings a session of another format version into the current working state (below) |
 | `ac2 session export <file> [--session <name>]` | writes an `.ac2session` file here: the working state or a saved session |
@@ -1548,8 +1548,8 @@ or .ac2session file>`, where that path is readable, rebuilds it on top of what i
   delay and tracking;
 - each stored trace with its name, colour, slot, offset, polarity, nudge, smoothing and
   lock, under its measurement; math channels on the restored items;
-- measurements that were running are started when the open audio session captures their
-  inputs (open the audio session first);
+- measurements that were running are started when the open audio I/O captures their
+  inputs (open the audio I/O first);
 - panes and the selection that showed a measurement come back to it once it is recreated.
 
 The old file is read setting by setting: a setting dropped or added since is named in the
@@ -1690,7 +1690,7 @@ daemon needed. Used for the [band transfer](#4-a-recorder-at-the-place).
 
 ## Calibration and SPL
 
-Inputs carry a **mic name** (**N** on the input in Settings › Audio & I/O or Calibration,
+Inputs carry a **mic name** (**N** on the input in Settings › Audio I/O or Calibration,
 `ac2 session open … --mic 3=M30`, `ac2 session inputs --mic 3=M30`). The daemon's machine
 stores, in its calibration store:
 
@@ -1733,7 +1733,7 @@ Chosen per input, explicitly:
 
 - **CLI:** `ac2 cal use 3 90°` (or `off`); `ac2 session inputs --mic 3=M30 --curve 3=90°`
   sets several inputs at once; `ac2 session inputs` alone lists them.
-- **App:** **←/→** on the input's row in Settings › Audio & I/O or the Calibrations view,
+- **App:** **←/→** on the input's row in Settings › Audio I/O or the Calibrations view,
   palette *Mic curve on input N…* (*3=90°*) or *Mic curve: next curve on the selected
   measurement's input*.
 
@@ -1785,7 +1785,7 @@ spectrum / RTA captions, the Calibrations view, `ac2 cal list`, `ac2 status`):
 | label | meaning |
 |---|---|
 | `cal 94 dB · 3 h ago` | acoustic: a 94 dB calibrator on this mic on this input, 3 h ago |
-| `verified · 94.0 dB SPL at 1.00 kHz · 3 h ago` | the same, written out (Calibrations view, Settings › Audio & I/O) |
+| `verified · 94.0 dB SPL at 1.00 kHz · 3 h ago` | the same, written out (Calibrations view, Settings › Audio I/O) |
 | `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago` | electrical, a voltmeter across the connected, powered mic's pins 2–3; `data sheet` when the sensitivity came from the mic's curve file, nothing when it was typed (the full record in the Calibrations view and `ac2 cal list` says `typed`); ±1 dB the stated uncertainty |
 | `electrical cal (injected, 10.0 mV/Pa) ±0.5 dB` | electrical, a generator in place of the mic, phantom off |
 | `electrical cal (in-line, data sheet 15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ −1.3 dB) ±1 dB` | electrical with the loading counted: the mic's 330 Ω output impedance into the preamp's 2 kΩ input takes 1.3 dB off its open-circuit sensitivity ([Loading](#loading-the-preamps-input-impedance)); the full record (`ac2 cal list`) says `… · loaded 330 Ω → 2.0 kΩ −1.3 dB · ±1 dB` |
@@ -2479,7 +2479,7 @@ Everything in the app is reachable from the keyboard.
   history, sweep dB / %, coherence placement) have no key: they are rows of Settings ›
   Display and palette commands.
 - Keys are scoped: the focused pane's keys apply first, then the global ones.
-- Settings pages have letter keys of their own, listed under each page (Audio & I/O: **R**,
+- Settings pages have letter keys of their own, listed under each page (Audio I/O: **R**,
   **M**, **S**, **N**, **D**, **P** the driver's settings; Calibration: **N**, **I**, **R**,
   **C**, **E**).
 - The defaults avoid `[ ] + - =` and other keys that need AltGr or a dead key on Nordic and
@@ -2645,7 +2645,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Home` | Clear offset | `offset_clear` |
 | `Alt+S` | Sessions… | `sessions` |
 | `Ctrl+S` | Save session | `session_save` |
-| `Shift+O` | Open audio session… | `session_open` |
+| `Shift+O` | Open audio I/O… | `session_open` |
 | `Ctrl+M` | New measurement… | `meas_new` |
 | `Shift+M` | New math… | `meas_new_math` |
 | `Shift+C` | Next colour | `meas_colour_next` |
@@ -2747,7 +2747,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Save session as… | `session_save_as` |
 | Export session… | `session_export` |
 | Reconnect | `reconnect` |
-| Close audio session | `session_close` |
+| Close audio I/O | `session_close` |
 | Record | `record` |
 | Replay recording… | `replay_recording` |
 | New transfer… | `meas_new_transfer` |
@@ -2831,7 +2831,7 @@ documents each command.
 | command | what it does |
 |---|---|
 | `ac2 devices`, `ac2 status`, `ac2 daemon start / stop / status` | the daemon and its audio devices; `status` includes the autosave state |
-| `ac2 session open / close / status / inputs / replay` | the audio session (`open --out-device` plays on another device than the capture one), each input's mic and active curve; replaying a recording as the session |
+| `ac2 session open / close / status / inputs / replay` | the audio I/O (`open --out-device` plays on another device than the capture one), each input's mic and active curve; replaying a recording as the audio input |
 | `ac2 session panel [--backend B] [--device D]` | opens the device's driver settings on the daemon's host (an ASIO driver's control panel, Audio MIDI Setup for Core Audio) |
 | `ac2 session new / save / save-as / load / recover / salvage / export / import / list` | the working state and saved sessions ([Sessions](#sessions)) |
 | `ac2 meas new / list / set / start / stop / rm`, `ac2 meas layout clear` | transfer (`tf`), `spectrum`, `rta`, `spl` and `sweep` measurements (math channels are listed too); `rm` of one that owns traces needs `--keep-traces` (moved to Imported) or `--delete-traces`; `layout clear` removes a measurement's own panes |

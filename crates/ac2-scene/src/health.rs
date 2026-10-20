@@ -258,9 +258,12 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
                 lines.push(format!("DSP {s} over the last second"));
             }
             if let Some(s) = span(a.session_load, a.session_peak) {
-                lines.push(format!("DSP {s} since the session opened"));
+                lines.push(format!("DSP {s} since the audio I/O opened"));
             }
-            lines.push(format!("{} since the session opened", xruns_text(a.xruns)));
+            lines.push(format!(
+                "{} since the audio I/O opened",
+                xruns_text(a.xruns)
+            ));
             lines.push(
                 "DSP: time in ac2d's own audio callback against the buffer period, not the \
                  whole audio graph's load"
@@ -404,8 +407,8 @@ mod tests {
         );
         for want in [
             "DSP 14 % mean, 28 % peak over the last second",
-            "DSP 12 % mean, 48 % peak since the session opened",
-            "0 xruns since the session opened",
+            "DSP 12 % mean, 48 % peak since the audio I/O opened",
+            "0 xruns since the audio I/O opened",
             "not the whole audio graph",
             "local = ketunkolo:\n  CPU 41 %",
             "14 Mbit/s received from the daemon",
@@ -445,7 +448,7 @@ mod tests {
         assert_eq!(
             health_line(&inputs(Some(&d), "here")),
             None,
-            "no cpu, no session"
+            "no cpu, no audio I/O"
         );
         let d = daemon("pupu", None, Some(audio(None, 0)));
         let l = health_line(&inputs(Some(&d), "here")).expect("xruns");

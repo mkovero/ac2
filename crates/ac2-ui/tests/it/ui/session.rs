@@ -29,7 +29,7 @@ fn session_dialog() {
                 && fake.lock().preview.is_some()
         },
     );
-    // Audio & I/O on the input device; ↓ past output device and input 1 to input 2, N names
+    // Audio I/O on the input device; ↓ past output device and input 1 to input 2, N names
     // its mic.
     h.state_mut().state.toasts.clear();
     h.step();

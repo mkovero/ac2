@@ -495,7 +495,7 @@ pub(crate) fn uncaptured(kind: &MeasKind, captured: &[u16]) -> Result<(), CliErr
     };
     match inputs.iter().find(|i| !captured.contains(i)) {
         Some(i) => Err(CliError::Usage(format!(
-            "input {} is not captured by the session",
+            "input {} is not captured by the audio I/O",
             i + 1
         ))),
         None => Ok(()),

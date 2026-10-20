@@ -183,7 +183,7 @@ fn without_a_session_new_measurement_goes_through_the_sessions_dialog() {
     let s = t.st.overlay.settings().expect("the audio setup");
     assert_eq!(s.page, crate::settings::Page::AudioIo);
     assert_eq!(s.heading(), crate::settings::NEW_SESSION_AUDIO);
-    assert_eq!(s.heading(), "New session — audio");
+    assert_eq!(s.heading(), "New session — Audio I/O");
     t.conn(ConnEvent::Devices(Ok(backends(true))));
     let r = t.key("Enter");
     assert!(opened(&r).is_some(), "{r:?}");

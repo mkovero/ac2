@@ -208,7 +208,7 @@ fn check_runnable(st: &State, config: &SweepConfig) -> Result<(), CliError> {
     }
     if st.session.open.is_none() {
         return Err(CliError::Usage(
-            "no open session; open one with `ac2 session open`".into(),
+            "no audio I/O open; open it with `ac2 session open`".into(),
         ));
     }
     Ok(())

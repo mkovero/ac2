@@ -348,10 +348,10 @@ pub fn log_failures(a: &Autosave, measurements: &[Measurement], now: WallNs) -> 
 
 pub fn session(s: &Session) -> String {
     match &s.open {
-        None => format!("session closed (epoch {})", s.epoch),
+        None => format!("audio I/O closed (epoch {})", s.epoch),
         Some(o) => match &o.replay {
             Some(r) => format!(
-                "session open (epoch {}): replaying {} ({:?})\n  file   {}\n  input  {} ch {}\n  rate   {}  {} recorded",
+                "audio I/O open (epoch {}): replaying {} ({:?})\n  file   {}\n  input  {} ch {}\n  rate   {}  {} recorded",
                 s.epoch,
                 r.name,
                 r.pace,
@@ -363,7 +363,7 @@ pub fn session(s: &Session) -> String {
             ),
             None => {
                 format!(
-                    "session open (epoch {})\n  input  {} ch {}\n  output {} × {}{}\n  rate   {}  buffer {} samples",
+                    "audio I/O open (epoch {})\n  input  {} ch {}\n  output {} × {}{}\n  rate   {}  buffer {} samples",
                     s.epoch,
                     o.input_device.0,
                     channels_text(&o.config.input_channels),

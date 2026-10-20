@@ -123,7 +123,7 @@ pub(crate) async fn session(
             let (r, warnings) = c.call_warned(Command::SessionClose).await?;
             let rev = expect_body!("session.close", r, ReplyBody::Ack { rev } => rev)?;
             super::osc::note_warnings(&c, &warnings, out).await;
-            out.emit(&json!({ "rev": rev }), || "session closed".to_owned())?;
+            out.emit(&json!({ "rev": rev }), || "audio I/O closed".to_owned())?;
         }
         SessionCmd::Status => {
             let r = c.call(Command::SessionStatus).await?;
@@ -186,7 +186,7 @@ pub(crate) async fn session(
                 };
                 format!(
                     "{}: {panel} is open on the daemon's host; a change there reopens the \
-                     session at the driver's new settings",
+                     audio I/O at the driver's new settings",
                     id.0
                 )
             })?;
@@ -209,7 +209,8 @@ async fn panel_target(
         (None, Some(o)) => o.backend,
         (None, None) => {
             return Err(CliError::Usage(
-                "no session is open: name the backend (--backend asio, --backend coreaudio)".into(),
+                "no audio I/O is open: name the backend (--backend asio, --backend coreaudio)"
+                    .into(),
             ));
         }
     };

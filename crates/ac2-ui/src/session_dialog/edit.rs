@@ -295,7 +295,7 @@ impl SessionDialog {
             }
             Some(row)
         } else {
-            self.notice = Some("the mic curve applies when the session opens (Enter)".into());
+            self.notice = Some("the mic curve applies when the audio I/O opens (Enter)".into());
             None
         }
     }

@@ -200,8 +200,8 @@ impl Control {
             return;
         };
         tracing::warn!(
-            "audio stopped ({}); reopening the session's configuration until it opens or a \
-             client closes the session",
+            "audio stopped ({}); reopening the audio I/O's configuration until it opens or a \
+             client closes the audio I/O",
             cause_text(cause)
         );
         let open = rt.open.clone();

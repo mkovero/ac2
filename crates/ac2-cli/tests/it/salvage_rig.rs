@@ -2,7 +2,7 @@
 //! `tests/fixtures/salvage`, in the shapes of formats 20, 22, 23 and 24) into a real
 //! daemon: measurements with their settings, colours and delays, the trace under its
 //! measurement, the math channel on the restored ids, and the running ones started only
-//! where the audio session captures their inputs. The fixtures were saved from the fake
+//! where the audio I/O captures their inputs. The fixtures were saved from the fake
 //! backend; the format 20 and 22 manifests are the format-23 one less the fields those versions
 //! lacked (`layout`; `colour` too in 20, which also has a nudged, tracking delay), and the
 //! trace's magnitude columns were filled in by hand because the fake input measured silence,
@@ -301,7 +301,7 @@ async fn format_23_without_audio_reports_what_it_could_not_set() {
     check_common(&r, &report).await;
     for name in ["FOH SPL", "Spectrum 1"] {
         assert!(
-            notes(item(&report, name)).contains("no audio session is open"),
+            notes(item(&report, name)).contains("no audio I/O is open"),
             "{report:#}"
         );
         assert!(!meas(&r.c, name).await.running);

@@ -246,7 +246,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &GenCmd, out: &mut Out<'_>) -> Result<()
     }
     if st.session.open.is_none() {
         return Err(CliError::Usage(
-            "no open session; open one with `ac2 session open`".into(),
+            "no audio I/O open; open it with `ac2 session open`".into(),
         ));
     }
     let lease = c.acquire_lease(force, OnDrop::StopAndRelease).await?;

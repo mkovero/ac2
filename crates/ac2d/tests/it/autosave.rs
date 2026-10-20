@@ -1,6 +1,6 @@
 //! Autosave on the fake rig: a captured trace and its measurement are written shortly after
 //! they change (one write per burst of edits), the status reaches clients as the `autosave`
-//! entity, a restarted daemon comes back with them disarmed and without an audio session,
+//! entity, a restarted daemon comes back with them disarmed and without an audio I/O,
 //! the previous autosave is kept as a backup, an unwritable directory shows as a failure,
 //! another format version and `--no-restore` move the autosave aside.
 #![allow(clippy::unwrap_used)]
@@ -108,7 +108,7 @@ fn rename(c: &mut Client, t: &TraceMeta, name: &str) {
 
 /// From an empty daemon: a trace is captured, the status goes pending → saved, the daemon
 /// restarts, and the trace (data and slot) and the measurement are back, disarmed, without
-/// an audio session. The next change keeps the first autosave as the backup.
+/// an audio I/O. The next change keeps the first autosave as the backup.
 #[test]
 fn traces_survive_a_restart() {
     let dir = tempfile::tempdir().unwrap();
@@ -239,7 +239,7 @@ fn traces_survive_a_restart() {
         st.traces[0].edit.owner,
         TraceOwner::Meas { meas: MeasId(1) }
     );
-    assert!(st.session.open.is_none(), "no audio session is opened");
+    assert!(st.session.open.is_none(), "no audio I/O is opened");
     assert!(!st.generator.armed && !st.generator.firing);
     assert_eq!(st.generator.owner, None);
     assert_eq!(

@@ -603,7 +603,7 @@ impl Control {
                 }) => self.on_request(&routing_id, peer, &payload),
                 Ok(ControlMsg::DeviceChanged { epoch }) => {
                     if self.session.as_ref().is_some_and(|r| r.epoch == epoch) {
-                        tracing::warn!("device or configuration change: reopening the session");
+                        tracing::warn!("device or configuration change: reopening the audio I/O");
                         let routes = self
                             .session
                             .as_ref()

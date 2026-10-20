@@ -145,7 +145,7 @@ the wait is the slowest operand's. Stored operands are held as their columns on 
 grid (mic curve baked in, resampled onto a transfer result's grid). The combination is
 `ac2_traces::math` (transfer and levels), shared with the tests.
 
-A math channel of stored traces only still needs a running audio session to publish (its
+A math channel of stored traces only still needs a running audio I/O to publish (its
 clock is the fan-out's); its result does not change.
 
 ## App

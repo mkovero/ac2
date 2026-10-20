@@ -196,7 +196,7 @@ impl AppState {
         }
         if self.daemon().is_some_and(|s| s.session.open.is_none()) {
             self.warn(format!(
-                "no audio session to sweep: {}",
+                "no audio I/O to sweep: {}",
                 open_session_hint(keymap)
             ));
             return;
@@ -288,7 +288,7 @@ impl AppState {
         }
         if self.daemon().is_some_and(|s| s.session.open.is_none()) {
             self.warn(format!(
-                "no audio session to play into: {}",
+                "no audio I/O to play into: {}",
                 open_session_hint(keymap)
             ));
             return;
@@ -317,11 +317,11 @@ impl AppState {
             return;
         }
         if self.daemon().is_some_and(|s| s.session.open.is_none()) {
-            self.warn("not armed: no audio session to play into");
+            self.warn("not armed: no audio I/O to play into");
             return;
         }
         if self.daemon().is_some_and(|s| s.session.stopped.is_some()) {
-            self.warn("not armed: the audio stopped; the daemon is reopening the session");
+            self.warn("not armed: the audio stopped; the daemon is reopening the audio I/O");
             return;
         }
         if let Some(settings) = self.stimulus.settings() {
@@ -338,7 +338,7 @@ impl AppState {
     pub(super) fn open_sweep_dialog(&mut self, keymap: &Keymap, out: &mut Vec<Request>) {
         let Some(o) = self.open_session().cloned() else {
             self.warn(format!(
-                "no audio session to sweep: {}",
+                "no audio I/O to sweep: {}",
                 open_session_hint(keymap)
             ));
             return;

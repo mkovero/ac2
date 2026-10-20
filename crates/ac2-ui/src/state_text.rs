@@ -173,10 +173,10 @@ pub fn open_session_hint(keymap: &Keymap) -> String {
             .map(|k: &Chord| k.label())
     };
     match (first(CommandId::OpenSession), first(CommandId::Palette)) {
-        (Some(o), Some(p)) => format!("press {o} (or {p} → Open audio session)"),
+        (Some(o), Some(p)) => format!("press {o} (or {p} → Open audio I/O)"),
         (Some(o), None) => format!("press {o}"),
-        (None, Some(p)) => format!("{p} → Open audio session"),
-        (None, None) => "command palette → Open audio session".into(),
+        (None, Some(p)) => format!("{p} → Open audio I/O"),
+        (None, None) => "command palette → Open audio I/O".into(),
     }
 }
 

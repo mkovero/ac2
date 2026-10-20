@@ -125,7 +125,7 @@ impl MathError {
                 name(*k)
             ),
             Self::NoSharedTimeBase => "the operands share no time base (an import, or a \
-                capture from an earlier audio session): their relative arrival is unknown, so \
+                capture from an earlier audio I/O): their relative arrival is unknown, so \
                 they cannot be summed, differenced or averaged with phase; use ÷, ×, or a \
                 power average"
                 .into(),

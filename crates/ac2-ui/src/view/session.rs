@@ -169,7 +169,7 @@ pub(super) fn notices(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome) {
     }
 }
 
-/// The Audio & I/O page below the device, in the order the operator decides: the inputs
+/// The Audio I/O page below the device, in the order the operator decides: the inputs
 /// with meters, names and roles; the outputs with their labels and the stimulus; the
 /// reference (loopback) with its detection; rate and buffer; then the one button that opens
 /// the session. `focus`: the focused row, `None` while the max level row below has it.
@@ -224,9 +224,9 @@ pub(super) fn open_row(
         let open = if new_session {
             "Open new session  Enter"
         } else if d.is_open_device() {
-            "Reopen session  Enter"
+            "Reopen audio I/O  Enter"
         } else {
-            "Open session  Enter"
+            "Open audio I/O  Enter"
         };
         let primary = egui::Button::new(RichText::new(open).strong().color(ch.panel))
             .fill(ch.focus)
@@ -242,7 +242,7 @@ pub(super) fn open_row(
     });
 }
 
-/// The Audio & I/O page's device: backend, input and output device.
+/// The Audio I/O page's device: backend, input and output device.
 pub(super) fn device_section(
     ui: &mut egui::Ui,
     d: &SessionDialog,

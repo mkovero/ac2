@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// A fresh start on a daemon with no audio session lands on the Sessions dialog, once: its
+/// A fresh start on a daemon with no audio I/O lands on the Sessions dialog, once: its
 /// New leads to the audio setup; Esc leaves a calm empty app naming the Sessions key. A
 /// daemon with audio open (a rig, the kiosk) opens nothing.
 #[test]
@@ -71,7 +71,7 @@ fn endpoint_backends() -> Vec<BackendInfo> {
 }
 
 /// An input device without outputs plays on the system's default output; ←/→ on the
-/// Output row choose another output device, whose rows the Audio & I/O page shows;
+/// Output row choose another output device, whose rows the Audio I/O page shows;
 /// the session opens with both devices, the loopback detection plays on the output device,
 /// and the choice is remembered for the input device.
 #[test]

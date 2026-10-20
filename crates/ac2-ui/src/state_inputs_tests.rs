@@ -293,7 +293,7 @@ fn stimulus_outputs_are_remembered_per_device() {
     assert!(t.st.stimulus.describe().ends_with("→ out 1"));
     assert!(t.st.prefs.outputs.is_empty());
     t.st.prefs_dirty = false;
-    // Choosing outputs (S on an output in Settings › Audio & I/O, opened on the
+    // Choosing outputs (S on an output in Settings › Audio I/O, opened on the
     // stimulus output) remembers them for the session's output device and applies them
     // now: the open session (on the simulated rig the dialog lists) has them.
     let mut s = daemon_state();
@@ -480,7 +480,7 @@ fn finder_band_and_observation_are_the_operators_choice() {
     assert_eq!(t.st.finder, FinderChoice::default());
 }
 
-// ----- audio session and measurement dialogs ----------------------------------------------
+// ----- audio I/O and measurement dialogs ----------------------------------------------
 
 fn calls(r: &[Request]) -> Vec<&Command> {
     r.iter()
@@ -772,7 +772,7 @@ fn session_dialog_steps_the_mic_curve_of_a_named_mic() {
         dialog(&t)
             .notice
             .as_deref()
-            .is_some_and(|n| n.contains("when the session opens"))
+            .is_some_and(|n| n.contains("when the audio I/O opens"))
     );
     // A row without a mic: nothing to choose.
     focus(&mut t, Row::Input(2));

@@ -1,4 +1,4 @@
-//! ac2 daemon: owns the audio session, measurement jobs and state; serves clients over
+//! ac2 daemon: owns the audio I/O, measurement jobs and state; serves clients over
 //! ZeroMQ (PLAN.md §4.3, §6; `docs/protocol.md`; `docs/design/q2-q5-q6-protocol.md`).
 //!
 //! # Threads
@@ -298,7 +298,7 @@ fn data_socket_options(xpub: &Socket, network: bool) -> Result<(), StartError> {
 }
 
 impl Daemon {
-    /// Binds the sockets and starts the I/O and control threads. No audio session is open
+    /// Binds the sockets and starts the I/O and control threads. No audio I/O is open
     /// until a client sends `session.open`.
     pub fn start(config: DaemonConfig) -> Result<Handle, StartError> {
         config.listen.validate().map_err(StartError::Listen)?;

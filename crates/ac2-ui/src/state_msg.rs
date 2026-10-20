@@ -172,7 +172,7 @@ impl Overlay {
         }
     }
 
-    /// The session model while Settings shows the Audio & I/O page.
+    /// The session model while Settings shows the Audio I/O page.
     pub fn session(&self) -> Option<&SessionDialog> {
         match self {
             Overlay::Settings(s) if matches!(s.page, Page::AudioIo) => Some(&s.session),

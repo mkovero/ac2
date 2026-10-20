@@ -253,7 +253,7 @@ impl CalView {
             .is_some_and(|o| o.config.input_channels.contains(&c));
         if !captured {
             self.notice = Some(format!(
-                "input {} is not in the open session: a calibration reads the input live",
+                "input {} is not in the open audio I/O: a calibration reads the input live",
                 input_no(c)
             ));
             return false;
@@ -277,7 +277,7 @@ impl CalView {
             .is_some_and(|o| o.config.input_channels.contains(&c));
         if !captured {
             self.notice = Some(format!(
-                "input {} is not in the open session: a calibration reads the input live",
+                "input {} is not in the open audio I/O: a calibration reads the input live",
                 input_no(c)
             ));
             return false;
@@ -488,7 +488,7 @@ pub fn line_texts(
                         if captured {
                             ""
                         } else {
-                            " (not in the session)"
+                            " (not in the audio I/O)"
                         }
                     ),
                     detail: ac2_scene::cal::curve_row(&u.curve),

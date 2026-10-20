@@ -121,7 +121,7 @@ impl AppState {
         out.push(Request::SessionList);
     }
 
-    /// With no audio session open, a command that needs one opens the Sessions dialog
+    /// With no audio I/O open, a command that needs one opens the Sessions dialog
     /// instead (its New leads to the audio setup, then the New measurement chooser); `true`
     /// when it did.
     pub(super) fn sessions_first(&mut self, out: &mut Vec<Request>) -> bool {

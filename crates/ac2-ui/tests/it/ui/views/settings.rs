@@ -4,7 +4,7 @@ use super::*;
 use ac2_proto::model::PeakMode;
 
 /// The Settings view's own pages on a live rig whose outputs are named and whose max level
-/// is below its bound: Audio & I/O with the max level row and a raise waiting for its
+/// is below its bound: Audio I/O with the max level row and a raise waiting for its
 /// word, Recording, Display and Connection (an embedded-style daemon: no client keys).
 #[test]
 fn settings_pages() {
@@ -35,7 +35,7 @@ fn settings_pages() {
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
     h.key_press_modifiers(Modifiers::COMMAND, Key::P);
-    step_until(&mut h, "Audio & I/O with the device", |a| {
+    step_until(&mut h, "Audio I/O with the device", |a| {
         a.state.overlay.settings().is_some_and(|s| {
             s.page == ac2_ui::settings::Page::AudioIo && s.session.device_info().is_some()
         })

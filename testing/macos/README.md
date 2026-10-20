@@ -21,7 +21,7 @@ audio path has so far run only on a virtual device (BlackHole) in CI.
   new app). If access is refused, ac2 says so in words (*macOS denies ac2 the
   microphone: allow it in System Settings › Privacy & Security › Microphone*) instead of
   hanging.
-- **Audio MIDI Setup on P.** On a Core Audio device, **P** in Settings › Audio & I/O brings
+- **Audio MIDI Setup on P.** On a Core Audio device, **P** in Settings › Audio I/O brings
   up macOS's Audio MIDI Setup, where the device's rate, format and clock source are set. A
   change there reopens the session at the new settings by itself.
 - **Only the inputs in use are read.** On an interface with several input streams (analog
@@ -109,7 +109,7 @@ Pass: the interface is listed, its inputs show live levels, and a session opens 
 errors.
 
 1. Start ac2. In the connect dialog choose **This computer's audio (Core Audio)**. Settings
-   opens on its **Audio & I/O** page, on the input device.
+   opens on its **Audio I/O** page, on the input device.
 2. **Input** device (**←/→**): pick your interface. Note what it shows (*N in / M out ·
    rate · buffer*), and whether its inputs carry the interface's own channel names or are
    numbered (*Input 3*).
@@ -124,7 +124,7 @@ errors.
    frames`); hovering over it shows the stated latency. The **Inputs** list on the left
    keeps a meter per input.
 
-Also worth a try: close the session (**⌘K → Close audio session**), reopen it at
+Also worth a try: close the session (**⌘K → Close audio I/O**), reopen it at
 96 kHz if the interface supports it (type the rate on the rate row), and a short buffer
 such as 256 frames (the buffer row).
 
@@ -133,7 +133,7 @@ such as 256 frames (the buffer row).
 Pass: an electrical loop reads flat (0 dB, 0°, coherence 1) and the delay finder reports
 the interface's own latency between the two inputs, about 0 ms.
 
-1. Make the stimulus play on both outputs: **⌘P**, **⌥1** (Settings › Audio & I/O),
+1. Make the stimulus play on both outputs: **⌘P**, **⌥1** (Settings › Audio I/O),
    **S** on output 2 as well, **Esc**. Output 1 feeds the reference over cable 1,
    output 2 the "measurement" over cable 2, so the measurement is a wire and the answer is
    known.
@@ -259,7 +259,7 @@ latency of its own, cannot be unplugged, has no clock to change and has one stre
    line (the same as the top bar's hover) should match the self-test's. Quit the app and
    `ac2 daemon stop` before the next self-test.
 2. **Rate change while running.** Open a session with the transfer measurement running
-   (Test 2). In Settings › Audio & I/O, on the device rows, **P** brings up **Audio MIDI
+   (Test 2). In Settings › Audio I/O, on the device rows, **P** brings up **Audio MIDI
    Setup**. There, change the interface's format to another rate (e.g. 44.1 kHz). Pass:
    within a few seconds ac2 reopens by itself at the new rate, and the top bar says so in
    the warning colour (`… · 44.1 kHz · … frames · driver changed from 48.0 kHz`; the hover

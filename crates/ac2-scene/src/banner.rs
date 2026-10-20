@@ -6,7 +6,7 @@
 //! | # | banner | severity | from |
 //! |---|---|---|---|
 //! | 1 | DAEMON NOT RESPONDING | fault | no keepalive for > 1.5 s |
-//! | 2 | AUDIO STOPPED · what, since | fault | `session.stopped` (the daemon is reopening the session) |
+//! | 2 | AUDIO STOPPED · what, since | fault | `session.stopped` (the daemon is reopening the audio I/O) |
 //! | 3 | CLIP | fault | protection `CLIP` |
 //! | 4 | NO REFERENCE | fault | protection `NO_REFERENCE` (the detail names the stimulus keys while nothing here plays) |
 //! | 5 | CHECK ROUTING | fault | protection `CHECK_ROUTING` (inputs identical or swapped) |

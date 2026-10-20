@@ -6,7 +6,7 @@
 //! Measurements first (math channels last: they name other measurements and traces), each
 //! with its colour, layout and delay; then each trace file imported, given its old
 //! properties and filed under its measurement; then the measurements that were running are
-//! started where the open audio session captures their inputs. A summary names what was
+//! started where the open audio I/O captures their inputs. A summary names what was
 //! restored, what was skipped and every setting not read as saved.
 
 mod read;
@@ -343,7 +343,7 @@ async fn restore_meas(
     });
 }
 
-/// Starts the measurements that were running, each only where the open audio session
+/// Starts the measurements that were running, each only where the open audio I/O
 /// captures every input it reads: a start the daemon would refuse is reported instead.
 async fn start_running(
     c: &Client,
@@ -362,7 +362,7 @@ async fn start_running(
             continue;
         }
         let why = match &open {
-            None => Some("no audio session is open".to_owned()),
+            None => Some("no audio I/O is open".to_owned()),
             Some(o) => uncaptured(&kind, &o.config.input_channels)
                 .err()
                 .map(|e| e.to_string()),

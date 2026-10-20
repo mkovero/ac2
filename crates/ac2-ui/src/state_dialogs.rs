@@ -362,7 +362,7 @@ impl AppState {
         out.push(Request::OpenSession {
             config: plan.config,
             inputs: plan.inputs,
-            what: format!("audio session open on {}", plan.device_name),
+            what: format!("audio I/O open on {}", plan.device_name),
         });
         self.overlay = Overlay::None;
     }

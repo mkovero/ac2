@@ -1,4 +1,4 @@
-//! Reducer tests of the audio session and measurement dialogs, the meters and recording.
+//! Reducer tests of the audio I/O and measurement dialogs, the meters and recording.
 
 use super::*;
 
@@ -89,11 +89,7 @@ fn empty_hint_yields_to_stored_traces() {
         t.st.empty_hint(t.pane(PaneKind::Transfer), &t.keys)
             .expect("hint");
     assert_eq!(hint.place, HintPlace::Title);
-    assert!(
-        hint.text.starts_with("No audio session — "),
-        "{}",
-        hint.text
-    );
+    assert!(hint.text.starts_with("No audio I/O — "), "{}", hint.text);
     // Hidden: the plot is empty again and the hint goes back to its centre.
     let mut hidden = meta.clone();
     hidden.edit.visible = false;
@@ -132,7 +128,7 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
             .map(|h| h.text)
             .as_deref(),
         Some(format!(
-            "No audio session — press {} (or {} → Open audio session)",
+            "No audio I/O — press {} (or {} → Open audio I/O)",
             open_key(),
             palette_key()
         ))
@@ -140,7 +136,7 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     );
     assert_eq!(
         t.st.no_audio_line(&t.keys),
-        format!("no audio session · {} opens one", open_key())
+        format!("no audio I/O · {} opens it", open_key())
     );
     let mut s = daemon_state();
     s.measurements.clear();
@@ -219,7 +215,7 @@ fn arming_without_a_session_names_the_key() {
     assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
     assert!(
         t.last_toast().contains(&format!(
-            "press {} (or {} → Open audio session)",
+            "press {} (or {} → Open audio I/O)",
             open_key(),
             palette_key()
         )),

@@ -41,9 +41,9 @@ pub enum RecordingEnd {
         /// What the file system said.
         msg: String,
     },
-    /// The audio session closed.
+    /// The audio I/O closed.
     SessionClosed,
-    /// The audio session reopened (device or configuration change, `session.open`).
+    /// The audio I/O reopened (device or configuration change, `session.open`).
     SessionReopened,
     /// The session's audio stopped (the device stopped delivering or the host ended the
     /// stream); the file ends with the last audio received, and the audio after the outage,

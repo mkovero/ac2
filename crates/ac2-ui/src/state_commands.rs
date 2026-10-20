@@ -691,7 +691,7 @@ impl AppState {
     }
 }
 
-/// Commands that make a measurement on the audio session: with none open they lead to the
+/// Commands that make a measurement on the audio I/O: with none open they lead to the
 /// Sessions dialog rather than a form or chooser that could only refuse.
 fn needs_session(c: CommandId) -> bool {
     use CommandId as C;

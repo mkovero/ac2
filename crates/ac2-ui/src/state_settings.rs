@@ -81,8 +81,8 @@ impl AppState {
         self.settings_entered(out);
     }
 
-    /// Settings on the Audio & I/O page focused on the input device: where a fresh start
-    /// on a daemon without an audio session, a new session and the open-session command
+    /// Settings on the Audio I/O page focused on the input device: where a fresh start
+    /// on a daemon without an audio I/O, a new session and the open-session command
     /// land.
     pub fn open_audio_setup(&mut self, out: &mut Vec<Request>) {
         self.open_settings(Page::AudioIo, out);
@@ -506,7 +506,7 @@ impl AppState {
         }
     }
 
-    /// Keys of the Audio & I/O page (the session model and the max level row). Esc never gets
+    /// Keys of the Audio I/O page (the session model and the max level row). Esc never gets
     /// here: it closes the topmost window.
     pub(super) fn session_key(
         &mut self,
@@ -634,7 +634,7 @@ impl AppState {
             .collect();
         let device = d.output_info().map(|x| x.id.0.clone());
         let Some(n) = open_outputs.filter(|_| d.is_open_output()) else {
-            d.notice = Some("the stimulus outputs apply when the session opens (Enter)".into());
+            d.notice = Some("the stimulus outputs apply when the audio I/O opens (Enter)".into());
             return;
         };
         if ticked.is_empty() || ticked.iter().any(|c| *c >= n) {

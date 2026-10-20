@@ -54,7 +54,7 @@ impl AppState {
                         self.call(out, Command::RecStop, "recording stopped".into());
                     }
                     None => self.warn(format!(
-                        "no audio session to record: {}",
+                        "no audio I/O to record: {}",
                         open_session_hint(keymap)
                     )),
                     Some(o) => self.call(
@@ -84,9 +84,9 @@ impl AppState {
             }
             C::CloseSession => {
                 if self.open_session().is_none() {
-                    self.warn("no audio session is open");
+                    self.warn("no audio I/O is open");
                 } else {
-                    self.call(out, Command::SessionClose, "audio session closed".into());
+                    self.call(out, Command::SessionClose, "audio I/O closed".into());
                 }
             }
             C::NewTransfer | C::NewSpectrum | C::NewRta | C::NewSpl => {
@@ -98,7 +98,7 @@ impl AppState {
                 };
                 match self.open_session().cloned() {
                     None => self.warn(format!(
-                        "no audio session to measure: {}",
+                        "no audio I/O to measure: {}",
                         open_session_hint(keymap)
                     )),
                     Some(o) => {

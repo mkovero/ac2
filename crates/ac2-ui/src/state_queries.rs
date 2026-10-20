@@ -452,12 +452,12 @@ impl AppState {
         }
     }
 
-    /// The daemon's open audio session.
+    /// The daemon's open audio I/O.
     pub fn open_session(&self) -> Option<&ac2_proto::model::OpenSession> {
         self.daemon().and_then(|s| s.session.open.as_ref())
     }
 
-    /// The top bar with no audio session: with nothing kept, the Sessions dialog starts
+    /// The top bar with no audio I/O: with nothing kept, the Sessions dialog starts
     /// one; with measurements kept, the audio is what is missing.
     pub fn no_audio_line(&self, keymap: &Keymap) -> String {
         if self.measurements().is_empty() {
@@ -467,7 +467,7 @@ impl AppState {
             )
         } else {
             format!(
-                "no audio session · {} opens one",
+                "no audio I/O · {} opens it",
                 keymap.reach(CommandId::OpenSession)
             )
         }
@@ -491,7 +491,7 @@ impl AppState {
             // Nothing to keep: a new session is the way in.
             ac2_scene::sessions::no_session_hint(&keymap.reach(CommandId::Sessions))
         } else if kind == PaneKind::Transfer && st.session.open.is_none() {
-            format!("No audio session — {}", open_session_hint(keymap))
+            format!("No audio I/O — {}", open_session_hint(keymap))
         } else if kind == PaneKind::Transfer && st.measurements.is_empty() {
             let reach = [CommandId::NewMeasurement, CommandId::Palette]
                 .into_iter()

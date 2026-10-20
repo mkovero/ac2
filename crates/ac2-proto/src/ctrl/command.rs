@@ -79,13 +79,13 @@ pub enum Command {
         /// RMS level of the burst; refused when absent (there is no default level).
         level: Option<Dbfs>,
     },
-    /// Open the audio session (new epoch).
+    /// Open the audio I/O (new epoch).
     #[serde(rename = "session.open")]
     SessionOpen {
         /// Configuration.
         config: SessionConfig,
     },
-    /// Close the audio session (new epoch).
+    /// Close the audio I/O (new epoch).
     #[serde(rename = "session.close")]
     SessionClose,
     /// Current session.
@@ -621,7 +621,7 @@ pub enum Command {
         /// Replace unsaved changes.
         discard: bool,
     },
-    /// Start an untitled session: every measurement and trace deleted (the audio session
+    /// Start an untitled session: every measurement and trace deleted (the audio I/O
     /// stays open). Guarded as `file.load`.
     #[serde(rename = "file.new")]
     FileNew {

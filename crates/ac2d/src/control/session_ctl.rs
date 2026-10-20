@@ -80,7 +80,7 @@ impl Control {
     /// Stops what runs on a stream about to close: the sweep, the jobs, the generator source
     /// and the published frames of the session.
     pub(super) fn wind_down(&mut self, recording: ac2_proto::model::RecordingEnd) {
-        self.abort_sweep(SweepFailure::SessionClosed, "the audio session reopened");
+        self.abort_sweep(SweepFailure::SessionClosed, "the audio I/O reopened");
         self.end_recording(recording);
         self.stop_all_jobs();
         self.level = None;
@@ -137,7 +137,7 @@ impl Control {
     }
 
     pub(super) fn session_close(&mut self, client: &ClientId) {
-        self.abort_sweep(SweepFailure::SessionClosed, "the audio session closed");
+        self.abort_sweep(SweepFailure::SessionClosed, "the audio I/O closed");
         self.end_recording(ac2_proto::model::RecordingEnd::SessionClosed);
         self.stop_all_jobs();
         let g = self.store.state().generator.clone();

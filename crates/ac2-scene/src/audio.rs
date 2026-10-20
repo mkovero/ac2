@@ -66,7 +66,7 @@ pub fn audio_stopped_text(
                 )
             } else {
                 (
-                    format!("reopening the session (attempt {attempt})"),
+                    format!("reopening the audio I/O (attempt {attempt})"),
                     format!("reopening (attempt {attempt})"),
                 )
             }
@@ -359,7 +359,7 @@ mod tests {
         );
         assert_eq!(
             quick.detail,
-            "reopening the session (attempt 1) · measurements paused"
+            "reopening the audio I/O (attempt 1) · measurements paused"
         );
         let hung = audio_stopped_text(&s(1.0), at(13.0), utc);
         assert_eq!(

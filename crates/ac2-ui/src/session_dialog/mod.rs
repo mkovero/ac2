@@ -1,4 +1,4 @@
-//! The audio session model behind two pages of Settings ([`crate::settings`]): **Audio**
+//! The audio I/O model behind two pages of Settings ([`crate::settings`]): **Audio**
 //! (a backend, the input and output devices, rate and buffer; Shift+O) and **Inputs &
 //! outputs** (one row per input and output with its name, a live meter and its role). Pure
 //! data; the reducer routes keys here and the view draws it.

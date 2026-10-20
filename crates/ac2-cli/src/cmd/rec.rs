@@ -24,7 +24,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &RecCmd, out: &mut Out<'_>) -> Result<()
                     .open
                     .map(|o| o.config.input_channels)
                     .ok_or_else(|| {
-                        CliError::Usage("no open session to record (ac2 session open)".into())
+                        CliError::Usage("no audio I/O open to record (ac2 session open)".into())
                     })?,
             };
             let r = c

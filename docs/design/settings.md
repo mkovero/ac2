@@ -11,7 +11,7 @@ dialog, palette prompts, `ui.toml` and daemon flags):
 
 | Page | Holds | Whose |
 |---|---|---|
-| Audio & I/O | backend, device, rate, buffer; input rows (in session, R reference / M mic, mic name, curve, meter), output rows by name (the rig's label, else the device's channel name) with **S** ticks for the stimulus, the reference pair, loopback detection, the **system max level** | the rig (stimulus ticks: this app) |
+| Audio I/O | backend, device, rate, buffer; input rows (in session, R reference / M mic, mic name, curve, meter), output rows by name (the rig's label, else the device's channel name) with **S** ticks for the stimulus, the reference pair, loopback detection, the **system max level** | the rig (stimulus ticks: this app) |
 | Calibration | the former calibrations view: inputs, mic library, sensitivities, the acoustic / electrical dialogs | the rig |
 | SPL / Leq | the former Leq dialog, for the SPL pane's meter | the rig |
 | Recording | the record toggle's limit; the daemon's recording folder | this app / the rig |
@@ -34,13 +34,13 @@ app starts with one pane.
 the topmost window (a calibration dialog or the raise confirmation over a page, else the
 view); Shift+Esc stops the stimulus from anywhere. `Ctrl+,` — the desktop convention — is the
 transfer pane's whole-sample delay step, so the letter P (preferences) it is; layout-safe on
-every keyboard. Shift+O opens Audio & I/O (on the device), Shift+L SPL / Leq, the palette's input setup
+every keyboard. Shift+O opens Audio I/O (on the device), Shift+L SPL / Leq, the palette's input setup
 and calibrations their pages. No dialog is left beside its page.
 
 The view covers the window below the top bar: what drives the speakers (badge, level,
 outputs, ■ Stop) stays in sight while settings change.
 
-The Audio & I/O page hosts the session model (`SessionDialog`); Enter opens (or reopens)
+The Audio I/O page hosts the session model (`SessionDialog`); Enter opens (or reopens)
 the session with what it says. A mouse click on a row shows its page.
 
 ## 2. Output names and stimulus outputs

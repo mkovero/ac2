@@ -285,7 +285,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     Ok(())
 }
 
-/// Settings from an empty daemon: Audio & I/O on the input device, ↓ to the channels: output 1 named for
+/// Settings from an empty daemon: Audio I/O on the input device, ↓ to the channels: output 1 named for
 /// the rig, output 2 ticked as the only stimulus output, Enter opens; the stimulus plays on
 /// output 2 alone. The system max level lowered below the playing stimulus stops it; a raise
 /// is refused while armed and needs the typed word; a second client sees the new level.
@@ -300,7 +300,7 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     other.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
-    d.until("the Audio & I/O page with the device", |s| {
+    d.until("the Audio I/O page with the device", |s| {
         s.overlay
             .settings()
             .is_some_and(|x| x.page == Page::AudioIo && x.session.device_info().is_some())

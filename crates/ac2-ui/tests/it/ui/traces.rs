@@ -386,7 +386,7 @@ fn smoothed_phase_and_spectrum() {
     snapshot(&mut h, "smoothed_phase_and_spectrum");
 }
 
-/// A daemon with no audio session (a fresh local daemon, an embedded one on real audio):
+/// A daemon with no audio I/O (a fresh local daemon, an embedded one on real audio):
 /// the transfer pane says how to open one, also once a file is imported.
 #[test]
 fn empty_session_hint() {

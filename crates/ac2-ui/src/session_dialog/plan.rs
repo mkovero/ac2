@@ -49,7 +49,7 @@ impl SessionDialog {
             .collect();
         if inputs.is_empty() {
             return Err(
-                "Choose at least one input: Space adds the focused input to the session.".into(),
+                "Choose at least one input: Space adds the focused input to the audio I/O.".into(),
             );
         }
         let reference = self
@@ -105,7 +105,7 @@ impl SessionDialog {
         let out_dev = self.output_info().unwrap_or(dev);
         if self.out_count > 0 && out_dev.output.is_none() {
             return Err(format!(
-                "{} has no outputs: choose the output device on the Audio & I/O page.",
+                "{} has no outputs: choose the output device on the Audio I/O page.",
                 out_dev.name
             ));
         }

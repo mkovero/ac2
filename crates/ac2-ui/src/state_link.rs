@@ -78,7 +78,9 @@ impl AppState {
                     && self.daemon().is_some_and(|s| s.session.stopped.is_some())
                 {
                     self.stimulus.arm_after_stop = false;
-                    self.warn("not armed: the audio stopped; the daemon is reopening the session");
+                    self.warn(
+                        "not armed: the audio stopped; the daemon is reopening the audio I/O",
+                    );
                 }
                 let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
                 if let Some(p) = self.pending_select

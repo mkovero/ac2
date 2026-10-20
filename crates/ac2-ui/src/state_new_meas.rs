@@ -74,11 +74,11 @@ impl AppState {
             NewKind::Math => self.math_form().err(),
             _ if self.open_session().is_some() => None,
             NewKind::Sweep => Some(format!(
-                "no audio session to sweep: {}",
+                "no audio I/O to sweep: {}",
                 open_session_hint(keymap)
             )),
             _ => Some(format!(
-                "no audio session to measure: {}",
+                "no audio I/O to measure: {}",
                 open_session_hint(keymap)
             )),
         }

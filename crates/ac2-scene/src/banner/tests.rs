@@ -110,7 +110,7 @@ fn audio_stopped_follows_the_daemon_and_replaces_stale() {
     assert_eq!(b[1].severity, Severity::Fault);
     assert_eq!(
         b[1].detail.as_deref(),
-        Some("reopening the session (attempt 1) · measurements paused")
+        Some("reopening the audio I/O (attempt 1) · measurements paused")
     );
 }
 
