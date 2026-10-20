@@ -113,6 +113,8 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
 - **ac2-ui `measurement_tree_and_delete_choices` on macOS CI**: the `measurement_delete_choices`
   snapshot differed by 14 573 px once (a680dcd); passed on rerun. The live curves behind the
   dialog are not pinned.
+- **ac2-ui `embedded::calibration::mic_curves_imported_and_switched_in_the_input_setup`**:
+  failed once on its first try in a full workspace run (passed on retry); 10/10 alone.
 - **ac2d `remote_stimulus` "timed out waiting for the tone"**: once in a full workspace run
   at load ~30; passed 4/4 alone.
 - **ac2d `traces::capture::capture_average_math_export_import`, unaligned capture at 301.6 Hz:
