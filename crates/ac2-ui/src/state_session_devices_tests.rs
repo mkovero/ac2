@@ -37,6 +37,28 @@ fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
     assert!(!t.st.open_session_when_empty);
 }
 
+/// A session kept from before (an autosave restored, measurements listed, its audio not
+/// reopened) is no fresh start: nothing opens at connect, and a command needing the audio
+/// opens the audio setup, not the Sessions dialog whose New would discard the session.
+#[test]
+fn a_kept_session_without_audio_opens_no_sessions_dialog() {
+    let mut t = T::disconnected();
+    t.st.open_session_when_empty = true;
+    connected_to(&mut t, "embedded daemon (coreaudio)");
+    let mut kept = daemon_state();
+    kept.session.open = None;
+    t.conn(mirror(kept));
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(!t.st.open_session_when_empty);
+    t.key("Ctrl+M");
+    assert!(t.st.sessions_dialog().is_none(), "{:?}", t.st.overlay);
+    assert!(
+        matches!(&t.st.overlay, Overlay::Settings(s) if s.page == crate::settings::Page::AudioIo && !s.new_session),
+        "{:?}",
+        t.st.overlay
+    );
+}
+
 /// Core Audio listing each direction as its own device: an output-only device
 /// listed first and the system's default output, an input-only USB mic, and another
 /// output-only device.

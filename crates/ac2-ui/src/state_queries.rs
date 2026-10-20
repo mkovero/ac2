@@ -457,6 +457,15 @@ impl AppState {
         self.daemon().and_then(|s| s.session.open.as_ref())
     }
 
+    /// No audio I/O and nothing kept (no measurements, no stored curves): a fresh start,
+    /// where the Sessions dialog begins one. With anything kept, a session lives on (an
+    /// autosave restored, a file loaded) and only its audio is missing.
+    pub fn nothing_kept(&self) -> bool {
+        self.open_session().is_none()
+            && self.measurements().is_empty()
+            && self.stored_traces().is_empty()
+    }
+
     /// The top bar with no audio I/O: with nothing kept, the Sessions dialog starts
     /// one; with measurements kept, the audio is what is missing.
     pub fn no_audio_line(&self, keymap: &Keymap) -> String {

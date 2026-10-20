@@ -165,7 +165,9 @@ impl AppState {
                 self.follow_leq_logs(data.as_deref(), out);
                 if self.open_session_when_empty && self.connected() && self.daemon().is_some() {
                     self.open_session_when_empty = false;
-                    if self.open_session().is_none() && self.overlay == Overlay::None {
+                    // A session kept from before (autosave, a loaded file) is no fresh
+                    // start: its hint names the audio page, nothing opens over it.
+                    if self.nothing_kept() && self.overlay == Overlay::None {
                         self.open_sessions(crate::sessions::Page::Main, out);
                     }
                 }

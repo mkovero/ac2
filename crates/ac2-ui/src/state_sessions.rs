@@ -122,13 +122,19 @@ impl AppState {
     }
 
     /// With no audio I/O open, a command that needs one opens the Sessions dialog
-    /// instead (its New leads to the audio setup, then the New measurement chooser); `true`
-    /// when it did.
+    /// instead (its New leads to the audio setup, then the New measurement chooser), or the
+    /// audio setup when measurements are kept; `true` when it did.
     pub(super) fn sessions_first(&mut self, out: &mut Vec<Request>) -> bool {
         if !self.connected() || self.daemon().is_none() || self.open_session().is_some() {
             return false;
         }
-        self.open_sessions(Page::Main, out);
+        // With measurements kept, New session would discard them: their audio is what
+        // is missing.
+        if self.nothing_kept() {
+            self.open_sessions(Page::Main, out);
+        } else {
+            self.open_audio_setup(out);
+        }
         true
     }
 
