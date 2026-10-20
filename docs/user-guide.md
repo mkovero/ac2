@@ -746,7 +746,7 @@ and the rank numbers away; the boxes stay on the curve.
 
 #### Fixed or multi-resolution
 
-A spectrum's **Resolution** is one FFT (`64 pt` … `65536 pt`, default 65 536) or
+A spectrum's **FFT length** is one FFT (`64 pt` … `65536 pt`, default 65 536) or
 **multi-resolution** (`multi-res 1/48 oct`; 1/12 … 1/96 oct). One FFT has one window for all
 frequencies: 65 536 points resolve 0.73 Hz at 48 kHz but take 1.4 s to see a change; 2048
 follow within 43 ms but cannot separate anything closer than 23 Hz. Multi-resolution runs
@@ -806,7 +806,7 @@ spectrum FIFO holds at most 511 frames at 65 536 points; an RTA's at most 65 536
 - **New spectrum** / **New RTA** have an *Averaging* field (**←/→**); *Edit measurement…*
   changes it, the input, name and smoothing or bands, and keeps the rest. A CLI setting the
   list does not offer shows as it is.
-- A spectrum's dialogs also pick *Resolution* (64 … 65 536 points, or multi-resolution
+- A spectrum's dialogs also pick *FFT length* (64 … 65 536 points, or multi-resolution
   1/12 … 1/96 oct) and *Window* (Hann, Blackman-Harris, flat-top, rectangular); the hint
   says what it gives at the session's rate (`0.73 Hz bins · 1365 ms window · 5.9 updates/s`;
   `0.68 s window at LF … 21 ms at HF`). A new resolution or window restarts a running
@@ -860,7 +860,7 @@ row; **N**; on the new half pick `Spectrum 2` from its chip (or click its live-c
 
 - **Setting it**: *Resolution* in the New / Edit dialogs, `ac2 meas new tf|sweep …
   --resolution 1/96`, `ac2 meas set <meas> --resolution 1/24` (`ac2 ir capture
-  --resolution`). The list shows a non-default one (`res 1/96 oct`). A transfer restarts its
+  --resolution`). The list shows a non-default one (`resolution 1/96 oct`). A transfer restarts its
   averaging on change; a sweep uses it from its next run.
 
 Every estimate has a **resolution cell**, 1/T for a window of T seconds. Where it is wider

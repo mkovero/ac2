@@ -149,7 +149,7 @@ fn describe(r: &SweepConfig) -> String {
         LfHarmonics::Fine => " · LF harmonics fine",
     };
     format!(
-        "sweep {} – {}, {} s × {} at {} on out {} · in {} re in {} · Resolution {}{lf}",
+        "sweep {} – {}, {} s × {} at {} on out {} · in {} re in {} · resolution {}{lf}",
         ac2_scene::format::freq_readout(r.sweep.start.0),
         ac2_scene::format::freq_readout(r.sweep.end.0),
         ac2_scene::format::fixed(r.sweep.duration.0, 1),
@@ -607,7 +607,7 @@ mod tests {
         );
         assert_eq!(
             describe(&r),
-            "sweep 20.0 Hz – 20.0 kHz, 3.0 s × 1 at −50.0 dBFS on out 1,2 · in 1 re in 2 · Resolution 1/48 oct"
+            "sweep 20.0 Hz – 20.0 kHz, 3.0 s × 1 at −50.0 dBFS on out 1,2 · in 1 re in 2 · resolution 1/48 oct"
         );
         let mut a = args();
         a.lf_harmonics = LfHarmonicsArg::Fine;
@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(
             describe(&r),
             "sweep 20.0 Hz – 20.0 kHz, 3.0 s × 1 at −50.0 dBFS on out 1,2 · in 1 re in 2 · \
-             Resolution 1/48 oct · LF harmonics fine"
+             resolution 1/48 oct · LF harmonics fine"
         );
         let mut a = args();
         a.from = Freq(Hz(30_000.0));

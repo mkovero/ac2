@@ -285,7 +285,7 @@ fn edit_meas_on_a_spectrum_changes_its_averaging_and_keeps_the_rest() {
             ("Input".to_owned(), "2 · Input 2".to_owned()),
             ("Name".to_owned(), "Sub".to_owned()),
             ("Smoothing".to_owned(), "off".to_owned()),
-            ("Resolution".to_owned(), "8192 pt".to_owned()),
+            ("FFT length".to_owned(), "8192 pt".to_owned()),
             ("Window".to_owned(), "Hann".to_owned()),
             ("Level".to_owned(), "tone (dBFS)".to_owned()),
             ("Averaging".to_owned(), "off".to_owned()),
@@ -344,7 +344,7 @@ fn edit_meas_switches_a_spectrum_to_multi_resolution() {
         let x = &f.fields[f.focus];
         (x.label.clone(), x.display(), x.hint.clone())
     };
-    assert_eq!(field(&t).0, "Resolution");
+    assert_eq!(field(&t).0, "FFT length");
     for _ in 0..20 {
         if field(&t).1 == "multi-res 1/48 oct" {
             break;

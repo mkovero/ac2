@@ -33,7 +33,7 @@ impl Form {
             .iter()
             .position(|x| *x == r)
             .unwrap_or(FFT_LENS.len() - 1);
-        let mut size = Field::choice(FieldId::FftSize, "Resolution", &labels, index);
+        let mut size = Field::choice(FieldId::FftSize, "FFT length", &labels, index);
         size.hint = self.fft_hint(all[index]);
         let names = WINDOWS.map(|w| {
             let l = ac2_scene::spectrum::window_label(w);

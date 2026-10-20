@@ -257,7 +257,7 @@ impl FromStr for ResolutionArg {
                 .and_then(ac2_proto::model::Resolution::from_ppo)
                 .ok_or_else(|| {
                     format!(
-                        "{s:?}: Resolution is 1/12, 1/24, 1/48 or 1/96 octave \
+                        "{s:?}: the resolution is 1/12, 1/24, 1/48 or 1/96 octave \
                          (a spectrum: multi or multi:1/N)"
                     )
                 })?,

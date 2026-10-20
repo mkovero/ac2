@@ -126,7 +126,7 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
         _ => None,
     };
     if let Some(r) = resolution.filter(|r| *r != Resolution::default()) {
-        text.push_str(&format!(" · res {}", format::resolution(r)));
+        text.push_str(&format!(" · resolution {}", format::resolution(r)));
     }
     match &m.config.kind {
         MeasKind::Transfer { config } if config.smoothing.is_some() => {

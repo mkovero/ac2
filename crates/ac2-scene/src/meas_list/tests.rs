@@ -111,7 +111,7 @@ fn tf_rows_say_a_resolution_other_than_the_default() {
     let smoothing = format::smoothing(config.smoothing);
     assert_eq!(
         meas_row(&item(&m), None, true).text,
-        format!("TF  Room\n     running · res 1/96 oct · {smoothing}")
+        format!("TF  Room\n     running · resolution 1/96 oct · {smoothing}")
     );
 }
 
