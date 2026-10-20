@@ -260,7 +260,7 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
         "{}",
         t.caption
     );
-    assert_eq!(t.bands, ["250", "500", "1k", "2k", "4k", "All"]);
+    assert_eq!(t.bands, ["250", "500", "1000", "2000", "4000", "All"]);
     let row = |p| t.rows.iter().find(|r| r.param == p).ok_or("row");
     for p in [ac2_scene::room::Param::T20, ac2_scene::room::Param::T30] {
         for c in &row(p)?.cells {

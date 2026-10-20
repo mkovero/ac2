@@ -55,3 +55,11 @@ fn iec_band_columns_agree() {
         assert_eq!(bits(core_edges), bits(proto_edges), "1/{b}");
     }
 }
+
+#[test]
+fn band_leq_tables_agree() {
+    use ac2_core::band_leq::{BANDS, LF_BANDS, NOMINAL_HZ};
+    assert_eq!((BANDS, LF_BANDS), (BAND_COUNT, LF_BAND_COUNT));
+    assert_eq!(bits(NOMINAL_HZ), bits(BAND_NOMINAL_HZ));
+    assert_eq!(BAND_NOMINAL_HZ, THIRD_OCTAVE_NOMINAL_HZ[..BAND_COUNT]);
+}
