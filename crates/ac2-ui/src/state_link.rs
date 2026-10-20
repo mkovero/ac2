@@ -125,6 +125,14 @@ impl AppState {
                     self.standin = self.selected;
                 }
                 self.edits.retain(|k, _| ids.contains(k));
+                // A fold belongs to the measurement folded: one listed later under its id
+                // (a session loaded, a daemon numbering afresh) starts unfolded.
+                self.collapsed.retain(|g| match g {
+                    TraceOwner::Meas { meas } => {
+                        !reborn && (ids.contains(meas) || Some(*meas) == keep)
+                    }
+                    TraceOwner::Imported => true,
+                });
                 let metas: BTreeMap<TraceId, TraceMeta> = self
                     .daemon()
                     .map(|st| st.traces.iter().map(|t| (t.id, t.clone())).collect())
@@ -225,8 +233,14 @@ impl AppState {
                     self.pane_on_create = None;
                     self.open_created(m.id, PaneKind::for_kind(&m.config.kind));
                 }
+                // Its header row is the selection, unfolded with its live curve under it,
+                // and the list scrolls to it.
                 self.selected = Some(m.id);
                 self.chosen = Some(m.id);
+                self.selected_trace = None;
+                self.selected_live = None;
+                self.collapsed.remove(&TraceOwner::Meas { meas: m.id });
+                self.tree_reveal = true;
                 self.pending_select = Some(m.id);
                 // Made here, by the operator: as if its row were chosen, the panes on screen
                 // are its own from now (it has none yet to bring).

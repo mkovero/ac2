@@ -271,3 +271,103 @@ fn a_new_meter_opens_in_its_own_pane() {
     assert_ne!(spl, tf);
     assert_eq!(t.st.layout.view(spl).and_then(|v| v.meas), Some(MeasId(9)));
 }
+
+/// The list as text: each row's name and first detail, child rows under their header.
+fn list_text(t: &T) -> Vec<String> {
+    t.st.tree_rows()
+        .iter()
+        .map(|row| {
+            let lead = match (row.depth, row.last) {
+                (0, _) => "",
+                (_, false) => "  ├ ",
+                (_, true) => "  └ ",
+            };
+            format!("{lead}{} · {}", row.name, row.details[0])
+        })
+        .collect()
+}
+
+/// Kind `i` of the chooser made on the daemon as id `id`: its form taken as it opens (the
+/// sweep's, which asks for a reference and a level, as the test sweep fills it), the
+/// daemon listing it and answering the create.
+fn create(t: &mut T, i: usize, id: u32) -> MeasConfig {
+    t.key("Ctrl+M");
+    t.st.update(Msg::Choose(Some(i)), &t.keys);
+    let r = t.key("Enter");
+    let c = match created(&r) {
+        Some(c) => c.clone(),
+        None if ac2_scene::new_meas::NewKind::ALL[i] == ac2_scene::new_meas::NewKind::Sweep => {
+            t.key("Escape");
+            sweep_measurement().config
+        }
+        None => panic!("kind {i}: {r:?} {:?}", t.st.overlay),
+    };
+    let m = meas(id, &c.name, c.kind.clone());
+    t.remirror(|s| s.measurements.push(m.clone()));
+    t.conn(ConnEvent::MeasCreated(Box::new(m)));
+    c
+}
+
+/// A measurement made from an empty daemon is selected with its live curve listed under
+/// it, and the list scrolls to it.
+#[test]
+fn a_new_spectrum_is_selected_and_unfolded() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.measurements.clear();
+    t.conn(mirror(s));
+    let c = create(&mut t, 1, 1);
+    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert!(t.st.tree_reveal, "the list scrolls to the new row");
+    let rows = t.st.tree_rows();
+    assert_eq!(rows[0].mark, ac2_scene::meas_list::Mark::Active);
+    assert_eq!(
+        list_text(&t),
+        [
+            format!("FFT  {} · running", c.name),
+            format!("  └ {} (live) · live", c.name),
+        ]
+    );
+}
+
+/// A fold kept from a measurement that is gone (another session, a restarted daemon) does
+/// not fold the new one that takes its id: every kind opens unfolded, its live curve (when
+/// it has one) listed under it.
+#[test]
+fn a_new_measurement_is_never_folded() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.measurements.clear();
+    t.conn(mirror(s));
+    for (i, id) in [(0, 2), (1, 3), (2, 4), (3, 5), (4, 6)] {
+        t.st.collapsed.insert(TraceOwner::Meas { meas: MeasId(id) });
+        let c = create(&mut t, i, id);
+        assert_eq!(t.st.selected, Some(MeasId(id)), "{c:?}");
+        let row =
+            t.st.tree_rows()
+                .into_iter()
+                .find(|r| r.key == ac2_scene::meas_list::TreeKey::Meas(MeasId(id)))
+                .expect("its header");
+        assert_eq!(row.collapsed, Some(false), "{}", row.name);
+        if ac2_scene::meas_list::has_live_curve(&c.kind) {
+            assert!(
+                list_text(&t).contains(&format!("  └ {} (live) · live", c.name)),
+                "{:?}",
+                list_text(&t)
+            );
+        }
+    }
+}
+
+/// A fold goes with its measurement: a later one listed under the same id (a session
+/// loaded, a restarted daemon numbering afresh) starts unfolded.
+#[test]
+fn a_gone_measurements_fold_is_forgotten() {
+    let mut t = T::new();
+    let sub = TraceOwner::Meas { meas: MeasId(2) };
+    t.st.update(Msg::ToggleGroup(sub), &t.keys);
+    t.st.update(Msg::ToggleGroup(TraceOwner::Imported), &t.keys);
+    t.remirror(|s| s.measurements.retain(|m| m.id != MeasId(2)));
+    assert!(!t.st.collapsed.contains(&sub));
+    assert!(t.st.collapsed.contains(&TraceOwner::Imported));
+}
