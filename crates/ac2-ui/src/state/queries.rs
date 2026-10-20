@@ -569,10 +569,7 @@ impl AppState {
     /// the math channel it is. `None` with nothing shown (or a math channel under Imported).
     pub fn group_of_shown(&self, shown: Option<&Measurement>) -> Option<MeasId> {
         let m = shown?;
-        match ac2_scene::meas_list::meas_group(m, &self.measurements()) {
-            TraceOwner::Meas { meas } => Some(meas),
-            TraceOwner::Imported => None,
-        }
+        ac2_scene::meas_list::meas_group(m, &self.measurements()).meas()
     }
 
     /// Whether a pane of kind `kind` showing `shown` draws stored trace `t` as its own: a
@@ -583,10 +580,9 @@ impl AppState {
     pub fn on_pane(&self, kind: PaneKind, t: &TraceMeta, shown: Option<&Measurement>) -> bool {
         kind != PaneKind::Distortion
             && kind_shown(t, kind)
-            && match ac2_scene::meas_list::group_of(t, &self.measurements()) {
-                TraceOwner::Meas { meas } => Some(meas) == self.group_of_shown(shown),
-                TraceOwner::Imported => false,
-            }
+            && ac2_scene::meas_list::group_of(t, &self.measurements())
+                .meas()
+                .is_some_and(|g| Some(g) == self.group_of_shown(shown))
     }
 
     /// Whether measurement `m` publishes a live curve a pane of kind `kind` draws.
@@ -614,10 +610,9 @@ impl AppState {
         if shown.map(|p| p.id) == Some(m.id) {
             return true;
         }
-        match ac2_scene::meas_list::meas_group(m, &self.measurements()) {
-            TraceOwner::Meas { meas } => Some(meas) == self.group_of_shown(shown),
-            TraceOwner::Imported => false,
-        }
+        ac2_scene::meas_list::meas_group(m, &self.measurements())
+            .meas()
+            .is_some_and(|g| Some(g) == self.group_of_shown(shown))
     }
 
     /// Whether a pane of kind `kind` showing `shown` draws `m`'s live curve for compare

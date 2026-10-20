@@ -169,37 +169,23 @@ fn draw_item(ui: &mut egui::Ui, it: &Item, k: usize, rtl: bool) -> Option<Comman
 pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let st = &app.state;
     let now = std::time::Instant::now();
-    let (color, link_full, link_short) = match &st.conn {
-        ConnState::Connecting { target } => (
-            ch.warn,
-            format!("connecting to {target}…"),
-            "connecting…".to_owned(),
-        ),
-        ConnState::Failed { target, error } => (
-            ch.fault,
-            format!("{target}: {error} · retrying"),
-            "link failed · retrying".to_owned(),
-        ),
-        ConnState::Connected { target, server, .. } => {
-            let responding = st.mirror.as_ref().is_some_and(|m| m.responding(now));
-            let synced = st.mirror.as_ref().is_some_and(|m| m.synced());
-            if !responding {
-                (
-                    ch.fault,
-                    format!("{server} · {target} · not responding"),
-                    "not responding".to_owned(),
-                )
-            } else if !synced {
-                (
-                    ch.warn,
-                    format!("{server} · {target} · syncing"),
-                    "syncing".to_owned(),
-                )
-            } else {
-                (ch.ok, format!("{server} · {target}"), target.clone())
-            }
-        }
+    let link_state = match &st.conn {
+        ConnState::Connecting { target } => ac2_scene::chrome::Link::Connecting { target },
+        ConnState::Failed { target, error } => ac2_scene::chrome::Link::Failed { target, error },
+        ConnState::Connected { target, server, .. } => ac2_scene::chrome::Link::Connected {
+            target,
+            server,
+            responding: st.mirror.as_ref().is_some_and(|m| m.responding(now)),
+            synced: st.mirror.as_ref().is_some_and(|m| m.synced()),
+        },
     };
+    let link_line = ac2_scene::chrome::link_line(link_state);
+    let color = match link_line.tone {
+        ac2_scene::chrome::LinkTone::Ok => ch.ok,
+        ac2_scene::chrome::LinkTone::Warn => ch.warn,
+        ac2_scene::chrome::LinkTone::Fault => ch.fault,
+    };
+    let (link_full, link_short) = (link_line.full, link_line.short);
     let dim = |s: String| RichText::new(s).color(ch.dim);
     let stopped = crate::scenes::audio_stopped(st, super::now().wall);
     // The session line in full: when it is wider than its room the segment scrolls.
@@ -212,7 +198,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 RichText::new(t.bar.first().cloned().unwrap_or_default())
                     .color(ch.fault)
                     .into(),
-                Some(format!("{} · {}", t.banner, t.detail)),
+                Some(ac2_scene::chrome::stopped_hover(&t.banner, &t.detail)),
             ),
         ),
         (Some(o), None) => {
@@ -245,7 +231,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         let name = ac2_scene::sessions::origin_name(st.working().origin.as_ref());
         let color = if l.unsaved { ch.warn } else { ch.text };
         let short = if l.unsaved {
-            format!("{name} ·")
+            ac2_scene::chrome::unsaved_short(&name)
         } else {
             name
         };
@@ -272,23 +258,15 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     left.extend(working);
 
     // Right side, from the edge inwards.
-    let mut keys = Item::new(
-        10,
-        vec![
-            dim(format!(
-                "{} keys · {} commands",
-                key_hint(app, CommandId::Help),
-                key_hint(app, CommandId::Palette)
-            )),
-            dim(format!("{} keys", key_hint(app, CommandId::Help))),
-        ],
-    )
-    .sep();
-    keys.hover = Some(format!(
-        "{} shows every key · {} finds every command by name · {} hides or shows the panes' key hints",
-        key_hint(app, CommandId::Help),
-        key_hint(app, CommandId::Palette),
-        key_hint(app, CommandId::KeyHints)
+    let [keys_full, keys_short] = ac2_scene::chrome::keys_hint(
+        &key_hint(app, CommandId::Help),
+        &key_hint(app, CommandId::Palette),
+    );
+    let mut keys = Item::new(10, vec![dim(keys_full), dim(keys_short)]).sep();
+    keys.hover = Some(ac2_scene::chrome::keys_tip(
+        &key_hint(app, CommandId::Help),
+        &key_hint(app, CommandId::Palette),
+        &key_hint(app, CommandId::KeyHints),
     ));
     let mut right = vec![keys];
     if let Some(l) = st.autosave_label(super::now().wall) {
