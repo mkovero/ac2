@@ -14,8 +14,17 @@ pub const EXPORT_DIR: &str = "~/ac2-exports";
 /// `offset_s` ahead of UTC: `FOH-SPL-leq-2026-10-17-0012.csv`. What a file name cannot hold
 /// (spaces, separators) becomes `-`.
 pub fn leq_export_name(meter: &str, at: WallNs, offset_s: i32) -> String {
-    let name: String = meter
-        .trim()
+    let name = file_name_part(meter);
+    let secs = (at.0 / 1_000_000_000) as i64 + i64::from(offset_s);
+    let when = chrono::DateTime::from_timestamp(secs, 0)
+        .map(|t| t.format("%Y-%m-%d-%H%M").to_string())
+        .unwrap_or_default();
+    format!("{name}-leq-{when}.csv")
+}
+
+/// `s` as part of a file name: what a file name cannot hold (spaces, separators) becomes `-`.
+pub(super) fn file_name_part(s: &str) -> String {
+    s.trim()
         .chars()
         .map(|c| {
             if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') {
@@ -24,12 +33,7 @@ pub fn leq_export_name(meter: &str, at: WallNs, offset_s: i32) -> String {
                 '-'
             }
         })
-        .collect();
-    let secs = (at.0 / 1_000_000_000) as i64 + i64::from(offset_s);
-    let when = chrono::DateTime::from_timestamp(secs, 0)
-        .map(|t| t.format("%Y-%m-%d-%H%M").to_string())
-        .unwrap_or_default();
-    format!("{name}-leq-{when}.csv")
+        .collect()
 }
 
 /// `text` typed as a path: `~/` is the home directory `home`, and so is the base of a

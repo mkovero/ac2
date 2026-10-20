@@ -135,6 +135,8 @@ fn every_command_is_reachable() {
         // Once a show: the palette's "export leq".
         CommandId::SplLogExport,
         CommandId::SplLogExportPrevious,
+        // For a report, now and then: the palette's "export pane".
+        CommandId::ExportPanePng,
     ];
     let m = Keymap::default();
     for c in CommandId::ALL {

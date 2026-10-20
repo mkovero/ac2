@@ -437,6 +437,7 @@ impl AppState {
                 }
                 None => self.warn(self.select_trace_first()),
             },
+            C::ExportPanePng => self.ask_pane_export(),
             C::TraceRename => match self.selected_trace_meta().cloned() {
                 Some(t) => self.prompt(PromptKind::TraceRename(t.id), t.edit.name.clone()),
                 None => self.warn(self.select_trace_first()),

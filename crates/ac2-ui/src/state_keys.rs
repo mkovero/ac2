@@ -438,6 +438,7 @@ impl AppState {
             PromptKind::LeqExport { meas, previous } => {
                 self.leq_export_entered(meas, previous, &text, out)
             }
+            PromptKind::PaneExport(pane) => self.pane_export_entered(pane, &text),
             PromptKind::TraceExport(id) => {
                 let path = text.trim();
                 if path.is_empty() {

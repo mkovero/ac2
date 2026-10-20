@@ -85,6 +85,9 @@ pub use leq_strip::{LeqSpan, STRIP_MIN_S, StripMsg};
 #[path = "state_leq_export.rs"]
 mod leq_export;
 pub use leq_export::{EXPORT_DIR, export_path, leq_export_name};
+#[path = "state_pane_export.rs"]
+mod pane_export;
+pub use pane_export::{PaneExport, pane_export_name};
 #[path = "state_link.rs"]
 mod link;
 #[path = "state_meas_display.rs"]
@@ -353,6 +356,8 @@ pub struct AppState {
     pub client_key: Option<crate::settings::ClientKey>,
     /// The operator asked for the connect dialog (the app opens it).
     pub want_connect_dialog: bool,
+    /// A pane to write as PNG (the app renders it with the window's GPU and takes it).
+    pub pane_export: Option<PaneExport>,
     /// The selection moved by key: the tree brings its row into view (the view takes it).
     pub tree_reveal: bool,
     /// A key moved the Settings page's focus (or a page was shown): the page brings the
@@ -520,6 +525,7 @@ impl AppState {
             spectrum_fit: BTreeMap::new(),
             client_key: None,
             want_connect_dialog: false,
+            pane_export: None,
             tree_reveal: false,
             settings_reveal: false,
             settings_page_last: Page::AudioIo,

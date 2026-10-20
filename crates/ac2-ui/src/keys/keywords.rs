@@ -92,6 +92,7 @@ impl CommandId {
             C::TraceSlot | C::MoveTrace => &["stored", "slot"],
             C::TraceRename => &["name", "label"],
             C::TraceExport => &["save", "text", "csv", "file"],
+            C::ExportPanePng => &["save", "image", "picture", "screenshot", "report", "print"],
             C::SelectLive => &["curve", "trace"],
             C::DeleteSelected => &["remove", "erase", "trace", "measurement"],
             C::OffsetUp | C::OffsetDown | C::OffsetUpCoarse | C::OffsetDownCoarse => {

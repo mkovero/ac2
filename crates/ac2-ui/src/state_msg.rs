@@ -41,6 +41,8 @@ pub enum PromptKind {
         meas: MeasId,
         previous: bool,
     },
+    /// Where a pane is written as PNG on this computer.
+    PaneExport(PaneId),
 }
 
 impl PromptKind {
@@ -80,6 +82,9 @@ impl PromptKind {
             } => "Export the Leq log as CSV on this computer to (file path)",
             PromptKind::LeqExport { previous: true, .. } => {
                 "Export the previous Leq log as CSV on this computer to (file path)"
+            }
+            PromptKind::PaneExport(_) => {
+                "Export the focused pane as PNG on this computer to (file path)"
             }
             PromptKind::FinderObservation => {
                 "Delay finder observation (s; empty = automatic; sub band: 2, 4 or 8)"

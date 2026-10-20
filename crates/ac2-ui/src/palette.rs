@@ -247,6 +247,8 @@ mod tests {
             ("new log", CommandId::SplNewLog),
             ("export leq", CommandId::SplLogExport),
             ("export previous", CommandId::SplLogExportPrevious),
+            ("export pane", CommandId::ExportPanePng),
+            ("screenshot", CommandId::ExportPanePng),
             ("full screen", CommandId::Fullscreen),
             ("key hints", CommandId::KeyHints),
             ("warning toasts", CommandId::WarningToasts),

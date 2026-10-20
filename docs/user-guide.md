@@ -614,6 +614,19 @@ values, the band labels, the limit lines and the allowed-level marks with their 
 at every step, and nothing moves: the scale keeps its room. The theme is in
 Settings › Display and the palette (*Theme*).
 
+#### Export a pane as PNG
+
+Palette (Ctrl+K) **Export pane as PNG…** (no key) writes the focused pane's plot as an image
+on the computer the app runs on, for a tuning report. It asks where, suggesting
+`~/ac2-exports/<measurement>-<view>-<YYYYMMDD-HHMMSS>.png` (a name typed without an
+extension gets `.png`; the folder is made). The picture is the plot as shown: the same
+view, zoom, theme and **T** step, with its legend, axes, labels and cursor readouts, drawn
+by the same renderer as the screen at twice the pane's on-screen pixels (sharper in print;
+a very large pane is held to the GPU's texture limit). The pane's title strip (number,
+name, measurement chip) and its key-hint line are window chrome and are not in it. A toast
+names the file and its size (`Transfer pane exported to … (2400×1300 px)`). The command
+line has no export: it has no renderer.
+
 #### The transfer legend
 
 The magnitude pane's legend lists every curve (name, colour, tags) on a plate that reads
@@ -2741,6 +2754,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Clear compare | `clear_compare` |
 | Move trace to slot… | `trace_slot` |
 | Export trace… | `trace_export` |
+| Export pane as PNG… | `pane_export_png` |
 | Import trace… | `import_trace` |
 | New session… | `session_new` |
 | Open session… | `session_load` |

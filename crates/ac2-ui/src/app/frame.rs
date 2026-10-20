@@ -20,7 +20,7 @@ impl eframe::App for App {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.passes += 1;
         if self.startup.first_ui.is_none() {
@@ -123,6 +123,18 @@ impl eframe::App for App {
             self.applied_theme = Some(self.state.theme);
         }
         view::draw(self, ui, &t);
+        // After the panes, so the export is the scene this pass drew.
+        if let Some(req) = self.state.pane_export.take() {
+            let result = self.export_pane(frame.wgpu_render_state(), ctx.pixels_per_point(), &req);
+            let (what, result) = match result {
+                Ok(done) => (done, Ok(())),
+                Err(e) => ("export pane".to_string(), Err(e)),
+            };
+            self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
+                what,
+                result,
+            })));
+        }
         if let Some(d) = self.connect.as_mut()
             && let Some(choice) = d.show(&ctx, &theme::chrome(&t))
         {

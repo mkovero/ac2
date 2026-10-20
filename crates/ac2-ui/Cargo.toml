@@ -40,6 +40,8 @@ chrono = { workspace = true, features = ["clock"] }
 clap = { workspace = true, features = ["derive"] }
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wayland", "wgpu", "x11"] }
 egui-wgpu = "0.36.2"
+# A pane exported as PNG (src/pane_export.rs).
+png = "0.18"
 # This computer's CPU use for the health meter (only its CPU figures are read).
 sysinfo = { workspace = true, features = ["system"] }
 serde = { workspace = true, features = ["derive"] }

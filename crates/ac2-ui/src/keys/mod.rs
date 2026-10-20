@@ -194,6 +194,7 @@ commands! {
     TraceSlot => "trace_slot", "Move trace to slot…", [Global];
     TraceRename => "trace_rename", "Rename trace…", [Global];
     TraceExport => "trace_export", "Export trace…", [Global];
+    ExportPanePng => "pane_export_png", "Export pane as PNG…", [Global];
     SelectLive => "select_live", "Select live", [Global];
     DeleteSelected => "delete_selected", "Delete selected…", [Global];
     OffsetUp => "offset_up", "Offset +1 dB", [Global];

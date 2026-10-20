@@ -192,6 +192,7 @@ dependencies = [
  "egui-wgpu",
  "egui_kittest",
  "num-complex",
+ "png",
  "serde",
  "sysinfo",
  "tempfile",
