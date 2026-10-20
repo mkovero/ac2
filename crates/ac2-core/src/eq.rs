@@ -459,6 +459,56 @@ pub fn peak_minus3db_q(q: f64, gain_db: f64) -> Result<f64, Refusal> {
     Ok(q * (a4 - 2.0).sqrt() / a)
 }
 
+/// A shelf as its prototype is built: the midpoint it is designed (and a digital section
+/// prewarped) at, and the cookbook Q of a second-order one (`None`: first order).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShelfPlan {
+    /// Where the gain is half the dB gain, Hz.
+    pub midpoint: f64,
+    /// Cookbook Q; `None` for a first-order shelf.
+    pub q: Option<f64>,
+}
+
+/// The [`ShelfPlan`] of a shelf section, or why it is refused. A corner reading is moved to
+/// the midpoint on the analog prototype (the 3 dB-from-flat point is a property of the
+/// prototype's shape, not of the realisation).
+pub fn shelf_plan(
+    pass: Pass,
+    f: f64,
+    gain_db: f64,
+    order: ShelfOrder,
+    f_at: ShelfFreq,
+) -> Result<ShelfPlan, Refusal> {
+    let g = check_gain(gain_db)?;
+    let (sos, q) = match order {
+        ShelfOrder::First => (proto::shelf_first(pass, g), None),
+        ShelfOrder::Second(slope) => {
+            let q = match slope {
+                ShelfSlope::Q(q) => q,
+                ShelfSlope::Octaves(n) => {
+                    if !(n.is_finite() && n > 0.0) {
+                        return Err(Refusal::OctavesNotPositive);
+                    }
+                    q_from_octaves(n)
+                }
+                ShelfSlope::S(s) => shelf_q_from_s(s, g).ok_or(Refusal::ShelfSlopeRange { s })?,
+            };
+            let q = check_q(q)?;
+            (proto::shelf_second(pass, g, q), Some(q))
+        }
+    };
+    let midpoint = match f_at {
+        ShelfFreq::Midpoint => f,
+        ShelfFreq::Corner => {
+            if g.abs() <= CORNER_DB {
+                return Err(Refusal::ShelfTooSmallForCorner);
+            }
+            f / proto::corner_ratio(pass, g, &sos)
+        }
+    };
+    Ok(ShelfPlan { midpoint, q })
+}
+
 /// Designs one section for a realisation, or says why it is refused.
 pub fn design(section: &Section, real: Realisation) -> Result<Designed, Refusal> {
     if let Realisation::Digital { rate } = real
@@ -496,34 +546,12 @@ pub fn design(section: &Section, real: Realisation) -> Result<Designed, Refusal>
             f_at,
         } => {
             check_f(f, real)?;
-            let g = check_gain(gain_db)?;
-            let sos = match order {
-                ShelfOrder::First => proto::shelf_first(pass, g),
-                ShelfOrder::Second(slope) => {
-                    let q = match slope {
-                        ShelfSlope::Q(q) => q,
-                        ShelfSlope::Octaves(n) => {
-                            if !(n.is_finite() && n > 0.0) {
-                                return Err(Refusal::OctavesNotPositive);
-                            }
-                            q_from_octaves(n)
-                        }
-                        ShelfSlope::S(s) => {
-                            shelf_q_from_s(s, g).ok_or(Refusal::ShelfSlopeRange { s })?
-                        }
-                    };
-                    proto::shelf_second(pass, g, check_q(q)?)
-                }
+            let plan = shelf_plan(pass, f, gain_db, order, f_at)?;
+            let sos = match plan.q {
+                None => proto::shelf_first(pass, gain_db),
+                Some(q) => proto::shelf_second(pass, gain_db, q),
             };
-            let f0 = match f_at {
-                ShelfFreq::Midpoint => f,
-                ShelfFreq::Corner => {
-                    if g.abs() <= CORNER_DB {
-                        return Err(Refusal::ShelfTooSmallForCorner);
-                    }
-                    f / proto::corner_ratio(pass, g, &sos)
-                }
-            };
+            let f0 = plan.midpoint;
             check_f(f0, real)?;
             Stage::Proto { f0, sos: vec![sos] }
         }

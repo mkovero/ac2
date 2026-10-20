@@ -205,11 +205,13 @@ pub enum EqShape {
         bw: Bandwidth,
     },
     /// First-order all-pass (90° point).
+    #[serde(rename = "all_pass_1")]
     AllPass1 {
         /// 90° point.
         f: Hz,
     },
     /// Second-order all-pass (180° point).
+    #[serde(rename = "all_pass_2")]
     AllPass2 {
         /// 180° point.
         f: Hz,

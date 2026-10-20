@@ -210,22 +210,28 @@ The ac2 text carries the full model; the APO format below is for exchange.
 
 **Equalizer APO / REW filter text** (`--format apo`, `ac2_traces::text::apo`): the
 `Filter: ON PK Fc 1250 Hz Gain -4.0 dB Q 2.00` line grammar Equalizer APO's `config.txt` reads
-and REW's "export filter settings as text" writes; one reader for both. Spellings marked † are
-to be verified against Equalizer APO's documentation and a REW export before the parser is
-written (the test plan writes sample files from them).
+and REW's "export filter settings as text" writes; one reader for both. The readings were
+settled against REW 5.40's Generic equaliser on pupu (one filter at a time on an imported flat
+response, its predicted response read through the API: `ac2-traces`
+`tests/fixtures/rew_generic_eq.json`, matched within 0.02 dB / 0.5° from 20 Hz to 20 kHz above
+−40 dB) and Equalizer APO's configuration reference. REW's text export itself could not be
+taken (no API endpoint; the GUI was held by a modal dialog that would have changed REW's
+state), so the REW layout test is written from its documented layout.
 
 | read | maps to |
 |---|---|
 | `Filter:` or `Filter N:` (N ignored), then `ON` / `OFF` | a section, `enabled` = ON |
-| `PK Fc Gain` + `Q q` or `BW Oct n` | `peaking`, `q_measured: half_gain` (APO's PK is the cookbook peaking EQ †); `BW Oct` by the cookbook's bandwidth relation † (whether APO warps it with `w0/sin w0` at the device rate decides the conversion) |
-| `LP` / `HP Fc` | `low_pass_q` / `high_pass_q` with APO's fixed Q † (0.7071 expected: Butterworth 2nd order) |
-| `LPQ` / `HPQ Fc Q` | `low_pass_q` / `high_pass_q` |
-| `LS` / `HS Fc Gain` (and `LS 6dB`, `LS 12dB`, `HS …` †) | `low_shelf` / `high_shelf`: 6 dB → first order, 12 dB / plain → second order with APO's fixed slope † |
-| `LSC` / `HSC [x dB] Fc Gain [Q q]` † | second-order shelf with the given Q; the `x dB` slope form as APO defines it † (refused by line until verified, not guessed) |
-| `NO Fc [Q q]`, `AP Fc [Q q]`, `BP Fc [Q q]` | `notch`, `all_pass_2`, `band_pass` (APO's default Q when absent †) |
-| `Preamp: g dB` | a `gain` section first in the list |
-| `#` comment lines; REW's header lines (`Filter Settings file`, `Room EQ V…`, `Dated:`, `Equaliser:`, `Notes:` †); REW's `Filter N: ON None` | ignored; REW's `Equaliser:` other than `Generic` is refused (its Q conventions differ and are not guessed) |
-| `Delay: t ms` † | `delay` (the same operation; it does not depend on channels) |
+| `PK` / `PEQ Fc Gain Q q` | `peaking`, `q_measured: half_gain` (REW: the cookbook peaking EQ, within 0.012 dB up to 12 kHz +9 dB Q 0.7). `BW Oct n` refused by line: whether APO / REW warp it at the device rate is not verified |
+| `LP` / `HP Fc` | `low_pass_q` / `high_pass_q` at Q 1/√2 (REW: the cookbook section, within 0.007 dB) |
+| `LPQ` / `HPQ Fc Q`, `LP` / `HP Fc Q` | `low_pass_q` / `high_pass_q` |
+| `LS` / `HS Fc Gain [Q q]`, `LSC` / `HSC Fc Gain [Q q]` | second-order shelf at its midpoint, the given Q or slope S = 1 (REW: the cookbook shelf, within 0.001 dB) |
+| `LS 6dB` / `HS 6dB`, `LS 12dB` / `HS 12dB Fc Gain` | first / second-order (Q 1/√2) shelf; `Fc` is the corner on the plateau side for either gain sign: `tan(π·f_mid/fs) = K^{±1/(2n)}·tan(π·Fc/fs)` (low ×, high ÷, K the linear gain magnitude, n the order; analog: on f itself), within 0.002 dB in all eight REW cases |
+| `LSC` / `HSC x dB …` (APO's slope form), `Modal`, `T60` | refused by line: not verified, not guessed |
+| `NO Fc [Q q]` | `notch`, Q 30 without one (REW: fitted 30.00 on a 0.05 Hz grid) |
+| `AP Fc Q`, `BP Fc Q` | `all_pass_2` (REW: the cookbook all-pass), `band_pass`; without a Q refused (REW's Generic has no BP; APO's default is not documented) |
+| `Preamp: g dB` | summed into one `gain` section first in the list |
+| `Delay: t ms` | `delay` (the same operation; it does not depend on channels); `Delay: n samples` refused (the file names no rate) |
+| `#` comment lines; REW's header (`Filter Settings file` up to its first filter line: version, date, notes, measurement name); REW's `Filter N: ON None` | ignored; REW's `Equaliser:` other than `Generic` is refused (its Q conventions differ and are not guessed) |
 | any other command (`Include`, `Channel`, `Device`, `Copy`, `Stage`, `If` / `Eval`, `GraphicEQ`, `Convolution`, …) or an unknown filter type | **refused with the line number**: they select channels / devices or reference other files, so the list would not be the filter one output sees |
 
 An import refused anywhere imports nothing. Export writes the set as APO lines, and
@@ -234,18 +240,20 @@ An import refused anywhere imports nothing. Export writes the set as APO lines, 
   closed form (same filter); `band_pass` reading refused (another filter family).
 - `high_pass` / `low_pass` Butterworth or Linkwitz-Riley of even order: cascaded `HPQ` / `LPQ`
   lines at the same Fc with the prototype's section Qs (exact: APO prewarps each biquad at its
-  Fc, which is the section's f). Odd orders refused unless a 1st-order line exists †. Bessel
-  refused: its sections sit at different frequencies, so per-line prewarping differs from
+  Fc, which is the section's f); LR orders divisible by 4. Odd orders refused (no first-order
+  pass line in the grammar). Bessel refused: its sections sit at different frequencies, so per-line prewarping differs from
   ac2's near Nyquist.
 - Shelves: second order → `LSC` / `HSC` with Q (S and the corner reading converted exactly);
-  first order → `LS 6dB` † only if APO's definition matches; else refused.
+  first order → `LS 6dB` / `HS 6dB` with the midpoint moved to REW's corner by the relation
+  above.
 - `notch`, `all_pass_2`, `band_pass`, `high_pass_q`/`low_pass_q` as lines; `gain` sections summed
-  into one `Preamp`; `delay` → `Delay` †; `polarity` (channel `Copy` in APO), `all_pass_1`,
+  into one `Preamp`; `delay` → `Delay: t ms`; `polarity` (channel `Copy` in APO), `all_pass_1`,
   `biquad`, `response` refused; an `analog` set refused (APO filters are digital); a digital
   set's rate written as a comment (APO runs at the device's rate).
 - Disabled sections are written `OFF`. The in-console mark is not a filter and is not written
   (the reply says so).
-A refused section is named with its reason (`3 · bessel high-pass: per-line prewarp differs`)
+A refused section is named with its reason (`3 · high-pass: Bessel sections sit at different frequencies, so per-line
+prewarping differs`)
 and nothing is written; `--skip-unsupported` writes the rest and lists every skipped section as
 a `#` comment at the top of the file. Never approximated.
 
@@ -263,16 +271,13 @@ a `#` comment at the top of the file. Never approximated.
 - `tools/refgen/sets/eq.py`: golden vectors from scipy (`signal.bilinear_zpk`, `freqz`,
   `freqs`, `butter`/`bessel(norm=…)`) and the cookbook formulas written out independently, so
   the Rust and the reference do not share code; compared with `ac2-testkit` tolerances.
-- `ac2-traces`: ac2 text round-trip, every refusal by line. APO: sample files written from
-  Equalizer APO's documentation and a REW export (no rig data), one per † spelling above;
-  import → export → import identity for every expressible shape; every export refusal named;
-  `--skip-unsupported` comments; an APO `Channel` / `Include` line refused by number.
-- Settling the † marks: REW 5.40 runs headless on pupu (API on port 4735, GUI on Xvfb; see
-  `tools/crosscheck`). Before the APO reader is written, set one filter of each † kind in REW's
-  EQ (Generic equaliser) and export the filter settings as text; also compare REW's predicted
-  filter response with ac2's for the same section (`BW Oct` warping, default Q, shelf slopes).
-  Filter export plays nothing. The exported text files are hand-checked and kept as test
-  fixtures (they hold no rig data); what they show replaces the † guesses here.
+- `ac2-traces`: ac2 text round-trip, every refusal by line. APO: every REW Generic filter type
+  read as a line predicts REW's response (`tests/fixtures/rew_generic_eq.json`: REW 5.40's
+  predicted responses, one filter at a time on an imported flat response at 48 kHz; no rig
+  data), the default notch Q on a fine linear grid, a file in APO's documented syntax and one
+  in REW's export layout; export → import predicts the set exactly and a second round trip
+  the same; every export refusal named; `--skip-unsupported` comments; `Channel` / `Include`
+  and every unverified spelling refused by line number.
 - `ac2-proto`: wire fixtures for `EqShape`, `Operand::Eq`, `TraceSource::Eq`, WIRE_LOCK bumped.
 - `ac2d` `tests/it/eq.rs` from an empty daemon on the fake backend: a transfer measurement on a
   flat fake path; `eq new` + peaking −6 dB @ 1 kHz → the prediction reads −6 dB at 1 kHz and

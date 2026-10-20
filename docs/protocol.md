@@ -390,7 +390,7 @@ client refetches the data when it changes)}. `EqBody` = {`name`, `realisation`
 `ShelfSlope`}, `f_at`: `midpoint` \| `corner`}, `high_pass` / `low_pass` {`f`,
 `alignment`: `butterworth` \| `linkwitz_riley` \| `bessel` {`norm`: `phase` \| `delay` \|
 `minus3db`}, `order`}, `high_pass_q` / `low_pass_q` {`f`, `q`}, `notch` / `band_pass` {`f`,
-`bw`}, `all_pass1` {`f`}, `all_pass2` {`f`, `q`}, `gain` {`gain`}, `polarity`, `delay`
+`bw`}, `all_pass_1` {`f`}, `all_pass_2` {`f`, `q`}, `gain` {`gain`}, `polarity`, `delay`
 {`seconds`}, `biquad` {`b0`, `b1`, `b2`, `a1`, `a2`, `rate`}, `response` {`trace`}.
 `Bandwidth`: `q` {`value`} \| `octaves` {`n`}; `ShelfSlope`: `q` {`value`} \| `s` {`value`} \|
 `octaves` {`n`}. `invalid` with the section's number and reason for a refused section (f at
