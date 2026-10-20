@@ -155,6 +155,20 @@ fn rig_rev(c: &Client) -> Rev {
     c.view().state.clone().unwrap().rig.rev
 }
 
+/// Waits until the mirror's rig shows the Art-Net target `want`: a reply can reach the
+/// client before the event it caused reaches its mirror, so a rev read from the mirror right
+/// after a call may still be the one before it.
+async fn target_until(c: &Client, want: Option<ArtnetTarget>) {
+    let deadline = Instant::now() + WAIT;
+    while c.view().state.clone().unwrap().rig.artnet_target != want {
+        assert!(
+            Instant::now() < deadline,
+            "rig.artnet_target never {want:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// Waits until the rig entity's lit channels read `want`.
 async fn rig_dmx_until(c: &Client, want: &str) {
     let deadline = Instant::now() + WAIT;
@@ -189,6 +203,9 @@ async fn the_universe_follows_the_cues_and_keeps_alive() {
     .await
     .unwrap();
     let f = node.until("the first frame", |_| true);
+    // The conflict below names the daemon's rev, which the mirror has once it shows the
+    // target.
+    target_until(&c, Some(target)).await;
     assert_eq!((f.net, f.sub_uni), (1, 0x23));
     assert!(f.data.iter().all(|v| *v == 0));
     let e = c
@@ -367,9 +384,13 @@ async fn a_cue_change_fades_and_a_zero_fade_jumps() {
     .await
     .unwrap();
     node.until("the first frame", |_| true);
+    target_until(&c, Some(target_on(&node))).await;
 
-    // A meter with no session goes to fault: channel 20 climbs through several steps over
-    // the fade, never down, and stops at its level.
+    // A meter with no session goes to fault: channel 20 climbs through intermediate levels,
+    // never down, and stops at its level no sooner than the fade's length after the change.
+    // How many steps arrive depends on how often a loaded runner wakes the control loop
+    // (one every `FADE_STEP` when idle), so only a fade, not a step count, is asserted.
+    let asked = Instant::now();
     create(&c, meter("A", None, cue("", "", "", "20=255"))).await;
     let first = node.until("the fade's first step", |f| f.ch(20) > 0);
     let mut steps = vec![first.ch(20)];
@@ -377,16 +398,20 @@ async fn a_cue_change_fades_and_a_zero_fade_jumps() {
         steps.push(f.ch(20));
         f.ch(20) == 255
     });
-    let took = last.at - first.at;
-    let between: Vec<u8> = steps.iter().copied().filter(|v| *v < 255).collect();
-    assert!(between.len() >= 4, "steps {steps:?}");
+    let took = last.at - asked;
+    assert!(
+        steps.iter().any(|v| *v < 255),
+        "a jump, not a fade: {steps:?}"
+    );
     assert!(steps.windows(2).all(|w| w[0] <= w[1]), "steps {steps:?}");
     assert!(
-        took > Duration::from_millis(150) && took < Duration::from_millis(1000),
+        took >= Duration::from_millis(300) && took < Duration::from_secs(3),
         "{took:?}"
     );
 
-    // No fade: the next change is one frame at its level.
+    // No fade: the next change is one frame at its level. The fault's levels moved the rig's
+    // rev; the fade is set on that one.
+    rig_dmx_until(&c, "20=255").await;
     c.call(Command::ArtnetFade {
         base: rig_rev(&c),
         seconds: Seconds(0.0),
