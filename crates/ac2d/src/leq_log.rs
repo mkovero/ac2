@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ac2_core::band_leq::{BandSecond, Period, Placed};
-use ac2_core::leq::{LogTotal, PEAK_HOLD_S, PeakHold, RollingLeq, Second};
+use ac2_core::leq::{LogTotal, PEAK_HOLD_S, RecentPeaks, RollingLeq, Second};
 use ac2_proto::model::BandPeriod;
 use ac2_proto::model::{
     LeqConfig, LeqJudgement, LeqPeakState, LeqWindow, LeqWindowState, PeakLimit, PeakQuantity,
@@ -302,7 +302,7 @@ impl LeqLog {
     /// ([`RollingLeq::refill`], which a client's replay of the log follows too). `peaks`
     /// gets the rows of the newest [`PEAK_HOLD_S`] seconds before `now`, so a restarted
     /// job judges its peak limits on what was just logged.
-    pub(crate) fn rebuild(&self, ring: &mut RollingLeq, peaks: &mut PeakHold, now: u64) {
+    pub(crate) fn rebuild(&self, ring: &mut RollingLeq, peaks: &mut RecentPeaks, now: u64) {
         ring.refill(
             self.rows.iter().rev().map(|r| (r.start.0, row_second(r))),
             now,
@@ -511,7 +511,7 @@ mod tests {
             },
         ];
         let mut r = RollingLeq::new(&specs, 60);
-        let mut peaks = PeakHold::default();
+        let mut peaks = RecentPeaks::default();
         l.rebuild(&mut r, &mut peaks, t0 + 240 * NS);
         // The newest ten seconds' maxima: -30 dBFS rows, +12 dB peaks.
         assert!((peaks.max_dbfs()[0] + 18.0).abs() < 1e-9);

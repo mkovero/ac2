@@ -441,7 +441,7 @@ pub struct SpectrumScene {
     /// else the first's that has bands); empty when the marker is off.
     pub stitches: Vec<crate::stitch::Stitch>,
     /// Its columns finer than the window behind them resolves, shaded.
-    pub unresolved: Vec<crate::unresolved::Mark>,
+    pub unresolved: Vec<crate::unresolved::RangeMark>,
 }
 
 /// The bands of the selected curve that has them, else of the first that does; `None`

@@ -407,15 +407,17 @@ fn desired(armed: bool, firing: bool) -> GeneratorDesired {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn lease_is_refreshed_while_held_and_stopped_on_drop() -> R {
-    let f = fake()?;
+    // Twice the client's 500 ms refresh period: the three refreshes awaited outlast it.
+    let f = FakeDaemon::start(FakeOptions {
+        lease_expiry: Duration::from_millis(1000),
+        ..FakeOptions::default()
+    })?;
     let c = connect(&f).await?;
     let lease = c.acquire_lease(false, OnDrop::StopAndRelease).await?;
     let g = lease.set(desired(true, true)).await?;
     assert!(g.firing);
-    // Held for well past the 1.5 s expiry.
-    tokio::time::sleep(Duration::from_millis(2500)).await;
+    until("three refreshes", || async { f.lock().refreshes >= 3 }).await?;
     assert_eq!(f.lock().expiries, 0);
-    assert!(f.lock().refreshes >= 3, "refreshes {}", f.lock().refreshes);
     assert!(f.lock().state.generator.firing);
     assert!(lease.lost().is_none());
     drop(lease);
@@ -553,9 +555,11 @@ async fn latest_keeps_newest_and_discards_old_epochs() -> R {
     assert!((0.0..1.0).contains(&age), "age {age}");
     assert!(!tf.stale);
     // No new frame for a second: STALE.
-    tokio::time::sleep(Duration::from_millis(1100)).await;
-    let l = c.latest()?;
-    assert!(l.get(&TF1).ok_or("tf gone")?.stale);
+    until("stale", || async {
+        c.latest()
+            .is_ok_and(|l| l.get(&TF1).is_some_and(|t| t.stale))
+    })
+    .await?;
     // Unsubscribing drops the topic.
     c.unsubscribe(Subscription::Meas(MeasId(1)))?;
     assert!(c.latest()?.get(&TF1).is_none());

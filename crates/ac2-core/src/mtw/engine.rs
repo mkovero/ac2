@@ -426,11 +426,6 @@ impl Mtw {
         })
     }
 
-    /// Column plan (static for the engine's layout and grid).
-    pub fn column_sources(&self) -> &[ColumnSource] {
-        &self.plan
-    }
-
     /// Build the current frame.
     pub fn frame(&mut self) -> MtwFrame {
         let mut f = MtwFrame {

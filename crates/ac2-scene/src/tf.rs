@@ -123,7 +123,7 @@ pub struct TfScene {
     pub banners: Vec<BannerRow>,
     /// Ranges the marked curve does not resolve at its grid (the selected curve, else the
     /// first of the pane's own), shaded in every pane; empty when the marker is off.
-    pub unresolved: Vec<crate::unresolved::Mark>,
+    pub unresolved: Vec<crate::unresolved::RangeMark>,
 }
 
 /// The valid-resolution marks of the selected shown curve that knows its ranges, else of
@@ -133,7 +133,7 @@ fn unresolved_marks(
     traces: &[TfTrace<'_>],
     shown: &[DisplayTrace],
     view: &ViewState,
-) -> Vec<crate::unresolved::Mark> {
+) -> Vec<crate::unresolved::RangeMark> {
     if !view.marks() {
         return Vec::new();
     }

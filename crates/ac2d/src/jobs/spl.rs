@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use ac2_core::leq::{
-    Headroom, Judgement, Latch, PEAK_HOLD_S, PeakHold, RollingLeq, Second, WindowSpec, judge,
+    Headroom, Judgement, Latch, PEAK_HOLD_S, RecentPeaks, RollingLeq, Second, WindowSpec, judge,
     judge_window,
 };
 use ac2_core::mic_curve::Correction;
@@ -92,7 +92,7 @@ struct LeqWindows {
     /// Per window: filling and on course to end over its limit (judged near).
     on_course: Vec<bool>,
     /// The newest seconds' LCpeak and LAFmax, which the peak limits are judged on.
-    peaks: PeakHold,
+    peaks: RecentPeaks,
     /// Judgement of the LCpeak and LAFmax limits ([`PeakQuantity::ALL`] order).
     peak_judgements: [LeqJudgement; 2],
     /// The log's epoch the windows and judgements belong to.
@@ -173,7 +173,7 @@ impl LeqWindows {
             on_course: vec![false; judgements.len()],
             latches: judgements.iter().map(|j| latch_of(*j)).collect(),
             judgements,
-            peaks: PeakHold::default(),
+            peaks: RecentPeaks::default(),
             peak_judgements: setup.peak_judgements,
             epoch,
             done: Vec::with_capacity(4),

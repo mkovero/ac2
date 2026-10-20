@@ -82,7 +82,7 @@ async fn two_curves_of_one_mic_switched_on_an_input() {
             .await
         }
     };
-    tokio::time::sleep(Duration::from_millis(3000)).await;
+    settled(&c, m.id, &cols).await;
     let at0 = tf_with(true).await;
     set_curve(&c, MIC, label("90°")).await;
     let at90 = tf_with(true).await;
@@ -158,4 +158,37 @@ async fn two_curves_of_one_mic_switched_on_an_input() {
     tokio::task::spawn_blocking(move || h.shutdown())
         .await
         .unwrap();
+}
+
+/// Returns once the transfer of `meas` holds still at `cols`: two fresh frames 300 ms
+/// apart within 0.05 dB of each other there, so the averages have settled.
+async fn settled(c: &Client, meas: MeasId, cols: &[usize]) {
+    let topic = Topic::Data {
+        meas,
+        stream: Stream::Tf,
+    };
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut held: Option<(Instant, Vec<f32>)> = None;
+    loop {
+        let now = Instant::now();
+        let mags = c.latest().unwrap().get(&topic).and_then(|f| {
+            let t = tf(&f.frame.data).filter(|_| !f.stale)?;
+            let m: Vec<f32> = cols.iter().map(|&k| t.mag[k]).collect();
+            m.iter().all(|v| v.is_finite()).then_some(m)
+        });
+        if let Some(m) = mags {
+            match &held {
+                Some((at, prev)) if now - *at >= Duration::from_millis(300) => {
+                    if prev.iter().zip(&m).all(|(a, b)| (a - b).abs() < 0.05) {
+                        return;
+                    }
+                    held = Some((now, m));
+                }
+                Some(_) => {}
+                None => held = Some((now, m)),
+            }
+        }
+        assert!(now < deadline, "the transfer never settled");
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
 }

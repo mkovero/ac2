@@ -86,13 +86,13 @@ pub const PEAK_HOLD_S: usize = 10;
 
 /// The newest [`PEAK_HOLD_S`] seconds' LCpeak and LAFmax. No allocation.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct PeakHold {
+pub struct RecentPeaks {
     ring: [[f64; 2]; PEAK_HOLD_S],
     head: usize,
     len: usize,
 }
 
-impl PeakHold {
+impl RecentPeaks {
     /// Adds the newest second (a gap adds nothing: its maxima are zero).
     pub fn push(&mut self, s: &Second) {
         self.ring[self.head] = [s.c_peak_sq, s.af_max_ms];
