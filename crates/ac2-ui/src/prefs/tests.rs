@@ -501,3 +501,20 @@ fn fullscreen_alone_is_the_window_full_screen() {
     let p = UiPrefs::from_toml("[layout]\nfullscreen = true\n").expect("parses");
     assert!(p.layout.fullscreen && !p.layout.panes_only);
 }
+
+#[test]
+fn advice_round_trip() {
+    let mut p = UiPrefs::default();
+    assert_eq!(p.advice, ac2_scene::advice::AdviceSettings::default());
+    // The defaults are not written.
+    assert!(!p.to_toml().contains("advice"));
+    p.advice.low_level_dbfs = -60.0;
+    p.advice.on = false;
+    let text = p.to_toml();
+    assert!(text.contains("[advice]"), "{text}");
+    assert!(text.contains("low_level_dbfs = -60.0"), "{text}");
+    assert!(!text.contains("low_coherence"), "{text}");
+    assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+    assert!(UiPrefs::from_toml("[advice]\nlow_coherence = 1.5\n").is_err());
+    assert!(UiPrefs::from_toml("[advice]\nref_headroom_db = 0.0\n").is_err());
+}

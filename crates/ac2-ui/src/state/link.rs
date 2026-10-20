@@ -287,6 +287,7 @@ impl AppState {
                 self.fold_spl(&d);
                 self.keep_bar_from(&d);
                 self.keep_spec_glide(&d);
+                self.fold_advice(&d);
                 self.data = Some(d);
                 self.fit_first_shows();
             }

@@ -383,6 +383,7 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
             distortion_unit: st.view.distortion.unit,
             coherence: st.view.tf.coherence_placement,
         },
+        st.prefs.advice,
     );
     for (row, value) in rows {
         let focused = s.display == row;

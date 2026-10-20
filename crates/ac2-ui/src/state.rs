@@ -57,6 +57,7 @@ pub use ir_nav::IrNavMsg;
 mod band_transfer;
 mod commands;
 pub use panes::drag::{DragMsg, DropTarget, EDGE_SHARE, RowDrag, drop_target};
+mod advice;
 mod glide;
 pub use glide::SpecGlide;
 mod leq;
@@ -153,6 +154,9 @@ pub struct AppState {
     pub spec_glide: HashMap<Topic, SpecGlide>,
     /// Per live spectrum or RTA topic, the capture times and arrivals that pace its glides.
     pub spec_pacing: HashMap<Topic, ac2_scene::curve_ease::Pacing>,
+    /// Per running transfer measurement, its headroom advice over time
+    /// ([`ac2_scene::advice::Hold`]).
+    pub advice: HashMap<MeasId, ac2_scene::advice::Hold>,
     /// Stored traces' data, as fetched.
     pub traces: BTreeMap<TraceId, (Arc<TraceData>, Arc<GridDef>)>,
     /// The transfer view's stored-trace display math, kept between frames.
@@ -371,6 +375,7 @@ impl AppState {
             bar_from: HashMap::new(),
             spec_glide: HashMap::new(),
             spec_pacing: HashMap::new(),
+            advice: HashMap::new(),
             traces: BTreeMap::new(),
             theme,
             view: ViewState::default(),

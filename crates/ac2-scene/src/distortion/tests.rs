@@ -132,6 +132,7 @@ fn status() -> Status {
         log_not_saved: None,
         file_damaged: None,
         drive: Default::default(),
+        advice: None,
     }
 }
 

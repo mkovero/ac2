@@ -938,6 +938,35 @@ SIGNAL**, **CHECK ROUTING**, **CLIP**, **STALE** (with the age: `STALE · 3.2 s`
 ESTIMATE**, **CLOCK DRIFT** (in ppm), **OUTPUT TIMING JUMP**, **AUDIO STOPPED** (with the
 reason), **DAEMON NOT RESPONDING**, and for math channels **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE** / **NO RESULT**.
 
+#### Headroom advice
+
+A transfer pane may add one last info banner (coloured as NO DELAY ESTIMATE) about the
+stimulus level. It is advice only: nothing in ac2 changes a level by itself.
+
+- **LOWER STIMULUS · ref peak −1.5 dBFS**: the reference input's peak came within 3 dB of
+  0 dBFS. The next crest of the noise may clip the reference, which spoils every value.
+- **RAISE STIMULUS · about +18 dB**: the pane's coherence (median γ² of the columns the
+  stimulus reaches) is under 0.70 *and* the measurement input reads under −50 dBFS RMS.
+  The step aims the measurement input 3 dB past that threshold. Low coherence with a
+  healthy input level is more likely reflections or noise in the room, which more
+  stimulus does not cure, so then nothing is said.
+- While this rig's generator plays, the step never goes past the **system max level**:
+  **RAISE STIMULUS · +4 dB to max level** (then raise the measurement input's gain), or
+  **STIMULUS AT MAX LEVEL · −50.0 dBFS** when there is no room left.
+
+The line does not show while a fault (CLIP, NO REFERENCE, CHECK ROUTING, NO SIGNAL) or
+STALE is up: the fault comes first. While the daemon holds the average on a weak reference
+(just after the stimulus dropped far), the line stays as it was. It does not flicker. RAISE waits until the condition
+has lasted 2 s (coherence is still averaging after a level change). A line stays while
+its reading is within 3 dB (γ² 0.05) of the threshold, and for 5 s after that. The raise
+step changes only when it moves by 3 dB or more. **T** (plot chrome) leaves it, like every
+banner.
+
+Settings → Display: *Headroom advice* on / off; *Advise lowering at* (reference peak
+within 1 … 12 dB of full scale, default 3); *Advise raising at* (coherence under γ² 0.40 …
+0.95, default 0.70); *… and* (measurement input under −80 … −30 dBFS RMS, default −50).
+They are this app's settings (`ui.toml`, `[advice]`).
+
 ### Min / max tracking on the transfer function
 
 **P** on a transfer pane turns min / max tracking on or off. It marks the five highest

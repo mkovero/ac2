@@ -423,3 +423,5 @@ fn b_cycles_spectrum_line_fill_bars() {
 mod select;
 
 mod banners;
+
+mod advice;

@@ -25,6 +25,7 @@ pub(crate) fn everything() -> Status {
         log_not_saved: None,
         file_damaged: None,
         drive: Default::default(),
+        advice: None,
     }
 }
 
@@ -604,4 +605,78 @@ fn math_average_banners() {
         ..base
     };
     assert_eq!(texts(&banners(&full)), ["NO SIGNAL", "STALE · 2.0 s"]);
+}
+
+/// Headroom advice ranks under every other banner, never shows beside a fault or STALE,
+/// and each variant's headline fits a full-width row whole in every theme, its detail beside
+/// it in the dark and light themes.
+#[test]
+fn headroom_advice_is_the_last_info_and_yields_to_faults() {
+    use crate::advice::{Advice, Stimulus};
+    let raise = |level: f64| Advice::Raise {
+        want_db: 18.0,
+        coherence: 0.42,
+        meas_rms_dbfs: -64.3,
+        stimulus: Some(Stimulus {
+            level_dbfs: level,
+            max_level_dbfs: -50.0,
+        }),
+    };
+    let s = Status {
+        no_delay_estimate: Some(NoDelayEstimate::NotFound),
+        advice: Some(raise(-80.0)),
+        ..Status::default()
+    };
+    let b = banners(&s);
+    assert_eq!(
+        texts(&b),
+        ["NO DELAY ESTIMATE", "RAISE STIMULUS · about +18 dB"]
+    );
+    assert_eq!(b[1].kind, BannerKind::Headroom);
+    assert_eq!(b[1].severity, Severity::Info);
+    for blocked in [
+        Status {
+            protection: ProtectionFlags::NO_SIGNAL,
+            ..s.clone()
+        },
+        Status {
+            frame_age_s: Some(2.0),
+            ..s.clone()
+        },
+    ] {
+        assert!(
+            banners(&blocked)
+                .iter()
+                .all(|b| b.kind != BannerKind::Headroom),
+            "{blocked:?}"
+        );
+    }
+    for a in [
+        Advice::Lower {
+            ref_peak_dbfs: -0.4,
+            headroom_db: 12.0,
+        },
+        raise(-80.0),
+        raise(-54.5),
+        raise(-50.0),
+    ] {
+        let b = banners(&Status {
+            advice: Some(a),
+            ..Status::default()
+        });
+        let (head, detail) = crate::advice::text(&a);
+        for theme in [Theme::dark(), Theme::light(), Theme::high_contrast()] {
+            let rows = layout_banners(&b, Rect::new(0.0, 0.0, 800.0, 200.0));
+            let mut layer = Layer::default();
+            draw_banners(&mut layer, &rows, &theme);
+            let both = theme.name != crate::theme::ThemeName::HighContrast;
+            for t in [&head, &detail].into_iter().take(if both { 2 } else { 1 }) {
+                assert!(
+                    layer.labels.iter().any(|l| &l.text == t),
+                    "{t} not drawn at {} px",
+                    theme.font_size
+                );
+            }
+        }
+    }
 }
