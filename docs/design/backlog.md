@@ -118,6 +118,10 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
 - **macOS CI "ac2 on BlackHole (Core Audio)"**: `selftest duplex` failed once with
   `config_changed` count 1 (run 39364032668, 1ee6a366); BlackHole reported a configuration
   change mid-run, the levels were exact. Seen once.
+- **ac2d `osc::slow_a_tone_over_the_limit_lights_over_and_back_ok` on macOS CI**: the
+  `/w/ok` cue carried 87.0004 against the test's `< 87.0` (run 39383093276); the ok edge
+  sits at the limit's hysteresis, so the bound or the edge's comparison is off by rounding.
+  Seen once.
 - **ac2d `remote_stimulus` "timed out waiting for the tone"**: once in a full workspace run
   at load ~30; passed 4/4 alone.
 - **ac2d `traces::capture::capture_average_math_export_import`, unaligned capture at 301.6 Hz:

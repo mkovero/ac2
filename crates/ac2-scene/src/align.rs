@@ -46,19 +46,39 @@ pub fn delayed<'a>(c: &AlignCandidate, a: &'a str, b: &'a str) -> &'a str {
     }
 }
 
-/// `Main: delay 4.21 ms · 1.45 m @ 20 °C · polarity normal`; `… · polarity inverted`. The
-/// name leads so that a system named "Delay tower" never reads "Delay Delay tower".
+/// A delay that reads 0.00 ms delays neither: which side it names is the sign of noise
+/// below the readout's resolution.
+fn none_needed(c: &AlignCandidate) -> bool {
+    format::delay(c.delay.0)
+        .chars()
+        .filter(char::is_ascii_digit)
+        .all(|ch| ch == '0')
+}
+
+/// `Main: delay 4.21 ms · 1.45 m @ 20 °C · polarity normal`; `… · polarity inverted`;
+/// `no delay · polarity normal`. The name leads so that a system named "Delay tower" never
+/// reads "Delay Delay tower".
 pub fn suggestion(c: &AlignCandidate, a: &str, b: &str, temp_c: f64) -> String {
     let who = delayed(c, a, b);
     let polarity = if c.inverted { "inverted" } else { "normal" };
+    if none_needed(c) {
+        return format!("no delay · polarity {polarity}");
+    }
     format!(
         "{who}: delay {} · polarity {polarity}",
         delay_readout(c.delay.0, temp_c)
     )
 }
 
-/// `Main +9.80 ms inverted, ±41°`; `Sub +1.20 ms, ±14°`.
+/// `Main +9.80 ms inverted, ±41°`; `Sub +1.20 ms, ±14°`; `no delay inverted, ±41°`.
 pub fn short(c: &AlignCandidate, a: &str, b: &str) -> String {
+    if none_needed(c) {
+        return format!(
+            "no delay{}, ±{}°",
+            if c.inverted { " inverted" } else { "" },
+            format::fixed(c.residual_deg, 0)
+        );
+    }
     format!(
         "{} +{}{}, ±{}°",
         delayed(c, a, b),
@@ -68,10 +88,15 @@ pub fn short(c: &AlignCandidate, a: &str, b: &str) -> String {
     )
 }
 
-/// The aligned sum's legend note: `aligned: Main +4.21 ms`, `aligned: Main +0.00 ms
-/// inverted`.
+/// The aligned sum's legend note: `aligned: Main +4.21 ms`, `aligned: no delay inverted`.
 pub fn legend_note(fit: &AlignFit, a: &str, b: &str) -> String {
     let c = &fit.best;
+    if none_needed(c) {
+        return format!(
+            "aligned: no delay{}",
+            if c.inverted { " inverted" } else { "" }
+        );
+    }
     format!(
         "aligned: {} +{}{}",
         delayed(c, a, b),

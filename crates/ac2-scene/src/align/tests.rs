@@ -77,6 +77,18 @@ fn suggestion_names_who_to_delay_metres_and_polarity() {
     assert_eq!(short(&c, "Sub", "Main"), "Sub +1.20 ms inverted, ±14°");
 }
 
+/// Below the readout's resolution neither system is named: the side is the sign of noise.
+#[test]
+fn a_delay_reading_zero_names_neither() {
+    let c = cand(0.000_4, AlignSide::B, false, 3.0);
+    assert_eq!(
+        suggestion(&c, "Sub", "Main", 20.0),
+        "no delay · polarity normal"
+    );
+    let c = cand(-0.000_4, AlignSide::A, true, 41.0);
+    assert_eq!(short(&c, "Sub", "Main"), "no delay inverted, ±41°");
+}
+
 #[test]
 fn readout_of_a_fit() {
     let r = readout(&fit_state(), "Sub", "Main", band(60.0, 120.0), 20.0);

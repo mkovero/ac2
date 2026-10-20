@@ -80,20 +80,13 @@ fn alignment_from_an_empty_daemon() -> R {
     );
     d.until("the alignment's fit", |s| readout(s).is_some_and(|r| r.fit))?;
     let r = readout(&d.st).ok_or("readout")?;
-    // One path twice: no delay, to the delay readout's last digit. The live curve keeps
-    // averaging fresh noise, so the fitted delay is a hair either side of zero and either
-    // curve may be the one named as delayed.
+    // One path twice: no delay. The live curve keeps averaging fresh noise, so the fit may
+    // land a few µs off zero, which the readout's third decimal shows on either curve.
     assert!(
-        [
-            "Reference → Room mic: delay 0.00",
-            "Reference → Room mic S1: delay 0.00"
-        ]
-        .iter()
-        .any(|h| r.headline.starts_with(h))
-            && r.headline.contains(" ms · "),
+        r.headline == "no delay · polarity normal"
+            || (r.headline.contains(": delay 0.00") && r.headline.ends_with("polarity normal")),
         "{r:?}"
     );
-    assert!(r.headline.ends_with("polarity normal"), "{r:?}");
     assert!(r.lines[0].contains("summation"), "{r:?}");
     d.stop()
 }

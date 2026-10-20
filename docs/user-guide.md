@@ -1064,7 +1064,7 @@ other polarity: Main +9.80 ms inverted, ±41°
 also fits: Main +15.30 ms, ±14° — the band is too narrow to tell: pick by distance
 ```
 
-The last line appears when a delay one period away fits almost as well: a narrow band cannot
+A delay that reads 0.00 ms names neither system: **no delay · polarity normal**. The last line appears when a delay one period away fits almost as well: a narrow band cannot
 tell them apart, the distance between the boxes can. A live operand keeps the result live.
 The curve of the alignment itself is the aligned sum (legend `Sub ↔ Main aligned · Main
 +4.21 ms`), drawn and captured like any sum. Without three usable columns in the band it
