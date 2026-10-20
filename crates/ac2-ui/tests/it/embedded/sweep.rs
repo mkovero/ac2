@@ -487,7 +487,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     // Live again, the transfer pane focused and given the sweep by its chip (V only
     // selects): V selects the first sweep, then the second; the sweep pane shows whichever
     // is selected.
-    d.key("Escape");
+    d.key("End");
     d.key("Alt+1");
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
     assert_eq!(d.st.selected_trace, None);

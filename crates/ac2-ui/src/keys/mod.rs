@@ -144,7 +144,7 @@ commands! {
     GrowPane => "grow_pane", "Grow pane", [Global];
     ShrinkPane => "shrink_pane", "Shrink pane", [Global];
     TransferStack => "transfer_stack", "Transfer stack", [Global];
-    MaximizePane => "maximize_pane", "Maximise pane", [Global];
+    MaximisePane => "maximise_pane", "Maximise pane", [Global];
     Undo => "undo", "Undo pane change", [Global];
     Redo => "redo", "Redo pane change", [Global];
     NextInTree => "next_in_tree", "Next list row", [Global];

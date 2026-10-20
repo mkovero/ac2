@@ -77,7 +77,7 @@ backtrace before the program exits (release builds stop on any panic; under syst
 restarts it: [Watchdogs](#watchdogs-under-systemd)). A daemon under systemd (`systemctl --user`) logs to the journal
 (`journalctl --user -u ac2d`). `RUST_LOG` chooses what is logged (default `warn,ac2=info`;
 `RUST_LOG=debug` for everything); `AC2_LOG_DIR` moves the files. The app's notifications are
-not in the file; *Recent notifications…* lists them ([Notifications](#notifications)).
+not in the file; *Notifications…* (Shift+E) lists them ([Notifications](#notifications)).
 
 ### Audio backends
 
@@ -640,7 +640,7 @@ The transfer pane's IR views and the sweep pane's IR views share keys and mouse 
 
 - The value axis is amplitude in FS (linear) or dB re the peak (log, ETC).
 - Time zooms no closer than four samples and pans at most one IR length outside the IR.
-- A click (or palette *Comparison cursor on / off*) puts a time cursor; **Shift+←/→** step
+- A click (or **Shift+T**, palette *Comparison cursor*) puts a time cursor; **Shift+←/→** step
   it (a sample when zoomed in, else 1/100 of the span); it reads `1.25 ms · +0.500 FS` or
   `1.25 ms · −12.3 dB`.
 - Transfer and sweep IR views keep their own zoom and cursor; the log / ETC ranges are in
@@ -1181,8 +1181,8 @@ unsmoothed.
   measurement between last and first; **Alt+V** / **Alt+Shift+V** include hidden ones. Like
   a click on a child row, **V** only selects: no pane changes, and a trace no pane draws
   stays selected all the same.
-- **Esc** (no window open) goes back to the live measurement — and stops the stimulus;
-  palette *Deselect the stored trace* does it without touching the stimulus.
+- **End** (palette *Select live*) goes back to the live measurement. **Esc** only stops the
+  stimulus: the stop reflex never changes the selection.
 - **A** shows or hides the selected trace.
 - Palette *Move the selected trace to slot…* puts it in slot 1–9 (`none` frees its slot).
 
@@ -1242,7 +1242,7 @@ as a level difference. A locked trace keeps its offset.
   the pane's run, tagged `cmp`.
 - Overlays are drawn relative to the selected trace's measured delay, so relative arrival
   between traces stays visible.
-- A click (or palette *Comparison cursor on / off*) puts the comparison cursor, synchronised
+- A click (or **Shift+T**, palette *Comparison cursor*) puts the comparison cursor, synchronised
   across panes; **Shift+←/→** move it.
 - **C** compares the selected trace or measurement into the measurement you choose; its
   panes draw it whatever its group (not an Imported trace: move it under a measurement
@@ -2506,7 +2506,7 @@ names in the last column of the keyboard map:
 
 ```toml
 [global]
-cycle_theme = "Ctrl+T"
+cycle_theme = "Alt+T"
 
 [transfer]
 insert_delay = ["X", "Alt+D"]
@@ -2546,10 +2546,10 @@ to the open window or the stimulus).
 
 **Warning toasts** (Settings › Display, or palette *Warning toasts on / off*; on by default,
 `warning_toasts = false` in `ui.toml`) off keeps warnings and Leq limit alarms out of the
-corner while you go over a limit on purpose (testing a limiter); they still go to *Recent
-notifications…* and the SPL displays still turn the limit colour.
+corner while you go over a limit on purpose (testing a limiter); they still go to
+*Notifications…* and the SPL displays still turn the limit colour.
 
-**Recent notifications** (palette, type `notif`) lists the app's last 50, newest first, with
+**Notifications…** (**Shift+E**, or the palette, type `notif`) lists the app's last 50, newest first, with
 kind, age and repeat count; Esc or Enter closes it. The log lasts as long as the app runs.
 
 ### Keyboard map
@@ -2562,6 +2562,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Keys | Command | `keys.toml` |
 |---|---|---|
 | `H` or `F1` | Key bindings | `help` |
+| `Shift+E` | Notifications… | `notifications` |
 | `Ctrl+K` | Command palette | `palette` |
 | `Ctrl+P` | Settings… | `settings` |
 | `Ctrl+Q` | Quit | `quit` |
@@ -2589,7 +2590,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+N` | Turn split | `turn_split` |
 | `Alt+→` | Grow pane | `grow_pane` |
 | `Alt+←` | Shrink pane | `shrink_pane` |
-| `W` | Maximise pane | `maximize_pane` |
+| `W` | Maximise pane | `maximise_pane` |
 | `Ctrl+Z` | Undo pane change | `undo` |
 | `Ctrl+Shift+Z` | Redo pane change | `redo` |
 | `Tab` | Next list row | `next_in_tree` |
@@ -2606,6 +2607,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+↓` | Pan level down | `level_pan_down` |
 | `Shift+Home` | Fit level | `level_fit` |
 | `Ctrl+Home` | Reset axes | `level_reset` |
+| `Shift+T` | Comparison cursor | `toggle_cursor` |
 | `C` | Compare… | `compare` |
 | `Shift+←` | Cursor left | `cursor_left` |
 | `Shift+→` | Cursor right | `cursor_right` |
@@ -2633,6 +2635,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Shift+V` | Previous trace incl. hidden | `prev_any_trace` |
 | `A` | Show/hide curve | `toggle_selected` |
 | `F2` | Rename trace… | `trace_rename` |
+| `End` | Select live | `select_live` |
 | `Delete` or `Backspace` | Delete selected… | `delete_selected` |
 | `Alt+↑` | Offset +1 dB | `offset_up` |
 | `Alt+↓` | Offset −1 dB | `offset_down` |
@@ -2727,7 +2730,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Command | `keys.toml` |
 |---|---|
-| Notifications… | `notifications` |
 | Key hints | `key_hints` |
 | Warning toasts | `warning_toasts` |
 | Stimulus outputs… | `stimulus_outputs` |
@@ -2735,11 +2737,9 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Transfer stack | `transfer_stack` |
 | Choose pane measurement… | `pane_measurement` |
 | Theme | `cycle_theme` |
-| Comparison cursor | `toggle_cursor` |
 | Clear compare | `clear_compare` |
 | Move trace to slot… | `trace_slot` |
 | Export trace… | `trace_export` |
-| Select live | `select_live` |
 | Import trace… | `import_trace` |
 | New session… | `session_new` |
 | Open session… | `session_load` |
@@ -2813,9 +2813,9 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 |---|---|
 | Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` min/max · `K` smoothing · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `P` peaks · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
-| Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next · `Q` close pane · `W` maximise · `H` all keys |
+| Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit level · `Tab` next row · `Q` close pane · `W` maximise · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
-| Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
+| Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
 
 <!-- keymap:end -->
 

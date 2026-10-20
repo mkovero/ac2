@@ -137,7 +137,7 @@ impl Section {
             | C::TurnSplit
             | C::GrowPane
             | C::ShrinkPane
-            | C::MaximizePane
+            | C::MaximisePane
             | C::Undo
             | C::Redo
             | C::PlotChrome

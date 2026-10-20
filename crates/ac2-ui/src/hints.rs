@@ -138,8 +138,8 @@ mod tests {
                 "G/Shift+G view",
                 "I zoom time",
                 "Ctrl+I zoom level",
-                "Shift+Home fit",
-                "Tab next",
+                "Shift+Home fit level",
+                "Tab next row",
                 "Q close pane",
                 "W maximise",
                 "H all keys"
@@ -161,7 +161,7 @@ mod tests {
             pc(Scope::Distortion),
             [
                 "Shift+S new sweep",
-                "V next sweep",
+                "V select trace",
                 "G/Shift+G view",
                 "E reference",
                 "W maximise",

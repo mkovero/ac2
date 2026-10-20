@@ -222,7 +222,7 @@ fn traces_are_selected_from_the_keyboard() {
     // The palette entry deselects.
     t.st.update(Msg::Command(CommandId::SelectLive), &t.keys);
     assert_eq!(t.st.selected_trace, None);
-    // Esc with a dialog open only closes it (and stops); with nothing open it also hands
+    // Esc with a dialog open only closes it; with nothing open it only stops: End hands
     // the keys back to the live measurement.
     t.key("V");
     t.key("H");
@@ -230,6 +230,12 @@ fn traces_are_selected_from_the_keyboard() {
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.st.selected_trace, Some(TraceId(10)));
     t.key("Esc");
+    assert_eq!(
+        t.st.selected_trace,
+        Some(TraceId(10)),
+        "Esc keeps the selection"
+    );
+    t.key("End");
     assert_eq!(t.st.selected_trace, None);
     assert_eq!(smoothing_set(&t.key("K")).0, "m1");
     // Tab steps to the next row of the list, a hidden trace's too (a click selects it).
@@ -466,7 +472,7 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
         Some("t14: smoothing off")
     );
     // Back to live: the sweep pane keeps the sweep selected last.
-    t.key("Esc");
+    t.key("End");
     assert_eq!(t.st.selected_trace, None);
     assert_eq!(shown(&t), Some(14));
     // V on the sweep pane steps the sweep runs and selects them for the transfer pane.
@@ -488,7 +494,7 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
 }
 
 #[test]
-fn escape_stops_the_stimulus_with_a_slot_selected() {
+fn escape_stops_the_stimulus_and_keeps_the_selected_slot() {
     let mut t = T::new();
     t.conn(with_traces(vec![stored(10, Some(1), 2)]));
     t.st.stimulus.level = Some(Dbfs(-20.0));
@@ -498,7 +504,7 @@ fn escape_stops_the_stimulus_with_a_slot_selected() {
     assert_eq!(t.st.selected_trace, Some(TraceId(10)));
     let r = t.key("Esc");
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
-    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
 }
 
 #[test]

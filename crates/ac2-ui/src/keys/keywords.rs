@@ -45,7 +45,7 @@ impl CommandId {
             C::SplitPane | C::TurnSplit | C::GrowPane | C::ShrinkPane => &["layout"],
             C::ClosePane => &["layout", "delete pane"],
             C::TransferStack => &["layout", "magnitude", "phase"],
-            C::MaximizePane => &["layout", "zoom pane"],
+            C::MaximisePane => &["layout", "zoom pane"],
             C::Undo | C::Redo => &["layout"],
             C::NextInTree | C::PrevInTree => &["measurements", "select"],
             C::PaneMeasurement => &["pick", "show", "pane"],

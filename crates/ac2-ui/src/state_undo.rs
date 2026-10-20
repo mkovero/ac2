@@ -222,7 +222,7 @@ impl AppState {
                     | C::SplShowMeterLeq
                     | C::SplShowBands => PaneEdit::View(focus),
                     C::PlotChrome => PaneEdit::Chrome(was),
-                    C::MaximizePane => PaneEdit::Screen(match self.layout.maximized {
+                    C::MaximisePane => PaneEdit::Screen(match self.layout.maximized {
                         true if self.fullscreen => ScreenStep::FullScreen(focus),
                         true => ScreenStep::Alone(focus),
                         false => ScreenStep::AllPanes,

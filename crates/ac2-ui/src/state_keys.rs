@@ -61,8 +61,8 @@ impl AppState {
             return;
         }
         // An open window owns Esc: it closes the topmost window only. With nothing open Esc
-        // stops the stimulus and hands the keys back from a selected slot to the live
-        // measurement.
+        // stops the stimulus and nothing else: the stop reflex never changes the selection
+        // (End goes back to the live measurement).
         if chord == Chord::key(Key::Escape) {
             // A row being dragged owns Esc as a window does: it cancels the drag only.
             if self.cancel_row_drag() {
@@ -70,7 +70,6 @@ impl AppState {
             }
             if self.overlay == Overlay::None {
                 self.command(CommandId::StimulusStop, keymap, out);
-                self.selected_trace = None;
             } else {
                 self.close_overlay();
             }

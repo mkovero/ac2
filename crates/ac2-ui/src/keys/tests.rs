@@ -70,7 +70,6 @@ fn every_command_is_reachable() {
         CommandId::PrevColour,
         CommandId::ToggleGroup,
         CommandId::AverageComplex,
-        CommandId::ToggleCursor,
         CommandId::ClearCompare,
         CommandId::AverageCoherence,
         CommandId::LegendTopLeft,
@@ -102,8 +101,6 @@ fn every_command_is_reachable() {
         CommandId::FinderObservation,
         CommandId::PaneMeasurement,
         CommandId::TransferStack,
-        // Esc also deselects (when no dialog is open); this is its palette entry.
-        CommandId::SelectLive,
         CommandId::SplFast,
         CommandId::SplSlow,
         CommandId::SplImpulse,
@@ -120,7 +117,6 @@ fn every_command_is_reachable() {
         CommandId::SplShowLeq,
         CommandId::SplShowMeterLeq,
         CommandId::SplShowBands,
-        CommandId::Notifications,
         // Settings › Display has the theme row; T is the plot's grid / labels / cursor.
         CommandId::CycleTheme,
         // Set once and left: Settings › Display has a row for each, so their keys went
@@ -450,7 +446,7 @@ fn key_hints() {
         Chord::parse("Q").ok()
     );
     assert_eq!(
-        m.first_chord(CommandId::MaximizePane, Scope::Spl),
+        m.first_chord(CommandId::MaximisePane, Scope::Spl),
         Chord::parse("W").ok()
     );
     assert_eq!(m.first_chord(CommandId::SweepIr, Scope::Spl), None);
@@ -668,7 +664,7 @@ fn palette_titles_are_terse_and_uniform() {
         (C::SessionExport, "Export session…"),
         (C::SplitPane, "Split pane"),
         (C::ClosePane, "Close pane"),
-        (C::MaximizePane, "Maximise pane"),
+        (C::MaximisePane, "Maximise pane"),
         (C::PeakHold, "Peaks"),
         (C::CoherenceMask, "Coherence mask"),
         (C::PhaseView, "Phase view"),

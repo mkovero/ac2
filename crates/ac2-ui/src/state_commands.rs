@@ -394,7 +394,7 @@ impl AppState {
                     ac2_scene::distortion::reference_toast(shown)
                 ));
             }
-            C::MaximizePane => self.cycle_layout(),
+            C::MaximisePane => self.cycle_layout(),
             C::NextInTree => self.cycle_tree_row(1),
             C::PrevInTree => self.cycle_tree_row(-1),
             C::PaneMeasurement => self.overlay = self.pane_menu(self.layout.focus),
