@@ -212,7 +212,7 @@ impl Control {
             tracing::warn!("the generator's output stopped with the audio; start it again to emit");
         }
         let closed = close_off_thread(rt);
-        self.recovery = Some(Recovery {
+        self.audio_recovery = Some(Recovery {
             epoch,
             open,
             routes,
@@ -237,7 +237,7 @@ impl Control {
         e: &ProtoError,
     ) {
         let output_stopped = self.disarm_for_outage();
-        self.recovery = Some(Recovery {
+        self.audio_recovery = Some(Recovery {
             epoch,
             open,
             routes,
@@ -257,7 +257,7 @@ impl Control {
     fn disarm_for_outage(&mut self) -> bool {
         let g = self.store.state().generator.clone();
         let firing = g.firing;
-        self.gate.close();
+        self.out.gate.close();
         if g.armed || g.firing {
             let mut g = g;
             g.armed = false;
@@ -273,7 +273,7 @@ impl Control {
     pub(super) fn start_attempt(&mut self, closed: Option<Receiver<()>>) {
         let token = self.next_token;
         self.next_token += 1;
-        let Some(r) = self.recovery.as_mut() else {
+        let Some(r) = self.audio_recovery.as_mut() else {
             return;
         };
         let epoch = SessionEpoch(r.epoch.0 + 1);
@@ -340,7 +340,7 @@ impl Control {
     /// Attempt `token` finished.
     pub(super) fn reopened(&mut self, token: u64, result: Result<Runtime, ProtoError>) {
         let current = self
-            .recovery
+            .audio_recovery
             .as_ref()
             .is_some_and(|r| matches!(r.phase, Phase::Opening { token: t } if t == token));
         if !current {
@@ -352,7 +352,7 @@ impl Control {
         }
         match result {
             Ok(mut rt) => {
-                let Some(r) = self.recovery.take() else {
+                let Some(r) = self.audio_recovery.take() else {
                     return;
                 };
                 rt.open.replay = r.open.replay.clone();
@@ -387,7 +387,7 @@ impl Control {
 
     /// The current attempt failed with `e`: the next waits its backoff.
     fn attempt_failed(&mut self, e: &ProtoError) {
-        let Some(r) = self.recovery.as_mut() else {
+        let Some(r) = self.audio_recovery.as_mut() else {
             return;
         };
         let wait = backoff(r.attempt);
@@ -422,7 +422,7 @@ impl Control {
     pub(super) fn start_probe(&mut self) {
         let token = self.next_token;
         self.next_token += 1;
-        let Some(r) = self.recovery.as_mut() else {
+        let Some(r) = self.audio_recovery.as_mut() else {
             return;
         };
         r.probe.pending = Some(token);
@@ -442,7 +442,7 @@ impl Control {
             });
         if let Err(e) = spawned {
             tracing::error!("cannot start a thread to look at the audio device: {e}");
-            if let Some(r) = self.recovery.as_mut() {
+            if let Some(r) = self.audio_recovery.as_mut() {
                 r.probe.pending = None;
             }
         }
@@ -452,7 +452,7 @@ impl Control {
     /// the wait.
     pub(super) fn probed(&mut self, token: u64, presence: ac2_audio::Presence) {
         use ac2_audio::Presence;
-        let Some(r) = self.recovery.as_mut() else {
+        let Some(r) = self.audio_recovery.as_mut() else {
             return;
         };
         if r.probe.pending != Some(token) {
@@ -481,7 +481,7 @@ impl Control {
     /// A session file loaded while the audio is stopped: the stopped session shows the
     /// load's `epoch`, and comes back without generator routes like any loaded session.
     pub(super) fn rebase_recovery(&mut self, epoch: SessionEpoch) {
-        let Some(r) = self.recovery.as_mut() else {
+        let Some(r) = self.audio_recovery.as_mut() else {
             return;
         };
         r.epoch = epoch;
@@ -492,7 +492,7 @@ impl Control {
     }
 
     fn commit_stopped(&mut self, recovery: WireRecovery) {
-        let Some(r) = self.recovery.as_ref() else {
+        let Some(r) = self.audio_recovery.as_ref() else {
             return;
         };
         let s = Session {

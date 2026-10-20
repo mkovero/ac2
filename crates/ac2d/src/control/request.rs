@@ -25,7 +25,7 @@ impl Control {
             return;
         }
         self.ka_seq += 1;
-        let stream = match (&self.session, &self.recovery) {
+        let stream = match (&self.session, &self.audio_recovery) {
             (Some(rt), _) => SessionStream::Running(&rt.health),
             (None, Some(_)) => SessionStream::Recovering,
             (None, None) => SessionStream::Closed,
