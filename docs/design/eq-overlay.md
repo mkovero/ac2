@@ -19,7 +19,7 @@ Ctrl+1 … 9, coloured, listed and refused with reasons like any math channel.
 
 ## 1. Filter model
 
-`EqSet { id, name, rev, realisation, peak_form, enabled, in_console, sections }`,
+`EqSet { id, name, rev, realisation, peak_q, enabled, in_console, sections }`,
 `EqSection { enabled, shape: EqShape }`; quantities typed (`Hz`, `Db`, `Seconds`).
 
 **Realisation** (per set — a processor runs every section the same way):
@@ -35,7 +35,7 @@ Ctrl+1 … 9, coloured, listed and refused with reasons like any math channel.
 
 | shape | parameters |
 |---|---|
-| `peaking` | `f`, `gain`, `bw: Bandwidth`, `form: PeakForm` |
+| `peaking` | `f`, `gain`, `bw: Bandwidth`, `q_measured: PeakQ` |
 | `low_shelf` / `high_shelf` | `f`, `gain`, `order: first \| second {slope: ShelfSlope}`, `f_at: ShelfFreq` |
 | `high_pass` / `low_pass` | `f`, `alignment: Alignment`, `order: 1..=8` (6 … 48 dB/oct) |
 | `high_pass_q` / `low_pass_q` | `f`, `q` — one free 2nd-order section (resonant HP/LP) |
@@ -61,26 +61,28 @@ analog relation `1/Q = 2·sinh(ln2/2 · N)` (exact for the s-domain prototype; t
 section keeps the prototype's Q, it does not re-warp the bandwidth). The user types either; the
 editor shows the other alongside (`Q 1.41 · 1.00 oct`).
 
-**PeakForm** — the two analog peaking families, which is what "Q convention" means in practice.
-With ω normalised to f₀, `A = 10^{g/40}`, `K = 10^{g/20}`:
-- `symmetric` — the RBJ cookbook peaking EQ:
-  `H(s) = (s² + s·A/Q + 1) / (s² + s/(A·Q) + 1)`. Setting `|H|² = A²` (half the dB gain)
-  gives `(1−ω²)² = ω²/Q²`, independent of A: **Q is the bandwidth at the half-gain points,
-  the same at every gain**, and a cut is the exact inverse of the equal boost. Measured instead
-  at 3 dB below the peak, the poles' damping `1/(AQ)` makes the hump narrow as the boost grows
-  (effective Q ≈ A·Q) — which is why the same filter is sold as "constant-Q" by one
-  manufacturer and behaves "proportional-Q" by another's yardstick.
-- `constant_peak` — the band-pass-sum form `H = 1 + (K−1)·BP(s)`, `BP = (s/Q)/(s² + s/Q + 1)`
-  for a boost (poles fixed at damping 1/Q), its inverse for a cut (zeros fixed). The bandwidth
-  3 dB from the peak tends to f₀/Q at large gains (Rane's "constant-Q" sense); the half-gain
-  bandwidth widens as √K (`(1−ω²)² = K·ω²/Q²`), so small boosts look broad.
+**PeakQ** — what the entered Q measures; this is what "Q convention" means in practice. Two
+analog families, three readings. With ω normalised to f₀, `A = 10^{|g|/40}`, `K = 10^{|g|/20}`:
+- `half_gain` — the RBJ cookbook (symmetric) peaking EQ
+  `H(s) = (s² + s·A/Q + 1) / (s² + s/(A·Q) + 1)`. Setting `|H|² = A²` (half the dB gain) gives
+  `(1−ω²)² = ω²/Q²`, independent of A: **Q is f₀ over the bandwidth between the half-gain
+  points, the same at every gain**; a cut is the exact inverse of the equal boost.
+- `minus_3db_from_peak` — the same symmetric filter, Q read between the points 3 dB below the
+  peak (above the dip), as some consoles print it. Solving `|H|² = A⁴/2` the same way gives
+  `Δω = A / (Q·√(A⁴ − 2))`, so the entered `Q₃` maps to `Q = Q₃·A/√(A⁴ − 2)` (exact, no
+  iteration); for large gains `Q₃ ≈ A·Q`, which is why one filter reads "constant-Q" by one
+  yardstick and "proportional-Q" by the other. Undefined at |gain| ≤ 3.01 dB: the section is
+  refused with that reason, never clamped.
+- `band_pass` — the band-pass-sum family `H = 1 + (K−1)·BP(s)`, `BP = (s/Q)/(s² + s/Q + 1)`
+  for a boost (poles fixed at damping 1/Q), its inverse for a cut (zeros fixed): Q is the
+  added band-pass's own. The bandwidth 3 dB from the peak tends to f₀/Q at large gains; the
+  half-gain bandwidth widens as √K (`(1−ω²)² = K·ω²/Q²`), so small boosts look broad.
 
-The user selects the form per section (editor field `Q is: half-gain (cookbook) | from peak`);
-the set's default form is a field of the set, so entering a console's 20 bands does not mean
-20 changes. No third, manufacturer-specific "proportional-Q" law is invented: a processor that
-scales Q with gain by an undisclosed rule is matched by the `response` escape hatch or by the
-user entering the Q they measured. Each form is labelled by what its Q *measures*, never by a
-brand.
+The user picks the reading per section (editor field `Q measured: at half gain | 3 dB from
+peak | of the band-pass`); the set's default (`peak_q`) is a field of the set, so entering a
+console's 20 bands does not mean 20 changes. No manufacturer's gain-dependent Q law is
+invented: a processor that scales Q by an undisclosed rule is matched by the `response` escape
+hatch or by entering the Q measured. Readings are named by what Q measures, never by a brand.
 
 **Shelves.** `ShelfSlope` = `q { value }` | `s { value }` (the cookbook slope, S = 1 the
 steepest without overshoot; `1/Q = √((A + 1/A)(1/S − 1) + 2)`) | `octaves`. The 2nd-order
@@ -90,28 +92,26 @@ or `corner` (f is the 3 dB-from-flat point of the flat side, which several conso
 solved numerically in core and converted to the midpoint). A shelf with |gain| < 3 dB has no
 corner: the section is refused with that reason.
 
-Validation (core, reported per section by index): 0 < f < fs/2 for digital, Q in (0, 100],
-|gain| ≤ 30 dB, order range per alignment, biquad stability, `response` trace exists and is a
-transfer trace. A refused section makes the set refuse; nothing is clamped silently.
+Validation (core, per section by index): 0 < f < fs/2 (digital), Q in (0, 100], |gain| ≤ 30 dB,
+order per alignment, biquad stability, `response` a transfer trace; a refusal refuses the set.
 
 ## 2. Where it is computed, stored, attached
 
 - **Math**: `ac2_core::eq` (pure: section → complex response at a list of frequencies, plus
   the parameter conversions above). The daemon evaluates a set on the curve's grid when a math
   channel's `Operand::Eq` asks; the UI never evaluates a filter (`tests/it/no_dsp.rs` stays as
-  is; `ac2-scene` links only `ac2-proto`). A drag (below) round-trips through the daemon:
+  is; `ac2-scene` links only `ac2-proto`). Every edit round-trips through the daemon:
   `meas.eq` → new columns → redraw; ~1 k columns × 20 sections is microseconds.
 - **Stored**: `Measurement.eq: Vec<EqSet>` (several per measurement — `EQ 1`, `EQ 2` — the
   what-if is A/B'ing two plans). `EqSet` adds `id`, `rev` (bumped on every edit) and
   `in_console: Option<EqSnapshot>` (§ below). The filter curve alone is published as a
   daemon-kept, locked trace `EQ 1` owned by the measurement (`TraceSource::Eq {meas, set}`,
   columns recomputed on edit and on load — the set is the truth, the columns a cache), so it is
-  drawn, exported and compared like any trace. Session `VERSION` 28 → 29; `PROTO_VERSION` bump
-  with `fixtures/protocol/WIRE_LOCK` and the protocol fixtures.
-- **Which curves get a prediction**: only the ones the user toggles on (**Alt+E** on a selected
-  curve of the measurement, `--on` in the CLI); a new set starts with the live curve on. Each
-  toggled curve is one math channel; toggling off deletes it. Curves of other measurements never
-  get this set (copy it: `meas eq copy`).
+  drawn, exported and compared like any trace. Session `VERSION` 28 → 29; `PROTO_VERSION` +
+  `WIRE_LOCK` bump.
+- **Which curves get a prediction**: only the ones the user ticks in the editor's curve list
+  (`meas eq on`); a new set starts with the live curve ticked. Each ticked curve is
+  one math channel; unticking deletes it. Other measurements get a copy (`meas eq copy`).
 - **Bypass**: `enabled` per section and per set. A disabled section is skipped; a disabled set
   evaluates as no filter, so the A/B is one key and nothing is rebuilt. Legend `EQ 1 · bypassed`.
 - **Invariants**: deleting a set deletes its predictions (the confirmation names them); a
@@ -119,7 +119,7 @@ transfer trace. A refused section makes the set refuse; nothing is clamped silen
 
 **The double-apply rule.** Once the EQ is really dialled into the console, new captures and the
 live curve already contain it; multiplying them by it again predicts nonsense. ac2 cannot see
-the console, so the user says when: **Shift+Enter** in the editor (`meas eq mark`) — *"in the
+the console, so the user says when: **M** in the editor, then a confirmation (`meas eq mark`) — *"in the
 console"* — snapshots the set's current sections and rev as `in_console`. From then on:
 - Every prediction is of the **difference** `H_current / H_in`, never of the whole set, for
   the live curve and for captures taken while that snapshot was marked. A capture records the
@@ -151,33 +151,37 @@ phase pane (all-pass and delay sections only show there). Both have tree dots an
 any curve. Overlay curves (dashed reference, a second curve in a measurement's shade) are
 **[shared]** with the alignment aid's predicted sum; one scene rule for "predicted" styling.
 
-**Editor** (**Alt+Q**, palette `EQ…`) opens on the selected measurement's set, or creates
-`EQ n` when it has none. Alt+E (toggle the selected curve's prediction) and Alt+Q are free in
-the key table; check the alignment aid did not claim them. Keyboard first:
-- Left: the section list (↑/↓ select, **N** new section after the selected, **X** delete,
-  **Space** bypass section, **Shift+Space** bypass set, **Shift+↑/↓** reorder).
-- Right: the selected section's fields (Tab / Shift+Tab move, ←/→ step a value: f in 1/24
-  octave, gain 0.5 dB, Q in 1/12 oct of bandwidth; **Shift** ×4 coarser, **Alt** finer; typing
-  a number replaces it). The shape field cycles with ←/→ and keeps f/gain/Q where the new shape
-  has them. The Q field shows `Q 2.0 · 0.71 oct` and its definition field beside it.
-- Top: set name and switcher (`EQ 1 | EQ 2`, ←/→ on the field), realisation (`digital 48 kHz` /
-  `analog`), default peak form, `in console (rev 4)` / `not marked` (**Shift+Enter** marks).
-- Bottom: the daemon's refusal for the selected section, verbatim.
-Every change sends `meas.eq` (debounced to the frame rate); Ctrl+Z / Ctrl+Shift+Z undo as the
+**Editor**: **Alt+E** in Transfer scope (unbound today: plain E is phase reference there,
+Shift+E notifications) and the palette entry `EQ…`; it opens on the selected measurement's set,
+or creates `EQ n` when it has none. Edits apply live (nothing to submit). Keys follow the Leq dialog (`state/settings_impl.rs` `leq_key`): **↑/↓** move
+between rows (as every dialog does), **Tab / Shift+Tab** between fields, **←/→** step or cycle,
+**Insert / Delete** add / remove. Space, Enter, Shift+↑/↓ are not used (the stimulus cluster;
+Enter stays inert as in the other dialogs). Letters act only when the focus is not a text field.
+- Sections (left): **Insert** adds after the selected, **Delete** removes, **B** bypasses the
+  section, **Shift+B** the whole set, **[ / ]** move it up / down.
+- Fields (right): ←/→ step f in 1/24 octave, gain 0.5 dB, Q in 1/12 oct of bandwidth
+  (**Shift** ×4 coarser, **Alt** finer); typing a number replaces it. The shape field cycles
+  and keeps f/gain/Q where the new shape has them. The Q field shows `Q 2.0 · 0.71 oct` and its
+  `Q measured` field beside it.
+- Curves (bottom left): every transfer curve of the measurement (live, captures, sweep runs,
+  imports filed under it), each with its basis (`assumes none in` / `change since rev 4`);
+  **P** ticks / unticks "after EQ" for the row.
+- Top: set name and switcher (`EQ 1 | EQ 2`, ←/→; **Shift+Insert** a new set), realisation
+  (`digital 48 kHz` / `analog`), default `Q measured`, `in console (rev 4)` / `not marked`.
+  **M** asks *"Mark EQ 1 rev 5 (6 sections) as in the console? Captures of Main L from now on
+  record it; predictions show only later changes. M marks, Esc cancels"*; **Shift+M** in that
+  confirmation clears the mark instead.
+- Bottom: the daemon's refusal for the selected section, verbatim. Every change sends `meas.eq` (debounced to the frame rate); Ctrl+Z / Ctrl+Shift+Z undo as the
 app's other edits do. No new Ctrl chord. **[shared]** The alignment aid also picks a transfer
-curve of a measurement and draws a predicted overlay; the curve picker and the "predicted"
+curve of a measurement and draws a predicted overlay; the curve list and the "predicted"
 styling should be one scene rule used by both.
 
-**Plot handles (option, not in the first cut).** A dot per enabled peaking/shelf/pass section at
-(f, gain) on the magnitude pane while the editor is open; drag moves f and gain, Shift-drag
-(or wheel) changes Q. The app sends the new parameters, the daemon draws the curve. Built only
-if the operator wants it after using the keyboard editor (open question 2).
 
 ## 4. CLI and text format
 
 ```
-ac2 meas eq new  "Main L" [--name "EQ 1"] [--rate 96k | --analog] [--form half-gain|from-peak]
-ac2 meas eq add  "Main L" peaking 1.25k -4 --q 2 | --oct 0.7 [--form …] [--at 3] [--set "EQ 2"]
+ac2 meas eq new  "Main L" [--name "EQ 1"] [--rate 96k | --analog] [--q-measured half-gain|3db-from-peak|band-pass]
+ac2 meas eq add  "Main L" peaking 1.25k -4 --q 2 | --oct 0.7 [--q-measured …] [--at 3] [--set "EQ 2"]
 ac2 meas eq add  "Main L" high-pass 80 --lr 4 | --bw 2 | --bessel 2 --norm phase
 ac2 meas eq add  "Main L" low-shelf 120 +3 --s 1 | --q 0.7 [--corner]
 ac2 meas eq add  "Main L" biquad --rate 48k b0 b1 b2 a1 a2 | response --trace "FIR v3"
@@ -196,7 +200,7 @@ ac2 meas eq export "Main L" eq1.txt ;  ac2 meas eq import "Main L" eq1.txt [--fo
 # ac2 eq 1
 name = EQ 1
 realisation = digital 96000
-peaking   f=1250 gain=-4.0 q=2.0 form=symmetric
+peaking   f=1250 gain=-4.0 q=2.0 q_measured=half_gain
 high_pass f=80 alignment=linkwitz_riley order=4
 low_shelf f=120 gain=3.0 s=1.0 f_at=midpoint   off
 ```
@@ -210,7 +214,8 @@ conventions are not guessed). Export writes the ac2 text only.
 
 - `ac2-core` `eq` (analytic, quick tier): every shape against its closed form at f₀ and
   decades either side — peaking: |H(f₀)| = gain, half-gain points at the Q-bandwidth for
-  `symmetric` at ±3, ±12 dB, √K widening for `constant_peak`; boost × equal cut = 0 dB (symmetric);
+  `half_gain` at ±3, ±12 dB, the −3 dB-from-peak points for `minus_3db_from_peak` at ±6, ±15 dB
+  (refused at ±3 dB), √K widening for `band_pass`; boost × equal cut = 0 dB (symmetric);
   Butterworth −3 dB at f and n·6 dB/oct asymptote; LR −6 dB at f, LR4 HP + LP sum flat with
   0 dB and all-pass phase; Bessel norms (phase-matched asymptote, unit delay, −3 dB); all-pass
   |H| = 1 and −180°/−360° at f; shelf midpoint and S = 1 monotonic; Q ↔ octaves ↔ S
@@ -230,20 +235,16 @@ conventions are not guessed). Export writes the ac2 text only.
   −8 dB → both predict −2 dB more; an unmarked import predicts the whole set; a capture of a
   prediction keeps its values; session save/load recomputes the columns; refusals (f ≥ fs/2, LR order 3).
 - `ac2-cli` `tests/it/eq_rig.rs`: command shapes and refusals by message; import/export.
-- `ac2-ui` `tests/it/embedded/eq.rs`: Alt+Q from an empty daemon, add a peaking section by keys,
-  the scene's legend reads `Main L after EQ 1 · assumes none of it in` and `EQ 1`, Space
-  bypasses, Shift+Enter turns it into `no change`; one GPU snapshot
+- `ac2-ui` `tests/it/embedded/eq.rs`: Alt+E from an empty daemon, add a peaking section by keys,
+  the scene's legend reads `Main L after EQ 1 · assumes none of it in` and `EQ 1`, B
+  bypasses, P ticks a capture, M + M turns it into `no change`; one GPU snapshot
   `transfer_eq` for the final look.
 
-## 6. Open questions for the operator
+## 6. Later (not in the first cut)
 
-1. Peaking forms: `half-gain (cookbook)` and `from peak` (band-pass sum) are the two offered.
-   Do you need a third Q measure — Q read at 3 dB below the peak of the *symmetric* form, which
-   some consoles print — or is "enter the Q you measured" enough?
-2. Plot handles (drag f / gain, Shift-drag Q) in the first cut, or keyboard editor only first?
-3. Keys: Alt+Q opens the editor, Alt+E toggles "after EQ" on the selected curve, Shift+Enter
-   in the editor marks "in the console" — acceptable, or other plain/Shift keys?
-4. A linked pair (one set feeding L and R of a stereo processor): `copy` makes independent
-   sets; is a shared set across measurements wanted, or is copy enough?
-5. Should predictions also be offered on spectrum / RTA panes (`spectrum × EQ`, which math
-   channels already support for a stored transfer B), or transfer only for now?
+- **Plot handles**: a dot per peaking / shelf / pass section at (f, gain) while the editor is
+  open; drag moves f and gain, Shift-drag or the wheel Q; the daemon still draws.
+- **Linked pair**: one set shared by L and R of a stereo processor. First cut: `copy` only.
+- **Spectrum / RTA × EQ**: math channels already take a stored transfer B for levels, but what
+  a level becomes through a filter depends on the programme material (the RTA band gain is
+  exact only for pink noise, `math-channels.md` *Levels*), so it waits for a use case.
