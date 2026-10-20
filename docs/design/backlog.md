@@ -117,7 +117,10 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   failed once on its first try in a full workspace run (passed on retry); 10/10 alone.
 - **macOS CI "ac2 on BlackHole (Core Audio)"**: `selftest duplex` failed once with
   `config_changed` count 1 (run 39364032668, 1ee6a366); BlackHole reported a configuration
-  change mid-run, the levels were exact. Seen once.
+  change mid-run, the levels were exact. Seen once. Also once: "delay finder read −481.0
+  samples, expected 480 ± 1" (run 39468724964, 3310ea85; passed on rerun): the right size with
+  the opposite sign, as if reference and measurement swapped for that run. Two oddities on
+  BlackHole in one day: watch for a third.
 - **ac2d `osc::slow_a_tone_over_the_limit_lights_over_and_back_ok` on macOS CI**: the
   `/w/ok` cue carried 87.0004 against the test's `< 87.0` (run 39383093276); the ok edge
   sits at the limit's hysteresis, so the bound or the edge's comparison is off by rounding.
