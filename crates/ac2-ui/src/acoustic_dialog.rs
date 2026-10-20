@@ -16,7 +16,7 @@ use ac2_proto::cal;
 use ac2_proto::model::{CalMethod, State};
 use ac2_proto::units::{DbSpl, Hz};
 
-use crate::electrical_dialog::parse_freq;
+use ac2_scene::unit_text::{Freq, SplLevel, in_field};
 
 /// The fields, top to bottom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -62,10 +62,9 @@ fn input_no(c: u16) -> u32 {
 
 /// `94 dB`, `114`, `94 dB SPL` → dB SPL, 70 … 150 (calibrators sit at 94, 104, 114, 124).
 pub fn parse_level(t: &str) -> Result<DbSpl, String> {
-    let v = crate::state::parse_number(t, &["db spl", "dbspl", "db"])
-        .map_err(|e| format!("calibrator level: {e}"))?;
-    if (70.0..=150.0).contains(&v) {
-        Ok(DbSpl(v))
+    let v = in_field::<SplLevel>(t, "db")?.0;
+    if (70.0..=150.0).contains(&v.0) {
+        Ok(v)
     } else {
         Err("the calibrator level is 70 … 150 dB SPL (94 or 114 on most calibrators)".into())
     }
@@ -175,7 +174,9 @@ impl AcousticDialog {
             }
             cal::check_mic_name(&mic).map_err(|e| (Field::Mic, e))?;
             let level = parse_level(&self.level).map_err(|e| (Field::Level, e))?;
-            let freq = parse_freq(&self.freq).map_err(|e| (Field::Freq, e))?;
+            let freq = in_field::<Freq>(&self.freq, "hz")
+                .map_err(|e| (Field::Freq, e.0))?
+                .0;
             Ok((mic, level, freq))
         })();
         let (mic, calibrator_level, calibrator_freq): (String, DbSpl, Hz) = match parsed {

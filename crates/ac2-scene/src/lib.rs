@@ -65,6 +65,7 @@ pub mod time;
 pub mod toast;
 pub mod trace;
 pub mod trace_list;
+pub mod unit_text;
 pub mod unresolved;
 pub mod view;
 

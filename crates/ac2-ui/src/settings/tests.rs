@@ -64,7 +64,12 @@ fn lowering_goes_out_at_once_a_raise_asks_for_the_word() {
 
     e.type_text("loud");
     assert_eq!(e.enter(Some(&g), false), None);
-    assert!(e.error.as_deref().expect("set").starts_with("not a number"));
+    assert!(
+        e.error
+            .as_deref()
+            .expect("set")
+            .contains("expected a number followed by a unit")
+    );
 }
 
 #[test]

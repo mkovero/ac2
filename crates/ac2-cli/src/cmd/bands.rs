@@ -18,8 +18,8 @@ use crate::args::{
     LeqWatch, MeasRef, TonalArg,
 };
 use crate::output::Out;
-use crate::units::{BandSourceArg, BandWindowArg, LeqWindowArg};
 use crate::watch;
+use ac2_scene::unit_text::{BandSourceArg, BandWindowArg, LeqWindowArg, TimeRef};
 
 pub(crate) async fn run(cli: &Cli, cmd: &BandsCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
@@ -281,6 +281,36 @@ async fn watch_cmd(cli: &Cli, w: &LeqWatch, out: &mut Out<'_>) -> Result<(), Cli
     watch::bands(&c, m.id, until, out).await
 }
 
+/// Unix ns of `t`, given now (Unix ns); local times in this host's time zone.
+fn resolve(t: &TimeRef, now_ns: u64) -> Result<u64, CliError> {
+    use chrono::TimeZone;
+    let at = |d: (i32, u32, u32), sec: u32| {
+        chrono::NaiveDate::from_ymd_opt(d.0, d.1, d.2)
+            .and_then(|d| d.and_hms_opt(sec / 3600, (sec % 3600) / 60, sec % 60))
+    };
+    let ns = |ts: i64| u64::try_from(ts).map(|t| t * 1_000_000_000).ok();
+    let out = match *t {
+        TimeRef::Now => Some(now_ns),
+        TimeRef::Ago(s) => Some(now_ns.saturating_sub((s * 1e9).round() as u64)),
+        TimeRef::Utc { date, seconds } => {
+            at(date, seconds).and_then(|t| ns(t.and_utc().timestamp()))
+        }
+        TimeRef::Local { date, seconds } => {
+            let date = date.unwrap_or_else(|| {
+                let today = chrono::Local
+                    .timestamp_nanos(i64::try_from(now_ns).unwrap_or(i64::MAX))
+                    .date_naive();
+                use chrono::Datelike;
+                (today.year(), today.month(), today.day())
+            });
+            at(date, seconds)
+                .and_then(|t| chrono::Local.from_local_datetime(&t).earliest())
+                .and_then(|t| ns(t.timestamp()))
+        }
+    };
+    out.ok_or_else(|| CliError::Usage(format!("{t:?}: not a time this host can place")))
+}
+
 /// The protocol source for `a`: a file read and parsed here, a span resolved against this
 /// host's clock and the daemon's meters.
 pub(crate) fn source(
@@ -292,11 +322,7 @@ pub(crate) fn source(
         BandSourceArg::File(p) => levels_file(p),
         BandSourceArg::Span { meter, from, until } => {
             let m = find_meas(st, &MeasRef(meter.clone()))?;
-            let bad = |e: crate::units::UnitError| CliError::Usage(e.0);
-            let (from, until) = (
-                from.resolve(now_ns).map_err(bad)?,
-                until.resolve(now_ns).map_err(bad)?,
-            );
+            let (from, until) = (resolve(from, now_ns)?, resolve(until, now_ns)?);
             if until <= from {
                 return Err(CliError::Usage(format!(
                     "{meter}: the span ends before it starts"
@@ -422,11 +448,7 @@ async fn log(cli: &Cli, a: &BandsLog, out: &mut Out<'_>) -> Result<(), CliError>
     let st = state(&c).await?;
     let m = the_meter(&st, &a.meter)?;
     let now = watch::now_wall().0;
-    let bad = |e: crate::units::UnitError| CliError::Usage(e.0);
-    let (from, until) = (
-        a.from.resolve(now).map_err(bad)?,
-        a.until.resolve(now).map_err(bad)?,
-    );
+    let (from, until) = (resolve(&a.from, now)?, resolve(&a.until, now)?);
     if until <= from {
         return Err(CliError::Usage("the span ends before it starts".into()));
     }
@@ -570,7 +592,7 @@ pub(crate) fn estimated_set(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::units::TimeRef;
+    use ac2_scene::unit_text::TimeRef;
     use clap::Parser;
 
     fn parse(args: &[&str]) -> BandsCmd {
@@ -810,13 +832,11 @@ mod tests {
         );
         let utc: TimeRef = "2026-10-08T21:00:30Z".parse().expect("test value");
         assert_eq!(
-            utc.resolve(0).expect("test value"),
+            resolve(&utc, 0).expect("test value"),
             1_791_493_230 * 1_000_000_000
         );
         assert_eq!(
-            TimeRef::Ago(30.0)
-                .resolve(100_000_000_000)
-                .expect("test value"),
+            resolve(&TimeRef::Ago(30.0), 100_000_000_000).expect("test value"),
             70_000_000_000
         );
         for bad in ["25:00", "2026-13-01T00:00", "-5", "21:00Z", "1"] {

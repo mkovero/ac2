@@ -290,8 +290,10 @@ impl LeqDialog {
                 continue;
             }
             let name = q.name();
-            let v = crate::state::parse_number(t, &["db spl", "dbspl", "db"])
-                .map_err(|err| format!("{name} limit: {err}"))?;
+            let v = ac2_scene::unit_text::in_field::<ac2_scene::unit_text::SplLevel>(t, "db")
+                .map_err(|err| format!("{name} limit: {err}"))?
+                .0
+                .0;
             if !(60.0..=170.0).contains(&v) {
                 return Err(format!(
                     "{name}: a limit is 60 … 170 dB SPL (empty for none)"
@@ -320,7 +322,9 @@ impl LeqDialog {
     /// as the energy levels' unless typed.
     pub fn position(&self) -> Result<Option<PositionCorrection>, String> {
         let parse = |t: &str, what: &str| {
-            crate::state::parse_number(t, &["db"]).map_err(|e| format!("{what}: {e}"))
+            ac2_scene::unit_text::in_field::<ac2_scene::unit_text::Gain>(t, "db")
+                .map(|g| g.0.0)
+                .map_err(|e| format!("{what}: {e}"))
         };
         let level = self.extra[Extra::Position.index()].trim();
         let peak = self.extra[Extra::PositionPeak.index()].trim();

@@ -20,10 +20,10 @@ use super::connect;
 use crate::CliError;
 use crate::args::{Cli, GenCmd, GenOpts, SlopeArg};
 use crate::output::Out;
-use crate::units::LevelDbfs;
-use crate::units::channels_text;
 use crate::watch::{Key, RawTerm, quit_signal};
 use ac2_scene::rig;
+use ac2_scene::unit_text::LevelDbfs;
+use ac2_scene::unit_text::channels_text;
 
 /// The settings `gen` would send, validated without a daemon.
 pub fn settings(cmd: &GenCmd) -> Result<Option<(GeneratorSettings, bool)>, CliError> {
@@ -325,7 +325,7 @@ mod tests {
     use ac2_proto::units::Dbfs;
 
     use super::*;
-    use crate::units::{Channels, LevelDbfs};
+    use ac2_scene::unit_text::{Channels, LevelDbfs};
 
     type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
 

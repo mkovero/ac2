@@ -187,7 +187,7 @@ pub(crate) fn apply_position(
 /// `--peak-limit`, `--warn`, `--horizon`.
 pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> {
     let mut cfg = cur.clone();
-    let blank = |w: &crate::units::LeqWindowArg| LeqWindow {
+    let blank = |w: &ac2_scene::unit_text::LeqWindowArg| LeqWindow {
         cue: None,
         duration: Seconds(f64::from(w.seconds)),
         weighting: w.weighting(),

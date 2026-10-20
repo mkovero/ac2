@@ -5,7 +5,9 @@ use std::str::FromStr;
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::{ColourArg, ResolutionArg};
-use crate::units::{Channel, Channels, Freq, MeasLevel, SampleCount, SpecAveragingArg, Time};
+use ac2_scene::unit_text::{
+    Channel, Channels, Freq, MeasLevel, SampleCount, SpecAveragingArg, Time,
+};
 
 /// Kind of a new measurement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

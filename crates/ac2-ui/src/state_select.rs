@@ -27,7 +27,9 @@ impl AppState {
         let observation = if text.trim().is_empty() {
             None
         } else {
-            let v = parse_number(text, &["s"])?;
+            let v = ac2_scene::unit_text::in_field::<ac2_scene::unit_text::Time>(text, "s")?
+                .0
+                .0;
             if !(v > 0.0 && v <= MAX_OBSERVATION_S) {
                 return Err(format!(
                     "observation must be above 0 and at most {MAX_OBSERVATION_S} s"

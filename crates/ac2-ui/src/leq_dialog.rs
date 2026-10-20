@@ -205,8 +205,11 @@ impl Row {
         let limit = if self.limit.trim().is_empty() {
             None
         } else {
-            let v = crate::state::parse_number(&self.limit, &["db spl", "dbspl", "db"])
-                .map_err(|e| format!("window {n} ({name}) limit: {e}"))?;
+            let v =
+                ac2_scene::unit_text::in_field::<ac2_scene::unit_text::SplLevel>(&self.limit, "db")
+                    .map_err(|e| format!("window {n} ({name}) limit: {e}"))?
+                    .0
+                    .0;
             if !(30.0..=150.0).contains(&v) {
                 return Err(format!(
                     "window {n} ({name}): a limit is 30 … 150 dB SPL (empty for none)"
@@ -214,8 +217,11 @@ impl Row {
             }
             Some(DbSpl(v))
         };
-        let margin = crate::state::parse_number(&self.margin, &["db"])
-            .map_err(|e| format!("window {n} ({name}) warn margin: {e}"))?;
+        let margin =
+            ac2_scene::unit_text::in_field::<ac2_scene::unit_text::Gain>(&self.margin, "db")
+                .map_err(|e| format!("window {n} ({name}) warn margin: {e}"))?
+                .0
+                .0;
         if !(0.0..=20.0).contains(&margin) {
             return Err(format!("window {n} ({name}): the warn margin is 0 … 20 dB"));
         }

@@ -1,14 +1,13 @@
 //! The `ac2` command-line client: a thin typed client of `ac2d`.
 //!
 //! Every command prints a human table or, with `--json`, one JSON document (live views: JSON
-//! lines). Values on the command line carry units ([`units`]). The CLI holds the stimulus
-//! lease only while a foreground `ac2 gen` runs.
+//! lines). Values on the command line carry units ([`ac2_scene::unit_text`]). The CLI holds
+//! the stimulus lease only while a foreground `ac2 gen` runs.
 
 pub mod args;
 mod cmd;
 mod output;
 pub mod selftest;
-pub mod units;
 mod watch;
 
 use std::io::Write;

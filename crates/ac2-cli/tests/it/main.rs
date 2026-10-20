@@ -6,6 +6,7 @@ mod artnet_rig;
 mod band_rig;
 mod discover;
 mod drift_rig;
+mod fake_parity;
 mod json;
 mod leq_rig;
 mod math_rig;

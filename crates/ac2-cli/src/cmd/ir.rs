@@ -31,8 +31,8 @@ use super::{connect, find_meas, find_trace, state};
 use crate::CliError;
 use crate::args::{Cli, IrCaptureArgs, IrCmd, IrMetricsArgs, SweepCmd, SweepRunArgs};
 use crate::output::Out;
-use crate::units::channels_text;
 use crate::watch::{Key, RawTerm, quit_signal};
+use ac2_scene::unit_text::channels_text;
 
 pub(crate) async fn run(cli: &Cli, cmd: &IrCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
@@ -573,7 +573,7 @@ mod tests {
     use super::*;
     use crate::args::LfHarmonicsArg;
     use crate::output::Out;
-    use crate::units::{Channel, Channels, Freq, LevelDbfs, Time};
+    use ac2_scene::unit_text::{Channel, Channels, Freq, LevelDbfs, Time};
 
     fn args() -> IrCaptureArgs {
         IrCaptureArgs {

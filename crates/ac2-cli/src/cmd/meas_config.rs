@@ -4,7 +4,7 @@ use ac2_proto::model::*;
 
 use crate::CliError;
 use crate::args::*;
-use crate::units::SampleCount;
+use ac2_scene::unit_text::SampleCount;
 
 pub(super) fn weighting(w: WeightArg) -> Weighting {
     match w {
@@ -95,11 +95,11 @@ pub(crate) fn window(w: WindowArg) -> Window {
 
 /// Builds the measurement configuration of `meas new`, checking the kind's required inputs.
 pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
-    let need = |c: Option<crate::units::Channel>, flag: &str| {
+    let need = |c: Option<ac2_scene::unit_text::Channel>, flag: &str| {
         c.map(|c| c.0)
             .ok_or_else(|| CliError::Usage(format!("{:?} needs --{flag}", n.kind)))
     };
-    let refuse = |c: Option<crate::units::Channel>, flag: &str| match c {
+    let refuse = |c: Option<ac2_scene::unit_text::Channel>, flag: &str| match c {
         Some(_) => Err(CliError::Usage(format!(
             "--{flag} does not apply to {:?}",
             n.kind
@@ -110,7 +110,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         ("out", n.outputs.is_some()),
         (
             "level",
-            matches!(n.level, Some(crate::units::MeasLevel::Stimulus(_))),
+            matches!(n.level, Some(ac2_scene::unit_text::MeasLevel::Stimulus(_))),
         ),
         ("duration", n.duration.is_some()),
         ("repeats", n.repeats.is_some()),
@@ -132,7 +132,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         )));
     }
     if n.kind != MeasKindArg::Spectrum
-        && let Some(crate::units::MeasLevel::Spectrum(l)) = n.level
+        && let Some(ac2_scene::unit_text::MeasLevel::Spectrum(l)) = n.level
     {
         return Err(CliError::Usage(format!(
             "--level {} applies to a spectrum, not {:?}",
@@ -191,8 +191,8 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                         .map(|o| o.0.clone())
                         .ok_or_else(|| CliError::Usage("sweep needs --out".into()))?,
                     level: match n.level {
-                        Some(crate::units::MeasLevel::Stimulus(l)) => l,
-                        Some(crate::units::MeasLevel::Spectrum(_)) => {
+                        Some(ac2_scene::unit_text::MeasLevel::Stimulus(l)) => l,
+                        Some(ac2_scene::unit_text::MeasLevel::Spectrum(_)) => {
                             return Err(CliError::Usage(
                                 "a sweep's --level is its RMS level, e.g. -50dbfs; tone and \
                                  density are a spectrum's"
@@ -284,7 +284,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                             smoothing: n.smooth.map(smoothing).transpose()?,
                             averaging: n.average.map_or(SpecAveraging::Off, |a| a.0),
                             level: match n.level {
-                                Some(crate::units::MeasLevel::Spectrum(l)) => l,
+                                Some(ac2_scene::unit_text::MeasLevel::Spectrum(l)) => l,
                                 _ => SpecLevel::default_for(resolution),
                             },
                             ..SpectrumConfig::on_input(input)

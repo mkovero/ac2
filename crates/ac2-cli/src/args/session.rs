@@ -6,7 +6,7 @@ use std::str::FromStr;
 use clap::{Args, Subcommand};
 
 use super::BackendArg;
-use crate::units::{Channel, Channels, Freq, SampleCount};
+use ac2_scene::unit_text::{Channel, Channels, Freq, SampleCount};
 
 /// `session …`.
 #[derive(Debug, Subcommand)]
@@ -125,7 +125,9 @@ impl FromStr for MicAssign {
         let (ch, name) = s
             .split_once('=')
             .ok_or_else(|| format!("{s:?}: expected IN=NAME, e.g. 3=M30"))?;
-        let input: Channel = ch.parse().map_err(|e: crate::units::UnitError| e.0)?;
+        let input: Channel = ch
+            .parse()
+            .map_err(|e: ac2_scene::unit_text::UnitError| e.0)?;
         let name = name.trim();
         Ok(Self {
             input,
@@ -172,7 +174,9 @@ impl FromStr for CurveAssign {
     fn from_str(s: &str) -> Result<Self, String> {
         let bad = || format!("{s:?}: expected IN=LABEL or IN=off, e.g. 3=90°");
         let (ch, v) = s.split_once('=').ok_or_else(bad)?;
-        let input: Channel = ch.parse().map_err(|e: crate::units::UnitError| e.0)?;
+        let input: Channel = ch
+            .parse()
+            .map_err(|e: ac2_scene::unit_text::UnitError| e.0)?;
         Ok(Self {
             input,
             curve: v.parse()?,

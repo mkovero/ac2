@@ -6,7 +6,7 @@ use std::str::FromStr;
 use clap::{Subcommand, ValueEnum};
 
 use super::{AverageArg, ImportFormatArg, MeasRef};
-use crate::units::{Celsius, Time};
+use ac2_scene::unit_text::{Celsius, Time};
 
 /// `trace …`.
 #[derive(Debug, Subcommand)]

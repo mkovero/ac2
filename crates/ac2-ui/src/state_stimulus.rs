@@ -8,7 +8,9 @@ impl AppState {
         text: &str,
         out: &mut Vec<Request>,
     ) -> Result<(), String> {
-        let v = parse_number(text, &["dbfs", "db"])?;
+        let v = ac2_scene::unit_text::in_field::<ac2_scene::unit_text::LevelDbfs>(text, "dbfs")?
+            .0
+            .0;
         if v > 0.0 {
             return Err("level must be ≤ 0 dBFS".into());
         }

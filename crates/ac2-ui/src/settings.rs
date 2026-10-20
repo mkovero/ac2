@@ -210,13 +210,14 @@ impl CeilingEdit {
             self.error = Some("type the new max level in dBFS (e.g. -40), then Enter".into());
             return None;
         }
-        let v = match crate::state::parse_number(text, &["dbfs", "db"]) {
-            Ok(v) => v,
-            Err(e) => {
-                self.error = Some(e);
-                return None;
-            }
-        };
+        let v =
+            match ac2_scene::unit_text::in_field::<ac2_scene::unit_text::LevelDbfs>(text, "dbfs") {
+                Ok(v) => v.0.0,
+                Err(e) => {
+                    self.error = Some(e.0);
+                    return None;
+                }
+            };
         if v > g.ceiling_bound.0 {
             self.error = Some(format!(
                 "above this rig's bound {} (ac2d --max-level; only a restart with a higher bound \
