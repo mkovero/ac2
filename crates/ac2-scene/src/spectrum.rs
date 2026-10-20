@@ -149,23 +149,36 @@ pub fn offset_note(name: &str, offset_db: f64) -> String {
     format!("{name} · offset {}", format::db_readout(offset_db))
 }
 
+/// What a live RTA or spectrum trace takes besides its frame: the frame's capture time (for
+/// the calibration age), the mic-curve note of its input, the display columns, its name,
+/// colour and freshness.
+#[derive(Clone, Debug)]
+pub struct LiveMeta<'a, 'c> {
+    pub captured: WallNs,
+    pub curve: Option<&'c str>,
+    pub freqs: &'a [f64],
+    pub edges: &'a [(f64, f64)],
+    pub name: String,
+    pub color: Color,
+    pub freshness: Freshness,
+}
+
 impl<'a> SpectrumTrace<'a> {
     /// A live RTA trace; `captured` is the frame's capture time (for the calibration age),
     /// `curve` the mic-curve note of its input.
-    #[allow(clippy::too_many_arguments)]
-    pub fn rta(
-        frame: &'a RtaFrame,
-        captured: WallNs,
-        curve: Option<&str>,
-        freqs: &'a [f64],
-        edges: &'a [(f64, f64)],
-        name: impl Into<String>,
-        color: Color,
-        freshness: Freshness,
-    ) -> Self {
+    pub fn rta(frame: &'a RtaFrame, meta: LiveMeta<'a, '_>) -> Self {
+        let LiveMeta {
+            captured,
+            curve,
+            freqs,
+            edges,
+            name,
+            color,
+            freshness,
+        } = meta;
         Self {
             key: TraceKey::Live(frame.meas),
-            name: name.into(),
+            name,
             color,
             freqs,
             edges,
@@ -197,20 +210,19 @@ impl<'a> SpectrumTrace<'a> {
     /// A live narrowband spectrum; `captured` is the frame's capture time, `curve` the
     /// mic-curve note of its input. Its columns are display columns of FFT bins, each the
     /// highest tone level among its bins (the mean density, a density); a gap is NaN.
-    #[allow(clippy::too_many_arguments)]
-    pub fn spectrum(
-        frame: &'a SpecFrame,
-        captured: WallNs,
-        curve: Option<&str>,
-        freqs: &'a [f64],
-        edges: &'a [(f64, f64)],
-        name: impl Into<String>,
-        color: Color,
-        freshness: Freshness,
-    ) -> Self {
+    pub fn spectrum(frame: &'a SpecFrame, meta: LiveMeta<'a, '_>) -> Self {
+        let LiveMeta {
+            captured,
+            curve,
+            freqs,
+            edges,
+            name,
+            color,
+            freshness,
+        } = meta;
         Self {
             key: TraceKey::Live(frame.meas),
-            name: name.into(),
+            name,
             color,
             freqs,
             edges,
@@ -429,7 +441,7 @@ pub struct SpectrumScene {
     /// else the first's that has bands); empty when the marker is off.
     pub stitches: Vec<crate::stitch::Stitch>,
     /// Its columns finer than the window behind them resolves, shaded.
-    pub unresolved: Vec<crate::unresolved::Mark>,
+    pub unresolved: Vec<crate::unresolved::RangeMark>,
 }
 
 /// The bands of the selected curve that has them, else of the first that does; `None`

@@ -110,11 +110,6 @@ impl ImpulseResponse {
         &self.samples
     }
 
-    /// Log view: `20·log10|h|`, floored at [`FLOOR_DB`].
-    pub fn log_db(&self) -> Vec<f64> {
-        self.samples.iter().map(|v| amp_db(v.abs())).collect()
-    }
-
     /// ETC view: Hilbert envelope in dB, floored at [`FLOOR_DB`].
     pub fn etc_db(&self) -> Vec<f64> {
         self.envelope().into_iter().map(amp_db).collect()

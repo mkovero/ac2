@@ -444,7 +444,7 @@ impl Control {
         // Disarmed, no owner; a sweep run in progress is discarded.
         self.abort_sweep(SweepFailure::Stopped, "a session was loaded");
         self.stop_output();
-        self.lease = None;
+        self.out.lease = None;
         let mut g = self.store.state().generator.clone();
         if g.owner.is_some() || g.armed || g.firing {
             g.owner = None;
@@ -489,7 +489,7 @@ impl Control {
             if let Err(e) = self.reopen_at(&[], epoch) {
                 tracing::warn!("session load: the audio stream did not reopen: {}", e.msg);
             }
-        } else if self.recovery.is_some() {
+        } else if self.audio_recovery.is_some() {
             // The session's audio is stopped: it stays open and keeps being reopened, now in
             // the loaded state's epoch.
             self.rebase_recovery(epoch);

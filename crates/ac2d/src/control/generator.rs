@@ -44,7 +44,7 @@ impl Control {
         client: &ClientId,
         token: LeaseToken,
     ) -> Result<(), ProtoError> {
-        match &self.lease {
+        match &self.out.lease {
             Some(l) if l.token == token && l.owner == *client && l.deadline > Instant::now() => {
                 Ok(())
             }
@@ -54,17 +54,17 @@ impl Control {
 
     /// Fades the output out (the gate makes the source fade on its own as well).
     pub(super) fn stop_output(&mut self) {
-        self.gate.close();
+        self.out.gate.close();
         if let Some(rt) = &self.session {
             rt.gen_handle.stop();
         }
-        self.level = None;
-        self.source = None;
+        self.out.level = None;
+        self.out.source = None;
     }
 
     pub(super) fn check_lease(&mut self, now: Instant) {
-        if self.lease.as_ref().is_some_and(|l| l.deadline <= now) {
-            let owner = self.lease.take().map(|l| l.owner);
+        if self.out.lease.as_ref().is_some_and(|l| l.deadline <= now) {
+            let owner = self.out.lease.take().map(|l| l.owner);
             tracing::warn!(
                 "stimulus lease of {} expired: output muted",
                 owner.as_ref().map_or("?", |o| o.0.as_str())
@@ -84,10 +84,10 @@ impl Control {
     /// the stimulus is silent, so the state must not say firing. Disarms with an expiry
     /// audit, and the lease goes with it.
     pub(super) fn check_muted(&mut self) {
-        if !self.gate.take_tripped() || !self.store.state().generator.firing {
+        if !self.out.gate.take_tripped() || !self.store.state().generator.firing {
             return;
         }
-        let owner = self.lease.take().map(|l| l.owner);
+        let owner = self.out.lease.take().map(|l| l.owner);
         tracing::warn!(
             "stimulus lease of {} expired: output muted",
             owner.as_ref().map_or("?", |o| o.0.as_str())
@@ -114,7 +114,7 @@ impl Control {
         // always a new instance (a reconnect, or another process with the same key) and
         // must never inherit armed or firing output it did not set. Whatever the old lease
         // drove fades out and disarms first; the new holder arms and fires explicitly.
-        let action = match &self.lease {
+        let action = match &self.out.lease {
             Some(l) if l.owner != *client && !force => {
                 return Err(perr_detail(
                     ErrorCode::LeaseHeld,
@@ -127,7 +127,7 @@ impl Control {
             Some(l) if l.owner != *client => GenAction::Force,
             _ => GenAction::Acquire,
         };
-        if self.lease.is_some() || g.armed || g.firing {
+        if self.out.lease.is_some() || g.armed || g.firing {
             let why = if action == GenAction::Force {
                 "another client took the stimulus over"
             } else {
@@ -140,7 +140,7 @@ impl Control {
         }
         let token = LeaseToken(random_u128());
         let deadline = Instant::now() + self.s.lease_expiry;
-        self.lease = Some(Lease {
+        self.out.lease = Some(Lease {
             token,
             owner: client.clone(),
             deadline,
@@ -213,7 +213,7 @@ impl Control {
         }
 
         let deadline = Instant::now() + self.s.lease_expiry;
-        if let Some(l) = &mut self.lease {
+        if let Some(l) = &mut self.out.lease {
             l.deadline = deadline;
         }
         let prev = self.store.state().generator.clone();
@@ -236,7 +236,7 @@ impl Control {
                 .session
                 .as_mut()
                 .ok_or_else(|| perr(ErrorCode::Refused, "no session"))?;
-            if self.source != Some(key) || self.level.is_none() {
+            if self.out.source != Some(key) || self.out.level.is_none() {
                 let g = CoreGenerator::new(&GeneratorConfig {
                     signal,
                     sample_rate: f64::from(rt.sample_rate),
@@ -255,18 +255,18 @@ impl Control {
                 }
                 let lc = g.level_control();
                 // A fresh gate state for the new source; the old one fades on its own.
-                self.gate.open_until(deadline);
+                self.out.gate.open_until(deadline);
                 rt.gen_handle
                     .set_source(Box::new(LeasedSource::new(
                         Box::new(g),
-                        Arc::clone(&self.gate),
+                        Arc::clone(&self.out.gate),
                     )))
                     .map_err(|e| perr(ErrorCode::Internal, e.to_string()))?;
-                self.level = Some(lc);
-                self.source = Some(key);
-            } else if let Some(lc) = &self.level {
+                self.out.level = Some(lc);
+                self.out.source = Some(key);
+            } else if let Some(lc) = &self.out.level {
                 lc.set_level_dbfs(st.level.0).map_err(gen_err)?;
-                self.gate.open_until(deadline);
+                self.out.gate.open_until(deadline);
             }
             rt.gen_handle.set_gain(Gain::UNITY);
             rt.gen_handle.start();

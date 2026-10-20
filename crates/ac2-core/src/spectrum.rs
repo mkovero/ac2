@@ -25,6 +25,7 @@
 //! below its level. It keeps the dBFS reference of tone power (a full-scale sine's mean
 //! square), so a density integrated over frequency is the signal's level in dBFS.
 
+#[cfg(test)]
 use crate::rta::BandFraction;
 use crate::window::{Window, WindowGains};
 use num_complex::Complex64;
@@ -138,11 +139,6 @@ impl<'a> PowerSpectrum<'a> {
         k as f64 * self.fs / self.n as f64
     }
 
-    /// Bin spacing Δf = fs/N.
-    pub fn bin_width(&self) -> f64 {
-        self.fs / self.n as f64
-    }
-
     /// Folded power F_k = c_k·|X_k|² (unnormalised).
     pub fn folded(&self) -> &'a [f64] {
         self.folded
@@ -176,7 +172,8 @@ impl<'a> PowerSpectrum<'a> {
     }
 
     /// Total power Σ_k PSD_k·Δf in FS² (the windowed mean square, by Parseval).
-    pub fn total_power(&self) -> f64 {
+    #[cfg(test)]
+    pub(crate) fn total_power(&self) -> f64 {
         self.folded.iter().sum::<f64>() / (self.n as f64 * self.gains.sum_sq)
     }
 
@@ -295,7 +292,8 @@ pub struct FftBanding {
 impl FftBanding {
     /// IEC 61260-1 base-10 bands of `fraction` with exact mid-band frequency in
     /// `[f_lo, f_hi]`, for an `n`-point FFT at rate `fs`.
-    pub fn iec(fraction: BandFraction, f_lo: f64, f_hi: f64, n: usize, fs: f64) -> Self {
+    #[cfg(test)]
+    pub(crate) fn iec(fraction: BandFraction, f_lo: f64, f_hi: f64, n: usize, fs: f64) -> Self {
         let specs = fraction.centres(f_lo, f_hi).into_iter().map(|fm| {
             let (lo, hi) = fraction.edges(fm);
             (fm, lo, hi)
@@ -308,7 +306,8 @@ impl FftBanding {
     ///
     /// # Panics
     /// If fewer than two edges are given or they are not strictly increasing from ≥ 0.
-    pub fn from_edges(edges: &[f64], n: usize, fs: f64) -> Self {
+    #[cfg(test)]
+    pub(crate) fn from_edges(edges: &[f64], n: usize, fs: f64) -> Self {
         assert!(edges.len() >= 2, "need at least two edges");
         assert!(
             edges[0] >= 0.0 && edges.windows(2).all(|w| w[1] > w[0]),
@@ -325,6 +324,7 @@ impl FftBanding {
         Self::build(specs, n, fs)
     }
 
+    #[cfg(test)]
     fn build(specs: impl Iterator<Item = (f64, f64, f64)>, n: usize, fs: f64) -> Self {
         assert!(n >= 2 && fs > 0.0, "invalid FFT size {n} or rate {fs}");
         let df = fs / n as f64;
@@ -700,12 +700,6 @@ impl SpectrumAnalyzer {
         self.fifo_sum.fill(0.0);
         self.avg.fill(0.0);
         self.peak.fill(0.0);
-        self.peak_age_s.fill(0.0);
-    }
-
-    /// Restarts peak hold from the current average.
-    pub fn reset_peak(&mut self) {
-        self.peak.copy_from_slice(&self.avg);
         self.peak_age_s.fill(0.0);
     }
 }

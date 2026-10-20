@@ -45,7 +45,7 @@ pub struct Source<'a> {
 
 /// One marked range.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Mark {
+pub struct RangeMark {
     pub lo_hz: f64,
     pub hi_hz: f64,
     /// Whether the range runs from the curve's lowest column (drawn without a lower edge).
@@ -59,7 +59,7 @@ pub struct Mark {
 /// The marks of `src` on a curve whose lowest column is at `first_hz` (a range starting
 /// at or below it is said as `below …`). `what` names the curve when the pane holds more
 /// than one kind (`harmonics`).
-pub fn marks(src: Source<'_>, first_hz: f64, what: Option<&str>) -> Vec<Mark> {
+pub fn marks(src: Source<'_>, first_hz: f64, what: Option<&str>) -> Vec<RangeMark> {
     let res = format::resolution(src.unresolved.resolution);
     let note = match what {
         Some(w) => format!("{w} coarser than {res} ({})", src.fill.text()),
@@ -80,7 +80,7 @@ pub fn marks(src: Source<'_>, first_hz: f64, what: Option<&str>) -> Vec<Mark> {
                     format::freq_rough(r.hi.0)
                 )
             };
-            Mark {
+            RangeMark {
                 lo_hz: r.lo.0,
                 hi_hz: r.hi.0,
                 from_bottom,
@@ -92,12 +92,12 @@ pub fn marks(src: Source<'_>, first_hz: f64, what: Option<&str>) -> Vec<Mark> {
 }
 
 /// The mark covering `hz`, if any.
-pub fn at(marks: &[Mark], hz: f64) -> Option<&Mark> {
+pub fn at(marks: &[RangeMark], hz: f64) -> Option<&RangeMark> {
     marks.iter().find(|m| hz >= m.lo_hz && hz <= m.hi_hz)
 }
 
 /// Shade and edges of `marks` in `plot`, under the grid and the curves.
-pub(crate) fn draw(c: &mut Canvas, plot: Rect, xm: &Mapping, marks: &[Mark], theme: &Theme) {
+pub(crate) fn draw(c: &mut Canvas, plot: Rect, xm: &Mapping, marks: &[RangeMark], theme: &Theme) {
     for m in marks {
         let x0 = xm.to_px(m.lo_hz).max(plot.x);
         let x1 = xm.to_px(m.hi_hz).min(plot.right());

@@ -134,17 +134,17 @@ impl Control {
 
     /// The rig meters as a session file keeps measurements (the rig log manifest).
     fn rig_saved(&self) -> Vec<SavedMeasurement> {
-        self.rigm.saved.iter().map(RigMeter::saved).collect()
+        self.rig.meas.saved.iter().map(RigMeter::saved).collect()
     }
 
     /// Whether the rig has meters.
     fn has_rig_meters(&self) -> bool {
-        !self.rigm.saved.is_empty()
+        !self.rig.meas.saved.is_empty()
     }
 
     /// The rig meters' ids, ascending.
     fn rig_meter_ids(&self) -> Vec<MeasId> {
-        self.rigm.saved.iter().map(|m| m.id).collect()
+        self.rig.meas.saved.iter().map(|m| m.id).collect()
     }
 
     /// `o` as a session file keeps it: a rig meter is no owner the file could name.
@@ -158,11 +158,11 @@ impl Control {
     /// Every rig setting as it stands, to persist with one of them changed.
     pub(super) fn rig_settings_now(&self) -> RigSettings {
         RigSettings {
-            ceiling_dbfs: self.ceiling_set,
+            ceiling_dbfs: self.out.ceiling_set,
             outputs: self.store.state().outputs.clone(),
-            meters: self.rigm.saved.clone(),
+            meters: self.rig.meas.saved.clone(),
             monitor_at_start: self.store.state().rig.monitor_at_start,
-            monitor_session: self.rigm.session.clone(),
+            monitor_session: self.rig.meas.session.clone(),
             osc_target: self.store.state().rig.osc_target,
             artnet_target: self.store.state().rig.artnet_target,
             artnet_fade: self.store.state().rig.artnet_fade,
@@ -210,7 +210,11 @@ impl Control {
             | Command::MeasStop { meas } => self.is_rig(*meas),
             _ => false,
         };
-        if touches { self.rig.check() } else { Ok(()) }
+        if touches {
+            self.rig.settings.check()
+        } else {
+            Ok(())
+        }
     }
 
     /// Called with every change before it is committed: a change to what the rig settings
@@ -219,7 +223,7 @@ impl Control {
         let Change::Measurement(p) = change else {
             return;
         };
-        let mut next = self.rigm.saved.clone();
+        let mut next = self.rig.meas.saved.clone();
         match p {
             Patch::Set(m) => {
                 next.retain(|s| s.id != m.id);
@@ -230,18 +234,18 @@ impl Control {
             }
             Patch::Deleted(id) => next.retain(|s| s.id != *id),
         }
-        if next == self.rigm.saved {
+        if next == self.rig.meas.saved {
             return;
         }
         let s = RigSettings {
             meters: next.clone(),
             ..self.rig_settings_now()
         };
-        if let Err(e) = self.rig.persist(&s) {
+        if let Err(e) = self.rig.settings.persist(&s) {
             // The commands checked the store is writable first; this is a failed write.
             tracing::error!("rig SPL meters not saved: {}", e.msg);
         }
-        self.rigm.saved = next;
+        self.rig.meas.saved = next;
     }
 
     /// Prepares a session about to replace the working one: refuses a rig meter in it and
@@ -260,7 +264,7 @@ impl Control {
                 ),
             ));
         }
-        let taken: BTreeSet<MeasId> = self.rigm.saved.iter().map(|m| m.id).collect();
+        let taken: BTreeSet<MeasId> = self.rig.meas.saved.iter().map(|m| m.id).collect();
         let map = remap_ids(data, &taken, &mut self.next_meas);
         for (from, to) in &map {
             tracing::info!(
@@ -276,10 +280,10 @@ impl Control {
         if !self.has_rig_meters() {
             return;
         }
-        let saved = self.rigm.saved.clone();
+        let saved = self.rig.meas.saved.clone();
         // Out while the meters load: their logs are handed over once, with where their
         // files stand.
-        let mut logs = self.rigm.logs.take();
+        let mut logs = self.rig.meas.logs.take();
         let (read, damage) = logs.as_ref().map(RigLogs::read).unwrap_or_default();
         for d in damage {
             self.note_damage(d);
@@ -326,7 +330,7 @@ impl Control {
             m.config_rev = Rev(self.store.rev().0 + 1);
             self.commit(Change::Measurement(Patch::Set(m)));
         }
-        let n = self.rigm.saved.len();
+        let n = self.rig.meas.saved.len();
         let dir = logs
             .as_ref()
             .map_or_else(|| "-".into(), |l| l.dir().display().to_string());
@@ -336,7 +340,7 @@ impl Control {
         if let Some(l) = logs.as_mut() {
             l.restored(fp, specs);
         }
-        self.rigm.logs = logs;
+        self.rig.meas.logs = logs;
     }
 
     /// The rig log directory's manifest as of now, and its fingerprint.
@@ -357,12 +361,12 @@ impl Control {
 
     /// The measurements or their logs changed: the rig log directory follows.
     pub(super) fn rig_logs_changed(&mut self) {
-        if self.rigm.logs.is_none() {
+        if self.rig.meas.logs.is_none() {
             return;
         }
         let (data, fp) = self.rig_logs_manifest();
         let specs = self.spl_log_specs(MeasScope::Rig, &[]);
-        if let Some(l) = self.rigm.logs.as_mut() {
+        if let Some(l) = self.rig.meas.logs.as_mut() {
             l.changed(data, fp, specs);
         }
     }
@@ -370,7 +374,7 @@ impl Control {
     /// Shutdown: the rig meters' logs reach the disk.
     pub(super) fn finish_rig_logs(&mut self) {
         self.rig_logs_changed();
-        if let Some(l) = self.rigm.logs.as_mut() {
+        if let Some(l) = self.rig.meas.logs.as_mut() {
             l.finish();
         }
     }
@@ -390,14 +394,14 @@ impl Control {
         // Turned on with the audio open: that is the device to come back to.
         let session = match self.open_config() {
             Some(c) if on && self.has_rig_meters() => Some(c),
-            _ => self.rigm.session.clone(),
+            _ => self.rig.meas.session.clone(),
         };
-        self.rig.persist(&RigSettings {
+        self.rig.settings.persist(&RigSettings {
             monitor_at_start: on,
             monitor_session: session.clone(),
             ..self.rig_settings_now()
         })?;
-        self.rigm.session = session;
+        self.rig.meas.session = session;
         let rev = self.commit_rig(|r| r.monitor_at_start = on);
         tracing::info!(
             target: "ac2d::audit",
@@ -431,23 +435,23 @@ impl Control {
             tracing::warn!(
                 "session.open on another device while {} rig SPL meter(s) run: they meter its \
                  inputs from now on",
-                self.rigm.saved.len()
+                self.rig.meas.saved.len()
             );
             self.reply_warnings.push(Warning::RigMonitorMoved {
                 meas: self.rig_meter_ids(),
             });
         }
-        self.rigm.retry = None;
+        self.rig.meas.retry = None;
         if self.store.state().rig.monitor_at_start
             && self.has_rig_meters()
-            && self.rigm.session.as_ref() != Some(&config)
+            && self.rig.meas.session.as_ref() != Some(&config)
         {
             let s = RigSettings {
                 monitor_session: Some(config.clone()),
                 ..self.rig_settings_now()
             };
-            match self.rig.persist(&s) {
-                Ok(()) => self.rigm.session = Some(config),
+            match self.rig.settings.persist(&s) {
+                Ok(()) => self.rig.meas.session = Some(config),
                 Err(e) => tracing::warn!("monitor at start: session not recorded: {}", e.msg),
             }
         }
@@ -456,11 +460,11 @@ impl Control {
 
     /// `session.close` is about to end the audio the rig meters meter.
     pub(super) fn rig_session_closing(&mut self) {
-        self.rigm.retry = None;
-        if self.has_rig_meters() && (self.session.is_some() || self.recovery.is_some()) {
+        self.rig.meas.retry = None;
+        if self.has_rig_meters() && (self.session.is_some() || self.audio_recovery.is_some()) {
             tracing::warn!(
                 "session.close: {} rig SPL meter(s) stop metering until a session opens again",
-                self.rigm.saved.len()
+                self.rig.meas.saved.len()
             );
             self.reply_warnings.push(Warning::RigMonitorBlind {
                 meas: self.rig_meter_ids(),
@@ -478,7 +482,7 @@ impl Control {
             tracing::info!("monitor at start: no rig SPL meters; the audio stays closed");
             return;
         }
-        if self.rigm.session.is_none() {
+        if self.rig.meas.session.is_none() {
             tracing::info!(
                 "monitor at start: no session recorded yet (one is, at the next session.open); \
                  the audio stays closed"
@@ -490,8 +494,8 @@ impl Control {
 
     /// Attempt `attempt` of the monitor at start to open the audio.
     fn monitor_open(&mut self, attempt: u32) {
-        self.rigm.retry = None;
-        let Some(cfg) = self.rigm.session.as_ref().map(capture_only) else {
+        self.rig.meas.retry = None;
+        let Some(cfg) = self.rig.meas.session.as_ref().map(capture_only) else {
             return;
         };
         let daemon = ac2_proto::units::ClientId("ac2d".into());
@@ -505,7 +509,7 @@ impl Control {
                     target: "ac2d::audit",
                     "monitor at start: audio opened capture-only on {dev} (no outputs, the \
                      generator disarmed); {} rig SPL meter(s) metering",
-                    self.rigm.saved.len()
+                    self.rig.meas.saved.len()
                 );
             }
             Err(e) => {
@@ -516,23 +520,23 @@ impl Control {
                     e.msg,
                     wait.as_secs()
                 );
-                self.rigm.retry = Some((Instant::now() + wait, attempt + 1));
+                self.rig.meas.retry = Some((Instant::now() + wait, attempt + 1));
             }
         }
     }
 
     /// When the control loop must wake for the monitor at start.
     pub(super) fn rig_due(&self) -> Option<Instant> {
-        self.rigm.retry.map(|(at, _)| at)
+        self.rig.meas.retry.map(|(at, _)| at)
     }
 
     /// The monitor at start's next attempt, when due and no session came meanwhile.
     pub(super) fn rig_tick(&mut self, now: Instant) {
-        let Some((at, attempt)) = self.rigm.retry else {
+        let Some((at, attempt)) = self.rig.meas.retry else {
             return;
         };
-        if self.session.is_some() || self.recovery.is_some() {
-            self.rigm.retry = None;
+        if self.session.is_some() || self.audio_recovery.is_some() {
+            self.rig.meas.retry = None;
         } else if now >= at {
             self.monitor_open(attempt);
         }

@@ -316,7 +316,8 @@ pub enum Headroom {
 
 impl Headroom {
     /// The allowed level in dBFS, if any.
-    pub fn allowed_dbfs(&self) -> Option<f64> {
+    #[cfg(test)]
+    pub(crate) fn allowed_dbfs(&self) -> Option<f64> {
         match self {
             Headroom::Allowed { ms } => Some(power_dbfs(*ms)),
             Headroom::CannotRecover { .. } => None,
@@ -683,7 +684,7 @@ impl<S: Slot> RollingLeq<S> {
 const NS: u64 = 1_000_000_000;
 
 pub use judge::{
-    Judgement, Latch, PEAK_HOLD_S, PeakHold, RELEASE_DB, RELEASE_HOLD_S, Verdict, judge,
+    Judgement, Latch, PEAK_HOLD_S, RELEASE_DB, RELEASE_HOLD_S, RecentPeaks, Verdict, judge,
     judge_window, round_tenth,
 };
 pub use replay::{LogReplay, LogTotal};

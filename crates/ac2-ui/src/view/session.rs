@@ -6,6 +6,7 @@ use eframe::egui::{self, Color32, RichText};
 use ac2_proto::model::Availability;
 use ac2_scene::meter::{MeterReading, MeterState};
 
+use super::CellCtx;
 use crate::app::App;
 use crate::session_dialog::{
     DetectPhase, Edit, InputRole, OutputDevice, RoleKey, Row, SessionDialog, backend_name,
@@ -300,14 +301,15 @@ fn backend_rows(
     device_row(
         ui,
         "Input device",
-        Row::Device,
         d.device_info()
             .map(|dev| (dev.name.clone(), device_summary(dev))),
-        d.input_position(),
-        inputs,
-        focus == Some(Row::Device),
-        ch,
-        msg,
+        (d.input_position(), inputs),
+        CellCtx {
+            focused: focus == Some(Row::Device),
+            at: Row::Device,
+            msg: &mut *msg,
+            ch,
+        },
     );
     let out = match (d.out_device, d.output_info()) {
         (_, None) => None,
@@ -319,13 +321,14 @@ fn backend_rows(
     device_row(
         ui,
         "Output device",
-        Row::OutputDevice,
         out,
-        d.output_position(),
-        outputs,
-        focus == Some(Row::OutputDevice),
-        ch,
-        msg,
+        (d.output_position(), outputs),
+        CellCtx {
+            focused: focus == Some(Row::OutputDevice),
+            at: Row::OutputDevice,
+            msg: &mut *msg,
+            ch,
+        },
     );
     if let Some(note) = d.clock_note() {
         ui.label(RichText::new(note).small().color(ch.dim));
@@ -349,18 +352,19 @@ fn backend_rows(
 }
 
 /// One device stepper: the name (a click steps on), ‹ › and its place among the choices.
-#[allow(clippy::too_many_arguments)]
 fn device_row(
     ui: &mut egui::Ui,
     label: &str,
-    row: Row,
     shown: Option<(String, String)>,
-    at: usize,
-    n: usize,
-    focused: bool,
-    ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    (place, n): (usize, usize),
+    cell: CellCtx<'_, Row, SessionMsg>,
 ) {
+    let CellCtx {
+        focused,
+        at: row,
+        msg,
+        ch,
+    } = cell;
     ui.horizontal(|ui| {
         if label_col(ui, label, focused, ch).clicked() {
             *msg = Some(SessionMsg::Focus(row));
@@ -384,7 +388,7 @@ fn device_row(
         }
         if n > 1 {
             ui.label(
-                RichText::new(format!("({} of {n})", at + 1))
+                RichText::new(format!("({} of {n})", place + 1))
                     .small()
                     .color(ch.dim),
             );

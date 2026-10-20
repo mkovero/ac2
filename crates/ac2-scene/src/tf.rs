@@ -19,7 +19,8 @@ use crate::trace::{
     DisplayCache, DisplayTrace, PhaseReference, PhaseRelation, TfTrace, TraceKey, display_traces,
     group_delay_span,
 };
-use crate::view::{CoherencePlacement, PhaseView, PlotChrome, TfView, ViewState};
+use crate::view::Style;
+use crate::view::{CoherencePlacement, PhaseView, TfView, ViewState};
 
 /// Relative heights of the panes.
 const WEIGHT_MAGNITUDE: f32 = 3.0;
@@ -122,7 +123,7 @@ pub struct TfScene {
     pub banners: Vec<BannerRow>,
     /// Ranges the marked curve does not resolve at its grid (the selected curve, else the
     /// first of the pane's own), shaded in every pane; empty when the marker is off.
-    pub unresolved: Vec<crate::unresolved::Mark>,
+    pub unresolved: Vec<crate::unresolved::RangeMark>,
 }
 
 /// The valid-resolution marks of the selected shown curve that knows its ranges, else of
@@ -132,7 +133,7 @@ fn unresolved_marks(
     traces: &[TfTrace<'_>],
     shown: &[DisplayTrace],
     view: &ViewState,
-) -> Vec<crate::unresolved::Mark> {
+) -> Vec<crate::unresolved::RangeMark> {
     if !view.marks() {
         return Vec::new();
     }
@@ -325,13 +326,8 @@ fn trace_line(
 }
 
 /// Right-margin axis of the overlaid coherence and a dashed line at γ² = 0.
-fn overlay_frame(
-    c: &mut Canvas,
-    plot: Rect,
-    o: &CoherenceOverlay,
-    chrome: PlotChrome,
-    theme: &Theme,
-) {
+fn overlay_frame(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, style: Style) {
+    let Style { chrome, theme } = style;
     // The band's floor is drawn as a grid line, so it goes with the grid.
     if chrome.grid() {
         overlay_floor(c, plot, o, theme);
@@ -570,8 +566,10 @@ pub fn transfer_scene(
             pi == last,
             &title,
             title_at,
-            view.chrome,
-            theme,
+            Style {
+                chrome: view.chrome,
+                theme,
+            },
         );
         crate::unresolved::draw(&mut c, plot, &xm, &marks, theme);
         let ym = y_axis.mapping;
@@ -579,7 +577,15 @@ pub fn transfer_scene(
             canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
         }
         if let Some(o) = &band {
-            overlay_frame(&mut c, plot, o, view.chrome, theme);
+            overlay_frame(
+                &mut c,
+                plot,
+                o,
+                Style {
+                    chrome: view.chrome,
+                    theme,
+                },
+            );
         }
 
         for t in &shown {

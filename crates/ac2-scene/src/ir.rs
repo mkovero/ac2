@@ -18,7 +18,7 @@ use crate::primitives::{Color, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Vi
 use crate::readout;
 use crate::theme::Theme;
 use crate::time::Freshness;
-use crate::view::{IrAxes, IrExtent, IrMode, PlotChrome, ViewState};
+use crate::view::{IrAxes, IrExtent, IrMode, Style, ViewState};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct IrScene {
@@ -170,23 +170,26 @@ pub fn cursor_reading(frame: &IrFrame, mode: IrMode, axes: &IrAxes) -> Option<Ir
     })
 }
 
-/// The IR `frame` in the view's mode on `axes` (the IR pane's or the sweep view's).
-#[allow(clippy::too_many_arguments)]
+/// What an IR pane draws around its curve: the banners, the view (its mode) on `axes` (the
+/// IR pane's or the sweep view's), the style and the pane's size.
+#[derive(Clone, Copy, Debug)]
+pub struct IrCtx<'a> {
+    pub status: &'a Status,
+    pub view: &'a ViewState,
+    pub axes: &'a IrAxes,
+    pub style: Style<'a>,
+    pub size: Viewport,
+}
+
+/// The IR `frame` in the view's mode on the context's axes.
 pub fn ir_scene(
     frame: &IrFrame,
     color: Color,
     freshness: Option<Freshness>,
-    status: &Status,
-    view: &ViewState,
-    axes: &IrAxes,
-    chrome: PlotChrome,
-    theme: &Theme,
-    size: Viewport,
+    ctx: &IrCtx,
 ) -> IrScene {
     let tag = freshness.and_then(|f| f.tag());
-    draw(
-        frame, color, freshness, tag, status, view, axes, chrome, theme, size,
-    )
+    draw(frame, color, freshness, tag, ctx)
 }
 
 /// A stored transfer trace's impulse response as an IR frame: the samples it was captured
@@ -209,22 +212,10 @@ pub fn stored_frame(d: &TraceData) -> Option<IrFrame> {
 /// A stored transfer trace's impulse response in the transfer IR view: drawn in the trace's
 /// colour and tagged with its name, as its row in the transfer legend names it. `None` for
 /// a trace captured without one.
-#[allow(clippy::too_many_arguments)]
-pub fn stored_ir_scene(
-    d: &TraceData,
-    color: Color,
-    status: &Status,
-    view: &ViewState,
-    axes: &IrAxes,
-    chrome: PlotChrome,
-    theme: &Theme,
-    size: Viewport,
-) -> Option<IrScene> {
+pub fn stored_ir_scene(d: &TraceData, color: Color, ctx: &IrCtx) -> Option<IrScene> {
     let frame = stored_frame(d)?;
     let tag = Some(d.meta.edit.name.clone());
-    Some(draw(
-        &frame, color, None, tag, status, view, axes, chrome, theme, size,
-    ))
+    Some(draw(&frame, color, None, tag, ctx))
 }
 
 /// Points above which an IR line is drawn [`per_pixel`]: a live IR (4096 points) is drawn
@@ -269,19 +260,20 @@ fn per_pixel(xs: &[f32], ys: &[f32]) -> (Vec<f32>, Vec<f32>) {
     (ox, oy)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn draw(
     frame: &IrFrame,
     color: Color,
     freshness: Option<Freshness>,
     tag: Option<String>,
-    status: &Status,
-    view: &ViewState,
-    axes: &IrAxes,
-    chrome: PlotChrome,
-    theme: &Theme,
-    size: Viewport,
+    ctx: &IrCtx,
 ) -> IrScene {
+    let &IrCtx {
+        status,
+        view,
+        axes,
+        style: Style { chrome, theme },
+        size,
+    } = ctx;
     let mode = view.ir.mode;
     let mut c = Canvas::new(size, theme);
     let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
@@ -295,7 +287,15 @@ fn draw(
     let title = title(mode).to_string();
     let y_unit = if mode == IrMode::Linear { "FS" } else { "dB" };
     let y_axis = axis::linear_axis(yrange, plot.bottom(), plot.y, y_unit);
-    canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, &title, chrome, theme);
+    canvas::pane_frame(
+        &mut c,
+        plot,
+        &x_axis,
+        &y_axis,
+        true,
+        &title,
+        Style { chrome, theme },
+    );
     let (xm, ym) = (x_axis.mapping, y_axis.mapping);
     if mode == IrMode::Linear {
         canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
@@ -483,10 +483,10 @@ pub fn missing_scene(
     note: String,
     status: &Status,
     axes: &IrAxes,
-    chrome: PlotChrome,
-    theme: &Theme,
+    style: Style,
     size: Viewport,
 ) -> IrScene {
+    let Style { chrome, theme } = style;
     let mut c = Canvas::new(size, theme);
     let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
@@ -497,7 +497,15 @@ pub fn missing_scene(
         .unwrap_or(Range::new(-1.0, 10.0));
     let x_axis = axis::linear_axis(trange, plot.x, plot.right(), "ms");
     let y_axis = axis::linear_axis(Range::new(-1.0, 1.0), plot.bottom(), plot.y, "FS");
-    canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, "", chrome, theme);
+    canvas::pane_frame(
+        &mut c,
+        plot,
+        &x_axis,
+        &y_axis,
+        true,
+        "",
+        Style { chrome, theme },
+    );
     let (lines, font) = note_lines(&note, plot.w - 12.0, theme);
     let pitch = font * 1.4;
     let top = plot.y + plot.h / 2.0 - pitch * (lines.len() as f32 - 1.0) / 2.0;

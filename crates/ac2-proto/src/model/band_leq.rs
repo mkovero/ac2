@@ -348,15 +348,6 @@ impl BandWindow {
         band_index(self.band.0)
     }
 
-    /// The limit in `period`.
-    pub fn limit_in(&self, period: BandPeriod) -> Option<DbSpl> {
-        let l = self.limit?;
-        Some(match (self.day_offset, period) {
-            (Some(o), BandPeriod::Day) => DbSpl(l.0 + o.0),
-            _ => l,
-        })
-    }
-
     /// Whether `other` is the same band over the same length and weighting: two such
     /// windows would be one shown twice.
     pub fn same_as(&self, other: &BandWindow) -> bool {

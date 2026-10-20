@@ -1,6 +1,7 @@
 use super::*;
 use crate::stimulus::Drive;
 use crate::view::IrView;
+use crate::view::PlotChrome;
 use ac2_proto::frame::IrMeta;
 use ac2_proto::units::{Hz, MeasId, Seconds};
 
@@ -64,12 +65,16 @@ fn time_axis_origin_is_the_inserted_delay() {
         &f,
         Color::WHITE,
         None,
-        &Status::default(),
-        &view(IrMode::Linear),
-        &IrAxes::default(),
-        PlotChrome::Full,
-        &Theme::dark(),
-        SIZE,
+        &IrCtx {
+            status: &Status::default(),
+            view: &view(IrMode::Linear),
+            axes: &IrAxes::default(),
+            style: Style {
+                chrome: PlotChrome::Full,
+                theme: &Theme::dark(),
+            },
+            size: SIZE,
+        },
     );
     assert_eq!(
         s.origin,
@@ -109,12 +114,16 @@ fn log_view_is_re_peak() {
         &f,
         Color::WHITE,
         None,
-        &Status::default(),
-        &view(IrMode::Log),
-        &IrAxes::default(),
-        PlotChrome::Full,
-        &Theme::dark(),
-        SIZE,
+        &IrCtx {
+            status: &Status::default(),
+            view: &view(IrMode::Log),
+            axes: &IrAxes::default(),
+            style: Style {
+                chrome: PlotChrome::Full,
+                theme: &Theme::dark(),
+            },
+            size: SIZE,
+        },
     );
     let line = &s.scene.layers[1].polylines[0];
     assert_eq!(line.points.len(), 21);
@@ -128,12 +137,16 @@ fn etc_missing_or_present() {
         &f,
         Color::WHITE,
         None,
-        &Status::default(),
-        &view(IrMode::Etc),
-        &IrAxes::default(),
-        PlotChrome::Full,
-        &Theme::dark(),
-        SIZE,
+        &IrCtx {
+            status: &Status::default(),
+            view: &view(IrMode::Etc),
+            axes: &IrAxes::default(),
+            style: Style {
+                chrome: PlotChrome::Full,
+                theme: &Theme::dark(),
+            },
+            size: SIZE,
+        },
     );
     assert_eq!(
         s.note.as_deref(),
@@ -155,12 +168,16 @@ fn zoomed_time_range_and_stale() {
         &f,
         Color::WHITE,
         Some(Freshness::from_age(2.0)),
-        &Status::default(),
-        &v,
-        &v.ir.axes,
-        PlotChrome::Full,
-        &Theme::dark(),
-        SIZE,
+        &IrCtx {
+            status: &Status::default(),
+            view: &v,
+            axes: &v.ir.axes,
+            style: Style {
+                chrome: PlotChrome::Full,
+                theme: &Theme::dark(),
+            },
+            size: SIZE,
+        },
     );
     assert_eq!(s.x_axis.mapping.range, Range::new(-0.2, 0.2));
     assert_eq!(
@@ -180,12 +197,16 @@ fn banners_sit_above_the_plot() {
         &f,
         Color::WHITE,
         None,
-        &Status::default(),
-        &view(IrMode::Log),
-        &IrAxes::default(),
-        PlotChrome::Full,
-        &Theme::dark(),
-        SIZE,
+        &IrCtx {
+            status: &Status::default(),
+            view: &view(IrMode::Log),
+            axes: &IrAxes::default(),
+            style: Style {
+                chrome: PlotChrome::Full,
+                theme: &Theme::dark(),
+            },
+            size: SIZE,
+        },
     );
     assert_eq!(calm.strip.h, 0.0);
     assert_eq!(calm.plot.y, MARGINS.top);
@@ -193,12 +214,16 @@ fn banners_sit_above_the_plot() {
         &f,
         Color::WHITE,
         None,
-        &crate::banner::tests::everything(),
-        &view(IrMode::Log),
-        &IrAxes::default(),
-        PlotChrome::Full,
-        &Theme::dark(),
-        SIZE,
+        &IrCtx {
+            status: &crate::banner::tests::everything(),
+            view: &view(IrMode::Log),
+            axes: &IrAxes::default(),
+            style: Style {
+                chrome: PlotChrome::Full,
+                theme: &Theme::dark(),
+            },
+            size: SIZE,
+        },
     );
     assert_eq!(s.plot.y, s.strip.bottom() + MARGINS.top);
     assert_eq!(s.plot.bottom(), calm.plot.bottom());
@@ -218,12 +243,16 @@ fn narrow_plot_puts_the_origin_under_the_title() {
             &f,
             Color::WHITE,
             None,
-            &Status::default(),
-            &view(IrMode::Linear),
-            &IrAxes::default(),
-            PlotChrome::Full,
-            &Theme::dark(),
-            size,
+            &IrCtx {
+                status: &Status::default(),
+                view: &view(IrMode::Linear),
+                axes: &IrAxes::default(),
+                style: Style {
+                    chrome: PlotChrome::Full,
+                    theme: &Theme::dark(),
+                },
+                size,
+            },
         )
     };
     let find = |s: &IrScene, t: &str| {
@@ -281,8 +310,10 @@ fn missing_ir_says_why() {
         t(IrMissing::NoReference(Drive::Playing)),
         &status,
         &IrAxes::default(),
-        PlotChrome::Full,
-        &Theme::dark(),
+        Style {
+            chrome: PlotChrome::Full,
+            theme: &Theme::dark(),
+        },
         SIZE,
     );
     assert_eq!(s.banners[0].text, "NO REFERENCE");
@@ -329,12 +360,16 @@ fn a_kept_ir_is_tagged_like_its_curve() {
             &f,
             Color::WHITE,
             Some(fr),
-            &Status::default(),
-            &view(IrMode::Linear),
-            &IrAxes::default(),
-            PlotChrome::Full,
-            &theme,
-            SIZE,
+            &IrCtx {
+                status: &Status::default(),
+                view: &view(IrMode::Linear),
+                axes: &IrAxes::default(),
+                style: Style {
+                    chrome: PlotChrome::Full,
+                    theme: &theme,
+                },
+                size: SIZE,
+            },
         )
     };
     let stopped = draw(Freshness::Stopped { age_s: 30.0 });
@@ -371,12 +406,16 @@ fn the_cursor_reads_time_and_value_in_every_mode() {
             &f,
             Color::WHITE,
             None,
-            &Status::default(),
-            &view(mode),
-            &axes,
-            PlotChrome::Full,
-            &Theme::dark(),
-            SIZE,
+            &IrCtx {
+                status: &Status::default(),
+                view: &view(mode),
+                axes: &axes,
+                style: Style {
+                    chrome: PlotChrome::Full,
+                    theme: &Theme::dark(),
+                },
+                size: SIZE,
+            },
         )
     };
     let lin = draw(IrMode::Linear);
@@ -417,12 +456,16 @@ fn the_cursor_reads_time_and_value_in_every_mode() {
         &f,
         Color::WHITE,
         None,
-        &Status::default(),
-        &view(IrMode::Linear),
-        &IrAxes::default(),
-        PlotChrome::Full,
-        &Theme::dark(),
-        SIZE,
+        &IrCtx {
+            status: &Status::default(),
+            view: &view(IrMode::Linear),
+            axes: &IrAxes::default(),
+            style: Style {
+                chrome: PlotChrome::Full,
+                theme: &Theme::dark(),
+            },
+            size: SIZE,
+        },
     );
     assert_eq!(off.cursor, None);
     assert!(off.scene.layers[2].polylines.is_empty());
@@ -444,12 +487,16 @@ fn navigated_axes_are_drawn_as_chosen() {
             &f,
             Color::WHITE,
             None,
-            &Status::default(),
-            &view(mode),
-            &axes,
-            PlotChrome::Full,
-            &Theme::dark(),
-            SIZE,
+            &IrCtx {
+                status: &Status::default(),
+                view: &view(mode),
+                axes: &axes,
+                style: Style {
+                    chrome: PlotChrome::Full,
+                    theme: &Theme::dark(),
+                },
+                size: SIZE,
+            },
         )
     };
     let lin = draw(IrMode::Linear);

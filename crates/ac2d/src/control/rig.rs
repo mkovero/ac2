@@ -121,11 +121,11 @@ impl Control {
         }
         // Kept first: a level that would quietly come back different after a restart is
         // worse than a refused change.
-        self.rig.persist(&RigSettings {
+        self.rig.settings.persist(&RigSettings {
             ceiling_dbfs: Some(new),
             ..self.rig_settings_now()
         })?;
-        self.ceiling_set = Some(new);
+        self.out.ceiling_set = Some(new);
         self.s.ceiling_dbfs = new;
         self.s.max_level = peak;
         if let Some(rt) = &self.session {
@@ -192,7 +192,7 @@ impl Control {
         }
         let all = upsert_outputs(&self.store.state().outputs, &rows);
         if all != self.store.state().outputs {
-            self.rig.persist(&RigSettings {
+            self.rig.settings.persist(&RigSettings {
                 outputs: all.clone(),
                 ..self.rig_settings_now()
             })?;

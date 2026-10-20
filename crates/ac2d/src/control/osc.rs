@@ -343,50 +343,52 @@ impl Control {
             let cued = has_cue(config);
             let mut live = self.session.is_some() && self.jobs.contains_key(&m.id);
             if live && cued {
-                let seen = *self.osc.alive.entry(m.id).or_insert(now);
+                let seen = *self.rig.osc.alive.entry(m.id).or_insert(now);
                 live = now.saturating_duration_since(seen) < STALE;
             } else {
-                self.osc.alive.remove(&m.id);
+                self.rig.osc.alive.remove(&m.id);
             }
             if !live {
-                self.osc.reports.remove(&m.id);
+                self.rig.osc.reports.remove(&m.id);
             }
             if cued {
                 want.extend(desired(
                     m.id,
                     config,
                     live,
-                    self.osc.reports.get(&m.id).map(Vec::as_slice),
+                    self.rig.osc.reports.get(&m.id).map(Vec::as_slice),
                 ));
             }
         }
         let measurements = &self.store.state().measurements;
-        self.osc
+        self.rig
+            .osc
             .reports
             .retain(|id, _| measurements.iter().any(|m| m.id == *id));
-        self.osc
+        self.rig
+            .osc
             .alive
             .retain(|id, _| measurements.iter().any(|m| m.id == *id));
-        let sends = self.osc.apply(want);
+        let sends = self.rig.osc.apply(want);
         let target = self.store.state().rig.osc_target;
-        self.osc.send_all(target, sends);
+        self.rig.osc.send_all(target, sends);
         self.artnet_sync(now);
-        if self.osc.entries.is_empty() {
-            self.osc.next_repeat = None;
-        } else if self.osc.next_repeat.is_none() {
-            self.osc.next_repeat = Some(Instant::now() + REPEAT);
+        if self.rig.osc.entries.is_empty() {
+            self.rig.osc.next_repeat = None;
+        } else if self.rig.osc.next_repeat.is_none() {
+            self.rig.osc.next_repeat = Some(Instant::now() + REPEAT);
         }
-        let cues = self.osc.rig_cues();
-        let dmx = dmx_nonzero(&self.osc.frame());
+        let cues = self.rig.osc.rig_cues();
+        let dmx = dmx_nonzero(&self.rig.osc.frame());
         let cur = &self.store.state().rig;
         if cues != cur.cues || dmx != cur.dmx {
             let mut rig = cur.clone();
             rig.cues = cues;
             rig.dmx = dmx;
-            rig.osc = self.osc.status().clone();
-            rig.artnet = self.artnet.status().clone();
-            self.osc.status_at = Some(now);
-            self.artnet.status_at = Some(now);
+            rig.osc = self.rig.osc.status().clone();
+            rig.artnet = self.rig.artnet.status().clone();
+            self.rig.osc.status_at = Some(now);
+            self.rig.artnet.status_at = Some(now);
             self.commit(Change::Rig(rig));
         }
     }
@@ -394,11 +396,11 @@ impl Control {
     /// The repeat, when due; the sending status is committed here (see
     /// [`Self::commit_osc_status`]).
     pub(super) fn osc_tick(&mut self, now: Instant) {
-        if self.osc.next_repeat.is_some_and(|t| t <= now) {
-            let sends = self.osc.current();
+        if self.rig.osc.next_repeat.is_some_and(|t| t <= now) {
+            let sends = self.rig.osc.current();
             let target = self.store.state().rig.osc_target;
-            self.osc.send_all(target, sends);
-            self.osc.next_repeat = Some(now + REPEAT);
+            self.rig.osc.send_all(target, sends);
+            self.rig.osc.next_repeat = Some(now + REPEAT);
             self.commit_osc_status(false);
         }
     }
@@ -409,31 +411,31 @@ impl Control {
         let now = Instant::now();
         let due = status_due(
             &self.store.state().rig.osc,
-            self.osc.status(),
-            self.osc.status_at,
+            self.rig.osc.status(),
+            self.rig.osc.status_at,
             now_too,
             now,
         );
         if due {
-            self.osc.status_at = Some(now);
+            self.rig.osc.status_at = Some(now);
             let mut rig = self.store.state().rig.clone();
-            rig.osc = self.osc.status().clone();
+            rig.osc = self.rig.osc.status().clone();
             self.commit(Change::Rig(rig));
         }
     }
 
     /// When the control loop must wake for the repeat.
     pub(super) fn osc_wake(&self) -> Option<Instant> {
-        self.osc.next_repeat
+        self.rig.osc.next_repeat
     }
 
     /// Clean shutdown: every cue sends its `ok` once (the Art-Net frame of `ok` levels
     /// first, while the cues are still known).
     pub(super) fn osc_shutdown(&mut self) {
         self.artnet_shutdown();
-        let sends = self.osc.clear();
+        let sends = self.rig.osc.clear();
         let target = self.store.state().rig.osc_target;
-        self.osc.send_all(target, sends);
+        self.rig.osc.send_all(target, sends);
     }
 
     /// `osc.target`.
@@ -458,7 +460,7 @@ impl Control {
         }
         // Kept first: a target that would come back different after a restart would send
         // the lights' cues somewhere the operator did not choose.
-        self.rig.persist(&RigSettings {
+        self.rig.settings.persist(&RigSettings {
             osc_target: addr,
             ..self.rig_settings_now()
         })?;
@@ -468,8 +470,8 @@ impl Control {
         );
         let rev = self.commit_rig(|r| r.osc_target = addr);
         // The new receiver learns the current states now, not at the next repeat.
-        let sends = self.osc.current();
-        self.osc.send_all(addr, sends);
+        let sends = self.rig.osc.current();
+        self.rig.osc.send_all(addr, sends);
         self.commit_osc_status(true);
         Ok(ReplyBody::Ack { rev })
     }
@@ -482,7 +484,7 @@ impl Control {
                 "no OSC target is set (osc.target)",
             ));
         };
-        let r = self.osc.sender.send(target, msg, Some(0.0));
+        let r = self.rig.osc.sender.send(target, msg, Some(0.0));
         self.commit_osc_status(true);
         r.map_err(|e| perr(ErrorCode::Internal, e))?;
         Ok(ReplyBody::Ack {

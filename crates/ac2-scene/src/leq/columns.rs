@@ -20,6 +20,7 @@ use crate::primitives::{Color, FillRect, HAlign, Polyline, Rect, Stroke, VAlign}
 use crate::theme::{Theme, contrast_ratio};
 
 use super::{LeqTile, PlotChrome, TileKind, TileState, length};
+use crate::view::Style;
 
 /// A judged scale starts this far below the lowest limit…
 pub const BELOW_LIMIT_DB: f64 = 30.0;
@@ -464,9 +465,9 @@ pub(super) fn draw_columns(
     range: Range,
     area: Rect,
     stale: bool,
-    chrome: PlotChrome,
-    theme: &Theme,
+    style: Style,
 ) -> LeqColumns {
+    let Style { chrome, theme } = style;
     // Windows by length, then the peak limits (LCpeak, LAFmax) at the right: a peak is
     // not a window and does not belong among their lengths.
     let mut order: Vec<usize> = (0..tiles.len()).collect();

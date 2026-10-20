@@ -289,11 +289,6 @@ impl Guard {
             clip: self.since_clip.is_some_and(|t| t < self.config.clip_hold_s),
         }
     }
-
-    /// Running reference level in dBFS RMS, once any reference has been seen.
-    pub fn running_reference_dbfs(&self) -> Option<f64> {
-        self.running_ms.map(|ms| rms_dbfs(ms.sqrt()))
-    }
 }
 
 #[cfg(test)]

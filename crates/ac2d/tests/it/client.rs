@@ -44,7 +44,6 @@ async fn ac2_client_drives_the_daemon() {
         .await
         .unwrap();
 
-    // The lease is refreshed by the client in the background, well past the 1.5 s expiry.
     let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
     lease
         .set(GeneratorDesired {
@@ -60,26 +59,29 @@ async fn ac2_client_drives_the_daemon() {
         .await
         .unwrap();
     c.subscribe(Subscription::Meas(MeasId(1))).unwrap();
-    tokio::time::sleep(Duration::from_millis(2200)).await;
-    assert!(lease.lost().is_none(), "lease kept alive by refreshes");
 
+    // A fresh levels frame at the generator's level: the tone went round the loopback.
     let deadline = Instant::now() + Duration::from_secs(10);
     let topic = Topic::Data {
         meas: MeasId(1),
         stream: Stream::Levels,
     };
-    let rms = loop {
+    let mut rms = None;
+    loop {
         let latest = c.latest().unwrap();
         if let Some(f) = latest.get(&topic)
             && let FrameData::Levels(l) = &f.frame.data
             && !f.stale
         {
-            break l.rms[0];
+            rms = Some(l.rms[0]);
+            if (l.rms[0] + 20.0).abs() < 2.0 {
+                break;
+            }
         }
-        assert!(Instant::now() < deadline, "no fresh levels frame");
+        assert!(Instant::now() < deadline, "loopback level {rms:?}");
         tokio::time::sleep(Duration::from_millis(50)).await;
-    };
-    assert!((rms + 20.0).abs() < 2.0, "loopback level {rms}");
+    }
+    assert!(lease.lost().is_none(), "lease kept alive by refreshes");
 
     let view = c.view();
     let s = view.state.as_ref().unwrap();

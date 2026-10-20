@@ -21,7 +21,7 @@ use crate::primitives::{
     Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
-use crate::view::{LeqLayout, LeqStyle, PlotChrome};
+use crate::view::{LeqLayout, LeqStyle, PlotChrome, Style};
 
 mod caption;
 mod columns;
@@ -275,8 +275,10 @@ pub(crate) fn leq_scene_under<T>(
             range,
             tiles_area,
             v.stale.is_some(),
-            v.chrome,
-            theme,
+            Style {
+                chrome: v.chrome,
+                theme,
+            },
         ));
     } else {
         let gap = 8.0;
@@ -307,8 +309,10 @@ pub(crate) fn leq_scene_under<T>(
                 v.stale.is_some(),
                 shared.as_deref(),
                 lines_below,
-                v.chrome,
-                theme,
+                Style {
+                    chrome: v.chrome,
+                    theme,
+                },
             );
             rects.push(r);
         }

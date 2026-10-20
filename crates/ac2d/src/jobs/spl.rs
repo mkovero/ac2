@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use ac2_core::leq::{
-    Headroom, Judgement, Latch, PEAK_HOLD_S, PeakHold, RollingLeq, Second, WindowSpec, judge,
+    Headroom, Judgement, Latch, PEAK_HOLD_S, RecentPeaks, RollingLeq, Second, WindowSpec, judge,
     judge_window,
 };
 use ac2_core::mic_curve::Correction;
@@ -30,7 +30,9 @@ use ac2_proto::model::{
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{DbSpl, Dbfs, MeasId, Rev, Seconds, WallNs};
 
-use super::{Analysis, Due, Emitter, Flush, JobCmd, LevelsMeter, Pace, StampArgs, channel_f64};
+use super::{
+    Analysis, Due, Emitter, Flush, JobCmd, JobCtx, LevelsMeter, Pace, StampArgs, channel_f64,
+};
 use crate::calstore::InputCal;
 use crate::config::LocalClock;
 use crate::control::{ControlMsg, Judged};
@@ -90,7 +92,7 @@ struct LeqWindows {
     /// Per window: filling and on course to end over its limit (judged near).
     on_course: Vec<bool>,
     /// The newest seconds' LCpeak and LAFmax, which the peak limits are judged on.
-    peaks: PeakHold,
+    peaks: RecentPeaks,
     /// Judgement of the LCpeak and LAFmax limits ([`PeakQuantity::ALL`] order).
     peak_judgements: [LeqJudgement; 2],
     /// The log's epoch the windows and judgements belong to.
@@ -171,7 +173,7 @@ impl LeqWindows {
             on_course: vec![false; judgements.len()],
             latches: judgements.iter().map(|j| latch_of(*j)).collect(),
             judgements,
-            peaks: PeakHold::default(),
+            peaks: RecentPeaks::default(),
             peak_judgements: setup.peak_judgements,
             epoch,
             done: Vec::with_capacity(4),
@@ -221,16 +223,19 @@ impl LeqWindows {
 }
 
 impl Spl {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        meas: MeasId,
-        cfg: SplConfig,
+        ctx: JobCtx<SplConfig>,
         sample_rate: u32,
         idx: usize,
         cal: InputCal,
-        config_rev: Rev,
         leq: LeqSetup,
     ) -> Result<Self, String> {
+        let JobCtx {
+            meas,
+            cfg,
+            config_rev,
+            ..
+        } = ctx;
         let fs = f64::from(sample_rate);
         let mut meter = SplMeter::new(SplMeterConfig {
             fs,

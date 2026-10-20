@@ -284,13 +284,15 @@ fn spectrum_golden(name: &str, style: SpectrumStyle) {
     };
     let mut t = SpectrumTrace::spectrum(
         &spec,
-        WallNs(0),
-        None,
-        &freqs,
-        &edges,
-        "Main L",
-        Theme::dark().trace_color(0),
-        Freshness::from_age(0.0),
+        ac2_scene::spectrum::LiveMeta {
+            captured: WallNs(0),
+            curve: None,
+            freqs: &freqs,
+            edges: &edges,
+            name: "Main L".into(),
+            color: Theme::dark().trace_color(0),
+            freshness: Freshness::from_age(0.0),
+        },
     );
     let theme = Theme::dark();
     t.style = style;

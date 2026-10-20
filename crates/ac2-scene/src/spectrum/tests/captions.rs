@@ -105,13 +105,15 @@ fn live_traces_carry_the_calibration_in_their_caption() {
     let fresh = Freshness::from_age(0.0);
     let t = SpectrumTrace::rta(
         &rta,
-        WallNs(3 * H),
-        Some("mic curve: MM1 90°"),
-        &[],
-        &[],
-        "RTA",
-        Color::WHITE,
-        fresh,
+        LiveMeta {
+            captured: WallNs(3 * H),
+            curve: Some("mic curve: MM1 90°"),
+            freqs: &[],
+            edges: &[],
+            name: "RTA".into(),
+            color: Color::WHITE,
+            freshness: fresh,
+        },
     );
     assert_eq!(
         t.caption,
@@ -133,13 +135,15 @@ fn live_traces_carry_the_calibration_in_their_caption() {
     };
     let t = SpectrumTrace::spectrum(
         &spec,
-        WallNs(25 * H),
-        None,
-        &[],
-        &[],
-        "FFT",
-        Color::WHITE,
-        fresh,
+        LiveMeta {
+            captured: WallNs(25 * H),
+            curve: None,
+            freqs: &[],
+            edges: &[],
+            name: "FFT".into(),
+            color: Color::WHITE,
+            freshness: fresh,
+        },
     );
     assert_eq!(t.caption, "Hann window · cal 94 dB · 1 d ago");
     assert_eq!(t.quantity, Quantity::Tone);
@@ -147,13 +151,15 @@ fn live_traces_carry_the_calibration_in_their_caption() {
     smoothed.meta.smoothing = Some(SmoothingFraction::Sixth);
     let t = SpectrumTrace::spectrum(
         &smoothed,
-        WallNs(25 * H),
-        None,
-        &[],
-        &[],
-        "FFT",
-        Color::WHITE,
-        fresh,
+        LiveMeta {
+            captured: WallNs(25 * H),
+            curve: None,
+            freqs: &[],
+            edges: &[],
+            name: "FFT".into(),
+            color: Color::WHITE,
+            freshness: fresh,
+        },
     );
     assert_eq!(t.caption, "Hann window · cal 94 dB · 1 d ago");
     assert_eq!(t.quantity, Quantity::SmoothedTone(SmoothingFraction::Sixth));

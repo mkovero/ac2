@@ -19,6 +19,7 @@ use crate::primitives::{
     Band, BandPoint, Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
+use crate::view::Style;
 use crate::view::{DistortionUnit, ViewState};
 
 mod reading;
@@ -62,8 +63,8 @@ pub struct DistortionScene {
     /// Ranges the sweep's response does not resolve at its grid (shaded in the fundamental's
     /// pane) and those its harmonics do not (shaded in the distortion pane); empty when the
     /// marker is off or the trace does not say.
-    pub unresolved_response: Vec<crate::unresolved::Mark>,
-    pub unresolved_harmonics: Vec<crate::unresolved::Mark>,
+    pub unresolved_response: Vec<crate::unresolved::RangeMark>,
+    pub unresolved_harmonics: Vec<crate::unresolved::RangeMark>,
     /// Why nothing is drawn, when that is the case.
     pub note: Option<String>,
     pub strip: Rect,
@@ -392,8 +393,10 @@ pub fn distortion_scene(
         &y_fundamental,
         false,
         FUNDAMENTAL_TITLE,
-        view.chrome,
-        theme,
+        Style {
+            chrome: view.chrome,
+            theme,
+        },
     );
     crate::unresolved::draw(
         &mut c,
@@ -428,8 +431,10 @@ pub fn distortion_scene(
         &y_axis,
         true,
         title,
-        view.chrome,
-        theme,
+        Style {
+            chrome: view.chrome,
+            theme,
+        },
     );
     crate::unresolved::draw(&mut c, plot, &xm, &unresolved_harmonics, theme);
     let ym = y_axis.mapping;
@@ -758,7 +763,10 @@ pub fn distortion_scene(
 fn unresolved_marks(
     sweep: Option<(SweepView<'_>, &SweepData)>,
     view: &ViewState,
-) -> (Vec<crate::unresolved::Mark>, Vec<crate::unresolved::Mark>) {
+) -> (
+    Vec<crate::unresolved::RangeMark>,
+    Vec<crate::unresolved::RangeMark>,
+) {
     use crate::unresolved::{Fill, Source, marks};
     let Some((t, Some(u))) = sweep.map(|(t, s)| (t, s.unresolved.as_ref())) else {
         return (Vec::new(), Vec::new());

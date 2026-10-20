@@ -650,7 +650,7 @@ fn unresolved_ranges_mark_both_panes() {
         )
     };
     let sc = scene(&view);
-    let text = |m: &[crate::unresolved::Mark]| -> Vec<String> {
+    let text = |m: &[crate::unresolved::RangeMark]| -> Vec<String> {
         m.iter().map(|m| m.text.clone()).collect()
     };
     assert_eq!(

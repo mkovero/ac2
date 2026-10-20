@@ -69,11 +69,11 @@ impl Control {
             Command::GenRefresh { lease_token } => {
                 self.lease_check(client, lease_token)?;
                 let deadline = Instant::now() + self.s.lease_expiry;
-                if let Some(l) = &mut self.lease {
+                if let Some(l) = &mut self.out.lease {
                     l.deadline = deadline;
                 }
                 if self.store.state().generator.firing {
-                    self.gate.open_until(deadline);
+                    self.out.gate.open_until(deadline);
                 }
                 Ok(ReplyBody::Lease(self.wire_lease(lease_token)))
             }
@@ -81,7 +81,7 @@ impl Control {
                 self.lease_check(client, lease_token)?;
                 self.abort_sweep(SweepFailure::Stopped, "the stimulus lease was released");
                 self.stop_output();
-                self.lease = None;
+                self.out.lease = None;
                 let mut g = self.store.state().generator.clone();
                 g.owner = None;
                 g.armed = false;

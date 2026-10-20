@@ -38,7 +38,9 @@ use ac2_traces::columns::Columns;
 use ac2_traces::math::{self, Combine, Input};
 use ac2_traces::ops::capture_columns;
 
-use super::{Analysis, Due, Emitter, Flush, JobCmd, Pace, Probes, SmoothingChange, StampArgs};
+use super::{
+    Analysis, Due, Emitter, Flush, JobCmd, JobCtx, Pace, Probes, SmoothingChange, StampArgs,
+};
 use crate::fanout::Block;
 
 /// Longest the job waits for its live operands' answers before it publishes without the
@@ -116,16 +118,18 @@ pub(crate) struct MathJob {
 }
 
 impl MathJob {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        meas: MeasId,
-        cfg: MathConfig,
+        ctx: JobCtx<MathConfig>,
         grids: Grids,
         stored: Vec<Option<Arc<Held>>>,
-        epoch: SessionEpoch,
         probes: Arc<Probes>,
-        config_rev: Rev,
     ) -> Self {
+        let JobCtx {
+            meas,
+            cfg,
+            config_rev,
+            epoch,
+        } = ctx;
         let seen_delay = stored.iter().map(|s| s.as_ref().map(|h| h.delay)).collect();
         Self {
             meas,

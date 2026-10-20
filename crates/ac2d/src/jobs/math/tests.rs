@@ -365,16 +365,18 @@ fn summation_of_a_capture_and_a_live_operand() {
 /// A math job over `operands` (`None` = live) with the probes `probes` holds.
 fn job(cfg: MathConfig, stored: Vec<Option<Arc<Held>>>, probes: Arc<Probes>) -> MathJob {
     MathJob::new(
-        MeasId(9),
-        cfg,
+        crate::jobs::JobCtx {
+            meas: MeasId(9),
+            cfg,
+            config_rev: Rev(1),
+            epoch: EPOCH,
+        },
         Grids {
             grid: grid(),
             display: None,
         },
         stored,
-        EPOCH,
         probes,
-        Rev(1),
     )
 }
 
