@@ -48,6 +48,7 @@ impl Shared {
                     layout: None,
                     compared: Vec::new(),
                     offset: Db(0.0),
+                    eq: Vec::new(),
                 };
                 self.put_meas(m)
             }

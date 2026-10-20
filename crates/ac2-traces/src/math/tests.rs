@@ -470,6 +470,7 @@ fn level_trace(grid: GridDef, columns: Columns) -> StoredTrace {
             mic: None,
             mic_curve: None,
             created_at: WallNs(0),
+            eq_in: Vec::new(),
         },
         grid,
         columns,

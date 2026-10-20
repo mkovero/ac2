@@ -138,9 +138,22 @@ impl Control {
             ));
         }
         let (traces, maths) = self.owned(meas);
-        let (gone_traces, gone_maths): (&[TraceId], &[MeasId]) = match what {
-            OwnedTraces::Keep => (&[], &[]),
-            OwnedTraces::Delete => (&traces, &maths),
+        // Its EQ curves and predictions exist only with its sets: they always go.
+        let (eq_traces, eq_maths) = self.eq_owned(meas);
+        let traces: Vec<TraceId> = traces
+            .into_iter()
+            .filter(|t| !eq_traces.contains(t))
+            .collect();
+        let maths: Vec<MeasId> = maths
+            .into_iter()
+            .filter(|m| !eq_maths.contains(m))
+            .collect();
+        let (gone_traces, gone_maths): (Vec<TraceId>, Vec<MeasId>) = match what {
+            OwnedTraces::Keep => (eq_traces.clone(), eq_maths.clone()),
+            OwnedTraces::Delete => (
+                traces.iter().chain(&eq_traces).copied().collect(),
+                maths.iter().chain(&eq_maths).copied().collect(),
+            ),
         };
         // A math channel that stays must not lose an operand.
         let staying = self.store.state().measurements.iter().filter(|m| {
@@ -155,11 +168,12 @@ impl Control {
             let lost = config.expr.operands().into_iter().find(|o| match o {
                 Operand::Meas { meas: x } => *x == meas,
                 Operand::Trace { trace } => gone_traces.contains(trace),
+                Operand::Eq { meas: x, .. } => *x == meas,
             });
             if let Some(o) = lost {
                 let what = match o {
                     Operand::Meas { .. } => name.clone(),
-                    Operand::Trace { .. } => self.operand_name(o),
+                    Operand::Trace { .. } | Operand::Eq { .. } => self.operand_name(o),
                 };
                 return Err(perr(
                     ErrorCode::Refused,
@@ -171,6 +185,13 @@ impl Control {
             }
         }
 
+        for id in &eq_maths {
+            self.remove_meas(*id);
+        }
+        for id in &eq_traces {
+            self.traces.remove(*id);
+            self.commit(Change::Trace(Patch::Deleted(*id)));
+        }
         match what {
             OwnedTraces::Keep => {
                 for id in &traces {
@@ -296,7 +317,7 @@ impl Control {
     }
 
     /// Stops measurement `id`'s job, drops what it published and its log, and deletes it.
-    fn remove_meas(&mut self, id: MeasId) -> ac2_proto::units::Rev {
+    pub(super) fn remove_meas(&mut self, id: MeasId) -> ac2_proto::units::Rev {
         self.stop_job(id);
         self.s
             .outbox

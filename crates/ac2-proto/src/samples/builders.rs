@@ -229,6 +229,7 @@ pub fn sweep_measurement() -> Measurement {
         layout: None,
         compared: Vec::new(),
         offset: Db(0.0),
+        eq: Vec::new(),
     }
 }
 
@@ -270,6 +271,7 @@ pub fn math_measurement() -> Measurement {
         layout: None,
         compared: Vec::new(),
         offset: Db(0.0),
+        eq: Vec::new(),
     }
 }
 
@@ -340,6 +342,7 @@ pub(super) fn measurement() -> Measurement {
         layout: Some(pane_layout()),
         compared: Vec::new(),
         offset: Db(0.0),
+        eq: Vec::new(),
     }
 }
 
@@ -372,6 +375,7 @@ pub(super) fn spectrum_measurement() -> Measurement {
         layout: None,
         compared: vec![crate::model::Compared::Meas { meas: MeasId(1) }],
         offset: Db(-6.5),
+        eq: Vec::new(),
     }
 }
 

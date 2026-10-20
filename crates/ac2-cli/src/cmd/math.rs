@@ -88,6 +88,7 @@ fn default_owner(s: &State, first: Operand) -> TraceOwner {
             .iter()
             .find(|t| t.id == trace)
             .map_or(TraceOwner::Imported, |t| t.edit.owner),
+        Operand::Eq { meas, .. } => TraceOwner::Meas { meas },
     }
 }
 
@@ -104,6 +105,7 @@ fn operand_name(s: &State, o: Operand) -> String {
             .iter()
             .find(|t| t.id == trace)
             .map_or_else(|| format!("trace {trace}"), |t| t.edit.name.clone()),
+        Operand::Eq { set, .. } => format!("EQ {}", set.0),
     }
 }
 
@@ -140,6 +142,7 @@ fn domain_of(s: &State, o: Operand) -> Result<MathDomain, CliError> {
                 TraceKind::Rta { .. } => MathDomain::Rta,
             })
         }
+        Operand::Eq { .. } => Ok(MathDomain::Transfer),
     }
 }
 

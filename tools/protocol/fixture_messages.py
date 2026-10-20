@@ -191,6 +191,7 @@ SPL_MEASUREMENT = {
     "layout": None,
     "compared": [],
     "offset": 0.0,
+    "eq": [],
 }
 
 SPL_LOG = {
@@ -342,6 +343,7 @@ def measurement():
         "layout": PANE_LAYOUT,
         "compared": [],
         "offset": 0.0,
+        "eq": [],
     }
 
 
@@ -377,6 +379,7 @@ MATH_MEASUREMENT = {
     "layout": None,
     "compared": [],
     "offset": 0.0,
+    "eq": [],
 }
 
 
@@ -411,6 +414,7 @@ SWEEP_MEASUREMENT = {
     "layout": None,
     "compared": [],
     "offset": 0.0,
+    "eq": [],
 }
 
 

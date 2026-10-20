@@ -361,4 +361,7 @@ pub fn commands() -> Vec<Command> {
             offset: crate::units::Db(6.0),
         },
     ]
+    .into_iter()
+    .chain(super::eq::eq_commands())
+    .collect()
 }

@@ -116,6 +116,7 @@ impl Shared {
             mic: None,
             mic_curve: None,
             created_at: WallNs(1_790_000_000_000_000_000),
+            eq_in: Vec::new(),
         }
     }
 

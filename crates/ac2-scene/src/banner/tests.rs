@@ -252,6 +252,7 @@ fn no_delay_estimate_says_why() {
         layout: None,
         compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
     };
     let why = no_delay_estimate(&m);
     assert_eq!(
@@ -556,6 +557,7 @@ fn math_average_banners() {
             MathStatus::new(&c, &a, |o| match o {
                 Operand::Meas { meas } => format!("Seat {}", meas.0),
                 Operand::Trace { trace } => format!("trace {trace}"),
+                Operand::Eq { set, .. } => format!("EQ {}", set.0),
             }),
         ))
     };

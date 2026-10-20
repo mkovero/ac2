@@ -41,6 +41,7 @@ impl Candidate {
                 Operand::Trace { trace } => traces
                     .iter()
                     .any(|t| t.id == trace && t.edit.owner == owner),
+                Operand::Eq { meas, .. } => owner == TraceOwner::Meas { meas },
             };
             // Stable: the list's order within each part.
             v.sort_by_key(|c| !mine(c));
@@ -657,6 +658,7 @@ mod tests {
             layout: None,
             compared: Vec::new(),
             offset: ac2_proto::units::Db(0.0),
+            eq: Vec::new(),
         }
     }
 

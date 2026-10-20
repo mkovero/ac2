@@ -103,6 +103,7 @@ pub(super) fn saved_of(m: &Measurement) -> SavedMeasurement {
         layout: m.layout.clone(),
         compared: m.compared.clone(),
         offset: m.offset,
+        eq: m.eq.clone(),
     }
 }
 
@@ -325,6 +326,7 @@ impl Control {
                 layout: sm.layout,
                 compared: Vec::new(),
                 offset: Db(0.0),
+                eq: Vec::new(),
             };
             self.ensure_spl_log(&m, None);
             m.config_rev = Rev(self.store.rev().0 + 1);

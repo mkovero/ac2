@@ -59,7 +59,7 @@ use ac2_proto::spl_log::{self, SplLogInfo};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 28;
+pub const VERSION: u32 = 29;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].
@@ -88,6 +88,8 @@ pub struct SavedMeasurement {
     pub compared: Vec<Compared>,
     /// Display offset of its live curves.
     pub offset: Db,
+    /// EQ what-if sets (their filter curves are recomputed on load).
+    pub eq: Vec<ac2_proto::model::EqSet>,
 }
 
 /// Delay of a saved transfer measurement.

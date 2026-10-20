@@ -281,6 +281,7 @@ pub fn spl_measurement() -> Measurement {
         layout: None,
         compared: Vec::new(),
         offset: Db(0.0),
+        eq: Vec::new(),
     }
 }
 

@@ -140,6 +140,7 @@ impl Control {
                     layout: None,
                     compared: Vec::new(),
                     offset: Db(0.0),
+                    eq: Vec::new(),
                 };
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 self.ensure_spl_log(&m, None);
@@ -153,6 +154,7 @@ impl Control {
                 }
                 self.check_meas_owner(Some(meas), &config.kind)?;
                 self.check_operand_update(meas, &config.kind)?;
+                self.check_eq_update(meas, &config.kind)?;
                 if owners::owner_only(&m.config, &config) {
                     // Moving a math channel changes where it is listed, not what it
                     // computes: its job and its frames' config rev go on.
@@ -229,6 +231,8 @@ impl Control {
                     }
                 }
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
+                // Its grid may have changed: the sets' curves follow it.
+                self.eq_refresh(meas);
                 Ok(ReplyBody::Measurement(m))
             }
             Command::MeasColour { meas, colour } => {
@@ -291,6 +295,7 @@ impl Control {
                 Ok(ReplyBody::Measurement(m))
             }
             Command::MeasDelete { meas, traces } => self.meas_delete(meas, traces),
+            Command::MeasEq { meas, edit } => self.meas_eq(client, meas, edit),
             Command::MeasStart { meas } => {
                 let mut m = self.meas(meas)?.clone();
                 not_a_sweep(&m)?;

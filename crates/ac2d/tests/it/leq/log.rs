@@ -204,6 +204,7 @@ async fn a_long_log_in_pages_and_its_history() {
                 layout: None,
                 compared: Vec::new(),
                 offset: ac2_proto::units::Db(0.0),
+                eq: Vec::new(),
             }],
             spl_logs: vec![SavedSplLog {
                 info: ac2_proto::spl_log::SplLogInfo {

@@ -40,6 +40,7 @@ fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
         layout: None,
         compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
     }
 }
 
@@ -444,6 +445,7 @@ fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
         mic: None,
         mic_curve: None,
         created_at: WallNs(0),
+        eq_in: Vec::new(),
     }
 }
 

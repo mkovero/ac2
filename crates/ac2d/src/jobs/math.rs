@@ -183,7 +183,7 @@ impl MathJob {
                 (Operand::Meas { meas }, None) => {
                     Ok(self.probes.get(*meas).and_then(|p| p.request()))
                 }
-                (Operand::Trace { .. }, None) => Ok(None),
+                (Operand::Trace { .. } | Operand::Eq { .. }, None) => Ok(None),
             })
             .collect();
         let deadline = Instant::now() + OPERAND_WAIT;

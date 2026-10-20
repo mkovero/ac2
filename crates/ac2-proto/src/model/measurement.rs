@@ -579,6 +579,14 @@ pub enum Operand {
         /// The trace.
         trace: TraceId,
     },
+    /// An EQ set of a measurement (`B` of a transfer `A × B` only): the set's response, or
+    /// its change since what `A` is known to contain (`docs/design/eq-overlay.md`).
+    Eq {
+        /// The measurement holding the set.
+        meas: MeasId,
+        /// The set.
+        set: crate::units::EqSetId,
+    },
 }
 
 /// Delay the phase of a transfer sum, difference or average is referred to.
@@ -714,6 +722,8 @@ pub struct Measurement {
     /// another measurement's panes too, compared): display only, its frames carry the
     /// measured levels. At most [`Measurement::OFFSET_MAX_DB`] either way.
     pub offset: Db,
+    /// EQ what-if sets (`meas.eq`), transfer and sweep measurements only.
+    pub eq: Vec<super::EqSet>,
 }
 
 impl Measurement {
