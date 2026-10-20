@@ -1,5 +1,14 @@
 use super::*;
 
+/// The thresholds with the low level at −50 dBFS: the readings below are at an
+/// uncalibrated input's levels.
+fn fifty() -> AdviceSettings {
+    AdviceSettings {
+        low_level_dbfs: -50.0,
+        ..AdviceSettings::default()
+    }
+}
+
 fn quiet(coh: f64, rms: f64) -> Reading {
     Reading {
         ref_peak_dbfs: Some(-20.0),
@@ -30,10 +39,12 @@ fn run(h: &mut Hold, t0: f64, t1: f64, r: &Reading, s: &AdviceSettings) {
 #[test]
 fn defaults_are_named_choices() {
     let s = AdviceSettings::default();
+    assert_eq!(s.low_level_dbfs, -70.0);
     assert!(s.on);
     assert!(is_choice(&REF_HEADROOM_DB, s.ref_headroom_db));
     assert!(is_choice(&LOW_COHERENCE, s.low_coherence));
     assert!(is_choice(&LOW_LEVEL_DBFS, s.low_level_dbfs));
+    assert_eq!(step_choice(&LOW_LEVEL_DBFS, -70.0, 1), -65.0);
     assert_eq!(step_choice(&LOW_LEVEL_DBFS, -50.0, 1), -45.0);
     assert_eq!(step_choice(&LOW_LEVEL_DBFS, -50.0, -1), -55.0);
     assert_eq!(step_choice(&REF_HEADROOM_DB, 12.0, 1), 12.0);
@@ -53,7 +64,7 @@ fn defaults_are_named_choices() {
 
 #[test]
 fn a_reference_near_full_scale_advises_lowering_at_once() {
-    let s = AdviceSettings::default();
+    let s = fifty();
     let mut h = Hold::default();
     h.step(0.0, &hot(-2.4), &s);
     let a = h.shown().expect("lower");
@@ -79,7 +90,7 @@ fn a_reference_near_full_scale_advises_lowering_at_once() {
 
 #[test]
 fn lower_holds_within_the_hysteresis_and_for_the_hold_time() {
-    let s = AdviceSettings::default();
+    let s = fifty();
     let mut h = Hold::default();
     h.step(0.0, &hot(-2.0), &s);
     // Peaks swinging between −2 and −5.5 dBFS (inside threshold + hysteresis): stays, the
@@ -104,7 +115,7 @@ fn lower_holds_within_the_hysteresis_and_for_the_hold_time() {
 
 #[test]
 fn low_coherence_with_a_quiet_input_advises_raising_after_it_settles() {
-    let s = AdviceSettings::default();
+    let s = fifty();
     let mut h = Hold::default();
     let r = quiet(0.42, -64.3);
     run(&mut h, 0.0, RAISE_AFTER_S - 0.2, &r, &s);
@@ -127,7 +138,7 @@ fn low_coherence_with_a_quiet_input_advises_raising_after_it_settles() {
 
 #[test]
 fn either_condition_alone_gives_no_raise() {
-    let s = AdviceSettings::default();
+    let s = fifty();
     for r in [quiet(0.95, -70.0), quiet(0.3, -30.0)] {
         let mut h = Hold::default();
         run(&mut h, 0.0, 10.0, &r, &s);
@@ -149,7 +160,7 @@ fn either_condition_alone_gives_no_raise() {
 
 #[test]
 fn a_brief_dip_never_shows_raise() {
-    let s = AdviceSettings::default();
+    let s = fifty();
     let mut h = Hold::default();
     // Low for 1.5 s, fine for 0.5 s, low again for 1.5 s: never 2 s in a row.
     run(&mut h, 0.0, 1.5, &quiet(0.4, -60.0), &s);
@@ -160,7 +171,7 @@ fn a_brief_dip_never_shows_raise() {
 
 #[test]
 fn raise_step_and_text_hold_through_jitter() {
-    let s = AdviceSettings::default();
+    let s = fifty();
     let mut h = Hold::default();
     run(&mut h, 0.0, 3.0, &quiet(0.42, -64.3), &s);
     let first = text(&h.shown().expect("advice"));
@@ -194,7 +205,7 @@ fn raise_step_and_text_hold_through_jitter() {
 
 #[test]
 fn the_max_level_caps_the_raise_and_says_so() {
-    let s = AdviceSettings::default();
+    let s = fifty();
     let stim = |level: f64| Stimulus {
         level_dbfs: level,
         max_level_dbfs: -50.0,
@@ -254,7 +265,7 @@ fn the_max_level_caps_the_raise_and_says_so() {
 
 #[test]
 fn a_fault_clears_the_advice_and_off_shows_none() {
-    let s = AdviceSettings::default();
+    let s = fifty();
     let mut h = Hold::default();
     h.step(0.0, &hot(-1.0), &s);
     assert!(h.shown().is_some());
@@ -276,7 +287,7 @@ fn a_fault_clears_the_advice_and_off_shows_none() {
 
 #[test]
 fn lower_wins_over_raise() {
-    let s = AdviceSettings::default();
+    let s = fifty();
     let mut h = Hold::default();
     run(&mut h, 0.0, 3.0, &quiet(0.4, -65.0), &s);
     assert!(matches!(h.shown(), Some(Advice::Raise { .. })));
@@ -313,7 +324,7 @@ fn pane_coherence_is_the_median_of_the_judged_columns() {
 /// coherence from before the drop.
 #[test]
 fn a_held_average_freezes_the_advice() {
-    let s = AdviceSettings::default();
+    let s = fifty();
     let weak = |r: Reading| Reading {
         protection: ProtectionFlags::WEAK_REFERENCE,
         ..r
@@ -325,4 +336,62 @@ fn a_held_average_freezes_the_advice() {
     let shown = h.shown().expect("raise");
     run(&mut h, 13.1, 30.0, &weak(quiet(0.95, -30.0)), &s);
     assert_eq!(h.shown(), Some(shown));
+}
+
+/// A calibrated measurement input: its gain is never advised (the calibration holds only
+/// at that gain); the stimulus raise still is, up to the max level, and at the max level
+/// the banner says why nothing is left.
+#[test]
+fn a_calibrated_input_is_never_told_to_raise_its_gain() {
+    let s = fifty();
+    let with = |level: f64| Reading {
+        stimulus: Some(Stimulus {
+            level_dbfs: level,
+            max_level_dbfs: -50.0,
+        }),
+        meas_calibrated: true,
+        ..quiet(0.42, -64.3)
+    };
+    // Room for the whole step: the same as uncalibrated.
+    let mut h = Hold::default();
+    run(&mut h, 0.0, 3.0, &with(-80.0), &s);
+    assert_eq!(
+        text(&h.shown().expect("advice")),
+        (
+            "RAISE STIMULUS · about +18 dB".to_string(),
+            "γ² 0.42 · meas −64.3 dBFS RMS".to_string()
+        )
+    );
+    // Capped: the stimulus step only.
+    let mut h = Hold::default();
+    run(&mut h, 0.0, 3.0, &with(-54.5), &s);
+    assert_eq!(
+        text(&h.shown().expect("advice")),
+        (
+            "RAISE STIMULUS · +4 dB to max level".to_string(),
+            "meas input calibrated".to_string()
+        )
+    );
+    // At the max level: why, not a gain to turn.
+    let mut h = Hold::default();
+    run(&mut h, 0.0, 3.0, &with(-50.0), &s);
+    let (head, detail) = text(&h.shown().expect("advice"));
+    assert_eq!(head, "STIMULUS AT MAX LEVEL");
+    assert_eq!(detail, "noise-limited · meas input calibrated");
+    assert!(!detail.contains("gain"));
+    // A calibration applied while shown changes the text at once.
+    let mut h = Hold::default();
+    run(
+        &mut h,
+        0.0,
+        3.0,
+        &Reading {
+            meas_calibrated: false,
+            ..with(-50.0)
+        },
+        &s,
+    );
+    assert_eq!(text(&h.shown().expect("advice")).1, "raise the meas gain");
+    h.step(3.1, &with(-50.0), &s);
+    assert_eq!(text(&h.shown().expect("advice")).0, "STIMULUS AT MAX LEVEL");
 }

@@ -179,6 +179,7 @@ fn transfer_view_advice() {
                 level_dbfs: -54.5,
                 max_level_dbfs: -50.0,
             }),
+            meas_calibrated: false,
         }),
         ..Status::default()
     };

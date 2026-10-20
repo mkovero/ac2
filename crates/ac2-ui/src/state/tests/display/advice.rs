@@ -83,11 +83,11 @@ fn advice(t: &T) -> Option<String> {
 fn low_coherence_on_a_quiet_input_advises_raising_capped_by_the_max_level() {
     let mut t = T::new();
     t.go(PaneKind::Transfer);
-    feed(&mut t, 10.0, 0.4, -20.0, -64.3);
+    feed(&mut t, 10.0, 0.4, -20.0, -84.3);
     assert_eq!(advice(&t), None, "not before it held 2 s");
-    feed(&mut t, 11.0, 0.4, -20.0, -64.3);
+    feed(&mut t, 11.0, 0.4, -20.0, -84.3);
     assert_eq!(advice(&t), None);
-    feed(&mut t, 12.1, 0.4, -20.0, -64.3);
+    feed(&mut t, 12.1, 0.4, -20.0, -84.3);
     assert_eq!(
         advice(&t).as_deref(),
         Some("RAISE STIMULUS · about +18 dB"),
@@ -106,7 +106,7 @@ fn low_coherence_on_a_quiet_input_advises_raising_capped_by_the_max_level() {
             outputs: vec![0],
         });
     });
-    feed(&mut t, 12.3, 0.4, -20.0, -64.3);
+    feed(&mut t, 12.3, 0.4, -20.0, -84.3);
     assert_eq!(
         advice(&t).as_deref(),
         Some("RAISE STIMULUS · +5 dB to max level")
@@ -120,7 +120,7 @@ fn low_coherence_on_a_quiet_input_advises_raising_capped_by_the_max_level() {
     );
     assert!(!t.st.prefs.advice.on && t.st.prefs_dirty);
     t.key("Escape");
-    feed(&mut t, 12.4, 0.4, -20.0, -64.3);
+    feed(&mut t, 12.4, 0.4, -20.0, -84.3);
     assert_eq!(advice(&t), None);
 }
 
@@ -153,14 +153,14 @@ fn the_low_level_threshold_is_a_display_setting() {
         )),
         &t.keys,
     );
-    assert_eq!(t.st.prefs.advice.low_level_dbfs, -55.0);
+    assert_eq!(t.st.prefs.advice.low_level_dbfs, -80.0);
     assert_eq!(
         t.last_toast(),
-        "advise raising with the measurement input under −55.0 dBFS RMS"
+        "advise raising with the measurement input under −80.0 dBFS RMS"
     );
-    // −52 dBFS RMS is now not low: no raise however low the coherence.
+    // −75 dBFS RMS is now not low: no raise however low the coherence.
     for i in 0..40 {
-        feed(&mut t, f64::from(i) * 0.1, 0.4, -20.0, -52.0);
+        feed(&mut t, f64::from(i) * 0.1, 0.4, -20.0, -75.0);
     }
     assert_eq!(advice(&t), None);
 }

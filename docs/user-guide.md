@@ -946,25 +946,31 @@ stimulus level. It is advice only: nothing in ac2 changes a level by itself.
 - **LOWER STIMULUS · ref peak −1.5 dBFS**: the reference input's peak came within 3 dB of
   0 dBFS. The next crest of the noise may clip the reference, which spoils every value.
 - **RAISE STIMULUS · about +18 dB**: the pane's coherence (median γ² of the columns the
-  stimulus reaches) is under 0.70 *and* the measurement input reads under −50 dBFS RMS.
+  stimulus reaches) is under 0.70 *and* the measurement input reads under −70 dBFS RMS.
   The step aims the measurement input 3 dB past that threshold. Low coherence with a
   healthy input level is more likely reflections or noise in the room, which more
   stimulus does not cure, so then nothing is said.
 - While this rig's generator plays, the step never goes past the **system max level**:
   **RAISE STIMULUS · +4 dB to max level** (then raise the measurement input's gain), or
-  **STIMULUS AT MAX LEVEL · −50.0 dBFS** when there is no room left.
+  **STIMULUS AT MAX LEVEL · −50.0 dBFS** (raise the measurement input's gain) when there
+  is no room left.
+- A measurement input with an SPL calibration applied is never told to raise its gain:
+  the calibration holds only at the gain it was made at. The capped step says **meas
+  input calibrated** instead, and at the max level the line reads **STIMULUS AT MAX
+  LEVEL · noise-limited · meas input calibrated**: the coherence is as good as this
+  stimulus and room allow.
 
 The line does not show while a fault (CLIP, NO REFERENCE, CHECK ROUTING, NO SIGNAL) or
 STALE is up: the fault comes first. While the daemon holds the average on a weak reference
-(just after the stimulus dropped far), the line stays as it was. It does not flicker. RAISE waits until the condition
-has lasted 2 s (coherence is still averaging after a level change). A line stays while
+(just after the stimulus dropped far), the line stays as it was. It does not flicker.
+RAISE waits until the condition has lasted 2 s (coherence is still averaging after a level change). A line stays while
 its reading is within 3 dB (γ² 0.05) of the threshold, and for 5 s after that. The raise
 step changes only when it moves by 3 dB or more. **T** (plot chrome) leaves it, like every
 banner.
 
 Settings → Display: *Headroom advice* on / off; *Advise lowering at* (reference peak
 within 1 … 12 dB of full scale, default 3); *Advise raising at* (coherence under γ² 0.40 …
-0.95, default 0.70); *… and* (measurement input under −80 … −30 dBFS RMS, default −50).
+0.95, default 0.70); *… and* (measurement input under −80 … −30 dBFS RMS, default −70).
 They are this app's settings (`ui.toml`, `[advice]`).
 
 ### Min / max tracking on the transfer function

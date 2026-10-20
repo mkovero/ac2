@@ -10,14 +10,18 @@
 //! 2. **Raise**: the pane's coherence (median γ² of the columns the stimulus reaches,
 //!    [`pane_coherence`]) is under [`AdviceSettings::low_coherence`] (default 0.70) *and* the
 //!    measurement input's RMS is under [`AdviceSettings::low_level_dbfs`] (default
-//!    −50 dBFS). Low coherence alone may be reflections, wind or a noisy venue, which more
+//!    −70 dBFS: low for an uncalibrated input, around a calibrated mic's level at a quiet
+//!    measurement level). Low coherence alone may be reflections, wind or a noisy venue, which more
 //!    stimulus does not cure; together with a quiet measurement input the likely cause is
 //!    too little signal over the noise floor. The step aims the measurement input
 //!    [`HYSTERESIS_DB`] past the low-level threshold (so the advice clears once followed),
 //!    rounded up to whole dB, and is capped so the stimulus never goes above the system max
 //!    level in force; the text says so when the max level is the limit, and names the
-//!    input gain as what is left. Without this rig's generator playing (an external
-//!    stimulus) no cap is known and none is applied.
+//!    input gain as what is left. Never the gain of a measurement input with an SPL
+//!    calibration applied: the calibration holds for the gain it was made at, so a gain
+//!    change would make every SPL reading wrong; there the text says the input is
+//!    calibrated instead. Without this rig's generator playing (an external stimulus) no
+//!    cap is known and none is applied.
 //! 3. Otherwise nothing.
 //!
 //! No advice while a fault explains the signal (CLIP, NO REFERENCE, CHECK ROUTING, NO
@@ -83,7 +87,7 @@ impl Default for AdviceSettings {
             on: true,
             ref_headroom_db: 3.0,
             low_coherence: 0.7,
-            low_level_dbfs: -50.0,
+            low_level_dbfs: -70.0,
         }
     }
 }
@@ -150,6 +154,8 @@ pub struct Reading {
     /// [`pane_coherence`] of the newest transfer frame.
     pub coherence: Option<f64>,
     pub stimulus: Option<Stimulus>,
+    /// The measurement input has an SPL calibration applied: its gain must stay.
+    pub meas_calibrated: bool,
 }
 
 /// Columns that say nothing about the stimulus's level: no bin there, outside the band,
@@ -204,6 +210,8 @@ pub enum Advice {
         coherence: f64,
         meas_rms_dbfs: f64,
         stimulus: Option<Stimulus>,
+        /// The measurement input is calibrated: never advise its gain.
+        meas_calibrated: bool,
     },
 }
 
@@ -281,6 +289,7 @@ impl Hold {
                 coherence: c,
                 meas_rms_dbfs: rms,
                 stimulus: r.stimulus,
+                meas_calibrated: r.meas_calibrated,
             };
             self.clear_since = None;
             match (shown_raise, self.shown) {
@@ -292,12 +301,14 @@ impl Hold {
                         ..
                     }),
                 ) if (want - w).abs() < HYSTERESIS_DB => {
-                    // The step holds; only the max level, an operator's change, is new.
+                    // The step holds; only the max level and the calibration, an
+                    // operator's changes, are new.
                     self.shown = Some(Advice::Raise {
                         want_db: w,
                         coherence,
                         meas_rms_dbfs,
                         stimulus: r.stimulus,
+                        meas_calibrated: r.meas_calibrated,
                     });
                 }
                 (Some(_), _) => self.shown = Some(fresh),
@@ -361,6 +372,9 @@ pub fn raise_by(want_db: f64, stimulus: Option<Stimulus>) -> RaiseBy {
     }
 }
 
+/// Why no gain is advised: the measurement input's SPL calibration holds only at its gain.
+const CALIBRATED: &str = "meas input calibrated";
+
 fn step_db(db: f64) -> String {
     format!("{} dB", format::signed(db, 0))
 }
@@ -382,6 +396,7 @@ pub fn text(a: &Advice) -> (String, String) {
             coherence,
             meas_rms_dbfs,
             stimulus,
+            meas_calibrated,
         } => {
             let why = format!(
                 "γ² {} · meas {} RMS",
@@ -392,7 +407,17 @@ pub fn text(a: &Advice) -> (String, String) {
                 RaiseBy::Full(by) => (format!("RAISE STIMULUS · about {}", step_db(by)), why),
                 RaiseBy::ToMax { by_db, .. } => (
                     format!("RAISE STIMULUS · {} to max level", step_db(by_db)),
-                    "then raise the meas gain".into(),
+                    if meas_calibrated {
+                        CALIBRATED.into()
+                    } else {
+                        "then raise the meas gain".into()
+                    },
+                ),
+                // Without the gain to turn, nothing is left to do but know why: the
+                // headline drops the max level's value so the reason fits beside it.
+                RaiseBy::AtMax { .. } if meas_calibrated => (
+                    "STIMULUS AT MAX LEVEL".into(),
+                    format!("noise-limited · {CALIBRATED}"),
                 ),
                 RaiseBy::AtMax { max_level_dbfs } => (
                     format!("STIMULUS AT MAX LEVEL · {}", format::dbfs(max_level_dbfs)),

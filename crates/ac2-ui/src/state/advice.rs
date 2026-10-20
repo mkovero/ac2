@@ -67,6 +67,14 @@ impl AppState {
                     meas_rms_dbfs: level(config.measurement_input, |l| &l.rms),
                     coherence: pane_coherence(&f.coh, &f.validity),
                     stimulus,
+                    // Any SPL calibration applied to the input, verified or borrowed: its
+                    // readings rely on the gain staying as it is.
+                    meas_calibrated: self.daemon().is_some_and(|s| {
+                        ac2_proto::cal::state_input_use(s, config.measurement_input)
+                            .sensitivity
+                            .entry()
+                            .is_some()
+                    }),
                 },
             ));
         }

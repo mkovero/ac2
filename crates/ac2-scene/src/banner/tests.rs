@@ -613,7 +613,7 @@ fn math_average_banners() {
 #[test]
 fn headroom_advice_is_the_last_info_and_yields_to_faults() {
     use crate::advice::{Advice, Stimulus};
-    let raise = |level: f64| Advice::Raise {
+    let raise_on = |level: f64, meas_calibrated: bool| Advice::Raise {
         want_db: 18.0,
         coherence: 0.42,
         meas_rms_dbfs: -64.3,
@@ -621,7 +621,9 @@ fn headroom_advice_is_the_last_info_and_yields_to_faults() {
             level_dbfs: level,
             max_level_dbfs: -50.0,
         }),
+        meas_calibrated,
     };
+    let raise = |level: f64| raise_on(level, false);
     let s = Status {
         no_delay_estimate: Some(NoDelayEstimate::NotFound),
         advice: Some(raise(-80.0)),
@@ -659,6 +661,8 @@ fn headroom_advice_is_the_last_info_and_yields_to_faults() {
         raise(-80.0),
         raise(-54.5),
         raise(-50.0),
+        raise_on(-54.5, true),
+        raise_on(-50.0, true),
     ] {
         let b = banners(&Status {
             advice: Some(a),
