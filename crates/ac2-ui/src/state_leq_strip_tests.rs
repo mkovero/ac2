@@ -71,7 +71,7 @@ fn keys_walk_the_strip_and_fetch_what_is_not_held() {
     let live = ac2_scene::leq::history_span(&cfg);
     // Zoomed out about the middle, the right edge stays at the newest second.
     let r = t.key("O");
-    let (from, to) = t.st.leq_strips[&pane];
+    let (from, to) = t.st.leq.strips[&pane];
     assert_eq!(to, 50_000.0);
     assert!((to - from - (live * ZOOM_FACTOR).min(40_000.0 * 1.05)).abs() < 1e-6);
     // The newest 600 s are held, the rest is asked for, with room to pan.
@@ -95,17 +95,17 @@ fn keys_walk_the_strip_and_fetch_what_is_not_held() {
     assert!(!v.loading);
     assert_eq!(v.points.map(|p| p.step()), Some(step));
     // ← moves a tenth of the span back.
-    let before = t.st.leq_strips[&pane];
+    let before = t.st.leq.strips[&pane];
     t.key("ArrowLeft");
-    let after = t.st.leq_strips[&pane];
+    let after = t.st.leq.strips[&pane];
     assert!((before.0 - after.0 - (before.1 - before.0) / 10.0).abs() < 1e-6);
     // I zooms in again.
     t.key("I");
-    let z = t.st.leq_strips[&pane];
+    let z = t.st.leq.strips[&pane];
     assert!(z.1 - z.0 < after.1 - after.0);
     // Home: live, said.
     t.key("Home");
-    assert!(!t.st.leq_strips.contains_key(&pane));
+    assert!(!t.st.leq.strips.contains_key(&pane));
     assert_eq!(t.last_toast(), "Leq history: live");
     let v = t.st.strip_view(pane, MeasId(4), None);
     assert_eq!(v.span.span, None);
@@ -128,10 +128,10 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
         }),
         &t.keys,
     );
-    let (a, b) = t.st.leq_strips[&pane];
+    let (a, b) = t.st.leq.strips[&pane];
     assert!((b - a - 500.0).abs() < 1e-6);
     assert!(((49_800.0 - a) / (b - a) - 0.8).abs() < 1e-6, "{a}..{b}");
-    assert_eq!(t.st.leq_strip_px, 800.0);
+    assert_eq!(t.st.leq.strip_px, 800.0);
     // Dragged right by 50 s' worth (the content moves left): later; all of it received.
     let r = t.st.update(
         m(StripMsg::Pan {
@@ -141,7 +141,7 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
         }),
         &t.keys,
     );
-    assert_eq!(t.st.leq_strips[&pane], (a + 50.0, b + 50.0));
+    assert_eq!(t.st.leq.strips[&pane], (a + 50.0, b + 50.0));
     assert_eq!(span_asked(&r), None, "the newest 600 s are held");
     // Far into the future: the strip ends at the newest second.
     t.st.update(
@@ -152,7 +152,7 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
         }),
         &t.keys,
     );
-    assert_eq!(t.st.leq_strips[&pane].1, 50_000.0);
+    assert_eq!(t.st.leq.strips[&pane].1, 50_000.0);
     // Far into the past: the log's first second stays on the strip, and that span is
     // asked for.
     let r = t.st.update(
@@ -163,7 +163,7 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
         }),
         &t.keys,
     );
-    let (a, b) = t.st.leq_strips[&pane];
+    let (a, b) = t.st.leq.strips[&pane];
     assert!(a < 10_000.0 && b > 10_000.0, "{a}..{b}");
     let (fa, fb, step, _) = span_asked(&r).expect("asked");
     assert!(fa <= 10_000.0 && fb >= b, "{fa}..{fb}");
@@ -178,14 +178,14 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
         }),
         &t.keys,
     );
-    let (a, b) = t.st.leq_strips[&pane];
+    let (a, b) = t.st.leq.strips[&pane];
     assert!((b - a - STRIP_MIN_S).abs() < 1e-6);
     // The pointer on the strip, and off it.
     t.st.update(m(StripMsg::Hover(Some(a + 5.0))), &t.keys);
-    assert_eq!(t.st.leq_cursor, Some((pane, a + 5.0)));
+    assert_eq!(t.st.leq.cursor, Some((pane, a + 5.0)));
     assert_eq!(t.st.strip_view(pane, MeasId(4), None).cursor, Some(a + 5.0));
     t.st.update(m(StripMsg::Hover(None)), &t.keys);
-    assert_eq!(t.st.leq_cursor, None);
+    assert_eq!(t.st.leq.cursor, None);
 }
 
 /// A stale or failed fetch: a reply to an earlier ask is not kept; a failure is said once.
@@ -210,7 +210,7 @@ fn a_failed_span_fetch_is_said() {
         "{}",
         t.last_toast()
     );
-    assert!(t.st.leq_spans.is_empty());
+    assert!(t.st.leq.spans.is_empty());
 }
 
 /// The export prompt's name: the meter's name made a file name, local date and time.

@@ -65,10 +65,11 @@ fn math_channels_from_an_empty_daemon() -> R {
     assert!(!matches!(d.st.overlay, Overlay::Form(_)));
     assert!(
         d.st.toasts
+            .list
             .iter()
             .any(|t| t.text.contains("two transfer functions, spectra or RTAs")),
         "{:?}",
-        d.st.toasts
+        d.st.toasts.list
     );
 
     // A second position, from the transfer dialog.

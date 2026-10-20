@@ -199,6 +199,7 @@ fn arrows_without_level_send_nothing() {
     assert!(t.key("Up").is_empty());
     assert!(
         t.st.toasts
+            .list
             .last()
             .is_some_and(|x| x.severity == Severity::Warning)
     );
@@ -949,9 +950,9 @@ fn a_driver_clock_change_is_told_with_whether_output_stopped() {
         "Audio clock changed (driver asked to resync): output stopped"
     );
     // Told once: the next mirror of the same outage says nothing new.
-    let told = t.st.toasts.len();
+    let told = t.st.toasts.list.len();
     t.conn(mirror(s));
-    assert_eq!(t.st.toasts.len(), told);
+    assert_eq!(t.st.toasts.list.len(), told);
 
     let mut t = T::new();
     let mut s = daemon_state();

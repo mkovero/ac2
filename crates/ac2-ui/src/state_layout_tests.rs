@@ -443,9 +443,13 @@ fn layout_is_remembered_and_restored() {
     v.conn(mirror(state));
     assert_eq!(v.st.kind_meas(PaneKind::Spl).map(|m| m.id), Some(MeasId(4)));
     assert!(
-        !v.st.toasts.iter().any(|t| t.severity != Severity::Info),
+        !v.st
+            .toasts
+            .list
+            .iter()
+            .any(|t| t.severity != Severity::Info),
         "{:?}",
-        v.st.toasts
+        v.st.toasts.list
     );
     // The usual choice is not the operator's: nothing is saved for the pane.
     assert_eq!(spl_entry(&mut v.st.prefs), Some(None));

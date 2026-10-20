@@ -319,7 +319,8 @@ impl AppState {
                 v.meas = None;
             }
         }
-        self.pending_pane_meas
+        self.pending
+            .pane_meas
             .retain(|p, _| self.layout.views.contains_key(p));
         if matches!(self.overlay, Overlay::PaneMenu(m) if !self.layout.views.contains_key(&m.pane))
         {

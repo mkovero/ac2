@@ -70,7 +70,13 @@ impl Driver {
                 return Ok(());
             }
             if Instant::now() > end {
-                let toasts: Vec<&str> = self.st.toasts.iter().map(|t| t.text.as_str()).collect();
+                let toasts: Vec<&str> = self
+                    .st
+                    .toasts
+                    .list
+                    .iter()
+                    .map(|t| t.text.as_str())
+                    .collect();
                 let mut held: Vec<String> = self
                     .st
                     .data

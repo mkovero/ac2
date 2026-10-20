@@ -107,6 +107,7 @@ fn refusal_inserts_nothing_and_says_why() {
     assert_eq!(t.st.overlay, Overlay::None);
     assert!(
         t.st.toasts
+            .list
             .last()
             .is_some_and(|x| x.severity == Severity::Warning)
     );

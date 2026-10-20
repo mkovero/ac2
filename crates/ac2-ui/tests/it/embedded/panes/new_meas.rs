@@ -64,6 +64,7 @@ fn a_fresh_session_asks_what_to_measure() -> R {
     assert_eq!(d.st.layout.views.len(), 1);
     let toast =
         d.st.toasts
+            .list
             .last()
             .map(|t| t.text.clone())
             .unwrap_or_default();

@@ -29,10 +29,10 @@ impl AppState {
             let f = self.layout.focus;
             self.set_pane_kind(f, kind);
         }
-        if self.pending_pane_meas.is_empty() {
+        if self.pending.pane_meas.is_empty() {
             return;
         }
-        let pending = std::mem::take(&mut self.pending_pane_meas);
+        let pending = std::mem::take(&mut self.pending.pane_meas);
         for (pane, name) in pending {
             // Given another measurement meanwhile: the pane's choice now.
             if self.layout.view(pane).is_none_or(|v| v.meas.is_some()) {
@@ -49,7 +49,7 @@ impl AppState {
                 // again), or none made yet: it comes back. One the daemon never listed is
                 // not coming: the pane's usual choice is it, and nothing is saved for it.
                 if self.meas_seen.contains(&name) || self.measurements().is_empty() {
-                    self.pending_pane_meas.insert(pane, name);
+                    self.pending.pane_meas.insert(pane, name);
                 }
                 continue;
             };
@@ -92,7 +92,7 @@ impl AppState {
                 .into_iter()
                 .filter_map(|id| {
                     let v = self.layout.view(id)?;
-                    let measurement = match (self.pending_pane_meas.get(&id), self.daemon()) {
+                    let measurement = match (self.pending.pane_meas.get(&id), self.daemon()) {
                         (Some(n), _) => Some(n.clone()),
                         (None, None) => remembered(id),
                         // A pane following the selection keeps following it: what it
@@ -110,7 +110,7 @@ impl AppState {
                 })
                 .collect(),
         });
-        let hidden = self.remembered_names(&self.hidden_meas, &self.pending_hidden);
+        let hidden = self.remembered_names(&self.hidden_meas, &self.pending.hidden);
         crate::prefs::LayoutPrefs {
             panes,
             maximized: self.layout.maximized,
@@ -162,7 +162,7 @@ impl AppState {
     /// name no measurement has waits as a pane's remembered measurement does: while the
     /// daemon lists none, or once listed (it comes back with a session reopening).
     pub(super) fn restore_meas_choices(&mut self) {
-        if self.daemon().is_none() || self.pending_hidden.is_empty() {
+        if self.daemon().is_none() || self.pending.hidden.is_empty() {
             return;
         }
         let ms: Vec<(MeasId, String)> = self
@@ -184,7 +184,7 @@ impl AppState {
                 }
             });
         };
-        resolve(&mut self.pending_hidden, &mut self.hidden_meas);
+        resolve(&mut self.pending.hidden, &mut self.hidden_meas);
     }
 
     /// Saves the layout (with each pane's level axes), the IR axes and the legend with the
@@ -272,7 +272,7 @@ impl AppState {
     pub fn set_prefs(&mut self, prefs: UiPrefs) {
         self.view.spl.layout = prefs.leq;
         let l = &prefs.layout;
-        self.pending_pane_meas.clear();
+        self.pending.pane_meas.clear();
         self.pane_levels.clear();
         self.level_set.clear();
         self.spectrum_hold.clear();
@@ -298,7 +298,7 @@ impl AppState {
                     if let Some(n) = &v.measurement
                         && self.layout.views.contains_key(&v.id)
                     {
-                        self.pending_pane_meas.insert(v.id, n.clone());
+                        self.pending.pane_meas.insert(v.id, n.clone());
                     }
                 }
                 self.pane_auto = false;
@@ -317,7 +317,7 @@ impl AppState {
         prefs.legend.apply(&mut self.view.tf.legend);
         self.view.unresolved = prefs.resolution_marker;
         self.hidden_meas.clear();
-        self.pending_hidden = l.hidden.clone();
+        self.pending.hidden = l.hidden.clone();
         self.prefs = prefs;
         self.restore_meas_choices();
     }

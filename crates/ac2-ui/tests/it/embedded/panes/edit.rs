@@ -174,6 +174,7 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     assert!(fit.is_valid() && fit != r, "{fit:?}");
     assert!(
         d.st.toasts
+            .list
             .iter()
             .any(|t| t.text.starts_with("Spectrum / RTA: level"))
     );
@@ -500,6 +501,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     assert!(!matches!(d.st.overlay, Overlay::Prompt(_)));
     assert!(
         d.st.toasts
+            .list
             .iter()
             .any(|t| t.severity != Severity::Info && t.text.contains("select"))
     );
@@ -519,6 +521,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     let file = dir.path().join(format!("{name}.csv"));
     d.until("the export written", |s| {
         s.toasts
+            .list
             .iter()
             .any(|t| t.severity == Severity::Info && t.text.contains("exported to"))
     })?;
@@ -539,6 +542,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     let named = dir.path().join("front fill.csv");
     d.until("the second export written", |s| {
         s.toasts
+            .list
             .iter()
             .any(|t| t.text.contains("front fill.csv") && t.text.contains("bytes"))
     })?;
@@ -549,7 +553,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     retype(&mut d, "rel.csv");
     d.key("Enter");
     d.until("the relative export written", |s| {
-        s.toasts.iter().any(|t| t.text.contains("rel.csv"))
+        s.toasts.list.iter().any(|t| t.text.contains("rel.csv"))
     })?;
     assert_eq!(std::fs::read_to_string(dir.path().join("rel.csv"))?, csv);
 
@@ -558,7 +562,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     retype(&mut d, &dir.path().join("gone/x.csv").display().to_string());
     d.key("Enter");
     d.until("the write error", |s| {
-        s.toasts.iter().any(|t| {
+        s.toasts.list.iter().any(|t| {
             t.severity != Severity::Info
                 && t.text.contains("cannot write")
                 && t.text.contains("gone")

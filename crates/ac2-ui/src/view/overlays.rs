@@ -566,7 +566,7 @@ const TOAST_BOTTOM_RESERVED: f32 = super::panes::HINT_H + 8.0;
 fn toasts(app: &mut App, ctx: &egui::Context, top: f32) {
     let mut held = false;
     let mut dismiss = None;
-    if !app.state.toasts.is_empty() {
+    if !app.state.toasts.list.is_empty() {
         let theme = app.theme();
         let screen = ctx.content_rect();
         let font = egui::FontId::proportional(theme.font_size + 1.0);
@@ -584,11 +584,17 @@ fn toasts(app: &mut App, ctx: &egui::Context, top: f32) {
             top - screen.min.y,
             TOAST_BOTTOM_RESERVED,
         );
-        let texts: Vec<&str> = app.state.toasts.iter().map(|t| t.text.as_str()).collect();
+        let texts: Vec<&str> = app
+            .state
+            .toasts
+            .list
+            .iter()
+            .map(|t| t.text.as_str())
+            .collect();
         let boxes = ac2_scene::toast::stack(&texts, area, line_h, &measure);
         let n = boxes.len();
         for (k, b) in boxes.into_iter().enumerate() {
-            let t = &app.state.toasts[b.index];
+            let t = &app.state.toasts.list[b.index];
             let c = ac2_scene::toast::colors(t.severity, &theme);
             let min = screen.min + egui::vec2(b.rect.x, b.rect.y);
             let size = egui::vec2(b.rect.w, b.rect.h);
@@ -638,7 +644,7 @@ fn toasts(app: &mut App, ctx: &egui::Context, top: f32) {
     }
     if let Some(id) = dismiss {
         app.dispatch(Msg::DismissToast(id));
-    } else if held != app.state.toasts_held {
+    } else if held != app.state.toasts.held {
         app.dispatch(Msg::ToastsHeld(held));
     }
 }

@@ -257,7 +257,7 @@ impl AppState {
         if !self.layout.stack(p, &views) {
             return false;
         }
-        self.pending_pane_meas.remove(&p);
+        self.pending.pane_meas.remove(&p);
         self.focus_pane(p);
         true
     }
@@ -348,12 +348,12 @@ impl AppState {
         if let Some(v) = self.layout.view_mut(p) {
             v.meas = v.meas.or(shown);
         }
-        let waiting = self.pending_pane_meas.get(&p).cloned();
+        let waiting = self.pending.pane_meas.get(&p).cloned();
         self.layout.maximized = false;
         let new = self.layout.split_pane(p, axis, side);
         self.copy_levels(p, new);
         if let Some(n) = waiting {
-            self.pending_pane_meas.insert(new, n);
+            self.pending.pane_meas.insert(new, n);
         }
         Some(new)
     }
@@ -390,7 +390,8 @@ impl AppState {
         if matches!(self.overlay, Overlay::PaneMenu(m) if m.pane == gone) {
             self.overlay = Overlay::None;
         }
-        self.pending_pane_meas
+        self.pending
+            .pane_meas
             .retain(|id, _| self.layout.views.contains_key(id));
     }
 
@@ -533,7 +534,7 @@ impl AppState {
             }
             v.kind = kind;
         }
-        self.pending_pane_meas.remove(&id);
+        self.pending.pane_meas.remove(&id);
         // The history goes with the last spectrograph shown.
         if !self.spectrograph_shown() {
             self.spectrographs.clear();

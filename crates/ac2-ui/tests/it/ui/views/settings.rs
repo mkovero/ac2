@@ -51,7 +51,7 @@ fn settings_pages() {
             .is_some_and(|s| s.ceiling.confirm.is_some())
     });
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "settings_max_level_raise");
     h.key_press(Key::Escape);
@@ -79,7 +79,7 @@ fn settings_pages() {
                     && (page == ac2_ui::settings::Page::Display || s.connection.server.is_some())
             })
         });
-        h.state_mut().state.toasts.clear();
+        h.state_mut().state.toasts.list.clear();
         // The connection's id is the daemon's per-connection one: pinned for the picture.
         let pin = |a: &mut App| {
             if let Some(m) = &a.state.mirror {
@@ -162,7 +162,7 @@ fn rig_monitor_views() {
         a.state.tree_rows().first().map(|r| r.name.as_str()) == Some("Rig")
     });
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "tree_rig_group");
     h.state_mut().dispatch(ac2_ui::state::Msg::OpenRig);
@@ -172,7 +172,7 @@ fn rig_monitor_views() {
             .settings()
             .is_some_and(|s| s.page == ac2_ui::settings::Page::Rig)
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "settings_rig");
 }
@@ -348,7 +348,7 @@ fn spectrum_peak_tracking() {
     // The tone is in the 996 Hz bin (11.7 Hz bins), its neighbours equal: no shift.
     assert!(list.starts_with("1  996 Hz  −32.0 dBFS (tone)"), "{list}");
     assert!(s.peaks[0].rows[0].mark.is_some());
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "spectrum_peak_tracking");
     h.key_press(Key::T);
     h.key_press(Key::T);
@@ -360,6 +360,6 @@ fn spectrum_peak_tracking() {
     assert_eq!(s.peak_list, None);
     assert!(s.cursor.is_none());
     assert!(s.peaks[0].rows[0].mark.is_some(), "the box stays");
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "spectrum_peak_tracking_bare");
 }

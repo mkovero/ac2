@@ -32,6 +32,18 @@ use ac2_proto::model::layout as wire;
 
 use super::*;
 
+/// The `meas.layout` calls in flight and the edits waiting behind them.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LayoutQueue {
+    /// `meas.layout` calls not answered yet, oldest first.
+    pub(super) calls: std::collections::VecDeque<LayoutCall>,
+    /// Edits waiting for the `meas.layout` call in flight for their measurement: the newest.
+    pub(super) queued: BTreeMap<MeasId, PaneLayout>,
+    /// A split dragged: the measurement whose layout takes it, and when (`now_s`) the drag
+    /// counts as done.
+    pub(super) due: Option<(MeasId, f64)>,
+}
+
 /// A `meas.layout` call not answered yet.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LayoutCall {
@@ -99,11 +111,13 @@ impl AppState {
     /// The layout of measurement `id` as this app last has it: the edit waiting to be sent,
     /// else the last one sent that the daemon's copy has not shown yet, else that copy.
     fn own_layout(&self, id: MeasId) -> Option<PaneLayout> {
-        self.layout_queued
+        self.layout_queue
+            .queued
             .get(&id)
             .cloned()
             .or_else(|| {
-                self.layout_calls
+                self.layout_queue
+                    .calls
                     .iter()
                     .rev()
                     .find(|c| c.meas == id && !c.applied)
@@ -152,7 +166,7 @@ impl AppState {
         if !conn && self.pane_layout() != before.panes {
             if drag {
                 self.history.stored.insert(owner);
-                self.layout_due = Some((owner, self.now_s + DRAG_REST_S));
+                self.layout_queue.due = Some((owner, self.now_s + DRAG_REST_S));
             } else {
                 self.store_layout(owner, out);
             }
@@ -164,30 +178,34 @@ impl AppState {
         }
         // This app's own, come back: on screen already, or older than the screen.
         if let Some(i) = self
-            .layout_calls
+            .layout_queue
+            .calls
             .iter()
             .position(|c| c.meas == owner && Some(&c.layout) == theirs.as_ref())
         {
-            for c in self.layout_calls.iter_mut().take(i + 1) {
+            for c in self.layout_queue.calls.iter_mut().take(i + 1) {
                 if c.meas == owner {
                     c.applied = true;
                 }
             }
-            self.layout_calls.retain(|c| !(c.answered && c.applied));
+            self.layout_queue
+                .calls
+                .retain(|c| !(c.answered && c.applied));
             return;
         }
         // While a call of this app's is unanswered, the daemon's copy is older than the
         // screen: the last call made wins.
-        if self.layout_queued.contains_key(&owner)
+        if self.layout_queue.queued.contains_key(&owner)
             || self
-                .layout_calls
+                .layout_queue
+                .calls
                 .iter()
                 .any(|c| c.meas == owner && !c.answered)
         {
             return;
         }
         // Another client's edit.
-        self.layout_calls.retain(|c| c.meas != owner);
+        self.layout_queue.calls.retain(|c| c.meas != owner);
         if let Some(l) = theirs.filter(|l| *l != self.pane_layout()) {
             self.show_layout(&l);
         }
@@ -199,7 +217,8 @@ impl AppState {
     fn settle_layout_calls(&mut self) {
         let own = self.own_panes;
         let shown: Vec<(MeasId, usize)> = self
-            .layout_calls
+            .layout_queue
+            .calls
             .iter()
             .enumerate()
             .filter(|(_, c)| Some(c.meas) != own && !c.applied)
@@ -210,19 +229,22 @@ impl AppState {
             return;
         }
         for (meas, i) in shown {
-            for c in self.layout_calls.iter_mut().take(i + 1) {
+            for c in self.layout_queue.calls.iter_mut().take(i + 1) {
                 if c.meas == meas {
                     c.applied = true;
                 }
             }
         }
-        self.layout_calls.retain(|c| !(c.answered && c.applied));
+        self.layout_queue
+            .calls
+            .retain(|c| !(c.answered && c.applied));
     }
 
     /// A dragged split resting long enough: sent.
     pub(super) fn layout_drag_due(&mut self, out: &mut Vec<Request>) {
         if self
-            .layout_due
+            .layout_queue
+            .due
             .as_ref()
             .is_some_and(|(_, at)| self.now_s >= *at)
         {
@@ -232,7 +254,7 @@ impl AppState {
 
     /// A dragged split sent now (before anything else changes the panes).
     pub(super) fn flush_layout_drag(&mut self, out: &mut Vec<Request>) {
-        if let Some((id, _)) = self.layout_due.take() {
+        if let Some((id, _)) = self.layout_queue.due.take() {
             self.store_layout(id, out);
         }
     }
@@ -251,11 +273,12 @@ impl AppState {
         self.history.stored.insert(id);
         let l = self.pane_layout();
         if self
-            .layout_calls
+            .layout_queue
+            .calls
             .iter()
             .any(|c| c.meas == id && !c.answered)
         {
-            self.layout_queued.insert(id, l);
+            self.layout_queue.queued.insert(id, l);
             return;
         }
         self.send_layout(id, l, out);
@@ -273,7 +296,7 @@ impl AppState {
         let Some(m) = self.meas(id) else {
             return;
         };
-        let last_sent = self.layout_calls.iter().rev().find(|c| c.meas == id);
+        let last_sent = self.layout_queue.calls.iter().rev().find(|c| c.meas == id);
         if last_sent.map_or(m.layout.as_ref(), |c| Some(&c.layout)) == Some(&l) {
             return;
         }
@@ -283,7 +306,7 @@ impl AppState {
             m.config.name,
             ac2_scene::format::own_panes(l.panes().len())
         );
-        self.layout_calls.push_back(LayoutCall {
+        self.layout_queue.calls.push_back(LayoutCall {
             meas: id,
             what: what.clone(),
             first,
@@ -312,31 +335,32 @@ impl AppState {
         out: &mut Vec<Request>,
     ) -> bool {
         let Some(i) = self
-            .layout_calls
+            .layout_queue
+            .calls
             .iter()
             .position(|c| c.what == what && !c.answered)
         else {
             return false;
         };
-        let meas = self.layout_calls[i].meas;
+        let meas = self.layout_queue.calls[i].meas;
         match result {
             Ok(()) => {
-                let c = &mut self.layout_calls[i];
+                let c = &mut self.layout_queue.calls[i];
                 c.answered = true;
                 let first = c.first;
                 if c.applied {
-                    self.layout_calls.remove(i);
+                    self.layout_queue.calls.remove(i);
                 }
                 if first {
                     self.toast(what);
                 }
             }
             Err(e) => {
-                self.layout_calls.remove(i);
+                self.layout_queue.calls.remove(i);
                 self.fault(format!("{what}: {e}"));
             }
         }
-        if let Some(l) = self.layout_queued.remove(&meas) {
+        if let Some(l) = self.layout_queue.queued.remove(&meas) {
             self.send_layout(meas, l, out);
         }
         true
@@ -344,9 +368,9 @@ impl AppState {
 
     /// The link went down or came up: no answer to an earlier call comes.
     pub(super) fn forget_layout_calls(&mut self) {
-        self.layout_calls.clear();
-        self.layout_queued.clear();
-        self.layout_due = None;
+        self.layout_queue.calls.clear();
+        self.layout_queue.queued.clear();
+        self.layout_queue.due = None;
     }
 
     /// Layout `l` on screen, each pane on the measurement it was picked for (one gone since,
@@ -416,7 +440,7 @@ impl AppState {
             self.set_operator_levels(id, &w);
         }
         self.pane_auto = false;
-        self.pending_pane_meas.clear();
+        self.pending.pane_meas.clear();
         if matches!(self.overlay, Overlay::PaneMenu(m) if !self.layout.views.contains_key(&m.pane))
         {
             self.overlay = Overlay::None;

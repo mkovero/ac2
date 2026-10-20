@@ -241,6 +241,16 @@ pub struct NewLogPrompt {
 /// within 5 s).
 pub const PREVIEW_RENEW_S: f64 = 2.0;
 
+/// The notifications shown in the window's corner.
+#[derive(Clone, Debug, Default)]
+pub struct Toasts {
+    /// Shown notifications, oldest first.
+    pub list: Vec<Toast>,
+    /// The pointer is over the toasts: none expires while the operator reads them.
+    pub held: bool,
+    pub(super) seq: u64,
+}
+
 /// A notification in the window's corner ([`ac2_scene::toast`] lays it out and says how
 /// long it stays).
 #[derive(Clone, Debug, PartialEq)]

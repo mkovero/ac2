@@ -93,6 +93,7 @@ fn m_averages_the_shown_stored_traces() {
     assert!(t.key("M").is_empty());
     assert!(
         t.st.toasts
+            .list
             .last()
             .is_some_and(|x| x.severity == Severity::Warning)
     );

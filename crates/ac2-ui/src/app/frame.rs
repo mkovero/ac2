@@ -185,6 +185,7 @@ impl eframe::App for App {
         } else if let Some(next) = self
             .state
             .toasts
+            .list
             .iter()
             .map(|t| t.until_s)
             .min_by(f64::total_cmp)

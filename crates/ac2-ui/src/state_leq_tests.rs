@@ -302,7 +302,7 @@ fn leq_history_survives_a_resync() {
     t.conn(mirror(with_spl()));
     t.conn(leq_data(4, 103, 99.2, judged));
     let cfg = LeqConfig::default_windows();
-    let h = &t.st.leq_history[&MeasId(4)].1;
+    let h = &t.st.leq.history[&MeasId(4)].1;
     let p = h.points(&cfg.windows[0]).expect("series");
     assert!(p.len() >= 3, "kept through the resync: {} points", p.len());
     assert_eq!(p[0].t, 100.0);
@@ -343,17 +343,17 @@ fn leq_history_and_alarm_toasts() {
         },
     }];
     t.conn(mirror(s.clone()));
-    let toasts = t.st.toasts.len();
+    let toasts = t.st.toasts.list.len();
     let judged = LeqFlags::LIMIT.with(LeqFlags::JUDGED);
     t.conn(leq_data(1, 100, 98.0, judged));
     t.conn(leq_data(1, 100, 98.0, judged));
     t.conn(leq_data(2, 101, 99.5, judged.with(LeqFlags::OVER)));
     let cfg = LeqConfig::default_windows();
-    let h = &t.st.leq_history[&MeasId(4)].1;
+    let h = &t.st.leq.history[&MeasId(4)].1;
     let p = h.points(&cfg.windows[0]).expect("series");
     assert_eq!(p.len(), 2);
     assert!(p[1].over && !p[0].over);
-    assert_eq!(t.st.toasts.len(), toasts, "old alarms are history");
+    assert_eq!(t.st.toasts.list.len(), toasts, "old alarms are history");
     // Over, then recovered: one toast each, the over one an error.
     let over = LeqAlarm {
         at: WallNs(10),
@@ -367,11 +367,16 @@ fn leq_history_and_alarm_toasts() {
     );
     assert!(
         t.st.toasts
+            .list
             .last()
             .is_some_and(|x| x.severity == Severity::Fault)
     );
     t.conn(mirror(s.clone()));
-    assert_eq!(t.st.toasts.len(), toasts + 1, "the same alarm toasts once");
+    assert_eq!(
+        t.st.toasts.list.len(),
+        toasts + 1,
+        "the same alarm toasts once"
+    );
     s.spl_logs[0].alarms.push(LeqAlarm {
         at: WallNs(20),
         kind: LeqAlarmKind::Recovered,
@@ -385,14 +390,18 @@ fn leq_history_and_alarm_toasts() {
     );
     // Warning toasts off: the alarms go to the log only, the over one still an error.
     t.st.prefs.warning_toasts = false;
-    let toasts = t.st.toasts.len();
+    let toasts = t.st.toasts.list.len();
     s.spl_logs[0].alarms.push(LeqAlarm {
         at: WallNs(30),
         level: DbSpl(99.8),
         ..old
     });
     t.conn(mirror(s));
-    assert_eq!(t.st.toasts.len(), toasts, "a muted alarm does not pop up");
+    assert_eq!(
+        t.st.toasts.list.len(),
+        toasts,
+        "a muted alarm does not pop up"
+    );
     let n = t.st.notices.back().expect("logged");
     assert_eq!(
         n.text,
@@ -447,13 +456,13 @@ fn a_restarted_app_rebuilds_the_history_from_the_log() {
         ask: ask + 7,
         result: Ok(Box::new(b.clone())),
     });
-    assert!(!t.st.leq_history.contains_key(&meas), "stale: ignored");
+    assert!(!t.st.leq.history.contains_key(&meas), "stale: ignored");
     t.conn(ConnEvent::LeqBackfill {
         meas,
         ask,
         result: Ok(Box::new(b)),
     });
-    let h = &t.st.leq_history[&meas].1;
+    let h = &t.st.leq.history[&meas].1;
     let p = h.points(&cfg.windows[0]).expect("series");
     assert_eq!(p.len(), 600);
     assert_eq!(p[0].t, 401.0);
@@ -463,7 +472,7 @@ fn a_restarted_app_rebuilds_the_history_from_the_log() {
     let flags = ac2_proto::frame::LeqFlags::LIMIT;
     t.conn(leq_data(601, 1000, 80.0, flags));
     t.conn(leq_data(602, 1001, 80.0, flags));
-    let p = t.st.leq_history[&meas]
+    let p = t.st.leq.history[&meas]
         .1
         .points(&cfg.windows[0])
         .expect("series");
@@ -498,12 +507,12 @@ fn a_new_log_or_new_windows_rebuild_the_history() {
     t.conn(mirror(s.clone()));
     t.conn(leq_data(600, 1000, 80.0, flags));
     t.conn(leq_data(601, 1001, 80.0, flags));
-    assert!(!t.st.leq_history[&MeasId(4)].1.is_empty());
+    assert!(!t.st.leq.history[&MeasId(4)].1.is_empty());
     // Emptied by a new log.
     s.spl_logs[0].started_at = None;
     let r = t.conn(mirror(s.clone()));
     assert!(backfill_asked(&r).is_some());
-    assert!(t.st.leq_history[&MeasId(4)].1.is_empty(), "cleared");
+    assert!(t.st.leq.history[&MeasId(4)].1.is_empty(), "cleared");
     // Its first rows: the frames say so, nothing more to ask.
     s.spl_logs[0].started_at = Some(WallNs(1_002_000_000_000));
     assert_eq!(backfill_asked(&t.conn(mirror(s.clone()))), None);
@@ -515,7 +524,7 @@ fn a_new_log_or_new_windows_rebuild_the_history() {
     // Another new log seen only in the frames (the entity's moment missed): fewer rows.
     let r = t.conn(leq_data_logged(604, 3, 1005, 60.0, flags));
     assert!(backfill_asked(&r).is_some());
-    let h = &t.st.leq_history[&MeasId(4)].1;
+    let h = &t.st.leq.history[&MeasId(4)].1;
     let p = h
         .points(&LeqConfig::default_windows().windows[0])
         .expect("series");

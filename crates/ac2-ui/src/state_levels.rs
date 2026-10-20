@@ -370,7 +370,7 @@ impl AppState {
         for pane in self.layout.root.leaves() {
             // A pane waiting for its remembered measurement shows a stand-in.
             if self.layout.kind(pane) != PaneKind::Spectrum
-                || self.pending_pane_meas.contains_key(&pane)
+                || self.pending.pane_meas.contains_key(&pane)
             {
                 continue;
             }

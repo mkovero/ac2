@@ -2,6 +2,23 @@
 
 use super::*;
 
+/// What waits for the mirror to list it: this client's creations, and choices remembered by
+/// measurement name from the app's last run.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Pending {
+    /// A measurement this client just created: selected once the mirror lists it.
+    pub(super) select: Option<MeasId>,
+    /// That measurement, created: stacked once the mirror lists it.
+    pub(super) stack: Option<MeasId>,
+    /// The measurement each pane showed when the app last ran, by name, until the daemon's
+    /// state is known.
+    pub(super) pane_meas: BTreeMap<PaneId, String>,
+    /// Hidden measurements by name, waiting for the daemon to list one of that name: read
+    /// from `ui.toml`, or a hidden one the daemon took away (a session reopening, a daemon
+    /// restarting renumbers them).
+    pub(super) hidden: BTreeSet<String>,
+}
+
 impl AppState {
     pub(super) fn conn_event(&mut self, e: ConnEvent, out: &mut Vec<Request>) {
         match e {
@@ -24,7 +41,7 @@ impl AppState {
                 self.stimulus.phase = StimPhase::Idle;
                 self.stimulus.arm_after_stop = false;
                 // Nor has it rebuilt any history: the log may have moved on meanwhile.
-                self.leq_logs.clear();
+                self.leq.logs.clear();
                 self.forget_layout_calls();
             }
             ConnEvent::Failed { target, error, .. } => {
@@ -34,8 +51,8 @@ impl AppState {
                 let names = self.meas_names();
                 self.park_gone_meas(&names, |_| true);
                 self.forget_layout_calls();
-                self.pending_select = None;
-                self.pending_stack = None;
+                self.pending.select = None;
+                self.pending.stack = None;
                 self.mirror = None;
                 self.data = None;
                 self.stimulus.phase = StimPhase::Idle;
@@ -83,20 +100,20 @@ impl AppState {
                     );
                 }
                 let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
-                if let Some(p) = self.pending_select
+                if let Some(p) = self.pending.select
                     && ids.contains(&p)
                 {
                     self.selected = Some(p);
                     self.chosen = Some(p);
-                    self.pending_select = None;
+                    self.pending.select = None;
                 }
-                if let Some(p) = self.pending_stack
+                if let Some(p) = self.pending.stack
                     && ids.contains(&p)
                 {
-                    self.pending_stack = None;
+                    self.pending.stack = None;
                     self.stack_created(p);
                 }
-                let waiting = self.pending_select.is_some() && self.pending_select == self.selected;
+                let waiting = self.pending.select.is_some() && self.pending.select == self.selected;
                 // A measurement this app made, selected before the daemon lists it, stays.
                 let keep = if waiting { self.selected } else { None };
                 self.park_gone_meas(&names, |id| {
@@ -243,13 +260,13 @@ impl AppState {
                 self.selected_live = None;
                 self.collapsed.remove(&TraceOwner::Meas { meas: m.id });
                 self.tree_reveal = true;
-                self.pending_select = Some(m.id);
+                self.pending.select = Some(m.id);
                 // Made here, by the operator: as if its row were chosen, the panes on screen
                 // are its own from now (it has none yet to bring).
                 self.own_panes = Some(m.id);
                 if self.stack_on_create.as_ref() == Some(&m.config.name) {
                     self.stack_on_create = None;
-                    self.pending_stack = Some(m.id);
+                    self.pending.stack = Some(m.id);
                 }
             }
             ConnEvent::Data(d) => {
@@ -634,7 +651,7 @@ impl AppState {
             if let Some(id) = v.meas.filter(|id| gone(*id)) {
                 v.meas = None;
                 if let Some(n) = names.get(&id) {
-                    self.pending_pane_meas.insert(*pane, n.clone());
+                    self.pending.pane_meas.insert(*pane, n.clone());
                 }
             }
         }
@@ -646,7 +663,7 @@ impl AppState {
             .filter(|m| !gone(m.id))
             .map(|m| m.config.name.clone())
             .collect();
-        let pending = &mut self.pending_hidden;
+        let pending = &mut self.pending.hidden;
         self.hidden_meas.retain(|id| {
             if !gone(*id) {
                 return true;

@@ -70,7 +70,7 @@ impl AppState {
             .map_or_else(CalView::default, |s| CalView::new(s, on));
         let leq = self.kind_meas(PaneKind::Spl).cloned().and_then(|m| {
             let calibrated = self.leq_calibrated(m.id);
-            LeqDialog::new(&m, calibrated, self.leq_cues_shown)
+            LeqDialog::new(&m, calibrated, self.leq.cues_shown)
         });
         let mut settings = Settings::new(page, session, cal, leq);
         settings.rig = RigPage::new(self.daemon().map(|s| &s.rig));
@@ -173,7 +173,7 @@ impl AppState {
     /// meter's current configuration. False when no such Apply is waiting, or another
     /// window is up.
     fn leq_conflict(&mut self, what: &str, out: &mut Vec<Request>) -> bool {
-        let Some((_, d)) = self.leq_sent.take_if(|(w, _)| w == what) else {
+        let Some((_, d)) = self.leq.sent.take_if(|(w, _)| w == what) else {
             return false;
         };
         let Some(m) = self.meas(d.meas).cloned() else {

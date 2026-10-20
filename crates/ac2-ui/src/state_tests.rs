@@ -303,7 +303,7 @@ impl T {
     }
 
     fn last_toast(&self) -> &str {
-        self.st.toasts.last().map_or("", |t| t.text.as_str())
+        self.st.toasts.list.last().map_or("", |t| t.text.as_str())
     }
 
     /// The daemon's state changed by `f`, as the next mirror shows it.

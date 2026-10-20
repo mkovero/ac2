@@ -2,6 +2,39 @@
 
 use super::*;
 
+/// The SPL meters' Leq history, history strips, logs and alarms as this client follows them.
+#[derive(Clone, Debug)]
+pub struct LeqUi {
+    /// Each SPL meter's Leq windows over time, from the `leq` frames received (with the
+    /// last `seq` folded in) over the history rebuilt from the meter's log.
+    pub history: BTreeMap<MeasId, (u64, ac2_scene::leq::LeqHistory)>,
+    /// The span (daemon wall clock, s) each SPL pane's history strip looks back at; a
+    /// pane not here follows live.
+    pub strips: BTreeMap<PaneId, (f64, f64)>,
+    /// The pointer over a history strip: its pane and time (s).
+    pub cursor: Option<(PaneId, f64)>,
+    /// Spans of each meter's log fetched for strips looking back, oldest first.
+    pub spans: BTreeMap<MeasId, Vec<leq_strip::LeqSpan>>,
+    /// The span fetch under way.
+    pub(super) span_pending: Option<leq_strip::SpanAsk>,
+    /// Number of the newest span fetch.
+    pub(super) span_ask: u64,
+    /// Width of the strip last moved by the mouse, px: the resolution fetched at.
+    pub strip_px: f32,
+    /// Which log and windows each SPL meter's history was last rebuilt for.
+    pub(super) logs: BTreeMap<MeasId, LeqLogSeen>,
+    /// Number of the newest history rebuild asked for.
+    pub(super) backfill_ask: u64,
+    /// The newest over / recovered alarm of each meter already shown (`None`: none yet).
+    pub(super) alarms_seen: BTreeMap<MeasId, Option<ac2_proto::model::LeqAlarm>>,
+    /// The SPL / Leq page's cue fold as the operator last set it, for the app's run: Apply,
+    /// closing and another meter keep it (a meter with a cue set opens shown anyway).
+    pub(super) cues_shown: bool,
+    /// The SPL / Leq page last applied, with what its call is named: a conflict brings it
+    /// back with its edits.
+    pub(super) sent: Option<(String, Box<LeqDialog>)>,
+}
+
 impl AppState {
     /// F / Z in the SPL pane (or the palette's direct choices): the meter the pane shows
     /// takes the next (or the named) time or frequency weighting, in place — its Leq
@@ -166,7 +199,7 @@ impl AppState {
             Ok(cmd) => {
                 let what = format!("{}: Leq windows set", d.name);
                 d.notice = None;
-                self.leq_sent = Some((what.clone(), Box::new(d.clone())));
+                self.leq.sent = Some((what.clone(), Box::new(d.clone())));
                 self.overlay = Overlay::None;
                 self.focus_kind(PaneKind::Spl);
                 let m = self.modes_mut();
@@ -225,7 +258,7 @@ impl AppState {
                 _ => None,
             })
             .collect();
-        self.leq_history.retain(|k, _| cfgs.contains_key(k));
+        self.leq.history.retain(|k, _| cfgs.contains_key(k));
         for tf in d.latest.frames.values() {
             let FrameData::Leq(f) = &tf.frame.data else {
                 continue;
@@ -234,7 +267,7 @@ impl AppState {
                 continue;
             };
             let seq = tf.frame.stamp.seq;
-            let e = self.leq_history.entry(f.meas).or_default();
+            let e = self.leq.history.entry(f.meas).or_default();
             if seq > e.0 {
                 e.0 = seq;
                 e.1.push(cfg, f, tf.frame.stamp.capture_wall_ns.0 as f64 / 1e9);
@@ -250,7 +283,7 @@ impl AppState {
         use ac2_proto::FrameData;
         let Some(st) = self.daemon() else {
             // Resyncing: the daemon may have restarted with other logs; ask again once synced.
-            self.leq_logs.clear();
+            self.leq.logs.clear();
             return;
         };
         let mut logged: BTreeMap<MeasId, u64> = BTreeMap::new();
@@ -276,27 +309,28 @@ impl AppState {
                 _ => None,
             })
             .collect();
-        self.leq_logs
+        self.leq
+            .logs
             .retain(|k, _| meters.iter().any(|(id, ..)| id == k));
         for (meas, config, started) in meters {
             let logged = logged.get(&meas).copied();
-            let seen = self.leq_logs.get(&meas);
+            let seen = self.leq.logs.get(&meas);
             let new_log = seen.is_some_and(|s| {
                 logged.is_some_and(|l| l < s.logged) || (s.started && started == Some(false))
             });
-            if new_log && let Some((_, h)) = self.leq_history.get_mut(&meas) {
+            if new_log && let Some((_, h)) = self.leq.history.get_mut(&meas) {
                 h.clear();
             }
-            match self.leq_logs.get_mut(&meas) {
+            match self.leq.logs.get_mut(&meas) {
                 Some(s) if !new_log && s.config == config => {
                     s.logged = logged.unwrap_or(s.logged).max(s.logged);
                     s.started = started.unwrap_or(s.started);
                 }
                 _ => {
                     self.forget_leq_spans(meas);
-                    self.leq_backfill_ask += 1;
-                    let ask = self.leq_backfill_ask;
-                    self.leq_logs.insert(
+                    self.leq.backfill_ask += 1;
+                    let ask = self.leq.backfill_ask;
+                    self.leq.logs.insert(
                         meas,
                         LeqLogSeen {
                             config,
@@ -319,11 +353,11 @@ impl AppState {
         ask: u64,
         result: Result<Box<ac2_proto::model::SplHistory>, String>,
     ) {
-        if self.leq_logs.get(&meas).is_none_or(|s| s.ask != ask) {
+        if self.leq.logs.get(&meas).is_none_or(|s| s.ask != ask) {
             return;
         }
         match result {
-            Ok(h) => self.leq_history.entry(meas).or_default().1.backfill(&h),
+            Ok(h) => self.leq.history.entry(meas).or_default().1.backfill(&h),
             Err(e) => {
                 let name = self
                     .measurements()
@@ -351,7 +385,7 @@ impl AppState {
         let mut seen = BTreeMap::new();
         for l in &st.spl_logs {
             let newest = l.alarms.last().copied();
-            match self.leq_alarms_seen.get(&l.meas) {
+            match self.leq.alarms_seen.get(&l.meas) {
                 None => {}
                 Some(prev) => {
                     let from = match prev {
@@ -364,7 +398,7 @@ impl AppState {
             }
             seen.insert(l.meas, newest);
         }
-        self.leq_alarms_seen = seen;
+        self.leq.alarms_seen = seen;
         for (name, a) in news {
             let (over, text) = ac2_scene::leq::alarm_text(&name, &a);
             self.leq_alarm(over, text);
