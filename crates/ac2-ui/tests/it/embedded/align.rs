@@ -5,7 +5,7 @@ use ac2_proto::model::{MathExpr, MeasKind};
 use ac2_scene::theme::Theme;
 use ac2_ui::embedded::{EmbeddedBackend, Setup, start_embedded_with};
 use ac2_ui::forms::{FieldId, FormKind};
-use ac2_ui::state::{AppState, Overlay, PaneKind, TransferView};
+use ac2_ui::state::{AppState, Overlay, PaneKind, StimPhase, TransferView};
 use std::time::Instant;
 
 /// The readout of the alignment view the focused pane shows.
@@ -22,9 +22,10 @@ fn readout(s: &AppState) -> Option<ac2_scene::align::Readout> {
 }
 
 /// From an empty daemon: a transfer measurement and its capture (Ctrl+1) are two curves of
-/// one path. Alt+M opens the math dialog on align with A the live curve, B the capture and
-/// the band prefilled where they are alike; Enter makes it, and it opens in a pane of its
-/// own showing the alignment view: no delay, normal polarity, the two adding fully.
+/// one path. With the stimulus playing again, Alt+M opens the math dialog on align with A
+/// the live curve, B the capture and the band prefilled where they are alike; Enter makes
+/// it, and it opens in a pane of its own showing the alignment view: no delay, normal
+/// polarity, the two adding fully.
 #[test]
 fn alignment_from_an_empty_daemon() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
@@ -39,6 +40,13 @@ fn alignment_from_an_empty_daemon() -> R {
     })?;
     d.until("the capture's curve", |s| !s.traces.is_empty())?;
     let panes = d.st.layout.views.len();
+    // A live operand under NO REFERENCE is left out of math (its held average is no longer
+    // what the system does), and `measure_from_empty` stopped the stimulus (its level is still
+    // set): the live curve needs it playing again for the alignment to have both operands.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
 
     d.key("Alt+M");
     let Overlay::Form(f) = &d.st.overlay else {
@@ -72,16 +80,20 @@ fn alignment_from_an_empty_daemon() -> R {
     );
     d.until("the alignment's fit", |s| readout(s).is_some_and(|r| r.fit))?;
     let r = readout(&d.st).ok_or("readout")?;
+    // One path twice: no delay, to the delay readout's last digit. The live curve keeps
+    // averaging fresh noise, so the fitted delay is a hair either side of zero and either
+    // curve may be the one named as delayed.
     assert!(
-        r.headline.starts_with("Reference → Room mic S1: delay "),
-        "{r:?}"
-    );
-    // One path twice: no delay, to the delay readout's last digit.
-    assert!(
-        r.headline.contains(": delay 0.00") && r.headline.contains(" ms · "),
+        [
+            "Reference → Room mic: delay 0.00",
+            "Reference → Room mic S1: delay 0.00"
+        ]
+        .iter()
+        .any(|h| r.headline.starts_with(h))
+            && r.headline.contains(" ms · "),
         "{r:?}"
     );
     assert!(r.headline.ends_with("polarity normal"), "{r:?}");
     assert!(r.lines[0].contains("summation"), "{r:?}");
-    Ok(())
+    d.stop()
 }
