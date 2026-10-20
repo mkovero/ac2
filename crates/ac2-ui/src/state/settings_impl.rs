@@ -442,6 +442,12 @@ impl AppState {
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
+            DisplayRow::CursorJump if d != 0 => {
+                let db = ac2_scene::cursor_jump::step_prominence(self.view.jump_prominence_db, d);
+                self.view.jump_prominence_db = db;
+                self.prefs.jump_prominence_db = db;
+                self.prefs_dirty = true;
+            }
             DisplayRow::LevelAxes if d == 0 => {
                 self.pane_levels.clear();
                 self.level_set.clear();

@@ -316,6 +316,7 @@ impl AppState {
         prefs.ir_levels.apply(&mut self.view);
         prefs.legend.apply(&mut self.view.tf.legend);
         self.view.unresolved = prefs.resolution_marker;
+        self.view.jump_prominence_db = prefs.jump_prominence_db;
         self.hidden_meas.clear();
         self.pending.hidden = l.hidden.clone();
         self.prefs = prefs;

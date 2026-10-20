@@ -287,6 +287,12 @@ commands! {
     Smooth12 => "smooth_12", "Smoothing 1/12 oct", [Transfer, Spectrum];
     Smooth6 => "smooth_6", "Smoothing 1/6 oct", [Transfer, Spectrum];
     Smooth3 => "smooth_3", "Smoothing 1/3 oct", [Transfer, Spectrum];
+    NextPeak => "next_peak", "Next peak", [Transfer, Spectrum];
+    PrevPeak => "prev_peak", "Previous peak", [Transfer, Spectrum];
+    NextNotch => "next_notch", "Next notch", [Transfer, Spectrum];
+    PrevNotch => "prev_notch", "Previous notch", [Transfer, Spectrum];
+    CursorMark => "cursor_mark", "Cursor mark", [Transfer, Spectrum];
+    ClearMark => "clear_mark", "Clear cursor mark", [Transfer, Spectrum];
 
     SpectrumStyle => "spectrum_style", "Spectrum style", [Spectrum];
     PeakHold => "peak_hold", "Peaks", [Spectrum];

@@ -111,6 +111,20 @@ fn spec_ease_round_trip() {
 }
 
 #[test]
+fn jump_prominence_round_trip() {
+    let mut p = UiPrefs::default();
+    assert_eq!(p.jump_prominence_db, 3.0);
+    assert!(!p.to_toml().contains("jump_prominence_db"));
+    p.jump_prominence_db = 6.0;
+    let text = p.to_toml();
+    assert!(text.contains("jump_prominence_db = 6.0"), "{text}");
+    assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+    // Nothing that cannot stand out reads back: the default instead.
+    let p = UiPrefs::from_toml("jump_prominence_db = -1.0\n").expect("prefs");
+    assert_eq!(p.jump_prominence_db, 3.0);
+}
+
+#[test]
 fn bar_ease_round_trip() {
     let mut p = UiPrefs::default();
     assert!(p.bar_ease);

@@ -70,6 +70,21 @@ pub fn spectrum(
     })
 }
 
+/// Where the cursor jumps in spectrum pane `pane` ([`ac2_scene::spectrum::jump`]): along
+/// the curve it draws as it draws it.
+pub fn spectrum_jump(
+    st: &AppState,
+    pane: PaneId,
+    shown: ac2_scene::axis::Range,
+    kind: ac2_scene::cursor_jump::Landmark,
+    step: ac2_scene::cursor_jump::Step,
+) -> Option<f64> {
+    let theme = st.scene_theme();
+    with_spectrum(st, pane, &theme, crate::view::now(), |traces, _, view| {
+        ac2_scene::spectrum::jump(traces, view, shown, kind, step)
+    })
+}
+
 /// The spectrum pane with the spectrograph of the pane's measurement under it.
 pub fn spectrograph(
     st: &AppState,

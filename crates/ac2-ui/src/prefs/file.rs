@@ -20,6 +20,9 @@ struct File {
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spec_ease: Option<bool>,
+    /// Written only when not the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    jump_prominence_db: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spl_hold_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -548,6 +551,12 @@ impl UiPrefs {
             resolution_marker: f.resolution_marker.unwrap_or(true),
             bar_ease: f.bar_ease.unwrap_or(true),
             spec_ease: f.spec_ease.unwrap_or(true),
+            // A value no step reaches (hand-edited) is kept when it can be stood out by;
+            // anything else is the default.
+            jump_prominence_db: f
+                .jump_prominence_db
+                .filter(|d| d.is_finite() && *d > 0.0 && *d <= 60.0)
+                .unwrap_or(ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB),
             spl_hold_ms: f.spl_hold_ms,
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
             ir_levels: f
@@ -583,6 +592,9 @@ impl UiPrefs {
             resolution_marker: (!self.resolution_marker).then_some(false),
             bar_ease: (!self.bar_ease).then_some(false),
             spec_ease: (!self.spec_ease).then_some(false),
+            jump_prominence_db: (self.jump_prominence_db
+                != ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB)
+                .then_some(self.jump_prominence_db),
             spl_hold_ms: self.spl_hold_ms,
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,

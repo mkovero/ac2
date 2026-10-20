@@ -1,6 +1,7 @@
 //! Key commands ([`CommandId`]): the app, stimulus, pane, trace and view steps; the rest go
 //! on to `commands::meas` and `commands::tf`.
 
+pub(super) mod cursor;
 pub(super) mod dialogs;
 pub(super) mod keys;
 pub(super) mod meas;
@@ -537,6 +538,10 @@ impl AppState {
                     Some(_) => None,
                     None => Some((t.lo * t.hi).sqrt()),
                 };
+                // The mark is read against the cursor: off, the cursor takes it along.
+                if self.view.cursor_hz.is_none() {
+                    self.view.cursor_mark_hz = None;
+                }
                 // Off takes the spectrograph's time with it; on starts on frequency alone.
                 self.view.spectrum.spectrograph.cursor_s = None;
             }
@@ -695,6 +700,12 @@ impl AppState {
             | C::SplC
             | C::SplZ
             | C::LeqWindows) => self.command_tf(c, out),
+            c @ (C::NextPeak
+            | C::PrevPeak
+            | C::NextNotch
+            | C::PrevNotch
+            | C::CursorMark
+            | C::ClearMark) => self.command_cursor(c),
         }
     }
 }

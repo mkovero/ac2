@@ -95,7 +95,7 @@ fn display_and_recording_texts() {
         bar_ease: false,
         spec_ease: false,
     };
-    let rows = display_rows(ThemeName::Light, switches, Some(500), views);
+    let rows = display_rows(ThemeName::Light, switches, Some(500), views, 6.0);
     let texts: Vec<&str> = rows.iter().map(|(_, v)| v.as_str()).collect();
     assert_eq!(
         texts,
@@ -113,6 +113,7 @@ fn display_and_recording_texts() {
             "% of fundamental",
             "over the magnitude",
             "off",
+            "stands out by 6 dB",
             "each pane's as last left · Enter resets them to the defaults",
         ]
     );

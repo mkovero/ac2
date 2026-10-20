@@ -219,6 +219,22 @@ pub fn defaults() -> Vec<Binding> {
         (C::SmoothCoarser, S::Spectrum, k(K::K)),
         (C::SmoothFiner, S::Spectrum, sh(K::K)),
         (C::PhaseView, S::Transfer, sh(K::P)),
+        // The cursor's jumps and mark, alike on both frequency panes: Alt+P to a peak, as
+        // P tracks them, Alt+N to a notch; Shift with either goes down in frequency, as
+        // Shift goes back with V and G. Alt+D drops the mark (Δ: the cursor then reads its
+        // differences from there), Alt+Shift+D clears it; Esc stays the stimulus's stop.
+        (C::NextPeak, S::Transfer, alt(K::P)),
+        (C::PrevPeak, S::Transfer, alt_sh(K::P)),
+        (C::NextNotch, S::Transfer, alt(K::N)),
+        (C::PrevNotch, S::Transfer, alt_sh(K::N)),
+        (C::CursorMark, S::Transfer, alt(K::D)),
+        (C::ClearMark, S::Transfer, alt_sh(K::D)),
+        (C::NextPeak, S::Spectrum, alt(K::P)),
+        (C::PrevPeak, S::Spectrum, alt_sh(K::P)),
+        (C::NextNotch, S::Spectrum, alt(K::N)),
+        (C::PrevNotch, S::Spectrum, alt_sh(K::N)),
+        (C::CursorMark, S::Spectrum, alt(K::D)),
+        (C::ClearMark, S::Spectrum, alt_sh(K::D)),
         (C::ResetAverage, S::Transfer, k(K::R)),
         (C::ResetAverage, S::Spectrum, k(K::R)),
         (C::ResetAverage, S::Spl, k(K::R)),

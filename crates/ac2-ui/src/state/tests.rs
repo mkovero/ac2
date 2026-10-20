@@ -595,6 +595,8 @@ use fixtures::*;
 
 mod display;
 
+mod cursor_jump;
+
 mod overlay;
 
 mod ir_nav_tests;

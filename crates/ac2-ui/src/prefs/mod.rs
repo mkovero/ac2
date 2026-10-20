@@ -247,6 +247,9 @@ pub struct UiPrefs {
     /// The live spectrum and RTA curves glide to each new frame (on until the operator
     /// turns it off); off, they jump to it as received.
     pub spec_ease: bool,
+    /// How far a peak or notch must stand out for the cursor to jump to it, dB
+    /// (`ac2_scene::cursor_jump`).
+    pub jump_prominence_db: f64,
     /// How long the SPL meter's number holds a reading; `None`: by its time weighting
     /// (`ac2_scene::spl::display_period_s`).
     pub spl_hold_ms: Option<u32>,
@@ -310,6 +313,7 @@ impl Default for UiPrefs {
             resolution_marker: true,
             bar_ease: true,
             spec_ease: true,
+            jump_prominence_db: ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB,
             spl_hold_ms: None,
             layout: LayoutPrefs::default(),
             ir_levels: IrLevelPrefs::default(),

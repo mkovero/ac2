@@ -278,11 +278,12 @@ pub enum DisplayRow {
     DistortionUnit,
     Coherence,
     ResolutionMarker,
+    CursorJump,
     LevelAxes,
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 14] = [
+    pub const ALL: [DisplayRow; 15] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -296,6 +297,7 @@ impl DisplayRow {
         DisplayRow::DistortionUnit,
         DisplayRow::Coherence,
         DisplayRow::ResolutionMarker,
+        DisplayRow::CursorJump,
         DisplayRow::LevelAxes,
     ];
 
@@ -314,6 +316,7 @@ impl DisplayRow {
             DisplayRow::DistortionUnit => "Distortion in",
             DisplayRow::Coherence => "Coherence",
             DisplayRow::ResolutionMarker => "Resolution marker",
+            DisplayRow::CursorJump => "Peak / notch jumps",
             DisplayRow::LevelAxes => "Level axes",
         }
     }
@@ -425,6 +428,7 @@ pub fn display_rows(
     switches: DisplaySwitches,
     spl_hold_ms: Option<u32>,
     views: PaneViews,
+    jump_prominence_db: f64,
 ) -> Vec<(DisplayRow, String)> {
     DisplayRow::ALL
         .iter()
@@ -468,6 +472,9 @@ pub fn display_rows(
                 },
                 DisplayRow::ResolutionMarker => {
                     resolution_marker_text(switches.resolution_marker).into()
+                }
+                DisplayRow::CursorJump => {
+                    ac2_scene::cursor_jump::prominence_text(jump_prominence_db)
                 }
                 DisplayRow::SpectrumView => spectrum_view_name(views.spectrum).to_owned(),
                 DisplayRow::SweepView => sweep_view_name(views.sweep).to_owned(),

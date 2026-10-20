@@ -69,6 +69,10 @@ impl CommandId {
             C::Compare => &["overlay", "reference"],
             C::ClearCompare => &["overlay"],
             C::CursorLeft | C::CursorRight => &["readout", "marker"],
+            C::NextPeak | C::PrevPeak => &["cursor", "jump", "maximum", "resonance"],
+            C::NextNotch | C::PrevNotch => &["cursor", "jump", "minimum", "comb"],
+            C::CursorMark => &["delta", "reference", "difference", "comb", "marker"],
+            C::ClearMark => &["delta", "marker"],
             C::Slot1
             | C::Slot2
             | C::Slot3

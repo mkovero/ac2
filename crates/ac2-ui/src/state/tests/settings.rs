@@ -337,6 +337,16 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Left");
     assert!(t.st.view.unresolved && t.st.prefs.resolution_marker);
     t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::CursorJump);
+    assert_eq!(t.st.view.jump_prominence_db, 3.0);
+    t.key("Right");
+    assert_eq!(t.st.view.jump_prominence_db, 6.0);
+    assert_eq!(t.st.prefs.jump_prominence_db, 6.0);
+    t.key("Left");
+    t.key("Left");
+    assert_eq!(t.st.view.jump_prominence_db, 2.0);
+    t.key("Right");
+    t.key("Down");
     assert_eq!(settings(&t).display, DisplayRow::LevelAxes);
     let f = t.st.layout.focus;
     t.st.pane_levels.insert(

@@ -30,7 +30,7 @@ mod spl_meters;
 pub use alignment::{alignment, is_alignment, pane_alignment};
 #[cfg(test)]
 pub(crate) use spectrum_pane::with_spectrum;
-pub use spectrum_pane::{spectrograph, spectrum, spectrum_scale};
+pub use spectrum_pane::{spectrograph, spectrum, spectrum_jump, spectrum_scale};
 pub use spl_meters::{
     LocalZone, StripPlace, band_leq, has_band_meter, leq, leq_keyed, leq_meter, meter_leq, spl,
     spl_pane, spl_placeholder,
@@ -293,6 +293,59 @@ struct LiveTf<'a> {
 /// so. Other groups wait until theirs is the pane's measurement; Imported until moved under
 /// a measurement.
 pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: Now) -> TfScene {
+    with_transfer(st, pane, theme, |traces, live| {
+        let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
+        let focus = pane_tf(st, pane);
+        let mut status = status(st, &shown, focus, now);
+        // The shown math channel's operands.
+        let frames: Vec<(MeasId, &TopicFrame)> = live.iter().map(|l| (l.meas.id, l.tf)).collect();
+        status.math = shown_math(st, focus, &frames);
+        // Under the stack's top pane, which says it for the column. Faults (clipping,
+        // STALE, audio stopped) stay in every pane: each must be seen wherever one looks.
+        if st.stacked_under(pane) {
+            status.no_delay_estimate = None;
+        }
+        transfer_scene(
+            traces,
+            &st.tf_display,
+            &status,
+            &st.view_for(pane),
+            theme,
+            size,
+        )
+    })
+}
+
+/// Where the cursor jumps in transfer pane `pane` ([`ac2_scene::tf::jump`]): along the
+/// curve it draws as it draws it.
+pub fn transfer_jump(
+    st: &AppState,
+    pane: PaneId,
+    shown: ac2_scene::axis::Range,
+    kind: ac2_scene::cursor_jump::Landmark,
+    step: ac2_scene::cursor_jump::Step,
+) -> Option<f64> {
+    let theme = st.scene_theme();
+    with_transfer(st, pane, &theme, |traces, _| {
+        ac2_scene::tf::jump(
+            traces,
+            &st.tf_display,
+            &st.view_for(pane),
+            shown,
+            kind,
+            step,
+        )
+    })
+}
+
+/// Calls `f` with the transfer pane's curves in legend order and the live frames they
+/// come from.
+fn with_transfer<R>(
+    st: &AppState,
+    pane: PaneId,
+    theme: &Theme,
+    f: impl FnOnce(&[TfTrace<'_>], &[LiveTf<'_>]) -> R,
+) -> R {
     let grids = st.data.as_ref().map(|d| &d.grids);
     let colours = st.curve_colours(theme);
     let pane_shows = st.pane_meas(pane);
@@ -411,25 +464,7 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
     order.sort_by_key(|i| (ranks.get(*i).copied().unwrap_or(usize::MAX), *i));
     let mut slots: Vec<Option<TfTrace<'_>>> = traces.into_iter().map(Some).collect();
     let traces: Vec<TfTrace<'_>> = order.iter().filter_map(|i| slots[*i].take()).collect();
-    let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
-    let focus = pane_tf(st, pane);
-    let mut status = status(st, &shown, focus, now);
-    // The shown math channel's operands.
-    let frames: Vec<(MeasId, &TopicFrame)> = live.iter().map(|l| (l.meas.id, l.tf)).collect();
-    status.math = shown_math(st, focus, &frames);
-    // Under the stack's top pane, which says it for the column. Faults (clipping, STALE,
-    // audio stopped) stay in every pane: each must be seen wherever one looks.
-    if st.stacked_under(pane) {
-        status.no_delay_estimate = None;
-    }
-    transfer_scene(
-        &traces,
-        &st.tf_display,
-        &status,
-        &st.view_for(pane),
-        theme,
-        size,
-    )
+    f(&traces, &live)
 }
 
 /// The IR of the focused transfer measurement, under the banners of its transfer stream

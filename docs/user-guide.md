@@ -616,6 +616,37 @@ values, the band labels, the limit lines and the allowed-level marks with their 
 at every step, and nothing moves: the scale keeps its room. The theme is in
 Settings › Display and the palette (*Theme*).
 
+#### Cursor jumps and the mark (Alt+P, Alt+N, Alt+D)
+
+On a transfer magnitude or a spectrum pane the comparison cursor (**Shift+T**) can jump:
+**Alt+P** to the next peak up in frequency, **Alt+Shift+P** to the one below, **Alt+N** /
+**Alt+Shift+N** the same for notches. A jump turns the cursor on when it is off. It reads
+one curve, the one min / max tracking follows: the selected curve when the pane draws it,
+else the pane's own. It reads that curve as drawn (smoothed, with its offset, without
+blanked or invalid columns) and only the part the pane shows: a peak off screen is not
+jumped to, and a column at the edge of the view or of a gap is never one. A peak or notch
+counts when it stands out of the curve around it by the prominence in Settings › Display ›
+*Peak / notch jumps* (3 dB unless changed; ←/→ steps 1, 2, 3, 6, 10, 20 dB). When there is
+none that way the cursor stays and a toast says so
+(`no higher peak in view stands out by 3 dB`).
+
+**Alt+D** drops a mark where the cursor is (a dashed line); **Alt+D** again moves it there.
+While the mark is set, the cursor reads against it on the same curve: under the cursor
+values on a spectrum, on a plate in a bottom corner of the transfer magnitude view
+(named when other curves are shown):
+
+    mark 500 Hz
+    Δ +1.00 kHz · +3.2 dB · +20°
+    comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C
+
+`Δ` is the cursor minus the mark: frequency, level, and on a transfer pane phase in the
+phase view's mode (wrapped degrees folded into ±180°, unwrapped degrees, or group delay in
+ms). The `comb` line reads the two frequencies as neighbouring notches (or peaks) of a comb:
+a copy arriving `τ` later cancels every `1/τ` Hz, so `Δf` names the delay and the extra path
+the copy travelled, as min / max tracking does for evenly spaced dips. Put the mark on one
+notch and jump the cursor to the next for the reading to mean that. **Alt+Shift+D** clears
+the mark, and so does turning the cursor off; **Esc** stays the stimulus's stop.
+
 #### Export a pane as PNG
 
 Palette (Ctrl+K) **Export pane as PNG…** (no key) writes the focused pane's plot as an image
@@ -949,7 +980,8 @@ invalid columns. Peaks and dips follow the spectrum's rules (6 dB prominence, 1/
 merge, marks that do not hop; see [Peaks: hold and tracking](#peaks-hold-and-tracking)).
 When four or more neighbouring dips are evenly spaced on a linear axis (within 10 %), as the
 notches of a comb are (a copy of the sound arriving `τ` later cancels every `1/τ` Hz), the
-list ends with the spacing and the delay it implies: `comb Δf 1.00 kHz · 1.00 ms`. An
+list ends with the spacing, the delay it implies and the extra path it stands for at the
+session's air temperature: `comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C`. An
 uneven set shows nothing. **T** to traces only takes the list away and keeps the marks.
 
 ### Math channels
@@ -2800,6 +2832,12 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+P` | Phase view | `phase_view` |
 | `K` | Smoothing coarser | `smooth_coarser` |
 | `Shift+K` | Smoothing finer | `smooth_finer` |
+| `Alt+P` | Next peak | `next_peak` |
+| `Alt+Shift+P` | Previous peak | `prev_peak` |
+| `Alt+N` | Next notch | `next_notch` |
+| `Alt+Shift+N` | Previous notch | `prev_notch` |
+| `Alt+D` | Cursor mark | `cursor_mark` |
+| `Alt+Shift+D` | Clear cursor mark | `clear_mark` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 
@@ -2812,6 +2850,12 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `J` | Set offset… | `offset` |
 | `K` | Smoothing coarser | `smooth_coarser` |
 | `Shift+K` | Smoothing finer | `smooth_finer` |
+| `Alt+P` | Next peak | `next_peak` |
+| `Alt+Shift+P` | Previous peak | `prev_peak` |
+| `Alt+N` | Next notch | `next_notch` |
+| `Alt+Shift+N` | Previous notch | `prev_notch` |
+| `Alt+D` | Cursor mark | `cursor_mark` |
+| `Alt+Shift+D` | Clear cursor mark | `clear_mark` |
 | `B` | Spectrum style | `spectrum_style` |
 | `P` | Peaks | `peak_hold` |
 | `Shift+B` | Spectrograph span | `spectrograph_span` |

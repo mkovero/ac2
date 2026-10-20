@@ -10,6 +10,7 @@
 
 mod align;
 mod calibration;
+mod cursor;
 mod eq;
 mod harness;
 mod keep;
