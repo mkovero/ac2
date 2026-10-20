@@ -204,7 +204,7 @@ new avg` and `ac2 trace math`. `--smooth-magnitude-only` keeps the phase unsmoot
   its capture a spectrum trace, operand FFT length locked.
 - `ac2-cli` (`tests/it/math_rig.rs`): expressions typed and by `--op`, refusals by message, an
   edit keeping the name, `meas list`.
-- `ac2-ui`: the dialog (`math_dialog.rs` tests, `state_tests`), `tests/it/embedded/math.rs`
+- `ac2-ui`: the dialog (`math_dialog.rs` tests, `state::tests`), `tests/it/embedded/math.rs`
   from an empty daemon (dialog by name, the average at −6 dB with its legend, capture with Ctrl+1,
   edit into ÷ at 0 dB, NO RESULT banner; spectrum math on the spectrum pane and not on the
   transfer pane), GPU snapshots `math_dialog`, `spectrum_math`, `transfer_math_average`

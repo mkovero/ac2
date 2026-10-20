@@ -5,7 +5,7 @@ the aligner's splice; `delay.nudge`; `applied_samples` fractional; the app's Ctr
 `,` `.` keys; `ac2 delay nudge`). Answers PLAN.md §3.3 "Delay change without full ladder
 resettle; sub-sample delay" and the §12 risk "MTW resettle on delay change (~2.4 s)".
 Tests: `crates/ac2-core/tests/it/mtw_delay.rs` (analytic systems), the aligner's splice test,
-`crates/ac2d/tests/it/transfer.rs` (daemon), `crates/ac2-ui/src/state_tests.rs` (keys).
+`crates/ac2d/tests/it/transfer.rs` (daemon), `crates/ac2-ui/src/state/tests.rs` (keys).
 
 ## What the operator gets
 

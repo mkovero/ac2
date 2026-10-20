@@ -108,9 +108,10 @@ fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
         t.len() >= 2 && t[..2].iter().all(quiet)
     })?;
     let seen = spl_log(&d.st).map_or(0, |l| l.alarms.len());
-    let seen_toast = d.st.toasts.last().map_or(0, |t| t.id);
+    let seen_toast = d.st.toasts.list.last().map_or(0, |t| t.id);
     let new_toasts = move |s: &AppState, what: &str, error: bool| {
         s.toasts
+            .list
             .iter()
             .filter(|t| {
                 t.id > seen_toast
@@ -181,7 +182,7 @@ fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
         ]
     );
     // The history holds the excursion: over-limit seconds, and ones after it that are not.
-    let (_, h) = d.st.leq_history.values().next().ok_or("history")?;
+    let (_, h) = d.st.leq.history.values().next().ok_or("history")?;
     let m =
         d.st.measurements()
             .into_iter()
@@ -303,9 +304,10 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
             )
         })
     })?;
-    let seen_toast = d.st.toasts.last().map_or(0, |t| t.id);
+    let seen_toast = d.st.toasts.list.last().map_or(0, |t| t.id);
     let new_toasts = move |s: &AppState, what: &str, error: bool| {
         s.toasts
+            .list
             .iter()
             .filter(|t| {
                 t.id > seen_toast
@@ -442,6 +444,7 @@ fn slow_filling_windows_go_red_only_when_their_budget_is_spent() -> R {
     d.key("Shift+R");
     d.until("the new log", |s| {
         s.toasts
+            .list
             .iter()
             .any(|t| t.text.contains("new SPL log started"))
             && spl_log(s).is_some_and(|l| l.alarms.is_empty())

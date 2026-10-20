@@ -185,7 +185,7 @@ fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
         })
     })?;
     // Only what this stop says.
-    d.st.toasts.clear();
+    d.st.toasts.list.clear();
     d.key("S");
     d.until("the measurement and the noise stopped", |s| {
         s.stimulus.phase == StimPhase::Idle
@@ -198,9 +198,15 @@ fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
         "{} stopped · stimulus stopped (no transfer measurement left running)",
         m.config.name
     );
-    d.until("the toast", |s| s.toasts.iter().any(|t| t.text == stopped))?;
+    d.until("the toast", |s| {
+        s.toasts.list.iter().any(|t| t.text == stopped)
+    })?;
     assert!(
-        !d.st.toasts.iter().any(|t| t.text == "stimulus stopped"),
+        !d.st
+            .toasts
+            .list
+            .iter()
+            .any(|t| t.text == "stimulus stopped"),
         "said twice"
     );
     drop(d);
@@ -352,11 +358,12 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
     })?;
     assert!(
         d.st.toasts
+            .list
             .iter()
             // The total depends on whether the mirror caught up between the keys.
             .any(|t| t.text.contains(": delay −0.1 sample → ")),
         "{:?}",
-        d.st.toasts.iter().map(|t| &t.text).collect::<Vec<_>>()
+        d.st.toasts.list.iter().map(|t| &t.text).collect::<Vec<_>>()
     );
     d.stop()?;
     drop(d);
@@ -704,6 +711,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.key("Ctrl+.");
     let toast =
         d.st.toasts
+            .list
             .last()
             .map(|t| t.text.clone())
             .unwrap_or_default();

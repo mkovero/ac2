@@ -65,7 +65,7 @@ fn move_selected(d: &mut Driver, trace: TraceId, to: TraceOwner) -> R {
     let Overlay::Choose(c) = &mut d.st.overlay else {
         return Err(format!(
             "no move dialog: {:?}, selected {:?}, toasts {:?}",
-            d.st.overlay, d.st.selected_trace, d.st.toasts
+            d.st.overlay, d.st.selected_trace, d.st.toasts.list
         )
         .into());
     };
@@ -211,13 +211,13 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
     // The key is named the platform's way (`⇧F2` on macOS).
     let move_key = Chord::parse("Shift+F2")?.label();
     assert!(
-        d.st.toasts
+        d.st.toasts.list
             .iter()
             .any(|t| t.text.ends_with(&format!(
                 "({l2}) is under Imported: it is no measurement's to compare — select it, then Move to measurement… ({move_key})"
             ))),
         "{:?}",
-        d.st.toasts
+        d.st.toasts.list
     );
     d.send(Msg::PanePick(right, PaneMenuRow::Meas(s2)));
     let hint =

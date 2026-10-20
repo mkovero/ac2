@@ -74,7 +74,7 @@ fn no_reference_reminds_of_the_stimulus_keys() {
                 && b.detail.as_deref() == Some("stimulus off: Space arms, Enter starts it")
         })
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "transfer_no_reference_reminder");
 }
@@ -124,7 +124,7 @@ fn ir_pane_of_a_stopped_measurement() {
         assert_eq!(s.tag, None);
         assert!(s.banners.iter().all(|b| !b.text.starts_with("STALE")));
     }
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "ir_stopped");
     // S starts it again: its live IR. The frequency panes' keys on its time and amplitude
@@ -144,7 +144,7 @@ fn ir_pane_of_a_stopped_measurement() {
         let ax = a.state.view.ir.axes;
         ax.time_ms.is_some() && ax.amplitude.is_some() && ax.cursor_ms.is_some()
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "ir_zoomed_cursor");
 }
@@ -272,7 +272,7 @@ fn math_dialog() {
         };
         assert_eq!(f.text(ac2_ui::forms::FieldId::Name), "Main L ÷ Delay tower");
     }
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "math_dialog");
 }
@@ -391,7 +391,7 @@ fn transfer_legend_many_curves() {
     step_until(&mut h, "scrolled", |a| a.state.view.tf.legend.first > 0);
     assert_eq!(h.state().state.view.freq, freq);
     h.event(Event::PointerMoved(egui::pos2(900.0, 700.0)));
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     settle(&mut h, 3);
     assert_eq!(legend(&h).hover, None);
     dense_snapshot(&mut h, "transfer_legend_many_curves");
@@ -426,7 +426,7 @@ fn transfer_legend_many_curves() {
     palette(&mut h, "theme");
     step_until(&mut h, "light", |a| a.state.theme == ThemeName::Light);
     h.event(Event::PointerMoved(egui::pos2(900.0, 120.0)));
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     settle(&mut h, 3);
     dense_snapshot(&mut h, "transfer_legend_many_curves_light");
 
@@ -470,6 +470,6 @@ fn transfer_min_max_tracking() {
         let list = s.extremes_list.expect("the list is up");
         assert!(list.starts_with("max\n1  "), "{list}");
     }
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "transfer_min_max");
 }

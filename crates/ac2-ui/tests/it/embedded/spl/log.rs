@@ -130,6 +130,7 @@ fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     assert_eq!(d.st.overlay, Overlay::None);
     d.until("the new log toasted", |s| {
         s.toasts
+            .list
             .iter()
             .any(|t| t.text.contains("new SPL log started"))
     })?;
@@ -155,7 +156,7 @@ fn history_points(s: &AppState) -> Option<(MeasId, Vec<ac2_scene::leq::HistoryPo
     let MeasKind::Spl { config } = &m.config.kind else {
         return None;
     };
-    let (_, h) = s.leq_history.get(&m.id)?;
+    let (_, h) = s.leq.history.get(&m.id)?;
     let p = h.points(config.leq.windows.first()?)?;
     Some((m.id, p.iter().copied().collect()))
 }
@@ -298,6 +299,7 @@ fn slow_a_restarted_app_shows_the_history_from_the_log() -> R {
     d.key("Shift+R");
     d.until("the new log toasted", |s| {
         s.toasts
+            .list
             .iter()
             .any(|t| t.text.contains("new SPL log started"))
     })?;

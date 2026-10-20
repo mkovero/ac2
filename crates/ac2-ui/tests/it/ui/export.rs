@@ -46,6 +46,7 @@ fn the_focused_pane_exports_as_png() {
     step_until(&mut h, "export toast", |a| {
         a.state
             .toasts
+            .list
             .iter()
             .any(|t| t.text.contains("exported to"))
     });
@@ -53,6 +54,7 @@ fn the_focused_pane_exports_as_png() {
         .state()
         .state
         .toasts
+        .list
         .iter()
         .find(|t| t.text.contains("exported to"))
         .map(|t| t.text.clone())

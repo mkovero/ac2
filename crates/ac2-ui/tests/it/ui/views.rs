@@ -64,7 +64,7 @@ fn sweep_progress_strip() {
     assert_eq!(title(&h), before, "the strip moved the panes");
     h.key_press(Key::W);
     step_until(&mut h, "maximized", |a| a.state.layout.maximized);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     // The bar at the start of the step, for a picture that does not depend on timing.
     let start = {
         let st = &h.state().state;
@@ -447,7 +447,7 @@ fn key_hints() {
             .is_some()
     );
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "key_hints");
     // The SPL hint line's tooltip (the title has none: it would cover the plot's top).
@@ -481,11 +481,11 @@ fn spl_meter_big_and_stage() {
     });
     // The group's toast expires on the wall clock: a slower rasterizer reaches the stage
     // view after it has gone, so neither picture shows it.
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "spl_meter_big");
     h.key_press(Key::W);
     step_until(&mut h, "the stage view", |a| a.state.stage_view());
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "spl_meter_stage");
 }
 
@@ -600,7 +600,7 @@ fn spectrograph() {
         st.spectrographs.insert(MeasId(3), pinned.clone());
         st.view.cursor_hz = Some(1000.0);
         st.view.spectrum.spectrograph.cursor_s = Some(8.0);
-        st.toasts.clear();
+        st.toasts.list.clear();
     };
     {
         pin(h.state_mut());

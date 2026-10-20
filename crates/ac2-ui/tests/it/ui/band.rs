@@ -281,7 +281,7 @@ fn slow_band_leq_from_an_empty_daemon() {
         })
     });
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "leq_dialog_band_range");
     // Enter on the range row adds it: the focus on the first added window, 50 Hz.
@@ -315,7 +315,7 @@ fn slow_band_leq_from_an_empty_daemon() {
         })
     });
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "leq_dialog_band_meter");
     h.ctx.memory_mut(|m| {
@@ -437,7 +437,7 @@ fn slow_band_leq_from_an_empty_daemon() {
         &mut h,
         "band_leq_over",
         |a| {
-            a.state.toasts.clear();
+            a.state.toasts.list.clear();
         },
         has_frame,
     );
@@ -456,7 +456,7 @@ fn slow_band_leq_from_an_empty_daemon() {
             &mut h,
             name,
             |a| {
-                a.state.toasts.clear();
+                a.state.toasts.list.clear();
             },
             has_frame,
         );
@@ -530,7 +530,7 @@ fn a_single_band_window_with_plus_and_minus() {
         })
     });
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "leq_dialog_band_single");
     h.ctx.memory_mut(|m| {
@@ -825,7 +825,7 @@ fn band_transfer_step(h: &mut Harness<'_, App>, fake: &ac2_client::fake::FakeDae
         h,
         "band_transfer_step",
         |a| {
-            a.state.toasts.clear();
+            a.state.toasts.list.clear();
             let base = 20_734 * 86_400 + 19 * 3600;
             let spans = [(0, 120), (240, 360), (420, 480)];
             if let Some(t) = a.state.overlay.leq_mut().and_then(|d| d.transfer.as_mut()) {

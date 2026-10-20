@@ -112,7 +112,13 @@ fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool)
     while !(cond(h.state()) && named(h.state())) {
         if t0.elapsed() > WAIT {
             let a = h.state();
-            let toasts: Vec<&str> = a.state.toasts.iter().map(|t| t.text.as_str()).collect();
+            let toasts: Vec<&str> = a
+                .state
+                .toasts
+                .list
+                .iter()
+                .map(|t| t.text.as_str())
+                .collect();
             panic!(
                 "timed out waiting for {what}; conn {:?}; overlay {:?}; stimulus {:?}; toasts {toasts:?}",
                 a.state.conn, a.state.overlay, a.state.stimulus.phase

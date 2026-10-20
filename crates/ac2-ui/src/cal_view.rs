@@ -175,22 +175,16 @@ impl CalView {
         };
         let mut row = cal::input_setup(&s.inputs, c);
         let Some(mic) = row.mic.clone() else {
-            self.notice = Some(format!(
-                "input {} has no mic name: N names it, then ←/→ choose its curve",
-                input_no(c)
-            ));
+            self.notice = Some(ac2_scene::cal_notice::no_mic_for_curve(c));
             return None;
         };
         cal::settle(&mut row, &s.mics);
         row.curve = cal::step(&row.curve, cal::mic(&s.mics, &mic), forward);
-        let what = match &row.curve {
-            CurveChoice::Curve { label } => format!(
-                "input {}: mic curve {}",
-                input_no(c),
-                ac2_scene::cal::curve_name(&mic, label)
-            ),
-            _ => format!("input {}: mic curve off ({mic})", input_no(c)),
+        let label = match &row.curve {
+            CurveChoice::Curve { label } => Some(label.as_str()),
+            _ => None,
         };
+        let what = ac2_scene::cal_notice::curve_stepped(c, &mic, label);
         Some(CalAction::Inputs(row, what))
     }
 
@@ -252,10 +246,7 @@ impl CalView {
             .as_ref()
             .is_some_and(|o| o.config.input_channels.contains(&c));
         if !captured {
-            self.notice = Some(format!(
-                "input {} is not in the open audio I/O: a calibration reads the input live",
-                input_no(c)
-            ));
+            self.notice = Some(ac2_scene::cal_notice::not_captured(c));
             return false;
         }
         self.acoustic = Some(AcousticDialog::new(s, c));
@@ -276,17 +267,11 @@ impl CalView {
             .as_ref()
             .is_some_and(|o| o.config.input_channels.contains(&c));
         if !captured {
-            self.notice = Some(format!(
-                "input {} is not in the open audio I/O: a calibration reads the input live",
-                input_no(c)
-            ));
+            self.notice = Some(ac2_scene::cal_notice::not_captured(c));
             return false;
         }
         let Some(mic) = cal::input_setup(&s.inputs, c).mic else {
-            self.notice = Some(format!(
-                "input {} has no mic name: N names it, then E calibrates it",
-                input_no(c)
-            ));
+            self.notice = Some(ac2_scene::cal_notice::no_mic_for_electrical(c));
             return false;
         };
         self.electrical = Some(ElectricalDialog::new(s, c, &mic));
@@ -300,7 +285,7 @@ impl CalView {
             && d.reply(what, result)
         {
             let after = ac2_scene::cal::acoustic_after();
-            self.notice = Some(format!("{what}: stored. {after}"));
+            self.notice = Some(ac2_scene::cal_notice::stored(what, after));
             self.acoustic = None;
         }
         let Some(d) = &mut self.electrical else {
@@ -308,7 +293,7 @@ impl CalView {
         };
         if d.reply(what, result) {
             let after = ac2_scene::cal::electrical_after(d.connection);
-            self.notice = Some(format!("{what}: stored. {after}"));
+            self.notice = Some(ac2_scene::cal_notice::stored(what, after));
             self.electrical = None;
         }
     }
@@ -331,18 +316,10 @@ impl CalView {
     pub fn delete(&mut self, s: &State) -> Option<CalAction> {
         let line = self.focused(s);
         let what = match &line {
-            Some(CalLine::Curve(id)) => {
-                format!(
-                    "curve {} of the mic library",
-                    ac2_scene::cal::curve_name(&id.mic, &id.label)
-                )
+            Some(CalLine::Curve(id)) => ac2_scene::cal_notice::delete_curve(&id.mic, &id.label),
+            Some(CalLine::Sensitivity(k)) => {
+                ac2_scene::cal_notice::delete_sensitivity(&k.mic, k.channel, &k.device.0)
             }
-            Some(CalLine::Sensitivity(k)) => format!(
-                "the sensitivity calibration of {} on input {} of {}",
-                k.mic,
-                input_no(k.channel),
-                k.device.0
-            ),
             _ => {
                 self.clear();
                 self.notice = Some("Delete removes a curve or a sensitivity calibration".into());
@@ -352,7 +329,7 @@ impl CalView {
         if self.confirm != Some(self.focus) {
             self.clear();
             self.confirm = Some(self.focus);
-            self.notice = Some(format!("Delete again to delete {what}"));
+            self.notice = Some(ac2_scene::cal_notice::delete_again(&what));
             return None;
         }
         self.clear();
