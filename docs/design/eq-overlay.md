@@ -9,31 +9,27 @@ parameters and how its Q is meant. To be built after the two-system alignment ai
 
 ## The idea in one paragraph
 
-An EQ set is a stored transfer trace whose columns the daemon computes from a list of filter
-sections (`TraceSource::Eq`), and "after EQ" is a math channel `subject × EQ` — the cascade
-`math-channels.md` already defines (delays add, the filter's is 0; the lower γ² carried, the
-filter's is 1). So the filter curve is drawn, listed, coloured, exported and compared like any
-trace, and the prediction updates live, is captured with Ctrl+1 … 9 and refuses with reasons
-like any math channel. What is new: the section model, its evaluation in `ac2-core`, the
-`eq.*` commands, the editor and a text format.
+An EQ set lives **on the measurement** (operator, 2026-10-20): it models the processor feeding
+that system, so any of the measurement's transfer curves — live, captures, sweep runs, imports
+filed under it — can show "after EQ". Each prediction shown is a math channel
+`curve × EQ 1` — the cascade `math-channels.md` already defines (delays add, the filter's is 0;
+the lower γ² carried, the filter's is 1) — whose B operand is the new typed operand
+`Operand::Eq`, evaluated by the daemon. So the prediction updates live, is captured with
+Ctrl+1 … 9, coloured, listed and refused with reasons like any math channel.
 
 ## 1. Filter model
 
-`EqSet { name, rate: Realisation, enabled: bool, sections: Vec<EqSection> }`,
-`EqSection { enabled: bool, shape: EqShape }`. Frequencies in Hz, gains in dB, typed
-(`Hz`, `Db`).
+`EqSet { id, name, rev, realisation, peak_form, enabled, in_console, sections }`,
+`EqSection { enabled, shape: EqShape }`; quantities typed (`Hz`, `Db`, `Seconds`).
 
 **Realisation** (per set — a processor runs every section the same way):
 - `digital { rate: Hz }` (default: the session rate; the user sets the *processor's* rate,
   48 / 96 kHz, which is not necessarily ac2's capture rate). Each section is designed in the s
   domain and mapped by the bilinear transform prewarped at its own f₀, then evaluated exactly
-  as `H(e^{j2πf/fs})` at every column — a polynomial ratio, no FFT, no impulse response. This
-  is what most consoles do, so it reproduces their cramping near Nyquist: a 16 kHz peak with
-  Q 2 at 48 kHz is visibly narrower and asymmetric, and that difference is exactly what the
-  user needs to see before setting it. Columns at or above fs/2 are gaps (NaN), not zero.
-- `analog`: the s-domain prototype evaluated at `s = j2πf` — for decramped / FIR-based
-  processors that match the analog response, and as the reference the digital form departs
-  from.
+  as `H(e^{j2πf/fs})` at every column (a polynomial ratio, no FFT). That is what most consoles
+  do, so it shows their cramping near Nyquist (a 16 kHz peak at 48 kHz squeezed towards fs/2)
+  before the user sets it. Columns at or above fs/2 are gaps (NaN), not zero.
+- `analog`: the s-domain prototype at `s = j2πf` — decramped / FIR-based processors.
 
 **Shapes** (`EqShape`, a serde enum, `#[serde(tag = "type")]`):
 
@@ -101,102 +97,113 @@ transfer trace. A refused section makes the set refuse; nothing is clamped silen
 ## 2. Where it is computed, stored, attached
 
 - **Math**: `ac2_core::eq` (pure: section → complex response at a list of frequencies, plus
-  the parameter conversions above). The daemon evaluates the set on the subject's grid and
-  stores the columns as the EQ trace (`mag_db`, `phase_deg`, coherence `None`, `delay` 0); the
-  math channel does the multiply. The UI never evaluates a filter (`tests/it/no_dsp.rs` stays as
+  the parameter conversions above). The daemon evaluates a set on the curve's grid when a math
+  channel's `Operand::Eq` asks; the UI never evaluates a filter (`tests/it/no_dsp.rs` stays as
   is; `ac2-scene` links only `ac2-proto`). A drag (below) round-trips through the daemon:
-  `eq.set` → new columns → redraw; at ~1 k columns × 20 sections that is microseconds.
-- **Stored**: `TraceSource::Eq { set: EqSet }` on the EQ trace; the session saves the set and
-  the columns are recomputed on load (the set is the truth, the columns a cache). An `EqSet`
-  edit re-evaluates and restarts dependent math channels with the new columns, the path a mic
-  curve applied to a stored operand already takes. Session `VERSION` 28 → 29;
-  `PROTO_VERSION` bump with `fixtures/protocol/WIRE_LOCK` and the protocol fixtures.
-- **Attachment** (operator note 2026-10-20: a measurement holds a live curve, captures, sweep
-  runs and imports). The EQ trace is **owned by the measurement** (`TraceOwner::meas`, listed
-  under it); it is applied to an explicit list of **subjects**, each one math channel
-  `subject × EQ`. Creating an EQ set from a measurement's header or live curve makes the live
-  curve its first subject; from a stored trace (capture, sweep run, import), that trace. **Alt+E**
-  on another selected transfer curve adds it as a subject ("after EQ" for a capture beside the
-  live one). Reason for explicit subjects over "whatever is shown": the prediction of a stored
-  capture is a separate curve the user compares with the live one — two predictions at once
-  must exist, and an implicit rule would make curves appear and vanish with visibility. See
-  open question 1.
-- **Several sets per measurement**: yes (`EQ 1`, `EQ 2` …) — the what-if is A/B'ing two plans.
+  `meas.eq` → new columns → redraw; ~1 k columns × 20 sections is microseconds.
+- **Stored**: `Measurement.eq: Vec<EqSet>` (several per measurement — `EQ 1`, `EQ 2` — the
+  what-if is A/B'ing two plans). `EqSet` adds `id`, `rev` (bumped on every edit) and
+  `in_console: Option<EqSnapshot>` (§ below). The filter curve alone is published as a
+  daemon-kept, locked trace `EQ 1` owned by the measurement (`TraceSource::Eq {meas, set}`,
+  columns recomputed on edit and on load — the set is the truth, the columns a cache), so it is
+  drawn, exported and compared like any trace. Session `VERSION` 28 → 29; `PROTO_VERSION` bump
+  with `fixtures/protocol/WIRE_LOCK` and the protocol fixtures.
+- **Which curves get a prediction**: only the ones the user toggles on (**Alt+E** on a selected
+  curve of the measurement, `--on` in the CLI); a new set starts with the live curve on. Each
+  toggled curve is one math channel; toggling off deletes it. Curves of other measurements never
+  get this set (copy it: `meas eq copy`).
 - **Bypass**: `enabled` per section and per set. A disabled section is skipped; a disabled set
-  evaluates to 0 dB / 0° (the EQ curve flat, "after EQ" equal to the subject) so the A/B is one
-  key and nothing is rebuilt. The legend says `EQ 1 · bypassed`.
-- **Copy / link**: `eq copy <set> --to <meas>` makes an independent copy under another
-  measurement; `eq apply <set> --to <curve>` adds a subject of any owner, so one set can be
-  the same filter on L and R (a linked processor) — editing it moves both predictions.
-- **Invariants** (as for math operands): an EQ trace with subjects cannot be deleted without
-  deleting its predictions (the delete confirmation names them); a `response` section's trace
-  cannot be deleted while named.
+  evaluates as no filter, so the A/B is one key and nothing is rebuilt. Legend `EQ 1 · bypassed`.
+- **Invariants**: deleting a set deletes its predictions (the confirmation names them); a
+  `response` section's trace cannot be deleted while named.
+
+**The double-apply rule.** Once the EQ is really dialled into the console, new captures and the
+live curve already contain it; multiplying them by it again predicts nonsense. ac2 cannot see
+the console, so the user says when: **Shift+Enter** in the editor (`meas eq mark`) — *"in the
+console"* — snapshots the set's current sections and rev as `in_console`. From then on:
+- Every prediction is of the **difference** `H_current / H_in`, never of the whole set, for
+  the live curve and for captures taken while that snapshot was marked. A capture records the
+  snapshot in force when it was taken (`TraceMeta.eq_in: Vec<EqSnapshot>`, one per set of the
+  measurement that was marked; the snapshot's sections, not just its rev, so later edits cannot
+  change what the trace is known to contain).
+- A trace's basis is therefore always known: `eq_in` of that set present → predict
+  `H_current / H_eq_in`; absent (taken before any mark, an import, a sweep run never marked) →
+  predict the whole set. When the difference is exactly none (same sections), no curve is drawn
+  and the legend says `EQ 1 in · no change`.
+- Unmarking (`meas eq mark --clear`: the console was reset or bypassed) clears `in_console`;
+  later captures record nothing; earlier ones keep what they recorded.
+- The legend always states the basis: `Main L after EQ 1 · assumes none of it in` /
+  `Main L after EQ 1 · change since rev 4`. A capture's prediction says the same about the
+  capture. That label is the guard for the one case ac2 cannot detect (the console changed
+  without a mark). Bypassing a marked set predicts `1 / H_in`: taking the EQ out again.
 
 ## 3. App
 
-**Names** (one vocabulary — row, legend, cursor readout, CLI): the set is `EQ 1` (renamable);
-its trace row and legend read `EQ 1`; a prediction reads `Main L after EQ 1` (math channel name
-following the expression; the expression column still shows `Main L × EQ 1`). A section reads
-`3 · peaking 1.25 kHz −4.0 dB Q 2.0 (half-gain)`.
+**Names** (one vocabulary — row, legend, cursor readout, CLI): the set is `EQ 1` (renamable),
+its filter curve's row and legend `EQ 1`; a prediction reads `Main L after EQ 1` (a capture's
+`Main L · capture 2 after EQ 1`; the expression column shows `× EQ 1`). A section reads
+`3 · peaking 1.25 kHz −4.0 dB Q 2.0 (half-gain)`. Marked: `EQ 1 · in console (rev 4)`.
 
-**Drawing.** On the transfer pane the prediction is a math channel result: its owner's shade,
-solid, with phase on the phase pane and the subject's coherence mask. The EQ curve is a trace in
+**Drawing.** On the transfer pane the prediction is a math channel result: the measurement's shade,
+solid, with phase on the phase pane and the curve's coherence mask. The EQ curve is a trace in
 another shade, drawn dashed and on the same magnitude axis about 0 dB, with its phase on the
 phase pane (all-pass and delay sections only show there). Both have tree dots and toggle like
 any curve. Overlay curves (dashed reference, a second curve in a measurement's shade) are
 **[shared]** with the alignment aid's predicted sum; one scene rule for "predicted" styling.
 
-**Editor** (Alt+E with no other transfer curve selected opens it for the selected set, or
-creates `EQ n` when there is none; palette `EQ…`). Alt+E is free in the key table; check the
-alignment aid did not claim it. A dialog in the existing dialog style, keyboard first:
+**Editor** (**Alt+Q**, palette `EQ…`) opens on the selected measurement's set, or creates
+`EQ n` when it has none. Alt+E (toggle the selected curve's prediction) and Alt+Q are free in
+the key table; check the alignment aid did not claim them. Keyboard first:
 - Left: the section list (↑/↓ select, **N** new section after the selected, **X** delete,
   **Space** bypass section, **Shift+Space** bypass set, **Shift+↑/↓** reorder).
 - Right: the selected section's fields (Tab / Shift+Tab move, ←/→ step a value: f in 1/24
   octave, gain 0.5 dB, Q in 1/12 oct of bandwidth; **Shift** ×4 coarser, **Alt** finer; typing
   a number replaces it). The shape field cycles with ←/→ and keeps f/gain/Q where the new shape
   has them. The Q field shows `Q 2.0 · 0.71 oct` and its definition field beside it.
-- Top: set name, realisation (`digital 48 kHz` / `analog`), default peak form, subjects.
+- Top: set name and switcher (`EQ 1 | EQ 2`, ←/→ on the field), realisation (`digital 48 kHz` /
+  `analog`), default peak form, `in console (rev 4)` / `not marked` (**Shift+Enter** marks).
 - Bottom: the daemon's refusal for the selected section, verbatim.
-Every change sends `eq.set` (debounced to the frame rate); Ctrl+Z / Ctrl+Shift+Z undo as the
-app's other edits do. No new Ctrl chord.
+Every change sends `meas.eq` (debounced to the frame rate); Ctrl+Z / Ctrl+Shift+Z undo as the
+app's other edits do. No new Ctrl chord. **[shared]** The alignment aid also picks a transfer
+curve of a measurement and draws a predicted overlay; the curve picker and the "predicted"
+styling should be one scene rule used by both.
 
 **Plot handles (option, not in the first cut).** A dot per enabled peaking/shelf/pass section at
 (f, gain) on the magnitude pane while the editor is open; drag moves f and gain, Shift-drag
 (or wheel) changes Q. The app sends the new parameters, the daemon draws the curve. Built only
-if the operator wants it after using the keyboard editor (open question 3).
+if the operator wants it after using the keyboard editor (open question 2).
 
 ## 4. CLI and text format
 
 ```
-ac2 eq new  --on "Main L" [--name "EQ 1"] [--rate 96k | --analog] [--form half-gain|from-peak]
-ac2 eq add  "EQ 1" peaking 1.25k -4 --q 2 | --oct 0.7 [--form …] [--at 3]
-ac2 eq add  "EQ 1" high-pass 80 --lr 4 | --bw 2 | --bessel 2 --norm phase
-ac2 eq add  "EQ 1" low-shelf 120 +3 --s 1 | --q 0.7 [--corner]
-ac2 eq add  "EQ 1" biquad --rate 48k b0 b1 b2 a1 a2 | response --trace "FIR v3"
-ac2 eq set  "EQ 1" 3 --gain -3.5 | --off | --on        # one section by its index
-ac2 eq rm   "EQ 1" 3 ;  ac2 eq bypass "EQ 1" [--off]
-ac2 eq apply "EQ 1" --to "Main L · capture 2" ;  ac2 eq copy "EQ 1" --to "Main R"
-ac2 eq show "EQ 1"                                     # sections, as the editor reads them
-ac2 eq export "EQ 1" eq1.txt ;  ac2 eq import eq1.txt --on "Main L" [--format rew]
+ac2 meas eq new  "Main L" [--name "EQ 1"] [--rate 96k | --analog] [--form half-gain|from-peak]
+ac2 meas eq add  "Main L" peaking 1.25k -4 --q 2 | --oct 0.7 [--form …] [--at 3] [--set "EQ 2"]
+ac2 meas eq add  "Main L" high-pass 80 --lr 4 | --bw 2 | --bessel 2 --norm phase
+ac2 meas eq add  "Main L" low-shelf 120 +3 --s 1 | --q 0.7 [--corner]
+ac2 meas eq add  "Main L" biquad --rate 48k b0 b1 b2 a1 a2 | response --trace "FIR v3"
+ac2 meas eq set  "Main L" 3 --gain -3.5 | --off | --on      # one section by its index
+ac2 meas eq rm   "Main L" 3 ;  ac2 meas eq bypass "Main L" [--off]
+ac2 meas eq on   "Main L" "capture 2" [--off]               # predict for this curve
+ac2 meas eq mark "Main L" [--clear]                          # "in the console"
+ac2 meas eq copy "Main L" --to "Main R"
+ac2 meas eq show "Main L"                                    # sections, basis per curve
+ac2 meas eq export "Main L" eq1.txt ;  ac2 meas eq import "Main L" eq1.txt [--format rew]
 ```
-Under `eq` rather than `meas eq` because a set is a trace with subjects of any owner, not a
-setting of one measurement; `ac2 meas list` lists the predictions, `ac2 trace list` the sets.
+`--set` picks among several sets (default: the only one, else refused naming them).
 
 **ac2 EQ text** (`ac2_traces::text::eq`, neutral, hand-editable, one section per line):
 ```
 # ac2 eq 1
 name = EQ 1
 realisation = digital 96000
-peaking   f=1250 gain=-4.0 q=2.0 form=half_gain
+peaking   f=1250 gain=-4.0 q=2.0 form=symmetric
 high_pass f=80 alignment=linkwitz_riley order=4
 low_shelf f=120 gain=3.0 s=1.0 f_at=midpoint   off
 ```
 Keys are the serde field names; unknown keys and shapes are refused with the line number.
-**REW import** (cheap, worth it): REW's "filter settings" text lists
-`Filter  1: ON  PK  Fc 1250 Hz  Gain -4.0 dB  Q 2.00` lines under an `Equaliser:` header;
-read `PK`, `LS`/`HS` (with and without `Q`/dB slope), `LP`/`HP` (`LPQ`/`HPQ`), `NO`, `AP`,
-mapping to `peaking { form: symmetric }` etc. for the `Generic` equaliser; another
-equaliser type, or a filter type not mapped, refuses with the line (REW's per-equaliser Q
+**REW import** (cheap): its filter-settings text (`Filter  1: ON  PK  Fc 1250 Hz  Gain -4.0 dB
+Q 2.00` under an `Equaliser:` header) maps `PK LS HS LP HP LPQ HPQ NO AP` for the `Generic`
+equaliser; another equaliser or an unmapped type refuses with the line (its per-equaliser Q
 conventions are not guessed). Export writes the ac2 text only.
 
 ## 5. Tests
@@ -214,27 +221,29 @@ conventions are not guessed). Export writes the ac2 text only.
   the Rust and the reference do not share code; compared with `ac2-testkit` tolerances.
 - `ac2-traces`: text format round-trip, every refusal by line; a REW sample file (written by
   hand from REW's documented format, no rig data).
-- `ac2-proto`: wire fixtures for `EqShape` / `TraceSource::Eq`, WIRE_LOCK bumped.
+- `ac2-proto`: wire fixtures for `EqShape`, `Operand::Eq`, `TraceSource::Eq`, WIRE_LOCK bumped.
 - `ac2d` `tests/it/eq.rs` from an empty daemon on the fake backend: a transfer measurement on a
   flat fake path; `eq new` + peaking −6 dB @ 1 kHz → the prediction reads −6 dB at 1 kHz and
-  0 dB at 100 Hz, its phase the closed form; section bypass → 0 dB; set bypass; a second subject
-  (a capture) gets its own prediction; edit moves both; a capture of the prediction keeps the
-  values; session save/load recomputes the columns; refusals (f ≥ fs/2, LR order 3).
+  0 dB at 100 Hz, its phase the closed form; section and set bypass; a capture toggled on gets its
+  own prediction; **double-apply**: mark, insert the same peaking in the fake path, capture → the
+  capture records `eq_in`, its and the live prediction equal the curve (`no change`); edit to
+  −8 dB → both predict −2 dB more; an unmarked import predicts the whole set; a capture of a
+  prediction keeps its values; session save/load recomputes the columns; refusals (f ≥ fs/2, LR order 3).
 - `ac2-cli` `tests/it/eq_rig.rs`: command shapes and refusals by message; import/export.
-- `ac2-ui` `tests/it/embedded/eq.rs`: Alt+E from an empty daemon, add a peaking section by keys,
-  the scene's legend reads `Main L after EQ 1` and `EQ 1`, Space bypasses; one GPU snapshot
+- `ac2-ui` `tests/it/embedded/eq.rs`: Alt+Q from an empty daemon, add a peaking section by keys,
+  the scene's legend reads `Main L after EQ 1 · assumes none of it in` and `EQ 1`, Space
+  bypasses, Shift+Enter turns it into `no change`; one GPU snapshot
   `transfer_eq` for the final look.
 
 ## 6. Open questions for the operator
 
-1. Subjects: an EQ set applies to an explicit list of curves (live curve by default, Alt+E adds a
-   capture or import). Alternative: it applies automatically to every transfer curve of its
-   measurement that is shown. Explicit is proposed — keep it?
-2. Peaking forms: `half-gain (cookbook)` and `from peak` (band-pass sum) are the two offered.
+1. Peaking forms: `half-gain (cookbook)` and `from peak` (band-pass sum) are the two offered.
    Do you need a third Q measure — Q read at 3 dB below the peak of the *symmetric* form, which
    some consoles print — or is "enter the Q you measured" enough?
-3. Plot handles (drag f / gain, Shift-drag Q) in the first cut, or keyboard editor only first?
-4. Key: Alt+E for the editor and for "apply to the selected curve" — acceptable, or another
-   plain/Shift key?
-5. Should the predicted curves also be offered on spectrum / RTA panes (`spectrum × EQ`, which
-   math channels already support for a stored transfer B), or transfer only for now?
+2. Plot handles (drag f / gain, Shift-drag Q) in the first cut, or keyboard editor only first?
+3. Keys: Alt+Q opens the editor, Alt+E toggles "after EQ" on the selected curve, Shift+Enter
+   in the editor marks "in the console" — acceptable, or other plain/Shift keys?
+4. A linked pair (one set feeding L and R of a stereo processor): `copy` makes independent
+   sets; is a shared set across measurements wanted, or is copy enough?
+5. Should predictions also be offered on spectrum / RTA panes (`spectrum × EQ`, which math
+   channels already support for a stored transfer B), or transfer only for now?
