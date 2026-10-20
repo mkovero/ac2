@@ -75,7 +75,7 @@ pub fn traces(t_: &[TraceMeta]) -> String {
             tr.edit.name.clone(),
             kind_text(tr.kind).to_owned(),
             source_text(&tr.source),
-            ms(tr.delay.0),
+            format::delay(tr.delay.0),
             time_base(&tr.source).to_owned(),
             yes(tr.edit.visible),
         ]);
@@ -150,7 +150,7 @@ pub fn trace_meta(t: &TraceMeta) -> String {
         TraceSource::Average {
             reference: DelayReference::Fixed { delay },
             ..
-        } => format!("\n  phase ref   {}", ms(delay.0)),
+        } => format!("\n  phase ref   {}", format::delay(delay.0)),
         _ => String::new(),
     };
     let epoch = match &t.source {
@@ -174,7 +174,7 @@ pub fn trace_meta(t: &TraceMeta) -> String {
         kind_text(t.kind),
         source_text(&t.source),
         time_base(&t.source),
-        ms(t.delay.0),
+        format::delay(t.delay.0),
         format::arrival_offset(t.edit.delay_nudge.0),
         match t.edit.polarity {
             Polarity::Normal => "normal",

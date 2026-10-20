@@ -147,7 +147,10 @@ impl AppState {
                 self.view.tf.coherence.blank_below = next;
                 self.toast(match next {
                     None => "coherence mask off".to_string(),
-                    Some(t) => format!("coherence mask: hide γ² < {t:.1}"),
+                    Some(t) => format!(
+                        "coherence mask: hide γ² < {}",
+                        format::coherence_readout(f64::from(t))
+                    ),
                 });
             }
             C::CoherencePlacement => self.toggle_coherence_placement(),

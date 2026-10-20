@@ -310,13 +310,13 @@ async fn restore_meas(
                 // new measurement has none, so the whole delay reads as the offset.
                 Ok(_) if d.nudged != d.applied => notes.push(format!(
                     "delay {} applied; its arrival ({}) is not kept: nudges count from 0",
-                    output::ms(d.applied.0),
-                    output::ms(d.applied.0 - d.nudged.0)
+                    ac2_scene::format::delay(d.applied.0),
+                    ac2_scene::format::delay(d.applied.0 - d.nudged.0)
                 )),
                 Ok(_) => {}
                 Err(e) => notes.push(format!(
                     "delay {} not applied: {e}",
-                    output::ms(d.applied.0)
+                    ac2_scene::format::delay(d.applied.0)
                 )),
             }
         }

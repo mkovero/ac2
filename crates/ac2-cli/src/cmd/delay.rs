@@ -65,9 +65,9 @@ fn finding_text(f: &DelayFinding, rate: Option<u32>) -> String {
         DelayOutcome::Accepted { first, strongest } => {
             out.push_str(&format!(
                 "first arrival  {}{}\nstrongest      {}{}\n",
-                output::ms(first.delay.0),
+                ac2_scene::format::delay(first.delay.0),
                 smp(first),
-                output::ms(strongest.delay.0),
+                ac2_scene::format::delay(strongest.delay.0),
                 smp(strongest)
             ));
         }
@@ -77,7 +77,7 @@ fn finding_text(f: &DelayFinding, rate: Option<u32>) -> String {
             let keys: Vec<String> = (1..=ranked.len().min(3)).map(|i| i.to_string()).collect();
             out.push_str(&format!(
                 "strongest      {}{}\n",
-                output::ms(strongest.delay.0),
+                ac2_scene::format::delay(strongest.delay.0),
                 smp(strongest)
             ));
             if let Some(note) = sf::ambiguity_note(&f.outcome) {
@@ -91,7 +91,7 @@ fn finding_text(f: &DelayFinding, rate: Option<u32>) -> String {
             for (i, a) in ranked.iter().enumerate() {
                 t.add_row(vec![
                     (i + 1).to_string(),
-                    output::ms(a.delay.0),
+                    ac2_scene::format::delay(a.delay.0),
                     ac2_scene::format::db_readout(a.level.0),
                     ac2_scene::format::phase_readout(a.phase.0),
                     format!("{} smp", ac2_scene::format::fixed(a.uncertainty_samples, 2)),
@@ -111,7 +111,7 @@ fn finding_text(f: &DelayFinding, rate: Option<u32>) -> String {
         for (i, a) in f.candidates.iter().enumerate() {
             t.add_row(vec![
                 i.to_string(),
-                output::ms(a.delay.0),
+                ac2_scene::format::delay(a.delay.0),
                 ac2_scene::format::db_readout(a.level.0),
             ]);
         }
