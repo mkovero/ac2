@@ -267,6 +267,12 @@ a `#` comment at the top of the file. Never approximated.
   Equalizer APO's documentation and a REW export (no rig data), one per † spelling above;
   import → export → import identity for every expressible shape; every export refusal named;
   `--skip-unsupported` comments; an APO `Channel` / `Include` line refused by number.
+- Settling the † marks: REW 5.40 runs headless on pupu (API on port 4735, GUI on Xvfb; see
+  `tools/crosscheck`). Before the APO reader is written, set one filter of each † kind in REW's
+  EQ (Generic equaliser) and export the filter settings as text; also compare REW's predicted
+  filter response with ac2's for the same section (`BW Oct` warping, default Q, shelf slopes).
+  Filter export plays nothing. The exported text files are hand-checked and kept as test
+  fixtures (they hold no rig data); what they show replaces the † guesses here.
 - `ac2-proto`: wire fixtures for `EqShape`, `Operand::Eq`, `TraceSource::Eq`, WIRE_LOCK bumped.
 - `ac2d` `tests/it/eq.rs` from an empty daemon on the fake backend: a transfer measurement on a
   flat fake path; `eq new` + peaking −6 dB @ 1 kHz → the prediction reads −6 dB at 1 kHz and
