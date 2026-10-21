@@ -404,31 +404,60 @@ and reads the curve back out of each picture.
   `None`, axes 20 Hz – 20 kHz and 60 dB of level on 5 dB marks with the curve's maximum just
   under the top, and saved by REW's own image capture (`Save main graph image`, 1200 px wide,
   no legend, title or cursor, 1 px lines): `<path>/rew/meas_graph_allspl.png` (magnitude
-  alone) and `meas_graph_splphase.png` (magnitude and phase). `meas_graph.json` keeps the axes
-  and settings, and how many other measurements REW held (they would be drawn too). REW's
-  graph settings are put back afterwards. A failure here is noted in `rew_ids.json`
-  (`graphs_error`) and does not touch the import.
+  alone), `meas_graph_splphase.png` (magnitude and phase), `meas_graph_groupdelay.png` (ms,
+  axes from the export's range), `meas_graph_impulse.png` (percent, ±110 %: REW draws the
+  impulse normalised to its peak whatever the export's scale) and `meas_graph_impulse_db.png`
+  (dBFS, 63 dB around the peak). `meas_graph.json` keeps the axes and settings, and how many
+  other measurements REW held (they would be drawn too). REW's graph settings are put back
+  afterwards. A failure here is noted in `rew_ids.json` (`graphs_error`) and does not touch
+  the import. `rew-import --rta` adds REW's RTA (Spectrum mode, 64k FFT, no averaging, one
+  3 s capture of the rig's input, nothing played): the frozen frame's data
+  (`rta/rew/rta_rta_data.json`, dBFS) and REW's picture of it; a fractional-octave mode is
+  not taken, because REW's captured data in those modes matches neither its picture nor the
+  frame's bins summed into bands.
 - **On the host**, `python -m crosscheck visual runs/<UTC time>`: the export REW drew
-  (`meas_fr.json`, dBFS; `meas_fr_spl.json`, SPL, on the speaker path) is written as a text
-  table and drawn by `plotcheck` (`tools/plotcheck`: `ac2_scene::tf::transfer_scene` rendered
-  by `ac2_plot`, the two calls the app's transfer panes go through) at the same pixel size
-  and on the same axes, dark theme, legend hidden. Each picture's curve is then read back
-  by colour, one value per pixel column (grid, text and background are grey on both; the
-  trace is the only colour, and REW's phase is red beside its blue magnitude). REW's pixels
-  are mapped to values through the plot frame found from its grid; ac2's through the
-  geometry plotcheck writes beside its picture (axis ranges and pixel extents). Output in
-  `visual/`: `visual.md`, `results.json`, each pair side by side (`<path>/meas_<graph>_side_by_side.png`),
-  the ac2 renders and the table they were drawn from.
+  (`meas_fr.json`, dBFS; `meas_fr_spl.json`, SPL, on the speaker path; `meas_gd.json`,
+  `meas_ir.json`, the RTA data) is written as a text table and drawn by `plotcheck`
+  (`tools/plotcheck`: the `ac2_scene` scene builders rendered by `ac2_plot`, the calls the
+  app's transfer, IR, spectrum and Leq panes go through) at the same pixel size and on the
+  same axes, dark theme, legend hidden (`--chrome bare`). Each picture's curve is then read
+  back by colour, one value per pixel column (grid, text and background are grey on both;
+  the trace is the only colour, REW's phase dotted beside its magnitude in the measurement's
+  own colours, its RTA black). REW's pixels are mapped to values through the plot frame found
+  from its grid (the impulse picture's overview strip excluded); ac2's through the geometry
+  plotcheck writes beside its picture (axis ranges and pixel extents). The read is the
+  stroke's centre, or its top edge where the centre says nothing: the spectrum (every FFT
+  bin, a band of spikes) and the linear impulse (a vertical line at the peak has its centre
+  on the data at any height). `ac2 spl watch` series beside the run (`*/ac2_spl_*.jsonl`) are
+  drawn on the Leq history strip, both strips (`live`, `span`), ac2 alone: REW's SPL logger
+  has no picture. Output in `visual/`: `visual.md`, `results.json`, each pair side by side
+  (`<path>/meas_<graph>_side_by_side.png`), the ac2 renders and the tables they were drawn
+  from.
 
 Checks, per path, graph and quantity (`visual.<path>.<graph>.<mag|phase>.…`), in pixels:
 
 - `ac2_vs_data_px` — ac2's drawn curve against the numbers it was given, worst column. The
-  one the stage exists for. A pixel column spans a band of frequencies and a line has
-  width, so a curve is held against the span (min…max) of the data inside its column: the
-  residual is the distance to that span, 0 when the line passes through it.
+  one the stage exists for. Both renderers join samples with straight segments, so each
+  drawn point is held to the polyline the data makes in the picture: the distance to the
+  nearest segment within a few columns, which a steep edge or a dense zigzag needs. A
+  column where the data wraps (phase) or turns back and forth more than four times over
+  more than two pixels (a dense comb at the top of the band) is counted and set aside: a
+  band's centre is nobody's value, and at a wrap ac2 joins ±180° with a vertical line where
+  REW leaves a gap (the report says how many columns and how far). Group delay: ac2's own
+  estimate from REW's phase, held against the numbers ac2 computed (`plotcheck --dump`).
 - `rew_vs_data_px` — REW's drawn curve against the same numbers. Validates the reader and
-  REW's own mapping; if both renderers miss the same way, the reader is suspect.
-- `ac2_vs_rew_px` — the two drawn curves against each other, in ac2's pixels.
+  REW's own mapping; if both renderers miss the same way, the reader is suspect. A column
+  with no export sample in it whose segment drops more than four pixels is set aside and
+  counted ("between samples"): REW draws from finer data than it exports (the phase
+  through a notch), so the export's straight segment is not what REW drew there, while ac2
+  draws the export. Group delay keeps its own limit on top (`gd_curve_px`): below 40 Hz the
+  export is a point every other pixel while the delay swings tens of ms between them. The
+  log impulse is INFO: REW's dBFS picture is not 20·log10 of its percent
+  export (3 dB above it at the peak, a floor near −65 dBFS where the export runs to −80),
+  so ac2 is held to the numbers and REW's side is a note.
+- `ac2_vs_rew_px` — the two drawn curves against each other, in ac2's pixels (group delay:
+  its own limit, the two estimators' difference is in it; spectrum: `dense_px`, each renderer
+  thins a line of 32k points to its 1100 columns its own way).
 - `axis.{rew,ac2}_decade_px` — the 100 Hz / 1 kHz / 10 kHz lines each picture shows against
   where its stated frequency axis puts them (ac2: the axis plotcheck reported; a drawing
   that disagrees with its own geometry would pass the curve check and fail this one).
@@ -725,8 +754,8 @@ only when `OSM_HARNESS` is set.
 - **Graphs: REW's `allspl` draws every measurement REW holds**, so the pictures are taken
   right after the meas import, before the ref; `meas_graph.json` says how many others
   there were. REW's phase axis is read from the picture (above). The comparison covers
-  magnitude and wrapped phase on the transfer view; group delay, impulse response, RTA and
-  the SPL panes are not drawn side by side yet.
+  magnitude, wrapped phase, group delay, impulse response (linear and log), the RTA in
+  Spectrum mode and, ac2 alone, the Leq history strip; REW's SPL logger has no picture.
 - **REW live measurements need Pro**, so only the offline import runs. The fixtures'
   "REW live" set came from a GUI session. REW's sweep length is the file's: make another
   file for another length, or use `[stages.rew].repeats`.
@@ -741,3 +770,15 @@ only when `OSM_HARNESS` is set.
 - **Speaker paths at −50 dBFS** leave most of 20–1000 Hz below the noise limit: those band
   rows are INCONCLUSIVE, and room clarity (C50/C80) is INCONCLUSIVE when ac2's decay meets
   the noise before the boundary.
+- **Graphs: REW's RTA in a fractional-octave mode** reports captured data (515 points at
+  48/octave from 4.4 Hz to 7.35 kHz) that matches neither its picture nor the same frame's
+  bins summed into bands, so only Spectrum mode is compared. **REW's log impulse picture**
+  is not derived from its percent export in any way found (above), so it is a note. **ac2
+  draws a wrapped phase's ±180° jump as a vertical line**, REW leaves the gap: the wrap
+  columns are set aside and counted, not judged. **ac2's dense spectrum line sits above the
+  data's column maxima** by about 1 dB on the RTA's noise floor (`rta … ac2_vs_rew_px`
+  fails): it keeps one point per pixel, the column's highest bin, and the segments to the
+  neighbouring columns' maxima pass through the column, so a stroke's top edge is up to
+  half the step to the neighbour above its own maximum; REW draws every bin, a band whose
+  top is the column's maximum. Thinning to each column's extremes, as the IR pane does,
+  would draw the band; the operator's call.

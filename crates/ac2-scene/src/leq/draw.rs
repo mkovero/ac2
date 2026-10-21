@@ -193,18 +193,21 @@ pub(super) fn draw_history(
             });
         }
     }
-    // Legend: each window's name in its colour, along the top of the strip.
-    let mut x = s.plot.x + 30.0;
-    for l in &s.lines {
-        let name = shown_name(&l.name, shared);
-        c.overlay.labels.push(label(
-            name.to_string(),
-            [x, s.plot.y + 4.0],
-            anchor(HAlign::Left, VAlign::Top),
-            theme.small_font_size,
-            l.color,
-        ));
-        x += canvas::text_width(name, theme.small_font_size) + 12.0;
+    // Legend: each window's name in its colour, along the top of the strip. A label, so
+    // it goes with the labels (traces only: the traces alone).
+    if chrome.labels() {
+        let mut x = s.plot.x + 30.0;
+        for l in &s.lines {
+            let name = shown_name(&l.name, shared);
+            c.overlay.labels.push(label(
+                name.to_string(),
+                [x, s.plot.y + 4.0],
+                anchor(HAlign::Left, VAlign::Top),
+                theme.small_font_size,
+                l.color,
+            ));
+            x += canvas::text_width(name, theme.small_font_size) + 12.0;
+        }
     }
 }
 

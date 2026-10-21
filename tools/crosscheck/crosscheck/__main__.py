@@ -74,6 +74,8 @@ def main(argv=None) -> int:
                                            "recordings; plays nothing")
     ri.add_argument("run", type=Path, help="run directory on the rig")
     ri.add_argument("--stages", default="", help="comma list of paths (default: every one with REW recordings)")
+    ri.add_argument("--rta", action="store_true", help="also REW's RTA picture of the rig's input (capture only) "
+                                                       "for the graph comparison, under <run>/rta/rew")
 
     for name, hlp in (("preflight", "read-only checks of the rig, no emission"),
                       ("run", "preflight, then the stages; emitting stages need the flags below")):

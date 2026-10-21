@@ -20,7 +20,7 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - macOS audio: the `coreaudio` backend over `cahal` (github.com/mkovero/cahal): `docs/design/coreaudio.md`.
 - Windows audio: ASIO only over the azo fork, FlexASIO / VB-CABLE in CI: `docs/design/asio.md`.
 - Rig monitor (OSC / Art-Net cues from SPL meters kept on the rig): `docs/user-guide.md` *Rig measurements*.
-- REW cross-check (numbers, and the `visual` stage: ac2's drawing against REW's own graph image, `tools/plotcheck`): `tools/crosscheck`, `docs/rigs/pupu.md`.
+- REW cross-check (numbers, and the `visual` stage: ac2's drawing against REW's own graph image — transfer, group delay, impulse, RTA; the Leq strip ac2-only — `tools/plotcheck`): `tools/crosscheck`, `docs/rigs/pupu.md`.
 - Panes (tiling tree, a measurement's own panes): `PLAN.md` §8.1, `docs/user-guide.md` *Panes: split, close…*.
 - Two-system alignment (delay, polarity, summation in an overlap band; Alt+M, `ac2 align`): `docs/design/alignment.md`, `docs/user-guide.md` *Alignment*.
 - Power cuts and watchdogs: `docs/design/watchdogs.md`.

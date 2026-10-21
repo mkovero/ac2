@@ -118,6 +118,19 @@ spectrum_noise_db = { pass = 0.1, warn = 0.3 }  # white noise per bin, power mea
 curve_px = [1.0, 2.0]
 # ac2's drawn curve against REW's, in ac2's pixels: both renderers' widths add up.
 cross_px = [1.5, 3.0]
+# Group delay drawn by ac2 (its own estimate from the phase) against REW's drawing of REW's
+# estimate: the two estimators' difference is in this one (a 1/12-octave fit against a
+# per-bin derivative), so it is looser; ac2's drawing against its own numbers is curve_px.
+gd_cross_px = [4.0, 8.0]
+# REW's drawn group delay against REW's export: below 40 Hz the export is a point every other pixel
+# while the delay swings tens of ms between them; REW draws finer data than it exports
+gd_curve_px = [4.0, 8.0]
+# REW's phase is dotted: a dot's centre reads a pixel or so off the line it samples
+dotted_px = [2.0, 3.0]
+# Dense data (REW's spectrum mode: tens of FFT bins a pixel column) read at the top of the
+# line: a needle's antialiased flank ramps over several rows, so the top sits a pixel or two
+# off the needle; a column of such data is otherwise a band from its lowest bin to its highest.
+dense_px = [2.0, 4.0]
 # The 100 Hz / 1 kHz / 10 kHz lines a picture shows against where its stated axis puts them.
 axis_px = [1.0, 2.0]
 

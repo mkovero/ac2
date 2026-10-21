@@ -154,3 +154,31 @@ fn a_live_strip_reads_the_second_under_the_cursor() {
     let s = leq_scene(&v, &Status::default(), &Theme::dark(), size(1200.0, 800.0));
     assert!(s.strip_readout.is_none());
 }
+
+/// Traces only (T): the strip's window legend, each name in its trace's colour along the
+/// strip's top, goes with the other labels; the caption stays (tested above).
+#[test]
+fn bare_chrome_drops_the_strip_legend() {
+    let c = cfg();
+    let f = frame(LevelScale::DbSpl);
+    let mut h = LeqHistory::default();
+    h.backfill(&super::caption::rebuilt(600, START_S + 600, 80.0));
+    let mut v = view(&c, &f, &h);
+    let legend = |s: &LeqScene| -> Vec<String> {
+        let top = s.history.as_ref().expect("strip").plot.y + 4.0;
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .filter(|l| l.pos[1] == top && l.text.ends_with(" min"))
+            .map(|l| l.text.clone())
+            .collect()
+    };
+    let full = leq_scene(&v, &Status::default(), &Theme::dark(), size(1200.0, 800.0));
+    let names = legend(&full);
+    assert_eq!(names.len(), c.windows.len(), "{names:?}");
+    assert!(names.iter().any(|n| n.ends_with("15 min")), "{names:?}");
+    v.chrome = crate::view::PlotChrome::Bare;
+    let bare = leq_scene(&v, &Status::default(), &Theme::dark(), size(1200.0, 800.0));
+    assert!(legend(&bare).is_empty(), "{:?}", legend(&bare));
+}
