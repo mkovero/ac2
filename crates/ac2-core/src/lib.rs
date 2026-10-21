@@ -28,5 +28,6 @@ pub mod smoothing;
 pub mod spectrum;
 pub mod spl;
 pub mod sweep;
+pub mod target;
 pub mod timing;
 pub mod weighting;

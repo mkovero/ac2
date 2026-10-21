@@ -322,6 +322,27 @@ impl Shared {
         Ok(self.add_trace(t, imp.grid, imp.columns))
     }
 
+    /// `trace.target`, as the daemon: the same columns, filed as an import.
+    pub(super) fn trace_target(
+        &mut self,
+        curve: TargetCurve,
+        name: String,
+    ) -> Result<ReplyBody, ProtoError> {
+        let (grid, columns) =
+            ac2_traces::target::generate(&curve).map_err(|e| err(ErrorCode::Invalid, e))?;
+        let id = self.alloc_trace();
+        let t = Self::new_meta(
+            id,
+            name,
+            None,
+            TraceKind::Target,
+            TraceSource::Generated { curve },
+            &grid,
+            Seconds(0.0),
+        );
+        Ok(self.add_trace(t, grid, columns))
+    }
+
     /// `trace.mic_curve`, as the daemon: the named curve of the mic library, normalised at
     /// the trace's calibrator frequency (1 kHz without one).
     pub(super) fn trace_mic_curve(

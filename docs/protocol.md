@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 60`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 61`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -128,6 +128,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.delete` | `trace` | `ack` | |
 | `trace.average` | `traces`, `method`, `reference`, `name` | `trace` | |
 | `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| ir_wav \| auto`, `role: trace \| target`, `ir: IrImport \| nil`, `content: bin` | `trace` | |
+| `trace.target` | `curve: TargetCurve`, `name` | `trace` | |
 | `trace.export` | `trace`, `format: ac2_csv \| ir_wav` | `export` (`file_name`, `content: bin`) | |
 | `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
@@ -1043,8 +1044,8 @@ display edits and are never applied to the stored data.
 - **Time base (decisions 8a / 8b).** Captured traces (`captured`, `sweep`) share the
   time base of their session epoch, and so does a `math` capture whose `phase` is
   `shared_time_base` and whose expression is a sum, difference or average (a ratio or a
-  cascade is relative, in no time base); every other source (`imported`, `average`, other
-  `math`) is independent.
+  cascade is relative, in no time base); every other source (`imported`, `generated`,
+  `average`, other `math`) is independent.
 - `trace.average`: ≥ 2 distinct traces of one kind (no targets; a tone and a density
   spectrum are different kinds). Transfer: `power` (RMS
   magnitude, phase of the complex mean), `complex`, `coherence_weighted` (weight
@@ -1080,6 +1081,20 @@ display edits and are never applied to the stored data.
   `pick_channel` (a multi-channel file without `ir.channel`, or a channel it lacks),
   `no_impulse` (every sample zero or not finite, fewer than 2), `bad_options` (above, or
   a gate not finite, `pre` < 0 or `post` ≤ 0).
+- `trace.target`: a target curve the daemon generates instead of reading a file, as a
+  `kind: target` trace under `imported`, named `name`, `source.generated` {`curve`}, `delay`
+  0. `TargetCurve` (tagged by `shape`): `flat` (0 dB); `tilt` {`slope_db_per_oct`,
+  `pivot: Hz`, `lf_shelf: LfShelf | nil`} — `slope · log₂(f / pivot)` dB plus, with
+  `LfShelf` {`gain: Db`, `corner: Hz`}, the cookbook second-order low shelf at slope S = 1
+  with half its gain at `corner` (analog prototype); both on the 1/48-octave log grid from
+  20 Hz to 20 kHz; `loudness_shift` {`from: Phon`, `to: Phon`} — how the perceived tonal
+  balance of a programme balanced at `from` changes when played at `to`: the difference of
+  the two ISO 226:2003 equal-loudness-level contours, each referred to its own 1 kHz value
+  (`C_from − C_to`, 0 dB at 1 kHz), defined at the standard's 29 one-third-octave
+  frequencies (20 Hz … 12.5 kHz) and on the log grid between them linear over log frequency.
+  It describes perception, not a response to equalise to. `invalid` outside slope ±6 dB/oct,
+  pivot 20 Hz … 20 kHz, shelf gain ±20 dB, corner 20 … 1000 Hz, loudness 20 … 100 phon, or
+  `from` = `to`.
 - `trace.export` `format: ir_wav`: the trace's impulse response (a transfer trace's `ir`,
   else a sweep's) as a mono 32-bit float WAV at its sample rate, every stored sample as
   stored (an imported file's samples come back bit-exact; `file_name` `<name>.wav`). A trace

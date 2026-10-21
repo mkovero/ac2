@@ -1471,9 +1471,57 @@ as a level difference. A locked trace keeps its offset.
 - **M** averages the shown stored traces of the transfer pane's group (power; complex and
   coherence-weighted in the palette). For ÷ × + −, **Shift+M** with the trace selected
   starts with it as A.
-- **Z** loads a target curve; the palette imports CSV and other analyzers' text exports.
+- **Z** adds a target curve: from a file or one of the built-in curves (below); the palette
+  imports CSV and other analyzers' text exports.
 - `ac2 trace display <trace> on|off`, `ac2 trace slot <trace> 3` (`none` frees it); `ac2
   trace list` shows both.
+
+### Target curves
+
+**Z** (palette *Target curve…*) asks which target to add:
+
+| row | what it is | CLI |
+|---|---|---|
+| Load a file… | a curve from another analyzer or typed by hand (`freq dB` per line) | `ac2 trace import house.txt --target` |
+| Flat | 0 dB at every frequency | `ac2 trace target flat` |
+| House tilt… | a slope in dB/oct through 0 dB at a pivot, optionally with an LF shelf | `ac2 trace target tilt --slope -1dB/oct --pivot 1kHz [--shelf 6dB --shelf-corner 100Hz]` |
+| Loudness shift… | how the balance seems to change between two listening levels | `ac2 trace target loudness --from 85phon --to 100phon` |
+
+Each row also has its own palette entry (*Flat target*, *House tilt target…*, *Loudness
+shift…*, *Load target file…*). The daemon computes the curve and stores it as a target
+trace, magnitude only, in the Imported group; it is saved with the session like any other
+trace. Its name says its parameters: `flat`, `tilt −1.0 dB/oct @ 1 kHz`,
+`tilt −1.0 dB/oct @ 1 kHz, LF +6.0 dB @ 100 Hz`, `loudness 85 → 100 phon`.
+
+- **House tilt** (default −1.0 dB/oct about 1 kHz, no shelf): slope −6 … 6 dB/oct, pivot
+  20 Hz … 20 kHz. The **LF shelf** (±20 dB, corner 20 Hz … 1 kHz) is a second-order low
+  shelf with Q = 1/√2 (the RBJ cookbook shape at S = 1), which has half its gain in dB at
+  the corner and rises monotonically, with no overshoot, to its full gain below. It is the
+  same shape as an EQ low shelf, so one filter can match it. Sampled at 1/48 octave from
+  20 Hz to 20 kHz.
+- **Loudness shift** (default 85 → 100 phon, each 20 … 100 phon): the difference between
+  two ISO 226:2003 equal-loudness contours, each set to 0 dB at 1 kHz. It shows how a
+  response balanced by ear at the first level is heard at the second: positive values are
+  frequencies that sound louder there, relative to 1 kHz. From 85 to 100 phon that is about
+  +7.9 dB at 20 Hz, +4.7 dB at 100 Hz, −0.5 dB around 3–5 kHz and +2.5 dB at 12.5 kHz. The
+  contours are defined from 20 Hz to 12.5 kHz only, so the curve stops there (1/48 octave,
+  interpolated in log frequency between the standard's one-third-octave points). Above
+  90 phon the contours rest on few measurements; treat a shift to 100 phon as indicative.
+
+**A loudness shift is not an EQ target.** It describes perception, not the system: the ear
+flattens out at high levels, so the same response sounds bass-heavier the louder it plays.
+Equalising a system to the shift would build one listening level's perception into its
+response at every level, and the shift changes again whenever the level does. Use it to
+compare: to judge how much of a "too much bass" complaint at show level is the level
+itself, or how a tuning done quietly will sound loud. The chooser, the dialog title and
+the trace's legend say so (`perceived shift, not an EQ target`). A bare equal-loudness
+contour is deliberately not offered as a target at all.
+
+The contour model is ISO 226:2003's published formula (Lp = (10/αf)·lg Af − LU + 94 with
+Af = 4.47·10⁻³·(10^0.025·LN − 1.15) + (0.4·10^((Tf + LU)/10 − 9))^αf), as given in the
+open-access review by Suzuki, Takeshima and Kurakata, *Acoust. Sci. & Tech.* 45(1), 2024
+(CC BY-ND 4.0); the per-frequency αf, LU and Tf are the 2003 edition's, as reproduced in
+Parmanen, *Open Journal of Acoustics* 2, 2012. The paid ISO document is not used.
 
 ### Export and import
 
@@ -2896,7 +2944,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `,` | Delay −0.1 ms | `nudge_earlier` |
 | `.` | Delay +0.1 ms | `nudge_later` |
 | `E` | Set phase reference | `phase_reference` |
-| `Z` | Import target… | `target` |
+| `Z` | Target curve… | `target` |
 | `B` | Coherence mask | `coherence_mask` |
 | `M` | Average power | `average` |
 | `P` | Min/max tracking | `min_max` |
@@ -3012,6 +3060,10 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Finder band sub | `finder_sub` |
 | Finder band custom… | `finder_custom` |
 | Finder observation… | `finder_observation` |
+| Load target file… | `target_file` |
+| Flat target | `target_flat` |
+| House tilt target… | `target_tilt` |
+| Loudness shift… | `target_loudness` |
 | Coherence placement | `coherence_placement` |
 | Legend top-left | `legend_top_left` |
 | Legend top-right | `legend_top_right` |

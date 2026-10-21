@@ -411,7 +411,12 @@ fn transfer_legend_many_curves() {
         .join("../ac2-traces/tests/fixtures/house_curve.txt");
     const CURVES: usize = 30;
     for n in 1..=CURVES {
+        // Z, then the chooser's first row: a target curve from a file.
         h.key_press(Key::Z);
+        step_until(&mut h, "target chooser", |a| {
+            matches!(a.state.overlay, Overlay::Choose(_))
+        });
+        h.key_press(Key::Enter);
         step_until(&mut h, "target prompt", |a| {
             matches!(a.state.overlay, Overlay::Prompt(_))
         });

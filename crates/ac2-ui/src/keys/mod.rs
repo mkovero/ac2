@@ -266,7 +266,11 @@ commands! {
     NudgeEarlier => "nudge_earlier", "Delay −0.1 ms", [Transfer];
     NudgeLater => "nudge_later", "Delay +0.1 ms", [Transfer];
     PhaseReference => "phase_reference", "Set phase reference", [Transfer];
-    Target => "target", "Import target…", [Transfer];
+    Target => "target", "Target curve…", [Transfer];
+    TargetFile => "target_file", "Load target file…", [Transfer];
+    TargetFlat => "target_flat", "Flat target", [Transfer];
+    TargetTilt => "target_tilt", "House tilt target…", [Transfer];
+    TargetLoudness => "target_loudness", "Loudness shift…", [Transfer];
     CoherenceMask => "coherence_mask", "Coherence mask", [Transfer];
     CoherencePlacement => "coherence_placement", "Coherence placement", [Transfer];
     LegendTopLeft => "legend_top_left", "Legend top-left", [Transfer];

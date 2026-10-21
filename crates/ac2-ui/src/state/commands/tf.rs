@@ -137,7 +137,17 @@ impl AppState {
                 }
             },
             C::EqEditor => self.open_eq(out),
-            C::Target => self.prompt(PromptKind::ImportFile(ImportRole::Target), String::new()),
+            C::Target => self.open_target_chooser(),
+            C::TargetFile => {
+                self.prompt(PromptKind::ImportFile(ImportRole::Target), String::new());
+            }
+            C::TargetFlat => self.add_target(ac2_proto::model::TargetCurve::Flat, out),
+            C::TargetTilt => {
+                self.overlay = Overlay::Form(Box::new(crate::target_dialog::tilt_form()));
+            }
+            C::TargetLoudness => {
+                self.overlay = Overlay::Form(Box::new(crate::target_dialog::loudness_form()));
+            }
             C::Average => self.average(AverageMethod::Power, out),
             C::AverageComplex => self.average(AverageMethod::Complex, out),
             C::AverageCoherence => self.average(AverageMethod::CoherenceWeighted, out),

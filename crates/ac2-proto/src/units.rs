@@ -54,6 +54,10 @@ float_unit!(
     /// Impedance magnitude, ohms.
     Ohms
 );
+float_unit!(
+    /// Loudness level, phon: the level in dB SPL of a 1 kHz tone heard as equally loud.
+    Phon
+);
 
 /// Signed sample count (offsets, delays in samples).
 #[derive(

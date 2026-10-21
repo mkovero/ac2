@@ -1,0 +1,306 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "target_curves",
+  "description": "Generated target curves: house tilts with an optional cookbook low shelf on a 1/12-octave grid, ISO 226:2003 equal-loudness-level contours at the standard's 29 frequencies, and the perceived-balance shift between two loudness levels.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_target_curves"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "tilt": "slope * log2(f / pivot) dB",
+    "shelf": "RBJ cookbook analog low shelf, S = 1, f0 = half-gain frequency, scipy.signal.freqs",
+    "contour": "Lp = 10/af lg Af - LU + 94; Af = 4.47e-3 (10^(0.025 LN) - 1.15) + (0.4 10^((Tf+LU)/10 - 9))^af",
+    "shift": "(C_from - C_from(1 kHz)) - (C_to - C_to(1 kHz))",
+    "tilts": {
+      "tilt_m1_1k": [
+        -1.0,
+        1000.0,
+        0.0,
+        0.0
+      ],
+      "tilt_m1_1k_shelf_p6_100": [
+        -1.0,
+        1000.0,
+        6.0,
+        100.0
+      ],
+      "tilt_p05_200_shelf_m4_60": [
+        0.5,
+        200.0,
+        -4.0,
+        60.0
+      ]
+    }
+  },
+  "references": [
+    "Suzuki, Takeshima, Kurakata, Acoust. Sci. & Tech. 45(1) 1-8 (2024), doi:10.1250/ast.e23.66, sec. 2.3",
+    "Parmanen, Open Journal of Acoustics 2, 143-149 (2012), doi:10.4236/oja.2012.24016, Table 1",
+    "R. Bristow-Johnson, Audio EQ Cookbook"
+  ],
+  "scalars": {},
+  "blob": {
+    "file": "target_curves.bin",
+    "nbytes": 6808,
+    "sha256": "5743666c6eb25b0b012a284fe7f0fec1ec5c5b18e4e9435ce90797b25033deeb"
+  },
+  "arrays": [
+    {
+      "name": "tilt_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        133
+      ],
+      "offset": 0,
+      "nbytes": 1064,
+      "unit": "Hz",
+      "description": "tilt evaluation frequencies",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-12
+      }
+    },
+    {
+      "name": "tilt_m1_1k",
+      "dtype": "f64",
+      "shape": [
+        133
+      ],
+      "offset": 1064,
+      "nbytes": 1064,
+      "unit": "dB",
+      "description": "tilt -1.0 dB/oct @ 1000.0 Hz, shelf 0.0 dB @ 0.0 Hz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "tilt_freq_hz"
+    },
+    {
+      "name": "tilt_m1_1k_shelf_p6_100",
+      "dtype": "f64",
+      "shape": [
+        133
+      ],
+      "offset": 2128,
+      "nbytes": 1064,
+      "unit": "dB",
+      "description": "tilt -1.0 dB/oct @ 1000.0 Hz, shelf 6.0 dB @ 100.0 Hz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "tilt_freq_hz"
+    },
+    {
+      "name": "tilt_p05_200_shelf_m4_60",
+      "dtype": "f64",
+      "shape": [
+        133
+      ],
+      "offset": 3192,
+      "nbytes": 1064,
+      "unit": "dB",
+      "description": "tilt 0.5 dB/oct @ 200.0 Hz, shelf -4.0 dB @ 60.0 Hz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-09
+      },
+      "axis": "tilt_freq_hz"
+    },
+    {
+      "name": "iso_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 4256,
+      "nbytes": 232,
+      "unit": "Hz",
+      "description": "ISO 226 frequencies",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "contour_20",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 4488,
+      "nbytes": 232,
+      "unit": "dB",
+      "description": "20-phon contour, dB SPL",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      },
+      "axis": "iso_freq_hz"
+    },
+    {
+      "name": "contour_40",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 4720,
+      "nbytes": 232,
+      "unit": "dB",
+      "description": "40-phon contour, dB SPL",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      },
+      "axis": "iso_freq_hz"
+    },
+    {
+      "name": "contour_60",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 4952,
+      "nbytes": 232,
+      "unit": "dB",
+      "description": "60-phon contour, dB SPL",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      },
+      "axis": "iso_freq_hz"
+    },
+    {
+      "name": "contour_80",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 5184,
+      "nbytes": 232,
+      "unit": "dB",
+      "description": "80-phon contour, dB SPL",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      },
+      "axis": "iso_freq_hz"
+    },
+    {
+      "name": "contour_85",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 5416,
+      "nbytes": 232,
+      "unit": "dB",
+      "description": "85-phon contour, dB SPL",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      },
+      "axis": "iso_freq_hz"
+    },
+    {
+      "name": "contour_90",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 5648,
+      "nbytes": 232,
+      "unit": "dB",
+      "description": "90-phon contour, dB SPL",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      },
+      "axis": "iso_freq_hz"
+    },
+    {
+      "name": "contour_100",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 5880,
+      "nbytes": 232,
+      "unit": "dB",
+      "description": "100-phon contour, dB SPL",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      },
+      "axis": "iso_freq_hz"
+    },
+    {
+      "name": "shift_85_100",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 6112,
+      "nbytes": 232,
+      "unit": "dB",
+      "description": "loudness shift 85 -> 100 phon",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      },
+      "axis": "iso_freq_hz"
+    },
+    {
+      "name": "shift_100_85",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 6344,
+      "nbytes": 232,
+      "unit": "dB",
+      "description": "loudness shift 100 -> 85 phon",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      },
+      "axis": "iso_freq_hz"
+    },
+    {
+      "name": "shift_60_90",
+      "dtype": "f64",
+      "shape": [
+        29
+      ],
+      "offset": 6576,
+      "nbytes": 232,
+      "unit": "dB",
+      "description": "loudness shift 60 -> 90 phon",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 1e-12
+      },
+      "axis": "iso_freq_hz"
+    }
+  ]
+}

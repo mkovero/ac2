@@ -12,8 +12,8 @@ use ac2_proto::frame::{Frame, MathState, OperandStatus};
 use ac2_proto::model::{
     AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, IrImport,
     MathConfig, MathExpr, MeasKind, Measurement, MicCurveId, MicCurveRef, MicState, NamedOperand,
-    Operand, Smoothing, SmoothingMode, SweepData, TraceEdit, TraceIr, TraceKind, TraceMeta,
-    TraceMicCurve, TraceOwner, TraceSource, TransferIr,
+    Operand, Smoothing, SmoothingMode, SweepData, TargetCurve, TraceEdit, TraceIr, TraceKind,
+    TraceMeta, TraceMicCurve, TraceOwner, TraceSource, TransferIr,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -642,6 +642,34 @@ impl Control {
         };
         tracing::info!("trace {id} imported ({} rows)", imp.rows);
         Ok(self.add_trace(t, imp.grid, imp.columns, imp.sweep, imp.ir, None))
+    }
+
+    /// `trace.target`: a target curve made from its parameters, filed as an import is.
+    pub(super) fn trace_target(
+        &mut self,
+        curve: TargetCurve,
+        name: String,
+    ) -> Result<ReplyBody, ProtoError> {
+        meta::check_edit(&name, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        let (grid, columns) =
+            ac2_traces::target::generate(&curve).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        let id = self.traces.alloc();
+        let t = TraceMeta {
+            id,
+            edit: meta::new_edit(id, name, None, TraceOwner::Imported),
+            kind: TraceKind::Target,
+            source: TraceSource::Generated { curve },
+            grid_id: grid.id(),
+            delay: Seconds(0.0),
+            depth: None,
+            cal: CalState::Uncalibrated,
+            mic: None,
+            mic_curve: None,
+            created_at: WallNs(wall_ns()),
+            eq_in: Vec::new(),
+        };
+        tracing::info!("trace {id}: target curve generated ({curve:?})");
+        Ok(self.add_trace(t, grid, columns, None, None, None))
     }
 
     /// `trace.mic_curve`: puts the curve the calibration store holds for `mic` on the

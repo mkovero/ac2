@@ -22,6 +22,7 @@ pub mod ops;
 pub mod raw;
 pub mod session;
 pub mod smooth;
+pub mod target;
 pub mod text;
 
 pub use columns::{Columns, StoredTrace, resample};

@@ -10,7 +10,7 @@ use crate::model::{
     DelayReference, DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId,
     MicLoading, OscMessage, OutputSetup, OwnedTraces, PaneLayout, RecordRequest, RecordingRef,
-    ReplayPace, SessionConfig, SessionRef, SplLogWhich, TraceEdit,
+    ReplayPace, SessionConfig, SessionRef, SplLogWhich, TargetCurve, TraceEdit,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, Rev, Seconds, TraceId, TransferId,
@@ -404,6 +404,16 @@ pub enum Command {
         ir: Option<IrImport>,
         /// File content.
         content: Blob,
+    },
+    /// Generate a target curve as a new target trace, imported group (`trace.import` of a
+    /// target, without a file). Refused (`invalid`) for parameters
+    /// [`TargetCurve::check`] refuses.
+    #[serde(rename = "trace.target")]
+    TraceTarget {
+        /// The curve.
+        curve: TargetCurve,
+        /// The trace's name.
+        name: String,
     },
     /// Apply a curve of the mic library to a stored trace, or remove the one applied
     /// (`curve: None`). A display edit: the stored columns stay as measured
@@ -806,6 +816,7 @@ impl Command {
             Self::TraceDelete { .. } => "trace.delete",
             Self::TraceAverage { .. } => "trace.average",
             Self::TraceImport { .. } => "trace.import",
+            Self::TraceTarget { .. } => "trace.target",
             Self::TraceMicCurve { .. } => "trace.mic_curve",
             Self::TraceExport { .. } => "trace.export",
             Self::CalSpl { .. } => "cal.spl",

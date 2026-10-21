@@ -47,6 +47,10 @@ pub enum FormKind {
     TransferEdit,
     /// A WAV / RF64 file imported as an impulse response ([`crate::ir_import_dialog`]).
     IrImport,
+    /// A house tilt target curve ([`crate::target_dialog`]).
+    TargetTilt,
+    /// A loudness shift target curve ([`crate::target_dialog`]).
+    TargetLoudness,
 }
 
 impl FormKind {
@@ -64,6 +68,8 @@ impl FormKind {
             FormKind::RtaEdit => "Edit RTA",
             FormKind::TransferEdit => "Edit transfer measurement (averaging restarts)",
             FormKind::IrImport => "Import impulse response",
+            FormKind::TargetTilt => ac2_scene::target_curve::tilt::TITLE,
+            FormKind::TargetLoudness => ac2_scene::target_curve::loudness::TITLE,
         }
     }
 
@@ -74,6 +80,7 @@ impl FormKind {
                 "Enter creates it; nothing plays · Space on the sweep pane arms a run, Enter plays it"
             }
             FormKind::IrImport => "Enter imports it as a transfer trace",
+            FormKind::TargetTilt | FormKind::TargetLoudness => ac2_scene::target_curve::SUBMIT,
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
@@ -94,6 +101,7 @@ impl FormKind {
         match self {
             FormKind::Sweep => "Create",
             FormKind::IrImport => "Import",
+            FormKind::TargetTilt | FormKind::TargetLoudness => "Add",
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
@@ -162,6 +170,17 @@ pub enum FieldId {
     Gate,
     /// An imported impulse response's gate before the peak.
     GatePre,
+    /// A target tilt's slope in dB per octave.
+    Slope,
+    /// Where a target tilt is 0 dB.
+    Pivot,
+    /// A target tilt's LF shelf gain (`off`: none).
+    ShelfGain,
+    /// Where a target tilt's LF shelf has half its gain.
+    ShelfCorner,
+    /// A loudness shift's levels: judged at, played at.
+    PhonFrom,
+    PhonTo,
 }
 
 /// A field's value: typed text, one of a few options (←/→ pick), or an input of the session

@@ -363,5 +363,16 @@ pub fn commands() -> Vec<Command> {
     ]
     .into_iter()
     .chain(super::eq::eq_commands())
+    .chain([Command::TraceTarget {
+        curve: TargetCurve::Tilt {
+            slope_db_per_oct: -1.0,
+            pivot: Hz(1000.0),
+            lf_shelf: Some(LfShelf {
+                gain: Db(6.0),
+                corner: Hz(100.0),
+            }),
+        },
+        name: "tilt −1.0 dB/oct @ 1 kHz, LF +6.0 dB @ 100 Hz".into(),
+    }])
     .collect()
 }

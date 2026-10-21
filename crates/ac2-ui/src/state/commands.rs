@@ -667,6 +667,10 @@ impl AppState {
             | C::PhaseReference
             | C::EqEditor
             | C::Target
+            | C::TargetFile
+            | C::TargetFlat
+            | C::TargetTilt
+            | C::TargetLoudness
             | C::Average
             | C::AverageComplex
             | C::AverageCoherence

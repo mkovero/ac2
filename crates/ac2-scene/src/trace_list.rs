@@ -19,6 +19,7 @@ pub fn kind_name(t: &TraceMeta) -> &'static str {
         (_, TraceSource::Imported { .. }) => "imported",
         (_, TraceSource::Average { .. }) => "average",
         (_, TraceSource::Eq { .. }) => "EQ",
+        (_, TraceSource::Generated { .. }) => "target",
         (_, TraceSource::Math { expr, .. }) => match expr {
             MathExpr::Average { .. } => "math average",
             MathExpr::Align { .. } => "aligned sum",
@@ -313,6 +314,13 @@ mod tests {
             (TraceKind::Transfer, imported(), "imported"),
             (TraceKind::Sweep, imported(), "imported sweep"),
             (TraceKind::Target, imported(), "target"),
+            (
+                TraceKind::Target,
+                TraceSource::Generated {
+                    curve: TargetCurve::Flat,
+                },
+                "target",
+            ),
             (
                 TraceKind::Spectrum {
                     scale: LevelScale::Dbfs,

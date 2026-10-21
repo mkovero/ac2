@@ -6,7 +6,7 @@ use std::str::FromStr;
 use clap::{Subcommand, ValueEnum};
 
 use super::{AverageArg, ImportFormatArg, MeasRef};
-use ac2_scene::unit_text::{Celsius, Time};
+use ac2_scene::unit_text::{Celsius, Freq, Gain, LoudnessLevel, Slope, Time};
 
 /// `trace …`.
 #[derive(Debug, Subcommand)]
@@ -100,6 +100,15 @@ pub enum TraceCmd {
         /// IR: columns per octave of the response: 1/12, 1/24, 1/48 (default) or 1/96.
         #[arg(long)]
         resolution: Option<ResolutionArg>,
+    },
+    /// Add a built-in target curve: flat, a house tilt, or the loudness shift between two
+    /// listening levels (a perceived shift to compare with, not a response to equalise to).
+    Target {
+        #[command(subcommand)]
+        curve: TargetArg,
+        /// Name (default: the curve's, e.g. `tilt −1.0 dB/oct @ 1 kHz`).
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Export a trace: its columns as ac2 CSV, or its impulse response as a mono 32-bit
     /// float WAV (sweeps, transfer captures, imported IRs).
@@ -322,4 +331,37 @@ impl FromStr for TraceSmoothing {
             }
         })))
     }
+}
+
+/// `trace target …`: the built-in curve.
+#[derive(Debug, Clone, Subcommand)]
+pub enum TargetArg {
+    /// 0 dB at every frequency.
+    Flat,
+    /// A straight line in dB per octave through 0 dB at the pivot, optionally with a
+    /// 2nd-order low shelf (half its gain at the corner).
+    Tilt {
+        /// e.g. `-1dB/oct`.
+        #[arg(long, default_value = "-1dB/oct", allow_hyphen_values = true)]
+        slope: Slope,
+        /// Where the tilt is 0 dB.
+        #[arg(long, default_value = "1kHz")]
+        pivot: Freq,
+        /// LF shelf gain, e.g. `6dB` (default: no shelf).
+        #[arg(long, allow_hyphen_values = true)]
+        shelf: Option<Gain>,
+        /// Where the shelf has half its gain.
+        #[arg(long, default_value = "100Hz", requires = "shelf")]
+        shelf_corner: Freq,
+    },
+    /// The change in perceived balance from one loudness level to another (ISO 226:2003
+    /// equal-loudness contours, 0 dB at 1 kHz). Not an EQ target.
+    Loudness {
+        /// The level the balance was judged at, e.g. `85phon`.
+        #[arg(long, default_value = "85phon")]
+        from: LoudnessLevel,
+        /// The level it is played at.
+        #[arg(long, default_value = "100phon")]
+        to: LoudnessLevel,
+    },
 }

@@ -242,7 +242,8 @@ impl Form {
         let name = |base: &str| Field::text(FieldId::Name, "Name", format!("{base} {n}"), "");
         let input_field = Field::channel(FieldId::Input, "Input", inputs, Some(measurement), "");
         let fields = match kind {
-            // Built by [`Form::sweep`], [`Form::math`] and [`crate::ir_import_dialog::form`].
+            // Built by [`Form::sweep`], [`Form::math`], [`crate::ir_import_dialog::form`] and
+            // [`crate::target_dialog`].
             FormKind::Sweep
             | FormKind::SweepEdit
             | FormKind::Math
@@ -250,7 +251,9 @@ impl Form {
             | FormKind::SpectrumEdit
             | FormKind::RtaEdit
             | FormKind::TransferEdit
-            | FormKind::IrImport => Vec::new(),
+            | FormKind::IrImport
+            | FormKind::TargetTilt
+            | FormKind::TargetLoudness => Vec::new(),
             FormKind::Transfer => vec![
                 Field::channel(
                     FieldId::Reference,
@@ -623,6 +626,9 @@ impl Form {
         let kind = match self.kind {
             FormKind::Sweep | FormKind::SweepEdit => return Err("a sweep dialog".into()),
             FormKind::IrImport => return Err("an import dialog".into()),
+            FormKind::TargetTilt | FormKind::TargetLoudness => {
+                return Err("a target curve dialog".into());
+            }
             FormKind::Math | FormKind::MathEdit => return self.math_config(),
             FormKind::Transfer | FormKind::TransferEdit => {
                 let r = input(FieldId::Reference, "reference input")?;

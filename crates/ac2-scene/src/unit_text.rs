@@ -13,7 +13,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Ohms, Seconds, Volts};
+use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Ohms, Phon, Seconds, Volts};
 
 mod band;
 
@@ -62,7 +62,17 @@ macro_rules! from_unit_text {
     )*};
 }
 
-from_unit_text!(Freq, LevelDbfs, Gain, SplLevel, OhmsArg, Time, DelayAmount);
+from_unit_text!(
+    Freq,
+    LevelDbfs,
+    Gain,
+    SplLevel,
+    OhmsArg,
+    Time,
+    DelayAmount,
+    Slope,
+    LoudnessLevel
+);
 
 fn fail<T>(msg: impl Into<String>) -> Result<T, UnitError> {
     Err(UnitError(msg.into()))
@@ -205,6 +215,34 @@ impl UnitText for Gain {
             return need_unit(s, &u, "db");
         }
         Ok(Self(Db(in_range(s, n, -200.0, 200.0, "gain")?)))
+    }
+}
+
+/// A slope in dB per octave: `-1db/oct`, `0.5 dB/octave`. |x| ≤ 100.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Slope(pub f64);
+
+impl UnitText for Slope {
+    fn parse_text(s: &str, bare: Option<&str>) -> Result<Self, UnitError> {
+        let (n, u) = split_in(s, bare)?;
+        if !matches!(u.as_str(), "db/oct" | "db/octave") {
+            return need_unit(s, &u, "db/oct");
+        }
+        Ok(Self(in_range(s, n, -100.0, 100.0, "slope")?))
+    }
+}
+
+/// A loudness level: `85phon`. 0 ≤ x ≤ 150.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LoudnessLevel(pub Phon);
+
+impl UnitText for LoudnessLevel {
+    fn parse_text(s: &str, bare: Option<&str>) -> Result<Self, UnitError> {
+        let (n, u) = split_in(s, bare)?;
+        if !matches!(u.as_str(), "phon" | "phons") {
+            return need_unit(s, &u, "phon");
+        }
+        Ok(Self(Phon(in_range(s, n, 0.0, 150.0, "loudness level")?)))
     }
 }
 

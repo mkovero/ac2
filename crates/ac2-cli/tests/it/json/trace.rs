@@ -324,3 +324,30 @@ async fn trace_commands_json() -> R {
     assert_eq!(r.json()?["error"]["code"], "not_found");
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn trace_target_adds_a_named_generated_curve() -> R {
+    let f = super::fake()?;
+    let t = ok_json(&f, &["trace", "target", "tilt", "--shelf", "6dB", "--json"]).await?;
+    assert_eq!(
+        t["edit"]["name"],
+        "tilt −1.0 dB/oct @ 1 kHz, LF +6.0 dB @ 100 Hz"
+    );
+    assert_eq!(t["kind"], json!({ "type": "target" }));
+    assert_eq!(t["source"]["type"], "generated");
+    assert_eq!(t["source"]["curve"]["shape"], "tilt");
+    let l = ok_json(
+        &f,
+        &["trace", "target", "--name", "louder", "loudness", "--json"],
+    )
+    .await?;
+    assert_eq!(l["edit"]["name"], "louder");
+    assert_eq!(
+        l["source"]["curve"],
+        json!({ "shape": "loudness_shift", "from": 85.0, "to": 100.0 })
+    );
+    let r = super::ac2(&f, &["trace", "target", "loudness", "--to", "120phon"]).await?;
+    assert_ne!(r.code, 0);
+    assert!(r.stderr.contains("phon"), "{}", r.stderr);
+    Ok(())
+}

@@ -180,7 +180,11 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::DelayFinding(accepted_finding())),
         Ok(ReplyBody::DelayFinding(refused_finding())),
         Ok(ReplyBody::Trace(trace_meta())),
-        Ok(ReplyBody::Traces(vec![trace_meta(), imported_trace_meta()])),
+        Ok(ReplyBody::Traces(vec![
+            trace_meta(),
+            imported_trace_meta(),
+            generated_trace_meta(),
+        ])),
         Ok(ReplyBody::TraceData(Box::new(TraceData {
             meta: trace_meta(),
             mag_db: vec![0.0, -3.0, f32::NAN],

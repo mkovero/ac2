@@ -419,6 +419,19 @@ fn other_commands_parse() {
     ok(&["timing", "--watch"]);
     ok(&["state", "dump"]);
     ok(&["trace", "list", "--json"]);
+    ok(&["trace", "target", "flat"]);
+    ok(&[
+        "trace",
+        "target",
+        "tilt",
+        "--slope",
+        "-0.5dB/oct",
+        "--pivot",
+        "2kHz",
+    ]);
+    ok(&[
+        "trace", "target", "loudness", "--from", "70phon", "--to", "90phon",
+    ]);
     ok(&["auth", "pair", "rig.local", "--server-key", "x"]);
     ok(&["auth", "show"]);
     ok(&["--timeout", "300ms", "devices"]);
@@ -589,6 +602,10 @@ fn refusals() {
         &[
             "gen", "sine", "--freq", "1000", "--out", "1", "--level", "-20dbfs",
         ],
+        // A slope and a loudness level name their units; a shelf corner needs a shelf.
+        &["trace", "target", "tilt", "--slope", "-1"],
+        &["trace", "target", "loudness", "--to", "100db"],
+        &["trace", "target", "tilt", "--shelf-corner", "80hz"],
         // Session backend is never implied.
         &["session", "open", "--in", "1,2"],
         &["session", "open", "--backend", "alsa", "--in", "1"],

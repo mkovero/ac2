@@ -575,6 +575,7 @@ impl Shared {
                 ir,
                 content,
             } => self.trace_import(file_name, format, role, ir, &content.0)?,
+            C::TraceTarget { curve, name } => self.trace_target(curve, name)?,
             C::TraceExport { trace, format } => self.trace_export(trace, format)?,
             C::TraceMicCurve { trace, curve } => self.trace_mic_curve(trace, curve)?,
             C::FileSave { session, .. } => self.file_save(&session)?,

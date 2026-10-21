@@ -19,6 +19,29 @@ pub(crate) fn method(m: AverageArg) -> AverageMethod {
     }
 }
 
+fn target_curve(a: &TargetArg) -> TargetCurve {
+    match a {
+        TargetArg::Flat => TargetCurve::Flat,
+        TargetArg::Tilt {
+            slope,
+            pivot,
+            shelf,
+            shelf_corner,
+        } => TargetCurve::Tilt {
+            slope_db_per_oct: slope.0,
+            pivot: pivot.0,
+            lf_shelf: shelf.map(|g| LfShelf {
+                gain: g.0,
+                corner: shelf_corner.0,
+            }),
+        },
+        TargetArg::Loudness { from, to } => TargetCurve::LoudnessShift {
+            from: from.0,
+            to: to.0,
+        },
+    }
+}
+
 pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     match cmd {
@@ -140,6 +163,15 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
                 })
                 .await?;
             let t = expect_body!("trace.average", r, ReplyBody::Trace(t) => t)?;
+            out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
+        }
+        TraceCmd::Target { curve, name } => {
+            let curve = target_curve(curve);
+            let name = name
+                .clone()
+                .unwrap_or_else(|| ac2_scene::target_curve::name(&curve));
+            let r = c.call(Command::TraceTarget { curve, name }).await?;
+            let t = expect_body!("trace.target", r, ReplyBody::Trace(t) => t)?;
             out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
         }
         TraceCmd::Import {

@@ -9,6 +9,11 @@ fn z_loads_a_target_curve_file() {
     std::fs::write(&house, "20 0\n20000 0\n").expect("write");
     let mut t = T::new();
     t.type_key("Z", "z");
+    // The chooser's first row, highlighted, is the file.
+    assert!(
+        matches!(&t.st.overlay, Overlay::Choose(c) if c.purpose == ChoicePurpose::Target && c.index == 0)
+    );
+    assert!(t.key("Enter").is_empty());
     assert!(matches!(
         &t.st.overlay,
         Overlay::Prompt(p) if p.kind == PromptKind::ImportFile(ImportRole::Target) && p.text.is_empty()

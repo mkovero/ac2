@@ -195,6 +195,7 @@ impl<'a> TfTrace<'a> {
                 *phase,
                 m.kind == ac2_proto::model::TraceKind::Transfer,
             )),
+            TraceSource::Generated { curve } => crate::target_curve::note(curve).map(str::to_owned),
             _ => None,
         };
         Self {

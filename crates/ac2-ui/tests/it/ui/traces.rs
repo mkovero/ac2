@@ -19,8 +19,12 @@ fn stored_traces_and_target() {
     tab_to(&mut h, MeasId(2));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
     step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
-    // Z: a target curve from a file.
+    // Z: a target curve from a file, the chooser's first row.
     h.key_press(Key::Z);
+    step_until(&mut h, "target chooser", |a| {
+        matches!(a.state.overlay, Overlay::Choose(_))
+    });
+    h.key_press(Key::Enter);
     step_until(&mut h, "target prompt", |a| {
         matches!(a.state.overlay, Overlay::Prompt(_))
     });
@@ -415,7 +419,12 @@ fn empty_session_hint() {
 
     // An imported target, without a session to file it under, is under Imported: no pane
     // draws it, and the pane's hint still says how to open a session.
+    // Z, then the chooser's first row: a target curve from a file.
     h.key_press(Key::Z);
+    step_until(&mut h, "target chooser", |a| {
+        matches!(a.state.overlay, Overlay::Choose(_))
+    });
+    h.key_press(Key::Enter);
     step_until(&mut h, "target prompt", |a| {
         matches!(a.state.overlay, Overlay::Prompt(_))
     });
@@ -457,7 +466,12 @@ fn traces_list() {
     tab_to(&mut h, MeasId(2));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
     step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
+    // Z, then the chooser's first row: a target curve from a file.
     h.key_press(Key::Z);
+    step_until(&mut h, "target chooser", |a| {
+        matches!(a.state.overlay, Overlay::Choose(_))
+    });
+    h.key_press(Key::Enter);
     step_until(&mut h, "target prompt", |a| {
         matches!(a.state.overlay, Overlay::Prompt(_))
     });
@@ -559,7 +573,12 @@ fn measurement_tree_and_delete_choices() {
     tab_to(&mut h, MeasId(2));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num3);
     step_until(&mut h, "slot 3", |a| a.state.slots()[2].is_some());
+    // Z, then the chooser's first row: a target curve from a file.
     h.key_press(Key::Z);
+    step_until(&mut h, "target chooser", |a| {
+        matches!(a.state.overlay, Overlay::Choose(_))
+    });
+    h.key_press(Key::Enter);
     step_until(&mut h, "target prompt", |a| {
         matches!(a.state.overlay, Overlay::Prompt(_))
     });
@@ -608,4 +627,53 @@ fn measurement_tree_and_delete_choices() {
     snapshot(&mut h, "measurement_delete_choices");
     h.key_press(Key::Escape);
     step_until(&mut h, "cancelled", |a| a.state.overlay == Overlay::None);
+}
+
+/// Z's built-in curves against the fake daemon: the chooser, the loudness dialog, and the
+/// generated traces it stores under their parameters' names.
+#[test]
+fn built_in_target_curves() {
+    if !have_gpu("built_in_target_curves") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press(Key::Z);
+    step_until(&mut h, "target chooser", |a| {
+        matches!(a.state.overlay, Overlay::Choose(_))
+    });
+    snapshot(&mut h, "target_chooser");
+    for _ in 0..3 {
+        h.key_press(Key::ArrowDown);
+    }
+    h.key_press(Key::Enter);
+    step_until(&mut h, "loudness dialog", |a| {
+        matches!(a.state.overlay, Overlay::Form(_))
+    });
+    snapshot(&mut h, "target_loudness_dialog");
+    h.key_press(Key::Enter);
+    step_until(&mut h, "the loudness shift stored", |a| {
+        a.state.traces.values().any(|(d, _)| {
+            d.meta.edit.name == "loudness 85 → 100 phon"
+                && matches!(
+                    d.meta.source,
+                    ac2_proto::model::TraceSource::Generated { .. }
+                )
+                && d.meta.kind == ac2_proto::model::TraceKind::Target
+        })
+    });
+    // Flat needs no dialog.
+    h.key_press(Key::Z);
+    step_until(&mut h, "target chooser", |a| {
+        matches!(a.state.overlay, Overlay::Choose(_))
+    });
+    h.key_press(Key::ArrowDown);
+    h.key_press(Key::Enter);
+    step_until(&mut h, "flat stored", |a| {
+        a.state
+            .traces
+            .values()
+            .any(|(d, _)| d.meta.edit.name == "flat")
+    });
 }

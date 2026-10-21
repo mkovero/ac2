@@ -70,6 +70,7 @@ fn source_text(s: &TraceSource) -> String {
             }
             t
         }
+        TraceSource::Generated { curve } => format!("generated: {curve:?}"),
         TraceSource::Eq { meas, set, rev } => {
             format!("filter response of EQ set {set} (rev {rev}) of measurement {meas}")
         }

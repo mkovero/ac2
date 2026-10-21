@@ -46,6 +46,7 @@ pub mod session_dialog;
 pub mod sessions;
 pub mod settings;
 pub mod state;
+pub mod target_dialog;
 pub mod theme;
 mod view;
 

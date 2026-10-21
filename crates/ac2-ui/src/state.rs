@@ -72,6 +72,7 @@ mod new_meas;
 mod panes;
 mod queries;
 pub(crate) mod sessions_impl;
+mod target;
 pub use sessions_impl::SessionsMsg;
 mod eq_impl;
 mod stimulus;

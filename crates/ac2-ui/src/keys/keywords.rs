@@ -177,7 +177,11 @@ impl CommandId {
             C::Offset => &["gain", "level"],
             C::PhaseReference => &["phase"],
             C::EqEditor => &["equaliser", "equalizer", "filter", "what-if", "predict"],
-            C::Target => &["curve", "house curve", "reference"],
+            C::Target => &["curve", "house curve", "reference", "tilt", "loudness"],
+            C::TargetFile => &["import", "curve", "house curve", "reference"],
+            C::TargetFlat => &["curve", "zero", "reference"],
+            C::TargetTilt => &["curve", "house curve", "slope", "shelf"],
+            C::TargetLoudness => &["curve", "phon", "iso 226", "equal loudness", "fletcher"],
             C::CoherenceMask => &["coherence", "blank", "gamma"],
             C::CoherencePlacement => &["coherence", "overlay", "gamma"],
             C::LegendTopLeft | C::LegendTopRight | C::LegendBottomLeft | C::LegendBottomRight => {

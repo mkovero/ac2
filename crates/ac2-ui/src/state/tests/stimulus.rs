@@ -500,11 +500,9 @@ fn transfer_commands() {
         t.st.view.tf.phase_reference,
         Some(TraceKey::Live(MeasId(1)))
     );
-    // Z asks for a target file; M with no stored traces says what it needs.
+    // Z asks which target curve; M with no stored traces says what it needs.
     assert!(t.key("Z").is_empty());
-    assert!(
-        matches!(&t.st.overlay, Overlay::Prompt(p) if p.kind == PromptKind::ImportFile(ImportRole::Target))
-    );
+    assert!(matches!(&t.st.overlay, Overlay::Choose(c) if c.purpose == ChoicePurpose::Target));
     t.key("Esc");
     assert!(t.key("M").is_empty());
     assert!(t.last_toast().contains("at least two"));

@@ -65,6 +65,16 @@ impl AppState {
         let Overlay::Form(f) = &mut self.overlay else {
             return;
         };
+        if matches!(f.kind, FormKind::TargetTilt | FormKind::TargetLoudness) {
+            match crate::target_dialog::curve(f) {
+                Ok(curve) => {
+                    self.overlay = Overlay::None;
+                    self.add_target(curve, out);
+                }
+                Err(e) => f.error = Some(e),
+            }
+            return;
+        }
         if f.kind == FormKind::IrImport {
             match crate::ir_import_dialog::request(f) {
                 Ok(req) => {

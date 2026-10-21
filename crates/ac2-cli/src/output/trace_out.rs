@@ -35,6 +35,9 @@ fn source_text(s: &TraceSource) -> String {
             meas_name, number, ..
         } => format!("run {number} of {meas_name}"),
         TraceSource::Eq { set, rev, .. } => format!("EQ {} (rev {rev})", set.0),
+        TraceSource::Generated { curve } => {
+            format!("generated {}", ac2_scene::target_curve::name(curve))
+        }
     }
 }
 
@@ -124,6 +127,9 @@ pub fn trace_meta(t: &TraceMeta) -> String {
                     .map(|n| format!("\n  note        {}", ac2_scene::trace::import_note(*n))),
             )
             .collect(),
+        TraceSource::Generated { curve } => ac2_scene::target_curve::note(curve)
+            .map(|n| format!("\n  note        {n}"))
+            .unwrap_or_default(),
         _ => String::new(),
     };
     let reference = match &t.source {

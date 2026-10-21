@@ -291,3 +291,16 @@ fn calendar_dates() {
     }
     assert!("2000-02-29T00:00".parse::<TimeRef>().is_ok());
 }
+
+#[test]
+fn slopes_and_loudness_levels() {
+    assert_eq!(ok::<Slope>("-1db/oct").0, -1.0);
+    assert_eq!(ok::<Slope>("−0.5 dB / octave").0, -0.5);
+    assert_eq!(in_field::<Slope>("2", "db/oct").map(|s| s.0), Ok(2.0));
+    assert!(bad::<Slope>("-1").contains("missing unit"));
+    assert!(bad::<Slope>("-1 db").contains("expected db/oct"));
+    assert_eq!(ok::<LoudnessLevel>("85phon").0, Phon(85.0));
+    assert_eq!(ok::<LoudnessLevel>("100 phons").0, Phon(100.0));
+    assert!(bad::<LoudnessLevel>("85 db").contains("expected phon"));
+    assert!(bad::<LoudnessLevel>("-5 phon").contains("within"));
+}

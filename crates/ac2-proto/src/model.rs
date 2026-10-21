@@ -25,6 +25,7 @@ mod session;
 mod spl;
 mod state;
 mod sweep;
+mod target;
 mod trace;
 
 pub use align::*;
@@ -48,4 +49,5 @@ pub use session::*;
 pub use spl::*;
 pub use state::*;
 pub use sweep::*;
+pub use target::*;
 pub use trace::*;

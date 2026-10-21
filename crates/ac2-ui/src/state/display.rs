@@ -54,6 +54,9 @@ pub enum ChoicePurpose {
     /// New measurement: the answer is a kind, in [`ac2_scene::new_meas::NewKind::ALL`]'s
     /// order; its form opens.
     NewMeasurement,
+    /// A target curve: the answer is in [`ac2_scene::target_curve::TargetChoice::ALL`]'s
+    /// order; a file prompt, a dialog, or (flat) the curve itself follows.
+    Target,
     /// Compare `item` with…: each answer is a measurement in `targets` whose panes draw it
     /// (`on`) or not; taking one toggles it and the question stays.
     Compare {
@@ -371,6 +374,7 @@ impl AppState {
         match c.purpose {
             ChoicePurpose::Compare { .. } => self.compare_pick(c, i, out),
             ChoicePurpose::NewMeasurement => self.new_measurement_pick(i, out),
+            ChoicePurpose::Target => self.target_pick(i, out),
             p @ (ChoicePurpose::Unsaved { .. }
             | ChoicePurpose::Replace { .. }
             | ChoicePurpose::Salvage { .. }) => self.session_answer(p, i, out),

@@ -161,6 +161,27 @@ pub(super) fn imported_trace_meta() -> TraceMeta {
     }
 }
 
+/// A generated target curve.
+pub(super) fn generated_trace_meta() -> TraceMeta {
+    TraceMeta {
+        id: TraceId(9),
+        edit: TraceEdit {
+            owner: TraceOwner::Imported,
+            ..edit()
+        },
+        kind: TraceKind::Target,
+        source: TraceSource::Generated {
+            curve: TargetCurve::house_tilt(),
+        },
+        delay: Seconds(0.0),
+        depth: None,
+        cal: CalState::Uncalibrated,
+        mic: None,
+        mic_curve: None,
+        ..trace_meta()
+    }
+}
+
 pub(super) fn sweep_run() -> SweepRun {
     SweepRun {
         id: SweepId(3),
