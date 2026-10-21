@@ -341,8 +341,9 @@ class CurveRead:
     whose data leaves the axis range has no span (NaN): the drawn line is clipped there.
     `band`, `seam` and `between` columns (see [`data_span`]; a seam with its neighbours, which
     the vertical stroke's antialiasing spills into) are counted and their worst distance
-    kept, but stay out of the verdict: a band's centre is not a line's; at a wrap ac2 draws
-    the jump as a vertical line (a finding the report notes) where REW leaves a gap; and
+    kept, but stay out of the verdict: a band's centre is not a line's; at a wrap REW draws
+    the jump as a vertical (dotted) line where ac2 leaves a gap, so the column holds the
+    whole axis in one picture and nothing in the other; and
     between export samples REW draws what it has, not the export's segment (ac2 draws the
     export, so for it `between` is empty)."""
     x: np.ndarray
@@ -1103,7 +1104,7 @@ def report(doc: dict) -> str:
               "in pixels, positive downwards; a residual is what remains outside the data's span in the column. A column "
               "whose data leaves the axis range is skipped: the line is clipped there. A band column holds more samples than "
               "a line (a dense comb): its drawn centre is nobody's value, so it is counted and set aside; so is a wrap column, "
-              "where ac2 joins ±180° with a vertical line and REW leaves a gap; and a column between export samples where the "
+              "where REW joins ±180° with a vertical dotted line and ac2 leaves a gap; and a column between export samples where the "
               "segment drops more than four pixels: REW draws from finer data than it exports.", ""]
     return "\n".join(lines)
 

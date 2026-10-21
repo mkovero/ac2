@@ -442,8 +442,8 @@ Checks, per path, graph and quantity (`visual.<path>.<graph>.<mag|phase>.…`), 
   nearest segment within a few columns, which a steep edge or a dense zigzag needs. A
   column where the data wraps (phase) or turns back and forth more than four times over
   more than two pixels (a dense comb at the top of the band) is counted and set aside: a
-  band's centre is nobody's value, and at a wrap ac2 joins ±180° with a vertical line where
-  REW leaves a gap (the report says how many columns and how far). Group delay: ac2's own
+  band's centre is nobody's value, and at a wrap REW joins ±180° with a vertical dotted line
+  where ac2 leaves a gap (the report says how many columns and how far). Group delay: ac2's own
   estimate from REW's phase, held against the numbers ac2 computed (`plotcheck --dump`).
 - `rew_vs_data_px` — REW's drawn curve against the same numbers. Validates the reader and
   REW's own mapping; if both renderers miss the same way, the reader is suspect. A column
@@ -773,9 +773,9 @@ only when `OSM_HARNESS` is set.
 - **Graphs: REW's RTA in a fractional-octave mode** reports captured data (515 points at
   48/octave from 4.4 Hz to 7.35 kHz) that matches neither its picture nor the same frame's
   bins summed into bands, so only Spectrum mode is compared. **REW's log impulse picture**
-  is not derived from its percent export in any way found (above), so it is a note. **ac2
-  draws a wrapped phase's ±180° jump as a vertical line**, REW leaves the gap: the wrap
-  columns are set aside and counted, not judged. **ac2's dense spectrum line sits above the
+  is not derived from its percent export in any way found (above), so it is a note. **REW
+  draws a wrapped phase's ±180° jump as a vertical dotted line**, ac2 leaves the gap: the
+  wrap columns are set aside and counted, not judged. **ac2's dense spectrum line sits above the
   data's column maxima** by about 1 dB on the RTA's noise floor (`rta … ac2_vs_rew_px`
   fails): it keeps one point per pixel, the column's highest bin, and the segments to the
   neighbouring columns' maxima pass through the column, so a stroke's top edge is up to
