@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 57
+PROTO_VERSION = 60
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -147,8 +147,18 @@ _OPERAND_STATUS = ("tagged", {
     "refused": [("protection", None)],
     "mismatch": [],
 })
+_ALIGN_CANDIDATE = [("delay", None), ("delayed", None), ("inverted", None), ("residual_deg", None),
+                    ("score", None)]
+_SUMMATION = [("mean_db", None), ("worst_db", None)]
+_ALIGN = ("opt", [("outcome", ("tagged", {
+    "fit": [("fit", [("best", _ALIGN_CANDIDATE), ("other_polarity", ("opt", _ALIGN_CANDIDATE)),
+                     ("runner_up", ("opt", _ALIGN_CANDIDATE)), ("before", _SUMMATION),
+                     ("after", _SUMMATION), ("columns", None)])],
+    "no_fit": [("why", ("tagged", {"few_operands": [], "few_columns": [("found", None)],
+                                   "no_weight": []}))],
+}))])
 _MATH = ("opt", [("operands", ("list", [("operand", _OPERAND), ("status", _OPERAND_STATUS)])),
-                 ("phase", None)])
+                 ("phase", None), ("align", _ALIGN)])
 _POSITION = [("level", None), ("peak", None)]
 _PEAK = [("level", None), ("judgement", None)]
 META = {

@@ -55,8 +55,9 @@ app runs). Profiles in `.config/nextest.toml`:
 - Comments explain why the math/physics requires something — never issue numbers or history.
 - `ac` is a source of ideas and test material, never code to copy file-for-file, and never
   the oracle for expected results (use `tools/refgen` / analytic models).
-- Put a new dependency in the crate's own `Cargo.toml`; don't edit `[workspace.dependencies]`
-  in parallel branches.
+- Put a new dependency in the crate's own `Cargo.toml`. One used by several crates lives in the
+  root `[workspace.dependencies]` (members: `x = { workspace = true, features = [..] }`), and
+  only one branch at a time edits that table.
 - Audio callback: no allocation, locks or syscalls.
 - CI must stay green: after pushing, check the run (`gh run list --branch main`). Pushes run
   Linux only; macOS/Windows run before each release or on demand
@@ -70,9 +71,13 @@ What an agent reads stays in its context for the rest of the session; keep reads
 - Locate before reading: `grep -n` the symbol, then read about 60 lines around it. Never page
   through a file top to bottom. Big docs (`PLAN.md`, `docs/protocol.md`, `docs/user-guide.md`):
   `grep -n '^#'` first, read one section.
+- Type names repeat across crates (`State`, `Transfer`, `Stimulus`, `Rig`, …): grep the definition
+  in one crate, `grep -rnE 'pub (struct|enum) X\b' crates/<crate>`.
 - Iterate with `cargo nextest run -p <crate> <filter>`; quick tier before commit/push (see *Tests*).
   Long commands run in the background (notified on exit) — no `until`/`sleep` polling loops.
 - UI changes: assert the `ac2-scene` text first; view a snapshot PNG only for the final look.
+- UI-only tests without the daemon (no ac2d/DSP/audio build):
+  `cargo nextest run -p ac2-ui --no-default-features -E 'test(/^ui::/)'`.
 - Delegation: one task per agent with the files and functions named in the brief; the agent
   ends when the task is done. Unrelated follow-ups go to a fresh agent, not via SendMessage.
 

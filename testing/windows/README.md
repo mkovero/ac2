@@ -141,7 +141,7 @@ driver you used.
   (close the app first: a driver runs in one program at a time).
 - **Rate and buffer.** With none chosen, ac2 opens at the driver's current rate and its
   preferred buffer size. Many drivers set the buffer only in their own control panel.
-- **Driver control panel.** In Settings › Audio & I/O, with an ASIO device chosen, the
+- **Driver control panel.** In Settings › Audio I/O, with an ASIO device chosen, the
   **Driver control panel… (P)** button (or **P**) opens the driver's own settings window;
   `ac2 session panel` does the same from the command line (on the PC running ac2d). A rate
   or buffer change there resets the driver: the session reopens by itself **at the
@@ -169,8 +169,8 @@ driver you used.
 Pass: the interface is listed, its inputs show live levels, and a session opens without
 errors.
 
-1. In the app, **Shift+O** (or **Ctrl+K → Open audio session…**) opens Settings on its
-   **Audio & I/O** page, on the **Input** row.
+1. In the app, **Shift+O** (or **Ctrl+K → Open audio I/O…**) opens Settings on its
+   **Audio I/O** page, on the **Input** row.
 2. **Input** (←/→): step through the list and write down every entry and what each shows
    (*N in / M out · rate · buffer*). Pick your interface's ASIO driver (or **FlexASIO**).
    The **Output** row follows it: one ASIO driver serves both directions. Note the clock
@@ -193,7 +193,7 @@ check the `[output]` device in `FlexASIO.toml`): go back to step 2.
 From the CLI the same session is `ac2 session open --backend asio --device "<driver>" --in
 1-2` (the name as `ac2 devices` lists it).
 
-Also worth a try: close the session (**Ctrl+K → Close audio session**), set the interface to
+Also worth a try: close the session (**Ctrl+K → Close audio I/O**), set the interface to
 96000 Hz in its driver's control panel (with FlexASIO, both devices in `mmsys.cpl`), reopen,
 and check the top bar shows 96 kHz. Unplug and replug
 the interface while a session is open (ac2 should say so and recover, not crash). If the
@@ -215,7 +215,7 @@ Pass: an electrical loop reads flat (0 dB, 0°, coherence 1) and the delay finde
 the interface's own latency between the two inputs, about 0 ms.
 
 1. Make the stimulus play on both outputs: **Ctrl+P**, **Alt+1**
-   (Settings › Audio & I/O), **S** on output 2 as well, **Esc**. Output 1 feeds the
+   (Settings › Audio I/O), **S** on output 2 as well, **Esc**. Output 1 feeds the
    reference over cable 1, output 2 the "measurement" over cable 2, so the measurement is a
    wire and the answer is known.
 2. **L**, type `-40`, **Enter**; **Space** arms, **Enter** plays pink noise. The transfer pane should show magnitude near 0 dB, phase near 0° and
@@ -333,7 +333,7 @@ Checks the file writes and the replay path on Windows.
    *Record: raw audio of every input on / off*. The top bar shows `REC 0:12 · … MB`. After
    a minute, the same command again stops it; the top bar names the recording
    (`recorded rec-… · 1:00 · … MB`).
-2. Stop the noise. **Ctrl+K → Replay a recording as the session (name or path)…**, type
+2. Stop the noise. **Ctrl+K → Replay recording…**, type
    that name, **Enter**. The measurements should show the same curves as live. Note what
    the app shows when the recording ends.
 3. The files are in `%APPDATA%\ac2\data\recordings\`. Note their size.
@@ -342,7 +342,7 @@ Checks the file writes and the replay path on Windows.
 
 Not run under emulation with a real driver yet; each tells us what your driver really does.
 
-1. **Panel.** Session open at 48 kHz. Press **P** in Settings › Audio & I/O (or `ac2
+1. **Panel.** Session open at 48 kHz. Press **P** in Settings › Audio I/O (or `ac2
    session panel`). Does the driver's window appear? Is it in front? Does the app stay
    responsive while it is open? Change the rate to 44.1 kHz (or the buffer size) and close
    it. Note: how long until audio is back, the top bar text, and the rate the measurements

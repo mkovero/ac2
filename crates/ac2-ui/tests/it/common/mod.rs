@@ -18,6 +18,8 @@ use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{Change, Frame, FrameData, GridDef, GridId, Patch};
 
+mod math;
+
 /// A frame the rig publishes, and its grid.
 type Published = (FrameData, Option<GridId>);
 
@@ -55,7 +57,7 @@ fn wrap(d: f64) -> f64 {
 }
 
 fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
-    let freqs = ac2_scene::grid::column_frequencies(&TF_GRID);
+    let freqs = TF_GRID.centres();
     let mag = freqs
         .iter()
         .map(|f| {
@@ -90,6 +92,7 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
         phase,
         coh,
         validity: vec![ValidityMask::NONE; freqs.len()],
+        align: None,
     }
 }
 
@@ -202,7 +205,7 @@ fn ir_frame(meas: u32) -> IrFrame {
 }
 
 fn spec_frame(meas: u32) -> SpecFrame {
-    let freqs = ac2_scene::grid::column_frequencies(&SPEC_GRID);
+    let freqs = SPEC_GRID.centres();
     let level = freqs
         .iter()
         .map(|f| {
@@ -272,6 +275,9 @@ fn measurement(
         grid_id: grid.map(GridDef::id),
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
     }
 }
 
@@ -405,6 +411,7 @@ impl Rig {
                             averaging: SpecAveraging::Off,
                             smoothing: smoothed.then_some(SmoothingFraction::Sixth),
                             level: ac2_proto::model::SpecLevel::Tone,
+                            display: Default::default(),
                         },
                     },
                     None,
@@ -506,6 +513,21 @@ impl Rig {
         *self.tf_protection.lock().unwrap() = flags;
     }
 
+    /// The curves compared into measurement `meas` (`meas.compare`, as the C chooser sets
+    /// them), first compared first.
+    pub fn compare_into(&self, meas: u32, compared: Vec<ac2_proto::model::Compared>) {
+        let mut s = self.fake.lock();
+        let mut m = s
+            .state
+            .measurements
+            .iter()
+            .find(|m| m.id == MeasId(meas))
+            .cloned()
+            .expect("the measurement");
+        m.compared = compared;
+        s.commit(Change::Measurement(Patch::Set(m)));
+    }
+
     /// Adds a third transfer position "Seat 3" (5, stopped) and "Audience" (6), a math
     /// channel: the power average of Main L, Delay tower and Seat 3, whose frames say Seat 3
     /// was left out (stopped): two of three positions averaged.
@@ -550,6 +572,7 @@ impl Rig {
                 .map(|(operand, status)| OperandState { operand, status })
                 .collect(),
             phase: PhaseBasis::SharedTimeBase,
+            align: None,
         }));
         self.extra
             .lock()
@@ -579,6 +602,7 @@ impl Rig {
                         averaging: SpecAveraging::Off,
                         smoothing: None,
                         level: ac2_proto::model::SpecLevel::Tone,
+                        display: Default::default(),
                     },
                 },
                 None,
@@ -604,7 +628,7 @@ impl Rig {
             s.commit(Change::Measurement(Patch::Set(m)));
         }
         let mut f = spec_frame(7);
-        let freqs = ac2_scene::grid::column_frequencies(&SPEC_GRID);
+        let freqs = SPEC_GRID.centres();
         f.level = freqs
             .iter()
             .map(|x| (2.0 * (x.max(20.0) / 1000.0).log2()).clamp(-6.0, 6.0) as f32)
@@ -617,6 +641,7 @@ impl Rig {
                 })
                 .to_vec(),
             phase: PhaseBasis::NoPhase,
+            align: None,
         }));
         self.extra
             .lock()
@@ -684,6 +709,7 @@ fn grid_of(row: &[ac2_ui::state::View]) -> ac2_ui::prefs::PanesPrefs {
             measurement: None,
             modes: v.modes,
             levels: Default::default(),
+            plates: Default::default(),
         })
         .collect();
     ac2_ui::prefs::PanesPrefs {
@@ -770,4 +796,18 @@ pub fn layout_of(p: &ac2_ui::prefs::PanesPrefs) -> ac2_ui::state::Layout {
         })
         .collect();
     ac2_ui::state::Layout::of(p.root.clone(), views, p.focus)
+}
+
+/// How many of a scene's texts an assert message shows.
+pub const TEXTS_SHOWN: usize = 20;
+
+/// The first `n` texts and how many there are, for an assert message: a whole pane's labels
+/// run to a hundred lines and more, printed again on every failing assert.
+pub fn scene_texts_excerpt<S: AsRef<str>>(texts: &[S], n: usize) -> String {
+    let shown: Vec<&str> = texts.iter().take(n).map(AsRef::as_ref).collect();
+    if texts.len() > n {
+        format!("{shown:?} … ({n} of {} texts)", texts.len())
+    } else {
+        format!("{shown:?} ({} texts)", texts.len())
+    }
 }

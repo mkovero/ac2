@@ -25,6 +25,8 @@ use egui_kittest::{Harness, SnapshotOptions};
 
 mod band;
 mod drag;
+mod eq;
+mod export;
 mod leq;
 mod overlays;
 mod session;
@@ -111,7 +113,13 @@ fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool)
     while !(cond(h.state()) && named(h.state())) {
         if t0.elapsed() > WAIT {
             let a = h.state();
-            let toasts: Vec<&str> = a.state.toasts.iter().map(|t| t.text.as_str()).collect();
+            let toasts: Vec<&str> = a
+                .state
+                .toasts
+                .list
+                .iter()
+                .map(|t| t.text.as_str())
+                .collect();
             panic!(
                 "timed out waiting for {what}; conn {:?}; overlay {:?}; stimulus {:?}; toasts {toasts:?}",
                 a.state.conn, a.state.overlay, a.state.stimulus.phase
@@ -337,6 +345,12 @@ impl Drop for Meters {
 fn session_dialog_of(a: &App) -> Option<&ac2_ui::session_dialog::SessionDialog> {
     a.state.overlay.settings().map(|s| &s.session)
 }
+
+/// Whether the New measurement chooser is open (as a fresh session opens it).
+fn new_meas_chooser(a: &App) -> bool {
+    matches!(&a.state.overlay, Overlay::Choose(c)
+        if c.purpose == ac2_ui::state::ChoicePurpose::NewMeasurement)
+}
 /// The pictures' local time: UTC+2, so the show starts at 19:02 on any machine.
 const SHOW_ZONE: ac2_ui::scenes::LocalZone = ac2_ui::scenes::LocalZone::Fixed { offset_s: 7200 };
 
@@ -366,6 +380,25 @@ fn drag(h: &mut Harness<'_, App>, from: egui::Pos2, to: egui::Pos2) {
         settle(h, 1);
     }
     h.event(button(to, false));
+    settle(h, 3);
+}
+
+/// Two clicks at `at` in quick succession.
+fn double_click(h: &mut Harness<'_, App>, at: egui::Pos2) {
+    let button = |pressed| Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    h.event(Event::PointerMoved(at));
+    settle(h, 2);
+    // The harness gives each queued event a frame of a quarter second, longer than egui's
+    // 0.3 s between the clicks of a double click: both clicks go into one frame's input.
+    for _ in 0..2 {
+        h.input_mut().events.push(button(true));
+        h.input_mut().events.push(button(false));
+    }
     settle(h, 3);
 }
 

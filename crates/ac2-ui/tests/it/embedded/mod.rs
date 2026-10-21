@@ -8,7 +8,11 @@
 //!   new-measurement dialog creates and starts a measurement, frames arrive.
 #![cfg(feature = "embedded")]
 
+mod advice;
+mod align;
 mod calibration;
+mod cursor;
+mod eq;
 mod harness;
 mod keep;
 mod math;

@@ -105,13 +105,15 @@ fn live_traces_carry_the_calibration_in_their_caption() {
     let fresh = Freshness::from_age(0.0);
     let t = SpectrumTrace::rta(
         &rta,
-        WallNs(3 * H),
-        Some("mic curve: MM1 90°"),
-        &[],
-        &[],
-        "RTA",
-        Color::WHITE,
-        fresh,
+        LiveMeta {
+            captured: WallNs(3 * H),
+            curve: Some("mic curve: MM1 90°"),
+            freqs: &[],
+            edges: &[],
+            name: "RTA".into(),
+            color: Color::WHITE,
+            freshness: fresh,
+        },
     );
     assert_eq!(
         t.caption,
@@ -133,13 +135,15 @@ fn live_traces_carry_the_calibration_in_their_caption() {
     };
     let t = SpectrumTrace::spectrum(
         &spec,
-        WallNs(25 * H),
-        None,
-        &[],
-        &[],
-        "FFT",
-        Color::WHITE,
-        fresh,
+        LiveMeta {
+            captured: WallNs(25 * H),
+            curve: None,
+            freqs: &[],
+            edges: &[],
+            name: "FFT".into(),
+            color: Color::WHITE,
+            freshness: fresh,
+        },
     );
     assert_eq!(t.caption, "Hann window · cal 94 dB · 1 d ago");
     assert_eq!(t.quantity, Quantity::Tone);
@@ -147,13 +151,15 @@ fn live_traces_carry_the_calibration_in_their_caption() {
     smoothed.meta.smoothing = Some(SmoothingFraction::Sixth);
     let t = SpectrumTrace::spectrum(
         &smoothed,
-        WallNs(25 * H),
-        None,
-        &[],
-        &[],
-        "FFT",
-        Color::WHITE,
-        fresh,
+        LiveMeta {
+            captured: WallNs(25 * H),
+            curve: None,
+            freqs: &[],
+            edges: &[],
+            name: "FFT".into(),
+            color: Color::WHITE,
+            freshness: fresh,
+        },
     );
     assert_eq!(t.caption, "Hann window · cal 94 dB · 1 d ago");
     assert_eq!(t.quantity, Quantity::SmoothedTone(SmoothingFraction::Sixth));
@@ -221,7 +227,7 @@ fn unit_labels() {
 #[test]
 fn mixed_units_are_flagged() {
     let g = third_octaves();
-    let (f, e) = (column_frequencies(&g), column_edges(&g));
+    let (f, e) = (g.centres(), g.edges());
     let level = vec![-40.0f32; f.len()];
     let a = rta_trace(&f, &e, &level, LevelScale::Dbfs);
     let b = rta_trace(&f, &e, &level, LevelScale::DbSpl);
@@ -256,6 +262,7 @@ fn tone_unit_names_the_bin_and_fits_narrow_panes() {
         drawn: None,
         validity: None,
         peak: None,
+        tracked: None,
         scale: LevelScale::DbSpl,
         quantity: Quantity::narrow(SpecLevel::Tone, Some(SmoothingFraction::Third)),
         bin_hz: cols.bin_hz,
@@ -265,6 +272,8 @@ fn tone_unit_names_the_bin_and_fits_narrow_panes() {
         selected: false,
         compared: false,
         bands: None,
+        style: ac2_proto::model::SpectrumStyle::Line,
+        layer: 0,
     };
     let theme = Theme::dark();
     let scene = |traces: &[SpectrumTrace<'_>], w: f32| {
@@ -376,6 +385,7 @@ fn density_unit_is_per_hertz_on_any_resolution() {
             drawn: None,
             validity: None,
             peak: None,
+            tracked: None,
             scale: LevelScale::Dbfs,
             quantity: Quantity::Density,
             bin_hz: c.bin_hz,
@@ -385,6 +395,8 @@ fn density_unit_is_per_hertz_on_any_resolution() {
             selected: false,
             compared: false,
             bands: None,
+            style: ac2_proto::model::SpectrumStyle::Line,
+            layer: 0,
         }
     }
     let (ta, tb) = (trace(&a, &la, 1), trace(&b, &lb, 2));
@@ -455,6 +467,7 @@ fn a_long_calibration_caption_leaves_the_unit_room() {
         drawn: None,
         validity: None,
         peak: None,
+        tracked: None,
         scale: LevelScale::DbSpl,
         quantity: Quantity::Tone,
         bin_hz: cols.bin_hz,
@@ -464,6 +477,8 @@ fn a_long_calibration_caption_leaves_the_unit_room() {
         selected: false,
         compared: false,
         bands: None,
+        style: ac2_proto::model::SpectrumStyle::Line,
+        layer: 0,
     };
     let theme = Theme::dark();
     let mut captions = Vec::new();

@@ -21,6 +21,7 @@ fn meta(imp: &Imported) -> TraceMeta {
         mic: None,
         mic_curve: None,
         created_at: WallNs(0),
+        eq_in: Vec::new(),
     }
 }
 
@@ -81,7 +82,7 @@ fn a_float_impulse_becomes_a_flat_response_with_its_delay() {
         (1, 0, 4800, 4800, 0)
     );
     assert!((f.peak.0 - d).abs() < 1e-12);
-    let freqs = crate::columns::frequencies(&imp.grid);
+    let freqs = imp.grid.centres();
     for (i, fq) in freqs.iter().enumerate() {
         let (m, p) = (
             imp.columns.mag_db[i],
@@ -112,7 +113,9 @@ fn integer_files_of_every_width_read_to_full_scale() {
         assert_eq!(ir.sample_rate, Hz(44_100.0));
         assert_eq!(ir.ir.linear[10], -0.5, "{bits} bits");
         // −0.5: −6.02 dB, and the inversion is the phase (180°).
-        let k = crate::columns::frequencies(&imp.grid)
+        let k = imp
+            .grid
+            .centres()
             .iter()
             .position(|f| (*f - 1000.0).abs() < 1e-6)
             .expect("1 kHz");

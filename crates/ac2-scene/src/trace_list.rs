@@ -18,8 +18,10 @@ pub fn kind_name(t: &TraceMeta) -> &'static str {
         (TraceKind::Sweep, TraceSource::Imported { .. }) => "imported sweep",
         (_, TraceSource::Imported { .. }) => "imported",
         (_, TraceSource::Average { .. }) => "average",
+        (_, TraceSource::Eq { .. }) => "EQ",
         (_, TraceSource::Math { expr, .. }) => match expr {
             MathExpr::Average { .. } => "math average",
+            MathExpr::Align { .. } => "aligned sum",
             MathExpr::Binary { op, .. } => match op {
                 MathOp::Divide => "A ÷ B",
                 MathOp::Multiply => "A × B",
@@ -201,7 +203,7 @@ pub fn delete_confirm(row: &TraceRow) -> DeleteConfirm {
              it cannot be undone."
                 .to_owned(),
         ],
-        hint: "Delete, Backspace or Enter deletes it · Esc or N keeps it".to_owned(),
+        hint: "Delete or Backspace deletes it · Esc or N keeps it".to_owned(),
         refused: false,
     }
 }
@@ -259,6 +261,7 @@ mod tests {
             mic: None,
             mic_curve: None,
             created_at: WallNs(0),
+            eq_in: Vec::new(),
         }
     }
 

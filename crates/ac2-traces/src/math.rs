@@ -58,7 +58,7 @@ use ac2_proto::model::{AverageMethod, MathOp, PhaseBasis};
 use ac2_proto::units::{Seconds, SessionEpoch};
 use num_complex::Complex64;
 
-use crate::columns::{Columns, StoredTrace, frequencies, resample};
+use crate::columns::{Columns, StoredTrace, resample};
 use crate::ops::{OpError, average_on_time_base};
 
 /// How the operands are combined.
@@ -120,14 +120,14 @@ impl MathError {
         match self {
             Self::Count => "this operator takes two operands".into(),
             Self::NoPhase(k) => format!(
-                "{} has no phase: a sum or difference adds complex values (use ÷ for a \
-                 magnitude comparison)",
+                "{} has no phase: a sum, difference or alignment combines complex values \
+                 (use ÷ for a magnitude comparison)",
                 name(*k)
             ),
             Self::NoSharedTimeBase => "the operands share no time base (an import, or a \
-                capture from an earlier audio session): their relative arrival is unknown, so \
-                they cannot be summed, differenced or averaged with phase; use ÷, ×, or a \
-                power average"
+                capture from an earlier audio I/O): their relative arrival is unknown, so \
+                they cannot be summed, differenced, aligned or averaged with phase; use ÷, \
+                ×, or a power average"
                 .into(),
             Self::NoCoherence(k) => {
                 format!("{} has no coherence to weight by", name(*k))
@@ -170,7 +170,7 @@ pub fn trace_on_grid(t: &StoredTrace, grid: &GridDef, freqs: &[f64]) -> Columns 
     if t.grid.id() == grid.id() {
         t.columns
     } else {
-        resample(&frequencies(&t.grid), &t.columns, freqs)
+        resample(&t.grid.centres(), &t.columns, freqs)
     }
 }
 
@@ -181,7 +181,7 @@ pub fn trace_on_grid(t: &StoredTrace, grid: &GridDef, freqs: &[f64]) -> Columns 
 /// band reaching past its first or last column, a bin outside it).
 pub fn filter_gain_on_grid(t: &StoredTrace, grid: &GridDef, freqs: &[f64]) -> Vec<f32> {
     let t = crate::mic::bake(t);
-    let from = frequencies(&t.grid);
+    let from = t.grid.centres();
     let point = resample(&from, &t.columns, freqs).mag_db;
     let GridDef::IecBands { fraction, .. } = grid else {
         return point;
@@ -595,6 +595,9 @@ fn average(
         phase: PhaseBasis::NoPhase,
     })
 }
+
+mod align;
+pub use align::align;
 
 #[cfg(test)]
 mod tests;

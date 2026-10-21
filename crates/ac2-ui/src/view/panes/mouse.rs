@@ -1,121 +1,153 @@
-//! The mouse on a pane: the legend, frequency-axis and IR navigation.
+//! The mouse on a pane: the plates, frequency-axis and IR navigation.
 
 use super::*;
 
-/// Click focuses (and on a frequency axis places the cursor); wheel zooms the frequency
-/// axis about the pointer, Ctrl+wheel the level axis, Shift+wheel pans the level axis; drag
-/// pans the frequency axis. Navigation only: values stay as received.
-/// What the legend took of the mouse this pass.
+/// What the plates took of the mouse this pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum LegendTook {
     Nothing,
-    /// Clicks and drags: the pointer is on the plate, or dragging it.
+    /// Clicks and drags: the pointer is on a plate, or dragging one.
     Pointer,
-    /// The wheel too: its rows scroll.
+    /// The wheel too: the legend's rows scroll.
     PointerAndWheel,
 }
 
-/// The mouse on the transfer pane's legend: a drag on the plate moves it, a drag on its
-/// bottom-right grip resizes it, the wheel scrolls rows that do not all fit. Places and
-/// sizes come from the scene's box, so the reducer only stores them.
-pub(super) fn legend_mouse(
+/// The mouse on a pane's plates (the legend, the cursor values, the mark's readout): a drag
+/// on a plate moves it, a drag on its bottom-right grip scales its text, a double-click
+/// puts it back where the scene places it; the wheel scrolls legend rows that do not all
+/// fit. Places and scales come from the scene's boxes, so the reducer only stores them.
+pub(super) fn plates_mouse(
     app: &mut App,
     ui: &egui::Ui,
     resp: &egui::Response,
     id: PaneId,
     plot_rect: egui::Rect,
 ) -> LegendTook {
-    use ac2_scene::legend::{LegendHover, ROW};
-    if app.state.layout.kind(id) != PaneKind::Transfer {
-        return LegendTook::Nothing;
-    }
-    let b = app.scenes.get(&id).and_then(|c| c.legend.clone());
-    let hover_now = app.state.view.tf.legend.hover;
+    use ac2_scene::legend::ROW;
+    use ac2_scene::plate::{PlateHover, PlateKind, hover_at};
+    let cached = app.scenes.get(&id);
+    let plates = cached.map(|c| c.plates.clone()).unwrap_or_default();
+    let legend = cached.and_then(|c| c.legend.clone());
     let origin = plot_rect.min.to_vec2();
     let screen = |r: ac2_scene::primitives::Rect| {
         egui::Rect::from_min_size(egui::pos2(r.x, r.y) + origin, egui::vec2(r.w, r.h))
     };
-    app.legend_screen = b.as_ref().map(|b| (screen(b.rect), screen(b.grip)));
-    let Some(b) = b.filter(|_| !app.state.window_over_panes()) else {
-        app.legend_drag = None;
+    app.plate_screen.retain(|p| p.0 != id);
+    app.plate_screen.extend(
+        plates
+            .iter()
+            .map(|p| (id, p.kind, screen(p.rect), screen(p.grip))),
+    );
+    let hover_now = app
+        .state
+        .plate_hover
+        .filter(|(p, _)| *p == id)
+        .map(|(_, h)| h);
+    if plates.is_empty() || app.state.window_over_panes() {
+        if app.plate_drag.is_some_and(|d| d.pane == id) {
+            app.plate_drag = None;
+        }
         if hover_now.is_some() {
-            app.dispatch(Msg::Legend(LegendMsg::Hover(None)));
+            app.dispatch(Msg::Plate(PlateMsg::Hover(None)));
         }
         return LegendTook::Nothing;
-    };
-    let inside = |r: ac2_scene::primitives::Rect, p: egui::Pos2| {
-        (r.x..=r.right()).contains(&p.x) && (r.y..=r.bottom()).contains(&p.y)
-    };
+    }
     let over_at = |p: egui::Pos2| {
         let p = p - origin;
-        if inside(b.grip, p) {
-            Some(LegendHover::Grip)
-        } else if inside(b.rect, p) {
-            Some(LegendHover::Plate)
-        } else {
-            None
-        }
+        hover_at(&plates, p.x, p.y)
     };
+    let plate_of = |k: PlateKind| plates.iter().find(|b| b.kind == k).copied();
+    if resp.double_clicked()
+        && let Some(h) = resp.interact_pointer_pos().and_then(over_at)
+    {
+        app.plate_drag = None;
+        app.dispatch(Msg::Plate(PlateMsg::Reset {
+            pane: id,
+            kind: h.kind,
+        }));
+        app.dispatch(Msg::Plate(PlateMsg::End));
+        return LegendTook::Pointer;
+    }
     if resp.drag_started()
         && let Some(p) = ui.input(|i| i.pointer.press_origin())
     {
         let at = p - origin;
-        app.legend_drag = match over_at(p) {
-            Some(LegendHover::Plate) => Some(LegendDrag::Move {
-                grab: at - egui::pos2(b.rect.x, b.rect.y),
-            }),
-            Some(LegendHover::Grip) => Some(LegendDrag::Resize {
-                grab: at - egui::pos2(b.rect.right(), b.rect.bottom()),
-            }),
-            None => None,
-        };
-    }
-    if let Some(d) = app.legend_drag {
-        if !resp.dragged() {
-            app.legend_drag = None;
-        } else if let Some(p) = resp.interact_pointer_pos() {
-            let p = p - origin;
-            let (msg, icon, kind) = match d {
-                LegendDrag::Move { grab } => {
-                    let [x, y] = b.position_for(p.x - grab.x, p.y - grab.y);
-                    (
-                        LegendMsg::Move { x, y },
-                        egui::CursorIcon::Grabbing,
-                        LegendHover::Plate,
-                    )
+        app.plate_drag = over_at(p).and_then(|h| {
+            let b = plate_of(h.kind)?;
+            let how = if h.grip {
+                PlateGrab::Scale {
+                    grab: at - egui::pos2(b.rect.right(), b.rect.bottom()),
                 }
-                LegendDrag::Resize { grab } => {
-                    let [w, h] = b.limits_for(p.x - grab.x, p.y - grab.y);
-                    (
-                        LegendMsg::Resize {
-                            max_width: w,
-                            max_height: h,
-                        },
-                        egui::CursorIcon::ResizeNwSe,
-                        LegendHover::Grip,
-                    )
+            } else {
+                PlateGrab::Move {
+                    grab: at - egui::pos2(b.rect.x, b.rect.y),
                 }
             };
+            Some(PlateDrag {
+                pane: id,
+                kind: h.kind,
+                how,
+            })
+        });
+    }
+    if let Some(d) = app.plate_drag.filter(|d| d.pane == id) {
+        if !resp.dragged() {
+            app.plate_drag = None;
+            app.dispatch(Msg::Plate(PlateMsg::End));
+        } else if let Some(p) = resp.interact_pointer_pos()
+            && let Some(b) = plate_of(d.kind)
+        {
+            let p = p - origin;
+            let (msg, icon, grip) = match d.how {
+                PlateGrab::Move { grab } => {
+                    let [x, y] = b.position_for(p.x - grab.x, p.y - grab.y);
+                    (
+                        PlateMsg::Move {
+                            pane: id,
+                            kind: d.kind,
+                            x,
+                            y,
+                        },
+                        egui::CursorIcon::Grabbing,
+                        false,
+                    )
+                }
+                PlateGrab::Scale { grab } => (
+                    PlateMsg::Scale {
+                        pane: id,
+                        kind: d.kind,
+                        scale: b.scale_for(p.x - grab.x, p.y - grab.y),
+                    },
+                    egui::CursorIcon::ResizeNwSe,
+                    true,
+                ),
+            };
             ui.ctx().set_cursor_icon(icon);
-            if hover_now != Some(kind) {
-                app.dispatch(Msg::Legend(LegendMsg::Hover(Some(kind))));
+            let h = PlateHover { kind: d.kind, grip };
+            if hover_now != Some(h) {
+                app.dispatch(Msg::Plate(PlateMsg::Hover(Some((id, h)))));
             }
-            app.dispatch(Msg::Legend(msg));
+            app.dispatch(Msg::Plate(msg));
             return LegendTook::Pointer;
         }
     }
     let over = resp.hover_pos().and_then(over_at);
     if over != hover_now {
-        app.dispatch(Msg::Legend(LegendMsg::Hover(over)));
+        app.dispatch(Msg::Plate(PlateMsg::Hover(over.map(|h| (id, h)))));
     }
     let Some(over) = over else {
         app.legend_wheel = 0.0;
         return LegendTook::Nothing;
     };
-    ui.ctx().set_cursor_icon(match over {
-        LegendHover::Plate => egui::CursorIcon::Grab,
-        LegendHover::Grip => egui::CursorIcon::ResizeNwSe,
+    ui.ctx().set_cursor_icon(if over.grip {
+        egui::CursorIcon::ResizeNwSe
+    } else {
+        egui::CursorIcon::Grab
     });
+    resp.clone().on_hover_text(ac2_scene::plate::hint(over));
+    let Some(b) = legend.filter(|_| over.kind == PlateKind::Legend) else {
+        return LegendTook::Pointer;
+    };
     // Ctrl / Shift + wheel still zoom and pan the level axis.
     let (dy, plain) = ui.input(|i| {
         (
@@ -127,18 +159,21 @@ pub(super) fn legend_mouse(
         return LegendTook::Pointer;
     }
     // Wheel down (negative delta) shows later rows, a row per row height of travel.
-    app.legend_wheel -= dy / ROW;
+    app.legend_wheel -= dy / (ROW * b.plate.scale);
     let rows = app.legend_wheel.trunc();
     if rows != 0.0 {
         app.legend_wheel -= rows;
         let first = b.scrolled(rows as i32);
         if first != app.state.view.tf.legend.first {
-            app.dispatch(Msg::Legend(LegendMsg::Scroll { first }));
+            app.dispatch(Msg::LegendScroll { first });
         }
     }
     LegendTook::PointerAndWheel
 }
 
+/// Click focuses (and on a frequency axis places the cursor); wheel zooms the frequency
+/// axis about the pointer, Ctrl+wheel the level axis, Shift+wheel pans the level axis; drag
+/// pans the frequency axis. Navigation only: values stay as received.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn navigate(
     app: &mut App,
@@ -160,8 +195,8 @@ pub(super) fn navigate(
         let p = pos? - plot_rect.min.to_vec2();
         let c = app.scenes.get(&id)?;
         let on_grip = c.legend.as_ref().is_some_and(|b| {
-            (b.grip.x..=b.grip.right()).contains(&p.x)
-                && (b.grip.y..=b.grip.bottom()).contains(&p.y)
+            let g = b.plate.grip;
+            (g.x..=g.right()).contains(&p.x) && (g.y..=g.bottom()).contains(&p.y)
         });
         if on_grip {
             return None;
@@ -384,7 +419,7 @@ pub(super) fn navigate_strip(
     strip: Option<scenes::StripPlace>,
 ) {
     let Some(s) = strip else {
-        if app.state.leq_cursor.is_some_and(|(p, _)| p == id) {
+        if app.state.leq.cursor.is_some_and(|(p, _)| p == id) {
             app.dispatch(Msg::LeqStrip(id, StripMsg::Hover(None)));
         }
         return;
@@ -420,7 +455,8 @@ pub(super) fn navigate_strip(
     let t = pos.map(t_at);
     if app
         .state
-        .leq_cursor
+        .leq
+        .cursor
         .filter(|(p, _)| *p == id)
         .map(|(_, t)| t)
         != t

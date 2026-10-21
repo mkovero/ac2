@@ -14,7 +14,6 @@ use ac2_proto::frame::{LeqFlags, LeqFrame, LeqMeta, ValidityMask};
 use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_scene::banner::Status;
-use ac2_scene::grid::column_frequencies;
 use ac2_scene::leq::{LeqHistory, LeqView, leq_scene, leq_tiles};
 use ac2_scene::primitives::{Scene, Viewport};
 use ac2_scene::tf::transfer_scene;
@@ -197,6 +196,7 @@ fn stored(id: u32, freqs: &[f64]) -> TraceData {
             mic: None,
             mic_curve: None,
             created_at: WallNs(0),
+            eq_in: Vec::new(),
         },
         mag_db: (0..n)
             .map(|i| ((i as f32) * 0.05 + id as f32).sin() * 6.0)
@@ -218,7 +218,7 @@ fn stored(id: u32, freqs: &[f64]) -> TraceData {
 
 #[test]
 fn transfer_view_with_a_live_trace_and_eight_stored() {
-    let freqs = column_frequencies(&grid());
+    let freqs = grid().centres();
     let n = freqs.len();
     let traces_data: Vec<Arc<TraceData>> = (1..=8).map(|i| Arc::new(stored(i, &freqs))).collect();
     let mag = vec![0.0f32; n];

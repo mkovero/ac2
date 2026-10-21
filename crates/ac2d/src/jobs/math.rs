@@ -29,16 +29,19 @@ use ac2_proto::frame::{
 };
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
-    AverageMethod, BandFraction, CalStatus, LevelScale, MathConfig, MathDomain, MathExpr, MathOp,
-    MathReference, Operand, PhaseBasis, SpecLevel, Weighting, Window,
+    AlignCurves, AlignNoFit, AlignOutcome, AlignState, AverageMethod, BandFraction, CalStatus,
+    LevelScale, MathConfig, MathDomain, MathExpr, MathOp, MathReference, Operand, PhaseBasis,
+    SpecLevel, Weighting, Window,
 };
 use ac2_proto::topic::Topic;
 use ac2_proto::units::{MeasId, Rev, Seconds, SessionEpoch};
-use ac2_traces::columns::{Columns, frequencies};
+use ac2_traces::columns::Columns;
 use ac2_traces::math::{self, Combine, Input};
 use ac2_traces::ops::capture_columns;
 
-use super::{Analysis, Due, Emitter, Flush, JobCmd, Pace, Probes, SmoothingChange, StampArgs};
+use super::{
+    Analysis, Due, Emitter, Flush, JobCmd, JobCtx, Pace, Probes, SmoothingChange, StampArgs,
+};
 use crate::fanout::Block;
 
 /// Longest the job waits for its live operands' answers before it publishes without the
@@ -116,20 +119,22 @@ pub(crate) struct MathJob {
 }
 
 impl MathJob {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        meas: MeasId,
-        cfg: MathConfig,
+        ctx: JobCtx<MathConfig>,
         grids: Grids,
         stored: Vec<Option<Arc<Held>>>,
-        epoch: SessionEpoch,
         probes: Arc<Probes>,
-        config_rev: Rev,
     ) -> Self {
+        let JobCtx {
+            meas,
+            cfg,
+            config_rev,
+            epoch,
+        } = ctx;
         let seen_delay = stored.iter().map(|s| s.as_ref().map(|h| h.delay)).collect();
         Self {
             meas,
-            freqs: frequencies(&grids.grid),
+            freqs: grids.grid.centres(),
             grid_id: grids.grid.id(),
             display_id: grids.display.as_ref().map(|(g, _)| g.id()),
             grids,
@@ -179,7 +184,7 @@ impl MathJob {
                 (Operand::Meas { meas }, None) => {
                     Ok(self.probes.get(*meas).and_then(|p| p.request()))
                 }
-                (Operand::Trace { .. }, None) => Ok(None),
+                (Operand::Trace { .. } | Operand::Eq { .. }, None) => Ok(None),
             })
             .collect();
         let deadline = Instant::now() + OPERAND_WAIT;
@@ -421,6 +426,7 @@ pub(crate) fn needs_shared_time_base(c: &MathConfig) -> bool {
         && match &c.expr {
             MathExpr::Binary { op, .. } => matches!(op, MathOp::Add | MathOp::Subtract),
             MathExpr::Average { method, .. } => *method != AverageMethod::Power,
+            MathExpr::Align { .. } => true,
         }
 }
 
@@ -481,7 +487,7 @@ pub(crate) fn combine(
         });
     }
     let enough = match &cfg.expr {
-        MathExpr::Binary { .. } => included.len() == 2,
+        MathExpr::Binary { .. } | MathExpr::Align { .. } => included.len() == 2,
         MathExpr::Average { .. } => included.len() >= MathConfig::MIN_AVERAGE,
     };
     // The reference: the named operand's delay (its newest, while it is left out), else an
@@ -511,8 +517,9 @@ pub(crate) fn combine(
         })
     };
     let combine_how = match &cfg.expr {
-        MathExpr::Binary { op, .. } => Combine::Binary(*op),
-        MathExpr::Average { method, .. } => Combine::Average(*method),
+        MathExpr::Binary { op, .. } => Some(Combine::Binary(*op)),
+        MathExpr::Average { method, .. } => Some(Combine::Average(*method)),
+        MathExpr::Align { .. } => None,
     };
     let inputs: Vec<Input<'_>> = included
         .iter()
@@ -522,7 +529,25 @@ pub(crate) fn combine(
             time_base: v.time_base,
         })
         .collect();
-    let result = if enough {
+    let mut align = None;
+    let mut curves = None;
+    let result = if !enough {
+        None
+    } else if let (
+        MathExpr::Align {
+            band, max_delay, ..
+        },
+        [a, b],
+    ) = (&cfg.expr, &inputs[..])
+    {
+        math::align(a, b, freqs, *band, *max_delay)
+            .map(|(r, st, cv)| {
+                align = Some(Box::new(st));
+                curves = Some(cv);
+                r
+            })
+            .ok()
+    } else if let Some(combine_how) = combine_how {
         match cfg.domain {
             MathDomain::Transfer => math::transfer(combine_how, &inputs, grid, freqs, reference),
             MathDomain::Spectrum | MathDomain::Rta => match (combine_how, &inputs[..]) {
@@ -550,9 +575,24 @@ pub(crate) fn combine(
         })
         .collect();
     let phase = result.as_ref().map_or(PhaseBasis::NoPhase, |r| r.phase);
+    // An alignment without both operands still says so, with its view's curves empty.
+    if align.is_none() && matches!(cfg.expr, MathExpr::Align { .. }) {
+        align = Some(Box::new(AlignState {
+            outcome: AlignOutcome::NoFit {
+                why: AlignNoFit::FewOperands,
+            },
+        }));
+        curves = Some(AlignCurves {
+            phase_before: vec![f32::NAN; n],
+            phase_after: vec![f32::NAN; n],
+            sum_before: vec![f32::NAN; n],
+            sum_after: vec![f32::NAN; n],
+        });
+    }
     let state = Some(Box::new(MathState {
         operands: states,
         phase,
+        align,
     }));
     let nan = || vec![f32::NAN; n];
     // A filter is no measurement: the result's mic curve is its level's.
@@ -590,6 +630,7 @@ pub(crate) fn combine(
             phase: phase_deg.unwrap_or_else(nan),
             coh: coh.unwrap_or_else(nan),
             validity,
+            align: curves,
         }),
         MathDomain::Spectrum => {
             let (window, cal) = match first_frame {

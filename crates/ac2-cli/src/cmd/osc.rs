@@ -76,7 +76,7 @@ pub(crate) async fn rig(cli: &Cli, cmd: &RigCmd, out: &mut Out<'_>) -> Result<()
                         .cues
                         .iter()
                         .filter(|q| q.meas == m.id)
-                        .map(|q| (subject_label(q.subject), q.state))
+                        .map(|q| (q.subject.to_string(), q.state))
                         .collect();
                     (m, cues)
                 })
@@ -120,10 +120,7 @@ pub(crate) async fn rig(cli: &Cli, cmd: &RigCmd, out: &mut Out<'_>) -> Result<()
                     if cues.is_empty() {
                         s.push_str("no cues\n");
                     } else {
-                        let c: Vec<String> = cues
-                            .iter()
-                            .map(|(l, q)| format!("{l} {}", cue_state(*q)))
-                            .collect();
+                        let c: Vec<String> = cues.iter().map(|(l, q)| format!("{l} {q}")).collect();
                         s.push_str(&format!("{}\n", c.join(", ")));
                     }
                 }
@@ -206,7 +203,7 @@ fn show_cue(
     subject: CueSubject,
     cue: Option<&Cue>,
 ) -> Result<(), CliError> {
-    let label = subject_label(subject);
+    let label = subject.to_string();
     out.emit(
         &json!({ "meas": m.id, "subject": subject, "label": label, "cue": cue }),
         || {
@@ -216,7 +213,7 @@ fn show_cue(
                 Some(q) => {
                     let mut lines = vec![format!("{head}:")];
                     for st in CueState::ALL {
-                        lines.push(format!("  {:<5} {}", cue_state(st), action_text(q.get(st))));
+                        lines.push(format!("  {st:<5} {}", action_text(q.get(st))));
                     }
                     lines.join("\n")
                 }
@@ -313,7 +310,7 @@ fn cue_slot(
             ))
         }
         CueSubjectArg::Peak(q) => {
-            let name = ac2_scene::leq::peak_name(q);
+            let name = q.name();
             let p = cfg.leq.peaks.get_mut(q).as_mut().ok_or_else(|| {
                 usage(format!(
                     "the meter has no {name} limit; `ac2 spl leq set --peak {}=<db>` sets one",
@@ -382,34 +379,6 @@ fn windows_text(names: &[String]) -> String {
         "none".to_owned()
     } else {
         names.join(", ")
-    }
-}
-
-/// A cue subject as the app and the alarms say it: `meter`, `LAeq 15 min`, `LCpeak`, `63 Hz
-/// band LZeq 60 min`, `predicted LAeq`.
-pub(crate) fn subject_label(s: CueSubject) -> String {
-    match s {
-        CueSubject::Meter => "meter".to_owned(),
-        CueSubject::Window {
-            duration,
-            weighting,
-        } => ac2_scene::band_leq::window_name(duration.0, weighting),
-        CueSubject::Peak { quantity } => ac2_scene::leq::peak_name(quantity).to_owned(),
-        CueSubject::Band {
-            duration,
-            weighting,
-            nominal,
-        } => ac2_scene::band_leq::band_window_name(nominal.0, duration.0, weighting),
-        CueSubject::Predicted => "predicted LAeq".to_owned(),
-    }
-}
-
-pub(crate) fn cue_state(s: CueState) -> &'static str {
-    match s {
-        CueState::Ok => "ok",
-        CueState::Near => "near",
-        CueState::Over => "over",
-        CueState::Fault => "fault",
     }
 }
 

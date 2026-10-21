@@ -64,7 +64,12 @@ fn lowering_goes_out_at_once_a_raise_asks_for_the_word() {
 
     e.type_text("loud");
     assert_eq!(e.enter(Some(&g), false), None);
-    assert!(e.error.as_deref().expect("set").starts_with("not a number"));
+    assert!(
+        e.error
+            .as_deref()
+            .expect("set")
+            .contains("expected a number followed by a unit")
+    );
 }
 
 #[test]
@@ -73,8 +78,6 @@ fn display_and_recording_texts() {
     assert_eq!(step_theme(ThemeName::Dark, -1), ThemeName::HighContrast);
     assert_eq!(step_hold(None, 1), Some(250));
     assert_eq!(step_hold(None, -1), None);
-    assert_eq!(step_span(10, 1), 30);
-    assert_eq!(step_span(120, 1), 120);
     let views = PaneViews {
         spectrum: SpectrumMode::Split,
         sweep: SweepMode::Room,
@@ -96,9 +99,9 @@ fn display_and_recording_texts() {
         ThemeName::Light,
         switches,
         Some(500),
-        30,
-        ac2_scene::primitives::Colormap::Magma,
         views,
+        6.0,
+        ac2_scene::advice::AdviceSettings::default(),
     );
     let texts: Vec<&str> = rows.iter().map(|(_, v)| v.as_str()).collect();
     assert_eq!(
@@ -113,13 +116,16 @@ fn display_and_recording_texts() {
             "jump to each new reading",
             "the spectrum over its spectrograph",
             "jumps to each new frame",
-            "last 30 s",
-            "magma",
             "the room parameters",
             "% of fundamental",
             "over the magnitude",
             "off",
+            "stands out by 6 dB",
             "each pane's as last left · Enter resets them to the defaults",
+            "on: a notice suggests lowering or raising the stimulus (never changes it)",
+            "reference peak within 3 dB of full scale",
+            "coherence under γ² 0.70",
+            "measurement input under −70.0 dBFS RMS",
         ]
     );
     let rows = recording_rows(60, None);

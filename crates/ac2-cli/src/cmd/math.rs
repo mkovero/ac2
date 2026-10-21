@@ -80,7 +80,7 @@ pub(crate) fn find_operand(s: &State, r: &MeasRef) -> Result<Operand, CliError> 
 /// Where a new math channel is listed when `--under` does not say: under its first operand
 /// when that is a measurement, else where that trace is filed (the CLI's stand-in for the
 /// app's "the measurement selected when it was made").
-fn default_owner(s: &State, first: Operand) -> TraceOwner {
+pub(crate) fn default_owner(s: &State, first: Operand) -> TraceOwner {
     match first {
         Operand::Meas { meas } => TraceOwner::Meas { meas },
         Operand::Trace { trace } => s
@@ -88,11 +88,12 @@ fn default_owner(s: &State, first: Operand) -> TraceOwner {
             .iter()
             .find(|t| t.id == trace)
             .map_or(TraceOwner::Imported, |t| t.edit.owner),
+        Operand::Eq { meas, .. } => TraceOwner::Meas { meas },
     }
 }
 
 /// An operand's name as the daemon's state has it.
-fn operand_name(s: &State, o: Operand) -> String {
+pub(crate) fn operand_name(s: &State, o: Operand) -> String {
     match o {
         Operand::Meas { meas } => s
             .measurements
@@ -104,6 +105,7 @@ fn operand_name(s: &State, o: Operand) -> String {
             .iter()
             .find(|t| t.id == trace)
             .map_or_else(|| format!("trace {trace}"), |t| t.edit.name.clone()),
+        Operand::Eq { set, .. } => format!("EQ {}", set.0),
     }
 }
 
@@ -140,6 +142,7 @@ fn domain_of(s: &State, o: Operand) -> Result<MathDomain, CliError> {
                 TraceKind::Rta { .. } => MathDomain::Rta,
             })
         }
+        Operand::Eq { .. } => Ok(MathDomain::Transfer),
     }
 }
 
@@ -251,7 +254,7 @@ pub(crate) fn math_config(
     if let Some(m) = a.method {
         match &mut expr {
             MathExpr::Average { method: x, .. } => *x = method(m),
-            MathExpr::Binary { .. } => {
+            MathExpr::Binary { .. } | MathExpr::Align { .. } => {
                 return Err(CliError::Usage("--method applies to an average".into()));
             }
         }

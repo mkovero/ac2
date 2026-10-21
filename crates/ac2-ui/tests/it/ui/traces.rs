@@ -77,17 +77,23 @@ fn stored_traces_and_target() {
     // The pane shows Delay tower's group (N chose it): Main L, its capture and the target
     // join it compared (C).
     {
-        let st = &mut h.state_mut().state;
-        st.compared_meas.insert(MeasId(1));
-        let others: Vec<_> = st
-            .traces
-            .values()
-            .map(|(d, _)| d.meta.clone())
-            .filter(|t| !t.edit.name.starts_with("Delay tower"))
-            .map(|t| t.id)
-            .collect();
-        st.compared_traces.extend(others);
+        use ac2_proto::model::Compared;
+        let st = &h.state().state;
+        let mut compared = vec![Compared::Meas { meas: MeasId(1) }];
+        compared.extend(
+            st.traces
+                .values()
+                .map(|(d, _)| d.meta.clone())
+                .filter(|t| !t.edit.name.starts_with("Delay tower"))
+                .map(|t| Compared::Trace { trace: t.id }),
+        );
+        rig.compare_into(2, compared);
     }
+    step_until(&mut h, "compared into Delay tower", |a| {
+        a.state
+            .meas(MeasId(2))
+            .is_some_and(|m| !m.compared.is_empty())
+    });
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::transfer(
@@ -112,7 +118,7 @@ fn stored_traces_and_target() {
         );
     }
     // Toasts expire on the wall clock; the snapshot shows the plots only.
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "transfer_stored_traces");
 }
@@ -176,7 +182,7 @@ fn trace_offset_spread() {
             "{legend:?}"
         );
     }
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "trace_offset_spread");
 }
@@ -201,15 +207,19 @@ fn pane_measurement_chip_and_list() {
         "list",
         |a| matches!(a.state.overlay, Overlay::PaneMenu(m) if m.pane == crate::common::pane(&a.state, PaneKind::Transfer)),
     );
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "pane_measurement_list");
     h.get_by_label("TF  Delay tower").click();
     step_until(&mut h, "delay tower shown", |a| {
         a.state.overlay == Overlay::None
-            && a.state.selected == Some(MeasId(2))
             && a.state.kind_meas(PaneKind::Transfer).map(|m| m.id) == Some(MeasId(2))
     });
+    assert_eq!(
+        h.state().state.selected,
+        Some(MeasId(1)),
+        "a pick selects nothing"
+    );
     // The pane now leads with it: first legend row, IR of it.
     let st = &h.state().state;
     let s = ac2_ui::scenes::transfer(
@@ -272,7 +282,7 @@ fn slot_resmoothed() {
         ac2_proto::model::MeasKind::Transfer { config }
             if config.smoothing.is_some_and(|s| s.fraction == ac2_proto::model::SmoothingFraction::Sixth)
     )));
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "slot_resmoothed");
 }
@@ -372,11 +382,11 @@ fn smoothed_phase_and_spectrum() {
                 .iter()
                 .any(|m| m.id == MeasId(1) && m.layout.is_some())
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "smoothed_phase_and_spectrum");
 }
 
-/// A daemon with no audio session (a fresh local daemon, an embedded one on real audio):
+/// A daemon with no audio I/O (a fresh local daemon, an embedded one on real audio):
 /// the transfer pane says how to open one, also once a file is imported.
 #[test]
 fn empty_session_hint() {
@@ -397,9 +407,9 @@ fn empty_session_hint() {
             .empty_hint(h.state().state.layout.focus, &h.state().keymap)
             .map(|h| h.text)
             .as_deref(),
-        Some("No audio session — press Shift+O (or Ctrl+K → Open audio session)")
+        Some("No session open — Alt+S, then New session")
     );
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "empty_session_hint");
 
@@ -424,10 +434,10 @@ fn empty_session_hint() {
         Some(ac2_ui::state::HintPlace::Centre)
     );
     assert!(
-        hint.is_some_and(|h| h.text.starts_with("No audio session")),
+        hint.is_some_and(|h| h.text.starts_with("No session open")),
         "the session hint stays"
     );
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "empty_session_hint_imported");
 }
@@ -478,7 +488,7 @@ fn traces_list() {
     );
     // The hidden trace's dot now offers to show it.
     h.get_by_label("Show Delay tower S2");
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "traces_list");
 }
@@ -514,7 +524,7 @@ fn measurement_hidden_and_delete_confirm() {
             .is_some_and(|c| c.starts_with("Delay tower hidden · ")),
         "{caption:?}"
     );
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "measurement_hidden");
     h.key_press(Key::Backspace);
@@ -587,7 +597,7 @@ fn measurement_tree_and_delete_choices() {
                 .is_some()
         })
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "measurement_tree");
     h.key_press(Key::Delete);

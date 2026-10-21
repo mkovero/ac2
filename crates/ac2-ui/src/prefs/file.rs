@@ -2,7 +2,6 @@
 
 use super::layout::*;
 use super::*;
-use ac2_scene::primitives::Colormap;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct File {
@@ -21,17 +20,15 @@ struct File {
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spec_ease: Option<bool>,
+    /// Written only when not the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    jump_prominence_db: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spl_hold_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     theme: Option<ThemeFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     record_limit_min: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    spectrograph_span_s: Option<u32>,
-    /// Written only when not the default (viridis).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    spectrograph_colours: Option<ColormapFile>,
     /// One-based channels per device id.
     #[serde(default)]
     stimulus_outputs: BTreeMap<String, Vec<u32>>,
@@ -40,6 +37,9 @@ struct File {
     sessions: BTreeMap<String, RolesFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     leq: Option<LeqFile>,
+    /// Written only when not the defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    advice: Option<AdviceFile>,
     /// A `[layout]` that does not parse as a pane tree is dropped (with a warning in the
     /// log): the panes are a convenience, so the app starts with one pane instead of
     /// refusing the hold times, sessions and devices the rest of the file keeps.
@@ -51,7 +51,13 @@ struct File {
     layout: Option<LayoutFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ir_levels: Option<IrLevelsFile>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// A `[legend]` that does not parse is dropped (with a warning in the log), as the
+    /// layout is: a legend shown again costs a key, a whole file set aside costs much more.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_legend"
+    )]
     legend: Option<LegendsFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window: Option<WindowFile>,
@@ -77,51 +83,31 @@ struct LegendsFile {
 struct LegendFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hidden: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    x: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    y: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_width: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_height: Option<f64>,
+}
+
+fn lenient_legend<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<LegendsFile>, D::Error> {
+    let v = toml::Value::deserialize(d)?;
+    match LegendsFile::deserialize(v) {
+        Ok(l) => Ok(Some(l)),
+        Err(e) => {
+            tracing::warn!("ui.toml: [legend] dropped, the legend shown: {e}");
+            Ok(None)
+        }
+    }
 }
 
 impl LegendFile {
-    fn parse(&self) -> Result<LegendPrefs, String> {
-        let d = LegendPrefs::default();
-        let limits = ac2_scene::legend::SIZE_LIMITS;
-        let (lo, hi) = (f64::from(*limits.start()), f64::from(*limits.end()));
-        let num = |name: &str, v: Option<f64>, default: f32, lo: f64, hi: f64| match v {
-            None => Ok(default),
-            Some(v) if (lo..=hi).contains(&v) => Ok(v as f32),
-            Some(_) => Err(format!(
-                "ui.toml: legend.transfer.{name} must be {lo} … {hi}"
-            )),
-        };
-        Ok(LegendPrefs {
-            hidden: self.hidden.unwrap_or(d.hidden),
-            x: num("x", self.x, d.x, 0.0, 1.0)?,
-            y: num("y", self.y, d.y, 0.0, 1.0)?,
-            max_width: num("max_width", self.max_width, d.max_width, lo, hi)?,
-            max_height: num("max_height", self.max_height, d.max_height, lo, hi)?,
-        })
+    fn parse(&self) -> LegendPrefs {
+        LegendPrefs {
+            hidden: self.hidden.unwrap_or(false),
+        }
     }
 
-    /// Only the choices moved off their defaults, to three decimals (a drag's fraction
-    /// has no meaningful digits beyond a pixel).
+    /// Only the choices moved off their defaults.
     fn from_prefs(l: &LegendPrefs) -> Option<LegendsFile> {
-        let d = LegendPrefs::default();
-        let v =
-            |x: f32, default: f32| (x != default).then(|| (f64::from(x) * 1000.0).round() / 1000.0);
-        let f = Self {
-            hidden: l.hidden.then_some(true),
-            x: v(l.x, d.x),
-            y: v(l.y, d.y),
-            max_width: v(l.max_width, d.max_width),
-            max_height: v(l.max_height, d.max_height),
-        };
-        (*l != d).then_some(LegendsFile { transfer: Some(f) })
+        l.hidden.then_some(LegendsFile {
+            transfer: Some(Self { hidden: Some(true) }),
+        })
     }
 }
 
@@ -149,38 +135,6 @@ impl ThemeFile {
             T::Dark => Self::Dark,
             T::Light => Self::Light,
             T::HighContrast => Self::HighContrast,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ColormapFile {
-    Viridis,
-    Magma,
-    Inferno,
-    Cividis,
-    Grey,
-}
-
-impl ColormapFile {
-    fn map(self) -> Colormap {
-        match self {
-            Self::Viridis => Colormap::Viridis,
-            Self::Magma => Colormap::Magma,
-            Self::Inferno => Colormap::Inferno,
-            Self::Cividis => Colormap::Cividis,
-            Self::Grey => Colormap::Grey,
-        }
-    }
-
-    fn of(m: Colormap) -> Self {
-        match m {
-            Colormap::Viridis => Self::Viridis,
-            Colormap::Magma => Self::Magma,
-            Colormap::Inferno => Self::Inferno,
-            Colormap::Cividis => Self::Cividis,
-            Colormap::Grey => Self::Grey,
         }
     }
 }
@@ -228,8 +182,9 @@ impl IrLevelsFile {
     }
 }
 
-/// A pane's own level axes (`[layout.panes.levels]` under its `[[layout.panes]]` entry),
-/// `[low, high]` dB; one left out is the default.
+/// A pane's level axes the operator set (`[layout.panes.levels]` under its
+/// `[[layout.panes]]` entry), `[low, high]` dB; one left out is framed when the pane first
+/// shows a curve.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PaneLevelsFile {
@@ -244,39 +199,118 @@ pub(super) struct PaneLevelsFile {
 }
 
 impl PaneLevelsFile {
-    /// The ranges; one that is no range is the default, logged (a layout is a convenience,
+    /// The ranges; one that is no range is left out, logged (a layout is a convenience,
     /// read leniently).
-    pub(super) fn parse(f: Option<&Self>, pane: u32) -> PaneLevels {
-        let d = PaneLevels::default();
+    pub(super) fn parse(f: Option<&Self>, pane: u32) -> LayoutLevels {
         let Some(f) = f else {
-            return d;
+            return LayoutLevels::default();
         };
-        let range = |name: &str, v: Option<[f64; 2]>, default: Range| match v {
-            None => default,
-            Some(v) => level_range(v).unwrap_or_else(|| {
+        let range = |name: &str, v: Option<[f64; 2]>| {
+            let v = v?;
+            let r = level_range(v);
+            if r.is_none() {
                 tracing::warn!(
-                    "ui.toml: pane {pane}'s levels.{name} is not [low, high] in dB; default"
+                    "ui.toml: pane {pane}'s levels.{name} is not [low, high] in dB; left out"
                 );
-                default
-            }),
+            }
+            r.map(|r| LevelRange { lo: r.lo, hi: r.hi })
         };
-        PaneLevels {
-            transfer: range("transfer", f.transfer, d.transfer),
-            spectrum_dbfs: range("spectrum_dbfs", f.spectrum_dbfs, d.spectrum_dbfs),
-            spectrum_spl: range("spectrum_spl", f.spectrum_spl, d.spectrum_spl),
-            distortion: range("distortion", f.distortion, d.distortion),
+        LayoutLevels {
+            transfer: range("transfer", f.transfer),
+            spectrum_dbfs: range("spectrum_dbfs", f.spectrum_dbfs),
+            spectrum_spl: range("spectrum_spl", f.spectrum_spl),
+            distortion: range("distortion", f.distortion),
         }
     }
 
-    /// Only the ranges moved off their defaults; `None` when all are at them.
-    pub(super) fn of(l: &PaneLevels) -> Option<Self> {
-        let d = PaneLevels::default();
-        let v = |r: Range, default: Range| (r != default).then_some([r.lo, r.hi]);
-        (*l != d).then(|| Self {
-            transfer: v(l.transfer, d.transfer),
-            spectrum_dbfs: v(l.spectrum_dbfs, d.spectrum_dbfs),
-            spectrum_spl: v(l.spectrum_spl, d.spectrum_spl),
-            distortion: v(l.distortion, d.distortion),
+    /// The ranges set; `None` when there are none.
+    pub(super) fn of(l: &LayoutLevels) -> Option<Self> {
+        let v = |r: Option<LevelRange>| r.map(|r| [r.lo, r.hi]);
+        (!l.is_empty()).then(|| Self {
+            transfer: v(l.transfer),
+            spectrum_dbfs: v(l.spectrum_dbfs),
+            spectrum_spl: v(l.spectrum_spl),
+            distortion: v(l.distortion),
+        })
+    }
+}
+
+/// Where a pane's plates were dropped and their text size (`[layout.panes.plates.readout]`
+/// and so on); one left out sits where the scene puts it.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PanePlatesFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    legend: Option<PlateFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    readout: Option<PlateFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mark: Option<PlateFile>,
+}
+
+/// One plate: its place, fractions `[x, y]` of the room beside it, and its text scale.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlateFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    at: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scale: Option<f64>,
+}
+
+impl PanePlatesFile {
+    /// The plates; a place or scale out of bounds is left out, logged (a layout is a
+    /// convenience, read leniently).
+    pub(super) fn parse(f: Option<&Self>, pane: u32) -> Plates {
+        let mut out = Plates::default();
+        let Some(f) = f else {
+            return out;
+        };
+        let scales = ac2_scene::plate::SCALE_LIMITS;
+        for (kind, file) in [
+            (PlateKind::Legend, &f.legend),
+            (PlateKind::Readout, &f.readout),
+            (PlateKind::Mark, &f.mark),
+        ] {
+            let Some(file) = file else { continue };
+            let name = format!("{kind:?}").to_lowercase();
+            let p = out.get_mut(kind);
+            match file.at {
+                Some([x, y]) if (0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y) => {
+                    p.move_to(x as f32, y as f32);
+                }
+                Some(_) => tracing::warn!(
+                    "ui.toml: pane {pane}'s plates.{name}.at is not [x, y] within 0 … 1; left out"
+                ),
+                None => {}
+            }
+            match file.scale {
+                Some(s) if scales.contains(&(s as f32)) => p.set_scale(s as f32),
+                Some(_) => tracing::warn!(
+                    "ui.toml: pane {pane}'s plates.{name}.scale is not {} … {}; left out",
+                    scales.start(),
+                    scales.end()
+                ),
+                None => {}
+            }
+        }
+        out
+    }
+
+    /// The plates moved or scaled, to three decimals (a drag's fraction has no meaningful
+    /// digits beyond a pixel); `None` when every one sits where the scene puts it.
+    pub(super) fn of(p: &Plates) -> Option<Self> {
+        let r = |v: f32| (f64::from(v) * 1000.0).round() / 1000.0;
+        let one = |p: &PlatePlace| {
+            (!p.is_auto()).then(|| PlateFile {
+                at: p.at.map(|[x, y]| [r(x), r(y)]),
+                scale: (p.scale() != 1.0).then(|| r(p.scale())),
+            })
+        };
+        (!p.is_auto()).then(|| Self {
+            legend: one(&p.legend),
+            readout: one(&p.readout),
+            mark: one(&p.mark),
         })
     }
 }
@@ -335,6 +369,7 @@ pub(super) enum TransferViewFile {
     Magnitude,
     Phase,
     Coherence,
+    Alignment,
     IrLinear,
     IrLog,
     Etc,
@@ -417,6 +452,68 @@ struct LeqFile {
     style: StyleFile,
     #[serde(default)]
     history: bool,
+}
+
+/// The headroom advice; a missing key keeps its default.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdviceFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    on: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ref_headroom_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    low_coherence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    low_level_dbfs: Option<f64>,
+}
+
+impl AdviceFile {
+    fn parse(&self) -> Result<ac2_scene::advice::AdviceSettings, String> {
+        use ac2_scene::advice::{AdviceSettings, LOW_COHERENCE, LOW_LEVEL_DBFS, REF_HEADROOM_DB};
+        let d = AdviceSettings::default();
+        let within = |key: &str, v: Option<f64>, choices: &[f64], default: f64| {
+            let (lo, hi) = (choices[0], choices[choices.len() - 1]);
+            match v {
+                None => Ok(default),
+                Some(v) if (lo..=hi).contains(&v) => Ok(v),
+                Some(_) => Err(format!("ui.toml: advice.{key} must be {lo} … {hi}")),
+            }
+        };
+        Ok(AdviceSettings {
+            on: self.on.unwrap_or(d.on),
+            ref_headroom_db: within(
+                "ref_headroom_db",
+                self.ref_headroom_db,
+                &REF_HEADROOM_DB,
+                d.ref_headroom_db,
+            )?,
+            low_coherence: within(
+                "low_coherence",
+                self.low_coherence,
+                &LOW_COHERENCE,
+                d.low_coherence,
+            )?,
+            low_level_dbfs: within(
+                "low_level_dbfs",
+                self.low_level_dbfs,
+                &LOW_LEVEL_DBFS,
+                d.low_level_dbfs,
+            )?,
+        })
+    }
+
+    fn from_prefs(a: &ac2_scene::advice::AdviceSettings) -> Option<Self> {
+        let d = ac2_scene::advice::AdviceSettings::default();
+        let changed = |v: f64, d: f64| ((v - d).abs() > 1e-9).then_some(v);
+        let f = Self {
+            on: (a.on != d.on).then_some(a.on),
+            ref_headroom_db: changed(a.ref_headroom_db, d.ref_headroom_db),
+            low_coherence: changed(a.low_coherence, d.low_coherence),
+            low_level_dbfs: changed(a.low_level_dbfs, d.low_level_dbfs),
+        };
+        (*a != d).then_some(f)
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -559,14 +656,6 @@ impl UiPrefs {
                 RECORD_LIMIT_MIN.end()
             ));
         }
-        if let Some(s) = f.spectrograph_span_s
-            && !ac2_scene::view::SPECTROGRAPH_SPANS_S.contains(&s)
-        {
-            return Err(format!(
-                "ui.toml: spectrograph_span_s must be one of {:?}",
-                ac2_scene::view::SPECTROGRAPH_SPANS_S
-            ));
-        }
         let window = match f.window {
             Some(w) if w.width >= WindowPrefs::MIN.0 && w.height >= WindowPrefs::MIN.1 => {
                 Some(WindowPrefs {
@@ -593,7 +682,19 @@ impl UiPrefs {
             resolution_marker: f.resolution_marker.unwrap_or(true),
             bar_ease: f.bar_ease.unwrap_or(true),
             spec_ease: f.spec_ease.unwrap_or(true),
+            // A value no step reaches (hand-edited) is kept when it can be stood out by;
+            // anything else is the default.
+            jump_prominence_db: f
+                .jump_prominence_db
+                .filter(|d| d.is_finite() && *d > 0.0 && *d <= 60.0)
+                .unwrap_or(ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB),
             spl_hold_ms: f.spl_hold_ms,
+            advice: f
+                .advice
+                .as_ref()
+                .map(AdviceFile::parse)
+                .transpose()?
+                .unwrap_or_default(),
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
             ir_levels: f
                 .ir_levels
@@ -604,17 +705,11 @@ impl UiPrefs {
             window,
             theme: f.theme.map(ThemeFile::name),
             record_limit_min: f.record_limit_min,
-            spectrograph_span_s: f.spectrograph_span_s,
-            spectrograph_colours: f
-                .spectrograph_colours
-                .map(ColormapFile::map)
-                .unwrap_or_default(),
             legend: f
                 .legend
                 .as_ref()
                 .and_then(|l| l.transfer.as_ref())
                 .map(LegendFile::parse)
-                .transpose()?
                 .unwrap_or_default(),
             recent_sessions: {
                 let mut r = f.recent_sessions;
@@ -633,12 +728,13 @@ impl UiPrefs {
             resolution_marker: (!self.resolution_marker).then_some(false),
             bar_ease: (!self.bar_ease).then_some(false),
             spec_ease: (!self.spec_ease).then_some(false),
+            jump_prominence_db: (self.jump_prominence_db
+                != ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB)
+                .then_some(self.jump_prominence_db),
             spl_hold_ms: self.spl_hold_ms,
+            advice: AdviceFile::from_prefs(&self.advice),
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,
-            spectrograph_span_s: self.spectrograph_span_s,
-            spectrograph_colours: (self.spectrograph_colours != Colormap::default())
-                .then(|| ColormapFile::of(self.spectrograph_colours)),
             layout: (self.layout != LayoutPrefs::default())
                 .then(|| LayoutFile::from_prefs(&self.layout)),
             ir_levels: IrLevelsFile::from_prefs(&self.ir_levels),

@@ -56,6 +56,8 @@ pub enum CompareRefusal {
     /// The item is a stored trace under Imported: it belongs to no measurement, so no pane
     /// draws it until it is moved under one.
     Imported,
+    /// The item is of the measurement the pane shows: drawn there anyway.
+    OwnGroup,
 }
 
 /// The toast of a refused Shift-drop: `FOH SPL not compared: pane 2 shows SPL; meters are
@@ -70,6 +72,9 @@ pub fn compare_refused(item: &str, why: CompareRefusal) -> String {
         }
         CompareRefusal::Imported => {
             format!("{item} not compared: it is under Imported — Move to measurement… first")
+        }
+        CompareRefusal::OwnGroup => {
+            format!("{item} not compared: the pane draws it already, as its own")
         }
     }
 }
@@ -110,12 +115,10 @@ pub enum PaneEdit {
     View(usize),
     /// T: pane `n`'s grid and labels.
     Chrome(usize),
+    /// A plate over pane `n`'s plot dragged, scaled or put back.
+    Plates(usize),
     /// W or F.
     Screen(ScreenStep),
-    /// C: `item` compared (`on`) or no longer.
-    Compare { item: String, on: bool },
-    /// Clear compare.
-    ClearCompare,
 }
 
 impl PaneEdit {
@@ -130,6 +133,7 @@ impl PaneEdit {
             PaneEdit::Stack(n) => format!("transfer stack in pane {n}"),
             PaneEdit::View(n) => format!("view of pane {n}"),
             PaneEdit::Chrome(n) => format!("grid and labels of pane {n}"),
+            PaneEdit::Plates(n) => format!("plates of pane {n}"),
             PaneEdit::Screen(s) => match s {
                 ScreenStep::AllPanes => "all panes".into(),
                 ScreenStep::Alone(n) => format!("pane {n} alone"),
@@ -138,9 +142,6 @@ impl PaneEdit {
                 ScreenStep::PanesOnly => "panes only, full screen".into(),
                 ScreenStep::Windowed => "windowed".into(),
             },
-            PaneEdit::Compare { item, on: true } => format!("compare {item}"),
-            PaneEdit::Compare { item, on: false } => format!("compare off for {item}"),
-            PaneEdit::ClearCompare => "clear compare".into(),
         }
     }
 }
@@ -196,11 +197,8 @@ mod tests {
         assert_eq!(redid(&PaneEdit::Split(1)), "Redid: split pane 1");
         assert_eq!(undid(&PaneEdit::Close(3)), "Undid: close pane 3");
         assert_eq!(
-            redid(&PaneEdit::Compare {
-                item: "Main R".into(),
-                on: true
-            }),
-            "Redid: compare Main R"
+            redid(&PaneEdit::Chrome(2)),
+            "Redid: grid and labels of pane 2"
         );
         assert_eq!(
             undid(&PaneEdit::Screen(ScreenStep::Alone(2))),

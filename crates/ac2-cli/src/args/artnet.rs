@@ -6,7 +6,7 @@ use std::str::FromStr;
 use ac2_proto::model::{ARTNET_PORT, ArtnetFade, DmxSet, PortAddress};
 use clap::Subcommand;
 
-use crate::units::{Time, UnitError};
+use ac2_scene::unit_text::{Time, UnitError};
 
 /// `artnet …`.
 #[derive(Debug, Subcommand)]

@@ -5,9 +5,9 @@
 //! Keyboard-first like every window (decision K9): the view owns the keyboard while open;
 //! ↑/↓ move within the page, ←/→ change a choice, Enter applies, Esc closes the topmost
 //! window (a calibration dialog or a confirmation over a page, else the view);
-//! Ctrl+PageUp / Ctrl+PageDown (or Ctrl+Tab / Ctrl+Shift+Tab) step through the pages and
-//! Alt+1 … Alt+6 jump to one. Shift+Esc still stops the stimulus from anywhere. The keys
-//! that used to open a dialog open its page: Shift+O the Audio & I/O page (focused on the device), Shift+L the SPL / Leq
+//! Ctrl+PageUp / Ctrl+PageDown (or Alt+← / Alt+→) step through the pages and Alt+1 … Alt+7
+//! jump to one (no Ctrl+Tab: desktops take it). Shift+Esc still stops the stimulus from anywhere. The keys
+//! that used to open a dialog open its page: Shift+O the Audio I/O page (focused on the device), Shift+L the SPL / Leq
 //! page, the palette's input setup and calibrations their pages.
 //!
 //! Every setting says whose it is: [`THIS_APP`] (kept in `ui.toml` on this computer) or
@@ -42,7 +42,9 @@ pub const THIS_APP: &str = "this app";
 /// Whose a setting is: the rig, for every client.
 pub const THE_RIG: &str = "the rig — all clients";
 /// The page with the audio device, the channels and the max level, as every text names it.
-pub const AUDIO_IO: &str = "Audio & I/O";
+pub const AUDIO_IO: &str = "Audio I/O";
+/// The Audio I/O page's heading when the Sessions dialog's New opened it.
+pub const NEW_SESSION_AUDIO: &str = "New session — Audio I/O";
 
 /// A page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,10 +93,7 @@ impl Page {
     /// Whose the page's settings are, as its header says.
     pub fn whose(self) -> &'static str {
         match self {
-            Page::AudioIo => {
-                "the device, channels, labels, the reference and the max level: the rig — all \
-                 clients · stimulus outputs: this app"
-            }
+            Page::AudioIo => "the rig — all clients · stimulus outputs: this app",
             Page::Calibration | Page::Leq | Page::Rig => THE_RIG,
             Page::Recording => "the limit: this app · the folder: the rig — all clients",
             Page::Display => THIS_APP,
@@ -170,7 +169,7 @@ pub struct RaiseConfirm {
     pub typed: String,
 }
 
-/// The system max level row of the Audio & I/O page.
+/// The system max level row of the Audio I/O page.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CeilingEdit {
     /// The level being typed; empty shows the level in force.
@@ -193,7 +192,7 @@ impl CeilingEdit {
             if !c.typed.trim().eq_ignore_ascii_case(RAISE_WORD) {
                 self.error = Some(format!(
                     "type {RAISE_WORD} to confirm, or Esc to keep {}",
-                    ac2_scene::rig::dbfs(c.from.0)
+                    ac2_scene::format::dbfs(c.from.0)
                 ));
                 return None;
             }
@@ -211,18 +210,19 @@ impl CeilingEdit {
             self.error = Some("type the new max level in dBFS (e.g. -40), then Enter".into());
             return None;
         }
-        let v = match crate::state::parse_number(text, &["dbfs", "db"]) {
-            Ok(v) => v,
-            Err(e) => {
-                self.error = Some(e);
-                return None;
-            }
-        };
+        let v =
+            match ac2_scene::unit_text::in_field::<ac2_scene::unit_text::LevelDbfs>(text, "dbfs") {
+                Ok(v) => v.0.0,
+                Err(e) => {
+                    self.error = Some(e.0);
+                    return None;
+                }
+            };
         if v > g.ceiling_bound.0 {
             self.error = Some(format!(
                 "above this rig's bound {} (ac2d --max-level; only a restart with a higher bound \
                  raises it)",
-                ac2_scene::rig::dbfs(g.ceiling_bound.0)
+                ac2_scene::format::dbfs(g.ceiling_bound.0)
             ));
             return None;
         }
@@ -274,17 +274,20 @@ pub enum DisplayRow {
     LeqBars,
     SpectrumView,
     SpectrumGlide,
-    Spectrograph,
-    SpectrographColours,
     SweepView,
     DistortionUnit,
     Coherence,
     ResolutionMarker,
+    CursorJump,
     LevelAxes,
+    Advice,
+    AdviceRefHeadroom,
+    AdviceLowCoherence,
+    AdviceLowLevel,
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 16] = [
+    pub const ALL: [DisplayRow; 19] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -294,13 +297,16 @@ impl DisplayRow {
         DisplayRow::LeqBars,
         DisplayRow::SpectrumView,
         DisplayRow::SpectrumGlide,
-        DisplayRow::Spectrograph,
-        DisplayRow::SpectrographColours,
         DisplayRow::SweepView,
         DisplayRow::DistortionUnit,
         DisplayRow::Coherence,
         DisplayRow::ResolutionMarker,
+        DisplayRow::CursorJump,
         DisplayRow::LevelAxes,
+        DisplayRow::Advice,
+        DisplayRow::AdviceRefHeadroom,
+        DisplayRow::AdviceLowCoherence,
+        DisplayRow::AdviceLowLevel,
     ];
 
     pub fn title(self) -> &'static str {
@@ -315,12 +321,15 @@ impl DisplayRow {
             DisplayRow::SpectrumView => "Spectrum pane shows",
             DisplayRow::SpectrumGlide => "Spectrum",
             DisplayRow::SweepView => "Sweep pane shows",
-            DisplayRow::Spectrograph => "Spectrograph history",
-            DisplayRow::SpectrographColours => "Spectrograph colours",
             DisplayRow::DistortionUnit => "Distortion in",
             DisplayRow::Coherence => "Coherence",
             DisplayRow::ResolutionMarker => "Resolution marker",
+            DisplayRow::CursorJump => "Peak / notch jumps",
             DisplayRow::LevelAxes => "Level axes",
+            DisplayRow::Advice => "Headroom advice",
+            DisplayRow::AdviceRefHeadroom => "Advise lowering at",
+            DisplayRow::AdviceLowCoherence => "Advise raising at",
+            DisplayRow::AdviceLowLevel => "… and",
         }
     }
 }
@@ -347,13 +356,6 @@ pub fn theme_name(t: ThemeName) -> &'static str {
 pub fn step_hold(h: Option<u32>, d: i32) -> Option<u32> {
     let i = SPL_HOLDS_MS.iter().position(|x| *x == h).unwrap_or(0) as i32;
     SPL_HOLDS_MS[(i + d).clamp(0, SPL_HOLDS_MS.len() as i32 - 1) as usize]
-}
-
-/// The spectrograph span ←/→ choose, s.
-pub fn step_span(s: u32, d: i32) -> u32 {
-    let all = ac2_scene::view::SPECTROGRAPH_SPANS_S;
-    let i = all.iter().position(|x| *x == s).unwrap_or(0) as i32;
-    all[(i + d).clamp(0, all.len() as i32 - 1) as usize]
 }
 
 /// What the spectrum pane's view is called (G steps it).
@@ -437,9 +439,9 @@ pub fn display_rows(
     theme: ThemeName,
     switches: DisplaySwitches,
     spl_hold_ms: Option<u32>,
-    span_s: u32,
-    colours: ac2_scene::primitives::Colormap,
     views: PaneViews,
+    jump_prominence_db: f64,
+    advice: ac2_scene::advice::AdviceSettings,
 ) -> Vec<(DisplayRow, String)> {
     DisplayRow::ALL
         .iter()
@@ -473,8 +475,6 @@ pub fn display_rows(
                 }
                 DisplayRow::LeqBars => bar_ease_text(switches.bar_ease).into(),
                 DisplayRow::SpectrumGlide => spec_ease_text(switches.spec_ease).into(),
-                DisplayRow::Spectrograph => format!("last {span_s} s"),
-                DisplayRow::SpectrographColours => colours.name().to_owned(),
                 DisplayRow::DistortionUnit => match views.distortion_unit {
                     DistortionUnit::Db => "dB re fundamental".into(),
                     DistortionUnit::Percent => "% of fundamental".into(),
@@ -486,10 +486,23 @@ pub fn display_rows(
                 DisplayRow::ResolutionMarker => {
                     resolution_marker_text(switches.resolution_marker).into()
                 }
+                DisplayRow::CursorJump => {
+                    ac2_scene::cursor_jump::prominence_text(jump_prominence_db)
+                }
                 DisplayRow::SpectrumView => spectrum_view_name(views.spectrum).to_owned(),
                 DisplayRow::SweepView => sweep_view_name(views.sweep).to_owned(),
                 DisplayRow::LevelAxes => {
                     "each pane's as last left · Enter resets them to the defaults".into()
+                }
+                DisplayRow::Advice => ac2_scene::advice::on_text(advice.on).into(),
+                DisplayRow::AdviceRefHeadroom => {
+                    ac2_scene::advice::ref_headroom_text(advice.ref_headroom_db)
+                }
+                DisplayRow::AdviceLowCoherence => {
+                    ac2_scene::advice::low_coherence_text(advice.low_coherence)
+                }
+                DisplayRow::AdviceLowLevel => {
+                    ac2_scene::advice::low_level_text(advice.low_level_dbfs)
                 }
             };
             (*r, v)
@@ -571,9 +584,9 @@ pub fn recording_rows(limit_min: u32, server: Option<&ServerInfo>) -> Vec<(Recor
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub page: Page,
-    /// The Audio & I/O page's device and channel rows.
+    /// The Audio I/O page's device and channel rows.
     pub session: SessionDialog,
-    /// The max level row is focused on the Audio & I/O page (below the channels).
+    /// The max level row is focused on the Audio I/O page (below the channels).
     pub on_ceiling: bool,
     pub ceiling: CeilingEdit,
     pub cal: CalView,
@@ -586,9 +599,11 @@ pub struct Settings {
     /// Opened for channel rows before the device's rows arrived: the focus goes to them
     /// once they do.
     pub focus_want: Option<FocusWant>,
+    /// Opened by the Sessions dialog's New: the Audio I/O page says it starts a new session.
+    pub new_session: bool,
 }
 
-/// Channel rows a command opened the Audio & I/O page for.
+/// Channel rows a command opened the Audio I/O page for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FocusWant {
     /// The first input.
@@ -611,6 +626,7 @@ impl Settings {
             connection: ConnectionPage::default(),
             rig: RigPage::default(),
             focus_want: None,
+            new_session: false,
         };
         s.show(page);
         s
@@ -645,7 +661,7 @@ impl Settings {
         }
     }
 
-    /// Shows the Audio & I/O page focused on `row`.
+    /// Shows the Audio I/O page focused on `row`.
     pub fn focus_session_row(&mut self, row: crate::session_dialog::Row) {
         self.show(Page::AudioIo);
         self.on_ceiling = false;
@@ -656,6 +672,16 @@ impl Settings {
     /// Shows `page`.
     pub fn show(&mut self, page: Page) {
         self.page = page;
+    }
+
+    /// The shown page's heading: its title, or on Audio I/O after the Sessions dialog's
+    /// New, that it opens a new session.
+    pub fn heading(&self) -> &'static str {
+        if self.new_session && self.page == Page::AudioIo {
+            NEW_SESSION_AUDIO
+        } else {
+            self.page.title()
+        }
     }
 
     /// Whether a typed edit or text row owns the keys that otherwise act on the page.
@@ -698,7 +724,7 @@ impl Settings {
         }
     }
 
-    /// ↑/↓ on the Audio & I/O page: the device rows, the channel rows, then the max level
+    /// ↑/↓ on the Audio I/O page: the device rows, the channel rows, then the max level
     /// row, wrapping.
     pub fn io_move(&mut self, d: i32) {
         let rows = self.session.rows();

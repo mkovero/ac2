@@ -9,7 +9,7 @@ use ac2_scene::theme::Theme;
 use ac2_ui::embedded::{EmbeddedBackend, Setup, start_embedded_with};
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::CommandId;
-use ac2_ui::state::{AppState, Msg, Overlay, StimPhase};
+use ac2_ui::state::{AppState, ChoicePurpose, Msg, Overlay, StimPhase};
 use std::time::{Duration, Instant};
 
 /// From an empty daemon to a stored sweep using only the app, on the simulated rig whose
@@ -66,7 +66,7 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
             && s.kind_sweep().is_some()
     })?;
     let (data, grid) = d.st.kind_sweep().ok_or("no sweep")?;
-    let freqs = ac2_scene::grid::column_frequencies(grid);
+    let freqs = grid.centres();
     let s = data.sweep.as_ref().ok_or("no sweep data")?;
     let m = s.info.floor_margin.0;
     for (order, want) in [(2u8, -40.0), (3, -50.0)] {
@@ -193,9 +193,10 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     d.until("the session", |s| s.open_session().is_some())?;
     let open = d.st.open_session().cloned().ok_or("session")?;
     assert_eq!(open.config.input_channels, vec![0, 1, 2]);
-    d.until("the measurement offer", |s| {
-        matches!(s.overlay, Overlay::Offer(_))
-    })?;
+    d.until(
+        "the New measurement chooser",
+        |s| matches!(&s.overlay, Overlay::Choose(c) if c.purpose == ChoicePurpose::NewMeasurement),
+    )?;
     d.key("Escape");
 
     let sweeps_before = sweep_count(&d.st);
@@ -259,7 +260,7 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
         "{}",
         t.caption
     );
-    assert_eq!(t.bands, ["250", "500", "1k", "2k", "4k", "All"]);
+    assert_eq!(t.bands, ["250", "500", "1000", "2000", "4000", "All"]);
     let row = |p| t.rows.iter().find(|r| r.param == p).ok_or("row");
     for p in [ac2_scene::room::Param::T20, ac2_scene::room::Param::T30] {
         for c in &row(p)?.cells {
@@ -483,11 +484,23 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
         ]
     );
 
-    // Live again, the transfer pane focused: V selects the first sweep, then the second;
-    // the sweep pane shows whichever is selected.
-    d.key("Escape");
+    // Live again, the transfer pane focused and given the sweep by its chip (V only
+    // selects): V selects the first sweep, then the second; the sweep pane shows whichever
+    // is selected.
+    d.key("End");
     d.key("Alt+1");
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
+    assert_eq!(d.st.selected_trace, None);
+    let sweep_meas =
+        d.st.trace_meta(first)
+            .ok()
+            .and_then(|t| t.edit.owner.meas())
+            .ok_or("the run's sweep")?;
+    let tf = crate::common::pane(&d.st, PaneKind::Transfer);
+    d.send(Msg::PanePick(
+        tf,
+        ac2_ui::state::PaneMenuRow::Meas(sweep_meas),
+    ));
     assert_eq!(d.st.selected_trace, None);
     d.key("V");
     assert_eq!(d.st.selected_trace, Some(first));
@@ -555,7 +568,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     assert_eq!(d.st.selected_trace, Some(second));
     assert_eq!(shown(&d.st), Some(second));
 
-    // V on the sweep pane steps the sweep runs and selects them for the transfer pane.
+    // V on the sweep pane steps the sweep runs and selects them.
     d.key("Alt+5");
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
     d.key("V");

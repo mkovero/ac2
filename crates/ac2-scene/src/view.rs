@@ -289,6 +289,30 @@ pub enum PhaseView {
     GroupDelay { range_ms: Range },
 }
 
+impl PhaseView {
+    /// Shift+P: wrapped → unwrapped → group delay → wrapped, each view at its default range.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Wrapped => Self::Unwrapped {
+                range: Range::new(-720.0, 180.0),
+            },
+            Self::Unwrapped { .. } => Self::GroupDelay {
+                range_ms: Range::new(-2.0, 10.0),
+            },
+            Self::GroupDelay { .. } => Self::Wrapped,
+        }
+    }
+
+    /// What the operator reads when stepping (toast).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Wrapped => "phase: wrapped",
+            Self::Unwrapped { .. } => "phase: unwrapped",
+            Self::GroupDelay { .. } => "group delay",
+        }
+    }
+}
+
 /// Coherence-driven display of TF traces (magnitude and phase panes).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CoherenceStyle {
@@ -338,8 +362,12 @@ pub struct TfView {
     /// Trace whose measured delay is the phase reference (decision 8b). `None`: the first
     /// trace with a shared time base.
     pub phase_reference: Option<TraceKey>,
-    /// Where the legend sits over the magnitude pane, how large it may be.
+    /// The legend over the magnitude pane: shown or not, scrolled how far (its place and
+    /// text size are the pane's [`ViewState::plates`]).
     pub legend: LegendView,
+    /// Min / max tracking (P): the highest peaks and deepest dips of the magnitude marked
+    /// and listed.
+    pub extremes: bool,
 }
 
 impl Default for TfView {
@@ -354,42 +382,19 @@ impl Default for TfView {
             coherence_placement: CoherencePlacement::Pane,
             phase_reference: None,
             legend: LegendView::default(),
-        }
-    }
-}
-
-/// How spectrum / RTA traces are drawn.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SpectrumStyle {
-    /// The max-per-pixel line.
-    Line,
-    /// The line over a faint area down to the plot bottom.
-    Fill,
-    /// Band power as bars (RTA traces); narrowband traces draw as `Line`.
-    Bars,
-}
-
-impl SpectrumStyle {
-    /// The next style in the B cycle: line → fill → bars → line.
-    pub fn next(self) -> Self {
-        match self {
-            Self::Line => Self::Fill,
-            Self::Fill => Self::Bars,
-            Self::Bars => Self::Line,
+            extremes: false,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpectrumView {
-    pub style: SpectrumStyle,
     /// Level axis while the pane shows dBFS.
     pub level: Range,
     /// Level axis while the pane shows dB SPL (calibrated): the same zoom and pan keys act on
     /// it, and each scale keeps its own range, so calibrating doesn't push the curves off
     /// a dBFS-sized axis.
     pub level_spl: Range,
-    pub peak_hold: bool,
     /// What the pane shows: the spectrum, the spectrograph or both.
     pub mode: SpectrumMode,
     pub spectrograph: SpectrographView,
@@ -436,36 +441,12 @@ impl SpectrumMode {
     }
 }
 
-/// The history lengths the spectrograph steps through, seconds.
-pub const SPECTROGRAPH_SPANS_S: [u32; 4] = [10, 30, 60, 120];
-
-/// The spectrograph: how much history it keeps, and the time of the cursor in it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// The spectrograph's cursor. How much history it keeps and its colours are its
+/// measurement's ([`ac2_proto::model::SpectrumDisplay`]).
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct SpectrographView {
-    /// History shown, seconds (one of [`SPECTROGRAPH_SPANS_S`]).
-    pub span_s: u32,
     /// The cursor's time, seconds before the newest frame (with `cursor_hz`, a point).
     pub cursor_s: Option<f64>,
-}
-
-impl Default for SpectrographView {
-    fn default() -> Self {
-        Self {
-            span_s: 30,
-            cursor_s: None,
-        }
-    }
-}
-
-impl SpectrographView {
-    /// The next history length, wrapping to the shortest.
-    pub fn next_span(span_s: u32) -> u32 {
-        SPECTROGRAPH_SPANS_S
-            .iter()
-            .copied()
-            .find(|s| *s > span_s)
-            .unwrap_or(SPECTROGRAPH_SPANS_S[0])
-    }
 }
 
 impl SpectrumView {
@@ -488,10 +469,8 @@ impl SpectrumView {
 impl Default for SpectrumView {
     fn default() -> Self {
         Self {
-            style: SpectrumStyle::Bars,
             level: Range::new(-100.0, 0.0),
             level_spl: Range::new(20.0, 120.0),
-            peak_hold: false,
             mode: SpectrumMode::Spectrum,
             spectrograph: SpectrographView::default(),
         }
@@ -725,6 +704,13 @@ pub struct SplView {
     pub layout: LeqLayout,
 }
 
+/// How a pane draws: its plot furniture and the colours and sizes it draws in.
+#[derive(Clone, Copy, Debug)]
+pub struct Style<'a> {
+    pub chrome: PlotChrome,
+    pub theme: &'a crate::theme::Theme,
+}
+
 /// How much of a plot's furniture a pane draws around its traces. Fewer lines let a
 /// screenshot or a crowded overlay read as curves alone; the axes stay as they are, so
 /// nothing about the picture's scale changes between the steps.
@@ -772,6 +758,12 @@ impl PlotChrome {
         self != Self::Bare
     }
 
+    /// The spectrum's peak list and the rank beside each mark; the marks themselves are on
+    /// the curve and stay with it, like the traces.
+    pub fn peak_list(self) -> bool {
+        self != Self::Bare
+    }
+
     /// The SPL views' state words (`OK`, `NEAR`, `OVER`) and limit texts (`stay ≤ … dB`,
     /// `limit … dB`). Read across a room, a bar's colour and its limit line already say
     /// the state, so the words go with the grid; every other word (on course, cooling
@@ -803,6 +795,11 @@ pub struct ViewState {
     pub spl: SplView,
     /// Comparison cursor, Hz; synchronised across traces and panes.
     pub cursor_hz: Option<f64>,
+    /// The cursor's mark, Hz: while set, the cursor reads how it differs from there.
+    pub cursor_mark_hz: Option<f64>,
+    /// How far a peak or notch must stand out for the cursor to jump to it, dB
+    /// ([`crate::cursor_jump`]).
+    pub jump_prominence_db: f64,
     /// Air temperature for the delay → distance readout (decision A).
     pub temperature_c: f64,
     /// Grid, labels and cursor of the pane being drawn.
@@ -810,6 +807,14 @@ pub struct ViewState {
     /// Mark the frequency ranges a curve's analysis does not resolve at its grid
     /// ([`crate::unresolved`]).
     pub unresolved: bool,
+    /// Least right margin of a frequency plot, logical pixels: set by the pane layout (not
+    /// the operator) to the widest margin among the panes stacked in this pane's column, so
+    /// they all put one frequency at one x ([`crate::freq_column`]). 0 keeps the plot's own.
+    pub freq_right: f32,
+    /// Where the pane's plates sit and how large their text is.
+    pub plates: crate::plate::Plates,
+    /// The plate under the pointer in the pane being drawn (lit, its grip shown bright).
+    pub plate_hover: Option<crate::plate::PlateHover>,
 }
 
 impl Default for ViewState {
@@ -822,9 +827,14 @@ impl Default for ViewState {
             distortion: DistortionView::default(),
             spl: SplView::default(),
             cursor_hz: None,
+            cursor_mark_hz: None,
+            jump_prominence_db: crate::cursor_jump::DEFAULT_PROMINENCE_DB,
             temperature_c: 20.0,
             chrome: PlotChrome::Full,
             unresolved: true,
+            freq_right: 0.0,
+            plates: crate::plate::Plates::default(),
+            plate_hover: None,
         }
     }
 }

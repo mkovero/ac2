@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use ac2_proto::model::{MathDomain, MeasKind};
+use ac2_proto::model::{MathDomain, MeasKind, PeakMode};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::MeasId;
 
@@ -50,8 +50,12 @@ impl AppState {
             .filter(|id| self.layout.view(**id).is_some_and(|v| v.shows_ir()))
             .filter_map(|id| self.pane_meas(*id).map(|m| m.id))
             .collect();
-        let spectrum =
-            shows(PaneKind::Spectrum) || self.view.spectrum.peak_hold || self.spectrograph_shown();
+        let spectrum = shows(PaneKind::Spectrum)
+            || self
+                .measurements()
+                .iter()
+                .any(|m| self.display_of(m).peak != PeakMode::Off)
+            || self.spectrograph_shown();
         let mut out = HashSet::new();
         for m in self.measurements() {
             let streams: &[Stream] = match &m.config.kind {

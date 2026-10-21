@@ -14,21 +14,19 @@ use crate::time::{ClockOffset, age_s};
 /// so neither a stray key nor a repeated Enter can raise it.
 pub const RAISE_WORD: &str = "raise";
 
-/// `−40.0 dBFS`.
-pub fn dbfs(v: f64) -> String {
-    format!("{} dBFS", format::level(v))
-}
-
 /// The system max level with its bound: `−40.0 dBFS · bound −10.0 dBFS (ac2d --max-level)`;
 /// at the bound, `−10.0 dBFS · the rig's bound (ac2d --max-level)`.
 pub fn ceiling_line(g: &Generator) -> String {
     if g.ceiling.0 >= g.ceiling_bound.0 {
-        format!("{} · the rig's bound (ac2d --max-level)", dbfs(g.ceiling.0))
+        format!(
+            "{} · the rig's bound (ac2d --max-level)",
+            format::dbfs(g.ceiling.0)
+        )
     } else {
         format!(
             "{} · bound {} (ac2d --max-level)",
-            dbfs(g.ceiling.0),
-            dbfs(g.ceiling_bound.0)
+            format::dbfs(g.ceiling.0),
+            format::dbfs(g.ceiling_bound.0)
         )
     }
 }
@@ -51,11 +49,11 @@ pub fn ceiling_change(g: &Generator) -> Option<String> {
 /// What a change did, for a toast or the CLI: `system max level lowered to −40.0 dBFS`.
 pub fn ceiling_changed(from: Dbfs, to: Dbfs) -> String {
     if to.0 > from.0 {
-        format!("system max level raised to {}", dbfs(to.0))
+        format!("system max level raised to {}", format::dbfs(to.0))
     } else if to.0 < from.0 {
-        format!("system max level lowered to {}", dbfs(to.0))
+        format!("system max level lowered to {}", format::dbfs(to.0))
     } else {
-        format!("system max level stays {}", dbfs(to.0))
+        format!("system max level stays {}", format::dbfs(to.0))
     }
 }
 
@@ -64,8 +62,8 @@ pub fn raise_prompt(from: Dbfs, to: Dbfs) -> String {
     format!(
         "Raise the system max level from {} to {}? Every client can then play louder. Type \
          {RAISE_WORD} and press Enter.",
-        dbfs(from.0),
-        dbfs(to.0)
+        format::dbfs(from.0),
+        format::dbfs(to.0)
     )
 }
 

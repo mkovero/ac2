@@ -49,6 +49,8 @@ pub struct TfFrame {
     pub coh: Vec<f32>,
     /// Validity per column.
     pub validity: Vec<ValidityMask>,
+    /// An alignment math channel's view curves; `None` for every other transfer frame.
+    pub align: Option<crate::model::AlignCurves>,
 }
 
 /// IR frame.

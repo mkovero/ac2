@@ -17,11 +17,11 @@ log = ["dep:tracing", "dep:tracing-core", "dep:tracing-subscriber"]
 
 [dependencies]
 directories = "6"
-tracing = { version = "0.1", optional = true }
+tracing = { workspace = true, optional = true }
 tracing-core = { version = "0.1", optional = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"], optional = true }
 
 [dev-dependencies]
-log = "0.4"
-tempfile = "3"
-tracing = "0.1"
+log = { workspace = true }
+tempfile = { workspace = true }
+tracing = { workspace = true }

@@ -81,6 +81,8 @@ struct PaneEntryFile {
     chrome: ChromeFile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     levels: Option<PaneLevelsFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plates: Option<PanePlatesFile>,
 }
 
 impl PaneEntryFile {
@@ -94,6 +96,7 @@ impl PaneEntryFile {
                 TransferView::Magnitude => TransferViewFile::Magnitude,
                 TransferView::Phase => TransferViewFile::Phase,
                 TransferView::Coherence => TransferViewFile::Coherence,
+                TransferView::Alignment => TransferViewFile::Alignment,
                 TransferView::Ir(IrMode::Linear) => TransferViewFile::IrLinear,
                 TransferView::Ir(IrMode::Log) => TransferViewFile::IrLog,
                 TransferView::Ir(IrMode::Etc) => TransferViewFile::Etc,
@@ -119,6 +122,7 @@ impl PaneEntryFile {
             sweep_reference: m.sweep_reference,
             chrome: ChromeFile::of(m.chrome),
             levels: PaneLevelsFile::of(&p.levels),
+            plates: PanePlatesFile::of(&p.plates),
         }
     }
 
@@ -132,6 +136,7 @@ impl PaneEntryFile {
                     TransferViewFile::Magnitude => TransferView::Magnitude,
                     TransferViewFile::Phase => TransferView::Phase,
                     TransferViewFile::Coherence => TransferView::Coherence,
+                    TransferViewFile::Alignment => TransferView::Alignment,
                     TransferViewFile::IrLinear => TransferView::Ir(IrMode::Linear),
                     TransferViewFile::IrLog => TransferView::Ir(IrMode::Log),
                     TransferViewFile::Etc => TransferView::Ir(IrMode::Etc),
@@ -158,12 +163,12 @@ impl PaneEntryFile {
                 chrome: self.chrome.chrome(),
             },
             levels: PaneLevelsFile::parse(self.levels.as_ref(), self.id),
+            plates: PanePlatesFile::parse(self.plates.as_ref(), self.id),
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct LayoutFile {
     /// The focused pane's id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,13 +183,15 @@ pub(super) struct LayoutFile {
     distortion_unit: UnitFile,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hidden: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    compared: Vec<String>,
     /// Last: tables.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tree: Option<NodeFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     panes: Vec<PaneEntryFile>,
+    /// Keys this version does not know: logged and left out of the next save, so one stale
+    /// key costs only itself, never the pane tree.
+    #[serde(flatten, skip_serializing)]
+    unknown: BTreeMap<String, toml::Value>,
 }
 
 fn spl_meter_leq() -> SplViewFile {
@@ -219,6 +226,9 @@ pub(super) fn lenient_layout<'de, D: serde::Deserializer<'de>>(
 
 impl LayoutFile {
     pub(super) fn parse(self) -> LayoutPrefs {
+        for key in self.unknown.keys() {
+            tracing::warn!("ui.toml: unknown [layout] setting `{key}` ignored");
+        }
         let panes = self.tree.as_ref().and_then(|t| {
             let Some(root) = t.node() else {
                 tracing::warn!(
@@ -265,7 +275,6 @@ impl LayoutFile {
                 UnitFile::Percent => DistortionUnit::Percent,
             },
             hidden: self.hidden.into_iter().collect(),
-            compared: self.compared.into_iter().collect(),
         }
     }
 
@@ -280,13 +289,13 @@ impl LayoutFile {
                 DistortionUnit::Percent => UnitFile::Percent,
             },
             hidden: l.hidden.iter().cloned().collect(),
-            compared: l.compared.iter().cloned().collect(),
             tree: l.panes.as_ref().map(|p| NodeFile::of(&p.root)),
             panes: l
                 .panes
                 .as_ref()
                 .map(|p| p.views.iter().map(PaneEntryFile::of).collect())
                 .unwrap_or_default(),
+            unknown: BTreeMap::new(),
         }
     }
 }

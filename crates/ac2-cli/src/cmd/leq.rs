@@ -187,7 +187,7 @@ pub(crate) fn apply_position(
 /// `--peak-limit`, `--warn`, `--horizon`.
 pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> {
     let mut cfg = cur.clone();
-    let blank = |w: &crate::units::LeqWindowArg| LeqWindow {
+    let blank = |w: &ac2_scene::unit_text::LeqWindowArg| LeqWindow {
         cue: None,
         duration: Seconds(f64::from(w.seconds)),
         weighting: w.weighting(),
@@ -285,7 +285,7 @@ fn windows_table(cfg: &LeqConfig, position: Option<PositionCorrection>) -> Strin
     for q in PeakQuantity::ALL {
         if let Some(l) = cfg.peaks.get(q) {
             t.add_row(vec![
-                format!("{} (highest second of 10 s)", ac2_scene::leq::peak_name(q)),
+                format!("{} (highest second of 10 s)", q.name()),
                 db(l.limit.0),
                 db(l.warn_margin.0),
             ]);

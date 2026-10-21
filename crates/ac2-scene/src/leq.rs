@@ -9,8 +9,8 @@ use std::collections::VecDeque;
 
 use ac2_proto::frame::{LeqFlags, LeqFrame, LeqPeak};
 use ac2_proto::model::{
-    AlarmSubject, LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LeqWindow, LevelScale,
-    PeakQuantity, PositionCorrection, SplHistory, Weighting,
+    LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LeqWindow, LevelScale, PeakQuantity,
+    PositionCorrection, SplHistory, Weighting,
 };
 
 use crate::axis::{self, Axis, Mapping, Range, Scale, Steps};
@@ -21,7 +21,7 @@ use crate::primitives::{
     Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
-use crate::view::{LeqLayout, LeqStyle, PlotChrome};
+use crate::view::{LeqLayout, LeqStyle, PlotChrome, Style};
 
 mod caption;
 mod columns;
@@ -29,6 +29,8 @@ mod draw;
 mod history;
 mod run;
 mod tiles;
+/// A window length in words (`1 min 30 s`), as the daemon and the CLI say it too.
+pub use ac2_proto::model::window_length as length;
 use caption::{Caption, caption, caption_left};
 pub use columns::{
     ABOVE_LIMIT_DB, BELOW_LIMIT_DB, Behind, FREE_SPAN_DB, LeqColumn, LeqColumns, NAME_RATIO,
@@ -45,51 +47,9 @@ pub use run::{LeqRunText, NewLogConfirm, new_log_confirm, run_text};
 use tiles::TILE_INSTRUCTION_EM;
 pub use tiles::{LeqTile, TileKind, TileState, leq_tiles, tile_colors, time_to};
 
-pub(crate) fn w_letter(w: Weighting) -> &'static str {
-    match w {
-        Weighting::A => "A",
-        Weighting::C => "C",
-        Weighting::Z => "Z",
-    }
-}
-
-/// A window length in words: `30 s`, `5 min`, `90 min`, `3 h`, `1 min 30 s`. Minutes up to
-/// two hours, as limits are written (LAeq,60min).
-pub fn length(seconds: f64) -> String {
-    if !seconds.is_finite() || seconds < 0.0 {
-        return format::NO_VALUE.to_string();
-    }
-    let s = seconds.round() as u64;
-    if s < 60 {
-        format!("{s} s")
-    } else if s > 7200 && s.is_multiple_of(3600) {
-        format!("{} h", s / 3600)
-    } else if s.is_multiple_of(60) {
-        format!("{} min", s / 60)
-    } else {
-        format!("{} min {} s", s / 60, s % 60)
-    }
-}
-
 /// `LAeq 30 min`.
 pub fn window_name(w: &LeqWindow) -> String {
-    format!("L{}eq {}", w_letter(w.weighting), length(w.duration.0))
-}
-
-/// `LCpeak`, `LAFmax`.
-pub fn peak_name(q: PeakQuantity) -> &'static str {
-    match q {
-        PeakQuantity::LcPeak => "LCpeak",
-        PeakQuantity::LafMax => "LAFmax",
-    }
-}
-
-/// The frequency weighting a peak quantity is in.
-fn peak_weighting(q: PeakQuantity) -> Weighting {
-    match q {
-        PeakQuantity::LcPeak => Weighting::C,
-        PeakQuantity::LafMax => Weighting::A,
-    }
+    ac2_proto::model::window_name(w.duration.0, w.weighting)
 }
 
 /// `corrected +5.0 dB`, or with a peak difference of its own `corrected +5.0 dB, peaks
@@ -107,29 +67,11 @@ pub fn position_text(p: &PositionCorrection) -> String {
 /// corrected number never reads as a measured one (the caption says by how much).
 const CORRECTED_MARK: &str = "corr.";
 
-/// What an alarm says: `FOH SPL: LAeq 30 min over its limit — 101.2 dB > 99.0 dB`,
-/// `FOH SPL: LCpeak back within its limit — 133.0 dB (corrected +2.0 dB)`. `true` for an
-/// over, which the app shows as an error.
+/// What an alarm says: `FOH SPL: LAeq 30 min over its limit — 101.2 dB SPL > 99.0 dB SPL`,
+/// `FOH SPL: LCpeak back within its limit — 133.0 dB SPL (corrected +2.0 dB)`. `true` for
+/// an over, which the app shows as an error.
 pub fn alarm_text(meter: &str, a: &LeqAlarm) -> (bool, String) {
-    let what = match a.subject {
-        AlarmSubject::Window {
-            duration,
-            weighting,
-        } => window_name(&LeqWindow {
-            cue: None,
-            duration,
-            weighting,
-            limit: None,
-            warn_margin: ac2_proto::units::Db(0.0),
-        }),
-        AlarmSubject::Peak { quantity } => peak_name(quantity).to_owned(),
-        AlarmSubject::Band {
-            duration,
-            weighting,
-            nominal,
-        } => crate::band_leq::band_window_name(nominal.0, duration.0, weighting),
-        AlarmSubject::Predicted => "predicted LAeq at the transfer's place".to_owned(),
-    };
+    let what = a.subject.to_string();
     let corrected = match a.position {
         Some(p) => format!(" (corrected {:+.1} dB)", p.0),
         None => String::new(),
@@ -138,16 +80,16 @@ pub fn alarm_text(meter: &str, a: &LeqAlarm) -> (bool, String) {
         LeqAlarmKind::Over => (
             true,
             format!(
-                "{meter}: {what} over its limit — {} dB > {} dB{corrected}",
-                format::level(a.level.0),
-                format::level(a.limit.0)
+                "{meter}: {what} over its limit — {} > {}{corrected}",
+                format::spl(a.level.0),
+                format::spl(a.limit.0)
             ),
         ),
         LeqAlarmKind::Recovered => (
             false,
             format!(
-                "{meter}: {what} back within its limit — {} dB{corrected}",
-                format::level(a.level.0)
+                "{meter}: {what} back within its limit — {}{corrected}",
+                format::spl(a.level.0)
             ),
         ),
     }
@@ -251,7 +193,7 @@ pub(crate) fn leq_scene_under<T>(
         .first()
         .map(|t| t.weighting)
         .filter(|w| windows.iter().all(|t| t.weighting == *w))
-        .map(|w| format!("L{}eq", w_letter(w)));
+        .map(|w| format!("L{}eq", w.letter()));
     let right = match &v.stale {
         Some(s) => format!("{s} · {}", v.cal),
         None => v.cal.clone(),
@@ -333,8 +275,10 @@ pub(crate) fn leq_scene_under<T>(
             range,
             tiles_area,
             v.stale.is_some(),
-            v.chrome,
-            theme,
+            Style {
+                chrome: v.chrome,
+                theme,
+            },
         ));
     } else {
         let gap = 8.0;
@@ -365,8 +309,10 @@ pub(crate) fn leq_scene_under<T>(
                 v.stale.is_some(),
                 shared.as_deref(),
                 lines_below,
-                v.chrome,
-                theme,
+                Style {
+                    chrome: v.chrome,
+                    theme,
+                },
             );
             rects.push(r);
         }

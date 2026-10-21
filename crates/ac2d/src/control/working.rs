@@ -197,7 +197,7 @@ impl Control {
             origin: self.working.origin.clone(),
             dirty: self.content_hash() != self.working.saved_hash,
             saved_at: self.working.saved_at,
-            recover: self.recover.as_ref().map(|r| r.info.clone()),
+            recover: self.replaced_working.as_ref().map(|r| r.info.clone()),
         };
         if self.store.state().working != w {
             self.commit(Change::Working(w));
@@ -298,7 +298,10 @@ impl Control {
     /// Makes a staged copy the recovery copy: on disk beside the autosave when it was
     /// written there, in memory when there is no autosave or the disk refused.
     pub(super) fn keep(&mut self, s: Staged) {
-        let had_disk = self.recover.as_ref().is_some_and(|r| r.copy.on_disk());
+        let had_disk = self
+            .replaced_working
+            .as_ref()
+            .is_some_and(|r| r.copy.on_disk());
         let Staged { kept, tmp } = s;
         let copy = match (kept.dir, tmp) {
             (Some(dir), Some(Ok(tmp))) => self.install(dir, tmp, kept.data),
@@ -323,7 +326,7 @@ impl Control {
             info.measurements,
             info.traces
         );
-        self.recover = Some(Recover {
+        self.replaced_working = Some(Recover {
             info,
             working: kept.working,
             copy,
@@ -358,7 +361,7 @@ impl Control {
 
     /// The write thread reported on the install asked under `token`.
     pub(super) fn recover_installed(&mut self, token: u64, result: Result<(), String>) {
-        let Some(r) = self.recover.take() else {
+        let Some(r) = self.replaced_working.take() else {
             return;
         };
         let copy = match r.copy {
@@ -376,7 +379,7 @@ impl Control {
             // A copy that has been replaced or recovered since.
             other => other,
         };
-        self.recover = Some(Recover { copy, ..r });
+        self.replaced_working = Some(Recover { copy, ..r });
     }
 
     /// The content hash and the saved hash: equal pairs mean the same content in the same
@@ -392,7 +395,7 @@ impl Control {
         &mut self,
         client: &ClientId,
     ) -> Result<(Pending, Work), ProtoError> {
-        let Some(r) = self.recover.as_ref() else {
+        let Some(r) = self.replaced_working.as_ref() else {
             return Err(perr(
                 ErrorCode::NotFound,
                 "no replaced working state to recover",
@@ -450,7 +453,7 @@ impl Control {
                      nothing was recovered: ask again",
                 ));
             }
-            match self.recover.take() {
+            match self.replaced_working.take() {
                 Some(old) => Ok((old, data)),
                 None => Err(perr(
                     ErrorCode::NotFound,
@@ -469,7 +472,7 @@ impl Control {
         };
         if let Err(e) = self.replace_session(Some(client), data) {
             // Nothing changed: the copy stays recoverable where it is.
-            self.recover = Some(old);
+            self.replaced_working = Some(old);
             if let Some(k) = kept {
                 k.discard();
             }
@@ -478,7 +481,10 @@ impl Control {
         if let Some(k) = kept {
             self.keep(k);
         }
-        let now_on_disk = self.recover.as_ref().is_some_and(|r| r.copy.on_disk());
+        let now_on_disk = self
+            .replaced_working
+            .as_ref()
+            .is_some_and(|r| r.copy.on_disk());
         if old.copy.on_disk() && !now_on_disk {
             self.remove_replaced();
         }
@@ -521,7 +527,7 @@ impl Control {
             && let Some(f) = read_json::<ReplacedFile>(&rd.join(WORKING_FILE))
             && let Ok(m) = session::read_manifest(&rd)
         {
-            self.recover = Some(Recover {
+            self.replaced_working = Some(Recover {
                 info: Recoverable {
                     replaced_at: f.replaced_at,
                     origin: f.working.origin.clone(),

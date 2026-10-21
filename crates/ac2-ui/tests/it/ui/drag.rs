@@ -12,6 +12,7 @@ fn two_panes() -> ac2_ui::prefs::UiPrefs {
         measurement: None,
         modes: Default::default(),
         levels: Default::default(),
+        plates: Default::default(),
     };
     p.layout.panes = Some(ac2_ui::prefs::PanesPrefs {
         root: PaneNode::Split {
@@ -90,7 +91,7 @@ fn a_list_row_dragged_onto_the_lower_pane() {
         Some("FOH SPL \u{2192} pane 2")
     );
     assert_eq!(h.state().state.drop_highlight(), Some((lower, None)));
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "row_drag_over_pane");
     h.event(button(to, false));
     settle(&mut h, 3);
@@ -111,6 +112,6 @@ fn a_list_row_dragged_onto_the_lower_pane() {
                 .is_some()
         })
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "row_dropped_on_pane");
 }

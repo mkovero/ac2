@@ -152,7 +152,9 @@ pub(super) fn sweep_config() -> SweepConfig {
     }
 }
 
-/// A transfer pane beside an SPL meter, the transfer one in its phase view.
+/// A transfer pane beside an SPL meter, the transfer one in its phase view with its level
+/// axis zoomed and its cursor values dragged to the bottom-left at twice the text size, the
+/// meter picked for measurement 2.
 pub fn pane_layout() -> PaneLayout {
     use crate::model::layout::*;
     let pane = |kind, transfer_view| LayoutPane {
@@ -162,18 +164,38 @@ pub fn pane_layout() -> PaneLayout {
         spl_view: SplView::MeterLeq,
         sweep_view: SweepView::Response,
         chrome: PlotChrome::Full,
+        meas: None,
+        levels: LayoutLevels::default(),
+        plates: LayoutPlates::default(),
     };
     PaneLayout::Split {
         axis: SplitAxis::Row,
         ratio: 0.625,
         a: Box::new(PaneLayout::Pane {
-            pane: pane(PaneKind::Transfer, TransferView::Phase),
+            pane: Box::new(LayoutPane {
+                levels: LayoutLevels {
+                    transfer: Some(LevelRange {
+                        lo: -24.0,
+                        hi: 12.0,
+                    }),
+                    ..LayoutLevels::default()
+                },
+                plates: LayoutPlates {
+                    readout: LayoutPlate {
+                        at: Some([0.0, 1.0]),
+                        scale: 2.0,
+                    },
+                    ..LayoutPlates::default()
+                },
+                ..pane(PaneKind::Transfer, TransferView::Phase)
+            }),
         }),
         b: Box::new(PaneLayout::Pane {
-            pane: LayoutPane {
+            pane: Box::new(LayoutPane {
                 chrome: PlotChrome::NoGrid,
+                meas: Some(MeasId(2)),
                 ..pane(PaneKind::Spl, TransferView::Magnitude)
-            },
+            }),
         }),
     }
 }
@@ -214,6 +236,9 @@ pub fn sweep_measurement() -> Measurement {
         grid_id: None,
         colour: Some(ColourFamily::Neutral),
         layout: None,
+        compared: Vec::new(),
+        offset: Db(0.0),
+        eq: Vec::new(),
     }
 }
 
@@ -253,7 +278,33 @@ pub fn math_measurement() -> Measurement {
         grid_id: Some(log_grid().id()),
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: Db(0.0),
+        eq: Vec::new(),
     }
+}
+
+/// An alignment: the live main against a stored sub capture, 60–120 Hz.
+pub(super) fn align_measurement() -> Measurement {
+    let mut m = math_measurement();
+    m.id = MeasId(9);
+    m.config.name = "Sub ↔ Main".into();
+    m.config.kind = MeasKind::Math {
+        config: MathConfig::of(
+            TraceOwner::Meas { meas: MeasId(1) },
+            MathDomain::Transfer,
+            MathExpr::Align {
+                a: Operand::Trace { trace: TraceId(7) },
+                b: Operand::Meas { meas: MeasId(1) },
+                band: AlignBand {
+                    lo: Hz(60.0),
+                    hi: Hz(120.0),
+                },
+                max_delay: ALIGN_MAX_DELAY_DEFAULT,
+            },
+        ),
+    };
+    m
 }
 
 /// A capture of the math channel `Main L ÷ Sub` (a live measurement over a stored trace).
@@ -321,6 +372,9 @@ pub(super) fn measurement() -> Measurement {
         grid_id: Some(log_grid().id()),
         colour: Some(ColourFamily::Hue { index: 5 }),
         layout: Some(pane_layout()),
+        compared: Vec::new(),
+        offset: Db(0.0),
+        eq: Vec::new(),
     }
 }
 
@@ -338,6 +392,10 @@ pub(super) fn spectrum_measurement() -> Measurement {
                     averaging: SpecAveraging::Fifo { frames: 4 },
                     smoothing: None,
                     level: SpecLevel::Density,
+                    display: crate::model::SpectrumDisplay {
+                        style: crate::model::SpectrumStyle::Line,
+                        ..Default::default()
+                    },
                 },
             },
         },
@@ -347,6 +405,9 @@ pub(super) fn spectrum_measurement() -> Measurement {
         grid_id: None,
         colour: None,
         layout: None,
+        compared: vec![crate::model::Compared::Meas { meas: MeasId(1) }],
+        offset: Db(-6.5),
+        eq: Vec::new(),
     }
 }
 

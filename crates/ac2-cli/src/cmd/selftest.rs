@@ -256,7 +256,7 @@ fn latency_text(l: &StaticLatency, rate_hz: u32) -> String {
 }
 
 fn channels(list: &[u16]) -> String {
-    crate::units::channels_text(list)
+    ac2_scene::unit_text::channels_text(list)
 }
 
 /// The report as text a tester can paste.

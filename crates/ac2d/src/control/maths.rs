@@ -10,12 +10,11 @@ use std::sync::Arc;
 
 use ac2_proto::grid::{BinColumns, GridDef};
 use ac2_proto::model::{
-    AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference, MeasKind, Measurement,
-    Operand, TraceKind, TraceMeta,
+    ALIGN_MAX_DELAY_LIMIT, AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference,
+    MeasKind, Measurement, Operand, TraceKind, TraceMeta,
 };
-use ac2_proto::units::{MeasId, SessionEpoch, TraceId};
+use ac2_proto::units::{EqSetId, MeasId, SessionEpoch, TraceId};
 use ac2_proto::{ErrorCode, ProtoError};
-use ac2_traces::columns::frequencies;
 use ac2_traces::math::trace_on_grid;
 
 use super::{Control, static_grid};
@@ -36,6 +35,22 @@ const LEVEL_RATIO: &str = "spectra and RTA bands are levels: they take − (leve
 /// Checks of a math channel's configuration that need no other entity.
 pub(super) fn validate(c: &MathConfig) -> Result<(), ProtoError> {
     let operands = c.expr.operands();
+    // An EQ set is a filter a curve goes through: only ever the B of a transfer ×.
+    let eq_ok = match &c.expr {
+        MathExpr::Binary { a, op, b } => {
+            !matches!(a, Operand::Eq { .. })
+                && (!matches!(b, Operand::Eq { .. })
+                    || (*op == MathOp::Multiply && c.domain == MathDomain::Transfer))
+        }
+        MathExpr::Average { .. } | MathExpr::Align { .. } => {
+            !operands.iter().any(|o| matches!(o, Operand::Eq { .. }))
+        }
+    };
+    if !eq_ok {
+        return Err(invalid(
+            "an EQ set is a filter: it is only the B of a transfer function × (A × EQ)",
+        ));
+    }
     match &c.expr {
         MathExpr::Binary { a, op, b } => {
             if a == b {
@@ -67,6 +82,32 @@ pub(super) fn validate(c: &MathConfig) -> Result<(), ProtoError> {
                 return Err(invalid("spectra and RTA bands average on power only"));
             }
         }
+        MathExpr::Align {
+            a,
+            b,
+            band,
+            max_delay,
+        } => {
+            if a == b {
+                return Err(invalid("A and B are the same operand"));
+            }
+            if c.domain != MathDomain::Transfer {
+                return Err(invalid(
+                    "an alignment compares the phase of two transfer functions; levels have none",
+                ));
+            }
+            if !band.is_valid() {
+                return Err(invalid(
+                    "the overlap band needs 0 < from < to (Hz): where both systems play",
+                ));
+            }
+            if !(max_delay.0 > 0.0 && max_delay.0 <= ALIGN_MAX_DELAY_LIMIT.0) {
+                return Err(invalid(format!(
+                    "the largest delay searched is above 0 and at most {} ms",
+                    ALIGN_MAX_DELAY_LIMIT.0 * 1e3
+                )));
+            }
+        }
     }
     match c.reference {
         MathReference::Operand { operand } if !operands.contains(&operand) => {
@@ -93,6 +134,7 @@ fn operand_word(o: Operand) -> String {
     match o {
         Operand::Meas { meas } => format!("measurement {meas}"),
         Operand::Trace { trace } => format!("trace {trace}"),
+        Operand::Eq { set, .. } => format!("EQ set {}", set.0),
     }
 }
 
@@ -117,6 +159,8 @@ fn domain_word(d: MathDomain) -> &'static str {
 pub(super) struct Lookup<'a> {
     pub(super) meas: &'a dyn Fn(MeasId) -> Option<(&'a str, &'a MeasKind)>,
     pub(super) trace: &'a dyn Fn(TraceId) -> Option<(&'a TraceMeta, GridDef)>,
+    /// Whether measurement `meas` holds EQ set `set`.
+    pub(super) eq: &'a dyn Fn(MeasId, EqSetId) -> bool,
     /// The current session epoch, the time base of every live operand; `None` skips the
     /// time-base checks (a session being loaded starts a new epoch: its math channels say
     /// per frame which operands share it).
@@ -220,6 +264,19 @@ pub(super) fn check_operands(
                 }
                 time_bases.push((t.source.shared_epoch(), name.clone()));
             }
+            Operand::Eq { meas, set } => {
+                if !(l.eq)(meas, set) {
+                    return Err(perr(
+                        ErrorCode::NotFound,
+                        format!("measurement {meas} has no EQ set {}", set.0),
+                    ));
+                }
+                if c.owner != (ac2_proto::model::TraceOwner::Meas { meas }) {
+                    return Err(invalid(
+                        "a prediction after an EQ set is listed under the set's measurement",
+                    ));
+                }
+            }
         }
     }
     if needs_shared_time_base(c) && l.epoch.is_some() {
@@ -227,9 +284,9 @@ pub(super) fn check_operands(
         if let Some((_, name)) = time_bases.iter().find(|(t, _)| t.is_none() || *t != first) {
             return Err(invalid(format!(
                 "{name} shares no time base with the other operands (an import, or a capture \
-                 from an earlier audio session): their relative arrival is unknown, so they \
-                 cannot be summed, differenced or averaged with phase; use ÷, ×, or a power \
-                 average"
+                 from an earlier audio I/O): their relative arrival is unknown, so they \
+                 cannot be summed, differenced, aligned or averaged with phase; use ÷, ×, \
+                 or a power average"
             )));
         }
     }
@@ -294,12 +351,17 @@ impl Control {
             MeasKind::Math { config } => {
                 let meas = |m| self.lookup(m);
                 let trace = |t| self.trace_lookup(t);
+                let eq = |m, s| {
+                    self.meas(m)
+                        .is_ok_and(|m: &Measurement| m.eq.iter().any(|x| x.id == s))
+                };
                 check_operands(
                     own,
                     config,
                     &Lookup {
                         meas: &meas,
                         trace: &trace,
+                        eq: &eq,
                         epoch: Some(self.epoch()),
                     },
                 )
@@ -351,9 +413,13 @@ impl Control {
             }
         }
         let (grid, _) = grid.ok_or_else(|| invalid("a math channel needs operands"))?;
-        let freqs = frequencies(&grid);
+        let freqs = grid.centres();
         let mut stored = Vec::with_capacity(operands.len());
         for o in &operands {
+            if let Operand::Eq { meas, set } = o {
+                stored.push(Some(Arc::new(self.eq_held(*meas, *set, c, &grid)?)));
+                continue;
+            }
             let Operand::Trace { trace } = o else {
                 stored.push(None);
                 continue;

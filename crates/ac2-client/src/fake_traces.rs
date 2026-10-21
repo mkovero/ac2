@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{Change, ErrorCode, ErrorDetail, GridDef, Patch, ProtoError, ReplyBody};
-use ac2_traces::columns::{Columns, StoredTrace, frequencies};
+use ac2_traces::columns::{Columns, StoredTrace};
 use ac2_traces::meta;
 use ac2_traces::ops::{self, Derived};
 use ac2_traces::text;
@@ -32,7 +32,7 @@ pub(super) struct FakeTraces {
 
 /// Synthetic transfer columns on `grid`.
 pub(super) fn synthetic(grid: &GridDef) -> Columns {
-    let f = frequencies(grid);
+    let f = grid.centres();
     Columns {
         mag_db: f
             .iter()
@@ -89,6 +89,12 @@ impl Shared {
         self.commit(Change::Trace(Patch::Set(meta.clone())));
         ReplyBody::Trace(meta)
     }
+    /// Adds a stored trace with its columns, as a test's fixture (the daemon's own kinds of
+    /// trace, such as an EQ set's curve, that the fake never makes itself).
+    pub fn put_trace(&mut self, meta: TraceMeta, grid: GridDef, columns: Columns) {
+        self.add_trace(meta, grid, columns);
+    }
+
     pub(super) fn alloc_trace(&mut self) -> TraceId {
         let id = TraceId(self.next_id);
         self.next_id += 1;
@@ -116,6 +122,7 @@ impl Shared {
             mic: None,
             mic_curve: None,
             created_at: WallNs(1_790_000_000_000_000_000),
+            eq_in: Vec::new(),
         }
     }
 
@@ -193,7 +200,32 @@ impl Shared {
         self.traces.irs.remove(&id);
         self.traces.mic_curves.remove(&id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
+        let rev = self.prune_compared().unwrap_or(rev);
         Ok(ReplyBody::Ack { rev })
+    }
+
+    /// Drops what is gone from every compare list, as the daemon does.
+    pub(super) fn prune_compared(&mut self) -> Option<Rev> {
+        let changed: Vec<Measurement> = self
+            .state
+            .measurements
+            .iter()
+            .filter_map(|m| {
+                let keep = |c: &Compared| match *c {
+                    Compared::Meas { meas } => self.state.measurements.iter().any(|o| o.id == meas),
+                    Compared::Trace { trace } => self.state.traces.iter().any(|t| t.id == trace),
+                };
+                let mut m = m.clone();
+                let n = m.compared.len();
+                m.compared.retain(keep);
+                (m.compared.len() != n).then_some(m)
+            })
+            .collect();
+        let mut rev = None;
+        for m in changed {
+            rev = Some(self.commit(Change::Measurement(Patch::Set(m))));
+        }
+        rev
     }
 
     fn derived(

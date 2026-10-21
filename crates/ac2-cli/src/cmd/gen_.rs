@@ -19,11 +19,11 @@ use tokio::sync::mpsc;
 use super::connect;
 use crate::CliError;
 use crate::args::{Cli, GenCmd, GenOpts, SlopeArg};
-use crate::output::{self, Out};
-use crate::units::LevelDbfs;
-use crate::units::channels_text;
+use crate::output::Out;
 use crate::watch::{Key, RawTerm, quit_signal};
 use ac2_scene::rig;
+use ac2_scene::unit_text::LevelDbfs;
+use ac2_scene::unit_text::channels_text;
 
 /// The settings `gen` would send, validated without a daemon.
 pub fn settings(cmd: &GenCmd) -> Result<Option<(GeneratorSettings, bool)>, CliError> {
@@ -90,7 +90,7 @@ fn signal_text(s: &GeneratorSettings) -> String {
     };
     format!(
         "{sig} at {} on out {}",
-        output::dbfs(s.level.0),
+        ac2_scene::format::dbfs(s.level.0),
         channels_text(&s.outputs)
     )
 }
@@ -192,8 +192,8 @@ async fn ceiling(
     if to.0 > g.ceiling.0 && !yes {
         return Err(CliError::Refused(format!(
             "raising the system max level from {} to {} needs --yes",
-            rig::dbfs(g.ceiling.0),
-            rig::dbfs(to.0)
+            ac2_scene::format::dbfs(g.ceiling.0),
+            ac2_scene::format::dbfs(to.0)
         )));
     }
     let r = c
@@ -240,13 +240,13 @@ pub(crate) async fn run(cli: &Cli, cmd: &GenCmd, out: &mut Out<'_>) -> Result<()
     if settings.level.0 > ceiling.0 {
         return Err(CliError::Refused(format!(
             "level {} is above the daemon's ceiling {}",
-            output::dbfs(settings.level.0),
-            output::dbfs(ceiling.0)
+            ac2_scene::format::dbfs(settings.level.0),
+            ac2_scene::format::dbfs(ceiling.0)
         )));
     }
     if st.session.open.is_none() {
         return Err(CliError::Usage(
-            "no open session; open one with `ac2 session open`".into(),
+            "no audio I/O open; open it with `ac2 session open`".into(),
         ));
     }
     let lease = c.acquire_lease(force, OnDrop::StopAndRelease).await?;
@@ -325,7 +325,7 @@ mod tests {
     use ac2_proto::units::Dbfs;
 
     use super::*;
-    use crate::units::{Channels, LevelDbfs};
+    use ac2_scene::unit_text::{Channels, LevelDbfs};
 
     type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
 

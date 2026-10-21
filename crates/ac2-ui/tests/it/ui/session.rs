@@ -4,7 +4,7 @@ use super::*;
 
 /// Shift+O: the session dialog lists the backends and the rig's channels by name with their
 /// live meters and roles; the mic is named inline, the loopback detected after a typed
-/// level, Enter opens and one more key creates the transfer measurement.
+/// level, Enter opens and the New measurement chooser asks what to measure.
 #[test]
 fn session_dialog() {
     if !have_gpu("settings_audio_mic_named") {
@@ -29,12 +29,12 @@ fn session_dialog() {
                 && fake.lock().preview.is_some()
         },
     );
-    // Audio & I/O on the input device; ↓ past output device, rate, buffer and input 1 to
-    // input 2, N names its mic.
-    h.state_mut().state.toasts.clear();
+    // Audio I/O on the input device; ↓ past output device and input 1 to input 2, N names
+    // its mic.
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "settings_audio");
-    for _ in 0..5 {
+    for _ in 0..3 {
         h.key_press(Key::ArrowDown);
     }
     h.key_press(Key::N);
@@ -44,7 +44,7 @@ fn session_dialog() {
     step_until(&mut h, "mic named", |a| {
         session_dialog_of(a).is_some_and(|d| d.inputs[1].mic == "M30 FOH" && d.edit.is_none())
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "settings_audio_mic_named");
 
@@ -57,7 +57,7 @@ fn session_dialog() {
             .and_then(|d| d.detect.as_ref())
             .is_some_and(|p| p.level == "-30")
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "settings_detect_confirm");
     h.key_press(Key::Enter);
@@ -75,19 +75,37 @@ fn session_dialog() {
             .daemon()
             .is_some_and(|s| s.generator.owner.is_none())
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "settings_detected");
 
     h.key_press(Key::Enter);
-    step_until(&mut h, "session open, offer shown", |a| {
-        a.state.open_session().is_some() && matches!(a.state.overlay, Overlay::Offer(_))
-    });
+    // The chooser opens on the session's answer, before its first level frame: the
+    // snapshot waits for the session's two meters too.
+    step_until(
+        &mut h,
+        "session open, the New measurement chooser, its meters",
+        |a| {
+            a.state.open_session().is_some()
+                && new_meas_chooser(a)
+                && a.state.input_meters().len() == 2
+        },
+    );
     assert_eq!(fake.executions("session.open"), 1);
     assert_eq!(fake.executions("session.inputs"), 1);
     assert!(
         fake.lock().preview.is_none(),
         "the session replaced the preview"
+    );
+    h.state_mut().state.toasts.list.clear();
+    h.step();
+    snapshot(&mut h, "session_new_measurement");
+    // Enter on Transfer (highlighted on the transfer pane), Enter on its form.
+    h.key_press(Key::Enter);
+    step_until(
+        &mut h,
+        "the transfer form",
+        |a| matches!(&a.state.overlay, Overlay::Form(f) if f.kind == ac2_ui::forms::FormKind::Transfer),
     );
     h.key_press(Key::Enter);
     // Created, then started by a second command: the picture shows it running.
@@ -105,7 +123,7 @@ fn session_dialog() {
     step_until(&mut h, "transfer dialog with meters", |a| {
         matches!(a.state.overlay, Overlay::Form(_)) && a.state.input_meters().len() == 2
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "transfer_dialog");
     h.key_press(Key::Escape);
@@ -132,7 +150,7 @@ fn session_dialog() {
             if f.text(ac2_ui::forms::FieldId::Level) == "-30")
             && a.state.input_meters().len() == 2
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "sweep_dialog");
     // A sweep pane beside the others (as N and the pane menu make one): the sweep goes there.
@@ -167,13 +185,13 @@ fn session_dialog() {
                 .is_some_and(|s| s.generator.owner.is_none() && !s.generator.armed)
     });
     // In the grid, beside the other panes: caption and legend fit a small pane.
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "sweep_distortion_pane");
     // The focused pane alone, for the picture.
     h.key_press(Key::W);
     step_until(&mut h, "maximized", |a| a.state.layout.maximized);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "sweep_distortion");
     // The title's dB | % toggle (U does the same): percent on a log axis.
@@ -183,13 +201,13 @@ fn session_dialog() {
     });
     // The pointer away again: no cursor or tooltip in the pictures.
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "sweep_distortion_percent");
     // The cursor (palette) reads the fundamental, every order and THD, here in percent.
     palette(&mut h, "comparison cursor");
     step_until(&mut h, "the cursor", |a| a.state.view.cursor_hz.is_some());
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "sweep_distortion_cursor");
     palette(&mut h, "comparison cursor");
@@ -208,7 +226,7 @@ fn session_dialog() {
             .sweep
             == ac2_scene::view::SweepMode::Ir(ac2_scene::view::IrMode::Log)
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "sweep_ir");
     // G past the ETC: the room parameters alone, the whole (maximised) pane.
@@ -221,7 +239,7 @@ fn session_dialog() {
             .sweep
             == ac2_scene::view::SweepMode::Room
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "sweep_room");
 }
@@ -246,7 +264,7 @@ fn sessions_dialog_save_as() {
             .sessions_dialog()
             .is_some_and(|d| d.daemon.is_some())
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "sessions_dialog");
     let save_as = h
@@ -291,11 +309,11 @@ fn sessions_dialog_save_as() {
         };
         assert_eq!(n.text, "Fawqgn 2");
     }
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "sessions_dialog_save_as");
     // The fake keeps no session directory, so the save itself is the reducer tests'
-    // (`state_sessions_tests`); Esc backs out to the actions, a second Esc closes.
+    // (`state::tests::sessions`); Esc backs out to the actions, a second Esc closes.
     h.key_press(Key::Escape);
     step_until(&mut h, "back on the actions", |a| {
         a.state

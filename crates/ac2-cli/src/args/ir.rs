@@ -3,7 +3,7 @@
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::{LfHarmonicsArg, MeasRef, ResolutionArg};
-use crate::units::{ByteSize, Channel, Channels, Freq, LevelDbfs, Time};
+use ac2_scene::unit_text::{ByteSize, Channel, Channels, Freq, LevelDbfs, Time};
 
 /// `ir …`.
 #[derive(Debug, Subcommand)]

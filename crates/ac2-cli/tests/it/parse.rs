@@ -2,8 +2,8 @@
 
 use ac2_cli::Cli;
 use ac2_cli::args::*;
-use ac2_cli::units::*;
 use ac2_proto::units::{Dbfs, Hz, Seconds};
+use ac2_scene::unit_text::*;
 use clap::Parser;
 use proptest::prelude::*;
 

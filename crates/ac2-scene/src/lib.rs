@@ -17,6 +17,8 @@
 //! [`spl::spl_readout`].
 #![forbid(unsafe_code)]
 
+pub mod advice;
+pub mod align;
 pub mod artnet;
 pub mod audio;
 pub mod autosave;
@@ -26,12 +28,18 @@ pub mod band_transfer;
 pub mod banner;
 pub mod bar_ease;
 pub mod cal;
+pub mod cal_notice;
 mod canvas;
+pub mod chrome;
+pub mod comb;
+pub mod cursor_jump;
 pub mod curve_ease;
 pub mod distortion;
+pub mod eq;
 pub mod families;
 pub mod finding;
 pub mod format;
+pub mod freq_column;
 pub mod grid;
 pub mod health;
 pub mod ir;
@@ -46,6 +54,7 @@ pub mod missing;
 pub mod new_meas;
 pub mod osc;
 pub mod pane_edit;
+pub mod plate;
 pub mod primitives;
 pub mod progress;
 pub mod readout;
@@ -64,6 +73,7 @@ pub mod time;
 pub mod toast;
 pub mod trace;
 pub mod trace_list;
+pub mod unit_text;
 pub mod unresolved;
 pub mod view;
 

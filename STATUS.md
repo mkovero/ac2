@@ -1,80 +1,31 @@
 # ac2 — status and where to look
 
 Short orientation; read this instead of the whole of `PLAN.md`. Versions live in the code
-(`PROTO_VERSION` in `crates/ac2-proto/src/lib.rs`), not here.
+(`PROTO_VERSION` in `crates/ac2-proto/src/lib.rs`), not here; what landed when is in
+`docs/design/backlog-done.md`.
 
 ## Where things stand
 - Phases 0–6 (1.0 scope) pass their CI criteria; phase 7 (post-1.0 extras) is in progress.
   Per-phase table with CI and hardware results: `PLAN.md` §9.0.
 - Hardware verified on Linux: the `pupu` rig (`docs/rigs/pupu.md`), a Pi 4 kiosk client.
-  Windows: RME Babyface Pro on its ASIO driver in a VM (1 h duplex, loopback timing;
-  `docs/design/asio.md` §4c); tester guide and dev.13 MSI in `testing/windows/`. macOS: no
-  audio interface yet; tester guide and dev.13 disk image in `testing/macos/`.
+  Windows and macOS: tester guides and builds in `testing/windows/`, `testing/macos/`.
 - CI on push is Linux only; macOS/Windows run before a release or on dispatch
-  (`CLAUDE.md` *Rules*). Rigs run locally built binaries: last deploy 70655493 (PROTO 51) on pupu,
-  ketunkolo and the Pi (`docs/rigs/pupu.md`, *Deploy log*). A session format change on deploy is restored
-  with `ac2 session salvage`.
-- macOS: the direct Core Audio backend (`coreaudio`, the HAL through `cahal`: its own
-  repository github.com/mkovero/cahal, from crates.io) is the only macOS backend (cpal removed,
-  `docs/design/coreaudio.md` §11); exact on BlackHole in the all-OS CI run (`all_os=true`).
-  Open on real hardware: the tester round (`testing/macos/`, Test 6: stated vs measured
-  latency, replug, rate change, streams).
-- Newest (PROTO 57): power cuts. A torn, empty or garbage state file never stops `ac2d` or `ac2-ui`:
-  it is set aside (`.damaged-<time>`), its previous copy or a default read, and it is listed
-  in `rig.damaged_files` (FILE DAMAGED banner, `ac2 status`); one damaged trace or log costs
-  only itself; atomic writes sync the directory (`docs/design/watchdogs.md` *Power cuts*).
-- PROTO 56: failing loud. `ac2d` and `ac2-ui` speak systemd's notify protocol (READY,
-  a watchdog pinged from the control loop / each presented frame, STOPPING), release builds
-  abort on a panic, and an SPL log the daemon cannot write is `autosave.log_failures` (LOG NOT
-  SAVED banner, `ac2 status`) (`docs/design/watchdogs.md`).
-- PROTO 55: the Leq history strip browses the whole log like a graph (wheel, drag,
-  I/O/←/→, Home to live, a cursor readout), `spl.history_get` takes a `HistorySpan` (newest
-  seconds, or a range in buckets of each window's highest Leq); palette *Export Leq log…*
-  writes the log CSV on the app's computer (`docs/user-guide.md` *Tiles, history and the
-  stage view*, *Leq from the terminal*; `docs/protocol.md` *Downloading a meter's whole log*).
-- Newest features: drag a measurement-list row onto a pane (an edge drop splits, Shift-drop
-  compares on a transfer pane) and Ctrl+Z / Ctrl+Shift+Z undo pane edits (`docs/user-guide.md`
-  *Dragging a row onto a pane*, *Undo and redo*); T on an SPL pane takes the limit text
-  (OK / NEAR / OVER, stay ≤, limit), the 10 dB lines and the scale like a graph's grid; Ctrl+S
-  saves the session. A health meter in the top bar after the session line (daemon host CPU,
-  this computer's with a remote daemon, ac2d's callback load, xruns, data rate, fps;
-  `docs/user-guide.md`, the paragraph after the driver-change one; health in the keepalive,
-  `docs/protocol.md`). Green in the all-OS CI run on 00bae469.
-  Per-measurement Resolution (1/12 … 1/96 octave) for transfer and sweep
-  with a grey resolution marker where the estimate is coarser than the grid (`docs/user-guide.md`
-  *Resolution and the resolution marker*); mic curve applied to sweeps; settable spectrum/RTA
-  averaging; multi-resolution spectrum (683 ms windows at LF … 21 ms at HF, window changes
-  marked: `docs/design/multires-spectrum.md`), shown as tone or density (dBFS/Hz; the
-  multi-resolution default, so broadband sound reads as on a fixed FFT). Band Leq per
-  1/3-octave band (STM 545/2015): `docs/design/band-leq.md`.
-- Rig monitor: SPL meters kept on the rig (`rig.json`, survive session loads) send OSC cues
-  (ok / near / over / fault, resent each second) to a typed target, and hold DMX levels in one
-  Art-Net universe (HTP over the cues' current states, sent on change and each second, a
-  change faded over the rig's fade time in perceived brightness); the
-  monitor can reopen its device capture-only at daemon start. Settings page 7 (Rig monitor),
-  the tree's Rig group, cues on the SPL / Leq page (OSC only so far), `ac2 osc` / `ac2 artnet`
-  / `ac2 cue` / `ac2 rig` (`docs/user-guide.md` *Rig measurements*, *OSC cues*, *Art-Net
-  cues*; decisions R1–R4).
-- REW cross-check (`tools/crosscheck`, `docs/rigs/pupu.md`): electrical and Genelec at −30 dBFS
-  agree with REW and numpy (FAIL 0 on 8b87f49). The `visual` stage draws the export REW drew
-  through ac2-scene + ac2-plot (`tools/plotcheck`) and reads both pictures' curves back: ac2's
-  magnitude and phase sit within 0.25 px of the numbers, REW's within 0.6 px (xone, 2026-10-21).
-- Panes are a tiling tree (one pane at first start, N split, Shift+N turns a split, Alt+←/→ or
-  a dragged gap sizes a pane, Q close, Tab / Shift+Tab step the measurement tree's rows into
-  the focused pane, G / Shift+G step a pane's views, the IR's linear / log / ETC views among
-  them); the focused pane shows any measurement picked, changing kind: `PLAN.md` §8.1,
-  `docs/user-guide.md` *Panes: split, close…*. A measurement can carry its own panes (in the
-  session, decision P1); only a measurement row brings them, a live-curve, math or trace row
-  goes into the focused pane alone (*Layouts follow the measurement*).
+  (`CLAUDE.md` *Rules*). Rigs run locally built binaries: `docs/rigs/pupu.md` *Deploy log*.
+  A session format change on deploy is restored with `ac2 session salvage`.
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
-- Windows audio is ASIO only (decision W1): the backend over the azo fork is in every Windows
-  build and WASAPI is gone; devices without a driver use FlexASIO, and with no ASIO driver the
-  device list says so. Passes under Wine (`tools/wine-asio`); the Windows CI audio pass is
-  FlexASIO on VB-CABLE (all-OS runs). RME's driver (Babyface Pro in a Windows 11 VM, USB host
-  passthrough) passes the 1 h silent run and loopback timing (4160 samples measured, 4159
-  stated); its ADAT clock loss is silent to the host (`docs/design/asio.md` §4c).
+
+## Pointers by topic
+- macOS audio: the `coreaudio` backend over `cahal` (github.com/mkovero/cahal): `docs/design/coreaudio.md`.
+- Windows audio: ASIO only over the azo fork, FlexASIO / VB-CABLE in CI: `docs/design/asio.md`.
+- Rig monitor (OSC / Art-Net cues from SPL meters kept on the rig): `docs/user-guide.md` *Rig measurements*.
+- REW cross-check (numbers, and the `visual` stage: ac2's drawing against REW's own graph image, `tools/plotcheck`): `tools/crosscheck`, `docs/rigs/pupu.md`.
+- Panes (tiling tree, a measurement's own panes): `PLAN.md` §8.1, `docs/user-guide.md` *Panes: split, close…*.
+- Two-system alignment (delay, polarity, summation in an overlap band; Alt+M, `ac2 align`): `docs/design/alignment.md`, `docs/user-guide.md` *Alignment*.
+- Power cuts and watchdogs: `docs/design/watchdogs.md`.
+- EQ what-if (sets, prediction, console mark, APO text): `docs/design/eq-overlay.md`, `docs/user-guide.md` *EQ what-if*.
+- Cursor peak / notch jumps and the mark's Δ / comb readout (Alt+P, Alt+N, Alt+D): `crates/ac2-scene/src/cursor_jump.rs`, `docs/user-guide.md` *Cursor jumps and the mark*.
 
 ## Where to look
 | need | file |

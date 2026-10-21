@@ -2,12 +2,13 @@
 //! outputs last used on each output device (decision K4), the session dialog's choices
 //! per device — which inputs and outputs were in the session, their roles and the mic
 //! names — the Leq view's layout, whether the panes show their key hints, how long the SPL
-//! meter's number holds a reading, the theme, the record toggle's time limit, the
-//! spectrograph's history span, the layout and window as last left: the pane tree, the
+//! meter's number holds a reading, the theme, the record toggle's time limit, the layout
+//! and window as last left: the pane tree, the
 //! focused pane, maximised or full screen, what each pane shows (its kind, measurement,
-//! modes and how much of its plot: grid, labels, cursor, and its own level axis range: a fit
-//! made for one show is a fair start for the next), the window's size and position, the
-//! impulse-response views' dB axes, where the transfer pane's legend sat and how large it may be, and the session files
+//! modes and how much of its plot: grid, labels, cursor, its own level axis range: a fit
+//! made for one show is a fair start for the next, and where its plates were dropped and
+//! their text size), the window's size and position, the impulse-response views' dB axes,
+//! whether the transfer pane's legend is hidden, and the session files
 //! this app opened or exported (the Sessions dialog's recents).
 //!
 //! ```toml
@@ -15,7 +16,6 @@
 //! spl_hold_ms = 250
 //! theme = "light"
 //! record_limit_min = 90
-//! spectrograph_span_s = 30
 //!
 //! [stimulus_outputs]
 //! "hw:UMC1820" = [1, 2]
@@ -54,6 +54,10 @@
 //! [layout.panes.levels]
 //! transfer = [-24.0, 12.0]
 //!
+//! [layout.panes.plates.readout]
+//! at = [0.0, 1.0]
+//! scale = 2.0
+//!
 //! [[layout.panes]]
 //! id = 2
 //! kind = "spl"
@@ -66,9 +70,7 @@
 //! sweep = [-90.0, 0.0]
 //!
 //! [legend.transfer]
-//! x = 1.0
-//! y = 0.0
-//! max_height = 0.3
+//! hidden = true
 //!
 //! [window]
 //! width = 1600
@@ -89,15 +91,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use ac2_proto::model::layout::{LayoutLevels, LevelRange};
 use ac2_scene::axis::Range;
 use ac2_scene::legend::LegendView;
+use ac2_scene::plate::{PlateKind, PlatePlace, Plates};
 use ac2_scene::view::{
     DistortionUnit, IrMode, LeqLayout, LeqStyle, PlotChrome, SpectrumMode, SplMode, SweepMode,
     ViewState, level,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::{Axis, PaneId, PaneKind, PaneLevels, PaneModes, PaneNode, TransferView};
+use crate::state::{Axis, PaneId, PaneKind, PaneModes, PaneNode, TransferView};
 
 mod file;
 mod layout;
@@ -139,9 +143,6 @@ pub struct LayoutPrefs {
     pub distortion_unit: DistortionUnit,
     /// Measurements whose live curves are hidden (A), by name.
     pub hidden: BTreeSet<String>,
-    /// Measurements whose live curves every transfer pane draws besides its own group
-    /// (compare, C), by name.
-    pub compared: BTreeSet<String>,
 }
 
 impl Default for LayoutPrefs {
@@ -153,7 +154,6 @@ impl Default for LayoutPrefs {
             panes_only: false,
             distortion_unit: DistortionUnit::Db,
             hidden: BTreeSet::new(),
-            compared: BTreeSet::new(),
         }
     }
 }
@@ -175,8 +175,11 @@ pub struct PanePrefs {
     /// The measurement it showed, by name.
     pub measurement: Option<String>,
     pub modes: PaneModes,
-    /// Its own level axis ranges.
-    pub levels: PaneLevels,
+    /// The level axis ranges the operator set on it (one not set is framed when the pane
+    /// first shows a curve).
+    pub levels: LayoutLevels,
+    /// Where its plates were dropped and their text size.
+    pub plates: ac2_scene::plate::Plates,
 }
 
 /// The impulse-response views' dB axes (log / ETC), dB re peak: one for the transfer
@@ -250,9 +253,14 @@ pub struct UiPrefs {
     /// The live spectrum and RTA curves glide to each new frame (on until the operator
     /// turns it off); off, they jump to it as received.
     pub spec_ease: bool,
+    /// How far a peak or notch must stand out for the cursor to jump to it, dB
+    /// (`ac2_scene::cursor_jump`).
+    pub jump_prominence_db: f64,
     /// How long the SPL meter's number holds a reading; `None`: by its time weighting
     /// (`ac2_scene::spl::display_period_s`).
     pub spl_hold_ms: Option<u32>,
+    /// The transfer panes' headroom advice: on or off and its thresholds.
+    pub advice: ac2_scene::advice::AdviceSettings,
     /// The layout as last left.
     pub layout: LayoutPrefs,
     /// The impulse-response dB axes as last left.
@@ -264,12 +272,6 @@ pub struct UiPrefs {
     /// How long the record toggle records before it stops by itself, minutes (`None`: an
     /// hour, [`crate::state::RECORD_MAX_S`]).
     pub record_limit_min: Option<u32>,
-    /// The spectrograph's history span, s (one of
-    /// [`ac2_scene::view::SPECTROGRAPH_SPANS_S`]; `None`: its default).
-    pub spectrograph_span_s: Option<u32>,
-    /// The spectrograph's colour map (and its colour bar's); a matter of eyes and room
-    /// light, so this app's, not the daemon's.
-    pub spectrograph_colours: ac2_scene::primitives::Colormap,
     /// The transfer pane's legend as last left.
     pub legend: LegendPrefs,
     /// Session files and folders on this machine the app opened or exported, most recent
@@ -319,52 +321,34 @@ impl Default for UiPrefs {
             resolution_marker: true,
             bar_ease: true,
             spec_ease: true,
+            jump_prominence_db: ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB,
             spl_hold_ms: None,
+            advice: ac2_scene::advice::AdviceSettings::default(),
             layout: LayoutPrefs::default(),
             ir_levels: IrLevelPrefs::default(),
             window: None,
             theme: None,
             record_limit_min: None,
-            spectrograph_span_s: None,
-            spectrograph_colours: ac2_scene::primitives::Colormap::default(),
             legend: LegendPrefs::default(),
             recent_sessions: Vec::new(),
         }
     }
 }
 
-/// A legend as last left: hidden or not, where it sat, how large it may be (the scroll and
-/// the pointer are not kept).
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A legend as last left: hidden or not (where it sits and its text size are each pane's,
+/// [`PanePrefs::plates`]; the scroll is not kept).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LegendPrefs {
     pub hidden: bool,
-    pub x: f32,
-    pub y: f32,
-    pub max_width: f32,
-    pub max_height: f32,
 }
 
 impl LegendPrefs {
     pub fn of(v: &LegendView) -> Self {
-        Self {
-            hidden: v.hidden,
-            x: v.x,
-            y: v.y,
-            max_width: v.max_width,
-            max_height: v.max_height,
-        }
+        Self { hidden: v.hidden }
     }
 
     /// Puts the choices on `v`.
     pub fn apply(&self, v: &mut LegendView) {
         v.hidden = self.hidden;
-        v.move_to(self.x, self.y);
-        v.resize(self.max_width, self.max_height);
-    }
-}
-
-impl Default for LegendPrefs {
-    fn default() -> Self {
-        Self::of(&LegendView::default())
     }
 }

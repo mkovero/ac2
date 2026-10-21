@@ -15,9 +15,9 @@
 //! allocates after construction (the bank's decimation buffers grow to the largest block
 //! once).
 
-use crate::leq::{
-    Headroom, Judgement, RollingLeq, Slot, Verdict, WindowValue, judge_window, mean_square,
-};
+#[cfg(test)]
+use crate::leq::Judgement;
+use crate::leq::{Headroom, RollingLeq, Slot, Verdict, WindowValue, judge_window, mean_square};
 use crate::rta::{BandFraction, BandInfo, OctaveFilterBank, RtaError};
 use crate::spectrum::power_dbfs;
 use crate::weighting::Weighting;
@@ -300,6 +300,7 @@ pub struct BandState {
 
 impl BandState {
     /// Severity: ok, near, on course, over.
+    #[cfg(test)]
     fn rank(&self) -> Option<u8> {
         self.verdict.map(|v| match (v.judgement, v.on_course) {
             (Judgement::Ok, _) => 0,
@@ -312,7 +313,8 @@ impl BandState {
 
 /// The band that is worst off: the most severe judgement, then the furthest above (or
 /// least below) its limit. `None` when no band has a judgement.
-pub fn worst_band(states: &[BandState]) -> Option<usize> {
+#[cfg(test)]
+pub(crate) fn worst_band(states: &[BandState]) -> Option<usize> {
     states
         .iter()
         .enumerate()

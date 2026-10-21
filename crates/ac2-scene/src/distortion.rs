@@ -19,251 +19,13 @@ use crate::primitives::{
     Band, BandPoint, Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
+use crate::view::Style;
 use crate::view::{DistortionUnit, ViewState};
 
-/// What a distortion curve says at one column.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Reading {
-    /// Not measured there (outside the band this order can be measured in).
-    NotMeasured,
-    /// Within the noise: below this floor (dB re fundamental).
-    BelowFloor(f64),
-    /// Distortion, dB re fundamental.
-    Level(f64),
-}
-
-/// The reading of `c` at column `i` under the analysis' margin `margin_db`.
-pub fn reading(c: &DistortionCurve, i: usize, margin_db: f64) -> Reading {
-    let level = c.level_db.get(i).map_or(f64::NAN, |v| f64::from(*v));
-    let floor = c.floor_db.get(i).map_or(f64::NAN, |v| f64::from(*v));
-    if !level.is_finite() {
-        Reading::NotMeasured
-    } else if c.valid(i, ac2_proto::units::Db(margin_db)) {
-        Reading::Level(level)
-    } else {
-        Reading::BelowFloor(floor)
-    }
-}
-
-/// dB re fundamental as percent.
-pub fn percent(db: f64) -> f64 {
-    100.0 * 10f64.powf(db / 20.0)
-}
-
-/// Percent of the fundamental as dB re it (the inverse of [`percent`]); NaN for a value
-/// that is not a positive ratio.
-pub fn db_of_percent(p: f64) -> f64 {
-    if p > 0.0 {
-        20.0 * (p / 100.0).log10()
-    } else {
-        f64::NAN
-    }
-}
-
-/// `1.00 %`, `0.0316 %`: three significant digits.
-pub fn percent_text(db: f64) -> String {
-    let p = percent(db);
-    if !p.is_finite() || p <= 0.0 {
-        return format::NO_VALUE.to_string();
-    }
-    let decimals = (2 - p.log10().floor() as i32).clamp(0, 6) as usize;
-    format!("{} %", format::fixed(p, decimals))
-}
-
-/// `−40.1 dB`.
-pub fn db_text(db: f64) -> String {
-    if db.is_finite() {
-        format!("{} dB", format::fixed(db, 1))
-    } else {
-        format::NO_VALUE.to_string()
-    }
-}
-
-/// A value in `unit`.
-pub fn value_text(db: f64, unit: DistortionUnit) -> String {
-    match unit {
-        DistortionUnit::Db => db_text(db),
-        DistortionUnit::Percent => percent_text(db),
-    }
-}
-
-/// `−40.1 dB`, `< −72.0 dB` (within the noise), `—` (not measured).
-pub fn reading_text(r: Reading, unit: DistortionUnit) -> String {
-    match r {
-        Reading::NotMeasured => format::NO_VALUE.to_string(),
-        Reading::BelowFloor(f) if f.is_finite() => format!("< {}", value_text(f, unit)),
-        Reading::BelowFloor(_) => "< floor".to_string(),
-        Reading::Level(v) => value_text(v, unit),
-    }
-}
-
-/// The highest valid point of an order: (frequency, dB re fundamental).
-pub fn peak(c: &DistortionCurve, freqs: &[f64], margin_db: f64) -> Option<(f64, f64)> {
-    (0..freqs.len())
-        .filter_map(|i| match reading(c, i, margin_db) {
-            Reading::Level(v) => Some((freqs[i], v)),
-            _ => None,
-        })
-        .max_by(|a, b| a.1.total_cmp(&b.1))
-}
-
-/// The reading at `hz`: the nearest column within 1/12 octave, else not measured.
-pub fn reading_at(c: &DistortionCurve, freqs: &[f64], hz: f64, margin_db: f64) -> Reading {
-    match nearest_column(freqs, hz) {
-        Some(i) if (freqs[i] / hz).log2().abs() <= 1.0 / 12.0 => reading(c, i, margin_db),
-        _ => Reading::NotMeasured,
-    }
-}
-
-/// A measured harmonic less than this far above the reference input's own is flagged, dB.
-/// Where the loopback shares the measured path's converters, their distortion is in both:
-/// 6 dB above it, the converters' share adds at most 1 dB to the measured level (power sum,
-/// 10·log10(1 + 10^−0.6)); closer, the system's own harmonic cannot be told from theirs.
-pub const REFERENCE_BOUND_DB: f64 = 6.0;
-
-/// Where one order of the measurement reads within [`REFERENCE_BOUND_DB`] of the reference's
-/// own valid level.
-#[derive(Clone, Debug, PartialEq)]
-pub struct NearReference {
-    pub order: u8,
-    /// Columns flagged.
-    pub columns: usize,
-    /// Lowest and highest flagged fundamental, Hz.
-    pub span_hz: (f64, f64),
-}
-
-/// Short summary of a sweep: THD at a few frequencies, each order's highest point.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Summary {
-    /// `(frequency, THD reading)`.
-    pub thd: Vec<(f64, Reading)>,
-    /// `(order, highest valid point (frequency, dB))`.
-    pub peaks: Vec<(u8, Option<(f64, f64)>)>,
-    /// The reference input's own orders, as [`Summary::peaks`]; empty when the sweep has
-    /// none.
-    pub reference_peaks: Vec<(u8, Option<(f64, f64)>)>,
-    /// Orders that read within [`REFERENCE_BOUND_DB`] of the reference's own somewhere.
-    pub near_reference: Vec<NearReference>,
-}
-
-/// THD at 100 Hz, 1 kHz and 10 kHz and every order's highest point, the reference's own,
-/// and where the measurement comes near those.
-pub fn summary(s: &SweepData, freqs: &[f64]) -> Summary {
-    let m = s.info.floor_margin.0;
-    let reference = s.reference_harmonics.as_deref().unwrap_or_default();
-    Summary {
-        thd: [100.0, 1000.0, 10_000.0]
-            .into_iter()
-            .map(|f| (f, reading_at(&s.thd, freqs, f, m)))
-            .collect(),
-        peaks: s
-            .harmonics
-            .iter()
-            .map(|h| (h.order, peak(&h.curve, freqs, m)))
-            .collect(),
-        reference_peaks: reference
-            .iter()
-            .map(|h| (h.order, peak(&h.curve, freqs, m)))
-            .collect(),
-        near_reference: s
-            .harmonics
-            .iter()
-            .filter_map(|h| {
-                let r = reference.iter().find(|r| r.order == h.order)?;
-                let near: Vec<f64> = (0..freqs.len())
-                    .filter(
-                        |&i| match (reading(&h.curve, i, m), reading(&r.curve, i, m)) {
-                            (Reading::Level(v), Reading::Level(rv)) => v < rv + REFERENCE_BOUND_DB,
-                            _ => false,
-                        },
-                    )
-                    .map(|i| freqs[i])
-                    .collect();
-                Some(NearReference {
-                    order: h.order,
-                    columns: near.len(),
-                    span_hz: (*near.first()?, *near.last()?),
-                })
-            })
-            .collect(),
-    }
-}
-
-/// `H2`, …, `THD`.
-pub fn order_name(order: u8) -> String {
-    format!("H{order}")
-}
-
-/// `reference H2`: the reference input's own order.
-pub fn reference_order_name(order: u8) -> String {
-    format!("reference {}", order_name(order))
-}
-
-/// `H2 within 6 dB of reference H2 at 12 points, 100 Hz – 1.00 kHz`.
-pub fn near_reference_text(n: &NearReference) -> String {
-    let (lo, hi) = n.span_hz;
-    let span = if lo == hi {
-        format!("at {}", format::freq_readout(lo))
-    } else {
-        format!(
-            "at {} points, {} – {}",
-            n.columns,
-            format::freq_readout(lo),
-            format::freq_readout(hi)
-        )
-    };
-    format!(
-        "{} within {} dB of {} {span}",
-        order_name(n.order),
-        format::fixed(REFERENCE_BOUND_DB, 0),
-        reference_order_name(n.order)
-    )
-}
-
-/// One sweep trace to draw.
-#[derive(Clone, Copy, Debug)]
-pub struct SweepView<'a> {
-    pub data: &'a TraceData,
-    /// Column frequencies of its grid.
-    pub freqs: &'a [f64],
-    /// The colour its fundamental is drawn in ([`crate::families`]).
-    pub color: Color,
-}
-
-/// How a legend entry shows what it names.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LegendMark {
-    /// The name in the curve's colour.
-    Name,
-    /// A dashed sample: an order within the noise, drawn at its floor in its own colour.
-    Dashed,
-    /// A shaded sample: under the lowest order's floor.
-    Shade,
-    /// A dotted sample: the reference input's own orders, each in its order's colour.
-    Dotted,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct LegendEntry {
-    pub name: String,
-    pub color: Color,
-    pub mark: LegendMark,
-}
-
-/// Legend name of the dashed floor lines.
-pub const BELOW_FLOOR: &str = "< floor";
-/// Legend name of the shading under every order's floor.
-pub const NOISE: &str = "noise";
-/// Legend name of the dotted lines of the reference input's own orders: each is
-/// [`reference_order_name`] in the cursor readout and the notes.
-pub const REFERENCE: &str = "reference";
-
-/// What showing or hiding the reference input's own orders says: `reference harmonics
-/// hidden`.
-pub fn reference_toast(shown: bool) -> String {
-    let state = if shown { "shown" } else { "hidden" };
-    format!("{REFERENCE} harmonics {state}")
-}
+mod reading;
+mod sweep_ir;
+pub use reading::*;
+pub use sweep_ir::{harmonic_marks, ir_frame, sweep_ir_scene};
 
 /// Cursor readout of the distortion view.
 #[derive(Clone, Debug, PartialEq)]
@@ -301,8 +63,8 @@ pub struct DistortionScene {
     /// Ranges the sweep's response does not resolve at its grid (shaded in the fundamental's
     /// pane) and those its harmonics do not (shaded in the distortion pane); empty when the
     /// marker is off or the trace does not say.
-    pub unresolved_response: Vec<crate::unresolved::Mark>,
-    pub unresolved_harmonics: Vec<crate::unresolved::Mark>,
+    pub unresolved_response: Vec<crate::unresolved::RangeMark>,
+    pub unresolved_harmonics: Vec<crate::unresolved::RangeMark>,
     /// Why nothing is drawn, when that is the case.
     pub note: Option<String>,
     pub strip: Rect,
@@ -584,9 +346,10 @@ pub fn distortion_scene(
     size: Viewport,
 ) -> DistortionScene {
     let mut c = Canvas::new(size, theme);
-    let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
+    let right = crate::freq_column::right(MARGINS.right, view);
+    let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
-    let area = canvas::plot_area(size, strip.rect.bottom(), MARGINS.right);
+    let area = canvas::plot_area(size, strip.rect.bottom(), right);
     // Fundamental : distortion heights 1 : 2.
     let top_h = ((area.h - PANE_GAP) / 3.0).max(1.0);
     let fundamental = Rect::new(area.x, area.y, area.w, top_h);
@@ -630,8 +393,10 @@ pub fn distortion_scene(
         &y_fundamental,
         false,
         FUNDAMENTAL_TITLE,
-        view.chrome,
-        theme,
+        Style {
+            chrome: view.chrome,
+            theme,
+        },
     );
     crate::unresolved::draw(
         &mut c,
@@ -666,8 +431,10 @@ pub fn distortion_scene(
         &y_axis,
         true,
         title,
-        view.chrome,
-        theme,
+        Style {
+            chrome: view.chrome,
+            theme,
+        },
     );
     crate::unresolved::draw(&mut c, plot, &xm, &unresolved_harmonics, theme);
     let ym = y_axis.mapping;
@@ -996,7 +763,10 @@ pub fn distortion_scene(
 fn unresolved_marks(
     sweep: Option<(SweepView<'_>, &SweepData)>,
     view: &ViewState,
-) -> (Vec<crate::unresolved::Mark>, Vec<crate::unresolved::Mark>) {
+) -> (
+    Vec<crate::unresolved::RangeMark>,
+    Vec<crate::unresolved::RangeMark>,
+) {
     use crate::unresolved::{Fill, Source, marks};
     let Some((t, Some(u))) = sweep.map(|(t, s)| (t, s.unresolved.as_ref())) else {
         return (Vec::new(), Vec::new());
@@ -1015,135 +785,6 @@ fn unresolved_marks(
         marks(src(&u.response), first, None),
         marks(src(&u.harmonics), first, Some("harmonics")),
     )
-}
-
-/// The sweep's impulse response as an IR frame for [`crate::ir::ir_scene`]: time zero at
-/// the arrival, the harmonics' impulses before it.
-pub fn ir_frame(d: &TraceData) -> Option<ac2_proto::frame::IrFrame> {
-    let s = d.sweep.as_ref()?;
-    Some(ac2_proto::frame::IrFrame {
-        meas: ac2_proto::units::MeasId(0),
-        meta: ac2_proto::frame::IrMeta {
-            sample_rate: s.info.sample_rate,
-            t0: s.ir.t0,
-            dt: s.ir.dt,
-            inserted_delay: s.info.arrival,
-        },
-        linear: s.ir.linear.clone(),
-        etc: Some(s.ir.etc_db.clone()),
-    })
-}
-
-/// Shortest IR plot left above the room table, logical pixels; a shorter pane shows the
-/// IR alone.
-const MIN_IR_HEIGHT: f32 = 140.0;
-
-/// The sweep's impulse response in the IR view, with each harmonic's impulse marked at
-/// `−L·ln k` and time zero named as the arrival; below it, when the pane is tall enough,
-/// the room parameters of its octave bands ([`crate::room`]).
-pub fn sweep_ir_scene(
-    d: &TraceData,
-    color: Color,
-    status: &Status,
-    view: &ViewState,
-    theme: &Theme,
-    size: Viewport,
-) -> Option<crate::ir::IrScene> {
-    let s = d.sweep.as_ref()?;
-    let frame = ir_frame(d)?;
-    let table = s
-        .room
-        .as_ref()
-        .map(|r| crate::room::room_table(r, crate::room::BandSet::Octave))
-        .filter(|t| size.height - crate::room::table_height(t, theme) >= MIN_IR_HEIGHT);
-    let ir_size = Viewport {
-        height: size.height
-            - table
-                .as_ref()
-                .map_or(0.0, |t| crate::room::table_height(t, theme)),
-        ..size
-    };
-    let mut sc = crate::ir::ir_scene(
-        &frame,
-        color,
-        None,
-        status,
-        view,
-        &view.distortion.ir,
-        view.chrome,
-        theme,
-        ir_size,
-    );
-    sc.room = table.clone();
-    if let Some(t) = &table {
-        let rect = Rect::new(
-            MARGINS.left,
-            ir_size.height,
-            (size.width - MARGINS.left - MARGINS.right).max(1.0),
-            size.height - ir_size.height,
-        );
-        sc.scene.viewport = size;
-        sc.scene
-            .layers
-            .push(crate::room::table_layer(t, rect, theme));
-    }
-    let origin = format!(
-        "t = 0 at the arrival {}",
-        crate::readout::delay_readout(s.info.arrival.0, view.temperature_c)
-    );
-    for layer in &mut sc.scene.layers {
-        for l in &mut layer.labels {
-            if l.text == sc.origin {
-                l.text.clone_from(&origin);
-            }
-        }
-    }
-    sc.origin = origin;
-    let xm = sc.x_axis.mapping;
-    let plot = sc.plot;
-    if let Some(overlay) = sc.scene.layers.get_mut(2) {
-        for (t_ms, name) in harmonic_marks(s) {
-            let x = xm.to_px(t_ms);
-            if !(x >= plot.x && x <= plot.right()) {
-                continue;
-            }
-            overlay.polylines.push(Polyline {
-                points: vec![[x, plot.y], [x, plot.bottom() - 16.0]],
-                alpha: vec![],
-                stroke: Stroke {
-                    color: theme.text_dim,
-                    width: 1.0,
-                    dash: Some(crate::primitives::Dash {
-                        on: 3.0,
-                        off: 3.0,
-                        offset: 0.0,
-                    }),
-                },
-                clip: Some(plot),
-            });
-            overlay.labels.push(label(
-                name,
-                [x + 3.0, plot.bottom() - 4.0],
-                anchor(HAlign::Left, VAlign::Bottom),
-                theme.small_font_size,
-                theme.text_dim,
-            ));
-        }
-    }
-    Some(sc)
-}
-
-/// Times (ms re the arrival) and names of the harmonic impulses: `(−L·ln k, "H k")`.
-pub fn harmonic_marks(s: &SweepData) -> Vec<(f64, String)> {
-    s.harmonics
-        .iter()
-        .map(|h| {
-            (
-                -s.info.rate.0 * f64::from(h.order).ln() * 1000.0,
-                order_name(h.order),
-            )
-        })
-        .collect()
 }
 
 #[cfg(test)]

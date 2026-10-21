@@ -177,12 +177,12 @@ fn spl_meter_from_an_empty_daemon(h: &mut Harness<'_, App>) -> MeasId {
             && a.state.input_meters().len() == 4
     });
     h.key_press(Key::Enter);
-    // The mirror can show the session before the reply that offers the rig's transfer
-    // measurement: a key sent in between would land on the offer.
-    step_until(h, "session open, the transfer measurement offered", |a| {
-        a.state.open_session().is_some() && matches!(a.state.overlay, Overlay::Offer(_))
+    // The mirror can show the session before the reply that opens the New measurement
+    // chooser: a key sent in between would land on the chooser.
+    step_until(h, "session open, the New measurement chooser", |a| {
+        a.state.open_session().is_some() && new_meas_chooser(a)
     });
-    h.key_press(Key::N);
+    h.key_press(Key::Escape);
     step_until(h, "no dialog", |a| a.state.overlay == Overlay::None);
     h.key_press_modifiers(Modifiers::COMMAND, Key::K);
     h.event(Event::Text("new spl".into()));
@@ -281,7 +281,7 @@ fn slow_band_leq_from_an_empty_daemon() {
         })
     });
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "leq_dialog_band_range");
     // Enter on the range row adds it: the focus on the first added window, 50 Hz.
@@ -315,7 +315,7 @@ fn slow_band_leq_from_an_empty_daemon() {
         })
     });
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "leq_dialog_band_meter");
     h.ctx.memory_mut(|m| {
@@ -395,13 +395,18 @@ fn slow_band_leq_from_an_empty_daemon() {
     assert!(
         texts
             .contains(&"63 Hz band LZeq 60 min 3.2 dB over its limit · cooling down in 6 min 52 s"),
-        "{texts:?}"
+        "{}",
+        common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
     );
     for want in [
         "LZeq 60 min · night limits (22–07)",
         "LAeq 15 min · so far · 7:30 / 15:00",
     ] {
-        assert!(texts.contains(&want), "{want:?} not in {texts:?}");
+        assert!(
+            texts.contains(&want),
+            "{want:?} not in {}",
+            common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
+        );
     }
     // One row per length and weighting: the hour's eleven bars, the quarter's three.
     assert_eq!(
@@ -412,21 +417,27 @@ fn slow_band_leq_from_an_empty_daemon() {
         !texts
             .iter()
             .any(|t| t.contains("transfer") || t.contains("bedroom")),
-        "{texts:?}"
+        "{}",
+        common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
     );
     // The key to the two marks across the columns.
-    assert!(texts.contains(&"limit"), "{texts:?}");
+    assert!(
+        texts.contains(&"limit"),
+        "{}",
+        common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
+    );
     assert!(
         texts
             .iter()
             .any(|t| t.starts_with("next ") && t.ends_with(": stay ≤")),
-        "{texts:?}"
+        "{}",
+        common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
     );
     snapshot_when(
         &mut h,
         "band_leq_over",
         |a| {
-            a.state.toasts.clear();
+            a.state.toasts.list.clear();
         },
         has_frame,
     );
@@ -445,7 +456,7 @@ fn slow_band_leq_from_an_empty_daemon() {
             &mut h,
             name,
             |a| {
-                a.state.toasts.clear();
+                a.state.toasts.list.clear();
             },
             has_frame,
         );
@@ -519,7 +530,7 @@ fn a_single_band_window_with_plus_and_minus() {
         })
     });
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "leq_dialog_band_single");
     h.ctx.memory_mut(|m| {
@@ -634,7 +645,11 @@ fn a_single_band_window_with_plus_and_minus() {
         "25",
         "72.0",
     ] {
-        assert!(texts.contains(&want), "{want:?} not in {texts:?}");
+        assert!(
+            texts.contains(&want),
+            "{want:?} not in {}",
+            common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
+        );
     }
     // − on each row: gone.
     h.key_press_modifiers(Modifiers::SHIFT, Key::L);
@@ -810,7 +825,7 @@ fn band_transfer_step(h: &mut Harness<'_, App>, fake: &ac2_client::fake::FakeDae
         h,
         "band_transfer_step",
         |a| {
-            a.state.toasts.clear();
+            a.state.toasts.list.clear();
             let base = 20_734 * 86_400 + 19 * 3600;
             let spans = [(0, 120), (240, 360), (420, 480)];
             if let Some(t) = a.state.overlay.leq_mut().and_then(|d| d.transfer.as_mut()) {

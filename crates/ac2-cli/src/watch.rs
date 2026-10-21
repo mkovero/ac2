@@ -291,18 +291,14 @@ pub async fn spl(
                 };
             };
             let m = &f.meta;
-            let name = format!(
-                "L{}{}",
-                output::weighting(m.weighting),
-                output::time_weighting(m.time_weighting)
-            );
+            let name = format!("L{}{}", m.weighting.letter(), m.time_weighting.letter());
             lines.push(format!(
                 "{name} {}   Leq {}   Lmax {}   Lmin {}   L{}peak {}",
-                output::level(m.level, m.scale),
+                format::scaled_level(m.level, m.scale),
                 format::level(m.leq),
                 format::level(m.lmax),
                 format::level(m.lmin),
-                output::peak_weighting(m.peak_weighting),
+                m.peak_weighting.letter(),
                 format::level(m.lpeak),
             ));
             lines.push(format!(
@@ -431,8 +427,8 @@ pub async fn timing(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
                 ),
                 w.psr
                     .map_or_else(|| format::NO_VALUE.to_owned(), |p| format::db_readout(p.0)),
-                output::dbfs(w.loopback.0),
-                output::dbfs(w.stimulus.0),
+                ac2_scene::format::dbfs(w.loopback.0),
+                ac2_scene::format::dbfs(w.stimulus.0),
             ));
         }
         lines.push(format!("age {}", age_text(tf.age, tf.stale)));

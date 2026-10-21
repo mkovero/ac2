@@ -58,26 +58,6 @@ pub(crate) fn resolution_field(r: Resolution) -> Field {
 pub const LF_HARMONICS_HINT: &str =
     "fine: finer low-frequency harmonics, higher floor there, longer silence after the sweep";
 
-/// `20`, `20 Hz`, `20k`, `1.5 kHz`.
-pub fn parse_freq(text: &str) -> Result<f64, String> {
-    let t = text.trim().to_ascii_lowercase().replace(' ', "");
-    let (num, scale) = if let Some(n) = t.strip_suffix("khz").or_else(|| t.strip_suffix('k')) {
-        (n, 1000.0)
-    } else {
-        (t.strip_suffix("hz").unwrap_or(&t), 1.0)
-    };
-    let v = num
-        .replace(',', ".")
-        .parse::<f64>()
-        .map_err(|_| format!("not a frequency: {:?}", text.trim()))?
-        * scale;
-    if v.is_finite() && v > 0.0 {
-        Ok(v)
-    } else {
-        Err(format!("not a frequency: {:?}", text.trim()))
-    }
-}
-
 /// Smoothing choices of the transfer and spectrum dialogs (index 0: none, as `ac2 meas new`
 /// without `--smooth`).
 pub(super) const SMOOTHING: [(&str, Option<SmoothingFraction>); 6] = [

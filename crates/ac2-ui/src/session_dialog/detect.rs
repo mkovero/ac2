@@ -40,7 +40,7 @@ impl SessionDialog {
             return Err("this device has no inputs to listen on".into());
         }
         if self.output_info().is_none() {
-            return Err("choose an output device first (Audio & I/O page)".into());
+            return Err("choose an output device first (Audio I/O page)".into());
         }
         self.detect = Some(DetectPanel {
             output,
@@ -77,7 +77,12 @@ impl SessionDialog {
         if d.phase != DetectPhase::Confirm {
             return None;
         }
-        let level = match crate::state::parse_number(&d.level, &["dbfs", "db"]) {
+        let level = match ac2_scene::unit_text::in_field::<ac2_scene::unit_text::LevelDbfs>(
+            &d.level, "dbfs",
+        )
+        .map(|l| l.0.0)
+        .map_err(String::from)
+        {
             Err(_) if d.level.trim().is_empty() => {
                 d.error = Some(
                     "type the burst level in dBFS (e.g. -30): there is no default level".into(),
@@ -212,26 +217,31 @@ impl SessionDialog {
                             input: i.channel,
                         });
                 format!(
-                    "Reference (loopback): input {} · {} ← output {} · {}{}",
-                    i.channel + 1,
+                    "{} (input {}) is the reference: it records what {} (output {}) plays.{}",
                     i.label(),
-                    o.channel + 1,
+                    i.channel + 1,
                     o.label(),
+                    o.channel + 1,
                     if now {
                         ""
                     } else {
-                        " — applies when the session opens (Enter)"
+                        " Applies when the audio I/O opens."
                     }
                 )
             }
             (Some(i), None) => format!(
-                "Reference: input {} · {} — tick the output that feeds its loopback (S)",
+                "{} (input {}) is the reference: S on the output its loopback cable comes from.",
+                i.label(),
                 i.channel + 1,
-                i.label()
             ),
-            (None, _) => "No reference: R on the input the stimulus's loopback cable returns on \
-                          (or D detects it)"
+            (None, _) => "No reference yet: R on the input the loopback cable returns on, or D \
+                          finds it."
                 .to_owned(),
         }
     }
 }
+
+/// Under the reference: why it matters, as the one choice on the page that is not obvious.
+pub const REFERENCE_HELP: &str = "The reference is a copy of the stimulus fed straight back to \
+     an input (a loopback cable or a console send). Transfer measurements compare each mic \
+     against it; spectrum, RTA and SPL meters do not need one.";

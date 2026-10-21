@@ -86,38 +86,21 @@ pub(super) fn reveal_focused(r: &egui::Response) {
 fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) {
     ui.label(RichText::new("Settings").strong().size(20.0).color(ch.text));
     ui.add_space(10.0);
-    // The keys are a column of their own: a page without one keeps its name in line.
-    let key_text = |k: String| RichText::new(k).small().monospace().color(ch.dim);
-    let key_w = (0..Page::ALL.len())
-        .filter_map(page_key)
-        .map(|k| {
-            egui::WidgetText::from(key_text(k.label()))
-                .into_galley(
-                    ui,
-                    Some(egui::TextWrapMode::Extend),
-                    f32::INFINITY,
-                    egui::TextStyle::Body,
-                )
-                .size()
-                .x
-        })
-        .fold(0.0, f32::max);
     for (i, p) in Page::ALL.iter().enumerate() {
         let on = s.page == *p;
         let t = RichText::new(p.title())
             .size(15.0)
             .color(if on { ch.focus } else { ch.text });
-        ui.horizontal(|ui| {
-            let key = page_key(i).map(|k| k.label()).unwrap_or_default();
-            let w = ui.label(key_text(key)).rect.width();
-            ui.add_space((key_w - w).max(0.0));
-            if ui
-                .add(egui::Button::selectable(on, t).min_size(egui::vec2(150.0, 26.0)))
-                .clicked()
-            {
-                *msg = Some(Msg::Settings(SettingsMsg::Page(*p)));
-            }
-        });
+        // A page's key stays out of the list (a column of chords read as a second list);
+        // hovering the page names it.
+        let b = ui.add(egui::Button::selectable(on, t).min_size(egui::vec2(150.0, 26.0)));
+        let b = match page_key(i) {
+            Some(k) => b.on_hover_text(k.label()),
+            None => b,
+        };
+        if b.clicked() {
+            *msg = Some(Msg::Settings(SettingsMsg::Page(*p)));
+        }
         ui.add_space(2.0);
     }
     ui.add_space(14.0);
@@ -132,11 +115,19 @@ fn sidebar(ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) 
     }
 }
 
-/// The chord that jumps to page `i` (0-based): Alt with its digit; the pages after the
-/// sixth have none.
+/// The chord that jumps to page `i` (0-based): Alt with its digit (`state/settings_impl.rs`
+/// dispatches the same seven).
 fn page_key(i: usize) -> Option<Chord> {
     use egui::Key as K;
-    const DIGITS: [K; 6] = [K::Num1, K::Num2, K::Num3, K::Num4, K::Num5, K::Num6];
+    const DIGITS: [K; 7] = [
+        K::Num1,
+        K::Num2,
+        K::Num3,
+        K::Num4,
+        K::Num5,
+        K::Num6,
+        K::Num7,
+    ];
     DIGITS.get(i).map(|k| Chord::alt(*k))
 }
 
@@ -145,8 +136,10 @@ fn page_key(i: usize) -> Option<Chord> {
 fn pages_hint(style: LabelStyle) -> String {
     let [up, down] =
         [egui::Key::PageUp, egui::Key::PageDown].map(|k| Chord::command(k).label_in(style));
+    let [left, right] =
+        [egui::Key::ArrowLeft, egui::Key::ArrowRight].map(|k| Chord::alt(k).label_in(style));
     format!(
-        "{up} / {down}: pages\nEsc closes · {} stops the stimulus",
+        "{up} / {down} or {left} / {right}: pages\nEsc closes · {} stops the stimulus",
         STOP_ANYWHERE.label_in(style)
     )
 }
@@ -163,7 +156,7 @@ fn page(
     // within the page.
     ui.set_max_width(body.width());
     ui.label(
-        RichText::new(s.page.title())
+        RichText::new(s.heading())
             .strong()
             .size(20.0)
             .color(ch.text),
@@ -174,7 +167,9 @@ fn page(
             .color(ch.dim),
     );
     ui.add_space(8.0);
-    let footer_h = 44.0;
+    // Audio I/O ends in what Enter does, kept in view below the scrolling settings.
+    let opens = s.page == Page::AudioIo && s.session.backends.is_some();
+    let footer_h = if opens { 44.0 + 46.0 } else { 44.0 };
     egui::ScrollArea::both()
         .id_salt(("ac2-settings-page", s.page.index()))
         .max_height((body.height() - 70.0 - footer_h).max(120.0))
@@ -189,7 +184,7 @@ fn page(
                     }
                 }
                 None => {
-                    let new = app.keymap.reach(CommandId::NewSpl, "New SPL meter…");
+                    let new = app.keymap.reach(CommandId::NewSpl);
                     ui.label(
                         RichText::new(format!(
                             "No SPL meter: make one first ({new}); its Leq windows and limits \
@@ -218,16 +213,25 @@ fn page(
                 super::rig::rig_page(ui, s, &rig, &meters, &theme, ch, msg);
             }
         });
+    if opens {
+        let mut m = None;
+        super::session::open_row(ui, &s.session, s.new_session, ch, &mut m);
+        if let Some(m) = m {
+            *msg = Some(Msg::Session(m));
+        }
+    }
     ui.separator();
     ui.label(RichText::new(s.page.keys()).small().color(ch.dim));
 }
 
-/// A section title with whose its settings are.
-fn section(ui: &mut egui::Ui, title: &str, whose: &str, ch: &Chrome) {
+/// A section title with whose its settings are (`whose` empty: the page header's).
+pub(super) fn section(ui: &mut egui::Ui, title: &str, whose: &str, ch: &Chrome) {
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         ui.label(RichText::new(title).strong().size(16.0).color(ch.text));
-        ui.label(RichText::new(format!("· {whose}")).small().color(ch.dim));
+        if !whose.is_empty() {
+            ui.label(RichText::new(format!("· {whose}")).small().color(ch.dim));
+        }
     });
     ui.add_space(4.0);
 }
@@ -236,14 +240,8 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
     let mut m = None;
     // One focus marker on the page: the max level row's, or a session row's.
     let focus = (!s.on_ceiling).then_some(s.session.focus);
-    section(ui, "Device", crate::settings::THE_RIG, ch);
+    section(ui, "Device", "", ch);
     super::session::device_section(ui, &s.session, focus, ch, &mut m);
-    section(
-        ui,
-        "Channels",
-        "the rig — all clients · stimulus outputs: this app",
-        ch,
-    );
     super::session::channels_section(app, ui, &s.session, focus, ch, &mut m);
     if let Some(m) = m {
         *msg = Some(Msg::Session(m));
@@ -295,7 +293,11 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
                             .size(15.0)
                             .color(ch.text),
                     );
-                    if ui.button("Raise").clicked() {
+                    if ui
+                        .button("Raise")
+                        .on_hover_text(super::keys_cue(&[egui::Key::Enter]))
+                        .clicked()
+                    {
                         *msg = Some(Msg::Settings(SettingsMsg::CeilingApply));
                     }
                 });
@@ -308,6 +310,10 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
     }
     if let Some(e) = &s.ceiling.error {
         ui.label(RichText::new(e).color(ch.fault));
+    }
+    // The max level is the page's last section: focused, it and its prompt stay in view.
+    if focused {
+        ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
     }
 }
 
@@ -370,8 +376,6 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
             spec_ease: st.prefs.spec_ease,
         },
         st.prefs.spl_hold_ms,
-        st.view.spectrum.spectrograph.span_s,
-        st.prefs.spectrograph_colours,
         crate::settings::PaneViews {
             spectrum: st.kind_modes(crate::state::PaneKind::Spectrum).spectrum,
             sweep: st.kind_modes(crate::state::PaneKind::Distortion).sweep,
@@ -379,6 +383,8 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
             distortion_unit: st.view.distortion.unit,
             coherence: st.view.tf.coherence_placement,
         },
+        st.view.jump_prominence_db,
+        st.prefs.advice,
     );
     for (row, value) in rows {
         let focused = s.display == row;
@@ -539,10 +545,16 @@ mod tests {
     #[test]
     fn settings_key_hints_use_the_label_style() {
         let pc = pages_hint(LabelStyle::Pc);
-        assert!(pc.starts_with("Ctrl+PageUp / Ctrl+PageDown: pages"), "{pc}");
+        assert!(
+            pc.starts_with("Ctrl+PageUp / Ctrl+PageDown or Alt+← / Alt+→: pages"),
+            "{pc}"
+        );
         assert!(pc.contains("Shift+Esc stops"), "{pc}");
         let mac = pages_hint(LabelStyle::Mac);
-        assert!(mac.starts_with("⌘PageUp / ⌘PageDown: pages"), "{mac}");
+        assert!(
+            mac.starts_with("⌘PageUp / ⌘PageDown or ⌥← / ⌥→: pages"),
+            "{mac}"
+        );
         assert!(mac.contains("⇧Esc stops"), "{mac}");
         assert_eq!(
             page_key(0).expect("a page key").label_in(LabelStyle::Pc),
@@ -551,6 +563,12 @@ mod tests {
         assert_eq!(
             page_key(3).expect("a page key").label_in(LabelStyle::Mac),
             "⌥4"
+        );
+        assert_eq!(
+            page_key(6)
+                .expect("the Rig page's key")
+                .label_in(LabelStyle::Pc),
+            "Alt+7"
         );
     }
 }

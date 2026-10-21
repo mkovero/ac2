@@ -224,8 +224,8 @@ fn main() -> ExitCode {
         started,
         bench_startup: args.bench_startup,
         smoke: args.smoke,
-        // A daemon without an audio session (an embedded one on real audio always starts
-        // so) lands on the audio setup once; one with audio open (a rig, a kiosk) does not.
+        // A daemon without an audio I/O (an embedded one on real audio always starts
+        // so) lands on the Sessions dialog once; one with audio open (a rig, a kiosk) does not.
         // The simulated rig starts measuring.
         open_session_dialog: !(embedded.is_some()
             && matches!(args.backend, Some(BackendArg::Fake))),

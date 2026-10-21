@@ -71,6 +71,8 @@
 //! [`SweepUnresolved`]: ac2_proto::model::SweepUnresolved
 
 mod ac2;
+pub mod apo;
+pub mod eq;
 mod export;
 mod table;
 

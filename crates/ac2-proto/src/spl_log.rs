@@ -96,21 +96,26 @@ pub enum SplLogError {
     },
 }
 
-/// `YYYY-MM-DDThh:mm:ss.mmmZ` of Unix nanoseconds (civil-from-days, proleptic Gregorian).
-pub fn utc_iso(ns: u64) -> String {
-    let secs = ns / 1_000_000_000;
-    let ms = (ns % 1_000_000_000) / 1_000_000;
-    let days = i64::try_from(secs / 86_400).unwrap_or(0);
-    let rem = secs % 86_400;
+/// `y`, `m` (1–12), `d` of a day count from 1970-01-01 (civil-from-days, proleptic
+/// Gregorian; negative counts are days before 1970).
+pub fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
+    let doe = z.rem_euclid(146_097);
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+/// `YYYY-MM-DDThh:mm:ss.mmmZ` of Unix nanoseconds.
+pub fn utc_iso(ns: u64) -> String {
+    let secs = ns / 1_000_000_000;
+    let ms = (ns % 1_000_000_000) / 1_000_000;
+    let (y, m, d) = civil_from_days(i64::try_from(secs / 86_400).unwrap_or(0));
+    let rem = secs % 86_400;
     format!(
         "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{ms:03}Z",
         rem / 3600,
@@ -383,6 +388,45 @@ mod tests {
             "2026-10-03T14:57:25.500Z"
         );
         assert_eq!(utc_iso(951_782_400_000_000_000), "2000-02-29T00:00:00.000Z");
+    }
+
+    #[test]
+    fn civil_dates() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
+        assert_eq!(civil_from_days(11_016), (2000, 2, 29));
+        assert_eq!(civil_from_days(-719_468), (0, 3, 1));
+        // Every day of 1900–2100 follows the one before.
+        let mut prev = civil_from_days(-25_567);
+        assert_eq!(prev, (1900, 1, 1));
+        for days in -25_566..47_482 {
+            let (y, m, d) = civil_from_days(days);
+            let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+            let len = [
+                31,
+                if leap { 29 } else { 28 },
+                31,
+                30,
+                31,
+                30,
+                31,
+                31,
+                30,
+                31,
+                30,
+                31,
+            ];
+            let next = if prev.2 < len[(prev.1 - 1) as usize] {
+                (prev.0, prev.1, prev.2 + 1)
+            } else if prev.1 < 12 {
+                (prev.0, prev.1 + 1, 1)
+            } else {
+                (prev.0 + 1, 1, 1)
+            };
+            assert_eq!((y, m, d), next, "{days}");
+            prev = (y, m, d);
+        }
+        assert_eq!(prev, (2099, 12, 31));
     }
 
     #[test]

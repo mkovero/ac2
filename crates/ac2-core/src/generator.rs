@@ -600,7 +600,8 @@ impl Generator {
     }
 
     /// Current output gain (FS RMS of the emitted signal before muting ramps finish).
-    pub fn current_gain(&self) -> f64 {
+    #[cfg(test)]
+    pub(crate) fn current_gain(&self) -> f64 {
         self.gain
     }
 

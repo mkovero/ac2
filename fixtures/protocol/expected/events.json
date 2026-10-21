@@ -131,7 +131,34 @@
        "spectrum_view": "spectrograph",
        "spl_view": "meter_leq",
        "sweep_view": "response",
-       "chrome": "full"
+       "chrome": "full",
+       "meas": null,
+       "levels": {
+        "transfer": {
+         "lo": -24.0,
+         "hi": 12.0
+        },
+        "spectrum_dbfs": null,
+        "spectrum_spl": null,
+        "distortion": null
+       },
+       "plates": {
+        "legend": {
+         "at": null,
+         "scale": 1.0
+        },
+        "readout": {
+         "at": [
+          0.0,
+          1.0
+         ],
+         "scale": 2.0
+        },
+        "mark": {
+         "at": null,
+         "scale": 1.0
+        }
+       }
       }
      },
      "b": {
@@ -142,10 +169,34 @@
        "spectrum_view": "spectrograph",
        "spl_view": "meter_leq",
        "sweep_view": "response",
-       "chrome": "no_grid"
+       "chrome": "no_grid",
+       "meas": 2,
+       "levels": {
+        "transfer": null,
+        "spectrum_dbfs": null,
+        "spectrum_spl": null,
+        "distortion": null
+       },
+       "plates": {
+        "legend": {
+         "at": null,
+         "scale": 1.0
+        },
+        "readout": {
+         "at": null,
+         "scale": 1.0
+        },
+        "mark": {
+         "at": null,
+         "scale": 1.0
+        }
+       }
       }
      }
-    }
+    },
+    "compared": [],
+    "offset": 0.0,
+    "eq": []
    }
   }
  },
@@ -645,7 +696,10 @@
     "delay": null,
     "grid_id": null,
     "colour": null,
-    "layout": null
+    "layout": null,
+    "compared": [],
+    "offset": 0.0,
+    "eq": []
    }
   }
  },
@@ -704,7 +758,10 @@
     "delay": null,
     "grid_id": 8785464140711761104,
     "colour": null,
-    "layout": null
+    "layout": null,
+    "compared": [],
+    "offset": 0.0,
+    "eq": []
    }
   }
  },
@@ -892,7 +949,10 @@
     "colour": {
      "type": "neutral"
     },
-    "layout": null
+    "layout": null,
+    "compared": [],
+    "offset": 0.0,
+    "eq": []
    }
   }
  },
@@ -991,6 +1051,63 @@
      "at": 1790000000000000000
     }
    ]
+  }
+ },
+ {
+  "kind": "measurement",
+  "rev": 69,
+  "payload": {
+   "type": "set",
+   "value": {
+    "id": 9,
+    "config": {
+     "name": "Sub \u2194 Main",
+     "scope": "session",
+     "kind": {
+      "type": "math",
+      "config": {
+       "owner": {
+        "type": "meas",
+        "meas": 1
+       },
+       "domain": "transfer",
+       "expr": {
+        "type": "align",
+        "a": {
+         "type": "trace",
+         "trace": 7
+        },
+        "b": {
+         "type": "meas",
+         "meas": 1
+        },
+        "band": {
+         "lo": 60.0,
+         "hi": 120.0
+        },
+        "max_delay": 0.05
+       },
+       "reference": {
+        "type": "operand",
+        "operand": {
+         "type": "trace",
+         "trace": 7
+        }
+       },
+       "smoothing": null
+      }
+     }
+    },
+    "config_rev": 62,
+    "running": true,
+    "delay": null,
+    "grid_id": 8785464140711761104,
+    "colour": null,
+    "layout": null,
+    "compared": [],
+    "offset": 0.0,
+    "eq": []
+   }
   }
  },
  {

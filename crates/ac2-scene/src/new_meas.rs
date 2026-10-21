@@ -46,7 +46,7 @@ impl NewKind {
             NewKind::Rta => "one input's level in fractional-octave bands",
             NewKind::Spl => "sound level: A / C / Z weighting, Leq windows and limits",
             NewKind::Sweep => "a played sweep: response and harmonic distortion",
-            NewKind::Math => "A ÷ × + − B of two curves, or the average of several",
+            NewKind::Math => "A ÷ × + − B of two curves, align A ↔ B, or the average of several",
         }
     }
 
@@ -126,6 +126,15 @@ pub fn empty_list(reach: &str) -> String {
     format!("none — {reach}: {TITLE}…")
 }
 
+/// Q on the only pane: it stays, and what does bring more to the screen (`split`: the
+/// split key, if bound; `reach`: the chooser's key, or its palette entry).
+pub fn last_pane_stays(split: Option<&str>, reach: &str) -> String {
+    match split {
+        Some(n) => format!("the last pane stays: {n} splits it · {reach}: {TITLE}…"),
+        None => format!("the last pane stays · {reach}: {TITLE}…"),
+    }
+}
+
 /// The empty transfer pane on a session without measurements (`reach`: the chooser's key,
 /// else the palette's): where every kind is made.
 pub fn no_measurements(reach: &str) -> String {
@@ -143,9 +152,48 @@ pub fn no_measurements(reach: &str) -> String {
     )
 }
 
+/// A new transfer's default name: what it compares, `Reference → M30 FOH` (`mic`: the
+/// measurement input's name), numbered ` 2`, ` 3` … past the names already `taken`; `TF n`
+/// when the input has no name.
+pub fn transfer_name(mic: Option<&str>, taken: &[&str], n: usize) -> String {
+    let Some(mic) = mic.map(str::trim).filter(|m| !m.is_empty()) else {
+        return format!("TF {n}");
+    };
+    let base = format!("Reference → {mic}");
+    if !taken.contains(&base.as_str()) {
+        return base;
+    }
+    (2..)
+        .map(|i| format!("{base} {i}"))
+        .find(|c| !taken.contains(&c.as_str()))
+        .unwrap_or(base)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_transfer_is_named_after_what_it_compares() {
+        assert_eq!(
+            transfer_name(Some("M30 FOH"), &[], 1),
+            "Reference → M30 FOH"
+        );
+        assert_eq!(
+            transfer_name(Some("M30 FOH"), &["Reference → M30 FOH", "TF 1"], 3),
+            "Reference → M30 FOH 2"
+        );
+        assert_eq!(
+            transfer_name(
+                Some("M30 FOH"),
+                &["Reference → M30 FOH", "Reference → M30 FOH 2"],
+                3
+            ),
+            "Reference → M30 FOH 3"
+        );
+        assert_eq!(transfer_name(None, &[], 2), "TF 2");
+        assert_eq!(transfer_name(Some(" "), &[], 1), "TF 1");
+    }
 
     #[test]
     fn rows_name_every_kind_with_its_key_and_reason() {
@@ -163,7 +211,7 @@ mod tests {
                 "RTA — one input's level in fractional-octave bands",
                 "SPL meter — sound level: A / C / Z weighting, Leq windows and limits",
                 "Sweep — a played sweep: response and harmonic distortion  ·  Shift+S",
-                "Math channel — A ÷ × + − B of two curves, or the average of several",
+                "Math channel — A ÷ × + − B of two curves, align A ↔ B, or the average of several",
             ]
         );
         assert_eq!(q.default, 1);
@@ -181,6 +229,14 @@ mod tests {
         assert_eq!(q.default, 0);
         assert_eq!(menu_row(Some("Ctrl+M")), "New measurement…  Ctrl+M");
         assert_eq!(empty_list("Ctrl+M"), "none — Ctrl+M: New measurement…");
+        assert_eq!(
+            last_pane_stays(Some("N"), "Ctrl+M"),
+            "the last pane stays: N splits it · Ctrl+M: New measurement…"
+        );
+        assert_eq!(
+            last_pane_stays(None, "Ctrl+M"),
+            "the last pane stays · Ctrl+M: New measurement…"
+        );
         assert_eq!(
             no_measurements("Ctrl+M"),
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \

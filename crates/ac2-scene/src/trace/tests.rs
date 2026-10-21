@@ -259,7 +259,7 @@ fn stored_display_math_is_kept_until_what_it_depends_on_changes() {
     raw.phase_deg = Some((0..n).map(|i| (i as f32 * 37.0) % 360.0 - 180.0).collect());
     raw.coherence = Some((0..n).map(|i| (i % 10) as f32 / 10.0).collect());
     let data = Arc::new(raw);
-    let freqs = crate::grid::column_frequencies(&crate::distortion::tests::grid());
+    let freqs = crate::distortion::tests::grid().centres();
     let live = Data::delay(n, 0.001, 0.001);
     let cache = DisplayCache::default();
     let style = CoherenceStyle {
@@ -403,6 +403,7 @@ fn live_frame(freqs: &[f64], tau: f64, applied: f64, nudged: f64) -> TfFrame {
         phase: measured_phase(freqs, tau, applied),
         coh: vec![1.0; n],
         validity: vec![ValidityMask::NONE; n],
+        align: None,
     }
 }
 

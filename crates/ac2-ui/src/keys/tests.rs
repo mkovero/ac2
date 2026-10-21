@@ -70,7 +70,6 @@ fn every_command_is_reachable() {
         CommandId::PrevColour,
         CommandId::ToggleGroup,
         CommandId::AverageComplex,
-        CommandId::ToggleCursor,
         CommandId::ClearCompare,
         CommandId::AverageCoherence,
         CommandId::LegendTopLeft,
@@ -102,8 +101,6 @@ fn every_command_is_reachable() {
         CommandId::FinderObservation,
         CommandId::PaneMeasurement,
         CommandId::TransferStack,
-        // Esc also deselects (when no dialog is open); this is its palette entry.
-        CommandId::SelectLive,
         CommandId::SplFast,
         CommandId::SplSlow,
         CommandId::SplImpulse,
@@ -120,7 +117,6 @@ fn every_command_is_reachable() {
         CommandId::SplShowLeq,
         CommandId::SplShowMeterLeq,
         CommandId::SplShowBands,
-        CommandId::Notifications,
         // Settings › Display has the theme row; T is the plot's grid / labels / cursor.
         CommandId::CycleTheme,
         // Set once and left: Settings › Display has a row for each, so their keys went
@@ -139,6 +135,8 @@ fn every_command_is_reachable() {
         // Once a show: the palette's "export leq".
         CommandId::SplLogExport,
         CommandId::SplLogExportPrevious,
+        // For a report, now and then: the palette's "export pane".
+        CommandId::ExportPanePng,
     ];
     let m = Keymap::default();
     for c in CommandId::ALL {
@@ -160,7 +158,7 @@ fn learned_bindings_carry_over() {
         ("Z", CommandId::Target),
         ("B", CommandId::CoherenceMask),
         ("M", CommandId::Average),
-        ("Shift+P", CommandId::GroupDelay),
+        ("Shift+P", CommandId::PhaseView),
         ("Ctrl+1", CommandId::Slot1),
         ("Ctrl+9", CommandId::Slot9),
         ("1", CommandId::ShowSlot1),
@@ -192,11 +190,13 @@ fn learned_bindings_carry_over() {
     ] {
         assert_eq!(m.lookup(t, c(chord)), Some(cmd), "{chord}");
     }
-    // Scoped lookup: P means peak hold in the spectrum pane, phase in the transfer pane.
+    // Scoped lookup: P tracks extremes in both plots — peak hold and peaks on the
+    // spectrum, min / max on the transfer function; Shift+P is the phase view there.
     assert_eq!(m.lookup(Scope::Spectrum, c("P")), Some(CommandId::PeakHold));
+    assert_eq!(m.lookup(Scope::Transfer, c("P")), Some(CommandId::MinMax));
     assert_eq!(
-        m.lookup(Scope::Transfer, c("P")),
-        Some(CommandId::PhaseUnwrap)
+        m.lookup(Scope::Transfer, c("Shift+P")),
+        Some(CommandId::PhaseView)
     );
     // H is help in every pane; Shift+I is the impulse response wherever there is one.
     for scope in Scope::ALL {
@@ -448,7 +448,7 @@ fn key_hints() {
         Chord::parse("Q").ok()
     );
     assert_eq!(
-        m.first_chord(CommandId::MaximizePane, Scope::Spl),
+        m.first_chord(CommandId::MaximisePane, Scope::Spl),
         Chord::parse("W").ok()
     );
     assert_eq!(m.first_chord(CommandId::SweepIr, Scope::Spl), None);
@@ -613,12 +613,9 @@ fn stop_anywhere_is_safe_on_every_layout() {
 fn message_text_names_keys_in_the_label_style() {
     use LabelStyle::{Mac, Pc};
     let m = Keymap::default();
-    assert_eq!(m.reach_in(CommandId::SweepNew, "New sweep…", Pc), "Shift+S");
-    assert_eq!(m.reach_in(CommandId::SweepNew, "New sweep…", Mac), "⇧S");
-    assert_eq!(
-        m.reach_in(CommandId::NewSpl, "New SPL meter…", Mac),
-        "New SPL meter… in ⌘K"
-    );
+    assert_eq!(m.reach_in(CommandId::SweepNew, Pc), "Shift+S");
+    assert_eq!(m.reach_in(CommandId::SweepNew, Mac), "⇧S");
+    assert_eq!(m.reach_in(CommandId::NewSpl, Mac), "New SPL meter… in ⌘K");
     assert_eq!(
         m.label_in(CommandId::SweepIr, Scope::Distortion, Mac)
             .as_deref(),
@@ -627,7 +624,53 @@ fn message_text_names_keys_in_the_label_style() {
     assert_eq!(m.label_in(CommandId::SweepIr, Scope::Transfer, Pc), None);
     let bare = Keymap::from_toml("[global]\npalette = []\nsweep_new = []\n").expect("valid");
     assert_eq!(
-        bare.reach_in(CommandId::SweepNew, "New sweep…", Mac),
+        bare.reach_in(CommandId::SweepNew, Mac),
         "New sweep… in the command palette"
     );
+}
+
+/// Palette lines are labels, not a manual: short, no asides, every title its own, and one
+/// shape per genre so a family reads (and searches) alike.
+#[test]
+fn palette_titles_are_terse_and_uniform() {
+    use CommandId as C;
+    let mut seen = std::collections::HashSet::new();
+    for &c in CommandId::ALL {
+        let t = c.title();
+        assert!(t.chars().count() <= 28, "too long: {t}");
+        assert!(!t.contains(['(', ')', ':', ';']), "aside in: {t}");
+        assert!(
+            !t.contains(" / ") && !t.contains('→'),
+            "manual text in: {t}"
+        );
+        assert!(!t.ends_with("...") && t.matches('…').count() <= 1, "{t}");
+        assert!(t.chars().next().is_some_and(char::is_uppercase), "{t}");
+        assert!(seen.insert(t), "two commands read {t}");
+    }
+    for c in [
+        C::NewMeasurement,
+        C::NewTransfer,
+        C::NewSpectrum,
+        C::NewRta,
+        C::NewSpl,
+        C::NewMath,
+        C::SweepNew,
+    ] {
+        let t = c.title();
+        assert!(t.starts_with("New ") && t.ends_with('…'), "{t}");
+    }
+    for (c, t) in [
+        (C::SessionLoad, "Open session…"),
+        (C::SessionSave, "Save session"),
+        (C::SessionSaveAs, "Save session as…"),
+        (C::SessionExport, "Export session…"),
+        (C::SplitPane, "Split pane"),
+        (C::ClosePane, "Close pane"),
+        (C::MaximisePane, "Maximise pane"),
+        (C::PeakHold, "Peaks"),
+        (C::CoherenceMask, "Coherence mask"),
+        (C::PhaseView, "Phase view"),
+    ] {
+        assert_eq!(c.title(), t);
+    }
 }

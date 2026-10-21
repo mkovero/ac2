@@ -103,7 +103,7 @@ the minimal honest form: `ac2 spl leq new --yes --export FILE` writes the ended 
 the reset, whole, with no second lost between an export and the reset; `ac2 spl leq export
 --previous` gets it later. The meter's job sees the new log at its next second (each log has
 an epoch) and starts its windows over; judgement reports from before the reset are dropped.
-The app asks first (Shift+R in the SPL pane, "Start a new SPL log…"), naming the run that
+The app asks first (Shift+R in the SPL pane, "New SPL log…"), naming the run that
 ends and what starts over; the CLI wants `--yes`.
 
 ## Limits
@@ -190,7 +190,7 @@ smallest t ≥ h with `E_(N−t) ≤ P·M_(N−t)` (the part still inside the wi
 below the limit), found by one pass over the ring. The display words it **"cooling down in
 7 min 30 s"**: the time until the window is back under its limit if the level stays at the
 limit (narrow "cooling down in 7:30", "cooling 7:30", "7:30"); the headroom reads "next 1
-min: stay ≤ 101.5 dB" in the CLI and just "stay ≤ 101.5 dB" in the app (narrow: "stay ≤
+min: stay ≤ 101.5 dB SPL" in the CLI and just "stay ≤ 101.5 dB SPL" in the app (narrow: "stay ≤
 101.5", "≤ 101.5"), where the level to stay under is what is acted on and a second line
 for what it holds for would compete with it.
 
@@ -284,7 +284,7 @@ A corrected number never passes for a measured one:
 
 - Frames carry the correction applied (`SplMeta.position`, `LeqMeta.position`); the app
   writes `corrected +3.0 dB` (or `corrected +3.0 dB, peaks +1.5 dB`) in the caption of the
-  meter and of the windows, and every window's and peak's unit reads `dB(A) corr.`; the CLI
+  meter and of the windows, and every window's and peak's unit reads `dB SPL (A) corr.`; the CLI
   says it in its head line (`position_text` in `--json`) and under `ac2 spl watch`.
 - Alarms carry the correction in their level (`LeqAlarm.position`), and the toasts and
   the daemon's log say "(corrected +3.0 dB)".
@@ -385,9 +385,9 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   level visibly not a whole window. On course, the state line says so with the time until
   the budget is spent ("ON COURSE — over in 12 min", then "over in 12 min", "ON COURSE" as
   the column narrows), and the headroom holds until the window is full (still worded
-  "stay ≤ 98.2 dB"). Tiles show the same texts. The limit is a line across the whole column.
+  "stay ≤ 98.2 dB SPL"). Tiles show the same texts. The limit is a line across the whole column.
 - **Text**: what a performer acts on is large — the state (`OVER`, `NEAR`, `OK`, "over in
-  47 s" on course) and the instruction ("stay ≤ 101.5 dB", or "cooling down in 7 min 30 s"
+  47 s" on course) and the instruction ("stay ≤ 101.5 dB SPL", or "cooling down in 7 min 30 s"
   when it cannot recover within the horizon) — each in the longest wording that fits every
   column saying the same kind of thing, shrinking to half size before a shorter wording is
   used, so neighbours read alike. The limit is small under them; "not calibrated" in its
@@ -397,7 +397,7 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   most 0.8 of the state (`VALUE_RATIO`) and ≤ 0.3 of the meter's number above. Its colour
   depends on what is behind it (`Behind`): on the fill the theme ink of highest contrast
   (≥ 4.5:1, never red on red), on the track the bar's colour where it reads (≥ 3:1). The
-  unit and weighting (`dB(A)`, `dBFS (A)` uncalibrated) are never dropped, since the meter
+  unit and weighting (`dB SPL (A)`, `dBFS (A)` uncalibrated) are never dropped, since the meter
   above may use another weighting. Rows drop when the bar would get too short (the limit
   first, the instruction last); the name shortens uniformly (`LAeq 30 min` → `30 min` →
   `30m`). Tested: 1–8 windows, 320–3840 px, no overlaps, every value inside its track,

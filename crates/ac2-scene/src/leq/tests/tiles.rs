@@ -32,10 +32,10 @@ fn tile_strings() {
     // Near: limit and the floored headroom.
     assert_eq!(t[1].state, TileState::Near);
     assert_eq!(t[1].state_text.as_deref(), Some("NEAR"));
-    assert_eq!(t[1].limit.as_deref(), Some("limit 100.0 dB"));
+    assert_eq!(t[1].limit.as_deref(), Some("limit 100.0 dB SPL"));
     assert_eq!(
         t[1].headroom.as_deref(),
-        Some("next 1 min: stay ≤ 101.5 dB")
+        Some("next 1 min: stay ≤ 101.5 dB SPL")
     );
     assert_eq!(t[1].filling, None);
     // Filling: the value is the Leq so far, elapsed of length; with more than the horizon
@@ -45,7 +45,7 @@ fn tile_strings() {
     assert_eq!(t[2].filling.as_deref(), Some("so far · 12:30 / 30:00"));
     assert_eq!(
         t[2].headroom.as_deref(),
-        Some("until full: stay ≤ 100.0 dB")
+        Some("until full: stay ≤ 100.0 dB SPL")
     );
     assert!(t[2].filling() && t[2].allowed_until_full && !t[2].on_course);
     assert_eq!(t[2].course, None);
@@ -150,13 +150,13 @@ fn scene_lays_tiles_out_and_colours_them() {
         "M30 · cal 3 h ago",
         "30 min",
         // Each tile names its own weighting with its value.
-        "dB(A)",
+        "dB SPL (A)",
         "97.8",
         "OVER",
         "NEAR",
-        "limit 99.0 dB",
+        "limit 99.0 dB SPL",
         // What to do, without what it holds for: the level is what is acted on.
-        "stay ≤ 100.0 dB",
+        "stay ≤ 100.0 dB SPL",
         "so far · 12:30 / 30:00",
         "now",
         "2:14:05 since 19:02 · total 97.8 · offline 12 s",
@@ -187,7 +187,7 @@ fn scene_lays_tiles_out_and_colours_them() {
     };
     let v97 = size_of(&s, "97.8");
     assert!(v97 > 12.0, "{v97}");
-    assert!(size_of(&s, "stay ≤ 100.0 dB") > v97);
+    assert!(size_of(&s, "stay ≤ 100.0 dB SPL") > v97);
     assert!((size_of(&s, "96.9") - v97).abs() < 1e-3);
     // Smaller than the window's name, at one place in every tile, instruction or not.
     assert!(v97 < size_of(&s, "1 min"));

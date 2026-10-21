@@ -13,11 +13,11 @@ use std::path::{Path, PathBuf};
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
-    DelayState, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement, Salvage,
-    SalvageRefusal, Session, SessionFile, SessionOrigin, SessionRef, SweepFailure, TraceKind,
-    TraceOwner,
+    Compared, DelayState, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement,
+    Salvage, SalvageRefusal, Session, SessionFile, SessionOrigin, SessionRef, SweepFailure,
+    TraceKind, TraceOwner,
 };
-use ac2_proto::units::{ClientId, MeasId, Rev, Seconds, SessionEpoch, TransferId, WallNs};
+use ac2_proto::units::{ClientId, Db, MeasId, Rev, Seconds, SessionEpoch, TransferId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 use ac2_traces::meta;
 use ac2_traces::session::{
@@ -444,7 +444,7 @@ impl Control {
         // Disarmed, no owner; a sweep run in progress is discarded.
         self.abort_sweep(SweepFailure::Stopped, "a session was loaded");
         self.stop_output();
-        self.lease = None;
+        self.out.lease = None;
         let mut g = self.store.state().generator.clone();
         if g.owner.is_some() || g.armed || g.firing {
             g.owner = None;
@@ -489,7 +489,7 @@ impl Control {
             if let Err(e) = self.reopen_at(&[], epoch) {
                 tracing::warn!("session load: the audio stream did not reopen: {}", e.msg);
             }
-        } else if self.recovery.is_some() {
+        } else if self.audio_recovery.is_some() {
             // The session's audio is stopped: it stays open and keeps being reopened, now in
             // the loaded state's epoch.
             self.rebase_recovery(epoch);
@@ -545,6 +545,17 @@ impl Control {
                 .filter(|c| c.is_valid() && !matches!(sm.config.kind, MeasKind::Math { .. }));
             // A layout no client could draw is no layout.
             let layout = sm.layout.filter(|l| l.check().is_ok());
+            // A list naming itself, an entry twice or past the cap is cut to what
+            // `meas.compare` takes; entries already gone are pruned once all is loaded.
+            let mut compared: Vec<Compared> = Vec::new();
+            for c in sm.compared {
+                if c != (Compared::Meas { meas: sm.id })
+                    && !compared.contains(&c)
+                    && compared.len() < Compared::MAX
+                {
+                    compared.push(c);
+                }
+            }
             let mut meas = Measurement {
                 id: sm.id,
                 config: sm.config,
@@ -555,11 +566,22 @@ impl Control {
                 grid_id,
                 colour,
                 layout,
+                compared,
+                // One no command could set is none.
+                offset: Some(sm.offset)
+                    .filter(|o| Measurement::offset_ok(*o))
+                    .unwrap_or(Db(0.0)),
+                eq: sm.eq,
             };
             self.ensure_spl_log(&meas, None);
             meas.config_rev = Rev(self.store.rev().0 + 1);
             self.commit(Change::Measurement(Patch::Set(meas.clone())));
             loaded.push(meas);
+        }
+        // The EQ curves are the daemon's: recomputed from their sets, not trusted from the
+        // file.
+        for m in &loaded {
+            self.eq_refresh(m.id);
         }
         // Then the jobs, once every measurement is there: a math channel looks its live
         // operands up whatever their order.
@@ -578,6 +600,7 @@ impl Control {
                 }
             }
         }
+        self.prune_compared();
         Ok(epoch)
     }
 }
@@ -615,12 +638,18 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
                         .find(|t: &&ac2_traces::StoredTrace| t.meta.id == id)
                         .map(|t| (&t.meta, t.grid.clone()))
                 };
+                let eq = |id, set| {
+                    data.measurements
+                        .iter()
+                        .any(|o: &SavedMeasurement| o.id == id && o.eq.iter().any(|s| s.id == set))
+                };
                 maths::check_operands(
                     Some(sm.id),
                     config,
                     &maths::Lookup {
                         meas: &meas,
                         trace: &trace,
+                        eq: &eq,
                         epoch: None,
                     },
                 )?
@@ -629,6 +658,29 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
         };
         if let Some(g) = grid {
             grids.insert(sm.id, g);
+        }
+    }
+    // EQ sets: ids unique in the session, each curve one of its traces.
+    let mut set_ids = std::collections::HashSet::new();
+    for sm in &data.measurements {
+        for s in &sm.eq {
+            if !set_ids.insert(s.id) {
+                return Err(perr(
+                    ErrorCode::Invalid,
+                    format!("EQ set {} appears twice in the session", s.id.0),
+                ));
+            }
+            if s.body.sections.len() > ac2_proto::model::EqSet::MAX_SECTIONS
+                || !data.traces.iter().any(|t| t.meta.id == s.trace)
+            {
+                return Err(perr(
+                    ErrorCode::Invalid,
+                    format!(
+                        "EQ set {} of measurement {} is not one ac2d keeps",
+                        s.id.0, sm.id
+                    ),
+                ));
+            }
         }
     }
     // Every owner is a measurement of the session that can own (not a math channel).

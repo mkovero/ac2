@@ -4,7 +4,11 @@
 
 mod common;
 mod conn;
+// Both start an embedded daemon. Without the `embedded` feature the binary links no daemon,
+// DSP or audio crate: `cargo nextest run -p ac2-ui --no-default-features` for UI-only work.
+#[cfg(feature = "embedded")]
 mod connect;
+#[cfg(feature = "embedded")]
 mod embedded;
 mod keymap_doc;
 mod no_dsp;

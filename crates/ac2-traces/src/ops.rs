@@ -23,7 +23,7 @@ use ac2_proto::model::{AverageMethod, DelayReference, TraceKind};
 use ac2_proto::units::{Seconds, SessionEpoch, TraceId};
 use num_complex::Complex64;
 
-use crate::columns::{Columns, StoredTrace, frequencies, resample};
+use crate::columns::{Columns, StoredTrace, resample};
 
 /// Why an operation was refused.
 #[derive(Debug, Clone, PartialEq)]
@@ -63,7 +63,7 @@ impl fmt::Display for OpError {
                 f,
                 "these traces cannot be combined (transfer and target combine with each other; spectra and RTA only with their own kind and scale, a spectrum only with one of the same level: tone or density)"
             ),
-            Self::KindNotSupported(k) => write!(f, "not supported for {} traces", kind_name(*k)),
+            Self::KindNotSupported(k) => write!(f, "not supported for {} traces", k.label()),
             Self::GridMismatch => write!(
                 f,
                 "spectrum / RTA traces must share one grid (band powers are not interpolated)"
@@ -85,17 +85,6 @@ impl fmt::Display for OpError {
 }
 
 impl std::error::Error for OpError {}
-
-/// Lower-case name of a kind for messages.
-pub fn kind_name(k: TraceKind) -> &'static str {
-    match k {
-        TraceKind::Transfer => "transfer",
-        TraceKind::Target => "target",
-        TraceKind::Spectrum { .. } => "spectrum",
-        TraceKind::Rta { .. } => "RTA",
-        TraceKind::Sweep => "sweep",
-    }
-}
 
 /// Transfer functions and sweep responses (a sweep's fundamental is a transfer function on
 /// the same time base) combine with each other.
@@ -178,7 +167,7 @@ fn on_grid(t: &StoredTrace, grid: &GridDef, freqs: &[f64]) -> Columns {
     if t.grid.id() == grid.id() {
         t.columns.clone()
     } else {
-        resample(&frequencies(&t.grid), &t.columns, freqs)
+        resample(&t.grid.centres(), &t.columns, freqs)
     }
 }
 
@@ -222,7 +211,7 @@ pub fn average(
         return Err(OpError::MixedKinds);
     }
     let grid = traces[0].grid.clone();
-    let freqs = frequencies(&grid);
+    let freqs = grid.centres();
     match kind {
         TraceKind::Target => Err(OpError::KindNotSupported(kind)),
         TraceKind::Spectrum { .. } | TraceKind::Rta { .. } => {

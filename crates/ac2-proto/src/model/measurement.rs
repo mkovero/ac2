@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AverageMethod, BandFraction, DelayState, PeakWeighting, Resolution, Smoothing,
-    SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SweepConfig, TfAveraging,
-    TimeWeighting, Weighting, Window,
+    SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SpectrumDisplay, SweepConfig,
+    TfAveraging, TimeWeighting, Weighting, Window,
 };
 use crate::grid::GridId;
 use crate::topic::Stream;
@@ -75,6 +75,8 @@ pub struct SpectrumConfig {
     pub smoothing: Option<SmoothingFraction>,
     /// Tone level or power spectral density.
     pub level: SpecLevel,
+    /// How clients draw it.
+    pub display: SpectrumDisplay,
 }
 
 /// Fractional-octave RTA.
@@ -93,6 +95,8 @@ pub struct RtaConfig {
     pub weighting: Weighting,
     /// Averaging.
     pub averaging: SpecAveraging,
+    /// How clients draw it.
+    pub display: SpectrumDisplay,
 }
 
 /// Sound level meter.
@@ -369,6 +373,25 @@ impl MeasKind {
         matches!(self.stream(), Some(Stream::Spec | Stream::Rta))
     }
 
+    /// How its curves are drawn, for a spectrum or RTA measurement (a math channel draws
+    /// with its owner's).
+    pub fn display(&self) -> Option<&SpectrumDisplay> {
+        match self {
+            MeasKind::Spectrum { config } => Some(&config.display),
+            MeasKind::Rta { config } => Some(&config.display),
+            _ => None,
+        }
+    }
+
+    /// [`Self::display`], to change.
+    pub fn display_mut(&mut self) -> Option<&mut SpectrumDisplay> {
+        match self {
+            MeasKind::Spectrum { config } => Some(&mut config.display),
+            MeasKind::Rta { config } => Some(&mut config.display),
+            _ => None,
+        }
+    }
+
     /// Whether it runs as a job (`meas.start`): every kind but a sweep measurement, which
     /// plays only when `sweep.run` fires it.
     pub fn is_job(&self) -> bool {
@@ -489,7 +512,7 @@ impl MathDomain {
 }
 
 /// A math channel's expression.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MathExpr {
     /// `a op b`.
@@ -509,13 +532,26 @@ pub enum MathExpr {
         /// How they are combined (spectrum and RTA: power only).
         method: AverageMethod,
     },
+    /// The delay and polarity that align `b` with `a` (or `a` with `b`) in `band`
+    /// (`docs/design/alignment.md`), transfer only: the curve is their sum aligned so, the
+    /// frame's [`crate::frame::MathState::align`] says what was found.
+    Align {
+        /// First system.
+        a: Operand,
+        /// Second system.
+        b: Operand,
+        /// Where the two overlap.
+        band: super::AlignBand,
+        /// Largest delay searched either way.
+        max_delay: Seconds,
+    },
 }
 
 impl MathExpr {
     /// Every operand, in expression order.
     pub fn operands(&self) -> Vec<Operand> {
         match self {
-            MathExpr::Binary { a, b, .. } => vec![*a, *b],
+            MathExpr::Binary { a, b, .. } | MathExpr::Align { a, b, .. } => vec![*a, *b],
             MathExpr::Average { of, .. } => of.clone(),
         }
     }
@@ -555,6 +591,14 @@ pub enum Operand {
     Trace {
         /// The trace.
         trace: TraceId,
+    },
+    /// An EQ set of a measurement (`B` of a transfer `A × B` only): the set's response, or
+    /// its change since what `A` is known to contain (`docs/design/eq-overlay.md`).
+    Eq {
+        /// The measurement holding the set.
+        meas: MeasId,
+        /// The set.
+        set: crate::units::EqSetId,
     },
 }
 
@@ -641,6 +685,28 @@ impl ColourFamily {
     }
 }
 
+/// A curve compared into a measurement's panes (`meas.compare`): drawn there over the
+/// measurement's own group, never on another measurement's panes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Compared {
+    /// A measurement's live curve, or a math channel.
+    Meas {
+        /// The measurement.
+        meas: MeasId,
+    },
+    /// A stored trace.
+    Trace {
+        /// The trace.
+        trace: TraceId,
+    },
+}
+
+impl Compared {
+    /// Most curves one measurement compares.
+    pub const MAX: usize = 32;
+}
+
 /// Measurement entity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -663,4 +729,23 @@ pub struct Measurement {
     /// The panes a client shows while this measurement is selected (`meas.layout`);
     /// `None`: none of its own, a client keeps the panes it has.
     pub layout: Option<super::PaneLayout>,
+    /// Curves its panes draw compared (`meas.compare`), first compared first.
+    pub compared: Vec<Compared>,
+    /// Display offset of its live curves (`meas.offset`), wherever they are drawn (in
+    /// another measurement's panes too, compared): display only, its frames carry the
+    /// measured levels. At most [`Measurement::OFFSET_MAX_DB`] either way.
+    pub offset: Db,
+    /// EQ what-if sets (`meas.eq`), transfer and sweep measurements only.
+    pub eq: Vec<super::EqSet>,
+}
+
+impl Measurement {
+    /// The largest display offset either way: wider than any level axis, so an offset
+    /// never takes a curve somewhere no axis reaches.
+    pub const OFFSET_MAX_DB: f64 = 200.0;
+
+    /// A display offset `meas.offset` takes: finite, within [`Self::OFFSET_MAX_DB`].
+    pub fn offset_ok(offset: Db) -> bool {
+        offset.0.is_finite() && offset.0.abs() <= Self::OFFSET_MAX_DB
+    }
 }

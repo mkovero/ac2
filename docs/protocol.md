@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 57`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 60`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -109,6 +109,9 @@ Lease column: **L** = `lease_token` required (Q6).
 | `meas.update` | `meas`, `base: Rev` (the `config_rev` the edit was made on), `config` | `measurement` | |
 | `meas.colour` | `meas`, `colour: ColourFamily \| nil` | `measurement` | |
 | `meas.layout` | `meas`, `layout: PaneLayout \| nil` | `measurement` | |
+| `meas.compare` | `meas`, `compared: [Compared]` | `measurement` | |
+| `meas.offset` | `meas`, `offset: Db` | `measurement` | |
+| `meas.eq` | `meas`, `edit: EqEdit` | `measurement` | |
 | `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the traces and math channels it owns) | `ack` | |
 | `meas.start` | `meas` | `measurement` | |
 | `meas.stop` | `meas` | `measurement` | |
@@ -338,10 +341,70 @@ layout it receives for the measurement it has selected on screen and never sends
 A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axis: row |
 column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
 `ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is {`kind`,
-`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `chrome`} (snake_case enums,
-`ac2_proto::model::layout`): its kind and the view of each kind it may be turned into. Which measurement a pane shows, the focused pane, a maximised or full-screen pane and
-the window are each client's. `invalid` for a ratio out of range and for more than 16
-panes; a session file's layout that is either is dropped on load.
+`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `chrome`, `meas`, `levels`,
+`plates`}
+(snake_case enums, `ac2_proto::model::layout`): its kind, the view of each kind it may be
+turned into, the measurement it was picked to show (`meas`: a `MeasId` or nil, nil being
+the measurement whose layout it is; a pick of a measurement gone since shows that one too)
+and the level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
+`spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
+when the pane first shows a curve) and where its readout plates sit (`plates`: {`legend`,
+`readout`, `mark`}, each {`at`, `scale`}: `at` nil for the client's own placement or
+[x, y], each in 0 … 1, the plate's top-left corner as a fraction of the room the plot leaves
+around the plate, so a dropped plate stays inside its plot at any pane size; `scale` the
+plate's text size, 1 being the theme's; missing = all nil at 1). The focused pane, a
+maximised or full-screen pane and the window are each client's. `invalid` for a ratio out
+of range, for more than 16 panes, for a level range not finite with `hi` above `lo` and for
+a plate `at` outside 0 … 1 or a `scale` not finite and positive; a session file's layout
+that is any of these is dropped on load.
+
+`meas.compare` sets the curves drawn compared into the measurement's panes, first compared
+first (drawn above the later ones, under the measurement's own curves): `Compared` is
+`{type: meas, meas}` (another measurement's live curve or a math channel) or `{type: trace,
+trace}` (a stored trace). It is `Measurement.compared`, kept in sessions and the autosave;
+the job, its averages and `config_rev` are untouched. Every client draws the same list; a
+pane showing a math channel draws its owner's. `invalid` for an SPL meter, more than 32
+entries, an entry twice or the measurement itself; `not_found` for an entry naming no
+measurement or trace. Deleting a measurement or a trace drops it from every list (one
+more `measurement` change per list it was in); a session file's list is cut to what
+`meas.compare` takes and pruned of what is gone on load.
+
+`meas.offset` sets the display offset of the measurement's live curves, in dB: display
+only (its frames carry the measured levels), drawn wherever the curve is, compared into
+another measurement's panes too. It is `Measurement.offset`, kept in sessions and the
+autosave; the job, its averages and `config_rev` are untouched. `invalid` unless finite and
+within ±200 dB; a session file's that is not is 0 on load.
+
+`meas.eq` edits the measurement's EQ what-if sets (`Measurement.eq: [EqSet]`, transfer and
+sweep measurements; `docs/design/eq-overlay.md`); the job and `config_rev` are untouched.
+`EqEdit` (tagged by `type`): `new` {`name` \| nil (the next free `EQ n`), `realisation` \|
+nil (digital at the session rate), `peak_q` \| nil (`half_gain`), `sections`} — also
+predicts the live curve —, `put` {`set`, `body`: `EqBody`} (replaces what the set holds,
+`rev` + 1), `delete` {`set`} (its filter curve and predictions go with it), `mark` {`set`,
+`clear`} (snapshots the set as `in_console`, or clears it), `predict` {`set`, `curve`:
+`Operand` (`meas` = this measurement's live curve, or `trace` = one of its transfer
+traces), `on`} (creates or deletes the math channel `curve × EQ`), `copy` {`set`, `to`}.
+`EqSet` = {`id`: `EqSetId`, `rev`, `body`, `in_console`: `EqSnapshot` \| nil, `trace`: the
+set's filter curve, a locked transfer trace with `source.eq` {`meas`, `set`, `rev`} whose
+columns the daemon recomputes on every edit and load (`rev`: the set's rev they are of; a
+client refetches the data when it changes)}. `EqBody` = {`name`, `realisation`
+(`digital` {`rate`} \| `analog`), `peak_q`: `PeakQ` (`half_gain` \| `minus3db_from_peak` \|
+`band_pass`, the default reading of a peaking section's Q), `enabled`, `sections`:
+[`EqSection` {`enabled`, `shape`: `EqShape`}]}; `EqSnapshot` = {`set`, `rev`, `body`}.
+`EqShape` (tagged by `type`): `peaking` {`f`, `gain`, `bw`, `q_measured`: `PeakQ` \| nil},
+`low_shelf` / `high_shelf` {`f`, `gain`, `order`: `first` \| `second` {`slope`:
+`ShelfSlope`}, `f_at`: `midpoint` \| `corner`}, `high_pass` / `low_pass` {`f`,
+`alignment`: `butterworth` \| `linkwitz_riley` \| `bessel` {`norm`: `phase` \| `delay` \|
+`minus3db`}, `order`}, `high_pass_q` / `low_pass_q` {`f`, `q`}, `notch` / `band_pass` {`f`,
+`bw`}, `all_pass_1` {`f`}, `all_pass_2` {`f`, `q`}, `gain` {`gain`}, `polarity`, `delay`
+{`seconds`}, `biquad` {`b0`, `b1`, `b2`, `a1`, `a2`, `rate`}, `response` {`trace`}.
+`Bandwidth`: `q` {`value`} \| `octaves` {`n`}; `ShelfSlope`: `q` {`value`} \| `s` {`value`} \|
+`octaves` {`n`}. `invalid` with the section's number and reason for a refused section (f at
+or above fs/2, Q outside 0 … 100, gain beyond ±30 dB, an order the alignment lacks, an
+unstable biquad, a `response` naming no transfer trace…), for more than 8 sets or 64
+sections, and for a `predict` curve not of this measurement. A capture records the marked
+snapshots of its measurement in `TraceMeta.eq_in`; a math capture of a prediction records
+the set as it was (its columns contain it).
 
 `MeasConfig` = {`name`, `kind`, `scope`: `MeasScope`}. `scope` is `session` (the working
 session's: saved in session files, replaced by a load) or `rig` (the rig's, SPL meters only:
@@ -385,6 +448,17 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   no longer the tone level of that bin: frames say so (`SpecMeta.smoothing`) and clients
   label it. A density (`level: density`, below) is smoothed as a density: the kernel
   averages power per hertz.
+- **Spectrum and RTA display** (`SpectrumConfig.display`, `RtaConfig.display`:
+  `SpectrumDisplay`): how clients draw the measurement, kept with it so every client draws
+  it the same and a session file restores it. `style` (`SpectrumStyle`: `line` \| `fill` \|
+  `bars`; narrowband curves asked for `bars` draw as `line`), `peak` (`PeakMode`: `off` \|
+  `hold` \| `track`: clients draw a peak-hold curve they keep themselves, and with `track`
+  also mark and list the curve's highest peaks, found by themselves), `spectrograph_span_s` (u32: 10 \| 30 \| 60
+  \| 120, `invalid` otherwise) and `spectrograph_colours` (`Colormap`: `viridis` \| `magma`
+  \| `inferno` \| `cividis` \| `grey`). A configuration that differs only in `display`
+  (and the name) changes nothing the daemon computes: the job, its averages and the
+  measurement's `config_rev` stay as they are. A math channel on the spectrum pane draws
+  with its owner's display.
 - **SPL** (`SplConfig`): any change on the same `input` — `weighting`, `time_weighting`,
   `peak_weighting`, the Leq windows and peak limits (`leq: LeqConfig`), the measuring-position
   correction (`position`), the name — applies in place; the
@@ -404,9 +478,18 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   levels on one bin grid) or `rta` (`rta`, band powers on one band layout). Its `grid_id`
   is the published grid (a transfer result's is known before it runs; a spectrum's is the
   display grid of its operands' FFT, its capture every bin).
-  - `expr` (`MathExpr`, tagged by `type`): `binary` {`a`, `op`, `b`} or `average` {`of`:
-    2 … 16 distinct operands, `method` `power` \| `complex` \| `coherence_weighted`}. An
-    operand (`Operand`, tagged by `type`) is `meas` {`meas`} or `trace` {`trace`}.
+  - `expr` (`MathExpr`, tagged by `type`): `binary` {`a`, `op`, `b`}, `average` {`of`:
+    2 … 16 distinct operands, `method` `power` \| `complex` \| `coherence_weighted`} or
+    `align` {`a`, `b`, `band`: `AlignBand` {`lo`, `hi`} (Hz, 0 < `lo` < `hi`), `max_delay`
+    (Seconds, 0 < … ≤ 1)}. An operand (`Operand`, tagged by `type`) is `meas` {`meas`},
+    `trace` {`trace`} or `eq` {`meas`, `set`} (an EQ set: `B` of a transfer `multiply`
+    only; the set's response, or its change `H_now / H_in` when `A` recorded the set in
+    console — `TraceMeta.eq_in`, or the set's `in_console` for a live `A`).
+  - `align` (transfer only; `docs/design/alignment.md`): the delay and polarity that make
+    two systems add in their overlap `band`. Its frame's `math.align` holds the fit
+    (`AlignState`, §5.4) and the frame's `align_*` arrays the per-column curves; its `tf`
+    curve is the aligned sum `A + B` with the fit applied to the delayed one, phase
+    referred to A's delay, coherence none. Needs phase and one time base, as a sum does.
   - `op` (`MathOp`): `divide` (A ÷ B: A relative to B), `multiply` (A × B: the cascade),
     `add` (transfer: the complex sum, what A and B sum to acoustically; levels: the power
     sum `10·lg(10^{a/10} + 10^{b/10})`), `subtract` (transfer: the complex difference;
@@ -1116,7 +1199,7 @@ with the autosave (§7.3).
   `not_found`; `invalid` (not a session, bad name, damaged files or archive); `unsupported`
   with `detail: {type: session_version, found, supported}` for another format version.
 - `file.new`: guarded as `file.load`; deletes every session measurement and every trace
-  (generator disarmed, the audio session stays open, rig measurements stay); untitled.
+  (generator disarmed, the audio I/O stays open, rig measurements stay); untitled.
 - `file.recover`: swaps the working state with `working.recover` (which then holds the
   state it replaced, so a second recover undoes the first); `not_found` without one.
 - `file.salvage`: imports each `traces/*.csv` of the session — any format version — into
@@ -1397,10 +1480,11 @@ saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
 The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`, `stopped:
 AudioStopped | nil`; §4.1.1),
 `measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`, `colour`,
-`layout`),
+`layout`, `compared`, `offset`, `eq`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
-math | average | sweep}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
+math | average | sweep | eq}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`,
+`eq_in` ([`EqSnapshot`]: the EQ sets marked in the console when captured);
 `kind` one of
 `transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `ceiling_bound`, `last_action` {`action`: acquire
@@ -1536,8 +1620,8 @@ code from the previous column's (the first from 0), modulo 2¹⁶, as two planes
 high byte of every difference. Neighbouring columns of a curve are close, so the high plane
 is mostly 0x00 / 0xff and deflates to little.
 
-Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec) and
-`ir_etc` are `i16`; `coh` is `u16`; `ir_linear` is `bfp16`; bitmasks are `u32`;
+Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec),
+`ir_etc` and the `align_*` arrays are `i16`; `coh` is `u16`; `ir_linear` is `bfp16`; bitmasks are `u32`;
 everything else (meters, Leq and band Leq windows) is `f32`. Precision: `i16` is within
 0.005 dB or 0.005° of the value computed, `u16` within 5·10⁻⁵ of γ² — below the readouts
 (0.1 dB, 1°, 0.01) and, for a group delay fitted to the phase over 1/12 octave of
@@ -1592,7 +1676,7 @@ layout as code.
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*) |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column) | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
 | `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil) |
@@ -1630,7 +1714,16 @@ without a usable result: no valid column yet, or no answer in time), `refused`
 {`protection`: the operand's fault flags among `CLIP`, `NO_REFERENCE`, `CHECK_ROUTING`,
 `NO_SIGNAL`}, `mismatch` (does not combine with the others: another level scale, spectrum
 level (`tone` / `density`), grid or time base). A math channel's own `protection` is always 0: its operands' faults are in their
-statuses. A spectrum math result's live frame gathers its bins into display columns like a
+statuses. `align` (`AlignState` \| nil, an `align` expression's): `outcome` (tagged by
+`type`) `fit` {`fit`: `AlignFit`} or `no_fit` {`why`: `AlignNoFit`, tagged by `type`:
+`few_operands`, `few_columns` {`found`}, `no_weight`}. `AlignFit`: `best`,
+`other_polarity` (\| nil), `runner_up` (\| nil: another delay of the same polarity whose
+score is within 0.1 of the best — the band is too narrow to tell), `before`, `after`
+(`Summation` {`mean_db`, `worst_db`}: `20·lg(|A+B|/(|A|+|B|))` in the band, its weighted
+mean and minimum, before and after the suggestion) and `columns`. `AlignCandidate`:
+`delay` (Seconds ≥ 0), `delayed` (`a` \| `b`: the one to delay), `inverted` (its polarity
+flipped), `residual_deg` (weighted RMS of the remaining phase difference) and `score`
+(weighted mean cosine of it, −1 … 1). A spectrum math result's live frame gathers its bins into display columns like a
 spectrum's, each the highest value among its bins (a level difference: the largest in the
 column; the mean power for a density result, as a density spectrum's); its capture keeps
 every bin. Its `level` is its operands'.
@@ -1774,7 +1867,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 25, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 28, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
 ColourFamily | null, layout: PaneLayout | null}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
@@ -1814,7 +1907,7 @@ daemon crash the last 30 s.
 
 At start the daemon loads `<dir>/session.json` (else `session.prev.json`, renaming a
 damaged `session.json` to `session.damaged.json`) exactly as `file.load` does — disarmed,
-no owner, a new session epoch, no audio session opened — logs what it restored, and carries
+no owner, a new session epoch, no audio I/O opened — logs what it restored, and carries
 on appending to the restored logs' files after their last whole line. An autosave of
 another session format version is renamed to `<dir>.v<N>`, an unreadable one to
 `<dir>.damaged` (a name taken gets the time appended), with a warning; neither is deleted.

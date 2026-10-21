@@ -254,7 +254,7 @@ fn leq_view<'a>(
         cal: spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now),
         cfg,
         tiles,
-        history: st.leq_history.get(&m.id).map(|(_, h)| h),
+        history: st.leq.history.get(&m.id).map(|(_, h)| h),
         stale: match fresh {
             Freshness::Stale { age_s } => Some(format!("STALE {}", format::age(age_s))),
             Freshness::Stopped { .. } => Some("STOPPED".into()),

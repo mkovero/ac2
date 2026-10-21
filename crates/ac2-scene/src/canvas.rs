@@ -7,7 +7,7 @@ use crate::primitives::{
     Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
-use crate::view::PlotChrome;
+use crate::view::Style;
 
 /// Layer order: base (backgrounds, grids, axis labels) → data (traces) → overlay (cursor,
 /// legend, readouts) → banners (in their own strip above the plots, drawn last).
@@ -124,7 +124,6 @@ pub(crate) fn cut_to(text: &str, width: f32, font: f32) -> String {
 /// Plot background, grid from both axes' ticks, y labels left of the plot, x labels below
 /// it when `x_labels`, and the y-axis title inside the top-left corner; `chrome` leaves out
 /// the grid, or the grid, the labels and the title.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn pane_frame(
     c: &mut Canvas,
     plot: Rect,
@@ -132,11 +131,10 @@ pub(crate) fn pane_frame(
     y: &Axis,
     x_labels: bool,
     title: &str,
-    chrome: PlotChrome,
-    theme: &Theme,
+    style: Style,
 ) {
     let at = [plot.x + 6.0, plot.y + 4.0];
-    pane_frame_at(c, plot, x, y, x_labels, title, at, chrome, theme);
+    pane_frame_at(c, plot, x, y, x_labels, title, at, style);
 }
 
 /// [`pane_frame`] with the title's top-left at `title_at`.
@@ -149,9 +147,9 @@ pub(crate) fn pane_frame_at(
     x_labels: bool,
     title: &str,
     title_at: [f32; 2],
-    chrome: PlotChrome,
-    theme: &Theme,
+    style: Style,
 ) {
+    let Style { chrome, theme } = style;
     c.base.rects.push(FillRect {
         rect: plot,
         color: theme.plot_background,
@@ -243,6 +241,19 @@ pub(crate) fn vline(layer: &mut Layer, plot: Rect, x: f32, stroke: Stroke) {
             stroke,
             clip: Some(plot),
         });
+    }
+}
+
+/// The cursor mark's line: the cursor's colour, dashed so the two never read as one
+/// another.
+pub(crate) fn mark_stroke(theme: &Theme) -> Stroke {
+    Stroke {
+        dash: Some(crate::primitives::Dash {
+            on: 4.0,
+            off: 3.0,
+            offset: 0.0,
+        }),
+        ..theme.cursor
     }
 }
 

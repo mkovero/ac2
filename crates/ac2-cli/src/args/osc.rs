@@ -7,7 +7,7 @@ use ac2_proto::model::{DmxSet, OscArg, OscMessage, OscPath, PeakQuantity, parse_
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::MeasRef;
-use crate::units::{BandNominalArg, LeqWindowArg, UnitError};
+use ac2_scene::unit_text::{BandNominalArg, LeqWindowArg, UnitError};
 
 /// `osc …`.
 #[derive(Debug, Subcommand)]

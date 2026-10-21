@@ -5,17 +5,19 @@ use std::io::{self, Write};
 use ac2_proto::GridDef;
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
-    ClockRelation, DelayReference, DepthPolicy, LevelScale, MeasKind, Measurement, Mic,
-    PeakWeighting, Polarity, RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile,
-    SmoothingFraction, SmoothingMode, State, TimeWeighting, TimingState, TimingStatus, TraceData,
-    TraceKind, TraceMeta, TraceSource, Weighting,
+    ClockRelation, DelayReference, DepthPolicy, MeasKind, Measurement, Mic, PeakMode, Polarity,
+    RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile, SmoothingFraction,
+    SmoothingMode, State, TimingState, TimingStatus, TraceData, TraceMeta, TraceSource,
 };
 use ac2_proto::units::WallNs;
 use ac2_scene::format;
 use comfy_table::{Table, presets};
 use serde::Serialize;
 
-use crate::units::channels_text;
+use ac2_scene::unit_text::channels_text;
+
+mod trace_out;
+pub use trace_out::{trace_columns, trace_meta, traces};
 
 /// Output sink.
 pub struct Out<'a> {
@@ -84,54 +86,6 @@ pub fn ms(seconds: f64) -> String {
     format::ms(seconds, 2)
 }
 
-/// `−20.0 dBFS`.
-pub fn dbfs(v: f64) -> String {
-    let s = format::level(v);
-    if s == format::NO_VALUE {
-        s
-    } else {
-        format!("{s} dBFS")
-    }
-}
-
-/// Level with its scale's unit.
-pub fn level(v: f64, scale: LevelScale) -> String {
-    let s = format::level(v);
-    if s == format::NO_VALUE {
-        return s;
-    }
-    match scale {
-        LevelScale::Dbfs => format!("{s} dBFS"),
-        LevelScale::DbSpl => format!("{s} dB SPL"),
-    }
-}
-
-/// `A`, `C`, `Z`.
-pub fn weighting(w: Weighting) -> &'static str {
-    match w {
-        Weighting::A => "A",
-        Weighting::C => "C",
-        Weighting::Z => "Z",
-    }
-}
-
-/// `F`, `S`, `I`.
-pub fn time_weighting(t: TimeWeighting) -> &'static str {
-    match t {
-        TimeWeighting::Fast => "F",
-        TimeWeighting::Slow => "S",
-        TimeWeighting::Impulse => "I",
-    }
-}
-
-/// `C`, `Z`.
-pub fn peak_weighting(p: PeakWeighting) -> &'static str {
-    match p {
-        PeakWeighting::C => "C",
-        PeakWeighting::Z => "Z",
-    }
-}
-
 /// ` · avg FIFO 16 frames`, as the measurement list in the app says it; nothing when off.
 fn spec_averaging(a: ac2_proto::model::SpecAveraging) -> String {
     match a {
@@ -161,14 +115,14 @@ pub fn meas_kind(k: &MeasKind) -> String {
             "rta 1/{} oct in {} ({}){}",
             config.fraction.b(),
             config.input + 1,
-            weighting(config.weighting),
+            config.weighting.letter(),
             spec_averaging(config.averaging)
         ),
         MeasKind::Spl { config } => format!(
             "spl in {} (L{}{})",
             config.input + 1,
-            weighting(config.weighting),
-            time_weighting(config.time_weighting)
+            config.weighting.letter(),
+            config.time_weighting.letter()
         ),
         MeasKind::Math { config } => {
             let what = match config.domain {
@@ -179,12 +133,17 @@ pub fn meas_kind(k: &MeasKind) -> String {
             let e = ac2_scene::math::expression(&config.expr, |o| match o {
                 ac2_proto::model::Operand::Meas { meas } => format!("#{meas}"),
                 ac2_proto::model::Operand::Trace { trace } => format!("trace {trace}"),
+                ac2_proto::model::Operand::Eq { set, .. } => format!("EQ {}", set.0),
             });
             match &config.expr {
                 ac2_proto::model::MathExpr::Average { method, .. } => {
-                    format!("{what} math: {} {e}", average_method(*method))
+                    format!("{what} math: {} {e}", method.label())
                 }
                 ac2_proto::model::MathExpr::Binary { .. } => format!("{what} math: {e}"),
+                ac2_proto::model::MathExpr::Align { band, .. } => format!(
+                    "{what} alignment: {e} over {}",
+                    ac2_scene::align::band_text(*band)
+                ),
             }
         }
         MeasKind::Sweep { config } => format!(
@@ -195,8 +154,8 @@ pub fn meas_kind(k: &MeasKind) -> String {
             format::freq_readout(config.sweep.end.0),
             format::fixed(config.sweep.duration.0, 1),
             config.repeats,
-            dbfs(config.level.0),
-            crate::units::channels_text(&config.outputs)
+            format::dbfs(config.level.0),
+            ac2_scene::unit_text::channels_text(&config.outputs)
         ),
     }
 }
@@ -206,15 +165,6 @@ pub fn owner_text(o: ac2_proto::model::TraceOwner) -> String {
     match o {
         ac2_proto::model::TraceOwner::Meas { meas } => format!("#{meas}"),
         ac2_proto::model::TraceOwner::Imported => "imported".into(),
-    }
-}
-
-/// `power`, `complex`, `coherence-weighted`.
-pub fn average_method(m: ac2_proto::model::AverageMethod) -> &'static str {
-    match m {
-        ac2_proto::model::AverageMethod::Power => "power",
-        ac2_proto::model::AverageMethod::Complex => "complex",
-        ac2_proto::model::AverageMethod::CoherenceWeighted => "coherence-weighted",
     }
 }
 
@@ -261,6 +211,40 @@ pub fn measurement(m: &Measurement) -> String {
     }
     if let Some(l) = &m.layout {
         s.push_str(&format!("  {}", format::own_panes(l.panes().len())));
+        // Panes numbered in reading order, as the app numbers them.
+        for (i, p) in l.panes().iter().enumerate() {
+            let mut said = Vec::new();
+            if let Some(id) = p.meas.filter(|id| *id != m.id) {
+                said.push(format!("shows {id}"));
+            }
+            if !p.levels.is_empty() {
+                said.push("level axis set".to_owned());
+            }
+            if p.plates != Default::default() {
+                said.push("plates moved".to_owned());
+            }
+            if !said.is_empty() {
+                s.push_str(&format!(" · pane {}: {}", i + 1, said.join(", ")));
+            }
+        }
+    }
+    if let Some(d) = m.config.kind.display() {
+        s.push_str(&format!(
+            "  {}{} · spectrograph {} s {}",
+            d.style.name(),
+            match d.peak {
+                PeakMode::Off => String::new(),
+                p => format!(", {}", p.name()),
+            },
+            d.spectrograph_span_s,
+            d.spectrograph_colours.name()
+        ));
+    }
+    if m.offset.0 != 0.0 {
+        s.push_str(&format!("  offset {}", format::db_readout(m.offset.0)));
+    }
+    if !m.compared.is_empty() {
+        s.push_str(&format!("  {} compared", m.compared.len()));
     }
     s
 }
@@ -372,10 +356,10 @@ pub fn log_failures(a: &Autosave, measurements: &[Measurement], now: WallNs) -> 
 
 pub fn session(s: &Session) -> String {
     match &s.open {
-        None => format!("session closed (epoch {})", s.epoch),
+        None => format!("audio I/O closed (epoch {})", s.epoch),
         Some(o) => match &o.replay {
             Some(r) => format!(
-                "session open (epoch {}): replaying {} ({:?})\n  file   {}\n  input  {} ch {}\n  rate   {}  {} recorded",
+                "audio I/O open (epoch {}): replaying {} ({:?})\n  file   {}\n  input  {} ch {}\n  rate   {}  {} recorded",
                 s.epoch,
                 r.name,
                 r.pace,
@@ -387,7 +371,7 @@ pub fn session(s: &Session) -> String {
             ),
             None => {
                 format!(
-                    "session open (epoch {})\n  input  {} ch {}\n  output {} × {}{}\n  rate   {}  buffer {} samples",
+                    "audio I/O open (epoch {})\n  input  {} ch {}\n  output {} × {}{}\n  rate   {}  buffer {} samples",
                     s.epoch,
                     o.input_device.0,
                     channels_text(&o.config.input_channels),
@@ -478,225 +462,6 @@ pub fn recordings(l: &[RecordingFile]) -> String {
     t.to_string()
 }
 
-fn source_text(s: &TraceSource) -> String {
-    match s {
-        TraceSource::Captured {
-            meas, meas_name, ..
-        } => format!("captured from {meas_name} ({meas})"),
-        TraceSource::Imported { file_name, .. } => format!("imported {file_name}"),
-        TraceSource::Math {
-            meas_name,
-            expr,
-            operands,
-            ..
-        } => format!(
-            "math {meas_name}: {}",
-            ac2_scene::math::expression(expr, |o| operands
-                .iter()
-                .find(|n| n.operand == o)
-                .map_or_else(|| "?".to_owned(), |n| n.name.clone()))
-        ),
-        TraceSource::Average { traces, method, .. } => {
-            let m = average_method(*method);
-            format!(
-                "{m} average of {}",
-                traces
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        }
-        TraceSource::Sweep {
-            meas_name, number, ..
-        } => format!("run {number} of {meas_name}"),
-    }
-}
-
-fn kind_text(k: TraceKind) -> &'static str {
-    match k {
-        TraceKind::Transfer => "transfer",
-        TraceKind::Target => "target",
-        TraceKind::Spectrum {
-            level: ac2_proto::model::SpecLevel::Tone,
-            ..
-        } => "spectrum",
-        TraceKind::Spectrum {
-            level: ac2_proto::model::SpecLevel::Density,
-            ..
-        } => "spectrum density",
-        TraceKind::Rta { .. } => "rta",
-        TraceKind::Sweep => "sweep",
-    }
-}
-
-/// Traces table.
-pub fn traces(t_: &[TraceMeta]) -> String {
-    let mut t = table(&[
-        "id",
-        "under",
-        "slot",
-        "name",
-        "kind",
-        "source",
-        "delay",
-        "time base",
-        "shown",
-    ]);
-    for tr in t_ {
-        t.add_row(vec![
-            tr.id.to_string(),
-            owner_text(tr.edit.owner),
-            tr.edit.slot.map(|s| s.to_string()).unwrap_or_default(),
-            tr.edit.name.clone(),
-            kind_text(tr.kind).to_owned(),
-            source_text(&tr.source),
-            ms(tr.delay.0),
-            time_base(&tr.source).to_owned(),
-            yes(tr.edit.visible),
-        ]);
-    }
-    t.to_string()
-}
-
-fn time_base(s: &TraceSource) -> &'static str {
-    if s.shared_epoch().is_some() {
-        "shared"
-    } else {
-        "indep."
-    }
-}
-
-/// Every metadata field of one trace.
-pub fn trace_meta(t: &TraceMeta) -> String {
-    let smoothing = match t.edit.smoothing {
-        None => "none".to_owned(),
-        Some(s) => {
-            let f = match s.fraction {
-                SmoothingFraction::Third => 3,
-                SmoothingFraction::Sixth => 6,
-                SmoothingFraction::Twelfth => 12,
-                SmoothingFraction::TwentyFourth => 24,
-                SmoothingFraction::FortyEighth => 48,
-            };
-            let m = match s.mode {
-                SmoothingMode::Magnitude => "magnitude",
-                SmoothingMode::MagnitudePhase => "magnitude and phase",
-            };
-            format!("1/{f} octave, {m}")
-        }
-    };
-    let depth = match t.depth {
-        None => "—".to_owned(),
-        Some(DepthPolicy::EqualConfidence) => "equal confidence".to_owned(),
-        Some(DepthPolicy::FastLf { max_settle_s }) => {
-            format!("fast LF (≤ {} s)", format::fixed(max_settle_s.0, 1))
-        }
-    };
-    let cal = match &t.cal {
-        CalState::Uncalibrated => "uncalibrated".to_owned(),
-        CalState::Calibrated {
-            key, sensitivity, ..
-        } => format!(
-            "{} in {} mic {}, sensitivity {}",
-            key.device.0,
-            u32::from(key.channel) + 1,
-            key.mic,
-            format::db_readout(sensitivity.0)
-        ),
-    };
-    let mic = ac2_scene::trace::mic_text(t.mic.as_ref(), t.mic_curve.as_deref());
-    let notes: String = match &t.source {
-        TraceSource::Imported { notes, ir_file, .. } => ir_file
-            .iter()
-            .map(|f| format!("\n  file        {}", ac2_scene::trace::ir_file_text(f)))
-            .chain(
-                notes
-                    .iter()
-                    .map(|n| format!("\n  note        {}", ac2_scene::trace::import_note(*n))),
-            )
-            .collect(),
-        _ => String::new(),
-    };
-    let reference = match &t.source {
-        TraceSource::Average {
-            reference: DelayReference::Trace { trace },
-            ..
-        } => format!("\n  phase ref   delay of trace {trace}"),
-        TraceSource::Average {
-            reference: DelayReference::Fixed { delay },
-            ..
-        } => format!("\n  phase ref   {}", ms(delay.0)),
-        _ => String::new(),
-    };
-    let epoch = match &t.source {
-        TraceSource::Captured {
-            epoch, at_sample, ..
-        }
-        | TraceSource::Math {
-            epoch, at_sample, ..
-        } => format!("\n  epoch       {} (sample {})", epoch.0, at_sample.0),
-        TraceSource::Sweep { epoch, .. } => format!("\n  epoch       {}", epoch.0),
-        _ => String::new(),
-    };
-    format!(
-        "trace {} {:?}{}\n  under       {}\n  kind        {}\n  source      {}\n  time base   {}{epoch}\n  delay       {}{reference}\n  from arrival {}\n  polarity    {}\n  offset      {}\n  smoothing   {smoothing}\n  depth       {depth}\n  cal         {cal}\n  mic         {mic}\n  shown       {}{}\n  created     {} ns{notes}",
-        t.id,
-        t.edit.name,
-        t.edit
-            .slot
-            .map_or_else(String::new, |s| format!(" (slot {s})")),
-        owner_text(t.edit.owner),
-        kind_text(t.kind),
-        source_text(&t.source),
-        time_base(&t.source),
-        ms(t.delay.0),
-        format::arrival_offset(t.edit.delay_nudge.0),
-        match t.edit.polarity {
-            Polarity::Normal => "normal",
-            Polarity::Inverted => "inverted",
-        },
-        format::db_readout(t.edit.offset.0),
-        yes(t.edit.visible),
-        if t.edit.locked { ", locked" } else { "" },
-        t.created_at.0
-    )
-}
-
-/// A trace's columns.
-pub fn trace_columns(d: &TraceData, g: &GridDef) -> String {
-    let f = ac2_scene::grid::column_frequencies(g);
-    let mut head = vec!["freq", "mag"];
-    if d.phase_deg.is_some() {
-        head.push("phase");
-    }
-    if d.coherence.is_some() {
-        head.push("γ²");
-    }
-    let mut t = table(&head);
-    let num = |v: f32, dec: usize| {
-        if v.is_finite() {
-            format::fixed(f64::from(v), dec)
-        } else {
-            "—".to_owned()
-        }
-    };
-    for (i, hz) in f.iter().enumerate() {
-        let mut row = vec![
-            format::freq_readout(*hz),
-            num(d.mag_db.get(i).copied().unwrap_or(f32::NAN), 2),
-        ];
-        if let Some(p) = &d.phase_deg {
-            row.push(num(p.get(i).copied().unwrap_or(f32::NAN), 1));
-        }
-        if let Some(c) = &d.coherence {
-            row.push(num(c.get(i).copied().unwrap_or(f32::NAN), 3));
-        }
-        t.add_row(row);
-    }
-    t.to_string()
-}
-
 /// Saved sessions table.
 pub fn sessions(l: &[SessionFile]) -> String {
     if l.is_empty() {
@@ -722,20 +487,11 @@ pub fn local_offset_s(t: ac2_proto::units::WallNs) -> i32 {
     Local.timestamp_nanos(ns).offset().fix().local_minus_utc()
 }
 
-/// `YYYY-MM-DD hh:mm` UTC of Unix nanoseconds (civil-from-days, proleptic Gregorian).
+/// `YYYY-MM-DD hh:mm` UTC of Unix nanoseconds.
 pub fn utc(ns: u64) -> String {
     let secs = ns / 1_000_000_000;
-    let days = i64::try_from(secs / 86_400).unwrap_or(0);
+    let (y, m, d) = ac2_proto::spl_log::civil_from_days(i64::try_from(secs / 86_400).unwrap_or(0));
     let rem = secs % 86_400;
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
     format!(
         "{y:04}-{m:02}-{d:02} {:02}:{:02}",
         rem / 3600,
@@ -763,7 +519,7 @@ pub fn calibrations(c: &[CalEntry]) -> String {
             format::db_readout(e.spl.sensitivity.0),
             ac2_scene::cal::method_cell(e),
             ac2_scene::cal::uncertainty_cell(e),
-            dbfs(e.spl.measured.0),
+            format::dbfs(e.spl.measured.0),
             utc(e.spl.calibrated_at.0),
         ]);
     }
@@ -937,86 +693,4 @@ pub fn timing(t: &TimingStatus, rate: Option<u32>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn autosave_line() {
-        const S: u64 = 1_000_000_000;
-        let now = WallNs(1_000 * S);
-        let a = |state, saved_at: Option<u64>| Autosave {
-            state,
-            saved_at: saved_at.map(WallNs),
-            log_failures: Vec::new(),
-        };
-        assert_eq!(
-            autosave(&a(AutosaveState::Off, None), now),
-            "autosave     off"
-        );
-        assert_eq!(
-            autosave(&a(AutosaveState::Saved, Some(400 * S)), now),
-            "autosave     autosaved 10 min ago"
-        );
-        assert_eq!(
-            autosave(&a(AutosaveState::Pending, None), now),
-            "autosave     saving…"
-        );
-        let reason = "x".repeat(100);
-        assert_eq!(
-            autosave(
-                &a(
-                    AutosaveState::Failed {
-                        reason: reason.clone()
-                    },
-                    None
-                ),
-                now
-            ),
-            format!("autosave     FAILED: {reason}")
-        );
-    }
-
-    #[test]
-    fn log_failure_lines() {
-        use ac2_proto::model::{LogWriteFailure, MeterLog};
-        const S: u64 = 1_000_000_000;
-        let now = WallNs(1_000 * S);
-        let mut a = Autosave {
-            state: AutosaveState::Saved,
-            saved_at: None,
-            log_failures: Vec::new(),
-        };
-        assert!(log_failures(&a, &[], now).is_empty());
-        a.log_failures.push(LogWriteFailure {
-            meas: ac2_proto::units::MeasId(3),
-            log: MeterLog::Bands,
-            reason: "disk full".into(),
-            since: WallNs(400 * S),
-        });
-        assert_eq!(
-            log_failures(&a, &[], now),
-            ["log          NOT SAVED: band log of measurement 3 not saved for 10 min: disk full"]
-        );
-    }
-
-    #[test]
-    fn damaged_file_lines() {
-        use ac2_proto::model::{DamagedFile, Rig, StateFile};
-        let mut rig = Rig::default();
-        assert!(damaged_files(&rig).is_empty());
-        rig.damaged_files.push(DamagedFile {
-            kind: StateFile::Calibrations,
-            path: "/c/calibrations.json".into(),
-            set_aside_as: Some("/c/calibrations.json.damaged-5".into()),
-            reason: "expected value; started without it".into(),
-            at: WallNs(0),
-        });
-        assert_eq!(
-            damaged_files(&rig),
-            [
-                "damaged      calibrations calibrations.json damaged: expected value; started \
-              without it; set aside as calibrations.json.damaged-5"
-            ]
-        );
-    }
-}
+mod tests;

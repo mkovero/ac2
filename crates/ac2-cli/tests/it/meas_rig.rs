@@ -74,7 +74,7 @@ async fn meas_new_start_on_an_uncaptured_input_creates_nothing() {
     let (code, e) = ac2(&ep, &tf("TF 2", true)).await;
     assert_eq!(code, 1, "{e}");
     assert_eq!(
-        e["error"]["msg"], "input 5 is not captured by the session",
+        e["error"]["msg"], "input 5 is not captured by the audio I/O",
         "{e}"
     );
     assert_eq!(ok(&ep, &["meas", "list"]).await, before);

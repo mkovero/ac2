@@ -193,7 +193,7 @@ impl Control {
 
         // Then the train, under the lease gate like any stimulus.
         let deadline = Instant::now() + self.s.lease_expiry;
-        if let Some(l) = &mut self.lease {
+        if let Some(l) = &mut self.out.lease {
             l.deadline = deadline;
         }
         let Some(rt) = self.session.as_mut() else {
@@ -203,11 +203,11 @@ impl Control {
             rt.set_routes(&req.outputs)?;
             let train =
                 SweepTrain::new(sweeps, timing.sweep_samples(), timing.post_roll_samples(fs));
-            self.gate.open_until(deadline);
+            self.out.gate.open_until(deadline);
             rt.gen_handle
                 .set_source(Box::new(LeasedSource::new(
                     Box::new(train),
-                    Arc::clone(&self.gate),
+                    Arc::clone(&self.out.gate),
                 )))
                 .map_err(|e| perr(ErrorCode::Internal, e.to_string()))?;
             rt.gen_handle.set_gain(Gain::UNITY);
@@ -221,8 +221,8 @@ impl Control {
             return Err(e);
         }
         // The train is no level-controlled generator: a later fire builds its own source.
-        self.level = None;
-        self.source = None;
+        self.out.level = None;
+        self.out.source = None;
 
         let mut g = self.store.state().generator.clone();
         g.firing = true;
@@ -423,6 +423,7 @@ impl Control {
             mic: active.mic.clone(),
             mic_curve: active.mic_curve.as_ref().map(|(m, _)| m.clone()),
             created_at: WallNs(wall_ns()),
+            eq_in: self.eq_in_live(run.meas),
         };
         tracing::info!(
             "sweep {} stored as trace {tid}: arrival {:.3} ms, reference {:+.1} dB{}",

@@ -178,6 +178,19 @@ def verify_bound(ctx: Ctx, want: float) -> dict:
     return c
 
 
+def _session_fits(st: dict, session_open: list) -> bool:
+    """True when the open session has the outputs and loopback `session_open` asks for. A
+    restarted ac2d with a rig monitor reopens capture-only (no outputs, no loopback): open,
+    but it cannot play a sweep."""
+    cfg = ((st.get("session") or {}).get("open") or {}).get("config")
+    if not cfg:
+        return False
+    args = list(map(str, session_open))
+    if "--outputs" in args and cfg.get("output_channels", 0) < int(args[args.index("--outputs") + 1]):
+        return False
+    return not ("--loopback-out" in args and not cfg.get("loopback"))
+
+
 def ensure_session(ctx: Ctx, deadline: float = 30.0):
     t0 = time.monotonic()
     while True:
@@ -188,7 +201,7 @@ def ensure_session(ctx: Ctx, deadline: float = 30.0):
             if time.monotonic() - t0 > deadline:
                 raise
             time.sleep(1.0)
-    if not (st.get("session") or {}).get("open"):
+    if not _session_fits(st, ctx.rig["ac2"]["session_open"]):
         ctx.ac2.run(*ctx.rig["ac2"]["session_open"], json_out=False)
         st = ctx.ac2.status() or {}
     return st

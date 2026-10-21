@@ -140,14 +140,14 @@ pub fn recording_label(r: &RecordingRun, input_name: impl Fn(u16) -> String) -> 
                     "the size limit was reached",
                 ),
                 RecordingEnd::SessionClosed => (
-                    format!("{saved} (session closed)"),
+                    format!("{saved} (audio I/O closed)"),
                     RecordingTone::Quiet,
-                    "the audio session closed",
+                    "the audio I/O closed",
                 ),
                 RecordingEnd::SessionReopened => (
-                    format!("{saved} (session reopened)"),
+                    format!("{saved} (audio I/O reopened)"),
                     RecordingTone::Warning,
-                    "the audio session reopened (device or configuration change)",
+                    "the audio I/O reopened (device or configuration change)",
                 ),
                 RecordingEnd::AudioStopped => (
                     format!("{saved} (audio stopped)"),

@@ -27,6 +27,9 @@ pub(crate) fn tf(id: u32, name: &str) -> Measurement {
         grid_id: None,
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
     }
 }
 
@@ -52,7 +55,7 @@ fn rows_say_a_measurement_has_its_own_panes() {
         "TF  TF 2\n     running · 2 own panes"
     );
     m.layout = Some(ac2_proto::model::PaneLayout::Pane {
-        pane: *ac2_proto::samples::pane_layout().panes()[0],
+        pane: Box::new(*ac2_proto::samples::pane_layout().panes()[0]),
     });
     assert!(
         meas_row(&item(&m), None, true)
@@ -109,7 +112,7 @@ fn tf_rows_say_a_resolution_other_than_the_default() {
     let smoothing = format::smoothing(config.smoothing);
     assert_eq!(
         meas_row(&item(&m), None, true).text,
-        format!("TF  Room\n     running · res 1/96 oct · {smoothing}")
+        format!("TF  Room\n     running · resolution 1/96 oct · {smoothing}")
     );
 }
 
@@ -211,10 +214,7 @@ fn delete_asks_and_a_math_operand_refuses() {
             "Its live curve and settings go; it owns no stored traces."
         ]
     );
-    assert_eq!(
-        c.hint,
-        "Delete, Backspace or Enter deletes it · Esc or N keeps it"
-    );
+    assert_eq!(c.hint, "Delete or Backspace deletes it · Esc or N keeps it");
     assert!(!c.refused);
     let r = delete_refused(&m, &["Avg".to_owned()]);
     assert_eq!(r.title, "TF 2 cannot be deleted");
@@ -295,6 +295,7 @@ pub(crate) fn trace(id: u32, name: &str, owner: TraceOwner, source: TraceSource)
         mic: None,
         mic_curve: None,
         created_at: WallNs(0),
+        eq_in: Vec::new(),
     }
 }
 

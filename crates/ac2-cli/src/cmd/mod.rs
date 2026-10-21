@@ -1,5 +1,6 @@
 //! Command implementations.
 
+mod align;
 mod artnet;
 mod auth;
 mod bands;
@@ -8,6 +9,7 @@ mod daemon;
 mod delay;
 mod devsel;
 mod discover;
+mod eq;
 mod gen_;
 mod ir;
 mod leq;
@@ -44,6 +46,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Gen { cmd } => gen_::run(cli, cmd, out).await,
         Cmd::Meas { cmd } => meas::meas(cli, cmd, out).await,
         Cmd::Math { cmd } => math::run(cli, cmd, out).await,
+        Cmd::Align { cmd } => align::run(cli, cmd, out).await,
         Cmd::Delay { cmd } => delay::delay(cli, cmd, out).await,
         Cmd::Spl { cmd } => readouts::spl(cli, cmd, out).await,
         Cmd::Cal { cmd } => cal::run(cli, cmd, out).await,

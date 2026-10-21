@@ -295,7 +295,7 @@ Where the code settles an open point of §3 or departs from it, and why.
   under the operator without saying so would make every reading after it silently
   different; refusing to follow it would leave the rig dead until a client noticed.
 - **Control panel.** `session.control_panel` (`ac2 session panel`, **P** in Settings ›
-  Audio & I/O) calls `ASIOControlPanel` on the `ac2-asio` thread: on the stream's own
+  Audio I/O) calls `ASIOControlPanel` on the `ac2-asio` thread: on the stream's own
   driver while a session runs, otherwise on a driver loaded for it, which stays loaded
   (its panel may be a window of that instance) until a stream or a listing needs the
   process's one driver. Another driver than the running stream's is refused. A modal panel

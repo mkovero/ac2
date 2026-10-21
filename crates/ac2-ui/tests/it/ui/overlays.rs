@@ -33,6 +33,7 @@ fn software_rendering_is_said() {
         .state()
         .state
         .toasts
+        .list
         .iter()
         .map(|t| t.text.clone())
         .collect();
@@ -51,7 +52,7 @@ fn toasts_wrap_and_stack() {
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     let reply = |what: &str, result: Result<(), String>| {
         ac2_ui::state::Msg::Conn(Box::new(ac2_ui::conn::ConnEvent::Reply {
             what: what.into(),
@@ -65,6 +66,7 @@ fn toasts_wrap_and_stack() {
     step_until(&mut h, "the warning", |a| {
         a.state
             .toasts
+            .list
             .iter()
             .any(|t| t.severity == Severity::Warning)
     });
@@ -76,6 +78,7 @@ fn toasts_wrap_and_stack() {
         .state()
         .state
         .toasts
+        .list
         .iter()
         .map(|t| t.text.clone())
         .collect();
@@ -83,7 +86,7 @@ fn toasts_wrap_and_stack() {
     // Pinned up: they expire on the wall clock. A few passes so egui has measured the
     // areas of places in the stack it had not drawn before.
     for _ in 0..3 {
-        for t in &mut h.state_mut().state.toasts {
+        for t in &mut h.state_mut().state.toasts.list {
             t.until_s = f64::from(u32::MAX);
         }
         h.step();
@@ -92,16 +95,16 @@ fn toasts_wrap_and_stack() {
         &mut h,
         "toasts_stacked",
         |a| {
-            for t in &mut a.state.toasts {
+            for t in &mut a.state.toasts.list {
                 t.until_s = f64::from(u32::MAX);
             }
         },
-        |a| a.state.toasts.len() == 3,
+        |a| a.state.toasts.list.len() == 3,
     );
     // A click on the newest dismisses it; the log still has all three.
     let newest = texts[2].clone();
     h.get_by_label(&newest).click();
-    step_until(&mut h, "dismissed", |a| a.state.toasts.len() == 2);
+    step_until(&mut h, "dismissed", |a| a.state.toasts.list.len() == 2);
     assert_eq!(h.state().state.notices.len(), 3);
 }
 
@@ -269,7 +272,7 @@ fn calibrations_view() {
     step_until(&mut h, "calibrations view", |a| {
         a.state.overlay.cal().is_some()
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "settings_calibration");
     // C on the mic's input: the acoustic calibration dialog, the mic prefilled.
     for _ in 0..8 {
@@ -292,7 +295,7 @@ fn calibrations_view() {
     step_until(&mut h, "the acoustic dialog", |a| {
         a.state.overlay.cal().is_some_and(|v| v.acoustic.is_some())
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "acoustic_calibration_dialog");
 }
 
@@ -320,7 +323,7 @@ fn ambiguous_delay_candidate_list() {
         Some((ac2_proto::model::FinderBand::Auto, None))
     );
     // Toasts expire on the wall clock; the snapshot shows the list and the plots.
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "delay_pick_candidates");
     // 2 inserts the second candidate (12.7 ms) and resolves the finding.
@@ -415,7 +418,7 @@ fn the_stage_view_stays_the_pane_while_firing() {
         a.state.stage_view() && a.state.layout.focus_kind() == PaneKind::Transfer
     });
     let quiet = |h: &mut Harness<'_, App>| {
-        h.state_mut().state.toasts.clear();
+        h.state_mut().state.toasts.list.clear();
         h.step();
     };
     quiet(&mut h);
@@ -455,7 +458,7 @@ fn panes_only_full_screen() {
     step_until(&mut h, "panes only", |a| {
         a.state.stage_view() && !a.state.layout.maximized && a.state.layout.panes().len() > 1
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "panes_only");
 }

@@ -195,10 +195,10 @@ fn leq_tiles_from_an_empty_daemon() {
             && a.state.input_meters().len() == 4
     });
     h.key_press(Key::Enter);
-    step_until(&mut h, "session open", |a| a.state.open_session().is_some());
-    if matches!(h.state().state.overlay, Overlay::Offer(_)) {
-        h.key_press(Key::N);
-    }
+    step_until(&mut h, "session open, the New measurement chooser", |a| {
+        a.state.open_session().is_some() && new_meas_chooser(a)
+    });
+    h.key_press(Key::Escape);
     step_until(&mut h, "no dialog", |a| a.state.overlay == Overlay::None);
 
     // An SPL meter from the palette: Ctrl+K, "new spl", Enter, Enter.
@@ -262,7 +262,7 @@ fn leq_tiles_from_an_empty_daemon() {
         })
     });
     h.event(Event::PointerGone);
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "settings_leq");
     // ↑ to the preset row, → to the French preset for children (its two windows, the
@@ -368,6 +368,7 @@ fn leq_tiles_from_an_empty_daemon() {
     step_until(&mut h, "the alarms toasted", |a| {
         a.state
             .toasts
+            .list
             .iter()
             .filter(|t| t.severity == Severity::Fault && t.text.contains("over its limit"))
             .count()
@@ -434,10 +435,11 @@ fn leq_tiles_from_an_empty_daemon() {
     h.key_press(Key::W);
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
     let pin = |a: &mut ac2_ui::App| {
-        a.state.toasts.clear();
+        a.state.toasts.list.clear();
         a.state.local_zone = SHOW_ZONE;
         a.state
-            .leq_history
+            .leq
+            .history
             .insert(meas, (u64::MAX, history.clone()));
     };
     let first_is = move |over: bool| {
@@ -495,12 +497,12 @@ fn leq_tiles_from_an_empty_daemon() {
     let looking_back = move |a: &mut ac2_ui::App| {
         pin(a);
         let pane = a.state.layout.focus;
-        a.state.leq_strips.insert(pane, (900.0, 2100.0));
-        a.state.leq_cursor = Some((pane, 1850.0));
+        a.state.leq.strips.insert(pane, (900.0, 2100.0));
+        a.state.leq.cursor = Some((pane, 1850.0));
     };
     snapshot_when(&mut h, "leq_tiles_history", looking_back, first_is(true));
-    h.state_mut().state.leq_strips.clear();
-    h.state_mut().state.leq_cursor = None;
+    h.state_mut().state.leq.strips.clear();
+    h.state_mut().state.leq.cursor = None;
 
     // Back under: the 1 min window plain again, the 30 min one near its limit.
     leq.set(leq_frame(
@@ -521,6 +523,7 @@ fn leq_tiles_from_an_empty_daemon() {
     step_until(&mut h, "the recoveries toasted", |a| {
         a.state
             .toasts
+            .list
             .iter()
             .filter(|t| t.text.contains("back within its limit"))
             .count()

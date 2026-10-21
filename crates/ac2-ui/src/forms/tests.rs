@@ -92,6 +92,7 @@ fn measurement_defaults_match_the_cli() {
                 averaging: SpecAveraging::Off,
                 smoothing: None,
                 level: SpecLevel::Tone,
+                display: Default::default(),
             }
         }
     );
@@ -119,6 +120,7 @@ fn measurement_defaults_match_the_cli() {
                 f_hi: Hz(20_000.0),
                 weighting: Weighting::Z,
                 averaging: SpecAveraging::Off,
+                display: Default::default(),
             }
         }
     );
@@ -206,6 +208,9 @@ fn spectrum_and_rta_dialogs_set_averaging_and_edit_keeps_the_rest() {
         grid_id: None,
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
     };
     let mut f = Form::edit_spec(&m, &names(&o), Some(o.sample_rate_hz)).expect("edit");
     assert_eq!(f.kind.title(), "Edit RTA");
@@ -234,7 +239,7 @@ fn spectrum_and_rta_dialogs_set_averaging_and_edit_keeps_the_rest() {
         "In 6 (not captured)"
     );
     let e = f.meas_config(Some(&o)).expect_err("refused");
-    assert!(e.contains("not captured by the session"), "{e}");
+    assert!(e.contains("not captured by the audio I/O"), "{e}");
 }
 
 #[test]
@@ -268,6 +273,9 @@ fn a_spectrums_fft_size_and_window_are_editable() {
         grid_id: None,
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
     };
     let mut e = Form::edit_spec(&m, &names(&o), Some(48_000)).expect("edit");
     let i = at(&e, FieldId::FftSize);
@@ -469,6 +477,9 @@ fn resolution_in_the_transfer_and_sweep_dialogs() {
         grid_id: None,
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
     };
     let mut e = Form::edit_spec(&m, &names(&o), Some(o.sample_rate_hz)).expect("edit");
     assert_eq!(e.kind, FormKind::TransferEdit);
@@ -507,6 +518,9 @@ fn resolution_in_the_transfer_and_sweep_dialogs() {
         grid_id: None,
         colour: None,
         layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
     };
     let se = Form::edit_sweep(&sm, Some(&o), &names(&o), &outs()).expect("edit");
     assert_eq!(

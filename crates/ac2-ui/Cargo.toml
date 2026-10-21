@@ -36,20 +36,22 @@ ac2-proto = { path = "../ac2-proto" }
 ac2-scene = { path = "../ac2-scene" }
 ac2-zmq = { path = "../ac2-zmq" }
 # Local time of day (the SPL log's start): the UTC offset in force at an instant.
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
-clap = { version = "4.5", features = ["derive"] }
+chrono = { workspace = true, features = ["clock"] }
+clap = { workspace = true, features = ["derive"] }
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wayland", "wgpu", "x11"] }
 egui-wgpu = "0.36.2"
+# A pane exported as PNG (src/pane_export.rs).
+png = "0.18"
 # This computer's CPU use for the health meter (only its CPU figures are read).
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
-serde = { version = "1", features = ["derive"] }
-tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time", "macros"] }
-tracing = "0.1"
+sysinfo = { workspace = true, features = ["system"] }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }
+tracing = { workspace = true }
 toml = "0.8"
 
 # Millisecond timer resolution for the app's lifetime (src/main.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Media"] }
+windows-sys = { workspace = true, features = ["Win32_Media"] }
 
 [dev-dependencies]
 ac2-client = { path = "../ac2-client", features = ["test-support"] }
@@ -58,6 +60,6 @@ ac2-client = { path = "../ac2-client", features = ["test-support"] }
 # daemon's band log rows are ac2-traces'.
 ac2-core = { path = "../ac2-core" }
 ac2-traces = { path = "../ac2-traces" }
-num-complex = "0.4"
+num-complex = { workspace = true }
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
-tempfile = "3"
+tempfile = { workspace = true }

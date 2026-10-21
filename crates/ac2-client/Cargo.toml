@@ -23,12 +23,12 @@ ac2-paths = { path = "../ac2-paths" }
 ac2-proto = { path = "../ac2-proto" }
 ac2-traces = { path = "../ac2-traces", optional = true }
 ac2-zmq = { path = "../ac2-zmq" }
-tokio = { version = "1.53", features = ["rt", "sync", "time", "macros", "net"] }
-thiserror = "2"
-tracing = "0.1"
-getrandom = "0.3"
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "net"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+getrandom = { workspace = true }
 
 [dev-dependencies]
 ac2-client = { path = ".", features = ["test-support"] }
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "time", "sync"] }
-tempfile = "3"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+tempfile = { workspace = true }

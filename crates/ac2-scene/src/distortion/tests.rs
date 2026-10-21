@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
-use crate::grid::column_frequencies;
 use ac2_proto::GridDef;
 use ac2_proto::model::*;
 use ac2_proto::units::*;
@@ -21,7 +20,7 @@ pub(crate) fn grid() -> GridDef {
 
 /// H2 at −40 dB (valid) up to 2 kHz, H3 within the noise, nothing above f2/k.
 pub(crate) fn data() -> TraceData {
-    let f = column_frequencies(&grid());
+    let f = grid().centres();
     let n = f.len();
     let curve = |level: f32, floor: f32, top: f64| DistortionCurve {
         level_db: f
@@ -70,6 +69,7 @@ pub(crate) fn data() -> TraceData {
             mic: None,
             mic_curve: None,
             created_at: WallNs(0),
+            eq_in: Vec::new(),
         },
         mag_db: vec![-6.0; n],
         phase_deg: Some(vec![0.0; n]),
@@ -132,6 +132,7 @@ fn status() -> Status {
         log_not_saved: None,
         file_damaged: None,
         drive: Default::default(),
+        advice: None,
     }
 }
 
@@ -139,7 +140,7 @@ fn status() -> Status {
 fn readings_and_their_text() {
     let d = data();
     let s = d.sweep.as_ref().unwrap();
-    let f = column_frequencies(&grid());
+    let f = grid().centres();
     let at1k = nearest_column(&f, 1000.0).unwrap();
     assert_eq!(
         reading(&s.harmonics[0].curve, at1k, 6.0),
@@ -187,7 +188,7 @@ fn readings_and_their_text() {
 #[test]
 fn the_summary_names_orders_near_the_references_own() {
     let mut d = data();
-    let f = column_frequencies(&grid());
+    let f = grid().centres();
     let curve = |level: f32, floor: f32, top: f64| DistortionCurve {
         level_db: f
             .iter()
@@ -239,7 +240,7 @@ fn the_summary_names_orders_near_the_references_own() {
 #[test]
 fn distortion_view_draws_valid_points_and_shades_the_floor() {
     let d = data();
-    let f = column_frequencies(&grid());
+    let f = grid().centres();
     let mut view = ViewState {
         cursor_hz: Some(1000.0),
         ..ViewState::default()
@@ -369,7 +370,7 @@ fn caption_and_legend_never_overlap_in_small_panes() {
     let mut d = data();
     d.meta.edit.name = "Main L 1083 on stand".into();
     d.sweep.as_mut().unwrap().info.clipped = true;
-    let f = column_frequencies(&grid());
+    let f = grid().centres();
     for unit in [DistortionUnit::Db, DistortionUnit::Percent] {
         let mut view = ViewState {
             cursor_hz: Some(1000.0),
@@ -456,7 +457,7 @@ fn lone_valid_points_are_short_lines_and_noise_is_dashed() {
             *l = if i % 2 == 0 { -50.0 } else { -66.0 };
         }
     }
-    let f = column_frequencies(&grid());
+    let f = grid().centres();
     // Columns closer than the pixels of a 1/4 pane would make dots.
     let size = Viewport {
         width: 420.0,
@@ -630,7 +631,7 @@ fn unresolved_ranges_mark_both_panes() {
             ranges: vec![range(30.0, 140.0)],
         },
     });
-    let f = column_frequencies(&grid());
+    let f = grid().centres();
     let theme = Theme::dark();
     let view = ViewState {
         cursor_hz: Some(100.0),
@@ -651,7 +652,7 @@ fn unresolved_ranges_mark_both_panes() {
         )
     };
     let sc = scene(&view);
-    let text = |m: &[crate::unresolved::Mark]| -> Vec<String> {
+    let text = |m: &[crate::unresolved::RangeMark]| -> Vec<String> {
         m.iter().map(|m| m.text.clone()).collect()
     };
     assert_eq!(
@@ -692,7 +693,7 @@ fn unresolved_ranges_mark_both_panes() {
 /// own H3 valid at −90 dB.
 fn with_reference() -> TraceData {
     let mut d = data();
-    let f = column_frequencies(&grid());
+    let f = grid().centres();
     let curve = |level: f32, floor: f32, top: f64| DistortionCurve {
         level_db: f
             .iter()
@@ -719,7 +720,7 @@ fn with_reference() -> TraceData {
 #[test]
 fn the_references_own_orders_are_drawn_dotted_and_hide() {
     let d = with_reference();
-    let f = column_frequencies(&grid());
+    let f = grid().centres();
     let mut view = ViewState {
         cursor_hz: Some(500.0),
         ..ViewState::default()
@@ -800,7 +801,7 @@ fn the_references_own_orders_are_drawn_dotted_and_hide() {
 #[test]
 fn a_sweep_without_the_references_own_orders_draws_no_reference() {
     let d = data();
-    let f = column_frequencies(&grid());
+    let f = grid().centres();
     let sc = distortion_scene(
         Some(SweepView {
             data: &d,

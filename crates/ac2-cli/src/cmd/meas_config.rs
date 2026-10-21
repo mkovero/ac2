@@ -4,7 +4,7 @@ use ac2_proto::model::*;
 
 use crate::CliError;
 use crate::args::*;
-use crate::units::SampleCount;
+use ac2_scene::unit_text::SampleCount;
 
 pub(super) fn weighting(w: WeightArg) -> Weighting {
     match w {
@@ -95,11 +95,11 @@ pub(crate) fn window(w: WindowArg) -> Window {
 
 /// Builds the measurement configuration of `meas new`, checking the kind's required inputs.
 pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
-    let need = |c: Option<crate::units::Channel>, flag: &str| {
+    let need = |c: Option<ac2_scene::unit_text::Channel>, flag: &str| {
         c.map(|c| c.0)
             .ok_or_else(|| CliError::Usage(format!("{:?} needs --{flag}", n.kind)))
     };
-    let refuse = |c: Option<crate::units::Channel>, flag: &str| match c {
+    let refuse = |c: Option<ac2_scene::unit_text::Channel>, flag: &str| match c {
         Some(_) => Err(CliError::Usage(format!(
             "--{flag} does not apply to {:?}",
             n.kind
@@ -110,7 +110,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         ("out", n.outputs.is_some()),
         (
             "level",
-            matches!(n.level, Some(crate::units::MeasLevel::Stimulus(_))),
+            matches!(n.level, Some(ac2_scene::unit_text::MeasLevel::Stimulus(_))),
         ),
         ("duration", n.duration.is_some()),
         ("repeats", n.repeats.is_some()),
@@ -132,7 +132,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         )));
     }
     if n.kind != MeasKindArg::Spectrum
-        && let Some(crate::units::MeasLevel::Spectrum(l)) = n.level
+        && let Some(ac2_scene::unit_text::MeasLevel::Spectrum(l)) = n.level
     {
         return Err(CliError::Usage(format!(
             "--level {} applies to a spectrum, not {:?}",
@@ -191,8 +191,8 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                         .map(|o| o.0.clone())
                         .ok_or_else(|| CliError::Usage("sweep needs --out".into()))?,
                     level: match n.level {
-                        Some(crate::units::MeasLevel::Stimulus(l)) => l,
-                        Some(crate::units::MeasLevel::Spectrum(_)) => {
+                        Some(ac2_scene::unit_text::MeasLevel::Stimulus(l)) => l,
+                        Some(ac2_scene::unit_text::MeasLevel::Spectrum(_)) => {
                             return Err(CliError::Usage(
                                 "a sweep's --level is its RMS level, e.g. -50dbfs; tone and \
                                  density are a spectrum's"
@@ -284,7 +284,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                             smoothing: n.smooth.map(smoothing).transpose()?,
                             averaging: n.average.map_or(SpecAveraging::Off, |a| a.0),
                             level: match n.level {
-                                Some(crate::units::MeasLevel::Spectrum(l)) => l,
+                                Some(ac2_scene::unit_text::MeasLevel::Spectrum(l)) => l,
                                 _ => SpecLevel::default_for(resolution),
                             },
                             ..SpectrumConfig::on_input(input)
@@ -334,6 +334,10 @@ pub(crate) struct MeasSet {
     pub(crate) window: Option<Window>,
     pub(crate) resolution: Option<ResolutionArg>,
     pub(crate) level: Option<SpecLevel>,
+    pub(crate) style: Option<SpectrumStyle>,
+    pub(crate) peak: Option<PeakMode>,
+    pub(crate) span_s: Option<u32>,
+    pub(crate) colours: Option<Colormap>,
 }
 
 impl MeasSet {
@@ -345,6 +349,10 @@ impl MeasSet {
             && self.window.is_none()
             && self.resolution.is_none()
             && self.level.is_none()
+            && self.style.is_none()
+            && self.peak.is_none()
+            && self.span_s.is_none()
+            && self.colours.is_none()
     }
 }
 
@@ -353,8 +361,8 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
     if set.is_empty() {
         return Err(CliError::Usage(
             "say what changes: --average (spectrum, rta), --blocks (tf), --fft, --window or \
-             --level (spectrum), --resolution (tf, sweep; multi[:1/N] for a spectrum) or \
-             --colour"
+             --level (spectrum), --resolution (tf, sweep; multi[:1/N] for a spectrum), \
+             --style, --peak, --span or --colours (spectrum, rta), --colour or --offset"
                 .into(),
         ));
     }
@@ -447,6 +455,31 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
         };
         c.level = l;
     }
+    let display =
+        set.style.is_some() || set.peak.is_some() || set.span_s.is_some() || set.colours.is_some();
+    if display {
+        let Some(d) = config.kind.display_mut() else {
+            return not("style, --peak, --span and --colours", "spectrum and rta");
+        };
+        if let Some(s) = set.style {
+            d.style = s;
+        }
+        if let Some(p) = set.peak {
+            d.peak = p;
+        }
+        if let Some(s) = set.span_s {
+            if !SpectrumDisplay::SPANS_S.contains(&s) {
+                return Err(CliError::Usage(format!(
+                    "--span is one of {:?} seconds",
+                    SpectrumDisplay::SPANS_S
+                )));
+            }
+            d.spectrograph_span_s = s;
+        }
+        if let Some(c) = set.colours {
+            d.spectrograph_colours = c;
+        }
+    }
     Ok(config)
 }
 
@@ -462,7 +495,7 @@ pub(crate) fn uncaptured(kind: &MeasKind, captured: &[u16]) -> Result<(), CliErr
     };
     match inputs.iter().find(|i| !captured.contains(i)) {
         Some(i) => Err(CliError::Usage(format!(
-            "input {} is not captured by the session",
+            "input {} is not captured by the audio I/O",
             i + 1
         ))),
         None => Ok(()),

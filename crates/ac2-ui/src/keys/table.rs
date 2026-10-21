@@ -83,11 +83,14 @@ pub fn defaults() -> Vec<Binding> {
         (C::NewMeasurement, S::Global, cmd(K::M)),
         // Shift+M, a step on from M (average the shown traces): a math channel by name.
         (C::NewMath, S::Global, sh(K::M)),
+        // Alt+M, the same dialog with its operator on align: two systems' delay and polarity
+        // in their overlap.
+        (C::NewAlignment, S::Global, alt(K::M)),
         // Tab walks the measurement list row by row, the way it walks a form's fields, and
         // the focused pane shows the measurement of each row it reaches.
         (C::NextInTree, S::Global, k(K::Tab)),
         (C::PrevInTree, S::Global, sh(K::Tab)),
-        (C::MaximizePane, S::Global, k(K::W)),
+        (C::MaximisePane, S::Global, k(K::W)),
         // Ctrl+Z / Ctrl+Shift+Z as in every editor; both reach the app on the desktops it
         // runs on. No Ctrl+Y: Y and Z swap places on German layouts, and one redo is enough.
         (C::Undo, S::Global, cmd(K::Z)),
@@ -130,14 +133,22 @@ pub fn defaults() -> Vec<Binding> {
         (C::OffsetUpCoarse, S::Global, alt_sh(K::ArrowUp)),
         (C::OffsetDownCoarse, S::Global, alt_sh(K::ArrowDown)),
         (C::OffsetClear, S::Global, alt(K::Home)),
-        // Delete asks first (Delete again or Enter deletes). Backspace too: Mac keyboards
-        // and many laptops have no Delete key.
+        // Delete asks first (Delete again deletes; Enter, the stimulus's, never does).
+        // Backspace too: Mac keyboards and many laptops have no Delete key.
         (C::DeleteSelected, S::Global, k(K::Delete)),
         (C::DeleteSelected, S::Global, k(K::Backspace)),
         (C::TraceRename, S::Global, k(K::F2)),
         (C::Compare, S::Global, k(K::C)),
         // Shift+C steps the selected measurement's colour (C itself compares).
         (C::NextColour, S::Global, sh(K::C)),
+        // End: back to the live measurement from a selected trace, the end of the list the
+        // traces are stepped through (Esc only stops: a reflex must not move the selection).
+        (C::SelectLive, S::Global, k(K::End)),
+        // Shift+T, a step on from T (the plot's chrome): the comparison cursor, which
+        // Shift+←/→ move.
+        (C::ToggleCursor, S::Global, sh(K::T)),
+        // Shift+E: the notifications (errors, warnings) behind the toasts.
+        (C::Notifications, S::Global, sh(K::E)),
         (C::CursorLeft, S::Global, sh(K::ArrowLeft)),
         (C::CursorRight, S::Global, sh(K::ArrowRight)),
         (C::Slot1, S::Global, cmd(K::Num1)),
@@ -194,17 +205,36 @@ pub fn defaults() -> Vec<Binding> {
         (C::DelayDownFine, S::Transfer, alt(K::Comma)),
         (C::DelayUpFine, S::Transfer, alt(K::Period)),
         (C::PhaseReference, S::Transfer, k(K::E)),
+        // Alt+E: the EQ what-if editor (E is the phase reference, Shift+E notifications).
+        (C::EqEditor, S::Transfer, alt(K::E)),
         (C::Target, S::Transfer, k(K::Z)),
-        // Shift+I shows or hides the impulse response wherever there is one (plain I zooms).
         (C::CoherenceMask, S::Transfer, k(K::B)),
         (C::Average, S::Transfer, k(K::M)),
-        (C::PhaseUnwrap, S::Transfer, k(K::P)),
+        // P tracks extremes in both plots: min / max here, peak hold and peaks on the
+        // spectrum. The phase views share Shift+P.
+        (C::MinMax, S::Transfer, k(K::P)),
         // K steps smoothing coarser, Shift+K finer (off → 1/48 … 1/3 octave).
         (C::SmoothCoarser, S::Transfer, k(K::K)),
         (C::SmoothFiner, S::Transfer, sh(K::K)),
         (C::SmoothCoarser, S::Spectrum, k(K::K)),
         (C::SmoothFiner, S::Spectrum, sh(K::K)),
-        (C::GroupDelay, S::Transfer, sh(K::P)),
+        (C::PhaseView, S::Transfer, sh(K::P)),
+        // The cursor's jumps and mark, alike on both frequency panes: Alt+P to a peak, as
+        // P tracks them, Alt+N to a notch; Shift with either goes down in frequency, as
+        // Shift goes back with V and G. Alt+D drops the mark (Δ: the cursor then reads its
+        // differences from there), Alt+Shift+D clears it; Esc stays the stimulus's stop.
+        (C::NextPeak, S::Transfer, alt(K::P)),
+        (C::PrevPeak, S::Transfer, alt_sh(K::P)),
+        (C::NextNotch, S::Transfer, alt(K::N)),
+        (C::PrevNotch, S::Transfer, alt_sh(K::N)),
+        (C::CursorMark, S::Transfer, alt(K::D)),
+        (C::ClearMark, S::Transfer, alt_sh(K::D)),
+        (C::NextPeak, S::Spectrum, alt(K::P)),
+        (C::PrevPeak, S::Spectrum, alt_sh(K::P)),
+        (C::NextNotch, S::Spectrum, alt(K::N)),
+        (C::PrevNotch, S::Spectrum, alt_sh(K::N)),
+        (C::CursorMark, S::Spectrum, alt(K::D)),
+        (C::ClearMark, S::Spectrum, alt_sh(K::D)),
         (C::ResetAverage, S::Transfer, k(K::R)),
         (C::ResetAverage, S::Spectrum, k(K::R)),
         (C::ResetAverage, S::Spl, k(K::R)),
@@ -239,6 +269,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::SplWeighting, S::Spl, k(K::Z)),
         // Plain L types the stimulus level; Shift+L is the Leq windows.
         (C::LeqWindows, S::Global, sh(K::L)),
+        // Shift+I shows or hides the sweep's impulse response, in the distortion pane only
+        // (plain I zooms).
         (C::SweepIr, S::Distortion, sh(K::I)),
         // E, as the transfer pane's phase reference: the reference input's own harmonics.
         (C::ReferenceHarmonics, S::Distortion, k(K::E)),
@@ -288,7 +320,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::Slot1, "capture", 85),
                     hint(C::InsertDelay, "find delay", 70),
                     hint(C::CoherenceMask, "coherence mask", 65),
-                    hint(C::PhaseUnwrap, "wrap/unwrap", 55),
+                    hint(C::MinMax, "min/max", 55),
                     hint(C::SmoothCoarser, "smoothing", 60),
                 ]
             }
@@ -297,14 +329,14 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::StartStop, "start/stop", 70),
-                    hint(C::PeakHold, "peak hold", 75),
+                    hint(C::PeakHold, "peaks", 75),
                     // The spectrum style (B) is in the help and the palette: the line
                     // holds eight.
                     hint(C::NextView, "view", 65),
                     hint(C::SmoothCoarser, "smoothing", 60),
                     hint(C::LevelFit, "fit level", 55),
                     hint(C::Slot1, "capture", 85),
-                    hint(C::MaximizePane, "maximise", 40),
+                    hint(C::MaximisePane, "maximise", 40),
                 ]
             }
         }
@@ -314,10 +346,10 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::NextView, "view", 92),
                     hint(C::ZoomIn, "zoom time", 80),
                     hint(C::LevelZoomIn, "zoom level", 65),
-                    hint(C::LevelFit, "fit", 55),
-                    hint(C::NextInTree, "next", 60),
+                    hint(C::LevelFit, "fit level", 55),
+                    hint(C::NextInTree, "next row", 60),
                     hint(C::ClosePane, "close pane", 45),
-                    hint(C::MaximizePane, "maximise", 50),
+                    hint(C::MaximisePane, "maximise", 50),
                 ]
             }
         }
@@ -329,7 +361,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::SplWeighting, "A/C/Z", 86),
                     hint(C::LeqWindows, "windows", 80),
                     hint(C::SplNewLog, "new log", 50),
-                    hint(C::MaximizePane, "maximise", 40),
+                    hint(C::MaximisePane, "maximise", 40),
                 ]
             }
         }
@@ -337,10 +369,10 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::SweepNew, "new sweep", 90),
-                    hint(C::NextTrace, "next sweep", 80),
+                    hint(C::NextTrace, "select trace", 80),
                     hint(C::NextView, "view", 75),
                     hint(C::ReferenceHarmonics, "reference", 60),
-                    hint(C::MaximizePane, "maximise", 50),
+                    hint(C::MaximisePane, "maximise", 50),
                     hint(C::ClosePane, "close pane", 40),
                 ]
             }

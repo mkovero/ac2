@@ -15,7 +15,7 @@ history (kept only while it is shown) builds while the spectrum is still in view
 takes the pane with that history, and the last step hides it. Frequency runs across on the
 spectrum's own log axis — the same plot left and right edges, so a frequency is at the same pixel in both, and zoom and
 pan move both. Time runs down, the newest frame at the top, over the history length
-(**Shift+B**: 10 → 30 → 60 → 120 s, default 30 s, saved as `spectrograph_span_s`). Level is colour, through the theme's
+(**Shift+B**: 10 → 30 → 60 → 120 s, default 30 s, kept with the measurement as `spectrograph_span_s`). Level is colour, through the theme's
 colormap (viridis: perceptually uniform, readable with the common colour-vision
 deficiencies), over the pane's level range for the measurement's scale — the range the level
 keys (Ctrl+I/O, Ctrl+↑/↓, Shift+Home, Ctrl+Home) and the mouse already move. A colour bar on

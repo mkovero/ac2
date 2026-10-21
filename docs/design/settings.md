@@ -11,7 +11,7 @@ dialog, palette prompts, `ui.toml` and daemon flags):
 
 | Page | Holds | Whose |
 |---|---|---|
-| Audio & I/O | backend, device, rate, buffer; input rows (in session, R reference / M mic, mic name, curve, meter), output rows by name (the rig's label, else the device's channel name) with **S** ticks for the stimulus, the reference pair, loopback detection, the **system max level** | the rig (stimulus ticks: this app) |
+| Audio I/O | backend, device, rate, buffer; input rows (in session, R reference / M mic, mic name, curve, meter), output rows by name (the rig's label, else the device's channel name) with **S** ticks for the stimulus, the reference pair, loopback detection, the **system max level** | the rig (stimulus ticks: this app) |
 | Calibration | the former calibrations view: inputs, mic library, sensitivities, the acoustic / electrical dialogs | the rig |
 | SPL / Leq | the former Leq dialog, for the SPL pane's meter | the rig |
 | Recording | the record toggle's limit; the daemon's recording folder | this app / the rig |
@@ -34,13 +34,13 @@ app starts with one pane.
 the topmost window (a calibration dialog or the raise confirmation over a page, else the
 view); Shift+Esc stops the stimulus from anywhere. `Ctrl+,` — the desktop convention — is the
 transfer pane's whole-sample delay step, so the letter P (preferences) it is; layout-safe on
-every keyboard. Shift+O opens Audio & I/O (on the device), Shift+L SPL / Leq, the palette's input setup
+every keyboard. Shift+O opens Audio I/O (on the device), Shift+L SPL / Leq, the palette's input setup
 and calibrations their pages. No dialog is left beside its page.
 
 The view covers the window below the top bar: what drives the speakers (badge, level,
 outputs, ■ Stop) stays in sight while settings change.
 
-The Audio & I/O page hosts the session model (`SessionDialog`); Enter opens (or reopens)
+The Audio I/O page hosts the session model (`SessionDialog`); Enter opens (or reopens)
 the session with what it says. A mouse click on a row shows its page.
 
 ## 2. Output names and stimulus outputs
@@ -85,9 +85,12 @@ the channels, with *applies when the session opens (Enter)* until it is the open
 - **Persisted** by the daemon in `rig.json` (config directory, `ac2_paths`; `ac2d --settings` names
   another file), atomic write, before the change applies (a level that would come back
   different after a restart is worse than a refused change). At start the level in force is
-  min(kept, bound): a later, lower `--max-level` wins. A file that cannot be read is never
-  written (the daemon starts at the bound and refuses changes with the reason); one of
-  another format version is set aside.
+  min(kept, bound): a later, lower `--max-level` wins. The file is read section by section:
+  a ceiling that cannot be read is taken from the previous copy (`rig.json.prev`) where it
+  reads there, else the daemon starts at the bound, as with no file. A file that cannot be
+  moved out of the way is never written (the daemon refuses changes with the reason); one
+  of a newer format version is set aside, one of the previous version is read and kept as
+  `rig.json.v1`.
 - Every emitting path keeps enforcing it: `gen.set`, `sweep.run`, `session.detect_loopback`
   refuse levels above it; the peak limit of the running stream and of the detection burst's
   stream follow it.
@@ -120,8 +123,8 @@ Neither the output labels nor the system max level are session content: both are
 
 ## 6. Open
 
-- Bulk palette prompts (*Input setup: type mic names (3=M30, 4=ECM)…*, *Mic curve on input
-  N…*, *Calibration: delete … (input=mic)…*) stay as typed shortcuts; their effect is visible
+- Bulk palette prompts (*Set input mics…*, *Set input mic curve…*,
+  *Delete calibration…*) stay as typed shortcuts; their effect is visible
   on the pages. Remove them if operators never use them.
 - Labels follow channel numbers, not devices; per-device labels if rigs switch interfaces.
 - A revoked client keeps its data stream until it reconnects.

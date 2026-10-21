@@ -1,7 +1,7 @@
 {
  "topic": "d/5/spec",
  "header": {
-  "v": 57,
+  "v": 60,
   "kind": "spec",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -51,7 +51,8 @@
        }
       }
      ],
-     "phase": "no_phase"
+     "phase": "no_phase",
+     "align": null
     },
     "bands": {
      "bands": [

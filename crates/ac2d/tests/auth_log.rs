@@ -10,6 +10,8 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use ac2_proto::model::ServerMode;
+use ac2_proto::{Command, ReplyBody};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair};
 use ac2d::{Daemon, Listen, NetworkSecurity};
 use common::*;
@@ -94,8 +96,27 @@ fn refused_key_is_logged_once_per_key_and_address() {
     while log.lines_with(&needle).is_empty() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
-    // Let the remaining handshakes (and libzmq's reconnects) reach the handler.
-    std::thread::sleep(Duration::from_millis(1500));
+    // The remaining handshakes reached the handler: the daemon counts all six refusals
+    // (`server.info`, asked by the authorized laptop).
+    let mut laptop_c = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve(&laptop)));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let ReplyBody::Server(info) = laptop_c.ok(Command::ServerInfo) else {
+            panic!("server.info: not a server reply");
+        };
+        let ServerMode::Network { refused, .. } = info.mode else {
+            panic!("not network mode: {:?}", info.mode);
+        };
+        let n = refused
+            .iter()
+            .find(|r| r.fingerprint.as_deref() == Some(fp.as_str()))
+            .map_or(0, |r| r.count);
+        if n >= 6 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{n} refusals counted");
+        std::thread::sleep(Duration::from_millis(20));
+    }
     let lines = log.lines_with(&needle);
     assert_eq!(lines.len(), 1, "{lines:#?}");
     assert!(lines[0].contains("WARN"), "{}", lines[0]);

@@ -26,10 +26,13 @@ use crate::tf::LegendEntry;
 use crate::theme::Theme;
 use crate::time::Freshness;
 use crate::trace::TraceKey;
-use crate::view::{SpectrumStyle, ViewState};
+use crate::view::ViewState;
+use ac2_proto::model::SpectrumStyle;
 
 mod draw;
 mod legend;
+mod mark;
+pub mod peaks;
 mod units;
 pub use draw::spectrum_scene;
 pub(crate) use draw::spectrum_scene_in;
@@ -38,9 +41,10 @@ use legend::{
     LEGEND_MAX_ROWS, LEGEND_ROW, LEGEND_SHARE, SWATCH_GAP, SWATCH_W, entry_width, legend_entry,
     legend_layout, unit_forms,
 };
+pub use mark::jump;
 pub use units::{
     BinWidth, cal_caption, density_unit_help, fraction_label, level_unit, level_unit_forms,
-    narrow_unit_help, tone_unit_help, value_unit, weighting_label, window_label,
+    narrow_unit_help, quantity_note, tone_unit_help, value_unit, weighting_label, window_label,
 };
 
 /// What a level value means.
@@ -87,7 +91,7 @@ pub struct SpectrumTrace<'a> {
     pub name: String,
     pub color: Color,
     pub freqs: &'a [f64],
-    /// Band edges per column ([`crate::grid::column_edges`]), for bars.
+    /// Band edges per column ([`GridDef::edges`](ac2_proto::GridDef::edges)), for bars.
     pub edges: &'a [(f64, f64)],
     pub level: &'a [f32],
     /// The levels the curve is drawn at while it glides to `level` ([`crate::curve_ease`]);
@@ -96,6 +100,9 @@ pub struct SpectrumTrace<'a> {
     pub validity: Option<&'a [ValidityMask]>,
     /// Peak-hold values, column-aligned ([`PeakHold`]).
     pub peak: Option<&'a [f32]>,
+    /// Tracked peaks ([`peaks::PeakTracker`]), loudest first; `Some` while its
+    /// measurement's peak mode tracks, and then marked and listed.
+    pub tracked: Option<&'a [peaks::Peak]>,
     pub scale: LevelScale,
     pub quantity: Quantity,
     /// FFT bin spacing of a narrowband trace's grid ([`crate::grid::bin_spacing`]): its
@@ -113,9 +120,24 @@ pub struct SpectrumTrace<'a> {
     /// Drawn for compare only (not of the pane's group): the legend tags it
     /// [`crate::trace::COMPARED`].
     pub compared: bool,
+    /// How it is drawn: its measurement's style (a stored trace: its owner's).
+    pub style: SpectrumStyle,
+    /// Stacking: 0 for the pane's own group, `n` for the `n`-th curve compared. A higher
+    /// layer is drawn beneath a lower one, its bars and fill lighter
+    /// ([`layer_alpha`]), so the first compared shows over the second and a fill beneath
+    /// still shows through.
+    pub layer: u8,
     /// A live multi-resolution spectrum's bands: where its windows change, and which
     /// columns resolve less than their grid.
     pub bands: Option<&'a SpecBands>,
+}
+
+/// Opacity multiplier of a curve's bars and fill on stacking layer `layer`
+/// ([`SpectrumTrace::layer`]): each layer down a step lighter, so a fill or bar beneath
+/// reads as further back, down to a floor where it still shows on every theme (dark fill
+/// 0.18 → 0.08, high-contrast bars 0.7 → 0.31).
+pub fn layer_alpha(layer: u8) -> f32 {
+    (1.0 - 0.3 * f32::from(layer)).max(0.45)
 }
 
 /// ` · stopped` after a stopped measurement's caption: its curve is the final result.
@@ -129,23 +151,36 @@ pub fn offset_note(name: &str, offset_db: f64) -> String {
     format!("{name} · offset {}", format::db_readout(offset_db))
 }
 
+/// What a live RTA or spectrum trace takes besides its frame: the frame's capture time (for
+/// the calibration age), the mic-curve note of its input, the display columns, its name,
+/// colour and freshness.
+#[derive(Clone, Debug)]
+pub struct LiveMeta<'a, 'c> {
+    pub captured: WallNs,
+    pub curve: Option<&'c str>,
+    pub freqs: &'a [f64],
+    pub edges: &'a [(f64, f64)],
+    pub name: String,
+    pub color: Color,
+    pub freshness: Freshness,
+}
+
 impl<'a> SpectrumTrace<'a> {
     /// A live RTA trace; `captured` is the frame's capture time (for the calibration age),
     /// `curve` the mic-curve note of its input.
-    #[allow(clippy::too_many_arguments)]
-    pub fn rta(
-        frame: &'a RtaFrame,
-        captured: WallNs,
-        curve: Option<&str>,
-        freqs: &'a [f64],
-        edges: &'a [(f64, f64)],
-        name: impl Into<String>,
-        color: Color,
-        freshness: Freshness,
-    ) -> Self {
+    pub fn rta(frame: &'a RtaFrame, meta: LiveMeta<'a, '_>) -> Self {
+        let LiveMeta {
+            captured,
+            curve,
+            freqs,
+            edges,
+            name,
+            color,
+            freshness,
+        } = meta;
         Self {
             key: TraceKey::Live(frame.meas),
-            name: name.into(),
+            name,
             color,
             freqs,
             edges,
@@ -153,6 +188,7 @@ impl<'a> SpectrumTrace<'a> {
             drawn: None,
             validity: Some(&frame.validity),
             peak: None,
+            tracked: None,
             scale: frame.meta.scale,
             quantity: Quantity::Band,
             bin_hz: None,
@@ -167,6 +203,8 @@ impl<'a> SpectrumTrace<'a> {
             offset_db: 0.0,
             selected: false,
             compared: false,
+            style: SpectrumStyle::default(),
+            layer: 0,
             bands: None,
         }
     }
@@ -174,20 +212,19 @@ impl<'a> SpectrumTrace<'a> {
     /// A live narrowband spectrum; `captured` is the frame's capture time, `curve` the
     /// mic-curve note of its input. Its columns are display columns of FFT bins, each the
     /// highest tone level among its bins (the mean density, a density); a gap is NaN.
-    #[allow(clippy::too_many_arguments)]
-    pub fn spectrum(
-        frame: &'a SpecFrame,
-        captured: WallNs,
-        curve: Option<&str>,
-        freqs: &'a [f64],
-        edges: &'a [(f64, f64)],
-        name: impl Into<String>,
-        color: Color,
-        freshness: Freshness,
-    ) -> Self {
+    pub fn spectrum(frame: &'a SpecFrame, meta: LiveMeta<'a, '_>) -> Self {
+        let LiveMeta {
+            captured,
+            curve,
+            freqs,
+            edges,
+            name,
+            color,
+            freshness,
+        } = meta;
         Self {
             key: TraceKey::Live(frame.meas),
-            name: name.into(),
+            name,
             color,
             freqs,
             edges,
@@ -195,6 +232,7 @@ impl<'a> SpectrumTrace<'a> {
             drawn: None,
             validity: None,
             peak: None,
+            tracked: None,
             scale: frame.meta.scale,
             quantity: Quantity::narrow(frame.meta.level, frame.meta.smoothing),
             bin_hz: None,
@@ -215,6 +253,8 @@ impl<'a> SpectrumTrace<'a> {
             offset_db: 0.0,
             selected: false,
             compared: false,
+            style: SpectrumStyle::default(),
+            layer: 0,
             bands: frame.meta.bands.as_deref(),
         }
     }
@@ -346,6 +386,27 @@ pub struct SpectrumCursor {
     pub rows: Vec<(String, String)>,
 }
 
+/// One tracked curve's peaks as listed and marked.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpectrumPeaks {
+    /// The curve, with its display offset when it has one ([`offset_note`]).
+    pub name: String,
+    pub rows: Vec<PeakRow>,
+}
+
+/// A tracked peak: where it is, what the list says about it, and its mark.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PeakRow {
+    pub freq_hz: f64,
+    /// The displayed level (with the display offset).
+    pub level: f64,
+    /// `1  1.00 kHz  −32.0 dBFS`.
+    pub text: String,
+    /// The box drawn around the point on the curve; `None` off the plot (zoomed past it),
+    /// when only the list names it.
+    pub mark: Option<Rect>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpectrumScene {
     pub scene: Scene,
@@ -361,6 +422,16 @@ pub struct SpectrumScene {
     /// The caption as drawn ([`caption_forms`]: the longest that leaves the unit room).
     pub caption: String,
     pub cursor: Option<SpectrumCursor>,
+    /// The plate of the cursor's values (and its mark's lines).
+    pub readout_box: Option<crate::plate::PlateBox>,
+    /// The cursor read against its mark ([`ViewState::cursor_mark_hz`]) on the selected
+    /// curve (else the pane's own); its lines follow the cursor's values.
+    pub mark: Option<crate::readout::MarkReadout>,
+    /// Tracked peaks, per tracked curve; empty unless peak tracking is on.
+    pub peaks: Vec<SpectrumPeaks>,
+    /// The peak list as drawn under the cursor readout; `None` with no tracked peaks or
+    /// while plot chrome is off (T), when only the marks stay.
+    pub peak_list: Option<String>,
     /// One entry per curve, in drawing order: name, colour and tags (`stopped`,
     /// `STALE 3.2 s`, `offset +3.0 dB`). Drawn in rows above the plot, never over a curve.
     pub legend: Vec<LegendEntry>,
@@ -377,7 +448,15 @@ pub struct SpectrumScene {
     /// else the first's that has bands); empty when the marker is off.
     pub stitches: Vec<crate::stitch::Stitch>,
     /// Its columns finer than the window behind them resolves, shaded.
-    pub unresolved: Vec<crate::unresolved::Mark>,
+    pub unresolved: Vec<crate::unresolved::RangeMark>,
+}
+
+impl SpectrumScene {
+    /// The plates the operator moves: the cursor values (the legend is rows above the
+    /// plot, no plate; the mark's lines ride on the cursor values' plate).
+    pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
+        self.readout_box.into_iter().collect()
+    }
 }
 
 /// The bands of the selected curve that has them, else of the first that does; `None`

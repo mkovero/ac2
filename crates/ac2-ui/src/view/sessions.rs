@@ -16,14 +16,16 @@ const WIDTH: f32 = 620.0;
 const BUTTON: [f32; 2] = [110.0, 40.0];
 
 /// The page's buttons (`ac2_scene::sessions::page_buttons`) in one row: the index clicked.
-fn buttons(ui: &mut egui::Ui, labels: &[&str]) -> Option<usize> {
+/// `keys` are each button's key cue (none: the button has no key).
+fn buttons(ui: &mut egui::Ui, labels: &[&str], keys: &[Option<egui::Key>]) -> Option<usize> {
     let mut clicked = None;
     ui.horizontal(|ui| {
         for (i, l) in labels.iter().enumerate() {
-            if ui
-                .add_sized(BUTTON, egui::Button::new(RichText::new(*l).size(15.0)))
-                .clicked()
-            {
+            let mut r = ui.add_sized(BUTTON, egui::Button::new(RichText::new(*l).size(15.0)));
+            if let Some(k) = keys.get(i).copied().flatten() {
+                r = r.on_hover_text(super::keys_cue(&[k]));
+            }
+            if r.clicked() {
                 clicked = Some(i);
             }
         }
@@ -122,7 +124,10 @@ pub(super) fn sessions(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                             });
                     }
                     Page::Browse(b) => {
-                        match buttons(ui, ac2_scene::sessions::page_buttons(d.page.scene())) {
+                        // Places has no key; Esc goes back.
+                        let keys = [None, Some(egui::Key::Escape)];
+                        match buttons(ui, ac2_scene::sessions::page_buttons(d.page.scene()), &keys)
+                        {
                             Some(0) => msg = Some(SessionsMsg::Places),
                             Some(_) => msg = Some(SessionsMsg::Back),
                             None => {}
@@ -174,7 +179,10 @@ pub(super) fn sessions(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                             ui.label(RichText::new(e).color(ch.warn));
                         }
                         ui.add_space(6.0);
-                        match buttons(ui, ac2_scene::sessions::page_buttons(d.page.scene())) {
+                        // Enter saves or exports; Esc goes back.
+                        let keys = [Some(egui::Key::Enter), Some(egui::Key::Escape)];
+                        match buttons(ui, ac2_scene::sessions::page_buttons(d.page.scene()), &keys)
+                        {
                             Some(0) => msg = Some(SessionsMsg::Submit),
                             Some(_) => msg = Some(SessionsMsg::Back),
                             None => {}

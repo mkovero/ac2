@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    ArtnetTarget, AverageMethod, BackendKind, CalKey, ColourFamily, DelayPick, DelayReference,
-    DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand, GeneratorDesired,
-    ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId, MicLoading, OscMessage,
-    OutputSetup, OwnedTraces, PaneLayout, RecordRequest, RecordingRef, ReplayPace, SessionConfig,
-    SessionRef, SplLogWhich, TraceEdit,
+    ArtnetTarget, AverageMethod, BackendKind, CalKey, ColourFamily, Compared, DelayPick,
+    DelayReference, DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand,
+    GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId,
+    MicLoading, OscMessage, OutputSetup, OwnedTraces, PaneLayout, RecordRequest, RecordingRef,
+    ReplayPace, SessionConfig, SessionRef, SplLogWhich, TraceEdit,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, Rev, Seconds, TraceId, TransferId,
@@ -79,13 +79,13 @@ pub enum Command {
         /// RMS level of the burst; refused when absent (there is no default level).
         level: Option<Dbfs>,
     },
-    /// Open the audio session (new epoch).
+    /// Open the audio I/O (new epoch).
     #[serde(rename = "session.open")]
     SessionOpen {
         /// Configuration.
         config: SessionConfig,
     },
-    /// Close the audio session (new epoch).
+    /// Close the audio I/O (new epoch).
     #[serde(rename = "session.close")]
     SessionClose,
     /// Current session.
@@ -241,6 +241,25 @@ pub enum Command {
         /// Layout, or `None` for none of its own.
         layout: Option<PaneLayout>,
     },
+    /// Set the curves drawn compared into the measurement's panes, first compared first
+    /// (drawn above the later ones). Its job and config rev go on.
+    #[serde(rename = "meas.compare")]
+    MeasCompare {
+        /// Measurement whose panes draw them.
+        meas: MeasId,
+        /// Live curves, math channels and stored traces of other measurements, at most
+        /// [`Compared::MAX`].
+        compared: Vec<Compared>,
+    },
+    /// Set the display offset of the measurement's live curves, wherever they are drawn.
+    /// Its job and config rev go on.
+    #[serde(rename = "meas.offset")]
+    MeasOffset {
+        /// Measurement.
+        meas: MeasId,
+        /// Offset, finite and at most [`crate::model::Measurement::OFFSET_MAX_DB`] either way.
+        offset: Db,
+    },
     /// Delete a measurement, and say what becomes of the stored traces and math channels
     /// it owns. Refused while a math channel that stays computes from it or from a trace
     /// deleted with it, and while a run of it (a sweep measurement) plays.
@@ -250,6 +269,15 @@ pub enum Command {
         meas: MeasId,
         /// Its traces and math channels: kept (moved to the imported group) or deleted.
         traces: OwnedTraces,
+    },
+    /// Edit a measurement's EQ what-if sets (transfer and sweep measurements). Its job and
+    /// config rev go on; replies with the measurement.
+    #[serde(rename = "meas.eq")]
+    MeasEq {
+        /// Measurement.
+        meas: MeasId,
+        /// The edit.
+        edit: crate::model::EqEdit,
     },
     /// Start the job (refused for a sweep measurement: `sweep.run` plays it).
     #[serde(rename = "meas.start")]
@@ -602,7 +630,7 @@ pub enum Command {
         /// Replace unsaved changes.
         discard: bool,
     },
-    /// Start an untitled session: every measurement and trace deleted (the audio session
+    /// Start an untitled session: every measurement and trace deleted (the audio I/O
     /// stays open). Guarded as `file.load`.
     #[serde(rename = "file.new")]
     FileNew {
@@ -758,8 +786,11 @@ impl Command {
             Self::MeasCreate { .. } => "meas.create",
             Self::MeasUpdate { .. } => "meas.update",
             Self::MeasColour { .. } => "meas.colour",
+            Self::MeasCompare { .. } => "meas.compare",
+            Self::MeasOffset { .. } => "meas.offset",
             Self::MeasLayout { .. } => "meas.layout",
             Self::MeasDelete { .. } => "meas.delete",
+            Self::MeasEq { .. } => "meas.eq",
             Self::MeasStart { .. } => "meas.start",
             Self::MeasStop { .. } => "meas.stop",
             Self::MeasReset { .. } => "meas.reset",

@@ -536,6 +536,8 @@ impl Shared {
             | C::MeasUpdate { .. }
             | C::MeasColour { .. }
             | C::MeasLayout { .. }
+            | C::MeasCompare { .. }
+            | C::MeasOffset { .. }
             | C::MeasDelete { .. }
             | C::MeasStart { .. }
             | C::MeasStop { .. }
@@ -592,6 +594,13 @@ impl Shared {
                 return Err(err(
                     ErrorCode::Unsupported,
                     "the fake keeps sessions by name and path only",
+                ));
+            }
+            C::MeasEq { .. } => {
+                // EQ sets are evaluated by the daemon (ac2_core::eq); the fake has no DSP.
+                return Err(err(
+                    ErrorCode::Unsupported,
+                    "the fake evaluates no EQ: run ac2d on the fake backend",
                 ));
             }
             C::FileList => self.file_list()?,

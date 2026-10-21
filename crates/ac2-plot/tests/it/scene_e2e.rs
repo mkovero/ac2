@@ -8,12 +8,13 @@ use crate::common;
 use ac2_plot::Viewport;
 use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::Polarity;
+use ac2_proto::model::SpectrumStyle;
 use ac2_proto::units::{MeasId, Seconds, SessionEpoch};
 use ac2_scene::banner::Status;
 use ac2_scene::theme::Theme;
 use ac2_scene::time::Freshness;
 use ac2_scene::trace::{TfTrace, TimeBase, TraceKey, wrap_deg};
-use ac2_scene::view::{CoherencePlacement, SpectrumStyle, ViewState};
+use ac2_scene::view::{CoherencePlacement, ViewState};
 use ac2_testkit::image::ImageTolerance;
 use common::{golden, gpu, render_on, renderer};
 
@@ -95,8 +96,9 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
     }
 }
 
-/// Two traces with a cursor and a STALE banner, rendered and compared with `name`.
-fn transfer_golden(name: &str, view: ViewState, status: Status) {
+/// Two traces with a cursor under `status`'s banners (the first reading `first`), rendered
+/// and compared with `name`.
+fn transfer_golden(name: &str, view: ViewState, status: Status, first: &str) {
     let Some(gpu) = gpu(name) else {
         return;
     };
@@ -121,7 +123,7 @@ fn transfer_golden(name: &str, view: ViewState, status: Status) {
         &theme,
         size,
     );
-    assert_eq!(s.banners[0].text, "STALE · 2.4 s");
+    assert_eq!(s.banners[0].text, first);
     // The strip sits above every pane.
     assert!(s.panes.iter().all(|p| p.plot.y > s.strip.bottom()));
     let mut r = renderer(gpu);
@@ -138,7 +140,40 @@ fn stale() -> Status {
 
 #[test]
 fn transfer_view() {
-    transfer_golden("transfer_view", ViewState::default(), stale());
+    transfer_golden(
+        "transfer_view",
+        ViewState::default(),
+        stale(),
+        "STALE · 2.4 s",
+    );
+}
+
+/// The cursor read against its mark on the bump's top: the mark's dashed line in every
+/// pane, its plate in a bottom corner of the magnitude view.
+#[test]
+fn transfer_view_cursor_mark() {
+    let view = ViewState {
+        cursor_mark_hz: Some(2000.0),
+        ..ViewState::default()
+    };
+    transfer_golden("transfer_view_cursor_mark", view, stale(), "STALE · 2.4 s");
+}
+
+/// The cursor values dragged to the bottom-left at 1.5× the text size, the legend to the
+/// top-right at 1.25× and the mark's readout to the bottom-right: each plate where it was
+/// dropped, grown with its text, inside the plot, with its grip.
+#[test]
+fn transfer_view_moved_plates() {
+    let mut view = ViewState {
+        cursor_mark_hz: Some(2000.0),
+        ..ViewState::default()
+    };
+    view.plates.readout.move_to(0.0, 1.0);
+    view.plates.readout.set_scale(1.5);
+    view.plates.legend.move_to(1.0, 0.0);
+    view.plates.legend.set_scale(1.25);
+    view.plates.mark.move_to(1.0, 1.0);
+    transfer_golden("transfer_view_moved_plates", view, stale(), "STALE · 2.4 s");
 }
 
 #[test]
@@ -150,7 +185,38 @@ fn transfer_view_coherence_overlay() {
         no_delay_estimate: Some(ac2_scene::banner::NoDelayEstimate::NotFound),
         ..stale()
     };
-    transfer_golden("transfer_view_coherence_overlay", view, status);
+    transfer_golden(
+        "transfer_view_coherence_overlay",
+        view,
+        status,
+        "STALE · 2.4 s",
+    );
+}
+
+/// Headroom advice: an info banner under the delay notice, the cap by the max level said.
+#[test]
+fn transfer_view_advice() {
+    use ac2_scene::advice::{Advice, Stimulus};
+    let status = Status {
+        no_delay_estimate: Some(ac2_scene::banner::NoDelayEstimate::NotFound),
+        advice: Some(Advice::Raise {
+            want_db: 18.0,
+            coherence: 0.42,
+            meas_rms_dbfs: -64.3,
+            stimulus: Some(Stimulus {
+                level_dbfs: -54.5,
+                max_level_dbfs: -50.0,
+            }),
+            meas_calibrated: false,
+        }),
+        ..Status::default()
+    };
+    transfer_golden(
+        "transfer_view_advice",
+        ViewState::default(),
+        status,
+        "NO DELAY ESTIMATE",
+    );
 }
 
 /// The valid-resolution marker of a 1/96-oct curve at 96 kHz: faint shade and dashed edges
@@ -253,8 +319,8 @@ fn spectrum_golden(name: &str, style: SpectrumStyle) {
         k_min: -7 * 48,
         k_max: 263,
     };
-    let freqs = ac2_scene::grid::column_frequencies(&grid);
-    let edges = ac2_scene::grid::column_edges(&grid);
+    let freqs = grid.centres();
+    let edges = grid.edges();
     // Pink-like noise floor with a sine at 1 kHz.
     let level = freqs
         .iter()
@@ -281,22 +347,24 @@ fn spectrum_golden(name: &str, style: SpectrumStyle) {
         },
         level,
     };
-    let t = SpectrumTrace::spectrum(
+    let mut t = SpectrumTrace::spectrum(
         &spec,
-        WallNs(0),
-        None,
-        &freqs,
-        &edges,
-        "Main L",
-        Theme::dark().trace_color(0),
-        Freshness::from_age(0.0),
+        ac2_scene::spectrum::LiveMeta {
+            captured: WallNs(0),
+            curve: None,
+            freqs: &freqs,
+            edges: &edges,
+            name: "Main L".into(),
+            color: Theme::dark().trace_color(0),
+            freshness: Freshness::from_age(0.0),
+        },
     );
     let theme = Theme::dark();
-    let mut view = ViewState {
+    t.style = style;
+    let view = ViewState {
         cursor_hz: Some(1000.0),
         ..ViewState::default()
     };
-    view.spectrum.style = style;
     let size = Viewport {
         width: 560.0,
         height: 360.0,

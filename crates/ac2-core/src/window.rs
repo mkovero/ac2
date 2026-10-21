@@ -79,11 +79,6 @@ impl WindowGains {
         }
     }
 
-    /// Coherent gain S₁ / N.
-    pub fn coherent_gain(&self) -> f64 {
-        self.sum / self.len as f64
-    }
-
     /// Equivalent noise bandwidth in bins, N·S₂ / S₁².
     pub fn enbw_bins(&self) -> f64 {
         self.len as f64 * self.sum_sq / (self.sum * self.sum)

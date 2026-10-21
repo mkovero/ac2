@@ -206,8 +206,8 @@ impl Control {
     /// Takes the cue frame the current states make and sends it when it changed (or the
     /// target has not had a frame yet). A changed cue frame ends a test hold at once.
     pub(super) fn artnet_sync(&mut self, now: Instant) {
-        let frame = self.osc.frame();
-        let u = &mut self.artnet;
+        let frame = self.rig.osc.frame();
+        let u = &mut self.rig.artnet;
         if frame != u.cue_frame {
             u.cue_frame = frame;
             u.test_until = None;
@@ -235,7 +235,7 @@ impl Control {
         let Some(target) = self.store.state().rig.artnet_target else {
             return;
         };
-        let u = &mut self.artnet;
+        let u = &mut self.rig.artnet;
         if u.next_keepalive.is_some_and(|t| t <= now) {
             let f = match u.fade {
                 Some(fade) => {
@@ -255,7 +255,7 @@ impl Control {
     /// When the control loop must wake for a fade step, the keepalive or the end of a test
     /// hold.
     pub(super) fn artnet_wake(&self) -> Option<Instant> {
-        match (self.artnet.next_keepalive, self.artnet.test_until) {
+        match (self.rig.artnet.next_keepalive, self.rig.artnet.test_until) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         }
@@ -264,8 +264,8 @@ impl Control {
     /// Clean shutdown: one frame of every cue's `ok` levels.
     pub(super) fn artnet_shutdown(&mut self) {
         if let Some(target) = self.store.state().rig.artnet_target {
-            let f = self.osc.ok_frame();
-            let _ = self.artnet.snap(target, f, Instant::now());
+            let f = self.rig.osc.ok_frame();
+            let _ = self.rig.artnet.snap(target, f, Instant::now());
         }
     }
 
@@ -274,14 +274,14 @@ impl Control {
         let now = Instant::now();
         if status_due(
             &self.store.state().rig.artnet,
-            self.artnet.status(),
-            self.artnet.status_at,
+            self.rig.artnet.status(),
+            self.rig.artnet.status_at,
             now_too,
             now,
         ) {
-            self.artnet.status_at = Some(now);
+            self.rig.artnet.status_at = Some(now);
             let mut rig = self.store.state().rig.clone();
-            rig.artnet = self.artnet.status().clone();
+            rig.artnet = self.rig.artnet.status().clone();
             self.commit(Change::Rig(rig));
         }
     }
@@ -303,7 +303,7 @@ impl Control {
         }
         // Kept first: a target that would come back different after a restart would send
         // the lights' levels somewhere the operator did not choose.
-        self.rig.persist(&RigSettings {
+        self.rig.settings.persist(&RigSettings {
             artnet_target: target,
             ..self.rig_settings_now()
         })?;
@@ -316,9 +316,9 @@ impl Control {
         );
         let rev = self.commit_rig(|r| r.artnet_target = target);
         // The new receiver gets the current frame now, not at the next keepalive.
-        self.artnet.sent = None;
-        self.artnet.fade = None;
-        self.artnet.test_until = None;
+        self.rig.artnet.sent = None;
+        self.rig.artnet.fade = None;
+        self.rig.artnet.test_until = None;
         self.artnet_sync(Instant::now());
         self.commit_artnet_status(true);
         Ok(ReplyBody::Ack { rev })
@@ -339,7 +339,7 @@ impl Control {
                 rev: self.store.rev(),
             });
         }
-        self.rig.persist(&RigSettings {
+        self.rig.settings.persist(&RigSettings {
             artnet_fade: fade,
             ..self.rig_settings_now()
         })?;
@@ -368,9 +368,9 @@ impl Control {
         }
         let now = Instant::now();
         let frame = dmx_htp([channels]);
-        let r = self.artnet.snap(target, frame, now);
-        self.artnet.test_until = Some(now + TEST_HOLD);
-        self.artnet.after_test = true;
+        let r = self.rig.artnet.snap(target, frame, now);
+        self.rig.artnet.test_until = Some(now + TEST_HOLD);
+        self.rig.artnet.after_test = true;
         self.commit_artnet_status(true);
         r.map_err(|e| perr(ErrorCode::Internal, e))?;
         Ok(ReplyBody::Ack {

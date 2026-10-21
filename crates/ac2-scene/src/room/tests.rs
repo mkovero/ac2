@@ -55,9 +55,9 @@ fn room() -> RoomAcoustics {
 fn bands_are_named_by_their_nominal_frequency() {
     assert_eq!(band_name(Some(62.5)), "63");
     assert_eq!(band_name(Some(125.89)), "125");
-    assert_eq!(band_name(Some(1000.0)), "1k");
-    assert_eq!(band_name(Some(1258.9)), "1.25k");
-    assert_eq!(band_name(Some(7943.3)), "8k");
+    assert_eq!(band_name(Some(1000.0)), "1000");
+    assert_eq!(band_name(Some(1258.9)), "1250");
+    assert_eq!(band_name(Some(7943.3)), "8000");
     assert_eq!(band_name(Some(31.62)), "31.5");
     assert_eq!(band_name(None), "All");
 }
@@ -65,7 +65,7 @@ fn bands_are_named_by_their_nominal_frequency() {
 #[test]
 fn refused_values_are_words_and_the_legend_says_why() {
     let t = room_table(&room(), BandSet::Octave);
-    assert_eq!(t.bands, ["63", "125", "1k", "8k", "All"]);
+    assert_eq!(t.bands, ["63", "125", "1000", "8000", "All"]);
     assert_eq!(
         t.caption,
         "Room (ISO 3382-1) · octave bands · decay to 990 ms"
@@ -105,7 +105,7 @@ fn refused_values_are_words_and_the_legend_says_why() {
         "the decay meets the noise after 40 dB; this needs 45 dB"
     );
     let third = room_table(&room(), BandSet::Third);
-    assert_eq!(third.bands, ["1.25k", "All"]);
+    assert_eq!(third.bands, ["1250", "All"]);
     assert!(third.caption.contains("⅓-octave bands"));
 }
 
@@ -117,7 +117,7 @@ fn plain_text_lines_up_the_columns() {
         lines[0],
         "Room (ISO 3382-1) · octave bands · decay to 990 ms"
     );
-    assert_eq!(lines[1], "               63    125     1k     8k    All");
+    assert_eq!(lines[1], "               63    125   1000   8000    All");
     assert_eq!(lines[4], "T30 (s)     noise  1.26*  1.03*  0.69*  1.09*");
     assert!(lines.iter().any(|l| l.starts_with("short: ")));
 }
@@ -137,7 +137,7 @@ fn a_narrow_pane_drops_outer_bands_and_keeps_broadband() {
     let narrow = table_layer(&t, Rect::new(0.0, 0.0, 230.0, 300.0), &theme);
     let some = texts(&narrow);
     assert!(!some.contains(&"63".to_owned()), "{some:?}");
-    assert!(some.contains(&"All".to_owned()) && some.contains(&"1k".to_owned()));
+    assert!(some.contains(&"All".to_owned()) && some.contains(&"1000".to_owned()));
     assert!(
         some[0].ends_with("bands hidden (narrow pane)"),
         "{}",

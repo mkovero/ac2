@@ -30,7 +30,7 @@ fn grid() -> GridDef {
 /// `inserted` s of delay (stored phase −360·f·(arrival − inserted)), γ² = 0.9.
 fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags) -> Answer {
     let g = grid();
-    let f = frequencies(&g);
+    let f = g.centres();
     let phase = f
         .iter()
         .map(|f| ac2_traces::columns::wrap_deg(-360.0 * f * (arrival - inserted)) as f32)
@@ -61,6 +61,7 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
             phase,
             coh: vec![0.9; f.len()],
             validity: vec![ValidityMask::NONE; f.len()],
+            align: None,
         }),
     }))
 }
@@ -71,7 +72,7 @@ fn flat(meas: u32, db: f32) -> Answer {
 
 /// A stored operand: flat `db`, phase 0, measured with `delay`, in `time_base`.
 fn stored(db: f32, delay: f64, time_base: Option<SessionEpoch>) -> Answer {
-    let n = frequencies(&grid()).len();
+    let n = grid().centres().len();
     Answer::Stored(Arc::new(Held {
         columns: Columns {
             mag_db: vec![db; n],
@@ -111,7 +112,7 @@ fn binary(a: Operand, op: MathOp, b: Operand) -> MathConfig {
 
 fn run(c: &MathConfig, seen: &[Option<f64>], answers: &[Answer]) -> TfFrame {
     let g = grid();
-    match combine(MeasId(9), c, &g, &frequencies(&g), EPOCH, seen, answers) {
+    match combine(MeasId(9), c, &g, &g.centres(), EPOCH, seen, answers) {
         FrameData::Tf(f) => f,
         other => panic!("{other:?}"),
     }
@@ -202,7 +203,7 @@ fn complex_average_rerefers_each_operands_delay() {
         member(2, 0.0, 0.010 + tau, 0.010 + tau, ProtectionFlags::NONE),
     ];
     let g = grid();
-    let freqs = frequencies(&g);
+    let freqs = g.centres();
     let f = run(&avg(&[1, 2], AverageMethod::Complex), &[None; 2], &answers);
     assert_eq!(f.meta.delay, Seconds(0.010));
     for (k, hz) in freqs.iter().enumerate() {
@@ -229,7 +230,7 @@ fn reference_operand_left_out_keeps_its_delay() {
     let f = run(&c, &[Some(0.004), Some(0.006), Some(0.006)], &answers);
     assert_eq!(f.meta.delay, Seconds(0.004));
     // Both included arrive 2 ms after the reference: phase −360·f·0.002 (wrapped).
-    let freqs = frequencies(&grid());
+    let freqs = grid().centres();
     let k = freqs
         .iter()
         .position(|f| (f - 125.0).abs() < 1.0)
@@ -290,7 +291,7 @@ fn ratio_of_a_live_and_a_stored_operand() {
     ];
     let f = run(&c, &[None; 2], &answers);
     assert_eq!(f.meta.delay, Seconds(0.0));
-    let freqs = frequencies(&grid());
+    let freqs = grid().centres();
     for (k, hz) in freqs.iter().enumerate() {
         assert!((f.mag[k] - 6.0).abs() < 1e-4);
         // Compared on the circle: ±180° are one phase.
@@ -352,7 +353,7 @@ fn summation_of_a_capture_and_a_live_operand() {
     ];
     let f = run(&add, &[None; 2], &answers);
     assert_eq!(f.meta.delay, Seconds(0.010));
-    for (k, hz) in frequencies(&grid()).iter().enumerate() {
+    for (k, hz) in grid().centres().iter().enumerate() {
         let want = 2.0 * (std::f64::consts::PI * hz * tau).cos().abs();
         let got = 10f64.powf(f64::from(f.mag[k]) / 20.0);
         if want > 1e-3 {
@@ -365,16 +366,18 @@ fn summation_of_a_capture_and_a_live_operand() {
 /// A math job over `operands` (`None` = live) with the probes `probes` holds.
 fn job(cfg: MathConfig, stored: Vec<Option<Arc<Held>>>, probes: Arc<Probes>) -> MathJob {
     MathJob::new(
-        MeasId(9),
-        cfg,
+        crate::jobs::JobCtx {
+            meas: MeasId(9),
+            cfg,
+            config_rev: Rev(1),
+            epoch: EPOCH,
+        },
         Grids {
             grid: grid(),
             display: None,
         },
         stored,
-        EPOCH,
         probes,
-        Rev(1),
     )
 }
 

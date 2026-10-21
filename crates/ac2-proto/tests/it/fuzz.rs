@@ -53,6 +53,7 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
                     phase,
                     coh,
                     validity: val.into_iter().map(frame::ValidityMask).collect(),
+                    align: None,
                 }),
             }
         })
@@ -309,6 +310,8 @@ proptest! {
         t.phase = vals.iter().map(|v| v.1).collect();
         t.coh = vals.iter().map(|v| v.2).collect();
         t.validity = vec![frame::ValidityMask::NONE; vals.len()];
+        // The alignment's curves are tested apart: these arrays are the grid's columns.
+        t.align = None;
         let back = decode_frame(&parts_ref(&encode_frame(&f).expect("encodes"))).expect("decodes");
         let (mag, phase, coh) = tf_arrays(&back);
         for (i, (m, p, c)) in vals.iter().enumerate() {

@@ -1,5 +1,6 @@
 //! Readout strings: comparison cursor and delay / distance.
 
+use crate::comb::Comb;
 use crate::format;
 use crate::grid::nearest_column;
 use crate::trace::{DisplayTrace, TraceKey};
@@ -15,16 +16,36 @@ pub fn delay_distance_m(delay_s: f64, temp_c: f64) -> f64 {
     delay_s * speed_of_sound(temp_c)
 }
 
+/// The path a delay stands for: `4.24 m @ 20 °C`.
+fn path_at(delay_s: f64, temp_c: f64) -> String {
+    format!(
+        "{} m @ {}",
+        format::fixed(delay_distance_m(delay_s, temp_c), 2),
+        format::celsius(temp_c)
+    )
+}
+
 /// `12.34 ms · 4.24 m @ 20 °C`; the delay to the µs when it has a finer part (`12.502 ms`).
 pub fn delay_readout(delay_s: f64, temp_c: f64) -> String {
     if !delay_s.is_finite() {
         return format::NO_VALUE.to_string();
     }
+    format!("{} · {}", format::delay(delay_s), path_at(delay_s, temp_c))
+}
+
+/// A comb read from the spacing of its notches (or peaks): a copy delayed by `τ` summed in
+/// cancels every `1/τ` Hz, so the spacing names the delay and the extra path the copy
+/// travelled: `comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C`.
+pub fn comb_text(spacing_hz: f64, temp_c: f64) -> String {
+    if !(spacing_hz.is_finite() && spacing_hz > 0.0) {
+        return format!("comb Δf {}", format::NO_VALUE);
+    }
+    let tau = 1.0 / spacing_hz;
     format!(
-        "{} · {} m @ {}",
-        format::delay(delay_s),
-        format::fixed(delay_distance_m(delay_s, temp_c), 2),
-        format::celsius(temp_c)
+        "comb Δf {} · {} · {}",
+        format::freq_readout(spacing_hz),
+        format::ms(tau, 2),
+        path_at(tau, temp_c)
     )
 }
 
@@ -98,11 +119,114 @@ pub fn cursor_readout(traces: &[DisplayTrace], hz: f64, phase: PhaseView) -> Opt
     })
 }
 
+/// One curve's values at the cursor or at its mark, as the pane draws them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MarkPoint {
+    /// The column read, Hz.
+    pub hz: f64,
+    /// Level as drawn, dB.
+    pub level_db: f64,
+    /// Phase in the pane's mode: degrees, or group delay in seconds. `None` on a spectrum.
+    pub phase: Option<f64>,
+}
+
+/// The cursor mark: where it is and how the cursor differs from it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MarkReadout {
+    /// The column the mark reads, Hz.
+    pub freq_hz: f64,
+    /// `mark 1.00 kHz`, `Δ +1.00 kHz · −3.2 dB · +45°`, then, when both ends are peaks or
+    /// both notches, what the curve says of the comb they make ([`comb_line`]).
+    pub lines: Vec<String>,
+}
+
+/// A frequency difference, signed: `+1.00 kHz`, `−250 Hz`, `0 Hz`.
+pub fn freq_delta(d_hz: f64) -> String {
+    if !d_hz.is_finite() {
+        return format::NO_VALUE.to_string();
+    }
+    let text = format::freq_readout(d_hz.abs());
+    if text == format::NO_VALUE {
+        return "0 Hz".to_string();
+    }
+    let sign = if d_hz < 0.0 { format::MINUS } else { '+' };
+    format!("{sign}{text}")
+}
+
+/// The difference of two phase readings in `phase`'s terms: wrapped degrees folded back
+/// into ±180° (a wrapped curve's jump is not a phase change), unwrapped degrees as they
+/// are, group delay in ms.
+fn phase_delta(cursor: f64, mark: f64, phase: PhaseView) -> String {
+    let d = cursor - mark;
+    if !d.is_finite() {
+        return format::NO_VALUE.to_string();
+    }
+    match phase {
+        PhaseView::Wrapped => format::phase_readout((d + 180.0).rem_euclid(360.0) - 180.0),
+        PhaseView::Unwrapped { .. } => format::phase_readout(d),
+        PhaseView::GroupDelay { .. } => format!("{} ms", format::signed(d * 1000.0, 2)),
+    }
+}
+
+/// The comb line of a mark and a cursor `spacing_hz` apart, by what the curve shows of it
+/// ([`Comb`]): the numbers ([`comb_text`]) only when a third tooth repeats the spacing;
+/// `comb: uneven, no third peak` when none does; `comb: smoothing 1/6 oct hides combs
+/// under 335 Hz here` when the smoothing is too wide for a comb that fine.
+pub fn comb_line(comb: Comb, spacing_hz: f64, temp_c: f64) -> String {
+    match comb {
+        Comb::Confirmed => comb_text(spacing_hz, temp_c),
+        Comb::Uneven(kind) => format!("comb: uneven, no third {}", kind.name()),
+        Comb::Smoothed { fraction, below_hz } => format!(
+            "comb: smoothing {} hides combs under {} here",
+            format::octave_fraction(fraction),
+            format::freq_readout(below_hz)
+        ),
+    }
+}
+
+/// The cursor (`cursor`) read against its mark (`mark`) on one curve, named (`name`) when
+/// other curves are shown beside it; `comb`, the evidence for the comb the two ends space
+/// when they are like landmarks ([`crate::comb::evidence`]); `temp_c` for the path a comb's
+/// delay stands for.
+pub fn mark_readout(
+    mark: MarkPoint,
+    cursor: MarkPoint,
+    comb: Option<Comb>,
+    phase: PhaseView,
+    name: Option<&str>,
+    temp_c: f64,
+) -> MarkReadout {
+    let at = format::freq_readout(mark.hz);
+    let head = match name {
+        Some(n) => format!("mark {n} {at}"),
+        None => format!("mark {at}"),
+    };
+    let df = cursor.hz - mark.hz;
+    let mut delta = format!(
+        "Δ {} · {}",
+        freq_delta(df),
+        format::db_readout(cursor.level_db - mark.level_db)
+    );
+    if let (Some(c), Some(m)) = (cursor.phase, mark.phase) {
+        delta = format!("{delta} · {}", phase_delta(c, m, phase));
+    }
+    let mut lines = vec![head, delta];
+    if let Some(comb) = comb.filter(|_| df.is_finite() && df != 0.0) {
+        lines.push(comb_line(comb, df.abs(), temp_c));
+    }
+    MarkReadout {
+        freq_hz: mark.hz,
+        lines,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cursor_jump::Landmark;
     use crate::primitives::Color;
     use crate::trace::{PhaseRelation, TraceKey};
+    use ac2_proto::model::SmoothingFraction;
     use ac2_proto::units::MeasId;
 
     #[test]
@@ -138,6 +262,110 @@ mod tests {
         assert_eq!(arrival_difference(f64::NAN, 0.0, 20.0), "—");
     }
 
+    #[test]
+    fn comb_and_mark_strings() {
+        // 1 kHz spacing: τ = 1 ms, 343.21 mm at 20 °C.
+        assert_eq!(
+            comb_text(1000.0, 20.0),
+            "comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C"
+        );
+        // 250 Hz: 4 ms, 1.3729 m.
+        assert_eq!(
+            comb_text(250.0, 20.0),
+            "comb Δf 250 Hz · 4.00 ms · 1.37 m @ 20 °C"
+        );
+        assert_eq!(comb_text(0.0, 20.0), "comb Δf —");
+        assert_eq!(freq_delta(1000.0), "+1.00 kHz");
+        assert_eq!(freq_delta(-250.0), "−250 Hz");
+        assert_eq!(freq_delta(0.0), "0 Hz");
+        assert_eq!(freq_delta(f64::NAN), "—");
+        let p = |hz, level_db, phase| MarkPoint {
+            hz,
+            level_db,
+            phase,
+        };
+        let comb = Some(Comb::Confirmed);
+        // Two neighbouring notches of a 1 ms comb, read wrapped: −170° − (+170°) is +20°
+        // across the wrap, not −340°.
+        let r = mark_readout(
+            p(500.0, -30.0, Some(170.0)),
+            p(1500.0, -26.75, Some(-170.0)),
+            comb,
+            PhaseView::Wrapped,
+            None,
+            20.0,
+        );
+        assert_eq!(r.freq_hz, 500.0);
+        assert_eq!(
+            r.lines,
+            [
+                "mark 500 Hz",
+                "Δ +1.00 kHz · +3.2 dB · +20°",
+                "comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C",
+            ]
+        );
+        let unwrapped = PhaseView::Unwrapped {
+            range: crate::axis::Range::new(-720.0, 0.0),
+        };
+        let r = mark_readout(
+            p(2000.0, 0.0, Some(-100.0)),
+            p(1000.0, -6.0, Some(-460.0)),
+            comb,
+            unwrapped,
+            Some("m1"),
+            0.0,
+        );
+        assert_eq!(
+            r.lines,
+            [
+                "mark m1 2.00 kHz",
+                "Δ −1.00 kHz · −6.0 dB · −360°",
+                "comb Δf 1.00 kHz · 1.00 ms · 0.33 m @ 0 °C",
+            ]
+        );
+        let gd = PhaseView::GroupDelay {
+            range_ms: crate::axis::Range::new(-5.0, 5.0),
+        };
+        let r = mark_readout(
+            p(100.0, 0.0, Some(0.002)),
+            p(100.0, f64::NAN, Some(0.0035)),
+            comb,
+            gd,
+            None,
+            20.0,
+        );
+        // On the mark itself: no spacing, so no comb; a level not drawn reads as none.
+        assert_eq!(r.lines, ["mark 100 Hz", "Δ 0 Hz · — · +1.50 ms"]);
+        // A spectrum has no phase.
+        let (m, c) = (p(1000.0, -20.0, None), p(1250.0, -32.5, None));
+        let r = mark_readout(m, c, comb, PhaseView::Wrapped, None, 20.0);
+        assert_eq!(r.lines[1], "Δ +250 Hz · −12.5 dB");
+        assert_eq!(r.lines[2], "comb Δf 250 Hz · 4.00 ms · 1.37 m @ 20 °C");
+        // Like ends with no third tooth, or finer than the smoothing resolves: no numbers.
+        let r = mark_readout(
+            m,
+            c,
+            Some(Comb::Uneven(Landmark::Peak)),
+            PhaseView::Wrapped,
+            None,
+            20.0,
+        );
+        assert_eq!(r.lines[2], "comb: uneven, no third peak");
+        let smoothed = Comb::Smoothed {
+            fraction: SmoothingFraction::Sixth,
+            below_hz: 2.0 * 1450.0 * 0.115_59,
+        };
+        let r = mark_readout(m, c, Some(smoothed), PhaseView::Wrapped, None, 20.0);
+        assert_eq!(
+            r.lines[2],
+            "comb: smoothing 1/6 oct hides combs under 335 Hz here"
+        );
+        // Unlike ends (a peak to a notch is half a comb's spacing) or a column that is
+        // neither: no comb line.
+        let r = mark_readout(m, c, None, PhaseView::Wrapped, None, 20.0);
+        assert_eq!(r.lines, ["mark 1.00 kHz", "Δ +250 Hz · −12.5 dB"]);
+    }
+
     fn dt(key: u32, freqs: Vec<f64>, mag: Vec<f64>) -> DisplayTrace {
         let n = freqs.len();
         DisplayTrace {
@@ -158,6 +386,7 @@ mod tests {
             freshness: None,
             smoothing: None,
             note: None,
+            dashed: false,
         }
     }
 

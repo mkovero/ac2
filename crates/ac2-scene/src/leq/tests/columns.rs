@@ -328,9 +328,9 @@ fn column_texts() {
         "OVER",
         "NEAR",
         "OK",
-        "limit 99.0 dB",
+        "limit 99.0 dB SPL",
         // What to do: the level to stay under, alone (not what it holds for).
-        "stay ≤ 101.5 dB",
+        "stay ≤ 101.5 dB SPL",
         // How long an over window cools down when it cannot recover within the horizon,
         // in the longest wording that fits.
         "cooling down in 7 min 30 s",
@@ -342,7 +342,7 @@ fn column_texts() {
         // One weighting: the caption names it once, the columns only their lengths.
         "15 min",
         // …and each column still says its unit and weighting under its value.
-        "dB(A)",
+        "dB SPL (A)",
     ] {
         assert!(all.contains(&want), "{want} in {all:?}");
     }
@@ -363,7 +363,7 @@ fn column_texts() {
     assert!(v < size_of(&s, "15 min"), "{v}");
     assert!((size_of(&s, "OVER") - k.large).abs() < 1e-3);
     // The instruction may shrink a little to keep its wording.
-    let stay = size_of(&s, "stay ≤ 101.5 dB");
+    let stay = size_of(&s, "stay ≤ 101.5 dB SPL");
     assert!(stay <= k.large && stay > v, "{stay}");
     assert!(v <= k.large * VALUE_RATIO + 1e-3, "{v} vs {}", k.large);
     let small = leq_scene(

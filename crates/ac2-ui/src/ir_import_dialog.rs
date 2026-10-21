@@ -7,11 +7,10 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use ac2_proto::model::{ImportRole, IrAlign, IrImport, IrImportWindow, Resolution};
-use ac2_proto::units::Seconds;
 
 use crate::conn::Request;
 use crate::forms::{Field, FieldId, Form, FormKind, Value};
-use crate::state::parse_number;
+use ac2_scene::unit_text::{Time, in_field};
 
 /// What a WAV / RF64 header says about the file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,19 +192,14 @@ pub fn request(f: &Form) -> Result<Request, String> {
     let window = if gate.is_empty() || gate.eq_ignore_ascii_case("off") {
         IrImportWindow::Whole
     } else {
-        let post = parse_number(gate, &["ms"]).map_err(|e| format!("gate: {e}"))?;
-        if post <= 0.0 {
+        let Time(post) = in_field(gate, "ms").map_err(|e| format!("gate: {e}"))?;
+        if post.0 <= 0.0 {
             return Err("gate: a length after the peak, more than 0 ms (or off)".into());
         }
-        let pre = parse_number(f.text(FieldId::GatePre), &["ms"])
+        // A duration is never negative: the parser refuses `-1 ms`.
+        let Time(pre) = in_field(f.text(FieldId::GatePre), "ms")
             .map_err(|e| format!("before the peak: {e}"))?;
-        if pre < 0.0 {
-            return Err("before the peak: 0 ms or more".into());
-        }
-        IrImportWindow::Gate {
-            pre: Seconds(pre / 1000.0),
-            post: Seconds(post / 1000.0),
-        }
+        IrImportWindow::Gate { pre, post }
     };
     Ok(Request::Import {
         path: target.path.clone(),

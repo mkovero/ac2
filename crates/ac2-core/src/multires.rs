@@ -187,18 +187,6 @@ impl MultiResLadder {
         ]
     }
 
-    /// The longest window that contributes to a column at `f`: what sets how fast the column
-    /// follows a change.
-    pub fn slowest_band(&self, f: f64) -> usize {
-        self.weights(f)
-            .iter()
-            .flatten()
-            .filter(|w| w.weight > 0.0)
-            .map(|w| w.band)
-            .min()
-            .unwrap_or(0)
-    }
-
     /// Resolution cell of a column at `f`: the bin of the widest-binned band contributing.
     pub fn cell_hz(&self, f: f64) -> f64 {
         let band = self

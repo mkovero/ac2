@@ -1,4 +1,5 @@
 use super::*;
+use ac2_proto::model::AlarmSubject;
 
 /// A long calibration text (mic, data sheet, curve) on the right still leaves the run centred
 /// on the pane, as the meter's number under it is: a shorter wording centred beats a longer
@@ -226,7 +227,11 @@ fn run_wordings() {
 fn new_log_confirmation_names_what_ends() {
     let c = cfg();
     let r = run_text(&run(), &c, |_| UTC_PLUS_2);
-    let k = new_log_confirm("FOH SPL", &c, Some(&r));
+    let k = new_log_confirm("FOH SPL", &c, Some(&r), "Shift+R");
+    assert_eq!(
+        k.hint,
+        "Shift+R starts the new log · N or Esc keeps the current one"
+    );
     assert_eq!(k.title, "Start a new SPL log for FOH SPL?");
     assert_eq!(
         k.lines[0],
@@ -239,7 +244,7 @@ fn new_log_confirmation_names_what_ends() {
     );
     assert!(k.lines[2].starts_with("Kept: the windows, limits"));
     assert!(k.lines[3].contains("ac2 spl leq export --previous"));
-    let k = new_log_confirm("FOH SPL", &c, None);
+    let k = new_log_confirm("FOH SPL", &c, None, "Shift+R");
     assert_eq!(k.lines[0], "The current log ends (no seconds logged yet).");
 }
 
@@ -369,11 +374,11 @@ fn peak_tiles_and_the_correction() {
             lc.value.as_str(),
             lc.weighted_unit.as_str()
         ),
-        ("LCpeak", "136.2", "dB(C) corr.")
+        ("LCpeak", "136.2", "dB SPL (C) corr.")
     );
     assert_eq!(lc.state, TileState::Over);
     assert_eq!(lc.state_text.as_deref(), Some("OVER"));
-    assert_eq!(lc.limit.as_deref(), Some("limit 135.0 dB"));
+    assert_eq!(lc.limit.as_deref(), Some("limit 135.0 dB SPL"));
     assert_eq!(lc.held.as_deref(), Some("highest of the last 10 s"));
     assert_eq!(lc.limit_db, Some(135.0));
     assert!(lc.headroom.is_none() && lc.filling.is_none() && !lc.filling());
@@ -384,9 +389,9 @@ fn peak_tiles_and_the_correction() {
             laf.weighted_unit.as_str(),
             laf.state_text.as_deref()
         ),
-        ("LAFmax", "dB(A) corr.", Some("OK"))
+        ("LAFmax", "dB SPL (A) corr.", Some("OK"))
     );
-    assert_eq!(t[1].weighted_unit, "dB(A) corr.");
+    assert_eq!(t[1].weighted_unit, "dB SPL (A) corr.");
     assert!(
         t.iter()
             .all(|x| x.corrected.as_deref() == Some("corrected +3.0 dB, peaks +1.5 dB"))
@@ -398,7 +403,7 @@ fn peak_tiles_and_the_correction() {
     // Without a correction: plain units, no caption note.
     let (c0, f0) = with_peaks(None);
     let t0 = leq_tiles(&c0, &f0);
-    assert_eq!(t0[4].weighted_unit, "dB(C)");
+    assert_eq!(t0[4].weighted_unit, "dB SPL (C)");
     assert!(t0.iter().all(|x| x.corrected.is_none()));
     // A limit not configured has no tile even when a frame carries a state.
     let mut c1 = c0.clone();
@@ -506,7 +511,7 @@ fn alarm_wording() {
         alarm_text("FOH SPL", &window),
         (
             true,
-            "FOH SPL: LAeq 30 min over its limit — 101.2 dB > 99.0 dB".to_owned()
+            "FOH SPL: LAeq 30 min over its limit — 101.2 dB SPL > 99.0 dB SPL".to_owned()
         )
     );
     let peak = LeqAlarm {
@@ -523,7 +528,7 @@ fn alarm_wording() {
         alarm_text("FOH SPL", &peak),
         (
             false,
-            "FOH SPL: LCpeak back within its limit — 133.0 dB (corrected +2.0 dB)".to_owned()
+            "FOH SPL: LCpeak back within its limit — 133.0 dB SPL (corrected +2.0 dB)".to_owned()
         )
     );
 }

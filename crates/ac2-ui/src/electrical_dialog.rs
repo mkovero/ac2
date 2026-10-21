@@ -17,7 +17,8 @@
 use ac2_proto::Command;
 use ac2_proto::cal::{self, DataSheet};
 use ac2_proto::model::{CalMethod, ElectricalConnection, MicLoading, State};
-use ac2_proto::units::{Hz, MvPerPa, Ohms, Volts};
+use ac2_proto::units::MvPerPa;
+use ac2_scene::unit_text::{Freq, MicSensitivityArg, OhmsArg, VoltsArg, in_field};
 
 /// The fields, top to bottom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -79,83 +80,6 @@ pub struct ElectricalDialog {
 
 fn input_no(c: u16) -> u32 {
     u32::from(c) + 1
-}
-
-/// A number followed by a unit, the unit lowercased without spaces.
-fn split(t: &str) -> Option<(f64, String)> {
-    let t = t.trim().replace(',', ".");
-    let end = t
-        .char_indices()
-        .find(|&(i, c)| !(c.is_ascii_digit() || c == '.' || ((c == '-' || c == '+') && i == 0)))
-        .map_or(t.len(), |(i, _)| i);
-    let n: f64 = t[..end].parse().ok()?;
-    n.is_finite()
-        .then(|| (n, t[end..].replace(' ', "").to_lowercase()))
-}
-
-/// `15.03 mV`, `0.015 V`, `250 µV` → volts. The unit is required: mV and V differ by 1000.
-pub fn parse_volts(t: &str) -> Result<Volts, String> {
-    let (n, u) = split(t).ok_or("type the voltage the meter shows, e.g. 15.03 mV")?;
-    let v = match u.as_str() {
-        "v" => n,
-        "mv" => n * 1e-3,
-        "uv" | "µv" | "μv" => n * 1e-6,
-        "" => return Err("give the unit: mV or V".into()),
-        _ => return Err(format!("unknown unit {u:?}: mV or V")),
-    };
-    if v > 0.0 {
-        Ok(Volts(v))
-    } else {
-        Err("the voltage must be above 0".into())
-    }
-}
-
-/// `1 kHz`, `1000 Hz`, `400` (Hz) → Hz.
-pub fn parse_freq(t: &str) -> Result<Hz, String> {
-    let (n, u) = split(t).ok_or("type the tone's frequency, e.g. 1 kHz")?;
-    let f = match u.as_str() {
-        "" | "hz" => n,
-        "k" | "khz" => n * 1e3,
-        _ => return Err(format!("unknown unit {u:?}: Hz or kHz")),
-    };
-    if f > 0.0 {
-        Ok(Hz(f))
-    } else {
-        Err("the frequency must be above 0".into())
-    }
-}
-
-/// `15.0 mV/Pa`, `0.015 V/Pa`, `-36.5 dBV/Pa` (as data sheets state it) → mV/Pa.
-pub fn parse_sensitivity(t: &str) -> Result<MvPerPa, String> {
-    let (n, u) = split(t).ok_or("type the mic's sensitivity, e.g. 15.0 mV/Pa")?;
-    let mv = match u.as_str() {
-        "mv/pa" | "mv" => n,
-        "v/pa" => n * 1e3,
-        "dbv/pa" | "dbv" => 1e3 * 10f64.powf(n / 20.0),
-        "" => return Err("give the unit: mV/Pa or dBV/Pa".into()),
-        _ => return Err(format!("unknown unit {u:?}: mV/Pa or dBV/Pa")),
-    };
-    if mv > 0.0 && mv.is_finite() {
-        Ok(MvPerPa(mv))
-    } else {
-        Err("the sensitivity must be above 0".into())
-    }
-}
-
-/// `330 ohm`, `330 Ω`, `330` (Ω), `2 k`, `2 kΩ`, `2 kohm` → Ω.
-pub fn parse_ohms(t: &str) -> Result<Ohms, String> {
-    let (n, u) = split(t).ok_or("type the impedance, e.g. 330 ohm or 2 k")?;
-    // `split` lowercases: Ω (and the ohm sign) become ω.
-    let z = match u.as_str() {
-        "" | "ohm" | "ω" => n,
-        "k" | "kohm" | "kω" => n * 1e3,
-        _ => return Err(format!("unknown unit {u:?}: ohm or k")),
-    };
-    if z > 0.0 && z.is_finite() {
-        Ok(Ohms(z))
-    } else {
-        Err("the impedance must be above 0".into())
-    }
 }
 
 impl ElectricalDialog {
@@ -273,8 +197,12 @@ impl ElectricalDialog {
                 "give the preamp's input impedance too, or leave both blank".into(),
             )),
             (false, false) => Ok(Some(MicLoading {
-                mic_impedance: parse_ohms(m).map_err(|e| (Field::MicImpedance, e))?,
-                input_impedance: parse_ohms(i).map_err(|e| (Field::InputImpedance, e))?,
+                mic_impedance: in_field::<OhmsArg>(m, "ohm")
+                    .map_err(|e| (Field::MicImpedance, e.0))?
+                    .0,
+                input_impedance: in_field::<OhmsArg>(i, "ohm")
+                    .map_err(|e| (Field::InputImpedance, e.0))?
+                    .0,
             })),
         }
     }
@@ -345,8 +273,20 @@ impl ElectricalDialog {
         }
         self.error = None;
         let parsed = (|| {
-            let volts = parse_volts(&self.volts).map_err(|e| (Field::Volts, e))?;
-            let freq = parse_freq(&self.freq).map_err(|e| (Field::Freq, e))?;
+            if self.volts.trim().is_empty() {
+                return Err((
+                    Field::Volts,
+                    "type the voltage the meter shows, e.g. 15.03 mV".into(),
+                ));
+            }
+            let volts = self
+                .volts
+                .parse::<VoltsArg>()
+                .map_err(|e| (Field::Volts, e.0))?
+                .0;
+            let freq = in_field::<Freq>(&self.freq, "hz")
+                .map_err(|e| (Field::Freq, e.0))?
+                .0;
             let from_sheet = self
                 .data_sheet
                 .as_ref()
@@ -361,7 +301,12 @@ impl ElectricalDialog {
                         .unwrap_or_else(|| "type the mic's sensitivity, e.g. 15.0 mV/Pa".into()),
                 ));
             } else {
-                Some(parse_sensitivity(&self.sensitivity).map_err(|e| (Field::Sensitivity, e))?)
+                Some(
+                    self.sensitivity
+                        .parse::<MicSensitivityArg>()
+                        .map_err(|e| (Field::Sensitivity, e.0))?
+                        .0,
+                )
             };
             let loading = self.loading()?;
             Ok((volts, freq, mic_sensitivity, loading))
@@ -452,7 +397,7 @@ mod tests {
     use ac2_proto::model::{
         CalEntry, CalKey, DeviceId, InputSetup, Mic, MicCurveRef, OpenSession, SplCal,
     };
-    use ac2_proto::units::{Db, DbSpl, Dbfs, WallNs};
+    use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, Ohms, Volts, WallNs};
 
     fn state(stated: Option<f64>) -> State {
         let mut s = ac2_proto::samples::state();
@@ -484,21 +429,6 @@ mod tests {
             .as_ref()
             .map(|o: &OpenSession| o.input_device.clone())
             .unwrap_or_else(|| DeviceId("none".into()))
-    }
-
-    #[test]
-    fn parses_what_meters_and_data_sheets_show() {
-        assert_eq!(parse_volts("15.03 mV"), Ok(Volts(0.01503)));
-        assert_eq!(parse_volts("0,015V"), Ok(Volts(0.015)));
-        assert!((parse_volts("250 µV").expect("µV").0 - 250e-6).abs() < 1e-15);
-        assert!(parse_volts("15").expect_err("unit").contains("mV or V"));
-        assert!(parse_volts("0 mV").is_err());
-        assert_eq!(parse_freq("1 kHz"), Ok(Hz(1000.0)));
-        assert_eq!(parse_freq("400"), Ok(Hz(400.0)));
-        assert_eq!(parse_sensitivity("15.0 mV/Pa"), Ok(MvPerPa(15.0)));
-        let db = parse_sensitivity("-36.5 dBV/Pa").expect("dBV").0;
-        assert!((db - 14.962).abs() < 1e-3);
-        assert!(parse_sensitivity("15").is_err());
     }
 
     #[test]
@@ -576,15 +506,6 @@ mod tests {
 
     #[test]
     fn loading_both_or_neither_shown_live() {
-        assert_eq!(parse_ohms("330 ohm"), Ok(Ohms(330.0)));
-        assert_eq!(parse_ohms("330Ω"), Ok(Ohms(330.0)));
-        assert_eq!(parse_ohms("330"), Ok(Ohms(330.0)));
-        assert_eq!(parse_ohms("2 k"), Ok(Ohms(2000.0)));
-        assert_eq!(parse_ohms("2 kΩ"), Ok(Ohms(2000.0)));
-        assert_eq!(parse_ohms("2,2 kohm"), Ok(Ohms(2200.0)));
-        assert!(parse_ohms("0 ohm").is_err());
-        assert!(parse_ohms("2 mA").is_err());
-
         let s = state(Some(15.0));
         let mut d = ElectricalDialog::new(&s, 1, "MM1 34804");
         assert_eq!(d.loading_text(), "blank: no loading correction");

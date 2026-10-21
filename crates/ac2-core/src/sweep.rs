@@ -372,7 +372,8 @@ impl SweepTiming {
     }
 
     /// Time of the k-th harmonic's impulse response re the linear one, seconds (negative).
-    pub fn harmonic_time_s(&self, k: u8) -> f64 {
+    #[cfg(test)]
+    pub(crate) fn harmonic_time_s(&self, k: u8) -> f64 {
         -self.plan.rate_s * f64::from(k).ln()
     }
 }
@@ -487,7 +488,8 @@ pub fn is_valid(level_db: f64, floor_db: f64) -> bool {
 }
 
 /// dB re fundamental as percent.
-pub fn db_to_percent(db: f64) -> f64 {
+#[cfg(test)]
+pub(crate) fn db_to_percent(db: f64) -> f64 {
     100.0 * 10f64.powf(db / 20.0)
 }
 

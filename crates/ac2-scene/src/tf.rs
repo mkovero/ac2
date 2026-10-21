@@ -5,11 +5,9 @@
 
 use crate::axis::{self, Axis, Range, Steps};
 use crate::banner::{BannerRow, Status};
-use crate::canvas::{
-    self, Canvas, MARGINS, PANE_GAP, anchor, gapped, label, text_width, visible_columns,
-};
+use crate::canvas::{self, Canvas, MARGINS, PANE_GAP, anchor, gapped, label, visible_columns};
 use crate::format;
-use crate::legend::{INSET, LegendBox, PAD_X, PAD_Y, ROW, RowStyle};
+use crate::legend::{INSET, LegendBox, RowStyle};
 use crate::primitives::{
     Color, Dash, FillRect, HAlign, Layer, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
@@ -19,7 +17,8 @@ use crate::trace::{
     DisplayCache, DisplayTrace, PhaseReference, PhaseRelation, TfTrace, TraceKey, display_traces,
     group_delay_span,
 };
-use crate::view::{CoherencePlacement, PhaseView, PlotChrome, TfView, ViewState};
+use crate::view::Style;
+use crate::view::{CoherencePlacement, PhaseView, TfView, ViewState};
 
 /// Relative heights of the panes.
 const WEIGHT_MAGNITUDE: f32 = 3.0;
@@ -106,7 +105,18 @@ pub struct TfScene {
     pub legend_hits: Vec<crate::legend::LegendHit>,
     pub cursor: Option<CursorReadout>,
     /// The cursor values' plate.
-    pub readout_box: Option<Rect>,
+    pub readout_box: Option<crate::plate::PlateBox>,
+    /// The cursor read against its mark ([`ViewState::cursor_mark_hz`]) on the tracked
+    /// curve; `None` without a mark, or while the cursor is off or hidden.
+    pub mark: Option<readout::MarkReadout>,
+    /// The mark's plate, in a bottom corner of the magnitude view unless dragged.
+    pub mark_box: Option<crate::plate::PlateBox>,
+    /// Min / max tracking's peaks and dips of the tracked curve; `None` while it is off or
+    /// the magnitude is not shown.
+    pub extremes: Option<TfExtremes>,
+    /// Their list as drawn; `None` also while plot chrome is off (T), when only the marks
+    /// stay.
+    pub extremes_list: Option<String>,
     /// Reference trace's delay: `ref m1 12.34 ms · 4.24 m @ 20 °C`.
     pub delay: Option<String>,
     /// Present when coherence is drawn over the magnitude pane.
@@ -116,7 +126,19 @@ pub struct TfScene {
     pub banners: Vec<BannerRow>,
     /// Ranges the marked curve does not resolve at its grid (the selected curve, else the
     /// first of the pane's own), shaded in every pane; empty when the marker is off.
-    pub unresolved: Vec<crate::unresolved::Mark>,
+    pub unresolved: Vec<crate::unresolved::RangeMark>,
+}
+
+impl TfScene {
+    /// The plates the operator moves, in drawing order (the last on top).
+    pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
+        self.legend_box
+            .iter()
+            .map(|b| b.plate)
+            .chain(self.readout_box)
+            .chain(self.mark_box)
+            .collect()
+    }
 }
 
 /// The valid-resolution marks of the selected shown curve that knows its ranges, else of
@@ -126,7 +148,7 @@ fn unresolved_marks(
     traces: &[TfTrace<'_>],
     shown: &[DisplayTrace],
     view: &ViewState,
-) -> Vec<crate::unresolved::Mark> {
+) -> Vec<crate::unresolved::RangeMark> {
     if !view.marks() {
         return Vec::new();
     }
@@ -227,7 +249,15 @@ fn signed_ms(s: f64) -> String {
 fn trace_stroke(t: &DisplayTrace, selected: bool, theme: &Theme) -> Stroke {
     let a = if t.is_stale() { theme.stale_alpha } else { 1.0 };
     let w = if selected { SELECTED_WIDTH } else { 1.0 };
-    Stroke::solid(t.color.with_alpha(a), theme.trace_width * w)
+    let dash = t.dashed.then_some(Dash {
+        on: 6.0,
+        off: 4.0,
+        offset: 0.0,
+    });
+    Stroke {
+        dash,
+        ..Stroke::solid(t.color.with_alpha(a), theme.trace_width * w)
+    }
 }
 
 /// Coherence overlaid on the magnitude pane: γ² 0…1 maps linearly onto `band`, the top
@@ -250,6 +280,16 @@ const OVERLAY_MARGIN_RIGHT: f32 = 30.0;
 /// Opacity of the overlaid coherence trace, so it does not read as a magnitude trace of the
 /// same colour.
 pub const OVERLAY_ALPHA: f32 = 0.6;
+
+/// What the transfer picture keeps right of its plots on its own: room for the overlaid
+/// coherence axis when it is drawn.
+pub(crate) fn right_margin(view: &ViewState) -> f32 {
+    if overlaid(view) {
+        OVERLAY_MARGIN_RIGHT
+    } else {
+        MARGINS.right
+    }
+}
 
 fn overlaid(view: &ViewState) -> bool {
     view.tf.show_coherence
@@ -309,13 +349,8 @@ fn trace_line(
 }
 
 /// Right-margin axis of the overlaid coherence and a dashed line at γ² = 0.
-fn overlay_frame(
-    c: &mut Canvas,
-    plot: Rect,
-    o: &CoherenceOverlay,
-    chrome: PlotChrome,
-    theme: &Theme,
-) {
+fn overlay_frame(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, style: Style) {
+    let Style { chrome, theme } = style;
     // The band's floor is drawn as a grid line, so it goes with the grid.
     if chrome.grid() {
         overlay_floor(c, plot, o, theme);
@@ -355,107 +390,6 @@ fn overlay_floor(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, theme: &Theme
     canvas::hline(c, plot, o.band.bottom(), floor);
 }
 
-/// The cursor values on a plate of their own: each on its trace's legend row, on the side of
-/// the plot away from the legend, the frequency above them (below when the pane title or the
-/// plot's top leaves no room). When that plate would run into the legend (a narrow pane,
-/// long names) the values go under the legend, or over it when it sits low, in the same
-/// order. With the legend hidden each value names its trace. Returns the plate.
-#[allow(clippy::too_many_arguments)]
-fn cursor_values(
-    c: &mut Canvas,
-    cr: &CursorReadout,
-    shown: &[DisplayTrace],
-    legend: Option<&LegendBox>,
-    area: Rect,
-    block: f32,
-    clip: Rect,
-    theme: &Theme,
-) -> Option<Rect> {
-    let font = theme.small_font_size;
-    let values = |r: &readout::CursorRow| format!("{}  {}  {}", r.magnitude, r.phase, r.coherence);
-    let lines = cr.rows.iter().filter_map(|r| {
-        let i = shown.iter().position(|t| t.key == r.key)?;
-        let text = match legend {
-            Some(_) => values(r),
-            None => format!("{}  {}", shown[i].name, values(r)),
-        };
-        Some((text, trace_stroke(&shown[i], false, theme).color, i))
-    });
-    let first_y = area.y + INSET + PAD_Y + ROW * 1.5;
-    let (right_side, mut rows): (bool, Vec<(String, Color, f32)>) = match legend {
-        Some(b) => (
-            b.rect.x + b.rect.w / 2.0 <= area.x + area.w / 2.0,
-            lines
-                .filter_map(|(t, col, i)| b.row_y(i).map(|y| (t, col, y)))
-                .collect(),
-        ),
-        None => (
-            true,
-            lines
-                .enumerate()
-                .map(|(k, (t, col, _))| (t, col, first_y + k as f32 * ROW))
-                .take_while(|l| l.2 + ROW / 2.0 + PAD_Y <= area.bottom() - INSET)
-                .collect(),
-        ),
-    };
-    let w = rows
-        .iter()
-        .map(|l| text_width(&l.0, font))
-        .chain([text_width(&cr.freq, font)])
-        .fold(0.0f32, f32::max)
-        + 2.0 * PAD_X;
-    let x = if right_side {
-        area.right() - INSET - w
-    } else {
-        area.x + INSET
-    };
-    if let Some(b) = legend
-        && !rows.is_empty()
-        && x < b.rect.right()
-        && x + w > b.rect.x
-    {
-        let need = (rows.len() + 1) as f32 * ROW + 2.0 * PAD_Y;
-        let top = if b.rect.bottom() + 2.0 + need <= area.bottom() {
-            b.rect.bottom() + 2.0
-        } else {
-            b.rect.y - 2.0 - need
-        };
-        for (k, l) in rows.iter_mut().enumerate() {
-            l.2 = top + PAD_Y + ROW * (k as f32 + 1.5);
-        }
-    }
-    let lo = rows.iter().map(|l| l.2).fold(f32::INFINITY, f32::min);
-    let hi = rows.iter().map(|l| l.2).fold(f32::NEG_INFINITY, f32::max);
-    // The pane title is at the left: on the right the frequency may share its line.
-    let ceiling = if right_side { block } else { area.y };
-    let freq_y = if rows.is_empty() {
-        area.y + INSET + PAD_Y + ROW / 2.0
-    } else if lo - ROW * 1.5 - PAD_Y >= ceiling {
-        lo - ROW
-    } else {
-        hi + ROW
-    };
-    let (top, bottom) = (lo.min(freq_y), hi.max(freq_y));
-    let rect = Rect::new(
-        x,
-        top - ROW / 2.0 - PAD_Y,
-        w,
-        bottom - top + ROW + 2.0 * PAD_Y,
-    );
-    crate::legend::plate(&mut c.overlay, rect, false, clip, theme);
-    let (tx, h) = if right_side {
-        (rect.right() - PAD_X, HAlign::Right)
-    } else {
-        (rect.x + PAD_X, HAlign::Left)
-    };
-    for (text, color, y) in std::iter::once((cr.freq.clone(), theme.text, freq_y)).chain(rows) {
-        let mut l = label(text, [tx, y], anchor(h, VAlign::Center), font, color);
-        l.clip = Some(clip);
-        c.overlay.labels.push(l);
-    }
-    Some(rect)
-}
-
 /// Builds the transfer view.
 pub fn transfer_scene(
     traces: &[TfTrace<'_>],
@@ -470,11 +404,7 @@ pub fn transfer_scene(
         display_traces(traces, cache, view.tf.phase_reference, &view.tf.coherence);
     let selected = traces.iter().find(|t| t.selected).map(|t| t.key);
     let overlay = overlaid(view);
-    let right = if overlay {
-        OVERLAY_MARGIN_RIGHT
-    } else {
-        MARGINS.right
-    };
+    let right = crate::freq_column::right(right_margin(view), view);
     let plot_x = MARGINS.left;
     let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, plot_x, plot_w, size, theme);
@@ -558,8 +488,10 @@ pub fn transfer_scene(
             pi == last,
             &title,
             title_at,
-            view.chrome,
-            theme,
+            Style {
+                chrome: view.chrome,
+                theme,
+            },
         );
         crate::unresolved::draw(&mut c, plot, &xm, &marks, theme);
         let ym = y_axis.mapping;
@@ -567,7 +499,15 @@ pub fn transfer_scene(
             canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
         }
         if let Some(o) = &band {
-            overlay_frame(&mut c, plot, o, view.chrome, theme);
+            overlay_frame(
+                &mut c,
+                plot,
+                o,
+                Style {
+                    chrome: view.chrome,
+                    theme,
+                },
+            );
         }
 
         for t in &shown {
@@ -669,8 +609,9 @@ pub fn transfer_scene(
         let area = Rect::new(top.x, area_top, top.w, (top.bottom() - area_top).max(1.0));
         let texts: Vec<&str> = legend.iter().map(|e| e.text.as_str()).collect();
         let notes: Vec<String> = delay.iter().cloned().collect();
-        let placed =
-            crate::legend::place(&view.tf.legend, area, &texts, &notes, theme.small_font_size);
+        let at = &view.plates.legend;
+        let m = crate::plate::Metrics::new(theme, at.scale());
+        let placed = crate::legend::place(&view.tf.legend, at, area, &texts, &notes, m);
         if let Some(b) = &placed {
             let styles: Vec<RowStyle> = legend
                 .iter()
@@ -681,11 +622,24 @@ pub fn transfer_scene(
                     selected: e.selected,
                 })
                 .collect();
-            crate::legend::draw(&mut c.overlay, b, &styles, view.tf.legend.hover, top, theme);
+            let hover = view
+                .plate_hover
+                .filter(|h| h.kind == crate::plate::PlateKind::Legend);
+            crate::legend::draw(&mut c.overlay, b, &styles, hover, top, theme);
         }
         if let Some(cr) = &cursor {
-            readout_box =
-                cursor_values(&mut c, cr, &shown, placed.as_ref(), area, block, top, theme);
+            readout_box = values::draw(
+                &mut c,
+                cr,
+                &shown,
+                placed.as_ref(),
+                &view.plates.readout,
+                view.plate_hover,
+                area,
+                block,
+                top,
+                theme,
+            );
             // Under the plates: the line runs behind the legend, never through its text.
             for (_, plot) in &panes_at {
                 canvas::vline(&mut c.data, *plot, xm.to_px(cr.freq_hz), theme.cursor);
@@ -693,6 +647,66 @@ pub fn transfer_scene(
         }
         legend_box = placed;
     }
+    let mag = panes.iter().find(|p| p.kind == TfPaneKind::Magnitude);
+    let mark = cursor
+        .as_ref()
+        .and_then(|_| mark::readout(traces, &shown, view));
+    let mark_box = mark.as_ref().and_then(|m| {
+        let plots: Vec<Rect> = panes_at.iter().map(|(_, r)| *r).collect();
+        mark::line(&mut c, &plots, xm.to_px(m.freq_hz), theme);
+        let plot = mag.map_or(*plots.first()?, |p| p.plot);
+        let avoid: Vec<Rect> = legend_box
+            .iter()
+            .map(|b| b.rect)
+            .chain(readout_box.map(|b| b.rect))
+            .collect();
+        let hover = view
+            .plate_hover
+            .filter(|h| h.kind == crate::plate::PlateKind::Mark);
+        Some(extremes::draw_list(
+            &mut c,
+            &m.lines.join("\n"),
+            plot,
+            &avoid,
+            Some((&view.plates.mark, hover)),
+            theme,
+        ))
+    });
+    let extremes = match mag.filter(|_| view.tf.extremes) {
+        Some(p) => extremes::extremes(
+            &mut c,
+            traces,
+            &shown,
+            cache,
+            p.plot,
+            &xm,
+            &p.y_axis.mapping,
+            view.chrome.peak_list(),
+            view.temperature_c,
+            theme,
+        ),
+        None => {
+            if !view.tf.extremes {
+                cache.clear_extremes();
+            }
+            None
+        }
+    };
+    let extremes_list = extremes
+        .as_ref()
+        .filter(|e| view.chrome.peak_list() && !(e.max.is_empty() && e.min.is_empty()))
+        .zip(mag)
+        .map(|(e, p)| {
+            let text = extremes::list_text(e, shown.len() > 1);
+            let avoid: Vec<Rect> = legend_box
+                .iter()
+                .map(|b| b.rect)
+                .chain(readout_box.map(|b| b.rect))
+                .chain(mark_box.map(|b| b.rect))
+                .collect();
+            extremes::draw_list(&mut c, &text, p.plot, &avoid, None, theme);
+            text
+        });
     let legend_hits = legend_box.as_ref().map_or_else(Vec::new, |b| {
         let keys: Vec<TraceKey> = legend.iter().map(|e| e.key).collect();
         b.hits(&keys)
@@ -709,6 +723,10 @@ pub fn transfer_scene(
         legend_hits,
         cursor,
         readout_box,
+        mark,
+        mark_box,
+        extremes,
+        extremes_list,
         delay,
         coherence_overlay,
         strip: strip.rect,
@@ -716,6 +734,12 @@ pub fn transfer_scene(
         unresolved: marks,
     }
 }
+
+mod extremes;
+mod mark;
+mod values;
+pub use extremes::{Comb, TfExtremes};
+pub use mark::jump;
 
 #[cfg(test)]
 mod tests;

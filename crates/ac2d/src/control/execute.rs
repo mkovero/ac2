@@ -5,13 +5,15 @@ use std::time::Instant;
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{ColourFamily, DelayState, GenAction, MeasKind, Measurement, SweepFailure};
-use ac2_proto::units::{ClientId, MeasId, Rev, Seconds};
+use ac2_proto::units::{ClientId, Db, MeasId, Rev, Seconds};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Welcome};
 
 use crate::jobs::JobCmd;
 use crate::util::{perr, perr_detail};
 
-use super::validate::{not_a_sweep, smoothing_only, spl_in_place, stale_meas, validate_meas};
+use super::validate::{
+    display_only, not_a_sweep, smoothing_only, spl_in_place, stale_meas, validate_meas,
+};
 use super::{Control, DelaySource, cal, owners};
 
 impl Control {
@@ -67,11 +69,11 @@ impl Control {
             Command::GenRefresh { lease_token } => {
                 self.lease_check(client, lease_token)?;
                 let deadline = Instant::now() + self.s.lease_expiry;
-                if let Some(l) = &mut self.lease {
+                if let Some(l) = &mut self.out.lease {
                     l.deadline = deadline;
                 }
                 if self.store.state().generator.firing {
-                    self.gate.open_until(deadline);
+                    self.out.gate.open_until(deadline);
                 }
                 Ok(ReplyBody::Lease(self.wire_lease(lease_token)))
             }
@@ -79,7 +81,7 @@ impl Control {
                 self.lease_check(client, lease_token)?;
                 self.abort_sweep(SweepFailure::Stopped, "the stimulus lease was released");
                 self.stop_output();
-                self.lease = None;
+                self.out.lease = None;
                 let mut g = self.store.state().generator.clone();
                 g.owner = None;
                 g.armed = false;
@@ -136,6 +138,9 @@ impl Control {
                     grid_id,
                     colour: None,
                     layout: None,
+                    compared: Vec::new(),
+                    offset: Db(0.0),
+                    eq: Vec::new(),
                 };
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 self.ensure_spl_log(&m, None);
@@ -149,6 +154,7 @@ impl Control {
                 }
                 self.check_meas_owner(Some(meas), &config.kind)?;
                 self.check_operand_update(meas, &config.kind)?;
+                self.check_eq_update(meas, &config.kind)?;
                 if owners::owner_only(&m.config, &config) {
                     // Moving a math channel changes where it is listed, not what it
                     // computes: its job and its frames' config rev go on.
@@ -172,6 +178,13 @@ impl Control {
                     }
                     self.commit(Change::Measurement(Patch::Set(m.clone())));
                     self.ensure_spl_log(&m, old_leq.as_ref());
+                    return Ok(ReplyBody::Measurement(m));
+                }
+                if display_only(&m.config.kind, &config.kind) {
+                    // Only how clients draw it changes: the job, its averages and the
+                    // config rev its frames carry go on.
+                    m.config = config;
+                    self.commit(Change::Measurement(Patch::Set(m.clone())));
                     return Ok(ReplyBody::Measurement(m));
                 }
                 if let Some(change) = smoothing_only(&m.config.kind, &config.kind) {
@@ -218,6 +231,8 @@ impl Control {
                     }
                 }
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
+                // Its grid may have changed: the sets' curves follow it.
+                self.eq_refresh(meas);
                 Ok(ReplyBody::Measurement(m))
             }
             Command::MeasColour { meas, colour } => {
@@ -255,7 +270,32 @@ impl Control {
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 Ok(ReplyBody::Measurement(m))
             }
+            Command::MeasCompare { meas, compared } => {
+                let mut m = self.meas(meas)?.clone();
+                self.check_compared(&m, &compared)?;
+                // Only what its panes draw changes: the job and its frames go on.
+                m.compared = compared;
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+            Command::MeasOffset { meas, offset } => {
+                let mut m = self.meas(meas)?.clone();
+                if !Measurement::offset_ok(offset) {
+                    return Err(perr(
+                        ErrorCode::Invalid,
+                        format!(
+                            "the offset must be finite and within ±{} dB",
+                            Measurement::OFFSET_MAX_DB
+                        ),
+                    ));
+                }
+                // Display only: the job and its frames go on, levels as measured.
+                m.offset = offset;
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
             Command::MeasDelete { meas, traces } => self.meas_delete(meas, traces),
+            Command::MeasEq { meas, edit } => self.meas_eq(client, meas, edit),
             Command::MeasStart { meas } => {
                 let mut m = self.meas(meas)?.clone();
                 not_a_sweep(&m)?;

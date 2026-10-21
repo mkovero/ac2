@@ -189,6 +189,9 @@ SPL_MEASUREMENT = {
     "grid_id": None,
     "colour": None,
     "layout": None,
+    "compared": [],
+    "offset": 0.0,
+    "eq": [],
 }
 
 SPL_LOG = {
@@ -286,7 +289,13 @@ def finding():
     }
 
 
-def _layout_pane(kind, transfer_view, chrome="full"):
+def _plate(at=None, scale=1.0):
+    return {"at": at, "scale": scale}
+
+
+def _layout_pane(
+    kind, transfer_view, chrome="full", meas=None, transfer_levels=None, readout=None
+):
     return {
         "kind": kind,
         "transfer_view": transfer_view,
@@ -294,16 +303,37 @@ def _layout_pane(kind, transfer_view, chrome="full"):
         "spl_view": "meter_leq",
         "sweep_view": "response",
         "chrome": chrome,
+        "meas": meas,
+        "levels": {
+            "transfer": transfer_levels,
+            "spectrum_dbfs": None,
+            "spectrum_spl": None,
+            "distortion": None,
+        },
+        "plates": {
+            "legend": _plate(),
+            "readout": readout or _plate(),
+            "mark": _plate(),
+        },
     }
 
 
-# samples::pane_layout(): a transfer pane beside an SPL meter.
+# samples::pane_layout(): a transfer pane (level axis zoomed, cursor values dragged to the
+# bottom-left at twice the text size) beside an SPL meter picked for measurement 2.
 PANE_LAYOUT = {
     "type": "split",
     "axis": "row",
     "ratio": 0.625,
-    "a": {"type": "pane", "pane": _layout_pane("transfer", "phase")},
-    "b": {"type": "pane", "pane": _layout_pane("spl", "magnitude", "no_grid")},
+    "a": {
+        "type": "pane",
+        "pane": _layout_pane(
+            "transfer",
+            "phase",
+            transfer_levels={"lo": -24.0, "hi": 12.0},
+            readout=_plate([0.0, 1.0], 2.0),
+        ),
+    },
+    "b": {"type": "pane", "pane": _layout_pane("spl", "magnitude", "no_grid", meas=2)},
 }
 
 
@@ -325,6 +355,9 @@ def measurement():
         "grid_id": p.grid_id(LOG_GRID),
         "colour": {"type": "hue", "index": 5},
         "layout": PANE_LAYOUT,
+        "compared": [],
+        "offset": 0.0,
+        "eq": [],
     }
 
 
@@ -358,6 +391,35 @@ MATH_MEASUREMENT = {
     "grid_id": p.grid_id(LOG_GRID),
     "colour": None,
     "layout": None,
+    "compared": [],
+    "offset": 0.0,
+    "eq": [],
+}
+
+
+ALIGN_MEASUREMENT = {
+    **MATH_MEASUREMENT,
+    "id": 9,
+    "config": {
+        "name": "Sub ↔ Main",
+        "scope": "session",
+        "kind": {
+            "type": "math",
+            "config": {
+                "owner": {"type": "meas", "meas": 1},
+                "domain": "transfer",
+                "expr": {
+                    "type": "align",
+                    "a": {"type": "trace", "trace": 7},
+                    "b": {"type": "meas", "meas": 1},
+                    "band": {"lo": 60.0, "hi": 120.0},
+                    "max_delay": 0.05,
+                },
+                "reference": {"type": "operand", "operand": {"type": "trace", "trace": 7}},
+                "smoothing": None,
+            },
+        },
+    },
 }
 
 
@@ -390,6 +452,9 @@ SWEEP_MEASUREMENT = {
     "grid_id": None,
     "colour": {"type": "neutral"},
     "layout": None,
+    "compared": [],
+    "offset": 0.0,
+    "eq": [],
 }
 
 
@@ -710,6 +775,11 @@ def events():
             "payload": {"origin": None, "dirty": False, "saved_at": None, "recover": None},
         },
         {"kind": "rig", "rev": 68, "payload": RIG},
+        {
+            "kind": "measurement",
+            "rev": 69,
+            "payload": {"type": "set", "value": ALIGN_MEASUREMENT},
+        },
         {
             "kind": "autosave",
             "rev": 57,

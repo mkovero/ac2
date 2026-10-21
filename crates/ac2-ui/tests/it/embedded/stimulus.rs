@@ -1,13 +1,15 @@
 //! The stimulus and audio state: banners, following the view, output routes and max level.
 
-use super::harness::{Driver, NAME, R, arm_new_sweep, measure_from_empty, sweep_count};
+use super::harness::{
+    Driver, NAME, R, arm_new_sweep, first_transfer, measure_from_empty, sweep_count,
+};
 use ac2_client::{ClientConfig, Endpoints};
 use ac2_proto::topic::Stream;
 use ac2_scene::theme::Theme;
 use ac2_ui::embedded::{EmbeddedBackend, Setup, start_embedded_with};
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::CommandId;
-use ac2_ui::state::{AppState, Msg, Overlay, StimPhase};
+use ac2_ui::state::{AppState, ChoicePurpose, Msg, Overlay, StimPhase};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -82,14 +84,8 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
     })?;
     d.key("Enter");
     d.until("the session", |s| s.open_session().is_some())?;
-    // The offered transfer measurement, so a curve is up when the audio stops.
-    d.until("the measurement offer", |s| {
-        matches!(s.overlay, Overlay::Offer(_))
-    })?;
-    d.key("Enter");
-    d.until("the measurement, running and selected", |s| {
-        s.selected_meas().is_some_and(|m| m.running)
-    })?;
+    // A transfer measurement from the chooser, so a curve is up when the audio stops.
+    first_transfer(&mut d)?;
     let meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     d.until("a transfer frame", |s| {
         ac2_ui::scenes::frame(s, meas, Stream::Tf).is_some()
@@ -289,7 +285,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     Ok(())
 }
 
-/// Settings from an empty daemon: Audio & I/O on the input device, ↓ to the channels: output 1 named for
+/// Settings from an empty daemon: Audio I/O on the input device, ↓ to the channels: output 1 named for
 /// the rig, output 2 ticked as the only stimulus output, Enter opens; the stimulus plays on
 /// output 2 alone. The system max level lowered below the playing stimulus stops it; a raise
 /// is refused while armed and needs the typed word; a second client sees the new level.
@@ -304,15 +300,15 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     other.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
-    d.until("the Audio & I/O page with the device", |s| {
+    d.until("the Audio I/O page with the device", |s| {
         s.overlay
             .settings()
             .is_some_and(|x| x.page == Page::AudioIo && x.session.device_info().is_some())
     })?;
     let focus = |s: &AppState| s.overlay.settings().map(|x| (x.page, x.session.focus));
     assert_eq!(focus(&d.st), Some((Page::AudioIo, Row::Device)));
-    // Output device, rate, buffer, then the first input.
-    for _ in 0..4 {
+    // Output device, then the first input.
+    for _ in 0..2 {
         d.key("ArrowDown");
     }
     assert_eq!(focus(&d.st), Some((Page::AudioIo, Row::Input(0))));
@@ -337,9 +333,10 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     d.key("S");
     d.key("Enter");
     d.until("the session", |s| s.open_session().is_some())?;
-    d.until("the measurement offer", |s| {
-        matches!(s.overlay, Overlay::Offer(_))
-    })?;
+    d.until(
+        "the New measurement chooser",
+        |s| matches!(&s.overlay, Overlay::Choose(c) if c.purpose == ChoicePurpose::NewMeasurement),
+    )?;
     d.key("Escape");
     assert_eq!(d.st.stimulus.outputs, vec![1]);
     d.fire()?;

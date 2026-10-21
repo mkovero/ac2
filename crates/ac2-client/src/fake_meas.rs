@@ -46,6 +46,9 @@ impl Shared {
                     grid_id,
                     colour: None,
                     layout: None,
+                    compared: Vec::new(),
+                    offset: Db(0.0),
+                    eq: Vec::new(),
                 };
                 self.put_meas(m)
             }
@@ -54,8 +57,18 @@ impl Shared {
                 if base != m.config_rev {
                     return Err(conflict(m.config_rev));
                 }
+                if config.kind.display().is_some_and(|d| !d.span_ok()) {
+                    return Err(err(ErrorCode::Invalid, "no such spectrograph span"));
+                }
+                // As the daemon does: how it is drawn is not a new configuration.
+                let mut drawn = m.config.clone();
+                if let (Some(d), Some(n)) = (drawn.kind.display_mut(), config.kind.display()) {
+                    *d = *n;
+                }
+                if drawn != config {
+                    m.config_rev = Rev(self.rev.0 + 1);
+                }
                 m.config = config;
-                m.config_rev = Rev(self.rev.0 + 1);
                 self.put_meas(m)
             }
             C::MeasColour { meas, colour } => {
@@ -66,6 +79,30 @@ impl Shared {
             C::MeasLayout { meas, layout } => {
                 let mut m = self.meas(meas)?;
                 m.layout = layout;
+                self.put_meas(m)
+            }
+            C::MeasCompare { meas, compared } => {
+                let mut m = self.meas(meas)?;
+                if compared.len() > Compared::MAX
+                    || compared.contains(&Compared::Meas { meas })
+                    || compared.iter().any(|c| match *c {
+                        Compared::Meas { meas } => self.meas(meas).is_err(),
+                        Compared::Trace { trace } => {
+                            !self.state.traces.iter().any(|t| t.id == trace)
+                        }
+                    })
+                {
+                    return Err(err(ErrorCode::Invalid, "no such compare list"));
+                }
+                m.compared = compared;
+                self.put_meas(m)
+            }
+            C::MeasOffset { meas, offset } => {
+                let mut m = self.meas(meas)?;
+                if !Measurement::offset_ok(offset) {
+                    return Err(err(ErrorCode::Invalid, "no such offset"));
+                }
+                m.offset = offset;
                 self.put_meas(m)
             }
             C::MeasDelete { meas, traces } => {
@@ -115,6 +152,7 @@ impl Shared {
                     self.commit(Change::SplLog(Patch::Deleted(meas)));
                 }
                 let rev = self.commit(Change::Measurement(Patch::Deleted(meas)));
+                let rev = self.prune_compared().unwrap_or(rev);
                 ReplyBody::Ack { rev }
             }
             C::MeasStart { meas } => {

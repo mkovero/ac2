@@ -49,7 +49,7 @@ impl SessionDialog {
             .collect();
         if inputs.is_empty() {
             return Err(
-                "Choose at least one input: Space adds the focused input to the session.".into(),
+                "Choose at least one input: Space adds the focused input to the audio I/O.".into(),
             );
         }
         let reference = self
@@ -105,7 +105,7 @@ impl SessionDialog {
         let out_dev = self.output_info().unwrap_or(dev);
         if self.out_count > 0 && out_dev.output.is_none() {
             return Err(format!(
-                "{} has no outputs: choose the output device on the Audio & I/O page.",
+                "{} has no outputs: choose the output device on the Audio I/O page.",
                 out_dev.name
             ));
         }
@@ -128,19 +128,6 @@ impl SessionDialog {
             .filter(|(_, r)| r.in_session)
             .filter_map(|(i, _)| self.row_setup(i))
             .collect();
-        let transfers = match reference {
-            Some(r) if !stimulus.is_empty() => mics
-                .iter()
-                .map(|m| MeasConfig {
-                    scope: ac2_proto::model::MeasScope::Session,
-                    name: format!("Reference → {}", m.label()),
-                    kind: MeasKind::Transfer {
-                        config: TransferConfig::with_inputs(r, m.channel),
-                    },
-                })
-                .collect(),
-            _ => Vec::new(),
-        };
         let roles = DeviceRoles {
             inputs,
             outputs: self.out_count,
@@ -166,7 +153,6 @@ impl SessionDialog {
             output_device_id: out_dev.id.0.clone(),
             roles,
             inputs: setup,
-            transfers,
         })
     }
 }

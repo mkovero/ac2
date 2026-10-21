@@ -1,22 +1,25 @@
-//! The session dialog (backend, device, the channel grid with meters and roles), the
-//! measurement offer after it, and the input meter shared with the measurement dialogs.
+//! The session dialog (backend, device, the channel grids with meters and roles, the
+//! reference, rate and buffer) and the input meter shared with the measurement dialogs.
 
 use eframe::egui::{self, Color32, RichText};
 
 use ac2_proto::model::Availability;
 use ac2_scene::meter::{MeterReading, MeterState};
 
+use super::CellCtx;
 use crate::app::App;
 use crate::session_dialog::{
     DetectPhase, Edit, InputRole, OutputDevice, RoleKey, Row, SessionDialog, backend_name,
     device_summary,
 };
-use crate::state::{Msg, Overlay, SessionMsg};
+use crate::state::SessionMsg;
 use crate::theme::Chrome;
 
-use super::overlays::card;
-
 const METER_W: f32 = 150.0;
+/// The label column of the device and rate rows, so their values line up.
+const LABEL_W: f32 = 104.0;
+/// The channel name column, wide enough for a named mic beside its input's name.
+const NAME_W: f32 = 230.0;
 const METER_H: f32 = 10.0;
 
 /// One input meter: the RMS as a bar, the peak as a tick, coloured by state.
@@ -82,7 +85,7 @@ pub(super) fn meter_sized(ui: &mut egui::Ui, m: &MeterReading, ch: &Chrome, widt
 }
 
 fn chip(ui: &mut egui::Ui, on: bool, text: &str, color: Color32, ch: &Chrome) -> egui::Response {
-    let t = RichText::new(text).monospace().strong();
+    let t = RichText::new(text).strong();
     let t = if on {
         t.color(ch.panel)
     } else {
@@ -108,14 +111,19 @@ fn label_col(ui: &mut egui::Ui, text: &str, focused: bool, ch: &Chrome) -> egui:
             .color(ch.focus)
             .monospace(),
     );
-    ui.add(
-        egui::Label::new(
-            RichText::new(text)
-                .color(if focused { ch.focus } else { ch.dim })
-                .strong(),
+    let layout = egui::Layout::left_to_right(egui::Align::Center);
+    ui.allocate_ui_with_layout(egui::vec2(LABEL_W, 18.0), layout, |ui| {
+        ui.set_min_width(LABEL_W);
+        ui.add(
+            egui::Label::new(
+                RichText::new(text)
+                    .color(if focused { ch.focus } else { ch.dim })
+                    .strong(),
+            )
+            .sense(egui::Sense::click()),
         )
-        .sense(egui::Sense::click()),
-    )
+    })
+    .inner
 }
 
 /// Each input's meter, and each mic row's curve and calibration text (with whether it needs
@@ -162,10 +170,10 @@ pub(super) fn notices(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome) {
     }
 }
 
-/// The Audio & I/O page's channels: inputs with meters, names and roles, outputs with
-/// their labels and stimulus ticks, the reference pair, the loopback detection and the
-/// button that opens the session. `focus`: the focused row, `None` while the max level
-/// row below has it.
+/// The Audio I/O page below the device, in the order the operator decides: the inputs
+/// with meters, names and roles; the outputs with their labels and the stimulus; the
+/// reference (loopback) with its detection; rate and buffer; then the one button that opens
+/// the session. `focus`: the focused row, `None` while the max level row below has it.
 pub(super) fn channels_section(
     app: &App,
     ui: &mut egui::Ui,
@@ -180,26 +188,62 @@ pub(super) fn channels_section(
         return;
     }
     let (meters, cal) = channel_data(app, d);
-    channel_grid(ui, d, focus, &meters, &cal, ch, msg);
-    ui.add_space(6.0);
+    super::settings::section(ui, "Inputs", "", ch);
+    input_grid(ui, d, focus, &meters, &cal, ch, msg);
+    super::settings::section(ui, "Outputs", "stimulus: this app", ch);
+    output_grid(ui, d, focus, ch, msg);
+    super::settings::section(ui, "Reference (loopback)", "", ch);
     ui.label(RichText::new(d.reference_text()).color(ch.text));
+    ui.label(
+        RichText::new(crate::session_dialog::REFERENCE_HELP)
+            .small()
+            .color(ch.dim),
+    );
+    ui.add_space(2.0);
+    if ui.button("Detect loopback…  D").clicked() {
+        *msg = Some(SessionMsg::Detect);
+    }
     detect_panel(ui, d, ch, msg);
+    super::settings::section(ui, "Sample rate and buffer", "", ch);
+    rate_rows(ui, d, focus, ch, msg);
+    ui.add_space(8.0);
     notices(ui, d, ch);
-    ui.add_space(4.0);
+}
+
+/// The page's last row: what Enter does here, set apart from the settings above it.
+pub(super) fn open_row(
+    ui: &mut egui::Ui,
+    d: &SessionDialog,
+    new_session: bool,
+    ch: &Chrome,
+    msg: &mut Option<SessionMsg>,
+) {
+    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(8.0);
     ui.horizontal(|ui| {
-        if ui
-            .button(RichText::new("Open the session").strong())
-            .clicked()
-        {
+        let open = if new_session {
+            "Open new session  Enter"
+        } else if d.is_open_device() {
+            "Reopen audio I/O  Enter"
+        } else {
+            "Open audio I/O  Enter"
+        };
+        let primary = egui::Button::new(RichText::new(open).strong().color(ch.panel))
+            .fill(ch.focus)
+            .min_size(egui::vec2(0.0, 24.0));
+        if ui.add(primary).clicked() {
             *msg = Some(SessionMsg::Submit);
         }
-        if ui.button("Detect loopback…").clicked() {
-            *msg = Some(SessionMsg::Detect);
-        }
+        ui.label(
+            RichText::new("Esc closes without opening")
+                .small()
+                .color(ch.dim),
+        );
     });
 }
 
-/// The Audio & I/O page's device: backend, input and output device, rate and buffer.
+/// The Audio I/O page's device: backend, input and output device.
 pub(super) fn device_section(
     ui: &mut egui::Ui,
     d: &SessionDialog,
@@ -208,8 +252,6 @@ pub(super) fn device_section(
     msg: &mut Option<SessionMsg>,
 ) {
     backend_rows(ui, d, focus, ch, msg);
-    ui.add_space(6.0);
-    rate_rows(ui, d, focus, ch, msg);
 }
 
 fn backend_rows(
@@ -224,7 +266,7 @@ fn backend_rows(
         return;
     };
     ui.horizontal(|ui| {
-        if label_col(ui, "Backend ", focus == Some(Row::Backend), ch).clicked() {
+        if label_col(ui, "Backend", focus == Some(Row::Backend), ch).clicked() {
             *msg = Some(SessionMsg::Focus(Row::Backend));
         }
         for (i, b) in backends.iter().enumerate() {
@@ -251,22 +293,23 @@ fn backend_rows(
                 .color(ch.fault),
         };
         ui.horizontal(|ui| {
-            ui.add_space(72.0);
+            ui.add_space(LABEL_W + 18.0);
             ui.label(text);
         });
     }
     let (inputs, outputs) = d.device_counts();
     device_row(
         ui,
-        "Input   ",
-        Row::Device,
+        "Input device",
         d.device_info()
             .map(|dev| (dev.name.clone(), device_summary(dev))),
-        d.input_position(),
-        inputs,
-        focus == Some(Row::Device),
-        ch,
-        msg,
+        (d.input_position(), inputs),
+        CellCtx {
+            focused: focus == Some(Row::Device),
+            at: Row::Device,
+            msg: &mut *msg,
+            ch,
+        },
     );
     let out = match (d.out_device, d.output_info()) {
         (_, None) => None,
@@ -277,14 +320,15 @@ fn backend_rows(
     };
     device_row(
         ui,
-        "Output  ",
-        Row::OutputDevice,
+        "Output device",
         out,
-        d.output_position(),
-        outputs,
-        focus == Some(Row::OutputDevice),
-        ch,
-        msg,
+        (d.output_position(), outputs),
+        CellCtx {
+            focused: focus == Some(Row::OutputDevice),
+            at: Row::OutputDevice,
+            msg: &mut *msg,
+            ch,
+        },
     );
     if let Some(note) = d.clock_note() {
         ui.label(RichText::new(note).small().color(ch.dim));
@@ -308,18 +352,19 @@ fn backend_rows(
 }
 
 /// One device stepper: the name (a click steps on), ‹ › and its place among the choices.
-#[allow(clippy::too_many_arguments)]
 fn device_row(
     ui: &mut egui::Ui,
     label: &str,
-    row: Row,
     shown: Option<(String, String)>,
-    at: usize,
-    n: usize,
-    focused: bool,
-    ch: &Chrome,
-    msg: &mut Option<SessionMsg>,
+    (place, n): (usize, usize),
+    cell: CellCtx<'_, Row, SessionMsg>,
 ) {
+    let CellCtx {
+        focused,
+        at: row,
+        msg,
+        ch,
+    } = cell;
     ui.horizontal(|ui| {
         if label_col(ui, label, focused, ch).clicked() {
             *msg = Some(SessionMsg::Focus(row));
@@ -343,7 +388,7 @@ fn device_row(
         }
         if n > 1 {
             ui.label(
-                RichText::new(format!("({} of {n})", at + 1))
+                RichText::new(format!("({} of {n})", place + 1))
                     .small()
                     .color(ch.dim),
             );
@@ -351,7 +396,24 @@ fn device_row(
     });
 }
 
-fn channel_grid(
+/// A channel row's head: the focus marker, the in-session tick and the channel number;
+/// whether the tick was clicked.
+fn row_head(ui: &mut egui::Ui, focused: bool, on: bool, channel: u16, ch: &Chrome) -> bool {
+    ui.horizontal(|ui| {
+        let marker = if focused { "▸" } else { " " };
+        ui.label(RichText::new(marker).color(ch.focus).monospace());
+        let clicked = check(ui, on, ch).clicked();
+        ui.label(
+            RichText::new(format!("{:>2}", channel + 1))
+                .monospace()
+                .color(ch.dim),
+        );
+        clicked
+    })
+    .inner
+}
+
+fn input_grid(
     ui: &mut egui::Ui,
     d: &SessionDialog,
     focus: Option<Row>,
@@ -360,50 +422,39 @@ fn channel_grid(
     ch: &Chrome,
     msg: &mut Option<SessionMsg>,
 ) {
-    egui::Grid::new("ac2-session-channels")
+    egui::Grid::new("ac2-session-inputs")
         .num_columns(5)
         .spacing(egui::vec2(10.0, 4.0))
         .min_col_width(0.0)
         .show(ui, |ui| {
-            ui.label(RichText::new("Inputs").strong().color(ch.text));
             ui.label("");
-            ui.label(RichText::new("level (dBFS RMS)").small().color(ch.dim));
+            ui.label(RichText::new("name").small().color(ch.dim));
+            ui.label(
+                RichText::new("level (dBFS RMS · peak tick)")
+                    .small()
+                    .color(ch.dim),
+            );
             ui.label(RichText::new("role").small().color(ch.dim));
             ui.label("");
             ui.end_row();
             for (i, r) in d.inputs.iter().enumerate() {
                 let row = Row::Input(i);
                 let focused = focus == Some(row);
-                ui.horizontal(|ui| {
-                    let marker = if focused { "▸" } else { " " };
-                    ui.label(RichText::new(marker).color(ch.focus).monospace());
-                    if check(ui, r.in_session, ch).clicked() {
-                        *msg = Some(SessionMsg::Toggle(row));
-                    }
-                    ui.label(
-                        RichText::new(format!("{:>2}", r.channel + 1))
-                            .monospace()
-                            .color(ch.dim),
-                    );
-                });
+                if row_head(ui, focused, r.in_session, r.channel, ch) {
+                    *msg = Some(SessionMsg::Toggle(row));
+                }
                 let editing = d.edit == Some(Edit::Mic(i));
                 let resp = ui
                     .horizontal(|ui| {
-                        ui.set_min_width(230.0);
+                        ui.set_min_width(NAME_W);
                         let dev = r
                             .device_name
                             .clone()
                             .unwrap_or_else(|| format!("Input {}", r.channel + 1));
-                        let name = if r.role == InputRole::Mic {
-                            if editing {
-                                format!("{}▏", r.mic)
-                            } else if r.mic.is_empty() {
-                                format!("{dev} · mic (N names it)")
-                            } else {
-                                format!("{} · {dev}", r.mic)
-                            }
-                        } else {
-                            dev
+                        let name = match r.role {
+                            InputRole::Mic if editing => format!("{}▏", r.mic),
+                            InputRole::Mic if !r.mic.is_empty() => format!("{} · {dev}", r.mic),
+                            _ => dev,
                         };
                         let color = if r.in_session { ch.text } else { ch.dim };
                         let t = RichText::new(name).color(color);
@@ -428,26 +479,27 @@ fn channel_grid(
                     meter(ui, &m, ch);
                 });
                 ui.horizontal(|ui| {
-                    if chip(ui, r.role == InputRole::Reference, "R", ch.focus, ch)
-                        .on_hover_text("Reference: the loopback return of the stimulus")
-                        .clicked()
+                    if chip(
+                        ui,
+                        r.role == InputRole::Reference,
+                        "Reference",
+                        ch.focus,
+                        ch,
+                    )
+                    .on_hover_text("R: the loopback return of the stimulus")
+                    .clicked()
                     {
                         *msg = Some(SessionMsg::Role(row, RoleKey::Reference));
                     }
-                    if chip(ui, r.role == InputRole::Mic, "M", ch.ok, ch)
-                        .on_hover_text("Measurement mic")
+                    if chip(ui, r.role == InputRole::Mic, "Mic", ch.ok, ch)
+                        .on_hover_text("M: a measurement mic")
                         .clicked()
                     {
                         *msg = Some(SessionMsg::Role(row, RoleKey::Mic));
                     }
                 });
-                let role = match r.role {
-                    InputRole::Reference => "Reference (loopback)",
-                    InputRole::Mic => "Measurement mic",
-                    InputRole::None if r.in_session => "in session",
-                    InputRole::None => "",
-                };
-                // A named mic says which curve and calibration it uses instead.
+                // A named mic says which curve and calibration it uses; an unnamed one, how
+                // to name it (its name is what every measurement on it reads).
                 match cal.get(i).and_then(Option::as_ref) {
                     Some((t, warn)) => {
                         ui.label(RichText::new(t).small().color(if *warn {
@@ -456,30 +508,37 @@ fn channel_grid(
                             ch.dim
                         }));
                     }
+                    None if r.role == InputRole::Mic && !editing => {
+                        ui.label(RichText::new("N names the mic").small().color(ch.dim));
+                    }
                     None => {
-                        ui.label(RichText::new(role).small().color(ch.dim));
+                        ui.label("");
                     }
                 }
                 ui.end_row();
             }
-            ui.label(RichText::new("Outputs").strong().color(ch.text));
-            ui.end_row();
+        });
+}
+
+fn output_grid(
+    ui: &mut egui::Ui,
+    d: &SessionDialog,
+    focus: Option<Row>,
+    ch: &Chrome,
+    msg: &mut Option<SessionMsg>,
+) {
+    egui::Grid::new("ac2-session-outputs")
+        .num_columns(3)
+        .spacing(egui::vec2(10.0, 4.0))
+        .min_col_width(0.0)
+        .show(ui, |ui| {
             for (o, r) in d.outputs.iter().enumerate() {
                 let row = Row::Output(o);
                 let focused = focus == Some(row);
                 let in_session = r.channel < d.out_count;
-                ui.horizontal(|ui| {
-                    let marker = if focused { "▸" } else { " " };
-                    ui.label(RichText::new(marker).color(ch.focus).monospace());
-                    if check(ui, in_session, ch).clicked() {
-                        *msg = Some(SessionMsg::Toggle(row));
-                    }
-                    ui.label(
-                        RichText::new(format!("{:>2}", r.channel + 1))
-                            .monospace()
-                            .color(ch.dim),
-                    );
-                });
+                if row_head(ui, focused, in_session, r.channel, ch) {
+                    *msg = Some(SessionMsg::Toggle(row));
+                }
                 let name = if d.edit == Some(Edit::OutputLabel(o)) {
                     format!("{}▏", d.label_text)
                 } else {
@@ -488,8 +547,14 @@ fn channel_grid(
                         _ => r.label(),
                     }
                 };
-                let t = RichText::new(name).color(if in_session { ch.text } else { ch.dim });
-                let resp = ui.add(egui::Button::selectable(focused, t));
+                let resp = ui
+                    .horizontal(|ui| {
+                        ui.set_min_width(NAME_W);
+                        let t =
+                            RichText::new(name).color(if in_session { ch.text } else { ch.dim });
+                        ui.add(egui::Button::selectable(focused, t))
+                    })
+                    .inner;
                 if resp.clicked() {
                     *msg = Some(SessionMsg::Focus(row));
                 }
@@ -499,18 +564,12 @@ fn channel_grid(
                 if focused {
                     super::settings::reveal_focused(&resp);
                 }
-                ui.label("");
-                if chip(ui, r.stimulus, "S", ch.armed, ch)
-                    .on_hover_text("Stimulus: feeds the speakers and the loopback")
+                if chip(ui, r.stimulus, "Stimulus", ch.armed, ch)
+                    .on_hover_text("S: plays the stimulus, to the speakers and the loopback")
                     .clicked()
                 {
                     *msg = Some(SessionMsg::Role(row, RoleKey::Stimulus));
                 }
-                ui.label(
-                    RichText::new(if r.stimulus { "Stimulus" } else { "" })
-                        .small()
-                        .color(ch.dim),
-                );
                 ui.end_row();
             }
         });
@@ -533,30 +592,38 @@ fn rate_rows(
         });
     let default_buffer = dir
         .and_then(|x| x.default_buffer_frames)
-        .map_or_else(String::new, |b| format!(" ({b})"));
-    ui.horizontal(|ui| {
-        for (row, label, text, default) in [
-            (Row::Rate, "Sample rate", &d.rate, default_rate),
-            (Row::Buffer, "Buffer (frames)", &d.buffer, default_buffer),
-        ] {
+        .map_or_else(String::new, |b| format!(" ({b} frames)"));
+    for (row, label, text, default, unit) in [
+        (Row::Rate, "Sample rate", &d.rate, default_rate, "Hz"),
+        (Row::Buffer, "Buffer", &d.buffer, default_buffer, "frames"),
+    ] {
+        ui.horizontal(|ui| {
             let focused = focus == Some(row);
             if label_col(ui, label, focused, ch).clicked() {
                 *msg = Some(SessionMsg::Focus(row));
             }
             let shown = if focused {
-                format!("{text}▏")
+                format!("{text}▏ {unit}")
             } else if text.is_empty() {
                 format!("device default{default}")
             } else {
-                text.clone()
+                format!("{text} {unit}")
             };
             let t = RichText::new(shown).monospace().color(ch.text);
-            if ui.add(egui::Button::selectable(focused, t)).clicked() {
+            let resp = ui.add(egui::Button::selectable(focused, t));
+            if resp.clicked() {
                 *msg = Some(SessionMsg::Focus(row));
             }
-            ui.add_space(16.0);
-        }
-    });
+            if focused {
+                super::settings::reveal_focused(&resp);
+                ui.label(
+                    RichText::new("type a value; empty is the device default")
+                        .small()
+                        .color(ch.dim),
+                );
+            }
+        });
+    }
 }
 
 fn detect_panel(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Option<SessionMsg>) {
@@ -581,10 +648,18 @@ fn detect_panel(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Opt
                         p.level.clone()
                     };
                     ui.label(RichText::new(shown).monospace().size(15.0).color(ch.text));
-                    if ui.button("Play burst").clicked() {
+                    if ui
+                        .button("Play burst")
+                        .on_hover_text(super::keys_cue(&[egui::Key::Enter]))
+                        .clicked()
+                    {
                         *msg = Some(SessionMsg::DetectConfirm);
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui
+                        .button("Cancel")
+                        .on_hover_text(super::keys_cue(&[egui::Key::ArrowUp]))
+                        .clicked()
+                    {
                         *msg = Some(SessionMsg::DetectCancel);
                     }
                 });
@@ -598,54 +673,4 @@ fn detect_panel(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Opt
                 ui.label(RichText::new(e).color(ch.fault));
             }
         });
-}
-
-/// The offer after a session opened with a reference and mics.
-pub(super) fn offer(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
-    let Overlay::Offer(o) = &app.state.overlay else {
-        return;
-    };
-    let names: Vec<String> = o.transfers.iter().map(|t| t.name.clone()).collect();
-    let mut msg = None;
-    egui::Area::new(egui::Id::new("ac2-offer"))
-        .order(egui::Order::Foreground)
-        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
-        .show(ctx, |ui| {
-            card(ch).show(ui, |ui| {
-                ui.set_width(460.0);
-                let n = names.len();
-                ui.label(
-                    RichText::new(if n == 1 {
-                        "Create a transfer measurement?".to_owned()
-                    } else {
-                        format!("Create {n} transfer measurements?")
-                    })
-                    .strong(),
-                );
-                ui.add_space(4.0);
-                for name in &names {
-                    ui.label(RichText::new(format!("• {name}")).color(ch.text));
-                }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .button(RichText::new("Create and start").strong())
-                        .clicked()
-                    {
-                        msg = Some(true);
-                    }
-                    if ui.button("Not now").clicked() {
-                        msg = Some(false);
-                    }
-                });
-                ui.label(
-                    RichText::new("Enter creates · N or Esc skips")
-                        .small()
-                        .color(ch.dim),
-                );
-            });
-        });
-    if let Some(m) = msg {
-        app.dispatch(Msg::Offer(m));
-    }
 }

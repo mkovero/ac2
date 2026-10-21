@@ -3,11 +3,6 @@
 Work found in use, not yet scheduled into a phase. Newest first. When an item lands, move it
 to `backlog-done.md` as one line with the commit.
 
-## Sound labels (design `sound-labels.md`)
-
-- **Not started.** YAMNet labels on the spectrum pane; open: toggle key, model bundled or
-  fetched, `classify` feature default, class folding for display.
-
 ## Band Leq (design `band-leq.md`)
 
 - **The daemon drops a frame that fails to encode without a word.** With 22 band windows the
@@ -118,6 +113,21 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
 - **ac2-ui `measurement_tree_and_delete_choices` on macOS CI**: the `measurement_delete_choices`
   snapshot differed by 14 573 px once (a680dcd); passed on rerun. The live curves behind the
   dialog are not pinned.
+- **ac2-ui `embedded::calibration::mic_curves_imported_and_switched_in_the_input_setup`**:
+  failed once on its first try in a full workspace run (passed on retry); 10/10 alone.
+- **macOS CI "ac2 on BlackHole (Core Audio)"**: `selftest duplex` failed once with
+  `config_changed` count 1 (run 39364032668, 1ee6a366); BlackHole reported a configuration
+  change mid-run, the levels were exact. Seen once. Also once: "delay finder read −481.0
+  samples, expected 480 ± 1" (run 39468724964, 3310ea85; passed on rerun): the right size with
+  the opposite sign, as if reference and measurement swapped for that run. Two oddities on
+  BlackHole in one day: watch for a third.
+- **ac2d `osc::slow_a_tone_over_the_limit_lights_over_and_back_ok` on macOS CI**: the
+  `/w/ok` cue carried 87.0004 against the test's `< 87.0` (run 39383093276); the ok edge
+  sits at the limit's hysteresis, so the bound or the edge's comparison is off by rounding.
+  Seen once.
+- **ac2-cli `json::trace::trace_commands_json` on Windows CI**: `session save-as` exited 3,
+  "daemon did not answer `file.save` (3 attempts)" (run 39387937301, c7ba3b04); passed on
+  rerun. Seen once.
 - **ac2d `remote_stimulus` "timed out waiting for the tone"**: once in a full workspace run
   at load ~30; passed 4/4 alone.
 - **ac2d `traces::capture::capture_average_math_export_import`, unaligned capture at 301.6 Hz:
@@ -134,3 +144,6 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   summing axis. Left: heights through the reference axis, 15–30° off axis, rear-panel
   settings, listening position;
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
+- **Per-device latency offset** (audit 2026-10-20 F4e): a user-entered latency per device for
+  a two-device rig without a loopback reference. Parked: the loopback measures that latency,
+  and an external reference on the input device needs none; the PA rigs here use loopback.

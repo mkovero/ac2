@@ -564,10 +564,15 @@ fn a_renewal_reopens_a_preview_that_stopped_delivering() {
     };
     preview(&mut c);
     preview_of(&s, BackendKind::Fake).expect("first frames");
-    // The stream goes quiet; past the stall bound a renewal reopens it.
-    std::thread::sleep(Duration::from_millis(2_500));
-    while s.frame(Duration::from_millis(20), |_| true).is_some() {}
-    preview(&mut c);
+    // The stream goes quiet; renewals keep it open until, past the stall bound, one
+    // reopens it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while opened.lock().unwrap().len() < 2 {
+        assert!(Instant::now() < deadline, "no renewal reopened the stream");
+        std::thread::sleep(Duration::from_millis(100));
+        while s.frame(Duration::from_millis(20), |_| true).is_some() {}
+        preview(&mut c);
+    }
     preview_of(&s, BackendKind::Fake).expect("frames after the renewal reopened the stream");
     assert_eq!(opened.lock().unwrap().len(), 2);
 }

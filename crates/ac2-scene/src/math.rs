@@ -9,17 +9,9 @@
 
 use ac2_proto::frame::{MathState, OperandStatus, ProtectionFlags};
 use ac2_proto::model::{
-    AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, NamedOperand, Operand, PhaseBasis,
+    AlignOutcome, AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, NamedOperand, Operand,
+    PhaseBasis,
 };
-
-/// `power`, `complex`, `coherence-weighted`.
-pub fn method_name(m: AverageMethod) -> &'static str {
-    match m {
-        AverageMethod::Power => "power",
-        AverageMethod::Complex => "complex",
-        AverageMethod::CoherenceWeighted => "coherence-weighted",
-    }
-}
 
 /// `÷`, `×`, `+`, `−`.
 pub fn op_symbol(op: MathOp) -> &'static str {
@@ -50,6 +42,9 @@ pub fn expression(expr: &MathExpr, name_of: impl Fn(Operand) -> String) -> Strin
         MathExpr::Binary { a, op, b } => {
             format!("{} {} {}", name_of(*a), op_symbol(*op), name_of(*b))
         }
+        MathExpr::Align { a, b, .. } => {
+            format!("{} {} {}", name_of(*a), crate::align::SYMBOL, name_of(*b))
+        }
         MathExpr::Average { of, .. } => format!(
             "average of {}",
             of.iter()
@@ -64,7 +59,7 @@ pub fn expression(expr: &MathExpr, name_of: impl Fn(Operand) -> String) -> Strin
 /// positions is `Average of 4`.
 pub fn default_name(expr: &MathExpr, name_of: impl Fn(Operand) -> String) -> String {
     match expr {
-        MathExpr::Binary { .. } => expression(expr, name_of),
+        MathExpr::Binary { .. } | MathExpr::Align { .. } => expression(expr, name_of),
         MathExpr::Average { of, .. } => format!("Average of {}", of.len()),
     }
 }
@@ -108,11 +103,13 @@ fn transfer_notes(expr: &MathExpr, phase: PhaseBasis) -> Vec<&'static str> {
         PhaseBasis::OwnAlignments => notes.push("phase: own alignments"),
         PhaseBasis::NoPhase => notes.push("magnitude only"),
     }
-    if let MathExpr::Binary {
-        op: MathOp::Add | MathOp::Subtract,
-        ..
-    } = expr
-    {
+    if matches!(
+        expr,
+        MathExpr::Binary {
+            op: MathOp::Add | MathOp::Subtract,
+            ..
+        } | MathExpr::Align { .. }
+    ) {
         // A sum's coherence would need the operands' cross-spectrum.
         notes.push("no coherence");
     }
@@ -161,6 +158,8 @@ pub struct MathStatus {
     pub notes: Vec<&'static str>,
     /// The operands' arrival difference ([`arrival_note`]), when the caller knows their delays.
     pub arrival: Option<String>,
+    /// An alignment's suggestion ([`crate::align::legend_note`]), when its frame has one.
+    pub align: Option<String>,
 }
 
 impl MathStatus {
@@ -171,14 +170,14 @@ impl MathStatus {
             MathDomain::Transfer => transfer_notes(&c.expr, s.phase),
             MathDomain::Spectrum | MathDomain::Rta => match &c.expr {
                 MathExpr::Binary { op, .. } => vec![op_meaning(*op, c.domain)],
-                MathExpr::Average { .. } => Vec::new(),
+                MathExpr::Average { .. } | MathExpr::Align { .. } => Vec::new(),
             },
         };
         Self {
             expression: expression(&c.expr, &name_of),
             method: match &c.expr {
                 MathExpr::Average { method, .. } => Some(*method),
-                MathExpr::Binary { .. } => None,
+                MathExpr::Binary { .. } | MathExpr::Align { .. } => None,
             },
             included: s.included(),
             operands: s.operands.len(),
@@ -191,6 +190,12 @@ impl MathStatus {
                 .collect(),
             notes,
             arrival: None,
+            align: match (&c.expr, s.align.as_deref().map(|a| &a.outcome)) {
+                (MathExpr::Align { a, b, .. }, Some(AlignOutcome::Fit { fit })) => {
+                    Some(crate::align::legend_note(fit, &name_of(*a), &name_of(*b)))
+                }
+                _ => None,
+            },
         }
     }
 
@@ -229,11 +234,12 @@ impl MathStatus {
     /// `Main L ÷ Sub · arrival Δ +3.7 µs · +1.3 mm @ 20 °C`.
     pub fn tag(&self) -> String {
         let head = match self.method {
-            Some(m) => format!("{} · {} avg", self.count(), method_name(m)),
+            Some(m) => format!("{} · {} avg", self.count(), m.label()),
             None => self.expression.clone(),
         };
         std::iter::once(head.as_str())
             .chain(self.notes.iter().copied())
+            .chain(self.align.as_deref())
             .chain(self.arrival.as_deref())
             .collect::<Vec<_>>()
             .join(" · ")
@@ -284,12 +290,9 @@ pub fn capture_note(
     };
     let head = match expr {
         MathExpr::Binary { .. } => expression(expr, name_of),
+        MathExpr::Align { .. } => format!("{} aligned", expression(expr, name_of)),
         MathExpr::Average { method, .. } => {
-            format!(
-                "{} positions · {} avg",
-                operands.len(),
-                method_name(*method)
-            )
+            format!("{} positions · {} avg", operands.len(), method.label())
         }
     };
     let notes = if transfer {
@@ -317,6 +320,7 @@ mod tests {
         match o {
             Operand::Meas { meas } => format!("Seat {}", meas.0),
             Operand::Trace { trace } => format!("S{}", trace.0),
+            Operand::Eq { set, .. } => format!("EQ {}", set.0),
         }
     }
 
@@ -337,6 +341,7 @@ mod tests {
                 })
                 .collect(),
             phase: PhaseBasis::SharedTimeBase,
+            align: None,
         };
         (c, s)
     }
@@ -400,6 +405,7 @@ mod tests {
                 },
             ],
             phase,
+            align: None,
         };
         let cfg = |op| {
             MathConfig::of(
@@ -464,6 +470,7 @@ mod tests {
                 },
             ],
             phase: PhaseBasis::NoPhase,
+            align: None,
         };
         assert_eq!(
             MathStatus::new(&spec, &both, name).tag(),
@@ -492,12 +499,14 @@ mod tests {
                 })
                 .collect(),
             phase,
+            align: None,
         };
         let s2 = Operand::Trace { trace: TraceId(2) };
         // Seat 1 at 600.37 samples, S2 at 600 (48 kHz).
         let delay_of = |o: Operand| match o {
             Operand::Meas { .. } => Some(600.37 / 48_000.0),
             Operand::Trace { .. } => Some(600.0 / 48_000.0),
+            Operand::Eq { .. } => None,
         };
         let tag = |op, b, phase: PhaseBasis| {
             let (c, s) = (cfg(op, b), state(b, phase));

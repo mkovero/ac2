@@ -934,7 +934,7 @@ fn latch_releases_after_the_hold_or_far_enough_below() {
 /// A peak is held for PEAK_HOLD_S seconds, then gone; NaN before any second.
 #[test]
 fn peak_hold_keeps_the_highest_second_of_the_newest_ten() {
-    let mut h = PeakHold::default();
+    let mut h = RecentPeaks::default();
     assert!(h.max_dbfs()[0].is_nan());
     let loud = Second::GAP.with_maxima(-3.0, -10.0);
     let quiet = Second::GAP.with_maxima(-30.0, -40.0);

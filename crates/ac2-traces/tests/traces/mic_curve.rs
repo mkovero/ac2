@@ -42,7 +42,7 @@ fn mic_curve_on_a_stored_trace_is_a_display_edit() {
     // Flat 0 dB measured: the served magnitude is minus the curve, 0 at 1 kHz, −3 dB from
     // 10 kHz up, +2 dB from 50 Hz down (held flat outside the points).
     let k = t.mic_curve.clone().unwrap();
-    for (f, v) in frequencies(g).iter().zip(&d.mag_db) {
+    for (f, v) in g.centres().iter().zip(&d.mag_db) {
         assert!((f64::from(*v) + k.db(*f)).abs() < 1e-5, "{f}: {v}");
     }
     assert_eq!(d.mag_db[col(g, 1000.0)], 0.0);
@@ -129,7 +129,7 @@ fn mic_curve_corrects_sweep_distortion() {
     let k = t.mic_curve.clone().unwrap();
     let s = t.sweep.as_ref().unwrap();
     let d = t.data().sweep.unwrap();
-    let f = frequencies(&t.grid);
+    let f = t.grid.centres();
     let i = col(&t.grid, 1000.0);
     for (h, raw) in d.harmonics.iter().zip(&s.harmonics) {
         let n = f64::from(h.order);

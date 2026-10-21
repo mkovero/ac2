@@ -67,7 +67,7 @@ connected, connections the daemon did not make (a recorder, a patch to another p
 are left alone, and changing the generator's outputs never reopens the stream, so they
 stay.
 
-When JACK cannot be used, `ac2 devices`, the app's Settings › Audio & I/O and the daemon log say
+When JACK cannot be used, `ac2 devices`, the app's Settings › Audio I/O and the daemon log say
 why and what to do: *PipeWire is running but its JACK library isn't in use: install
 pipewire-jack … or start the daemon with `pw-jack ac2d`*, or *No JACK server: start JACK
 (e.g. `jackd -d alsa`) or use PipeWire*. libjack is loaded at run time, so ac2 starts either
@@ -122,7 +122,7 @@ microphone prompt, so either let the app host its daemon or start `ac2d` from Te
 Audio goes through Core Audio, the HAL directly (backend `coreaudio`, the only one on
 macOS): any device macOS lists, an aggregate device made in Audio MIDI Setup included. A
 device's rate, format and clock source are set in Audio MIDI Setup, which **P** on Settings ›
-Audio & I/O brings up. The audio path is verified in CI on BlackHole, a virtual device;
+Audio I/O brings up. The audio path is verified in CI on BlackHole, a virtual device;
 measuring with a real audio interface is not yet verified ([testing/macos](../testing/macos/README.md)).
 
 ## Windows (10 1809 or newer, x64)
@@ -149,7 +149,7 @@ are verified on Windows; ASIO with a real interface is not yet.
 There are three ways; pick one.
 
 - **The app hosts it.** Start **ac2**. If no daemon is running, the connect dialog opens:
-  choose *This computer's audio* (Settings opens next on its Audio & I/O page, to pick the
+  choose *This computer's audio* (Settings opens next on its Audio I/O page, to pick the
   interface and channels) or *Simulated rig* to try ac2 without hardware (it starts with its
   session open and a transfer measurement "demo" running). That daemon lives inside the app
   and stops with it. The command-line client cannot reach it; everything it would do is in
@@ -179,9 +179,9 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
 
 **In the app** (any daemon: hosted by the app, per-user, or remote; no terminal needed):
 
-1. Until there is an audio session the transfer pane says *No audio session — press
-   Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio session…*) opens Settings on its
-   **Audio & I/O** page. Its first rows pick the **backend** (JACK on Linux, Core Audio on macOS, ASIO on
+1. Until there is an audio I/O the transfer pane says *No audio I/O — press
+   Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio I/O…*) opens Settings on its
+   **Audio I/O** page. Its first rows pick the **backend** (JACK on Linux, Core Audio on macOS, ASIO on
    Windows; one that cannot be used says why and what to do, e.g. *No JACK server: start
    JACK (e.g. `jackd -d alsa`) or use PipeWire*) and the **device** (*8 in / 8 out ·
    48 kHz*) with **←/→**. Below them (**↓**) the page has
@@ -202,9 +202,9 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
    device's defaults unless you type them. The roles and names are remembered per device.
 3. **Enter** (on either page) opens the session. With a reference and at least one mic, and
    no measurements yet, the app offers *Reference → M30 FOH* — one transfer measurement per
-   mic; **Enter** creates and starts them. Later, **Ctrl+K** → *New transfer measurement…*
+   mic; **Enter** creates and starts them. Later, **Ctrl+K** → *New transfer…*
    (or *New spectrum…*, *New RTA…*, *New SPL meter…*) picks inputs by name with their meters
-   (**←/→**); *Delete selected measurement or trace…* and *Close audio session* are in the
+   (**←/→**); *Delete selected…* and *Close audio I/O* are in the
    palette too. While the session is open, the **Inputs** list on the left keeps a named
    meter per input with its role (*reference*, *mic*), so levels stay in sight while you
    measure.

@@ -23,15 +23,18 @@ use ac2_proto::model::{
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
 pub use ac2_scene::banner::Severity;
+use ac2_scene::format;
+// The reducer tests read these through `super::*`.
 use ac2_scene::spectrum::PeakHold;
 use ac2_scene::stimulus::{Drive, Next as NextKey, Stimulus as NextStimulus};
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
 use ac2_scene::view::{
-    DistortionUnit, FreqRange, IrMode, IrPane, PhaseView, PlotChrome, SpectrumMode, SplMode,
-    SweepMode, ViewState,
+    DistortionUnit, FreqRange, IrMode, IrPane, PlotChrome, SpectrumMode, SplMode, SweepMode,
+    ViewState,
 };
-use ac2_scene::{axis::Range, format};
+#[cfg(test)]
+use ac2_scene::{axis::Range, view::PhaseView};
 
 use crate::anim::FreqNav;
 use crate::cal_view::{CalAction, CalView};
@@ -44,99 +47,61 @@ use crate::prefs::UiPrefs;
 use crate::session_dialog::{RoleKey, Row, SessionDialog};
 use crate::settings::{FocusWant, Page, Settings};
 
-#[path = "state_display.rs"]
 mod display;
 pub use display::{ChoicePrompt, ChoicePurpose, DeletePrompt, DeleteTarget, MoveWhat};
-#[path = "state_levels.rs"]
-mod levels;
-pub use levels::{LEVEL_ZOOM_FACTOR, PaneLevels};
-#[path = "state_settings.rs"]
+pub use panes::levels::{LEVEL_ZOOM_FACTOR, PaneLevels};
 mod settings_impl;
 pub use settings_impl::SettingsMsg;
-#[path = "state_ir.rs"]
 mod ir_nav;
 pub use ir_nav::IrNavMsg;
-#[path = "state_band_transfer.rs"]
 mod band_transfer;
-#[path = "state_commands.rs"]
 mod commands;
-#[path = "state_commands_meas.rs"]
-mod commands_meas;
-#[path = "state_commands_tf.rs"]
-mod commands_tf;
-#[path = "state_dialogs.rs"]
-mod dialogs;
-#[path = "state_drag.rs"]
-mod drag;
-pub use drag::{DragMsg, DropTarget, EDGE_SHARE, RowDrag, drop_target};
-#[path = "state_glide.rs"]
+pub use panes::drag::{DragMsg, DropTarget, EDGE_SHARE, RowDrag, drop_target};
+mod advice;
 mod glide;
-#[path = "state_keys.rs"]
-mod keys;
 pub use glide::SpecGlide;
-#[path = "state_leq.rs"]
 mod leq;
-#[path = "state_leq_strip.rs"]
-mod leq_strip;
-pub use leq_strip::{LeqSpan, STRIP_MIN_S, StripMsg};
-#[path = "state_leq_export.rs"]
-mod leq_export;
-pub use leq_export::{EXPORT_DIR, export_path, leq_export_name};
-#[path = "state_link.rs"]
+pub use leq::LeqUi;
+pub use leq::export::{EXPORT_DIR, export_path, leq_export_name};
+pub use leq::strip::{LeqSpan, STRIP_MIN_S, StripMsg};
+pub use panes::pane_export::{PaneExport, pane_export_name};
 mod link;
-#[path = "state_meas_layout.rs"]
-mod meas_layout;
-#[path = "state_new_meas.rs"]
+use link::Pending;
+use panes::meas_layout::LayoutQueue;
 mod new_meas;
-#[path = "state_panes.rs"]
 mod panes;
-#[path = "state_panes_ops.rs"]
-mod panes_ops;
-#[path = "state_panes_views.rs"]
-mod panes_views;
-#[path = "state_queries.rs"]
 mod queries;
-#[path = "state_queries_inputs.rs"]
-mod queries_inputs;
-#[path = "state_queries_layout.rs"]
-mod queries_layout;
-#[path = "state_select.rs"]
-mod select;
-#[path = "state_sessions.rs"]
 pub(crate) mod sessions_impl;
 pub use sessions_impl::SessionsMsg;
-#[path = "state_stimulus.rs"]
+mod eq_impl;
 mod stimulus;
-#[path = "state_text.rs"]
 mod text;
-#[path = "state_undo.rs"]
 mod undo;
-pub use panes::{Axis, PaneId, PaneNode, PaneRect, Side, SplitGap};
-pub use panes_views::{
+pub use panes::views::{
     DEFAULT_PANE_AREA, Layout, PaneMenuRow, PaneModes, PaneTemplate, TransferView, View,
 };
+pub use panes::{Axis, PaneId, PaneNode, PaneRect, Side, SplitGap};
 pub use text::{
     curve_what, kind_shown, meas_input, mics_text, open_session_hint, parse_band, parse_mics,
-    parse_number, parse_outputs, parse_session_ref, parse_slot, trace_label,
+    parse_session_ref, parse_slot, trace_label,
 };
 use text::{drawn_in, offset_text, slot_of};
 pub use undo::HISTORY_LEN;
 
-#[path = "state_types.rs"]
 mod types;
 pub(crate) use types::STIMULUS_STOPPED_TOO;
+use types::trace_mic_request;
 pub use types::{
     ConnState, FinderChoice, LiveEdit, MAX_OBSERVATION_S, PaneKind, PaneMenu, SMOOTHING_STEPS,
     SUB_OBSERVATIONS_S, SmoothTarget, Smoothable, StimPhase, Stimulus, outputs_text, parse_curve,
     parse_input_curve, spectrum_smoothing,
 };
-use types::{dbfs, trace_mic_request};
-#[path = "state_msg.rs"]
 mod msg;
 pub use msg::{
     CAL_PAGE, COHERENCE_MASKS, DELAY_FINE_STEP, DelayChoice, FormMsg, HELP_LINE, HELP_PAGE,
-    LEVEL_FLOOR, LegendMsg, LeqMsg, MAX_TOASTS, Msg, NUDGE_S, NewLogPrompt, Notice, Offer, Overlay,
-    PAN_OCTAVES, PREVIEW_RENEW_S, Prompt, PromptKind, RECORD_MAX_S, SessionMsg, Toast, ZOOM_FACTOR,
+    LEVEL_FLOOR, LeqMsg, MAX_TOASTS, Msg, NUDGE_S, NewLogPrompt, Notice, Overlay, PAN_OCTAVES,
+    PREVIEW_RENEW_S, PlateMsg, Prompt, PromptKind, RECORD_MAX_S, SessionMsg, Toast, Toasts,
+    ZOOM_FACTOR,
 };
 use msg::{LeqLogSeen, Muted};
 
@@ -189,6 +154,9 @@ pub struct AppState {
     pub spec_glide: HashMap<Topic, SpecGlide>,
     /// Per live spectrum or RTA topic, the capture times and arrivals that pace its glides.
     pub spec_pacing: HashMap<Topic, ac2_scene::curve_ease::Pacing>,
+    /// Per running transfer measurement, its headroom advice over time
+    /// ([`ac2_scene::advice::Hold`]).
+    pub advice: HashMap<MeasId, ac2_scene::advice::Hold>,
     /// Stored traces' data, as fetched.
     pub traces: BTreeMap<TraceId, (Arc<TraceData>, Arc<GridDef>)>,
     /// The transfer view's stored-trace display math, kept between frames.
@@ -217,18 +185,15 @@ pub struct AppState {
     /// By id: names may repeat, and hiding one `Main` must not hide another. `ui.toml`
     /// keeps them by name ([`AppState::restore_meas_choices`]).
     pub hidden_meas: BTreeSet<MeasId>,
-    /// Measurements (live curves, math channels) every transfer pane draws besides its own
-    /// group, by id as hidden ones are (compare, C): an overlay, never an operand.
-    pub compared_meas: BTreeSet<MeasId>,
-    /// Stored traces every transfer pane draws besides its own group (compare, C), whatever
-    /// their owner. Ids are the daemon's: kept while the app runs, not in `ui.toml`.
-    pub compared_traces: BTreeSet<TraceId>,
     /// Groups of the measurement tree folded in this app (their rows not listed).
     pub collapsed: BTreeSet<ac2_proto::model::TraceOwner>,
     pub edits: BTreeMap<MeasId, LiveEdit>,
     /// Peak hold per spectrum / RTA measurement, with the last folded-in `seq` and capture
     /// time.
     pub peaks: BTreeMap<MeasId, (u64, u64, PeakHold)>,
+    /// Tracked peaks per spectrum / RTA measurement, with the last folded-in `seq`, kept
+    /// while peak tracking is on.
+    pub peak_tracks: BTreeMap<MeasId, (u64, ac2_scene::spectrum::peaks::PeakTracker)>,
     /// Spectrograph history per spectrum / RTA measurement, kept while the spectrograph is
     /// shown.
     pub spectrographs: BTreeMap<MeasId, ac2_scene::spectrograph::SpectrographHistory>,
@@ -257,11 +222,8 @@ pub struct AppState {
     pub help_scroll: f32,
     /// The scrolled window's visible height, points, as the view last measured it: a page.
     pub help_page: f32,
-    /// Shown notifications, oldest first.
-    pub toasts: Vec<Toast>,
-    /// The pointer is over the toasts: none expires while the operator reads them.
-    pub toasts_held: bool,
-    toast_seq: u64,
+    /// Shown notifications.
+    pub toasts: Toasts,
     /// What rasterises the window: a CPU rasteriser gets fewer frames and no shadows.
     pub rasterizer: ac2_plot::Rasterizer,
     /// The last [`ac2_scene::toast::LOG_LEN`] notifications, oldest first.
@@ -281,19 +243,23 @@ pub struct AppState {
     /// Settings sent with the arm in flight; a change made before the arm is confirmed is
     /// sent once it is.
     armed_with: Option<GeneratorSettings>,
-    /// A measurement this client just created: selected once the mirror lists it.
-    pending_select: Option<MeasId>,
+    /// What waits for the mirror to list it.
+    pending: Pending,
     /// The name of a transfer measurement submitted from its form: its creation lays it
     /// out in the transfer stack.
     stack_on_create: Option<String>,
-    /// That measurement, created: stacked once the mirror lists it.
-    pending_stack: Option<MeasId>,
     /// The name of a sweep, spectrum, RTA or SPL meter submitted from its form: its
     /// creation brings up a pane of its kind for it.
     pane_on_create: Option<String>,
-    /// Open the audio setup ([`Self::open_audio_setup`]) once the daemon's state shows no
-    /// audio session (an embedded daemon on real audio starts without one).
+    /// The name of an alignment submitted from the math dialog: its creation splits the
+    /// focused pane and the new half shows its alignment view.
+    align_on_create: Option<String>,
+    /// Open the Sessions dialog once the daemon's state shows no audio I/O (an embedded
+    /// daemon on real audio starts without one): its New leads on to the audio setup.
     pub open_session_when_empty: bool,
+    /// The session dialog's session opened: ask what to measure ([`Self::choose_first`])
+    /// once the daemon's state shows it open.
+    choose_when_open: bool,
     /// The daemon's backends and devices as last listed (channel names for the dialogs).
     pub devices: Option<Vec<ac2_proto::model::BackendInfo>>,
     /// When the device preview was last asked for.
@@ -301,41 +267,15 @@ pub struct AppState {
     /// The session the device list was last asked for on its own (for the input names of
     /// the always-on meters).
     devices_for: Option<ac2_proto::units::SessionEpoch>,
-    /// Each SPL meter's Leq windows over time, from the `leq` frames received (with the
-    /// last `seq` folded in) over the history rebuilt from the meter's log.
-    pub leq_history: BTreeMap<MeasId, (u64, ac2_scene::leq::LeqHistory)>,
-    /// The span (daemon wall clock, s) each SPL pane's history strip looks back at; a
-    /// pane not here follows live.
-    pub leq_strips: BTreeMap<PaneId, (f64, f64)>,
-    /// The pointer over a history strip: its pane and time (s).
-    pub leq_cursor: Option<(PaneId, f64)>,
-    /// Spans of each meter's log fetched for strips looking back, oldest first.
-    pub leq_spans: BTreeMap<MeasId, Vec<leq_strip::LeqSpan>>,
-    /// The span fetch under way.
-    leq_span_pending: Option<leq_strip::SpanAsk>,
-    /// Number of the newest span fetch.
-    leq_span_ask: u64,
-    /// Width of the strip last moved by the mouse, px: the resolution fetched at.
-    pub leq_strip_px: f32,
-    /// Which log and windows each SPL meter's history was last rebuilt for.
-    leq_logs: BTreeMap<MeasId, LeqLogSeen>,
-    /// Number of the newest history rebuild asked for.
-    leq_backfill_ask: u64,
-    /// The newest over / recovered alarm of each meter already shown (`None`: none yet).
-    leq_alarms_seen: BTreeMap<MeasId, Option<ac2_proto::model::LeqAlarm>>,
+    /// The SPL meters' Leq history, strips, logs and alarms.
+    pub leq: LeqUi,
     /// Each SPL meter's displayed reading, held for its display period.
     pub spl_hold: BTreeMap<MeasId, ac2_scene::spl::SplHold>,
-    /// The measurement each pane showed when the app last ran, by name, until the daemon's
-    /// state is known.
-    pending_pane_meas: BTreeMap<PaneId, String>,
-    /// Hidden measurements by name, waiting for the daemon to list one of that name: read
-    /// from `ui.toml`, or a hidden one the daemon took away (a session reopening, a daemon
-    /// restarting renumbers them).
-    pending_hidden: BTreeSet<String>,
-    /// Compared measurements by name, waiting as hidden ones do.
-    pending_compared: BTreeSet<String>,
     /// Each pane's level axis ranges, by pane: a pane not here draws on the defaults.
     pane_levels: BTreeMap<PaneId, PaneLevels>,
+    /// Spectrum panes whose level axis is framed for what they show, or set by the operator:
+    /// a pane not here frames its next frame.
+    spectrum_hold: BTreeMap<PaneId, panes::levels::SpectrumHold>,
     /// No layout was remembered: the one pane takes the kind of the first measurement once
     /// the daemon's state is known.
     pane_auto: bool,
@@ -347,6 +287,8 @@ pub struct AppState {
     pub client_key: Option<crate::settings::ClientKey>,
     /// The operator asked for the connect dialog (the app opens it).
     pub want_connect_dialog: bool,
+    /// A pane to write as PNG (the app renders it with the window's GPU and takes it).
+    pub pane_export: Option<PaneExport>,
     /// The selection moved by key: the tree brings its row into view (the view takes it).
     pub tree_reveal: bool,
     /// A key moved the Settings page's focus (or a page was shown): the page brings the
@@ -355,19 +297,8 @@ pub struct AppState {
     pub settings_reveal: bool,
     /// The Settings page last shown: the Settings key opens it again.
     settings_page_last: Page,
-    /// The SPL / Leq page's cue fold as the operator last set it, for the app's run: Apply,
-    /// closing and another meter keep it (a meter with a cue set opens shown anyway).
-    leq_cues_shown: bool,
-    /// The SPL / Leq page last applied, with what its call is named: a conflict brings it
-    /// back with its edits.
-    leq_sent: Option<(String, Box<LeqDialog>)>,
-    /// `meas.layout` calls not answered yet, oldest first.
-    layout_calls: std::collections::VecDeque<meas_layout::LayoutCall>,
-    /// Edits waiting for the `meas.layout` call in flight for their measurement: the newest.
-    layout_queued: BTreeMap<MeasId, ac2_proto::model::PaneLayout>,
-    /// A split dragged: the measurements whose layout takes it, and when (`now_s`) the drag
-    /// counts as done.
-    layout_due: Option<(Vec<MeasId>, f64)>,
+    /// `meas.layout` calls in flight and the edits waiting for them.
+    layout_queue: LayoutQueue,
     /// A measurement's row was chosen: its own panes go on screen after the message.
     own_panes_due: bool,
     /// The measurement this app selected by itself, the one it had gone (or none chosen
@@ -384,6 +315,16 @@ pub struct AppState {
     own_panes: Option<MeasId>,
     /// The lost selection's own panes were on screen: they follow it when it comes back.
     lost_own_panes: bool,
+    /// The plate under the pointer, and whose pane it is on.
+    pub plate_hover: Option<(PaneId, ac2_scene::plate::PlateHover)>,
+    /// The measurement whose row was chosen last (or that this app selected by itself, a
+    /// measurement made, a sweep just run): a pane with no pick of its own shows it. A child
+    /// row, a chip pick or a click in a pane never moves it, so they change no pane but the
+    /// one picked.
+    chosen: Option<MeasId>,
+    /// The level ranges the operator set, by pane: each is stored with the panes and kept
+    /// (never framed again automatically) until the pane shows another measurement.
+    level_set: BTreeSet<(PaneId, panes::levels::LevelSlot)>,
     /// Names of the measurements the daemon has listed since this app started: a pane
     /// remembered on one of them waits for it to come back.
     meas_seen: BTreeSet<String>,
@@ -423,10 +364,9 @@ fn typed_char(c: &Chord) -> Option<char> {
 }
 
 impl AppState {
-    /// The theme the panes are drawn with: the chosen theme with the chosen spectrograph
-    /// colours.
+    /// The theme the panes are drawn with.
     pub fn scene_theme(&self) -> ac2_scene::theme::Theme {
-        ac2_scene::theme::Theme::by_name(self.theme).with_colormap(self.prefs.spectrograph_colours)
+        ac2_scene::theme::Theme::by_name(self.theme)
     }
 
     pub fn new(theme: ThemeName, target: String) -> Self {
@@ -437,6 +377,7 @@ impl AppState {
             bar_from: HashMap::new(),
             spec_glide: HashMap::new(),
             spec_pacing: HashMap::new(),
+            advice: HashMap::new(),
             traces: BTreeMap::new(),
             theme,
             view: ViewState::default(),
@@ -448,6 +389,7 @@ impl AppState {
             selected_live: None,
             edits: BTreeMap::new(),
             peaks: BTreeMap::new(),
+            peak_tracks: BTreeMap::new(),
             spectrographs: BTreeMap::new(),
             stimulus: Stimulus::default(),
             sweep: SweepUi::default(),
@@ -461,9 +403,7 @@ impl AppState {
             overlay: Overlay::None,
             help_scroll: 0.0,
             help_page: HELP_PAGE,
-            toasts: Vec::new(),
-            toasts_held: false,
-            toast_seq: 0,
+            toasts: Toasts::default(),
             rasterizer: ac2_plot::Rasterizer::Gpu,
             notices: std::collections::VecDeque::new(),
             now_s: 0.0,
@@ -473,53 +413,54 @@ impl AppState {
             panes_only: false,
             swallow_text: None,
             armed_with: None,
-            pending_select: None,
+            pending: Pending::default(),
             stack_on_create: None,
             pane_on_create: None,
-            pending_stack: None,
+            align_on_create: None,
             open_session_when_empty: false,
+            choose_when_open: false,
             devices: None,
             preview_sent_s: f64::NEG_INFINITY,
             devices_for: None,
-            leq_history: BTreeMap::new(),
-            leq_strips: BTreeMap::new(),
-            leq_cursor: None,
-            leq_spans: BTreeMap::new(),
-            leq_span_pending: None,
-            leq_span_ask: 0,
-            leq_strip_px: 600.0,
+            leq: LeqUi {
+                history: BTreeMap::new(),
+                strips: BTreeMap::new(),
+                cursor: None,
+                spans: BTreeMap::new(),
+                span_pending: None,
+                span_ask: 0,
+                strip_px: 600.0,
+                logs: BTreeMap::new(),
+                backfill_ask: 0,
+                alarms_seen: BTreeMap::new(),
+                cues_shown: false,
+                sent: None,
+            },
             tf_display: Default::default(),
-            leq_logs: BTreeMap::new(),
-            leq_backfill_ask: 0,
-            leq_alarms_seen: BTreeMap::new(),
             spl_hold: BTreeMap::new(),
-            pending_pane_meas: BTreeMap::new(),
             pane_auto: true,
-            pending_hidden: BTreeSet::new(),
             pane_levels: BTreeMap::new(),
-            pending_compared: BTreeSet::new(),
+            spectrum_hold: BTreeMap::new(),
             hidden_meas: BTreeSet::new(),
-            compared_meas: BTreeSet::new(),
-            compared_traces: BTreeSet::new(),
             collapsed: BTreeSet::new(),
             link_wants: crate::link_wants::Sent::default(),
             spectrum_running: BTreeSet::new(),
             spectrum_fit: BTreeMap::new(),
             client_key: None,
             want_connect_dialog: false,
+            pane_export: None,
             tree_reveal: false,
             settings_reveal: false,
             settings_page_last: Page::AudioIo,
-            leq_cues_shown: false,
-            leq_sent: None,
-            layout_calls: std::collections::VecDeque::new(),
-            layout_queued: BTreeMap::new(),
-            layout_due: None,
+            layout_queue: LayoutQueue::default(),
             own_panes_due: false,
             standin: None,
             lost_selection: None,
             own_panes: None,
             lost_own_panes: false,
+            plate_hover: None,
+            chosen: None,
+            level_set: BTreeSet::new(),
             meas_seen: BTreeSet::new(),
             keys: Keymap::default(),
             row_drag: None,
@@ -535,18 +476,25 @@ impl AppState {
         let mut out = Vec::new();
         let before = self.meter_wants();
         let tick = matches!(msg, Msg::Tick { .. });
-        let drag = matches!(msg, Msg::DragSplit { .. });
+        // A split or a plate dragged: one undo step, sent to the daemon once it rests.
+        let drag = matches!(
+            msg,
+            Msg::DragSplit { .. }
+                | Msg::Plate(
+                    PlateMsg::Move { .. } | PlateMsg::Scale { .. } | PlateMsg::Reset { .. }
+                )
+        );
         let conn = matches!(msg, Msg::Conn(_));
         if !tick && !drag {
             self.flush_layout_drag(&mut out);
-            self.finish_split_drag();
+            self.finish_drag();
         }
         if self.keys != *keymap {
             self.keys = keymap.clone();
         }
         let panes_before = self.panes_watch();
         let edit = if drag {
-            self.start_split_drag();
+            self.start_drag(&msg);
             None
         } else if tick || conn {
             None
@@ -557,7 +505,7 @@ impl AppState {
         self.undoing = false;
         self.update_inner(msg, keymap, &mut out);
         if let Some(c) = self.overlay.leq().and_then(|d| d.cues_chosen) {
-            self.leq_cues_shown = c;
+            self.leq.cues_shown = c;
         }
         if tick {
             self.poll_settings(&mut out);
@@ -572,7 +520,6 @@ impl AppState {
             // An undo or redo stores what it restores itself, on the owner of the edit only.
             let undoing = std::mem::take(&mut self.undoing);
             self.sync_meas_layout(panes_before, conn || undoing, drag, &mut out);
-            self.prune_compared();
             if let Some(w) = edit.filter(|_| !undoing) {
                 let ran = self.ran_command;
                 self.record_edit(w, ran);
@@ -586,14 +533,13 @@ impl AppState {
         let out = &mut *out;
         match msg {
             Msg::Key(chord) => self.key(chord, keymap, out),
-            Msg::Text(t) => self.text(&t),
+            Msg::Text(t) => self.text_with(&t, out),
             Msg::Backspace => self.backspace(out),
             Msg::Wheel { rows } => self.wheel(rows, keymap),
             Msg::Command(c) => self.command(c, keymap, out),
             Msg::Conn(e) => self.conn_event(*e, out),
             Msg::Form(m) => self.form_msg(m, out),
             Msg::Session(m) => self.session_msg(m, out),
-            Msg::Offer(create) => self.offer(create, out),
             Msg::NewLog(go) => self.new_log(go, out),
             Msg::Delete(go) => self.delete(go, out),
             Msg::LevelZoom {
@@ -611,15 +557,15 @@ impl AppState {
                 self.now_s = now_s;
                 self.nav.step(dt_s);
                 self.view.freq = self.nav.current();
-                if self.toasts_held {
-                    for t in &mut self.toasts {
+                if self.toasts.held {
+                    for t in &mut self.toasts.list {
                         t.until_s += held;
                     }
                 }
                 let now = self.now_s;
-                self.toasts.retain(|t| t.until_s > now);
+                self.toasts.list.retain(|t| t.until_s > now);
             }
-            Msg::ToastsHeld(held) => self.toasts_held = held,
+            Msg::ToastsHeld(held) => self.toasts.held = held,
             Msg::Rasterizer(r) => {
                 if r == ac2_plot::Rasterizer::Software && self.rasterizer != r {
                     self.toast(ac2_scene::toast::SOFTWARE_RENDERING);
@@ -627,9 +573,9 @@ impl AppState {
                 self.rasterizer = r;
             }
             Msg::DismissToast(id) => {
-                self.toasts.retain(|t| t.id != id);
+                self.toasts.list.retain(|t| t.id != id);
                 // What moved under the pointer is not what it rested on.
-                self.toasts_held = false;
+                self.toasts.held = false;
             }
             Msg::SelectMeas(id) => self.select_meas_row(id),
             Msg::OpenRig => self.open_settings(crate::settings::Page::Rig, out),
@@ -637,11 +583,10 @@ impl AppState {
             Msg::SelectMath(id) => self.select_math_row(id),
             Msg::SelectTrace(id) => {
                 if self.selected_trace == Some(id) {
-                    self.select_trace(None);
+                    self.set_selected_trace(None);
                 } else {
                     self.select_trace_row(id);
                 }
-                self.reveal_trace();
             }
             Msg::ToggleShown(id) => self.toggle_shown(id, out),
             Msg::ToggleGroup(g) => {
@@ -654,21 +599,15 @@ impl AppState {
             Msg::Sessions(m) => self.sessions_msg(m, out),
             Msg::RenameTrace(id) => {
                 if self.selected_trace != Some(id) {
-                    self.select_trace(Some(id));
-                    self.reveal_trace();
+                    self.select_trace_row(id);
                 }
                 if let Ok(t) = self.trace_meta(id) {
                     self.prompt(PromptKind::TraceRename(id), t.edit.name.clone());
                 }
             }
-            Msg::FocusPane(p) => {
-                self.layout.set_focus(p);
-                // A click on a pane of another measurement is about what it shows; one on
-                // the pane of the selection only moves the focus.
-                if !self.selection_on_pane(p) {
-                    self.select_shown(p);
-                }
-            }
+            // A click in a pane gives it the keyboard; the selection stays on the row the
+            // operator chose (the pane's keys act on what it shows).
+            Msg::FocusPane(p) => self.layout.set_focus(p),
             Msg::LegendPick(p, key) => self.legend_pick(p, key),
             Msg::PaneMenu(p) => {
                 self.overlay = match self.overlay {
@@ -680,7 +619,7 @@ impl AppState {
             Msg::DragSplit { path, ratio } => self.drag_split(&path, ratio),
             // The drag's step was closed before the message, as any other message closes it.
             Msg::DragSplitEnd => {}
-            Msg::RowDrag(m) => self.row_drag_msg(m),
+            Msg::RowDrag(m) => self.row_drag_msg(m, out),
             Msg::Zoom { about_hz, factor } => {
                 let t = self.nav.target.zoom(about_hz, factor);
                 self.nav.set_target(t);
@@ -697,18 +636,8 @@ impl AppState {
                 self.view.spectrum.spectrograph.cursor_s = Some(before_s);
             }
             Msg::DistortionUnit(unit) => self.view.distortion.unit = unit,
-            Msg::Legend(m) => {
-                let l = &mut self.view.tf.legend;
-                match m {
-                    LegendMsg::Hover(h) => l.hover = h,
-                    LegendMsg::Move { x, y } => l.move_to(x, y),
-                    LegendMsg::Resize {
-                        max_width,
-                        max_height,
-                    } => l.resize(max_width, max_height),
-                    LegendMsg::Scroll { first } => l.first = first,
-                }
-            }
+            Msg::Plate(m) => self.plate_msg(m),
+            Msg::LegendScroll { first } => self.view.tf.legend.first = first,
         }
     }
 
@@ -748,13 +677,14 @@ impl AppState {
         };
         if pops {
             self.toasts
+                .list
                 .retain(|t| !(t.severity == severity && t.text == text));
-            if self.toasts.len() >= MAX_TOASTS {
-                self.toasts.remove(0);
+            if self.toasts.list.len() >= MAX_TOASTS {
+                self.toasts.list.remove(0);
             }
-            self.toast_seq += 1;
-            self.toasts.push(Toast {
-                id: self.toast_seq,
+            self.toasts.seq += 1;
+            self.toasts.list.push(Toast {
+                id: self.toasts.seq,
                 until_s: self.now_s + ac2_scene::toast::duration_s(severity, &text),
                 text: text.clone(),
                 severity,
@@ -817,7 +747,7 @@ fn relabel(f: &mut Form, names: &[(u16, String)]) {
     }
 }
 
-/// `press Shift+O (or Ctrl+K → Open audio session)`, from the keys actually bound.
+/// `press Shift+O (or Ctrl+K → Open audio I/O)`, from the keys actually bound.
 /// The transfer pane's first-run guidance and where it goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmptyHint {
@@ -835,5 +765,4 @@ pub enum HintPlace {
 }
 
 #[cfg(test)]
-#[path = "state_tests.rs"]
 mod tests;

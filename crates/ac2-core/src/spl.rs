@@ -173,7 +173,8 @@ impl Leq {
 
     /// Adds one sample.
     #[inline]
-    pub fn push_sample(&mut self, x: f64) {
+    #[cfg(test)]
+    pub(crate) fn push_sample(&mut self, x: f64) {
         self.add(x * x);
         self.samples += 1;
     }
@@ -224,7 +225,8 @@ impl Leq {
     }
 
     /// Sound exposure level in dBFS·s: Leq + 10·lg(T / 1 s) (IEC 61672-1 Formula 4).
-    pub fn exposure_level_dbfs(&self) -> f64 {
+    #[cfg(test)]
+    pub(crate) fn exposure_level_dbfs(&self) -> f64 {
         power_dbfs(self.energy() / self.fs)
     }
 
@@ -275,7 +277,8 @@ pub struct Sensitivity {
 impl Sensitivity {
     /// From a calibrator of known level (e.g. 94 or 114 dB SPL) and the level measured from
     /// it in dBFS on the same scale as every other level here.
-    pub fn from_calibrator(calibrator_db_spl: f64, measured_dbfs: f64) -> Self {
+    #[cfg(test)]
+    pub(crate) fn from_calibrator(calibrator_db_spl: f64, measured_dbfs: f64) -> Self {
         Self {
             offset_db: calibrator_db_spl - measured_dbfs,
         }

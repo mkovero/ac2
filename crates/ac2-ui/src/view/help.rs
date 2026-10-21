@@ -89,6 +89,7 @@ impl Section {
             | C::NewRta
             | C::NewSpl
             | C::NewMath
+            | C::NewAlignment
             | C::SweepNew
             | C::EditMeas
             | C::Slot1
@@ -137,7 +138,7 @@ impl Section {
             | C::TurnSplit
             | C::GrowPane
             | C::ShrinkPane
-            | C::MaximizePane
+            | C::MaximisePane
             | C::Undo
             | C::Redo
             | C::PlotChrome
@@ -164,7 +165,7 @@ const DIGIT_GROUPS: [([CommandId; 9], &str); 3] = {
                 C::Slot8,
                 C::Slot9,
             ],
-            "Capture selected measurement to slot 1…9",
+            "Capture to slot 1…9",
         ),
         (
             [
@@ -178,7 +179,7 @@ const DIGIT_GROUPS: [([CommandId; 9], &str); 3] = {
                 C::ShowSlot8,
                 C::ShowSlot9,
             ],
-            "Show / hide slot 1…9",
+            "Show/hide slot 1…9",
         ),
         (
             [
@@ -192,7 +193,7 @@ const DIGIT_GROUPS: [([CommandId; 9], &str); 3] = {
                 C::FocusPane8,
                 C::FocusPane9,
             ],
-            "Focus pane 1…9 (in reading order)",
+            "Focus pane 1…9",
         ),
     ]
 };
@@ -209,86 +210,46 @@ const DIGITS: [Key; 9] = [
     Key::Num9,
 ];
 
-/// Opposite steps shown on one row (`↑/↓ Stimulus level +1 / −1 dB`) when their keys fit the
+/// Opposite steps shown on one row (`↑/↓ Stimulus level ±1 dB`) when their keys fit the
 /// key column side by side.
 const PAIRS: [(CommandId, CommandId, &str); 17] = {
     use CommandId as C;
     [
-        (C::LevelUp, C::LevelDown, "Stimulus level +1 / −1 dB"),
-        (
-            C::LevelUpCoarse,
-            C::LevelDownCoarse,
-            "Stimulus level +3 / −3 dB",
-        ),
-        (C::ZoomIn, C::ZoomOut, "Zoom frequency in / out (IR: time)"),
-        (
-            C::PanLeft,
-            C::PanRight,
-            "Pan frequency down / up (IR: time)",
-        ),
-        (
-            C::CursorLeft,
-            C::CursorRight,
-            "Cursor 1/12 octave down / up (IR: a step)",
-        ),
-        (
-            C::NudgeEarlier,
-            C::NudgeLater,
-            "Delay −0.1 / +0.1 ms of the measurement or the selected stored trace",
-        ),
-        (
-            C::DelayDown,
-            C::DelayUp,
-            "Delay of the measurement −1 / +1 sample",
-        ),
-        (
-            C::DelayDownFine,
-            C::DelayUpFine,
-            "Delay of the measurement −0.1 / +0.1 sample",
-        ),
+        (C::LevelUp, C::LevelDown, "Stimulus level ±1 dB"),
+        (C::LevelUpCoarse, C::LevelDownCoarse, "Stimulus level ±3 dB"),
+        (C::ZoomIn, C::ZoomOut, "Zoom in/out"),
+        (C::PanLeft, C::PanRight, "Pan left/right"),
+        (C::CursorLeft, C::CursorRight, "Cursor left/right"),
+        (C::NudgeEarlier, C::NudgeLater, "Delay −/+0.1 ms"),
+        (C::DelayDown, C::DelayUp, "Delay −/+1 sample"),
+        (C::DelayDownFine, C::DelayUpFine, "Delay −/+0.1 sample"),
         (
             C::InsertDelay,
             C::InsertStrongest,
-            "Delay: find and insert first arrival / strongest peak",
+            "Find first arrival/strongest peak",
         ),
-        (
-            C::OffsetUp,
-            C::OffsetDown,
-            "Display offset +1 / −1 dB of the selected curve",
-        ),
-        (
-            C::OffsetUpCoarse,
-            C::OffsetDownCoarse,
-            "Display offset +3 / −3 dB of the selected curve",
-        ),
-        (
-            C::LevelZoomIn,
-            C::LevelZoomOut,
-            "Zoom level axis in / out (vertical; IR: amplitude or dB)",
-        ),
-        (
-            C::LevelPanUp,
-            C::LevelPanDown,
-            "Pan level axis up / down (IR: amplitude or dB)",
-        ),
-        (
-            C::NextTrace,
-            C::PrevTrace,
-            "Select next / previous shown stored trace (then live)",
-        ),
-        (C::NextView, C::PrevView, "Next / previous view"),
-        (
-            C::SmoothCoarser,
-            C::SmoothFiner,
-            "Smoothing coarser / finer (selected trace or pane's measurement)",
-        ),
+        (C::OffsetUp, C::OffsetDown, "Offset ±1 dB"),
+        (C::OffsetUpCoarse, C::OffsetDownCoarse, "Offset ±3 dB"),
+        (C::LevelZoomIn, C::LevelZoomOut, "Zoom level in/out"),
+        (C::LevelPanUp, C::LevelPanDown, "Pan level up/down"),
+        (C::NextTrace, C::PrevTrace, "Next/previous trace"),
+        (C::NextView, C::PrevView, "Next/previous view"),
+        (C::SmoothCoarser, C::SmoothFiner, "Smoothing coarser/finer"),
         (
             C::ToggleSelected,
             C::HideGroup,
-            "Show / hide the selected curve / its measurement with every trace",
+            "Show/hide curve/measurement",
         ),
     ]
 };
+
+/// The mouse on the legend and readout plates: no key does this, and the plates are where
+/// the eye already is, so the help names the gestures with the pane's keys, on one row to
+/// keep the busiest pane's help within its columns.
+const PLATE_MOUSE: [(&str, &str); 1] = [(
+    "Drag plate",
+    "Move it; its corner: text size; double-click: back",
+)];
 
 /// The widest key text the help's key column holds (`Alt+Shift+V`).
 const KEY_COLUMN_CHARS: usize = 11;
@@ -301,6 +262,12 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
         if !pane.is_empty() {
             rows.push(HelpRow::Header(format!("{} pane", active.title())));
             rows.extend(pane);
+            if matches!(active, Scope::Transfer | Scope::Spectrum) {
+                rows.extend(PLATE_MOUSE.iter().map(|(keys, title)| HelpRow::Bind {
+                    keys: (*keys).into(),
+                    title: (*title).into(),
+                }));
+            }
         }
     }
     for section in Section::ALL {
@@ -371,20 +338,10 @@ fn scope_rows(keymap: &Keymap, scope: Scope, keep: impl Fn(CommandId) -> bool) -
         };
         rows.push(HelpRow::Bind {
             keys,
-            title: short_title(c).into(),
+            title: c.title().into(),
         });
     }
     rows
-}
-
-/// The palette's title without its closing explanation in parentheses: the help is read at
-/// a glance, the palette (same words, in full) when searching.
-fn short_title(c: CommandId) -> &'static str {
-    let t = c.title();
-    match t.rfind(" (") {
-        Some(i) if t.ends_with(')') => &t[..i],
-        _ => t,
-    }
 }
 
 /// `Shift+↑/↓` for a pair bound to one key each with the same modifiers, `V/Shift+V` for
@@ -632,26 +589,24 @@ mod tests {
         let b = binds(&rows);
         // Only this pane's and the global keys: the spectrum's peak hold is not listed.
         assert!(!b.iter().any(|(_, t)| *t == CommandId::PeakHold.title()));
-        assert!(b.contains(&("↑/↓", "Stimulus level +1 / −1 dB")));
-        assert!(b.contains(&(
-            "X/Shift+X",
-            "Delay: find and insert first arrival / strongest peak"
-        )));
-        assert!(b.contains(&("Ctrl+1…9", "Capture selected measurement to slot 1…9")));
-        assert!(b.contains(&("1…9", "Show / hide slot 1…9")));
-        assert!(b.contains(&("Alt+1…9", "Focus pane 1…9 (in reading order)")));
-        assert!(b.contains(&(
-            "V/Shift+V",
-            "Select next / previous shown stored trace (then live)"
-        )));
+        assert!(b.contains(&("↑/↓", "Stimulus level ±1 dB")));
+        assert!(b.contains(&("X/Shift+X", "Find first arrival/strongest peak")));
+        assert!(b.contains(&("Ctrl+1…9", "Capture to slot 1…9")));
+        assert!(b.contains(&("1…9", "Show/hide slot 1…9")));
+        assert!(b.contains(&("Alt+1…9", "Focus pane 1…9")));
+        assert!(b.contains(&("V/Shift+V", "Next/previous trace")));
         // Too wide side by side: a row each, one key per line when they do not fit.
         assert!(
             b.iter()
                 .any(|(_, t)| *t == CommandId::OffsetUpCoarse.title())
         );
         assert!(b.contains(&("Delete\nBackspace", CommandId::DeleteSelected.title())));
-        // The explanation in parentheses stays in the palette.
-        assert!(b.contains(&("Space", "Stimulus: arm what the view plays")));
+        // The help shows the palette's own words.
+        assert!(b.contains(&("Space", "Arm stimulus")));
+        // The plates' mouse gestures under the pane's keys.
+        assert!(b.contains(&PLATE_MOUSE[0]));
+        let ir = help_rows(&Keymap::default(), Scope::Ir);
+        assert!(!binds(&ir).contains(&PLATE_MOUSE[0]));
     }
 
     #[test]
@@ -668,7 +623,7 @@ mod tests {
                 }
                 let c = b.command;
                 let listed = binds(&rows).iter().any(|(_, t)| {
-                    *t == short_title(c)
+                    *t == c.title()
                         || DIGIT_GROUPS
                             .iter()
                             .any(|(cmds, g)| cmds.contains(&c) && t == g)

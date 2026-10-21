@@ -77,5 +77,16 @@ pub fn events() -> Vec<Event> {
             }),
         ),
         ev(68, Change::Rig(rig())),
+        ev(69, Change::Measurement(Patch::Set(align_measurement()))),
+        ev(
+            70,
+            Change::Measurement(Patch::Set(super::eq::eq_measurement())),
+        ),
+        ev(71, Change::Trace(Patch::Set(super::eq::eq_trace_meta()))),
+        ev(72, Change::Trace(Patch::Set(super::eq::eq_capture_meta()))),
+        ev(
+            73,
+            Change::Measurement(Patch::Set(super::eq::eq_prediction())),
+        ),
     ]
 }

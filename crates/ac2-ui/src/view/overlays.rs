@@ -2,6 +2,7 @@
 
 use eframe::egui::{self, Color32, RichText, text::LayoutJob};
 
+use super::keys_cue;
 use crate::app::App;
 use crate::forms::Value;
 use crate::keys::{CommandId, Keymap, LabelStyle, STOP_ANYWHERE, Scope};
@@ -22,11 +23,11 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32) {
         Overlay::DelayPick(_) => delay_pick(app, ctx, ch),
         Overlay::Form(_) => form(app, ctx, ch),
         Overlay::Settings(_) => super::settings::settings(app, ctx, ch, top),
-        Overlay::Offer(_) => super::session::offer(app, ctx, ch),
         Overlay::NewLog(_) => super::leq::new_log(app, ctx, ch),
         Overlay::Delete(_) => delete(app, ctx, ch),
         Overlay::Choose(_) => choose(app, ctx, ch),
         Overlay::Sessions(_) => super::sessions::sessions(app, ctx, ch),
+        Overlay::Eq(_) => super::eq::eq(app, ctx, ch),
         // Drawn by its pane, under the title chip.
         Overlay::PaneMenu(_) => {}
     }
@@ -61,15 +62,27 @@ fn delete(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if k.refused {
-                        if ui.button("Close").clicked() {
+                        if ui
+                            .button("Close")
+                            .on_hover_text(keys_cue(&[egui::Key::Enter, egui::Key::Escape]))
+                            .clicked()
+                        {
                             msg = Some(false);
                         }
                         return;
                     }
-                    if ui.button(RichText::new("Delete").strong()).clicked() {
+                    if ui
+                        .button(RichText::new("Delete").strong())
+                        .on_hover_text(keys_cue(&[egui::Key::Delete, egui::Key::Backspace]))
+                        .clicked()
+                    {
                         msg = Some(true);
                     }
-                    if ui.button("Keep it").clicked() {
+                    if ui
+                        .button("Keep it")
+                        .on_hover_text(keys_cue(&[egui::Key::N, egui::Key::Escape]))
+                        .clicked()
+                    {
                         msg = Some(false);
                     }
                 });
@@ -118,9 +131,10 @@ fn choose(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                     } else if i == p.index {
                         text = text.strong();
                     }
-                    let r = ui.add_sized(
-                        [ui.available_width(), 24.0],
-                        egui::Button::selectable(i == p.index, text),
+                    // Full width to click, text read from the left edge like a list.
+                    let r = ui.add(
+                        egui::Button::selectable(i == p.index, text)
+                            .min_size(egui::vec2(ui.available_width(), 24.0)),
                     );
                     if r.clicked() {
                         msg = Some(Some(i));
@@ -137,7 +151,10 @@ fn choose(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.horizontal(|ui| {
                     // A question whose answers include Cancel needs no second one.
                     if !p.choices.iter().any(|c| c.label == "Cancel")
-                        && ui.button("Cancel").clicked()
+                        && ui
+                            .button("Cancel")
+                            .on_hover_text(keys_cue(&[egui::Key::Escape]))
+                            .clicked()
                     {
                         msg = Some(None);
                     }
@@ -389,10 +406,18 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     let verb = f.kind.verb();
-                    if ui.button(verb).clicked() {
+                    if ui
+                        .button(verb)
+                        .on_hover_text(keys_cue(&[egui::Key::Enter]))
+                        .clicked()
+                    {
                         msg = Some(FormMsg::Submit);
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui
+                        .button("Cancel")
+                        .on_hover_text(keys_cue(&[egui::Key::Escape]))
+                        .clicked()
+                    {
                         msg = Some(FormMsg::Cancel);
                     }
                 });
@@ -542,7 +567,7 @@ const TOAST_BOTTOM_RESERVED: f32 = super::panes::HINT_H + 8.0;
 fn toasts(app: &mut App, ctx: &egui::Context, top: f32) {
     let mut held = false;
     let mut dismiss = None;
-    if !app.state.toasts.is_empty() {
+    if !app.state.toasts.list.is_empty() {
         let theme = app.theme();
         let screen = ctx.content_rect();
         let font = egui::FontId::proportional(theme.font_size + 1.0);
@@ -560,11 +585,17 @@ fn toasts(app: &mut App, ctx: &egui::Context, top: f32) {
             top - screen.min.y,
             TOAST_BOTTOM_RESERVED,
         );
-        let texts: Vec<&str> = app.state.toasts.iter().map(|t| t.text.as_str()).collect();
+        let texts: Vec<&str> = app
+            .state
+            .toasts
+            .list
+            .iter()
+            .map(|t| t.text.as_str())
+            .collect();
         let boxes = ac2_scene::toast::stack(&texts, area, line_h, &measure);
         let n = boxes.len();
         for (k, b) in boxes.into_iter().enumerate() {
-            let t = &app.state.toasts[b.index];
+            let t = &app.state.toasts.list[b.index];
             let c = ac2_scene::toast::colors(t.severity, &theme);
             let min = screen.min + egui::vec2(b.rect.x, b.rect.y);
             let size = egui::vec2(b.rect.w, b.rect.h);
@@ -614,7 +645,7 @@ fn toasts(app: &mut App, ctx: &egui::Context, top: f32) {
     }
     if let Some(id) = dismiss {
         app.dispatch(Msg::DismissToast(id));
-    } else if held != app.state.toasts_held {
+    } else if held != app.state.toasts.held {
         app.dispatch(Msg::ToastsHeld(held));
     }
 }

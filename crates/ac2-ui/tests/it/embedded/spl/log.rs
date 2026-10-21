@@ -55,7 +55,7 @@ fn run_seconds(s: &AppState) -> Option<u64> {
 /// The run clock and a new log from an empty daemon, using the app: a session and an SPL
 /// meter from the app; the Leq view's caption counts the meter's log (`running 0:00:05
 /// since … · LAeq total …`); Shift+R asks first, naming the run that ends; N keeps it,
-/// Shift+R and Enter start a new log, and the clock starts again from zero.
+/// Shift+R twice starts a new log, and the clock starts again from zero.
 #[test]
 fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     use ac2_ui::state::PaneKind;
@@ -124,12 +124,13 @@ fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     })?;
     let ended = run_seconds(&d.st).ok_or("clock")?;
 
-    // Shift+R, Enter: a new log; the clock starts from zero again.
+    // Shift+R, Shift+R again: a new log; the clock starts from zero again.
     d.key("Shift+R");
-    d.key("Enter");
+    d.key("Shift+R");
     assert_eq!(d.st.overlay, Overlay::None);
     d.until("the new log toasted", |s| {
         s.toasts
+            .list
             .iter()
             .any(|t| t.text.contains("new SPL log started"))
     })?;
@@ -155,7 +156,7 @@ fn history_points(s: &AppState) -> Option<(MeasId, Vec<ac2_scene::leq::HistoryPo
     let MeasKind::Spl { config } = &m.config.kind else {
         return None;
     };
-    let (_, h) = s.leq_history.get(&m.id)?;
+    let (_, h) = s.leq.history.get(&m.id)?;
     let p = h.points(config.leq.windows.first()?)?;
     Some((m.id, p.iter().copied().collect()))
 }
@@ -295,9 +296,10 @@ fn slow_a_restarted_app_shows_the_history_from_the_log() -> R {
         history_points(s).is_some_and(|(_, p)| p.first().is_some_and(|x| x.t <= first + 0.5))
     })?;
     d.key("Shift+R");
-    d.key("Enter");
+    d.key("Shift+R");
     d.until("the new log toasted", |s| {
         s.toasts
+            .list
             .iter()
             .any(|t| t.text.contains("new SPL log started"))
     })?;
@@ -332,7 +334,7 @@ fn logged(s: &AppState) -> Option<u64> {
 }
 
 /// A preset chosen in the Leq dialog replaces the meter's windows: DIN 15905-5 from the
-/// preset row, Enter, and the meter has only LAeq 30 min ≤ 99 dB. The log carries on (in
+/// preset row, Enter, and the meter has only LAeq 30 min ≤ 99 dB SPL. The log carries on (in
 /// place, not a new log), and the history of the new window is rebuilt from it.
 #[test]
 fn slow_a_preset_replaces_the_windows_from_the_app() -> R {
@@ -365,7 +367,7 @@ fn slow_a_preset_replaces_the_windows_from_the_app() -> R {
     };
     assert_eq!(
         x.preset_text(),
-        "DIN 15905-5: LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB"
+        "DIN 15905-5: LAeq 30 min ≤ 99 dB SPL, LCpeak ≤ 135 dB SPL"
     );
     assert!(x.preset_note().contains("replaces the windows"));
     let shown: Vec<(String, String)> = x
@@ -376,7 +378,7 @@ fn slow_a_preset_replaces_the_windows_from_the_app() -> R {
     assert_eq!(shown, [("LAeq 30 min".to_owned(), "99".to_owned())]);
     d.key("Enter");
     assert_eq!(d.st.overlay, Overlay::None);
-    d.until("only LAeq 30 min ≤ 99 dB", |s| {
+    d.until("only LAeq 30 min ≤ 99 dB SPL", |s| {
         s.measurements().iter().any(|m| match &m.config.kind {
             MeasKind::Spl { config } => config.leq.windows == LeqPreset::Din15905.windows(),
             _ => false,

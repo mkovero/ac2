@@ -141,7 +141,7 @@ PATHS: tuple[SignalPath, ...] = (
     SignalPath("Xone", "xone", "Xone (electrical)",
                "Out of the interface, through the Xone:62 and back in. " + RIG_TRUTH,
                (REF_LEVEL, GAIN, MAG_TONES, *MAG_BANDS, *MAG_TF, PHASE_TONES, PHASE, *GD, ARRIVAL, HARMONICS)),
-    SignalPath("Genelec", "genelec", "Genelec (speaker at 56 cm)",
+    SignalPath("Genelec", "genelec", "Genelec (speaker at 54 cm)",
                "The Genelec 1083 in the room, the MM1 on its tweeter axis. " + RIG_TRUTH
                + " SPL: the steady sine through the stored calibration.",
                (REF_LEVEL, GAIN, SPL, MAG_TONES, *MAG_BANDS, *MAG_TF, PHASE_TONES, PHASE, ARRIVAL, HARMONICS)),

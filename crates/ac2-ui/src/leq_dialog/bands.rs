@@ -12,7 +12,7 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{Db, DbSpl, Hz, Seconds};
 
-use super::{LENGTHS, WEIGHTINGS, number_text, weighting_letter};
+use super::{LENGTHS, WEIGHTINGS, number_text};
 
 /// A setting of the band section outside its windows, top to bottom.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -205,7 +205,7 @@ impl BandRow {
             BandCol::Length => {
                 ac2_scene::band_leq::window_name(f64::from(self.seconds), self.weighting)
             }
-            BandCol::Weighting => weighting_letter(self.weighting).to_owned(),
+            BandCol::Weighting => self.weighting.letter().to_owned(),
             BandCol::Limit => self.limit.clone(),
             BandCol::DayOffset => self.day_offset.clone(),
             BandCol::Margin => self.margin.clone(),
@@ -215,7 +215,8 @@ impl BandRow {
     fn window(&self, n: usize) -> Result<BandWindow, String> {
         let name = self.name();
         let parse = |t: &str, what: &str| {
-            crate::state::parse_number(t, &["db spl", "dbspl", "db"])
+            ac2_scene::unit_text::in_field::<ac2_scene::unit_text::SplLevel>(t, "db")
+                .map(|l| l.0.0)
                 .map_err(|e| format!("band window {n} ({name}) {what}: {e}"))
         };
         let limit = if self.limit.trim().is_empty() {
@@ -279,7 +280,7 @@ impl RangeRow {
             RangeCol::Length => {
                 ac2_scene::band_leq::window_name(f64::from(self.seconds), self.weighting)
             }
-            RangeCol::Weighting => weighting_letter(self.weighting).to_owned(),
+            RangeCol::Weighting => self.weighting.letter().to_owned(),
         }
     }
 
@@ -854,7 +855,7 @@ mod tests {
         s.rows[1].limit = "loud".into();
         assert_eq!(
             s.config(),
-            Err("band window 2 (25 Hz band LZeq 1 min) limit: not a number: \"loud\"".into())
+            Err("band window 2 (25 Hz band LZeq 1 min) limit: \"loud\": expected a number followed by a unit".into())
         );
         s.rows[1].limit.clear();
         // The same band twice over one length and weighting is refused.

@@ -48,6 +48,7 @@ use crate::util::perr;
 mod artnet;
 mod autosave;
 mod cal;
+mod eq;
 mod execute;
 mod file_jobs;
 mod files;
@@ -326,7 +327,7 @@ pub(crate) struct Control {
     /// The health meter keepalives carry.
     health: crate::health::Health,
     /// The open session's audio stopped and is being reopened; `session` is `None` meanwhile.
-    recovery: Option<recovery::Recovery>,
+    audio_recovery: Option<recovery::Recovery>,
     jobs: BTreeMap<MeasId, JobHandle>,
     /// How spatial averages reach their running members.
     probes: Arc<Probes>,
@@ -341,10 +342,7 @@ pub(crate) struct Control {
     reply_warnings: Vec<ac2_proto::Warning>,
     next_fanout_id: u64,
     next_meas: u32,
-    lease: Option<Lease>,
-    gate: Arc<LeaseGate>,
-    level: Option<LevelControl>,
-    source: Option<SourceKey>,
+    out: Output,
     grids: HashMap<GridId, GridDef>,
     seqs: Arc<Seqs>,
     ka_seq: u64,
@@ -362,33 +360,51 @@ pub(crate) struct Control {
     autosave: Option<Autosaver>,
     /// Load the autosave when the control thread starts.
     restore: bool,
-    /// Per-second log of each SPL measurement, shared with its job.
-    spl_logs: HashMap<MeasId, crate::leq_log::SharedLog>,
-    /// The log `spl.log_new` ended last, per SPL meter.
-    spl_prev_logs: HashMap<MeasId, crate::leq_log::LeqLog>,
+    logs: SplLogs,
     /// The raw capture being written.
     recording: Option<recording::ActiveRecording>,
-    /// Where the rig settings are kept.
-    rig: crate::rig::RigStore,
-    /// The rig's SPL meters and the monitor at start.
-    rigm: rig_meas::RigMeas,
-    /// The system max level a client last set (kept in the rig settings); `None`: never
-    /// set, the bound applies.
-    ceiling_set: Option<f64>,
+    rig: RigState,
     /// The recording a replay session plays (`session.replay`).
     replay_backend: Option<Arc<ac2_audio::ReplayBackend>>,
     /// What the working state belongs to (`State.working`).
     working: working::Persist,
     /// The working state the last `file.new` / `file.load` replaced with unsaved changes.
-    recover: Option<working::Recover>,
+    replaced_working: Option<working::Recover>,
     /// Session archives being uploaded or downloaded.
     transfers: transfer::Transfers,
     /// File operations whose disk work runs on a worker, by token.
     file_jobs: file_jobs::FileJobs,
+}
+
+/// The stimulus output: who may drive it, its gate, level and source, and the ceiling.
+struct Output {
+    lease: Option<Lease>,
+    gate: Arc<LeaseGate>,
+    level: Option<LevelControl>,
+    source: Option<SourceKey>,
+    /// The system max level a client last set (kept in the rig settings); `None`: never
+    /// set, the bound applies.
+    ceiling_set: Option<f64>,
+}
+
+/// The rig's persistent settings, its meters and the cue senders they drive.
+struct RigState {
+    /// Where the rig settings are kept.
+    settings: crate::rig::RigStore,
+    /// The rig's SPL meters and the monitor at start.
+    meas: rig_meas::RigMeas,
     /// The OSC cues' states and their sender.
     osc: osc::Cues,
     /// The Art-Net universe the cue states make, and its sender.
     artnet: artnet::Universe,
+}
+
+/// The per-second SPL logs, by meter.
+struct SplLogs {
+    /// The log each SPL measurement is writing now, shared with its job.
+    live: HashMap<MeasId, crate::leq_log::SharedLog>,
+    /// The log `spl.log_new` ended last, per SPL meter.
+    ended: HashMap<MeasId, crate::leq_log::LeqLog>,
 }
 
 impl Control {
@@ -464,7 +480,7 @@ impl Control {
             dedup,
             session: None,
             health: crate::health::Health::new(),
-            recovery: None,
+            audio_recovery: None,
             jobs: BTreeMap::new(),
             probes: Arc::new(Probes::default()),
             timing_job: None,
@@ -474,10 +490,13 @@ impl Control {
             reply_warnings: Vec::new(),
             next_fanout_id: 1,
             next_meas: rigm.next_id(),
-            lease: None,
-            gate: Arc::new(LeaseGate::new()),
-            level: None,
-            source: None,
+            out: Output {
+                lease: None,
+                gate: Arc::new(LeaseGate::new()),
+                level: None,
+                source: None,
+                ceiling_set: saved.ceiling_dbfs,
+            },
             grids: HashMap::new(),
             seqs: Arc::new(Seqs::default()),
             ka_seq: 0,
@@ -495,19 +514,22 @@ impl Control {
             next_sweep: 1,
             autosave,
             restore,
-            spl_logs: HashMap::new(),
-            spl_prev_logs: HashMap::new(),
+            logs: SplLogs {
+                live: HashMap::new(),
+                ended: HashMap::new(),
+            },
             recording: None,
             replay_backend: None,
             working: working::Persist::untitled(),
-            recover: None,
+            replaced_working: None,
             transfers: transfer::Transfers::default(),
             file_jobs: file_jobs::FileJobs::default(),
-            osc: osc::Cues::default(),
-            artnet: artnet::Universe::default(),
-            rig,
-            rigm,
-            ceiling_set: saved.ceiling_dbfs,
+            rig: RigState {
+                settings: rig,
+                meas: rigm,
+                osc: osc::Cues::default(),
+                artnet: artnet::Universe::default(),
+            },
             s,
         }
     }
@@ -543,7 +565,7 @@ impl Control {
                 }
             }
             if self
-                .recovery
+                .audio_recovery
                 .as_ref()
                 .and_then(recovery::Recovery::due)
                 .is_some_and(|d| d <= now)
@@ -551,7 +573,7 @@ impl Control {
                 self.start_attempt(None);
             }
             if self
-                .recovery
+                .audio_recovery
                 .as_ref()
                 .and_then(recovery::Recovery::probe_due)
                 .is_some_and(|d| d <= now)
@@ -573,7 +595,7 @@ impl Control {
             if let Some(t) = self.artnet_wake() {
                 wake = wake.min(t);
             }
-            if let Some(l) = &self.lease {
+            if let Some(l) = &self.out.lease {
                 wake = wake.min(l.deadline);
             }
             if let Some(p) = &self.preview {
@@ -582,14 +604,18 @@ impl Control {
             if let Some(d) = self.autosave.as_ref().and_then(Autosaver::due) {
                 wake = wake.min(d);
             }
-            if let Some(d) = self.recovery.as_ref().and_then(recovery::Recovery::due) {
+            if let Some(d) = self
+                .audio_recovery
+                .as_ref()
+                .and_then(recovery::Recovery::due)
+            {
                 wake = wake.min(d);
             }
             if let Some(d) = self.rig_due() {
                 wake = wake.min(d);
             }
             if let Some(d) = self
-                .recovery
+                .audio_recovery
                 .as_ref()
                 .and_then(recovery::Recovery::probe_due)
             {
@@ -603,7 +629,7 @@ impl Control {
                 }) => self.on_request(&routing_id, peer, &payload),
                 Ok(ControlMsg::DeviceChanged { epoch }) => {
                     if self.session.as_ref().is_some_and(|r| r.epoch == epoch) {
-                        tracing::warn!("device or configuration change: reopening the session");
+                        tracing::warn!("device or configuration change: reopening the audio I/O");
                         let routes = self
                             .session
                             .as_ref()
@@ -722,7 +748,7 @@ impl Control {
         self.close_preview();
         self.stop_output();
         self.stop_all_jobs();
-        self.recovery = None;
+        self.audio_recovery = None;
         if let Some(rt) = self.session.take() {
             recovery::close_bounded(rt, recovery::CLOSE_BOUND);
         }

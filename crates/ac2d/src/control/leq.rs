@@ -7,9 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    AlarmSubject, BAND_COUNT, BandLevelSource, BandTransferSet, HistorySpan, LeqAlarm,
-    LeqAlarmKind, LeqConfig, LeqJudgement, MeasKind, Measurement, PeakQuantity, SplHistory, SplLog,
-    SplLogWhich, Weighting,
+    BAND_COUNT, BandLevelSource, BandTransferSet, HistorySpan, LeqAlarm, LeqAlarmKind, LeqConfig,
+    LeqJudgement, MeasKind, Measurement, PeakQuantity, SplHistory, SplLog, SplLogWhich,
 };
 use ac2_proto::spl_log::SplLogInfo;
 use ac2_proto::units::{ClientId, MeasId, Rev, WallNs};
@@ -24,47 +23,6 @@ use crate::leq_log::{self, LeqLog};
 use crate::util::{perr, wall_ns};
 
 const NS: u64 = 1_000_000_000;
-
-/// `LAeq 30 min`, `LCpeak`, for the daemon's own log.
-fn subject_name(s: &AlarmSubject) -> String {
-    match s {
-        AlarmSubject::Window {
-            duration,
-            weighting,
-        } => {
-            let w = match weighting {
-                Weighting::A => "A",
-                Weighting::C => "C",
-                Weighting::Z => "Z",
-            };
-            let secs = duration.0;
-            let len = if secs >= 60.0 && secs % 60.0 == 0.0 {
-                format!("{} min", secs / 60.0)
-            } else {
-                format!("{secs} s")
-            };
-            format!("L{w}eq {len}")
-        }
-        AlarmSubject::Peak {
-            quantity: PeakQuantity::LcPeak,
-        } => "LCpeak".into(),
-        AlarmSubject::Peak {
-            quantity: PeakQuantity::LafMax,
-        } => "LAFmax".into(),
-        AlarmSubject::Band {
-            duration,
-            weighting,
-            nominal,
-        } => {
-            let window = subject_name(&AlarmSubject::Window {
-                duration: *duration,
-                weighting: *weighting,
-            });
-            format!("{} Hz band {window}", nominal.0)
-        }
-        AlarmSubject::Predicted => "predicted LAeq at the transfer's place".into(),
-    }
-}
 
 impl Control {
     fn spl_config(&self, id: MeasId) -> Option<(String, ac2_proto::model::SplConfig)> {
@@ -105,7 +63,8 @@ impl Control {
             return;
         };
         let log = self
-            .spl_logs
+            .logs
+            .live
             .entry(m.id)
             .or_insert_with(|| Arc::new(Mutex::new(LeqLog::default())))
             .clone();
@@ -140,14 +99,14 @@ impl Control {
 
     /// Loads `rows` as the log of SPL measurement `id` (a loaded session's).
     pub(super) fn set_spl_log(&mut self, id: MeasId, log: LeqLog) {
-        self.spl_logs.insert(id, Arc::new(Mutex::new(log)));
+        self.logs.live.insert(id, Arc::new(Mutex::new(log)));
         self.autosave_changed();
     }
 
     /// Forgets a measurement's logs and its entity.
     pub(super) fn drop_spl_log(&mut self, id: MeasId) {
-        let had = self.spl_logs.remove(&id).is_some();
-        self.spl_prev_logs.remove(&id);
+        let had = self.logs.live.remove(&id).is_some();
+        self.logs.ended.remove(&id);
         if self.spl_log_entity(id).is_some() {
             self.commit(Change::SplLog(Patch::Deleted(id)));
         }
@@ -158,11 +117,11 @@ impl Control {
 
     /// What a starting SPL job needs: the log and the judgements the entity holds.
     pub(super) fn leq_setup(&mut self, id: MeasId) -> LeqSetup {
-        let log = match self.spl_logs.get(&id) {
+        let log = match self.logs.live.get(&id) {
             Some(l) => l.clone(),
             None => {
                 let l: crate::leq_log::SharedLog = Arc::new(Mutex::new(LeqLog::default()));
-                self.spl_logs.insert(id, l.clone());
+                self.logs.live.insert(id, l.clone());
                 self.autosave_changed();
                 l
             }
@@ -205,7 +164,8 @@ impl Control {
         // one from before `spl.log_new` belongs to the ended log.
         if current != Some(config_rev)
             || self
-                .spl_logs
+                .logs
+                .live
                 .get(&meas)
                 .is_none_or(|l| leq_log::lock(l).epoch() != epoch)
         {
@@ -216,7 +176,7 @@ impl Control {
         else {
             return;
         };
-        self.osc.reported(meas, judged);
+        self.rig.osc.reported(meas, judged);
         let mut l = prev;
         for (w, &j) in l.windows.iter_mut().zip(judgements) {
             if w.judgement != j {
@@ -239,13 +199,13 @@ impl Control {
             match a.kind {
                 LeqAlarmKind::Over => tracing::warn!(
                     "SPL meter {meas} ({name}): {} over its limit: {:.1} dB > {:.1} dB{corrected}",
-                    subject_name(&a.subject),
+                    a.subject,
                     a.level.0,
                     a.limit.0
                 ),
                 LeqAlarmKind::Recovered => tracing::info!(
                     "SPL meter {meas} ({name}): {} back within its limit: {:.1} dB ≤ {:.1} dB{corrected}",
-                    subject_name(&a.subject),
+                    a.subject,
                     a.level.0,
                     a.limit.0
                 ),
@@ -254,7 +214,7 @@ impl Control {
         l.alarms.extend(alarms);
         let over = l.alarms.len().saturating_sub(SplLog::MAX_ALARMS);
         l.alarms.drain(..over);
-        if let Some(log) = self.spl_logs.get(&meas) {
+        if let Some(log) = self.logs.live.get(&meas) {
             l.started_at = leq_log::lock(log).started_at();
         }
         self.commit_spl_log(l);
@@ -282,12 +242,13 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         self.spl_meter(meas)?;
         let page = match which {
-            SplLogWhich::Current => match self.spl_logs.get(&meas) {
+            SplLogWhich::Current => match self.logs.live.get(&meas) {
                 Some(l) => leq_log::lock(l).page(meas, from, max),
                 None => LeqLog::default().page(meas, from, max),
             },
             SplLogWhich::Previous => self
-                .spl_prev_logs
+                .logs
+                .ended
                 .get(&meas)
                 .ok_or_else(|| {
                     perr(
@@ -316,7 +277,7 @@ impl Control {
         let MeasKind::Spl { config } = &m.config.kind else {
             return Err(perr(ErrorCode::Internal, "SPL meter without its config"));
         };
-        let log = self.spl_logs.get(&meas);
+        let log = self.logs.live.get(&meas);
         let extent = log.and_then(|l| leq_log::lock(l).extent());
         let mut h = match span {
             HistorySpan::Newest { seconds } => {
@@ -376,7 +337,8 @@ impl Control {
             return Err(perr(ErrorCode::Internal, "SPL meter without its config"));
         };
         let log = self
-            .spl_logs
+            .logs
+            .live
             .entry(meas)
             .or_insert_with(|| Arc::new(Mutex::new(LeqLog::default())))
             .clone();
@@ -394,7 +356,7 @@ impl Control {
                 ended.total()
             );
         }
-        self.spl_prev_logs.insert(meas, ended);
+        self.logs.ended.insert(meas, ended);
         let calibrated = self.input_calibrated(config.input);
         let now = WallNs(wall_ns());
         let windows = leq_log::window_states(&config.leq, None, &[], calibrated, now);
@@ -416,7 +378,8 @@ impl Control {
     /// not a change (the autosave appends it), another log is.
     pub(super) fn spl_log_ids(&self, scope: ac2_proto::model::MeasScope) -> Vec<(MeasId, u64)> {
         let mut v: Vec<(MeasId, u64)> = self
-            .spl_logs
+            .logs
+            .live
             .iter()
             .filter(|(id, _)| self.meas_scope(**id) == scope)
             .map(|(id, l)| (*id, leq_log::lock(l).id()))
@@ -432,7 +395,8 @@ impl Control {
     ) -> Vec<(SplLogInfo, &crate::leq_log::SharedLog)> {
         let st = self.store.state();
         let mut out: Vec<_> = self
-            .spl_logs
+            .logs
+            .live
             .iter()
             .filter(|(id, _)| self.meas_scope(**id) == scope)
             .filter_map(|(id, log)| {
@@ -548,7 +512,8 @@ impl Control {
         let banded = matches!(&m.config.kind, MeasKind::Spl { config } if config.bands.is_some());
         let name = m.config.name.clone();
         let rows = self
-            .spl_logs
+            .logs
+            .live
             .get(&meas)
             .map(|l| leq_log::lock(l).band_rows_in(from, until))
             .unwrap_or_default();

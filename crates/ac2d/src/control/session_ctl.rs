@@ -45,7 +45,7 @@ impl Control {
         let backend = self.backend_for(config.backend)?;
         // The preview may hold the very device the session is about to open.
         self.close_preview();
-        if self.session.is_some() || self.recovery.is_some() {
+        if self.session.is_some() || self.audio_recovery.is_some() {
             self.session_close(client);
         }
         let epoch = SessionEpoch(self.epoch().0 + 1);
@@ -80,11 +80,11 @@ impl Control {
     /// Stops what runs on a stream about to close: the sweep, the jobs, the generator source
     /// and the published frames of the session.
     pub(super) fn wind_down(&mut self, recording: ac2_proto::model::RecordingEnd) {
-        self.abort_sweep(SweepFailure::SessionClosed, "the audio session reopened");
+        self.abort_sweep(SweepFailure::SessionClosed, "the audio I/O reopened");
         self.end_recording(recording);
         self.stop_all_jobs();
-        self.level = None;
-        self.source = None;
+        self.out.level = None;
+        self.out.source = None;
         self.s.outbox.clear(b"d/");
         self.s.outbox.clear(b"timing");
         self.s.outbox.clear(b"session/levels");
@@ -137,7 +137,7 @@ impl Control {
     }
 
     pub(super) fn session_close(&mut self, client: &ClientId) {
-        self.abort_sweep(SweepFailure::SessionClosed, "the audio session closed");
+        self.abort_sweep(SweepFailure::SessionClosed, "the audio I/O closed");
         self.end_recording(ac2_proto::model::RecordingEnd::SessionClosed);
         self.stop_all_jobs();
         let g = self.store.state().generator.clone();
@@ -153,7 +153,7 @@ impl Control {
         }
         // A close ends the attempts to reopen a stopped session too; an attempt still
         // running closes what it opens.
-        let recovering = self.recovery.take().is_some();
+        let recovering = self.audio_recovery.take().is_some();
         let rt = self.session.take();
         let had = rt.is_some() || recovering;
         if let Some(rt) = rt {

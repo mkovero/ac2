@@ -1,6 +1,7 @@
 //! Drawing the tiles and the history strip into the scene.
 
 use super::*;
+use crate::view::Style;
 
 /// Columns of a grid of `n` tiles in `w × h` that makes the tiles largest at about 2:1.
 pub(super) fn columns(n: usize, w: f32, h: f32) -> usize {
@@ -40,12 +41,11 @@ pub(super) fn tile_below(t: &LeqTile, chrome: PlotChrome) -> Vec<String> {
     below
 }
 
-/// One tile: the name and state on top; in the middle, large, what to do (`stay ≤ 101.5 dB`,
+/// One tile: the name and state on top; in the middle, large, what to do (`stay ≤ 101.5 dB SPL`,
 /// or how long it cools down); under it, at a fixed place low in the body and smaller than
 /// the name, the window's value — on stage the instruction is acted on, the value only
 /// explains it, and a meter's number shown above the tiles must stay the big one; below,
 /// the course, limit and progress, in room for `lines_below` of them.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_tile(
     c: &mut Canvas,
     t: &LeqTile,
@@ -53,9 +53,9 @@ pub(super) fn draw_tile(
     stale: bool,
     shared: Option<&str>,
     lines_below: usize,
-    chrome: PlotChrome,
-    theme: &Theme,
+    style: Style,
 ) {
+    let Style { chrome, theme } = style;
     let (bg, fg) = tile_colors(t.state, theme);
     c.base.rects.push(FillRect {
         rect: r,
@@ -158,7 +158,7 @@ pub(super) fn draw_history(
     chrome: crate::view::PlotChrome,
     theme: &Theme,
 ) {
-    canvas::pane_frame(c, s.plot, &s.x, &s.y, true, "dB", chrome, theme);
+    canvas::pane_frame(c, s.plot, &s.x, &s.y, true, "dB", Style { chrome, theme });
     for l in &s.lines {
         if let Some(y) = l.limit_y {
             canvas::hline(

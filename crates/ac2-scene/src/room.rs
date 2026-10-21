@@ -126,29 +126,14 @@ pub fn refusal_text(r: RoomRefusal) -> String {
     }
 }
 
-/// `63`, `125`, `1k`, `1.25k`, `10k`: the nominal IEC name of a mid-band frequency;
-/// `All` for broadband.
+/// The nominal IEC name of a mid-band frequency, labelled as every band is
+/// ([`band_label`](crate::band_leq::band_label)): `63`, `125`, `1000`, `1250`; `All` for
+/// broadband.
 pub fn band_name(centre: Option<f64>) -> String {
-    const NOMINAL: [f64; 31] = [
-        20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0,
-        500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0,
-        6300.0, 8000.0, 10_000.0, 12_500.0, 16_000.0, 20_000.0,
-    ];
-    let Some(f) = centre else {
-        return "All".to_owned();
-    };
-    let n = NOMINAL
-        .iter()
-        .copied()
-        .min_by(|a, b| (a / f).ln().abs().total_cmp(&(b / f).ln().abs()))
-        .unwrap_or(f);
-    if n >= 1000.0 {
-        let k = n / 1000.0;
-        let s = format!("{k}");
-        format!("{s}k")
-    } else {
-        format!("{n}")
-    }
+    centre.map_or_else(
+        || "All".to_owned(),
+        |f| crate::band_leq::band_label(ac2_proto::model::nearest_nominal_hz(f)),
+    )
 }
 
 /// One cell.

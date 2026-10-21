@@ -1,0 +1,314 @@
+//! Free helpers of the reducer: parsing typed text, trace labels, slots and the pane a trace is drawn in.
+
+use super::*;
+
+/// A stored trace as messages and captions name it: `slot 3 (Main L S3)`, or its name.
+pub fn trace_label(t: &TraceMeta) -> String {
+    match t.edit.slot {
+        Some(n) => format!("slot {n} ({})", t.edit.name),
+        None => t.edit.name.clone(),
+    }
+}
+
+/// Capture into slot 1 … 9.
+pub(super) const CAPTURE_SLOT: [CommandId; 9] = {
+    use CommandId as C;
+    [
+        C::Slot1,
+        C::Slot2,
+        C::Slot3,
+        C::Slot4,
+        C::Slot5,
+        C::Slot6,
+        C::Slot7,
+        C::Slot8,
+        C::Slot9,
+    ]
+};
+
+/// Show/hide slot 1 … 9.
+pub(super) const SHOW_SLOT: [CommandId; 9] = {
+    use CommandId as C;
+    [
+        C::ShowSlot1,
+        C::ShowSlot2,
+        C::ShowSlot3,
+        C::ShowSlot4,
+        C::ShowSlot5,
+        C::ShowSlot6,
+        C::ShowSlot7,
+        C::ShowSlot8,
+        C::ShowSlot9,
+    ]
+};
+
+impl AppState {
+    /// What a trace command without a selected trace says, naming the trace keys bound.
+    pub(super) fn select_trace_first(&self) -> String {
+        let k = |c| self.keys.label(c, Scope::Global);
+        let how = match (k(CommandId::NextTrace), k(CommandId::NextAnyTrace)) {
+            (Some(v), Some(a)) => format!("{v}, {a} for hidden ones, or click it in the list"),
+            (Some(v), None) | (None, Some(v)) => format!("{v} or click it in the list"),
+            (None, None) => "click it in the list".to_owned(),
+        };
+        format!("select a stored trace first ({how})")
+    }
+
+    /// What a command needing a selection says with nothing selected (`to`: `first`, `to
+    /// compare`): the list, then the keys that step through measurements and traces.
+    pub(super) fn select_first(&self, to: &str) -> String {
+        let keys = [CommandId::NextInTree, CommandId::NextTrace]
+            .into_iter()
+            .filter_map(|c| self.keys.label(c, Scope::Global));
+        let how = std::iter::once("click it in the list".to_owned())
+            .chain(keys)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("select a measurement or a stored trace {to} ({how})")
+    }
+
+    /// `Ctrl+1 … Ctrl+9`: the keys of the first and the last of the nine slot commands
+    /// `slots` (`None` unless both are bound).
+    pub(super) fn slot_keys(&self, slots: &[CommandId; 9]) -> Option<String> {
+        let k = |c| self.keys.label(c, Scope::Global);
+        Some(format!("{} … {}", k(slots[0])?, k(slots[8])?))
+    }
+
+    /// How message text says to capture into a slot: its keys, else the palette entry.
+    pub(super) fn capture_keys(&self) -> String {
+        self.slot_keys(&CAPTURE_SLOT)
+            .unwrap_or_else(|| self.keys.palette_entry("Capture to slot …"))
+    }
+
+    /// How message text says to set up a sweep: its key, else the palette entry.
+    pub fn new_sweep_key(&self) -> String {
+        self.keys.reach(CommandId::SweepNew)
+    }
+
+    /// The working session's label in the top bar and the sessions dialog, naming the key
+    /// that opens the dialog.
+    pub fn working_label(
+        &self,
+        now: ac2_proto::units::WallNs,
+    ) -> ac2_scene::sessions::WorkingLabel {
+        let key = self.keys.label(CommandId::Sessions, Scope::Global);
+        ac2_scene::sessions::working_label(
+            &self.working(),
+            now,
+            self.clock_offset(),
+            key.as_deref(),
+        )
+    }
+
+    /// How to reach a row of the measurement list: its bound key, else a click.
+    pub(super) fn to_it(&self) -> String {
+        self.keys
+            .label(CommandId::NextInTree, Scope::Global)
+            .map_or_else(
+                || "pick it in the list".to_owned(),
+                |k| format!("{k} to it"),
+            )
+    }
+
+    /// What a command needing a selected measurement says without one.
+    pub(super) fn select_meas_first(&self) -> String {
+        format!("select a measurement first ({})", self.to_it())
+    }
+
+    /// What a command needing an SPL meter says without one.
+    pub(super) fn no_spl_meter(&self) -> String {
+        format!(
+            "no SPL meter: make one first ({})",
+            self.keys.reach(CommandId::NewSpl)
+        )
+    }
+}
+
+/// A display offset as its prompt starts: empty for none, else `-3.5`.
+pub(super) fn offset_text(v: f64) -> String {
+    if v == 0.0 {
+        String::new()
+    } else {
+        format::fixed(v, 1).replace(format::MINUS, "-")
+    }
+}
+
+/// A slot as typed: `1` … `9`, or `none` (also empty, `-`, `off`) to free it.
+pub fn parse_slot(text: &str) -> Result<Option<u8>, String> {
+    let t = text.trim().to_ascii_lowercase();
+    let t = t.strip_prefix("slot").map_or(t.as_str(), str::trim);
+    if matches!(t, "" | "none" | "-" | "off") {
+        return Ok(None);
+    }
+    match t.parse::<u8>() {
+        Ok(n @ 1..=9) => Ok(Some(n)),
+        _ => Err(format!("{text:?}: a slot is 1 … 9, or none")),
+    }
+}
+
+/// Whether pane `p` draws stored trace `t` (when shown).
+pub(super) fn drawn_in(t: &TraceMeta, p: PaneKind) -> bool {
+    match p {
+        PaneKind::Transfer => matches!(
+            t.kind,
+            TraceKind::Transfer | TraceKind::Target | TraceKind::Sweep
+        ),
+        PaneKind::Spectrum => matches!(t.kind, TraceKind::Spectrum { .. } | TraceKind::Rta { .. }),
+        PaneKind::Distortion => t.kind == TraceKind::Sweep,
+        PaneKind::Spl => false,
+    }
+}
+
+/// A shown stored curve of a kind pane `p` draws: what a pane of that kind draws when it is
+/// also of the pane's group ([`super::AppState::on_pane`]).
+pub fn kind_shown(t: &TraceMeta, p: PaneKind) -> bool {
+    t.edit.visible && drawn_in(t, p)
+}
+
+pub fn open_session_hint(keymap: &Keymap) -> String {
+    let first = |c| {
+        keymap
+            .chords(c, Scope::Global)
+            .first()
+            .map(|k: &Chord| k.label())
+    };
+    match (first(CommandId::OpenSession), first(CommandId::Palette)) {
+        (Some(o), Some(p)) => format!("press {o} (or {p} → Open audio I/O)"),
+        (Some(o), None) => format!("press {o}"),
+        (None, Some(p)) => format!("{p} → Open audio I/O"),
+        (None, None) => "command palette → Open audio I/O".into(),
+    }
+}
+
+pub(super) fn slot_of(c: CommandId) -> u8 {
+    use CommandId as C;
+    match c {
+        C::Slot1 | C::ShowSlot1 => 1,
+        C::Slot2 | C::ShowSlot2 => 2,
+        C::Slot3 | C::ShowSlot3 => 3,
+        C::Slot4 | C::ShowSlot4 => 4,
+        C::Slot5 | C::ShowSlot5 => 5,
+        C::Slot6 | C::ShowSlot6 => 6,
+        C::Slot7 | C::ShowSlot7 => 7,
+        C::Slot8 | C::ShowSlot8 => 8,
+        _ => 9,
+    }
+}
+
+/// A session given by name, or by path (anything with a separator, or starting with `.` or
+/// `~`); a path is made absolute, since the daemon does not share this process's working
+/// directory.
+pub fn parse_session_ref(text: &str) -> Result<SessionRef, String> {
+    let t = text.trim();
+    if t.is_empty() {
+        return Err("type a session name or a directory path".into());
+    }
+    let is_path = t.contains('/')
+        || t.contains('\\')
+        || t.starts_with('.')
+        || t.starts_with('~')
+        || std::path::Path::new(t).is_absolute();
+    if !is_path {
+        return Ok(SessionRef::Name { name: t.to_owned() });
+    }
+    let p = match t.strip_prefix('~') {
+        Some(rest) => std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(|h| std::path::PathBuf::from(h).join(rest.trim_start_matches(['/', '\\'])))
+            .ok_or_else(|| "no home directory to expand ~".to_string())?,
+        None => std::path::PathBuf::from(t),
+    };
+    let p = std::path::absolute(&p).map_err(|e| e.to_string())?;
+    Ok(SessionRef::Path {
+        path: p.to_string_lossy().into_owned(),
+    })
+}
+
+/// The input a measurement's mic curve belongs to (a transfer function's measurement
+/// input); a math channel has its operands', none of its own.
+pub fn meas_input(k: &MeasKind) -> Option<u16> {
+    match k {
+        MeasKind::Transfer { config } => Some(config.measurement_input),
+        MeasKind::Spectrum { config } => Some(config.input),
+        MeasKind::Rta { config } => Some(config.input),
+        MeasKind::Spl { config } => Some(config.input),
+        MeasKind::Sweep { config } => Some(config.measurement_input),
+        MeasKind::Math { .. } => None,
+    }
+}
+
+/// The toast of a curve choice: `input 2: mic curve MM1 34804 90°`, `input 2: mic curve off`.
+pub fn curve_what(row: &InputSetup) -> String {
+    let n = u32::from(row.channel) + 1;
+    match (&row.mic, &row.curve) {
+        (Some(m), CurveChoice::Curve { label }) => {
+            format!(
+                "input {n}: mic curve {}",
+                ac2_scene::cal::curve_name(m, label)
+            )
+        }
+        (_, CurveChoice::NotChosen) => format!("input {n}: no mic curve chosen"),
+        _ => format!("input {n}: mic curve off"),
+    }
+}
+
+/// `3=M30, 4=ECM` (1-based) of the rows with a mic name, or `3=` for a cleared one.
+pub fn mics_text(rows: &[InputSetup]) -> String {
+    rows.iter()
+        .map(|r| {
+            format!(
+                "{}={}",
+                u32::from(r.channel) + 1,
+                r.mic.as_deref().unwrap_or("")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Parses `3=M30, 4=ECM, 5=` into zero-based channels and names (`None` clears).
+pub fn parse_mics(text: &str) -> Result<Vec<(u16, Option<String>)>, String> {
+    let mut v: Vec<(u16, Option<String>)> = Vec::new();
+    for part in text.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let (ch, name) = part
+            .split_once('=')
+            .ok_or_else(|| format!("{part:?}: expected input=name, e.g. 3=M30"))?;
+        let n: u16 = ch
+            .trim()
+            .parse()
+            .map_err(|_| format!("not an input number: {:?}", ch.trim()))?;
+        if n == 0 {
+            return Err("inputs count from 1".into());
+        }
+        let name = name.trim();
+        if name.chars().count() > 64 {
+            return Err(format!(
+                "mic name of input {n} is longer than 64 characters"
+            ));
+        }
+        if v.iter().any(|(c, _)| *c == n - 1) {
+            return Err(format!("input {n} given twice"));
+        }
+        v.push((n - 1, (!name.is_empty()).then(|| name.to_owned())));
+    }
+    if v.is_empty() {
+        return Err("type at least one input=name".into());
+    }
+    Ok(v)
+}
+
+/// `80-800`, `80 – 800 Hz`, `80-1.2k`: band edges in Hz, lower first.
+pub fn parse_band(text: &str) -> Result<(f64, f64), String> {
+    use ac2_scene::unit_text::{Freq, in_field};
+    let t = text.replace(['–', '—'], "-");
+    let (a, b) = t
+        .split_once('-')
+        .ok_or_else(|| format!("{:?}: expected low-high, e.g. 80-800", text.trim()))?;
+    let Freq(lo) = in_field(a, "hz")?;
+    let Freq(hi) = in_field(b, "hz")?;
+    let (lo, hi) = (lo.0, hi.0);
+    if hi <= lo {
+        return Err("band edges must be above 0 Hz, the upper above the lower".into());
+    }
+    Ok((lo, hi))
+}

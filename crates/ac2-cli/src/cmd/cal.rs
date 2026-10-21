@@ -239,7 +239,7 @@ async fn curve(cli: &Cli, cmd: &CalCurveCmd, out: &mut Out<'_>) -> Result<(), Cl
 /// `cal use IN LABEL|off`.
 async fn use_curve(
     cli: &Cli,
-    input: crate::units::Channel,
+    input: ac2_scene::unit_text::Channel,
     curve: &CurveArg,
     out: &mut Out<'_>,
 ) -> Result<(), CliError> {

@@ -6,7 +6,7 @@ use ac2_proto::frame::LeqRun;
 use ac2_proto::model::{LeqConfig, Weighting};
 use ac2_proto::units::WallNs;
 
-use super::{length, w_letter};
+use super::length;
 use crate::format;
 
 /// Hours a full log holds (`SplLogPage::RETAINED_ROWS`).
@@ -29,20 +29,6 @@ pub struct LeqRunText {
     pub gaps: Option<String>,
     /// The log is at its retention: the clock and the total cover the last 48 h kept.
     pub trimmed: bool,
-}
-
-/// `y`, `m` (1–12), `d` of a day count from 1970-01-01 (civil-from-days, proleptic
-/// Gregorian).
-fn civil(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
 const MONTHS: [&str; 12] = [
@@ -70,14 +56,14 @@ pub fn run_text(run: &LeqRun, cfg: &LeqConfig, offset_s: impl Fn(WallNs) -> i32)
     let since = if sd == ed {
         hm
     } else {
-        let (_, m, d) = civil(sd);
+        let (_, m, d) = ac2_proto::spl_log::civil_from_days(sd);
         format!("{d} {} {hm}", MONTHS[(m - 1) as usize])
     };
     let used = |w: Weighting| cfg.windows.iter().any(|x| x.weighting == w);
     let mut totals = vec![("LAeq".to_owned(), format::level(run.laeq))];
     for (w, v) in [(Weighting::C, run.lceq), (Weighting::Z, run.lzeq)] {
         if used(w) {
-            totals.push((format!("L{}eq", w_letter(w)), format::level(v)));
+            totals.push((format!("L{}eq", w.letter()), format::level(v)));
         }
     }
     let gaps = run.gaps.0.max(0.0);
@@ -176,8 +162,14 @@ pub struct NewLogConfirm {
 }
 
 /// The confirmation before `spl.log_new` on `meter`: it discards show data, so it names
-/// the run that ends and everything that starts over.
-pub fn new_log_confirm(meter: &str, cfg: &LeqConfig, run: Option<&LeqRunText>) -> NewLogConfirm {
+/// the run that ends and everything that starts over. `key` confirms: the key that asked,
+/// pressed again, so the stimulus's Enter never discards a log by reflex.
+pub fn new_log_confirm(
+    meter: &str,
+    cfg: &LeqConfig,
+    run: Option<&LeqRunText>,
+    key: &str,
+) -> NewLogConfirm {
     let n = cfg.windows.len();
     let ends = match run {
         Some(r) => format!("The current log ends: {}.", r.line()),
@@ -201,6 +193,6 @@ pub fn new_log_confirm(meter: &str, cfg: &LeqConfig, run: Option<&LeqRunText>) -
              ac2 spl leq export --previous"
                 .to_owned(),
         ],
-        hint: "Enter starts the new log · N or Esc keeps the current one".to_owned(),
+        hint: format!("{key} starts the new log · N or Esc keeps the current one"),
     }
 }

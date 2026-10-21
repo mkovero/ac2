@@ -883,3 +883,105 @@ fn an_imported_impulse_response_filters_live_measurements() {
     assert_eq!(content.0, wav);
     r.h.shutdown();
 }
+
+/// An alignment of Seat 1 as captured with Seat 2 live: Seat 2 arrives `ACOUSTIC_DELAY`
+/// later, so Seat 1 is the one to delay, by that much, polarity normal; aligned, the two
+/// add fully (+3 dB and −3 dB in phase: 20·lg(1.413 + 0.708) = +6.53 dB).
+#[test]
+fn alignment_of_a_capture_and_a_live_seat() {
+    use ac2_proto::model::{AlignBand, AlignOutcome, AlignSide};
+    use ac2_proto::units::Hz;
+    let mut r = rig("math-align", &[b"d/4/tf"]);
+    let c = &mut r.c;
+    play(&mut r.d, c, r.tok, 3.0);
+    let seat1 = match c.ok(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "Seat 1 alone".into(),
+        slot: Some(1),
+    }) {
+        ReplyBody::Trace(t) => t,
+        other => panic!("{other:?}"),
+    };
+    let band = AlignBand {
+        lo: Hz(500.0),
+        hi: Hz(2000.0),
+    };
+    let align = |a, b, band, max_delay| {
+        math(
+            "Seat 1 ↔ Seat 2",
+            MathDomain::Transfer,
+            MathExpr::Align {
+                a,
+                b,
+                band,
+                max_delay,
+            },
+        )
+    };
+    let stored = Operand::Trace { trace: seat1.id };
+    for (bad, why) in [
+        (
+            align(meas(2), meas(2), band, Seconds(0.05)),
+            "the same operand",
+        ),
+        (
+            align(
+                stored,
+                meas(2),
+                AlignBand {
+                    lo: Hz(2000.0),
+                    hi: Hz(500.0),
+                },
+                Seconds(0.05),
+            ),
+            "0 < from < to",
+        ),
+        (
+            align(stored, meas(2), band, Seconds(2.0)),
+            "at most 1000 ms",
+        ),
+    ] {
+        let e = c.call(Command::MeasCreate { config: bad }).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Invalid);
+        assert!(e.msg.contains(why), "{}", e.msg);
+    }
+    let q = created(c.ok(Command::MeasCreate {
+        config: align(stored, meas(2), band, Seconds(0.05)),
+    }));
+    c.ok(Command::MeasStart { meas: q });
+    play(&mut r.d, c, r.tok, 2.0);
+    let [f] = newest(&r.sub, &r.d, [q.0]);
+    let t = tf(&f);
+    let state = t.meta.math.as_ref().unwrap();
+    assert!(
+        state
+            .operands
+            .iter()
+            .all(|o| o.status == OperandStatus::Included)
+    );
+    let al = state.align.as_ref().expect("an alignment's state");
+    let AlignOutcome::Fit { fit } = al.outcome else {
+        panic!("{:?}", al.outcome)
+    };
+    let dt = f64::from(ACOUSTIC_DELAY) / f64::from(FS);
+    assert_eq!(fit.best.delayed, AlignSide::A, "{fit:?}");
+    assert!(!fit.best.inverted);
+    assert!((fit.best.delay.0 - dt).abs() < dt * 0.01, "{fit:?}");
+    assert!(fit.best.residual_deg < 5.0, "{fit:?}");
+    assert!(fit.after.mean_db > -0.1 && fit.before.worst_db < fit.after.worst_db);
+    let in_band: Vec<usize> = (0..t.mag.len())
+        .filter(|&i| (500.0..=2000.0).contains(&grid_freq(i)))
+        .collect();
+    assert!(in_band.len() > 90);
+    let curves = t.align.as_ref().expect("the alignment's curves");
+    for &i in &in_band {
+        assert!((t.mag[i] - 6.53).abs() < 0.3, "{} dB", t.mag[i]);
+        let after = curves.phase_after[i];
+        assert!(after.abs() < 5.0, "{after}°");
+    }
+    // The stored operand stays while the alignment names it.
+    let e = c
+        .call(Command::TraceDelete { trace: seat1.id })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
+}

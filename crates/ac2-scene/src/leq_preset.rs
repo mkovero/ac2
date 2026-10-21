@@ -1,9 +1,9 @@
 //! What a Leq limit preset sets, as the dialog and the CLI show it (`docs/design/leq.md`).
 
-use ac2_proto::model::{LeqPreset, PeakQuantity};
+use ac2_proto::model::{LeqPreset, LevelScale, PeakQuantity};
 
 /// The preset's windows and limits, then its peak limits: `France R1336-1: LAeq 15 min ≤
-/// 102 dB, LCeq 15 min ≤ 118 dB`, `DIN 15905-5: LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB`. A
+/// 102 dB, LCeq 15 min ≤ 118 dB SPL`, `DIN 15905-5: LAeq 30 min ≤ 99 dB SPL, LCpeak ≤ 135 dB SPL`. A
 /// window the rule wants shown without a limit of its own reads `… shown`.
 pub fn summary(p: LeqPreset) -> String {
     let mut windows: Vec<String> = p
@@ -12,7 +12,7 @@ pub fn summary(p: LeqPreset) -> String {
         .map(|w| {
             let name = crate::leq::window_name(w);
             match w.limit {
-                Some(l) => format!("{name} ≤ {} dB", l.0),
+                Some(l) => format!("{name} ≤ {} {}", l.0, LevelScale::DbSpl.unit()),
                 None => format!("{name} shown"),
             }
         })
@@ -20,7 +20,12 @@ pub fn summary(p: LeqPreset) -> String {
     let peaks = p.peaks();
     for q in PeakQuantity::ALL {
         if let Some(l) = peaks.get(q) {
-            windows.push(format!("{} ≤ {} dB", crate::leq::peak_name(q), l.limit.0));
+            windows.push(format!(
+                "{} ≤ {} {}",
+                q.name(),
+                l.limit.0,
+                LevelScale::DbSpl.unit()
+            ));
         }
     }
     format!("{}: {}", p.name(), windows.join(", "))
@@ -39,27 +44,27 @@ mod tests {
     fn summaries_name_every_window() {
         assert_eq!(
             summary(LeqPreset::Din15905),
-            "DIN 15905-5: LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB"
+            "DIN 15905-5: LAeq 30 min ≤ 99 dB SPL, LCpeak ≤ 135 dB SPL"
         );
         assert_eq!(
             summary(LeqPreset::Swiss96),
-            "Swiss V-NISSG 96 dB: LAeq 60 min ≤ 96 dB, LAFmax ≤ 125 dB"
+            "Swiss V-NISSG 96 dB: LAeq 60 min ≤ 96 dB SPL, LAFmax ≤ 125 dB SPL"
         );
         assert_eq!(
             summary(LeqPreset::France),
-            "France R1336-1: LAeq 15 min ≤ 102 dB, LCeq 15 min ≤ 118 dB"
+            "France R1336-1: LAeq 15 min ≤ 102 dB SPL, LCeq 15 min ≤ 118 dB SPL"
         );
         assert_eq!(
             summary(LeqPreset::Flanders100),
-            "Flanders VLAREM 100 dB: LAeq 15 min shown, LAeq 60 min ≤ 100 dB"
+            "Flanders VLAREM 100 dB: LAeq 15 min shown, LAeq 60 min ≤ 100 dB SPL"
         );
         assert_eq!(
             summary(LeqPreset::Brussels100),
-            "Brussels 100 dB: LAeq 60 min ≤ 100 dB, LCeq 60 min ≤ 115 dB"
+            "Brussels 100 dB: LAeq 60 min ≤ 100 dB SPL, LCeq 60 min ≤ 115 dB SPL"
         );
         assert_eq!(
             summary(LeqPreset::Finland545),
-            "Finland STM 545/2015: LAeq 4 h ≤ 100 dB, LCpeak ≤ 140 dB, LAFmax ≤ 115 dB"
+            "Finland STM 545/2015: LAeq 4 h ≤ 100 dB SPL, LCpeak ≤ 140 dB SPL, LAFmax ≤ 115 dB SPL"
         );
         for p in LeqPreset::ALL {
             assert!(source(p).ends_with("not legal advice"), "{p:?}");

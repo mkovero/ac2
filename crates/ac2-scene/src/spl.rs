@@ -7,7 +7,7 @@
 //! (`LAF` = A-weighted, Fast), `LAeq`, `LCpeak`, `LAFmax`, `LAFmin`.
 
 use ac2_proto::frame::SplFrame;
-use ac2_proto::model::{CalStatus, LevelScale, PeakWeighting, TimeWeighting, Weighting};
+use ac2_proto::model::{CalStatus, LevelScale, TimeWeighting, Weighting};
 use ac2_proto::units::{Rev, WallNs};
 
 use crate::banner::{BannerRow, Status};
@@ -17,32 +17,9 @@ use crate::primitives::{FillRect, HAlign, Rect, Scene, VAlign, Viewport};
 use crate::theme::Theme;
 use crate::time::{self, ClockOffset, Freshness};
 
-fn w_letter(w: Weighting) -> &'static str {
-    match w {
-        Weighting::A => "A",
-        Weighting::C => "C",
-        Weighting::Z => "Z",
-    }
-}
-
-fn tw_letter(t: TimeWeighting) -> &'static str {
-    match t {
-        TimeWeighting::Fast => "F",
-        TimeWeighting::Slow => "S",
-        TimeWeighting::Impulse => "I",
-    }
-}
-
-fn pw_letter(p: PeakWeighting) -> &'static str {
-    match p {
-        PeakWeighting::C => "C",
-        PeakWeighting::Z => "Z",
-    }
-}
-
 /// `LAF`, `LCS`: L + frequency weighting + time weighting (IEC 61672-1).
 pub fn metric_name(w: Weighting, t: TimeWeighting) -> String {
-    format!("L{}{}", w_letter(w), tw_letter(t))
+    format!("L{}{}", w.letter(), t.letter())
 }
 
 /// How long the meter's number holds one reading, in seconds: twice a second for F and I,
@@ -243,17 +220,13 @@ pub fn spl_readout(
     since: String,
 ) -> SplReadout {
     let m = &held.meta;
-    let w = w_letter(m.weighting);
+    let w = m.weighting.letter();
     let metric = metric_name(m.weighting, m.time_weighting);
     let stat = |label: String, v: f64| SplStat {
         label,
         value: format::level(v),
     };
-    let unit = match m.scale {
-        LevelScale::Dbfs => "dBFS",
-        LevelScale::DbSpl => "dB SPL",
-    }
-    .to_string();
+    let unit = m.scale.unit().to_string();
     let corrected = m.position.as_ref().map(crate::leq::position_text);
     SplReadout {
         caption: match &corrected {
@@ -265,7 +238,7 @@ pub fn spl_readout(
         unit,
         stats: vec![
             stat(format!("L{w}eq"), m.leq),
-            stat(format!("L{}peak", pw_letter(m.peak_weighting)), m.lpeak),
+            stat(format!("L{}peak", m.peak_weighting.letter()), m.lpeak),
             stat(format!("{metric}max"), m.lmax),
             stat(format!("{metric}min"), m.lmin),
         ],

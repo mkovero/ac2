@@ -39,8 +39,8 @@ pub struct AppOptions {
     pub bench_startup: bool,
     /// Print the daemon's device list once it arrives and quit (`--smoke`).
     pub smoke: bool,
-    /// Open the audio setup (Settings › Audio & I/O on the device) once connected if the
-    /// daemon has no audio session (an embedded daemon on real audio starts without one).
+    /// Open the Sessions dialog once connected if the daemon has no audio I/O (an
+    /// embedded daemon on real audio starts without one); its New leads to the audio setup.
     pub open_session_dialog: bool,
     /// The app hosts its daemon (`Some(true)`: that daemon autosaves): quitting with
     /// unsaved changes asks first.
@@ -97,13 +97,15 @@ pub struct StartupTiming {
 }
 
 /// Cached pane scene: rebuilt when what the pane shows, its kind's generation
-/// ([`App::pane_generation`]), size, theme or spectrograph colours change.
+/// ([`App::pane_generation`]), size or theme change.
 pub(crate) struct CachedScene {
     pub view: crate::state::View,
     pub generation: u64,
     pub size: egui::Vec2,
+    /// The column's frequency-plot margin it was laid out with: a neighbour's change of
+    /// view moves this pane's plot edge too.
+    pub freq_right: f32,
     pub theme: ThemeName,
-    pub colormap: ac2_scene::primitives::Colormap,
     pub scene: Arc<Scene>,
     /// The frequency axis mapping of the scene (TF / spectrum), for mouse navigation.
     pub x_axis: Option<ac2_scene::axis::Mapping>,
@@ -122,20 +124,30 @@ pub(crate) struct CachedScene {
     pub strip: Option<crate::scenes::StripPlace>,
     /// Where on the scene the level axis's unit is drawn and what it means, for a tooltip.
     pub unit_tip: Option<(egui::Rect, String)>,
-    /// Where the scene put its legend, for moving, resizing and scrolling it.
+    /// Where the scene put its legend, for scrolling it.
     pub legend: Option<ac2_scene::legend::LegendBox>,
+    /// Where the scene put its plates (the legend's among them), for moving and scaling
+    /// them; the last on top.
+    pub plates: Vec<ac2_scene::plate::PlateBox>,
     /// Where the scene drew each legend row and whose curve it names: a click selects it.
     pub legend_hits: Vec<ac2_scene::legend::LegendHit>,
 }
 
-/// A drag on the legend: where on the plate (or its grip) the pointer took it, so the
-/// plate keeps that point under the pointer.
+/// A drag on a plate: which, and where on the plate (or its grip) the pointer took it, so
+/// the plate keeps that point under the pointer.
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum LegendDrag {
+pub(crate) struct PlateDrag {
+    pub pane: crate::state::PaneId,
+    pub kind: ac2_scene::plate::PlateKind,
+    pub how: PlateGrab,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum PlateGrab {
     /// From its top-left corner.
     Move { grab: egui::Vec2 },
-    /// From its bottom-right corner.
-    Resize { grab: egui::Vec2 },
+    /// From its bottom-right corner: the text scale.
+    Scale { grab: egui::Vec2 },
 }
 
 pub struct App {
@@ -157,6 +169,8 @@ pub struct App {
     /// reducer, renderer or GPU present stops the pings and the unit restarts the app.
     notify: ac2_paths::notify::Notifier,
     smoke: bool,
+    /// `--smoke` sent its own device-list request (once the link is up).
+    smoke_asked: bool,
     applied_theme: Option<ThemeName>,
     /// The full-screen state last sent to the window.
     applied_fullscreen: bool,
@@ -166,9 +180,14 @@ pub struct App {
     /// The time-driven texts the panes were last built with ([`ClockTexts`]).
     clock: ClockTexts,
     pub(crate) scenes: HashMap<crate::state::PaneId, CachedScene>,
-    pub(crate) legend_drag: Option<LegendDrag>,
-    /// Where the transfer legend's plate and grip were last drawn, on screen.
-    pub(crate) legend_screen: Option<(egui::Rect, egui::Rect)>,
+    pub(crate) plate_drag: Option<PlateDrag>,
+    /// Where each pane's plates and their grips were last drawn, on screen.
+    pub(crate) plate_screen: Vec<(
+        crate::state::PaneId,
+        ac2_scene::plate::PlateKind,
+        egui::Rect,
+        egui::Rect,
+    )>,
     /// Wheel travel over the legend not yet a whole row.
     pub(crate) legend_wheel: f32,
     /// Where each pane was last drawn, on screen: what a dragged list row is dropped on.
@@ -208,46 +227,6 @@ impl std::fmt::Debug for App {
         f.debug_struct("App")
             .field("passes", &self.passes)
             .finish_non_exhaustive()
-    }
-}
-
-/// How long `--smoke` waits for the device list: the link's first connect, the daemon's
-/// start and a driver that takes seconds to load all fit with room to spare.
-const SMOKE_LIMIT: Duration = Duration::from_secs(60);
-
-impl App {
-    /// `--smoke`: prints every device of the daemon's list once it arrives and quits, or
-    /// gives up after [`SMOKE_LIMIT`]. The last line says which.
-    fn smoke_step(&mut self, ctx: &egui::Context) {
-        let done = if let Some(backends) = &self.state.devices {
-            for b in backends {
-                for d in &b.devices {
-                    println!(
-                        "smoke: device {:?} {:?}: {} in, {} out",
-                        b.kind,
-                        d.id.0,
-                        d.input.as_ref().map_or(0, |i| i.max_channels),
-                        d.output.as_ref().map_or(0, |o| o.max_channels)
-                    );
-                }
-            }
-            println!("smoke: ok");
-            true
-        } else if self.started.elapsed() > SMOKE_LIMIT {
-            println!(
-                "smoke: failed: no device list within {} s",
-                SMOKE_LIMIT.as_secs()
-            );
-            true
-        } else {
-            // Nothing else may ask for a frame while the link connects.
-            ctx.request_repaint_after(Duration::from_millis(100));
-            false
-        };
-        if done {
-            self.smoke = false;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
     }
 }
 
@@ -310,14 +289,15 @@ impl App {
             bench_startup: opts.bench_startup,
             notify: ac2_paths::notify::Notifier::from_env(),
             smoke: opts.smoke,
+            smoke_asked: false,
             applied_theme: None,
             applied_fullscreen: false,
             generation: 0,
             pane_generations: HashMap::new(),
             clock: ClockTexts::default(),
             scenes: HashMap::new(),
-            legend_drag: None,
-            legend_screen: None,
+            plate_drag: None,
+            plate_screen: Vec::new(),
             legend_wheel: 0.0,
             pane_rects: Vec::new(),
             plots,
@@ -399,7 +379,7 @@ impl App {
         };
         let target = match choice {
             Choice::Target(t) => {
-                // Another daemon: if it has no audio session, the audio setup once.
+                // Another daemon: if it has no audio I/O, the audio setup once.
                 self.state.open_session_when_empty = true;
                 *t
             }
@@ -417,7 +397,7 @@ impl App {
                     self.state.open_session_when_empty = b != EmbeddedBackend::Fake;
                     if b == EmbeddedBackend::Fake {
                         self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
-                            what: "simulated rig: session open, \"demo\" measuring · L types a \
+                            what: "simulated rig: audio I/O open, \"demo\" measuring · L types a \
                                    level, Space arms, Enter fires"
                                 .into(),
                             result: Ok(()),
@@ -457,10 +437,17 @@ impl App {
         self.pane_generations.get(&p).copied().unwrap_or(0)
     }
 
-    /// Where the transfer legend's plate and its resize grip were last drawn, on screen
+    /// Where pane `pane`'s plate `kind` and its scale grip were last drawn, on screen
     /// (what a test points the mouse at).
-    pub fn legend_rects(&self) -> Option<(egui::Rect, egui::Rect)> {
-        self.legend_screen
+    pub fn plate_rects(
+        &self,
+        pane: crate::state::PaneId,
+        kind: ac2_scene::plate::PlateKind,
+    ) -> Option<(egui::Rect, egui::Rect)> {
+        self.plate_screen
+            .iter()
+            .find(|p| p.0 == pane && p.1 == kind)
+            .map(|p| (p.2, p.3))
     }
 
     /// Marks `panes` as changed: their scenes are rebuilt on the next pass.
@@ -500,7 +487,7 @@ impl App {
                 _ => PaneKind::ALL.to_vec(),
             },
             Touches::Spl => vec![PaneKind::Spl],
-            Touches::Legend => vec![PaneKind::Transfer],
+            Touches::Plates => vec![PaneKind::Transfer, PaneKind::Spectrum],
             Touches::All => PaneKind::ALL.to_vec(),
         };
         self.touch(&panes);
@@ -662,8 +649,8 @@ enum Touches {
     Spl,
     /// The toasts' hover and dismissal: no pane.
     Toasts,
-    /// The mouse on the legend: the transfer pane only, rebuilt on every step of a drag.
-    Legend,
+    /// The mouse on a plate: the panes that draw plates, rebuilt on every step of a drag.
+    Plates,
     /// Keys, commands, replies: anything may change.
     All,
 }
@@ -681,7 +668,7 @@ impl Touches {
             | Msg::RowDrag(crate::state::DragMsg::Start(_) | crate::state::DragMsg::Over { .. }) => {
                 Self::Toasts
             }
-            Msg::Legend(_) => Self::Legend,
+            Msg::Plate(_) | Msg::LegendScroll { .. } => Self::Plates,
             Msg::LeqStrip(..) => Self::Spl,
             Msg::Conn(e) => match **e {
                 ConnEvent::Data(_) => Self::Data,
@@ -872,295 +859,7 @@ pub(crate) fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-impl eframe::App for App {
-    /// The window's geometry goes into the preferences on the way out (the layout already
-    /// did, whenever it changed).
-    fn on_exit(&mut self) {
-        if self.window.is_some() && self.window != self.state.prefs.window {
-            self.state.prefs.window = self.window;
-            self.state.prefs_dirty = true;
-        }
-        // Also a change still waiting for its write.
-        if std::mem::take(&mut self.state.prefs_dirty)
-            && let Some(path) = &self.prefs_path
-            && let Err(e) = self.state.prefs.save(path)
-        {
-            eprintln!("ac2-ui: {e}");
-        }
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-        self.passes += 1;
-        if self.startup.first_ui.is_none() {
-            self.startup.first_ui = Some(self.started.elapsed());
-        } else if self.startup.first_frame.is_none() {
-            self.startup.first_frame = Some(self.started.elapsed());
-            if self.bench_startup {
-                let t = self.startup;
-                println!(
-                    "startup: first ui pass {:.1} ms, first frame presented {:.1} ms (target < 300 ms)",
-                    t.first_ui.unwrap_or_default().as_secs_f64() * 1e3,
-                    t.first_frame.unwrap_or_default().as_secs_f64() * 1e3
-                );
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-        }
-        if self.startup.first_frame.is_some() {
-            self.notify_frame(Instant::now());
-        }
-        if self.smoke {
-            self.smoke_step(&ctx);
-        }
-
-        let now = Instant::now();
-        let dt = self
-            .last_tick
-            .map_or(0.0, |t| now.duration_since(t).as_secs_f64())
-            .min(0.1);
-        self.last_tick = Some(now);
-        self.dispatch(Msg::Tick {
-            now_s: now.duration_since(self.started).as_secs_f64(),
-            dt_s: dt,
-        });
-        self.pump_link();
-        // Ages keep counting between the link's snapshots.
-        let now = Instant::now();
-        let daemon_health = self.state.mirror.as_ref().and_then(|m| m.health.as_ref());
-        let remote_host = daemon_health
-            .is_some_and(|h| !self.link_embedded && h.host != self.health.local_host());
-        let xruns = daemon_health.and_then(|h| h.audio).map(|a| a.xruns);
-        if self.health_measured {
-            self.health.frame(now, remote_host);
-        }
-        self.health.daemon_xruns(xruns, now);
-        if let Some(d) = &self.state.data
-            && d.drained < now
-        {
-            self.state.data = Some(Arc::new(d.aged(now)));
-        }
-        let (clock, clock_wait) = ClockTexts::at(&self.state, now);
-        if clock != self.clock {
-            self.clock = clock;
-            self.state_edited();
-        }
-        // The dialog owns the keyboard while open (text entry); there is no link to drive.
-        if self.connect.is_none() {
-            self.input(&ctx);
-            // The keys reach the reducer, which keeps each dialog's focus itself; egui's own
-            // keyboard focus would only wander: Tab and the arrows move it from widget to
-            // widget across the window (an open dialog's buttons to the sidebar's chips)
-            // whatever is open, and highlight what no key acts on. egui reads those keys at
-            // the start of the pass, before the reducer takes them; here, before any widget
-            // is laid out, the move is cancelled and no widget keeps the focus.
-            ctx.memory_mut(|m| {
-                m.move_focus(egui::FocusDirection::None);
-                if let Some(id) = m.focused() {
-                    m.surrender_focus(id);
-                }
-            });
-        }
-        // The window's close button: with unsaved changes on an embedded daemon the
-        // question comes first.
-        if ctx.input(|i| i.viewport().close_requested()) && !self.state.close_requested() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        }
-        if self.state.quit {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
-        if std::mem::take(&mut self.state.want_connect_dialog) {
-            match &self.connect_setup {
-                Some(c) => self.connect = Some(c.dialog()),
-                None => self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
-                    what: "connect dialog".into(),
-                    result: Err("not available in this window".into()),
-                }))),
-            }
-        }
-        self.follow_window(&ctx);
-        if self.applied_fullscreen != self.state.fullscreen {
-            self.applied_fullscreen = self.state.fullscreen;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.state.fullscreen));
-        }
-
-        let t = self.theme();
-        if self.applied_theme != Some(self.state.theme) {
-            theme::apply(&ctx, &t);
-            if self.state.rasterizer == ac2_plot::Rasterizer::Software {
-                theme::drop_shadows(&ctx);
-            }
-            self.applied_theme = Some(self.state.theme);
-        }
-        view::draw(self, ui, &t);
-        if let Some(d) = self.connect.as_mut()
-            && let Some(choice) = d.show(&ctx, &theme::chrome(&t))
-        {
-            self.connect_to(&ctx, choice);
-        }
-
-        if let Some(w) = clock_wait {
-            // egui wakes a predicted frame time early; the texts must have changed by then.
-            let early = Duration::from_secs_f32(ctx.input(|i| i.predicted_dt).max(0.0));
-            ctx.request_repaint_after(w + early);
-        }
-        if self.conn.is_some() {
-            ctx.request_repaint_after(SLOW_REFRESH);
-        }
-        if let Some(wait) = self.save_prefs(Instant::now()) {
-            ctx.request_repaint_after(wait);
-        }
-        if let Some(t) = self.health.xrun_warning_until() {
-            let now = Instant::now();
-            if t > now {
-                // The xrun count leaves its warning colour then.
-                ctx.request_repaint_after(t - now);
-            }
-        }
-        if self.state.animating()
-            || self.state.bars_easing(Instant::now())
-            || self.state.spectrum_gliding(Instant::now())
-            || self.startup.first_frame.is_none()
-        {
-            if self.frame_interval.is_zero() {
-                ctx.request_repaint();
-            } else {
-                ctx.request_repaint_after(self.frame_interval);
-            }
-        } else if self.state.overlay.session().is_some()
-            || self
-                .state
-                .overlay
-                .settings()
-                .is_some_and(|s| s.page == crate::settings::Page::Connection)
-        {
-            // The device preview is renewed, and the server info asked again, from the frame
-            // tick, also when no frame arrives to wake the UI.
-            ctx.request_repaint_after(Duration::from_millis(500));
-        } else if self.state.operation().is_some() {
-            // The progress bar and time left move between the daemon's step reports.
-            ctx.request_repaint_after(Duration::from_millis(200));
-        } else if let Some(next) = self
-            .state
-            .toasts
-            .iter()
-            .map(|t| t.until_s)
-            .min_by(f64::total_cmp)
-        {
-            let wait = (next - self.state.now_s).max(0.0);
-            ctx.request_repaint_after(Duration::from_secs_f64(wait));
-        }
-        // An idle, healthy app still draws often enough to keep the watchdog fed.
-        if let Some(idle) = self.notify.max_idle() {
-            ctx.request_repaint_after(idle);
-        }
-    }
-}
+mod frame;
 
 #[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use ac2_client::{Latest, TopicFrame};
-    use ac2_proto::frame::{ClipFlags, LevelsMeta, SessionLevelsFrame};
-    use ac2_proto::units::MeasId;
-    use ac2_proto::{Frame, FrameData};
-
-    use super::*;
-
-    fn frame(topic: Topic, seq: u64, peak: f32, stale: bool) -> TopicFrame {
-        let mut stamp = ac2_proto::samples::stamp(None);
-        stamp.seq = seq;
-        TopicFrame {
-            topic,
-            frame: Arc::new(Frame {
-                stamp,
-                data: FrameData::SessionLevels(SessionLevelsFrame {
-                    meta: LevelsMeta { channels: vec![0] },
-                    peak: vec![peak],
-                    rms: vec![-30.0],
-                    clip: vec![ClipFlags::NONE],
-                }),
-            }),
-            received: Instant::now(),
-            since_new: Duration::ZERO,
-            age: Some(0.0),
-            stale,
-        }
-    }
-
-    fn snap(frames: &[TopicFrame]) -> DataSnapshot {
-        DataSnapshot {
-            latest: Latest {
-                frames: frames
-                    .iter()
-                    .map(|f| (f.topic.to_string().into(), f.clone()))
-                    .collect(),
-                ..Latest::default()
-            },
-            grids: BTreeMap::new(),
-            drained: Instant::now(),
-        }
-    }
-
-    fn data(meas: u32, stream: Stream) -> Topic {
-        Topic::Data {
-            meas: MeasId(meas),
-            stream,
-        }
-    }
-
-    /// Only the panes drawing a changed topic are rebuilt: new content, a STALE flip, a
-    /// topic gone; a new `seq` with the same content, and the input meters, rebuild none.
-    #[test]
-    fn new_frames_touch_the_panes_that_draw_them() {
-        let tf = data(1, Stream::Tf);
-        let spl = data(4, Stream::Spl);
-        let old = snap(&[
-            frame(tf, 1, -10.0, false),
-            frame(spl, 1, -10.0, false),
-            frame(Topic::SessionLevels, 1, -10.0, false),
-        ]);
-        let same = snap(&[
-            frame(tf, 2, -10.0, false),
-            frame(spl, 2, -10.0, false),
-            frame(Topic::SessionLevels, 2, -11.0, false),
-        ]);
-        assert!(data_touches(Some(&old), Some(&same)).is_empty());
-        let tf_new = snap(&[
-            frame(tf, 2, -12.0, false),
-            frame(spl, 1, -10.0, false),
-            frame(Topic::SessionLevels, 1, -10.0, false),
-        ]);
-        assert_eq!(
-            data_touches(Some(&old), Some(&tf_new)),
-            vec![PaneKind::Transfer]
-        );
-        let spl_stale = snap(&[frame(tf, 1, -10.0, false), frame(spl, 1, -10.0, true)]);
-        assert_eq!(
-            data_touches(Some(&old), Some(&spl_stale)),
-            vec![PaneKind::Spl]
-        );
-        assert_eq!(data_touches(None, Some(&old)), PaneKind::ALL.to_vec());
-    }
-
-    /// Every motion in progress moves its panes on a tick, whatever else moves with it: the
-    /// Leq bars easing after their once-a-second reading never hold the spectrum glide.
-    #[test]
-    fn a_tick_moves_every_pane_in_motion() {
-        assert!(tick_touches(false, false, false).is_empty());
-        assert_eq!(
-            tick_touches(false, true, true),
-            vec![PaneKind::Spl, PaneKind::Spectrum]
-        );
-        assert_eq!(
-            tick_touches(true, true, true),
-            vec![
-                PaneKind::Transfer,
-                PaneKind::Spectrum,
-                PaneKind::Distortion,
-                PaneKind::Spl
-            ]
-        );
-        assert_eq!(tick_touches(false, false, true), vec![PaneKind::Spectrum]);
-    }
-}
+mod tests;

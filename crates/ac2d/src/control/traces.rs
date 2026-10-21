@@ -363,6 +363,7 @@ impl Control {
             mic,
             mic_curve: None,
             created_at: WallNs(wall_ns()),
+            eq_in: self.eq_in_live(meas),
         };
         let ir = ir
             .filter(|_| kind == TraceKind::Transfer)
@@ -384,6 +385,11 @@ impl Control {
                 .iter()
                 .find(|t| t.id == trace)
                 .map_or_else(|| format!("trace {trace}"), |t| t.edit.name.clone()),
+            Operand::Eq { meas, set } => self
+                .meas(meas)
+                .ok()
+                .and_then(|m| m.eq.iter().find(|s| s.id == set))
+                .map_or_else(|| format!("EQ {}", set.0), |s| s.body.name.clone()),
         }
     }
 
@@ -432,7 +438,7 @@ impl Control {
             })
             .collect();
         let enough = match &config.expr {
-            MathExpr::Binary { .. } => included.len() == 2,
+            MathExpr::Binary { .. } | MathExpr::Align { .. } => included.len() == 2,
             MathExpr::Average { .. } => included.len() >= MathConfig::MIN_AVERAGE,
         };
         if !enough || columns.mag_db.iter().all(|v| v.is_nan()) {
@@ -468,6 +474,7 @@ impl Control {
             mic: None,
             mic_curve: None,
             created_at: WallNs(wall_ns()),
+            eq_in: self.eq_in_math(config),
         };
         tracing::info!("trace {id} captured from math channel {}", m.id);
         Ok(self.add_trace(t, grid, columns, None, None, None))
@@ -516,8 +523,10 @@ impl Control {
             ));
         }
         self.check_trace_operand_delete(id)?;
+        self.check_eq_trace_delete(id)?;
         self.traces.remove(id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
+        let rev = self.prune_compared().unwrap_or(rev);
         Ok(ReplyBody::Ack { rev })
     }
 
@@ -562,6 +571,7 @@ impl Control {
             mic,
             mic_curve: None,
             created_at: WallNs(wall_ns()),
+            eq_in: Vec::new(),
         };
         Ok(self.add_trace(t, d.grid, d.columns, None, None, None))
     }
@@ -628,6 +638,7 @@ impl Control {
             mic: None,
             mic_curve: None,
             created_at: WallNs(wall_ns()),
+            eq_in: Vec::new(),
         };
         tracing::info!("trace {id} imported ({} rows)", imp.rows);
         Ok(self.add_trace(t, imp.grid, imp.columns, imp.sweep, imp.ir, None))

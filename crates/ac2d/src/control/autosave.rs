@@ -80,7 +80,7 @@ impl Control {
             Ok(epoch) => {
                 tracing::info!(
                     "autosave restored from {}: {n_meas} measurements, {n_traces} traces \
-                     (epoch {}, disarmed, no audio session opened)",
+                     (epoch {}, disarmed, no audio I/O opened)",
                     from.display(),
                     epoch.0
                 );

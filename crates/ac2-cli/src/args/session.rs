@@ -6,16 +6,16 @@ use std::str::FromStr;
 use clap::{Args, Subcommand};
 
 use super::BackendArg;
-use crate::units::{Channel, Channels, Freq, SampleCount};
+use ac2_scene::unit_text::{Channel, Channels, Freq, SampleCount};
 
 /// `session …`.
 #[derive(Debug, Subcommand)]
 pub enum SessionCmd {
-    /// Open the session on one device of an explicitly named backend.
+    /// Open the audio I/O on one device of an explicitly named backend.
     Open(SessionOpen),
-    /// Close the session.
+    /// Close the audio I/O.
     Close,
-    /// Current session.
+    /// The audio I/O and the working session: name, unsaved changes, what could be recovered.
     Status,
     /// Start a new session: no measurements or traces. Refused while there are unsaved
     /// changes, unless --discard (what it replaces stays recoverable: `session recover`).
@@ -52,7 +52,7 @@ pub enum SessionCmd {
     /// Bring a session that cannot be opened (another format version) into the current
     /// measurements and traces. From a folder or .ac2session file on this machine: its
     /// measurements with their settings, colours, layouts and delays, its traces under
-    /// their measurements, and the running ones started where the audio session captures
+    /// their measurements, and the running ones started where the audio I/O captures
     /// their inputs, with a summary of what was restored, skipped or not read as saved.
     /// From a name or a path of the daemon's host: its traces only.
     Salvage {
@@ -125,7 +125,9 @@ impl FromStr for MicAssign {
         let (ch, name) = s
             .split_once('=')
             .ok_or_else(|| format!("{s:?}: expected IN=NAME, e.g. 3=M30"))?;
-        let input: Channel = ch.parse().map_err(|e: crate::units::UnitError| e.0)?;
+        let input: Channel = ch
+            .parse()
+            .map_err(|e: ac2_scene::unit_text::UnitError| e.0)?;
         let name = name.trim();
         Ok(Self {
             input,
@@ -172,7 +174,9 @@ impl FromStr for CurveAssign {
     fn from_str(s: &str) -> Result<Self, String> {
         let bad = || format!("{s:?}: expected IN=LABEL or IN=off, e.g. 3=90°");
         let (ch, v) = s.split_once('=').ok_or_else(bad)?;
-        let input: Channel = ch.parse().map_err(|e: crate::units::UnitError| e.0)?;
+        let input: Channel = ch
+            .parse()
+            .map_err(|e: ac2_scene::unit_text::UnitError| e.0)?;
         Ok(Self {
             input,
             curve: v.parse()?,

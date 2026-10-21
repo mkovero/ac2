@@ -6,7 +6,7 @@
 //! Measurements first (math channels last: they name other measurements and traces), each
 //! with its colour, layout and delay; then each trace file imported, given its old
 //! properties and filed under its measurement; then the measurements that were running are
-//! started where the open audio session captures their inputs. A summary names what was
+//! started where the open audio I/O captures their inputs. A summary names what was
 //! restored, what was skipped and every setting not read as saved.
 
 mod read;
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use ac2_client::{Client, expect_body};
 use ac2_proto::model::{
     ImportFormat, ImportRole, MathConfig, MathExpr, MathReference, MeasConfig, MeasKind, Operand,
-    TraceEdit, TraceKind, TraceOwner,
+    PaneLayout, TraceEdit, TraceKind, TraceOwner,
 };
 use ac2_proto::units::{Blob, MeasId, TraceId};
 use ac2_proto::{Command, ReplyBody};
@@ -130,6 +130,7 @@ async fn restore(
     let mut meas_ids: HashMap<MeasId, MeasId> = HashMap::new();
     let mut trace_ids: HashMap<TraceId, TraceId> = HashMap::new();
     let mut running: Vec<(usize, MeasId, MeasKind)> = Vec::new();
+    let mut layouts: Vec<(usize, MeasId, PaneLayout)> = Vec::new();
 
     let names: HashMap<MeasId, String> = plan
         .measurements
@@ -142,7 +143,16 @@ async fn restore(
         .partition(|m| matches!(m.config.kind, MeasKind::Math { .. }));
     for m in plain {
         let config = m.config.clone();
-        restore_meas(c, m, config, &mut items, &mut meas_ids, &mut running).await;
+        restore_meas(
+            c,
+            m,
+            config,
+            &mut items,
+            &mut meas_ids,
+            &mut running,
+            &mut layouts,
+        )
+        .await;
     }
 
     for t in plan.traces {
@@ -158,7 +168,16 @@ async fn restore(
         for m in pending {
             match remap_math(&m.config, &meas_ids, &trace_ids) {
                 Ok(config) => {
-                    restore_meas(c, m, config, &mut items, &mut meas_ids, &mut running).await;
+                    restore_meas(
+                        c,
+                        m,
+                        config,
+                        &mut items,
+                        &mut meas_ids,
+                        &mut running,
+                        &mut layouts,
+                    )
+                    .await;
                 }
                 Err(_) => left.push(m),
             }
@@ -181,6 +200,22 @@ async fn restore(
             restored: false,
             notes,
         });
+    }
+    for (i, id, mut l) in layouts {
+        // Each pane's pick names the measurement by its id in the old session; one not
+        // made again shows the layout's own measurement.
+        for p in l.panes_mut() {
+            p.meas = p.meas.and_then(|old| meas_ids.get(&old).copied());
+        }
+        if let Err(e) = c
+            .call(Command::MeasLayout {
+                meas: id,
+                layout: Some(l),
+            })
+            .await
+        {
+            items[i].notes.push(format!("layout not set: {e}"));
+        }
     }
 
     start_running(c, &mut items, running).await?;
@@ -225,6 +260,7 @@ async fn restore_meas(
     items: &mut Vec<Item>,
     meas_ids: &mut HashMap<MeasId, MeasId>,
     running: &mut Vec<(usize, MeasId, MeasKind)>,
+    layouts: &mut Vec<(usize, MeasId, PaneLayout)>,
 ) {
     let mut notes = m.notes;
     let name = config.name.clone();
@@ -257,15 +293,9 @@ async fn restore_meas(
     {
         notes.push(format!("colour not set: {e}"));
     }
-    if m.layout.is_some()
-        && let Err(e) = c
-            .call(Command::MeasLayout {
-                meas: id,
-                layout: m.layout.clone(),
-            })
-            .await
-    {
-        notes.push(format!("layout not set: {e}"));
+    // Set once every measurement is made: its panes may be picked for one made later.
+    if let Some(l) = m.layout {
+        layouts.push((items.len(), id, l));
     }
     if let Some(d) = m.delay {
         if d.applied.0 != 0.0 {
@@ -280,13 +310,13 @@ async fn restore_meas(
                 // new measurement has none, so the whole delay reads as the offset.
                 Ok(_) if d.nudged != d.applied => notes.push(format!(
                     "delay {} applied; its arrival ({}) is not kept: nudges count from 0",
-                    output::ms(d.applied.0),
-                    output::ms(d.applied.0 - d.nudged.0)
+                    ac2_scene::format::delay(d.applied.0),
+                    ac2_scene::format::delay(d.applied.0 - d.nudged.0)
                 )),
                 Ok(_) => {}
                 Err(e) => notes.push(format!(
                     "delay {} not applied: {e}",
-                    output::ms(d.applied.0)
+                    ac2_scene::format::delay(d.applied.0)
                 )),
             }
         }
@@ -313,7 +343,7 @@ async fn restore_meas(
     });
 }
 
-/// Starts the measurements that were running, each only where the open audio session
+/// Starts the measurements that were running, each only where the open audio I/O
 /// captures every input it reads: a start the daemon would refuse is reported instead.
 async fn start_running(
     c: &Client,
@@ -332,7 +362,7 @@ async fn start_running(
             continue;
         }
         let why = match &open {
-            None => Some("no audio session is open".to_owned()),
+            None => Some("no audio I/O is open".to_owned()),
             Some(o) => uncaptured(&kind, &o.config.input_channels)
                 .err()
                 .map(|e| e.to_string()),
@@ -459,6 +489,9 @@ fn remap_math(
             .get(&old)
             .map(|&trace| Operand::Trace { trace })
             .ok_or_else(|| format!("computes from trace (old id {}), not restored", old.0)),
+        // An EQ set lives in the session, not in a recording: its prediction cannot be
+        // rebuilt from what salvage reads.
+        Operand::Eq { set, .. } => Err(format!("predicts after EQ {}, not restored", set.0)),
     };
     let owner = match m.owner {
         TraceOwner::Meas { meas: old } => TraceOwner::Meas {
@@ -477,6 +510,17 @@ fn remap_math(
         MathExpr::Average { of, method } => MathExpr::Average {
             of: of.iter().map(|o| operand(*o)).collect::<Result<_, _>>()?,
             method: *method,
+        },
+        MathExpr::Align {
+            a,
+            b,
+            band,
+            max_delay,
+        } => MathExpr::Align {
+            a: operand(*a)?,
+            b: operand(*b)?,
+            band: *band,
+            max_delay: *max_delay,
         },
     };
     let reference = match m.reference {

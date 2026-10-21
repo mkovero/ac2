@@ -19,12 +19,35 @@ pub fn band_index(hz: f64) -> Option<usize> {
     BAND_NOMINAL_HZ.iter().position(|&n| n == hz)
 }
 
-/// Nominal mid-band frequencies, Hz (IEC 61260-1 Annex E), low to high.
-pub const BAND_NOMINAL_HZ: [f64; BAND_COUNT] = [
+/// Nominal 1/3-octave mid-band frequencies 20 Hz … 20 kHz, Hz (IEC 61260-1 Annex E), low
+/// to high. Every octave nominal (31.5, 63, 125 … 16 000) is one of them.
+pub const THIRD_OCTAVE_NOMINAL_HZ: [f64; 31] = [
     20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0,
     500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0,
-    8000.0, 10000.0,
+    8000.0, 10_000.0, 12_500.0, 16_000.0, 20_000.0,
 ];
+
+/// Nominal mid-band frequencies of the band Leq bands, Hz: the first [`BAND_COUNT`] of
+/// [`THIRD_OCTAVE_NOMINAL_HZ`].
+pub const BAND_NOMINAL_HZ: [f64; BAND_COUNT] = {
+    let mut a = [0.0; BAND_COUNT];
+    let mut i = 0;
+    while i < BAND_COUNT {
+        a[i] = THIRD_OCTAVE_NOMINAL_HZ[i];
+        i += 1;
+    }
+    a
+};
+
+/// The nominal 1/3-octave frequency ([`THIRD_OCTAVE_NOMINAL_HZ`]) nearest `hz` on a log
+/// scale: the name of an exact mid-band frequency (`125.89` → `125`).
+pub fn nearest_nominal_hz(hz: f64) -> f64 {
+    THIRD_OCTAVE_NOMINAL_HZ
+        .iter()
+        .copied()
+        .min_by(|a, b| (a / hz).ln().abs().total_cmp(&(b / hz).ln().abs()))
+        .unwrap_or(hz)
+}
 
 /// Which limit set is in force (STM 545/2015: night 22:00–07:00, day 07:00–22:00, local
 /// time).
@@ -323,15 +346,6 @@ impl BandWindow {
     /// Index of its band into [`BAND_NOMINAL_HZ`], when it is one.
     pub fn index(&self) -> Option<usize> {
         band_index(self.band.0)
-    }
-
-    /// The limit in `period`.
-    pub fn limit_in(&self, period: BandPeriod) -> Option<DbSpl> {
-        let l = self.limit?;
-        Some(match (self.day_offset, period) {
-            (Some(o), BandPeriod::Day) => DbSpl(l.0 + o.0),
-            _ => l,
-        })
     }
 
     /// Whether `other` is the same band over the same length and weighting: two such

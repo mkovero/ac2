@@ -1,7 +1,8 @@
 //! Drawing the spectrum scene: the axes, each curve as bars or a line, peak hold, the
-//! valid-resolution marker, the legend and the cursor.
+//! valid-resolution marker, the legend, the cursor and the tracked peaks.
 
 use super::*;
+use crate::view::Style;
 
 pub fn spectrum_scene(
     traces: &[SpectrumTrace<'_>],
@@ -10,7 +11,8 @@ pub fn spectrum_scene(
     theme: &Theme,
     size: Viewport,
 ) -> SpectrumScene {
-    spectrum_scene_in(traces, status, view, theme, size, MARGINS.right)
+    let right = crate::freq_column::right(MARGINS.right, view);
+    spectrum_scene_in(traces, status, view, theme, size, right)
 }
 
 /// [`spectrum_scene`] with `right` logical pixels right of the plot: room for what a
@@ -137,8 +139,10 @@ pub(crate) fn spectrum_scene_in(
         &y_axis,
         true,
         &unit,
-        view.chrome,
-        theme,
+        Style {
+            chrome: view.chrome,
+            theme,
+        },
     );
     c.base.labels.push(label(
         caption.clone(),
@@ -163,16 +167,20 @@ pub(crate) fn spectrum_scene_in(
     crate::unresolved::draw(&mut c, plot, &xm, &unresolved, theme);
     crate::stitch::draw(&mut c, plot, &xm, &stitches, true, theme);
 
-    for t in traces {
+    // Later shapes draw over earlier ones, and `traces` lists the pane's own group first,
+    // then the compared ones in compare order: drawn last to first, the pane's own curves
+    // come out on top and the first compared above the second.
+    for t in traces.iter().rev() {
         let dim = if t.is_stale() { theme.stale_alpha } else { 1.0 };
         let color = t.color.with_alpha(dim);
+        let back = super::layer_alpha(t.layer);
         let n = t.freqs.len().min(t.level.len());
         let cols = visible_columns(&t.freqs[..n], xm.range.lo, xm.range.hi);
         // Bars are band power (RTA). A narrowband bin is a tone level, and thousands of bins
         // share a pixel at the top of a log axis: drawn as bars, a single-bin tone becomes a
         // sub-pixel sliver. A tone trace asked for bars gets the max-per-pixel line, which
         // keeps a tone a spike.
-        let style = match view.spectrum.style {
+        let style = match t.style {
             SpectrumStyle::Bars if t.quantity.is_narrow() => SpectrumStyle::Line,
             s => s,
         };
@@ -197,7 +205,7 @@ pub(crate) fn spectrum_scene_in(
                             (x1 - x0 - gap).max(0.5),
                             plot.bottom() - y,
                         ),
-                        color: color.with_alpha(theme.bar_alpha),
+                        color: color.with_alpha(theme.bar_alpha * back),
                         clip: Some(plot),
                     });
                 }
@@ -219,7 +227,7 @@ pub(crate) fn spectrum_scene_in(
                                 y1: plot.bottom(),
                             })
                             .collect(),
-                        color: color.with_alpha(theme.fill_alpha),
+                        color: color.with_alpha(theme.fill_alpha * back),
                         clip: Some(plot),
                     });
                 }
@@ -241,7 +249,7 @@ pub(crate) fn spectrum_scene_in(
                 }
             }
         }
-        if view.spectrum.peak_hold && t.peak.is_some() {
+        if t.peak.is_some() {
             let pc = color.with_alpha(theme.peak_alpha);
             let points = match style {
                 // A cap across each band.
@@ -305,7 +313,11 @@ pub(crate) fn spectrum_scene_in(
                 let v = t.value(j);
                 let s = format::level(v);
                 let s = if v.is_finite() {
-                    format!("{s} {}", value_unit(t.scale, t.quantity))
+                    format!(
+                        "{s} {} ({})",
+                        value_unit(t.scale, t.quantity),
+                        quantity_note(t.quantity)
+                    )
                 } else {
                     s
                 };
@@ -333,15 +345,115 @@ pub(crate) fn spectrum_scene_in(
             rows,
         })
     });
+    // The readouts stack down the plot's right side from here: the cursor's, then the
+    // peak list under it (at the top when the cursor values were dragged elsewhere).
+    let mut readout_y = plot.y + 22.0;
+    let mark = cursor.as_ref().and_then(|_| mark::readout(traces, view));
+    let mut readout_box = None;
     if let Some(cur) = &cursor {
         canvas::vline(&mut c.overlay, plot, xm.to_px(cur.freq_hz), theme.cursor);
         let mut lines = vec![cur.freq.clone()];
         lines.extend(cur.rows.iter().map(|(n, v)| format!("{n}  {v}")));
+        if let Some(m) = &mark {
+            let x = xm.to_px(m.freq_hz);
+            canvas::vline(&mut c.overlay, plot, x, canvas::mark_stroke(theme));
+            lines.extend(m.lines.iter().cloned());
+        }
+        let place = &view.plates.readout;
+        let s = place.scale();
+        let m = crate::plate::Metrics::new(theme, s);
+        let (w, h) = m.size(&lines);
+        // Placed by the scene: its text where an unplated readout would start, under the
+        // unit and the caption at the plot's top.
+        let rect = match place.at {
+            Some(at) => crate::plate::PlatePlace::rect_at(at, plot, w, h),
+            None => Rect::new(
+                plot.right() - crate::legend::INSET - w,
+                plot.y + 22.0 - m.pad_y,
+                w,
+                h,
+            ),
+        };
+        if place.at.is_none() {
+            readout_y = rect.bottom() + GAP_EM * font;
+        }
+        let hover = view
+            .plate_hover
+            .filter(|h| h.kind == crate::plate::PlateKind::Readout);
+        let lines: Vec<(String, Color)> = lines.into_iter().map(|l| (l, theme.text)).collect();
+        crate::plate::draw_lines(
+            &mut c.overlay,
+            rect,
+            &lines,
+            HAlign::Right,
+            m,
+            true,
+            hover,
+            plot,
+            theme,
+        );
+        readout_box = Some(crate::plate::PlateBox::new(
+            crate::plate::PlateKind::Readout,
+            plot,
+            rect,
+            s,
+        ));
+    }
+    let peaks = tracked_peaks(traces, &xm, &ym, plot);
+    let list_on = view.chrome.peak_list();
+    for (t, p) in traces.iter().filter(|t| t.tracked.is_some()).zip(&peaks) {
+        let color = t
+            .color
+            .with_alpha(if t.is_stale() { theme.stale_alpha } else { 1.0 });
+        for (k, r) in p.rows.iter().enumerate() {
+            let Some(m) = r.mark else { continue };
+            c.overlay.polylines.push(Polyline {
+                points: vec![
+                    [m.x, m.y],
+                    [m.right(), m.y],
+                    [m.right(), m.bottom()],
+                    [m.x, m.bottom()],
+                    [m.x, m.y],
+                ],
+                alpha: vec![],
+                stroke: Stroke::solid(color, 1.5),
+                clip: Some(plot),
+            });
+            // The rank ties a mark to its row; with the list gone (T) it would point at
+            // nothing.
+            if list_on {
+                c.overlay.labels.push(label(
+                    (k + 1).to_string(),
+                    [m.x + m.w / 2.0, m.y - 2.0],
+                    anchor(HAlign::Center, VAlign::Bottom),
+                    font,
+                    theme.text,
+                ));
+            }
+        }
+    }
+    let several = peaks.len() > 1;
+    let peak_list = (list_on && peaks.iter().any(|p| !p.rows.is_empty())).then(|| {
+        let mut lines = Vec::new();
+        for (t, p) in traces.iter().filter(|t| t.tracked.is_some()).zip(&peaks) {
+            if p.rows.is_empty() {
+                continue;
+            }
+            // A curve's name heads its rows when the list could be read against another
+            // curve's, or its levels are spread by an offset.
+            if several || t.offset_db != 0.0 {
+                lines.push(p.name.clone());
+            }
+            lines.extend(p.rows.iter().map(|r| r.text.clone()));
+        }
+        lines.join("\n")
+    });
+    if let Some(list) = &peak_list {
         c.overlay.labels.push(label(
-            lines.join("\n"),
-            [plot.right() - 8.0, plot.y + 22.0],
+            list.clone(),
+            [plot.right() - 8.0, readout_y],
             anchor(HAlign::Right, VAlign::Top),
-            theme.small_font_size,
+            font,
             theme.text,
         ));
     }
@@ -361,6 +473,10 @@ pub(crate) fn spectrum_scene_in(
         unit_help,
         caption,
         cursor,
+        readout_box,
+        mark,
+        peaks,
+        peak_list,
         legend,
         legend_shown,
         legend_rect,
@@ -370,4 +486,68 @@ pub(crate) fn spectrum_scene_in(
         stitches,
         unresolved,
     }
+}
+
+/// The gap left between the cursor values' plate and the peak list under it, in ems.
+const GAP_EM: f32 = 0.5;
+
+/// Half the side of a peak's box, logical pixels: big enough to find on a busy curve,
+/// small enough that marks a [`peaks::SPACING_OCT`] apart do not touch on a wide pane.
+const MARK_HALF: f32 = 4.0;
+
+/// Each tracked curve's peaks, in [`SpectrumTrace::tracked`] order: a row per peak with
+/// its displayed level (offset included, as the cursor reads) and its box where it is on
+/// the plot.
+fn tracked_peaks(
+    traces: &[SpectrumTrace<'_>],
+    xm: &crate::axis::Mapping,
+    ym: &crate::axis::Mapping,
+    plot: Rect,
+) -> Vec<SpectrumPeaks> {
+    traces
+        .iter()
+        .filter_map(|t| {
+            let tracked = t.tracked?;
+            let rows = tracked
+                .iter()
+                .enumerate()
+                .map(|(k, p)| {
+                    let level = p.level + t.offset_db;
+                    let (x, y) = (xm.to_px(p.freq_hz), ym.to_px(level));
+                    let inside = x.is_finite()
+                        && y.is_finite()
+                        && x >= plot.x
+                        && x <= plot.right()
+                        && y >= plot.y
+                        && y <= plot.bottom();
+                    PeakRow {
+                        freq_hz: p.freq_hz,
+                        level,
+                        text: format!(
+                            "{}  {}  {} {} ({})",
+                            k + 1,
+                            format::freq_readout(p.freq_hz),
+                            format::level(level),
+                            value_unit(t.scale, t.quantity),
+                            quantity_note(t.quantity)
+                        ),
+                        mark: inside.then(|| {
+                            Rect::new(
+                                x - MARK_HALF,
+                                y - MARK_HALF,
+                                2.0 * MARK_HALF,
+                                2.0 * MARK_HALF,
+                            )
+                        }),
+                    }
+                })
+                .collect();
+            let name = if t.offset_db != 0.0 {
+                offset_note(&t.name, t.offset_db)
+            } else {
+                t.name.clone()
+            };
+            Some(SpectrumPeaks { name, rows })
+        })
+        .collect()
 }

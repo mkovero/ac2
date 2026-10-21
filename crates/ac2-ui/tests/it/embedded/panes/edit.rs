@@ -174,15 +174,22 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     assert!(fit.is_valid() && fit != r, "{fit:?}");
     assert!(
         d.st.toasts
+            .list
             .iter()
             .any(|t| t.text.starts_with("Spectrum / RTA: level"))
     );
     d.key("Ctrl+Home");
     assert_eq!(level(&d.st), start);
 
-    // Delete slot 1: asked first, then gone; the selection moves to slot 2.
+    // Delete slot 1: asked first, then gone; the selection moves to slot 2. (Slot 2 is
+    // still selected, the focus keys leaving it: V steps round to slot 1.)
     d.key("Alt+1");
-    d.key("V");
+    for _ in 0..3 {
+        if d.st.selected_trace == Some(a) {
+            break;
+        }
+        d.key("V");
+    }
     assert_eq!(d.st.selected_trace, Some(a));
     d.key("Delete");
     assert!(
@@ -215,8 +222,8 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
 /// starts still fits the axis on its first frame.
 /// The keys act on what was selected last: from an empty daemon, two transfer
 /// measurements; the first selected, A hides its curve from the transfer pane while it keeps
-/// running and measuring, A shows it again; Backspace asks before it goes and Enter deletes
-/// it, the other measuring on.
+/// running and measuring, A shows it again; Backspace asks before it goes and Backspace
+/// again deletes it (Enter does not), the other measuring on.
 #[test]
 fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     use ac2_ui::state::{DeleteTarget, PaneKind};
@@ -243,12 +250,20 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.tf_frames(second.id, 240)?;
-    // The transfer pane draws one measurement's group; C on each keeps both curves on it
-    // whichever measurement the pane follows.
+    // The transfer pane draws one measurement's group; each compared into the other (C,
+    // Enter on the one target) keeps both curves on it whichever measurement it follows.
     d.key("C");
+    d.key("Enter");
+    d.key("Escape");
     d.send(Msg::SelectMeas(first.id));
     d.key("C");
-    assert_eq!(d.st.compared_meas.len(), 2);
+    d.key("Enter");
+    d.key("Escape");
+    d.until("each compared into the other", |s| {
+        [first.id, second.id]
+            .iter()
+            .all(|id| s.meas(*id).is_some_and(|m| m.compared.len() == 1))
+    })?;
 
     let theme = Theme::dark();
     let size = ac2_scene::primitives::Viewport {
@@ -312,7 +327,7 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     assert_eq!(names(&d.st).len(), 2);
     d.key("A");
 
-    // Backspace asks first; Enter deletes it.
+    // Backspace asks first; Enter, the stimulus's key, deletes nothing; Backspace again does.
     d.key("Backspace");
     assert!(
         matches!(&d.st.overlay, Overlay::Delete(p) if p.target == DeleteTarget::Meas(first.id)),
@@ -320,6 +335,8 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
         d.st.overlay
     );
     d.key("Enter");
+    assert!(matches!(&d.st.overlay, Overlay::Delete(_)));
+    d.key("Backspace");
     assert_eq!(d.st.overlay, Overlay::None);
     d.until("the first measurement gone", |s| {
         s.measurements().len() == 1 && s.meas(first.id).is_none()
@@ -346,13 +363,15 @@ fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
         let v = panes.views.iter().find(|v| v.kind == PaneKind::Spectrum);
         v.expect("a spectrum pane").levels
     };
+    let as_level =
+        |r: ac2_scene::axis::Range| ac2_proto::model::layout::LevelRange { lo: r.lo, hi: r.hi };
     if let Some(v) = prefs
         .layout
         .panes
         .as_mut()
         .and_then(|p| p.views.iter_mut().find(|v| v.kind == PaneKind::Spectrum))
     {
-        v.levels.spectrum_dbfs = remembered;
+        v.levels.spectrum_dbfs = Some(as_level(remembered));
     }
     let prefs = ac2_ui::prefs::UiPrefs::from_toml(&prefs.to_toml())?;
     d.st.set_prefs(prefs);
@@ -371,8 +390,79 @@ fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
     d.until("the started spectrum fitted", |s| level(s) != remembered)?;
     let fit = level(&d.st);
     assert!(fit.is_valid() && fit.hi > -150.0, "{fit:?}");
-    // The fit is what the next start comes back to.
-    assert_eq!(spectrum_pane(&d.st.prefs).spectrum_dbfs, fit);
+    // The fit is the app's, not the operator's: not remembered, the next start frames the
+    // pane's first curve again.
+    assert_eq!(spectrum_pane(&d.st.prefs).spectrum_dbfs, None);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// From an empty daemon: a new spectrum's pane shows its first frames on a fitted level
+/// axis (its labels are the fit's, not the default's), and frames after that leave it.
+#[test]
+fn a_new_spectrum_pane_shows_a_fitted_level_axis() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spectrum".into()));
+    d.key("Enter");
+    d.until(
+        "the spectrum dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spectrum),
+    )?;
+    d.key("Enter");
+    let default = ac2_scene::view::ViewState::default().spectrum.level;
+    let level = |s: &AppState| crate::common::spectrum_level(s);
+    d.until("the spectrum's level axis fitted", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+            && level(s) != default
+    })?;
+    let fit = level(&d.st);
+    // The labels the pane draws span the fitted range.
+    let labels = |s: &AppState| -> Vec<f64> {
+        let pane = ac2_ui::scenes::spectrum(
+            s,
+            crate::common::pane(s, PaneKind::Spectrum),
+            &Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1200.0,
+                height: 600.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        pane.y_axis
+            .labels()
+            .into_iter()
+            .filter_map(|l| l.replace('\u{2212}', "-").parse().ok())
+            .collect()
+    };
+    let shown = labels(&d.st);
+    let (lo, hi) = shown
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| {
+            (a.min(*x), b.max(*x))
+        });
+    assert!(lo >= fit.lo && hi <= fit.hi, "{shown:?} on {fit:?}");
+    assert_ne!((lo, hi), (default.lo, default.hi), "{shown:?}");
+    // Later frames leave the range alone.
+    let seq = |s: &AppState| {
+        let sp = s
+            .measurements()
+            .iter()
+            .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+            .map(|m| m.id)?;
+        ac2_ui::scenes::frame(s, sp, Stream::Spec).map(|f| f.frame.stamp.seq)
+    };
+    let first = seq(&d.st);
+    d.until("more spectrum frames", |s| seq(s) > first)?;
+    assert_eq!(level(&d.st), fit);
     drop(d);
     drop(daemon);
     Ok(())
@@ -401,7 +491,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     let dir = tempfile::tempdir()?;
     let export = |d: &mut Driver| {
         d.key("Ctrl+K");
-        d.send(Msg::Text("export the selected".into()));
+        d.send(Msg::Text("export trace".into()));
         d.key("Enter");
     };
 
@@ -411,6 +501,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     assert!(!matches!(d.st.overlay, Overlay::Prompt(_)));
     assert!(
         d.st.toasts
+            .list
             .iter()
             .any(|t| t.severity != Severity::Info && t.text.contains("select"))
     );
@@ -430,6 +521,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     let file = dir.path().join(format!("{name}.csv"));
     d.until("the export written", |s| {
         s.toasts
+            .list
             .iter()
             .any(|t| t.severity == Severity::Info && t.text.contains("exported to"))
     })?;
@@ -450,6 +542,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     let named = dir.path().join("front fill.csv");
     d.until("the second export written", |s| {
         s.toasts
+            .list
             .iter()
             .any(|t| t.text.contains("front fill.csv") && t.text.contains("bytes"))
     })?;
@@ -460,7 +553,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     retype(&mut d, "rel.csv");
     d.key("Enter");
     d.until("the relative export written", |s| {
-        s.toasts.iter().any(|t| t.text.contains("rel.csv"))
+        s.toasts.list.iter().any(|t| t.text.contains("rel.csv"))
     })?;
     assert_eq!(std::fs::read_to_string(dir.path().join("rel.csv"))?, csv);
 
@@ -469,7 +562,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     retype(&mut d, &dir.path().join("gone/x.csv").display().to_string());
     d.key("Enter");
     d.until("the write error", |s| {
-        s.toasts.iter().any(|t| {
+        s.toasts.list.iter().any(|t| {
             t.severity != Severity::Info
                 && t.text.contains("cannot write")
                 && t.text.contains("gone")
@@ -483,7 +576,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     let b = d.st.slots()[1].map(|t| t.id).ok_or("slot 2")?;
     d.send(Msg::SelectTrace(b));
     d.key("Ctrl+K");
-    d.send(Msg::Text("move the selected trace to slot".into()));
+    d.send(Msg::Text("move trace to slot".into()));
     d.key("Enter");
     retype(&mut d, "none");
     d.key("Enter");

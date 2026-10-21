@@ -1,6 +1,7 @@
 //! The dialogs' constructors and the `meas.create` / sweep configs they build.
 
 use super::*;
+use ac2_scene::unit_text::{Freq, LevelDbfs, in_field};
 
 impl Form {
     pub(crate) fn new(kind: FormKind, fields: Vec<Field>) -> Self {
@@ -33,7 +34,7 @@ impl Form {
             .iter()
             .position(|x| *x == r)
             .unwrap_or(FFT_LENS.len() - 1);
-        let mut size = Field::choice(FieldId::FftSize, "Resolution", &labels, index);
+        let mut size = Field::choice(FieldId::FftSize, "FFT length", &labels, index);
         size.hint = self.fft_hint(all[index]);
         let names = WINDOWS.map(|w| {
             let l = ac2_scene::spectrum::window_label(w);
@@ -490,16 +491,16 @@ impl Form {
         open: Option<&OpenSession>,
         ceiling: Option<Dbfs>,
     ) -> Result<MeasConfig, String> {
-        let open = open.ok_or("no open audio session")?;
+        let open = open.ok_or("audio I/O not open")?;
         let captured = &open.config.input_channels;
         let input = |id: FieldId, what: &str| -> Result<u16, String> {
             let c = self
                 .channel(id)
-                .ok_or_else(|| format!("{what}: the session captures no input"))?;
+                .ok_or_else(|| format!("{what}: the audio I/O captures no input"))?;
             if captured.contains(&c) {
                 Ok(c)
             } else {
-                Err(format!("{what} {} is not captured by the session", c + 1))
+                Err(format!("{what} {} is not captured by the audio I/O", c + 1))
             }
         };
         if self.channel(FieldId::Reference).is_none() {
@@ -522,7 +523,7 @@ impl Form {
         if level.is_empty() {
             return Err("type the level (dBFS): a sweep has no default level".into());
         }
-        let level = crate::state::parse_number(level, &["dbfs", "db"])?;
+        let level = in_field::<LevelDbfs>(level, "dbfs")?.0.0;
         if level > 0.0 {
             return Err("level must be ≤ 0 dBFS".into());
         }
@@ -534,8 +535,9 @@ impl Form {
                 ac2_scene::format::fixed(c.0, 1)
             ));
         }
-        let from = parse_freq(self.text(FieldId::From))?;
-        let to = parse_freq(self.text(FieldId::To))?;
+        // A sweep's edges in Hz: `20`, `20 Hz`, `20k`, `1.5 kHz`.
+        let from = in_field::<Freq>(self.text(FieldId::From), "hz")?.0.0;
+        let to = in_field::<Freq>(self.text(FieldId::To), "hz")?.0.0;
         let nyquist = f64::from(open.sample_rate_hz) / 2.0;
         if from >= to || to > nyquist {
             return Err(format!(
@@ -601,10 +603,10 @@ impl Form {
         let input = |id: FieldId, what: &str| -> Result<u16, String> {
             let c = self
                 .channel(id)
-                .ok_or_else(|| format!("{what}: the session captures no input"))?;
+                .ok_or_else(|| format!("{what}: the audio I/O captures no input"))?;
             match captured {
                 Some(cap) if !cap.contains(&c) => Err(format!(
-                    "{what} {} is not captured by the session: reopen it with that input (Space on its row)",
+                    "{what} {} is not captured by the audio I/O: reopen it with that input (Space on its row)",
                     c + 1
                 )),
                 _ => Ok(c),
@@ -677,6 +679,7 @@ impl Form {
                             .choice_index(FieldId::SpecLevel)
                             .and_then(|i| SPEC_LEVELS.get(i))
                             .map_or(base.level, |l| l.1),
+                        display: Default::default(),
                     },
                 }
             }

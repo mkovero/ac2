@@ -20,7 +20,7 @@ use ac2_proto::model::{
 use crate::banner::{BannerRow, Status};
 use crate::canvas::{self, Canvas, anchor, label};
 use crate::format;
-use crate::leq::{TileState, clock, column_colors, length, tile_colors, w_letter};
+use crate::leq::{TileState, clock, column_colors, length, tile_colors};
 use crate::primitives::{Color, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport};
 use crate::theme::Theme;
 use crate::view::PlotChrome;
@@ -35,7 +35,7 @@ pub use summary::{
 
 /// A band window's name, as a Leq window's: `LZeq 60 min`.
 pub fn window_name(duration_s: f64, weighting: Weighting) -> String {
-    format!("L{}eq {}", w_letter(weighting), length(duration_s))
+    ac2_proto::model::window_name(duration_s, weighting)
 }
 
 /// A band of a band window as the alarms, the CLI and the app say it: `63 Hz band LZeq 60
@@ -112,7 +112,7 @@ pub struct BandBar {
     pub on_course: bool,
     /// Floored steady level allowed (a ceiling to stay under).
     pub allowed_db: Option<f64>,
-    /// `next 1 min: stay ≤ 41.3 dB`, `until full: stay ≤ 40.2 dB`; none without limit text.
+    /// `next 1 min: stay ≤ 41.3 dB SPL`, `until full: stay ≤ 40.2 dB SPL`; none without limit text.
     pub headroom: Option<String>,
     pub recover_s: Option<f64>,
     /// `cooling down in 6 min 52 s` when it cannot recover within the horizon.
@@ -330,11 +330,11 @@ fn bar(f: &BandLeqFrame, k: usize, chrome: PlotChrome) -> BandBar {
         .filter(|_| is_judged)
         .map(|a| (a * 10.0 + 1e-6).floor() / 10.0);
     let headroom = allowed_db.filter(|_| chrome.limit_text()).map(|a| {
-        let a = format::level(a);
+        let a = format::scaled_level(a, m.scale);
         if until_full {
-            format!("until full: stay ≤ {a} dB")
+            format!("until full: stay ≤ {a}")
         } else {
-            format!("next {horizon}: stay ≤ {a} dB")
+            format!("next {horizon}: stay ≤ {a}")
         }
     });
     let recover_s = finite(f.recover[k]).filter(|_| is_judged);
@@ -358,7 +358,7 @@ fn bar(f: &BandLeqFrame, k: usize, chrome: PlotChrome) -> BandBar {
         limit_db,
         limit: limit
             .filter(|_| chrome.limit_text())
-            .map(|l| format!("limit {} dB", format::level(l))),
+            .map(|l| format!("limit {}", format::scaled_level(l, m.scale))),
         state,
         state_text: state_text(state, on_course, chrome),
         on_course,
@@ -448,10 +448,7 @@ fn row_text(
 /// or without limit text (`chrome`).
 pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame, chrome: PlotChrome) -> BandLeqText {
     let m = &f.meta;
-    let unit = match m.scale {
-        LevelScale::DbSpl => "dB SPL",
-        LevelScale::Dbfs => "dBFS",
-    };
+    let unit = m.scale.unit();
     let keys: Vec<(f64, _)> = (0..m.windows.len())
         .map(|w| {
             let st = m.windows[w];

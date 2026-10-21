@@ -58,7 +58,7 @@ binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap ev
    Check `journalctl --user -u ac2d -n 30`: "autosave restored … no audio session opened" is
    normal.
    `--max-level -50` is the **hard bound**: the system max level in force can be lowered (or
-   raised again up to −50) from any client — Settings › Audio & I/O, or
+   raised again up to −50) from any client — Settings › Audio I/O, or
    `bin/ac2 --remote 192.168.9.27 gen ceiling -60dbfs` — and is kept in
    `~/.config/ac2/rig.json`, so a restart comes up at min(kept, bound). A restart with a
    higher `--max-level` does not raise a level that was lowered; raise it explicitly
@@ -105,6 +105,17 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
+| bb62ce83 | 2026-10-21 | 59 / 29 | app only (ketunkolo, Pi; pupu daemon stays on c7ba3b04): the cursor mark's comb line shows only when the mark and the cursor are both peaks or both notches |
+| 3310ea85 | 2026-10-20 | 59 / 29 | app only (ketunkolo, Pi; pupu daemon stays on c7ba3b04): cursor jumps to the next / previous peak or notch (Alt+P / Alt+N, Shift back), cursor mark with Δ and comb path readout (Alt+D, Alt+Shift+D clears), Settings › Display "Peak / notch jumps" (stands out by 3 dB); headroom advice on transfer panes (lower / raise the stimulus, never changes a level; a calibrated input is never told to raise its gain), four Display rows |
+| c7ba3b04 | 2026-10-20 | 59 / 29 | alignment aid (Alt+M, `ac2 align`: delay and polarity of two transfer traces over an overlap band, 0.00 ms reads "no delay"), EQ what-if (Alt+E editor, EQ sets on a measurement, predicted "after EQ" curves, `ac2 meas eq`, APO / REW filter text import and export), EQ edits sent one at a time, `ui --smoke` asks for devices. `rig-logs` (format 28) set aside, so the rig meter's per-second Leq starts again (exported before to ketunkolo `~/ac2-test/leq-export/foh-spl-2026-10-20-pre-c7ba3b04.csv`, 172 801 s). Session reopened `--in 1-8 --outputs 6 --loopback-out 2 --loopback-in 2`; `session salvage autosave.v28`: 7 restored, 1 skipped (`traces/3-c4d2aafaaef19dbe.csv`, a file no manifest entry names), ids unchanged; Spectrum 1/2 kept span 120 s / 10 s and inferno |
+| 1d08be20 | 2026-10-20 | 58 / 28 | app only (ketunkolo, Pi; pupu daemon stays on e57cbf74): audit rounds D–E. Level fields parse units the CLI way (dBFS fields refuse `-20db`; decimal comma, U+2212 minus and spaced units accepted); internal restructure only otherwise (app state, daemon control, parameter structs), no wire or session format change |
+| e392d380 | 2026-10-20 | 58 / 28 | app only (ketunkolo, Pi; pupu daemon stays on e57cbf74): a session kept from before (autosave restored, no audio yet) opens no Sessions dialog, Ctrl+M then opens the audio setup; settings sidebar drops the Alt+digit column (hover names the key) |
+| 2ca59e0f | 2026-10-20 | 58 / 28 | app only (ketunkolo, Pi; pupu daemon stays on e57cbf74): audit rounds A–C + PNG export. Keys: Settings pages Alt+←/→ (Ctrl+Tab gone), Alt+7 Rig, Esc stops only, End back to live, Shift+T cursor, Shift+E notifications, Delete / new log confirm with their own key (Enter inert), `maximise_pane` id; "Audio I/O" names the device setup; signed dBFS, levels and limits "dB SPL", "resolution", FFT length, room band labels "1000"; palette *Export pane as PNG…*; dev builds line tables only |
+| 292d27f4 | 2026-10-20 | 58 / 28 | app only (ketunkolo, Pi; pupu daemon stays on e57cbf74): no session → Sessions dialog at start and for anything that needs one, Audio & I/O only after New (heading "New session — audio", Open session pinned at the page foot), P "Peaks" (tracking draws no hold), hidden Ctrl+K keywords ("unwrap" → phase), first transfer "Reference → <mic>", a new measurement shows unfolded with its live row |
+| 36b83512 | 2026-10-17 | 58 / 28 | app only (ketunkolo, Pi; pupu daemon stays on e57cbf74): a fresh session opens the New measurement chooser (the transfer offer is gone), Q on the last pane names N and Ctrl+M, hints name the bound keys, Audio & I/O page reordered (device → inputs → outputs → reference → rate/buffer → Open session), Ctrl+K titles terse and uniform (175 of 197 changed, ids unchanged) |
+| e57cbf74 | 2026-10-17 | 58 / 28 | rig.json format 2 (rig meters as a narrow rig-owned type, sections read independently, damaged sections taken from `.prev`): pupu's file read from version 1, kept as `rig.json.v1`, written as 2, rig meter loaded, no damage; autosave restored as is; V, trace-row clicks, Tab and delete-next only select (no pane moves); session reopened `--in 1-8 --outputs 6 --loopback-out 2 --loopback-in 2`; REW (device "PCM: pipewire") left running |
+| 7f896c18 | 2026-10-17 | 58 / 28 | per-measurement display settings on the daemon (B, P, spectrograph span and colours, offset), compare picks its target first and lists live on the target measurement, pane picks and level ranges saved in the layout, list child rows only select, spectrum peak tracking (P: off / hold / hold + top 5), transfer min/max tracking with comb readout (P; Shift+P steps wrapped / unwrapped / group delay), cursor readouts name tone / density / band. First start set `rig.json` aside as damaged (its rig SPL meter lacked the new `compared` / `offset` fields): the set-aside copy with `"compared": []`, `"offset": 0.0` added was installed and the daemon restarted, rig meter back; `rig-logs` (format 27) set aside, so the rig meter's per-second Leq starts again (exported before to ketunkolo `~/ac2-test/leq-export/foh-spl-2026-10-17-pre-7f896c18.csv`). Session reopened `--in 1-8 --outputs 6 --loopback-out 2 --loopback-in 2`; `session salvage autosave.v27`: 7 restored, 0 skipped, ids unchanged (notes: spectra got default display settings); ketunkolo's old `spectrograph_span_s = 10` / `"inferno"` set on both spectra with `meas set --span 10 --colours inferno` |
+| 8b82a6a2 | 2026-10-17 | 57 / 27 | app only (ketunkolo, Pi; pupu daemon stays on bf60fbc2): stacked frequency panes share one plot x range (cursor and ticks line up under a spectrograph), spectrum panes fit their level axis on first show, a chip pick in a row's own panes comes back with that row |
 | 46435b07 | 2026-10-17 | 57 / 27 | app only (ketunkolo, Pi; pupu daemon stays on bf60fbc2): every pane draws only its own measurement's group (spectrum, SPL, sweep too; C compares, Imported only after Move to measurement…), Ctrl+M New measurement chooser, spectrograph colour maps (Settings › Display), spectrum fill style (B: line / fill / bars), spectrum cursor kept at the clicked Hz |
 | b4415bfe | 2026-10-17 | 55 / 27 | Leq history strip browsable over the whole log (wheel/drag/I/O/←/→, Home live), `spl.history_get` range, Ctrl+K "Export Leq log (CSV, on this computer)…"; monitor at start opened capture-only, session reopened `--in 1-8 --outputs 6`; FOH SPL Leq history exported before to ketunkolo `~/ac2-test/foh-spl-leq-pre-b4415bfe.csv`; Pi `ui.toml` kept `chrome = "no_grid"`. FF400 auto-recovery (sys repo `pupu/`: udev stop on removal, `ff400-recover` restores the mixer and starts JACK, card found by id prefix) passed a quick and a ~22 s unplug: audio back 22 s / 37 s after the cut |
 | f483381e | 2026-10-16 | 54 / 27 | Art-Net cue changes fade over a rig-wide time (default 1 s, gamma 2.2, `ac2 artnet fade`, Rig monitor "Fade (s)" row); autosave restored as is, monitor at start opened capture-only then session reopened `--in 1-8 --outputs 6`; rig kept Art-Net target 192.168.9.82 universe 0.0.2, OSC target off; FOH SPL Leq history exported before to ketunkolo `~/ac2-test/foh-spl-leq-pre-f483381e.csv` (not needed) |
@@ -369,3 +380,34 @@ ac2d's bound only for the speaker stage; `gen ceiling` read bound −50 after ev
 - Ambient with an averaged RTA (`--average fifo:N` over the Leq window): LZ / LA / LC within
   0.005 dB of numpy, LAeq ac2 vs REW −0.009 dB; worst third octave +1.69 dB at 79 Hz (filter
   skirts against ideal band edges in a falling LF ambient).
+
+### Genelec cold start, harmonics over the first hour (2026-10-17)
+
+The operator powered the Genelec on from cold at about 03:55Z; the mic had moved (about 54 cm)
+and a second Genelec now stands beside the 1083, so the room response differs from the
+2026-10-14 baselines (1 kHz fundamental at the mic 6 dB lower). The loss is a reflection: in IRs
+from REW's recordings (meas ÷ loopback), the 1 kHz third octave gated 1.5 ms after the direct
+sound differs by only −0.44 dB between the two runs, but by −4.4 dB with a 3 ms gate and
+−3.8 dB ungated. The ETC has an arrival at +2.69 ms (≈ 92 cm extra path, −21 dB; +2.80 ms at
+−23 dB before), whose comb notches fall at 186, 558, 929 and 1301 Hz. Steady-sine harmonics at
+−30 dBFS, dBr re the fundamental at the mic (runs `20261017T041201Z`, `T042549Z`, `T044015Z`):
+
+| on for | H2 @ 501.5 Hz | H3 @ 501.5 Hz | H2 @ 201.3 Hz | H3 @ 1001.5 Hz |
+|---|---|---|---|---|
+| ~20 min | −71.4 | −42.0 | −68.1 | −51.1 |
+| ~35 min | −70.4 | −42.1 | −68.7 | −50.9 |
+| ~50 min | −70.6 | −42.1 | −71.7 | −50.9 |
+| days (2026-10-14) | −67.6 | −43.2 | −72.3 | −56.2 |
+
+No drift within the first hour (all within ±1 dB, H2 @ 200 Hz ±2 dB). The operator reports
+the audible distortion has come only after days on, so the 2026-10-17 numbers are a day-0
+reference for a long-term trend, not a test of the drift itself.
+
+The ac2 sweep's H2 @ 500 Hz read −66.4 dBr (`dist` variant) between the sines that read
+−70.4 and −70.6: a 4 dB excess that the sines rule out as warming. The 2026-10-14 run had
++2.2 dB on the same cell; REW's import is floor-bound there (< −64.6 dBr), so it cannot
+confirm or refute it. Open.
+
+Xone −10 dBFS: three LF FAILs in `T042549Z` (REW H2 at 35 / 40.5 Hz, ac2 3 Hz-sweep H3 at
+40.5 Hz, all at −92…−100 dBr against a sine near its own floor) did not repeat in
+`T044349Z` (FAIL 0, WARN 0): one-take noise of the hum-burst kind described above.

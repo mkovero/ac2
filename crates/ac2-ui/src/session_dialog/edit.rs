@@ -5,17 +5,13 @@ use super::*;
 impl SessionDialog {
     // ----- focus -------------------------------------------------------------------------
 
-    /// Focus order: the device rows, then one row per input, then one per output.
+    /// Focus order, as the page reads top to bottom: the device rows, one row per input,
+    /// one per output, then the rate and buffer (the device's defaults suit most rigs).
     pub fn rows(&self) -> Vec<Row> {
-        let mut v = vec![
-            Row::Backend,
-            Row::Device,
-            Row::OutputDevice,
-            Row::Rate,
-            Row::Buffer,
-        ];
+        let mut v = vec![Row::Backend, Row::Device, Row::OutputDevice];
         v.extend((0..self.inputs.len()).map(Row::Input));
         v.extend((0..self.outputs.len()).map(Row::Output));
+        v.extend([Row::Rate, Row::Buffer]);
         v
     }
 
@@ -299,7 +295,7 @@ impl SessionDialog {
             }
             Some(row)
         } else {
-            self.notice = Some("the mic curve applies when the session opens (Enter)".into());
+            self.notice = Some("the mic curve applies when the audio I/O opens (Enter)".into());
             None
         }
     }

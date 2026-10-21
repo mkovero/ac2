@@ -114,7 +114,7 @@ mod tests {
                 "Ctrl+1 capture",
                 "X find delay",
                 "B coherence mask",
-                "P wrap/unwrap",
+                "P min/max",
                 "K smoothing",
                 "H all keys"
             ]
@@ -123,7 +123,7 @@ mod tests {
             pc(Scope::Spectrum),
             [
                 "S start/stop",
-                "P peak hold",
+                "P peaks",
                 "G/Shift+G view",
                 "K smoothing",
                 "Shift+Home fit level",
@@ -138,8 +138,8 @@ mod tests {
                 "G/Shift+G view",
                 "I zoom time",
                 "Ctrl+I zoom level",
-                "Shift+Home fit",
-                "Tab next",
+                "Shift+Home fit level",
+                "Tab next row",
                 "Q close pane",
                 "W maximise",
                 "H all keys"
@@ -161,7 +161,7 @@ mod tests {
             pc(Scope::Distortion),
             [
                 "Shift+S new sweep",
-                "V next sweep",
+                "V select trace",
                 "G/Shift+G view",
                 "E reference",
                 "W maximise",

@@ -13,7 +13,7 @@ use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, WallNs};
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
-use ac2_scene::grid::{GridColumns, column_frequencies, columns};
+use ac2_scene::grid::{GridColumns, columns};
 use ac2_scene::ir::{IrScene, ir_scene};
 use ac2_scene::math::MathStatus;
 use ac2_scene::primitives::Viewport;
@@ -24,11 +24,13 @@ use ac2_scene::trace::{TfTrace, TimeBase};
 
 use crate::state::{AppState, PaneId, PaneKind};
 
+mod alignment;
 mod spectrum_pane;
 mod spl_meters;
+pub use alignment::{alignment, is_alignment, pane_alignment};
 #[cfg(test)]
 pub(crate) use spectrum_pane::with_spectrum;
-pub use spectrum_pane::{spectrograph, spectrum, spectrum_scale};
+pub use spectrum_pane::{spectrograph, spectrum, spectrum_jump, spectrum_scale};
 pub use spl_meters::{
     LocalZone, StripPlace, band_leq, has_band_meter, leq, leq_keyed, leq_meter, meter_leq, spl,
     spl_pane, spl_placeholder,
@@ -130,6 +132,7 @@ pub fn status(
             .daemon()
             .and_then(|d| ac2_scene::autosave::damage_text(&d.rig.damaged_files)),
         drive: st.drive(),
+        advice: None,
     }
 }
 
@@ -186,6 +189,30 @@ pub fn daemon_wall(st: &AppState, client_now: WallNs) -> WallNs {
 
 /// What a math channel's frame combined, operands named as the lists name them; `None`
 /// for any other frame.
+/// A prediction's legend tag: what its curve already contains of the set
+/// (`assumes none of it in`, `change since rev 4`, `EQ 1 in · no change`).
+fn eq_prediction_note(st: &AppState, m: &Measurement) -> Option<String> {
+    let MeasKind::Math { config } = &m.config.kind else {
+        return None;
+    };
+    let (meas, set, curve) = ac2_scene::eq::prediction(&config.expr)?;
+    let set = st.meas(meas)?.eq.iter().find(|s| s.id == set)?;
+    let basis =
+        ac2_scene::eq::curve_basis(set, curve, |id| st.traces.get(&id).map(|(t, _)| &t.meta));
+    Some(ac2_scene::eq::basis_tag(&set.body.name, basis))
+}
+
+/// An EQ set's filter curve's tags (`bypassed`, `in console (rev 4)`); `None` for any other
+/// trace.
+fn eq_curve_tags(st: &AppState, meta: &ac2_proto::model::TraceMeta) -> Option<String> {
+    let ac2_proto::model::TraceSource::Eq { meas, set, .. } = meta.source else {
+        return None;
+    };
+    let set = st.meas(meas)?.eq.iter().find(|s| s.id == set)?;
+    let tags = ac2_scene::eq::set_tags(set);
+    (!tags.is_empty()).then(|| tags.join(" · "))
+}
+
 fn math_status(st: &AppState, m: &Measurement, frame: &FrameData) -> Option<MathStatus> {
     let MeasKind::Math { config } = &m.config.kind else {
         return None;
@@ -267,6 +294,65 @@ struct LiveTf<'a> {
 /// so. Other groups wait until theirs is the pane's measurement; Imported until moved under
 /// a measurement.
 pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: Now) -> TfScene {
+    with_transfer(st, pane, theme, |traces, live| {
+        let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
+        let focus = pane_tf(st, pane);
+        let mut status = status(st, &shown, focus, now);
+        // The shown math channel's operands.
+        let frames: Vec<(MeasId, &TopicFrame)> = live.iter().map(|l| (l.meas.id, l.tf)).collect();
+        status.math = shown_math(st, focus, &frames);
+        // Headroom advice is about the measurement the pane shows, from live levels; a stored
+        // trace or math channel has no stimulus to change.
+        status.advice = focus
+            .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
+            .and_then(|m| st.advice_of(m.id));
+        // Under the stack's top pane, which says it for the column. Faults (clipping,
+        // STALE, audio stopped) stay in every pane: each must be seen wherever one looks.
+        if st.stacked_under(pane) {
+            status.no_delay_estimate = None;
+            status.advice = None;
+        }
+        transfer_scene(
+            traces,
+            &st.tf_display,
+            &status,
+            &st.view_for(pane),
+            theme,
+            size,
+        )
+    })
+}
+
+/// Where the cursor jumps in transfer pane `pane` ([`ac2_scene::tf::jump`]): along the
+/// curve it draws as it draws it.
+pub fn transfer_jump(
+    st: &AppState,
+    pane: PaneId,
+    shown: ac2_scene::axis::Range,
+    kind: ac2_scene::cursor_jump::Landmark,
+    step: ac2_scene::cursor_jump::Step,
+) -> Option<f64> {
+    let theme = st.scene_theme();
+    with_transfer(st, pane, &theme, |traces, _| {
+        ac2_scene::tf::jump(
+            traces,
+            &st.tf_display,
+            &st.view_for(pane),
+            shown,
+            kind,
+            step,
+        )
+    })
+}
+
+/// Calls `f` with the transfer pane's curves in legend order and the live frames they
+/// come from.
+fn with_transfer<R>(
+    st: &AppState,
+    pane: PaneId,
+    theme: &Theme,
+    f: impl FnOnce(&[TfTrace<'_>], &[LiveTf<'_>]) -> R,
+) -> R {
     let grids = st.data.as_ref().map(|d| &d.grids);
     let colours = st.curve_colours(theme);
     let pane_shows = st.pane_meas(pane);
@@ -343,13 +429,14 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
             freshness(st, l.tf),
         );
         let e = st.edit(l.meas.id);
-        t.offset_db = e.offset_db;
+        t.offset_db = st.meas_offset(l.meas.id);
         t.polarity = if e.inverted {
             Polarity::Inverted
         } else {
             Polarity::Normal
         };
-        t.note = math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag());
+        t.note = eq_prediction_note(st, l.meas)
+            .or_else(|| math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag()));
         t.compared = st.live_compared_on(PaneKind::Transfer, l.meas, pane_shows);
         // A ratio or cascade of operands without a shared time base has each operand's
         // own alignment in its phase, not a time base of this session.
@@ -366,6 +453,9 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
         ranks.push(rank(ac2_scene::meas_list::group_of(&data.meta, &ms)));
         let mut t = TfTrace::stored(data, &cols.freqs, colours.trace(data.meta.id));
         t.selected = st.selected_trace == Some(data.meta.id);
+        if let Some(tags) = eq_curve_tags(st, &data.meta) {
+            t.note = Some(tags);
+        }
         t.compared = st.trace_compared_on(PaneKind::Transfer, &data.meta, pane_shows);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (Some(epoch), Some(cur)) = (
@@ -381,25 +471,7 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
     order.sort_by_key(|i| (ranks.get(*i).copied().unwrap_or(usize::MAX), *i));
     let mut slots: Vec<Option<TfTrace<'_>>> = traces.into_iter().map(Some).collect();
     let traces: Vec<TfTrace<'_>> = order.iter().filter_map(|i| slots[*i].take()).collect();
-    let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
-    let focus = pane_tf(st, pane);
-    let mut status = status(st, &shown, focus, now);
-    // The shown math channel's operands.
-    let frames: Vec<(MeasId, &TopicFrame)> = live.iter().map(|l| (l.meas.id, l.tf)).collect();
-    status.math = shown_math(st, focus, &frames);
-    // Under the stack's top pane, which says it for the column. Faults (clipping, STALE,
-    // audio stopped) stay in every pane: each must be seen wherever one looks.
-    if st.stacked_under(pane) {
-        status.no_delay_estimate = None;
-    }
-    transfer_scene(
-        &traces,
-        &st.tf_display,
-        &status,
-        &st.view_for(pane),
-        theme,
-        size,
-    )
+    f(&traces, &live)
 }
 
 /// The IR of the focused transfer measurement, under the banners of its transfer stream
@@ -424,12 +496,16 @@ pub fn ir(
         return ac2_scene::ir::stored_ir_scene(
             d,
             st.curve_colours(theme).trace(d.meta.id),
-            &status,
-            &view,
-            &view.ir.axes,
-            view.chrome,
-            theme,
-            size,
+            &ac2_scene::ir::IrCtx {
+                status: &status,
+                view: &view,
+                axes: &view.ir.axes,
+                style: ac2_scene::view::Style {
+                    chrome: view.chrome,
+                    theme,
+                },
+                size,
+            },
         );
     }
     let m = st.pane_meas(pane)?;
@@ -446,12 +522,16 @@ pub fn ir(
             f,
             meas_color(st, theme, m.id),
             Some(freshness(st, ir)),
-            &status,
-            &view,
-            &view.ir.axes,
-            view.chrome,
-            theme,
-            size,
+            &ac2_scene::ir::IrCtx {
+                status: &status,
+                view: &view,
+                axes: &view.ir.axes,
+                style: ac2_scene::view::Style {
+                    chrome: view.chrome,
+                    theme,
+                },
+                size,
+            },
         ));
     }
     let hidden = st.meas_hidden(m);
@@ -483,8 +563,10 @@ pub fn ir(
         missing_text(&m.config.name, why, &start),
         &status,
         &view.ir.axes,
-        view.chrome,
-        theme,
+        ac2_scene::view::Style {
+            chrome: view.chrome,
+            theme,
+        },
         size,
     ))
 }
@@ -559,9 +641,7 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
             return SweepPane::Ir(Box::new(s));
         }
     }
-    let freqs = shown
-        .map(|(_, g)| column_frequencies(g))
-        .unwrap_or_default();
+    let freqs = shown.map(|(_, g)| g.centres()).unwrap_or_default();
     let colours = st.curve_colours(theme);
     let view = shown.map(|(d, _)| SweepView {
         data: d,
@@ -569,7 +649,7 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
         color: colours.trace(d.meta.id),
     });
     let others = st.compared_sweeps(pane);
-    let other_freqs: Vec<Vec<f64>> = others.iter().map(|(_, g)| column_frequencies(g)).collect();
+    let other_freqs: Vec<Vec<f64>> = others.iter().map(|(_, g)| g.centres()).collect();
     let compared: Vec<SweepView<'_>> = others
         .iter()
         .zip(&other_freqs)

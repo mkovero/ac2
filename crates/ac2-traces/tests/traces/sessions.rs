@@ -39,6 +39,9 @@ pub(super) fn session_sample() -> Session {
                 }),
                 colour: None,
                 layout: Some(ac2_proto::samples::pane_layout()),
+                compared: Vec::new(),
+                offset: ac2_proto::units::Db(0.0),
+                eq: Vec::new(),
             },
             SavedMeasurement {
                 id: MeasId(2),
@@ -53,6 +56,9 @@ pub(super) fn session_sample() -> Session {
                 delay: None,
                 colour: None,
                 layout: None,
+                compared: Vec::new(),
+                offset: ac2_proto::units::Db(0.0),
+                eq: Vec::new(),
             },
         ],
         spl_logs: vec![SavedSplLog {

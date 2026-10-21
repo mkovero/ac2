@@ -66,6 +66,15 @@ pub(crate) struct JobEnv {
     pub(crate) fps: u32,
 }
 
+/// The measurement a job runs: its id, its configuration at `config_rev`, and the session
+/// epoch it starts in.
+pub(crate) struct JobCtx<C> {
+    pub(crate) meas: MeasId,
+    pub(crate) cfg: C,
+    pub(crate) config_rev: Rev,
+    pub(crate) epoch: SessionEpoch,
+}
+
 /// Header fields a job decides.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct StampArgs {

@@ -82,6 +82,7 @@ fn kiosk_prefs() -> UiPrefs {
             measurement: Some(SPL.to_owned()),
             modes: PaneModes::default(),
             levels: Default::default(),
+            plates: Default::default(),
         }],
     });
     p.layout.fullscreen = true;

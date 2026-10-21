@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 /// Leq windows with limits from an empty daemon, using the app: the session from its dialog,
 /// an SPL meter from the palette, its windows from the Leq dialog by keys (a 5 s and a 10 s
 /// window limited to 85 dB), the stimulus from the keys. Pink noise at −20 dBFS reads about
-/// 91 dB(A) on the calibrated mic: both windows' columns (the default layout) and tiles turn
+/// 91 dB SPL (A) on the calibrated mic: both windows' columns (the default layout) and tiles turn
 /// red, the alarms arrive as toasts; the stop brings both back under the limit, and that is
 /// a toast too.
 #[test]
@@ -108,9 +108,10 @@ fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
         t.len() >= 2 && t[..2].iter().all(quiet)
     })?;
     let seen = spl_log(&d.st).map_or(0, |l| l.alarms.len());
-    let seen_toast = d.st.toasts.last().map_or(0, |t| t.id);
+    let seen_toast = d.st.toasts.list.last().map_or(0, |t| t.id);
     let new_toasts = move |s: &AppState, what: &str, error: bool| {
         s.toasts
+            .list
             .iter()
             .filter(|t| {
                 t.id > seen_toast
@@ -142,7 +143,7 @@ fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
     let t = tiles(&d.st);
     assert_eq!(t[0].name, "LAeq 5 s");
     assert_eq!(t[0].state_text.as_deref(), Some("OVER"));
-    assert_eq!(t[0].limit.as_deref(), Some("limit 85.0 dB"));
+    assert_eq!(t[0].limit.as_deref(), Some("limit 85.0 dB SPL"));
     assert_eq!(t[0].unit, "dB SPL");
     d.until("the over alarms as toasts", |s| {
         new_toasts(s, "over its limit", true) == 2
@@ -181,7 +182,7 @@ fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
         ]
     );
     // The history holds the excursion: over-limit seconds, and ones after it that are not.
-    let (_, h) = d.st.leq_history.values().next().ok_or("history")?;
+    let (_, h) = d.st.leq.history.values().next().ok_or("history")?;
     let m =
         d.st.measurements()
             .into_iter()
@@ -259,7 +260,7 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
     d.until("an LCpeak tile, corrected", |s| {
         tiles(s).iter().any(|t| {
             t.kind == TileKind::Peak(PeakQuantity::LcPeak)
-                && t.weighted_unit == "dB(C) corr."
+                && t.weighted_unit == "dB SPL (C) corr."
                 && t.corrected.as_deref() == Some("corrected +4.0 dB")
         })
     })?;
@@ -290,7 +291,8 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
     let texts = scene_texts(&scene.scene);
     assert!(
         texts.iter().any(|t| t.contains("corrected +4.0 dB")),
-        "{texts:?}"
+        "{}",
+        crate::common::scene_texts_excerpt(&texts, crate::common::TEXTS_SHOWN)
     );
 
     // The calibrator's seconds (97 dB peaks, 101 corrected) leave the 10 s hold first.
@@ -302,9 +304,10 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
             )
         })
     })?;
-    let seen_toast = d.st.toasts.last().map_or(0, |t| t.id);
+    let seen_toast = d.st.toasts.list.last().map_or(0, |t| t.id);
     let new_toasts = move |s: &AppState, what: &str, error: bool| {
         s.toasts
+            .list
             .iter()
             .filter(|t| {
                 t.id > seen_toast
@@ -372,8 +375,8 @@ fn leq_columns(s: &AppState) -> Option<ac2_scene::leq::LeqColumns> {
 
 /// Filling windows judged on their budgets, from an empty daemon, using the app: an SPL
 /// meter from the palette, calibrated; its default windows (1, 5, 10, 30, 60 min) limited to
-/// 80 dB in the Leq dialog; Shift+R, Enter: a new log, so every window fills from nothing.
-/// Pink noise at −20 dBFS (about 91 dB(A), 12 times the limit's power) puts every window's
+/// 80 dB in the Leq dialog; Shift+R twice: a new log, so every window fills from nothing.
+/// Pink noise at −20 dBFS (about 91 dB SPL (A), 12 times the limit's power) puts every window's
 /// Leq so far over 80 at once: all amber, "ON COURSE". The 1 min window has spent its budget
 /// after about 5 s and turns red; the 5 min one after about 25 s; the 10, 30 and 60 min ones
 /// stay amber on course, their bars under the limit line, with the time until their budgets
@@ -438,9 +441,10 @@ fn slow_filling_windows_go_red_only_when_their_budget_is_spent() -> R {
 
     // A new log: the calibrator's seconds go, every window fills from nothing.
     d.key("Shift+R");
-    d.key("Enter");
+    d.key("Shift+R");
     d.until("the new log", |s| {
         s.toasts
+            .list
             .iter()
             .any(|t| t.text.contains("new SPL log started"))
             && spl_log(s).is_some_and(|l| l.alarms.is_empty())

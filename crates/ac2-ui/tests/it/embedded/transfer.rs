@@ -185,7 +185,7 @@ fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
         })
     })?;
     // Only what this stop says.
-    d.st.toasts.clear();
+    d.st.toasts.list.clear();
     d.key("S");
     d.until("the measurement and the noise stopped", |s| {
         s.stimulus.phase == StimPhase::Idle
@@ -198,9 +198,15 @@ fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
         "{} stopped · stimulus stopped (no transfer measurement left running)",
         m.config.name
     );
-    d.until("the toast", |s| s.toasts.iter().any(|t| t.text == stopped))?;
+    d.until("the toast", |s| {
+        s.toasts.list.iter().any(|t| t.text == stopped)
+    })?;
     assert!(
-        !d.st.toasts.iter().any(|t| t.text == "stimulus stopped"),
+        !d.st
+            .toasts
+            .list
+            .iter()
+            .any(|t| t.text == "stimulus stopped"),
         "said twice"
     );
     drop(d);
@@ -352,11 +358,12 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
     })?;
     assert!(
         d.st.toasts
+            .list
             .iter()
             // The total depends on whether the mirror caught up between the keys.
             .any(|t| t.text.contains(": delay −0.1 sample → ")),
         "{:?}",
-        d.st.toasts.iter().map(|t| &t.text).collect::<Vec<_>>()
+        d.st.toasts.list.iter().map(|t| &t.text).collect::<Vec<_>>()
     );
     d.stop()?;
     drop(d);
@@ -464,6 +471,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.key("Alt+1");
     let f = d.st.layout.focus;
     d.send(Msg::PanePick(f, ac2_ui::state::PaneMenuRow::Meas(m.id)));
+    // The chip leaves the selection on the sweep; the measurement's row selects it.
+    d.send(Msg::SelectMeas(m.id));
     assert_eq!(d.st.selected, Some(m.id));
     let running = |s: &AppState| {
         s.daemon()
@@ -603,12 +612,36 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     );
 
     // The sweep run as the reference: the steps move the live curve against it, alone.
-    // The run takes the transfer pane to the sweep's group, so the live curve is compared
-    // onto it first.
+    // The pane's chip gives it the sweep's group (V only selects the run), so the live curve
+    // is compared onto it first.
     d.send(Msg::SelectMeas(m.id));
     assert_eq!(d.st.selected_trace, None);
+    let sweep =
+        d.st.trace_meta(run)
+            .ok()
+            .and_then(|t| t.edit.owner.meas())
+            .ok_or("the run's sweep")?;
+    let sweep_name =
+        d.st.meas(sweep)
+            .map(|x| x.config.name.clone())
+            .ok_or("the sweep")?;
     d.key("C");
-    assert!(d.st.compared_meas.contains(&m.id));
+    let Overlay::Choose(c) = &mut d.st.overlay else {
+        return Err(format!("no compare chooser: {:?}", d.st.overlay).into());
+    };
+    c.index = c
+        .choices
+        .iter()
+        .position(|c| c.label.contains(&sweep_name))
+        .ok_or("the sweep among the targets")?;
+    d.key("Enter");
+    d.key("Escape");
+    d.until("the live curve compared into the sweep", |s| {
+        s.meas(sweep).is_some_and(|x| {
+            x.compared
+                .contains(&ac2_proto::model::Compared::Meas { meas: m.id })
+        })
+    })?;
     for _ in 0..8 {
         if d.st.selected_trace == Some(run) {
             break;
@@ -616,6 +649,18 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         d.send(Msg::Command(CommandId::NextTrace));
     }
     assert_eq!(d.st.selected_trace, Some(run));
+    assert_eq!(
+        d.st.kind_meas(PaneKind::Transfer).map(|x| x.id),
+        Some(m.id),
+        "V moved no pane"
+    );
+    let tf = crate::common::pane(&d.st, PaneKind::Transfer);
+    d.send(Msg::PanePick(tf, ac2_ui::state::PaneMenuRow::Meas(sweep)));
+    assert_eq!(
+        d.st.selected_trace,
+        Some(run),
+        "the chip keeps the selection"
+    );
     d.send(Msg::Command(CommandId::PhaseReference));
     let pre = drawn_phase(&d.st, 240);
     let live_pre = drawn_curve(&d.st, live);
@@ -652,8 +697,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     }
     d.stop()?;
 
-    // Stopped: no live curve to move, so the keys change nothing and say why. The pane went
-    // to the sweep with its run; its list puts the measurement back first.
+    // Stopped: no live curve to move, so the keys change nothing and say why. The pane was
+    // given the sweep; its list puts the measurement back first.
     let tf = crate::common::pane(&d.st, PaneKind::Transfer);
     d.send(Msg::PanePick(tf, ac2_ui::state::PaneMenuRow::Meas(m.id)));
     assert_eq!(d.st.kind_meas(PaneKind::Transfer).map(|x| x.id), Some(m.id));
@@ -666,6 +711,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.key("Ctrl+.");
     let toast =
         d.st.toasts
+            .list
             .last()
             .map(|t| t.text.clone())
             .unwrap_or_default();

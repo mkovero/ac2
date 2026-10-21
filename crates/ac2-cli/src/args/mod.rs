@@ -1,8 +1,10 @@
 //! Command-line grammar.
 
+mod align;
 mod artnet;
 mod cal;
 mod delay;
+mod eq;
 mod gen_;
 mod ir;
 mod math;
@@ -12,9 +14,11 @@ mod session;
 mod spl;
 mod trace;
 
+pub use align::*;
 pub use artnet::*;
 pub use cal::*;
 pub use delay::*;
+pub use eq::*;
 pub use gen_::*;
 pub use ir::*;
 pub use math::*;
@@ -29,7 +33,7 @@ use std::path::PathBuf;
 use ac2_client::RemoteAddr;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::units::{Channel, Channels, Freq, LevelDbfs, SampleCount, Time};
+use ac2_scene::unit_text::{Channel, Channels, Freq, LevelDbfs, SampleCount, Time};
 
 /// ac2: live dual-channel analyzer — command-line client.
 #[derive(Debug, Parser)]
@@ -71,7 +75,7 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: DaemonCmd,
     },
-    /// Open or close the audio session.
+    /// Audio I/O (open, close, status, inputs, replay) and saved session files.
     Session {
         /// Action.
         #[command(subcommand)]
@@ -95,6 +99,13 @@ pub enum Cmd {
         /// Action.
         #[command(subcommand)]
         cmd: MathCmd,
+    },
+    /// Alignment of two systems in their overlap (sub/main, main/fill): the delay and
+    /// polarity that make two transfer curves add.
+    Align {
+        /// Action.
+        #[command(subcommand)]
+        cmd: AlignCmd,
     },
     /// Delay finder and compensation of a transfer measurement.
     Delay {

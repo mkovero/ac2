@@ -30,9 +30,9 @@ use super::gen_::{Input, input, say};
 use super::{connect, find_meas, find_trace, state};
 use crate::CliError;
 use crate::args::{Cli, IrCaptureArgs, IrCmd, IrMetricsArgs, SweepCmd, SweepRunArgs};
-use crate::output::{self, Out};
-use crate::units::channels_text;
+use crate::output::Out;
 use crate::watch::{Key, RawTerm, quit_signal};
+use ac2_scene::unit_text::channels_text;
 
 pub(crate) async fn run(cli: &Cli, cmd: &IrCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
@@ -149,12 +149,12 @@ fn describe(r: &SweepConfig) -> String {
         LfHarmonics::Fine => " · LF harmonics fine",
     };
     format!(
-        "sweep {} – {}, {} s × {} at {} on out {} · in {} re in {} · Resolution {}{lf}",
+        "sweep {} – {}, {} s × {} at {} on out {} · in {} re in {} · resolution {}{lf}",
         ac2_scene::format::freq_readout(r.sweep.start.0),
         ac2_scene::format::freq_readout(r.sweep.end.0),
         ac2_scene::format::fixed(r.sweep.duration.0, 1),
         r.repeats,
-        output::dbfs(r.level.0),
+        ac2_scene::format::dbfs(r.level.0),
         channels_text(&r.outputs),
         r.measurement_input + 1,
         r.reference_input + 1,
@@ -202,13 +202,13 @@ fn check_runnable(st: &State, config: &SweepConfig) -> Result<(), CliError> {
     if config.level.0 > ceiling.0 {
         return Err(CliError::Refused(format!(
             "level {} is above the daemon's ceiling {}",
-            output::dbfs(config.level.0),
-            output::dbfs(ceiling.0)
+            ac2_scene::format::dbfs(config.level.0),
+            ac2_scene::format::dbfs(ceiling.0)
         )));
     }
     if st.session.open.is_none() {
         return Err(CliError::Usage(
-            "no open session; open one with `ac2 session open`".into(),
+            "no audio I/O open; open it with `ac2 session open`".into(),
         ));
     }
     Ok(())
@@ -417,7 +417,7 @@ async fn foreground(
     let data = c.call(Command::TraceGet { trace }).await?;
     let data = expect_body!("trace.get", data, ReplyBody::TraceData(d) => d)?;
     let grid = c.grid(data.meta.grid_id).await?;
-    let freqs = ac2_scene::grid::column_frequencies(&grid);
+    let freqs = grid.centres();
     print_summary(out, &data, &freqs);
     Ok(())
 }
@@ -573,7 +573,7 @@ mod tests {
     use super::*;
     use crate::args::LfHarmonicsArg;
     use crate::output::Out;
-    use crate::units::{Channel, Channels, Freq, LevelDbfs, Time};
+    use ac2_scene::unit_text::{Channel, Channels, Freq, LevelDbfs, Time};
 
     fn args() -> IrCaptureArgs {
         IrCaptureArgs {
@@ -607,7 +607,7 @@ mod tests {
         );
         assert_eq!(
             describe(&r),
-            "sweep 20.0 Hz – 20.0 kHz, 3.0 s × 1 at −50.0 dBFS on out 1,2 · in 1 re in 2 · Resolution 1/48 oct"
+            "sweep 20.0 Hz – 20.0 kHz, 3.0 s × 1 at −50.0 dBFS on out 1,2 · in 1 re in 2 · resolution 1/48 oct"
         );
         let mut a = args();
         a.lf_harmonics = LfHarmonicsArg::Fine;
@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(
             describe(&r),
             "sweep 20.0 Hz – 20.0 kHz, 3.0 s × 1 at −50.0 dBFS on out 1,2 · in 1 re in 2 · \
-             Resolution 1/48 oct · LF harmonics fine"
+             resolution 1/48 oct · LF harmonics fine"
         );
         let mut a = args();
         a.from = Freq(Hz(30_000.0));
@@ -763,7 +763,7 @@ mod tests {
         let ReplyBody::TraceData(data) = data else {
             return Err("trace data".into());
         };
-        let freqs = ac2_scene::grid::column_frequencies(&*c.grid(data.meta.grid_id).await?);
+        let freqs = c.grid(data.meta.grid_id).await?.centres();
         // The rig's H3 is c3·A²/4 re the fundamental (A = 0.1 at −20 dBFS, the fundamental
         // itself gaining 3/4·c3·A²): −50.08 dB at every frequency. Its median over the band
         // where H3 lies inside the sweep (3·f ≤ 5 kHz) reads it without the noise's bias.

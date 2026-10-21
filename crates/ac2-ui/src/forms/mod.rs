@@ -5,7 +5,7 @@
 //! data; the reducer routes keys here and the view draws them. Every default is the CLI's
 //! (`ac2 meas new`, `ac2 ir capture`), taken from the shared constructors in `ac2-proto`.
 //!
-//! The audio session dialog is [`crate::session_dialog`]; the rate and buffer parsers it
+//! The audio I/O dialog is [`crate::session_dialog`]; the rate and buffer parsers it
 //! shares live here.
 
 use ac2_proto::model::{
@@ -22,7 +22,7 @@ mod options;
 use options::*;
 
 pub(crate) use options::resolution_field;
-pub use options::{LF_HARMONICS_HINT, RESOLUTION_HINT, parse_buffer, parse_freq, parse_rate};
+pub use options::{LF_HARMONICS_HINT, RESOLUTION_HINT, parse_buffer, parse_rate};
 
 /// Which dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,7 +56,7 @@ impl FormKind {
             FormKind::Spectrum => "New spectrum",
             FormKind::Rta => "New RTA",
             FormKind::Spl => "New SPL meter",
-            FormKind::Math => "New math channel (A ÷ × + − B, or the average of several)",
+            FormKind::Math => "New math channel (A ÷ × + − ↔ B, or the average of several)",
             FormKind::MathEdit => "Edit math channel",
             FormKind::Sweep => "New sweep measurement (response and harmonic distortion)",
             FormKind::SweepEdit => "Edit sweep measurement (its next run)",
@@ -149,6 +149,11 @@ pub enum FieldId {
     OperandB,
     /// The operand whose delay a math channel's sum or average is referred to.
     PhaseRef,
+    /// An alignment's overlap band, lower and upper edge.
+    AlignFrom,
+    AlignTo,
+    /// The longest delay an alignment looks at.
+    MaxDelay,
     /// The channel of a multi-channel impulse-response file.
     IrChannel,
     /// An imported impulse response's time zero: its peak or the file's start.
@@ -294,7 +299,7 @@ pub struct Form {
 }
 
 impl Form {
-    fn field(&self, id: FieldId) -> Option<&Field> {
+    pub(crate) fn field(&self, id: FieldId) -> Option<&Field> {
         self.fields.iter().find(|f| f.id == id)
     }
 

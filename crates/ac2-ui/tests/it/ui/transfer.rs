@@ -11,7 +11,15 @@ fn transfer_view_two_traces_and_banner() {
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
     // The pane draws Main L's group; Delay tower joins it compared (C), tagged `cmp`.
-    h.state_mut().state.compared_meas.insert(MeasId(2));
+    rig.compare_into(
+        1,
+        vec![ac2_proto::model::Compared::Meas { meas: MeasId(2) }],
+    );
+    step_until(&mut h, "Delay tower compared", |a| {
+        a.state
+            .meas(MeasId(1))
+            .is_some_and(|m| !m.compared.is_empty())
+    });
     {
         let st = &h.state().state;
         assert_eq!(st.selected, Some(MeasId(1)));
@@ -66,7 +74,7 @@ fn no_reference_reminds_of_the_stimulus_keys() {
                 && b.detail.as_deref() == Some("stimulus off: Space arms, Enter starts it")
         })
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "transfer_no_reference_reminder");
 }
@@ -116,7 +124,7 @@ fn ir_pane_of_a_stopped_measurement() {
         assert_eq!(s.tag, None);
         assert!(s.banners.iter().all(|b| !b.text.starts_with("STALE")));
     }
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "ir_stopped");
     // S starts it again: its live IR. The frequency panes' keys on its time and amplitude
@@ -136,7 +144,7 @@ fn ir_pane_of_a_stopped_measurement() {
         let ax = a.state.view.ir.axes;
         ax.time_ms.is_some() && ax.amplitude.is_some() && ax.cursor_ms.is_some()
     });
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "ir_zoomed_cursor");
 }
@@ -177,6 +185,70 @@ fn recording_indicator() {
         Some("REC 1:23 · 31.9 MB · 1 dropout".to_owned())
     );
     snapshot(&mut h, "recording_indicator");
+}
+
+/// The alignment view of "Delay tower ↔ Main L": the readout says what to do, the phase
+/// difference and the summation before (dim) and after (bright), the band shaded.
+#[test]
+fn alignment_view() {
+    if !have_gpu("alignment_view") {
+        return;
+    }
+    let rig = common::Rig::start();
+    rig.add_alignment();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "the alignment's frames", |a| {
+        live_with(a, 5)
+            && a.state.data.as_ref().is_some_and(|d| {
+                d.latest
+                    .get(&Topic::Data {
+                        meas: MeasId(9),
+                        stream: Stream::Tf,
+                    })
+                    .is_some()
+            })
+    });
+    {
+        let st = &mut h.state_mut().state;
+        common::show_on(st, PaneKind::Transfer, MeasId(9));
+        let p = common::pane(st, PaneKind::Transfer);
+        if let Some(v) = st.layout.view_mut(p) {
+            v.modes.transfer = ac2_ui::state::TransferView::Alignment;
+        }
+    }
+    {
+        let st = &h.state().state;
+        let s = ac2_ui::scenes::alignment(
+            st,
+            crate::common::pane(st, PaneKind::Transfer),
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 600.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        let r = s.readout.expect("the readout");
+        assert_eq!(
+            r.headline,
+            "Delay tower: delay 4.21 ms · 1.44 m @ 20 °C · polarity normal"
+        );
+        assert_eq!(
+            r.lines[1],
+            "other polarity: Delay tower +9.80 ms inverted, ±41°"
+        );
+        assert_eq!(
+            s.titles,
+            [
+                "phase difference Delay tower − Main L (°)",
+                "summation (dB, 0 = they add fully)"
+            ]
+        );
+    }
+    snapshot(&mut h, "transfer_alignment");
 }
 
 #[test]
@@ -264,7 +336,7 @@ fn math_dialog() {
         };
         assert_eq!(f.text(ac2_ui::forms::FieldId::Name), "Main L ÷ Delay tower");
     }
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     h.step();
     snapshot(&mut h, "math_dialog");
 }
@@ -320,11 +392,13 @@ fn spectrum_math() {
 
 /// Many curves from an empty daemon: target curves imported one after another fill the
 /// transfer legend. Its rows sit on a plate in the plot's colour; at most 70 % of the pane tall,
-/// the rest scroll with the wheel over it. A drag moves it, a drag on its grip makes it
-/// narrower, the palette snaps it to a corner and hides it, and ui.toml keeps all that.
+/// the rest scroll with the wheel over it. A drag moves it, a drag on its grip enlarges its
+/// text, a double-click puts it back, the palette snaps it to a corner and hides it, and
+/// ui.toml keeps all that.
 #[test]
 fn transfer_legend_many_curves() {
-    use ac2_scene::legend::{LegendCorner, LegendHover};
+    use ac2_scene::legend::LegendCorner;
+    use ac2_scene::plate::{PlateHover, PlateKind, PlatePlace};
     if !have_gpu("transfer_legend_many_curves") {
         return;
     }
@@ -362,15 +436,25 @@ fn transfer_legend_many_curves() {
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
     settle(&mut h, 3);
     let legend = |h: &Harness<'_, App>| h.state().state.view.tf.legend;
-    let (plate, _) = h.state().legend_rects().expect("legend drawn");
+    let id = h.state().state.layout.focus;
+    let place = |a: &App| a.state.layout.view(id).expect("pane").plates.legend;
+    let rects = |h: &Harness<'_, App>| h.state().plate_rects(id, PlateKind::Legend);
+    let (plate, _) = rects(&h).expect("legend drawn");
     let pane = h.state().state.layout.focus_kind();
     assert_eq!(pane, PaneKind::Transfer);
+    let hover = |h: &Harness<'_, App>| h.state().state.plate_hover.map(|(_, p)| p);
 
     // The wheel over it scrolls its rows (the frequency axis stays).
     let freq = h.state().state.view.freq;
     h.event(Event::PointerMoved(plate.center()));
     settle(&mut h, 3);
-    assert_eq!(legend(&h).hover, Some(LegendHover::Plate));
+    assert_eq!(
+        hover(&h),
+        Some(PlateHover {
+            kind: PlateKind::Legend,
+            grip: false
+        })
+    );
     for _ in 0..2 {
         h.event(Event::MouseWheel {
             unit: egui::MouseWheelUnit::Line,
@@ -383,9 +467,9 @@ fn transfer_legend_many_curves() {
     step_until(&mut h, "scrolled", |a| a.state.view.tf.legend.first > 0);
     assert_eq!(h.state().state.view.freq, freq);
     h.event(Event::PointerMoved(egui::pos2(900.0, 700.0)));
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     settle(&mut h, 3);
-    assert_eq!(legend(&h).hover, None);
+    assert_eq!(hover(&h), None);
     dense_snapshot(&mut h, "transfer_legend_many_curves");
 
     // Dragged right and down: off its corner, the cursor not placed by the click.
@@ -395,39 +479,76 @@ fn transfer_legend_many_curves() {
         plate.center() + egui::vec2(400.0, 120.0),
     );
     step_until(&mut h, "moved", |a| {
-        let l = a.state.view.tf.legend;
-        l.x > 0.3 && l.y > 0.1
+        place(a).at.is_some_and(|[x, y]| x > 0.3 && y > 0.1)
     });
     assert_eq!(h.state().state.view.cursor_hz, None);
-    assert_eq!(legend(&h).corner(), None);
-    // Its grip dragged left: narrower.
-    let (_, grip) = h.state().legend_rects().expect("legend drawn");
-    let width = legend(&h).max_width;
+    // Its grip dragged out: larger text.
+    let (_, grip) = rects(&h).expect("legend drawn");
     drag(
         &mut h,
         grip.center(),
-        grip.center() - egui::vec2(150.0, 0.0),
+        grip.center() + egui::vec2(150.0, 60.0),
     );
-    step_until(&mut h, "narrower", |a| {
-        a.state.view.tf.legend.max_width < width
-    });
+    step_until(&mut h, "larger", |a| place(a).scale > 1.2);
+    // Double-clicked: back in its corner at the plot's text size.
+    let (plate, _) = rects(&h).expect("legend drawn");
+    double_click(&mut h, plate.center());
+    step_until(&mut h, "put back", |a| place(a) == PlatePlace::default());
+    assert_eq!(h.state().state.view.cursor_hz, None);
 
     // Snapped to a corner from the palette, in the light theme.
-    palette(&mut h, "legend: bottom-right");
-    assert_eq!(legend(&h).corner(), Some(LegendCorner::BottomRight));
+    palette(&mut h, "legend bottom-right");
+    assert_eq!(
+        place(h.state()).at,
+        Some(LegendCorner::BottomRight.position())
+    );
     palette(&mut h, "theme");
     step_until(&mut h, "light", |a| a.state.theme == ThemeName::Light);
     h.event(Event::PointerMoved(egui::pos2(900.0, 120.0)));
-    h.state_mut().state.toasts.clear();
+    h.state_mut().state.toasts.list.clear();
     settle(&mut h, 3);
     dense_snapshot(&mut h, "transfer_legend_many_curves_light");
 
-    // Hidden, and kept so.
-    palette(&mut h, "legend: hide");
+    // Hidden, and kept so; the pane keeps its place.
+    palette(&mut h, "hide legend");
     assert!(legend(&h).hidden);
-    assert!(h.state().legend_rects().is_none());
-    let kept = h.state().state.prefs.legend;
-    assert!(kept.hidden);
-    assert_eq!([kept.x, kept.y], [1.0, 1.0]);
-    assert!(kept.max_width < width);
+    assert!(rects(&h).is_none());
+    assert!(h.state().state.prefs.legend.hidden);
+    let kept = h.state().state.prefs.layout.panes.clone().expect("panes");
+    let v = kept.views.iter().find(|v| v.id == id).expect("pane kept");
+    assert_eq!(v.plates.legend.at, Some([1.0, 1.0]));
+}
+
+/// P on the transfer pane: min / max tracking marks the magnitude's peak (▲) and lists it on
+/// a plate in a bottom corner, clear of the legend.
+#[test]
+fn transfer_min_max_tracking() {
+    if !have_gpu("transfer_min_max_tracking") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press(Key::P);
+    step_until(&mut h, "min / max on", |a| a.state.view.tf.extremes);
+    {
+        let st = &h.state().state;
+        let s = ac2_ui::scenes::transfer(
+            st,
+            crate::common::pane(st, PaneKind::Transfer),
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 450.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        let list = s.extremes_list.expect("the list is up");
+        assert!(list.starts_with("max\n1  "), "{list}");
+    }
+    h.state_mut().state.toasts.list.clear();
+    snapshot(&mut h, "transfer_min_max");
 }

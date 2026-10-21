@@ -19,6 +19,68 @@ fn chooser(s: &AppState) -> Option<&ChoicePrompt> {
     }
 }
 
+/// First run: a session opened on an empty daemon asks what to measure with the chooser;
+/// Esc leaves the empty transfer pane naming Ctrl+M; Q down to the last pane keeps it and
+/// names the keys that bring more (N, Ctrl+M), never Tab.
+#[test]
+fn a_fresh_session_asks_what_to_measure() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    d.synced()?;
+    d.key("Shift+O");
+    d.send(Msg::Text("O".into()));
+    d.until("the device list", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.session.device_info().is_some())
+    })?;
+    d.key("Enter");
+    d.until("the session", |s| s.open_session().is_some())?;
+    d.until("the chooser", |s| chooser(s).is_some())?;
+    let c = chooser(&d.st).ok_or("the chooser")?;
+    assert_eq!(c.index, 0, "Transfer, on the transfer pane");
+    // The session is open by the time it asks: every kind can be made but math, which
+    // needs two curves first.
+    let blocked: Vec<bool> = c.choices.iter().map(|x| x.blocked.is_some()).collect();
+    assert_eq!(blocked, [false, false, false, false, false, true]);
+
+    d.key("Escape");
+    assert_eq!(d.st.overlay, Overlay::None);
+    assert!(d.st.measurements().is_empty());
+    let m = Chord::parse("Ctrl+M")?.label();
+    let hint =
+        d.st.empty_hint(d.st.layout.focus, &d.keys)
+            .map(|h| h.text)
+            .unwrap_or_default();
+    assert!(
+        hint.starts_with(&format!("No measurements — {m} → New measurement…")),
+        "{hint}"
+    );
+
+    let panes = d.st.layout.views.len();
+    for _ in 0..panes {
+        d.key("Q");
+    }
+    assert_eq!(d.st.layout.views.len(), 1);
+    let toast =
+        d.st.toasts
+            .list
+            .last()
+            .map(|t| t.text.clone())
+            .unwrap_or_default();
+    let n = Chord::parse("N")?.label();
+    assert_eq!(
+        toast,
+        format!("the last pane stays: {n} splits it · {m}: New measurement…")
+    );
+    assert!(!toast.contains("Tab"), "{toast}");
+    // What it names works: Ctrl+M opens the chooser again.
+    d.key("Ctrl+M");
+    assert!(chooser(&d.st).is_some());
+    d.key("Escape");
+    Ok(())
+}
+
 #[test]
 fn ctrl_m_makes_a_spectrum_from_an_empty_daemon() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;

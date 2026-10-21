@@ -2,7 +2,7 @@
 //! full-height column per window, shortest window left, each a bar filling bottom → top
 //! with the window's Leq — like a meter that fills — the window's name at the bottom, and
 //! on top, large, what a performer acts on: the state (`OVER`) and how loud the next stretch
-//! may be (`stay ≤ 101.5 dB`). The window's value is a small figure held still low on its
+//! may be (`stay ≤ 101.5 dB SPL`). The window's value is a small figure held still low on its
 //! bar, inked for what is behind it: the value of each window matters less on stage than
 //! whether to back off, a figure riding the bar's top draws the eye as it moves, and the
 //! meter's number above the windows stays the one big number.
@@ -19,7 +19,8 @@ use crate::format;
 use crate::primitives::{Color, FillRect, HAlign, Polyline, Rect, Stroke, VAlign};
 use crate::theme::{Theme, contrast_ratio};
 
-use super::{LeqTile, PlotChrome, TileKind, TileState, length, w_letter};
+use super::{LeqTile, PlotChrome, TileKind, TileState, length};
+use crate::view::Style;
 
 /// A judged scale starts this far below the lowest limit…
 pub const BELOW_LIMIT_DB: f64 = 30.0;
@@ -193,11 +194,11 @@ fn name_levels(tiles: &[&LeqTile]) -> Vec<(Vec<String>, bool)> {
     };
     let pre = |w: Weighting| match one {
         Some(_) => String::new(),
-        None => w_letter(w).to_string(),
+        None => w.letter().to_string(),
     };
     let sep = |w: Weighting| match one {
         Some(_) => String::new(),
-        None => format!("{} ", w_letter(w)),
+        None => format!("{} ", w.letter()),
     };
     // One weighting for every window: the caption names it once (`LAeq`), the columns only
     // their lengths; mixed weightings keep it on every name.
@@ -275,9 +276,9 @@ fn shared_level(all: &[&Vec<String>], width: f32, size: f32, floor: f32) -> usiz
 enum Row {
     /// `OVER`, `NEAR`, `ON COURSE — over in 12 min`, `OK`: large.
     State,
-    /// What to do: `stay ≤ 101.5 dB`, or how long until back under: large.
+    /// What to do: `stay ≤ 101.5 dB SPL`, or how long until back under: large.
     Instruction,
-    /// `limit 99.0 dB`: small and dim, the line on the bar says it too; `not calibrated`
+    /// `limit 99.0 dB SPL`: small and dim, the line on the bar says it too; `not calibrated`
     /// when nothing is judged.
     Limit,
 }
@@ -325,7 +326,7 @@ pub(super) fn detail_lines(t: &LeqTile, chrome: PlotChrome) -> [Vec<String>; 3] 
         Some(_) if !words => vec![],
         Some(l) => {
             let l = format::level(l);
-            vec![format!("limit {l} dB"), format!("limit {l}"), l]
+            vec![format!("limit {l} dB SPL"), format!("limit {l}"), l]
         }
         None if t.state == TileState::NotCalibrated => {
             vec!["not calibrated".to_string(), "uncal.".to_string()]
@@ -335,7 +336,7 @@ pub(super) fn detail_lines(t: &LeqTile, chrome: PlotChrome) -> [Vec<String>; 3] 
     let stay = |a: f64| {
         let a = format::level(a);
         vec![
-            format!("stay ≤ {a} dB"),
+            format!("stay ≤ {a} dB SPL"),
             format!("stay ≤ {a}"),
             format!("≤ {a}"),
         ]
@@ -464,9 +465,9 @@ pub(super) fn draw_columns(
     range: Range,
     area: Rect,
     stale: bool,
-    chrome: PlotChrome,
-    theme: &Theme,
+    style: Style,
 ) -> LeqColumns {
+    let Style { chrome, theme } = style;
     // Windows by length, then the peak limits (LCpeak, LAFmax) at the right: a peak is
     // not a window and does not belong among their lengths.
     let mut order: Vec<usize> = (0..tiles.len()).collect();
@@ -479,7 +480,7 @@ pub(super) fn draw_columns(
                 tiles[a]
                     .duration_s
                     .total_cmp(&tiles[b].duration_s)
-                    .then_with(|| w_letter(tiles[a].weighting).cmp(w_letter(tiles[b].weighting)))
+                    .then_with(|| tiles[a].weighting.letter().cmp(tiles[b].weighting.letter()))
             }
         })
     });
@@ -520,7 +521,7 @@ pub(super) fn draw_columns(
         .max()
         .unwrap_or(0)
         .max(5) as f32;
-    // The value carries its unit and weighting on its baseline (`dB(A)`), so the value's
+    // The value carries its unit and weighting on its baseline (`dB SPL (A)`), so the value's
     // size leaves room for the widest unit; the bar it sits on is narrower than the column.
     let unit_w1 = sorted
         .iter()
@@ -550,7 +551,7 @@ pub(super) fn draw_columns(
         sorted
             .iter()
             .find(|t| t.kind == TileKind::Window)
-            .map(|t| format!("L{}eq", w_letter(t.weighting)))
+            .map(|t| format!("L{}eq", t.weighting.letter()))
             .unwrap_or_default()
     });
 

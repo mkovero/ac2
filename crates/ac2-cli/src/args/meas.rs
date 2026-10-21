@@ -5,7 +5,9 @@ use std::str::FromStr;
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::{ColourArg, ResolutionArg};
-use crate::units::{Channel, Channels, Freq, MeasLevel, SampleCount, SpecAveragingArg, Time};
+use ac2_scene::unit_text::{
+    Channel, Channels, Freq, MeasLevel, SampleCount, SpecAveragingArg, Time,
+};
 
 /// Kind of a new measurement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -76,6 +78,75 @@ pub enum WindowArg {
     Flattop,
     /// Rectangular.
     Rect,
+}
+
+/// How spectrum and RTA curves are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum StyleArg {
+    /// The line alone.
+    Line,
+    /// The line over a faint area.
+    Fill,
+    /// Band power as bars (narrowband curves draw as a line).
+    Bars,
+}
+
+impl From<StyleArg> for ac2_proto::model::SpectrumStyle {
+    fn from(s: StyleArg) -> Self {
+        match s {
+            StyleArg::Line => Self::Line,
+            StyleArg::Fill => Self::Fill,
+            StyleArg::Bars => Self::Bars,
+        }
+    }
+}
+
+/// What is drawn over spectrum and RTA curves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PeakArg {
+    /// The live curve alone.
+    Off,
+    /// Each bin's highest level over the live curve.
+    Hold,
+    /// The live curve's highest peaks marked and listed (no hold line).
+    Track,
+}
+
+impl From<PeakArg> for ac2_proto::model::PeakMode {
+    fn from(p: PeakArg) -> Self {
+        match p {
+            PeakArg::Off => Self::Off,
+            PeakArg::Hold => Self::Hold,
+            PeakArg::Track => Self::Track,
+        }
+    }
+}
+
+/// Spectrograph colour map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ColoursArg {
+    /// Dark blue through green to yellow.
+    Viridis,
+    /// Black through purple and orange to pale yellow.
+    Magma,
+    /// Black through purple and red to pale yellow.
+    Inferno,
+    /// Dark blue through grey to yellow.
+    Cividis,
+    /// Black to light grey.
+    Grey,
+}
+
+impl From<ColoursArg> for ac2_proto::model::Colormap {
+    fn from(c: ColoursArg) -> Self {
+        match c {
+            ColoursArg::Viridis => Self::Viridis,
+            ColoursArg::Magma => Self::Magma,
+            ColoursArg::Inferno => Self::Inferno,
+            ColoursArg::Cividis => Self::Cividis,
+            ColoursArg::Grey => Self::Grey,
+        }
+    }
 }
 
 /// What a spectrum's levels are.
@@ -183,6 +254,23 @@ pub enum MeasCmd {
         /// or `auto` (by its id, the default). Not for a math channel (its measurement's).
         #[arg(long, value_name = "N|grey|auto")]
         colour: Option<ColourArg>,
+        /// Spectrum and RTA: how every client draws its curves (the app's B).
+        #[arg(long, value_enum)]
+        style: Option<StyleArg>,
+        /// Spectrum and RTA: peak hold, peak tracking, or neither (the app's P).
+        #[arg(long, value_enum)]
+        peak: Option<PeakArg>,
+        /// Spectrum and RTA: spectrograph history shown, seconds: 10, 30, 60 or 120 (the
+        /// app's Shift+B).
+        #[arg(long, value_name = "SECONDS")]
+        span: Option<u32>,
+        /// Spectrum and RTA: spectrograph colour map.
+        #[arg(long, value_enum)]
+        colours: Option<ColoursArg>,
+        /// Display offset of its live curves, dB (the app's O / J): levels as measured, drawn
+        /// shifted, wherever they are drawn (compared curves too). `0` removes it.
+        #[arg(long, value_name = "DB", allow_hyphen_values = true)]
+        offset: Option<f64>,
     },
     /// Make an SPL meter the rig's (kept by the rig across session loads, new sessions and
     /// restarts, and metering whatever session is open) or the session's again.
@@ -202,6 +290,11 @@ pub enum MeasCmd {
     Stop {
         /// Id or name.
         meas: MeasRef,
+    },
+    /// EQ what-if sets: predict a curve after an EQ before it is applied.
+    Eq {
+        #[command(subcommand)]
+        cmd: super::MeasEqCmd,
     },
     /// A measurement's own panes: the app shows them while it is selected (edited in the
     /// app).

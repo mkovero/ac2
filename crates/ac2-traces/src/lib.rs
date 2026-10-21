@@ -13,6 +13,7 @@ pub mod band_levels;
 pub mod band_log;
 pub mod check;
 pub mod columns;
+pub mod eq;
 pub mod ir_wav;
 pub mod math;
 pub mod meta;
@@ -23,7 +24,7 @@ pub mod session;
 pub mod smooth;
 pub mod text;
 
-pub use columns::{Columns, StoredTrace, frequencies, resample};
+pub use columns::{Columns, StoredTrace, resample};
 pub use ops::{OpError, average, capture_columns};
 pub use session::SessionError;
 pub use text::{ImportError, Imported, export_csv, import};

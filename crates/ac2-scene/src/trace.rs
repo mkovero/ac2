@@ -86,7 +86,7 @@ pub struct TfTrace<'a> {
     pub key: TraceKey,
     pub name: String,
     pub color: Color,
-    /// Column frequencies (from the frame's grid, [`crate::grid::column_frequencies`]).
+    /// Column frequencies (from the frame's grid, [`GridDef::centres`](ac2_proto::GridDef::centres)).
     pub freqs: &'a [f64],
     pub mag_db: &'a [f32],
     pub phase_deg: Option<&'a [f32]>,
@@ -340,6 +340,8 @@ pub struct DisplayTrace {
     pub smoothing: Option<Smoothing>,
     /// See [`TfTrace::note`].
     pub note: Option<String>,
+    /// An EQ set's filter curve: drawn dashed, so it does not read as a measured curve.
+    pub dashed: bool,
 }
 
 impl DisplayTrace {
@@ -546,6 +548,9 @@ pub fn display_trace(
         freshness: t.freshness,
         smoothing: t.smoothing,
         note: t.note.clone(),
+        dashed: t
+            .stored
+            .is_some_and(|d| matches!(d.meta.source, TraceSource::Eq { .. })),
     }
 }
 
@@ -592,8 +597,25 @@ fn columns_of_stored(t: &TfTrace<'_>, data: &TraceData) -> bool {
 /// change, so its unwrap, group delay and coherence opacity are worked out again only when
 /// its data, edits, reference or the coherence style change — not on every frame a live
 /// trace beside it moves. Entries not used by a scene are dropped. A clone starts empty.
+///
+/// It also keeps what min / max tracking marked on each curve in the previous scene, so the
+/// marks hold still from frame to frame ([`crate::spectrum::peaks::PeakTracker`]).
 #[derive(Default)]
-pub struct DisplayCache(Mutex<Vec<(CacheKey, DisplayTrace)>>);
+pub struct DisplayCache {
+    traces: Mutex<Vec<(CacheKey, DisplayTrace)>>,
+    extremes: Mutex<Vec<(TraceKey, ExtremeTrackers)>>,
+}
+
+/// A curve's peak and dip trackers.
+#[derive(Clone, Debug)]
+struct ExtremeTrackers {
+    max: crate::spectrum::peaks::PeakTracker,
+    min: crate::spectrum::peaks::PeakTracker,
+}
+
+/// Curves whose marks are kept: a few transfer panes' worth, so the list stays small
+/// while each pane's tracked curve keeps its marks.
+const EXTREME_CURVES: usize = 8;
 
 impl Clone for DisplayCache {
     fn clone(&self) -> Self {
@@ -603,7 +625,7 @@ impl Clone for DisplayCache {
 
 impl std::fmt::Debug for DisplayCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let n = self.0.lock().map_or(0, |v| v.len());
+        let n = self.traces.lock().map_or(0, |v| v.len());
         write!(f, "DisplayCache({n})")
     }
 }
@@ -611,11 +633,49 @@ impl std::fmt::Debug for DisplayCache {
 impl DisplayCache {
     /// Stored traces whose display math is kept.
     pub fn len(&self) -> usize {
-        self.0.lock().map_or(0, |v| v.len())
+        self.traces.lock().map_or(0, |v| v.len())
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// `key`'s marks chosen again from a scene's `max` peaks and `min` dips: (peaks, dips),
+    /// each in list order.
+    pub(crate) fn track_extremes(
+        &self,
+        key: TraceKey,
+        max: &[crate::spectrum::peaks::Peak],
+        min: &[crate::spectrum::peaks::Peak],
+    ) -> (
+        Vec<crate::spectrum::peaks::Peak>,
+        Vec<crate::spectrum::peaks::Peak>,
+    ) {
+        use crate::spectrum::peaks::{Extreme, PeakTracker};
+        let mut all = self.extremes.lock().unwrap_or_else(|e| e.into_inner());
+        let mut t = match all.iter().position(|(k, _)| *k == key) {
+            Some(i) => all.remove(i).1,
+            None => ExtremeTrackers {
+                max: PeakTracker::new(Extreme::Max),
+                min: PeakTracker::new(Extreme::Min),
+            },
+        };
+        t.max.update(max);
+        t.min.update(min);
+        let out = (t.max.peaks().to_vec(), t.min.peaks().to_vec());
+        all.push((key, t));
+        if all.len() > EXTREME_CURVES {
+            all.remove(0);
+        }
+        out
+    }
+
+    /// Forgets every curve's marks: tracking off, the next start chooses afresh.
+    pub(crate) fn clear_extremes(&self) {
+        self.extremes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 }
 
@@ -628,7 +688,7 @@ pub fn display_traces(
     style: &CoherenceStyle,
 ) -> (Option<PhaseReference>, Vec<DisplayTrace>) {
     let reference = resolve_reference(traces, wanted_reference);
-    let mut old = cache.0.lock().unwrap_or_else(|e| e.into_inner());
+    let mut old = cache.traces.lock().unwrap_or_else(|e| e.into_inner());
     let mut kept = Vec::new();
     let shown = traces
         .iter()
