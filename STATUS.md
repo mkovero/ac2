@@ -56,7 +56,9 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   / `ac2 cue` / `ac2 rig` (`docs/user-guide.md` *Rig measurements*, *OSC cues*, *Art-Net
   cues*; decisions R1–R4).
 - REW cross-check (`tools/crosscheck`, `docs/rigs/pupu.md`): electrical and Genelec at −30 dBFS
-  agree with REW and numpy (FAIL 0 on 8b87f49).
+  agree with REW and numpy (FAIL 0 on 8b87f49). The `visual` stage draws the export REW drew
+  through ac2-scene + ac2-plot (`tools/plotcheck`) and reads both pictures' curves back: ac2's
+  magnitude and phase sit within 0.25 px of the numbers, REW's within 0.6 px (xone, 2026-10-21).
 - Panes are a tiling tree (one pane at first start, N split, Shift+N turns a split, Alt+←/→ or
   a dragged gap sizes a pane, Q close, Tab / Shift+Tab step the measurement tree's rows into
   the focused pane, G / Shift+G step a pane's views, the IR's linear / log / ETC views among

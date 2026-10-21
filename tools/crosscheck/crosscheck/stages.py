@@ -468,6 +468,14 @@ def rew_import(rew, d: Path, stim_path: str, pname: str, speaker: bool, keep: bo
         ids["meas"] = mid
         rew.put(f"/measurements/{mid}", {"title": f"xc {pname} meas"})
         rew.fetch(mid, d, "meas", spl=speaker)
+        # REW's own pictures of this measurement, for the graph comparison (visual.py). An
+        # extra beside the exports: whatever goes wrong with it, the import stands.
+        try:
+            from . import visual
+            ids["graphs"] = visual.save_graphs(rew, mid, d, "meas", "SPL" if speaker else "dBFS")
+        except Exception as e:  # noqa: BLE001
+            ids["graphs_error"] = f"{type(e).__name__}: {e}"
+            print(f"REW: graphs not saved: {ids['graphs_error']}", flush=True)
         rid = imp("ref", False)
         made.append(rid)
         ids["ref"] = rid

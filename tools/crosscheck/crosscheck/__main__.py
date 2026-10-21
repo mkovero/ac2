@@ -1,4 +1,4 @@
-"""python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison,rew-import} —
+"""python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison,rew-import,visual} —
 see README.md."""
 from __future__ import annotations
 
@@ -62,6 +62,13 @@ def main(argv=None) -> int:
     cm.add_argument("--check", action="store_true", help="write nothing; exit 1 when the document is stale")
     cm.add_argument("--doc", type=Path, help="document (default: the suite's comparison.md)")
     cm.add_argument("--baselines", type=Path, help="baseline directory (default: the suite's baselines/)")
+
+    vi = sub.add_parser("visual", help="the graph comparison: draw each path's REW export with plotcheck (ac2's "
+                                       "scene and renderer) and read both pictures' curves back against the numbers "
+                                       "(offline; needs the plotcheck binary)")
+    vi.add_argument("run", type=Path, help="run directory with <path>/rew/meas_graph.json and the PNGs")
+    vi.add_argument("--plotcheck", help="path of the plotcheck binary (default: $PLOTCHECK, else on PATH)")
+    vi.add_argument("--out", type=Path, help="output directory (default: <run>/visual)")
 
     ri = sub.add_parser("rew-import", help="on the rig: redo a run's REW import (meas, ref, A / B) from its saved "
                                            "recordings; plays nothing")
@@ -212,6 +219,9 @@ def main(argv=None) -> int:
     if a.cmd == "rew-import":
         from . import rewimport
         return rewimport.main(a)
+    if a.cmd == "visual":
+        from . import visual
+        return visual.main(a)
     from . import run
     from .levels import PolicyError
     try:

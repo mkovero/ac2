@@ -41,7 +41,9 @@ The **rig** (pupu) runs `run` and `preflight`. It needs only numpy and JACK-Clie
   Alternatively, set `[ac2].cmd` in the rig file to a paired host over ssh.
 
 The **dev host** runs `analyse`. It needs numpy; matplotlib adds the plots and pytest runs
-the tests. scipy is not used.
+the tests. scipy is not used. `visual` (the graph comparison) also needs Pillow and the
+`plotcheck` binary (`cargo build -p ac2-plotcheck`; it renders through wgpu, lavapipe on a
+headless host), named by `--plotcheck` or `$PLOTCHECK`.
 
 ## The REW stimulus
 
@@ -390,6 +392,61 @@ calibration mapping, one table of checks per group, the data tables and the plot
     integration of REW's IR.
   - **ambient SPL**: Leq Z/A/C from ac2, REW and numpy; third-octave levels.
 
+## Graphs: ac2's drawing against REW's
+
+The numeric checks hold ac2's analysis against REW's. They say nothing about the picture:
+whether the curve the app draws sits where its axes say, and whether it is the curve REW
+draws of the same data. The `visual` stage puts the same numbers in front of both renderers
+and reads the curve back out of each picture.
+
+- **On the rig**, inside the REW import of each path (`run` and `rew-import` alike), after
+  the meas measurement's exports are fetched: REW's main graph is pointed at it, smoothing
+  `None`, axes 20 Hz – 20 kHz and 60 dB of level on 5 dB marks with the curve's maximum just
+  under the top, and saved by REW's own image capture (`Save main graph image`, 1200 px wide,
+  no legend, title or cursor, 1 px lines): `<path>/rew/meas_graph_allspl.png` (magnitude
+  alone) and `meas_graph_splphase.png` (magnitude and phase). `meas_graph.json` keeps the axes
+  and settings, and how many other measurements REW held (they would be drawn too). REW's
+  graph settings are put back afterwards. A failure here is noted in `rew_ids.json`
+  (`graphs_error`) and does not touch the import.
+- **On the host**, `python -m crosscheck visual runs/<UTC time>`: the export REW drew
+  (`meas_fr.json`, dBFS; `meas_fr_spl.json`, SPL, on the speaker path) is written as a text
+  table and drawn by `plotcheck` (`tools/plotcheck`: `ac2_scene::tf::transfer_scene` rendered
+  by `ac2_plot`, the two calls the app's transfer panes go through) at the same pixel size
+  and on the same axes, dark theme, legend hidden. Each picture's curve is then read back
+  by colour, one value per pixel column (grid, text and background are grey on both; the
+  trace is the only colour, and REW's phase is red beside its blue magnitude). REW's pixels
+  are mapped to values through the plot frame found from its grid; ac2's through the
+  geometry plotcheck writes beside its picture (axis ranges and pixel extents). Output in
+  `visual/`: `visual.md`, `results.json`, each pair side by side (`<path>/meas_<graph>_side_by_side.png`),
+  the ac2 renders and the table they were drawn from.
+
+Checks, per path, graph and quantity (`visual.<path>.<graph>.<mag|phase>.…`), in pixels:
+
+- `ac2_vs_data_px` — ac2's drawn curve against the numbers it was given, worst column. The
+  one the stage exists for. A pixel column spans a band of frequencies and a line has
+  width, so a curve is held against the span (min…max) of the data inside its column: the
+  residual is the distance to that span, 0 when the line passes through it.
+- `rew_vs_data_px` — REW's drawn curve against the same numbers. Validates the reader and
+  REW's own mapping; if both renderers miss the same way, the reader is suspect.
+- `ac2_vs_rew_px` — the two drawn curves against each other, in ac2's pixels.
+- `axis.{rew,ac2}_decade_px` — the 100 Hz / 1 kHz / 10 kHz lines each picture shows against
+  where its stated frequency axis puts them (ac2: the axis plotcheck reported; a drawing
+  that disagrees with its own geometry would pass the curve check and fail this one).
+
+Limits in `[visual]` of `tolerances.toml`, in pixels: a correctly drawn antialiased line reads
+back within half a pixel. `visual` exits 1 on a FAIL. Its results are not in the baselines
+(they are a property of the build's renderer, not of a take); the report is the evidence.
+
+Phase: REW's right axis can be neither set nor read through the API, and it does not follow
+the magnitude axis. The reader takes it from the picture: the right-axis labels are 60°
+apart and the one-glyph label among them is `0`; where a label's text sits against its value
+is calibrated on the left axis, whose labels stand beside grid rows of known value
+(`results.json`, `rew_phase_axis`). REW draws the phase dotted, so most of its columns are
+empty and the read-back is coarser than the magnitude's. ac2's phase pane is −180…180°,
+wrapped. Pixels are read at their centres; REW's own curves read a constant half pixel below
+its grid (its stroke conventions), which the `mean` beside each residual shows apart from
+noise.
+
 ## Baselines and compare
 
 `baselines/<rig>/<stage>-<level>dbfs.json` (`ambient.json` for the silent stage) hold a
@@ -665,6 +722,11 @@ only when `OSM_HARNESS` is set.
 
 ## Known gaps
 
+- **Graphs: REW's `allspl` draws every measurement REW holds**, so the pictures are taken
+  right after the meas import, before the ref; `meas_graph.json` says how many others
+  there were. REW's phase axis is read from the picture (above). The comparison covers
+  magnitude and wrapped phase on the transfer view; group delay, impulse response, RTA and
+  the SPL panes are not drawn side by side yet.
 - **REW live measurements need Pro**, so only the offline import runs. The fixtures'
   "REW live" set came from a GUI session. REW's sweep length is the file's: make another
   file for another length, or use `[stages.rew].repeats`.

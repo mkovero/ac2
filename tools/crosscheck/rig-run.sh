@@ -24,5 +24,11 @@ if [[ -f "$RUNS/$TS/manifest.json" ]]; then
   echo "report: $RUNS/$TS/report/report.md"
   # differences are for the operator to read, not a failed run
   "$PY_LOCAL" -m crosscheck compare "$RUNS/$TS" || true
+  # the graph comparison needs the plotcheck binary ($PLOTCHECK or on PATH; README)
+  if [[ -n "${PLOTCHECK:-}" || -n "$(command -v plotcheck)" ]]; then
+    "$PY_LOCAL" -m crosscheck visual "$RUNS/$TS" || true
+  else
+    echo "visual: skipped (no plotcheck binary; cargo build --release -p ac2-plotcheck, then PLOTCHECK=target/release/plotcheck)"
+  fi
 fi
 exit $rc

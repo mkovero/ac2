@@ -10,6 +10,8 @@ Run directory layout (written by `run.py`, read here):
     <path>/sine/results.json, noise.wav
     <path>/rew/rec.wav, play.json, {meas,ref}_{fr,fr_spl,ir,gd,dist,rt60,summary}.json
     <path>/rew/div_{fr,ir,gd,summary}.json, rew_ids.json   REW's A / B (meas ÷ ref), the ids used
+    <path>/rew/meas_graph_{allspl,splphase}.png, meas_graph.json   REW's own pictures of meas, the axes used (visual.py)
+    visual/<path>/…, visual/visual.md, results.json   the graph comparison (`visual`, on the host)
     rew_reimport.json             the REW import step redone later (`rew-import`): when, suite commit
     <path>/ac2_sweep/<variant>/trace.csv, events.jsonl, rec.wav, rec.json, plan.json
     <path>/ac2_tf/trace.csv, rec.wav, rec.json

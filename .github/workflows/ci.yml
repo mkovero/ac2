@@ -368,7 +368,7 @@ jobs:
           python-version: "3.12"
 
       - name: Python deps
-        run: pip install numpy JACK-Client pytest
+        run: pip install numpy JACK-Client pytest Pillow
 
       - name: build ac2, ac2d, ac2-jack-dut
         run: cargo build --locked -p ac2d -p ac2-cli -p ac2-jack-dut

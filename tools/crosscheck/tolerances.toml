@@ -110,6 +110,17 @@ delay_vs_osm_samples = { pass = 0.6, warn = 1.0 }  # OSM rounds to a sample (0.5
 spectrum_tone_db = { pass = 0.02, warn = 0.1 }  # bin-centred sine, ac2 peak-convention dBFS
 spectrum_noise_db = { pass = 0.1, warn = 0.3 }  # white noise per bin, power mean (OSM: Rayleigh mean converted)
 
+[visual]
+# The graph comparison (visual.py): a drawn curve read back from the picture against the
+# numbers it was drawn from, worst pixel column, in pixels of that picture. A line is drawn
+# with antialiasing about a pixel wide, so its read-back centre stands within half a pixel
+# of the value when the drawing is right; one pixel is a comfortable pass, two is visible.
+curve_px = [1.0, 2.0]
+# ac2's drawn curve against REW's, in ac2's pixels: both renderers' widths add up.
+cross_px = [1.5, 3.0]
+# The 100 Hz / 1 kHz / 10 kHz lines a picture shows against where its stated axis puts them.
+axis_px = [1.0, 2.0]
+
 [compare]
 # `compare` flags a judged value that moved more than max(step[unit], pass_fraction × pass
 # limit) from its baseline. The unit step is about the take-to-take scatter of a quiet band;

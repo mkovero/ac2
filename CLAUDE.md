@@ -47,7 +47,7 @@ app runs). Profiles in `.config/nextest.toml`:
 | `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare; golden images (feature `image`) |
 | `packaging/` | per-OS packaging scripts and icon, run by `.github/workflows/release.yml` |
 | `testing/` | per-platform tester guides; release binaries beside them are git-ignored |
-| `tools/` | `refgen` (golden vectors), `protocol` (Python cross-language fixtures), `release` (smoke scripts), `experiments` |
+| `tools/` | `refgen` (golden vectors), `protocol` (Python cross-language fixtures), `release` (smoke scripts), `crosscheck` (REW / OSM / steady-sine suite; `visual` = ac2's plot vs REW's of the same export), `plotcheck` (renders a response through ac2-scene + ac2-plot to PNG for it), `jack-dut`, `experiments` |
 
 ## Rules
 - No compatibility shims, no stringly-typed modes/commands (serde enums), no trait default
