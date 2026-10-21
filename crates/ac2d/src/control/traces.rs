@@ -607,7 +607,9 @@ impl Control {
         role: ImportRole,
         ir: Option<IrImport>,
         content: &[u8],
+        owner: TraceOwner,
     ) -> Result<ReplyBody, ProtoError> {
+        self.check_owner(owner)?;
         let imp = ac2_traces::import_file(content, format, role, ir).map_err(import_err)?;
         let name = imp.name.clone().unwrap_or_else(|| {
             std::path::Path::new(&file_name)
@@ -623,7 +625,7 @@ impl Control {
         let id = self.traces.alloc();
         let t = TraceMeta {
             id,
-            edit: meta::new_edit(id, name, None, TraceOwner::Imported),
+            edit: meta::new_edit(id, name, None, owner),
             kind: imp.kind,
             source: TraceSource::Imported {
                 file_name,
@@ -644,19 +646,22 @@ impl Control {
         Ok(self.add_trace(t, imp.grid, imp.columns, imp.sweep, imp.ir, None))
     }
 
-    /// `trace.target`: a target curve made from its parameters, filed as an import is.
+    /// `trace.target`: a target curve made from its parameters, filed under `owner` as an
+    /// import is.
     pub(super) fn trace_target(
         &mut self,
         curve: TargetCurve,
         name: String,
+        owner: TraceOwner,
     ) -> Result<ReplyBody, ProtoError> {
         meta::check_edit(&name, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        self.check_owner(owner)?;
         let (grid, columns) =
             ac2_traces::target::generate(&curve).map_err(|e| perr(ErrorCode::Invalid, e))?;
         let id = self.traces.alloc();
         let t = TraceMeta {
             id,
-            edit: meta::new_edit(id, name, None, TraceOwner::Imported),
+            edit: meta::new_edit(id, name, None, owner),
             kind: TraceKind::Target,
             source: TraceSource::Generated { curve },
             grid_id: grid.id(),

@@ -511,6 +511,7 @@ fn ratio_edit_capture_and_summation() {
         role: ImportRole::Trace,
         ir: None,
         content: Blob(text.into_bytes()),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }) {
         ReplyBody::Trace(t) => t,
         other => panic!("{other:?}"),
@@ -770,6 +771,7 @@ fn an_imported_impulse_response_filters_live_measurements() {
         role: ImportRole::Trace,
         ir: None,
         content: Blob(wav.clone()),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }) {
         ReplyBody::Trace(t) => t,
         other => panic!("{other:?}"),

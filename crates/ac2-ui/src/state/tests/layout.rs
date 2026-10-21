@@ -169,7 +169,9 @@ fn key_hints_use_the_live_keymap_and_never_show_on_stage() {
 #[test]
 fn pane_caption_shortens_to_the_selected_trace() {
     let mut t = T::new();
+    // Main L's capture: the transfer pane draws it, so its title names it.
     let mut a = stored(10, Some(3), 2);
+    a.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) };
     a.mic = Some(MicState {
         name: "MM1 34804".into(),
         curve: Some(curve_ref("90°")),
@@ -581,3 +583,28 @@ fn need_meas_names_the_keys_that_reach_a_measurement() {
 }
 
 mod tree;
+
+/// A pane's title names the selected trace only when the pane draws it: a curve under
+/// Imported (or under another measurement) is drawn on no transfer pane showing Main L,
+/// so naming it there read as if the pane had it applied.
+#[test]
+fn pane_caption_names_only_a_trace_the_pane_draws() {
+    let mut t = T::new();
+    let mut loud = stored(12, None, 2);
+    loud.edit.name = "loudness 85 → 100 phon".into();
+    loud.kind = TraceKind::Target;
+    t.conn(with_traces(vec![loud.clone()]));
+    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    let v = t.st.pane_caption_variants(t.pane(PaneKind::Transfer));
+    assert!(!v.iter().any(|c| c.contains("loudness")), "{v:?}");
+    let mut t = T::new();
+    loud.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) };
+    t.conn(with_traces(vec![loud]));
+    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    let v = t.st.pane_caption_variants(t.pane(PaneKind::Transfer));
+    assert!(
+        v.first()
+            .is_some_and(|c| c.starts_with("loudness 85 → 100 phon")),
+        "{v:?}"
+    );
+}

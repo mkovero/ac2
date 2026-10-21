@@ -126,6 +126,26 @@ impl Shared {
         }
     }
 
+    /// As the daemon: a trace is filed under a measurement that exists and is no math
+    /// channel, or under Imported.
+    fn check_trace_owner(&self, owner: TraceOwner) -> Result<(), ProtoError> {
+        let Some(meas) = owner.meas() else {
+            return Ok(());
+        };
+        let m = self.state.measurements.iter().find(|m| m.id == meas);
+        match m.map(|m| &m.config.kind) {
+            None => Err(err(
+                ErrorCode::NotFound,
+                format!("no measurement {meas} to file it under"),
+            )),
+            Some(ac2_proto::model::MeasKind::Math { .. }) => Err(err(
+                ErrorCode::Invalid,
+                format!("measurement {meas} is a math channel: math owns no traces"),
+            )),
+            Some(_) => Ok(()),
+        }
+    }
+
     pub(super) fn trace_capture(
         &mut self,
         meas: MeasId,
@@ -284,7 +304,9 @@ impl Shared {
         role: ImportRole,
         ir: Option<IrImport>,
         content: &[u8],
+        owner: TraceOwner,
     ) -> Result<ReplyBody, ProtoError> {
+        self.check_trace_owner(owner)?;
         let imp = ac2_traces::import_file(content, format, role, ir).map_err(|e| ProtoError {
             code: ErrorCode::Invalid,
             msg: e.to_string(),
@@ -299,7 +321,7 @@ impl Shared {
                 .map_or_else(|| file_name.clone(), |s| s.to_string_lossy().into_owned())
         });
         let id = self.alloc_trace();
-        let t = Self::new_meta(
+        let mut t = Self::new_meta(
             id,
             name,
             None,
@@ -313,6 +335,7 @@ impl Shared {
             &imp.grid,
             imp.delay.unwrap_or(Seconds(0.0)),
         );
+        t.edit.owner = owner;
         if let Some(sw) = imp.sweep {
             self.traces.sweeps.insert(id, sw);
         }
@@ -322,16 +345,18 @@ impl Shared {
         Ok(self.add_trace(t, imp.grid, imp.columns))
     }
 
-    /// `trace.target`, as the daemon: the same columns, filed as an import.
+    /// `trace.target`, as the daemon: the same columns, filed under `owner`.
     pub(super) fn trace_target(
         &mut self,
         curve: TargetCurve,
         name: String,
+        owner: TraceOwner,
     ) -> Result<ReplyBody, ProtoError> {
+        self.check_trace_owner(owner)?;
         let (grid, columns) =
             ac2_traces::target::generate(&curve).map_err(|e| err(ErrorCode::Invalid, e))?;
         let id = self.alloc_trace();
-        let t = Self::new_meta(
+        let mut t = Self::new_meta(
             id,
             name,
             None,
@@ -340,6 +365,7 @@ impl Shared {
             &grid,
             Seconds(0.0),
         );
+        t.edit.owner = owner;
         Ok(self.add_trace(t, grid, columns))
     }
 

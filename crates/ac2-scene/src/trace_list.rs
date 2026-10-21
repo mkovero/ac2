@@ -2,7 +2,7 @@
 //! whether it is shown, and its colour, in the order the selection keys step through.
 
 use ac2_proto::model::{
-    LfHarmonics, MathExpr, MathOp, SpecLevel, TraceKind, TraceMeta, TraceSource,
+    EqSet, LfHarmonics, MathExpr, MathOp, SpecLevel, TraceKind, TraceMeta, TraceSource,
 };
 use ac2_proto::units::TraceId;
 
@@ -67,6 +67,30 @@ pub fn run_settings(t: &TraceMeta) -> Option<String> {
     ))
 }
 
+/// What a curve that is not a measurement says after its kind: an EQ set's sections and
+/// state (`3 sections · bypassed`), a generated target's origin and, for a loudness shift,
+/// that it is no EQ target (`generated · perceived shift, not an EQ target`).
+pub fn curve_about(t: &TraceMeta, eq: Option<&EqSet>) -> Vec<String> {
+    match (&t.source, eq) {
+        (TraceSource::Eq { .. }, Some(set)) => {
+            let n = set.body.sections.len();
+            let mut v = vec![match n {
+                0 => "no sections".to_owned(),
+                1 => "1 section".to_owned(),
+                n => format!("{n} sections"),
+            }];
+            v.extend(crate::eq::set_tags(set));
+            v
+        }
+        (TraceSource::Generated { curve }, _) => {
+            let mut v = vec!["generated".to_owned()];
+            v.extend(crate::target_curve::note(curve).map(str::to_owned));
+            v
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// The list's order within a group, which the selection keys follow too: slotted traces by
 /// slot, then the rest in display order (oldest first).
 pub fn sort_key(t: &TraceMeta) -> (u8, u32, TraceId) {
@@ -81,6 +105,8 @@ pub struct TraceItem<'a> {
     pub has_data: bool,
     /// The colour it is drawn in ([`crate::families`]).
     pub color: Color,
+    /// An EQ set's curve: the set (its measurement holds it, not the trace).
+    pub eq: Option<&'a EqSet>,
 }
 
 /// One row of the list.
@@ -124,7 +150,9 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
             let kind = kind_name(t);
             let slot = t.edit.slot.map(|n| format!("slot {n}"));
             let hidden = (!t.edit.visible).then(|| "hidden".to_owned());
-            let locked = t.edit.locked.then(|| "locked".to_owned());
+            let about = curve_about(t, i.eq);
+            // An EQ curve is locked because its set is the truth: the set's state says more.
+            let locked = (t.edit.locked && i.eq.is_none()).then(|| "locked".to_owned());
             let no_data = (!i.has_data).then(|| "no data yet".to_owned());
             let delay = format::trace_delay(t.edit.delay_nudge.0);
             let smooth = smoothing_text(t);
@@ -141,6 +169,7 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
             // Dropped from the end first: what the eye and the colour already say last.
             let parts = |extra: bool| -> String {
                 let mut v = vec![kind.to_owned()];
+                v.extend(about.clone());
                 v.extend(level.clone());
                 v.extend(run.clone());
                 v.extend(slot.clone());
@@ -157,6 +186,9 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
             let mut details = vec![parts(true), parts(false)];
             if slot.is_some() && hidden.is_some() {
                 details.push(format!("{kind} · {}", slot.clone().unwrap_or_default()));
+            }
+            if let Some(first) = about.first() {
+                details.push(format!("{kind} · {first}"));
             }
             details.push(kind.to_owned());
             details.dedup();
@@ -411,21 +443,25 @@ mod tests {
                 meta: &sweep_b,
                 has_data: true,
                 color: Color::from_rgba8([10, 20, 30, 255]),
+                eq: None,
             },
             TraceItem {
                 meta: &slot3,
                 has_data: true,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                eq: None,
             },
             TraceItem {
                 meta: &sweep_a,
                 has_data: false,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                eq: None,
             },
             TraceItem {
                 meta: &target,
                 has_data: true,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                eq: None,
             },
         ];
         let rows = trace_rows(&items, Some(TraceId(7)));
@@ -477,6 +513,7 @@ mod tests {
                 meta: &t,
                 has_data: true,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                eq: None,
             }],
             None,
         );
@@ -502,6 +539,7 @@ mod tests {
                 meta: &t,
                 has_data: true,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                eq: None,
             }],
             None,
         );
@@ -531,5 +569,98 @@ mod tests {
             "capture · slot 1 · hidden · delay −0.25 ms from arrival · 1/6 oct"
         );
         assert_eq!(d[1], "capture · slot 1 · hidden");
+    }
+
+    #[test]
+    fn an_eq_set_and_a_generated_curve_say_what_they_are_under_their_name() {
+        let mut eq_curve = meta(
+            9,
+            "EQ 1",
+            None,
+            TraceKind::Transfer,
+            TraceSource::Eq {
+                meas: MeasId(1),
+                set: EqSetId(1),
+                rev: 5,
+            },
+        );
+        eq_curve.edit.locked = true;
+        let section = EqSection {
+            enabled: true,
+            shape: EqShape::Gain { gain: Db(-1.0) },
+        };
+        let mut set = EqSet {
+            id: EqSetId(1),
+            rev: 5,
+            body: EqBody {
+                name: "EQ 1".into(),
+                realisation: EqRealisation::Analog,
+                peak_q: PeakQ::HalfGain,
+                enabled: true,
+                sections: vec![section; 3],
+            },
+            in_console: None,
+            trace: TraceId(9),
+        };
+        let loud = meta(
+            3,
+            "loudness 85 → 100 phon",
+            None,
+            TraceKind::Target,
+            TraceSource::Generated {
+                curve: TargetCurve::loudness_shift(),
+            },
+        );
+        let flat = meta(
+            4,
+            "flat",
+            None,
+            TraceKind::Target,
+            TraceSource::Generated {
+                curve: TargetCurve::Flat,
+            },
+        );
+        let rows = |set: &EqSet| {
+            let items: Vec<TraceItem<'_>> = [(&eq_curve, Some(set)), (&loud, None), (&flat, None)]
+                .into_iter()
+                .map(|(meta, eq)| TraceItem {
+                    meta,
+                    has_data: true,
+                    color: Color::from_rgba8([1, 2, 3, 255]),
+                    eq,
+                })
+                .collect();
+            trace_rows(&items, None)
+                .into_iter()
+                .map(|r| (r.name, r.details))
+                .collect::<Vec<_>>()
+        };
+        let r = rows(&set);
+        let of = |n: &str| {
+            r.iter()
+                .find(|x| x.0 == n)
+                .map(|x| x.1.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(of("EQ 1"), ["EQ · 3 sections", "EQ"]);
+        assert_eq!(
+            of("loudness 85 → 100 phon"),
+            [
+                "target · generated · perceived shift, not an EQ target",
+                "target · generated",
+                "target"
+            ]
+        );
+        assert_eq!(of("flat"), ["target · generated", "target"]);
+        set.body.enabled = false;
+        set.body.sections.truncate(1);
+        let r = rows(&set);
+        assert_eq!(
+            r.iter()
+                .find(|x| x.0 == "EQ 1")
+                .map(|x| x.1.clone())
+                .unwrap_or_default(),
+            ["EQ · 1 section · bypassed", "EQ · 1 section", "EQ"]
+        );
     }
 }

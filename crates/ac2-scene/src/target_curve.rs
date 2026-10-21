@@ -126,6 +126,12 @@ pub fn name(c: &TargetCurve) -> String {
     }
 }
 
+/// The toast after a target is added: where it is listed, `target flat added under TF 1`,
+/// `… added under Imported`.
+pub fn added(name: &str, owner: Option<&str>) -> String {
+    format!("target {name} added under {}", owner.unwrap_or("Imported"))
+}
+
 /// Decimals a phon level needs: none for a whole number, one otherwise.
 fn needed(v: f64) -> usize {
     usize::from((v - v.round()).abs() > 1e-9)

@@ -26,6 +26,8 @@ pub struct IrTarget {
     pub path: PathBuf,
     pub role: ImportRole,
     pub header: WavHeader,
+    /// Where the trace is listed.
+    pub owner: ac2_proto::model::TraceOwner,
 }
 
 /// Reads the header of `path`: `None` when the file does not start like a WAV / RF64 file
@@ -204,6 +206,7 @@ pub fn request(f: &Form) -> Result<Request, String> {
     Ok(Request::Import {
         path: target.path.clone(),
         role: target.role,
+        owner: target.owner,
         ir: Some(IrImport {
             channel,
             window,

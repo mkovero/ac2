@@ -100,6 +100,9 @@ pub enum TraceCmd {
         /// IR: columns per octave of the response: 1/12, 1/24, 1/48 (default) or 1/96.
         #[arg(long)]
         resolution: Option<ResolutionArg>,
+        /// The measurement to file it under (default: the imported group, under none).
+        #[arg(long, value_name = "MEAS")]
+        meas: Option<MeasRef>,
     },
     /// Add a built-in target curve: flat, a house tilt, or the loudness shift between two
     /// listening levels (a perceived shift to compare with, not a response to equalise to).
@@ -109,6 +112,9 @@ pub enum TraceCmd {
         /// Name (default: the curve's, e.g. `tilt −1.0 dB/oct @ 1 kHz`).
         #[arg(long)]
         name: Option<String>,
+        /// The measurement it is for, listed under it (default: the imported group).
+        #[arg(long, value_name = "MEAS", global = true)]
+        meas: Option<MeasRef>,
     },
     /// Export a trace: its columns as ac2 CSV, or its impulse response as a mono 32-bit
     /// float WAV (sweeps, transfer captures, imported IRs).

@@ -12,11 +12,15 @@ use crate::state::*;
 const EQ_EDIT: &str = "EQ edit";
 
 impl AppState {
-    /// Alt+E / `EQ…`: the editor on the transfer measurement, making `EQ 1` when it has no
-    /// set yet.
+    /// Alt+E / `EQ…`: the editor on the selected EQ set's row, else on the transfer
+    /// measurement, making `EQ 1` when it has no set yet.
     pub(in crate::state) fn open_eq(&mut self, out: &mut Vec<Request>) {
         if matches!(self.overlay, Overlay::Eq(_)) {
             self.overlay = Overlay::None;
+            return;
+        }
+        if let Some((meas, set)) = self.selected_eq_set() {
+            self.open_eq_on(meas, set);
             return;
         }
         let Some(m) = self.need_tf() else {
@@ -27,6 +31,49 @@ impl AppState {
             self.eq_new_set(&m, out);
         }
         self.overlay = Overlay::Eq(Box::new(EqEditor::new(m.id, set)));
+    }
+
+    /// The EQ set whose curve's row the keys act on.
+    pub(in crate::state) fn selected_eq_set(&self) -> Option<(MeasId, EqSetId)> {
+        let t = self
+            .selected_trace_meta()
+            .filter(|_| self.keys_on_trace())?;
+        match t.source {
+            ac2_proto::model::TraceSource::Eq { meas, set, .. } => Some((meas, set)),
+            _ => None,
+        }
+    }
+
+    /// The editor on set `set` of `meas` (an EQ set's row double-clicked, or Alt+E on it).
+    pub(in crate::state) fn open_eq_on(&mut self, meas: MeasId, set: EqSetId) {
+        self.overlay = Overlay::Eq(Box::new(EqEditor::new(meas, Some(set))));
+    }
+
+    /// Delete on an EQ set's row: the confirmation naming its curve and the curves after
+    /// it, which go with it.
+    pub(in crate::state) fn ask_delete_eq_set(&mut self, meas: MeasId, set: EqSetId) {
+        let Some(m) = self.meas(meas).cloned() else {
+            return;
+        };
+        let Some(s) = m.eq.iter().find(|s| s.id == set) else {
+            return;
+        };
+        let predictions: Vec<String> = self
+            .measurements()
+            .into_iter()
+            .filter(|x| match &x.config.kind {
+                MeasKind::Math { config } => ac2_scene::eq::prediction(&config.expr)
+                    .is_some_and(|(pm, ps, _)| pm == meas && ps == set),
+                _ => false,
+            })
+            .map(|x| x.config.name.clone())
+            .collect();
+        let confirm = ac2_scene::eq::delete_set_confirm(s, &m.config.name, &predictions);
+        self.overlay = Overlay::Delete(Box::new(DeletePrompt {
+            target: DeleteTarget::EqSet { meas, set },
+            label: s.body.name.clone(),
+            confirm,
+        }));
     }
 
     fn eq_new_set(&mut self, m: &Measurement, out: &mut Vec<Request>) {

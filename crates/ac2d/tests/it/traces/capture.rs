@@ -151,6 +151,7 @@ fn capture_average_math_export_import() {
         role: ImportRole::Trace,
         ir: None,
         content,
+        owner: ac2_proto::model::TraceOwner::Imported,
     }));
     assert_eq!(imp.grid_id, aligned.grid_id);
     assert_eq!(imp.edit.name, "aligned");
@@ -176,6 +177,7 @@ fn capture_average_math_export_import() {
         role: ImportRole::Target,
         ir: None,
         content: Blob(fixture("house_curve.txt")),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }));
     assert_eq!(tgt.kind, TraceKind::Target);
     assert_eq!(tgt.edit.name, "house_curve");
@@ -222,6 +224,7 @@ fn capture_average_math_export_import() {
             role: ImportRole::Trace,
             ir: None,
             content: Blob(b"* REW\n20 1\n30 2\n25 3\n".to_vec()),
+            owner: ac2_proto::model::TraceOwner::Imported,
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid);
@@ -255,6 +258,7 @@ fn old_sweep_export_imports_as_transfer_with_its_delay() {
         role: ImportRole::Trace,
         ir: None,
         content: Blob(fixture("ac2-v1-sweep1.csv")),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }));
     assert_eq!(t.kind, TraceKind::Transfer);
     assert!((t.delay.0 * 1000.0 - 3.333_333_333_333_333_5).abs() < 1e-12);
@@ -353,6 +357,7 @@ fn transfer_capture_keeps_its_ir() {
         role: ImportRole::Trace,
         ir: None,
         content,
+        owner: ac2_proto::model::TraceOwner::Imported,
     }));
     assert_eq!(data(c, back.id).ir, Some(air));
 

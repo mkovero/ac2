@@ -498,6 +498,12 @@ impl AppState {
             }),
             PromptKind::ImportFile(role) => {
                 let path = std::path::PathBuf::from(text.trim());
+                // A target is for the system being tuned: listed with its measurement. A
+                // measured file is of a system ac2 does not know: Imported, until moved.
+                let owner = match role {
+                    ImportRole::Target => self.curve_owner(),
+                    ImportRole::Trace => ac2_proto::model::TraceOwner::Imported,
+                };
                 if path.as_os_str().is_empty() {
                     Err("type a file path".to_string())
                 } else {
@@ -505,12 +511,18 @@ impl AppState {
                     crate::ir_import_dialog::probe(&path).map(|header| match header {
                         Some(header) => {
                             ir_form = Some(crate::ir_import_dialog::form(
-                                crate::ir_import_dialog::IrTarget { path, role, header },
+                                crate::ir_import_dialog::IrTarget {
+                                    path,
+                                    role,
+                                    header,
+                                    owner,
+                                },
                             ));
                         }
                         None => out.push(Request::Import {
                             path,
                             role,
+                            owner,
                             ir: None,
                         }),
                     })

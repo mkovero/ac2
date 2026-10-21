@@ -56,9 +56,15 @@ pub fn expression(expr: &MathExpr, name_of: impl Fn(Operand) -> String) -> Strin
 }
 
 /// The name a new math channel gets: the expression, `Main L ÷ Sub`; an average of
-/// positions is `Average of 4`.
+/// positions is `Average of 4`; a curve through an EQ set is its prediction, named as the
+/// EQ editor names one: `Main L after EQ 1`.
 pub fn default_name(expr: &MathExpr, name_of: impl Fn(Operand) -> String) -> String {
     match expr {
+        MathExpr::Binary {
+            a,
+            op: MathOp::Multiply,
+            b: b @ Operand::Eq { .. },
+        } => format!("{} after {}", name_of(*a), name_of(*b)),
         MathExpr::Binary { .. } | MathExpr::Align { .. } => expression(expr, name_of),
         MathExpr::Average { of, .. } => format!("Average of {}", of.len()),
     }

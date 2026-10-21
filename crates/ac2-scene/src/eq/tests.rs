@@ -167,3 +167,21 @@ fn basis_and_set_tags() {
         EqBasis::Whole
     );
 }
+
+#[test]
+fn deleting_a_set_names_the_curves_that_go_with_it() {
+    let c = delete_set_confirm(&set(true, None), "Main L", &["Main L after EQ 1".into()]);
+    assert_eq!(c.title, "Delete EQ 1?");
+    assert_eq!(
+        c.lines,
+        [
+            "EQ set of Main L · 1 section",
+            "Its filter curve goes with it, and the curves after it: Main L after EQ 1. It \
+             cannot be undone."
+        ]
+    );
+    assert_eq!(
+        delete_set_confirm(&set(true, None), "Main L", &[]).lines[1],
+        "Its filter curve goes with it; it cannot be undone."
+    );
+}

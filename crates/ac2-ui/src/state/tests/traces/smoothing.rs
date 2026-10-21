@@ -135,9 +135,14 @@ fn smoothing_keys_change_a_selected_slot() {
         scale: LevelScale::Dbfs,
         level: ac2_proto::model::SpecLevel::Tone,
     };
+    // Sub's: the spectrum pane draws it.
+    spec.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(2) };
     let mut locked = stored(12, Some(5), 2);
     locked.edit.locked = true;
-    t.conn(with_traces(vec![stored(10, Some(3), 2), spec, locked]));
+    // Main L's capture: the transfer pane draws it, so its title names it.
+    let mut slot = stored(10, Some(3), 2);
+    slot.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) };
+    t.conn(with_traces(vec![slot, spec, locked]));
     // A click on slot 3 selects it: K changes its trace, the caption says so.
     t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
     assert_eq!(t.st.selected_trace, Some(TraceId(10)));
@@ -168,6 +173,7 @@ fn smoothing_keys_change_a_selected_slot() {
             // Its other edits are sent unchanged.
             let mut want = stored(10, Some(3), 2).edit;
             want.smoothing = edit.smoothing;
+            want.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) };
             assert_eq!(*edit, want);
         }
         other => panic!("{other:?}"),

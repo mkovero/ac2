@@ -68,11 +68,13 @@ pub use panes::pane_export::{PaneExport, pane_export_name};
 mod link;
 use link::Pending;
 use panes::meas_layout::LayoutQueue;
+mod drop_math;
 mod new_meas;
 mod panes;
 mod queries;
 pub(crate) mod sessions_impl;
 mod target;
+pub use drop_math::DropPlan;
 pub use sessions_impl::SessionsMsg;
 mod eq_impl;
 mod stimulus;
@@ -602,7 +604,12 @@ impl AppState {
                 if self.selected_trace != Some(id) {
                     self.select_trace_row(id);
                 }
-                if let Ok(t) = self.trace_meta(id) {
+                // An EQ set's curve is named by its set: a double click opens the set.
+                if let Ok(ac2_proto::model::TraceSource::Eq { meas, set, .. }) =
+                    self.trace_meta(id).map(|t| t.source)
+                {
+                    self.open_eq_on(meas, set);
+                } else if let Ok(t) = self.trace_meta(id) {
                     self.prompt(PromptKind::TraceRename(id), t.edit.name.clone());
                 }
             }

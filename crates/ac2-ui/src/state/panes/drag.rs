@@ -3,6 +3,9 @@
 //! one of its sides, the pane splits there first, as N would, and the new half shows it.
 //! With Shift held, the item is drawn compared over the pane, which keeps what it shows.
 //!
+//! Dropped on another row of the list instead, it opens the math dialog combining the two
+//! (`crate::state::drop_math`).
+//!
 //! A drop is a guest pick: it never brings the dropped measurement's own panes, and an edit
 //! of the panes afterwards still goes to the measurement whose row was chosen
 //! ([`crate::state::panes::meas_layout`]).
@@ -32,6 +35,8 @@ pub struct RowDrag {
     pub item: TreeKey,
     /// The pane under the pointer, if any.
     pub over: Option<DropTarget>,
+    /// The list row under the pointer, if any: a drop there combines the two.
+    pub onto: Option<TreeKey>,
     /// Shift is held: the drop compares.
     pub compare: bool,
     /// Esc cancelled it: nothing happens on release.
@@ -48,6 +53,8 @@ pub enum DragMsg {
         target: Option<DropTarget>,
         compare: bool,
     },
+    /// The pointer over a row of the list (`None`: off the list's rows).
+    OverRow(Option<TreeKey>),
     /// The button released: dropped where the pointer last was over, comparing with Shift.
     Drop { compare: bool },
 }
@@ -131,9 +138,16 @@ impl AppState {
         self.row_drag.is_some()
     }
 
-    /// The label beside the pointer: `FOH SPL → pane 2`; `None` off the panes.
+    /// The label beside the pointer: `FOH SPL → pane 2`, over a row the math channel the
+    /// drop opens (or why the two do not combine); `None` elsewhere.
     pub fn drag_label(&self) -> Option<String> {
         let d = self.row_drag()?;
+        if let Some(onto) = d.onto {
+            return Some(match self.drop_math_plan(d.item, onto) {
+                Ok(p) => p.label,
+                Err(why) => why,
+            });
+        }
         let spot = self.drop_spot(d.over?, d.compare)?;
         Some(pane_edit::drop_label(&self.row_name(d.item)?, spot))
     }
@@ -156,6 +170,7 @@ impl AppState {
                     self.row_drag = Some(RowDrag {
                         item,
                         over: None,
+                        onto: None,
                         compare: false,
                         cancelled: false,
                     });
@@ -165,14 +180,29 @@ impl AppState {
                 if let Some(d) = self.row_drag.as_mut().filter(|d| !d.cancelled) {
                     d.over = target;
                     d.compare = compare;
+                    if target.is_some() {
+                        d.onto = None;
+                    }
+                }
+            }
+            DragMsg::OverRow(row) => {
+                if let Some(d) = self.row_drag.as_mut().filter(|d| !d.cancelled) {
+                    // Its own row is where the drag started: nothing to combine with.
+                    d.onto = row.filter(|r| *r != d.item && !r.is_heading());
+                    if d.onto.is_some() {
+                        d.over = None;
+                    }
                 }
             }
             DragMsg::Drop { compare } => {
                 if let Some(d) = self.row_drag.take()
                     && !d.cancelled
-                    && let Some(t) = d.over
                 {
-                    self.drop_row(d.item, t, compare, out);
+                    if let Some(onto) = d.onto {
+                        self.drop_math(d.item, onto);
+                    } else if let Some(t) = d.over {
+                        self.drop_row(d.item, t, compare, out);
+                    }
                 }
             }
         }
@@ -184,6 +214,7 @@ impl AppState {
             Some(d) if !d.cancelled => {
                 d.cancelled = true;
                 d.over = None;
+                d.onto = None;
                 true
             }
             _ => false,

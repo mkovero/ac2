@@ -285,6 +285,7 @@ fn slow_a_burst_of_edits_is_one_write() {
         role: ImportRole::Target,
         ir: None,
         content: Blob(b"20 -3.0\n1000 0.0\n20000 -6.0\n".to_vec()),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }) {
         ReplyBody::Trace(t) => t,
         other => panic!("{other:?}"),

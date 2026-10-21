@@ -553,6 +553,9 @@ there already and an Imported trace is not compared, so anything else is refused
 toast that says why. Two SPL meters side by side: add a pane (**N**) and
 drop the other meter on it without **Shift**. **Esc** cancels the drag; a drop outside the panes does nothing.
 
+A row dropped onto **another row** of the list combines the two in a math channel: see
+[Dropping a row on another](#dropping-a-row-on-another).
+
 #### Undo and redo (Ctrl+Z, Ctrl+Shift+Z)
 
 **Ctrl+Z** takes back the last change to the panes and **Ctrl+Shift+Z** does it again; the
@@ -987,8 +990,8 @@ transfer legend row say the smoothing.
 - **RTA** bands already are fractional-octave: **K** says so and changes nothing.
 - On a **live measurement** the keys act on the focused pane's measurement; nothing
   restarts.
-- On a **stored trace**: select it (**V** / **Shift+V**, or click it), then **K**. The pane
-  title names it (`Sweep 2: smoothing off`). Back to live: **V** past the last trace, click
+- On a **stored trace**: select it (**V** / **Shift+V**, or click it), then **K**. A pane
+  that draws it names it in its title (`Sweep 2: smoothing off`). Back to live: **V** past the last trace, click
   the trace again, palette *Deselect the stored trace*, or select a measurement.
 - CLI: `ac2 trace smooth <trace> 1/12` (`1/3` … `1/48`, `12`, `none`); a transfer or sweep
   trace keeps its mode unless `--phase` or `--magnitude-only`.
@@ -1067,6 +1070,34 @@ every client (and `ac2 meas list`) sees it.
 stored trace, `(live)` or `(stored, S2)`), the **operator**, **B** (curves of A's kind). The
 name follows the expression (`Main L ÷ Sub`) until you type one. **Enter** creates and
 starts it. *Edit measurement…* on a selected math channel reopens the dialog.
+
+#### Dropping a row on another
+
+Drag a row of the measurement list onto another row (a live curve, a stored trace, an EQ
+set, a target or loudness shift, from any measurement) and the math dialog opens with them
+filled in: **A** the row dropped on, **B** the row dragged, the operator the reading B asks
+for, the name following the expression. While dragging, the row under the pointer is
+shaded with a dashed edge and the label says what the drop makes (`math channel: Main L S1
+× loudness 85 → 100 phon`). Nothing is made until **Enter**: the operator, operands and
+name can still be changed, and **Esc** drops it.
+
+| B (the dragged row) | operator | reads |
+|---|---|---|
+| an EQ set | **×** | the curve after the set (`Main L S1 after EQ 1`, as **P** names it) |
+| a loudness shift | **×** | the curve as heard at the other level |
+| a target (flat, tilt, a loaded file) | **÷** | how far the curve is from the target |
+| another transfer function (live or stored, any measurement) | **÷** | A relative to B |
+| a spectrum or RTA on one of its kind | **−** | the dB difference |
+| a stored transfer function on a spectrum or RTA | **×** | A heard through B |
+
+A measured curve dropped on an EQ set, a loudness shift or a target works the same way
+round: the curve is A. The channel is listed under A's measurement; one with an EQ set as
+B under the set's measurement, as **P**'s predictions are. Two rows that do not combine are refused with a
+toast saying why, in the dialog's words, and nothing opens: `Sub is a spectrum: it does
+not combine with Main L S1, a transfer function`; `EQ 1 is an EQ set: it filters transfer
+functions, and Sub is a spectrum`; `a spectrum is filtered by a stored transfer function:
+capture Main L first`; a math channel as an operand: `… is a math channel: capture it to
+combine it with another curve`.
 
 Transfer functions combine as complex values (magnitude and phase):
 
@@ -1188,6 +1219,15 @@ the set is a model of what you dial in.
 
 **Alt+E** on a transfer pane (palette **EQ…**) opens the editor over the plot, making `EQ 1`
 with a prediction of the live curve when the measurement has none.
+
+Each set is a row of the measurement list under its measurement, its grey line saying what
+it holds: `EQ · 3 sections`, `EQ · 1 section · bypassed`, `EQ · 2 sections · in console (rev
+4)`. A **double click** on the row (or **Alt+E** with it selected) opens the editor on that
+set; **Delete** asks first (`Delete EQ 1?`, naming the predictions that go with it) and
+deletes the set. In the math dialog a set is a **B** operand (`EQ 1 (EQ set of Main L)`):
+**A × EQ 1** is the same channel **P** makes. Drop the set's row on a curve's row to open
+that ([Dropping a row on another](#dropping-a-row-on-another)), on any curve of its own
+measurement or another's.
 
 | key | does |
 |---|---|
@@ -1420,9 +1460,11 @@ On the selected trace when its curve is on the transfer pane (else the live meas
 | palette *Mic curve on the selected trace…* | corrects it ([below](#mic-curve-on-a-stored-trace)) |
 
 A stored trace keeps only its offset from the arrival it was measured at, so no absolute
-delay is shown. A target curve takes an offset only; a locked trace refuses. The pane title
-names the selected trace and the plot marks it (a bar and thicker swatch on its legend row,
-a line twice as wide).
+delay is shown. A target curve takes an offset only; a locked trace refuses. A pane whose
+plot draws the selected trace names it in its title and marks it (a bar and thicker swatch
+on its legend row, a line twice as wide). A title names only what its pane draws: a trace
+selected under another measurement or under Imported, hidden, or without an impulse
+response on an IR view is not named there.
 
 ### Spreading curves apart (display offset)
 
@@ -1482,16 +1524,28 @@ as a level difference. A locked trace keeps its offset.
 
 | row | what it is | CLI |
 |---|---|---|
-| Load a file… | a curve from another analyzer or typed by hand (`freq dB` per line) | `ac2 trace import house.txt --target` |
-| Flat | 0 dB at every frequency | `ac2 trace target flat` |
+| Load a file… | a curve from another analyzer or typed by hand (`freq dB` per line) | `ac2 trace import house.txt --target --meas "Main L"` |
+| Flat | 0 dB at every frequency | `ac2 trace target flat --meas "Main L"` |
 | House tilt… | a slope in dB/oct through 0 dB at a pivot, optionally with an LF shelf | `ac2 trace target tilt --slope -1dB/oct --pivot 1kHz [--shelf 6dB --shelf-corner 100Hz]` |
 | Loudness shift… | how the balance seems to change between two listening levels | `ac2 trace target loudness --from 85phon --to 100phon` |
 
 Each row also has its own palette entry (*Flat target*, *House tilt target…*, *Loudness
 shift…*, *Load target file…*). The daemon computes the curve and stores it as a target
-trace, magnitude only, in the Imported group; it is saved with the session like any other
-trace. Its name says its parameters: `flat`, `tilt −1.0 dB/oct @ 1 kHz`,
+trace, magnitude only; it is saved with the session like any other trace. Its name says
+its parameters: `flat`, `tilt −1.0 dB/oct @ 1 kHz`,
 `tilt −1.0 dB/oct @ 1 kHz, LF +6.0 dB @ 100 Hz`, `loudness 85 → 100 phon`.
+
+**A target belongs to a measurement.** It is listed under the measurement it was made for,
+and drawn on the panes that show that measurement: the selected row's measurement (a
+transfer function or sweep), else the one the transfer pane shows; with neither, Imported.
+The toast says where: `target flat added under Main L`. From the CLI, `--meas` names the
+measurement (by name or id; without it the target goes under Imported, and *Move to
+measurement…* files it later). The row's grey line says what it is: `target · generated`,
+and for a loudness shift `target · generated · perceived shift, not an EQ target`.
+
+To read a curve against a target, or through a loudness shift, drop the target's row on
+the curve's row: the math dialog opens with `curve ÷ target` (for a loudness shift,
+`curve × loudness 85 → 100 phon`). See [Math channels](#math-channels).
 
 - **House tilt** (default −1.0 dB/oct about 1 kHz, no shelf): slope −6 … 6 dB/oct, pivot
   20 Hz … 20 kHz. The **LF shelf** (±20 dB, corner 20 Hz … 1 kHz) is a second-order low

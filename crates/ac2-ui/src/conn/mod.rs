@@ -234,6 +234,8 @@ pub enum Request {
     Import {
         path: std::path::PathBuf,
         role: ImportRole,
+        /// Where it is listed.
+        owner: ac2_proto::model::TraceOwner,
         ir: Option<ac2_proto::model::IrImport>,
     },
     /// Read a local mic-curve file and `cal.curve_import` it as a curve of `mic` (the label

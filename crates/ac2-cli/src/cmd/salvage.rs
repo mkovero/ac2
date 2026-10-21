@@ -416,6 +416,7 @@ async fn restore_trace(
             role,
             ir: None,
             content: Blob(content),
+            owner: ac2_proto::model::TraceOwner::Imported,
         })
         .await
         .map_err(CliError::from)

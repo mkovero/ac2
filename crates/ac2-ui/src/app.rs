@@ -665,9 +665,11 @@ impl Touches {
             Msg::ToastsHeld(_)
             | Msg::DismissToast(_)
             | Msg::Rasterizer(_)
-            | Msg::RowDrag(crate::state::DragMsg::Start(_) | crate::state::DragMsg::Over { .. }) => {
-                Self::Toasts
-            }
+            | Msg::RowDrag(
+                crate::state::DragMsg::Start(_)
+                | crate::state::DragMsg::Over { .. }
+                | crate::state::DragMsg::OverRow(_),
+            ) => Self::Toasts,
             Msg::Plate(_) | Msg::LegendScroll { .. } => Self::Plates,
             Msg::LeqStrip(..) => Self::Spl,
             Msg::Conn(e) => match **e {

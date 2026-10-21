@@ -589,7 +589,6 @@ fn measurement_tree_and_delete_choices() {
     step_until(&mut h, "four stored traces with data", |a| {
         a.state.traces.len() == 4
     });
-    // The sweep-less spectrum's group folded with its arrow.
     let names: Vec<String> = h
         .state()
         .state
@@ -597,7 +596,16 @@ fn measurement_tree_and_delete_choices() {
         .iter()
         .map(|r| r.name.clone())
         .collect();
-    assert!(names.iter().any(|n| n == "Imported"), "{names:?}");
+    // The target was loaded with Delay tower on screen: it is listed under it, and nothing
+    // is left under Imported.
+    let at = names.iter().position(|n| n == "house_curve");
+    assert_eq!(
+        at.map(|i| names[i - 1].as_str()),
+        Some("Delay tower S3"),
+        "{names:?}"
+    );
+    assert!(!names.iter().any(|n| n == "Imported"), "{names:?}");
+    // Delay tower's group folded with its arrow.
     h.state_mut().dispatch(ac2_ui::state::Msg::ToggleGroup(
         ac2_proto::model::TraceOwner::Meas { meas: MeasId(2) },
     ));

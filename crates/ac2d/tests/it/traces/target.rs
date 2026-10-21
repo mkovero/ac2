@@ -1,6 +1,6 @@
-//! Generated target curves: made from their parameters, filed as imports, refused outside
-//! their ranges, and kept with their parameters through a session save and load.
-
+//! Generated target curves: made from their parameters, filed under the measurement they
+//! were made for (or Imported), refused outside their ranges, and kept with their parameters
+//! and owner through a session save and load.
 use super::*;
 
 #[test]
@@ -18,6 +18,7 @@ fn a_generated_target_is_a_target_trace_with_its_parameters_and_survives_a_reloa
     let t = trace(c.ok(Command::TraceTarget {
         curve,
         name: "house".into(),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }));
     assert_eq!(t.kind, TraceKind::Target);
     assert_eq!(t.source, TraceSource::Generated { curve });
@@ -32,6 +33,7 @@ fn a_generated_target_is_a_target_trace_with_its_parameters_and_survives_a_reloa
     let loud = trace(c.ok(Command::TraceTarget {
         curve: TargetCurve::loudness_shift(),
         name: "loudness 85 → 100 phon".into(),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }));
     assert!(data(c, loud.id).mag_db[0] > 7.0);
 
@@ -42,6 +44,7 @@ fn a_generated_target_is_a_target_trace_with_its_parameters_and_survives_a_reloa
                 to: Phon(140.0),
             },
             name: "too loud".into(),
+            owner: ac2_proto::model::TraceOwner::Imported,
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
@@ -66,4 +69,53 @@ fn a_generated_target_is_a_target_trace_with_its_parameters_and_survives_a_reloa
         .expect("reloaded");
     assert_eq!(back.source, TraceSource::Generated { curve });
     assert_eq!(data(c, back.id).mag_db, d.mag_db);
+}
+
+#[test]
+fn a_target_is_filed_under_the_measurement_it_was_made_for_and_stays_there() {
+    let mut r = rig("target_owned");
+    let c = &mut r.c;
+    let main = TraceOwner::Meas { meas: MeasId(1) };
+    let loud = trace(c.ok(Command::TraceTarget {
+        curve: TargetCurve::loudness_shift(),
+        name: "loudness 85 → 100 phon".into(),
+        owner: main,
+    }));
+    assert_eq!(loud.edit.owner, main);
+    // A file loaded as a target goes under the same measurement.
+    let file = trace(c.ok(Command::TraceImport {
+        file_name: "house.txt".into(),
+        format: ImportFormat::Auto,
+        role: ImportRole::Target,
+        ir: None,
+        content: Blob(b"20 6\n1000 0\n20000 -6\n".to_vec()),
+        owner: main,
+    }));
+    assert_eq!(file.edit.owner, main);
+    // A measurement that does not exist is refused.
+    let e = c
+        .call(Command::TraceTarget {
+            curve: TargetCurve::Flat,
+            name: "flat".into(),
+            owner: TraceOwner::Meas { meas: MeasId(99) },
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
+    assert!(e.msg.contains("no measurement 99"), "{e:?}");
+    c.ok(Command::FileSave {
+        session: SessionRef::Name {
+            name: "owned".into(),
+        },
+        overwrite: false,
+    });
+    c.ok(Command::FileLoad {
+        session: SessionRef::Name {
+            name: "owned".into(),
+        },
+        discard: true,
+    });
+    let back = traces(c);
+    let owner_of = |n: &str| back.iter().find(|t| t.edit.name == n).map(|t| t.edit.owner);
+    assert_eq!(owner_of("loudness 85 → 100 phon"), Some(main));
+    assert_eq!(owner_of("house"), Some(main));
 }

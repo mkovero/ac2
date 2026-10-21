@@ -36,10 +36,43 @@ impl AppState {
         self.command(id, &keymap, out);
     }
 
-    /// Asks the daemon for `curve` as a target trace, named as the trace list names it.
+    /// Asks the daemon for `curve` as a target trace, named as the trace list names it,
+    /// under the measurement the operator is on ([`Self::curve_owner`]).
     pub(super) fn add_target(&mut self, curve: TargetCurve, out: &mut Vec<Request>) {
         let name = name(&curve);
-        let what = format!("target {name} added");
-        self.call(out, Command::TraceTarget { curve, name }, what);
+        let owner = self.curve_owner();
+        let what = ac2_scene::target_curve::added(&name, self.owner_name(owner).as_deref());
+        self.call(out, Command::TraceTarget { curve, name, owner }, what);
+    }
+
+    /// Where a new target curve is listed: the transfer or sweep measurement of the selected
+    /// row (a trace's, a math channel's owner), else the one the transfer pane shows, else
+    /// Imported. A target is read against that system's curves, so it belongs with them and
+    /// is drawn in its panes; a curve under Imported is drawn in none.
+    pub(super) fn curve_owner(&self) -> TraceOwner {
+        let fits = |id: &MeasId| {
+            self.meas(*id).is_some_and(|m| {
+                matches!(
+                    m.config.kind,
+                    MeasKind::Transfer { .. } | MeasKind::Sweep { .. }
+                )
+            })
+        };
+        self.selected_group()
+            .and_then(TraceOwner::meas)
+            .filter(fits)
+            .or_else(|| {
+                let shown = self.kind_meas(PaneKind::Transfer);
+                self.group_of_shown(shown).filter(fits)
+            })
+            .map_or(TraceOwner::Imported, |meas| TraceOwner::Meas { meas })
+    }
+
+    /// The name of the measurement `owner` is, `None` for Imported.
+    pub(super) fn owner_name(&self, owner: TraceOwner) -> Option<String> {
+        owner
+            .meas()
+            .and_then(|id| self.meas(id))
+            .map(|m| m.config.name.clone())
     }
 }

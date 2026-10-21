@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 61`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 62`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -127,8 +127,8 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.update` | `trace`, `edit: TraceEdit` (full replacement) | `trace` | |
 | `trace.delete` | `trace` | `ack` | |
 | `trace.average` | `traces`, `method`, `reference`, `name` | `trace` | |
-| `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| ir_wav \| auto`, `role: trace \| target`, `ir: IrImport \| nil`, `content: bin` | `trace` | |
-| `trace.target` | `curve: TargetCurve`, `name` | `trace` | |
+| `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| ir_wav \| auto`, `role: trace \| target`, `ir: IrImport \| nil`, `content: bin`, `owner: TraceOwner` | `trace` | |
+| `trace.target` | `curve: TargetCurve`, `name`, `owner: TraceOwner` | `trace` | |
 | `trace.export` | `trace`, `format: ac2_csv \| ir_wav` | `export` (`file_name`, `content: bin`) | |
 | `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
@@ -1073,7 +1073,10 @@ display edits and are never applied to the stored data.
   `mic_curve_not_applied` — the export named a mic curve applied after capture, the
   columns are without it; `ir_truncated` — an impulse response longer than 65536 samples,
   cut around its peak). `ir_file` (`IrFile` \| nil) are the facts of an imported impulse
-  response (§7.6). A refused file is `invalid` with
+  response (§7.6). The trace is listed under `owner` (`TraceOwner`: a measurement, or
+  `imported`): a target loaded for the system being tuned belongs with that system's
+  measurement; `not_found` for a measurement that does not exist, `invalid` for a math
+  channel (math owns no traces). A refused file is `invalid` with
   `detail: {type: import, line (1-based) | nil, problem: ImportProblem}`.
   `ImportProblem`: `not_text`, `no_data`, `bad_number`, `column_count`, `too_few_columns`,
   `not_ascending`, `out_of_range`, `too_many_rows` (> 65536, IR rows too),
@@ -1082,7 +1085,7 @@ display edits and are never applied to the stored data.
   `no_impulse` (every sample zero or not finite, fewer than 2), `bad_options` (above, or
   a gate not finite, `pre` < 0 or `post` ≤ 0).
 - `trace.target`: a target curve the daemon generates instead of reading a file, as a
-  `kind: target` trace under `imported`, named `name`, `source.generated` {`curve`}, `delay`
+  `kind: target` trace under `owner` (as `trace.import`'s), named `name`, `source.generated` {`curve`}, `delay`
   0. `TargetCurve` (tagged by `shape`): `flat` (0 dB); `tilt` {`slope_db_per_oct`,
   `pivot: Hz`, `lf_shelf: LfShelf | nil`} — `slope · log₂(f / pivot)` dB plus, with
   `LfShelf` {`gain: Db`, `corner: Hz`}, the cookbook second-order low shelf at slope S = 1

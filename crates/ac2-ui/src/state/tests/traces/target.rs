@@ -17,13 +17,19 @@ fn pick(t: &mut T, downs: usize) -> Vec<Request> {
 
 /// The one `trace.target` in `r`: its curve, name and toast text.
 fn target(r: &[Request]) -> (&TargetCurve, &str, &str) {
+    let (curve, name, what, _) = target_owned(r);
+    (curve, name, what)
+}
+
+/// The one `trace.target` in `r`, with where it is listed.
+fn target_owned(r: &[Request]) -> (&TargetCurve, &str, &str, TraceOwner) {
     match r {
         [
             Request::Call {
-                cmd: Command::TraceTarget { curve, name },
+                cmd: Command::TraceTarget { curve, name, owner },
                 what,
             },
-        ] => (curve, name, what),
+        ] => (curve, name, what, *owner),
         r => panic!("{r:?}"),
     }
 }
@@ -63,7 +69,7 @@ fn flat_is_added_at_once() {
     let (curve, name, what) = target(&r);
     assert_eq!(*curve, TargetCurve::Flat);
     assert_eq!(name, "flat");
-    assert_eq!(what, "target flat added");
+    assert_eq!(what, "target flat added under Main L");
     assert_eq!(t.st.overlay, Overlay::None);
 }
 
@@ -152,4 +158,34 @@ fn the_palette_reaches_each_curve_without_the_chooser() {
         &t.st.overlay,
         Overlay::Prompt(p) if p.kind == PromptKind::ImportFile(ImportRole::Target)
     ));
+}
+
+#[test]
+fn a_curve_goes_under_the_measurement_the_operator_is_on() {
+    let mut t = T::new();
+    // Nothing selected: the measurement the transfer pane shows.
+    let r = pick(&mut t, 1);
+    assert_eq!(target_owned(&r).3, TraceOwner::Meas { meas: MeasId(1) });
+    // A transfer measurement selected: under it, whatever the pane shows.
+    let mut s = daemon_state();
+    s.measurements.push(meas(3, "Main R", transfer()));
+    t.conn(mirror(s));
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    let r = pick(&mut t, 1);
+    let (_, _, what, owner) = target_owned(&r);
+    assert_eq!(owner, TraceOwner::Meas { meas: MeasId(3) });
+    assert_eq!(what, "target flat added under Main R");
+    // A spectrum selected owns no target: the transfer pane's measurement does (from the
+    // palette: the focused pane now shows the spectrum, where Z is not bound).
+    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    let r = t.st.update(Msg::Command(CommandId::TargetFlat), &t.keys);
+    assert_eq!(target_owned(&r).3, TraceOwner::Meas { meas: MeasId(1) });
+    // No transfer measurement at all: Imported, as a file without one.
+    let mut s = daemon_state();
+    s.measurements.retain(|m| m.id == MeasId(2));
+    t.conn(mirror(s));
+    let r = t.st.update(Msg::Command(CommandId::TargetFlat), &t.keys);
+    let (_, _, what, owner) = target_owned(&r);
+    assert_eq!(owner, TraceOwner::Imported);
+    assert_eq!(what, "target flat added under Imported");
 }

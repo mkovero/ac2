@@ -119,6 +119,7 @@ pub fn commands() -> Vec<Command> {
                 resolution: Resolution::FortyEighth,
             }),
             content: Blob(b"RIFF".to_vec()),
+            owner: crate::model::TraceOwner::Imported,
         },
         Command::TraceExport {
             trace: TraceId(8),
@@ -373,6 +374,7 @@ pub fn commands() -> Vec<Command> {
             }),
         },
         name: "tilt −1.0 dB/oct @ 1 kHz, LF +6.0 dB @ 100 Hz".into(),
+        owner: crate::model::TraceOwner::Meas { meas: MeasId(4) },
     }])
     .collect()
 }

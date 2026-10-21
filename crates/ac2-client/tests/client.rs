@@ -804,6 +804,7 @@ async fn traces_and_sessions_against_the_fake() -> R {
             role: ImportRole::Trace,
             ir: None,
             content: csv,
+            owner: ac2_proto::model::TraceOwner::Imported,
         })
         .await?
     {
@@ -819,6 +820,7 @@ async fn traces_and_sessions_against_the_fake() -> R {
             role: ImportRole::Trace,
             ir: None,
             content: Blob(b"1 2\n".to_vec()),
+            owner: ac2_proto::model::TraceOwner::Imported,
         })
         .await;
     assert_eq!(bad.err().and_then(|e| e.code()), Some(ErrorCode::Invalid));

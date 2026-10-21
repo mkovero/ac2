@@ -22,7 +22,8 @@ fn z_loads_a_target_curve_file() {
     let r = t.key("Enter");
     assert!(matches!(
         r.as_slice(),
-        [Request::Import { path, role: ImportRole::Target, ir: None }] if *path == house
+        [Request::Import { path, role: ImportRole::Target, ir: None, owner }]
+            if *path == house && *owner == TraceOwner::Meas { meas: MeasId(1) }
     ));
     assert_eq!(t.st.overlay, Overlay::None);
 }
@@ -86,7 +87,7 @@ fn a_wav_import_asks_its_channel_time_zero_gate_and_resolution() {
     assert!(
         matches!(
             r.as_slice(),
-            [Request::Import { path, role: ImportRole::Trace, ir: Some(ir) }]
+            [Request::Import { path, role: ImportRole::Trace, ir: Some(ir), owner: TraceOwner::Imported }]
                 if *path == wav && *ir == ac2_proto::model::IrImport { channel: Some(0), ..Default::default() }
         ),
         "{r:?}"

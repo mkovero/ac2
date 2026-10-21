@@ -375,6 +375,33 @@ pub fn editor_title(meas_name: &str) -> String {
     format!("EQ · {meas_name}")
 }
 
+/// The confirmation before an EQ set is deleted from its row: the set, what goes with it
+/// (its curve and every curve after it), and the keys.
+pub fn delete_set_confirm(
+    set: &EqSet,
+    meas_name: &str,
+    predictions: &[String],
+) -> crate::trace_list::DeleteConfirm {
+    let n = set.body.sections.len();
+    let mut lines = vec![format!(
+        "EQ set of {meas_name} · {n} section{}",
+        if n == 1 { "" } else { "s" }
+    )];
+    lines.push(match predictions {
+        [] => "Its filter curve goes with it; it cannot be undone.".to_owned(),
+        ps => format!(
+            "Its filter curve goes with it, and the curves after it: {}. It cannot be undone.",
+            ps.join(", ")
+        ),
+    });
+    crate::trace_list::DeleteConfirm {
+        title: format!("Delete {}?", set.body.name),
+        lines,
+        hint: "Delete or Backspace deletes it · Esc or N keeps it".to_owned(),
+        refused: false,
+    }
+}
+
 /// The parts of a prediction (`curve × EQ`): its measurement, set and curve.
 pub fn prediction(expr: &MathExpr) -> Option<(MeasId, EqSetId, &Operand)> {
     match expr {

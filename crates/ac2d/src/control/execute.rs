@@ -402,8 +402,9 @@ impl Control {
                 role,
                 ir,
                 content,
-            } => self.trace_import(file_name, format, role, ir, &content.0),
-            Command::TraceTarget { curve, name } => self.trace_target(curve, name),
+                owner,
+            } => self.trace_import(file_name, format, role, ir, &content.0, owner),
+            Command::TraceTarget { curve, name, owner } => self.trace_target(curve, name, owner),
             Command::TraceExport { trace, format } => self.trace_export(trace, format),
             Command::TraceMicCurve { trace, curve } => self.trace_mic_curve(trace, curve),
 

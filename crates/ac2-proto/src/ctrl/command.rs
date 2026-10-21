@@ -10,7 +10,7 @@ use crate::model::{
     DelayReference, DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId,
     MicLoading, OscMessage, OutputSetup, OwnedTraces, PaneLayout, RecordRequest, RecordingRef,
-    ReplayPace, SessionConfig, SessionRef, SplLogWhich, TargetCurve, TraceEdit,
+    ReplayPace, SessionConfig, SessionRef, SplLogWhich, TargetCurve, TraceEdit, TraceOwner,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, Rev, Seconds, TraceId, TransferId,
@@ -404,16 +404,22 @@ pub enum Command {
         ir: Option<IrImport>,
         /// File content.
         content: Blob,
+        /// The measurement it is listed under, or the imported group: a target loaded for
+        /// the system being tuned belongs with that system's measurement. Refused for a
+        /// math channel or a measurement that does not exist.
+        owner: TraceOwner,
     },
-    /// Generate a target curve as a new target trace, imported group (`trace.import` of a
-    /// target, without a file). Refused (`invalid`) for parameters
-    /// [`TargetCurve::check`] refuses.
+    /// Generate a target curve as a new target trace (`trace.import` of a target, without a
+    /// file), listed under `owner`. Refused (`invalid`) for parameters
+    /// [`TargetCurve::check`] refuses, and for an owner `trace.import` refuses.
     #[serde(rename = "trace.target")]
     TraceTarget {
         /// The curve.
         curve: TargetCurve,
         /// The trace's name.
         name: String,
+        /// The measurement it is listed under, or the imported group.
+        owner: TraceOwner,
     },
     /// Apply a curve of the mic library to a stored trace, or remove the one applied
     /// (`curve: None`). A display edit: the stored columns stay as measured

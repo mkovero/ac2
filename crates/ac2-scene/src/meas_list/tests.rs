@@ -398,6 +398,7 @@ fn rows(
                 meta,
                 has_data: true,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                eq: None,
             })
             .collect(),
         collapsed,
@@ -426,6 +427,7 @@ fn compared_rows_are_marked() {
                 meta,
                 has_data: true,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                eq: None,
             })
             .collect(),
         collapsed: &none,
@@ -535,6 +537,7 @@ fn a_live_row_selected_is_marked_and_its_header_outlined() {
                 meta,
                 has_data: true,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                eq: None,
             })
             .collect(),
         collapsed: &none,
@@ -628,6 +631,7 @@ fn hidden_curves_read_hidden_and_a_sweep_says_it_plays() {
                 meta,
                 has_data: true,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                eq: None,
             })
             .collect(),
         collapsed: &none,

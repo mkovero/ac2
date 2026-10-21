@@ -47,6 +47,7 @@ pub mod legend;
 pub mod leq;
 pub mod leq_preset;
 pub mod math;
+pub mod math_drop;
 pub mod meas_list;
 pub mod meter;
 pub mod meter_leq;

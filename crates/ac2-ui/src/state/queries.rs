@@ -141,11 +141,9 @@ impl AppState {
         if !matches!(pane, PaneKind::Transfer | PaneKind::Spectrum) {
             return None;
         }
-        let t = match self.selected_trace_meta() {
-            Some(t) if SmoothTarget::Trace(t.clone()).pane() == pane => {
-                SmoothTarget::Trace(t.clone())
-            }
-            _ => SmoothTarget::Meas(self.pane_meas(id)?.clone()),
+        let t = match self.caption_trace(id) {
+            Some(t) => SmoothTarget::Trace(t.clone()),
+            None => SmoothTarget::Meas(self.pane_meas(id)?.clone()),
         };
         if let SmoothTarget::Trace(_) = &t
             && t.kind() == Smoothable::No
@@ -180,9 +178,7 @@ impl AppState {
             |t: &TraceMeta| ac2_scene::trace::curve_note(t.mic.as_ref(), t.mic_curve.as_deref());
         match pane {
             PaneKind::Transfer | PaneKind::Spectrum => {
-                if let Some(t) = self.selected_trace_meta()
-                    && SmoothTarget::Trace(t.clone()).pane() == pane
-                {
+                if let Some(t) = self.caption_trace(id) {
                     return stored(t);
                 }
                 let m = self.pane_meas(id)?;
@@ -204,6 +200,26 @@ impl AppState {
         }
     }
 
+    /// The selected stored trace, when pane `id` (a transfer or spectrum pane) draws it: of
+    /// the pane's group or compared into it, and shown. A title names only what its pane
+    /// draws: a curve selected under another measurement, under Imported, or hidden would
+    /// read as part of this plot.
+    pub fn caption_trace(&self, id: PaneId) -> Option<&TraceMeta> {
+        let kind = self.layout.kind(id);
+        if !matches!(kind, PaneKind::Transfer | PaneKind::Spectrum) {
+            return None;
+        }
+        let shown = self.pane_meas(id);
+        // The IR view draws a stored trace only through its impulse response.
+        if kind == PaneKind::Transfer && self.pane_modes(id).transfer.ir().is_some() {
+            return self.stored_ir(shown).map(|d| &d.meta);
+        }
+        self.selected_trace_meta().filter(|t| {
+            SmoothTarget::Trace((*t).clone()).pane() == kind
+                && (self.on_pane(kind, t, shown) || self.trace_compared_on(kind, t, shown))
+        })
+    }
+
     /// The pane's title caption: smoothing and mic curve, `smoothing 1/6 oct · mic curve:
     /// MM1 34804 90°`.
     pub fn pane_caption(&self, id: PaneId) -> Option<String> {
@@ -217,13 +233,7 @@ impl AppState {
         let pane = self.layout.kind(id);
         let smoothing = self.smoothing_caption(id);
         let curve = self.mic_curve_caption(id);
-        let trace = self
-            .selected_trace_meta()
-            .filter(|t| {
-                matches!(pane, PaneKind::Transfer | PaneKind::Spectrum)
-                    && SmoothTarget::Trace((*t).clone()).pane() == pane
-            })
-            .map(trace_label);
+        let trace = self.caption_trace(id).map(trace_label);
         let mut v: Vec<String> = Vec::new();
         let parts: Vec<&String> = [&smoothing, &curve].into_iter().flatten().collect();
         if !parts.is_empty() {
@@ -313,6 +323,12 @@ impl AppState {
                 meta,
                 has_data: self.traces.contains_key(&meta.id),
                 color: colours.trace(meta.id),
+                eq: match meta.source {
+                    ac2_proto::model::TraceSource::Eq { meas, set, .. } => self
+                        .meas(meas)
+                        .and_then(|m| m.eq.iter().find(|s| s.id == set)),
+                    _ => None,
+                },
             })
             .collect()
     }

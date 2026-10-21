@@ -1,7 +1,7 @@
 //! Ownership from the CLI against a real daemon (`docs/design/measurement-tree.md`): a
 //! sweep measurement made with `meas new sweep` waits (no job), traces move with `trace
 //! move`, a math channel is filed with `--under`, and `meas rm` of a measurement that owns
-//! traces asks for `--keep-traces` or `--delete-traces`.
+//! traces asks for `--keep-traces` or `--delete-traces`; a target is filed with `--meas`.
 #![allow(clippy::unwrap_used)]
 
 use ac2_cli::{Cli, Out, run_reporting};
@@ -188,5 +188,33 @@ async fn owners_from_the_cli() {
         .map(|m| m["config"]["name"].as_str().unwrap().to_owned())
         .collect();
     assert_eq!(names, ["Genelec 1 m"]);
+
+    // A target curve made or loaded for a measurement is listed under it with `--meas`.
+    let (code, text) = run(
+        &ep,
+        &["trace", "target", "loudness", "--meas", "Genelec 1 m"],
+    )
+    .await;
+    assert_eq!(code, 0, "{text}");
+    let t = document(&text);
+    assert_eq!(t["edit"]["owner"]["meas"], 2, "{t}");
+    assert_eq!(t["edit"]["name"], "loudness 85 → 100 phon");
+    let (code, text) = run(
+        &ep,
+        &[
+            "trace",
+            "import",
+            file.to_str().unwrap(),
+            "--target",
+            "--meas",
+            "Genelec 1 m",
+        ],
+    )
+    .await;
+    assert_eq!(code, 0, "{text}");
+    assert_eq!(document(&text)["edit"]["owner"]["meas"], 2);
+    let (code, text) = run(&ep, &["trace", "target", "flat", "--meas", "nope"]).await;
+    assert_ne!(code, 0);
+    assert!(text.contains("nope"), "{text}");
     h.shutdown();
 }

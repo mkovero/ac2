@@ -367,6 +367,8 @@ fn trace_keys_act_on_the_selected_trace() {
     locked.edit.locked = true;
     let mut target = stored(15, None, 2);
     target.kind = TraceKind::Target;
+    // Main L's target: the transfer pane draws it, so its title names it.
+    target.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) };
     let mut spec = stored(16, None, 2);
     spec.kind = TraceKind::Spectrum {
         scale: LevelScale::Dbfs,
@@ -467,9 +469,10 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
     t.key("V");
     assert_eq!(t.st.selected_trace, Some(TraceId(14)));
     assert_eq!(shown(&t), Some(14));
+    // The transfer pane draws Main L's group, not Sweep 1's: its title does not name t14.
     assert_eq!(
         t.st.pane_caption(t.pane(PaneKind::Transfer)).as_deref(),
-        Some("t14: smoothing off")
+        Some("smoothing off")
     );
     // Back to live: the sweep pane keeps the sweep selected last.
     t.key("End");
@@ -616,3 +619,5 @@ mod import;
 mod toast;
 
 mod target;
+
+mod drop_math;

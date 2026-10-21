@@ -8,7 +8,7 @@
 use ac2_proto::model::{
     ALIGN_MAX_DELAY_DEFAULT, AlignBand, AverageMethod, MathConfig, MathDomain, MathExpr, MathOp,
     MathReference, MeasConfig, MeasKind, Measurement, Operand, Smoothing, SmoothingFraction,
-    SmoothingMode, TraceKind, TraceMeta, TraceOwner,
+    SmoothingMode, TraceKind, TraceMeta, TraceOwner, TraceSource,
 };
 use ac2_proto::units::MeasId;
 
@@ -52,6 +52,11 @@ impl Candidate {
         v
     }
 
+    /// An EQ set: B of `A × B` only (a curve after the set), never A or an average's member.
+    pub fn is_eq(&self) -> bool {
+        matches!(self.operand, Operand::Eq { .. })
+    }
+
     fn listed(ms: &[&Measurement], traces: &[&TraceMeta]) -> Vec<Candidate> {
         let live = ms.iter().filter_map(|m| {
             let domain = match m.config.kind {
@@ -69,12 +74,22 @@ impl Candidate {
                 domain,
             })
         });
+        // An EQ set's curve is offered as the set itself: the daemon evaluates the set on the
+        // curve's grid, against what the curve already contains of it (its mark), as the
+        // editor's prediction does.
         let stored = traces.iter().map(|t| Candidate {
-            operand: Operand::Trace { trace: t.id },
+            operand: match t.source {
+                TraceSource::Eq { meas, set, .. } => Operand::Eq { meas, set },
+                _ => Operand::Trace { trace: t.id },
+            },
             name: t.edit.name.clone(),
-            label: match t.edit.slot {
-                Some(s) => format!("{} (stored, S{s})", t.edit.name),
-                None => format!("{} (stored)", t.edit.name),
+            label: match (&t.source, t.edit.slot) {
+                (TraceSource::Eq { meas, .. }, _) => match ms.iter().find(|m| m.id == *meas) {
+                    Some(m) => format!("{} (EQ set of {})", t.edit.name, m.config.name),
+                    None => format!("{} (EQ set)", t.edit.name),
+                },
+                (_, Some(s)) => format!("{} (stored, S{s})", t.edit.name),
+                (_, None) => format!("{} (stored)", t.edit.name),
             },
             domain: match t.kind {
                 TraceKind::Transfer | TraceKind::Sweep | TraceKind::Target => MathDomain::Transfer,
@@ -208,6 +223,12 @@ impl MathForm {
         o.and_then(|o| self.find(o)).map(|c| c.domain)
     }
 
+    /// A's choices: every candidate but the EQ sets (a curve goes through a set, not the
+    /// other way round).
+    fn as_(&self) -> Vec<&Candidate> {
+        self.candidates.iter().filter(|c| !c.is_eq()).collect()
+    }
+
     /// B's choices: the other candidates of A's kind; for a level through (or with removed)
     /// a filter, the stored transfer traces, whose magnitude is that filter's gain.
     fn bs(&self, domain: MathDomain, choice: Choice, a: Option<Operand>) -> Vec<&Candidate> {
@@ -219,7 +240,10 @@ impl MathForm {
                 if filter {
                     c.domain == MathDomain::Transfer && matches!(c.operand, Operand::Trace { .. })
                 } else {
-                    c.domain == domain && Some(c.operand) != a
+                    // An alignment sums two systems: an EQ set is none.
+                    c.domain == domain
+                        && Some(c.operand) != a
+                        && !(c.is_eq() && choice == Choice::Align)
                 }
             })
             .collect()
@@ -229,7 +253,7 @@ impl MathForm {
     fn members(&self, domain: MathDomain) -> Vec<&Candidate> {
         self.candidates
             .iter()
-            .filter(|c| c.domain == domain)
+            .filter(|c| c.domain == domain && !c.is_eq())
             .take(MathConfig::MAX_AVERAGE)
             .collect()
     }
@@ -247,11 +271,11 @@ impl Form {
         let pairable = |d: MathDomain| candidates.iter().filter(|c| c.domain == d).count() >= 2;
         let a = first
             .and_then(|o| candidates.iter().find(|c| c.operand == o))
-            .filter(|c| pairable(c.domain))
-            .or_else(|| candidates.iter().find(|c| pairable(c.domain)))?;
+            .filter(|c| pairable(c.domain) && !c.is_eq())
+            .or_else(|| candidates.iter().find(|c| pairable(c.domain) && !c.is_eq()))?;
         let b = candidates
             .iter()
-            .find(|c| c.domain == a.domain && c.operand != a.operand)
+            .find(|c| c.domain == a.domain && c.operand != a.operand && !c.is_eq())
             .map(|c| c.operand);
         let picks = Picks {
             domain: a.domain,
@@ -278,6 +302,46 @@ impl Form {
         }));
         f.lay_out(picks, Some(FieldId::OperandA));
         Some(f)
+    }
+
+    /// The new-math-channel dialog a row dropped on another opens: `a op b`, listed under
+    /// `owner`, the name following the expression. `None` when either is no candidate.
+    pub fn math_drop(
+        candidates: Vec<Candidate>,
+        a: Operand,
+        op: MathOp,
+        b: Operand,
+        owner: TraceOwner,
+    ) -> Option<Form> {
+        let domain = candidates.iter().find(|c| c.operand == a)?.domain;
+        candidates.iter().find(|c| c.operand == b)?;
+        let picks = Picks {
+            domain,
+            a: Some(a),
+            choice: Choice::Binary(op),
+            b: Some(b),
+            of: Vec::new(),
+            method: AverageMethod::Power,
+            reference: None,
+            smoothing: None,
+            band: Default::default(),
+            max_delay: align::default_max_delay(),
+            name: String::new(),
+        };
+        let mut f = Form::new(FormKind::Math, Vec::new());
+        f.math = Some(Box::new(MathForm {
+            candidates,
+            edit: None,
+            owner,
+            auto_name: String::new(),
+            mode: SmoothingMode::MagnitudePhase,
+            levels: Vec::new(),
+            auto_band: Default::default(),
+        }));
+        // The operator focused: ←/→ changes the reading, Enter makes the channel as dropped.
+        f.lay_out(picks, Some(FieldId::Operator));
+        let p = f.picks()?;
+        (p.a == Some(a) && p.b == Some(b) && p.choice == Choice::Binary(op)).then_some(f)
     }
 
     /// The dialog editing math channel `m`, its rows as configured.
@@ -361,7 +425,7 @@ impl Form {
                 _ => None,
             }
         };
-        let all: Vec<Operand> = m.candidates.iter().map(|c| c.operand).collect();
+        let all: Vec<Operand> = m.as_().iter().map(|c| c.operand).collect();
         let of: Vec<Operand> = self
             .fields
             .iter()
@@ -449,7 +513,7 @@ impl Form {
         );
         match p.choice {
             Choice::Binary(_) | Choice::Align => {
-                let all: Vec<&Candidate> = m.candidates.iter().collect();
+                let all: Vec<&Candidate> = m.as_();
                 let ai =
                     p.a.and_then(|a| all.iter().position(|c| c.operand == a))
                         .unwrap_or(0);
@@ -651,7 +715,16 @@ impl Form {
                 }
             }
         };
-        let mut config = MathConfig::of(m.owner, domain, expr);
+        // A curve after an EQ set is listed with the set: it goes when the set goes, and
+        // the editor ticks it as that set's prediction.
+        let owner = match expr {
+            MathExpr::Binary {
+                b: Operand::Eq { meas, .. },
+                ..
+            } => TraceOwner::Meas { meas },
+            _ => m.owner,
+        };
+        let mut config = MathConfig::of(owner, domain, expr);
         if let Some(r) = p.reference {
             config.reference = MathReference::Operand { operand: r };
         }
@@ -693,7 +766,7 @@ impl Form {
                 .iter()
                 .map(|c| c.operand)
                 .collect(),
-            _ => m.candidates.iter().map(|c| c.operand).collect(),
+            _ => m.as_().iter().map(|c| c.operand).collect(),
         };
         let Some(i) = list.iter().position(|x| *x == o) else {
             return false;

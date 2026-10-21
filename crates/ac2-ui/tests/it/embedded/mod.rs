@@ -12,6 +12,7 @@ mod advice;
 mod align;
 mod calibration;
 mod cursor;
+mod drop_math;
 mod eq;
 mod harness;
 mod keep;

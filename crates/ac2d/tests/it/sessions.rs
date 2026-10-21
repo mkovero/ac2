@@ -54,6 +54,7 @@ fn import(c: &mut Client, name: &str) -> TraceMeta {
         role: ImportRole::Trace,
         ir: None,
         content: Blob(content),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }) {
         ReplyBody::Trace(t) => t,
         other => panic!("{other:?}"),

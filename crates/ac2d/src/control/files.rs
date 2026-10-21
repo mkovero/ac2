@@ -404,7 +404,14 @@ impl Control {
             } else {
                 ImportRole::Trace
             };
-            match self.trace_import(rel.clone(), ImportFormat::Ac2Csv, role, None, &content) {
+            match self.trace_import(
+                rel.clone(),
+                ImportFormat::Ac2Csv,
+                role,
+                None,
+                &content,
+                TraceOwner::Imported,
+            ) {
                 Ok(ReplyBody::Trace(t)) => imported.push(t),
                 Ok(_) => {}
                 Err(e) => refused.push(SalvageRefusal {

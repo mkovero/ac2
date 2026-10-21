@@ -19,6 +19,16 @@ pub(crate) fn method(m: AverageArg) -> AverageMethod {
     }
 }
 
+/// The owner `--meas` names, or the imported group without it.
+async fn owner_of(c: &ac2_client::Client, meas: Option<&MeasRef>) -> Result<TraceOwner, CliError> {
+    Ok(match meas {
+        Some(m) => TraceOwner::Meas {
+            meas: find_meas(&state(c).await?, m)?.id,
+        },
+        None => TraceOwner::Imported,
+    })
+}
+
 fn target_curve(a: &TargetArg) -> TargetCurve {
     match a {
         TargetArg::Flat => TargetCurve::Flat,
@@ -165,12 +175,13 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
             let t = expect_body!("trace.average", r, ReplyBody::Trace(t) => t)?;
             out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
         }
-        TraceCmd::Target { curve, name } => {
+        TraceCmd::Target { curve, name, meas } => {
+            let owner = owner_of(&c, meas.as_ref()).await?;
             let curve = target_curve(curve);
             let name = name
                 .clone()
                 .unwrap_or_else(|| ac2_scene::target_curve::name(&curve));
-            let r = c.call(Command::TraceTarget { curve, name }).await?;
+            let r = c.call(Command::TraceTarget { curve, name, owner }).await?;
             let t = expect_body!("trace.target", r, ReplyBody::Trace(t) => t)?;
             out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
         }
@@ -184,7 +195,9 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
             gate_pre,
             keep_delay,
             resolution,
+            meas,
         } => {
+            let owner = owner_of(&c, meas.as_ref()).await?;
             let ir_given =
                 channel.is_some() || gate.is_some() || *keep_delay || resolution.is_some();
             let ir_resolution = resolution
@@ -230,6 +243,7 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
                     },
                     ir,
                     content: Blob(content),
+                    owner,
                 })
                 .await?;
             let mut t = expect_body!("trace.import", r, ReplyBody::Trace(t) => t)?;

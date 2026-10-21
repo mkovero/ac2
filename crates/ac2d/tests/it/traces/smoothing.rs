@@ -225,6 +225,7 @@ fn live_smoothing_and_resmoothed_captures() {
         role: ImportRole::Target,
         ir: None,
         content: Blob(fixture("house_curve.txt")),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }));
     let mut te = tgt.edit.clone();
     te.smoothing = Some(sixth());

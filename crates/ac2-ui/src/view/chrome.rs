@@ -1,9 +1,8 @@
 //! Top bar (link, session, stimulus) and the measurement list.
 
-use ac2_proto::model::TraceOwner;
 use ac2_scene::autosave::AutosaveTone;
 use ac2_scene::format;
-use ac2_scene::meas_list::{Mark, TreeKey, TreeRow};
+use ac2_scene::meas_list::{Mark, TreeKey};
 use ac2_scene::recording::RecordingTone;
 use eframe::egui::{self, Color32, RichText};
 
@@ -14,6 +13,9 @@ use crate::state::{ConnState, DragMsg, Msg, StimPhase, outputs_text};
 use crate::theme::Chrome;
 
 use super::segment::{Part, SEGMENT_MIN_W, draw_segment, health_part, segment_width};
+
+mod tree_row;
+use tree_row::{RowTips, tree_row};
 
 fn dot(ui: &mut egui::Ui, c: Color32) {
     let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
@@ -643,7 +645,8 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         meas: format!(
             "Click shows it in the focused pane · the arrow folds it · {} / {} step through \
              the list · {} shows / hides its curve, {} everything under it · {} \
-             deletes it (asks first)",
+             deletes it (asks first) · drag onto a pane to show it there, onto another row \
+             to combine the two in a math channel",
             key_hint(app, CommandId::NextInTree),
             key_hint(app, CommandId::PrevInTree),
             key_hint(app, CommandId::ToggleSelected),
@@ -652,8 +655,9 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         ),
         eye: key_hint(app, CommandId::ToggleSelected),
         select: format!(
-            "Click selects it (again: deselects) · double click renames · {} moves it · {} / {} \
-             step through the shown traces",
+            "Click selects it (again: deselects) · double click renames (an EQ set: opens \
+             it) · {} moves it · {} / {} step through the shown traces · drag onto another \
+             row to combine the two in a math channel",
             key_hint(app, CommandId::MoveTrace),
             key_hint(app, CommandId::NextTrace),
             key_hint(app, CommandId::PrevTrace)
@@ -661,6 +665,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     };
     inputs(app, ui, ch);
     let mut msg = None;
+    let (mut under, mut row_over) = (None, None);
     let reveal = std::mem::take(&mut app.state.tree_reveal);
     let dragging = app.state.row_drag_held();
     {
@@ -695,6 +700,8 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         if rows.is_empty() {
             ui.label(RichText::new(st.empty_list_text()).color(ch.dim));
         }
+        let drag = st.row_drag().map(|d| (d.item, d.onto));
+        let pointer = ui.ctx().pointer_latest_pos();
         for row in &rows {
             let reveal = reveal
                 && row.mark == Mark::Active
@@ -702,9 +709,41 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                     row.key,
                     TreeKey::Meas(_) | TreeKey::Live(_) | TreeKey::Math(_)
                 );
-            if let Some(m) = tree_row(ui, row, &tips, ch, &theme, reveal, dragging) {
+            let (m, rect) = tree_row(ui, row, &tips, ch, &theme, reveal, dragging);
+            if let Some(m) = m {
                 msg = Some(m);
             }
+            // A row dragged over another: the drop combines them (the math dialog opens),
+            // shaded as a pane a drop would take is.
+            if let Some((item, onto)) = drag {
+                if pointer.is_some_and(|p| rect.contains(p))
+                    && row.key != item
+                    && !row.key.is_heading()
+                {
+                    under = Some(row.key);
+                }
+                if onto == Some(row.key) {
+                    let r = rect.expand(1.0);
+                    let painter = ui.painter();
+                    painter.rect_filled(r, 3.0, crate::theme::c32(theme.unresolved_shade));
+                    let e = theme.unresolved_edge;
+                    let stroke = egui::Stroke::new(e.width, crate::theme::c32(e.color));
+                    let (on, off) = e.dash.map_or((4.0, 4.0), |d| (d.on, d.off));
+                    let outline = [
+                        r.left_top(),
+                        r.right_top(),
+                        r.right_bottom(),
+                        r.left_bottom(),
+                        r.left_top(),
+                    ];
+                    painter.extend(egui::Shape::dashed_line(&outline, stroke, on, off));
+                }
+            }
+        }
+        if let Some((_, onto)) = drag
+            && onto != under
+        {
+            row_over = Some(Msg::RowDrag(DragMsg::OverRow(under)));
         }
         if !rows.iter().any(|r| matches!(r.key, TreeKey::Trace(_))) && !rows.is_empty() {
             ui.label(
@@ -717,223 +756,12 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             );
         }
     }
+    if let Some(m) = row_over {
+        app.dispatch(m);
+    }
     if let Some(m) = msg {
         app.dispatch(m);
     }
-}
-
-/// The tooltips of the tree's rows, with the keys that do the same.
-struct RowTips {
-    meas: String,
-    /// The key that shows / hides the selected curve.
-    eye: String,
-    select: String,
-}
-
-/// Width of a row's colour dot, which is also its show / hide toggle.
-const EYE_W: f32 = 18.0;
-/// How far a row under a header is indented.
-const INDENT: f32 = 14.0;
-
-/// How far (points) the pointer moves with the button held on a row before the row is
-/// dragged: a click that wobbles a little stays a click.
-const ROW_DRAG_START: f32 = 6.0;
-
-/// One row of the measurement tree: a header (its fold arrow, its tag and name over its
-/// state) or a row under it (its tree line, its dot when it has a curve to show or hide,
-/// its name over what it is). `reveal`: the tree scrolls the row into view. Pressed and
-/// moved, a row other than Imported's starts a drag onto the panes (unless one is
-/// `dragging` already).
-fn tree_row(
-    ui: &mut egui::Ui,
-    row: &TreeRow,
-    tips: &RowTips,
-    ch: &Chrome,
-    theme: &ac2_scene::theme::Theme,
-    reveal: bool,
-    dragging: bool,
-) -> Option<Msg> {
-    let mut click = None;
-    let group = match row.key {
-        TreeKey::Meas(meas) => Some(TraceOwner::Meas { meas }),
-        TreeKey::Imported => Some(TraceOwner::Imported),
-        _ => None,
-    };
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        if let (Some(folded), Some(g)) = (row.collapsed, group) {
-            let what = if folded { "Unfold" } else { "Fold" };
-            let (rect, r) = ui.allocate_exact_size(egui::vec2(EYE_W, 22.0), egui::Sense::click());
-            let label = format!("{what} {}", row.name);
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
-            // Drawn, not a glyph: the arrow characters are missing from the UI font.
-            let c = egui::pos2(rect.center().x, rect.min.y + 9.0);
-            let color = if r.hovered() { ch.text } else { ch.dim };
-            let points = if folded {
-                vec![
-                    c + egui::vec2(-2.5, -4.5),
-                    c + egui::vec2(3.5, 0.0),
-                    c + egui::vec2(-2.5, 4.5),
-                ]
-            } else {
-                vec![
-                    c + egui::vec2(-4.5, -2.5),
-                    c + egui::vec2(4.5, -2.5),
-                    c + egui::vec2(0.0, 3.5),
-                ]
-            };
-            ui.painter().add(egui::Shape::convex_polygon(
-                points,
-                color,
-                egui::Stroke::NONE,
-            ));
-            let r = r.on_hover_text(label);
-            if r.clicked() {
-                click = Some(Msg::ToggleGroup(g));
-            }
-        } else if row.depth == 0 {
-            // A header with nothing to fold (the rig's, the session's).
-            ui.add_space(EYE_W);
-        } else {
-            ui.add_space(INDENT);
-            ui.label(
-                RichText::new(if row.last { "└" } else { "├" })
-                    .color(ch.dim)
-                    .monospace(),
-            );
-        }
-        if let Some(c) = row.chip {
-            super::rig::cue_chip(ui, c, theme)
-                .on_hover_text(format!("OSC cue {}", ac2_scene::osc::state_word(c)));
-        }
-        // A curve's dot: filled when shown, a ring when hidden; a click shows or hides it.
-        if let Some((color, shown)) = row.dot.map(|(c, shown)| (to_color32(c), shown)) {
-            let (r, eye) = ui.allocate_exact_size(egui::vec2(EYE_W, 22.0), egui::Sense::click());
-            let what = if shown { "Hide" } else { "Show" };
-            let label = format!("{what} {}", row.name);
-            eye.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
-            let centre = egui::pos2(r.center().x, r.min.y + 9.0);
-            if shown {
-                ui.painter().circle_filled(centre, 5.5, color);
-            } else {
-                ui.painter()
-                    .circle_stroke(centre, 4.5, egui::Stroke::new(1.5, color));
-            }
-            if eye.hovered() {
-                ui.painter()
-                    .circle_stroke(centre, 8.0, egui::Stroke::new(1.0, ch.border));
-            }
-            let tip = format!(
-                "{what} this curve · {} shows / hides the selected one",
-                tips.eye
-            );
-            if eye.on_hover_text(tip).clicked() {
-                click = Some(match row.key {
-                    TreeKey::Trace(id) => Msg::ToggleShown(id),
-                    TreeKey::Live(id) | TreeKey::Math(id) => Msg::ToggleMeasShown(id),
-                    TreeKey::Meas(_) | TreeKey::Imported | TreeKey::Rig | TreeKey::Session => {
-                        return;
-                    }
-                });
-            }
-        }
-        // The longest detail line that fits beside the name, measured as drawn.
-        let room = ui.available_width() - 2.0 * ui.spacing().button_padding.x;
-        let small = egui::TextStyle::Small.resolve(ui.style());
-        let detail = row
-            .details
-            .iter()
-            .find(|d| {
-                ui.painter()
-                    .layout_no_wrap((*d).clone(), small.clone(), ch.dim)
-                    .size()
-                    .x
-                    <= room
-            })
-            .or(row.details.last())
-            .cloned()
-            .unwrap_or_default();
-        let name_color = match row.dot {
-            _ if row.hidden => ch.dim,
-            Some((c, _)) => to_color32(c),
-            None => ch.text,
-        };
-        let mut job = egui::text::LayoutJob::default();
-        let body = egui::TextStyle::Body.resolve(ui.style());
-        let mut fmt = egui::TextFormat::simple(body, name_color);
-        if row.depth == 0 {
-            fmt.font_id.size += 0.5;
-        }
-        job.append(&row.name, 0.0, fmt);
-        job.append("\n", 0.0, egui::TextFormat::simple(small.clone(), ch.dim));
-        job.append(&detail, 0.0, egui::TextFormat::simple(small, ch.dim));
-        job.wrap.max_width = room;
-        // Filled: the keys act on it. Outlined: still the selected measurement, while a
-        // stored trace selected after it has the keys.
-        let b = match row.mark {
-            Mark::Active => egui::Button::selectable(true, job),
-            Mark::Selected => egui::Button::new(job)
-                .fill(Color32::TRANSPARENT)
-                .stroke(egui::Stroke::new(1.0, ch.focus)),
-            Mark::None => egui::Button::selectable(false, job),
-        };
-        let tip = match row.key {
-            TreeKey::Trace(_) => format!("{}\n{}", row.describe, tips.select),
-            _ => format!("{}\n{}", row.describe, tips.meas),
-        };
-        let draggable = !row.key.is_heading();
-        let sense = if draggable {
-            egui::Sense::click_and_drag()
-        } else {
-            egui::Sense::click()
-        };
-        let r = ui.add(b.wrap_mode(egui::TextWrapMode::Wrap).sense(sense));
-        // No tooltip while the row is held: it would cover the drag label.
-        let r = if r.is_pointer_button_down_on() {
-            r
-        } else {
-            r.on_hover_text(tip)
-        };
-        if reveal {
-            r.scroll_to_me(None);
-        }
-        let moved = ui.input(|i| {
-            i.pointer
-                .press_origin()
-                .zip(i.pointer.latest_pos())
-                .map_or(0.0, |(a, b)| a.distance(b))
-        });
-        if draggable && !dragging && r.dragged() && moved >= ROW_DRAG_START {
-            click = Some(Msg::RowDrag(DragMsg::Start(row.key)));
-        }
-        // A double click's second click also reads as a click: check it first, or it would
-        // deselect the row the first click selected.
-        if let TreeKey::Trace(id) = row.key
-            && r.double_clicked()
-        {
-            click = Some(Msg::RenameTrace(id));
-        } else if r.clicked() {
-            click = Some(match row.key {
-                TreeKey::Meas(id) => Msg::SelectMeas(id),
-                TreeKey::Math(id) => Msg::SelectMath(id),
-                TreeKey::Live(id) => Msg::SelectLive(id),
-                TreeKey::Trace(id) => Msg::SelectTrace(id),
-                TreeKey::Imported => Msg::ToggleGroup(TraceOwner::Imported),
-                TreeKey::Rig => Msg::OpenRig,
-                TreeKey::Session => return,
-            });
-        }
-    });
-    click
-}
-
-fn to_color32(c: ac2_scene::primitives::Color) -> Color32 {
-    Color32::from_rgba_unmultiplied(
-        (c.r * 255.0).round() as u8,
-        (c.g * 255.0).round() as u8,
-        (c.b * 255.0).round() as u8,
-        255,
-    )
 }
 
 #[cfg(test)]

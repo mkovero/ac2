@@ -345,6 +345,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
         role: ImportRole::Trace,
         ir: None,
         content: Blob(csv.into_bytes()),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }) {
         ReplyBody::Trace(t) => t,
         other => panic!("{other:?}"),
@@ -619,6 +620,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         role: ImportRole::Trace,
         ir: None,
         content: Blob(csv.into_bytes()),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }) {
         ReplyBody::Trace(t) => t,
         other => panic!("{other:?}"),

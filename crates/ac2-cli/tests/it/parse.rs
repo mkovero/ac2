@@ -420,6 +420,18 @@ fn other_commands_parse() {
     ok(&["state", "dump"]);
     ok(&["trace", "list", "--json"]);
     ok(&["trace", "target", "flat"]);
+    ok(&["trace", "target", "flat", "--meas", "Main L"]);
+    ok(&[
+        "trace", "target", "--meas", "2", "loudness", "--to", "95phon",
+    ]);
+    ok(&[
+        "trace",
+        "import",
+        "house.txt",
+        "--target",
+        "--meas",
+        "Main L",
+    ]);
     ok(&[
         "trace",
         "target",

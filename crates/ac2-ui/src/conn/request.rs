@@ -143,11 +143,16 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                 });
             });
         }
-        Request::Import { path, role, ir } => {
+        Request::Import {
+            path,
+            role,
+            owner,
+            ir,
+        } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
                 let what = format!("import {}", path.display());
-                let result = import(&c, &path, role, ir).await.map(|t| {
+                let result = import(&c, &path, role, owner, ir).await.map(|t| {
                     o.send(ConnEvent::Reply {
                         what: format!("{} imported", t.edit.name),
                         result: Ok(()),
@@ -579,6 +584,7 @@ pub(super) async fn import(
     c: &Client,
     path: &std::path::Path,
     role: ImportRole,
+    owner: ac2_proto::model::TraceOwner,
     ir: Option<ac2_proto::model::IrImport>,
 ) -> Result<TraceMeta, String> {
     let content = tokio::task::spawn_blocking({
@@ -599,6 +605,7 @@ pub(super) async fn import(
             role,
             ir,
             content: ac2_proto::units::Blob(content),
+            owner,
         })
         .await
         .map_err(|e| e.to_string())?;

@@ -518,6 +518,7 @@ def requests():
                     "resolution": "forty_eighth",
                 },
                 "content": b"RIFF",
+                "owner": {"type": "imported"},
             },
         ),
         req(

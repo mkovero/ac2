@@ -27,6 +27,7 @@ fn session_save_load_round_trip() {
         role: ImportRole::Target,
         ir: None,
         content: Blob(fixture("house_curve.txt")),
+        owner: ac2_proto::model::TraceOwner::Imported,
     }));
     let mut e = tgt.edit.clone();
     e.visible = false;

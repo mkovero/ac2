@@ -18,6 +18,11 @@ use crate::conn::Request;
 pub enum DeleteTarget {
     Trace(TraceId),
     Meas(MeasId),
+    /// An EQ set, from its curve's row: the set goes, its curve and predictions with it.
+    EqSet {
+        meas: MeasId,
+        set: ac2_proto::units::EqSetId,
+    },
     /// Nothing: the window says why the selection cannot go (a math channel computes from
     /// it) and only closes.
     Refused,
@@ -528,6 +533,10 @@ impl AppState {
             return;
         };
         let label = trace_label(&t);
+        if let ac2_proto::model::TraceSource::Eq { meas, set, .. } = t.source {
+            self.ask_delete_eq_set(meas, set);
+            return;
+        }
         if t.edit.locked {
             self.warn(format!("{label} is locked: it is not deleted"));
             return;
@@ -568,6 +577,14 @@ impl AppState {
                     what,
                 );
             }
+            DeleteTarget::EqSet { meas, set } => self.call(
+                out,
+                Command::MeasEq {
+                    meas,
+                    edit: ac2_proto::model::EqEdit::Delete { set },
+                },
+                format!("{label} deleted"),
+            ),
             DeleteTarget::Refused => {}
         }
     }
