@@ -67,15 +67,9 @@ fn jumps_mark_and_delta_on_the_transfer_pane() {
     let theme = Theme::dark();
     let s = crate::scenes::transfer(&t.st, t.pane(PaneKind::Transfer), &theme, SIZE, now());
     let m = s.mark.expect("mark readout");
-    // A stored magnitude without phase reads no phase difference.
-    assert_eq!(
-        m.lines,
-        [
-            "mark 4.00 kHz",
-            "Δ −3.00 kHz · +12.0 dB · —",
-            "comb Δf 3.00 kHz · 0.33 ms · 0.11 m @ 20 °C",
-        ]
-    );
+    // A stored magnitude without phase reads no phase difference; a notch to a peak is
+    // no comb's spacing.
+    assert_eq!(m.lines, ["mark 4.00 kHz", "Δ −3.00 kHz · +12.0 dB · —"]);
     // Alt+Shift+D clears the mark; the cursor stays.
     t.key("Alt+Shift+D");
     assert_eq!(t.st.view.cursor_mark_hz, None);

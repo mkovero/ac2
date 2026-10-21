@@ -15,14 +15,27 @@ fn target(traces: &[SpectrumTrace<'_>]) -> Option<usize> {
         .or_else(|| (!traces.is_empty()).then_some(0))
 }
 
+/// `t`'s levels as drawn, one per column.
+fn values(t: &SpectrumTrace<'_>) -> Vec<f64> {
+    (0..t.freqs.len()).map(|j| t.value(j)).collect()
+}
+
 /// `t` where `hz` is: the frequency as put (the spectrum's cursor stays where it was put,
-/// [`SpectrumCursor`]) and the level of the column whose band holds it, as drawn.
-fn point(t: &SpectrumTrace<'_>, hz: f64) -> Option<MarkPoint> {
+/// [`SpectrumCursor`]), the level of the column whose band holds it, as drawn, and the
+/// landmark that column is as the jumps read the view (`view`).
+fn point(t: &SpectrumTrace<'_>, v: &[f64], hz: f64, view: &ViewState) -> Option<MarkPoint> {
     let j = column_at(t.freqs, t.edges, hz)?;
     Some(MarkPoint {
         hz,
         level_db: t.value(j),
         phase: None,
+        landmark: cursor_jump::landmark_at(
+            t.freqs,
+            v,
+            view.freq.range(),
+            j,
+            view.jump_prominence_db,
+        ),
     })
 }
 
@@ -35,9 +48,10 @@ pub(super) fn readout(traces: &[SpectrumTrace<'_>], view: &ViewState) -> Option<
     }
     let t = traces.get(target(traces)?)?;
     let name = (traces.len() > 1).then_some(t.name.as_str());
+    let v = values(t);
     Some(mark_readout(
-        point(t, m)?,
-        point(t, c)?,
+        point(t, &v, m, view)?,
+        point(t, &v, c, view)?,
         PhaseView::Wrapped,
         name,
         view.temperature_c,
@@ -55,7 +69,7 @@ pub fn jump(
     step: Step,
 ) -> Option<f64> {
     let t = traces.get(target(traces)?)?;
-    let v: Vec<f64> = (0..t.freqs.len()).map(|j| t.value(j)).collect();
+    let v = values(t);
     cursor_jump::jump(
         t.freqs,
         &v,

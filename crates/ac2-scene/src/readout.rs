@@ -1,5 +1,6 @@
 //! Readout strings: comparison cursor and delay / distance.
 
+use crate::cursor_jump::Landmark;
 use crate::format;
 use crate::grid::nearest_column;
 use crate::trace::{DisplayTrace, TraceKey};
@@ -127,6 +128,8 @@ pub struct MarkPoint {
     pub level_db: f64,
     /// Phase in the pane's mode: degrees, or group delay in seconds. `None` on a spectrum.
     pub phase: Option<f64>,
+    /// The peak or notch the column is, as the cursor jumps find them.
+    pub landmark: Option<Landmark>,
 }
 
 /// The cursor mark: where it is and how the cursor differs from it.
@@ -134,8 +137,8 @@ pub struct MarkPoint {
 pub struct MarkReadout {
     /// The column the mark reads, Hz.
     pub freq_hz: f64,
-    /// `mark 1.00 kHz`, `Δ +1.00 kHz · −3.2 dB · +45°`, then the comb those two points
-    /// would make were they neighbouring notches: `comb Δf 1.00 kHz · 1.00 ms · …`.
+    /// `mark 1.00 kHz`, `Δ +1.00 kHz · −3.2 dB · +45°`, then, when both ends are peaks or
+    /// both notches, the comb they make as neighbours: `comb Δf 1.00 kHz · 1.00 ms · …`.
     pub lines: Vec<String>,
 }
 
@@ -191,7 +194,10 @@ pub fn mark_readout(
         delta = format!("{delta} · {}", phase_delta(c, m, phase));
     }
     let mut lines = vec![head, delta];
-    if df.is_finite() && df != 0.0 {
+    // A comb's peaks (or notches) repeat every 1/τ; a peak and a notch sit half that apart,
+    // and any other column has no spacing to read, so only like ends make a comb.
+    let like = mark.landmark.is_some() && mark.landmark == cursor.landmark;
+    if like && df.is_finite() && df != 0.0 {
         lines.push(comb_text(df.abs(), temp_c));
     }
     MarkReadout {
@@ -261,12 +267,18 @@ mod tests {
             hz,
             level_db,
             phase,
+            landmark: None,
         };
+        let at = |landmark, q: MarkPoint| MarkPoint {
+            landmark: Some(landmark),
+            ..q
+        };
+        let (peak, notch) = (Landmark::Peak, Landmark::Notch);
         // Two neighbouring notches of a 1 ms comb, read wrapped: −170° − (+170°) is +20°
         // across the wrap, not −340°.
         let r = mark_readout(
-            p(500.0, -30.0, Some(170.0)),
-            p(1500.0, -26.75, Some(-170.0)),
+            at(notch, p(500.0, -30.0, Some(170.0))),
+            at(notch, p(1500.0, -26.75, Some(-170.0))),
             PhaseView::Wrapped,
             None,
             20.0,
@@ -284,8 +296,8 @@ mod tests {
             range: crate::axis::Range::new(-720.0, 0.0),
         };
         let r = mark_readout(
-            p(2000.0, 0.0, Some(-100.0)),
-            p(1000.0, -6.0, Some(-460.0)),
+            at(peak, p(2000.0, 0.0, Some(-100.0))),
+            at(peak, p(1000.0, -6.0, Some(-460.0))),
             unwrapped,
             Some("m1"),
             0.0,
@@ -312,14 +324,27 @@ mod tests {
         assert_eq!(r.lines, ["mark 100 Hz", "Δ 0 Hz · — · +1.50 ms"]);
         // A spectrum has no phase.
         let r = mark_readout(
-            p(1000.0, -20.0, None),
-            p(1250.0, -32.5, None),
+            at(notch, p(1000.0, -20.0, None)),
+            at(notch, p(1250.0, -32.5, None)),
             PhaseView::Wrapped,
             None,
             20.0,
         );
         assert_eq!(r.lines[1], "Δ +250 Hz · −12.5 dB");
         assert_eq!(r.lines[2], "comb Δf 250 Hz · 4.00 ms · 1.37 m @ 20 °C");
+        // A peak to a notch is half a comb's spacing, and a column that is neither has no
+        // spacing at all: no comb either way.
+        for (m, c) in [
+            (
+                at(peak, p(1000.0, -20.0, None)),
+                at(notch, p(1250.0, -32.5, None)),
+            ),
+            (at(peak, p(1000.0, -20.0, None)), p(1250.0, -32.5, None)),
+            (p(1000.0, -20.0, None), p(1250.0, -32.5, None)),
+        ] {
+            let r = mark_readout(m, c, PhaseView::Wrapped, None, 20.0);
+            assert_eq!(r.lines, ["mark 1.00 kHz", "Δ +250 Hz · −12.5 dB"]);
+        }
     }
 
     fn dt(key: u32, freqs: Vec<f64>, mag: Vec<f64>) -> DisplayTrace {

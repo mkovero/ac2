@@ -51,18 +51,18 @@ fn jumps_and_the_mark_read_the_drawn_levels() {
     view.jump_prominence_db = 3.0;
     view.cursor_mark_hz = Some(1000.0);
     view.cursor_hz = Some(2000.0);
-    let s = spectrum_scene(&[t], &Status::default(), &view, &Theme::dark(), SIZE);
+    let s = spectrum_scene(
+        std::slice::from_ref(&t),
+        &Status::default(),
+        &view,
+        &Theme::dark(),
+        SIZE,
+    );
     let m = s.mark.expect("mark");
     // The 1 kHz band is the bump's top, −31 dB; the 2 kHz band sits a third of the way
-    // between the bump and the dip, whose tails cancel there: −40 dB.
-    assert_eq!(
-        m.lines,
-        [
-            "mark 1.00 kHz",
-            "Δ +1.00 kHz · −9.0 dB",
-            "comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C",
-        ]
-    );
+    // between the bump and the dip, whose tails cancel there: −40 dB. A peak to a column
+    // that is neither peak nor notch spaces no comb.
+    assert_eq!(m.lines, ["mark 1.00 kHz", "Δ +1.00 kHz · −9.0 dB"]);
     // Under the cursor's values, in one label.
     let label = s
         .scene
@@ -72,10 +72,12 @@ fn jumps_and_the_mark_read_the_drawn_levels() {
         .find(|l| l.text.starts_with("2.00 kHz"))
         .expect("cursor label");
     assert!(
-        label
-            .text
-            .ends_with("comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C"),
+        label.text.ends_with("Δ +1.00 kHz · −9.0 dB"),
         "{}",
         label.text
     );
+    // Nor does the peak to the notch: half a comb's spacing, not one.
+    view.cursor_hz = notch;
+    let s = spectrum_scene(&[t], &Status::default(), &view, &Theme::dark(), SIZE);
+    assert_eq!(s.mark.expect("mark").lines.len(), 2);
 }

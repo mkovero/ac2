@@ -51,6 +51,15 @@ fn the_mark_reads_the_comb_between_two_notches() {
         texts.contains(&"comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C"),
         "{texts:?}"
     );
+    // The peak between the notches is half the comb's spacing from either, and a column
+    // that is neither has none: no comb.
+    let peak = jump(&t, &cache, &v, shown, Landmark::Peak, Step::Down).expect("peak");
+    assert!((peak - 1000.0).abs() < 25.0, "{peak}");
+    for hz in [peak, 1200.0] {
+        v.cursor_hz = Some(hz);
+        let m = scene(&c, &v).mark.expect("mark");
+        assert_eq!(m.lines.len(), 2, "{hz}: {m:?}");
+    }
     // Up from the peak between the two notches is the upper notch, down the lower.
     v.cursor_hz = Some(1000.0);
     let up = jump(&t, &cache, &v, shown, Landmark::Notch, Step::Up);

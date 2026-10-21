@@ -27,8 +27,9 @@ fn transfer(s: &AppState) -> ac2_scene::tf::TfScene {
 /// rig's mic path is flat to the eye but its last average is ragged at the top, where the
 /// stimulus stopped feeding it. Alt+P puts the cursor on a peak, a second Alt+P on a higher
 /// one and Alt+Shift+P back; Alt+D marks it, Alt+N goes on to a notch above, and the
-/// readout reads the cursor against the mark on the measurement's curve with the comb their
-/// spacing would make. Alt+Shift+D clears the mark.
+/// readout reads the cursor against the mark on the measurement's curve, with no comb from
+/// a peak to a notch; Alt+P to the next peak reads the comb that spacing would make.
+/// Alt+Shift+D clears the mark.
 #[test]
 fn cursor_jumps_and_mark_from_an_empty_daemon() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
@@ -62,9 +63,16 @@ fn cursor_jumps_and_mark_from_an_empty_daemon() -> R {
         format!("mark {}", ac2_scene::format::freq_readout(first))
     );
     assert!(m.lines[1].starts_with("Δ +"), "{m:?}");
+    // A peak to a notch is half a comb's spacing: no comb line.
+    assert_eq!(m.lines.len(), 2, "{m:?}");
+    // Peak to peak is one.
+    d.key("Alt+P");
+    let peak = d.st.view.cursor_hz.ok_or("cursor")?;
+    assert!(peak > notch, "{notch} → {peak}");
+    let m = transfer(&d.st).mark.ok_or("mark readout")?;
     assert_eq!(
         m.lines[2],
-        ac2_scene::readout::comb_text(notch - first, 20.0),
+        ac2_scene::readout::comb_text(peak - first, 20.0),
         "{m:?}"
     );
 

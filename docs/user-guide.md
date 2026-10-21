@@ -643,8 +643,10 @@ values on a spectrum, on a plate in a bottom corner of the transfer magnitude vi
 phase view's mode (wrapped degrees folded into ±180°, unwrapped degrees, or group delay in
 ms). The `comb` line reads the two frequencies as neighbouring notches (or peaks) of a comb:
 a copy arriving `τ` later cancels every `1/τ` Hz, so `Δf` names the delay and the extra path
-the copy travelled, as min / max tracking does for evenly spaced dips. Put the mark on one
-notch and jump the cursor to the next for the reading to mean that. **Alt+Shift+D** clears
+the copy travelled, as min / max tracking does for evenly spaced dips. It shows only when
+the mark and the cursor are both on notches or both on peaks, as the jumps find them: a
+peak to a notch is half the spacing, and any other point has none. Put the mark on one
+notch and jump the cursor to the next; skipping a notch halves the delay read. **Alt+Shift+D** clears
 the mark, and so does turning the cursor off; **Esc** stays the stimulus's stop.
 
 #### Export a pane as PNG

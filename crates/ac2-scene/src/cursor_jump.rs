@@ -86,6 +86,33 @@ pub fn landmarks(
     kind: Landmark,
     prominence_db: f64,
 ) -> Vec<f64> {
+    columns(freqs, values, shown, kind, prominence_db)
+        .into_iter()
+        .map(|i| freqs[i])
+        .collect()
+}
+
+/// What column `i` of `values` is ([`landmarks`]): a peak, a notch, or neither.
+pub fn landmark_at(
+    freqs: &[f64],
+    values: &[f64],
+    shown: Range,
+    i: usize,
+    prominence_db: f64,
+) -> Option<Landmark> {
+    [Landmark::Peak, Landmark::Notch]
+        .into_iter()
+        .find(|k| columns(freqs, values, shown, *k, prominence_db).contains(&i))
+}
+
+/// The columns [`landmarks`] reads as `kind`, ascending.
+fn columns(
+    freqs: &[f64],
+    values: &[f64],
+    shown: Range,
+    kind: Landmark,
+    prominence_db: f64,
+) -> Vec<usize> {
     let n = freqs.len().min(values.len());
     let v: Vec<f64> = (0..n)
         .map(|i| {
@@ -114,7 +141,6 @@ pub fn landmarks(
                 && b >= r
                 && prominence(&v, i) >= prominence_db
         })
-        .map(|i| freqs[i])
         .collect()
 }
 
