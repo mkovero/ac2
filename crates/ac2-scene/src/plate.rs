@@ -232,6 +232,80 @@ impl PlateBox {
     }
 }
 
+impl PlateBox {
+    /// The top-left nearest `left`, `top` at which the plate overlaps none of `others`
+    /// (its own kind among them is skipped): dropped on another plate, it slides beside it,
+    /// because two plates' text drawn over each other reads as neither. When the plot has
+    /// no clear place for it, `left`, `top` as asked.
+    pub fn clear_of(&self, left: f32, top: f32, others: &[PlateBox]) -> (f32, f32) {
+        let others: Vec<Rect> = others
+            .iter()
+            .filter(|o| o.kind != self.kind)
+            .map(|o| o.rect)
+            .collect();
+        let (w, h) = (self.rect.w, self.rect.h);
+        let x_hi = (self.area.right() - INSET - w).max(self.area.x + INSET);
+        let y_hi = (self.area.bottom() - INSET - h).max(self.area.y + INSET);
+        let xs = |v: f32| v.clamp(self.area.x + INSET, x_hi);
+        let ys = |v: f32| v.clamp(self.area.y + INSET, y_hi);
+        let (left, top) = (xs(left), ys(top));
+        let mut cx = vec![left];
+        let mut cy = vec![top];
+        for o in &others {
+            cx.extend([xs(o.x - INSET - w), xs(o.right() + INSET)]);
+            cy.extend([ys(o.y - INSET - h), ys(o.bottom() + INSET)]);
+        }
+        let clear = |x: f32, y: f32| {
+            let r = Rect::new(x, y, w, h);
+            !others.iter().any(|o| overlap(&r, o))
+        };
+        cx.iter()
+            .flat_map(|&x| cy.iter().map(move |&y| (x, y)))
+            .filter(|&(x, y)| clear(x, y))
+            .min_by(|a, b| {
+                let d = |p: &(f32, f32)| (p.0 - left).powi(2) + (p.1 - top).powi(2);
+                d(a).total_cmp(&d(b))
+            })
+            .unwrap_or((left, top))
+    }
+
+    /// [`Self::scale_for`], stopped where the growing plate would run into one of `others`
+    /// it does not already overlap: the grip enlarges the text up to its neighbour, not
+    /// over it. Shrinking is never stopped.
+    pub fn scale_clear_of(&self, right: f32, bottom: f32, others: &[PlateBox]) -> f32 {
+        let want = self.scale_for(right, bottom);
+        if want <= self.scale || self.scale <= 0.0 {
+            return want;
+        }
+        let others: Vec<Rect> = others
+            .iter()
+            .filter(|o| o.kind != self.kind && !overlap(&self.rect, &o.rect))
+            .map(|o| o.rect)
+            .collect();
+        let clear = |s: f32| {
+            let k = s / self.scale;
+            let r = Rect::new(self.rect.x, self.rect.y, self.rect.w * k, self.rect.h * k);
+            !others.iter().any(|o| overlap(&r, o))
+        };
+        if clear(want) {
+            return want;
+        }
+        // The plate grows monotonically with its scale: halve the interval to the largest
+        // clear scale (a twelfth halving is well under a pixel).
+        let (mut lo, mut hi) = (self.scale, want);
+        for _ in 0..12 {
+            let mid = 0.5 * (lo + hi);
+            if clear(mid) { lo = mid } else { hi = mid }
+        }
+        lo
+    }
+}
+
+/// Whether `a` and `b` share any area (touching edges do not).
+fn overlap(a: &Rect, b: &Rect) -> bool {
+    a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+}
+
 /// The plate at `x`, `y` in `plates` (drawn in order, so the last is on top), and whether
 /// on its grip.
 pub fn hover_at(plates: &[PlateBox], x: f32, y: f32) -> Option<PlateHover> {
@@ -425,5 +499,35 @@ mod tests {
         );
         assert_eq!(hover_at(&plates, 245.0, 165.0).map(|h| h.grip), Some(true));
         assert_eq!(hover_at(&plates, 10.0, 10.0), None);
+    }
+
+    /// Dropped on another plate, a plate slides to the nearest clear place beside it;
+    /// grown by its grip, it stops at its neighbour.
+    #[test]
+    fn plates_keep_clear_of_each_other() {
+        let a = plate_box(Rect::new(100.0, 100.0, 100.0, 50.0));
+        let m = PlateBox::new(
+            PlateKind::Mark,
+            AREA,
+            Rect::new(300.0, 200.0, 100.0, 50.0),
+            1.0,
+        );
+        let plates = [a, m];
+        // Dropped on the readout: the nearest clear place is just below it.
+        let (x, y) = m.clear_of(110.0, 110.0, &plates);
+        assert_eq!((x, y), (110.0, 150.0 + INSET));
+        // A clear place is kept as asked.
+        assert_eq!(m.clear_of(600.0, 100.0, &plates), (600.0, 100.0));
+        // Its own kind does not push it.
+        assert_eq!(a.clear_of(120.0, 100.0, &plates), (120.0, 100.0));
+        // The grip grows the readout towards the mark only up to it.
+        let s = a.scale_clear_of(700.0, 400.0, &plates);
+        let k = s / a.scale;
+        assert!(s > 1.0 && s < 3.0, "{s}");
+        let grown = Rect::new(100.0, 100.0, 100.0 * k, 50.0 * k);
+        assert!(!overlap(&grown, &m.rect));
+        assert!(k > 1.99, "{k}");
+        // Shrinking is never stopped.
+        assert_eq!(a.scale_clear_of(100.0, 100.0, &plates), 0.75);
     }
 }

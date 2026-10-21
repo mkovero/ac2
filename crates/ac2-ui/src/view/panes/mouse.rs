@@ -100,7 +100,8 @@ pub(super) fn plates_mouse(
             let p = p - origin;
             let (msg, icon, grip) = match d.how {
                 PlateGrab::Move { grab } => {
-                    let [x, y] = b.position_for(p.x - grab.x, p.y - grab.y);
+                    let (l, t) = b.clear_of(p.x - grab.x, p.y - grab.y, &plates);
+                    let [x, y] = b.position_for(l, t);
                     (
                         PlateMsg::Move {
                             pane: id,
@@ -116,7 +117,7 @@ pub(super) fn plates_mouse(
                     PlateMsg::Scale {
                         pane: id,
                         kind: d.kind,
-                        scale: b.scale_for(p.x - grab.x, p.y - grab.y),
+                        scale: b.scale_clear_of(p.x - grab.x, p.y - grab.y, &plates),
                     },
                     egui::CursorIcon::ResizeNwSe,
                     true,
