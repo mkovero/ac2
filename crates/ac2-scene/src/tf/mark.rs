@@ -3,36 +3,30 @@
 //! the differences read one curve.
 
 use super::*;
+use crate::comb::{self, End};
 use crate::cursor_jump::{self, Landmark, Step};
 use crate::grid::nearest_column;
 use crate::readout::{MarkPoint, MarkReadout, mark_readout};
 
-/// `d` at its column nearest `hz`, its phase in the pane's mode, and the landmark it is
-/// as the jumps read the view (`view`).
-fn point(d: &DisplayTrace, hz: f64, view: &ViewState) -> Option<MarkPoint> {
-    let phase = view.tf.phase;
+/// `d` at its column nearest `hz` (returned beside it) and its phase in the pane's mode.
+fn point(d: &DisplayTrace, hz: f64, phase: PhaseView) -> Option<(MarkPoint, End)> {
     let i = nearest_column(&d.freqs, hz)?;
     let ph = match phase {
         PhaseView::Wrapped => &d.phase_wrapped_deg,
         PhaseView::Unwrapped { .. } => &d.phase_unwrapped_deg,
         PhaseView::GroupDelay { .. } => &d.group_delay_s,
     };
-    Some(MarkPoint {
+    let p = MarkPoint {
         hz: d.freqs[i],
         level_db: d.magnitude_db.get(i).copied().unwrap_or(f64::NAN),
         phase: Some(ph.get(i).copied().unwrap_or(f64::NAN)),
-        landmark: cursor_jump::landmark_at(
-            &d.freqs,
-            &d.magnitude_db,
-            view.freq.range(),
-            i,
-            view.jump_prominence_db,
-        ),
-    })
+    };
+    Some((p, End { col: i, hz: p.hz }))
 }
 
-/// The cursor read against its mark on the tracked curve; `None` without both, or while
-/// the plot's chrome hides the cursor (T).
+/// The cursor read against its mark on the tracked curve, with the comb evidence of its
+/// magnitude as the jumps read the view (smoothed as served: both smoothing modes smooth
+/// the magnitude); `None` without both, or while the plot's chrome hides the cursor (T).
 pub(super) fn readout(
     traces: &[TfTrace<'_>],
     shown: &[DisplayTrace],
@@ -44,9 +38,21 @@ pub(super) fn readout(
     }
     let d = shown.get(extremes::tracked(traces)?)?;
     let name = (shown.len() > 1).then_some(d.name.as_str());
+    let (mark, m_end) = point(d, m, view.tf.phase)?;
+    let (cursor, c_end) = point(d, c, view.tf.phase)?;
+    let comb = comb::evidence(
+        &d.freqs,
+        &d.magnitude_db,
+        view.freq.range(),
+        view.jump_prominence_db,
+        d.smoothing.map(|s| s.fraction),
+        m_end,
+        c_end,
+    );
     Some(mark_readout(
-        point(d, m, view)?,
-        point(d, c, view)?,
+        mark,
+        cursor,
+        comb,
         view.tf.phase,
         name,
         view.temperature_c,

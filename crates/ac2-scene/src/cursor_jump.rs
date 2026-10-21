@@ -56,7 +56,8 @@ impl Landmark {
         }
     }
 
-    fn name(self) -> &'static str {
+    /// `peak`, `notch`.
+    pub fn name(self) -> &'static str {
         match self {
             Self::Peak => "peak",
             Self::Notch => "notch",
