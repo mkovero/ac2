@@ -422,14 +422,7 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                     }
                 });
                 ui.add_space(4.0);
-                ui.label(
-                    RichText::new(format!(
-                        "{} · ↑↓ field · ←→ choose (inputs by name) · Esc closes",
-                        f.kind.submit()
-                    ))
-                    .small()
-                    .color(ch.dim),
-                );
+                ui.label(RichText::new(f.keys_hint()).small().color(ch.dim));
                 if let Some(note) = f.kind.close_note() {
                     ui.label(RichText::new(note).small().color(ch.armed));
                 }

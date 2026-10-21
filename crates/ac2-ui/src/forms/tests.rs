@@ -635,3 +635,20 @@ fn typing_replaces_a_selected_default() {
     f.select_all();
     assert!(!f.selected);
 }
+
+#[test]
+fn the_footer_names_only_the_keys_a_form_has() {
+    let f = crate::target_dialog::loudness_form();
+    assert_eq!(
+        f.keys_hint(),
+        format!("{} · ↑↓ field · Esc closes", f.kind.submit())
+    );
+    let f = Form::new(
+        FormKind::TargetTilt,
+        vec![Field::choice(FieldId::Slope, "Shape", &["a", "b"], 0)],
+    );
+    assert_eq!(
+        f.keys_hint(),
+        format!("{} · ←→ choose · Esc closes", f.kind.submit())
+    );
+}

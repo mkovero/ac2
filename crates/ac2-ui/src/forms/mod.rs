@@ -383,6 +383,30 @@ impl Form {
         }
     }
 
+    /// The footer's key cue: only the keys that do something in this form, so a dialog of
+    /// plain values never promises ←→ or an input list it does not have.
+    pub fn keys_hint(&self) -> String {
+        let mut parts = vec![self.kind.submit().to_string()];
+        if self.fields.len() > 1 {
+            parts.push("↑↓ field".into());
+        }
+        let channel = self
+            .fields
+            .iter()
+            .any(|f| matches!(f.value, Value::Channel { .. }));
+        let choice = self
+            .fields
+            .iter()
+            .any(|f| matches!(f.value, Value::Choice { .. }));
+        if channel {
+            parts.push("←→ choose (inputs by name)".into());
+        } else if choice {
+            parts.push("←→ choose".into());
+        }
+        parts.push("Esc closes".into());
+        parts.join(" · ")
+    }
+
     /// Ctrl+A: selects the focused text field's text.
     pub fn select_all(&mut self) {
         self.selected = matches!(
