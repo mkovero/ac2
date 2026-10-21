@@ -12,6 +12,7 @@ fn two_panes() -> ac2_ui::prefs::UiPrefs {
         measurement: None,
         modes: Default::default(),
         levels: Default::default(),
+        plates: Default::default(),
     };
     p.layout.panes = Some(ac2_ui::prefs::PanesPrefs {
         root: PaneNode::Split {

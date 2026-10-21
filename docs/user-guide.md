@@ -666,13 +666,33 @@ line has no export: it has no renderer.
 
 The magnitude pane's legend lists every curve (name, colour, tags) on a plate that reads
 over any number of curves; cursor values sit on a plate of their own on the side away from
-the legend. **Drag** the plate anywhere; **drag its corner grip** to set how large it may
-grow (longer rows are cut with `…`). By default it is at most 70 % of the pane tall; more
-rows **scroll with the wheel** and its last line counts the rest (`3 above · 9 below`), so
-every curve stays reachable by name. **Click** a row to select its curve (then **A** hides
-it; a hidden curve leaves the legend, bring it back from the list). Palette: *Legend
-top-left* / *top-right* / *bottom-left* / *bottom-right*, *Show/hide legend*. Position,
-size and hidden state are kept in `ui.toml` (`[legend.transfer]`).
+the legend. It is at most 70 % of the pane tall and 60 % wide (longer rows are cut with
+`…`); more rows **scroll with the wheel** and its last line counts the rest (`3 above · 9
+below`), so every curve stays reachable by name. **Click** a row to select its curve (then
+**A** hides it; a hidden curve leaves the legend, bring it back from the list). Palette:
+*Legend top-left* / *top-right* / *bottom-left* / *bottom-right* (back to that corner at its
+text size), *Show/hide legend*. Whether it is hidden is kept in `ui.toml`
+(`[legend.transfer]`); where it sits is the pane's, as below.
+
+#### Moving the plates and their text size
+
+The legend, the cursor values and the mark's readout are plates, and every plate takes the
+same mouse (transfer and spectrum panes; a spectrum's legend is a strip of rows above the
+plot, not a plate, and its mark lines ride on the cursor values' plate):
+
+- **Drag** a plate anywhere inside its plot. It stays where it was dropped as the pane
+  grows or shrinks (kept as a share of the room around it, so one dropped against an edge
+  stays against it) and never leaves the plot.
+- **Drag its corner grip** (the three dots, bottom-right) to set its text size, from 0.75×
+  to 3× the theme's, to read a value across a room. The plate grows with its text.
+- **Double-click** it to put it back where the pane places it, at the theme's size.
+
+Hovering a plate makes it opaque and shows the move or resize pointer and a tooltip with
+these gestures. A dragged cursor-values plate names each curve beside its values, since it
+no longer sits on the legend's rows; the frequency is its first line. Each pane keeps its
+own plates, with the measurement's panes (so in the session, like the level ranges) or in
+`ui.toml` with the window's panes. A move or a size is one **Ctrl+Z** step. The list of
+extremes (**P**) stays where it is placed.
 
 #### Impulse-response pictures
 

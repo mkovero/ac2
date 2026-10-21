@@ -4,6 +4,7 @@
 //! are evenly spaced the list names the spacing and the delay it implies.
 
 use super::*;
+use crate::plate::{Metrics, PlateBox, PlateHover, PlateKind, PlatePlace};
 use crate::spectrum::PeakRow;
 use crate::spectrum::peaks::{self, Extreme, Peak, find_extremes};
 
@@ -158,42 +159,50 @@ pub(super) fn list_text(e: &TfExtremes, named: bool) -> String {
 
 /// Draws `text` on a plate in a bottom corner of `plot` clear of the legend and the cursor
 /// values (`avoid`): bottom-right first, as the legend starts top-left and the cursor values
-/// top-right. Returns the plate.
+/// top-right. `plate`: one the operator moves and scales (the mark's), with the pointer on
+/// it or not; where it was dropped, when dragged. Returns the plate.
 pub(super) fn draw_list(
     c: &mut Canvas,
     text: &str,
     plot: Rect,
     avoid: &[Rect],
+    plate: Option<(&PlatePlace, Option<PlateHover>)>,
     theme: &Theme,
-) -> Rect {
-    let font = theme.small_font_size;
-    let lines: Vec<&str> = text.split('\n').collect();
-    let w = lines
-        .iter()
-        .map(|l| text_width(l, font))
-        .fold(0.0f32, f32::max)
-        + 2.0 * PAD_X;
-    let h = lines.len() as f32 * ROW + 2.0 * PAD_Y;
-    let y = plot.bottom() - INSET - h;
-    let right = Rect::new(plot.right() - INSET - w, y, w, h);
-    let left = Rect::new(plot.x + INSET, y, w, h);
-    let clear = |r: &Rect| {
-        !avoid
-            .iter()
-            .any(|a| r.x < a.right() && a.x < r.right() && r.y < a.bottom() && a.y < r.bottom())
+) -> PlateBox {
+    let set = plate.map_or(1.0, |p| p.0.scale());
+    let lines: Vec<(String, Color)> = text
+        .split('\n')
+        .map(|l| (l.to_string(), theme.text))
+        .collect();
+    let texts: Vec<&str> = lines.iter().map(|l| l.0.as_str()).collect();
+    let (w, h) = Metrics::new(theme, set).size(&texts);
+    let s = crate::plate::fitted(set, plot, w, h);
+    let m = Metrics::new(theme, s);
+    let (w, h) = m.size(&texts);
+    let rect = match plate.and_then(|p| p.0.at) {
+        Some(at) => PlatePlace::rect_at(at, plot, w, h),
+        None => {
+            let y = plot.bottom() - INSET - h;
+            let right = Rect::new(plot.right() - INSET - w, y, w, h);
+            let left = Rect::new(plot.x + INSET, y, w, h);
+            let clear = |r: &Rect| {
+                !avoid.iter().any(|a| {
+                    r.x < a.right() && a.x < r.right() && r.y < a.bottom() && a.y < r.bottom()
+                })
+            };
+            [right, left].into_iter().find(clear).unwrap_or(right)
+        }
     };
-    let rect = [right, left].into_iter().find(clear).unwrap_or(right);
-    crate::legend::plate(&mut c.overlay, rect, false, plot, theme);
-    for (k, l) in lines.iter().enumerate() {
-        let mut lb = label(
-            (*l).to_string(),
-            [rect.x + PAD_X, rect.y + PAD_Y + ROW * (k as f32 + 0.5)],
-            anchor(HAlign::Left, VAlign::Center),
-            font,
-            theme.text,
-        );
-        lb.clip = Some(plot);
-        c.overlay.labels.push(lb);
-    }
-    rect
+    crate::plate::draw_lines(
+        &mut c.overlay,
+        rect,
+        &lines,
+        HAlign::Left,
+        m,
+        plate.is_some(),
+        plate.and_then(|p| p.1),
+        plot,
+        theme,
+    );
+    PlateBox::new(PlateKind::Mark, plot, rect, s)
 }

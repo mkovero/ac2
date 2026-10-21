@@ -453,6 +453,29 @@ fn undo_and_redo_round_trip_every_pane_edit() {
         ),
         ("W", key("W")),
         ("F", key("F")),
+        (
+            "plate drag",
+            Box::new(|t: &mut T| {
+                let pane = pane_n(t, 1);
+                let kind = ac2_scene::plate::PlateKind::Legend;
+                for x in [0.2, 0.4] {
+                    let m = PlateMsg::Move {
+                        pane,
+                        kind,
+                        x,
+                        y: 0.5,
+                    };
+                    t.st.update(Msg::Plate(m), &t.keys);
+                }
+                let m = PlateMsg::Scale {
+                    pane,
+                    kind,
+                    scale: 1.5,
+                };
+                t.st.update(Msg::Plate(m), &t.keys);
+                t.st.update(Msg::Plate(PlateMsg::End), &t.keys);
+            }),
+        ),
     ];
     for (name, edit) in edits {
         let mut t = desk();

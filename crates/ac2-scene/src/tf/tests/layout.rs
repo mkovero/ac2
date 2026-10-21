@@ -340,14 +340,14 @@ fn narrow_panes_move_cursor_values_below_the_legend() {
     assert_eq!(row_y(&wide, "0.0 dB"), row_y(&wide, "Main left hang"));
     let (legend, values) = (
         wide.legend_box.as_ref().expect("legend").rect,
-        wide.readout_box.expect("values"),
+        wide.readout_box.expect("values").rect,
     );
     assert!(values.x > legend.right());
     // Narrow: the plates would meet, so the values go below the legend (its rows and
     // delay line); nothing overlaps.
     let narrow = build(360.0);
     let legend = narrow.legend_box.as_ref().expect("legend").rect;
-    let values = narrow.readout_box.expect("values");
+    let values = narrow.readout_box.expect("values").rect;
     assert!(values.y >= legend.bottom(), "{values:?} below {legend:?}");
     assert!(row_y(&narrow, "0.0 dB") > row_y(&narrow, "ref Main left hang"));
     let labels: Vec<&crate::primitives::Label> = narrow.scene.layers[2].labels.iter().collect();
@@ -368,7 +368,6 @@ fn narrow_panes_move_cursor_values_below_the_legend() {
 /// the shown rows. The pointer on it makes the plate opaque.
 #[test]
 fn many_curves_scroll_on_a_plate() {
-    use crate::legend::LegendHover;
     let a = cols(97);
     let ts: Vec<TfTrace<'_>> = (0..18)
         .map(|i| {
@@ -416,7 +415,7 @@ fn many_curves_scroll_on_a_plate() {
         assert_eq!(l.color, theme.text);
     }
     // The values of the shown rows only, and the frequency.
-    let values = s.readout_box.expect("values");
+    let values = s.readout_box.expect("values").rect;
     let n = overlay
         .labels
         .iter()
@@ -425,7 +424,10 @@ fn many_curves_scroll_on_a_plate() {
     assert_eq!(n, b.shown + 1);
     // Scrolled to the end, the pointer on it.
     view.tf.legend.first = b.scrolled(100);
-    view.tf.legend.hover = Some(LegendHover::Plate);
+    view.plate_hover = Some(crate::plate::PlateHover {
+        kind: crate::plate::PlateKind::Legend,
+        grip: false,
+    });
     let s = build(&view);
     let b = s.legend_box.clone().expect("legend");
     assert_eq!(b.first + b.shown, 18);
@@ -470,9 +472,7 @@ fn legend_corners_and_hidden() {
         cursor_hz: Some(1000.0),
         ..ViewState::default()
     };
-    view.tf
-        .legend
-        .snap(crate::legend::LegendCorner::BottomRight);
+    view.plates.legend.at = Some(crate::legend::LegendCorner::BottomRight.position());
     let build = |view: &ViewState| {
         transfer_scene(
             &[ta.clone(), tb.clone()],
@@ -488,7 +488,7 @@ fn legend_corners_and_hidden() {
     let b = s.legend_box.as_ref().expect("legend");
     assert_eq!(b.rect.right(), mag.right() - crate::legend::INSET);
     assert_eq!(b.rect.bottom(), mag.bottom() - crate::legend::INSET);
-    let values = s.readout_box.expect("values");
+    let values = s.readout_box.expect("values").rect;
     assert_eq!(values.x, mag.x + crate::legend::INSET);
     view.tf.legend.hidden = true;
     let s = build(&view);

@@ -99,8 +99,8 @@ pub use types::{
 mod msg;
 pub use msg::{
     CAL_PAGE, COHERENCE_MASKS, DELAY_FINE_STEP, DelayChoice, FormMsg, HELP_LINE, HELP_PAGE,
-    LEVEL_FLOOR, LegendMsg, LeqMsg, MAX_TOASTS, Msg, NUDGE_S, NewLogPrompt, Notice, Overlay,
-    PAN_OCTAVES, PREVIEW_RENEW_S, Prompt, PromptKind, RECORD_MAX_S, SessionMsg, Toast, Toasts,
+    LEVEL_FLOOR, LeqMsg, MAX_TOASTS, Msg, NUDGE_S, NewLogPrompt, Notice, Overlay, PAN_OCTAVES,
+    PREVIEW_RENEW_S, PlateMsg, Prompt, PromptKind, RECORD_MAX_S, SessionMsg, Toast, Toasts,
     ZOOM_FACTOR,
 };
 use msg::{LeqLogSeen, Muted};
@@ -315,6 +315,8 @@ pub struct AppState {
     own_panes: Option<MeasId>,
     /// The lost selection's own panes were on screen: they follow it when it comes back.
     lost_own_panes: bool,
+    /// The plate under the pointer, and whose pane it is on.
+    pub plate_hover: Option<(PaneId, ac2_scene::plate::PlateHover)>,
     /// The measurement whose row was chosen last (or that this app selected by itself, a
     /// measurement made, a sweep just run): a pane with no pick of its own shows it. A child
     /// row, a chip pick or a click in a pane never moves it, so they change no pane but the
@@ -456,6 +458,7 @@ impl AppState {
             lost_selection: None,
             own_panes: None,
             lost_own_panes: false,
+            plate_hover: None,
             chosen: None,
             level_set: BTreeSet::new(),
             meas_seen: BTreeSet::new(),
@@ -473,18 +476,25 @@ impl AppState {
         let mut out = Vec::new();
         let before = self.meter_wants();
         let tick = matches!(msg, Msg::Tick { .. });
-        let drag = matches!(msg, Msg::DragSplit { .. });
+        // A split or a plate dragged: one undo step, sent to the daemon once it rests.
+        let drag = matches!(
+            msg,
+            Msg::DragSplit { .. }
+                | Msg::Plate(
+                    PlateMsg::Move { .. } | PlateMsg::Scale { .. } | PlateMsg::Reset { .. }
+                )
+        );
         let conn = matches!(msg, Msg::Conn(_));
         if !tick && !drag {
             self.flush_layout_drag(&mut out);
-            self.finish_split_drag();
+            self.finish_drag();
         }
         if self.keys != *keymap {
             self.keys = keymap.clone();
         }
         let panes_before = self.panes_watch();
         let edit = if drag {
-            self.start_split_drag();
+            self.start_drag(&msg);
             None
         } else if tick || conn {
             None
@@ -626,18 +636,8 @@ impl AppState {
                 self.view.spectrum.spectrograph.cursor_s = Some(before_s);
             }
             Msg::DistortionUnit(unit) => self.view.distortion.unit = unit,
-            Msg::Legend(m) => {
-                let l = &mut self.view.tf.legend;
-                match m {
-                    LegendMsg::Hover(h) => l.hover = h,
-                    LegendMsg::Move { x, y } => l.move_to(x, y),
-                    LegendMsg::Resize {
-                        max_width,
-                        max_height,
-                    } => l.resize(max_width, max_height),
-                    LegendMsg::Scroll { first } => l.first = first,
-                }
-            }
+            Msg::Plate(m) => self.plate_msg(m),
+            Msg::LegendScroll { first } => self.view.tf.legend.first = first,
         }
     }
 

@@ -10,6 +10,7 @@ mod extremes;
 mod layout;
 mod mark;
 mod panes;
+mod plates;
 
 const SIZE: Viewport = Viewport {
     width: 960.0,

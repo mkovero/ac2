@@ -362,7 +362,8 @@ pub struct TfView {
     /// Trace whose measured delay is the phase reference (decision 8b). `None`: the first
     /// trace with a shared time base.
     pub phase_reference: Option<TraceKey>,
-    /// Where the legend sits over the magnitude pane, how large it may be.
+    /// The legend over the magnitude pane: shown or not, scrolled how far (its place and
+    /// text size are the pane's [`ViewState::plates`]).
     pub legend: LegendView,
     /// Min / max tracking (P): the highest peaks and deepest dips of the magnitude marked
     /// and listed.
@@ -810,6 +811,10 @@ pub struct ViewState {
     /// the operator) to the widest margin among the panes stacked in this pane's column, so
     /// they all put one frequency at one x ([`crate::freq_column`]). 0 keeps the plot's own.
     pub freq_right: f32,
+    /// Where the pane's plates sit and how large their text is.
+    pub plates: crate::plate::Plates,
+    /// The plate under the pointer in the pane being drawn (lit, its grip shown bright).
+    pub plate_hover: Option<crate::plate::PlateHover>,
 }
 
 impl Default for ViewState {
@@ -828,6 +833,8 @@ impl Default for ViewState {
             chrome: PlotChrome::Full,
             unresolved: true,
             freq_right: 0.0,
+            plates: crate::plate::Plates::default(),
+            plate_hover: None,
         }
     }
 }

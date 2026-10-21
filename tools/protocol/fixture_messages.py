@@ -289,7 +289,13 @@ def finding():
     }
 
 
-def _layout_pane(kind, transfer_view, chrome="full", meas=None, transfer_levels=None):
+def _plate(at=None, scale=1.0):
+    return {"at": at, "scale": scale}
+
+
+def _layout_pane(
+    kind, transfer_view, chrome="full", meas=None, transfer_levels=None, readout=None
+):
     return {
         "kind": kind,
         "transfer_view": transfer_view,
@@ -304,11 +310,16 @@ def _layout_pane(kind, transfer_view, chrome="full", meas=None, transfer_levels=
             "spectrum_spl": None,
             "distortion": None,
         },
+        "plates": {
+            "legend": _plate(),
+            "readout": readout or _plate(),
+            "mark": _plate(),
+        },
     }
 
 
-# samples::pane_layout(): a transfer pane (level axis zoomed) beside an SPL meter picked
-# for measurement 2.
+# samples::pane_layout(): a transfer pane (level axis zoomed, cursor values dragged to the
+# bottom-left at twice the text size) beside an SPL meter picked for measurement 2.
 PANE_LAYOUT = {
     "type": "split",
     "axis": "row",
@@ -316,7 +327,10 @@ PANE_LAYOUT = {
     "a": {
         "type": "pane",
         "pane": _layout_pane(
-            "transfer", "phase", transfer_levels={"lo": -24.0, "hi": 12.0}
+            "transfer",
+            "phase",
+            transfer_levels={"lo": -24.0, "hi": 12.0},
+            readout=_plate([0.0, 1.0], 2.0),
         ),
     },
     "b": {"type": "pane", "pane": _layout_pane("spl", "magnitude", "no_grid", meas=2)},

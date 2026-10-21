@@ -346,9 +346,10 @@ pub(crate) fn spectrum_scene_in(
         })
     });
     // The readouts stack down the plot's right side from here: the cursor's, then the
-    // peak list under it.
+    // peak list under it (at the top when the cursor values were dragged elsewhere).
     let mut readout_y = plot.y + 22.0;
     let mark = cursor.as_ref().and_then(|_| mark::readout(traces, view));
+    let mut readout_box = None;
     if let Some(cur) = &cursor {
         canvas::vline(&mut c.overlay, plot, xm.to_px(cur.freq_hz), theme.cursor);
         let mut lines = vec![cur.freq.clone()];
@@ -358,13 +359,44 @@ pub(crate) fn spectrum_scene_in(
             canvas::vline(&mut c.overlay, plot, x, canvas::mark_stroke(theme));
             lines.extend(m.lines.iter().cloned());
         }
-        readout_y += (lines.len() as f32 * LINE_EM + GAP_EM) * font;
-        c.overlay.labels.push(label(
-            lines.join("\n"),
-            [plot.right() - 8.0, plot.y + 22.0],
-            anchor(HAlign::Right, VAlign::Top),
-            theme.small_font_size,
-            theme.text,
+        let place = &view.plates.readout;
+        let s = place.scale();
+        let m = crate::plate::Metrics::new(theme, s);
+        let (w, h) = m.size(&lines);
+        // Placed by the scene: its text where an unplated readout would start, under the
+        // unit and the caption at the plot's top.
+        let rect = match place.at {
+            Some(at) => crate::plate::PlatePlace::rect_at(at, plot, w, h),
+            None => Rect::new(
+                plot.right() - crate::legend::INSET - w,
+                plot.y + 22.0 - m.pad_y,
+                w,
+                h,
+            ),
+        };
+        if place.at.is_none() {
+            readout_y = rect.bottom() + GAP_EM * font;
+        }
+        let hover = view
+            .plate_hover
+            .filter(|h| h.kind == crate::plate::PlateKind::Readout);
+        let lines: Vec<(String, Color)> = lines.into_iter().map(|l| (l, theme.text)).collect();
+        crate::plate::draw_lines(
+            &mut c.overlay,
+            rect,
+            &lines,
+            HAlign::Right,
+            m,
+            true,
+            hover,
+            plot,
+            theme,
+        );
+        readout_box = Some(crate::plate::PlateBox::new(
+            crate::plate::PlateKind::Readout,
+            plot,
+            rect,
+            s,
         ));
     }
     let peaks = tracked_peaks(traces, &xm, &ym, plot);
@@ -441,6 +473,7 @@ pub(crate) fn spectrum_scene_in(
         unit_help,
         caption,
         cursor,
+        readout_box,
         mark,
         peaks,
         peak_list,
@@ -455,8 +488,7 @@ pub(crate) fn spectrum_scene_in(
     }
 }
 
-/// Line height of a multi-line label, in ems, and the gap left between two stacked ones.
-const LINE_EM: f32 = 1.25;
+/// The gap left between the cursor values' plate and the peak list under it, in ems.
 const GAP_EM: f32 = 0.5;
 
 /// Half the side of a peak's box, logical pixels: big enough to find on a busy curve,

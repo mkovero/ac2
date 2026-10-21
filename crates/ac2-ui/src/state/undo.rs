@@ -73,8 +73,9 @@ struct Step {
 pub(crate) struct History {
     done: VecDeque<Step>,
     undone: Vec<Step>,
-    /// A split being dragged: the panes before its first step. The drag is one step.
-    drag: Option<PaneSnap>,
+    /// A split or a plate being dragged: the panes before its first step, and what the
+    /// drag edits. The drag is one step.
+    drag: Option<(PaneSnap, PaneEdit)>,
     /// Measurements whose layout the edit under way stored (or will, once a drag rests).
     pub(super) stored: BTreeSet<MeasId>,
 }
@@ -258,17 +259,25 @@ impl AppState {
         }
     }
 
-    /// The first step of a split dragged: the panes before it.
-    pub(super) fn start_split_drag(&mut self) {
+    /// The first step of a split or plate dragged (`msg`): the panes before it.
+    pub(super) fn start_drag(&mut self, msg: &Msg) {
         if self.history.drag.is_none() {
+            let edit = match msg {
+                Msg::Plate(
+                    PlateMsg::Move { pane, .. }
+                    | PlateMsg::Scale { pane, .. }
+                    | PlateMsg::Reset { pane, .. },
+                ) => PaneEdit::Plates(self.pane_number(*pane)),
+                _ => PaneEdit::Resize,
+            };
             self.history.stored.clear();
-            self.history.drag = Some(self.pane_snap());
+            self.history.drag = Some((self.pane_snap(), edit));
         }
     }
 
-    /// The split drag over (released, or something else happened): one step.
-    pub(super) fn finish_split_drag(&mut self) {
-        let Some(before) = self.history.drag.take() else {
+    /// The drag over (released, or something else happened): one step.
+    pub(super) fn finish_drag(&mut self) {
+        let Some((before, edit)) = self.history.drag.take() else {
             return;
         };
         let after = self.pane_snap();
@@ -279,7 +288,7 @@ impl AppState {
         self.history.push(Step {
             before,
             after,
-            edit: PaneEdit::Resize,
+            edit,
             owner,
         });
     }

@@ -53,6 +53,7 @@ pub mod missing;
 pub mod new_meas;
 pub mod osc;
 pub mod pane_edit;
+pub mod plate;
 pub mod primitives;
 pub mod progress;
 pub mod readout;

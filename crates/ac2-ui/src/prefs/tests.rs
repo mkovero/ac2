@@ -175,6 +175,13 @@ fn two_panes() -> PanesPrefs {
                     ..PaneModes::default()
                 },
                 levels: LayoutLevels::default(),
+                plates: ac2_scene::plate::Plates {
+                    readout: ac2_scene::plate::PlatePlace {
+                        at: Some([0.0, 1.0]),
+                        scale: 2.0,
+                    },
+                    ..ac2_scene::plate::Plates::default()
+                },
             },
             PanePrefs {
                 id: PaneId(2),
@@ -189,6 +196,7 @@ fn two_panes() -> PanesPrefs {
                     chrome: PlotChrome::Bare,
                 },
                 levels: LayoutLevels::default(),
+                plates: ac2_scene::plate::Plates::default(),
             },
         ],
     }
@@ -444,28 +452,45 @@ fn a_kind_wide_levels_table_is_ignored() {
     assert!(!p.to_toml().contains("levels"));
 }
 
-/// A legend moved or resized is written, its defaults left out; out of bounds is an
-/// error.
+/// A hidden legend is written, the default left out; a `[legend]` this version cannot
+/// read (one from before the plates were each pane's) is dropped, the rest of the file kept.
 #[test]
 fn legend_round_trip() {
     assert!(!UiPrefs::default().to_toml().contains("legend"));
     let mut p = UiPrefs::default();
-    p.legend.x = 1.0;
-    p.legend.max_height = 0.3;
+    p.legend.hidden = true;
     let text = p.to_toml();
     assert!(
-        text.contains("[legend.transfer]\nx = 1.0\nmax_height = 0.3\n"),
+        text.contains("[legend.transfer]\nhidden = true\n"),
         "{text}"
     );
+    assert!(UiPrefs::from_toml(&text).expect("parse").legend.hidden);
+    let old =
+        UiPrefs::from_toml("theme = \"light\"\n\n[legend.transfer]\nhidden = true\nx = 1.0\n")
+            .expect("parse");
+    assert!(!old.legend.hidden);
+    assert_eq!(old.theme, Some(ac2_scene::theme::ThemeName::Light));
+}
+
+/// A pane's plates moved or scaled are written under the pane, the ones left alone not;
+/// a place or scale out of bounds is left out.
+#[test]
+fn plates_round_trip() {
+    let mut p = UiPrefs::default();
+    p.layout.panes = Some(two_panes());
+    let text = p.to_toml();
+    assert!(
+        text.contains("[layout.panes.plates.readout]\nat = [0.0, 1.0]\nscale = 2.0\n"),
+        "{text}"
+    );
+    assert_eq!(text.matches("plates").count(), 1, "{text}");
     let back = UiPrefs::from_toml(&text).expect("parse");
-    assert_eq!(back.legend.x, 1.0);
-    assert_eq!(back.legend.max_height, 0.3);
-    assert_eq!(back.legend.y, 0.0);
-    assert!(UiPrefs::from_toml("[legend.transfer]\nx = 2.0\n").is_err());
-    assert!(UiPrefs::from_toml("[legend.transfer]\nmax_width = 0.01\n").is_err());
-    assert!(UiPrefs::from_toml("[legend.spectrum]\nx = 0.5\n").is_err());
-    let hidden = UiPrefs::from_toml("[legend.transfer]\nhidden = true\n").expect("parse");
-    assert!(hidden.legend.hidden);
+    assert_eq!(back.layout.panes, p.layout.panes);
+    let bad = text.replace("at = [0.0, 1.0]", "at = [0.0, 1.5]");
+    let back = UiPrefs::from_toml(&bad).expect("parse");
+    let readout = back.layout.panes.expect("panes").views[0].plates.readout;
+    assert_eq!(readout.at, None);
+    assert_eq!(readout.scale, 2.0);
 }
 
 #[test]

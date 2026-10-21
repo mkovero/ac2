@@ -141,6 +141,23 @@
         "spectrum_dbfs": null,
         "spectrum_spl": null,
         "distortion": null
+       },
+       "plates": {
+        "legend": {
+         "at": null,
+         "scale": 1.0
+        },
+        "readout": {
+         "at": [
+          0.0,
+          1.0
+         ],
+         "scale": 2.0
+        },
+        "mark": {
+         "at": null,
+         "scale": 1.0
+        }
        }
       }
      },
@@ -159,6 +176,20 @@
         "spectrum_dbfs": null,
         "spectrum_spl": null,
         "distortion": null
+       },
+       "plates": {
+        "legend": {
+         "at": null,
+         "scale": 1.0
+        },
+        "readout": {
+         "at": null,
+         "scale": 1.0
+        },
+        "mark": {
+         "at": null,
+         "scale": 1.0
+        }
        }
       }
      }

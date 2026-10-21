@@ -16,6 +16,7 @@ fn two_transfer() -> PaneLayout {
             chrome: wire::PlotChrome::Full,
             meas: None,
             levels: wire::LayoutLevels::default(),
+            plates: wire::LayoutPlates::default(),
         }),
     };
     PaneLayout::Split {
@@ -396,6 +397,7 @@ fn three_transfer() -> PaneLayout {
             chrome: wire::PlotChrome::TracesOnly,
             meas: None,
             levels: wire::LayoutLevels::default(),
+            plates: wire::LayoutPlates::default(),
         }),
     };
     PaneLayout::Split {
@@ -595,6 +597,7 @@ fn three_spectrum() -> PaneLayout {
             chrome: wire::PlotChrome::TracesOnly,
             meas: None,
             levels: wire::LayoutLevels::default(),
+            plates: wire::LayoutPlates::default(),
         }),
     };
     PaneLayout::Split {

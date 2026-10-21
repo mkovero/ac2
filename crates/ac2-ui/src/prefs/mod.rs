@@ -5,9 +5,10 @@
 //! meter's number holds a reading, the theme, the record toggle's time limit, the layout
 //! and window as last left: the pane tree, the
 //! focused pane, maximised or full screen, what each pane shows (its kind, measurement,
-//! modes and how much of its plot: grid, labels, cursor, and its own level axis range: a fit
-//! made for one show is a fair start for the next), the window's size and position, the
-//! impulse-response views' dB axes, where the transfer pane's legend sat and how large it may be, and the session files
+//! modes and how much of its plot: grid, labels, cursor, its own level axis range: a fit
+//! made for one show is a fair start for the next, and where its plates were dropped and
+//! their text size), the window's size and position, the impulse-response views' dB axes,
+//! whether the transfer pane's legend is hidden, and the session files
 //! this app opened or exported (the Sessions dialog's recents).
 //!
 //! ```toml
@@ -53,6 +54,10 @@
 //! [layout.panes.levels]
 //! transfer = [-24.0, 12.0]
 //!
+//! [layout.panes.plates.readout]
+//! at = [0.0, 1.0]
+//! scale = 2.0
+//!
 //! [[layout.panes]]
 //! id = 2
 //! kind = "spl"
@@ -65,9 +70,7 @@
 //! sweep = [-90.0, 0.0]
 //!
 //! [legend.transfer]
-//! x = 1.0
-//! y = 0.0
-//! max_height = 0.3
+//! hidden = true
 //!
 //! [window]
 //! width = 1600
@@ -91,6 +94,7 @@ use std::path::Path;
 use ac2_proto::model::layout::{LayoutLevels, LevelRange};
 use ac2_scene::axis::Range;
 use ac2_scene::legend::LegendView;
+use ac2_scene::plate::{PlateKind, PlatePlace, Plates};
 use ac2_scene::view::{
     DistortionUnit, IrMode, LeqLayout, LeqStyle, PlotChrome, SpectrumMode, SplMode, SweepMode,
     ViewState, level,
@@ -174,6 +178,8 @@ pub struct PanePrefs {
     /// The level axis ranges the operator set on it (one not set is framed when the pane
     /// first shows a curve).
     pub levels: LayoutLevels,
+    /// Where its plates were dropped and their text size.
+    pub plates: ac2_scene::plate::Plates,
 }
 
 /// The impulse-response views' dB axes (log / ETC), dB re peak: one for the transfer
@@ -329,38 +335,20 @@ impl Default for UiPrefs {
     }
 }
 
-/// A legend as last left: hidden or not, where it sat, how large it may be (the scroll and
-/// the pointer are not kept).
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A legend as last left: hidden or not (where it sits and its text size are each pane's,
+/// [`PanePrefs::plates`]; the scroll is not kept).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LegendPrefs {
     pub hidden: bool,
-    pub x: f32,
-    pub y: f32,
-    pub max_width: f32,
-    pub max_height: f32,
 }
 
 impl LegendPrefs {
     pub fn of(v: &LegendView) -> Self {
-        Self {
-            hidden: v.hidden,
-            x: v.x,
-            y: v.y,
-            max_width: v.max_width,
-            max_height: v.max_height,
-        }
+        Self { hidden: v.hidden }
     }
 
     /// Puts the choices on `v`.
     pub fn apply(&self, v: &mut LegendView) {
         v.hidden = self.hidden;
-        v.move_to(self.x, self.y);
-        v.resize(self.max_width, self.max_height);
-    }
-}
-
-impl Default for LegendPrefs {
-    fn default() -> Self {
-        Self::of(&LegendView::default())
     }
 }

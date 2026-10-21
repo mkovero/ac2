@@ -106,6 +106,7 @@ impl AppState {
                         measurement,
                         modes: v.modes,
                         levels: self.operator_levels(id),
+                        plates: v.plates,
                     })
                 })
                 .collect(),
@@ -288,6 +289,7 @@ impl AppState {
                                 kind: v.kind,
                                 meas: None,
                                 modes: v.modes,
+                                plates: v.plates,
                             },
                         )
                     })

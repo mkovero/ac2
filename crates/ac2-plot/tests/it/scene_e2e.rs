@@ -159,6 +159,23 @@ fn transfer_view_cursor_mark() {
     transfer_golden("transfer_view_cursor_mark", view, stale(), "STALE · 2.4 s");
 }
 
+/// The cursor values dragged to the bottom-left at 1.5× the text size, the legend to the
+/// top-right at 1.25× and the mark's readout to the bottom-right: each plate where it was
+/// dropped, grown with its text, inside the plot, with its grip.
+#[test]
+fn transfer_view_moved_plates() {
+    let mut view = ViewState {
+        cursor_mark_hz: Some(2000.0),
+        ..ViewState::default()
+    };
+    view.plates.readout.move_to(0.0, 1.0);
+    view.plates.readout.set_scale(1.5);
+    view.plates.legend.move_to(1.0, 0.0);
+    view.plates.legend.set_scale(1.25);
+    view.plates.mark.move_to(1.0, 1.0);
+    transfer_golden("transfer_view_moved_plates", view, stale(), "STALE · 2.4 s");
+}
+
 #[test]
 fn transfer_view_coherence_overlay() {
     let mut view = ViewState::default();

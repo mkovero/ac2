@@ -1,7 +1,7 @@
 //! A measurement's pane layout (`meas.layout`): the panes a client shows while that
 //! measurement is selected. The arrangement, what each pane draws, the measurement each
-//! pane was picked to show and the level ranges the operator set on it travel; which pane
-//! has the keyboard, a maximised or full-screen pane and the window stay with each client.
+//! pane was picked to show, the level ranges the operator set on it and where they dropped
+//! the plates over its plot (and their text size) travel; which pane has the keyboard, a maximised or full-screen pane and the window stay with each client.
 
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +65,49 @@ pub struct LayoutPane {
     /// one left `None` is framed by the client when the pane first shows a curve.
     #[serde(default)]
     pub levels: LayoutLevels,
+    /// Where the operator dropped the plates over the plot and their text size.
+    #[serde(default)]
+    pub plates: LayoutPlates,
+}
+
+/// A pane's plates over the plot: the legend, the cursor values, the mark's readout.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutPlates {
+    pub legend: LayoutPlate,
+    pub readout: LayoutPlate,
+    pub mark: LayoutPlate,
+}
+
+impl LayoutPlates {
+    fn all(&self) -> [(&'static str, LayoutPlate); 3] {
+        [
+            ("legend", self.legend),
+            ("readout", self.readout),
+            ("mark", self.mark),
+        ]
+    }
+}
+
+/// Where one plate sits and how large its text is.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutPlate {
+    /// Its place as fractions of the room the plot leaves beside it, `[x, y]`, each 0 … 1
+    /// (0 at the left / top edge): a fraction keeps the plate inside a plot of any size.
+    /// `None`: where the client puts it.
+    pub at: Option<[f64; 2]>,
+    /// Its text size, times the plot's.
+    pub scale: f64,
+}
+
+impl Default for LayoutPlate {
+    fn default() -> Self {
+        Self {
+            at: None,
+            scale: 1.0,
+        }
+    }
 }
 
 /// A pane's operator-set level axis ranges, one per kind the pane may show (it keeps the
@@ -210,8 +253,9 @@ impl PaneLayout {
     }
 
     /// Why the layout cannot be drawn, if it cannot: a split ratio not strictly between 0
-    /// and 1 leaves one side no room, more than [`Self::MAX_PANES`] panes, and a level
-    /// range not finite with its top above its bottom (no axis can be drawn on it).
+    /// and 1 leaves one side no room, more than [`Self::MAX_PANES`] panes, a level range
+    /// not finite with its top above its bottom (no axis can be drawn on it), and a plate
+    /// placed outside 0 … 1 or with a text scale not finite and above 0.
     pub fn check(&self) -> Result<(), String> {
         let n = self.panes().len();
         if n > Self::MAX_PANES {
@@ -231,6 +275,22 @@ impl PaneLayout {
                     "a pane's {name} level range is finite with its top above its bottom, \
                      not {} … {}",
                     r.lo, r.hi
+                ));
+            }
+        }
+        for (name, p) in self.panes().iter().flat_map(|p| p.plates.all()) {
+            if p.at
+                .is_some_and(|a| !a.iter().all(|v| (0.0..=1.0).contains(v)))
+            {
+                return Err(format!(
+                    "a pane's {name} plate is placed within 0 … 1, not {:?}",
+                    p.at
+                ));
+            }
+            if !(p.scale.is_finite() && p.scale > 0.0) {
+                return Err(format!(
+                    "a pane's {name} plate's text scale is finite and above 0, not {}",
+                    p.scale
                 ));
             }
         }

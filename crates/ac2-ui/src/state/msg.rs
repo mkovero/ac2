@@ -308,18 +308,33 @@ pub const CAL_PAGE: i32 = 10;
 /// Lowest stimulus level the arrows go to.
 pub const LEVEL_FLOOR: f64 = -90.0;
 
-/// The mouse on the transfer pane's legend; places and limits as the scene's
-/// [`ac2_scene::legend::LegendBox`] computed them from the pointer.
+/// The mouse on a plate over a plot (the legend, the cursor values, the mark's readout);
+/// places and scales as the scene's [`ac2_scene::plate::PlateBox`] computed them from the
+/// pointer.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum LegendMsg {
-    /// The pointer came onto the plate or its grip, or left it.
-    Hover(Option<ac2_scene::legend::LegendHover>),
-    /// Dragged: its place, [`ac2_scene::legend::LegendView::x`] and `y`.
-    Move { x: f32, y: f32 },
-    /// Its grip dragged: its size limits.
-    Resize { max_width: f32, max_height: f32 },
-    /// The wheel over it: the first row shown.
-    Scroll { first: usize },
+pub enum PlateMsg {
+    /// The pointer came onto pane `.0`'s plate (or its grip), or left every plate.
+    Hover(Option<(PaneId, ac2_scene::plate::PlateHover)>),
+    /// Dragged: its place, [`ac2_scene::plate::PlatePlace::at`].
+    Move {
+        pane: PaneId,
+        kind: ac2_scene::plate::PlateKind,
+        x: f32,
+        y: f32,
+    },
+    /// Its grip dragged: its text scale.
+    Scale {
+        pane: PaneId,
+        kind: ac2_scene::plate::PlateKind,
+        scale: f32,
+    },
+    /// Double-clicked: back to where the scene puts it, at the plot's text size.
+    Reset {
+        pane: PaneId,
+        kind: ac2_scene::plate::PlateKind,
+    },
+    /// Released (or reset): the drag is one step of the undo history, stored now.
+    End,
 }
 
 /// Messages into the reducer.
@@ -400,8 +415,12 @@ pub enum Msg {
     CursorAt(Option<f64>),
     /// The dB | % toggle of the distortion pane.
     DistortionUnit(DistortionUnit),
-    /// The mouse on the transfer pane's legend.
-    Legend(LegendMsg),
+    /// The mouse on a plate over a plot.
+    Plate(PlateMsg),
+    /// The wheel over the transfer legend's rows: the first row shown.
+    LegendScroll {
+        first: usize,
+    },
     /// A click on the row of pane `p`'s legend that names `key`'s curve.
     LegendPick(PaneId, ac2_scene::trace::TraceKey),
     /// Mouse on an open dialog.

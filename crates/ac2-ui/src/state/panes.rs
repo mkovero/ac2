@@ -11,6 +11,7 @@ pub(super) mod meas_display;
 pub(super) mod meas_layout;
 pub(super) mod ops;
 pub(super) mod pane_export;
+pub(super) mod plates;
 pub(super) mod views;
 
 /// A pane of the tree. Stable for the pane's life: a split keeps the split pane's id and
