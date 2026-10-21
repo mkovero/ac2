@@ -645,9 +645,21 @@ ms). The `comb` line reads the two frequencies as neighbouring notches (or peaks
 a copy arriving `τ` later cancels every `1/τ` Hz, so `Δf` names the delay and the extra path
 the copy travelled, as min / max tracking does for evenly spaced dips. It shows only when
 the mark and the cursor are both on notches or both on peaks, as the jumps find them: a
-peak to a notch is half the spacing, and any other point has none. Put the mark on one
-notch and jump the cursor to the next; skipping a notch halves the delay read. **Alt+Shift+D** clears
-the mark, and so does turning the cursor off; **Esc** stays the stimulus's stop.
+peak to a notch is half the spacing, and any other point has none. Any two ripples of a
+room curve have a spacing, so the numbers need evidence, asked in this order:
+
+- **Smoothing.** A smoothed curve cannot show a comb finer than about twice its bandwidth
+  at the pair's upper frequency (`f · (2^(1/2n) − 2^(−1/2n))` for 1/n octave): the line
+  then reads `comb: smoothing 1/6 oct hides combs under 335 Hz here`. Turn the smoothing
+  down to look closer. Unsmoothed curves have no such limit.
+- **A third tooth.** A third notch (or peak) one `Δf` above the upper end or below the
+  lower, within 10 % of `Δf` (the tolerance min / max tracking uses), as the jumps find it
+  in the shown range. Without one the line reads `comb: uneven, no third notch` (or
+  `peak`): two uneven ripples say nothing about one delay.
+
+Put the mark on one notch and jump the cursor to the next; skipping a notch halves the
+delay read. **Alt+Shift+D** clears the mark, and so does turning the cursor off; **Esc**
+stays the stimulus's stop.
 
 #### Export a pane as PNG
 
@@ -1019,7 +1031,9 @@ When four or more neighbouring dips are evenly spaced on a linear axis (within 1
 notches of a comb are (a copy of the sound arriving `τ` later cancels every `1/τ` Hz), the
 list ends with the spacing, the delay it implies and the extra path it stands for at the
 session's air temperature: `comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C`. An
-uneven set shows nothing. **T** to traces only takes the list away and keeps the marks.
+uneven set shows nothing. The cursor mark reads the same comb from a chosen pair of notches
+and asks for less: one third notch one spacing beyond the pair
+([Cursor jumps and the mark](#cursor-jumps-and-the-mark-altp-altn-altd)). **T** to traces only takes the list away and keeps the marks.
 
 ### Math channels
 

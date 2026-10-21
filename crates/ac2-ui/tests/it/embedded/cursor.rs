@@ -28,7 +28,8 @@ fn transfer(s: &AppState) -> ac2_scene::tf::TfScene {
 /// stimulus stopped feeding it. Alt+P puts the cursor on a peak, a second Alt+P on a higher
 /// one and Alt+Shift+P back; Alt+D marks it, Alt+N goes on to a notch above, and the
 /// readout reads the cursor against the mark on the measurement's curve, with no comb from
-/// a peak to a notch; Alt+P to the next peak reads the comb that spacing would make.
+/// a peak to a notch; Alt+P to the next peak reads what the curve says of the comb that
+/// spacing would make.
 /// Alt+Shift+D clears the mark.
 #[test]
 fn cursor_jumps_and_mark_from_an_empty_daemon() -> R {
@@ -65,14 +66,16 @@ fn cursor_jumps_and_mark_from_an_empty_daemon() -> R {
     assert!(m.lines[1].starts_with("Δ +"), "{m:?}");
     // A peak to a notch is half a comb's spacing: no comb line.
     assert_eq!(m.lines.len(), 2, "{m:?}");
-    // Peak to peak is one.
+    // Peak to peak spaces one, if the curve repeats the spacing. This ripple is the
+    // average's noise, so whether a third peak falls one spacing beyond is chance from run
+    // to run: either verdict, but nothing else (the scene's tests pin which is which).
     d.key("Alt+P");
     let peak = d.st.view.cursor_hz.ok_or("cursor")?;
     assert!(peak > notch, "{notch} → {peak}");
     let m = transfer(&d.st).mark.ok_or("mark readout")?;
-    assert_eq!(
-        m.lines[2],
-        ac2_scene::readout::comb_text(peak - first, 20.0),
+    let confirmed = ac2_scene::readout::comb_text(peak - first, 20.0);
+    assert!(
+        m.lines[2] == confirmed || m.lines[2] == "comb: uneven, no third peak",
         "{m:?}"
     );
 
