@@ -101,25 +101,7 @@ pub fn search(query: &str, keymap: &Keymap, active: Scope) -> Vec<Entry> {
         .iter()
         .enumerate()
         .filter_map(|(i, &c)| {
-            let title = c.title();
-            let by_title = fuzzy(query, title);
-            // The snake_case name (what keys.toml uses) matches too, without highlighting.
-            let by_name = fuzzy(query, c.name()).map(|m| Match {
-                score: m.score - 5,
-                positions: vec![],
-            });
-            // Hidden keywords match too, a little below the title so a title hit leads, and
-            // never highlight: they are not on the row.
-            let by_keyword = c
-                .keywords()
-                .iter()
-                .filter_map(|k| fuzzy(query, k))
-                .map(|m| Match {
-                    score: m.score - KEYWORD_PENALTY,
-                    positions: vec![],
-                })
-                .max_by_key(|m| m.score);
-            let m = [by_title, by_name, by_keyword]
+            let m = [command_match(query, c), words_match(query, c)]
                 .into_iter()
                 .flatten()
                 .reduce(|a, b| if b.score > a.score { b } else { a })?;
@@ -130,7 +112,7 @@ pub fn search(query: &str, keymap: &Keymap, active: Scope) -> Vec<Entry> {
                 i,
                 Entry {
                     command: c,
-                    title,
+                    title: c.title(),
                     key: keymap.key_hint(c, active),
                     positions: m.positions,
                 },
@@ -141,6 +123,55 @@ pub fn search(query: &str, keymap: &Keymap, active: Scope) -> Vec<Entry> {
         rows.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     }
     rows.into_iter().map(|r| r.2).collect()
+}
+
+/// `query` as one run against the command's title, keys.toml name or one hidden keyword
+/// ([`CommandId::keywords`]).
+fn command_match(query: &str, c: CommandId) -> Option<Match> {
+    let by_title = fuzzy(query, c.title());
+    // The snake_case name (what keys.toml uses) matches too, without highlighting.
+    let by_name = fuzzy(query, c.name()).map(|m| Match {
+        score: m.score - 5,
+        positions: vec![],
+    });
+    // Hidden keywords match too, a little below the title so a title hit leads, and never
+    // highlight: they are not on the row.
+    let by_keyword = c
+        .keywords()
+        .iter()
+        .filter_map(|k| fuzzy(query, k))
+        .map(|m| Match {
+            score: m.score - KEYWORD_PENALTY,
+            positions: vec![],
+        })
+        .max_by_key(|m| m.score);
+    [by_title, by_name, by_keyword]
+        .into_iter()
+        .flatten()
+        .reduce(|a, b| if b.score > a.score { b } else { a })
+}
+
+/// Several words, each matching the title or a keyword on its own: "phase wrap" finds the
+/// phase view though no one string holds both words. Scored as the words' mean, so it
+/// ranks with single matches rather than above them for being longer.
+fn words_match(query: &str, c: CommandId) -> Option<Match> {
+    let words: Vec<&str> = query.split_whitespace().collect();
+    if words.len() < 2 {
+        return None;
+    }
+    let mut score = 0;
+    let mut positions = Vec::new();
+    for w in &words {
+        let m = command_match(w, c)?;
+        score += m.score;
+        positions.extend(m.positions);
+    }
+    positions.sort_unstable();
+    positions.dedup();
+    Some(Match {
+        score: score / words.len() as i32,
+        positions,
+    })
 }
 
 /// Commands the palette shows at once; PageUp / PageDown move by this many.
@@ -281,6 +312,9 @@ mod tests {
     fn hidden_keywords_find_the_command() {
         let k = Keymap::default();
         for (q, want) in [
+            ("wrap", CommandId::PhaseView),
+            ("phase wrap", CommandId::PhaseView),
+            ("wrapped phase", CommandId::PhaseView),
             ("unwrap", CommandId::PhaseView),
             ("unwrapped", CommandId::PhaseView),
             ("group delay", CommandId::PhaseView),
@@ -310,8 +344,10 @@ mod tests {
             for &w in c.keywords() {
                 for e in search(w, &k, Scope::Transfer) {
                     assert_eq!(e.title, e.command.title());
-                    let by_shown =
-                        fuzzy(w, e.title).is_some() || fuzzy(w, e.command.name()).is_some();
+                    // A word of it that matches the title on its own is highlighted there.
+                    let by_shown = fuzzy(w, e.title).is_some()
+                        || fuzzy(w, e.command.name()).is_some()
+                        || w.split_whitespace().any(|p| fuzzy(p, e.title).is_some());
                     if !by_shown {
                         assert!(e.positions.is_empty(), "{w}: {e:?}");
                     }
