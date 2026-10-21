@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 59`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 60`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -341,16 +341,22 @@ layout it receives for the measurement it has selected on screen and never sends
 A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axis: row |
 column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
 `ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is {`kind`,
-`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `chrome`, `meas`, `levels`}
+`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `chrome`, `meas`, `levels`,
+`plates`}
 (snake_case enums, `ac2_proto::model::layout`): its kind, the view of each kind it may be
 turned into, the measurement it was picked to show (`meas`: a `MeasId` or nil, nil being
 the measurement whose layout it is; a pick of a measurement gone since shows that one too)
 and the level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
 `spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
-when the pane first shows a curve). The focused pane, a maximised or full-screen pane and
-the window are each client's. `invalid` for a ratio out of range, for more than 16 panes
-and for a level range not finite with `hi` above `lo`; a session file's layout that is any
-of these is dropped on load.
+when the pane first shows a curve) and where its readout plates sit (`plates`: {`legend`,
+`readout`, `mark`}, each {`at`, `scale`}: `at` nil for the client's own placement or
+[x, y], each in 0 … 1, the plate's top-left corner as a fraction of the room the plot leaves
+around the plate, so a dropped plate stays inside its plot at any pane size; `scale` the
+plate's text size, 1 being the theme's; missing = all nil at 1). The focused pane, a
+maximised or full-screen pane and the window are each client's. `invalid` for a ratio out
+of range, for more than 16 panes, for a level range not finite with `hi` above `lo` and for
+a plate `at` outside 0 … 1 or a `scale` not finite and positive; a session file's layout
+that is any of these is dropped on load.
 
 `meas.compare` sets the curves drawn compared into the measurement's panes, first compared
 first (drawn above the later ones, under the measurement's own curves): `Compared` is

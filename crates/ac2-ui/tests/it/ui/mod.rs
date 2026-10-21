@@ -383,6 +383,25 @@ fn drag(h: &mut Harness<'_, App>, from: egui::Pos2, to: egui::Pos2) {
     settle(h, 3);
 }
 
+/// Two clicks at `at` in quick succession.
+fn double_click(h: &mut Harness<'_, App>, at: egui::Pos2) {
+    let button = |pressed| Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    h.event(Event::PointerMoved(at));
+    settle(h, 2);
+    // The harness gives each queued event a frame of a quarter second, longer than egui's
+    // 0.3 s between the clicks of a double click: both clicks go into one frame's input.
+    for _ in 0..2 {
+        h.input_mut().events.push(button(true));
+        h.input_mut().events.push(button(false));
+    }
+    settle(h, 3);
+}
+
 /// Runs a palette command by typing `what`.
 fn palette(h: &mut Harness<'_, App>, what: &str) {
     h.key_press_modifiers(Modifiers::COMMAND, Key::K);

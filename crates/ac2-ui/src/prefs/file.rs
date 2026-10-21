@@ -51,7 +51,13 @@ struct File {
     layout: Option<LayoutFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ir_levels: Option<IrLevelsFile>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// A `[legend]` that does not parse is dropped (with a warning in the log), as the
+    /// layout is: a legend shown again costs a key, a whole file set aside costs much more.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_legend"
+    )]
     legend: Option<LegendsFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window: Option<WindowFile>,
@@ -77,51 +83,31 @@ struct LegendsFile {
 struct LegendFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hidden: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    x: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    y: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_width: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_height: Option<f64>,
+}
+
+fn lenient_legend<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<LegendsFile>, D::Error> {
+    let v = toml::Value::deserialize(d)?;
+    match LegendsFile::deserialize(v) {
+        Ok(l) => Ok(Some(l)),
+        Err(e) => {
+            tracing::warn!("ui.toml: [legend] dropped, the legend shown: {e}");
+            Ok(None)
+        }
+    }
 }
 
 impl LegendFile {
-    fn parse(&self) -> Result<LegendPrefs, String> {
-        let d = LegendPrefs::default();
-        let limits = ac2_scene::legend::SIZE_LIMITS;
-        let (lo, hi) = (f64::from(*limits.start()), f64::from(*limits.end()));
-        let num = |name: &str, v: Option<f64>, default: f32, lo: f64, hi: f64| match v {
-            None => Ok(default),
-            Some(v) if (lo..=hi).contains(&v) => Ok(v as f32),
-            Some(_) => Err(format!(
-                "ui.toml: legend.transfer.{name} must be {lo} … {hi}"
-            )),
-        };
-        Ok(LegendPrefs {
-            hidden: self.hidden.unwrap_or(d.hidden),
-            x: num("x", self.x, d.x, 0.0, 1.0)?,
-            y: num("y", self.y, d.y, 0.0, 1.0)?,
-            max_width: num("max_width", self.max_width, d.max_width, lo, hi)?,
-            max_height: num("max_height", self.max_height, d.max_height, lo, hi)?,
-        })
+    fn parse(&self) -> LegendPrefs {
+        LegendPrefs {
+            hidden: self.hidden.unwrap_or(false),
+        }
     }
 
-    /// Only the choices moved off their defaults, to three decimals (a drag's fraction
-    /// has no meaningful digits beyond a pixel).
+    /// Only the choices moved off their defaults.
     fn from_prefs(l: &LegendPrefs) -> Option<LegendsFile> {
-        let d = LegendPrefs::default();
-        let v =
-            |x: f32, default: f32| (x != default).then(|| (f64::from(x) * 1000.0).round() / 1000.0);
-        let f = Self {
-            hidden: l.hidden.then_some(true),
-            x: v(l.x, d.x),
-            y: v(l.y, d.y),
-            max_width: v(l.max_width, d.max_width),
-            max_height: v(l.max_height, d.max_height),
-        };
-        (*l != d).then_some(LegendsFile { transfer: Some(f) })
+        l.hidden.then_some(LegendsFile {
+            transfer: Some(Self { hidden: Some(true) }),
+        })
     }
 }
 
@@ -245,6 +231,86 @@ impl PaneLevelsFile {
             spectrum_dbfs: v(l.spectrum_dbfs),
             spectrum_spl: v(l.spectrum_spl),
             distortion: v(l.distortion),
+        })
+    }
+}
+
+/// Where a pane's plates were dropped and their text size (`[layout.panes.plates.readout]`
+/// and so on); one left out sits where the scene puts it.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PanePlatesFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    legend: Option<PlateFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    readout: Option<PlateFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mark: Option<PlateFile>,
+}
+
+/// One plate: its place, fractions `[x, y]` of the room beside it, and its text scale.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlateFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    at: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scale: Option<f64>,
+}
+
+impl PanePlatesFile {
+    /// The plates; a place or scale out of bounds is left out, logged (a layout is a
+    /// convenience, read leniently).
+    pub(super) fn parse(f: Option<&Self>, pane: u32) -> Plates {
+        let mut out = Plates::default();
+        let Some(f) = f else {
+            return out;
+        };
+        let scales = ac2_scene::plate::SCALE_LIMITS;
+        for (kind, file) in [
+            (PlateKind::Legend, &f.legend),
+            (PlateKind::Readout, &f.readout),
+            (PlateKind::Mark, &f.mark),
+        ] {
+            let Some(file) = file else { continue };
+            let name = format!("{kind:?}").to_lowercase();
+            let p = out.get_mut(kind);
+            match file.at {
+                Some([x, y]) if (0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y) => {
+                    p.move_to(x as f32, y as f32);
+                }
+                Some(_) => tracing::warn!(
+                    "ui.toml: pane {pane}'s plates.{name}.at is not [x, y] within 0 … 1; left out"
+                ),
+                None => {}
+            }
+            match file.scale {
+                Some(s) if scales.contains(&(s as f32)) => p.set_scale(s as f32),
+                Some(_) => tracing::warn!(
+                    "ui.toml: pane {pane}'s plates.{name}.scale is not {} … {}; left out",
+                    scales.start(),
+                    scales.end()
+                ),
+                None => {}
+            }
+        }
+        out
+    }
+
+    /// The plates moved or scaled, to three decimals (a drag's fraction has no meaningful
+    /// digits beyond a pixel); `None` when every one sits where the scene puts it.
+    pub(super) fn of(p: &Plates) -> Option<Self> {
+        let r = |v: f32| (f64::from(v) * 1000.0).round() / 1000.0;
+        let one = |p: &PlatePlace| {
+            (!p.is_auto()).then(|| PlateFile {
+                at: p.at.map(|[x, y]| [r(x), r(y)]),
+                scale: (p.scale() != 1.0).then(|| r(p.scale())),
+            })
+        };
+        (!p.is_auto()).then(|| Self {
+            legend: one(&p.legend),
+            readout: one(&p.readout),
+            mark: one(&p.mark),
         })
     }
 }
@@ -644,7 +710,6 @@ impl UiPrefs {
                 .as_ref()
                 .and_then(|l| l.transfer.as_ref())
                 .map(LegendFile::parse)
-                .transpose()?
                 .unwrap_or_default(),
             recent_sessions: {
                 let mut r = f.recent_sessions;

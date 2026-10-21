@@ -422,6 +422,8 @@ pub struct SpectrumScene {
     /// The caption as drawn ([`caption_forms`]: the longest that leaves the unit room).
     pub caption: String,
     pub cursor: Option<SpectrumCursor>,
+    /// The plate of the cursor's values (and its mark's lines).
+    pub readout_box: Option<crate::plate::PlateBox>,
     /// The cursor read against its mark ([`ViewState::cursor_mark_hz`]) on the selected
     /// curve (else the pane's own); its lines follow the cursor's values.
     pub mark: Option<crate::readout::MarkReadout>,
@@ -447,6 +449,14 @@ pub struct SpectrumScene {
     pub stitches: Vec<crate::stitch::Stitch>,
     /// Its columns finer than the window behind them resolves, shaded.
     pub unresolved: Vec<crate::unresolved::RangeMark>,
+}
+
+impl SpectrumScene {
+    /// The plates the operator moves: the cursor values (the legend is rows above the
+    /// plot, no plate; the mark's lines ride on the cursor values' plate).
+    pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
+        self.readout_box.into_iter().collect()
+    }
 }
 
 /// The bands of the selected curve that has them, else of the first that does; `None`

@@ -10,14 +10,14 @@ use eframe::egui;
 
 use ac2_scene::view::{DistortionUnit, IrPane};
 
-use crate::app::{App, CachedScene, LegendDrag};
+use crate::app::{App, CachedScene, PlateDrag, PlateGrab};
 use crate::hints::{self, KeyHint};
 use crate::keys::{CommandId, Scope};
 use crate::plot::{self, PlotSlot};
 use crate::scenes;
 use crate::state::{
-    Axis, DragMsg, HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow,
-    PaneRect, StripMsg, TransferView, drop_target,
+    Axis, DragMsg, HintPlace, IrNavMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow, PaneRect,
+    PlateMsg, StripMsg, TransferView, drop_target,
 };
 use crate::theme::Chrome;
 
@@ -118,6 +118,7 @@ fn scene_for(
     let st = &app.state;
     let mut unit_tip = None;
     let mut legend = None;
+    let mut plates = Vec::new();
     let mut legend_hits = Vec::new();
     let (scene, axes) = match pane {
         PaneKind::Transfer if view.shows_ir() => {
@@ -146,6 +147,7 @@ fn scene_for(
         }
         PaneKind::Transfer => {
             let s = scenes::transfer(st, id, theme, vp, now);
+            plates = s.plates();
             legend = s.legend_box;
             legend_hits = s.legend_hits;
             let y = s
@@ -167,6 +169,7 @@ fn scene_for(
         PaneKind::Spectrum if view.modes.spectrum.spectrograph() => {
             let s = scenes::spectrograph(st, id, theme, vp, now);
             if let Some(sp) = &s.spectrum {
+                plates = sp.plates();
                 legend_hits = sp.legend_hits.clone();
                 let r = sp.unit_rect;
                 unit_tip = sp.unit_help.clone().map(|h| {
@@ -189,6 +192,7 @@ fn scene_for(
         }
         PaneKind::Spectrum => {
             let s = scenes::spectrum(st, id, theme, vp, now);
+            plates = s.plates();
             legend_hits = s.legend_hits;
             let r = s.unit_rect;
             unit_tip = s.unit_help.map(|h| {
@@ -247,6 +251,7 @@ fn scene_for(
             strip: axes.strip,
             unit_tip,
             legend,
+            plates,
             legend_hits,
         },
     );
@@ -355,7 +360,7 @@ fn pane(
         }
         // Full screen keeps the mouse: wheel zooms frequency, Ctrl/Shift+wheel the level
         // axis, as in the split layout.
-        let took = legend_mouse(app, ui, &resp, id, rect);
+        let took = plates_mouse(app, ui, &resp, id, rect);
         navigate(app, ui, &resp, id, rect, axes, took);
         return;
     }
@@ -487,7 +492,7 @@ fn pane(
             HintPlace::Title => title_hint(ui, title, caption_end + 16.0, &hint.text, ch),
         }
     }
-    let took = legend_mouse(app, ui, &resp, id, plot_rect);
+    let took = plates_mouse(app, ui, &resp, id, plot_rect);
     navigate(
         app,
         ui,

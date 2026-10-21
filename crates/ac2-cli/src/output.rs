@@ -220,6 +220,9 @@ pub fn measurement(m: &Measurement) -> String {
             if !p.levels.is_empty() {
                 said.push("level axis set".to_owned());
             }
+            if p.plates != Default::default() {
+                said.push("plates moved".to_owned());
+            }
             if !said.is_empty() {
                 s.push_str(&format!(" · pane {}: {}", i + 1, said.join(", ")));
             }

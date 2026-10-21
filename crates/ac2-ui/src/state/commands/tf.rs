@@ -155,10 +155,10 @@ impl AppState {
                 });
             }
             C::CoherencePlacement => self.toggle_coherence_placement(),
-            C::LegendTopLeft => self.view.tf.legend.snap(LegendCorner::TopLeft),
-            C::LegendTopRight => self.view.tf.legend.snap(LegendCorner::TopRight),
-            C::LegendBottomLeft => self.view.tf.legend.snap(LegendCorner::BottomLeft),
-            C::LegendBottomRight => self.view.tf.legend.snap(LegendCorner::BottomRight),
+            C::LegendTopLeft => self.snap_legend(LegendCorner::TopLeft),
+            C::LegendTopRight => self.snap_legend(LegendCorner::TopRight),
+            C::LegendBottomLeft => self.snap_legend(LegendCorner::BottomLeft),
+            C::LegendBottomRight => self.snap_legend(LegendCorner::BottomRight),
             C::LegendHide => {
                 let hidden = !self.view.tf.legend.hidden;
                 self.view.tf.legend.hidden = hidden;

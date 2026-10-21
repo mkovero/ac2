@@ -93,6 +93,8 @@ impl AppState {
         };
         v.chrome = modes.chrome;
         v.distortion.reference = modes.sweep_reference;
+        v.plates = self.layout.view(id).map(|v| v.plates).unwrap_or_default();
+        v.plate_hover = self.plate_hover.filter(|(p, _)| *p == id).map(|(_, h)| h);
         // The transfer scene lays out the plots it is asked for: one alone fills the pane.
         // The coherence rides on the magnitude view only when placed over it.
         let over =

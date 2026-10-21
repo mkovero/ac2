@@ -81,6 +81,8 @@ struct PaneEntryFile {
     chrome: ChromeFile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     levels: Option<PaneLevelsFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plates: Option<PanePlatesFile>,
 }
 
 impl PaneEntryFile {
@@ -120,6 +122,7 @@ impl PaneEntryFile {
             sweep_reference: m.sweep_reference,
             chrome: ChromeFile::of(m.chrome),
             levels: PaneLevelsFile::of(&p.levels),
+            plates: PanePlatesFile::of(&p.plates),
         }
     }
 
@@ -160,6 +163,7 @@ impl PaneEntryFile {
                 chrome: self.chrome.chrome(),
             },
             levels: PaneLevelsFile::parse(self.levels.as_ref(), self.id),
+            plates: PanePlatesFile::parse(self.plates.as_ref(), self.id),
         }
     }
 }

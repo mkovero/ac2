@@ -671,6 +671,8 @@ mod settings_mirror;
 
 mod drag_undo;
 
+mod plates;
+
 /// Shift+C steps the selected measurement's colour to one no other measurement has
 /// (`meas.colour`); the palette's previous colour steps back, grey last.
 #[test]

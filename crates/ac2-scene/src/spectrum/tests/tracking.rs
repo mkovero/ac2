@@ -75,12 +75,9 @@ fn tracked_peaks_are_listed_under_the_cursor_and_marked() {
         .iter()
         .find(|l| l.text.starts_with("1  1.00 kHz"))
         .expect("list drawn");
-    let cursor = labels
-        .iter()
-        .find(|l| l.text.starts_with("1.00 kHz\n"))
-        .expect("cursor readout drawn");
-    assert!(!intersects(label_box(list), label_box(cursor)));
-    assert!(list.pos[1] > cursor.pos[1]);
+    let cursor = s.readout_box.expect("cursor readout drawn").rect;
+    assert!(!intersects(label_box(list), cursor));
+    assert!(list.pos[1] > cursor.bottom());
     // Rank numbers beside the marks.
     for k in ["1", "2", "3"] {
         assert!(labels.iter().any(|l| l.text == k), "rank {k}");
@@ -152,4 +149,37 @@ fn an_offset_curve_lists_its_displayed_levels_under_its_name() {
         list.starts_with("RTA · offset +6.0 dB\n1  1.00 kHz  −26.0 dBFS (band)"),
         "{list}"
     );
+}
+
+/// The cursor values dragged to the plot's bottom-left at twice the text size: their plate
+/// sits there, and the peak list takes the top of the plot's right side they left.
+#[test]
+fn dragged_cursor_values_leave_the_list_the_top() {
+    let g = third_octaves();
+    let (f, e) = (g.centres(), g.edges());
+    let level = levels(&f);
+    let peaks = tracked_rta(&f, &level);
+    let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    t.tracked = Some(&peaks);
+    let mut v = view(PlotChrome::Full);
+    v.plates.readout.at = Some([0.0, 1.0]);
+    v.plates.readout.scale = 2.0;
+    let s = spectrum_scene(&[t], &Status::default(), &v, &Theme::dark(), SIZE);
+    let b = s.readout_box.expect("cursor values");
+    assert_eq!(b.area, s.plot);
+    assert_eq!(b.scale, 2.0);
+    assert_eq!(b.rect.x, s.plot.x + crate::legend::INSET);
+    assert_eq!(b.rect.bottom(), s.plot.bottom() - crate::legend::INSET);
+    let labels = &s.scene.layers[2].labels;
+    let freq = labels
+        .iter()
+        .find(|l| l.text == "1.00 kHz")
+        .expect("frequency");
+    assert_eq!(freq.size, 2.0 * Theme::dark().small_font_size);
+    let list = labels
+        .iter()
+        .find(|l| l.text.starts_with("1  1.00 kHz"))
+        .expect("list drawn");
+    assert_eq!(list.pos[1], s.plot.y + 22.0);
+    assert_eq!(s.plates(), vec![b]);
 }

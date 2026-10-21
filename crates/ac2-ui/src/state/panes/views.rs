@@ -3,6 +3,7 @@
 
 use crate::state::panes::MIN_RATIO;
 use crate::state::*;
+use ac2_scene::plate::Plates;
 
 /// What a transfer pane draws of its measurement (G steps through them in this order,
 /// Shift+G back). Each fills the pane: one quantity read at the full height. Magnitude,
@@ -155,6 +156,8 @@ pub struct View {
     /// selection.
     pub meas: Option<MeasId>,
     pub modes: PaneModes,
+    /// Where the operator dropped the plates over its plot, and their text size.
+    pub plates: Plates,
 }
 
 impl View {
@@ -163,6 +166,7 @@ impl View {
             kind,
             meas: None,
             modes: PaneModes::default(),
+            plates: Plates::default(),
         }
     }
 

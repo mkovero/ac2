@@ -153,7 +153,8 @@ pub(super) fn sweep_config() -> SweepConfig {
 }
 
 /// A transfer pane beside an SPL meter, the transfer one in its phase view with its level
-/// axis zoomed, the meter picked for measurement 2.
+/// axis zoomed and its cursor values dragged to the bottom-left at twice the text size, the
+/// meter picked for measurement 2.
 pub fn pane_layout() -> PaneLayout {
     use crate::model::layout::*;
     let pane = |kind, transfer_view| LayoutPane {
@@ -165,6 +166,7 @@ pub fn pane_layout() -> PaneLayout {
         chrome: PlotChrome::Full,
         meas: None,
         levels: LayoutLevels::default(),
+        plates: LayoutPlates::default(),
     };
     PaneLayout::Split {
         axis: SplitAxis::Row,
@@ -177,6 +179,13 @@ pub fn pane_layout() -> PaneLayout {
                         hi: 12.0,
                     }),
                     ..LayoutLevels::default()
+                },
+                plates: LayoutPlates {
+                    readout: LayoutPlate {
+                        at: Some([0.0, 1.0]),
+                        scale: 2.0,
+                    },
+                    ..LayoutPlates::default()
                 },
                 ..pane(PaneKind::Transfer, TransferView::Phase)
             }),

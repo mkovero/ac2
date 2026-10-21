@@ -392,11 +392,13 @@ fn spectrum_math() {
 
 /// Many curves from an empty daemon: target curves imported one after another fill the
 /// transfer legend. Its rows sit on a plate in the plot's colour; at most 70 % of the pane tall,
-/// the rest scroll with the wheel over it. A drag moves it, a drag on its grip makes it
-/// narrower, the palette snaps it to a corner and hides it, and ui.toml keeps all that.
+/// the rest scroll with the wheel over it. A drag moves it, a drag on its grip enlarges its
+/// text, a double-click puts it back, the palette snaps it to a corner and hides it, and
+/// ui.toml keeps all that.
 #[test]
 fn transfer_legend_many_curves() {
-    use ac2_scene::legend::{LegendCorner, LegendHover};
+    use ac2_scene::legend::LegendCorner;
+    use ac2_scene::plate::{PlateHover, PlateKind, PlatePlace};
     if !have_gpu("transfer_legend_many_curves") {
         return;
     }
@@ -434,15 +436,25 @@ fn transfer_legend_many_curves() {
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
     settle(&mut h, 3);
     let legend = |h: &Harness<'_, App>| h.state().state.view.tf.legend;
-    let (plate, _) = h.state().legend_rects().expect("legend drawn");
+    let id = h.state().state.layout.focus;
+    let place = |a: &App| a.state.layout.view(id).expect("pane").plates.legend;
+    let rects = |h: &Harness<'_, App>| h.state().plate_rects(id, PlateKind::Legend);
+    let (plate, _) = rects(&h).expect("legend drawn");
     let pane = h.state().state.layout.focus_kind();
     assert_eq!(pane, PaneKind::Transfer);
+    let hover = |h: &Harness<'_, App>| h.state().state.plate_hover.map(|(_, p)| p);
 
     // The wheel over it scrolls its rows (the frequency axis stays).
     let freq = h.state().state.view.freq;
     h.event(Event::PointerMoved(plate.center()));
     settle(&mut h, 3);
-    assert_eq!(legend(&h).hover, Some(LegendHover::Plate));
+    assert_eq!(
+        hover(&h),
+        Some(PlateHover {
+            kind: PlateKind::Legend,
+            grip: false
+        })
+    );
     for _ in 0..2 {
         h.event(Event::MouseWheel {
             unit: egui::MouseWheelUnit::Line,
@@ -457,7 +469,7 @@ fn transfer_legend_many_curves() {
     h.event(Event::PointerMoved(egui::pos2(900.0, 700.0)));
     h.state_mut().state.toasts.list.clear();
     settle(&mut h, 3);
-    assert_eq!(legend(&h).hover, None);
+    assert_eq!(hover(&h), None);
     dense_snapshot(&mut h, "transfer_legend_many_curves");
 
     // Dragged right and down: off its corner, the cursor not placed by the click.
@@ -467,26 +479,29 @@ fn transfer_legend_many_curves() {
         plate.center() + egui::vec2(400.0, 120.0),
     );
     step_until(&mut h, "moved", |a| {
-        let l = a.state.view.tf.legend;
-        l.x > 0.3 && l.y > 0.1
+        place(a).at.is_some_and(|[x, y]| x > 0.3 && y > 0.1)
     });
     assert_eq!(h.state().state.view.cursor_hz, None);
-    assert_eq!(legend(&h).corner(), None);
-    // Its grip dragged left: narrower.
-    let (_, grip) = h.state().legend_rects().expect("legend drawn");
-    let width = legend(&h).max_width;
+    // Its grip dragged out: larger text.
+    let (_, grip) = rects(&h).expect("legend drawn");
     drag(
         &mut h,
         grip.center(),
-        grip.center() - egui::vec2(150.0, 0.0),
+        grip.center() + egui::vec2(150.0, 60.0),
     );
-    step_until(&mut h, "narrower", |a| {
-        a.state.view.tf.legend.max_width < width
-    });
+    step_until(&mut h, "larger", |a| place(a).scale > 1.2);
+    // Double-clicked: back in its corner at the plot's text size.
+    let (plate, _) = rects(&h).expect("legend drawn");
+    double_click(&mut h, plate.center());
+    step_until(&mut h, "put back", |a| place(a) == PlatePlace::default());
+    assert_eq!(h.state().state.view.cursor_hz, None);
 
     // Snapped to a corner from the palette, in the light theme.
     palette(&mut h, "legend bottom-right");
-    assert_eq!(legend(&h).corner(), Some(LegendCorner::BottomRight));
+    assert_eq!(
+        place(h.state()).at,
+        Some(LegendCorner::BottomRight.position())
+    );
     palette(&mut h, "theme");
     step_until(&mut h, "light", |a| a.state.theme == ThemeName::Light);
     h.event(Event::PointerMoved(egui::pos2(900.0, 120.0)));
@@ -494,14 +509,14 @@ fn transfer_legend_many_curves() {
     settle(&mut h, 3);
     dense_snapshot(&mut h, "transfer_legend_many_curves_light");
 
-    // Hidden, and kept so.
+    // Hidden, and kept so; the pane keeps its place.
     palette(&mut h, "hide legend");
     assert!(legend(&h).hidden);
-    assert!(h.state().legend_rects().is_none());
-    let kept = h.state().state.prefs.legend;
-    assert!(kept.hidden);
-    assert_eq!([kept.x, kept.y], [1.0, 1.0]);
-    assert!(kept.max_width < width);
+    assert!(rects(&h).is_none());
+    assert!(h.state().state.prefs.legend.hidden);
+    let kept = h.state().state.prefs.layout.panes.clone().expect("panes");
+    let v = kept.views.iter().find(|v| v.id == id).expect("pane kept");
+    assert_eq!(v.plates.legend.at, Some([1.0, 1.0]));
 }
 
 /// P on the transfer pane: min / max tracking marks the magnitude's peak (▲) and lists it on

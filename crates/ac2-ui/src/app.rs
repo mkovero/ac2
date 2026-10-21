@@ -124,20 +124,30 @@ pub(crate) struct CachedScene {
     pub strip: Option<crate::scenes::StripPlace>,
     /// Where on the scene the level axis's unit is drawn and what it means, for a tooltip.
     pub unit_tip: Option<(egui::Rect, String)>,
-    /// Where the scene put its legend, for moving, resizing and scrolling it.
+    /// Where the scene put its legend, for scrolling it.
     pub legend: Option<ac2_scene::legend::LegendBox>,
+    /// Where the scene put its plates (the legend's among them), for moving and scaling
+    /// them; the last on top.
+    pub plates: Vec<ac2_scene::plate::PlateBox>,
     /// Where the scene drew each legend row and whose curve it names: a click selects it.
     pub legend_hits: Vec<ac2_scene::legend::LegendHit>,
 }
 
-/// A drag on the legend: where on the plate (or its grip) the pointer took it, so the
-/// plate keeps that point under the pointer.
+/// A drag on a plate: which, and where on the plate (or its grip) the pointer took it, so
+/// the plate keeps that point under the pointer.
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum LegendDrag {
+pub(crate) struct PlateDrag {
+    pub pane: crate::state::PaneId,
+    pub kind: ac2_scene::plate::PlateKind,
+    pub how: PlateGrab,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum PlateGrab {
     /// From its top-left corner.
     Move { grab: egui::Vec2 },
-    /// From its bottom-right corner.
-    Resize { grab: egui::Vec2 },
+    /// From its bottom-right corner: the text scale.
+    Scale { grab: egui::Vec2 },
 }
 
 pub struct App {
@@ -170,9 +180,14 @@ pub struct App {
     /// The time-driven texts the panes were last built with ([`ClockTexts`]).
     clock: ClockTexts,
     pub(crate) scenes: HashMap<crate::state::PaneId, CachedScene>,
-    pub(crate) legend_drag: Option<LegendDrag>,
-    /// Where the transfer legend's plate and grip were last drawn, on screen.
-    pub(crate) legend_screen: Option<(egui::Rect, egui::Rect)>,
+    pub(crate) plate_drag: Option<PlateDrag>,
+    /// Where each pane's plates and their grips were last drawn, on screen.
+    pub(crate) plate_screen: Vec<(
+        crate::state::PaneId,
+        ac2_scene::plate::PlateKind,
+        egui::Rect,
+        egui::Rect,
+    )>,
     /// Wheel travel over the legend not yet a whole row.
     pub(crate) legend_wheel: f32,
     /// Where each pane was last drawn, on screen: what a dragged list row is dropped on.
@@ -281,8 +296,8 @@ impl App {
             pane_generations: HashMap::new(),
             clock: ClockTexts::default(),
             scenes: HashMap::new(),
-            legend_drag: None,
-            legend_screen: None,
+            plate_drag: None,
+            plate_screen: Vec::new(),
             legend_wheel: 0.0,
             pane_rects: Vec::new(),
             plots,
@@ -422,10 +437,17 @@ impl App {
         self.pane_generations.get(&p).copied().unwrap_or(0)
     }
 
-    /// Where the transfer legend's plate and its resize grip were last drawn, on screen
+    /// Where pane `pane`'s plate `kind` and its scale grip were last drawn, on screen
     /// (what a test points the mouse at).
-    pub fn legend_rects(&self) -> Option<(egui::Rect, egui::Rect)> {
-        self.legend_screen
+    pub fn plate_rects(
+        &self,
+        pane: crate::state::PaneId,
+        kind: ac2_scene::plate::PlateKind,
+    ) -> Option<(egui::Rect, egui::Rect)> {
+        self.plate_screen
+            .iter()
+            .find(|p| p.0 == pane && p.1 == kind)
+            .map(|p| (p.2, p.3))
     }
 
     /// Marks `panes` as changed: their scenes are rebuilt on the next pass.
@@ -465,7 +487,7 @@ impl App {
                 _ => PaneKind::ALL.to_vec(),
             },
             Touches::Spl => vec![PaneKind::Spl],
-            Touches::Legend => vec![PaneKind::Transfer],
+            Touches::Plates => vec![PaneKind::Transfer, PaneKind::Spectrum],
             Touches::All => PaneKind::ALL.to_vec(),
         };
         self.touch(&panes);
@@ -627,8 +649,8 @@ enum Touches {
     Spl,
     /// The toasts' hover and dismissal: no pane.
     Toasts,
-    /// The mouse on the legend: the transfer pane only, rebuilt on every step of a drag.
-    Legend,
+    /// The mouse on a plate: the panes that draw plates, rebuilt on every step of a drag.
+    Plates,
     /// Keys, commands, replies: anything may change.
     All,
 }
@@ -646,7 +668,7 @@ impl Touches {
             | Msg::RowDrag(crate::state::DragMsg::Start(_) | crate::state::DragMsg::Over { .. }) => {
                 Self::Toasts
             }
-            Msg::Legend(_) => Self::Legend,
+            Msg::Plate(_) | Msg::LegendScroll { .. } => Self::Plates,
             Msg::LeqStrip(..) => Self::Spl,
             Msg::Conn(e) => match **e {
                 ConnEvent::Data(_) => Self::Data,

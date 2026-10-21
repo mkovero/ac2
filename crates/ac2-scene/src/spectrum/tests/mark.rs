@@ -63,18 +63,19 @@ fn jumps_and_the_mark_read_the_drawn_levels() {
     // between the bump and the dip, whose tails cancel there: −40 dB. A peak to a column
     // that is neither peak nor notch spaces no comb.
     assert_eq!(m.lines, ["mark 1.00 kHz", "Δ +1.00 kHz · −9.0 dB"]);
-    // Under the cursor's values, in one label.
-    let label = s
+    // Under the cursor's values, on their plate.
+    let plate = s.readout_box.expect("cursor values").rect;
+    let labels: Vec<_> = s
         .scene
         .layers
         .iter()
         .flat_map(|l| &l.labels)
-        .find(|l| l.text.starts_with("2.00 kHz"))
-        .expect("cursor label");
-    assert!(
-        label.text.ends_with("Δ +1.00 kHz · −9.0 dB"),
-        "{}",
-        label.text
+        .filter(|l| l.pos[1] > plate.y && l.pos[1] < plate.bottom() && l.pos[0] > plate.x)
+        .collect();
+    assert!(labels[0].text.starts_with("2.00 kHz"), "{}", labels[0].text);
+    assert_eq!(
+        labels.last().map(|l| l.text.as_str()),
+        Some("Δ +1.00 kHz · −9.0 dB")
     );
     // Nor does the peak to the notch: half a comb's spacing, not one.
     view.cursor_hz = notch;

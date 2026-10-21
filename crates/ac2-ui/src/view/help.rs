@@ -243,6 +243,14 @@ const PAIRS: [(CommandId, CommandId, &str); 17] = {
     ]
 };
 
+/// The mouse on the legend and readout plates: no key does this, and the plates are where
+/// the eye already is, so the help names the gestures with the pane's keys, on one row to
+/// keep the busiest pane's help within its columns.
+const PLATE_MOUSE: [(&str, &str); 1] = [(
+    "Drag plate",
+    "Move it; its corner: text size; double-click: back",
+)];
+
 /// The widest key text the help's key column holds (`Alt+Shift+V`).
 const KEY_COLUMN_CHARS: usize = 11;
 
@@ -254,6 +262,12 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
         if !pane.is_empty() {
             rows.push(HelpRow::Header(format!("{} pane", active.title())));
             rows.extend(pane);
+            if matches!(active, Scope::Transfer | Scope::Spectrum) {
+                rows.extend(PLATE_MOUSE.iter().map(|(keys, title)| HelpRow::Bind {
+                    keys: (*keys).into(),
+                    title: (*title).into(),
+                }));
+            }
         }
     }
     for section in Section::ALL {
@@ -589,6 +603,10 @@ mod tests {
         assert!(b.contains(&("Delete\nBackspace", CommandId::DeleteSelected.title())));
         // The help shows the palette's own words.
         assert!(b.contains(&("Space", "Arm stimulus")));
+        // The plates' mouse gestures under the pane's keys.
+        assert!(b.contains(&PLATE_MOUSE[0]));
+        let ir = help_rows(&Keymap::default(), Scope::Ir);
+        assert!(!binds(&ir).contains(&PLATE_MOUSE[0]));
     }
 
     #[test]

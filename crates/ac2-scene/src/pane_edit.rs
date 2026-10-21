@@ -115,6 +115,8 @@ pub enum PaneEdit {
     View(usize),
     /// T: pane `n`'s grid and labels.
     Chrome(usize),
+    /// A plate over pane `n`'s plot dragged, scaled or put back.
+    Plates(usize),
     /// W or F.
     Screen(ScreenStep),
 }
@@ -131,6 +133,7 @@ impl PaneEdit {
             PaneEdit::Stack(n) => format!("transfer stack in pane {n}"),
             PaneEdit::View(n) => format!("view of pane {n}"),
             PaneEdit::Chrome(n) => format!("grid and labels of pane {n}"),
+            PaneEdit::Plates(n) => format!("plates of pane {n}"),
             PaneEdit::Screen(s) => match s {
                 ScreenStep::AllPanes => "all panes".into(),
                 ScreenStep::Alone(n) => format!("pane {n} alone"),

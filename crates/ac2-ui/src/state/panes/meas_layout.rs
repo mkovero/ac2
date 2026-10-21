@@ -521,6 +521,7 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
         },
         meas: v.meas,
         levels,
+        plates: super::plates::wire_plates(&v.plates),
     }
 }
 
@@ -533,6 +534,7 @@ fn ui_view(p: &wire::LayoutPane) -> View {
             wire::PaneKind::Distortion => PaneKind::Distortion,
         },
         meas: p.meas,
+        plates: super::plates::ui_plates(&p.plates),
         modes: PaneModes {
             transfer: match p.transfer_view {
                 wire::TransferView::Magnitude => TransferView::Magnitude,
