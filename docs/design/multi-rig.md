@@ -101,8 +101,9 @@ pub enum RigRef {
     Active,
     /// Session files only: the rig this session belongs to, whatever tab is active at load.
     ThisRig,
-    /// A pinned rig, by key; the name is for the operator when it is absent.
-    Rig { key: ServerKey, name: String },
+    /// A pinned rig, by its RigId (§1; never the CURVE key, which a local rig lacks and a
+    /// rig moving to network mode gains); the name is for the operator when it is absent.
+    Rig { id: RigId, name: String },
 }
 ```
 
@@ -130,7 +131,7 @@ Programme pane opened from a pair row (a child row; no measurement chosen) is li
 app's: child rows never store panes (list click model), so it is saved in the layout prefs
 only.
 
-Layout prefs save `Rig` by key and name. Loading a session whose panes reference a rig this
+Layout prefs save `Rig` by id and name. Loading a session whose panes reference a rig this
 app has not connected shows those panes as *ketunkolo not connected* with the content's
 name, so the layout survives and says what is missing.
 
@@ -239,7 +240,8 @@ rig and are display only (`ac2-discovery` already trusts nothing).
    the daemon's refusal of `Active` (`PROTO_VERSION` and session format bump), picker per
    rig, arm line and banner naming the rig, Shift+Escape stopping every rig, Connect… adds a
    rig, remembered rigs. Tests: the app's e2e tests start two fake daemons; a session saved with
-   `ThisRig` panes loads right on either tab.
+   `ThisRig` panes loads right on either tab, and a `Rig` pin resolves by id after the
+   pinned daemon reconnects on another address.
 2. **Clock reporting and stimulus chips** — daemon state gains the clock lines of §4
    (`PROTO_VERSION` bump), Connection page shows them, `ac2 status` prints them; other-rig
    stimulus chips in the top bar.
