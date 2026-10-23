@@ -15,6 +15,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - Designed, not built: programme metering on the console feed (input domains, stereo pairs,
   PPM ballistics, correlation, ember goniometer, Programme pane, loudness as stage 3):
   `docs/design/programme-meter.md`, decisions V1–V6.
+- Designed, not built: many rigs in one app (tabs, mixed panes, remote inputs, clocks across
+  PTP hosts): `docs/design/multi-rig.md`, decisions N1–N6.
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.

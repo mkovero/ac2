@@ -164,6 +164,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Rolling Leq windows, limits and alarms; filling windows judged on their energy budget; informational regulation presets (done: `docs/design/leq.md`) | P1 | new | 7 |
 | Continuous crash-safe logging, export (done for the per-second LAeq/LCeq/LZeq log: autosaved, in sessions, CSV export) | P1 | new | 7 |
 | Programme metering on the console feed: input domains (line/digital, dBu), stereo pairs, PPM ballistics + true peak + overs, correlation, ember goniometer, Programme pane; LUFS / true peak as its stage 3 (designed: `docs/design/programme-meter.md`) | P2 | new (ac for loudness vectors) | 7 |
+| Many rigs in one app: tabs per daemon, panes mixing rigs, remote inputs between daemons, clock relation across PTP hosts (designed: `docs/design/multi-rig.md`) | P2 | new | 7 |
 
 ### 3.7 IR / room acoustics
 | Feature | Pri | Src | Phase |

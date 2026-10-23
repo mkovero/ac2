@@ -3,6 +3,12 @@
 Work found in use, not yet scheduled into a phase. Newest first. When an item lands, move it
 to `backlog-done.md` as one line with the commit.
 
+## Many rigs in one app (design `multi-rig.md`)
+
+- **Not started.** Stages: (1) tabs, per-rig state, mixed panes, no wire change; (2) clock
+  reporting; (3) remote inputs over `audio.subscribe`. Open before stage 1: tab-switch key
+  and where the rig name lives (tab bar vs top-bar session line).
+
 ## Programme metering (design `programme-meter.md`)
 
 - **Not started.** Stages: (1) input domains + pairs + line calibration, (2) PPM ballistics,
