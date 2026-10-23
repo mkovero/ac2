@@ -2,15 +2,17 @@
 
 One app connects to any number of daemons. Each is a full rig — session, measurement tree,
 stimulus, calibrations — exactly as the single daemon is today; nothing is a watered-down
-"viewer" mode. Panes may show any rig's measurement side by side, and a measurement on one
-rig may take an input from another. Decisions N1–N6 in `open-questions.md`.
+"viewer" mode. Panes may show any rig's measurement side by side, and (stage 3) a
+measurement on one rig may take a microphone or line input from another. Decisions N1–N6 in
+`open-questions.md`. Revised 2026-10-23 after an independent review: the state refactor is
+the bulk of stage 1, pane references are a wire change, and cross-host timing rests on
+backend capture timestamps and resampling, not on the fan-out's wall stamp.
 
 Operator's framing (2026-10-23): keep every connection functionally identical to the first;
-switch between them; by default they are sub-sessions with tabs; nothing prevents including
-another daemon's channels in a measurement. Different magic states would confuse, and there
-is no reason to cripple the other rigs. The math is the daemon's; the app renders streams.
-Both rigs in use (pupu, ketunkolo) take their system clock from PTP, so timing between
-daemons can be sharp.
+switch between them; by default they are sub-sessions with tabs; another daemon's channels
+can go into a measurement. Different magic states would confuse, and there is no reason to
+cripple the other rigs. The math is the daemon's; the app renders streams. Both rigs in use
+(pupu, ketunkolo) take their system clock from PTP.
 
 ## What the operator gets
 
@@ -19,25 +21,31 @@ daemons can be sharp.
 - **Tabs**, one per rig, named by the rig (never trusted beyond display). The active tab is
   the rig the single-rig keys talk to: Space arms *its* stimulus, Enter opens *its* session,
   the tree is *its* tree, Settings' Audio & I/O is *its* devices. Switching tabs switches all
-  of that; nothing else changes.
+  of that; nothing else changes. With more than one rig connected the arm line and the
+  stimulus banner **name the rig** (*arm pupu's stimulus · Space*): sound must never leave a
+  system the operator did not mean.
 - **Panes are the app's**, not a tab's: the pane tree stays when the tab changes, and a pane
-  shows a measurement of any connected rig. A pane's title names the rig when it is not the
-  active one (*pupu · Stage*). Pick and drag work across rigs: the picker lists every rig's
-  measurements under a heading per rig.
-- **Remote inputs**: a rig's session may include an input channel of another rig (*ketunkolo
-  · in 3*). It appears on the Audio & I/O page under its rig, with its name, domain and
-  calibration as that rig states them, and goes into measurements like a local input.
+  shows a measurement, input set or pair of any connected rig. A pane's title names the rig
+  when it is not the active one (*pupu · Stage*). Pick and drag work across rigs: the picker
+  lists every rig's measurements under a heading per rig.
+- **Remote inputs** (stage 3): a rig's session may include a mic or line input of another
+  rig (*ketunkolo · in 3*). It appears on the Audio & I/O page under its rig, with its name,
+  kind and calibration as that rig states them, and goes into measurements like a local
+  input — a new measurement simply offers the other rigs' channels.
 - **Clocks**: the Connection page says, per rig, how its sample clock runs against its system
-  clock and whether the system clock is disciplined; between two rigs, the offset and drift of
-  their capture streams. A cross-rig measurement states which clock relation it rests on.
+  clock and what the OS says about that clock; between two rigs, the measured relation of
+  their capture streams once a stream exists. A cross-rig measurement states what its time
+  axis rests on.
 
 The two rigs in use: a Programme pane with ketunkolo's console-feed loudness beside pupu's
 SPL meter at the place, in one layout, on one screen (or one Pi).
 
 ## 1. One state per rig, one layout per app (N1)
 
-Today's `State` is the state of one rig: connection, session, tree, selection, stimulus,
-dialogs that belong to a session. It stays as it is and becomes `RigState`; the app holds
+Today's `AppState` (`ac2-ui/src/state.rs`) mixes two things: what belongs to a rig
+(connection, session, tree, selection, stimulus, measurement-bound maps) and what belongs to
+the app (layout, view, navigation, prefs, toasts, rasteriser, pane area). Stage 1 splits
+it:
 
 ```rust
 pub struct App {
@@ -45,6 +53,7 @@ pub struct App {
     active: RigId,                // the tab shown
     layout: PaneTree,             // panes with cross-rig sources (§2)
     settings: Settings,           // app-wide (how the operator likes to read)
+    // view, nav, toasts, rasteriser … (app-level as today)
 }
 ```
 
@@ -52,11 +61,18 @@ pub struct App {
 renames, and it is what pairing already keys on. Display name from the hello (and
 discovery), re-read on each connect.
 
-Every reducer event names its rig; the link thread tags what it delivers with its `RigId`.
-Keys are routed by **one rule**: a key scoped to a pane goes to the pane's rig (R on a
-Programme pane of ketunkolo resets ketunkolo's hold; T hides that pane's chrome); every
-other key goes to the active tab's rig. No key ever acts on a rig the operator is neither
-looking at (tab) nor pointing at (focused pane).
+**Ids are per daemon.** `MeasId`, `TraceId`, `PairId` and frame topics collide across rigs,
+and the app keys a dozen maps by them today (bar origins, traces, edits, peaks,
+spectrographs, SPL holds, selection…). Every such key becomes `(RigId, MeasId)` (or lives
+inside the `RigState` that owns it), every reducer event names its rig, and the link thread
+tags what it delivers with its `RigId`. This namespacing and the `AppState` split **are**
+stage 1; the tabs are the small part.
+
+Keys are routed by **one rule**: a key scoped to a pane goes to the pane's rig (**R** on a
+Programme pane of ketunkolo resets ketunkolo's max and overs; **E** picks the phase reference
+of that pane's transfer); every other key goes to the active tab's rig. App-level toggles
+(**T** chrome, **W** / **F** view) are not rig commands and are unchanged. No key ever acts
+on a rig the operator is neither looking at (tab) nor pointing at (focused pane).
 
 A rig that drops out keeps its tab and its panes: panes grey with *pupu unreachable ·
 retrying* and the connection retries as today. Closing a tab closes that connection (its
@@ -67,80 +83,113 @@ stimulus in parallel, each within `QUIT_GRACE`.
 ### Stimulus awareness
 
 Stimulus runs per rig under its own lease. The top bar shows the active rig's stimulus as
-today, and a chip per *other* rig whose stimulus this app holds (*▶ pupu −20 dBFS*): sound
-coming out of a system you are not looking at is never silent in the UI. Escape on the
-active rig stops its stimulus; Shift+Escape stops every rig's.
+today and names the rig when more than one is connected (stage 1). A chip per *other* rig
+whose stimulus this app holds (*▶ pupu −20 dBFS*) and Shift+Escape stopping every rig's
+stimulus follow in stage 2: sound coming out of a system you are not looking at must not be
+silent in the UI.
 
-## 2. Pane sources (N2)
+## 2. Pane sources and the P1 ruling (N2)
 
 ```rust
-pub struct PaneSource { pub rig: RigRef, pub meas: MeasId }
-pub enum RigRef { Active, Rig { key: ServerKey, name: String } }
+pub struct PaneSource { pub rig: RigRef, pub content: PaneContent }   // PaneContent: programme-meter.md §6
+pub enum RigRef {
+    /// App prefs only: the pane follows the active tab (the single-rig meaning).
+    Active,
+    /// Session files only: the rig this session belongs to, whatever tab is active at load.
+    ThisRig,
+    /// A pinned rig, by key; the name is for the operator when it is absent.
+    Rig { key: ServerKey, name: String },
+}
 ```
 
-`Active` is the default and what a single-rig app has always meant: the pane follows the
-active tab. A pane pointed at a specific rig keeps it across tab switches. The picker and a
-drop set `Rig` when the source is not the active rig.
+`Active` is the default in the layout prefs. In a **session file** a pane source is
+`ThisRig` or `Rig`, never `Active`: a session is one daemon's, and "the active tab" at load
+time could be another rig's ids. The picker and a drop set `Rig` when the source is not the
+active rig.
 
-Layout prefs save `Rig` by key and name. A session file is one rig's (a session is a daemon
-concept; nothing changes there), and its panes may reference other rigs by key and name:
-loading it on an app without that rig shows those panes as *ketunkolo not connected* with
-the measurement's name, so the layout survives and says what is missing.
+Pane sources live in the measurement's layout (`Measurement.layout`, sent by `meas.layout`,
+saved in the session: decision P1), so adding `RigRef` and `PaneContent` is a **`PROTO_VERSION`
+and session format bump**, in stage 1.
 
-## 3. Remote inputs (N3)
+**P1 across rigs.** P1 says choosing a measurement row brings its own panes. With rigs: a
+brought layout of rig A's measurement replaces only the panes whose source is `Active` or
+`ThisRig`/`Rig` of A; panes pinned to another rig stay where they are. The operator who put
+ketunkolo's loudness beside pupu's meter keeps it when stepping through pupu's measurements.
 
-A rig's session includes an input channel of another rig by subscribing to it: daemon A
-asks daemon B for channel `c` and B publishes its capture of `c` to A.
+Layout prefs save `Rig` by key and name. Loading a session whose panes reference a rig this
+app has not connected shows those panes as *ketunkolo not connected* with the content's
+name, so the layout survives and says what is missing.
 
-- **Wire**: `audio.subscribe { channels }` on B opens a per-subscriber CURVE PUB stream of
-  f32 blocks, sample-indexed in B's capture clock, each block stamped with B's wall time at
-  its first sample (the stamp the fan-out already puts on every block). `audio.unsubscribe`
-  and the lease-like expiry of a silent subscriber end it. 48 kHz mono f32 is 1.5 Mbit/s a
-  channel; the Connection page states the rate. `PROTO_VERSION` bump.
-- **Session**: `SessionConfig.input_channels` grows a remote form, `RemoteInput { rig,
-  channel }`, beside device channels. `InputSetup` of a remote input is **B's**: name,
-  domain, mic, curve and calibration are read from B at open (and re-read when B says they
-  changed), never copied into A's store — the mic is on B's input and B is where it was
-  calibrated. A's Audio & I/O page shows the remote input under a *ketunkolo* heading with
-  B's row text; editing it says *set on ketunkolo*.
-- **Where a measurement runs**: on the rig whose outputs carry its stimulus (the reference is
-  that rig's loopback). Cross-rig transfer: stimulus out of B, B's loopback reference, A's
-  mic as a remote input into B's session — or the other way round. Programme material
-  (no stimulus) runs wherever the operator makes the measurement. The app's picker refuses
-  a measurement whose reference and stimulus are on different rigs by name, since the
-  loopback would not be a loopback.
-- **Timing**: a remote input is a second capture clock, the case `multi-device.md` §5 solves
-  for two devices on one host, with one difference: the common reference is not a loopback
-  but the two hosts' wall clocks, read at every block (§4). The drift model and its
-  statement to the operator (*drift 2.1 ppm · resampled* or refused) are reused as they
-  stand; the offset comes from the wall stamps instead of a correlation.
+## 3. Remote inputs (N3, stage 3)
+
+A rig's session includes a mic or line input of another rig by subscribing to it: daemon A
+asks daemon B for channel `c` and B streams its capture of `c` to A. The reference is the
+session's `LoopbackRoute` on A's own device and is never remote (the loopback is a loopback
+because it returns on the same converter), so a remote input is a measurement or line input
+only; nothing has to be refused about where a measurement runs.
+
+What stage 3 needs, none of it designed yet beyond this list:
+
+- **Capture timestamps from the backend**, not the fan-out's wall stamp: the fan-out stamps
+  a block when its thread receives it (scheduling and buffer-period jitter, milliseconds),
+  which gives a drift slope over a minute but no offset. Backends can state the capture
+  time of a block's first sample: JACK cycle times, Core Audio `mHostTime`, ASIO
+  `systemTime`. Each must be measured against the loopback on the rigs in use before any
+  cross-rig offset is shown; and each interface's input latency (ADC + driver, device
+  specific) remains a constant the clocks do not remove — it is stated per rig as the
+  backend reports it, or the cross-rig delay is shown as *offset unknown*, never as a number
+  it is not.
+- **Resampling.** Two interfaces run on two crystals (48 000.0 vs 48 000.3 Hz is 6 ppm:
+  0.3 ms drift every 50 s, 108° at 1 kHz). A measurement that combines samples from both
+  must resample the remote stream onto A's capture clock continuously, the ratio tracked
+  from the timestamps — an asynchronous sample-rate converter in A's block pipeline, which
+  does not exist today (`multi-device.md` §6 only warns about drift and refuses the
+  reference). The drift model of §5 there supplies the ratio; the converter is new.
+- **A buffer policy**: A delays its local blocks so that local and remote meet at one sample
+  index; the delay is the network jitter bound plus one block and is added to every live view
+  of that session. Stated on the Audio & I/O page (*remote inputs add 12 ms*).
+- **Daemon as client.** A opens a CURVE connection to B: A needs a client key and B must
+  have paired it. Today pairing is app ↔ daemon; a daemon ↔ daemon pairing (the app that
+  holds both asks B to admit A's key) is a new flow.
+- **Loss.** A PUB stream drops at its high-water mark; a dropped block is a marked gap in
+  the remote input (as a device xrun is), never interpolated. The stream is `f32` blocks,
+  sample-indexed in B's capture clock, each with B's backend capture timestamp; 48 kHz mono
+  is 1.5 Mbit/s a channel, stated on the Connection page.
+- **Session**: `SessionConfig.input_channels` grows `RemoteInput { rig, channel }`. The remote
+  input's `InputSetup` (kind, mic, curve) and calibration are **B's**, read from B at open
+  and re-read when B says they changed, never copied into A's store — the mic is on B's input
+  and B is where it was calibrated. A's Audio & I/O page shows it under a *ketunkolo*
+  heading with B's row text; editing it says *set on ketunkolo*.
 
 Why not netjack: it was tried (2026-10-11) and failed in use — unloading netmanager wedged
 pupu's jackd and the bridged reference was unusable for a transfer function. This stream is
 ac2's own, over the connection it already secures, and touches no jackd.
 
+Precondition for designing stage 3 further: a timestamp and latency study on pupu and
+ketunkolo (backend timestamp against loopback, over an hour, both hosts), written up in
+`multi-device.md` §7 (input-vs-input, designed never built) which this stage would build.
+
 ## 4. Clocks across hosts (N4)
 
-Every daemon already stamps each capture block with its system wall time. It reports in its
-state, per device clock:
+Each daemon reports in its state, per device clock, what it can measure and what the OS
+says, and infers nothing:
 
-- the sample clock's rate against the system clock (`48 000.3 Hz`, `+6 ppm`), from the
-  block stamps over the last minute — the quantity the drift model needs;
-- whether the system clock is disciplined, **as the OS states it**: on Linux the
-  `adjtimex` status (`STA_UNSYNC` clear = synced; the maximum error estimate `maxerror` in
-  µs); on macOS and Windows *not stated*. The daemon does not guess at PTP versus NTP: a
-  PTP-disciplined clock reports a `maxerror` of microseconds, an NTP one of milliseconds,
-  and the number is what the operator reads.
+- the sample clock's rate against the system clock as a deviation in ppm (`+6 ppm`), from
+  the block wall stamps over the last minute — the rig monitor already speaks ppm, and
+  `48 000.3 Hz` beside it would be the same number twice;
+- the system clock's own status **as the OS states it**: on Linux the `adjtimex` status
+  word (`STA_UNSYNC` clear or set) and its `maxerror` estimate; on macOS and Windows *not
+  stated*. `maxerror` grows between updates (about 500 µs per second until the discipline
+  daemon resets it), so it is shown as what it is — the OS's current bound — and is never
+  turned into a "PTP" or "NTP" label. What a PTP-disciplined host actually reports is read
+  on pupu and ketunkolo before the Connection page promises any figure.
 
-The app's Connection page shows per rig *clock: 48 000.3 Hz (+6 ppm) · system clock synced
-±15 µs* and, for each pair of rigs with a stream between them, *pupu → ketunkolo: offset
-−0.21 ms · drift 2.1 ppm*. A cross-rig measurement's delay readout states its basis
-(*clocks ±15 µs*); when a host's clock is unsynced or states ±ms, the delay is shown with
-that uncertainty and the transfer function's phase is marked the way an independent-epoch
+The Connection page shows per rig *clock: +6 ppm · system clock synced, OS bound ±0.4 ms*
+and, once a remote stream exists (stage 3), per pair of rigs the measured relation of their
+capture streams. A cross-rig measurement's delay readout states its basis in words; when a
+host's clock is unsynced, or no backend timestamp has been validated for it, the delay is
+*offset unknown* and the transfer function's phase is marked the way an independent-epoch
 trace is today (decision 8b): the magnitude stands, the absolute time does not.
-
-With both hosts on PTP the sub-sample alignment the loopback gives on one host is within
-reach across hosts: a 15 µs bound is under a sample at 48 kHz.
 
 ## 5. Discovery and pairing (N5)
 
@@ -153,7 +202,7 @@ rig and are display only (`ac2-discovery` already trusts nothing).
 
 - A session is one daemon's. Remote inputs make it reach across; it never lives in two.
 - Settings (how the operator reads) are the app's; rig settings (rig monitor, OSC targets,
-  system max level) are each rig's, edited on its tab.
+  system max level, programme-meter ballistic) are each rig's, edited on its tab.
 - Undo is per rig (edits are daemon edits). Layout changes are not undone today and stay so.
 - Cross-rig math channels are offered like any other math: both operands are traces or live
   curves the app already has; the daemon doing the math is the measurement's.
@@ -162,23 +211,25 @@ rig and are display only (`ac2-discovery` already trusts nothing).
 
 - Two rigs' measurements in one layout are as good as each rig's: nothing is lost by
   showing them together.
-- A cross-rig measurement is as good as the two clocks' agreement and says so; the app never
-  shows a cross-rig delay without its clock basis.
-- Audio between daemons rides the LAN; a lost block is a marked gap in the measurement's
-  input (as a device xrun is), not silently interpolated.
-- No daemon plays a stimulus for another's measurement; §3 says where a measurement runs.
+- A cross-rig measurement is as good as the two clocks' agreement *and* the validated
+  backend timestamps *and* the stated input latencies, and says so; the app never shows a
+  cross-rig delay without its basis, and shows *offset unknown* until all three exist.
+- Audio between daemons rides the LAN; a lost block is a marked gap, never interpolated.
+- No daemon plays a stimulus for another's measurement; the reference is never remote.
 
 ## Stages
 
-1. **Many rigs, tabs, mixed panes** — `App { rigs, active, layout }`, `RigId`, tagged
-   events, key routing rule, tabs, pane sources with `RigRef`, picker per rig, layout prefs
-   and session pane references, stimulus chips, Shift+Escape, Connect… adds a rig, remembered
-   rigs. No wire change. Tests: the app's e2e tests start two fake daemons.
-2. **Clock reporting** — daemon state gains the clock lines of §4 (`PROTO_VERSION` bump);
-   Connection page shows them; `ac2 status` prints them.
-3. **Remote inputs** — `audio.subscribe` stream, `RemoteInput` in the session config,
-   B's input setup read at open, the drift model on wall stamps, the Audio & I/O page's rig
-   headings, the where-it-runs refusal (`PROTO_VERSION` bump).
+1. **Many rigs, tabs, mixed panes** — the `AppState` split and id namespacing (§1),
+   `RigId`, tagged events, key routing rule, tabs, `PaneSource { RigRef, PaneContent }` in
+   `Measurement.layout` and the layout prefs with the P1 ruling (`PROTO_VERSION` and session
+   format bump), picker per rig, arm line and banner naming the rig, Connect… adds a rig,
+   remembered rigs. Tests: the app's e2e tests start two fake daemons; a session saved with
+   `ThisRig` panes loads right on either tab.
+2. **Clock reporting and stimulus awareness** — daemon state gains the clock lines of §4
+   (`PROTO_VERSION` bump), Connection page shows them, `ac2 status` prints them; other-rig
+   stimulus chips and Shift+Escape.
+3. **Remote inputs** — after the timestamp and latency study; redesigned then on the list
+   in §3.
 
 Open before stage 1: the tab-switch key (everyday keys plain / Shift / Alt; Alt+←/→ size
 panes; Ctrl chords are eaten on the operator's desktop), and whether a tab bar or the top
