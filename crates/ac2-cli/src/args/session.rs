@@ -1,4 +1,4 @@
-//! `ac2 session …`: open, close, replay and mic/curve assignment.
+//! `ac2 session …`: open, close, replay and the input setup (kinds, mics, curves, pairs).
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -6,6 +6,7 @@ use std::str::FromStr;
 use clap::{Args, Subcommand};
 
 use super::BackendArg;
+use ac2_proto::model::{InputKind, Pair};
 use ac2_scene::unit_text::{Channel, Channels, Freq, SampleCount};
 
 /// `session …`.
@@ -92,7 +93,8 @@ pub enum SessionCmd {
         #[arg(long)]
         fast: bool,
     },
-    /// Input setup: the mic on each input and its active mic curve (shown without options).
+    /// Input setup: what each input carries (mic, line or digital), the mic's name and
+    /// active curve, and the stereo pairs (shown without options).
     Inputs(SessionInputs),
     /// Open the device's driver settings on the daemon's host: an ASIO driver's own control
     /// panel (rate, buffer size, clock source, routing), or Audio MIDI Setup for a Core
@@ -184,15 +186,144 @@ impl FromStr for CurveAssign {
     }
 }
 
-/// `session inputs`.
-#[derive(Debug, Args)]
+/// What an input carries, as the operator declares it: `mic`, `line` or `digital`. The
+/// words are the ones the app's rows use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KindArg {
+    /// A measurement microphone (dB SPL through its calibration).
+    Mic,
+    /// Analogue line level (dBFS, dBu once line-calibrated).
+    Line,
+    /// A digital feed (dBFS, never calibrated).
+    Digital,
+}
+
+impl KindArg {
+    /// The protocol's kind: a mic starts unnamed with no curve chosen (the mic name and
+    /// curve are set separately, and a line or digital input carries neither).
+    pub fn to_kind(self) -> InputKind {
+        match self {
+            Self::Mic => InputKind::Mic {
+                mic: None,
+                curve: ac2_proto::model::CurveChoice::NotChosen,
+            },
+            Self::Line => InputKind::Line,
+            Self::Digital => InputKind::Digital,
+        }
+    }
+}
+
+impl FromStr for KindArg {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "mic" => Ok(Self::Mic),
+            "line" => Ok(Self::Line),
+            "digital" => Ok(Self::Digital),
+            _ => Err(format!("{s:?}: expected mic, line or digital")),
+        }
+    }
+}
+
+/// `IN=mic|line|digital`: what a 1-based input carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KindAssign {
+    /// Input.
+    pub input: Channel,
+    /// Its kind.
+    pub kind: KindArg,
+}
+
+impl FromStr for KindAssign {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let (ch, k) = s
+            .split_once('=')
+            .ok_or_else(|| format!("{s:?}: expected IN=mic|line|digital, e.g. 3=line"))?;
+        let input: Channel = ch
+            .parse()
+            .map_err(|e: ac2_scene::unit_text::UnitError| e.0)?;
+        Ok(Self {
+            input,
+            kind: k.parse()?,
+        })
+    }
+}
+
+/// `L,R[=NAME]`: a stereo pair of two 1-based inputs, left first, optionally named.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairArg {
+    /// Left input.
+    pub left: Channel,
+    /// Right input.
+    pub right: Channel,
+    /// Operator's name; `None` = named by its inputs.
+    pub name: Option<String>,
+}
+
+impl PairArg {
+    /// The protocol's pair.
+    pub fn to_pair(&self) -> Pair {
+        Pair {
+            left: self.left.0,
+            right: self.right.0,
+            name: self.name.clone(),
+        }
+    }
+}
+
+impl FromStr for PairArg {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let bad = || format!("{s:?}: expected L,R or L,R=NAME, e.g. 3,4=Main");
+        let (chs, name) = match s.split_once('=') {
+            Some((c, n)) => (c, Some(n.trim())),
+            None => (s, None),
+        };
+        let (l, r) = chs.split_once(',').ok_or_else(bad)?;
+        let parse = |t: &str| -> Result<Channel, String> {
+            t.parse().map_err(|e: ac2_scene::unit_text::UnitError| e.0)
+        };
+        Ok(Self {
+            left: parse(l)?,
+            right: parse(r)?,
+            name: name.filter(|n| !n.is_empty()).map(str::to_owned),
+        })
+    }
+}
+
+/// `session inputs`. Kinds apply before mic names and curves, so `--kind 3=mic --mic 3=M30`
+/// is one command; the pair list given replaces the daemon's.
+#[derive(Debug, Default, Args)]
 pub struct SessionInputs {
-    /// Mic on an input, e.g. `3=M30` (repeatable; `3=` clears the name).
+    /// What an input carries, e.g. `3=line`, `1=mic`, `5=digital` (repeatable). A new
+    /// mic is unnamed; a line or digital input drops its mic name and curve.
+    #[arg(long = "kind", value_name = "IN=mic|line|digital")]
+    pub kinds: Vec<KindAssign>,
+    /// Mic on an input, e.g. `3=M30` (repeatable; `3=` clears the name). Mic inputs only.
     #[arg(long = "mic", value_name = "IN=NAME")]
     pub mics: Vec<MicAssign>,
-    /// Active mic curve of an input, e.g. `3=90°` or `3=off` (repeatable).
+    /// Active mic curve of an input, e.g. `3=90°` or `3=off` (repeatable). Mic inputs only.
     #[arg(long = "curve", value_name = "IN=LABEL|off")]
     pub curves: Vec<CurveAssign>,
+    /// A stereo pair, left input first, e.g. `3,4` or `3,4=Main` (repeatable): the pairs
+    /// given replace the current ones. Two line or two digital inputs, never mics.
+    #[arg(long = "pair", value_name = "L,R[=NAME]", conflicts_with = "no_pairs")]
+    pub pairs: Vec<PairArg>,
+    /// Remove every pair.
+    #[arg(long)]
+    pub no_pairs: bool,
+}
+
+impl SessionInputs {
+    /// Nothing to change: the command only lists the setup.
+    pub fn is_empty(&self) -> bool {
+        self.kinds.is_empty()
+            && self.mics.is_empty()
+            && self.curves.is_empty()
+            && self.pairs.is_empty()
+            && !self.no_pairs
+    }
 }
 
 /// `session open`.

@@ -108,7 +108,16 @@ pub(crate) async fn session(
             let inputs = if o.mics.is_empty() {
                 None
             } else {
-                Some(super::cal::set_inputs(&c, &o.mics, &[]).await?)
+                Some(
+                    super::cal::set_inputs(
+                        &c,
+                        &crate::args::SessionInputs {
+                            mics: o.mics.clone(),
+                            ..crate::args::SessionInputs::default()
+                        },
+                    )
+                    .await?,
+                )
             };
             out.emit(&s, || match &inputs {
                 None => output::session(&s),

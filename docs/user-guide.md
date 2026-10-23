@@ -2033,11 +2033,24 @@ daemon needed. Used for the [band transfer](#4-a-recorder-at-the-place).
 
 ## Calibration and SPL
 
-Inputs carry a **mic name** (**N** on the input in Settings › Audio I/O or Calibration,
-`ac2 session open … --mic 3=M30`, `ac2 session inputs --mic 3=M30`). The daemon's machine
-stores, in its calibration store:
+Every input is declared **mic**, **line** or **digital** (**M** / **L** / **A** on the input
+in Settings › Audio I/O; `ac2 session inputs --kind 3=line`): a backend cannot tell an AES
+feed from an analogue one, so nothing is inferred. A mic reads dB SPL through its
+calibration; a line input reads dBFS, and dBu once it has a line calibration; a digital
+feed reads dBFS and is never calibrated (0 dBFS is its full scale). Two line or two digital
+inputs can be a **stereo pair** (`ac2 session inputs --pair 3,4=Main`, repeatable; the pairs
+given replace the current ones, `--no-pairs` clears them); mics are never paired. A mic
+input carries a **mic name** (**N**, `ac2 session open … --mic 3=M30`, `ac2 session inputs
+--mic 3=M30`); `ac2 session inputs` alone lists the setup, one line per input in the app's
+words (`in 1 · mic MM1 · 90° · verified …`, `in 3+4 · line · pair Main · dBFS`). The
+daemon's machine stores, in its calibration store:
 
 - **Sensitivity** (dB SPL of 0 dBFS): per device, input and mic.
+- **Line calibration** (dBu of 0 dBFS): per device and line input. Feed the input a steady
+  tone, measure its RMS voltage at the input, read the level off the input meter and give
+  both: `ac2 cal line --input 3 --volts 1.228v --read -9dbfs` prints `in 3: 0 dBFS = +13.0
+  dBu (1.228 V read at −9.0 dBFS)` (a +4 dBu tone at −9 dBFS: full scale +13 dBu). The
+  input's rows then say *dBu · full scale +13.0 dBu* with the calibration's age.
 - **Mic curves** (the **mic library**): per mic, any number, each with a short **label**.
 
 #### Sensitivity
@@ -2115,7 +2128,10 @@ input, mic, calibrator level and frequency, reading, age) and every line calibra
 | **E** | calibrates an input electrically: on a mic ([below](#calibrating-without-a-calibrator-electrical)), on a line input in volts ([Calibrating a line input](#calibrating-a-line-input)); a digital input has no volt to calibrate, and E says so |
 | **Delete** (twice) | deletes a curve, a sensitivity calibration or a line calibration |
 
-CLI: `ac2 cal list`, `ac2 cal curve rm --mic NAME LABEL`, `ac2 cal rm --input 3`.
+CLI: `ac2 cal list` (sensitivity calibrations, then `line calibrations` as `in 3 · +13.0 dBu
+at full scale · 3 h ago · <device>`, the mic library, the inputs), `ac2 cal curve rm --mic
+NAME LABEL`, `ac2 cal rm --input 3` (a sensitivity calibration), `ac2 cal rm --input 3
+--line` (a line calibration).
 
 A calibration store of another format version is set aside (renamed `calibrations.json.v1`,
 `.v2`, …, never deleted) and the daemon starts with an empty store: calibrate and import the
@@ -3210,6 +3226,7 @@ documents each command.
 |---|---|
 | `ac2 devices`, `ac2 status`, `ac2 daemon start / stop / status` | the daemon and its audio devices; `status` includes the autosave state |
 | `ac2 session open / close / status / inputs / replay` | the audio I/O (`open --out-device` plays on another device than the capture one), each input's mic and active curve; replaying a recording as the audio input |
+| `ac2 session inputs [--kind IN=mic\|line\|digital] [--mic IN=NAME] [--curve IN=LABEL\|off] [--pair L,R[=NAME]] [--no-pairs]` | what each input carries, its mic and curve, the stereo pairs; alone, lists them |
 | `ac2 session panel [--backend B] [--device D]` | opens the device's driver settings on the daemon's host (an ASIO driver's control panel, Audio MIDI Setup for Core Audio) |
 | `ac2 session new / save / save-as / load / recover / salvage / export / import / list` | the working state and saved sessions ([Sessions](#sessions)) |
 | `ac2 meas new / list / set / start / stop / rm`, `ac2 meas layout clear` | transfer (`tf`), `spectrum`, `rta`, `spl` and `sweep` measurements (math channels are listed too); `rm` of one that owns traces needs `--keep-traces` (moved to Imported) or `--delete-traces`; `layout clear` removes a measurement's own panes |
@@ -3221,7 +3238,7 @@ documents each command.
 | `ac2 ir capture`, `ac2 ir metrics` | a sweep with its settings as flags (runs the sweep measurement with exactly those settings, made when there is none); room parameters of a stored sweep |
 | `ac2 rec start / stop / status / list / import` | raw recording of the inputs |
 | `ac2 trace capture / list / show / rename / display / slot / move / rm / average / import / export / smooth / mic / delay-diff` | stored traces; `list` says what each is filed under; `move <traces> --to MEAS` (or `--imported`) files them elsewhere |
-| `ac2 cal spl / electrical / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |
+| `ac2 cal spl / electrical / line / curve import / curve rename / curve rm / use / list / rm` | sensitivity and line calibrations and the mic library; `rm --line` deletes a line calibration |
 | `ac2 spl watch / set / cal`, `ac2 spl leq watch / set / export / new` | SPL readout, the meter's weightings, acoustic calibration (as `cal spl`), Leq windows and presets, the per-second log and a new log |
 | `ac2 spl bands watch / set / transfer / log / estimate` | the band meter and its transfer ([Band Leq](#band-leq-band-limits-at-a-neighbours)) |
 | `ac2 timing --watch` | the loopback timing monitor |

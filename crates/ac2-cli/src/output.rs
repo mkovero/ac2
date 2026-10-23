@@ -5,9 +5,10 @@ use std::io::{self, Write};
 use ac2_proto::GridDef;
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
-    ClockRelation, DelayReference, DepthPolicy, MeasKind, Measurement, Mic, PeakMode, Polarity,
-    RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile, SmoothingFraction,
-    SmoothingMode, State, TimingState, TimingStatus, TraceData, TraceMeta, TraceSource,
+    ClockRelation, DelayReference, DepthPolicy, InputKind, LineCalEntry, MeasKind, Measurement,
+    Mic, Pair, PeakMode, Polarity, RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile,
+    SmoothingFraction, SmoothingMode, State, TimingState, TimingStatus, TraceData, TraceMeta,
+    TraceSource,
 };
 use ac2_proto::units::WallNs;
 use ac2_scene::format;
@@ -584,20 +585,120 @@ fn input_channels(s: &State) -> Vec<u16> {
     ch
 }
 
-/// What each input uses: its mic, its mic curve (or why none applies) and its sensitivity
-/// calibration, in the app's words (`ac2_scene::cal`). The age is on this machine's clock.
-pub fn inputs(s: &State, now: WallNs) -> String {
-    let mut t = table(&["in", "mic", "mic curve", "sensitivity"]);
-    for ch in input_channels(s) {
-        let u = ac2_proto::cal::state_input_use(s, ch);
-        t.add_row(vec![
-            (u32::from(ch) + 1).to_string(),
-            u.mic.unwrap_or(format::NO_VALUE).to_owned(),
-            ac2_scene::cal::curve_state(&u.curve),
-            ac2_scene::cal::sensitivity_state(&u.sensitivity, now, ac2_scene::time::ClockOffset(0)),
-        ]);
+/// What an input carries, in the words the app's rows use: `mic`, `line`, `digital`.
+pub fn kind_word(k: &InputKind) -> &'static str {
+    match k {
+        InputKind::Mic { .. } => "mic",
+        InputKind::Line => "line",
+        InputKind::Digital => "digital",
     }
-    t.to_string()
+}
+
+/// The kind with the mic's name when it has one: `mic MM1`, `mic`, `line`, `digital`.
+fn kind_text(k: &InputKind) -> String {
+    match k.mic() {
+        Some(m) => format!("mic {m}"),
+        None => kind_word(k).to_owned(),
+    }
+}
+
+/// What an input's numbers are referred to: a mic's curve and sensitivity calibration in
+/// the app's words; a line input `dBFS` until its line calibration gives dBu (a console feed
+/// metered in dBFS is complete as it is, so it is not called uncalibrated); digital `dBFS`.
+fn reference_text(s: &State, ch: u16, now: WallNs) -> String {
+    use ac2_proto::cal::Sensitivity;
+    let u = ac2_proto::cal::state_input_use(s, ch);
+    let offset = ac2_scene::time::ClockOffset(0);
+    match (u.kind, &u.sensitivity) {
+        (InputKind::Mic { .. }, sens) => format!(
+            "{} · {}",
+            ac2_scene::cal::curve_state(&u.curve),
+            ac2_scene::cal::sensitivity_state(sens, now, offset)
+        ),
+        (_, sens @ Sensitivity::Line(_)) => ac2_scene::cal::sensitivity_state(sens, now, offset),
+        (InputKind::Line | InputKind::Digital, _) => "dBFS".to_owned(),
+    }
+}
+
+/// A pair's line: `in 3+4 · line · pair Main · dBFS`; the sides' references when they differ.
+fn pair_line(s: &State, p: &Pair, now: WallNs) -> String {
+    let kind = ac2_proto::cal::input_kind(&s.inputs, p.left);
+    let name = p
+        .name
+        .as_deref()
+        .map_or_else(|| "pair".to_owned(), |n| format!("pair {n}"));
+    let (l, r) = (
+        reference_text(s, p.left, now),
+        reference_text(s, p.right, now),
+    );
+    let reference = if l == r { l } else { format!("L {l} · R {r}") };
+    format!(
+        "in {}+{} · {} · {name} · {reference}",
+        u32::from(p.left) + 1,
+        u32::from(p.right) + 1,
+        kind_text(&kind)
+    )
+}
+
+/// One line per input, a pair on one line, in the app's words (`ac2_scene::cal`): `in 1 ·
+/// mic MM1 · 90° · verified · 94.0 dB SPL at 1.00 kHz · 3 h ago`, `in 3 · line · dBFS`,
+/// `in 3+4 · line · pair Main · dBu · full scale +13.0 dBu · just now`, `in 5 · digital ·
+/// dBFS`. The age is on this machine's clock.
+pub fn inputs(s: &State, now: WallNs) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut shown: Vec<u16> = Vec::new();
+    for ch in input_channels(s) {
+        if shown.contains(&ch) {
+            continue;
+        }
+        match s.pairs.iter().find(|p| p.left == ch || p.right == ch) {
+            Some(p) => {
+                shown.extend([p.left, p.right]);
+                lines.push(pair_line(s, p, now));
+            }
+            None => lines.push(format!(
+                "{} · {} · {}",
+                input_label(ch),
+                kind_text(&ac2_proto::cal::input_kind(&s.inputs, ch)),
+                reference_text(s, ch, now)
+            )),
+        }
+    }
+    lines.join("\n")
+}
+
+/// Line calibrations, one per line: `in 3 · +13.0 dBu at full scale · 3 h ago · <device>`.
+pub fn line_calibrations(l: &[LineCalEntry], now: WallNs) -> String {
+    if l.is_empty() {
+        return "none".to_owned();
+    }
+    l.iter()
+        .map(|e| {
+            format!(
+                "{} · {} dBu at full scale · {} · {}",
+                input_label(e.key.channel),
+                format::signed(ac2_proto::cal::dbu_fs(e.line.v_fs.0).0, 1),
+                format::ago(ac2_scene::time::age_s(
+                    e.line.calibrated_at,
+                    now,
+                    ac2_scene::time::ClockOffset(0)
+                )),
+                e.key.device.0
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A line calibration just taken: `in 3: 0 dBFS = +13.0 dBu (1.550 V read at −9.0 dBFS)`.
+pub fn line_calibration(e: &LineCalEntry) -> String {
+    format!(
+        "{}: 0 dBFS = {} dBu ({} read at {})",
+        input_label(e.key.channel),
+        format::signed(ac2_proto::cal::dbu_fs(e.line.v_fs.0).0, 1),
+        format::volts(e.line.volts.0),
+        format::dbfs(e.line.measured.0)
+    )
 }
 
 /// [`inputs`] as JSON rows.

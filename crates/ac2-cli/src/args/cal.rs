@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::CurveArg;
-use ac2_scene::unit_text::{Channel, Freq, Gain, MicSensitivityArg, OhmsArg, SplLevel, VoltsArg};
+use ac2_scene::unit_text::{
+    Channel, Freq, Gain, LevelDbfs, MicSensitivityArg, OhmsArg, SplLevel, VoltsArg,
+};
 
 /// `cal …`.
 #[derive(Debug, Subcommand)]
@@ -22,6 +24,12 @@ pub enum CalCmd {
     /// that input first (48 V can damage the generator; ac2 cannot switch it) and back on
     /// for the mic afterwards. Either way keep the gain you will measure with.
     Electrical(CalElectrical),
+    /// Calibrate a line input: what 0 dBFS is in dBu. Feed the input a steady tone, measure
+    /// its RMS voltage at the input with a meter, read the level off ac2's input meter
+    /// (`ac2 status`, the app's Inputs list) and give both; the volts at full scale and
+    /// dBu follow. The input must be declared `line` (`ac2 session inputs --kind 3=line`):
+    /// a mic reads dB SPL, a digital feed has no voltage.
+    Line(CalLine),
     /// The mic library: import, rename and delete a mic's curves.
     #[command(subcommand)]
     Curve(CalCurveCmd),
@@ -32,9 +40,10 @@ pub enum CalCmd {
         /// Curve label (e.g. 90°), or `off`.
         curve: CurveArg,
     },
-    /// List sensitivity calibrations, the mic library and what each input uses.
+    /// List sensitivity and line calibrations, the mic library and what each input uses.
     List,
-    /// Delete a sensitivity calibration.
+    /// Delete a sensitivity calibration (`--input 3 [--mic NAME]`) or a line calibration
+    /// (`--input 3 --line`).
     Rm(CalRm),
 }
 
@@ -87,14 +96,32 @@ pub struct CalRm {
     /// Input channel of the calibration.
     #[arg(long)]
     pub input: Channel,
-    /// Mic name of the calibration (default: the input's mic name in the session's input
-    /// setup).
-    #[arg(long)]
+    /// Mic name of the sensitivity calibration (default: the input's mic name in the
+    /// session's input setup).
+    #[arg(long, conflicts_with = "line")]
     pub mic: Option<String>,
+    /// The input's line calibration (dBu of 0 dBFS) instead of a sensitivity calibration.
+    #[arg(long)]
+    pub line: bool,
     /// Capture device of the calibration (default: the open session's; without a session,
-    /// the one device holding a calibration for this input and mic).
+    /// the one device holding a calibration for this input).
     #[arg(long, value_name = "ID")]
     pub device: Option<String>,
+}
+
+/// `cal line`.
+#[derive(Debug, Args)]
+pub struct CalLine {
+    /// Input channel (a `line` input).
+    #[arg(long, visible_alias = "channel")]
+    pub input: Channel,
+    /// Voltage of the tone measured at the input, RMS, e.g. `1.55v` or `775mv`.
+    #[arg(long, value_name = "VOLTS")]
+    pub volts: VoltsArg,
+    /// Level ac2's input meter read from the tone, e.g. `-9dbfs`. The daemon reads
+    /// nothing itself: the level is read off the meter at your pace, as the voltmeter was.
+    #[arg(long, value_name = "DBFS", allow_hyphen_values = true)]
+    pub read: LevelDbfs,
 }
 
 /// Where the voltage of an electrical calibration is measured.
