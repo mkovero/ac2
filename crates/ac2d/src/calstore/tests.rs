@@ -465,18 +465,61 @@ fn a_store_of_the_previous_format_is_set_aside() {
         std::fs::read(dir.path().join("calibrations.json.v2")).expect("set aside"),
         v2
     );
+}
 
-    // Version 3 (input rows with a mic name instead of a kind, no line calibrations, no
-    // pairs) is set aside the same way: the store starts empty, the file is kept.
-    let v3 = br#"{"format":"ac2-calibrations","version":3,"sensitivities":[{"key":{"device":"d","channel":0,"mic":"M"},"spl":{"sensitivity":120.0,"method":{"type":"acoustic","calibrator_level":94.0},"freq":1000.0,"measured":-26.0,"calibrated_at":1}}],"mics":[],"inputs":[{"channel":0,"mic":"M","curve":{"type":"off"}},{"channel":1,"mic":null,"curve":{"type":"not_chosen"}}]}"#;
-    std::fs::write(&path, v3).expect("write");
-    let (s, c) = CalStore::open(&path);
-    s.check().expect("writable");
-    assert_eq!(c, Contents::default());
-    assert_eq!(
-        std::fs::read(dir.path().join("calibrations.json.v3")).expect("set aside"),
-        v3
+#[test]
+fn the_previous_version_loads_and_is_written_back_as_this_one() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let path = dir.path().join("calibrations.json");
+    // Version 3: input rows hold a mic name and curve choice instead of a kind; no line
+    // calibrations, no pairs. The rigs in use hold their mic calibrations in this shape.
+    let cal = entry(key("hw:A", 2, "M30"), spl(120.0, 10, 1000.0));
+    let v3 = format!(
+        r#"{{"format":"ac2-calibrations","version":3,"sensitivities":[{}],"mics":[{{"name":"M30","curves":[{{"reference":{{"label":"0deg","file_name":"c","content_hash":"0","points":2,"f_lo":20.0,"f_hi":200.0,"imported_at":1,"stated_sensitivity":null}},"points":[[20.0,0.0],[200.0,0.0]]}}]}}],"inputs":[{{"channel":0,"mic":null,"curve":{{"type":"not_chosen"}}}},{{"channel":2,"mic":"M30","curve":{{"type":"curve","label":"0deg"}}}}]}}"#,
+        serde_json::to_string(&cal).expect("json")
     );
+    std::fs::write(&path, &v3).expect("write");
+    let (mut s, c) = CalStore::open(&path);
+    s.check().expect("writable");
+    // Nothing set aside: the file is read in place.
+    assert!(path.exists() && !dir.path().join("calibrations.json.v3").exists());
+    assert_eq!(c.calibrations, vec![cal]);
+    assert_eq!(c.mics.len(), 1);
+    assert_eq!(c.mics[0].name, "M30");
+    assert_eq!(c.mics[0].curves[0].label, "0deg");
+    assert!(s.curve("M30", "0deg").is_some());
+    assert!(c.line_calibrations.is_empty() && c.pairs.is_empty());
+    // A row that named a mic is that mic with its curve; one without is a line input.
+    assert_eq!(
+        c.inputs,
+        vec![
+            InputSetup {
+                channel: 0,
+                kind: InputKind::Line,
+                pair: None,
+            },
+            InputSetup {
+                channel: 2,
+                kind: InputKind::Mic {
+                    mic: Some("M30".into()),
+                    curve: CurveChoice::Curve {
+                        label: "0deg".into(),
+                    },
+                },
+                pair: None,
+            },
+        ]
+    );
+    // The next save writes the current version, and that reads back the same.
+    let curves = s.curves();
+    s.persist(&c, curves).expect("persist");
+    let written: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("json");
+    assert_eq!(written["version"], 4);
+    assert_eq!(written["lines"], serde_json::json!([]));
+    assert_eq!(written["pairs"], serde_json::json!([]));
+    let (_, again) = CalStore::open(&path);
+    assert_eq!(again, c);
 }
 
 #[test]

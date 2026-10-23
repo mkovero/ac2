@@ -6,11 +6,13 @@
 //!
 //! The file is read once at start. One that cannot be read is never written: the store
 //! comes up empty and read-only and every calibration command is refused with the reason,
-//! so an operator's calibrations are never replaced by an empty set. A store of another
-//! format version is set aside (renamed, never deleted) and the daemon starts with an empty
-//! store: there is no migration. An optional field a version 4 file leaves out reads as
-//! its `None` meaning (an electrical calibration without a mic loading was taken unloaded,
-//! and its stored sensitivity counts none), so adding one keeps the version.
+//! so an operator's calibrations are never replaced by an empty set. The previous format
+//! version is read through a mapping and written back as the current one on the next save,
+//! so a deploy keeps the rigs' calibrations; a store of any other version is set aside
+//! (renamed, never deleted) and the daemon starts with an empty store. An optional field a
+//! version 4 file leaves out reads as its `None` meaning (an electrical calibration without
+//! a mic loading was taken unloaded, and its stored sensitivity counts none), so adding one
+//! keeps the version.
 
 use std::collections::HashMap;
 use std::io;
@@ -21,8 +23,8 @@ use ac2_core::mic_curve::{Correction, MicCurve, MicCurveFileError};
 use ac2_proto::cal::{self, InputUse};
 use ac2_proto::model::StateFile;
 use ac2_proto::model::{
-    CalEntry, CalStatus, DeviceId, InputSetup, LineCalEntry, Mic, MicCurveId, MicCurveRef, Pair,
-    State,
+    CalEntry, CalStatus, CurveChoice, DeviceId, InputKind, InputSetup, LineCalEntry, Mic,
+    MicCurveId, MicCurveRef, Pair, State,
 };
 use ac2_proto::{ErrorCode, ErrorDetail, MicCurveFileReason, ProtoError};
 use serde::{Deserialize, Serialize};
@@ -31,6 +33,8 @@ use crate::util::{perr, perr_detail};
 
 const FORMAT: &str = "ac2-calibrations";
 const VERSION: u32 = 4;
+/// The version before this one, still read (see [`StoreFileV3`]).
+const PREVIOUS_VERSION: u32 = 3;
 /// Normalisation frequency when no sensitivity calibration applies.
 pub(crate) const DEFAULT_F_NORM: f64 = 1000.0;
 
@@ -59,6 +63,59 @@ struct StoreFile {
     mics: Vec<FileMic>,
     inputs: Vec<InputSetup>,
     pairs: Vec<Pair>,
+}
+
+/// The previous format: no line calibrations, no pairs, and an input row holding a mic name
+/// and curve choice instead of a kind.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoreFileV3 {
+    format: String,
+    #[serde(rename = "version")]
+    _version: u32,
+    sensitivities: Vec<CalEntry>,
+    mics: Vec<FileMic>,
+    inputs: Vec<InputRowV3>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InputRowV3 {
+    channel: u16,
+    mic: Option<String>,
+    curve: CurveChoice,
+}
+
+impl StoreFileV3 {
+    /// The same store in the current format: sensitivities and mics as they were; a row that
+    /// named a mic is that microphone, one that did not is a line input (the only inputs set
+    /// up without a mic name were reference feeds; the UI declares its roles again on the
+    /// next session anyway); no line calibrations and no pairs yet.
+    fn into_current(self) -> StoreFile {
+        StoreFile {
+            format: self.format,
+            version: VERSION,
+            sensitivities: self.sensitivities,
+            lines: Vec::new(),
+            mics: self.mics,
+            inputs: self
+                .inputs
+                .into_iter()
+                .map(|r| InputSetup {
+                    channel: r.channel,
+                    kind: match r.mic {
+                        Some(mic) => InputKind::Mic {
+                            mic: Some(mic),
+                            curve: r.curve,
+                        },
+                        None => InputKind::Line,
+                    },
+                    pair: None,
+                })
+                .collect(),
+            pairs: Vec::new(),
+        }
+    }
 }
 
 /// Just enough of any store file to tell its version.
@@ -207,17 +264,20 @@ impl CalStore {
                 return (store, Contents::default());
             }
         };
-        if let Ok(h) = serde_json::from_slice::<Header>(&text)
+        let header = serde_json::from_slice::<Header>(&text).ok();
+        if let Some(h) = &header
             && h.format == FORMAT
             && h.version != VERSION
+            && h.version != PREVIOUS_VERSION
         {
             match set_aside(path, &format!("v{}", h.version)) {
                 Some(to) => {
                     tracing::warn!(
                         "calibration store {} is format version {} (this ac2d reads {VERSION}); \
                          set aside as {} and starting with an empty store — calibrate again \
-                         (`ac2 cal spl` or `ac2 cal electrical`) and import the mic curves again (`ac2 cal curve import \
-                         FILE --mic NAME`); the old file shows the mic names and file names",
+                         (`ac2 cal spl` or `ac2 cal electrical`) and import the mic curves again \
+                         (`ac2 cal curve import FILE --mic NAME`); the old file shows the mic names \
+                         and file names",
                         path.display(),
                         h.version,
                         to.display()
@@ -237,6 +297,13 @@ impl CalStore {
         match parse(&text) {
             Ok((contents, curves)) => {
                 store.curves = curves;
+                if header.is_some_and(|h| h.version == PREVIOUS_VERSION) {
+                    tracing::info!(
+                        "calibration store {} is format version {PREVIOUS_VERSION}; read through \
+                         the mapping and written as version {VERSION} on the next change",
+                        path.display()
+                    );
+                }
                 tracing::info!(
                     "calibration store {}: {} sensitivity calibrations, {} line calibrations, \
                      {} mics",
@@ -360,14 +427,26 @@ impl CalStore {
     }
 }
 
-fn parse(text: &[u8]) -> Result<(Contents, Curves), String> {
-    let f: StoreFile = serde_json::from_slice(text).map_err(|e| e.to_string())?;
-    if f.format != FORMAT || f.version != VERSION {
-        return Err(format!(
-            "format {:?} version {}, expected {FORMAT:?} version {VERSION}",
-            f.format, f.version
-        ));
+/// The file in the current format, the previous version mapped.
+fn read_file(text: &[u8]) -> Result<StoreFile, String> {
+    let h: Header = serde_json::from_slice(text).map_err(|e| e.to_string())?;
+    if h.format != FORMAT {
+        return Err(format!("format {:?}, expected {FORMAT:?}", h.format));
     }
+    let err = |e: serde_json::Error| e.to_string();
+    match h.version {
+        VERSION => serde_json::from_slice(text).map_err(err),
+        PREVIOUS_VERSION => serde_json::from_slice::<StoreFileV3>(text)
+            .map(StoreFileV3::into_current)
+            .map_err(err),
+        v => Err(format!(
+            "format {FORMAT:?} version {v}, expected version {VERSION} (or {PREVIOUS_VERSION})"
+        )),
+    }
+}
+
+fn parse(text: &[u8]) -> Result<(Contents, Curves), String> {
+    let f = read_file(text)?;
     let mut calibrations: Vec<CalEntry> = Vec::new();
     for e in f.sensitivities {
         if calibrations.iter().any(|x| x.key == e.key) {
