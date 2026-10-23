@@ -156,7 +156,7 @@ fn an_input_only_device_plays_on_another_output_device() {
     det.input_device = req.device.clone();
     det.output_device = req.output_device.clone();
     t.conn(ConnEvent::LoopbackDetected(Ok(det)));
-    assert_eq!(dialog(&t).inputs[0].role, InputRole::Reference);
+    assert!(dialog(&t).inputs[0].reference);
 
     let r = t.key("Enter");
     let (config, _) = opened(&r).expect("session.open");

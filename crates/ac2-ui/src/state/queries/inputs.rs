@@ -80,46 +80,91 @@ impl AppState {
             },
             (None, None) => Vec::new(),
         };
-        o.config
-            .input_channels
-            .iter()
-            .map(|&c| {
-                let mic = self.input_setup(c).mic().map(str::to_owned);
-                let dev = device_names
-                    .as_ref()
-                    .and_then(|n| n.get(usize::from(c)).cloned());
-                let name = ac2_scene::meter::input_name(c, mic.as_deref(), dev.as_deref());
-                let is_ref = loopback == Some(c)
-                    || ms.iter().any(|m| {
-                        matches!(&m.config.kind, MeasKind::Transfer { config }
-                            if config.reference_input == c)
-                    });
-                let is_mic = mic.is_some()
-                    || ms.iter().any(|m| {
-                        matches!(&m.config.kind, MeasKind::Transfer { config }
-                            if config.measurement_input == c)
-                    });
-                let role = if is_ref {
-                    Some(InputRole::Reference)
-                } else if is_mic {
-                    Some(InputRole::Mic)
-                } else {
-                    None
-                };
-                let curve = self.daemon().and_then(|s| {
-                    ac2_scene::cal::curve_short(&ac2_proto::cal::state_input_use(s, c).curve)
-                });
-                InputRow {
-                    channel: c,
-                    label: input_label(c, &name, curve.as_deref(), role),
-                    used: uses.iter().find(|(i, _)| *i == c).map(|(_, u)| *u),
-                    reading: meters.get(&c).cloned().unwrap_or_else(MeterReading::none),
+        let now = super::super::sessions_impl::wall_now();
+        let offset = self.clock_offset();
+        let st = self.daemon();
+        let name_of = |c: u16| {
+            let mic = self.input_setup(c).mic().map(str::to_owned);
+            let dev = device_names
+                .as_ref()
+                .and_then(|n| n.get(usize::from(c)).cloned());
+            ac2_scene::meter::input_name(c, mic.as_deref(), dev.as_deref())
+        };
+        let kind_of = |c: u16| crate::prefs::KindPref::of(&self.input_setup(c).kind);
+        let role_of = |c: u16| {
+            if loopback == Some(c) {
+                InputRole::Reference
+            } else {
+                crate::session_dialog::kind_role(kind_of(c))
+            }
+        };
+        // What a line or digital row reads in: dBFS, or dBu with its calibration's age. A
+        // mic's calibration is the SPL meter's business; its row names the curve instead.
+        let cal_of = |c: u16| {
+            if kind_of(c) == crate::prefs::KindPref::Mic {
+                return None;
+            }
+            let status = st.map(|s| ac2_proto::cal::state_input_use(s, c).sensitivity.status());
+            Some(match status {
+                Some(ac2_proto::model::CalStatus::Line { .. }) => {
+                    ac2_scene::spl::cal_text(status?, false, now, offset)
                 }
+                _ => ac2_scene::meter::DBFS.to_owned(),
             })
-            .collect()
+        };
+        let reading = |c: u16| meters.get(&c).cloned().unwrap_or_else(MeterReading::none);
+        let pairs = st.map(|s| s.pairs.as_slice()).unwrap_or_default();
+        let captured = &o.config.input_channels;
+        let mut rows = Vec::new();
+        for &c in captured {
+            let pair = pairs
+                .iter()
+                .find(|p| p.right == c && captured.contains(&p.left));
+            if pair.is_some() {
+                // Drawn with its left side.
+                continue;
+            }
+            let pair = pairs
+                .iter()
+                .find(|p| p.left == c && captured.contains(&p.right));
+            let used = uses.iter().find(|(i, _)| *i == c).map(|(_, u)| *u);
+            let row = match pair {
+                Some(p) => {
+                    let name = p.name.clone().unwrap_or_else(|| {
+                        ac2_scene::meter::pair_name(&name_of(c), &name_of(p.right))
+                    });
+                    InputRow {
+                        channel: c,
+                        label: ac2_scene::meter::pair_label(c, p.right, &name, role_of(c)),
+                        used,
+                        reading: reading(c),
+                        cal: cal_of(c),
+                        right: Some((p.right, reading(p.right))),
+                    }
+                }
+                None => {
+                    let curve = st.and_then(|s| {
+                        ac2_scene::cal::curve_short(&ac2_proto::cal::state_input_use(s, c).curve)
+                    });
+                    InputRow {
+                        channel: c,
+                        label: input_label(c, &name_of(c), curve.as_deref(), Some(role_of(c))),
+                        used,
+                        reading: reading(c),
+                        cal: cal_of(c),
+                        right: None,
+                    }
+                }
+            };
+            rows.push(row);
+        }
+        rows
     }
 
     /// Subscribes, opens, renews and closes what [`Self::meter_wants`] changed to.
+    /// The preview carries the dialog's kinds and pairs as they stand when it is asked for
+    /// (a device change or the renewal), not on every edit: the dialog's rows are the
+    /// truth while it is open, the frames' declaration follows at the next renewal.
     pub(in crate::state) fn sync_meters(
         &mut self,
         before: (
@@ -136,9 +181,16 @@ impl AppState {
         let renew = tick && self.now_s - self.preview_sent_s >= PREVIEW_RENEW_S;
         match (&before.1, &after.1) {
             (_, Some((backend, device))) if before.1 != after.1 || renew => {
+                let (inputs, pairs) = self
+                    .overlay
+                    .session()
+                    .map(|d| d.preview_setup())
+                    .unwrap_or_default();
                 out.push(Request::Preview {
                     backend: *backend,
                     device: device.clone(),
+                    inputs,
+                    pairs,
                 });
                 self.preview_sent_s = self.now_s;
             }
@@ -190,6 +242,26 @@ impl AppState {
             );
         }
         out
+    }
+
+    /// The RMS level of session input `channel` from the latest level frame, for a
+    /// calibration that pairs a meter reading with it; `None` without a fresh frame.
+    pub fn input_level_dbfs(&self, channel: u16) -> Option<ac2_proto::units::Dbfs> {
+        use ac2_proto::FrameData;
+        use ac2_proto::topic::Topic;
+        let tf = self
+            .data
+            .as_ref()?
+            .latest
+            .get(&Topic::SessionLevels)
+            .filter(|f| !f.stale)?;
+        let FrameData::SessionLevels(f) = &tf.frame.data else {
+            return None;
+        };
+        let i = f.meta.channels.iter().position(|c| *c == channel)?;
+        let rms = *f.rms.get(i)?;
+        rms.is_finite()
+            .then(|| ac2_proto::units::Dbfs(f64::from(rms)))
     }
 
     /// The names of the open session's outputs: the device's channel name, else `Output N`.

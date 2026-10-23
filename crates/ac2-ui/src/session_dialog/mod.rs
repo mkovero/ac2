@@ -8,10 +8,14 @@
 //! direction as its own device, and a USB mic beside an interface, need another
 //! device to play the stimulus on.
 //!
-//! Roles say what a channel is for, so nobody types channel numbers:
+//! Roles and kinds say what a channel is for, so nobody types channel numbers:
 //! - **R — Reference**: the input the stimulus returns on through a loopback cable (one).
-//! - **M — Measurement mic**: an input with a mic (any number; each can be named, and
-//!   ←/→ on its row choose which of the mic's curves applies: off, 0°, 90° …).
+//! - **M / L / A — the kind**: a measurement mic (any number; each can be named with N, and
+//!   ←/→ on its row choose which of the mic's curves applies: off, 0°, 90° …), a line input
+//!   (dBFS, dBu once calibrated) or a digital feed (dBFS). The backend cannot tell them
+//!   apart, so the operator declares the kind; it fixes the dB reference of every meter.
+//! - **Shift+P — pair**: two line or two digital inputs read as one left/right row; N on a
+//!   paired row names the pair.
 //! - **S — Stimulus**: an output that feeds the speakers and the loopback.
 //!
 //! The session's inputs, outputs and loopback follow from the roles (and the rows put in
@@ -24,15 +28,15 @@ use std::collections::BTreeMap;
 use ac2_proto::cal::MAX_MIC_NAME;
 use ac2_proto::model::{
     Availability, BackendInfo, BackendKind, ClockRelation, CurveChoice, DeviceId, DeviceInfo,
-    DeviceSelector, InputKind, InputSetup, LoopbackDetection, LoopbackRoute, MAX_OUTPUT_LABEL, Mic,
-    OpenSession, OutputSetup, SessionConfig,
+    DeviceSelector, InputKind, InputSetup, InputSetups, LoopbackDetection, LoopbackRoute,
+    MAX_OUTPUT_LABEL, Mic, OpenSession, OutputSetup, Pair, PairSide, PreviewInput, SessionConfig,
 };
 use ac2_proto::units::Dbfs;
 use ac2_scene::format;
 use ac2_scene::meter::{input_name, output_name};
 
 use crate::forms::{parse_buffer, parse_rate};
-use crate::prefs::{DeviceRoles, UiPrefs};
+use crate::prefs::{DeviceRoles, KindPref, UiPrefs};
 
 mod detect;
 mod devices;
@@ -41,22 +45,33 @@ mod plan;
 
 pub use detect::REFERENCE_HELP;
 
-/// What an input is for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InputRole {
-    None,
-    /// The loopback return of the stimulus.
-    Reference,
-    /// A measurement mic.
-    Mic,
-}
-
-/// A role key.
+/// What a key or chip of a channel row sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RoleKey {
+    /// R: the loopback return (a role, on top of the kind).
     Reference,
+    /// M: a measurement mic.
     Mic,
+    /// L: a line input.
+    Line,
+    /// A: a digital feed.
+    Digital,
+    /// Shift+P: paired with the next input in the session below it, or unpaired.
+    Pair,
+    /// S: a stimulus output.
     Stimulus,
+}
+
+impl RoleKey {
+    /// The kind a kind key sets.
+    fn kind(self) -> Option<KindPref> {
+        match self {
+            Self::Mic => Some(KindPref::Mic),
+            Self::Line => Some(KindPref::Line),
+            Self::Digital => Some(KindPref::Digital),
+            Self::Reference | Self::Pair | Self::Stimulus => None,
+        }
+    }
 }
 
 /// One device input.
@@ -66,18 +81,57 @@ pub struct InputRow {
     /// What the backend calls it, if anything.
     pub device_name: Option<String>,
     pub in_session: bool,
-    pub role: InputRole,
-    /// Mic name (K8); empty = none.
-    pub mic: String,
-    /// Which of the mic's curves applies.
-    pub curve: CurveChoice,
+    /// The loopback return of the stimulus.
+    pub reference: bool,
+    /// What is on it: a mic (with its name and curve), a line input or a digital feed.
+    pub kind: InputKind,
 }
 
 impl InputRow {
     /// The row's name: mic name, else the backend's, else `Input N`.
     pub fn label(&self) -> String {
-        let mic = (self.role == InputRole::Mic).then_some(self.mic.as_str());
-        input_name(self.channel, mic, self.device_name.as_deref())
+        input_name(self.channel, self.kind.mic(), self.device_name.as_deref())
+    }
+
+    /// The mic name of a mic row, if named.
+    pub fn mic(&self) -> Option<&str> {
+        self.kind.mic()
+    }
+
+    pub fn is_mic(&self) -> bool {
+        matches!(self.kind, InputKind::Mic { .. })
+    }
+
+    /// The kind without the mic's details.
+    pub fn kind_pref(&self) -> KindPref {
+        KindPref::of(&self.kind)
+    }
+
+    /// The kind word as the Inputs list, the chips and the toasts say it.
+    pub fn kind_word(&self) -> &'static str {
+        kind_role(self.kind_pref()).name()
+    }
+}
+
+/// The Inputs-list role word of a kind.
+pub fn kind_role(k: KindPref) -> ac2_scene::meter::InputRole {
+    use ac2_scene::meter::InputRole as R;
+    match k {
+        KindPref::Mic => R::Mic,
+        KindPref::Line => R::Line,
+        KindPref::Digital => R::Digital,
+    }
+}
+
+/// An `InputKind` of a remembered kind: a mic with `mic`'s name (no curve chosen yet).
+fn kind_of(k: KindPref, mic: Option<&str>) -> InputKind {
+    match k {
+        KindPref::Mic => InputKind::Mic {
+            mic: mic.map(str::to_owned),
+            curve: CurveChoice::NotChosen,
+        },
+        KindPref::Line => InputKind::Line,
+        KindPref::Digital => InputKind::Digital,
     }
 }
 
@@ -115,11 +169,13 @@ pub enum Row {
     Buffer,
 }
 
-/// Text being typed into.
+/// Text being typed into ([`SessionDialog::edit_text`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Edit {
     /// The mic name of input row `.0`.
     Mic(usize),
+    /// The name of the pair input row `.0` is in.
+    PairName(usize),
     /// The rig's label of output row `.0`; applied on Enter, dropped on ↑/↓.
     OutputLabel(usize),
     /// The level of the loopback detection burst.
@@ -169,8 +225,8 @@ pub struct SessionPlan {
     pub output_device_id: String,
     /// Remembered for this device.
     pub roles: DeviceRoles,
-    /// Mic names of the session's inputs (`session.inputs`).
-    pub inputs: Vec<InputSetup>,
+    /// The kinds and pairs of the session's inputs (`session.inputs`).
+    pub inputs: InputSetups,
 }
 
 /// A loopback detection to run.
@@ -193,6 +249,8 @@ pub struct SessionDialog {
     pub device: usize,
     pub out_device: OutputDevice,
     pub inputs: Vec<InputRow>,
+    /// Left/right pairs among the inputs in the session (sorted by left channel).
+    pub pairs: Vec<Pair>,
     pub outputs: Vec<OutputRow>,
     /// Output channels of the session: outputs `0 .. out_count`.
     pub out_count: u16,
@@ -202,8 +260,8 @@ pub struct SessionDialog {
     pub edit: Option<Edit>,
     /// Why the last Enter was refused (plain words).
     pub error: Option<String>,
-    /// The output label being typed ([`Edit::OutputLabel`]).
-    pub label_text: String,
+    /// The name being typed: a mic's, a pair's or an output's label ([`Edit`]).
+    pub edit_text: String,
     /// What just happened (a role moved, a detection answered).
     pub notice: Option<String>,
     pub detect: Option<DetectPanel>,
@@ -211,8 +269,13 @@ pub struct SessionDialog {
     pub preview_error: Option<String>,
     /// The session open when the dialog opened.
     open: Option<OpenSession>,
-    /// The daemon's input setup (mic names) when the dialog opened.
+    /// The daemon's input setup (kinds, mic names, curves) when the dialog opened.
     setup: Vec<InputSetup>,
+    /// The daemon's pairs when the dialog opened.
+    setup_pairs: Vec<Pair>,
+    /// The mic names remembered for this device's inputs: M on a row gives its mic its last
+    /// name back.
+    mic_names: BTreeMap<u16, String>,
     /// The rig's output labels as last mirrored.
     labels: Vec<OutputSetup>,
 }
@@ -259,7 +322,7 @@ pub fn device_summary(d: &DeviceInfo) -> String {
 
 impl SessionDialog {
     /// The dialog over the open session (if any), until the device list arrives.
-    pub fn new(open: Option<&OpenSession>, setup: &[InputSetup]) -> Self {
+    pub fn new(open: Option<&OpenSession>, setup: &InputSetups) -> Self {
         let c = open.map(|o| &o.config);
         Self {
             backends: None,
@@ -267,6 +330,7 @@ impl SessionDialog {
             device: 0,
             out_device: OutputDevice::SameAsInput,
             inputs: Vec::new(),
+            pairs: Vec::new(),
             outputs: Vec::new(),
             out_count: 0,
             rate: c
@@ -280,12 +344,14 @@ impl SessionDialog {
             focus: Row::Backend,
             edit: None,
             error: None,
-            label_text: String::new(),
+            edit_text: String::new(),
             notice: None,
             detect: None,
             preview_error: None,
             open: open.cloned(),
-            setup: setup.to_vec(),
+            setup: setup.inputs.clone(),
+            setup_pairs: setup.pairs.clone(),
+            mic_names: BTreeMap::new(),
             labels: Vec::new(),
         }
     }
@@ -309,6 +375,33 @@ impl SessionDialog {
             o.rig_label = rig_label(labels, o.channel);
         }
     }
+
+    /// The pair input `channel` is in, and its side.
+    pub fn pair_of(&self, channel: u16) -> Option<(&Pair, PairSide)> {
+        self.pairs.iter().find_map(|p| {
+            if p.left == channel {
+                Some((p, PairSide::Left))
+            } else if p.right == channel {
+                Some((p, PairSide::Right))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// The kinds of every input of the device and the pairs, for the device's preview: its
+    /// frames then say what each column is.
+    pub fn preview_setup(&self) -> (Vec<PreviewInput>, Vec<Pair>) {
+        let inputs = self
+            .inputs
+            .iter()
+            .map(|r| PreviewInput {
+                channel: r.channel,
+                kind: r.kind.clone(),
+            })
+            .collect();
+        (inputs, self.pairs.clone())
+    }
 }
 
 /// The rig's label of output `channel`, if it has one.
@@ -331,6 +424,8 @@ fn default_roles(kind: BackendKind, n_in: u16, n_out: u16) -> DeviceRoles {
             mics: vec![1],
             stimulus: vec![0],
             mic_names: BTreeMap::new(),
+            kinds: [(0, KindPref::Line), (1, KindPref::Mic)].into(),
+            pairs: Vec::new(),
             output_device: None,
         };
     }

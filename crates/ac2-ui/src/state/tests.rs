@@ -13,7 +13,8 @@ use ac2_proto::units::*;
 use super::*;
 use crate::conn::{ConnEvent, Request, StimEvent};
 use crate::keys::{Chord, Keymap};
-use crate::session_dialog::{InputRole, RoleKey, Row, SessionDialog};
+use crate::prefs::KindPref;
+use crate::session_dialog::{RoleKey, Row, SessionDialog};
 
 fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
     let delay = matches!(kind, MeasKind::Transfer { .. }).then(|| DelayState {

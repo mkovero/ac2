@@ -113,11 +113,15 @@ impl Page {
     pub fn keys_in(self, style: crate::keys::LabelStyle) -> String {
         let text = match self {
             Page::AudioIo => {
-                "↑↓ move · ←→ backend / input / output device, a mic's curve · type the rate or \
-                 buffer · Space in session · R reference · M mic · S stimulus output · N names a \
-                 mic or an output · D detects the loopback · P opens the driver's settings (ASIO \
-                 panel, Audio MIDI Setup) · on the max level: type dBFS, Enter \
-                 · Enter opens the session · Esc closes"
+                let pair = crate::keys::Chord::shift(eframe::egui::Key::P).label_in(style);
+                return format!(
+                    "↑↓ move · ←→ backend / input / output device, a mic's curve · type the rate \
+                     or buffer · Space in session · R reference · M mic · L line · A digital · \
+                     {pair} pair · N name (the mic, the pair or an output) · S stimulus output · \
+                     D detects the loopback · P opens the driver's settings (ASIO panel, Audio \
+                     MIDI Setup) · on the max level: type dBFS, Enter · Enter opens the session \
+                     · Esc closes"
+                );
             }
             Page::Calibration => {
                 "↑↓ move (PgUp/PgDn, Home/End) · ←→ mic curve of an input · N names the mic · I \

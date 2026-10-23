@@ -532,8 +532,23 @@ struct RolesFile {
     /// One-based channel (as text: TOML keys are strings) → mic name.
     #[serde(default)]
     mic_names: BTreeMap<String, String>,
+    /// One-based channel (as text) → kind.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    kinds: BTreeMap<String, KindPref>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pairs: Vec<PairFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     output_device: Option<String>,
+}
+
+/// A left/right pair, one-based channels.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PairFile {
+    left: u32,
+    right: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
 }
 
 /// One-based → zero-based.
@@ -555,6 +570,18 @@ impl RolesFile {
         for (k, v) in &self.mic_names {
             mic_names.insert(zero(k.trim().parse().ok()?)?, v.clone());
         }
+        let mut kinds = BTreeMap::new();
+        for (k, v) in &self.kinds {
+            kinds.insert(zero(k.trim().parse().ok()?)?, *v);
+        }
+        let mut pairs = Vec::new();
+        for p in &self.pairs {
+            pairs.push(ac2_proto::model::Pair {
+                left: zero(p.left)?,
+                right: zero(p.right)?,
+                name: p.name.clone(),
+            });
+        }
         Some(DeviceRoles {
             inputs: zeros(&self.inputs)?,
             outputs: u16::try_from(self.outputs).ok()?,
@@ -565,6 +592,8 @@ impl RolesFile {
             mics: zeros(&self.mics)?,
             stimulus: zeros(&self.stimulus)?,
             mic_names,
+            kinds,
+            pairs,
             output_device: self.output_device.clone(),
         })
     }
@@ -580,6 +609,20 @@ impl RolesFile {
                 .mic_names
                 .iter()
                 .map(|(c, n)| ((u32::from(*c) + 1).to_string(), n.clone()))
+                .collect(),
+            kinds: r
+                .kinds
+                .iter()
+                .map(|(c, k)| ((u32::from(*c) + 1).to_string(), *k))
+                .collect(),
+            pairs: r
+                .pairs
+                .iter()
+                .map(|p| PairFile {
+                    left: u32::from(p.left) + 1,
+                    right: u32::from(p.right) + 1,
+                    name: p.name.clone(),
+                })
                 .collect(),
             output_device: r.output_device.clone(),
         }

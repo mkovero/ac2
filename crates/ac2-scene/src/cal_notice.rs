@@ -62,6 +62,23 @@ pub fn delete_sensitivity(mic: &str, channel: u16, device: &str) -> String {
     )
 }
 
+/// What Delete deletes on a line calibration line.
+pub fn delete_line(channel: u16, device: &str) -> String {
+    format!(
+        "the line calibration of input {} of {device}",
+        input_no(channel)
+    )
+}
+
+/// E on a digital input: nothing to calibrate.
+pub fn digital_not_calibrated(channel: u16) -> String {
+    format!(
+        "input {} is a digital input: it reads dBFS of its full scale, there is no volt to \
+         calibrate",
+        input_no(channel)
+    )
+}
+
 /// The first Delete press: asks for the second.
 pub fn delete_again(what: &str) -> String {
     format!("Delete again to delete {what}")

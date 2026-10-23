@@ -54,7 +54,13 @@ impl AppState {
             return;
         }
         let open = self.open_session().cloned();
-        let setup = self.daemon().map(|s| s.inputs.clone()).unwrap_or_default();
+        let setup = self
+            .daemon()
+            .map(|s| ac2_proto::model::InputSetups {
+                inputs: s.inputs.clone(),
+                pairs: s.pairs.clone(),
+            })
+            .unwrap_or_default();
         let labels = self.daemon().map(|s| s.outputs.clone()).unwrap_or_default();
         let mut session = SessionDialog::new(open.as_ref(), &setup);
         session.set_labels(&labels);
@@ -553,7 +559,7 @@ impl AppState {
                         Ok(None) => {}
                         Err(e) => d.error = Some(e),
                     }
-                } else if matches!(d.edit, Some(Edit::Mic(_))) {
+                } else if matches!(d.edit, Some(Edit::Mic(_) | Edit::PairName(_))) {
                     d.finish_edit();
                 } else {
                     self.submit_session(out);
@@ -586,6 +592,9 @@ impl AppState {
             Key::Space if plain => d.toggle(),
             Key::R if plain => d.assign(RoleKey::Reference),
             Key::M if plain => d.assign(RoleKey::Mic),
+            Key::L if plain => d.assign(RoleKey::Line),
+            Key::A if plain => d.assign(RoleKey::Digital),
+            Key::P if plain && chord.shift => d.assign(RoleKey::Pair),
             Key::S if plain => {
                 d.assign(RoleKey::Stimulus);
                 if matches!(d.focus, Row::Output(_)) {

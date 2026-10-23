@@ -105,6 +105,8 @@ fn preview_requests_reach_the_daemon_in_order() {
     let preview = || Request::Preview {
         backend: BackendKind::Fake,
         device: dev.clone(),
+        inputs: Vec::new(),
+        pairs: Vec::new(),
     };
     let rounds = 100;
     for _ in 0..rounds {

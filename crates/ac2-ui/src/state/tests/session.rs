@@ -1,6 +1,7 @@
 //! Reducer tests of the audio I/O and measurement dialogs, the meters and recording.
 
 use super::*;
+use crate::session_dialog::Edit;
 
 fn real_backends() -> Vec<BackendInfo> {
     let mut b = backends(false);
@@ -246,8 +247,9 @@ fn session_dialog_opens_a_session_from_roles() {
     assert_eq!(dialog(&t).backend_kind(), Some(BackendKind::Fake));
     assert_eq!(previewed(&r), Some(&DeviceId("fake:loop".into())));
     let d = dialog(&t);
-    assert_eq!(d.inputs[0].role, InputRole::Reference);
-    assert_eq!(d.inputs[1].role, InputRole::Mic);
+    assert!(d.inputs[0].reference);
+    assert_eq!(d.inputs[0].kind_pref(), KindPref::Line);
+    assert_eq!(d.inputs[1].kind_pref(), KindPref::Mic);
     assert_eq!(d.inputs[1].label(), "Room mic");
     assert!(!d.inputs[2].in_session);
     assert!(d.outputs[0].stimulus);
@@ -257,7 +259,7 @@ fn session_dialog_opens_a_session_from_roles() {
     assert!(r.is_empty(), "{r:?}");
     t.text("M30 FOH");
     assert!(t.key("Enter").is_empty());
-    assert_eq!(dialog(&t).inputs[1].mic, "M30 FOH");
+    assert_eq!(dialog(&t).inputs[1].mic(), Some("M30 FOH"));
     assert_eq!(dialog(&t).edit, None);
     let r = t.key("Enter");
     let (config, inputs) = opened(&r).expect("session.open");
@@ -277,15 +279,13 @@ fn session_dialog_opens_a_session_from_roles() {
             id: DeviceId("fake:loop".into())
         }
     );
+    // The reference is the loopback cable, a line input; the mic row carries its name.
     assert_eq!(
         inputs,
         &[
             InputSetup {
                 channel: 0,
-                kind: InputKind::Mic {
-                    mic: None,
-                    curve: CurveChoice::NotChosen,
-                },
+                kind: InputKind::Line,
                 pair: None,
             },
             InputSetup {
@@ -322,18 +322,18 @@ fn roles_move_toggle_and_explain_themselves() {
     focus(&mut t, Row::Input(2));
     t.key("R");
     let d = dialog(&t);
-    assert_eq!(d.inputs[2].role, InputRole::Reference);
+    assert!(d.inputs[2].reference);
     assert!(d.inputs[2].in_session);
-    assert_eq!(d.inputs[0].role, InputRole::None);
+    assert!(!d.inputs[0].reference);
     assert!(d.inputs[0].in_session);
-    // M marks several mics; Space takes a row out of the session with its role.
+    // M marks several mics; Space takes a row out of the session, its kind kept.
     focus(&mut t, Row::Input(3));
     t.key("M");
-    assert_eq!(dialog(&t).inputs[3].role, InputRole::Mic);
-    assert_eq!(dialog(&t).inputs[1].role, InputRole::Mic);
+    assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Mic);
+    assert_eq!(dialog(&t).inputs[1].kind_pref(), KindPref::Mic);
     t.type_key("Space", " ");
     assert!(!dialog(&t).inputs[3].in_session);
-    assert_eq!(dialog(&t).inputs[3].role, InputRole::None);
+    assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Mic);
     // S belongs on an output: on an input it says so and changes nothing.
     t.key("S");
     assert!(
@@ -399,7 +399,7 @@ fn mic_names_must_differ_and_the_mouse_assigns_roles() {
         Msg::Session(SessionMsg::Role(Row::Input(2), RoleKey::Reference)),
         &t.keys,
     );
-    assert_eq!(dialog(&t).inputs[2].role, InputRole::Reference);
+    assert!(dialog(&t).inputs[2].reference);
     t.key("N");
     assert_eq!(dialog(&t).edit, None);
     let r = t.st.update(Msg::Session(SessionMsg::Submit), &t.keys);
@@ -429,14 +429,17 @@ fn roles_are_remembered_per_device() {
             mics: vec![0, 2],
             stimulus: vec![1],
             mic_names: [(0, "M30".to_owned()), (2, "KM184".to_owned())].into(),
+            kinds: BTreeMap::new(),
+            pairs: Vec::new(),
             output_device: None,
         },
     );
     open_dialog(&mut t, backends(true));
     let d = dialog(&t);
-    assert_eq!(d.inputs[3].role, InputRole::Reference);
-    assert_eq!(d.inputs[0].role, InputRole::Mic);
-    assert_eq!(d.inputs[0].mic, "M30");
+    assert!(d.inputs[3].reference);
+    assert_eq!(d.inputs[3].kind_pref(), KindPref::Line);
+    assert_eq!(d.inputs[0].kind_pref(), KindPref::Mic);
+    assert_eq!(d.inputs[0].mic(), Some("M30"));
     assert_eq!(d.inputs[0].label(), "M30");
     assert!(!d.inputs[1].in_session);
     assert!(d.outputs[1].stimulus && !d.outputs[0].stimulus);
@@ -457,8 +460,14 @@ fn a_real_backend_is_preferred_and_an_unavailable_one_says_why() {
     let r = open_dialog(&mut t, real_backends());
     assert_eq!(dialog(&t).backend_kind(), Some(BackendKind::CoreAudio));
     assert_eq!(previewed(&r), Some(&DeviceId("card".into())));
-    // A real interface starts without roles: its wiring is the operator's to say.
-    assert!(dialog(&t).inputs.iter().all(|i| i.role == InputRole::None));
+    // A real interface starts without roles, every input a line input: its wiring is the
+    // operator's to say.
+    assert!(
+        dialog(&t)
+            .inputs
+            .iter()
+            .all(|i| !i.reference && i.kind_pref() == KindPref::Line)
+    );
     // → on the device row (where Shift+O lands) previews the other device.
     assert_eq!(dialog(&t).focus, Row::Device);
     let r = t.key("Right");
@@ -550,7 +559,7 @@ fn preview_renews_and_the_open_device_uses_the_session_meters() {
     assert!(previewed(&r).is_none(), "{r:?}");
     // Prefilled from the session: inputs 1–2, no loopback.
     assert!(dialog(&t).inputs[0].in_session && dialog(&t).inputs[1].in_session);
-    assert!(dialog(&t).inputs.iter().all(|i| i.role == InputRole::None));
+    assert!(dialog(&t).inputs.iter().all(|i| !i.reference));
 }
 
 #[test]
@@ -630,8 +639,8 @@ fn detect_loopback_needs_a_stimulus_output_and_a_typed_level() {
     let r = t.conn(ConnEvent::LoopbackDetected(Ok(det)));
     assert!(previewed(&r).is_some(), "{r:?}");
     let d = dialog(&t);
-    assert_eq!(d.inputs[2].role, InputRole::Reference);
-    assert_eq!(d.inputs[0].role, InputRole::None);
+    assert!(d.inputs[2].reference);
+    assert!(!d.inputs[0].reference);
     assert_eq!(d.focus, Row::Input(2));
     let text = d.detect_text().unwrap_or_default();
     assert!(
@@ -706,3 +715,182 @@ fn session_dialog_errors() {
 mod meters;
 
 mod devices;
+
+fn opened_pairs(r: &[Request]) -> Option<&[Pair]> {
+    r.iter().find_map(|r| match r {
+        Request::OpenSession { pairs, .. } => Some(pairs.as_slice()),
+        _ => None,
+    })
+}
+
+/// L and A set an input's kind, Shift+P pairs it with the next input in the session below
+/// it, N names the pair; the refusals name the rule, and the opened session carries the
+/// kinds and the pair.
+#[test]
+fn kinds_and_pairs_by_key() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    // A never-declared row is a line input; the remembered mic stays a mic.
+    let d = dialog(&t);
+    assert_eq!(d.inputs[1].kind_pref(), KindPref::Mic);
+    assert_eq!(d.inputs[2].kind_pref(), KindPref::Line);
+    assert!(!d.inputs[2].in_session);
+    let notice = |t: &T| dialog(t).notice.clone().unwrap_or_default();
+    // Shift+P with nothing in the session below: says what it pairs with.
+    focus(&mut t, Row::Input(2));
+    t.type_key("Space", " ");
+    t.type_key("Shift+P", "P");
+    assert!(
+        notice(&t).starts_with("Shift+P pairs this input with the next input in the session"),
+        "{}",
+        notice(&t)
+    );
+    assert!(dialog(&t).pairs.is_empty());
+    // A makes in 4 digital; a line and a digital input are not a pair.
+    focus(&mut t, Row::Input(3));
+    t.type_key("Space", " ");
+    t.key("A");
+    assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Digital);
+    focus(&mut t, Row::Input(2));
+    t.type_key("Shift+P", "P");
+    assert_eq!(
+        notice(&t),
+        "in 3 is line and in 4 is digital; a pair is two of one kind (L or A on the rows)"
+    );
+    // Both digital: paired.
+    t.key("A");
+    t.type_key("Shift+P", "P");
+    assert_eq!(notice(&t), "in 3 and 4 are a pair (N names it)");
+    assert_eq!(
+        dialog(&t).pairs,
+        vec![Pair {
+            left: 2,
+            right: 3,
+            name: None
+        }]
+    );
+    // L on a paired row changes both rows; the pair stays.
+    t.key("L");
+    assert_eq!(dialog(&t).inputs[2].kind_pref(), KindPref::Line);
+    assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Line);
+    assert_eq!(dialog(&t).pairs.len(), 1);
+    // N on a paired row names the pair.
+    t.type_key("N", "n");
+    assert_eq!(dialog(&t).edit, Some(Edit::PairName(2)));
+    t.text("Main");
+    t.key("Enter");
+    assert_eq!(dialog(&t).pairs[0].name.as_deref(), Some("Main"));
+    assert_eq!(dialog(&t).edit, None);
+    // M on a paired row: a mic, and the pair is gone.
+    focus(&mut t, Row::Input(3));
+    t.key("M");
+    assert_eq!(
+        notice(&t),
+        "in 3 and 4 are no longer a pair: a pair is two line or two digital inputs"
+    );
+    assert!(dialog(&t).pairs.is_empty());
+    assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Mic);
+    // Shift+P onto a mic is refused by the rule.
+    focus(&mut t, Row::Input(2));
+    t.type_key("Shift+P", "P");
+    assert_eq!(
+        notice(&t),
+        "in 4 is a mic; a pair is two line or two digital inputs (L or A on the rows)"
+    );
+    // Line again, paired, opened: the setups carry the kinds and the sides, the session
+    // the pair, and the device remembers both.
+    focus(&mut t, Row::Input(3));
+    t.key("L");
+    focus(&mut t, Row::Input(2));
+    t.type_key("Shift+P", "P");
+    let r = t.key("Enter");
+    let (config, inputs) = opened(&r).expect("open");
+    assert_eq!(config.input_channels, vec![0, 1, 2, 3]);
+    let setup = |c: u16| inputs.iter().find(|i| i.channel == c).expect("setup");
+    assert_eq!(setup(2).kind, InputKind::Line);
+    assert_eq!(setup(2).pair, Some(PairSide::Left));
+    assert_eq!(setup(3).pair, Some(PairSide::Right));
+    assert_eq!(setup(1).pair, None);
+    let pair = Pair {
+        left: 2,
+        right: 3,
+        name: None,
+    };
+    assert_eq!(opened_pairs(&r), Some(std::slice::from_ref(&pair)));
+    let roles = &t.st.prefs.sessions["fake/fake:loop"];
+    assert_eq!(roles.kinds.get(&2), Some(&KindPref::Line));
+    assert_eq!(roles.kinds.get(&3), Some(&KindPref::Line));
+    assert_eq!(roles.pairs, vec![pair]);
+}
+
+/// The remembered kinds and pair of a device come back in the dialog and open with it; a
+/// pair whose input is out of the session is dropped, not sent.
+#[test]
+fn kinds_and_pairs_are_remembered_per_device() {
+    let mut t = T::new();
+    let pair = Pair {
+        left: 2,
+        right: 3,
+        name: Some("AES".into()),
+    };
+    let roles = crate::prefs::DeviceRoles {
+        inputs: vec![0, 1, 2, 3],
+        outputs: 2,
+        reference: Some(0),
+        mics: vec![1],
+        stimulus: vec![0],
+        mic_names: [(1, "M30".to_owned())].into(),
+        kinds: [
+            (0, KindPref::Line),
+            (1, KindPref::Mic),
+            (2, KindPref::Digital),
+            (3, KindPref::Digital),
+        ]
+        .into(),
+        pairs: vec![pair.clone()],
+        output_device: None,
+    };
+    t.st.prefs
+        .sessions
+        .insert("fake/fake:loop".into(), roles.clone());
+    open_dialog(&mut t, backends(true));
+    let d = dialog(&t);
+    assert_eq!(d.inputs[2].kind_pref(), KindPref::Digital);
+    assert_eq!(d.inputs[3].kind_pref(), KindPref::Digital);
+    assert_eq!(
+        d.pair_of(2).map(|(p, s)| (p.clone(), s)),
+        Some((pair.clone(), PairSide::Left))
+    );
+    assert_eq!(d.pair_of(3).map(|(_, s)| s), Some(PairSide::Right));
+    let r = t.key("Enter");
+    assert_eq!(opened_pairs(&r), Some(std::slice::from_ref(&pair)));
+    // One input of the pair out of the session, or a hand-edited file pairing two kinds:
+    // no pair.
+    for edit in [
+        |r: &mut crate::prefs::DeviceRoles| r.inputs = vec![0, 1, 2],
+        |r: &mut crate::prefs::DeviceRoles| {
+            r.kinds.insert(3, KindPref::Line);
+        },
+    ] {
+        let mut roles = roles.clone();
+        edit(&mut roles);
+        t.st.prefs.sessions.insert("fake/fake:loop".into(), roles);
+        open_dialog(&mut t, backends(true));
+        assert!(dialog(&t).pairs.is_empty());
+        let r = t.key("Enter");
+        assert_eq!(opened_pairs(&r), Some(&[][..]));
+    }
+}
+
+/// The footer of the Audio I/O page names the kind and pair keys in the row's words.
+#[test]
+fn audio_io_key_tips_name_the_kind_and_pair_keys() {
+    use crate::keys::LabelStyle;
+    let tips = crate::settings::Page::AudioIo.keys_in(LabelStyle::Pc);
+    assert!(
+        tips.contains("M mic · L line · A digital · Shift+P pair · N name"),
+        "{tips}"
+    );
+    let tips = crate::settings::Page::AudioIo.keys_in(LabelStyle::Mac);
+    assert!(tips.contains("⇧P pair"), "{tips}");
+}

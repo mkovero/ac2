@@ -129,19 +129,28 @@ pub fn channel_choice(channel: u16, name: &str) -> String {
     format!("{} · {name}", u32::from(channel) + 1)
 }
 
-/// What an input is wired as in the setup: the loopback return of the stimulus, or a
-/// measurement mic.
+/// What the row's name is followed by: the reference role, else the input's declared kind.
+/// The word is the same in the Audio & I/O chips, the toasts and the user guide.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputRole {
+    /// The loopback return of the stimulus.
     Reference,
+    /// A measurement microphone.
     Mic,
+    /// Analogue line level.
+    Line,
+    /// A digital feed.
+    Digital,
 }
 
 impl InputRole {
+    /// The word after the name.
     pub fn name(self) -> &'static str {
         match self {
             Self::Reference => "reference",
             Self::Mic => "mic",
+            Self::Line => "line",
+            Self::Digital => "digital",
         }
     }
 }
@@ -168,11 +177,25 @@ impl InputUse {
 /// uses it as, and its reading.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputRow {
+    /// The input, or a pair's left input.
     pub channel: u16,
     pub label: String,
     pub used: Option<InputUse>,
+    /// The input's reading, or the pair's left reading.
     pub reading: MeterReading,
+    /// What the readout rests on, for a row whose level is not dB SPL: `dBFS`, or a line
+    /// calibration's `dBu · full scale +13.0 dBu · 3 h ago`. A mic row names its curve in
+    /// the label instead.
+    pub cal: Option<String>,
+    /// A pair's right input and its reading: the row then draws two meters, `L` and `R`.
+    pub right: Option<(u16, MeterReading)>,
 }
+
+/// The mark beside a pair's meter.
+pub const PAIR_MARKS: (&str, &str) = ("L", "R");
+
+/// What a line or digital input reads without a line calibration.
+pub const DBFS: &str = "dBFS";
 
 /// A session input's label: its name ([`input_name`]), its role, and the one-based input
 /// number when the name does not already say it, with the mic curve in use
@@ -199,6 +222,23 @@ pub fn input_label(
         s.push_str(&format!(" (in {n})"));
     }
     s
+}
+
+/// The name of a pair not named by the operator: `Main L + Main R`.
+pub fn pair_name(left: &str, right: &str) -> String {
+    format!("{left} + {right}")
+}
+
+/// A pair's row label: the pair's name, the kind of both inputs, `pair`, and both input
+/// numbers (the name of a pair never says them both): `Main L + Main R · line · pair (in 3,
+/// 4)`, `Stereo bus · digital · pair (in 5, 6)`.
+pub fn pair_label(left: u16, right: u16, name: &str, kind: InputRole) -> String {
+    format!(
+        "{name} · {} · pair (in {}, {})",
+        kind.name(),
+        u32::from(left) + 1,
+        u32::from(right) + 1
+    )
 }
 
 #[cfg(test)]
@@ -266,5 +306,32 @@ mod tests {
         assert_eq!(input_label(3, "Input 4", None, None), "Input 4");
         assert_eq!(InputUse::Reference.tag(), "REF");
         assert_eq!(InputUse::Measurement.tag(), "MEAS");
+    }
+
+    #[test]
+    fn input_labels_name_the_kind_and_a_pair_is_one_row() {
+        assert_eq!(
+            input_label(2, "Main L", None, Some(InputRole::Line)),
+            "Main L · line (in 3)"
+        );
+        assert_eq!(
+            input_label(4, "AES 1", None, Some(InputRole::Digital)),
+            "AES 1 · digital (in 5)"
+        );
+        assert_eq!(
+            input_label(1, "loopback", None, Some(InputRole::Reference)),
+            "loopback · reference (in 2)"
+        );
+        assert_eq!(pair_name("Main L", "Main R"), "Main L + Main R");
+        assert_eq!(
+            pair_label(2, 3, &pair_name("Main L", "Main R"), InputRole::Line),
+            "Main L + Main R · line · pair (in 3, 4)"
+        );
+        assert_eq!(
+            pair_label(4, 5, "Stereo bus", InputRole::Digital),
+            "Stereo bus · digital · pair (in 5, 6)"
+        );
+        assert_eq!(PAIR_MARKS, ("L", "R"));
+        assert_eq!(DBFS, "dBFS");
     }
 }

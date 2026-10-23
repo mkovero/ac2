@@ -142,13 +142,15 @@ impl SessionDialog {
                     && let Some(i) = self.inputs.iter().position(|r| r.channel == input)
                 {
                     for r in &mut self.inputs {
-                        if r.role == InputRole::Reference {
-                            r.role = InputRole::None;
-                        }
+                        r.reference = false;
                     }
                     let row = &mut self.inputs[i];
-                    row.role = InputRole::Reference;
+                    row.reference = true;
                     row.in_session = true;
+                    // The loopback carries the stimulus back, not a mic.
+                    if row.is_mic() {
+                        row.kind = InputKind::Line;
+                    }
                     self.focus = Row::Input(i);
                 }
             }
@@ -204,7 +206,7 @@ impl SessionDialog {
     /// The default reference as its loopback pair, in words: which input the stimulus output
     /// returns on, and whether that is the open session's already.
     pub fn reference_text(&self) -> String {
-        let input = self.inputs.iter().find(|r| r.role == InputRole::Reference);
+        let input = self.inputs.iter().find(|r| r.reference);
         let output = self
             .stimulus_output()
             .and_then(|o| self.outputs.iter().find(|r| r.channel == o));

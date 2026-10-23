@@ -108,6 +108,28 @@ mod layout;
 #[cfg(test)]
 mod tests;
 
+/// An input's remembered kind: `InputKind` without the mic's name and curve (the name is in
+/// [`DeviceRoles::mic_names`], the curve is the daemon's).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KindPref {
+    Mic,
+    Line,
+    Digital,
+}
+
+impl KindPref {
+    /// The kind of a declared input.
+    pub fn of(kind: &ac2_proto::model::InputKind) -> Self {
+        use ac2_proto::model::InputKind as K;
+        match kind {
+            K::Mic { .. } => Self::Mic,
+            K::Line => Self::Line,
+            K::Digital => Self::Digital,
+        }
+    }
+}
+
 /// The session dialog's choices for one device (zero-based channels).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DeviceRoles {
@@ -123,9 +145,29 @@ pub struct DeviceRoles {
     pub stimulus: Vec<u16>,
     /// Mic name per input.
     pub mic_names: BTreeMap<u16, String>,
+    /// The kind declared per input. An input absent here is a mic when it is in `mics`
+    /// (a file from before kinds names its mics there), else line.
+    pub kinds: BTreeMap<u16, KindPref>,
+    /// Left/right pairs among the inputs.
+    pub pairs: Vec<ac2_proto::model::Pair>,
     /// The device the session plays on when it is not the input device (its id); `None`:
     /// the input device's own outputs, or the system default where it has none.
     pub output_device: Option<String>,
+}
+
+impl DeviceRoles {
+    /// The kind remembered for `channel`: declared, else a mic when listed among the mics
+    /// (an unnamed mic keeps its SPL meters), else line.
+    pub fn kind_of(&self, channel: u16) -> KindPref {
+        self.kinds
+            .get(&channel)
+            .copied()
+            .unwrap_or(if self.mics.contains(&channel) {
+                KindPref::Mic
+            } else {
+                KindPref::Line
+            })
+    }
 }
 
 /// The layout as the operator left it.

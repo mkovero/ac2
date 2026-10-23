@@ -128,6 +128,12 @@ impl AppState {
             self.overlay = Overlay::None;
             return;
         };
+        // The line calibration dialog reads the input's level as Enter is pressed.
+        let read = self
+            .overlay
+            .settings()
+            .and_then(|s| s.cal.line.as_ref())
+            .and_then(|d| self.input_level_dbfs(d.input));
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
@@ -142,6 +148,14 @@ impl AppState {
         }
         if let Some(d) = &mut v.electrical {
             if let Some(a) = crate::electrical_dialog::key(d, &chord) {
+                self.cal_action(a, out);
+            } else {
+                self.swallow_text = swallow;
+            }
+            return;
+        }
+        if let Some(d) = &mut v.line {
+            if let Some(a) = crate::line_dialog::key(d, &chord, read) {
                 self.cal_action(a, out);
             } else {
                 self.swallow_text = swallow;
@@ -255,6 +269,15 @@ impl AppState {
                 ),
                 cmd: Command::CalDelete {
                     key: ac2_proto::model::CalRef::Spl(key),
+                },
+            }),
+            CalAction::DeleteLine(key) => out.push(Request::Call {
+                what: format!(
+                    "line calibration of input {} deleted",
+                    u32::from(key.channel) + 1
+                ),
+                cmd: Command::CalDelete {
+                    key: ac2_proto::model::CalRef::Line(key),
                 },
             }),
         }
@@ -376,8 +399,8 @@ impl AppState {
         self.prefs_dirty = true;
         out.push(Request::OpenSession {
             config: plan.config,
-            inputs: plan.inputs,
-            pairs: self.pairs(),
+            inputs: plan.inputs.inputs,
+            pairs: plan.inputs.pairs,
             what: format!("audio I/O open on {}", plan.device_name),
         });
         self.overlay = Overlay::None;

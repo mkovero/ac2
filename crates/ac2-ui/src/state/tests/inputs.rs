@@ -787,16 +787,19 @@ fn session_dialog_steps_the_mic_curve_of_a_named_mic() {
         }])
     );
     assert_eq!(
-        dialog(&t).inputs[1].curve,
-        CurveChoice::Curve {
+        dialog(&t).inputs[1].kind.curve(),
+        Some(&CurveChoice::Curve {
             label: "90°".into()
-        }
+        })
     );
     // Another name typed: not live yet, the choice starts over and waits for Enter.
     t.type_key("N", "n");
     t.text(" B");
     t.key("Enter");
-    assert_eq!(dialog(&t).inputs[1].curve, CurveChoice::NotChosen);
+    assert_eq!(
+        dialog(&t).inputs[1].kind.curve(),
+        Some(&CurveChoice::NotChosen)
+    );
     let r = t.key("ArrowRight");
     assert_eq!(inputs_call(&r), None);
     assert!(
@@ -858,5 +861,109 @@ fn pane_keys_act_on_the_panes_own_measurement() {
             Request::Call { cmd: Command::MeasStop { meas }, .. } if *meas == MeasId(1)
         )),
         "{r:?}"
+    );
+}
+
+/// E on a line input of the calibrations view: the line calibration dialog; Enter sends
+/// `cal.line` with the voltage typed and the level the input reads now, a refusal stays
+/// in the dialog, a success closes it with what to do next. On a digital input E says
+/// there is nothing to calibrate.
+#[test]
+fn line_calibration_from_the_calibrations_view() {
+    use ac2_client::{Latest, TopicFrame};
+    use ac2_proto::frame::{ClipFlags, SessionLevelsFrame};
+    use ac2_proto::units::Volts;
+    use ac2_proto::{Frame, FrameData};
+    let mut t = T::new();
+    let mut s = mm1_state(CurveChoice::NotChosen);
+    s.inputs.push(InputSetup {
+        channel: 0,
+        kind: InputKind::Line,
+        pair: None,
+    });
+    t.conn(mirror(s.clone()));
+    t.st.update(Msg::Command(CommandId::Calibrations), &t.keys);
+    t.key("Home");
+    t.type_key("E", "e");
+    let d = cal_view(&t).line.clone().expect("the line dialog");
+    assert_eq!(d.title(), "Line calibration · in 1");
+    assert_eq!(d.volts, "");
+    // Without a reading there is nothing to calibrate against.
+    t.text("1.228 V");
+    assert!(calls(&t.key("Enter")).is_empty());
+    let e = cal_view(&t).line.as_ref().and_then(|d| d.error.clone());
+    assert!(
+        e.as_deref()
+            .is_some_and(|e| e.starts_with("the input reads no level")),
+        "{e:?}"
+    );
+    // The session's meters running: Enter sends the volts with the input's level now.
+    let mut latest = Latest::default();
+    let data = FrameData::SessionLevels(SessionLevelsFrame {
+        meta: ac2_proto::frame::LevelsMeta {
+            channels: vec![0, 1],
+        },
+        peak: vec![-6.0, -1.0],
+        rms: vec![-9.0, -12.0],
+        clip: vec![ClipFlags::NONE, ClipFlags::NONE],
+    });
+    let f = TopicFrame {
+        topic: data.topic(),
+        frame: Arc::new(Frame {
+            stamp: ac2_proto::samples::stamp(None),
+            data,
+        }),
+        received: Instant::now(),
+        since_new: std::time::Duration::ZERO,
+        age: Some(0.0),
+        stale: false,
+    };
+    latest.frames.insert(f.topic.to_string().into(), f);
+    t.st.data = Some(Arc::new(crate::conn::DataSnapshot {
+        latest,
+        grids: Default::default(),
+        drained: Instant::now(),
+    }));
+    let r = t.key("Enter");
+    let what = match r.as_slice() {
+        [
+            Request::Call {
+                cmd:
+                    Command::CalLine {
+                        channel: 0,
+                        volts,
+                        read_dbfs,
+                    },
+                what,
+            },
+        ] if *volts == Volts(1.228) && *read_dbfs == Dbfs(-9.0) => what.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(what, "line calibration of input 1");
+    t.conn(ConnEvent::Reply {
+        what: what.clone(),
+        result: Err("the tone level on input 1 is not steady yet".into()),
+    });
+    let d = cal_view(&t).line.clone().expect("still open");
+    assert!(d.error.as_deref().is_some_and(|e| e.contains("not steady")));
+    assert_eq!(calls(&t.key("Enter")).len(), 1);
+    t.conn(ConnEvent::Reply {
+        what,
+        result: Ok(()),
+    });
+    assert!(cal_view(&t).line.is_none());
+    let n = cal_view(&t).notice.clone().unwrap_or_default();
+    assert!(n.contains("stored") && n.contains("reads dBu now"), "{n}");
+    // A digital input has no volt to calibrate.
+    s.inputs[1].kind = InputKind::Digital;
+    t.conn(mirror(s));
+    t.key("Home");
+    t.type_key("E", "e");
+    assert!(cal_view(&t).line.is_none());
+    let n = cal_view(&t).notice.clone().unwrap_or_default();
+    assert_eq!(
+        n,
+        "input 1 is a digital input: it reads dBFS of its full scale, there is no volt to \
+         calibrate"
     );
 }

@@ -14,6 +14,19 @@ fn round_trip_is_one_based_in_the_file() {
             mics: vec![1, 2],
             stimulus: vec![0],
             mic_names: [(1, "M30 FOH".to_owned()), (2, "ECM8000".to_owned())].into(),
+            kinds: [
+                (0, KindPref::Line),
+                (1, KindPref::Mic),
+                (2, KindPref::Mic),
+                (3, KindPref::Digital),
+                (4, KindPref::Digital),
+            ]
+            .into(),
+            pairs: vec![ac2_proto::model::Pair {
+                left: 3,
+                right: 4,
+                name: Some("AES".into()),
+            }],
             output_device: Some("hw:Out".into()),
         },
     );
@@ -22,8 +35,31 @@ fn round_trip_is_one_based_in_the_file() {
     assert!(text.contains("reference = 1"), "{text}");
     assert!(text.contains("mics = [2, 3]"), "{text}");
     assert!(text.contains("2 = \"M30 FOH\""), "{text}");
+    assert!(text.contains("4 = \"digital\""), "{text}");
+    assert!(text.contains("left = 4"), "{text}");
+    assert!(text.contains("right = 5"), "{text}");
+    assert!(text.contains("name = \"AES\""), "{text}");
     assert_eq!(UiPrefs::from_toml(&text), Ok(p));
     assert_eq!(UiPrefs::from_toml(""), Ok(UiPrefs::default()));
+}
+
+/// A file from before kinds names its mics in `mics` alone: they stay mics (an unnamed mic
+/// keeps its SPL meters), every other input is a line input.
+#[test]
+fn roles_without_kinds_keep_their_mics() {
+    let p = UiPrefs::from_toml(
+        "[sessions.\"fake/x\"]\ninputs = [1, 2, 3]\nreference = 1\nmics = [2]\n",
+    )
+    .expect("parses");
+    let r = &p.sessions["fake/x"];
+    assert_eq!(r.kind_of(0), KindPref::Line);
+    assert_eq!(r.kind_of(1), KindPref::Mic);
+    assert_eq!(r.kind_of(2), KindPref::Line);
+    assert!(r.pairs.is_empty());
+    assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\nkinds = { \"1\" = \"aes\" }\n").is_err());
+    assert!(
+        UiPrefs::from_toml("[sessions.\"fake/x\"]\npairs = [{ left = 0, right = 1 }]\n").is_err()
+    );
 }
 
 #[test]

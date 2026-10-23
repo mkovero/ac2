@@ -16,9 +16,10 @@ use ac2_proto::Command;
 use ac2_proto::GridDef;
 use ac2_proto::model::{
     AverageMethod, CalKey, CurveChoice, DelayFinding, DelayOutcome, DelayPick, DelayReference,
-    FinderBand, GeneratorDesired, GeneratorSettings, ImportRole, InputSetup, MathDomain, MeasKind,
-    Measurement, MicCurveId, Operand, Polarity, SessionRef, Signal, Smoothing, SmoothingFraction,
-    SmoothingMode, State, SweepStatus, TraceData, TraceKind, TraceMeta, TraceOwner,
+    FinderBand, GeneratorDesired, GeneratorSettings, ImportRole, InputKind, InputSetup, MathDomain,
+    MeasKind, Measurement, MicCurveId, Operand, Polarity, SessionRef, Signal, Smoothing,
+    SmoothingFraction, SmoothingMode, State, SweepStatus, TraceData, TraceKind, TraceMeta,
+    TraceOwner,
 };
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};

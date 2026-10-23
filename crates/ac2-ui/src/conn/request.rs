@@ -754,13 +754,18 @@ pub(super) async fn preview_task(
 ) {
     while let Some(r) = reqs.recv().await {
         match r {
-            Request::Preview { backend, device } => {
+            Request::Preview {
+                backend,
+                device,
+                inputs,
+                pairs,
+            } => {
                 let result = client
                     .call(Command::SessionPreview {
                         backend,
                         device: device.clone(),
-                        inputs: Vec::new(),
-                        pairs: Vec::new(),
+                        inputs,
+                        pairs,
                     })
                     .await
                     .and_then(|r| expect_body!("session.preview", r, ReplyBody::Preview(p) => p))

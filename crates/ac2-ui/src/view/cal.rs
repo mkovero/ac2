@@ -42,6 +42,7 @@ pub(super) fn cal_page(app: &App, ui: &mut egui::Ui, v: &CalView, ch: &Chrome) {
                     CalLine::Input(_) => "Inputs",
                     CalLine::Curve(_) => "Mic library",
                     CalLine::Sensitivity(_) => "Sensitivity calibrations",
+                    CalLine::Line(_) => "Line calibrations",
                 };
                 if title != section {
                     section = title;
@@ -103,6 +104,78 @@ pub(super) fn cal_dialogs(app: &App, ctx: &egui::Context, ch: &Chrome, v: &CalVi
     if let Some(d) = &v.acoustic {
         acoustic(app, ctx, ch, d);
     }
+    if let Some(d) = &v.line {
+        line(app, ctx, ch, d);
+    }
+}
+
+/// The line calibration dialog over the view: what to do, the input's level now, the
+/// voltage, Enter.
+fn line(app: &App, ctx: &egui::Context, ch: &Chrome, d: &crate::line_dialog::LineDialog) {
+    let meter = app
+        .state
+        .input_meters()
+        .get(&d.input)
+        .cloned()
+        .unwrap_or_else(ac2_scene::meter::MeterReading::none);
+    egui::Area::new(egui::Id::new("ac2-line-cal"))
+        .order(egui::Order::Tooltip)
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
+        .show(ctx, |ui| {
+            card(ch).show(ui, |ui| {
+                ui.set_width(560.0);
+                ui.label(RichText::new(d.title()).strong().size(16.0));
+                ui.add_space(4.0);
+                ui.label(RichText::new(d.method_text()).color(ch.text));
+                ui.add_space(6.0);
+                egui::Grid::new("ac2-line-fields")
+                    .num_columns(3)
+                    .spacing(egui::vec2(12.0, 6.0))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("Input level now").color(ch.text));
+                        ui.horizontal(|ui| super::session::meter(ui, &meter, ch));
+                        ui.label(
+                            RichText::new("dBFS · steady, not clipping")
+                                .small()
+                                .color(ch.dim),
+                        );
+                        ui.end_row();
+                        ui.label(RichText::new("Voltage measured (RMS)").color(ch.focus));
+                        ui.label(
+                            RichText::new(format!("{}▏", d.volts))
+                                .monospace()
+                                .color(ch.focus),
+                        );
+                        ui.label(
+                            RichText::new("as the meter shows it, e.g. 1.228 V")
+                                .small()
+                                .color(ch.dim),
+                        );
+                        ui.end_row();
+                    });
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "0 dBFS = V / 10^(L/20); dBu re 0.7746 V. The input reads dBu from then \
+                         on, its full scale named.",
+                    )
+                    .small()
+                    .color(ch.dim),
+                );
+                if let Some(p) = &d.pending {
+                    ui.label(RichText::new(format!("{p}…")).color(ch.dim));
+                }
+                if let Some(e) = &d.error {
+                    ui.label(RichText::new(e).color(ch.fault));
+                }
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Enter reads the level and stores · Esc closes")
+                        .small()
+                        .color(ch.dim),
+                );
+            });
+        });
 }
 
 /// The acoustic calibration dialog over the view: what to do, the input's level now, the

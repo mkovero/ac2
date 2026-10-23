@@ -187,13 +187,27 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   names, the channel names a Core Audio or ASIO device gives; without them *Input 3*); inputs have a **live meter** (RMS bar, peak
   tick, *CLIP* held 1 s). The meters run before the session opens (the daemon opens the
   device capture-only, no output stream), so you can find a mic by tapping it.
-- **Roles**: **R** *Reference* (the loopback return, one input); **M** *Mic*, a measurement mic (any
-  number; **N** names one — the name is the mic's identity for calibrations; a named mic's
-  row says its curve and calibration, and **←/→** choose the curve: off, 0°, 90° …);
-  **S** *Stimulus* (the outputs the stimulus plays on; this app's choice, remembered per
-  device; applied at once when the open session has the output). **Space** puts a row in or
-  out of the session. The mouse works too: boxes, the *Reference* / *Mic* / *Stimulus* chips,
-  double click on a name.
+- **Kinds**: every input in the session is one of three kinds, and the row says which.
+  **M** *mic*, a measurement mic (any number; **N** names one — the name is the mic's
+  identity for calibrations; a named mic's row says its curve and calibration, and **←/→**
+  choose the curve: off, 0°, 90° …); **L** *line*, an analogue line input (a console
+  output, a processor, the loopback); **A** *digital*, an AES/EBU, S/PDIF, Dante or other
+  digital input, whose full scale is a number, not a voltage. An input never declared is a
+  line input; one once marked a mic stays a mic. A line input reads *dBFS* under its name
+  until a line calibration (see *Calibrating a line input*) makes it read dBu; a digital
+  input always reads dBFS of its full scale.
+- **Roles**: **R** *reference* (the loopback return, one input; a line or digital input, so
+  **R** on a mic row drops the mic name); **S** *stimulus* (the outputs the stimulus plays
+  on; this app's choice, remembered per device; applied at once when the open session has
+  the output). **Space** puts a row in or out of the session.
+- **Pairs**: **Shift+P** pairs an input with the next input in the session below it as
+  left and right (**Shift+P** again on either row unpairs); **N** on a paired row names the
+  pair (`Main`, `AES 1`). A pair is two line or two digital inputs, both in the session —
+  the row says so when it is not, and the kind keys apply to both rows of a pair. The
+  Inputs list shows a pair as one row with two meters.
+- The mouse works too: boxes, the *reference* / *mic* / *line* / *digital* / *pair* chips,
+  double click on a name. The foot of the page lists the keys:
+  `M mic · L line · A digital · Shift+P pair · N name`.
 - **Output names**: **N** on an output names it for the whole rig (`Main L`; empty clears
   it); the top bar names the stimulus outputs by it (`→ Main L, Main R`).
 - **Reference (loopback)**: names the reference pair in words (`Loop return (input 1) is the
@@ -228,7 +242,8 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   the room between the bar's left and right groups, they scroll slowly back and forth
   through it; resting the pointer on them holds them still.
 - **Enter** opens; what is missing is said in words (*Pick a reference input: the loopback
-  from your stimulus output*). Roles and mic names are remembered per device (`ui.toml`).
+  from your stimulus output*). Roles, kinds, pairs and mic names are remembered per device
+  (`ui.toml`).
   On a daemon with no measurements yet, the session opening brings up the **New
   measurement** chooser (as **Ctrl+M** does): **Enter** on a kind opens its settings, **Esc**
   leaves the empty panes, which say how to come back to it.
@@ -240,11 +255,16 @@ The measurement dialogs pick inputs the same way: by name, with meters, **←/�
 While a session is open, the top of the left-hand list shows **Inputs**, one meter per
 captured input: bar = RMS, tick = sample peak, number = RMS dBFS, red *CLIP* held 1 s. They
 run whether or not anything measures, sweeps included. Each row is named, not numbered:
-the mic's name, else the backend's channel name, else *Input N*; then its role (*reference*
-or *mic*); then the input number when the name lacks it — *MM1 34804 · 90° · mic (in 1)*,
-*loopback · reference (in 2)*, *capture_4 (in 4)*. A named mic's row says which curve is in
-use, or why none (*curve off*, *curve not chosen*, *no curve stored*, *90° not stored*). A
-**REF** / **MEAS** mark shows what the running sweep, else the selected measurement, uses.
+the mic's name, else the backend's channel name, else *Input N*; then its role or kind
+(*reference*, *mic*, *line*, *digital*); then the input number when the name lacks it —
+*MM1 34804 · 90° · mic (in 1)*, *loopback · reference (in 2)*, *Main L · line (in 3)*,
+*AES 1 · digital (in 5)*. A named mic's row says which curve is in use, or why none (*curve
+off*, *curve not chosen*, *no curve stored*, *90° not stored*). A line or digital input's
+row says what its number means: *dBFS*, or after a line calibration *dBu · full scale +13.0
+dBu · 3 h ago*. A pair is one row — both names, or the pair's name — with two meters side
+by side marked **L** and **R**: *Main L + Main R · line · pair (in 3, 4)*, *Stereo bus ·
+digital · pair (in 5, 6)*. A **REF** / **MEAS** mark shows what the running sweep, else the
+selected measurement, uses.
 
 ## Reference wiring and loopback
 
@@ -2080,8 +2100,9 @@ content hash; the export header says it).
 
 The **Calibration** page of Settings (palette *Calibrations…*; opens on the selected
 measurement's input) lists what each input uses, every mic with its curves (file, points,
-range, data sheet sensitivity, inputs using it) and every sensitivity calibration (device,
-input, mic, calibrator level and frequency, reading, age).
+range, data sheet sensitivity, inputs using it), every sensitivity calibration (device,
+input, mic, calibrator level and frequency, reading, age) and every line calibration
+(device, input, the voltage read and the full-scale voltage it gives, age).
 
 | Key | Does |
 |---|---|
@@ -2091,8 +2112,8 @@ input, mic, calibrator level and frequency, reading, age).
 | **I** | imports a curve file for the focused mic (type the path) |
 | **R** | renames a curve |
 | **C** | calibrates an input with a calibrator ([above](#sensitivity)) |
-| **E** | calibrates an input electrically ([below](#calibrating-without-a-calibrator-electrical)) |
-| **Delete** (twice) | deletes a curve or a sensitivity calibration |
+| **E** | calibrates an input electrically: on a mic ([below](#calibrating-without-a-calibrator-electrical)), on a line input in volts ([Calibrating a line input](#calibrating-a-line-input)); a digital input has no volt to calibrate, and E says so |
+| **Delete** (twice) | deletes a curve, a sensitivity calibration or a line calibration |
 
 CLI: `ac2 cal list`, `ac2 cal curve rm --mic NAME LABEL`, `ac2 cal rm --input 3`.
 
@@ -2217,6 +2238,21 @@ Measure the divider's output loaded by the input when you can.
 A tone other than 1 kHz is accepted (`--freq 400hz`, for a meter specified only to 400 Hz):
 the sensitivity is still the capsule's at 1 kHz, so this assumes the preamp is flat between
 the two (ac2 notes it). The mic curve stays normalised at 1 kHz.
+
+### Calibrating a line input
+
+A line input (Settings › Audio I/O, **L**) reads dBFS until it is calibrated in volts; then
+its meter in the Inputs list reads **dBu** (*dBu · full scale +13.0 dBu · 3 h ago*), and so
+does every programme-level readout on it. Feed the input a steady tone from the console or
+processor, set the gain you will use, and measure the voltage at the input with a true-RMS
+meter. On the input's line of the Calibration page **E** opens the **Line calibration**
+dialog: it shows the level the input reads now (dBFS, which must be steady and not
+clipping), takes the voltage you measured (`1.228 V`, `-2 dBu` is not accepted: volts
+only), and **Enter** stores the full-scale voltage, `volts / 10^(dBFS / 20)`. Take the tone
+off and keep the gain as it is: changing the input gain afterwards makes the calibration
+wrong, calibrate again. The calibration belongs to the device and input, not to what is
+plugged into it, and is listed under *Line calibrations*; **Delete** twice removes it, and
+the input reads dBFS again.
 
 ### SPL meter
 

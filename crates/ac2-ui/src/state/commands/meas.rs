@@ -113,7 +113,7 @@ impl AppState {
                             .map(|s| {
                                 s.inputs
                                     .iter()
-                                    .filter(|i| i.mic().is_some())
+                                    .filter(|i| matches!(i.kind, InputKind::Mic { .. }))
                                     .map(|i| i.channel)
                                     .collect()
                             })

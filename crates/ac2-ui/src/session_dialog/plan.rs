@@ -55,12 +55,12 @@ impl SessionDialog {
         let reference = self
             .inputs
             .iter()
-            .find(|r| r.role == InputRole::Reference)
+            .find(|r| r.reference && r.in_session)
             .map(|r| r.channel);
         let mics: Vec<&InputRow> = self
             .inputs
             .iter()
-            .filter(|r| r.role == InputRole::Mic)
+            .filter(|r| r.in_session && r.is_mic())
             .collect();
         let stimulus: Vec<u16> = self
             .outputs
@@ -84,17 +84,28 @@ impl SessionDialog {
         }
         let mut seen: Vec<&str> = Vec::new();
         for m in &mics {
-            if m.mic.is_empty() {
+            let Some(name) = m.mic() else {
                 continue;
-            }
-            if seen.contains(&m.mic.as_str()) {
+            };
+            if seen.contains(&name) {
                 return Err(format!(
-                    "Two mics are named {:?}: give each its own name (N on its row).",
-                    m.mic
+                    "Two mics are named {name:?}: give each its own name (N on its row)."
                 ));
             }
-            seen.push(&m.mic);
+            seen.push(name);
         }
+        let setup: Vec<InputSetup> = self
+            .inputs
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.in_session)
+            .filter_map(|(i, _)| self.row_setup(i))
+            .collect();
+        // The daemon's own rules of a pair, applied here first so the refusal names the
+        // inputs before anything is sent.
+        let captured = |c: u16| inputs.contains(&c);
+        ac2_proto::cal::check_pairs(&setup, &self.pairs, Some(&captured))
+            .map_err(|e| format!("Pair: {e} (Shift+P on a row unpairs it)."))?;
         let rate = parse_rate(&self.rate).map_err(|e| format!("Sample rate: {e}."))?;
         let buffer = parse_buffer(&self.buffer).map_err(|e| format!("Buffer: {e}."))?;
         let loopback = reference.and_then(|input| {
@@ -121,26 +132,29 @@ impl SessionDialog {
             buffer_frames: buffer,
             loopback,
         };
-        let setup: Vec<InputSetup> = self
-            .inputs
-            .iter()
-            .enumerate()
-            .filter(|(_, r)| r.in_session)
-            .filter_map(|(i, _)| self.row_setup(i))
-            .collect();
         let roles = DeviceRoles {
-            inputs,
             outputs: self.out_count,
             reference,
             mics: mics.iter().map(|m| m.channel).collect(),
             stimulus,
+            // Every row's last mic name, mic or not now: M gives it back.
             mic_names: self
                 .inputs
                 .iter()
-                .filter(|r| !r.mic.is_empty())
-                .map(|r| (r.channel, r.mic.clone()))
+                .filter_map(|r| {
+                    let name = r
+                        .mic()
+                        .or_else(|| self.mic_names.get(&r.channel).map(String::as_str))?;
+                    Some((r.channel, name.to_owned()))
+                })
                 .collect(),
+            kinds: setup
+                .iter()
+                .map(|s| (s.channel, KindPref::of(&s.kind)))
+                .collect(),
+            pairs: self.pairs.clone(),
             output_device: (out_dev.id != dev.id).then(|| out_dev.id.0.clone()),
+            inputs,
         };
         Ok(SessionPlan {
             config,
@@ -152,7 +166,10 @@ impl SessionDialog {
             device_id: dev.id.0.clone(),
             output_device_id: out_dev.id.0.clone(),
             roles,
-            inputs: setup,
+            inputs: InputSetups {
+                inputs: setup,
+                pairs: self.pairs.clone(),
+            },
         })
     }
 }

@@ -214,7 +214,7 @@ impl Form {
 
     /// A measurement dialog over the session's captured `inputs` (channel, name). The
     /// reference defaults to the session's loopback input, the measurement input to the
-    /// first mic (`mics`: inputs with a mic name), else the first other captured input.
+    /// first mic (`mics`: the inputs of mic kind), else the first other captured input.
     pub fn measurement(
         kind: FormKind,
         open: Option<&OpenSession>,

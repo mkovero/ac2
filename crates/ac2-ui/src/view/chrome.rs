@@ -626,9 +626,28 @@ fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
                     .wrap_mode(egui::TextWrapMode::Wrap),
             );
         });
-        ui.horizontal(|ui| {
-            super::session::meter_sized(ui, &r.reading, ch, 136.0);
-        });
+        // A pair is one row with two meters, left then right, marked L and R.
+        let (l, rmark) = ac2_scene::meter::PAIR_MARKS;
+        match &r.right {
+            Some((_, right)) => {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(RichText::new(l).small().monospace().color(ch.dim));
+                    super::session::meter_sized(ui, &r.reading, ch, 56.0);
+                    ui.label(RichText::new(rmark).small().monospace().color(ch.dim));
+                    super::session::meter_sized(ui, right, ch, 56.0);
+                });
+            }
+            None => {
+                ui.horizontal(|ui| {
+                    super::session::meter_sized(ui, &r.reading, ch, 136.0);
+                });
+            }
+        }
+        // What a line or digital row reads in (a mic row names its curve in the label).
+        if let Some(cal) = &r.cal {
+            ui.label(RichText::new(cal).small().color(ch.dim));
+        }
         ui.add_space(2.0);
     }
     ui.add_space(10.0);

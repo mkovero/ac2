@@ -274,6 +274,11 @@ pub fn acoustic_after() -> &'static str {
      on this input now reads dB SPL."
 }
 
+/// What to do once a line calibration is stored.
+pub fn line_after() -> &'static str {
+    "Done: take the tone off; keep the gain as it is. The input reads dBu now."
+}
+
 /// What to do once an electrical calibration is stored.
 pub fn electrical_after(c: ElectricalConnection) -> &'static str {
     match c {
@@ -329,6 +334,17 @@ pub fn sensitivity_state(s: &Sensitivity<'_>, client_now: WallNs, offset: ClockO
             format::ago(time::age_s(e.line.calibrated_at, client_now, offset))
         ),
     }
+}
+
+/// A line calibration's record: `1.228 V read −9.0 dBFS · full scale 3.46 V (+13.0 dBu)`.
+pub fn line_detail(l: &ac2_proto::model::LineCal) -> String {
+    format!(
+        "{} read {} dBFS · full scale {} ({} dBu)",
+        format::volts(l.volts.0),
+        format::level(l.measured.0),
+        format::volts(l.v_fs.0),
+        format::signed(ac2_proto::cal::dbu_fs(l.v_fs.0).0, 1)
+    )
 }
 
 /// A line calibration's reference, `dBu · full scale +13.0 dBu`.
@@ -567,6 +583,18 @@ mod tests {
             Some("electrical cal from other mic / input ±1 dB")
         );
         assert!(electrical_notes(&e).is_empty());
+        // A line input's readout: dBu once calibrated, with the full-scale point and the age.
+        assert_eq!(
+            status_text(
+                CalStatus::Line {
+                    calibrated_at: WallNs(0),
+                    dbu_fs: Dbu(13.0),
+                },
+                10_800.0
+            )
+            .as_deref(),
+            Some("dBu · full scale +13.0 dBu · 3 h ago")
+        );
 
         // The MM1's 330 Ω into a 2 kΩ mic input: the same words everywhere.
         let mm1 = ac2_proto::model::MicLoading {

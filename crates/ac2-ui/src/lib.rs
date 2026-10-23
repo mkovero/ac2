@@ -34,6 +34,7 @@ pub mod hints;
 pub mod ir_import_dialog;
 pub mod keys;
 pub mod leq_dialog;
+pub mod line_dialog;
 pub mod link_wants;
 pub mod marquee;
 pub mod math_dialog;

@@ -259,9 +259,8 @@ impl SessionDialog {
                 channel,
                 device_name: names(d.input.as_ref(), channel),
                 in_session: false,
-                role: InputRole::None,
-                mic: String::new(),
-                curve: CurveChoice::NotChosen,
+                reference: false,
+                kind: InputKind::Line,
             })
             .collect();
         let kind = self.backend_kind().unwrap_or(BackendKind::Fake);
@@ -338,10 +337,13 @@ impl SessionDialog {
         }
         let open = self.open.as_ref()?;
         let c = &open.config;
-        let mic_names: BTreeMap<u16, String> = self
+        let declared: Vec<&InputSetup> = self
             .setup
             .iter()
             .filter(|s| c.input_channels.contains(&s.channel))
+            .collect();
+        let mic_names: BTreeMap<u16, String> = declared
+            .iter()
             .filter_map(|s| Some((s.channel, s.mic()?.to_owned())))
             .collect();
         let reference = c.loopback.map(|l| l.input);
@@ -349,39 +351,64 @@ impl SessionDialog {
             inputs: c.input_channels.clone(),
             outputs: c.output_channels,
             reference,
-            mics: mic_names
-                .keys()
-                .copied()
+            mics: declared
+                .iter()
+                .filter(|s| matches!(s.kind, InputKind::Mic { .. }))
+                .map(|s| s.channel)
                 .filter(|m| Some(*m) != reference)
                 .collect(),
             stimulus: c.loopback.map(|l| vec![l.output]).unwrap_or_default(),
             mic_names,
+            kinds: declared
+                .iter()
+                .map(|s| (s.channel, KindPref::of(&s.kind)))
+                .collect(),
+            pairs: self.setup_pairs.clone(),
             output_device: (open.output_device != open.input_device)
                 .then(|| open.output_device.0.clone()),
         })
     }
 
+    /// The remembered roles onto the rows. A row's kind is the remembered one (a mic gets
+    /// its name back and the daemon's curve for it); the reference is a line input unless
+    /// remembered digital. A pair whose rows are not both in the session is dropped.
     fn apply_roles(&mut self, r: &DeviceRoles) {
+        self.mic_names = r.mic_names.clone();
         for row in &mut self.inputs {
             let c = row.channel;
             row.in_session = r.inputs.contains(&c) || r.reference == Some(c) || r.mics.contains(&c);
-            row.role = if r.reference == Some(c) {
-                InputRole::Reference
-            } else if r.mics.contains(&c) {
-                InputRole::Mic
-            } else {
-                InputRole::None
-            };
-            row.mic = r.mic_names.get(&c).cloned().unwrap_or_default();
+            row.reference = r.reference == Some(c);
+            let mut kind = r.kind_of(c);
+            if row.reference && kind == KindPref::Mic {
+                kind = KindPref::Line;
+            }
+            row.kind = kind_of(kind, r.mic_names.get(&c).map(String::as_str));
         }
-        let curves: Vec<CurveChoice> = self
+        let curves: Vec<Option<CurveChoice>> = self
             .inputs
             .iter()
-            .map(|r| self.setup_curve(r.channel, &r.mic))
+            .map(|r| r.mic().map(|m| self.setup_curve(r.channel, m)))
             .collect();
         for (row, c) in self.inputs.iter_mut().zip(curves) {
-            row.curve = c;
+            if let (InputKind::Mic { curve, .. }, Some(c)) = (&mut row.kind, c) {
+                *curve = c;
+            }
         }
+        // A pair is two inputs of one non-mic kind, both in the session; the prefs file
+        // may have been edited by hand, so a pair that is not that is dropped here.
+        let pairable = |c: u16| {
+            self.inputs
+                .iter()
+                .find(|row| row.channel == c && row.in_session && !row.is_mic())
+                .map(|row| row.kind_pref())
+        };
+        self.pairs = r
+            .pairs
+            .iter()
+            .filter(|p| pairable(p.left).is_some_and(|k| pairable(p.right) == Some(k)))
+            .cloned()
+            .collect();
+        self.pairs.sort_by_key(|p| p.left);
         let n_out = self.outputs.len() as u16;
         let top_stim = r.stimulus.iter().map(|s| s + 1).max().unwrap_or(0);
         self.out_count = r.outputs.max(top_stim).min(n_out);

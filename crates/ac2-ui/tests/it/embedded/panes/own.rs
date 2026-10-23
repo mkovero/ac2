@@ -304,8 +304,45 @@ fn a_transfer_pane_does_not_draw_imported_from_an_empty_daemon() -> R {
     Ok(())
 }
 
-/// An SPL meter from the palette's dialog (on the dialog's input or, `other`, the one
-/// before it): its id once it runs.
+/// The open session reopened with in 3 in it as a second mic: Shift+O, ↓ to its row, Space
+/// and M, Enter. An SPL meter needs a mic, so two meters on two inputs need two of them.
+fn second_mic(d: &mut Driver) -> R {
+    use ac2_ui::session_dialog::Row;
+    d.key("Shift+O");
+    d.send(Msg::Text("O".into()));
+    d.until("the device list", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.session.device_info().is_some())
+    })?;
+    for _ in 0..16 {
+        if d.st
+            .overlay
+            .settings()
+            .is_some_and(|x| x.session.focus == Row::Input(2))
+        {
+            break;
+        }
+        d.key("ArrowDown");
+    }
+    d.key("Space");
+    d.key("M");
+    d.until("in 3 a mic in the session", |s| {
+        s.overlay.settings().is_some_and(|x| {
+            let r = &x.session.inputs[2];
+            r.in_session && r.is_mic()
+        })
+    })?;
+    d.key("Enter");
+    d.until("the session with three inputs", |s| {
+        s.open_session()
+            .is_some_and(|o| o.config.input_channels == [0, 1, 2])
+    })?;
+    Ok(())
+}
+
+/// An SPL meter from the palette: on the first mic (in 2), or with `other` on the next
+/// one (in 3, [`second_mic`]).
 fn new_spl(d: &mut Driver, other: bool) -> R<MeasId> {
     let before: Vec<MeasId> = d.st.measurements().iter().map(|m| m.id).collect();
     d.key("Ctrl+K");
@@ -316,7 +353,7 @@ fn new_spl(d: &mut Driver, other: bool) -> R<MeasId> {
         |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spl),
     )?;
     if other {
-        d.key("ArrowLeft");
+        d.key("ArrowRight");
     }
     d.key("Enter");
     d.until("the new SPL meter, running", |s| {
@@ -348,6 +385,7 @@ fn two_spl_meters_side_by_side_by_drag_from_an_empty_daemon() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
+    second_mic(&mut d)?;
     let m1 = new_spl(&mut d, false)?;
     let m2 = new_spl(&mut d, true)?;
     let name =

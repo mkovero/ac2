@@ -262,10 +262,13 @@ pub enum Request {
         pairs: Vec<ac2_proto::model::Pair>,
         what: String,
     },
-    /// Open or renew the capture-only preview of a device.
+    /// Open or renew the capture-only preview of a device, with what its inputs are
+    /// declared to be (its frames then say what each column is).
     Preview {
         backend: BackendKind,
         device: DeviceId,
+        inputs: Vec<ac2_proto::model::PreviewInput>,
+        pairs: Vec<ac2_proto::model::Pair>,
     },
     /// Close the preview.
     PreviewStop,
@@ -642,7 +645,7 @@ async fn wait_retry(
                 Some(Ctl::Req(Request::Devices)) => {
                     out.send(ConnEvent::Devices(Err("not connected".into())));
                 }
-                Some(Ctl::Req(Request::Preview { backend, device })) => {
+                Some(Ctl::Req(Request::Preview { backend, device, .. })) => {
                     out.send(ConnEvent::Preview {
                         backend,
                         device,

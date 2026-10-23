@@ -40,9 +40,10 @@ impl SessionDialog {
         self.edit.is_some() || matches!(self.focus, Row::Rate | Row::Buffer)
     }
 
-    // ----- roles -------------------------------------------------------------------------
+    // ----- roles, kinds and pairs ----------------------------------------------------------
 
-    /// Space: puts the focused input or output in the session, or takes it out.
+    /// Space: puts the focused input or output in the session, or takes it out. An input
+    /// taken out leaves its pair and the reference role: both are the session's.
     pub fn toggle(&mut self) {
         self.notice = None;
         self.error = None;
@@ -51,7 +52,9 @@ impl SessionDialog {
                 if let Some(r) = self.inputs.get_mut(i) {
                     r.in_session = !r.in_session;
                     if !r.in_session {
-                        r.role = InputRole::None;
+                        r.reference = false;
+                        let c = r.channel;
+                        self.unpair(c);
                     }
                 }
             }
@@ -69,38 +72,16 @@ impl SessionDialog {
         }
     }
 
-    /// R / M / S on the focused row.
+    /// R / M / L / A / Shift+P / S on the focused row.
     pub fn assign(&mut self, key: RoleKey) {
         self.error = None;
         self.notice = None;
         match (self.focus, key) {
-            (Row::Input(i), RoleKey::Reference) => {
-                if self
-                    .inputs
-                    .get(i)
-                    .is_some_and(|r| r.role == InputRole::Reference)
-                {
-                    self.inputs[i].role = InputRole::None;
-                    return;
-                }
-                for r in &mut self.inputs {
-                    if r.role == InputRole::Reference {
-                        r.role = InputRole::None;
-                    }
-                }
-                if let Some(r) = self.inputs.get_mut(i) {
-                    r.role = InputRole::Reference;
-                    r.in_session = true;
-                }
-            }
-            (Row::Input(i), RoleKey::Mic) => {
-                if let Some(r) = self.inputs.get_mut(i) {
-                    r.role = if r.role == InputRole::Mic {
-                        InputRole::None
-                    } else {
-                        r.in_session = true;
-                        InputRole::Mic
-                    };
+            (Row::Input(i), RoleKey::Reference) => self.set_reference(i),
+            (Row::Input(i), RoleKey::Pair) => self.toggle_pair(i),
+            (Row::Input(i), k) if k.kind().is_some() => {
+                if let Some(k) = k.kind() {
+                    self.set_kind(i, k);
                 }
             }
             (Row::Output(o), RoleKey::Stimulus) => {
@@ -112,8 +93,11 @@ impl SessionDialog {
                 }
             }
             (Row::Output(_), _) => {
-                self.notice =
-                    Some("R and M mark inputs: the loopback return (R) and the mics (M)".into());
+                self.notice = Some(
+                    "R, M, L, A and Shift+P mark inputs: the loopback return (R), the kind \
+                     (mic, line, digital) and a pair"
+                        .into(),
+                );
             }
             (Row::Input(_), RoleKey::Stimulus) => {
                 self.notice = Some(
@@ -126,24 +110,176 @@ impl SessionDialog {
         }
     }
 
-    /// N: types the focused input's mic name (it becomes a mic).
+    /// R: the row becomes the one reference (again: no reference). The loopback carries
+    /// the stimulus back, not a mic: a mic row made the reference becomes a line input.
+    fn set_reference(&mut self, i: usize) {
+        if self.inputs.get(i).is_some_and(|r| r.reference) {
+            self.inputs[i].reference = false;
+            return;
+        }
+        for r in &mut self.inputs {
+            r.reference = false;
+        }
+        if let Some(r) = self.inputs.get_mut(i) {
+            r.reference = true;
+            r.in_session = true;
+            if r.is_mic() {
+                r.kind = InputKind::Line;
+                self.notice = Some(
+                    "the reference is the loopback cable, a line input: its mic name is \
+                     dropped"
+                        .into(),
+                );
+            }
+        }
+    }
+
+    /// M / L / A: declares the row's kind (and puts it in the session). A line or digital
+    /// kind applies to both rows of the row's pair (a pair is two of one kind); a mic
+    /// leaves the pair (mics are never paired). A mic row gets the mic name last used on
+    /// this input.
+    fn set_kind(&mut self, i: usize, k: KindPref) {
+        let Some(r) = self.inputs.get(i) else {
+            return;
+        };
+        if r.reference && k == KindPref::Mic {
+            self.notice = Some("the reference is the loopback cable: it has no mic".into());
+            return;
+        }
+        let c = r.channel;
+        let pair = self.pair_of(c).map(|(p, side)| (p.left, p.right, side));
+        let partner = pair.map(|(l, r, side)| match side {
+            PairSide::Left => r,
+            PairSide::Right => l,
+        });
+        if k == KindPref::Mic
+            && let Some((l, r, _)) = pair
+        {
+            self.unpair(c);
+            // A pair reads left then right wherever it is named.
+            self.notice = Some(format!(
+                "in {} and {} are no longer a pair: a pair is two line or two digital inputs",
+                l + 1,
+                r + 1
+            ));
+        }
+        for row in &mut self.inputs {
+            let own = row.channel == c;
+            if !own && (k == KindPref::Mic || Some(row.channel) != partner) {
+                continue;
+            }
+            if row.kind_pref() != k {
+                let mic = self.mic_names.get(&row.channel).map(String::as_str);
+                row.kind = kind_of(k, mic);
+            }
+            if own {
+                row.in_session = true;
+            }
+        }
+        if k == KindPref::Mic
+            && let Some(name) = self.inputs[i].mic().map(str::to_owned)
+        {
+            let curve = self.setup_curve(c, &name);
+            self.inputs[i].kind = InputKind::Mic {
+                mic: Some(name),
+                curve,
+            };
+        }
+    }
+
+    /// Shift+P: pairs the row with the next input in the session below it as left and
+    /// right; on a paired row, unpairs it. Both rows must be line or both digital.
+    fn toggle_pair(&mut self, i: usize) {
+        let Some(r) = self.inputs.get(i) else {
+            return;
+        };
+        let c = r.channel;
+        if let Some((p, _)) = self.pair_of(c) {
+            let (l, r) = (p.left, p.right);
+            self.unpair(c);
+            self.notice = Some(format!("in {} and {} are no longer a pair", l + 1, r + 1));
+            return;
+        }
+        let Some(below) = self.inputs[i + 1..].iter().find(|o| o.in_session) else {
+            self.notice = Some(
+                "Shift+P pairs this input with the next input in the session below it (Space \
+                 puts one in)"
+                    .into(),
+            );
+            return;
+        };
+        let (right, kind_r, word_r) = (below.channel, below.kind_pref(), below.kind_word());
+        let (kind_l, word_l) = (r.kind_pref(), r.kind_word());
+        if kind_l == KindPref::Mic || kind_r == KindPref::Mic {
+            let which = if kind_l == KindPref::Mic { c } else { right };
+            self.notice = Some(format!(
+                "in {} is a mic; a pair is two line or two digital inputs (L or A on the \
+                 rows)",
+                which + 1
+            ));
+            return;
+        }
+        if kind_l != kind_r {
+            self.notice = Some(format!(
+                "in {} is {word_l} and in {} is {word_r}; a pair is two of one kind (L or A \
+                 on the rows)",
+                c + 1,
+                right + 1
+            ));
+            return;
+        }
+        if self.pair_of(right).is_some() {
+            self.notice = Some(format!(
+                "in {} is in a pair already (Shift+P on its row unpairs it)",
+                right + 1
+            ));
+            return;
+        }
+        self.inputs[i].in_session = true;
+        self.pairs.push(Pair {
+            left: c,
+            right,
+            name: None,
+        });
+        self.pairs.sort_by_key(|p| p.left);
+        self.notice = Some(format!(
+            "in {} and {} are a pair (N names it)",
+            c + 1,
+            right + 1
+        ));
+    }
+
+    /// Drops the pair `channel` is in, if any.
+    pub(super) fn unpair(&mut self, channel: u16) {
+        self.pairs
+            .retain(|p| p.left != channel && p.right != channel);
+    }
+
+    /// N on an input row: types the mic name of a mic row (a line or digital row becomes
+    /// a mic), or the name of the pair a paired row is in.
     pub fn start_mic_edit(&mut self) -> bool {
         let Row::Input(i) = self.focus else {
-            self.notice = Some("N names the mic on an input row".into());
+            self.notice = Some("N names the mic or the pair on an input row".into());
             return false;
         };
-        if self
-            .inputs
-            .get(i)
-            .is_some_and(|r| r.role == InputRole::Reference)
-        {
+        let Some(r) = self.inputs.get(i) else {
+            return false;
+        };
+        if let Some((p, _)) = self.pair_of(r.channel) {
+            self.edit_text = p.name.clone().unwrap_or_default();
+            self.edit = Some(Edit::PairName(i));
+            return true;
+        }
+        if r.reference {
             self.notice = Some("the reference is the loopback cable: it has no mic".into());
             return false;
         }
-        if let Some(r) = self.inputs.get_mut(i) {
-            r.role = InputRole::Mic;
-            r.in_session = true;
+        self.edit_text = r.mic().unwrap_or_default().to_owned();
+        if !r.is_mic() {
+            self.set_kind(i, KindPref::Mic);
+            self.edit_text = self.inputs[i].mic().unwrap_or_default().to_owned();
         }
+        self.inputs[i].in_session = true;
         self.edit = Some(Edit::Mic(i));
         true
     }
@@ -156,7 +292,7 @@ impl SessionDialog {
         let Some(r) = self.outputs.get(i) else {
             return false;
         };
-        self.label_text = r.rig_label.clone().unwrap_or_default();
+        self.edit_text = r.rig_label.clone().unwrap_or_default();
         self.edit = Some(Edit::OutputLabel(i));
         self.notice = None;
         self.error = None;
@@ -172,7 +308,7 @@ impl SessionDialog {
             self.edit = None;
             return Ok(None);
         };
-        let text = self.label_text.trim().to_owned();
+        let text = self.edit_text.trim().to_owned();
         let label = (!text.is_empty()).then_some(text);
         if let Some(l) = &label {
             ac2_proto::model::check_output_label(l)?;
@@ -185,24 +321,50 @@ impl SessionDialog {
         Ok((self.outputs[i].rig_label != row.label).then_some(row))
     }
 
-    /// Ends a mic-name edit (Enter, ↑/↓, Tab). Another mic name starts with no curve
-    /// chosen: the choice belonged to the other capsule. An output label edit is dropped:
-    /// a rig-wide name is only sent on Enter.
+    /// Ends a name edit (Enter, ↑/↓, Tab). Another mic name starts with no curve chosen:
+    /// the choice belonged to the other capsule. A pair name applies when it follows the
+    /// rules (else the error says why and the old name stays). An output label edit is
+    /// dropped: a rig-wide name is only sent on Enter.
     pub fn finish_edit(&mut self) {
-        if let Some(Edit::OutputLabel(_)) = self.edit {
-            self.edit = None;
+        // The detection level has its own Enter and Esc.
+        if self.edit == Some(Edit::DetectLevel) {
             return;
         }
-        if let Some(Edit::Mic(i)) = self.edit
-            && let Some(r) = self.inputs.get(i)
-        {
-            let mic = r.mic.trim().to_owned();
-            let curve = self.setup_curve(r.channel, &mic);
-            let r = &mut self.inputs[i];
-            r.mic = mic;
-            r.curve = curve;
-            self.edit = None;
+        let text = self.edit_text.trim().to_owned();
+        match self.edit {
+            Some(Edit::OutputLabel(_) | Edit::DetectLevel) => {}
+            Some(Edit::Mic(i)) => {
+                if let Some(r) = self.inputs.get(i) {
+                    let channel = r.channel;
+                    let mic = (!text.is_empty()).then_some(text.clone());
+                    let curve = self.setup_curve(channel, &text);
+                    let r = &mut self.inputs[i];
+                    if r.mic() != mic.as_deref() {
+                        r.kind = InputKind::Mic { mic, curve };
+                    }
+                    if let Some(name) = r.mic() {
+                        self.mic_names.insert(channel, name.to_owned());
+                    }
+                }
+            }
+            Some(Edit::PairName(i)) => {
+                if let Some(c) = self.inputs.get(i).map(|r| r.channel) {
+                    let name = (!text.is_empty()).then_some(text);
+                    match name.as_deref().map(ac2_proto::cal::check_pair_name) {
+                        Some(Err(e)) => self.error = Some(format!("{e}.")),
+                        _ => {
+                            if let Some(p) =
+                                self.pairs.iter_mut().find(|p| p.left == c || p.right == c)
+                            {
+                                p.name = name;
+                            }
+                        }
+                    }
+                }
+            }
+            None => {}
         }
+        self.edit = None;
     }
 
     /// The daemon's curve choice of `channel` while its mic is still `mic`, else none.
@@ -213,33 +375,20 @@ impl SessionDialog {
             .map_or(CurveChoice::NotChosen, InputSetup::curve)
     }
 
-    /// The input setup row `i` would send: a mic row is a `Mic` with its name and curve,
-    /// every other row a `Line`.
+    /// The input setup row `i` would send: its kind and its side of its pair.
     pub fn row_setup(&self, i: usize) -> Option<InputSetup> {
         let r = self.inputs.get(i)?;
-        // Every row is declared a microphone until the dialog gets a kind column: the daemon
-        // refuses an SPL meter on a line or digital input, and a reference feed is still
-        // metered as one today.
-        let mic =
-            (r.role == InputRole::Mic && !r.mic.trim().is_empty()).then(|| r.mic.trim().to_owned());
-        let kind = InputKind::Mic {
-            curve: if mic.is_some() {
-                r.curve.clone()
-            } else {
-                CurveChoice::NotChosen
-            },
-            mic,
-        };
         Some(InputSetup {
             channel: r.channel,
-            kind,
-            pair: None,
+            kind: r.kind.clone(),
+            pair: self.pair_of(r.channel).map(|(_, side)| side),
         })
     }
 
     /// What input row `i`'s mic uses, in words: `curve 90° · verified · 94.0 dB SPL at
     /// 1.00 kHz · 3 h ago`; `true` when it needs a look (a chosen curve not stored, none
-    /// chosen among several). `None` for a row without a mic name.
+    /// chosen among several). A line row with a line calibration: `dBu · full scale +13.0
+    /// dBu · 3 h ago`. `None` for an unnamed mic and for a line or digital row reading dBFS.
     pub fn row_cal_text(
         &self,
         i: usize,
@@ -247,9 +396,12 @@ impl SessionDialog {
         now: ac2_proto::units::WallNs,
         offset: ac2_scene::time::ClockOffset,
     ) -> Option<(String, bool)> {
-        use ac2_proto::cal::{CurveUse, input_use, settle};
+        use ac2_proto::cal::{CurveUse, Sensitivity, input_use, settle};
         let mut row = self.row_setup(i)?;
-        row.mic()?;
+        let line = matches!(row.kind, InputKind::Line);
+        if !line {
+            row.mic()?;
+        }
         settle(&mut row, &st.mics);
         let channel = row.channel;
         let rows = [row];
@@ -262,6 +414,14 @@ impl SessionDialog {
             device,
             channel,
         );
+        if line {
+            return matches!(u.sensitivity, Sensitivity::Line(_)).then(|| {
+                (
+                    ac2_scene::cal::sensitivity_state(&u.sensitivity, now, offset),
+                    false,
+                )
+            });
+        }
         Some((
             format!(
                 "{} · {}",
@@ -300,7 +460,7 @@ impl SessionDialog {
             ac2_proto::cal::mic(mics, &mic),
             forward,
         ));
-        self.inputs[i].curve = row.curve();
+        self.inputs[i].kind = row.kind.clone();
         let captured = self
             .open
             .as_ref()
@@ -325,12 +485,10 @@ impl SessionDialog {
             self.error = None;
         }
         match self.edit {
-            Some(Edit::Mic(i)) => {
-                if let Some(r) = self.inputs.get_mut(i) {
-                    for c in s.chars().filter(|c| !c.is_control()) {
-                        if r.mic.chars().count() < MAX_MIC_NAME {
-                            r.mic.push(c);
-                        }
+            Some(Edit::Mic(_) | Edit::PairName(_)) => {
+                for c in s.chars().filter(|c| !c.is_control()) {
+                    if self.edit_text.chars().count() < MAX_MIC_NAME {
+                        self.edit_text.push(c);
                     }
                 }
             }
@@ -342,8 +500,8 @@ impl SessionDialog {
             }
             Some(Edit::OutputLabel(_)) => {
                 for c in s.chars().filter(|c| !c.is_control()) {
-                    if self.label_text.chars().count() < MAX_OUTPUT_LABEL {
-                        self.label_text.push(c);
+                    if self.edit_text.chars().count() < MAX_OUTPUT_LABEL {
+                        self.edit_text.push(c);
                     }
                 }
             }
@@ -357,18 +515,13 @@ impl SessionDialog {
 
     pub fn backspace(&mut self) {
         match self.edit {
-            Some(Edit::Mic(i)) => {
-                if let Some(r) = self.inputs.get_mut(i) {
-                    r.mic.pop();
-                }
+            Some(Edit::Mic(_) | Edit::PairName(_) | Edit::OutputLabel(_)) => {
+                self.edit_text.pop();
             }
             Some(Edit::DetectLevel) => {
                 if let Some(d) = &mut self.detect {
                     d.level.pop();
                 }
-            }
-            Some(Edit::OutputLabel(_)) => {
-                self.label_text.pop();
             }
             None => match self.focus {
                 Row::Rate => {

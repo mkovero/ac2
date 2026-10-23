@@ -9,8 +9,7 @@ use ac2_scene::meter::{MeterReading, MeterState};
 use super::CellCtx;
 use crate::app::App;
 use crate::session_dialog::{
-    DetectPhase, Edit, InputRole, OutputDevice, RoleKey, Row, SessionDialog, backend_name,
-    device_summary,
+    DetectPhase, Edit, OutputDevice, RoleKey, Row, SessionDialog, backend_name, device_summary,
 };
 use crate::state::SessionMsg;
 use crate::theme::Chrome;
@@ -434,7 +433,7 @@ fn input_grid(
                     .small()
                     .color(ch.dim),
             );
-            ui.label(RichText::new("role").small().color(ch.dim));
+            ui.label(RichText::new("role · kind").small().color(ch.dim));
             ui.label("");
             ui.end_row();
             for (i, r) in d.inputs.iter().enumerate() {
@@ -444,6 +443,8 @@ fn input_grid(
                     *msg = Some(SessionMsg::Toggle(row));
                 }
                 let editing = d.edit == Some(Edit::Mic(i));
+                let naming_pair = d.edit == Some(Edit::PairName(i));
+                let pair = d.pair_of(r.channel);
                 let resp = ui
                     .horizontal(|ui| {
                         ui.set_min_width(NAME_W);
@@ -451,10 +452,23 @@ fn input_grid(
                             .device_name
                             .clone()
                             .unwrap_or_else(|| format!("Input {}", r.channel + 1));
-                        let name = match r.role {
-                            InputRole::Mic if editing => format!("{}▏", r.mic),
-                            InputRole::Mic if !r.mic.is_empty() => format!("{} · {dev}", r.mic),
-                            _ => dev,
+                        let name = if editing || naming_pair {
+                            format!("{}▏", d.edit_text)
+                        } else {
+                            match (r.mic(), pair) {
+                                (Some(m), _) => format!("{m} · {dev}"),
+                                (None, Some((p, side))) => {
+                                    let mark = match side {
+                                        ac2_proto::model::PairSide::Left => "L",
+                                        ac2_proto::model::PairSide::Right => "R",
+                                    };
+                                    match &p.name {
+                                        Some(n) => format!("{n} {mark} · {dev}"),
+                                        None => format!("{dev} · {mark}"),
+                                    }
+                                }
+                                (None, None) => dev,
+                            }
                         };
                         let color = if r.in_session { ch.text } else { ch.dim };
                         let t = RichText::new(name).color(color);
@@ -479,27 +493,54 @@ fn input_grid(
                     meter(ui, &m, ch);
                 });
                 ui.horizontal(|ui| {
-                    if chip(
-                        ui,
-                        r.role == InputRole::Reference,
-                        "Reference",
-                        ch.focus,
-                        ch,
-                    )
-                    .on_hover_text("R: the loopback return of the stimulus")
-                    .clicked()
+                    if chip(ui, r.reference, "reference", ch.focus, ch)
+                        .on_hover_text("R: the loopback return of the stimulus")
+                        .clicked()
                     {
                         *msg = Some(SessionMsg::Role(row, RoleKey::Reference));
                     }
-                    if chip(ui, r.role == InputRole::Mic, "Mic", ch.ok, ch)
-                        .on_hover_text("M: a measurement mic")
+                    // The kind: one word, the same as the Inputs list says it.
+                    let k = r.kind_pref();
+                    for (on, text, key, tip, color) in [
+                        (
+                            k == crate::prefs::KindPref::Mic,
+                            "mic",
+                            RoleKey::Mic,
+                            "M: a measurement mic (dB SPL through its calibration)",
+                            ch.ok,
+                        ),
+                        (
+                            k == crate::prefs::KindPref::Line,
+                            "line",
+                            RoleKey::Line,
+                            "L: a line input (dBFS; dBu once calibrated)",
+                            ch.text,
+                        ),
+                        (
+                            k == crate::prefs::KindPref::Digital,
+                            "digital",
+                            RoleKey::Digital,
+                            "A: a digital feed (dBFS of its full scale)",
+                            ch.text,
+                        ),
+                    ] {
+                        if chip(ui, on, text, color, ch).on_hover_text(tip).clicked() {
+                            *msg = Some(SessionMsg::Role(row, key));
+                        }
+                    }
+                    if chip(ui, pair.is_some(), "pair", ch.armed, ch)
+                        .on_hover_text(
+                            "Shift+P: left/right pair with the next input in the session below \
+                             (two line or two digital inputs)",
+                        )
                         .clicked()
                     {
-                        *msg = Some(SessionMsg::Role(row, RoleKey::Mic));
+                        *msg = Some(SessionMsg::Role(row, RoleKey::Pair));
                     }
                 });
                 // A named mic says which curve and calibration it uses; an unnamed one, how
-                // to name it (its name is what every measurement on it reads).
+                // to name it (its name is what every measurement on it reads). A line or
+                // digital row says what its level reads in.
                 match cal.get(i).and_then(Option::as_ref) {
                     Some((t, warn)) => {
                         ui.label(RichText::new(t).small().color(if *warn {
@@ -508,8 +549,18 @@ fn input_grid(
                             ch.dim
                         }));
                     }
-                    None if r.role == InputRole::Mic && !editing => {
+                    None if r.is_mic() && !editing => {
                         ui.label(RichText::new("N names the mic").small().color(ch.dim));
+                    }
+                    None if pair.is_some() && !naming_pair => {
+                        ui.label(
+                            RichText::new("dBFS · N names the pair")
+                                .small()
+                                .color(ch.dim),
+                        );
+                    }
+                    None if !r.is_mic() => {
+                        ui.label(RichText::new(ac2_scene::meter::DBFS).small().color(ch.dim));
                     }
                     None => {
                         ui.label("");
@@ -540,7 +591,7 @@ fn output_grid(
                     *msg = Some(SessionMsg::Toggle(row));
                 }
                 let name = if d.edit == Some(Edit::OutputLabel(o)) {
-                    format!("{}▏", d.label_text)
+                    format!("{}▏", d.edit_text)
                 } else {
                     match (&r.rig_label, &r.device_name) {
                         (Some(l), Some(dev)) => format!("{l} · {dev}"),
@@ -564,7 +615,7 @@ fn output_grid(
                 if focused {
                     super::settings::reveal_focused(&resp);
                 }
-                if chip(ui, r.stimulus, "Stimulus", ch.armed, ch)
+                if chip(ui, r.stimulus, "stimulus", ch.armed, ch)
                     .on_hover_text("S: plays the stimulus, to the speakers and the loopback")
                     .clicked()
                 {

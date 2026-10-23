@@ -111,7 +111,8 @@ fn sidebar_meters_name_every_session_input_by_role() {
                 "MM1 34804 · 90° · mic (in 2)".into(),
                 Some(InputUse::Measurement)
             ),
-            ("Input 3".into(), None),
+            // Undeclared: what the daemon takes it for (an unnamed mic), said so.
+            ("Input 3 · mic".into(), None),
         ]
     );
     // The device's channel names once listed.
@@ -127,7 +128,7 @@ fn sidebar_meters_name_every_session_input_by_role() {
                 "MM1 34804 · 90° · mic (in 2)".into(),
                 Some(InputUse::Measurement)
             ),
-            ("Line 3 (in 3)".into(), None),
+            ("Line 3 · mic (in 3)".into(), None),
         ]
     );
     // Readings from the session's meters; an input without one reads as no data.
@@ -470,4 +471,94 @@ fn new_measurements_start_and_become_selected() {
     let r = t.st.update(Msg::Command(CommandId::NewRta), &t.keys);
     assert!(matches!(r.as_slice(), [Request::SessionList]), "{r:?}");
     assert!(t.st.sessions_dialog().is_some(), "{:?}", t.st.overlay);
+}
+
+/// A pair is one row of the Inputs list with both inputs' names (or the pair's) and two
+/// readings; a line input reads dBFS until a line calibration makes it dBu; a mic has no
+/// level text of its own (its calibration is on the Calibration page).
+#[test]
+fn sidebar_meters_show_a_pair_as_one_row_and_line_inputs_in_dbfs_or_dbu() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    if let Some(o) = &mut s.session.open {
+        o.backend = BackendKind::Fake;
+        o.config.input_channels = vec![0, 1, 2, 3];
+        o.config.loopback = Some(LoopbackRoute {
+            output: 0,
+            input: 0,
+        });
+    }
+    s.inputs = vec![
+        InputSetup {
+            channel: 0,
+            kind: InputKind::Line,
+            pair: None,
+        },
+        InputSetup {
+            channel: 1,
+            kind: InputKind::Mic {
+                mic: Some("MM1 34804".into()),
+                curve: CurveChoice::Curve {
+                    label: "90°".into(),
+                },
+            },
+            pair: None,
+        },
+        InputSetup {
+            channel: 2,
+            kind: InputKind::Line,
+            pair: Some(PairSide::Left),
+        },
+        InputSetup {
+            channel: 3,
+            kind: InputKind::Line,
+            pair: Some(PairSide::Right),
+        },
+    ];
+    s.pairs = vec![Pair {
+        left: 2,
+        right: 3,
+        name: None,
+    }];
+    s.mics = vec![mm1()];
+    t.conn(mirror(s.clone()));
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    let rows = t.st.session_inputs();
+    let labels: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        vec![
+            "Loop return · reference (in 1)",
+            "MM1 34804 · 90° · mic (in 2)",
+            "Line 3 + Line 4 · line · pair (in 3, 4)",
+        ]
+    );
+    assert_eq!(rows[0].cal.as_deref(), Some(ac2_scene::meter::DBFS));
+    assert_eq!(rows[1].cal, None);
+    assert_eq!(rows[2].cal.as_deref(), Some(ac2_scene::meter::DBFS));
+    assert_eq!(rows[2].right.as_ref().map(|(c, _)| *c), Some(3));
+    assert!(rows[0].right.is_none() && rows[1].right.is_none());
+    // The pair's name stands for both inputs' names.
+    s.pairs[0].name = Some("Main".into());
+    t.conn(mirror(s.clone()));
+    assert_eq!(
+        t.st.session_inputs()[2].label,
+        "Main · line · pair (in 3, 4)"
+    );
+    // A line calibration of the reference: its level text is dBu, with the full scale.
+    s.line_calibrations = vec![LineCalEntry {
+        key: LineCalKey {
+            device: DeviceId("fake:loop".into()),
+            channel: 0,
+        },
+        line: LineCal {
+            v_fs: Volts(3.4641),
+            volts: Volts(1.2280),
+            measured: Dbfs(-9.0),
+            calibrated_at: WallNs(0),
+        },
+    }];
+    t.conn(mirror(s));
+    let cal = t.st.session_inputs()[0].cal.clone().unwrap_or_default();
+    assert!(cal.starts_with("dBu · full scale +13.0 dBu · "), "{cal}");
 }

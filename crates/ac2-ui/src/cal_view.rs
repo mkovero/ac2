@@ -16,10 +16,11 @@
 //! shows the daemon's truth; the reducer turns [`CalAction`]s into requests.
 
 use ac2_proto::cal;
-use ac2_proto::model::{CalKey, CurveChoice, InputSetup, MicCurveId, State};
+use ac2_proto::model::{CalKey, CurveChoice, InputKind, InputSetup, LineCalKey, MicCurveId, State};
 
 use crate::acoustic_dialog::AcousticDialog;
 use crate::electrical_dialog::ElectricalDialog;
+use crate::line_dialog::LineDialog;
 
 /// One line of the view.
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +31,8 @@ pub enum CalLine {
     Curve(MicCurveId),
     /// A sensitivity calibration.
     Sensitivity(CalKey),
+    /// A line calibration.
+    Line(LineCalKey),
 }
 
 /// The lines of `s`: inputs (the open session's captured inputs and every input with a mic
@@ -59,6 +62,11 @@ pub fn lines(s: &State) -> Vec<CalLine> {
         s.calibrations
             .iter()
             .map(|e| CalLine::Sensitivity(e.key.clone())),
+    );
+    v.extend(
+        s.line_calibrations
+            .iter()
+            .map(|e| CalLine::Line(e.key.clone())),
     );
     v
 }
@@ -95,8 +103,10 @@ pub enum CalAction {
     Rename(MicCurveId, String),
     /// `cal.curve_delete`.
     DeleteCurve(MicCurveId),
-    /// `cal.delete`.
+    /// `cal.delete` of a sensitivity calibration.
     DeleteSensitivity(CalKey),
+    /// `cal.delete` of a line calibration.
+    DeleteLine(LineCalKey),
     /// `cal.spl` or `cal.spl_electrical` from a calibration dialog; the reply comes back by
     /// `what`.
     Calibrate(ac2_proto::Command, String),
@@ -115,6 +125,8 @@ pub struct CalView {
     pub electrical: Option<ElectricalDialog>,
     /// The acoustic calibration dialog, over the view.
     pub acoustic: Option<AcousticDialog>,
+    /// The line calibration dialog, over the view.
+    pub line: Option<LineDialog>,
 }
 
 fn input_no(c: u16) -> u32 {
@@ -216,7 +228,7 @@ impl CalView {
             ),
             Some(CalLine::Curve(id)) => (Some(id.mic), None),
             Some(CalLine::Sensitivity(k)) => (Some(k.mic), None),
-            None => (None, None),
+            Some(CalLine::Line(_)) | None => (None, None),
         };
         let Some(mic) = mic else {
             self.notice = Some("name the mic first (N), then I imports its curve".into());
@@ -231,12 +243,17 @@ impl CalView {
 
     /// Typing goes to a typed edit or a calibration dialog.
     pub fn typing(&self) -> bool {
-        self.edit.is_some() || self.electrical.is_some() || self.acoustic.is_some()
+        self.edit.is_some()
+            || self.electrical.is_some()
+            || self.acoustic.is_some()
+            || self.line.is_some()
     }
 
     /// Closes an open calibration dialog (Esc); `false` when none was open.
     pub fn close_dialog(&mut self) -> bool {
-        self.electrical.take().is_some() || self.acoustic.take().is_some()
+        self.electrical.take().is_some()
+            || self.acoustic.take().is_some()
+            || self.line.take().is_some()
     }
 
     /// C on an input of the open session: the acoustic calibration dialog (the mic named
@@ -260,8 +277,9 @@ impl CalView {
         true
     }
 
-    /// E on an input of the open session with a mic name: the electrical calibration
-    /// dialog.
+    /// E on an input of the open session: the electrical calibration dialog of a named mic,
+    /// the line calibration dialog of a line input. A digital input has nothing to
+    /// calibrate: its reference is the word's full scale.
     pub fn start_electrical(&mut self, s: &State) -> bool {
         self.clear();
         let Some(CalLine::Input(c)) = self.focused(s) else {
@@ -277,7 +295,19 @@ impl CalView {
             self.notice = Some(ac2_scene::cal_notice::not_captured(c));
             return false;
         }
-        let Some(mic) = cal::input_setup(&s.inputs, c).mic().map(str::to_owned) else {
+        let setup = cal::input_setup(&s.inputs, c);
+        match &setup.kind {
+            InputKind::Line => {
+                self.line = Some(LineDialog::new(c));
+                return true;
+            }
+            InputKind::Digital => {
+                self.notice = Some(ac2_scene::cal_notice::digital_not_calibrated(c));
+                return false;
+            }
+            InputKind::Mic { .. } => {}
+        }
+        let Some(mic) = setup.mic().map(str::to_owned) else {
             self.notice = Some(ac2_scene::cal_notice::no_mic_for_electrical(c));
             return false;
         };
@@ -294,6 +324,13 @@ impl CalView {
             let after = ac2_scene::cal::acoustic_after();
             self.notice = Some(ac2_scene::cal_notice::stored(what, after));
             self.acoustic = None;
+        }
+        if let Some(d) = &mut self.line
+            && d.reply(what, result)
+        {
+            let after = ac2_scene::cal::line_after();
+            self.notice = Some(ac2_scene::cal_notice::stored(what, after));
+            self.line = None;
         }
         let Some(d) = &mut self.electrical else {
             return;
@@ -327,9 +364,10 @@ impl CalView {
             Some(CalLine::Sensitivity(k)) => {
                 ac2_scene::cal_notice::delete_sensitivity(&k.mic, k.channel, &k.device.0)
             }
+            Some(CalLine::Line(k)) => ac2_scene::cal_notice::delete_line(k.channel, &k.device.0),
             _ => {
                 self.clear();
-                self.notice = Some("Delete removes a curve or a sensitivity calibration".into());
+                self.notice = Some("Delete removes a curve or a calibration".into());
                 return None;
             }
         };
@@ -343,6 +381,7 @@ impl CalView {
         match line {
             Some(CalLine::Curve(id)) => Some(CalAction::DeleteCurve(id)),
             Some(CalLine::Sensitivity(k)) => Some(CalAction::DeleteSensitivity(k)),
+            Some(CalLine::Line(k)) => Some(CalAction::DeleteLine(k)),
             _ => None,
         }
     }
@@ -351,6 +390,8 @@ impl CalView {
         if let Some(d) = &mut self.acoustic {
             d.type_text(t);
         } else if let Some(d) = &mut self.electrical {
+            d.type_text(t);
+        } else if let Some(d) = &mut self.line {
             d.type_text(t);
         } else if let Some(e) = &mut self.edit {
             e.text.extend(t.chars().filter(|c| !c.is_control()));
@@ -362,6 +403,8 @@ impl CalView {
         if let Some(d) = &mut self.acoustic {
             d.backspace();
         } else if let Some(d) = &mut self.electrical {
+            d.backspace();
+        } else if let Some(d) = &mut self.line {
             d.backspace();
         } else if let Some(e) = &mut self.edit {
             e.text.pop();
@@ -503,6 +546,29 @@ pub fn line_texts(
                     } else {
                         format!("in use on {}", users.join(", "))
                     },
+                    warn: false,
+                    line,
+                }
+            }
+            CalLine::Line(k) => {
+                let e = s.line_calibrations.iter().find(|e| e.key == *k);
+                LineText {
+                    title: format!("line in {} of {}", input_no(k.channel), k.device.0),
+                    detail: e
+                        .map(|e| ac2_scene::cal::line_detail(&e.line))
+                        .unwrap_or_default(),
+                    extra: e
+                        .map(|e| {
+                            format!(
+                                "calibrated {}",
+                                ac2_scene::format::ago(ac2_scene::time::age_s(
+                                    e.line.calibrated_at,
+                                    now,
+                                    offset
+                                ))
+                            )
+                        })
+                        .unwrap_or_default(),
                     warn: false,
                     line,
                 }
