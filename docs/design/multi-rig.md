@@ -18,9 +18,14 @@ cripple the other rigs. The math is the daemon's; the app renders streams. Both 
 
 - **Connect…** adds a rig: browse (`_ac2._tcp`, network mode) or a typed address, paired per
   rig as today. The embedded daemon is a rig like any other (*this computer*).
-- **Tabs**, one per rig, named by the rig (never trusted beyond display). The active tab is
-  the rig the single-rig keys talk to: Space arms *its* stimulus, Enter opens *its* session,
-  the tree is *its* tree, Settings' Audio & I/O is *its* devices. Switching tabs switches all
+- **Rigs in the top bar**: a drop-down after the session line names the active rig and
+  lists the others; a click switches. It is gone in the stage view and full screen like the
+  rest of the top bar. There is **no tab-switch key** (operator, 2026-10-23): clicking is
+  enough, and slots do the keyboard's part — a slot (K7, Ctrl+1 … 9 capture, 1 … 9 show)
+  remembers its measurement's rig, and showing a slot of another rig makes that rig active,
+  so 1 … 9 step between measurements across rigs. The active rig is the one the single-rig
+  keys talk to: Space arms *its* stimulus, Enter opens *its* session,
+  the tree is *its* tree, Settings' Audio & I/O is *its* devices. Switching rigs switches all
   of that; nothing else changes. With more than one rig connected the arm line and the
   stimulus banner **name the rig** (*arm pupu's stimulus · Space*): sound must never leave a
   system the operator did not mean.
@@ -248,6 +253,5 @@ rig and are display only (`ac2-discovery` already trusts nothing).
 3. **Remote inputs** — after the timestamp and latency study; redesigned then on the list
    in §3.
 
-Open before stage 1: the tab-switch key (everyday keys plain / Shift / Alt; Alt+←/→ size
-panes; Ctrl chords are eaten on the operator's desktop), and whether a tab bar or the top
-bar's session line carries the rig name.
+Settled 2026-10-23 (operator): no tab-switch key; a top-bar drop-down (hidden in the stage
+view) carries the rig; slots carry their rig and showing one switches to it.

@@ -5,19 +5,19 @@ to `backlog-done.md` as one line with the commit.
 
 ## Many rigs in one app (design `multi-rig.md`)
 
-- **Not started.** Stages: (1) `AppState` split + id namespacing by rig, tabs, `PaneSource {RigRef, PaneContent}`
-  in `Measurement.layout` (PROTO + session bump), P1 ruling, arm line names the rig; (2) clock
-  reporting, other-rig stimulus chips; (3) remote inputs, only after a backend-timestamp and
-  input-latency study on pupu + ketunkolo. Open before stage 1: tab-switch key and where the
-  rig name lives.
+- **Not started.** Stages: (1) `AppState` split + id namespacing by rig, top-bar rig drop-down,
+  slots carrying their rig, `PaneSource {RigRef, PaneContent}` in `Measurement.layout`
+  (PROTO + session bump), P1 storage rule, arm line names the rig, Shift+Escape stops every
+  rig; (2) clock reporting, other-rig stimulus chips; (3) remote inputs, only after a
+  backend-timestamp and input-latency study on pupu + ketunkolo.
 
 ## Programme metering (design `programme-meter.md`)
 
-- **Not started.** Stages: (1) `InputKind` + pairs + `cal.line` + preview kinds/pairs (PROTO +
-  session bump), (2) PPM ballistics against the IEC 60268-10 burst table, true peak, overs,
-  per-side gated correlation, ember goniometer, Programme pane, rig-level `levels.set`,
-  (3) loudness. Open before stage 1: the I/O page keys for kind (L, A proposed) against the
-  scoped key table; before stage 2: the burst-table constants from the IEC text.
+- **Not started.** Stages: (1) `InputKind` (keys M / L / A) + pairs + `cal.line` + preview
+  kinds/pairs (PROTO + session bump), (2) PPM ballistics against the IEC 60268-10 burst table,
+  true peak, overs, per-side gated correlation, ember goniometer, Programme pane, rig-level
+  `levels.set`, (3) loudness. Open before stage 2: the burst-table constants from the IEC
+  text.
 
 ## Band Leq (design `band-leq.md`)
 

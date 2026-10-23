@@ -47,8 +47,8 @@ pub enum InputKind {
 `InputSetup` becomes `{ channel, kind, pair }`. Rules:
 
 - **M** on the Audio & I/O page makes an input `Mic` (and **N** names it, as today); **L**
-  makes it `Line`, **A** `Digital` (AES; keys to be confirmed against the page's scoped key
-  table at build time — the page already uses R M N S D P, Space and arrows). Default for a
+  makes it `Line`, **A** `Digital` (AES) — accepted by the operator 2026-10-23; the page
+  already uses R M N S D P, Space and arrows, and these do not collide. Default for a
   new input: `Line`.
 - Reference (**R**) is a role, not a kind: the loopback is `Line` or `Digital`.
 - A `Line` input without a line calibration reads **dBFS** and its row says *dBFS*, not
