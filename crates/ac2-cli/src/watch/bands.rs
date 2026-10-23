@@ -80,7 +80,7 @@ pub async fn bands(
                 s.inputs
                     .iter()
                     .find(|i| i.channel == config.input)
-                    .and_then(|i| i.mic.clone())
+                    .and_then(|i| i.kind.mic().map(str::to_owned))
             });
             let cal = output::cal_status(meta.cal, meta.mic_curve, now_wall(), offset);
             let cal = match &mic {

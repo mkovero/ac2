@@ -52,6 +52,6 @@ pub fn log_info(st: &State, m: &Measurement) -> Option<SplLogInfo> {
             .inputs
             .iter()
             .find(|i| i.channel == config.input)
-            .and_then(|i| i.mic.clone()),
+            .and_then(|i| i.kind.mic().map(str::to_owned)),
     })
 }

@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale, Operand,
-    PeakWeighting, PhaseBasis, PositionCorrection, Smoothing, SmoothingFraction, SpecLevel,
-    TimeWeighting, TimingState, TimingStatus, Unresolved, Weighting, Window,
+    BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale, Operand, Pair,
+    PeakWeighting, PhaseBasis, PositionCorrection, PreviewInput, Smoothing, SmoothingFraction,
+    SpecLevel, TimeWeighting, TimingState, TimingStatus, Unresolved, Weighting, Window,
 };
 use crate::units::{
     ClientId, DaemonIncarnation, Db, Dbfs, Hz, Rev, SampleIndex, Samples, Seconds, SessionEpoch,
@@ -353,6 +353,10 @@ pub struct PreviewLevelsMeta {
     pub device: DeviceId,
     /// Device input channel of each column.
     pub channels: Vec<u16>,
+    /// What is on the inputs, as `session.preview` declared them.
+    pub inputs: Vec<PreviewInput>,
+    /// Pairs among them, as declared.
+    pub pairs: Vec<Pair>,
 }
 
 /// One timing correlation window.

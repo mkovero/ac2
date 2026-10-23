@@ -10,7 +10,7 @@ use ac2_proto::model::{
     CalBasis, CalEntry, CalMethod, CalStatus, ElectricalConnection, Mic, MicCurveRef, MicLoading,
     SensitivitySource,
 };
-use ac2_proto::units::{Db, MvPerPa, WallNs};
+use ac2_proto::units::{Db, Dbu, MvPerPa, WallNs};
 
 use crate::format;
 use crate::time::{self, ClockOffset};
@@ -323,7 +323,17 @@ pub fn sensitivity_state(s: &Sensitivity<'_>, client_now: WallNs, offset: ClockO
             u32::from(e.key.channel) + 1,
             tail(e)
         ),
+        Sensitivity::Line(e) => format!(
+            "{} · {}",
+            line_scale(ac2_proto::cal::dbu_fs(e.line.v_fs.0)),
+            format::ago(time::age_s(e.line.calibrated_at, client_now, offset))
+        ),
     }
+}
+
+/// A line calibration's reference, `dBu · full scale +13.0 dBu`.
+pub fn line_scale(dbu_fs: Dbu) -> String {
+    format!("dBu · full scale {} dBu", format::signed(dbu_fs.0, 1))
 }
 
 /// A readout's calibration (decisions 7a/7b) with the calibration's age `age_s`: `cal 94 dB
@@ -347,6 +357,9 @@ pub fn status_text(cal: CalStatus, age_s: f64) -> Option<String> {
             "electrical cal from other mic / input {}",
             uncertainty(u)
         )),
+        CalStatus::Line { dbu_fs, .. } => {
+            Some(format!("{} · {}", line_scale(dbu_fs), format::ago(age_s)))
+        }
     }
 }
 

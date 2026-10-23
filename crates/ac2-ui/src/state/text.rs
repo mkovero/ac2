@@ -240,7 +240,7 @@ pub fn meas_input(k: &MeasKind) -> Option<u16> {
 /// The toast of a curve choice: `input 2: mic curve MM1 34804 90°`, `input 2: mic curve off`.
 pub fn curve_what(row: &InputSetup) -> String {
     let n = u32::from(row.channel) + 1;
-    match (&row.mic, &row.curve) {
+    match (row.mic(), &row.curve()) {
         (Some(m), CurveChoice::Curve { label }) => {
             format!(
                 "input {n}: mic curve {}",
@@ -255,13 +255,7 @@ pub fn curve_what(row: &InputSetup) -> String {
 /// `3=M30, 4=ECM` (1-based) of the rows with a mic name, or `3=` for a cleared one.
 pub fn mics_text(rows: &[InputSetup]) -> String {
     rows.iter()
-        .map(|r| {
-            format!(
-                "{}={}",
-                u32::from(r.channel) + 1,
-                r.mic.as_deref().unwrap_or("")
-            )
-        })
+        .map(|r| format!("{}={}", u32::from(r.channel) + 1, r.mic().unwrap_or("")))
         .collect::<Vec<_>>()
         .join(", ")
 }

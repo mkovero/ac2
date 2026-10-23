@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 62`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 63`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -84,14 +84,14 @@ Lease column: **L** = `lease_token` required (Q6).
 |---|---|---|---|
 | `hello` | `client` | `welcome` | |
 | `session.devices` | — | `backends` | |
-| `session.preview` | `backend: BackendKind`, `device: DeviceId` | `preview` | |
+| `session.preview` | `backend: BackendKind`, `device: DeviceId`, `inputs: [PreviewInput]` ({`channel`, `kind: InputKind`}), `pairs: [Pair]` | `preview` | |
 | `session.preview_stop` | — | `ack` | |
 | `session.control_panel` | `backend: BackendKind`, `device: DeviceId` | `ack` | |
 | `session.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs \| nil` | `loopback_detection` | L |
 | `session.open` | `config: SessionConfig` | `session` | |
 | `session.close` | — | `ack` | |
 | `session.status` | — | `session` | |
-| `session.inputs` | `inputs: [InputSetup]` (upserted by channel) | `inputs` (the whole setup) | |
+| `session.inputs` | `inputs: [InputSetup]` (upserted by channel), `pairs: [Pair]` (the whole list) | `inputs` (`inputs`: the whole setup, `pairs`) | |
 | `session.outputs` | `outputs: [OutputSetup]` (upserted by channel; `label: nil` clears) | `outputs` (every label) | |
 | `gen.acquire` | `force: bool` | `lease` (`lease_token`, `expires_in_ms`) | |
 | `gen.set` | `lease_token`, `desired: {settings, armed, firing}` | `generator` | L |
@@ -136,8 +136,9 @@ Lease column: **L** = `lease_token` required (Q6).
 | `cal.curve_import` | `mic`, `label: string \| nil`, `file_name`, `content: bin`, `input: u16 \| nil` | `mic` | |
 | `cal.curve_rename` | `curve: MicCurveId`, `label` | `mic` | |
 | `cal.curve_delete` | `curve: MicCurveId` | `ack` | |
-| `cal.list` | — | `calibrations` (`calibrations`, `mics`) | |
-| `cal.delete` | `key: CalKey` | `ack` | |
+| `cal.line` | `channel`, `volts: Volts`, `read_dbfs: Dbfs` | `line_calibration` | |
+| `cal.list` | — | `calibrations` (`calibrations`, `line_calibrations`, `mics`) | |
+| `cal.delete` | `key: CalRef` (`type`: `spl` {device, channel, mic} \| `line` {device, channel}) | `ack` | |
 | `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
 | `spl.log_new` | `meas` | `ack` | |
 | `spl.history_get` | `meas`, `span: HistorySpan` | `spl_history` | non-mutating |
@@ -1361,27 +1362,48 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   inputs that chose it follow. `cal.curve_delete` removes it (a mic left without curves is
   deleted, event `mic` `deleted`); inputs that chose it keep the label and show it as not
   stored. `not_found` for an unknown mic or label. Neither needs an open session.
-- `cal.delete` removes the sensitivity calibration `key` (any device; no open session
-  needed); `not_found` when there is none. The input setup is not changed.
-- `InputSetup` = {`channel`, `mic`: string | nil, `curve: CurveChoice`}; `CurveChoice` is
-  tagged by `type`: `not_chosen` | `off` | `curve` {`label`}. `session.inputs` refuses
-  (`invalid`) a row whose chosen label is not stored for its mic, unless the row is
-  unchanged. The daemon chooses a mic's only curve on a row where none is chosen (on every
-  change of the setup or the library); with several, the row stays `not_chosen` and no
-  curve applies until the operator chooses. A new mic name on a row starts `not_chosen`.
-  Mic names are 1–64 characters.
+- `cal.line` (`docs/design/programme-meter.md` §1.1) calibrates a `line` input: the
+  operator measured `volts` (RMS) of a steady tone at the input while the meter read
+  `read_dbfs`; the daemon reads nothing itself and stores `LineCalEntry` {`key: LineCalKey`
+  {device, channel}, `line: LineCal` {`v_fs`: Volts (`volts / 10^(read_dbfs/20)`, the volts
+  at 0 dBFS), `volts`, `measured`: Dbfs, `calibrated_at`}} under the open session's input
+  device, replacing the input's earlier one. dBu of 0 dBFS is `20·lg(v_fs / 0.7746 V)`;
+  `invalid` when it falls outside +4 … +30 dBu (a unit slip), when `read_dbfs` is outside
+  −70 … −3 dBFS, or when the input is a `mic` or `digital` one (named by channel).
+- `cal.delete` removes the sensitivity (`spl`) or line (`line`) calibration `key` (any
+  device; no open session needed); `not_found` when there is none. The input setup is not
+  changed.
+- `InputSetup` = {`channel`, `kind: InputKind`, `pair`: `left` | `right` | nil}; `InputKind`
+  is tagged by `kind`: `mic` {`mic`: string | nil, `curve: CurveChoice`} | `line` |
+  `digital` (`docs/design/programme-meter.md` §1: the kind is declared, never inferred, and
+  fixes the dB reference; an input with no row is an unnamed `mic`). `CurveChoice` is
+  tagged by `type`: `not_chosen` | `off` | `curve` {`label`}. `Pair` = {`left`, `right`,
+  `name`: string | nil} (channels). `session.inputs` upserts its rows and replaces the pair
+  list; the daemon sets every row's `pair` side from the list. It refuses (`invalid`, naming
+  the inputs by channel) a mic row whose chosen label is not stored for its mic (unless the
+  row is unchanged), a pair of an input with itself, of two kinds, of a `mic`, of an input
+  in two pairs, or of an input the open session does not capture. The daemon chooses a
+  mic's only curve on a row where none is chosen (on every change of the setup or the
+  library); with several, the row stays `not_chosen` and no curve applies until the
+  operator chooses. A new mic name on a row starts `not_chosen`. Mic and pair names are 1–64
+  characters. `cal.spl`, `cal.spl_electrical` and `cal.curve_import` with `input` need a
+  `mic` input; an SPL meter (`meas.create` / `meas.start` of a `spl` measurement) needs one
+  too and is `invalid` otherwise (*input 3 is a line input; an SPL meter needs a
+  microphone*). Transfer, spectrum, RTA and sweeps take any kind.
 - When the daemon's calibration store file cannot be read it is never written: `cal.spl`,
-  `cal.spl_electrical`,
+  `cal.spl_electrical`, `cal.line`,
   `cal.curve_*`, `cal.delete`, `cal.list` and `session.inputs` are `refused` with `detail:
   {type: cal_store, path, reason}`.
 
 Which calibration a measurement uses (shown as `CalStatus` in `spl`, `rta` and `spec`
 frames): the entry of device + input + the input's mic → `verified`; else the newest one
 on the same device + input (another mic, or no mic name set), else the newest one for the
-same mic elsewhere → `other_mic_or_input`; else `uncalibrated` (dBFS). `CalStatus` is
+same mic elsewhere → `other_mic_or_input`; else `uncalibrated` (dBFS). A `line` input
+uses its line calibration on the same device + input → `line` {`calibrated_at`, `dbu_fs`:
+Dbu}, else `uncalibrated`; a `digital` input is always `uncalibrated`. `CalStatus` is
 tagged by `type`: `uncalibrated` | `verified` {`calibrated_at`, `basis`} |
-`other_mic_or_input` {`calibrated_at`, `basis`}; the age is `capture_wall_ns −
-calibrated_at`. `basis: CalBasis` (tagged by `type`) says what the calibration rests on:
+`other_mic_or_input` {`calibrated_at`, `basis`} | `line` {`calibrated_at`, `dbu_fs`}; the
+age is `capture_wall_ns − calibrated_at`. `basis: CalBasis` (tagged by `type`) says what the calibration rests on:
 `acoustic` {`calibrator_level`} | `electrical` {`connection`, `mic_sensitivity`,
 `data_sheet`: bool, `loading`: MicLoading | nil, `uncertainty`}. The mic curve is the input's chosen curve of its mic —
 only that one; none when not chosen, off, or not stored — normalised to 0 dB at the
@@ -1508,8 +1530,9 @@ math | average | sweep | eq}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_cu
 `armed`, `firing`, `settings`, `ceiling`, `ceiling_bound`, `last_action` {`action`: acquire
 \| force \| arm \| fire \| set \| stop \| release \| expiry \| ceiling_lowered \|
 ceiling_raised, `client`, `at`}), `calibrations` (`CalEntry`:
-`key` {device, channel, mic}, `spl`: SplCal), `mics` (`Mic`: `name`, `curves`
-[MicCurveRef]), `inputs` ([InputSetup], sorted by channel), `outputs` ([OutputSetup], the
+`key` {device, channel, mic}, `spl`: SplCal), `line_calibrations` ([LineCalEntry]), `mics`
+(`Mic`: `name`, `curves` [MicCurveRef]), `inputs` ([InputSetup], sorted by channel), `pairs`
+([Pair], sorted by left channel), `outputs` ([OutputSetup], the
 labelled outputs, sorted by channel), `spl_logs` (`SplLog` per SPL
 meter: `meas`, `started_at`, `windows`, `peaks`, `alarms`; §3.2), `timing` (`TimingStatus`: `epoch`,
 `state` {no_stimulus | acquiring | locked{offset} | jumped{from, to} | lost}, `last_lock`,
@@ -1562,9 +1585,9 @@ samples). Every later recovery reopens the configuration as it then stands.
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`, `working`. `payload` is the entity's
-full new value (`inputs`, `outputs`: the whole list); for keyed entities (`measurement`, `trace`,
-`calibration`, `mic` (keyed by name), `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
+`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`, `working`. `payload` is the entity's
+full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list); for keyed entities (`measurement`, `trace`,
+`calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
 `[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB.
 
@@ -1659,7 +1682,8 @@ its fields in the order listed; an enum with data is an array of its `type` name
 its fields (`["verified", calibrated_at, ["acoustic", calibrator_level]]`); the `meta` key
 stays a one-entry map `{kind: [...]}`; enums without data stay strings. Nested orders:
 `Smoothing` [fraction, mode]; `CalStatus` `uncalibrated` \| `verified` /
-`other_mic_or_input` [calibrated_at, basis]; `CalBasis` `acoustic` [calibrator_level] \|
+`other_mic_or_input` [calibrated_at, basis] \| `line` [calibrated_at, dbu_fs]; `InputKind`
+`mic` [mic, curve] \| `line` \| `digital` (tagged by `kind`); `CalBasis` `acoustic` [calibrator_level] \|
 `electrical` [connection, mic_sensitivity, data_sheet, loading, uncertainty] (`loading` nil
 or [mic_impedance, input_impedance]); `LeqRun` [started_at,
 until, measured, gaps, trimmed, laeq, lceq, lzeq]; `LeqPeak` [level, judgement];
@@ -1703,7 +1727,7 @@ layout as code.
 | `band_leq` | one column per band window, in configuration order: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
-| `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n) |
+| `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `session.preview` declared them), `pairs` ([Pair]) |
 | `timing` | none | `status` (TimingStatus), `window` {capture_start, offset, psr, loopback, stimulus} |
 | `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, armed, firing}, `health` (`DaemonHealth`, below) |
 

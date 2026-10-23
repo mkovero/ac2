@@ -295,6 +295,8 @@ impl Meters {
                             backend: BackendKind::Fake,
                             device: DeviceId("fake:loop".into()),
                             channels: vec![0, 1, 2, 3],
+                            inputs: Vec::new(),
+                            pairs: Vec::new(),
                         },
                         peak: peak.to_vec(),
                         rms: rms.to_vec(),

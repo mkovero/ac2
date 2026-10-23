@@ -6,11 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    ArtnetTarget, AverageMethod, BackendKind, CalKey, ColourFamily, Compared, DelayPick,
+    ArtnetTarget, AverageMethod, BackendKind, CalRef, ColourFamily, Compared, DelayPick,
     DelayReference, DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId,
-    MicLoading, OscMessage, OutputSetup, OwnedTraces, PaneLayout, RecordRequest, RecordingRef,
-    ReplayPace, SessionConfig, SessionRef, SplLogWhich, TargetCurve, TraceEdit, TraceOwner,
+    MicLoading, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout, PreviewInput,
+    RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef, SplLogWhich, TargetCurve,
+    TraceEdit, TraceOwner,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, Rev, Seconds, TraceId, TransferId,
@@ -36,13 +37,19 @@ pub enum Command {
     /// Meter every input of a device without opening a session on it: capture only, the
     /// outputs are never opened. Naming the same device again keeps the preview open;
     /// another device replaces it. Closed by `session.preview_stop`, `session.open`,
-    /// `session.detect_loopback` or when not renewed within `expires_in_ms`.
+    /// `session.detect_loopback` or when not renewed within `expires_in_ms`. The declared
+    /// kinds and pairs of the device's inputs travel back in the preview frames' meta so the
+    /// rows can be labelled; the meters themselves read dBFS.
     #[serde(rename = "session.preview")]
     SessionPreview {
         /// Backend.
         backend: BackendKind,
         /// Device.
         device: DeviceId,
+        /// What is on the inputs (undeclared inputs are microphones).
+        inputs: Vec<PreviewInput>,
+        /// Pairs among them; the rules of `session.inputs` apply.
+        pairs: Vec<Pair>,
     },
     /// Close the preview.
     #[serde(rename = "session.preview_stop")]
@@ -91,12 +98,17 @@ pub enum Command {
     /// Current session.
     #[serde(rename = "session.status")]
     SessionStatus,
-    /// Set the mic name and active mic curve of the listed inputs (others unchanged). A
-    /// chosen curve must be stored for the row's mic (unless the row is unchanged).
+    /// Set the kind (and a mic's name and active curve) of the listed inputs (others
+    /// unchanged) and the pairs among all inputs (the whole list). A chosen curve must be
+    /// stored for the row's mic (unless the row is unchanged). Refused by name: a pair of
+    /// two kinds, of mics, of an input twice, of an input with itself, or of an input the
+    /// open session does not capture; a row's `pair` side is set from the pair list.
     #[serde(rename = "session.inputs")]
     SessionInputs {
         /// Rows to upsert, one per channel.
         inputs: Vec<InputSetup>,
+        /// Every pair.
+        pairs: Vec<Pair>,
     },
     /// Set or clear the labels of the listed outputs (others unchanged). Kept by the daemon
     /// with the rig's settings.
@@ -513,14 +525,27 @@ pub enum Command {
         /// The curve.
         curve: MicCurveId,
     },
-    /// List sensitivity calibrations and the mic library.
+    /// Calibrate a line input: the operator measured `volts` (RMS) of a steady tone at the
+    /// input while the meter read `read_dbfs`; the daemon stores `V_FS = volts /
+    /// 10^(read_dbfs/20)`, the volts at 0 dBFS, under the open session's input device. On
+    /// a `line` input only: a mic reads dB SPL and a digital feed has no volt.
+    #[serde(rename = "cal.line")]
+    CalLine {
+        /// Input channel.
+        channel: u16,
+        /// Voltage measured, RMS.
+        volts: Volts,
+        /// Level the meter read.
+        read_dbfs: Dbfs,
+    },
+    /// List sensitivity and line calibrations and the mic library.
     #[serde(rename = "cal.list")]
     CalList,
-    /// Delete a sensitivity calibration, on any device (no open session needed).
+    /// Delete a sensitivity or line calibration, on any device (no open session needed).
     #[serde(rename = "cal.delete")]
     CalDelete {
         /// Entry.
-        key: CalKey,
+        key: CalRef,
     },
 
     // -- spl ----------------------------------------------------------------------------
@@ -830,6 +855,7 @@ impl Command {
             Self::CalCurveImport { .. } => "cal.curve_import",
             Self::CalCurveRename { .. } => "cal.curve_rename",
             Self::CalCurveDelete { .. } => "cal.curve_delete",
+            Self::CalLine { .. } => "cal.line",
             Self::CalList => "cal.list",
             Self::CalDelete { .. } => "cal.delete",
             Self::SplLogGet { .. } => "spl.log_get",

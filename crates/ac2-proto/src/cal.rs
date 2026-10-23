@@ -5,10 +5,10 @@
 //! readouts from the same functions, so what is shown as in use is what is in use.
 
 use crate::model::{
-    CalEntry, CalMethod, CalStatus, CurveChoice, DeviceId, InputSetup, Mic, MicCurveRef,
-    MicLoading, SensitivitySource, SplCal, State,
+    CalEntry, CalMethod, CalStatus, CurveChoice, DeviceId, InputKind, InputSetup, LineCalEntry,
+    Mic, MicCurveRef, MicLoading, Pair, PairSide, SensitivitySource, SplCal, State,
 };
-use crate::units::{Db, Hz, MvPerPa};
+use crate::units::{Db, Dbu, Hz, MvPerPa};
 
 /// Longest mic name, characters.
 pub const MAX_MIC_NAME: usize = 64;
@@ -31,6 +31,12 @@ pub fn check_mic_name(m: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// A pair name follows the mic name's rules: 1 … 64 characters without surrounding spaces or
+/// control characters.
+pub fn check_pair_name(n: &str) -> Result<(), String> {
+    check_mic_name(n).map_err(|e| e.replacen("mic name", "pair name", 1))
 }
 
 /// A curve label is 1 … 32 characters without surrounding spaces or control characters,
@@ -85,7 +91,17 @@ pub fn curve<'a>(mics: &'a [Mic], name: &str, label: &str) -> Option<&'a MicCurv
     mic(mics, name)?.curves.iter().find(|c| c.label == label)
 }
 
-/// The input setup row of `channel` (default: no mic, no curve chosen).
+/// The kind of an input nobody has declared: a microphone with no name and no curve chosen.
+/// A measurement on an undeclared input is acoustic by default so that it reads dBFS, as an
+/// uncalibrated mic does, rather than being refused for a declaration no one made.
+pub fn default_kind() -> InputKind {
+    InputKind::Mic {
+        mic: None,
+        curve: CurveChoice::NotChosen,
+    }
+}
+
+/// The input setup row of `channel` (default: an undeclared mic, unpaired).
 pub fn input_setup(inputs: &[InputSetup], channel: u16) -> InputSetup {
     inputs
         .iter()
@@ -93,24 +109,115 @@ pub fn input_setup(inputs: &[InputSetup], channel: u16) -> InputSetup {
         .cloned()
         .unwrap_or(InputSetup {
             channel,
-            mic: None,
-            curve: CurveChoice::NotChosen,
+            kind: default_kind(),
+            pair: None,
         })
 }
 
-/// Chooses the only curve of a mic that has exactly one, on a row where none is chosen:
+/// The kind of `channel` ([`input_setup`]'s default when undeclared).
+pub fn input_kind(inputs: &[InputSetup], channel: u16) -> InputKind {
+    input_setup(inputs, channel).kind
+}
+
+/// Chooses the only curve of a mic that has exactly one, on a mic row where none is chosen:
 /// with one curve there is nothing to confuse it with. With several, the operator chooses.
 pub fn settle(row: &mut InputSetup, mics: &[Mic]) {
-    if row.curve != CurveChoice::NotChosen {
+    let InputKind::Mic {
+        mic: Some(name),
+        curve,
+    } = &mut row.kind
+    else {
+        return;
+    };
+    if *curve != CurveChoice::NotChosen {
         return;
     }
-    if let Some(m) = row.mic.as_deref().and_then(|n| mic(mics, n))
+    if let Some(m) = mic(mics, name)
         && let [only] = m.curves.as_slice()
     {
-        row.curve = CurveChoice::Curve {
+        *curve = CurveChoice::Curve {
             label: only.label.clone(),
         };
     }
+}
+
+/// `inputs` with every row's `pair` side set from `pairs` (unpaired rows get `None`); a
+/// paired channel without a row gets one of the default kind.
+pub fn apply_pair_sides(inputs: &[InputSetup], pairs: &[Pair]) -> Vec<InputSetup> {
+    let mut rows: Vec<InputSetup> = inputs.to_vec();
+    for p in pairs {
+        for ch in [p.left, p.right] {
+            if !rows.iter().any(|r| r.channel == ch) {
+                rows.push(input_setup(inputs, ch));
+            }
+        }
+    }
+    for r in &mut rows {
+        r.pair = pairs.iter().find_map(|p| {
+            if p.left == r.channel {
+                Some(PairSide::Left)
+            } else if p.right == r.channel {
+                Some(PairSide::Right)
+            } else {
+                None
+            }
+        });
+    }
+    rows.sort_by_key(|r| r.channel);
+    rows
+}
+
+/// The rules of a pair list over `inputs` (decision V2), one message per violation naming
+/// the inputs by channel (1-based, as printed on the interface): both sides are of one kind
+/// and neither is a mic, an input is in at most one pair, and a pair is two inputs.
+/// `captured` says whether the open session captures a channel (`None`: no open session, so
+/// any channel may be declared).
+pub fn check_pairs(
+    inputs: &[InputSetup],
+    pairs: &[Pair],
+    captured: Option<&dyn Fn(u16) -> bool>,
+) -> Result<(), String> {
+    let n = |ch: u16| u32::from(ch) + 1;
+    for (i, p) in pairs.iter().enumerate() {
+        if let Some(name) = &p.name {
+            check_pair_name(name)?;
+        }
+        if p.left == p.right {
+            return Err(format!("input {} cannot be paired with itself", n(p.left)));
+        }
+        for ch in [p.left, p.right] {
+            if let Some(c) = captured
+                && !c(ch)
+            {
+                return Err(format!(
+                    "input {} is not captured by the session, so it cannot be paired",
+                    n(ch)
+                ));
+            }
+            if pairs[..i].iter().any(|o| o.left == ch || o.right == ch) {
+                return Err(format!("input {} is in two pairs", n(ch)));
+            }
+        }
+        let (l, r) = (input_kind(inputs, p.left), input_kind(inputs, p.right));
+        for (ch, k) in [(p.left, &l), (p.right, &r)] {
+            if matches!(k, InputKind::Mic { .. }) {
+                return Err(format!(
+                    "input {} is a microphone; a pair is two line or two digital inputs",
+                    n(ch)
+                ));
+            }
+        }
+        if l != r {
+            return Err(format!(
+                "inputs {} and {} are of different kinds ({} and {}); a pair is two of one kind",
+                n(p.left),
+                n(p.right),
+                l.word(),
+                r.word()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The choices ←/→ step through for a row with mic `m`: off, then the mic's curves in
@@ -143,13 +250,15 @@ pub enum Sensitivity<'a> {
     /// A calibration of another mic on this input, or of this mic on another input or
     /// device: applied, and said so.
     OtherMicOrInput(&'a CalEntry),
+    /// A line input with a line calibration: dBu of 0 dBFS, no capsule, no dB SPL.
+    Line(&'a LineCalEntry),
 }
 
 impl<'a> Sensitivity<'a> {
-    /// The entry applied.
+    /// The sensitivity calibration applied (none on a line input: it has no dB SPL).
     pub fn entry(&self) -> Option<&'a CalEntry> {
         match self {
-            Self::Uncalibrated => None,
+            Self::Uncalibrated | Self::Line(_) => None,
             Self::Verified(e) | Self::OtherMicOrInput(e) => Some(e),
         }
     }
@@ -165,6 +274,10 @@ impl<'a> Sensitivity<'a> {
             Self::OtherMicOrInput(e) => CalStatus::OtherMicOrInput {
                 calibrated_at: e.spl.calibrated_at,
                 basis: e.spl.method.basis(),
+            },
+            Self::Line(e) => CalStatus::Line {
+                calibrated_at: e.line.calibrated_at,
+                dbu_fs: dbu_fs(e.line.v_fs.0),
             },
         }
     }
@@ -223,6 +336,8 @@ impl<'a> CurveUse<'a> {
 pub struct InputUse<'a> {
     /// Input channel.
     pub channel: u16,
+    /// What is on it ([`default_kind`] when undeclared).
+    pub kind: &'a InputKind,
     /// Mic name on the input setup.
     pub mic: Option<&'a str>,
     /// Sensitivity calibration.
@@ -231,21 +346,56 @@ pub struct InputUse<'a> {
     pub curve: CurveUse<'a>,
 }
 
+/// The kind of an undeclared input, with the lifetime of the state it is read from.
+static DEFAULT_KIND: InputKind = InputKind::Mic {
+    mic: None,
+    curve: CurveChoice::NotChosen,
+};
+
 /// What input `channel` of capture device `device` uses (`None`: no open session, so only
 /// calibrations of the input's mic on any device can match).
 ///
-/// Sensitivity, first match wins: the entry (device, input, mic) → verified; the newest on
-/// (device, input) → other mic / input; the newest for the mic anywhere → other mic / input;
-/// else uncalibrated. Curve: the input's chosen curve of its mic, only that one.
+/// A mic's sensitivity, first match wins: the entry (device, input, mic) → verified; the
+/// newest on (device, input) → other mic / input; the newest for the mic anywhere → other
+/// mic / input; else uncalibrated. Curve: the input's chosen curve of its mic, only that
+/// one. A line input: its line calibration on (device, input), else uncalibrated (dBFS). A
+/// digital input is never calibrated.
 pub fn input_use<'a>(
     calibrations: &'a [CalEntry],
+    line_calibrations: &'a [LineCalEntry],
     mics: &'a [Mic],
     inputs: &'a [InputSetup],
     device: Option<&DeviceId>,
     channel: u16,
 ) -> InputUse<'a> {
     let row = inputs.iter().find(|i| i.channel == channel);
-    let mic_name = row.and_then(|r| r.mic.as_deref());
+    let kind = row.map_or(&DEFAULT_KIND, |r| &r.kind);
+    let (mic_name, choice) = match kind {
+        InputKind::Mic { mic, curve } => (mic.as_deref(), Some(curve)),
+        InputKind::Line => {
+            let line = device.and_then(|d| {
+                line_calibrations
+                    .iter()
+                    .find(|e| e.key.device == *d && e.key.channel == channel)
+            });
+            return InputUse {
+                channel,
+                kind,
+                mic: None,
+                sensitivity: line.map_or(Sensitivity::Uncalibrated, Sensitivity::Line),
+                curve: CurveUse::NoMic,
+            };
+        }
+        InputKind::Digital => {
+            return InputUse {
+                channel,
+                kind,
+                mic: None,
+                sensitivity: Sensitivity::Uncalibrated,
+                curve: CurveUse::NoMic,
+            };
+        }
+    };
     let here =
         |e: &&CalEntry| device.is_some_and(|d| e.key.device == *d) && e.key.channel == channel;
     let newest =
@@ -261,7 +411,7 @@ pub fn input_use<'a>(
     } else {
         Sensitivity::Uncalibrated
     };
-    let curve = match (mic_name, row.map(|r| &r.curve)) {
+    let curve = match (mic_name, choice) {
         (None, _) | (_, None) => CurveUse::NoMic,
         (Some(m), Some(choice)) => {
             let stored = mic(mics, m).map_or(&[][..], |x| x.curves.as_slice());
@@ -278,6 +428,7 @@ pub fn input_use<'a>(
     };
     InputUse {
         channel,
+        kind,
         mic: mic_name,
         sensitivity,
         curve,
@@ -288,6 +439,7 @@ pub fn input_use<'a>(
 pub fn state_input_use(s: &State, channel: u16) -> InputUse<'_> {
     input_use(
         &s.calibrations,
+        &s.line_calibrations,
         &s.mics,
         &s.inputs,
         s.session.open.as_ref().map(|o| &o.input_device),
@@ -323,6 +475,25 @@ pub fn full_scale_volts(volts: f64, level_dbfs: f64) -> f64 {
 /// `mv_per_pa`: 0 dBFS is `V_FS / S` pascal.
 pub fn electrical_sensitivity_db(full_scale_volts: f64, mv_per_pa: f64) -> f64 {
     20.0 * (full_scale_volts / (mv_per_pa / 1000.0 * P_REF_PA)).log10()
+}
+
+// ---------------------------------------------------------------------------------------
+// Line calibration (`docs/design/programme-meter.md` §1.1)
+
+/// 0 dBu in volts RMS: 1 mW into 600 Ω, `sqrt(0.001 · 600)`.
+pub const DBU_REF_VOLTS: f64 = 0.774_596_669_241_483_4;
+/// Lowest and highest line full scale accepted, dBu: below +4 dBu a line input could not
+/// take a nominal signal; above +30 dBu no interface exists (the volts would be a unit slip).
+pub const LINE_DBU_FS_RANGE: (f64, f64) = (4.0, 30.0);
+
+/// dBu of 0 dBFS for an input whose full scale is `full_scale_volts`.
+pub fn dbu_fs(full_scale_volts: f64) -> Dbu {
+    Dbu(20.0 * (full_scale_volts / DBU_REF_VOLTS).log10())
+}
+
+/// The level of `volts` RMS on a line, dBu.
+pub fn volts_to_dbu(volts: f64) -> Dbu {
+    Dbu(20.0 * (volts / DBU_REF_VOLTS).log10())
 }
 
 /// An impedance of a [`MicLoading`] that cannot form a voltage divider.
@@ -434,9 +605,10 @@ pub fn data_sheet(mics: &[Mic], mic_name: &str) -> DataSheet {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::model::{CalKey, ElectricalConnection};
+    use crate::model::{CalKey, ElectricalConnection, LineCal, LineCalKey};
     use crate::units::{DbSpl, Dbfs, Volts, WallNs};
 
     fn curve_ref(label: &str) -> MicCurveRef {
@@ -474,8 +646,11 @@ mod tests {
     fn row(ch: u16, mic: Option<&str>, curve: CurveChoice) -> InputSetup {
         InputSetup {
             channel: ch,
-            mic: mic.map(Into::into),
-            curve,
+            kind: InputKind::Mic {
+                mic: mic.map(Into::into),
+                curve,
+            },
+            pair: None,
         }
     }
 
@@ -502,7 +677,7 @@ mod tests {
         }];
         let at = |r: InputSetup| {
             let inputs = vec![r];
-            format!("{:?}", input_use(&[], &mics, &inputs, None, 0).curve)
+            format!("{:?}", input_use(&[], &[], &mics, &inputs, None, 0).curve)
         };
         assert!(at(row(0, None, CurveChoice::Off)).starts_with("NoMic"));
         assert!(at(row(0, Some("ECM"), CurveChoice::NotChosen)).starts_with("NoneStored"));
@@ -511,10 +686,13 @@ mod tests {
         let l = |s: &str| CurveChoice::Curve { label: s.into() };
         assert!(at(row(0, Some("MM1"), l("45°"))).starts_with("Missing"));
         let inputs = vec![row(0, Some("MM1"), l("90°"))];
-        let u = input_use(&[], &mics, &inputs, None, 0);
+        let u = input_use(&[], &[], &mics, &inputs, None, 0);
         assert_eq!(u.curve.applied().map(|c| c.label.as_str()), Some("90°"));
         // No row at all: no mic.
-        assert_eq!(input_use(&[], &mics, &[], None, 3).curve, CurveUse::NoMic);
+        assert_eq!(
+            input_use(&[], &[], &mics, &[], None, 3).curve,
+            CurveUse::NoMic
+        );
     }
 
     #[test]
@@ -526,18 +704,18 @@ mod tests {
         let mut r = row(0, Some("MM1"), CurveChoice::NotChosen);
         settle(&mut r, &mics);
         assert_eq!(
-            r.curve,
-            CurveChoice::Curve {
+            r.kind.curve(),
+            Some(&CurveChoice::Curve {
                 label: "0°".into()
-            }
+            })
         );
         mics[0].curves.push(curve_ref("90°"));
         let mut r = row(0, Some("MM1"), CurveChoice::NotChosen);
         settle(&mut r, &mics);
-        assert_eq!(r.curve, CurveChoice::NotChosen);
+        assert_eq!(r.kind.curve(), Some(&CurveChoice::NotChosen));
         let mut off = row(0, Some("MM1"), CurveChoice::Off);
         settle(&mut off, &mics[..1]);
-        assert_eq!(off.curve, CurveChoice::Off);
+        assert_eq!(off.kind.curve(), Some(&CurveChoice::Off));
 
         let l = |s: &str| CurveChoice::Curve { label: s.into() };
         let m = Some(&mics[0]);
@@ -562,8 +740,9 @@ mod tests {
             row(1, Some("MM1"), CurveChoice::Off),
             row(2, Some("M30"), CurveChoice::Off),
         ];
-        let s =
-            |ch: u16, dev: Option<&DeviceId>| input_use(&cals, &[], &inputs, dev, ch).sensitivity;
+        let s = |ch: u16, dev: Option<&DeviceId>| {
+            input_use(&cals, &[], &[], &inputs, dev, ch).sensitivity
+        };
         assert!(matches!(s(0, Some(&d)), Sensitivity::Verified(e) if e.key.channel == 0));
         // Another mic on this input wins over this mic on another input.
         assert!(matches!(s(1, Some(&d)), Sensitivity::OtherMicOrInput(e) if e.key.mic == "ECM"));
@@ -707,5 +886,136 @@ mod tests {
             ),
             DataSheet::Differ(vec![15.0, 14.2])
         );
+    }
+
+    fn line_row(ch: u16) -> InputSetup {
+        InputSetup {
+            channel: ch,
+            kind: InputKind::Line,
+            pair: None,
+        }
+    }
+
+    #[test]
+    fn line_calibration_maths_by_hand() {
+        // An interface whose full scale is +13 dBu reads a +4 dBu tone at −9 dBFS.
+        let tone = DBU_REF_VOLTS * 10f64.powf(4.0 / 20.0);
+        let v_fs = full_scale_volts(tone, -9.0);
+        assert!((dbu_fs(v_fs).0 - 13.0).abs() < 1e-9, "{}", dbu_fs(v_fs).0);
+        // The MSD's scale test point: 1.55 V is +6 dBu.
+        assert_eq!(format!("{:.1}", volts_to_dbu(1.55).0), "6.0");
+        assert!((dbu_fs(DBU_REF_VOLTS).0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pair_rules_name_the_inputs() {
+        let inputs = vec![
+            row(0, Some("M30"), CurveChoice::Off),
+            line_row(1),
+            line_row(2),
+            line_row(3),
+            InputSetup {
+                channel: 4,
+                kind: InputKind::Digital,
+                pair: None,
+            },
+        ];
+        let pair = |l, r| Pair {
+            left: l,
+            right: r,
+            name: None,
+        };
+        let check = |pairs: &[Pair]| check_pairs(&inputs, pairs, None);
+        assert_eq!(check(&[pair(1, 2)]), Ok(()));
+        assert_eq!(
+            check(&[pair(0, 1)]).unwrap_err(),
+            "input 1 is a microphone; a pair is two line or two digital inputs"
+        );
+        // An undeclared input is a mic.
+        assert!(
+            check(&[pair(1, 9)])
+                .unwrap_err()
+                .starts_with("input 10 is a microphone")
+        );
+        assert_eq!(
+            check(&[pair(3, 4)]).unwrap_err(),
+            "inputs 4 and 5 are of different kinds (line input and digital input); a pair is \
+             two of one kind"
+        );
+        assert_eq!(
+            check(&[pair(1, 2), pair(2, 3)]).unwrap_err(),
+            "input 3 is in two pairs"
+        );
+        assert_eq!(
+            check(&[pair(2, 2)]).unwrap_err(),
+            "input 3 cannot be paired with itself"
+        );
+        let captured = |ch: u16| ch < 3;
+        assert_eq!(
+            check_pairs(&inputs, &[pair(2, 3)], Some(&captured)).unwrap_err(),
+            "input 4 is not captured by the session, so it cannot be paired"
+        );
+        assert!(
+            check(&[Pair {
+                name: Some(" x".into()),
+                ..pair(1, 2)
+            }])
+            .unwrap_err()
+            .starts_with("pair name")
+        );
+        let rows = apply_pair_sides(&inputs, &[pair(2, 1)]);
+        assert_eq!(rows[1].pair, Some(PairSide::Right));
+        assert_eq!(rows[2].pair, Some(PairSide::Left));
+        assert_eq!(rows[3].pair, None);
+    }
+
+    #[test]
+    fn line_input_uses_its_line_calibration_only() {
+        let dev = DeviceId("d".into());
+        let cals = [entry("d", 1, "M30", 5)];
+        let line = [LineCalEntry {
+            key: LineCalKey {
+                device: dev.clone(),
+                channel: 1,
+            },
+            line: LineCal {
+                v_fs: Volts(DBU_REF_VOLTS * 10f64.powf(13.0 / 20.0)),
+                volts: Volts(1.0),
+                measured: Dbfs(-9.0),
+                calibrated_at: WallNs(7),
+            },
+        }];
+        let inputs = [
+            line_row(1),
+            InputSetup {
+                channel: 2,
+                kind: InputKind::Digital,
+                pair: None,
+            },
+        ];
+        let u = input_use(&cals, &line, &[], &inputs, Some(&dev), 1);
+        assert_eq!(u.sensitivity, Sensitivity::Line(&line[0]));
+        assert_eq!(u.sensitivity.entry(), None);
+        match u.sensitivity.status() {
+            CalStatus::Line {
+                calibrated_at,
+                dbu_fs,
+            } => {
+                assert_eq!(calibrated_at, WallNs(7));
+                assert!((dbu_fs.0 - 13.0).abs() < 1e-9);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(u.curve, CurveUse::NoMic);
+        // Another device: no line calibration, dBFS.
+        let other = DeviceId("e".into());
+        let u = input_use(&cals, &line, &[], &inputs, Some(&other), 1);
+        assert_eq!(u.sensitivity, Sensitivity::Uncalibrated);
+        // Digital: never calibrated, whatever is stored.
+        let u = input_use(&cals, &line, &[], &inputs, Some(&dev), 2);
+        assert_eq!(u.sensitivity, Sensitivity::Uncalibrated);
+        // Undeclared: a mic, the sensitivity calibration on (device, input) applies.
+        let u = input_use(&cals, &line, &[], &[], Some(&dev), 1);
+        assert_eq!(u.sensitivity, Sensitivity::OtherMicOrInput(&cals[0]));
     }
 }

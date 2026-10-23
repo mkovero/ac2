@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 62
+PROTO_VERSION = 63
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -139,6 +139,14 @@ _TIMING_STATUS = [
     ("internal_reference", None),
 ]
 _LEVELS = [("channels", None)]
+# `InputKind` is tagged by `kind`, not `type`: its variants name what is on the input.
+_INPUT_KIND = ("kinded", {
+    "mic": [("mic", None), ("curve", ("tagged", {"not_chosen": [], "off": [], "curve": [("label", None)]}))],
+    "line": [],
+    "digital": [],
+})
+_PREVIEW_INPUT = [("channel", None), ("kind", _INPUT_KIND)]
+_PAIR = [("left", None), ("right", None), ("name", None)]
 _OPERAND = ("tagged", {"meas": [("meas", None)], "trace": [("trace", None)]})
 _OPERAND_STATUS = ("tagged", {
     "included": [],
@@ -189,7 +197,8 @@ META = {
                                         ("limit", None), ("judgement", None)]))],
     "levels": _LEVELS,
     "session_levels": _LEVELS,
-    "preview_levels": [("backend", None), ("device", None), ("channels", None)],
+    "preview_levels": [("backend", None), ("device", None), ("channels", None),
+                       ("inputs", ("list", _PREVIEW_INPUT)), ("pairs", ("list", _PAIR))],
     "timing": [("status", _TIMING_STATUS),
                ("window", ("opt", [("capture_start", None), ("offset", None), ("psr", None),
                                    ("loopback", None), ("stimulus", None)]))],
@@ -221,9 +230,10 @@ def positional(t, x):
         return positional(sub, x)
     if tag == "list":
         return [positional(sub, v) for v in x]
-    if tag == "tagged":
-        fields = sub[x["type"]]
-        return [x["type"]] + positional(fields, {k: v for k, v in x.items() if k != "type"})
+    if tag in ("tagged", "kinded"):
+        key = "type" if tag == "tagged" else "kind"
+        fields = sub[x[key]]
+        return [x[key]] + positional(fields, {k: v for k, v in x.items() if k != key})
     if tag == "meta":
         ((k, v),) = x.items()
         return {k: positional(sub[k], v)}
@@ -245,10 +255,11 @@ def named(t, x):
         if not isinstance(x, list):
             raise DecodeError(f"expected a list, got {x!r}")
         return [named(sub, v) for v in x]
-    if tag == "tagged":
+    if tag in ("tagged", "kinded"):
         if not isinstance(x, list) or not x or x[0] not in sub:
             raise DecodeError(f"bad tagged value {x!r}")
-        return {"type": x[0], **named(sub[x[0]], x[1:])}
+        key = "type" if tag == "tagged" else "kind"
+        return {key: x[0], **named(sub[x[0]], x[1:])}
     if tag == "meta":
         if not isinstance(x, dict) or len(x) != 1 or next(iter(x)) not in sub:
             raise DecodeError(f"bad meta {x!r}")

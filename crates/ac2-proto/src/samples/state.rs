@@ -40,26 +40,57 @@ pub fn server_info() -> ServerInfo {
     }
 }
 
-pub(super) fn inputs() -> Vec<InputSetup> {
-    vec![
-        InputSetup {
-            channel: 1,
-            mic: Some("M30 #1234".into()),
-            curve: CurveChoice::Curve {
-                label: "0°".into()
+pub(super) fn inputs() -> InputSetups {
+    InputSetups {
+        inputs: vec![
+            InputSetup {
+                channel: 1,
+                kind: InputKind::Mic {
+                    mic: Some("M30 #1234".into()),
+                    curve: CurveChoice::Curve {
+                        label: "0°".into()
+                    },
+                },
+                pair: None,
             },
-        },
-        InputSetup {
-            channel: 2,
-            mic: None,
-            curve: CurveChoice::NotChosen,
-        },
-        InputSetup {
-            channel: 3,
-            mic: Some("ECM".into()),
-            curve: CurveChoice::Off,
-        },
-    ]
+            InputSetup {
+                channel: 2,
+                kind: InputKind::Mic {
+                    mic: None,
+                    curve: CurveChoice::NotChosen,
+                },
+                pair: None,
+            },
+            InputSetup {
+                channel: 3,
+                kind: InputKind::Mic {
+                    mic: Some("ECM".into()),
+                    curve: CurveChoice::Off,
+                },
+                pair: None,
+            },
+            InputSetup {
+                channel: 4,
+                kind: InputKind::Line,
+                pair: Some(PairSide::Left),
+            },
+            InputSetup {
+                channel: 5,
+                kind: InputKind::Line,
+                pair: Some(PairSide::Right),
+            },
+            InputSetup {
+                channel: 6,
+                kind: InputKind::Digital,
+                pair: None,
+            },
+        ],
+        pairs: vec![Pair {
+            left: 4,
+            right: 5,
+            name: Some("Main".into()),
+        }],
+    }
 }
 
 pub(super) fn session() -> Session {
@@ -454,8 +485,10 @@ pub fn state() -> State {
         traces: vec![trace_meta(), spectrum_trace_meta()],
         generator: generator(),
         calibrations: vec![cal_entry(), electrical_cal_entry()],
+        line_calibrations: vec![line_cal_entry()],
         mics: vec![mic()],
-        inputs: inputs(),
+        inputs: inputs().inputs,
+        pairs: inputs().pairs,
         outputs: outputs(),
         spl_logs: vec![spl_log()],
         timing: timing(),

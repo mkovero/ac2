@@ -159,6 +159,8 @@ impl Control {
                 (Box::new(a), Some(g))
             }
             MeasKind::Spl { config } => {
+                // Checked at meas.create too; the input may have been redeclared since.
+                self.mic_input(config.input, "an SPL meter")?;
                 let (input, cal) = (idx(config.input)?, self.input_cal(rt, config.input));
                 let config = config.clone();
                 let leq = leq

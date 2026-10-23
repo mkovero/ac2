@@ -113,6 +113,25 @@ pub(super) fn cal_key() -> CalKey {
     }
 }
 
+pub(super) fn line_cal_key() -> LineCalKey {
+    LineCalKey {
+        device: DeviceId("hw:UMC1820".into()),
+        channel: 4,
+    }
+}
+
+pub(super) fn line_cal_entry() -> LineCalEntry {
+    LineCalEntry {
+        key: line_cal_key(),
+        line: LineCal {
+            v_fs: Volts(3.4615),
+            volts: Volts(1.2277),
+            measured: Dbfs(-9.0),
+            calibrated_at: WallNs(1_789_100_000_000_000_000),
+        },
+    }
+}
+
 pub(super) fn edit() -> TraceEdit {
     TraceEdit {
         name: "Main L before EQ".into(),

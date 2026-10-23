@@ -453,8 +453,12 @@ pub fn apply_change(s: &mut State, c: Change) {
         Change::Trace(p) => upsert(&mut s.traces, p, |t| t.id),
         Change::Generator(g) => s.generator = g,
         Change::Calibration(p) => upsert(&mut s.calibrations, p, |c| c.key.clone()),
+        Change::LineCalibration(p) => upsert(&mut s.line_calibrations, p, |c| c.key.clone()),
         Change::Mic(p) => upsert(&mut s.mics, p, |m| m.name.clone()),
-        Change::Inputs(i) => s.inputs = i.clone(),
+        Change::Inputs(i) => {
+            s.inputs = i.inputs.clone();
+            s.pairs = i.pairs.clone();
+        }
         Change::Outputs(o) => s.outputs = o.clone(),
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = t,

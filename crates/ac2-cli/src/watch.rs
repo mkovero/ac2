@@ -271,7 +271,7 @@ pub async fn spl(
                 s.inputs
                     .iter()
                     .find(|i| i.channel == input)
-                    .and_then(|i| i.mic.clone())
+                    .and_then(|i| i.kind.mic().map(str::to_owned))
             });
             // 1-based, as the operator typed it.
             let input_no = u32::from(input) + 1;

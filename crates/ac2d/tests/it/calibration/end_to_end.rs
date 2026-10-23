@@ -109,8 +109,11 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
         st.inputs,
         vec![InputSetup {
             channel: 1,
-            mic: Some("M30".into()),
-            curve: CurveChoice::NotChosen,
+            kind: InputKind::Mic {
+                mic: Some("M30".into()),
+                curve: CurveChoice::NotChosen,
+            },
+            pair: None,
         }],
         "calibrating binds the input's mic name"
     );
@@ -150,7 +153,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
         ("M30.frd", "M30", 5)
     );
     let st = state_until(&c, |s| {
-        s.inputs.first().is_some_and(|i| i.curve == label("M30"))
+        s.inputs.first().is_some_and(|i| i.curve() == label("M30"))
     })
     .await;
     assert_eq!(st.calibrations.len(), 1, "the calibration is kept");
@@ -279,9 +282,13 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
         .call(Command::SessionInputs {
             inputs: vec![InputSetup {
                 channel: 1,
-                mic: Some("ECM".into()),
-                curve: label("M30"),
+                kind: InputKind::Mic {
+                    mic: Some("ECM".into()),
+                    curve: label("M30"),
+                },
+                pair: None,
             }],
+            pairs: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -290,7 +297,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
         "{e:?}"
     );
     set_curve(&c, "ECM", CurveChoice::NotChosen).await;
-    let st = state_until(&c, |s| s.inputs[0].mic.as_deref() == Some("ECM")).await;
+    let st = state_until(&c, |s| s.inputs[0].mic() == Some("ECM")).await;
     assert!(matches!(
         ac2_proto::cal::state_input_use(&st, 1).curve,
         ac2_proto::cal::CurveUse::NoneStored { mic: "ECM" }
@@ -323,7 +330,7 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
     assert_eq!(st.calibrations[0].spl, cal);
     assert_eq!(st.mics.len(), 1);
     assert_eq!(st.mics[0].curves[0].points, 5);
-    assert_eq!(st.inputs[0].mic.as_deref(), Some("ECM"));
+    assert_eq!(st.inputs[0].mic(), Some("ECM"));
 
     // Library and sensitivity changes need no session. The curve first (the calibration
     // stays), then the sensitivity.
@@ -345,14 +352,12 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
             .await
             .unwrap_err()
     ));
-    let del = || Command::CalDelete { key: key.clone() };
+    let del = || Command::CalDelete {
+        key: CalRef::Spl(key.clone()),
+    };
     c.call(del()).await.unwrap();
     let st = state_until(&c, |s| s.calibrations.is_empty()).await;
-    assert_eq!(
-        st.inputs[0].mic.as_deref(),
-        Some("ECM"),
-        "input setup untouched"
-    );
+    assert_eq!(st.inputs[0].mic(), Some("ECM"), "input setup untouched");
     assert!(missing(c.call(del()).await.unwrap_err()));
     drop(c);
     tokio::task::spawn_blocking(move || h.shutdown())

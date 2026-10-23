@@ -237,6 +237,7 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
         Request::OpenSession {
             config,
             inputs,
+            pairs,
             what,
         } => {
             let (c, o) = (client.clone(), out.clone());
@@ -252,7 +253,7 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                     }
                 }
                 if !inputs.is_empty()
-                    && let Err(e) = c.call(Command::SessionInputs { inputs }).await
+                    && let Err(e) = c.call(Command::SessionInputs { inputs, pairs }).await
                 {
                     o.send(ConnEvent::Reply {
                         what: format!("{what}, but the mic names were not set"),
@@ -758,6 +759,8 @@ pub(super) async fn preview_task(
                     .call(Command::SessionPreview {
                         backend,
                         device: device.clone(),
+                        inputs: Vec::new(),
+                        pairs: Vec::new(),
                     })
                     .await
                     .and_then(|r| expect_body!("session.preview", r, ReplyBody::Preview(p) => p))

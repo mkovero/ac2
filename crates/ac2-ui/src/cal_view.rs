@@ -38,7 +38,7 @@ pub fn lines(s: &State) -> Vec<CalLine> {
     let mut inputs: Vec<u16> = s
         .inputs
         .iter()
-        .filter(|i| i.mic.is_some())
+        .filter(|i| i.mic().is_some())
         .map(|i| i.channel)
         .collect();
     if let Some(o) = &s.session.open {
@@ -174,13 +174,14 @@ impl CalView {
             return None;
         };
         let mut row = cal::input_setup(&s.inputs, c);
-        let Some(mic) = row.mic.clone() else {
+        let Some(mic) = row.mic().map(str::to_owned) else {
             self.notice = Some(ac2_scene::cal_notice::no_mic_for_curve(c));
             return None;
         };
         cal::settle(&mut row, &s.mics);
-        row.curve = cal::step(&row.curve, cal::mic(&s.mics, &mic), forward);
-        let label = match &row.curve {
+        row.set_curve(cal::step(&row.curve(), cal::mic(&s.mics, &mic), forward));
+        let choice = row.curve();
+        let label = match &choice {
             CurveChoice::Curve { label } => Some(label.as_str()),
             _ => None,
         };
@@ -197,7 +198,10 @@ impl CalView {
         };
         self.edit = Some(CalEdit {
             kind: EditKind::MicName(c),
-            text: cal::input_setup(&s.inputs, c).mic.unwrap_or_default(),
+            text: cal::input_setup(&s.inputs, c)
+                .mic()
+                .unwrap_or_default()
+                .to_owned(),
         });
         true
     }
@@ -206,7 +210,10 @@ impl CalView {
     pub fn start_import(&mut self, s: &State) -> bool {
         self.clear();
         let (mic, input) = match self.focused(s) {
-            Some(CalLine::Input(c)) => (cal::input_setup(&s.inputs, c).mic, Some(c)),
+            Some(CalLine::Input(c)) => (
+                cal::input_setup(&s.inputs, c).mic().map(str::to_owned),
+                Some(c),
+            ),
             Some(CalLine::Curve(id)) => (Some(id.mic), None),
             Some(CalLine::Sensitivity(k)) => (Some(k.mic), None),
             None => (None, None),
@@ -270,7 +277,7 @@ impl CalView {
             self.notice = Some(ac2_scene::cal_notice::not_captured(c));
             return false;
         }
-        let Some(mic) = cal::input_setup(&s.inputs, c).mic else {
+        let Some(mic) = cal::input_setup(&s.inputs, c).mic().map(str::to_owned) else {
             self.notice = Some(ac2_scene::cal_notice::no_mic_for_electrical(c));
             return false;
         };
@@ -374,11 +381,8 @@ impl CalView {
                 {
                     Err(err)
                 } else {
-                    if row.mic != mic {
-                        row.mic = mic;
-                        row.curve = CurveChoice::NotChosen;
-                    }
-                    let what = match &row.mic {
+                    row.set_mic(mic);
+                    let what = match row.mic() {
                         Some(m) => format!("input {}: mic {m}", input_no(*c)),
                         None => format!("input {}: mic name cleared", input_no(*c)),
                     };
@@ -483,8 +487,8 @@ pub fn line_texts(
                     .inputs
                     .iter()
                     .filter(|i| {
-                        i.mic.as_deref() == Some(id.mic.as_str())
-                            && i.curve
+                        i.mic() == Some(id.mic.as_str())
+                            && i.curve()
                                 == (CurveChoice::Curve {
                                     label: id.label.clone(),
                                 })

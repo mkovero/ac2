@@ -21,9 +21,10 @@
 
 use std::collections::BTreeMap;
 
+use ac2_proto::cal::MAX_MIC_NAME;
 use ac2_proto::model::{
     Availability, BackendInfo, BackendKind, ClockRelation, CurveChoice, DeviceId, DeviceInfo,
-    DeviceSelector, InputSetup, LoopbackDetection, LoopbackRoute, MAX_OUTPUT_LABEL, Mic,
+    DeviceSelector, InputKind, InputSetup, LoopbackDetection, LoopbackRoute, MAX_OUTPUT_LABEL, Mic,
     OpenSession, OutputSetup, SessionConfig,
 };
 use ac2_proto::units::Dbfs;
@@ -39,9 +40,6 @@ mod edit;
 mod plan;
 
 pub use detect::REFERENCE_HELP;
-
-/// Longest mic name the daemon accepts.
-pub const MAX_MIC_NAME: usize = 64;
 
 /// What an input is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

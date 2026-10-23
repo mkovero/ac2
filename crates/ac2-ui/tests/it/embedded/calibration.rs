@@ -86,7 +86,7 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     let curve_of = |s: &AppState| {
         s.daemon()
             .and_then(|x| x.inputs.iter().find(|i| i.channel == 1))
-            .map(|i| i.curve.clone())
+            .map(|i| i.curve())
     };
     let label = |l: &str| CurveChoice::Curve { label: l.into() };
     d.until("0° imported and chosen (the mic's only curve)", |s| {
@@ -233,7 +233,7 @@ fn slow_electrical_calibration_from_the_app() -> R {
         s.daemon().is_some_and(|x| {
             x.inputs
                 .iter()
-                .any(|i| i.channel == 1 && i.mic.as_deref() == Some("MM1 34804"))
+                .any(|i| i.channel == 1 && i.mic() == Some("MM1 34804"))
         })
     })?;
     d.key("I");
@@ -472,7 +472,7 @@ fn slow_acoustic_calibration_from_the_app() -> R {
         s.daemon().is_some_and(|x| {
             x.inputs
                 .iter()
-                .any(|i| i.channel == 1 && i.mic.as_deref() == Some("MM1 34804"))
+                .any(|i| i.channel == 1 && i.mic() == Some("MM1 34804"))
                 && x.calibrations.iter().any(|e| {
                     e.key.channel == 1
                         && e.key.mic == "MM1 34804"

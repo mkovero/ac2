@@ -282,13 +282,19 @@ fn session_dialog_opens_a_session_from_roles() {
         &[
             InputSetup {
                 channel: 0,
-                mic: None,
-                curve: CurveChoice::NotChosen,
+                kind: InputKind::Mic {
+                    mic: None,
+                    curve: CurveChoice::NotChosen,
+                },
+                pair: None,
             },
             InputSetup {
                 channel: 1,
-                mic: Some("M30 FOH".into()),
-                curve: CurveChoice::NotChosen,
+                kind: InputKind::Mic {
+                    mic: Some("M30 FOH".into()),
+                    curve: CurveChoice::NotChosen,
+                },
+                pair: None,
             },
         ]
     );
@@ -400,8 +406,8 @@ fn mic_names_must_differ_and_the_mouse_assigns_roles() {
     let (config, inputs) = opened(&r).expect("open");
     assert_eq!(config.loopback.map(|l| l.input), Some(2));
     assert_eq!(config.input_channels, vec![0, 1, 2]);
-    assert_eq!(inputs[1].mic.as_deref(), Some("ECM"));
-    assert_eq!(inputs[2].mic, None);
+    assert_eq!(inputs[1].mic(), Some("ECM"));
+    assert_eq!(inputs[2].mic(), None);
     // Cancel closes without touching the stimulus (Esc would stop it).
     t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
     t.st.stimulus.phase = StimPhase::Armed;

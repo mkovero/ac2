@@ -148,11 +148,27 @@ def tf_frame():
 
 CAL_AT = 1_789_000_000_000_000_000
 
-INPUTS = [
-    {"channel": 1, "mic": "M30 #1234", "curve": {"type": "curve", "label": "0°"}},
-    {"channel": 2, "mic": None, "curve": {"type": "not_chosen"}},
-    {"channel": 3, "mic": "ECM", "curve": {"type": "off"}},
+def mic(name, curve):
+    return {"kind": "mic", "mic": name, "curve": curve}
+
+
+INPUTS = {
+    "inputs": [
+        {"channel": 1, "kind": mic("M30 #1234", {"type": "curve", "label": "0°"}), "pair": None},
+        {"channel": 2, "kind": mic(None, {"type": "not_chosen"}), "pair": None},
+        {"channel": 3, "kind": mic("ECM", {"type": "off"}), "pair": None},
+        {"channel": 4, "kind": {"kind": "line"}, "pair": "left"},
+        {"channel": 5, "kind": {"kind": "line"}, "pair": "right"},
+        {"channel": 6, "kind": {"kind": "digital"}, "pair": None},
+    ],
+    "pairs": [{"left": 4, "right": 5, "name": "Main"}],
+}
+
+PREVIEW_INPUTS = [
+    {"channel": 0, "kind": {"kind": "line"}},
+    {"channel": 1, "kind": {"kind": "line"}},
 ]
+PREVIEW_PAIRS = [{"left": 0, "right": 1, "name": None}]
 
 
 def frames():
@@ -415,7 +431,13 @@ def frames():
             "session/preview",
             "preview_levels",
             None,
-            {"backend": "jack", "device": "jack", "channels": [0, 1]},
+            {
+                "backend": "jack",
+                "device": "jack",
+                "channels": [0, 1],
+                "inputs": PREVIEW_INPUTS,
+                "pairs": PREVIEW_PAIRS,
+            },
             [
                 (arr("peak", "dbfs"), [-12.0, -40.5]),
                 (arr("rms", "dbfs"), [-20.0, -52.25]),

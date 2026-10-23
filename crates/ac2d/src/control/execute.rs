@@ -40,7 +40,12 @@ impl Control {
                 }))
             }
             Command::SessionDevices => Ok(ReplyBody::Backends(self.backend_infos())),
-            Command::SessionPreview { backend, device } => self.session_preview(backend, device),
+            Command::SessionPreview {
+                backend,
+                device,
+                inputs,
+                pairs,
+            } => self.session_preview(backend, device, inputs, pairs),
             Command::SessionPreviewStop => {
                 self.close_preview();
                 ack(self.store.rev())
@@ -115,6 +120,7 @@ impl Control {
 
             Command::MeasCreate { config } => {
                 validate_meas(&config)?;
+                self.spl_needs_mic(&config)?;
                 self.check_meas_owner(None, &config.kind)?;
                 let grid = self.grid_of(None, &config.kind)?;
                 let id = MeasId(self.next_meas);
@@ -148,6 +154,7 @@ impl Control {
             }
             Command::MeasUpdate { meas, base, config } => {
                 validate_meas(&config)?;
+                self.spl_needs_mic(&config)?;
                 let mut m = self.meas(meas)?.clone();
                 if base != m.config_rev {
                     return Err(stale_meas(meas, m.config_rev));
@@ -445,8 +452,13 @@ impl Control {
             Command::CalCurveRename { curve, label } => self.cal_curve_rename(curve, label),
             Command::CalCurveDelete { curve } => self.cal_curve_delete(curve),
             Command::CalList => self.cal_list(),
+            Command::CalLine {
+                channel,
+                volts,
+                read_dbfs,
+            } => self.cal_line(channel, volts, read_dbfs),
             Command::CalDelete { key } => self.cal_delete(&key),
-            Command::SessionInputs { inputs } => self.session_inputs(inputs),
+            Command::SessionInputs { inputs, pairs } => self.session_inputs(inputs, pairs),
 
             Command::SplLogGet {
                 meas,

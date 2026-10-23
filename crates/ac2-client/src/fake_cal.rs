@@ -16,6 +16,7 @@ impl Shared {
                 calibrator_level,
                 calibrator_freq,
             } => {
+                self.mic_input(input, "a sensitivity calibration")?;
                 let key = fake_cal_key(input, &mic)?;
                 let e = CalEntry {
                     spl: SplCal {
@@ -45,6 +46,7 @@ impl Shared {
             } => {
                 use ac2_proto::cal;
                 use ac2_proto::model::{CalMethod, SensitivitySource};
+                self.mic_input(input, "a sensitivity calibration")?;
                 let key = fake_cal_key(input, &mic)?;
                 let (s, from) = match mic_sensitivity {
                     Some(s) => (s, SensitivitySource::Typed),
@@ -127,8 +129,14 @@ impl Shared {
                 };
                 let mut all = self.state.inputs.clone();
                 for r in &mut all {
-                    if r.mic.as_deref() == Some(curve.mic.as_str()) && r.curve == old {
-                        r.curve = CurveChoice::Curve {
+                    if let InputKind::Mic {
+                        mic: Some(m),
+                        curve: choice,
+                    } = &mut r.kind
+                        && *m == curve.mic
+                        && *choice == old
+                    {
+                        *choice = CurveChoice::Curve {
                             label: label.clone(),
                         };
                     }
@@ -155,48 +163,129 @@ impl Shared {
                 let rev = self.set_inputs(all).unwrap_or(rev);
                 ReplyBody::Ack { rev }
             }
+            C::CalLine {
+                channel,
+                volts,
+                read_dbfs,
+            } => {
+                use ac2_proto::cal;
+                let kind = cal::input_kind(&self.state.inputs, channel);
+                if kind != InputKind::Line {
+                    return Err(err(
+                        ErrorCode::Invalid,
+                        format!(
+                            "input {} is a {}; a line calibration is for a line input",
+                            channel + 1,
+                            kind.word()
+                        ),
+                    ));
+                }
+                if !(volts.0.is_finite() && (1e-3..=100.0).contains(&volts.0)) {
+                    return Err(err(ErrorCode::Invalid, "measured voltage out of range"));
+                }
+                if !(read_dbfs.0.is_finite()
+                    && (cal::ELECTRICAL_MIN_DBFS..=cal::ELECTRICAL_MAX_DBFS).contains(&read_dbfs.0))
+                {
+                    return Err(err(ErrorCode::Invalid, "level read out of range"));
+                }
+                let v_fs = cal::full_scale_volts(volts.0, read_dbfs.0);
+                let (lo, hi) = cal::LINE_DBU_FS_RANGE;
+                if !(lo..=hi).contains(&cal::dbu_fs(v_fs).0) {
+                    return Err(err(ErrorCode::Invalid, "full scale outside +4 … +30 dBu"));
+                }
+                let e = LineCalEntry {
+                    key: LineCalKey {
+                        device: DeviceId("fake:loop".into()),
+                        channel,
+                    },
+                    line: LineCal {
+                        v_fs: Volts(v_fs),
+                        volts,
+                        measured: read_dbfs,
+                        calibrated_at: WallNs(1_790_000_000_000_000_000),
+                    },
+                };
+                self.commit(Change::LineCalibration(Patch::Set(e.clone())));
+                ReplyBody::LineCalibration(e)
+            }
             C::CalList => ReplyBody::Calibrations {
                 calibrations: self.state.calibrations.clone(),
+                line_calibrations: self.state.line_calibrations.clone(),
                 mics: self.state.mics.clone(),
             },
             C::CalDelete { key } => {
-                if !self.state.calibrations.iter().any(|e| e.key == key) {
-                    return Err(err(ErrorCode::NotFound, "no such calibration"));
-                }
-                let rev = self.commit(Change::Calibration(Patch::Deleted(key)));
+                let rev = match key {
+                    CalRef::Spl(key) => {
+                        if !self.state.calibrations.iter().any(|e| e.key == key) {
+                            return Err(err(ErrorCode::NotFound, "no such calibration"));
+                        }
+                        self.commit(Change::Calibration(Patch::Deleted(key)))
+                    }
+                    CalRef::Line(key) => {
+                        if !self.state.line_calibrations.iter().any(|e| e.key == key) {
+                            return Err(err(ErrorCode::NotFound, "no such line calibration"));
+                        }
+                        self.commit(Change::LineCalibration(Patch::Deleted(key)))
+                    }
+                };
                 ReplyBody::Ack { rev }
             }
             _ => unreachable!("not a cal command"),
         })
     }
 
+    /// A sensitivity calibration or a mic curve needs a microphone on the input, as the
+    /// daemon refuses it.
+    pub(super) fn mic_input(&self, channel: u16, what: &str) -> Result<(), ProtoError> {
+        let kind = ac2_proto::cal::input_kind(&self.state.inputs, channel);
+        if matches!(kind, InputKind::Mic { .. }) {
+            return Ok(());
+        }
+        Err(err(
+            ErrorCode::Invalid,
+            format!(
+                "input {} is a {}; {what} needs a microphone",
+                channel + 1,
+                kind.word()
+            ),
+        ))
+    }
+
     /// Calibrating binds the input's mic name, as the daemon does; a new mic starts with
     /// no curve chosen.
     fn set_mic(&mut self, channel: u16, mic: &str) {
         let mut all = self.state.inputs.clone();
-        match all.iter_mut().find(|i| i.channel == channel) {
-            Some(i) if i.mic.as_deref() == Some(mic) => {}
-            Some(i) => {
-                i.mic = Some(mic.to_owned());
-                i.curve = CurveChoice::NotChosen;
-            }
-            None => all.push(InputSetup {
-                channel,
+        let mut row = ac2_proto::cal::input_setup(&all, channel);
+        if row.kind.mic() != Some(mic) {
+            row.kind = InputKind::Mic {
                 mic: Some(mic.to_owned()),
                 curve: CurveChoice::NotChosen,
-            }),
+            };
         }
+        all.retain(|i| i.channel != channel);
+        all.push(row);
         self.set_inputs(all);
     }
 
     /// Commits the input setup (sorted, the only curve of a one-curve mic chosen where none
-    /// is, as the daemon does) when it changed.
-    pub(super) fn set_inputs(&mut self, mut all: Vec<InputSetup>) -> Option<Rev> {
+    /// is, as the daemon does) when it changed; the pairs stay.
+    pub(super) fn set_inputs(&mut self, all: Vec<InputSetup>) -> Option<Rev> {
+        let pairs = self.state.pairs.clone();
+        self.set_inputs_and_pairs(all, pairs)
+    }
+
+    /// Commits the input setup and the pairs as one change when either changed.
+    pub(super) fn set_inputs_and_pairs(
+        &mut self,
+        mut all: Vec<InputSetup>,
+        pairs: Vec<Pair>,
+    ) -> Option<Rev> {
         all.sort_by_key(|i| i.channel);
         for r in &mut all {
             ac2_proto::cal::settle(r, &self.state.mics);
         }
-        (all != self.state.inputs).then(|| self.commit(Change::Inputs(all)))
+        (all != self.state.inputs || pairs != self.state.pairs)
+            .then(|| self.commit(Change::Inputs(InputSetups { inputs: all, pairs })))
     }
 
     /// `cal.curve_import`, as the daemon (labels and stated sensitivity from the file).
@@ -258,8 +347,10 @@ impl Shared {
             self.set_mic(i, &mic);
             if m.curves.len() == 1 {
                 let mut all = self.state.inputs.clone();
-                if let Some(row) = all.iter_mut().find(|r| r.channel == i) {
-                    row.curve = CurveChoice::Curve { label };
+                if let Some(InputKind::Mic { curve, .. }) =
+                    all.iter_mut().find(|r| r.channel == i).map(|r| &mut r.kind)
+                {
+                    *curve = CurveChoice::Curve { label };
                 }
                 self.set_inputs(all);
             }

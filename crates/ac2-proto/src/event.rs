@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::{
-    Autosave, CalEntry, CalKey, Generator, InputSetup, Measurement, Mic, OutputSetup, RecordingRun,
-    Rig, Session, SplLog, State, SweepRun, TimingStatus, TraceMeta, WorkingSession,
+    Autosave, CalEntry, CalKey, Generator, InputSetups, LineCalEntry, LineCalKey, Measurement, Mic,
+    OutputSetup, RecordingRun, Rig, Session, SplLog, State, SweepRun, TimingStatus, TraceMeta,
+    WorkingSession,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId};
 
@@ -44,10 +45,13 @@ pub enum Change {
     Generator(Generator),
     /// A sensitivity calibration.
     Calibration(Patch<CalEntry, CalKey>),
+    /// A line calibration.
+    LineCalibration(Patch<LineCalEntry, LineCalKey>),
     /// A mic of the mic library, keyed by name.
     Mic(Patch<Mic, String>),
-    /// The whole input setup (mic names, active curves), sorted by channel.
-    Inputs(Vec<InputSetup>),
+    /// The whole input setup (kinds, mic names, active curves) and the pairs, sorted by
+    /// channel.
+    Inputs(InputSetups),
     /// Every output label of the rig, sorted by channel.
     Outputs(Vec<OutputSetup>),
     /// An SPL log.
@@ -115,6 +119,13 @@ pub enum WireEvent {
         /// Payload.
         payload: Patch<CalEntry, CalKey>,
     },
+    /// [`Change::LineCalibration`].
+    LineCalibration {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Patch<LineCalEntry, LineCalKey>,
+    },
     /// [`Change::Mic`].
     Mic {
         /// Rev.
@@ -127,7 +138,7 @@ pub enum WireEvent {
         /// Rev.
         rev: Rev,
         /// Payload.
-        payload: Vec<InputSetup>,
+        payload: InputSetups,
     },
     /// [`Change::Outputs`].
     Outputs {
@@ -196,6 +207,7 @@ impl From<Event> for WireEvent {
             Change::Trace(payload) => Self::Trace { rev, payload },
             Change::Generator(payload) => Self::Generator { rev, payload },
             Change::Calibration(payload) => Self::Calibration { rev, payload },
+            Change::LineCalibration(payload) => Self::LineCalibration { rev, payload },
             Change::Mic(payload) => Self::Mic { rev, payload },
             Change::Inputs(payload) => Self::Inputs { rev, payload },
             Change::Outputs(payload) => Self::Outputs { rev, payload },
@@ -218,6 +230,7 @@ impl From<WireEvent> for Event {
             WireEvent::Trace { rev, payload } => (rev, Change::Trace(payload)),
             WireEvent::Generator { rev, payload } => (rev, Change::Generator(payload)),
             WireEvent::Calibration { rev, payload } => (rev, Change::Calibration(payload)),
+            WireEvent::LineCalibration { rev, payload } => (rev, Change::LineCalibration(payload)),
             WireEvent::Mic { rev, payload } => (rev, Change::Mic(payload)),
             WireEvent::Inputs { rev, payload } => (rev, Change::Inputs(payload)),
             WireEvent::Outputs { rev, payload } => (rev, Change::Outputs(payload)),
@@ -242,6 +255,7 @@ impl Change {
             Self::Trace(_) => "trace",
             Self::Generator(_) => "generator",
             Self::Calibration(_) => "calibration",
+            Self::LineCalibration(_) => "line_calibration",
             Self::Mic(_) => "mic",
             Self::Inputs(_) => "inputs",
             Self::Outputs(_) => "outputs",

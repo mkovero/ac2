@@ -84,7 +84,7 @@ impl AppState {
             .input_channels
             .iter()
             .map(|&c| {
-                let mic = self.input_setup(c).mic;
+                let mic = self.input_setup(c).mic().map(str::to_owned);
                 let dev = device_names
                     .as_ref()
                     .and_then(|n| n.get(usize::from(c)).cloned());
@@ -244,7 +244,7 @@ impl AppState {
             .input_channels
             .iter()
             .map(|&c| {
-                let mic = self.input_setup(c).mic;
+                let mic = self.input_setup(c).mic().map(str::to_owned);
                 let dev = device_names
                     .as_ref()
                     .and_then(|n| n.get(usize::from(c)).cloned());

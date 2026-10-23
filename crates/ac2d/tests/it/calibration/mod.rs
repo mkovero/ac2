@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop, StimulusLease};
 use ac2_proto::frame::{FrameData, SpecFrame, SplMeta, TfFrame};
 use ac2_proto::model::{
-    BandFraction, CalBasis, CalKey, CalMethod, CalState, CalStatus, CurveChoice,
-    ElectricalConnection, GeneratorDesired, GeneratorSettings, InputSetup, LevelScale, MeasConfig,
-    MeasKind, Mic, MicCurveId, MicLoading, RtaConfig, SensitivitySource, Signal, SpecAveraging,
-    SpectrumConfig, State, TraceMeta, Weighting, Window,
+    BandFraction, CalBasis, CalKey, CalMethod, CalRef, CalState, CalStatus, CurveChoice,
+    ElectricalConnection, GeneratorDesired, GeneratorSettings, InputKind, InputSetup, LevelScale,
+    MeasConfig, MeasKind, Mic, MicCurveId, MicLoading, RtaConfig, SensitivitySource, Signal,
+    SpecAveraging, SpectrumConfig, State, TraceMeta, Weighting, Window,
 };
 use ac2_proto::units::{Blob, Db, DbSpl, Dbfs, Hz, MeasId, MvPerPa, Ohms, Seconds, Volts};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody, Stream, Subscription, Topic};
@@ -154,9 +154,13 @@ async fn set_curve(c: &Client, mic: &str, curve: CurveChoice) {
     c.call(Command::SessionInputs {
         inputs: vec![InputSetup {
             channel: 1,
-            mic: Some(mic.into()),
-            curve,
+            kind: InputKind::Mic {
+                mic: Some(mic.into()),
+                curve,
+            },
+            pair: None,
         }],
+        pairs: Vec::new(),
     })
     .await
     .unwrap();

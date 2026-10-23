@@ -379,7 +379,7 @@ impl AppState {
             }
             PromptKind::MicCurveInput => parse_input_curve(&text).and_then(|(channel, curve)| {
                 let mut row = self.input_setup(channel);
-                let Some(mic) = row.mic.clone() else {
+                let Some(mic) = row.mic().map(str::to_owned) else {
                     return Err(format!(
                         "input {} has no mic name: name it first (palette: Input setup…)",
                         u32::from(channel) + 1
@@ -396,11 +396,11 @@ impl AppState {
                         .map_or_else(|| "none".to_owned(), |m| ac2_scene::cal::labels(&m.curves));
                     return Err(format!("{mic} has no curve {label:?} (stored: {stored})"));
                 }
-                row.curve = curve;
+                row.set_curve(curve);
                 let what = curve_what(&row);
                 out.push(Request::Call {
                     what,
-                    cmd: Command::SessionInputs { inputs: vec![row] },
+                    cmd: self.inputs_cmd(vec![row]),
                 });
                 Ok(())
             }),
@@ -556,17 +556,14 @@ impl AppState {
                     .into_iter()
                     .map(|(channel, mic)| {
                         let mut row = self.input_setup(channel);
-                        if row.mic != mic {
-                            row.mic = mic;
-                            // Another capsule: its own curves, chosen again.
-                            row.curve = CurveChoice::NotChosen;
-                        }
+                        // Another capsule: its own curves, chosen again.
+                        row.set_mic(mic);
                         row
                     })
                     .collect();
                 out.push(Request::Call {
                     what: format!("input setup ({})", mics_text(&inputs)),
-                    cmd: Command::SessionInputs { inputs },
+                    cmd: self.inputs_cmd(inputs),
                 });
             }),
             PromptKind::Delay(id) => {

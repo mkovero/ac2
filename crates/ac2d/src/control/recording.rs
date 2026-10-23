@@ -257,7 +257,7 @@ impl Control {
                             .inputs
                             .iter()
                             .find(|i| i.channel == input)
-                            .and_then(|i| i.mic.clone()),
+                            .and_then(|i| i.kind.mic().map(str::to_owned)),
                         roles: roles(self, rt, input),
                     })
                     .collect(),
@@ -443,7 +443,7 @@ impl Control {
         let note = match change {
             Change::Measurement(p) => TimelineChange::Measurement(Box::new(p.clone())),
             Change::Generator(g) => TimelineChange::Generator(g.clone()),
-            Change::Inputs(i) => TimelineChange::Inputs(i.clone()),
+            Change::Inputs(i) => TimelineChange::Inputs(i.inputs.clone()),
             Change::Calibration(c) => TimelineChange::Calibration(c.clone()),
             _ => return,
         };

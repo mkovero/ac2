@@ -73,7 +73,10 @@ pub fn parse_level(t: &str) -> Result<DbSpl, String> {
 impl AcousticDialog {
     /// The dialog for `input`, the mic named on it (when it has one) prefilled.
     pub fn new(s: &State, input: u16) -> Self {
-        let mic = cal::input_setup(&s.inputs, input).mic.unwrap_or_default();
+        let mic = cal::input_setup(&s.inputs, input)
+            .mic()
+            .unwrap_or_default()
+            .to_owned();
         let replaces = s
             .session
             .open
@@ -247,14 +250,17 @@ pub fn key(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ac2_proto::model::InputSetup;
+    use ac2_proto::model::{InputKind, InputSetup};
 
     fn state(mic: Option<&str>) -> State {
         let mut s = ac2_proto::samples::state();
         s.inputs = vec![InputSetup {
             channel: 1,
-            mic: mic.map(str::to_owned),
-            curve: ac2_proto::model::CurveChoice::NotChosen,
+            kind: InputKind::Mic {
+                mic: mic.map(str::to_owned),
+                curve: ac2_proto::model::CurveChoice::NotChosen,
+            },
+            pair: None,
         }];
         s
     }

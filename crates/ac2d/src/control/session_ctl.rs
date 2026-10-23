@@ -302,6 +302,8 @@ impl Control {
         &mut self,
         kind: ac2_proto::model::BackendKind,
         device: ac2_proto::model::DeviceId,
+        inputs: Vec<ac2_proto::model::PreviewInput>,
+        pairs: Vec<ac2_proto::model::Pair>,
     ) -> Result<ReplyBody, ProtoError> {
         if self.detecting.is_some() {
             // The burst holds the device; a preview asked for before the detection started
@@ -311,9 +313,13 @@ impl Control {
                 "a loopback detection holds the device; the meters return with its result",
             ));
         }
+        // The declared kinds and pairs travel in every frame's meta, fixed when the stream
+        // opens: a changed declaration reopens the preview like another device would.
         if let Some(p) = &mut self.preview
             && p.backend == kind
             && p.device == device
+            && p.meta.inputs == inputs
+            && p.meta.pairs == pairs
         {
             match p.dead(Instant::now()) {
                 None => {
@@ -331,6 +337,8 @@ impl Control {
             &*backend,
             kind,
             device,
+            inputs,
+            pairs,
             self.s.max_level,
             self.env_at(self.epoch()),
         )?;

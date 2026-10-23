@@ -22,6 +22,8 @@ pub fn events() -> Vec<Event> {
         ev(47, Change::Generator(generator())),
         ev(48, Change::Calibration(Patch::Set(cal_entry()))),
         ev(49, Change::Calibration(Patch::Deleted(cal_key()))),
+        ev(73, Change::LineCalibration(Patch::Set(line_cal_entry()))),
+        ev(74, Change::LineCalibration(Patch::Deleted(line_cal_key()))),
         ev(50, Change::Inputs(inputs())),
         ev(51, Change::Mic(Patch::Set(mic()))),
         ev(52, Change::SplLog(Patch::Set(spl_log()))),

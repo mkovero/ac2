@@ -243,6 +243,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::TraceData(_) => "trace_data",
         ReplyBody::Export { .. } => "export",
         ReplyBody::Calibration(_) => "calibration",
+        ReplyBody::LineCalibration(_) => "line_calibration",
         ReplyBody::Mic(_) => "mic",
         ReplyBody::Calibrations { .. } => "calibrations",
         ReplyBody::Inputs(_) => "inputs",

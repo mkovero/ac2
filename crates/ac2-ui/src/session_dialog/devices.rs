@@ -342,7 +342,7 @@ impl SessionDialog {
             .setup
             .iter()
             .filter(|s| c.input_channels.contains(&s.channel))
-            .filter_map(|s| Some((s.channel, s.mic.clone()?)))
+            .filter_map(|s| Some((s.channel, s.mic()?.to_owned())))
             .collect();
         let reference = c.loopback.map(|l| l.input);
         Some(DeviceRoles {

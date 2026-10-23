@@ -15,6 +15,7 @@ mod discovery;
 mod drift;
 mod eq;
 mod file_jobs;
+mod inputs;
 mod jack;
 mod leq;
 mod math_channels;

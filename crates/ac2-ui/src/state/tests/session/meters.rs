@@ -35,6 +35,8 @@ fn input_meters_follow_the_dialog() {
                 backend: BackendKind::Fake,
                 device: DeviceId("fake:loop".into()),
                 channels: vec![0, 1, 2, 3],
+                inputs: vec![],
+                pairs: vec![],
             },
             peak: vec![-6.0, f32::NEG_INFINITY, -50.0, -50.0],
             rms: vec![-12.0, f32::NEG_INFINITY, -60.0, -60.0],
@@ -84,10 +86,13 @@ fn sidebar_meters_name_every_session_input_by_role() {
     }
     s.inputs = vec![InputSetup {
         channel: 1,
-        mic: Some("MM1 34804".into()),
-        curve: CurveChoice::Curve {
-            label: "90°".into(),
+        kind: InputKind::Mic {
+            mic: Some("MM1 34804".into()),
+            curve: CurveChoice::Curve {
+                label: "90°".into(),
+            },
         },
+        pair: None,
     }];
     s.mics = vec![mm1()];
     t.conn(mirror(s.clone()));

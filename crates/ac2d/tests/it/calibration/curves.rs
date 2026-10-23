@@ -54,7 +54,7 @@ async fn two_curves_of_one_mic_switched_on_an_input() {
     // The first import was the mic's only curve, so the input chose it; the second leaves
     // the choice alone.
     let st = state_until(&c, |s| s.mics.first().is_some_and(|m| m.curves.len() == 2)).await;
-    assert_eq!(st.inputs[0].curve, label("0°"));
+    assert_eq!(st.inputs[0].curve(), label("0°"));
 
     let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
     fire(&lease, Signal::Pink).await;

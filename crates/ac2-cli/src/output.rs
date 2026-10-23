@@ -609,8 +609,10 @@ pub fn inputs_json(s: &State) -> serde_json::Value {
             let u = ac2_proto::cal::state_input_use(s, ch);
             serde_json::json!({
                 "input": u32::from(ch) + 1,
-                "mic": row.mic,
-                "curve": row.curve,
+                "kind": row.kind,
+                "mic": row.kind.mic(),
+                "curve": row.kind.curve(),
+                "pair": row.pair,
                 "curve_text": ac2_scene::cal::curve_state(&u.curve),
                 "curve_applied": u.curve.applied(),
                 "sensitivity": u.sensitivity.entry(),

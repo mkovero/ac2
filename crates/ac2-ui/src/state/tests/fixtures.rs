@@ -220,8 +220,11 @@ pub(super) fn mm1_state(curve: CurveChoice) -> State {
     s.mics = vec![mm1()];
     s.inputs = vec![InputSetup {
         channel: 1,
-        mic: Some("MM1 34804".into()),
-        curve,
+        kind: InputKind::Mic {
+            mic: Some("MM1 34804".into()),
+            curve,
+        },
+        pair: None,
     }];
     s.calibrations = vec![CalEntry {
         key: CalKey {

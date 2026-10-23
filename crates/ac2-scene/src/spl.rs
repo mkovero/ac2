@@ -180,7 +180,8 @@ pub fn cal_text(
     let base = match cal {
         CalStatus::Uncalibrated => None,
         CalStatus::Verified { calibrated_at, .. }
-        | CalStatus::OtherMicOrInput { calibrated_at, .. } => {
+        | CalStatus::OtherMicOrInput { calibrated_at, .. }
+        | CalStatus::Line { calibrated_at, .. } => {
             crate::cal::status_text(cal, time::age_s(calibrated_at, client_now, offset))
         }
     }

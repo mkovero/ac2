@@ -48,7 +48,7 @@ fn spl_cal(
     match st
         .daemon()
         .and_then(|d| d.inputs.iter().find(|i| i.channel == input))
-        .and_then(|i| i.mic.as_deref())
+        .and_then(|i| i.mic())
     {
         Some(mic) => format!("{mic} · {cal}"),
         None => cal,

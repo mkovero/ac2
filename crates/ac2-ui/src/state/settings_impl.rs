@@ -574,7 +574,7 @@ impl AppState {
                         let what = super::curve_what(&row);
                         out.push(Request::Call {
                             what,
-                            cmd: Command::SessionInputs { inputs: vec![row] },
+                            cmd: self.inputs_cmd(vec![row]),
                         });
                     }
                 } else {

@@ -1,6 +1,6 @@
 [
  {
-  "v": 62,
+  "v": 63,
   "id": 0,
   "cmd": {
    "op": "hello",
@@ -11,7 +11,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 2,
   "cmd": {
    "op": "session.open",
@@ -43,7 +43,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 6,
   "cmd": {
    "op": "gen.set",
@@ -76,7 +76,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 9,
   "cmd": {
    "op": "gen.stop"
@@ -84,7 +84,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 10,
   "cmd": {
    "op": "meas.create",
@@ -118,7 +118,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 16,
   "cmd": {
    "op": "delay.find",
@@ -133,7 +133,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 17,
   "cmd": {
    "op": "delay.insert",
@@ -148,7 +148,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 26,
   "cmd": {
    "op": "trace.import",
@@ -177,7 +177,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 29,
   "cmd": {
    "op": "cal.curve_import",
@@ -194,7 +194,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 31,
   "cmd": {
    "op": "spl.log_get",
@@ -208,7 +208,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 32,
   "cmd": {
    "op": "sweep.run",
@@ -223,7 +223,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 39,
   "cmd": {
    "op": "session.inputs",
@@ -231,25 +231,65 @@
     "inputs": [
      {
       "channel": 1,
-      "mic": "M30 #1234",
-      "curve": {
-       "type": "curve",
-       "label": "0\u00b0"
-      }
+      "kind": {
+       "kind": "mic",
+       "mic": "M30 #1234",
+       "curve": {
+        "type": "curve",
+        "label": "0\u00b0"
+       }
+      },
+      "pair": null
      },
      {
       "channel": 2,
-      "mic": null,
-      "curve": {
-       "type": "not_chosen"
-      }
+      "kind": {
+       "kind": "mic",
+       "mic": null,
+       "curve": {
+        "type": "not_chosen"
+       }
+      },
+      "pair": null
      },
      {
       "channel": 3,
-      "mic": "ECM",
-      "curve": {
-       "type": "off"
-      }
+      "kind": {
+       "kind": "mic",
+       "mic": "ECM",
+       "curve": {
+        "type": "off"
+       }
+      },
+      "pair": null
+     },
+     {
+      "channel": 4,
+      "kind": {
+       "kind": "line"
+      },
+      "pair": "left"
+     },
+     {
+      "channel": 5,
+      "kind": {
+       "kind": "line"
+      },
+      "pair": "right"
+     },
+     {
+      "channel": 6,
+      "kind": {
+       "kind": "digital"
+      },
+      "pair": null
+     }
+    ],
+    "pairs": [
+     {
+      "left": 4,
+      "right": 5,
+      "name": "Main"
      }
     ]
    }
@@ -257,34 +297,55 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 40,
   "cmd": {
    "op": "cal.delete",
    "args": {
     "key": {
+     "type": "line",
      "device": "hw:UMC1820",
-     "channel": 1,
-     "mic": "M30 #1234"
+     "channel": 4
     }
    }
   },
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 41,
   "cmd": {
    "op": "session.preview",
    "args": {
     "backend": "jack",
-    "device": "jack"
+    "device": "jack",
+    "inputs": [
+     {
+      "channel": 0,
+      "kind": {
+       "kind": "line"
+      }
+     },
+     {
+      "channel": 1,
+      "kind": {
+       "kind": "line"
+      }
+     }
+    ],
+    "pairs": [
+     {
+      "left": 0,
+      "right": 1,
+      "name": null
+     }
+    ]
    }
   },
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 42,
   "cmd": {
    "op": "session.preview_stop"
@@ -292,7 +353,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 43,
   "cmd": {
    "op": "session.detect_loopback",
@@ -310,7 +371,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 44,
   "cmd": {
    "op": "trace.mic_curve",
@@ -325,7 +386,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 46,
   "cmd": {
    "op": "cal.curve_delete",
@@ -339,7 +400,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 47,
   "cmd": {
    "op": "spl.log_new",
@@ -350,7 +411,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 48,
   "cmd": {
    "op": "cal.spl_electrical",
@@ -372,7 +433,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 49,
   "cmd": {
    "op": "spl.history_get",
@@ -389,7 +450,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 50,
   "cmd": {
    "op": "delay.nudge",
@@ -401,7 +462,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 51,
   "cmd": {
    "op": "rec.start",
@@ -420,7 +481,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 53,
   "cmd": {
    "op": "rec.list"
@@ -428,7 +489,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 54,
   "cmd": {
    "op": "session.replay",
@@ -443,7 +504,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 55,
   "cmd": {
    "op": "gen.ceiling",
@@ -455,7 +516,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 56,
   "cmd": {
    "op": "session.outputs",
@@ -475,7 +536,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 57,
   "cmd": {
    "op": "server.info"
@@ -483,7 +544,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 59,
   "cmd": {
    "op": "server.revoke",
@@ -494,7 +555,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 60,
   "cmd": {
    "op": "spl.band_transfer",
@@ -546,7 +607,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 61,
   "cmd": {
    "op": "spl.band_log_get",
@@ -560,7 +621,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 62,
   "cmd": {
    "op": "meas.colour",
@@ -575,7 +636,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 63,
   "cmd": {
    "op": "file.new",
@@ -586,7 +647,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 67,
   "cmd": {
    "op": "file.upload_chunk",
@@ -601,7 +662,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 71,
   "cmd": {
    "op": "file.download_end",
@@ -613,7 +674,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 73,
   "cmd": {
    "op": "session.control_panel",
@@ -625,7 +686,7 @@
   "expect_rev": null
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 74,
   "cmd": {
    "op": "osc.target",
@@ -637,7 +698,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 75,
   "cmd": {
    "op": "osc.test",
@@ -657,7 +718,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 76,
   "cmd": {
    "op": "rig.monitor_start",
@@ -669,7 +730,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 77,
   "cmd": {
    "op": "artnet.target",
@@ -684,7 +745,7 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 78,
   "cmd": {
    "op": "artnet.test",
@@ -704,13 +765,26 @@
   "expect_rev": 41
  },
  {
-  "v": 62,
+  "v": 63,
   "id": 79,
   "cmd": {
    "op": "artnet.fade",
    "args": {
     "base": 38,
     "seconds": 2.5
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 63,
+  "id": 82,
+  "cmd": {
+   "op": "cal.line",
+   "args": {
+    "channel": 4,
+    "volts": 1.2277,
+    "read_dbfs": -9.0
    }
   },
   "expect_rev": 41

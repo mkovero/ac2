@@ -151,7 +151,7 @@ fn own_client_id_follows_the_daemon_incarnation() {
 fn inputs_call(r: &[Request]) -> Option<Vec<InputSetup>> {
     r.iter().find_map(|r| match r {
         Request::Call {
-            cmd: Command::SessionInputs { inputs },
+            cmd: Command::SessionInputs { inputs, .. },
             ..
         } => Some(inputs.clone()),
         _ => None,
@@ -164,8 +164,11 @@ fn input_mics_prompt_sets_the_input_setup() {
     let mut s = daemon_state();
     s.inputs = vec![InputSetup {
         channel: 1,
-        mic: Some("M30".into()),
-        curve: CurveChoice::Off,
+        kind: InputKind::Mic {
+            mic: Some("M30".into()),
+            curve: CurveChoice::Off,
+        },
+        pair: None,
     }];
     t.conn(mirror(s));
     let r = t.st.update(Msg::Command(CommandId::InputMics), &t.keys);
@@ -188,13 +191,19 @@ fn input_mics_prompt_sets_the_input_setup() {
             // Another mic (here none): the old choice is dropped.
             InputSetup {
                 channel: 1,
-                mic: None,
-                curve: CurveChoice::NotChosen,
+                kind: InputKind::Mic {
+                    mic: None,
+                    curve: CurveChoice::NotChosen,
+                },
+                pair: None,
             },
             InputSetup {
                 channel: 2,
-                mic: Some("ECM 8000".into()),
-                curve: CurveChoice::NotChosen,
+                kind: InputKind::Mic {
+                    mic: Some("ECM 8000".into()),
+                    curve: CurveChoice::NotChosen,
+                },
+                pair: None,
             },
         ]),
         "{r:?}"
@@ -222,8 +231,11 @@ fn mic_curve_steps_through_the_selected_measurements_input() {
     s.mics = vec![mm1()];
     let row = |curve: CurveChoice| InputSetup {
         channel: 1,
-        mic: Some("MM1 34804".into()),
-        curve,
+        kind: InputKind::Mic {
+            mic: Some("MM1 34804".into()),
+            curve,
+        },
+        pair: None,
     };
     let label = |l: &str| CurveChoice::Curve { label: l.into() };
     // off → 0° → 90° → off, each from what the daemon holds.
@@ -256,13 +268,19 @@ fn mic_text_round_trips() {
     let rows = vec![
         InputSetup {
             channel: 0,
-            mic: Some("M30 #1".into()),
-            curve: CurveChoice::NotChosen,
+            kind: InputKind::Mic {
+                mic: Some("M30 #1".into()),
+                curve: CurveChoice::NotChosen,
+            },
+            pair: None,
         },
         InputSetup {
             channel: 3,
-            mic: Some("ECM".into()),
-            curve: CurveChoice::Off,
+            kind: InputKind::Mic {
+                mic: Some("ECM".into()),
+                curve: CurveChoice::Off,
+            },
+            pair: None,
         },
     ];
     assert_eq!(mics_text(&rows), "1=M30 #1, 4=ECM");
@@ -355,7 +373,9 @@ fn outputs_never_change_under_a_held_stimulus() {
 fn cal_delete(r: &[Request]) -> Option<CalKey> {
     r.iter().find_map(|r| match r {
         Request::Call {
-            cmd: Command::CalDelete { key },
+            cmd: Command::CalDelete {
+                key: CalRef::Spl(key),
+            },
             ..
         } => Some(key.clone()),
         _ => None,
@@ -368,8 +388,11 @@ fn calibrations_are_deleted_from_the_palette() {
     let mut s = daemon_state();
     s.inputs = vec![InputSetup {
         channel: 1,
-        mic: Some("M30".into()),
-        curve: CurveChoice::NotChosen,
+        kind: InputKind::Mic {
+            mic: Some("M30".into()),
+            curve: CurveChoice::NotChosen,
+        },
+        pair: None,
     }];
     t.conn(mirror(s));
     // Prefilled with the selected measurement's input and its mic.
@@ -522,8 +545,11 @@ fn input_setup_view_steps_curves_and_manages_the_library() {
     // → / ←: one request each, the next / previous curve (off after the last).
     let row = |curve: CurveChoice| InputSetup {
         channel: 1,
-        mic: Some("MM1 34804".into()),
-        curve,
+        kind: InputKind::Mic {
+            mic: Some("MM1 34804".into()),
+            curve,
+        },
+        pair: None,
     };
     let r = t.key("ArrowRight");
     assert_eq!(inputs_call(&r), Some(vec![row(label("90°"))]));
@@ -557,8 +583,11 @@ fn input_setup_view_steps_curves_and_manages_the_library() {
         inputs_call(&r),
         Some(vec![InputSetup {
             channel: 1,
-            mic: Some("ECM 8000".into()),
-            curve: CurveChoice::NotChosen,
+            kind: InputKind::Mic {
+                mic: Some("ECM 8000".into()),
+                curve: CurveChoice::NotChosen,
+            },
+            pair: None,
         }])
     );
 
@@ -604,7 +633,7 @@ fn input_setup_view_steps_curves_and_manages_the_library() {
     let r = t.st.update(Msg::Backspace, &t.keys);
     assert!(matches!(
         calls(&r).as_slice(),
-        [Command::CalDelete { key }] if key.mic == "MM1 34804" && key.channel == 1
+        [Command::CalDelete { key: CalRef::Spl(key) }] if key.mic == "MM1 34804" && key.channel == 1
     ));
     // ←/→ off an input line explain themselves instead of acting.
     let r = t.key("ArrowRight");
@@ -748,10 +777,13 @@ fn session_dialog_steps_the_mic_curve_of_a_named_mic() {
         inputs_call(&r),
         Some(vec![InputSetup {
             channel: 1,
-            mic: Some("MM1 34804".into()),
-            curve: CurveChoice::Curve {
-                label: "90°".into()
+            kind: InputKind::Mic {
+                mic: Some("MM1 34804".into()),
+                curve: CurveChoice::Curve {
+                    label: "90°".into()
+                },
             },
+            pair: None,
         }])
     );
     assert_eq!(

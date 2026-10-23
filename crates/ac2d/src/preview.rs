@@ -18,8 +18,11 @@ use std::time::{Duration, Instant};
 use ac2_audio::{Backend, DeviceSelector, DuplexRequest, MaxLevel, OutputSource};
 use ac2_proto::ErrorCode;
 use ac2_proto::ProtoError;
+use ac2_proto::cal;
 use ac2_proto::frame::{FrameData, PreviewLevelsFrame, PreviewLevelsMeta};
-use ac2_proto::model::{BackendKind, DeviceId, Preview as WirePreview};
+use ac2_proto::model::{
+    BackendKind, DeviceId, InputSetup, Pair, Preview as WirePreview, PreviewInput,
+};
 use ac2_proto::topic::Topic;
 use ac2_proto::units::Rev;
 
@@ -46,6 +49,8 @@ pub(crate) struct Preview {
     pub(crate) backend: BackendKind,
     pub(crate) device: DeviceId,
     pub(crate) channels: u16,
+    /// What every frame says about the device and its declared inputs.
+    pub(crate) meta: PreviewLevelsMeta,
     pub(crate) sample_rate: u32,
     pub(crate) deadline: Instant,
     opened: Instant,
@@ -63,6 +68,8 @@ impl Preview {
         backend: &dyn Backend,
         kind: BackendKind,
         device: DeviceId,
+        declared: Vec<PreviewInput>,
+        pairs: Vec<Pair>,
         max_level: MaxLevel,
         env: JobEnv,
     ) -> Result<Self, ProtoError> {
@@ -109,11 +116,37 @@ impl Preview {
         let last_block_ms = Arc::new(AtomicU64::new(NEVER));
         let ended_flag = Arc::new(AtomicBool::new(false));
         let (lb, ef) = (Arc::clone(&last_block_ms), Arc::clone(&ended_flag));
+        // The declaration follows the rules of `session.inputs`, over the device's inputs.
+        let rows: Vec<InputSetup> = declared
+            .iter()
+            .map(|d| InputSetup {
+                channel: d.channel,
+                kind: d.kind.clone(),
+                pair: None,
+            })
+            .collect();
+        for (i, r) in rows.iter().enumerate() {
+            if rows[..i].iter().any(|o| o.channel == r.channel) {
+                let _ = stream.stop(STOP_TIMEOUT);
+                return Err(perr(
+                    ErrorCode::Invalid,
+                    format!("input {} listed twice", u32::from(r.channel) + 1),
+                ));
+            }
+        }
+        let captured = |ch: u16| ch < channels;
+        if let Err(e) = cal::check_pairs(&rows, &pairs, Some(&captured)) {
+            let _ = stream.stop(STOP_TIMEOUT);
+            return Err(perr(ErrorCode::Invalid, e));
+        }
         let meta = PreviewLevelsMeta {
             backend: kind,
             device: device.clone(),
             channels: (0..channels).collect(),
+            inputs: declared,
+            pairs,
         };
+        let frame_meta = meta.clone();
         let thread = std::thread::Builder::new()
             .name("ac2d-preview".into())
             .spawn(move || {
@@ -127,7 +160,7 @@ impl Preview {
                 };
                 let mut levels = LevelsMeter::new(
                     (0..usize::from(channels)).collect(),
-                    meta.channels.clone(),
+                    frame_meta.channels.clone(),
                     sample_rate,
                 );
                 let mut wall = 0;
@@ -153,7 +186,7 @@ impl Preview {
                         em.send(
                             stamp,
                             FrameData::PreviewLevels(PreviewLevelsFrame {
-                                meta: meta.clone(),
+                                meta: frame_meta.clone(),
                                 peak,
                                 rms,
                                 clip,
@@ -185,6 +218,7 @@ impl Preview {
             backend: kind,
             device,
             channels,
+            meta,
             sample_rate,
             deadline: Instant::now() + PREVIEW_EXPIRY,
             opened,

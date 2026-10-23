@@ -4,8 +4,8 @@
 use ac2_client::{Client, expect_body};
 use ac2_proto::cal::input_setup;
 use ac2_proto::model::{
-    CalEntry, CalKey, DeviceId, ElectricalConnection, InputSetup, Mic, MicCurveId, MicLoading,
-    State,
+    CalEntry, CalKey, CalRef, CurveChoice, DeviceId, ElectricalConnection, InputKind, InputSetup,
+    LineCalEntry, Mic, MicCurveId, MicLoading, State,
 };
 use ac2_proto::units::Blob;
 use ac2_proto::{Command, ReplyBody};
@@ -25,7 +25,11 @@ fn mic_for(s: &State, input: u16, given: Option<&String>) -> Result<String, CliE
     if let Some(m) = given {
         return Ok(m.clone());
     }
-    input_setup(&s.inputs, input).mic.ok_or_else(|| {
+    input_setup(&s.inputs, input)
+        .kind
+        .mic()
+        .map(str::to_owned)
+        .ok_or_else(|| {
         CliError::Usage(format!(
             "input {} has no mic name: give --mic NAME (or set it with `ac2 session inputs --mic {}=NAME`)",
             u32::from(input) + 1,
@@ -54,16 +58,28 @@ pub(crate) async fn set_inputs(
     };
     for m in mics {
         edit(m.input.0, &mut |r| {
-            if r.mic != m.mic {
-                r.mic.clone_from(&m.mic);
-                r.curve = ac2_proto::model::CurveChoice::NotChosen;
+            if r.kind.mic() != m.mic.as_deref() {
+                r.kind = InputKind::Mic {
+                    mic: m.mic.clone(),
+                    curve: CurveChoice::NotChosen,
+                };
             }
         });
     }
     for c in curves {
-        edit(c.input.0, &mut |r| r.curve = c.curve.0.clone());
+        edit(c.input.0, &mut |r| {
+            r.kind = InputKind::Mic {
+                mic: r.kind.mic().map(str::to_owned),
+                curve: c.curve.0.clone(),
+            }
+        });
     }
-    let r = c.call(Command::SessionInputs { inputs: rows }).await?;
+    let r = c
+        .call(Command::SessionInputs {
+            inputs: rows,
+            pairs: s.pairs.clone(),
+        })
+        .await?;
     expect_body!("session.inputs", r, ReplyBody::Inputs(i) => i)?;
     state(c).await
 }
@@ -146,7 +162,7 @@ fn mic_text(m: &Mic, s: &State) -> String {
     let on: Vec<String> = s
         .inputs
         .iter()
-        .filter(|i| i.mic.as_deref() == Some(m.name.as_str()))
+        .filter(|i| i.kind.mic() == Some(m.name.as_str()))
         .map(|i| {
             let u = ac2_proto::cal::state_input_use(s, i.channel);
             format!(
@@ -245,7 +261,7 @@ async fn use_curve(
 ) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     let s = state(&c).await?;
-    if input_setup(&s.inputs, input.0).mic.is_none() {
+    if input_setup(&s.inputs, input.0).kind.mic().is_none() {
         return Err(CliError::Usage(format!(
             "input {input} has no mic name: set it first (`ac2 session inputs --mic {input}=NAME`)"
         )));
@@ -305,7 +321,11 @@ async fn rm(cli: &Cli, a: &CalRm, out: &mut Out<'_>) -> Result<(), CliError> {
         channel: a.input.0,
         mic,
     };
-    let r = c.call(Command::CalDelete { key: key.clone() }).await?;
+    let r = c
+        .call(Command::CalDelete {
+            key: CalRef::Spl(key.clone()),
+        })
+        .await?;
     let rev = expect_body!("cal.delete", r, ReplyBody::Ack { rev } => rev)?;
     out.emit(&json!({ "rev": rev, "key": key }), || {
         format!(
@@ -327,15 +347,18 @@ pub(crate) async fn run(cli: &Cli, cmd: &CalCmd, out: &mut Out<'_>) -> Result<()
         CalCmd::List => {
             let c = connect(cli, false).await?;
             let r = c.call(Command::CalList).await?;
-            let (l, mics): (Vec<CalEntry>, Vec<Mic>) = expect_body!(
+            let (l, lines, mics): (Vec<CalEntry>, Vec<LineCalEntry>, Vec<Mic>) = expect_body!(
                 "cal.list",
                 r,
-                ReplyBody::Calibrations { calibrations, mics } => (calibrations, mics)
+                ReplyBody::Calibrations { calibrations, line_calibrations, mics } => {
+                    (calibrations, line_calibrations, mics)
+                }
             )?;
             let s = state(&c).await?;
             out.emit(
                 &json!({
                     "calibrations": l,
+                    "line_calibrations": lines,
                     "mics": mics,
                     "inputs": output::inputs_json(&s),
                 }),

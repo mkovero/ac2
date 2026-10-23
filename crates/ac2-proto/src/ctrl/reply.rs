@@ -7,9 +7,9 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, StateSnapshot};
 use crate::grid::GridDef;
 use crate::model::{
-    BackendInfo, CalEntry, DelayFinding, Generator, InputSetup, Lease, LoopbackDetection,
-    Measurement, Mic, OutputSetup, Preview, RecordingFile, RecordingRun, ServerInfo, Session,
-    SessionFile, SplHistory, SplLogPage, SweepRun, TraceData, TraceMeta,
+    BackendInfo, CalEntry, DelayFinding, Generator, InputSetups, Lease, LineCalEntry,
+    LoopbackDetection, Measurement, Mic, OutputSetup, Preview, RecordingFile, RecordingRun,
+    ServerInfo, Session, SessionFile, SplHistory, SplLogPage, SweepRun, TraceData, TraceMeta,
 };
 use crate::units::{Blob, ClientId, DaemonIncarnation, RequestId, Rev, SessionEpoch};
 
@@ -80,15 +80,19 @@ pub enum ReplyBody {
     Calibration(CalEntry),
     /// `cal.curve_import`, `cal.curve_rename`: the mic with its curves.
     Mic(Mic),
+    /// `cal.line`.
+    LineCalibration(LineCalEntry),
     /// `cal.list`.
     Calibrations {
         /// Sensitivity calibrations.
         calibrations: Vec<CalEntry>,
+        /// Line calibrations.
+        line_calibrations: Vec<LineCalEntry>,
         /// Mic library.
         mics: Vec<Mic>,
     },
-    /// `session.inputs`: the whole input setup.
-    Inputs(Vec<InputSetup>),
+    /// `session.inputs`: the whole input setup and the pairs.
+    Inputs(InputSetups),
     /// `session.outputs`: every output label.
     Outputs(Vec<OutputSetup>),
     /// `server.info`, `server.authorize`, `server.revoke`.

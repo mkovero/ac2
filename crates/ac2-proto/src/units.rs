@@ -47,6 +47,10 @@ float_unit!(
     Volts
 );
 float_unit!(
+    /// Line level, dB re 0.7746 V RMS (1 mW into 600 Ω).
+    Dbu
+);
+float_unit!(
     /// Microphone sensitivity, millivolts per pascal (the unit data sheets state it in).
     MvPerPa
 );

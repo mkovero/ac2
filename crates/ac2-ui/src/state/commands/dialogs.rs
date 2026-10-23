@@ -227,7 +227,7 @@ impl AppState {
         match a {
             CalAction::Inputs(row, what) => out.push(Request::Call {
                 what,
-                cmd: Command::SessionInputs { inputs: vec![row] },
+                cmd: self.inputs_cmd(vec![row]),
             }),
             CalAction::Import { path, mic, input } => {
                 out.push(Request::ImportCurve { path, mic, input })
@@ -253,7 +253,9 @@ impl AppState {
                     key.mic,
                     u32::from(key.channel) + 1
                 ),
-                cmd: Command::CalDelete { key },
+                cmd: Command::CalDelete {
+                    key: ac2_proto::model::CalRef::Spl(key),
+                },
             }),
         }
     }
@@ -375,6 +377,7 @@ impl AppState {
         out.push(Request::OpenSession {
             config: plan.config,
             inputs: plan.inputs,
+            pairs: self.pairs(),
             what: format!("audio I/O open on {}", plan.device_name),
         });
         self.overlay = Overlay::None;

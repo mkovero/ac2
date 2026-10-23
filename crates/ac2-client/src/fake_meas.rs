@@ -7,10 +7,31 @@ use ac2_proto::{Change, Command, ErrorCode, GridDef, Patch, ProtoError, ReplyBod
 use super::{FakeFinding, Shared, conflict, err};
 
 impl Shared {
+    /// An SPL meter is acoustic by definition: the daemon refuses one on a line or digital
+    /// input by name when its job starts.
+    fn spl_needs_mic(&self, config: &MeasConfig) -> Result<(), ProtoError> {
+        let MeasKind::Spl { config } = &config.kind else {
+            return Ok(());
+        };
+        let kind = ac2_proto::cal::input_kind(&self.state.inputs, config.input);
+        if matches!(kind, InputKind::Mic { .. }) {
+            return Ok(());
+        }
+        Err(err(
+            ErrorCode::Invalid,
+            format!(
+                "input {} is a {}; an SPL meter needs a microphone",
+                config.input + 1,
+                kind.word()
+            ),
+        ))
+    }
+
     pub(super) fn meas_cmd(&mut self, cmd: Command) -> Result<ReplyBody, ProtoError> {
         use Command as C;
         Ok(match cmd {
             C::MeasCreate { config } => {
+                self.spl_needs_mic(&config)?;
                 let id = MeasId(self.next_id);
                 self.next_id += 1;
                 let (delay, grid_id) = match &config.kind {
@@ -157,6 +178,7 @@ impl Shared {
             }
             C::MeasStart { meas } => {
                 let mut m = self.meas(meas)?;
+                self.spl_needs_mic(&m.config)?;
                 m.running = true;
                 self.put_meas(m)
             }

@@ -209,23 +209,31 @@ impl SessionDialog {
     pub(super) fn setup_curve(&self, channel: u16, mic: &str) -> CurveChoice {
         self.setup
             .iter()
-            .find(|s| s.channel == channel && s.mic.as_deref() == Some(mic) && !mic.is_empty())
-            .map_or(CurveChoice::NotChosen, |s| s.curve.clone())
+            .find(|s| s.channel == channel && s.mic() == Some(mic) && !mic.is_empty())
+            .map_or(CurveChoice::NotChosen, InputSetup::curve)
     }
 
-    /// The input setup row `i` would send: its mic (a mic row's name) and curve.
+    /// The input setup row `i` would send: a mic row is a `Mic` with its name and curve,
+    /// every other row a `Line`.
     pub fn row_setup(&self, i: usize) -> Option<InputSetup> {
         let r = self.inputs.get(i)?;
+        // Every row is declared a microphone until the dialog gets a kind column: the daemon
+        // refuses an SPL meter on a line or digital input, and a reference feed is still
+        // metered as one today.
         let mic =
             (r.role == InputRole::Mic && !r.mic.trim().is_empty()).then(|| r.mic.trim().to_owned());
-        Some(InputSetup {
-            channel: r.channel,
+        let kind = InputKind::Mic {
             curve: if mic.is_some() {
                 r.curve.clone()
             } else {
                 CurveChoice::NotChosen
             },
             mic,
+        };
+        Some(InputSetup {
+            channel: r.channel,
+            kind,
+            pair: None,
         })
     }
 
@@ -241,12 +249,19 @@ impl SessionDialog {
     ) -> Option<(String, bool)> {
         use ac2_proto::cal::{CurveUse, input_use, settle};
         let mut row = self.row_setup(i)?;
-        row.mic.as_ref()?;
+        row.mic()?;
         settle(&mut row, &st.mics);
         let channel = row.channel;
         let rows = [row];
         let device = self.device_info().map(|d| &d.id);
-        let u = input_use(&st.calibrations, &st.mics, &rows, device, channel);
+        let u = input_use(
+            &st.calibrations,
+            &st.line_calibrations,
+            &st.mics,
+            &rows,
+            device,
+            channel,
+        );
         Some((
             format!(
                 "{} · {}",
@@ -275,23 +290,27 @@ impl SessionDialog {
             return None;
         };
         let mut row = self.row_setup(i)?;
-        let Some(mic) = row.mic.clone() else {
+        let Some(mic) = row.mic().map(str::to_owned) else {
             self.notice = Some("←/→ choose the mic curve of a named mic (N names it)".into());
             return None;
         };
         ac2_proto::cal::settle(&mut row, mics);
-        row.curve = ac2_proto::cal::step(&row.curve, ac2_proto::cal::mic(mics, &mic), forward);
-        self.inputs[i].curve = row.curve.clone();
+        row.set_curve(ac2_proto::cal::step(
+            &row.curve(),
+            ac2_proto::cal::mic(mics, &mic),
+            forward,
+        ));
+        self.inputs[i].curve = row.curve();
         let captured = self
             .open
             .as_ref()
             .is_some_and(|o| o.config.input_channels.contains(&row.channel));
         let same_mic = live
             .iter()
-            .any(|s| s.channel == row.channel && s.mic.as_deref() == Some(mic.as_str()));
+            .any(|s| s.channel == row.channel && s.mic() == Some(mic.as_str()));
         if self.is_open_device() && captured && same_mic {
             if let Some(s) = self.setup.iter_mut().find(|s| s.channel == row.channel) {
-                s.curve = row.curve.clone();
+                s.set_curve(row.curve());
             }
             Some(row)
         } else {

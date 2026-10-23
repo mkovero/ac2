@@ -219,8 +219,10 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         }),
         Ok(ReplyBody::Calibration(cal_entry())),
         Ok(ReplyBody::Calibration(electrical_cal_entry())),
+        Ok(ReplyBody::LineCalibration(line_cal_entry())),
         Ok(ReplyBody::Calibrations {
             calibrations: vec![cal_entry()],
+            line_calibrations: vec![line_cal_entry()],
             mics: vec![mic()],
         }),
         Ok(ReplyBody::Inputs(inputs())),

@@ -231,30 +231,83 @@
  {
   "kind": "inputs",
   "rev": 50,
-  "payload": [
-   {
-    "channel": 1,
-    "mic": "M30 #1234",
-    "curve": {
-     "type": "curve",
-     "label": "0\u00b0"
+  "payload": {
+   "inputs": [
+    {
+     "channel": 1,
+     "kind": {
+      "kind": "mic",
+      "mic": "M30 #1234",
+      "curve": {
+       "type": "curve",
+       "label": "0\u00b0"
+      }
+     },
+     "pair": null
+    },
+    {
+     "channel": 2,
+     "kind": {
+      "kind": "mic",
+      "mic": null,
+      "curve": {
+       "type": "not_chosen"
+      }
+     },
+     "pair": null
+    },
+    {
+     "channel": 3,
+     "kind": {
+      "kind": "mic",
+      "mic": "ECM",
+      "curve": {
+       "type": "off"
+      }
+     },
+     "pair": null
+    },
+    {
+     "channel": 4,
+     "kind": {
+      "kind": "line"
+     },
+     "pair": "left"
+    },
+    {
+     "channel": 5,
+     "kind": {
+      "kind": "line"
+     },
+     "pair": "right"
+    },
+    {
+     "channel": 6,
+     "kind": {
+      "kind": "digital"
+     },
+     "pair": null
     }
-   },
-   {
-    "channel": 2,
-    "mic": null,
-    "curve": {
-     "type": "not_chosen"
+   ],
+   "pairs": [
+    {
+     "left": 4,
+     "right": 5,
+     "name": "Main"
     }
-   },
-   {
-    "channel": 3,
-    "mic": "ECM",
-    "curve": {
-     "type": "off"
-    }
+   ]
+  }
+ },
+ {
+  "kind": "line_calibration",
+  "rev": 74,
+  "payload": {
+   "type": "deleted",
+   "value": {
+    "device": "hw:UMC1820",
+    "channel": 4
    }
-  ]
+  }
  },
  {
   "kind": "outputs",

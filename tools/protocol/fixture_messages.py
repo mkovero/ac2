@@ -6,6 +6,8 @@ import ac2proto as p
 from fixture_frames import (
     INPUTS,
     LOG_GRID,
+    PREVIEW_INPUTS,
+    PREVIEW_PAIRS,
     TIMING_STATUS,
 )
 
@@ -543,13 +545,23 @@ def requests():
             "sweep.run",
             {"lease_token": TOKEN, "meas": 7, "name": "1083 sweep"},
         ),
-        req(39, "session.inputs", {"inputs": INPUTS}),
+        req(39, "session.inputs", INPUTS),
         req(
             40,
             "cal.delete",
-            {"key": {"device": "hw:UMC1820", "channel": 1, "mic": "M30 #1234"}},
+            {"key": {"type": "line", "device": "hw:UMC1820", "channel": 4}},
         ),
-        req(41, "session.preview", {"backend": "jack", "device": "jack"}, mutation=False),
+        req(
+            41,
+            "session.preview",
+            {
+                "backend": "jack",
+                "device": "jack",
+                "inputs": PREVIEW_INPUTS,
+                "pairs": PREVIEW_PAIRS,
+            },
+            mutation=False,
+        ),
         req(42, "session.preview_stop", mutation=False),
         req(
             43,
@@ -686,6 +698,7 @@ def requests():
         ),
         req(78, "artnet.test", {"channels": dmx([(12, 255), (13, 40)])}),
         req(79, "artnet.fade", {"base": 38, "seconds": 2.5}),
+        req(82, "cal.line", {"channel": 4, "volts": 1.2277, "read_dbfs": -9.0}),
     ]
 
 
@@ -704,6 +717,11 @@ def events():
             },
         },
         {"kind": "inputs", "rev": 50, "payload": INPUTS},
+        {
+            "kind": "line_calibration",
+            "rev": 74,
+            "payload": {"type": "deleted", "value": {"device": "hw:UMC1820", "channel": 4}},
+        },
         {
             "kind": "outputs",
             "rev": 64,

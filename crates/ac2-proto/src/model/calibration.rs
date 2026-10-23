@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::DeviceId;
-use crate::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Ohms, Volts, WallNs};
+use crate::units::{Db, DbSpl, Dbfs, Dbu, Hz, MvPerPa, Ohms, Volts, WallNs};
 
 /// What a calibration is tied to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -262,17 +262,186 @@ pub fn check_output_label(l: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Input setup of one input channel (decision K8): which mic is on it and which of the
-/// mic's curves it applies.
+/// What an input carries, declared by the operator (decision V1): a backend cannot tell an
+/// AES feed from an analogue one, so nothing is inferred. The kind fixes the dB reference
+/// and which calibrations are offered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum InputKind {
+    /// A measurement microphone: dB SPL through its sensitivity calibration. The mic name
+    /// and curve live here, so a line or digital input cannot carry a mic name at all.
+    Mic {
+        /// Mic name; `None` = not set.
+        mic: Option<String>,
+        /// The active curve.
+        curve: CurveChoice,
+    },
+    /// Analogue line level: dBu through a line calibration, dBFS without one.
+    Line,
+    /// A digital feed (AES, ADAT, Dante…): dBFS; 0 dBFS is the source's full scale, so no
+    /// calibration is ever offered.
+    Digital,
+}
+
+impl InputKind {
+    /// The mic name, on a `Mic`.
+    pub fn mic(&self) -> Option<&str> {
+        match self {
+            Self::Mic { mic, .. } => mic.as_deref(),
+            Self::Line | Self::Digital => None,
+        }
+    }
+
+    /// The curve choice, on a `Mic`.
+    pub fn curve(&self) -> Option<&CurveChoice> {
+        match self {
+            Self::Mic { curve, .. } => Some(curve),
+            Self::Line | Self::Digital => None,
+        }
+    }
+
+    /// The kind in words for a refusal: `microphone`, `line input`, `digital input`.
+    pub fn word(&self) -> &'static str {
+        match self {
+            Self::Mic { .. } => "microphone",
+            Self::Line => "line input",
+            Self::Digital => "digital input",
+        }
+    }
+}
+
+/// Which side of a stereo pair an input is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PairSide {
+    /// Left.
+    Left,
+    /// Right.
+    Right,
+}
+
+/// Two inputs of one kind declared a stereo pair (decision V2). Never two mics: a
+/// correlation of two measurement mics would be read as a stereo verdict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Pair {
+    /// Zero-based device input channel of the left side.
+    pub left: u16,
+    /// Zero-based device input channel of the right side.
+    pub right: u16,
+    /// Operator's name; `None` = named by its inputs.
+    pub name: Option<String>,
+}
+
+/// Input setup of one input channel: what is on it and, when paired, which side it is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InputSetup {
     /// Zero-based device input channel.
     pub channel: u16,
-    /// Mic name; `None` = not set.
-    pub mic: Option<String>,
-    /// The active curve.
-    pub curve: CurveChoice,
+    /// What is on it.
+    pub kind: InputKind,
+    /// Its side of the pair it is in, if any (the daemon sets it from the pair list).
+    pub pair: Option<PairSide>,
+}
+
+impl InputSetup {
+    /// The mic name, on a mic.
+    pub fn mic(&self) -> Option<&str> {
+        self.kind.mic()
+    }
+
+    /// The curve choice of a mic; `NotChosen` on a line or digital input (no curve can
+    /// apply there).
+    pub fn curve(&self) -> CurveChoice {
+        self.kind.curve().cloned().unwrap_or(CurveChoice::NotChosen)
+    }
+
+    /// Makes the input a mic named `mic` (`None`: unnamed); another capsule's curves are
+    /// its own, so a changed name leaves the curve unchosen.
+    pub fn set_mic(&mut self, mic: Option<String>) {
+        if !matches!(self.kind, InputKind::Mic { .. }) || self.kind.mic() != mic.as_deref() {
+            self.kind = InputKind::Mic {
+                mic,
+                curve: CurveChoice::NotChosen,
+            };
+        }
+    }
+
+    /// Chooses `curve` on the input's mic (a line or digital input becomes an unnamed mic:
+    /// a curve is a mic's).
+    pub fn set_curve(&mut self, curve: CurveChoice) {
+        self.kind = InputKind::Mic {
+            mic: self.kind.mic().map(str::to_owned),
+            curve,
+        };
+    }
+}
+
+/// The input setup as a whole: the rows and the pairs among them.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputSetups {
+    /// One row per declared channel, sorted by channel.
+    pub inputs: Vec<InputSetup>,
+    /// Pairs, sorted by left channel.
+    pub pairs: Vec<Pair>,
+}
+
+/// What an input of a device preview is declared to be (`session.preview`), so a client
+/// can label the preview's rows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewInput {
+    /// Zero-based device input channel.
+    pub channel: u16,
+    /// What is on it.
+    pub kind: InputKind,
+}
+
+/// What a line calibration is tied to: a line input has no capsule to name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineCalKey {
+    /// Capture device.
+    pub device: DeviceId,
+    /// Input channel.
+    pub channel: u16,
+}
+
+/// A line calibration: the volts at 0 dBFS of a line input, from a steady tone whose RMS
+/// voltage the operator measured while the meter read its level.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineCal {
+    /// Voltage at 0 dBFS: `volts / 10^(measured / 20)`.
+    pub v_fs: Volts,
+    /// Voltage measured, RMS.
+    pub volts: Volts,
+    /// Level read from the tone.
+    pub measured: Dbfs,
+    /// When (daemon clock).
+    pub calibrated_at: WallNs,
+}
+
+/// Line calibration entry: one per device + input channel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineCalEntry {
+    /// Key.
+    pub key: LineCalKey,
+    /// The calibration.
+    pub line: LineCal,
+}
+
+/// A calibration `cal.delete` addresses: either kind of entry of the store.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CalRef {
+    /// A sensitivity calibration.
+    Spl(CalKey),
+    /// A line calibration.
+    Line(LineCalKey),
 }
 
 /// Calibration state of a calibrated readout (decisions 7a/7b). The age is the frame's
@@ -296,5 +465,12 @@ pub enum CalStatus {
         calibrated_at: WallNs,
         /// What it rests on.
         basis: CalBasis,
+    },
+    /// A line input with a line calibration: dBu, not dB SPL.
+    Line {
+        /// When it was taken.
+        calibrated_at: WallNs,
+        /// dBu of 0 dBFS.
+        dbu_fs: Dbu,
     },
 }

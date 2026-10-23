@@ -259,6 +259,7 @@ pub enum Request {
     OpenSession {
         config: SessionConfig,
         inputs: Vec<InputSetup>,
+        pairs: Vec<ac2_proto::model::Pair>,
         what: String,
     },
     /// Open or renew the capture-only preview of a device.

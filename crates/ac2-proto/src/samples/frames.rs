@@ -370,6 +370,21 @@ pub fn frames() -> Vec<Frame> {
                     backend: BackendKind::Jack,
                     device: DeviceId("jack".into()),
                     channels: vec![0, 1],
+                    inputs: vec![
+                        PreviewInput {
+                            channel: 0,
+                            kind: InputKind::Line,
+                        },
+                        PreviewInput {
+                            channel: 1,
+                            kind: InputKind::Line,
+                        },
+                    ],
+                    pairs: vec![Pair {
+                        left: 0,
+                        right: 1,
+                        name: None,
+                    }],
                 },
                 peak: vec![-12.0, -40.5],
                 rms: vec![-20.0, -52.25],

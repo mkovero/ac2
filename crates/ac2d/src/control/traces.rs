@@ -223,9 +223,10 @@ impl Control {
             None => CalState::Uncalibrated,
         };
         let mic = ac2_proto::cal::input_setup(&self.store.state().inputs, input)
-            .mic
+            .kind
+            .mic()
             .map(|name| MicState {
-                name,
+                name: name.to_owned(),
                 curve: c.curve,
             });
         (cal, mic)
@@ -242,10 +243,11 @@ impl Control {
         let rt = self.session.as_ref()?;
         let c = self.input_cal(rt, input);
         let curve = c.curve?;
-        let mic = ac2_proto::cal::input_setup(&self.store.state().inputs, input).mic?;
-        let points = self.cal.curve(&mic, &curve.label)?;
+        let row = ac2_proto::cal::input_setup(&self.store.state().inputs, input);
+        let mic = row.kind.mic()?;
+        let points = self.cal.curve(mic, &curve.label)?;
         let f_norm = crate::calstore::f_norm(c.spl_entry.as_ref());
-        Some(after_capture(mic, curve, points, f_norm))
+        Some(after_capture(mic.to_owned(), curve, points, f_norm))
     }
 
     pub(super) fn trace_capture(

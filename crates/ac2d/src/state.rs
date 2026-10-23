@@ -48,8 +48,10 @@ impl Store {
                     last_action: None,
                 },
                 calibrations: Vec::new(),
+                line_calibrations: Vec::new(),
                 mics: Vec::new(),
                 inputs: Vec::new(),
+                pairs: Vec::new(),
                 outputs: Vec::new(),
                 spl_logs: Vec::new(),
                 timing: TimingStatus {
@@ -83,8 +85,10 @@ impl Store {
     /// The initial state carries the calibration store's contents (rev 0, no events).
     pub(crate) fn with_calibrations(mut self, c: crate::calstore::Contents) -> Self {
         self.state.calibrations = c.calibrations;
+        self.state.line_calibrations = c.line_calibrations;
         self.state.mics = c.mics;
         self.state.inputs = c.inputs;
+        self.state.pairs = c.pairs;
         self
     }
 
@@ -192,8 +196,12 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::Trace(p) => upsert(&mut s.traces, p, |t| t.id),
         Change::Generator(g) => s.generator = g.clone(),
         Change::Calibration(p) => upsert(&mut s.calibrations, p, |c| c.key.clone()),
+        Change::LineCalibration(p) => upsert(&mut s.line_calibrations, p, |c| c.key.clone()),
         Change::Mic(p) => upsert(&mut s.mics, p, |m| m.name.clone()),
-        Change::Inputs(i) => s.inputs = i.clone(),
+        Change::Inputs(i) => {
+            s.inputs = i.inputs.clone();
+            s.pairs = i.pairs.clone();
+        }
         Change::Outputs(o) => s.outputs = o.clone(),
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = *t,

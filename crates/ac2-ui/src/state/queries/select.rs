@@ -57,7 +57,7 @@ impl AppState {
         self.selected_meas()
             .and_then(|m| meas_input(&m.config.kind))
             .map(|input| {
-                let mic = self.input_setup(input).mic.unwrap_or_default();
+                let mic = self.input_setup(input).mic().unwrap_or_default().to_owned();
                 format!("{}={mic}", u32::from(input) + 1)
             })
             .unwrap_or_default()
@@ -91,11 +91,11 @@ impl AppState {
                 u32::from(channel) + 1
             ),
             cmd: Command::CalDelete {
-                key: CalKey {
+                key: ac2_proto::model::CalRef::Spl(CalKey {
                     device,
                     channel,
                     mic,
-                },
+                }),
             },
         });
         Ok(())
@@ -141,6 +141,20 @@ impl AppState {
     }
 
     /// The daemon's input setup row of `channel` (default: no mic name, no curve chosen).
+    /// The daemon's pairs (`session.inputs` carries the whole list, so a row change
+    /// resends them).
+    pub(in crate::state) fn pairs(&self) -> Vec<ac2_proto::model::Pair> {
+        self.daemon().map(|s| s.pairs.clone()).unwrap_or_default()
+    }
+
+    /// `session.inputs` upserting `inputs`, the pairs as they are.
+    pub(in crate::state) fn inputs_cmd(&self, inputs: Vec<InputSetup>) -> Command {
+        Command::SessionInputs {
+            inputs,
+            pairs: self.pairs(),
+        }
+    }
+
     pub(in crate::state) fn input_setup(&self, channel: u16) -> InputSetup {
         ac2_proto::cal::input_setup(
             self.daemon()

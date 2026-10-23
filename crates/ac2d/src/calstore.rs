@@ -1,13 +1,14 @@
-//! Calibration store (`docs/design/q7-calibration.md`): sensitivity calibrations keyed by
-//! device + input channel + mic name, the mic library (named curves per mic, with their
-//! points), the input setup; the JSON file behind them; and the matching that decides what a
-//! job on an input uses.
+//! Calibration store (`docs/design/q7-calibration.md`, `programme-meter.md` §1): sensitivity
+//! calibrations keyed by device + input channel + mic name, line calibrations keyed by
+//! device + input channel, the mic library (named curves per mic, with their points), the
+//! input setup with its pairs; the JSON file behind them; and the matching that decides what
+//! a job on an input uses.
 //!
 //! The file is read once at start. One that cannot be read is never written: the store
 //! comes up empty and read-only and every calibration command is refused with the reason,
 //! so an operator's calibrations are never replaced by an empty set. A store of another
 //! format version is set aside (renamed, never deleted) and the daemon starts with an empty
-//! store: there is no migration. An optional field a version 3 file leaves out reads as
+//! store: there is no migration. An optional field a version 4 file leaves out reads as
 //! its `None` meaning (an electrical calibration without a mic loading was taken unloaded,
 //! and its stored sensitivity counts none), so adding one keeps the version.
 
@@ -20,7 +21,8 @@ use ac2_core::mic_curve::{Correction, MicCurve, MicCurveFileError};
 use ac2_proto::cal::{self, InputUse};
 use ac2_proto::model::StateFile;
 use ac2_proto::model::{
-    CalEntry, CalStatus, DeviceId, InputSetup, Mic, MicCurveId, MicCurveRef, State,
+    CalEntry, CalStatus, DeviceId, InputSetup, LineCalEntry, Mic, MicCurveId, MicCurveRef, Pair,
+    State,
 };
 use ac2_proto::{ErrorCode, ErrorDetail, MicCurveFileReason, ProtoError};
 use serde::{Deserialize, Serialize};
@@ -28,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use crate::util::{perr, perr_detail};
 
 const FORMAT: &str = "ac2-calibrations";
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 /// Normalisation frequency when no sensitivity calibration applies.
 pub(crate) const DEFAULT_F_NORM: f64 = 1000.0;
 
@@ -53,8 +55,10 @@ struct StoreFile {
     format: String,
     version: u32,
     sensitivities: Vec<CalEntry>,
+    lines: Vec<LineCalEntry>,
     mics: Vec<FileMic>,
     inputs: Vec<InputSetup>,
+    pairs: Vec<Pair>,
 }
 
 /// Just enough of any store file to tell its version.
@@ -68,8 +72,10 @@ struct Header {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct Contents {
     pub(crate) calibrations: Vec<CalEntry>,
+    pub(crate) line_calibrations: Vec<LineCalEntry>,
     pub(crate) mics: Vec<Mic>,
     pub(crate) inputs: Vec<InputSetup>,
+    pub(crate) pairs: Vec<Pair>,
 }
 
 /// The curves' points, by mic and label.
@@ -232,9 +238,11 @@ impl CalStore {
             Ok((contents, curves)) => {
                 store.curves = curves;
                 tracing::info!(
-                    "calibration store {}: {} sensitivity calibrations, {} mics",
+                    "calibration store {}: {} sensitivity calibrations, {} line calibrations, \
+                     {} mics",
                     path.display(),
                     contents.calibrations.len(),
+                    contents.line_calibrations.len(),
                     contents.mics.len()
                 );
                 (store, contents)
@@ -303,6 +311,7 @@ impl CalStore {
                 format: FORMAT.into(),
                 version: VERSION,
                 sensitivities: c.calibrations.clone(),
+                lines: c.line_calibrations.clone(),
                 mics: c
                     .mics
                     .iter()
@@ -330,6 +339,7 @@ impl CalStore {
                     })
                     .collect(),
                 inputs: c.inputs.clone(),
+                pairs: c.pairs.clone(),
             };
             let text = serde_json::to_vec_pretty(&file)
                 .map_err(|e| perr(ErrorCode::Internal, format!("calibration store: {e}")))?;
@@ -365,6 +375,19 @@ fn parse(text: &[u8]) -> Result<(Contents, Curves), String> {
         }
         cal::check_mic_name(&e.key.mic)?;
         calibrations.push(e);
+    }
+    let mut line_calibrations: Vec<LineCalEntry> = Vec::new();
+    for e in f.lines {
+        if line_calibrations.iter().any(|x| x.key == e.key) {
+            return Err(format!("duplicate line calibration {:?}", e.key));
+        }
+        if !(e.line.v_fs.0.is_finite() && e.line.v_fs.0 > 0.0) {
+            return Err(format!(
+                "line calibration {:?}: full scale {} V is not a voltage",
+                e.key, e.line.v_fs.0
+            ));
+        }
+        line_calibrations.push(e);
     }
     let mut mics: Vec<Mic> = Vec::new();
     let mut curves = HashMap::new();
@@ -409,15 +432,23 @@ fn parse(text: &[u8]) -> Result<(Contents, Curves), String> {
         return Err("duplicate input channel".into());
     }
     for i in &inputs {
-        if let Some(m) = &i.mic {
+        if let Some(m) = i.kind.mic() {
             cal::check_mic_name(m)?;
         }
+    }
+    let mut pairs = f.pairs;
+    pairs.sort_by_key(|p| p.left);
+    cal::check_pairs(&inputs, &pairs, None)?;
+    if inputs != cal::apply_pair_sides(&inputs, &pairs) {
+        return Err("the pair sides of the inputs do not match the pairs".into());
     }
     Ok((
         Contents {
             calibrations,
+            line_calibrations,
             mics,
             inputs,
+            pairs,
         },
         curves,
     ))
@@ -433,6 +464,7 @@ pub(crate) fn f_norm(spl: Option<&CalEntry>) -> f64 {
 pub(crate) fn resolve(st: &State, store: &CalStore, device: &DeviceId, channel: u16) -> InputCal {
     let u: InputUse<'_> = cal::input_use(
         &st.calibrations,
+        &st.line_calibrations,
         &st.mics,
         &st.inputs,
         Some(device),

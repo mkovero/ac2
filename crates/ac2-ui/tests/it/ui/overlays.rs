@@ -205,7 +205,8 @@ fn command_palette() {
 #[test]
 fn calibrations_view() {
     use ac2_proto::model::{
-        CalEntry, CalKey, CurveChoice, DeviceId, InputSetup, Mic, MicCurveRef, SplCal,
+        CalEntry, CalKey, CurveChoice, DeviceId, InputKind, InputSetup, InputSetups, Mic,
+        MicCurveRef, SplCal,
     };
     use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, WallNs};
     use ac2_proto::{Change, Patch};
@@ -251,13 +252,19 @@ fn calibrations_view() {
                 calibrated_at: WallNs(now - 3 * 3_600_000_000_000 - 60_000_000_000),
             },
         })));
-        f.commit(Change::Inputs(vec![InputSetup {
-            channel: 1,
-            mic: Some("MM1 34804".into()),
-            curve: CurveChoice::Curve {
-                label: "0°".into()
-            },
-        }]));
+        f.commit(Change::Inputs(InputSetups {
+            inputs: vec![InputSetup {
+                channel: 1,
+                kind: InputKind::Mic {
+                    mic: Some("MM1 34804".into()),
+                    curve: CurveChoice::Curve {
+                        label: "0°".into()
+                    },
+                },
+                pair: None,
+            }],
+            pairs: Vec::new(),
+        }));
     }
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", |a| {

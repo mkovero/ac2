@@ -180,8 +180,10 @@ pub fn empty_state() -> State {
             last_action: None,
         },
         calibrations: vec![],
+        line_calibrations: vec![],
         mics: vec![],
         inputs: vec![],
+        pairs: vec![],
         outputs: vec![],
         spl_logs: vec![],
         timing: TimingStatus {
@@ -614,6 +616,7 @@ impl Shared {
             | C::CalCurveImport { .. }
             | C::CalCurveRename { .. }
             | C::CalCurveDelete { .. }
+            | C::CalLine { .. }
             | C::CalList
             | C::CalDelete { .. }) => self.cal_cmd(c)?,
             c @ (C::SplLogGet { .. }

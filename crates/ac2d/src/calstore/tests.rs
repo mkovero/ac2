@@ -1,7 +1,7 @@
 use super::*;
 use ac2_proto::model::{
-    CalBasis, CalKey, CalMethod, CurveChoice, ElectricalConnection, MicLoading, SensitivitySource,
-    SplCal,
+    CalBasis, CalKey, CalMethod, CurveChoice, ElectricalConnection, InputKind, LineCal, LineCalKey,
+    MicLoading, Pair, PairSide, SensitivitySource, SplCal,
 };
 use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Ohms, Volts, WallNs};
 
@@ -72,8 +72,19 @@ fn curve_ref(label: &str, at: u64) -> MicCurveRef {
 fn setup(ch: u16, mic: Option<&str>, curve: CurveChoice) -> InputSetup {
     InputSetup {
         channel: ch,
-        mic: mic.map(Into::into),
-        curve,
+        kind: InputKind::Mic {
+            mic: mic.map(Into::into),
+            curve,
+        },
+        pair: None,
+    }
+}
+
+fn line(ch: u16, pair: Option<PairSide>) -> InputSetup {
+    InputSetup {
+        channel: ch,
+        kind: InputKind::Line,
+        pair,
     }
 }
 
@@ -95,8 +106,10 @@ fn id(mic: &str, label: &str) -> MicCurveId {
 fn state(c: &Contents) -> State {
     let mut s = ac2_proto::samples::state();
     s.calibrations = c.calibrations.clone();
+    s.line_calibrations = c.line_calibrations.clone();
     s.mics = c.mics.clone();
     s.inputs = c.inputs.clone();
+    s.pairs = c.pairs.clone();
     s
 }
 
@@ -166,6 +179,8 @@ fn only_the_chosen_curve_applies() {
             curves: vec![curve_ref("0°", 1), curve_ref("90°", 2)],
         }],
         inputs: vec![],
+        line_calibrations: vec![],
+        pairs: vec![],
     };
     let mut store = CalStore::memory();
     let mut curves = HashMap::new();
@@ -246,11 +261,35 @@ fn file_round_trip_and_atomic_write() {
             name: "M30 #1".into(),
             curves: vec![curve_ref("0°", 3), curve_ref("90°", 4)],
         }],
+        line_calibrations: vec![LineCalEntry {
+            key: LineCalKey {
+                device: DeviceId("hw:A".into()),
+                channel: 6,
+            },
+            line: LineCal {
+                v_fs: Volts(3.461_5),
+                volts: Volts(1.227_7),
+                measured: Dbfs(-9.0),
+                calibrated_at: WallNs(40),
+            },
+        }],
         inputs: vec![
             setup(2, Some("M30 #1"), label("90°")),
             setup(3, None, CurveChoice::NotChosen),
             setup(4, Some("ECM"), CurveChoice::Off),
+            line(6, Some(PairSide::Left)),
+            line(7, Some(PairSide::Right)),
+            InputSetup {
+                channel: 8,
+                kind: InputKind::Digital,
+                pair: None,
+            },
         ],
+        pairs: vec![Pair {
+            left: 6,
+            right: 7,
+            name: Some("Main".into()),
+        }],
     };
     let mut curves = HashMap::new();
     curves.insert(id("M30 #1", "0°"), points(1.5));
@@ -273,6 +312,61 @@ fn file_round_trip_and_atomic_write() {
     assert_eq!(
         s2.curve("M30 #1", "0°").map(|c| c.gains().to_vec()),
         Some(vec![0.0, 0.0, 1.5])
+    );
+    // The line input resolves to its line calibration, in dBu, with no dB SPL sensitivity.
+    let dev = DeviceId("hw:A".into());
+    let x = resolve(&state(&c2), &s2, &dev, 6);
+    assert_eq!(x.sensitivity, None);
+    assert!(matches!(
+        x.status,
+        CalStatus::Line {
+            calibrated_at: WallNs(40),
+            ..
+        }
+    ));
+    assert_eq!(
+        resolve(&state(&c2), &s2, &dev, 7).status,
+        CalStatus::Uncalibrated
+    );
+    assert_eq!(
+        resolve(&state(&c2), &s2, &dev, 8).status,
+        CalStatus::Uncalibrated
+    );
+}
+
+/// The pair sides written must agree with the pair list, and the pairs obey their rules: a
+/// file that says otherwise was not written by this daemon.
+#[test]
+fn pairs_in_the_file_are_checked() {
+    let head =
+        r#"{"format":"ac2-calibrations","version":4,"sensitivities":[],"lines":[],"mics":[],"#;
+    let ok = format!(
+        r#"{head}"inputs":[{{"channel":0,"kind":{{"kind":"line"}},"pair":"left"}},{{"channel":1,"kind":{{"kind":"line"}},"pair":"right"}}],"pairs":[{{"left":0,"right":1,"name":null}}]}}"#
+    );
+    let (c, _) = parse(ok.as_bytes()).expect("valid");
+    assert_eq!(c.pairs.len(), 1);
+    assert_eq!(c.inputs[1].pair, Some(PairSide::Right));
+    let sides_wrong = format!(
+        r#"{head}"inputs":[{{"channel":0,"kind":{{"kind":"line"}},"pair":null}},{{"channel":1,"kind":{{"kind":"line"}},"pair":"right"}}],"pairs":[{{"left":0,"right":1,"name":null}}]}}"#
+    );
+    assert!(
+        parse(sides_wrong.as_bytes())
+            .expect_err("pair sides")
+            .contains("pair sides")
+    );
+    let mic_pair = format!(
+        r#"{head}"inputs":[{{"channel":0,"kind":{{"kind":"mic","mic":null,"curve":{{"type":"not_chosen"}}}},"pair":"left"}},{{"channel":1,"kind":{{"kind":"line"}},"pair":"right"}}],"pairs":[{{"left":0,"right":1,"name":null}}]}}"#
+    );
+    assert!(
+        parse(mic_pair.as_bytes())
+            .expect_err("microphone")
+            .contains("microphone")
+    );
+    let dup_line = r#"{"format":"ac2-calibrations","version":4,"sensitivities":[],"lines":[{"key":{"device":"d","channel":0},"line":{"v_fs":1.0,"volts":0.5,"measured":-6.0,"calibrated_at":1}},{"key":{"device":"d","channel":0},"line":{"v_fs":2.0,"volts":0.5,"measured":-12.0,"calibrated_at":2}}],"mics":[],"inputs":[],"pairs":[]}"#;
+    assert!(
+        parse(dup_line.as_bytes())
+            .expect_err("duplicate line")
+            .contains("duplicate line")
     );
 }
 
@@ -371,6 +465,18 @@ fn a_store_of_the_previous_format_is_set_aside() {
         std::fs::read(dir.path().join("calibrations.json.v2")).expect("set aside"),
         v2
     );
+
+    // Version 3 (input rows with a mic name instead of a kind, no line calibrations, no
+    // pairs) is set aside the same way: the store starts empty, the file is kept.
+    let v3 = br#"{"format":"ac2-calibrations","version":3,"sensitivities":[{"key":{"device":"d","channel":0,"mic":"M"},"spl":{"sensitivity":120.0,"method":{"type":"acoustic","calibrator_level":94.0},"freq":1000.0,"measured":-26.0,"calibrated_at":1}}],"mics":[],"inputs":[{"channel":0,"mic":"M","curve":{"type":"off"}},{"channel":1,"mic":null,"curve":{"type":"not_chosen"}}]}"#;
+    std::fs::write(&path, v3).expect("write");
+    let (s, c) = CalStore::open(&path);
+    s.check().expect("writable");
+    assert_eq!(c, Contents::default());
+    assert_eq!(
+        std::fs::read(dir.path().join("calibrations.json.v3")).expect("set aside"),
+        v3
+    );
 }
 
 #[test]
@@ -386,8 +492,8 @@ fn a_damaged_file_is_set_aside_and_its_previous_copy_read() {
         b"",
         b"\0\0\0\0\0\0",
         br#"{"format":"other","version":2,"sensitivities":[],"mics":[],"inputs":[]}"#,
-        br#"{"format":"ac2-calibrations","version":3,"sensitivities":[],"mics":[{"name":"m","curves":[{"reference":{"label":"0deg","file_name":"c","content_hash":"0","points":2,"f_lo":20.0,"f_hi":10.0,"imported_at":1,"stated_sensitivity":null},"points":[[20.0,0.0],[10.0,0.0]]}]}],"inputs":[]}"#,
-        br#"{"format":"ac2-calibrations","version":3,"sensitivities":[],"mics":[{"name":"m","curves":[]}],"inputs":[]}"#,
+        br#"{"format":"ac2-calibrations","version":4,"sensitivities":[],"lines":[],"mics":[{"name":"m","curves":[{"reference":{"label":"0deg","file_name":"c","content_hash":"0","points":2,"f_lo":20.0,"f_hi":10.0,"imported_at":1,"stated_sensitivity":null},"points":[[20.0,0.0],[10.0,0.0]]}]}],"inputs":[],"pairs":[]}"#,
+        br#"{"format":"ac2-calibrations","version":4,"sensitivities":[],"lines":[],"mics":[{"name":"m","curves":[]}],"inputs":[],"pairs":[]}"#,
     ] {
         // No previous copy: an empty store, writable.
         let _ = std::fs::remove_file(crate::damage::prev_path(&path));

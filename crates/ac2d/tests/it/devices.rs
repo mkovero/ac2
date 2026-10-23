@@ -191,6 +191,8 @@ fn preview_is_capture_only_and_silent() {
     let ReplyBody::Preview(p) = c.ok(Command::SessionPreview {
         backend: BackendKind::Fake,
         device: fake_dev(),
+        inputs: Vec::new(),
+        pairs: Vec::new(),
     }) else {
         panic!("preview");
     };
@@ -221,6 +223,8 @@ fn preview_is_capture_only_and_silent() {
     c.ok(Command::SessionPreview {
         backend: BackendKind::Fake,
         device: fake_dev(),
+        inputs: Vec::new(),
+        pairs: Vec::new(),
     });
     c.ok(Command::SessionPreviewStop);
     assert_eq!(*opened.lock().unwrap(), vec![(0, false)]);
@@ -229,6 +233,8 @@ fn preview_is_capture_only_and_silent() {
         .call(Command::SessionPreview {
             backend: BackendKind::Fake,
             device: DeviceId("nope".into()),
+            inputs: Vec::new(),
+            pairs: Vec::new(),
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound);
@@ -246,6 +252,8 @@ fn slow_preview_expires_and_closes_when_a_session_opens() {
     c.ok(Command::SessionPreview {
         backend: BackendKind::Fake,
         device: fake_dev(),
+        inputs: Vec::new(),
+        pairs: Vec::new(),
     });
     s.frame(T, |f| matches!(f.data, FrameData::PreviewLevels(_)))
         .expect("preview frame");
@@ -275,6 +283,8 @@ fn slow_preview_expires_and_closes_when_a_session_opens() {
     c.ok(Command::SessionPreview {
         backend: BackendKind::Fake,
         device: fake_dev(),
+        inputs: Vec::new(),
+        pairs: Vec::new(),
     });
     s.frame(T, |f| matches!(f.data, FrameData::PreviewLevels(_)))
         .expect("preview frame");
@@ -507,6 +517,8 @@ fn slow_preview_follows_the_device_through_every_round() {
         c.ok(Command::SessionPreview {
             backend: kind,
             device: fake_dev(),
+            inputs: Vec::new(),
+            pairs: Vec::new(),
         })
     };
     for round in 0..3 {
@@ -560,6 +572,8 @@ fn a_renewal_reopens_a_preview_that_stopped_delivering() {
         c.ok(Command::SessionPreview {
             backend: BackendKind::Fake,
             device: fake_dev(),
+            inputs: Vec::new(),
+            pairs: Vec::new(),
         })
     };
     preview(&mut c);

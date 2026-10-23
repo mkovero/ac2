@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    CalEntry, Generator, InputSetup, Measurement, Mic, OutputSetup, RecordingRun, Rig, Session,
-    SplLog, SweepRun, TraceMeta, WorkingSession,
+    CalEntry, Generator, InputSetup, LineCalEntry, Measurement, Mic, OutputSetup, Pair,
+    RecordingRun, Rig, Session, SplLog, SweepRun, TraceMeta, WorkingSession,
 };
 use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
 
@@ -96,8 +96,12 @@ pub struct State {
     pub calibrations: Vec<CalEntry>,
     /// Mic library (named curves per mic).
     pub mics: Vec<Mic>,
-    /// Input setup (mic names, active curves), sorted by channel.
+    /// Line calibrations.
+    pub line_calibrations: Vec<LineCalEntry>,
+    /// Input setup (kinds, mic names, active curves), sorted by channel.
     pub inputs: Vec<InputSetup>,
+    /// Stereo pairs among the inputs, sorted by left channel.
+    pub pairs: Vec<Pair>,
     /// Output labels of the rig, sorted by channel; only labelled outputs are listed.
     pub outputs: Vec<OutputSetup>,
     /// SPL logs.

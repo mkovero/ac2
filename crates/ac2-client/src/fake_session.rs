@@ -22,7 +22,12 @@ impl Shared {
                 rev: self.rev,
             }),
             C::SessionDevices => ReplyBody::Backends(self.backends.clone()),
-            C::SessionPreview { backend, device } => {
+            C::SessionPreview {
+                backend,
+                device,
+                inputs,
+                pairs,
+            } => {
                 let channels = self
                     .backends
                     .iter()
@@ -31,6 +36,17 @@ impl Shared {
                     .and_then(|d| d.input.as_ref())
                     .map(|i| i.max_channels)
                     .ok_or_else(|| err(ErrorCode::NotFound, "no such device"))?;
+                let rows: Vec<InputSetup> = inputs
+                    .iter()
+                    .map(|d| InputSetup {
+                        channel: d.channel,
+                        kind: d.kind.clone(),
+                        pair: None,
+                    })
+                    .collect();
+                let captured = |ch: u16| ch < channels;
+                ac2_proto::cal::check_pairs(&rows, &pairs, Some(&captured))
+                    .map_err(|e| err(ErrorCode::Invalid, e))?;
                 self.preview = Some((backend, device.clone()));
                 ReplyBody::Preview(Preview {
                     backend,
@@ -153,10 +169,13 @@ impl Shared {
                     "the fake daemon has no recordings to replay",
                 ));
             }
-            C::SessionInputs { inputs } => {
+            C::SessionInputs { inputs, pairs } => {
                 for r in &inputs {
-                    if let (Some(m), CurveChoice::Curve { label }) = (&r.mic, &r.curve)
-                        && !self.state.inputs.contains(r)
+                    if let InputKind::Mic {
+                        mic: Some(m),
+                        curve: CurveChoice::Curve { label },
+                    } = &r.kind
+                        && !self.state.inputs.iter().any(|x| x.kind == r.kind)
                         && ac2_proto::cal::curve(&self.state.mics, m, label).is_none()
                     {
                         return Err(err(
@@ -173,8 +192,29 @@ impl Shared {
                     .cloned()
                     .collect();
                 all.extend(inputs);
-                self.set_inputs(all);
-                ReplyBody::Inputs(self.state.inputs.clone())
+                let captured = self
+                    .state
+                    .session
+                    .open
+                    .as_ref()
+                    .map(|o| o.config.input_channels.clone());
+                let captured_fn = |ch: u16| captured.as_ref().is_some_and(|c| c.contains(&ch));
+                ac2_proto::cal::check_pairs(
+                    &all,
+                    &pairs,
+                    captured
+                        .is_some()
+                        .then_some(&captured_fn as &dyn Fn(u16) -> bool),
+                )
+                .map_err(|e| err(ErrorCode::Invalid, e))?;
+                let mut pairs = pairs;
+                pairs.sort_by_key(|p| p.left);
+                let all = ac2_proto::cal::apply_pair_sides(&all, &pairs);
+                self.set_inputs_and_pairs(all, pairs);
+                ReplyBody::Inputs(InputSetups {
+                    inputs: self.state.inputs.clone(),
+                    pairs: self.state.pairs.clone(),
+                })
             }
             _ => unreachable!("not a session command"),
         })

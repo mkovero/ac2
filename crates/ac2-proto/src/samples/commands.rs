@@ -168,11 +168,31 @@ pub fn commands() -> Vec<Command> {
             discard: true,
         },
         Command::FileList,
-        Command::SessionInputs { inputs: inputs() },
-        Command::CalDelete { key: cal_key() },
+        Command::SessionInputs {
+            inputs: inputs().inputs,
+            pairs: inputs().pairs,
+        },
+        Command::CalDelete {
+            key: CalRef::Line(line_cal_key()),
+        },
         Command::SessionPreview {
             backend: BackendKind::Jack,
             device: DeviceId("jack".into()),
+            inputs: vec![
+                PreviewInput {
+                    channel: 0,
+                    kind: InputKind::Line,
+                },
+                PreviewInput {
+                    channel: 1,
+                    kind: InputKind::Line,
+                },
+            ],
+            pairs: vec![Pair {
+                left: 0,
+                right: 1,
+                name: None,
+            }],
         },
         Command::SessionPreviewStop,
         Command::SessionDetectLoopback {
@@ -360,6 +380,11 @@ pub fn commands() -> Vec<Command> {
         Command::MeasOffset {
             meas: MeasId(4),
             offset: crate::units::Db(6.0),
+        },
+        Command::CalLine {
+            channel: 4,
+            volts: Volts(1.2277),
+            read_dbfs: Dbfs(-9.0),
         },
     ]
     .into_iter()

@@ -416,8 +416,11 @@ mod tests {
         }];
         s.inputs = vec![InputSetup {
             channel: 1,
-            mic: Some("MM1 34804".into()),
-            curve: ac2_proto::model::CurveChoice::NotChosen,
+            kind: ac2_proto::model::InputKind::Mic {
+                mic: Some("MM1 34804".into()),
+                curve: ac2_proto::model::CurveChoice::NotChosen,
+            },
+            pair: None,
         }];
         s.calibrations.clear();
         s

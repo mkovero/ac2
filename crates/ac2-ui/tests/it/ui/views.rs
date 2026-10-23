@@ -373,7 +373,7 @@ fn top_bar_marquee_scrolls_when_narrow() {
 /// tooltip: the pane's hints in full.
 #[test]
 fn key_hints() {
-    use ac2_proto::model::{CurveChoice, InputSetup, Mic, MicCurveRef};
+    use ac2_proto::model::{CurveChoice, InputKind, InputSetup, InputSetups, Mic, MicCurveRef};
     use ac2_proto::units::{Hz, WallNs};
     use ac2_proto::{Change, Patch};
     if !have_gpu("key_hints") {
@@ -396,13 +396,19 @@ fn key_hints() {
             name: "MM1 34804".into(),
             curves: vec![curve("0°"), curve("90°")],
         })));
-        f.commit(Change::Inputs(vec![InputSetup {
-            channel: 1,
-            mic: Some("MM1 34804".into()),
-            curve: CurveChoice::Curve {
-                label: "90°".into(),
-            },
-        }]));
+        f.commit(Change::Inputs(InputSetups {
+            inputs: vec![InputSetup {
+                channel: 1,
+                kind: InputKind::Mic {
+                    mic: Some("MM1 34804".into()),
+                    curve: CurveChoice::Curve {
+                        label: "90°".into(),
+                    },
+                },
+                pair: None,
+            }],
+            pairs: Vec::new(),
+        }));
     }
     let mut opts = options(Some(&rig));
     opts.prefs.layout.panes = Some(common::grid_with_sweep_prefs());

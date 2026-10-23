@@ -113,7 +113,7 @@ impl AppState {
                             .map(|s| {
                                 s.inputs
                                     .iter()
-                                    .filter(|i| i.mic.is_some())
+                                    .filter(|i| i.mic().is_some())
                                     .map(|i| i.channel)
                                     .collect()
                             })
@@ -227,7 +227,7 @@ impl AppState {
                     .map(|s| {
                         s.inputs
                             .iter()
-                            .filter(|i| i.mic.is_some())
+                            .filter(|i| i.mic().is_some())
                             .cloned()
                             .collect()
                     })
@@ -317,7 +317,7 @@ impl AppState {
                 ) && let Some(input) = meas_input(&m.config.kind)
                 {
                     let mut row = self.input_setup(input);
-                    let Some(mic) = row.mic.clone() else {
+                    let Some(mic) = row.mic().map(str::to_owned) else {
                         self.warn(format!(
                             "input {} has no mic name: name it first (palette: Input setup…)",
                             u32::from(input) + 1
@@ -326,10 +326,14 @@ impl AppState {
                     };
                     let mics = self.daemon().map(|s| s.mics.clone()).unwrap_or_default();
                     ac2_proto::cal::settle(&mut row, &mics);
-                    row.curve =
-                        ac2_proto::cal::step(&row.curve, ac2_proto::cal::mic(&mics, &mic), true);
+                    row.set_curve(ac2_proto::cal::step(
+                        &row.curve(),
+                        ac2_proto::cal::mic(&mics, &mic),
+                        true,
+                    ));
                     let what = curve_what(&row);
-                    self.call(out, Command::SessionInputs { inputs: vec![row] }, what);
+                    let cmd = self.inputs_cmd(vec![row]);
+                    self.call(out, cmd, what);
                 }
             }
 

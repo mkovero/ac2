@@ -1,6 +1,7 @@
-//! Calibration commands (`docs/design/q7-calibration.md`): sensitivity calibrations
-//! (`cal.spl`, `cal.spl_electrical`, `cal.delete`), the mic library (`cal.curve_import`, `cal.curve_rename`,
-//! `cal.curve_delete`), the input setup (`session.inputs`) and `cal.list`.
+//! Calibration commands (`docs/design/q7-calibration.md`, `programme-meter.md` §1):
+//! sensitivity calibrations (`cal.spl`, `cal.spl_electrical`), line calibrations
+//! (`cal.line`), `cal.delete`, the mic library (`cal.curve_import`, `cal.curve_rename`,
+//! `cal.curve_delete`), the input setup with its pairs (`session.inputs`) and `cal.list`.
 //!
 //! Every change goes through [`Control::commit_store`]: the store file is written first
 //! (nothing is committed when that fails), then the changed entities are committed and the
@@ -11,8 +12,9 @@ use std::sync::Arc;
 use ac2_core::mic_curve::{MicCurve, file_info};
 use ac2_proto::cal;
 use ac2_proto::model::{
-    CalEntry, CalKey, CalMethod, CurveChoice, ElectricalConnection, InputSetup, Mic, MicCurveId,
-    MicCurveRef, MicLoading, SensitivitySource, SplCal,
+    CalEntry, CalKey, CalMethod, CalRef, CurveChoice, ElectricalConnection, InputKind, InputSetup,
+    InputSetups, LineCal, LineCalEntry, LineCalKey, MeasConfig, MeasKind, Mic, MicCurveId,
+    MicCurveRef, MicLoading, Pair, SensitivitySource, SplCal,
 };
 use ac2_proto::units::{Blob, Db, DbSpl, Dbfs, Hz, MvPerPa, Rev, Volts, WallNs};
 
@@ -24,14 +26,22 @@ use crate::calstore::{self, Contents, Curves};
 use crate::util::wall_ns;
 
 /// `inputs` with `channel`'s mic name set to `mic`; a new mic starts with no curve chosen
-/// (the old choice named another capsule's curve).
+/// (the old choice named another capsule's curve). The row is a mic's ([`Control::mic_input`]
+/// checked it).
 fn set_input_mic(inputs: &[InputSetup], channel: u16, mic: &str) -> Vec<InputSetup> {
     let mut row = cal::input_setup(inputs, channel);
-    if row.mic.as_deref() != Some(mic) {
-        row.mic = Some(mic.to_owned());
-        row.curve = CurveChoice::NotChosen;
+    if row.kind.mic() != Some(mic) {
+        row.kind = InputKind::Mic {
+            mic: Some(mic.to_owned()),
+            curve: CurveChoice::NotChosen,
+        };
     }
     upsert_inputs(inputs, vec![row])
+}
+
+/// Input `channel` as printed on the interface: 1-based.
+fn nth(channel: u16) -> u32 {
+    u32::from(channel) + 1
 }
 
 /// The fields of `cal.spl_electrical`.
@@ -66,8 +76,45 @@ impl Control {
         let st = self.store.state();
         Contents {
             calibrations: st.calibrations.clone(),
+            line_calibrations: st.line_calibrations.clone(),
             mics: st.mics.clone(),
             inputs: st.inputs.clone(),
+            pairs: st.pairs.clone(),
+        }
+    }
+
+    /// Input `channel` must be a microphone for a sensitivity calibration or a mic curve: a
+    /// line or digital input has no capsule to calibrate (`programme-meter.md` §1).
+    /// An SPL meter (and the Leq and band Leq inside it) is acoustic by definition: dB SPL
+    /// needs a capsule, and a line or digital feed has none.
+    pub(super) fn spl_needs_mic(&self, config: &MeasConfig) -> Result<(), ProtoError> {
+        match &config.kind {
+            MeasKind::Spl { config } => self.mic_input(config.input, "an SPL meter"),
+            _ => Ok(()),
+        }
+    }
+
+    pub(super) fn mic_input(&self, channel: u16, what: &str) -> Result<(), ProtoError> {
+        let kind = cal::input_kind(&self.store.state().inputs, channel);
+        if matches!(kind, InputKind::Mic { .. }) {
+            return Ok(());
+        }
+        Err(perr(
+            ErrorCode::Invalid,
+            format!(
+                "input {} is a {}; {what} needs a microphone",
+                nth(channel),
+                kind.word()
+            ),
+        ))
+    }
+
+    /// The whole input setup as mirrored.
+    fn input_setups(&self) -> InputSetups {
+        let st = self.store.state();
+        InputSetups {
+            inputs: st.inputs.clone(),
+            pairs: st.pairs.clone(),
         }
     }
 
@@ -95,6 +142,16 @@ impl Control {
                 changes.push(Change::Calibration(Patch::Deleted(e.key.clone())));
             }
         }
+        for e in &new.line_calibrations {
+            if !old.line_calibrations.contains(e) {
+                changes.push(Change::LineCalibration(Patch::Set(e.clone())));
+            }
+        }
+        for e in &old.line_calibrations {
+            if !new.line_calibrations.iter().any(|n| n.key == e.key) {
+                changes.push(Change::LineCalibration(Patch::Deleted(e.key.clone())));
+            }
+        }
         for m in &new.mics {
             if !old.mics.contains(m) {
                 changes.push(Change::Mic(Patch::Set(m.clone())));
@@ -105,8 +162,11 @@ impl Control {
                 changes.push(Change::Mic(Patch::Deleted(m.name.clone())));
             }
         }
-        if new.inputs != old.inputs {
-            changes.push(Change::Inputs(new.inputs));
+        if new.inputs != old.inputs || new.pairs != old.pairs {
+            changes.push(Change::Inputs(InputSetups {
+                inputs: new.inputs,
+                pairs: new.pairs,
+            }));
         }
         let mut rev = self.store.rev();
         for c in changes {
@@ -138,6 +198,7 @@ impl Control {
         input: u16,
         tone: &str,
     ) -> Result<(ac2_proto::model::DeviceId, f64), ProtoError> {
+        self.mic_input(input, "a sensitivity calibration")?;
         let device = self.cal_target(input)?;
         let Some(rt) = self.session.as_ref() else {
             return Err(perr(ErrorCode::Invalid, "no open session"));
@@ -395,8 +456,11 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         self.cal.check()?;
         calstore::check_mic_name(&mic)?;
-        if let (Some(i), Some(_)) = (input, self.session.as_ref()) {
-            self.cal_target(i)?;
+        if let Some(i) = input {
+            self.mic_input(i, "a mic curve")?;
+            if self.session.is_some() {
+                self.cal_target(i)?;
+            }
         }
         let base = file_name
             .rsplit(['/', '\\'])
@@ -464,10 +528,13 @@ impl Control {
                     &new.inputs,
                     vec![InputSetup {
                         channel: i,
-                        mic: Some(mic.clone()),
-                        curve: CurveChoice::Curve {
-                            label: label.clone(),
+                        kind: InputKind::Mic {
+                            mic: Some(mic.clone()),
+                            curve: CurveChoice::Curve {
+                                label: label.clone(),
+                            },
                         },
+                        pair: cal::input_setup(&new.inputs, i).pair,
                     }],
                 );
             }
@@ -519,15 +586,14 @@ impl Control {
         c.label.clone_from(&label);
         let renamed = m.clone();
         for r in &mut new.inputs {
-            if r.mic.as_deref() == Some(id.mic.as_str())
-                && r.curve
-                    == (CurveChoice::Curve {
-                        label: id.label.clone(),
-                    })
+            if let InputKind::Mic {
+                mic: Some(m),
+                curve: CurveChoice::Curve { label: l },
+            } = &mut r.kind
+                && *m == id.mic
+                && *l == id.label
             {
-                r.curve = CurveChoice::Curve {
-                    label: label.clone(),
-                };
+                l.clone_from(&label);
             }
         }
         let mut curves = self.cal.curves();
@@ -570,29 +636,127 @@ impl Control {
         Ok(ReplyBody::Ack { rev })
     }
 
-    /// Removes a sensitivity calibration, on any device: housekeeping of calibrations that
-    /// no longer describe the hardware (a mic sold, a device retired) needs no open session.
-    pub(super) fn cal_delete(&mut self, key: &CalKey) -> Result<ReplyBody, ProtoError> {
+    /// Removes a sensitivity or line calibration, on any device: housekeeping of
+    /// calibrations that no longer describe the hardware (a mic sold, a device retired) needs
+    /// no open session.
+    pub(super) fn cal_delete(&mut self, key: &CalRef) -> Result<ReplyBody, ProtoError> {
         self.cal.check()?;
         let mut new = self.cal_contents();
-        let before = new.calibrations.len();
-        new.calibrations.retain(|e| e.key != *key);
-        if new.calibrations.len() == before {
-            return Err(not_found(format!(
-                "no sensitivity calibration for {} on input {} of {}",
-                key.mic,
-                u32::from(key.channel) + 1,
-                key.device.0
+        let what = match key {
+            CalRef::Spl(key) => {
+                let before = new.calibrations.len();
+                new.calibrations.retain(|e| e.key != *key);
+                if new.calibrations.len() == before {
+                    return Err(not_found(format!(
+                        "no sensitivity calibration for {} on input {} of {}",
+                        key.mic,
+                        nth(key.channel),
+                        key.device.0
+                    )));
+                }
+                format!(
+                    "sensitivity calibration of {} on input {} of {}",
+                    key.mic,
+                    nth(key.channel),
+                    key.device.0
+                )
+            }
+            CalRef::Line(key) => {
+                let before = new.line_calibrations.len();
+                new.line_calibrations.retain(|e| e.key != *key);
+                if new.line_calibrations.len() == before {
+                    return Err(not_found(format!(
+                        "no line calibration of input {} of {}",
+                        nth(key.channel),
+                        key.device.0
+                    )));
+                }
+                format!(
+                    "line calibration of input {} of {}",
+                    nth(key.channel),
+                    key.device.0
+                )
+            }
+        };
+        let rev = self.commit_store(new, self.cal.curves())?;
+        tracing::info!("{what} deleted");
+        Ok(ReplyBody::Ack { rev })
+    }
+
+    /// `cal.line` (`programme-meter.md` §1.1): the operator measured `volts` RMS of a steady
+    /// tone at a line input while the meter read `read_dbfs`; the volts at 0 dBFS follow,
+    /// and dBu of 0 dBFS from them. The daemon reads nothing itself: the level was read off
+    /// the meter, at the operator's pace, as the voltmeter was.
+    pub(super) fn cal_line(
+        &mut self,
+        channel: u16,
+        volts: Volts,
+        read_dbfs: Dbfs,
+    ) -> Result<ReplyBody, ProtoError> {
+        self.cal.check()?;
+        let invalid = |m: String| perr(ErrorCode::Invalid, m);
+        let kind = cal::input_kind(&self.store.state().inputs, channel);
+        if kind != InputKind::Line {
+            return Err(invalid(format!(
+                "input {} is a {}; a line calibration is for a line input ({})",
+                nth(channel),
+                kind.word(),
+                match kind {
+                    InputKind::Mic { .. } => "a microphone reads dB SPL through `cal.spl`",
+                    _ => "a digital feed has no voltage: 0 dBFS is its full scale",
+                }
             )));
         }
-        let rev = self.commit_store(new, self.cal.curves())?;
+        // Ranges that catch a unit slip (mV typed as V) rather than limits of the method.
+        if !(volts.0.is_finite() && (1e-3..=100.0).contains(&volts.0)) {
+            return Err(invalid(format!(
+                "measured voltage {} V is outside 1 mV … 100 V RMS",
+                volts.0
+            )));
+        }
+        if !(read_dbfs.0.is_finite()
+            && (cal::ELECTRICAL_MIN_DBFS..=cal::ELECTRICAL_MAX_DBFS).contains(&read_dbfs.0))
+        {
+            return Err(invalid(format!(
+                "level read {} dBFS is outside {} … {} dBFS",
+                read_dbfs.0,
+                cal::ELECTRICAL_MIN_DBFS,
+                cal::ELECTRICAL_MAX_DBFS
+            )));
+        }
+        let v_fs = cal::full_scale_volts(volts.0, read_dbfs.0);
+        let dbu_fs = cal::dbu_fs(v_fs);
+        let (lo, hi) = cal::LINE_DBU_FS_RANGE;
+        if !(lo..=hi).contains(&dbu_fs.0) {
+            return Err(invalid(format!(
+                "{} V at {} dBFS puts full scale at {:+.1} dBu, outside {lo:+} … {hi:+} dBu: \
+                 check the voltage (volts RMS, not millivolts) and the level",
+                volts.0, read_dbfs.0, dbu_fs.0
+            )));
+        }
+        let device = self.cal_target(channel)?;
+        let entry = LineCalEntry {
+            key: LineCalKey { device, channel },
+            line: LineCal {
+                v_fs: Volts(v_fs),
+                volts,
+                measured: read_dbfs,
+                calibrated_at: WallNs(wall_ns()),
+            },
+        };
+        let mut new = self.cal_contents();
+        new.line_calibrations.retain(|e| e.key != entry.key);
+        new.line_calibrations.push(entry.clone());
+        self.commit_store(new, self.cal.curves())?;
         tracing::info!(
-            "sensitivity calibration of {} on input {} of {} deleted",
-            key.mic,
-            u32::from(key.channel) + 1,
-            key.device.0
+            "input {} line calibrated: {} V RMS at {:.2} dBFS, full scale {:.3} V = {:+.1} dBu",
+            nth(channel),
+            volts.0,
+            read_dbfs.0,
+            v_fs,
+            dbu_fs.0
         );
-        Ok(ReplyBody::Ack { rev })
+        Ok(ReplyBody::LineCalibration(entry))
     }
 
     pub(super) fn cal_list(&self) -> Result<ReplyBody, ProtoError> {
@@ -600,30 +764,42 @@ impl Control {
         let st = self.store.state();
         Ok(ReplyBody::Calibrations {
             calibrations: st.calibrations.clone(),
+            line_calibrations: st.line_calibrations.clone(),
             mics: st.mics.clone(),
         })
     }
 
+    /// `session.inputs`: rows upsert, the pair list replaces. The rows are checked as given,
+    /// the pairs over the merged setup (a row's kind may change under a pair), and every
+    /// row's `pair` side is set from the list.
     pub(super) fn session_inputs(
         &mut self,
         rows: Vec<InputSetup>,
+        pairs: Vec<Pair>,
     ) -> Result<ReplyBody, ProtoError> {
         self.cal.check()?;
         let st = self.store.state();
         for (i, r) in rows.iter().enumerate() {
-            let n = u32::from(r.channel) + 1;
+            let n = nth(r.channel);
             if rows[..i].iter().any(|o| o.channel == r.channel) {
                 return Err(perr(ErrorCode::Invalid, format!("input {n} listed twice")));
             }
-            if let Some(m) = &r.mic {
+            let InputKind::Mic { mic, curve } = &r.kind else {
+                continue;
+            };
+            if let Some(m) = mic {
                 calstore::check_mic_name(m)?;
             }
             // A row as it is may keep a curve no longer stored: it says so where shown.
-            if st.inputs.contains(r) {
+            if st
+                .inputs
+                .iter()
+                .any(|x| x.channel == r.channel && x.kind == r.kind)
+            {
                 continue;
             }
-            if let CurveChoice::Curve { label } = &r.curve {
-                let Some(m) = &r.mic else {
+            if let CurveChoice::Curve { label } = curve {
+                let Some(m) = mic else {
                     return Err(perr(
                         ErrorCode::Invalid,
                         format!("input {n}: a curve is chosen for a mic; name the mic first"),
@@ -639,14 +815,28 @@ impl Control {
             }
         }
         let mut new = self.cal_contents();
-        new.inputs = upsert_inputs(&new.inputs, rows);
+        let merged = upsert_inputs(&new.inputs, rows);
+        let captured = self.session.as_ref().map(|rt| rt.input_map.clone());
+        let captured_fn = |ch: u16| captured.as_ref().is_some_and(|m| m.contains(&ch));
+        cal::check_pairs(
+            &merged,
+            &pairs,
+            captured
+                .is_some()
+                .then_some(&captured_fn as &dyn Fn(u16) -> bool),
+        )
+        .map_err(|e| perr(ErrorCode::Invalid, e))?;
+        let mut pairs = pairs;
+        pairs.sort_by_key(|p| p.left);
+        new.inputs = cal::apply_pair_sides(&merged, &pairs);
+        new.pairs = pairs;
         let mut settled = new.inputs.clone();
         for r in &mut settled {
             cal::settle(r, &new.mics);
         }
-        if settled != self.store.state().inputs {
+        if settled != self.store.state().inputs || new.pairs != self.store.state().pairs {
             self.commit_store(new, self.cal.curves())?;
         }
-        Ok(ReplyBody::Inputs(self.store.state().inputs.clone()))
+        Ok(ReplyBody::Inputs(self.input_setups()))
     }
 }
