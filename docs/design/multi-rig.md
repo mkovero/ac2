@@ -57,9 +57,12 @@ pub struct App {
 }
 ```
 
-`RigId` is the server's CURVE public key: stable across reconnects, address changes and
-renames, and it is what pairing already keys on. Display name from the hello (and
-discovery), re-read on each connect.
+`RigId` is a daemon identity the hello reply carries: a random id the daemon makes once and
+keeps in its config directory beside `server.key`. It cannot be the CURVE key: a local
+(ipc) or embedded daemon runs without CURVE and has none. The id is stable across
+reconnects, address changes, renames and a move from local to network mode; pairing still
+keys on the CURVE key, and the Connection page shows that key's fingerprint as today.
+Display name from the hello (and discovery), re-read on each connect.
 
 **Ids are per daemon.** `MeasId`, `TraceId`, `PairId` and frame topics collide across rigs,
 and the app keys a dozen maps by them today (bar origins, traces, edits, peaks,
@@ -83,10 +86,11 @@ stimulus in parallel, each within `QUIT_GRACE`.
 ### Stimulus awareness
 
 Stimulus runs per rig under its own lease. The top bar shows the active rig's stimulus as
-today and names the rig when more than one is connected (stage 1). A chip per *other* rig
-whose stimulus this app holds (*▶ pupu −20 dBFS*) and Shift+Escape stopping every rig's
-stimulus follow in stage 2: sound coming out of a system you are not looking at must not be
-silent in the UI.
+today and names the rig when more than one is connected. **Shift+Escape stops every rig's
+stimulus** and is in stage 1 with the tabs: the moment two rigs can play, a stop that needs
+a tab switch first is not the universal stop decision K1 promises. A chip per *other* rig
+whose stimulus this app holds (*▶ pupu −20 dBFS*) follows in stage 2: sound coming out of a
+system you are not looking at must not be silent in the UI.
 
 ## 2. Pane sources and the P1 ruling (N2)
 
@@ -104,17 +108,27 @@ pub enum RigRef {
 
 `Active` is the default in the layout prefs. In a **session file** a pane source is
 `ThisRig` or `Rig`, never `Active`: a session is one daemon's, and "the active tab" at load
-time could be another rig's ids. The picker and a drop set `Rig` when the source is not the
-active rig.
+time could be another rig's ids. Enforced where each side can: the daemon refuses `Active`
+in `meas.layout` by name (*a measurement's layout names its own rig or another, never the
+active tab*); the app maps `ThisRig` to the session's rig at load and writes `ThisRig` for
+that rig on save. A `Rig { .. }` pane's content is another daemon's ids, which this daemon
+cannot check: it stores them opaque and the app resolves them. The picker and a drop set
+`Rig` when the source is not the active rig.
 
 Pane sources live in the measurement's layout (`Measurement.layout`, sent by `meas.layout`,
 saved in the session: decision P1), so adding `RigRef` and `PaneContent` is a **`PROTO_VERSION`
 and session format bump**, in stage 1.
 
-**P1 across rigs.** P1 says choosing a measurement row brings its own panes. With rigs: a
-brought layout of rig A's measurement replaces only the panes whose source is `Active` or
-`ThisRig`/`Rig` of A; panes pinned to another rig stay where they are. The operator who put
-ketunkolo's loudness beside pupu's meter keeps it when stepping through pupu's measurements.
+**P1 across rigs.** P1 says choosing a measurement row brings its own panes and stores the
+panes edited while it is chosen. With rigs, a measurement's layout **stores only `ThisRig`
+panes**: a pane pinned to another rig is never written into a measurement's layout (it
+would come back as a duplicate of the pinned pane already on screen); it lives in the app's
+layout prefs. Bringing rig A's measurement replaces the panes whose source is `Active` or
+`ThisRig` of A and leaves pinned panes where they are. The operator who put ketunkolo's
+loudness beside pupu's meter keeps it when stepping through pupu's measurements. A
+Programme pane opened from a pair row (a child row; no measurement chosen) is likewise the
+app's: child rows never store panes (list click model), so it is saved in the layout prefs
+only.
 
 Layout prefs save `Rig` by key and name. Loading a session whose panes reference a rig this
 app has not connected shows those panes as *ketunkolo not connected* with the content's
@@ -220,14 +234,15 @@ rig and are display only (`ac2-discovery` already trusts nothing).
 ## Stages
 
 1. **Many rigs, tabs, mixed panes** — the `AppState` split and id namespacing (§1),
-   `RigId`, tagged events, key routing rule, tabs, `PaneSource { RigRef, PaneContent }` in
-   `Measurement.layout` and the layout prefs with the P1 ruling (`PROTO_VERSION` and session
-   format bump), picker per rig, arm line and banner naming the rig, Connect… adds a rig,
-   remembered rigs. Tests: the app's e2e tests start two fake daemons; a session saved with
+   `RigId` in the hello reply, tagged events, key routing rule, tabs, `PaneSource { RigRef,
+   PaneContent }` in `Measurement.layout` and the layout prefs with the P1 storage rule and
+   the daemon's refusal of `Active` (`PROTO_VERSION` and session format bump), picker per
+   rig, arm line and banner naming the rig, Shift+Escape stopping every rig, Connect… adds a
+   rig, remembered rigs. Tests: the app's e2e tests start two fake daemons; a session saved with
    `ThisRig` panes loads right on either tab.
-2. **Clock reporting and stimulus awareness** — daemon state gains the clock lines of §4
+2. **Clock reporting and stimulus chips** — daemon state gains the clock lines of §4
    (`PROTO_VERSION` bump), Connection page shows them, `ac2 status` prints them; other-rig
-   stimulus chips and Shift+Escape.
+   stimulus chips in the top bar.
 3. **Remote inputs** — after the timestamp and latency study; redesigned then on the list
    in §3.
 

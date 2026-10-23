@@ -50,11 +50,18 @@ pub enum InputKind {
   makes it `Line`, **A** `Digital` (AES; keys to be confirmed against the page's scoped key
   table at build time — the page already uses R M N S D P, Space and arrows). Default for a
   new input: `Line`.
-- Reference (**R**) is a role, not a kind: the loopback is `Line` or `Digital`. A reference
-  input's row reads dBFS and carries no calibration mark — a loopback never needs dBu, and
-  *uncalibrated* on every rig forever would be noise.
+- Reference (**R**) is a role, not a kind: the loopback is `Line` or `Digital`.
+- A `Line` input without a line calibration reads **dBFS** and its row says *dBFS*, not
+  *uncalibrated*: a console feed metered in dBFS is complete as it is, and a nag on every
+  line input (the loopback among them) would be noise. *dBu* appears once a line
+  calibration exists, with its age, like a mic calibration's.
+- Measurement kinds that are acoustic by definition — SPL meter, Leq, band Leq — take a
+  `Mic` input only and refuse a `Line` or `Digital` one by name (*Stage is a line input;
+  an SPL meter needs a microphone*). Transfer, spectrum, RTA and sweeps take any kind: a
+  ratio or a dBFS spectrum of a line feed is a sound measurement too.
 - Sensitivity calibration (`spl`) is offered on `Mic` only. A line calibration (§1.1) on
-  `Line` only. `Digital` is never calibrated: its reference is the word's full scale, and
+  `Line` only. Decision K8 (mic name per input) is superseded in form, not substance: the
+  name and curve now live inside `Mic`. `Digital` is never calibrated: its reference is the word's full scale, and
   offering a calibration would invent a volt that does not exist.
 - Backends cannot tell AES from analogue (a JACK port, an ASIO or Core Audio channel name
   say nothing reliable), so the kind is declared, like the MSD's input menu, and remembered
@@ -76,7 +83,7 @@ calibration (that one is shaped around a capsule): `line` under `(device uid, in
 channel)` with `v_fs`, `measured_dbfs`, `volts`, `calibrated_at`. New command `cal.line
 { channel, volts, read_dbfs }`, CLI `ac2 cal line`, listed by `cal.list` beside the mic
 calibrations and removed by `cal.delete`. A `Line` input without one reads dBFS and its row
-says *uncalibrated*, like an uncalibrated mic.
+says *dBFS* (§1).
 
 The dBu scale of a calibrated line input runs `dBu_FS − 60 … dBu_FS` (full scale sits at
 +13 … +24 dBu on real interfaces; nominal +4 dBu is in the upper part, the top 3 dB in the
@@ -131,17 +138,22 @@ The ballistic is a **rig setting** (`levels.set { ballistic, correlator, over_th
 in the daemon's rig settings beside the system max level), not an app preference: the
 daemon computes the quantity, so the daemon owns the choice, and two apps on one rig — or a
 Pi kiosk and a laptop — read the same bar. Another rig may choose otherwise. The daemon
-runs **every** ballistic all the time (four one-pole detectors per channel) and reports the
-chosen one, so a change reads a settled detector at once, as `SplMeter` does for its
-weightings.
+runs **every** ballistic all the time and reports the chosen one, so a change reads a
+settled detector at once, as `SplMeter` does for its weightings. The cost is the true-peak
+interpolator (a 48-tap polyphase FIR, 48 multiply-adds a sample a channel: about a percent
+of one Pi 4 core for eight channels) plus two two-rate detectors (one-pole attack,
+linear-in-dB release) and one one-pole mean per channel.
 
 Quasi-peak model: full-wave rectifier, first-order attack, exponential (linear-in-dB) return
-at the stated rate. The attack is fitted to the standard's **burst table** (0.5, 1.5, 5, 10,
-100 ms bursts and their readings), not to one burst; the `tools/refgen` vectors are that
-table plus a step down, so a constant that misses the standard fails a test rather than
-hiding in a comment. The constants above are the standards' as the MSD spec sheet states
-them and are checked against the IEC 60268-10 text before the vectors are frozen. VU: a
-first-order mean of |x| with the stated settling, symmetric. True peak: the BS.1770
+at the stated rate. IEC 60268-10 specifies each type by a **table of tone-burst lengths and
+the reading each must give, with a tolerance per row**, not by one integration time; the
+`tools/refgen` vectors are that table plus a step down, and the acceptance is the standard's
+per-row tolerance. A single attack time constant fitted to one row may miss the shortest
+bursts by a few dB; if it does, the attack takes a second time constant rather than the
+table losing rows. The table itself is not in hand (paid text) and is not reproduced here:
+the constants quoted in the enum are the MSD spec sheet's, and the vectors are frozen only
+after the standard has been read. VU: a first-order mean of |x| with the stated settling,
+symmetric. True peak: the BS.1770
 polyphase interpolator (48 taps at 4×; 2× at 96 kHz), max |x| per block, in dBTP.
 
 Per input the frame carries (dBFS; the front end converts to dBu / dB SPL from the kind and
@@ -150,9 +162,9 @@ its calibration, so one wire quantity serves every scale):
 | field | what |
 |---|---|
 | `rms` | as today |
-| `ppm` | the chosen ballistic's reading (`None` for VU on an input it is not offered on) |
+| `ppm` | the chosen ballistic's reading; where VU is chosen but not offered (a mic or digital input, or an uncalibrated line input) the true-peak reading, and the row says *VU needs a line calibration · true peak shown* — a rig setting never blanks a bar |
 | `true_peak` | dBTP, this frame |
-| `max` | the highest `ppm` since the last reset (daemon) |
+| `max` | the highest reading of the chosen ballistic since the last reset (daemon; held per ballistic, since all run, so a ballistic change does not splice a Type I maximum onto true-peak readings) |
 | `overs` | over events since the last reset (daemon) |
 | `clip` | as today: samples at full scale (the converter's own clip) |
 
@@ -269,7 +281,8 @@ with a log like the SPL meter's; the pane's numbers stay the live view.
 - **Rig settings** (daemon, `levels.set`, beside the system max level; `ac2 levels`):
   ballistic, correlator window (s), over threshold (dBTP), correlation gate (dBFS). The
   daemon computes these quantities, so it owns their parameters and every client reads
-  alike.
+  alike. `levels.set` is a rig edit under decision R3: it names the rig rev it was made on
+  and is refused with `conflict` when another client changed it first.
 - **App Settings**: ember decay only — how a shape fades is how this operator likes to
   look, and no number depends on it.
 
@@ -283,7 +296,9 @@ with a log like the SPL meter's; the pane's numbers stay the live view.
   pairs. `PROTO_VERSION` bump.
 - `InputSetup` becomes `{ channel, kind, pair }`; `session.open` refuses the rule
   violations of §1 and §2 by name. Session format bump; older sessions load with `Mic` where
-  a mic name was and `Line` elsewhere, no pairs.
+  a mic name was and `Line` elsewhere, no pairs — and the app re-applies its remembered
+  `DeviceRoles.mics` on load, so an unnamed mic (the M role without a name) stays `Mic` and
+  its SPL meter is not refused.
 - Line calibrations are a new entry kind in the calibration store, same file.
 - `DeviceRoles` (app prefs) remembers kinds and pairs per device.
 - Rig settings file gains the four values of §7.
