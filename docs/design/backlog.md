@@ -3,6 +3,14 @@
 Work found in use, not yet scheduled into a phase. Newest first. When an item lands, move it
 to `backlog-done.md` as one line with the commit.
 
+## Programme metering (design `programme-meter.md`)
+
+- **Not started.** Stages: (1) input domains + pairs + line calibration, (2) PPM ballistics,
+  true peak, overs, correlation, ember goniometer, Programme pane, (3) loudness. Open before
+  stage 2: the I/O page keys for domain and pair (the page uses R M N S D P, Space, arrows;
+  everyday keys plain/Shift/Alt only), and the ballistic constants against the IEC 60268
+  texts.
+
 ## Band Leq (design `band-leq.md`)
 
 - **The daemon drops a frame that fails to encode without a word.** With 22 band windows the

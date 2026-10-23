@@ -12,6 +12,9 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - CI on push is Linux only; macOS/Windows run before a release or on dispatch
   (`CLAUDE.md` *Rules*). Rigs run locally built binaries: `docs/rigs/pupu.md` *Deploy log*.
   A session format change on deploy is restored with `ac2 session salvage`.
+- Designed, not built: programme metering on the console feed (input domains, stereo pairs,
+  PPM ballistics, correlation, ember goniometer, Programme pane, loudness as stage 3):
+  `docs/design/programme-meter.md`, decisions V1–V6.
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
