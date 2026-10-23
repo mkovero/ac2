@@ -178,7 +178,7 @@ that may be below full scale) are different events and never share a word. `leve
 { channels }` clears max and overs; the UI's **R** on an Inputs-list row sends it.
 
 Preview (before a session opens): the app passes the device's remembered kinds and pairs in
-`preview.start`, so preview bars read dBu on a calibrated line input, pair rows pair, and
+`session.preview`, so preview bars read dBu on a calibrated line input, pair rows pair, and
 the correlation runs — you can check the console feed before opening, as you find a mic by
 tapping it today.
 
@@ -292,11 +292,13 @@ with a log like the SPL meter's; the pane's numbers stay the live view.
   per channel and `pairs: Vec<PairLevels { left, right, correlation: Option<f32>,
   quiet: Option<Side> }>`; `LevelsMeta` names the ballistic in force so a frame is
   self-describing. A `gonio` frame topic per pair carries the 256 quantised points.
-  `levels.set`, `levels.reset { channels }`, `cal.line`; `preview.start` carries kinds and
+  `levels.set`, `levels.reset { channels }`, `cal.line`; `session.preview` carries kinds and
   pairs. `PROTO_VERSION` bump.
-- `InputSetup` becomes `{ channel, kind, pair }`; `session.open` refuses the rule
-  violations of §1 and §2 by name. Session format bump; older sessions load with `Mic` where
-  a mic name was and `Line` elsewhere, no pairs — and the app re-applies its remembered
+- `InputSetup` becomes `{ channel, kind, pair }`; `session.inputs` (the command that sets
+  them after `session.open`) refuses the rule violations of §1 and §2 by name, and pairs
+  travel with it. Input setups live in the daemon's calibration store (`StoreFile.inputs`),
+  not in session files, so the bump is the store's version: an older store loads with `Mic`
+  where a mic name was and `Line` elsewhere, no pairs — and the app re-applies its remembered
   `DeviceRoles.mics` on load, so an unnamed mic (the M role without a name) stays `Mic` and
   its SPL meter is not refused.
 - Line calibrations are a new entry kind in the calibration store, same file.
@@ -334,8 +336,8 @@ with a log like the SPL meter's; the pane's numbers stay the live view.
 
 1. **Kinds and pairs** — `InputKind`, `pair` in `InputSetup` and `DeviceRoles`, the I/O
    page keys and chips, pair rows in the Inputs list, the line calibration kind with
-   `cal.line` and `ac2 cal line`, `preview.start` carrying kinds and pairs, session and
-   proto bumps, `ac2 session` CLI. Meters unchanged otherwise; a calibrated line input
+   `cal.line` and `ac2 cal line`, `session.preview` carrying kinds and pairs, calibration
+   store and proto bumps, `ac2 session` CLI. Meters unchanged otherwise; a calibrated line input
    already reads dBu.
 2. **PPM, correlation, goniometer, pane** — `ac2_core::ppm` (ballistics against the burst
    table, true peak, overs) and `ac2_core::stereo` (gated correlation, gonio points, auto
