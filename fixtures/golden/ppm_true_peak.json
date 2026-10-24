@@ -1,0 +1,129 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "ppm_true_peak",
+  "description": "BS.1770-5 Annex 2 true peak (order-48, 4-phase FIR, 4x at every rate): per-block maxima for an fs/4 sine sampled 45 deg off its peak, an 11.025 kHz sine at 44.1 kHz, and a pink-noise burst.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_ppm_true_peak"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "taps": "h[4m + p] = Annex 2 table column p (phase) row m; y[4n+p] = sum_m h[4m+p] x[n-m]; scipy.signal.upfirdn(h, x, up=4)",
+    "block_samples": 480,
+    "sine_fs4": "sin(pi n / 2 + pi / 4) at 48 kHz: sample peak -3.01 dBFS, true peak 0 dBTP",
+    "sine_11025": "sin(pi n / 2) at 44.1 kHz",
+    "pink": "white Gaussian shaped 1/sqrt(f) in the FFT domain, scaled to peak 0.5, seed 0x5EED7B"
+  },
+  "references": [
+    "ITU-R BS.1770-5 Annex 2 (over-sampled peak)"
+  ],
+  "scalars": {
+    "sine_fs4_sample_peak": 0.7071067690849304,
+    "sine_fs4_true_peak": 1.0051584870598163,
+    "sine_11025_true_peak": 0.9775390625001349
+  },
+  "blob": {
+    "file": "ppm_true_peak.bin",
+    "nbytes": 115824,
+    "sha256": "aed5c9e8a05a35bb052ae8c6a09630a87cf9df6e113fff350eed031d4184de2a"
+  },
+  "arrays": [
+    {
+      "name": "phases",
+      "dtype": "f64",
+      "shape": [
+        12,
+        4
+      ],
+      "offset": 0,
+      "nbytes": 384,
+      "unit": "1",
+      "description": "filter coefficients, [row m][phase p]"
+    },
+    {
+      "name": "sine_fs4_input",
+      "dtype": "f64",
+      "shape": [
+        4800
+      ],
+      "offset": 384,
+      "nbytes": 38400,
+      "unit": "FS",
+      "description": "sine_fs4 input"
+    },
+    {
+      "name": "sine_fs4_block_true_peak",
+      "dtype": "f64",
+      "shape": [
+        10
+      ],
+      "offset": 38784,
+      "nbytes": 80,
+      "unit": "FS",
+      "description": "sine_fs4 true peak per 480-sample block",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0001,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "sine_11025_input",
+      "dtype": "f64",
+      "shape": [
+        4800
+      ],
+      "offset": 38864,
+      "nbytes": 38400,
+      "unit": "FS",
+      "description": "sine_11025 input"
+    },
+    {
+      "name": "sine_11025_block_true_peak",
+      "dtype": "f64",
+      "shape": [
+        10
+      ],
+      "offset": 77264,
+      "nbytes": 80,
+      "unit": "FS",
+      "description": "sine_11025 true peak per 480-sample block",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0001,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "pink_input",
+      "dtype": "f64",
+      "shape": [
+        4800
+      ],
+      "offset": 77344,
+      "nbytes": 38400,
+      "unit": "FS",
+      "description": "pink input"
+    },
+    {
+      "name": "pink_block_true_peak",
+      "dtype": "f64",
+      "shape": [
+        10
+      ],
+      "offset": 115744,
+      "nbytes": 80,
+      "unit": "FS",
+      "description": "pink true peak per 480-sample block",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0001,
+        "rel": 0.0
+      }
+    }
+  ]
+}

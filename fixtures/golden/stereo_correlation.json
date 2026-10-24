@@ -1,0 +1,253 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "stereo_correlation",
+  "description": "Zero-lag normalised cross-correlation over an exponential 0.3 s window, one reading per 480-sample block, gated per side at -60 dBFS; pink noise pairs: mono, one side only, reversed, independent, 1 ms delayed copy, and a left side 50 dB down (gated).",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_stereo_correlation"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "window_s": 0.3,
+    "gate_dbfs": -60.0,
+    "block_samples": 480,
+    "detector": "(identical in `ac2_core::stereo::",
+    "gate": "mean square < 10^(gate/10) / 2 (0 dBFS = full-scale sine); left checked first; r = 0 where gated",
+    "quiet_codes": {
+      "none": 0.0,
+      "left": 1.0,
+      "right": 2.0
+    },
+    "cases": "l, r from p, q (rounded to f32 after composition): mono (p, p); left_only (p, 0); right_only (0, p); reversed (p, -p); independent (p, q); delayed_1ms (p, p delayed 48 samples, zeros first); gated_left (p * 10^(-50/20), q)",
+    "pink": "white Gaussian shaped 1/sqrt(f) in the FFT domain, unit RMS, scaled to -20 dBFS RMS (0.1 FS); seed 0x5EEDC0; delayed copy: 48 samples"
+  },
+  "references": [
+    "docs/design/programme-meter.md §4"
+  ],
+  "scalars": {
+    "gonio_left_only_x_times_y_max": -2.9262856345327665e-08
+  },
+  "blob": {
+    "file": "stereo_correlation.bin",
+    "nbytes": 779200,
+    "sha256": "07a69cff360a80246cff166609f0e564ef36042b0ecccac8131b9b72acbd0161"
+  },
+  "arrays": [
+    {
+      "name": "p",
+      "dtype": "f64",
+      "shape": [
+        48000
+      ],
+      "offset": 0,
+      "nbytes": 384000,
+      "unit": "FS",
+      "description": "pink noise p, -20 dBFS RMS"
+    },
+    {
+      "name": "q",
+      "dtype": "f64",
+      "shape": [
+        48000
+      ],
+      "offset": 384000,
+      "nbytes": 384000,
+      "unit": "FS",
+      "description": "pink noise q, independent of p"
+    },
+    {
+      "name": "mono_r",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 768000,
+      "nbytes": 800,
+      "unit": "1",
+      "description": "mono correlation per block",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0001,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "mono_quiet",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 768800,
+      "nbytes": 800,
+      "unit": "code",
+      "description": "mono quiet side code"
+    },
+    {
+      "name": "left_only_r",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 769600,
+      "nbytes": 800,
+      "unit": "1",
+      "description": "left_only correlation per block",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0001,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "left_only_quiet",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 770400,
+      "nbytes": 800,
+      "unit": "code",
+      "description": "left_only quiet side code"
+    },
+    {
+      "name": "right_only_r",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 771200,
+      "nbytes": 800,
+      "unit": "1",
+      "description": "right_only correlation per block",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0001,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "right_only_quiet",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 772000,
+      "nbytes": 800,
+      "unit": "code",
+      "description": "right_only quiet side code"
+    },
+    {
+      "name": "reversed_r",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 772800,
+      "nbytes": 800,
+      "unit": "1",
+      "description": "reversed correlation per block",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0001,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "reversed_quiet",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 773600,
+      "nbytes": 800,
+      "unit": "code",
+      "description": "reversed quiet side code"
+    },
+    {
+      "name": "independent_r",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 774400,
+      "nbytes": 800,
+      "unit": "1",
+      "description": "independent correlation per block",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0001,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "independent_quiet",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 775200,
+      "nbytes": 800,
+      "unit": "code",
+      "description": "independent quiet side code"
+    },
+    {
+      "name": "delayed_1ms_r",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 776000,
+      "nbytes": 800,
+      "unit": "1",
+      "description": "delayed_1ms correlation per block",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0001,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "delayed_1ms_quiet",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 776800,
+      "nbytes": 800,
+      "unit": "code",
+      "description": "delayed_1ms quiet side code"
+    },
+    {
+      "name": "gated_left_r",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 777600,
+      "nbytes": 800,
+      "unit": "1",
+      "description": "gated_left correlation per block",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0001,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "gated_left_quiet",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 778400,
+      "nbytes": 800,
+      "unit": "code",
+      "description": "gated_left quiet side code"
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "ppm_vu_step",
+  "description": "IEC 60268-17 VU: first-order mean of |x| (99 % in 300 ms) scaled so a steady sine reads its RMS; a 1 kHz tone switched on at t = 0, the state after every 10 ms block for 1 s.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_ppm_vu_step"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "tone_hz": 1000.0,
+    "amplitude_fs": 0.5,
+    "tau_s": 0.06514417228548777,
+    "tau": "0.3 / ln 100",
+    "detector": "y[n] = y[n-1] + alpha (|x[n]| - y[n-1]), alpha = 1 - exp(-1/(fs tau)); reading = y * pi / (2 sqrt 2)",
+    "block_samples": 480
+  },
+  "references": [
+    "IEC 60268-17 (300 ms to 99 %)"
+  ],
+  "scalars": {
+    "rms": 0.35355339059327373
+  },
+  "blob": {
+    "file": "ppm_vu_step.bin",
+    "nbytes": 1184,
+    "sha256": "9893e799ee13ab4e4e81a0017f0a93d2962eb06a765ef4f49e1d082edb60ffc0"
+  },
+  "arrays": [
+    {
+      "name": "period",
+      "dtype": "f64",
+      "shape": [
+        48
+      ],
+      "offset": 0,
+      "nbytes": 384,
+      "unit": "FS",
+      "description": "one period of the tone (48 samples)"
+    },
+    {
+      "name": "reading",
+      "dtype": "f64",
+      "shape": [
+        100
+      ],
+      "offset": 384,
+      "nbytes": 800,
+      "unit": "FS",
+      "description": "VU reading after each 10 ms block",
+      "tolerance": {
+        "kind": "db",
+        "db": 0.05,
+        "floor_db": -80.0
+      }
+    }
+  ]
+}

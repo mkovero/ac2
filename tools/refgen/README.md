@@ -90,6 +90,8 @@ Each set's JSON `description` and `parameters` say exactly what it holds; module
 | `spectrum_density` | spectrum density `2·c_k·|X_k|²/(fs·Σw²)` (twice the PSD below, so it keeps the dBFS reference: white noise σ reads `4σ²/fs`), 1024-point Hann at 48 kHz, FIFO 32, on noise + sine and pink noise [`density.py`] |
 | `multires_density`, `multires_spectrum` | multi-resolution spectrum at 12 kHz on the 1/24 grid: density divided by `B(f) = Σ w_b·ENBW·fs/N_b`, and tone level with bands blended in power [`density.py`, `multires.py`] |
 | `display_smoothing_biquad`, `display_ir_etc` | fractional-octave display smoothing (power and complex); live IR by circular IFFT and ETC from the Hilbert envelope [`display.py`] |
+| `ppm_quasi_peak`, `ppm_vu_step`, `ppm_true_peak` | IEC 60268-10 Type I / II quasi-peak (two-charge attack fitted to the burst table by `ppm.py --fit`) over a 5 kHz burst sequence; VU step; BS.1770-5 Annex 2 true peak per block [`ppm.py`] |
+| `stereo_correlation` | zero-lag correlation over a 0.3 s exponential window, gated per side, on pink-noise pairs (mono, one side, reversed, independent, 1 ms delayed) [`stereo.py`] |
 
 ## Conventions
 
