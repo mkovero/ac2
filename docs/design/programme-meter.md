@@ -591,7 +591,7 @@ numbers stay the live view.
    gain) with refgen vectors; levels frames extended, `gonio` topic, `levels.set` /
    `levels.reset` and the rig settings; scene text for rows, chips and pane; `ac2-plot`
    ember renderer and golden images; `PaneKind::Programme` and `PaneContent`.
-3. **Loudness** — `ac2_core::loudness` with Tech 3341/3342 vectors, the pane's column,
+3. **Loudness** (landed) — `ac2_core::loudness` with Tech 3341/3342 vectors, the pane's column,
    `since … R resets`.
 
 Each stage is one landed batch.

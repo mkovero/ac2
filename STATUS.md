@@ -12,11 +12,13 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - CI on push is Linux only; macOS/Windows run before a release or on dispatch
   (`CLAUDE.md` *Rules*). Rigs run locally built binaries: `docs/rigs/pupu.md` *Deploy log*.
   A session format change on deploy is restored with `ac2 session salvage`.
-- Programme metering on the console feed, stages 1–2 landed: input kinds mic / line /
+- Programme metering on the console feed, stages 1–3 landed: input kinds mic / line /
   digital, stereo pairs, line calibration in dBu (`cal.line`, `session.inputs`); PPM
   ballistics, true peak, overs, gated correlation, ember goniometer, `levels.set` /
-  `levels.reset`, the Programme pane and the Inputs list's readouts (PROTO 66, session format
-  32). Stage 3 (loudness) designed, not built: `docs/design/programme-meter.md`, V1–V6.
+  `levels.reset`, the Programme pane and the Inputs list's readouts; BS.1770-5 / R128
+  loudness per line/digital source (momentary, short-term, integrated, LRA, max true peak;
+  EBU Tech 3341/3342 vectors) in the pane's column and `ac2 levels` (PROTO 67, session format
+  32). Design: `docs/design/programme-meter.md`, V1–V6 and §6.1.
 - Designed, not built: many rigs in one app (tabs, mixed panes, remote inputs, clocks across
   PTP hosts): `docs/design/multi-rig.md`, decisions N1–N6.
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
