@@ -231,6 +231,41 @@ pub struct Label {
     pub clip: Option<Rect>,
 }
 
+/// How a primitive's colour combines with what is already drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Blend {
+    /// Source over: the usual translucent paint.
+    Alpha,
+    /// Light added to light: overlapping points brighten each other, so a dense core glows
+    /// while a sparse halo stays faint (the goniometer's embers). The background shows
+    /// through as the sum, so this only reads on a dark field.
+    Additive,
+}
+
+/// One point of a [`Points`] cloud.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Point {
+    /// Logical pixels.
+    pub pos: [f32; 2],
+    /// The point's colour; `a` scales the whole contribution (under [`Blend::Additive`]
+    /// the light added is `rgb · a`), so a cooling ember is the same colour at a lower `a`
+    /// or a darker colour at `a = 1`, as the caller prefers.
+    pub color: Color,
+}
+
+/// A cloud of equal-size soft discs drawn in one pass: each disc fades linearly from full
+/// coverage at its centre to nothing at its rim (`size_px / 2` from the centre), so a
+/// two-to-three pixel point reads as a glowing grain, not a hard square.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Points {
+    pub points: Vec<Point>,
+    /// Disc diameter in logical pixels.
+    pub size_px: f32,
+    pub blend: Blend,
+    /// Nothing outside this rectangle is drawn (typically the plot rect).
+    pub clip: Option<Rect>,
+}
+
 /// Identity of a heatmap's GPU texture across frames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct HeatmapId(pub u64);
@@ -287,8 +322,8 @@ pub struct Heatmap {
     pub data: Vec<Option<HeatmapColumn>>,
 }
 
-/// Primitives drawn in a fixed order: rects, heatmaps, bands, grids, polylines, labels.
-/// Anything that must cover text (a banner over the plot) goes into a later layer.
+/// Primitives drawn in a fixed order: rects, heatmaps, bands, grids, polylines, points,
+/// labels. Anything that must cover text (a banner over the plot) goes into a later layer.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layer {
     pub rects: Vec<FillRect>,
@@ -296,6 +331,7 @@ pub struct Layer {
     pub bands: Vec<Band>,
     pub grids: Vec<Grid>,
     pub polylines: Vec<Polyline>,
+    pub points: Vec<Points>,
     pub labels: Vec<Label>,
 }
 

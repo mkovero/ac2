@@ -3,6 +3,7 @@
 //! `cargo nextest run -p ac2-plot -E 'test(/^golden::/)'` or `cargo test -p ac2-plot --test it golden::`.
 
 mod common;
+mod embers;
 mod golden;
 mod prepare_bench;
 mod render;
