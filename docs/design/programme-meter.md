@@ -289,18 +289,212 @@ with *inputs 3+4 not in this session*.
 
 ### 6.1 Loudness (stage 3)
 
-The same pane carries BS.1770-5 / EBU R128 for a pair (channel weights 1, 1) or a single
-input: momentary (400 ms), short-term (3 s), integrated with the −70 LKFS absolute and
-−10 LU relative gates, loudness range (EBU Tech 3342) and max true peak, all since the last
-reset (*since 20:14 · R resets*, the SPL meter's wording). The K-weighting, gating and LRA
-math is pure `ac2-core`; its golden vectors are EBU Tech 3341 / 3342's own published test
-signals through `tools/refgen` (free, unlike the ballistics standards). Shown as a column of
-numbers beside the bars; the integrated value is the only one that needs a start, and the
-reset is it.
+BS.1770-5 / EBU R128 loudness of the programme, beside the bars, by the definitions of EBU
+Tech 3341 V4 and Tech 3342 V4 (2023). Readouts on the absolute scale only (LUFS; LU for the
+range). ac2 does **not** claim EBU Mode: it has no relative readout (LU re −23 LUFS), no
+loudness bar with the +9 / +18 scales and no start / pause / continue (§9).
 
-Not in this stage: a loudness log or session persistence of the integrated value. If a
-show's integrated loudness turns out to be wanted after the fact, it becomes a measurement
-with a log like the SPL meter's; the pane's numbers stay the live view.
+**Sources.** The daemon computes loudness for every declared pair whose both inputs are
+captured and are line or digital (stereo, channel weights 1, 1), and for every captured
+line or digital input not in a pair (one channel, weight 1). An input of a declared pair
+whose partner is not captured has no source. Mic inputs get none: a LUFS
+figure on a measurement mic depends on its preamp gain and would be misread beside its
+dB SPL. Computing every source always is cheap (two biquads per sample per channel; the
+true peak already runs for the meters) and needs no subscription bookkeeping: every client
+reads the same numbers. A one-channel source is named *mono* where it is shown: BS.1770
+weighs a single channel 1, so a mono signal on one input reads 3 LU below the same signal on
+both inputs of a pair; that is the standard's answer. When `session.inputs` changes a kind
+or a pair, the sources that changed are dropped and the new ones start afresh (their since
+line shows it). A new source's sub-block grid starts at the first sample of the first audio
+block metered after the change (or after `session.open`, or after a preview's pairs are
+re-declared), with zeroed K-filter state. A new source follows the restart rule of a discontinuity: momentary,
+short-term and their maxima read — until a window lies wholly after its start, and `since`
+is its creation time until the first reset.
+
+**Rates.** Loudness runs from 44.1 to 192 kHz when the rate is a whole multiple of 100 Hz
+(44.1, 48, 88.2, 96, 176.4, 192 kHz all are), so a 10 ms sub-block is a whole number of
+samples and the K-weighting can follow the 48 kHz curve to 19.2 kHz. At any other rate there
+are no loudness sources and the pane says *loudness needs a rate of 44.1 to 192 kHz, a
+multiple of 100 Hz*.
+
+**Time base.** Each source keeps the K-weighted energy (channel-weighted sum of squares, f64)
+of consecutive **10 ms sub-blocks counted in samples**, independent of the audio block size,
+in a ring of the last 300.
+
+| quantity | definition |
+|---|---|
+| momentary (Mom) | the last 40 sub-blocks (400 ms): `−0.691 + 10 log₁₀(mean square)`; evaluated every sub-block |
+| short-term (Short) | the last 300 sub-blocks (3 s); evaluated every sub-block |
+| max momentary, max short-term | highest values over windows that lie wholly after the reset; −∞ until the first such window |
+| integrated (Int) | gating blocks of 40 sub-blocks every 10 sub-blocks (400 ms, 75 % overlap) from the reset; absolute gate −70 LUFS, relative gate −10 LU under the energy mean of the blocks that passed the absolute gate; both gates compare with BS.1770's `>`; re-evaluated at each completed gating block (10 Hz); `None` until a block passes |
+| loudness range (LRA) | Tech 3342: the short-term values on the gating grid: the first is the window ending 300 sub-blocks after the reset, then one every 10 sub-blocks (10 Hz); absolute gate −70 LUFS, relative gate −20 LU under the energy mean of those that passed, both compared with Tech 3342's `>=`; P95 − P10; re-evaluated at each new value (10 Hz); `None` until a value passes; *settling* while `duration` < 60 s |
+| max true peak | highest true peak of the source's channels since the reset, dBTP (BS.1770 Annex 2, the meters' detector); resets at the same instant as the meters' per-channel max (an audio-block boundary, not the sub-block grid); −∞ until the first metered block |
+
+Momentary and short-term are signal state: they are not reset by `levels.reset`. Each is summed
+from the ring at every sub-block (no running add/subtract sum, whose residue can go negative);
+a mean square below 1e-15 (−150.7 LUFS) is sent as −∞ and shown —; K-filter states below
+1e-30 are flushed to zero so a digital-silence tail does not decay through subnormals. Evaluating them every 10 ms, not every 100 ms, is what
+Tech 3341's live max cases need: case 14 starts each 400 ms tone 20 ms further on, and a
+100 ms grid would miss up to 50 ms of a tone (−0.58 LU against ±0.1).
+
+**Reset.** `levels.reset { channels }` (and **R** / **Shift+R**) resets every source with a
+channel in the set, together with the max and overs: one reset per concept. The reset takes
+effect at the first sub-block boundary at or after the first sample of the next audio block
+the fan-out thread meters (at most 10 ms later); the gating grid, the LRA feed, the maxima and
+`duration` start at that boundary, and the first gating block counts 400 ms later. The
+sub-block grid itself never re-phases. The keytip
+says *resets max, overs and loudness* (a pair's integrated loudness restarts when either
+input's row is reset). Loudness accumulated in a device preview does not carry into the
+session: every source starts afresh at `session.open`, as at a daemon restart.
+
+**Capture discontinuity.** When the audio path reports a discontinuity (xrun, device
+recovery), the K-filter state and the sub-block ring are cleared and the sub-block grid, the
+gating grid and the LRA grid restart at the first resumed sample; partial sub-blocks, gating
+blocks and short-term windows from before the gap are discarded. Momentary, short-term and
+their maxima use only windows lying wholly after the restart, and read — (−∞) until one
+exists. Integrated, LRA and the maxima keep what they had; `duration` counts metered samples
+only (the gap excluded).
+
+**K-weighting at every rate.** BS.1770-5 Annex 1 gives the two biquads for 48 kHz only. The
+coefficients for rate `fs` are computed in f64 (and the filter state is f64: at 192 kHz the
+RLB poles lie about 1e-3 from the unit circle) by the parameterisation that reproduces Table 1
+at 48 kHz to about 1e-15:
+
+- pre-filter: `K = tan(π f₀/fs)`, `Vh = 10^(G/20)`, `Vb = Vh^0.4996667741545416`,
+  `a0 = 1 + K/Q + K²`; `b = [Vh + Vb K/Q + K², 2(K² − Vh), Vh − Vb K/Q + K²] / a0`,
+  `a = [1, 2(K² − 1)/a0, (1 − K/Q + K²)/a0]`; `f₀ = 1681.974450955533 Hz`,
+  `G = 3.999843853973347 dB`, `Q = 0.7071752369554196`.
+- RLB high pass: `K = tan(π f₀/fs)`, `a0 = 1 + K/Q + K²`, `b = g·[1, −2, 1]` with
+  `g = a0(48 kHz) / a0(fs)`, `a = [1, 2(K² − 1)/a0, (1 − K/Q + K²)/a0]`;
+  `f₀ = 38.13547087602444 Hz`, `Q = 0.5003270373238773`. Table 2's numerator is the
+  unnormalised `[1, −2, 1]`, which gives the stage a +0.043 dB passband gain at 48 kHz; `g`
+  is 1 there and keeps that gain at every other rate (libebur128 keeps `[1, −2, 1]` and so
+  drifts by up to 0.04 dB at 192 kHz).
+
+Tests: at 48 kHz the coefficients equal Tables 1 and 2 to 1e-14 (with `g` = 1); at 44.1,
+88.2, 96, 176.4 and 192 kHz the
+cascade's magnitude response matches the 48 kHz one within ±0.01 dB from 20 Hz to 19.2 kHz;
+tone vectors at 40 Hz, 1 kHz and 10 kHz read the same integrated loudness at every rate as at
+48 kHz within ±0.05 LU; at 32 kHz (below the range), 47.952 kHz (not a multiple of 100 Hz)
+and 384 kHz (above the range) there are no loudness sources and the pane reads *loudness
+needs a rate of 44.1 to 192 kHz, a multiple of 100 Hz*.
+
+**Bounded memory.** A show is hours long; neither gate may keep every block. Integrated and
+LRA each keep a histogram of 0.01 LU bins from −70 to +10 LUFS (8000 bins; bin `i` covers
+`[−70 + 0.01·i, −70 + 0.01·(i + 1))`, index `floor((L + 70)·100)` in f64, except that
+integrated sends `L ≤ −70` to underflow; an underflow bin
+for what the absolute gate drops and an overflow bin above, f32 input can exceed 0 dBFS)
+holding each bin's count and f64 energy sum: 256 kB per source, fixed. Integrated
+puts values `≤ −70` in its underflow bin (its gate is `>`), LRA values `< −70` (its gate is
+`>=`). The relative threshold Γ comes from the exact energy sums. **Integrated:** bins wholly
+above Γ count whole; the bin Γ falls in counts the fraction `(upper edge − Γ) / 0.01` of its
+count and energy. When Γ lies below the histogram (integrated Γ ≤ −70, LRA Γ < −70) the
+absolute gate governs: every regular bin and the overflow bin count whole, the underflow
+bin never counts. Integrated: if Γ is at or above +10 LUFS (every block in the overflow bin) the
+overflow bin's blocks count whole and the bound does not apply. **LRA:** the bin Γ falls in counts whole if its lower edge is `>= Γ` (the overflow
+bin, when Γ falls in it, counts whole), otherwise not, so the gated count `n` stays an integer; the percentile index is the integer
+`k = ((n − 1)·p + 50) / 100` (integer division; zero based; equal to the Tech 3342 MATLAB's
+`round` for p = 10 and 95); the value is the centre of the bin where the cumulative count
+first exceeds `k`, or the energy mean `−0.691 + 10 log₁₀(E/c)` of the overflow bin if it
+lands there. Bound: the result departs from an unbinned computation only through blocks in
+the bin a gate falls in (within 0.01 LU of the gate, where the exact value itself jumps for
+a 0.01 LU change of the input) and by half a bin (0.005 LU) on each LRA percentile. A refgen
+vector with a dense population of blocks around the relative gate checks it: the binned
+result lies between the unbinned results with every block of the gate's bin included and
+excluded, widened by 0.01 LU for LRA.
+
+**Golden vectors.** `tools/refgen` synthesises the EBU cases from their text and records the
+published reading and tolerance; its reference implementation (numpy, unbinned, per block,
+the formulas above) gives values for the same signals at the other rates, for a mono source
+and for the histogram case:
+
+- Tech 3341 cases 1–2 (momentary, short-term and integrated, ±0.1 LU); 3–5 (integrated,
+  ±0.1 LU); 9 (short-term: every sub-block value after 3 s within ±0.1 LU); 12 (momentary:
+  every sub-block value after 1 s within ±0.1 LU; its 0.4 s period does not divide the 3 s
+  window, so short-term is not asserted); 11 and 14 in their live form (one
+  signal, max short-term sampled at the end of each 6 s segment / max momentary at the end
+  of each tone segment, the twenty successive maxima, ±0.1 LU), each run twice: with the
+  reset on a sub-block boundary at the signal's start and with the reset 5 ms (240 samples
+  at 48 kHz) before it, the grid's worst phase;
+  15–19 (true peak, +0.2 / −0.4 dB).
+- Cases 20–23 (an fs/4 period spliced into an fs/6 tone, made at 4·fs and decimated): the
+  documents do not specify the decimator, splice or fade, so refgen states its own (a
+  windowed-sinc decimator of named length and cutoff, a phase-continuous splice, a named
+  fade) and the vector carries two expectations, both of which must hold: the published 0.0
+  +0.2 / −0.4 dBTP, and refgen's own true peak of its signal by a long-FIR ×32
+  reconstruction within the same tolerance. They check ac2's
+  detector, not EBU equivalence.
+- Tech 3342 cases 1–4 (LRA of tone sequences, ±1 LU, read at the end of the signal with no
+  trailing silence fed), and case 1 repeated twice (LRA unchanged).
+- Quiet programme (mean about −62 LUFS, so the relative gates fall below −70): integrated
+  and LRA match the unbinned reference with the absolute gate governing.
+- Discontinuity (fake backend, an xrun between two tone segments): integrated carries on
+  across the gap, `duration` excludes it, momentary reads −∞ for the first 400 ms after the
+  resume and short-term for the first 3 s, and no block spanning the gap is counted.
+- The −18 dBFS stereo 1 kHz calibration tone reads −18.0 LUFS.
+- Not run, said so in the vector set: 3341 case 6 (5.0, synthesisable but ac2 has no
+  surround source), 10 and 13 (the file form of 11 and 14: twenty files each measured after
+  a reset; the live form tests the same windows), 7–8 and 3342 5–6 (the EBU's own programme
+  recordings, not in the text).
+- K-weighting tests run at 44.1, 48, 88.2, 96, 176.4 and 192 kHz.
+
+**Wire.** `SessionLevelsMeta` and `PreviewLevelsMeta` gain `loudness: Vec<SourceLoudness>`,
+pairs first in `pair_levels` order, then unpaired inputs ascending by channel; channels in
+`LoudnessSource` are zero-based device channels as in `PairLevels` (the CLI and UI show
+them 1-based):
+
+```rust
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LoudnessSource { Pair { left: u16, right: u16 }, Input { channel: u16 } }
+#[serde(deny_unknown_fields)]
+pub struct SourceLoudness {
+    pub source: LoudnessSource,
+    pub momentary: Lufs,          // −∞ on silence
+    pub short_term: Lufs,
+    pub integrated: Option<Lufs>, // None until a block passes the absolute gate
+    pub range: Option<Db>,        // LU
+    pub max_momentary: Lufs,      // −∞ until the first window after the reset
+    pub max_short_term: Lufs,
+    pub max_true_peak: Dbtp,
+    pub duration: Seconds,        // metered samples since the reset: settling, elapsed
+    pub since: WallNs,            // the daemon's clock at the reset, for "since 20:14" only
+}
+```
+
+`Lufs` is a new unit newtype beside `Dbfs` and `Dbtp`; a loudness difference (LRA) is a
+`Db`, shown with the unit LU.
+
+`duration` carries what must not depend on clocks (a Pi has no RTC; NTP steps it after
+boot): LRA settling is `duration < 60 s`. `PROTO_VERSION` bump. Not persisted: a daemon
+restart or a new session starts every source afresh.
+
+**Pane.** A Programme pane shows a loudness column for its pair; for a pane of one input,
+that input's mono source, or the pair's loudness (titled with the pair's name) when the input
+is half of a pair; for a pane whose inputs are exactly a declared pair, that pair; a pane of
+several other inputs shows none and says *loudness: one input or a pair*; a pane on an input
+whose pair partner is not captured names the partner as the pair row does, *loudness: Main R (input 4) not captured*. Mic inputs show
+*no loudness on a mic input*. When several messages apply, the pane shows the first of: the
+rate message, the mic message, the partner not captured, *one input or a pair*. The column reads `Mom −23.1`, `Short −22.8`, `Int −23.0 LUFS`,
+`LRA 6.2 LU` (`LRA 6.2 LU (settling)` while `duration` < 60 s; *LRA — (waiting for
+programme)* while it is `None`), `TP max −1.2 dBTP`, then
+*since 20:14 · R resets* (the SPL meter's wording); integrated before a block passed the gate
+reads *Int — (waiting for programme)*. One decimal throughout. (Mom / Short, not M / S: mid
+and side are the goniometer's words in the same pane.) Narrow panes drop the column before
+the goniometer; **T** hides the since line with the rest of the chrome. The Inputs list rows
+stay as they are.
+
+**CLI.** `ac2 levels` gains a loudness table (source · Mom · Short · Int · LRA · max Mom ·
+max Short · TP max · since); `--json` carries it; `ac2 levels reset` already resets it. The
+table names a source by 1-based inputs as the existing rows do (`1+2`, `3 mono`). In `--json`
+a source is `{"type": "pair", "left": 1, "right": 2}` or `{"type": "input", "input": 3}`;
+−∞ is the string `"-inf"` (as `spl_log` writes it) and `None` is `null`, so silence and
+*waiting for programme* stay distinct. The existing rows' `ppm`, `true_peak` and `max` switch
+to the same `"-inf"` encoding in this change, so `null` never stands for −∞; it keeps each field's own meaning (not yet, gated, none).
+
+Not in this stage: a loudness log, session persistence of the integrated value, EBU Mode's
+relative readout, bar scales and pause, surround. If a show's integrated loudness turns out to
+be wanted after the fact, it becomes a measurement with a log like the SPL meter's; the pane's
+numbers stay the live view.
 
 ## 7. Where the settings live
 
@@ -330,6 +524,8 @@ with a log like the SPL meter's; the pane's numbers stay the live view.
 - Line calibrations are a new entry kind in the calibration store, same file.
 - `DeviceRoles` (app prefs) remembers kinds and pairs per device.
 - Rig settings file gains the four values of §7.
+- Stage 3: `SessionLevelsMeta` / `PreviewLevelsMeta` gain `loudness: Vec<SourceLoudness>`
+  (§6.1), a `Lufs` unit; `PROTO_VERSION` bump; nothing persisted.
 - `PaneKind::Programme` and `PaneContent` in `ac2-proto` layout (the session's per-measurement
   layouts, decision P1) and the app's layout prefs.
 
@@ -358,6 +554,16 @@ with a log like the SPL meter's; the pane's numbers stay the live view.
 - Correlation is at zero lag: an inter-channel delay (a misaligned stereo pair) lowers it
   honestly; the meter does not search lags, and the pane does not guess why it is low.
 - The goniometer shows shape at auto gain, never level; nothing in it is a number.
+- Loudness follows BS.1770-5 and the Tech 3341 / 3342 definitions and passes the stereo
+  live-meter cases synthesisable from the documents' text, each on the quantity it specifies (3341: 1–5, 9, 11, 12, 14, 15–19;
+  3342: 1–4); 3341 cases 20–23 are checked against ac2's own synthesis of them; 6 (5.0) and
+  the file forms 10 and 13 are not run. At rates other than 48 kHz the K-weighting is ac2's
+  derivation (BS.1770 gives 48 kHz coefficients and asks for the same response), matching the
+  48 kHz response within 0.01 dB from 20 Hz to 19.2 kHz; loudness runs from 44.1 to 192 kHz
+  only. Integrated loudness and LRA come from 0.01 LU histograms, within the stated bound of
+  an unbinned computation. It is not an EBU Mode meter (no relative readout, no +9 / +18 bar
+  scale, no start / pause / continue) and not surround. Momentary is evaluated every 10 ms
+  (3341 states no minimum rate for it).
 - Surround vector displays (the MSD "Jelly-Fish"), scale libraries, matrix routing and
   SRC/sync handling are the MSD's broadcast context and are not taken.
 
