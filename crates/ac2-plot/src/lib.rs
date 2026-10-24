@@ -12,6 +12,7 @@
 
 pub mod adapter;
 pub mod colormap;
+pub mod embers;
 mod geometry;
 mod heatmap;
 pub mod offscreen;
@@ -20,6 +21,7 @@ pub mod scene;
 mod text;
 
 pub use adapter::{Rasterizer, classify_info};
+pub use embers::{ember_color, ember_points};
 pub use offscreen::{Gpu, GpuError, Offscreen, Pixels, RenderError, render_to_image};
 pub use renderer::{FrameTarget, PrepareError, RenderShared, Renderer};
 pub use scene::*;

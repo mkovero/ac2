@@ -3,7 +3,9 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::scene::{Band, Color, FillRect, Grid, GridAxis, GridKind, Polyline, Rect, Stroke};
+use crate::scene::{
+    Band, Color, FillRect, Grid, GridAxis, GridKind, Points, Polyline, Rect, Stroke,
+};
 
 /// Logical → physical framebuffer pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -621,5 +623,48 @@ mod tests {
             scissor_of(&[-5.0, -5.0, 500.0, 50.0], [100, 40]),
             Some([0, 0, 100, 40])
         );
+    }
+}
+
+/// One soft disc of a point cloud. Layout mirrors `VsIn` in `points.wgsl`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+pub(crate) struct PointInstance {
+    pub centre: [f32; 2],
+    pub clip: [f32; 4],
+    /// RGBA8, straight alpha.
+    pub color: u32,
+    /// Physical pixels.
+    pub radius: f32,
+}
+
+/// Smallest radius drawn: a point under a pixel and a half across would otherwise fall
+/// between pixel centres and flicker as it moves.
+const MIN_POINT_RADIUS_PX: f32 = 0.75;
+
+pub(crate) fn push_points(out: &mut Vec<PointInstance>, pts: &Points, xf: &Xform, clip: ClipPx) {
+    if !positive(pts.size_px) || is_empty(&clip) {
+        return;
+    }
+    let radius = (pts.size_px * xf.scale / 2.0).max(MIN_POINT_RADIUS_PX);
+    for p in &pts.points {
+        if !finite(p.pos) || !positive(p.color.a) {
+            continue;
+        }
+        let c = xf.point(p.pos);
+        // Wholly outside the clip (with the rim's margin): nothing to rasterize.
+        if c[0] + radius < clip[0]
+            || c[1] + radius < clip[1]
+            || c[0] - radius > clip[2]
+            || c[1] - radius > clip[3]
+        {
+            continue;
+        }
+        out.push(PointInstance {
+            centre: c,
+            clip,
+            color: pack_color(p.color),
+            radius,
+        });
     }
 }

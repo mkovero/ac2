@@ -7,11 +7,11 @@ use std::sync::{Arc, Mutex};
 use bytemuck::{Pod, Zeroable};
 
 use crate::geometry::{
-    self, ClipPx, FillInstance, LineScratch, SegmentInstance, Xform, intersect, is_empty,
-    scissor_of,
+    self, ClipPx, FillInstance, LineScratch, PointInstance, SegmentInstance, Xform, intersect,
+    is_empty, scissor_of,
 };
 use crate::heatmap::{self, Heatmaps};
-use crate::scene::{HeatmapId, Rect, Scene};
+use crate::scene::{Blend, HeatmapId, Rect, Scene};
 use crate::text::{Fonts, TextLayer};
 
 /// Where and how a scene lands in the render target.
@@ -91,6 +91,7 @@ struct Globals {
 enum Draw {
     Fill { first: u32, end: u32 },
     Lines { first: u32, end: u32 },
+    Points { first: u32, end: u32, blend: Blend },
     Heatmap(HeatmapId),
     Text(usize),
 }
@@ -141,6 +142,9 @@ pub struct RenderShared {
     lines: wgpu::RenderPipeline,
     fill: wgpu::RenderPipeline,
     heatmap: wgpu::RenderPipeline,
+    /// The same point shader under source-over and additive blending.
+    points_alpha: wgpu::RenderPipeline,
+    points_add: wgpu::RenderPipeline,
     pub(crate) glyphs: glyphon::Cache,
     pub(crate) fonts: Mutex<Fonts>,
 }
@@ -162,9 +166,11 @@ pub struct Renderer {
     text: TextLayer,
     segments: Vec<SegmentInstance>,
     fills: Vec<FillInstance>,
+    points: Vec<PointInstance>,
     scratch: LineScratch,
     segment_buf: GrowBuffer,
     fill_buf: GrowBuffer,
+    point_buf: GrowBuffer,
     cmds: Vec<Cmd>,
     target: [u32; 2],
 }
@@ -193,7 +199,23 @@ struct PipelineSpec<'a> {
     module: &'a wgpu::ShaderModule,
     layout: &'a wgpu::PipelineLayout,
     instance: Option<wgpu::VertexBufferLayout<'a>>,
+    blend: wgpu::BlendState,
 }
+
+/// Light added to light: `dst + src` on colour and alpha, with the shader's premultiplied
+/// output, so overlapping points sum and never darken each other.
+const ADDITIVE: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+};
 
 fn pipeline(
     device: &wgpu::Device,
@@ -223,7 +245,7 @@ fn pipeline(
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                blend: Some(spec.blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -239,6 +261,8 @@ const SEGMENT_ATTRS: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
 const FILL_ATTRS: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
     0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Float32x4, 4 => Unorm8x4, 5 => Uint32
 ];
+const POINT_ATTRS: [wgpu::VertexAttribute; 4] =
+    wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4, 2 => Unorm8x4, 3 => Float32];
 
 impl RenderShared {
     /// Pipelines for a `format` target with `multisample` (1 sample unless the host UI
@@ -288,6 +312,12 @@ impl RenderShared {
             "ac2-plot heatmap.wgsl",
             include_str!("shaders/heatmap.wgsl"),
         );
+        let points_mod = shader(
+            device,
+            "ac2-plot points.wgsl",
+            include_str!("shaders/points.wgsl"),
+        );
+        let over = wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING;
         let lines = pipeline(
             device,
             format,
@@ -301,6 +331,7 @@ impl RenderShared {
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &SEGMENT_ATTRS,
                 }),
+                blend: over,
             },
         );
         let fill = pipeline(
@@ -316,6 +347,7 @@ impl RenderShared {
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &FILL_ATTRS,
                 }),
+                blend: over,
             },
         );
         let heatmap = pipeline(
@@ -327,8 +359,29 @@ impl RenderShared {
                 module: &heat_mod,
                 layout: &heatmap_pl,
                 instance: None,
+                blend: over,
             },
         );
+        let points = |label, blend| {
+            pipeline(
+                device,
+                format,
+                multisample,
+                PipelineSpec {
+                    label,
+                    module: &points_mod,
+                    layout: &simple_layout,
+                    instance: Some(wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<PointInstance>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &POINT_ATTRS,
+                    }),
+                    blend,
+                },
+            )
+        };
+        let points_alpha = points("ac2-plot points", over);
+        let points_add = points("ac2-plot points additive", ADDITIVE);
         Arc::new(Self {
             format,
             multisample,
@@ -337,6 +390,8 @@ impl RenderShared {
             lines,
             fill,
             heatmap,
+            points_alpha,
+            points_add,
             glyphs: glyphon::Cache::new(device),
             fonts: Mutex::new(Fonts::new()),
         })
@@ -372,6 +427,7 @@ impl Renderer {
             text: TextLayer::new(device, queue, shared),
             segments: Vec::new(),
             fills: Vec::new(),
+            points: Vec::new(),
             scratch: LineScratch::default(),
             segment_buf: GrowBuffer {
                 label: "ac2-plot segments",
@@ -379,6 +435,10 @@ impl Renderer {
             },
             fill_buf: GrowBuffer {
                 label: "ac2-plot fills",
+                buffer: None,
+            },
+            point_buf: GrowBuffer {
+                label: "ac2-plot points",
                 buffer: None,
             },
             cmds: Vec::new(),
@@ -423,6 +483,7 @@ impl Renderer {
         self.target = target.size_px;
         self.segments.clear();
         self.fills.clear();
+        self.points.clear();
         self.cmds.clear();
         self.heatmaps.begin();
         self.text.begin(queue, target.size_px);
@@ -525,6 +586,19 @@ impl Renderer {
                     size,
                 );
             }
+            for pts in &layer.points {
+                let clip = clip_of(&pts.clip);
+                let first = self.points.len();
+                geometry::push_points(&mut self.points, pts, &xf, clip);
+                push_cmd(
+                    &mut self.cmds,
+                    Kind::Points(pts.blend),
+                    first,
+                    self.points.len(),
+                    &clip,
+                    size,
+                );
+            }
             let visible = |l: &&crate::scene::Label| {
                 !l.text.is_empty()
                     && l.size > 0.0
@@ -561,6 +635,8 @@ impl Renderer {
             .write(device, queue, bytemuck::cast_slice(&self.segments));
         self.fill_buf
             .write(device, queue, bytemuck::cast_slice(&self.fills));
+        self.point_buf
+            .write(device, queue, bytemuck::cast_slice(&self.points));
         Ok(())
     }
 
@@ -595,6 +671,18 @@ impl Renderer {
                     pass.set_vertex_buffer(0, buf.slice(..));
                     pass.draw(0..4, first..end);
                 }
+                Draw::Points { first, end, blend } => {
+                    let Some(buf) = &self.point_buf.buffer else {
+                        continue;
+                    };
+                    pass.set_pipeline(match blend {
+                        Blend::Alpha => &self.shared.points_alpha,
+                        Blend::Additive => &self.shared.points_add,
+                    });
+                    pass.set_bind_group(0, &self.globals_bg, &[]);
+                    pass.set_vertex_buffer(0, buf.slice(..));
+                    pass.draw(0..4, first..end);
+                }
                 Draw::Heatmap(id) => {
                     let Some(bg) = self.heatmaps.bind_group(id) else {
                         continue;
@@ -615,6 +703,7 @@ impl Renderer {
 enum Kind {
     Fill,
     Lines,
+    Points(Blend),
 }
 
 /// Records instances `first..end` of one pipeline, merging with the previous draw when it is
@@ -645,12 +734,17 @@ fn push_cmd(
                 *e = end;
                 return;
             }
+            (Draw::Points { end: e, blend, .. }, Kind::Points(b)) if *e == first && *blend == b => {
+                *e = end;
+                return;
+            }
             _ => {}
         }
     }
     let draw = match kind {
         Kind::Fill => Draw::Fill { first, end },
         Kind::Lines => Draw::Lines { first, end },
+        Kind::Points(blend) => Draw::Points { first, end, blend },
     };
     cmds.push(Cmd { draw, scissor });
 }
