@@ -335,7 +335,7 @@ with a log like the SPL meter's; the pane's numbers stay the live view.
 
 ## Stages
 
-1. **Kinds and pairs** — `InputKind`, `pair` in `InputSetup` and `DeviceRoles`, the I/O
+1. **Kinds and pairs** (landed, `cal.line { channel, volts }` daemon-measured) — `InputKind`, `pair` in `InputSetup` and `DeviceRoles`, the I/O
    page keys and chips, pair rows in the Inputs list, the line calibration kind with
    `cal.line` and `ac2 cal line`, `session.preview` carrying kinds and pairs, calibration
    store and proto bumps, `ac2 session` CLI. Meters unchanged otherwise; a calibrated line input
