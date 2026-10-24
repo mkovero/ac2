@@ -244,26 +244,6 @@ impl AppState {
         out
     }
 
-    /// The RMS level of session input `channel` from the latest level frame, for a
-    /// calibration that pairs a meter reading with it; `None` without a fresh frame.
-    pub fn input_level_dbfs(&self, channel: u16) -> Option<ac2_proto::units::Dbfs> {
-        use ac2_proto::FrameData;
-        use ac2_proto::topic::Topic;
-        let tf = self
-            .data
-            .as_ref()?
-            .latest
-            .get(&Topic::SessionLevels)
-            .filter(|f| !f.stale)?;
-        let FrameData::SessionLevels(f) = &tf.frame.data else {
-            return None;
-        };
-        let i = f.meta.channels.iter().position(|c| *c == channel)?;
-        let rms = *f.rms.get(i)?;
-        rms.is_finite()
-            .then(|| ac2_proto::units::Dbfs(f64::from(rms)))
-    }
-
     /// The names of the open session's outputs: the device's channel name, else `Output N`.
     pub fn session_output_names(&self) -> Vec<(u16, String)> {
         let Some(o) = self.open_session() else {

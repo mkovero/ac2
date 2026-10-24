@@ -3,12 +3,12 @@
 //! daemon reads the input's level, gives the volts at 0 dBFS and so the dBu scale of the
 //! input. No capsule, no sensitivity: the electrical calibration stops at `V_FS`.
 //!
-//! Keyboard-first like the other dialogs: typing edits the voltage, Enter reads and stores,
-//! Esc closes. Pure data: the reducer turns Enter into a `cal.line` request with the live
-//! reading and hands the reply back through [`LineDialog::reply`].
+//! Keyboard-first like the other dialogs: typing edits the voltage, Enter stores, Esc
+//! closes. Pure data: the reducer turns Enter into a `cal.line` request carrying the volts
+//! alone (the daemon measures the tone's level itself and refuses a missing, clipping or
+//! unsteady one) and hands the reply back through [`LineDialog::reply`].
 
 use ac2_proto::Command;
-use ac2_proto::units::Dbfs;
 use ac2_scene::unit_text::VoltsArg;
 
 /// The `what` of the dialog's request: its reply comes back to the dialog by it.
@@ -59,9 +59,9 @@ impl LineDialog {
         self.volts.pop();
     }
 
-    /// Enter: the request with the input's level `read` now, or why not (shown in the
-    /// dialog). Without a reading there is nothing to calibrate against.
-    pub fn submit(&mut self, read: Option<Dbfs>) -> Option<Command> {
+    /// Enter: the request with the volts, or why not (shown in the dialog). The level is
+    /// the daemon's to measure; its refusals come back through [`Self::reply`].
+    pub fn submit(&mut self) -> Option<Command> {
         if self.pending.is_some() {
             return None;
         }
@@ -77,19 +77,10 @@ impl LineDialog {
                 return None;
             }
         };
-        let Some(read_dbfs) = read.filter(|d| d.0.is_finite()) else {
-            self.error = Some(
-                "the input reads no level: the meters must be running (the audio I/O open on \
-                 this input)"
-                    .into(),
-            );
-            return None;
-        };
         self.pending = Some(self.what());
         Some(Command::CalLine {
             channel: self.input,
             volts,
-            read_dbfs,
         })
     }
 
@@ -115,16 +106,12 @@ impl LineDialog {
     }
 }
 
-/// A key in the dialog with the input's level `read` now: the action for the calibrations
-/// view, if any. Text arrives separately ([`LineDialog::type_text`]).
-pub fn key(
-    d: &mut LineDialog,
-    chord: &crate::keys::Chord,
-    read: Option<Dbfs>,
-) -> Option<crate::cal_view::CalAction> {
+/// A key in the dialog: the action for the calibrations view, if any. Text arrives
+/// separately ([`LineDialog::type_text`]).
+pub fn key(d: &mut LineDialog, chord: &crate::keys::Chord) -> Option<crate::cal_view::CalAction> {
     if chord.key == eframe::egui::Key::Enter {
         return d
-            .submit(read)
+            .submit()
             .map(|c| crate::cal_view::CalAction::Calibrate(c, d.what()));
     }
     None
@@ -135,33 +122,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn enter_sends_the_volts_with_the_live_reading() {
+    fn enter_sends_the_volts_alone() {
         let mut d = LineDialog::new(2);
         assert_eq!(d.title(), "Line calibration · in 3");
-        assert!(d.submit(Some(Dbfs(-9.0))).is_none());
+        assert!(d.submit().is_none());
         assert!(d.error.as_deref().is_some_and(|e| e.contains("voltage")));
         d.type_text("1.228 V");
-        // No reading: refused with the reason, nothing sent.
-        assert!(d.submit(None).is_none());
-        assert!(d.error.as_deref().is_some_and(|e| e.contains("no level")));
-        let cmd = d.submit(Some(Dbfs(-9.0))).expect("sent");
+        let cmd = d.submit().expect("sent");
         match cmd {
-            Command::CalLine {
-                channel,
-                volts,
-                read_dbfs,
-            } => {
+            Command::CalLine { channel, volts } => {
                 assert_eq!(channel, 2);
                 assert!((volts.0 - 1.228).abs() < 1e-9);
-                assert_eq!(read_dbfs, Dbfs(-9.0));
             }
             other => panic!("{other:?}"),
         }
         assert_eq!(d.what(), "line calibration of input 3");
-        // A refusal stays to retry; success closes.
+        // One request at a time.
+        assert!(d.submit().is_none());
+        // A refusal (the daemon's: no tone, clipping, not steady) stays to retry; success
+        // closes.
         assert!(!d.reply("line calibration of input 3", &Err("no".into())));
         assert_eq!(d.error.as_deref(), Some("no"));
-        d.submit(Some(Dbfs(-9.0)));
+        d.submit();
         assert!(d.reply("line calibration of input 3", &Ok(())));
     }
 }

@@ -452,11 +452,7 @@ impl Control {
             Command::CalCurveRename { curve, label } => self.cal_curve_rename(curve, label),
             Command::CalCurveDelete { curve } => self.cal_curve_delete(curve),
             Command::CalList => self.cal_list(),
-            Command::CalLine {
-                channel,
-                volts,
-                read_dbfs,
-            } => self.cal_line(channel, volts, read_dbfs),
+            Command::CalLine { channel, volts } => self.cal_line(channel, volts),
             Command::CalDelete { key } => self.cal_delete(&key),
             Command::SessionInputs { inputs, pairs } => self.session_inputs(inputs, pairs),
 

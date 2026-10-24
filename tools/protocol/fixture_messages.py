@@ -698,7 +698,7 @@ def requests():
         ),
         req(78, "artnet.test", {"channels": dmx([(12, 255), (13, 40)])}),
         req(79, "artnet.fade", {"base": 38, "seconds": 2.5}),
-        req(82, "cal.line", {"channel": 4, "volts": 1.2277, "read_dbfs": -9.0}),
+        req(82, "cal.line", {"channel": 4, "volts": 1.2277}),
     ]
 
 

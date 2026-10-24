@@ -96,38 +96,29 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     let i = ok_json(&f, &["session", "inputs", "--json"]).await?;
     assert_eq!(input_row(&i, 3)["pair"], "left");
 
-    // Line calibration: +4 dBu (1.228 V) read at −9 dBFS puts full scale at +13 dBu.
-    let r = ac2(
-        &f,
-        &[
-            "cal", "line", "--input", "3", "--volts", "1.228v", "--read", "-9dbfs",
-        ],
-    )
-    .await?;
+    // Line calibration: +4 dBu (1.228 V) with the fake's inputs reading −20 dBFS puts full
+    // scale at +24 dBu; the daemon measured the level, the operator typed only the volts.
+    let r = ac2(&f, &["cal", "line", "--input", "3", "--volts", "1.228v"]).await?;
     assert_eq!(r.code, 0, "{} {}", r.stdout, r.stderr);
     assert_eq!(
         r.stdout.trim(),
-        "in 3: 0 dBFS = +13.0 dBu (1.228 V read at −9.0 dBFS)"
+        "in 3: 0 dBFS = +24.0 dBu (1.228 V at −20.0 dBFS)"
     );
     let j = ok_json(
         &f,
-        &[
-            "cal", "line", "--input", "3", "--volts", "1.228v", "--read", "-9dbfs", "--json",
-        ],
+        &["cal", "line", "--input", "3", "--volts", "1.228v", "--json"],
     )
     .await?;
     assert_eq!(j["key"]["channel"], 2);
     assert!(
-        (j["dbu_fs"].as_f64().unwrap_or(f64::NAN) - 13.0).abs() < 0.05,
+        (j["dbu_fs"].as_f64().unwrap_or(f64::NAN) - 24.0).abs() < 0.05,
         "{j}"
     );
-    assert!((j["line"]["measured"].as_f64().unwrap_or(f64::NAN) + 9.0).abs() < 1e-9);
+    assert!((j["line"]["measured"].as_f64().unwrap_or(f64::NAN) + 20.0).abs() < 1e-9);
     // On a digital input: the daemon's refusal, verbatim.
     let r = ac2(
         &f,
-        &[
-            "cal", "line", "--input", "2", "--volts", "1.228v", "--read", "-9dbfs", "--json",
-        ],
+        &["cal", "line", "--input", "2", "--volts", "1.228v", "--json"],
     )
     .await?;
     assert_ne!(r.code, 0);
@@ -137,11 +128,11 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
 
     // `cal list`: its own block; the input line now reads dBu on the calibrated side.
     let t = ac2(&f, &["cal", "list"]).await?.stdout;
-    has(&t, "line calibrations\nin 3 · +13.0 dBu at full scale · ");
+    has(&t, "line calibrations\nin 3 · +24.0 dBu at full scale · ");
     has(&t, " · fake:loop");
     has(
         &t,
-        "in 3+4 · line · pair Main · L dBu · full scale +13.0 dBu · ",
+        "in 3+4 · line · pair Main · L dBu · full scale +24.0 dBu · ",
     );
     has(&t, " · R dBFS");
     let l = ok_json(&f, &["cal", "list", "--json"]).await?;

@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 63`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 64`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -136,7 +136,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `cal.curve_import` | `mic`, `label: string \| nil`, `file_name`, `content: bin`, `input: u16 \| nil` | `mic` | |
 | `cal.curve_rename` | `curve: MicCurveId`, `label` | `mic` | |
 | `cal.curve_delete` | `curve: MicCurveId` | `ack` | |
-| `cal.line` | `channel`, `volts: Volts`, `read_dbfs: Dbfs` | `line_calibration` | |
+| `cal.line` | `channel`, `volts: Volts` | `line_calibration` | |
 | `cal.list` | — | `calibrations` (`calibrations`, `line_calibrations`, `mics`) | |
 | `cal.delete` | `key: CalRef` (`type`: `spl` {device, channel, mic} \| `line` {device, channel}) | `ack` | |
 | `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
@@ -1363,13 +1363,15 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   deleted, event `mic` `deleted`); inputs that chose it keep the label and show it as not
   stored. `not_found` for an unknown mic or label. Neither needs an open session.
 - `cal.line` (`docs/design/programme-meter.md` §1.1) calibrates a `line` input: the
-  operator measured `volts` (RMS) of a steady tone at the input while the meter read
-  `read_dbfs`; the daemon reads nothing itself and stores `LineCalEntry` {`key: LineCalKey`
-  {device, channel}, `line: LineCal` {`v_fs`: Volts (`volts / 10^(read_dbfs/20)`, the volts
-  at 0 dBFS), `volts`, `measured`: Dbfs, `calibrated_at`}} under the open session's input
-  device, replacing the input's earlier one. dBu of 0 dBFS is `20·lg(v_fs / 0.7746 V)`;
-  `invalid` when it falls outside +4 … +30 dBu (a unit slip), when `read_dbfs` is outside
-  −70 … −3 dBFS, or when the input is a `mic` or `digital` one (named by channel).
+  operator measured `volts` (RMS) of a steady tone at the input; the daemon measures the
+  tone's level `L` as `cal.spl_electrical` does (`refused` below −80 dBFS, when the input
+  clipped in the last 2 s, while the level is not steady, and when `L` is outside
+  −70 … −3 dBFS) and stores `LineCalEntry` {`key: LineCalKey` {device, channel},
+  `line: LineCal` {`v_fs`: Volts (`volts / 10^(L/20)`, the volts at 0 dBFS), `volts`,
+  `measured`: Dbfs (`L`), `calibrated_at`}} under the open session's input device,
+  replacing the input's earlier one. dBu of 0 dBFS is `20·lg(v_fs / 0.7746 V)`; `invalid`
+  when it falls outside +4 … +30 dBu (a unit slip) or when the input is a `mic` or
+  `digital` one (named by channel).
 - `cal.delete` removes the sensitivity (`spl`) or line (`line`) calibration `key` (any
   device; no open session needed); `not_found` when there is none. The input setup is not
   changed.

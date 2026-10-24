@@ -1059,9 +1059,7 @@ fn input_kinds_pairs_and_line_cal_grammar() {
     assert!(parse(&["session", "inputs", "--pair", "3,x"]).is_err());
     assert!(parse(&["session", "inputs", "--pair", "3,4", "--no-pairs"]).is_err());
 
-    let c = ok(&[
-        "cal", "line", "--input", "3", "--volts", "1.228v", "--read", "-9dbfs",
-    ]);
+    let c = ok(&["cal", "line", "--input", "3", "--volts", "1.228v"]);
     let Cmd::Cal {
         cmd: CalCmd::Line(a),
     } = c.cmd
@@ -1070,32 +1068,17 @@ fn input_kinds_pairs_and_line_cal_grammar() {
     };
     assert_eq!(a.input, Channel(2));
     assert!((a.volts.0.0 - 1.228).abs() < 1e-9);
-    assert_eq!(a.read.0, Dbfs(-9.0));
     assert!(
-        ok(&[
-            "cal",
-            "line",
-            "--channel",
-            "3",
-            "--volts",
-            "775mv",
-            "--read",
-            "-13dbfs"
-        ])
-        .cmd
-        .is_cal()
+        ok(&["cal", "line", "--channel", "3", "--volts", "775mv"])
+            .cmd
+            .is_cal()
     );
-    // Both readings are required and carry their units.
-    assert!(parse(&["cal", "line", "--input", "3", "--volts", "1.228v"]).is_err());
+    // The voltage is required and carries its unit; the level is the daemon's to measure.
+    assert!(parse(&["cal", "line", "--input", "3"]).is_err());
+    assert!(parse(&["cal", "line", "--input", "3", "--volts", "1.228"]).is_err());
     assert!(
         parse(&[
-            "cal", "line", "--input", "3", "--volts", "1.228", "--read", "-9dbfs"
-        ])
-        .is_err()
-    );
-    assert!(
-        parse(&[
-            "cal", "line", "--input", "3", "--volts", "1.228v", "--read", "-9"
+            "cal", "line", "--input", "3", "--volts", "1.228v", "--read", "-9dbfs"
         ])
         .is_err()
     );

@@ -128,12 +128,6 @@ impl AppState {
             self.overlay = Overlay::None;
             return;
         };
-        // The line calibration dialog reads the input's level as Enter is pressed.
-        let read = self
-            .overlay
-            .settings()
-            .and_then(|s| s.cal.line.as_ref())
-            .and_then(|d| self.input_level_dbfs(d.input));
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
@@ -155,7 +149,7 @@ impl AppState {
             return;
         }
         if let Some(d) = &mut v.line {
-            if let Some(a) = crate::line_dialog::key(d, &chord, read) {
+            if let Some(a) = crate::line_dialog::key(d, &chord) {
                 self.cal_action(a, out);
             } else {
                 self.swallow_text = swallow;

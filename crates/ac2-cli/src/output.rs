@@ -690,10 +690,10 @@ pub fn line_calibrations(l: &[LineCalEntry], now: WallNs) -> String {
         .join("\n")
 }
 
-/// A line calibration just taken: `in 3: 0 dBFS = +13.0 dBu (1.550 V read at −9.0 dBFS)`.
+/// A line calibration just taken: `in 3: 0 dBFS = +13.0 dBu (1.550 V at −9.0 dBFS)`.
 pub fn line_calibration(e: &LineCalEntry) -> String {
     format!(
-        "{}: 0 dBFS = {} dBu ({} read at {})",
+        "{}: 0 dBFS = {} dBu ({} at {})",
         input_label(e.key.channel),
         format::signed(ac2_proto::cal::dbu_fs(e.line.v_fs.0).0, 1),
         format::volts(e.line.volts.0),

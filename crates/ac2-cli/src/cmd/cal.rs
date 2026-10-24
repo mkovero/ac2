@@ -176,15 +176,14 @@ async fn cal_electrical(cli: &Cli, a: &CalElectrical, out: &mut Out<'_>) -> Resu
     Ok(())
 }
 
-/// `cal line`: the operator's voltmeter reading and meter reading go to the daemon, which
-/// stores the volts at 0 dBFS; the dBu of full scale is printed from them.
+/// `cal line`: the operator's voltmeter reading goes to the daemon, which measures the
+/// tone's level and stores the volts at 0 dBFS; the dBu of full scale is printed from them.
 async fn cal_line(cli: &Cli, a: &CalLine, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     let r = c
         .call(Command::CalLine {
             channel: a.input.0,
             volts: a.volts.0,
-            read_dbfs: a.read.0,
         })
         .await?;
     let e = expect_body!("cal.line", r, ReplyBody::LineCalibration(e) => e)?;

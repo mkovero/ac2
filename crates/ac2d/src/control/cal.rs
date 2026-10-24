@@ -189,16 +189,25 @@ impl Control {
         Ok(rt.open.input_device.clone())
     }
 
-    /// The steady, uncorrected broadband level of `input` (τ = 1 s) for a calibration,
-    /// with the device it is tied to. Refused without a session, without signal (below
-    /// −80 dBFS), when the input reached full scale in the last 2 s (a clipped tone reads
-    /// low) and while the level is not steady. `tone` names the signal in the refusals.
+    /// [`Self::steady_level`] of a microphone input, for a sensitivity calibration.
     fn cal_reading(
         &self,
         input: u16,
         tone: &str,
     ) -> Result<(ac2_proto::model::DeviceId, f64), ProtoError> {
         self.mic_input(input, "a sensitivity calibration")?;
+        self.steady_level(input, tone)
+    }
+
+    /// The steady, uncorrected broadband level of `input` (τ = 1 s) for a calibration,
+    /// with the device it is tied to. Refused without a session, without signal (below
+    /// −80 dBFS), when the input reached full scale in the last 2 s (a clipped tone reads
+    /// low) and while the level is not steady. `tone` names the signal in the refusals.
+    fn steady_level(
+        &self,
+        input: u16,
+        tone: &str,
+    ) -> Result<(ac2_proto::model::DeviceId, f64), ProtoError> {
         let device = self.cal_target(input)?;
         let Some(rt) = self.session.as_ref() else {
             return Err(perr(ErrorCode::Invalid, "no open session"));
@@ -684,15 +693,9 @@ impl Control {
     }
 
     /// `cal.line` (`programme-meter.md` §1.1): the operator measured `volts` RMS of a steady
-    /// tone at a line input while the meter read `read_dbfs`; the volts at 0 dBFS follow,
-    /// and dBu of 0 dBFS from them. The daemon reads nothing itself: the level was read off
-    /// the meter, at the operator's pace, as the voltmeter was.
-    pub(super) fn cal_line(
-        &mut self,
-        channel: u16,
-        volts: Volts,
-        read_dbfs: Dbfs,
-    ) -> Result<ReplyBody, ProtoError> {
+    /// tone at a line input; the daemon measures the tone's level the way
+    /// `cal.spl_electrical` does, and the volts at 0 dBFS follow, dBu of 0 dBFS from them.
+    pub(super) fn cal_line(&mut self, channel: u16, volts: Volts) -> Result<ReplyBody, ProtoError> {
         self.cal.check()?;
         let invalid = |m: String| perr(ErrorCode::Invalid, m);
         let kind = cal::input_kind(&self.store.state().inputs, channel);
@@ -714,33 +717,40 @@ impl Control {
                 volts.0
             )));
         }
-        if !(read_dbfs.0.is_finite()
-            && (cal::ELECTRICAL_MIN_DBFS..=cal::ELECTRICAL_MAX_DBFS).contains(&read_dbfs.0))
-        {
-            return Err(invalid(format!(
-                "level read {} dBFS is outside {} … {} dBFS",
-                read_dbfs.0,
-                cal::ELECTRICAL_MIN_DBFS,
-                cal::ELECTRICAL_MAX_DBFS
-            )));
+        let (device, measured) = self.steady_level(channel, "tone")?;
+        if !(cal::ELECTRICAL_MIN_DBFS..=cal::ELECTRICAL_MAX_DBFS).contains(&measured) {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!(
+                    "input {} reads {measured:.1} dBFS, outside {} … {} dBFS for a \
+                     calibration: {} the tone, not the gain",
+                    nth(channel),
+                    cal::ELECTRICAL_MIN_DBFS,
+                    cal::ELECTRICAL_MAX_DBFS,
+                    if measured > cal::ELECTRICAL_MAX_DBFS {
+                        "lower"
+                    } else {
+                        "raise"
+                    }
+                ),
+            ));
         }
-        let v_fs = cal::full_scale_volts(volts.0, read_dbfs.0);
+        let v_fs = cal::full_scale_volts(volts.0, measured);
         let dbu_fs = cal::dbu_fs(v_fs);
         let (lo, hi) = cal::LINE_DBU_FS_RANGE;
         if !(lo..=hi).contains(&dbu_fs.0) {
             return Err(invalid(format!(
-                "{} V at {} dBFS puts full scale at {:+.1} dBu, outside {lo:+} … {hi:+} dBu: \
-                 check the voltage (volts RMS, not millivolts) and the level",
-                volts.0, read_dbfs.0, dbu_fs.0
+                "{} V at {measured:.1} dBFS puts full scale at {:+.1} dBu, outside {lo:+} … \
+                 {hi:+} dBu: check the voltage (volts RMS, not millivolts) and the level",
+                volts.0, dbu_fs.0
             )));
         }
-        let device = self.cal_target(channel)?;
         let entry = LineCalEntry {
             key: LineCalKey { device, channel },
             line: LineCal {
                 v_fs: Volts(v_fs),
                 volts,
-                measured: read_dbfs,
+                measured: Dbfs(measured),
                 calibrated_at: WallNs(wall_ns()),
             },
         };
@@ -749,10 +759,11 @@ impl Control {
         new.line_calibrations.push(entry.clone());
         self.commit_store(new, self.cal.curves())?;
         tracing::info!(
-            "input {} line calibrated: {} V RMS at {:.2} dBFS, full scale {:.3} V = {:+.1} dBu",
+            "input {} line calibrated: {} V RMS measured at {:.2} dBFS, full scale {:.3} V = \
+             {:+.1} dBu",
             nth(channel),
             volts.0,
-            read_dbfs.0,
+            measured,
             v_fs,
             dbu_fs.0
         );

@@ -384,7 +384,6 @@ pub fn commands() -> Vec<Command> {
         Command::CalLine {
             channel: 4,
             volts: Volts(1.2277),
-            read_dbfs: Dbfs(-9.0),
         },
     ]
     .into_iter()

@@ -163,11 +163,7 @@ impl Shared {
                 let rev = self.set_inputs(all).unwrap_or(rev);
                 ReplyBody::Ack { rev }
             }
-            C::CalLine {
-                channel,
-                volts,
-                read_dbfs,
-            } => {
+            C::CalLine { channel, volts } => {
                 use ac2_proto::cal;
                 let kind = cal::input_kind(&self.state.inputs, channel);
                 if kind != InputKind::Line {
@@ -183,12 +179,9 @@ impl Shared {
                 if !(volts.0.is_finite() && (1e-3..=100.0).contains(&volts.0)) {
                     return Err(err(ErrorCode::Invalid, "measured voltage out of range"));
                 }
-                if !(read_dbfs.0.is_finite()
-                    && (cal::ELECTRICAL_MIN_DBFS..=cal::ELECTRICAL_MAX_DBFS).contains(&read_dbfs.0))
-                {
-                    return Err(err(ErrorCode::Invalid, "level read out of range"));
-                }
-                let v_fs = cal::full_scale_volts(volts.0, read_dbfs.0);
+                // The fake's inputs read a fixed level, as for `cal.spl_electrical`.
+                let measured = Dbfs(-20.0);
+                let v_fs = cal::full_scale_volts(volts.0, measured.0);
                 let (lo, hi) = cal::LINE_DBU_FS_RANGE;
                 if !(lo..=hi).contains(&cal::dbu_fs(v_fs).0) {
                     return Err(err(ErrorCode::Invalid, "full scale outside +4 … +30 dBu"));
@@ -201,7 +194,7 @@ impl Shared {
                     line: LineCal {
                         v_fs: Volts(v_fs),
                         volts,
-                        measured: read_dbfs,
+                        measured,
                         calibrated_at: WallNs(1_790_000_000_000_000_000),
                     },
                 };

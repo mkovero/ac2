@@ -6,28 +6,23 @@
 
 use crate::common;
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::{
-    BackendKind, CalRef, CalStatus, DeviceId, InputKind, InputSetup, Pair, PairSide, PreviewInput,
+    BackendKind, CalRef, CalStatus, DeviceId, GeneratorDesired, GeneratorSettings, InputKind,
+    InputSetup, Pair, PairSide, PreviewInput, Signal,
 };
-use ac2_proto::units::{Dbfs, Volts};
+use ac2_proto::units::{Dbfs, Hz, Volts};
 use ac2_proto::{Command, ErrorCode, ReplyBody, Subscription};
-use ac2d::{Daemon, DaemonConfig, Handle};
+use ac2d::{Daemon, Handle};
 use common::*;
 
 const T: Duration = Duration::from_secs(5);
 
 fn start() -> Handle {
     init_log();
-    Daemon::start(DaemonConfig::new(
-        Arc::new(realtime_rig()),
-        inproc("inputs"),
-        -10.0,
-    ))
-    .unwrap()
+    Daemon::start(steady_config(realtime_rig(), inproc("inputs"))).unwrap()
 }
 
 fn fake_dev() -> DeviceId {
@@ -175,8 +170,21 @@ fn an_spl_meter_needs_a_microphone() {
     );
 }
 
+/// `cmd` once the tone the generator just started is there and steady (about 5 s).
+fn steady(c: &mut Client, cmd: Command) -> Result<ReplyBody, ac2_proto::ProtoError> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        match c.call(cmd.clone()) {
+            Err(e) if e.msg.contains("not steady") || e.msg.contains("no tone") => {}
+            other => return other,
+        }
+        assert!(std::time::Instant::now() < deadline, "level never steady");
+        std::thread::sleep(Duration::from_millis(300));
+    }
+}
+
 #[test]
-fn a_line_calibration_wants_a_line_input_and_lands_in_the_list() {
+fn a_line_calibration_wants_a_line_input_with_a_tone_on_it() {
     let h = start();
     let (mut c, _s) = connect(&h, &[]);
     open_four(&mut c);
@@ -186,14 +194,12 @@ fn a_line_calibration_wants_a_line_input_and_lands_in_the_list() {
         Vec::new(),
     )
     .unwrap();
+    let line = |channel| Command::CalLine {
+        channel,
+        volts: Volts(1.2277),
+    };
     // A digital feed has no voltage: 0 dBFS is its full scale.
-    let e = c
-        .call(Command::CalLine {
-            channel: 2,
-            volts: Volts(1.2277),
-            read_dbfs: Dbfs(-9.0),
-        })
-        .unwrap_err();
+    let e = c.call(line(2)).unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid);
     assert!(
         e.msg.starts_with("input 3 is a digital input;"),
@@ -201,37 +207,75 @@ fn a_line_calibration_wants_a_line_input_and_lands_in_the_list() {
         e.msg
     );
     // Nor has an undeclared (microphone) input.
-    let e = c
-        .call(Command::CalLine {
-            channel: 0,
-            volts: Volts(1.2277),
-            read_dbfs: Dbfs(-9.0),
-        })
-        .unwrap_err();
+    let e = c.call(line(0)).unwrap_err();
     assert!(e.msg.starts_with("input 1 is a microphone;"), "{}", e.msg);
+    // Silence on the line input: the daemon measures the level itself and finds no tone.
+    let e = c.call(line(1)).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused);
+    assert!(e.msg.starts_with("no tone signal on input 1"), "{}", e.msg);
+}
+
+#[test]
+fn slow_a_line_calibration_measures_the_tone_and_lands_in_the_list() {
+    let h = start();
+    let (mut c, _s) = connect(&h, &[]);
+    open_four(&mut c);
+    declare(&mut c, vec![row(1, InputKind::Line)], Vec::new()).unwrap();
+    // A 1 kHz tone out of output 0 reaches input 1 through the fake rig's acoustic path,
+    // ACOUSTIC_GAIN down: that is the level the daemon measures.
+    let level = -12.0;
+    let measured = level + 20.0 * f64::from(ACOUSTIC_GAIN).log10();
+    let ReplyBody::Lease(lease) = c.ok(Command::GenAcquire { force: false }) else {
+        panic!("lease");
+    };
+    c.ok(Command::GenSet {
+        lease_token: lease.lease_token,
+        desired: GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Sine { freq: Hz(1000.0) },
+                level: Dbfs(level),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: true,
+            firing: true,
+        },
+    });
     // Millivolts typed as volts put full scale far outside any line input's range.
-    let e = c
-        .call(Command::CalLine {
+    let e = steady(
+        &mut c,
+        Command::CalLine {
             channel: 1,
             volts: Volts(0.0012277),
-            read_dbfs: Dbfs(-9.0),
-        })
-        .unwrap_err();
+        },
+    )
+    .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid);
     assert!(e.msg.contains("dBu"), "{}", e.msg);
-    // +4 dBu tone (1.2277 V) read at −9 dBFS: full scale is +13 dBu, 3.46 V.
-    let ReplyBody::LineCalibration(entry) = c.ok(Command::CalLine {
-        channel: 1,
-        volts: Volts(1.2277),
-        read_dbfs: Dbfs(-9.0),
-    }) else {
+    // A +4 dBu tone (1.2277 V) measured at −18.02 dBFS: full scale is +22.02 dBu, 9.775 V.
+    let v_fs = 1.2277 / 10f64.powf(measured / 20.0);
+    let dbu_fs = 20.0 * (v_fs / 0.774_597).log10();
+    let ReplyBody::LineCalibration(entry) = steady(
+        &mut c,
+        Command::CalLine {
+            channel: 1,
+            volts: Volts(1.2277),
+        },
+    )
+    .unwrap() else {
         panic!("line calibration");
     };
     assert_eq!(entry.key.channel, 1);
     assert_eq!(entry.key.device, fake_dev());
+    assert_eq!(entry.line.volts, Volts(1.2277));
     assert!(
-        (entry.line.v_fs.0 - 3.4601).abs() < 1e-3,
-        "{}",
+        (entry.line.measured.0 - measured).abs() < 0.1,
+        "{} vs {measured}",
+        entry.line.measured.0
+    );
+    assert!(
+        (entry.line.v_fs.0 - v_fs).abs() < 0.1,
+        "{} vs {v_fs}",
         entry.line.v_fs.0
     );
     let ReplyBody::Calibrations {
@@ -248,7 +292,9 @@ fn a_line_calibration_wants_a_line_input_and_lands_in_the_list() {
     let st = snap.state;
     assert_eq!(st.line_calibrations, vec![entry.clone()]);
     match ac2_proto::cal::state_input_use(&st, 1).sensitivity.status() {
-        CalStatus::Line { dbu_fs, .. } => assert!((dbu_fs.0 - 13.0).abs() < 0.01, "{}", dbu_fs.0),
+        CalStatus::Line { dbu_fs: d, .. } => {
+            assert!((d.0 - dbu_fs).abs() < 0.1, "{} vs {dbu_fs}", d.0)
+        }
         other => panic!("{other:?}"),
     }
     // Deleted by its own key; the input stays declared.

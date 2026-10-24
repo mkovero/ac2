@@ -2047,10 +2047,11 @@ daemon's machine stores, in its calibration store:
 
 - **Sensitivity** (dB SPL of 0 dBFS): per device, input and mic.
 - **Line calibration** (dBu of 0 dBFS): per device and line input. Feed the input a steady
-  tone, measure its RMS voltage at the input, read the level off the input meter and give
-  both: `ac2 cal line --input 3 --volts 1.228v --read -9dbfs` prints `in 3: 0 dBFS = +13.0
-  dBu (1.228 V read at −9.0 dBFS)` (a +4 dBu tone at −9 dBFS: full scale +13 dBu). The
-  input's rows then say *dBu · full scale +13.0 dBu* with the calibration's age.
+  tone, measure its RMS voltage at the input and give the volts; the daemon measures the
+  tone's level itself, as the electrical calibration does: `ac2 cal line --input 3 --volts
+  1.228v` prints `in 3: 0 dBFS = +13.0 dBu (1.228 V at −9.0 dBFS)` (a +4 dBu tone measured
+  at −9 dBFS: full scale +13 dBu). The input's rows then say *dBu · full scale +13.0 dBu*
+  with the calibration's age.
 - **Mic curves** (the **mic library**): per mic, any number, each with a short **label**.
 
 #### Sensitivity
@@ -2264,7 +2265,9 @@ processor, set the gain you will use, and measure the voltage at the input with 
 meter. On the input's line of the Calibration page **E** opens the **Line calibration**
 dialog: it shows the level the input reads now (dBFS, which must be steady and not
 clipping), takes the voltage you measured (`1.228 V`, `-2 dBu` is not accepted: volts
-only), and **Enter** stores the full-scale voltage, `volts / 10^(dBFS / 20)`. Take the tone
+only), and **Enter** has the daemon measure the tone's level, as the electrical
+calibration does (a missing, clipping or not yet steady tone is refused, with the reason in
+the dialog), and store the full-scale voltage, `volts / 10^(dBFS / 20)`. Take the tone
 off and keep the gain as it is: changing the input gain afterwards makes the calibration
 wrong, calibrate again. The calibration belongs to the device and input, not to what is
 plugged into it, and is listed under *Line calibrations*; **Delete** twice removes it, and

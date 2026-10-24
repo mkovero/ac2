@@ -525,18 +525,18 @@ pub enum Command {
         /// The curve.
         curve: MicCurveId,
     },
-    /// Calibrate a line input: the operator measured `volts` (RMS) of a steady tone at the
-    /// input while the meter read `read_dbfs`; the daemon stores `V_FS = volts /
-    /// 10^(read_dbfs/20)`, the volts at 0 dBFS, under the open session's input device. On
-    /// a `line` input only: a mic reads dB SPL and a digital feed has no volt.
+    /// Calibrate a line input: the operator feeds the input a steady tone and measures
+    /// `volts` (RMS) at the input; the daemon measures the tone's level `L` the way
+    /// `cal.spl_electrical` does (refused without signal, clipped or not steady yet) and
+    /// stores `V_FS = volts / 10^(L/20)`, the volts at 0 dBFS, under the open session's
+    /// input device. On a `line` input only: a mic reads dB SPL and a digital feed has no
+    /// volt.
     #[serde(rename = "cal.line")]
     CalLine {
         /// Input channel.
         channel: u16,
         /// Voltage measured, RMS.
         volts: Volts,
-        /// Level the meter read.
-        read_dbfs: Dbfs,
     },
     /// List sensitivity and line calibrations and the mic library.
     #[serde(rename = "cal.list")]

@@ -5,9 +5,7 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::CurveArg;
-use ac2_scene::unit_text::{
-    Channel, Freq, Gain, LevelDbfs, MicSensitivityArg, OhmsArg, SplLevel, VoltsArg,
-};
+use ac2_scene::unit_text::{Channel, Freq, Gain, MicSensitivityArg, OhmsArg, SplLevel, VoltsArg};
 
 /// `cal …`.
 #[derive(Debug, Subcommand)]
@@ -24,11 +22,12 @@ pub enum CalCmd {
     /// that input first (48 V can damage the generator; ac2 cannot switch it) and back on
     /// for the mic afterwards. Either way keep the gain you will measure with.
     Electrical(CalElectrical),
-    /// Calibrate a line input: what 0 dBFS is in dBu. Feed the input a steady tone, measure
-    /// its RMS voltage at the input with a meter, read the level off ac2's input meter
-    /// (`ac2 status`, the app's Inputs list) and give both; the volts at full scale and
-    /// dBu follow. The input must be declared `line` (`ac2 session inputs --kind 3=line`):
-    /// a mic reads dB SPL, a digital feed has no voltage.
+    /// Calibrate a line input: what 0 dBFS is in dBu. Feed the input a steady tone (1 kHz,
+    /// around nominal level), measure its RMS voltage at the input with a true-RMS meter and
+    /// give the volts; the daemon measures the tone's level itself, as `cal electrical`
+    /// does (refused while the tone is missing, clipping or not steady yet), and the volts
+    /// at full scale and dBu follow. The input must be declared `line` (`ac2 session inputs
+    /// --kind 3=line`): a mic reads dB SPL, a digital feed has no voltage.
     Line(CalLine),
     /// The mic library: import, rename and delete a mic's curves.
     #[command(subcommand)]
@@ -118,10 +117,6 @@ pub struct CalLine {
     /// Voltage of the tone measured at the input, RMS, e.g. `1.55v` or `775mv`.
     #[arg(long, value_name = "VOLTS")]
     pub volts: VoltsArg,
-    /// Level ac2's input meter read from the tone, e.g. `-9dbfs`. The daemon reads
-    /// nothing itself: the level is read off the meter at your pace, as the voltmeter was.
-    #[arg(long, value_name = "DBFS", allow_hyphen_values = true)]
-    pub read: LevelDbfs,
 }
 
 /// Where the voltage of an electrical calibration is measured.

@@ -888,16 +888,9 @@ fn line_calibration_from_the_calibrations_view() {
     let d = cal_view(&t).line.clone().expect("the line dialog");
     assert_eq!(d.title(), "Line calibration · in 1");
     assert_eq!(d.volts, "");
-    // Without a reading there is nothing to calibrate against.
     t.text("1.228 V");
-    assert!(calls(&t.key("Enter")).is_empty());
-    let e = cal_view(&t).line.as_ref().and_then(|d| d.error.clone());
-    assert!(
-        e.as_deref()
-            .is_some_and(|e| e.starts_with("the input reads no level")),
-        "{e:?}"
-    );
-    // The session's meters running: Enter sends the volts with the input's level now.
+    // The session's meters running, the dialog shows the input's level; Enter sends the
+    // volts alone, the daemon measures the level itself.
     let mut latest = Latest::default();
     let data = FrameData::SessionLevels(SessionLevelsFrame {
         meta: ac2_proto::frame::LevelsMeta {
@@ -928,15 +921,10 @@ fn line_calibration_from_the_calibrations_view() {
     let what = match r.as_slice() {
         [
             Request::Call {
-                cmd:
-                    Command::CalLine {
-                        channel: 0,
-                        volts,
-                        read_dbfs,
-                    },
+                cmd: Command::CalLine { channel: 0, volts },
                 what,
             },
-        ] if *volts == Volts(1.228) && *read_dbfs == Dbfs(-9.0) => what.clone(),
+        ] if *volts == Volts(1.228) => what.clone(),
         other => panic!("{other:?}"),
     };
     assert_eq!(what, "line calibration of input 1");

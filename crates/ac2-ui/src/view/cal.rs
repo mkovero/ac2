@@ -170,7 +170,7 @@ fn line(app: &App, ctx: &egui::Context, ch: &Chrome, d: &crate::line_dialog::Lin
                 }
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new("Enter reads the level and stores · Esc closes")
+                    RichText::new("Enter measures the level and stores · Esc closes")
                         .small()
                         .color(ch.dim),
                 );

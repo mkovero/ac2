@@ -81,9 +81,10 @@ Check: an interface whose full scale is +13 dBu reads a +4 dBu tone at −9 dBFS
 It is its own calibration kind in the store, not a `CalBasis` variant of the sensitivity
 calibration (that one is shaped around a capsule): `line` under `(device uid, input
 channel)` with `v_fs`, `measured_dbfs`, `volts`, `calibrated_at`. New command `cal.line
-{ channel, volts, read_dbfs }`, CLI `ac2 cal line`, listed by `cal.list` beside the mic
-calibrations and removed by `cal.delete`. A `Line` input without one reads dBFS and its row
-says *dBFS* (§1).
+{ channel, volts }` (the daemon measures the tone's level the way `cal.spl_electrical`
+does; the operator types only the volts), CLI `ac2 cal line`, listed by `cal.list` beside
+the mic calibrations and removed by `cal.delete`. A `Line` input without one reads dBFS and
+its row says *dBFS* (§1).
 
 The dBu scale of a calibrated line input runs `dBu_FS − 60 … dBu_FS` (full scale sits at
 +13 … +24 dBu on real interfaces; nominal +4 dBu is in the upper part, the top 3 dB in the
