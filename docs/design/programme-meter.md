@@ -333,6 +333,21 @@ with a log like the SPL meter's; the pane's numbers stay the live view.
 - `PaneKind::Programme` and `PaneContent` in `ac2-proto` layout (the session's per-measurement
   layouts, decision P1) and the app's layout prefs.
 
+### As built in stage 2
+
+- `PaneContent` is `Meas { meas } | Inputs { inputs } | Pair { left, right }`: a pair is named
+  by its two inputs, which is what the session's pair list keys on; there is no pair id.
+  `PaneLayout::check` refuses a Programme pane without inputs and inputs on any other kind.
+- A picked Inputs row opens its Programme pane with **P**, not **Enter**: Enter fires the
+  stimulus in every keymap (`RESERVED`), and a meter key must never be one chord away from
+  sound. A click picks a row; Tab or a click elsewhere drops the pick.
+- The goniometer frames come with the input meters (`session/` subscription), not a
+  subscription of their own while a Programme pane is visible; the app folds them into ember
+  rings only for the pairs a visible pane shows.
+- `PairLevels.quiet` names one side, the left first, so the chip never says *both quiet*.
+- The rig's four values are on Settings › Rig monitor (←/→ steps, each step one `levels.set`
+  of that value) besides `ac2 levels set`.
+
 ## 9. What is and isn't claimed
 
 - The ballistics are implemented to the named standards' burst tables and proven by

@@ -13,10 +13,16 @@ to `backlog-done.md` as one line with the commit.
 
 ## Programme metering (design `programme-meter.md`)
 
-- **Stage 1 landed (7823115d).** Stage 2 in progress: PPM ballistics against the IEC
-  60268-10 burst table (rows and ac2's acceptance in the note §3; the standard's own
-  tolerances still unread), true peak, overs, per-side gated correlation, ember goniometer,
-  Programme pane, rig-level `levels.set`. Stage 3 loudness after.
+- **Stages 1 (7823115d) and 2 landed.** Stage 2: PPM ballistics against the IEC 60268-10
+  burst table (rows and ac2's acceptance in the note §3; the standard's own tolerances still
+  unread), true peak, overs, per-side gated correlation, ember goniometer, Programme pane,
+  rig-level `levels.set` (Settings › Rig monitor and `ac2 levels`). Its deviations from the
+  note are in §8. **Stage 3 (loudness) open.**
+- **Programme pane polish.** No drag of an Inputs row onto a pane yet (P and the pane's list
+  open one); the goniometer frames arrive with the session's input meters whether or not a
+  Programme pane shows them (`session/` prefix), a separate subscription would spare the
+  bandwidth on a rig with many pairs; *both quiet* never shows (the wire names one quiet
+  side, the left first).
 
 ## Band Leq (design `band-leq.md`)
 
