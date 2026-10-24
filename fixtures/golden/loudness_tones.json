@@ -1,0 +1,147 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "loudness_tones",
+  "description": "Integrated loudness of 40 Hz, 1 kHz and 10 kHz stereo tones at every rate; the -18 dBFS stereo calibration tone; mono sources.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_loudness_tones"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "rates_hz": [
+      44100,
+      48000,
+      88200,
+      96000,
+      176400,
+      192000
+    ],
+    "rate_tolerance_lu": 0.05,
+    "tones": {
+      "40": {
+        "freq_hz": 40,
+        "channels": 2,
+        "segments": [
+          [
+            5.0,
+            -20,
+            -20
+          ]
+        ]
+      },
+      "1000": {
+        "freq_hz": 1000,
+        "channels": 2,
+        "segments": [
+          [
+            5.0,
+            -20,
+            -20
+          ]
+        ]
+      },
+      "10000": {
+        "freq_hz": 10000,
+        "channels": 2,
+        "segments": [
+          [
+            5.0,
+            -20,
+            -20
+          ]
+        ]
+      }
+    },
+    "calibration": {
+      "programme": {
+        "freq_hz": 1000,
+        "channels": 2,
+        "segments": [
+          [
+            10.0,
+            -18,
+            -18
+          ]
+        ]
+      },
+      "published": -18.0,
+      "tolerance_lu": 0.05
+    },
+    "mono": {
+      "case1": {
+        "freq_hz": 1000,
+        "channels": 1,
+        "segments": [
+          [
+            20.0,
+            -23,
+            -23
+          ]
+        ]
+      },
+      "case3": {
+        "freq_hz": 1000,
+        "channels": 1,
+        "segments": [
+          [
+            10.0,
+            -36,
+            -36
+          ],
+          [
+            60.0,
+            -23,
+            -23
+          ],
+          [
+            10.0,
+            -36,
+            -36
+          ]
+        ]
+      },
+      "note": "one channel of weight 1: 3 LU under the same signal on a pair"
+    }
+  },
+  "references": [
+    "ITU-R BS.1770-5 Annex 1 (K-weighting, gating)",
+    "EBU Tech 3341 V4 §2.9 (calibration tone)"
+  ],
+  "scalars": {
+    "tone40_44100_integrated": -26.259361935060337,
+    "tone40_48000_integrated": -26.25936177896094,
+    "tone40_88200_integrated": -26.25936078626319,
+    "tone40_96000_integrated": -26.259360627842664,
+    "tone40_176400_integrated": -26.2593598450021,
+    "tone40_192000_integrated": -26.25935974273013,
+    "tone1000_44100_integrated": -19.99436671033255,
+    "tone1000_48000_integrated": -19.993301963206147,
+    "tone1000_88200_integrated": -19.989245971127815,
+    "tone1000_96000_integrated": -19.988979941795144,
+    "tone1000_176400_integrated": -19.987966308957162,
+    "tone1000_192000_integrated": -19.987899717257466,
+    "tone10000_44100_integrated": -16.648972683109033,
+    "tone10000_48000_integrated": -16.649118244002313,
+    "tone10000_88200_integrated": -16.64978765290661,
+    "tone10000_96000_integrated": -16.64983815784326,
+    "tone10000_176400_integrated": -16.650038571169535,
+    "tone10000_192000_integrated": -16.650052132471266,
+    "calibration_integrated": -17.993298767779013,
+    "calibration_momentary": -17.993295678084937,
+    "calibration_short_term": -17.993295678084937,
+    "mono_case1_integrated": -26.00359705832264,
+    "mono_case1_momentary": -26.003595537001424,
+    "mono_case3_integrated": -26.02416863110961,
+    "mono_case3_momentary": -39.003595514486406
+  },
+  "blob": {
+    "file": "loudness_tones.bin",
+    "nbytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "arrays": []
+}

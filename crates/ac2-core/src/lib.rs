@@ -17,6 +17,7 @@ pub mod ir_response;
 pub mod ir_view;
 pub mod leq;
 pub mod loopback;
+pub mod loudness;
 pub mod mic_curve;
 pub mod mtw;
 pub mod multires;

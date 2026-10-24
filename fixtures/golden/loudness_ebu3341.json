@@ -1,0 +1,1332 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "loudness_ebu3341",
+  "description": "EBU Tech 3341 cases 1-5 (all rates), 9, 12 and the live forms of 11 and 14 (48 kHz, two reset phases): published readings and the unbinned reference meter's values for the same synthesised signals.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_loudness_ebu3341"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "signal": "1000 Hz stereo tone per the module doc of tools/refgen/sets/loudness.py",
+    "tolerance_lu": 0.1,
+    "rates_hz": [
+      44100,
+      48000,
+      88200,
+      96000,
+      176400,
+      192000
+    ],
+    "cases": {
+      "1": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              20.0,
+              -23,
+              -23
+            ]
+          ]
+        },
+        "published": {
+          "momentary": -23.0,
+          "short_term": -23.0,
+          "integrated": -23.0
+        }
+      },
+      "2": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              20.0,
+              -33,
+              -33
+            ]
+          ]
+        },
+        "published": {
+          "momentary": -33.0,
+          "short_term": -33.0,
+          "integrated": -33.0
+        }
+      },
+      "3": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              10.0,
+              -36,
+              -36
+            ],
+            [
+              60.0,
+              -23,
+              -23
+            ],
+            [
+              10.0,
+              -36,
+              -36
+            ]
+          ]
+        },
+        "published": {
+          "integrated": -23.0
+        }
+      },
+      "4": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              10.0,
+              -72,
+              -72
+            ],
+            [
+              10.0,
+              -36,
+              -36
+            ],
+            [
+              60.0,
+              -23,
+              -23
+            ],
+            [
+              10.0,
+              -36,
+              -36
+            ],
+            [
+              10.0,
+              -72,
+              -72
+            ]
+          ]
+        },
+        "published": {
+          "integrated": -23.0
+        }
+      },
+      "5": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              20.0,
+              -26,
+              -26
+            ],
+            [
+              20.1,
+              -20,
+              -20
+            ],
+            [
+              20.0,
+              -26,
+              -26
+            ]
+          ]
+        },
+        "published": {
+          "integrated": -23.0
+        }
+      }
+    },
+    "not_run": {
+      "6": "5.0 surround: ac2 has no surround source",
+      "7, 8": "the EBU's programme recordings, not in the text",
+      "10, 13": "file forms of 11 and 14 (twenty files each measured after a reset); the live forms test the same windows",
+      "15-19": "true peak: tests/it/loudness of ac2-core from the text (analytic)"
+    },
+    "case9": {
+      "programme": {
+        "freq_hz": 1000,
+        "channels": 2,
+        "segments": [
+          [
+            1.34,
+            -20,
+            -20
+          ],
+          [
+            1.66,
+            -30,
+            -30
+          ],
+          [
+            1.34,
+            -20,
+            -20
+          ],
+          [
+            1.66,
+            -30,
+            -30
+          ],
+          [
+            1.34,
+            -20,
+            -20
+          ],
+          [
+            1.66,
+            -30,
+            -30
+          ],
+          [
+            1.34,
+            -20,
+            -20
+          ],
+          [
+            1.66,
+            -30,
+            -30
+          ],
+          [
+            1.34,
+            -20,
+            -20
+          ],
+          [
+            1.66,
+            -30,
+            -30
+          ]
+        ]
+      },
+      "published_short_term": -23.0,
+      "from_sub_block": 300,
+      "note": "every sub-block value after 3 s"
+    },
+    "case12": {
+      "programme": {
+        "freq_hz": 1000,
+        "channels": 2,
+        "segments": [
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ],
+          [
+            0.18,
+            -20,
+            -20
+          ],
+          [
+            0.22,
+            -30,
+            -30
+          ]
+        ]
+      },
+      "published_momentary": -23.0,
+      "from_sub_block": 100,
+      "note": "every sub-block value after 1 s"
+    },
+    "live": {
+      "lead_in": {
+        "freq_hz": 1000,
+        "channels": 2,
+        "segments": [
+          [
+            1.0,
+            -30,
+            -30
+          ]
+        ]
+      },
+      "reset": "reset requested after the lead-in (a sub-block boundary); the signal follows at once (phase 0) or after 240 samples of silence (phase 240: the reset 5 ms before the signal)",
+      "phases_samples": [
+        0,
+        240
+      ],
+      "read": "the maximum after the last sample of each segment",
+      "case11": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              0.0,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -38.0,
+              -38.0
+            ],
+            [
+              3.0,
+              null,
+              null
+            ],
+            [
+              0.15,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -37.0,
+              -37.0
+            ],
+            [
+              2.85,
+              null,
+              null
+            ],
+            [
+              0.3,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -36.0,
+              -36.0
+            ],
+            [
+              2.7,
+              null,
+              null
+            ],
+            [
+              0.45,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -35.0,
+              -35.0
+            ],
+            [
+              2.55,
+              null,
+              null
+            ],
+            [
+              0.6,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -34.0,
+              -34.0
+            ],
+            [
+              2.4,
+              null,
+              null
+            ],
+            [
+              0.75,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -33.0,
+              -33.0
+            ],
+            [
+              2.25,
+              null,
+              null
+            ],
+            [
+              0.9,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -32.0,
+              -32.0
+            ],
+            [
+              2.1,
+              null,
+              null
+            ],
+            [
+              1.05,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -31.0,
+              -31.0
+            ],
+            [
+              1.95,
+              null,
+              null
+            ],
+            [
+              1.2,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -30.0,
+              -30.0
+            ],
+            [
+              1.8,
+              null,
+              null
+            ],
+            [
+              1.35,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -29.0,
+              -29.0
+            ],
+            [
+              1.65,
+              null,
+              null
+            ],
+            [
+              1.5,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -28.0,
+              -28.0
+            ],
+            [
+              1.5,
+              null,
+              null
+            ],
+            [
+              1.65,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -27.0,
+              -27.0
+            ],
+            [
+              1.35,
+              null,
+              null
+            ],
+            [
+              1.8,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -26.0,
+              -26.0
+            ],
+            [
+              1.2,
+              null,
+              null
+            ],
+            [
+              1.95,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -25.0,
+              -25.0
+            ],
+            [
+              1.05,
+              null,
+              null
+            ],
+            [
+              2.1,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -24.0,
+              -24.0
+            ],
+            [
+              0.9,
+              null,
+              null
+            ],
+            [
+              2.25,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -23.0,
+              -23.0
+            ],
+            [
+              0.75,
+              null,
+              null
+            ],
+            [
+              2.4,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -22.0,
+              -22.0
+            ],
+            [
+              0.6,
+              null,
+              null
+            ],
+            [
+              2.55,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -21.0,
+              -21.0
+            ],
+            [
+              0.45,
+              null,
+              null
+            ],
+            [
+              2.7,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -20.0,
+              -20.0
+            ],
+            [
+              0.3,
+              null,
+              null
+            ],
+            [
+              2.85,
+              null,
+              null
+            ],
+            [
+              3.0,
+              -19.0,
+              -19.0
+            ],
+            [
+              0.15,
+              null,
+              null
+            ]
+          ]
+        },
+        "segment_s": 6.0,
+        "quantity": "max_short_term",
+        "published": [
+          -38.0,
+          -37.0,
+          -36.0,
+          -35.0,
+          -34.0,
+          -33.0,
+          -32.0,
+          -31.0,
+          -30.0,
+          -29.0,
+          -28.0,
+          -27.0,
+          -26.0,
+          -25.0,
+          -24.0,
+          -23.0,
+          -22.0,
+          -21.0,
+          -20.0,
+          -19.0
+        ]
+      },
+      "case14": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              0.0,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -38.0,
+              -38.0
+            ],
+            [
+              0.4,
+              null,
+              null
+            ],
+            [
+              0.02,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -37.0,
+              -37.0
+            ],
+            [
+              0.38,
+              null,
+              null
+            ],
+            [
+              0.04,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -36.0,
+              -36.0
+            ],
+            [
+              0.36,
+              null,
+              null
+            ],
+            [
+              0.06,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -35.0,
+              -35.0
+            ],
+            [
+              0.34,
+              null,
+              null
+            ],
+            [
+              0.08,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -34.0,
+              -34.0
+            ],
+            [
+              0.32,
+              null,
+              null
+            ],
+            [
+              0.1,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -33.0,
+              -33.0
+            ],
+            [
+              0.3,
+              null,
+              null
+            ],
+            [
+              0.12,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -32.0,
+              -32.0
+            ],
+            [
+              0.28,
+              null,
+              null
+            ],
+            [
+              0.14,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -31.0,
+              -31.0
+            ],
+            [
+              0.26,
+              null,
+              null
+            ],
+            [
+              0.16,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -30.0,
+              -30.0
+            ],
+            [
+              0.24,
+              null,
+              null
+            ],
+            [
+              0.18,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -29.0,
+              -29.0
+            ],
+            [
+              0.22,
+              null,
+              null
+            ],
+            [
+              0.2,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -28.0,
+              -28.0
+            ],
+            [
+              0.2,
+              null,
+              null
+            ],
+            [
+              0.22,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -27.0,
+              -27.0
+            ],
+            [
+              0.18,
+              null,
+              null
+            ],
+            [
+              0.24,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -26.0,
+              -26.0
+            ],
+            [
+              0.16,
+              null,
+              null
+            ],
+            [
+              0.26,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -25.0,
+              -25.0
+            ],
+            [
+              0.14,
+              null,
+              null
+            ],
+            [
+              0.28,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -24.0,
+              -24.0
+            ],
+            [
+              0.12,
+              null,
+              null
+            ],
+            [
+              0.3,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -23.0,
+              -23.0
+            ],
+            [
+              0.1,
+              null,
+              null
+            ],
+            [
+              0.32,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -22.0,
+              -22.0
+            ],
+            [
+              0.08,
+              null,
+              null
+            ],
+            [
+              0.34,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -21.0,
+              -21.0
+            ],
+            [
+              0.06,
+              null,
+              null
+            ],
+            [
+              0.36,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -20.0,
+              -20.0
+            ],
+            [
+              0.04,
+              null,
+              null
+            ],
+            [
+              0.38,
+              null,
+              null
+            ],
+            [
+              0.4,
+              -19.0,
+              -19.0
+            ],
+            [
+              0.02,
+              null,
+              null
+            ]
+          ]
+        },
+        "segment_s": 0.8,
+        "quantity": "max_momentary",
+        "published": [
+          -38.0,
+          -37.0,
+          -36.0,
+          -35.0,
+          -34.0,
+          -33.0,
+          -32.0,
+          -31.0,
+          -30.0,
+          -29.0,
+          -28.0,
+          -27.0,
+          -26.0,
+          -25.0,
+          -24.0,
+          -23.0,
+          -22.0,
+          -21.0,
+          -20.0,
+          -19.0
+        ]
+      }
+    }
+  },
+  "references": [
+    "EBU Tech 3341 V4 (2023) Table 1, synthesised from its text",
+    "ITU-R BS.1770-5 Annex 1 (K-weighting, gating)"
+  ],
+  "scalars": {
+    "c1_44100_integrated": -22.99436185884541,
+    "c1_44100_momentary": -22.99436033771649,
+    "c1_44100_short_term": -22.99436033771649,
+    "c1_48000_integrated": -22.993297101682828,
+    "c1_48000_momentary": -22.99329558036161,
+    "c1_48000_short_term": -22.99329558036161,
+    "c1_88200_integrated": -22.98924116489963,
+    "c1_88200_momentary": -22.989239657951597,
+    "c1_88200_short_term": -22.989239657951604,
+    "c1_96000_integrated": -22.98897515811835,
+    "c1_96000_momentary": -22.988973653928614,
+    "c1_96000_short_term": -22.988973653928618,
+    "c1_176400_integrated": -22.987961569042007,
+    "c1_176400_momentary": -22.98796008287211,
+    "c1_176400_short_term": -22.987960082872114,
+    "c1_192000_integrated": -22.987895097890004,
+    "c1_192000_momentary": -22.987893613806662,
+    "c1_192000_short_term": -22.98789361380664,
+    "c2_44100_integrated": -32.99436188590138,
+    "c2_44100_momentary": -32.99436036477234,
+    "c2_44100_short_term": -32.99436036477234,
+    "c2_48000_integrated": -32.99329704068299,
+    "c2_48000_momentary": -32.993295519361695,
+    "c2_48000_short_term": -32.993295519361695,
+    "c2_88200_integrated": -32.98924119195543,
+    "c2_88200_momentary": -32.989239685007455,
+    "c2_88200_short_term": -32.989239685007455,
+    "c2_96000_integrated": -32.988975021794346,
+    "c2_96000_momentary": -32.98897351760462,
+    "c2_96000_short_term": -32.98897351760462,
+    "c2_176400_integrated": -32.98796159609785,
+    "c2_176400_momentary": -32.98796010992798,
+    "c2_176400_short_term": -32.98796010992798,
+    "c2_192000_integrated": -32.98789500840114,
+    "c2_192000_momentary": -32.987893524317755,
+    "c2_192000_short_term": -32.98789352431776,
+    "c3_44100_integrated": -23.014933425498416,
+    "c3_44100_momentary": -35.99436031734861,
+    "c3_44100_short_term": -35.99436031734861,
+    "c3_48000_integrated": -23.013868674469798,
+    "c3_48000_momentary": -35.993295557846594,
+    "c3_48000_short_term": -35.993295557846594,
+    "c3_88200_integrated": -23.009812771470084,
+    "c3_88200_momentary": -35.98923963758371,
+    "c3_88200_short_term": -35.98923963758371,
+    "c3_96000_integrated": -23.009546768166636,
+    "c3_96000_momentary": -35.988973680582106,
+    "c3_96000_short_term": -35.9889736805821,
+    "c3_176400_integrated": -23.008533197455108,
+    "c3_176400_momentary": -35.98796006250422,
+    "c3_176400_short_term": -35.987960062504236,
+    "c3_192000_integrated": -23.00846672813399,
+    "c3_192000_momentary": -35.98789360514534,
+    "c3_192000_short_term": -35.98789360514531,
+    "c4_44100_integrated": -23.014933425498416,
+    "c4_44100_momentary": -71.9943603588451,
+    "c4_44100_short_term": -71.99436035884509,
+    "c4_48000_integrated": -23.01386867446981,
+    "c4_48000_momentary": -71.99329547216333,
+    "c4_48000_short_term": -71.99329547216333,
+    "c4_88200_integrated": -23.009812771470084,
+    "c4_88200_momentary": -71.98923967908019,
+    "c4_88200_short_term": -71.98923967908019,
+    "c4_96000_integrated": -23.009546768166636,
+    "c4_96000_momentary": -71.98897354486576,
+    "c4_96000_short_term": -71.98897354486574,
+    "c4_176400_integrated": -23.00853319745512,
+    "c4_176400_momentary": -71.98796010400066,
+    "c4_176400_short_term": -71.98796010400066,
+    "c4_192000_integrated": -23.00846672813399,
+    "c4_192000_momentary": -71.98789351003947,
+    "c4_192000_short_term": -71.98789351003947,
+    "c5_44100_integrated": -22.979722197292652,
+    "c5_44100_momentary": -25.994360341793282,
+    "c5_44100_short_term": -25.994360341793282,
+    "c5_48000_integrated": -22.97865743657874,
+    "c5_48000_momentary": -25.99329553224007,
+    "c5_48000_short_term": -25.99329553224007,
+    "c5_88200_integrated": -22.97460155186747,
+    "c5_88200_momentary": -25.989239662028393,
+    "c5_88200_short_term": -25.989239662028393,
+    "c5_96000_integrated": -22.974335531935058,
+    "c5_96000_momentary": -25.98897363335994,
+    "c5_96000_short_term": -25.988973633359944,
+    "c5_176400_integrated": -22.973321982541695,
+    "c5_176400_momentary": -25.987960086948966,
+    "c5_176400_short_term": -25.987960086948956,
+    "c5_192000_integrated": -22.973255427562425,
+    "c5_192000_momentary": -25.987893587953483,
+    "c5_192000_short_term": -25.987893587953483
+  },
+  "blob": {
+    "file": "loudness_ebu3341.bin",
+    "nbytes": 17456,
+    "sha256": "a3db60a3384f1a0ed0a6154a58fd9bb1fb20d0abd73c3eb97de3771cf5f55a84"
+  },
+  "arrays": [
+    {
+      "name": "case9_short_term",
+      "dtype": "f64",
+      "shape": [
+        1201
+      ],
+      "offset": 0,
+      "nbytes": 9608,
+      "unit": "LUFS",
+      "description": "short-term after each sub-block J = 300.. (48 kHz)",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "case12_momentary",
+      "dtype": "f64",
+      "shape": [
+        901
+      ],
+      "offset": 9608,
+      "nbytes": 7208,
+      "unit": "LUFS",
+      "description": "momentary after each sub-block J = 100.. (48 kHz)",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "case11_maxima",
+      "dtype": "f64",
+      "shape": [
+        2,
+        20
+      ],
+      "offset": 16816,
+      "nbytes": 320,
+      "unit": "LUFS",
+      "description": "max_short_term at the end of each segment, [phase 0, 240][segment]",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "case14_maxima",
+      "dtype": "f64",
+      "shape": [
+        2,
+        20
+      ],
+      "offset": 17136,
+      "nbytes": 320,
+      "unit": "LUFS",
+      "description": "max_momentary at the end of each segment, [phase 0, 240][segment]",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      }
+    }
+  ]
+}

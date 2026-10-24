@@ -1,0 +1,116 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "loudness_kweighting",
+  "description": "BS.1770-5 K-weighting re-derived per rate: biquad coefficients at 44.1-192 kHz, the cascade's magnitude response from 20 Hz to 19.2 kHz, and Tables 1 and 2.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_loudness_kweighting"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "rates_hz": [
+      44100,
+      48000,
+      88200,
+      96000,
+      176400,
+      192000
+    ],
+    "formulas": "pre-filter: K = tan(pi f0/fs), Vh = 10^(G/20), Vb = Vh^vb_exp, a0 = 1 + K/Q + K^2; b = [Vh + Vb K/Q + K^2, 2(K^2 - Vh), Vh - Vb K/Q + K^2]/a0, a = [1, 2(K^2 - 1)/a0, (1 - K/Q + K^2)/a0]. RLB: K = tan(pi f0/fs), a0 = 1 + K/Q + K^2, b = g [1, -2, 1], g = a0(48 kHz)/a0(fs), a = [1, 2(K^2 - 1)/a0, (1 - K/Q + K^2)/a0]",
+    "pre": {
+      "f0": 1681.974450955533,
+      "gain_db": 3.999843853973347,
+      "q": 0.7071752369554196,
+      "vb_exp": 0.4996667741545416
+    },
+    "rlb": {
+      "f0": 38.13547087602444,
+      "q": 0.5003270373238773
+    },
+    "coefficient_layout": "[rate][stage pre, rlb][b0, b1, b2, a1, a2]"
+  },
+  "references": [
+    "ITU-R BS.1770-5 Annex 1 (K-weighting, gating)"
+  ],
+  "scalars": {},
+  "blob": {
+    "file": "loudness_kweighting.bin",
+    "nbytes": 14104,
+    "sha256": "21b5b3638f1bd485c9750a79d7bf8f2caba8c297216bddbb8e17465ef9c8fc0b"
+  },
+  "arrays": [
+    {
+      "name": "tables",
+      "dtype": "f64",
+      "shape": [
+        2,
+        5
+      ],
+      "offset": 0,
+      "nbytes": 80,
+      "unit": "1",
+      "description": "BS.1770-5 Tables 1 and 2 as printed (48 kHz)"
+    },
+    {
+      "name": "rates",
+      "dtype": "f64",
+      "shape": [
+        6
+      ],
+      "offset": 80,
+      "nbytes": 48,
+      "unit": "Hz",
+      "description": "rates"
+    },
+    {
+      "name": "coefficients",
+      "dtype": "f64",
+      "shape": [
+        6,
+        2,
+        5
+      ],
+      "offset": 128,
+      "nbytes": 480,
+      "unit": "1",
+      "description": "per-rate coefficients",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-12,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "freqs",
+      "dtype": "f64",
+      "shape": [
+        241
+      ],
+      "offset": 608,
+      "nbytes": 1928,
+      "unit": "Hz",
+      "description": "response frequencies"
+    },
+    {
+      "name": "response_db",
+      "dtype": "f64",
+      "shape": [
+        6,
+        241
+      ],
+      "offset": 2536,
+      "nbytes": 11568,
+      "unit": "dB",
+      "description": "cascade magnitude per rate, [rate][freqs]; freqz's cos-form evaluation loses digits near the RLB poles at high rates",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      }
+    }
+  ]
+}
