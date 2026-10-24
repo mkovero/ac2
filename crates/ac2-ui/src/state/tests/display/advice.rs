@@ -30,6 +30,7 @@ fn feed(t: &mut T, now_s: f64, coh: f32, ref_peak: f32, meas_rms: f32) {
                 channels: vec![0, 1],
                 ballistic: Default::default(),
                 pair_levels: vec![],
+                loudness: vec![],
             },
             peak: vec![ref_peak, meas_rms + 12.0],
             rms: vec![ref_peak - 12.0, meas_rms],

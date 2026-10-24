@@ -897,6 +897,7 @@ fn line_calibration_from_the_calibrations_view() {
             channels: vec![0, 1],
             ballistic: Default::default(),
             pair_levels: vec![],
+            loudness: vec![],
         },
         peak: vec![-6.0, -1.0],
         rms: vec![-9.0, -12.0],

@@ -16,7 +16,7 @@ use ac2_core::ppm::{QuasiPeak, QuasiPeakSpec, TruePeak, Vu, dbtp};
 use ac2_core::protection::peak_dbfs;
 use ac2_core::stereo::{Correlator, GonioPicker, Side};
 use ac2_proto::cal;
-use ac2_proto::frame::{GONIO_POINTS, GonioFrame, GonioPair, PairLevels};
+use ac2_proto::frame::{GONIO_POINTS, GonioFrame, GonioPair, PairLevels, SourceLoudness};
 use ac2_proto::model::{
     Ballistic, DeviceId, InputSetup, LevelsSettings, LineCalEntry, Pair, PairSide,
 };
@@ -327,6 +327,7 @@ impl Programme {
             max: Vec::with_capacity(self.inputs.len()),
             overs: Vec::with_capacity(self.inputs.len()),
             pair_levels: Vec::with_capacity(self.pairs.len()),
+            loudness: self.loudness(),
             gonio: points.then(|| GonioFrame {
                 pairs: Vec::with_capacity(self.pairs.len()),
             }),
@@ -371,6 +372,13 @@ impl Programme {
         }
         out
     }
+
+    /// The loudness of every source this interval (docs/design/programme-meter.md §6.1):
+    /// pairs first in `pair_levels` order, then unpaired line and digital inputs ascending
+    /// by channel. The BS.1770 meters are not wired in yet, so there are no sources.
+    fn loudness(&mut self) -> Vec<SourceLoudness> {
+        Vec::new()
+    }
 }
 
 fn slot(b: Ballistic) -> usize {
@@ -388,6 +396,7 @@ pub(crate) struct Readings {
     pub(crate) max: Vec<f32>,
     pub(crate) overs: Vec<u32>,
     pub(crate) pair_levels: Vec<PairLevels>,
+    pub(crate) loudness: Vec<SourceLoudness>,
     pub(crate) gonio: Option<GonioFrame>,
 }
 

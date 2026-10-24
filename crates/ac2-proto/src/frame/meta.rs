@@ -10,8 +10,8 @@ use crate::model::{
     Window,
 };
 use crate::units::{
-    ClientId, DaemonIncarnation, Db, Dbfs, Hz, Rev, SampleIndex, Samples, Seconds, SessionEpoch,
-    WallNs,
+    ClientId, DaemonIncarnation, Db, Dbfs, Dbtp, Hz, Lufs, Rev, SampleIndex, Samples, Seconds,
+    SessionEpoch, WallNs,
 };
 
 use super::{ArrayDesc, FrameKind, ProtectionFlags};
@@ -360,6 +360,56 @@ pub struct PairLevels {
     pub quiet: Option<PairSide>,
 }
 
+/// What a loudness figure is measured over (docs/design/programme-meter.md §6.1): a
+/// declared pair with both inputs captured (stereo, channel weights 1, 1), or one captured
+/// input not in a pair (weight 1, so a mono signal reads 3 LU below the same on a pair).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LoudnessSource {
+    /// A declared pair; zero-based device input channels, as in [`PairLevels`].
+    Pair {
+        /// Zero-based device input channel of the left side.
+        left: u16,
+        /// Zero-based device input channel of the right side.
+        right: u16,
+    },
+    /// One unpaired input.
+    Input {
+        /// Zero-based device input channel.
+        channel: u16,
+    },
+}
+
+/// One source's BS.1770 / EBU Tech 3341 and 3342 loudness this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceLoudness {
+    /// What it is measured over.
+    pub source: LoudnessSource,
+    /// Momentary loudness (the last 400 ms); −∞ on silence or before a window lies wholly
+    /// after the source's start or a discontinuity.
+    pub momentary: Lufs,
+    /// Short-term loudness (the last 3 s); −∞ as `momentary`.
+    pub short_term: Lufs,
+    /// Integrated (gated) loudness since the reset; `None` until a block passes the
+    /// absolute gate.
+    pub integrated: Option<Lufs>,
+    /// Loudness range (Tech 3342), LU; `None` until a short-term value passes the gate.
+    pub range: Option<Db>,
+    /// Highest momentary over windows wholly after the reset; −∞ until the first.
+    pub max_momentary: Lufs,
+    /// Highest short-term over windows wholly after the reset; −∞ until the first.
+    pub max_short_term: Lufs,
+    /// Highest true peak of the source's channels since the reset; −∞ until the first
+    /// metered block.
+    pub max_true_peak: Dbtp,
+    /// Metered samples since the reset, as time: the range is settling below 60 s, and it
+    /// must not depend on a wall clock that NTP may step.
+    pub duration: Seconds,
+    /// The daemon's clock at the reset, for the "since" line only.
+    pub since: WallNs,
+}
+
 /// Session input meters metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -371,6 +421,9 @@ pub struct SessionLevelsMeta {
     pub ballistic: Ballistic,
     /// Every declared pair whose both inputs are captured, in `session.inputs` order.
     pub pair_levels: Vec<PairLevels>,
+    /// Every loudness source: pairs first in `pair_levels` order, then unpaired line and
+    /// digital inputs ascending by channel; none for mic inputs.
+    pub loudness: Vec<SourceLoudness>,
 }
 
 /// Device preview meters metadata.
@@ -391,6 +444,8 @@ pub struct PreviewLevelsMeta {
     pub ballistic: Ballistic,
     /// As [`SessionLevelsMeta::pair_levels`], one per declared pair.
     pub pair_levels: Vec<PairLevels>,
+    /// As [`SessionLevelsMeta::loudness`].
+    pub loudness: Vec<SourceLoudness>,
 }
 
 /// One pair of a goniometer frame: which inputs, and the gain its points are relative to.

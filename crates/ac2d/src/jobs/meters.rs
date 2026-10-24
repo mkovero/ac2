@@ -90,6 +90,7 @@ impl SessionLevels {
                         channels: meta.channels,
                         ballistic: r.ballistic,
                         pair_levels: r.pair_levels,
+                        loudness: r.loudness,
                     },
                     peak,
                     rms,

@@ -57,10 +57,31 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     assert_eq!(rows[0]["overs"], 0);
     assert_eq!(rows[0]["clip"], false);
     assert_eq!(
-        rows[1]["ppm"],
-        serde_json::Value::Null,
-        "-inf is not JSON: null"
+        rows[1]["ppm"], "-inf",
+        "JSON has no infinity; null means something else"
     );
+    assert_eq!(rows[1]["max"], "-inf");
+    // Loudness: the line pair 1+2, then input 3 alone; input 4 (undeclared, so a mic) none.
+    let loud = v["loudness"].as_array().expect("array");
+    assert_eq!(loud.len(), 2, "{loud:?}");
+    assert_eq!(
+        loud[0]["source"],
+        serde_json::json!({"type": "pair", "left": 1, "right": 2})
+    );
+    assert_eq!(
+        loud[1]["source"],
+        serde_json::json!({"type": "input", "input": 3})
+    );
+    assert!(near(&loud[0]["max_true_peak"], -11.8), "{}", loud[0]);
+    for l in loud {
+        // Before its first gating block passes, integrated is null, never "-inf".
+        let int = &l["integrated"];
+        assert!(int.is_null() || int.is_f64(), "{l}");
+        let mom = &l["momentary"];
+        assert!(mom == "-inf" || mom.is_f64(), "{l}");
+        assert!(l["duration"].as_f64().expect("seconds") > 0.0, "{l}");
+        assert!(l["since"].as_u64().expect("daemon wall ns") > 0, "{l}");
+    }
     let pairs = v["pairs"].as_array().expect("array");
     assert_eq!(pairs.len(), 1);
     assert_eq!(pairs[0]["left"], 1);
@@ -71,7 +92,18 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     // The text table uses the meter words.
     let t = ac2(&f, &["levels"]).await?;
     assert_eq!(t.code, 0, "{}", t.stderr);
-    for word in ["true peak", "dBTP", "overs", "CLIP", "right quiet", "1 s"] {
+    for word in [
+        "true peak",
+        "dBTP",
+        "overs",
+        "CLIP",
+        "right quiet",
+        "1 s",
+        "TP max",
+        "max Short",
+        "1+2",
+        "3 mono",
+    ] {
         assert!(t.stdout.contains(word), "{word:?} missing in {}", t.stdout);
     }
     // Set: fields given change, the rig comes back; the window shows on the pair row.

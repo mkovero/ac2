@@ -1,13 +1,18 @@
-//! `ac2 levels [set|reset]`: the programme meters of the open session, their settings and
-//! their holds.
+//! `ac2 levels [set|reset]`: the programme meters and loudness of the open session, their
+//! settings and their holds.
+//!
+//! In `--json`, −∞ is the string `"-inf"` (as `spl_log` writes it): JSON has no infinity,
+//! and `null` keeps each field's own meaning (not yet, gated, none), so silence and
+//! *waiting for programme* stay distinct.
 
 use std::time::{Duration, Instant};
 
 use ac2_client::{Client, expect_body};
 use ac2_proto::cal;
-use ac2_proto::frame::{ClipFlags, FrameData, SessionLevelsFrame};
+use ac2_proto::frame::{ClipFlags, FrameData, LoudnessSource, SessionLevelsFrame, SourceLoudness};
 use ac2_proto::model::{Ballistic, LevelsSettings, PairSide, Rig, State};
 use ac2_proto::topic::Topic;
+use ac2_proto::units::WallNs;
 use ac2_proto::{Command, ReplyBody, Subscription};
 use serde_json::json;
 
@@ -15,7 +20,7 @@ use super::osc::rig_edit;
 use super::{connect, state};
 use crate::CliError;
 use crate::args::*;
-use crate::output::{Out, kind_word, table};
+use crate::output::{Out, kind_word, local_offset_s, table};
 
 /// How long one meter frame may take to arrive (they come thirty times a second).
 const WAIT: Duration = Duration::from_secs(3);
@@ -62,10 +67,10 @@ pub(crate) async fn run(
             let rev = expect_body!("levels.reset", r, ReplyBody::Ack { rev } => rev)?;
             out.emit(&json!({ "rev": rev, "channels": channels }), || {
                 if channels.is_empty() {
-                    "max holds and overs cleared on every input".to_owned()
+                    "max holds, overs and loudness cleared on every input".to_owned()
                 } else {
                     format!(
-                        "max holds and overs cleared on input {}",
+                        "max holds, overs and loudness cleared on input {}",
                         ac2_scene::unit_text::channels_text(&channels)
                     )
                 }
@@ -75,7 +80,8 @@ pub(crate) async fn run(
     }
 }
 
-/// One meter frame of the open session as a table: a row per input, a row per pair.
+/// One meter frame of the open session as tables: a row per input, a row per pair, a row
+/// per loudness source.
 async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     let st = state(&c).await?;
@@ -84,7 +90,7 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
             "no session is open: ac2 session open meters the inputs".into(),
         ));
     }
-    let f = one_frame(&c).await?;
+    let (f, captured_at) = one_frame(&c).await?;
     let rows: Vec<serde_json::Value> = f
         .meta
         .channels
@@ -96,9 +102,9 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
                 "input": u32::from(ch) + 1,
                 "kind": kind_word(&cal::input_kind(&st.inputs, ch)),
                 "ballistic": b,
-                "ppm": f.ppm[i],
-                "true_peak": f.true_peak[i],
-                "max": f.max[i],
+                "ppm": level_json(f.ppm[i]),
+                "true_peak": level_json(f.true_peak[i]),
+                "max": level_json(f.max[i]),
                 "overs": f.overs[i],
                 "clip": f.clip[i].contains(ClipFlags::CLIP) || f.clip[i].contains(ClipFlags::HELD),
             })
@@ -118,8 +124,14 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
             })
         })
         .collect();
+    let loudness: Vec<serde_json::Value> = f.meta.loudness.iter().map(loudness_json).collect();
     out.emit(
-        &json!({ "settings": st.rig.levels, "inputs": rows, "pairs": pairs }),
+        &json!({
+            "settings": st.rig.levels,
+            "inputs": rows,
+            "pairs": pairs,
+            "loudness": loudness,
+        }),
         || {
             let mut t = table(&[
                 "in",
@@ -159,6 +171,10 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
                 s.push('\n');
                 s.push_str(&p.to_string());
             }
+            if !f.meta.loudness.is_empty() {
+                s.push('\n');
+                s.push_str(&loudness_table(&f.meta.loudness, captured_at));
+            }
             s
         },
     )?;
@@ -177,16 +193,113 @@ fn ballistic_of(st: &State, f: &SessionLevelsFrame, ch: u16) -> Ballistic {
     }
 }
 
-async fn one_frame(c: &Client) -> Result<SessionLevelsFrame, CliError> {
+/// The loudness table: one row per source, the readouts as the Programme pane words them.
+fn loudness_table(sources: &[SourceLoudness], captured_at: WallNs) -> String {
+    let mut t = table(&[
+        "source",
+        "Mom",
+        "Short",
+        "Int",
+        "LRA",
+        "max Mom",
+        "max Short",
+        "TP max",
+        "since",
+    ]);
+    for l in sources {
+        let lufs = |v: f64| level_text(v, "LUFS");
+        t.add_row([
+            source_name(&l.source),
+            lufs(l.momentary.0),
+            lufs(l.short_term.0),
+            l.integrated
+                .map_or_else(|| WAITING.to_owned(), |v| lufs(v.0)),
+            range_text(l),
+            lufs(l.max_momentary.0),
+            lufs(l.max_short_term.0),
+            level_text(l.max_true_peak.0, "dBTP"),
+            ac2_scene::time::local_clock(l.since, captured_at, local_offset_s),
+        ]);
+    }
+    t.to_string()
+}
+
+/// What an integrated loudness or a range reads before a block passes its gate.
+const WAITING: &str = "— (waiting for programme)";
+
+/// Tech 3342 asks for 60 s of programme before a range is more than a first impression.
+const RANGE_SETTLED_S: f64 = 60.0;
+
+fn range_text(l: &SourceLoudness) -> String {
+    match l.range {
+        None => WAITING.to_owned(),
+        Some(r) if l.duration.0 < RANGE_SETTLED_S => format!("{:.1} LU (settling)", r.0),
+        Some(r) => format!("{:.1} LU", r.0),
+    }
+}
+
+/// `1+2` for a pair, `3 mono` for one input (1-based, as the input rows).
+fn source_name(s: &LoudnessSource) -> String {
+    match *s {
+        LoudnessSource::Pair { left, right } => {
+            format!("{}+{}", u32::from(left) + 1, u32::from(right) + 1)
+        }
+        LoudnessSource::Input { channel } => format!("{} mono", u32::from(channel) + 1),
+    }
+}
+
+fn loudness_json(l: &SourceLoudness) -> serde_json::Value {
+    let source = match l.source {
+        LoudnessSource::Pair { left, right } => json!({
+            "type": "pair",
+            "left": u32::from(left) + 1,
+            "right": u32::from(right) + 1,
+        }),
+        LoudnessSource::Input { channel } => json!({
+            "type": "input",
+            "input": u32::from(channel) + 1,
+        }),
+    };
+    json!({
+        "source": source,
+        "momentary": level_json(l.momentary.0),
+        "short_term": level_json(l.short_term.0),
+        "integrated": l.integrated.map(|v| level_json(v.0)),
+        "range": l.range.map(|v| level_json(v.0)),
+        "max_momentary": level_json(l.max_momentary.0),
+        "max_short_term": level_json(l.max_short_term.0),
+        "max_true_peak": level_json(l.max_true_peak.0),
+        "duration": l.duration.0,
+        "since": l.since,
+    })
+}
+
+/// A level as JSON: a number, or the strings `"-inf"` / `"inf"` / `"nan"`, which JSON
+/// numbers cannot carry.
+pub(crate) fn level_json<T: Into<f64> + serde::Serialize + Copy>(v: T) -> serde_json::Value {
+    let x: f64 = v.into();
+    if x.is_finite() {
+        json!(v)
+    } else if x == f64::NEG_INFINITY {
+        json!("-inf")
+    } else if x.is_nan() {
+        json!("nan")
+    } else {
+        json!("inf")
+    }
+}
+
+/// The newest session meter frame and its capture time (daemon clock).
+async fn one_frame(c: &Client) -> Result<(SessionLevelsFrame, WallNs), CliError> {
     c.subscribe(Subscription::InputMeters)?;
     let end = Instant::now() + WAIT;
     let mut got = None;
     while Instant::now() < end {
         let latest = c.latest()?;
-        if let Some(FrameData::SessionLevels(f)) =
-            latest.get(&Topic::SessionLevels).map(|f| &f.frame.data)
+        if let Some(l) = latest.get(&Topic::SessionLevels)
+            && let FrameData::SessionLevels(f) = &l.frame.data
         {
-            got = Some(f.clone());
+            got = Some((f.clone(), l.frame.stamp.capture_wall_ns));
             break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -200,7 +313,8 @@ async fn one_frame(c: &Client) -> Result<SessionLevelsFrame, CliError> {
     })
 }
 
-fn level_text(v: f32, unit: &str) -> String {
+fn level_text(v: impl Into<f64>, unit: &str) -> String {
+    let v: f64 = v.into();
     if v.is_finite() {
         format!("{v:.1} {unit}")
     } else {

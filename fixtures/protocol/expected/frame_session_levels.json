@@ -1,7 +1,7 @@
 {
  "topic": "session/levels",
  "header": {
-  "v": 66,
+  "v": 67,
   "kind": "session_levels",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -64,6 +64,39 @@
       "right": 1,
       "correlation": 0.875,
       "quiet": null
+     }
+    ],
+    "loudness": [
+     {
+      "source": {
+       "type": "pair",
+       "left": 0,
+       "right": 1
+      },
+      "momentary": -23.25,
+      "short_term": -22.75,
+      "integrated": -23.0,
+      "range": 6.25,
+      "max_momentary": -18.5,
+      "max_short_term": -20.125,
+      "max_true_peak": -1.25,
+      "duration": 45.0,
+      "since": 1789999955000000000
+     },
+     {
+      "source": {
+       "type": "input",
+       "channel": 2
+      },
+      "momentary": -Infinity,
+      "short_term": -Infinity,
+      "integrated": null,
+      "range": null,
+      "max_momentary": -Infinity,
+      "max_short_term": -Infinity,
+      "max_true_peak": -Infinity,
+      "duration": 0.0,
+      "since": 1790000000000000000
      }
     ]
    }

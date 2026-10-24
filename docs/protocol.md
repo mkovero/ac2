@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 66`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 67`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -255,7 +255,9 @@ runs every ballistic all the time and reports the chosen one, so `levels.set` re
 settled detector at once; it keeps the fields given (nil keeps a field), persists the rig
 settings first, and refuses a threshold or gate outside its range or not finite (`invalid`).
 `levels.reset` clears the max hold of every ballistic and the over count of `channels`
-(device inputs; empty = every captured input) on the session meters and the preview alike;
+(device inputs; empty = every captured input) on the session meters and the preview alike,
+and resets every loudness source with an input in `channels` (integrated, range, the maxima,
+`duration` and `since` restart; momentary and short-term are signal state and carry on);
 nothing in the state changes, the next meter frame carries the cleared values.
 `artnet.test` sends one frame holding `channels` (every other channel 0) now, to find a
 fixture's channels; the keepalive repeats it for 5 s, then the cue frame comes back (at once
@@ -1764,12 +1766,29 @@ always `i8`).
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
 | `band_leq` | one column per band window, in configuration order: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
-| `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask, `ppm`: dbfs (the `ballistic`'s reading; the true peak where VU is chosen but not offered on the input), `true_peak`: dbtp, `max`: dbfs (highest `ppm` of the chosen ballistic since `levels.reset`), `overs`: count (since `levels.reset`) | `channels` (device input per column; length n), `ballistic` (`Ballistic`), `pair_levels` ([`PairLevels`] {`left`, `right`, `correlation`: f32 \| nil (−1 … 1 over the rig's window), `quiet`: `left` \| `right` \| nil (the side below the gate; then `correlation` is nil)}: every declared pair whose both inputs are captured) |
-| `preview_levels` | as `session_levels` | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `session.preview` declared them), `pairs` ([Pair]), `ballistic`, `pair_levels` ([`PairLevels`], one per declared pair) |
+| `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask, `ppm`: dbfs (the `ballistic`'s reading; the true peak where VU is chosen but not offered on the input), `true_peak`: dbtp, `max`: dbfs (highest `ppm` of the chosen ballistic since `levels.reset`), `overs`: count (since `levels.reset`) | `channels` (device input per column; length n), `ballistic` (`Ballistic`), `pair_levels` ([`PairLevels`] {`left`, `right`, `correlation`: f32 \| nil (−1 … 1 over the rig's window), `quiet`: `left` \| `right` \| nil (the side below the gate; then `correlation` is nil)}: every declared pair whose both inputs are captured), `loudness` ([`SourceLoudness`], below) |
+| `preview_levels` | as `session_levels` | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `session.preview` declared them), `pairs` ([Pair]), `ballistic`, `pair_levels` ([`PairLevels`], one per declared pair), `loudness` ([`SourceLoudness`]; a preview's sources never carry into the session) |
 | `session_gonio` | `gonio_x`, `gonio_y`: gonio_unit — every pair's 256 points in turn (n = 256 × pairs), `x = (r − l)/√2`, `y = (l + r)/√2` divided by the pair's auto gain (a mono signal is a vertical line, a left-only one leans left), one pair drawn from a random position in each of 256 bins of the frame's samples | `pairs` ([`GonioPairMeta`] {`left`, `right`, `gain_dbfs`: the auto gain, dBFS of the pair magnitude `√(l² + r²)`}) |
 | `preview_gonio` | as `session_gonio`, for the previewed device's declared pairs | as `session_gonio` |
 | `timing` | none | `status` (TimingStatus), `window` {capture_start, offset, psr, loopback, stimulus} |
 | `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, armed, firing}, `health` (`DaemonHealth`, below) |
+
+`SourceLoudness` (BS.1770-5 / EBU Tech 3341 and 3342; docs/design/programme-meter.md §6.1):
+`source` (`LoudnessSource`: {`type`: `pair`, `left`, `right`} or {`type`: `input`,
+`channel`}; zero-based device inputs), `momentary` and `short_term` (LUFS, f64: the last
+400 ms and 3 s; −∞ on silence and until a window lies wholly after the source's start or a
+capture discontinuity), `integrated` (LUFS \| nil: gated, since the reset; nil until a
+block passes the −70 LUFS gate), `range` (LU \| nil: the loudness range; nil until a
+short-term value passes its gate; settling while `duration` < 60 s), `max_momentary`,
+`max_short_term` (LUFS: −∞ until the first window after the reset), `max_true_peak`
+(dBTP, the source's channels; −∞ until the first metered block), `duration` (s of metered
+samples since the reset, gaps excluded: what settling reads, independent of the wall
+clock), `since` (WallNs: the daemon clock at the reset, for display only). Sources: every
+declared pair with both inputs captured and line or digital (stereo, weights 1, 1), then
+every captured line or digital input in no pair (weight 1, ascending by channel); none for
+a mic input, nor for a pair input whose partner is not captured, nor at a sample rate
+outside 44.1 … 192 kHz or not a multiple of 100 Hz. A change of kinds or pairs drops the
+sources that changed; new ones start afresh. Nothing is persisted.
 
 `DaemonHealth`: `host` (the daemon's host name as a DNS label, so a client on another
 machine names where the figures come from), `cpu` (f64 \| nil: whole-host CPU use over about

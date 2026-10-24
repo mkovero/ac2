@@ -5,15 +5,31 @@ use super::state::*;
 use crate::frame::{
     AudioHealth, BandLeqFrame, BandLeqMeta, BandWindowState, ClipFlags, DaemonHealth, Frame,
     FrameData, FrameStamp, GONIO_POINTS, GenSummary, GonioFrame, GonioPair, IrFrame, IrMeta,
-    KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMeta, MathState,
-    OperandState, OperandStatus, PairLevels, PreviewLevelsFrame, PreviewLevelsMeta,
-    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SessionLevelsMeta, SpecBand, SpecBands,
-    SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta, TimingWindow,
-    ValidityMask,
+    KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMeta, LoudnessSource,
+    MathState, OperandState, OperandStatus, PairLevels, PreviewLevelsFrame, PreviewLevelsMeta,
+    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SessionLevelsMeta, SourceLoudness,
+    SpecBand, SpecBands, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta,
+    TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
 use crate::units::*;
+
+/// A pair's loudness 45 s after its reset: integrated passed the gate, LRA still settling.
+fn pair_loudness() -> SourceLoudness {
+    SourceLoudness {
+        source: LoudnessSource::Pair { left: 0, right: 1 },
+        momentary: Lufs(-23.25),
+        short_term: Lufs(-22.75),
+        integrated: Some(Lufs(-23.0)),
+        range: Some(Db(6.25)),
+        max_momentary: Lufs(-18.5),
+        max_short_term: Lufs(-20.125),
+        max_true_peak: Dbtp(-1.25),
+        duration: Seconds(45.0),
+        since: WallNs(1_789_999_955_000_000_000),
+    }
+}
 
 /// The stamp the sample frames carry (with the kind's grid).
 pub fn stamp(grid: Option<GridDef>) -> FrameStamp {
@@ -362,6 +378,21 @@ pub fn frames() -> Vec<Frame> {
                         correlation: Some(0.875),
                         quiet: None,
                     }],
+                    loudness: vec![
+                        pair_loudness(),
+                        SourceLoudness {
+                            source: LoudnessSource::Input { channel: 2 },
+                            momentary: Lufs(f64::NEG_INFINITY),
+                            short_term: Lufs(f64::NEG_INFINITY),
+                            integrated: None,
+                            range: None,
+                            max_momentary: Lufs(f64::NEG_INFINITY),
+                            max_short_term: Lufs(f64::NEG_INFINITY),
+                            max_true_peak: Dbtp(f64::NEG_INFINITY),
+                            duration: Seconds(0.0),
+                            since: WallNs(1_790_000_000_000_000_000),
+                        },
+                    ],
                 },
                 peak: vec![-6.0, -0.0625, f32::NEG_INFINITY],
                 rms: vec![-18.5, -3.25, f32::NEG_INFINITY],
@@ -418,6 +449,7 @@ pub fn frames() -> Vec<Frame> {
                         correlation: None,
                         quiet: Some(PairSide::Right),
                     }],
+                    loudness: vec![pair_loudness()],
                 },
                 peak: vec![-12.0, -40.5],
                 rms: vec![-20.0, -52.25],

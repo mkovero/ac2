@@ -148,6 +148,7 @@ impl Preview {
             pairs,
             ballistic: Ballistic::default(),
             pair_levels: Vec::new(),
+            loudness: Vec::new(),
         };
         let frame_meta = meta.clone();
         // The declared pairs stay as the dialog declared them; the pairs of a session do
@@ -205,6 +206,7 @@ impl Preview {
                             let mut meta = frame_meta.clone();
                             meta.ballistic = r.ballistic;
                             meta.pair_levels = r.pair_levels;
+                            meta.loudness = r.loudness;
                             em.send(
                                 stamp,
                                 FrameData::PreviewLevels(PreviewLevelsFrame {

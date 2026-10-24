@@ -33,6 +33,7 @@ fn frame(topic: Topic, seq: u64) -> TopicFrame {
                     channels: vec![0],
                     ballistic: Default::default(),
                     pair_levels: vec![],
+                    loudness: vec![],
                 },
                 peak: vec![-20.0],
                 rms: vec![-30.0],

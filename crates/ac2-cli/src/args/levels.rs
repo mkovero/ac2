@@ -32,7 +32,8 @@ pub enum LevelsCmd {
         #[arg(long, allow_hyphen_values = true)]
         gate: Option<LevelDbfs>,
     },
-    /// Clears the max holds and the over counts: of the inputs given, or of every input.
+    /// Clears the max holds, the over counts and the loudness (integrated, range, maxima)
+    /// of every source with an input given, or of every input.
     Reset {
         /// A device input (1-based); repeatable. None: every input.
         #[arg(long = "input")]

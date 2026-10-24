@@ -463,7 +463,9 @@ pub fn state_input_use(s: &State, channel: u16) -> InputUse<'_> {
 }
 
 mod electrical;
+mod loudness;
 pub use electrical::*;
+pub use loudness::*;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

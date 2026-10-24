@@ -1,7 +1,7 @@
 {
  "topic": "session/preview",
  "header": {
-  "v": 66,
+  "v": 67,
   "kind": "preview_levels",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -86,6 +86,24 @@
       "right": 1,
       "correlation": null,
       "quiet": "right"
+     }
+    ],
+    "loudness": [
+     {
+      "source": {
+       "type": "pair",
+       "left": 0,
+       "right": 1
+      },
+      "momentary": -23.25,
+      "short_term": -22.75,
+      "integrated": -23.0,
+      "range": 6.25,
+      "max_momentary": -18.5,
+      "max_short_term": -20.125,
+      "max_true_peak": -1.25,
+      "duration": 45.0,
+      "since": 1789999955000000000
      }
     ]
    }

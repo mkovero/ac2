@@ -172,7 +172,8 @@ pub enum Cmd {
         cmd: ArtnetCmd,
     },
     /// The programme meters of the open session's inputs (one frame: ppm, true peak, max,
-    /// overs, CLIP, each pair's correlation); `set` their settings, `reset` their holds.
+    /// overs, CLIP, each pair's correlation, the loudness of each pair and unpaired line or
+    /// digital input); `set` their settings, `reset` their holds and loudness.
     Levels {
         /// Action; none shows the meters.
         #[command(subcommand)]

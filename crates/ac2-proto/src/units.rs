@@ -40,6 +40,12 @@ float_unit!(
     Dbtp
 );
 float_unit!(
+    /// Programme loudness, LUFS (BS.1770 / EBU R128: K-weighted, channel-weighted mean
+    /// square, `−0.691 + 10 log₁₀`, so a 1 kHz stereo tone at −18 dBFS reads −18 LUFS).
+    /// A loudness difference (LRA) is a [`Db`], shown as LU.
+    Lufs
+);
+float_unit!(
     /// Sound pressure level, dB re 20 µPa.
     DbSpl
 );

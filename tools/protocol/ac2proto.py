@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 66
+PROTO_VERSION = 67
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -175,6 +175,11 @@ _MATH = ("opt", [("operands", ("list", [("operand", _OPERAND), ("status", _OPERA
 _POSITION = [("level", None), ("peak", None)]
 _PEAK = [("level", None), ("judgement", None)]
 _PAIR_LEVELS = [("left", None), ("right", None), ("correlation", None), ("quiet", None)]
+_LOUDNESS = [("source", ("tagged", {"pair": [("left", None), ("right", None)],
+                                     "input": [("channel", None)]})),
+             ("momentary", None), ("short_term", None), ("integrated", None), ("range", None),
+             ("max_momentary", None), ("max_short_term", None), ("max_true_peak", None),
+             ("duration", None), ("since", None)]
 _GONIO_PAIR = [("left", None), ("right", None), ("gain_dbfs", None)]
 META = {
     "tf": [("delay", None), ("nudged", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
@@ -203,10 +208,12 @@ META = {
                  ("predicted", ("opt", [("duration", None), ("estimate", None), ("at_most", None),
                                         ("limit", None), ("judgement", None)]))],
     "levels": _LEVELS,
-    "session_levels": [("channels", None), ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS))],
+    "session_levels": [("channels", None), ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
+                       ("loudness", ("list", _LOUDNESS))],
     "preview_levels": [("backend", None), ("device", None), ("channels", None),
                        ("inputs", ("list", _PREVIEW_INPUT)), ("pairs", ("list", _PAIR)),
-                       ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS))],
+                       ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
+                       ("loudness", ("list", _LOUDNESS))],
     "session_gonio": [("pairs", ("list", _GONIO_PAIR))],
     "preview_gonio": [("pairs", ("list", _GONIO_PAIR))],
     "timing": [("status", _TIMING_STATUS),

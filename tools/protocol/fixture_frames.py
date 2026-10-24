@@ -172,6 +172,18 @@ PREVIEW_INPUTS = [
     {"channel": 1, "kind": {"kind": "line"}},
 ]
 PREVIEW_PAIRS = [{"left": 0, "right": 1, "name": None}]
+PAIR_LOUDNESS = {
+    "source": {"type": "pair", "left": 0, "right": 1},
+    "momentary": -23.25,
+    "short_term": -22.75,
+    "integrated": -23.0,
+    "range": 6.25,
+    "max_momentary": -18.5,
+    "max_short_term": -20.125,
+    "max_true_peak": -1.25,
+    "duration": 45.0,
+    "since": 1_789_999_955_000_000_000,
+}
 
 
 def gonio_points():
@@ -447,6 +459,21 @@ def frames():
                 "channels": [0, 1, 2],
                 "ballistic": "type1",
                 "pair_levels": [{"left": 0, "right": 1, "correlation": 0.875, "quiet": None}],
+                "loudness": [
+                    PAIR_LOUDNESS,
+                    {
+                        "source": {"type": "input", "channel": 2},
+                        "momentary": -INF,
+                        "short_term": -INF,
+                        "integrated": None,
+                        "range": None,
+                        "max_momentary": -INF,
+                        "max_short_term": -INF,
+                        "max_true_peak": -INF,
+                        "duration": 0.0,
+                        "since": 1_790_000_000_000_000_000,
+                    },
+                ],
             },
             [
                 (arr("peak", "dbfs"), [-6.0, -0.0625, -INF]),
@@ -473,6 +500,7 @@ def frames():
                 "pairs": PREVIEW_PAIRS,
                 "ballistic": "true_peak",
                 "pair_levels": [{"left": 0, "right": 1, "correlation": None, "quiet": "right"}],
+                "loudness": [PAIR_LOUDNESS],
             },
             [
                 (arr("peak", "dbfs"), [-12.0, -40.5]),

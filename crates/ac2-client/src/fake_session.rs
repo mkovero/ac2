@@ -48,6 +48,7 @@ impl Shared {
                 ac2_proto::cal::check_pairs(&rows, &pairs, Some(&captured))
                     .map_err(|e| err(ErrorCode::Invalid, e))?;
                 self.preview = Some((backend, device.clone()));
+                self.forget_loudness(super::levels::Meter::Preview);
                 self.preview_decl = Some(super::levels::PreviewDecl {
                     backend,
                     device: device.clone(),
@@ -102,6 +103,7 @@ impl Shared {
                 };
                 self.preview = None;
                 self.preview_decl = None;
+                self.forget_loudness(super::levels::Meter::Session);
                 let s = Session {
                     epoch: SessionEpoch(self.state.session.epoch.0 + 1),
                     open: Some(OpenSession {

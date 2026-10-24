@@ -1,7 +1,7 @@
 {
  "topic": "session/gonio",
  "header": {
-  "v": 66,
+  "v": 67,
   "kind": "session_gonio",
   "seq": 1234,
   "audio_sample": 172800000,

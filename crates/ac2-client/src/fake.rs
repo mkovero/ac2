@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use ac2_proto::frame::{DaemonHealth, GenSummary, KaMeta, ProtectionFlags};
+use ac2_proto::frame::{DaemonHealth, GenSummary, KaMeta, LoudnessSource, ProtectionFlags};
 use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{
@@ -141,6 +141,8 @@ pub struct Shared {
     pub input_peak: HashMap<u16, f32>,
     /// The max holds of the programme meters, by input.
     pub levels_max: HashMap<u16, f32>,
+    /// When each loudness source started and was last reset, by meter.
+    pub loudness_starts: HashMap<(levels::Meter, LoudnessSource), levels::SourceStart>,
     /// Sequence of the meter frames.
     pub meter_seq: u64,
     /// Publish meter frames (`session/levels`, `session/preview`, the goniometers) while a
@@ -342,6 +344,7 @@ impl Shared {
             preview_decl: None,
             input_peak: HashMap::new(),
             levels_max: HashMap::new(),
+            loudness_starts: HashMap::new(),
             meter_seq: 0,
             meters: false,
             detection: fake_detection(),
