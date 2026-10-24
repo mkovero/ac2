@@ -4,9 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale, Operand, Pair,
-    PeakWeighting, PhaseBasis, PositionCorrection, PreviewInput, Smoothing, SmoothingFraction,
-    SpecLevel, TimeWeighting, TimingState, TimingStatus, Unresolved, Weighting, Window,
+    BackendKind, Ballistic, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale, Operand,
+    Pair, PairSide, PeakWeighting, PhaseBasis, PositionCorrection, PreviewInput, Smoothing,
+    SmoothingFraction, SpecLevel, TimeWeighting, TimingState, TimingStatus, Unresolved, Weighting,
+    Window,
 };
 use crate::units::{
     ClientId, DaemonIncarnation, Db, Dbfs, Hz, Rev, SampleIndex, Samples, Seconds, SessionEpoch,
@@ -343,6 +344,35 @@ pub struct LevelsMeta {
     pub channels: Vec<u16>,
 }
 
+/// One stereo pair's correlation this frame (docs/design/programme-meter.md §4).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PairLevels {
+    /// Zero-based device input channel of the left side.
+    pub left: u16,
+    /// Zero-based device input channel of the right side.
+    pub right: u16,
+    /// Normalised zero-lag correlation over the rig's window, −1 … 1 (mono +1, wide 0,
+    /// reversed −1); `None` while a side is below the gate.
+    pub correlation: Option<f32>,
+    /// The side below the rig's correlation gate (left checked first), when one is: a dead
+    /// channel must not read 0 and look like wide stereo.
+    pub quiet: Option<PairSide>,
+}
+
+/// Session input meters metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionLevelsMeta {
+    /// Device input channel of each column.
+    pub channels: Vec<u16>,
+    /// The ballistic `ppm` and `max` read (the rig's `levels.ballistic`), so a frame is
+    /// self-describing.
+    pub ballistic: Ballistic,
+    /// Every declared pair whose both inputs are captured, in `session.inputs` order.
+    pub pair_levels: Vec<PairLevels>,
+}
+
 /// Device preview meters metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -357,6 +387,32 @@ pub struct PreviewLevelsMeta {
     pub inputs: Vec<PreviewInput>,
     /// Pairs among them, as declared.
     pub pairs: Vec<Pair>,
+    /// As [`SessionLevelsMeta::ballistic`].
+    pub ballistic: Ballistic,
+    /// As [`SessionLevelsMeta::pair_levels`], one per declared pair.
+    pub pair_levels: Vec<PairLevels>,
+}
+
+/// One pair of a goniometer frame: which inputs, and the gain its points are relative to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GonioPairMeta {
+    /// Zero-based device input channel of the left side.
+    pub left: u16,
+    /// Zero-based device input channel of the right side.
+    pub right: u16,
+    /// The auto gain, dBFS of the pair magnitude.
+    pub gain_dbfs: f32,
+}
+
+/// Goniometer frame metadata: `n` is the pair count times
+/// [`super::GONIO_POINTS`], the `gonio_x` and `gonio_y` arrays holding every pair's points in
+/// turn.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GonioMeta {
+    /// Pairs, in the declared order.
+    pub pairs: Vec<GonioPairMeta>,
 }
 
 /// One timing correlation window.
@@ -472,9 +528,13 @@ pub enum FrameMeta {
     /// Levels.
     Levels(LevelsMeta),
     /// Session levels.
-    SessionLevels(LevelsMeta),
+    SessionLevels(SessionLevelsMeta),
     /// Preview levels.
     PreviewLevels(PreviewLevelsMeta),
+    /// Session goniometer.
+    SessionGonio(GonioMeta),
+    /// Preview goniometer.
+    PreviewGonio(GonioMeta),
     /// Timing.
     Timing(TimingMeta),
     /// Keepalive.
@@ -494,6 +554,8 @@ impl FrameMeta {
             Self::Levels(_) => FrameKind::Levels,
             Self::SessionLevels(_) => FrameKind::SessionLevels,
             Self::PreviewLevels(_) => FrameKind::PreviewLevels,
+            Self::SessionGonio(_) => FrameKind::SessionGonio,
+            Self::PreviewGonio(_) => FrameKind::PreviewGonio,
             Self::Timing(_) => FrameKind::Timing,
             Self::Ka(_) => FrameKind::Ka,
         }

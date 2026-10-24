@@ -113,6 +113,22 @@ pub fn input_setup(inputs: &[InputSetup], channel: u16) -> InputSetup {
         })
 }
 
+/// Whether the VU ballistic is offered on `channel` of `device`: a `Line` input with a line
+/// calibration on this device (0 VU is +4 dBu, which needs the volt). The daemon reads this
+/// to decide what `ppm` carries where VU is chosen, and every client words the row from
+/// it, so the bar and its label agree.
+pub fn offers_vu(
+    inputs: &[InputSetup],
+    line_calibrations: &[LineCalEntry],
+    device: &DeviceId,
+    channel: u16,
+) -> bool {
+    input_kind(inputs, channel) == InputKind::Line
+        && line_calibrations
+            .iter()
+            .any(|e| e.key.device == *device && e.key.channel == channel)
+}
+
 /// The kind of `channel` ([`input_setup`]'s default when undeclared).
 pub fn input_kind(inputs: &[InputSetup], channel: u16) -> InputKind {
     input_setup(inputs, channel).kind

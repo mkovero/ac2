@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 64`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 65`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -105,6 +105,8 @@ Lease column: **L** = `lease_token` required (Q6).
 | `artnet.target` | `base: Rev` (`rig.rev`), `target: ArtnetTarget \| nil` | `ack` (`rig` event) | |
 | `artnet.test` | `channels: [DmxSet]` | `ack` (`rig` event: the sent count) | |
 | `artnet.fade` | `base: Rev` (`rig.rev`), `seconds: f64` | `ack` (`rig` event) | |
+| `levels.set` | `base: Rev` (`rig.rev`), `ballistic: Ballistic \| nil`, `correlation_window: CorrelationWindow \| nil`, `over_threshold: Dbtp \| nil`, `correlation_gate: Dbfs \| nil` | `ack` (`rig` event) | |
+| `levels.reset` | `channels: [u16]` (empty: every captured input) | `ack` | |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
 | `meas.update` | `meas`, `base: Rev` (the `config_rev` the edit was made on), `config` | `measurement` | |
 | `meas.colour` | `meas`, `colour: ColourFamily \| nil` | `measurement` | |
@@ -212,7 +214,9 @@ to the daemon's machine rather than to a session: `rev` (the rev of its last set
 `artnet_target` (`ArtnetTarget` \| nil: where the Art-Net universe goes), `artnet_fade` (f64
 seconds, 0–60: how long the DMX channels take to move to a new cue frame; 0 jumps; 1 until
 set), `monitor_at_start` (at start the daemon reopens the last session's device capture-only so the
-rig measurements meter with no client connected; the generator stays disarmed), `osc` and
+rig measurements meter with no client connected; the generator stays disarmed), `levels`
+(`LevelsSettings` {`ballistic`: `Ballistic`, `correlation_window`: `CorrelationWindow`,
+`over_threshold`: Dbtp, `correlation_gate`: Dbfs}: the programme meters' settings, below), `osc` and
 `artnet` (each an `OutputStatus` {`sent`: packets since the daemon started, u64,
 `last_error`: str \| nil, the latest send error as the operating system said it}), `dmx`
 ([`DmxSet`]: the cue universe's channels above 0, in channel order, whether or not a target is
@@ -227,7 +231,7 @@ tagged by `type`: `meter` (the whole meter: the worst state of its limits), `win
 {duration, weighting}, `peak` {quantity}, `band` {duration, weighting, nominal},
 `predicted`. `CueState` is `ok` (under the limit, or none), `near`, `over` or `fault` (the rig
 cannot judge: no audio, device lost, not calibrated).
-`osc.target`, `artnet.target`, `artnet.fade` and `rig.monitor_start` carry the `rig.rev` they were made on; another is
+`osc.target`, `artnet.target`, `artnet.fade`, `rig.monitor_start` and `levels.set` carry the `rig.rev` they were made on; another is
 `conflict` with `detail: conflict {rev}` (the current one). `osc.test` sends one message to
 the target now (setup); `invalid` without a target, `internal` with the operating system's
 reason when the send fails; `append_level` appends 0 dB. `osc.target` refuses an unspecified
@@ -237,6 +241,22 @@ an unspecified address or port 0, persists, and sends the current frame at once.
 `artnet.fade` sets `rig.artnet_fade` and persists it; `seconds` outside 0–60 or not finite is
 `invalid`. It applies from the next change of the cue frame (a fade in progress keeps its
 length).
+**Programme meters (`levels.*`).** `rig.levels` holds what the input meters of §5.4
+(`session_levels`, `preview_levels`) read beyond peak and RMS: `ballistic` is what the `ppm`
+bar reads — `true_peak` (BS.1770 Annex 2, 4× oversampled; the default), `type1` (IEC
+60268-10 Type I quasi-peak), `type2` (Type II) or `vu` (IEC 60268-17; offered on a `line`
+input with a line calibration only — elsewhere `ppm` carries the true peak and the row says
+so); `correlation_window` is the correlator's exponential window, `short` (0.3 s) or `long`
+(1 s, the default); `over_threshold` (dBTP, default 0; −20 … +6) is the true peak above which
+an over is counted (a sustained clip counts once: the next over only after the true peak fell
+1 dB below the threshold); `correlation_gate` (dBFS RMS of a side, default −60; −120 … 0) is
+the level below which a pair's side reads *quiet* and no correlation is given. The daemon
+runs every ballistic all the time and reports the chosen one, so `levels.set` reads a
+settled detector at once; it keeps the fields given (nil keeps a field), persists the rig
+settings first, and refuses a threshold or gate outside its range or not finite (`invalid`).
+`levels.reset` clears the max hold of every ballistic and the over count of `channels`
+(device inputs; empty = every captured input) on the session meters and the preview alike;
+nothing in the state changes, the next meter frame carries the cleared values.
 `artnet.test` sends one frame holding `channels` (every other channel 0) now, to find a
 fixture's channels; the keepalive repeats it for 5 s, then the cue frame comes back (at once
 when a cue changes state meanwhile); `invalid` without a target or with a channel listed
@@ -868,7 +888,11 @@ the loopback monitor measures while a stimulus plays (`timing.drift`, §4.1).
 
 While a session is open the daemon meters every captured input on `session/levels` (§5.1)
 whether or not a measurement runs: per-interval sample peak, 300 ms integrated RMS and clip
-(held 1 s), at most 30 frames per second, published only while subscribed.
+(held 1 s), and the programme meters of `rig.levels` (the chosen ballistic's reading, the
+true peak, the max hold and the over count per input; the correlation per declared pair whose
+both inputs are captured), at most 30 frames per second, published only while subscribed.
+Beside them `session/gonio` carries each such pair's goniometer points (§5.4
+`session_gonio`) at the same rate.
 
 **Driver control panel.** `session.control_panel` opens the named device's driver
 settings window on the daemon's machine (ASIO's `controlPanel`, where pro interfaces set
@@ -885,7 +909,8 @@ the driver reset the session's stream (§4.1.1, `driver_reset`).
 **Preview.** `session.preview` opens a device for capture only — no output stream exists,
 so nothing can be emitted — and publishes meters of every input on `session/preview`
 (meta names the device; `audio_sample` counts from the preview's start, `session_epoch` is
-the epoch it opened in). Reply `Preview`: `backend`, `device`, `channels` (inputs metered,
+the epoch it opened in), with the same programme meters as the session's over the kinds and
+pairs declared, and the pairs' goniometer points on `preview/gonio`. Reply `Preview`: `backend`, `device`, `channels` (inputs metered,
 `0 .. channels`), `sample_rate_hz`, `expires_in_ms`. There is one preview per daemon;
 naming the same device again renews it, another device replaces it. It closes on
 `session.preview_stop`, `session.open`, `session.detect_loopback`, or when not renewed
@@ -1620,6 +1645,8 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 | `d/<meas>/levels` | input meters of the measurement's channels |
 | `session/levels` | input meters of every input of the open session |
 | `session/preview` | input meters of every input of the previewed device |
+| `session/gonio` | goniometer points of every pair of the open session |
+| `preview/gonio` | goniometer points of every pair of the previewed device |
 | `timing` | loopback timing monitor |
 | `evt` | state events (§4.2) |
 | `ka` | keepalive, every 250 ms |
@@ -1633,7 +1660,8 @@ fresh header every 250 ms, so only a stream without audio goes STALE.
 `<meas>` is the decimal measurement id without sign or leading zeros; a topic has exactly
 one spelling. Prefixes: `d/` (all measurement streams), `d/<meas>/` (one measurement —
 the trailing slash keeps `d/1/` from matching `d/12/…`), `session/` (both input-meter
-topics). Longest topic: 32 bytes.
+topics and the session's goniometer; the preview's goniometer is under `preview/`, so a
+client metering alone does not receive its points). Longest topic: 32 bytes.
 
 ### 5.2 Layout
 
@@ -1656,6 +1684,7 @@ Element encodings (`elem`), all little-endian:
 | `u32` | 4 | unsigned (bitmasks) |
 | `i16` | 2 | hundredths of the unit, `round(x × 100)` rounding halves up, clamped to ±32 766; −32 768 = NaN, −32 767 = −∞, 32 767 = +∞. Degrees are wrapped on the hundredths to [−18 000, 18 000), so a phase is in [−180°, 180°) and ±∞ degrees is NaN. Decoded as code ÷ 100 |
 | `u16` | 2 | ten-thousandths, `round(x × 10 000)` rounding halves up, clamped to 0 … 10 000; 65 535 = NaN; any other code above 10 000 refuses the frame. Decoded as code ÷ 10 000 |
+| `i8` | 1 | signed; the goniometer's coordinates, −127 … 127 of the pair's auto gain |
 | `bfp16` | 2 (+ 1 per array) | block floating point: the array's bytes start with one signed exponent byte `e`, then one `i16` mantissa per element, `round(x × 2^−e)` rounding halves up, clamped to ±32 766, with the `i16` codes of NaN and ±∞. `e` is the smallest integer in [−128, 113] for which every finite \|x\| × 2^−e ≤ 32 765 (from `frexp(peak) = (m, k)`: `k − 14` if `m × 2^15 > 32 765`, else `k − 15`), 0 when no element is finite and non-zero; an exponent above 113 refuses the frame. Decoded as mantissa × 2^e rounded to f32 |
 
 An `i16`, `u16` or `bfp16` array (after its exponent byte) goes as the differences of each
@@ -1664,7 +1693,8 @@ high byte of every difference. Neighbouring columns of a curve are close, so the
 is mostly 0x00 / 0xff and deflates to little.
 
 Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec),
-`ir_etc` and the `align_*` arrays are `i16`; `coh` is `u16`; `ir_linear` is `bfp16`; bitmasks are `u32`;
+`ir_etc` and the `align_*` arrays are `i16`; `coh` is `u16`; `ir_linear` is `bfp16`; bitmasks and
+counts (`overs`) are `u32`; `gonio_x` and `gonio_y` are `i8`;
 everything else (meters, Leq and band Leq windows) is `f32`. Precision: `i16` is within
 0.005 dB or 0.005° of the value computed, `u16` within 5·10⁻⁵ of γ² — below the readouts
 (0.1 dB, 1°, 0.01) and, for a group delay fitted to the phase over 1/12 octave of
@@ -1698,7 +1728,7 @@ layout as code.
 | field | type | meaning |
 |---|---|---|
 | `v` | u16 | protocol version |
-| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `timing`, `ka`; equals the topic and the `meta` key |
+| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `session_gonio`, `preview_gonio`, `timing`, `ka`; equals the topic and the `meta` key |
 | `seq` | u64 | per topic per incarnation; clients keep the max per topic when draining |
 | `audio_sample` | u64 | session sample index (origin = session open) of the newest sample in the frame |
 | `session_epoch` | u32 | frames from older epochs are discarded |
@@ -1712,9 +1742,10 @@ layout as code.
 | `arrays` | [[`name`, `unit`, `elem`]] | one descriptor per array part, in part order |
 | `meta` | {kind: […]} | per-kind metadata (§5.4), fields in the order listed there |
 
-`elem` is `f32`, `u32`, `i16`, `u16` or `bfp16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `db_spl`, `dbfs_per_hz`, `db_spl_per_hz` (a spectrum density), `deg`, `coherence`
+`elem` is `f32`, `u32`, `i16`, `u16`, `i8` or `bfp16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `dbtp` (dB true peak), `db_spl`, `dbfs_per_hz`, `db_spl_per_hz` (a spectrum density), `deg`, `coherence`
 (γ², 0…1), `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
-`u32`).
+`u32`), `count` (an event count, always `u32`), `gonio_unit` (a goniometer coordinate,
+always `i8`).
 
 ### 5.4 Kinds
 
@@ -1728,8 +1759,10 @@ layout as code.
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
 | `band_leq` | one column per band window, in configuration order: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
-| `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
-| `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `session.preview` declared them), `pairs` ([Pair]) |
+| `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask, `ppm`: dbfs (the `ballistic`'s reading; the true peak where VU is chosen but not offered on the input), `true_peak`: dbtp, `max`: dbfs (highest `ppm` of the chosen ballistic since `levels.reset`), `overs`: count (since `levels.reset`) | `channels` (device input per column; length n), `ballistic` (`Ballistic`), `pair_levels` ([`PairLevels`] {`left`, `right`, `correlation`: f32 \| nil (−1 … 1 over the rig's window), `quiet`: `left` \| `right` \| nil (the side below the gate; then `correlation` is nil)}: every declared pair whose both inputs are captured) |
+| `preview_levels` | as `session_levels` | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `session.preview` declared them), `pairs` ([Pair]), `ballistic`, `pair_levels` ([`PairLevels`], one per declared pair) |
+| `session_gonio` | `gonio_x`, `gonio_y`: gonio_unit — every pair's 256 points in turn (n = 256 × pairs), `x = (r − l)/√2`, `y = (l + r)/√2` divided by the pair's auto gain (a mono signal is a vertical line, a left-only one leans left), one pair drawn from a random position in each of 256 bins of the frame's samples | `pairs` ([`GonioPairMeta`] {`left`, `right`, `gain_dbfs`: the auto gain, dBFS of the pair magnitude `√(l² + r²)`}) |
+| `preview_gonio` | as `session_gonio`, for the previewed device's declared pairs | as `session_gonio` |
 | `timing` | none | `status` (TimingStatus), `window` {capture_start, offset, psr, loopback, stimulus} |
 | `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, armed, firing}, `health` (`DaemonHealth`, below) |
 

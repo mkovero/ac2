@@ -6,9 +6,9 @@ use crate::topic::{Stream, Topic};
 use crate::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, SessionEpoch, WallNs};
 
 use super::{
-    BandLeqMeta, ClipFlags, FrameKind, IrMeta, KaMeta, LeqFlags, LeqMeta, LevelsMeta,
-    PreviewLevelsMeta, ProtectionFlags, RtaMeta, SpecMeta, SplMeta, TfMeta, TimingMeta,
-    ValidityMask,
+    BandLeqMeta, ClipFlags, FrameKind, GonioMeta, GonioPairMeta, IrMeta, KaMeta, LeqFlags, LeqMeta,
+    LevelsMeta, PreviewLevelsMeta, ProtectionFlags, RtaMeta, SessionLevelsMeta, SpecMeta, SplMeta,
+    TfMeta, TimingMeta, ValidityMask,
 };
 
 /// Header fields shared by every kind.
@@ -171,20 +171,36 @@ pub struct LevelsFrame {
     pub clip: Vec<ClipFlags>,
 }
 
-/// Meters of every input of the open session, independent of measurements.
+/// Meters of every input of the open session, independent of measurements. Beside the
+/// sample peak, RMS and clip, the programme meters of docs/design/programme-meter.md §3:
+/// the chosen ballistic's reading, the true peak, the daemon's max hold and over count per
+/// channel; the pair readings (correlation) are in `meta.pair_levels`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionLevelsFrame {
-    /// Channels.
-    pub meta: LevelsMeta,
+    /// Channels, the ballistic in force and the pairs' correlation.
+    pub meta: SessionLevelsMeta,
     /// Peak per channel, dBFS (sample peak).
     pub peak: Vec<f32>,
     /// RMS per channel, dBFS.
     pub rms: Vec<f32>,
     /// Clip state per channel.
     pub clip: Vec<ClipFlags>,
+    /// The chosen ballistic's reading per channel, dBFS (a peak for the quasi-peak types, the
+    /// RMS-scaled mean for VU); where VU is chosen but not offered on the input
+    /// ([`crate::cal::offers_vu`]) the true peak, so a rig setting never blanks a bar.
+    pub ppm: Vec<f32>,
+    /// True peak per channel this frame, dBTP.
+    pub true_peak: Vec<f32>,
+    /// Highest `ppm` reading of the chosen ballistic since the last `levels.reset` (held per
+    /// ballistic, so a ballistic change never splices one type's maximum onto another's).
+    pub max: Vec<f32>,
+    /// Over events (true peak above the rig's threshold, counted once until it fell 1 dB
+    /// below) since the last `levels.reset`.
+    pub overs: Vec<u32>,
 }
 
-/// Meters of every input of a previewed device.
+/// Meters of every input of a previewed device, with the same programme meters as
+/// [`SessionLevelsFrame`] over the kinds and pairs `session.preview` declared.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewLevelsFrame {
     /// Device and channels.
@@ -195,6 +211,57 @@ pub struct PreviewLevelsFrame {
     pub rms: Vec<f32>,
     /// Clip state per channel.
     pub clip: Vec<ClipFlags>,
+    /// As [`SessionLevelsFrame::ppm`].
+    pub ppm: Vec<f32>,
+    /// As [`SessionLevelsFrame::true_peak`].
+    pub true_peak: Vec<f32>,
+    /// As [`SessionLevelsFrame::max`].
+    pub max: Vec<f32>,
+    /// As [`SessionLevelsFrame::overs`].
+    pub overs: Vec<u32>,
+}
+
+/// Points per pair in a goniometer frame (docs/design/programme-meter.md §5): one pair is
+/// drawn from a random position in each of this many bins of the frame's samples.
+pub const GONIO_POINTS: usize = 256;
+
+/// One pair's goniometer points this frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GonioPair {
+    /// Zero-based device input channel of the left side.
+    pub left: u16,
+    /// Zero-based device input channel of the right side.
+    pub right: u16,
+    /// The auto gain the points are divided by, dBFS of the pair magnitude `√(l² + r²)`
+    /// (a full-scale mono signal reads +3.01).
+    pub gain_dbfs: f32,
+    /// [`GONIO_POINTS`] points `[x, y]`, rotated 45° so that mono stands upright and left
+    /// leans left (`x = (r − l)/√2`, `y = (l + r)/√2`), −127 … 127 of the gain.
+    pub points: Vec<[i8; 2]>,
+}
+
+/// Goniometer points of every pair (`session/gonio`, `preview/gonio`), at the meter rate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GonioFrame {
+    /// Pairs, in the declared order.
+    pub pairs: Vec<GonioPair>,
+}
+
+impl GonioFrame {
+    /// The header meta: every pair's channels and gain.
+    pub(super) fn meta(&self) -> GonioMeta {
+        GonioMeta {
+            pairs: self
+                .pairs
+                .iter()
+                .map(|p| GonioPairMeta {
+                    left: p.left,
+                    right: p.right,
+                    gain_dbfs: p.gain_dbfs,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Every frame body.
@@ -220,6 +287,10 @@ pub enum FrameData {
     SessionLevels(SessionLevelsFrame),
     /// `session/preview`.
     PreviewLevels(PreviewLevelsFrame),
+    /// `session/gonio`.
+    SessionGonio(GonioFrame),
+    /// `preview/gonio`.
+    PreviewGonio(GonioFrame),
     /// `timing`.
     Timing(TimingMeta),
     /// `ka`.
@@ -249,6 +320,8 @@ impl FrameData {
             Self::Levels(_) => FrameKind::Levels,
             Self::SessionLevels(_) => FrameKind::SessionLevels,
             Self::PreviewLevels(_) => FrameKind::PreviewLevels,
+            Self::SessionGonio(_) => FrameKind::SessionGonio,
+            Self::PreviewGonio(_) => FrameKind::PreviewGonio,
             Self::Timing(_) => FrameKind::Timing,
             Self::Ka(_) => FrameKind::Ka,
         }
@@ -268,6 +341,8 @@ impl FrameData {
             Self::Levels(f) => data(f.meas, Stream::Levels),
             Self::SessionLevels(_) => Topic::SessionLevels,
             Self::PreviewLevels(_) => Topic::PreviewLevels,
+            Self::SessionGonio(_) => Topic::SessionGonio,
+            Self::PreviewGonio(_) => Topic::PreviewGonio,
             Self::Timing(_) => Topic::Timing,
             Self::Ka(_) => Topic::Ka,
         }

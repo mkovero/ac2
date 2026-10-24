@@ -68,6 +68,7 @@ fn elem_size(e: Elem) -> usize {
     match e {
         Elem::F32 | Elem::U32 => 4,
         Elem::I16 | Elem::U16 | Elem::Bfp16 => 2,
+        Elem::I8 => 1,
     }
 }
 
@@ -228,7 +229,19 @@ pub(crate) fn put_f32(out: &mut Vec<u8>, elem: Elem, deg: bool, v: &[f32]) {
                 }
             }
         }
+        // Not a float encoding; the goniometer goes through `put_i8`.
+        Elem::I8 => out.extend(v.iter().map(|x| *x as i8 as u8)),
     }
+}
+
+/// Appends an `i8` array.
+pub(crate) fn put_i8(out: &mut Vec<u8>, v: &[i8]) {
+    out.extend(v.iter().map(|x| *x as u8));
+}
+
+/// An `i8` array from its bytes.
+pub(crate) fn get_i8(b: &[u8]) -> Vec<i8> {
+    b.iter().map(|x| *x as i8).collect()
 }
 
 /// Appends a `u32` array.
@@ -259,6 +272,7 @@ pub(crate) fn get_f32(b: &[u8], elem: Elem) -> Option<Vec<f32>> {
                 .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                 .collect(),
         ),
+        Elem::I8 => Some(get_i8(b).into_iter().map(f32::from).collect()),
     }
 }
 

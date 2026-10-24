@@ -1,7 +1,7 @@
 {
  "topic": "session/preview",
  "header": {
-  "v": 64,
+  "v": 65,
   "kind": "preview_levels",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -27,6 +27,26 @@
    {
     "name": "clip",
     "unit": "bitmask",
+    "elem": "u32"
+   },
+   {
+    "name": "ppm",
+    "unit": "dbfs",
+    "elem": "f32"
+   },
+   {
+    "name": "true_peak",
+    "unit": "dbtp",
+    "elem": "f32"
+   },
+   {
+    "name": "max",
+    "unit": "dbfs",
+    "elem": "f32"
+   },
+   {
+    "name": "overs",
+    "unit": "count",
     "elem": "u32"
    }
   ],
@@ -58,6 +78,15 @@
       "right": 1,
       "name": null
      }
+    ],
+    "ballistic": "true_peak",
+    "pair_levels": [
+     {
+      "left": 0,
+      "right": 1,
+      "correlation": null,
+      "quiet": "right"
+     }
     ]
    }
   }
@@ -74,6 +103,22 @@
   "clip": [
    0,
    1
+  ],
+  "ppm": [
+   -11.75,
+   -40.25
+  ],
+  "true_peak": [
+   -11.75,
+   -40.25
+  ],
+  "max": [
+   -3.0,
+   -38.0
+  ],
+  "overs": [
+   1,
+   0
   ]
  }
 }

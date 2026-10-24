@@ -94,6 +94,10 @@ pub enum Topic {
     SessionLevels,
     /// `session/preview`: meters of every input of the previewed device.
     PreviewLevels,
+    /// `session/gonio`: goniometer points of the open session's pairs.
+    SessionGonio,
+    /// `preview/gonio`: goniometer points of the previewed device's pairs.
+    PreviewGonio,
     /// `timing`: loopback timing monitor.
     Timing,
     /// `evt`: state events.
@@ -124,6 +128,8 @@ impl Topic {
             "timing" => return Ok(Self::Timing),
             "session/levels" => return Ok(Self::SessionLevels),
             "session/preview" => return Ok(Self::PreviewLevels),
+            "session/gonio" => return Ok(Self::SessionGonio),
+            "preview/gonio" => return Ok(Self::PreviewGonio),
             "evt" => return Ok(Self::Evt),
             "ka" => return Ok(Self::Ka),
             _ => {}
@@ -154,6 +160,8 @@ impl fmt::Display for Topic {
             Self::Data { meas, stream } => write!(f, "d/{}/{}", meas.0, stream.as_str()),
             Self::SessionLevels => f.write_str("session/levels"),
             Self::PreviewLevels => f.write_str("session/preview"),
+            Self::SessionGonio => f.write_str("session/gonio"),
+            Self::PreviewGonio => f.write_str("preview/gonio"),
             Self::Timing => f.write_str("timing"),
             Self::Evt => f.write_str("evt"),
             Self::Ka => f.write_str("ka"),
@@ -168,7 +176,8 @@ pub enum Subscription {
     AllData,
     /// Every stream of one measurement (`d/<meas>/`).
     Meas(MeasId),
-    /// The session's and the preview's input meters (`session/`).
+    /// The session's and the preview's input meters and the session's goniometer
+    /// (`session/`).
     InputMeters,
     /// Exactly one topic.
     Topic(Topic),
@@ -191,7 +200,10 @@ impl Subscription {
         match (self, topic) {
             (Self::AllData, Topic::Data { .. }) => true,
             (Self::Meas(m), Topic::Data { meas, .. }) => m == meas,
-            (Self::InputMeters, Topic::SessionLevels | Topic::PreviewLevels) => true,
+            (
+                Self::InputMeters,
+                Topic::SessionLevels | Topic::PreviewLevels | Topic::SessionGonio,
+            ) => true,
             (Self::Topic(t), other) => t == other,
             _ => false,
         }
@@ -229,10 +241,17 @@ mod tests {
             Topic::Timing,
             Topic::SessionLevels,
             Topic::PreviewLevels,
+            Topic::SessionGonio,
+            Topic::PreviewGonio,
         ] {
             assert_eq!(Topic::parse(&t.to_bytes()), Ok(t));
         }
-        for t in [Topic::SessionLevels, Topic::PreviewLevels] {
+        assert!(!Subscription::InputMeters.matches(&Topic::PreviewGonio));
+        for t in [
+            Topic::SessionLevels,
+            Topic::PreviewLevels,
+            Topic::SessionGonio,
+        ] {
             assert!(
                 t.to_bytes()
                     .starts_with(&Subscription::InputMeters.prefix())

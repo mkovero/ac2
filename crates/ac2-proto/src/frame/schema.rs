@@ -28,6 +28,10 @@ pub enum FrameKind {
     SessionLevels,
     /// Input meters of a device preview.
     PreviewLevels,
+    /// Goniometer points of the open session's pairs.
+    SessionGonio,
+    /// Goniometer points of a device preview's pairs.
+    PreviewGonio,
     /// Loopback timing.
     Timing,
     /// Keepalive.
@@ -85,6 +89,18 @@ pub enum ArrayName {
     OverIn,
     /// A band window's limit in force (NaN: none).
     Limit,
+    /// The chosen ballistic's programme-meter reading per input.
+    Ppm,
+    /// True peak per input (BS.1770 Annex 2).
+    TruePeak,
+    /// Highest reading of the chosen ballistic since the last reset, per input.
+    Max,
+    /// Over events since the last reset, per input.
+    Overs,
+    /// Goniometer point x (`(r − l)/√2` after auto gain), every pair's points in turn.
+    GonioX,
+    /// Goniometer point y (`(l + r)/√2` after auto gain), every pair's points in turn.
+    GonioY,
 }
 
 /// Array unit.
@@ -95,6 +111,8 @@ pub enum Unit {
     Db,
     /// dBFS.
     Dbfs,
+    /// dB true peak (an inter-sample peak re full scale).
+    Dbtp,
     /// dB SPL.
     DbSpl,
     /// dBFS per hertz (power spectral density).
@@ -111,6 +129,10 @@ pub enum Unit {
     Seconds,
     /// Bitmask (u32 elements).
     Bitmask,
+    /// An event count (u32 elements).
+    Count,
+    /// Goniometer coordinate, −127 … 127 of the pair's auto gain (i8 elements).
+    GonioUnit,
 }
 
 /// Element type of an array part.
@@ -132,6 +154,8 @@ pub enum Elem {
     /// neighbour differences in byte planes, value = mantissa · 2^e; within 1/32 765 of the
     /// array's peak. The linear IR.
     Bfp16,
+    /// Signed 8-bit. The goniometer's quantised coordinates.
+    I8,
 }
 
 /// Describes one array part.
@@ -151,7 +175,8 @@ pub(super) fn desc(name: ArrayName, unit: Unit) -> ArrayDesc {
     // `crate::packing`), the linear IR relative to its peak; meters and Leq windows are read
     // as numbers or summed further and stay f32.
     let elem = match (name, unit) {
-        (_, Unit::Bitmask) => Elem::U32,
+        (_, Unit::Bitmask | Unit::Count) => Elem::U32,
+        (_, Unit::GonioUnit) => Elem::I8,
         (
             ArrayName::Mag
             | ArrayName::Phase

@@ -31,8 +31,9 @@ mod meta;
 mod schema;
 
 pub use data::{
-    BandLeqFrame, DataMessage, Frame, FrameData, FrameStamp, IrFrame, LeqFrame, LevelsFrame,
-    PreviewLevelsFrame, RtaFrame, SessionLevelsFrame, SpecFrame, SplFrame, TfFrame,
+    BandLeqFrame, DataMessage, Frame, FrameData, FrameStamp, GONIO_POINTS, GonioFrame, GonioPair,
+    IrFrame, LeqFrame, LevelsFrame, PreviewLevelsFrame, RtaFrame, SessionLevelsFrame, SpecFrame,
+    SplFrame, TfFrame,
 };
 pub use decode::{decode_data_message, decode_frame};
 pub use encode::{encode_event_message, encode_frame};
@@ -40,8 +41,8 @@ pub use error::{DecodeError, EncodeError};
 pub use flags::{ClipFlags, LeqFlags, ProtectionFlags, ValidityMask};
 pub use meta::{
     AudioHealth, BandLeqMeta, BandWindowState, DaemonHealth, FrameHeader, FrameMeta, GenSummary,
-    IrMeta, KaMeta, LeqMeta, LeqPeak, LeqRun, LevelsMeta, MathState, OperandState, OperandStatus,
-    PreviewLevelsMeta, RtaMeta, SpecBand, SpecBands, SpecMeta, SplMeta, TfMeta, TimingMeta,
-    TimingWindow,
+    GonioMeta, GonioPairMeta, IrMeta, KaMeta, LeqMeta, LeqPeak, LeqRun, LevelsMeta, MathState,
+    OperandState, OperandStatus, PairLevels, PreviewLevelsMeta, RtaMeta, SessionLevelsMeta,
+    SpecBand, SpecBands, SpecMeta, SplMeta, TfMeta, TimingMeta, TimingWindow,
 };
 pub use schema::{ArrayDesc, ArrayName, Elem, FrameKind, Unit};

@@ -400,5 +400,17 @@ pub fn commands() -> Vec<Command> {
         name: "tilt −1.0 dB/oct @ 1 kHz, LF +6.0 dB @ 100 Hz".into(),
         owner: crate::model::TraceOwner::Meas { meas: MeasId(4) },
     }])
+    .chain([
+        Command::LevelsSet {
+            base: Rev(38),
+            ballistic: Some(crate::model::Ballistic::Type2),
+            correlation_window: None,
+            over_threshold: Some(crate::units::Dbtp(-1.0)),
+            correlation_gate: None,
+        },
+        Command::LevelsReset {
+            channels: vec![0, 1],
+        },
+    ])
     .collect()
 }

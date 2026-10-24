@@ -1059,6 +1059,12 @@
    },
    "artnet_fade": 1.5,
    "monitor_at_start": true,
+   "levels": {
+    "ballistic": "type1",
+    "correlation_window": "short",
+    "over_threshold": -1.0,
+    "correlation_gate": -50.0
+   },
    "osc": {
     "sent": 12,
     "last_error": "Connection refused (os error 111)"

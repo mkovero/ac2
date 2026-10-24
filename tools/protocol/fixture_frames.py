@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import ac2proto as p
 
 
@@ -44,7 +46,8 @@ def stamp(grid, protection=WEAK_REFERENCE):
 def arr(name, unit, elem=None):
     """The element encoding is fixed per array (docs/protocol.md §5.3)."""
     if elem is None:
-        elem = {"mag": "i16", "phase": "i16", "level": "i16", "ir_etc": "i16", "coh": "u16", "ir_linear": "bfp16"}.get(name, "f32")
+        elem = {"mag": "i16", "phase": "i16", "level": "i16", "ir_etc": "i16", "coh": "u16", "ir_linear": "bfp16",
+                "gonio_x": "i8", "gonio_y": "i8", "overs": "u32"}.get(name, "f32")
         if name.startswith("align_"):
             elem = "i16"
     return {"name": name, "unit": unit, "elem": elem}
@@ -169,6 +172,27 @@ PREVIEW_INPUTS = [
     {"channel": 1, "kind": {"kind": "line"}},
 ]
 PREVIEW_PAIRS = [{"left": 0, "right": 1, "name": None}]
+
+
+def gonio_points():
+    """A mono 1 kHz tone: every point on the vertical axis (samples::frames::gonio_frame)."""
+    n = 256
+    return [[0, round(127.0 * math.sin(i * 2.0 * math.pi * 7.0 / n))] for i in range(n)]
+
+
+def gonio_frame(topic, kind):
+    pts = gonio_points()
+    return frame(
+        topic,
+        kind,
+        None,
+        {"pairs": [{"left": 0, "right": 1, "gain_dbfs": -6.0}]},
+        [
+            (arr("gonio_x", "gonio_unit"), [q[0] for q in pts]),
+            (arr("gonio_y", "gonio_unit"), [q[1] for q in pts]),
+        ],
+        protection=0,
+    )
 
 
 def frames():
@@ -419,14 +443,24 @@ def frames():
             "session/levels",
             "session_levels",
             None,
-            {"channels": [0, 1, 2]},
+            {
+                "channels": [0, 1, 2],
+                "ballistic": "type1",
+                "pair_levels": [{"left": 0, "right": 1, "correlation": 0.875, "quiet": None}],
+            },
             [
                 (arr("peak", "dbfs"), [-6.0, -0.0625, -INF]),
                 (arr("rms", "dbfs"), [-18.5, -3.25, -INF]),
                 (arr("clip", "bitmask", "u32"), [0, HELD, 0]),
+                (arr("ppm", "dbfs"), [-7.5, -1.25, -INF]),
+                (arr("true_peak", "dbtp"), [-5.75, 0.5, -INF]),
+                (arr("max", "dbfs"), [-2.0, 0.25, -INF]),
+                (arr("overs", "count"), [0, 3, 0]),
             ],
             protection=0,
         ),
+        "session_gonio": gonio_frame("session/gonio", "session_gonio"),
+        "preview_gonio": gonio_frame("preview/gonio", "preview_gonio"),
         "preview_levels": frame(
             "session/preview",
             "preview_levels",
@@ -437,11 +471,17 @@ def frames():
                 "channels": [0, 1],
                 "inputs": PREVIEW_INPUTS,
                 "pairs": PREVIEW_PAIRS,
+                "ballistic": "true_peak",
+                "pair_levels": [{"left": 0, "right": 1, "correlation": None, "quiet": "right"}],
             },
             [
                 (arr("peak", "dbfs"), [-12.0, -40.5]),
                 (arr("rms", "dbfs"), [-20.0, -52.25]),
                 (arr("clip", "bitmask", "u32"), [0, CLIP]),
+                (arr("ppm", "dbfs"), [-11.75, -40.25]),
+                (arr("true_peak", "dbtp"), [-11.75, -40.25]),
+                (arr("max", "dbfs"), [-3.0, -38.0]),
+                (arr("overs", "count"), [1, 0]),
             ],
             protection=0,
         ),

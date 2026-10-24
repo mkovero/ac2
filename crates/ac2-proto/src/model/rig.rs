@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ArtnetFade, ArtnetTarget, DmxSet, RigCue};
+use super::{ArtnetFade, ArtnetTarget, DmxSet, LevelsSettings, RigCue};
 use crate::units::{Rev, WallNs};
 
 /// How sending to one kind of receiver (OSC, Art-Net) fares.
@@ -24,7 +24,7 @@ pub struct OutputStatus {
 #[serde(deny_unknown_fields)]
 pub struct Rig {
     /// Rev at which these settings were last committed; `osc.target`, `artnet.target`,
-    /// `artnet.fade` and `rig.monitor_start` name it as their `base`.
+    /// `artnet.fade`, `rig.monitor_start` and `levels.set` name it as their `base`.
     pub rev: Rev,
     /// Where OSC cues go (an IP literal and port); `None`: nowhere.
     #[serde(with = "opt_addr")]
@@ -36,6 +36,10 @@ pub struct Rig {
     /// At start the daemon reopens the last session's device capture-only, so the rig
     /// measurements meter with no client connected.
     pub monitor_at_start: bool,
+    /// The programme meters' ballistic, correlator window, over threshold and correlation
+    /// gate: the daemon computes these quantities, so it owns the choice and every client
+    /// reads the same bar.
+    pub levels: LevelsSettings,
     /// Sending OSC.
     pub osc: OutputStatus,
     /// Sending Art-Net.
@@ -137,6 +141,10 @@ mod tests {
             }),
             artnet_fade: ArtnetFade::new(2.5).expect("valid"),
             monitor_at_start: true,
+            levels: LevelsSettings {
+                ballistic: crate::model::Ballistic::Type2,
+                ..LevelsSettings::default()
+            },
             damaged_files: Vec::new(),
             osc: OutputStatus {
                 sent: 3,

@@ -6,16 +6,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    ArtnetTarget, AverageMethod, BackendKind, CalRef, ColourFamily, Compared, DelayPick,
-    DelayReference, DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand,
-    GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId,
-    MicLoading, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout, PreviewInput,
-    RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef, SplLogWhich, TargetCurve,
-    TraceEdit, TraceOwner,
+    ArtnetTarget, AverageMethod, BackendKind, Ballistic, CalRef, ColourFamily, Compared,
+    CorrelationWindow, DelayPick, DelayReference, DeviceId, DmxSet, ElectricalConnection,
+    ExportFormat, FinderBand, GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport,
+    MeasConfig, MicCurveId, MicLoading, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout,
+    PreviewInput, RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef, SplLogWhich,
+    TargetCurve, TraceEdit, TraceOwner,
 };
 use crate::units::{
-    Blob, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, Rev, Seconds, TraceId, TransferId,
-    Volts,
+    Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, MeasId, MvPerPa, Rev, Seconds, TraceId,
+    TransferId, Volts,
 };
 
 /// Every command. Wire: `{"op": "<group>.<name>", "args": {…}}`; `args` is absent for
@@ -214,6 +214,33 @@ pub enum Command {
         base: Rev,
         /// On or off.
         on: bool,
+    },
+    /// Set the rig's programme-meter settings (`rig.levels`): the ballistic the bars read,
+    /// the correlator window, the over threshold and the correlation gate; a field `None`
+    /// keeps its value. The daemon runs every ballistic all the time, so a change reads a
+    /// settled detector at once. A threshold outside −20 … +6 dBTP or a gate outside
+    /// −120 … 0 dBFS, or either not finite, is refused (`invalid`). Kept by the daemon
+    /// across restarts.
+    #[serde(rename = "levels.set")]
+    LevelsSet {
+        /// The `rig.rev` the edit was made on; another is refused with `conflict`.
+        base: Rev,
+        /// What the `ppm` bar reads.
+        ballistic: Option<Ballistic>,
+        /// The correlator's window.
+        correlation_window: Option<CorrelationWindow>,
+        /// The over threshold.
+        over_threshold: Option<Dbtp>,
+        /// The correlation gate.
+        correlation_gate: Option<Dbfs>,
+    },
+    /// Clear the max hold of every ballistic and the over count of `channels` (device
+    /// inputs; empty: every captured input), on the session meters and the preview alike.
+    /// No state changes: the next meter frame carries the cleared values.
+    #[serde(rename = "levels.reset")]
+    LevelsReset {
+        /// Device input channels; empty = all.
+        channels: Vec<u16>,
     },
 
     // -- meas ---------------------------------------------------------------------------
@@ -824,6 +851,8 @@ impl Command {
             Self::ArtnetFade { .. } => "artnet.fade",
             Self::ArtnetTest { .. } => "artnet.test",
             Self::RigMonitorStart { .. } => "rig.monitor_start",
+            Self::LevelsSet { .. } => "levels.set",
+            Self::LevelsReset { .. } => "levels.reset",
             Self::MeasCreate { .. } => "meas.create",
             Self::MeasUpdate { .. } => "meas.update",
             Self::MeasColour { .. } => "meas.colour",

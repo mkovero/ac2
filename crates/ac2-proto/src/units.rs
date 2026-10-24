@@ -35,6 +35,11 @@ float_unit!(
     Dbfs
 );
 float_unit!(
+    /// True-peak level re digital full scale (BS.1770 Annex 2: the inter-sample peak the
+    /// converter will see), so a value above 0 is possible.
+    Dbtp
+);
+float_unit!(
     /// Sound pressure level, dB re 20 µPa.
     DbSpl
 );

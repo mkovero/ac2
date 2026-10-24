@@ -10,9 +10,9 @@ use super::flags::MaskBits;
 use super::schema::{desc, level_unit, spec_unit};
 use super::{
     ArrayDesc, ArrayName, BandLeqFrame, DataMessage, DecodeError, Frame, FrameData, FrameHeader,
-    FrameKind, FrameMeta, FrameStamp, IrFrame, LeqFrame, LevelsFrame, MAX_ARRAYS, MAX_FRAME_BYTES,
-    MAX_HEADER_BYTES, MAX_N, MAX_PARTS, PreviewLevelsFrame, RtaFrame, SessionLevelsFrame,
-    SpecFrame, SplFrame, TfFrame, Unit,
+    FrameKind, FrameMeta, FrameStamp, GONIO_POINTS, GonioFrame, GonioPair, IrFrame, LeqFrame,
+    LevelsFrame, MAX_ARRAYS, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MAX_N, MAX_PARTS,
+    PreviewLevelsFrame, RtaFrame, SessionLevelsFrame, SpecFrame, SplFrame, TfFrame, Unit,
 };
 
 /// An alignment's four view curves: all of them or none.
@@ -40,6 +40,36 @@ fn align_curves(a: &mut Arrays<'_>) -> Result<Option<crate::model::AlignCurves>,
             "tf: an alignment's curves come all four or none".into(),
         )),
     }
+}
+
+/// A goniometer frame: `n` is the pairs' points in turn, split back per pair.
+fn gonio(a: &mut Arrays<'_>, meta: super::GonioMeta, n: u32) -> Result<GonioFrame, DecodeError> {
+    if meta.pairs.len() * GONIO_POINTS != n as usize {
+        return Err(DecodeError::Schema(
+            "gonio: n != pairs × GONIO_POINTS".into(),
+        ));
+    }
+    let x = a.gonio(ArrayName::GonioX)?;
+    let y = a.gonio(ArrayName::GonioY)?;
+    let pairs = meta
+        .pairs
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let at = i * GONIO_POINTS..(i + 1) * GONIO_POINTS;
+            GonioPair {
+                left: p.left,
+                right: p.right,
+                gain_dbfs: p.gain_dbfs,
+                points: x[at.clone()]
+                    .iter()
+                    .zip(&y[at])
+                    .map(|(&x, &y)| [x, y])
+                    .collect(),
+            }
+        })
+        .collect();
+    Ok(GonioFrame { pairs })
 }
 
 struct Arrays<'a> {
@@ -95,6 +125,22 @@ impl<'a> Arrays<'a> {
         } else {
             Err(DecodeError::UnknownBits(name))
         }
+    }
+
+    /// A count array (`u32` elements, no bit meaning).
+    fn counts(&mut self, name: ArrayName) -> Result<Vec<u32>, DecodeError> {
+        let b = self
+            .find(name, Unit::Count)?
+            .ok_or_else(|| DecodeError::Schema(format!("missing {name:?}")))?;
+        Ok(packing::get_u32(b))
+    }
+
+    /// A goniometer coordinate array.
+    fn gonio(&mut self, name: ArrayName) -> Result<Vec<i8>, DecodeError> {
+        let b = self
+            .find(name, Unit::GonioUnit)?
+            .ok_or_else(|| DecodeError::Schema(format!("missing {name:?}")))?;
+        Ok(packing::get_i8(b))
     }
 
     fn finish(self) -> Result<(), DecodeError> {
@@ -194,6 +240,8 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
         Topic::Data { stream, .. } => stream_kind(stream),
         Topic::SessionLevels => FrameKind::SessionLevels,
         Topic::PreviewLevels => FrameKind::PreviewLevels,
+        Topic::SessionGonio => FrameKind::SessionGonio,
+        Topic::PreviewGonio => FrameKind::PreviewGonio,
         Topic::Timing => FrameKind::Timing,
         Topic::Ka => FrameKind::Ka,
         Topic::Evt => return Err(DecodeError::KindMismatch),
@@ -310,6 +358,10 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
                 peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
                 rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,
                 clip: a.mask(ArrayName::Clip)?,
+                ppm: a.f32(ArrayName::Ppm, Unit::Dbfs)?,
+                true_peak: a.f32(ArrayName::TruePeak, Unit::Dbtp)?,
+                max: a.f32(ArrayName::Max, Unit::Dbfs)?,
+                overs: a.counts(ArrayName::Overs)?,
             })
         }
         FrameMeta::PreviewLevels(meta) => {
@@ -323,8 +375,14 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
                 peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
                 rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,
                 clip: a.mask(ArrayName::Clip)?,
+                ppm: a.f32(ArrayName::Ppm, Unit::Dbfs)?,
+                true_peak: a.f32(ArrayName::TruePeak, Unit::Dbtp)?,
+                max: a.f32(ArrayName::Max, Unit::Dbfs)?,
+                overs: a.counts(ArrayName::Overs)?,
             })
         }
+        FrameMeta::SessionGonio(meta) => FrameData::SessionGonio(gonio(&mut a, meta, h.n)?),
+        FrameMeta::PreviewGonio(meta) => FrameData::PreviewGonio(gonio(&mut a, meta, h.n)?),
         FrameMeta::Timing(m) => FrameData::Timing(m),
         FrameMeta::Ka(m) => FrameData::Ka(m),
     };

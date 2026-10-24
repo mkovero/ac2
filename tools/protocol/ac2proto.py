@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 64
+PROTO_VERSION = 65
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -26,7 +26,12 @@ _DATA_TOPIC = re.compile(r"^d/(0|[1-9][0-9]*)/(" + "|".join(STREAMS) + r")$")
 
 
 # Input-meter topics and the frame kind each carries.
-_METER_TOPICS = {"session/levels": "session_levels", "session/preview": "preview_levels"}
+_METER_TOPICS = {
+    "session/levels": "session_levels",
+    "session/preview": "preview_levels",
+    "session/gonio": "session_gonio",
+    "preview/gonio": "preview_gonio",
+}
 
 
 class DecodeError(Exception):
@@ -169,6 +174,8 @@ _MATH = ("opt", [("operands", ("list", [("operand", _OPERAND), ("status", _OPERA
                  ("phase", None), ("align", _ALIGN)])
 _POSITION = [("level", None), ("peak", None)]
 _PEAK = [("level", None), ("judgement", None)]
+_PAIR_LEVELS = [("left", None), ("right", None), ("correlation", None), ("quiet", None)]
+_GONIO_PAIR = [("left", None), ("right", None), ("gain_dbfs", None)]
 META = {
     "tf": [("delay", None), ("nudged", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
            ("math", _MATH),
@@ -196,9 +203,12 @@ META = {
                  ("predicted", ("opt", [("duration", None), ("estimate", None), ("at_most", None),
                                         ("limit", None), ("judgement", None)]))],
     "levels": _LEVELS,
-    "session_levels": _LEVELS,
+    "session_levels": [("channels", None), ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS))],
     "preview_levels": [("backend", None), ("device", None), ("channels", None),
-                       ("inputs", ("list", _PREVIEW_INPUT)), ("pairs", ("list", _PAIR))],
+                       ("inputs", ("list", _PREVIEW_INPUT)), ("pairs", ("list", _PAIR)),
+                       ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS))],
+    "session_gonio": [("pairs", ("list", _GONIO_PAIR))],
+    "preview_gonio": [("pairs", ("list", _GONIO_PAIR))],
     "timing": [("status", _TIMING_STATUS),
                ("window", ("opt", [("capture_start", None), ("offset", None), ("psr", None),
                                    ("loopback", None), ("stimulus", None)]))],
@@ -271,7 +281,7 @@ def named(t, x):
 # --------------------------------------------------------------------------------------
 # Frames
 
-_ELEM_SIZE = {"f32": 4, "u32": 4, "i16": 2, "u16": 2, "bfp16": 2}
+_ELEM_SIZE = {"f32": 4, "u32": 4, "i16": 2, "u16": 2, "bfp16": 2, "i8": 1}
 BFP_EXP_MIN, BFP_EXP_MAX, BFP_PEAK = -128, 113, 32765.0
 
 
@@ -392,7 +402,7 @@ def _encode_array(desc: dict, values: list) -> bytes:
         values = [_f32(v) for v in values]
         x = bfp_exponent(values)
         return struct.pack("<b", x) + _planes([_code_i16(math.ldexp(v, -x)) & 0xFFFF for v in values])
-    return struct.pack("<%d%s" % (len(values), {"f32": "f", "u32": "I"}[e]), *values)
+    return struct.pack("<%d%s" % (len(values), {"f32": "f", "u32": "I", "i8": "b"}[e]), *values)
 
 
 def _decode_array(desc: dict, b: bytes) -> list:
@@ -408,7 +418,8 @@ def _decode_array(desc: dict, b: bytes) -> list:
         if x > BFP_EXP_MAX:
             raise DecodeError(f"bfp16 exponent {x}")
         return [from_bfp(q - 0x10000 if q >= 0x8000 else q, x) for q in _unplanes(b[1:])]
-    return list(struct.unpack("<%d%s" % (len(b) // 4, {"f32": "f", "u32": "I"}[e]), b))
+    size, code = {"f32": (4, "f"), "u32": (4, "I"), "i8": (1, "b")}[e]
+    return list(struct.unpack("<%d%s" % (len(b) // size, code), b))
 
 
 def encode_frame(topic: str, header: dict, arrays: list) -> list:

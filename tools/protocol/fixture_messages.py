@@ -56,6 +56,12 @@ RIG = {
     "artnet_target": {"addr": "192.168.9.255:6454", "universe": 1},
     "artnet_fade": 1.5,
     "monitor_at_start": True,
+    "levels": {
+        "ballistic": "type1",
+        "correlation_window": "short",
+        "over_threshold": -1.0,
+        "correlation_gate": -50.0,
+    },
     "osc": {"sent": 12, "last_error": "Connection refused (os error 111)"},
     "artnet": {"sent": 340, "last_error": None},
     "dmx": dmx([(12, 255), (14, 40)]),
@@ -699,6 +705,18 @@ def requests():
         req(78, "artnet.test", {"channels": dmx([(12, 255), (13, 40)])}),
         req(79, "artnet.fade", {"base": 38, "seconds": 2.5}),
         req(82, "cal.line", {"channel": 4, "volts": 1.2277}),
+        req(
+            85,
+            "levels.set",
+            {
+                "base": 38,
+                "ballistic": "type2",
+                "correlation_window": None,
+                "over_threshold": -1.0,
+                "correlation_gate": None,
+            },
+        ),
+        req(86, "levels.reset", {"channels": [0, 1]}),
     ]
 
 

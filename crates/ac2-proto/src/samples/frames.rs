@@ -4,11 +4,12 @@ use super::builders::*;
 use super::state::*;
 use crate::frame::{
     AudioHealth, BandLeqFrame, BandLeqMeta, BandWindowState, ClipFlags, DaemonHealth, Frame,
-    FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LeqFlags, LeqFrame, LeqMeta,
-    LeqPeak, LeqRun, LevelsFrame, LevelsMeta, MathState, OperandState, OperandStatus,
-    PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame,
-    SpecBand, SpecBands, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta,
-    TimingWindow, ValidityMask,
+    FrameData, FrameStamp, GONIO_POINTS, GenSummary, GonioFrame, GonioPair, IrFrame, IrMeta,
+    KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMeta, MathState,
+    OperandState, OperandStatus, PairLevels, PreviewLevelsFrame, PreviewLevelsMeta,
+    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SessionLevelsMeta, SpecBand, SpecBands,
+    SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta, TimingWindow,
+    ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -352,13 +353,38 @@ pub fn frames() -> Vec<Frame> {
                 ..stamp(None)
             },
             data: FrameData::SessionLevels(SessionLevelsFrame {
-                meta: LevelsMeta {
+                meta: SessionLevelsMeta {
                     channels: vec![0, 1, 2],
+                    ballistic: Ballistic::Type1,
+                    pair_levels: vec![PairLevels {
+                        left: 0,
+                        right: 1,
+                        correlation: Some(0.875),
+                        quiet: None,
+                    }],
                 },
                 peak: vec![-6.0, -0.0625, f32::NEG_INFINITY],
                 rms: vec![-18.5, -3.25, f32::NEG_INFINITY],
                 clip: vec![ClipFlags::NONE, ClipFlags::HELD, ClipFlags::NONE],
+                ppm: vec![-7.5, -1.25, f32::NEG_INFINITY],
+                true_peak: vec![-5.75, 0.5, f32::NEG_INFINITY],
+                max: vec![-2.0, 0.25, f32::NEG_INFINITY],
+                overs: vec![0, 3, 0],
             }),
+        },
+        Frame {
+            stamp: FrameStamp {
+                protection: ProtectionFlags::NONE,
+                ..stamp(None)
+            },
+            data: FrameData::SessionGonio(gonio_frame()),
+        },
+        Frame {
+            stamp: FrameStamp {
+                protection: ProtectionFlags::NONE,
+                ..stamp(None)
+            },
+            data: FrameData::PreviewGonio(gonio_frame()),
         },
         Frame {
             stamp: FrameStamp {
@@ -385,10 +411,21 @@ pub fn frames() -> Vec<Frame> {
                         right: 1,
                         name: None,
                     }],
+                    ballistic: Ballistic::TruePeak,
+                    pair_levels: vec![PairLevels {
+                        left: 0,
+                        right: 1,
+                        correlation: None,
+                        quiet: Some(PairSide::Right),
+                    }],
                 },
                 peak: vec![-12.0, -40.5],
                 rms: vec![-20.0, -52.25],
                 clip: vec![ClipFlags::NONE, ClipFlags::CLIP],
+                ppm: vec![-11.75, -40.25],
+                true_peak: vec![-11.75, -40.25],
+                max: vec![-3.0, -38.0],
+                overs: vec![1, 0],
             }),
         },
         Frame {
@@ -439,6 +476,25 @@ pub fn frames() -> Vec<Frame> {
 
 /// A band meter's frame at night, three windows (50 and 63 Hz LZeq 60 min, 1 kHz LAeq 15
 /// min): 63 Hz over and cannot recover, 50 Hz on course, 1 kHz under its limit.
+/// A goniometer frame of one pair: a mono 1 kHz tone (every point on the vertical axis) at a
+/// pair magnitude of −6 dBFS, the picker's phase walking the tone.
+pub fn gonio_frame() -> GonioFrame {
+    let points = (0..GONIO_POINTS)
+        .map(|i| {
+            let phase = i as f64 * 2.0 * std::f64::consts::PI * 7.0 / GONIO_POINTS as f64;
+            [0, (127.0 * phase.sin()).round() as i8]
+        })
+        .collect();
+    GonioFrame {
+        pairs: vec![GonioPair {
+            left: 0,
+            right: 1,
+            gain_dbfs: -6.0,
+            points,
+        }],
+    }
+}
+
 pub(super) fn band_leq_frame() -> BandLeqFrame {
     let nan = f32::NAN;
     let judged = LeqFlags::LIMIT.with(LeqFlags::JUDGED);

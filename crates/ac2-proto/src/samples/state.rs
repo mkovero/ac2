@@ -559,6 +559,12 @@ pub fn rig() -> Rig {
         }),
         artnet_fade: ArtnetFade::new(1.5).expect("valid sample fade"),
         monitor_at_start: true,
+        levels: LevelsSettings {
+            ballistic: Ballistic::Type1,
+            correlation_window: CorrelationWindow::Short,
+            over_threshold: Dbtp(-1.0),
+            correlation_gate: Dbfs(-50.0),
+        },
         osc: OutputStatus {
             sent: 12,
             last_error: Some("Connection refused (os error 111)".into()),

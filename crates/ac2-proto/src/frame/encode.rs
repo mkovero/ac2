@@ -15,6 +15,33 @@ use super::{
 enum Col<'a> {
     F(&'a [f32]),
     U(Vec<u32>),
+    I(Vec<i8>),
+}
+
+/// The programme-meter columns of a session or preview levels frame.
+fn programme_cols<'a>(
+    cols: &mut Vec<(ArrayDesc, Col<'a>)>,
+    ppm: &'a [f32],
+    true_peak: &'a [f32],
+    max: &'a [f32],
+    overs: &'a [u32],
+) {
+    cols.push((desc(ArrayName::Ppm, Unit::Dbfs), Col::F(ppm)));
+    cols.push((desc(ArrayName::TruePeak, Unit::Dbtp), Col::F(true_peak)));
+    cols.push((desc(ArrayName::Max, Unit::Dbfs), Col::F(max)));
+    cols.push((desc(ArrayName::Overs, Unit::Count), Col::U(overs.to_vec())));
+}
+
+/// Every pair's points in turn, as one x and one y column.
+fn gonio_cols<'a>(cols: &mut Vec<(ArrayDesc, Col<'a>)>, f: &super::GonioFrame) {
+    let n = f.pairs.len() * super::GONIO_POINTS;
+    let (mut x, mut y) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    for p in &f.pairs {
+        x.extend(p.points.iter().map(|q| q[0]));
+        y.extend(p.points.iter().map(|q| q[1]));
+    }
+    cols.push((desc(ArrayName::GonioX, Unit::GonioUnit), Col::I(x)));
+    cols.push((desc(ArrayName::GonioY, Unit::GonioUnit), Col::I(y)));
 }
 
 fn mask_slice<T: MaskBits>(v: &[T]) -> Vec<u32> {
@@ -120,6 +147,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
                 desc(ArrayName::Clip, Unit::Bitmask),
                 Col::U(mask_slice(&f.clip)),
             ));
+            programme_cols(&mut cols, &f.ppm, &f.true_peak, &f.max, &f.overs);
             FrameMeta::SessionLevels(f.meta.clone())
         }
         FrameData::PreviewLevels(f) => {
@@ -129,7 +157,16 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
                 desc(ArrayName::Clip, Unit::Bitmask),
                 Col::U(mask_slice(&f.clip)),
             ));
+            programme_cols(&mut cols, &f.ppm, &f.true_peak, &f.max, &f.overs);
             FrameMeta::PreviewLevels(f.meta.clone())
+        }
+        FrameData::SessionGonio(f) => {
+            gonio_cols(&mut cols, f);
+            FrameMeta::SessionGonio(f.meta())
+        }
+        FrameData::PreviewGonio(f) => {
+            gonio_cols(&mut cols, f);
+            FrameMeta::PreviewGonio(f.meta())
         }
         FrameData::Timing(m) => FrameMeta::Timing(*m),
         FrameData::Ka(m) => FrameMeta::Ka(m.clone()),
@@ -139,6 +176,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
         None => 0,
         Some((_, Col::F(v))) => v.len(),
         Some((_, Col::U(v))) => v.len(),
+        Some((_, Col::I(v))) => v.len(),
     };
     if n > MAX_N as usize {
         return Err(EncodeError::TooManyElements(n));
@@ -147,6 +185,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
         let got = match c {
             Col::F(v) => v.len(),
             Col::U(v) => v.len(),
+            Col::I(v) => v.len(),
         };
         if got != n {
             return Err(EncodeError::Length {
@@ -188,6 +227,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
             match c {
                 Col::F(v) => packing::put_f32(&mut raw, d.elem, d.unit == Unit::Deg, v),
                 Col::U(v) => packing::put_u32(&mut raw, v),
+                Col::I(v) => packing::put_i8(&mut raw, v),
             }
         }
         parts.push(packing::deflate(&raw));
