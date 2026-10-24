@@ -13,6 +13,7 @@ mod eq;
 mod gen_;
 mod ir;
 mod leq;
+mod levels;
 mod math;
 mod meas;
 mod meas_config;
@@ -57,6 +58,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Trace { cmd } => traces::trace(cli, cmd, out).await,
         Cmd::Osc { cmd } => osc::osc(cli, cmd, out).await,
         Cmd::Artnet { cmd } => artnet::artnet(cli, cmd, out).await,
+        Cmd::Levels { cmd } => levels::run(cli, cmd.as_ref(), out).await,
         Cmd::Cue(a) => osc::cue(cli, a, out).await,
         Cmd::Rig { cmd } => osc::rig(cli, cmd, out).await,
         Cmd::State { cmd } => readouts::state_dump(cli, cmd, out).await,

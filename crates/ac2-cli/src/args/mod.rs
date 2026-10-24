@@ -7,6 +7,7 @@ mod delay;
 mod eq;
 mod gen_;
 mod ir;
+mod levels;
 mod math;
 mod meas;
 mod osc;
@@ -21,6 +22,7 @@ pub use delay::*;
 pub use eq::*;
 pub use gen_::*;
 pub use ir::*;
+pub use levels::*;
 pub use math::*;
 pub use meas::*;
 pub use osc::*;
@@ -168,6 +170,13 @@ pub enum Cmd {
         /// Action.
         #[command(subcommand)]
         cmd: ArtnetCmd,
+    },
+    /// The programme meters of the open session's inputs (one frame: ppm, true peak, max,
+    /// overs, CLIP, each pair's correlation); `set` their settings, `reset` their holds.
+    Levels {
+        /// Action; none shows the meters.
+        #[command(subcommand)]
+        cmd: Option<LevelsCmd>,
     },
     /// What an SPL meter's limit (or the whole meter) does for external gear when its state
     /// changes: ok (under the limit), near (within the warn margin), over, fault (the rig

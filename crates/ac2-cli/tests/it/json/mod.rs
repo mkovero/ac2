@@ -4,6 +4,7 @@ mod daemon;
 mod gen_;
 mod input;
 mod kinds;
+mod levels;
 mod meas;
 mod trace;
 

@@ -107,6 +107,7 @@ pub(crate) async fn rig(cli: &Cli, cmd: &RigCmd, out: &mut Out<'_>) -> Result<()
                     st.rig.osc.last_error.as_deref().unwrap_or("none"),
                 );
                 s.push_str(&super::artnet::status_text(&st.rig));
+                s.push_str(&super::levels::status_text(&st.rig));
                 s.push_str(&format!(
                     "monitor at start: {}\n",
                     if st.rig.monitor_at_start { "on" } else { "off" }

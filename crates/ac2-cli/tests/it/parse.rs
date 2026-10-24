@@ -8,6 +8,7 @@ use clap::Parser;
 use proptest::prelude::*;
 
 mod kinds;
+mod levels;
 
 fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
     Cli::try_parse_from(std::iter::once("ac2").chain(args.iter().copied()))
