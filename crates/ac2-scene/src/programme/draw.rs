@@ -1,5 +1,6 @@
 //! The Programme pane as primitives: bars on the right with their readouts under them, the
-//! goniometer's dark field and grid on the left with the correlation chip below it. The
+//! goniometer's dark field and grid on the left with the correlation chip below it, the
+//! loudness column at the right edge. The
 //! embers themselves are `ac2-plot`'s (`embers::ember_points`), placed in the square this
 //! returns.
 
@@ -9,6 +10,7 @@ use crate::primitives::{Color, FillRect, HAlign, Rect, Scene, Stroke, VAlign, Vi
 use crate::theme::Theme;
 use crate::view::{PlotChrome, Style};
 
+use super::loudness::LoudnessColumn;
 use super::{Ballistic, ProgrammeInput, ProgrammePane, bar_fill};
 
 /// The pane's picture and where its embers go.
@@ -134,6 +136,9 @@ pub fn programme_scene(
         }
     }
     bars(&mut c, p, l.bars, style);
+    if let (Some(r), Some(col)) = (l.loudness, &p.loudness) {
+        loudness(&mut c, col, r, style);
+    }
     ProgrammeScene {
         scene: c.into_scene(size),
         gonio: square,
@@ -248,6 +253,48 @@ fn bars(c: &mut Canvas, p: &ProgrammePane, area: Rect, style: Style) {
                 ));
             }
             y += line;
+        }
+    }
+}
+
+/// The loudness column: its source's name level with the bar labels, the readouts from the
+/// bars' top down, the since line at the foot (chrome, so **T** hides it with the rest); or
+/// why there is none. Lines too long for the column wrap.
+fn loudness(c: &mut Canvas, col: &LoudnessColumn, r: Rect, style: Style) {
+    let theme = style.theme;
+    let (fs, small) = (theme.font_size, theme.small_font_size);
+    let x = r.x + 4.0;
+    let w = (r.w - 6.0).max(1.0);
+    let put = |c: &mut Canvas, text: &str, y: &mut f32, size: f32, color: Color| {
+        for line in crate::toast::wrap(text, w, &|s| crate::canvas::text_width(s, size)) {
+            c.overlay.labels.push(label(
+                line,
+                [x, *y],
+                anchor(HAlign::Left, VAlign::Top),
+                size,
+                color,
+            ));
+            *y += 1.3 * size;
+        }
+    };
+    let mut y = r.y + 1.4 * fs;
+    match col {
+        LoudnessColumn::Message(m) => put(c, m, &mut y, small, theme.text_dim),
+        LoudnessColumn::Readout(l) => {
+            let mut top = r.y;
+            put(c, &l.title, &mut top, fs, theme.text);
+            y = y.max(top);
+            let [mom, short, int, lra, tp] = l.lines();
+            for t in [mom, short, int] {
+                put(c, &t, &mut y, fs, theme.text);
+            }
+            for t in [lra, tp] {
+                put(c, &t, &mut y, small, theme.text_dim);
+            }
+            if style.chrome != PlotChrome::Bare {
+                let mut foot = (r.bottom() - 1.3 * small).max(y);
+                put(c, &l.since, &mut foot, small, theme.text_dim);
+            }
         }
     }
 }

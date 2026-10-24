@@ -274,8 +274,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::SweepIr, S::Distortion, sh(K::I)),
         // E, as the transfer pane's phase reference: the reference input's own harmonics.
         (C::ReferenceHarmonics, S::Distortion, k(K::E)),
-        // R resets the meters' max and overs, as it resets the other panes' averaging and
-        // the SPL meter's display; Shift+R, a step further, every input's.
+        // R resets the meters' max, overs and loudness, as it resets the other panes'
+        // averaging and the SPL meter's display; Shift+R, a step further, every input's.
         (C::LevelsReset, S::Programme, k(K::R)),
         (C::LevelsResetAll, S::Programme, sh(K::R)),
         (C::LevelsReset, S::Inputs, k(K::R)),
@@ -389,7 +389,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
         Scope::Programme => {
             const {
                 &[
-                    hint(C::LevelsReset, "reset max", 90),
+                    hint(C::LevelsReset, "reset", 90),
                     hint(C::LevelsResetAll, "reset all", 80),
                     hint(C::PlotChrome, "grid", 60),
                     hint(C::MaximisePane, "maximise", 50),
@@ -400,7 +400,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
         Scope::Inputs => {
             const {
                 &[
-                    hint(C::LevelsReset, "reset max", 90),
+                    hint(C::LevelsReset, "reset", 90),
                     hint(C::LevelsResetAll, "reset all", 80),
                     hint(C::ProgrammePane, "programme pane", 85),
                     hint(C::NextInTree, "measurements", 60),

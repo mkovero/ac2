@@ -1,9 +1,10 @@
 //! Programme panes: what each meters, the app-side flying peaks and goniometer rings fed
-//! from the session's levels and gonio frames, and the max / overs reset.
+//! from the session's levels and gonio frames, the loudness column's source, and the reset of
+//! max, overs and loudness.
 //!
-//! The daemon computes every number (ballistics, true peak, max, overs, correlation, the
-//! gonio points); the app only holds what is a matter of display: the flying peak above a
-//! bar and the embers' ages.
+//! The daemon computes every number (ballistics, true peak, max, overs, correlation,
+//! loudness, the gonio points); the app only holds what is a matter of display: the flying
+//! peak above a bar and the embers' ages.
 
 use std::collections::BTreeMap;
 
@@ -11,11 +12,13 @@ use ac2_proto::FrameData;
 use ac2_proto::model::layout::PaneContent;
 use ac2_proto::topic::Topic;
 use ac2_scene::gonio::EmberRing;
+use ac2_scene::programme::loudness::{LoudnessFacts, NamedPair, loudness_column};
 use ac2_scene::programme::{
     Ballistic, Correlation, FlyingPeak, ProgrammeInput, ProgrammePair, ProgrammePane, Scale, Side,
 };
 
 use crate::conn::{DataSnapshot, Request};
+use crate::keys::{CommandId, Scope};
 use crate::state::{AppState, PaneId, PaneKind};
 
 /// Bars a Programme pane shows at most (the wire's limit).
@@ -243,15 +246,15 @@ impl AppState {
     /// pair's correlation. The Programme panes and the Inputs list read the same.
     pub fn programme_of(&self, metered: Metered) -> ProgrammePane {
         let st = self.daemon();
-        let frame = self
+        let latest = self
             .data
             .as_ref()
             .and_then(|d| d.latest.get(&Topic::SessionLevels))
-            .filter(|f| !f.stale)
-            .and_then(|f| match &f.frame.data {
-                FrameData::SessionLevels(l) => Some(l),
-                _ => None,
-            });
+            .filter(|f| !f.stale);
+        let frame = latest.and_then(|f| match &f.frame.data {
+            FrameData::SessionLevels(l) => Some(l),
+            _ => None,
+        });
         let rig = st.map(|s| s.rig.levels);
         let b = frame
             .map(|f| f.meta.ballistic)
@@ -295,25 +298,66 @@ impl AppState {
                 }
             })
             .collect();
-        let pair = metered.pair().map(|(l, r)| {
-            let named = st
-                .and_then(|s| s.pairs.iter().find(|p| p.left == l && p.right == r))
-                .and_then(|p| p.name.clone());
-            ProgrammePair {
-                name: named.unwrap_or_else(|| ac2_scene::meter::pair_name(&name(l), &name(r))),
-                correlation: correlation(frame.and_then(|f| {
-                    f.meta
-                        .pair_levels
-                        .iter()
-                        .find(|p| p.left == l && p.right == r)
-                })),
-                window_s: rig.map_or(1.0, |r| r.correlation_window.seconds()),
-            }
+        let pair_title = |l: u16, r: u16| {
+            st.and_then(|s| s.pairs.iter().find(|p| p.left == l && p.right == r))
+                .and_then(|p| p.name.clone())
+                .unwrap_or_else(|| ac2_scene::meter::pair_name(&name(l), &name(r)))
+        };
+        let loudness = self.open_session().and_then(|o| {
+            let s = st?;
+            let pairs: Vec<NamedPair> = s
+                .pairs
+                .iter()
+                .map(|p| NamedPair {
+                    left: p.left,
+                    right: p.right,
+                    name: pair_title(p.left, p.right),
+                })
+                .collect();
+            let captured_at = latest.map(|f| f.frame.stamp.capture_wall_ns);
+            let reset_key = self
+                .keys
+                .first_chord(CommandId::LevelsReset, Scope::Programme)
+                .map(|c| c.label());
+            loudness_column(
+                &metered.inputs(),
+                &LoudnessFacts {
+                    rate_hz: o.sample_rate_hz,
+                    pairs: &pairs,
+                    captured: &o.config.input_channels,
+                    sources: frame.map_or(&[], |f| f.meta.loudness.as_slice()),
+                    is_mic: &|c| {
+                        matches!(
+                            ac2_proto::cal::input_kind(&s.inputs, c),
+                            ac2_proto::model::InputKind::Mic { .. }
+                        )
+                    },
+                    label: &name,
+                    own_name: &|c| self.input_own_name(c),
+                    clock: &|t| {
+                        ac2_scene::time::local_clock(t, captured_at.unwrap_or(t), |w| {
+                            self.local_zone.offset_s(w)
+                        })
+                    },
+                    reset_key: reset_key.as_deref(),
+                },
+            )
+        });
+        let pair = metered.pair().map(|(l, r)| ProgrammePair {
+            name: pair_title(l, r),
+            correlation: correlation(frame.and_then(|f| {
+                f.meta
+                    .pair_levels
+                    .iter()
+                    .find(|p| p.left == l && p.right == r)
+            })),
+            window_s: rig.map_or(1.0, |r| r.correlation_window.seconds()),
         });
         ProgrammePane {
             inputs,
             pair,
             ballistic: ballistic(b),
+            loudness,
         }
     }
 
@@ -444,13 +488,13 @@ impl AppState {
             return;
         }
         let what = if channels.is_empty() {
-            "max and overs reset on every input".to_owned()
+            "max, overs and loudness reset on every input".to_owned()
         } else {
             let n: Vec<String> = channels
                 .iter()
                 .map(|c| (u32::from(*c) + 1).to_string())
                 .collect();
-            format!("max and overs reset on input {}", n.join(", "))
+            format!("max, overs and loudness reset on input {}", n.join(", "))
         };
         out.push(Request::Call {
             cmd: ac2_proto::Command::LevelsReset { channels },

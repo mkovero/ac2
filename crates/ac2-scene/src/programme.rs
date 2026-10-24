@@ -1,5 +1,5 @@
 //! The Programme pane's display truth: what each input's bar reads, what the chip beside a
-//! pair's goniometer says, and where the three parts sit.
+//! pair's goniometer says, the loudness column ([`loudness`]), and where the parts sit.
 //!
 //! The wire carries every level in dBFS; the scale an input is shown on
 //! ([`Scale`]) converts for the text only, so a line input reads `+4.0 dBu` while its bar
@@ -331,6 +331,8 @@ pub struct ProgrammePane {
     pub inputs: Vec<ProgrammeInput>,
     pub pair: Option<ProgrammePair>,
     pub ballistic: Ballistic,
+    /// The loudness column; `None` shows none.
+    pub loudness: Option<loudness::LoudnessColumn>,
 }
 
 impl ProgrammePane {
@@ -345,7 +347,12 @@ impl ProgrammePane {
     }
 
     pub fn layout(&self, rect: Rect) -> ProgrammeLayout {
-        layout(rect, self.pair.is_some())
+        layout(
+            rect,
+            self.pair.is_some(),
+            self.loudness.is_some(),
+            self.inputs.len(),
+        )
     }
 }
 
@@ -356,6 +363,15 @@ pub const CHIP_W: f32 = 96.0;
 /// Below this height the goniometer has no room (it needs a square of at least ~120 px
 /// above the chip) and the pane shows bars plus the chip only.
 pub const SHORT_PANE_H: f32 = 150.0;
+/// Width of the loudness column at the pane's right edge: `since 2 Oct 20:14 · R resets` on
+/// one line.
+pub const LOUDNESS_W: f32 = 190.0;
+/// A bar's column keeps its readouts whole (`max −11.8 dBTP`) at this width.
+pub const BAR_MIN_W: f32 = 96.0;
+/// The dBFS scale left of the bars.
+pub const BAR_SCALE_W: f32 = 32.0;
+/// The narrowest goniometer worth drawing beside the loudness column.
+pub const GONIO_MIN_W: f32 = 120.0;
 
 /// Where the parts go.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -366,32 +382,58 @@ pub struct ProgrammeLayout {
     /// The correlation chip (a pair).
     pub correlation: Option<Rect>,
     pub bars: Rect,
+    /// The loudness column (the pane has one and room for it).
+    pub loudness: Option<Rect>,
 }
 
 /// Bars on the right, the goniometer with the correlation chip under it on the left, split
 /// 1:1 (the MSD main screen); bars alone without a pair; on a pane shorter than
 /// [`SHORT_PANE_H`] the chip stands [`CHIP_W`] wide on the left and the bars take the rest.
-pub fn layout(rect: Rect, has_pair: bool) -> ProgrammeLayout {
+///
+/// The loudness column, when `loudness`, takes [`LOUDNESS_W`] at the right edge only if the
+/// rest keeps the `inputs` bars their readouts ([`BAR_MIN_W`] each) and a pair its
+/// goniometer ([`GONIO_MIN_W`]) or chip: a narrow pane drops the column first. With the
+/// column the bars take what they need and the goniometer the rest, up to half.
+pub fn layout(rect: Rect, has_pair: bool, loudness: bool, inputs: usize) -> ProgrammeLayout {
+    let short = rect.h < SHORT_PANE_H;
+    let bars_min = BAR_SCALE_W + inputs.max(1) as f32 * BAR_MIN_W;
+    let beside = match (has_pair, short) {
+        (false, _) => 0.0,
+        (true, true) => CHIP_W,
+        (true, false) => GONIO_MIN_W,
+    };
+    let column = (loudness && rect.w - LOUDNESS_W >= bars_min + beside)
+        .then(|| Rect::new(rect.right() - LOUDNESS_W, rect.y, LOUDNESS_W, rect.h));
+    let rect = match column {
+        Some(c) => Rect::new(rect.x, rect.y, rect.w - c.w, rect.h),
+        None => rect,
+    };
     if !has_pair {
         return ProgrammeLayout {
             gonio: None,
             correlation: None,
             bars: rect,
+            loudness: column,
         };
     }
-    if rect.h < SHORT_PANE_H {
+    if short {
         let w = CHIP_W.min(rect.w / 2.0);
         return ProgrammeLayout {
             gonio: None,
             correlation: Some(Rect::new(rect.x, rect.y, w, rect.h)),
             bars: Rect::new(rect.x + w, rect.y, rect.w - w, rect.h),
+            loudness: column,
         };
     }
-    let half = rect.w / 2.0;
+    let gonio_w = match column {
+        Some(_) => (rect.w - bars_min).min(rect.w / 2.0),
+        None => rect.w / 2.0,
+    };
     ProgrammeLayout {
-        gonio: Some(Rect::new(rect.x, rect.y, half, rect.h - CHIP_H)),
-        correlation: Some(Rect::new(rect.x, rect.bottom() - CHIP_H, half, CHIP_H)),
-        bars: Rect::new(rect.x + half, rect.y, rect.w - half, rect.h),
+        gonio: Some(Rect::new(rect.x, rect.y, gonio_w, rect.h - CHIP_H)),
+        correlation: Some(Rect::new(rect.x, rect.bottom() - CHIP_H, gonio_w, CHIP_H)),
+        bars: Rect::new(rect.x + gonio_w, rect.y, rect.w - gonio_w, rect.h),
+        loudness: column,
     }
 }
 
@@ -427,6 +469,7 @@ pub fn inputs_text(inputs: &[u16]) -> String {
 }
 
 mod draw;
+pub mod loudness;
 pub use draw::{ProgrammeScene, programme_scene};
 
 #[cfg(test)]
