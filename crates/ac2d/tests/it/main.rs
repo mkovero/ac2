@@ -19,6 +19,7 @@ mod inputs;
 mod jack;
 mod leq;
 mod levels;
+mod loudness;
 mod math_channels;
 mod meas_display;
 mod network;

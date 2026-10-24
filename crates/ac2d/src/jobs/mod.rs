@@ -28,6 +28,7 @@ use crate::io::Interest;
 use crate::outbox::Outbox;
 
 pub(crate) mod finder;
+mod loudness;
 pub(crate) mod math;
 pub(crate) mod meters;
 #[cfg(test)]

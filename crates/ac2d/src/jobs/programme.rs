@@ -8,10 +8,12 @@
 //! detector at once instead of a meter charging from zero. What the operator chose, and
 //! what a reset asks for, reach the meters through a [`SharedPolicy`] the control thread
 //! refreshes and the meters read once per frame; the blocks themselves see only cached
-//! values, so no lock or allocation sits on the per-block path in steady state.
+//! values, so no lock or allocation sits on the per-block path in steady state. The
+//! loudness sources ([`super::loudness`]) ride along on the same blocks and resets.
 
 use std::sync::{Arc, Mutex};
 
+use super::loudness::Loudness;
 use ac2_core::ppm::{QuasiPeak, QuasiPeakSpec, TruePeak, Vu, dbtp};
 use ac2_core::protection::peak_dbfs;
 use ac2_core::stereo::{Correlator, GonioPicker, Side};
@@ -45,6 +47,9 @@ pub(crate) struct LevelsPolicy {
     /// `(seq, channels)` of each reset; empty `channels` = every input.
     resets: Vec<(u64, Vec<u16>)>,
     reset_seq: u64,
+    /// Bumped when `inputs` or `pairs` change: the loudness sources follow both, and a
+    /// count is cheaper to compare every frame than the declaration itself.
+    declared: u64,
 }
 
 impl LevelsPolicy {
@@ -54,6 +59,18 @@ impl LevelsPolicy {
         self.resets.push((self.reset_seq, channels));
         if self.resets.len() > RESET_LOG {
             self.resets.remove(0);
+        }
+    }
+
+    /// Takes the session's declaration; unchanged rows leave the loudness sources alone.
+    pub(crate) fn declare(&mut self, inputs: &[InputSetup], pairs: &[Pair]) {
+        if self.inputs != inputs {
+            self.inputs = inputs.to_vec();
+            self.declared += 1;
+        }
+        if self.pairs != pairs {
+            self.pairs = pairs.to_vec();
+            self.declared += 1;
         }
     }
 }
@@ -91,7 +108,8 @@ impl Input {
         }
     }
 
-    fn push(&mut self, x: &[f32], over: f32, release: f32) {
+    /// Meters a block; returns its true peak (linear).
+    fn push(&mut self, x: &[f32], over: f32, release: f32) -> f32 {
         let tp = self.true_peak.process(x);
         let readings = [
             tp,
@@ -111,6 +129,7 @@ impl Input {
         } else if tp < release {
             self.armed = true;
         }
+        tp
     }
 
     /// Clears the holds and the count. A tone still above the threshold at the reset is the
@@ -124,6 +143,7 @@ impl Input {
 struct PairState {
     left: u16,
     right: u16,
+    /// Metered positions of the two sides.
     li: usize,
     ri: usize,
     corr: Correlator,
@@ -143,6 +163,17 @@ pub(crate) struct Captured {
     pub(crate) sample_rate: u32,
 }
 
+/// Whose declaration of kinds and pairs a [`Programme`] meters by.
+pub(crate) enum Declared {
+    /// The session's, followed through the policy.
+    Session,
+    /// A preview's own, fixed for its life.
+    Fixed {
+        inputs: Vec<InputSetup>,
+        pairs: Vec<Pair>,
+    },
+}
+
 /// Programme meters of the block channels `idx` carrying device inputs `channels`.
 pub(crate) struct Programme {
     idx: Vec<usize>,
@@ -159,28 +190,33 @@ pub(crate) struct Programme {
     over: f32,
     release: f32,
     resets_seen: u64,
-    scratch: Vec<f32>,
-    /// The pair's right channel while `scratch` holds the left.
-    scratch_r: Vec<f32>,
+    declared_seen: u64,
+    /// Each metered input's samples of the block being metered.
+    chans: Vec<Vec<f32>>,
+    /// Each metered input's true peak of that block (linear).
+    block_tp: Vec<f32>,
+    /// One past the last sample metered: a block not starting there follows a gap.
+    end: Option<u64>,
+    loudness: Loudness,
     seed: u64,
 }
 
 impl Programme {
-    /// Meters of the inputs `c` captures; `pairs` as declared when `follow_pairs` is off,
-    /// else refreshed from the policy at every frame. `seed` decorrelates the goniometers'
-    /// sampling positions.
-    pub(crate) fn new(
-        c: Captured,
-        pairs: &[Pair],
-        follow_pairs: bool,
-        policy: SharedPolicy,
-        seed: u64,
-    ) -> Self {
-        let (settings, resets_seen, policy_pairs) = {
+    /// Meters of the inputs `c` captures, by `declared` kinds and pairs (the session's are
+    /// refreshed from the policy at every frame). `seed` decorrelates the goniometers'
+    /// sampling positions. Every loudness source starts afresh.
+    pub(crate) fn new(c: Captured, declared: Declared, policy: SharedPolicy, seed: u64) -> Self {
+        let follow_pairs = matches!(declared, Declared::Session);
+        let (settings, resets_seen, declared_seen, (inputs, pairs)) = {
             let p = policy.lock().unwrap_or_else(|e| e.into_inner());
-            (p.settings, p.reset_seq, p.pairs.clone())
+            let decl = match declared {
+                Declared::Session => (p.inputs.clone(), p.pairs.clone()),
+                Declared::Fixed { inputs, pairs } => (inputs, pairs),
+            };
+            (p.settings, p.reset_seq, p.declared, decl)
         };
         let fs = f64::from(c.sample_rate);
+        let n = c.channels.len();
         let mut me = Self {
             inputs: c.channels.iter().map(|_| Input::new(fs)).collect(),
             idx: c.idx,
@@ -194,13 +230,17 @@ impl Programme {
             over: 0.0,
             release: 0.0,
             resets_seen,
-            scratch: Vec::new(),
-            scratch_r: Vec::new(),
+            declared_seen,
+            chans: vec![Vec::new(); n],
+            block_tp: vec![0.0; n],
+            end: None,
+            loudness: Loudness::new(fs),
             seed,
         };
         me.set_thresholds();
-        let declared = if follow_pairs { &policy_pairs } else { pairs };
-        me.set_pairs(declared);
+        me.set_pairs(&pairs);
+        me.loudness
+            .declare(&inputs, &pairs, &me.channels, crate::util::wall_ns());
         me
     }
 
@@ -228,8 +268,8 @@ impl Programme {
             self.pairs.push(PairState {
                 left: p.left,
                 right: p.right,
-                li: self.idx[li],
-                ri: self.idx[ri],
+                li,
+                ri,
                 corr: Correlator::new(self.sample_rate, window),
                 gonio: GonioPicker::new(self.sample_rate, self.seed),
                 l: Vec::with_capacity(cap),
@@ -254,27 +294,37 @@ impl Programme {
     }
 
     pub(crate) fn push(&mut self, b: &Block) {
+        // A gap, or a block the host flags as not following the last one: the K-weighting
+        // state and the loudness windows must not run across it.
+        if self
+            .end
+            .is_some_and(|e| e != b.start_sample || b.flags.breaks_continuity())
+        {
+            self.loudness.discontinuity();
+        }
+        self.end = Some(b.end_sample());
         let (over, release) = (self.over, self.release);
         for (m, &ch) in self.idx.iter().enumerate() {
-            b.channel_into(ch, &mut self.scratch);
-            self.inputs[m].push(&self.scratch, over, release);
+            b.channel_into(ch, &mut self.chans[m]);
+            self.block_tp[m] = self.inputs[m].push(&self.chans[m], over, release);
         }
         for p in &mut self.pairs {
-            b.channel_into(p.li, &mut self.scratch);
-            b.channel_into(p.ri, &mut self.scratch_r);
+            let (l, r) = (&self.chans[p.li], &self.chans[p.ri]);
             // The correlator sees every sample; only the picker's interval buffer is bounded.
-            p.corr.process(&self.scratch, &self.scratch_r);
+            p.corr.process(l, r);
             let room = p.l.capacity() - p.l.len();
-            let take = self.scratch.len().min(room);
-            p.l.extend_from_slice(&self.scratch[..take]);
-            p.r.extend_from_slice(&self.scratch_r[..take]);
+            let take = l.len().min(room);
+            p.l.extend_from_slice(&l[..take]);
+            p.r.extend_from_slice(&r[..take]);
         }
+        self.loudness.push(&self.chans, &self.block_tp);
     }
 
     /// Reads the policy: settings, VU offers, the session's pairs and the resets since the
     /// last frame.
     fn sync(&mut self) {
         let mut pairs_changed = false;
+        let mut redeclare = None;
         {
             let p = self.policy.lock().unwrap_or_else(|e| e.into_inner());
             let window_changed = p.settings.correlation_window != self.settings.correlation_window;
@@ -298,11 +348,20 @@ impl Programme {
                         self.inputs[i].reset();
                     }
                 }
+                self.loudness.reset(channels, crate::util::wall_ns());
             }
             self.resets_seen = p.reset_seq;
             if self.follow_pairs && !self.pairs_match(&p.pairs) {
                 pairs_changed = true;
             }
+            if self.follow_pairs && p.declared != self.declared_seen {
+                self.declared_seen = p.declared;
+                redeclare = Some((p.inputs.clone(), p.pairs.clone()));
+            }
+        }
+        if let Some((inputs, pairs)) = redeclare {
+            self.loudness
+                .declare(&inputs, &pairs, &self.channels, crate::util::wall_ns());
         }
         self.set_thresholds();
         if pairs_changed {
@@ -373,11 +432,10 @@ impl Programme {
         out
     }
 
-    /// The loudness of every source this interval (docs/design/programme-meter.md §6.1):
-    /// pairs first in `pair_levels` order, then unpaired line and digital inputs ascending
-    /// by channel. The BS.1770 meters are not wired in yet, so there are no sources.
+    /// The loudness of every source (docs/design/programme-meter.md §6.1): pairs first in
+    /// `pair_levels` order, then unpaired line and digital inputs ascending by channel.
     fn loudness(&mut self) -> Vec<SourceLoudness> {
-        Vec::new()
+        self.loudness.readings()
     }
 }
 
@@ -443,8 +501,7 @@ mod tests {
                 device: DeviceId("fake".into()),
                 sample_rate: 48_000,
             },
-            &pairs,
-            true,
+            Declared::Session,
             Arc::clone(&p),
             7,
         );
@@ -499,6 +556,75 @@ mod tests {
         m.push(&block(start, 512, 0.1, true));
         let r = m.take(false);
         assert_eq!(r.overs, [1, 2]);
+    }
+
+    fn line(channel: u16) -> InputSetup {
+        InputSetup {
+            channel,
+            kind: ac2_proto::model::InputKind::Line,
+            pair: None,
+        }
+    }
+
+    /// A source that stays in the set keeps its meter across a change of the declaration;
+    /// one that changed starts afresh; a mic has none.
+    #[test]
+    fn a_redeclaration_keeps_the_sources_that_did_not_change() {
+        use ac2_proto::frame::LoudnessSource::{Input as In, Pair as P};
+        let (mut m, p) = programme(LevelsSettings::default());
+        let source = |r: &Readings| r.loudness.iter().map(|l| l.source).collect::<Vec<_>>();
+        // Undeclared inputs are mics: no loudness.
+        assert!(m.take(false).loudness.is_empty());
+        p.lock().expect("policy").declare(&[line(0), line(1)], &[]);
+        let mut start = 0;
+        let run = |m: &mut Programme, start: &mut u64, blocks: u32| {
+            for _ in 0..blocks {
+                m.push(&block(*start, 480, 0.1, true));
+                *start += 480;
+            }
+        };
+        let r = m.take(false);
+        assert_eq!(r.loudness.len(), 2, "declared, no block metered yet");
+        assert_eq!(r.loudness[0].duration.0, 0.0);
+        assert_eq!(r.loudness[0].max_true_peak.0, f64::NEG_INFINITY);
+        run(&mut m, &mut start, 100);
+        let r = m.take(false);
+        assert_eq!(source(&r), [In { channel: 0 }, In { channel: 1 }]);
+        assert!(
+            (r.loudness[0].duration.0 - 1.0).abs() < 1e-9,
+            "{:?}",
+            r.loudness[0]
+        );
+        // Input 1 becomes a mic: input 0 keeps its second, input 1 has no source.
+        let mut mic = line(1);
+        mic.kind = ac2_proto::cal::default_kind();
+        p.lock().expect("policy").declare(&[line(0), mic], &[]);
+        run(&mut m, &mut start, 50);
+        let r = m.take(false);
+        assert_eq!(source(&r), [In { channel: 0 }]);
+        assert!((r.loudness[0].duration.0 - 1.5).abs() < 1e-9);
+        // Paired: a new source, input 0's own is dropped.
+        let pair = Pair {
+            left: 0,
+            right: 1,
+            name: None,
+        };
+        p.lock()
+            .expect("policy")
+            .declare(&[line(0), line(1)], &[pair]);
+        assert_eq!(source(&m.take(false)), [P { left: 0, right: 1 }]);
+        run(&mut m, &mut start, 50);
+        let r = m.take(false);
+        assert!((r.loudness[0].duration.0 - 0.5).abs() < 1e-9);
+        // A gap in the sample index restarts the windows; integrated carries on.
+        start += 48_000;
+        run(&mut m, &mut start, 10);
+        let r = m.take(false);
+        let l = &r.loudness[0];
+        assert_eq!(l.momentary.0, f64::NEG_INFINITY, "{l:?}");
+        assert!(l.integrated.is_some(), "{l:?}");
+        assert!((l.duration.0 - 0.6).abs() < 1e-9);
+        assert!((l.max_true_peak.0 + 20.0).abs() < 0.2, "{l:?}");
     }
 
     /// A silent right side reads quiet, never a correlation.

@@ -29,7 +29,7 @@ use ac2_proto::units::Rev;
 use crate::burst::BurstDetector;
 use crate::fanout::pop_block;
 use crate::jobs::meters::{meter_period, meter_stamp};
-use crate::jobs::programme::{Captured, Programme, SharedPolicy};
+use crate::jobs::programme::{Captured, Declared, Programme, SharedPolicy};
 use crate::jobs::{Emitter, JobEnv, LevelsMeter, Meters};
 use crate::session::audio_err;
 use crate::util::perr;
@@ -160,8 +160,10 @@ impl Preview {
                 device: device.clone(),
                 sample_rate,
             },
-            &meta.pairs,
-            false,
+            Declared::Fixed {
+                inputs: rows,
+                pairs: meta.pairs.clone(),
+            },
             policy,
             crate::util::wall_ns(),
         );

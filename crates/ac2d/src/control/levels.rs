@@ -71,14 +71,9 @@ impl Control {
         let st = self.store.state();
         let mut p = self.levels.lock().unwrap_or_else(|e| e.into_inner());
         p.settings = st.rig.levels;
-        if p.inputs != st.inputs {
-            p.inputs = st.inputs.clone();
-        }
+        p.declare(&st.inputs, &st.pairs);
         if p.line_calibrations != st.line_calibrations {
             p.line_calibrations = st.line_calibrations.clone();
-        }
-        if p.pairs != st.pairs {
-            p.pairs = st.pairs.clone();
         }
     }
 }

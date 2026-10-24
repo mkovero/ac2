@@ -12,7 +12,7 @@ use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 
 use crate::calstore::{self, InputCal};
 use crate::conv;
-use crate::jobs::programme::{Captured, Programme};
+use crate::jobs::programme::{Captured, Declared, Programme};
 use crate::jobs::{self, Analysis, JobCmd, JobEnv, block_index};
 use crate::session::Runtime;
 use crate::util::{perr, wall_ns};
@@ -265,8 +265,7 @@ impl Control {
                 device: rt.open.input_device.clone(),
                 sample_rate: rt.sample_rate,
             },
-            &[],
-            true,
+            Declared::Session,
             Arc::clone(&self.levels),
             wall_ns() ^ u64::from(rt.epoch.0),
         );
