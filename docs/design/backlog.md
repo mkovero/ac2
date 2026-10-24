@@ -13,11 +13,10 @@ to `backlog-done.md` as one line with the commit.
 
 ## Programme metering (design `programme-meter.md`)
 
-- **Not started.** Stages: (1) `InputKind` (keys M / L / A) + pairs + `cal.line` + preview
-  kinds/pairs (PROTO + session bump), (2) PPM ballistics against the IEC 60268-10 burst table,
-  true peak, overs, per-side gated correlation, ember goniometer, Programme pane, rig-level
-  `levels.set`, (3) loudness. Open before stage 2: the burst-table constants from the IEC
-  text.
+- **Stage 1 landed (7823115d).** Stage 2 in progress: PPM ballistics against the IEC
+  60268-10 burst table (rows and ac2's acceptance in the note §3; the standard's own
+  tolerances still unread), true peak, overs, per-side gated correlation, ember goniometer,
+  Programme pane, rig-level `levels.set`. Stage 3 loudness after.
 
 ## Band Leq (design `band-leq.md`)
 

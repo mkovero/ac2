@@ -151,11 +151,35 @@ the reading each must give, with a tolerance per row**, not by one integration t
 `tools/refgen` vectors are that table plus a step down, and the acceptance is the standard's
 per-row tolerance. A single attack time constant fitted to one row may miss the shortest
 bursts by a few dB; if it does, the attack takes a second time constant rather than the
-table losing rows. The table itself is not in hand (paid text) and is not reproduced here:
-the constants quoted in the enum are the MSD spec sheet's, and the vectors are frozen only
-after the standard has been read. VU: a first-order mean of |x| with the stated settling,
-symmetric. True peak: the BS.1770
-polyphase interpolator (48 taps at 4×; 2× at 96 kHz), max |x| per block, in dBTP.
+table losing rows. The table as published secondary (the standard's own text is paid; the
+BBC's PPM conformance files and the standards summaries agree on these rows, 5 kHz bursts,
+reading below the steady tone):
+
+| burst | Type I | Type II |
+|---|---|---|
+| 100 ms | 0 dB | 0 dB |
+| 10 ms | −1 dB | −2 dB |
+| 5 ms | −2 dB | −4 dB |
+| 3 ms | −4 dB | — |
+| 1.5 ms | — | −9 dB |
+| 0.5 ms | — | −17 dB |
+| 0.4 ms | −15 dB | — |
+
+Return: Type I 20 dB in 1.7 s, Type II 24 dB in 2.8 s, linear in dB. Acceptance in ac2 (the
+standard's own tolerances are not in hand): ±1 dB on the 100, 10 and 5 ms rows, ±2 dB on the
+shorter ones, and the return within ±0.3 s. A single first-order attack cannot hold both ends
+of a column (fitted to 10 ms it over-reads the 0.4 ms burst by 3 dB), so the attack is two
+first-order charges in parallel, a fast one carrying most of the reading and a slow one the
+rest (`reading = a·(1−e^(−T/τ₁)) + (1−a)·(1−e^(−T/τ₂))`); `tools/refgen` fits `a, τ₁, τ₂`
+per type to the table by least squares, the constants are frozen in both the generator and
+`ac2_core::ppm`, and the Rust is tested against the generator's burst vectors (parity) and
+against the table (acceptance) separately. The detector input is the full-wave rectified
+sample; on a steady sine the reading is the sine's peak (the release is far slower than a
+period), so the wire carries dBFS of the peak as `true_peak` does. VU: a first-order mean of |x| with the stated settling,
+symmetric. True peak: the BS.1770-5
+Annex 2 interpolator (the 48-tap, 4-phase FIR the annex prints), max |x| per block, in dBTP;
+4× at every sample rate (at 96 kHz that is more than the annex asks and costs eight
+channels about two percent of a Pi core, which buys one code path and one set of vectors).
 
 Per input the frame carries (dBFS; the front end converts to dBu / dB SPL from the kind and
 its calibration, so one wire quantity serves every scale):
@@ -225,10 +249,11 @@ along a blackbody ramp — white-yellow → orange → deep red → ash-grey →
 exponential decay (τ ≈ 0.4 s of display time; the one app-side Settings value of this note,
 0.1 … 2 s, where 2 s gives a phosphor feel). Brightness at landing follows the sample's
 instantaneous level within the auto-gain window, so loud transients land white and quiet
-detail lands dull red; points that pile up add (additive blending into a persistence texture
-that fades each frame), so a dense mono core glows while a wide, sparse halo smoulders. No
-glow sprites or bloom passes: one point, one texel, additive, the fade does the rest — cheap
-on an integrated GPU and on the Pi. The truth is in `ac2-scene` (position, age, landing
+detail lands dull red; points that pile up add (additive blending), so a dense mono core glows while a wide, sparse halo smoulders. No
+persistence texture, glow sprites or bloom passes: the scene's ring already holds every
+live point with its age, so each frame draws the ring once as small additive points whose
+colour and brightness come from the age — a few thousand points at most, cheap on an
+integrated GPU and on the Pi, and a golden image is reproducible from a ring alone. The truth is in `ac2-scene` (position, age, landing
 intensity per point); the colour ramp, the fade and the blending are `ac2-plot`'s, like
 every other style. Grid: a faint square and the two diagonals, hidden by **T** like all plot
 chrome.
