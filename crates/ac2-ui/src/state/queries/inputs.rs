@@ -283,15 +283,7 @@ impl AppState {
         let Some(o) = self.open_session() else {
             return Vec::new();
         };
-        let device_names = self
-            .devices
-            .iter()
-            .flatten()
-            .filter(|b| b.kind == o.backend)
-            .flat_map(|b| &b.devices)
-            .find(|d| d.id == o.input_device)
-            .and_then(|d| d.input.as_ref())
-            .and_then(|i| i.channel_names.clone());
+        let device_names = self.input_channel_names();
         o.config
             .input_channels
             .iter()
@@ -306,5 +298,32 @@ impl AppState {
                 )
             })
             .collect()
+    }
+
+    /// The open input device's channel names, as the backend reports them.
+    fn input_channel_names(&self) -> Option<Vec<String>> {
+        let o = self.open_session()?;
+        self.devices
+            .iter()
+            .flatten()
+            .filter(|b| b.kind == o.backend)
+            .flat_map(|b| &b.devices)
+            .find(|d| d.id == o.input_device)
+            .and_then(|d| d.input.as_ref())
+            .and_then(|i| i.channel_names.clone())
+    }
+
+    /// The name of input `c` of the open device, captured or not: its mic, else the
+    /// device's channel name; `None` when it has neither.
+    pub fn input_own_name(&self, c: u16) -> Option<String> {
+        let mic = self.input_setup(c).mic().map(str::to_owned);
+        let dev = self
+            .input_channel_names()
+            .and_then(|n| n.get(usize::from(c)).cloned());
+        [mic, dev]
+            .into_iter()
+            .flatten()
+            .map(|s| s.trim().to_owned())
+            .find(|s| !s.is_empty())
     }
 }

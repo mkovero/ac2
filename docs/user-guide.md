@@ -275,9 +275,9 @@ beside the name, *correlation +0.87*, red when negative, *right quiet* when a si
 the gate (see [Programme pane](#programme-pane)). The line appears once the daemon's first
 levels frame arrives.
 
-A click picks a row (outlined); then **R** clears its max and overs (a pair: both sides),
-**Shift+R** those of every input, **P** meters it big in a new [Programme
-pane](#programme-pane). Tab, a click on a pane or on a list row leaves the pick.
+A click picks a row (outlined); then **R** clears its max, overs and loudness (a pair: both
+sides, and the pair's loudness), **Shift+R** those of every input, **P** meters it big in a
+new [Programme pane](#programme-pane). Tab, a click on a pane or on a list row leaves the pick.
 
 ### Programme pane
 
@@ -307,7 +307,8 @@ unit, overs and CLIP.
   type-approved meter: for a broadcast delivery that must be measured on one, use it.
 - **Overs**: a frame whose true peak passes the rig's threshold (*An over is above*, 0 dBTP
   by default; −1 dBTP is the R128 practice) counts one, and the next only after the level fell
-  1 dB below it — a sustained over is one, not hundreds. **R** clears the max and overs.
+  1 dB below it — a sustained over is one, not hundreds. **R** clears the max, overs and
+  loudness.
 - **Correlation** (a pair): −1 … +1 over the rig's window (0.3 s or 1 s, *Correlation
   window*), under the goniometer. Negative turns red: a sub or a mono fill fed the sum will
   cancel. When a side is under the rig's gate (−60 dBFS RMS by default, *Correlation gate*)
@@ -318,9 +319,27 @@ unit, overs and CLIP.
   red to grey: **Settings › Display › Ember decay** sets how long (0.1 … 2 s, 0.4 s by
   default; ←/→ step 0.1 s). The picture is auto-gained by the daemon; its frame says nothing
   about level — read the bars for that.
+- **Loudness** (ITU-R BS.1770 / EBU R128, by EBU Tech 3341 and 3342): a column at the
+  pane's right edge, headed by what it measures — the pair's name, or an input's name with
+  *mono* (BS.1770 weighs one channel 1, so a mono signal on one input reads 3 LU below the
+  same signal on both inputs of a pair). *Mom* is the momentary loudness (400 ms), *Short*
+  the short-term (3 s), *Int … LUFS* the integrated loudness since the last reset, *LRA … LU*
+  the loudness range (*settling* for its first minute), *TP max … dBTP* the highest true
+  peak; then *since 20:14 · R resets*. Integrated and LRA read *— (waiting for programme)*
+  until enough programme passed their gates; Mom and Short read — on silence. A pane of a
+  pair, of one input, or of one side of a pair (it shows the pair's loudness) has a column;
+  otherwise it says why: *loudness needs a rate of 44.1 to 192 kHz, a multiple of 100 Hz*,
+  *no loudness on a mic input* (a LUFS figure on a mic would follow its preamp gain),
+  *loudness: Main R (input 4) not captured* (a pair's partner the session does not
+  capture), *loudness: one input or a pair*. **R** resets the integrated loudness, LRA and
+  TP max with the max and overs; a pair restarts when either side's row is reset. A narrow
+  pane drops the column before the goniometer. The readouts are absolute (LUFS, LU): ac2 is
+  not an EBU Mode meter — there is no relative scale (LU re −23 LUFS), no loudness bar and
+  no pause. `ac2 levels` prints the same figures, max Mom and max Short too.
 
-**T** hides the grid and scale as on every pane (twice: the labels too), **W** makes it the
-stage view, **R** / **Shift+R** reset as on the Inputs list. The daemon meters every input
+**T** hides the grid and scale as on every pane (twice: the labels and the loudness
+column's since line too), **W** makes it the stage view, **R** / **Shift+R** reset as on the
+Inputs list. The daemon meters every input
 whether a pane shows it or not; the pane draws only while it is on screen.
 
 ## Reference wiring and loopback
@@ -3180,15 +3199,15 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `R` | Reset overs and max | `levels_reset` |
-| `Shift+R` | Reset every overs and max | `levels_reset_all` |
+| `R` | Reset overs, max, loudness | `levels_reset` |
+| `Shift+R` | Reset every input | `levels_reset_all` |
 
 #### Inputs list row
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `R` | Reset overs and max | `levels_reset` |
-| `Shift+R` | Reset every overs and max | `levels_reset_all` |
+| `R` | Reset overs, max, loudness | `levels_reset` |
+| `Shift+R` | Reset every input | `levels_reset_all` |
 | `P` | Open a Programme pane | `programme_pane` |
 
 #### Command palette only (`Ctrl+K`)
@@ -3286,8 +3305,8 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit level · `Tab` next row · `Q` close pane · `W` maximise · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
-| Programme | `R` reset max · `Shift+R` reset all · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
-| Inputs list row | `R` reset max · `Shift+R` reset all · `P` programme pane · `Tab` measurements · `H` all keys |
+| Programme | `R` reset · `Shift+R` reset all · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
+| Inputs list row | `R` reset · `Shift+R` reset all · `P` programme pane · `Tab` measurements · `H` all keys |
 
 <!-- keymap:end -->
 

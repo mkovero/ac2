@@ -607,8 +607,8 @@ fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) -> Option<Msg> {
             .map_or_else(|| "—".into(), |k| k.label())
     };
     let tip = format!(
-        "Click picks a row · {} resets its max and overs · {} meters it in a new Programme \
-         pane",
+        "Click picks a row · {} resets its max, overs and loudness · {} meters it in a new \
+         Programme pane",
         key(CommandId::LevelsReset),
         key(CommandId::ProgrammePane)
     );

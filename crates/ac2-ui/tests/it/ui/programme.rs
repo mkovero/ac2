@@ -2,14 +2,22 @@
 //! own meters (`Shared::meters`).
 
 use super::*;
+use ac2_scene::programme::loudness::{LoudnessColumn, LoudnessReadout};
 
-/// Inputs 3 + 4 as the pair `Main`, its right side silent, the fake's meters on.
+/// Inputs 3 + 4 as the line pair `Main`, its right side silent, the fake's meters on.
 fn pair_rig() -> common::Rig {
-    use ac2_proto::model::{InputSetups, Pair};
+    use ac2_proto::model::{InputKind, InputSetup, InputSetups, Pair};
     let rig = common::Rig::start();
     {
         let mut s = rig.fake.lock();
-        let inputs = s.state.inputs.clone();
+        let mut inputs = s.state.inputs.clone();
+        inputs.retain(|i| i.channel != 2 && i.channel != 3);
+        inputs.extend([2, 3].map(|channel| InputSetup {
+            channel,
+            kind: InputKind::Line,
+            pair: None,
+        }));
+        inputs.sort_by_key(|i| i.channel);
         s.commit(ac2_proto::Change::Inputs(InputSetups {
             inputs,
             pairs: vec![Pair {
@@ -42,6 +50,26 @@ fn programme_texts(h: &Harness<'_, App>) -> Vec<String> {
         .iter()
         .flat_map(|l| l.labels.iter().map(|l| l.text.clone()))
         .collect()
+}
+
+/// A reset at 19:02 UTC on a day that is never the test's: the since line reads the same on
+/// every run.
+const SHOW_RESET: ac2_proto::units::WallNs = ac2_proto::units::WallNs(1_767_294_120_000_000_000);
+
+/// The readout of Programme pane `pane`'s loudness column, if it shows one.
+fn loudness(a: &App, pane: ac2_ui::state::PaneId) -> Option<LoudnessReadout> {
+    match a.state.programme_pane(pane)?.0.loudness? {
+        LoudnessColumn::Readout(r) => Some(r),
+        LoudnessColumn::Message(_) => None,
+    }
+}
+
+/// What Programme pane `pane`'s loudness column says instead of a readout.
+fn loudness_message(a: &App, pane: ac2_ui::state::PaneId) -> Option<String> {
+    match a.state.programme_pane(pane)?.0.loudness? {
+        LoudnessColumn::Message(m) => Some(m),
+        LoudnessColumn::Readout(_) => None,
+    }
 }
 
 /// A click picks the pair's Inputs row, P meters it in a new Programme pane: the title says
@@ -99,6 +127,35 @@ fn programme_pane_of_a_pair() {
             common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
         );
     }
+    // The pair's loudness: a −12 dBFS-peak tone on one side of two reads −18 LUFS (the
+    // fake's BS.1770 figure); the range settles for a minute. The since line is pinned to a
+    // fixed reset so the picture does not follow the wall clock.
+    for st in rig.fake.lock().loudness_starts.values_mut() {
+        st.since = SHOW_RESET;
+    }
+    step_until(&mut h, "the pair's short-term loudness", |a| {
+        loudness(a, pane).is_some_and(|l| {
+            l.short_term_text() == "Short −18.0" && l.since == "since 1 Jan 19:02 · R resets"
+        })
+    });
+    let l = loudness(h.state(), pane).expect("the pair's loudness");
+    assert_eq!(l.title, "Main");
+    let texts = programme_texts(&h);
+    for want in [
+        "Main",
+        "Mom −18.0",
+        "Short −18.0",
+        "Int −18.0 LUFS",
+        "LRA 0.0 LU (settling)",
+        "TP max −11.8 dBTP",
+        "since 1 Jan 19:02 · R resets",
+    ] {
+        assert!(
+            texts.iter().any(|t| t == want),
+            "{want}: {}",
+            common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
+        );
+    }
     h.state_mut().state.toasts.list.clear();
     // The embers' brightness follows the wall clock between frames: the picture shows the
     // pane between two goniometer frames, the field empty (ac2-plot tests the embers).
@@ -125,6 +182,16 @@ fn programme_pane_of_a_pair() {
     assert_eq!(
         view.meters,
         Some(ac2_ui::state::Metered::Pair { left: 2, right: 3 })
+    );
+
+    // W gives the pane the window: room for the loudness column beside the bars, which a
+    // pane a quarter of the window wide drops to keep the bars' readouts whole.
+    h.key_press(Key::W);
+    snapshot_when(
+        &mut h,
+        "programme_pair_loudness",
+        |a| a.state.programme.rings.clear(),
+        |a| !a.state.programme.glowing(),
     );
 }
 
@@ -158,6 +225,58 @@ fn r_resets_the_picked_inputs_max() {
             .toasts
             .list
             .iter()
-            .any(|t| t.text == "max and overs reset on input 2"),
+            .any(|t| t.text == "max, overs and loudness reset on input 2"),
     );
+}
+
+/// A mic input's pane has no loudness and says why; a pane of several inputs asks for one
+/// input or a pair; R's toast names what it resets.
+#[test]
+fn loudness_says_why_a_pane_has_none() {
+    if !have_gpu("loudness_says_why_a_pane_has_none") {
+        return;
+    }
+    let rig = pair_rig();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "input 2's levels", |a| {
+        a.state.row_meters(1).is_some_and(|m| {
+            a.state
+                .programme_of(m)
+                .inputs
+                .iter()
+                .all(|i| i.max.is_some())
+        })
+    });
+    h.state_mut().dispatch(ac2_ui::state::Msg::InputPick(1));
+    h.key_press(Key::P);
+    step_until(&mut h, "a Programme pane", |a| {
+        common::visible(&a.state).contains(&PaneKind::Programme)
+    });
+    let pane = common::pane(&h.state().state, PaneKind::Programme);
+    step_until(&mut h, "the mic message", |a| {
+        loudness_message(a, pane).as_deref() == Some("no loudness on a mic input")
+    });
+    assert!(
+        programme_texts(&h)
+            .iter()
+            .any(|t| t == "no loudness on a mic input")
+    );
+    let several = ac2_ui::state::Metered::inputs_of(&[0, 2, 3]).expect("three inputs");
+    if let Some(v) = h.state_mut().state.layout.view_mut(pane) {
+        v.meters = Some(several);
+    }
+    h.state_mut().state_edited();
+    step_until(&mut h, "the several-inputs message", |a| {
+        loudness_message(a, pane).as_deref() == Some("loudness: one input or a pair")
+    });
+    // R on the focused pane, not on a picked row.
+    h.state_mut().state.input_pick = None;
+    h.key_press(Key::R);
+    step_until(&mut h, "the reset toast", |a| {
+        a.state
+            .toasts
+            .list
+            .iter()
+            .any(|t| t.text == "max, overs and loudness reset on input 1, 3, 4")
+    });
 }

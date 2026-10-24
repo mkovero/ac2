@@ -337,7 +337,7 @@ commands! {
     SweepIr => "sweep_ir", "Sweep IR view", [Distortion];
     ReferenceHarmonics => "reference_harmonics", "Reference harmonics", [Distortion];
 
-    LevelsReset => "levels_reset", "Reset overs and max", [Programme, Inputs];
-    LevelsResetAll => "levels_reset_all", "Reset every overs and max", [Programme, Inputs];
+    LevelsReset => "levels_reset", "Reset overs, max, loudness", [Programme, Inputs];
+    LevelsResetAll => "levels_reset_all", "Reset every input", [Programme, Inputs];
     ProgrammePane => "programme_pane", "Open a Programme pane", [Inputs];
 }

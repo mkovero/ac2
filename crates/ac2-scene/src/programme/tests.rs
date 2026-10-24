@@ -169,6 +169,7 @@ fn window_and_title() {
             window_s: 0.3,
         }),
         ballistic: Ballistic::Type2,
+        loudness: None,
     };
     assert_eq!(pane.title(), "Type II · Main L + Main R · 0.3 s");
     let solo = ProgrammePane {
@@ -213,12 +214,12 @@ fn flying_peak_holds_a_second_then_falls_20_db_a_second() {
 #[test]
 fn layout_cases() {
     let rect = Rect::new(10.0, 20.0, 400.0, 300.0);
-    let bars_only = layout(rect, false);
+    let bars_only = layout(rect, false, false, 2);
     assert_eq!(bars_only.gonio, None);
     assert_eq!(bars_only.correlation, None);
     assert_eq!(bars_only.bars, rect);
 
-    let full = layout(rect, true);
+    let full = layout(rect, true, false, 2);
     assert_eq!(
         full.gonio,
         Some(Rect::new(10.0, 20.0, 200.0, 300.0 - CHIP_H))
@@ -229,12 +230,12 @@ fn layout_cases() {
     );
     assert_eq!(full.bars, Rect::new(210.0, 20.0, 200.0, 300.0));
 
-    let short = layout(Rect::new(0.0, 0.0, 400.0, 100.0), true);
+    let short = layout(Rect::new(0.0, 0.0, 400.0, 100.0), true, false, 2);
     assert_eq!(short.gonio, None);
     assert_eq!(short.correlation, Some(Rect::new(0.0, 0.0, CHIP_W, 100.0)));
     assert_eq!(short.bars, Rect::new(CHIP_W, 0.0, 400.0 - CHIP_W, 100.0));
 
-    let narrow = layout(Rect::new(0.0, 0.0, 100.0, 100.0), true);
+    let narrow = layout(Rect::new(0.0, 0.0, 100.0, 100.0), true, false, 2);
     assert_eq!(
         narrow.correlation.expect("a chip").w,
         50.0,
@@ -244,6 +245,7 @@ fn layout_cases() {
         inputs: vec![],
         pair: None,
         ballistic: Ballistic::TruePeak,
+        loudness: None,
     };
     assert_eq!(pane.layout(rect), bars_only);
 }
@@ -261,6 +263,7 @@ fn pane_with_pair(correlation: Correlation) -> ProgrammePane {
             window_s: 1.0,
         }),
         ballistic: Ballistic::TruePeak,
+        loudness: None,
     }
 }
 
@@ -340,4 +343,112 @@ fn scene_draws_bars_readouts_chip_and_field() {
     );
     assert_eq!(texts(&gone.scene), vec!["inputs 3+4 not in this session"]);
     assert!(gone.gonio.is_none());
+}
+
+#[test]
+fn the_loudness_column_goes_before_the_goniometer() {
+    // Two bars need 32 + 2 · 96 = 224 px, the goniometer 120, the column 190: 534 px.
+    let wide = layout(Rect::new(0.0, 0.0, 600.0, 300.0), true, true, 2);
+    assert_eq!(
+        wide.loudness,
+        Some(Rect::new(600.0 - LOUDNESS_W, 0.0, LOUDNESS_W, 300.0))
+    );
+    let g = wide.gonio.expect("a goniometer");
+    assert_eq!(
+        g.w,
+        600.0 - LOUDNESS_W - 224.0,
+        "the bars keep their readouts"
+    );
+    assert_eq!(wide.bars.w, 224.0);
+    assert_eq!(wide.bars.right(), 600.0 - LOUDNESS_W);
+    // A wide pane splits the rest 1:1 as without the column.
+    let wider = layout(Rect::new(0.0, 0.0, 1000.0, 300.0), true, true, 2);
+    assert_eq!(
+        wider.gonio.expect("a goniometer").w,
+        (1000.0 - LOUDNESS_W) / 2.0
+    );
+    let narrow = layout(Rect::new(0.0, 0.0, 520.0, 300.0), true, true, 2);
+    assert_eq!(narrow.loudness, None, "the column goes first");
+    assert!(narrow.gonio.is_some(), "the goniometer stays");
+    assert_eq!(
+        narrow,
+        layout(Rect::new(0.0, 0.0, 520.0, 300.0), true, false, 2)
+    );
+    // Bars alone: one bar needs 128 px beside the column.
+    assert!(
+        layout(Rect::new(0.0, 0.0, 318.0, 300.0), false, true, 1)
+            .loudness
+            .is_some()
+    );
+    assert_eq!(
+        layout(Rect::new(0.0, 0.0, 317.0, 300.0), false, true, 1).loudness,
+        None
+    );
+    assert_eq!(
+        layout(Rect::new(0.0, 0.0, 400.0, 300.0), false, true, 3).loudness,
+        None
+    );
+}
+
+#[test]
+fn scene_draws_the_loudness_column() {
+    use super::loudness::{LoudnessColumn, LoudnessReadout};
+    use crate::primitives::Viewport;
+    use crate::theme::Theme;
+    use crate::view::{PlotChrome, Style};
+    let theme = Theme::dark();
+    let size = Viewport {
+        width: 800.0,
+        height: 400.0,
+    };
+    let mut p = pane_with_pair(Correlation::Value(0.5));
+    p.loudness = Some(LoudnessColumn::Readout(LoudnessReadout {
+        title: "Main L + Main R".into(),
+        momentary: -23.06,
+        short_term: -22.84,
+        integrated: Some(-23.0),
+        range: Some(6.2),
+        duration_s: 10.0,
+        max_true_peak: -1.2,
+        since: "since 20:14 · R resets".into(),
+    }));
+    let style = |chrome| Style {
+        chrome,
+        theme: &theme,
+    };
+    let t = texts(&programme_scene(&p, style(PlotChrome::Full), size, None).scene);
+    for want in [
+        "Mom −23.1",
+        "Short −22.8",
+        "Int −23.0 LUFS",
+        "LRA 6.2 LU (settling)",
+        "TP max −1.2 dBTP",
+        "since 20:14 · R resets",
+    ] {
+        assert!(t.iter().any(|x| x == want), "{want} in {t:?}");
+    }
+    let bare = texts(&programme_scene(&p, style(PlotChrome::Bare), size, None).scene);
+    assert!(bare.iter().any(|x| x == "Int −23.0 LUFS"), "{bare:?}");
+    assert!(
+        !bare.iter().any(|x| x.starts_with("since")),
+        "T hides the since line"
+    );
+    let narrow = Viewport {
+        width: 400.0,
+        height: 400.0,
+    };
+    let t = texts(&programme_scene(&p, style(PlotChrome::Full), narrow, None).scene);
+    assert!(!t.iter().any(|x| x.starts_with("Mom")), "{t:?}");
+
+    // A message wraps in the column; its words read in order.
+    p.loudness = Some(LoudnessColumn::Message(
+        super::loudness::RATE_TEXT.to_owned(),
+    ));
+    let t = texts(&programme_scene(&p, style(PlotChrome::Full), size, None).scene);
+    let start = t
+        .iter()
+        .position(|x| x.starts_with("loudness"))
+        .expect("the message");
+    let joined = t[start..].join(" ");
+    assert!(joined.starts_with(super::loudness::RATE_TEXT), "{t:?}");
 }
