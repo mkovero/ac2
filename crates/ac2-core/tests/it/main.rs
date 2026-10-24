@@ -4,6 +4,7 @@
 
 mod delay;
 mod density;
+mod loudness;
 mod mtw;
 mod mtw_delay;
 mod mtw_timing;

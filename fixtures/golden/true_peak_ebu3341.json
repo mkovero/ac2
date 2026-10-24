@@ -1,0 +1,91 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "true_peak_ebu3341",
+  "description": "EBU Tech 3341 cases 20-23: one period of fs/4 (amplitude 1) spliced into an fs/6 tone (0.5), made at 4 fs and decimated at offsets 0-3. Holds the 256 samples around the splice (elsewhere the plain tone, true peak -6 dBTP), the published reading and refgen's own x32 true peak.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_true_peak_ebu3341"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000,
+    "synthesis": "at 4 fs: 0.5 sin(2 pi k/24) for 0.5 s, one period sin(2 pi k/16) inserted at a phase-0 sample nearest the middle (phase continuous at both sides), 10 ms raised-cosine fades",
+    "decimator": "scipy.signal.firwin(255, 0.45 fs, kaiser beta 8.0) at 4 fs, delay compensated, every 4th sample from the offset; rounded to f32",
+    "reconstruction": "scipy.signal.resample_poly(x, 32, 1, kaiser beta 10) over the whole decimated signal",
+    "published_dbtp": 0.0,
+    "tolerance_db": {
+      "above": 0.2,
+      "below": 0.4
+    },
+    "window_samples": 256
+  },
+  "references": [
+    "EBU Tech 3341 V4 (2023) Table 1, synthesised from its text",
+    "ITU-R BS.1770-5 Annex 2"
+  ],
+  "scalars": {
+    "case20_true_peak_x32_dbtp": -0.13333381775540273,
+    "case20_sample_peak_dbfs": -0.1570517469810506,
+    "case21_true_peak_x32_dbtp": -0.11344241311990515,
+    "case21_sample_peak_dbfs": -0.5556598756537211,
+    "case22_true_peak_x32_dbtp": -0.14563705405819094,
+    "case22_sample_peak_dbfs": -2.646365673614511,
+    "case23_true_peak_x32_dbtp": -0.11344241311990709,
+    "case23_sample_peak_dbfs": -0.5556598756537211
+  },
+  "blob": {
+    "file": "true_peak_ebu3341.bin",
+    "nbytes": 8192,
+    "sha256": "e7c98e450125510a8dea7ec4006c1231968255c54c008ef3ce36901e1d418ff8"
+  },
+  "arrays": [
+    {
+      "name": "case20_window",
+      "dtype": "f64",
+      "shape": [
+        256
+      ],
+      "offset": 0,
+      "nbytes": 2048,
+      "unit": "FS",
+      "description": "case 20: 256 samples around the splice"
+    },
+    {
+      "name": "case21_window",
+      "dtype": "f64",
+      "shape": [
+        256
+      ],
+      "offset": 2048,
+      "nbytes": 2048,
+      "unit": "FS",
+      "description": "case 21: 256 samples around the splice"
+    },
+    {
+      "name": "case22_window",
+      "dtype": "f64",
+      "shape": [
+        256
+      ],
+      "offset": 4096,
+      "nbytes": 2048,
+      "unit": "FS",
+      "description": "case 22: 256 samples around the splice"
+    },
+    {
+      "name": "case23_window",
+      "dtype": "f64",
+      "shape": [
+        256
+      ],
+      "offset": 6144,
+      "nbytes": 2048,
+      "unit": "FS",
+      "description": "case 23: 256 samples around the splice"
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "loudness_ebu3342",
+  "description": "EBU Tech 3342 cases 1-4 and case 1 repeated twice: LRA at the end of the signal (no trailing silence), published and the unbinned reference at every rate.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_loudness_ebu3342"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "signal": "1000 Hz stereo tone per the module doc",
+    "tolerance_lu": 1.0,
+    "rates_hz": [
+      44100,
+      48000,
+      88200,
+      96000,
+      176400,
+      192000
+    ],
+    "cases": {
+      "1": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              20.0,
+              -20,
+              -20
+            ],
+            [
+              20.0,
+              -30,
+              -30
+            ]
+          ]
+        },
+        "published": 10.0
+      },
+      "2": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              20.0,
+              -20,
+              -20
+            ],
+            [
+              20.0,
+              -15,
+              -15
+            ]
+          ]
+        },
+        "published": 5.0
+      },
+      "3": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              20.0,
+              -40,
+              -40
+            ],
+            [
+              20.0,
+              -20,
+              -20
+            ]
+          ]
+        },
+        "published": 20.0
+      },
+      "4": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              20.0,
+              -50,
+              -50
+            ],
+            [
+              20.0,
+              -35,
+              -35
+            ],
+            [
+              20.0,
+              -20,
+              -20
+            ],
+            [
+              20.0,
+              -35,
+              -35
+            ],
+            [
+              20.0,
+              -50,
+              -50
+            ]
+          ]
+        },
+        "published": 15.0
+      },
+      "1x2": {
+        "programme": {
+          "freq_hz": 1000,
+          "channels": 2,
+          "segments": [
+            [
+              20.0,
+              -20,
+              -20
+            ],
+            [
+              20.0,
+              -30,
+              -30
+            ],
+            [
+              20.0,
+              -20,
+              -20
+            ],
+            [
+              20.0,
+              -30,
+              -30
+            ]
+          ]
+        },
+        "published": 10.0
+      }
+    },
+    "not_run": {
+      "5, 6": "the EBU's programme recordings, not in the text"
+    }
+  },
+  "references": [
+    "EBU Tech 3342 V4 (2023) Table 1, synthesised from its text"
+  ],
+  "scalars": {
+    "c1_44100_range": 9.999999996429054,
+    "c1_48000_range": 10.000000072602056,
+    "c1_88200_range": 9.999999996429043,
+    "c1_96000_range": 9.999999986649978,
+    "c1_176400_range": 9.999999996429018,
+    "c1_192000_range": 10.000000072320194,
+    "c2_44100_range": 5.00000002528763,
+    "c2_48000_range": 5.00000006916431,
+    "c2_88200_range": 5.00000002528763,
+    "c2_96000_range": 5.00000004209412,
+    "c2_176400_range": 5.000000025287646,
+    "c2_192000_range": 4.9999998974976325,
+    "c3_44100_range": 19.99999997697551,
+    "c3_48000_range": 19.999999990496622,
+    "c3_88200_range": 19.999999976975523,
+    "c3_96000_range": 19.999999911392948,
+    "c3_176400_range": 19.999999976975495,
+    "c3_192000_range": 20.00000004839044,
+    "c4_44100_range": 14.9999999758653,
+    "c4_48000_range": 14.99999995708195,
+    "c4_88200_range": 14.999999975865315,
+    "c4_96000_range": 14.999999958408296,
+    "c4_176400_range": 14.999999975865268,
+    "c4_192000_range": 15.000000048258041,
+    "c1x2_44100_range": 9.999999996429054,
+    "c1x2_48000_range": 10.000000072602056,
+    "c1x2_88200_range": 9.999999996429043,
+    "c1x2_96000_range": 9.999999986649978,
+    "c1x2_176400_range": 9.999999996429018,
+    "c1x2_192000_range": 10.000000072320194
+  },
+  "blob": {
+    "file": "loudness_ebu3342.bin",
+    "nbytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "arrays": []
+}

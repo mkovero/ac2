@@ -1,0 +1,111 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "loudness_histogram",
+  "description": "Histogram bound checks: a programme whose gating blocks and short-term values crowd both relative gates (slow 1 dB ramps centred on them), and a quiet programme whose relative gates fall below -70 LUFS.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_loudness_histogram"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "dense": {
+      "programme": {
+        "freq_hz": 1000,
+        "channels": 2,
+        "segments": [
+          [
+            60.0,
+            -20,
+            -20
+          ],
+          [
+            60.0,
+            -35.112,
+            -34.112
+          ],
+          [
+            60.0,
+            -45.141,
+            -44.141
+          ]
+        ]
+      },
+      "design": "60 s at -20 dBFS, then 60 s ramps of +-0.5 dB centred on the integrated and LRA relative gates (iterated four times)",
+      "bound": "binned integrated within [unbinned with the gate's bin excluded, included]; LRA likewise widened by 0.01 LU"
+    },
+    "quiet": {
+      "programme": {
+        "freq_hz": 1000,
+        "channels": 2,
+        "segments": [
+          [
+            10.0,
+            -58,
+            -58
+          ],
+          [
+            10.0,
+            -62,
+            -62
+          ],
+          [
+            10.0,
+            -66,
+            -66
+          ],
+          [
+            10.0,
+            -69,
+            -69
+          ],
+          [
+            10.0,
+            -75,
+            -75
+          ],
+          [
+            10.0,
+            -82,
+            -82
+          ],
+          [
+            10.0,
+            -64,
+            -64
+          ]
+        ]
+      },
+      "note": "the absolute gate governs both measures"
+    }
+  },
+  "references": [
+    "ITU-R BS.1770-5 Annex 1 (K-weighting, gating)",
+    "EBU Tech 3342 V4 (2023) Table 1, synthesised from its text"
+  ],
+  "scalars": {
+    "dense_integrated": -21.681158362593766,
+    "dense_integrated_gate": -34.60539604143564,
+    "dense_integrated_with_gate_bin": -21.690316900362273,
+    "dense_integrated_without_gate_bin": -21.6627780103194,
+    "dense_integrated_gate_bin_count": 6,
+    "dense_range": 24.392643108933132,
+    "dense_range_gate": -44.63428418213876,
+    "dense_range_with_gate_bin": 24.39764310884217,
+    "dense_range_without_gate_bin": 24.389309775627257,
+    "dense_range_gate_bin_count": 6,
+    "quiet_integrated": -62.25190196115048,
+    "quiet_integrated_gate": -72.25190196115048,
+    "quiet_range": 11.000000061993923,
+    "quiet_range_gate": -82.43356464981738
+  },
+  "blob": {
+    "file": "loudness_histogram.bin",
+    "nbytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "arrays": []
+}
