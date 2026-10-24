@@ -78,6 +78,9 @@ impl Histogram {
 
     /// Adds a block of mean square `z` (loudness `l = −0.691 + 10 log₁₀ z`).
     fn add(&mut self, z: f64) {
+        if !z.is_finite() {
+            return;
+        }
         let l = lufs(z);
         let dropped = match self.gate {
             Gate::Above => l <= HISTOGRAM_FLOOR,

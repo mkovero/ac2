@@ -168,3 +168,35 @@ fn readings_do_not_depend_on_the_block_size() {
         }
     }
 }
+
+#[test]
+fn a_non_finite_sample_reads_as_silence_and_does_not_poison_the_meter() {
+    let mut clean = meter(FS, 2);
+    let mut dirty = meter(FS, 2);
+    let n = (FS as usize) * 3;
+    let mut s = tone(3.0, -20.0);
+    feed(&mut clean, &mut s, n, 480);
+    let mut s = tone(3.0, -20.0);
+    let half = n / 2;
+    feed(&mut dirty, &mut s, half, 480);
+    let bad = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
+    dirty.process(&[&bad, &bad]);
+    feed(&mut dirty, &mut s, n - half, 480);
+    let r = dirty.reading();
+    assert!(r.momentary.is_finite() && r.short_term.is_finite(), "{r:?}");
+    let (i, j) = (
+        r.integrated.expect("I"),
+        clean.reading().integrated.expect("I"),
+    );
+    assert_near("integrated", i, j, 0.01);
+}
+
+#[test]
+fn a_block_with_the_wrong_channel_count_is_not_metered() {
+    let mut m = meter(FS, 1);
+    let x = vec![0.5_f32; FS as usize];
+    m.process(&[&x, &x]);
+    let r = m.reading();
+    assert_eq!(r.duration_samples, 0);
+    assert!(r.integrated.is_none());
+}
