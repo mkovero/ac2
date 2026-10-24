@@ -212,7 +212,7 @@ fn a_line_calibration_wants_a_line_input_with_a_tone_on_it() {
     // Silence on the line input: the daemon measures the level itself and finds no tone.
     let e = c.call(line(1)).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
-    assert!(e.msg.starts_with("no tone signal on input 1"), "{}", e.msg);
+    assert!(e.msg.starts_with("no tone signal on input 2"), "{}", e.msg);
 }
 
 #[test]

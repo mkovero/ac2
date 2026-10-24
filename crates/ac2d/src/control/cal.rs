@@ -178,6 +178,7 @@ impl Control {
 
     /// The open session's capture device, with `input` captured by it.
     fn cal_target(&self, input: u16) -> Result<ac2_proto::model::DeviceId, ProtoError> {
+        let n = nth(input);
         let Some(rt) = self.session.as_ref() else {
             return Err(perr(
                 ErrorCode::Invalid,
@@ -185,7 +186,7 @@ impl Control {
             ));
         };
         block_index(&rt.input_map, input)
-            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {input} is not captured")))?;
+            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {n} is not captured")))?;
         Ok(rt.open.input_device.clone())
     }
 
@@ -208,12 +209,13 @@ impl Control {
         input: u16,
         tone: &str,
     ) -> Result<(ac2_proto::model::DeviceId, f64), ProtoError> {
+        let n = nth(input);
         let device = self.cal_target(input)?;
         let Some(rt) = self.session.as_ref() else {
             return Err(perr(ErrorCode::Invalid, "no open session"));
         };
         let idx = block_index(&rt.input_map, input)
-            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {input} is not captured")))?;
+            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {n} is not captured")))?;
         // Broadband and uncorrected: the mic curve is 0 dB at the calibration frequency,
         // so the corrected paths read the tone the same (Q7 §3).
         let (ms, fast) = rt.fanout.meters.mean_square(idx).unwrap_or((0.0, 0.0));
@@ -221,7 +223,7 @@ impl Control {
         if !(measured.is_finite() && measured > -80.0) {
             return Err(perr(
                 ErrorCode::Refused,
-                format!("no {tone} signal on input {input} ({measured:.1} dBFS)"),
+                format!("no {tone} signal on input {n} ({measured:.1} dBFS)"),
             ));
         }
         let latest = rt.fanout.latest.load(std::sync::atomic::Ordering::Acquire);
@@ -231,7 +233,7 @@ impl Control {
             return Err(perr(
                 ErrorCode::Refused,
                 format!(
-                    "input {input} clipped in the last 2 s: a clipped {tone} reads low; lower \
+                    "input {n} clipped in the last 2 s: a clipped {tone} reads low; lower \
                      the level or the gain and retry"
                 ),
             ));
@@ -243,7 +245,7 @@ impl Control {
             return Err(perr(
                 ErrorCode::Refused,
                 format!(
-                    "the {tone} level on input {input} is not steady yet ({unsettled:+.2} dB \
+                    "the {tone} level on input {n} is not steady yet ({unsettled:+.2} dB \
                      over the last second); keep it on and retry in a few seconds"
                 ),
             ));
@@ -268,6 +270,7 @@ impl Control {
         calibrator_level: DbSpl,
         calibrator_freq: Hz,
     ) -> Result<ReplyBody, ProtoError> {
+        let n = nth(input);
         self.cal.check()?;
         calstore::check_mic_name(&mic)?;
         if !(calibrator_level.0.is_finite()
@@ -298,7 +301,7 @@ impl Control {
         };
         self.store_calibration(&entry)?;
         tracing::info!(
-            "input {input} ({mic}) calibrated: {measured:.2} dBFS at {:.1} dB SPL",
+            "input {n} ({mic}) calibrated: {measured:.2} dBFS at {:.1} dB SPL",
             calibrator_level.0
         );
         Ok(ReplyBody::Calibration(entry))
@@ -314,6 +317,7 @@ impl Control {
         calstore::check_mic_name(&a.mic)?;
         let invalid = |m: String| perr(ErrorCode::Invalid, m);
         let input = a.input;
+        let n = nth(input);
         // Ranges that catch a unit slip (mV typed as V, V/Pa as mV/Pa) rather than limits of
         // the method.
         if !(a.volts.0.is_finite() && (1e-4..=100.0).contains(&a.volts.0)) {
@@ -393,7 +397,7 @@ impl Control {
             return Err(perr(
                 ErrorCode::Refused,
                 format!(
-                    "input {input} has an acoustic calibration for {} ({:.1} dB SPL calibrator): \
+                    "input {n} has an acoustic calibration for {} ({:.1} dB SPL calibrator): \
                      it measured the whole chain and is the better one; replace it only on \
                      purpose",
                     a.mic, calibrator_level.0
@@ -405,7 +409,7 @@ impl Control {
             return Err(perr(
                 ErrorCode::Refused,
                 format!(
-                    "input {input} reads {measured:.1} dBFS, too close to full scale for a \
+                    "input {n} reads {measured:.1} dBFS, too close to full scale for a \
                      calibration (at most {} dBFS): lower the tone, not the gain",
                     cal::ELECTRICAL_MAX_DBFS
                 ),
@@ -415,7 +419,7 @@ impl Control {
             return Err(perr(
                 ErrorCode::Refused,
                 format!(
-                    "input {input} reads {measured:.1} dBFS, too low for a good reading (at \
+                    "input {n} reads {measured:.1} dBFS, too low for a good reading (at \
                      least {} dBFS): raise the tone, not the gain",
                     cal::ELECTRICAL_MIN_DBFS
                 ),
@@ -443,7 +447,7 @@ impl Control {
         };
         self.store_calibration(&entry)?;
         tracing::info!(
-            "input {input} ({}) calibrated electrically ({:?}): {} V read at {measured:.2} dBFS \
+            "input {n} ({}) calibrated electrically ({:?}): {} V read at {measured:.2} dBFS \
              → {full_scale:.4} V at 0 dBFS, {} mV/Pa ({:.3} mV/Pa loaded) → 0 dBFS = \
              {sensitivity:.2} dB SPL",
             a.mic,
