@@ -625,6 +625,99 @@ mod tests {
         assert!(l.integrated.is_some(), "{l:?}");
         assert!((l.duration.0 - 0.6).abs() < 1e-9);
         assert!((l.max_true_peak.0 + 20.0).abs() < 0.2, "{l:?}");
+        // Contiguous blocks the host flags as breaking continuity restart the windows too.
+        for flag in [BlockFlags::XRUN, BlockFlags::DISCONTINUITY] {
+            run(&mut m, &mut start, 50);
+            let before = m.take(false).loudness[0];
+            assert!(before.momentary.0.is_finite(), "{before:?}");
+            let mut b = block(start, 480, 0.1, true);
+            b.flags = flag;
+            m.push(&b);
+            start += 480;
+            let l = m.take(false).loudness[0];
+            assert_eq!(l.momentary.0, f64::NEG_INFINITY, "{flag:?}: {l:?}");
+            assert_eq!(l.integrated, before.integrated, "{flag:?}");
+        }
+        // A contiguous unflagged run restarts nothing: short-term fills and stays.
+        run(&mut m, &mut start, 310);
+        let l = m.take(false).loudness[0];
+        assert!((l.short_term.0 + 20.0).abs() < 0.1, "{l:?}");
+        run(&mut m, &mut start, 1);
+        let l = m.take(false).loudness[0];
+        assert!((l.short_term.0 + 20.0).abs() < 0.1, "{l:?}");
+        assert!((l.momentary.0 + 20.0).abs() < 0.1, "{l:?}");
+    }
+
+    /// A capture of device inputs 2, 3 and 5 (block channels 0, 1, 2): the pair 3+5 and the
+    /// single line input 2 find their samples by metered position, not device number.
+    #[test]
+    fn a_sparse_capture_meters_each_source_on_its_own_inputs() {
+        use ac2_proto::frame::LoudnessSource::{Input as In, Pair as P};
+        let pair = Pair {
+            left: 3,
+            right: 5,
+            name: None,
+        };
+        let p = policy(LevelsSettings::default(), Vec::new());
+        p.lock()
+            .expect("policy")
+            .declare(&[line(2), line(3), line(5)], std::slice::from_ref(&pair));
+        let mut m = Programme::new(
+            Captured {
+                idx: vec![0, 1, 2],
+                channels: vec![2, 3, 5],
+                device: DeviceId("fake".into()),
+                sample_rate: 48_000,
+            },
+            Declared::Session,
+            Arc::clone(&p),
+            7,
+        );
+        // Inputs 2 and 3 carry the tone, input 5 (the pair's right) is silent.
+        let fs = 48_000.0;
+        let mut start = 0u64;
+        let mut run = |m: &mut Programme, blocks: u32| {
+            for _ in 0..blocks {
+                let mut data = Vec::with_capacity(480 * 3);
+                for i in 0..480u64 {
+                    let t = (start + i) as f64 / fs;
+                    let v = 0.1 * (2.0 * std::f64::consts::PI * 997.0 * t).sin() as f32;
+                    data.extend_from_slice(&[v, v, 0.0]);
+                }
+                m.push(&Block::new(start, 480, 3, BlockFlags::NONE, 0, data));
+                start += 480;
+            }
+        };
+        run(&mut m, 100);
+        let r = m.take(false);
+        assert_eq!(r.pair_levels.len(), 1);
+        assert_eq!((r.pair_levels[0].left, r.pair_levels[0].right), (3, 5));
+        assert_eq!(r.pair_levels[0].quiet, Some(PairSide::Right));
+        assert_eq!(r.pair_levels[0].correlation, None);
+        assert!((r.true_peak[1] + 20.0).abs() < 0.2, "{:?}", r.true_peak);
+        assert_eq!(r.true_peak[2], f32::NEG_INFINITY);
+        let sources: Vec<_> = r.loudness.iter().map(|l| l.source).collect();
+        assert_eq!(sources, [P { left: 3, right: 5 }, In { channel: 2 }]);
+        // One side of a pair carries a −20 dBFS sine: its mean square is the single
+        // channel's, 3 dB under the same tone on both sides.
+        let (pl, il) = (r.loudness[0], r.loudness[1]);
+        assert!((pl.max_true_peak.0 + 20.0).abs() < 0.2, "{pl:?}");
+        assert!((pl.momentary.0 + 23.01).abs() < 0.1, "{pl:?}");
+        assert!((il.momentary.0 + 23.01).abs() < 0.1, "{il:?}");
+        assert!((il.max_true_peak.0 + 20.0).abs() < 0.2, "{il:?}");
+        // A reset of input 5 restarts the pair, not input 2.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        p.lock().expect("policy").reset(vec![5]);
+        m.take(false);
+        run(&mut m, 10);
+        let r = m.take(false);
+        let (p2, i2) = (r.loudness[0], r.loudness[1]);
+        assert!(p2.since.0 > pl.since.0, "{p2:?}");
+        assert!(p2.duration.0 <= 0.1 + 1e-9, "{p2:?}");
+        assert_eq!(p2.integrated, None, "{p2:?}");
+        assert_eq!(i2.since, il.since);
+        assert!((i2.duration.0 - 1.1).abs() < 1e-9, "{i2:?}");
+        assert!(i2.integrated.is_some());
     }
 
     /// A silent right side reads quiet, never a correlation.

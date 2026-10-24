@@ -67,7 +67,11 @@ impl Loudness {
                     None => continue,
                 },
             };
-            let Ok(meter) = LoudnessMeter::new(self.sample_rate, n) else {
+            // The rate was checked above and a source has one or two channels, so the meter
+            // always builds; a release build skips the source rather than stop the meters.
+            let meter = LoudnessMeter::new(self.sample_rate, n);
+            debug_assert!(meter.is_ok(), "{meter:?}");
+            let Ok(meter) = meter else {
                 continue;
             };
             self.sources.push(Source {
