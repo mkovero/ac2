@@ -72,6 +72,30 @@ fn overs_clip_and_notes_keep_their_words() {
 }
 
 #[test]
+fn inputs_row_line_says_only_what_there_is() {
+    let mut i = input(Scale::Dbfs);
+    assert_eq!(
+        i.row_text(Ballistic::Type1),
+        "Type I −12.3 dBFS · −1.2 dBTP · max −3.1 dBFS"
+    );
+    assert_eq!(
+        i.row_text(Ballistic::TruePeak),
+        "true peak −12.3 dBFS · max −3.1 dBFS"
+    );
+    // VU on an uncalibrated input reads the true peak, and says so.
+    assert_eq!(
+        i.row_text(Ballistic::Vu),
+        "true peak −12.3 dBFS · max −3.1 dBFS"
+    );
+    i.overs = 2;
+    i.clipped = true;
+    assert_eq!(
+        i.row_text(Ballistic::TruePeak),
+        "true peak −12.3 dBFS · max −3.1 dBFS · 2 overs · CLIP"
+    );
+}
+
+#[test]
 fn ballistic_words() {
     assert_eq!(Ballistic::TruePeak.word(), "true peak");
     assert_eq!(Ballistic::Type1.word(), "Type I");
@@ -196,4 +220,86 @@ fn layout_cases() {
         ballistic: Ballistic::TruePeak,
     };
     assert_eq!(pane.layout(rect), bars_only);
+}
+
+fn pane_with_pair(correlation: Correlation) -> ProgrammePane {
+    let mut l = input(Scale::Dbfs);
+    l.label = "Main L".into();
+    let mut r = input(Scale::Dbfs);
+    r.label = "Main R".into();
+    ProgrammePane {
+        inputs: vec![l, r],
+        pair: Some(ProgrammePair {
+            name: "Main L + Main R".into(),
+            correlation,
+            window_s: 1.0,
+        }),
+        ballistic: Ballistic::TruePeak,
+    }
+}
+
+fn texts(s: &crate::primitives::Scene) -> Vec<String> {
+    s.layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|x| x.text.clone()))
+        .collect()
+}
+
+#[test]
+fn missing_inputs_say_which() {
+    assert_eq!(missing_text(&[2]), "input 3 not in this session");
+    assert_eq!(missing_text(&[2, 3]), "inputs 3+4 not in this session");
+}
+
+#[test]
+fn scene_draws_bars_readouts_chip_and_field() {
+    use crate::primitives::Viewport;
+    use crate::theme::Theme;
+    use crate::view::{PlotChrome, Style};
+    let theme = Theme::dark();
+    let size = Viewport {
+        width: 600.0,
+        height: 400.0,
+    };
+    let p = pane_with_pair(Correlation::Quiet(Side::Right));
+    let full = programme_scene(
+        &p,
+        Style {
+            chrome: PlotChrome::Full,
+            theme: &theme,
+        },
+        size,
+        None,
+    );
+    let t = texts(&full.scene);
+    for want in ["Main L", "Main R", "right quiet", "correlation", "L", "R"] {
+        assert!(t.iter().any(|x| x == want), "{want} in {t:?}");
+    }
+    assert!(t.iter().any(|x| x.ends_with("dBTP")), "{t:?}");
+    assert!(t.iter().any(|x| x.starts_with("max ")), "{t:?}");
+    let sq = full.gonio.expect("a pair on a tall pane has a goniometer");
+    assert_eq!(sq.w, sq.h);
+    let grid = |s: &ProgrammeScene| s.scene.layers[0].polylines.len();
+    let bare = programme_scene(
+        &p,
+        Style {
+            chrome: PlotChrome::Bare,
+            theme: &theme,
+        },
+        size,
+        None,
+    );
+    assert!(grid(&full) > 3);
+    assert_eq!(grid(&bare), 0, "T hides the grid");
+    let gone = programme_scene(
+        &p,
+        Style {
+            chrome: PlotChrome::Full,
+            theme: &theme,
+        },
+        size,
+        Some("inputs 3+4 not in this session"),
+    );
+    assert_eq!(texts(&gone.scene), vec!["inputs 3+4 not in this session"]);
+    assert!(gone.gonio.is_none());
 }

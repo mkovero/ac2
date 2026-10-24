@@ -139,6 +139,28 @@ impl ProgrammeInput {
         if self.clipped { "CLIP" } else { "" }
     }
 
+    /// The Inputs-list line under the row's meter, readouts only, never empty separators:
+    /// `Type I −12.3 dBFS · −1.2 dBTP · max −3.1 dBFS · 2 overs · CLIP`.
+    pub fn row_text(&self, ballistic: Ballistic) -> String {
+        let word = if self.note(ballistic).is_some() {
+            Ballistic::TruePeak.word()
+        } else {
+            ballistic.word()
+        };
+        let mut parts = vec![format!("{word} {}", self.ppm_text())];
+        // A true-peak reading already is the dBTP number, on the row's scale.
+        if word != Ballistic::TruePeak.word() {
+            parts.push(self.true_peak_text());
+        }
+        parts.push(self.max_text());
+        parts.extend(
+            [self.overs_text(), self.clip_text().to_owned()]
+                .into_iter()
+                .filter(|t| !t.is_empty()),
+        );
+        parts.join(" · ")
+    }
+
     /// The note under the bar when the rig's `ballistic` is one this input cannot read.
     pub fn note(&self, ballistic: Ballistic) -> Option<&'static str> {
         (ballistic == Ballistic::Vu && !self.offers_vu).then_some(VU_FALLBACK)
@@ -332,5 +354,71 @@ pub fn layout(rect: Rect, has_pair: bool) -> ProgrammeLayout {
     }
 }
 
+/// What a Programme pane says when inputs it names are not in the session (or no session
+/// is open): `input 3 not in this session`, `inputs 3+4 not in this session`.
+pub fn missing_text(inputs: &[u16]) -> String {
+    let n: Vec<String> = inputs
+        .iter()
+        .map(|c| (u32::from(*c) + 1).to_string())
+        .collect();
+    match n.len() {
+        1 => format!("input {} not in this session", n[0]),
+        _ => format!("inputs {} not in this session", n.join("+")),
+    }
+}
+
+/// A Programme pane that names nothing to meter (a layout from elsewhere): its list picks
+/// the inputs.
+pub const NO_METERS: &str = "no inputs chosen: the pane's list picks a pair or inputs";
+
+/// A Programme row of a pane's list: `meter  Main L + Main R`, `meter  inputs 1–8`.
+pub fn menu_row(what: &str) -> String {
+    format!("meter  {what}")
+}
+
+/// What a Programme row of several inputs is called: `inputs 1, 2, 5`.
+pub fn inputs_text(inputs: &[u16]) -> String {
+    let n: Vec<String> = inputs
+        .iter()
+        .map(|c| (u32::from(*c) + 1).to_string())
+        .collect();
+    format!("inputs {}", n.join(", "))
+}
+
+mod draw;
+pub use draw::{ProgrammeScene, programme_scene};
+
 #[cfg(test)]
 mod tests;
+
+/// The rig's programme-meter rows on the Rig monitor page: title, the value as shown, and a
+/// note under it.
+pub mod rig {
+    use crate::format;
+
+    pub const BALLISTIC_TITLE: &str = "Programme meters read";
+    pub const WINDOW_TITLE: &str = "Correlation window";
+    pub const OVER_TITLE: &str = "An over is above";
+    pub const GATE_TITLE: &str = "Correlation gate";
+
+    pub const BALLISTIC_NOTE: &str = "the rig's choice: every app on it reads the same bar · \
+         VU only on a calibrated line input";
+    pub const WINDOW_NOTE: &str = "how long the correlator averages";
+    pub const OVER_NOTE: &str = "true peak above this counts an over";
+    pub const GATE_NOTE: &str = "a side quieter than this reads quiet, with no correlation";
+
+    /// One ←/→ step of the over threshold, dB.
+    pub const OVER_STEP_DB: f64 = 0.5;
+    /// One ←/→ step of the correlation gate, dB.
+    pub const GATE_STEP_DB: f64 = 5.0;
+
+    /// `−1.0 dBTP`.
+    pub fn over_text(dbtp: f64) -> String {
+        format!("{} dBTP", format::signed(dbtp, 1))
+    }
+
+    /// `−60 dBFS`.
+    pub fn gate_text(dbfs: f64) -> String {
+        format!("{} dBFS", format::signed(dbfs, 0))
+    }
+}

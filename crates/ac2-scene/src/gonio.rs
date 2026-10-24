@@ -30,6 +30,23 @@ pub fn clamp_decay(s: f32) -> f32 {
     }
 }
 
+/// The auto-gain window: a point lands at full intensity at the pair's recent peak and at
+/// none this far below it (the daemon's figure, `ac2_core::stereo::GONIO_WINDOW_DB`).
+pub const WINDOW_DB: f32 = 30.0;
+
+/// Landing intensity `0 … 1` of a point as the gonio frame carries it (`[x, y]`, auto-gained,
+/// `±127` full scale): its level within the auto-gain window, 1 at radius 127, 0 at
+/// [`WINDOW_DB`] below (radius ≈ 4). The 45° rotation keeps the sample pair's magnitude, so
+/// the radius alone is the level and the wire needs no third coordinate.
+pub fn landing_intensity(point: [i8; 2]) -> f32 {
+    let (x, y) = (f32::from(point[0]), f32::from(point[1]));
+    let radius = (x * x + y * y).sqrt();
+    if radius < 0.5 {
+        return 0.0;
+    }
+    (1.0 + 20.0 * (radius / 127.0).log10() / WINDOW_DB).clamp(0.0, 1.0)
+}
+
 /// One point as the wire carries it: `[x, y, intensity]`, `x`/`y` in `−127 … 127` for
 /// `−1 … 1`, intensity in `0 … 127` for `0 … 1` (negative intensity reads as 0).
 pub type WirePoint = [i8; 3];
@@ -89,19 +106,36 @@ impl EmberRing {
     /// Lands one frame's points at display time `now`.
     pub fn push_frame(&mut self, now: f64, points: &[WirePoint]) {
         for p in points {
-            if self.embers.len() == self.capacity {
-                self.embers.pop_front();
-            }
-            if self.capacity == 0 {
-                return;
-            }
-            self.embers.push_back(Ember {
+            self.land(Ember {
                 x: f32::from(p[0]) / 127.0,
                 y: f32::from(p[1]) / 127.0,
                 landed_at: now,
                 intensity: f32::from(p[2].max(0)) / 127.0,
             });
         }
+    }
+
+    /// Lands one gonio frame's `[x, y]` points at display time `now`, each at its
+    /// [`landing_intensity`].
+    pub fn push_points(&mut self, now: f64, points: &[[i8; 2]]) {
+        for p in points {
+            self.land(Ember {
+                x: f32::from(p[0]) / 127.0,
+                y: f32::from(p[1]) / 127.0,
+                landed_at: now,
+                intensity: landing_intensity(*p),
+            });
+        }
+    }
+
+    fn land(&mut self, e: Ember) {
+        if self.capacity == 0 {
+            return;
+        }
+        if self.embers.len() == self.capacity {
+            self.embers.pop_front();
+        }
+        self.embers.push_back(e);
     }
 
     /// Every ember with its age at `now`, oldest first.
@@ -237,6 +271,22 @@ mod tests {
         let mut z = EmberRing::new(0);
         z.push_frame(0.0, &[[0, 0, 127]]);
         assert!(z.is_empty());
+    }
+
+    #[test]
+    fn landing_intensity_spans_the_window() {
+        assert_eq!(landing_intensity([0, 127]), 1.0);
+        assert_eq!(landing_intensity([127, 127]), 1.0, "past the gain clamps");
+        assert_eq!(landing_intensity([0, 0]), 0.0);
+        assert_eq!(landing_intensity([0, 4]), 0.0, "30 dB down is radius 4");
+        // 15 dB down: halfway.
+        let r = (127.0 * 10f32.powf(-15.0 / 20.0)).round() as i8;
+        assert!((landing_intensity([0, r]) - 0.5).abs() < 0.02);
+        let mut ring = EmberRing::new(4);
+        ring.push_points(1.0, &[[0, 127], [-90, 0]]);
+        let v: Vec<EmberAge> = ring.age(1.0).collect();
+        assert_eq!((v[0].x, v[0].y, v[0].intensity), (0.0, 1.0, 1.0));
+        assert!(v[1].intensity > 0.9 && v[1].intensity < 1.0);
     }
 
     #[test]
