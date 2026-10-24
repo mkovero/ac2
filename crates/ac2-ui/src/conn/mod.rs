@@ -752,6 +752,20 @@ async fn session(
                 }
                 Some(Ctl::Req(r)) => handle(&client, r, &stim_tx, out),
             },
+            silent = client.await_dead() => {
+                // The transport may still look connected (a half-open TCP connection after
+                // the link dropped), so libzmq would never reconnect by itself: drop the
+                // client, which closes all three sockets, and connect anew.
+                tracing_free_note(
+                    out,
+                    "daemon",
+                    &format!(
+                        "no keepalive for {}, reconnecting",
+                        ac2_scene::format::age(silent.as_secs_f64())
+                    ),
+                );
+                break Next::Reconnect;
+            },
             changed = mirror.changed() => {
                 if changed.is_err() {
                     break Next::Reconnect;

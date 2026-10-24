@@ -34,7 +34,8 @@ fn main() {
     } else {
         // libzmq's sources are not -Wextra clean; cc would relay every warning as a cargo
         // warning on each build of this crate.
-        set_env("CXXFLAGS", &format!("{flags} -w"));
+        let keepalive = keepalive_defines();
+        set_env("CXXFLAGS", &format!("{flags} -w {keepalive}"));
         sodium_include
     };
 
@@ -49,6 +50,31 @@ fn main() {
         for lib in ["ws2_32", "iphlpapi", "advapi32"] {
             println!("cargo:rustc-link-lib={lib}");
         }
+    }
+}
+
+/// Preprocessor defines that compile libzmq's TCP keepalive tuning in.
+///
+/// libzmq applies `ZMQ_TCP_KEEPALIVE*` to a connection only inside `#ifdef ZMQ_HAVE_SO_KEEPALIVE`
+/// / `ZMQ_HAVE_TCP_KEEP{CNT,IDLE,INTVL}` (`ZMQ_HAVE_TCP_KEEPALIVE` for the idle time on Apple,
+/// whose `TCP_KEEPALIVE` plays the role of `TCP_KEEPIDLE`). Its CMake build probes the headers
+/// and writes those into `platform.hpp`; zeromq-src compiles with `cc` and no probes, so without
+/// these the socket options are accepted and read back but never reach the kernel: only
+/// `TCP_USER_TIMEOUT`, which libzmq keys on the kernel macro itself, is set. A socket that never
+/// sends (every SUB) then has no way to notice a peer that vanished without a FIN, and the
+/// connection stays half-open forever. Windows tunes keepalive through `WSAIoctl` under
+/// `ZMQ_HAVE_WINDOWS`, which zeromq-src does define.
+fn keepalive_defines() -> &'static str {
+    match env::var("CARGO_CFG_TARGET_OS").expect("target os").as_str() {
+        "macos" | "ios" | "tvos" | "watchos" | "visionos" => {
+            "-DZMQ_HAVE_SO_KEEPALIVE=1 -DZMQ_HAVE_TCP_KEEPCNT=1 -DZMQ_HAVE_TCP_KEEPALIVE=1 \
+             -DZMQ_HAVE_TCP_KEEPINTVL=1"
+        }
+        "linux" | "android" | "freebsd" | "netbsd" | "dragonfly" => {
+            "-DZMQ_HAVE_SO_KEEPALIVE=1 -DZMQ_HAVE_TCP_KEEPCNT=1 -DZMQ_HAVE_TCP_KEEPIDLE=1 \
+             -DZMQ_HAVE_TCP_KEEPINTVL=1"
+        }
+        _ => "",
     }
 }
 

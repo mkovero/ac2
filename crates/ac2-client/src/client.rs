@@ -62,7 +62,22 @@ pub struct ClientConfig {
     /// frames), as decoded by ZeroMQ: CURVE and TCP overhead are not in it. Shared, so its
     /// owner can read the rate across reconnects; each connect adds to the same counter.
     pub received_bytes: Arc<AtomicU64>,
+    /// No keepalive for this long (counted from the connect until the first one): the
+    /// connection is dead as far as this client is concerned and [`Client::await_dead`]
+    /// resolves, whatever the kernel thinks of the TCP connection. [`DEAD_AFTER`] by default.
+    pub dead_after: Duration,
 }
+
+/// Default [`ClientConfig::dead_after`]: the application-level watchdog above the kernel's.
+///
+/// The daemon sends keepalives at 4 Hz, so 10 s is forty missed in a row: a daemon too busy
+/// to send one, or a Wi-Fi roam, is over long before that, while a kiosk is back within the
+/// time an operator would wait before reaching for the power switch. It is also longer than
+/// the kernel's own detection (5 s idle + 3 × 1 s probes, 15 s unacknowledged send), so a
+/// TCP connection the kernel can judge is closed by the kernel first and this fires only
+/// where the kernel cannot judge: a middlebox answering the probes, a platform whose probe
+/// count is fixed, or a daemon that is reachable but silent.
+pub const DEAD_AFTER: Duration = Duration::from_secs(10);
 
 /// First retry after a lost or refused connection.
 const RECONNECT_FIRST: Duration = Duration::from_millis(100);
@@ -125,6 +140,7 @@ impl ClientConfig {
             mirror: true,
             context: None,
             received_bytes: Arc::default(),
+            dead_after: DEAD_AFTER,
         }
     }
 
@@ -294,6 +310,7 @@ struct Inner {
     grids: Mutex<HashMap<GridId, Arc<GridDef>>>,
     sync_task: JoinHandle<()>,
     name: String,
+    dead_after: Duration,
 }
 
 impl Drop for Inner {
@@ -391,6 +408,7 @@ impl Client {
             grids: Mutex::new(HashMap::new()),
             sync_task,
             name: cfg.name,
+            dead_after: cfg.dead_after,
         };
         Ok(Self {
             inner: Arc::new(inner),
@@ -473,6 +491,31 @@ impl Client {
     /// A receiver that wakes on every mirror change (state, keepalive, incarnation).
     pub fn watch(&self) -> watch::Receiver<Arc<MirrorView>> {
         self.inner.view.clone()
+    }
+
+    /// Resolves once no keepalive has arrived for [`ClientConfig::dead_after`] (counted from
+    /// the connect until the first one), with the length of the silence. The transport may
+    /// still look connected: a peer that vanished without closing leaves the TCP connection
+    /// half-open until the kernel's probes give up, and a subscription never sends, so a
+    /// caller that wants to be sure drops this client and connects anew.
+    pub async fn await_dead(&self) -> Duration {
+        let dead_after = self.inner.dead_after;
+        let mut rx = self.watch();
+        loop {
+            let silent = rx.borrow_and_update().silent_for(Instant::now());
+            if silent >= dead_after {
+                return silent;
+            }
+            tokio::select! {
+                changed = rx.changed() => {
+                    if changed.is_err() {
+                        // The sync task is gone: nothing will ever arrive.
+                        return silent;
+                    }
+                }
+                () = tokio::time::sleep(dead_after - silent) => {}
+            }
+        }
     }
 
     /// Waits until the mirror is synced, at most `timeout`.

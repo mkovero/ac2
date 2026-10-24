@@ -62,6 +62,7 @@ fn mirror(ms: Vec<Measurement>) -> Msg {
         rev: Rev(1),
         state: Some(Arc::new(s)),
         last_ka: Some(Instant::now()),
+        connected: Instant::now(),
         generator: None,
         timing: None,
         health: None,

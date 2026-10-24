@@ -29,7 +29,7 @@ pub mod spl_log;
 #[cfg(feature = "test-support")]
 pub mod fake;
 
-pub use client::{Client, ClientConfig, Retry, body_name};
+pub use client::{Client, ClientConfig, DEAD_AFTER, Retry, body_name};
 pub use data::{Latest, TopicFrame, frame_age};
 pub use endpoint::{Endpoints, RemoteAddr};
 pub use error::{ClientError, code_name};
