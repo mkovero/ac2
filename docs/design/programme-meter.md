@@ -352,8 +352,8 @@ recovery), the K-filter state and the sub-block ring are cleared and the sub-blo
 gating grid and the LRA grid restart at the first resumed sample; partial sub-blocks, gating
 blocks and short-term windows from before the gap are discarded. Momentary, short-term and
 their maxima use only windows lying wholly after the restart, and read — (−∞) until one
-exists. Integrated, LRA and the maxima keep what they had; `duration` counts metered samples
-only (the gap excluded).
+exists. Integrated, LRA and the maxima keep what they had; `duration` counts metered
+samples (those of a dropped partial sub-block too; the gap excluded).
 
 **K-weighting at every rate.** BS.1770-5 Annex 1 gives the two biquads for 48 kHz only. The
 coefficients for rate `fs` are computed in f64 (and the filter state is f64: at 192 kHz the

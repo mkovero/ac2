@@ -194,7 +194,11 @@ impl LoudnessMeter {
 
     /// Meters a block: one slice per channel, read up to the shortest.
     pub fn process(&mut self, block: &[&[f32]]) {
-        debug_assert_eq!(block.len(), self.channels, "one slice per channel");
+        // A block with the wrong channel count would weigh the source wrongly (+3 LU for a
+        // mono meter fed a pair), so it is not metered at all.
+        if block.len() != self.channels {
+            return;
+        }
         let n = block.iter().map(|c| c.len()).min().unwrap_or(0);
         if self.reset_pending && self.pos == 0 {
             self.apply_reset();
@@ -204,7 +208,10 @@ impl LoudnessMeter {
             let take = (n - t).min(self.sub_block - self.pos);
             for (filter, channel) in self.filters.iter_mut().zip(block) {
                 for &x in &channel[t..t + take] {
-                    let y = filter.process(&self.k, f64::from(x));
+                    // A non-finite sample carries no energy a level can be read from, and
+                    // it would leave the recursive filter state NaN for good.
+                    let x = if x.is_finite() { f64::from(x) } else { 0.0 };
+                    let y = filter.process(&self.k, x);
                     self.acc += y * y;
                 }
             }
