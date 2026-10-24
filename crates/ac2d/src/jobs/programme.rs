@@ -113,10 +113,11 @@ impl Input {
         }
     }
 
+    /// Clears the holds and the count. A tone still above the threshold at the reset is the
+    /// same over, so the arming follows the release rule, not the reset.
     fn reset(&mut self) {
         self.hold = [0.0; 4];
         self.overs = 0;
-        self.armed = true;
     }
 }
 
@@ -159,6 +160,8 @@ pub(crate) struct Programme {
     release: f32,
     resets_seen: u64,
     scratch: Vec<f32>,
+    /// The pair's right channel while `scratch` holds the left.
+    scratch_r: Vec<f32>,
     seed: u64,
 }
 
@@ -192,6 +195,7 @@ impl Programme {
             release: 0.0,
             resets_seen,
             scratch: Vec::new(),
+            scratch_r: Vec::new(),
             seed,
         };
         me.set_thresholds();
@@ -257,13 +261,13 @@ impl Programme {
         }
         for p in &mut self.pairs {
             b.channel_into(p.li, &mut self.scratch);
+            b.channel_into(p.ri, &mut self.scratch_r);
+            // The correlator sees every sample; only the picker's interval buffer is bounded.
+            p.corr.process(&self.scratch, &self.scratch_r);
             let room = p.l.capacity() - p.l.len();
             let take = self.scratch.len().min(room);
             p.l.extend_from_slice(&self.scratch[..take]);
-            b.channel_into(p.ri, &mut self.scratch);
-            p.r.extend_from_slice(&self.scratch[..take]);
-            let n = p.l.len();
-            p.corr.process(&p.l[n - take..], &p.r[n - take..]);
+            p.r.extend_from_slice(&self.scratch_r[..take]);
         }
     }
 

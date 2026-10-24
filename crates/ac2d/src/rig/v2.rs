@@ -1,9 +1,8 @@
 //! Rig settings files of format version 2, read into the current shape.
 //!
-//! Version 3 added the `levels` section (the programme meters' ballistic, correlation
-//! window, over threshold and correlation gate). A version 2 file lacks it because nothing
-//! had been set, so it takes the defaults rather than reading as damaged; every other
-//! section is the same.
+//! Such a file has no `levels` section (the programme meters' ballistic, correlation window,
+//! over threshold and correlation gate): nothing had been set, so the defaults are the right
+//! reading and the file is not damaged. Every other section is the same.
 
 use ac2_proto::model::LevelsSettings;
 use serde_json::{Map, Value};
