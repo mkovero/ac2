@@ -206,3 +206,49 @@ fn the_leq_log_exports_as_csv_in_a_new_folder() {
     // The rows and the column header.
     assert_eq!(data, n as usize + 1, "{}", &csv[..300.min(csv.len())]);
 }
+
+#[test]
+fn a_silent_daemon_is_dropped_and_connected_anew() {
+    // The fake keeps every TCP connection open but stops its keepalives: the transport looks
+    // healthy, as a half-open connection after a lost link does, so only the watchdog notices.
+    let fake = FakeDaemon::start(FakeOptions::default()).unwrap();
+    let mut config = ClientConfig::new(fake.endpoints(), "ac2-ui link test");
+    config.dead_after = Duration::from_millis(600);
+    let conn = Conn::start(
+        Target {
+            config,
+            describe: "fake daemon".into(),
+        },
+        Arc::new(|| {}),
+    )
+    .unwrap();
+    wait_for(&conn, "connected", |e| {
+        matches!(e, ConnEvent::Connected { .. })
+    });
+    let hellos = fake.received("hello");
+    fake.lock().ka_paused = true;
+    // The note and the new connection can arrive in one drain: watch for both in order.
+    let mut noted = false;
+    wait_for(
+        &conn,
+        "the watchdog's note, then a new connection",
+        |e| match e {
+            ConnEvent::Reply {
+                what,
+                result: Err(m),
+            } if what == "daemon" && m.contains("no keepalive for") => {
+                // A fresh connection must be heard from again before it counts.
+                fake.lock().ka_paused = false;
+                noted = true;
+                false
+            }
+            ConnEvent::Connected { .. } => noted,
+            _ => false,
+        },
+    );
+    assert!(
+        fake.received("hello") > hellos,
+        "the reconnect must be a new connection with its own hello"
+    );
+    conn.close();
+}

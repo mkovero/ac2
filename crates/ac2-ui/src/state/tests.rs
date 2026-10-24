@@ -117,6 +117,7 @@ fn mirror_of(state: State, incarnation: u64, me: Option<&str>) -> ConnEvent {
         rev: Rev(10),
         state: Some(Arc::new(state)),
         last_ka: Some(Instant::now()),
+        connected: Instant::now(),
         generator: None,
         timing: None,
         health: None,

@@ -183,6 +183,10 @@ async fn live_until(
             k = keys.recv(), if term.is_some() => {
                 if matches!(k, Some(Key::Quit) | None) { break Ok(()); }
             }
+            silent = c.await_dead() => {
+                // A half-open connection would otherwise show STALE values for good.
+                break Err(dead(silent));
+            }
             _ = tick.tick() => {
                 if until.is_some_and(|u| Instant::now() >= u) {
                     break Ok(());
@@ -216,6 +220,14 @@ async fn live_until(
         let _ = c.unsubscribe(*s);
     }
     result
+}
+
+/// The daemon has sent nothing for `silent`, longer than the client's watchdog allows.
+pub(crate) fn dead(silent: Duration) -> CliError {
+    CliError::NotRunning(format!(
+        "daemon not responding: no keepalive for {}",
+        format::age(silent.as_secs_f64())
+    ))
 }
 
 /// This machine's wall clock, Unix ns.

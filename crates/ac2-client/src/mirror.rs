@@ -100,6 +100,9 @@ pub struct MirrorView {
     pub state: Option<Arc<State>>,
     /// When the last `ka` arrived.
     pub last_ka: Option<Instant>,
+    /// When this connection was made. The daemon's silence is counted from here until the
+    /// first keepalive, so a fresh connection gets the same grace as a running one.
+    pub connected: Instant,
     /// Generator summary from the last `ka`.
     pub generator: Option<GenSummary>,
     /// Timing state from the last `ka`.
@@ -134,6 +137,12 @@ impl MirrorView {
         self.last_ka
             .is_some_and(|t| now.saturating_duration_since(t) < KA_TIMEOUT)
     }
+
+    /// How long the daemon has been silent: since the last keepalive, or since the
+    /// connection was made if none has arrived yet.
+    pub fn silent_for(&self, now: Instant) -> Duration {
+        now.saturating_duration_since(self.last_ka.unwrap_or(self.connected))
+    }
 }
 
 /// The sync state machine.
@@ -150,6 +159,7 @@ pub struct Mirror {
     ahead_since: Option<Instant>,
     last_request: Option<(Need, Instant)>,
     last_ka: Option<Instant>,
+    connected: Instant,
     ka: Option<KaMeta>,
     clock: ClockEstimator,
     snapshots: u64,
@@ -172,6 +182,7 @@ impl Mirror {
             ahead_since: None,
             last_request: None,
             last_ka: None,
+            connected: Instant::now(),
             ka: None,
             clock: ClockEstimator::default(),
             snapshots: 0,
@@ -189,6 +200,7 @@ impl Mirror {
             rev: self.rev,
             state: self.state.clone(),
             last_ka: self.last_ka,
+            connected: self.connected,
             generator: self.ka.as_ref().map(|k| k.generator.clone()),
             timing: self.ka.as_ref().map(|k| k.timing),
             health: self.ka.as_ref().map(|k| k.health.clone()),

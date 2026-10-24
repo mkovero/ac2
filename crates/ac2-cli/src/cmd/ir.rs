@@ -354,6 +354,7 @@ async fn foreground(
                 }
                 Some(Input::Key(Key::Enter)) => {}
             },
+            silent = c.await_dead() => break Err(crate::watch::dead(silent)),
             changed = watch.changed(), if run.is_some() => {
                 if changed.is_err() {
                     break Err(CliError::Refused("the connection to the daemon closed".into()));
