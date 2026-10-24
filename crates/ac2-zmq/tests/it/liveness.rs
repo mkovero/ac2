@@ -181,9 +181,11 @@ mod kernel {
     /// Asserts `fd` carries the probing schedule `l` the way the kernel will run it.
     pub fn assert_liveness(fd: libc::c_int, l: &ac2_zmq::TcpLiveness, what: &str) {
         let secs = |d: Duration| libc::c_int::try_from(d.as_secs()).expect("seconds fit a C int");
-        assert_eq!(
+        // A boolean socket option reads back as any non-zero value when set: Linux gives 1,
+        // the BSD stack (macOS) the option's own flag bit.
+        assert_ne!(
             int_opt(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE),
-            1,
+            0,
             "{what}: SO_KEEPALIVE"
         );
         #[cfg(target_os = "linux")]
