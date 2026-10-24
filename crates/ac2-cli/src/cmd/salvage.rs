@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ac2_client::{Client, expect_body};
+use ac2_proto::model::layout::PaneContent;
 use ac2_proto::model::{
     ImportFormat, ImportRole, MathConfig, MathExpr, MathReference, MeasConfig, MeasKind, Operand,
     PaneLayout, TraceEdit, TraceKind, TraceOwner,
@@ -205,7 +206,12 @@ async fn restore(
         // Each pane's pick names the measurement by its id in the old session; one not
         // made again shows the layout's own measurement.
         for p in l.panes_mut() {
-            p.meas = p.meas.and_then(|old| meas_ids.get(&old).copied());
+            if let Some(PaneContent::Meas { meas }) = &mut p.content {
+                match meas_ids.get(meas) {
+                    Some(new) => *meas = *new,
+                    None => p.content = None,
+                }
+            }
         }
         if let Err(e) = c
             .call(Command::MeasLayout {

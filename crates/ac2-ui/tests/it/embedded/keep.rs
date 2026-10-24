@@ -80,6 +80,7 @@ fn kiosk_prefs() -> UiPrefs {
             id: PaneId(1),
             kind: PaneKind::Spl,
             measurement: Some(SPL.to_owned()),
+            meters: None,
             modes: PaneModes::default(),
             levels: Default::default(),
             plates: Default::default(),

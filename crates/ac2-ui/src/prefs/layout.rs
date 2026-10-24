@@ -59,6 +59,40 @@ impl NodeFile {
     }
 }
 
+/// What a Programme pane meters, one-based as the operator numbers inputs.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum MetersFile {
+    Inputs(Vec<u32>),
+    Pair([u32; 2]),
+}
+
+impl MetersFile {
+    fn of(m: &crate::state::Metered) -> Self {
+        let one = |c: u16| u32::from(c) + 1;
+        match m.pair() {
+            Some((l, r)) => Self::Pair([one(l), one(r)]),
+            None => Self::Inputs(m.inputs().into_iter().map(one).collect()),
+        }
+    }
+
+    /// `None` for what no pane can meter (input 0, a repeat, more than eight): the pane
+    /// then comes back empty rather than the file being refused.
+    fn parse(&self) -> Option<crate::state::Metered> {
+        let zero = |c: u32| c.checked_sub(1).and_then(|c| u16::try_from(c).ok());
+        let content = match self {
+            Self::Inputs(v) => ac2_proto::model::layout::PaneContent::Inputs {
+                inputs: v.iter().map(|c| zero(*c)).collect::<Option<Vec<_>>>()?,
+            },
+            Self::Pair([l, r]) => ac2_proto::model::layout::PaneContent::Pair {
+                left: zero(*l)?,
+                right: zero(*r)?,
+            },
+        };
+        crate::state::Metered::from_wire(&content)
+    }
+}
+
 /// One pane: its kind, measurement and the modes of each kind it may show.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -67,6 +101,9 @@ struct PaneEntryFile {
     kind: PaneFile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     measurement: Option<String>,
+    /// A Programme pane's one-based inputs, or its pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    meters: Option<MetersFile>,
     #[serde(default)]
     transfer_view: TransferViewFile,
     #[serde(default = "spl_meter_leq")]
@@ -92,6 +129,7 @@ impl PaneEntryFile {
             id: p.id.0,
             kind: PaneFile::of(p.kind),
             measurement: p.measurement.clone(),
+            meters: p.meters.as_ref().map(MetersFile::of),
             transfer_view: match m.transfer {
                 TransferView::Magnitude => TransferViewFile::Magnitude,
                 TransferView::Phase => TransferViewFile::Phase,
@@ -131,6 +169,7 @@ impl PaneEntryFile {
             id: PaneId(self.id),
             kind: self.kind.pane(),
             measurement: self.measurement.clone(),
+            meters: self.meters.as_ref().and_then(MetersFile::parse),
             modes: PaneModes {
                 transfer: match self.transfer_view {
                     TransferViewFile::Magnitude => TransferView::Magnitude,

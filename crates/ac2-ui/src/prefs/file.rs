@@ -25,6 +25,9 @@ struct File {
     jump_prominence_db: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spl_hold_ms: Option<u32>,
+    /// Written only when not the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ember_decay_s: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     theme: Option<ThemeFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -322,6 +325,7 @@ pub(super) enum PaneFile {
     Spectrum,
     Spl,
     Distortion,
+    Programme,
 }
 
 impl PaneFile {
@@ -331,6 +335,7 @@ impl PaneFile {
             PaneKind::Spectrum => Self::Spectrum,
             PaneKind::Spl => Self::Spl,
             PaneKind::Distortion => Self::Distortion,
+            PaneKind::Programme => Self::Programme,
         }
     }
 
@@ -340,6 +345,7 @@ impl PaneFile {
             Self::Spectrum => PaneKind::Spectrum,
             Self::Spl => PaneKind::Spl,
             Self::Distortion => PaneKind::Distortion,
+            Self::Programme => PaneKind::Programme,
         }
     }
 }
@@ -732,6 +738,12 @@ impl UiPrefs {
                 .filter(|d| d.is_finite() && *d > 0.0 && *d <= 60.0)
                 .unwrap_or(ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB),
             spl_hold_ms: f.spl_hold_ms,
+            // A hand-edited value outside the range is clamped into it: how the embers fade
+            // is taste, not worth refusing the file over.
+            ember_decay_s: f.ember_decay_s.map_or(
+                ac2_scene::gonio::EMBER_DECAY_DEFAULT_S,
+                ac2_scene::gonio::clamp_decay,
+            ),
             advice: f
                 .advice
                 .as_ref()
@@ -775,6 +787,8 @@ impl UiPrefs {
                 != ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB)
                 .then_some(self.jump_prominence_db),
             spl_hold_ms: self.spl_hold_ms,
+            ember_decay_s: (self.ember_decay_s != ac2_scene::gonio::EMBER_DECAY_DEFAULT_S)
+                .then_some(self.ember_decay_s),
             advice: AdviceFile::from_prefs(&self.advice),
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,

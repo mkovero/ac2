@@ -10,6 +10,7 @@ mod conn;
 mod connect;
 #[cfg(feature = "embedded")]
 mod embedded;
+mod gonio_parity;
 mod keymap_doc;
 mod no_dsp;
 mod pane_title;

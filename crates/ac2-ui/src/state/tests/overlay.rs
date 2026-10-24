@@ -360,7 +360,7 @@ fn palette_and_lists_page_and_wheel() {
         ref o => panic!("{o:?}"),
     };
     let n = t.st.pane_menu_rows(pane).len();
-    t.st.update(Msg::Wheel { rows: 5 }, &t.keys);
+    t.st.update(Msg::Wheel { rows: n as i32 }, &t.keys);
     assert_eq!(index(&t), n - 1);
 }
 

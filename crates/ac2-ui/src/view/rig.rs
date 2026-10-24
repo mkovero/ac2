@@ -65,6 +65,22 @@ pub(super) fn rig_page(
                         *msg = Some(Msg::Settings(SettingsMsg::RigMonitor(!on)));
                     }
                 }
+                // A programme-meter value: a click steps it on as → does.
+                _ if row.is_levels() => {
+                    let r = ui.add(egui::Button::selectable(
+                        focused,
+                        RichText::new(crate::settings::RigPage::levels_text(rig, row))
+                            .color(ch.text),
+                    ));
+                    if focused {
+                        super::settings::reveal_focused(&r);
+                    }
+                    if r.on_hover_text("← / → step it · each step is sent")
+                        .clicked()
+                    {
+                        *msg = Some(Msg::Settings(SettingsMsg::RigApply(row)));
+                    }
+                }
                 _ => {
                     let text = match row {
                         RigRow::Target => &p.target,
@@ -103,7 +119,7 @@ pub(super) fn rig_page(
             RigRow::Universe => Some(artnet::UNIVERSE_NOTE),
             RigRow::Fade => Some(artnet::FADE_NOTE),
             RigRow::DmxTest => Some(artnet::TEST_NOTE),
-            RigRow::Monitor => None,
+            _ => row.levels_note(),
         };
         let error = p.error.as_deref().filter(|_| focused);
         for (text, color) in [(note, ch.dim), (error, ch.fault)] {

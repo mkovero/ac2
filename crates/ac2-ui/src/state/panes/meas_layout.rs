@@ -486,6 +486,7 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
             PaneKind::Spectrum => wire::PaneKind::Spectrum,
             PaneKind::Spl => wire::PaneKind::Spl,
             PaneKind::Distortion => wire::PaneKind::Distortion,
+            PaneKind::Programme => wire::PaneKind::Programme,
         },
         transfer_view: match m.transfer {
             TransferView::Magnitude => wire::TransferView::Magnitude,
@@ -519,7 +520,10 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
             PlotChrome::NoGrid => wire::PlotChrome::NoGrid,
             PlotChrome::Bare => wire::PlotChrome::TracesOnly,
         },
-        meas: v.meas,
+        content: match v.meters {
+            Some(m) => Some(m.wire()),
+            None => v.meas.map(|meas| wire::PaneContent::Meas { meas }),
+        },
         levels,
         plates: super::plates::wire_plates(&v.plates),
     }
@@ -532,8 +536,13 @@ fn ui_view(p: &wire::LayoutPane) -> View {
             wire::PaneKind::Spectrum => PaneKind::Spectrum,
             wire::PaneKind::Spl => PaneKind::Spl,
             wire::PaneKind::Distortion => PaneKind::Distortion,
+            wire::PaneKind::Programme => PaneKind::Programme,
         },
-        meas: p.meas,
+        meas: p.content.as_ref().and_then(wire::PaneContent::meas),
+        meters: p
+            .content
+            .as_ref()
+            .and_then(crate::state::Metered::from_wire),
         plates: super::plates::ui_plates(&p.plates),
         modes: PaneModes {
             transfer: match p.transfer_view {

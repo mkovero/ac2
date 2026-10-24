@@ -251,6 +251,7 @@ impl AppState {
             (PaneKind::Spl, false) => m.spl = m.spl.prev(bands),
             (PaneKind::Distortion, true) => m.sweep = m.sweep.next(),
             (PaneKind::Distortion, false) => m.sweep = m.sweep.prev(),
+            (PaneKind::Programme, _) => {}
         }
         // The history starts with the view and goes with the last pane showing it: nothing
         // is kept for a hidden spectrograph; from the split to the spectrograph alone it

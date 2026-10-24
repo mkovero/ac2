@@ -216,6 +216,8 @@ pub struct PanePrefs {
     pub kind: PaneKind,
     /// The measurement it showed, by name.
     pub measurement: Option<String>,
+    /// What a Programme pane metered.
+    pub meters: Option<crate::state::Metered>,
     pub modes: PaneModes,
     /// The level axis ranges the operator set on it (one not set is framed when the pane
     /// first shows a curve).
@@ -301,6 +303,9 @@ pub struct UiPrefs {
     /// How long the SPL meter's number holds a reading; `None`: by its time weighting
     /// (`ac2_scene::spl::display_period_s`).
     pub spl_hold_ms: Option<u32>,
+    /// The goniometer embers' cooling time constant, seconds
+    /// (`ac2_scene::gonio::EMBER_DECAY_RANGE_S`).
+    pub ember_decay_s: f32,
     /// The transfer panes' headroom advice: on or off and its thresholds.
     pub advice: ac2_scene::advice::AdviceSettings,
     /// The layout as last left.
@@ -365,6 +370,7 @@ impl Default for UiPrefs {
             spec_ease: true,
             jump_prominence_db: ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB,
             spl_hold_ms: None,
+            ember_decay_s: ac2_scene::gonio::EMBER_DECAY_DEFAULT_S,
             advice: ac2_scene::advice::AdviceSettings::default(),
             layout: LayoutPrefs::default(),
             ir_levels: IrLevelPrefs::default(),

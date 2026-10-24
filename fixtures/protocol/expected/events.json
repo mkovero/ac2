@@ -132,7 +132,7 @@
        "spl_view": "meter_leq",
        "sweep_view": "response",
        "chrome": "full",
-       "meas": null,
+       "content": null,
        "levels": {
         "transfer": {
          "lo": -24.0,
@@ -162,33 +162,77 @@
       }
      },
      "b": {
-      "type": "pane",
-      "pane": {
-       "kind": "spl",
-       "transfer_view": "magnitude",
-       "spectrum_view": "spectrograph",
-       "spl_view": "meter_leq",
-       "sweep_view": "response",
-       "chrome": "no_grid",
-       "meas": 2,
-       "levels": {
-        "transfer": null,
-        "spectrum_dbfs": null,
-        "spectrum_spl": null,
-        "distortion": null
-       },
-       "plates": {
-        "legend": {
-         "at": null,
-         "scale": 1.0
+      "type": "split",
+      "axis": "column",
+      "ratio": 0.5,
+      "a": {
+       "type": "pane",
+       "pane": {
+        "kind": "spl",
+        "transfer_view": "magnitude",
+        "spectrum_view": "spectrograph",
+        "spl_view": "meter_leq",
+        "sweep_view": "response",
+        "chrome": "no_grid",
+        "content": {
+         "type": "meas",
+         "meas": 2
         },
-        "readout": {
-         "at": null,
-         "scale": 1.0
+        "levels": {
+         "transfer": null,
+         "spectrum_dbfs": null,
+         "spectrum_spl": null,
+         "distortion": null
         },
-        "mark": {
-         "at": null,
-         "scale": 1.0
+        "plates": {
+         "legend": {
+          "at": null,
+          "scale": 1.0
+         },
+         "readout": {
+          "at": null,
+          "scale": 1.0
+         },
+         "mark": {
+          "at": null,
+          "scale": 1.0
+         }
+        }
+       }
+      },
+      "b": {
+       "type": "pane",
+       "pane": {
+        "kind": "programme",
+        "transfer_view": "magnitude",
+        "spectrum_view": "spectrograph",
+        "spl_view": "meter_leq",
+        "sweep_view": "response",
+        "chrome": "full",
+        "content": {
+         "type": "pair",
+         "left": 2,
+         "right": 3
+        },
+        "levels": {
+         "transfer": null,
+         "spectrum_dbfs": null,
+         "spectrum_spl": null,
+         "distortion": null
+        },
+        "plates": {
+         "legend": {
+          "at": null,
+          "scale": 1.0
+         },
+         "readout": {
+          "at": null,
+          "scale": 1.0
+         },
+         "mark": {
+          "at": null,
+          "scale": 1.0
+         }
         }
        }
       }

@@ -707,6 +707,7 @@ fn grid_of(row: &[ac2_ui::state::View]) -> ac2_ui::prefs::PanesPrefs {
             id: PaneId(n),
             kind: v.kind,
             measurement: None,
+            meters: v.meters,
             modes: v.modes,
             levels: Default::default(),
             plates: Default::default(),

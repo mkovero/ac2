@@ -147,7 +147,7 @@ impl Page {
             Page::Rig => {
                 "↑↓ Tab move · type a target or a test, ←→ Home End move the caret, Delete \
                  deletes at it · Enter applies the target, sends the test · ←→ or Enter on \
-                 Monitor at start · Esc closes"
+                 Monitor at start and the programme meters' rows · Esc closes"
             }
         };
         text.to_owned()
@@ -273,6 +273,7 @@ pub enum DisplayRow {
     KeyHints,
     WarningToasts,
     SplHold,
+    EmberDecay,
     LeqStyle,
     LeqHistory,
     LeqBars,
@@ -291,11 +292,12 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 19] = [
+    pub const ALL: [DisplayRow; 20] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
         DisplayRow::SplHold,
+        DisplayRow::EmberDecay,
         DisplayRow::LeqStyle,
         DisplayRow::LeqHistory,
         DisplayRow::LeqBars,
@@ -319,6 +321,7 @@ impl DisplayRow {
             DisplayRow::KeyHints => "Key hints",
             DisplayRow::WarningToasts => "Warning toasts",
             DisplayRow::SplHold => "SPL number holds",
+            DisplayRow::EmberDecay => "Ember decay",
             DisplayRow::LeqStyle => "Leq windows",
             DisplayRow::LeqHistory => "Leq history strip",
             DisplayRow::LeqBars => "Leq bars",
@@ -357,6 +360,24 @@ pub fn theme_name(t: ThemeName) -> &'static str {
 }
 
 /// The SPL hold ←/→ choose.
+/// One ←/→ step of the goniometer's ember decay, seconds.
+const EMBER_STEP_S: f32 = 0.1;
+
+/// The ember decay one step from `s`, on the 0.1 s grid, within
+/// [`ac2_scene::gonio::EMBER_DECAY_RANGE_S`].
+pub fn step_ember_decay(s: f32, d: i32) -> f32 {
+    let steps = (ac2_scene::gonio::clamp_decay(s) / EMBER_STEP_S).round() + d.signum() as f32;
+    ac2_scene::gonio::clamp_decay(steps * EMBER_STEP_S)
+}
+
+/// `0.4 s: a point fades out that long after it lands`.
+pub fn ember_decay_text(s: f32) -> String {
+    format!(
+        "{} s: a goniometer point fades out that long after it lands",
+        ac2_scene::format::fixed(f64::from(ac2_scene::gonio::clamp_decay(s)), 1)
+    )
+}
+
 pub fn step_hold(h: Option<u32>, d: i32) -> Option<u32> {
     let i = SPL_HOLDS_MS.iter().position(|x| *x == h).unwrap_or(0) as i32;
     SPL_HOLDS_MS[(i + d).clamp(0, SPL_HOLDS_MS.len() as i32 - 1) as usize]
@@ -443,6 +464,7 @@ pub fn display_rows(
     theme: ThemeName,
     switches: DisplaySwitches,
     spl_hold_ms: Option<u32>,
+    ember_decay_s: f32,
     views: PaneViews,
     jump_prominence_db: f64,
     advice: ac2_scene::advice::AdviceSettings,
@@ -466,6 +488,7 @@ pub fn display_rows(
                         format!("{} s", ac2_scene::format::fixed(f64::from(ms) / 1e3, 2))
                     }
                 },
+                DisplayRow::EmberDecay => ember_decay_text(ember_decay_s),
                 DisplayRow::LeqStyle => match views.leq.style {
                     LeqStyle::Columns => "columns".into(),
                     LeqStyle::Tiles => "tiles".into(),

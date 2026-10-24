@@ -58,7 +58,7 @@ impl PaneLevels {
                 LevelScale::DbSpl => self.spectrum_spl,
             }),
             PaneKind::Distortion => Some(self.distortion),
-            PaneKind::Spl => None,
+            PaneKind::Spl | PaneKind::Programme => None,
         }
     }
 
@@ -70,7 +70,7 @@ impl PaneLevels {
                 LevelScale::DbSpl => &mut self.spectrum_spl,
             }),
             PaneKind::Distortion => Some(&mut self.distortion),
-            PaneKind::Spl => None,
+            PaneKind::Spl | PaneKind::Programme => None,
         }
     }
 }
@@ -107,7 +107,7 @@ impl LevelSlot {
                 LevelScale::DbSpl => Self::SpectrumSpl,
             }),
             PaneKind::Distortion => Some(Self::Distortion),
-            PaneKind::Spl => None,
+            PaneKind::Spl | PaneKind::Programme => None,
         }
     }
 
@@ -277,7 +277,7 @@ impl AppState {
             PaneKind::Distortion => f.modes.sweep == ac2_scene::view::SweepMode::Response,
             PaneKind::Transfer => f.modes.transfer == crate::state::TransferView::Magnitude,
             PaneKind::Spectrum => true,
-            PaneKind::Spl => false,
+            PaneKind::Spl | PaneKind::Programme => false,
         };
         if !has {
             let what = match f.kind {
@@ -523,7 +523,7 @@ impl AppState {
                     }
                 }
             }
-            PaneKind::Spl => {}
+            PaneKind::Spl | PaneKind::Programme => {}
         }
         v
     }

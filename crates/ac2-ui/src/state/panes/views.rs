@@ -155,6 +155,8 @@ pub struct View {
     /// The measurement chosen for it (Tab, the list, the chip's list); `None` follows the
     /// selection.
     pub meas: Option<MeasId>,
+    /// What a Programme pane meters; `None` on every other kind.
+    pub meters: Option<crate::state::Metered>,
     pub modes: PaneModes,
     /// Where the operator dropped the plates over its plot, and their text size.
     pub plates: Plates,
@@ -165,6 +167,7 @@ impl View {
         Self {
             kind,
             meas: None,
+            meters: None,
             modes: PaneModes::default(),
             plates: Plates::default(),
         }
@@ -440,5 +443,7 @@ pub const DEFAULT_PANE_AREA: (f32, f32) = (1280.0, 760.0);
 pub enum PaneMenuRow {
     Meas(MeasId),
     Kind(PaneKind),
+    /// A Programme pane metering these inputs or this pair.
+    Meter(crate::state::Metered),
     NewMeasurement,
 }

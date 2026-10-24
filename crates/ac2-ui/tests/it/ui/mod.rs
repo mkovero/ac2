@@ -29,6 +29,7 @@ mod eq;
 mod export;
 mod leq;
 mod overlays;
+mod programme;
 mod session;
 mod traces;
 mod transfer;

@@ -389,6 +389,9 @@ pub enum Msg {
     },
     /// A click in a pane: focuses it and selects the measurement it shows.
     FocusPane(PaneId),
+    /// A row of the Inputs list clicked (by its input, a pair by its left): picked, so its
+    /// meter keys act on it (again: unpicked).
+    InputPick(u16),
     /// The pane title chip: opens (or closes) the pane's list.
     PaneMenu(PaneId),
     /// A row picked from a pane's list: the pane shows that measurement (selected), or

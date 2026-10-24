@@ -223,6 +223,15 @@ impl CommandId {
             C::DistortionUnit => &["thd", "harmonics", "percent"],
             C::SweepIr => &["impulse", "IR"],
             C::ReferenceHarmonics => &["thd", "distortion"],
+            C::LevelsReset | C::LevelsResetAll => &["peak", "ppm", "clear", "overs", "max"],
+            C::ProgrammePane => &[
+                "ppm",
+                "meter",
+                "goniometer",
+                "correlation",
+                "stereo",
+                "pair",
+            ],
         }
     }
 }

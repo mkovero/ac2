@@ -40,8 +40,77 @@ pub enum SplitAxis {
     Column,
 }
 
+/// What a pane was picked to show when it is not the measurement whose layout this is: a
+/// measurement (its chip, a row dropped on it), or, for a Programme pane, the inputs or the
+/// stereo pair it meters. Inputs are zero-based device input channels, as the session's
+/// `input_channels` names them; a pane of a session loaded on a device without them shows
+/// which are missing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PaneContent {
+    /// A measurement; its id is the session's, kept by a save and a load.
+    Meas { meas: MeasId },
+    /// Up to [`PaneContent::MAX_INPUTS`] inputs, metered side by side.
+    Inputs { inputs: Vec<u16> },
+    /// A stereo pair: its two bars, correlation and goniometer.
+    Pair { left: u16, right: u16 },
+}
+
+impl PaneContent {
+    /// Bars a Programme pane shows at most: more than eight no longer read at a glance,
+    /// and a console feed is rarely wider.
+    pub const MAX_INPUTS: usize = 8;
+
+    /// The measurement, when that is what the content is.
+    pub fn meas(&self) -> Option<MeasId> {
+        match self {
+            Self::Meas { meas } => Some(*meas),
+            _ => None,
+        }
+    }
+
+    /// The inputs a Programme pane with this content meters, left to right.
+    pub fn inputs(&self) -> Vec<u16> {
+        match self {
+            Self::Meas { .. } => Vec::new(),
+            Self::Inputs { inputs } => inputs.clone(),
+            Self::Pair { left, right } => vec![*left, *right],
+        }
+    }
+
+    /// Why the content cannot be shown, if it cannot: no inputs, more than
+    /// [`Self::MAX_INPUTS`], one named twice, or a pair of one input.
+    pub fn check(&self) -> Result<(), String> {
+        match self {
+            Self::Meas { .. } => Ok(()),
+            Self::Inputs { inputs } if inputs.is_empty() => {
+                Err("a Programme pane names at least one input".into())
+            }
+            Self::Inputs { inputs } if inputs.len() > Self::MAX_INPUTS => Err(format!(
+                "a Programme pane shows at most {} inputs, not {}",
+                Self::MAX_INPUTS,
+                inputs.len()
+            )),
+            Self::Inputs { inputs } => {
+                let mut seen = inputs.clone();
+                seen.sort_unstable();
+                seen.dedup();
+                if seen.len() != inputs.len() {
+                    return Err("a Programme pane names each input once".into());
+                }
+                Ok(())
+            }
+            Self::Pair { left, right } if left == right => Err(format!(
+                "a pair is two inputs, not input {} twice",
+                left + 1
+            )),
+            Self::Pair { .. } => Ok(()),
+        }
+    }
+}
+
 /// What a pane draws: its kind and the view of each kind it may be turned into.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LayoutPane {
     /// The kind of plot.
@@ -56,11 +125,11 @@ pub struct LayoutPane {
     pub sweep_view: SweepView,
     /// How much of the plot besides the curves.
     pub chrome: PlotChrome,
-    /// The measurement the pane was picked to show (its chip, a row dropped on it); `None`:
-    /// the measurement whose layout this is. Ids are the session's, kept by a save and a
-    /// load; a pick of a measurement gone since shows the layout's own measurement.
+    /// What the pane was picked to show (its chip, a row dropped on it, a pair row); `None`:
+    /// the measurement whose layout this is. A pick of a measurement gone since shows the
+    /// layout's own measurement.
     #[serde(default)]
-    pub meas: Option<MeasId>,
+    pub content: Option<PaneContent>,
     /// The level axis ranges the operator set on the pane (zoomed, panned, reset, fitted);
     /// one left `None` is framed by the client when the pane first shows a curve.
     #[serde(default)]
@@ -164,6 +233,8 @@ pub enum PaneKind {
     Spl,
     /// Sweep results: response, distortion, the sweep's IR.
     Distortion,
+    /// Programme meters of inputs or a stereo pair: PPM bars, correlation, goniometer.
+    Programme,
 }
 
 /// The transfer pane's views.
@@ -255,7 +326,9 @@ impl PaneLayout {
     /// Why the layout cannot be drawn, if it cannot: a split ratio not strictly between 0
     /// and 1 leaves one side no room, more than [`Self::MAX_PANES`] panes, a level range
     /// not finite with its top above its bottom (no axis can be drawn on it), and a plate
-    /// placed outside 0 … 1 or with a text scale not finite and above 0.
+    /// placed outside 0 … 1 or with a text scale not finite and above 0, a Programme pane
+    /// without inputs (or another kind with them), and content [`PaneContent::check`]
+    /// refuses.
     pub fn check(&self) -> Result<(), String> {
         let n = self.panes().len();
         if n > Self::MAX_PANES {
@@ -276,6 +349,21 @@ impl PaneLayout {
                      not {} … {}",
                     r.lo, r.hi
                 ));
+            }
+        }
+        for p in self.panes() {
+            match (p.kind, &p.content) {
+                (PaneKind::Programme, None | Some(PaneContent::Meas { .. })) => {
+                    return Err("a Programme pane names the inputs or the pair it meters".into());
+                }
+                (
+                    PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Spl | PaneKind::Distortion,
+                    Some(PaneContent::Inputs { .. } | PaneContent::Pair { .. }),
+                ) => return Err("only a Programme pane meters inputs".into()),
+                _ => {}
+            }
+            if let Some(c) = &p.content {
+                c.check()?;
             }
         }
         for (name, p) in self.panes().iter().flat_map(|p| p.plates.all()) {
@@ -310,5 +398,46 @@ impl PaneLayout {
                 b.check_ratios()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn programme(content: Option<PaneContent>) -> PaneLayout {
+        let mut l = crate::samples::pane_layout();
+        for p in l.panes_mut() {
+            if p.kind == PaneKind::Programme {
+                p.content = content.clone();
+            }
+        }
+        l
+    }
+
+    #[test]
+    fn programme_content_is_checked() {
+        assert_eq!(crate::samples::pane_layout().check(), Ok(()));
+        let inputs = |v: Vec<u16>| Some(PaneContent::Inputs { inputs: v });
+        assert_eq!(programme(inputs(vec![0, 1, 2])).check(), Ok(()));
+        assert!(programme(None).check().is_err());
+        assert!(
+            programme(Some(PaneContent::Meas { meas: MeasId(1) }))
+                .check()
+                .is_err()
+        );
+        assert!(programme(inputs(vec![])).check().is_err());
+        assert!(programme(inputs((0..9).collect())).check().is_err());
+        assert!(programme(inputs(vec![1, 1])).check().is_err());
+        assert_eq!(
+            programme(Some(PaneContent::Pair { left: 3, right: 3 })).check(),
+            Err("a pair is two inputs, not input 4 twice".into())
+        );
+        let mut l = crate::samples::pane_layout();
+        l.panes_mut()[0].content = Some(PaneContent::Pair { left: 0, right: 1 });
+        assert!(l.check().is_err(), "only a Programme pane meters inputs");
+        let p = PaneContent::Pair { left: 2, right: 3 };
+        assert_eq!(p.inputs(), vec![2, 3]);
+        assert_eq!(p.meas(), None);
     }
 }

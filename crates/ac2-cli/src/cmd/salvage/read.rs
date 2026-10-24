@@ -604,7 +604,7 @@ mod tests {
         let layout = m.layout.expect("the layout");
         let panes = layout.panes();
         assert_eq!(panes.len(), 1);
-        assert_eq!(panes[0].meas, None);
+        assert_eq!(panes[0].content, None);
         assert!(panes[0].levels.is_empty());
     }
 

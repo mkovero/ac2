@@ -12,14 +12,18 @@ pub enum PaneKind {
     /// Sweep results: response, harmonic distortion, the sweep's IR. Hidden until a sweep
     /// is stored (or the operator shows it).
     Distortion,
+    /// Programme meters of inputs or a stereo pair: PPM bars, correlation, goniometer. It
+    /// shows no measurement: what it meters is its view's [`crate::state::Metered`].
+    Programme,
 }
 
 impl PaneKind {
-    pub const ALL: [PaneKind; 4] = [
+    pub const ALL: [PaneKind; 5] = [
         PaneKind::Transfer,
         PaneKind::Spectrum,
         PaneKind::Spl,
         PaneKind::Distortion,
+        PaneKind::Programme,
     ];
 
     pub fn scope(self) -> Scope {
@@ -28,6 +32,7 @@ impl PaneKind {
             PaneKind::Spectrum => Scope::Spectrum,
             PaneKind::Spl => Scope::Spl,
             PaneKind::Distortion => Scope::Distortion,
+            PaneKind::Programme => Scope::Programme,
         }
     }
 
@@ -37,6 +42,7 @@ impl PaneKind {
             PaneKind::Spectrum => "Spectrum / RTA",
             PaneKind::Spl => "SPL",
             PaneKind::Distortion => "Sweep / distortion",
+            PaneKind::Programme => "Programme",
         }
     }
 
@@ -50,6 +56,7 @@ impl PaneKind {
             PaneKind::Spl => matches!(k, MeasKind::Spl { .. }),
             // Sweep measurements: the pane shows their runs.
             PaneKind::Distortion => matches!(k, MeasKind::Sweep { .. }),
+            PaneKind::Programme => false,
         }
     }
 
@@ -70,6 +77,7 @@ impl PaneKind {
             PaneKind::Spectrum => "spectrum or RTA",
             PaneKind::Spl => "SPL",
             PaneKind::Distortion => "sweep",
+            PaneKind::Programme => "programme",
         }
     }
 }

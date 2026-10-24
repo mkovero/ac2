@@ -104,6 +104,7 @@ impl AppState {
                         id,
                         kind: v.kind,
                         measurement,
+                        meters: v.meters,
                         modes: v.modes,
                         levels: self.operator_levels(id),
                         plates: v.plates,
@@ -288,6 +289,7 @@ impl AppState {
                             View {
                                 kind: v.kind,
                                 meas: None,
+                                meters: v.meters,
                                 modes: v.modes,
                                 plates: v.plates,
                             },

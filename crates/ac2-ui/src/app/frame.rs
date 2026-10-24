@@ -162,6 +162,7 @@ impl eframe::App for App {
         if self.state.animating()
             || self.state.bars_easing(Instant::now())
             || self.state.spectrum_gliding(Instant::now())
+            || self.state.embers_glowing()
             || self.startup.first_frame.is_none()
         {
             if self.frame_interval.is_zero() {

@@ -99,6 +99,7 @@ fn display_and_recording_texts() {
         ThemeName::Light,
         switches,
         Some(500),
+        0.4,
         views,
         6.0,
         ac2_scene::advice::AdviceSettings::default(),
@@ -111,6 +112,7 @@ fn display_and_recording_texts() {
             "hidden",
             "off: warnings and Leq limit alarms go only to the notification log",
             "0.50 s",
+            "0.4 s: a goniometer point fades out that long after it lands",
             "tiles",
             "hidden",
             "jump to each new reading",
@@ -248,5 +250,23 @@ fn page_keys_follow_the_label_style() {
         Page::Leq
             .keys_in(LabelStyle::Mac)
             .contains("⇧Insert or + range…")
+    );
+}
+
+/// The ember decay steps by 0.1 s and stops at its range's ends.
+#[test]
+fn ember_decay_steps_within_its_range() {
+    use ac2_scene::gonio::{EMBER_DECAY_DEFAULT_S, EMBER_DECAY_RANGE_S};
+    let up = step_ember_decay(EMBER_DECAY_DEFAULT_S, 1);
+    assert!((up - 0.5).abs() < 1e-6, "{up}");
+    let down = step_ember_decay(EMBER_DECAY_DEFAULT_S, -1);
+    assert!((down - 0.3).abs() < 1e-6, "{down}");
+    assert_eq!(
+        step_ember_decay(EMBER_DECAY_RANGE_S.1, 1),
+        EMBER_DECAY_RANGE_S.1
+    );
+    assert_eq!(
+        step_ember_decay(EMBER_DECAY_RANGE_S.0, -1),
+        EMBER_DECAY_RANGE_S.0
     );
 }

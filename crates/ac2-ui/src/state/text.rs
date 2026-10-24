@@ -155,7 +155,7 @@ pub(super) fn drawn_in(t: &TraceMeta, p: PaneKind) -> bool {
         ),
         PaneKind::Spectrum => matches!(t.kind, TraceKind::Spectrum { .. } | TraceKind::Rta { .. }),
         PaneKind::Distortion => t.kind == TraceKind::Sweep,
-        PaneKind::Spl => false,
+        PaneKind::Spl | PaneKind::Programme => false,
     }
 }
 

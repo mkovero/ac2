@@ -593,64 +593,149 @@ fn progress(app: &mut App, ui: &mut egui::Ui, ch: &Chrome, p: &ac2_scene::progre
 }
 
 /// Every input of the open session, metered all the time: the operator sees what reaches
-/// the mic and the reference before and during any measurement.
-fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
+/// the mic and the reference before and during any measurement. A click picks a row for
+/// the Inputs keys (reset its max, open it in a Programme pane).
+fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) -> Option<Msg> {
     let rows = app.state.session_inputs();
     if rows.is_empty() {
-        return;
+        return None;
     }
+    let key = |c: CommandId| {
+        app.keymap
+            .chords(c, Scope::Inputs)
+            .first()
+            .map_or_else(|| "—".into(), |k| k.label())
+    };
+    let tip = format!(
+        "Click picks a row · {} resets its max and overs · {} meters it in a new Programme \
+         pane",
+        key(CommandId::LevelsReset),
+        key(CommandId::ProgrammePane)
+    );
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Inputs").strong());
-        ui.label(RichText::new("dBFS RMS · peak tick").small().color(ch.dim));
+        ui.label(RichText::new("Inputs").strong())
+            .on_hover_text(&tip);
+        ui.label(RichText::new("dBFS RMS · peak tick").small().color(ch.dim))
+            .on_hover_text(&tip);
     });
     ui.add_space(2.0);
+    let mut msg = None;
     for r in &rows {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            if let Some(u) = r.used {
-                let color = match u {
-                    ac2_scene::meter::InputUse::Reference => ch.focus,
-                    ac2_scene::meter::InputUse::Measurement => ch.ok,
-                };
-                ui.label(
-                    RichText::new(u.tag())
-                        .small()
-                        .strong()
-                        .color(ch.panel)
-                        .background_color(color),
+        let picked = app.state.input_pick == Some(r.channel);
+        let meters = app.state.row_meters(r.channel);
+        let programme = meters.map(|m| app.state.programme_of(m));
+        let row = ui.vertical(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if let Some(u) = r.used {
+                    let color = match u {
+                        ac2_scene::meter::InputUse::Reference => ch.focus,
+                        ac2_scene::meter::InputUse::Measurement => ch.ok,
+                    };
+                    ui.label(
+                        RichText::new(u.tag())
+                            .small()
+                            .strong()
+                            .color(ch.panel)
+                            .background_color(color),
+                    );
+                }
+                // Wrapped, never cut: the label names the mic curve in use.
+                ui.add(
+                    egui::Label::new(RichText::new(&r.label).color(if picked {
+                        ch.focus
+                    } else {
+                        ch.text
+                    }))
+                    .wrap_mode(egui::TextWrapMode::Wrap)
+                    .selectable(false),
                 );
+                // A pair's correlation beside its name: negative reads in the warning colour.
+                if let Some(pair) = programme
+                    .as_ref()
+                    .and_then(|p| p.pair.as_ref())
+                    .filter(|p| p.correlation != ac2_scene::programme::Correlation::NoData)
+                {
+                    let chip = pair.correlation.chip();
+                    let (fg, bg) = if chip.warning {
+                        (ch.on_fault_fill, ch.fault_fill)
+                    } else {
+                        (ch.text, ch.panel)
+                    };
+                    ui.label(
+                        RichText::new(format!("correlation {}", chip.text))
+                            .small()
+                            .color(fg)
+                            .background_color(bg),
+                    );
+                }
+            });
+            // A pair is one row with two meters, left then right, marked L and R.
+            let (l, rmark) = ac2_scene::meter::PAIR_MARKS;
+            match &r.right {
+                Some((_, right)) => {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        ui.label(RichText::new(l).small().monospace().color(ch.dim));
+                        super::session::meter_sized(ui, &r.reading, ch, 56.0);
+                        ui.label(RichText::new(rmark).small().monospace().color(ch.dim));
+                        super::session::meter_sized(ui, right, ch, 56.0);
+                    });
+                }
+                None => {
+                    ui.horizontal(|ui| {
+                        super::session::meter_sized(ui, &r.reading, ch, 136.0);
+                    });
+                }
             }
-            // Wrapped, never cut: the label names the mic curve in use.
-            ui.add(
-                egui::Label::new(RichText::new(&r.label).color(ch.text))
-                    .wrap_mode(egui::TextWrapMode::Wrap),
-            );
+            // The programme readouts of each side once the levels arrive: ballistic reading,
+            // true peak, max, overs.
+            if let Some(p) = programme
+                .as_ref()
+                .filter(|p| p.inputs.iter().any(|i| i.ppm.is_some() || i.max.is_some()))
+            {
+                let marks = [l, rmark];
+                for (i, input) in p.inputs.iter().enumerate() {
+                    let text = input.row_text(p.ballistic);
+                    let text = if p.inputs.len() > 1 {
+                        format!("{} {text}", marks.get(i).copied().unwrap_or(""))
+                    } else {
+                        text
+                    };
+                    let color = if input.clipped || input.overs > 0 {
+                        ch.fault
+                    } else {
+                        ch.dim
+                    };
+                    ui.add(
+                        egui::Label::new(RichText::new(text).small().color(color))
+                            .wrap_mode(egui::TextWrapMode::Wrap)
+                            .selectable(false),
+                    );
+                }
+            }
+            // What a line or digital row reads in (a mic row names its curve in the label).
+            if let Some(cal) = &r.cal {
+                ui.label(RichText::new(cal).small().color(ch.dim));
+            }
         });
-        // A pair is one row with two meters, left then right, marked L and R.
-        let (l, rmark) = ac2_scene::meter::PAIR_MARKS;
-        match &r.right {
-            Some((_, right)) => {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.label(RichText::new(l).small().monospace().color(ch.dim));
-                    super::session::meter_sized(ui, &r.reading, ch, 56.0);
-                    ui.label(RichText::new(rmark).small().monospace().color(ch.dim));
-                    super::session::meter_sized(ui, right, ch, 56.0);
-                });
-            }
-            None => {
-                ui.horizontal(|ui| {
-                    super::session::meter_sized(ui, &r.reading, ch, 136.0);
-                });
-            }
+        let rect = row.response.rect;
+        if picked {
+            ui.painter().rect_stroke(
+                rect.expand(2.0),
+                3.0,
+                egui::Stroke::new(1.0, ch.focus),
+                egui::StrokeKind::Outside,
+            );
         }
-        // What a line or digital row reads in (a mic row names its curve in the label).
-        if let Some(cal) = &r.cal {
-            ui.label(RichText::new(cal).small().color(ch.dim));
+        let id = ui.id().with(("input-row", r.channel));
+        if ui.interact(rect, id, egui::Sense::click()).clicked() {
+            msg = Some(Msg::InputPick(r.channel));
         }
         ui.add_space(2.0);
     }
     ui.add_space(10.0);
+    msg
 }
 
 pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
@@ -682,7 +767,9 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             key_hint(app, CommandId::PrevTrace)
         ),
     };
-    inputs(app, ui, ch);
+    if let Some(m) = inputs(app, ui, ch) {
+        app.dispatch(m);
+    }
     let mut msg = None;
     let (mut under, mut row_over) = (None, None);
     let reveal = std::mem::take(&mut app.state.tree_reveal);

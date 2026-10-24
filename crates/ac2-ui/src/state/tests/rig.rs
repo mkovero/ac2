@@ -780,3 +780,65 @@ fn shift_tab_steps_back_on_the_rig_page() {
     t.key("Shift+Tab");
     assert_eq!(rig_page(&t).focus, RigRow::Target);
 }
+
+/// The programme-meter rows step the rig's value with ←/→ and send each step as a
+/// `levels.set` of that value alone, on the rev the page shows; a range's end sends nothing.
+#[test]
+fn the_rig_page_steps_the_programme_meters() {
+    use ac2_proto::model::{Ballistic, CorrelationWindow};
+    use ac2_proto::units::{Dbfs, Dbtp};
+    let mut t = T::new();
+    t.conn(mirror(with_rig(7)));
+    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.update(
+        Msg::Settings(SettingsMsg::RigFocus(RigRow::Ballistic)),
+        &t.keys,
+    );
+    let set =
+        |ballistic, correlation_window, over_threshold, correlation_gate| Command::LevelsSet {
+            base: Rev(7),
+            ballistic,
+            correlation_window,
+            over_threshold,
+            correlation_gate,
+        };
+    let r = t.key("ArrowRight");
+    assert_eq!(
+        call(&r),
+        Some((
+            &set(Some(Ballistic::Type1), None, None, None),
+            "programme meters read Type I"
+        ))
+    );
+    assert!(
+        call(&t.key("ArrowLeft")).is_none(),
+        "true peak is the first"
+    );
+    t.key("ArrowDown");
+    let r = t.key("ArrowLeft");
+    assert_eq!(
+        call(&r),
+        Some((
+            &set(None, Some(CorrelationWindow::Short), None, None),
+            "correlation window 0.3 s"
+        ))
+    );
+    t.key("ArrowDown");
+    let r = t.key("ArrowLeft");
+    assert_eq!(
+        call(&r),
+        Some((
+            &set(None, None, Some(Dbtp(-0.5)), None),
+            "an over is above −0.5 dBTP"
+        ))
+    );
+    t.key("ArrowDown");
+    let r = t.key("ArrowRight");
+    assert_eq!(
+        call(&r),
+        Some((
+            &set(None, None, None, Some(Dbfs(-55.0))),
+            "correlation gate −55 dBFS"
+        ))
+    );
+}

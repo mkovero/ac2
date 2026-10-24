@@ -57,7 +57,7 @@ impl AppState {
             PaneKind::Distortion if v.modes.sweep == ac2_scene::view::SweepMode::Response => {
                 Some(FreqPlot::Distortion)
             }
-            PaneKind::Transfer | PaneKind::Distortion | PaneKind::Spl => None,
+            PaneKind::Transfer | PaneKind::Distortion | PaneKind::Spl | PaneKind::Programme => None,
         }
     }
 
@@ -331,7 +331,7 @@ impl AppState {
 
     /// N's split: the new pane, or `None` when a half would be smaller than resizing keeps
     /// a pane.
-    fn split_focused_pane(&mut self) -> Option<PaneId> {
+    pub(in crate::state) fn split_focused_pane(&mut self) -> Option<PaneId> {
         let rect = self.focused_rect();
         let axis = if rect.w >= rect.h {
             Axis::Row
@@ -538,6 +538,7 @@ impl AppState {
     /// Focuses pane `id` from the keyboard: it takes the keys; the selection stays on the
     /// row the operator chose.
     pub(in crate::state) fn focus_pane(&mut self, id: PaneId) {
+        self.input_pick = None;
         self.layout.set_focus(id);
     }
 
@@ -561,6 +562,9 @@ impl AppState {
         if let Some(v) = self.layout.view_mut(id) {
             if v.kind != kind {
                 v.meas = None;
+            }
+            if kind != PaneKind::Programme {
+                v.meters = None;
             }
             v.kind = kind;
         }
@@ -604,9 +608,12 @@ impl AppState {
         v.extend(
             PaneKind::ALL
                 .into_iter()
-                .filter(|k| *k != kind && !meas.iter().any(|m| k.shows(&m.config.kind)))
+                // A Programme pane is offered by what it meters, below.
+                .filter(|k| *k != kind && *k != PaneKind::Programme)
+                .filter(|k| !meas.iter().any(|m| k.shows(&m.config.kind)))
                 .map(|k| (PaneMenuRow::Kind(k), format!("pane  {}", k.title()))),
         );
+        v.extend(self.programme_menu_rows());
         let key = self.keys.label(CommandId::NewMeasurement, Scope::Global);
         v.push((
             PaneMenuRow::NewMeasurement,
@@ -625,6 +632,13 @@ impl AppState {
             PaneMenuRow::Meas(m) => self.pane_show(id, m),
             PaneMenuRow::Kind(k) => {
                 self.set_pane_kind(id, k);
+                self.focus_pane(id);
+            }
+            PaneMenuRow::Meter(m) => {
+                self.set_pane_kind(id, PaneKind::Programme);
+                if let Some(v) = self.layout.view_mut(id) {
+                    v.meters = Some(m);
+                }
                 self.focus_pane(id);
             }
             PaneMenuRow::NewMeasurement => {

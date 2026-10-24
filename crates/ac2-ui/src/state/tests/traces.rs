@@ -121,6 +121,11 @@ fn panes_show_their_measurement_and_leave_the_selection() {
             .into_iter()
             .map(|(r, _)| r)
             .collect();
+    // The Programme rows (each input, then both side by side) come before New measurement.
+    let meters =
+        |c: &[u16]| PaneMenuRow::Meter(crate::state::Metered::inputs_of(c).expect("meters"));
+    let at = want.len() - 1;
+    want.splice(at..at, [meters(&[0]), meters(&[1]), meters(&[0, 1])]);
     assert_eq!(rows, want);
     t.key("Esc");
 

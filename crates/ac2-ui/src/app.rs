@@ -467,6 +467,7 @@ impl App {
         let animating = self.state.animating();
         let easing = self.state.bars_easing(Instant::now());
         let gliding = self.state.spectrum_gliding(Instant::now());
+        let glowing = self.state.embers_glowing();
         let data = self.state.data.clone();
         let mirror = self.state.mirror.clone();
         let mut reqs = self.state.update(msg, &self.keymap);
@@ -474,11 +475,16 @@ impl App {
         let panes = match what {
             Touches::Tick => {
                 let now = Instant::now();
-                tick_touches(
+                let mut panes = tick_touches(
                     animating || self.state.animating(),
                     easing || self.state.bars_easing(now),
                     gliding || self.state.spectrum_gliding(now),
-                )
+                );
+                // The embers cool between gonio frames.
+                if glowing || self.state.embers_glowing() {
+                    panes.push(PaneKind::Programme);
+                }
+                panes
             }
             Touches::Toasts => Vec::new(),
             Touches::Data => data_touches(data.as_deref(), self.state.data.as_deref()),
@@ -683,9 +689,11 @@ impl Touches {
     }
 }
 
-/// The panes that draw `topic`. Input meters are drawn by the chrome, outside any pane.
+/// The panes that draw `topic`. Input meters are drawn by the chrome, outside any pane, and
+/// by the Programme panes.
 fn topic_panes(topic: &Topic) -> &'static [PaneKind] {
     match topic {
+        Topic::SessionLevels | Topic::SessionGonio => &[PaneKind::Programme],
         Topic::Data { stream, .. } => match stream {
             Stream::Tf | Stream::Ir => &[PaneKind::Transfer],
             Stream::Spec | Stream::Rta => &[PaneKind::Spectrum],

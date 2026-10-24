@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 65`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 66`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -363,11 +363,16 @@ layout it receives for the measurement it has selected on screen and never sends
 A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axis: row |
 column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
 `ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is {`kind`,
-`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `chrome`, `meas`, `levels`,
+`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `chrome`, `content`, `levels`,
 `plates`}
-(snake_case enums, `ac2_proto::model::layout`): its kind, the view of each kind it may be
-turned into, the measurement it was picked to show (`meas`: a `MeasId` or nil, nil being
-the measurement whose layout it is; a pick of a measurement gone since shows that one too)
+(snake_case enums, `ac2_proto::model::layout`): its kind (`transfer`, `spectrum`, `spl`,
+`distortion`, `programme`), the view of each kind it may be turned into, what it was picked
+to show (`content`: nil, being the measurement whose layout it is, or a tagged map
+`{type: meas, meas: MeasId}` — a pick of a measurement gone since shows the layout's own —,
+`{type: inputs, inputs: [u16, …]}` (one to eight zero-based device inputs a Programme pane
+meters) or `{type: pair, left: u16, right: u16}` (the stereo pair it meters); a layout
+whose content names no input, more than eight, an input twice or a pair of one input, a
+Programme pane without inputs or another kind with them, is refused `invalid`)
 and the level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
 `spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
 when the pane first shows a curve) and where its readout plates sit (`plates`: {`legend`,

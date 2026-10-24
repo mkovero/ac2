@@ -171,9 +171,10 @@ pub(super) fn sweep_config() -> SweepConfig {
     }
 }
 
-/// A transfer pane beside an SPL meter, the transfer one in its phase view with its level
-/// axis zoomed and its cursor values dragged to the bottom-left at twice the text size, the
-/// meter picked for measurement 2.
+/// A transfer pane beside an SPL meter over a Programme pane, the transfer one in its phase
+/// view with its level axis zoomed and its cursor values dragged to the bottom-left at twice
+/// the text size, the meter picked for measurement 2, the Programme pane metering the pair
+/// of inputs 3 and 4.
 pub fn pane_layout() -> PaneLayout {
     use crate::model::layout::*;
     let pane = |kind, transfer_view| LayoutPane {
@@ -183,7 +184,7 @@ pub fn pane_layout() -> PaneLayout {
         spl_view: SplView::MeterLeq,
         sweep_view: SweepView::Response,
         chrome: PlotChrome::Full,
-        meas: None,
+        content: None,
         levels: LayoutLevels::default(),
         plates: LayoutPlates::default(),
     };
@@ -209,11 +210,21 @@ pub fn pane_layout() -> PaneLayout {
                 ..pane(PaneKind::Transfer, TransferView::Phase)
             }),
         }),
-        b: Box::new(PaneLayout::Pane {
-            pane: Box::new(LayoutPane {
-                chrome: PlotChrome::NoGrid,
-                meas: Some(MeasId(2)),
-                ..pane(PaneKind::Spl, TransferView::Magnitude)
+        b: Box::new(PaneLayout::Split {
+            axis: SplitAxis::Column,
+            ratio: 0.5,
+            a: Box::new(PaneLayout::Pane {
+                pane: Box::new(LayoutPane {
+                    chrome: PlotChrome::NoGrid,
+                    content: Some(PaneContent::Meas { meas: MeasId(2) }),
+                    ..pane(PaneKind::Spl, TransferView::Magnitude)
+                }),
+            }),
+            b: Box::new(PaneLayout::Pane {
+                pane: Box::new(LayoutPane {
+                    content: Some(PaneContent::Pair { left: 2, right: 3 }),
+                    ..pane(PaneKind::Programme, TransferView::Magnitude)
+                }),
             }),
         }),
     }

@@ -70,6 +70,8 @@ mod link;
 use link::Pending;
 use panes::meas_layout::LayoutQueue;
 mod drop_math;
+mod programme;
+pub use programme::{MAX_METERED, Metered, ProgrammeUi};
 mod new_meas;
 mod panes;
 mod queries;
@@ -275,6 +277,11 @@ pub struct AppState {
     pub leq: LeqUi,
     /// Each SPL meter's displayed reading, held for its display period.
     pub spl_hold: BTreeMap<MeasId, ac2_scene::spl::SplHold>,
+    /// The Programme panes' flying peaks and ember rings.
+    pub programme: ProgrammeUi,
+    /// The Inputs-list row picked (its input, a pair's left): the keys go to its meters
+    /// until a pane or another row is clicked.
+    pub input_pick: Option<u16>,
     /// Each pane's level axis ranges, by pane: a pane not here draws on the defaults.
     pane_levels: BTreeMap<PaneId, PaneLevels>,
     /// Spectrum panes whose level axis is framed for what they show, or set by the operator:
@@ -442,6 +449,8 @@ impl AppState {
             },
             tf_display: Default::default(),
             spl_hold: BTreeMap::new(),
+            programme: ProgrammeUi::default(),
+            input_pick: None,
             pane_auto: true,
             pane_levels: BTreeMap::new(),
             spectrum_hold: BTreeMap::new(),
@@ -489,6 +498,20 @@ impl AppState {
                 )
         );
         let conn = matches!(msg, Msg::Conn(_));
+        // A click anywhere else in the list or the panes gives the keys back to the panes.
+        if matches!(
+            msg,
+            Msg::FocusPane(_)
+                | Msg::SelectMeas(_)
+                | Msg::SelectLive(_)
+                | Msg::SelectMath(_)
+                | Msg::SelectTrace(_)
+                | Msg::PaneMenu(_)
+                | Msg::PanePick(..)
+                | Msg::OpenRig
+        ) {
+            self.input_pick = None;
+        }
         if !tick && !drag {
             self.flush_layout_drag(&mut out);
             self.finish_drag();
@@ -568,6 +591,7 @@ impl AppState {
                 }
                 let now = self.now_s;
                 self.toasts.list.retain(|t| t.until_s > now);
+                self.retire_embers();
             }
             Msg::ToastsHeld(held) => self.toasts.held = held,
             Msg::Rasterizer(r) => {
@@ -617,6 +641,9 @@ impl AppState {
             // A click in a pane gives it the keyboard; the selection stays on the row the
             // operator chose (the pane's keys act on what it shows).
             Msg::FocusPane(p) => self.layout.set_focus(p),
+            Msg::InputPick(c) => {
+                self.input_pick = (self.input_pick != Some(c)).then_some(c);
+            }
             Msg::LegendPick(p, key) => self.legend_pick(p, key),
             Msg::PaneMenu(p) => {
                 self.overlay = match self.overlay {

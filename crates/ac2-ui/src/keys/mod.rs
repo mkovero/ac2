@@ -37,16 +37,22 @@ pub enum Scope {
     Ir,
     Spl,
     Distortion,
+    /// A Programme pane in focus.
+    Programme,
+    /// A row of the Inputs list picked (clicked): its meters' keys.
+    Inputs,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 6] = [
+    pub const ALL: [Scope; 8] = [
         Scope::Global,
         Scope::Transfer,
         Scope::Spectrum,
         Scope::Ir,
         Scope::Spl,
         Scope::Distortion,
+        Scope::Programme,
+        Scope::Inputs,
     ];
 
     pub fn name(self) -> &'static str {
@@ -57,6 +63,8 @@ impl Scope {
             Scope::Ir => "ir",
             Scope::Spl => "spl",
             Scope::Distortion => "distortion",
+            Scope::Programme => "programme",
+            Scope::Inputs => "inputs",
         }
     }
 
@@ -68,6 +76,8 @@ impl Scope {
             Scope::Ir => "Transfer: impulse response view",
             Scope::Spl => "SPL",
             Scope::Distortion => "Sweep / distortion",
+            Scope::Programme => "Programme",
+            Scope::Inputs => "Inputs list row",
         }
     }
 
@@ -326,4 +336,8 @@ commands! {
     DistortionUnit => "distortion_unit", "Distortion unit", [Distortion];
     SweepIr => "sweep_ir", "Sweep IR view", [Distortion];
     ReferenceHarmonics => "reference_harmonics", "Reference harmonics", [Distortion];
+
+    LevelsReset => "levels_reset", "Reset overs and max", [Programme, Inputs];
+    LevelsResetAll => "levels_reset_all", "Reset every overs and max", [Programme, Inputs];
+    ProgrammePane => "programme_pane", "Open a Programme pane", [Inputs];
 }

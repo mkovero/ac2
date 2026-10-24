@@ -196,7 +196,7 @@ impl AppState {
                 meas_input(&m.config.kind).and_then(|i| self.curve_note(i, applied))
             }
             PaneKind::Distortion => self.pane_sweep(id).and_then(|(d, _)| stored(&d.meta)),
-            PaneKind::Spl => None,
+            PaneKind::Spl | PaneKind::Programme => None,
         }
     }
 
@@ -615,7 +615,7 @@ impl AppState {
         match kind {
             PaneKind::Transfer => m.config.kind.publishes_tf(),
             PaneKind::Spectrum => spectrum_stream(m).is_some(),
-            PaneKind::Spl | PaneKind::Distortion => false,
+            PaneKind::Spl | PaneKind::Distortion | PaneKind::Programme => false,
         }
     }
 
@@ -729,9 +729,13 @@ impl AppState {
         matches!(self.conn, ConnState::Connected { .. })
     }
 
-    /// Keys go to the focused pane's scope.
+    /// Keys go to the picked Inputs row's meters, else to the focused pane's scope.
     pub fn scope(&self) -> Scope {
-        self.layout.focused().scope()
+        if self.input_pick.is_some() {
+            Scope::Inputs
+        } else {
+            self.layout.focused().scope()
+        }
     }
 
     /// Navigation still moving: the UI keeps repainting until it settles.

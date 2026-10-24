@@ -302,7 +302,7 @@ def _plate(at=None, scale=1.0):
 
 
 def _layout_pane(
-    kind, transfer_view, chrome="full", meas=None, transfer_levels=None, readout=None
+    kind, transfer_view, chrome="full", content=None, transfer_levels=None, readout=None
 ):
     return {
         "kind": kind,
@@ -311,7 +311,7 @@ def _layout_pane(
         "spl_view": "meter_leq",
         "sweep_view": "response",
         "chrome": chrome,
-        "meas": meas,
+        "content": content,
         "levels": {
             "transfer": transfer_levels,
             "spectrum_dbfs": None,
@@ -327,7 +327,8 @@ def _layout_pane(
 
 
 # samples::pane_layout(): a transfer pane (level axis zoomed, cursor values dragged to the
-# bottom-left at twice the text size) beside an SPL meter picked for measurement 2.
+# bottom-left at twice the text size) beside an SPL meter picked for measurement 2 over a
+# Programme pane metering the pair of inputs 3 and 4.
 PANE_LAYOUT = {
     "type": "split",
     "axis": "row",
@@ -341,7 +342,25 @@ PANE_LAYOUT = {
             readout=_plate([0.0, 1.0], 2.0),
         ),
     },
-    "b": {"type": "pane", "pane": _layout_pane("spl", "magnitude", "no_grid", meas=2)},
+    "b": {
+        "type": "split",
+        "axis": "column",
+        "ratio": 0.5,
+        "a": {
+            "type": "pane",
+            "pane": _layout_pane(
+                "spl", "magnitude", "no_grid", content={"type": "meas", "meas": 2}
+            ),
+        },
+        "b": {
+            "type": "pane",
+            "pane": _layout_pane(
+                "programme",
+                "magnitude",
+                content={"type": "pair", "left": 2, "right": 3},
+            ),
+        },
+    },
 }
 
 

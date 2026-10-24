@@ -14,7 +14,7 @@ fn two_transfer() -> PaneLayout {
             spl_view: wire::SplView::MeterLeq,
             sweep_view: wire::SweepView::Response,
             chrome: wire::PlotChrome::Full,
-            meas: None,
+            content: None,
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
         }),
@@ -395,7 +395,7 @@ fn three_transfer() -> PaneLayout {
             spl_view: wire::SplView::Leq,
             sweep_view: wire::SweepView::Response,
             chrome: wire::PlotChrome::TracesOnly,
-            meas: None,
+            content: None,
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
         }),
@@ -595,7 +595,7 @@ fn three_spectrum() -> PaneLayout {
             spl_view: wire::SplView::Leq,
             sweep_view: wire::SweepView::Response,
             chrome: wire::PlotChrome::TracesOnly,
-            meas: None,
+            content: None,
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
         }),
@@ -759,7 +759,7 @@ fn guest_in_spectrograph_survives_the_rows(put: fn(&mut T, PaneId) -> Vec<Reques
     assert!(layout_calls(&r).is_empty(), "Spectrum 2's row: {r:?}");
     assert_eq!(t.st.selected, Some(s2));
     let mut picked = three_spectrum();
-    picked.panes_mut()[1].meas = Some(s1);
+    picked.panes_mut()[1].content = Some(wire::PaneContent::Meas { meas: s1 });
     assert_eq!(
         t.st.pane_layout(),
         picked,
@@ -918,7 +918,7 @@ fn a_layout_brings_its_level_ranges() {
 #[test]
 fn a_pick_of_a_deleted_measurement_falls_back_to_the_chosen_one() {
     let mut l = three_spectrum();
-    l.panes_mut()[1].meas = Some(MeasId(9));
+    l.panes_mut()[1].content = Some(wire::PaneContent::Meas { meas: MeasId(9) });
     let mut s = rig();
     let mut m = meas(4, "Spectrum 2", spectrum());
     m.layout = Some(l);
@@ -946,7 +946,10 @@ fn picks_and_level_ranges_survive_a_reconnect_and_reach_a_fresh_app() {
     answer_layout_calls(&mut t, &r);
     let zoomed = t.st.level_range(middle);
     let stored = t.st.pane_layout();
-    assert_eq!(stored.panes()[1].meas, Some(s1));
+    assert_eq!(
+        stored.panes()[1].content,
+        Some(wire::PaneContent::Meas { meas: s1 })
+    );
     assert!(
         stored.panes()[1].levels.spectrum_dbfs.is_some(),
         "{stored:?}"

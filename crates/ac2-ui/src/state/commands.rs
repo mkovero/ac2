@@ -401,8 +401,23 @@ impl AppState {
                 ));
             }
             C::MaximisePane => self.cycle_layout(),
-            C::NextInTree => self.cycle_tree_row(1),
-            C::PrevInTree => self.cycle_tree_row(-1),
+            C::NextInTree => {
+                self.input_pick = None;
+                self.cycle_tree_row(1);
+            }
+            C::PrevInTree => {
+                self.input_pick = None;
+                self.cycle_tree_row(-1);
+            }
+            C::LevelsReset => match self.reset_target() {
+                Some(channels) => self.levels_reset(channels, out),
+                None => self.warn("pick an Inputs row or focus a Programme pane to reset its max"),
+            },
+            C::LevelsResetAll => self.levels_reset(Vec::new(), out),
+            C::ProgrammePane => match self.input_pick.and_then(|c| self.row_meters(c)) {
+                Some(m) => self.open_programme(m),
+                None => self.warn("pick an Inputs row first: its meters open in a new pane"),
+            },
             C::PaneMeasurement => self.overlay = self.pane_menu(self.layout.focus),
             // The sweep pane draws one run at a time: V steps through the runs, never onto a
             // curve the pane cannot draw.

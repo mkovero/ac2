@@ -3,6 +3,7 @@
 use std::io::{self, Write};
 
 use ac2_proto::GridDef;
+use ac2_proto::model::layout::PaneContent;
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
     ClockRelation, DelayReference, DepthPolicy, InputKind, LineCalEntry, MeasKind, Measurement,
@@ -215,8 +216,24 @@ pub fn measurement(m: &Measurement) -> String {
         // Panes numbered in reading order, as the app numbers them.
         for (i, p) in l.panes().iter().enumerate() {
             let mut said = Vec::new();
-            if let Some(id) = p.meas.filter(|id| *id != m.id) {
-                said.push(format!("shows {id}"));
+            match &p.content {
+                Some(PaneContent::Meas { meas }) if *meas != m.id => {
+                    said.push(format!("shows {meas}"));
+                }
+                Some(PaneContent::Inputs { inputs }) => said.push(format!(
+                    "meters inputs {}",
+                    inputs
+                        .iter()
+                        .map(|c| (u32::from(*c) + 1).to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+                Some(PaneContent::Pair { left, right }) => said.push(format!(
+                    "meters the pair of inputs {}, {}",
+                    u32::from(*left) + 1,
+                    u32::from(*right) + 1
+                )),
+                _ => {}
             }
             if !p.levels.is_empty() {
                 said.push("level axis set".to_owned());

@@ -274,6 +274,15 @@ pub fn defaults() -> Vec<Binding> {
         (C::SweepIr, S::Distortion, sh(K::I)),
         // E, as the transfer pane's phase reference: the reference input's own harmonics.
         (C::ReferenceHarmonics, S::Distortion, k(K::E)),
+        // R resets the meters' max and overs, as it resets the other panes' averaging and
+        // the SPL meter's display; Shift+R, a step further, every input's.
+        (C::LevelsReset, S::Programme, k(K::R)),
+        (C::LevelsResetAll, S::Programme, sh(K::R)),
+        (C::LevelsReset, S::Inputs, k(K::R)),
+        (C::LevelsResetAll, S::Inputs, sh(K::R)),
+        // P(rogramme) on a picked Inputs row: its meters in a new pane. Not Enter, which
+        // fires the stimulus in every keymap.
+        (C::ProgrammePane, S::Inputs, k(K::P)),
     ];
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
     v.into_iter()
@@ -374,6 +383,27 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::ReferenceHarmonics, "reference", 60),
                     hint(C::MaximisePane, "maximise", 50),
                     hint(C::ClosePane, "close pane", 40),
+                ]
+            }
+        }
+        Scope::Programme => {
+            const {
+                &[
+                    hint(C::LevelsReset, "reset max", 90),
+                    hint(C::LevelsResetAll, "reset all", 80),
+                    hint(C::PlotChrome, "grid", 60),
+                    hint(C::MaximisePane, "maximise", 50),
+                    hint(C::ClosePane, "close pane", 40),
+                ]
+            }
+        }
+        Scope::Inputs => {
+            const {
+                &[
+                    hint(C::LevelsReset, "reset max", 90),
+                    hint(C::LevelsResetAll, "reset all", 80),
+                    hint(C::ProgrammePane, "programme pane", 85),
+                    hint(C::NextInTree, "measurements", 60),
                 ]
             }
         }

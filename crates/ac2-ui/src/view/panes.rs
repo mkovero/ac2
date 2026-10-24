@@ -55,7 +55,7 @@ fn stage_caption(st: &crate::state::AppState, id: PaneId) -> Option<String> {
         return None;
     }
     let parts: Vec<String> = [
-        Some(view.title().to_owned()),
+        Some(st.pane_title(id)),
         st.pane_meas(id).map(|m| m.config.name.clone()),
         st.pane_caption(id),
     ]
@@ -233,6 +233,7 @@ fn scene_for(
             };
             (s.scene(), axes)
         }
+        PaneKind::Programme => (scenes::programme(st, id, theme, vp)?, Axes::default()),
     };
     let scene = Arc::new(scene);
     app.scenes.insert(
@@ -263,6 +264,7 @@ fn placeholder(id: PaneId, app: &App) -> String {
     match app.state.layout.kind(id) {
         PaneKind::Transfer if modes.transfer.ir().is_some() => "no transfer measurement".into(),
         PaneKind::Spl => scenes::spl_placeholder(&app.state, id, &app.keymap),
+        PaneKind::Programme => ac2_scene::programme::NO_METERS.to_owned(),
         _ => String::new(),
     }
 }
@@ -309,11 +311,8 @@ fn pane(
     order: &[PaneId],
 ) {
     let pane = app.state.layout.kind(id);
-    let pane_title = app
-        .state
-        .layout
-        .view(id)
-        .map_or(pane.title(), |v| v.title());
+    let pane_title = app.state.pane_title(id);
+    let pane_title = pane_title.as_str();
     if stage {
         // The SPL meter and its Leq windows carry their own captions; a plot gets a slim
         // one naming the pane and its measurement, and nothing else.

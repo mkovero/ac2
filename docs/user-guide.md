@@ -137,7 +137,7 @@ once).
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
-| Display | theme, key hints, warning toasts, how long the SPL number holds, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, level axes | |
+| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, level axes | |
 | Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
 #### System max level
@@ -265,6 +265,61 @@ dBu · 3 h ago*. A pair is one row — both names, or the pair's name — with t
 by side marked **L** and **R**: *Main L + Main R · line · pair (in 3, 4)*, *Stereo bus ·
 digital · pair (in 5, 6)*. A **REF** / **MEAS** mark shows what the running sweep, else the
 selected measurement, uses.
+
+Under each meter a line reads the programme meters of that input (of each side of a pair,
+marked **L** / **R**) in the rig's ballistic: *true peak −12.0 dBFS · max −3.1 dBFS*, or
+*Type I −14.2 dBFS · −11.8 dBTP · max −3.1 dBFS* (the true peak beside it), then *2 overs*
+and *CLIP* when there are any — the line turns red then. A pair's row names its correlation
+beside the name, *correlation +0.87*, red when negative, *right quiet* when a side is under
+the gate (see [Programme pane](#programme-pane)). The line appears once the daemon's first
+levels frame arrives.
+
+A click picks a row (outlined); then **R** clears its max and overs (a pair: both sides),
+**Shift+R** those of every input, **P** meters it big in a new [Programme
+pane](#programme-pane). Tab, a click on a pane or on a list row leaves the pick.
+
+### Programme pane
+
+A pane that meters inputs rather than a measurement: a pair, or up to eight inputs side by
+side. **P** on a picked Inputs row opens one for that row in a new pane beside the focused
+one (never in place of it); a pane's own list (its title's ▾) offers *meter …* rows — every
+pair, every input alone, and the first eight inputs together. The layout keeps the pane and
+what it meters; a session without those inputs shows it empty with *inputs 3+4 not in this
+session*.
+
+The title says how the bars read, which pair and the correlator's window: *true peak · Main
+· 1 s*. Each input is a bar on a dBFS scale (−60 … 0), green, yellow from −6, red when it
+clips, with a flying peak that holds 1 s and then falls 20 dB/s. Under each bar: the reading
+on the input's own scale (dBFS; dBu after a [line calibration](#calibrating-a-line-input); dB
+SPL on a calibrated mic), the true peak in dBTP, the max since the last reset, overs and
+CLIP.
+
+- **Ballistics** (the rig's, Settings › Rig monitor › *Programme meters read*, or `ac2
+  levels set --ballistic`): **true peak** (the default — sample peak through 4×
+  oversampling, ITU-R BS.1770 Annex 2: what a converter or a link will see), **Type I**
+  (IEC 60268-10 quasi-peak, 5 ms integration, 20 dB return in 1.7 s: the Nordic and DIN
+  meters), **Type II** (10 ms, 24 dB in 2.8 s: the BBC and EBU meters) and **VU** (IEC
+  60268-17, 300 ms; 0 VU = +4 dBu, so only a calibrated line input reads it — any other bar
+  says *VU needs a line calibration · true peak shown*). The ballistics follow the
+  standards' burst responses, checked against their published tables, but ac2 is not a
+  type-approved meter: for a broadcast delivery that must be measured on one, use it.
+- **Overs**: a frame whose true peak passes the rig's threshold (*An over is above*, 0 dBTP
+  by default; −1 dBTP is the R128 practice) counts one, and the next only after the level fell
+  1 dB below it — a sustained over is one, not hundreds. **R** clears the max and overs.
+- **Correlation** (a pair): −1 … +1 over the rig's window (0.3 s or 1 s, *Correlation
+  window*), under the goniometer. Negative turns red: a sub or a mono fill fed the sum will
+  cancel. When a side is under the rig's gate (−60 dBFS RMS by default, *Correlation gate*)
+  the chip says *left quiet* or *right quiet* instead of a number: a dead channel must not
+  read 0 and pass for wide stereo.
+- **Goniometer** (a pair): left up-left, right up-right, mono on the vertical, out of phase
+  on the horizontal. Each point lands bright and cools from white through yellow, orange and
+  red to grey: **Settings › Display › Ember decay** sets how long (0.1 … 2 s, 0.4 s by
+  default; ←/→ step 0.1 s). The picture is auto-gained by the daemon; its frame says nothing
+  about level — read the bars for that.
+
+**T** hides the grid and scale as on every pane (twice: the labels too), **W** makes it the
+stage view, **R** / **Shift+R** reset as on the Inputs list. The daemon meters every input
+whether a pane shows it or not; the pane draws only while it is on screen.
 
 ## Reference wiring and loopback
 
@@ -3119,6 +3174,21 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+I` | Sweep IR view | `sweep_ir` |
 | `E` | Reference harmonics | `reference_harmonics` |
 
+#### Programme
+
+| Keys | Command | `keys.toml` |
+|---|---|---|
+| `R` | Reset overs and max | `levels_reset` |
+| `Shift+R` | Reset every overs and max | `levels_reset_all` |
+
+#### Inputs list row
+
+| Keys | Command | `keys.toml` |
+|---|---|---|
+| `R` | Reset overs and max | `levels_reset` |
+| `Shift+R` | Reset every overs and max | `levels_reset_all` |
+| `P` | Open a Programme pane | `programme_pane` |
+
 #### Command palette only (`Ctrl+K`)
 
 | Command | `keys.toml` |
@@ -3214,6 +3284,8 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit level · `Tab` next row · `Q` close pane · `W` maximise · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
+| Programme | `R` reset max · `Shift+R` reset all · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
+| Inputs list row | `R` reset max · `Shift+R` reset all · `P` programme pane · `Tab` measurements · `H` all keys |
 
 <!-- keymap:end -->
 

@@ -238,6 +238,16 @@ impl AppState {
         }
     }
 
+    fn rig_levels(&mut self, row: RigRow, d: i32, out: &mut Vec<Request>) {
+        let rig = self.daemon().map(|s| s.rig.clone()).unwrap_or_default();
+        let Overlay::Settings(s) = &mut self.overlay else {
+            return;
+        };
+        if let Some((cmd, what)) = s.rig.levels_step(&rig, row, d) {
+            self.call(out, cmd, what);
+        }
+    }
+
     fn rig_key(&mut self, chord: Chord, swallow: Option<char>, out: &mut Vec<Request>) {
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
@@ -250,6 +260,8 @@ impl AppState {
             Key::Enter => self.rig_apply(focus, out),
             Key::ArrowLeft if focus == RigRow::Monitor => self.rig_monitor(false, out),
             Key::ArrowRight if focus == RigRow::Monitor => self.rig_monitor(true, out),
+            Key::ArrowLeft if focus.is_levels() => self.rig_levels(focus, -1, out),
+            Key::ArrowRight if focus.is_levels() => self.rig_levels(focus, 1, out),
             Key::ArrowLeft => s.rig.caret_step(-1),
             Key::ArrowRight => s.rig.caret_step(1),
             Key::Home => s.rig.caret_edge(false),
@@ -416,6 +428,11 @@ impl AppState {
             DisplayRow::WarningToasts if d != 0 => self.toggle_warning_toasts(),
             DisplayRow::SplHold if d != 0 => {
                 self.prefs.spl_hold_ms = step_hold(self.prefs.spl_hold_ms, d);
+                self.prefs_dirty = true;
+            }
+            DisplayRow::EmberDecay if d != 0 => {
+                self.prefs.ember_decay_s =
+                    crate::settings::step_ember_decay(self.prefs.ember_decay_s, d);
                 self.prefs_dirty = true;
             }
             // The G keys of the pane of that kind worked in last, so the spectrograph's

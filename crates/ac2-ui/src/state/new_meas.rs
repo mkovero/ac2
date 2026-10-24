@@ -15,6 +15,7 @@ impl AppState {
                 _ => NewKind::Spectrum,
             },
             PaneKind::Spl => NewKind::Spl,
+            PaneKind::Programme => NewKind::Transfer,
             PaneKind::Distortion => NewKind::Sweep,
         };
         // Each kind's own key, where bound: the direct route next time.

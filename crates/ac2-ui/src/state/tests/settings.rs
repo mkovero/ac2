@@ -271,6 +271,12 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Down");
     t.key("Right");
     assert_eq!(t.st.prefs.spl_hold_ms, Some(250));
+    t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::EmberDecay);
+    t.key("Right");
+    assert!((t.st.prefs.ember_decay_s - 0.5).abs() < 1e-6);
+    t.key("Left");
+    assert!((t.st.prefs.ember_decay_s - 0.4).abs() < 1e-6);
     t.st.prefs_dirty = false;
     let focus = t.focus_kind();
     t.key("Down");

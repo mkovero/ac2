@@ -2,7 +2,9 @@
 //! the daemon starts metering on its own at start, a one-off test message, where the rig's
 //! Art-Net universe goes (an address and a universe, applied together), how long its
 //! channels fade to a new cue state and a test frame,
-//! how sending fares, and the meters the rig keeps. Every edit names the rig settings' rev
+//! how sending fares, the meters the rig keeps, and how its programme meters read (the
+//! ballistic, the correlator's window, the over threshold, the correlation gate: stepped with
+//! ←/→, each step sent at once). Every edit names the rig settings' rev
 //! the page showed, so a change another client made first is refused, not overwritten.
 
 use crate::caret::Caret;
@@ -11,6 +13,7 @@ use ac2_proto::model::Rig;
 use ac2_proto::units::Rev;
 use ac2_scene::artnet;
 use ac2_scene::osc::{DEFAULT_TEST, parse_message, parse_target, target_text};
+use ac2_scene::programme::rig as levels;
 
 /// A row of the page, top to bottom.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,10 +25,14 @@ pub enum RigRow {
     Universe,
     Fade,
     DmxTest,
+    Ballistic,
+    CorrelationWindow,
+    OverThreshold,
+    CorrelationGate,
 }
 
 impl RigRow {
-    pub const ALL: [RigRow; 7] = [
+    pub const ALL: [RigRow; 11] = [
         RigRow::Target,
         RigRow::Monitor,
         RigRow::Test,
@@ -33,6 +40,10 @@ impl RigRow {
         RigRow::Universe,
         RigRow::Fade,
         RigRow::DmxTest,
+        RigRow::Ballistic,
+        RigRow::CorrelationWindow,
+        RigRow::OverThreshold,
+        RigRow::CorrelationGate,
     ];
 
     pub fn title(self) -> &'static str {
@@ -44,11 +55,37 @@ impl RigRow {
             RigRow::Universe => artnet::UNIVERSE_TITLE,
             RigRow::Fade => artnet::FADE_TITLE,
             RigRow::DmxTest => artnet::TEST_TITLE,
+            RigRow::Ballistic => levels::BALLISTIC_TITLE,
+            RigRow::CorrelationWindow => levels::WINDOW_TITLE,
+            RigRow::OverThreshold => levels::OVER_TITLE,
+            RigRow::CorrelationGate => levels::GATE_TITLE,
         }
     }
 
     pub fn is_text(self) -> bool {
-        !matches!(self, RigRow::Monitor)
+        !matches!(self, RigRow::Monitor) && !self.is_levels()
+    }
+
+    /// A programme-meter row: a value ←/→ steps, each step sent.
+    pub fn is_levels(self) -> bool {
+        matches!(
+            self,
+            RigRow::Ballistic
+                | RigRow::CorrelationWindow
+                | RigRow::OverThreshold
+                | RigRow::CorrelationGate
+        )
+    }
+
+    /// The note under a programme-meter row.
+    pub fn levels_note(self) -> Option<&'static str> {
+        match self {
+            RigRow::Ballistic => Some(levels::BALLISTIC_NOTE),
+            RigRow::CorrelationWindow => Some(levels::WINDOW_NOTE),
+            RigRow::OverThreshold => Some(levels::OVER_NOTE),
+            RigRow::CorrelationGate => Some(levels::GATE_NOTE),
+            _ => None,
+        }
     }
 
     /// The Art-Net target's rows: Enter on either applies both.
@@ -255,7 +292,7 @@ impl RigPage {
                 Some(&mut self.fade)
             }
             RigRow::DmxTest => Some(&mut self.dmx_test),
-            RigRow::Monitor => None,
+            _ => None,
         }
     }
 
@@ -268,7 +305,7 @@ impl RigPage {
             RigRow::Universe => Some(&self.universe),
             RigRow::Fade => Some(&self.fade),
             RigRow::DmxTest => Some(&self.dmx_test),
-            RigRow::Monitor => None,
+            _ => None,
         }
     }
 
@@ -344,6 +381,82 @@ impl RigPage {
         })
     }
 
+    /// ←/→ (`d`) on programme-meter row `row`: the rig's value one step on, as a
+    /// `levels.set` of that value alone; nothing at either end of a range.
+    pub fn levels_step(&mut self, rig: &Rig, row: RigRow, d: i32) -> Option<(Command, String)> {
+        use ac2_proto::model::{
+            Ballistic, CORRELATION_GATE_RANGE, CorrelationWindow, OVER_THRESHOLD_RANGE,
+        };
+        use ac2_proto::units::{Dbfs, Dbtp};
+        self.focus_row(row);
+        self.sent = None;
+        let now = rig.levels;
+        let step_in = |all: usize, at: usize| {
+            let i = at as i32 + d.signum();
+            (0..all as i32).contains(&i).then_some(i as usize)
+        };
+        let stepped = |v: f64, by: f64, (lo, hi): (f64, f64)| {
+            let n = ((v / by).round() + f64::from(d.signum())) * by;
+            (n >= lo && n <= hi && n != v).then_some(n)
+        };
+        let (mut ballistic, mut correlation_window) = (None, None);
+        let (mut over_threshold, mut correlation_gate) = (None, None);
+        let what = match row {
+            RigRow::Ballistic => {
+                let at = Ballistic::ALL.iter().position(|b| *b == now.ballistic)?;
+                let b = Ballistic::ALL[step_in(Ballistic::ALL.len(), at)?];
+                ballistic = Some(b);
+                format!("programme meters read {}", b.word())
+            }
+            RigRow::CorrelationWindow => {
+                let all = CorrelationWindow::ALL;
+                let at = all.iter().position(|w| *w == now.correlation_window)?;
+                let w = all[step_in(all.len(), at)?];
+                correlation_window = Some(w);
+                format!("correlation window {}", w.text())
+            }
+            RigRow::OverThreshold => {
+                let t = stepped(
+                    now.over_threshold.0,
+                    levels::OVER_STEP_DB,
+                    OVER_THRESHOLD_RANGE,
+                )?;
+                over_threshold = Some(Dbtp(t));
+                format!("an over is above {}", levels::over_text(t))
+            }
+            RigRow::CorrelationGate => {
+                let g = stepped(
+                    now.correlation_gate.0,
+                    levels::GATE_STEP_DB,
+                    CORRELATION_GATE_RANGE,
+                )?;
+                correlation_gate = Some(Dbfs(g));
+                format!("correlation gate {}", levels::gate_text(g))
+            }
+            _ => return None,
+        };
+        let cmd = Command::LevelsSet {
+            base: self.rev,
+            ballistic,
+            correlation_window,
+            over_threshold,
+            correlation_gate,
+        };
+        Some((cmd, what))
+    }
+
+    /// The value programme-meter row `row` shows: the rig's.
+    pub fn levels_text(rig: &Rig, row: RigRow) -> String {
+        let l = rig.levels;
+        match row {
+            RigRow::Ballistic => l.ballistic.word().to_owned(),
+            RigRow::CorrelationWindow => l.correlation_window.text().to_owned(),
+            RigRow::OverThreshold => levels::over_text(l.over_threshold.0),
+            RigRow::CorrelationGate => levels::gate_text(l.correlation_gate.0),
+            _ => String::new(),
+        }
+    }
+
     /// Enter on the focused row: the command to send and what the toast says, or nothing
     /// (a refusal says why in [`Self::error`]).
     pub fn enter(&mut self, rig: &Rig) -> Option<(Command, String)> {
@@ -404,6 +517,10 @@ impl RigPage {
                 )
             }),
             RigRow::Monitor => return self.monitor(rig, !rig.monitor_at_start),
+            row @ (RigRow::Ballistic
+            | RigRow::CorrelationWindow
+            | RigRow::OverThreshold
+            | RigRow::CorrelationGate) => return self.levels_step(rig, row, 1),
             RigRow::Test => match parse_message(&self.test, false) {
                 Ok(Some(msg)) => {
                     let what = format!("OSC test {} sent", ac2_scene::osc::message_text(&msg));

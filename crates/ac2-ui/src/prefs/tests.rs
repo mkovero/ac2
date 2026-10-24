@@ -206,6 +206,7 @@ fn two_panes() -> PanesPrefs {
                 id: PaneId(1),
                 kind: PaneKind::Transfer,
                 measurement: Some("Main L".to_owned()),
+                meters: None,
                 modes: PaneModes {
                     transfer: TransferView::Ir(IrMode::Log),
                     ..PaneModes::default()
@@ -223,6 +224,7 @@ fn two_panes() -> PanesPrefs {
                 id: PaneId(2),
                 kind: PaneKind::Spl,
                 measurement: Some("FOH SPL".to_owned()),
+                meters: None,
                 modes: PaneModes {
                     transfer: TransferView::Coherence,
                     spl: SplMode::Leq,
@@ -592,4 +594,50 @@ fn advice_round_trip() {
     assert_eq!(UiPrefs::from_toml(&text), Ok(p));
     assert!(UiPrefs::from_toml("[advice]\nlow_coherence = 1.5\n").is_err());
     assert!(UiPrefs::from_toml("[advice]\nref_headroom_db = 0.0\n").is_err());
+}
+
+/// The ember decay is written only when changed, read back, and a hand-edited value outside
+/// its range is clamped into it.
+#[test]
+fn ember_decay_round_trips_and_clamps() {
+    use ac2_scene::gonio::{EMBER_DECAY_DEFAULT_S, EMBER_DECAY_RANGE_S};
+    assert!(!UiPrefs::default().to_toml().contains("ember_decay_s"));
+    let p = UiPrefs {
+        ember_decay_s: 1.2,
+        ..UiPrefs::default()
+    };
+    let text = p.to_toml();
+    assert!(text.contains("ember_decay_s = 1.2"), "{text}");
+    assert_eq!(
+        UiPrefs::from_toml(&text).expect("parses").ember_decay_s,
+        1.2
+    );
+    let read = |t: &str| UiPrefs::from_toml(t).expect("parses").ember_decay_s;
+    assert_eq!(read("ember_decay_s = 30.0\n"), EMBER_DECAY_RANGE_S.1);
+    assert_eq!(read("ember_decay_s = 0.0\n"), EMBER_DECAY_RANGE_S.0);
+    assert_eq!(read(""), EMBER_DECAY_DEFAULT_S);
+}
+
+/// A Programme pane keeps what it meters, one-based in the file; inputs no pane can meter
+/// (input 0) bring the pane back empty rather than refusing the file.
+#[test]
+fn programme_pane_meters_round_trip() {
+    use crate::state::Metered;
+    let mut panes = two_panes();
+    panes.views[1].kind = PaneKind::Programme;
+    panes.views[1].meters = Some(Metered::Pair { left: 2, right: 3 });
+    let p = UiPrefs {
+        layout: LayoutPrefs {
+            panes: Some(panes.clone()),
+            ..LayoutPrefs::default()
+        },
+        ..UiPrefs::default()
+    };
+    let text = p.to_toml();
+    assert!(text.contains("pair = [3, 4]"), "{text}");
+    let back = UiPrefs::from_toml(&text).expect("parses");
+    assert_eq!(back.layout.panes, Some(panes));
+    let bad = text.replace("pair = [3, 4]", "pair = [0, 4]");
+    let back = UiPrefs::from_toml(&bad).expect("parses");
+    assert_eq!(back.layout.panes.expect("panes").views[1].meters, None);
 }
