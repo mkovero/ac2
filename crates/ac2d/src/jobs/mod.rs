@@ -32,6 +32,7 @@ pub(crate) mod math;
 pub(crate) mod meters;
 #[cfg(test)]
 mod pace_tests;
+pub(crate) mod programme;
 pub(crate) mod record;
 pub(crate) mod rta;
 pub(crate) mod spectrum;

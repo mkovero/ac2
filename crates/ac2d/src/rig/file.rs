@@ -9,14 +9,14 @@
 //! A rig meter is kept as [`RigMeter`], what the operator set for it, not as a session
 //! measurement: a field a session measurement gains (compare picks, display offsets, the
 //! transfer delay) never changes this file. A change to [`RigMeter`] or to a section's
-//! shape bumps [`VERSION`], and the previous version is read by its own module
-//! ([`super::v1`]).
+//! shape bumps [`VERSION`], and each previous version is read by its own module
+//! ([`super::v1`], [`super::v2`]).
 
 use std::net::SocketAddr;
 
 use ac2_proto::model::{
-    ArtnetFade, ArtnetTarget, ColourFamily, MeasConfig, MeasKind, MeasScope, OutputSetup,
-    PaneLayout, SessionConfig,
+    ArtnetFade, ArtnetTarget, ColourFamily, LevelsSettings, MeasConfig, MeasKind, MeasScope,
+    OutputSetup, PaneLayout, SessionConfig,
 };
 use ac2_proto::units::MeasId;
 use serde::Serialize;
@@ -26,7 +26,7 @@ use serde_json::{Map, Value};
 use super::{RigMeter, RigSettings};
 
 pub(super) const FORMAT: &str = "ac2-rig-settings";
-pub(super) const VERSION: u32 = 2;
+pub(super) const VERSION: u32 = 3;
 
 /// The file as written: every section always present (`null` for none), so that a key
 /// missing on read is damage, not a default.
@@ -42,6 +42,7 @@ struct Out<'a> {
     osc_target: Option<SocketAddr>,
     artnet_target: Option<ArtnetTarget>,
     artnet_fade: ArtnetFade,
+    levels: LevelsSettings,
 }
 
 /// `s` as the file's bytes.
@@ -57,6 +58,7 @@ pub(super) fn write(s: &RigSettings) -> serde_json::Result<Vec<u8>> {
         osc_target: s.osc_target,
         artnet_target: s.artnet_target,
         artnet_fade: s.artnet_fade,
+        levels: s.levels,
     })
 }
 
@@ -71,6 +73,7 @@ pub(super) struct Sections {
     pub(super) osc_target: Option<Option<SocketAddr>>,
     pub(super) artnet_target: Option<Option<ArtnetTarget>>,
     pub(super) artnet_fade: Option<ArtnetFade>,
+    pub(super) levels: Option<LevelsSettings>,
 }
 
 impl Sections {
@@ -85,6 +88,7 @@ impl Sections {
             osc_target: self.osc_target.or(other.osc_target),
             artnet_target: self.artnet_target.or(other.artnet_target),
             artnet_fade: self.artnet_fade.or(other.artnet_fade),
+            levels: self.levels.or(other.levels),
         }
     }
 
@@ -99,6 +103,7 @@ impl Sections {
             ("osc_target", self.osc_target.is_none()),
             ("artnet_target", self.artnet_target.is_none()),
             ("artnet_fade", self.artnet_fade.is_none()),
+            ("levels", self.levels.is_none()),
         ]
         .into_iter()
         .filter_map(|(k, unread)| unread.then_some(k))
@@ -119,6 +124,7 @@ impl Sections {
             osc_target: self.osc_target.flatten(),
             artnet_target: self.artnet_target.flatten(),
             artnet_fade: self.artnet_fade.unwrap_or_default(),
+            levels: self.levels.unwrap_or_default(),
         }
     }
 }
@@ -153,7 +159,11 @@ pub(super) fn read(text: &[u8]) -> Result<Read, String> {
         .and_then(|v| u32::try_from(v).ok())
         .ok_or("no format version")?;
     match version {
-        1 => super::v1::upgrade(&mut obj),
+        1 => {
+            super::v1::upgrade(&mut obj);
+            super::v2::upgrade(&mut obj);
+        }
+        2 => super::v2::upgrade(&mut obj),
         VERSION => {}
         v => return Ok(Read::OtherVersion(v)),
     }
@@ -177,6 +187,7 @@ pub(super) fn read(text: &[u8]) -> Result<Read, String> {
             })
         }),
         artnet_fade: r.section("artnet_fade", |_| Ok(())),
+        levels: r.section("levels", |l: &LevelsSettings| l.check()),
     };
     let mut lost = r.lost;
     lost.extend(

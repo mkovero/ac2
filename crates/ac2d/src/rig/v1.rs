@@ -8,7 +8,8 @@
 //! - the session-only fields of each meter are dropped: they never belonged to the rig;
 //! - keys version 1 files written before them lack take what their absence meant then.
 //!
-//! The daemon writes version 2 straight after, the version 1 file kept beside it.
+//! The result goes through [`super::v2::upgrade`] like any version 2 file; the daemon
+//! writes the current version straight after, the version 1 file kept beside it.
 
 use ac2_proto::model::ArtnetFade;
 use serde_json::{Map, Value};

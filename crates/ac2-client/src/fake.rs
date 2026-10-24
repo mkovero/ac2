@@ -38,6 +38,8 @@ mod cal;
 mod files;
 #[path = "fake_generator.rs"]
 mod generator;
+#[path = "fake_levels.rs"]
+pub mod levels;
 #[path = "fake_meas.rs"]
 mod meas;
 #[path = "fake_session.rs"]
@@ -133,6 +135,18 @@ pub struct Shared {
     pub backends: Vec<BackendInfo>,
     /// The device `session.preview` last opened; `None` once stopped.
     pub preview: Option<(BackendKind, DeviceId)>,
+    /// What the preview declared, for its meter frames; `None` once stopped.
+    pub preview_decl: Option<levels::PreviewDecl>,
+    /// The sample peak each input reads in meter frames; absent: the default.
+    pub input_peak: HashMap<u16, f32>,
+    /// The max holds of the programme meters, by input.
+    pub levels_max: HashMap<u16, f32>,
+    /// Sequence of the meter frames.
+    pub meter_seq: u64,
+    /// Publish meter frames (`session/levels`, `session/preview`, the goniometers) while a
+    /// session or a preview is open. Off unless a test asks: a UI test that opens a session
+    /// sees no meter bars it did not publish itself.
+    pub meters: bool,
     /// What `session.detect_loopback` answers (output, level and device are the request's).
     pub detection: LoopbackDetection,
     /// Lease refreshes accepted.
@@ -325,6 +339,11 @@ impl Shared {
             grids: HashMap::new(),
             backends: fake_backends(),
             preview: None,
+            preview_decl: None,
+            input_peak: HashMap::new(),
+            levels_max: HashMap::new(),
+            meter_seq: 0,
+            meters: false,
             detection: fake_detection(),
             refreshes: 0,
             expiries: 0,
@@ -534,6 +553,7 @@ impl Shared {
             | C::ArtnetFade { .. }
             | C::ArtnetTest { .. }
             | C::RigMonitorStart { .. }) => self.rig_cmd(c)?,
+            c @ (C::LevelsSet { .. } | C::LevelsReset { .. }) => self.levels_cmd(c)?,
             c @ (C::MeasCreate { .. }
             | C::MeasUpdate { .. }
             | C::MeasColour { .. }
@@ -763,6 +783,9 @@ fn run(
         s.expire_lease();
         if Instant::now() >= next_ka {
             next_ka = Instant::now() + ka_interval;
+            if s.meters {
+                s.publish_levels();
+            }
             if !s.ka_paused {
                 s.ka_seq += 1;
                 let mut stamp = s.stamp(s.ka_seq, None);

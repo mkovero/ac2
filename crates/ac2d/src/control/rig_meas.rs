@@ -167,11 +167,12 @@ impl Control {
             osc_target: self.store.state().rig.osc_target,
             artnet_target: self.store.state().rig.artnet_target,
             artnet_fade: self.store.state().rig.artnet_fade,
+            levels: self.store.state().rig.levels,
         }
     }
 
     /// `conflict` unless `base` is the rig's rev (`osc.target`, `artnet.target`,
-    /// `artnet.fade`, `rig.monitor_start`).
+    /// `artnet.fade`, `rig.monitor_start`, `levels.set`).
     pub(super) fn rig_base(&self, base: Rev) -> Result<(), ProtoError> {
         let rev = self.store.state().rig.rev;
         if base == rev {

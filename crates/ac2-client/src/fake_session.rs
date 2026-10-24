@@ -48,6 +48,13 @@ impl Shared {
                 ac2_proto::cal::check_pairs(&rows, &pairs, Some(&captured))
                     .map_err(|e| err(ErrorCode::Invalid, e))?;
                 self.preview = Some((backend, device.clone()));
+                self.preview_decl = Some(super::levels::PreviewDecl {
+                    backend,
+                    device: device.clone(),
+                    channels,
+                    inputs,
+                    pairs,
+                });
                 ReplyBody::Preview(Preview {
                     backend,
                     device,
@@ -58,6 +65,7 @@ impl Shared {
             }
             C::SessionPreviewStop => {
                 self.preview = None;
+                self.preview_decl = None;
                 ReplyBody::Ack { rev: self.rev }
             }
             C::SessionDetectLoopback {
@@ -77,6 +85,7 @@ impl Shared {
                     return Err(err(ErrorCode::Refused, "level above ceiling"));
                 }
                 self.preview = None;
+                self.preview_decl = None;
                 ReplyBody::LoopbackDetection(LoopbackDetection {
                     backend,
                     input_device,
@@ -92,6 +101,7 @@ impl Shared {
                     DeviceSelector::Id { id } => id.clone(),
                 };
                 self.preview = None;
+                self.preview_decl = None;
                 let s = Session {
                     epoch: SessionEpoch(self.state.session.epoch.0 + 1),
                     open: Some(OpenSession {

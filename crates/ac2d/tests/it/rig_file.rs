@@ -152,7 +152,7 @@ fn a_v1_file_loads_whole_and_round_trips() {
     // The version 1 file is kept beside the new one.
     assert_eq!(std::fs::read(dir.path().join("rig.json.v1")).unwrap(), v1);
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 2);
+    assert_eq!(rj["version"], 3);
     assert_eq!(
         rj["monitor_session"],
         serde_json::to_value(&s.monitor).unwrap()

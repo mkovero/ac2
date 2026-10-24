@@ -23,12 +23,18 @@ fn input_meters_follow_the_dialog() {
     let mut latest = Latest::default();
     for f in [
         frame(FrameData::SessionLevels(SessionLevelsFrame {
-            meta: ac2_proto::frame::LevelsMeta {
+            meta: ac2_proto::frame::SessionLevelsMeta {
                 channels: vec![0, 1],
+                ballistic: Default::default(),
+                pair_levels: vec![],
             },
             peak: vec![-10.0, -30.0],
             rms: vec![-20.0, -40.0],
             clip: vec![ClipFlags::NONE, ClipFlags::HELD],
+            ppm: vec![f32::NEG_INFINITY; 2],
+            true_peak: vec![f32::NEG_INFINITY; 2],
+            max: vec![f32::NEG_INFINITY; 2],
+            overs: vec![0; 2],
         })),
         frame(FrameData::PreviewLevels(PreviewLevelsFrame {
             meta: PreviewLevelsMeta {
@@ -37,10 +43,16 @@ fn input_meters_follow_the_dialog() {
                 channels: vec![0, 1, 2, 3],
                 inputs: vec![],
                 pairs: vec![],
+                ballistic: Default::default(),
+                pair_levels: vec![],
             },
             peak: vec![-6.0, f32::NEG_INFINITY, -50.0, -50.0],
             rms: vec![-12.0, f32::NEG_INFINITY, -60.0, -60.0],
             clip: vec![ClipFlags::NONE; 4],
+            ppm: vec![f32::NEG_INFINITY; 4],
+            true_peak: vec![f32::NEG_INFINITY; 4],
+            max: vec![f32::NEG_INFINITY; 4],
+            overs: vec![0; 4],
         })),
     ] {
         latest.frames.insert(f.topic.to_string().into(), f);
@@ -134,12 +146,18 @@ fn sidebar_meters_name_every_session_input_by_role() {
     // Readings from the session's meters; an input without one reads as no data.
     let mut latest = Latest::default();
     let data = FrameData::SessionLevels(SessionLevelsFrame {
-        meta: ac2_proto::frame::LevelsMeta {
+        meta: ac2_proto::frame::SessionLevelsMeta {
             channels: vec![0, 1],
+            ballistic: Default::default(),
+            pair_levels: vec![],
         },
         peak: vec![-10.0, -1.0],
         rms: vec![-20.0, -12.0],
         clip: vec![ClipFlags::NONE, ClipFlags::HELD],
+        ppm: vec![f32::NEG_INFINITY; 2],
+        true_peak: vec![f32::NEG_INFINITY; 2],
+        max: vec![f32::NEG_INFINITY; 2],
+        overs: vec![0; 2],
     });
     let f = TopicFrame {
         topic: data.topic(),

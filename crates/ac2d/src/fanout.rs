@@ -27,6 +27,7 @@ use ac2_proto::units::{Rev, SessionEpoch, WallNs};
 use crate::burst::BurstDetector;
 use crate::control::ControlMsg;
 use crate::jobs::meters::{SessionLevels, meter_period};
+use crate::jobs::programme::Programme;
 use crate::jobs::{Emitter, JobEnv, JobMsg};
 use crate::util::wall_ns;
 
@@ -211,6 +212,7 @@ pub(crate) enum FanoutMsg {
         env: JobEnv,
         input_map: Vec<u16>,
         config_rev: Rev,
+        programme: Box<Programme>,
     },
     Stop,
 }
@@ -389,11 +391,18 @@ impl Fanout {
     }
 
     /// Starts publishing the session input meters.
-    pub(crate) fn start_levels(&self, env: JobEnv, input_map: Vec<u16>, config_rev: Rev) {
+    pub(crate) fn start_levels(
+        &self,
+        env: JobEnv,
+        input_map: Vec<u16>,
+        config_rev: Rev,
+        programme: Programme,
+    ) {
         self.send(FanoutMsg::Levels {
             env,
             input_map,
             config_rev,
+            programme: Box::new(programme),
         });
     }
 
@@ -536,6 +545,7 @@ fn run(
                     env,
                     input_map,
                     config_rev,
+                    programme,
                 } => match Emitter::connect(env) {
                     Ok(em) => {
                         let l = SessionLevels::new(
@@ -543,6 +553,7 @@ fn run(
                             cfg.sample_rate,
                             config_rev,
                             meter_early,
+                            *programme,
                         );
                         levels = Some((l, em));
                     }

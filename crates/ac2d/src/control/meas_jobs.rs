@@ -12,6 +12,7 @@ use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 
 use crate::calstore::{self, InputCal};
 use crate::conv;
+use crate::jobs::programme::{Captured, Programme};
 use crate::jobs::{self, Analysis, JobCmd, JobEnv, block_index};
 use crate::session::Runtime;
 use crate::util::{perr, wall_ns};
@@ -255,8 +256,26 @@ impl Control {
         let Some(rt) = self.session.as_ref() else {
             return;
         };
-        rt.fanout
-            .start_levels(self.job_env(rt), rt.input_map.clone(), self.store.rev());
+        // The session's pairs follow `session.inputs` through the policy; the seed only
+        // decorrelates the goniometers' sampling positions between pairs and sessions.
+        let programme = Programme::new(
+            Captured {
+                idx: (0..rt.input_map.len()).collect(),
+                channels: rt.input_map.clone(),
+                device: rt.open.input_device.clone(),
+                sample_rate: rt.sample_rate,
+            },
+            &[],
+            true,
+            Arc::clone(&self.levels),
+            wall_ns() ^ u64::from(rt.epoch.0),
+        );
+        rt.fanout.start_levels(
+            self.job_env(rt),
+            rt.input_map.clone(),
+            self.store.rev(),
+            programme,
+        );
     }
 
     pub(super) fn start_timing_job(&mut self) {

@@ -7,7 +7,7 @@ use super::*;
 
 use ac2_client::{Latest, TopicFrame};
 use ac2_proto::FrameData;
-use ac2_proto::frame::{ClipFlags, LevelsMeta, SessionLevelsFrame, ValidityMask};
+use ac2_proto::frame::{ClipFlags, SessionLevelsFrame, ValidityMask};
 
 /// One snapshot at `now_s`: transfer measurement 1 with coherence `coh` everywhere, and
 /// the session meters of inputs 0 (reference, `ref_peak` dBFS) and 1 (measurement,
@@ -26,12 +26,18 @@ fn feed(t: &mut T, now_s: f64, coh: f32, ref_peak: f32, meas_rms: f32) {
     let meters = ac2_proto::Frame {
         stamp: f.stamp,
         data: FrameData::SessionLevels(SessionLevelsFrame {
-            meta: LevelsMeta {
+            meta: ac2_proto::frame::SessionLevelsMeta {
                 channels: vec![0, 1],
+                ballistic: Default::default(),
+                pair_levels: vec![],
             },
             peak: vec![ref_peak, meas_rms + 12.0],
             rms: vec![ref_peak - 12.0, meas_rms],
             clip: vec![ClipFlags::NONE; 2],
+            ppm: vec![f32::NEG_INFINITY; 2],
+            true_peak: vec![f32::NEG_INFINITY; 2],
+            max: vec![f32::NEG_INFINITY; 2],
+            overs: vec![0; 2],
         }),
     };
     for f in [f, meters] {

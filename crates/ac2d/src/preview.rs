@@ -21,7 +21,7 @@ use ac2_proto::ProtoError;
 use ac2_proto::cal;
 use ac2_proto::frame::{FrameData, PreviewLevelsFrame, PreviewLevelsMeta};
 use ac2_proto::model::{
-    BackendKind, DeviceId, InputSetup, Pair, Preview as WirePreview, PreviewInput,
+    BackendKind, Ballistic, DeviceId, InputSetup, Pair, Preview as WirePreview, PreviewInput,
 };
 use ac2_proto::topic::Topic;
 use ac2_proto::units::Rev;
@@ -29,6 +29,7 @@ use ac2_proto::units::Rev;
 use crate::burst::BurstDetector;
 use crate::fanout::pop_block;
 use crate::jobs::meters::{meter_period, meter_stamp};
+use crate::jobs::programme::{Captured, Programme, SharedPolicy};
 use crate::jobs::{Emitter, JobEnv, LevelsMeter, Meters};
 use crate::session::audio_err;
 use crate::util::perr;
@@ -66,12 +67,12 @@ impl Preview {
     /// Opens `device` of `backend` for capture of every input and starts metering.
     pub(crate) fn open(
         backend: &dyn Backend,
-        kind: BackendKind,
-        device: DeviceId,
+        (kind, device): (BackendKind, DeviceId),
         declared: Vec<PreviewInput>,
         pairs: Vec<Pair>,
         max_level: MaxLevel,
         env: JobEnv,
+        policy: SharedPolicy,
     ) -> Result<Self, ProtoError> {
         let caps = backend
             .enumerate()
@@ -145,8 +146,24 @@ impl Preview {
             channels: (0..channels).collect(),
             inputs: declared,
             pairs,
+            ballistic: Ballistic::default(),
+            pair_levels: Vec::new(),
         };
         let frame_meta = meta.clone();
+        // The declared pairs stay as the dialog declared them; the pairs of a session do
+        // not apply to a device that is only being looked at.
+        let mut programme = Programme::new(
+            Captured {
+                idx: (0..usize::from(channels)).collect(),
+                channels: meta.channels.clone(),
+                device: device.clone(),
+                sample_rate,
+            },
+            &meta.pairs,
+            false,
+            policy,
+            crate::util::wall_ns(),
+        );
         let thread = std::thread::Builder::new()
             .name("ac2d-preview".into())
             .spawn(move || {
@@ -175,23 +192,36 @@ impl Preview {
                         lb.store(since, Ordering::Release);
                         bursts.observe(Instant::now(), b.frames);
                         levels.push(&b);
+                        programme.push(&b);
                         wall = b.wall_ns;
                     }
                     let stamp = meter_stamp(&levels, Rev(0), wall);
                     if let Some(Meters {
                         peak, rms, clip, ..
                     }) = levels.take_meters()
-                        && em.wants(Topic::PreviewLevels)
                     {
-                        em.send(
-                            stamp,
-                            FrameData::PreviewLevels(PreviewLevelsFrame {
-                                meta: frame_meta.clone(),
-                                peak,
-                                rms,
-                                clip,
-                            }),
-                        );
+                        let r = programme.take(em.wants(Topic::PreviewGonio));
+                        if em.wants(Topic::PreviewLevels) {
+                            let mut meta = frame_meta.clone();
+                            meta.ballistic = r.ballistic;
+                            meta.pair_levels = r.pair_levels;
+                            em.send(
+                                stamp,
+                                FrameData::PreviewLevels(PreviewLevelsFrame {
+                                    meta,
+                                    peak,
+                                    rms,
+                                    clip,
+                                    ppm: r.ppm,
+                                    true_peak: r.true_peak,
+                                    max: r.max,
+                                    overs: r.overs,
+                                }),
+                            );
+                        }
+                        if let Some(g) = r.gonio {
+                            em.send(stamp, FrameData::PreviewGonio(g));
+                        }
                     }
                     if !ended && stream.events().ended {
                         ended = true;

@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ac2_client::TopicFrame;
-use ac2_proto::frame::{ClipFlags, LevelsMeta, SessionLevelsFrame};
+use ac2_proto::frame::{ClipFlags, SessionLevelsFrame};
 use ac2_proto::units::MeasId;
 use ac2_proto::{Frame, FrameData};
 
@@ -29,10 +29,18 @@ fn frame(topic: Topic, seq: u64) -> TopicFrame {
         frame: Arc::new(Frame {
             stamp,
             data: FrameData::SessionLevels(SessionLevelsFrame {
-                meta: LevelsMeta { channels: vec![0] },
+                meta: ac2_proto::frame::SessionLevelsMeta {
+                    channels: vec![0],
+                    ballistic: Default::default(),
+                    pair_levels: vec![],
+                },
                 peak: vec![-20.0],
                 rms: vec![-30.0],
                 clip: vec![ClipFlags::NONE],
+                ppm: vec![f32::NEG_INFINITY; 1],
+                true_peak: vec![f32::NEG_INFINITY; 1],
+                max: vec![f32::NEG_INFINITY; 1],
+                overs: vec![0; 1],
             }),
         }),
         received: Instant::now(),

@@ -335,12 +335,12 @@ impl Control {
         self.close_preview();
         let p = Preview::open(
             &*backend,
-            kind,
-            device,
+            (kind, device),
             inputs,
             pairs,
             self.s.max_level,
             self.env_at(self.epoch()),
+            Arc::clone(&self.levels),
         )?;
         let wire = p.wire();
         self.preview = Some(p);

@@ -277,7 +277,7 @@ struct Meters {
 impl Meters {
     fn start(fake: Arc<ac2_client::fake::FakeDaemon>) -> Self {
         use ac2_proto::frame::{
-            ClipFlags, LevelsMeta, PreviewLevelsFrame, PreviewLevelsMeta, SessionLevelsFrame,
+            ClipFlags, PreviewLevelsFrame, PreviewLevelsMeta, SessionLevelsFrame, SessionLevelsMeta,
         };
         use ac2_proto::model::{BackendKind, DeviceId};
         use ac2_proto::{Frame, FrameData};
@@ -297,10 +297,16 @@ impl Meters {
                             channels: vec![0, 1, 2, 3],
                             inputs: Vec::new(),
                             pairs: Vec::new(),
+                            ballistic: Default::default(),
+                            pair_levels: Vec::new(),
                         },
                         peak: peak.to_vec(),
                         rms: rms.to_vec(),
                         clip: vec![ClipFlags::NONE; 4],
+                        ppm: peak.to_vec(),
+                        true_peak: peak.to_vec(),
+                        max: peak.to_vec(),
+                        overs: vec![0; 4],
                     });
                     let frame = Frame {
                         stamp: st.stamp(seq, None),
@@ -313,12 +319,18 @@ impl Meters {
                         let frame = Frame {
                             stamp: st.stamp(seq, None),
                             data: FrameData::SessionLevels(SessionLevelsFrame {
-                                meta: LevelsMeta {
+                                meta: SessionLevelsMeta {
                                     channels: ch.clone(),
+                                    ballistic: Default::default(),
+                                    pair_levels: Vec::new(),
                                 },
                                 peak: pick(&peak),
                                 rms: pick(&rms),
                                 clip: vec![ClipFlags::NONE; ch.len()],
+                                ppm: pick(&peak),
+                                true_peak: pick(&peak),
+                                max: pick(&peak),
+                                overs: vec![0; ch.len()],
                             }),
                         };
                         st.publish(&frame);

@@ -108,6 +108,20 @@ impl Control {
             Command::ArtnetTarget { base, target } => self.artnet_target(base, target),
             Command::ArtnetFade { base, seconds } => self.artnet_fade(base, seconds),
             Command::ArtnetTest { channels } => self.artnet_test(&channels),
+            Command::LevelsSet {
+                base,
+                ballistic,
+                correlation_window,
+                over_threshold,
+                correlation_gate,
+            } => self.levels_set(
+                base,
+                ballistic,
+                correlation_window,
+                over_threshold,
+                correlation_gate,
+            ),
+            Command::LevelsReset { channels } => self.levels_reset(channels),
             Command::GenStop => {
                 self.abort_sweep(SweepFailure::Stopped, "the stimulus was stopped");
                 self.stop_output();

@@ -893,12 +893,18 @@ fn line_calibration_from_the_calibrations_view() {
     // volts alone, the daemon measures the level itself.
     let mut latest = Latest::default();
     let data = FrameData::SessionLevels(SessionLevelsFrame {
-        meta: ac2_proto::frame::LevelsMeta {
+        meta: ac2_proto::frame::SessionLevelsMeta {
             channels: vec![0, 1],
+            ballistic: Default::default(),
+            pair_levels: vec![],
         },
         peak: vec![-6.0, -1.0],
         rms: vec![-9.0, -12.0],
         clip: vec![ClipFlags::NONE, ClipFlags::NONE],
+        ppm: vec![f32::NEG_INFINITY; 2],
+        true_peak: vec![f32::NEG_INFINITY; 2],
+        max: vec![f32::NEG_INFINITY; 2],
+        overs: vec![0; 2],
     });
     let f = TopicFrame {
         topic: data.topic(),

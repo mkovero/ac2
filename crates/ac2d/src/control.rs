@@ -54,6 +54,7 @@ mod file_jobs;
 mod files;
 mod generator;
 mod leq;
+mod levels;
 mod maths;
 mod meas_jobs;
 mod osc;
@@ -364,6 +365,9 @@ pub(crate) struct Control {
     /// The raw capture being written.
     recording: Option<recording::ActiveRecording>,
     rig: RigState,
+    /// What the programme meters of the session and the preview read: `rig.levels`, the
+    /// inputs and line calibrations (VU offers), the pairs, the resets.
+    levels: crate::jobs::programme::SharedPolicy,
     /// The recording a replay session plays (`session.replay`).
     replay_backend: Option<Arc<ac2_audio::ReplayBackend>>,
     /// What the working state belongs to (`State.working`).
@@ -464,6 +468,7 @@ impl Control {
                 osc_target: saved.osc_target,
                 artnet_target: saved.artnet_target,
                 artnet_fade: saved.artnet_fade,
+                levels: saved.levels,
                 ..Default::default()
             })
             .with_calibrations(contents)
@@ -530,11 +535,13 @@ impl Control {
                 osc: osc::Cues::default(),
                 artnet: artnet::Universe::default(),
             },
+            levels: Default::default(),
             s,
         }
     }
 
     pub(crate) fn run(mut self, rx: &Receiver<ControlMsg>) {
+        self.sync_levels_policy();
         self.load_rig_meas();
         self.start_autosave();
         self.start_rig_monitor();
@@ -762,9 +769,16 @@ impl Control {
 
     fn commit(&mut self, change: Change) -> Rev {
         let saved = matches!(change, Change::Measurement(_) | Change::Trace(_));
+        let levels = matches!(
+            change,
+            Change::Rig(_) | Change::Inputs(_) | Change::LineCalibration(_)
+        );
         self.note_for_recording(&change);
         self.rig_meas_committing(&change);
         let ev = self.store.commit(change, Instant::now());
+        if levels {
+            self.sync_levels_policy();
+        }
         match ac2_proto::encode_event(&ev) {
             Ok(b) => self.s.outbox.event(&b),
             Err(e) => tracing::error!("event not encodable: {e}"),

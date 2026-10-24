@@ -17,14 +17,15 @@
 
 mod file;
 mod v1;
+mod v2;
 
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use ac2_proto::model::{
-    ArtnetFade, ArtnetTarget, ColourFamily, MeasConfig, Measurement, OutputSetup, PaneLayout,
-    SessionConfig, StateFile,
+    ArtnetFade, ArtnetTarget, ColourFamily, LevelsSettings, MeasConfig, Measurement, OutputSetup,
+    PaneLayout, SessionConfig, StateFile,
 };
 use ac2_proto::units::{Db, MeasId};
 use ac2_proto::{ErrorCode, ProtoError};
@@ -95,6 +96,8 @@ pub(crate) struct RigSettings {
     pub(crate) artnet_target: Option<ArtnetTarget>,
     /// How long the DMX channels take to move to a new cue frame.
     pub(crate) artnet_fade: ArtnetFade,
+    /// The programme meters: ballistic, correlation window, over threshold, gate.
+    pub(crate) levels: LevelsSettings,
 }
 
 /// Where the rig settings live.
