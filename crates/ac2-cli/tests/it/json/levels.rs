@@ -45,9 +45,15 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     assert_eq!(rows[0]["input"], 1);
     assert_eq!(rows[0]["kind"], "line");
     assert_eq!(rows[0]["ballistic"], "true_peak");
-    assert_eq!(rows[0]["ppm"], -12.0);
-    assert!((rows[0]["true_peak"].as_f64().expect("number") + 11.8).abs() < 1e-6);
-    assert_eq!(rows[0]["max"], -12.0);
+    // True peak chosen: the reading and its max are the true peak.
+    let near = |v: &serde_json::Value, want: f64| (v.as_f64().expect("number") - want).abs() < 1e-6;
+    assert!(near(&rows[0]["ppm"], -11.8), "{}", rows[0]["ppm"]);
+    assert!(
+        near(&rows[0]["true_peak"], -11.8),
+        "{}",
+        rows[0]["true_peak"]
+    );
+    assert!(near(&rows[0]["max"], -11.8), "{}", rows[0]["max"]);
     assert_eq!(rows[0]["overs"], 0);
     assert_eq!(rows[0]["clip"], false);
     assert_eq!(
@@ -103,12 +109,15 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     // Reset: the holds of the inputs given go, the others stay.
     f.lock().set_input_peak(0, -30.0);
     let v = ok_json(&f, &["levels", "--json"]).await?;
-    assert_eq!(v["inputs"][0]["max"], -12.0, "held");
+    assert!(near(&v["inputs"][0]["max"], -11.8), "held");
     let r = ok_json(&f, &["levels", "reset", "--input", "1", "--json"]).await?;
     assert_eq!(r["channels"], serde_json::json!([0]));
     let v = ok_json(&f, &["levels", "--json"]).await?;
-    assert_eq!(v["inputs"][0]["max"], -30.0);
-    assert_eq!(v["inputs"][2]["max"], -12.0);
+    assert!(
+        near(&v["inputs"][0]["max"], -29.8),
+        "the VU fallback's true peak"
+    );
+    assert!(near(&v["inputs"][2]["max"], -11.8));
     let r = ok_json(&f, &["levels", "reset", "--json"]).await?;
     assert_eq!(r["channels"], serde_json::json!([]));
     let t = ac2(&f, &["levels", "reset"]).await?;

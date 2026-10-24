@@ -17,22 +17,38 @@ fn input(scale: Scale) -> ProgrammeInput {
 #[test]
 fn levels_read_on_their_scale() {
     let i = input(Scale::Dbfs);
-    assert_eq!(i.ppm_text(), "−12.3 dBFS");
+    assert_eq!(i.ppm_text(Ballistic::Type1), "−12.3 dBFS");
     assert_eq!(i.true_peak_text(), "−1.2 dBTP");
-    assert_eq!(i.max_text(), "max −3.1 dBFS");
+    assert_eq!(i.max_text(Ballistic::Type1), "max −3.1 dBFS");
     let line = input(Scale::Dbu { fs_dbu: 16.3 });
-    assert_eq!(line.ppm_text(), "+4.0 dBu");
+    assert_eq!(line.ppm_text(Ballistic::Type1), "+4.0 dBu");
     assert_eq!(line.true_peak_text(), "−1.2 dBTP", "dBTP on every scale");
-    assert_eq!(line.max_text(), "max +13.2 dBu");
+    assert_eq!(line.max_text(Ballistic::Type1), "max +13.2 dBu");
     let mic = input(Scale::DbSpl { fs_db_spl: 120.5 });
-    assert_eq!(mic.ppm_text(), "108.2 dB SPL");
+    assert_eq!(mic.ppm_text(Ballistic::Type1), "108.2 dB SPL");
     let mut none = input(Scale::Dbfs);
     none.ppm = None;
     none.max = Some(f32::NEG_INFINITY);
     none.true_peak_dbtp = None;
-    assert_eq!(none.ppm_text(), "—");
-    assert_eq!(none.max_text(), "max —");
+    assert_eq!(none.ppm_text(Ballistic::Type1), "—");
+    assert_eq!(none.max_text(Ballistic::TruePeak), "max —");
     assert_eq!(none.true_peak_text(), "—");
+}
+
+/// A true-peak reading and its max are the dBTP quantity, as the true peak reads elsewhere;
+/// VU falling back to the true peak reads it too. A calibrated scale keeps its unit.
+#[test]
+fn a_true_peak_reading_is_in_dbtp() {
+    let i = input(Scale::Dbfs);
+    assert_eq!(i.ppm_text(Ballistic::TruePeak), "−12.3 dBTP");
+    assert_eq!(i.max_text(Ballistic::TruePeak), "max −3.1 dBTP");
+    assert_eq!(i.ppm_text(Ballistic::Vu), "−12.3 dBTP");
+    assert_eq!(i.max_text(Ballistic::Vu), "max −3.1 dBTP");
+    assert_eq!(i.unit(Ballistic::Type2), "dBFS");
+    let line = input(Scale::Dbu { fs_dbu: 16.3 });
+    assert_eq!(line.ppm_text(Ballistic::TruePeak), "+4.0 dBu");
+    let mic = input(Scale::DbSpl { fs_db_spl: 120.5 });
+    assert_eq!(mic.max_text(Ballistic::TruePeak), "max 117.4 dB SPL");
 }
 
 #[test]
@@ -76,22 +92,32 @@ fn inputs_row_line_says_only_what_there_is() {
     let mut i = input(Scale::Dbfs);
     assert_eq!(
         i.row_text(Ballistic::Type1),
-        "Type I −12.3 dBFS · −1.2 dBTP · max −3.1 dBFS"
+        "Type I −12.3 · max −3.1 dBFS · −1.2 dBTP"
     );
     assert_eq!(
         i.row_text(Ballistic::TruePeak),
-        "true peak −12.3 dBFS · max −3.1 dBFS"
+        "true peak −12.3 · max −3.1 dBTP"
     );
     // VU on an uncalibrated input reads the true peak, and says so.
+    assert_eq!(i.row_text(Ballistic::Vu), "true peak −12.3 · max −3.1 dBTP");
+    let line = input(Scale::Dbu { fs_dbu: 16.3 });
     assert_eq!(
-        i.row_text(Ballistic::Vu),
-        "true peak −12.3 dBFS · max −3.1 dBFS"
+        line.row_text(Ballistic::Type2),
+        "Type II +4.0 · max +13.2 dBu · −1.2 dBTP"
     );
+    let mut held = input(Scale::Dbfs);
+    held.max = None;
+    assert_eq!(
+        held.row_text(Ballistic::TruePeak),
+        "true peak −12.3 dBTP · max —"
+    );
+    held.ppm = None;
+    assert_eq!(held.row_text(Ballistic::TruePeak), "true peak — · max —");
     i.overs = 2;
     i.clipped = true;
     assert_eq!(
         i.row_text(Ballistic::TruePeak),
-        "true peak −12.3 dBFS · max −3.1 dBFS · 2 overs · CLIP"
+        "true peak −12.3 · max −3.1 dBTP · 2 overs · CLIP"
     );
 }
 
@@ -275,8 +301,20 @@ fn scene_draws_bars_readouts_chip_and_field() {
     for want in ["Main L", "Main R", "right quiet", "correlation", "L", "R"] {
         assert!(t.iter().any(|x| x == want), "{want} in {t:?}");
     }
-    assert!(t.iter().any(|x| x.ends_with("dBTP")), "{t:?}");
-    assert!(t.iter().any(|x| x.starts_with("max ")), "{t:?}");
+    // A true-peak bar reads dBTP, its max too, and no second true-peak line repeats it.
+    assert!(t.iter().any(|x| x == "−12.3 dBTP"), "{t:?}");
+    assert!(t.iter().any(|x| x == "max −3.1 dBTP"), "{t:?}");
+    assert!(!t.iter().any(|x| x == "−1.2 dBTP"), "{t:?}");
+    let mut type1 = p.clone();
+    type1.ballistic = Ballistic::Type1;
+    let style = Style {
+        chrome: PlotChrome::Full,
+        theme: &theme,
+    };
+    let t1 = texts(&programme_scene(&type1, style, size, None).scene);
+    for want in ["−12.3 dBFS", "−1.2 dBTP", "max −3.1 dBFS"] {
+        assert!(t1.iter().any(|x| x == want), "{want} in {t1:?}");
+    }
     let sq = full.gonio.expect("a pair on a tall pane has a goniometer");
     assert_eq!(sq.w, sq.h);
     let grid = |s: &ProgrammeScene| s.scene.layers[0].polylines.len();

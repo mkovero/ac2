@@ -267,8 +267,9 @@ digital · pair (in 5, 6)*. A **REF** / **MEAS** mark shows what the running swe
 selected measurement, uses.
 
 Under each meter a line reads the programme meters of that input (of each side of a pair,
-marked **L** / **R**) in the rig's ballistic: *true peak −12.0 dBFS · max −3.1 dBFS*, or
-*Type I −14.2 dBFS · −11.8 dBTP · max −3.1 dBFS* (the true peak beside it), then *2 overs*
+marked **L** / **R**) in the rig's ballistic, the unit said once for the reading and its max:
+*true peak −12.0 · max −3.1 dBTP*, or *Type I −14.2 · max −3.1 dBFS · −11.8 dBTP* (the true
+peak beside it), then *2 overs*
 and *CLIP* when there are any — the line turns red then. A pair's row names its correlation
 beside the name, *correlation +0.87*, red when negative, *right quiet* when a side is under
 the gate (see [Programme pane](#programme-pane)). The line appears once the daemon's first
@@ -290,9 +291,10 @@ session*.
 The title says how the bars read, which pair and the correlator's window: *true peak · Main
 · 1 s*. Each input is a bar on a dBFS scale (−60 … 0), green, yellow from −6, red when it
 clips, with a flying peak that holds 1 s and then falls 20 dB/s. Under each bar: the reading
-on the input's own scale (dBFS; dBu after a [line calibration](#calibrating-a-line-input); dB
-SPL on a calibrated mic), the true peak in dBTP, the max since the last reset, overs and
-CLIP.
+on the input's own scale (dBTP for true peak, dBFS for the other ballistics; dBu after a [line
+calibration](#calibrating-a-line-input); dB SPL on a calibrated mic), the true peak in dBTP
+(not repeated when the bar already reads it), the max since the last reset in the reading's
+unit, overs and CLIP.
 
 - **Ballistics** (the rig's, Settings › Rig monitor › *Programme meters read*, or `ac2
   levels set --ballistic`): **true peak** (the default — sample peak through 4×

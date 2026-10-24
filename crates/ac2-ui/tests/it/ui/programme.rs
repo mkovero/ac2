@@ -90,7 +90,9 @@ fn programme_pane_of_a_pair() {
             .is_some_and(|p| p.correlation.chip().text == "right quiet")
     });
     let texts = programme_texts(&h);
-    for want in ["right quiet", "−11.8 dBTP", "max −12.0 dBFS"] {
+    // The bar reads the true peak in dBTP, its max too, and no second true-peak line.
+    assert!(!texts.iter().any(|t| t.ends_with("dBFS")), "{texts:?}");
+    for want in ["right quiet", "−11.8 dBTP", "max −11.8 dBTP"] {
         assert!(
             texts.iter().any(|t| t == want),
             "{want}: {}",
@@ -139,16 +141,16 @@ fn r_resets_the_picked_inputs_max() {
         a.state
             .row_meters(1)
             .map(|m| a.state.programme_of(m))
-            .and_then(|p| p.inputs.first().map(|i| i.max_text()))
+            .and_then(|p| p.inputs.first().map(|i| i.max_text(p.ballistic)))
     };
     step_until(&mut h, "in 2's max", |a| {
-        max_of(a).as_deref() == Some("max −3.0 dBFS")
+        max_of(a).as_deref() == Some("max −2.8 dBTP")
     });
     rig.fake.lock().set_input_peak(1, -20.0);
     h.state_mut().dispatch(ac2_ui::state::Msg::InputPick(1));
     h.key_press(Key::R);
     step_until(&mut h, "the max reset", |a| {
-        max_of(a).as_deref() == Some("max −20.0 dBFS")
+        max_of(a).as_deref() == Some("max −19.8 dBTP")
     });
     assert!(
         h.state()

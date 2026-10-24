@@ -9,7 +9,7 @@ use crate::primitives::{Color, FillRect, HAlign, Rect, Scene, Stroke, VAlign, Vi
 use crate::theme::Theme;
 use crate::view::{PlotChrome, Style};
 
-use super::{ProgrammeInput, ProgrammePane, bar_fill};
+use super::{Ballistic, ProgrammeInput, ProgrammePane, bar_fill};
 
 /// The pane's picture and where its embers go.
 #[derive(Clone, Debug, PartialEq)]
@@ -216,11 +216,12 @@ fn bars(c: &mut Canvas, p: &ProgrammePane, area: Rect, style: Style) {
                 clip: None,
             });
         }
-        let mut rows: Vec<(String, Color)> = vec![
-            (input.ppm_text(), theme.text),
-            (input.true_peak_text(), theme.text_dim),
-            (input.max_text(), theme.text_dim),
-        ];
+        let mut rows: Vec<(String, Color)> = vec![(input.ppm_text(p.ballistic), theme.text)];
+        // A true-peak bar already reads the dBTP number; a second line would repeat it.
+        if input.reads(p.ballistic) != Ballistic::TruePeak {
+            rows.push((input.true_peak_text(), theme.text_dim));
+        }
+        rows.push((input.max_text(p.ballistic), theme.text_dim));
         let flags = [input.overs_text(), input.clip_text().to_owned()]
             .into_iter()
             .filter(|t| !t.is_empty())

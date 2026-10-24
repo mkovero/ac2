@@ -52,18 +52,15 @@ pub enum Scale {
 }
 
 impl Scale {
-    /// A dBFS level as text on this scale: `−12.3 dBFS`, `+4.0 dBu`, `94.0 dB SPL`; `—` for
-    /// none.
-    pub fn text(self, dbfs: Option<f32>) -> String {
-        let Some(v) = dbfs.filter(|v| v.is_finite()) else {
-            return NO_VALUE.to_owned();
-        };
-        let v = f64::from(v);
-        match self {
-            Scale::Dbfs => format::dbfs(v),
-            Scale::Dbu { fs_dbu } => format!("{} dBu", format::signed(v + f64::from(fs_dbu), 1)),
-            Scale::DbSpl { fs_db_spl } => format::spl(v + f64::from(fs_db_spl)),
-        }
+    /// A dBFS level as this scale's number without its unit: `−12.3`, `+4.0`, `94.0`;
+    /// none for no level or silence.
+    fn number(self, dbfs: Option<f32>) -> Option<String> {
+        let v = f64::from(dbfs.filter(|v| v.is_finite())?);
+        Some(match self {
+            Scale::Dbfs => format::signed(v, 1),
+            Scale::Dbu { fs_dbu } => format::signed(v + f64::from(fs_dbu), 1),
+            Scale::DbSpl { fs_db_spl } => format::level(v + f64::from(fs_db_spl)),
+        })
     }
 }
 
@@ -106,9 +103,33 @@ impl ProgrammeInput {
         bar_fill(self.flying_peak)
     }
 
-    /// `−12.3 dBFS`, `+4.0 dBu`, `94.0 dB SPL`, `—`.
-    pub fn ppm_text(&self) -> String {
-        self.scale.text(self.ppm)
+    /// The ballistic this input reads under the rig's `ballistic`: the true peak where VU
+    /// is chosen but not offered.
+    pub fn reads(&self, ballistic: Ballistic) -> Ballistic {
+        if self.note(ballistic).is_some() {
+            Ballistic::TruePeak
+        } else {
+            ballistic
+        }
+    }
+
+    /// The unit of the reading and its max: a digital true peak is `dBTP`, any other digital
+    /// reading `dBFS`; a calibrated scale keeps its own (`dBu`, `dB SPL`).
+    pub fn unit(&self, ballistic: Ballistic) -> &'static str {
+        match self.scale {
+            Scale::Dbfs if self.reads(ballistic) == Ballistic::TruePeak => "dBTP",
+            Scale::Dbfs => "dBFS",
+            Scale::Dbu { .. } => "dBu",
+            Scale::DbSpl { .. } => "dB SPL",
+        }
+    }
+
+    /// `−12.3 dBFS`, `−1.2 dBTP`, `+4.0 dBu`, `94.0 dB SPL`, `—`.
+    pub fn ppm_text(&self, ballistic: Ballistic) -> String {
+        match self.scale.number(self.ppm) {
+            Some(n) => format!("{n} {}", self.unit(ballistic)),
+            None => NO_VALUE.to_owned(),
+        }
     }
 
     /// `−1.2 dBTP`: the true peak is a digital quantity and keeps its own unit on every
@@ -120,9 +141,13 @@ impl ProgrammeInput {
         }
     }
 
-    /// `max −3.1 dBFS`, `max —`.
-    pub fn max_text(&self) -> String {
-        format!("max {}", self.scale.text(self.max))
+    /// The max holds the chosen ballistic's reading, so it carries that unit:
+    /// `max −3.1 dBFS`, `max −3.1 dBTP`, `max —`.
+    pub fn max_text(&self, ballistic: Ballistic) -> String {
+        match self.scale.number(self.max) {
+            Some(n) => format!("max {n} {}", self.unit(ballistic)),
+            None => format!("max {NO_VALUE}"),
+        }
     }
 
     /// `2 overs`, `1 over`; empty when none.
@@ -139,20 +164,36 @@ impl ProgrammeInput {
         if self.clipped { "CLIP" } else { "" }
     }
 
-    /// The Inputs-list line under the row's meter, readouts only, never empty separators:
-    /// `Type I −12.3 dBFS · −1.2 dBTP · max −3.1 dBFS · 2 overs · CLIP`.
+    /// The Inputs-list line under the row's meter, readouts only, never empty separators,
+    /// the reading's unit said once (the reading and its max share it), so the line fits the
+    /// sidebar: `Type I −12.3 · max −3.1 dBFS · −1.2 dBTP · 2 overs · CLIP`,
+    /// `true peak −12.3 · max −3.1 dBTP`.
     pub fn row_text(&self, ballistic: Ballistic) -> String {
-        let word = if self.note(ballistic).is_some() {
-            Ballistic::TruePeak.word()
-        } else {
-            ballistic.word()
+        let reads = self.reads(ballistic);
+        let unit = self.unit(ballistic);
+        let ppm = self.scale.number(self.ppm);
+        let max = self.scale.number(self.max);
+        // The unit goes after the last number on the line.
+        let with_unit = |n: &str, last: bool| {
+            if last {
+                format!("{n} {unit}")
+            } else {
+                n.to_owned()
+            }
         };
-        let mut parts = vec![format!("{word} {}", self.ppm_text())];
-        // A true-peak reading already is the dBTP number, on the row's scale.
-        if word != Ballistic::TruePeak.word() {
+        let reading = format!(
+            "{} {} · max {}",
+            reads.word(),
+            ppm.as_deref()
+                .map_or(NO_VALUE.to_owned(), |p| with_unit(p, max.is_none())),
+            max.as_deref()
+                .map_or(NO_VALUE.to_owned(), |m| with_unit(m, true)),
+        );
+        let mut parts = vec![reading];
+        // A true-peak reading already is the dBTP number.
+        if reads != Ballistic::TruePeak {
             parts.push(self.true_peak_text());
         }
-        parts.push(self.max_text());
         parts.extend(
             [self.overs_text(), self.clip_text().to_owned()]
                 .into_iter()

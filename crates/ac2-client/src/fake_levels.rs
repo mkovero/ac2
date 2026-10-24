@@ -3,9 +3,11 @@
 //! turns [`Shared::meters`] on.
 //!
 //! The figures are plausible, not measured: every input peaks at [`Shared::input_peak`]
-//! (default [`DEFAULT_PEAK_DBFS`]) unless a test sets it, `ppm` is that peak, the true peak
-//! sits 0.2 dB above it (the inter-sample overshoot a 4× interpolator finds on a sine), the
-//! max holds the highest peak since the last reset, nothing is ever over. A pair of two
+//! (default [`DEFAULT_PEAK_DBFS`]) unless a test sets it, the true peak sits 0.2 dB above it
+//! (the inter-sample overshoot a 4× interpolator finds on a sine), `ppm` is what the rig's
+//! ballistic reads (the true peak for true peak and for VU where VU is not offered, the
+//! peak otherwise), the max holds the
+//! highest `ppm` since the last reset, nothing is ever over. A pair of two
 //! sounding inputs is mono (+1); one with a silent side names it `quiet`. The goniometer
 //! draws a 1 kHz mono tone: a vertical line.
 
@@ -86,22 +88,33 @@ impl Shared {
             .unwrap_or(DEFAULT_PEAK_DBFS)
     }
 
-    /// The programme columns of `channels`, the max holds advanced.
-    fn programme(&mut self, channels: &[u16]) -> Programme {
+    /// The programme columns of `channels` on `device`, the max holds advanced.
+    fn programme(&mut self, channels: &[u16], device: &DeviceId) -> Programme {
+        let ballistic = self.state.rig.levels.ballistic;
         let mut p = Programme::default();
         for &ch in channels {
             let peak = self.peak_of(ch);
-            let held = self.levels_max.entry(ch).or_insert(f32::NEG_INFINITY);
-            *held = held.max(peak);
-            p.peak.push(peak);
-            p.rms.push(peak - 3.0);
-            p.clip.push(ClipFlags::NONE);
-            p.ppm.push(peak);
-            p.true_peak.push(if peak.is_finite() {
+            let true_peak = if peak.is_finite() {
                 peak + TRUE_PEAK_OVER_PEAK_DB
             } else {
                 peak
-            });
+            };
+            let reads_true_peak = ballistic == Ballistic::TruePeak
+                || (ballistic == Ballistic::Vu
+                    && !ac2_proto::cal::offers_vu(
+                        &self.state.inputs,
+                        &self.state.line_calibrations,
+                        device,
+                        ch,
+                    ));
+            let ppm = if reads_true_peak { true_peak } else { peak };
+            let held = self.levels_max.entry(ch).or_insert(f32::NEG_INFINITY);
+            *held = held.max(ppm);
+            p.peak.push(peak);
+            p.rms.push(peak - 3.0);
+            p.clip.push(ClipFlags::NONE);
+            p.ppm.push(ppm);
+            p.true_peak.push(true_peak);
             p.max.push(*held);
             p.overs.push(0);
         }
@@ -155,7 +168,7 @@ impl Shared {
     pub(super) fn publish_levels(&mut self) {
         if let Some(open) = self.state.session.open.clone() {
             let channels = open.config.input_channels.clone();
-            let p = self.programme(&channels);
+            let p = self.programme(&channels, &open.input_device);
             let pair_levels = self.pair_levels(&self.state.pairs.clone(), &channels);
             let gonio = self.gonio(&pair_levels);
             self.meter_seq += 1;
@@ -186,7 +199,7 @@ impl Shared {
         }
         if let Some(d) = self.preview_decl.clone() {
             let channels: Vec<u16> = (0..d.channels).collect();
-            let p = self.programme(&channels);
+            let p = self.programme(&channels, &d.device);
             let pair_levels = self.pair_levels(&d.pairs, &channels);
             let gonio = self.gonio(&pair_levels);
             self.meter_seq += 1;
