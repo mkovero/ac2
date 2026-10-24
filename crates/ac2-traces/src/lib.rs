@@ -18,6 +18,7 @@ pub mod ir_wav;
 pub mod math;
 pub mod meta;
 pub mod mic;
+pub mod old_layout;
 pub mod ops;
 pub mod raw;
 pub mod session;

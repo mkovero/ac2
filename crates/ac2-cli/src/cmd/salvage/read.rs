@@ -226,8 +226,14 @@ fn old_meas(v: &Value) -> Result<OldMeas, String> {
     let delay = optional("delay").and_then(|d| lenient::<SavedDelay>(d, None, "delay", &mut notes));
     let colour =
         optional("colour").and_then(|d| lenient::<ColourFamily>(d, None, "colour", &mut notes));
-    let layout =
-        optional("layout").and_then(|d| lenient::<PaneLayout>(d, None, "layout", &mut notes));
+    let old_layout = optional("layout").map(|d| {
+        let mut d = d.clone();
+        ac2_traces::old_layout::pane_meas_to_content(&mut d);
+        d
+    });
+    let layout = old_layout
+        .as_ref()
+        .and_then(|d| lenient::<PaneLayout>(d, None, "layout", &mut notes));
     let known = meas_keys();
     for (k, v) in obj {
         if !known.contains(k) {
@@ -551,6 +557,7 @@ fn set(doc: &mut Value, ptr: &str, key: &str, v: Option<Value>) {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use ac2_proto::model::layout::{PaneContent, PlotChrome};
     use ac2_proto::model::{MeasKind, SpecLevel, SpecResolution, SplConfig, Window};
     use serde_json::json;
 
@@ -606,6 +613,29 @@ mod tests {
         assert_eq!(panes.len(), 1);
         assert_eq!(panes[0].content, None);
         assert!(panes[0].levels.is_empty());
+    }
+
+    /// A layout of format 31 names a picked measurement as `meas`: the pick reads as today's
+    /// `content`, nothing is dropped.
+    #[test]
+    fn a_layout_of_format_31_keeps_its_pick() {
+        let pane = json!({ "kind": "spl", "transfer_view": "coherence",
+                           "spectrum_view": "spectrum", "spl_view": "leq",
+                           "sweep_view": "response", "chrome": "no_grid", "meas": 3,
+                           "levels": { "transfer": null, "spectrum_dbfs": null,
+                                       "spectrum_spl": null, "distortion": null } });
+        let v = json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
+                        "running": false, "delay": null, "colour": null,
+                        "layout": { "type": "pane", "pane": pane } });
+        let m = old_meas(&v).unwrap();
+        assert!(m.notes.is_empty(), "{:?}", m.notes);
+        let layout = m.layout.expect("the layout");
+        let panes = layout.panes();
+        assert_eq!(
+            panes[0].content,
+            Some(PaneContent::Meas { meas: MeasId(3) })
+        );
+        assert_eq!(panes[0].chrome, PlotChrome::NoGrid);
     }
 
     #[test]

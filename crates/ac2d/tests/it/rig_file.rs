@@ -260,3 +260,50 @@ fn unreadable_meters_keep_the_ceiling_monitor_and_artnet() {
     drop(c);
     h.shutdown();
 }
+
+/// A version 2 meter's own layout names a picked measurement as `meas`: it reads whole, the
+/// pick as today's `content`, and the file is not set aside.
+#[test]
+fn a_v2_meter_layout_with_a_pick_reads_whole() {
+    let s = seeded();
+    let pane = |meas: Value| {
+        json!({ "type": "pane", "pane": {
+            "kind": "spl", "transfer_view": "coherence", "spectrum_view": "spectrum",
+            "spl_view": "leq", "sweep_view": "response", "chrome": "no_grid", "meas": meas,
+            "levels": { "transfer": null, "spectrum_dbfs": null, "spectrum_spl": null,
+                        "distortion": null } } })
+    };
+    let meter = |id: u64, meas: Value| {
+        json!({ "id": id, "config": s.meter, "running": true, "colour": null,
+                "layout": pane(meas) })
+    };
+    let dir = tempfile::tempdir().unwrap();
+    v2_with_meters(dir.path(), &s, json!([meter(1, json!(1))]));
+    let h = start("rig-file-v2-layout", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    let st = state(&mut c);
+    assert!(
+        st.rig.damaged_files.is_empty(),
+        "{:?}",
+        st.rig.damaged_files
+    );
+    assert_rig_kept(&st, &s);
+    let panes = |id| {
+        let m = st.measurements.iter().find(|m| m.id == MeasId(id)).unwrap();
+        m.layout.as_ref().expect("the meter's layout").panes()
+    };
+    let picked = panes(1);
+    assert_eq!(picked[0].chrome, layout::PlotChrome::NoGrid);
+    assert_eq!(
+        picked[0].content,
+        Some(layout::PaneContent::Meas { meas: MeasId(1) })
+    );
+    let rj = rig_json(dir.path());
+    assert_eq!(rj["version"], 3);
+    assert_eq!(
+        rj["meters"][0]["layout"]["pane"]["content"],
+        json!({ "type": "meas", "meas": 1 })
+    );
+    drop(c);
+    h.shutdown();
+}
