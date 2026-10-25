@@ -65,6 +65,10 @@ impl AppState {
         let Overlay::Form(f) = &mut self.overlay else {
             return;
         };
+        if matches!(f.kind, FormKind::Programme | FormKind::ProgrammeEdit) {
+            self.submit_meter(out);
+            return;
+        }
         if matches!(f.kind, FormKind::TargetTilt | FormKind::TargetLoudness) {
             match crate::target_dialog::curve(f) {
                 Ok(curve) => {

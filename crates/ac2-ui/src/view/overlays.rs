@@ -320,6 +320,10 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                     .min_col_width(0.0)
                     .show(ui, |ui| {
                         for (i, field) in f.fields.iter().enumerate() {
+                            if let Some(h) = f.heading(field.id) {
+                                ui.label(RichText::new(h).strong().color(ch.dim));
+                                ui.end_row();
+                            }
                             let focused = i == f.focus;
                             let label = RichText::new(field.label.as_str()).color(if focused {
                                 ch.text
@@ -383,10 +387,7 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                                         if ui.small_button("›").clicked() {
                                             msg = Some(FormMsg::Cycle(i, 1));
                                         }
-                                        if let Some(c) = field
-                                            .channel_value()
-                                            .filter(|_| field.id != crate::forms::FieldId::Output)
-                                        {
+                                        for c in f.field_meters(i) {
                                             let m = meters.get(&c).cloned().unwrap_or_else(
                                                 ac2_scene::meter::MeterReading::none,
                                             );

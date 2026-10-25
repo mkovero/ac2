@@ -44,9 +44,10 @@ the top bar); **Shift+O** opens its Audio I/O page; **Ctrl+M** (*New measurement
 the last row of every pane's list) lists every kind — transfer, spectrum, RTA, SPL meter,
 sweep, math channel, alignment — with what each measures, and opens the chosen kind's settings
 (created, started and selected on **Enter**, in a pane of its own); a row it cannot make now
-says why. Its last row, *Programme meter*, makes no measurement: **Enter** asks what to meter
-and opens a [Programme pane](#programme-pane) beside the focused one; **Ctrl+M** on a
-Programme pane starts on that row. The palette (**Ctrl+K**) also has
+says why. Its last row, *Programme meter*, makes no measurement: **Enter** opens its form
+(the pair or inputs to meter, and the rig's programme-meter settings), whose **Enter** opens a
+[Programme pane](#programme-pane) beside the focused one; **Ctrl+M** on a Programme pane
+starts on that row. The palette (**Ctrl+K**) also has
 *New transfer…*, *New spectrum…*, *New RTA…*, *New SPL meter…* directly, and
 *Close audio I/O*; **Delete** (or **Backspace**) deletes the
 selected measurement after asking. Until there is a session or a measurement, the transfer
@@ -249,8 +250,9 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   from your stimulus output*). Roles, kinds, pairs and mic names are remembered per device
   (`ui.toml`).
   On a daemon with no measurements yet, the session opening brings up the **New
-  measurement** chooser (as **Ctrl+M** does): **Enter** on a kind opens its settings, **Esc**
-  leaves the empty panes, which say how to come back to it.
+  measurement** chooser (as **Ctrl+M** does): **Enter** on a kind opens its settings — the
+  *Programme meter* row too, a form of what to meter (see [Programme pane](#programme-pane))
+  — and **Esc** leaves the empty panes, which say how to come back to it.
 
 The measurement dialogs pick inputs the same way: by name, with meters, **←/→**.
 
@@ -286,13 +288,30 @@ new [Programme pane](#programme-pane). Tab, a click on a pane or on a list row l
 ### Programme pane
 
 A pane that meters inputs rather than a measurement: a pair, or up to eight inputs side by
-side. **P** on a picked Inputs row opens one for that row in a new pane beside the focused
-one (never in place of it); a pane's own list (its title's ▾) offers *meter …* rows — every
-pair, every input alone, and the first eight inputs together. The **Ctrl+M** chooser's
-*Programme meter* row offers the same list and opens the pane beside the focused one, as
-**P** does. The layout keeps the pane and
-what it meters; a session without those inputs shows it empty with *inputs 3+4 not in this
-session*.
+side. The **Ctrl+M** chooser's *Programme meter* row opens the **New programme meter** form,
+laid out and keyed like the measurement forms (**↑/↓** field, **←/→** choose, **Enter**,
+**Esc** closes and changes nothing):
+
+- **What to meter** — *Meter*: one of the session's pairs, or *inputs side by side*; then
+  *Bar 1* … *Bar 8*, each an input by name with its meter (a pair shows both sides' meters).
+  A bar never meters an input another bar does; **←** past the first input leaves a bar
+  *none*, and an empty bar after the last waits for the next input. Mics are offered too:
+  they show levels, no loudness. Switching from a pair to inputs starts with its two sides.
+- **How it reads · Whose: the rig — all clients** — *Programme meters read*, *Correlation
+  window*, *An over is above* and *Correlation gate*, as on Settings › Rig monitor. They are
+  the rig's, so every app on it reads the same bar: a value changed here goes out on
+  **Enter** as one `levels.set` of only what was changed, and **Esc** sends nothing.
+
+**Enter** opens the pane beside the focused one (never in place of it). A session with no
+inputs lists the row with *no inputs in the session to meter*. *Edit measurement…* (the
+palette) on a focused Programme pane opens the same form, **Edit programme meter**, filled in
+with what the pane meters; **Enter** changes that pane in place.
+
+Two quicker routes stay: **P** on a picked Inputs row opens a pane for that row (its pair,
+else the input) beside the focused one, and a pane's own list (its title's ▾) offers *meter
+…* rows — every pair, every input alone, and the first eight inputs together. The layout
+keeps the pane and what it meters; a session without those inputs shows it empty with
+*inputs 3+4 not in this session*.
 
 The title says how the bars read, which pair and the correlator's window: *true peak · Main
 · 1 s*. Each input is a bar on a dBFS scale (−60 … 0), green, yellow from −6, red when it

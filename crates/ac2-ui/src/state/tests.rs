@@ -653,6 +653,8 @@ mod sweep;
 
 mod new_meas;
 
+mod meter_form;
+
 mod leq;
 
 mod leq_strip;

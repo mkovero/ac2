@@ -38,6 +38,7 @@ pub mod line_dialog;
 pub mod link_wants;
 pub mod marquee;
 pub mod math_dialog;
+pub mod meter_dialog;
 pub mod palette;
 pub mod pane_export;
 pub mod plot;

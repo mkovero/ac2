@@ -48,7 +48,7 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
     assert_eq!(c.index, 0, "the transfer pane's kind");
     assert_eq!(
         c.hint,
-        "↑/↓ choose · Enter opens its settings, or what to meter · Esc cancels"
+        "↑/↓ choose · Enter opens its settings · Esc cancels"
     );
     // One transfer function: Alt+M would refuse, and the row says so in its words.
     assert!(
@@ -150,43 +150,6 @@ fn the_alignment_row_opens_the_aligned_math_dialog() {
     };
     let by_key = g.fields.iter().map(|x| x.display()).collect::<Vec<_>>();
     assert_eq!(from_row, by_key);
-}
-
-/// The Programme meter row asks what to meter (the pane list's *meter …* rows); the pick
-/// opens a Programme pane beside the focused one, which keeps what it shows.
-#[test]
-fn the_meter_row_asks_what_to_meter_and_opens_a_pane_beside() {
-    let mut t = T::new();
-    t.put(PaneKind::Transfer);
-    let tf = t.st.layout.focus;
-    let before = t.visible().len();
-    let menu: Vec<(PaneMenuRow, String)> =
-        t.st.pane_menu_rows(tf)
-            .into_iter()
-            .filter(|(r, _)| matches!(r, PaneMenuRow::Meter(_)))
-            .collect();
-    assert!(menu.len() > 1, "{menu:?}");
-    t.key("Ctrl+M");
-    t.st.update(Msg::Choose(Some(7)), &t.keys);
-    let Overlay::Choose(c) = &t.st.overlay else {
-        panic!("{:?}", t.st.overlay);
-    };
-    assert_eq!(c.title, "Programme meter");
-    let labels: Vec<&str> = c.choices.iter().map(|x| x.label.as_str()).collect();
-    let want: Vec<&str> = menu.iter().map(|(_, l)| l.as_str()).collect();
-    assert_eq!(labels, want);
-    t.key("ArrowDown");
-    t.key("Enter");
-    assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.layout.kind(tf), PaneKind::Transfer);
-    assert_eq!(t.visible().len(), before + 1);
-    let p = t.st.layout.focus;
-    assert_ne!(p, tf);
-    assert_eq!(t.st.layout.kind(p), PaneKind::Programme);
-    let PaneMenuRow::Meter(m) = menu[1].0 else {
-        unreachable!()
-    };
-    assert_eq!(t.st.layout.view(p).and_then(|v| v.meters), Some(m));
 }
 
 /// A session without inputs has nothing to meter: the row says so.

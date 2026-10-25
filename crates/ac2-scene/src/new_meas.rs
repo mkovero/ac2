@@ -115,29 +115,12 @@ pub fn new_choices(
     NewChoices {
         title: TITLE.to_owned(),
         lines: vec![
-            "What to measure (its settings come next) or meter: it opens in its own pane."
+            "What to measure or meter (its settings come next): it opens in its own pane."
                 .to_owned(),
         ],
         choices,
         default,
-        hint: "↑/↓ choose · Enter opens its settings, or what to meter · Esc cancels".to_owned(),
-    }
-}
-
-/// The Programme meter row taken: what to meter (`rows`: the pane list's *meter …* rows).
-pub fn meter_choices(rows: Vec<String>) -> NewChoices {
-    NewChoices {
-        title: NewKind::Programme.name().to_owned(),
-        lines: vec!["What to meter: it opens in a new pane beside the focused one.".to_owned()],
-        choices: rows
-            .into_iter()
-            .map(|label| Choice {
-                label,
-                blocked: None,
-            })
-            .collect(),
-        default: 0,
-        hint: "↑/↓ choose · Enter opens its meters · Esc cancels".to_owned(),
+        hint: "↑/↓ choose · Enter opens its settings · Esc cancels".to_owned(),
     }
 }
 
@@ -286,21 +269,8 @@ mod tests {
         assert_eq!(open.default, 7);
         assert_eq!(
             open.hint,
-            "↑/↓ choose · Enter opens its settings, or what to meter · Esc cancels"
+            "↑/↓ choose · Enter opens its settings · Esc cancels"
         );
-    }
-
-    #[test]
-    fn the_meter_asks_what_to_meter() {
-        let q = meter_choices(vec!["meter  Main".to_owned(), "meter  in 1".to_owned()]);
-        assert_eq!(q.title, "Programme meter");
-        assert_eq!(
-            q.lines,
-            ["What to meter: it opens in a new pane beside the focused one."]
-        );
-        let labels: Vec<&str> = q.choices.iter().map(|c| c.label.as_str()).collect();
-        assert_eq!(labels, ["meter  Main", "meter  in 1"]);
-        assert!(q.choices.iter().all(|c| c.blocked.is_none()));
     }
 
     #[test]

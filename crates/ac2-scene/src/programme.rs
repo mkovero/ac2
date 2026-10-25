@@ -469,6 +469,7 @@ pub fn inputs_text(inputs: &[u16]) -> String {
 }
 
 mod draw;
+pub mod form;
 pub mod loudness;
 pub use draw::{ProgrammeScene, programme_scene};
 

@@ -135,7 +135,7 @@ impl CommandId {
             C::NewSpl => &["add", "level", "leq", "sound level"],
             C::NewMath => &["add", "average", "sum", "difference"],
             C::NewAlignment => &["crossover", "subwoofer", "time align", "phase align"],
-            C::EditMeas => &["settings", "configure", "change"],
+            C::EditMeas => &["settings", "configure", "change", "meter", "programme"],
             C::NextColour | C::PrevColour => &["color"],
             C::HideGroup => &["visible", "hide"],
             C::ToggleGroup => &["collapse", "expand"],

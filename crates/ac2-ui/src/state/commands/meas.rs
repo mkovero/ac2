@@ -142,6 +142,12 @@ impl AppState {
             C::NewMeasurement => self.open_new_measurement(self.layout.focus, keymap),
             C::NextColour | C::PrevColour => self.step_colour(c == C::NextColour, out),
             C::EditMeas => {
+                // A focused Programme pane: what it meters, edited in place. It shows no
+                // measurement, so the selection is not what the operator is pointing at.
+                if self.layout.focus_kind() == PaneKind::Programme {
+                    self.open_meter_form(Some(self.layout.focus), out);
+                    return;
+                }
                 // A sweep measurement selected (or the sweep pane's) edits its settings.
                 let sweep = self
                     .selected_meas()
@@ -207,7 +213,8 @@ impl AppState {
                     Some(Ok(f)) => self.overlay = Overlay::Form(Box::new(f)),
                     Some(Err(e)) => self.warn(e),
                     None => self.warn(
-                        "select a measurement first (a transfer, sweep, spectrum, RTA or math channel)",
+                        "select a measurement first (a transfer, sweep, spectrum, RTA or math \
+                         channel), or focus a Programme pane",
                     ),
                 }
             }

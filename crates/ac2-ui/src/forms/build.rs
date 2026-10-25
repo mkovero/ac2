@@ -15,6 +15,8 @@ impl Form {
             sweep_edit: None,
             meas_edit: None,
             ir_import: None,
+            meter: None,
+            headings: Vec::new(),
             averaging: AVERAGING.to_vec(),
             sample_rate: None,
         }
@@ -243,7 +245,7 @@ impl Form {
         let input_field = Field::channel(FieldId::Input, "Input", inputs, Some(measurement), "");
         let fields = match kind {
             // Built by [`Form::sweep`], [`Form::math`], [`crate::ir_import_dialog::form`] and
-            // [`crate::target_dialog`].
+            // [`crate::target_dialog`]; the programme meter's by [`crate::meter_dialog`].
             FormKind::Sweep
             | FormKind::SweepEdit
             | FormKind::Math
@@ -253,7 +255,9 @@ impl Form {
             | FormKind::TransferEdit
             | FormKind::IrImport
             | FormKind::TargetTilt
-            | FormKind::TargetLoudness => Vec::new(),
+            | FormKind::TargetLoudness
+            | FormKind::Programme
+            | FormKind::ProgrammeEdit => Vec::new(),
             FormKind::Transfer => vec![
                 Field::channel(
                     FieldId::Reference,
@@ -626,6 +630,9 @@ impl Form {
         let kind = match self.kind {
             FormKind::Sweep | FormKind::SweepEdit => return Err("a sweep dialog".into()),
             FormKind::IrImport => return Err("an import dialog".into()),
+            FormKind::Programme | FormKind::ProgrammeEdit => {
+                return Err("a programme meter dialog".into());
+            }
             FormKind::TargetTilt | FormKind::TargetLoudness => {
                 return Err("a target curve dialog".into());
             }

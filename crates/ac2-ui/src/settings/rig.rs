@@ -9,7 +9,7 @@
 
 use crate::caret::Caret;
 use ac2_proto::Command;
-use ac2_proto::model::Rig;
+use ac2_proto::model::{LevelsSettings, Rig};
 use ac2_proto::units::Rev;
 use ac2_scene::artnet;
 use ac2_scene::osc::{DEFAULT_TEST, parse_message, parse_target, target_text};
@@ -399,50 +399,34 @@ impl RigPage {
             let n = ((v / by).round() + f64::from(d.signum())) * by;
             (n >= lo && n <= hi && n != v).then_some(n)
         };
-        let (mut ballistic, mut correlation_window) = (None, None);
-        let (mut over_threshold, mut correlation_gate) = (None, None);
-        let what = match row {
+        let mut want = now;
+        match row {
             RigRow::Ballistic => {
                 let at = Ballistic::ALL.iter().position(|b| *b == now.ballistic)?;
-                let b = Ballistic::ALL[step_in(Ballistic::ALL.len(), at)?];
-                ballistic = Some(b);
-                format!("programme meters read {}", b.word())
+                want.ballistic = Ballistic::ALL[step_in(Ballistic::ALL.len(), at)?];
             }
             RigRow::CorrelationWindow => {
                 let all = CorrelationWindow::ALL;
                 let at = all.iter().position(|w| *w == now.correlation_window)?;
-                let w = all[step_in(all.len(), at)?];
-                correlation_window = Some(w);
-                format!("correlation window {}", w.text())
+                want.correlation_window = all[step_in(all.len(), at)?];
             }
             RigRow::OverThreshold => {
-                let t = stepped(
+                want.over_threshold = Dbtp(stepped(
                     now.over_threshold.0,
                     levels::OVER_STEP_DB,
                     OVER_THRESHOLD_RANGE,
-                )?;
-                over_threshold = Some(Dbtp(t));
-                format!("an over is above {}", levels::over_text(t))
+                )?);
             }
             RigRow::CorrelationGate => {
-                let g = stepped(
+                want.correlation_gate = Dbfs(stepped(
                     now.correlation_gate.0,
                     levels::GATE_STEP_DB,
                     CORRELATION_GATE_RANGE,
-                )?;
-                correlation_gate = Some(Dbfs(g));
-                format!("correlation gate {}", levels::gate_text(g))
+                )?);
             }
             _ => return None,
-        };
-        let cmd = Command::LevelsSet {
-            base: self.rev,
-            ballistic,
-            correlation_window,
-            over_threshold,
-            correlation_gate,
-        };
-        Some((cmd, what))
+        }
+        levels_set(self.rev, now, want)
     }
 
     /// The value programme-meter row `row` shows: the rig's.
@@ -542,4 +526,40 @@ impl RigPage {
         };
         r.map_err(|e| self.error = Some(e)).ok()
     }
+}
+
+/// `levels.set` of the programme-meter settings in `want` that differ from the rig's `now`,
+/// on the rev `base` the change was made against, with what the toast says; `None` when
+/// nothing differs. A value left alone is not sent, so it never overwrites another client's.
+pub fn levels_set(
+    base: Rev,
+    now: LevelsSettings,
+    want: LevelsSettings,
+) -> Option<(Command, String)> {
+    let ballistic = (want.ballistic != now.ballistic).then_some(want.ballistic);
+    let correlation_window =
+        (want.correlation_window != now.correlation_window).then_some(want.correlation_window);
+    let over_threshold = (want.over_threshold != now.over_threshold).then_some(want.over_threshold);
+    let correlation_gate =
+        (want.correlation_gate != now.correlation_gate).then_some(want.correlation_gate);
+    let what: Vec<String> = [
+        ballistic.map(|b| format!("programme meters read {}", b.word())),
+        correlation_window.map(|w| format!("correlation window {}", w.text())),
+        over_threshold.map(|t| format!("an over is above {}", levels::over_text(t.0))),
+        correlation_gate.map(|g| format!("correlation gate {}", levels::gate_text(g.0))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if what.is_empty() {
+        return None;
+    }
+    let cmd = Command::LevelsSet {
+        base,
+        ballistic,
+        correlation_window,
+        over_threshold,
+        correlation_gate,
+    };
+    Some((cmd, what.join(" · ")))
 }

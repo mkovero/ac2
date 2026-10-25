@@ -35,7 +35,7 @@ pub use connection::{
     ClientKey, ConnAction, ConnEdit, ConnLine, ConnectionPage, SERVER_INFO_EVERY_S, conn_line_text,
     conn_lines, link_lines,
 };
-pub use rig::{RigPage, RigRow};
+pub use rig::{RigPage, RigRow, levels_set};
 
 /// Whose a setting is: this computer's app alone.
 pub const THIS_APP: &str = "this app";

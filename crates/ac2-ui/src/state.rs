@@ -72,6 +72,7 @@ use panes::meas_layout::LayoutQueue;
 mod drop_math;
 mod programme;
 pub use programme::{MAX_METERED, Metered, ProgrammeUi};
+mod meter_form;
 mod new_meas;
 mod panes;
 mod queries;

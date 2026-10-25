@@ -51,6 +51,10 @@ pub enum FormKind {
     TargetTilt,
     /// A loudness shift target curve ([`crate::target_dialog`]).
     TargetLoudness,
+    /// A new Programme pane ([`crate::meter_dialog`]).
+    Programme,
+    /// What a Programme pane meters, edited in place.
+    ProgrammeEdit,
 }
 
 impl FormKind {
@@ -70,6 +74,8 @@ impl FormKind {
             FormKind::IrImport => "Import impulse response",
             FormKind::TargetTilt => ac2_scene::target_curve::tilt::TITLE,
             FormKind::TargetLoudness => ac2_scene::target_curve::loudness::TITLE,
+            FormKind::Programme => ac2_scene::programme::form::NEW_TITLE,
+            FormKind::ProgrammeEdit => ac2_scene::programme::form::EDIT_TITLE,
         }
     }
 
@@ -81,6 +87,8 @@ impl FormKind {
             }
             FormKind::IrImport => "Enter imports it as a transfer trace",
             FormKind::TargetTilt | FormKind::TargetLoudness => ac2_scene::target_curve::SUBMIT,
+            FormKind::Programme => ac2_scene::programme::form::NEW_SUBMIT,
+            FormKind::ProgrammeEdit => ac2_scene::programme::form::EDIT_SUBMIT,
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
@@ -102,11 +110,13 @@ impl FormKind {
             FormKind::Sweep => "Create",
             FormKind::IrImport => "Import",
             FormKind::TargetTilt | FormKind::TargetLoudness => "Add",
+            FormKind::Programme => "Open",
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
             | FormKind::RtaEdit
-            | FormKind::TransferEdit => "Apply",
+            | FormKind::TransferEdit
+            | FormKind::ProgrammeEdit => "Apply",
             _ => "Create and start",
         }
     }
@@ -181,6 +191,15 @@ pub enum FieldId {
     /// A loudness shift's levels: judged at, played at.
     PhonFrom,
     PhonTo,
+    /// What a Programme pane meters: one of the session's pairs, or inputs.
+    Metered,
+    /// A Programme pane's bar `n` (zero-based) when it meters inputs.
+    Bar(u8),
+    /// The rig's programme-meter settings ([`ac2_proto::model::LevelsSettings`]).
+    Ballistic,
+    CorrelationWindow,
+    OverThreshold,
+    CorrelationGate,
 }
 
 /// A field's value: typed text, one of a few options (←/→ pick), or an input of the session
@@ -243,7 +262,7 @@ impl Field {
         }
     }
 
-    fn channel(
+    pub(crate) fn channel(
         id: FieldId,
         label: &'static str,
         inputs: &[(u16, String)],
@@ -273,9 +292,10 @@ impl Field {
                 index: Some(i),
                 ..
             } => options.get(*i).cloned().unwrap_or_default(),
-            Value::Channel { index: None, .. } => {
-                format!("choose the {}", self.label.to_lowercase())
-            }
+            Value::Channel { index: None, .. } => match self.id {
+                FieldId::Bar(n) if n > 0 => ac2_scene::programme::form::NO_BAR.to_owned(),
+                _ => format!("choose the {}", self.label.to_lowercase()),
+            },
         }
     }
 
@@ -311,6 +331,10 @@ pub struct Form {
     pub meas_edit: Option<Box<Measurement>>,
     /// The file the impulse-response import dialog reads.
     pub ir_import: Option<Box<crate::ir_import_dialog::IrTarget>>,
+    /// The programme meter dialog's own state ([`crate::meter_dialog`]).
+    pub meter: Option<Box<crate::meter_dialog::MeterForm>>,
+    /// A heading drawn above the field it names.
+    pub headings: Vec<(FieldId, String)>,
     /// The averaging field's values, one per option.
     averaging: Vec<SpecAveraging>,
     /// The open session's sample rate: what the FFT size field's hint is stated at.
@@ -407,6 +431,29 @@ impl Form {
         parts.join(" · ")
     }
 
+    /// The inputs whose meters are drawn beside field `i`: a channel field's input (an
+    /// output has none), both sides of a pair the programme meter picks.
+    pub fn field_meters(&self, i: usize) -> Vec<u16> {
+        let Some(f) = self.fields.get(i) else {
+            return Vec::new();
+        };
+        if let Some(m) = self.meter.as_ref().filter(|_| f.id == FieldId::Metered) {
+            return m.pair_of(f).map_or_else(Vec::new, |(l, r)| vec![l, r]);
+        }
+        f.channel_value()
+            .filter(|_| f.id != FieldId::Output)
+            .into_iter()
+            .collect()
+    }
+
+    /// The heading drawn above field `id`, if any.
+    pub fn heading(&self, id: FieldId) -> Option<&str> {
+        self.headings
+            .iter()
+            .find(|(f, _)| *f == id)
+            .map(|(_, h)| h.as_str())
+    }
+
     /// Ctrl+A: selects the focused text field's text.
     pub fn select_all(&mut self) {
         self.selected = matches!(
@@ -418,6 +465,9 @@ impl Form {
     /// ←/→ on the focused choice or channel: the next or previous option, stopping at the
     /// ends. An unchosen channel takes the first option on →, the last on ←.
     pub fn cycle(&mut self, d: i32) {
+        if crate::meter_dialog::cycle(self, d) {
+            return;
+        }
         let Some(f) = self.fields.get_mut(self.focus) else {
             return;
         };
