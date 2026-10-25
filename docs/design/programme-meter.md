@@ -707,12 +707,14 @@ in `programme::rig` beside `BALLISTIC_TITLE` as `TARGET_TITLE` (*Loudness target
 `TARGET_NOTE`, `TARGET_STEP_LU` (1) and `target_text()` (`−23 LUFS`); `ac2 levels set
 --loudness-target -23lufs` (a `LoudnessTargetArg` parsed as `OverThresholdArg` is, with
 `allow_hyphen_values` and the unit suffix required: `expected a loudness in LUFS (e.g.
--23lufs)`). The pane's layout gains the plate (below). `PROTO_VERSION` bump;
-rig settings file version 4: a new `rig/v3.rs::upgrade` adds `loudness_target` (−23) to
+-23lufs)`). The pane's layout gains the plate (below). `PROTO_VERSION` 68 → 69;
+rig settings file version 5: a new `rig/v4.rs::upgrade` adds `loudness_target` (−23) to
 the `levels` section when it lacks one (a version 1 or 2 file has had the whole default
-section inserted by `v2::upgrade` already) and the loudness plate to every meter layout (below) (which denies unknown fields and requires every field, so the upgrade
-is needed, not optional), and `file.rs::read` chains it: version 1 → v1, v2, v3; 2 → v2, v3;
-3 → v3; session format version bump for the layout.
+section inserted by `v2::upgrade` already; `levels` denies unknown fields and requires every
+field, so the upgrade is needed, not optional) and the loudness plate to every meter layout
+(below), following `rig/v3.rs` (which added the peak plate); `file.rs::read` appends it to
+every chain (version 1 → v1, v2, v3, v4; 2 → v2, v3, v4; 3 → v3, v4; 4 → v4). Session
+format 33 → 34 for the layout (below).
 
 **The loudness plate.** The column becomes a plate, `PlateKind::Loudness` (named *loudness*
 in hints), with the plate rules of the graphs (user guide *Moving the plates and their text
@@ -773,13 +775,20 @@ kept, so a larger pane brings the operator's size back):
 4. none: no plate (the bars still read loudness).
 
 A plate the operator has **moved** (`at: Some`) floats: it is drawn over the pane (bars,
-goniometer and all, translucent as the graph plates are) at its fraction of the room the
+goniometer and all) at its fraction of the room the
 pane leaves beside it, and the dock's room goes back to the bars and goniometer as soon as
 it moves. That re-layout is the operator's gesture, not a value change, so the static rule
 is not broken; a double-click docks it again (`at: None`) and resets its scale, as
-`PlateMsg::Reset` does for every plate. A docked plate is drawn opaque (nothing is under it). A floating plate
+`PlateMsg::Reset` does for every plate. A docked plate covers nothing, so a see-through fill shows only the pane's background. A floating plate
 that does not fit shrinks by `plate::fitted` and then drops slots by the order of step 3.
 Which slots show is decided by the pane's size and the plate's scale only, never by values.
+
+**Drawing.** The plate is drawn as every plate: its fill by `legend::plate` (through
+`plate::draw_lines`' first step), so it honours Settings › Display › *Plate background*
+(see-through / solid, the theme's `plate_alpha`) and the hover opacity like the others, and
+its grip by `plate::grip`. Its rows have mixed sizes and fixed cells, which `draw_lines`
+(one row size, one alignment) does not lay out, so the plate calls `legend::plate` and
+`plate::grip` itself and places its cells; it adds no fill or alpha of its own.
 
 **Scene and UI contract.** As on the transfer and spectrum panes: `ProgrammePane` gains
 `plate: PlatePlace` (from the pane's `Plates.loudness`) and the hover state; `ProgrammeScene`
@@ -797,22 +806,28 @@ existing `PlateMsg` path (hover, `Move`, `Scale`, `Reset`, `End`) applies to
 `LayoutPlates` (the table as a whole keeps its `#[serde(default)]` on `LayoutPane`), so
 the plate's place and size travel with the pane as the other plates do: in a measurement's
 layout (the session) or in `ui.toml` with the window's panes, and in a rig meter's layout.
-Programme panes have no legend, cursor values or mark; the three stay at their defaults
-there. Every file that holds a layout says so: the session format bumps
-(`ac2_traces::session::VERSION`, 32 → 33, in 4a); sessions saved before this stage are
-refused by version, as at every format bump; the rig file is upgraded because its meters are
-the daemon's standing state; the rig file's
-`rig/v3.rs::upgrade` adds `loudness = {at: null, scale: 1}` to the `plates` table of each
-pane of each `meters[].layout` that has one, walking the Split / Pane tree as
-`ac2_traces::old_layout::pane_meas_to_content` does (a pane is an object with `kind` and
-`chrome`), not the root only (the rig reads its meters one by one and leaves
-out one it cannot read, so without this every rig meter with moved plates would silently
-vanish); a pane with no `plates` key keeps none, since `LayoutPane.plates` defaults whole
-(inserting a table holding only `loudness` would fail on the required siblings). The 4b
-upgrade test covers both panes; the app's `ui.toml` (`PanePlatesFile`
+The slot sits beside `legend`, `readout`, `mark` and `peaks` (the spectrum's peak-list
+plate). Programme panes have no legend, cursor values, mark or peak list; those stay at their
+defaults there. Old layouts are mapped, not refused, by the existing `ac2_traces::old_layout`
+mechanism: a new `plates_add_loudness(v)` beside `plates_add_peaks`, the same walk (every
+pane of the Split / Pane tree, a pane being an object with `kind` and `chrome`; a pane with
+no `plates` key keeps none, since `LayoutPane.plates` defaults whole, and inserting a table
+holding only `loudness` would fail on the required siblings), adding `loudness = {at:
+null, scale: 1}` where it is missing; the module's header list gains *session format 33 and
+rig settings version 4*. Its callers:
+
+- **sessions:** `ac2_traces::session::VERSION` 33 → 34 (4a). As at every format bump the
+  daemon sets an older autosave aside as `autosave.v33` and starts empty, and `ac2 session
+  salvage` brings it back; salvage's layout read (`ac2-cli/src/cmd/salvage/read.rs`, after
+  `plates_add_peaks`) calls `plates_add_loudness`, so a salvaged pane keeps its layout with
+  the plate docked;
+- **the rig file:** `rig/v4.rs::upgrade` calls it on each `meters[].layout`, as `rig/v3.rs`
+  calls `plates_add_peaks` (the rig reads its meters one by one and leaves out one it cannot
+  read, so without this every rig meter would silently vanish). The 4b upgrade test covers a
+  pane with and one without `plates`; the app's `ui.toml` (`PanePlatesFile`
 in `ac2-ui/src/prefs/file.rs`) gains the key, and with it the scene ↔ wire conversions
-`wire_plates` / `ui_plates` (`ac2-ui/src/state/panes/plates.rs`), `PlateKind::ALL` (three
-to four, which also drives `Plates::is_auto()` and the hover hint's *loudness* name) and `Plates::get` / `get_mut`. `LayoutPlates::all()` gains the fourth entry, so `PaneLayout::check` checks it.
+`wire_plates` / `ui_plates` (`ac2-ui/src/state/panes/plates.rs`), `PlateKind::ALL` (four
+to five, which also drives `Plates::is_auto()` and the hover hint's *loudness* name) and `Plates::get` / `get_mut`. `LayoutPlates::all()` gains the fifth entry, so `PaneLayout::check` checks it.
 
 **T.** On a Programme pane: full → no grid → traces only → full, as on every pane. *No
 grid* takes the bars' grid lines and the target label; *traces only* also takes the scales'
@@ -881,7 +896,7 @@ table plate, later.
   Under `Momentary` and `ShortTerm` every input's `ppm` and `max` equal its true peak and
   true-peak hold, a mic's included.
 - *Proto:* the two values' serde names, `LevelsSettings::check` on the target range,
-  `WIRE_LOCK`, the rig file v3 → v4 upgrade (defaults the target, keeps the rest), the session
+  `WIRE_LOCK`, the rig file v4 → v5 upgrade (defaults the target, adds the plate, keeps the rest), `plates_add_loudness` on a tree with and without `plates`, salvage of a format 33 session with a moved peak plate, the session
   format round trip with a moved loudness plate.
 - *Scene text:* `reads()` is `TruePeak` under both loudness ballistics, with unit dBTP on
   the bar, the Inputs list row and the preview row; bars per source for a Pair pane, an Inputs pane `1, 5, 2` with `1+2` paired,
@@ -934,8 +949,9 @@ table plate, later.
 - Stage 3: `SessionLevelsMeta` / `PreviewLevelsMeta` gain `loudness: Vec<SourceLoudness>`
   (§6.1), a `Lufs` unit; `PROTO_VERSION` bump; nothing persisted.
 - Stage 4: `Ballistic::Momentary` / `ShortTerm`, `LevelsSettings.loudness_target`,
-  `LayoutPlates.loudness` (§6.2); `PROTO_VERSION` bump, rig settings file version 4 (v3
-  upgraded with the default target), session format bump.
+  `LayoutPlates.loudness` (§6.2); `PROTO_VERSION` 69, rig settings file version 5 (`rig/v4.rs`
+  adds the default target and the loudness plate), session format 34 (salvage maps older
+  layouts through `old_layout::plates_add_loudness`).
 - `PaneKind::Programme` and `PaneContent` in `ac2-proto` layout (the session's per-measurement
   layouts, decision P1) and the app's layout prefs.
 
@@ -1008,11 +1024,12 @@ table plate, later.
 4. **Loudness bars and plate** (§6.2) — layers, each one agent:
    - *4a proto* (first; the others build on it): `Ballistic::Momentary` / `ShortTerm` with
      words and unit, `LevelsSettings.loudness_target` and its range, `LayoutPlates.loudness`,
-     `Command::LevelsSet.loudness_target`, the `LayoutPlates` doc comment (four plates), `PROTO_VERSION`, `WIRE_LOCK`, the
-     `tools/protocol` cross-language fixtures (the enum's new serde names), session format bump.
+     `Command::LevelsSet.loudness_target`, the `LayoutPlates` doc comment (five plates), `PROTO_VERSION` 69, `WIRE_LOCK`, the
+     `tools/protocol` cross-language fixtures (the enum's new serde names), session format 34, `old_layout::plates_add_loudness`
+     and its salvage call.
    - *4b daemon + CLI* (after 4a): loudness ballistics map `ppm` / `max` to the true-peak slot,
-     `levels.set` checks the target, rig file v4 with the v3 upgrade (target and meter
-     layouts' `plates.loudness`), `ac2 levels set
+     `levels.set` checks the target, rig file v5 with `rig/v4.rs` (target, and
+     `plates_add_loudness` on meter layouts), `ac2 levels set
      --ballistic momentary|short-term --loudness-target`, the fake-backend path tests.
    - *4c scene* (after 4a, beside 4b): `sources()` and `bars()` (bars per source under a loudness ballistic, `LoudnessFacts.peak`), the LUFS scale, zones, target and
      max ticks, the true-peak fallback bar with its own ticks, `PlateKind::Loudness`, the plate
