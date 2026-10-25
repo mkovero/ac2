@@ -105,7 +105,7 @@ impl SessionDialog {
         // inputs before anything is sent.
         let captured = |c: u16| inputs.contains(&c);
         ac2_proto::cal::check_pairs(&setup, &self.pairs, Some(&captured))
-            .map_err(|e| format!("Pair: {e} (Shift+P on a row unpairs it)."))?;
+            .map_err(|e| format!("Pair: {e} (pair on either row unpairs it)."))?;
         let rate = parse_rate(&self.rate).map_err(|e| format!("Sample rate: {e}."))?;
         let buffer = parse_buffer(&self.buffer).map_err(|e| format!("Buffer: {e}."))?;
         let loopback = reference.and_then(|input| {

@@ -97,6 +97,16 @@ fn chip(ui: &mut egui::Ui, on: bool, text: &str, color: Color32, ch: &Chrome) ->
     ui.add(b)
 }
 
+/// A chip waiting for its second half: outlined and lettered in `color`, not filled, so it
+/// reads apart from a chip that is on.
+fn pick_chip(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Response {
+    let b = egui::Button::new(RichText::new(text).strong().color(color))
+        .fill(Color32::TRANSPARENT)
+        .stroke(egui::Stroke::new(2.0, color))
+        .min_size(egui::vec2(22.0, 18.0));
+    ui.add(b)
+}
+
 fn check(ui: &mut egui::Ui, on: bool, ch: &Chrome) -> egui::Response {
     let t = RichText::new(if on { "☑" } else { "☐" }).color(if on { ch.text } else { ch.dim });
     ui.add(egui::Button::new(t).frame(false))
@@ -528,10 +538,30 @@ fn input_grid(
                             *msg = Some(SessionMsg::Role(row, key));
                         }
                     }
-                    if chip(ui, pair.is_some(), "pair", ch.armed, ch)
-                        .on_hover_text(
-                            "Shift+P: left/right pair with the next input in the session below \
-                             (two line or two digital inputs)",
+                    // A mic is never half of a pair: its chip is shown, disabled, with why.
+                    let picked = d.pair_pick == Some(r.channel);
+                    let resp = ui.add_enabled_ui(!r.is_mic(), |ui| {
+                        if picked {
+                            pick_chip(ui, "pair", ch.armed)
+                        } else {
+                            chip(ui, pair.is_some(), "pair", ch.armed, ch)
+                        }
+                    });
+                    let tip = if pair.is_some() {
+                        "Shift+P: unpair"
+                    } else if picked {
+                        "Shift+P: picked; pair on the other input pairs them, here again \
+                         cancels"
+                    } else {
+                        "Shift+P: pick for a left/right pair, then pair on the other input \
+                         (two line or two digital inputs)"
+                    };
+                    if resp
+                        .inner
+                        .on_hover_text(tip)
+                        .on_disabled_hover_text(
+                            "a mic is never paired: L or A makes it a line \
+                             or digital input",
                         )
                         .clicked()
                     {

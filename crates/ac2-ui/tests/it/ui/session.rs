@@ -337,9 +337,9 @@ fn down_to(h: &mut Harness<'_, App>, row: ac2_ui::session_dialog::Row) {
     panic!("row {row:?} not reached");
 }
 
-/// The kind and pair keys of the Audio I/O page against the fake daemon: Space puts in 3
-/// and in 4 in the session (line inputs by default), Shift+P pairs them, N names the
-/// pair, A makes the pair digital and L line again; Enter opens the session with the
+/// The kind and pair keys of the Audio I/O page against the fake daemon: Shift+P on in 3
+/// then on in 4 pairs them (line inputs by default) and puts both in the session, N names
+/// the pair, A makes the pair digital and L line again; Enter opens the session with the
 /// kinds and the pair, which the Inputs list shows as one row. An SPL meter asked of the
 /// line reference is refused in the daemon's words.
 #[test]
@@ -363,20 +363,19 @@ fn kinds_and_a_pair_from_the_session_dialog() {
             && a.state.input_meters().len() == 4
     });
     let dialog = |a: &App| session_dialog_of(a).expect("the dialog").clone();
-    down_to(&mut h, Row::Input(2));
-    h.key_press(Key::Space);
-    down_to(&mut h, Row::Input(3));
-    h.key_press(Key::Space);
-    step_until(&mut h, "in 3 and 4 in the session", |a| {
-        let d = dialog(a);
-        d.inputs[2].in_session && d.inputs[3].in_session
-    });
     assert_eq!(dialog(h.state()).inputs[2].kind_pref(), KindPref::Line);
-    h.key_press(Key::ArrowUp);
     down_to(&mut h, Row::Input(2));
     h.key_press_modifiers(Modifiers::SHIFT, Key::P);
     h.event(Event::Text("P".into()));
-    step_until(&mut h, "paired", |a| dialog(a).pairs.len() == 1);
+    step_until(&mut h, "in 3 picked", |a| dialog(a).pair_pick == Some(2));
+    down_to(&mut h, Row::Input(3));
+    h.key_press_modifiers(Modifiers::SHIFT, Key::P);
+    h.event(Event::Text("P".into()));
+    step_until(&mut h, "paired, both in the session", |a| {
+        let d = dialog(a);
+        d.pairs.len() == 1 && d.inputs[2].in_session && d.inputs[3].in_session
+    });
+    h.key_press(Key::ArrowUp);
     h.key_press(Key::N);
     h.event(Event::Text("n".into()));
     h.event(Event::Text("Main".into()));

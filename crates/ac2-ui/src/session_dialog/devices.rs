@@ -254,6 +254,7 @@ impl SessionDialog {
                 .and_then(|n| n.get(usize::from(ch)).cloned())
         };
         let n_in = d.input.as_ref().map_or(0, |i| i.max_channels);
+        self.pair_pick = None;
         self.inputs = (0..n_in)
             .map(|channel| InputRow {
                 channel,

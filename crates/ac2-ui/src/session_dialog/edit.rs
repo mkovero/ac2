@@ -43,7 +43,8 @@ impl SessionDialog {
     // ----- roles, kinds and pairs ----------------------------------------------------------
 
     /// Space: puts the focused input or output in the session, or takes it out. An input
-    /// taken out leaves its pair and the reference role: both are the session's.
+    /// taken out leaves its pair, the pair pick and the reference role: all are the
+    /// session's.
     pub fn toggle(&mut self) {
         self.notice = None;
         self.error = None;
@@ -55,6 +56,9 @@ impl SessionDialog {
                         r.reference = false;
                         let c = r.channel;
                         self.unpair(c);
+                        if self.pair_pick == Some(c) {
+                            self.pair_pick = None;
+                        }
                     }
                 }
             }
@@ -152,6 +156,9 @@ impl SessionDialog {
             PairSide::Left => r,
             PairSide::Right => l,
         });
+        if k == KindPref::Mic && self.pair_pick == Some(c) {
+            self.pair_pick = None;
+        }
         if k == KindPref::Mic
             && let Some((l, r, _)) = pair
         {
@@ -187,66 +194,87 @@ impl SessionDialog {
         }
     }
 
-    /// Shift+P: pairs the row with the next input in the session below it as left and
-    /// right; on a paired row, unpairs it. Both rows must be line or both digital.
+    /// *pair* / Shift+P: on a paired row, unpairs it; else the first pick waits for a
+    /// second, which makes the pair (the lower input left, both in the session) or is
+    /// refused with the first pick kept. The picked row again cancels the pick. Both
+    /// inputs must be line or both digital: a kind is the operator's to declare, so a
+    /// refusal never changes one.
     fn toggle_pair(&mut self, i: usize) {
         let Some(r) = self.inputs.get(i) else {
             return;
         };
-        let c = r.channel;
+        let (c, kind, word) = (r.channel, r.kind_pref(), r.kind_word());
         if let Some((p, _)) = self.pair_of(c) {
             let (l, r) = (p.left, p.right);
             self.unpair(c);
             self.notice = Some(format!("in {} and {} are no longer a pair", l + 1, r + 1));
             return;
         }
-        let Some(below) = self.inputs[i + 1..].iter().find(|o| o.in_session) else {
-            self.notice = Some(
-                "Shift+P pairs this input with the next input in the session below it (Space \
-                 puts one in)"
-                    .into(),
-            );
+        let rule = "a pair is two line or two digital inputs (L or A on the rows)";
+        let Some(first) = self.pair_pick else {
+            if kind == KindPref::Mic {
+                self.notice = Some(format!("in {} is a mic: {rule}", c + 1));
+                return;
+            }
+            self.pair_pick = Some(c);
+            self.notice = Some(format!(
+                "in {} picked: pair on the other input (again on in {}, or Esc, cancels)",
+                c + 1,
+                c + 1
+            ));
             return;
         };
-        let (right, kind_r, word_r) = (below.channel, below.kind_pref(), below.kind_word());
-        let (kind_l, word_l) = (r.kind_pref(), r.kind_word());
-        if kind_l == KindPref::Mic || kind_r == KindPref::Mic {
-            let which = if kind_l == KindPref::Mic { c } else { right };
+        if first == c {
+            self.pair_pick = None;
+            self.notice = Some(format!("in {} no longer picked for a pair", c + 1));
+            return;
+        }
+        let Some(fi) = self.inputs.iter().position(|o| o.channel == first) else {
+            self.pair_pick = None;
+            return;
+        };
+        let (kind_f, word_f) = (self.inputs[fi].kind_pref(), self.inputs[fi].kind_word());
+        let kept = format!("in {} stays picked", first + 1);
+        if kind == KindPref::Mic {
+            self.notice = Some(format!("in {} is a mic: {rule}; {kept}", c + 1));
+            return;
+        }
+        if kind != kind_f {
             self.notice = Some(format!(
-                "in {} is a mic; a pair is two line or two digital inputs (L or A on the \
-                 rows)",
-                which + 1
+                "in {} is {word_f} and in {} is {word}: a pair is two of one kind (L or A on \
+                 the rows); {kept}",
+                first + 1,
+                c + 1
             ));
             return;
         }
-        if kind_l != kind_r {
-            self.notice = Some(format!(
-                "in {} is {word_l} and in {} is {word_r}; a pair is two of one kind (L or A \
-                 on the rows)",
-                c + 1,
-                right + 1
-            ));
-            return;
+        self.pair_pick = None;
+        let (left, right) = (first.min(c), first.max(c));
+        for row in &mut self.inputs {
+            if row.channel == left || row.channel == right {
+                row.in_session = true;
+            }
         }
-        if self.pair_of(right).is_some() {
-            self.notice = Some(format!(
-                "in {} is in a pair already (Shift+P on its row unpairs it)",
-                right + 1
-            ));
-            return;
-        }
-        self.inputs[i].in_session = true;
         self.pairs.push(Pair {
-            left: c,
+            left,
             right,
             name: None,
         });
         self.pairs.sort_by_key(|p| p.left);
         self.notice = Some(format!(
             "in {} and {} are a pair (N names it)",
-            c + 1,
+            left + 1,
             right + 1
         ));
+    }
+
+    /// Esc with an input picked for a pair: drops the pick. `false` when none is picked.
+    pub fn cancel_pair_pick(&mut self) -> bool {
+        let Some(c) = self.pair_pick.take() else {
+            return false;
+        };
+        self.notice = Some(format!("in {} no longer picked for a pair", c + 1));
+        true
     }
 
     /// Drops the pair `channel` is in, if any.

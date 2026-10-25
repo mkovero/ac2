@@ -723,9 +723,8 @@ fn opened_pairs(r: &[Request]) -> Option<&[Pair]> {
     })
 }
 
-/// L and A set an input's kind, Shift+P pairs it with the next input in the session below
-/// it, N names the pair; the refusals name the rule, and the opened session carries the
-/// kinds and the pair.
+/// L and A set an input's kind, Shift+P on two inputs pairs them, N names the pair; the
+/// refusals name the rule, and the opened session carries the kinds and the pair.
 #[test]
 fn kinds_and_pairs_by_key() {
     let mut t = T::new();
@@ -736,16 +735,8 @@ fn kinds_and_pairs_by_key() {
     assert_eq!(d.inputs[2].kind_pref(), KindPref::Line);
     assert!(!d.inputs[2].in_session);
     let notice = |t: &T| dialog(t).notice.clone().unwrap_or_default();
-    // Shift+P with nothing in the session below: says what it pairs with.
     focus(&mut t, Row::Input(2));
     t.type_key("Space", " ");
-    t.type_key("Shift+P", "P");
-    assert!(
-        notice(&t).starts_with("Shift+P pairs this input with the next input in the session"),
-        "{}",
-        notice(&t)
-    );
-    assert!(dialog(&t).pairs.is_empty());
     // A makes in 4 digital; a line and a digital input are not a pair.
     focus(&mut t, Row::Input(3));
     t.type_key("Space", " ");
@@ -755,12 +746,24 @@ fn kinds_and_pairs_by_key() {
     t.type_key("Shift+P", "P");
     assert_eq!(
         notice(&t),
-        "in 3 is line and in 4 is digital; a pair is two of one kind (L or A on the rows)"
+        "in 3 picked: pair on the other input (again on in 3, or Esc, cancels)"
     );
+    focus(&mut t, Row::Input(3));
+    t.type_key("Shift+P", "P");
+    assert_eq!(
+        notice(&t),
+        "in 3 is line and in 4 is digital: a pair is two of one kind (L or A on the rows); \
+         in 3 stays picked"
+    );
+    assert_eq!(dialog(&t).pair_pick, Some(2));
     // Both digital: paired.
+    focus(&mut t, Row::Input(2));
     t.key("A");
+    focus(&mut t, Row::Input(3));
     t.type_key("Shift+P", "P");
     assert_eq!(notice(&t), "in 3 and 4 are a pair (N names it)");
+    assert_eq!(dialog(&t).pair_pick, None);
+    focus(&mut t, Row::Input(2));
     assert_eq!(
         dialog(&t).pairs,
         vec![Pair {
@@ -791,17 +794,19 @@ fn kinds_and_pairs_by_key() {
     assert!(dialog(&t).pairs.is_empty());
     assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Mic);
     // Shift+P onto a mic is refused by the rule.
-    focus(&mut t, Row::Input(2));
+    focus(&mut t, Row::Input(3));
     t.type_key("Shift+P", "P");
     assert_eq!(
         notice(&t),
-        "in 4 is a mic; a pair is two line or two digital inputs (L or A on the rows)"
+        "in 4 is a mic: a pair is two line or two digital inputs (L or A on the rows)"
     );
+    assert_eq!(dialog(&t).pair_pick, None);
     // Line again, paired, opened: the setups carry the kinds and the sides, the session
     // the pair, and the device remembers both.
-    focus(&mut t, Row::Input(3));
     t.key("L");
     focus(&mut t, Row::Input(2));
+    t.type_key("Shift+P", "P");
+    focus(&mut t, Row::Input(3));
     t.type_key("Shift+P", "P");
     let r = t.key("Enter");
     let (config, inputs) = opened(&r).expect("open");
@@ -821,6 +826,143 @@ fn kinds_and_pairs_by_key() {
     assert_eq!(roles.kinds.get(&2), Some(&KindPref::Line));
     assert_eq!(roles.kinds.get(&3), Some(&KindPref::Line));
     assert_eq!(roles.pairs, vec![pair]);
+}
+
+/// *pair* clicked on one input.
+fn click_pair(t: &mut T, i: usize) {
+    t.st.update(
+        Msg::Session(SessionMsg::Role(Row::Input(i), RoleKey::Pair)),
+        &t.keys,
+    );
+}
+
+/// The one pair of the dialog as (left, right).
+fn the_pair(t: &T) -> Option<(u16, u16)> {
+    match dialog(t).pairs.as_slice() {
+        [p] => Some((p.left, p.right)),
+        [] => None,
+        more => panic!("{more:?}"),
+    }
+}
+
+/// *pair* on in 1 then on in 4 pairs them across the mic between: adjacency does not matter,
+/// and both go in the session without Space.
+#[test]
+fn pair_by_two_clicks_any_inputs() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    assert!(!dialog(&t).inputs[3].in_session);
+    click_pair(&mut t, 0);
+    assert_eq!(dialog(&t).pair_pick, Some(0));
+    assert_eq!(the_pair(&t), None);
+    click_pair(&mut t, 3);
+    assert_eq!(the_pair(&t), Some((0, 3)));
+    assert_eq!(dialog(&t).pair_pick, None);
+    assert!(dialog(&t).inputs[0].in_session && dialog(&t).inputs[3].in_session);
+    assert_eq!(
+        dialog(&t).notice.as_deref(),
+        Some("in 1 and 4 are a pair (N names it)")
+    );
+}
+
+/// The higher input clicked first still ends up right.
+#[test]
+fn pair_left_is_the_lower_input() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    click_pair(&mut t, 3);
+    click_pair(&mut t, 2);
+    assert_eq!(the_pair(&t), Some((2, 3)));
+    assert!(dialog(&t).inputs[2].in_session && dialog(&t).inputs[3].in_session);
+}
+
+/// *pair* again on the picked row, or Esc, drops the pick; Esc then leaves the dialog
+/// open.
+#[test]
+fn pair_pick_cancels() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    click_pair(&mut t, 2);
+    click_pair(&mut t, 2);
+    assert_eq!(dialog(&t).pair_pick, None);
+    assert_eq!(
+        dialog(&t).notice.as_deref(),
+        Some("in 3 no longer picked for a pair")
+    );
+    focus(&mut t, Row::Input(2));
+    t.type_key("Shift+P", "P");
+    assert_eq!(dialog(&t).pair_pick, Some(2));
+    t.key("Escape");
+    assert_eq!(dialog(&t).pair_pick, None);
+    assert_eq!(the_pair(&t), None);
+    // A second pick after the cancel starts over.
+    click_pair(&mut t, 3);
+    assert_eq!(dialog(&t).pair_pick, Some(3));
+}
+
+/// A mic is never paired: a first pick on it is refused, a second keeps the first pick for
+/// another try; mixed kinds likewise, and no kind changes.
+#[test]
+fn pair_refusals_keep_the_first_pick() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    let notice = |t: &T| dialog(t).notice.clone().unwrap_or_default();
+    click_pair(&mut t, 1);
+    assert_eq!(
+        notice(&t),
+        "in 2 is a mic: a pair is two line or two digital inputs (L or A on the rows)"
+    );
+    assert_eq!(dialog(&t).pair_pick, None);
+    click_pair(&mut t, 2);
+    click_pair(&mut t, 1);
+    assert_eq!(
+        notice(&t),
+        "in 2 is a mic: a pair is two line or two digital inputs (L or A on the rows); \
+         in 3 stays picked"
+    );
+    assert_eq!(dialog(&t).pair_pick, Some(2));
+    assert_eq!(dialog(&t).inputs[1].kind_pref(), KindPref::Mic);
+    // Mixed kinds: refused, kinds kept, pick kept.
+    focus(&mut t, Row::Input(3));
+    t.key("A");
+    click_pair(&mut t, 3);
+    assert_eq!(
+        notice(&t),
+        "in 3 is line and in 4 is digital: a pair is two of one kind (L or A on the rows); \
+         in 3 stays picked"
+    );
+    assert_eq!(dialog(&t).inputs[2].kind_pref(), KindPref::Line);
+    assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Digital);
+    assert_eq!(dialog(&t).pair_pick, Some(2));
+    // Another line input completes the pair with the kept pick.
+    click_pair(&mut t, 0);
+    assert_eq!(the_pair(&t), Some((0, 2)));
+}
+
+/// *pair* on either row of a pair unpairs it; the pick is dropped when its row leaves the
+/// session or becomes a mic.
+#[test]
+fn pair_unpairs_and_pick_follows_the_row() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    click_pair(&mut t, 2);
+    click_pair(&mut t, 3);
+    click_pair(&mut t, 3);
+    assert_eq!(the_pair(&t), None);
+    assert_eq!(
+        dialog(&t).notice.as_deref(),
+        Some("in 3 and 4 are no longer a pair")
+    );
+    // Picked, then out of the session (in 3 went in with the pair): no pick.
+    click_pair(&mut t, 2);
+    focus(&mut t, Row::Input(2));
+    t.type_key("Space", " ");
+    assert!(!dialog(&t).inputs[2].in_session);
+    assert_eq!(dialog(&t).pair_pick, None);
+    // Picked, then a mic: no pick.
+    click_pair(&mut t, 2);
+    t.key("M");
+    assert_eq!(dialog(&t).pair_pick, None);
 }
 
 /// The remembered kinds and pair of a device come back in the dialog and open with it; a

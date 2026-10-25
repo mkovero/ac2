@@ -200,11 +200,12 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   **R** on a mic row drops the mic name); **S** *stimulus* (the outputs the stimulus plays
   on; this app's choice, remembered per device; applied at once when the open session has
   the output). **Space** puts a row in or out of the session.
-- **Pairs**: **Shift+P** pairs an input with the next input in the session below it as
-  left and right (**Shift+P** again on either row unpairs); **N** on a paired row names the
-  pair (`Main`, `AES 1`). A pair is two line or two digital inputs, both in the session —
-  the row says so when it is not, and the kind keys apply to both rows of a pair. The
-  Inputs list shows a pair as one row with two meters.
+- **Pairs**: *pair* (or **Shift+P**) on one input picks it, *pair* on a second input makes
+  the pair: the lower input is left, the higher right, and both go in the session. *pair*
+  on the picked row again, or **Esc**, drops the pick; *pair* on either row of a pair
+  unpairs it. **N** on a paired row names the pair (`Main`, `AES 1`). A pair is two line
+  or two digital inputs (a mic is never paired) and the kind keys apply to both rows of a
+  pair. The Inputs list shows a pair as one row with two meters.
 - The mouse works too: boxes, the *reference* / *mic* / *line* / *digital* / *pair* chips,
   double click on a name. The foot of the page lists the keys:
   `M mic · L line · A digital · Shift+P pair · N name`.

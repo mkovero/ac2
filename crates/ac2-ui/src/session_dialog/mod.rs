@@ -14,8 +14,9 @@
 //!   ←/→ on its row choose which of the mic's curves applies: off, 0°, 90° …), a line input
 //!   (dBFS, dBu once calibrated) or a digital feed (dBFS). The backend cannot tell them
 //!   apart, so the operator declares the kind; it fixes the dB reference of every meter.
-//! - **Shift+P — pair**: two line or two digital inputs read as one left/right row; N on a
-//!   paired row names the pair.
+//! - **Shift+P — pair**: two line or two digital inputs read as one left/right row, the
+//!   lower input left. *pair* (or Shift+P) on one input picks it, on a second makes the
+//!   pair; on a paired row it unpairs. N on a paired row names the pair.
 //! - **S — Stimulus**: an output that feeds the speakers and the loopback.
 //!
 //! The session's inputs, outputs and loopback follow from the roles (and the rows put in
@@ -56,7 +57,7 @@ pub enum RoleKey {
     Line,
     /// A: a digital feed.
     Digital,
-    /// Shift+P: paired with the next input in the session below it, or unpaired.
+    /// Shift+P: picks the input for a pair, pairs it with the input picked, or unpairs it.
     Pair,
     /// S: a stimulus output.
     Stimulus,
@@ -251,6 +252,8 @@ pub struct SessionDialog {
     pub inputs: Vec<InputRow>,
     /// Left/right pairs among the inputs in the session (sorted by left channel).
     pub pairs: Vec<Pair>,
+    /// The input picked for a pair, waiting for the second pick.
+    pub pair_pick: Option<u16>,
     pub outputs: Vec<OutputRow>,
     /// Output channels of the session: outputs `0 .. out_count`.
     pub out_count: u16,
@@ -331,6 +334,7 @@ impl SessionDialog {
             out_device: OutputDevice::SameAsInput,
             inputs: Vec::new(),
             pairs: Vec::new(),
+            pair_pick: None,
             outputs: Vec::new(),
             out_count: 0,
             rate: c
