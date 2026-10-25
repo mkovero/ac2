@@ -531,8 +531,9 @@ The scene's model (4c) becomes a list of bars, filled by the UI (4e):
 pub enum ProgrammeBar {
     /// One input's peak bar: every peak ballistic, and an input without a source under a
     /// loudness one, with the reason in `note` (`programme::bars()` formats it from
-    /// `LoudnessFacts` in §6.1's message order: rate, mic, partner not captured).
-    /// `ProgrammeInput::note()` stays the VU rule of §3 only.
+    /// `LoudnessFacts` in §6.1's message order: rate, mic, partner not captured). Under
+    /// a peak ballistic `bars()` fills it with `input.note(ballistic)` (the VU fallback),
+    /// so the pane reads one field; `ProgrammeInput::note()` stays for the Inputs list.
     Peak { input: ProgrammeInput, note: Option<String> },
     /// A loudness source's bar.
     Source(SourceBar),
@@ -552,8 +553,12 @@ with `pub struct SideFlags { pub overs: u32, pub clipped: bool }`. `ProgrammePan
 reads for the ballistic (`s.rig.levels` in `ac2-ui/src/state/programme.rs`; −23, the
 default, while no rig state has arrived, so a preview has a span), and beside
 `bar_fill` stands `lufs_fill(reading, target) -> f32`: 0 at target −18 LU, 1 at target +9 LU,
-clamped. `ProgrammePane.inputs`
-becomes `bars: Vec<ProgrammeBar>`. Two steps, one resolution:
+clamped. `ProgrammePane` keeps `inputs: Vec<ProgrammeInput>` (one per pane input, every
+ballistic), which the Inputs list rows (`ac2-ui/src/view/chrome.rs`, `row_lines`) and the
+preview rows keep reading, and gains `bars: Vec<ProgrammeBar>`, which the pane draws;
+`layout()` takes `bars.len()`. With no open session (no `LoudnessFacts`) `bars` is one
+`Peak` per input with the VU note only (the pane shows its missing text anyway). Two steps,
+one resolution:
 
 - `programme::sources(shown: &[u16], facts: &LoudnessFacts) -> Vec<Resolved>`, one per pane
   input: its source (`LoudnessSource`) or its reason (rate, mic, partner not captured, in
@@ -561,7 +566,7 @@ becomes `bars: Vec<ProgrammeBar>`. Two steps, one resolution:
   is the only place an input is mapped to a source.
 - `programme::bars(resolved: &[Resolved], ballistic, facts: &LoudnessFacts) ->
   Vec<ProgrammeBar>`: under a peak
-  ballistic one `Peak { note: None }` per input, as today (a pair pane keeps its L and R
+  ballistic one `Peak` per input with `note` = the VU note or `None`, as today (a pair pane keeps its L and R
   bars); under a loudness one, one `Source` bar per distinct source at its first input and
   `Peak { note: Some(reason) }` for an input without one.
 
@@ -574,9 +579,12 @@ from it; there is no separate peak-facts type. The plate and the bars read the s
 source an input belongs to. `layout()` takes the bar
 count (not the input count) and the plate's dock rect in place of the `LOUDNESS_W` column,
 which goes; `LoudnessReadout` gains `max_momentary` and `max_short_term` for the plate's
-maxima slot; the plate's sizes come from a new `programme::plate::size(font, scale, slots)
+maxima slot; the plate takes `LoudnessReadout` (so extended) as its data; its sizes come from a new
+`programme::plate::size(font, scale, slots)
 -> (w, h)` returning the size at the slots' mixed font sizes (2.5 f, 1.5 f, f, 0.8 f), which
-`plate::Metrics::size` (one row size) cannot.
+`plate::Metrics::size` (one row size) cannot: each slot's row is 1.3 × its size, as every
+bar row, and the pads are `plate::Metrics::of(font, scale).pad_x` / `pad_y`, so the dock's
+fit tests in the scene and the golden images agree.
 
 **Two ballistics, one per window.**
 
@@ -617,7 +625,7 @@ LU … target +9 LU**, labelled in absolute LUFS every 3 LU (target −23: −41
 −14) when the bar is at least ten label rows (`1.3 · small` each) high, else every 9 LU
 (−41, −32, −23, −14); the target tick always. The rule depends on the bar's height only, so
 labels never come and go with values. The glance a bar is for is "how far from target", and 27 LU over a bar's height gives
-about four times the resolution per LU of the −60 … 0 span, so 1 LU is visible. Below the
+about twice the resolution per LU of the −60 … 0 span, so 1 LU is visible. Below the
 span the bar is empty and its text still reads the value; above it the bar is full. A max
 tick off the span is clamped to its edge (the text carries the value). The
 numbers stay absolute (LUFS): ac2 still has no relative LU readout (one unit per quantity;
@@ -625,7 +633,13 @@ a relative mode would be a second number for the same thing). The target is a ne
 setting, `levels.loudness_target` (LUFS, default −23, the R128 programme level; −36 … −5 in
 1 LU steps, which spans R128, ATSC A/85 −24, the −16 … −14 of streaming services and AES
 TD1008's −18 … −20). It is the rig's, not the app's, because it colours the bar: two apps on
-one rig must not show the same programme green on one and yellow on the other.
+one rig must not show the same programme lit above the target on one and not on the other.
+
+**Title.** `ProgrammePane::title()` starts with the word of what the bars read, not of the
+setting alone: `Mom loudness` / `Short loudness` when any bar is a `Source`, else `true
+peak` (a pane of mics or of sourceless inputs under a loudness ballistic, whose bars all read
+true peak). The target follows a loudness word: `Short loudness · target −23 LUFS · Main ·
+1 s`.
 
 **Lines on a bar.** Two lines, drawn so one never passes for the other: the **target**
 (a setting) is dashed, 1 px, in the text colour (the SPL limit line's colour; that line is
@@ -708,8 +722,8 @@ the rig file). Under a loudness ballistic each input's `ppm` and `max` carry its
 true-peak hold (`ppm` is per input; loudness is per source and is in `loudness`), so a frame
 stays self-describing: `meta.ballistic` says the bars read `loudness`, the columns say what
 every input's own peak is. `LevelsSettings` gains `loudness_target: Lufs`, checked against
-`LOUDNESS_TARGET_RANGE` (−36, −5) by `check` (`loudness target −40 LUFS is outside −36 …
-−5 LUFS`; both bounds negative, so no `+` as the over threshold's upper bound has); `Command::LevelsSet` gains `loudness_target: Option<Lufs>` (sent only when
+`LOUDNESS_TARGET_RANGE` (−36, −5) by `check` in the over threshold's format, raw numbers (`loudness target -40 LUFS is outside -36 …
+-5 LUFS`; both bounds negative, so no `+` as the over threshold's upper bound has); `Command::LevelsSet` gains `loudness_target: Option<Lufs>` (sent only when
 changed, as the other four); Settings › Rig
 monitor and the *How it reads* rows of the New programme meter form gain *Loudness target*
 (←/→ 1 LU, one `levels.set` per step, like the other four); the row's words live
@@ -744,7 +758,7 @@ fixed slots, top down (`f` the plate's font size, the theme's times its scale):
 | hero status | `waiting for programme` (a new `WAITING_STATUS`; the value cell shows its own —, unlike §6.1's `WAITING`, which is both) while integrated is `None`, else blank | 0.8 f |
 | live | `Mom −23.1` · `Short −22.8`, each with `LUFS` | 1.5 f |
 | maxima | `max Mom −18.0` · `max Short −20.1` | f |
-| range, peak | `LRA 6.2 LU` with its status cell (`waiting`, the hero status shortened to the cell's width, while the range is `None`, else `settling` while `duration` < 60 s, else blank; `settling`, the longest, sizes the cell) · `TP max −1.2 dBTP` | f |
+| range, peak | `LRA 6.2 LU` with its status cell (`RANGE_WAITING` = `waiting` while the range is `None`, else `settling` while `duration` < 60 s, else blank; `settling`, the longest, sizes the cell) · `TP max −1.2 dBTP` | f |
 | foot | `since 20:14 · R resets` | 0.8 f |
 
 Int is the large number because it is the delivery figure and the one thing a bar cannot
@@ -802,7 +816,7 @@ its grip by `plate::grip`. Its rows have mixed sizes and fixed cells, which `dra
 
 **Scene and UI contract.** As on the transfer and spectrum panes: `ProgrammePane` gains
 `plate: PlatePlace` (from the pane's `Plates.loudness`) and the hover state; `ProgrammeScene`
-gains a `plates() -> &[PlateBox]` method, as `TfScene` and `SpectrumScene` have, holding the loudness plate's box when it is drawn and nothing
+gains a `plates() -> Vec<PlateBox>` method, as `TfScene` and `SpectrumScene` have, holding the loudness plate's box when it is drawn and nothing
 when it is hidden by **T** or not shown, so a plate that is not
 on screen cannot be grabbed; the UI's `scenes::programme` returns the `ProgrammeScene` (today an `Option<Scene>`) as
 `scenes::transfer` returns its scene, and the Programme arm of `view/panes.rs` sets the
@@ -837,7 +851,8 @@ rig settings version 4*. Its callers:
   pane with and one without `plates`; the app's `ui.toml` (`PanePlatesFile`
 in `ac2-ui/src/prefs/file.rs`) gains the key, and with it the scene ↔ wire conversions
 `wire_plates` / `ui_plates` (`ac2-ui/src/state/panes/plates.rs`), `PlateKind::ALL` (four
-to five, which also drives `Plates::is_auto()` and the hover hint's *loudness readout* name) and `Plates::get` / `get_mut`. `LayoutPlates::all()` gains the fifth entry, so `PaneLayout::check` checks it.
+to five, which drives `Plates::is_auto()`; the hover hint's *loudness readout* comes from
+`PlateKind::name()`) and `Plates::get` / `get_mut`. `LayoutPlates::all()` gains the fifth entry, so `PaneLayout::check` checks it.
 
 **T.** On a Programme pane: full → no grid → traces only → full, as on every pane. *No
 grid* takes the bars' grid lines and the target label; *traces only* also takes the scales'
@@ -846,8 +861,9 @@ plate at the same step). The bars, their text, the
 target line, the max ticks, the goniometer and the chip stay at every step, and **nothing
 moves**: a docked plate's room stays reserved while it is hidden, and the scale keeps its width
 with its numbers gone, as the SPL scale keeps its room (a change: today `bars()` drops the
-scale's width at *traces only*, so the bars widen). Toasts name what is shown, as the SPL ones do: `Programme: grid, scale and loudness
-plate`, `Programme: no grid or target label`, `Programme: no grid, scale or loudness plate`
+scale's width at *traces only*, so the bars widen). Toasts name what is shown, as the SPL ones do: `Programme: grid, target label, scale and
+loudness plate`, `Programme: no grid or target label`, `Programme: no grid, target label,
+scale or loudness plate`
 (a `programme_name` beside `spl_name`; like the SPL toast it names the full step's parts
 on a pane that lacks one, a pane without a plate included). These three strings are the
 Programme pane's step names everywhere they are shown (toast, help); the user guide's T
@@ -872,7 +888,7 @@ wholly after its start (400 ms, 3 s), and its bar is empty until then.
 **The form.** The New programme meter form's rows *Bar 1* … *Bar 8* become *Input 1* …
 *Input 8* (`programme/form.rs`, the user guide's *Programme pane* bullet): they name inputs,
 and under a loudness ballistic the pane's bars follow from them by source. The form's other
-words follow: `PAIR_HINT` drops "bars L and R" (*L and R, goniometer, correlation,
+words follow (`FIRST_BAR_HINT`, *by name; mics show levels, no loudness*, stays): `PAIR_HINT` drops "bars L and R" (*L and R, goniometer, correlation,
 loudness*), `INPUTS_HINT` *one row per input, up to 8*, `CHOOSE_FIRST` *choose input 1*,
 `BARS_DISTINCT` *each row names another input, 8 at most*, `NO_BAR` / `MORE_BAR_HINT` in input terms,
 and the guide's "A bar never meters an input another bar does" becomes "An input is named
@@ -880,7 +896,8 @@ once".
 
 **Keys.** None new: the ballistic and target are settings rows (Settings › Rig monitor, the
 form), the plate takes the plates' mouse, **R** and **T** are the pane's. The user guide's
-*Programme pane* section, *Moving the plates* (the plate list gains the loudness plate) and
+*Programme pane* section, *Moving the plates* (its opening "(transfer and spectrum panes; …)" adds the Programme
+pane, and the plate list gains the loudness readout) and
 *Grid, labels and cursor (T)* (the Programme steps), and the `ac2 levels` row
 (the two ballistics, `--loudness-target`) change with the stage, and so do the user guide's Loudness bullet ("a column at the pane's
 right edge", "no loudness bar", the messages) and its T sentence, and the *Input meters* and
@@ -1037,8 +1054,8 @@ table plate, later.
 4. **Loudness bars and plate** (§6.2) — layers, each one agent:
    - *4a proto + formats* (first; the others build on it; touches `ac2-proto`, `ac2-traces`
      `session.rs` / `old_layout.rs` and `ac2-cli/src/cmd/salvage/read.rs`): `Ballistic::Momentary` / `ShortTerm` with
-     words and unit (the doc comments of `Ballistic::unit()` and
-     `SessionLevelsMeta::ballistic` say that under `momentary` / `short_term` the per-input
+     words and unit (the doc comments of `Ballistic::unit()`, `SessionLevelsMeta::ballistic`,
+     `LevelsSettings.ballistic` and `Command::LevelsSet.ballistic` say that under `momentary` / `short_term` the per-input
      `ppm` / `max` are true peak in dBTP and loudness is in `loudness`), `LevelsSettings.loudness_target` and its range, `LayoutPlates.loudness`,
      `Command::LevelsSet.loudness_target`, the `LayoutPlates` doc comment (five plates), `PROTO_VERSION` 69, `WIRE_LOCK`, the
      `tools/protocol` cross-language fixtures (the enum's new serde names), session format 34, `old_layout::plates_add_loudness`
@@ -1047,7 +1064,7 @@ table plate, later.
      `levels.set` checks the target, rig file v5 with `rig/v4.rs` (target, and
      `plates_add_loudness` on meter layouts), `ac2 levels set
      --ballistic momentary|short-term --loudness-target`, the fake-backend path tests.
-   - *4c scene* (after 4a, beside 4b): `sources()` and `bars()` (bars per source under a loudness ballistic, `LoudnessFacts.peak`), the LUFS scale, zones, target and
+   - *4c scene* (after 4a, beside 4b): `sources()` and `bars()` (bars per source under a loudness ballistic, `LoudnessFacts.input`), the LUFS scale, zones, target and
      max ticks, the true-peak fallback bar with its own ticks, `PlateKind::Loudness`, the plate
      slots, the dock ladder, `programme_name`, the scene-text tests.
    - *4d plot* (after 4c): `Label::tabular` drawn with tabular figures, golden images.
