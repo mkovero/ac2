@@ -120,7 +120,7 @@ impl Page {
                      {pair} pair · N name (the mic, the pair or an output) · S stimulus output · \
                      D detects the loopback · P opens the driver's settings (ASIO panel, Audio \
                      MIDI Setup) · on the max level: type dBFS, Enter · Enter opens the session \
-                     · Esc drops a pair pick, else closes"
+                     · Esc closes"
                 );
             }
             Page::Calibration => {
@@ -729,7 +729,7 @@ impl Settings {
     pub fn inner_open(&self) -> bool {
         match self.page {
             Page::Calibration => self.cal.electrical.is_some() || self.cal.acoustic.is_some(),
-            Page::AudioIo => self.ceiling.confirm.is_some() || self.session.pair_pick.is_some(),
+            Page::AudioIo => self.ceiling.confirm.is_some(),
             Page::Leq => self.leq.as_ref().is_some_and(|d| d.transfer.is_some()),
             _ => false,
         }
@@ -743,7 +743,6 @@ impl Settings {
                 self.ceiling = CeilingEdit::default();
                 true
             }
-            Page::AudioIo => self.session.cancel_pair_pick(),
             Page::Leq => self
                 .leq
                 .as_mut()

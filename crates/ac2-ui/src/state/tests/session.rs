@@ -746,7 +746,7 @@ fn kinds_and_pairs_by_key() {
     t.type_key("Shift+P", "P");
     assert_eq!(
         notice(&t),
-        "in 3 picked: pair on the other input (again on in 3, or Esc, cancels)"
+        "in 3 picked: pair on the other input (again on in 3 cancels)"
     );
     focus(&mut t, Row::Input(3));
     t.type_key("Shift+P", "P");
@@ -876,8 +876,8 @@ fn pair_left_is_the_lower_input() {
     assert!(dialog(&t).inputs[2].in_session && dialog(&t).inputs[3].in_session);
 }
 
-/// *pair* again on the picked row, or Esc, drops the pick; Esc then leaves the dialog
-/// open.
+/// *pair* again on the picked row drops the pick; Esc closes the dialog as always, the
+/// pick with it.
 #[test]
 fn pair_pick_cancels() {
     let mut t = T::new();
@@ -893,11 +893,10 @@ fn pair_pick_cancels() {
     t.type_key("Shift+P", "P");
     assert_eq!(dialog(&t).pair_pick, Some(2));
     t.key("Escape");
+    assert_eq!(t.st.overlay, Overlay::None);
+    open_dialog(&mut t, backends(true));
     assert_eq!(dialog(&t).pair_pick, None);
     assert_eq!(the_pair(&t), None);
-    // A second pick after the cancel starts over.
-    click_pair(&mut t, 3);
-    assert_eq!(dialog(&t).pair_pick, Some(3));
 }
 
 /// A mic is never paired: a first pick on it is refused, a second keeps the first pick for

@@ -205,7 +205,7 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   the output). **Space** puts a row in or out of the session.
 - **Pairs**: *pair* (or **Shift+P**) on one input picks it, *pair* on a second input makes
   the pair: the lower input is left, the higher right, and both go in the session. *pair*
-  on the picked row again, or **Esc**, drops the pick; *pair* on either row of a pair
+  on the picked row again drops the pick; *pair* on either row of a pair
   unpairs it. **N** on a paired row names the pair (`Main`, `AES 1`). A pair is two line
   or two digital inputs (a mic is never paired) and the kind keys apply to both rows of a
   pair. The Inputs list shows a pair as one row with two meters.

@@ -218,7 +218,7 @@ impl SessionDialog {
             }
             self.pair_pick = Some(c);
             self.notice = Some(format!(
-                "in {} picked: pair on the other input (again on in {}, or Esc, cancels)",
+                "in {} picked: pair on the other input (again on in {} cancels)",
                 c + 1,
                 c + 1
             ));
@@ -266,15 +266,6 @@ impl SessionDialog {
             left + 1,
             right + 1
         ));
-    }
-
-    /// Esc with an input picked for a pair: drops the pick. `false` when none is picked.
-    pub fn cancel_pair_pick(&mut self) -> bool {
-        let Some(c) = self.pair_pick.take() else {
-            return false;
-        };
-        self.notice = Some(format!("in {} no longer picked for a pair", c + 1));
-        true
     }
 
     /// Drops the pair `channel` is in, if any.
