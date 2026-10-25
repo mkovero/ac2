@@ -1,8 +1,9 @@
 //! The New measurement chooser (Ctrl+M): every kind of measurement in one list, each
-//! opening the same settings form its own command does.
+//! opening the same settings form its own command does; and the Programme meter, which
+//! asks what to meter as a pane's list offers it.
 
 use super::*;
-use ac2_scene::new_meas::{NewKind, new_choices};
+use ac2_scene::new_meas::{NewKind, meter_choices, new_choices};
 
 impl AppState {
     /// Opens the chooser, the kind pane `p` shows highlighted. A kind that cannot be made
@@ -15,11 +16,11 @@ impl AppState {
                 _ => NewKind::Spectrum,
             },
             PaneKind::Spl => NewKind::Spl,
-            PaneKind::Programme => NewKind::Transfer,
+            PaneKind::Programme => NewKind::Programme,
             PaneKind::Distortion => NewKind::Sweep,
         };
         // Each kind's own key, where bound: the direct route next time.
-        let key = |k: NewKind| keymap.label(kind_command(k), Scope::Global);
+        let key = |k: NewKind| kind_command(k).and_then(|c| keymap.label(c, Scope::Global));
         let blocked = |k: NewKind| self.new_refusal(k, keymap);
         let q = new_choices(preselect, key, blocked);
         self.overlay = Overlay::Choose(Box::new(ChoicePrompt {
@@ -59,13 +60,46 @@ impl AppState {
         self.keys.reach(CommandId::NewMeasurement)
     }
 
-    /// A row of the chooser taken: that kind's own command opens its form.
+    /// A row of the chooser taken: that kind's own command opens its form; the meter asks
+    /// what to meter.
     pub(super) fn new_measurement_pick(&mut self, i: usize, out: &mut Vec<Request>) {
         let Some(kind) = NewKind::ALL.get(i).copied() else {
             return;
         };
-        let keymap = self.keys.clone();
-        self.command(kind_command(kind), &keymap, out);
+        match kind_command(kind) {
+            Some(c) => {
+                let keymap = self.keys.clone();
+                self.command(c, &keymap, out);
+            }
+            None => self.open_meter_choice(),
+        }
+    }
+
+    /// What a new Programme pane may meter: the *meter …* rows of a pane's list.
+    fn meter_rows(&self) -> Vec<(Metered, String)> {
+        self.programme_menu_rows()
+            .into_iter()
+            .filter_map(|(row, label)| match row {
+                PaneMenuRow::Meter(m) => Some((m, label)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The question after the Programme meter row: what to meter, in a new pane.
+    fn open_meter_choice(&mut self) {
+        let (meters, rows): (Vec<Metered>, Vec<String>) = self.meter_rows().into_iter().unzip();
+        let q = meter_choices(rows);
+        self.overlay = Overlay::Choose(Box::new(ChoicePrompt {
+            purpose: ChoicePurpose::Meter { meters },
+            label: q.title.clone(),
+            title: q.title,
+            lines: q.lines,
+            choices: q.choices,
+            owners: Vec::new(),
+            index: q.default,
+            hint: q.hint,
+        }));
     }
 
     /// Why kind `k` cannot be made now, in the words its own command warns with; `None`
@@ -73,6 +107,14 @@ impl AppState {
     pub(super) fn new_refusal(&self, k: NewKind, keymap: &Keymap) -> Option<String> {
         match k {
             NewKind::Math => self.math_form().err(),
+            NewKind::Alignment => self.alignment_form().err(),
+            NewKind::Programme if self.open_session().is_none() => Some(format!(
+                "no audio I/O to meter: {}",
+                open_session_hint(keymap)
+            )),
+            NewKind::Programme if self.meter_rows().is_empty() => {
+                Some("no inputs in the session to meter".to_owned())
+            }
             _ if self.open_session().is_some() => None,
             NewKind::Sweep => Some(format!(
                 "no audio I/O to sweep: {}",
@@ -194,14 +236,17 @@ impl AppState {
     }
 }
 
-/// The command that opens kind `k`'s form.
-fn kind_command(k: NewKind) -> CommandId {
-    match k {
+/// The command that opens kind `k`'s form; `None` for the meter, whose own key (P) needs
+/// a picked Inputs row the chooser has not got.
+fn kind_command(k: NewKind) -> Option<CommandId> {
+    Some(match k {
         NewKind::Transfer => CommandId::NewTransfer,
         NewKind::Spectrum => CommandId::NewSpectrum,
         NewKind::Rta => CommandId::NewRta,
         NewKind::Spl => CommandId::NewSpl,
         NewKind::Sweep => CommandId::SweepNew,
         NewKind::Math => CommandId::NewMath,
-    }
+        NewKind::Alignment => CommandId::NewAlignment,
+        NewKind::Programme => return None,
+    })
 }

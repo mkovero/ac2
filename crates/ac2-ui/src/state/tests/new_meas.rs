@@ -5,6 +5,9 @@
 use super::*;
 use crate::forms::FormKind;
 
+const ALIGN_REFUSAL: &str = "an alignment needs two transfer curves, live or stored: make a \
+                             transfer measurement or capture one";
+
 const MATH_REFUSAL: &str = "a math channel needs two transfer functions, spectra or RTAs of one \
                             kind, live or stored: make a measurement or capture one";
 
@@ -35,13 +38,30 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
             "RTA — one input's level in fractional-octave bands",
             "SPL meter — sound level: A / C / Z weighting, Leq windows and limits",
             "Sweep — a played sweep: response and harmonic distortion  ·  Shift+S",
-            "Math channel — A ÷ × + − B of two curves, align A ↔ B, or the average of several  ·  Shift+M",
+            "Math channel — A ÷ × + − B of two curves, or the average of several  ·  Shift+M",
+            "Alignment — delay and polarity of two systems in their overlap (sub + main, delay \
+             tower)  ·  Alt+M",
+            "Programme meter — meters inputs live in a new pane (levels, correlation); adds no \
+             measurement",
         ]
     );
     assert_eq!(c.index, 0, "the transfer pane's kind");
     assert_eq!(
         c.hint,
-        "↑/↓ choose · Enter opens its settings · Esc cancels"
+        "↑/↓ choose · Enter opens its settings, or what to meter · Esc cancels"
+    );
+    // One transfer function: Alt+M would refuse, and the row says so in its words.
+    assert!(
+        c.choices[6]
+            .blocked
+            .as_deref()
+            .is_some_and(|w| w.starts_with(ALIGN_REFUSAL)),
+        "{:?}",
+        c.choices[6]
+    );
+    assert_eq!(
+        c.choices[7].blocked, None,
+        "the session has inputs to meter"
     );
     // One transfer function and one spectrum: Shift+M would refuse, and the row says so.
     assert!(
@@ -95,6 +115,94 @@ fn the_focused_pane_picks_the_kind_highlighted() {
     assert_eq!(at(&mut t), 4, "sweep");
     t.go(PaneKind::Transfer);
     assert_eq!(at(&mut t), 0, "transfer");
+    t.go(PaneKind::Programme);
+    assert_eq!(at(&mut t), 7, "the Programme meter");
+}
+
+/// The Alignment row opens what Alt+M opens: the math dialog, its operator on align.
+#[test]
+fn the_alignment_row_opens_the_aligned_math_dialog() {
+    use ac2_scene::new_meas::NewKind;
+    let mut t = T::new();
+    t.conn(mirror(four()));
+    t.put(PaneKind::Transfer);
+    let at = NewKind::ALL
+        .iter()
+        .position(|k| *k == NewKind::Alignment)
+        .expect("alignment row");
+    t.key("Ctrl+M");
+    assert_eq!(chooser(&t).choices[at].blocked, None);
+    t.st.update(Msg::Choose(Some(at)), &t.keys);
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    assert_eq!(f.kind, FormKind::Math);
+    assert!(
+        f.fields[1].display().starts_with("↔  aligned"),
+        "{}",
+        f.fields[1].display()
+    );
+    let from_row = f.fields.iter().map(|x| x.display()).collect::<Vec<_>>();
+    t.key("Esc");
+    t.key("Alt+M");
+    let Overlay::Form(g) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    let by_key = g.fields.iter().map(|x| x.display()).collect::<Vec<_>>();
+    assert_eq!(from_row, by_key);
+}
+
+/// The Programme meter row asks what to meter (the pane list's *meter …* rows); the pick
+/// opens a Programme pane beside the focused one, which keeps what it shows.
+#[test]
+fn the_meter_row_asks_what_to_meter_and_opens_a_pane_beside() {
+    let mut t = T::new();
+    t.put(PaneKind::Transfer);
+    let tf = t.st.layout.focus;
+    let before = t.visible().len();
+    let menu: Vec<(PaneMenuRow, String)> =
+        t.st.pane_menu_rows(tf)
+            .into_iter()
+            .filter(|(r, _)| matches!(r, PaneMenuRow::Meter(_)))
+            .collect();
+    assert!(menu.len() > 1, "{menu:?}");
+    t.key("Ctrl+M");
+    t.st.update(Msg::Choose(Some(7)), &t.keys);
+    let Overlay::Choose(c) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    assert_eq!(c.title, "Programme meter");
+    let labels: Vec<&str> = c.choices.iter().map(|x| x.label.as_str()).collect();
+    let want: Vec<&str> = menu.iter().map(|(_, l)| l.as_str()).collect();
+    assert_eq!(labels, want);
+    t.key("ArrowDown");
+    t.key("Enter");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.layout.kind(tf), PaneKind::Transfer);
+    assert_eq!(t.visible().len(), before + 1);
+    let p = t.st.layout.focus;
+    assert_ne!(p, tf);
+    assert_eq!(t.st.layout.kind(p), PaneKind::Programme);
+    let PaneMenuRow::Meter(m) = menu[1].0 else {
+        unreachable!()
+    };
+    assert_eq!(t.st.layout.view(p).and_then(|v| v.meters), Some(m));
+}
+
+/// A session without inputs has nothing to meter: the row says so.
+#[test]
+fn the_meter_row_is_blocked_without_inputs() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    if let Some(o) = &mut s.session.open {
+        o.config.input_channels.clear();
+    }
+    t.conn(mirror(s));
+    t.key("Ctrl+M");
+    assert_eq!(
+        chooser(&t).choices[7].blocked.as_deref(),
+        Some("no inputs in the session to meter")
+    );
 }
 
 #[test]
@@ -237,7 +345,7 @@ fn empty_texts_name_the_chooser() {
             .as_deref(),
         Some(
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \
-             sweep, math channel)"
+             sweep, math channel, alignment)"
         )
     );
 }

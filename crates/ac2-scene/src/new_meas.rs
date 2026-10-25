@@ -1,5 +1,6 @@
 //! The New measurement chooser: every kind of measurement the app can make, in words, so
-//! the kinds that have no key of their own are found without knowing the palette's words.
+//! the kinds that have no key of their own are found without knowing the palette's words;
+//! at its foot the Programme meter, which meters inputs without making a measurement.
 
 use crate::meas_list::Choice;
 
@@ -12,18 +13,23 @@ pub enum NewKind {
     Spl,
     Sweep,
     Math,
+    Alignment,
+    Programme,
 }
 
 impl NewKind {
     /// The rows, top to bottom: the live two-channel measurement first, then one input's,
-    /// then what is played and what is computed from the others.
-    pub const ALL: [NewKind; 6] = [
+    /// then what is played and what is computed from the others; last the meter, which is
+    /// not a measurement.
+    pub const ALL: [NewKind; 8] = [
         NewKind::Transfer,
         NewKind::Spectrum,
         NewKind::Rta,
         NewKind::Spl,
         NewKind::Sweep,
         NewKind::Math,
+        NewKind::Alignment,
+        NewKind::Programme,
     ];
 
     /// The kind's name, as the palette's `New …` entries and the forms' titles say it.
@@ -35,6 +41,8 @@ impl NewKind {
             NewKind::Spl => "SPL meter",
             NewKind::Sweep => "Sweep",
             NewKind::Math => "Math channel",
+            NewKind::Alignment => "Alignment",
+            NewKind::Programme => "Programme meter",
         }
     }
 
@@ -46,7 +54,13 @@ impl NewKind {
             NewKind::Rta => "one input's level in fractional-octave bands",
             NewKind::Spl => "sound level: A / C / Z weighting, Leq windows and limits",
             NewKind::Sweep => "a played sweep: response and harmonic distortion",
-            NewKind::Math => "A ÷ × + − B of two curves, align A ↔ B, or the average of several",
+            NewKind::Math => "A ÷ × + − B of two curves, or the average of several",
+            NewKind::Alignment => {
+                "delay and polarity of two systems in their overlap (sub + main, delay tower)"
+            }
+            NewKind::Programme => {
+                "meters inputs live in a new pane (levels, correlation); adds no measurement"
+            }
         }
     }
 
@@ -101,11 +115,29 @@ pub fn new_choices(
     NewChoices {
         title: TITLE.to_owned(),
         lines: vec![
-            "What to measure: its settings come next, and it opens in its own pane.".to_owned(),
+            "What to measure (its settings come next) or meter: it opens in its own pane."
+                .to_owned(),
         ],
         choices,
         default,
-        hint: "↑/↓ choose · Enter opens its settings · Esc cancels".to_owned(),
+        hint: "↑/↓ choose · Enter opens its settings, or what to meter · Esc cancels".to_owned(),
+    }
+}
+
+/// The Programme meter row taken: what to meter (`rows`: the pane list's *meter …* rows).
+pub fn meter_choices(rows: Vec<String>) -> NewChoices {
+    NewChoices {
+        title: NewKind::Programme.name().to_owned(),
+        lines: vec!["What to meter: it opens in a new pane beside the focused one.".to_owned()],
+        choices: rows
+            .into_iter()
+            .map(|label| Choice {
+                label,
+                blocked: None,
+            })
+            .collect(),
+        default: 0,
+        hint: "↑/↓ choose · Enter opens its meters · Esc cancels".to_owned(),
     }
 }
 
@@ -140,6 +172,8 @@ pub fn last_pane_stays(split: Option<&str>, reach: &str) -> String {
 pub fn no_measurements(reach: &str) -> String {
     let kinds: Vec<String> = NewKind::ALL
         .iter()
+        // The meter makes no measurement.
+        .filter(|k| **k != NewKind::Programme)
         .map(|k| match k {
             // Lower case mid-sentence; RTA and SPL stay capitals.
             NewKind::Rta | NewKind::Spl => k.name().to_owned(),
@@ -199,7 +233,11 @@ mod tests {
     fn rows_name_every_kind_with_its_key_and_reason() {
         let q = new_choices(
             NewKind::Spectrum,
-            |k| (k == NewKind::Sweep).then(|| "Shift+S".to_owned()),
+            |k| match k {
+                NewKind::Sweep => Some("Shift+S".to_owned()),
+                NewKind::Alignment => Some("Alt+M".to_owned()),
+                _ => None,
+            },
             |k| (k == NewKind::Math).then(|| "no curves".to_owned()),
         );
         let labels: Vec<&str> = q.choices.iter().map(|c| c.label.as_str()).collect();
@@ -211,12 +249,58 @@ mod tests {
                 "RTA — one input's level in fractional-octave bands",
                 "SPL meter — sound level: A / C / Z weighting, Leq windows and limits",
                 "Sweep — a played sweep: response and harmonic distortion  ·  Shift+S",
-                "Math channel — A ÷ × + − B of two curves, align A ↔ B, or the average of several",
+                "Math channel — A ÷ × + − B of two curves, or the average of several",
+                "Alignment — delay and polarity of two systems in their overlap (sub + main, \
+                 delay tower)  ·  Alt+M",
+                "Programme meter — meters inputs live in a new pane (levels, correlation); adds no \
+                 measurement",
             ]
         );
         assert_eq!(q.default, 1);
         assert_eq!(q.choices[5].blocked.as_deref(), Some("no curves"));
         assert_eq!(q.title, "New measurement");
+    }
+
+    #[test]
+    fn alignment_and_the_meter_say_why_they_are_blocked() {
+        let q = new_choices(
+            NewKind::Programme,
+            |_| None,
+            |k| match k {
+                NewKind::Alignment => Some("an alignment needs two transfer curves".to_owned()),
+                NewKind::Programme => Some("no inputs in the session to meter".to_owned()),
+                _ => None,
+            },
+        );
+        assert_eq!(
+            q.choices[6].blocked.as_deref(),
+            Some("an alignment needs two transfer curves")
+        );
+        assert_eq!(
+            q.choices[7].blocked.as_deref(),
+            Some("no inputs in the session to meter")
+        );
+        // The meter preselected but blocked: the first row that can be made.
+        assert_eq!(q.default, 0);
+        let open = new_choices(NewKind::Programme, |_| None, |_| None);
+        assert_eq!(open.default, 7);
+        assert_eq!(
+            open.hint,
+            "↑/↓ choose · Enter opens its settings, or what to meter · Esc cancels"
+        );
+    }
+
+    #[test]
+    fn the_meter_asks_what_to_meter() {
+        let q = meter_choices(vec!["meter  Main".to_owned(), "meter  in 1".to_owned()]);
+        assert_eq!(q.title, "Programme meter");
+        assert_eq!(
+            q.lines,
+            ["What to meter: it opens in a new pane beside the focused one."]
+        );
+        let labels: Vec<&str> = q.choices.iter().map(|c| c.label.as_str()).collect();
+        assert_eq!(labels, ["meter  Main", "meter  in 1"]);
+        assert!(q.choices.iter().all(|c| c.blocked.is_none()));
     }
 
     #[test]
@@ -240,7 +324,7 @@ mod tests {
         assert_eq!(
             no_measurements("Ctrl+M"),
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \
-             sweep, math channel)"
+             sweep, math channel, alignment)"
         );
     }
 }

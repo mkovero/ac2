@@ -42,8 +42,11 @@ inputs to capture. **Measurements** run on it: transfer functions (`tf`), spectr
 SPL meters and sweeps. In the app, every setting lives in **Settings** (**Ctrl+P**, the ⚙ in
 the top bar); **Shift+O** opens its Audio I/O page; **Ctrl+M** (*New measurement…*, also
 the last row of every pane's list) lists every kind — transfer, spectrum, RTA, SPL meter,
-sweep, math channel — with what each measures, and opens the chosen kind's settings (created,
-started and selected on **Enter**, in a pane of its own); the palette (**Ctrl+K**) also has
+sweep, math channel, alignment — with what each measures, and opens the chosen kind's settings
+(created, started and selected on **Enter**, in a pane of its own); a row it cannot make now
+says why. Its last row, *Programme meter*, makes no measurement: **Enter** asks what to meter
+and opens a [Programme pane](#programme-pane) beside the focused one; **Ctrl+M** on a
+Programme pane starts on that row. The palette (**Ctrl+K**) also has
 *New transfer…*, *New spectrum…*, *New RTA…*, *New SPL meter…* directly, and
 *Close audio I/O*; **Delete** (or **Backspace**) deletes the
 selected measurement after asking. Until there is a session or a measurement, the transfer
@@ -285,7 +288,9 @@ new [Programme pane](#programme-pane). Tab, a click on a pane or on a list row l
 A pane that meters inputs rather than a measurement: a pair, or up to eight inputs side by
 side. **P** on a picked Inputs row opens one for that row in a new pane beside the focused
 one (never in place of it); a pane's own list (its title's ▾) offers *meter …* rows — every
-pair, every input alone, and the first eight inputs together. The layout keeps the pane and
+pair, every input alone, and the first eight inputs together. The **Ctrl+M** chooser's
+*Programme meter* row offers the same list and opens the pane beside the focused one, as
+**P** does. The layout keeps the pane and
 what it meters; a session without those inputs shows it empty with *inputs 3+4 not in this
 session*.
 
@@ -1280,7 +1285,8 @@ base; **Overlap from / to** (Hz) is the band to fit; **Max delay** (default 50 m
 longest delay looked at. The band is never assumed: it is prefilled with where both curves
 are alike (within 6 dB of each other and 20 dB of their own peak, *where both curves are
 alike: check it*), or left empty to type. **Enter** creates it and opens its own pane, split
-from the focused one, on the **alignment view**.
+from the focused one, on the **alignment view**. The **Ctrl+M** chooser's *Alignment* row
+opens the same dialog, or says why it cannot (fewer than two transfer curves).
 
 The daemon fits the delay over the band, weighting each frequency by `|A|·|B|` and the lower
 coherence (where one system is far below the other nothing can cancel), and tries both

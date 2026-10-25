@@ -59,6 +59,9 @@ pub enum ChoicePurpose {
     /// New measurement: the answer is a kind, in [`ac2_scene::new_meas::NewKind::ALL`]'s
     /// order; its form opens.
     NewMeasurement,
+    /// What a new Programme pane meters: the answer is one of `meters`, opened beside the
+    /// focused pane.
+    Meter { meters: Vec<crate::state::Metered> },
     /// A target curve: the answer is in [`ac2_scene::target_curve::TargetChoice::ALL`]'s
     /// order; a file prompt, a dialog, or (flat) the curve itself follows.
     Target,
@@ -379,6 +382,11 @@ impl AppState {
         match c.purpose {
             ChoicePurpose::Compare { .. } => self.compare_pick(c, i, out),
             ChoicePurpose::NewMeasurement => self.new_measurement_pick(i, out),
+            ChoicePurpose::Meter { meters } => {
+                if let Some(m) = meters.get(i) {
+                    self.open_programme(*m);
+                }
+            }
             ChoicePurpose::Target => self.target_pick(i, out),
             p @ (ChoicePurpose::Unsaved { .. }
             | ChoicePurpose::Replace { .. }
