@@ -153,11 +153,16 @@ impl Shared {
             *held = held.max(ppm);
             p.peak.push(peak);
             p.rms.push(peak - 3.0);
-            p.clip.push(ClipFlags::NONE);
+            let (overs, clipped) = self.input_overs.get(&ch).copied().unwrap_or_default();
+            p.clip.push(if clipped {
+                ClipFlags::CLIP.with(ClipFlags::HELD)
+            } else {
+                ClipFlags::NONE
+            });
             p.ppm.push(ppm);
             p.true_peak.push(true_peak);
             p.max.push(*held);
-            p.overs.push(0);
+            p.overs.push(overs);
         }
         p
     }

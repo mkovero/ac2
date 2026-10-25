@@ -164,47 +164,77 @@ impl ProgrammeInput {
         if self.clipped { "CLIP" } else { "" }
     }
 
-    /// The Inputs-list line under the row's meter, readouts only, never empty separators,
-    /// the reading's unit said once (the reading and its max share it), so the line fits the
-    /// sidebar: `Type I −12.3 · max −3.1 dBFS · −1.2 dBTP · 2 overs · CLIP`,
-    /// `true peak −12.3 · max −3.1 dBTP`.
-    pub fn row_text(&self, ballistic: Ballistic) -> String {
+    /// The Inputs-list lines under the row's meter, set in a monospace font: every slot
+    /// keeps its width whatever the value, so the row neither shifts nor wraps as levels,
+    /// overs and CLIP come and go. The reading with CLIP's slot, its max with the overs
+    /// slot, then the true peak where the reading is not already it:
+    /// `Type I  −12.3 dBFS CLIP`, `max   −3.1 dBFS    2 overs`, `true peak   −1.2 dBTP`.
+    pub fn row_lines(&self, ballistic: Ballistic) -> Vec<String> {
         let reads = self.reads(ballistic);
         let unit = self.unit(ballistic);
-        let ppm = self.scale.number(self.ppm);
-        let max = self.scale.number(self.max);
-        // The unit goes after the last number on the line.
-        let with_unit = |n: &str, last: bool| {
-            if last {
-                format!("{n} {unit}")
-            } else {
-                n.to_owned()
-            }
-        };
-        let reading = format!(
-            "{} {} · max {}",
-            reads.word(),
-            ppm.as_deref()
-                .map_or(NO_VALUE.to_owned(), |p| with_unit(p, max.is_none())),
-            max.as_deref()
-                .map_or(NO_VALUE.to_owned(), |m| with_unit(m, true)),
-        );
-        let mut parts = vec![reading];
+        let slot = |v: Option<String>| number_slot(v.as_deref().unwrap_or(NO_VALUE));
+        let clip = if self.clipped { "CLIP" } else { "    " };
+        let mut lines = vec![
+            format!(
+                "{} {} {unit} {clip}",
+                reads.word(),
+                slot(self.scale.number(self.ppm))
+            ),
+            format!(
+                "max {} {unit} {}",
+                slot(self.scale.number(self.max)),
+                overs_slot(self.overs)
+            ),
+        ];
         // A true-peak reading already is the dBTP number.
         if reads != Ballistic::TruePeak {
-            parts.push(self.true_peak_text());
+            let tp = self
+                .true_peak_dbtp
+                .filter(|v| v.is_finite())
+                .map(|v| format::signed(f64::from(v), 1));
+            lines.push(format!("{} {} dBTP", Ballistic::TruePeak.word(), slot(tp)));
         }
-        parts.extend(
-            [self.overs_text(), self.clip_text().to_owned()]
-                .into_iter()
-                .filter(|t| !t.is_empty()),
-        );
-        parts.join(" · ")
+        lines
     }
 
     /// The note under the bar when the rig's `ballistic` is one this input cannot read.
     pub fn note(&self, ballistic: Ballistic) -> Option<&'static str> {
         (ballistic == Ballistic::Vu && !self.offers_vu).then_some(VU_FALLBACK)
+    }
+}
+
+/// Characters of a level's slot: the widest reading is `−120.0`.
+pub const NUMBER_SLOT: usize = 6;
+/// Characters of the overs slot: `9999 overs`.
+pub const OVERS_SLOT: usize = 10;
+/// Characters of a pair's correlation slot: the widest is `right quiet`.
+pub const CORRELATION_SLOT: usize = 11;
+
+/// `n` right-aligned in a [`NUMBER_SLOT`] (wider numbers keep every digit).
+fn number_slot(n: &str) -> String {
+    format!("{n:>NUMBER_SLOT$}")
+}
+
+/// `   2 overs`, `   1 over `, blank when none; past 9999 in thousands (`120k overs`), so the
+/// count never outgrows its [`OVERS_SLOT`].
+pub fn overs_slot(n: u32) -> String {
+    let count = match n {
+        0 => return " ".repeat(OVERS_SLOT),
+        1..=9999 => n.to_string(),
+        10_000..=999_999 => format!("{}k", n / 1000),
+        _ => "1M+".to_owned(),
+    };
+    let word = if n == 1 { "over " } else { "overs" };
+    format!("{count:>4} {word}")
+}
+
+/// A pair's line in the Inputs list: `correlation +0.87      `, `correlation right quiet`, the
+/// value left in a fixed [`CORRELATION_SLOT`] so the chip keeps its width.
+pub fn correlation_line(c: Correlation) -> CorrelationChip {
+    let chip = c.chip();
+    CorrelationChip {
+        text: format!("correlation {:<CORRELATION_SLOT$}", chip.text),
+        warning: chip.warning,
     }
 }
 

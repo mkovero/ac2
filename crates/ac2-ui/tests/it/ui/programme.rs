@@ -120,7 +120,7 @@ fn programme_pane_of_a_pair() {
     let texts = programme_texts(&h);
     // The bar reads the true peak in dBTP, its max too, and no second true-peak line.
     assert!(!texts.iter().any(|t| t.ends_with("dBFS")), "{texts:?}");
-    for want in ["right quiet", "−11.8 dBTP", "max −11.8 dBTP"] {
+    for want in ["right quiet", "−11.8 dBTP", "max"] {
         assert!(
             texts.iter().any(|t| t == want),
             "{want}: {}",
@@ -279,4 +279,59 @@ fn loudness_says_why_a_pane_has_none() {
             .iter()
             .any(|t| t.text == "max, overs and loudness reset on input 1, 3, 4")
     });
+}
+
+/// Only the bars move in the Inputs list: the pair row's readout lines, its correlation and
+/// everything under them keep their rects whatever the levels read, overs or no overs,
+/// CLIP or not.
+#[test]
+fn inputs_rows_keep_their_geometry() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::By;
+    if !have_gpu("inputs_rows_keep_their_geometry") {
+        return;
+    }
+    let rig = pair_rig();
+    let mut h = harness(options(Some(&rig)));
+    // Every label of the sidebar: the rows' names, readouts and the lists under them.
+    let rects = |h: &Harness<'_, App>| {
+        let mut r: Vec<[i32; 4]> = h
+            .query_all(By::new().predicate(|n| n.role() == Role::Label))
+            .map(|n| n.rect())
+            .filter(|r| r.max.x <= 240.0)
+            .map(|r| [r.min.x, r.min.y, r.max.x, r.max.y].map(|v| (v * 8.0).round() as i32))
+            .collect();
+        r.sort_unstable();
+        r
+    };
+    let left = |a: &App| {
+        a.state
+            .row_meters(2)
+            .map(|m| a.state.programme_of(m))
+            .and_then(|p| p.inputs.first().cloned())
+    };
+    let mut first = None;
+    for (peak, overs, clip) in [
+        (-60.0, 0, false),
+        (-0.1, 12, false),
+        (f32::NEG_INFINITY, 999, true),
+        (-12.0, 1, true),
+    ] {
+        {
+            let mut s = rig.fake.lock();
+            s.set_input_peak(2, peak);
+            s.input_overs.insert(2, (overs, clip));
+        }
+        step_until(&mut h, "the levels shown", |a| {
+            left(a).is_some_and(|i| {
+                i.overs == overs
+                    && i.clipped == clip
+                    && i.ppm.is_some_and(|p| p.is_finite() == peak.is_finite())
+            })
+        });
+        h.step();
+        let got = rects(&h);
+        let want = first.get_or_insert_with(|| got.clone());
+        assert_eq!(*want, got, "{peak} dBFS, {overs} overs, clip {clip}");
+    }
 }

@@ -650,25 +650,6 @@ fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) -> Option<Msg> {
                     .wrap_mode(egui::TextWrapMode::Wrap)
                     .selectable(false),
                 );
-                // A pair's correlation beside its name: negative reads in the warning colour.
-                if let Some(pair) = programme
-                    .as_ref()
-                    .and_then(|p| p.pair.as_ref())
-                    .filter(|p| p.correlation != ac2_scene::programme::Correlation::NoData)
-                {
-                    let chip = pair.correlation.chip();
-                    let (fg, bg) = if chip.warning {
-                        (ch.on_fault_fill, ch.fault_fill)
-                    } else {
-                        (ch.text, ch.panel)
-                    };
-                    ui.label(
-                        RichText::new(format!("correlation {}", chip.text))
-                            .small()
-                            .color(fg)
-                            .background_color(bg),
-                    );
-                }
             });
             // A pair is one row with two meters, left then right, marked L and R.
             let (l, rmark) = ac2_scene::meter::PAIR_MARKS;
@@ -688,30 +669,51 @@ fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) -> Option<Msg> {
                     });
                 }
             }
-            // The programme readouts of each side once the levels arrive: ballistic reading,
-            // true peak, max, overs.
+            // The programme readouts of each side once the levels arrive, then a pair's
+            // correlation: monospace, unwrapped, every slot a fixed width, so nothing in the
+            // row moves as values, overs and CLIP come and go (only the bars do).
             if let Some(p) = programme
                 .as_ref()
                 .filter(|p| p.inputs.iter().any(|i| i.ppm.is_some() || i.max.is_some()))
             {
+                let small = egui::TextStyle::Small.resolve(ui.style()).size;
+                let mono = |t: String| {
+                    RichText::new(t)
+                        .family(egui::FontFamily::Monospace)
+                        .size(small)
+                };
+                let line = |ui: &mut egui::Ui, t: RichText| {
+                    ui.add(
+                        egui::Label::new(t)
+                            .wrap_mode(egui::TextWrapMode::Extend)
+                            .selectable(false),
+                    );
+                };
                 let marks = [l, rmark];
                 for (i, input) in p.inputs.iter().enumerate() {
-                    let text = input.row_text(p.ballistic);
-                    let text = if p.inputs.len() > 1 {
-                        format!("{} {text}", marks.get(i).copied().unwrap_or(""))
-                    } else {
-                        text
-                    };
                     let color = if input.clipped || input.overs > 0 {
                         ch.fault
                     } else {
                         ch.dim
                     };
-                    ui.add(
-                        egui::Label::new(RichText::new(text).small().color(color))
-                            .wrap_mode(egui::TextWrapMode::Wrap)
-                            .selectable(false),
-                    );
+                    for (k, text) in input.row_lines(p.ballistic).into_iter().enumerate() {
+                        let text = match (p.inputs.len() > 1, k) {
+                            (false, _) => text,
+                            (true, 0) => format!("{} {text}", marks.get(i).copied().unwrap_or("")),
+                            (true, _) => format!("  {text}"),
+                        };
+                        line(ui, mono(text).color(color));
+                    }
+                }
+                // Negative correlation reads in the warning colour.
+                if let Some(pair) = &p.pair {
+                    let chip = ac2_scene::programme::correlation_line(pair.correlation);
+                    let (fg, bg) = if chip.warning {
+                        (ch.on_fault_fill, ch.fault_fill)
+                    } else {
+                        (ch.text, ch.panel)
+                    };
+                    line(ui, mono(chip.text).color(fg).background_color(bg));
                 }
             }
             // What a line or digital row reads in (a mic row names its curve in the label).

@@ -272,14 +272,16 @@ by side marked **L** and **R**: *Main L + Main R · line · pair (in 3, 4)*, *St
 digital · pair (in 5, 6)*. A **REF** / **MEAS** mark shows what the running sweep, else the
 selected measurement, uses.
 
-Under each meter a line reads the programme meters of that input (of each side of a pair,
-marked **L** / **R**) in the rig's ballistic, the unit said once for the reading and its max:
-*true peak −12.0 · max −3.1 dBTP*, or *Type I −14.2 · max −3.1 dBFS · −11.8 dBTP* (the true
-peak beside it), then *2 overs*
-and *CLIP* when there are any — the line turns red then. A pair's row names its correlation
-beside the name, *correlation +0.87*, red when negative, *right quiet* when a side is under
-the gate (see [Programme pane](#programme-pane)). The line appears once the daemon's first
-levels frame arrives.
+Under each meter a few lines read the programme meters of that input (of each side of a
+pair, marked **L** / **R**) in the rig's ballistic: the reading, then its max, then the true
+peak where the reading is not already it — *Type I −14.2 dBFS*, *max −3.1 dBFS*, *true peak
+−11.8 dBTP*. *CLIP* shows at the end of the reading's line and *2 overs* at the end of the
+max line when there are any; the lines turn red then. Every field keeps its place and width
+whatever it reads (a fixed-width font, numbers right-aligned, the overs and CLIP places kept
+when blank), so only the bars move. A pair's row ends with its correlation, *correlation
++0.87*, red when negative, *right quiet* when a side is under the gate, *—* before the
+first value (see [Programme pane](#programme-pane)). The lines appear once the daemon's
+first levels frame arrives.
 
 A click picks a row (outlined); then **R** clears its max, overs and loudness (a pair: both
 sides, and the pair's loudness), **Shift+R** those of every input, **P** meters it big in a
@@ -319,7 +321,8 @@ clips, with a flying peak that holds 1 s and then falls 20 dB/s. Under each bar:
 on the input's own scale (dBTP for true peak, dBFS for the other ballistics; dBu after a [line
 calibration](#calibrating-a-line-input); dB SPL on a calibrated mic), the true peak in dBTP
 (not repeated when the bar already reads it), the max since the last reset in the reading's
-unit, overs and CLIP.
+unit, overs and CLIP. Each readout has its place under the bar — the numbers right-aligned,
+*max* and the overs on the left, *CLIP* on the right — so none shifts as the value changes.
 
 - **Ballistics** (the rig's, Settings › Rig monitor › *Programme meters read*, or `ac2
   levels set --ballistic`): **true peak** (the default — sample peak through 4×

@@ -4,7 +4,7 @@
 //! embers themselves are `ac2-plot`'s (`embers::ember_points`), placed in the square this
 //! returns.
 
-use crate::canvas::{Canvas, anchor, cut_to, label};
+use crate::canvas::{Canvas, anchor, cut_to, label, text_width};
 use crate::gonio;
 use crate::primitives::{Color, FillRect, HAlign, Rect, Scene, Stroke, VAlign, Viewport};
 use crate::theme::Theme;
@@ -221,38 +221,78 @@ fn bars(c: &mut Canvas, p: &ProgrammePane, area: Rect, style: Style) {
                 clip: None,
             });
         }
-        let mut rows: Vec<(String, Color)> = vec![(input.ppm_text(p.ballistic), theme.text)];
+        // Every readout sits at a place fixed by the column, never by its own text: the
+        // values right-aligned at one edge (the unit stays put, the digits grow left), `max`
+        // and the overs count from the other, CLIP at the right. A centred readout would
+        // shift with every digit the value gains or loses.
+        let unit = input.unit(p.ballistic);
+        let block = text_width(&format!("max −120.0 {unit}"), small).min(col_w - 4.0);
+        let (xl, xr) = (cx - block / 2.0, cx + block / 2.0);
+        let value_w = block - text_width("max ", small);
+        let mut y = top + bar_h + 4.0;
+        let mut put = |t: String, x: f32, h: HAlign, color: Color, y: f32| {
+            c.overlay
+                .labels
+                .push(label(t, [x, y], anchor(h, VAlign::Top), small, color));
+        };
+        put(
+            cut_to(&input.ppm_text(p.ballistic), value_w, small),
+            xr,
+            HAlign::Right,
+            theme.text,
+            y,
+        );
+        y += line;
         // A true-peak bar already reads the dBTP number; a second line would repeat it.
         if input.reads(p.ballistic) != Ballistic::TruePeak {
-            rows.push((input.true_peak_text(), theme.text_dim));
+            put(
+                cut_to(&input.true_peak_text(), value_w, small),
+                xr,
+                HAlign::Right,
+                theme.text_dim,
+                y,
+            );
+            y += line;
         }
-        rows.push((input.max_text(p.ballistic), theme.text_dim));
-        let flags = [input.overs_text(), input.clip_text().to_owned()]
-            .into_iter()
-            .filter(|t| !t.is_empty())
-            .collect::<Vec<_>>()
-            .join(" · ");
+        put("max".to_owned(), xl, HAlign::Left, theme.text_dim, y);
+        let max = input.max_text(p.ballistic);
+        let max = max.strip_prefix("max ").unwrap_or(&max);
+        put(
+            cut_to(max, value_w, small),
+            xr,
+            HAlign::Right,
+            theme.text_dim,
+            y,
+        );
+        y += line;
         let flag_color = if input.clipped {
             theme.banner_fault.background
         } else {
             theme.banner_warning.background
         };
-        rows.push((flags, flag_color));
-        if let Some(n) = input.note(p.ballistic) {
-            rows.push((n.to_owned(), theme.text_dim));
+        let overs = input.overs_text();
+        if !overs.is_empty() {
+            let room = block - text_width("CLIP ", small);
+            put(cut_to(&overs, room, small), xl, HAlign::Left, flag_color, y);
         }
-        let mut y = top + bar_h + 4.0;
-        for (t, color) in rows {
-            if !t.is_empty() {
-                c.overlay.labels.push(label(
-                    cut_to(&t, col_w - 4.0, small),
-                    [cx, y],
-                    anchor(HAlign::Center, VAlign::Top),
-                    small,
-                    color,
-                ));
-            }
-            y += line;
+        if input.clipped {
+            put(
+                input.clip_text().to_owned(),
+                xr,
+                HAlign::Right,
+                flag_color,
+                y,
+            );
+        }
+        y += line;
+        if let Some(n) = input.note(p.ballistic) {
+            put(
+                cut_to(n, col_w - 4.0, small),
+                cx,
+                HAlign::Center,
+                theme.text_dim,
+                y,
+            );
         }
     }
 }

@@ -88,37 +88,109 @@ fn overs_clip_and_notes_keep_their_words() {
 }
 
 #[test]
-fn inputs_row_line_says_only_what_there_is() {
+fn inputs_row_lines_read_in_fixed_slots() {
     let mut i = input(Scale::Dbfs);
     assert_eq!(
-        i.row_text(Ballistic::Type1),
-        "Type I −12.3 · max −3.1 dBFS · −1.2 dBTP"
+        i.row_lines(Ballistic::Type1),
+        [
+            "Type I  −12.3 dBFS     ",
+            "max   −3.1 dBFS           ",
+            "true peak   −1.2 dBTP",
+        ]
     );
     assert_eq!(
-        i.row_text(Ballistic::TruePeak),
-        "true peak −12.3 · max −3.1 dBTP"
+        i.row_lines(Ballistic::TruePeak),
+        ["true peak  −12.3 dBTP     ", "max   −3.1 dBTP           "]
     );
     // VU on an uncalibrated input reads the true peak, and says so.
-    assert_eq!(i.row_text(Ballistic::Vu), "true peak −12.3 · max −3.1 dBTP");
+    assert_eq!(i.row_lines(Ballistic::Vu), i.row_lines(Ballistic::TruePeak));
     let line = input(Scale::Dbu { fs_dbu: 16.3 });
     assert_eq!(
-        line.row_text(Ballistic::Type2),
-        "Type II +4.0 · max +13.2 dBu · −1.2 dBTP"
+        line.row_lines(Ballistic::Type2),
+        [
+            "Type II   +4.0 dBu     ",
+            "max  +13.2 dBu           ",
+            "true peak   −1.2 dBTP",
+        ]
     );
-    let mut held = input(Scale::Dbfs);
-    held.max = None;
-    assert_eq!(
-        held.row_text(Ballistic::TruePeak),
-        "true peak −12.3 dBTP · max —"
-    );
-    held.ppm = None;
-    assert_eq!(held.row_text(Ballistic::TruePeak), "true peak — · max —");
+    i.ppm = None;
+    i.max = None;
     i.overs = 2;
     i.clipped = true;
     assert_eq!(
-        i.row_text(Ballistic::TruePeak),
-        "true peak −12.3 · max −3.1 dBTP · 2 overs · CLIP"
+        i.row_lines(Ballistic::TruePeak),
+        ["true peak      — dBTP CLIP", "max      — dBTP    2 overs"]
     );
+    i.overs = 1;
+    assert_eq!(
+        i.row_lines(Ballistic::TruePeak)[1],
+        "max      — dBTP    1 over "
+    );
+}
+
+/// Every line keeps its character count (the Inputs list sets it in a monospace font)
+/// whatever the levels, the overs count and CLIP: the row never shifts or wraps.
+#[test]
+fn inputs_row_lines_keep_their_width() {
+    for scale in [
+        Scale::Dbfs,
+        Scale::Dbu { fs_dbu: 16.3 },
+        Scale::DbSpl { fs_db_spl: 120.5 },
+    ] {
+        for ballistic in [Ballistic::TruePeak, Ballistic::Type1, Ballistic::Vu] {
+            let mut widths = None;
+            for level in [
+                None,
+                Some(f32::NEG_INFINITY),
+                Some(-0.1),
+                Some(-60.0),
+                Some(-120.0),
+                Some(3.0),
+            ] {
+                for overs in [0, 1, 12, 999, 9999, 123_456, u32::MAX] {
+                    for clipped in [false, true] {
+                        let mut i = input(scale);
+                        i.offers_vu = matches!(scale, Scale::Dbu { .. });
+                        (i.ppm, i.max, i.true_peak_dbtp) = (level, level, level);
+                        i.overs = overs;
+                        i.clipped = clipped;
+                        let w: Vec<usize> = i
+                            .row_lines(ballistic)
+                            .iter()
+                            .map(|l| l.chars().count())
+                            .collect();
+                        let first = widths.get_or_insert_with(|| w.clone());
+                        assert_eq!(
+                            *first, w,
+                            "{scale:?} {ballistic:?} {level:?} {overs} {clipped}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(overs_slot(0).chars().count(), OVERS_SLOT);
+    assert_eq!(overs_slot(123_456), "123k overs");
+    assert_eq!(overs_slot(u32::MAX), " 1M+ overs");
+}
+
+#[test]
+fn correlation_line_keeps_its_width() {
+    let lines = [
+        Correlation::NoData,
+        Correlation::Value(0.874),
+        Correlation::Value(-0.42),
+        Correlation::Value(f32::NAN),
+        Correlation::Quiet(Side::Left),
+        Correlation::Quiet(Side::Right),
+        Correlation::Quiet(Side::Both),
+    ]
+    .map(|c| correlation_line(c).text);
+    assert_eq!(lines[1], "correlation +0.87      ");
+    assert!(correlation_line(Correlation::Value(-0.42)).warning);
+    for l in &lines {
+        assert_eq!(l.chars().count(), lines[0].chars().count(), "{l:?}");
+    }
 }
 
 #[test]
@@ -306,7 +378,8 @@ fn scene_draws_bars_readouts_chip_and_field() {
     }
     // A true-peak bar reads dBTP, its max too, and no second true-peak line repeats it.
     assert!(t.iter().any(|x| x == "−12.3 dBTP"), "{t:?}");
-    assert!(t.iter().any(|x| x == "max −3.1 dBTP"), "{t:?}");
+    assert!(t.iter().any(|x| x == "max"), "{t:?}");
+    assert!(t.iter().any(|x| x == "−3.1 dBTP"), "{t:?}");
     assert!(!t.iter().any(|x| x == "−1.2 dBTP"), "{t:?}");
     let mut type1 = p.clone();
     type1.ballistic = Ballistic::Type1;
@@ -315,7 +388,7 @@ fn scene_draws_bars_readouts_chip_and_field() {
         theme: &theme,
     };
     let t1 = texts(&programme_scene(&type1, style, size, None).scene);
-    for want in ["−12.3 dBFS", "−1.2 dBTP", "max −3.1 dBFS"] {
+    for want in ["−12.3 dBFS", "−1.2 dBTP", "max", "−3.1 dBFS"] {
         assert!(t1.iter().any(|x| x == want), "{want} in {t1:?}");
     }
     let sq = full.gonio.expect("a pair on a tall pane has a goniometer");
@@ -451,4 +524,61 @@ fn scene_draws_the_loudness_column() {
         .expect("the message");
     let joined = t[start..].join(" ");
     assert!(joined.starts_with(super::loudness::RATE_TEXT), "{t:?}");
+}
+
+/// The readouts under the bars stay where the column puts them whatever they read: the
+/// values right-aligned at one edge, `max`, the overs and CLIP at their own places.
+#[test]
+fn bar_readouts_keep_their_places() {
+    use crate::primitives::Viewport;
+    use crate::theme::Theme;
+    use crate::view::{PlotChrome, Style};
+    let theme = Theme::dark();
+    let style = Style {
+        chrome: PlotChrome::Full,
+        theme: &theme,
+    };
+    let size = Viewport {
+        width: 600.0,
+        height: 400.0,
+    };
+    let places = |level: Option<f32>, overs: u32, clipped: bool| {
+        let mut p = pane_with_pair(Correlation::Value(0.5));
+        p.ballistic = Ballistic::Type1;
+        for i in &mut p.inputs {
+            (i.ppm, i.max, i.true_peak_dbtp) = (level, level, level);
+            i.overs = overs;
+            i.clipped = clipped;
+        }
+        let scene = programme_scene(&p, style, size, None).scene;
+        let mut out: Vec<(String, [u32; 2])> = scene
+            .layers
+            .iter()
+            .flat_map(|l| l.labels.iter())
+            .map(|l| {
+                let class = if l.text.contains("over") {
+                    "overs".to_owned()
+                } else if l.text.ends_with("dBFS") || l.text.ends_with("dBTP") || l.text == NO_VALUE
+                {
+                    "value".to_owned()
+                } else {
+                    l.text.clone()
+                };
+                (class, l.pos.map(f32::to_bits))
+            })
+            .collect();
+        out.sort();
+        out
+    };
+    let all = places(Some(-0.1), 12, true);
+    for level in [None, Some(-0.1), Some(-60.0), Some(-120.0)] {
+        for overs in [0, 1, 12, 999] {
+            for clipped in [false, true] {
+                let got = places(level, overs, clipped);
+                for g in &got {
+                    assert!(all.contains(g), "{g:?} moved: {level:?} {overs} {clipped}");
+                }
+            }
+        }
+    }
 }

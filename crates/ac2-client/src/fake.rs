@@ -139,6 +139,8 @@ pub struct Shared {
     pub preview_decl: Option<levels::PreviewDecl>,
     /// The sample peak each input reads in meter frames; absent: the default.
     pub input_peak: HashMap<u16, f32>,
+    /// The overs count and CLIP each input reads in meter frames; absent: none.
+    pub input_overs: HashMap<u16, (u32, bool)>,
     /// The max holds of the programme meters, by input.
     pub levels_max: HashMap<u16, f32>,
     /// When each loudness source started and was last reset, by meter.
@@ -343,6 +345,7 @@ impl Shared {
             preview: None,
             preview_decl: None,
             input_peak: HashMap::new(),
+            input_overs: HashMap::new(),
             levels_max: HashMap::new(),
             loudness_starts: HashMap::new(),
             meter_seq: 0,
