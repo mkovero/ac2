@@ -187,7 +187,7 @@ its calibration, so one wire quantity serves every scale):
 | field | what |
 |---|---|
 | `rms` | as today |
-| `ppm` | the chosen ballistic's reading; where VU is chosen but not offered (a mic or digital input, or an uncalibrated line input) the true-peak reading, and the row says *VU needs a line calibration · true peak shown*; under a loudness ballistic (§6.2) every input's true peak — a rig setting never blanks a bar |
+| `ppm` | the chosen ballistic's reading; where VU is chosen but not offered (a mic or digital input, or an uncalibrated line input) the true-peak reading, and the row says *true peak shown · VU needs a line calibration* (the order of §6.2); under a loudness ballistic (§6.2) every input's true peak — a rig setting never blanks a bar |
 | `true_peak` | dBTP, this frame |
 | `max` | the highest reading of the chosen ballistic since the last reset (daemon; held per ballistic, since all run, so a ballistic change does not splice a Type I maximum onto true-peak readings); under a loudness ballistic (§6.2) the true-peak hold |
 | `overs` | over events since the last reset (daemon) |
@@ -585,18 +585,28 @@ every captured input's `ProgrammeInput` as the UI builds it today from the level
 `Peak` bar's `input` and a source bar's per-side `true_peak_dbtp`, `overs` and `clipped`
 from it; there is no separate peak-facts type. The plate and the bars read the same `sources()`, so they never disagree on which
 source an input belongs to. One function runs the dock
-ladder (below): `programme::dock(rect, has_pair, bars, scale_w, font, scale) ->
-ProgrammeLayout`, trying each step by calling `layout(rect_left_after_reserve, has_pair,
-bars, scale_w)`, which stays the pure fit for a given room; `ProgrammeLayout.loudness:
-Option<Rect>` becomes `plate: Option<Docked { rect, slots, scale }>`, and `LOUDNESS_W`
-goes. The scale width is one number, `scale_w(kind, small)` (the dBFS column `3 · small` as
+ladder (below): `programme::dock(rect: Rect, has_pair: bool, bars: usize, scale_w: f32,
+font: f32, scale: f32) -> ProgrammeLayout`, trying each step by calling `layout(rect: Rect,
+has_pair: bool, bars: usize, scale_w: f32) -> ProgrammeLayout` on the room left after the
+reserve; `layout()` stays the pure fit for a given room and loses its `loudness: bool`. The
+pane calls `dock` when it has a plate (`loudness.is_some()`) whose place is auto
+(`plate.at.is_none()`), at every T step (so the room stays reserved at the third); otherwise
+it calls `layout` on the whole rect (a floating plate reserves nothing). `ProgrammeLayout.
+loudness: Option<Rect>` becomes `plate: Option<Docked { rect: Rect, dropped: u8, scale: f32
+}>`, `dropped` 0 … 4 being how many steps of the fixed drop order (foot, maxima, range and
+peak, live) are taken; `loudness_plate::size(font, scale, dropped)`, the drawing and a
+floating plate's shrink use the same count. `LOUDNESS_W` goes. The scale width is one number, `scale_w(kind, small)` (the dBFS column `3 · small` as
 `draw::bars` reserves today, or the LUFS column below), used by the fit test, the dock and
 the drawing alike, replacing `layout()`'s fixed `BAR_SCALE_W`. `ProgrammePane.loudness:
 Option<LoudnessColumn>` becomes `Option<LoudnessReadout>` (the plate's data), present iff
-`sources()` resolves the pane to exactly one source; `LoudnessColumn` and
+`sources()` resolves the pane to exactly one source, whether or not this frame carries that
+source yet: a resolved source absent from the frame's `loudness` (declarations and frames
+arrive on different paths) reads −∞ / `None` in every field, `duration` 0 and a blank foot,
+and a `SourceBar` for it is empty with — readings, so the plate and its dock never pop in a
+frame later; `LoudnessColumn` and
 `ONE_INPUT_OR_PAIR` go; `LoudnessReadout` gains `max_momentary` and `max_short_term` for the plate's
 maxima slot; the plate takes `LoudnessReadout` (so extended) as its data; its sizes come from a new
-`programme::loudness_plate::size(font, scale, slots)
+`programme::loudness_plate::size(font, scale, dropped)
 -> (w, h)` returning the size at the slots' mixed font sizes (2.5 f, 1.5 f, f, 0.8 f), which
 `crate::plate::Metrics::size` (one row size) cannot: each slot's row is 1.3 × its size, as every
 bar row, and the pads are `crate::plate::Metrics::of(font, scale).pad_x` / `pad_y`, so the dock's
@@ -633,18 +643,19 @@ the true-peak slot, and the VU fallback branch of `take()` becomes `chosen.is_lo
 both lists; the mirrors gain the two values in their layers: `ac2_scene::programme::
 Ballistic` (4c), the UI's `ballistic()` map in `ac2-ui/src/state/programme.rs` and the
 choosers on Settings › Rig monitor and the form, which step `ALL` (4e), the CLI's
-`BallisticArg` (4b). Integrated is not a ballistic: it has no window, it is a figure since the
+`BallisticArg` (4b: a clap `ValueEnum`, so variants `Momentary` / `ShortTerm` give
+`momentary` / `short-term`, and its `From` impl gains both arms). Integrated is not a ballistic: it has no window, it is a figure since the
 reset, and it is the plate's large number.
 
 **Scale and target.** A loudness bar is drawn on the span of the EBU +9 scale, **target −18
 LU … target +9 LU**, labelled in absolute LUFS every 3 LU (target −23: −41, −38, … −23, …
-−14) when the bar is at least ten label rows (`1.3 · small` each) high, else every 9 LU
+−14; `target −41`, the template of the scale column below, is the widest label over the whole target range) when the bar is at least ten label rows (`1.3 · small` each) high, else every 9 LU
 (−41, −32, −23, −14); the target tick always. The rule depends on the bar's height only, so
 labels never come and go with values. The glance a bar is for is "how far from target", and 27 LU over a bar's height gives
 about twice the resolution per LU of the −60 … 0 span, so 1 LU is visible. Below the
 span the bar is empty and its text still reads the value; above it the bar is full. A max
-above the span draws no tick (clamped to the top it would read as *max = target +9*); one
-below the span is clamped to the bottom edge; the text carries the value either way. The
+outside the span draws no tick either way (clamped, it would read as *max = target +9* or
+*target −18*); the text carries the value. The
 numbers stay absolute (LUFS): ac2 still has no relative LU readout (one unit per quantity;
 a relative mode would be a second number for the same thing). The target is a new rig
 setting, `levels.loudness_target` (LUFS, default −23, the R128 programme level; −36 … −5 in
@@ -655,7 +666,7 @@ one rig must not show the same programme lit above the target on one and not on 
 **Title.** `ProgrammePane::title()` starts with the word of what the bars read, not of the
 setting alone: `Mom loudness` / `Short loudness` when any bar is a `Source`, else `true
 peak` (a pane of mics or of sourceless inputs under a loudness ballistic, whose bars all read
-true peak). The target follows a loudness word: `Short loudness · target −23 LUFS · Main ·
+true peak). The same rule applies to VU: a pane where no bar offers VU is titled `true peak`. The target follows a loudness word: `Short loudness · target −23 LUFS · Main ·
 1 s`.
 
 **Lines on a bar.** Two lines, drawn so one never passes for the other: the **target**
@@ -671,7 +682,7 @@ column is `text_width("target −41", small)` + 4 px wide, a
 constant at every T step, so the label fits and nothing moves when it changes to a number.
 
 **Colour.** Zones by position, not by state: the part of the bar below the target is the
-level green, the part above it the green blended halfway to the text colour (lighter on the dark theme,
+level green (`Theme.level_ok`), the part above it that green blended halfway to the text colour (lighter on the dark theme,
 darker on the light one; the test asserts the blend). No yellow and no red: on every other bar yellow means *near full scale* or
 *NEAR a limit*, and a Mom bar of a programme whose Int sits on target is above the target
 half the time, which is not a fault (CLIP and overs stay on the bar's text, coloured as
@@ -722,8 +733,10 @@ Under a loudness ballistic every **per-input** reading is the true peak, and eve
 of one says so: `ProgrammeInput::reads()` returns `TruePeak` whenever the ballistic is a
 loudness one (the VU rule of §3 generalised), so its `unit()` is dBTP and its text has no
 note (the note is for an input whose bar would read loudness and cannot, above); the Inputs
-list rows and the I/O page's device-preview rows read true peak, in dBTP; the `ac2 levels` input table heads that column `true
-peak` and its loudness table marks the bars' column (`Short (bars)`); `--json` numbers are
+list rows and the I/O page's device-preview rows read true peak, in dBTP (dBu / dB SPL on a calibrated scale, as under true peak); the `ac2 levels` input table heads that column `true
+peak`: `ballistic_of()` in `ac2-cli/src/cmd/levels.rs` returns `TruePeak` whenever the
+rig's ballistic `is_loudness()` (the VU rule generalised, as `reads()`), so the table's word
+and unit and the per-input `--json` `"ballistic"` (`"true_peak"`) follow (4b, with a test) and its loudness table marks the bars' column (`Short (bars)`); `--json` numbers are
 unchanged (`ppm` is the true peak).
 
 **Rate and cost.** Nothing new is computed: the fan-out thread already runs every source's
@@ -766,7 +779,8 @@ iff `sources()` resolves its inputs to exactly one distinct source, whatever the
 (a pair pane under true peak has its two peak bars and the plate), and sourceless inputs
 beside it keep their own reason rows under a loudness ballistic; otherwise nothing is docked and nothing reserved. There is
 no message line: an input without a source says why on its own bar (above). Contents, in
-fixed slots, top down (`f` the plate's font size, the theme's times its scale):
+fixed slots, top down (`f` the plate's font size, `theme.small_font_size` × its scale, as
+`plate::Metrics::new` sizes every plate, so a loudness plate at 1× reads like a legend):
 
 | slot | text | size |
 |---|---|---|
@@ -861,8 +875,8 @@ rig settings version 4*. Its callers:
 
 - **sessions:** `ac2_traces::session::VERSION` 33 → 34 (4a). As at every format bump the
   daemon sets an older autosave aside as `autosave.v33` and starts empty, and `ac2 session
-  salvage` brings it back; salvage's layout read (`ac2-cli/src/cmd/salvage/read.rs`, after
-  `plates_add_peaks`) calls `plates_add_loudness`, so a salvaged pane keeps its layout with
+  salvage` brings it back; salvage's layout read (`ac2-cli/src/cmd/salvage/read.rs`) calls `plates_add_loudness`
+  after `plates_add_peaks` (a pre-33 tree lacks `peaks` too; every caller keeps that order), so a salvaged pane keeps its layout with
   the plate docked;
 - **the rig file:** `rig/v4.rs::upgrade` calls it on each `meters[].layout`, as `rig/v3.rs`
   calls `plates_add_peaks` (the rig reads its meters one by one and leaves out one it cannot
