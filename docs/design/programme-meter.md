@@ -1086,7 +1086,7 @@ which now says *what a chooser steps* beside `PEAK`'s *the detectors*, say that 
      `levels.set` checks the target, rig file v5 with `rig/v4.rs` (target, and
      `plates_add_loudness` on meter layouts), `ac2 levels set
      --ballistic momentary|short-term --loudness-target`, the fake-backend path tests.
-   - *4c scene* (after 4a, beside 4b): `sources()` and `bars()` (bars per source under a loudness ballistic, `LoudnessFacts.input`), the LUFS scale, zones, target and
+   - *4c scene* (after 4a, beside 4b): `sources()`, `bars_of()`, `dock()` (bars per source under a loudness ballistic, `LoudnessFacts.input`), the LUFS scale, zones, target and
      max ticks, the true-peak fallback bar with its own ticks, `PlateKind::Loudness`, the plate
      slots, the dock ladder, `programme_name`, the scene-text tests.
    - *4d plot* (after 4c): `Label::tabular` drawn with tabular figures, golden images.
