@@ -172,3 +172,59 @@ fn a_legend_corner_keeps_the_text_size() {
     assert_eq!(p.at, Some([0.0, 1.0]));
     assert_eq!(p.scale(), 2.0);
 }
+
+/// The spectrum's peak list is a plate as the others: dragged and scaled it is sent with
+/// its measurement's panes, one undo step each; a double-click puts it back; a layout
+/// received for the measurement brings it back where it was dropped.
+#[test]
+fn the_peak_list_is_a_plate_of_the_pane() {
+    let mut t = T::new();
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    let pane = t.st.layout.focus;
+    t.tick(1.0);
+    let steps = t.st.history.undo_len();
+    let kind = PlateKind::Peaks;
+    let mut r = plate(
+        &mut t,
+        PlateMsg::Move {
+            pane,
+            kind,
+            x: 0.0,
+            y: 1.0,
+        },
+    );
+    r.extend(plate(&mut t, PlateMsg::End));
+    r.extend(plate(
+        &mut t,
+        PlateMsg::Scale {
+            pane,
+            kind,
+            scale: 2.0,
+        },
+    ));
+    r.extend(plate(&mut t, PlateMsg::End));
+    r.extend(t.st.update(
+        Msg::Tick {
+            now_s: 2.0,
+            dt_s: 1.0,
+        },
+        &t.keys,
+    ));
+    assert_eq!(t.st.history.undo_len(), steps + 2);
+    let p = plates(&t, pane).peaks;
+    assert_eq!((p.at, p.scale()), (Some([0.0, 1.0]), 2.0));
+    // The others are left where the scene puts them.
+    assert!(plates(&t, pane).readout.is_auto());
+    // The move is sent once it rests (the size waits for the daemon's answer to it).
+    let sent = layout_sent(&r).expect("the layout, once the drag rests");
+    assert_eq!(sent.panes()[0].plates.peaks.at, Some([0.0, 1.0]));
+    // Both go on the wire, and come back from it, as they are.
+    let w = crate::state::panes::plates::wire_plates(&plates(&t, pane));
+    assert_eq!((w.peaks.at, w.peaks.scale), (Some([0.0, 1.0]), 2.0));
+    assert_eq!(crate::state::panes::plates::ui_plates(&w).peaks, p);
+    t.key("Ctrl+Z");
+    assert_eq!(plates(&t, pane).peaks.scale(), 1.0);
+    plate(&mut t, PlateMsg::Reset { pane, kind });
+    plate(&mut t, PlateMsg::End);
+    assert_eq!(plates(&t, pane).peaks, PlatePlace::default());
+}

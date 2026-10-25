@@ -157,6 +157,10 @@
         "mark": {
          "at": null,
          "scale": 1.0
+        },
+        "peaks": {
+         "at": null,
+         "scale": 1.0
         }
        }
       }
@@ -196,6 +200,10 @@
          "mark": {
           "at": null,
           "scale": 1.0
+         },
+         "peaks": {
+          "at": null,
+          "scale": 1.0
          }
         }
        }
@@ -230,6 +238,10 @@
           "scale": 1.0
          },
          "mark": {
+          "at": null,
+          "scale": 1.0
+         },
+         "peaks": {
           "at": null,
           "scale": 1.0
          }

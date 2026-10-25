@@ -1,5 +1,5 @@
-//! The plates over a plot (the legend, the cursor values, the mark's readout): one rule for
-//! all of them. A plate sits where the scene puts it until the operator drags it; then it
+//! The plates over a plot (the legend, the cursor values, the mark's readout, the
+//! spectrum's peak list): one rule for all of them. A plate sits where the scene puts it until the operator drags it; then it
 //! stays where it was dropped, kept per pane. Its grip scales its text, so a readout can be
 //! read across a room. A double-click puts it back to its automatic place and size.
 
@@ -14,6 +14,46 @@ use crate::theme::Theme;
 /// own labels; above the upper one a few rows fill a small pane.
 pub const SCALE_LIMITS: RangeInclusive<f32> = 0.75..=3.0;
 
+/// What shows through a plate the pointer is not on. See-through keeps the curves under it
+/// in sight; solid reads best at a distance or over a busy plot. On hover a plate is solid
+/// either way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PlateBackground {
+    #[default]
+    SeeThrough,
+    Solid,
+}
+
+impl PlateBackground {
+    /// The fill's opacity off hover.
+    pub fn alpha(self) -> f32 {
+        match self {
+            Self::SeeThrough => SEE_THROUGH_ALPHA,
+            Self::Solid => 1.0,
+        }
+    }
+
+    /// The other choice.
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::SeeThrough => Self::Solid,
+            Self::Solid => Self::SeeThrough,
+        }
+    }
+
+    /// What the settings say.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SeeThrough => "see-through",
+            Self::Solid => "solid",
+        }
+    }
+}
+
+/// A see-through plate's fill: its text stays legible over a dense bundle of curves while
+/// the curves behind still show that they continue under it.
+pub const SEE_THROUGH_ALPHA: f32 = 0.88;
+
 /// Which plate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PlateKind {
@@ -24,10 +64,12 @@ pub enum PlateKind {
     /// The cursor read against its mark (transfer view; the spectrum lists it with the
     /// cursor values).
     Mark,
+    /// The tracked peaks, ranked (spectrum view; their boxes stay on the curve).
+    Peaks,
 }
 
 impl PlateKind {
-    pub const ALL: [Self; 3] = [Self::Legend, Self::Readout, Self::Mark];
+    pub const ALL: [Self; 4] = [Self::Legend, Self::Readout, Self::Mark, Self::Peaks];
 
     /// What it is called in a hint.
     pub fn name(self) -> &'static str {
@@ -35,6 +77,7 @@ impl PlateKind {
             Self::Legend => "legend",
             Self::Readout => "cursor values",
             Self::Mark => "mark readout",
+            Self::Peaks => "peak list",
         }
     }
 }
@@ -133,6 +176,7 @@ pub struct Plates {
     pub legend: PlatePlace,
     pub readout: PlatePlace,
     pub mark: PlatePlace,
+    pub peaks: PlatePlace,
 }
 
 impl Plates {
@@ -141,6 +185,7 @@ impl Plates {
             PlateKind::Legend => &self.legend,
             PlateKind::Readout => &self.readout,
             PlateKind::Mark => &self.mark,
+            PlateKind::Peaks => &self.peaks,
         }
     }
 
@@ -149,6 +194,7 @@ impl Plates {
             PlateKind::Legend => &mut self.legend,
             PlateKind::Readout => &mut self.readout,
             PlateKind::Mark => &mut self.mark,
+            PlateKind::Peaks => &mut self.peaks,
         }
     }
 

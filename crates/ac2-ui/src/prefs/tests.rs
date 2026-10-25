@@ -120,6 +120,21 @@ fn resolution_marker_round_trip() {
     assert_eq!(UiPrefs::from_toml(&text), Ok(p));
 }
 
+#[test]
+fn plate_background_round_trip() {
+    use ac2_scene::plate::PlateBackground;
+    let mut p = UiPrefs::default();
+    assert_eq!(p.plate_background, PlateBackground::SeeThrough);
+    assert!(!p.to_toml().contains("plate_background"));
+    p.plate_background = PlateBackground::Solid;
+    let text = p.to_toml();
+    assert!(text.contains("plate_background = \"solid\""), "{text}");
+    assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+    let see = UiPrefs::from_toml("plate_background = \"see_through\"\n").expect("parse");
+    assert_eq!(see.plate_background, PlateBackground::SeeThrough);
+    assert!(UiPrefs::from_toml("plate_background = \"glass\"\n").is_err());
+}
+
 /// A file from before the spectrograph settings and compare moved to the measurements
 /// still loads: those keys are dropped with a warning, the rest (the pane tree too) kept.
 #[test]
@@ -529,6 +544,23 @@ fn plates_round_trip() {
     let readout = back.layout.panes.expect("panes").views[0].plates.readout;
     assert_eq!(readout.at, None);
     assert_eq!(readout.scale, 2.0);
+}
+
+/// The peak list's plate is written under the pane as the others are.
+#[test]
+fn the_peak_plate_round_trips() {
+    let mut p = UiPrefs::default();
+    let mut panes = two_panes();
+    panes.views[0].plates.peaks.move_to(1.0, 0.25);
+    panes.views[0].plates.peaks.set_scale(1.5);
+    p.layout.panes = Some(panes);
+    let text = p.to_toml();
+    assert!(
+        text.contains("[layout.panes.plates.peaks]\nat = [1.0, 0.25]\nscale = 1.5\n"),
+        "{text}"
+    );
+    let back = UiPrefs::from_toml(&text).expect("parse");
+    assert_eq!(back.layout.panes, p.layout.panes);
 }
 
 #[test]

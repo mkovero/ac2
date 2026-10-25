@@ -374,6 +374,7 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
             resolution_marker: st.view.unresolved,
             bar_ease: st.prefs.bar_ease,
             spec_ease: st.prefs.spec_ease,
+            plate_background: st.prefs.plate_background,
         },
         st.prefs.spl_hold_ms,
         st.prefs.ember_decay_s,

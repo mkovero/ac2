@@ -302,7 +302,8 @@ fn leq_page_holds_its_scroll_while_the_rig_meters() {
 
 /// P twice on the spectrum pane: peak hold, then peak tracking, which drops the hold line.
 /// The rig's tone near 1 kHz gets a box on the curve and a row in the list under the cursor
-/// readout; T to traces only takes the list (and the cursor) away and leaves the box.
+/// readout, on a plate of its own (solid with Settings › Display › Plate background); T to
+/// traces only takes the list (and the cursor) away and leaves the box.
 #[test]
 fn spectrum_peak_tracking() {
     if !have_gpu("spectrum_peak_tracking") {
@@ -351,8 +352,19 @@ fn spectrum_peak_tracking() {
     // The tone is in the 996 Hz bin (11.7 Hz bins), its neighbours equal: no shift.
     assert!(list.starts_with("1  996 Hz  −32.0 dBFS (tone)"), "{list}");
     assert!(s.peaks[0].rows[0].mark.is_some());
+    let kinds: Vec<_> = s.plates().iter().map(|p| p.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            ac2_scene::plate::PlateKind::Readout,
+            ac2_scene::plate::PlateKind::Peaks
+        ]
+    );
     h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "spectrum_peak_tracking");
+    h.state_mut().state.prefs.plate_background = ac2_scene::plate::PlateBackground::Solid;
+    snapshot(&mut h, "spectrum_peak_tracking_solid");
+    h.state_mut().state.prefs.plate_background = ac2_scene::plate::PlateBackground::SeeThrough;
     h.key_press(Key::T);
     h.key_press(Key::T);
     step_until(&mut h, "traces only", |a| {
@@ -361,6 +373,7 @@ fn spectrum_peak_tracking() {
     });
     let s = scene(&h);
     assert_eq!(s.peak_list, None);
+    assert!(s.plates().is_empty(), "no plate under T");
     assert!(s.cursor.is_none());
     assert!(s.peaks[0].rows[0].mark.is_some(), "the box stays");
     h.state_mut().state.toasts.list.clear();

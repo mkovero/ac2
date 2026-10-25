@@ -80,6 +80,9 @@ pub struct Theme {
     pub big_font_size: f32,
     /// A level judged within its limit (the Leq columns' bars).
     pub level_ok: Color,
+    /// Opacity of a plate's fill while the pointer is not on it
+    /// ([`crate::plate::PlateBackground::alpha`]).
+    pub plate_alpha: f32,
 }
 
 fn hex(v: u32) -> Color {
@@ -152,6 +155,7 @@ impl Theme {
             small_font_size: 10.5,
             big_font_size: 64.0,
             level_ok: hex(0x2fa66a),
+            plate_alpha: crate::plate::SEE_THROUGH_ALPHA,
         }
     }
 
@@ -220,6 +224,7 @@ impl Theme {
             small_font_size: 10.5,
             big_font_size: 64.0,
             level_ok: hex(0x1b7a45),
+            plate_alpha: crate::plate::SEE_THROUGH_ALPHA,
         }
     }
 
@@ -288,6 +293,7 @@ impl Theme {
             small_font_size: 12.0,
             big_font_size: 72.0,
             level_ok: hex(0x00e676),
+            plate_alpha: crate::plate::SEE_THROUGH_ALPHA,
         }
     }
 

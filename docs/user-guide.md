@@ -141,7 +141,7 @@ once).
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
-| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, level axes | |
+| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
 | Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
 #### System max level
@@ -815,9 +815,10 @@ text size), *Show/hide legend*. Whether it is hidden is kept in `ui.toml`
 
 #### Moving the plates and their text size
 
-The legend, the cursor values and the mark's readout are plates, and every plate takes the
-same mouse (transfer and spectrum panes; a spectrum's legend is a strip of rows above the
-plot, not a plate, and its mark lines ride on the cursor values' plate):
+The legend, the cursor values, the mark's readout and the spectrum's list of tracked peaks
+are plates, and every plate takes the same mouse (transfer and spectrum panes; a spectrum's
+legend is a strip of rows above the plot, not a plate, and its mark lines ride on the
+cursor values' plate):
 
 - **Drag** a plate anywhere inside its plot. It stays where it was dropped as the pane
   grows or shrinks (kept as a share of the room around it, so one dropped against an edge
@@ -827,7 +828,13 @@ plot, not a plate, and its mark lines ride on the cursor values' plate):
 - **Double-click** it to put it back where the pane places it, at the theme's size.
 
 Hovering a plate makes it opaque and shows the move or resize pointer and a tooltip with
-these gestures. A dragged cursor-values plate names each curve beside its values, since it
+these gestures. Off hover a plate is see-through, so the curves show under it; Settings ›
+Display › **Plate background** › *solid* fills every plate with the plot's background at
+full opacity (black on the dark theme) inside its hairline border, to read at a distance
+or over a busy plot (saved in `ui.toml`). The peak list, placed by the pane, hangs under
+the cursor values on the plot's right side (at the top while those are dragged elsewhere,
+in the bottom-right corner if they were dropped on its place); dragged, it keeps its
+place as the other plates do, while its boxes stay on the curve. A dragged cursor-values plate names each curve beside its values, since it
 no longer sits on the legend's rows; the frequency is its first line. Each pane keeps its
 own plates, with the measurement's panes (so in the session, like the level ranges) or in
 `ui.toml` with the window's panes. A move or a size is one **Ctrl+Z** step. The list of
@@ -934,8 +941,9 @@ step (`Sub: peaks: hold`). The mode is the measurement's; the hold and the track
 are each app's own, started when the mode asks for them, so a hold turned on again starts
 afresh. Tracking draws no hold line: the boxes and the list say where the peaks are, and a
 hold line under them would only crowd them. Tracking marks the five highest peaks of the pane's own live curve (the first live curve
-when the pane's measurement has none) with a small box on the curve and lists them under
-the cursor readout, loudest first: `1  1.00 kHz  −32.0 dBFS (band)`, the value's
+when the pane's measurement has none) with a small box on the curve and lists them on a
+plate under the cursor readout (a plate you can drag and size, see [Moving the plates and
+their text size](#moving-the-plates-and-their-text-size)), loudest first: `1  1.00 kHz  −32.0 dBFS (band)`, the value's
 quantity in parentheses as the cursor readout gives it. One curve is tracked, not
 every curve shown: five boxes per curve on several curves crowd the plot and the list would
 no longer read at a glance.
@@ -948,8 +956,8 @@ the two beside it (within a fraction of a bin of a tone between bins); an RTA pe
 its band's centre. The level is the curve's own at that column, what the cursor reads. Gaps,
 invalid columns and a multi-resolution spectrum's unresolved columns hold no peak. Marks do
 not hop: a marked peak keeps its place unless a rival beats it by more than 3 dB, and keeps
-its row unless the one below beats it by more than 1 dB. **T** to traces only takes the list
-and the rank numbers away; the boxes stay on the curve.
+its row unless the one below beats it by more than 1 dB. **T** to traces only takes the list's
+plate and the rank numbers away; the boxes stay on the curve.
 
 #### Fixed or multi-resolution
 

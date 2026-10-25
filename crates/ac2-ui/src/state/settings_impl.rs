@@ -465,6 +465,7 @@ impl AppState {
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
+            DisplayRow::PlateBackground if d != 0 => self.toggle_plate_background(),
             DisplayRow::CursorJump if d != 0 => {
                 let db = ac2_scene::cursor_jump::step_prominence(self.view.jump_prominence_db, d);
                 self.view.jump_prominence_db = db;
@@ -875,6 +876,17 @@ impl AppState {
         self.toast(format!(
             "resolution marker {}",
             crate::settings::resolution_marker_text(self.view.unresolved)
+        ));
+    }
+
+    /// The Display page's Plate background line, for every plate of every pane; remembered
+    /// in the prefs.
+    pub(super) fn toggle_plate_background(&mut self) {
+        self.prefs.plate_background = self.prefs.plate_background.toggled();
+        self.prefs_dirty = true;
+        self.toast(format!(
+            "plate background {}",
+            crate::settings::plate_background_text(self.prefs.plate_background)
         ));
     }
 

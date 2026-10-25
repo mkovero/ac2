@@ -284,7 +284,43 @@ fn spectrum_fill() {
     spectrum_golden("spectrum_fill", SpectrumStyle::Fill);
 }
 
+/// Peaks tracked on the spectrum with solid plates: the boxes on the curve, the cursor
+/// values where the pane puts them, and the peak list dragged to the bottom-left at 1.5×
+/// its text size, each plate on the plot's background at full opacity inside its border.
+#[test]
+fn spectrum_tracked_peaks_solid_plates() {
+    let peaks = [
+        ac2_scene::spectrum::peaks::Peak {
+            freq_hz: 1000.0,
+            level: -20.0,
+        },
+        ac2_scene::spectrum::peaks::Peak {
+            freq_hz: 100.0,
+            level: -64.0,
+        },
+    ];
+    spectrum_golden_with(
+        "spectrum_tracked_peaks_solid_plates",
+        SpectrumStyle::Line,
+        Some(&peaks),
+        |view, theme| {
+            view.plates.peaks.move_to(0.0, 1.0);
+            view.plates.peaks.set_scale(1.5);
+            theme.plate_alpha = ac2_scene::plate::PlateBackground::Solid.alpha();
+        },
+    );
+}
+
 fn spectrum_golden(name: &str, style: SpectrumStyle) {
+    spectrum_golden_with(name, style, None, |_, _| {});
+}
+
+fn spectrum_golden_with(
+    name: &str,
+    style: SpectrumStyle,
+    tracked: Option<&[ac2_scene::spectrum::peaks::Peak]>,
+    adjust: impl FnOnce(&mut ViewState, &mut Theme),
+) {
     use ac2_proto::GridDef;
     use ac2_proto::frame::{SpecBand, SpecBands, SpecFrame, SpecMeta};
     use ac2_proto::model::{CalStatus, FreqRange, LevelScale, Resolution, Unresolved, Window};
@@ -359,12 +395,14 @@ fn spectrum_golden(name: &str, style: SpectrumStyle) {
             freshness: Freshness::from_age(0.0),
         },
     );
-    let theme = Theme::dark();
+    let mut theme = Theme::dark();
     t.style = style;
-    let view = ViewState {
+    t.tracked = tracked;
+    let mut view = ViewState {
         cursor_hz: Some(1000.0),
         ..ViewState::default()
     };
+    adjust(&mut view, &mut theme);
     let size = Viewport {
         width: 560.0,
         height: 360.0,

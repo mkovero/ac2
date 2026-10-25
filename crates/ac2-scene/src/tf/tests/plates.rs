@@ -67,7 +67,11 @@ fn dragged_plates_sit_where_dropped() {
         [0.5, 0.5]
     );
     let kinds: Vec<PlateKind> = s.plates().iter().map(|p| p.kind).collect();
-    assert_eq!(kinds, PlateKind::ALL);
+    // The peak list is the spectrum's.
+    assert_eq!(
+        kinds,
+        [PlateKind::Legend, PlateKind::Readout, PlateKind::Mark]
+    );
 }
 
 /// A plate dropped in a corner of a large pane stays wholly inside, in that corner, when

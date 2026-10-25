@@ -26,9 +26,6 @@ pub const MAX_HEIGHT: f32 = 0.7;
 /// Colour swatch of a row and the gap after it.
 const SWATCH_W: f32 = 12.0;
 const SWATCH_GAP: f32 = 6.0;
-/// Opacity of a plate: text stays legible over a dense bundle of curves while the curves
-/// behind still show that they continue under it.
-const PLATE_ALPHA: f32 = 0.88;
 
 /// Corners the legend snaps to from the command palette.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,7 +223,7 @@ pub(crate) fn place(
 pub(crate) fn plate(layer: &mut Layer, rect: Rect, hovered: bool, clip: Rect, theme: &Theme) {
     let fill = theme
         .plot_background
-        .with_alpha(if hovered { 1.0 } else { PLATE_ALPHA });
+        .with_alpha(if hovered { 1.0 } else { theme.plate_alpha });
     let border = if hovered {
         theme.text_dim
     } else {

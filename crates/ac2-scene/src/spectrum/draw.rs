@@ -448,15 +448,9 @@ pub(crate) fn spectrum_scene_in(
         }
         lines.join("\n")
     });
-    if let Some(list) = &peak_list {
-        c.overlay.labels.push(label(
-            list.clone(),
-            [plot.right() - 8.0, readout_y],
-            anchor(HAlign::Right, VAlign::Top),
-            font,
-            theme.text,
-        ));
-    }
+    let peaks_box = peak_list
+        .as_ref()
+        .map(|list| peak_plate(&mut c, list, plot, readout_y, readout_box, view, theme));
 
     SpectrumScene {
         scene: c.into_scene(size),
@@ -477,6 +471,7 @@ pub(crate) fn spectrum_scene_in(
         mark,
         peaks,
         peak_list,
+        peaks_box,
         legend,
         legend_shown,
         legend_rect,
@@ -490,6 +485,63 @@ pub(crate) fn spectrum_scene_in(
 
 /// The gap left between the cursor values' plate and the peak list under it, in ems.
 const GAP_EM: f32 = 0.5;
+
+/// Draws the peak list `list` on its plate. Placed by the scene, it hangs from the plot's
+/// right edge with its text's top at `top` (under the cursor values while those are where
+/// the scene puts them); were it to cover cursor values dragged there (`readout`), it goes
+/// to the bottom-right corner instead. Dragged, it sits where it was dropped.
+fn peak_plate(
+    c: &mut Canvas,
+    list: &str,
+    plot: Rect,
+    top: f32,
+    readout: Option<crate::plate::PlateBox>,
+    view: &ViewState,
+    theme: &Theme,
+) -> crate::plate::PlateBox {
+    use crate::plate::{Metrics, PlateBox, PlateKind, PlatePlace};
+    let place = &view.plates.peaks;
+    let lines: Vec<(String, Color)> = list
+        .split('\n')
+        .map(|l| (l.to_string(), theme.text))
+        .collect();
+    let texts: Vec<&str> = lines.iter().map(|l| l.0.as_str()).collect();
+    let (w, h) = Metrics::new(theme, place.scale()).size(&texts);
+    let s = crate::plate::fitted(place.scale(), plot, w, h);
+    let m = Metrics::new(theme, s);
+    let (w, h) = m.size(&texts);
+    let rect = match place.at {
+        Some(at) => PlatePlace::rect_at(at, plot, w, h),
+        None => {
+            let x = plot.right() - crate::legend::INSET - w;
+            let under = Rect::new(x, top - m.pad_y, w, h);
+            let covers = readout.is_some_and(|r| {
+                under.x < r.rect.right()
+                    && r.rect.x < under.right()
+                    && under.y < r.rect.bottom()
+                    && r.rect.y < under.bottom()
+            });
+            if covers {
+                Rect::new(x, plot.bottom() - crate::legend::INSET - h, w, h)
+            } else {
+                under
+            }
+        }
+    };
+    let hover = view.plate_hover.filter(|h| h.kind == PlateKind::Peaks);
+    crate::plate::draw_lines(
+        &mut c.overlay,
+        rect,
+        &lines,
+        HAlign::Right,
+        m,
+        true,
+        hover,
+        plot,
+        theme,
+    );
+    PlateBox::new(PlateKind::Peaks, plot, rect, s)
+}
 
 /// Half the side of a peak's box, logical pixels: big enough to find on a busy curve,
 /// small enough that marks a [`peaks::SPACING_OCT`] apart do not touch on a wide pane.

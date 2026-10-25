@@ -322,6 +322,7 @@ def _layout_pane(
             "legend": _plate(),
             "readout": readout or _plate(),
             "mark": _plate(),
+            "peaks": _plate(),
         },
     }
 

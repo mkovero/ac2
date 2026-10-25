@@ -152,7 +152,7 @@ fn a_v1_file_loads_whole_and_round_trips() {
     // The version 1 file is kept beside the new one.
     assert_eq!(std::fs::read(dir.path().join("rig.json.v1")).unwrap(), v1);
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 3);
+    assert_eq!(rj["version"], 4);
     assert_eq!(
         rj["monitor_session"],
         serde_json::to_value(&s.monitor).unwrap()
@@ -299,11 +299,55 @@ fn a_v2_meter_layout_with_a_pick_reads_whole() {
         Some(layout::PaneContent::Meas { meas: MeasId(1) })
     );
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 3);
+    assert_eq!(rj["version"], 4);
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["content"],
         json!({ "type": "meas", "meas": 1 })
     );
+    drop(c);
+    h.shutdown();
+}
+
+/// A version 3 meter's layout holds three plates, none for the spectrum's peak list: it
+/// reads whole, the dragged plates kept and the peak list where the client puts it, and the
+/// file is written as version 4.
+#[test]
+fn a_v3_meter_layout_with_three_plates_reads_whole() {
+    let s = seeded();
+    let auto = json!({ "at": null, "scale": 1.0 });
+    let layout = json!({ "type": "pane", "pane": {
+        "kind": "spectrum", "transfer_view": "coherence", "spectrum_view": "spectrum",
+        "spl_view": "leq", "sweep_view": "response", "chrome": "full", "content": null,
+        "levels": { "transfer": null, "spectrum_dbfs": null, "spectrum_spl": null,
+                    "distortion": null },
+        "plates": { "legend": auto, "readout": { "at": [0.0, 1.0], "scale": 2.0 },
+                    "mark": auto } } });
+    let meter = json!({ "id": 1, "config": s.meter, "running": true, "colour": null,
+                        "layout": layout });
+    let dir = tempfile::tempdir().unwrap();
+    let mut v: Value =
+        serde_json::from_slice(&v2_with_meters(dir.path(), &s, json!([meter]))).unwrap();
+    v["version"] = json!(3);
+    v.as_object_mut().unwrap().insert(
+        "levels".into(),
+        serde_json::to_value(LevelsSettings::default()).unwrap(),
+    );
+    std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
+    let h = start("rig-file-v3-plates", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    let st = state(&mut c);
+    assert!(
+        st.rig.damaged_files.is_empty(),
+        "{:?}",
+        st.rig.damaged_files
+    );
+    let m = &st.measurements[0];
+    let pane = &m.layout.as_ref().expect("the meter's layout").panes()[0];
+    assert_eq!(pane.plates.readout.at, Some([0.0, 1.0]));
+    assert_eq!(pane.plates.peaks, layout::LayoutPlate::default());
+    let rj = rig_json(dir.path());
+    assert_eq!(rj["version"], 4);
+    assert_eq!(rj["meters"][0]["layout"]["pane"]["plates"]["peaks"], auto);
     drop(c);
     h.shutdown();
 }

@@ -291,6 +291,9 @@ pub struct UiPrefs {
     /// The transfer and sweep panes shade the ranges a curve's analysis does not resolve
     /// at its grid (on until the operator turns it off).
     pub resolution_marker: bool,
+    /// What shows through a plate the pointer is not on (see-through until the operator
+    /// sets it solid).
+    pub plate_background: ac2_scene::plate::PlateBackground,
     /// The Leq and band Leq bars glide to each new reading (on until the operator turns it
     /// off); off, they jump to it as received.
     pub bar_ease: bool,
@@ -366,6 +369,7 @@ impl Default for UiPrefs {
             key_hints: true,
             warning_toasts: true,
             resolution_marker: true,
+            plate_background: ac2_scene::plate::PlateBackground::SeeThrough,
             bar_ease: true,
             spec_ease: true,
             jump_prominence_db: ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB,

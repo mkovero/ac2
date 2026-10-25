@@ -343,6 +343,29 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Left");
     assert!(t.st.view.unresolved && t.st.prefs.resolution_marker);
     t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::PlateBackground);
+    let solid = ac2_scene::plate::PlateBackground::Solid;
+    assert_eq!(
+        t.st.scene_theme().plate_alpha,
+        ac2_scene::plate::SEE_THROUGH_ALPHA
+    );
+    t.st.prefs_dirty = false;
+    t.key("Right");
+    // Every plate of every pane: the one theme the scenes are drawn with.
+    assert_eq!(t.st.prefs.plate_background, solid);
+    assert_eq!(t.st.scene_theme().plate_alpha, 1.0);
+    assert!(t.st.prefs_dirty);
+    assert!(
+        t.last_toast().starts_with("plate background solid"),
+        "{}",
+        t.last_toast()
+    );
+    t.key("Left");
+    assert_eq!(
+        t.st.scene_theme().plate_alpha,
+        ac2_scene::plate::SEE_THROUGH_ALPHA
+    );
+    t.key("Down");
     assert_eq!(settings(&t).display, DisplayRow::CursorJump);
     assert_eq!(t.st.view.jump_prominence_db, 3.0);
     t.key("Right");

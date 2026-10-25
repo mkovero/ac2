@@ -2,6 +2,7 @@
 
 use super::layout::*;
 use super::*;
+use ac2_scene::plate::PlateBackground;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct File {
@@ -14,6 +15,9 @@ struct File {
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     resolution_marker: Option<bool>,
+    /// Written only when solid (the default is see-through).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plate_background: Option<PlateBackgroundFile>,
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bar_ease: Option<bool>,
@@ -111,6 +115,29 @@ impl LegendFile {
         l.hidden.then_some(LegendsFile {
             transfer: Some(Self { hidden: Some(true) }),
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PlateBackgroundFile {
+    SeeThrough,
+    Solid,
+}
+
+impl PlateBackgroundFile {
+    fn background(self) -> PlateBackground {
+        match self {
+            Self::SeeThrough => PlateBackground::SeeThrough,
+            Self::Solid => PlateBackground::Solid,
+        }
+    }
+
+    fn of(b: PlateBackground) -> Self {
+        match b {
+            PlateBackground::SeeThrough => Self::SeeThrough,
+            PlateBackground::Solid => Self::Solid,
+        }
     }
 }
 
@@ -249,6 +276,8 @@ pub(super) struct PanePlatesFile {
     readout: Option<PlateFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mark: Option<PlateFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    peaks: Option<PlateFile>,
 }
 
 /// One plate: its place, fractions `[x, y]` of the room beside it, and its text scale.
@@ -274,6 +303,7 @@ impl PanePlatesFile {
             (PlateKind::Legend, &f.legend),
             (PlateKind::Readout, &f.readout),
             (PlateKind::Mark, &f.mark),
+            (PlateKind::Peaks, &f.peaks),
         ] {
             let Some(file) = file else { continue };
             let name = format!("{kind:?}").to_lowercase();
@@ -314,6 +344,7 @@ impl PanePlatesFile {
             legend: one(&p.legend),
             readout: one(&p.readout),
             mark: one(&p.mark),
+            peaks: one(&p.peaks),
         })
     }
 }
@@ -729,6 +760,9 @@ impl UiPrefs {
             key_hints: f.key_hints.unwrap_or(true),
             warning_toasts: f.warning_toasts.unwrap_or(true),
             resolution_marker: f.resolution_marker.unwrap_or(true),
+            plate_background: f
+                .plate_background
+                .map_or(PlateBackground::SeeThrough, PlateBackgroundFile::background),
             bar_ease: f.bar_ease.unwrap_or(true),
             spec_ease: f.spec_ease.unwrap_or(true),
             // A value no step reaches (hand-edited) is kept when it can be stood out by;
@@ -781,6 +815,8 @@ impl UiPrefs {
             unknown: BTreeMap::new(),
             warning_toasts: (!self.warning_toasts).then_some(false),
             resolution_marker: (!self.resolution_marker).then_some(false),
+            plate_background: (self.plate_background != PlateBackground::SeeThrough)
+                .then(|| PlateBackgroundFile::of(self.plate_background)),
             bar_ease: (!self.bar_ease).then_some(false),
             spec_ease: (!self.spec_ease).then_some(false),
             jump_prominence_db: (self.jump_prominence_db

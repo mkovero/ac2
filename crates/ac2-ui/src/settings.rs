@@ -283,6 +283,7 @@ pub enum DisplayRow {
     DistortionUnit,
     Coherence,
     ResolutionMarker,
+    PlateBackground,
     CursorJump,
     LevelAxes,
     Advice,
@@ -292,7 +293,7 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 20] = [
+    pub const ALL: [DisplayRow; 21] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -307,6 +308,7 @@ impl DisplayRow {
         DisplayRow::DistortionUnit,
         DisplayRow::Coherence,
         DisplayRow::ResolutionMarker,
+        DisplayRow::PlateBackground,
         DisplayRow::CursorJump,
         DisplayRow::LevelAxes,
         DisplayRow::Advice,
@@ -331,6 +333,7 @@ impl DisplayRow {
             DisplayRow::DistortionUnit => "Distortion in",
             DisplayRow::Coherence => "Coherence",
             DisplayRow::ResolutionMarker => "Resolution marker",
+            DisplayRow::PlateBackground => "Plate background",
             DisplayRow::CursorJump => "Peak / notch jumps",
             DisplayRow::LevelAxes => "Level axes",
             DisplayRow::Advice => "Headroom advice",
@@ -431,6 +434,16 @@ pub fn resolution_marker_text(on: bool) -> &'static str {
     }
 }
 
+/// What the Plate background setting says, on the Display page and in its toast.
+pub fn plate_background_text(bg: ac2_scene::plate::PlateBackground) -> &'static str {
+    match bg {
+        ac2_scene::plate::PlateBackground::SeeThrough => {
+            "see-through: the curves show under the plates"
+        }
+        ac2_scene::plate::PlateBackground::Solid => "solid: the plot's background, opaque",
+    }
+}
+
 /// What the Leq bars setting says, on the Display page and in its toast.
 pub fn bar_ease_text(on: bool) -> &'static str {
     if on {
@@ -457,6 +470,7 @@ pub struct DisplaySwitches {
     pub resolution_marker: bool,
     pub bar_ease: bool,
     pub spec_ease: bool,
+    pub plate_background: ac2_scene::plate::PlateBackground,
 }
 
 /// What the Display page shows for each line: title, value, whose.
@@ -512,6 +526,9 @@ pub fn display_rows(
                 },
                 DisplayRow::ResolutionMarker => {
                     resolution_marker_text(switches.resolution_marker).into()
+                }
+                DisplayRow::PlateBackground => {
+                    plate_background_text(switches.plate_background).into()
                 }
                 DisplayRow::CursorJump => {
                     ac2_scene::cursor_jump::prominence_text(jump_prominence_db)

@@ -139,21 +139,24 @@ pub struct LayoutPane {
     pub plates: LayoutPlates,
 }
 
-/// A pane's plates over the plot: the legend, the cursor values, the mark's readout.
+/// A pane's plates over the plot: the legend, the cursor values, the mark's readout and
+/// the spectrum's list of tracked peaks.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LayoutPlates {
     pub legend: LayoutPlate,
     pub readout: LayoutPlate,
     pub mark: LayoutPlate,
+    pub peaks: LayoutPlate,
 }
 
 impl LayoutPlates {
-    fn all(&self) -> [(&'static str, LayoutPlate); 3] {
+    fn all(&self) -> [(&'static str, LayoutPlate); 4] {
         [
             ("legend", self.legend),
             ("readout", self.readout),
             ("mark", self.mark),
+            ("peaks", self.peaks),
         ]
     }
 }

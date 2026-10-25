@@ -94,6 +94,7 @@ fn display_and_recording_texts() {
         resolution_marker: false,
         bar_ease: false,
         spec_ease: false,
+        plate_background: ac2_scene::plate::PlateBackground::Solid,
     };
     let rows = display_rows(
         ThemeName::Light,
@@ -122,6 +123,7 @@ fn display_and_recording_texts() {
             "% of fundamental",
             "over the magnitude",
             "off",
+            "solid: the plot's background, opaque",
             "stands out by 6 dB",
             "each pane's as last left · Enter resets them to the defaults",
             "on: a notice suggests lowering or raising the stimulus (never changes it)",

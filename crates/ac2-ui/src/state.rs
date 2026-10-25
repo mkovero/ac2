@@ -378,7 +378,9 @@ fn typed_char(c: &Chord) -> Option<char> {
 impl AppState {
     /// The theme the panes are drawn with.
     pub fn scene_theme(&self) -> ac2_scene::theme::Theme {
-        ac2_scene::theme::Theme::by_name(self.theme)
+        let mut t = ac2_scene::theme::Theme::by_name(self.theme);
+        t.plate_alpha = self.prefs.plate_background.alpha();
+        t
     }
 
     pub fn new(theme: ThemeName, target: String) -> Self {

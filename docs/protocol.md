@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 67`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 68`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -378,7 +378,7 @@ Programme pane without inputs or another kind with them, is refused `invalid`)
 and the level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
 `spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
 when the pane first shows a curve) and where its readout plates sit (`plates`: {`legend`,
-`readout`, `mark`}, each {`at`, `scale`}: `at` nil for the client's own placement or
+`readout`, `mark`, `peaks`}, each {`at`, `scale`}: `at` nil for the client's own placement or
 [x, y], each in 0 … 1, the plate's top-left corner as a fraction of the room the plot leaves
 around the plate, so a dropped plate stays inside its plot at any pane size; `scale` the
 plate's text size, 1 being the theme's; missing = all nil at 1). The focused pane, a

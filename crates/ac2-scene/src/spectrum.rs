@@ -429,9 +429,11 @@ pub struct SpectrumScene {
     pub mark: Option<crate::readout::MarkReadout>,
     /// Tracked peaks, per tracked curve; empty unless peak tracking is on.
     pub peaks: Vec<SpectrumPeaks>,
-    /// The peak list as drawn under the cursor readout; `None` with no tracked peaks or
-    /// while plot chrome is off (T), when only the marks stay.
+    /// The peak list as drawn on its plate; `None` with no tracked peaks or while plot
+    /// chrome is off (T), when only the marks stay.
     pub peak_list: Option<String>,
+    /// The peak list's plate, when the list is drawn.
+    pub peaks_box: Option<crate::plate::PlateBox>,
     /// One entry per curve, in drawing order: name, colour and tags (`stopped`,
     /// `STALE 3.2 s`, `offset +3.0 dB`). Drawn in rows above the plot, never over a curve.
     pub legend: Vec<LegendEntry>,
@@ -452,10 +454,10 @@ pub struct SpectrumScene {
 }
 
 impl SpectrumScene {
-    /// The plates the operator moves: the cursor values (the legend is rows above the
-    /// plot, no plate; the mark's lines ride on the cursor values' plate).
+    /// The plates the operator moves: the cursor values and the peak list (the legend is
+    /// rows above the plot, no plate; the mark's lines ride on the cursor values' plate).
     pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
-        self.readout_box.into_iter().collect()
+        self.readout_box.into_iter().chain(self.peaks_box).collect()
     }
 }
 

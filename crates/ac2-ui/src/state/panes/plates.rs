@@ -1,7 +1,7 @@
-//! The plates over a pane's plot (the legend, the cursor values, the mark's readout):
-//! dragged, scaled by their grip and put back by a double-click. Where they sit is the
-//! pane's, stored with its other display choices ([`View::plates`]), so it travels with
-//! a measurement's own panes and comes back with `ui.toml`.
+//! The plates over a pane's plot (the legend, the cursor values, the mark's readout, the
+//! peak list): dragged, scaled by their grip and put back by a double-click. Where they
+//! sit is the pane's, stored with its other display choices ([`View::plates`]), so it
+//! travels with a measurement's own panes and comes back with `ui.toml`.
 
 use ac2_proto::model::layout as wire;
 use ac2_scene::legend::LegendCorner;
@@ -73,6 +73,7 @@ pub(in crate::state) fn wire_plates(p: &Plates) -> wire::LayoutPlates {
         legend: one(&p.legend),
         readout: one(&p.readout),
         mark: one(&p.mark),
+        peaks: one(&p.peaks),
     }
 }
 
@@ -90,5 +91,6 @@ pub(in crate::state) fn ui_plates(w: &wire::LayoutPlates) -> Plates {
         legend: one(&w.legend),
         readout: one(&w.readout),
         mark: one(&w.mark),
+        peaks: one(&w.peaks),
     }
 }

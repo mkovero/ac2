@@ -18,6 +18,7 @@
 mod file;
 mod v1;
 mod v2;
+mod v3;
 
 use std::io;
 use std::net::SocketAddr;
