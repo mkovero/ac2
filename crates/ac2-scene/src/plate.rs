@@ -66,10 +66,18 @@ pub enum PlateKind {
     Mark,
     /// The tracked peaks, ranked (spectrum view; their boxes stay on the curve).
     Peaks,
+    /// A Programme pane's one loudness source: Int, Mom, Short, the maxima, LRA, TP max.
+    Loudness,
 }
 
 impl PlateKind {
-    pub const ALL: [Self; 4] = [Self::Legend, Self::Readout, Self::Mark, Self::Peaks];
+    pub const ALL: [Self; 5] = [
+        Self::Legend,
+        Self::Readout,
+        Self::Mark,
+        Self::Peaks,
+        Self::Loudness,
+    ];
 
     /// What it is called in a hint.
     pub fn name(self) -> &'static str {
@@ -78,6 +86,7 @@ impl PlateKind {
             Self::Readout => "cursor values",
             Self::Mark => "mark readout",
             Self::Peaks => "peak list",
+            Self::Loudness => "loudness readout",
         }
     }
 }
@@ -177,6 +186,7 @@ pub struct Plates {
     pub readout: PlatePlace,
     pub mark: PlatePlace,
     pub peaks: PlatePlace,
+    pub loudness: PlatePlace,
 }
 
 impl Plates {
@@ -186,6 +196,7 @@ impl Plates {
             PlateKind::Readout => &self.readout,
             PlateKind::Mark => &self.mark,
             PlateKind::Peaks => &self.peaks,
+            PlateKind::Loudness => &self.loudness,
         }
     }
 
@@ -195,6 +206,7 @@ impl Plates {
             PlateKind::Readout => &mut self.readout,
             PlateKind::Mark => &mut self.mark,
             PlateKind::Peaks => &mut self.peaks,
+            PlateKind::Loudness => &mut self.loudness,
         }
     }
 

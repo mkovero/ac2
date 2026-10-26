@@ -1,5 +1,27 @@
 use super::*;
 
+mod bars;
+mod dock;
+mod plate;
+
+/// A pane of peak bars, one per input, as the UI fills it with no loudness source.
+pub(super) fn pane_of(
+    inputs: Vec<ProgrammeInput>,
+    pair: Option<ProgrammePair>,
+    ballistic: Ballistic,
+) -> ProgrammePane {
+    ProgrammePane {
+        bars: peak_bars(&inputs, ballistic),
+        inputs,
+        pair,
+        ballistic,
+        loudness_target: -23.0,
+        loudness: None,
+        plate: crate::plate::PlatePlace::default(),
+        plate_hover: None,
+    }
+}
+
 fn input(scale: Scale) -> ProgrammeInput {
     ProgrammeInput {
         label: "Main L".into(),
@@ -84,7 +106,7 @@ fn overs_clip_and_notes_keep_their_words() {
     assert_eq!(i.note(Ballistic::TruePeak), None);
     i.offers_vu = true;
     assert_eq!(i.note(Ballistic::Vu), None);
-    assert_eq!(VU_FALLBACK, "VU needs a line calibration · true peak shown");
+    assert_eq!(VU_FALLBACK, "true peak shown · VU needs a line calibration");
 }
 
 #[test]
@@ -137,7 +159,12 @@ fn inputs_row_lines_keep_their_width() {
         Scale::Dbu { fs_dbu: 16.3 },
         Scale::DbSpl { fs_db_spl: 120.5 },
     ] {
-        for ballistic in [Ballistic::TruePeak, Ballistic::Type1, Ballistic::Vu] {
+        for ballistic in [
+            Ballistic::TruePeak,
+            Ballistic::Type1,
+            Ballistic::Vu,
+            Ballistic::ShortTerm,
+        ] {
             let mut widths = None;
             for level in [
                 None,
@@ -233,16 +260,15 @@ fn window_and_title() {
     assert_eq!(window_text(0.3), "0.3 s");
     assert_eq!(window_text(1.0), "1 s");
     assert_eq!(window_text(0.0), "—");
-    let pane = ProgrammePane {
-        inputs: vec![input(Scale::Dbfs)],
-        pair: Some(ProgrammePair {
+    let pane = pane_of(
+        vec![input(Scale::Dbfs)],
+        Some(ProgrammePair {
             name: "Main L + Main R".into(),
             correlation: Correlation::Value(0.9),
             window_s: 0.3,
         }),
-        ballistic: Ballistic::Type2,
-        loudness: None,
-    };
+        Ballistic::Type2,
+    );
     assert_eq!(pane.title(), "Type II · Main L + Main R · 0.3 s");
     let solo = ProgrammePane {
         pair: None,
@@ -285,61 +311,62 @@ fn flying_peak_holds_a_second_then_falls_20_db_a_second() {
 
 #[test]
 fn layout_cases() {
-    let rect = Rect::new(10.0, 20.0, 400.0, 300.0);
-    let bars_only = layout(rect, false, false, 2);
+    let rect = Rect::new(10.0, 20.0, 600.0, 300.0);
+    let sw = scale_w(ScaleKind::Dbfs, 11.0);
+    let bars_only = layout(rect, false, 2, sw);
     assert_eq!(bars_only.gonio, None);
     assert_eq!(bars_only.correlation, None);
     assert_eq!(bars_only.bars, rect);
 
-    let full = layout(rect, true, false, 2);
+    let full = layout(rect, true, 2, sw);
     assert_eq!(
         full.gonio,
-        Some(Rect::new(10.0, 20.0, 200.0, 300.0 - CHIP_H))
+        Some(Rect::new(10.0, 20.0, 300.0, 300.0 - CHIP_H))
     );
     assert_eq!(
         full.correlation,
-        Some(Rect::new(10.0, 320.0 - CHIP_H, 200.0, CHIP_H))
+        Some(Rect::new(10.0, 320.0 - CHIP_H, 300.0, CHIP_H))
     );
-    assert_eq!(full.bars, Rect::new(210.0, 20.0, 200.0, 300.0));
+    assert_eq!(full.bars, Rect::new(310.0, 20.0, 300.0, 300.0));
+    // Narrower: the goniometer gives way so the bars keep their readouts, down to its
+    // least width.
+    let mid = layout(Rect::new(0.0, 0.0, 400.0, 300.0), true, 2, sw);
+    assert_eq!(mid.bars.w, sw + 2.0 * BAR_MIN_W);
+    let tight = layout(Rect::new(0.0, 0.0, 300.0, 300.0), true, 2, sw);
+    assert_eq!(tight.gonio.expect("a goniometer").w, GONIO_MIN_W);
 
-    let short = layout(Rect::new(0.0, 0.0, 400.0, 100.0), true, false, 2);
+    let short = layout(Rect::new(0.0, 0.0, 400.0, 100.0), true, 2, sw);
     assert_eq!(short.gonio, None);
     assert_eq!(short.correlation, Some(Rect::new(0.0, 0.0, CHIP_W, 100.0)));
     assert_eq!(short.bars, Rect::new(CHIP_W, 0.0, 400.0 - CHIP_W, 100.0));
 
-    let narrow = layout(Rect::new(0.0, 0.0, 100.0, 100.0), true, false, 2);
+    let narrow = layout(Rect::new(0.0, 0.0, 100.0, 100.0), true, 2, sw);
     assert_eq!(
         narrow.correlation.expect("a chip").w,
         50.0,
         "the chip never crowds the bars out"
     );
-    let pane = ProgrammePane {
-        inputs: vec![],
-        pair: None,
-        ballistic: Ballistic::TruePeak,
-        loudness: None,
-    };
-    assert_eq!(pane.layout(rect), bars_only);
+    let pane = pane_of(vec![], None, Ballistic::TruePeak);
+    assert_eq!(pane.layout(rect, 11.0), bars_only);
 }
 
-fn pane_with_pair(correlation: Correlation) -> ProgrammePane {
+pub(super) fn pane_with_pair(correlation: Correlation) -> ProgrammePane {
     let mut l = input(Scale::Dbfs);
     l.label = "Main L".into();
     let mut r = input(Scale::Dbfs);
     r.label = "Main R".into();
-    ProgrammePane {
-        inputs: vec![l, r],
-        pair: Some(ProgrammePair {
+    pane_of(
+        vec![l, r],
+        Some(ProgrammePair {
             name: "Main L + Main R".into(),
             correlation,
             window_s: 1.0,
         }),
-        ballistic: Ballistic::TruePeak,
-        loudness: None,
-    }
+        Ballistic::TruePeak,
+    )
 }
 
-fn texts(s: &crate::primitives::Scene) -> Vec<String> {
+pub(super) fn texts(s: &crate::primitives::Scene) -> Vec<String> {
     s.layers
         .iter()
         .flat_map(|l| l.labels.iter().map(|x| x.text.clone()))
@@ -418,114 +445,6 @@ fn scene_draws_bars_readouts_chip_and_field() {
     assert!(gone.gonio.is_none());
 }
 
-#[test]
-fn the_loudness_column_goes_before_the_goniometer() {
-    // Two bars need 32 + 2 · 96 = 224 px, the goniometer 120, the column 190: 534 px.
-    let wide = layout(Rect::new(0.0, 0.0, 600.0, 300.0), true, true, 2);
-    assert_eq!(
-        wide.loudness,
-        Some(Rect::new(600.0 - LOUDNESS_W, 0.0, LOUDNESS_W, 300.0))
-    );
-    let g = wide.gonio.expect("a goniometer");
-    assert_eq!(
-        g.w,
-        600.0 - LOUDNESS_W - 224.0,
-        "the bars keep their readouts"
-    );
-    assert_eq!(wide.bars.w, 224.0);
-    assert_eq!(wide.bars.right(), 600.0 - LOUDNESS_W);
-    // A wide pane splits the rest 1:1 as without the column.
-    let wider = layout(Rect::new(0.0, 0.0, 1000.0, 300.0), true, true, 2);
-    assert_eq!(
-        wider.gonio.expect("a goniometer").w,
-        (1000.0 - LOUDNESS_W) / 2.0
-    );
-    let narrow = layout(Rect::new(0.0, 0.0, 520.0, 300.0), true, true, 2);
-    assert_eq!(narrow.loudness, None, "the column goes first");
-    assert!(narrow.gonio.is_some(), "the goniometer stays");
-    assert_eq!(
-        narrow,
-        layout(Rect::new(0.0, 0.0, 520.0, 300.0), true, false, 2)
-    );
-    // Bars alone: one bar needs 128 px beside the column.
-    assert!(
-        layout(Rect::new(0.0, 0.0, 318.0, 300.0), false, true, 1)
-            .loudness
-            .is_some()
-    );
-    assert_eq!(
-        layout(Rect::new(0.0, 0.0, 317.0, 300.0), false, true, 1).loudness,
-        None
-    );
-    assert_eq!(
-        layout(Rect::new(0.0, 0.0, 400.0, 300.0), false, true, 3).loudness,
-        None
-    );
-}
-
-#[test]
-fn scene_draws_the_loudness_column() {
-    use super::loudness::{LoudnessColumn, LoudnessReadout};
-    use crate::primitives::Viewport;
-    use crate::theme::Theme;
-    use crate::view::{PlotChrome, Style};
-    let theme = Theme::dark();
-    let size = Viewport {
-        width: 800.0,
-        height: 400.0,
-    };
-    let mut p = pane_with_pair(Correlation::Value(0.5));
-    p.loudness = Some(LoudnessColumn::Readout(LoudnessReadout {
-        title: "Main L + Main R".into(),
-        momentary: -23.06,
-        short_term: -22.84,
-        integrated: Some(-23.0),
-        range: Some(6.2),
-        duration_s: 10.0,
-        max_true_peak: -1.2,
-        since: "since 20:14 · R resets".into(),
-    }));
-    let style = |chrome| Style {
-        chrome,
-        theme: &theme,
-    };
-    let t = texts(&programme_scene(&p, style(PlotChrome::Full), size, None).scene);
-    for want in [
-        "Mom −23.1",
-        "Short −22.8",
-        "Int −23.0 LUFS",
-        "LRA 6.2 LU (settling)",
-        "TP max −1.2 dBTP",
-        "since 20:14 · R resets",
-    ] {
-        assert!(t.iter().any(|x| x == want), "{want} in {t:?}");
-    }
-    let bare = texts(&programme_scene(&p, style(PlotChrome::Bare), size, None).scene);
-    assert!(bare.iter().any(|x| x == "Int −23.0 LUFS"), "{bare:?}");
-    assert!(
-        !bare.iter().any(|x| x.starts_with("since")),
-        "T hides the since line"
-    );
-    let narrow = Viewport {
-        width: 400.0,
-        height: 400.0,
-    };
-    let t = texts(&programme_scene(&p, style(PlotChrome::Full), narrow, None).scene);
-    assert!(!t.iter().any(|x| x.starts_with("Mom")), "{t:?}");
-
-    // A message wraps in the column; its words read in order.
-    p.loudness = Some(LoudnessColumn::Message(
-        super::loudness::RATE_TEXT.to_owned(),
-    ));
-    let t = texts(&programme_scene(&p, style(PlotChrome::Full), size, None).scene);
-    let start = t
-        .iter()
-        .position(|x| x.starts_with("loudness"))
-        .expect("the message");
-    let joined = t[start..].join(" ");
-    assert!(joined.starts_with(super::loudness::RATE_TEXT), "{t:?}");
-}
-
 /// The readouts under the bars stay where the column puts them whatever they read: the
 /// values right-aligned at one edge, `max`, the overs and CLIP at their own places.
 #[test]
@@ -550,6 +469,7 @@ fn bar_readouts_keep_their_places() {
             i.overs = overs;
             i.clipped = clipped;
         }
+        p.bars = peak_bars(&p.inputs, p.ballistic);
         let scene = programme_scene(&p, style, size, None).scene;
         let mut out: Vec<(String, [u32; 2])> = scene
             .layers

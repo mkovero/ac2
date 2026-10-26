@@ -1,15 +1,17 @@
-//! The Programme pane's loudness column (docs/design/programme-meter.md §6.1): which of the
-//! daemon's loudness sources a pane shows, the readout lines, and what it says instead when
-//! there is no source to show.
+//! The Programme pane's loudness facts and the loudness plate's data
+//! (docs/design/programme-meter.md §6.1, §6.2): what the resolution of a pane's inputs to
+//! sources rests on ([`LoudnessFacts`], used by [`super::sources`]), why an input has none,
+//! and one source's readouts as the plate shows them ([`LoudnessReadout`]).
 //!
-//! The daemon decides the sources (`ac2_proto::cal::loudness_sources`); this module picks one
-//! for a pane by the same rule, so a message names the real reason a pane has none. The
-//! readouts are on the absolute scale only (LUFS, LU for the range): ac2 has no relative
-//! (EBU Mode) readout, so nothing here is worded as one.
+//! The daemon decides the sources (`ac2_proto::cal::loudness_sources`); the pane resolves its
+//! inputs by the same rule, so a reason names the real cause. The readouts are on the
+//! absolute scale only (LUFS, LU for the range): ac2 has no relative (EBU Mode) readout, so
+//! nothing here is worded as one.
 
 use ac2_proto::frame::{LoudnessSource, SourceLoudness};
 use ac2_proto::units::WallNs;
 
+use super::{ProgrammeInput, Resolved};
 use crate::format::{self, NO_VALUE};
 
 /// BS.1770 is defined on 10 ms sub-blocks and a K-weighting that follows the 48 kHz curve to
@@ -19,11 +21,6 @@ pub const RATE_TEXT: &str = "loudness needs a rate of 44.1 to 192 kHz, a multipl
 /// A LUFS figure on a measurement mic would follow its preamp gain and be misread beside
 /// its dB SPL.
 pub const MIC_TEXT: &str = "no loudness on a mic input";
-/// A pane of several inputs that are not exactly one declared pair has no single programme.
-pub const ONE_INPUT_OR_PAIR: &str = "loudness: one input or a pair";
-/// What integrated loudness and the range read before a block passes their gates (the CLI's
-/// word too).
-pub const WAITING: &str = "— (waiting for programme)";
 /// Tech 3342 asks for 60 s of programme before a range is more than a first impression.
 pub const RANGE_SETTLED_S: f64 = 60.0;
 
@@ -51,8 +48,8 @@ pub struct NamedPair {
     pub name: String,
 }
 
-/// What the column's choice rests on: the session's rate, pairs, captured inputs and the
-/// latest frame's loudness, with how inputs are named and what kind they are.
+/// What the resolution rests on: the session's rate, pairs, captured inputs and the latest
+/// frame's loudness, with how inputs are named, what kind they are and what they read.
 pub struct LoudnessFacts<'a> {
     pub rate_hz: u32,
     pub pairs: &'a [NamedPair],
@@ -63,6 +60,10 @@ pub struct LoudnessFacts<'a> {
     pub is_mic: &'a dyn Fn(u16) -> bool,
     /// What a captured input is called in the pane (its bar's label).
     pub label: &'a dyn Fn(u16) -> String,
+    /// Every captured input's peak readings as the frame carries them: a source bar takes
+    /// its sides' true peak, overs and CLIP from here even when the pane does not name a
+    /// side.
+    pub input: &'a dyn Fn(u16) -> Option<ProgrammeInput>,
     /// The name of an input that may not be captured, `None` when it has none of its own.
     pub own_name: &'a dyn Fn(u16) -> Option<String>,
     /// The local time of a reset, `20:14`.
@@ -83,15 +84,9 @@ impl std::fmt::Debug for LoudnessFacts<'_> {
     }
 }
 
-/// What the loudness column shows.
-#[derive(Clone, Debug, PartialEq)]
-pub enum LoudnessColumn {
-    /// Why the pane has no loudness.
-    Message(String),
-    Readout(LoudnessReadout),
-}
-
-/// One source's readouts as the pane words them.
+/// One source's readouts as the plate words them. A source the frame does not carry yet
+/// reads −∞ / `None` everywhere ([`LoudnessReadout::empty`]), so the plate is there before
+/// its first value and never pops in a frame later.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoudnessReadout {
     /// The pair's name, or the input's with `mono`: BS.1770 weighs one channel 1, so a mono
@@ -104,61 +99,51 @@ pub struct LoudnessReadout {
     /// Programme metered since the reset, s.
     pub duration_s: f64,
     pub max_true_peak: f64,
-    /// `since 20:14 · R resets`.
+    /// Tech 3341's maximum since the reset of each window.
+    pub max_momentary: f64,
+    pub max_short_term: f64,
+    /// `since 20:14 · R resets`; blank before the frame carries the source.
     pub since: String,
 }
 
 impl LoudnessReadout {
-    /// `Mom −23.1`.
-    pub fn momentary_text(&self) -> String {
-        format!("Mom {}", format::fixed(self.momentary, 1))
-    }
-
-    /// `Short −22.8`.
-    pub fn short_term_text(&self) -> String {
-        format!("Short {}", format::fixed(self.short_term, 1))
-    }
-
-    /// `Int −23.0 LUFS`, `Int — (waiting for programme)` before a block passed the gate.
-    pub fn integrated_text(&self) -> String {
-        match self.integrated {
-            Some(v) if v.is_finite() => format!("Int {} LUFS", format::fixed(v, 1)),
-            Some(_) => format!("Int {NO_VALUE}"),
-            None => format!("Int {WAITING}"),
+    /// A source the frame does not carry yet.
+    pub fn empty(title: String) -> Self {
+        Self {
+            title,
+            momentary: f64::NEG_INFINITY,
+            short_term: f64::NEG_INFINITY,
+            integrated: None,
+            range: None,
+            duration_s: 0.0,
+            max_true_peak: f64::NEG_INFINITY,
+            max_momentary: f64::NEG_INFINITY,
+            max_short_term: f64::NEG_INFINITY,
+            since: String::new(),
         }
     }
 
-    /// `LRA 6.2 LU`, `LRA 6.2 LU (settling)` for the first minute, `LRA — (waiting for
-    /// programme)` before a value passed the gate.
-    pub fn range_text(&self) -> String {
-        match self.range {
-            None => format!("LRA {WAITING}"),
-            Some(r) if !r.is_finite() => format!("LRA {NO_VALUE}"),
-            Some(r) if self.duration_s < RANGE_SETTLED_S => {
-                format!("LRA {} LU (settling)", format::fixed(r, 1))
-            }
-            Some(r) => format!("LRA {} LU", format::fixed(r, 1)),
+    fn of(title: String, l: &SourceLoudness, since: String) -> Self {
+        Self {
+            title,
+            momentary: l.momentary.0,
+            short_term: l.short_term.0,
+            integrated: l.integrated.map(|v| v.0),
+            range: l.range.map(|v| v.0),
+            duration_s: l.duration.0,
+            max_true_peak: l.max_true_peak.0,
+            max_momentary: l.max_momentary.0,
+            max_short_term: l.max_short_term.0,
+            since,
         }
     }
+}
 
-    /// `TP max −1.2 dBTP`, `TP max —` before the first metered block.
-    pub fn true_peak_text(&self) -> String {
-        if self.max_true_peak.is_finite() {
-            format!("TP max {} dBTP", format::fixed(self.max_true_peak, 1))
-        } else {
-            format!("TP max {NO_VALUE}")
-        }
-    }
-
-    /// The readout lines top to bottom, the since line apart (it is chrome).
-    pub fn lines(&self) -> [String; 5] {
-        [
-            self.momentary_text(),
-            self.short_term_text(),
-            self.integrated_text(),
-            self.range_text(),
-            self.true_peak_text(),
-        ]
+/// A plate value: one decimal, `—` for −∞ or none.
+pub fn value_text(v: Option<f64>) -> String {
+    match v {
+        Some(v) if v.is_finite() => format::fixed(v, 1),
+        _ => NO_VALUE.to_owned(),
     }
 }
 
@@ -170,65 +155,33 @@ pub fn since_text(clock: &str, reset_key: Option<&str>) -> String {
     }
 }
 
-/// The column of a pane showing `shown` (a pair pane: its two inputs). `None`: nothing to
-/// show, as when the frame does not carry the source yet — a wrong reason would be read as
-/// the truth. When several messages apply the first wins: the rate, a mic, a pair partner
-/// not captured, then *one input or a pair*. The mic and partner messages concern the
-/// source the pane would show, so a pane of several inputs only ever says the last.
-pub fn loudness_column(shown: &[u16], f: &LoudnessFacts<'_>) -> Option<LoudnessColumn> {
-    let pair_of = |c: u16| f.pairs.iter().find(|p| p.left == c || p.right == c);
-    let candidate = match *shown {
-        [] => return None,
-        [c] => Some(pair_of(c).ok_or(c)),
-        [a, b] => f
+/// What a source is called on its bar and plate: the pair's name, an input's with `mono`.
+pub fn source_name(source: LoudnessSource, f: &LoudnessFacts<'_>) -> String {
+    match source {
+        LoudnessSource::Pair { left, right } => f
             .pairs
             .iter()
-            .find(|p| (p.left, p.right) == (a, b) || (p.left, p.right) == (b, a))
-            .map(Ok),
-        _ => None,
-    };
-    if !rate_has_loudness(f.rate_hz) {
-        return Some(LoudnessColumn::Message(RATE_TEXT.to_owned()));
+            .find(|p| p.left == left && p.right == right)
+            .map_or_else(
+                || crate::meter::pair_name(&(f.label)(left), &(f.label)(right)),
+                |p| p.name.clone(),
+            ),
+        LoudnessSource::Input { channel } => format!("{} mono", (f.label)(channel)),
     }
-    let Some(candidate) = candidate else {
-        return Some(LoudnessColumn::Message(ONE_INPUT_OR_PAIR.to_owned()));
-    };
-    let (source, inputs, title) = match candidate {
-        Ok(p) => (
-            LoudnessSource::Pair {
-                left: p.left,
-                right: p.right,
-            },
-            vec![p.left, p.right],
-            p.name.clone(),
-        ),
-        Err(c) => (
-            LoudnessSource::Input { channel: c },
-            vec![c],
-            format!("{} mono", (f.label)(c)),
-        ),
-    };
-    if inputs.iter().any(|&c| (f.is_mic)(c)) {
-        return Some(LoudnessColumn::Message(MIC_TEXT.to_owned()));
-    }
-    if let Some(&c) = inputs.iter().find(|c| !f.captured.contains(c)) {
-        return Some(LoudnessColumn::Message(partner_text(
-            c,
-            (f.own_name)(c).as_deref(),
-        )));
-    }
-    let l = f.sources.iter().find(|l| l.source == source)?;
-    Some(LoudnessColumn::Readout(LoudnessReadout {
-        title,
-        momentary: l.momentary.0,
-        short_term: l.short_term.0,
-        integrated: l.integrated.map(|v| v.0),
-        range: l.range.map(|v| v.0),
-        duration_s: l.duration.0,
-        max_true_peak: l.max_true_peak.0,
-        since: since_text(&(f.clock)(l.since), f.reset_key),
-    }))
 }
 
-#[cfg(test)]
-mod tests;
+/// The loudness plate's data for a pane whose inputs resolved to `resolved`: present iff
+/// they name exactly one distinct source, whether or not the frame carries it yet. Several
+/// sources have no single programme to read; none has nothing.
+pub fn plate_readout(resolved: &[Resolved], f: &LoudnessFacts<'_>) -> Option<LoudnessReadout> {
+    let mut sources = resolved.iter().filter_map(Resolved::source);
+    let first = sources.next()?;
+    if sources.any(|s| s != first) {
+        return None;
+    }
+    let title = source_name(first, f);
+    Some(match f.sources.iter().find(|l| l.source == first) {
+        Some(l) => LoudnessReadout::of(title, l, since_text(&(f.clock)(l.since), f.reset_key)),
+        None => LoudnessReadout::empty(title),
+    })
+}

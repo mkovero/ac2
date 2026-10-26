@@ -781,6 +781,17 @@ impl PlotChrome {
             Self::Bare => "no grid, scale or limit text",
         }
     }
+
+    /// [`Self::name`] on a Programme pane: the grid is the bars' lines, the labels their
+    /// scales' numbers with the target's word, and the step past full takes the loudness
+    /// plate too (as graphs take their cursor values there).
+    pub fn programme_name(self) -> &'static str {
+        match self {
+            Self::Full => "grid, target label, scale and loudness plate",
+            Self::NoGrid => "no grid or target label",
+            Self::Bare => "no grid, target label, scale or loudness plate",
+        }
+    }
 }
 
 /// Everything the operator chose about the view.

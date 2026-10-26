@@ -10,10 +10,13 @@ use crate::state::{AppState, PaneId};
 
 /// The scene of Programme pane `pane` at `size`; `None` when the pane is not one.
 pub fn programme(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport) -> Option<Scene> {
-    let (p, missing) = st.programme_pane(pane)?;
+    let (mut p, missing) = st.programme_pane(pane)?;
     let metered = st.layout.view(pane)?.meters?;
+    let view = st.view_for(pane);
+    p.plate = view.plates.loudness;
+    p.plate_hover = view.plate_hover;
     let style = Style {
-        chrome: st.view_for(pane).chrome,
+        chrome: view.chrome,
         theme,
     };
     let missing = (!missing.is_empty()).then(|| missing_text(&missing));

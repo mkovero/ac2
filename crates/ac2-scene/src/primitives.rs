@@ -229,6 +229,19 @@ pub struct Label {
     pub size: f32,
     pub color: Color,
     pub clip: Option<Rect>,
+    /// Draw the digits at one advance each (the font's tabular figures), so a right-aligned
+    /// number whose digits change keeps every digit in its column instead of jittering.
+    pub tabular: bool,
+}
+
+impl Label {
+    /// The same label with tabular digits.
+    pub fn tabular(self) -> Self {
+        Self {
+            tabular: true,
+            ..self
+        }
+    }
 }
 
 /// How a primitive's colour combines with what is already drawn.

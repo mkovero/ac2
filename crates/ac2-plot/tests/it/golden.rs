@@ -210,6 +210,7 @@ fn clipped_plot() -> ac2_plot::Scene {
         size: 13.0,
         color: Color::WHITE,
         clip: Some(plot),
+        tabular: false,
     });
     scene(200.0, 130.0, vec![layer])
 }
@@ -317,6 +318,7 @@ fn text_anchors_and_banner() {
             size: 14.0,
             color: Color::WHITE,
             clip: None,
+            tabular: false,
         });
     }
     for (i, size) in [9.0, 11.0, 16.0, 22.0].into_iter().enumerate() {
@@ -327,6 +329,7 @@ fn text_anchors_and_banner() {
             size,
             color: Color::rgb(0.85, 0.87, 0.9),
             clip: None,
+            tabular: false,
         });
     }
     base.polylines.push(line(
@@ -347,6 +350,7 @@ fn text_anchors_and_banner() {
         size: 15.0,
         color: Color::WHITE,
         clip: None,
+        tabular: false,
     });
     let img = render(gpu, &mut r, &scene(320.0, 150.0, vec![base, overlay]), 1.0);
     golden("text_anchors_and_banner", &img, TEXT);

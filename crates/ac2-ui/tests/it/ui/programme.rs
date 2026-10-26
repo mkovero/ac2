@@ -2,7 +2,7 @@
 //! own meters (`Shared::meters`).
 
 use super::*;
-use ac2_scene::programme::loudness::{LoudnessColumn, LoudnessReadout};
+use ac2_scene::programme::loudness::{LoudnessReadout, value_text};
 
 /// Inputs 3 + 4 as the line pair `Main`, its right side silent, the fake's meters on.
 fn pair_rig() -> common::Rig {
@@ -56,20 +56,9 @@ fn programme_texts(h: &Harness<'_, App>) -> Vec<String> {
 /// every run.
 const SHOW_RESET: ac2_proto::units::WallNs = ac2_proto::units::WallNs(1_767_294_120_000_000_000);
 
-/// The readout of Programme pane `pane`'s loudness column, if it shows one.
+/// The readout of Programme pane `pane`'s loudness plate, if it has one.
 fn loudness(a: &App, pane: ac2_ui::state::PaneId) -> Option<LoudnessReadout> {
-    match a.state.programme_pane(pane)?.0.loudness? {
-        LoudnessColumn::Readout(r) => Some(r),
-        LoudnessColumn::Message(_) => None,
-    }
-}
-
-/// What Programme pane `pane`'s loudness column says instead of a readout.
-fn loudness_message(a: &App, pane: ac2_ui::state::PaneId) -> Option<String> {
-    match a.state.programme_pane(pane)?.0.loudness? {
-        LoudnessColumn::Message(m) => Some(m),
-        LoudnessColumn::Readout(_) => None,
-    }
+    a.state.programme_pane(pane)?.0.loudness
 }
 
 /// A click picks the pair's Inputs row, P meters it in a new Programme pane: the title says
@@ -135,7 +124,7 @@ fn programme_pane_of_a_pair() {
     }
     step_until(&mut h, "the pair's short-term loudness", |a| {
         loudness(a, pane).is_some_and(|l| {
-            l.short_term_text() == "Short −18.0" && l.since == "since 1 Jan 19:02 · R resets"
+            value_text(Some(l.short_term)) == "−18.0" && l.since == "since 1 Jan 19:02 · R resets"
         })
     });
     let l = loudness(h.state(), pane).expect("the pair's loudness");
@@ -143,11 +132,16 @@ fn programme_pane_of_a_pair() {
     let texts = programme_texts(&h);
     for want in [
         "Main",
-        "Mom −18.0",
-        "Short −18.0",
-        "Int −18.0 LUFS",
-        "LRA 0.0 LU (settling)",
-        "TP max −11.8 dBTP",
+        "Int",
+        "−18.0",
+        "LUFS",
+        "Mom",
+        "Short",
+        "LRA",
+        "0.0",
+        "settling",
+        "TP max",
+        "−11.8",
         "since 1 Jan 19:02 · R resets",
     ] {
         assert!(
@@ -184,8 +178,8 @@ fn programme_pane_of_a_pair() {
         Some(ac2_ui::state::Metered::Pair { left: 2, right: 3 })
     );
 
-    // W gives the pane the window: room for the loudness column beside the bars, which a
-    // pane a quarter of the window wide drops to keep the bars' readouts whole.
+    // W gives the pane the window: room for the loudness plate beside the bars, which a
+    // pane a quarter of the window wide docks above them or drops.
     h.key_press(Key::W);
     snapshot_when(
         &mut h,
@@ -229,11 +223,11 @@ fn r_resets_the_picked_inputs_max() {
     );
 }
 
-/// A mic input's pane has no loudness and says why; a pane of several inputs asks for one
-/// input or a pair; R's toast names what it resets.
+/// A mic input's pane has no loudness plate; the mic beside a pair's inputs leaves one
+/// source, so that pane has the pair's; R's toast names what it resets.
 #[test]
-fn loudness_says_why_a_pane_has_none() {
-    if !have_gpu("loudness_says_why_a_pane_has_none") {
+fn loudness_plate_only_for_one_source() {
+    if !have_gpu("loudness_plate_only_for_one_source") {
         return;
     }
     let rig = pair_rig();
@@ -253,21 +247,17 @@ fn loudness_says_why_a_pane_has_none() {
         common::visible(&a.state).contains(&PaneKind::Programme)
     });
     let pane = common::pane(&h.state().state, PaneKind::Programme);
-    step_until(&mut h, "the mic message", |a| {
-        loudness_message(a, pane).as_deref() == Some("no loudness on a mic input")
-    });
-    assert!(
-        programme_texts(&h)
-            .iter()
-            .any(|t| t == "no loudness on a mic input")
-    );
-    let several = ac2_ui::state::Metered::inputs_of(&[0, 2, 3]).expect("three inputs");
+    assert_eq!(loudness(h.state(), pane), None, "a mic has no source");
+    assert!(!programme_texts(&h).iter().any(|t| t.contains("LUFS")));
+    let several = ac2_ui::state::Metered::inputs_of(&[1, 2, 3]).expect("three inputs");
     if let Some(v) = h.state_mut().state.layout.view_mut(pane) {
         v.meters = Some(several);
     }
     h.state_mut().state_edited();
-    step_until(&mut h, "the several-inputs message", |a| {
-        loudness_message(a, pane).as_deref() == Some("loudness: one input or a pair")
+    step_until(&mut h, "the pair's plate beside the mic", |a| {
+        a.state.programme_pane(pane).is_some_and(|(p, _)| {
+            p.bars.len() == 3 && p.loudness.is_some_and(|l| l.title == "Main")
+        })
     });
     // R on the focused pane, not on a picked row.
     h.state_mut().state.input_pick = None;
@@ -277,7 +267,7 @@ fn loudness_says_why_a_pane_has_none() {
             .toasts
             .list
             .iter()
-            .any(|t| t.text == "max, overs and loudness reset on input 1, 3, 4")
+            .any(|t| t.text == "max, overs and loudness reset on input 2, 3, 4")
     });
 }
 

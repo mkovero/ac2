@@ -1,5 +1,6 @@
 //! The Programme pane's display truth: what each input's bar reads, what the chip beside a
-//! pair's goniometer says, the loudness column ([`loudness`]), and where the parts sit.
+//! pair's goniometer says, the bars under a loudness ballistic ([`sources`], [`bars_of`]),
+//! the loudness plate ([`loudness_plate`]), and where the parts sit ([`dock`], [`layout`]).
 //!
 //! The wire carries every level in dBFS; the scale an input is shown on
 //! ([`Scale`]) converts for the text only, so a line input reads `+4.0 dBu` while its bar
@@ -19,22 +20,36 @@ pub enum Ballistic {
     Type1,
     Type2,
     Vu,
+    /// BS.1770 momentary loudness of the bar's source (400 ms), LUFS. Line and digital
+    /// sources only; an input without a source reads its true peak.
+    Momentary,
+    /// BS.1770 short-term loudness of the bar's source (3 s), LUFS.
+    ShortTerm,
 }
 
 impl Ballistic {
-    /// The word on the pane: `true peak`, `Type I`, `Type II`, `VU`.
+    /// The word on the pane: `true peak`, `Type I`, `Type II`, `VU`, `Mom loudness`,
+    /// `Short loudness` (never M / S, which are the goniometer's).
     pub fn word(self) -> &'static str {
         match self {
             Ballistic::TruePeak => "true peak",
             Ballistic::Type1 => "Type I",
             Ballistic::Type2 => "Type II",
             Ballistic::Vu => "VU",
+            Ballistic::Momentary => "Mom loudness",
+            Ballistic::ShortTerm => "Short loudness",
         }
+    }
+
+    /// A loudness window: the bars are sources, not inputs.
+    pub fn is_loudness(self) -> bool {
+        matches!(self, Ballistic::Momentary | Ballistic::ShortTerm)
     }
 }
 
-/// Said under a bar when VU is chosen but the input cannot offer it.
-pub const VU_FALLBACK: &str = "VU needs a line calibration · true peak shown";
+/// Said under a bar when VU is chosen but the input cannot offer it: what the bar reads
+/// first, so a cut to the bar's width loses the reason, never the reading.
+pub const VU_FALLBACK: &str = "true peak shown · VU needs a line calibration";
 
 /// How an input's levels are shown. The wire value is dBFS; `fs` is what 0 dBFS is on the
 /// scale.
@@ -104,9 +119,10 @@ impl ProgrammeInput {
     }
 
     /// The ballistic this input reads under the rig's `ballistic`: the true peak where VU
-    /// is chosen but not offered.
+    /// is chosen but not offered, and under a loudness ballistic (loudness is a source's,
+    /// never one input's).
     pub fn reads(&self, ballistic: Ballistic) -> Ballistic {
-        if self.note(ballistic).is_some() {
+        if ballistic.is_loudness() || self.note(ballistic).is_some() {
             Ballistic::TruePeak
         } else {
             ballistic
@@ -358,112 +374,91 @@ pub struct ProgrammePair {
 /// Everything the pane displays.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProgrammePane {
+    /// One per pane input, under every ballistic: the Inputs list and preview rows read
+    /// these.
     pub inputs: Vec<ProgrammeInput>,
+    /// What the pane draws, left to right ([`bars_of`]).
+    pub bars: Vec<ProgrammeBar>,
     pub pair: Option<ProgrammePair>,
     pub ballistic: Ballistic,
-    /// The loudness column; `None` shows none.
-    pub loudness: Option<loudness::LoudnessColumn>,
+    /// The rig's loudness target, LUFS: where a loudness bar's colour turns and its dashed
+    /// line sits.
+    pub loudness_target: f64,
+    /// The loudness plate's data: present iff the pane's inputs resolve to exactly one
+    /// source ([`loudness::plate_readout`]).
+    pub loudness: Option<LoudnessReadout>,
+    /// Where the loudness plate sits (`at: None` docks it) and its text scale.
+    pub plate: crate::plate::PlatePlace,
+    /// The plate under the pointer (lit, its grip bright).
+    pub plate_hover: Option<crate::plate::PlateHover>,
 }
 
 impl ProgrammePane {
-    /// The pane's title line: the ballistic word, and the pair's name with its correlator
-    /// window: `true peak · Main L + Main R · 0.3 s`.
+    /// Whether any bar reads a loudness source.
+    pub fn has_source_bar(&self) -> bool {
+        self.bars
+            .iter()
+            .any(|b| matches!(b, ProgrammeBar::Source(_)))
+    }
+
+    /// What the bars read, as the title's first word: the ballistic, unless no bar can read
+    /// it (a pane of mics under a loudness ballistic, of inputs without a line calibration
+    /// under VU), when the bars read the true peak and the title says so.
+    pub fn reads(&self) -> Ballistic {
+        let offered = match self.ballistic {
+            b if b.is_loudness() => self.has_source_bar(),
+            Ballistic::Vu => self.bars.iter().any(|b| match b {
+                ProgrammeBar::Peak { input, .. } => input.offers_vu,
+                ProgrammeBar::Source(_) => false,
+            }),
+            _ => true,
+        };
+        if offered {
+            self.ballistic
+        } else {
+            Ballistic::TruePeak
+        }
+    }
+
+    /// The pane's title line: what the bars read, the target after a loudness word, and the
+    /// pair's name with its correlator window: `true peak · Main L + Main R · 0.3 s`,
+    /// `Short loudness · target −23 LUFS · Main · 1 s`.
     pub fn title(&self) -> String {
-        let mut s = self.ballistic.word().to_owned();
+        let reads = self.reads();
+        let mut s = reads.word().to_owned();
+        if reads.is_loudness() {
+            s.push_str(&format!(
+                " · target {}",
+                rig::target_text(self.loudness_target)
+            ));
+        }
         if let Some(p) = &self.pair {
             s.push_str(&format!(" · {} · {}", p.name, window_text(p.window_s)));
         }
         s
     }
 
-    pub fn layout(&self, rect: Rect) -> ProgrammeLayout {
-        layout(
-            rect,
-            self.pair.is_some(),
-            self.loudness.is_some(),
-            self.inputs.len(),
-        )
+    /// The pane's scale column: LUFS iff a bar reads a source.
+    pub fn scale_kind(&self) -> ScaleKind {
+        if self.has_source_bar() {
+            ScaleKind::Lufs
+        } else {
+            ScaleKind::Dbfs
+        }
     }
-}
 
-/// Height of the correlation chip strip, logical pixels.
-pub const CHIP_H: f32 = 28.0;
-/// Width of the chip when it stands alone beside the bars (short pane).
-pub const CHIP_W: f32 = 96.0;
-/// Below this height the goniometer has no room (it needs a square of at least ~120 px
-/// above the chip) and the pane shows bars plus the chip only.
-pub const SHORT_PANE_H: f32 = 150.0;
-/// Width of the loudness column at the pane's right edge: `since 2 Oct 20:14 · R resets` on
-/// one line.
-pub const LOUDNESS_W: f32 = 190.0;
-/// A bar's column keeps its readouts whole (`max −11.8 dBTP`) at this width.
-pub const BAR_MIN_W: f32 = 96.0;
-/// The dBFS scale left of the bars.
-pub const BAR_SCALE_W: f32 = 32.0;
-/// The narrowest goniometer worth drawing beside the loudness column.
-pub const GONIO_MIN_W: f32 = 120.0;
-
-/// Where the parts go.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ProgrammeLayout {
-    /// The goniometer's rect (a pair, tall enough); the figure is [`crate::gonio::square`]
-    /// of it.
-    pub gonio: Option<Rect>,
-    /// The correlation chip (a pair).
-    pub correlation: Option<Rect>,
-    pub bars: Rect,
-    /// The loudness column (the pane has one and room for it).
-    pub loudness: Option<Rect>,
-}
-
-/// Bars on the right, the goniometer with the correlation chip under it on the left, split
-/// 1:1 (the MSD main screen); bars alone without a pair; on a pane shorter than
-/// [`SHORT_PANE_H`] the chip stands [`CHIP_W`] wide on the left and the bars take the rest.
-///
-/// The loudness column, when `loudness`, takes [`LOUDNESS_W`] at the right edge only if the
-/// rest keeps the `inputs` bars their readouts ([`BAR_MIN_W`] each) and a pair its
-/// goniometer ([`GONIO_MIN_W`]) or chip: a narrow pane drops the column first. With the
-/// column the bars take what they need and the goniometer the rest, up to half.
-pub fn layout(rect: Rect, has_pair: bool, loudness: bool, inputs: usize) -> ProgrammeLayout {
-    let short = rect.h < SHORT_PANE_H;
-    let bars_min = BAR_SCALE_W + inputs.max(1) as f32 * BAR_MIN_W;
-    let beside = match (has_pair, short) {
-        (false, _) => 0.0,
-        (true, true) => CHIP_W,
-        (true, false) => GONIO_MIN_W,
-    };
-    let column = (loudness && rect.w - LOUDNESS_W >= bars_min + beside)
-        .then(|| Rect::new(rect.right() - LOUDNESS_W, rect.y, LOUDNESS_W, rect.h));
-    let rect = match column {
-        Some(c) => Rect::new(rect.x, rect.y, rect.w - c.w, rect.h),
-        None => rect,
-    };
-    if !has_pair {
-        return ProgrammeLayout {
-            gonio: None,
-            correlation: None,
-            bars: rect,
-            loudness: column,
-        };
-    }
-    if short {
-        let w = CHIP_W.min(rect.w / 2.0);
-        return ProgrammeLayout {
-            gonio: None,
-            correlation: Some(Rect::new(rect.x, rect.y, w, rect.h)),
-            bars: Rect::new(rect.x + w, rect.y, rect.w - w, rect.h),
-            loudness: column,
-        };
-    }
-    let gonio_w = match column {
-        Some(_) => (rect.w - bars_min).min(rect.w / 2.0),
-        None => rect.w / 2.0,
-    };
-    ProgrammeLayout {
-        gonio: Some(Rect::new(rect.x, rect.y, gonio_w, rect.h - CHIP_H)),
-        correlation: Some(Rect::new(rect.x, rect.bottom() - CHIP_H, gonio_w, CHIP_H)),
-        bars: Rect::new(rect.x + gonio_w, rect.y, rect.w - gonio_w, rect.h),
-        loudness: column,
+    /// Where the parts go in `rect` at the plot font `small`: the dock ladder when the pane
+    /// has a plate where the pane puts it, else the bars and goniometer on the whole rect
+    /// (a floating plate reserves nothing).
+    pub fn layout(&self, rect: Rect, small: f32) -> ProgrammeLayout {
+        let scale_w = scale_w(self.scale_kind(), small);
+        let has_pair = self.pair.is_some();
+        let bars = self.bars.len();
+        if self.loudness.is_some() && self.plate.at.is_none() {
+            dock(rect, has_pair, bars, scale_w, small, self.plate.scale())
+        } else {
+            layout(rect, has_pair, bars, scale_w)
+        }
     }
 }
 
@@ -498,10 +493,22 @@ pub fn inputs_text(inputs: &[u16]) -> String {
     format!("inputs {}", n.join(", "))
 }
 
+mod bars;
 mod draw;
 pub mod form;
+mod layout;
 pub mod loudness;
+pub mod loudness_plate;
+pub use bars::{
+    LUFS_LOW, LUFS_SPAN, ProgrammeBar, Resolved, SideFlags, SourceBar, TRUE_PEAK_SHOWN, bars_of,
+    lufs_fill, on_lufs_span, peak_bars, sources,
+};
 pub use draw::{ProgrammeScene, programme_scene};
+pub use layout::{
+    BAR_MIN_H, BAR_MIN_W, CHIP_H, CHIP_W, Docked, GONIO_MIN_W, ProgrammeLayout, SHORT_PANE_H,
+    ScaleKind, dock, layout, scale_w,
+};
+pub use loudness::LoudnessReadout;
 
 #[cfg(test)]
 mod tests;
@@ -535,5 +542,14 @@ pub mod rig {
     /// `−60 dBFS`.
     pub fn gate_text(dbfs: f64) -> String {
         format!("{} dBFS", format::signed(dbfs, 0))
+    }
+
+    pub const TARGET_TITLE: &str = "Loudness target";
+    /// One ←/→ step of the loudness target, LU.
+    pub const TARGET_STEP_LU: f64 = 1.0;
+
+    /// `−23 LUFS`: the target is set in whole LU.
+    pub fn target_text(lufs: f64) -> String {
+        format!("{} LUFS", format::fixed(lufs, 0))
     }
 }

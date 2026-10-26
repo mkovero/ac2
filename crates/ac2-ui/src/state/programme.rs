@@ -12,9 +12,10 @@ use ac2_proto::FrameData;
 use ac2_proto::model::layout::PaneContent;
 use ac2_proto::topic::Topic;
 use ac2_scene::gonio::EmberRing;
-use ac2_scene::programme::loudness::{LoudnessFacts, NamedPair, loudness_column};
+use ac2_scene::programme::loudness::{LoudnessFacts, NamedPair, plate_readout};
 use ac2_scene::programme::{
     Ballistic, Correlation, FlyingPeak, ProgrammeInput, ProgrammePair, ProgrammePane, Scale, Side,
+    bars_of, peak_bars, sources,
 };
 
 use crate::conn::{DataSnapshot, Request};
@@ -120,8 +121,8 @@ pub fn ballistic(b: ac2_proto::model::Ballistic) -> Ballistic {
         W::Type1 => Ballistic::Type1,
         W::Type2 => Ballistic::Type2,
         W::Vu => Ballistic::Vu,
-        // Under a loudness ballistic each input's own reading is its true peak.
-        W::Momentary | W::ShortTerm => Ballistic::TruePeak,
+        W::Momentary => Ballistic::Momentary,
+        W::ShortTerm => Ballistic::ShortTerm,
     }
 }
 
@@ -269,37 +270,35 @@ impl AppState {
                 .cloned()
                 .unwrap_or_else(|| ac2_scene::meter::input_name(c, None, None))
         };
-        let inputs = metered
-            .inputs()
-            .into_iter()
-            .map(|c| {
-                let at = frame.and_then(|f| f.meta.channels.iter().position(|x| *x == c));
-                let col = |v: &[f32]| at.and_then(|i| v.get(i).copied());
-                let device = st
-                    .and_then(|s| s.session.open.as_ref())
-                    .map(|o| &o.input_device);
-                ProgrammeInput {
-                    label: name(c),
-                    scale: self.programme_scale(c),
-                    ppm: frame.and_then(|f| col(&f.ppm)),
-                    true_peak_dbtp: frame.and_then(|f| col(&f.true_peak)),
-                    max: frame.and_then(|f| col(&f.max)),
-                    overs: frame
-                        .and_then(|f| at.and_then(|i| f.overs.get(i).copied()))
-                        .unwrap_or(0),
-                    clipped: frame
-                        .and_then(|f| at.and_then(|i| f.clip.get(i)))
-                        .is_some_and(|k| *k != ac2_proto::frame::ClipFlags::NONE),
-                    flying_peak: self.programme.flying.get(&c).and_then(FlyingPeak::value),
-                    offers_vu: match (st, device) {
-                        (Some(s), Some(d)) => {
-                            ac2_proto::cal::offers_vu(&s.inputs, &s.line_calibrations, d, c)
-                        }
-                        _ => false,
-                    },
-                }
-            })
-            .collect();
+        let input_of = |c: u16| {
+            let at = frame.and_then(|f| f.meta.channels.iter().position(|x| *x == c));
+            let col = |v: &[f32]| at.and_then(|i| v.get(i).copied());
+            let device = st
+                .and_then(|s| s.session.open.as_ref())
+                .map(|o| &o.input_device);
+            ProgrammeInput {
+                label: name(c),
+                scale: self.programme_scale(c),
+                ppm: frame.and_then(|f| col(&f.ppm)),
+                true_peak_dbtp: frame.and_then(|f| col(&f.true_peak)),
+                max: frame.and_then(|f| col(&f.max)),
+                overs: frame
+                    .and_then(|f| at.and_then(|i| f.overs.get(i).copied()))
+                    .unwrap_or(0),
+                clipped: frame
+                    .and_then(|f| at.and_then(|i| f.clip.get(i)))
+                    .is_some_and(|k| *k != ac2_proto::frame::ClipFlags::NONE),
+                flying_peak: self.programme.flying.get(&c).and_then(FlyingPeak::value),
+                offers_vu: match (st, device) {
+                    (Some(s), Some(d)) => {
+                        ac2_proto::cal::offers_vu(&s.inputs, &s.line_calibrations, d, c)
+                    }
+                    _ => false,
+                },
+            }
+        };
+        let inputs: Vec<ProgrammeInput> = metered.inputs().into_iter().map(input_of).collect();
+        let ballistic = ballistic(b);
         let pair_title = |l: u16, r: u16| {
             st.and_then(|s| s.pairs.iter().find(|p| p.left == l && p.right == r))
                 .and_then(|p| p.name.clone())
@@ -321,30 +320,36 @@ impl AppState {
                 .keys
                 .first_chord(CommandId::LevelsReset, Scope::Programme)
                 .map(|c| c.label());
-            loudness_column(
-                &metered.inputs(),
-                &LoudnessFacts {
-                    rate_hz: o.sample_rate_hz,
-                    pairs: &pairs,
-                    captured: &o.config.input_channels,
-                    sources: frame.map_or(&[], |f| f.meta.loudness.as_slice()),
-                    is_mic: &|c| {
-                        matches!(
-                            ac2_proto::cal::input_kind(&s.inputs, c),
-                            ac2_proto::model::InputKind::Mic { .. }
-                        )
-                    },
-                    label: &name,
-                    own_name: &|c| self.input_own_name(c),
-                    clock: &|t| {
-                        ac2_scene::time::local_clock(t, captured_at.unwrap_or(t), |w| {
-                            self.local_zone.offset_s(w)
-                        })
-                    },
-                    reset_key: reset_key.as_deref(),
+            let captured = &o.config.input_channels;
+            let input = |c: u16| captured.contains(&c).then(|| input_of(c));
+            let f = LoudnessFacts {
+                rate_hz: o.sample_rate_hz,
+                pairs: &pairs,
+                captured,
+                sources: frame.map_or(&[], |f| f.meta.loudness.as_slice()),
+                is_mic: &|c| {
+                    matches!(
+                        ac2_proto::cal::input_kind(&s.inputs, c),
+                        ac2_proto::model::InputKind::Mic { .. }
+                    )
                 },
-            )
+                label: &name,
+                input: &input,
+                own_name: &|c| self.input_own_name(c),
+                clock: &|t| {
+                    ac2_scene::time::local_clock(t, captured_at.unwrap_or(t), |w| {
+                        self.local_zone.offset_s(w)
+                    })
+                },
+                reset_key: reset_key.as_deref(),
+            };
+            let resolved = sources(&metered.inputs(), &f);
+            Some((
+                bars_of(&resolved, ballistic, &f),
+                plate_readout(&resolved, &f),
+            ))
         });
+        let (bars, loudness) = loudness.unwrap_or_else(|| (peak_bars(&inputs, ballistic), None));
         let pair = metered.pair().map(|(l, r)| ProgrammePair {
             name: pair_title(l, r),
             correlation: correlation(frame.and_then(|f| {
@@ -357,9 +362,13 @@ impl AppState {
         });
         ProgrammePane {
             inputs,
+            bars,
             pair,
-            ballistic: ballistic(b),
+            ballistic,
+            loudness_target: rig.map_or(-23.0, |r| r.loudness_target.0),
             loudness,
+            plate: ac2_scene::plate::PlatePlace::default(),
+            plate_hover: None,
         }
     }
 

@@ -63,6 +63,7 @@ fn kept_labels_match_freshly_shaped_ones() {
                     size: *size,
                     color: Color::WHITE,
                     clip: None,
+                    tabular: false,
                 });
             }
         })
@@ -459,6 +460,7 @@ fn label_anchors_place_text() {
                 size: 20.0,
                 color: Color::WHITE,
                 clip: None,
+                tabular: false,
             });
         });
         ink_box(&render_on(gpu, r, &s, 1.0, Color::BLACK), 100).expect("label has ink")
@@ -528,6 +530,7 @@ fn offset_target_matches_standalone_render() {
             size: 12.0,
             color: Color::WHITE,
             clip: None,
+            tabular: false,
         });
     });
     let alone = render_on(gpu, &mut r, &s, 1.0, Color::BLACK);

@@ -492,6 +492,7 @@ pub fn draw_banners(layer: &mut Layer, rows: &[BannerRow], theme: &Theme) {
                 size: theme.small_font_size,
                 color: colors.text,
                 clip: Some(r.rect),
+                tabular: false,
             });
         }
     }

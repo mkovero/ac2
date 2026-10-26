@@ -96,6 +96,7 @@ pub(crate) fn label(
         size,
         color,
         clip: None,
+        tabular: false,
     }
 }
 

@@ -96,6 +96,7 @@ fn dense_scene(phase: f32) -> ac2_plot::Scene {
             size: 12.0,
             color: Color::rgb(0.8, 0.8, 0.85),
             clip: None,
+            tabular: false,
         });
     }
     scene(W, H, vec![layer])
