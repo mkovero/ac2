@@ -93,14 +93,15 @@ warning colour).
 ## 2. Pairs (V2)
 
 A pair is two inputs of the session declared `Left` and `Right`. One input belongs to at
-most one pair; both inputs must be of the same kind, and `Mic` pairs are refused (a
-correlation of two measurement mics means something else and would be read as a stereo
-verdict). The pair is named by its inputs' names (*Main L + Main R*) until **N** names it on
+most one pair; both inputs must be of the same kind, mics included (revised 2026-10-26,
+operator: *"mic pair can be stereo too"*: an XY or ORTF pair is a stereo source; a mic and
+a line input are still refused). A mic pair shows its bars, correlation and goniometer and
+no loudness (§6.3 *Mic pairs*); what its correlation means depends on the technique, and
+ac2 draws no verdict from it. The pair is named by its inputs' names (*Main L + Main R*) until **N** names it on
 the Audio & I/O page.
 
-The Inputs list shows one row per pair: both bars, the correlation chip (§4), the overs of
-the louder side, and the input numbers when the names lack them. A pair row in the list
-selects like any child row (list click model); the Programme pane (§6) is where it opens
+The Inputs list shows one row per pair: both bars, the correlation chip (§4), each side's overs and CLIP (§6.3 *The Inputs list rows*), and the input numbers when the names lack them. A pair row in the list
+selects like any child row (list click model); the Programme panes (§6, §6.3) are where it opens
 big.
 
 ### Key scope
@@ -242,7 +243,8 @@ the pair's recent peak (exponential, τ = 1 s, floor −60 dBFS, so the range is
 signal at a stride that divides its period collapses to a few dots (1 kHz at 48 kHz, stride
 6, is eight points). Each frame is split into 256 bins and one sample pair is drawn from a
 random position in each bin, so a tone keeps its line and a cloud its shape. The scene keeps
-a ring of the last ~1 s of points with their age; the renderer places them.
+a ring of the points of the last five decays (`GONE_DECAYS`) with their age (§6.3; stage 2 kept a fixed
+~1 s, which cut the longer fades short); the renderer places them.
 
 **The look — embers.** The field is dark. Each point is an ember: it lands bright and cools
 along a blackbody ramp — white-yellow → orange → deep red → ash-grey → gone — on an
@@ -283,8 +285,11 @@ loudness target, §6.2). **W** /
 **F** make it the stage view as for every pane; **T** hides chrome; **R** resets max and
 overs of what the pane shows.
 
-Opened from the picker like any pane, or from a pair row with **Enter** (the row brings its
-own pane the way a measurement row does). Saved in the layout prefs and the session's panes
+Stage 5 (§6.3) replaces this one-pane layout by two views, Meters and Goniometer, stepped
+by **G**, and a pair brings one pane of each.
+
+Opened from the picker like any pane, or from a pair row with **P** (stage 5 brings two
+panes for a pair, §6.3 *Where panes come from*). Saved in the layout prefs and the session's panes
 by its input set; a session loaded on a device without those inputs shows the pane empty
 with *inputs 3+4 not in this session*.
 
@@ -590,7 +595,8 @@ font: f32, scale: f32) -> ProgrammeLayout`, trying each step by calling `layout(
 has_pair: bool, bars: usize, scale_w: f32) -> ProgrammeLayout` on the room left after the
 reserve; `layout()` stays the pure fit for a given room and loses its `loudness: bool`. The
 pane calls `dock` when it has a plate (`loudness.is_some()`) whose place is auto
-(`plate.at.is_none()`), at every T step (so the room stays reserved at the third); otherwise
+(`plate.at.is_none()`), at every T step (so the room stays reserved at the third; superseded by §6.3: at *traces
+only* the room goes to the bars); otherwise
 it calls `layout` on the whole rect (a floating plate reserves nothing). `ProgrammeLayout.
 loudness: Option<Rect>` becomes `plate: Option<Docked { rect: Rect, dropped: u8, scale: f32
 }>`, `dropped` 0 … 4 being how many steps of the fixed drop order (foot, maxima, range and
@@ -892,7 +898,8 @@ grid* takes the bars' grid lines and the target label; *traces only* also takes 
 numbers and the **loudness plate** (whole, wherever it sits: graphs hide their cursor-values
 plate at the same step). The bars, their text, the
 target line, the max ticks, the goniometer and the chip stay at every step, and **nothing
-moves**: a docked plate's room stays reserved while it is hidden, and the scale keeps its width
+moves**: a docked plate's room stays reserved while it is hidden (superseded by §6.3: the
+Meters view gives it to the bars), and the scale keeps its width
 with its numbers gone, as the SPL scale keeps its room (a change: today `draw::bars` drops the
 scale's width at *traces only*, so the bars widen). Toasts name what is shown, as the SPL ones do: `Programme: grid, target label, scale and
 loudness plate`, `Programme: no grid or target label`, `Programme: no grid, target label,
@@ -981,6 +988,630 @@ no loudness text) and under `ShortTerm` (true-peak bars with the rate reason row
   one `levels.set`; e2e from an empty daemon: declare a line pair, set `ShortTerm`, open the
   pair's pane, read the scene text.
 
+### 6.3 Meter and goniometer as pane views (stage 5)
+
+Stage 4 put bars, goniometer, correlation chip and loudness plate in one Programme pane. In
+the field (2026-10-26, ketunkolo, local daemon, one digital stereo pair, `ShortTerm`, target
+−22 LUFS) that pane showed a goniometer about 670 px wide on the left, a wide empty gap, one
+thin LUFS bar, no loudness plate, and a bar that read empty because −56.5 LUFS lies below
+its floor (target −18 LU = −40 LUFS). Stage 5 splits the pane into two **views** stepped by
+**G**, sizes the plate from its room, marks a reading below the floor and tidies the Inputs
+list's rows (one quantity per bar, with its unit beside it).
+
+**Settled by the operator (2026-10-26):**
+
+1. *"I would treat goniometer and bar metering as their own panes (g-traversible for
+   example) and I would expect goniometer to fill the area it is in. with it being its own
+   pane i could merely just fullscreen it if I would want to focus on that."*
+2. Under a loudness ballistic a pair's pane shows **L and R true peak plus the LUFS bar**
+   (MSD / RTW style); a mono line or digital source its true-peak bar plus its LUFS bar.
+3. *"option to alter the fade on goniometer, too"*.
+4. *"mic pair can be stereo too"*: two mic inputs may be a pair (XY, ORTF); see §2 and
+   *Mic pairs* below.
+
+#### Why the field pane had no plate
+
+The scene does dock a plate for that pane. A pair pane under `ShortTerm` with one LUFS bar,
+laid out by `ProgrammePane::layout` (`ac2-scene/src/programme.rs`) at 1400 × 760,
+1700 × 900 and 2500 × 1300, gets `dock()`'s first rung (*beside*) every time: a plate of
+292 × 125 px at the pane's top-right corner (checked with a scratch test against
+`programme/tests/bars.rs::Rig`). `plate_readout()` is `Some` when the pane's inputs resolve to exactly one
+source, which a line or digital pair pane's always do, and `bars_of()` reads the same `sources()` list. So the plate was laid out and then
+not drawn. The code has one path that does exactly that:
+
+- `programme_scene()` in `ac2-scene/src/programme/draw.rs` draws the plate only under
+  `style.chrome != PlotChrome::Bare`. `ProgrammePane::layout` still docks at *traces only*
+  (§6.2 *T*: "a docked plate's room stays reserved while it is hidden"). The bars therefore
+  keep the rest of the pane, the plate's 292 px stay empty at the right, and the scale
+  numbers and the goniometer's grid and L/R labels go too. That is the pane the report
+  describes: a goniometer, a gap, one bar, no plate, mostly empty. The step is per pane
+  (`PaneModes.chrome`) and `ui.toml` keeps it (`chrome = "traces_only"`), so one **T** press on
+  an earlier day is enough.
+
+One thing makes it worse even when the plate shows: at 1× in a 1700 px pane the plate is a
+292 × 125 box in a corner, far from the bar. The *Meters view* below fixes that by sizing
+the plate from its room. The *T* rule stays as it is (plates go at *traces only* on every
+pane kind). What changes is that the step can no longer pass unnoticed: a hidden docked
+plate now gives its room to the bars (below), and the T toast already names the plate.
+Whether the field pane was at *traces only* is still to be confirmed (open question 1).
+
+#### Two views, G steps them
+
+`PaneKind::Programme` gets views as Transfer, Spectrum, SPL and Sweep panes have them:
+
+```rust
+pub enum ProgrammeMode { Meters, Goniometer }   // ac2_scene::view, beside SplMode
+```
+
+- **Meters**: the bars and the loudness plate (below), no goniometer. A pane naming a pair
+  keeps the correlation chip as a strip under the bars, `CHIP_H` high and as wide as the
+  bars (operator 2026-10-26: as the MSD does, so a maximised Meters pane still shows it);
+  a pane with no pair has no strip.
+- **Goniometer**: the goniometer fills the pane, `gonio::square` of the pane less the chip
+  strip, centred, with the correlation chip right under the square, centred on it, as wide
+  as the square or as its text, whichever is wider (the chip's minimum is its text width,
+  not a constant).
+  The Goniometer view has **no loudness plate**: `ProgrammePane::layout` does not call
+  `dock()` for it, `ProgrammeLayout.plate` is `None`, `programme_scene` builds no
+  `PlateBox`, and `plates()` returns none, so no hidden grip or drag target sits on the
+  square (today a pair pane docks at every step, `programme.rs` `layout`, and builds a box
+  at `chrome != Bare`, `draw.rs`). The plate's place and scale stay stored on the pane,
+  for the Meters view. 5b test: a Goniometer-view pair pane on `ShortTerm` has no plate
+  box and its square is the pane less the chip strip.
+  Below `GONIO_MIN_W` (`programme/layout.rs`, 120 px) of square side, the chip stands alone, centred (5b rewrites
+  that constant's comment for this meaning: the smallest square in which a figure still
+  reads as a shape). The same
+  §5 embers, grid and **T** rule apply: the grid goes at *no grid*, the L/R labels at *traces only*, the chip
+  stays at every step.
+
+`ProgrammeMode::next(has_pair)` / `prev(has_pair)` step Meters ↔ Goniometer when the pane
+meters a pair, and return `self` otherwise, so a stored value is never overwritten. On a
+pane without a pair, **G** toasts `Programme: the goniometer needs a pair` (§2's word) and
+changes nothing. `step_view` (`ac2-ui/src/state/queries/select.rs`) loses its
+`(PaneKind::Programme, _) => {}` arm. It steps `m.programme` with the focused pane's
+`has_pair` (read like `aligned` above it, before `self.modes_mut()` borrows), and raises that toast itself when `has_pair` is
+false. `step_view` has no toast path today, so this is its first. A stored `Goniometer` on
+a pane whose content stops being a pair (the Edit form picked inputs) draws the Meters view
+and keeps the stored value. That is a draw-side fallback, as the transfer scene draws
+magnitude for a stored `TransferView::Alignment` (`ac2-ui/src/state/panes/views.rs`)
+without an alignment. `PaneModes` gains
+`programme: ProgrammeMode` (default `Meters`). Like every sibling view there are three
+enums with their mappings: the scene/UI mode `ac2_scene::view::ProgrammeMode` (as
+`SplMode`), the wire `ac2_proto::model::layout::ProgrammeView` (as `SplView`; ac2-proto
+cannot use a scene type), and the `ui.toml` `prefs/file.rs::ProgrammeViewFile` (as
+`SplViewFile`). The mappings are `wire_pane` / `ui_view` in
+`state/panes/meas_layout.rs` and `PaneEntryFile::of` / `parse` in `prefs/layout.rs`. Undo already treats `NextView` / `PrevView`
+as `PaneEdit::View`.
+
+**No combined view.** The operator wants separate panes. **W** maximises one and **F** makes
+it the stage view. A combined view would be a third layout to keep, the stage-4 one whose
+1:1 split produced the gap.
+
+**Titles.** Meters: what the bars read, the target after a loudness word, the source or
+pair: `Short loudness · target −23 LUFS · Main`. The correlator window stays on a pair's
+Meters title, which carries the chip. Goniometer: `goniometer · Main · 1 s` (the window belongs to the
+chip). `ProgrammePane::title()` takes the view.
+
+**Where panes come from.**
+
+- **A pair** opened from its Inputs row (**P**, `open_programme` in
+  `ac2-ui/src/state/programme.rs`) or from the New programme meter form brings **two
+  panes**: the focused pane is split once (`split_focused_pane`, as today) and the new
+  pane is split again side by side (`split_pane_at(new, Axis::Row, Side::A)` in
+  `state/panes/ops.rs`, which halves the pane, the copy on the `A` side), goniometer left and meters right (the MSD order). The
+  meters pane gets the focus. `Layout::split_pane` focuses the new pane, and with the
+  goniometer as the new `Side::A` pane the focus would land there, so `open_programme`
+  calls `focus_pane(meters)` after the second split. `split_pane_at` fills `meas` from `pane_meas` (`v.meas.or(shown)`),
+  and today `open_programme` clears it on the new pane only. After the second split it
+  must clear `meas` on **both** Programme panes. The wire is safe either way (`wire_pane`
+  takes `content` from `meters` first), but `pane_meas` / `resolve_meas` would otherwise
+  tie the goniometer pane to a measurement. 5c asserts neither keeps a `meas`.
+  Today **P** is not undoable: `edit_of` in `state/undo.rs`
+  has no arm for `C::ProgrammePane`, and the form's submit, which `undo_watch` does watch
+  as `Watch::Command` (every `Msg::Key`), reaches `edit_of` with `ran: None` and
+  `menu: None` and records nothing. 5c adds `C::ProgrammePane => PaneEdit::Split(was)` to `edit_of`. The form's Enter is a
+  `Msg::Key` that runs no `CommandId` (it goes `state/commands/dialogs.rs` → `submit_meter`), so 5c also
+  decides, inside the `Msg::Key(_)` arm of `undo_watch` and before it falls back to
+  `Watch::Command`, on a new `Watch::MeterForm` (overlay `Overlay::Form` with
+  `FormKind::Programme | ProgrammeEdit` and the submit key), which `edit_of` maps to
+  `PaneEdit::Split(was)` for New and to `pick_edit(p)` for Edit (its submit runs
+  `pane_pick`, as a pane-list pick does). With both, one
+  **Ctrl+Z** removes both panes. If there is room for only one split, the meters
+  pane opens alone and a toast says `no room for the goniometer pane: G turns this pane to
+  it`.
+- **Inputs side by side** (no pair): one pane, Meters.
+- **A pane's own list** (`PaneMenuRow::Meter`): the pane turns into one Programme pane in
+  Meters view: the pick sets `programme` to `Meters`, so a pane whose mode was left at
+  Goniometer by an earlier G does not open on the square. The list turns *this* pane into something and never adds panes.
+  The reset lives in the `Msg::PanePick` arm of `state.rs`, before it calls `pane_pick`,
+  not in `pane_pick`'s `Meter` arm, because the Edit form's submit also runs `pane_pick`
+  (`state/meter_form.rs`).
+- **The Edit form** applies to its own pane only and keeps its view: editing a Goniometer
+  pane's pair leaves it a Goniometer pane (a 5c test), and if the edit leaves it without a
+  pair it draws Meters by the fallback below.
+
+The form's `NEW_SUBMIT` becomes `Enter opens it beside the focused one: meters, and a
+goniometer pane for a pair`. `PAIR_HINT` becomes `L and R, loudness (line or digital); goniometer and
+correlation in their own pane`, since a mic pair has no loudness.
+
+#### The Meters view
+
+**Bars under a loudness ballistic.** A true-peak bar per input the pane names, and a LUFS
+bar per source those inputs resolve to (`sources()`, unchanged). Order: the **true-peak
+block** first (every named input in pane order, sourceless ones included with their reason
+row), then the **LUFS block** (sources in the order the pane first names one of their
+inputs). A Pair pane: `Main L`, `Main R` | `Main`. An Inputs pane `1, 5, 2` with `1+2`
+paired: `Input 1`, `Input 5`, `Input 2` | `Main`, `Input 5 mono` (generic names as `meter.rs` gives them). A pane `1, 5` with `1+2` declared and
+input 2 captured: `Input 1`, `Input 5` | `Main`, `Input 5 mono` (input 2 is in Main's loudness but
+has no bar, because the pane does not name it; the plate's TP max covers the source). A mic
+pair or a mic: true-peak bars only, each with `true peak shown · no loudness on a mic
+input`. This keeps §6.2's point: there is still **no per-input loudness bar**. The new bars
+read true peak, which an input does have.
+
+`bars_of()` builds both blocks, and the layout groups bars by variant. Each `Peak` bar keeps
+its own flags row (overs, CLIP), so `SourceBar` loses `true_peak` and `sides`, and
+`SideFlags` goes. A pane names its source's sides as its bars, except a pane that names
+fewer inputs than its source has (`1, 5` with input 2 the pair of 1). Such a pane no
+longer shows an unnamed side's overs and CLIP: its plate's TP max still covers the whole
+source, and that side's own Inputs row and any pane naming it show the CLIP. The comment on
+`LoudnessFacts` (`programme/loudness.rs`) that promises the unnamed sides' flags is
+rewritten to say the plate's TP max is all the pane keeps of them. The LUFS bar's rows become reading, max, and the floor row (below). §6.2's
+pair flags row (`2 overs L · CLIP R`) is gone, since each side's own bar says it.
+
+**Under a peak ballistic nothing changes**: one bar per named input, one dBFS scale, as in
+stage 4.
+
+**Two scale columns.** Each block carries its scale column on its left. The true-peak block
+has the 60 dB span under full scale (`SCALE_DBFS` numbers, `scale_w(Dbfs)`), and the LUFS
+block has the EBU +9 span (`scale_w(Lufs)`, §6.2's labels and target tick). Each column has
+its unit at its head, in the scale's colour and at its size: `dBTP` over the true-peak
+column when every bar in the block reads dBFS-based true peak, and nothing when a
+calibrated bar is among them (dBu, dB SPL: the numbers are still the shared span's, as in
+§6.2, and each bar's own text carries its unit). The LUFS column is headed `LUFS`. Both
+heads show at *full* and *no grid* and go with the numbers at *traces only*. The columns
+keep their width at every step (§6.2), so only the hidden plate's room moves (below). §6.2's own four-number dBFS scale on a peak bar beside LUFS bars goes: the
+block's column replaces it. `ScaleKind` stays as each block's kind
+(`scale_w(kind, small)` is unchanged); only `ProgrammePane::scale_kind()` goes.
+
+**Below the floor.** A LUFS reading under target −18 LU leaves the bar empty, so the bar
+says so in two places. A small downward triangle (8 px wide, `text_dim`) is drawn inside
+the bar's rect at its foot. The label `below −41` (the floor in LUFS,
+`fixed(target − 18, 0)`, `small`, `text_dim`) goes in a text row of its own under the
+bar's reading and max. That row is reserved on every LUFS bar whatever the reading, so
+the pane's row count and every bar rect stay the same. Both are drawn while `reading` is
+`Some(v)` with `v < floor`. A reading of — (no window yet) draws neither, since — already
+says *nothing yet*. The
+`max` ticks keep §6.2's rule (none outside the span). The span does not widen. 27 LU over
+the bar's height is what gives a 1 LU resolution at the target, and the field case (a feed
+34 LU under target) is what the mark is for.
+
+**The plate fills its room.** In the Meters view the docked plate (`at: None`) is sized by
+the pane and not by the stored scale:
+
+1. The Meters view has no goniometer, so `layout()` and `dock()` in
+   `programme/layout.rs` keep `has_pair` only for the chip strip under the bars (the strip
+   is taken from the bars' height before the plate is fitted). `CHIP_W`, `SHORT_PANE_H`
+   and the 1:1 split go; `CHIP_H` serves both views' strips. `layout()`'s
+   doc comment is rewritten (5b). The bars' need is `Σ scale columns + bars × BAR_MIN_W`. The **fit scale** `s` is the
+   largest that makes `loudness_plate::size(font, s, 0)` fit beside the bars in width and
+   in the pane's height, capped at 3 (`SCALE_LIMITS`' top) and floored to 0.05 steps, so a
+   pixel of resize does not flicker the text.
+2. If `s ≥ 1`: *beside*, at the pane's right edge from the top, at `s`. Bars take the rest,
+   widening as they do today (`col_w`, bar width clamp 6 … 40 px).
+3. Else stage 4's ladder from its step 2: *above* at 1×, then slots dropped at 1×, then no
+   plate.
+
+A pair pane at 1700 × 900 gets a plate at 3× (about 876 × 376 px: `Int` about 82 px high).
+A pair's Meters pane half of a 1920 px window wide (about 820 px of area; the bars need
+about 380 px: 31.5 + 60 px of scale columns and 3 × 96) gets about 1.5× beside them. A
+third of that window (under 640 px) docks the plate above at 1×.
+
+The stored `scale` is now the **floating** size only. The grip on a docked plate floats it
+where it is, at the scale the drag sets: one gesture, one **Ctrl+Z** step. To make that
+happen, the loudness `PlateBox` of a docked plate is built with a new field `docked: bool`
+(`PlateBox.scale`, the drawn scale, already exists). The box-aware mouse code
+(`ac2-ui/src/view/panes/mouse.rs`, which already calls `b.position_for` /
+`b.scale_clear_of`) handles either gesture (body drag or grip drag) on a docked box this
+way. It first dispatches `PlateMsg::Move` to `position_for(rect.x, rect.y)`, which floats
+the plate where it stands (only `Move` sets `at`, `plates.rs`). It then dispatches
+`PlateMsg::Scale` with the box's drawn scale, and after that the gesture's own `Move` or
+`Scale`. `PlateMsg::Move` carries no scale, so without the second message a 3× docked plate
+would shrink to the stored 1× under the pointer, and without the first a grip drag would
+change only the stored scale while the dock went on sizing the plate. All of these are drag messages of one gesture, so they make one undo step
+(the drag grouping: `history.drag`, `start_drag` / `finish_drag` in `state/undo.rs`). A double-click docks it again (`PlateMsg::Reset`: `at: None`, scale 1, which a
+docked plate ignores). The "stored scale is kept, so a larger pane brings it back" rule of
+§6.2 goes, because a docked plate always takes what its pane gives.
+
+**T on the Meters view.** The steps and toasts are §6.2's. One thing changes: at *traces
+only* the hidden docked plate's room goes **to the bars** instead of staying reserved
+(`ProgrammePane::layout` gains the chrome step and does not dock at *traces only*).
+Stage 4 kept the room so that nothing moves, but an empty rectangle the width of the plate
+is what made the field pane look broken, and the steps are an operator gesture, not a
+value change, so the static rule (§6.2) is not broken. The toast
+`Programme: no grid, target label, scale or loudness plate` says what went.
+
+**The Goniometer view at T**: today's rule (`draw.rs`). The grid shows at *full* only, the
+L/R labels at *full* and *no grid*, and the chip at every step (it is a reading). The toasts are §6.2's three: their wording
+names the parts of the full step even on a pane that lacks one, as the SPL toasts do.
+
+#### Ember decay on the form
+
+The goniometer's fade is **Settings › Display › Ember decay** (app setting, `ui.toml`,
+`prefs.ember_decay_s`, `step_ember_decay` in `ac2-ui/src/settings.rs`). The New / Edit
+programme meter form gains the same row: label `Ember decay`, value text
+`ember_decay_text()` (*0.4 s: a goniometer point fades out that long after it lands*),
+a `Value::Choice` row like the form's other stepped rows
+(the local `stepped(id, title, note, all, now, text)` closure in `meter_dialog.rs` with a
+new `FieldId::EmberDecay` in `forms/mod.rs`). The closure takes `&[f64]`, `now: f64` and
+`fn(f64) -> String`, and picks the index by exact `==`; the ember values are `f32`
+(`prefs.ember_decay_s`, `EMBER_STEP_S`, `ac2_scene::gonio::EMBER_DECAY_RANGE_S`, `ember_decay_text(f32)`).
+So this row does **not** go through `steps()`: widening first would miss its 1e-9 match
+(`f64::from(0.4f32)` is 0.40000000596…) and list 0.4 s twice. A new
+`settings::ember_decay_steps() -> Vec<f32>` builds the grid in `f32` (the steps of
+`EMBER_STEP_S` across `EMBER_DECAY_RANGE_S`, the grid `step_ember_decay` rounds to). The
+row widens each step, and `now` is picked out of that same widened list as the entry
+nearest `prefs.ember_decay_s`, so it is the same `f64` value and `==` finds it (a
+stored value between steps shows as its nearest step). The text function is wrapped.
+`EMBER_STEP_S` stays private beside it. Test: 0.4 and 2.0 s each list once and select. The submit writes
+`prefs.ember_decay_s`, and the Settings page keeps `step_ember_decay`. It is one value, so the form changes the same pref, and Display
+shows the change. It sits under a third heading, after *How it reads*. `rehead`
+(`meter_dialog.rs`) gives that one `format!("{} · Whose: {}", HOW_HEADING, THE_RIG)`
+(`THE_RIG` = *the rig — all clients*, `settings.rs`). The new one follows the same
+pattern: `DISPLAY_HEADING = "Display"` (the Settings page's name) with `THIS_APP`
+(*this app*, `ac2-ui/src/settings.rs`). `DISPLAY_HEADING` goes to
+`ac2-scene/src/programme/form.rs` beside `HOW_HEADING`, as `THE_RIG` stays in
+`settings.rs` today, because §7 puts the value on the app and not on the rig. **Enter** applies it with the rest, **Esc** closes without
+applying, as in every form. It shows for every Meter pick, because it is an app setting and
+not a pane's, and it never sends `levels.set`.
+
+**Range stays 0.1 … 2 s; the ring follows the decay.** The upper end is already more than
+the app honours. `RING_CAPACITY` (`ac2-ui/src/state/programme.rs`) is `GONIO_POINTS × 32`,
+which is 32 frames, or about 1.07 s at the daemon's `METER_FPS` 30. `EmberRing::retire`
+waits `GONE_DECAYS × decay` (10 s at 2 s), but the ring has dropped each ember after about
+1 s. At 2 s an ember disappears at 59 % brightness (e^−0.53). Above about 0.21 s
+(1.07 s / 5) the ash stage is cut short, and above about 0.43 s (1.07 s / 2.5) it is
+skipped entirely (2.5 … 5 decays, `STAGE_DECAYS` in
+`gonio.rs`, which `ac2-plot` floors at 6 % alpha so ash stays visible until it is retired).
+Stage 5 sizes the ring from the decay, so every ember lives its whole ramp:
+`capacity = GONIO_POINTS × ceil(METER_FPS × GONE_DECAYS × decay)`, with `GONE_DECAYS`
+unchanged at 5. At the 0.4 s default that is 60 frames (15 360 points). At 2 s it is 300
+frames (76 800 points), which is one instanced draw of small additive points. The Pi kiosk
+runs the default. `METER_FPS` moves from `ac2d/src/jobs/meters.rs` (`pub(crate)`) to
+`ac2_proto::frame` beside `GONIO_POINTS` (5a), and the daemon uses that, so the app sizes
+the ring from the rate the daemon sends at. `EmberRing` gains `set_capacity(n)`, which
+drops the oldest points when it shrinks. A change of the setting calls it on every ring.
+The range does **not** widen:
+
+- Below 0.1 s an ember lives about 3 frames at 30 fps and flickers between frames.
+- Above 2 s the cloud mixes more than 6 s of programme, longer than the 3 s short-term
+  window and the slowest correlator window, so the shape no longer belongs to what the bars
+  and the chip read now.
+- The point budget grows linearly with the decay, and the Pi kiosk draws the same ring.
+
+The operator asked for the control, not a longer tail. §5 now reads *a ring of the points of
+the last five decays*.
+
+#### Mic pairs
+
+§2 now allows two mic inputs as a pair. Kinds must still match (mic + line is refused). A
+mic pair reads like any input:
+
+- **Bars**: per input on the input's own scale. That is dB SPL when its curve or
+  calibration gives one, else dBFS, exactly as a lone mic's bar and Inputs row do today
+  (`AppState::programme_scale` in `ac2-ui/src/state/programme.rs`). Under a peak ballistic: PPM / true peak. Under a loudness
+  ballistic: true peak with `true peak shown · no loudness on a mic input` (`TRUE_PEAK_SHOWN · MIC_TEXT`,
+  `sources()` already resolves a pair with a mic side to that reason). There is no LUFS
+  bar, no LUFS scale column and no plate, because §6.1 meters loudness on line and digital
+  sources only and the operator chose loudness for those.
+- **Correlation and goniometer**: as for any pair, from the same daemon path. Correlation
+  is gated per side in dBFS (the gate is about signal presence, not level), so calibration
+  does not change it. What a mic pair's correlation means depends on the technique (a
+  coincident XY pair reads high, a spaced AB pair low), and the user guide says so in one
+  sentence. ac2 draws no conclusion from it (no verdict, as §4).
+- The Inputs list pair row and the pane title are as for any pair. The New programme meter
+  form's `FIRST_BAR_HINT` (*by name; mics show levels, no loudness*) still holds.
+
+Mic pairs are declared as any pair (`check_pairs` in `ac2-proto/src/cal.rs` refuses only two
+different kinds). Stage 5's rules read what `sources()` resolves.
+
+#### The Inputs list rows
+
+The operator, on the same screenshot: *"the input list looks bit disorienting… the top left
+one dBTP and dBFS mixed and is not obvious what units the moving value is and clutter"*, and
+the rule *"everything except bars themselves should be pretty static"*. Today a row
+(`ac2-ui/src/view/chrome.rs` ~600–720) shows **two quantities**. The bar and its unlabelled
+number are the always-on meter's 300 ms **RMS** (`MeterReading.rms_fill` / `text`, drawn by
+`meter_sized` in `view/session.rs`), under the header `dBFS RMS · peak tick`. The lines
+under it are the rig's **ballistic** reading and max (`ProgrammeInput::row_lines`), in dBTP
+under a loudness ballistic. A pair puts `L`, a 56 px bar, its 64 px number, `R` and a
+second bar on one line, about 260 px in a sidebar of about 210 px. The R bar is squeezed
+and its number cut. The row's `cal` line, which is only the word `dBFS` for an uncalibrated
+line or digital input (`ac2_scene::meter::DBFS`), lands under the correlation and reads as
+its unit. Stage 2 promised that *"the input meters stop being an RMS bar with a peak tick
+and become peak programme meters"* (*What the operator gets*), and the row never caught up.
+
+Before (digital pair, `ShortTerm`):
+
+```
+Inputs  dBFS RMS · peak tick
+Main · digital · pair (in 3, 4)
+L ▮ −56.4 R ▮
+L true peak  −50.6 dBTP
+  max  −45.7 dBTP
+R true peak  −48.6 dBTP
+  max  −42.2 dBTP
+correlation +0.31
+dBFS
+```
+
+**Grammar.** One quantity per bar, and that quantity is the one the Programme pane's
+per-input bar reads (§6.2, §6.3: `ProgrammeInput::reads(ballistic)`). The bar shows it,
+the number beside the bar is the same reading with its unit, and the tick is its flying
+peak (`ProgrammeInput::flying_peak_fill`, as on a pane's peak bar). The bar has the pane's
+peak-bar colours: level green, the hot colour within `ac2_scene::meter::HOT_PEAK_DBFS`
+(−6 dB, already `pub`) of full scale, and the fault colour while CLIP is up. The state is
+`ac2_scene::meter::MeterState` (every state it has: `NoData` for the `—` row, `Silent`,
+`Signal`, `Hot`, `Clip`), computed in the scene, so the app colours and never compares
+levels. The RMS bar, its number and the `dBFS RMS · peak tick`
+header leave the list. RMS stays where it is the quantity: the SPL and spectrum panes, and
+the I/O page's device preview (`meter_sized` stays for that page). Both come from the same
+`SessionLevels` frame, so nothing is lost.
+
+Rows are monospace with tabular digits and fixed slots: number `NUMBER_SLOT` (6,
+`−120.0`), CLIP (4) and overs `OVERS_SLOT` (10, `9999 overs`) as `row_lines` uses them, and
+a new unit slot (6, `dB SPL`) that `row_block` pads to, since `row_lines` prints the unit
+unpadded today. The bar takes what the row's width leaves after the fixed columns. Nothing
+but the bar fill and the tick changes width or place as values move. Each side has its own
+lines, prefixed by its mark:
+
+```
+<m> <bar ……………………>  <number> <unit> <CLIP>     the reading, one per side
+<m> max         <number> <unit> <overs>    the ballistic's hold since R, one per side
+<m> true peak   <number> dBTP              only when the bar does not read true peak
+    correlation <value>                    pairs: the chip, warning colours on negative
+    <note>                                 only when a row cannot read the ballistic
+```
+
+- **Mark column** `<m>`: `L` / `R` on a pair, blank on a mono row. It is one character wide
+  on every row, so every number column lines up down the list. The mark moves into the
+  scene's lines (today `chrome.rs` prefixes it).
+- **max** and **true peak**: one line per side, so each side's overs and CLIP always have
+  their slot, whatever the sidebar's width. These are the slots of today's lines, so a
+  pair needs no more width than a mono row. `true peak` (this frame's) shows only under a
+  ballistic whose reading is not already true peak (Type I / II, VU), so no number appears
+  twice.
+- **No reading** (no levels frame yet, a stale frame, or the session dialog previewing
+  another device, the guard `session_inputs` applies today and `programme_of` gains): an
+  empty bar, no tick, `—` in each number slot, and every slot kept, so the row has the same
+  rect with and without data. Today the lines vanish until a frame arrives
+  (`chrome.rs` ~675, the `ppm.is_some() || max.is_some()` gate); they stay instead.
+- **Calibration**: a line calibration's text (`dBu · full scale +13.0 dBu · 3 h ago`)
+  moves from its own line under the row (`chrome.rs` ~720) onto the label line, where a
+  mic's curve already is. The scene's row label (`ac2_scene::meter`'s label for the row)
+  appends it. An uncalibrated row has no unit line, because every
+  number carries its unit. `InputRow::cal` is `None` for an uncalibrated line or digital
+  input; `DBFS` stays for the I/O page.
+
+**What the bar and number read, by ballistic** (every row on its input's scale: dBFS,
+calibrated dBu or dB SPL). The header is the strong `Inputs` followed by the word of what
+the bars read and `· max since R`. It is built from the rig's ballistic
+(`self.daemon().map(|s| s.rig.levels.ballistic)`; deliberately the rig setting only, not the
+frame's `meta.ballistic` that `programme_of` prefers, so it exists before any frame). It
+goes through a new input-free `ac2_scene::programme::Ballistic::inputs_read(self)`: `TruePeak` under a loudness
+ballistic, else `self`. Rows that cannot read VU say so on their own note. The header
+changes only when the rig setting does. Right after a `levels.set` the header can name the
+new ballistic for one meter frame (≤ 33 ms) while the rows still read the old one. Each
+row's numbers still carry their own unit, so no number is misread, and taking the header
+from the frame instead would leave it empty until the first frame:
+
+| rig ballistic | bar and number | unit (uncalibrated) | header after `Inputs` |
+|---|---|---|---|
+| Type I, Type II | that PPM | dBFS | `Type I · max since R` |
+| true peak | true peak | dBTP | `true peak · max since R` |
+| VU | VU; a row without a line calibration reads true peak with its note (`true peak shown · VU needs a line calibration`) | dBFS / dBTP | `VU · max since R` |
+| Mom / Short loudness | true peak (loudness is a source's, in the Programme pane, §6.2) | dBTP | `true peak · max since R` |
+
+The words are the Programme pane title's (`ac2_scene::programme::Ballistic::word()`): under a loudness ballistic
+the inputs read true peak, so the header says `true peak`, not `Short loudness`. The hover
+tip keeps the keys sentence, and under a loudness ballistic adds *loudness is metered per
+programme in the Programme pane*. That is too long for the header line, which must not
+wrap and push the rows down. `R` is the reset key's label (`first_chord`).
+
+After (same pair, `ShortTerm`, one over on L), then a mono line input with a line
+calibration under Type I, then an uncalibrated mic pair under true peak:
+
+```
+Inputs  true peak · max since R
+Main · digital · pair (in 3, 4)
+L ▮▮▮▮▮▮▮──────────  −50.6 dBTP
+R ▮▮▮▮▮▮▮▮─────────  −48.6 dBTP
+L max     −45.7 dBTP     1 over
+R max     −42.2 dBTP
+  correlation +0.31
+
+Inputs  Type I · max since R
+Vox · line (in 5) · dBu · full scale +13.0 dBu · 3 h ago
+  ▮▮▮▮▮▮▮▮▮▮───────   +2.1 dBu
+  max      +6.0 dBu
+  true peak −6.4 dBTP
+
+Inputs  true peak · max since R
+Overheads · mic · pair (in 7, 8)
+L ▮▮▮▮▮▮───────────  −31.2 dBTP
+R ▮▮▮▮▮────────────  −33.0 dBTP
+L max     −18.4 dBTP
+R max     −19.9 dBTP
+  correlation +0.62
+```
+
+(Before, the mock is a sketch: today's reading line also has its 4-character CLIP slot,
+and `chrome.rs` adds the `L` / `R` prefixes.)
+
+A mic pair follows the same grammar. A calibrated mic reads dB SPL in every slot (`94.2 dB
+SPL`, `max 101.0 dB SPL`), and the true-peak line stays in dBTP, because true peak is a
+digital quantity on every scale (`true_peak_text`). Under a loudness ballistic a mic row
+has no note. Its true-peak reading is what every input reads there, and the reason it has
+no loudness belongs to the Programme pane's bar.
+
+**Same words everywhere.** `max`, `true peak`, `correlation`, the units and the flag forms
+are the Programme pane's and the CLI's (`ac2 levels`). `row_lines()` becomes
+`programme::row_block(inputs: &[ProgrammeInput], ballistic)`, which builds the lines above for a mono row
+or a pair from the same `ppm_text` / `max_text` / `true_peak_text` helpers the pane uses, so
+the two surfaces cannot drift. It returns one `RowBlock`: per side the bar fill, the
+flying-peak tick and the `MeterState`, the text lines in their fixed slots, and the
+correlation chip's text and warning state. The correlation stays the chip
+from `correlation_line`, with its warning colours on a negative value.
+
+#### Wire and persistence
+
+- **Proto (5a):** `LayoutPane` gains `programme_view: ProgrammeView` (the wire enum above, `meters` |
+  `goniometer`, `rename_all = "snake_case"`), required like its four siblings (the struct is
+  `deny_unknown_fields`, and every pane carries every kind's view). `PROTO_VERSION` 70 → 71,
+  `WIRE_LOCK`, `tools/protocol/fixture_messages.py`'s pane gains the key, and
+  `samples/builders.rs` gets it too.
+- **Old layouts:** `ac2_traces::old_layout::programme_views(v)`, beside
+  `plates_add_loudness`. Like `plates_add` it recurses through the value, but it matches
+  the `{"type": "pane"}` wrapper object (not the pane inside it), because a pair pane is
+  replaced by a split there. It adds `"programme_view": "meters"` to every pane that lacks it. A
+  `"kind": "programme"` pane whose `content` is a `pair` is instead rewritten one level
+  up, at its tree node: the walk matches the wrapper `{"type": "pane", "pane": {…}}` whose
+  inner pane is such a pane, and replaces that wrapper in place (the tree root, or an `a` /
+  `b` slot) by `{"type": "split", "axis": "row", "ratio": 0.5, a: <pane, goniometer>, b: <pane,
+  meters>}`. Both copies keep the pane's content, chrome and levels. The goniometer copy
+  drops its `plates` key (it defaults whole, as `old_layout` already relies on), because a
+  goniometer has no plate. A tree may hold at most `PaneLayout::MAX_PANES` (16) panes;
+  beyond that `check` fails, and salvage would drop the whole layout. So the walk counts
+  the panes first and splits pair panes only while the running total stays at or under 16.
+  Any further pair pane stays one pane with `meters`. Test: 15 panes, 2 of them pair
+  panes. This turns the stage-4
+  pane into the two panes a new pair brings. The module header gains *session format 34
+  and rig settings version 6*. Callers run it after `plates_add_loudness`:
+  - **sessions:** `session::VERSION` 34 → 35. An older autosave is set aside as
+    `autosave.v34` as at every bump, and `ac2 session salvage` (`salvage/read.rs`) calls
+    it wherever it calls `plates_add_loudness` today: per measurement layout (salvage does
+    not read the session's own `layout`);
+  - **the rig file:** `VERSION` 6 → 7, a new `rig/v6.rs::upgrade` calling it on each
+    `meters[].layout` (as `v4.rs` calls `plates_add_loudness`), appended after
+    `v5::upgrade` in every branch of `rig/file.rs`;
+  - **`ui.toml`:** `PaneEntryFile` gains `#[serde(default)] programme_view`, which defaults
+    to Meters. This follows the file's own convention, one serde default per key (`spl_view` names a default fn; `ProgrammeViewFile` derives
+    `Default` = Meters, so a plain `#[serde(default)]` does). Prefs carry no version, so an old shape cannot be detected without a
+    reader branch that would live forever (a shim). A stage-4 pair pane kept in `ui.toml`
+    therefore reads back as **one** Meters pane, and **G** or **P** on its pair row gives
+    the goniometer. The two-pane rewrite is for the versioned stores only. A test pins
+    that a stage-4 `ui.toml` pair pane reads back as one Meters pane. This is accepted,
+    not hidden: the 5d user guide's Programme section says that an app layout from before
+    the views opens a pair pane in Meters view and that **G** or **P** brings the
+    goniometer. No one-time toast, since detecting the old shape is the reader branch
+    ruled out above.
+- `PaneLayout::check` is unchanged. A `goniometer` view on a non-pair pane is valid and
+  draws Meters (above).
+
+#### Keys and words
+
+- **G / Shift+G** (`CommandId::NextView` / `PrevView`) gain `Scope::Programme`: the
+  `NextView` scope list in `keys/mod.rs`, two rows in `keys/table.rs`
+  (`(C::NextView, S::Programme, k(K::G))`, `(C::PrevView, S::Programme, sh(K::G))`),
+  `hint(C::NextView, "view", 70)` in the Programme hints (it ranks between reset all and
+  grid), and `keys/keywords.rs` adds `meters` (`goniometer` is already listed). `G` is free in that scope
+  (only R, Shift+R are bound there). `keys/tests.rs`'s `g_steps_the_views_of_every_pane`
+  asserts G is unbound in `Scope::Programme` today; 5c moves Programme to the bound arm and
+  rewrites its comment.
+- **User guide (5d):** the key table's G row names Programme (*meters ↔ goniometer*). The
+  *Programme pane* section is rewritten for the two views, two panes per pair, the
+  true-peak + LUFS blocks, the floor mark and the plate that fills its room. Also: the
+  *Moving the plates* sentence on the docked loudness plate (pane-sized, grip floats it),
+  *Grid, labels and cursor (T)* (the plate's room goes to the bars at the third step, and
+  the Goniometer view's steps), *Input meters* (the row grammar, the header by ballistic and the before / after mock of §6.3 *The Inputs list rows*), the mic-pair sentence (§2), and *Display › Ember decay* (also on the programme
+  meter form).
+- No new key, so no new hint beyond G's. Esc only closes. No Ctrl chord.
+
+#### Sub-stages
+
+Each is one agent, in order. 5b and 5c each start from the scene text.
+
+- **5a proto + formats** (`ac2-proto`, `ac2-traces` `old_layout.rs` / `session.rs`,
+  `ac2d/src/rig/{file.rs,v6.rs}`, `ac2-cli/src/cmd/salvage/read.rs`, `tools/protocol`):
+  `ProgrammeView`, `LayoutPane.programme_view`, PROTO 71, `WIRE_LOCK`, session format 35,
+  rig file v7, `programme_views` and its callers. Not a wire fact but landed here because
+  the app needs it: `METER_FPS`, the daemon's meter frame rate, moved to `ac2_proto::frame`
+  (`ac2d/src/jobs/meters.rs` uses it, and the rustdoc link in `ac2d/src/fanout.rs` follows).
+  *Tests:* serde names; `WIRE_LOCK`; `programme_views` on a tree with a pair Programme
+  pane (becomes a row split, goniometer left, plates reset on that copy), an Inputs
+  Programme pane (`meters`), a Transfer pane (key added), and a tree already carrying the
+  key (unchanged); salvage of a format-34 session with a pair pane inside a measurement's
+  `measurements[].layout` (the only layout salvage reads); the session round trip of a
+  format-34 autosave set aside, as at every bump; rig v6 → v7 upgrade of
+  a meter layout; the session round trip with a `goniometer` pane.
+- **5b scene** (new tests go to `programme/tests/blocks.rs`, since `tests/bars.rs` is at
+  646 lines; `ac2-scene`: `view.rs`, `programme.rs`, `programme/{layout,bars,draw,
+  loudness_plate,form}.rs`, `gonio.rs`). `draw.rs` is at 676 lines, so the views move to
+  `programme/meters.rs` and `programme/gonio_view.rs`, which keeps every file under 1000.
+  Changes: `ProgrammeMode` with `next/prev(has_pair)`, `ProgrammePane.view`, `title()`
+  per view, `bars_of()` blocks, `SourceBar` slimmed, block scale columns and their heads,
+  the floor mark, the fit-scale dock, the hidden plate's room to the bars, the Goniometer
+  view's square and chip, `PlateBox.docked`, the form's words and `DISPLAY_HEADING`,
+  `ring_capacity(decay_s)` from `ac2_proto::frame::METER_FPS` and `GONE_DECAYS`, and
+  `EmberRing::set_capacity`.
+  *Tests (scene text first, headless):* bars and their order for a Pair pane, `1, 5, 2`,
+  `1, 5` with input 2 unnamed, a mic pair, a mic, under `ShortTerm` / `Momentary` and under
+  `TruePeak` (unchanged); the column heads (`dBTP`, none with a calibrated bar, `LUFS`);
+  `below −41` and the triangle present at −56.5 with target −23, absent at −40.9, at —, and
+  at target −22 reading `below −40`; every bar rect identical across those readings; the fit
+  scale at 1700 × 900 (3×), at a half-window pane (between 1 and 3), at a third-window pane
+  (above at 1×), floored to 0.05; a docked box has `docked`, a floating one not; at *traces
+  only* no plate box and the bars' right edge at the pane's; the Goniometer view: the square
+  is the largest centred in the pane less the chip, the chip as wide as the square or its text, whichever is wider, chip
+  alone under `GONIO_MIN_W`; Goniometer stored on a non-pair pane draws Meters; titles of
+  both views (the Meters title of a pair pane has no correlator window), and the Meters
+  title of a pane without a pair; `programme_name` toasts
+  unchanged; `ring_capacity(0.4)` = 60 frames and `(2.0)` = 300; `set_capacity` keeps the
+  newest points; an ember at 2 s decay is still in the ring at 9 s and retired after 10 s.
+- **5c ui + plot** (`ac2-ui`: `state/panes/views.rs`, `queries/select.rs`,
+  `state/programme.rs`, `scenes/programme.rs`, `meter_dialog.rs`, `state/meter_form.rs`,
+  `state/panes/plates.rs`, `state/panes/meas_layout.rs`, `view/panes/mouse.rs`,
+  `state/undo.rs`, `forms/mod.rs`, `prefs/layout.rs`, `prefs/file.rs` (916 lines; the
+  enum adds about 10, under the cap; its conversions go to `prefs/layout.rs`'s
+  `PaneEntryFile::of` / `parse`),
+  `state/queries/inputs.rs` (where
+  `InputRow::cal` is built), `view/chrome.rs`, `keys/*`, the regenerated per-scope key
+  table in `docs/user-guide.md` (`keymap_doc.rs` checks it against the binding table, so it
+  changes with the two new rows) and the `Pane | G steps` row; `ac2-plot` golden images).
+  `view/chrome.rs` is at 915 lines, so the Inputs list moves to its own
+  `view/inputs_list.rs` first. Changes: G on Programme, two panes per pair, the form's Ember decay row, the ring
+  re-sized on a decay change, docked-grip floating, `ui.toml` key and its read rule, and the
+  Inputs list rows (5b adds `row_block` and the header text to `ac2-scene`, with
+  scene-text tests for every ballistic row of the table, mono, pair and mic pair, and the
+  slots' widths constant over readings −∞, −120.0, −0.1, +3.2, with overs 0 / 999+).
+  *Tests:* G steps Meters ↔ Goniometer on a pair pane and toasts on an Inputs pane (scene
+  text), and one Ctrl+Z steps back; P on a pair row opens two panes (goniometer left,
+  meters focused) and one pane with no room for two; a pane-list Meter row turns one pane;
+  one Ctrl+Z removes both panes, and neither keeps a `meas`; a wire layout with a
+  `goniometer` pane round-trips `ui_view` → `wire_pane`, and a `ui.toml` one round-trips
+  `PaneEntryFile`; the form's Ember decay row changes `prefs.ember_decay_s`, Display shows it, and Esc leaves
+  it; a grip drag on the docked plate stores `at` and `scale` in one undo step, and a
+  double-click docks it; a stage-4 `ui.toml` with a pair pane reads as one Meters pane; the two
+  assertions `cal == Some(DBFS)` in `state/tests/session/meters.rs` flip to `None`; the Inputs
+  list in an egui snapshot: a pair row is two bar lines whose numbers sit in the mono
+  row's column, no RMS bar or number, no bare `dBFS` line, the header follows a ballistic
+  change, and a row's rect is unchanged between a quiet and a clipping frame; an e2e from an empty daemon (declare a line pair, `ShortTerm`, P, read both
+  panes' scene text); a reducer case declaring two mics as a pair on `ShortTerm`: the Inputs row has two dBTP bar lines and the correlation, P opens two panes, the Meters pane has true-peak bars only (no LUFS column, no plate), named `slow_…` since it waits on real Leq windows. Golden images: the Meters view of a pair on `ShortTerm` at
+  1700 × 900 (plate at 3×) and at 600 × 500 (plate above); a reading below the floor; a
+  line + mic Inputs pane (both blocks); the Goniometer view at 900 × 900 and 1600 × 600
+  (square centred) on uncorrelated noise; embers at decay 0.4 and 2.0 s, where the 2 s
+  image still shows the tail at 1.5 s, which today's ring drops. These replace
+  `programme_traces_only.png`, `programme_plate_beside_*` and `gonio_embers_decay_*` in
+  `ac2-plot/tests/reference`.
+- **5d docs**: the user guide prose above (5c has already regenerated the key tables), `docs/protocol.md` (the layout pane's key), and
+  this section's *as built* note.
+
+**Not in this stage:** a combined view, a plate per
+source, a relative LU readout, an Int bar.
+
+**Settled with the operator (2026-10-26):** the field pane was at **T**'s third step (the
+screenshot has no scale numbers and no goniometer grid), which confirms *Why the field pane
+had no plate*. A pair's Meters view keeps the correlation chip under its bars.
+
 ## 7. Where the settings live
 
 - **Rig settings** (daemon, `levels.set`, beside the system max level; `ac2 levels`):
@@ -990,7 +1621,8 @@ no loudness text) and under `ShortTerm` (true-peak bars with the rate reason row
   alike. `levels.set` is a rig edit under decision R3: it names the rig rev it was made on
   and is refused with `conflict` when another client changed it first.
 - **App Settings**: ember decay only — how a shape fades is how this operator likes to
-  look, and no number depends on it.
+  look, and no number depends on it. From stage 5 the programme meter form shows the same
+  row (§6.3), the same value.
 
 ## 8. Wire and persistence
 
@@ -1108,5 +1740,15 @@ which now says *what a chooser steps* beside `PEAK`'s *the detectors*, say that 
      (`PanePlatesFile` in `ac2-ui/src/prefs/file.rs`, `wire_plates` / `ui_plates`),
      the target row on Settings › Rig monitor and the form, T toasts, the user guide sections.
    No `ac2-core` change: the meter already computes every value.
+5. **Meter and goniometer views** (§6.3, designed): from the 2026-10-26 field report.
+   Programme panes get Meters / Goniometer views stepped by **G**, and a pair brings one
+   pane of each. Under a loudness ballistic the Meters view shows a true-peak block plus a
+   LUFS block, each with its own scale column, a mark below the floor, and a plate sized
+   from its room. Ember decay is also on the programme meter form, and the ember ring
+   follows the decay. Inputs list rows: one quantity per bar (the ballistic's reading, not RMS), with its unit beside it, fixed slots and a header by ballistic. How a mic pair reads. Layers:
+   *5a proto + formats* (PROTO 71, session format 35, rig file v7, `old_layout::programme_views`,
+   `frame::METER_FPS`),
+   *5b scene*, *5c ui + plot*, *5d docs*. The tests are listed in §6.3 *Sub-stages*. No
+   `ac2-core` and no daemon math change.
 
 Each stage is one landed batch.
