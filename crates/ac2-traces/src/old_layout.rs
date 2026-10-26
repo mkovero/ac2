@@ -10,7 +10,11 @@
 //!   plates, without `loudness`: session format 33 and rig settings version 4
 //!   ([`plates_add_loudness`]). A tree older than both lacks `peaks` too, so every caller
 //!   runs [`plates_add_peaks`] first.
+//! - Before the Programme pane had a meters and a goniometer view a pane carried no
+//!   `programme_view`, and a pair's pane drew both: session format 34 and rig settings
+//!   version 6 ([`programme_views`]). Every caller runs it after [`plates_add_loudness`].
 
+use ac2_proto::model::layout::PaneLayout;
 use serde_json::{Map, Value};
 
 /// Rewrites every pane in the layout tree `v` from the `meas` pick to the `content` pick:
@@ -76,6 +80,91 @@ fn plates_add(v: &mut Value, plate: &str) {
             }
         }
         Value::Array(items) => items.iter_mut().for_each(|c| plates_add(c, plate)),
+        _ => {}
+    }
+}
+
+/// Gives every pane in the layout tree `v` that lacks one a `programme_view` of `meters`, and
+/// turns a Programme pane metering a pair into the two panes a pair now brings: its tree
+/// node (`{"type": "pane", "pane": …}`) becomes a row split of a goniometer pane on the left
+/// and a meters pane on the right, both with the pane's content, chrome and levels. The
+/// goniometer copy drops its `plates`, since a goniometer has none and a pane without the
+/// key takes the whole default. A tree holds at most [`PaneLayout::MAX_PANES`] panes, and
+/// one over that fails the whole layout, so pair panes are split only while the total stays
+/// within it; the rest stay one meters pane each. A pane is an object holding both `kind`
+/// and `chrome`; anything else is walked through.
+pub fn programme_views(v: &mut Value) {
+    let mut panes = count_panes(v);
+    add_views(v, &mut panes);
+}
+
+fn is_pane(obj: &Map<String, Value>) -> bool {
+    obj.contains_key("kind") && obj.contains_key("chrome")
+}
+
+fn count_panes(v: &Value) -> usize {
+    match v {
+        Value::Object(obj) if is_pane(obj) => 1,
+        Value::Object(obj) => obj.values().map(count_panes).sum(),
+        Value::Array(items) => items.iter().map(count_panes).sum(),
+        _ => 0,
+    }
+}
+
+/// The pane inside a tree node `{"type": "pane", "pane": …}` that meters a pair and has no
+/// view yet.
+fn old_pair_pane(obj: &Map<String, Value>) -> Option<&Map<String, Value>> {
+    if obj.get("type").and_then(Value::as_str) != Some("pane") {
+        return None;
+    }
+    let pane = obj.get("pane")?.as_object()?;
+    let pair = pane.get("kind").and_then(Value::as_str) == Some("programme")
+        && pane
+            .get("content")
+            .and_then(|c| c.get("type"))
+            .and_then(Value::as_str)
+            == Some("pair")
+        && !pane.contains_key("programme_view");
+    (is_pane(pane) && pair).then_some(pane)
+}
+
+fn add_views(v: &mut Value, panes: &mut usize) {
+    match v {
+        Value::Object(obj) => {
+            if is_pane(obj) {
+                obj.entry("programme_view")
+                    .or_insert_with(|| Value::from("meters"));
+                return;
+            }
+            if *panes < PaneLayout::MAX_PANES
+                && let Some(pane) = old_pair_pane(obj)
+            {
+                let mut gonio = pane.clone();
+                gonio.insert("programme_view".into(), Value::from("goniometer"));
+                gonio.remove("plates");
+                let mut meters = pane.clone();
+                meters.insert("programme_view".into(), Value::from("meters"));
+                let node = |p: Map<String, Value>| {
+                    let mut n = Map::new();
+                    n.insert("type".into(), Value::from("pane"));
+                    n.insert("pane".into(), Value::Object(p));
+                    Value::Object(n)
+                };
+                let mut split = Map::new();
+                split.insert("type".into(), Value::from("split"));
+                split.insert("axis".into(), Value::from("row"));
+                split.insert("ratio".into(), Value::from(0.5));
+                split.insert("a".into(), node(gonio));
+                split.insert("b".into(), node(meters));
+                *obj = split;
+                *panes += 1;
+                return;
+            }
+            for child in obj.values_mut() {
+                add_views(child, panes);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|c| add_views(c, panes)),
         _ => {}
     }
 }
@@ -161,5 +250,106 @@ mod tests {
             json!({"legend": auto, "readout": auto, "mark": auto, "peaks": auto,
                 "loudness": auto})
         );
+    }
+
+    fn pane(kind: &str, content: Value) -> Value {
+        json!({"type": "pane", "pane": {"kind": kind, "transfer_view": "magnitude",
+            "chrome": "no_grid", "content": content,
+            "levels": {"transfer": {"lo": -6.0, "hi": 6.0}},
+            "plates": {"loudness": {"at": [0.5, 0.5], "scale": 2.0}}}})
+    }
+
+    #[test]
+    fn a_pair_pane_becomes_a_goniometer_beside_its_meters() {
+        let pair = json!({"type": "pair", "left": 2, "right": 3});
+        let inputs = json!({"type": "inputs", "inputs": [0, 4]});
+        let mut v = json!({"type": "split", "axis": "column", "ratio": 0.5,
+            "a": pane("programme", pair.clone()),
+            "b": {"type": "split", "axis": "row", "ratio": 0.3,
+                "a": pane("programme", inputs.clone()),
+                "b": pane("transfer", Value::Null)}});
+        programme_views(&mut v);
+        let with = |p: Value, view: &str| {
+            let mut p = p;
+            p["pane"]["programme_view"] = Value::from(view);
+            p
+        };
+        let mut gonio = with(pane("programme", pair.clone()), "goniometer");
+        gonio["pane"]
+            .as_object_mut()
+            .expect("a pane")
+            .remove("plates");
+        assert_eq!(
+            v,
+            json!({"type": "split", "axis": "column", "ratio": 0.5,
+                "a": {"type": "split", "axis": "row", "ratio": 0.5,
+                    "a": gonio, "b": with(pane("programme", pair), "meters")},
+                "b": {"type": "split", "axis": "row", "ratio": 0.3,
+                    "a": with(pane("programme", inputs), "meters"),
+                    "b": with(pane("transfer", Value::Null), "meters")}})
+        );
+        // A tree of today's shape is kept as it is.
+        let before = v.clone();
+        programme_views(&mut v);
+        assert_eq!(v, before);
+    }
+
+    #[test]
+    fn a_pair_pane_at_the_tree_root_is_split_there() {
+        let mut v = pane("programme", json!({"type": "pair", "left": 0, "right": 1}));
+        programme_views(&mut v);
+        assert_eq!(v["type"], "split");
+        assert_eq!(v["a"]["pane"]["programme_view"], "goniometer");
+        assert_eq!(v["b"]["pane"]["programme_view"], "meters");
+        assert_eq!(v["b"]["pane"]["chrome"], "no_grid");
+        assert_eq!(v["a"]["pane"]["levels"], v["b"]["pane"]["levels"]);
+    }
+
+    /// A row of `n` panes, the given ones metering a pair.
+    fn row(n: usize, pairs: &[usize]) -> Value {
+        let mut tree = Value::Null;
+        for i in (0..n).rev() {
+            let p = if pairs.contains(&i) {
+                pane("programme", json!({"type": "pair", "left": 0, "right": 1}))
+            } else {
+                pane("spl", Value::Null)
+            };
+            tree = if tree.is_null() {
+                p
+            } else {
+                json!({"type": "split", "axis": "row", "ratio": 0.5, "a": p, "b": tree})
+            };
+        }
+        tree
+    }
+
+    #[test]
+    fn pair_panes_split_only_while_the_tree_stays_within_its_pane_limit() {
+        let mut v = row(15, &[3, 9]);
+        programme_views(&mut v);
+        assert_eq!(count_panes(&v), PaneLayout::MAX_PANES);
+        let text = v.to_string();
+        assert_eq!(text.matches("\"goniometer\"").count(), 1, "{text}");
+        assert_eq!(text.matches("\"meters\"").count(), 15, "{text}");
+        let layout: PaneLayout = serde_json::from_value(strip_for_wire(v)).expect("a wire layout");
+        layout.check().expect("within the pane limit");
+    }
+
+    /// The test panes carry only the keys the walk reads; fill the rest the wire requires.
+    fn strip_for_wire(mut v: Value) -> Value {
+        if let Value::Object(obj) = &mut v {
+            if is_pane(obj) {
+                obj.insert("spectrum_view".into(), Value::from("spectrum"));
+                obj.insert("spl_view".into(), Value::from("meter"));
+                obj.insert("sweep_view".into(), Value::from("response"));
+                obj.remove("plates");
+                obj.remove("levels");
+            } else {
+                for c in obj.values_mut() {
+                    *c = strip_for_wire(c.take());
+                }
+            }
+        }
+        v
     }
 }

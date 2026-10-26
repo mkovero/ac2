@@ -303,7 +303,13 @@ def _plate(at=None, scale=1.0):
 
 
 def _layout_pane(
-    kind, transfer_view, chrome="full", content=None, transfer_levels=None, readout=None
+    kind,
+    transfer_view,
+    chrome="full",
+    content=None,
+    transfer_levels=None,
+    readout=None,
+    programme_view="meters",
 ):
     return {
         "kind": kind,
@@ -311,6 +317,7 @@ def _layout_pane(
         "spectrum_view": "spectrograph",
         "spl_view": "meter_leq",
         "sweep_view": "response",
+        "programme_view": programme_view,
         "chrome": chrome,
         "content": content,
         "levels": {
@@ -331,7 +338,7 @@ def _layout_pane(
 
 # samples::pane_layout(): a transfer pane (level axis zoomed, cursor values dragged to the
 # bottom-left at twice the text size) beside an SPL meter picked for measurement 2 over a
-# Programme pane metering the pair of inputs 3 and 4.
+# Programme pane metering the pair of inputs 3 and 4 in its goniometer view.
 PANE_LAYOUT = {
     "type": "split",
     "axis": "row",
@@ -361,6 +368,7 @@ PANE_LAYOUT = {
                 "programme",
                 "magnitude",
                 content={"type": "pair", "left": 2, "right": 3},
+                programme_view="goniometer",
             ),
         },
     },

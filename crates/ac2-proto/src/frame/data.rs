@@ -226,6 +226,11 @@ pub struct PreviewLevelsFrame {
     pub overs: Vec<u32>,
 }
 
+/// Meter frames (levels and goniometer) per second at most. A meter read by eye gains
+/// nothing above ~30 updates per second, and the 300 ms RMS barely moves between them. A
+/// client sizes what it keeps of the frames (the goniometer's embers) from this rate.
+pub const METER_FPS: u32 = 30;
+
 /// Points per pair in a goniometer frame (docs/design/programme-meter.md §5): one pair is
 /// drawn from a random position in each of this many bins of the frame's samples.
 pub const GONIO_POINTS: usize = 256;

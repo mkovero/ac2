@@ -175,7 +175,7 @@ pub(super) fn sweep_config() -> SweepConfig {
 /// A transfer pane beside an SPL meter over a Programme pane, the transfer one in its phase
 /// view with its level axis zoomed and its cursor values dragged to the bottom-left at twice
 /// the text size, the meter picked for measurement 2, the Programme pane metering the pair
-/// of inputs 3 and 4.
+/// of inputs 3 and 4 in its goniometer view.
 pub fn pane_layout() -> PaneLayout {
     use crate::model::layout::*;
     let pane = |kind, transfer_view| LayoutPane {
@@ -184,6 +184,7 @@ pub fn pane_layout() -> PaneLayout {
         spectrum_view: SpectrumView::Spectrograph,
         spl_view: SplView::MeterLeq,
         sweep_view: SweepView::Response,
+        programme_view: ProgrammeView::Meters,
         chrome: PlotChrome::Full,
         content: None,
         levels: LayoutLevels::default(),
@@ -224,6 +225,7 @@ pub fn pane_layout() -> PaneLayout {
             b: Box::new(PaneLayout::Pane {
                 pane: Box::new(LayoutPane {
                     content: Some(PaneContent::Pair { left: 2, right: 3 }),
+                    programme_view: ProgrammeView::Goniometer,
                     ..pane(PaneKind::Programme, TransferView::Magnitude)
                 }),
             }),

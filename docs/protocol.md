@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 70`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 71`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -373,10 +373,11 @@ layout it receives for the measurement it has selected on screen and never sends
 A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axis: row |
 column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
 `ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is {`kind`,
-`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `chrome`, `content`, `levels`,
-`plates`}
+`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `programme_view`, `chrome`,
+`content`, `levels`, `plates`}
 (snake_case enums, `ac2_proto::model::layout`): its kind (`transfer`, `spectrum`, `spl`,
-`distortion`, `programme`), the view of each kind it may be turned into, what it was picked
+`distortion`, `programme`), the view of each kind it may be turned into (`programme_view`:
+`meters` or `goniometer`; a goniometer on a pane that meters no pair draws its meters), what it was picked
 to show (`content`: nil, being the measurement whose layout it is, or a tagged map
 `{type: meas, meas: MeasId}` — a pick of a measurement gone since shows the layout's own —,
 `{type: inputs, inputs: [u16, …]}` (one to eight zero-based device inputs a Programme pane
@@ -388,7 +389,8 @@ and the level axis ranges the operator set on it (`levels`: {`transfer`, `spectr
 when the pane first shows a curve) and where its readout plates sit (`plates`: {`legend`,
 `readout`, `mark`, `peaks`, `loudness`}, each {`at`, `scale`}, all five required; a pane kind
 without a plate keeps its slot at the default; `loudness` is the Programme pane's loudness
-readout, docked beside or above the bars while `at` is nil: `at` nil for the client's own placement or
+readout, docked beside or above the bars and sized from the room it gets while `at` is nil
+(its `scale` then only sizes it once floated): `at` nil for the client's own placement or
 [x, y], each in 0 … 1, the plate's top-left corner as a fraction of the room the plot leaves
 around the plate, so a dropped plate stays inside its plot at any pane size; `scale` the
 plate's text size, 1 being the theme's; missing = all nil at 1). The focused pane, a

@@ -131,6 +131,7 @@
        "spectrum_view": "spectrograph",
        "spl_view": "meter_leq",
        "sweep_view": "response",
+       "programme_view": "meters",
        "chrome": "full",
        "content": null,
        "levels": {
@@ -181,6 +182,7 @@
         "spectrum_view": "spectrograph",
         "spl_view": "meter_leq",
         "sweep_view": "response",
+        "programme_view": "meters",
         "chrome": "no_grid",
         "content": {
          "type": "meas",
@@ -224,6 +226,7 @@
         "spectrum_view": "spectrograph",
         "spl_view": "meter_leq",
         "sweep_view": "response",
+        "programme_view": "goniometer",
         "chrome": "full",
         "content": {
          "type": "pair",

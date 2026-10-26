@@ -32,8 +32,8 @@ mod schema;
 
 pub use data::{
     BandLeqFrame, DataMessage, Frame, FrameData, FrameStamp, GONIO_POINTS, GonioFrame, GonioPair,
-    IrFrame, LeqFrame, LevelsFrame, PreviewLevelsFrame, RtaFrame, SessionLevelsFrame, SpecFrame,
-    SplFrame, TfFrame,
+    IrFrame, LeqFrame, LevelsFrame, METER_FPS, PreviewLevelsFrame, RtaFrame, SessionLevelsFrame,
+    SpecFrame, SplFrame, TfFrame,
 };
 pub use decode::{decode_data_message, decode_frame};
 pub use encode::{encode_event_message, encode_frame};

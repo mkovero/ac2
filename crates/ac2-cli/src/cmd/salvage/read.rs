@@ -231,6 +231,7 @@ fn old_meas(v: &Value) -> Result<OldMeas, String> {
         ac2_traces::old_layout::pane_meas_to_content(&mut d);
         ac2_traces::old_layout::plates_add_peaks(&mut d);
         ac2_traces::old_layout::plates_add_loudness(&mut d);
+        ac2_traces::old_layout::programme_views(&mut d);
         d
     });
     let layout = old_layout
@@ -688,6 +689,37 @@ mod tests {
         assert_eq!(p.peaks.at, Some([0.25, 0.75]));
         assert_eq!(p.peaks.scale, 2.0);
         assert_eq!(p.loudness, ac2_proto::model::layout::LayoutPlate::default());
+    }
+
+    /// A layout of format 34 has no Programme views: a pair's Programme pane becomes the
+    /// goniometer pane beside the meters pane a pair now brings, nothing is dropped.
+    #[test]
+    fn a_layout_of_format_34_splits_a_pair_pane() {
+        use ac2_proto::model::layout::{PaneContent, ProgrammeView};
+        let auto = json!({ "at": null, "scale": 1.0 });
+        let pane = json!({ "kind": "programme", "transfer_view": "magnitude",
+                           "spectrum_view": "spectrum", "spl_view": "meter_leq",
+                           "sweep_view": "response", "chrome": "full",
+                           "content": { "type": "pair", "left": 0, "right": 1 },
+                           "levels": { "transfer": null, "spectrum_dbfs": null,
+                                       "spectrum_spl": null, "distortion": null },
+                           "plates": { "legend": auto, "readout": auto, "mark": auto,
+                                       "peaks": auto,
+                                       "loudness": { "at": [0.25, 0.75], "scale": 2.0 } } });
+        let v = json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
+                        "running": false, "delay": null, "colour": null,
+                        "layout": { "type": "pane", "pane": pane } });
+        let m = old_meas(&v).unwrap();
+        assert!(m.notes.is_empty(), "{:?}", m.notes);
+        let layout = m.layout.expect("the layout");
+        let panes = layout.panes();
+        assert_eq!(panes.len(), 2);
+        assert_eq!(panes[0].programme_view, ProgrammeView::Goniometer);
+        assert_eq!(panes[1].programme_view, ProgrammeView::Meters);
+        assert_eq!(panes[1].plates.loudness.at, Some([0.25, 0.75]));
+        for p in panes {
+            assert_eq!(p.content, Some(PaneContent::Pair { left: 0, right: 1 }));
+        }
     }
 
     #[test]

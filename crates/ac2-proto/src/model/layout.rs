@@ -123,6 +123,8 @@ pub struct LayoutPane {
     pub spl_view: SplView,
     /// The sweep pane's view.
     pub sweep_view: SweepView,
+    /// The Programme pane's view; `goniometer` on a pane that meters no pair draws its meters.
+    pub programme_view: ProgrammeView,
     /// How much of the plot besides the curves.
     pub chrome: PlotChrome,
     /// What the pane was picked to show (its chip, a row dropped on it, a pair row); `None`:
@@ -286,6 +288,14 @@ pub enum SweepView {
     IrLog,
     Etc,
     Room,
+}
+
+/// The Programme pane's views: its bars and loudness plate, or the goniometer of its pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProgrammeView {
+    Meters,
+    Goniometer,
 }
 
 /// Grid, labels and cursor around the curves.

@@ -515,6 +515,7 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
             SweepMode::Ir(IrMode::Etc) => wire::SweepView::Etc,
             SweepMode::Room => wire::SweepView::Room,
         },
+        programme_view: wire::ProgrammeView::Meters,
         chrome: match m.chrome {
             PlotChrome::Full => wire::PlotChrome::Full,
             PlotChrome::NoGrid => wire::PlotChrome::NoGrid,

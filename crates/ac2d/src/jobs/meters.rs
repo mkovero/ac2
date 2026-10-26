@@ -6,7 +6,9 @@
 
 use std::time::{Duration, Instant};
 
-use ac2_proto::frame::{FrameData, ProtectionFlags, SessionLevelsFrame, SessionLevelsMeta};
+use ac2_proto::frame::{
+    FrameData, METER_FPS, ProtectionFlags, SessionLevelsFrame, SessionLevelsMeta,
+};
 use ac2_proto::topic::Topic;
 use ac2_proto::units::Rev;
 
@@ -14,10 +16,6 @@ use super::programme::Programme;
 use super::{Emitter, LevelsMeter, Meters, StampArgs};
 use crate::cadence::Cadence;
 use crate::fanout::Block;
-
-/// Meter frames per second at most. A meter read by eye gains nothing above ~30 updates per
-/// second, and the 300 ms RMS barely moves between them.
-pub(crate) const METER_FPS: u32 = 30;
 
 /// Shortest interval between two meter frames.
 pub(crate) fn meter_period() -> Duration {

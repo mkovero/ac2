@@ -241,7 +241,7 @@ pub(crate) const JOB_QUEUE_S: f64 = 2.0;
 const MAX_BATCH: usize = 4096;
 
 /// How often captured audio is handed on. Jobs publish at most `fps` times a second and
-/// the session meters [`crate::jobs::meters::METER_FPS`] times; handing off at twice the
+/// the session meters [`ac2_proto::frame::METER_FPS`] times; handing off at twice the
 /// meter rate (or the publish rate, if faster) lets both publish on schedule while every
 /// thread downstream wakes once per hand-off rather than once per device period. Never
 /// shorter than one device period: waking between blocks finds nothing.
