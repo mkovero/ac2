@@ -395,12 +395,12 @@ impl SessionDialog {
                 *curve = c;
             }
         }
-        // A pair is two inputs of one non-mic kind, both in the session; the prefs file
-        // may have been edited by hand, so a pair that is not that is dropped here.
+        // A pair is two inputs of one kind, both in the session; the prefs file may have
+        // been edited by hand, so a pair that is not that is dropped here.
         let pairable = |c: u16| {
             self.inputs
                 .iter()
-                .find(|row| row.channel == c && row.in_session && !row.is_mic())
+                .find(|row| row.channel == c && row.in_session)
                 .map(|row| row.kind_pref())
         };
         self.pairs = r

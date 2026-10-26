@@ -82,11 +82,11 @@ fn pair_rules_name_the_inputs_they_refuse() {
         e,
         "inputs 2 and 3 are of different kinds (line input and digital input); a pair is two of one kind"
     );
-    // A microphone never pairs: its reading is dB SPL, which has no left and right.
+    // A microphone pairs only with a microphone.
     let e = declare(&mut c, rows.clone(), vec![pair(3, 0)]).unwrap_err();
     assert_eq!(
         e,
-        "input 4 is a microphone; a pair is two line or two digital inputs"
+        "inputs 4 and 1 are of different kinds (microphone and line input); a pair is two of one kind"
     );
     // One pair per input, and never with itself.
     let e = declare(&mut c, rows.clone(), vec![pair(0, 1), pair(1, 2)]).unwrap_err();
@@ -129,6 +129,23 @@ fn pair_rules_name_the_inputs_they_refuse() {
     };
     assert!(all.pairs.is_empty());
     assert!(all.inputs.iter().all(|r| r.pair.is_none()));
+    // Two mics pair, whatever their mic names: an undeclared input is a mic too.
+    let mic = |name: Option<&str>| InputKind::Mic {
+        mic: name.map(Into::into),
+        curve: ac2_proto::model::CurveChoice::NotChosen,
+    };
+    let ReplyBody::Inputs(all) = declare(
+        &mut c,
+        vec![row(2, mic(Some("M30"))), row(3, mic(None))],
+        vec![pair(2, 3)],
+    )
+    .unwrap() else {
+        panic!("inputs");
+    };
+    assert_eq!(all.pairs.len(), 1);
+    let side = |ch: u16| all.inputs.iter().find(|r| r.channel == ch).unwrap().pair;
+    assert_eq!(side(2), Some(PairSide::Left));
+    assert_eq!(side(3), Some(PairSide::Right));
 }
 
 #[test]

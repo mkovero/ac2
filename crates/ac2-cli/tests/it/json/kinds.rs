@@ -82,7 +82,7 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     let r = ac2(&f, &["session", "inputs", "--pair", "1,2", "--json"]).await?;
     assert_ne!(r.code, 0);
     assert_eq!(r.json()?["error"]["code"], "invalid");
-    has(&r.stdout, "input 1 is a microphone");
+    has(&r.stdout, "inputs 1 and 2 are of different kinds");
     let r = ac2(
         &f,
         &[

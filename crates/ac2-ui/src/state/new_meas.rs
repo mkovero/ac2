@@ -86,6 +86,9 @@ impl AppState {
                 open_session_hint(keymap)
             )),
             NewKind::Programme => self.meter_form(None).err(),
+            NewKind::Transfer | NewKind::Sweep if self.open_session().is_some() => {
+                self.two_input_refusal(k == NewKind::Sweep, keymap)
+            }
             _ if self.open_session().is_some() => None,
             NewKind::Sweep => Some(format!(
                 "no audio I/O to sweep: {}",
@@ -96,6 +99,30 @@ impl AppState {
                 open_session_hint(keymap)
             )),
         }
+    }
+
+    /// Why a transfer (or, `sweep`, a sweep) cannot be made on the open session: both
+    /// divide a measured input by a reference input, so one input alone gives nothing to
+    /// divide by, and a sweep is played, so it needs an output. A session may open without
+    /// either (a lone mic meters SPL and spectra), so this is where the need is said.
+    pub(super) fn two_input_refusal(&self, sweep: bool, keymap: &Keymap) -> Option<String> {
+        let o = self.open_session()?;
+        let what = if sweep { "a sweep" } else { "a transfer" };
+        if o.config.input_channels.len() < 2 {
+            return Some(format!(
+                "{what} compares the measured input with a reference input, and the audio \
+                 I/O captures one input: add the reference (R on its row) — {}",
+                open_session_hint(keymap)
+            ));
+        }
+        if sweep && o.config.output_channels == 0 {
+            return Some(format!(
+                "a sweep is played on an output, and the audio I/O has none: add the \
+                 stimulus output (S on its row) — {}",
+                open_session_hint(keymap)
+            ));
+        }
+        None
     }
 
     /// The math channel form as Shift+M opens it, or why it cannot open.

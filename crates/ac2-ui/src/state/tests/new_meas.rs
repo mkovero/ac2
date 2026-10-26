@@ -168,6 +168,63 @@ fn the_meter_row_is_blocked_without_inputs() {
     );
 }
 
+/// One mic and no outputs (a USB mic for SPL): the meters can be made, a transfer and a
+/// sweep say what they need, on their rows and on their own keys.
+#[test]
+fn a_lone_mic_session_says_what_a_transfer_and_a_sweep_need() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    if let Some(o) = &mut s.session.open {
+        o.config.input_channels = vec![1];
+        o.config.output_channels = 0;
+        o.config.loopback = None;
+    }
+    t.conn(mirror(s));
+    t.key("Ctrl+M");
+    let c = chooser(&t);
+    let blocked = |i: usize| c.choices[i].blocked.clone().unwrap_or_default();
+    assert!(
+        blocked(0).starts_with(
+            "a transfer compares the measured input with a reference input, and the audio \
+             I/O captures one input: add the reference (R on its row) — press "
+        ),
+        "{}",
+        blocked(0)
+    );
+    assert!(
+        blocked(4).starts_with("a sweep compares the measured input with a reference input"),
+        "{}",
+        blocked(4)
+    );
+    assert!(c.choices[1..4].iter().all(|x| x.blocked.is_none()));
+    assert_eq!(c.index, 1, "the first kind that can be made");
+    t.key("Escape");
+    // Two inputs but no output: the transfer can be made, the sweep has nowhere to play.
+    t.remirror(|s| {
+        if let Some(o) = &mut s.session.open {
+            o.config.input_channels = vec![0, 1];
+        }
+    });
+    t.key("Ctrl+M");
+    let c = chooser(&t);
+    assert_eq!(c.choices[0].blocked, None);
+    assert!(
+        c.choices[4]
+            .blocked
+            .as_deref()
+            .is_some_and(|w| w.starts_with(
+                "a sweep is played on an output, and the audio I/O \
+                                            has none: add the stimulus output (S on its row)"
+            )),
+        "{:?}",
+        c.choices[4]
+    );
+    t.key("Escape");
+    // Shift+S warns in the same words and opens no form.
+    t.key("Shift+S");
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
 #[test]
 fn enter_opens_the_kinds_form_and_a_refused_kind_stays_listed() {
     let mut t = T::new();

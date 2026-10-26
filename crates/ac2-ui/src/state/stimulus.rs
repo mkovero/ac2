@@ -345,6 +345,10 @@ impl AppState {
             ));
             return;
         };
+        if let Some(why) = self.two_input_refusal(true, keymap) {
+            self.warn(why);
+            return;
+        }
         let inputs = self.session_input_names();
         let outputs = self.session_output_names();
         let mics: Vec<u16> = self

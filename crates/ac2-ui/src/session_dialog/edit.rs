@@ -124,24 +124,35 @@ impl SessionDialog {
         for r in &mut self.inputs {
             r.reference = false;
         }
-        if let Some(r) = self.inputs.get_mut(i) {
-            r.reference = true;
-            r.in_session = true;
-            if r.is_mic() {
-                r.kind = InputKind::Line;
-                self.notice = Some(
+        let Some(r) = self.inputs.get_mut(i) else {
+            return;
+        };
+        r.reference = true;
+        r.in_session = true;
+        if r.is_mic() {
+            r.kind = InputKind::Line;
+            let c = r.channel;
+            self.notice = Some(
+                "the reference is the loopback cable, a line input: its mic name is dropped".into(),
+            );
+            // Its partner stays a mic, and a pair is two of one kind.
+            if let Some((p, _)) = self.pair_of(c) {
+                let (l, r) = (p.left, p.right);
+                self.unpair(c);
+                self.notice = Some(format!(
                     "the reference is the loopback cable, a line input: its mic name is \
-                     dropped"
-                        .into(),
-                );
+                     dropped, and in {} and {} are no longer a pair",
+                    l + 1,
+                    r + 1
+                ));
             }
         }
     }
 
-    /// M / L / A: declares the row's kind (and puts it in the session). A line or digital
-    /// kind applies to both rows of the row's pair (a pair is two of one kind); a mic
-    /// leaves the pair (mics are never paired). A mic row gets the mic name last used on
-    /// this input.
+    /// M / L / A: declares the row's kind (and puts it in the session). The kind applies
+    /// to both rows of the row's pair (a pair is two of one kind), except that a mic kind
+    /// never reaches the reference: then the row leaves the pair instead. A mic row gets
+    /// the mic name last used on this input.
     fn set_kind(&mut self, i: usize, k: KindPref) {
         let Some(r) = self.inputs.get(i) else {
             return;
@@ -152,27 +163,31 @@ impl SessionDialog {
         }
         let c = r.channel;
         let pair = self.pair_of(c).map(|(p, side)| (p.left, p.right, side));
-        let partner = pair.map(|(l, r, side)| match side {
+        let mut partner = pair.map(|(l, r, side)| match side {
             PairSide::Left => r,
             PairSide::Right => l,
         });
-        if k == KindPref::Mic && self.pair_pick == Some(c) {
-            self.pair_pick = None;
-        }
         if k == KindPref::Mic
             && let Some((l, r, _)) = pair
+            && self
+                .inputs
+                .iter()
+                .any(|row| Some(row.channel) == partner && row.reference)
         {
             self.unpair(c);
+            partner = None;
             // A pair reads left then right wherever it is named.
             self.notice = Some(format!(
-                "in {} and {} are no longer a pair: a pair is two line or two digital inputs",
+                "in {} and {} are no longer a pair: the reference is the loopback cable, \
+                 a line input, and a pair is two of one kind",
                 l + 1,
                 r + 1
             ));
         }
-        for row in &mut self.inputs {
+        let mut mics = Vec::new();
+        for (j, row) in self.inputs.iter_mut().enumerate() {
             let own = row.channel == c;
-            if !own && (k == KindPref::Mic || Some(row.channel) != partner) {
+            if !own && Some(row.channel) != partner {
                 continue;
             }
             if row.kind_pref() != k {
@@ -182,23 +197,26 @@ impl SessionDialog {
             if own {
                 row.in_session = true;
             }
+            if k == KindPref::Mic {
+                mics.push(j);
+            }
         }
-        if k == KindPref::Mic
-            && let Some(name) = self.inputs[i].mic().map(str::to_owned)
-        {
-            let curve = self.setup_curve(c, &name);
-            self.inputs[i].kind = InputKind::Mic {
-                mic: Some(name),
-                curve,
-            };
+        for j in mics {
+            if let Some(name) = self.inputs[j].mic().map(str::to_owned) {
+                let curve = self.setup_curve(self.inputs[j].channel, &name);
+                self.inputs[j].kind = InputKind::Mic {
+                    mic: Some(name),
+                    curve,
+                };
+            }
         }
     }
 
     /// *pair* / Shift+P: on a paired row, unpairs it; else the first pick waits for a
     /// second, which makes the pair (the lower input left, both in the session) or is
     /// refused with the first pick kept. The picked row again cancels the pick. Both
-    /// inputs must be line or both digital: a kind is the operator's to declare, so a
-    /// refusal never changes one.
+    /// inputs must be of one kind (mic, line or digital): a kind is the operator's to
+    /// declare, so a refusal never changes one.
     fn toggle_pair(&mut self, i: usize) {
         let Some(r) = self.inputs.get(i) else {
             return;
@@ -210,12 +228,7 @@ impl SessionDialog {
             self.notice = Some(format!("in {} and {} are no longer a pair", l + 1, r + 1));
             return;
         }
-        let rule = "a pair is two line or two digital inputs (L or A on the rows)";
         let Some(first) = self.pair_pick else {
-            if kind == KindPref::Mic {
-                self.notice = Some(format!("in {} is a mic: {rule}", c + 1));
-                return;
-            }
             self.pair_pick = Some(c);
             self.notice = Some(format!(
                 "in {} picked: pair on the other input (again on in {} cancels)",
@@ -235,14 +248,10 @@ impl SessionDialog {
         };
         let (kind_f, word_f) = (self.inputs[fi].kind_pref(), self.inputs[fi].kind_word());
         let kept = format!("in {} stays picked", first + 1);
-        if kind == KindPref::Mic {
-            self.notice = Some(format!("in {} is a mic: {rule}; {kept}", c + 1));
-            return;
-        }
         if kind != kind_f {
             self.notice = Some(format!(
-                "in {} is {word_f} and in {} is {word}: a pair is two of one kind (L or A on \
-                 the rows); {kept}",
+                "in {} is {word_f} and in {} is {word}: a pair is two of one kind (M, L or A \
+                 on the rows); {kept}",
                 first + 1,
                 c + 1
             ));
@@ -275,7 +284,9 @@ impl SessionDialog {
     }
 
     /// N on an input row: types the mic name of a mic row (a line or digital row becomes
-    /// a mic), or the name of the pair a paired row is in.
+    /// a mic), or the name of the pair a paired line or digital row is in. A paired mic
+    /// row names its mic: the mic name picks the calibration every reading on it uses, so
+    /// it outranks a label for the pair.
     pub fn start_mic_edit(&mut self) -> bool {
         let Row::Input(i) = self.focus else {
             self.notice = Some("N names the mic or the pair on an input row".into());
@@ -284,7 +295,9 @@ impl SessionDialog {
         let Some(r) = self.inputs.get(i) else {
             return false;
         };
-        if let Some((p, _)) = self.pair_of(r.channel) {
+        if let Some((p, _)) = self.pair_of(r.channel)
+            && !r.is_mic()
+        {
             self.edit_text = p.name.clone().unwrap_or_default();
             self.edit = Some(Edit::PairName(i));
             return true;

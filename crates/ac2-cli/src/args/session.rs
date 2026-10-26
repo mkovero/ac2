@@ -307,7 +307,7 @@ pub struct SessionInputs {
     #[arg(long = "curve", value_name = "IN=LABEL|off")]
     pub curves: Vec<CurveAssign>,
     /// A stereo pair, left input first, e.g. `3,4` or `3,4=Main` (repeatable): the pairs
-    /// given replace the current ones. Two line or two digital inputs, never mics.
+    /// given replace the current ones. Two inputs of one kind: mics, line or digital.
     #[arg(long = "pair", value_name = "L,R[=NAME]", conflicts_with = "no_pairs")]
     pub pairs: Vec<PairArg>,
     /// Remove every pair.

@@ -39,7 +39,7 @@ fn kinds_and_pairs_by_key() {
     t.type_key("Shift+P", "P");
     assert_eq!(
         notice(&t),
-        "in 3 is line and in 4 is digital: a pair is two of one kind (L or A on the rows); \
+        "in 3 is line and in 4 is digital: a pair is two of one kind (M, L or A on the rows); \
          in 3 stays picked"
     );
     assert_eq!(dialog(&t).pair_pick, Some(2));
@@ -71,30 +71,17 @@ fn kinds_and_pairs_by_key() {
     t.key("Enter");
     assert_eq!(dialog(&t).pairs[0].name.as_deref(), Some("Main"));
     assert_eq!(dialog(&t).edit, None);
-    // M on a paired row: a mic, and the pair is gone.
+    // M on a paired row: both rows become mics and the pair stays (two of one kind).
     focus(&mut t, Row::Input(3));
     t.key("M");
-    assert_eq!(
-        notice(&t),
-        "in 3 and 4 are no longer a pair: a pair is two line or two digital inputs"
-    );
-    assert!(dialog(&t).pairs.is_empty());
+    assert_eq!(dialog(&t).inputs[2].kind_pref(), KindPref::Mic);
     assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Mic);
-    // Shift+P onto a mic is refused by the rule.
-    focus(&mut t, Row::Input(3));
-    t.type_key("Shift+P", "P");
-    assert_eq!(
-        notice(&t),
-        "in 4 is a mic: a pair is two line or two digital inputs (L or A on the rows)"
-    );
-    assert_eq!(dialog(&t).pair_pick, None);
-    // Line again, paired, opened: the setups carry the kinds and the sides, the session
-    // the pair, and the device remembers both.
+    assert_eq!(dialog(&t).pairs.len(), 1);
+    // Line again on both, still paired, opened: the setups carry the kinds and the sides,
+    // the session the pair, and the device remembers both.
     t.key("L");
-    focus(&mut t, Row::Input(2));
-    t.type_key("Shift+P", "P");
-    focus(&mut t, Row::Input(3));
-    t.type_key("Shift+P", "P");
+    assert_eq!(dialog(&t).inputs[2].kind_pref(), KindPref::Line);
+    assert_eq!(dialog(&t).pairs.len(), 1);
     let r = t.key("Enter");
     let (config, inputs) = opened(&r).expect("open");
     assert_eq!(config.input_channels, vec![0, 1, 2, 3]);
@@ -106,7 +93,7 @@ fn kinds_and_pairs_by_key() {
     let pair = Pair {
         left: 2,
         right: 3,
-        name: None,
+        name: Some("Main".into()),
     };
     assert_eq!(opened_pairs(&r), Some(std::slice::from_ref(&pair)));
     let roles = &t.st.prefs.sessions["fake/fake:loop"];
@@ -186,24 +173,18 @@ fn pair_pick_cancels() {
     assert_eq!(the_pair(&t), None);
 }
 
-/// A mic is never paired: a first pick on it is refused, a second keeps the first pick for
-/// another try; mixed kinds likewise, and no kind changes.
+/// A pair of two kinds is refused and the first pick kept for another try; no kind
+/// changes.
 #[test]
 fn pair_refusals_keep_the_first_pick() {
     let mut t = T::new();
     open_dialog(&mut t, backends(true));
     let notice = |t: &T| dialog(t).notice.clone().unwrap_or_default();
-    click_pair(&mut t, 1);
-    assert_eq!(
-        notice(&t),
-        "in 2 is a mic: a pair is two line or two digital inputs (L or A on the rows)"
-    );
-    assert_eq!(dialog(&t).pair_pick, None);
     click_pair(&mut t, 2);
     click_pair(&mut t, 1);
     assert_eq!(
         notice(&t),
-        "in 2 is a mic: a pair is two line or two digital inputs (L or A on the rows); \
+        "in 3 is line and in 2 is mic: a pair is two of one kind (M, L or A on the rows); \
          in 3 stays picked"
     );
     assert_eq!(dialog(&t).pair_pick, Some(2));
@@ -214,7 +195,7 @@ fn pair_refusals_keep_the_first_pick() {
     click_pair(&mut t, 3);
     assert_eq!(
         notice(&t),
-        "in 3 is line and in 4 is digital: a pair is two of one kind (L or A on the rows); \
+        "in 3 is line and in 4 is digital: a pair is two of one kind (M, L or A on the rows); \
          in 3 stays picked"
     );
     assert_eq!(dialog(&t).inputs[2].kind_pref(), KindPref::Line);
@@ -226,7 +207,7 @@ fn pair_refusals_keep_the_first_pick() {
 }
 
 /// *pair* on either row of a pair unpairs it; the pick is dropped when its row leaves the
-/// session or becomes a mic.
+/// session, and kept when its kind changes (the second pick checks the kinds).
 #[test]
 fn pair_unpairs_and_pick_follows_the_row() {
     let mut t = T::new();
@@ -245,10 +226,62 @@ fn pair_unpairs_and_pick_follows_the_row() {
     t.type_key("Space", " ");
     assert!(!dialog(&t).inputs[2].in_session);
     assert_eq!(dialog(&t).pair_pick, None);
-    // Picked, then a mic: no pick.
+    // Picked, then a mic: still picked.
     click_pair(&mut t, 2);
     t.key("M");
-    assert_eq!(dialog(&t).pair_pick, None);
+    assert_eq!(dialog(&t).pair_pick, Some(2));
+}
+
+/// Two mics pair like two line inputs: the pair opens with both mic rows, N on a paired mic
+/// names the mic (its calibration), and R on one of them unpairs it, since the reference
+/// is a line input.
+#[test]
+fn two_mics_pair() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    let notice = |t: &T| dialog(t).notice.clone().unwrap_or_default();
+    focus(&mut t, Row::Input(3));
+    t.key("M");
+    click_pair(&mut t, 1);
+    click_pair(&mut t, 3);
+    assert_eq!(notice(&t), "in 2 and 4 are a pair (N names it)");
+    assert_eq!(the_pair(&t), Some((1, 3)));
+    t.type_key("N", "n");
+    assert_eq!(dialog(&t).edit, Some(Edit::Mic(3)));
+    t.text("M31");
+    t.key("Enter");
+    assert_eq!(dialog(&t).inputs[3].mic(), Some("M31"));
+    assert_eq!(the_pair(&t), Some((1, 3)));
+    let r = t.key("Enter");
+    let (_, inputs) = opened(&r).expect("open");
+    let setup = |c: u16| inputs.iter().find(|i| i.channel == c).expect("setup");
+    assert!(matches!(setup(1).kind, InputKind::Mic { .. }));
+    assert_eq!(setup(1).pair, Some(PairSide::Left));
+    assert_eq!(setup(3).kind.mic(), Some("M31"));
+    assert_eq!(setup(3).pair, Some(PairSide::Right));
+    assert_eq!(
+        opened_pairs(&r),
+        Some(
+            &[Pair {
+                left: 1,
+                right: 3,
+                name: None
+            }][..]
+        )
+    );
+    // The reference is the loopback cable: a mic made the reference leaves its pair.
+    open_dialog(&mut t, backends(true));
+    assert_eq!(the_pair(&t), Some((1, 3)));
+    focus(&mut t, Row::Input(3));
+    t.key("R");
+    assert_eq!(the_pair(&t), None);
+    assert_eq!(dialog(&t).inputs[3].kind_pref(), KindPref::Line);
+    assert_eq!(dialog(&t).inputs[1].kind_pref(), KindPref::Mic);
+    assert!(
+        notice(&t).ends_with("in 2 and 4 are no longer a pair"),
+        "{}",
+        notice(&t)
+    );
 }
 
 /// The remembered kinds and pair of a device come back in the dialog and open with it; a

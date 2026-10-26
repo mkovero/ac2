@@ -106,6 +106,13 @@ impl AppState {
                         "no audio I/O to measure: {}",
                         open_session_hint(keymap)
                     )),
+                    Some(_)
+                        if let Some(why) = (kind == FormKind::Transfer)
+                            .then(|| self.two_input_refusal(false, keymap))
+                            .flatten() =>
+                    {
+                        self.warn(why)
+                    }
                     Some(o) => {
                         let names = self.session_input_names();
                         let mics: Vec<u16> = self

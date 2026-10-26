@@ -335,3 +335,33 @@ fn p_on_a_core_audio_device_opens_audio_midi_setup() {
         "{r:?}"
     );
 }
+
+/// One USB mic and nothing else: no outputs, no reference. It opens capture-only, the mic
+/// in the session, no loopback and no output channels.
+#[test]
+fn a_lone_usb_mic_opens_without_reference_or_outputs() {
+    let mut t = T::new();
+    let mut b = backends(false);
+    let dev = &mut b[0].devices[0];
+    dev.output = None;
+    if let Some(i) = dev.input.as_mut() {
+        i.max_channels = 1;
+    }
+    open_dialog(&mut t, b);
+    assert_eq!(dialog(&t).inputs.len(), 1);
+    focus(&mut t, Row::Input(0));
+    if dialog(&t).inputs[0].reference {
+        t.key("R");
+    }
+    t.key("M");
+    let d = dialog(&t);
+    assert!(!d.inputs[0].reference);
+    assert!(d.inputs[0].in_session);
+    assert_eq!(d.inputs[0].kind_pref(), KindPref::Mic);
+    let r = t.key("Enter");
+    let (config, inputs) = opened(&r).unwrap_or_else(|| panic!("{:?}", dialog(&t).error));
+    assert_eq!(config.input_channels, vec![0]);
+    assert_eq!(config.output_channels, 0);
+    assert_eq!(config.loopback, None);
+    assert!(matches!(inputs[0].kind, InputKind::Mic { .. }));
+}

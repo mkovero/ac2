@@ -344,17 +344,6 @@ fn roles_move_toggle_and_explain_themselves() {
         "{:?}",
         dialog(&t).notice
     );
-    // Without the reference, mics have nothing to be measured against.
-    focus(&mut t, Row::Input(2));
-    t.key("R");
-    assert!(
-        t.key("Enter")
-            .iter()
-            .all(|r| opened(std::slice::from_ref(r)).is_none())
-    );
-    let e = dialog(&t).error.clone().unwrap_or_default();
-    assert!(e.starts_with("Pick a reference input: the loopback"), "{e}");
-    t.key("R");
     // Without a stimulus output the loopback has no source.
     focus(&mut t, Row::Output(0));
     t.key("S");

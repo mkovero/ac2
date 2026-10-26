@@ -68,13 +68,9 @@ impl SessionDialog {
             .filter(|o| o.stimulus && o.channel < self.out_count)
             .map(|o| o.channel)
             .collect();
-        if !mics.is_empty() && reference.is_none() {
-            return Err(
-                "Pick a reference input: the loopback from your stimulus output (R on its row, \
-                 or D to detect it)."
-                    .into(),
-            );
-        }
+        // No reference is needed to open: a mic alone meters SPL and spectra, and a
+        // transfer or sweep says it needs one when it is asked for. The reference is the
+        // loopback of the stimulus output, though, so one without the other names nothing.
         if reference.is_some() && stimulus.is_empty() {
             return Err(
                 "Pick the stimulus output: the output that feeds your speakers and the loopback \

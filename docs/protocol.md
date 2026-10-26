@@ -1425,7 +1425,7 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   `name`: string | nil} (channels). `session.inputs` upserts its rows and replaces the pair
   list; the daemon sets every row's `pair` side from the list. It refuses (`invalid`, naming
   the inputs by channel) a mic row whose chosen label is not stored for its mic (unless the
-  row is unchanged), a pair of an input with itself, of two kinds, of a `mic`, of an input
+  row is unchanged), a pair of an input with itself, of two kinds, of an input
   in two pairs, or of an input the open session does not capture. The daemon chooses a
   mic's only curve on a row where none is chosen (on every change of the setup or the
   library); with several, the row stays `not_chosen` and no curve applies until the

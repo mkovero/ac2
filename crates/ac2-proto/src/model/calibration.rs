@@ -320,8 +320,9 @@ pub enum PairSide {
     Right,
 }
 
-/// Two inputs of one kind declared a stereo pair (decision V2). Never two mics: a
-/// correlation of two measurement mics would be read as a stereo verdict.
+/// Two inputs of one kind declared a stereo pair (decision V2): two mics, two line or two
+/// digital inputs. A mic pair gets level bars and correlation but no loudness, since
+/// BS.1770 loudness is defined on a programme feed, not on an acoustic pickup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Pair {

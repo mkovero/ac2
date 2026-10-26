@@ -101,7 +101,7 @@ pub enum Command {
     /// Set the kind (and a mic's name and active curve) of the listed inputs (others
     /// unchanged) and the pairs among all inputs (the whole list). A chosen curve must be
     /// stored for the row's mic (unless the row is unchanged). Refused by name: a pair of
-    /// two kinds, of mics, of an input twice, of an input with itself, or of an input the
+    /// two kinds, of an input twice, of an input with itself, or of an input the
     /// open session does not capture; a row's `pair` side is set from the pair list.
     #[serde(rename = "session.inputs")]
     SessionInputs {

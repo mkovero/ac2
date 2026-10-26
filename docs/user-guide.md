@@ -208,9 +208,9 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
 - **Pairs**: *pair* (or **Shift+P**) on one input picks it, *pair* on a second input makes
   the pair: the lower input is left, the higher right, and both go in the session. *pair*
   on the picked row again drops the pick; *pair* on either row of a pair
-  unpairs it. **N** on a paired row names the pair (`Main`, `AES 1`). A pair is two line
-  or two digital inputs (a mic is never paired) and the kind keys apply to both rows of a
-  pair. The Inputs list shows a pair as one row with two meters.
+  unpairs it. **N** on a paired row names the pair (`Main`, `AES 1`). A pair is two inputs
+  of one kind (two mics, two line or two digital inputs) and the kind keys apply to both
+  rows of a pair. The Inputs list shows a pair as one row with two meters.
 - The mouse works too: boxes, the *reference* / *mic* / *line* / *digital* / *pair* chips,
   double click on a name. The foot of the page lists the keys:
   `M mic · L line · A digital · Shift+P pair · N name`.
@@ -247,8 +247,14 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   is left out, never shown as zero. When the session line and these figures are wider than
   the room between the bar's left and right groups, they scroll slowly back and forth
   through it; resting the pointer on them holds them still.
-- **Enter** opens; what is missing is said in words (*Pick a reference input: the loopback
-  from your stimulus output*). Roles, kinds, pairs and mic names are remembered per device
+- **Enter** opens; what is missing is said in words (*Pick the stimulus output: the output
+  that feeds your speakers and the loopback*). A reference and a stimulus output are not
+  needed to open: one USB mic alone meters SPL, spectrum and RTA (an input-only device
+  opens capture-only). The reference is the loopback of the stimulus output, so a
+  reference asks for its stimulus output. A transfer or a sweep needs two inputs (a sweep
+  also an output), and its *New measurement* row and key say so on audio I/O without them;
+  a transfer's reference is picked in its form from the captured inputs, so an external
+  generator's or console's feed declared as an input serves too. Roles, kinds, pairs and mic names are remembered per device
   (`ui.toml`).
   On a daemon with no measurements yet, the session opening brings up the **New
   measurement** chooser (as **Ctrl+M** does): **Enter** on a kind opens its settings — the
@@ -2201,9 +2207,9 @@ Every input is declared **mic**, **line** or **digital** (**M** / **L** / **A** 
 in Settings › Audio I/O; `ac2 session inputs --kind 3=line`): a backend cannot tell an AES
 feed from an analogue one, so nothing is inferred. A mic reads dB SPL through its
 calibration; a line input reads dBFS, and dBu once it has a line calibration; a digital
-feed reads dBFS and is never calibrated (0 dBFS is its full scale). Two line or two digital
-inputs can be a **stereo pair** (`ac2 session inputs --pair 3,4=Main`, repeatable; the pairs
-given replace the current ones, `--no-pairs` clears them); mics are never paired. A mic
+feed reads dBFS and is never calibrated (0 dBFS is its full scale). Two inputs of one kind
+(two mics, two line or two digital inputs) can be a **stereo pair** (`ac2 session inputs --pair 3,4=Main`, repeatable; the pairs
+given replace the current ones, `--no-pairs` clears them); a mic pair gets bars and a correlation but no loudness. A mic
 input carries a **mic name** (**N**, `ac2 session open … --mic 3=M30`, `ac2 session inputs
 --mic 3=M30`); `ac2 session inputs` alone lists the setup, one line per input in the app's
 words (`in 1 · mic MM1 · 90° · verified …`, `in 3+4 · line · pair Main · dBFS`). The

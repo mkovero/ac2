@@ -236,8 +236,8 @@ impl SessionDialog {
                 i.label(),
                 i.channel + 1,
             ),
-            (None, _) => "No reference yet: R on the input the loopback cable returns on, or D \
-                          finds it."
+            (None, _) => "No reference: spectrum, RTA and SPL need none. For transfers and \
+                          sweeps, R on the input the loopback cable returns on, or D finds it."
                 .to_owned(),
         }
     }

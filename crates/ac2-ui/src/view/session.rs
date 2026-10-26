@@ -465,18 +465,19 @@ fn input_grid(
                         let name = if editing || naming_pair {
                             format!("{}▏", d.edit_text)
                         } else {
+                            let mark = |side| match side {
+                                ac2_proto::model::PairSide::Left => "L",
+                                ac2_proto::model::PairSide::Right => "R",
+                            };
                             match (r.mic(), pair) {
-                                (Some(m), _) => format!("{m} · {dev}"),
-                                (None, Some((p, side))) => {
-                                    let mark = match side {
-                                        ac2_proto::model::PairSide::Left => "L",
-                                        ac2_proto::model::PairSide::Right => "R",
-                                    };
-                                    match &p.name {
-                                        Some(n) => format!("{n} {mark} · {dev}"),
-                                        None => format!("{dev} · {mark}"),
-                                    }
+                                (Some(m), Some((_, side))) => {
+                                    format!("{m} {} · {dev}", mark(side))
                                 }
+                                (Some(m), None) => format!("{m} · {dev}"),
+                                (None, Some((p, side))) => match &p.name {
+                                    Some(n) => format!("{n} {} · {dev}", mark(side)),
+                                    None => format!("{dev} · {}", mark(side)),
+                                },
                                 (None, None) => dev,
                             }
                         };
@@ -538,15 +539,12 @@ fn input_grid(
                             *msg = Some(SessionMsg::Role(row, key));
                         }
                     }
-                    // A mic is never half of a pair: its chip is shown, disabled, with why.
                     let picked = d.pair_pick == Some(r.channel);
-                    let resp = ui.add_enabled_ui(!r.is_mic(), |ui| {
-                        if picked {
-                            pick_chip(ui, "pair", ch.armed)
-                        } else {
-                            chip(ui, pair.is_some(), "pair", ch.armed, ch)
-                        }
-                    });
+                    let resp = if picked {
+                        pick_chip(ui, "pair", ch.armed)
+                    } else {
+                        chip(ui, pair.is_some(), "pair", ch.armed, ch)
+                    };
                     let tip = if pair.is_some() {
                         "Shift+P: unpair"
                     } else if picked {
@@ -554,17 +552,9 @@ fn input_grid(
                          cancels"
                     } else {
                         "Shift+P: pick for a left/right pair, then pair on the other input \
-                         (two line or two digital inputs)"
+                         (two inputs of one kind)"
                     };
-                    if resp
-                        .inner
-                        .on_hover_text(tip)
-                        .on_disabled_hover_text(
-                            "a mic is never paired: L or A makes it a line \
-                             or digital input",
-                        )
-                        .clicked()
-                    {
+                    if resp.on_hover_text(tip).clicked() {
                         *msg = Some(SessionMsg::Role(row, RoleKey::Pair));
                     }
                 });

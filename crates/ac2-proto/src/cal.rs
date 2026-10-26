@@ -184,7 +184,8 @@ pub fn apply_pair_sides(inputs: &[InputSetup], pairs: &[Pair]) -> Vec<InputSetup
 
 /// The rules of a pair list over `inputs` (decision V2), one message per violation naming
 /// the inputs by channel (1-based, as printed on the interface): both sides are of one kind
-/// and neither is a mic, an input is in at most one pair, and a pair is two inputs.
+/// (two mics, two line or two digital inputs), an input is in at most one pair, and a pair
+/// is two inputs.
 /// `captured` says whether the open session captures a channel (`None`: no open session, so
 /// any channel may be declared).
 pub fn check_pairs(
@@ -213,16 +214,10 @@ pub fn check_pairs(
                 return Err(format!("input {} is in two pairs", n(ch)));
             }
         }
+        // Two mics of one pair may carry different mic names and curves: the kind is what
+        // must match, since a pair's meters read both sides on one scale.
         let (l, r) = (input_kind(inputs, p.left), input_kind(inputs, p.right));
-        for (ch, k) in [(p.left, &l), (p.right, &r)] {
-            if matches!(k, InputKind::Mic { .. }) {
-                return Err(format!(
-                    "input {} is a microphone; a pair is two line or two digital inputs",
-                    n(ch)
-                ));
-            }
-        }
-        if l != r {
+        if l.word() != r.word() {
             return Err(format!(
                 "inputs {} and {} are of different kinds ({} and {}); a pair is two of one kind",
                 n(p.left),
@@ -795,13 +790,15 @@ mod tests {
         assert_eq!(check(&[pair(1, 2)]), Ok(()));
         assert_eq!(
             check(&[pair(0, 1)]).unwrap_err(),
-            "input 1 is a microphone; a pair is two line or two digital inputs"
+            "inputs 1 and 2 are of different kinds (microphone and line input); a pair is \
+             two of one kind"
         );
-        // An undeclared input is a mic.
+        // An undeclared input is a mic, so it pairs with a declared mic of another name.
+        assert_eq!(check(&[pair(0, 9)]), Ok(()));
         assert!(
             check(&[pair(1, 9)])
                 .unwrap_err()
-                .starts_with("input 10 is a microphone")
+                .starts_with("inputs 2 and 10 are of different kinds (line input and microphone)")
         );
         assert_eq!(
             check(&[pair(3, 4)]).unwrap_err(),
