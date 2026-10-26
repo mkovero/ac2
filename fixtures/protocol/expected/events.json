@@ -161,6 +161,10 @@
         "peaks": {
          "at": null,
          "scale": 1.0
+        },
+        "loudness": {
+         "at": null,
+         "scale": 1.0
         }
        }
       }
@@ -204,6 +208,10 @@
          "peaks": {
           "at": null,
           "scale": 1.0
+         },
+         "loudness": {
+          "at": null,
+          "scale": 1.0
          }
         }
        }
@@ -242,6 +250,10 @@
           "scale": 1.0
          },
          "peaks": {
+          "at": null,
+          "scale": 1.0
+         },
+         "loudness": {
           "at": null,
           "scale": 1.0
          }
@@ -1119,7 +1131,8 @@
     "ballistic": "type1",
     "correlation_window": "short",
     "over_threshold": -1.0,
-    "correlation_gate": -50.0
+    "correlation_gate": -50.0,
+    "loudness_target": -16.0
    },
    "osc": {
     "sent": 12,

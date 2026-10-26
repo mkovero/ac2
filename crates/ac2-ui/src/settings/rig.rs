@@ -560,6 +560,7 @@ pub fn levels_set(
         correlation_window,
         over_threshold,
         correlation_gate,
+        loudness_target: None,
     };
     Some((cmd, what.join(" · ")))
 }

@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 68`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 69`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -105,7 +105,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `artnet.target` | `base: Rev` (`rig.rev`), `target: ArtnetTarget \| nil` | `ack` (`rig` event) | |
 | `artnet.test` | `channels: [DmxSet]` | `ack` (`rig` event: the sent count) | |
 | `artnet.fade` | `base: Rev` (`rig.rev`), `seconds: f64` | `ack` (`rig` event) | |
-| `levels.set` | `base: Rev` (`rig.rev`), `ballistic: Ballistic \| nil`, `correlation_window: CorrelationWindow \| nil`, `over_threshold: Dbtp \| nil`, `correlation_gate: Dbfs \| nil` | `ack` (`rig` event) | |
+| `levels.set` | `base: Rev` (`rig.rev`), `ballistic: Ballistic \| nil`, `correlation_window: CorrelationWindow \| nil`, `over_threshold: Dbtp \| nil`, `correlation_gate: Dbfs \| nil`, `loudness_target: Lufs \| nil` | `ack` (`rig` event) | |
 | `levels.reset` | `channels: [u16]` (empty: every captured input) | `ack` | |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
 | `meas.update` | `meas`, `base: Rev` (the `config_rev` the edit was made on), `config` | `measurement` | |
@@ -216,7 +216,7 @@ seconds, 0–60: how long the DMX channels take to move to a new cue frame; 0 ju
 set), `monitor_at_start` (at start the daemon reopens the last session's device capture-only so the
 rig measurements meter with no client connected; the generator stays disarmed), `levels`
 (`LevelsSettings` {`ballistic`: `Ballistic`, `correlation_window`: `CorrelationWindow`,
-`over_threshold`: Dbtp, `correlation_gate`: Dbfs}: the programme meters' settings, below), `osc` and
+`over_threshold`: Dbtp, `correlation_gate`: Dbfs, `loudness_target`: Lufs}: the programme meters' settings, below), `osc` and
 `artnet` (each an `OutputStatus` {`sent`: packets since the daemon started, u64,
 `last_error`: str \| nil, the latest send error as the operating system said it}), `dmx`
 ([`DmxSet`]: the cue universe's channels above 0, in channel order, whether or not a target is
@@ -242,18 +242,26 @@ an unspecified address or port 0, persists, and sends the current frame at once.
 `invalid`. It applies from the next change of the cue frame (a fade in progress keeps its
 length).
 **Programme meters (`levels.*`).** `rig.levels` holds what the input meters of §5.4
-(`session_levels`, `preview_levels`) read beyond peak and RMS: `ballistic` is what the `ppm`
-bar reads — `true_peak` (BS.1770 Annex 2, 4× oversampled; the default), `type1` (IEC
-60268-10 Type I quasi-peak), `type2` (Type II) or `vu` (IEC 60268-17; offered on a `line`
-input with a line calibration only — elsewhere `ppm` carries the true peak and the row says
-so); `correlation_window` is the correlator's exponential window, `short` (0.3 s) or `long`
+(`session_levels`, `preview_levels`) read beyond peak and RMS: `ballistic` is what the bars
+read — a peak detector in `ppm`: `true_peak` (BS.1770 Annex 2, 4× oversampled; the
+default), `type1` (IEC 60268-10 Type I quasi-peak), `type2` (Type II) or `vu` (IEC 60268-17;
+offered on a `line` input with a line calibration only — elsewhere `ppm` carries the true
+peak and the row says so); or a loudness window of each bar's source: `momentary` (BS.1770
+momentary, 400 ms, LUFS) or `short_term` (3 s), read from the frame's `loudness` — under
+these two every input's `ppm` and `max` carry its true peak and true-peak hold (dBTP), so a
+frame stays self-describing, and an input without a source (a mic, a partner not captured, a
+rate outside the meter's) reads its true peak; `correlation_window` is the correlator's exponential window, `short` (0.3 s) or `long`
 (1 s, the default); `over_threshold` (dBTP, default 0; −20 … +6) is the true peak above which
 an over is counted (a sustained clip counts once: the next over only after the true peak fell
 1 dB below the threshold); `correlation_gate` (dBFS RMS of a side, default −60; −120 … 0) is
-the level below which a pair's side reads *quiet* and no correlation is given. The daemon
-runs every ballistic all the time and reports the chosen one, so `levels.set` reads a
-settled detector at once; it keeps the fields given (nil keeps a field), persists the rig
-settings first, and refuses a threshold or gate outside its range or not finite (`invalid`).
+the level below which a pair's side reads *quiet* and no correlation is given;
+`loudness_target` (LUFS, default −23, the R128 programme level; −36 … −5) is the level a
+loudness bar is drawn around (its span is target −18 … target +9 LU) and lit above, the rig's
+so that two clients colour one programme alike. The daemon runs every detector and every
+source's loudness all the time and reports the chosen ballistic, so `levels.set` reads a
+settled value at once; it keeps the fields given (nil keeps a field), persists the rig
+settings first, and refuses a threshold, gate or target outside its range or not finite
+(`invalid`).
 `levels.reset` clears the max hold of every ballistic and the over count of `channels`
 (device inputs; empty = every captured input) on the session meters and the preview alike,
 and resets every loudness source with an input in `channels` (integrated, range, the maxima,
@@ -378,7 +386,9 @@ Programme pane without inputs or another kind with them, is refused `invalid`)
 and the level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
 `spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
 when the pane first shows a curve) and where its readout plates sit (`plates`: {`legend`,
-`readout`, `mark`, `peaks`}, each {`at`, `scale`}: `at` nil for the client's own placement or
+`readout`, `mark`, `peaks`, `loudness`}, each {`at`, `scale`}, all five required; a pane kind
+without a plate keeps its slot at the default; `loudness` is the Programme pane's loudness
+readout, docked beside or above the bars while `at` is nil: `at` nil for the client's own placement or
 [x, y], each in 0 … 1, the plate's top-left corner as a fraction of the room the plot leaves
 around the plate, so a dropped plate stays inside its plot at any pane size; `scale` the
 plate's text size, 1 being the theme's; missing = all nil at 1). The focused pane, a
@@ -1766,7 +1776,7 @@ always `i8`).
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
 | `band_leq` | one column per band window, in configuration order: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
-| `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask, `ppm`: dbfs (the `ballistic`'s reading; the true peak where VU is chosen but not offered on the input), `true_peak`: dbtp, `max`: dbfs (highest `ppm` of the chosen ballistic since `levels.reset`), `overs`: count (since `levels.reset`) | `channels` (device input per column; length n), `ballistic` (`Ballistic`), `pair_levels` ([`PairLevels`] {`left`, `right`, `correlation`: f32 \| nil (−1 … 1 over the rig's window), `quiet`: `left` \| `right` \| nil (the side below the gate; then `correlation` is nil)}: every declared pair whose both inputs are captured), `loudness` ([`SourceLoudness`], below) |
+| `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask, `ppm`: dbfs (the `ballistic`'s reading; the true peak where VU is chosen but not offered on the input, and under `momentary` / `short_term`), `true_peak`: dbtp, `max`: dbfs (highest `ppm` of the chosen ballistic since `levels.reset`), `overs`: count (since `levels.reset`) | `channels` (device input per column; length n), `ballistic` (`Ballistic`), `pair_levels` ([`PairLevels`] {`left`, `right`, `correlation`: f32 \| nil (−1 … 1 over the rig's window), `quiet`: `left` \| `right` \| nil (the side below the gate; then `correlation` is nil)}: every declared pair whose both inputs are captured), `loudness` ([`SourceLoudness`], below) |
 | `preview_levels` | as `session_levels` | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `session.preview` declared them), `pairs` ([Pair]), `ballistic`, `pair_levels` ([`PairLevels`], one per declared pair), `loudness` ([`SourceLoudness`]; a preview's sources never carry into the session) |
 | `session_gonio` | `gonio_x`, `gonio_y`: gonio_unit — every pair's 256 points in turn (n = 256 × pairs), `x = (r − l)/√2`, `y = (l + r)/√2` divided by the pair's auto gain (a mono signal is a vertical line, a left-only one leans left), one pair drawn from a random position in each of 256 bins of the frame's samples | `pairs` ([`GonioPairMeta`] {`left`, `right`, `gain_dbfs`: the auto gain, dBFS of the pair magnitude `√(l² + r²)`}) |
 | `preview_gonio` | as `session_gonio`, for the previewed device's declared pairs | as `session_gonio` |

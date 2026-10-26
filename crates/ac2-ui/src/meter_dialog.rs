@@ -358,6 +358,8 @@ pub fn levels(f: &Form) -> Option<LevelsSettings> {
             [at(FieldId::CorrelationWindow).min(CorrelationWindow::ALL.len() - 1)],
         over_threshold: Dbtp(m.over.get(at(FieldId::OverThreshold)).copied()?),
         correlation_gate: Dbfs(m.gate.get(at(FieldId::CorrelationGate)).copied()?),
+        // No row for it yet: the rig's own, so `wanted` never changes it.
+        loudness_target: m.opened.loudness_target,
     })
 }
 
@@ -387,6 +389,11 @@ pub fn wanted(
             opened.correlation_gate,
             shown.correlation_gate,
             now.correlation_gate,
+        ),
+        loudness_target: pick(
+            opened.loudness_target,
+            shown.loudness_target,
+            now.loudness_target,
         ),
     }
 }

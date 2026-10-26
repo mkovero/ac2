@@ -139,8 +139,9 @@ pub struct LayoutPane {
     pub plates: LayoutPlates,
 }
 
-/// A pane's plates over the plot: the legend, the cursor values, the mark's readout and
-/// the spectrum's list of tracked peaks.
+/// A pane's five plates: the legend, the cursor values, the mark's readout, the
+/// spectrum's list of tracked peaks and the Programme pane's loudness readout. A pane kind
+/// without one of them keeps that slot at its default.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LayoutPlates {
@@ -148,15 +149,18 @@ pub struct LayoutPlates {
     pub readout: LayoutPlate,
     pub mark: LayoutPlate,
     pub peaks: LayoutPlate,
+    /// `at: None` docks it: the pane reserves room for it beside or above the bars.
+    pub loudness: LayoutPlate,
 }
 
 impl LayoutPlates {
-    fn all(&self) -> [(&'static str, LayoutPlate); 4] {
+    fn all(&self) -> [(&'static str, LayoutPlate); 5] {
         [
             ("legend", self.legend),
             ("readout", self.readout),
             ("mark", self.mark),
             ("peaks", self.peaks),
+            ("loudness", self.loudness),
         ]
     }
 }

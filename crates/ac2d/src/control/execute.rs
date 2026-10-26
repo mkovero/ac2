@@ -114,12 +114,14 @@ impl Control {
                 correlation_window,
                 over_threshold,
                 correlation_gate,
+                loudness_target,
             } => self.levels_set(
                 base,
                 ballistic,
                 correlation_window,
                 over_threshold,
                 correlation_gate,
+                loudness_target,
             ),
             Command::LevelsReset { channels } => self.levels_reset(channels),
             Command::GenStop => {

@@ -14,7 +14,7 @@ use crate::model::{
     TargetCurve, TraceEdit, TraceOwner,
 };
 use crate::units::{
-    Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, MeasId, MvPerPa, Rev, Seconds, TraceId,
+    Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, MvPerPa, Rev, Seconds, TraceId,
     TransferId, Volts,
 };
 
@@ -216,16 +216,17 @@ pub enum Command {
         on: bool,
     },
     /// Set the rig's programme-meter settings (`rig.levels`): the ballistic the bars read,
-    /// the correlator window, the over threshold and the correlation gate; a field `None`
-    /// keeps its value. The daemon runs every ballistic all the time, so a change reads a
-    /// settled detector at once. A threshold outside −20 … +6 dBTP or a gate outside
-    /// −120 … 0 dBFS, or either not finite, is refused (`invalid`). Kept by the daemon
-    /// across restarts.
+    /// the correlator window, the over threshold, the correlation gate and the loudness
+    /// target; a field `None` keeps its value. The daemon runs every detector and every
+    /// source's loudness all the time, so a change reads a settled value at once. A threshold
+    /// outside −20 … +6 dBTP, a gate outside −120 … 0 dBFS or a target outside −36 … −5 LUFS,
+    /// or any not finite, is refused (`invalid`). Kept by the daemon across restarts.
     #[serde(rename = "levels.set")]
     LevelsSet {
         /// The `rig.rev` the edit was made on; another is refused with `conflict`.
         base: Rev,
-        /// What the `ppm` bar reads.
+        /// What the bars read. Under `momentary` / `short_term` each input's `ppm` / `max`
+        /// are its true peak in dBTP and the bars read the frame's `loudness`.
         ballistic: Option<Ballistic>,
         /// The correlator's window.
         correlation_window: Option<CorrelationWindow>,
@@ -233,6 +234,8 @@ pub enum Command {
         over_threshold: Option<Dbtp>,
         /// The correlation gate.
         correlation_gate: Option<Dbfs>,
+        /// The loudness target.
+        loudness_target: Option<Lufs>,
     },
     /// Clear the max hold of every ballistic and the over count of `channels` (device
     /// inputs; empty: every captured input), on the session meters and the preview alike.

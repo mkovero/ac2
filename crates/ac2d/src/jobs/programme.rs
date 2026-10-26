@@ -83,9 +83,9 @@ struct Input {
     type1: QuasiPeak,
     type2: QuasiPeak,
     vu: Vu,
-    /// Per ballistic ([`Ballistic::ALL`] order): the reading of the interval (linear).
+    /// Per detector ([`Ballistic::PEAK`] order): the reading of the interval (linear).
     interval: [f32; 4],
-    /// Per ballistic: the highest reading since the last reset (linear).
+    /// Per detector: the highest reading since the last reset (linear).
     hold: [f32; 4],
     overs: u32,
     /// The true peak fell below the threshold's release since the last over.
@@ -392,7 +392,9 @@ impl Programme {
             }),
         };
         for i in &mut self.inputs {
-            let b = if chosen == Ballistic::Vu && !i.vu_offered {
+            // Under a loudness ballistic the bars read the sources' loudness; each input's
+            // own column stays a peak reading, its true peak, so the frame says what it is.
+            let b = if chosen.is_loudness() || (chosen == Ballistic::Vu && !i.vu_offered) {
                 Ballistic::TruePeak
             } else {
                 chosen
@@ -439,8 +441,9 @@ impl Programme {
     }
 }
 
+/// A loudness ballistic has no detector of its own: it reads the true-peak slot.
 fn slot(b: Ballistic) -> usize {
-    Ballistic::ALL
+    Ballistic::PEAK
         .iter()
         .position(|&x| x == b)
         .unwrap_or_default()
@@ -746,5 +749,27 @@ mod tests {
         // Silence is below any gate.
         assert_eq!(r.pair_levels[0].quiet, Some(PairSide::Right));
         assert_eq!(m.settings.correlation_window, CorrelationWindow::Short);
+    }
+
+    /// Under either loudness ballistic each input's own column is its true peak and hold.
+    #[test]
+    fn a_loudness_ballistic_reads_each_inputs_true_peak() {
+        for b in [Ballistic::Momentary, Ballistic::ShortTerm] {
+            let settings = LevelsSettings {
+                ballistic: b,
+                ..LevelsSettings::default()
+            };
+            let (mut m, _p) = programme(settings);
+            let mut start = 0;
+            for _ in 0..30 {
+                m.push(&block(start, 512, 0.1, false));
+                start += 512;
+            }
+            let r = m.take(false);
+            assert_eq!(r.ballistic, b);
+            assert_eq!(r.ppm[0], r.true_peak[0], "{b:?}");
+            assert!((r.ppm[0] + 20.0).abs() < 0.2, "{:?}", r.ppm);
+            assert!((r.max[0] - r.ppm[0]).abs() < 0.01, "{:?}", r.max);
+        }
     }
 }

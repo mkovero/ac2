@@ -230,6 +230,7 @@ fn old_meas(v: &Value) -> Result<OldMeas, String> {
         let mut d = d.clone();
         ac2_traces::old_layout::pane_meas_to_content(&mut d);
         ac2_traces::old_layout::plates_add_peaks(&mut d);
+        ac2_traces::old_layout::plates_add_loudness(&mut d);
         d
     });
     let layout = old_layout
@@ -662,6 +663,31 @@ mod tests {
         assert_eq!(p.readout.at, Some([1.0, 0.5]));
         assert_eq!(p.readout.scale, 1.5);
         assert_eq!(p.peaks, ac2_proto::model::layout::LayoutPlate::default());
+        assert_eq!(p.loudness, ac2_proto::model::layout::LayoutPlate::default());
+    }
+
+    /// A layout of format 33 holds four plates: a moved peak list is kept and the loudness
+    /// readout docks where the pane puts it, nothing is dropped.
+    #[test]
+    fn a_layout_of_format_33_keeps_its_plates() {
+        let auto = json!({ "at": null, "scale": 1.0 });
+        let pane = json!({ "kind": "spectrum", "transfer_view": "magnitude",
+                           "spectrum_view": "spectrum", "spl_view": "meter_leq",
+                           "sweep_view": "response", "chrome": "full", "content": null,
+                           "levels": { "transfer": null, "spectrum_dbfs": null,
+                                       "spectrum_spl": null, "distortion": null },
+                           "plates": { "legend": auto, "readout": auto, "mark": auto,
+                                       "peaks": { "at": [0.25, 0.75], "scale": 2.0 } } });
+        let v = json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
+                        "running": false, "delay": null, "colour": null,
+                        "layout": { "type": "pane", "pane": pane } });
+        let m = old_meas(&v).unwrap();
+        assert!(m.notes.is_empty(), "{:?}", m.notes);
+        let layout = m.layout.expect("the layout");
+        let p = layout.panes()[0].plates;
+        assert_eq!(p.peaks.at, Some([0.25, 0.75]));
+        assert_eq!(p.peaks.scale, 2.0);
+        assert_eq!(p.loudness, ac2_proto::model::layout::LayoutPlate::default());
     }
 
     #[test]

@@ -564,6 +564,7 @@ pub fn rig() -> Rig {
             correlation_window: CorrelationWindow::Short,
             over_threshold: Dbtp(-1.0),
             correlation_gate: Dbfs(-50.0),
+            loudness_target: Lufs(-16.0),
         },
         osc: OutputStatus {
             sent: 12,

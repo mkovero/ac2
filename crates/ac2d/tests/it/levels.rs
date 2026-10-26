@@ -14,7 +14,7 @@ use ac2_proto::model::{
     Ballistic, CorrelationWindow, GeneratorDesired, GeneratorSettings, InputKind, InputSetup,
     LevelsSettings, Pair, PairSide, Signal, State,
 };
-use ac2_proto::units::{Dbfs, Dbtp, Hz, Rev};
+use ac2_proto::units::{Dbfs, Dbtp, Hz, Lufs, Rev};
 use ac2_proto::{Command, ErrorCode, ReplyBody, Subscription};
 use ac2d::{Daemon, Handle};
 use common::*;
@@ -44,6 +44,7 @@ fn set(c: &mut Client, base: Rev, f: impl FnOnce(&mut Command)) -> Result<ReplyB
         correlation_window: None,
         over_threshold: None,
         correlation_gate: None,
+        loudness_target: None,
     };
     f(&mut cmd);
     c.call(cmd).map_err(|e| e.code)
@@ -121,6 +122,7 @@ fn set_is_a_rig_edit_checked_and_kept_across_a_restart() {
         correlation_window: CorrelationWindow::Short,
         over_threshold: Dbtp(-1.0),
         correlation_gate: Dbfs(-60.0),
+        loudness_target: Lufs(-23.0),
     };
     let rig = state(&mut c).rig;
     assert_eq!(rig.levels, want);

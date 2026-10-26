@@ -51,6 +51,7 @@ pub(crate) async fn run(
                 correlation_window: window,
                 over_threshold: over,
                 correlation_gate: gate,
+                loudness_target: None,
             })
             .await?;
             out.emit(&rig, || settings_text(&rig.levels))?;
@@ -182,10 +183,12 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
 }
 
 /// The ballistic input `ch` reads: the rig's, or the true peak where VU is chosen but not
-/// offered (not a line input with a line calibration).
+/// offered (not a line input with a line calibration) and under a loudness ballistic (the
+/// loudness is the source's, in the loudness table; an input's own column is its peak).
 fn ballistic_of(st: &State, f: &SessionLevelsFrame, ch: u16) -> Ballistic {
     let device = st.session.open.as_ref().map(|o| &o.input_device);
     match (f.meta.ballistic, device) {
+        (b, _) if b.is_loudness() => Ballistic::TruePeak,
         (Ballistic::Vu, Some(d)) if !cal::offers_vu(&st.inputs, &st.line_calibrations, d, ch) => {
             Ballistic::TruePeak
         }

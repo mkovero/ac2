@@ -2,6 +2,17 @@
 
 use super::*;
 
+/// The sample layout with its first pane's loudness readout dragged and scaled, so the
+/// round trip carries the fifth plate.
+fn layout_with_a_moved_loudness_plate() -> ac2_proto::model::layout::PaneLayout {
+    let mut l = ac2_proto::samples::pane_layout();
+    l.panes_mut()[0].plates.loudness = ac2_proto::model::layout::LayoutPlate {
+        at: Some([0.75, 0.25]),
+        scale: 1.5,
+    };
+    l
+}
+
 pub(super) fn session_sample() -> Session {
     let mut a = delayed(4, 2, 0.0125, 0.0125, 0.95);
     a.meta.edit.slot = Some(1);
@@ -38,7 +49,7 @@ pub(super) fn session_sample() -> Session {
                     tracking: false,
                 }),
                 colour: None,
-                layout: Some(ac2_proto::samples::pane_layout()),
+                layout: Some(layout_with_a_moved_loudness_plate()),
                 compared: Vec::new(),
                 offset: ac2_proto::units::Db(0.0),
                 eq: Vec::new(),

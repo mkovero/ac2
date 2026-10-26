@@ -82,6 +82,7 @@ impl Shared {
                 correlation_window,
                 over_threshold,
                 correlation_gate,
+                loudness_target,
             } => {
                 let mut rig = self.state.rig.clone();
                 if base != rig.rev {
@@ -93,6 +94,7 @@ impl Shared {
                     correlation_window: correlation_window.unwrap_or(now.correlation_window),
                     over_threshold: over_threshold.unwrap_or(now.over_threshold),
                     correlation_gate: correlation_gate.unwrap_or(now.correlation_gate),
+                    loudness_target: loudness_target.unwrap_or(now.loudness_target),
                 };
                 levels.check().map_err(|e| err(ErrorCode::Invalid, e))?;
                 rig.levels = levels;

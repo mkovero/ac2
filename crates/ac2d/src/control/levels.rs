@@ -2,7 +2,7 @@
 //! targets, and the reset of their holds.
 
 use ac2_proto::model::{Ballistic, CorrelationWindow, LevelsSettings};
-use ac2_proto::units::{Dbfs, Dbtp, Rev};
+use ac2_proto::units::{Dbfs, Dbtp, Lufs, Rev};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 
 use super::Control;
@@ -19,6 +19,7 @@ impl Control {
         correlation_window: Option<CorrelationWindow>,
         over_threshold: Option<Dbtp>,
         correlation_gate: Option<Dbfs>,
+        loudness_target: Option<Lufs>,
     ) -> Result<ReplyBody, ProtoError> {
         self.rig_base(base)?;
         let now = self.store.state().rig.levels;
@@ -27,6 +28,7 @@ impl Control {
             correlation_window: correlation_window.unwrap_or(now.correlation_window),
             over_threshold: over_threshold.unwrap_or(now.over_threshold),
             correlation_gate: correlation_gate.unwrap_or(now.correlation_gate),
+            loudness_target: loudness_target.unwrap_or(now.loudness_target),
         };
         levels.check().map_err(|e| perr(ErrorCode::Invalid, e))?;
         if levels == now {
@@ -39,11 +41,13 @@ impl Control {
             ..self.rig_settings_now()
         })?;
         tracing::info!(
-            "programme meters: {}, correlation over {}, over above {} dBTP, gate {} dBFS",
+            "programme meters: {}, correlation over {}, over above {} dBTP, gate {} dBFS, \
+             loudness target {} LUFS",
             levels.ballistic.word(),
             levels.correlation_window.text(),
             levels.over_threshold.0,
-            levels.correlation_gate.0
+            levels.correlation_gate.0,
+            levels.loudness_target.0
         );
         let rev = self.commit_rig(|r| r.levels = levels);
         Ok(ReplyBody::Ack { rev })

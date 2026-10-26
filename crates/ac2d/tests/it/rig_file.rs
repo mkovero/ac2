@@ -152,7 +152,7 @@ fn a_v1_file_loads_whole_and_round_trips() {
     // The version 1 file is kept beside the new one.
     assert_eq!(std::fs::read(dir.path().join("rig.json.v1")).unwrap(), v1);
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 4);
+    assert_eq!(rj["version"], 5);
     assert_eq!(
         rj["monitor_session"],
         serde_json::to_value(&s.monitor).unwrap()
@@ -299,7 +299,7 @@ fn a_v2_meter_layout_with_a_pick_reads_whole() {
         Some(layout::PaneContent::Meas { meas: MeasId(1) })
     );
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 4);
+    assert_eq!(rj["version"], 5);
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["content"],
         json!({ "type": "meas", "meas": 1 })
@@ -346,8 +346,67 @@ fn a_v3_meter_layout_with_three_plates_reads_whole() {
     assert_eq!(pane.plates.readout.at, Some([0.0, 1.0]));
     assert_eq!(pane.plates.peaks, layout::LayoutPlate::default());
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 4);
+    assert_eq!(rj["version"], 5);
     assert_eq!(rj["meters"][0]["layout"]["pane"]["plates"]["peaks"], auto);
+    assert_eq!(
+        rj["meters"][0]["layout"]["pane"]["plates"]["loudness"],
+        auto
+    );
+    drop(c);
+    h.shutdown();
+}
+
+/// A version 4 file: its levels gain the default loudness target and keep the rest, its
+/// meters' four plates gain a docked loudness readout and keep where they were dropped.
+#[test]
+fn a_v4_file_gains_the_loudness_target_and_plate() {
+    let s = seeded();
+    let auto = json!({ "at": null, "scale": 1.0 });
+    let moved = json!({ "at": [0.25, 0.5], "scale": 1.5 });
+    let layout = json!({ "type": "pane", "pane": {
+        "kind": "spectrum", "transfer_view": "coherence", "spectrum_view": "spectrum",
+        "spl_view": "leq", "sweep_view": "response", "chrome": "full", "content": null,
+        "levels": { "transfer": null, "spectrum_dbfs": null, "spectrum_spl": null,
+                    "distortion": null },
+        "plates": { "legend": auto, "readout": auto, "mark": auto, "peaks": moved } } });
+    let meter = json!({ "id": 1, "config": s.meter, "running": true, "colour": null,
+                        "layout": layout });
+    let dir = tempfile::tempdir().unwrap();
+    let mut v: Value =
+        serde_json::from_slice(&v2_with_meters(dir.path(), &s, json!([meter]))).unwrap();
+    v["version"] = json!(4);
+    let mut levels = serde_json::to_value(LevelsSettings {
+        ballistic: Ballistic::Type1,
+        ..LevelsSettings::default()
+    })
+    .unwrap();
+    levels.as_object_mut().unwrap().remove("loudness_target");
+    v.as_object_mut().unwrap().insert("levels".into(), levels);
+    std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
+    let h = start("rig-file-v4", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    let st = state(&mut c);
+    assert!(
+        st.rig.damaged_files.is_empty(),
+        "{:?}",
+        st.rig.damaged_files
+    );
+    assert_eq!(st.rig.levels.ballistic, Ballistic::Type1);
+    assert_eq!(st.rig.levels.loudness_target, Lufs(-23.0));
+    let pane = &st.measurements[0]
+        .layout
+        .as_ref()
+        .expect("the meter's layout")
+        .panes()[0];
+    assert_eq!(pane.plates.peaks.at, Some([0.25, 0.5]));
+    assert_eq!(pane.plates.loudness, layout::LayoutPlate::default());
+    let rj = rig_json(dir.path());
+    assert_eq!(rj["version"], 5);
+    assert_eq!(rj["levels"]["loudness_target"], json!(-23.0));
+    assert_eq!(
+        rj["meters"][0]["layout"]["pane"]["plates"]["loudness"],
+        auto
+    );
     drop(c);
     h.shutdown();
 }

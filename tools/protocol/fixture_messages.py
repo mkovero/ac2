@@ -61,6 +61,7 @@ RIG = {
         "correlation_window": "short",
         "over_threshold": -1.0,
         "correlation_gate": -50.0,
+        "loudness_target": -16.0,
     },
     "osc": {"sent": 12, "last_error": "Connection refused (os error 111)"},
     "artnet": {"sent": 340, "last_error": None},
@@ -323,6 +324,7 @@ def _layout_pane(
             "readout": readout or _plate(),
             "mark": _plate(),
             "peaks": _plate(),
+            "loudness": _plate(),
         },
     }
 
@@ -730,10 +732,11 @@ def requests():
             "levels.set",
             {
                 "base": 38,
-                "ballistic": "type2",
+                "ballistic": "short_term",
                 "correlation_window": None,
                 "over_threshold": -1.0,
                 "correlation_gate": None,
+                "loudness_target": -16.0,
             },
         ),
         req(86, "levels.reset", {"channels": [0, 1]}),

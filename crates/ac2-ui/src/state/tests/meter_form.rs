@@ -173,6 +173,7 @@ fn a_changed_rig_setting_is_sent_as_levels_set() {
                 correlation_window: None,
                 over_threshold: None,
                 correlation_gate: None,
+                loudness_target: None,
             },
             "programme meters read Type II"
         )]

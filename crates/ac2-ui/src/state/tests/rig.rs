@@ -801,6 +801,7 @@ fn the_rig_page_steps_the_programme_meters() {
             correlation_window,
             over_threshold,
             correlation_gate,
+            loudness_target: None,
         };
     let r = t.key("ArrowRight");
     assert_eq!(

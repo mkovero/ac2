@@ -403,10 +403,11 @@ pub fn commands() -> Vec<Command> {
     .chain([
         Command::LevelsSet {
             base: Rev(38),
-            ballistic: Some(crate::model::Ballistic::Type2),
+            ballistic: Some(crate::model::Ballistic::ShortTerm),
             correlation_window: None,
             over_threshold: Some(crate::units::Dbtp(-1.0)),
             correlation_gate: None,
+            loudness_target: Some(crate::units::Lufs(-16.0)),
         },
         Command::LevelsReset {
             channels: vec![0, 1],

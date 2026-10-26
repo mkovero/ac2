@@ -74,6 +74,7 @@ pub(in crate::state) fn wire_plates(p: &Plates) -> wire::LayoutPlates {
         readout: one(&p.readout),
         mark: one(&p.mark),
         peaks: one(&p.peaks),
+        loudness: wire::LayoutPlate::default(),
     }
 }
 

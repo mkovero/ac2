@@ -120,6 +120,8 @@ pub fn ballistic(b: ac2_proto::model::Ballistic) -> Ballistic {
         W::Type1 => Ballistic::Type1,
         W::Type2 => Ballistic::Type2,
         W::Vu => Ballistic::Vu,
+        // Under a loudness ballistic each input's own reading is its true peak.
+        W::Momentary | W::ShortTerm => Ballistic::TruePeak,
     }
 }
 

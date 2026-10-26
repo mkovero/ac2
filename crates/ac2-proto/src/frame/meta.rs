@@ -416,8 +416,9 @@ pub struct SourceLoudness {
 pub struct SessionLevelsMeta {
     /// Device input channel of each column.
     pub channels: Vec<u16>,
-    /// The ballistic `ppm` and `max` read (the rig's `levels.ballistic`), so a frame is
-    /// self-describing.
+    /// What the bars read (the rig's `levels.ballistic`), so a frame is self-describing:
+    /// under a peak detector `ppm` and `max` are its reading; under `momentary` /
+    /// `short_term` they are each input's true peak in dBTP and the bars read `loudness`.
     pub ballistic: Ballistic,
     /// Every declared pair whose both inputs are captured, in `session.inputs` order.
     pub pair_levels: Vec<PairLevels>,

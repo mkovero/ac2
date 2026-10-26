@@ -141,6 +141,7 @@ fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
         correlation_window: CorrelationWindow::Short,
         over_threshold: Dbtp(-1.3),
         correlation_gate: Dbfs(-70.0),
+        loudness_target: ac2_proto::units::Lufs(-23.0),
     };
     let m = Metered::inputs_of(&[3, 0]).expect("two");
     let f = form(main_pair(), inputs(), Some(m), rig, Some(PaneId(4)));
