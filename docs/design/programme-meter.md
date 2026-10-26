@@ -1085,7 +1085,7 @@ no loudness text) and under `ShortTerm` (true-peak bars with the rate reason row
    ember renderer and golden images; `PaneKind::Programme` and `PaneContent`.
 3. **Loudness** (landed) — `ac2_core::loudness` with Tech 3341/3342 vectors, the pane's column,
    `since … R resets`.
-4. **Loudness bars and plate** (§6.2) — layers, each one agent:
+4. **Loudness bars and plate** (§6.2, landed) — layers, each one agent:
    - *4a proto + formats* (first; the others build on it; touches `ac2-proto`, `ac2-traces`
      `session.rs` / `old_layout.rs` and `ac2-cli/src/cmd/salvage/read.rs`): `Ballistic::Momentary` / `ShortTerm` with
      words and unit (the doc comments of `Ballistic::unit()`, `SessionLevelsMeta::ballistic`,
