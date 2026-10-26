@@ -5,8 +5,8 @@
 //! The figures are plausible, not measured: every input peaks at [`Shared::input_peak`]
 //! (default [`DEFAULT_PEAK_DBFS`]) unless a test sets it, the true peak sits 0.2 dB above it
 //! (the inter-sample overshoot a 4× interpolator finds on a sine), `ppm` is what the rig's
-//! ballistic reads (the true peak for true peak and for VU where VU is not offered, the
-//! peak otherwise), the max holds the
+//! ballistic reads (the true peak for true peak, under a loudness ballistic, and for VU where
+//! VU is not offered; the peak otherwise), the max holds the
 //! highest `ppm` since the last reset, nothing is ever over. A pair of two
 //! sounding inputs is mono (+1); one with a silent side names it `quiet`. The goniometer
 //! draws a 1 kHz mono tone: a vertical line.
@@ -143,6 +143,7 @@ impl Shared {
                 peak
             };
             let reads_true_peak = ballistic == Ballistic::TruePeak
+                || ballistic.is_loudness()
                 || (ballistic == Ballistic::Vu
                     && !ac2_proto::cal::offers_vu(
                         &self.state.inputs,

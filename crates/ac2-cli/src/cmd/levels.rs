@@ -37,13 +37,15 @@ pub(crate) async fn run(
             window,
             over_threshold,
             gate,
+            loudness_target,
         }) => {
             let c = connect(cli, false).await?;
-            let (ballistic, window, over, gate) = (
+            let (ballistic, window, over, gate, target) = (
                 ballistic.map(Ballistic::from),
                 window.map(|w| w.0),
                 over_threshold.map(|t| t.0),
                 gate.map(|g| g.0),
+                loudness_target.map(|t| t.0),
             );
             let rig = rig_edit(&c, |base| Command::LevelsSet {
                 base,
@@ -51,7 +53,7 @@ pub(crate) async fn run(
                 correlation_window: window,
                 over_threshold: over,
                 correlation_gate: gate,
-                loudness_target: None,
+                loudness_target: target,
             })
             .await?;
             out.emit(&rig, || settings_text(&rig.levels))?;
@@ -174,7 +176,11 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
             }
             if !f.meta.loudness.is_empty() {
                 s.push('\n');
-                s.push_str(&loudness_table(&f.meta.loudness, captured_at));
+                s.push_str(&loudness_table(
+                    &f.meta.loudness,
+                    f.meta.ballistic,
+                    captured_at,
+                ));
             }
             s
         },
@@ -197,11 +203,14 @@ fn ballistic_of(st: &State, f: &SessionLevelsFrame, ch: u16) -> Ballistic {
 }
 
 /// The loudness table: one row per source, the readouts as the Programme pane words them.
-fn loudness_table(sources: &[SourceLoudness], captured_at: WallNs) -> String {
+/// Under a loudness ballistic the window the bars read is marked, since the input table above
+/// it then reads each input's true peak.
+fn loudness_table(sources: &[SourceLoudness], ballistic: Ballistic, captured_at: WallNs) -> String {
+    let (mom, short) = window_heads(ballistic);
     let mut t = table(&[
         "source",
-        "Mom",
-        "Short",
+        mom,
+        short,
         "Int",
         "LRA",
         "max Mom",
@@ -225,6 +234,17 @@ fn loudness_table(sources: &[SourceLoudness], captured_at: WallNs) -> String {
         ]);
     }
     t.to_string()
+}
+
+/// The loudness table's Mom and Short column heads, the one the bars read marked.
+fn window_heads(ballistic: Ballistic) -> (&'static str, &'static str) {
+    match ballistic {
+        Ballistic::Momentary => ("Mom (bars)", "Short"),
+        Ballistic::ShortTerm => ("Mom", "Short (bars)"),
+        Ballistic::TruePeak | Ballistic::Type1 | Ballistic::Type2 | Ballistic::Vu => {
+            ("Mom", "Short")
+        }
+    }
 }
 
 /// What an integrated loudness or a range reads before a block passes its gate.
@@ -338,15 +358,102 @@ pub(crate) fn correlation_text(r: Option<f32>, quiet: Option<PairSide>) -> Strin
 /// The settings as `levels set` and `rig status` say them.
 pub(crate) fn settings_text(l: &LevelsSettings) -> String {
     format!(
-        "programme meters: {}; correlation over {}; over above {} dBTP; gate {} dBFS",
+        "programme meters: {}; correlation over {}; over above {} dBTP; gate {} dBFS; \
+         loudness target {} LUFS",
         l.ballistic.word(),
         l.correlation_window.text(),
         l.over_threshold.0,
-        l.correlation_gate.0
+        l.correlation_gate.0,
+        l.loudness_target.0
     )
 }
 
 /// The programme-meter line of `rig status`.
 pub(crate) fn status_text(rig: &Rig) -> String {
     format!("{}\n", settings_text(&rig.levels))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ac2_proto::samples;
+
+    fn frame(ballistic: Ballistic, channels: Vec<u16>) -> SessionLevelsFrame {
+        let mut f = samples::frames()
+            .into_iter()
+            .find_map(|f| match f.data {
+                FrameData::SessionLevels(l) => Some(l),
+                _ => None,
+            })
+            .expect("a session meter frame");
+        f.meta.ballistic = ballistic;
+        f.meta.channels = channels;
+        f
+    }
+
+    /// Input 2 a mic, 5 a line input with a line calibration on the open device, 6 a line
+    /// input without one: the peak detectors read as chosen, VU only where offered, and
+    /// under either loudness ballistic every input's own column is its true peak (the
+    /// loudness is the source's), a mic's included.
+    #[test]
+    fn an_inputs_column_is_its_true_peak_under_a_loudness_ballistic() {
+        let st = samples::state();
+        let device = &st.session.open.as_ref().expect("open").input_device;
+        assert!(cal::offers_vu(&st.inputs, &st.line_calibrations, device, 4));
+        assert!(!cal::offers_vu(
+            &st.inputs,
+            &st.line_calibrations,
+            device,
+            5
+        ));
+        let chans = [1, 4, 5];
+        let tp = Ballistic::TruePeak;
+        for (b, want) in [
+            (Ballistic::TruePeak, [tp; 3]),
+            (Ballistic::Type1, [Ballistic::Type1; 3]),
+            (Ballistic::Type2, [Ballistic::Type2; 3]),
+            (Ballistic::Vu, [tp, Ballistic::Vu, tp]),
+            (Ballistic::Momentary, [tp; 3]),
+            (Ballistic::ShortTerm, [tp; 3]),
+        ] {
+            let f = frame(b, chans.to_vec());
+            let got = chans.map(|ch| ballistic_of(&st, &f, ch));
+            assert_eq!(got, want, "{b:?}");
+        }
+    }
+
+    /// The window the bars read is marked in the loudness table; no mark under a peak
+    /// ballistic.
+    #[test]
+    fn the_loudness_table_marks_the_bars_window() {
+        let f = frame(Ballistic::ShortTerm, vec![0, 1, 2]);
+        let at = WallNs(1_790_000_000_000_000_000);
+        let t = loudness_table(&f.meta.loudness, Ballistic::ShortTerm, at);
+        assert!(
+            t.contains("Short (bars)") && !t.contains("Mom (bars)"),
+            "{t}"
+        );
+        let t = loudness_table(&f.meta.loudness, Ballistic::Momentary, at);
+        assert!(
+            t.contains("Mom (bars)") && !t.contains("Short (bars)"),
+            "{t}"
+        );
+        for b in Ballistic::PEAK {
+            assert!(
+                !loudness_table(&f.meta.loudness, b, at).contains("(bars)"),
+                "{b:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_settings_line_names_the_loudness_target() {
+        let l = LevelsSettings {
+            ballistic: Ballistic::ShortTerm,
+            ..LevelsSettings::default()
+        };
+        let t = settings_text(&l);
+        assert!(t.starts_with("programme meters: Short loudness;"), "{t}");
+        assert!(t.ends_with("; loudness target -23 LUFS"), "{t}");
+    }
 }

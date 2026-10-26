@@ -4,7 +4,7 @@
 use super::{ok, parse};
 use ac2_cli::args::*;
 use ac2_proto::model::{Ballistic, CorrelationWindow};
-use ac2_proto::units::{Dbfs, Dbtp};
+use ac2_proto::units::{Dbfs, Dbtp, Lufs};
 use ac2_scene::unit_text::*;
 
 #[test]
@@ -21,6 +21,8 @@ fn levels_grammar() {
         "-1dbtp",
         "--gate",
         "-50dbfs",
+        "--loudness-target",
+        "-16lufs",
     ]);
     let Cmd::Levels {
         cmd:
@@ -29,6 +31,7 @@ fn levels_grammar() {
                 window,
                 over_threshold,
                 gate,
+                loudness_target,
             }),
     } = c.cmd
     else {
@@ -38,11 +41,14 @@ fn levels_grammar() {
     assert_eq!(window, Some(CorrelationWindowArg(CorrelationWindow::Short)));
     assert_eq!(over_threshold, Some(OverThresholdArg(Dbtp(-1.0))));
     assert_eq!(gate, Some(LevelDbfs(Dbfs(-50.0))));
+    assert_eq!(loudness_target, Some(LoudnessTargetArg(Lufs(-16.0))));
     // Each ballistic word; the window in either unit; nothing given is a valid (empty) set.
     for (word, want) in [
         ("true-peak", Ballistic::TruePeak),
         ("type2", Ballistic::Type2),
         ("vu", Ballistic::Vu),
+        ("momentary", Ballistic::Momentary),
+        ("short-term", Ballistic::ShortTerm),
     ] {
         let Cmd::Levels {
             cmd: Some(LevelsCmd::Set { ballistic, .. }),
@@ -67,7 +73,8 @@ fn levels_grammar() {
                 ballistic: None,
                 window: None,
                 over_threshold: None,
-                gate: None
+                gate: None,
+                loudness_target: None,
             })
         }
     ));
@@ -83,12 +90,30 @@ fn levels_grammar() {
         &["levels", "set", "--gate", "-60dbtp"],
         &["levels", "set", "--gate", "1dbfs"],
         &["levels", "set", "--ballistic", "peak"],
+        &["levels", "set", "--ballistic", "loudness"],
+        &["levels", "set", "--loudness-target", "-23"],
+        &["levels", "set", "--loudness-target", "-23db"],
+        &["levels", "set", "--loudness-target", "-37lufs"],
+        &["levels", "set", "--loudness-target", "-4lufs"],
     ] {
         assert!(parse(bad).is_err(), "{bad:?}");
     }
     assert_eq!(
         "+6dbtp".parse::<OverThresholdArg>().expect("threshold"),
         OverThresholdArg(Dbtp(6.0))
+    );
+    // The target's range ends are allowed; the unit is required and named in the refusal.
+    for (typed, want) in [("-36lufs", -36.0), ("-5LUFS", -5.0), ("-23 lufs", -23.0)] {
+        assert_eq!(
+            typed.parse::<LoudnessTargetArg>().expect("target"),
+            LoudnessTargetArg(Lufs(want))
+        );
+    }
+    let e = "-23".parse::<LoudnessTargetArg>().expect_err("no unit");
+    assert!(
+        e.0.contains("expected a loudness in LUFS (e.g. -23lufs)"),
+        "{}",
+        e.0
     );
     // Reset: every input, or the inputs given (1-based).
     let Cmd::Levels {

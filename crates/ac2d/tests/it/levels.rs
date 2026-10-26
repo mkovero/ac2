@@ -140,6 +140,74 @@ fn set_is_a_rig_edit_checked_and_kept_across_a_restart() {
     assert_eq!(json["levels"]["correlation_window"], "short");
 }
 
+/// The loudness target is checked against its range like the other values (refused, nothing
+/// changes), and a target and a loudness ballistic set together are kept across a restart.
+#[test]
+fn a_loudness_target_outside_its_range_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start_with_file(dir.path());
+    let (mut c, _s) = connect(&h, &[]);
+    for t in [-36.5, -4.5, -40.0, 0.0, f64::NAN, f64::NEG_INFINITY] {
+        let base = state(&mut c).rig.rev;
+        let e = c
+            .call(Command::LevelsSet {
+                base,
+                ballistic: Some(Ballistic::ShortTerm),
+                correlation_window: None,
+                over_threshold: None,
+                correlation_gate: None,
+                loudness_target: Some(Lufs(t)),
+            })
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::Invalid, "{t}");
+        assert!(e.msg.contains("loudness target"), "{t}: {}", e.msg);
+    }
+    let base = state(&mut c).rig.rev;
+    let e = set(&mut c, base, |cmd| {
+        if let Command::LevelsSet {
+            loudness_target, ..
+        } = cmd
+        {
+            *loudness_target = Some(Lufs(-40.0));
+        }
+    });
+    assert_eq!(e.unwrap_err(), ErrorCode::Invalid);
+    assert_eq!(state(&mut c).rig.levels, LevelsSettings::default());
+    // The range's ends are targets a rig may set.
+    for t in [-36.0, -5.0, -14.0] {
+        let base = state(&mut c).rig.rev;
+        set(&mut c, base, |cmd| {
+            if let Command::LevelsSet {
+                ballistic,
+                loudness_target,
+                ..
+            } = cmd
+            {
+                *ballistic = Some(Ballistic::ShortTerm);
+                *loudness_target = Some(Lufs(t));
+            }
+        })
+        .unwrap();
+        assert_eq!(state(&mut c).rig.levels.loudness_target, Lufs(t));
+    }
+    let want = LevelsSettings {
+        ballistic: Ballistic::ShortTerm,
+        loudness_target: Lufs(-14.0),
+        ..LevelsSettings::default()
+    };
+    drop(c);
+    h.shutdown();
+    let h = start_with_file(dir.path());
+    let (mut c, _s) = connect(&h, &[]);
+    assert_eq!(state(&mut c).rig.levels, want);
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("rig.json")).unwrap()).unwrap();
+    assert_eq!(json["levels"]["ballistic"], "short_term");
+    assert_eq!(json["levels"]["loudness_target"], -14.0);
+    drop(c);
+    h.shutdown();
+}
+
 fn levels_frame(f: &ac2_proto::Frame) -> Option<&SessionLevelsFrame> {
     match &f.data {
         FrameData::SessionLevels(l) => Some(l),

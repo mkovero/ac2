@@ -187,12 +187,17 @@ pub struct SessionLevelsFrame {
     pub clip: Vec<ClipFlags>,
     /// The chosen ballistic's reading per channel, dBFS (a peak for the quasi-peak types, the
     /// RMS-scaled mean for VU); where VU is chosen but not offered on the input
-    /// ([`crate::cal::offers_vu`]) the true peak, so a rig setting never blanks a bar.
+    /// ([`crate::cal::offers_vu`]) the true peak, so a rig setting never blanks a bar. Under
+    /// a loudness ballistic ([`Ballistic::is_loudness`]) each input's true peak, dBTP: the
+    /// loudness is per source, in `meta.loudness`.
+    ///
+    /// [`Ballistic::is_loudness`]: crate::model::Ballistic::is_loudness
     pub ppm: Vec<f32>,
     /// True peak per channel this frame, dBTP.
     pub true_peak: Vec<f32>,
     /// Highest `ppm` reading of the chosen ballistic since the last `levels.reset` (held per
-    /// ballistic, so a ballistic change never splices one type's maximum onto another's).
+    /// ballistic, so a ballistic change never splices one type's maximum onto another's);
+    /// under a loudness ballistic the true-peak hold.
     pub max: Vec<f32>,
     /// Over events (true peak above the rig's threshold, counted once until it fell 1 dB
     /// below) since the last `levels.reset`.

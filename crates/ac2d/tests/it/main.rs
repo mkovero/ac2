@@ -20,6 +20,7 @@ mod jack;
 mod leq;
 mod levels;
 mod loudness;
+mod loudness_bars;
 mod math_channels;
 mod meas_display;
 mod network;

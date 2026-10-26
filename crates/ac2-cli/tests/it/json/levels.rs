@@ -138,6 +138,45 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     // it reads.
     let v = ok_json(&f, &["levels", "--json"]).await?;
     assert_eq!(v["inputs"][0]["ballistic"], "true_peak");
+    // A loudness ballistic: the target is kept with the rest, each input's own column reads
+    // its true peak (a mic's too), the numbers unchanged, and the loudness table marks the
+    // window the bars read.
+    let rig = ok_json(
+        &f,
+        &[
+            "levels",
+            "set",
+            "--ballistic",
+            "short-term",
+            "--loudness-target",
+            "-16lufs",
+            "--json",
+        ],
+    )
+    .await?;
+    assert_eq!(rig["levels"]["ballistic"], "short_term");
+    assert_eq!(rig["levels"]["loudness_target"], -16.0);
+    assert_eq!(rig["levels"]["correlation_gate"], -40.0, "kept");
+    let v = ok_json(&f, &["levels", "--json"]).await?;
+    assert_eq!(v["settings"]["loudness_target"], -16.0);
+    for row in v["inputs"].as_array().expect("array") {
+        assert_eq!(row["ballistic"], "true_peak", "{row}");
+        assert_eq!(row["ppm"], row["true_peak"], "{row}");
+    }
+    let t = ac2(&f, &["levels"]).await?;
+    assert_eq!(t.code, 0, "{}", t.stderr);
+    assert!(t.stdout.contains("Short (bars)"), "{}", t.stdout);
+    assert!(!t.stdout.contains("Short loudness"), "{}", t.stdout);
+    let t = ac2(&f, &["levels", "set", "--ballistic", "momentary"]).await?;
+    assert!(
+        t.stdout.contains("programme meters: Mom loudness;")
+            && t.stdout.contains("loudness target -16 LUFS"),
+        "{}",
+        t.stdout
+    );
+    let t = ac2(&f, &["levels"]).await?;
+    assert!(t.stdout.contains("Mom (bars)"), "{}", t.stdout);
+    ok_json(&f, &["levels", "set", "--ballistic", "vu", "--json"]).await?;
     // Reset: the holds of the inputs given go, the others stay.
     f.lock().set_input_peak(0, -30.0);
     let v = ok_json(&f, &["levels", "--json"]).await?;
