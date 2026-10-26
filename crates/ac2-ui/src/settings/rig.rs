@@ -3,7 +3,8 @@
 //! Art-Net universe goes (an address and a universe, applied together), how long its
 //! channels fade to a new cue state and a test frame,
 //! how sending fares, the meters the rig keeps, and how its programme meters read (the
-//! ballistic, the correlator's window, the over threshold, the correlation gate: stepped with
+//! ballistic, the loudness target, the correlator's window, the over threshold, the
+//! correlation gate: stepped with
 //! ←/→, each step sent at once). Every edit names the rig settings' rev
 //! the page showed, so a change another client made first is refused, not overwritten.
 
@@ -26,13 +27,14 @@ pub enum RigRow {
     Fade,
     DmxTest,
     Ballistic,
+    LoudnessTarget,
     CorrelationWindow,
     OverThreshold,
     CorrelationGate,
 }
 
 impl RigRow {
-    pub const ALL: [RigRow; 11] = [
+    pub const ALL: [RigRow; 12] = [
         RigRow::Target,
         RigRow::Monitor,
         RigRow::Test,
@@ -41,6 +43,7 @@ impl RigRow {
         RigRow::Fade,
         RigRow::DmxTest,
         RigRow::Ballistic,
+        RigRow::LoudnessTarget,
         RigRow::CorrelationWindow,
         RigRow::OverThreshold,
         RigRow::CorrelationGate,
@@ -56,6 +59,7 @@ impl RigRow {
             RigRow::Fade => artnet::FADE_TITLE,
             RigRow::DmxTest => artnet::TEST_TITLE,
             RigRow::Ballistic => levels::BALLISTIC_TITLE,
+            RigRow::LoudnessTarget => levels::TARGET_TITLE,
             RigRow::CorrelationWindow => levels::WINDOW_TITLE,
             RigRow::OverThreshold => levels::OVER_TITLE,
             RigRow::CorrelationGate => levels::GATE_TITLE,
@@ -71,6 +75,7 @@ impl RigRow {
         matches!(
             self,
             RigRow::Ballistic
+                | RigRow::LoudnessTarget
                 | RigRow::CorrelationWindow
                 | RigRow::OverThreshold
                 | RigRow::CorrelationGate
@@ -81,6 +86,7 @@ impl RigRow {
     pub fn levels_note(self) -> Option<&'static str> {
         match self {
             RigRow::Ballistic => Some(levels::BALLISTIC_NOTE),
+            RigRow::LoudnessTarget => Some(levels::TARGET_NOTE),
             RigRow::CorrelationWindow => Some(levels::WINDOW_NOTE),
             RigRow::OverThreshold => Some(levels::OVER_NOTE),
             RigRow::CorrelationGate => Some(levels::GATE_NOTE),
@@ -382,14 +388,16 @@ impl RigPage {
     }
 
     /// ←/→ (`d`) on programme-meter row `row`: the rig's value one step on, as a
-    /// `levels.set` of that value alone; nothing at either end of a range.
+    /// `levels.set` of that value alone; nothing at either end of a range (the loudness
+    /// target says why in [`Self::error`]).
     pub fn levels_step(&mut self, rig: &Rig, row: RigRow, d: i32) -> Option<(Command, String)> {
         use ac2_proto::model::{
             Ballistic, CORRELATION_GATE_RANGE, CorrelationWindow, OVER_THRESHOLD_RANGE,
         };
-        use ac2_proto::units::{Dbfs, Dbtp};
+        use ac2_proto::units::{Dbfs, Dbtp, Lufs};
         self.focus_row(row);
         self.sent = None;
+        self.error = None;
         let now = rig.levels;
         let step_in = |all: usize, at: usize| {
             let i = at as i32 + d.signum();
@@ -404,6 +412,16 @@ impl RigPage {
             RigRow::Ballistic => {
                 let at = Ballistic::ALL.iter().position(|b| *b == now.ballistic)?;
                 want.ballistic = Ballistic::ALL[step_in(Ballistic::ALL.len(), at)?];
+            }
+            RigRow::LoudnessTarget => {
+                let by = levels::TARGET_STEP_LU;
+                let n = ((now.loudness_target.0 / by).round() + f64::from(d.signum())) * by;
+                want.loudness_target = Lufs(n);
+                // Past either end the row says what the rig takes, in the daemon's words.
+                if let Err(e) = want.check() {
+                    self.error = Some(e);
+                    return None;
+                }
             }
             RigRow::CorrelationWindow => {
                 let all = CorrelationWindow::ALL;
@@ -434,6 +452,7 @@ impl RigPage {
         let l = rig.levels;
         match row {
             RigRow::Ballistic => l.ballistic.word().to_owned(),
+            RigRow::LoudnessTarget => levels::target_text(l.loudness_target.0),
             RigRow::CorrelationWindow => l.correlation_window.text().to_owned(),
             RigRow::OverThreshold => levels::over_text(l.over_threshold.0),
             RigRow::CorrelationGate => levels::gate_text(l.correlation_gate.0),
@@ -502,6 +521,7 @@ impl RigPage {
             }),
             RigRow::Monitor => return self.monitor(rig, !rig.monitor_at_start),
             row @ (RigRow::Ballistic
+            | RigRow::LoudnessTarget
             | RigRow::CorrelationWindow
             | RigRow::OverThreshold
             | RigRow::CorrelationGate) => return self.levels_step(rig, row, 1),
@@ -542,8 +562,11 @@ pub fn levels_set(
     let over_threshold = (want.over_threshold != now.over_threshold).then_some(want.over_threshold);
     let correlation_gate =
         (want.correlation_gate != now.correlation_gate).then_some(want.correlation_gate);
+    let loudness_target =
+        (want.loudness_target != now.loudness_target).then_some(want.loudness_target);
     let what: Vec<String> = [
         ballistic.map(|b| format!("programme meters read {}", b.word())),
+        loudness_target.map(|t| format!("loudness target {}", levels::target_text(t.0))),
         correlation_window.map(|w| format!("correlation window {}", w.text())),
         over_threshold.map(|t| format!("an over is above {}", levels::over_text(t.0))),
         correlation_gate.map(|g| format!("correlation gate {}", levels::gate_text(g.0))),
@@ -560,7 +583,7 @@ pub fn levels_set(
         correlation_window,
         over_threshold,
         correlation_gate,
-        loudness_target: None,
+        loudness_target,
     };
     Some((cmd, what.join(" · ")))
 }

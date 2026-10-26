@@ -278,6 +278,8 @@ pub(super) struct PanePlatesFile {
     mark: Option<PlateFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     peaks: Option<PlateFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    loudness: Option<PlateFile>,
 }
 
 /// One plate: its place, fractions `[x, y]` of the room beside it, and its text scale.
@@ -304,6 +306,7 @@ impl PanePlatesFile {
             (PlateKind::Readout, &f.readout),
             (PlateKind::Mark, &f.mark),
             (PlateKind::Peaks, &f.peaks),
+            (PlateKind::Loudness, &f.loudness),
         ] {
             let Some(file) = file else { continue };
             let name = format!("{kind:?}").to_lowercase();
@@ -345,6 +348,7 @@ impl PanePlatesFile {
             readout: one(&p.readout),
             mark: one(&p.mark),
             peaks: one(&p.peaks),
+            loudness: one(&p.loudness),
         })
     }
 }

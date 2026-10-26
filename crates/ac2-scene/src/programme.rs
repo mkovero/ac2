@@ -524,7 +524,7 @@ pub mod rig {
     pub const GATE_TITLE: &str = "Correlation gate";
 
     pub const BALLISTIC_NOTE: &str = "the rig's choice: every app on it reads the same bar · \
-         VU only on a calibrated line input";
+         VU only on a calibrated line input · loudness on line and digital inputs";
     pub const WINDOW_NOTE: &str = "how long the correlator averages";
     pub const OVER_NOTE: &str = "true peak above this counts an over";
     pub const GATE_NOTE: &str = "a side quieter than this reads quiet, with no correlation";
@@ -545,6 +545,10 @@ pub mod rig {
     }
 
     pub const TARGET_TITLE: &str = "Loudness target";
+    /// The target colours the bars, so it is the rig's: two apps on one rig must light the
+    /// same programme the same way.
+    pub const TARGET_NOTE: &str = "loudness bars are lighter above it · the rig's: every app \
+         on it reads the same · R128 −23, streaming often −14";
     /// One ←/→ step of the loudness target, LU.
     pub const TARGET_STEP_LU: f64 = 1.0;
 

@@ -228,3 +228,90 @@ fn the_peak_list_is_a_plate_of_the_pane() {
     plate(&mut t, PlateMsg::End);
     assert_eq!(plates(&t, pane).peaks, PlatePlace::default());
 }
+
+/// A Programme pane's loudness readout is a plate as the others: a move and a size are one
+/// undo step each, a double-click docks it again, and T names it among what the steps hide.
+#[test]
+fn the_loudness_plate_is_a_plate_of_the_programme_pane() {
+    let mut t = T::new();
+    t.st.open_programme(Metered::Pair { left: 2, right: 3 });
+    let pane = t.st.layout.focus;
+    assert_eq!(t.st.layout.kind(pane), PaneKind::Programme);
+    t.tick(1.0);
+    let steps = t.st.history.undo_len();
+    let kind = PlateKind::Loudness;
+    plate(
+        &mut t,
+        PlateMsg::Move {
+            pane,
+            kind,
+            x: 0.25,
+            y: 0.0,
+        },
+    );
+    plate(&mut t, PlateMsg::End);
+    plate(
+        &mut t,
+        PlateMsg::Scale {
+            pane,
+            kind,
+            scale: 2.0,
+        },
+    );
+    plate(&mut t, PlateMsg::End);
+    assert_eq!(t.st.history.undo_len(), steps + 2);
+    let p = plates(&t, pane).loudness;
+    assert_eq!((p.at, p.scale()), (Some([0.25, 0.0]), 2.0));
+    assert!(plates(&t, pane).readout.is_auto());
+    // The pane's layout carries it, and brings it back.
+    let w = crate::state::panes::plates::wire_plates(&plates(&t, pane));
+    assert_eq!((w.loudness.at, w.loudness.scale), (Some([0.25, 0.0]), 2.0));
+    assert_eq!(crate::state::panes::plates::ui_plates(&w).loudness, p);
+    t.key("Ctrl+Z");
+    assert_eq!(plates(&t, pane).loudness.scale(), 1.0);
+    assert_eq!(plates(&t, pane).loudness.at, Some([0.25, 0.0]));
+    plate(&mut t, PlateMsg::Reset { pane, kind });
+    plate(&mut t, PlateMsg::End);
+    assert_eq!(plates(&t, pane).loudness, PlatePlace::default());
+    t.key("T");
+    assert_eq!(t.last_toast(), "Programme: no grid or target label");
+    t.key("T");
+    assert_eq!(
+        t.last_toast(),
+        "Programme: no grid, target label, scale or loudness plate"
+    );
+    t.key("T");
+    assert_eq!(
+        t.last_toast(),
+        "Programme: grid, target label, scale and loudness plate"
+    );
+}
+
+/// The loudness plate goes on the wire with a measurement's panes, as the others do.
+#[test]
+fn the_loudness_plate_is_sent_with_the_measurements_panes() {
+    let mut t = T::new();
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    let pane = t.st.layout.focus;
+    t.tick(1.0);
+    let kind = PlateKind::Loudness;
+    let mut r = plate(
+        &mut t,
+        PlateMsg::Move {
+            pane,
+            kind,
+            x: 1.0,
+            y: 0.5,
+        },
+    );
+    r.extend(plate(&mut t, PlateMsg::End));
+    r.extend(t.st.update(
+        Msg::Tick {
+            now_s: 2.0,
+            dt_s: 1.0,
+        },
+        &t.keys,
+    ));
+    let sent = layout_sent(&r).expect("the layout, once the drag rests");
+    assert_eq!(sent.panes()[0].plates.loudness.at, Some([1.0, 0.5]));
+}

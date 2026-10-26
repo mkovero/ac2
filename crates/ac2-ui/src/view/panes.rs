@@ -233,7 +233,11 @@ fn scene_for(
             };
             (s.scene(), axes)
         }
-        PaneKind::Programme => (scenes::programme(st, id, theme, vp)?, Axes::default()),
+        PaneKind::Programme => {
+            let s = scenes::programme(st, id, theme, vp)?;
+            plates = s.plates();
+            (s.scene, Axes::default())
+        }
     };
     let scene = Arc::new(scene);
     app.scenes.insert(

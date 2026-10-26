@@ -815,6 +815,9 @@ fn the_rig_page_steps_the_programme_meters() {
         call(&t.key("ArrowLeft")).is_none(),
         "true peak is the first"
     );
+    // Past the loudness target (its own test) to the correlation window.
+    t.key("ArrowDown");
+    assert_eq!(rig_page(&t).focus, RigRow::LoudnessTarget);
     t.key("ArrowDown");
     let r = t.key("ArrowLeft");
     assert_eq!(
@@ -841,5 +844,49 @@ fn the_rig_page_steps_the_programme_meters() {
             &set(None, None, None, Some(Dbfs(-55.0))),
             "correlation gate −55 dBFS"
         ))
+    );
+}
+
+/// The loudness target steps 1 LU with ←/→ and sends each step as a `levels.set` of the
+/// target alone; past either end of the rig's range it sends nothing and the row says why.
+#[test]
+fn the_rig_page_steps_the_loudness_target() {
+    use ac2_proto::units::Lufs;
+    let mut t = T::new();
+    let mut s = with_rig(7);
+    s.rig.levels.loudness_target = Lufs(-36.0);
+    t.conn(mirror(s));
+    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.update(
+        Msg::Settings(SettingsMsg::RigFocus(RigRow::LoudnessTarget)),
+        &t.keys,
+    );
+    assert_eq!(RigRow::LoudnessTarget.title(), "Loudness target");
+    let rig = t.st.daemon().expect("state").rig.clone();
+    assert_eq!(
+        crate::settings::RigPage::levels_text(&rig, RigRow::LoudnessTarget),
+        "\u{2212}36 LUFS"
+    );
+    let r = t.key("ArrowRight");
+    assert_eq!(
+        call(&r),
+        Some((
+            &Command::LevelsSet {
+                base: Rev(7),
+                ballistic: None,
+                correlation_window: None,
+                over_threshold: None,
+                correlation_gate: None,
+                loudness_target: Some(Lufs(-35.0)),
+            },
+            "loudness target \u{2212}35 LUFS"
+        ))
+    );
+    assert_eq!(rig_page(&t).error, None);
+    let r = t.key("ArrowLeft");
+    assert!(call(&r).is_none(), "−37 is past the range: {r:?}");
+    assert_eq!(
+        rig_page(&t).error.as_deref(),
+        Some("loudness target -37 LUFS is outside -36 … -5 LUFS")
     );
 }

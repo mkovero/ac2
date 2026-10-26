@@ -563,6 +563,28 @@ fn the_peak_plate_round_trips() {
     assert_eq!(back.layout.panes, p.layout.panes);
 }
 
+/// A Programme pane's loudness plate is written under the pane as the others are, and
+/// left out where the pane docks it.
+#[test]
+fn the_loudness_plate_round_trips() {
+    let mut p = UiPrefs::default();
+    let mut panes = two_panes();
+    panes.views[1].plates.loudness.move_to(0.0, 0.5);
+    panes.views[1].plates.loudness.set_scale(2.5);
+    p.layout.panes = Some(panes);
+    let text = p.to_toml();
+    assert!(
+        text.contains("[layout.panes.plates.loudness]\nat = [0.0, 0.5]\nscale = 2.5\n"),
+        "{text}"
+    );
+    let back = UiPrefs::from_toml(&text).expect("parse");
+    assert_eq!(back.layout.panes, p.layout.panes);
+    let bad = text.replace("scale = 2.5", "scale = 4.0");
+    let back = UiPrefs::from_toml(&bad).expect("parse");
+    let l = back.layout.panes.expect("panes").views[1].plates.loudness;
+    assert_eq!((l.at, l.scale()), (Some([0.0, 0.5]), 1.0));
+}
+
 #[test]
 fn load_and_atomic_save() {
     let dir = tempfile::tempdir().expect("tempdir");

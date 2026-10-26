@@ -490,10 +490,14 @@ impl AppState {
             C::SpectrographGrey => self.spectrograph_colours(Ok(Colormap::Grey), out),
             C::PlotChrome => {
                 let title = self.layout.focused().title();
-                let spl = self.layout.focus_kind() == PaneKind::Spl;
+                let kind = self.layout.focus_kind();
                 let c = &mut self.modes_mut().chrome;
                 *c = c.next();
-                let name = if spl { c.spl_name() } else { c.name() };
+                let name = match kind {
+                    PaneKind::Spl => c.spl_name(),
+                    PaneKind::Programme => c.programme_name(),
+                    _ => c.name(),
+                };
                 self.toast(format!("{title}: {name}"));
             }
             // A Leq history strip on the focused pane walks its log with the same keys.

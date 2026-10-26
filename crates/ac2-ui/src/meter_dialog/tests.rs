@@ -34,9 +34,10 @@ fn focus(f: &mut Form, id: FieldId) {
     f.focus_field(i);
 }
 
-const RIG_ROWS: [&str; 5] = [
+const RIG_ROWS: [&str; 6] = [
     "## How it reads · Whose: the rig — all clients",
     "Programme meters read: true peak",
+    "Loudness target: −23 LUFS",
     "Correlation window: 1 s",
     "An over is above: 0.0 dBTP",
     "Correlation gate: −60 dBFS",
@@ -72,19 +73,23 @@ fn inputs_are_picked_as_bars_by_name_each_once() {
         [
             "## What to meter",
             "Meter: inputs side by side",
-            "Bar 1: Main L (in 3)",
-            "Bar 2: Main R (in 4)",
-            "Bar 3: none",
+            "Input 1: Main L (in 3)",
+            "Input 2: Main R (in 4)",
+            "Input 3: none",
         ]
     );
     // An empty bar takes the first input no other bar meters; the next empty one follows.
     focus(&mut f, FieldId::Bar(2));
     f.cycle(1);
-    assert_eq!(rows(&f)[4..6], ["Bar 3: MM1 (in 1)", "Bar 4: none"]);
+    assert_eq!(rows(&f)[4..6], ["Input 3: MM1 (in 1)", "Input 4: none"]);
     f.cycle(1);
-    assert_eq!(rows(&f)[4], "Bar 3: Loop (in 2)", "in 3 and in 4 are taken");
+    assert_eq!(
+        rows(&f)[4],
+        "Input 3: Loop (in 2)",
+        "in 3 and in 4 are taken"
+    );
     f.cycle(1);
-    assert_eq!(rows(&f)[4], "Bar 3: Loop (in 2)", "the last free input");
+    assert_eq!(rows(&f)[4], "Input 3: Loop (in 2)", "the last free input");
     assert_eq!(
         metered(&f),
         Ok(Metered::inputs_of(&[2, 3, 1]).expect("three inputs"))
@@ -92,7 +97,7 @@ fn inputs_are_picked_as_bars_by_name_each_once() {
     // ← past the first free input: the bar meters nothing, and the empty bar after it goes.
     f.cycle(-1);
     f.cycle(-1);
-    assert_eq!(rows(&f)[4], "Bar 3: none");
+    assert_eq!(rows(&f)[4], "Input 3: none");
     assert_eq!(rows(&f)[5], RIG_ROWS[0]);
     assert_eq!(f.fields[f.focus].id, FieldId::Bar(2));
     // Bar 1 always meters an input.
@@ -100,7 +105,7 @@ fn inputs_are_picked_as_bars_by_name_each_once() {
     for _ in 0..5 {
         f.cycle(-1);
     }
-    assert_eq!(rows(&f)[2], "Bar 1: MM1 (in 1)");
+    assert_eq!(rows(&f)[2], "Input 1: MM1 (in 1)");
     // Back to the pair: no bars.
     focus(&mut f, FieldId::Metered);
     f.cycle(-1);
@@ -129,7 +134,7 @@ fn without_pairs_there_is_no_meter_field() {
     let f = form(Vec::new(), inputs(), None, LevelsSettings::default(), None);
     assert_eq!(
         rows(&f)[..3],
-        ["## What to meter", "Bar 1: MM1 (in 1)", "Bar 2: none"]
+        ["## What to meter", "Input 1: MM1 (in 1)", "Input 2: none"]
     );
     assert_eq!(f.field_meters(0), vec![0]);
 }
@@ -152,11 +157,12 @@ fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
         [
             "## What to meter",
             "Meter: inputs side by side",
-            "Bar 1: Main R (in 4)",
-            "Bar 2: MM1 (in 1)",
-            "Bar 3: none",
+            "Input 1: Main R (in 4)",
+            "Input 2: MM1 (in 1)",
+            "Input 3: none",
             RIG_ROWS[0],
             "Programme meters read: Type II",
+            "Loudness target: −23 LUFS",
             "Correlation window: 0.3 s",
             "An over is above: −1.3 dBTP",
             "Correlation gate: −70 dBFS",
@@ -206,5 +212,5 @@ fn nothing_metered_is_said() {
         LevelsSettings::default(),
         None,
     );
-    assert_eq!(metered(&f), Err("choose the input of bar 1".to_owned()));
+    assert_eq!(metered(&f), Err("choose input 1".to_owned()));
 }

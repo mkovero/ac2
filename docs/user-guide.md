@@ -141,6 +141,7 @@ once).
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
+| Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
 | Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
 | Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
@@ -275,7 +276,9 @@ selected measurement, uses.
 Under each meter a few lines read the programme meters of that input (of each side of a
 pair, marked **L** / **R**) in the rig's ballistic: the reading, then its max, then the true
 peak where the reading is not already it — *Type I −14.2 dBFS*, *max −3.1 dBFS*, *true peak
-−11.8 dBTP*. *CLIP* shows at the end of the reading's line and *2 overs* at the end of the
+−11.8 dBTP*. Under a loudness ballistic (*Mom loudness*, *Short loudness*) the loudness is
+the source's, on the Programme pane's bars and plate, so each input's lines read its true
+peak in dBTP (dBu or dB SPL on a calibrated scale, as under true peak). *CLIP* shows at the end of the reading's line and *2 overs* at the end of the
 max line when there are any; the lines turn red then. Every field keeps its place and width
 whatever it reads (a fixed-width font, numbers right-aligned, the overs and CLIP places kept
 when blank), so only the bars move. A pair's row ends with its correlation, *correlation
@@ -295,14 +298,17 @@ laid out and keyed like the measurement forms (**↑/↓** field, **←/→** ch
 **Esc** closes and changes nothing):
 
 - **What to meter** — *Meter*: one of the session's pairs, or *inputs side by side*; then
-  *Bar 1* … *Bar 8*, each an input by name with its meter (a pair shows both sides' meters).
-  A bar never meters an input another bar does; **←** past the first input leaves a bar
-  *none*, and an empty bar after the last waits for the next input. Mics are offered too:
-  they show levels, no loudness. Switching from a pair to inputs starts with its two sides.
-- **How it reads · Whose: the rig — all clients** — *Programme meters read*, *Correlation
-  window*, *An over is above* and *Correlation gate*, as on Settings › Rig monitor. They are
-  the rig's, so every app on it reads the same bar: a value changed here goes out on
-  **Enter** as one `levels.set` of only what was changed, and **Esc** sends nothing.
+  *Input 1* … *Input 8*, each an input by name with its meter (a pair shows both sides'
+  meters). An input is named once; **←** past the first input leaves a row *none*, and an
+  empty row after the last waits for the next input. Mics are offered too: they show
+  levels, no loudness. Switching from a pair to inputs starts with its two sides. The rows
+  name inputs, not bars: under a loudness ballistic the pane's bars follow from them by
+  source (below).
+- **How it reads · Whose: the rig — all clients** — *Programme meters read*, *Loudness
+  target*, *Correlation window*, *An over is above* and *Correlation gate*, as on Settings ›
+  Rig monitor. They are the rig's, so every app on it reads the same bar: a value changed
+  here goes out on **Enter** as one `levels.set` of only what was changed, and **Esc** sends
+  nothing.
 
 **Enter** opens the pane beside the focused one (never in place of it). A session with no
 inputs lists the row with *no inputs in the session to meter*. *Edit measurement…* (the
@@ -315,24 +321,54 @@ else the input) beside the focused one, and a pane's own list (its title's ▾) 
 keeps the pane and what it meters; a session without those inputs shows it empty with
 *inputs 3+4 not in this session*.
 
-The title says how the bars read, which pair and the correlator's window: *true peak · Main
-· 1 s*. Each input is a bar on a dBFS scale (−60 … 0), green, yellow from −6, red when it
-clips, with a flying peak that holds 1 s and then falls 20 dB/s. Under each bar: the reading
-on the input's own scale (dBTP for true peak, dBFS for the other ballistics; dBu after a [line
-calibration](#calibrating-a-line-input); dB SPL on a calibrated mic), the true peak in dBTP
-(not repeated when the bar already reads it), the max since the last reset in the reading's
-unit, overs and CLIP. Each readout has its place under the bar — the numbers right-aligned,
-*max* and the overs on the left, *CLIP* on the right — so none shifts as the value changes.
+The title starts with what the bars read, then the target under a loudness ballistic, the
+pair and the correlator's window: *true peak · Main · 1 s*, *Short loudness · target −23 LUFS
+· Main · 1 s*. Under a peak ballistic each input is a bar on a dBFS scale (−60 … 0), green,
+yellow from −6, red when it clips, with a flying peak that holds 1 s and then falls 20 dB/s.
+Under each bar: the reading on the input's own scale (dBTP for true peak, dBFS for the other
+ballistics; dBu after a [line calibration](#calibrating-a-line-input); dB SPL on a calibrated
+mic), the true peak in dBTP (not repeated when the bar already reads it), the max since the
+last reset in the reading's unit, overs and CLIP. Each readout has its place under the bar —
+the numbers right-aligned, *max* and the overs on the left, *CLIP* on the right — so none
+shifts as the value changes.
 
 - **Ballistics** (the rig's, Settings › Rig monitor › *Programme meters read*, or `ac2
   levels set --ballistic`): **true peak** (the default — sample peak through 4×
   oversampling, ITU-R BS.1770 Annex 2: what a converter or a link will see), **Type I**
   (IEC 60268-10 quasi-peak, 5 ms integration, 20 dB return in 1.7 s: the Nordic and DIN
-  meters), **Type II** (10 ms, 24 dB in 2.8 s: the BBC and EBU meters) and **VU** (IEC
+  meters), **Type II** (10 ms, 24 dB in 2.8 s: the BBC and EBU meters), **VU** (IEC
   60268-17, 300 ms; 0 VU = +4 dBu, so only a calibrated line input reads it — any other bar
-  says *VU needs a line calibration · true peak shown*). The ballistics follow the
-  standards' burst responses, checked against their published tables, but ac2 is not a
-  type-approved meter: for a broadcast delivery that must be measured on one, use it.
+  reads true peak and says *true peak shown · VU needs a line calibration*), **Mom
+  loudness** and **Short loudness** (below). The ballistics follow the standards' burst
+  responses, checked against their published tables, but ac2 is not a type-approved meter:
+  for a broadcast delivery that must be measured on one, use it.
+- **Loudness bars** (*Mom loudness*: BS.1770 momentary loudness, 400 ms; *Short loudness*:
+  short-term, 3 s; both in LUFS, by EBU Tech 3341). A loudness bar meters a **source**, not
+  an input: a line or digital pair reads one bar, both channels summed; an unpaired line or
+  digital input reads its own, named with *mono* (BS.1770 weighs one channel 1, so a mono
+  signal on one input reads 3 LU below the same signal on both inputs of a pair). A pane of
+  one side of a pair, or naming one side among other inputs, reads the pair's bar under the
+  pair's name; an Inputs pane of *1, 5, 2* with *1+2* a pair has two bars, the pair's where
+  input 1 was and input 5's. The bar spans **target −18 … target +9 LU** (the EBU +9 scale),
+  labelled in LUFS every 3 LU on a tall bar, else every 9 LU; the target's own tick reads
+  *target −23*, and a dashed line across the bar marks it. Below the target the bar is the
+  level green, above it a lighter green (no yellow or red: a programme on target reads above
+  it half the time). Two short ticks at the bar's edges mark the **max since the reset**
+  (none before the first window, none off the scale); there is no flying peak. Under the
+  bar: the reading (*−23.1 LUFS*, — until a window lies wholly after the start), *max −20.1
+  LUFS*, *TP −1.2 dBTP* (the higher side this frame) and the overs and CLIP of each side
+  (*2 overs L · CLIP R*). An input without a source — a mic (a LUFS figure on a mic would
+  follow its preamp gain), a pair side whose partner the session does not capture, any
+  input at a rate other than 44.1 … 192 kHz in multiples of 100 Hz — keeps a true-peak bar
+  with its own short dBFS scale and says why on its last row: *true peak shown · no loudness
+  on a mic input*, *true peak shown · loudness: Main R (input 4) not captured*, *true peak
+  shown · loudness needs a rate of 44.1 to 192 kHz, a multiple of 100 Hz*. A pane of mics
+  only reads true peak, titled so.
+- **Loudness target** (the rig's, Settings › Rig monitor › *Loudness target*, or `ac2 levels
+  set --loudness-target`): −23 LUFS by default (EBU R128), −36 … −5 LUFS in 1 LU steps
+  (streaming services often use −14 or −16). It is the rig's because it colours the bars:
+  two apps on one rig light the same programme alike. ac2 has no relative (LU) readout; the
+  numbers stay absolute.
 - **Overs**: a frame whose true peak passes the rig's threshold (*An over is above*, 0 dBTP
   by default; −1 dBTP is the R128 practice) counts one, and the next only after the level fell
   1 dB below it — a sustained over is one, not hundreds. **R** clears the max, overs and
@@ -347,28 +383,35 @@ unit, overs and CLIP. Each readout has its place under the bar — the numbers r
   red to grey: **Settings › Display › Ember decay** sets how long (0.1 … 2 s, 0.4 s by
   default; ←/→ step 0.1 s). The picture is auto-gained by the daemon; its frame says nothing
   about level — read the bars for that.
-- **Loudness** (ITU-R BS.1770 / EBU R128, by EBU Tech 3341 and 3342): a column at the
-  pane's right edge, headed by what it measures — the pair's name, or an input's name with
-  *mono* (BS.1770 weighs one channel 1, so a mono signal on one input reads 3 LU below the
-  same signal on both inputs of a pair). *Mom* is the momentary loudness (400 ms), *Short*
-  the short-term (3 s), *Int … LUFS* the integrated loudness since the last reset, *LRA … LU*
-  the loudness range (*settling* for its first minute), *TP max … dBTP* the highest true
-  peak; then *since 20:14 · R resets*. Integrated and LRA read *— (waiting for programme)*
-  until enough programme passed their gates; Mom and Short read — on silence. A pane of a
-  pair, of one input, or of one side of a pair (it shows the pair's loudness) has a column;
-  otherwise it says why: *loudness needs a rate of 44.1 to 192 kHz, a multiple of 100 Hz*,
-  *no loudness on a mic input* (a LUFS figure on a mic would follow its preamp gain),
-  *loudness: Main R (input 4) not captured* (a pair's partner the session does not
-  capture), *loudness: one input or a pair*. **R** resets the integrated loudness, LRA and
-  TP max with the max and overs; a pair restarts when either side's row is reset. A narrow
-  pane drops the column before the goniometer. The readouts are absolute (LUFS, LU): ac2 is
-  not an EBU Mode meter — there is no relative scale (LU re −23 LUFS), no loudness bar and
-  no pause. `ac2 levels` prints the same figures, max Mom and max Short too.
+- **The loudness plate** (ITU-R BS.1770 / EBU R128, by EBU Tech 3341 and 3342): a pane whose
+  inputs make exactly one source — a pair, one line input, one side of a pair, or such a
+  source beside mics — has a plate of that source's loudness, whatever the ballistic. Top
+  down: the source's name; **Int … LUFS**, the integrated loudness since the last reset,
+  large (*waiting for programme* under it until enough programme passed its gate); *Mom* and
+  *Short* in LUFS; *max Mom* and *max Short* since the reset; *LRA … LU*, the loudness range
+  (*waiting*, then *settling* for its first minute) and *TP max … dBTP*, the highest true
+  peak; then *since 20:14 · R resets*. Nothing on it moves as values change (tabular
+  digits in fixed cells). The pane docks it — beside the bars at the right edge, else above
+  them, else with the since line, the maxima, the range and peak and then the live values
+  dropped in that order, else not at all — so it covers nothing. It is a
+  [plate](#moving-the-plates-and-their-text-size): drag it anywhere (it then floats over the
+  pane and the bars take its room back), drag its corner grip to scale its text 0.75× … 3×,
+  double-click to dock it again at the theme's size; a move or a size is one **Ctrl+Z**
+  step, and its place and size are kept with the pane. A pane of several sources (two
+  pairs, a pair and a line input), or of none, has no plate: its bars read each source.
+  **R** resets the integrated loudness, LRA, the maxima and TP max with the max and overs;
+  a pair restarts when either side's row is reset. ac2 is not an EBU Mode meter: no
+  relative scale (LU re the target), no Int bar and no pause. `ac2 levels` prints the same
+  figures.
 
-**T** hides the grid and scale as on every pane (twice: the labels and the loudness
-column's since line too), **W** makes it the stage view, **R** / **Shift+R** reset as on the
-Inputs list. The daemon meters every input
-whether a pane shows it or not; the pane draws only while it is on screen.
+**T** steps the pane as every pane (`Programme: no grid or target label`, then `Programme: no
+grid, target label, scale or loudness plate`, `Programme: grid, target label, scale and
+loudness plate`): the second step takes the bars' grid lines and the target's label, the
+third also the scales' numbers and the loudness plate wherever it sits. The bars, their
+text, the target line, the max ticks, the goniometer and the chip stay at every step, and
+nothing moves: a docked plate's room stays reserved, the scale keeps its width. **W** makes
+the pane the stage view, **R** / **Shift+R** reset as on the Inputs list. The daemon meters
+every input whether a pane shows it or not; the pane draws only while it is on screen.
 
 ## Reference wiring and loopback
 
@@ -740,7 +783,11 @@ stay. The 10 dB lines across the Leq columns and band bars go with the grid, and
 only takes their scale's numbers too (`SPL: no grid or limit text`, then
 `SPL: no grid, scale or limit text`, `SPL: grid, scale and limit text`). The bars, their
 values, the band labels, the limit lines and the allowed-level marks with their key stay
-at every step, and nothing moves: the scale keeps its room. The theme is in
+at every step, and nothing moves: the scale keeps its room. On the Programme pane no grid also takes the
+target's label, and traces only the scales' numbers and the loudness plate
+(`Programme: no grid or target label`, then `Programme: no grid, target label, scale or
+loudness plate`, `Programme: grid, target label, scale and loudness plate`); the bars, their
+text, the target line and the max ticks stay, and a docked plate's room stays reserved. The theme is in
 Settings › Display and the palette (*Theme*).
 
 #### Cursor jumps and the mark (Alt+P, Alt+N, Alt+D)
@@ -815,10 +862,10 @@ text size), *Show/hide legend*. Whether it is hidden is kept in `ui.toml`
 
 #### Moving the plates and their text size
 
-The legend, the cursor values, the mark's readout and the spectrum's list of tracked peaks
-are plates, and every plate takes the same mouse (transfer and spectrum panes; a spectrum's
-legend is a strip of rows above the plot, not a plate, and its mark lines ride on the
-cursor values' plate):
+The legend, the cursor values, the mark's readout, the spectrum's list of tracked peaks and
+the Programme pane's loudness readout are plates, and every plate takes the same mouse
+(transfer, spectrum and Programme panes; a spectrum's legend is a strip of rows above the
+plot, not a plate, and its mark lines ride on the cursor values' plate):
 
 - **Drag** a plate anywhere inside its plot. It stays where it was dropped as the pane
   grows or shrinks (kept as a share of the room around it, so one dropped against an edge
@@ -826,6 +873,10 @@ cursor values' plate):
 - **Drag its corner grip** (the three dots, bottom-right) to set its text size, from 0.75×
   to 3× the theme's, to read a value across a room. The plate grows with its text.
 - **Double-click** it to put it back where the pane places it, at the theme's size.
+
+The loudness readout, where the pane places it, is docked: the bars leave it room beside or
+above them. Dragged, it floats over the pane and the bars take that room back; a
+double-click docks it again.
 
 Hovering a plate makes it opaque and shows the move or resize pointer and a tooltip with
 these gestures. Off hover a plate is see-through, so the curves show under it; Settings ›

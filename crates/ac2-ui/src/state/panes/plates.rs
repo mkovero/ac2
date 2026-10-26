@@ -1,5 +1,5 @@
 //! The plates over a pane's plot (the legend, the cursor values, the mark's readout, the
-//! peak list): dragged, scaled by their grip and put back by a double-click. Where they
+//! peak list, a Programme pane's loudness readout): dragged, scaled by their grip and put back by a double-click. Where they
 //! sit is the pane's, stored with its other display choices ([`View::plates`]), so it
 //! travels with a measurement's own panes and comes back with `ui.toml`.
 

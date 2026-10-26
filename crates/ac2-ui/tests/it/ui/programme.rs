@@ -46,6 +46,7 @@ fn programme_texts(h: &Harness<'_, App>) -> Vec<String> {
     )
     .expect("a Programme scene");
     scene
+        .scene
         .layers
         .iter()
         .flat_map(|l| l.labels.iter().map(|l| l.text.clone()))
@@ -324,4 +325,123 @@ fn inputs_rows_keep_their_geometry() {
         let want = first.get_or_insert_with(|| got.clone());
         assert_eq!(*want, got, "{peak} dBFS, {overs} overs, clip {clip}");
     }
+}
+
+/// From the fake daemon's pair: Mom loudness chosen on Settings › Rig monitor turns the
+/// pair's two peak bars into one LUFS bar of the pair, titled so, with the target; the
+/// loudness plate is a plate the mouse can take over the whole pane; T's third step takes
+/// it (and its box) away and the next brings both back.
+#[test]
+fn mom_loudness_reads_lufs_bars() {
+    use ac2_proto::model::Ballistic as Wire;
+    use ac2_scene::programme::ProgrammeBar;
+    use ac2_ui::settings::RigRow;
+    use ac2_ui::state::{Msg, SettingsMsg};
+    if !have_gpu("mom_loudness_reads_lufs_bars") {
+        return;
+    }
+    let rig = pair_rig();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "the pair's levels", |a| {
+        a.state.row_meters(2).is_some_and(|m| {
+            a.state
+                .programme_of(m)
+                .inputs
+                .iter()
+                .all(|i| i.max.is_some())
+        })
+    });
+    h.state_mut().dispatch(Msg::InputPick(2));
+    h.key_press(Key::P);
+    step_until(&mut h, "a Programme pane", |a| {
+        common::visible(&a.state).contains(&PaneKind::Programme)
+    });
+    let pane = common::pane(&h.state().state, PaneKind::Programme);
+    h.state_mut().dispatch(Msg::OpenRig);
+    h.state_mut()
+        .dispatch(Msg::Settings(SettingsMsg::RigFocus(RigRow::Ballistic)));
+    // Each step is sent from the rig's value, so the next waits for it to come back.
+    for want in [Wire::Type1, Wire::Type2, Wire::Vu, Wire::Momentary] {
+        h.key_press(Key::ArrowRight);
+        step_until(&mut h, want.word(), |a| {
+            a.state
+                .daemon()
+                .is_some_and(|s| s.rig.levels.ballistic == want)
+        });
+    }
+    h.key_press(Key::Escape);
+    step_until(&mut h, "Settings closed", |a| {
+        a.state.overlay == Overlay::None
+    });
+    step_until(&mut h, "one LUFS bar of the pair", |a| {
+        a.state.programme_pane(pane).is_some_and(|(p, _)| {
+            matches!(p.bars.as_slice(), [ProgrammeBar::Source(b)] if b.name == "Main"
+                && b.reading.is_some())
+        })
+    });
+    let st = &h.state().state;
+    assert_eq!(
+        st.pane_title(pane),
+        "Mom loudness · target \u{2212}23 LUFS · Main · 1 s"
+    );
+    let texts = programme_texts(&h);
+    for want in ["target \u{2212}23", "Int", "Mom", "Short"] {
+        assert!(
+            texts.iter().any(|t| t == want),
+            "{want}: {}",
+            common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
+        );
+    }
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.ends_with(" LUFS") && t.starts_with('\u{2212}')),
+        "the bar's reading: {}",
+        common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
+    );
+    // Every input's own reading is its true peak.
+    let (p, _) = st.programme_pane(pane).expect("the pane");
+    assert!(p.inputs.iter().all(|i| i.unit(p.ballistic) == "dBTP"));
+    let boxes = |h: &Harness<'_, App>| plate_boxes(h, pane);
+    let b = boxes(&h);
+    assert_eq!(b.len(), 1, "the loudness plate's box");
+    assert_eq!(b[0].kind, ac2_scene::plate::PlateKind::Loudness);
+    // Its room is the whole pane (inside the plot's inset), docked or not.
+    let (a, r) = (b[0].area, b[0].rect);
+    assert_eq!(
+        (a.x + a.w + a.x, a.y + a.h + a.y),
+        (900.0, 450.0),
+        "the pane is its room: {a:?}"
+    );
+    assert!(r.x >= a.x && r.y >= a.y && r.x + r.w <= a.x + a.w && r.y + r.h <= a.y + a.h);
+    use ac2_scene::view::PlotChrome;
+    let chrome = |c| move |a: &App| a.state.kind_modes(PaneKind::Programme).chrome == c;
+    h.key_press(Key::T);
+    step_until(&mut h, "no grid", chrome(PlotChrome::NoGrid));
+    assert_eq!(boxes(&h).len(), 1, "no grid keeps the plate");
+    h.key_press(Key::T);
+    step_until(&mut h, "traces only", chrome(PlotChrome::Bare));
+    assert!(boxes(&h).is_empty(), "the third step hides it");
+    assert!(!programme_texts(&h).iter().any(|t| t == "Int"));
+    h.key_press(Key::T);
+    step_until(&mut h, "full", chrome(PlotChrome::Full));
+    assert_eq!(boxes(&h).len(), 1);
+}
+
+/// The plates Programme pane `pane`'s scene offers the mouse at the test's size.
+fn plate_boxes(
+    h: &Harness<'_, App>,
+    pane: ac2_ui::state::PaneId,
+) -> Vec<ac2_scene::plate::PlateBox> {
+    ac2_ui::scenes::programme(
+        &h.state().state,
+        pane,
+        &ac2_scene::theme::Theme::dark(),
+        ac2_scene::primitives::Viewport {
+            width: 900.0,
+            height: 450.0,
+        },
+    )
+    .expect("a Programme scene")
+    .plates()
 }

@@ -97,6 +97,7 @@ fn the_chooser_row_opens_the_form_with_the_rigs_settings() {
         [
             "Meter: Main · line · pair (in 3, 4)",
             "Programme meters read: Type I",
+            "Loudness target: −23 LUFS",
             "Correlation window: 1 s",
             "An over is above: 0.0 dBTP",
             "Correlation gate: −60 dBFS",
@@ -139,10 +140,10 @@ fn several_inputs_open_side_by_side() {
         rows(&t)[..5],
         [
             "Meter: inputs side by side",
-            "Bar 1: 3 · Input 3",
-            "Bar 2: 4 · Input 4",
-            "Bar 3: 1 · Input 1",
-            "Bar 4: none",
+            "Input 1: 3 · Input 3",
+            "Input 2: 4 · Input 4",
+            "Input 3: 1 · Input 1",
+            "Input 4: none",
         ]
     );
     t.key("Enter");
@@ -197,11 +198,11 @@ fn edit_on_a_programme_pane_changes_it_in_place() {
     assert_eq!(rows(&t)[0], "Meter: Main · line · pair (in 3, 4)");
     t.key("ArrowRight");
     to_field(&mut t, FieldId::Bar(1));
-    // ← past inputs 2 and 1 (input 3 is bar 1's): none.
+    // ← past inputs 2 and 1 (input 3 is in row 1): none.
     for _ in 0..3 {
         t.key("ArrowLeft");
     }
-    assert_eq!(rows(&t)[1..3], ["Bar 1: 3 · Input 3", "Bar 2: none"]);
+    assert_eq!(rows(&t)[1..3], ["Input 1: 3 · Input 3", "Input 2: none"]);
     t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.st.layout.focus, p);
@@ -212,6 +213,40 @@ fn edit_on_a_programme_pane_changes_it_in_place() {
     );
 }
 
+/// The form's *Loudness target* row steps 1 LU and goes out on Enter as the target alone.
+#[test]
+fn the_loudness_target_is_sent_as_levels_set() {
+    use ac2_proto::units::Lufs;
+    let mut t = meter_t();
+    open_from_chooser(&mut t);
+    to_field(&mut t, FieldId::LoudnessTarget);
+    assert!(
+        rows(&t)
+            .iter()
+            .any(|r| r == "Loudness target: \u{2212}23 LUFS"),
+        "{:?}",
+        rows(&t)
+    );
+    t.key("ArrowRight");
+    let r = t.key("Enter");
+    assert_eq!(
+        calls(&r),
+        [(
+            &Command::LevelsSet {
+                base: Rev(7),
+                ballistic: None,
+                correlation_window: None,
+                over_threshold: None,
+                correlation_gate: None,
+                loudness_target: Some(Lufs(-22.0)),
+            },
+            "loudness target \u{2212}22 LUFS"
+        )]
+    );
+}
+
+/// Esc closes the form and does nothing else: no pane, no rig setting sent, whatever was
+/// changed in it.
 #[test]
 fn esc_only_closes() {
     let mut t = meter_t();
@@ -220,6 +255,8 @@ fn esc_only_closes() {
     open_from_chooser(&mut t);
     to_field(&mut t, FieldId::Ballistic);
     t.key("ArrowRight");
+    to_field(&mut t, FieldId::LoudnessTarget);
+    t.key("ArrowLeft");
     let r = t.key("Escape");
     assert!(calls(&r).is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);

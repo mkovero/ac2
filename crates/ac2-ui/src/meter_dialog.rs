@@ -1,13 +1,14 @@
 //! The programme meter dialog: what a Programme pane meters (one of the session's pairs, or up
-//! to eight inputs as bars side by side, picked by name with their meters) and how the rig's
+//! to eight inputs side by side, picked by name with their meters) and how the rig's
 //! programme meters read. The second part is the rig's (`levels.set`): the daemon computes the
 //! ballistics, so every app on the rig reads the same bar. It is marked as the rig's, and Enter
 //! sends only what was changed here, so a value another client set meanwhile stays.
 
 use ac2_proto::model::{
-    Ballistic, CORRELATION_GATE_RANGE, CorrelationWindow, LevelsSettings, OVER_THRESHOLD_RANGE,
+    Ballistic, CORRELATION_GATE_RANGE, CorrelationWindow, LOUDNESS_TARGET_RANGE, LevelsSettings,
+    OVER_THRESHOLD_RANGE,
 };
-use ac2_proto::units::{Dbfs, Dbtp};
+use ac2_proto::units::{Dbfs, Dbtp, Lufs};
 use ac2_scene::programme::{form as words, rig};
 
 use crate::forms::{Field, FieldId, Form, FormKind, Value};
@@ -21,9 +22,10 @@ pub struct MeterForm {
     pairs: Vec<((u16, u16), String)>,
     /// The session's inputs: channel and name as the dialogs show it.
     inputs: Vec<(u16, String)>,
-    /// The over threshold's and the gate's options, dB.
+    /// The over threshold's and the gate's options, dB; the loudness target's, LUFS.
     over: Vec<f64>,
     gate: Vec<f64>,
+    target: Vec<f64>,
     /// The rig's settings when the dialog opened: a field still at its value is not sent.
     pub opened: LevelsSettings,
     /// The Programme pane whose meters change in place; `None`: a new pane.
@@ -40,7 +42,7 @@ impl MeterForm {
     }
 }
 
-/// What the What part shows: the picked pair (an index of the pairs), else the bars.
+/// What the What part shows: the picked pair (an index of the pairs), else the inputs.
 struct What {
     pair: Option<usize>,
     bars: Vec<Option<u16>>,
@@ -106,6 +108,11 @@ pub fn form(
             rig::GATE_STEP_DB,
             CORRELATION_GATE_RANGE,
         ),
+        target: steps(
+            rig.loudness_target.0,
+            rig::TARGET_STEP_LU,
+            LOUDNESS_TARGET_RANGE,
+        ),
         pairs,
         inputs,
         opened: rig,
@@ -156,7 +163,7 @@ fn what_fields(m: &MeterForm, w: &What) -> Vec<Field> {
     if w.pair.is_some() {
         return v;
     }
-    // Every picked bar, then one empty bar to add the next input in.
+    // Every picked input, then one empty row to add the next input in.
     let mut bars = w.bars.clone();
     while bars.len() > 1 && bars.last() == Some(&None) {
         bars.pop();
@@ -210,6 +217,14 @@ fn rig_fields(m: &MeterForm, l: LevelsSettings) -> Vec<Field> {
         };
     vec![
         ballistic,
+        stepped(
+            FieldId::LoudnessTarget,
+            rig::TARGET_TITLE,
+            rig::TARGET_NOTE,
+            &m.target,
+            l.loudness_target.0,
+            rig::target_text,
+        ),
         window,
         stepped(
             FieldId::OverThreshold,
@@ -264,7 +279,7 @@ fn what(f: &Form, m: &MeterForm) -> What {
     What { pair, bars }
 }
 
-/// ←/→ on the Meter field or a bar: the What part laid out again for the new pick. False
+/// ←/→ on the Meter field or an input row: the What part laid out again for the new pick. False
 /// for any other field (a plain choice steps as in every form).
 pub(crate) fn cycle(f: &mut Form, d: i32) -> bool {
     let Some(m) = f.meter.clone() else {
@@ -300,7 +315,7 @@ pub(crate) fn cycle(f: &mut Form, d: i32) -> bool {
                 .filter(|(i, _)| *i != b)
                 .filter_map(|(_, c)| *c)
                 .collect();
-            // A later bar may meter nothing; no two bars meter one input.
+            // A later row may name nothing; no two rows name one input.
             let opts: Vec<Option<u16>> = (b > 0)
                 .then_some(None)
                 .into_iter()
@@ -317,7 +332,7 @@ pub(crate) fn cycle(f: &mut Form, d: i32) -> bool {
             let cur = w.bars.get(b).copied().flatten();
             let to = match opts.iter().position(|o| *o == cur) {
                 Some(i) => (i as i64 + i64::from(d.signum())).clamp(0, opts.len() as i64 - 1),
-                // Bar 1 with nothing picked: → the first input, ← the last.
+                // Input 1 with nothing picked: → the first input, ← the last.
                 None if d < 0 => opts.len() as i64 - 1,
                 None => 0,
             } as usize;
@@ -342,6 +357,7 @@ fn is_rig(id: FieldId) -> bool {
     matches!(
         id,
         FieldId::Ballistic
+            | FieldId::LoudnessTarget
             | FieldId::CorrelationWindow
             | FieldId::OverThreshold
             | FieldId::CorrelationGate
@@ -358,8 +374,7 @@ pub fn levels(f: &Form) -> Option<LevelsSettings> {
             [at(FieldId::CorrelationWindow).min(CorrelationWindow::ALL.len() - 1)],
         over_threshold: Dbtp(m.over.get(at(FieldId::OverThreshold)).copied()?),
         correlation_gate: Dbfs(m.gate.get(at(FieldId::CorrelationGate)).copied()?),
-        // No row for it yet: the rig's own, so `wanted` never changes it.
-        loudness_target: m.opened.loudness_target,
+        loudness_target: Lufs(m.target.get(at(FieldId::LoudnessTarget)).copied()?),
     })
 }
 

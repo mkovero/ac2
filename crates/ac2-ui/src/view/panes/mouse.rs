@@ -12,10 +12,10 @@ pub(super) enum LegendTook {
     PointerAndWheel,
 }
 
-/// The mouse on a pane's plates (the legend, the cursor values, the mark's readout): a drag
-/// on a plate moves it, a drag on its bottom-right grip scales its text, a double-click
-/// puts it back where the scene places it; the wheel scrolls legend rows that do not all
-/// fit. Places and scales come from the scene's boxes, so the reducer only stores them.
+/// The mouse on a pane's plates (the legend, the cursor values, the mark's readout, the peak
+/// list, the loudness readout): a drag on a plate moves it, a drag on its bottom-right grip
+/// scales its text, a double-click puts it back where the scene places it; the wheel
+/// scrolls legend rows that do not all fit. Places and scales come from the scene's boxes, so the reducer only stores them.
 pub(super) fn plates_mouse(
     app: &mut App,
     ui: &egui::Ui,

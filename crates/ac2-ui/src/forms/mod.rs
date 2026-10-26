@@ -193,10 +193,11 @@ pub enum FieldId {
     PhonTo,
     /// What a Programme pane meters: one of the session's pairs, or inputs.
     Metered,
-    /// A Programme pane's bar `n` (zero-based) when it meters inputs.
+    /// A Programme pane's input row `n` (zero-based) when it meters inputs.
     Bar(u8),
     /// The rig's programme-meter settings ([`ac2_proto::model::LevelsSettings`]).
     Ballistic,
+    LoudnessTarget,
     CorrelationWindow,
     OverThreshold,
     CorrelationGate,
