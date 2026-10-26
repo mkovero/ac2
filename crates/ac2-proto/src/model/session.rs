@@ -79,6 +79,11 @@ pub struct DirectionInfo {
     /// The host's default device for this direction (where the system plays or records
     /// unless told otherwise).
     pub system_default: bool,
+    /// Spare inputs a session can open beyond `max_channels` (JACK): ports tied to no
+    /// physical channel, which the operator routes into with the host's own tools. Spare `k`
+    /// (zero-based) is device channel `max_channels + k`. Zero where the backend has none
+    /// and for outputs.
+    pub spare_channels: u16,
 }
 
 /// A device as listed by `session.devices`.
@@ -181,8 +186,13 @@ pub struct SessionConfig {
     pub input_device: DeviceSelector,
     /// Playback device.
     pub output_device: DeviceSelector,
-    /// Device input channels captured (zero-based).
+    /// Device input channels captured (zero-based). Spare inputs are listed here like any
+    /// other, as the channels after the device's physical ones.
     pub input_channels: Vec<u16>,
+    /// Spare inputs the session opens ([`DirectionInfo::spare_channels`]): input channels
+    /// from the device's physical count up to that count plus this one may be captured.
+    /// Zero on every backend but JACK.
+    pub spare_inputs: u16,
     /// Output channels of the stream.
     pub output_channels: u16,
     /// Requested sample rate; `None` = device default.
@@ -228,6 +238,18 @@ pub struct OpenSession {
     /// The driver's own statement of its latency at the open buffer size (ASIO);
     /// `None` for a backend that states none in frames.
     pub stated_latency: Option<StatedLatency>,
+    /// The spare inputs captured, with the port each one is: what the operator routes into.
+    pub spare_ports: Vec<SparePort>,
+}
+
+/// A spare input of an open session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SparePort {
+    /// Input channel (zero-based, after the device's physical ones).
+    pub input: u16,
+    /// The port's full name in the host's graph (`ac2:in_19`).
+    pub port: String,
 }
 
 /// A driver reset or clock change the session went through.

@@ -312,7 +312,8 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
         d.key("ArrowDown");
     }
     assert_eq!(focus(&d.st), Some((Page::AudioIo, Row::Input(0))));
-    for _ in 0..4 {
+    // The other three inputs and the spare input count below them.
+    for _ in 0..5 {
         d.key("ArrowDown");
     }
     assert_eq!(focus(&d.st), Some((Page::AudioIo, Row::Output(0))));

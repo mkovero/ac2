@@ -164,6 +164,8 @@ pub enum Row {
     Device,
     /// The output (playback) device.
     OutputDevice,
+    /// How many spare inputs the session opens (JACK only).
+    Spares,
     Input(usize),
     Output(usize),
     Rate,
@@ -250,6 +252,9 @@ pub struct SessionDialog {
     pub device: usize,
     pub out_device: OutputDevice,
     pub inputs: Vec<InputRow>,
+    /// Spare inputs the session opens: the last rows of `inputs`, numbered after the
+    /// device's physical inputs.
+    pub spares: u16,
     /// Left/right pairs among the inputs in the session (sorted by left channel).
     pub pairs: Vec<Pair>,
     /// The input picked for a pair, waiting for the second pick.
@@ -333,6 +338,7 @@ impl SessionDialog {
             device: 0,
             out_device: OutputDevice::SameAsInput,
             inputs: Vec::new(),
+            spares: 0,
             pairs: Vec::new(),
             pair_pick: None,
             outputs: Vec::new(),
@@ -396,9 +402,13 @@ impl SessionDialog {
     /// The kinds of every input of the device and the pairs, for the device's preview: its
     /// frames then say what each column is.
     pub fn preview_setup(&self) -> (Vec<PreviewInput>, Vec<Pair>) {
+        // The preview opens the device's physical inputs only: a spare input exists once a
+        // session opens it.
+        let physical = self.physical_inputs();
         let inputs = self
             .inputs
             .iter()
+            .filter(|r| r.channel < physical)
             .map(|r| PreviewInput {
                 channel: r.channel,
                 kind: r.kind.clone(),
@@ -427,6 +437,7 @@ fn default_roles(kind: BackendKind, n_in: u16, n_out: u16) -> DeviceRoles {
             reference: Some(0),
             mics: vec![1],
             stimulus: vec![0],
+            spare_inputs: 0,
             mic_names: BTreeMap::new(),
             kinds: [(0, KindPref::Line), (1, KindPref::Mic)].into(),
             pairs: Vec::new(),
@@ -435,6 +446,7 @@ fn default_roles(kind: BackendKind, n_in: u16, n_out: u16) -> DeviceRoles {
     }
     DeviceRoles {
         inputs: (0..n_in.min(2)).collect(),
+        spare_inputs: 0,
         outputs: n_out.min(2),
         ..DeviceRoles::default()
     }

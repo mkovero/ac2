@@ -125,6 +125,7 @@ pub fn session(loopback: bool) -> SessionConfig {
         input_device: DeviceSelector::Default,
         output_device: DeviceSelector::Default,
         input_channels: vec![0, 1],
+        spare_inputs: 0,
         output_channels: 2,
         sample_rate_hz: Some(FS),
         buffer_frames: Some(BLOCK),

@@ -89,6 +89,13 @@ fn seeded() -> Seeded {
     }
 }
 
+/// The monitor session as files before spare inputs wrote it.
+fn monitor_without_spares(s: &Seeded) -> Value {
+    let mut m = serde_json::to_value(&s.monitor).unwrap();
+    m.as_object_mut().unwrap().remove("spare_inputs");
+    m
+}
+
 /// A rig settings file as the build before rig meters had their own type wrote it: format
 /// version 1, the meter a session measurement (with `delay`, without `compared` and
 /// `offset`).
@@ -107,7 +114,7 @@ fn v1_file(s: &Seeded) -> Value {
             "layout": null
         }],
         "monitor_at_start": true,
-        "monitor_session": s.monitor,
+        "monitor_session": monitor_without_spares(s),
         "artnet_target": s.target,
         "artnet_fade": 2.5
     })
@@ -155,7 +162,7 @@ fn a_v1_file_loads_whole_and_round_trips() {
     assert_eq!(st.rig.levels, LevelsSettings::default());
     assert_eq!(st.rig.levels.loudness_target, Lufs(-23.0));
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 5);
+    assert_eq!(rj["version"], 6);
     assert_eq!(rj["levels"]["loudness_target"], json!(-23.0));
     assert_eq!(
         rj["monitor_session"],
@@ -307,7 +314,7 @@ fn a_v2_meter_layout_with_a_pick_reads_whole() {
     assert_eq!(picked[0].plates, layout::LayoutPlates::default());
     assert_eq!(st.rig.levels, LevelsSettings::default());
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 5);
+    assert_eq!(rj["version"], 6);
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["content"],
         json!({ "type": "meas", "meas": 1 })
@@ -367,7 +374,7 @@ fn a_v3_meter_layout_with_three_plates_reads_whole() {
     assert_eq!(st.rig.levels.ballistic, Ballistic::Type2, "kept");
     assert_eq!(st.rig.levels.loudness_target, Lufs(-23.0));
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 5);
+    assert_eq!(rj["version"], 6);
     assert_eq!(rj["meters"][0]["layout"]["pane"]["plates"]["peaks"], auto);
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["plates"]["loudness"],
@@ -422,11 +429,42 @@ fn a_v4_file_gains_the_loudness_target_and_plate() {
     assert_eq!(pane.plates.peaks.at, Some([0.25, 0.5]));
     assert_eq!(pane.plates.loudness, layout::LayoutPlate::default());
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 5);
+    assert_eq!(rj["version"], 6);
     assert_eq!(rj["levels"]["loudness_target"], json!(-23.0));
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["plates"]["loudness"],
         auto
+    );
+    drop(c);
+    h.shutdown();
+}
+
+/// A version 5 file: its monitor session gains no spare inputs and keeps the rest.
+#[test]
+fn a_v5_monitor_session_opens_no_spare_inputs() {
+    let s = seeded();
+    let dir = tempfile::tempdir().unwrap();
+    let mut v: Value = serde_json::from_slice(&v2_with_meters(dir.path(), &s, json!([]))).unwrap();
+    v["version"] = json!(5);
+    let levels = serde_json::to_value(LevelsSettings::default()).unwrap();
+    v.as_object_mut().unwrap().insert("levels".into(), levels);
+    assert!(v["monitor_session"].get("spare_inputs").is_none());
+    std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
+    let h = start("rig-file-v5", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    let st = state(&mut c);
+    assert!(
+        st.rig.damaged_files.is_empty(),
+        "{:?}",
+        st.rig.damaged_files
+    );
+    assert_rig_kept(&st, &s);
+    let rj = rig_json(dir.path());
+    assert_eq!(rj["version"], 6);
+    assert_eq!(rj["monitor_session"]["spare_inputs"], json!(0));
+    assert_eq!(
+        rj["monitor_session"],
+        serde_json::to_value(&s.monitor).unwrap()
     );
     drop(c);
     h.shutdown();

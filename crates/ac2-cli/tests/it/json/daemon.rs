@@ -17,6 +17,7 @@ async fn devices_json() -> R {
             "default_rate_hz": 48000,
             "default_buffer_frames": 256,
             "channel_names": names,
+            "spare_channels": 0,
             "system_default": true
         })
     };

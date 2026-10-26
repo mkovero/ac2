@@ -69,6 +69,7 @@ async fn slow_status_shows_the_clock_domain_and_the_drift() {
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
             input_channels: vec![0, 1],
+            spare_inputs: 0,
             output_channels: 2,
             sample_rate_hz: Some(48_000),
             buffer_frames: Some(256),

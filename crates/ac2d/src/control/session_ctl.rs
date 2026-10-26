@@ -65,6 +65,7 @@ impl Control {
             }
         };
         rt.open.replay = replay;
+        rt.link_spares(&self.spare_links);
         let s = Session {
             epoch,
             open: Some(rt.open.clone()),
@@ -157,6 +158,7 @@ impl Control {
         let rt = self.session.take();
         let had = rt.is_some() || recovering;
         if let Some(rt) = rt {
+            self.keep_spare_links(&rt);
             recovery::close_bounded(rt, recovery::CLOSE_BOUND);
         }
         if had {
@@ -170,6 +172,14 @@ impl Control {
                 open: None,
                 stopped: None,
             }));
+        }
+    }
+
+    /// Remembers what feeds `rt`'s spare inputs before the daemon closes it. A stream that
+    /// cannot say (its host gone) leaves the last reading in place.
+    pub(super) fn keep_spare_links(&mut self, rt: &Runtime) {
+        if let Some(l) = rt.spare_links() {
+            self.spare_links = l;
         }
     }
 
@@ -200,6 +210,7 @@ impl Control {
             }
         };
         self.wind_down(ac2_proto::model::RecordingEnd::SessionReopened);
+        self.keep_spare_links(&rt);
         recovery::close_bounded(rt, recovery::CLOSE_BOUND);
         match Runtime::open(
             &*backend,
@@ -212,6 +223,7 @@ impl Control {
         ) {
             Ok(mut rt) => {
                 rt.open.replay = replay;
+                rt.link_spares(&self.spare_links);
                 let s = Session {
                     epoch,
                     open: Some(rt.open.clone()),

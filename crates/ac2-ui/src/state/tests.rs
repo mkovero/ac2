@@ -83,6 +83,7 @@ fn daemon_state() -> State {
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
             input_channels: vec![0, 1],
+            spare_inputs: 0,
             output_channels: 2,
             sample_rate_hz: Some(48_000),
             buffer_frames: Some(256),
@@ -100,6 +101,7 @@ fn daemon_state() -> State {
         driver_change: None,
         driver_reset: None,
         stated_latency: None,
+        spare_ports: vec![],
     });
     s
 }

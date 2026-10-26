@@ -22,6 +22,7 @@ pub(super) fn backends(fake_names: bool) -> Vec<BackendInfo> {
         default_buffer_frames: Some(256),
         channel_names: names.map(|n| n.into_iter().map(String::from).collect()),
         system_default: true,
+        spare_channels: 0,
     };
     let dev = |backend, id: &str, names: bool| DeviceInfo {
         backend,

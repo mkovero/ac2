@@ -26,7 +26,7 @@ use jack::{
 use crate::backend::{
     Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
     DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, Presence, RateRange,
-    SampleFormat, StaticLatency,
+    SampleFormat, SparePort, StaticLatency,
 };
 use crate::block::{BlockProducer, BlockStamp};
 use crate::clock::FrameCounterClock;
@@ -34,7 +34,9 @@ use crate::error::{AudioError, Operation, Unavailability, Unsupported};
 use crate::events::{BackendEvents, EventLatch};
 use crate::load::LoadTimer;
 use crate::output::{OutputRenderer, OutputStamp};
-use crate::stream::{DuplexStream, OutputPatch, PatchLink, PatchState, Plumbing, StreamParts};
+use crate::stream::{
+    DuplexStream, GraphPatch, PatchLink, PatchState, Plumbing, SpareLink, StreamParts,
+};
 
 /// Ports per direction. The callback gathers port buffers into fixed arrays of this size,
 /// so it never allocates.
@@ -47,7 +49,7 @@ const AUDIO_TYPE: &str = "32 bit float mono audio";
 ///
 /// Output ports are never connected at open: which outputs reach the physical playback
 /// ports is the operator's choice, made through the stream's
-/// [`output_patch`](DuplexStream::output_patch).
+/// [`graph_patch`](DuplexStream::graph_patch).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JackConfig {
     /// Client name shown in the graph.
@@ -342,7 +344,7 @@ impl Backend for JackBackend {
                 .collect()
         };
         let (capture_names, playback_names) = (labels(&capture), labels(&playback));
-        let dir = |n: usize, names: &Vec<String>| DirectionCaps {
+        let dir = |n: usize, names: &Vec<String>, spare: u16| DirectionCaps {
             max_channels: n.min(MAX_PORTS) as u16,
             rates: vec![RateRange {
                 min: rate,
@@ -358,6 +360,7 @@ impl Backend for JackBackend {
             channel_names: Some(names.clone()),
             // The server is the only device JACK lists.
             system_default: true,
+            spare_channels: spare,
         };
         Ok(vec![DeviceCaps {
             backend: BackendKind::Jack,
@@ -368,8 +371,12 @@ impl Backend for JackBackend {
                 capture.len(),
                 playback.len()
             ),
-            input: Some(dir(capture.len(), &capture_names)),
-            output: Some(dir(playback.len(), &playback_names)),
+            input: Some(dir(
+                capture.len(),
+                &capture_names,
+                spare_channels(capture.len()),
+            )),
+            output: Some(dir(playback.len(), &playback_names, 0)),
             duplex_clock: ClockRelation::SingleCallback,
             index: IndexExactness::Exact,
             latency: static_latency(&client, &capture, &playback),
@@ -433,27 +440,36 @@ impl Backend for JackBackend {
         }
         let capture = physical(&client, true);
         let playback = physical(&client, false);
-        if self.config.connect_inputs
-            && let Some(&ch) = request
-                .input_map
-                .iter()
-                .find(|&&c| usize::from(c) >= capture.len())
-        {
-            return Err(Unsupported::InputChannel {
-                channel: ch,
-                available: capture.len() as u16,
-            }
-            .into());
-        }
+        let physical_in = capture.len().min(MAX_PORTS) as u16;
+        // Unconnected test streams name any channel: only the spare count is checked.
+        let checked_in = if self.config.connect_inputs {
+            physical_in
+        } else {
+            u16::MAX
+        };
+        crate::backend::check_spare_inputs(
+            BackendKind::Jack,
+            &request,
+            checked_in,
+            spare_channels(capture.len()),
+        )?;
 
+        // Ports are named by device channel, not stream position, so `in_19` is input 19
+        // in every session and a spare's name does not move when inputs are added.
         let mut in_ports = Vec::with_capacity(request.input_map.len());
-        for i in 0..request.input_map.len() {
+        for &dev in &request.input_map {
             in_ports.push(
                 client
-                    .register_port(&format!("in_{}", i + 1), AudioIn::default())
+                    .register_port(&format!("in_{}", dev + 1), AudioIn::default())
                     .map_err(|e| backend_err(Operation::Open, e))?,
             );
         }
+        let spares: Vec<SparePort> = in_ports
+            .iter()
+            .zip(&request.input_map)
+            .filter(|&(_, &dev)| dev >= physical_in)
+            .filter_map(|(p, &channel)| p.name().ok().map(|port| SparePort { channel, port }))
+            .collect();
         let mut out_ports = Vec::with_capacity(usize::from(request.output_channels));
         for i in 0..request.output_channels {
             out_ports.push(
@@ -468,6 +484,7 @@ impl Backend for JackBackend {
         let used_capture: Vec<String> = request
             .input_map
             .iter()
+            .filter(|&&c| c < physical_in)
             .filter_map(|&c| capture.get(usize::from(c)).cloned())
             .collect();
         let used_playback: Vec<String> = playback
@@ -507,6 +524,10 @@ impl Backend for JackBackend {
         let c = active.as_client();
         if self.config.connect_inputs {
             for (ours, &dev) in in_names.iter().zip(&request.input_map) {
+                // A spare input is the operator's to connect.
+                if dev >= physical_in {
+                    continue;
+                }
                 if let Some(src) = capture.get(usize::from(dev)) {
                     c.connect_ports_by_name(src, ours)
                         .map_err(|e| backend_err(Operation::Connect, e))?;
@@ -518,6 +539,7 @@ impl Backend for JackBackend {
             ours: out_names,
             playback,
             made: Mutex::new(BTreeMap::new()),
+            spares: spares.clone(),
         };
 
         let negotiated = Negotiated {
@@ -540,6 +562,7 @@ impl Backend for JackBackend {
             },
             clock_source: None,
             delivery: Delivery::Device,
+            spare_ports: spares,
         };
         // Output written in cycle n leaves at the next cycle boundary, then passes the
         // playback latency.
@@ -570,9 +593,11 @@ struct JackPatch {
     playback: Vec<String>,
     /// Connections this patch made, by output channel.
     made: Mutex<BTreeMap<u16, (String, String)>>,
+    /// The stream's spare inputs.
+    spares: Vec<SparePort>,
 }
 
-impl OutputPatch for JackPatch {
+impl GraphPatch for JackPatch {
     fn connect_only(&self, outputs: &[u16]) -> Result<PatchState, AudioError> {
         let active = self
             .client
@@ -620,6 +645,50 @@ impl OutputPatch for JackPatch {
         }
         Ok(state)
     }
+
+    fn spare_links(&self) -> Result<Vec<SpareLink>, AudioError> {
+        let active = self
+            .client
+            .upgrade()
+            .ok_or_else(|| backend_err(Operation::Connect, "the stream is closed"))?;
+        let c = active.as_client();
+        Ok(self
+            .spares
+            .iter()
+            .filter_map(|s| {
+                let sources = c.port_by_name(&s.port)?.get_connections();
+                (!sources.is_empty()).then_some(SpareLink {
+                    channel: s.channel,
+                    sources,
+                })
+            })
+            .collect())
+    }
+
+    fn link_spares(&self, links: &[SpareLink]) -> Vec<String> {
+        let Some(active) = self.client.upgrade() else {
+            return vec!["the stream is closed".into()];
+        };
+        let c = active.as_client();
+        let mut problems = Vec::new();
+        for l in links {
+            let Some(ours) = self.spares.iter().find(|s| s.channel == l.channel) else {
+                continue;
+            };
+            for src in &l.sources {
+                if let Err(e) = c.connect_ports_by_name(src, &ours.port) {
+                    problems.push(format!("{src} → {}: {e}", ours.port));
+                }
+            }
+        }
+        problems
+    }
+}
+
+/// Spare inputs a server with `capture` physical capture ports can add: up to the per-stream
+/// port limit.
+fn spare_channels(capture: usize) -> u16 {
+    MAX_PORTS.saturating_sub(capture) as u16
 }
 
 struct Notifications {

@@ -173,6 +173,7 @@ impl Backend for ReplayBackend {
                 default_buffer: Some(c.block_frames),
                 channel_names: Some(c.input_names.clone()),
                 system_default: true,
+                spare_channels: 0,
             }),
             output: None,
             duplex_clock: ClockRelation::SingleCallback,
@@ -185,6 +186,8 @@ impl Backend for ReplayBackend {
 
     fn open(&self, mut request: DuplexRequest) -> Result<DuplexStream, AudioError> {
         request.validate()?;
+        // A recording holds only what was captured: there is nothing to route in.
+        crate::backend::check_spare_inputs(BackendKind::Replay, &request, u16::MAX, 0)?;
         let c = &self.cfg;
         if let DeviceSelector::Id(id) = &request.input_device
             && id.0 != c.device_id
@@ -243,6 +246,7 @@ impl Backend for ReplayBackend {
             latency: StaticLatency::Unknown,
             clock_source: None,
             delivery: Delivery::Stepped,
+            spare_ports: Vec::new(),
         };
         let source = (c.open)().map_err(|e| AudioError::Backend {
             backend: BackendKind::Replay,

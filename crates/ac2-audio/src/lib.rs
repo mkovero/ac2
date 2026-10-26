@@ -61,14 +61,16 @@ pub use backend::{
     Backend, BackendKind, ClockRelation, ClockSource, Delivery, DeviceCaps, DeviceId,
     DeviceSelector, Direction, DirectionCaps, DriverBuffering, DuplexRequest, FrameRange,
     HistoryRequest, IndexExactness, Negotiated, Presence, RateRange, SHORT_BUFFER_AT_48K,
-    SampleFormat, StaticLatency, short_buffer_frames,
+    SampleFormat, SparePort, StaticLatency, short_buffer_frames,
 };
 pub use block::{BlockConsumer, BlockFlags, BlockHeader, TransportStats};
 #[cfg(target_os = "macos")]
 pub use coreaudio_host::CoreAudioBackend;
 pub use error::{AudioError, Operation, RequestError, Unavailability, Unsupported};
 pub use events::{EventSnapshot, ResetReason};
-pub use fake::{FakeBackend, FakeConfig, FakeDriver, FakeEndpoints, FakeReverb, OutageKind};
+pub use fake::{
+    FAKE_SPARE_INPUTS, FakeBackend, FakeConfig, FakeDriver, FakeEndpoints, FakeReverb, OutageKind,
+};
 pub use generator::{
     GeneratorHandle, GeneratorPort, MAX_ROUTED_CHANNELS, RouteError, SignalSource, generator,
 };
@@ -82,4 +84,4 @@ pub use level::{Gain, LevelError, MaxLevel};
 pub use load::{LoadTotals, StreamHealth};
 pub use output::{FADE_SECONDS, OutputSource, OutputState, OutputStats, OutputTick};
 pub use replay::{FrameSource, OpenSource, ReplayBackend, ReplayConfig, ReplayMark, ReplaySpeed};
-pub use stream::{DuplexStream, OutputPatch, PatchLink, PatchState, StopOutcome};
+pub use stream::{DuplexStream, GraphPatch, PatchLink, PatchState, SpareLink, StopOutcome};

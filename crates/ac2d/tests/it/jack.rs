@@ -159,6 +159,7 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
             input_channels: vec![0],
+            spare_inputs: 0,
             output_channels: 2,
             sample_rate_hz: None,
             buffer_frames: None,
@@ -221,6 +222,79 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
     };
     assert_eq!(snap.state.session.epoch, s.epoch, "no reopen");
     c.ok(Command::GenStop);
+    c.ok(Command::SessionClose);
+    h.shutdown();
+}
+
+/// What the operator routed into a spare input survives the daemon's own reopen (a spare
+/// added on the Audio I/O page reopens the stream): the source is connected again to the
+/// new stream's port of the same input. Capture only.
+#[test]
+fn spare_input_sources_survive_a_reopen() {
+    use ac2_proto::model::{DeviceSelector, SessionConfig};
+    if std::env::var_os("AC2_JACK_DUMMY").is_none() {
+        eprintln!("skipping: needs AC2_JACK_DUMMY=1 (dummy driver only)");
+        return;
+    }
+    init_log();
+    let backends = ac2d::backends(BackendChoice::Jack).expect("backends");
+    let mut cfg = DaemonConfig::new(backends[0].clone(), inproc("jack-spare"), -10.0);
+    cfg.backends = backends;
+    let h = Daemon::start(cfg).expect("daemon");
+    let (mut c, _s) = connect(&h, &[]);
+    let ReplyBody::Backends(b) = c.ok(Command::SessionDevices) else {
+        panic!("backends");
+    };
+    let Some(input) = b[0].devices.first().and_then(|d| d.input.clone()) else {
+        eprintln!("skipping: no JACK capture ports");
+        return;
+    };
+    let first = input.max_channels;
+    let open = |c: &mut Client, spares: u16| {
+        let ReplyBody::Session(s) = c.ok(Command::SessionOpen {
+            config: SessionConfig {
+                backend: Some(BackendKind::Jack),
+                input_device: DeviceSelector::Default,
+                output_device: DeviceSelector::Default,
+                input_channels: std::iter::once(0).chain(first..first + spares).collect(),
+                spare_inputs: spares,
+                output_channels: 0,
+                sample_rate_hz: None,
+                buffer_frames: None,
+                loopback: None,
+            },
+        }) else {
+            panic!("session");
+        };
+        s.open.expect("open").spare_ports
+    };
+    let ports = open(&mut c, 1);
+    assert_eq!(ports.len(), 1);
+    assert_eq!(ports[0].input, first);
+    assert_eq!(ports[0].port, format!("ac2:in_{}", first + 1));
+
+    let (src, _) =
+        jack::Client::new("ac2d-test-src", jack::ClientOptions::NO_START_SERVER).unwrap();
+    let out = src.register_port("out", jack::AudioOut::default()).unwrap();
+    let out = out.name().unwrap();
+    let src = src.activate_async((), ()).unwrap();
+    let src = src.as_client();
+    src.connect_ports_by_name(&out, &ports[0].port).unwrap();
+
+    let ports = open(&mut c, 2);
+    assert_eq!(ports.len(), 2);
+    let linked = |a: &str, b: &str| {
+        src.port_by_name(a)
+            .is_some_and(|p| p.is_connected_to(b).unwrap_or(false))
+    };
+    assert!(
+        linked(&out, &ports[0].port),
+        "connected again after the reopen"
+    );
+    assert!(
+        !linked(&out, &ports[1].port),
+        "the new spare is the operator's"
+    );
     c.ok(Command::SessionClose);
     h.shutdown();
 }

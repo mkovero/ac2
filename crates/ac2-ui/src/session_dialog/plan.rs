@@ -123,6 +123,7 @@ impl SessionDialog {
                 id: out_dev.id.clone(),
             },
             input_channels: inputs.clone(),
+            spare_inputs: self.spares,
             output_channels: self.out_count,
             sample_rate_hz: rate,
             buffer_frames: buffer,
@@ -133,6 +134,7 @@ impl SessionDialog {
             reference,
             mics: mics.iter().map(|m| m.channel).collect(),
             stimulus,
+            spare_inputs: self.spares,
             // Every row's last mic name, mic or not now: M gives it back.
             mic_names: self
                 .inputs

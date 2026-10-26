@@ -501,6 +501,7 @@ def requests():
                     "input_device": {"type": "id", "id": "hw:UMC1820"},
                     "output_device": {"type": "default"},
                     "input_channels": [0, 1, 2],
+                    "spare_inputs": 0,
                     "output_channels": 2,
                     "sample_rate_hz": 48000,
                     "buffer_frames": None,

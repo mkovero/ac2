@@ -120,6 +120,7 @@ impl Shared {
                         driver_change: None,
                         driver_reset: None,
                         stated_latency: None,
+                        spare_ports: vec![],
                     }),
                     stopped: None,
                 };

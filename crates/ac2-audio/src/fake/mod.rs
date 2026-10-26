@@ -35,6 +35,9 @@ pub const FAKE_INPUT_ID: &str = "fake:in";
 pub const FAKE_SPLIT_NAME: &str = "simulated interface";
 /// Playback device id of [`FakeEndpoints::Split`].
 pub const FAKE_OUTPUT_ID: &str = "fake:out";
+/// Spare inputs the fake opens, as JACK does: they capture silence, since nothing can be
+/// routed into a simulation.
+pub const FAKE_SPARE_INPUTS: u16 = 8;
 
 mod analog;
 mod config;

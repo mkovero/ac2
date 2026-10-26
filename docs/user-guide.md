@@ -192,6 +192,12 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   names, the channel names a Core Audio or ASIO device gives; without them *Input 3*); inputs have a **live meter** (RMS bar, peak
   tick, *CLIP* held 1 s). The meters run before the session opens (the daemon opens the
   device capture-only, no output stream), so you can find a mic by tapping it.
+- **Spare inputs** (**←/→**, JACK only): extra inputs tied to no physical input, numbered
+  after the device's own (a Fireface 400's 18 capture ports make the first spare input 19).
+  Each adds an input row, in the session, named *spare 1* until the session opens and then
+  by its port (`ac2:in_19`). Nothing is connected to them: you connect any JACK source to
+  them yourself (see *Metering other JACK sources*). Once open they are ordinary inputs:
+  kind, pair, name and every meter. Other backends have no such row.
 - **Kinds**: every input in the session is one of three kinds, and the row says which.
   **M** *mic*, a measurement mic (any number; **N** names one — the name is the mic's
   identity for calibrations; a named mic's row says its curve and calibration, and **←/→**
@@ -262,6 +268,26 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   — and **Esc** leaves the empty panes, which say how to come back to it.
 
 The measurement dialogs pick inputs the same way: by name, with meters, **←/→**.
+
+### Metering other JACK sources
+
+To meter something else in the JACK graph (a player, a console's network feed, a bus of
+another application) alongside the interface's inputs:
+
+1. On the Audio I/O page set **Spare inputs** to how many you need (`ac2 session open
+   --backend jack --in 1-2 --spare-inputs 2` from the CLI) and open. `ac2 session status`
+   lists each spare with its port: `spare  in 19 · ac2:in_19`.
+2. Connect the source to that port with your own JACK tools — qjackctl's graph,
+   `jack_connect mpv:out_0 ac2:in_19`, a patchbay, WirePlumber rules. Disconnect nothing:
+   a JACK output can feed any number of inputs, so the source keeps playing where it did.
+3. Declare the input's kind (**L** line, **A** digital) and pair two spares for a stereo
+   source; every meter (PPM, true peak, loudness, goniometer, spectrum, SPL) then works on it.
+
+ac2 never connects a spare input itself, with one exception: when the daemon reopens the
+audio I/O on its own (a spare added, a device change), it reads what fed the spare ports
+and connects it again to the new ones. After the JACK server or the daemon restarts that
+reading is gone; keep such routes in a patchbay (qjackctl's, or a WirePlumber rule) if they
+must come back by themselves.
 
 ### Input meters
 

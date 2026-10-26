@@ -159,6 +159,17 @@ pub enum Unsupported {
         /// Channels the device has.
         available: u16,
     },
+    /// More spare inputs than the backend opens (none, on every backend but JACK and the
+    /// fake device).
+    #[error("{requested} spare inputs ({backend:?} opens {max})")]
+    SpareInputs {
+        /// Which backend.
+        backend: BackendKind,
+        /// Spare inputs asked for.
+        requested: u16,
+        /// Most it opens.
+        max: u16,
+    },
     /// A replay was asked for an input its recording does not hold.
     #[error("input {channel} was not recorded")]
     InputNotRecorded {

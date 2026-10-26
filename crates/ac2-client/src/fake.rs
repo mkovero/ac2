@@ -243,6 +243,7 @@ pub fn fake_backends() -> Vec<BackendInfo> {
         default_buffer_frames: Some(256),
         channel_names,
         system_default: true,
+        spare_channels: 0,
     };
     vec![
         BackendInfo {

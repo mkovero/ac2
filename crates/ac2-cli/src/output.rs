@@ -290,10 +290,15 @@ pub fn devices(backends: &[BackendInfo]) -> String {
             x.as_ref().map_or_else(
                 || format::NO_VALUE.to_owned(),
                 |d| {
-                    if d.system_default {
-                        format!("{} (default)", d.max_channels)
+                    let spare = if d.spare_channels > 0 {
+                        format!(" + {} spare", d.spare_channels)
                     } else {
-                        d.max_channels.to_string()
+                        String::new()
+                    };
+                    if d.system_default {
+                        format!("{}{spare} (default)", d.max_channels)
+                    } else {
+                        format!("{}{spare}", d.max_channels)
                     }
                 },
             )
@@ -414,6 +419,12 @@ fn driver_lines(o: &ac2_proto::model::OpenSession) -> String {
     let mut t = String::new();
     if let Some(c) = &o.clock_source {
         t.push_str(&format!("\n  clock  {c}"));
+    }
+    for p in &o.spare_ports {
+        t.push_str(&format!(
+            "\n  spare  {}",
+            ac2_scene::audio::spare_port_text(p)
+        ));
     }
     if let Some(l) = &o.stated_latency {
         t.push_str(&format!(

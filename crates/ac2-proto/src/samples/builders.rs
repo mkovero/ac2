@@ -48,6 +48,7 @@ pub(super) fn session_config() -> SessionConfig {
         },
         output_device: DeviceSelector::Default,
         input_channels: vec![0, 1, 2],
+        spare_inputs: 0,
         output_channels: 2,
         sample_rate_hz: Some(48_000),
         buffer_frames: None,

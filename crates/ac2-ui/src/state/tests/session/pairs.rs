@@ -297,6 +297,7 @@ fn kinds_and_pairs_are_remembered_per_device() {
     let roles = crate::prefs::DeviceRoles {
         inputs: vec![0, 1, 2, 3],
         outputs: 2,
+        spare_inputs: 0,
         reference: Some(0),
         mics: vec![1],
         stimulus: vec![0],

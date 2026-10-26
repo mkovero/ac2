@@ -81,6 +81,7 @@ async fn status_shows_stopped_audio_until_the_daemon_reopens_it() {
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
             input_channels: vec![0, 1],
+            spare_inputs: 0,
             output_channels: 2,
             sample_rate_hz: Some(48_000),
             buffer_frames: Some(256),

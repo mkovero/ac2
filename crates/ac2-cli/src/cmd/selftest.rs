@@ -501,6 +501,7 @@ mod tests {
                 default_buffer: None,
                 channel_names: None,
                 system_default: default,
+                spare_channels: 0,
             })
         };
         DeviceCaps {

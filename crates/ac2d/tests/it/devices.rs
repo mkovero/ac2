@@ -630,3 +630,64 @@ fn a_retried_detection_runs_once() {
     assert_eq!(*opened.lock().unwrap(), vec![(1, true)]);
     h.shutdown();
 }
+
+/// Spare inputs on the fake rig: listed with the device, opened after its physical inputs
+/// and metered like any input (silent: nothing is routed into a simulation); more spares
+/// than the device opens, or a channel past them, is refused.
+#[test]
+fn spare_inputs_open_after_the_physical_ones_and_are_metered() {
+    use ac2_audio::FAKE_SPARE_INPUTS;
+    use ac2_proto::model::SparePort;
+    let rig = named_rig(FakeDrive::Manual, 0.01);
+    let fake = rig.clone();
+    let h = start(Arc::new(rig));
+    let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
+    let ReplyBody::Backends(b) = c.ok(Command::SessionDevices) else {
+        panic!("backends");
+    };
+    let input = b[0].devices[0].input.as_ref().unwrap();
+    assert_eq!(
+        (input.max_channels, input.spare_channels),
+        (4, FAKE_SPARE_INPUTS)
+    );
+
+    let mut cfg = session(true);
+    cfg.spare_inputs = FAKE_SPARE_INPUTS + 1;
+    let e = c.call(Command::SessionOpen { config: cfg }).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Unsupported, "{}", e.msg);
+    let mut cfg = session(true);
+    cfg.spare_inputs = 1;
+    cfg.input_channels = vec![0, 1, 5];
+    let e = c.call(Command::SessionOpen { config: cfg }).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Unsupported, "{}", e.msg);
+
+    let mut cfg = session(true);
+    cfg.spare_inputs = 2;
+    cfg.input_channels = vec![0, 1, 4, 5];
+    let ReplyBody::Session(opened) = c.ok(Command::SessionOpen { config: cfg }) else {
+        panic!("session");
+    };
+    let spare = |input: u16| SparePort {
+        input,
+        port: format!("fake:in_{}", input + 1),
+    };
+    assert_eq!(opened.open.unwrap().spare_ports, vec![spare(4), spare(5)]);
+    let mut d = driver(&fake);
+    run(&mut d, 1.0);
+    let mut last = None;
+    while let Some(f) = s.frame(Duration::from_millis(300), |f| {
+        matches!(f.data, FrameData::SessionLevels(_))
+    }) {
+        last = Some(f);
+    }
+    let FrameData::SessionLevels(l) = &last.expect("session/levels").data else {
+        unreachable!()
+    };
+    assert_eq!(l.meta.channels, vec![0, 1, 4, 5]);
+    assert!(
+        l.rms[1] > -45.0,
+        "a physical input hears its noise: {}",
+        l.rms[1]
+    );
+    assert!(l.rms[2] < -90.0, "a spare input is silent: {}", l.rms[2]);
+}

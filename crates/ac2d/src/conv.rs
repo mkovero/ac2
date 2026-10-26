@@ -197,6 +197,7 @@ fn direction(d: &audio::DirectionCaps) -> pm::DirectionInfo {
         default_buffer_frames: d.default_buffer,
         channel_names: d.channel_names.clone(),
         system_default: d.system_default,
+        spare_channels: d.spare_channels,
     }
 }
 

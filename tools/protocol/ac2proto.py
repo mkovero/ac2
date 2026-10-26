@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 69
+PROTO_VERSION = 70
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8

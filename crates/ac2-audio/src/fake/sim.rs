@@ -274,7 +274,15 @@ impl Sim {
                 callback_ns,
                 capture_ns: Some(capture_ns),
             },
-            |f, c| buf[f * inputs + map[c]],
+            // A spare input (past the device's channels) has nothing routed into it.
+            |f, c| {
+                let ch = map[c];
+                if ch < inputs {
+                    buf[f * inputs + ch]
+                } else {
+                    0.0
+                }
+            },
         );
         self.raw_counter = self.raw_counter.wrapping_add(frames);
         self.stats.blocks += 1;

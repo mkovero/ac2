@@ -372,6 +372,7 @@ pub(crate) fn device_caps(
             default_buffer: Some(sizes.preferred.max(1) as u32),
             channel_names: channel_names(&descs),
             system_default: first,
+            spare_channels: 0,
         }))
     };
     let input = dir(true, ins)?;
@@ -605,6 +606,7 @@ pub(crate) fn open_stream(
         },
         clock_source,
         delivery: Delivery::Device,
+        spare_ports: Vec::new(),
     };
     // Output written in one switch leaves after the other half has played, then passes
     // the driver's output latency.

@@ -343,6 +343,10 @@ pub struct SessionOpen {
     /// Input channels to capture, e.g. `1-4`.
     #[arg(long = "in", value_name = "CHANNELS")]
     pub inputs: Channels,
+    /// Spare inputs to open (JACK): ports tied to no physical input that you route into
+    /// with your own JACK tools, numbered after the physical inputs and always captured.
+    #[arg(long, value_name = "N", default_value_t = 0)]
+    pub spare_inputs: u16,
     /// Output channels of the stream.
     #[arg(long = "outputs", value_name = "N", default_value_t = 2)]
     pub outputs: u16,

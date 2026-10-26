@@ -14,6 +14,7 @@ fn open(inputs: Vec<u16>, loopback: Option<LoopbackRoute>) -> OpenSession {
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
             input_channels: inputs,
+            spare_inputs: 0,
             output_channels: 2,
             sample_rate_hz: None,
             buffer_frames: None,
@@ -31,6 +32,7 @@ fn open(inputs: Vec<u16>, loopback: Option<LoopbackRoute>) -> OpenSession {
         driver_change: None,
         driver_reset: None,
         stated_latency: None,
+        spare_ports: vec![],
     }
 }
 

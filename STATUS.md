@@ -21,6 +21,10 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   ballistics, the rig's loudness target, −23 LUFS by default) and the loudness plate, moved and
   sized like every plate, hidden by T (PROTO 69, session format 34, rig file 5). Design:
   `docs/design/programme-meter.md`, V1–V6, §6.1 and §6.2.
+- Spare inputs on JACK: extra `ac2:in_K` ports after the physical inputs, never
+  auto-connected, metered like any input once the operator routes a source into them; the
+  daemon re-makes those routes across its own reopens (PROTO 70, rig file 6). Docs:
+  `docs/user-guide.md` *Metering other JACK sources*.
 - Designed, not built: many rigs in one app (tabs, mixed panes, remote inputs, clocks across
   PTP hosts): `docs/design/multi-rig.md`, decisions N1–N6.
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,

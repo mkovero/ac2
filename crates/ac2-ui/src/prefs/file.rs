@@ -564,6 +564,8 @@ struct RolesFile {
     inputs: Vec<u32>,
     #[serde(default)]
     outputs: u32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    spare_inputs: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reference: Option<u32>,
     #[serde(default)]
@@ -590,6 +592,10 @@ struct PairFile {
     right: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 /// One-based → zero-based.
@@ -626,6 +632,7 @@ impl RolesFile {
         Some(DeviceRoles {
             inputs: zeros(&self.inputs)?,
             outputs: u16::try_from(self.outputs).ok()?,
+            spare_inputs: u16::try_from(self.spare_inputs).ok()?,
             reference: match self.reference {
                 Some(r) => Some(zero(r)?),
                 None => None,
@@ -643,6 +650,7 @@ impl RolesFile {
         Self {
             inputs: ones(&r.inputs),
             outputs: u32::from(r.outputs),
+            spare_inputs: u32::from(r.spare_inputs),
             reference: r.reference.map(|c| u32::from(c) + 1),
             mics: ones(&r.mics),
             stimulus: ones(&r.stimulus),

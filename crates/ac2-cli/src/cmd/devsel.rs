@@ -129,6 +129,7 @@ pub(crate) mod tests {
             default_buffer_frames: None,
             channel_names: None,
             system_default: default,
+            spare_channels: 0,
         })
     }
 

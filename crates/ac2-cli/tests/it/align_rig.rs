@@ -58,6 +58,7 @@ async fn alignment_by_name() {
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
             input_channels: vec![0, 1, 2, 3],
+            spare_inputs: 0,
             output_channels: 2,
             sample_rate_hz: None,
             buffer_frames: None,

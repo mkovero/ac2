@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use ac2_audio::{
-    AudioError, Backend, DuplexRequest, GeneratorHandle, HistoryReader, HistoryRequest, MaxLevel,
-    OutputPatch, OutputSource, generator,
+    AudioError, Backend, DuplexRequest, GeneratorHandle, GraphPatch, HistoryReader, HistoryRequest,
+    MaxLevel, OutputSource, SpareLink, generator,
 };
 use ac2_proto::ErrorCode;
 use ac2_proto::ProtoError;
@@ -29,7 +29,7 @@ pub(crate) struct Runtime {
     pub(crate) routes: Vec<u16>,
     pub(crate) gen_handle: GeneratorHandle,
     /// Connections of the stream's outputs to the device's physical outputs (JACK).
-    patch: Option<Arc<dyn OutputPatch>>,
+    patch: Option<Arc<dyn GraphPatch>>,
     pub(crate) history: Option<HistoryReader>,
     pub(crate) fanout: Fanout,
     /// The stream's callback load and xruns, for the health meter.
@@ -108,6 +108,7 @@ impl Runtime {
             input_device: conv::device_selector(&cfg.input_device),
             output_device: conv::device_selector(&cfg.output_device),
             input_map: cfg.input_channels.clone(),
+            spare_inputs: cfg.spare_inputs,
             output_channels: cfg.output_channels,
             sample_rate: cfg.sample_rate_hz,
             buffer_frames: cfg.buffer_frames,
@@ -119,7 +120,7 @@ impl Runtime {
         let stream = backend.open(req).map_err(audio_err)?;
         let n = stream.negotiated().clone();
         let history = stream.history().cloned();
-        let patch = stream.output_patch();
+        let patch = stream.graph_patch();
         let health = stream.health();
         let open = OpenSession {
             config: cfg.clone(),
@@ -135,6 +136,14 @@ impl Runtime {
             driver_change: None,
             driver_reset: None,
             stated_latency: conv::stated_latency(&n.latency),
+            spare_ports: n
+                .spare_ports
+                .iter()
+                .map(|s| ac2_proto::model::SparePort {
+                    input: s.channel,
+                    port: s.port.clone(),
+                })
+                .collect(),
         };
         tracing::info!(
             "session open: {} in / {} out @ {} Hz on {:?}/{:?} ({:?}), epoch {}",
@@ -208,6 +217,50 @@ impl Runtime {
                 }
             }
             Err(e) => tracing::warn!("cannot connect the stimulus outputs: {e}"),
+        }
+    }
+
+    /// What feeds the spare inputs now; `None` where the host cannot say.
+    pub(crate) fn spare_links(&self) -> Option<Vec<SpareLink>> {
+        let patch = match &self.patch {
+            Some(p) if !self.open.spare_ports.is_empty() => p,
+            _ => return Some(Vec::new()),
+        };
+        match patch.spare_links() {
+            Ok(l) => Some(l),
+            Err(e) => {
+                tracing::warn!("cannot read what feeds the spare inputs: {e}");
+                None
+            }
+        }
+    }
+
+    /// Connects `links` to the spare inputs of this stream: a reopen registers new ports,
+    /// and what the operator routed into the old ones would otherwise be lost.
+    pub(crate) fn link_spares(&self, links: &[SpareLink]) {
+        let Some(patch) = &self.patch else {
+            return;
+        };
+        let links: Vec<SpareLink> = links
+            .iter()
+            .filter(|l| self.open.spare_ports.iter().any(|s| s.input == l.channel))
+            .cloned()
+            .collect();
+        if links.is_empty() {
+            return;
+        }
+        let problems = patch.link_spares(&links);
+        for p in &problems {
+            tracing::warn!("spare input not connected again: {p}");
+        }
+        if problems.is_empty() {
+            for l in &links {
+                tracing::info!(
+                    "spare input {} connected again from {}",
+                    l.channel + 1,
+                    l.sources.join(", ")
+                );
+            }
         }
     }
 

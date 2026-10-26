@@ -414,6 +414,7 @@ fn roles_are_remembered_per_device() {
         crate::prefs::DeviceRoles {
             inputs: vec![0, 2, 3],
             outputs: 2,
+            spare_inputs: 0,
             reference: Some(3),
             mics: vec![0, 2],
             stimulus: vec![1],
@@ -706,3 +707,5 @@ mod meters;
 mod devices;
 
 mod pairs;
+
+mod spares;

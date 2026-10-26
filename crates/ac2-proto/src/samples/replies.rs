@@ -66,6 +66,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
                         default_buffer_frames: Some(256),
                         channel_names: Some(vec!["capture_1".into(), "capture_2".into()]),
                         system_default: true,
+                        spare_channels: 62,
                     }),
                     output: None,
                     duplex_clock: ClockRelation::SingleCallback,
@@ -108,6 +109,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
                         default_buffer_frames: Some(256),
                         channel_names: Some(vec!["Mic/Line 1".into(), "Mic/Line 2".into()]),
                         system_default: true,
+                        spare_channels: 0,
                     }),
                     output: Some(DirectionInfo {
                         max_channels: 2,
@@ -120,6 +122,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
                         default_buffer_frames: Some(256),
                         channel_names: Some(vec!["Analog 1".into(), "Analog 2".into()]),
                         system_default: true,
+                        spare_channels: 0,
                     }),
                     duplex_clock: ClockRelation::SingleCallback,
                     index: IndexExactness::Exact,

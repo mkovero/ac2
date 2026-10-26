@@ -633,6 +633,7 @@ impl Control {
             },
             output_device: DeviceSelector::Default,
             input_channels: inputs,
+            spare_inputs: 0,
             output_channels: 0,
             sample_rate_hz: Some(s.audio.sample_rate),
             buffer_frames: Some(block),

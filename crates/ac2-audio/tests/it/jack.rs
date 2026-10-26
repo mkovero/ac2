@@ -217,7 +217,7 @@ fn generator_loopback_through_graph_has_constant_offset() {
 /// the same number, never removes a connection it did not make, and a routing change needs
 /// no reopen: a port connection made by someone else survives it.
 #[test]
-fn output_patch_connects_chosen_outputs_only() {
+fn graph_patch_connects_chosen_outputs_only() {
     if std::env::var_os("AC2_JACK_DUMMY").is_none() {
         eprintln!("skipping: patching playback ports needs AC2_JACK_DUMMY=1 (dummy driver only)");
         return;
@@ -243,7 +243,7 @@ fn output_patch_connects_chosen_outputs_only() {
     let mut req = DuplexRequest::new(vec![0, 1], 2, level());
     req.output = OutputSource::Generator(port);
     let mut s = b.open(req).expect("open");
-    let patch = s.output_patch().expect("JACK streams have a patch");
+    let patch = s.graph_patch().expect("JACK streams have a patch");
     let ours = |k: usize| format!("ac2-test-patch-out:out_{}", k + 1);
     let linked = |a: &str, b: &str| {
         other
@@ -312,4 +312,86 @@ fn output_patch_connects_chosen_outputs_only() {
         patch.connect_only(&[0]).is_err(),
         "a closed stream is never patched"
     );
+}
+
+/// A spare input is a port after the physical ones, named by its device channel and tied
+/// to nothing; what the operator connects to it is read back and connected again to the
+/// next stream's port. Capture only: no output is opened.
+#[test]
+fn spare_inputs_are_unconnected_ports_whose_sources_carry_over() {
+    let b = backend("ac2-test-spare", true);
+    if server_or_skip(&b).is_none() {
+        return;
+    }
+    let caps = b.enumerate().expect("enumerate");
+    let input = caps[0].input.as_ref().expect("capture");
+    let physical = input.max_channels;
+    if physical == 0 {
+        eprintln!("skipping: the server has no capture ports");
+        return;
+    }
+    assert!(input.spare_channels > 0, "JACK opens spare inputs");
+    let mut req = DuplexRequest::new(vec![0, physical], 0, level());
+    req.spare_inputs = 1;
+    let s = b.open(req).expect("open");
+    let port = format!("ac2-test-spare:in_{}", physical + 1);
+    assert_eq!(
+        s.negotiated().spare_ports,
+        [ac2_audio::SparePort {
+            channel: physical,
+            port: port.clone(),
+        }]
+    );
+    let (other, _) = jack::Client::new("ac2-test-spare-src", jack::ClientOptions::NO_START_SERVER)
+        .expect("other client");
+    let src = other
+        .register_port("src", jack::AudioOut::default())
+        .expect("source port");
+    let src = src.name().expect("source name");
+    // A port joins the graph once its client is active; this one never writes, so it
+    // carries silence.
+    let active = other.activate_async((), ()).expect("activate");
+    let other = active.as_client();
+    let sources = |p: &str| other.port_by_name(p).map(|p| p.get_connections());
+    assert_eq!(sources(&port), Some(vec![]), "nothing is connected at open");
+    assert_eq!(
+        sources("ac2-test-spare:in_1").map(|c| c.len()),
+        Some(1),
+        "the physical input is"
+    );
+
+    other
+        .connect_ports_by_name(&src, &port)
+        .expect("operator's connection");
+    let patch = s.graph_patch().expect("JACK streams have a patch");
+    let links = patch.spare_links().expect("links");
+    assert_eq!(
+        links,
+        [ac2_audio::SpareLink {
+            channel: physical,
+            sources: vec![src.clone()],
+        }]
+    );
+    drop(patch);
+    drop(s);
+
+    // Out of range: one spare more than the server's port limit leaves room for.
+    let mut req = DuplexRequest::new(vec![0], 0, level());
+    req.spare_inputs = input.spare_channels + 1;
+    assert!(matches!(
+        b.open(req),
+        Err(AudioError::Unsupported(Unsupported::SpareInputs { .. }))
+    ));
+
+    let mut req = DuplexRequest::new(vec![0, physical], 0, level());
+    req.spare_inputs = 1;
+    let s = b.open(req).expect("reopen");
+    assert_eq!(
+        sources(&port),
+        Some(vec![]),
+        "a new port starts unconnected"
+    );
+    let patch = s.graph_patch().expect("patch");
+    assert!(patch.link_spares(&links).is_empty());
+    assert_eq!(sources(&port), Some(vec![src.clone()]));
 }

@@ -5,11 +5,15 @@ use super::*;
 impl SessionDialog {
     // ----- focus -------------------------------------------------------------------------
 
-    /// Focus order, as the page reads top to bottom: the device rows, one row per input,
-    /// one per output, then the rate and buffer (the device's defaults suit most rigs).
+    /// Focus order, as the page reads top to bottom: the device rows, one row per input, the
+    /// spare input count where the device opens spares (it grows the input list above it),
+    /// one row per output, then the rate and buffer (the device's defaults suit most rigs).
     pub fn rows(&self) -> Vec<Row> {
         let mut v = vec![Row::Backend, Row::Device, Row::OutputDevice];
         v.extend((0..self.inputs.len()).map(Row::Input));
+        if self.max_spares() > 0 {
+            v.push(Row::Spares);
+        }
         v.extend((0..self.outputs.len()).map(Row::Output));
         v.extend([Row::Rate, Row::Buffer]);
         v

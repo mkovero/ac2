@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 69`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 70`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -878,13 +878,19 @@ panel), `notes`. `DirectionInfo`: `max_channels`,
 `rates_hz` ([{min, max}]), `buffer_frames` ({min, max} \| nil), `default_rate_hz`,
 `default_buffer_frames` (u32 \| nil), `channel_names` ([string], one per channel, \| nil
 where the backend does not name channels: JACK gives the port alias or short name, ASIO
-the driver's channel name, Core Audio the device's channel name where it has one), `system_default` (bool: the host's default device for this direction). A host
+the driver's channel name, Core Audio the device's channel name where it has one), `system_default` (bool: the host's default device for this direction), `spare_channels` (u16: spare inputs a session can
+open beyond `max_channels`: ports tied to no physical channel, which the operator connects
+other sources to with the host's own tools; spare `k` (zero-based) is input channel
+`max_channels + k`; JACK and the simulated rig only, 0 elsewhere and for outputs). A host
 whose devices are single-direction lists an interface (or a built-in mic and speakers) as an
 input-only and an output-only device, each with `duplex_clock: unknown`.
 
 `SessionConfig`: `backend: BackendKind | nil` (nil = the default backend), `input_device`,
 `output_device` (`DeviceSelector`: `default` \| `id` {`id`}), `input_channels` ([u16],
-zero-based), `output_channels` (u16, a count), `sample_rate_hz`, `buffer_frames`,
+zero-based; spare inputs listed like any other), `spare_inputs` (u16: spare inputs the
+session opens; input channels from the device's `max_channels` up to `max_channels +
+spare_inputs` may then be captured; more than `spare_channels`, or a channel past them,
+is `unsupported`), `output_channels` (u16, a count), `sample_rate_hz`, `buffer_frames`,
 `loopback` ({`output`, `input`} \| nil). `OpenSession` adds `backend` (the one used),
 `input_device`, `output_device`, `sample_rate_hz`, `buffer_frames`, `clock`, `opened_at`,
 `replay` (`ReplayInfo` \| nil: the recording a replay session plays, §3.2 raw capture
@@ -897,7 +903,13 @@ output was cut}, set when the session reopened after a `driver_reset` stop, kept
 later recoveries, nil after a `session.open`), `stated_latency` (`StatedLatency` \| nil:
 {`input_frames`, `output_frames`: the driver's `getLatencies` at the open buffer size,
 `driver_buffering`: {`input_frames`, `output_frames`} \| nil, the ASIO 2.3 buffering inside
-the driver, part of the two, nil when the driver does not report it}; ASIO only). `session.open` with `backend: replay` is `invalid`: recordings open with
+the driver, part of the two, nil when the driver does not report it}; ASIO only),
+`spare_ports` ([{`input`: u16, `port`: string}]: each spare input captured and the full
+name of its port in the host's graph, e.g. `ac2:in_19`; empty without spares). JACK ports
+are named by input channel (`in_19` is input 19). On its own reopen (a new `session.open`
+on the same daemon, a device change) the daemon reads what is connected to the spare
+ports before closing and connects it again to the new ones; after the JACK server or the
+daemon restarts it cannot, so the operator keeps such routes in a patchbay. `session.open` with `backend: replay` is `invalid`: recordings open with
 `session.replay`. Input and output may be two devices of one backend; an output device
 without outputs (or an `output_device: default` the host has none for) is `not_found`
 when `output_channels > 0`. Two devices open with `clock: unknown`: they may drift, which

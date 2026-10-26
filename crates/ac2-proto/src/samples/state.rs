@@ -123,6 +123,7 @@ pub(super) fn session() -> Session {
                     output_frames: 64,
                 }),
             }),
+            spare_ports: vec![],
         }),
         stopped: Some(AudioStopped {
             since: WallNs(1_789_999_500_000_000_000),

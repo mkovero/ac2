@@ -279,6 +279,8 @@ impl SessionDialog {
         self.load_outputs();
         let n_out = self.outputs.len() as u16;
         let roles = remembered.unwrap_or_else(|| default_roles(kind, n_in, n_out));
+        self.spares = 0;
+        self.add_spare_rows(roles.spare_inputs.min(self.max_spares()), false);
         self.apply_roles(&roles);
         if !self.is_open_device() {
             self.rate.clear();
@@ -350,6 +352,7 @@ impl SessionDialog {
         let reference = c.loopback.map(|l| l.input);
         Some(DeviceRoles {
             inputs: c.input_channels.clone(),
+            spare_inputs: c.spare_inputs,
             outputs: c.output_channels,
             reference,
             mics: declared
@@ -450,7 +453,114 @@ impl SessionDialog {
                     self.change_output(next, prefs);
                 }
             }
+            Row::Spares => {
+                let n = (i32::from(self.spares) + d).clamp(0, i32::from(self.max_spares()));
+                self.set_spares(n as u16);
+            }
             _ => {}
         }
     }
+
+    // ----- spare inputs --------------------------------------------------------------------
+
+    /// The chosen device's physical inputs: spare inputs are numbered from here.
+    pub fn physical_inputs(&self) -> u16 {
+        self.device_info()
+            .and_then(|d| d.input.as_ref())
+            .map_or(0, |i| i.max_channels)
+    }
+
+    /// Spare inputs the chosen device opens; zero on every backend but JACK.
+    pub fn max_spares(&self) -> u16 {
+        self.device_info()
+            .and_then(|d| d.input.as_ref())
+            .map_or(0, |i| i.spare_channels)
+    }
+
+    /// The graph port of spare input `channel` in the open session, when this device's
+    /// session has it open.
+    pub fn spare_port(&self, channel: u16) -> Option<&str> {
+        if !self.is_open_device() {
+            return None;
+        }
+        self.open
+            .as_ref()?
+            .spare_ports
+            .iter()
+            .find(|p| p.input == channel)
+            .map(|p| p.port.as_str())
+    }
+
+    /// The spare inputs row beside its count: which inputs they are and how they are fed.
+    pub fn spares_text(&self) -> String {
+        let max = self.max_spares();
+        if self.spares == 0 {
+            return format!(
+                "none · ← → add up to {max} inputs that you connect other JACK sources to"
+            );
+        }
+        let first = self.physical_inputs() + 1;
+        let last = first + self.spares - 1;
+        let which = if first == last {
+            format!("input {first}")
+        } else {
+            format!("inputs {first}–{last}")
+        };
+        format!(
+            "{which} · connect sources to them with your JACK tools (qjackctl, jack_connect); \
+             a patchbay keeps them when JACK restarts"
+        )
+    }
+
+    /// The session opens `n` spare inputs: rows are added in the session (a spare exists to
+    /// be metered) or removed with their roles.
+    pub fn set_spares(&mut self, n: u16) {
+        self.notice = None;
+        self.error = None;
+        let n = n.min(self.max_spares());
+        if n > self.spares {
+            self.add_spare_rows(n - self.spares, true);
+        } else {
+            let first_gone = self.physical_inputs() + n;
+            let gone: Vec<u16> = self
+                .inputs
+                .iter()
+                .map(|r| r.channel)
+                .filter(|&c| c >= first_gone)
+                .collect();
+            for c in gone {
+                self.unpair(c);
+                if self.pair_pick == Some(c) {
+                    self.pair_pick = None;
+                }
+            }
+            self.inputs.retain(|r| r.channel < first_gone);
+            self.spares = n;
+            self.keep_focus();
+        }
+    }
+
+    /// Appends `n` spare input rows after the last one.
+    fn add_spare_rows(&mut self, n: u16, in_session: bool) {
+        let first = self.physical_inputs() + self.spares;
+        for channel in first..first + n {
+            let device_name = Some(self.spare_port(channel).map_or_else(
+                || spare_name(channel - self.physical_inputs()),
+                str::to_owned,
+            ));
+            self.inputs.push(InputRow {
+                channel,
+                device_name,
+                in_session,
+                reference: false,
+                kind: InputKind::Line,
+            });
+        }
+        self.spares += n;
+    }
+}
+
+/// What a spare input is called until a session names its port: `spare 1`.
+fn spare_name(k: u16) -> String {
+    format!("spare {}", k + 1)
 }

@@ -137,6 +137,8 @@ pub struct DeviceRoles {
     pub inputs: Vec<u16>,
     /// Output channels of the session (a count: outputs `0 .. outputs`).
     pub outputs: u16,
+    /// Spare inputs the session opens (JACK); listed in `inputs` like any other.
+    pub spare_inputs: u16,
     /// The loopback return.
     pub reference: Option<u16>,
     /// Measurement mics.

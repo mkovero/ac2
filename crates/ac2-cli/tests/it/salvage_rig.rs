@@ -103,6 +103,7 @@ async fn rig(open_inputs: Option<Vec<u16>>) -> Rig {
                 input_device: DeviceSelector::Default,
                 output_device: DeviceSelector::Default,
                 input_channels: inputs,
+                spare_inputs: 0,
                 output_channels: 2,
                 sample_rate_hz: None,
                 buffer_frames: None,

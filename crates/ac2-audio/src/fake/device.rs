@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crate::backend::{
     Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
     DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, Presence, RateRange,
-    SampleFormat, StaticLatency,
+    SampleFormat, SparePort, StaticLatency,
 };
 use crate::error::{AudioError, Operation, Unsupported};
 use crate::stream::{DuplexStream, Plumbing, StreamParts};
@@ -14,7 +14,9 @@ use crate::stream::{DuplexStream, Plumbing, StreamParts};
 use super::config::{FakeConfig, FakeConfigError, FakeDrive, FakeEndpoints, Pace};
 use super::outage::{Outage, OutageKind};
 use super::sim::{FakeDriver, Sim};
-use super::{FAKE_DEVICE_ID, FAKE_INPUT_ID, FAKE_OUTPUT_ID, FAKE_SPLIT_NAME as SPLIT_NAME};
+use super::{
+    FAKE_DEVICE_ID, FAKE_INPUT_ID, FAKE_OUTPUT_ID, FAKE_SPARE_INPUTS, FAKE_SPLIT_NAME as SPLIT_NAME,
+};
 
 /// The simulated device. Cloning shares the parked manual driver slot, the device's
 /// availability and its driver settings.
@@ -156,13 +158,12 @@ impl FakeBackend {
             }
             .into());
         }
-        if let Some(&ch) = request.input_map.iter().find(|&&ch| ch >= c.inputs) {
-            return Err(Unsupported::InputChannel {
-                channel: ch,
-                available: c.inputs,
-            }
-            .into());
-        }
+        crate::backend::check_spare_inputs(
+            BackendKind::Fake,
+            &request,
+            c.inputs,
+            FAKE_SPARE_INPUTS,
+        )?;
         if request.output_channels > c.outputs {
             return Err(Unsupported::OutputChannels {
                 requested: request.output_channels,
@@ -194,6 +195,15 @@ impl FakeBackend {
             latency: StaticLatency::Unknown,
             clock_source: None,
             delivery: Delivery::Stepped,
+            spare_ports: request
+                .input_map
+                .iter()
+                .filter(|&&ch| ch >= c.inputs)
+                .map(|&channel| SparePort {
+                    channel,
+                    port: format!("fake:in_{}", channel + 1),
+                })
+                .collect(),
         };
         let sim = Sim::new(
             c.clone(),
@@ -250,7 +260,7 @@ impl Backend for FakeBackend {
 
     fn enumerate(&self) -> Result<Vec<DeviceCaps>, AudioError> {
         let c = &self.current();
-        let dir = |channels: u16, names: &Option<Vec<String>>| DirectionCaps {
+        let dir = |channels: u16, names: &Option<Vec<String>>, spare: u16| DirectionCaps {
             max_channels: channels,
             rates: vec![RateRange {
                 min: c.sample_rate,
@@ -265,9 +275,10 @@ impl Backend for FakeBackend {
             default_buffer: Some(c.block_frames),
             channel_names: names.clone(),
             system_default: true,
+            spare_channels: spare,
         };
-        let input = Some(dir(c.inputs, &c.input_names));
-        let output = (c.outputs > 0).then(|| dir(c.outputs, &c.output_names));
+        let input = Some(dir(c.inputs, &c.input_names, FAKE_SPARE_INPUTS));
+        let output = (c.outputs > 0).then(|| dir(c.outputs, &c.output_names, 0));
         let device = |id: &str, name: &str, input, output, duplex_clock| DeviceCaps {
             backend: BackendKind::Fake,
             host: "fake".into(),

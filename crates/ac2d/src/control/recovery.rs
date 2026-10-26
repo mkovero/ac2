@@ -356,6 +356,7 @@ impl Control {
                     return;
                 };
                 rt.open.replay = r.open.replay.clone();
+                rt.link_spares(&self.spare_links);
                 follow_driver(&r.open, &mut rt.open);
                 rt.open.driver_reset = match r.cause {
                     StopCause::DriverReset { reason } => Some(DriverReset {

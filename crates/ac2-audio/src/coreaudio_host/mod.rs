@@ -107,6 +107,8 @@ impl Backend for CoreAudioBackend {
     }
 
     fn open(&self, request: DuplexRequest) -> Result<DuplexStream, AudioError> {
+        // A HAL device's channels are all physical: there is no graph to route into ac2.
+        crate::backend::check_spare_inputs(crate::BackendKind::CoreAudio, &request, u16::MAX, 0)?;
         open::open_stream(Arc::clone(&self.source), request, self.consent_wait)
     }
 

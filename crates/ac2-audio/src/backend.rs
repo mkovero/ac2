@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AudioError, RequestError};
+use crate::error::{AudioError, RequestError, Unsupported};
 use crate::level::MaxLevel;
 use crate::output::OutputSource;
 use crate::stream::DuplexStream;
@@ -183,6 +183,11 @@ pub struct DirectionCaps {
     /// The host's default device for this direction: where the system plays or records
     /// unless told otherwise.
     pub system_default: bool,
+    /// Spare channels a stream can open beyond `max_channels` (inputs only): ports tied to
+    /// no physical channel that the host's own graph tools route into (JACK). Spare `k`
+    /// (zero-based) is device channel `max_channels + k`, so adding spares never renumbers
+    /// the physical channels. Zero where the host has no such ports.
+    pub spare_channels: u16,
 }
 
 /// Opaque device identifier, stable for as long as the host keeps it stable.
@@ -285,8 +290,12 @@ pub struct DuplexRequest {
     /// itself when it also plays, which keeps one clock where the host allows it.
     pub output_device: DeviceSelector,
     /// Zero-based device input channels; block channel `i` carries device channel
-    /// `input_map[i]`.
+    /// `input_map[i]`. Channels from the device's physical count on are spare inputs, and
+    /// must lie below the physical count plus `spare_inputs`.
     pub input_map: Vec<u16>,
+    /// Spare inputs the stream may open ([`DirectionCaps::spare_channels`]); a backend
+    /// without them refuses any other value than zero.
+    pub spare_inputs: u16,
     /// Output channels of the stream (channel `i` is device output `i`).
     pub output_channels: u16,
     /// Sample rate; `None` takes the device's default.
@@ -313,6 +322,7 @@ impl DuplexRequest {
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
             input_map,
+            spare_inputs: 0,
             output_channels,
             sample_rate: None,
             buffer_frames: None,
@@ -415,6 +425,39 @@ pub struct Negotiated {
     pub clock_source: Option<String>,
     /// What paces the blocks.
     pub delivery: Delivery,
+    /// The spare inputs captured, in `input_map` order, with the port each one is.
+    pub spare_ports: Vec<SparePort>,
+}
+
+/// A spare input as opened: what the operator routes into with the host's own tools.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SparePort {
+    /// Zero-based device channel (after the physical ones).
+    pub channel: u16,
+    /// The port's full name in the host's graph (`ac2:in_19`).
+    pub port: String,
+}
+
+/// Checks `request`'s spare inputs against a device with `physical` capture channels whose
+/// backend opens at most `max_spare` spare ones.
+pub(crate) fn check_spare_inputs(
+    backend: BackendKind,
+    request: &DuplexRequest,
+    physical: u16,
+    max_spare: u16,
+) -> Result<(), Unsupported> {
+    if request.spare_inputs > max_spare {
+        return Err(Unsupported::SpareInputs {
+            backend,
+            requested: request.spare_inputs,
+            max: max_spare,
+        });
+    }
+    let available = physical.saturating_add(request.spare_inputs);
+    match request.input_map.iter().find(|&&c| c >= available) {
+        Some(&channel) => Err(Unsupported::InputChannel { channel, available }),
+        None => Ok(()),
+    }
 }
 
 /// What paces a stream's blocks, which decides whether a pause in them is a fault.

@@ -114,6 +114,7 @@ fn direction(
         default_buffer: Some(d.buffer_frames),
         channel_names: channel_names(names, channels),
         system_default: default,
+        spare_channels: 0,
     })
 }
 

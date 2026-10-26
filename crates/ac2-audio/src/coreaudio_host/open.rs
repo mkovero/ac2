@@ -543,6 +543,7 @@ pub(crate) fn open_stream(
         latency: latency.clone(),
         clock_source,
         delivery: Delivery::Device,
+        spare_ports: Vec::new(),
     };
     // The last rendered cycle leaves after the output part of the latency (its buffer,
     // safety offset and converter) has played.

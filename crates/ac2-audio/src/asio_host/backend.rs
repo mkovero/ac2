@@ -162,6 +162,8 @@ impl<S: DriverSource> Backend for AsioHost<S> {
 
     fn open(&self, request: DuplexRequest) -> Result<DuplexStream, AudioError> {
         request.validate()?;
+        // An ASIO driver's channels are all physical: nothing else can route into it.
+        crate::backend::check_spare_inputs(crate::BackendKind::Asio, &request, u16::MAX, 0)?;
         let want = one_device(&request.input_device, &request.output_device)?;
         let (index, name) = self.resolve(want.as_ref())?;
         let id = DeviceId(name);

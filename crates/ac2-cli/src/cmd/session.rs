@@ -20,6 +20,25 @@ pub(crate) async fn devices(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError
     Ok(())
 }
 
+/// The device channels of `n` spare inputs on `dev`: the ones after its physical inputs.
+fn spare_channels(dev: &DeviceInfo, n: u16) -> Result<Vec<u16>, CliError> {
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let (physical, max) = dev
+        .input
+        .as_ref()
+        .map_or((0, 0), |d| (d.max_channels, d.spare_channels));
+    if n > max {
+        return Err(CliError::Usage(if max == 0 {
+            format!("{} has no spare inputs (only JACK opens them)", dev.name)
+        } else {
+            format!("{} opens at most {max} spare inputs", dev.name)
+        }));
+    }
+    Ok((physical..physical + n).collect())
+}
+
 fn backend(b: BackendArg) -> BackendKind {
     match b {
         BackendArg::Jack => BackendKind::Jack,
@@ -90,13 +109,16 @@ pub(crate) async fn session(
                     out_dev.name
                 )));
             }
+            let mut input_channels = o.inputs.0.clone();
+            input_channels.extend(spare_channels(dev, o.spare_inputs)?);
             let config = SessionConfig {
                 backend: Some(want),
                 input_device: DeviceSelector::Id { id: dev.id.clone() },
                 output_device: DeviceSelector::Id {
                     id: out_dev.id.clone(),
                 },
-                input_channels: o.inputs.0.clone(),
+                input_channels,
+                spare_inputs: o.spare_inputs,
                 output_channels: o.outputs,
                 sample_rate_hz: rate,
                 buffer_frames: buffer,
@@ -323,5 +345,36 @@ mod tests {
         let e = pick(&refs, None, None).expect_err("refused");
         assert!(e.to_string().contains("choose one with --device"), "{e}");
         assert!(pick(&[], None, None).is_err());
+    }
+
+    #[test]
+    fn spare_inputs_follow_the_physical_ones_within_what_the_device_opens() {
+        let mut jack = info("jack", "JACK server", 18, 18, true);
+        if let Some(d) = jack.input.as_mut() {
+            d.spare_channels = 46;
+        }
+        assert_eq!(spare_channels(&jack, 0).expect("none"), Vec::<u16>::new());
+        assert_eq!(spare_channels(&jack, 2).expect("two"), [18, 19]);
+        assert!(spare_channels(&jack, 47).is_err());
+        let asio = info("a", "Interface", 8, 8, false);
+        let e = spare_channels(&asio, 1).expect_err("ASIO has none");
+        assert!(e.to_string().contains("no spare inputs"), "{e}");
+    }
+
+    #[test]
+    fn session_open_takes_a_count_of_spare_inputs() {
+        use clap::Parser;
+        let argv = ["ac2", "session", "open", "--backend", "jack", "--in", "1-2"];
+        let spare = |extra: &[&str]| match crate::Cli::try_parse_from(argv.iter().chain(extra))
+            .map(|c| c.cmd)
+        {
+            Ok(crate::args::Cmd::Session {
+                cmd: SessionCmd::Open(o),
+            }) => Some(o.spare_inputs),
+            _ => None,
+        };
+        assert_eq!(spare(&[]), Some(0));
+        assert_eq!(spare(&["--spare-inputs", "2"]), Some(2));
+        assert_eq!(spare(&["--spare-inputs", "-1"]), None);
     }
 }

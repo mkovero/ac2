@@ -199,6 +199,9 @@ pub(super) fn channels_section(
     let (meters, cal) = channel_data(app, d);
     super::settings::section(ui, "Inputs", "", ch);
     input_grid(ui, d, focus, &meters, &cal, ch, msg);
+    if d.max_spares() > 0 {
+        spares_row(ui, d, focus == Some(Row::Spares), ch, msg);
+    }
     super::settings::section(ui, "Outputs", "stimulus: this app", ch);
     output_grid(ui, d, focus, ch, msg);
     super::settings::section(ui, "Reference (loopback)", "", ch);
@@ -402,6 +405,38 @@ fn device_row(
                     .color(ch.dim),
             );
         }
+    });
+}
+
+/// The count of spare inputs (JACK): ‹ › or ← → change it.
+fn spares_row(
+    ui: &mut egui::Ui,
+    d: &SessionDialog,
+    focused: bool,
+    ch: &Chrome,
+    msg: &mut Option<SessionMsg>,
+) {
+    ui.horizontal(|ui| {
+        if label_col(ui, "Spare inputs", focused, ch).clicked() {
+            *msg = Some(SessionMsg::Focus(Row::Spares));
+        }
+        if ui.small_button("‹").clicked() {
+            *msg = Some(SessionMsg::Cycle(Row::Spares, -1));
+        }
+        let t = RichText::new(d.spares.to_string())
+            .monospace()
+            .color(ch.text);
+        let resp = ui.add(egui::Button::selectable(focused, t));
+        if resp.clicked() {
+            *msg = Some(SessionMsg::Focus(Row::Spares));
+        }
+        if focused {
+            super::settings::reveal_focused(&resp);
+        }
+        if ui.small_button("›").clicked() {
+            *msg = Some(SessionMsg::Cycle(Row::Spares, 1));
+        }
+        ui.label(RichText::new(d.spares_text()).small().color(ch.dim));
     });
 }
 

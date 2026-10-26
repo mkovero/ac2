@@ -2,7 +2,8 @@
 //! bar and the `ac2 status` line all say the same thing (`docs/design/audio-recovery.md`).
 
 use ac2_proto::model::{
-    AudioStopped, ClockSource, DriverResetReason, OpenSession, Recovery, StatedLatency, StopCause,
+    AudioStopped, ClockSource, DriverResetReason, OpenSession, Recovery, SparePort, StatedLatency,
+    StopCause,
 };
 use ac2_proto::units::WallNs;
 
@@ -252,6 +253,12 @@ pub fn clock_sources_text(sources: &[ClockSource]) -> Option<String> {
     })
 }
 
+/// A spare input and the graph port that feeds it: `in 19 · ac2:in_19`. The port's full
+/// name is what the operator's JACK tools list, so it is given whole.
+pub fn spare_port_text(p: &SparePort) -> String {
+    format!("in {} · {}", p.input + 1, p.port)
+}
+
 /// The line for open session `o`.
 pub fn session_line(o: &OpenSession) -> SessionLine {
     let rate = rate_text(o.sample_rate_hz);
@@ -391,6 +398,7 @@ mod tests {
                 input_device: DeviceSelector::Default,
                 output_device: DeviceSelector::Default,
                 input_channels: vec![0, 1],
+                spare_inputs: 0,
                 output_channels: 2,
                 sample_rate_hz: Some(rate),
                 buffer_frames: Some(frames),
@@ -408,6 +416,7 @@ mod tests {
             driver_change: None,
             driver_reset: None,
             stated_latency: None,
+            spare_ports: vec![],
         }
     }
 

@@ -329,6 +329,10 @@ pub(crate) struct Control {
     health: crate::health::Health,
     /// The open session's audio stopped and is being reopened; `session` is `None` meanwhile.
     audio_recovery: Option<recovery::Recovery>,
+    /// What fed the spare inputs when the daemon last closed a running stream itself,
+    /// connected again to each stream it opens: the operator's routing into spare ports
+    /// would otherwise end with every reopen.
+    spare_links: Vec<ac2_audio::SpareLink>,
     jobs: BTreeMap<MeasId, JobHandle>,
     /// How spatial averages reach their running members.
     probes: Arc<Probes>,
@@ -486,6 +490,7 @@ impl Control {
             session: None,
             health: crate::health::Health::new(),
             audio_recovery: None,
+            spare_links: Vec::new(),
             jobs: BTreeMap::new(),
             probes: Arc::new(Probes::default()),
             timing_job: None,

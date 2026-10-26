@@ -354,6 +354,7 @@ impl Rig {
                         input_device: DeviceSelector::Default,
                         output_device: DeviceSelector::Default,
                         input_channels: vec![0, 1, 2, 3],
+                        spare_inputs: 0,
                         output_channels: 2,
                         sample_rate_hz: Some(48_000),
                         buffer_frames: Some(256),
@@ -374,6 +375,7 @@ impl Rig {
                     driver_change: None,
                     driver_reset: None,
                     stated_latency: None,
+                    spare_ports: vec![],
                 }),
                 stopped: None,
             };

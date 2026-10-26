@@ -68,7 +68,7 @@ pub enum StopOutcome {
     TimedOut,
 }
 
-/// One connection an [`OutputPatch`] holds: a stream output and the physical port it feeds.
+/// One connection a [`GraphPatch`] holds: a stream output and the physical port it feeds.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PatchLink {
     /// Stream output channel, zero-based.
@@ -79,7 +79,7 @@ pub struct PatchLink {
     pub to: String,
 }
 
-/// What [`OutputPatch::connect_only`] left in place.
+/// What [`GraphPatch::connect_only`] left in place.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PatchState {
     /// Connections the patch holds now.
@@ -88,16 +88,37 @@ pub struct PatchState {
     pub unmatched: Vec<u16>,
 }
 
-/// Connections from a stream's outputs to the device's physical outputs, on a backend whose
-/// stream outputs are ports in a graph (JACK) rather than the device's channels themselves.
+/// What feeds one spare input: the graph ports connected to it, as the host names them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpareLink {
+    /// The spare input's device channel, zero-based.
+    pub channel: u16,
+    /// Full names of the ports connected to it (`system:capture_3`, `mpv:out_0`).
+    pub sources: Vec<String>,
+}
+
+/// The stream's ports in the host's graph, on a backend whose stream channels are ports
+/// (JACK) rather than the device's channels themselves.
 ///
-/// Stream output `k` goes to the `k`-th physical playback port, in the order the device
-/// listing names them. Only connections the patch made itself are ever removed; a
+/// Outputs: stream output `k` goes to the `k`-th physical playback port, in the order the
+/// device listing names them. Only connections the patch made itself are ever removed; a
 /// connection someone else made is left alone.
-pub trait OutputPatch: Send + Sync {
+///
+/// Spare inputs: the operator connects them with the host's own tools. A reopen registers
+/// new ports, so what fed them is read before the old stream closes and connected again to
+/// the new one.
+pub trait GraphPatch: Send + Sync {
     /// Connects exactly the outputs in `outputs` (zero-based) to their physical playback
     /// ports, and removes the patch's own connections of every other output.
     fn connect_only(&self, outputs: &[u16]) -> Result<PatchState, AudioError>;
+
+    /// What is connected to each spare input now (spares with nothing connected left out).
+    fn spare_links(&self) -> Result<Vec<SpareLink>, AudioError>;
+
+    /// Connects each link's sources to the spare input of its channel, where both exist.
+    /// Returns what could not be connected, one line each: a source that is gone is the
+    /// operator's business, never a failure of the stream.
+    fn link_spares(&self, links: &[SpareLink]) -> Vec<String>;
 }
 
 /// Pieces a backend hands to [`DuplexStream::new`].
@@ -110,7 +131,7 @@ pub(crate) struct StreamParts {
     pub(crate) drain: Duration,
     pub(crate) guard: Box<dyn StreamGuard>,
     /// How the stream's outputs reach the device, when that takes graph connections.
-    pub(crate) patch: Option<Arc<dyn OutputPatch>>,
+    pub(crate) patch: Option<Arc<dyn GraphPatch>>,
 }
 
 /// An open duplex stream.
@@ -126,7 +147,7 @@ pub struct DuplexStream {
     events: Arc<BackendEvents>,
     drain: Duration,
     guard: Option<Box<dyn StreamGuard>>,
-    patch: Option<Arc<dyn OutputPatch>>,
+    patch: Option<Arc<dyn GraphPatch>>,
 }
 
 impl fmt::Debug for DuplexStream {
@@ -179,7 +200,7 @@ impl DuplexStream {
     /// backend where those are graph connections (JACK). `None` where the stream's outputs
     /// are the device's channels themselves (Core Audio, ASIO, the fake device). The patch outlives
     /// the stream harmlessly: once the stream is stopped, it refuses to connect.
-    pub fn output_patch(&self) -> Option<Arc<dyn OutputPatch>> {
+    pub fn graph_patch(&self) -> Option<Arc<dyn GraphPatch>> {
         self.patch.clone()
     }
 

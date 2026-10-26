@@ -10,6 +10,7 @@ fn round_trip_is_one_based_in_the_file() {
         DeviceRoles {
             inputs: vec![0, 1, 2],
             outputs: 2,
+            spare_inputs: 2,
             reference: Some(0),
             mics: vec![1, 2],
             stimulus: vec![0],
@@ -33,6 +34,7 @@ fn round_trip_is_one_based_in_the_file() {
     let text = p.to_toml();
     assert!(text.contains("\"hw:UMC1820\" = [1, 2]"), "{text}");
     assert!(text.contains("reference = 1"), "{text}");
+    assert!(text.contains("spare_inputs = 2"), "{text}");
     assert!(text.contains("mics = [2, 3]"), "{text}");
     assert!(text.contains("2 = \"M30 FOH\""), "{text}");
     assert!(text.contains("4 = \"digital\""), "{text}");
