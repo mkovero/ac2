@@ -7,6 +7,11 @@
 //!   instancing, uniforms and sampled textures (no storage buffers, no compute), so asking
 //!   for more only rules out GPUs that would draw them fine — a Raspberry Pi 4 (V3D, 4096 px
 //!   textures, GLES 3.1 or v3dv Vulkan) refuses wgpu's desktop defaults.
+//! - A present mode that never waits for vblank: with FIFO, acquiring the next surface
+//!   texture blocks until the display takes a frame, and a display that is off or unplugged
+//!   (an NVIDIA X11 output with the TV switched off) gives none, so the acquire times out
+//!   after a second and the whole UI thread — picture, keys, the stimulus's stop key — runs
+//!   at 1 Hz. The app paces its own frames instead ([`frame_interval`], [`crate::pace`]).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,15 +40,29 @@ pub fn power_preference() -> wgpu::PowerPreference {
 /// and a level or spectrum updating 30 times a second still reads as continuous motion.
 pub const SOFTWARE_FRAME_INTERVAL: Duration = Duration::from_micros(33_333);
 
-/// Least time between frames asked for by data or animation: none on a GPU (the display's
-/// rate paces it), [`SOFTWARE_FRAME_INTERVAL`] on a CPU rasteriser. Input still repaints at
-/// once, so the pointer and keys stay responsive.
+/// The fastest a GPU is asked to draw: 60 frames a second. The surface no longer waits for
+/// vblank, so without a cap a stream of data frames or an animation would draw as fast as
+/// the GPU can; 60 is the common display rate (egui does not report the monitor's), and
+/// levels and spectra gain nothing readable above it.
+pub const GPU_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
+
+/// Least time between frame starts asked for by data or animation:
+/// [`GPU_FRAME_INTERVAL`] on a GPU, [`SOFTWARE_FRAME_INTERVAL`] on a CPU rasteriser. Input
+/// still repaints at once, so the pointer and keys stay responsive.
 pub fn frame_interval(r: Rasterizer) -> Duration {
     match r {
-        Rasterizer::Gpu => Duration::ZERO,
+        Rasterizer::Gpu => GPU_FRAME_INTERVAL,
         Rasterizer::Software => SOFTWARE_FRAME_INTERVAL,
     }
 }
+
+/// The surface's present mode: `AutoNoVsync`, which wgpu resolves against the surface's
+/// capabilities to Immediate, else Mailbox, else FIFO. Mailbox would never tear, but egui
+/// configures the surface itself and gives no hook to read its capabilities first, and
+/// asking for a mode the surface lacks is an error rather than a fallback. Immediate may
+/// tear on an uncomposited X11 screen; a compositor (xfwm4's, Wayland) usually shows whole frames.
+/// GLES on Linux offers only FIFO, so a GL adapter (V3D on GLES) keeps vblank pacing.
+pub const PRESENT_MODE: wgpu::PresentMode = wgpu::PresentMode::AutoNoVsync;
 
 /// eframe's wgpu options with this module's adapter and device choice.
 pub fn wgpu_options() -> egui_wgpu::WgpuConfiguration {
@@ -56,6 +75,12 @@ pub fn wgpu_options() -> egui_wgpu::WgpuConfiguration {
     });
     egui_wgpu::WgpuConfiguration {
         wgpu_setup: setup.into(),
+        surface: egui_wgpu::SurfaceConfig {
+            present_mode: PRESENT_MODE,
+            // Two frames in flight: a slow GPU (V3D) records the next frame while the last
+            // one draws; the pacing, not the queue, bounds how far ahead the app runs.
+            desired_maximum_frame_latency: Some(2),
+        },
         ..Default::default()
     }
 }
@@ -65,10 +90,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_cpu_rasteriser_is_paced() {
-        assert_eq!(frame_interval(Rasterizer::Gpu), Duration::ZERO);
+    fn both_rasterisers_are_paced() {
+        let gpu = frame_interval(Rasterizer::Gpu);
+        assert!((1.0 / gpu.as_secs_f64() - 60.0).abs() < 0.01, "{gpu:?}");
         let sw = frame_interval(Rasterizer::Software);
         assert!((1.0 / sw.as_secs_f64() - 30.0).abs() < 0.01, "{sw:?}");
+    }
+
+    /// The surface never blocks on vblank where the surface can avoid it, and the latency
+    /// is set rather than left to egui's default.
+    #[test]
+    fn present_mode_does_not_wait_for_vblank() {
+        let o = wgpu_options();
+        assert_eq!(o.surface.present_mode, wgpu::PresentMode::AutoNoVsync);
+        assert_eq!(o.surface.desired_maximum_frame_latency, Some(2));
     }
 
     /// A V3D-class adapter (4096 px textures, GLES 3.1 class) can grant what is asked, on

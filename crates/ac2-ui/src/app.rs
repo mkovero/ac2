@@ -206,8 +206,8 @@ pub struct App {
     window_checked: bool,
     /// What the connect dialog is made from.
     connect_setup: Option<ConnectSetup>,
-    /// Least time between two frames asked for by data or animation (zero on a GPU).
-    frame_interval: Duration,
+    /// Paces the frames asked for by data or animation.
+    pacer: Arc<crate::pace::Pacer>,
     /// This window's side of the health meter.
     pub health: crate::health::LocalHealth,
     /// The window measures its own health figures on every pass. Reference renders turn it
@@ -246,7 +246,7 @@ impl App {
                     ac2_plot::classify_info(&rs.adapter.get_info())
                 })
         });
-        let frame_interval = crate::gpu::frame_interval(rasterizer);
+        let pacer = crate::pace::Pacer::new(crate::gpu::frame_interval(rasterizer));
         install_fonts(&cc.egui_ctx);
         let ctx = cc.egui_ctx.clone();
         let describe = opts
@@ -258,7 +258,7 @@ impl App {
         let daemon_addr = opts.target.as_ref().and_then(network_host);
         let conn = opts.target.and_then(|mut t| {
             t.config.received_bytes = Arc::clone(&health.received);
-            Conn::start(t, link_wake(ctx, frame_interval)).ok()
+            Conn::start(t, link_wake(ctx, Arc::clone(&pacer))).ok()
         });
         let mut state = AppState::new(opts.theme, describe);
         state.set_prefs(opts.prefs);
@@ -307,7 +307,7 @@ impl App {
             window: None,
             window_checked: false,
             connect_setup: opts.connect,
-            frame_interval,
+            pacer,
             health,
             health_measured: true,
             link_embedded,
@@ -417,7 +417,7 @@ impl App {
         target.config.received_bytes = Arc::clone(&self.health.received);
         self.link_embedded = embedded_target(&target);
         self.daemon_addr = network_host(&target);
-        match Conn::start(target, link_wake(ctx.clone(), self.frame_interval)) {
+        match Conn::start(target, link_wake(ctx.clone(), Arc::clone(&self.pacer))) {
             Ok(c) => {
                 self.conn = Some(c);
                 self.connect = None;
@@ -819,15 +819,11 @@ const PREFS_SAVE_INTERVAL: Duration = Duration::from_secs(1);
 /// How often `ui.toml` is tried again after a failed write (a full or read-only disk).
 const PREFS_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Wakes the UI for what the link reports: one pass. egui answers a plain
-/// `request_repaint` with two passes (for responses that land a frame late), which on a
-/// software rasteriser doubles the cost of every data frame; a delayed request is painted
-/// once, and a nanosecond is no delay at all. With a frame `interval` (a CPU rasteriser) the
-/// frame is asked that far ahead: egui keeps the earliest pending request, so the data
-/// frames arriving meanwhile join that one frame instead of each drawing their own.
-fn link_wake(ctx: egui::Context, interval: Duration) -> crate::conn::Wake {
-    let after = interval.max(Duration::from_nanos(1));
-    Arc::new(move || ctx.request_repaint_after(after))
+/// Wakes the UI for what the link reports: one paced frame. egui keeps the earliest pending
+/// request, so the data frames arriving before it join that one frame instead of each
+/// drawing their own, and a stream of them draws at most once per interval.
+fn link_wake(ctx: egui::Context, pacer: Arc<crate::pace::Pacer>) -> crate::conn::Wake {
+    Arc::new(move || pacer.request(&ctx))
 }
 
 /// Whether `t` reaches a daemon inside this process: an `inproc://` daemon is reachable

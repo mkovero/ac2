@@ -245,7 +245,9 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   inside the app) a single `CPU 23 %`; **DSP** is the share of each buffer period ac2d's own
   audio callback takes (not the whole JACK graph's load); **xruns** count since the session
   opened; the data rate is what this window receives from the daemon (left out with the
-  daemon inside the app); **fps** is shown while live data arrives. CPU past 85 %, DSP past
+  daemon inside the app); **fps** is shown while live data arrives — at most 60 on a GPU and
+  30 on a software renderer, since the app paces its own frames rather than wait for the
+  display, which keeps it responsive with the screen off or unplugged. CPU past 85 %, DSP past
   70 %, a frame rate under a third of the data's and an xrun in the last 5 s show in the
   warning colour; the hover names the hosts (`remote = pupu (192.168.9.27)`,
   `local = ketunkolo`) and gives the means and peaks since the session opened. Each number keeps a

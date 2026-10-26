@@ -29,7 +29,7 @@ reasoning and the tests that prove it.
 | 8a | Shared time reference within a session; imported traces marked independent; **each trace's delay can be nudged individually**. |
 | 1c | Near-equal peaks: both shown on IR panel + short list; first-arrival rule pre-selects; one key accepts, another picks; tracking pauses until resolved. |
 | 2a | STALE = no fresh frame for ~1 s: trace dims and shows age. Says nothing about measured delay. |
-| 2b | Up to 60 fps per topic, local and remote alike; UI interpolates to display refresh. Remote was 30 until frames were packed ([wire-slim.md](wire-slim.md)): a heavy tuning session went 9.3 → 3.2 Mbit/s at 60 fps (2.7 at 30), and transfer functions come at their analysis hop (≈ 26/s) whatever the rate, so 60 costs remote clients ≈ 0.5 Mbit/s more than 30. |
+| 2b | Up to 60 fps per topic, local and remote alike; UI interpolates at up to 60 frames a second, paced by the app, not the display's vblank (`ac2-ui` `pace`, `gpu::PRESENT_MODE`). Remote was 30 until frames were packed ([wire-slim.md](wire-slim.md)): a heavy tuning session went 9.3 → 3.2 Mbit/s at 60 fps (2.7 at 30), and transfer functions come at their analysis hop (≈ 26/s) whatever the rate, so 60 costs remote clients ≈ 0.5 Mbit/s more than 30. |
 | 3a | No start-up probe. Daemon continuously correlates generator output with the reference loopback while a stimulus plays; offset jumps are flagged; when silent, last value shown with age. |
 | 4b | Narrowband spectrum = tone level; RTA = band power; unit printed on axis. |
 | 4c | Flat-top window available as an option in spectrum view, not default. |

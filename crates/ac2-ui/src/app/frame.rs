@@ -22,6 +22,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.pacer.frame_started(Instant::now());
         self.passes += 1;
         if self.startup.first_ui.is_none() {
             self.startup.first_ui = Some(self.started.elapsed());
@@ -142,9 +143,9 @@ impl eframe::App for App {
         }
 
         if let Some(w) = clock_wait {
-            // egui wakes a predicted frame time early; the texts must have changed by then.
-            let early = Duration::from_secs_f32(ctx.input(|i| i.predicted_dt).max(0.0));
-            ctx.request_repaint_after(w + early);
+            // Not early: the texts must have changed by then.
+            let dt = ctx.input(|i| i.predicted_dt);
+            ctx.request_repaint_after(crate::pace::repaint_delay(w, dt));
         }
         if self.conn.is_some() {
             ctx.request_repaint_after(SLOW_REFRESH);
@@ -165,11 +166,7 @@ impl eframe::App for App {
             || self.state.embers_glowing()
             || self.startup.first_frame.is_none()
         {
-            if self.frame_interval.is_zero() {
-                ctx.request_repaint();
-            } else {
-                ctx.request_repaint_after(self.frame_interval);
-            }
+            self.pacer.request(&ctx);
         } else if self.state.overlay.session().is_some()
             || self
                 .state

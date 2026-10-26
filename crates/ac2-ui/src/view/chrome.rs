@@ -381,8 +381,11 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         });
     });
     if let Some(w) = wake {
+        // At the marquee's own frame period, not a predicted frame earlier.
+        let dt = ui.input(|i| i.predicted_dt);
+        let w = std::time::Duration::from_secs_f64(w);
         ui.ctx()
-            .request_repaint_after(std::time::Duration::from_secs_f64(w));
+            .request_repaint_after(crate::pace::repaint_delay(w, dt));
     }
     if open_settings {
         app.dispatch(crate::state::Msg::Command(CommandId::Settings));
