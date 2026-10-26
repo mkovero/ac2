@@ -412,7 +412,7 @@ fn case_12_momentary_over_a_period() {
 /// −38 + i dBFS after 20·i ms of silence. At each segment's end the max momentary since the
 /// reset, what a bar's max ticks show, reads −38 + i LUFS.
 #[test]
-fn case_14_max_momentary_at_each_segment_end() {
+fn slow_case_14_max_momentary_at_each_segment_end() {
     let mut p = open("bars-3341-14", Ballistic::Momentary, SILENT);
     p.run(blocks(0.5) - 1);
     p.c.ok(Command::LevelsReset {
