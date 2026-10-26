@@ -59,6 +59,41 @@ fn a_kept_session_without_audio_opens_no_sessions_dialog() {
     );
 }
 
+/// Connecting to another daemon while Settings is open lists that daemon's devices: the
+/// Audio I/O page drops the last daemon's ports at once and asks the new one.
+#[test]
+fn another_daemon_lists_its_own_devices() {
+    let mut t = T::disconnected();
+    connected_to(&mut t, "pupu");
+    t.conn(mirror(daemon_state()));
+    t.key("Shift+O");
+    t.conn(ConnEvent::Devices(Ok(real_backends())));
+    assert!(dialog(&t).backends.is_some());
+    assert!(t.st.devices.is_some());
+
+    let r = t.conn(ConnEvent::Connected {
+        target: "local daemon".into(),
+        server: "ac2d test".into(),
+        client_id: ClientId("c1".into()),
+    });
+    assert!(r.iter().any(|x| matches!(x, Request::Devices)), "{r:?}");
+    assert!(dialog(&t).backends.is_none());
+    assert!(t.st.devices.is_none());
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    assert_eq!(dialog(&t).backend_kind(), Some(BackendKind::Fake));
+
+    // Without Settings open, the inputs' channel names are asked of the new daemon too.
+    t.key("Escape");
+    assert_eq!(t.st.overlay, Overlay::None);
+    let r = t.conn(ConnEvent::Connected {
+        target: "pupu".into(),
+        server: "ac2d test".into(),
+        client_id: ClientId("c1".into()),
+    });
+    assert!(r.iter().any(|x| matches!(x, Request::Devices)), "{r:?}");
+    assert!(t.st.devices.is_none());
+}
+
 /// Core Audio listing each direction as its own device: an output-only device
 /// listed first and the system's default output, an input-only USB mic, and another
 /// output-only device.

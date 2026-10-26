@@ -43,6 +43,14 @@ impl AppState {
                 // Nor has it rebuilt any history: the log may have moved on meanwhile.
                 self.leq.logs.clear();
                 self.forget_layout_calls();
+                // The devices listed were the last daemon's: another host has other ports,
+                // and opening with them would name channels this daemon may not have.
+                self.devices = None;
+                self.devices_for = None;
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    s.session.backends = None;
+                    out.push(Request::Devices);
+                }
             }
             ConnEvent::Failed { target, error, .. } => {
                 self.conn = ConnState::Failed { target, error };
