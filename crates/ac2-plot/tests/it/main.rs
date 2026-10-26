@@ -6,5 +6,6 @@ mod common;
 mod embers;
 mod golden;
 mod prepare_bench;
+mod programme;
 mod render;
 mod scene_e2e;

@@ -10,6 +10,9 @@ use crate::primitives::{Label, Scene};
 use crate::theme::Theme;
 use crate::view::PlotChrome;
 
+/// The plate's layer: the last, above the bars' labels.
+const PLATE_LAYER: usize = 3;
+
 fn settled() -> LoudnessReadout {
     LoudnessReadout {
         title: "Main".into(),
@@ -124,7 +127,7 @@ fn plate_states_waiting_settling_and_reset() {
 
 /// The plate's labels: the clipped ones inside its rect (the bars' are not clipped).
 fn plate_labels(s: &Scene, rect: crate::primitives::Rect) -> Vec<Label> {
-    s.layers[2]
+    s.layers[PLATE_LAYER]
         .labels
         .iter()
         .filter(|l| {
@@ -195,10 +198,11 @@ fn values_are_tabular() {
     let rig = Rig::new();
     let p = rig.pane(&[2, 3], Ballistic::ShortTerm);
     let s = scene_of(&p, PlotChrome::Full, 900.0, 400.0);
-    let labels = &s.scene.layers[2].labels;
     let find = |t: &str| {
-        labels
+        s.scene
+            .layers
             .iter()
+            .flat_map(|l| &l.labels)
             .find(|l| l.text == t)
             .unwrap_or_else(|| panic!("{t}"))
     };
@@ -237,7 +241,7 @@ fn plate_fill_honours_plate_alpha_and_hover() {
                 None,
             );
             let plate = s.plate.expect("a plate");
-            let fill = s.scene.layers[2]
+            let fill = s.scene.layers[PLATE_LAYER]
                 .rects
                 .iter()
                 .find(|r| r.rect == plate.rect)
@@ -247,7 +251,7 @@ fn plate_fill_honours_plate_alpha_and_hover() {
             assert_eq!(plate.kind, PlateKind::Loudness);
             assert_eq!(s.plates(), vec![plate]);
             // The grip's three dots inside the corner.
-            let dots = s.scene.layers[2]
+            let dots = s.scene.layers[PLATE_LAYER]
                 .rects
                 .iter()
                 .filter(|r| r.rect.w == 2.0 && r.rect.h == 2.0 && plate.grip.x <= r.rect.x)

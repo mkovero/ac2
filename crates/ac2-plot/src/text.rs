@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use glyphon::cosmic_text::{FeatureTag, FontFeatures};
 use glyphon::{
     Attrs, Buffer, Family, FontSystem, Metrics, Resolution, Shaping, SwashCache, TextArea,
     TextAtlas, TextBounds, TextRenderer, fontdb,
@@ -19,8 +20,8 @@ pub const FONT_FAMILY: &str = "Inter";
 /// Line box height as a multiple of the font size.
 const LINE_HEIGHT: f32 = 1.25;
 
-/// A label's shaped text, kept while some frame uses it. Keyed by text and size, so a
-/// label added or removed early in a layer does not reshape every label after it.
+/// A label's shaped text, kept while some frame uses it. Keyed by text, size and figure
+/// style, so a label added or removed early in a layer does not reshape every label after it.
 struct Shaped {
     buffer: Buffer,
     /// Widest line and total height of the laid-out text, physical pixels.
@@ -69,8 +70,8 @@ pub(crate) struct TextLayer {
     /// Shaped texts; `None` marks a free entry.
     shaped: Vec<Option<Shaped>>,
     free: Vec<usize>,
-    /// Index into `shaped` by size (f32 bits) and text.
-    index: HashMap<u32, HashMap<String, usize>>,
+    /// Index into `shaped` by size (f32 bits) and figure style, then text.
+    index: HashMap<(u32, bool), HashMap<String, usize>>,
     placed: Vec<Placed>,
     frame: u64,
 }
@@ -190,22 +191,26 @@ impl TextLayer {
         )
     }
 
-    /// The entry of `text` at `size_px`, shaped now if no recent frame used it.
-    fn shaped(&mut self, fs: &mut FontSystem, text: &str, size_px: f32) -> usize {
+    /// The entry of `text` at `size_px`, shaped now if no recent frame used it. `tabular`
+    /// shapes with the font's tabular figures (`tnum`): every digit takes one advance, so
+    /// a right-aligned number keeps each digit in its column as the value changes.
+    fn shaped(&mut self, fs: &mut FontSystem, text: &str, size_px: f32, tabular: bool) -> usize {
         let frame = self.frame;
-        if let Some(&i) = self.index.get(&size_px.to_bits()).and_then(|m| m.get(text))
+        let key = (size_px.to_bits(), tabular);
+        if let Some(&i) = self.index.get(&key).and_then(|m| m.get(text))
             && let Some(s) = self.shaped[i].as_mut()
         {
             s.frame = frame;
             return i;
         }
         let mut buffer = Buffer::new(fs, Metrics::new(size_px, size_px * LINE_HEIGHT));
-        buffer.set_text(
-            text,
-            &Attrs::new().family(Family::Name(FONT_FAMILY)),
-            Shaping::Advanced,
-            None,
-        );
+        let mut attrs = Attrs::new().family(Family::Name(FONT_FAMILY));
+        if tabular {
+            let mut features = FontFeatures::new();
+            features.enable(FeatureTag::new(b"tnum"));
+            attrs = attrs.font_features(features);
+        }
+        buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(fs, false);
         let mut width: f32 = 0.0;
         let mut height: f32 = 0.0;
@@ -233,14 +238,14 @@ impl TextLayer {
             }
         };
         self.index
-            .entry(size_px.to_bits())
+            .entry(key)
             .or_default()
             .insert(text.to_owned(), i);
         i
     }
 
     fn place(&mut self, fs: &mut FontSystem, label: &Label, clip: ClipPx, xf: &Xform) -> Placed {
-        let i = self.shaped(fs, &label.text, label.size * xf.scale);
+        let i = self.shaped(fs, &label.text, label.size * xf.scale, label.tabular);
         let (width, height, baseline) = self.shaped[i]
             .as_ref()
             .map_or((0.0, 0.0, 0.0), |s| (s.width, s.height, s.baseline));

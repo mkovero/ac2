@@ -196,7 +196,9 @@ fn plate(
     };
     let (rect, cells) = loudness_plate::cells(origin, font, scale, dropped);
     let hover = p.plate_hover.filter(|h| h.kind == PlateKind::Loudness);
-    loudness_plate::draw(&mut c.overlay, r, rect, &cells, hover, area, theme);
+    // Its own layer, the last: a layer's labels draw over its fills, so a plate floated
+    // over the bars in theirs would show their scale and readouts through its fill.
+    loudness_plate::draw(&mut c.banners, r, rect, &cells, hover, area, theme);
     Some(PlateBox::new(PlateKind::Loudness, area, rect, scale))
 }
 

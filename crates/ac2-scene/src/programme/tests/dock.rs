@@ -91,6 +91,20 @@ fn a_moved_plate_floats_and_the_bars_reclaim_its_room() {
     assert_eq!(plate.rect.y, area.y + crate::legend::INSET);
     assert_eq!(docked_plate.area, area, "one room, docked or not");
     assert_eq!(plate.position_for(plate.rect.x, plate.rect.y), [0.0, 0.0]);
+    // Drawn over the bars: no label of theirs sits in the plate's layer or above it, so
+    // none shows through its fill.
+    let layers = &floating.scene.layers;
+    let plate_layer = layers
+        .iter()
+        .position(|l| l.rects.iter().any(|r| r.rect == plate.rect))
+        .expect("the plate's fill");
+    assert!(
+        layers[plate_layer..]
+            .iter()
+            .flat_map(|l| &l.labels)
+            .all(|l| l.clip.is_some()),
+        "only the plate's own (clipped) labels at or above its fill"
+    );
     // A floating plate too large for the pane shrinks, then drops slots.
     p.plate.set_scale(3.0);
     let small = scene_of(&p, PlotChrome::Full, 900.0, 260.0)
