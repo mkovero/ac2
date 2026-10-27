@@ -122,6 +122,8 @@ commands! {
     Notifications => "notifications", "Notifications…", [Global];
     Palette => "palette", "Command palette", [Global];
     Settings => "settings", "Settings…", [Global];
+    Rigs => "rigs", "Rigs…", [Global];
+    ConnectRig => "connect_rig", "Connect a rig…", [Global];
     Quit => "quit", "Quit", [Global];
     Fullscreen => "fullscreen", "Full screen", [Global];
     KeyHints => "key_hints", "Key hints", [Global];

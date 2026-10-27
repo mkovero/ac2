@@ -477,11 +477,17 @@ impl Conn {
     }
 
     fn shutdown(&mut self) -> bool {
+        let _ = self.tx.send(Ctl::Shutdown);
+        self.finish(Instant::now() + QUIT_GRACE)
+    }
+
+    /// Waits until `deadline` for the link to end after its shutdown was sent.
+    fn finish(&mut self, deadline: Instant) -> bool {
         let Some(t) = self.thread.take() else {
             return true;
         };
-        let _ = self.tx.send(Ctl::Shutdown);
-        match self.done.recv_timeout(QUIT_GRACE) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match self.done.recv_timeout(left) {
             Err(std_mpsc::RecvTimeoutError::Timeout) => false,
             Ok(()) | Err(std_mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = t.join();
@@ -489,6 +495,21 @@ impl Conn {
             }
         }
     }
+}
+
+/// Closes every link at once: each stops the stimulus it holds and releases its lease in
+/// parallel, all within one [`QUIT_GRACE`], so quitting with several rigs waits no longer
+/// than with one. `true` when every link finished in time.
+pub fn close_all(conns: Vec<Conn>) -> bool {
+    for c in &conns {
+        let _ = c.tx.send(Ctl::Shutdown);
+    }
+    let deadline = Instant::now() + QUIT_GRACE;
+    let mut all = true;
+    for mut c in conns {
+        all &= c.finish(deadline);
+    }
+    all
 }
 
 impl Drop for Conn {

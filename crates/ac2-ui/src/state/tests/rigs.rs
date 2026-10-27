@@ -14,10 +14,10 @@ const PUPU: RigId = RigId(0x9e9e);
 fn two_rigs() -> T {
     let mut t = T::new();
     t.conn(mirror(with_spl()));
-    t.st.background.push(RigState::new("pupu".into()));
+    let slot = t.st.add_rig("pupu".into(), None, None);
     let r = to(
         &mut t,
-        UNKNOWN_RIG,
+        RigId(u64::from(slot)),
         ConnEvent::Connected {
             target: "pupu".into(),
             server: "ac2d test".into(),
@@ -242,15 +242,15 @@ fn requests_name_their_rig() {
     let r = to(&mut t, PUPU, mirror(with_spl()));
     assert!(
         matches!(
-            r.as_slice(),
-            [(
+            r.first(),
+            Some((
                 PUPU,
                 Request::LeqBackfill {
                     meas: MeasId(4),
                     ..
                 }
-            )]
-        ),
+            ))
+        ) && r.iter().all(|(rig, _)| *rig == PUPU),
         "{r:?}"
     );
     // Space arms the active rig's stimulus.
@@ -342,4 +342,255 @@ fn devices_are_remembered_per_rig() {
     t.st.rig.stim_device = None;
     t.remirror(|_| {});
     assert_eq!(t.st.rig.stimulus.outputs, vec![3]);
+}
+
+/// Two rigs, both mirroring the test daemon (the same measurement ids), the first shown.
+fn two_mirrored() -> T {
+    let mut t = two_rigs();
+    to(&mut t, PUPU, mirror(with_spl()));
+    t
+}
+
+/// A pick in the rigs drop-down.
+fn pick(t: &mut T, row: RigRow) -> Vec<(RigId, Request)> {
+    t.st.update(Msg::RigPick(row), &t.keys)
+}
+
+/// The rigs drop-down lists each rig in the order added, then Connect… and closing the rig
+/// shown; a pick shows that rig and its keys and windows are the operator's.
+#[test]
+fn the_drop_down_switches_the_rig_shown() {
+    let mut t = two_mirrored();
+    assert_eq!(
+        t.st.rig_menu_rows(),
+        vec![
+            RigRow::Rig(RIG),
+            RigRow::Rig(PUPU),
+            RigRow::Connect,
+            RigRow::Close(RIG)
+        ]
+    );
+    t.st.apply(Msg::Command(CommandId::Rigs), &t.keys);
+    assert!(matches!(t.st.overlay, Overlay::RigMenu(_)));
+    pick(&mut t, RigRow::Rig(PUPU));
+    assert_eq!(t.st.active(), PUPU);
+    assert_eq!(t.st.rig.id, PUPU);
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(t.st.find_rig(RIG).is_some());
+    // Space arms pupu's stimulus now.
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    let r =
+        t.st.update(Msg::Key(Chord::parse("Space").expect("key")), &t.keys);
+    assert!(
+        !r.is_empty() && r.iter().all(|(rig, _)| *rig == PUPU),
+        "{r:?}"
+    );
+}
+
+/// While a window is open the rig shown cannot change: the window acts on the rig it
+/// opened on. The drop-down does not open over it.
+#[test]
+fn no_switch_under_a_window() {
+    let mut t = two_mirrored();
+    t.st.apply(Msg::Command(CommandId::Calibrations), &t.keys);
+    let window = t.st.overlay.clone();
+    assert_ne!(window, Overlay::None);
+    t.st.apply(Msg::Command(CommandId::Rigs), &t.keys);
+    assert_eq!(t.st.overlay, window);
+    pick(&mut t, RigRow::Rig(PUPU));
+    assert_eq!(t.st.active(), RIG);
+    assert_eq!(t.st.window_rig, Some(RIG));
+}
+
+/// A reply to what the operator asked of a rig arrives after another rig is shown: it is
+/// still that rig's, handled in full.
+#[test]
+fn replies_after_a_switch_reach_their_rig() {
+    let mut t = two_mirrored();
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.key("Space");
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Arming);
+    pick(&mut t, RigRow::Rig(PUPU));
+    let r = to(&mut t, RIG, ConnEvent::Stimulus(StimEvent::Armed));
+    assert!(r.iter().all(|(rig, _)| *rig == RIG), "{r:?}");
+    assert_eq!(
+        t.st.find_rig(RIG).expect("rig").stimulus.phase,
+        StimPhase::Armed
+    );
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle, "pupu's untouched");
+}
+
+/// A pane given a measurement on one rig keeps showing that rig's after a switch, though
+/// the other rig has a measurement of the same id: its ids are resolved against its own
+/// rig alone. A pane with no pick of its own follows the rig shown.
+#[test]
+fn a_pane_keeps_its_rig_through_a_switch() {
+    let mut t = two_mirrored();
+    let p = t.st.layout.focus;
+    t.st.layout.split_pane(p, Axis::Row, Side::B);
+    let q = t.st.layout.focus;
+    t.st.layout.view_mut(p).expect("pane").kind = PaneKind::Spectrum;
+    t.st.layout.view_mut(q).expect("pane").kind = PaneKind::Spectrum;
+    t.st.layout.view_mut(p).expect("pane").meas = Some(MeasId(2));
+    t.st.layout.view_mut(q).expect("pane").meas = None;
+    pick(&mut t, RigRow::Rig(PUPU));
+    assert_eq!(t.st.layout.view(p).expect("pane").rig, PaneRig::Rig(RIG));
+    assert_eq!(t.st.layout.view(q).expect("pane").rig, PaneRig::Active);
+    // Pupu has a MeasId(2) too: the pinned pane never shows it.
+    assert!(t.st.pane_meas(p).is_none());
+    assert!(t.st.pane_meas(q).is_some());
+    assert!(
+        t.st.pane_title(p)
+            .starts_with(&format!("{} · ", t.st.rig_name(RIG)))
+    );
+    let shown =
+        t.st.visit(RIG, |st| st.pane_meas(p).map(|m| m.id))
+            .flatten();
+    assert_eq!(shown, Some(MeasId(2)));
+    // Back on the first rig the pane is the shown rig's again.
+    pick(&mut t, RigRow::Rig(RIG));
+    assert_eq!(t.st.layout.view(p).expect("pane").rig, PaneRig::Active);
+    assert_eq!(t.st.pane_meas(p).map(|m| m.id), Some(MeasId(2)));
+}
+
+/// What is stored as a measurement's layout is its own rig's panes alone.
+#[test]
+fn a_measurement_layout_never_holds_another_rigs_pane() {
+    let mut t = two_mirrored();
+    let p = t.st.layout.focus;
+    t.st.layout.split_pane(p, Axis::Row, Side::B);
+    t.st.layout.view_mut(p).expect("pane").kind = PaneKind::Spectrum;
+    t.st.layout.view_mut(p).expect("pane").meas = Some(MeasId(2));
+    let both = t.st.pane_layout();
+    pick(&mut t, RigRow::Rig(PUPU));
+    let own = t.st.pane_layout();
+    fn count(l: &ac2_proto::model::PaneLayout) -> usize {
+        match l {
+            ac2_proto::model::PaneLayout::Pane { .. } => 1,
+            ac2_proto::model::PaneLayout::Split { a, b, .. } => count(a) + count(b),
+        }
+    }
+    assert_eq!(count(&own), count(&both) - 1, "{own:?}");
+}
+
+/// A key on a pane of the rig not shown acts on that pane's rig.
+#[test]
+fn a_pane_key_goes_to_the_panes_rig() {
+    let mut t = two_mirrored();
+    let p = t.st.layout.focus;
+    t.st.layout.view_mut(p).expect("pane").kind = PaneKind::Spectrum;
+    t.st.layout.view_mut(p).expect("pane").meas = Some(MeasId(2));
+    pick(&mut t, RigRow::Rig(PUPU));
+    t.st.layout.set_focus(p);
+    // Peak hold on the spectrum pane: a display edit of the measurement it shows.
+    let r = t.st.update(Msg::Command(CommandId::PeakHold), &t.keys);
+    assert!(
+        !r.is_empty() && r.iter().all(|(rig, _)| *rig == RIG),
+        "{r:?}"
+    );
+}
+
+/// Shift+Esc stops the stimulus of every rig, the shown one's and those in the
+/// background, from anywhere.
+#[test]
+fn stop_anywhere_stops_every_rig() {
+    let mut t = two_mirrored();
+    t.st.rig.stimulus.phase = StimPhase::Armed;
+    t.st.background
+        .iter_mut()
+        .for_each(|r| r.stimulus.phase = StimPhase::Firing);
+    assert_eq!(t.st.live_elsewhere(), vec!["pupu".to_string()]);
+    let r = t.st.update(Msg::Key(STOP_ANYWHERE), &t.keys);
+    let stops: Vec<RigId> = r
+        .iter()
+        .filter(|(_, q)| matches!(q, Request::StimStop))
+        .map(|(rig, _)| *rig)
+        .collect();
+    assert_eq!(stops, vec![RIG, PUPU]);
+    assert_eq!(pupu(&t).stimulus.phase, StimPhase::Stopping);
+}
+
+/// Closing the rig shown shows the next one first; the closed rig goes to the app, which
+/// closes its link (stopping the stimulus it holds and releasing its lease first). Its
+/// panes stay, saying it is not connected, and it is no longer remembered.
+#[test]
+fn closing_a_rig() {
+    let mut t = two_mirrored();
+    t.st.prefs.rigs.push(crate::prefs::RememberedRig {
+        id: RIG,
+        name: "ac2d test".into(),
+        addr: crate::prefs::RigAddr::Local,
+    });
+    let p = t.st.layout.focus;
+    t.st.layout.view_mut(p).expect("pane").kind = PaneKind::Spectrum;
+    t.st.layout.view_mut(p).expect("pane").meas = Some(MeasId(2));
+    pick(&mut t, RigRow::Close(RIG));
+    assert_eq!(t.st.active(), PUPU);
+    assert!(t.st.find_rig(RIG).is_none());
+    assert_eq!(t.st.closing.len(), 1);
+    assert_eq!(t.st.closing[0].id, RIG);
+    assert!(t.st.prefs.rigs.is_empty());
+    assert_eq!(t.st.layout.view(p).expect("pane").rig, PaneRig::Rig(RIG));
+    let name = t.st.rig_name(RIG);
+    assert_eq!(
+        t.st.pane_title(p),
+        format!("{name} · {}", PaneKind::Spectrum.title())
+    );
+    // The last rig stays.
+    assert_eq!(
+        t.st.rig_menu_rows(),
+        vec![RigRow::Rig(PUPU), RigRow::Connect]
+    );
+}
+
+/// The same daemon reached twice is one rig: the second link is closed.
+#[test]
+fn a_rig_already_held_is_not_added_twice() {
+    let mut t = two_rigs();
+    let slot = t.st.add_rig("pupu again".into(), None, None);
+    to(
+        &mut t,
+        RigId(u64::from(slot)),
+        ConnEvent::Connected {
+            target: "pupu again".into(),
+            server: "ac2d test".into(),
+            client_id: ClientId("c3".into()),
+            rig_id: PUPU,
+            name: "pupu".into(),
+        },
+    );
+    assert_eq!(t.st.rigs().count(), 2);
+    assert_eq!(t.st.closing.len(), 1);
+}
+
+/// A rig connected where it was reached is remembered for the next start, by its id.
+#[test]
+fn a_connected_rig_is_remembered() {
+    let mut t = T::new();
+    let addr = crate::prefs::RigAddr::Network {
+        host: "pupu.local".into(),
+        port: 47820,
+        fingerprint: Some("ab12".into()),
+    };
+    let slot = t.st.add_rig("pupu".into(), None, Some(addr.clone()));
+    to(
+        &mut t,
+        RigId(u64::from(slot)),
+        ConnEvent::Connected {
+            target: "pupu".into(),
+            server: "ac2d test".into(),
+            client_id: ClientId("c2".into()),
+            rig_id: PUPU,
+            name: "pupu".into(),
+        },
+    );
+    assert_eq!(
+        t.st.prefs.rigs,
+        vec![crate::prefs::RememberedRig {
+            id: PUPU,
+            name: "pupu".into(),
+            addr
+        }]
+    );
+    assert!(t.st.prefs_dirty);
 }

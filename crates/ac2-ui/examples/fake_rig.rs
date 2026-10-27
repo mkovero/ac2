@@ -40,6 +40,7 @@ fn main() -> Result<(), eframe::Error> {
             config: ClientConfig::new(rig.fake.endpoints(), "ac2-ui fake rig"),
             describe: "fake rig".into(),
         }),
+        target_addr: None,
         theme,
         keymap,
         keymap_path: Some(keymap_path),

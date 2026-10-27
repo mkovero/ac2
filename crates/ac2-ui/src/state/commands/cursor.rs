@@ -37,8 +37,8 @@ impl AppState {
             _ => None,
         };
         ok(self.layout.focus)
-            .or_else(|| self.layout.lead(PaneKind::Transfer).and_then(ok))
-            .or_else(|| self.layout.lead(PaneKind::Spectrum).and_then(ok))
+            .or_else(|| self.lead(PaneKind::Transfer).and_then(ok))
+            .or_else(|| self.lead(PaneKind::Spectrum).and_then(ok))
     }
 
     /// Puts the cursor on the next `kind` that way of the curve the pane draws inside the

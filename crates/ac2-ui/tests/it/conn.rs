@@ -252,3 +252,26 @@ fn a_silent_daemon_is_dropped_and_connected_anew() {
     );
     conn.close();
 }
+
+/// Quitting with two rigs: each link stops and releases its own stimulus, in parallel, so
+/// a silent rig costs the quit one grace period, not one per rig, and never keeps the
+/// answering rig from being released.
+#[test]
+fn quit_with_two_rigs_stops_both_within_one_grace_period() {
+    let answering = FakeDaemon::start(FakeOptions::default()).unwrap();
+    let silent = FakeDaemon::start(FakeOptions {
+        rig_id: ac2_proto::units::RigId(0x2),
+        name: "silent".into(),
+        ..FakeOptions::default()
+    })
+    .unwrap();
+    let links = vec![armed(&silent), armed(&answering)];
+    silent.lock().mute = true;
+    let t0 = Instant::now();
+    ac2_ui::conn::close_all(links);
+    let took = t0.elapsed();
+    assert!(took <= QUIT_GRACE + Duration::from_millis(500), "{took:?}");
+    let s = answering.lock();
+    assert!(!s.state.generator.armed && s.state.generator.owner.is_none());
+    assert!(s.executions.get("gen.release").is_some_and(|n| *n >= 1));
+}

@@ -106,6 +106,62 @@ pub fn keys_tip(help: &str, palette: &str, key_hints: &str) -> String {
     )
 }
 
+/// The rigs drop-down's row for adding a rig.
+pub const RIG_CONNECT: &str = "Connect a rig…";
+
+/// Shown when the rig shown cannot change because a window acts on it.
+pub const RIG_SWITCH_WINDOW_OPEN: &str = "close the window first: it acts on the rig shown";
+
+/// What a rig whose link lost its daemon is, in the drop-down and on its panes.
+pub const RIG_UNREACHABLE: &str = "unreachable · retrying";
+
+/// The rigs drop-down's row closing the rig shown.
+pub fn rig_close(name: &str) -> String {
+    format!("Close {name}")
+}
+
+/// A rig's row in the rigs drop-down: its name, and why it is greyed when its link is down.
+pub fn rig_row(name: &str, reachable: bool) -> String {
+    if reachable {
+        name.to_owned()
+    } else {
+        format!("{name} · {RIG_UNREACHABLE}")
+    }
+}
+
+/// The title of a pane showing a rig other than the one shown: whose it is first.
+pub fn rig_pane_title(rig: &str, title: &str) -> String {
+    format!("{rig} · {title}")
+}
+
+/// What a pane of a rig whose link is down shows instead of its content.
+pub fn rig_pane_unreachable(rig: &str) -> String {
+    format!("{rig} {RIG_UNREACHABLE}")
+}
+
+/// What a pane of a closed rig shows: it stays, saying which rig it was.
+pub fn rig_pane_closed(rig: &str) -> String {
+    format!("{rig} not connected")
+}
+
+/// A key or click on another rig's pane would open a window, which acts on the rig shown.
+pub fn rig_window_elsewhere(rig: &str) -> String {
+    format!("switch to {rig} to open that window")
+}
+
+/// The daemon reached is a rig already held.
+pub fn rig_already_connected(rig: &str) -> String {
+    format!("{rig} is already connected")
+}
+
+/// A rig closed.
+pub fn rig_closed(rig: &str) -> String {
+    format!("{rig} closed")
+}
+
+/// The rigs drop-down's tip.
+pub const RIG_MENU_TIP: &str = "The rig shown: switch to another, connect a rig, or close this one";
+
 #[cfg(test)]
 mod tests {
     use super::*;

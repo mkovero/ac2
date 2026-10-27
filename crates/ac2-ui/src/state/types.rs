@@ -185,6 +185,24 @@ impl SmoothTarget {
     }
 }
 
+/// The rigs drop-down of the top bar: each rig this app holds, then Connect… and closing
+/// the rig shown (Up/Down move, Enter takes the row, Esc closes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RigMenu {
+    pub index: usize,
+}
+
+/// A row of the rigs drop-down.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RigRow {
+    /// Show this rig.
+    Rig(RigId),
+    /// Add a rig: the connect dialog.
+    Connect,
+    /// Close the rig shown (only with another to show).
+    Close(RigId),
+}
+
 /// The measurement list a pane's title chip opens: the pane's compatible measurements, one
 /// highlighted (Up/Down move, Enter shows it, Esc closes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

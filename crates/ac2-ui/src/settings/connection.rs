@@ -8,7 +8,8 @@ use ac2_proto::model::{ServerInfo, ServerMode};
 pub enum ConnLine {
     /// Drop the link and connect again now.
     Reconnect,
-    /// Choose another daemon (or pair with one) in the connect dialog.
+    /// Add a rig (another daemon, or pair with one) in the connect dialog: the rigs held
+    /// stay.
     ConnectOther,
     /// An authorized client, by name.
     Authorized(String),
@@ -253,6 +254,7 @@ pub struct ClientKey {
 /// prints it), what the link is, who this client is, its key.
 pub fn link_lines(
     build: &str,
+    rig: &str,
     target: &str,
     state: &str,
     server: Option<&str>,
@@ -261,6 +263,7 @@ pub fn link_lines(
 ) -> Vec<String> {
     let mut v = vec![
         format!("Version: ac2-ui {build}"),
+        format!("Rig: {rig}"),
         format!("Daemon: {target} · {state}"),
     ];
     if let Some(s) = server {
@@ -285,7 +288,9 @@ pub fn link_lines(
 pub fn conn_line_text(l: &ConnLine, server: Option<&ServerInfo>) -> String {
     match l {
         ConnLine::Reconnect => "Reconnect now (Enter)".into(),
-        ConnLine::ConnectOther => "Connect to another daemon, or pair with a rig… (Enter)".into(),
+        ConnLine::ConnectOther => {
+            "Connect a rig (another daemon, or pair with one)… (Enter)".into()
+        }
         ConnLine::Authorized(name) => server
             .and_then(|s| match &s.mode {
                 ServerMode::Network { authorized, .. } => authorized

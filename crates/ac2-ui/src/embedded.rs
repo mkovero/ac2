@@ -73,6 +73,24 @@ pub enum EmbeddedBackend {
 }
 
 impl EmbeddedBackend {
+    /// Every backend, as remembered by name.
+    pub const ALL: [Self; 4] = [Self::CoreAudio, Self::Jack, Self::Asio, Self::Fake];
+
+    /// The name a remembered rig keeps it by.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::CoreAudio => "coreaudio",
+            Self::Jack => "jack",
+            Self::Asio => "asio",
+            Self::Fake => "fake",
+        }
+    }
+
+    /// The backend named `name` ([`Self::name`]).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|b| b.name() == name)
+    }
+
     /// This platform's audio: JACK on Linux, ASIO on Windows, Core Audio on macOS.
     pub const fn platform() -> Self {
         if cfg!(target_os = "linux") {

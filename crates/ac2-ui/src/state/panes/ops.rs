@@ -23,8 +23,9 @@ impl AppState {
 
     /// The measurement pane `id` shows: its own choice, else the one whose row was chosen if
     /// it fits, else the first that fits.
+    /// None for a pane of another rig: its ids are that rig's.
     pub fn pane_meas(&self, id: PaneId) -> Option<&Measurement> {
-        let v = self.layout.view(id)?;
+        let v = self.layout.view(id).filter(|v| self.ours(v))?;
         self.resolve_meas(v.kind, v.meas)
     }
 
@@ -32,7 +33,7 @@ impl AppState {
     /// (an SPL command, the delay banner): the focused pane's when it is of that kind, else
     /// the one of that kind focused last; with none on screen, what one would show.
     pub fn kind_meas(&self, kind: PaneKind) -> Option<&Measurement> {
-        match self.layout.lead(kind) {
+        match self.lead(kind) {
             Some(id) => self.pane_meas(id),
             None => self.resolve_meas(kind, None),
         }
@@ -165,8 +166,7 @@ impl AppState {
     /// The modes of the pane of `kind` the keys mean (focused or last focused), else the
     /// focused pane's.
     pub fn kind_modes(&self, kind: PaneKind) -> PaneModes {
-        self.layout
-            .lead(kind)
+        self.lead(kind)
             .and_then(|id| self.layout.view(id))
             .map_or(self.modes(), |v| v.modes)
     }
@@ -177,10 +177,9 @@ impl AppState {
 
     /// Some spectrum pane shows the spectrograph: its history is kept.
     pub fn spectrograph_shown(&self) -> bool {
-        self.layout
-            .views
-            .values()
-            .any(|v| v.kind == PaneKind::Spectrum && v.modes.spectrum.spectrograph())
+        self.layout.views.values().any(|v| {
+            self.ours(v) && v.kind == PaneKind::Spectrum && v.modes.spectrum.spectrograph()
+        })
     }
 
     /// The tree drawn now: the whole layout, or the focused pane alone when maximised.
@@ -299,7 +298,7 @@ impl AppState {
     pub(in crate::state) fn stack_created(&mut self, meas: MeasId) {
         let p = match self.layout.focus_kind() {
             PaneKind::Transfer => self.layout.focus,
-            _ => match self.layout.lead(PaneKind::Transfer) {
+            _ => match self.lead(PaneKind::Transfer) {
                 Some(p) => p,
                 None => match self.split_focused_pane() {
                     Some(new) => {
@@ -375,7 +374,7 @@ impl AppState {
     /// already there keep their kinds. A sweep's pane takes the focus, as its runs are armed
     /// there: with no room to split, the focused pane turns into it.
     pub(in crate::state) fn open_created(&mut self, meas: MeasId, kind: PaneKind) {
-        if self.layout.lead(kind).is_none()
+        if self.lead(kind).is_none()
             && let Some(new) = self.split_focused_pane()
         {
             self.set_pane_kind(new, kind);
@@ -547,7 +546,7 @@ impl AppState {
     /// modes): the one of that kind on screen worked in last, else the focused pane turns
     /// into one.
     pub(in crate::state) fn focus_kind(&mut self, p: PaneKind) {
-        let id = match self.layout.lead(p) {
+        let id = match self.lead(p) {
             Some(id) => id,
             None => {
                 let f = self.layout.focus;

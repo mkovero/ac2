@@ -501,7 +501,7 @@ impl AppState {
                     .map_or_else(String::new, |m| format!(" of {}", m.config.name));
                 // A sweep pane on screen shows the result; the layout is otherwise the
                 // operator's, and the toast says where the result is.
-                match self.layout.lead(PaneKind::Distortion) {
+                match self.lead(PaneKind::Distortion) {
                     Some(p) => {
                         self.layout.set_focus(p);
                         let ir = self

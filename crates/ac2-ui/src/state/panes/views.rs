@@ -150,6 +150,20 @@ impl PaneModes {
     }
 }
 
+/// Whose ids a pane's content is: a daemon numbers its measurements and inputs on its own,
+/// so a pane read against another rig than its own would show another measurement.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PaneRig {
+    /// The rig the operator looks at (the drop-down's): the meaning with one rig, and of a
+    /// pane with nothing chosen for it, which follows the selection of whichever rig is
+    /// active.
+    #[default]
+    Active,
+    /// A rig that was active when the pane's content was chosen. Never the active rig's
+    /// id: a rig coming back to the drop-down takes its panes back as [`PaneRig::Active`].
+    Rig(ac2_proto::units::RigId),
+}
+
 /// What a pane shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct View {
@@ -163,6 +177,8 @@ pub struct View {
     pub modes: PaneModes,
     /// Where the operator dropped the plates over its plot, and their text size.
     pub plates: Plates,
+    /// The rig whose ids `meas` and `meters` are.
+    pub rig: PaneRig,
 }
 
 impl View {
@@ -173,7 +189,13 @@ impl View {
             meters: None,
             modes: PaneModes::default(),
             plates: Plates::default(),
+            rig: PaneRig::Active,
         }
+    }
+
+    /// Something was chosen for the pane (a measurement, meters): it shows its rig's ids.
+    pub fn has_content(&self) -> bool {
+        self.meas.is_some() || self.meters.is_some()
     }
 
     /// A transfer pane in its IR view.
@@ -314,11 +336,16 @@ impl Layout {
 
     /// The pane of kind `kind` the operator worked in last, else the first in reading order.
     pub fn lead(&self, kind: PaneKind) -> Option<PaneId> {
+        self.lead_of(kind, |_| true)
+    }
+
+    /// [`Self::lead`] among the panes `of` takes (those of one rig).
+    pub fn lead_of(&self, kind: PaneKind, of: impl Fn(&View) -> bool) -> Option<PaneId> {
         self.mru
             .iter()
             .copied()
             .chain(self.panes())
-            .find(|id| self.views.get(id).is_some_and(|v| v.kind == kind))
+            .find(|id| self.views.get(id).is_some_and(|v| v.kind == kind && of(v)))
     }
 
     /// Splits pane `id` in halves along `axis`, the new pane on `side` of it (`A`: left or

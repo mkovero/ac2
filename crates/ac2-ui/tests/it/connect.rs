@@ -60,6 +60,7 @@ fn rig(name: &str, key: &PublicKey, addr: &str, port: u16) -> Rig {
 fn harness(dialog: ConnectDialog) -> Harness<'static, App> {
     let opts = AppOptions {
         target: None,
+        target_addr: None,
         theme: ThemeName::Dark,
         keymap: Keymap::default(),
         keymap_path: None,

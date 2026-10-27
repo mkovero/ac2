@@ -22,6 +22,22 @@ fn dot(ui: &mut egui::Ui, c: Color32) {
     ui.painter().circle_filled(r.center(), 4.5, c);
 }
 
+/// A small ▾ after an item that opens a list, as on a pane's chip; drawn, since the UI
+/// font has no such glyph.
+fn chevron(ui: &mut egui::Ui, c: Color32) {
+    let (r, _) = ui.allocate_exact_size(egui::vec2(BAR_DOT, 10.0), egui::Sense::hover());
+    let (cx, cy) = (r.center().x, r.center().y);
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(cx - 3.5, cy - 1.5),
+            egui::pos2(cx + 3.5, cy - 1.5),
+            egui::pos2(cx, cy + 2.5),
+        ],
+        c,
+        egui::Stroke::NONE,
+    ));
+}
+
 /// The first key of a global command, as shown in the bar.
 fn key_hint(app: &App, c: CommandId) -> String {
     app.keymap
@@ -42,11 +58,15 @@ struct Item {
     droppable: bool,
     /// A status dot before the text.
     dot: Option<Color32>,
+    /// A ▾ after the text: the item opens a list.
+    chevron: Option<Color32>,
     /// A separator after it (on its far side from the bar's edge).
     sep: bool,
     hover: Option<String>,
     /// A click (or tap) runs it.
     click: Option<CommandId>,
+    /// The rigs drop-down: the menu opens under it.
+    rigs: bool,
 }
 
 impl Item {
@@ -60,9 +80,11 @@ impl Item {
             variants,
             droppable: true,
             dot: None,
+            chevron: None,
             sep: false,
             hover: None,
             click: None,
+            rigs: false,
         }
     }
 
@@ -136,7 +158,18 @@ pub(super) fn text_width(ui: &egui::Ui, t: &egui::WidgetText) -> f32 {
 /// then the dot (shown before it), then the separator (shown inwards of it).
 /// Draws `it` in its variant `k`; returns its command when it was clicked.
 fn draw_item(ui: &mut egui::Ui, it: &Item, k: usize, rtl: bool) -> Option<CommandId> {
+    draw_item_at(ui, it, k, rtl).0
+}
+
+/// [`draw_item`], with where its text went.
+fn draw_item_at(
+    ui: &mut egui::Ui,
+    it: &Item,
+    k: usize,
+    rtl: bool,
+) -> (Option<CommandId>, egui::Rect) {
     let mut clicked = false;
+    let mut at = egui::Rect::NOTHING;
     let mut text = |ui: &mut egui::Ui| {
         let mut l = egui::Label::new(it.variants[k].clone());
         if it.click.is_some() {
@@ -150,8 +183,12 @@ fn draw_item(ui: &mut egui::Ui, it: &Item, k: usize, rtl: bool) -> Option<Comman
             r = r.on_hover_text(h);
         }
         clicked = r.clicked();
+        at = r.rect;
     };
     if rtl {
+        if let Some(c) = it.chevron {
+            chevron(ui, c);
+        }
         text(ui);
         if let Some(c) = it.dot {
             dot(ui, c);
@@ -161,11 +198,14 @@ fn draw_item(ui: &mut egui::Ui, it: &Item, k: usize, rtl: bool) -> Option<Comman
             dot(ui, c);
         }
         text(ui);
+        if let Some(c) = it.chevron {
+            chevron(ui, c);
+        }
     }
     if it.sep {
         ui.separator();
     }
-    it.click.filter(|_| clicked)
+    (it.click.filter(|_| clicked), at)
 }
 
 pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
@@ -309,11 +349,14 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         right.push(it);
     }
     right.extend(stimulus(app, ch));
+    // Innermost, right after the session line: the rig everything else in the bar is of.
+    right.push(rig_item(st, ch));
 
     let segment_w = segment_width(&segment);
     let item_w = |it: &Item| {
         let extra = BAR_GAP
             + it.dot.map_or(0.0, |_| BAR_DOT + BAR_GAP)
+            + it.chevron.map_or(0.0, |_| BAR_DOT + BAR_GAP)
             + if it.sep { BAR_SEP + 2.0 * BAR_GAP } else { 0.0 };
         let v = it
             .variants
@@ -351,6 +394,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let fade = ch.panel;
     let marquee = &mut app.marquee;
     let mut wake = None;
+    let mut rig_at = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BAR_GAP;
         for (it, p) in left.iter().zip(lp) {
@@ -369,7 +413,11 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             open_settings = gear.clicked();
             for (it, p) in right.iter().zip(rp) {
                 if let Some(k) = p {
-                    run = run.or(draw_item(ui, it, *k, true));
+                    let (c, at) = draw_item_at(ui, it, *k, true);
+                    if it.rigs {
+                        rig_at = Some(at);
+                    }
+                    run = run.or(c);
                 }
             }
             if segment_shown {
@@ -387,11 +435,92 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         ui.ctx()
             .request_repaint_after(crate::pace::repaint_delay(w, dt));
     }
+    app.rig_menu_at = rig_at;
     if open_settings {
         app.dispatch(crate::state::Msg::Command(CommandId::Settings));
     }
     if let Some(c) = run {
         app.dispatch(crate::state::Msg::Command(c));
+    }
+}
+
+/// The rigs drop-down: the rig shown, by name (also with one rig, so the bar says whose
+/// it is). Greyed and inert while a window is open: the window acts on the rig shown.
+fn rig_item(st: &crate::state::AppState, ch: &Chrome) -> Item {
+    let name = st.rig_name(st.active());
+    let free = matches!(
+        st.overlay,
+        crate::state::Overlay::None | crate::state::Overlay::RigMenu(_)
+    );
+    let color = if free { ch.text } else { ch.dim };
+    let mut it = Item::new(68, vec![RichText::new(name).color(color)]).sep();
+    it.hover = Some(if free {
+        ac2_scene::chrome::RIG_MENU_TIP.to_owned()
+    } else {
+        ac2_scene::chrome::RIG_SWITCH_WINDOW_OPEN.to_owned()
+    });
+    it.click = free.then_some(CommandId::Rigs);
+    it.rigs = true;
+    it.chevron = Some(ch.dim);
+    it
+}
+
+/// The rigs drop-down's list, under its top-bar item: each rig (greyed when down), then
+/// Connect… and closing the rig shown.
+pub(super) fn rig_menu(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
+    let crate::state::Overlay::RigMenu(menu) = app.state.overlay else {
+        return;
+    };
+    let Some(at) = app.rig_menu_at else {
+        return;
+    };
+    let rows = app.state.rig_menu_rows();
+    let mut picked = None;
+    let area = egui::Area::new(egui::Id::new("ac2-rig-menu"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(at.left_bottom() + egui::vec2(0.0, 4.0))
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(200.0);
+                for (i, row) in rows.iter().enumerate() {
+                    let (text, color) = rig_row_text(&app.state, *row, ch);
+                    let r = ui.add(
+                        egui::Button::selectable(i == menu.index, RichText::new(text).color(color))
+                            .min_size(egui::vec2(200.0, 0.0)),
+                    );
+                    if r.clicked() {
+                        picked = Some(*row);
+                    }
+                }
+            });
+        });
+    let outside = ctx.input(|i| i.pointer.any_click())
+        && !area.response.contains_pointer()
+        && !at.contains(ctx.pointer_interact_pos().unwrap_or_default());
+    if let Some(r) = picked {
+        app.dispatch(crate::state::Msg::RigPick(r));
+    } else if outside {
+        app.dispatch(crate::state::Msg::Command(CommandId::Rigs));
+    }
+}
+
+/// A row of the rigs drop-down as drawn.
+fn rig_row_text(
+    st: &crate::state::AppState,
+    row: crate::state::RigRow,
+    ch: &Chrome,
+) -> (String, Color32) {
+    use crate::state::RigRow;
+    match row {
+        RigRow::Rig(id) => {
+            let up = st
+                .find_rig(id)
+                .is_some_and(|r| matches!(r.conn, ConnState::Connected { .. }));
+            let text = ac2_scene::chrome::rig_row(&st.rig_name(id), up);
+            (text, if up { ch.text } else { ch.dim })
+        }
+        RigRow::Connect => (ac2_scene::chrome::RIG_CONNECT.to_owned(), ch.text),
+        RigRow::Close(id) => (ac2_scene::chrome::rig_close(&st.rig_name(id)), ch.text),
     }
 }
 
@@ -456,11 +585,24 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
                 )
         })
         .map(|(next, what)| {
-            ac2_scene::stimulus::hint(next, &what, &key_hint(app, CommandId::StimulusLevel))
+            let level_key = key_hint(app, CommandId::StimulusLevel);
+            if st.many_rigs() {
+                let rig = st.rig_name(st.active());
+                ac2_scene::stimulus::rig_hint(&rig, next, &what, &level_key)
+            } else {
+                ac2_scene::stimulus::hint(next, &what, &level_key)
+            }
         });
+    let elsewhere = st.live_elsewhere();
+    // The level and outputs are the rig shown's: with more than one, say whose.
+    let rig = if st.many_rigs() {
+        format!("{}: ", st.rig_name(st.active()))
+    } else {
+        String::new()
+    };
     // While anything is armed or playing: the stop that works from anywhere, windows
     // included (Esc stops too while no window is open).
-    let live = run.is_some() || st.stimulus_live();
+    let live = run.is_some() || st.stimulus_live() || !elsewhere.is_empty();
     let badge_text = RichText::new(badge)
         .strong()
         .color(ink)
@@ -472,7 +614,7 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
             90,
             vec![
                 RichText::new(format!(
-                    "{prefix}{level} → {}",
+                    "{rig}{prefix}{level} → {}",
                     ac2_scene::rig::stimulus_outputs(
                         &st.rig.stimulus.outputs,
                         st.daemon()
@@ -481,10 +623,10 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
                     )
                 )),
                 RichText::new(format!(
-                    "{prefix}{level} → out {}",
+                    "{rig}{prefix}{level} → out {}",
                     outputs_text(&st.rig.stimulus.outputs)
                 )),
-                RichText::new(format!("{prefix}{level}")),
+                RichText::new(format!("{rig}{prefix}{level}")),
             ],
         )
         .kept(),
@@ -513,11 +655,28 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
             ],
         )
         .kept();
-        it.hover = Some(format!(
-            "{stop} stops and disarms the stimulus from anywhere, also with a window open; \
-             with no window open Esc does too"
-        ));
+        it.hover = Some(if st.many_rigs() {
+            ac2_scene::stimulus::stop_every_rig_tip(&stop)
+        } else {
+            format!(
+                "{stop} stops and disarms the stimulus from anywhere, also with a window open; \
+                 with no window open Esc does too"
+            )
+        });
         v.push(it);
+        if !elsewhere.is_empty() {
+            v.push(
+                Item::new(
+                    96,
+                    vec![
+                        RichText::new(ac2_scene::stimulus::live_elsewhere(&elsewhere))
+                            .strong()
+                            .color(ch.fault),
+                    ],
+                )
+                .kept(),
+            );
+        }
     }
     // From the bar's edge inwards: the hints are outermost, the badge innermost.
     v.reverse();

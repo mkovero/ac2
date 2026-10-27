@@ -28,7 +28,7 @@ pub struct Sent {
 }
 
 impl AppState {
-    /// The streams the active rig should send now:
+    /// The streams the rig in `rig` should send now, for its panes on screen:
     /// - each transfer measurement's TF while a transfer pane draws its response, and the
     ///   IR and TF of the one a transfer pane in its IR view shows;
     /// - each spectrum / RTA while the spectrum pane is in view or peak hold or the
@@ -38,7 +38,7 @@ impl AppState {
     ///
     /// Per-measurement input levels are never drawn, so never received.
     pub fn wanted_topics(&self) -> HashSet<Topic> {
-        let visible = self.visible_panes();
+        let visible = self.own_visible_panes();
         let shows = |p: PaneKind| {
             visible
                 .iter()
@@ -57,26 +57,15 @@ impl AppState {
     /// How often new frames may reach the UI: [`DISPLAY_PERIOD`], or [`SPL_ONLY_PERIOD`]
     /// when the SPL pane is all there is to see.
     pub fn display_period(&self) -> Duration {
-        if self.visible_kinds() == [PaneKind::Spl] {
-            SPL_ONLY_PERIOD
-        } else {
-            DISPLAY_PERIOD
-        }
-    }
-
-    /// The requests that bring each rig's link in line with what it should receive; nothing
-    /// for a link that already is. The active rig's follows the panes ([`Self::wanted_topics`],
-    /// [`Self::display_period`]); one in the background, which no pane shows, receives what
-    /// folds whether shown or not. The app calls it after every message it feeds the
-    /// reducer.
-    pub fn sync_link(&mut self) -> Vec<(RigId, Request)> {
-        let mut out = Vec::new();
-        let (topics, period) = (self.wanted_topics(), self.display_period());
-        sync(&mut self.rig, topics, period, &mut out);
-        for r in &mut self.background {
-            let topics = topics_of(r, |_| false, &[], false);
-            // Peak holds fold every frame; SPL readings and Leq windows move slower.
-            let period = if topics.iter().any(|t| {
+        let kinds: Vec<PaneKind> = self
+            .own_visible_panes()
+            .into_iter()
+            .map(|id| self.layout.kind(id))
+            .collect();
+        if kinds.is_empty() {
+            // No pane shows this rig: what it folds sets the pace. Peak holds fold every
+            // frame; SPL readings and Leq windows move slower.
+            let spectra = self.wanted_topics().iter().any(|t| {
                 matches!(
                     t,
                     Topic::Data {
@@ -84,12 +73,31 @@ impl AppState {
                         ..
                     }
                 )
-            }) {
+            });
+            if spectra {
                 DISPLAY_PERIOD
             } else {
                 SPL_ONLY_PERIOD
-            };
-            sync(r, topics, period, &mut out);
+            }
+        } else if kinds == [PaneKind::Spl] {
+            SPL_ONLY_PERIOD
+        } else {
+            DISPLAY_PERIOD
+        }
+    }
+
+    /// The requests that bring each rig's link in line with what it should receive; nothing
+    /// for a link that already is. Each follows its own panes on screen
+    /// ([`Self::wanted_topics`], [`Self::display_period`]) and what it folds whether shown
+    /// or not. The app calls it after every message it feeds the reducer.
+    pub fn sync_link(&mut self) -> Vec<(RigId, Request)> {
+        let mut out = Vec::new();
+        let ids: Vec<RigId> = self.rigs().map(|r| r.id).collect();
+        for id in ids {
+            self.visit(id, |st| {
+                let (topics, period) = (st.wanted_topics(), st.display_period());
+                sync(&mut st.rig, topics, period, &mut out);
+            });
         }
         out
     }

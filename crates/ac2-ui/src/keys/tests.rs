@@ -142,6 +142,10 @@ fn every_command_is_reachable() {
         CommandId::SplLogExportPrevious,
         // For a report, now and then: the palette's "export pane".
         CommandId::ExportPanePng,
+        // The top bar's rig drop-down is a click; the operator's desktop takes the free
+        // Ctrl chords and the plain keys are measuring keys.
+        CommandId::Rigs,
+        CommandId::ConnectRig,
     ];
     let m = Keymap::default();
     for c in CommandId::ALL {

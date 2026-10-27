@@ -130,8 +130,8 @@ pub(super) fn health_part(
     let wanted_fps = 1.0 / st.display_period().as_secs_f64();
     let inputs = app.health.inputs(
         daemon,
-        app.link_embedded,
-        app.daemon_addr.as_deref(),
+        app.state.rig.link_embedded,
+        app.state.rig.daemon_addr.as_deref(),
         wanted_fps,
         now,
     );

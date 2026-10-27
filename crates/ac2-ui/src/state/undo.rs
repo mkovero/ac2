@@ -32,12 +32,14 @@ pub(crate) struct PaneSnap {
     /// Whose own panes these were: a measurement row brings its panes, and undoing that
     /// makes the panes before it the earlier owner's again.
     own_panes: Option<MeasId>,
+    /// The rig `own_panes` is a measurement of.
+    rig: RigId,
 }
 
 /// Equal as the operator sees them and as the next edit stores them.
 impl PartialEq for PaneSnap {
     fn eq(&self, o: &Self) -> bool {
-        self.same_screen(o) && self.own_panes == o.own_panes
+        self.same_screen(o) && self.own_panes == o.own_panes && self.rig == o.rig
     }
 }
 
@@ -89,6 +91,17 @@ impl History {
         }
     }
 
+    /// Each layout the history holds, edited by `f` (the panes' rigs follow a switch).
+    pub(super) fn layouts_mut(&mut self, f: impl Fn(&mut Layout)) {
+        for s in self.done.iter_mut().chain(self.undone.iter_mut()) {
+            f(&mut s.before.layout);
+            f(&mut s.after.layout);
+        }
+        if let Some((snap, _)) = &mut self.drag {
+            f(&mut snap.layout);
+        }
+    }
+
     /// Steps that undo can take back.
     #[cfg(test)]
     pub(crate) fn undo_len(&self) -> usize {
@@ -129,6 +142,7 @@ impl AppState {
             fullscreen: self.fullscreen,
             panes_only: self.panes_only,
             own_panes: self.rig.own_panes,
+            rig: self.rig.id,
         }
     }
 
@@ -351,8 +365,14 @@ impl AppState {
         self.undoing = true;
         let ids: BTreeSet<MeasId> = self.measurements().iter().map(|m| m.id).collect();
         self.layout.restore(&s.layout);
+        let rig = self.rig.id;
+        let tab = self.active();
         for v in self.layout.views.values_mut() {
-            if v.meas.is_some_and(|m| !ids.contains(&m)) {
+            let ours = match v.rig {
+                PaneRig::Active => tab == rig,
+                PaneRig::Rig(r) => r == rig,
+            };
+            if ours && v.meas.is_some_and(|m| !ids.contains(&m)) {
                 v.meas = None;
             }
         }
@@ -366,7 +386,8 @@ impl AppState {
         }
         self.fullscreen = s.fullscreen;
         self.panes_only = s.panes_only;
-        self.rig.own_panes = s.own_panes.filter(|m| ids.contains(m));
+        // Another rig's measurement is no owner here: its ids name nothing on this rig.
+        self.rig.own_panes = s.own_panes.filter(|m| s.rig == rig && ids.contains(m));
         if !self.spectrograph_shown() {
             self.rig.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_s = None;

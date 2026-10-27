@@ -136,6 +136,8 @@ pub enum Overlay {
     Settings(Box<Settings>),
     /// A pane's measurement list, opened from its title chip.
     PaneMenu(PaneMenu),
+    /// The rigs drop-down of the top bar.
+    RigMenu(RigMenu),
     /// The confirmation before a new SPL log.
     NewLog(Box<NewLogPrompt>),
     /// The confirmation before the selected measurement or stored trace is deleted (or,
@@ -395,6 +397,8 @@ pub enum Msg {
     InputPick(u16),
     /// The pane title chip: opens (or closes) the pane's list.
     PaneMenu(PaneId),
+    /// A row of the rigs drop-down clicked.
+    RigPick(RigRow),
     /// A row picked from a pane's list: the pane shows that measurement (selected), or
     /// turns into that kind of pane.
     PanePick(PaneId, PaneMenuRow),

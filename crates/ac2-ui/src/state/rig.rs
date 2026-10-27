@@ -12,6 +12,9 @@ pub const UNKNOWN_RIG: RigId = RigId(0);
 /// here, never beside another rig's.
 #[derive(Debug)]
 pub struct RigState {
+    /// Which rig this is in this run, whatever its id: a rig's id is the daemon's, known
+    /// only once it says hello, and the slot names the rig before and after.
+    pub slot: u32,
     /// The daemon's identity from its hello reply; [`UNKNOWN_RIG`] until the first one.
     pub id: RigId,
     /// The daemon's display name from its hello reply (empty until the first one).
@@ -19,6 +22,18 @@ pub struct RigState {
     /// The link to the daemon (`None`: no link, as in the reducer tests). The reducer never
     /// touches it: the app sends this rig's requests over it and drains its events.
     pub link: Option<crate::conn::Conn>,
+    /// Where the app reached this rig, remembered with it (`None`: not to be remembered, as
+    /// a fake daemon, which is another rig each run).
+    pub addr: Option<crate::prefs::RigAddr>,
+    /// The link reaches a daemon inside this process: no network between, the same host.
+    pub link_embedded: bool,
+    /// The host the link reaches the daemon at over the network; `None` on a local link.
+    pub daemon_addr: Option<String>,
+    /// The daemon said hello as a rig this app already holds: the app closes this link.
+    pub duplicate: bool,
+    /// The transfer panes' phase reference while another rig is shown: it names this rig's
+    /// traces.
+    pub(super) phase_reference: Option<TraceKey>,
     pub conn: ConnState,
     pub mirror: Option<Arc<MirrorView>>,
     pub data: Option<Arc<DataSnapshot>>,
@@ -163,10 +178,22 @@ pub(super) struct Folding {
 impl RigState {
     /// A rig not yet connected, reached through `target`.
     pub fn new(target: String) -> Self {
+        Self::in_slot(0, target)
+    }
+
+    /// A rig not yet connected in slot `slot`: until its hello its id is the slot's own
+    /// (the first rig's [`UNKNOWN_RIG`]), so no two rigs share one.
+    pub fn in_slot(slot: u32, target: String) -> Self {
         Self {
-            id: UNKNOWN_RIG,
+            slot,
+            id: RigId(u64::from(slot)),
             name: String::new(),
             link: None,
+            addr: None,
+            link_embedded: false,
+            daemon_addr: None,
+            duplicate: false,
+            phase_reference: None,
             conn: ConnState::Connecting { target },
             mirror: None,
             data: None,
@@ -284,36 +311,17 @@ impl RigState {
 }
 
 impl AppState {
-    /// The rig the operator looks at (its tab): the one keys and windows act on.
-    pub fn active(&self) -> RigId {
-        self.rig.id
-    }
-
-    /// Every rig this app holds, the active one first.
-    pub fn rigs(&self) -> impl Iterator<Item = &RigState> {
-        std::iter::once(&self.rig).chain(&self.background)
-    }
-
-    /// The rig with id `id`, active or in the background.
-    pub fn find_rig(&self, id: RigId) -> Option<&RigState> {
-        self.rigs().find(|r| r.id == id)
-    }
-
-    /// What folding a rig's frames takes from the app. `on_screen`: the panes show that rig
-    /// (the active one); no pane shows a rig in the background.
-    pub(super) fn folding(&self, on_screen: bool) -> Folding {
+    /// What folding the frames of the rig in `rig` takes from the app: what its panes on
+    /// screen show of it.
+    pub(super) fn folding(&self) -> Folding {
         Folding {
             now_s: self.now_s,
             spl_hold_ms: self.prefs.spl_hold_ms,
             spec_ease: self.prefs.spec_ease,
             advice: self.prefs.advice,
             cooling: self.ember_cooling(),
-            pairs_shown: if on_screen {
-                self.programme_pairs_shown()
-            } else {
-                Vec::new()
-            },
-            spectrograph_shown: on_screen && self.spectrograph_shown(),
+            pairs_shown: self.programme_pairs_shown(),
+            spectrograph_shown: self.spectrograph_shown(),
         }
     }
 }

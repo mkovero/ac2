@@ -161,6 +161,45 @@ fn short_number(v: f64) -> String {
     }
 }
 
+/// [`hint`] with more than one rig: the key line names the rig whose stimulus the key
+/// arms or fires, `arm pupu's stimulus · Space: pink −50 dBFS → out 1`.
+pub fn rig_hint(rig: &str, next: Next, what: &Stimulus, level_key: &str) -> (String, String) {
+    match (next, what) {
+        (Next::Space, Stimulus::SweepDialog | Stimulus::Generator { level: None, .. }) => {
+            let (long, short) = hint(next, what, level_key);
+            (format!("{rig}: {long}"), format!("{rig}: {short}"))
+        }
+        (Next::Space, w) => {
+            let short = format!("arm {rig}'s stimulus · Space");
+            (format!("{short}: {}", describe(w)), short)
+        }
+        (Next::Enter, w) => {
+            let short = format!("fire {rig}'s stimulus · Enter");
+            (format!("{short}: {}", describe(w)), short)
+        }
+    }
+}
+
+/// The stimulus of rigs not shown is armed or playing: the top bar says whose, beside the
+/// stop that stops every rig's.
+pub fn live_elsewhere(rigs: &[String]) -> String {
+    format!(
+        "{} stimulus on",
+        rigs.iter()
+            .map(|r| format!("{r}'s"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// The stop's tip with more than one rig: it stops them all.
+pub fn stop_every_rig_tip(stop: &str) -> String {
+    format!(
+        "{stop} stops and disarms every rig's stimulus from anywhere, also with a window open; \
+         with no window open Esc stops the rig shown"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

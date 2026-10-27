@@ -30,6 +30,7 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32) {
         Overlay::Eq(_) => super::eq::eq(app, ctx, ch),
         // Drawn by its pane, under the title chip.
         Overlay::PaneMenu(_) => {}
+        Overlay::RigMenu(_) => super::chrome::rig_menu(app, ctx, ch),
     }
     toasts(app, ctx, top);
 }

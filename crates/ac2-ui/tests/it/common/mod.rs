@@ -331,17 +331,29 @@ pub fn fake_options() -> FakeOptions {
 
 impl Rig {
     pub fn start() -> Self {
-        Self::start_with(false)
+        Self::start_with(false, fake_options())
+    }
+
+    /// [`Rig::start`] as another rig: its own id and name in `hello`.
+    pub fn start_as(rig_id: ac2_proto::units::RigId, name: &str) -> Self {
+        Self::start_with(
+            false,
+            FakeOptions {
+                rig_id,
+                name: name.to_owned(),
+                ..fake_options()
+            },
+        )
     }
 
     /// Every curve with scatter, published smoothed at 1/6 octave (transfer: magnitude and
     /// phase; spectrum: power), and the spectrum measurement set to smooth.
     pub fn start_smoothed() -> Self {
-        Self::start_with(true)
+        Self::start_with(true, fake_options())
     }
 
-    fn start_with(smoothed: bool) -> Self {
-        let fake = Arc::new(FakeDaemon::start(fake_options()).unwrap());
+    fn start_with(smoothed: bool, opts: FakeOptions) -> Self {
+        let fake = Arc::new(FakeDaemon::start(opts).unwrap());
         {
             let mut s = fake.lock();
             s.grids.insert(TF_GRID.id(), TF_GRID);

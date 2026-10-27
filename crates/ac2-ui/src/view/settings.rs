@@ -428,8 +428,10 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
     };
     let me = st.my_client_id().map(|c| c.0.clone());
     section(ui, "This app", crate::settings::THIS_APP, ch);
+    let rig = st.rig_name(st.active());
     for l in link_lines(
         &st.build_id,
+        &rig,
         target,
         state,
         server,

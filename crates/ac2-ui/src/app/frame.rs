@@ -7,6 +7,7 @@ impl eframe::App for App {
     /// The window's geometry goes into the preferences on the way out (the layout already
     /// did, whenever it changed).
     fn on_exit(&mut self) {
+        self.close_all_links();
         if self.window.is_some() && self.window != self.state.prefs.window {
             self.state.prefs.window = self.window;
             self.state.prefs_dirty = true;
@@ -65,16 +66,20 @@ impl eframe::App for App {
             .as_ref()
             .and_then(|m| m.health.as_ref());
         let remote_host = daemon_health
-            .is_some_and(|h| !self.link_embedded && h.host != self.health.local_host());
+            .is_some_and(|h| !self.state.rig.link_embedded && h.host != self.health.local_host());
         let xruns = daemon_health.and_then(|h| h.audio).map(|a| a.xruns);
         if self.health_measured {
             self.health.frame(now, remote_host);
         }
         self.health.daemon_xruns(xruns, now);
-        if let Some(d) = &self.state.rig.data
-            && d.drained < now
-        {
-            self.state.rig.data = Some(Arc::new(d.aged(now)));
+        let slots: Vec<u32> = self.state.rigs().map(|r| r.slot).collect();
+        for slot in slots {
+            if let Some(r) = self.state.rig_in_slot_mut(slot)
+                && let Some(d) = &r.data
+                && d.drained < now
+            {
+                r.data = Some(Arc::new(d.aged(now)));
+            }
         }
         let (clock, clock_wait) = ClockTexts::at(&self.state, now);
         if clock != self.clock {
@@ -107,7 +112,11 @@ impl eframe::App for App {
         }
         if std::mem::take(&mut self.state.want_connect_dialog) {
             match &self.connect_setup {
-                Some(c) => self.connect = Some(c.dialog()),
+                Some(c) => {
+                    let mut d = c.dialog();
+                    d.closable = self.state.rigs().any(|r| r.link.is_some());
+                    self.connect = Some(d);
+                }
                 None => self.dispatch(Msg::Conn(
                     self.state.rig.id,
                     Box::new(crate::conn::ConnEvent::Reply {
@@ -148,6 +157,9 @@ impl eframe::App for App {
             && let Some(choice) = d.show(&ctx, &theme::chrome(&t))
         {
             self.connect_to(&ctx, choice);
+        }
+        if self.connect.as_ref().is_some_and(|d| d.closed) {
+            self.connect = None;
         }
 
         if let Some(w) = clock_wait {

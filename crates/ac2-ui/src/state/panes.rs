@@ -354,6 +354,41 @@ impl PaneNode {
         }
     }
 
+    /// The tree with only the leaves `keep` takes, each split with one side gone replaced
+    /// by the other side (`None`: no leaf kept).
+    pub fn pruned(&self, keep: &dyn Fn(PaneId) -> bool) -> Option<PaneNode> {
+        match self {
+            PaneNode::Leaf(id) => keep(*id).then_some(PaneNode::Leaf(*id)),
+            PaneNode::Split { axis, ratio, a, b } => match (a.pruned(keep), b.pruned(keep)) {
+                (Some(a), Some(b)) => Some(PaneNode::Split {
+                    axis: *axis,
+                    ratio: *ratio,
+                    a: Box::new(a),
+                    b: Box::new(b),
+                }),
+                (one, None) | (None, one) => one,
+            },
+        }
+    }
+
+    /// Leaf `id` replaced by `with`; false when there is no such leaf.
+    pub fn replace_leaf(&mut self, id: PaneId, with: PaneNode) -> bool {
+        match self {
+            PaneNode::Leaf(l) if *l == id => {
+                *self = with;
+                true
+            }
+            PaneNode::Leaf(_) => false,
+            PaneNode::Split { a, b, .. } => {
+                if a.contains(id) {
+                    a.replace_leaf(id, with)
+                } else {
+                    b.replace_leaf(id, with)
+                }
+            }
+        }
+    }
+
     /// Removes leaf `id`: its sibling takes the parent's place. The leaf of that sibling
     /// that bordered `id` along the split (its first when `id` was `a`, its last when `id`
     /// was `b`), which gets the focus; `None` for the last leaf (never removed) or no such

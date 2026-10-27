@@ -20,6 +20,7 @@ impl AppState {
         }
         // The first pane shows what the daemon measures: the kind of its first measurement.
         if self.pane_auto
+            && self.pane_ours(self.layout.focus)
             && let Some(kind) = self
                 .measurements()
                 .first()
@@ -35,7 +36,11 @@ impl AppState {
         let pending = std::mem::take(&mut self.rig.pending.pane_meas);
         for (pane, name) in pending {
             // Given another measurement meanwhile: the pane's choice now.
-            if self.layout.view(pane).is_none_or(|v| v.meas.is_some()) {
+            if self
+                .layout
+                .view(pane)
+                .is_none_or(|v| v.meas.is_some() || !self.ours(v))
+            {
                 continue;
             }
             let kind = self.layout.kind(pane);
@@ -294,6 +299,7 @@ impl AppState {
                                 meters: v.meters,
                                 modes: v.modes,
                                 plates: v.plates,
+                                rig: PaneRig::Active,
                             },
                         )
                     })

@@ -14,13 +14,15 @@ use eframe::egui;
 
 use crate::conn::Target;
 use crate::embedded::EmbeddedBackend;
+use crate::prefs::RigAddr;
 use crate::theme::Chrome;
 
 /// What the operator picked.
 #[derive(Clone, Debug)]
 pub enum Choice {
-    /// A daemon to connect to as is.
-    Target(Box<Target>),
+    /// A daemon to connect to as is, and where it is, to reach it again at the next start
+    /// (`None`: not to be remembered).
+    Target(Box<Target>, Option<RigAddr>),
     /// Host a daemon in this process.
     Embedded(EmbeddedBackend),
 }
@@ -118,6 +120,59 @@ pub enum PairOutcome {
     Refused(String),
 }
 
+/// The connection to a rig at `addr`, as remembered: the local daemon, an embedded one, or
+/// a daemon over the network with its pinned key (the one with the remembered fingerprint
+/// when there is one, so a reconnect never talks to another key). Endpoints are as given.
+pub fn reach(key_dir: &KeyDir, client_name: &str, addr: &RigAddr) -> Result<Choice, String> {
+    let target = |config, describe: String| {
+        Ok(Choice::Target(
+            Box::new(Target { config, describe }),
+            Some(addr.clone()),
+        ))
+    };
+    match addr {
+        RigAddr::Local => target(
+            ClientConfig::local(client_name.to_owned()),
+            "local daemon".into(),
+        ),
+        RigAddr::Embedded(b) => EmbeddedBackend::from_name(b)
+            .map(Choice::Embedded)
+            .ok_or_else(|| format!("no embedded backend `{b}` in this build")),
+        RigAddr::Endpoints { ctrl, data } => {
+            let endpoints = Endpoints {
+                ctrl: ctrl.clone(),
+                data: data.clone(),
+            };
+            target(
+                ClientConfig::new(endpoints, client_name.to_owned()),
+                format!("daemon at {ctrl}"),
+            )
+        }
+        RigAddr::Network {
+            host,
+            port,
+            fingerprint,
+        } => {
+            let remote = RemoteAddr {
+                host: host.clone(),
+                port: *port,
+            };
+            let curve = match fingerprint {
+                Some(f) => match key_dir.pin_status(f, &[host.as_str()]) {
+                    Ok(PinStatus::Paired { key, .. }) => key_dir.curve_client_for_key(key),
+                    Ok(_) => return Err(format!("{remote}: no pinned key has fingerprint {f}")),
+                    Err(e) => Err(e),
+                },
+                None => key_dir.curve_client(host),
+            }
+            .map_err(|e| format!("{remote}: {e}"))?;
+            let mut config = ClientConfig::new(Endpoints::remote(&remote), client_name.to_owned());
+            config.curve = Some(curve);
+            target(config, format!("daemon at {remote}"))
+        }
+    }
+}
+
 /// Whether the local daemon looks up: its socket file (Unix) or its ctrl port (Windows).
 pub fn local_daemon_running() -> bool {
     #[cfg(unix)]
@@ -148,6 +203,13 @@ pub struct ConnectDialog {
     pub error: Option<String>,
     /// This app's build, at the foot ([`crate::BUILD_ID`]; screenshot tests pin it).
     pub build_id: String,
+    /// A daemon's address typed in (`host` or `host:port`): a rig that does not advertise,
+    /// or one on another network.
+    pub address: String,
+    /// The app already holds a rig: the dialog adds one, and Cancel (or Esc) closes it.
+    pub closable: bool,
+    /// The operator closed it without a choice.
+    pub closed: bool,
 }
 
 impl std::fmt::Debug for ConnectDialog {
@@ -187,7 +249,29 @@ impl ConnectDialog {
             pair: None,
             error: None,
             build_id: crate::BUILD_ID.into(),
+            address: String::new(),
+            closable: false,
+            closed: false,
         }
+    }
+
+    /// The connection for the typed address: a paired host (its pinned key), the
+    /// default port when none is typed.
+    pub fn address_choice(&self) -> Result<Choice, String> {
+        let text = self.address.trim();
+        if text.is_empty() {
+            return Err("type the daemon's host, or host:port".into());
+        }
+        let addr: RemoteAddr = text.parse().map_err(|e| format!("{text}: {e}"))?;
+        reach(
+            &self.key_dir,
+            &self.client_name,
+            &RigAddr::Network {
+                host: addr.host,
+                port: addr.port,
+                fingerprint: None,
+            },
+        )
     }
 
     /// The name sent in `hello`.
@@ -228,10 +312,7 @@ impl ConnectDialog {
     /// The connection for `e`, or why it cannot be used.
     pub fn choice(&self, e: &Entry) -> Result<Choice, String> {
         match e {
-            Entry::Local { .. } => Ok(Choice::Target(Box::new(Target {
-                config: ClientConfig::local(self.client_name.clone()),
-                describe: "local daemon".into(),
-            }))),
+            Entry::Local { .. } => reach(&self.key_dir, &self.client_name, &RigAddr::Local),
             Entry::Embedded(b) => Ok(Choice::Embedded(*b)),
             Entry::Rig { rig, status } => {
                 let PinStatus::Paired { key, .. } = status else {
@@ -256,10 +337,18 @@ impl ConnectDialog {
                         .curve_client_for_key(*key)
                         .map_err(|e| e.to_string())?,
                 );
-                Ok(Choice::Target(Box::new(Target {
-                    config,
-                    describe: format!("{} ({addr})", rig.advert.name),
-                })))
+                let remember = RigAddr::Network {
+                    host: addr.host.clone(),
+                    port: addr.port,
+                    fingerprint: Some(rig.advert.fingerprint.clone()),
+                };
+                Ok(Choice::Target(
+                    Box::new(Target {
+                        config,
+                        describe: format!("{} ({addr})", rig.advert.name),
+                    }),
+                    Some(remember),
+                ))
             }
         }
     }
@@ -306,9 +395,14 @@ impl ConnectDialog {
         let entries = self.entries();
         self.selected = self.selected.min(entries.len().saturating_sub(1));
         let mut picked = None;
+        let mut typed = false;
+        if self.closable && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.closed = true;
+            return None;
+        }
         egui::Modal::new(egui::Id::new("ac2-connect")).show(ctx, |ui| {
             ui.set_width(560.0);
-            ui.heading("Connect to a rig");
+            ui.heading(if self.closable { "Connect a rig" } else { "Connect to a rig" });
             ui.label(
                 egui::RichText::new(
                     "Pick where measurements run. Rigs on this network appear as they answer.",
@@ -349,6 +443,19 @@ impl ConnectDialog {
                 };
                 ui.label(egui::RichText::new(msg).small().color(ch.dim));
             }
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Address");
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut self.address)
+                        .hint_text("host or host:port (paired)")
+                        .desired_width(300.0),
+                );
+                let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.button("Connect to address").clicked() || enter {
+                    typed = true;
+                }
+            });
             if let Some(err) = &self.error {
                 ui.colored_label(ch.fault, err);
             }
@@ -358,6 +465,9 @@ impl ConnectDialog {
                 if ui.add_enabled(can, egui::Button::new("Connect")).clicked() {
                     picked = Some(self.selected);
                 }
+                if self.closable && ui.button("Cancel").clicked() {
+                    self.closed = true;
+                }
             });
             ui.label(
                 egui::RichText::new(format!("ac2-ui {}", self.build_id))
@@ -365,9 +475,14 @@ impl ConnectDialog {
                     .color(ch.dim),
             );
         });
-        let i = picked?;
-        let e = entries.get(i)?;
-        match self.choice(e) {
+        let choice = if typed {
+            self.address_choice()
+        } else {
+            let i = picked?;
+            let e = entries.get(i)?;
+            self.choice(e)
+        };
+        match choice {
             Ok(c) => Some(c),
             Err(msg) => {
                 self.error = Some(msg);
@@ -516,7 +631,7 @@ mod tests {
         let e = d.entries();
         assert!(e[2].enabled());
         match d.choice(&e[2]) {
-            Ok(Choice::Target(t)) => {
+            Ok(Choice::Target(t, _)) => {
                 assert_eq!(t.config.endpoints.ctrl, "tcp://10.0.0.5:47820");
                 let curve = t.config.curve.unwrap_or_else(|| panic!("CURVE"));
                 assert_eq!(curve.server_key, server.public);

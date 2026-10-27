@@ -447,7 +447,7 @@ impl AppState {
                 } else {
                     PaneKind::Distortion
                 };
-                let Some(pane) = self.layout.lead(kind) else {
+                let Some(pane) = self.lead(kind) else {
                     self.warn(format!(
                         "no {} pane: a {} measurement selected in the list shows one in the \
                          focused pane",

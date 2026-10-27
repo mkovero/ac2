@@ -73,9 +73,11 @@ pub(crate) struct PanesWatch {
 const DRAG_REST_S: f64 = 0.4;
 
 impl AppState {
-    /// The panes on screen as a layout.
+    /// The panes on screen as a layout: those of the rig in `rig`, as if the others' were
+    /// not there (another rig's panes are never stored in this rig's measurement).
     pub fn pane_layout(&self) -> PaneLayout {
-        self.layout_of(&self.layout.root)
+        let own = self.layout.root.pruned(&|p| self.pane_ours(p));
+        self.layout_of(own.as_ref().unwrap_or(&self.layout.root))
     }
 
     fn layout_of(&self, n: &PaneNode) -> PaneLayout {
@@ -443,6 +445,7 @@ impl AppState {
                 v.meas = Some(m.id);
             }
         }
+        let (root, views) = self.beside_other_rigs(root, views);
         self.layout.install(root, views, focus);
         self.prune_levels();
         for (id, w) in levels {
@@ -459,6 +462,51 @@ impl AppState {
             self.rig.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_s = None;
         }
+    }
+
+    /// Panes `root` brought on screen with the other rigs' panes kept where they are: they
+    /// take the place of this rig's panes (the focused one's, else the first's), or with
+    /// none of this rig's on screen go beside them.
+    fn beside_other_rigs(
+        &self,
+        root: PaneNode,
+        mut views: BTreeMap<PaneId, View>,
+    ) -> (PaneNode, BTreeMap<PaneId, View>) {
+        let (ours, theirs): (Vec<PaneId>, Vec<PaneId>) = self
+            .layout
+            .root
+            .reading_order()
+            .into_iter()
+            .partition(|p| self.pane_ours(*p));
+        if theirs.is_empty() {
+            return (root, views);
+        }
+        let mut tree = self.layout.root.clone();
+        let anchor = Some(self.layout.focus)
+            .filter(|f| ours.contains(f))
+            .or_else(|| ours.first().copied());
+        match anchor {
+            Some(a) => {
+                for p in ours.iter().filter(|p| **p != a) {
+                    tree.remove(*p);
+                }
+                tree.replace_leaf(a, root);
+            }
+            None => {
+                tree = PaneNode::Split {
+                    axis: Axis::Row,
+                    ratio: 0.5,
+                    a: Box::new(tree),
+                    b: Box::new(root),
+                };
+            }
+        }
+        for p in theirs {
+            if let Some(v) = self.layout.view(p) {
+                views.insert(p, *v);
+            }
+        }
+        (tree, views)
     }
 
     fn install_node(
@@ -559,6 +607,8 @@ fn ui_view(p: &wire::LayoutPane) -> View {
             .as_ref()
             .and_then(crate::state::Metered::from_wire),
         plates: super::plates::ui_plates(&p.plates),
+        // The rig whose measurement's layout this is: the one the reducer runs for.
+        rig: PaneRig::Active,
         modes: PaneModes {
             transfer: match p.transfer_view {
                 wire::TransferView::Magnitude => TransferView::Magnitude,

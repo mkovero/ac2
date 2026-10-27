@@ -144,13 +144,19 @@ impl AppState {
         let Some(view) = self.layout.view(id) else {
             return self.layout.kind(id).title().to_owned();
         };
-        if view.kind == PaneKind::Programme
+        let title = if view.kind == PaneKind::Programme
             && let Some((p, missing)) = self.programme_pane(id)
             && missing.is_empty()
         {
-            return p.title();
+            p.title()
+        } else {
+            view.title().to_owned()
+        };
+        // A pane of a rig not shown says whose it is: its ids are that rig's.
+        match self.pane_rig(view) {
+            r if r == self.active() => title,
+            r => ac2_scene::chrome::rig_pane_title(&self.rig_name(r), &title),
         }
-        view.title().to_owned()
     }
 
     /// Whether a visible goniometer has embers still cooling: it redraws every frame.
@@ -161,7 +167,7 @@ impl AppState {
     /// The pairs the visible Programme panes show.
     pub fn programme_pairs_shown(&self) -> Vec<(u16, u16)> {
         let mut v: Vec<(u16, u16)> = self
-            .visible_panes()
+            .own_visible_panes()
             .into_iter()
             .filter_map(|id| self.layout.view(id))
             .filter(|v| v.kind == PaneKind::Programme)

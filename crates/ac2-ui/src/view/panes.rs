@@ -293,12 +293,84 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                 .max_rect(rect),
         );
         pane_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
-        pane(app, &mut pane_ui, theme, ch, id, rect, stage, &order);
+        let rig = app.state.layout.view(id).map(|v| app.state.pane_rig(v));
+        match rig.filter(|r| *r != app.state.active()) {
+            None => pane(app, &mut pane_ui, theme, ch, id, rect, stage, &order),
+            // Another rig's pane is drawn with that rig swapped in: its ids are that rig's.
+            Some(r) => match app.state.find_rig(r).map(|x| x.conn.clone()) {
+                Some(crate::state::ConnState::Connected { .. }) => {
+                    app.with_rig(r, |app| {
+                        pane(app, &mut pane_ui, theme, ch, id, rect, stage, &order)
+                    });
+                }
+                Some(_) => {
+                    let text = ac2_scene::chrome::rig_pane_unreachable(&app.state.rig_name(r));
+                    rig_away(app, &mut pane_ui, ch, id, rect, &text);
+                }
+                None => {
+                    let text = ac2_scene::chrome::rig_pane_closed(&app.state.rig_name(r));
+                    rig_away(app, &mut pane_ui, ch, id, rect, &text);
+                }
+            },
+        }
     }
     if !stage {
         split_gaps(app, ui, area);
     }
     ui.allocate_rect(area, egui::Sense::hover());
+}
+
+/// A pane of a rig that is down or closed: its frame and title, greyed, saying so. It stays
+/// where it is (the rig may come back) and takes the focus like any pane.
+fn rig_away(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    ch: &Chrome,
+    id: PaneId,
+    rect: egui::Rect,
+    text: &str,
+) {
+    let focused = app.state.layout.focus == id;
+    let stroke = if focused {
+        egui::Stroke::new(1.5, ch.focus)
+    } else {
+        egui::Stroke::new(1.0, ch.border)
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, 4.0, ch.raised);
+    painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
+    let n = app
+        .state
+        .layout
+        .panes()
+        .iter()
+        .position(|p| *p == id)
+        .unwrap_or(0)
+        + 1;
+    let title = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), TITLE_H));
+    painter.text(
+        title.left_center() + egui::vec2(8.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        format!("{n}  {}", app.state.pane_title(id)),
+        egui::FontId::proportional(12.0),
+        ch.dim,
+    );
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        egui::FontId::proportional(13.0),
+        ch.dim,
+    );
+    let resp = ui.interact(
+        rect,
+        ui.id().with(("pane-away", id.0)),
+        egui::Sense::click(),
+    );
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    if resp.clicked() && !focused {
+        app.dispatch(Msg::FocusPane(id));
+    }
 }
 
 /// One pane in `rect`: its frame, title strip, plot and hint line (or, on the stage, its

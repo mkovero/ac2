@@ -364,6 +364,8 @@ impl AppState {
                 let page = self.settings_page_last;
                 self.open_settings(page, out);
             }
+            C::Rigs => self.open_rig_menu(),
+            C::ConnectRig => self.want_connect_dialog = true,
 
             C::FocusPane1 => self.focus_nth(1),
             C::FocusPane2 => self.focus_nth(2),

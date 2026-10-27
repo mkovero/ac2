@@ -9,6 +9,7 @@ use ac2_ui::conn::Target;
 use ac2_ui::connect::ConnectDialog;
 use ac2_ui::embedded::{Embedded, EmbeddedBackend, start_embedded};
 use ac2_ui::keys::{Keymap, config_path};
+use ac2_ui::prefs::RigAddr;
 use ac2_ui::prefs::UiPrefs;
 use ac2_ui::{App, AppOptions};
 use clap::{Parser, ValueEnum};
@@ -86,7 +87,7 @@ fn target(
     a: &Args,
     embedded: &mut Option<Embedded>,
     notices: &mut Vec<String>,
-) -> Result<Target, String> {
+) -> Result<(Target, Option<RigAddr>), String> {
     if let Some(r) = &a.remote {
         let kd = KeyDir::new(
             a.key_dir
@@ -95,23 +96,37 @@ fn target(
         );
         let curve = kd.curve_client(&r.host).map_err(|e| e.to_string())?;
         let mut config = ClientConfig::new(Endpoints::remote(r), NAME);
+        let addr = RigAddr::Network {
+            host: r.host.clone(),
+            port: r.port,
+            fingerprint: Some(curve.server_key.fingerprint()),
+        };
         config.curve = Some(curve);
-        return Ok(Target {
-            config,
-            describe: format!("daemon at {r}"),
-        });
+        return Ok((
+            Target {
+                config,
+                describe: format!("daemon at {r}"),
+            },
+            Some(addr),
+        ));
     }
     if let (Some(c), Some(d)) = (&a.ctrl, &a.data) {
-        return Ok(Target {
-            config: ClientConfig::new(
-                Endpoints {
-                    ctrl: c.clone(),
-                    data: d.clone(),
-                },
-                NAME,
-            ),
-            describe: format!("daemon at {c}"),
-        });
+        return Ok((
+            Target {
+                config: ClientConfig::new(
+                    Endpoints {
+                        ctrl: c.clone(),
+                        data: d.clone(),
+                    },
+                    NAME,
+                ),
+                describe: format!("daemon at {c}"),
+            },
+            Some(RigAddr::Endpoints {
+                ctrl: c.clone(),
+                data: d.clone(),
+            }),
+        ));
     }
     if a.embedded {
         let backend = match a.backend {
@@ -130,12 +145,18 @@ fn target(
         };
         notices.push(format!("{} running in this process", e.describe()));
         *embedded = Some(e);
-        return Ok(t);
+        // The simulated rig is another rig each run: never remembered.
+        let addr = (backend != EmbeddedBackend::Fake)
+            .then(|| RigAddr::Embedded(backend.name().to_owned()));
+        return Ok((t, addr));
     }
-    Ok(Target {
-        config: ClientConfig::local(NAME),
-        describe: "local daemon".into(),
-    })
+    Ok((
+        Target {
+            config: ClientConfig::local(NAME),
+            describe: "local daemon".into(),
+        },
+        Some(RigAddr::Local),
+    ))
 }
 
 fn embedded_backends() -> Vec<EmbeddedBackend> {
@@ -160,7 +181,13 @@ fn main() -> ExitCode {
     let mut embedded = None;
     let explicit = args.remote.is_some() || args.ctrl.is_some() || args.embedded;
     let local_running = ac2_ui::connect::local_daemon_running();
-    let dialog = (args.connect || (!explicit && !local_running)).then(|| {
+    let prefs_path = ac2_paths::ui_prefs();
+    let (prefs, err) = UiPrefs::load(Some(&prefs_path));
+    notices.extend(err);
+    // The rigs held last time are connected again (by the app); no dialog, no local daemon
+    // in their place.
+    let remembered = !explicit && !args.connect && !prefs.rigs.is_empty();
+    let dialog = (args.connect || (!explicit && !local_running && !remembered)).then(|| {
         let kd = KeyDir::new(
             args.key_dir
                 .clone()
@@ -175,7 +202,7 @@ fn main() -> ExitCode {
             (!args.no_discovery).then_some(&mdns),
         )
     });
-    let target = if dialog.is_some() {
+    let target = if dialog.is_some() || remembered {
         None
     } else {
         match target(&args, &mut embedded, &mut notices) {
@@ -191,9 +218,6 @@ fn main() -> ExitCode {
     };
     let keymap_path = Some(args.keys.clone().unwrap_or_else(config_path));
     let (keymap, err) = Keymap::load(keymap_path.as_deref());
-    notices.extend(err);
-    let prefs_path = ac2_paths::ui_prefs();
-    let (prefs, err) = UiPrefs::load(Some(&prefs_path));
     notices.extend(err);
     let theme = match args.theme {
         Some(ThemeArg::Dark) => ThemeName::Dark,
@@ -213,8 +237,10 @@ fn main() -> ExitCode {
             fingerprint: kp.public.fingerprint(),
             key: kp.public.to_z85(),
         });
+    let (target, target_addr) = target.unzip();
     let opts = AppOptions {
         target,
+        target_addr: target_addr.flatten(),
         theme,
         keymap,
         keymap_path,

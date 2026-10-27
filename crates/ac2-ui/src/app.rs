@@ -23,6 +23,8 @@ use crate::{theme, view};
 pub struct AppOptions {
     /// `None`: no daemon link (UI tests of chrome only).
     pub target: Option<Target>,
+    /// Where `target` is, to remember the rig it reaches (`None`: not remembered).
+    pub target_addr: Option<crate::prefs::RigAddr>,
     pub theme: ThemeName,
     pub keymap: Keymap,
     /// Where the keymap came from, for the help overlay.
@@ -213,10 +215,16 @@ pub struct App {
     /// off and feed [`App::health`] figures at chosen instants: measured ones move run to
     /// run.
     pub health_measured: bool,
-    /// The link reaches a daemon inside this process: no network between, the same host.
-    pub(crate) link_embedded: bool,
-    /// The host the link reaches the daemon at over the network; `None` on a local link.
-    pub(crate) daemon_addr: Option<String>,
+    /// The rig whose link reaches `embedded`.
+    embedded_slot: Option<u32>,
+    /// Where the top bar's rigs drop-down was last drawn: its list opens under it.
+    pub(crate) rig_menu_at: Option<egui::Rect>,
+    /// Messages sent while a pane of a rig in the background is drawn (with that rig swapped
+    /// in): fed to the reducer once it is back.
+    deferred: Vec<Msg>,
+    in_visit: bool,
+    /// Links of closed rigs, closing on their own threads (each stops its stimulus first).
+    closers: Vec<std::thread::JoinHandle<()>>,
     /// The top bar's session and health line, scrolling when it is wider than its room.
     pub marquee: crate::marquee::Marquee,
 }
@@ -255,12 +263,18 @@ impl App {
         let health = crate::health::LocalHealth::new();
         let link_embedded = opts.target.as_ref().is_some_and(embedded_target);
         let daemon_addr = opts.target.as_ref().and_then(network_host);
+        let started_target = opts.target.is_some();
         let conn = opts.target.and_then(|mut t| {
             t.config.received_bytes = Arc::clone(&health.received);
-            Conn::start(t, link_wake(ctx, Arc::clone(&pacer))).ok()
+            Conn::start(t, link_wake(ctx.clone(), Arc::clone(&pacer))).ok()
         });
         let mut state = AppState::new(opts.theme, describe);
         state.rig.link = conn;
+        state.rig.link_embedded = link_embedded;
+        state.rig.daemon_addr = daemon_addr;
+        let target_addr = opts.target_addr.clone();
+        state.rig.addr = target_addr.clone();
+        let remembered = opts.prefs.rigs.clone();
         state.set_prefs(opts.prefs);
         state.rig.open_session_when_empty = opts.open_session_dialog;
         state.rig.embedded_autosave = opts.embedded_autosave;
@@ -278,7 +292,7 @@ impl App {
                 &opts.keymap,
             );
         }
-        Self {
+        let mut app = Self {
             state,
             keymap: opts.keymap,
             keymap_path: opts.keymap_path,
@@ -312,10 +326,123 @@ impl App {
             pacer,
             health,
             health_measured: true,
-            link_embedded,
-            daemon_addr,
+            embedded_slot: None,
+            rig_menu_at: None,
+            deferred: Vec::new(),
+            in_visit: false,
+            closers: Vec::new(),
             marquee: crate::marquee::Marquee::default(),
+        };
+        app.reconnect(&ctx, remembered, started_target, target_addr.as_ref());
+        app
+    }
+
+    /// The rigs held when the app last ran, connected again: the one started with keeps
+    /// its remembered id and name; with none started, the first takes the first rig's place.
+    fn reconnect(
+        &mut self,
+        ctx: &egui::Context,
+        rigs: Vec<crate::prefs::RememberedRig>,
+        started: bool,
+        started_addr: Option<&crate::prefs::RigAddr>,
+    ) {
+        let mut first_free = !started;
+        for r in rigs {
+            if Some(&r.addr) == started_addr {
+                self.state.rig.id = r.id;
+                self.state.rig.name = r.name;
+                continue;
+            }
+            let Some(setup) = &self.connect_setup else {
+                return;
+            };
+            let key_dir = ac2_client::KeyDir::new(setup.key_dir.clone());
+            let choice = match crate::connect::reach(&key_dir, &setup.client_name, &r.addr) {
+                Ok(c) => c,
+                Err(e) => {
+                    self.startup_notice(format!("{}: {e}", r.name));
+                    continue;
+                }
+            };
+            let slot = if std::mem::take(&mut first_free) {
+                self.state.rig.id = r.id;
+                self.state.rig.name = r.name.clone();
+                self.state.rig.addr = Some(r.addr.clone());
+                self.state.rig.slot
+            } else {
+                self.state.add_rig(
+                    r.name.clone(),
+                    Some((r.id, r.name.clone())),
+                    Some(r.addr.clone()),
+                )
+            };
+            if let Err(e) = self.start_rig(ctx, slot, choice) {
+                self.startup_notice(format!("{}: {e}", r.name));
+            }
         }
+    }
+
+    /// A notice from the app itself (startup), as a failed reply.
+    fn startup_notice(&mut self, text: String) {
+        self.dispatch(Msg::Conn(
+            self.state.active(),
+            Box::new(crate::conn::ConnEvent::Reply {
+                what: "startup".into(),
+                result: Err(text),
+            }),
+        ));
+    }
+
+    /// Starts the link of the rig in slot `slot` to `choice` (an embedded daemon started
+    /// for it first).
+    fn start_rig(&mut self, ctx: &egui::Context, slot: u32, choice: Choice) -> Result<(), String> {
+        let client_name = self
+            .connect_setup
+            .as_ref()
+            .map_or_else(|| "ac2-ui".to_owned(), |c| c.client_name.clone());
+        let (mut target, addr, embedded) = match choice {
+            Choice::Target(t, addr) => (*t, addr, None),
+            Choice::Embedded(b) => {
+                if self.embedded.is_some() {
+                    return Err("this computer is already a rig here".into());
+                }
+                let e = start_embedded(b).map_err(|e| format!("embedded daemon: {e}"))?;
+                let t = Target {
+                    config: e.client_config(client_name),
+                    describe: e.describe(),
+                };
+                // The simulated rig is another rig each run: never remembered.
+                let addr = (b != EmbeddedBackend::Fake)
+                    .then(|| crate::prefs::RigAddr::Embedded(b.name().to_owned()));
+                (t, addr, Some((e, b)))
+            }
+        };
+        target.config.received_bytes = Arc::clone(&self.health.received);
+        let link_embedded = embedded_target(&target);
+        let daemon_addr = network_host(&target);
+        let describe = target.describe.clone();
+        let c = Conn::start(target, link_wake(ctx.clone(), Arc::clone(&self.pacer)))
+            .map_err(|e| format!("link thread: {e}"))?;
+        let fake = embedded
+            .as_ref()
+            .is_some_and(|(_, b)| *b == EmbeddedBackend::Fake);
+        let Some(r) = self.state.rig_in_slot_mut(slot) else {
+            return Ok(());
+        };
+        r.link = Some(c);
+        r.link_embedded = link_embedded;
+        r.daemon_addr = daemon_addr;
+        r.addr = addr;
+        r.conn = crate::state::ConnState::Connecting { target: describe };
+        // A daemon without audio I/O: the audio setup once. The simulated rig is already
+        // measuring.
+        r.open_session_when_empty = !fake;
+        if let Some((e, _)) = embedded {
+            r.embedded_autosave = Some(e.autosaves());
+            self.embedded = Some(e);
+            self.embedded_slot = Some(slot);
+        }
+        Ok(())
     }
 
     /// Follows the window's geometry, and once, makes a restored window fit its screen
@@ -375,57 +502,42 @@ impl App {
         self.connect.is_some()
     }
 
-    fn connect_to(&mut self, ctx: &egui::Context, choice: Choice) {
-        let Some(dialog) = self.connect.as_mut() else {
+    /// The connect dialog's choice: a rig added (or, with no rig linked yet, the first
+    /// one), shown at once. Nothing while the dialog is closed.
+    pub fn connect_to(&mut self, ctx: &egui::Context, choice: Choice) {
+        if self.connect.is_none() {
             return;
+        }
+        let fake = matches!(choice, Choice::Embedded(EmbeddedBackend::Fake));
+        let first = self.state.rigs().all(|r| r.link.is_none());
+        let slot = if first {
+            self.state.rig.slot
+        } else {
+            self.state.add_rig(String::new(), None, None)
         };
-        let target = match choice {
-            Choice::Target(t) => {
-                // Another daemon: if it has no audio I/O, the audio setup once.
-                self.state.rig.open_session_when_empty = true;
-                *t
-            }
-            Choice::Embedded(b) => match start_embedded(b) {
-                Ok(e) => {
-                    let t = Target {
-                        config: e.client_config(dialog.client_name()),
-                        describe: e.describe(),
-                    };
-                    self.state.rig.link = None;
-                    self.state.rig.embedded_autosave = Some(e.autosaves());
-                    self.embedded = Some(e);
-                    // Real audio: the operator picks the interface and channels. The
-                    // simulated rig is already measuring.
-                    self.state.rig.open_session_when_empty = b != EmbeddedBackend::Fake;
-                    if b == EmbeddedBackend::Fake {
-                        let reply = crate::conn::ConnEvent::Reply {
-                            what: "simulated rig: audio I/O open, \"demo\" measuring · L \
-                                       types a level, Space arms, Enter fires"
-                                .into(),
-                            result: Ok(()),
-                        };
-                        self.dispatch(Msg::Conn(self.state.rig.id, Box::new(reply)));
-                    }
-                    t
-                }
-                Err(e) => {
-                    // Never a silent switch to another daemon: the operator chooses again.
-                    dialog.error = Some(format!("embedded daemon: {e}"));
-                    return;
-                }
-            },
-        };
-        self.state.rig.link = None;
-        let mut target = target;
-        target.config.received_bytes = Arc::clone(&self.health.received);
-        self.link_embedded = embedded_target(&target);
-        self.daemon_addr = network_host(&target);
-        match Conn::start(target, link_wake(ctx.clone(), Arc::clone(&self.pacer))) {
-            Ok(c) => {
-                self.state.rig.link = Some(c);
+        match self.start_rig(ctx, slot, choice) {
+            Ok(()) => {
                 self.connect = None;
+                if let Some(id) = self.state.rig_in_slot(slot).map(|r| r.id) {
+                    self.dispatch(Msg::RigPick(crate::state::RigRow::Rig(id)));
+                }
+                if fake {
+                    let reply = crate::conn::ConnEvent::Reply {
+                        what: "simulated rig: audio I/O open, \"demo\" measuring · L \
+                               types a level, Space arms, Enter fires"
+                            .into(),
+                        result: Ok(()),
+                    };
+                    self.dispatch(Msg::Conn(self.state.active(), Box::new(reply)));
+                }
             }
-            Err(e) => dialog_error(&mut self.connect, format!("link thread: {e}")),
+            Err(e) => {
+                if !first {
+                    self.state.forget_rig(slot);
+                }
+                // Never a silent switch to another daemon: the operator chooses again.
+                dialog_error(&mut self.connect, e);
+            }
         }
     }
 
@@ -466,14 +578,28 @@ impl App {
 
     /// Feeds one message through the reducer and forwards its requests.
     pub fn dispatch(&mut self, msg: Msg) {
+        if self.in_visit {
+            self.deferred.push(msg);
+            return;
+        }
         let what = Touches::of(&msg);
         let animating = self.state.animating();
         let easing = self.state.bars_easing(Instant::now());
         let gliding = self.state.spectrum_gliding(Instant::now());
         let glowing = self.state.embers_glowing();
-        let data = self.state.rig.data.clone();
-        let mirror = self.state.rig.mirror.clone();
+        // The rig the message is from: its data and mirror say which panes change.
+        let from = match &msg {
+            Msg::Conn(r, _) => self.state.find_rig(*r).map(|r| r.slot),
+            _ => None,
+        }
+        .unwrap_or(self.state.rig.slot);
+        let of = |st: &AppState| {
+            st.rig_in_slot(from)
+                .map(|r| (r.data.clone(), r.mirror.clone()))
+        };
+        let (data, mirror) = of(&self.state).unwrap_or_default();
         let mut reqs = self.state.update(msg, &self.keymap);
+        let (data_after, mirror_after) = of(&self.state).unwrap_or_default();
         reqs.extend(self.state.sync_link());
         let panes = match what {
             Touches::Tick => {
@@ -490,8 +616,8 @@ impl App {
                 panes
             }
             Touches::Toasts => Vec::new(),
-            Touches::Data => data_touches(data.as_deref(), self.state.rig.data.as_deref()),
-            Touches::Mirror => match (&mirror, &self.state.rig.mirror) {
+            Touches::Data => data_touches(data.as_deref(), data_after.as_deref()),
+            Touches::Mirror => match (&mirror, &mirror_after) {
                 (Some(a), Some(b)) if !crate::conn::mirror_differs(a, b) => Vec::new(),
                 _ => PaneKind::ALL.to_vec(),
             },
@@ -505,7 +631,68 @@ impl App {
                 c.send(r);
             }
         }
+        self.close_rigs();
         self.save_prefs(Instant::now());
+    }
+
+    /// Closes the links of the rigs the reducer closed, each on its own thread: the link
+    /// stops the stimulus it holds and releases its lease (within [`crate::conn::QUIT_GRACE`])
+    /// while the window goes on. An embedded daemon goes after its link.
+    fn close_rigs(&mut self) {
+        for mut r in std::mem::take(&mut self.state.closing) {
+            let embedded = (self.embedded_slot == Some(r.slot))
+                .then(|| {
+                    self.embedded_slot = None;
+                    self.embedded.take()
+                })
+                .flatten();
+            let link = r.link.take();
+            self.closers.push(std::thread::spawn(move || {
+                if let Some(c) = link {
+                    c.close();
+                }
+                drop(embedded);
+            }));
+        }
+        self.closers.retain(|t| !t.is_finished());
+    }
+
+    /// Runs `f` with rig `rig` swapped in as the reducer's `rig` (a pane of that rig is
+    /// drawn): every query resolves that rig's ids. Messages sent meanwhile wait until it is
+    /// back. `None`: no such rig.
+    pub(crate) fn with_rig<R>(
+        &mut self,
+        rig: ac2_proto::units::RigId,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> Option<R> {
+        if rig == self.state.rig.id {
+            return Some(f(self));
+        }
+        let v = self.state.enter(rig)?;
+        self.in_visit = true;
+        let r = f(self);
+        self.state.leave(v);
+        self.in_visit = false;
+        for m in std::mem::take(&mut self.deferred) {
+            self.dispatch(m);
+        }
+        Some(r)
+    }
+
+    /// Every link closed at once on the way out, the stimulus each holds stopped in
+    /// parallel within one [`crate::conn::QUIT_GRACE`]; then the embedded daemon.
+    pub(crate) fn close_all_links(&mut self) {
+        let mut links = Vec::new();
+        for slot in self.state.rigs().map(|r| r.slot).collect::<Vec<_>>() {
+            if let Some(c) = self.state.rig_in_slot_mut(slot).and_then(|r| r.link.take()) {
+                links.push(c);
+            }
+        }
+        crate::conn::close_all(links);
+        for t in self.closers.drain(..) {
+            let _ = t.join();
+        }
+        self.embedded = None;
     }
 
     /// Writes `ui.toml` when a preference changed, at most once per
@@ -565,8 +752,10 @@ impl App {
     /// Feeds every rig's link events to the reducer, each tagged with its rig. The rig is
     /// found by its place, not its id: its hello reply gives it its id.
     fn pump_link(&mut self) {
-        for place in 0..self.state.rigs().count() {
-            let events = (self.state.rigs().nth(place))
+        // By slot: a switch reorders the rigs and a hello renames one between events.
+        let slots: Vec<u32> = self.state.rigs().map(|r| r.slot).collect();
+        for slot in slots {
+            let events = (self.state.rig_in_slot(slot))
                 .and_then(|r| r.link.as_ref())
                 .map(Conn::drain)
                 .unwrap_or_default();
@@ -574,7 +763,7 @@ impl App {
                 if matches!(e, crate::conn::ConnEvent::Data(_)) {
                     self.health.data_arrived();
                 }
-                let Some(rig) = self.state.rigs().nth(place).map(|r| r.id) else {
+                let Some(rig) = self.state.rig_in_slot(slot).map(|r| r.id) else {
                     break;
                 };
                 self.dispatch(Msg::Conn(rig, Box::new(e)));

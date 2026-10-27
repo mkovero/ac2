@@ -34,6 +34,10 @@ impl AppState {
                 rig_id,
                 name,
             } => {
+                if self.is_duplicate(rig_id) {
+                    self.rig.duplicate = true;
+                    return;
+                }
                 // A window opened before the hello acts on this rig, now named by it.
                 if self.window_rig == Some(self.rig.id) {
                     self.window_rig = Some(rig_id);
@@ -45,6 +49,7 @@ impl AppState {
                     rig_id,
                     name,
                 });
+                self.remember_rig();
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.session.backends = None;
                     out.push(Request::Devices);
@@ -254,7 +259,7 @@ impl AppState {
                 }
             }
             ConnEvent::Data(d) => {
-                let fold = self.folding(true);
+                let fold = self.folding();
                 for meas in self.rig.fold_data(d, &fold, out) {
                     self.forget_leq_strips(meas);
                 }
@@ -448,7 +453,16 @@ impl AppState {
     /// stand-in may take its place meanwhile). A session reopened, salvaged or a daemon
     /// restarted takes them away for a moment and makes them again under the same names.
     fn park_gone_meas(&mut self, names: &BTreeMap<MeasId, String>, gone: impl Fn(MeasId) -> bool) {
+        let (rig, tab) = (self.rig.id, self.active());
         for (pane, v) in &mut self.layout.views {
+            // Another rig's pane names that rig's measurements.
+            let ours = match v.rig {
+                PaneRig::Active => tab == rig,
+                PaneRig::Rig(r) => r == rig,
+            };
+            if !ours {
+                continue;
+            }
             if let Some(id) = v.meas.filter(|id| gone(*id)) {
                 v.meas = None;
                 if let Some(n) = names.get(&id) {
@@ -687,61 +701,6 @@ impl RigState {
             }));
             e.0 = seq;
         }
-    }
-}
-
-impl AppState {
-    /// An event from a rig in the background. No pane shows such a rig and no window acts
-    /// on it, so only what it keeps of its own daemon follows: its link, mirror, frames and
-    /// traces. Replies and the stimulus answer the operator's keys and windows, which act
-    /// on the active rig alone.
-    pub(super) fn background_event(&mut self, rig: RigId, e: ConnEvent) -> Vec<(RigId, Request)> {
-        let fold = self.folding(false);
-        let Some(r) = self.background.iter_mut().find(|r| r.id == rig) else {
-            return Vec::new();
-        };
-        let mut out = Vec::new();
-        match e {
-            ConnEvent::Connecting { target } if !matches!(r.conn, ConnState::Failed { .. }) => {
-                r.conn = ConnState::Connecting { target };
-            }
-            ConnEvent::Connected {
-                target,
-                server,
-                client_id,
-                rig_id,
-                name,
-            } => r.connected(ConnState::Connected {
-                target,
-                server,
-                client_id,
-                rig_id,
-                name,
-            }),
-            ConnEvent::Failed { target, error, .. } => r.failed(target, error),
-            ConnEvent::Mirror(v) => {
-                let incarnation = r.mirror.as_ref().and_then(|m| m.incarnation);
-                let reborn = incarnation.is_some() && v.incarnation != incarnation;
-                r.mirror = Some(v);
-                let seen: Vec<String> = r
-                    .measurements()
-                    .iter()
-                    .map(|m| m.config.name.clone())
-                    .collect();
-                r.meas_seen.extend(seen);
-                r.keep_listed(reborn, None);
-                r.follow_spectrum_starts();
-                let data = r.data.clone();
-                // No strip looks back at a background rig's meter.
-                let _ = r.follow_leq_logs(data.as_deref(), &mut out);
-            }
-            ConnEvent::Data(d) => {
-                let _ = r.fold_data(d, &fold, &mut out);
-            }
-            ConnEvent::Trace(t, g) => r.keep_trace(t, g),
-            _ => {}
-        }
-        out.into_iter().map(|q| (rig, q)).collect()
     }
 }
 

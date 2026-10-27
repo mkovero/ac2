@@ -65,6 +65,7 @@ pub use glide::SpecGlide;
 mod leq;
 pub use leq::{LeqPanes, LeqUi};
 mod rig;
+mod rigs;
 pub use leq::export::{EXPORT_DIR, export_path, leq_export_name};
 pub use leq::strip::{LeqSpan, STRIP_MIN_S, StripMsg};
 pub use panes::pane_export::{PaneExport, pane_export_name};
@@ -89,7 +90,7 @@ mod stimulus;
 mod text;
 mod undo;
 pub use panes::views::{
-    DEFAULT_PANE_AREA, Layout, PaneMenuRow, PaneModes, PaneTemplate, TransferView, View,
+    DEFAULT_PANE_AREA, Layout, PaneMenuRow, PaneModes, PaneRig, PaneTemplate, TransferView, View,
 };
 pub use panes::{Axis, PaneId, PaneNode, PaneRect, Side, SplitGap};
 pub use text::{
@@ -103,9 +104,9 @@ mod types;
 pub(crate) use types::STIMULUS_STOPPED_TOO;
 use types::trace_mic_request;
 pub use types::{
-    ConnState, FinderChoice, LiveEdit, MAX_OBSERVATION_S, PaneKind, PaneMenu, SMOOTHING_STEPS,
-    SUB_OBSERVATIONS_S, SmoothTarget, Smoothable, StimPhase, Stimulus, outputs_text, parse_curve,
-    parse_input_curve, spectrum_smoothing,
+    ConnState, FinderChoice, LiveEdit, MAX_OBSERVATION_S, PaneKind, PaneMenu, RigMenu, RigRow,
+    SMOOTHING_STEPS, SUB_OBSERVATIONS_S, SmoothTarget, Smoothable, StimPhase, Stimulus,
+    outputs_text, parse_curve, parse_input_curve, spectrum_smoothing,
 };
 mod msg;
 pub use msg::{
@@ -159,6 +160,15 @@ pub struct AppState {
     pub rig: RigState,
     /// The rigs this app holds besides the active one, each with its own link.
     pub background: Vec<RigState>,
+    /// While a message for a rig in the background is handled, that rig is swapped in as
+    /// `rig` and this is the shown rig's id ([`AppState::visit`]).
+    visiting: Option<RigId>,
+    /// The slot the next rig added takes.
+    next_slot: u32,
+    /// Rigs closed, whose links the app closes (stopping the stimulus they hold first).
+    pub closing: Vec<RigState>,
+    /// The names of rigs closed in this run: their panes stay, saying which rig they were.
+    pub(crate) rig_names: BTreeMap<RigId, String>,
     pub theme: ThemeName,
     /// What the scene builders get; `view.freq` follows `nav`.
     pub view: ViewState,
@@ -278,6 +288,10 @@ impl AppState {
         Self {
             rig: RigState::new(target),
             background: Vec::new(),
+            visiting: None,
+            next_slot: 1,
+            closing: Vec::new(),
+            rig_names: BTreeMap::new(),
             leq_panes: LeqPanes::default(),
             theme,
             view: ViewState::default(),
@@ -322,21 +336,8 @@ impl AppState {
 
     // ----- queries -----------------------------------------------------------------------
 
-    /// One message in; the requests it makes out, each for the rig whose link sends it.
-    pub fn update(&mut self, msg: Msg, keymap: &Keymap) -> Vec<(RigId, Request)> {
-        let msg = match msg {
-            Msg::Conn(rig, e) if rig != self.rig.id => {
-                return self.background_event(rig, *e);
-            }
-            m => m,
-        };
-        let out = self.update_active(msg, keymap);
-        let rig = self.rig.id;
-        out.into_iter().map(|r| (rig, r)).collect()
-    }
-
-    /// [`Self::update`] of a message for the active rig (or the app): what it asks goes to
-    /// the active rig's link.
+    /// [`Self::update`] of a message for the rig in `rig` (the shown one, or one in the
+    /// background swapped in): what it asks goes to that rig's link.
     fn update_active(&mut self, msg: Msg, keymap: &Keymap) -> Vec<Request> {
         let mut out = Vec::new();
         let before = self.meter_wants();
@@ -382,7 +383,9 @@ impl AppState {
         };
         self.ran_command = None;
         self.undoing = false;
+        let contents = self.pane_contents();
         self.update_inner(msg, keymap, &mut out);
+        self.set_pane_rigs(&contents);
         self.window_rig = match self.overlay {
             Overlay::None => None,
             _ => self.window_rig.or(Some(self.rig.id)),
@@ -501,6 +504,15 @@ impl AppState {
                 self.rig.input_pick = (self.rig.input_pick != Some(c)).then_some(c);
             }
             Msg::LegendPick(p, key) => self.legend_pick(p, key),
+            Msg::RigPick(row) => self.rig_pick(row, out),
+            Msg::PaneMenu(p) if !self.pane_ours(p) => {
+                // Its list would be another rig's measurements, picked from the rig shown.
+                let rig = self.layout.view(p).map(|v| self.pane_rig(v));
+                if let Some(r) = rig {
+                    let name = self.rig_name(r);
+                    self.warn(ac2_scene::chrome::rig_window_elsewhere(&name));
+                }
+            }
             Msg::PaneMenu(p) => {
                 self.overlay = match self.overlay {
                     Overlay::PaneMenu(m) if m.pane == p => Overlay::None,
@@ -572,6 +584,11 @@ impl AppState {
     /// message again replaces the one up (newest, its time restarted) rather than
     /// stacking copies, and counts up in the log.
     fn notify(&mut self, severity: Severity, text: String, muted: Muted) {
+        // While another rig is shown, a notice about this one says whose it is.
+        let text = match self.notice_prefix() {
+            Some(p) => p + &text,
+            None => text,
+        };
         let pops = match muted {
             Muted::Never => true,
             Muted::WithWarningToasts => self.prefs.warning_toasts,

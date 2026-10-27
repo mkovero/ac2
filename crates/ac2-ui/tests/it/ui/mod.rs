@@ -30,6 +30,7 @@ mod export;
 mod leq;
 mod overlays;
 mod programme;
+mod rigs;
 mod session;
 mod traces;
 mod transfer;
@@ -65,6 +66,7 @@ fn options_at(endpoints: Option<ac2_client::Endpoints>) -> AppOptions {
             config: ClientConfig::new(ep, "ac2-ui test"),
             describe: "fake daemon".into(),
         }),
+        target_addr: None,
         theme: ThemeName::Dark,
         keymap: Keymap::default(),
         keymap_path: Some("~/.config/ac2/keys.toml".into()),

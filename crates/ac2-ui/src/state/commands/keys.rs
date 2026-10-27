@@ -11,6 +11,10 @@ impl AppState {
                 let n = p.entries(keymap, scope).len();
                 p.move_by(rows, n);
             }
+            Overlay::RigMenu(m) => {
+                let m = *m;
+                self.rig_menu_wheel(m, rows);
+            }
             Overlay::PaneMenu(m) => {
                 let mut m = *m;
                 let n = self.pane_menu_rows(m.pane).len();
@@ -234,6 +238,11 @@ impl AppState {
                 // The list stays up over the plots and the other keys keep working, except
                 // the stimulus's.
                 self.overlay_fallthrough(chord, keymap, out);
+                return;
+            }
+            Overlay::RigMenu(menu) => {
+                let menu = *menu;
+                self.rig_menu_key(menu, chord, out);
                 return;
             }
             Overlay::PaneMenu(menu) => {

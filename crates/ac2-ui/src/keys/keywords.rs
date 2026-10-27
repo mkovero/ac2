@@ -13,6 +13,8 @@ impl CommandId {
             C::Notifications => &["toasts", "messages", "warnings", "errors"],
             C::Palette => &["commands", "search"],
             C::Settings => &["preferences", "options", "config"],
+            C::Rigs => &["daemon", "switch", "computer", "host", "close"],
+            C::ConnectRig => &["daemon", "add", "host", "pair", "network", "remote"],
             C::Quit => &["exit"],
             C::Fullscreen => &["window"],
             C::KeyHints => &["shortcuts", "help"],

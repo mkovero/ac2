@@ -87,6 +87,7 @@ fn harness() -> Harness<'static, App> {
                 cc,
                 AppOptions {
                     target: None,
+                    target_addr: None,
                     theme: ThemeName::Dark,
                     keymap: Keymap::default(),
                     keymap_path: None,
