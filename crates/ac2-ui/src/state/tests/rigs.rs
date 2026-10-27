@@ -649,3 +649,320 @@ fn input_meters_follow_each_rig_through_switches() {
         );
     }
 }
+
+/// Two rigs mirrored, pupu's measurement 2 named apart from the first rig's (the same id,
+/// another measurement), and pane `p`'s list open on the first rig.
+fn picker_open() -> (T, PaneId) {
+    let mut t = two_rigs();
+    let mut s = with_spl();
+    s.measurements[0].config.name = "Pupu sub".into();
+    to(&mut t, PUPU, mirror(s));
+    let p = t.st.layout.focus;
+    t.st.update(Msg::PaneMenu(p), &t.keys);
+    assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == p));
+    (t, p)
+}
+
+/// The rows of pane `p`'s list taken by a pick (no heading, no kind of pane).
+fn menu_picks(t: &T, p: PaneId) -> Vec<PaneMenuRow> {
+    t.st.pane_menu_rows(p)
+        .into_iter()
+        .map(|(r, _)| r)
+        .filter(|r| {
+            matches!(
+                r,
+                PaneMenuRow::Meas(_)
+                    | PaneMenuRow::RigMeas(..)
+                    | PaneMenuRow::Meter(_)
+                    | PaneMenuRow::RigMeter(..)
+            )
+        })
+        .collect()
+}
+
+/// With two rigs the pane's list has a heading per rig, the rig shown first, and each
+/// rig's measurements under it by that rig's ids: measurement 2 twice, one per rig.
+#[test]
+fn the_pane_list_offers_every_rigs_measurements() {
+    let (t, p) = picker_open();
+    let rows = t.st.pane_menu_rows(p);
+    let heads: Vec<(RigId, String)> = rows
+        .iter()
+        .filter_map(|(r, s)| match r {
+            PaneMenuRow::Heading(id) => Some((*id, s.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        heads,
+        vec![(RIG, t.st.rig_name(RIG)), (PUPU, "pupu".to_string())]
+    );
+    assert_eq!(rows[0].0, PaneMenuRow::Heading(RIG));
+    let picks = menu_picks(&t, p);
+    assert!(picks.contains(&PaneMenuRow::Meas(MeasId(2))));
+    assert!(picks.contains(&PaneMenuRow::RigMeas(PUPU, MeasId(2))));
+    let label = |want: PaneMenuRow| {
+        rows.iter()
+            .find(|(r, _)| *r == want)
+            .map(|(_, s)| s.clone())
+            .expect("listed")
+    };
+    assert!(label(PaneMenuRow::Meas(MeasId(2))).ends_with("Sub"));
+    assert!(label(PaneMenuRow::RigMeas(PUPU, MeasId(2))).ends_with("Pupu sub"));
+    // Pupu's session inputs are offered as pupu's meters.
+    assert!(
+        picks
+            .iter()
+            .any(|r| matches!(r, PaneMenuRow::RigMeter(PUPU, _)))
+    );
+    // The highlight never rests on a heading: Home lands on the first measurement.
+    let mut t = t;
+    t.key("Home");
+    let Overlay::PaneMenu(m) = t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    assert!(rows[m.index].0.pickable(), "{:?}", rows[m.index]);
+    assert!(matches!(rows[m.index].0, PaneMenuRow::Meas(_)));
+}
+
+/// Picking pupu's measurement 2 sets the pane on pupu: it shows pupu's, never the first
+/// rig's measurement of that id, and the selection stays on the first rig's row.
+#[test]
+fn a_pick_of_another_rigs_measurement_pins_the_pane() {
+    let (mut t, p) = picker_open();
+    let selected = t.st.rig.selected;
+    t.st.update(
+        Msg::PanePick(p, PaneMenuRow::RigMeas(PUPU, MeasId(2))),
+        &t.keys,
+    );
+    let v = *t.st.layout.view(p).expect("pane");
+    assert_eq!((v.rig, v.meas), (PaneRig::Rig(PUPU), Some(MeasId(2))));
+    assert_eq!(v.kind, PaneKind::Spectrum);
+    assert!(
+        t.st.pane_meas(p).is_none(),
+        "not the first rig's measurement 2"
+    );
+    let name =
+        t.st.visit(PUPU, |st| st.pane_meas(p).map(|m| m.config.name.clone()));
+    assert_eq!(name.flatten().as_deref(), Some("Pupu sub"));
+    assert_eq!(t.st.rig.selected, selected);
+    assert!(t.st.pane_title(p).starts_with("pupu · "));
+    // Opened again, its list highlights pupu's row.
+    t.st.update(Msg::PaneMenu(p), &t.keys);
+    let Overlay::PaneMenu(m) = t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    assert_eq!(
+        t.st.pane_menu_rows(p)[m.index].0,
+        PaneMenuRow::RigMeas(PUPU, MeasId(2))
+    );
+    // The first rig's own row puts the pane back on the rig shown.
+    t.st.update(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    let v = *t.st.layout.view(p).expect("pane");
+    assert_eq!((v.rig, v.meas), (PaneRig::Active, Some(MeasId(2))));
+    assert_eq!(
+        t.st.pane_meas(p).map(|m| m.config.name.as_str()),
+        Some("Sub")
+    );
+}
+
+/// Pupu's inputs picked: a Programme pane on pupu's meters, by pupu's channel numbers.
+#[test]
+fn another_rigs_meters_in_a_pane() {
+    let (mut t, p) = picker_open();
+    let row = menu_picks(&t, p)
+        .into_iter()
+        .find(|r| matches!(r, PaneMenuRow::RigMeter(PUPU, _)))
+        .expect("pupu's meters");
+    let PaneMenuRow::RigMeter(_, m) = row else {
+        unreachable!()
+    };
+    t.st.update(Msg::PanePick(p, row), &t.keys);
+    let v = *t.st.layout.view(p).expect("pane");
+    assert_eq!(
+        (v.kind, v.rig, v.meters, v.meas),
+        (PaneKind::Programme, PaneRig::Rig(PUPU), Some(m), None)
+    );
+    assert_eq!(v.modes.programme, ac2_scene::view::ProgrammeMode::Meters);
+}
+
+/// A measurement row chosen in the list while another rig's pane has the focus: the rig's
+/// own pane shows it, the pinned pane stays as it was.
+#[test]
+fn a_row_chosen_leaves_another_rigs_pane() {
+    let (mut t, p) = picker_open();
+    t.st.update(
+        Msg::PanePick(p, PaneMenuRow::RigMeas(PUPU, MeasId(2))),
+        &t.keys,
+    );
+    let pinned = *t.st.layout.view(p).expect("pane");
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
+    assert_eq!(*t.st.layout.view(p).expect("pane"), pinned);
+    let f = t.st.layout.focus;
+    assert_ne!(f, p, "a pane of its own split off");
+    assert_eq!(t.st.layout.view(f).expect("pane").rig, PaneRig::Active);
+    assert_eq!(t.st.pane_meas(f).map(|m| m.id), Some(MeasId(1)));
+}
+
+/// The layout prefs keep a pinned pane's rig and its measurement's name on that rig; read
+/// back at the next start, the pane waits for that rig, held under another slot and
+/// reached anywhere, and shows its measurement once the rig says hello with its id.
+#[test]
+fn prefs_pin_a_pane_to_its_rig_by_id() {
+    let (mut t, p) = picker_open();
+    t.st.update(
+        Msg::PanePick(p, PaneMenuRow::RigMeas(PUPU, MeasId(2))),
+        &t.keys,
+    );
+    let prefs = t.st.layout_prefs();
+    let pane = prefs
+        .panes
+        .as_ref()
+        .and_then(|l| l.views.iter().find(|v| v.id == p))
+        .expect("the pane remembered");
+    assert_eq!(pane.rig, Some((PUPU, "pupu".to_string())));
+    assert_eq!(pane.measurement.as_deref(), Some("Pupu sub"));
+    // The next start: the first rig only; pupu is reached later, at a new address.
+    let ui = crate::prefs::UiPrefs {
+        layout: prefs,
+        ..Default::default()
+    };
+    let mut t = T::new();
+    t.st.set_prefs(ui);
+    t.conn(mirror(with_spl()));
+    let v = *t.st.layout.view(p).expect("pane");
+    assert_eq!((v.rig, v.meas), (PaneRig::Rig(PUPU), None));
+    assert_eq!(t.st.rig_name(PUPU), "pupu");
+    let slot = t.st.add_rig("pupu.elsewhere".into(), None, None);
+    to(
+        &mut t,
+        RigId(u64::from(slot)),
+        ConnEvent::Connected {
+            target: "pupu.elsewhere".into(),
+            server: "ac2d test".into(),
+            client_id: ClientId("c2".into()),
+            rig_id: PUPU,
+            name: "pupu".into(),
+        },
+    );
+    let mut s = with_spl();
+    s.measurements[0].config.name = "Pupu sub".into();
+    s.measurements[0].id = MeasId(7);
+    to(&mut t, PUPU, mirror(s));
+    let v = *t.st.layout.view(p).expect("pane");
+    assert_eq!((v.rig, v.meas), (PaneRig::Rig(PUPU), Some(MeasId(7))));
+}
+
+/// A rig closed and reached again (another address, its daemon restarted with other ids):
+/// its pinned pane shows the same measurement, found by name on the rig of that id.
+#[test]
+fn a_closed_rig_back_shows_its_panes_again() {
+    let (mut t, p) = picker_open();
+    t.st.update(
+        Msg::PanePick(p, PaneMenuRow::RigMeas(PUPU, MeasId(2))),
+        &t.keys,
+    );
+    pick(&mut t, RigRow::Rig(PUPU));
+    pick(&mut t, RigRow::Close(PUPU));
+    assert_eq!(t.st.active(), RIG);
+    let v = *t.st.layout.view(p).expect("pane");
+    assert_eq!((v.rig, v.meas), (PaneRig::Rig(PUPU), None));
+    assert!(t.st.pane_title(p).starts_with("pupu · "));
+    // The app has closed its link meanwhile.
+    t.st.closing.clear();
+    let slot = t.st.add_rig("10.0.0.9".into(), None, None);
+    to(
+        &mut t,
+        RigId(u64::from(slot)),
+        ConnEvent::Connected {
+            target: "10.0.0.9".into(),
+            server: "ac2d test".into(),
+            client_id: ClientId("c3".into()),
+            rig_id: PUPU,
+            name: "pupu".into(),
+        },
+    );
+    let mut s = with_spl();
+    s.measurements[0].config.name = "Pupu sub".into();
+    s.measurements[0].id = MeasId(9);
+    to(&mut t, PUPU, mirror(s));
+    let v = *t.st.layout.view(p).expect("pane");
+    assert_eq!((v.rig, v.meas), (PaneRig::Rig(PUPU), Some(MeasId(9))));
+}
+
+/// A measurement's stored panes read for the rig whose layout it is: `ThisRig` and a pin
+/// to that rig's own id are its panes, a pin to another rig stays that rig's, named.
+#[test]
+fn a_stored_pane_names_its_rig() {
+    use ac2_proto::model::layout as wire;
+    let mut t = two_mirrored();
+    fn first(l: &wire::PaneLayout) -> &wire::LayoutPane {
+        match l {
+            wire::PaneLayout::Pane { pane } => pane,
+            wire::PaneLayout::Split { a, .. } => first(a),
+        }
+    }
+    let base = t.st.pane_layout();
+    let pane = first(&base);
+    let with = |rig: wire::RigRef, meas: u32| {
+        let mut p = pane.clone();
+        p.rig = rig;
+        p.kind = wire::PaneKind::Spectrum;
+        p.content = Some(wire::PaneContent::Meas { meas: MeasId(meas) });
+        wire::PaneLayout::Pane { pane: Box::new(p) }
+    };
+    let l = wire::PaneLayout::Split {
+        axis: wire::SplitAxis::Row,
+        ratio: 0.5,
+        a: Box::new(with(wire::RigRef::ThisRig, 2)),
+        b: Box::new(wire::PaneLayout::Split {
+            axis: wire::SplitAxis::Row,
+            ratio: 0.5,
+            a: Box::new(with(
+                wire::RigRef::Rig {
+                    id: RIG,
+                    name: "this one".into(),
+                },
+                2,
+            )),
+            b: Box::new(with(
+                wire::RigRef::Rig {
+                    id: RigId(0x55),
+                    name: "kettu".into(),
+                },
+                12,
+            )),
+        }),
+    };
+    assert!(l.check().is_ok(), "{:?}", l.check());
+    t.st.rig.chosen = Some(MeasId(2));
+    t.st.show_layout(&l);
+    let rigs: Vec<(PaneRig, Option<MeasId>)> =
+        t.st.layout
+            .panes()
+            .into_iter()
+            .filter_map(|p| t.st.layout.view(p).map(|v| (v.rig, v.meas)))
+            .collect();
+    assert_eq!(
+        rigs,
+        vec![
+            (PaneRig::Active, Some(MeasId(2))),
+            (PaneRig::Active, Some(MeasId(2))),
+            (PaneRig::Rig(RigId(0x55)), Some(MeasId(12))),
+        ]
+    );
+    assert_eq!(t.st.rig_name(RigId(0x55)), "kettu");
+    // Stored again, the rig's own layout holds its own panes alone, as `ThisRig`.
+    fn rigs_of(l: &wire::PaneLayout, out: &mut Vec<wire::RigRef>) {
+        match l {
+            wire::PaneLayout::Pane { pane } => out.push(pane.rig.clone()),
+            wire::PaneLayout::Split { a, b, .. } => {
+                rigs_of(a, out);
+                rigs_of(b, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    rigs_of(&t.st.pane_layout(), &mut out);
+    assert_eq!(out, vec![wire::RigRef::ThisRig; 2]);
+}

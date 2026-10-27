@@ -449,7 +449,7 @@ impl AppState {
     pub(in crate::state) fn open_programme(&mut self, m: Metered) {
         use crate::state::panes::{Axis, Side};
         use ac2_scene::view::ProgrammeMode;
-        let Some(meters) = self.split_focused_pane() else {
+        let Some(meters) = self.split_for_new() else {
             let close = self.keys.reach(crate::keys::CommandId::ClosePane);
             self.warn(format!(
                 "no room to split the pane for the meters: {close} closes one to make room"

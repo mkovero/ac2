@@ -260,6 +260,7 @@ fn two_panes() -> PanesPrefs {
                 kind: PaneKind::Transfer,
                 measurement: Some("Main L".to_owned()),
                 meters: None,
+                rig: None,
                 modes: PaneModes {
                     transfer: TransferView::Ir(IrMode::Log),
                     ..PaneModes::default()
@@ -278,6 +279,8 @@ fn two_panes() -> PanesPrefs {
                 kind: PaneKind::Spl,
                 measurement: Some("FOH SPL".to_owned()),
                 meters: None,
+                // Pinned to another rig: kept by its id, the name for when it is away.
+                rig: Some((ac2_proto::units::RigId(0x7075_7075), "pupu".to_owned())),
                 modes: PaneModes {
                     transfer: TransferView::Coherence,
                     spl: SplMode::Leq,
@@ -330,6 +333,8 @@ fn layout_window_and_hold_round_trip() {
         "[[layout.panes]]",
         "kind = \"spl\"",
         "measurement = \"FOH SPL\"",
+        "[layout.panes.rig]",
+        "id = \"0000000070757075\"",
         "spl_view = \"leq\"",
         "spectrum_view = \"spectrograph\"",
         "transfer_view = \"ir_log\"",

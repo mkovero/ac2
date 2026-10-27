@@ -346,6 +346,20 @@ impl Rig {
         )
     }
 
+    /// As [`Self::start_as`], saving and loading sessions in `dir` (two rigs given one
+    /// directory open each other's sessions).
+    pub fn start_in(rig_id: ac2_proto::units::RigId, name: &str, dir: &std::path::Path) -> Self {
+        Self::start_with(
+            false,
+            FakeOptions {
+                rig_id,
+                name: name.to_owned(),
+                session_dir: Some(dir.to_path_buf()),
+                ..fake_options()
+            },
+        )
+    }
+
     /// Every curve with scatter, published smoothed at 1/6 octave (transfer: magnitude and
     /// phase; spectrum: power), and the spectrum measurement set to smooth.
     pub fn start_smoothed() -> Self {
@@ -722,6 +736,7 @@ fn grid_of(row: &[ac2_ui::state::View]) -> ac2_ui::prefs::PanesPrefs {
             kind: v.kind,
             measurement: None,
             meters: v.meters,
+            rig: None,
             modes: v.modes,
             levels: Default::default(),
             plates: Default::default(),

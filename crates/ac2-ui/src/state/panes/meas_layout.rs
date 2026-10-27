@@ -390,14 +390,15 @@ impl AppState {
     /// of the same kind; else it goes to a pane picked for the chosen measurement, else to
     /// a pane that shows it, else to the first of its kind. With no pane showing it, the
     /// focused pane does, as its row puts it there.
-    fn show_layout(&mut self, l: &PaneLayout) {
+    pub(in crate::state) fn show_layout(&mut self, l: &PaneLayout) {
         if l.check().is_err() {
             return;
         }
         let mut views = BTreeMap::new();
         let mut levels = Vec::new();
         let root = self.install_node(l, &mut views, &mut levels);
-        for v in views.values_mut() {
+        // Another rig's pane names that rig's ids, which this rig's mirror cannot check.
+        for v in views.values_mut().filter(|v| v.rig == PaneRig::Active) {
             v.meas = v
                 .meas
                 .filter(|id| self.meas(*id).is_some_and(|m| v.kind.shows(&m.config.kind)));
@@ -518,7 +519,10 @@ impl AppState {
         match l {
             PaneLayout::Pane { pane } => {
                 let id = self.layout.fresh_id();
-                views.insert(id, ui_view(pane));
+                if let wire::RigRef::Rig { id: r, name } = &pane.rig {
+                    self.rig_names.entry(*r).or_insert_with(|| name.clone());
+                }
+                views.insert(id, ui_view(pane, self.rig.id));
                 levels.push((id, pane.levels));
                 PaneNode::Leaf(id)
             }
@@ -592,7 +596,10 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
     }
 }
 
-fn ui_view(p: &wire::LayoutPane) -> View {
+/// A stored pane as the app holds it, read for rig `this` (the rig whose measurement's
+/// layout it is): its own panes (`ThisRig`, or pinned to it by id) are that rig's, a pane
+/// pinned to another rig shows that rig's ids.
+fn ui_view(p: &wire::LayoutPane, this: RigId) -> View {
     View {
         kind: match p.kind {
             wire::PaneKind::Transfer => PaneKind::Transfer,
@@ -607,8 +614,15 @@ fn ui_view(p: &wire::LayoutPane) -> View {
             .as_ref()
             .and_then(crate::state::Metered::from_wire),
         plates: super::plates::ui_plates(&p.plates),
-        // The rig whose measurement's layout this is: the one the reducer runs for.
-        rig: PaneRig::Active,
+        // The rig whose measurement's layout this is, the one the reducer runs for, is
+        // `Active` here; a pane given content while another rig is shown is set on it after
+        // the message ([`AppState::set_pane_rigs`]).
+        rig: match &p.rig {
+            wire::RigRef::Rig { id, .. } if *id != this => PaneRig::Rig(*id),
+            wire::RigRef::Rig { .. } | wire::RigRef::ThisRig | wire::RigRef::Active => {
+                PaneRig::Active
+            }
+        },
         modes: PaneModes {
             transfer: match p.transfer_view {
                 wire::TransferView::Magnitude => TransferView::Magnitude,
@@ -675,6 +689,6 @@ mod tests {
         v.modes.programme = ProgrammeMode::Goniometer;
         let p = wire_pane(&v, wire::LayoutLevels::default());
         assert_eq!(p.programme_view, wire::ProgrammeView::Goniometer);
-        assert_eq!(ui_view(&p), v);
+        assert_eq!(ui_view(&p, RigId(1)), v);
     }
 }

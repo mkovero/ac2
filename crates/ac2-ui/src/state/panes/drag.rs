@@ -286,6 +286,7 @@ impl AppState {
             && let Some(v) = self.layout.view_mut(p)
         {
             v.meas = Some(meas);
+            v.rig = PaneRig::Active;
         }
         if t.kind == TraceKind::Sweep {
             self.rig.sweep.shown = Some(id);

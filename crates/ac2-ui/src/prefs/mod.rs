@@ -222,6 +222,9 @@ pub struct PanePrefs {
     pub measurement: Option<String>,
     /// What a Programme pane metered.
     pub meters: Option<crate::state::Metered>,
+    /// The rig the pane was pinned to, by id (its name for the operator while it is not
+    /// connected); `None`: the pane follows the rig shown.
+    pub rig: Option<(RigId, String)>,
     pub modes: PaneModes,
     /// The level axis ranges the operator set on it (one not set is framed when the pane
     /// first shows a curve).

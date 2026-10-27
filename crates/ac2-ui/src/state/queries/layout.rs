@@ -76,14 +76,6 @@ impl AppState {
 
     /// The layout as it is now, as the preferences keep it.
     pub fn layout_prefs(&self) -> crate::prefs::LayoutPrefs {
-        let remembered = |id: PaneId| {
-            self.prefs
-                .layout
-                .panes
-                .as_ref()
-                .and_then(|p| p.views.iter().find(|v| v.id == id))
-                .and_then(|v| v.measurement.clone())
-        };
         // Unknown until the daemon's state is (and while a remembered one waits for it):
         // keep what the preferences say. No layout of the operator's yet: none is kept, and
         // neither are its panes' level axes (an automatic fit or a zoom there is no layout
@@ -98,19 +90,12 @@ impl AppState {
                 .into_iter()
                 .filter_map(|id| {
                     let v = self.layout.view(id)?;
-                    let measurement = match (self.rig.pending.pane_meas.get(&id), self.daemon()) {
-                        (Some(n), _) => Some(n.clone()),
-                        (None, None) => remembered(id),
-                        // A pane following the selection keeps following it: what it
-                        // resolves to now is not its choice.
-                        (None, Some(_)) if v.meas.is_none() => None,
-                        (None, Some(_)) => self.pane_meas(id).map(|m| m.config.name.clone()),
-                    };
                     Some(crate::prefs::PanePrefs {
                         id,
                         kind: v.kind,
-                        measurement,
+                        measurement: self.pane_pref_meas(id, v),
                         meters: v.meters,
+                        rig: self.pane_pref_rig(v),
                         modes: v.modes,
                         levels: self.operator_levels(id),
                         plates: v.plates,
@@ -118,7 +103,12 @@ impl AppState {
                 })
                 .collect(),
         });
-        let hidden = self.remembered_names(&self.rig.hidden_meas, &self.rig.pending.hidden);
+        // The hidden ones are the rig shown's: while another rig's message is handled, as
+        // they were.
+        let hidden = match self.visiting {
+            Some(_) => self.prefs.layout.hidden.clone(),
+            None => self.remembered_names(&self.rig.hidden_meas, &self.rig.pending.hidden),
+        };
         crate::prefs::LayoutPrefs {
             panes,
             maximized: self.layout.maximized,
@@ -282,6 +272,7 @@ impl AppState {
         self.view.spl.layout = prefs.leq;
         let l = &prefs.layout;
         self.rig.pending.pane_meas.clear();
+        self.rig_pending.clear();
         self.pane_levels.clear();
         self.level_set.clear();
         self.spectrum_hold.clear();
@@ -299,7 +290,10 @@ impl AppState {
                                 meters: v.meters,
                                 modes: v.modes,
                                 plates: v.plates,
-                                rig: PaneRig::Active,
+                                rig: v
+                                    .rig
+                                    .as_ref()
+                                    .map_or(PaneRig::Active, |(r, _)| PaneRig::Rig(*r)),
                             },
                         )
                     })
@@ -307,10 +301,24 @@ impl AppState {
                 self.layout = Layout::of(p.root.clone(), views, p.focus);
                 for v in &p.views {
                     self.set_operator_levels(v.id, &v.levels);
+                    if let Some((r, name)) = &v.rig {
+                        self.rig_names.entry(*r).or_insert_with(|| name.clone());
+                    }
                     if let Some(n) = &v.measurement
                         && self.layout.views.contains_key(&v.id)
                     {
-                        self.rig.pending.pane_meas.insert(v.id, n.clone());
+                        // A pinned pane's measurement waits for its rig, held now or not.
+                        match &v.rig {
+                            Some((r, _)) => {
+                                self.rig_pending
+                                    .entry(*r)
+                                    .or_default()
+                                    .insert(v.id, n.clone());
+                            }
+                            None => {
+                                self.rig.pending.pane_meas.insert(v.id, n.clone());
+                            }
+                        }
                     }
                 }
                 self.pane_auto = false;

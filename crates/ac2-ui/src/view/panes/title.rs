@@ -368,6 +368,12 @@ pub(super) fn pane_menu(
                 .show(ui, |ui| {
                     ui.set_min_width(200.0);
                     for (i, (id, text)) in rows.iter().enumerate() {
+                        if !id.pickable() {
+                            // A rig's heading over its rows: a name, not a row to take.
+                            ui.add_space(if i == 0 { 0.0 } else { 4.0 });
+                            ui.label(egui::RichText::new(text.as_str()).small().color(ch.dim));
+                            continue;
+                        }
                         let b = egui::Button::selectable(i == menu.index, text.as_str());
                         if ui.add(b).clicked() {
                             picked = Some(*id);

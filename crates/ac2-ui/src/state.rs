@@ -64,6 +64,8 @@ mod glide;
 pub use glide::SpecGlide;
 mod leq;
 pub use leq::{LeqPanes, LeqUi};
+mod cross_rig;
+pub(crate) use cross_rig::MenuRig;
 mod rig;
 mod rigs;
 pub use leq::export::{EXPORT_DIR, export_path, leq_export_name};
@@ -172,6 +174,14 @@ pub struct AppState {
     pub closing: Vec<RigState>,
     /// The names of rigs closed in this run: their panes stay, saying which rig they were.
     pub(crate) rig_names: BTreeMap<RigId, String>,
+    /// Pane measurements by name waiting for a rig this app does not hold (a pane pinned to
+    /// it in the layout prefs, or a rig closed): the rig takes them once it is held again
+    /// under that id, wherever it is reached.
+    pub(crate) rig_pending: BTreeMap<RigId, BTreeMap<PaneId, String>>,
+    /// The pane list's rows of each connected rig, while a pane's list is open: the list
+    /// offers every rig's measurements and meters, and another rig's are read with that rig
+    /// swapped in ([`AppState::refresh_menu_rigs`]).
+    pub(crate) menu_rigs: Vec<MenuRig>,
     pub theme: ThemeName,
     /// What the scene builders get; `view.freq` follows `nav`.
     pub view: ViewState,
@@ -296,6 +306,8 @@ impl AppState {
             next_slot: 1,
             closing: Vec::new(),
             rig_names: BTreeMap::new(),
+            rig_pending: BTreeMap::new(),
+            menu_rigs: Vec::new(),
             leq_panes: LeqPanes::default(),
             theme,
             view: ViewState::default(),
@@ -509,24 +521,15 @@ impl AppState {
             }
             Msg::LegendPick(p, key) => self.legend_pick(p, key),
             Msg::RigPick(row) => self.rig_pick(row, out),
-            Msg::PaneMenu(p) if !self.pane_ours(p) => {
-                // Its list would be another rig's measurements, picked from the rig shown.
-                let rig = self.layout.view(p).map(|v| self.pane_rig(v));
-                if let Some(r) = rig {
-                    let name = self.rig_name(r);
-                    self.warn(ac2_scene::chrome::rig_window_elsewhere(&name));
-                }
-            }
-            Msg::PaneMenu(p) => {
-                self.overlay = match self.overlay {
-                    Overlay::PaneMenu(m) if m.pane == p => Overlay::None,
-                    _ => self.pane_menu(p),
-                };
-            }
+            // Any pane's list, another rig's pane's too: the list offers every rig's.
+            Msg::PaneMenu(p) => match self.overlay {
+                Overlay::PaneMenu(m) if m.pane == p => self.overlay = Overlay::None,
+                _ => self.open_pane_menu(p),
+            },
             Msg::PanePick(p, row) => {
                 // The list turns this pane into meters: it opens on the bars even where an
                 // earlier G left it on the goniometer. The Edit form keeps the view.
-                if matches!(row, PaneMenuRow::Meter(_))
+                if matches!(row, PaneMenuRow::Meter(_) | PaneMenuRow::RigMeter(..))
                     && let Some(v) = self.layout.view_mut(p)
                 {
                     v.modes.programme = ac2_scene::view::ProgrammeMode::Meters;

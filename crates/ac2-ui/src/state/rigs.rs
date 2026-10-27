@@ -19,6 +19,16 @@ pub(crate) struct Visit {
     window_rig: Option<RigId>,
 }
 
+impl Visit {
+    /// The pane list open on the shown rig, if one is.
+    pub(crate) fn pane_menu(&self) -> Option<PaneMenu> {
+        match self.overlay {
+            Overlay::PaneMenu(m) => Some(m),
+            _ => None,
+        }
+    }
+}
+
 impl AppState {
     /// The rig shown (the drop-down's): the one keys and windows act on.
     pub fn active(&self) -> RigId {
@@ -139,7 +149,7 @@ impl AppState {
 
     /// What a pane given content now is set on: the shown rig, or the one in `rig` while a
     /// message for it is handled.
-    fn here(&self) -> PaneRig {
+    pub(super) fn here(&self) -> PaneRig {
         match self.visiting {
             Some(_) => PaneRig::Rig(self.rig.id),
             None => PaneRig::Active,
@@ -249,6 +259,7 @@ impl AppState {
             _ => false,
         };
         let conn = matches!(msg, Msg::Conn(..));
+        self.settle_pins();
         let ids: Vec<(u32, RigId)> = self.rigs().map(|r| (r.slot, r.id)).collect();
         let to = self.msg_rig(&msg, keymap);
         let Some(slot) = self.find_rig(to).map(|r| r.slot) else {
@@ -299,6 +310,10 @@ impl AppState {
         }
         self.follow_rig_ids(&ids);
         self.close_duplicates();
+        self.settle_pins();
+        if !self.menu_rigs.is_empty() || matches!(self.overlay, Overlay::PaneMenu(_)) {
+            self.refresh_menu_rigs();
+        }
         out.into_iter()
             .filter_map(|(s, q)| self.rig_in_slot(s).map(|r| (r.id, q)))
             .collect()
@@ -429,6 +444,7 @@ impl AppState {
             return;
         };
         let r = self.background.remove(i);
+        self.park_closed_rig(&r);
         let name = rig_label(&r);
         self.rig_names.insert(id, name.clone());
         let before = self.prefs.rigs.len();
@@ -561,6 +577,8 @@ impl AppState {
         let here = self.here();
         for (id, v) in &mut self.layout.views {
             match before.get(id) {
+                // Set on a rig by the message itself (a pick of another rig's row).
+                Some(b) if b.rig != v.rig => {}
                 Some(b) if b.meas == v.meas && b.meters == v.meters => {}
                 Some(_) => v.rig = here,
                 None if v.rig == PaneRig::Active => v.rig = here,

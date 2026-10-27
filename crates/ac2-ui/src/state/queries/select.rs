@@ -311,7 +311,7 @@ impl AppState {
         let Some(kind) = self.meas(id).map(|m| PaneKind::for_kind(&m.config.kind)) else {
             return;
         };
-        let f = self.layout.focus;
+        let f = self.own_pane_for(kind);
         self.set_pane_kind(f, kind);
         self.select_on(f, id);
         self.rig.own_panes_due = true;
@@ -439,8 +439,11 @@ impl AppState {
             self.set_pane_kind(p, kind);
         }
         self.layout.set_focus(p);
+        // The rig in `rig`'s measurement: the pane is set on that rig, whichever it showed.
+        let here = self.here();
         if let Some(v) = self.layout.view_mut(p) {
             v.meas = Some(id);
+            v.rig = here;
         }
     }
 

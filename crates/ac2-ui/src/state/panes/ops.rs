@@ -297,10 +297,10 @@ impl AppState {
     /// panes already there keep their kinds; only a pane too small to split turns into it.
     pub(in crate::state) fn stack_created(&mut self, meas: MeasId) {
         let p = match self.layout.focus_kind() {
-            PaneKind::Transfer => self.layout.focus,
+            PaneKind::Transfer if self.pane_ours(self.layout.focus) => self.layout.focus,
             _ => match self.lead(PaneKind::Transfer) {
                 Some(p) => p,
-                None => match self.split_focused_pane() {
+                None => match self.split_for_new() {
                     Some(new) => {
                         self.set_pane_kind(new, PaneKind::Transfer);
                         if let Some(v) = self.layout.view_mut(new) {
@@ -340,6 +340,43 @@ impl AppState {
         self.split_pane_at(self.layout.focus, axis, Side::B)
     }
 
+    /// A pane of its own for something new of the rig in `rig` (a measurement made, meters
+    /// opened): N's split of the focused pane, the new half set on that rig with nothing
+    /// chosen yet, whichever rig the focused pane shows.
+    pub(in crate::state) fn split_for_new(&mut self) -> Option<PaneId> {
+        let new = self.split_focused_pane()?;
+        let here = self.here();
+        if let Some(v) = self.layout.view_mut(new)
+            && v.rig != here
+        {
+            v.rig = here;
+            v.meas = None;
+            v.meters = None;
+        }
+        Some(new)
+    }
+
+    /// The pane a measurement row chosen in the list shows its measurement in: the focused
+    /// pane when it is the rig's own, else the rig's pane of `kind` worked in last, else its
+    /// first pane; with none on screen, a pane of its own split off the focused one. Another
+    /// rig's panes stay as they are.
+    pub(in crate::state) fn own_pane_for(&mut self, kind: PaneKind) -> PaneId {
+        let f = self.layout.focus;
+        if self.pane_ours(f) {
+            return f;
+        }
+        let ours = self
+            .lead(kind)
+            .or_else(|| self.layout.panes().into_iter().find(|p| self.pane_ours(*p)));
+        match ours.or_else(|| self.split_for_new()) {
+            Some(p) => {
+                self.layout.set_focus(p);
+                p
+            }
+            None => f,
+        }
+    }
+
     /// Pane `p` split in halves along `axis`, the new half on `side` (`A`: left or top),
     /// showing what `p` does and taking the focus: the new pane, or `None` when a half would
     /// be smaller than resizing keeps a pane.
@@ -375,7 +412,7 @@ impl AppState {
     /// there: with no room to split, the focused pane turns into it.
     pub(in crate::state) fn open_created(&mut self, meas: MeasId, kind: PaneKind) {
         if self.lead(kind).is_none()
-            && let Some(new) = self.split_focused_pane()
+            && let Some(new) = self.split_for_new()
         {
             self.set_pane_kind(new, kind);
             if let Some(v) = self.layout.view_mut(new) {
@@ -390,7 +427,7 @@ impl AppState {
     /// A new alignment's own pane: the focused pane split, the new half showing the
     /// alignment view of `meas` (the focused pane keeps what it shows).
     pub(in crate::state) fn open_alignment(&mut self, meas: MeasId) {
-        let Some(new) = self.split_focused_pane() else {
+        let Some(new) = self.split_for_new() else {
             let g = self.keys.label(CommandId::NextView, Scope::Transfer);
             self.warn(format!(
                 "no room to split the pane for the alignment: {} on a transfer pane steps to its view",
@@ -580,14 +617,43 @@ impl AppState {
     /// into the kind a picked one needs), then the kinds of pane no measurement brings, so
     /// a pane can still be readied for a measurement not yet made; last, the New
     /// measurement chooser, where a list of what exists is looked in for what does not.
+    /// With several rigs connected, each rig's measurements and meters come under a
+    /// heading naming it, the rig shown first ([`Self::refresh_menu_rigs`]).
     pub fn pane_menu_rows(&self, id: PaneId) -> Vec<(PaneMenuRow, String)> {
         let kind = self.layout.kind(id);
+        let (mut v, meters, brought) = if self.menu_rigs.is_empty() {
+            let own = self.own_menu_rows();
+            (own.meas, own.meters, own.brought)
+        } else {
+            let (v, brought) = self.every_rig_menu_rows();
+            (v, Vec::new(), brought)
+        };
+        v.extend(
+            PaneKind::ALL
+                .into_iter()
+                // A Programme pane is offered by what it meters.
+                .filter(|k| *k != kind && *k != PaneKind::Programme)
+                .filter(|k| !brought.contains(k))
+                .map(|k| (PaneMenuRow::Kind(k), format!("pane  {}", k.title()))),
+        );
+        v.extend(meters);
+        let key = self.keys.label(CommandId::NewMeasurement, Scope::Global);
+        v.push((
+            PaneMenuRow::NewMeasurement,
+            ac2_scene::new_meas::menu_row(key.as_deref()),
+        ));
+        v
+    }
+
+    /// The rig in `rig`'s rows of a pane's list: its measurements in the tree's order, what
+    /// it can meter, and the kinds of pane its measurements bring.
+    pub(in crate::state) fn own_menu_rows(&self) -> MenuRig {
         let meas: Vec<&Measurement> = self
             .tree_meas_order()
             .into_iter()
             .filter_map(|m| self.meas(m))
             .collect();
-        let mut v: Vec<(PaneMenuRow, String)> = meas
+        let v: Vec<(PaneMenuRow, String)> = meas
             .iter()
             .map(|m| {
                 let hidden = if self.meas_hidden(m) {
@@ -605,21 +671,16 @@ impl AppState {
                 )
             })
             .collect();
-        v.extend(
-            PaneKind::ALL
-                .into_iter()
-                // A Programme pane is offered by what it meters, below.
-                .filter(|k| *k != kind && *k != PaneKind::Programme)
-                .filter(|k| !meas.iter().any(|m| k.shows(&m.config.kind)))
-                .map(|k| (PaneMenuRow::Kind(k), format!("pane  {}", k.title()))),
-        );
-        v.extend(self.programme_menu_rows());
-        let key = self.keys.label(CommandId::NewMeasurement, Scope::Global);
-        v.push((
-            PaneMenuRow::NewMeasurement,
-            ac2_scene::new_meas::menu_row(key.as_deref()),
-        ));
-        v
+        let brought = PaneKind::ALL
+            .into_iter()
+            .filter(|k| meas.iter().any(|m| k.shows(&m.config.kind)))
+            .collect();
+        MenuRig {
+            rig: self.rig.id,
+            meas: v,
+            meters: self.programme_menu_rows(),
+            brought,
+        }
     }
 
     /// A row of pane `id`'s list taken: it shows that measurement (selected), or turns into
@@ -630,14 +691,23 @@ impl AppState {
         }
         match row {
             PaneMenuRow::Meas(m) => self.pane_show(id, m),
+            // A kind or the shown rig's meters: the pane is the shown rig's from then on.
             PaneMenuRow::Kind(k) => {
                 self.set_pane_kind(id, k);
+                if let Some(v) = self.layout.view_mut(id)
+                    && v.rig != PaneRig::Active
+                {
+                    v.rig = PaneRig::Active;
+                    v.meas = None;
+                    v.meters = None;
+                }
                 self.focus_pane(id);
             }
             PaneMenuRow::Meter(m) => {
                 self.set_pane_kind(id, PaneKind::Programme);
                 if let Some(v) = self.layout.view_mut(id) {
                     v.meters = Some(m);
+                    v.rig = PaneRig::Active;
                 }
                 self.focus_pane(id);
             }
@@ -648,6 +718,9 @@ impl AppState {
                 let keymap = self.keys.clone();
                 self.open_new_measurement(id, &keymap);
             }
+            PaneMenuRow::Heading(_) => {}
+            PaneMenuRow::RigMeas(r, m) => self.pane_show_from(id, r, m),
+            PaneMenuRow::RigMeter(r, m) => self.pane_meter_from(id, r, m),
         }
     }
 }

@@ -11,6 +11,7 @@ fn two_panes() -> ac2_ui::prefs::UiPrefs {
         kind,
         measurement: None,
         meters: None,
+        rig: None,
         modes: Default::default(),
         levels: Default::default(),
         plates: Default::default(),

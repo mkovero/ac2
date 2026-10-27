@@ -93,6 +93,15 @@ impl MetersFile {
     }
 }
 
+/// The rig a pane is pinned to: its id as 16 hex digits (as the remembered rigs keep it)
+/// and its name when pinned.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PaneRigFile {
+    id: String,
+    name: String,
+}
+
 /// One pane: its kind, measurement and the modes of each kind it may show.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -104,6 +113,9 @@ struct PaneEntryFile {
     /// A Programme pane's one-based inputs, or its pair.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     meters: Option<MetersFile>,
+    /// The rig the pane is pinned to; absent: the rig shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rig: Option<PaneRigFile>,
     #[serde(default)]
     transfer_view: TransferViewFile,
     #[serde(default = "spl_meter_leq")]
@@ -132,6 +144,10 @@ impl PaneEntryFile {
             kind: PaneFile::of(p.kind),
             measurement: p.measurement.clone(),
             meters: p.meters.as_ref().map(MetersFile::of),
+            rig: p.rig.as_ref().map(|(id, name)| PaneRigFile {
+                id: id.to_string(),
+                name: name.clone(),
+            }),
             transfer_view: match m.transfer {
                 TransferView::Magnitude => TransferViewFile::Magnitude,
                 TransferView::Phase => TransferViewFile::Phase,
@@ -176,6 +192,11 @@ impl PaneEntryFile {
             kind: self.kind.pane(),
             measurement: self.measurement.clone(),
             meters: self.meters.as_ref().and_then(MetersFile::parse),
+            // A rig id no daemon has pins to nothing: the pane follows the rig shown.
+            rig: self
+                .rig
+                .as_ref()
+                .and_then(|r| Some((parse_rig_id(&r.id)?, r.name.clone()))),
             modes: PaneModes {
                 transfer: match self.transfer_view {
                     TransferViewFile::Magnitude => TransferView::Magnitude,

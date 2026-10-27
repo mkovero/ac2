@@ -11,15 +11,19 @@ use super::*;
 use ac2_scene::primitives::Colormap;
 
 impl AppState {
-    /// The list of pane `p`, the shown measurement highlighted.
-    pub(super) fn pane_menu(&mut self, p: PaneId) -> Overlay {
+    /// The list of pane `p` opens, what it shows highlighted (else the first row a pick
+    /// can land on).
+    pub(super) fn open_pane_menu(&mut self, p: PaneId) {
+        self.overlay = Overlay::PaneMenu(PaneMenu { pane: p, index: 0 });
+        self.refresh_menu_rigs();
         let rows = self.pane_menu_rows(p);
-        let shown = self.pane_meas(p).map(|m| PaneMenuRow::Meas(m.id));
+        let shown = self.pane_menu_shown(p);
         let index = rows
             .iter()
             .position(|(r, _)| Some(*r) == shown)
+            .or_else(|| rows.iter().position(|(r, _)| r.pickable()))
             .unwrap_or(0);
-        Overlay::PaneMenu(PaneMenu { pane: p, index })
+        self.overlay = Overlay::PaneMenu(PaneMenu { pane: p, index });
     }
 
     /// Sets the smoothing of what the smoothing keys act on (`step`: +1 coarser / -1 finer
@@ -421,7 +425,7 @@ impl AppState {
                 Some(m) => self.open_programme(m),
                 None => self.warn("pick an Inputs row first: its meters open in a new pane"),
             },
-            C::PaneMeasurement => self.overlay = self.pane_menu(self.layout.focus),
+            C::PaneMeasurement => self.open_pane_menu(self.layout.focus),
             // The sweep pane draws one run at a time: V steps through the runs, never onto a
             // curve the pane cannot draw.
             C::NextTrace if self.layout.focus_kind() == PaneKind::Distortion => {

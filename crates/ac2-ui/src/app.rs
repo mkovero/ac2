@@ -669,8 +669,14 @@ impl App {
             return Some(f(self));
         }
         let v = self.state.enter(rig)?;
+        // A pane of that rig drawn with its list open: the list is the shown rig's window,
+        // drawn under that pane's chip.
+        if let Some(m) = v.pane_menu() {
+            self.state.overlay = crate::state::Overlay::PaneMenu(m);
+        }
         self.in_visit = true;
         let r = f(self);
+        self.state.overlay = crate::state::Overlay::None;
         self.state.leave(v);
         self.in_visit = false;
         for m in std::mem::take(&mut self.deferred) {

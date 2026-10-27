@@ -468,7 +468,9 @@ impl Layout {
 pub const DEFAULT_PANE_AREA: (f32, f32) = (1280.0, 760.0);
 
 /// A row of a pane's list (its title chip, `PaneMeasurement`): a measurement to show,
-/// another kind of pane to turn into, or the New measurement chooser.
+/// another kind of pane to turn into, or the New measurement chooser. `Meas` and `Meter`
+/// are the rig shown's; with several rigs connected the list also offers each other
+/// rig's under its heading, and picking one of those sets the pane on that rig.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaneMenuRow {
     Meas(MeasId),
@@ -476,4 +478,17 @@ pub enum PaneMenuRow {
     /// A Programme pane metering these inputs or this pair.
     Meter(crate::state::Metered),
     NewMeasurement,
+    /// The heading over a rig's rows: names the rig, picks nothing.
+    Heading(ac2_proto::units::RigId),
+    /// A measurement of a rig not shown, by that rig's id for it.
+    RigMeas(ac2_proto::units::RigId, MeasId),
+    /// Inputs or a pair of a rig not shown, by that rig's channel numbers.
+    RigMeter(ac2_proto::units::RigId, crate::state::Metered),
+}
+
+impl PaneMenuRow {
+    /// A row the list can land on and take (a heading only names its rig).
+    pub fn pickable(&self) -> bool {
+        !matches!(self, Self::Heading(_))
+    }
 }

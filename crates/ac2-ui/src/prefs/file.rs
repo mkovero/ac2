@@ -138,12 +138,9 @@ impl RigFile {
 
     /// The rig, unless its id is not one a daemon has (dropped, as an unknown key is).
     fn rig(self) -> Option<RememberedRig> {
-        let id = Some(self.id.as_str())
-            .filter(|s| s.len() == 16)
-            .and_then(|s| u64::from_str_radix(s, 16).ok())
-            .filter(|n| *n != 0)?;
+        let id = parse_rig_id(&self.id)?;
         Some(RememberedRig {
-            id: RigId(id),
+            id,
             name: self.name,
             addr: match self.addr {
                 RigAddrFile::Local => RigAddr::Local,
@@ -1047,9 +1044,14 @@ fn rig_key((rig, device): &(RigId, String)) -> String {
 /// it out.
 fn parse_rig_key(key: &str) -> Option<(RigId, String)> {
     let (rig, device) = key.split_once('/')?;
-    if rig.len() != 16 {
-        return None;
-    }
-    let id = u64::from_str_radix(rig, 16).ok().filter(|n| *n != 0)?;
-    Some((RigId(id), device.to_owned()))
+    Some((parse_rig_id(rig)?, device.to_owned()))
+}
+
+/// A rig id as the file writes it, 16 hex digits; `None` for one no daemon has.
+pub(super) fn parse_rig_id(s: &str) -> Option<RigId> {
+    Some(s)
+        .filter(|s| s.len() == 16)
+        .and_then(|s| u64::from_str_radix(s, 16).ok())
+        .filter(|n| *n != 0)
+        .map(RigId)
 }
