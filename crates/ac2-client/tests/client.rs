@@ -970,8 +970,15 @@ async fn two_fakes_are_two_rigs_by_id_and_name() -> R {
     let (wa, wb) = (ca.welcome(), cb.welcome());
     assert_eq!((wa.rig_id, wa.name.as_str()), (RigId(0xa), "pupu"));
     assert_eq!((wb.rig_id, wb.name.as_str()), (RigId(0xb), "ketunkolo"));
-    // A restart keeps the rig: the id is the daemon's, the incarnation the process's.
-    a.lock().restart(0xbeef);
+    // A restart keeps the rig: the id is the daemon's, the incarnation the process's. The
+    // client hears of a restart from the state the new incarnation publishes, so it is synced
+    // first and the restarted fake commits a change.
+    ca.wait_synced(DEADLINE).await?;
+    {
+        let mut s = a.lock();
+        s.restart(0xbeef);
+        s.commit(Change::Measurement(Patch::Set(spl_meas(1, "after"))));
+    }
     until("welcome refreshed", || async {
         ca.welcome().daemon_incarnation == DaemonIncarnation(0xbeef)
     })
