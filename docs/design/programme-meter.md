@@ -1612,6 +1612,28 @@ source, a relative LU readout, an Int bar.
 screenshot has no scale numbers and no goniometer grid), which confirms *Why the field pane
 had no plate*. A pair's Meters view keeps the correlation chip under its bars.
 
+**As built (stage 5).** Where the code took a different path than the text above:
+
+- `docs/protocol.md`'s layout key landed with 5a, beside the wire change it documents.
+- The Inputs list left `chrome.rs` for `ac2-ui/src/view/inputs_list.rs`, and it landed with
+  5b, as did the `ac2-plot` golden images: the scene change redraws both, so each image and
+  snapshot was blessed once. The list takes one row width for every bar line, so bars and
+  numbers line up down the list whatever egui's layout pass gives a row.
+- `row_block` takes the pair's correlation as a third argument and builds the chip there.
+- A short true-peak column thins its labels to every 30 dB (`peak_ticks`), since at the
+  dropped-rows size the 10 dB labels overprinted. The dropped-rows image keeps a one-slot
+  drop.
+- The ember rings are resized in the frame tick (`retire_embers`) when their capacity
+  differs from the decay's, which covers every way the decay changes (Settings, the form, a
+  reloaded `ui.toml`) without a call per setter. The form's row picks its index as the
+  nearest step of the `f32` grid directly.
+- The mic-pair case is an e2e against the fake daemon (`tests/it/ui/programme.rs`,
+  `a_mic_pair_on_short_loudness_reads_true_peak`) and not named `slow_…`: the fake's
+  meters answer at once, so it waits on no real Leq window and runs in 0.4 s. The line-pair
+  e2e is `programme_pane_of_a_pair`, which reads both panes' scene text.
+- The header-by-ballistic rule is pinned by the scene's `inputs_header` test rather than an
+  egui snapshot per ballistic; the snapshots show the true-peak header.
+
 ## 7. Where the settings live
 
 - **Rig settings** (daemon, `levels.set`, beside the system max level; `ac2 levels`):
@@ -1740,7 +1762,7 @@ which now says *what a chooser steps* beside `PEAK`'s *the detectors*, say that 
      (`PanePlatesFile` in `ac2-ui/src/prefs/file.rs`, `wire_plates` / `ui_plates`),
      the target row on Settings › Rig monitor and the form, T toasts, the user guide sections.
    No `ac2-core` change: the meter already computes every value.
-5. **Meter and goniometer views** (§6.3, designed): from the 2026-10-26 field report.
+5. **Meter and goniometer views** (§6.3, built): from the 2026-10-26 field report.
    Programme panes get Meters / Goniometer views stepped by **G**, and a pair brings one
    pane of each. Under a loudness ballistic the Meters view shows a true-peak block plus a
    LUFS block, each with its own scale column, a mark below the floor, and a plate sized
