@@ -100,7 +100,7 @@ fn display_and_recording_texts() {
         ThemeName::Light,
         switches,
         Some(500),
-        0.4,
+        ac2_scene::gonio::Cooling::new(0.4, 2.0),
         views,
         6.0,
         ac2_scene::advice::AdviceSettings::default(),
@@ -114,6 +114,7 @@ fn display_and_recording_texts() {
             "off: warnings and Leq limit alarms go only to the notification log",
             "0.50 s",
             "0.4 s: a goniometer point fades out that long after it lands",
+            "×2: a goniometer point lands that many times as bright",
             "tiles",
             "hidden",
             "jump to each new reading",
@@ -270,5 +271,38 @@ fn ember_decay_steps_within_its_range() {
     assert_eq!(
         step_ember_decay(EMBER_DECAY_RANGE_S.0, -1),
         EMBER_DECAY_RANGE_S.0
+    );
+}
+
+/// The ember glow steps along its ladder, stops at the range's ends, and a stored value
+/// between steps moves to the next step its way.
+#[test]
+fn ember_glow_steps_along_its_ladder() {
+    use ac2_scene::gonio::{EMBER_GLOW_DEFAULT, EMBER_GLOW_RANGE};
+    let mut g = EMBER_GLOW_RANGE.0;
+    let mut up = vec![g];
+    while step_ember_glow(g, 1) != g {
+        g = step_ember_glow(g, 1);
+        up.push(g);
+    }
+    assert_eq!(up, ember_glow_steps());
+    assert_eq!(up, [0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0]);
+    assert_eq!(step_ember_glow(EMBER_GLOW_RANGE.1, 1), EMBER_GLOW_RANGE.1);
+    assert_eq!(step_ember_glow(EMBER_GLOW_RANGE.0, -1), EMBER_GLOW_RANGE.0);
+    assert_eq!(step_ember_glow(EMBER_GLOW_DEFAULT, -1), 0.75);
+    assert_eq!(step_ember_glow(2.5, 1), 3.0);
+    assert_eq!(step_ember_glow(2.5, -1), 2.0);
+    assert_eq!(step_ember_glow(2.5, 0), 2.5);
+    assert_eq!(
+        ember_glow_text(0.75),
+        "×0.75: a goniometer point lands that many times as bright"
+    );
+    assert_eq!(
+        ember_glow_text(1.0),
+        "×1: a goniometer point lands that many times as bright"
+    );
+    assert_eq!(
+        ember_glow_text(9.0),
+        "×4: a goniometer point lands that many times as bright"
     );
 }

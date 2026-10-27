@@ -1,4 +1,5 @@
 use super::*;
+use ac2_scene::gonio::Cooling;
 
 fn inputs() -> Vec<(u16, String)> {
     [
@@ -34,7 +35,7 @@ fn focus(f: &mut Form, id: FieldId) {
     f.focus_field(i);
 }
 
-const RIG_ROWS: [&str; 8] = [
+const RIG_ROWS: [&str; 9] = [
     "## How it reads · Whose: the rig — all clients",
     "Programme meters read: true peak",
     "Loudness target: −23 LUFS",
@@ -43,6 +44,7 @@ const RIG_ROWS: [&str; 8] = [
     "Correlation gate: −60 dBFS",
     "## Display · Whose: this app",
     "Ember decay: 0.4 s: a goniometer point fades out that long after it lands",
+    "Ember glow: ×1: a goniometer point lands that many times as bright",
 ];
 
 #[test]
@@ -52,7 +54,7 @@ fn a_new_meter_starts_on_the_first_pair_and_shows_the_rigs_settings() {
         inputs(),
         None,
         LevelsSettings::default(),
-        0.4,
+        Cooling::default(),
         None,
     );
     assert_eq!(f.kind, FormKind::Programme);
@@ -79,7 +81,7 @@ fn inputs_are_picked_as_bars_by_name_each_once() {
         inputs(),
         None,
         LevelsSettings::default(),
-        0.4,
+        Cooling::default(),
         None,
     );
     // From the pair to inputs: its sides are the first two bars, a third waits empty.
@@ -140,7 +142,7 @@ fn eight_bars_at_most() {
         many,
         Some(all),
         LevelsSettings::default(),
-        0.4,
+        Cooling::default(),
         None,
     );
     let bars = f
@@ -159,7 +161,7 @@ fn without_pairs_there_is_no_meter_field() {
         inputs(),
         None,
         LevelsSettings::default(),
-        0.4,
+        Cooling::default(),
         None,
     );
     assert_eq!(
@@ -179,7 +181,14 @@ fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
         loudness_target: ac2_proto::units::Lufs(-23.0),
     };
     let m = Metered::inputs_of(&[3, 0]).expect("two");
-    let f = form(main_pair(), inputs(), Some(m), rig, 0.4, Some(PaneId(4)));
+    let f = form(
+        main_pair(),
+        inputs(),
+        Some(m),
+        rig,
+        Cooling::default(),
+        Some(PaneId(4)),
+    );
     assert_eq!(f.kind.title(), "Edit programme meter");
     assert_eq!(f.kind.verb(), "Apply");
     assert_eq!(
@@ -198,6 +207,7 @@ fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
             "Correlation gate: −70 dBFS",
             "## Display · Whose: this app",
             "Ember decay: 0.4 s: a goniometer point fades out that long after it lands",
+            "Ember glow: ×1: a goniometer point lands that many times as bright",
         ]
     );
     assert_eq!(levels(&f), Some(rig));
@@ -207,7 +217,7 @@ fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
         inputs(),
         Some(Metered::Pair { left: 2, right: 3 }),
         rig,
-        0.4,
+        Cooling::default(),
         Some(PaneId(4)),
     );
     assert_eq!(metered(&p), Ok(Metered::Pair { left: 2, right: 3 }));
@@ -243,7 +253,7 @@ fn nothing_metered_is_said() {
         Vec::new(),
         None,
         LevelsSettings::default(),
-        0.4,
+        Cooling::default(),
         None,
     );
     assert_eq!(metered(&f), Err("choose input 1".to_owned()));
@@ -259,7 +269,7 @@ fn the_ember_decay_row_lists_each_step_once() {
             inputs(),
             None,
             LevelsSettings::default(),
-            now,
+            Cooling::new(now, 1.0),
             None,
         );
         let Some(Value::Choice { options, .. }) = f.field(FieldId::EmberDecay).map(|x| &x.value)
@@ -270,5 +280,31 @@ fn the_ember_decay_row_lists_each_step_once() {
         let text = crate::settings::ember_decay_text(want);
         assert_eq!(options.iter().filter(|o| **o == text).count(), 1, "{text}");
         assert_eq!(ember_decay(&f), Some(want));
+    }
+}
+
+/// The ember glow row lists the ladder, reads as Settings › Display does, and a stored
+/// value between steps shows its nearest.
+#[test]
+fn the_ember_glow_row_lists_the_ladder() {
+    for (now, want) in [(1.0f32, 1.0f32), (4.0, 4.0), (0.8, 0.75)] {
+        let f = form(
+            main_pair(),
+            inputs(),
+            None,
+            LevelsSettings::default(),
+            Cooling::new(0.4, now),
+            None,
+        );
+        let Some(Value::Choice { options, .. }) = f.field(FieldId::EmberGlow).map(|x| &x.value)
+        else {
+            panic!("the ember glow row");
+        };
+        assert_eq!(options.len(), 7);
+        assert_eq!(
+            options[4],
+            "×2: a goniometer point lands that many times as bright"
+        );
+        assert_eq!(ember_glow(&f), Some(want));
     }
 }

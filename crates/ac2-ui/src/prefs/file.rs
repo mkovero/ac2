@@ -32,6 +32,9 @@ struct File {
     /// Written only when not the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ember_decay_s: Option<f32>,
+    /// Written only when not the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ember_glow: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     theme: Option<ThemeFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -799,6 +802,10 @@ impl UiPrefs {
                 ac2_scene::gonio::EMBER_DECAY_DEFAULT_S,
                 ac2_scene::gonio::clamp_decay,
             ),
+            ember_glow: f.ember_glow.map_or(
+                ac2_scene::gonio::EMBER_GLOW_DEFAULT,
+                ac2_scene::gonio::clamp_glow,
+            ),
             advice: f
                 .advice
                 .as_ref()
@@ -846,6 +853,8 @@ impl UiPrefs {
             spl_hold_ms: self.spl_hold_ms,
             ember_decay_s: (self.ember_decay_s != ac2_scene::gonio::EMBER_DECAY_DEFAULT_S)
                 .then_some(self.ember_decay_s),
+            ember_glow: (self.ember_glow != ac2_scene::gonio::EMBER_GLOW_DEFAULT)
+                .then_some(self.ember_glow),
             advice: AdviceFile::from_prefs(&self.advice),
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,

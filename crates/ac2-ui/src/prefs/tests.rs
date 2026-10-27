@@ -675,6 +675,26 @@ fn ember_decay_round_trips_and_clamps() {
     assert_eq!(read(""), EMBER_DECAY_DEFAULT_S);
 }
 
+/// The ember glow is written only when changed, read back, and a hand-edited value outside
+/// its range is clamped into it.
+#[test]
+fn ember_glow_round_trips_and_clamps() {
+    use ac2_scene::gonio::{EMBER_GLOW_DEFAULT, EMBER_GLOW_RANGE};
+    assert!(!UiPrefs::default().to_toml().contains("ember_glow"));
+    let p = UiPrefs {
+        ember_glow: 3.0,
+        ..UiPrefs::default()
+    };
+    let text = p.to_toml();
+    assert!(text.contains("ember_glow = 3.0"), "{text}");
+    assert_eq!(UiPrefs::from_toml(&text).expect("parses").ember_glow, 3.0);
+    let read = |t: &str| UiPrefs::from_toml(t).expect("parses").ember_glow;
+    assert_eq!(read("ember_glow = 100.0\n"), EMBER_GLOW_RANGE.1);
+    assert_eq!(read("ember_glow = 0.0\n"), EMBER_GLOW_RANGE.0);
+    assert_eq!(read("ember_glow = -2.0\n"), EMBER_GLOW_RANGE.0);
+    assert_eq!(read(""), EMBER_GLOW_DEFAULT);
+}
+
 /// A Programme pane keeps what it meters, one-based in the file; inputs no pane can meter
 /// (input 0) bring the pane back empty rather than refusing the file.
 #[test]

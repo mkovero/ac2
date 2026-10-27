@@ -203,6 +203,8 @@ pub enum FieldId {
     CorrelationGate,
     /// The goniometer's fade: this app's (Settings › Display), not the rig's.
     EmberDecay,
+    /// How bright a goniometer point lands: this app's too.
+    EmberGlow,
 }
 
 /// A field's value: typed text, one of a few options (←/→ pick), or an input of the session

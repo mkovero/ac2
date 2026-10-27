@@ -11,7 +11,7 @@ use crate::common;
 use crate::embers::{self, Figure};
 
 use ac2_plot::{Anchor, Color, HAlign, Label, Layer, VAlign, Viewport, ember_points};
-use ac2_scene::gonio::EMBER_DECAY_DEFAULT_S;
+use ac2_scene::gonio::{Cooling, EMBER_DECAY_DEFAULT_S};
 use ac2_scene::plate::{PlatePlace, SEE_THROUGH_ALPHA};
 use ac2_scene::programme::loudness::{LoudnessReadout, MIC_TEXT};
 use ac2_scene::programme::{
@@ -305,7 +305,7 @@ fn programme_goniometer() {
             square.h > h * 0.85,
             "{name}: the square fills the pane: {square:?}"
         );
-        let points = ember_points(&ring, embers::NOW, EMBER_DECAY_DEFAULT_S, square);
+        let points = ember_points(&ring, embers::NOW, Cooling::default(), square);
         s.scene.layers[0].points.push(points);
         let mut r = renderer(gpu);
         let img = render_on(gpu, &mut r, &s.scene, 1.0, theme.background);

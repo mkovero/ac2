@@ -435,6 +435,10 @@ impl AppState {
                     crate::settings::step_ember_decay(self.prefs.ember_decay_s, d);
                 self.prefs_dirty = true;
             }
+            DisplayRow::EmberGlow if d != 0 => {
+                self.prefs.ember_glow = crate::settings::step_ember_glow(self.prefs.ember_glow, d);
+                self.prefs_dirty = true;
+            }
             // The G keys of the pane of that kind worked in last, so the spectrograph's
             // history comes and goes as it does there; the focus stays where it was.
             DisplayRow::SpectrumView | DisplayRow::SweepView if d != 0 => {

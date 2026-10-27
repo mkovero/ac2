@@ -102,6 +102,7 @@ fn the_chooser_row_opens_the_form_with_the_rigs_settings() {
             "An over is above: 0.0 dBTP",
             "Correlation gate: −60 dBFS",
             "Ember decay: 0.4 s: a goniometer point fades out that long after it lands",
+            "Ember glow: ×1: a goniometer point lands that many times as bright",
         ]
     );
     assert_eq!(

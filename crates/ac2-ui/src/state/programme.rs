@@ -192,7 +192,7 @@ impl AppState {
         }
         let shown = self.programme_pairs_shown();
         self.programme.rings.retain(|k, _| shown.contains(k));
-        let capacity = ac2_scene::gonio::ring_capacity(self.ember_decay_s());
+        let capacity = ac2_scene::gonio::ring_capacity(self.ember_cooling());
         if let Some(tf) = d.latest.get(&Topic::SessionGonio)
             && let FrameData::SessionGonio(g) = &tf.frame.data
             && self.programme.gonio_seq != Some(tf.frame.stamp.seq)
@@ -210,23 +210,23 @@ impl AppState {
         }
     }
 
-    /// Lets the embers older than the decay go (every frame tick), and sizes each ring to
-    /// the decay set now (Settings › Display or the programme meter form), so every ember
-    /// lives its whole ramp.
+    /// Lets the embers that no longer show go (every frame tick), and sizes each ring to
+    /// the decay and glow set now (Settings › Display or the programme meter form), so
+    /// every ember lives its whole ramp.
     pub(in crate::state) fn retire_embers(&mut self) {
-        let (now, decay) = (self.now_s, self.ember_decay_s());
-        let capacity = ac2_scene::gonio::ring_capacity(decay);
+        let (now, cooling) = (self.now_s, self.ember_cooling());
+        let capacity = ac2_scene::gonio::ring_capacity(cooling);
         for r in self.programme.rings.values_mut() {
             if r.capacity() != capacity {
                 r.set_capacity(capacity);
             }
-            r.retire(now, decay);
+            r.retire(now, cooling);
         }
     }
 
-    /// The ember cooling time constant the operator set (Settings › Display).
-    pub fn ember_decay_s(&self) -> f32 {
-        ac2_scene::gonio::clamp_decay(self.prefs.ember_decay_s)
+    /// How the embers cool as the operator set it (Settings › Display): decay and glow.
+    pub fn ember_cooling(&self) -> ac2_scene::gonio::Cooling {
+        ac2_scene::gonio::Cooling::new(self.prefs.ember_decay_s, self.prefs.ember_glow)
     }
 
     /// What Programme pane `id` shows: its bars, its pair's chip, the ballistic in force;

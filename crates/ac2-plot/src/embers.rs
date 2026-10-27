@@ -2,7 +2,7 @@
 //! ring becomes. The truth (where each point is, how old, how bright it landed) is
 //! `ac2_scene::gonio`'s; this file only chooses colours.
 
-use ac2_scene::gonio::{AshStage, EmberRing, ash_stage, brightness, place};
+use ac2_scene::gonio::{AshStage, Cooling, EmberRing, ash_stage, brightness, place};
 
 use crate::scene::{Blend, Color, Point, Points, Rect};
 
@@ -32,16 +32,16 @@ pub fn ember_color(stage: AshStage, brightness: f32) -> Color {
 }
 
 /// The ring as an additive point cloud in the goniometer's `square`
-/// ([`ac2_scene::gonio::square`]) at display time `now` with the cooling constant
-/// `decay_s`; oldest points first, so the freshest land on top.
-pub fn ember_points(ring: &EmberRing, now: f64, decay_s: f32, square: Rect) -> Points {
+/// ([`ac2_scene::gonio::square`]) at display time `now`, cooling as `cooling` (decay and
+/// glow); oldest points first, so the freshest land on top.
+pub fn ember_points(ring: &EmberRing, now: f64, cooling: Cooling, square: Rect) -> Points {
     let points = ring
         .age(now)
         .map(|e| Point {
             pos: place(square, e.x, e.y),
             color: ember_color(
-                ash_stage(e.age_s, decay_s),
-                brightness(e.age_s, decay_s, e.intensity),
+                ash_stage(e.age_s, cooling),
+                brightness(e.age_s, cooling, e.intensity),
             ),
         })
         .collect();
@@ -82,7 +82,7 @@ mod tests {
         ring.push_frame(0.0, &[[127, 0, 127]]);
         ring.push_frame(1.0, &[[0, 127, 64]]);
         let sq = Rect::new(0.0, 0.0, 100.0, 100.0);
-        let pts = ember_points(&ring, 1.0, 0.4, sq);
+        let pts = ember_points(&ring, 1.0, Cooling::new(0.4, 1.0), sq);
         assert_eq!(pts.blend, Blend::Additive);
         assert_eq!(pts.clip, Some(sq));
         assert_eq!(pts.points.len(), 2);

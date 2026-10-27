@@ -3,7 +3,7 @@
 //! Programme pane for that pane; and its Enter.
 
 use super::*;
-use crate::meter_dialog::{ember_decay, levels, metered, wanted};
+use crate::meter_dialog::{ember_decay, ember_glow, levels, metered, wanted};
 
 impl AppState {
     /// The session's pairs as the dialog offers them: each pair row of the Inputs list whose
@@ -33,7 +33,7 @@ impl AppState {
             inputs,
             now,
             rig,
-            self.prefs.ember_decay_s,
+            self.ember_cooling(),
             edit,
         ))
     }
@@ -51,7 +51,7 @@ impl AppState {
         }
     }
 
-    /// Enter on the dialog: the ember decay is this app's and set here; the rig's settings
+    /// Enter on the dialog: the ember decay and glow are this app's and set here; the rig's settings
     /// changed here go out as one `levels.set`, then
     /// the meters open in a new pane beside the focused one, or change in the edited pane.
     pub(super) fn submit_meter(&mut self, out: &mut Vec<Request>) {
@@ -68,11 +68,15 @@ impl AppState {
         let Some((opened, edit)) = f.meter.as_ref().map(|x| (x.opened, x.edit)) else {
             return;
         };
-        let ember = ember_decay(f);
+        let (ember, glow) = (ember_decay(f), ember_glow(f));
         self.overlay = Overlay::None;
         // This app's, as on Settings › Display: one value, whichever page sets it.
         if let Some(e) = ember.filter(|e| *e != self.prefs.ember_decay_s) {
             self.prefs.ember_decay_s = e;
+            self.prefs_dirty = true;
+        }
+        if let Some(g) = glow.filter(|g| *g != self.prefs.ember_glow) {
+            self.prefs.ember_glow = g;
             self.prefs_dirty = true;
         }
         let rig = self.daemon().map(|s| s.rig.clone()).unwrap_or_default();

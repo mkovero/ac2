@@ -142,7 +142,7 @@ once).
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
 | Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
-| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
+| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
 | Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
 #### System max level
@@ -365,8 +365,9 @@ laid out and keyed like the measurement forms (**↑/↓** field, **←/→** ch
   Rig monitor. They are the rig's, so every app on it reads the same bar: a value changed
   here goes out on **Enter** as one `levels.set` of only what was changed, and **Esc** sends
   nothing.
-- **Display · Whose: this app** — *Ember decay*, the goniometer's fade: the same setting as
-  Settings › Display, kept by **Enter** and left alone by **Esc**.
+- **Display · Whose: this app** — *Ember decay*, the goniometer's fade, and *Ember glow*, how
+  bright its points land: the same settings as Settings › Display, kept by **Enter** and left
+  alone by **Esc**.
 
 **Enter** opens the meters beside the focused one (never in place of it), and for a pair
 its goniometer pane on their left; the meters take the focus, and one **Ctrl+Z** takes
@@ -450,7 +451,11 @@ shifts as the value changes.
   phase on the horizontal. Each point lands bright and cools from white through yellow,
   orange and red to grey: **Settings › Display › Ember decay**, or the same row on the
   programme meter form, sets how long (0.1 … 2 s, 0.4 s by default; ←/→ step 0.1 s), and
-  every point keeps its whole fade. The picture is auto-gained by the daemon; its frame says nothing
+  every point keeps its whole fade. **Ember glow**, beside it, sets how hot a point lands:
+  ×0.5 … ×4 of its level's brightness (×1 by default; ←/→ step ×0.5, ×0.75, ×1, ×1.5, ×2,
+  ×3, ×4). A hotter glow lands brighter, stays white longer and fades to grey later, which
+  lifts sparse or quiet material; a cooler one lands already orange and keeps a dense
+  programme from washing the square out. The picture is auto-gained by the daemon; its frame says nothing
   about level — read the bars for that.
 - **The loudness plate** (ITU-R BS.1770 / EBU R128, by EBU Tech 3341 and 3342): a pane whose
   inputs make exactly one source — a pair, one line input, one side of a pair, or such a

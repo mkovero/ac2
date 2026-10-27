@@ -274,6 +274,7 @@ pub enum DisplayRow {
     WarningToasts,
     SplHold,
     EmberDecay,
+    EmberGlow,
     LeqStyle,
     LeqHistory,
     LeqBars,
@@ -293,12 +294,13 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 21] = [
+    pub const ALL: [DisplayRow; 22] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
         DisplayRow::SplHold,
         DisplayRow::EmberDecay,
+        DisplayRow::EmberGlow,
         DisplayRow::LeqStyle,
         DisplayRow::LeqHistory,
         DisplayRow::LeqBars,
@@ -324,6 +326,7 @@ impl DisplayRow {
             DisplayRow::WarningToasts => "Warning toasts",
             DisplayRow::SplHold => "SPL number holds",
             DisplayRow::EmberDecay => ac2_scene::programme::form::EMBER_TITLE,
+            DisplayRow::EmberGlow => ac2_scene::programme::form::GLOW_TITLE,
             DisplayRow::LeqStyle => "Leq windows",
             DisplayRow::LeqHistory => "Leq history strip",
             DisplayRow::LeqBars => "Leq bars",
@@ -362,7 +365,6 @@ pub fn theme_name(t: ThemeName) -> &'static str {
     }
 }
 
-/// The SPL hold ←/→ choose.
 /// One ←/→ step of the goniometer's ember decay, seconds.
 const EMBER_STEP_S: f32 = 0.1;
 
@@ -394,6 +396,35 @@ pub fn ember_decay_text(s: f32) -> String {
         "{} s: a goniometer point fades out that long after it lands",
         ac2_scene::format::fixed(f64::from(ac2_scene::gonio::clamp_decay(s)), 1)
     )
+}
+
+/// The ember glows ←/→ step through: closer at the dim end, where a quarter step already
+/// shows, and doubling at the hot end, where brightness clips at full and only the longer
+/// tail tells steps apart.
+const EMBER_GLOWS: [f32; 7] = [0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0];
+
+/// The ember glow one step from `g` within [`EMBER_GLOWS`]; a stored value between steps
+/// moves to the next step its way.
+pub fn step_ember_glow(g: f32, d: i32) -> f32 {
+    let g = ac2_scene::gonio::clamp_glow(g);
+    let next = match d.signum() {
+        1 => EMBER_GLOWS.iter().find(|s| **s > g),
+        -1 => EMBER_GLOWS.iter().rev().find(|s| **s < g),
+        _ => None,
+    };
+    next.copied().unwrap_or(g)
+}
+
+/// Every ember glow ←/→ reaches.
+pub fn ember_glow_steps() -> Vec<f32> {
+    EMBER_GLOWS.to_vec()
+}
+
+/// `×2: a goniometer point lands that many times as bright`.
+pub fn ember_glow_text(g: f32) -> String {
+    let n = ac2_scene::format::fixed(f64::from(ac2_scene::gonio::clamp_glow(g)), 2);
+    let n = n.trim_end_matches('0').trim_end_matches('.');
+    format!("×{n}: a goniometer point lands that many times as bright")
 }
 
 pub fn step_hold(h: Option<u32>, d: i32) -> Option<u32> {
@@ -493,7 +524,7 @@ pub fn display_rows(
     theme: ThemeName,
     switches: DisplaySwitches,
     spl_hold_ms: Option<u32>,
-    ember_decay_s: f32,
+    embers: ac2_scene::gonio::Cooling,
     views: PaneViews,
     jump_prominence_db: f64,
     advice: ac2_scene::advice::AdviceSettings,
@@ -517,7 +548,8 @@ pub fn display_rows(
                         format!("{} s", ac2_scene::format::fixed(f64::from(ms) / 1e3, 2))
                     }
                 },
-                DisplayRow::EmberDecay => ember_decay_text(ember_decay_s),
+                DisplayRow::EmberDecay => ember_decay_text(embers.decay_s()),
+                DisplayRow::EmberGlow => ember_glow_text(embers.glow()),
                 DisplayRow::LeqStyle => match views.leq.style {
                     LeqStyle::Columns => "columns".into(),
                     LeqStyle::Tiles => "tiles".into(),

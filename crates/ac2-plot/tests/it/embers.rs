@@ -82,7 +82,7 @@ fn frame(fig: Figure, start_s: f64, rng: &mut u32) -> Vec<WirePoint> {
 /// the newest landing at [`NOW`]: whatever its capacity holds of them.
 pub(crate) fn ring(fig: Figure, decay_s: f32) -> EmberRing {
     let mut rng = 0x5eed_1234 ^ fig as u32;
-    let mut ring = EmberRing::new(gonio::ring_capacity(decay_s));
+    let mut ring = EmberRing::new(gonio::ring_capacity(gonio::Cooling::new(decay_s, 1.0)));
     for f in 0..PUSHED {
         let landed = NOW - (PUSHED - 1 - f) as f64 * FRAME_S;
         ring.push_frame(landed, &frame(fig, landed, &mut rng));
@@ -100,7 +100,12 @@ fn gonio_layer(ring: &EmberRing, decay_s: f32, rect: Rect, chrome: bool) -> Laye
     if chrome {
         layer.polylines = gonio::grid_polylines(square, GRID);
     }
-    layer.points.push(ember_points(ring, NOW, decay_s, square));
+    layer.points.push(ember_points(
+        ring,
+        NOW,
+        gonio::Cooling::new(decay_s, 1.0),
+        square,
+    ));
     layer
 }
 
@@ -237,7 +242,7 @@ fn the_slow_ring_keeps_its_tail() {
     let slow = ring(Figure::Noise, 2.0);
     let tail = slow.age(NOW).filter(|e| e.age_s >= 1.5).count();
     assert!(tail >= POINTS * 30, "{tail} points of 1.5 s and older");
-    assert!(gonio::brightness(1.5, 2.0, 1.0) > 0.0);
+    assert!(gonio::brightness(1.5, gonio::Cooling::new(2.0, 1.0), 1.0) > 0.0);
     let fast = ring(Figure::Noise, 0.4);
     assert_eq!(fast.len(), POINTS * 60);
 }
@@ -252,5 +257,8 @@ fn chrome_flag_hides_the_grid() {
     assert!(hidden.polylines.is_empty());
     assert_eq!(shown.points, hidden.points);
     assert_eq!(shown.points[0].blend, Blend::Additive);
-    assert_eq!(shown.points[0].points.len(), gonio::ring_capacity(0.4));
+    assert_eq!(
+        shown.points[0].points.len(),
+        gonio::ring_capacity(gonio::Cooling::default())
+    );
 }

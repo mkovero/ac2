@@ -28,6 +28,8 @@ pub struct MeterForm {
     target: Vec<f64>,
     /// The ember decay's options, seconds ([`crate::settings::ember_decay_steps`]).
     ember: Vec<f32>,
+    /// The ember glow's options ([`crate::settings::ember_glow_steps`]).
+    glow: Vec<f32>,
     /// The rig's settings when the dialog opened: a field still at its value is not sent.
     pub opened: LevelsSettings,
     /// The Programme pane whose meters change in place; `None`: a new pane.
@@ -52,14 +54,14 @@ struct What {
 
 /// The dialog over the session's `pairs` and `inputs`, starting from `now` (an edited pane's
 /// meters; for a new pane what to start from, else the first pair, else the first input), and
-/// the rig's settings `rig`, and this app's ember decay `ember_s`. `edit`: the pane it
-/// changes in place.
+/// the rig's settings `rig`, and how this app's embers cool `embers` (decay and glow).
+/// `edit`: the pane it changes in place.
 pub fn form(
     pairs: Vec<((u16, u16), String)>,
     inputs: Vec<(u16, String)>,
     now: Option<Metered>,
     rig: LevelsSettings,
-    ember_s: f32,
+    embers: ac2_scene::gonio::Cooling,
     edit: Option<PaneId>,
 ) -> Form {
     let kind = match edit {
@@ -118,6 +120,7 @@ pub fn form(
             LOUDNESS_TARGET_RANGE,
         ),
         ember: crate::settings::ember_decay_steps(),
+        glow: crate::settings::ember_glow_steps(),
         pairs,
         inputs,
         opened: rig,
@@ -126,7 +129,8 @@ pub fn form(
     let mut f = Form::new(kind, Vec::new());
     f.fields = what_fields(&meter, &what);
     f.fields.extend(rig_fields(&meter, rig));
-    f.fields.push(ember_field(&meter.ember, ember_s));
+    f.fields.push(ember_field(&meter.ember, embers.decay_s()));
+    f.fields.push(glow_field(&meter.glow, embers.glow()));
     f.meter = Some(Box::new(meter));
     rehead(&mut f);
     f
@@ -251,14 +255,17 @@ fn rig_fields(m: &MeterForm, l: LevelsSettings) -> Vec<Field> {
     ]
 }
 
-/// The goniometer's fade, the same setting as Settings › Display's: a stored value between
-/// steps shows as its nearest step.
-fn ember_field(all: &[f32], now: f32) -> Field {
-    let index = all
-        .iter()
+/// The index of the step of `all` nearest `now`: a stored value between steps shows as it.
+fn nearest(all: &[f32], now: f32) -> usize {
+    all.iter()
         .enumerate()
         .min_by(|a, b| (a.1 - now).abs().total_cmp(&(b.1 - now).abs()))
-        .map_or(0, |(i, _)| i);
+        .map_or(0, |(i, _)| i)
+}
+
+/// The goniometer's fade, the same setting as Settings › Display's.
+fn ember_field(all: &[f32], now: f32) -> Field {
+    let index = nearest(all, now);
     Field {
         id: FieldId::EmberDecay,
         label: words::EMBER_TITLE.to_owned(),
@@ -271,6 +278,28 @@ fn ember_field(all: &[f32], now: f32) -> Field {
         },
         hint: words::EMBER_NOTE.to_owned(),
     }
+}
+
+/// The goniometer's glow, the same setting as Settings › Display's.
+fn glow_field(all: &[f32], now: f32) -> Field {
+    Field {
+        id: FieldId::EmberGlow,
+        label: words::GLOW_TITLE.to_owned(),
+        value: Value::Choice {
+            options: all
+                .iter()
+                .map(|g| crate::settings::ember_glow_text(*g))
+                .collect(),
+            index: nearest(all, now),
+        },
+        hint: words::GLOW_NOTE.to_owned(),
+    }
+}
+
+/// The ember glow the form shows, a gain.
+pub fn ember_glow(f: &Form) -> Option<f32> {
+    let m = f.meter.as_deref()?;
+    m.glow.get(f.choice_index(FieldId::EmberGlow)?).copied()
 }
 
 /// The ember decay the form shows, seconds.
@@ -388,7 +417,7 @@ pub(crate) fn cycle(f: &mut Form, d: i32) -> bool {
     let rigs: Vec<Field> = f
         .fields
         .iter()
-        .filter(|x| is_rig(x.id) || x.id == FieldId::EmberDecay)
+        .filter(|x| is_rig(x.id) || matches!(x.id, FieldId::EmberDecay | FieldId::EmberGlow))
         .cloned()
         .collect();
     f.fields = what_fields(&m, &w);

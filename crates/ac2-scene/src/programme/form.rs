@@ -21,6 +21,10 @@ pub const DISPLAY_HEADING: &str = "Display";
 pub const EMBER_TITLE: &str = "Ember decay";
 /// Under the ember decay row.
 pub const EMBER_NOTE: &str = "how long a goniometer point glows; also Settings › Display";
+/// The ember glow row's label: Settings › Display's.
+pub const GLOW_TITLE: &str = "Ember glow";
+/// Under the ember glow row.
+pub const GLOW_NOTE: &str = "how bright a goniometer point lands; also Settings › Display";
 
 /// The field that picks a pair or the inputs.
 pub const METER: &str = "Meter";

@@ -311,6 +311,9 @@ pub struct UiPrefs {
     /// The goniometer embers' cooling time constant, seconds
     /// (`ac2_scene::gonio::EMBER_DECAY_RANGE_S`).
     pub ember_decay_s: f32,
+    /// The goniometer embers' glow, a gain on landing intensity
+    /// (`ac2_scene::gonio::EMBER_GLOW_RANGE`).
+    pub ember_glow: f32,
     /// The transfer panes' headroom advice: on or off and its thresholds.
     pub advice: ac2_scene::advice::AdviceSettings,
     /// The layout as last left.
@@ -377,6 +380,7 @@ impl Default for UiPrefs {
             jump_prominence_db: ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB,
             spl_hold_ms: None,
             ember_decay_s: ac2_scene::gonio::EMBER_DECAY_DEFAULT_S,
+            ember_glow: ac2_scene::gonio::EMBER_GLOW_DEFAULT,
             advice: ac2_scene::advice::AdviceSettings::default(),
             layout: LayoutPrefs::default(),
             ir_levels: IrLevelPrefs::default(),

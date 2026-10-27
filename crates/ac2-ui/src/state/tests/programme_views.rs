@@ -154,20 +154,49 @@ fn the_forms_ember_decay_is_this_apps_setting() {
     }
 }
 
+/// The form's Ember glow row: Enter keeps the value in this app's settings, Esc leaves it.
+#[test]
+fn the_forms_ember_glow_is_this_apps_setting() {
+    let mut t = meter_t();
+    for (close, want) in [("Escape", 1.0), ("Enter", 1.5)] {
+        t.key("Ctrl+M");
+        t.st.update(Msg::Choose(Some(7)), &t.keys);
+        let Overlay::Form(f) = &t.st.overlay else {
+            panic!("no form: {:?}", t.st.overlay)
+        };
+        let at = f
+            .fields
+            .iter()
+            .position(|x| x.id == crate::forms::FieldId::EmberGlow)
+            .expect("glow row");
+        for _ in 0..at {
+            t.key("ArrowDown");
+        }
+        t.key("ArrowRight");
+        t.key(close);
+        assert_eq!(t.st.prefs.ember_glow, want, "{close}");
+    }
+}
+
 /// A ring is sized for the decay set now: a longer decay grows it on the next tick, so
 /// every ember lives its whole ramp.
 #[test]
 fn a_rings_capacity_follows_the_decay() {
-    use ac2_scene::gonio::{EmberRing, ring_capacity};
+    use ac2_scene::gonio::{Cooling, EmberRing, ring_capacity};
     let mut t = T::new();
     t.conn(mirror(rig_with_pair()));
     t.st.prefs.ember_decay_s = 0.4;
     t.st.programme
         .rings
-        .insert((2, 3), EmberRing::new(ring_capacity(0.4)));
+        .insert((2, 3), EmberRing::new(ring_capacity(Cooling::default())));
     t.st.prefs.ember_decay_s = 2.0;
     t.tick(1.0);
-    assert_eq!(t.st.programme.rings[&(2, 3)].capacity(), ring_capacity(2.0));
+    let cap = |decay, glow| ring_capacity(Cooling::new(decay, glow));
+    assert_eq!(t.st.programme.rings[&(2, 3)].capacity(), cap(2.0, 1.0));
+    // A hotter glow lives longer: the ring grows for it too.
+    t.st.prefs.ember_glow = 4.0;
+    t.tick(1.0);
+    assert_eq!(t.st.programme.rings[&(2, 3)].capacity(), cap(2.0, 4.0));
 }
 
 /// The docked loudness plate's first drag starts where it was docked, at the size it was
