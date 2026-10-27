@@ -58,7 +58,7 @@ pub struct App {
     rigs: Vec<RigState>,          // in tab order; at least the embedded or first rig
     active: RigId,                // the tab shown
     layout: PaneTree,             // panes with cross-rig sources (§2)
-    settings: Settings,           // app-wide (how the operator likes to read)
+    prefs: UiPrefs,               // app-wide (how the operator likes to read)
     // view, nav, toasts, rasteriser … (app-level as today)
 }
 ```
@@ -76,14 +76,24 @@ stable across reconnects, address changes, renames and a move from local to netw
 pairing still keys on the CURVE key, and the Connection page shows that key's fingerprint as
 today.
 
+`RigId(u64)` joins the id newtypes in `ac2-proto/src/units.rs` (random, never 0); on the
+wire it is a JSON number like `daemon_incarnation`. `<config>/rig-id` holds it as 16
+lowercase hex digits and a newline, written with `ac2_paths::write_private_atomic`; an
+unreadable file is set aside (`ac2_paths::set_aside_damaged`) and a new id made and logged —
+a reconnecting app then sees a new rig, never a wrong one.
+
 The hello reply (`Welcome`, `ac2-proto/src/ctrl/reply.rs`) gains `rig_id: RigId` and
-`name: String`. The name is the `--name` that network mode advertises, defaulting to
-*ac2 on <hostname>* in every mode; the embedded daemon's is *this computer*. It is re-read
+`name: String`. `DaemonConfig` gains `name: String` (default *ac2 on <hostname>*);
+`Advertise.name` is taken from it and `--name` no longer requires `--listen`; the app's
+embedded daemon sets *this computer* where it builds its `DaemonConfig`
+(`ac2-ui/src/embedded.rs`). `ac2 daemon` prints the name and id beside the server line, so
+an operator can read a rig's id on its host. `docs/protocol.md` §2 documents both fields. It is re-read
 on each connect and is display only. `FakeOptions` (`ac2-client/src/fake.rs`) gains both, so
-tests can start two distinguishable fake daemons; `ConnEvent::Connected` and
+tests can start two distinguishable fake daemons (its `Welcome` is built in
+`fake_session.rs`); `ConnEvent::Connected` and
 `ConnState::Connected` carry them.
 
-**Ids are per daemon.** `MeasId`, `TraceId`, `PairId` and frame topics collide across rigs,
+**Ids are per daemon.** `MeasId`, `TraceId`, input and pair channel numbers and frame topics collide across rigs,
 and the app keys a dozen maps by them today (bar origins, traces, edits, peaks,
 spectrographs, SPL holds, selection…). Every such key becomes `(RigId, MeasId)` (or lives
 inside the `RigState` that owns it), every reducer event names its rig, and the link thread
@@ -99,11 +109,11 @@ stage 1; the tabs are the small part.
   `lost_selection`, `own_panes`, `lost_own_panes`, `own_panes_due`, `layout_queue`,
   `pending`, the `*_on_create` names, `choose_when_open`, `open_session_when_empty`);
   `stimulus`, `sweep`, `armed_with`, `stim_device`, `finder`, `embedded_autosave`;
-  `devices`, `devices_for`, `preview_sent_s`; `input_pick` (input numbers are a daemon's);
+  `chosen`, `devices`, `devices_for`, `preview_sent_s`; `input_pick` (input numbers are a daemon's);
   `link_wants`; `leq`'s history, spans and logs; `ProgrammeUi`'s flying peaks and rings
   (keyed by input channel, which collide across rigs).
-- *The app's* (`App`): `layout`, `pane_area`, `pane_levels`, `spectrum_hold` and every
-  other map by `PaneId` (plate hover, pane export, `leq`'s strips and cursor), `view`, `nav`,
+- *The app's* (`App`): `layout`, `pane_area`, `pane_levels`, `spectrum_hold`, `level_set` and
+  every other map by `PaneId` (plate hover, pane export, `leq`'s strips and cursor), `view`, `nav`,
   `theme`, `prefs`, `prefs_dirty`, `export_dir`, `local_zone`, `build_id`, `overlay`,
   `help_scroll`, `help_page`, `toasts`, `notices`, `rasterizer`, `now_s`, `quit`,
   `fullscreen`, `panes_only`, `swallow_text`, `pane_auto`, `client_key` (one CURVE identity
@@ -128,7 +138,8 @@ already clears the device list (another daemon has other ports); with the split 
 that rig's state only.
 
 **Remembered per device.** `UiPrefs.sessions` and `outputs` are keyed by device id strings,
-and `jack:system` exists on both rigs in use: they are keyed by `(RigId, device)`.
+and `jack:system` exists on both rigs in use: they are keyed by `(RigId, device)`. Entries
+under the old string keys are dropped on the first save (pre-1.0, no shim).
 
 Keys are routed by **one rule**: a command that resolves to a pane — the focused pane's
 scope, or a global command that acts on the most recently used pane of a kind
@@ -162,7 +173,7 @@ Option<PaneContent>` (`None`: the measurement whose layout this is; programme-me
 and `programme_view`. It gains the rig; there is no wrapper type:
 
 ```rust
-pub struct LayoutPane { /* kind, views, chrome, content as today */ #[serde(default)] pub rig: RigRef }
+pub struct LayoutPane { /* kind, views, chrome, content as today */ pub rig: RigRef }
 pub enum RigRef {
     /// App prefs only: the pane follows the active tab (the single-rig meaning).
     Active,
@@ -174,7 +185,9 @@ pub enum RigRef {
 }
 ```
 
-The serde default is `ThisRig`; `Active` is the default in the layout prefs. In a
+`rig` is required on the wire and in the session manifest (no serde default: the bumps
+make older files unreadable anyway, and `check()` is the one truth); `rig/v7.rs` fills
+`ThisRig` for a rig file 7. `Active` is the default in the layout prefs. In a
 **session file** a pane's rig is `ThisRig` or `Rig`, never `Active`: a session is one
 daemon's, and "the active tab" at load time could be another rig's ids. Enforced where each
 side can: `PaneLayout::check()` (the daemon's refusal point for `meas.layout`, and for the
@@ -293,9 +306,11 @@ trace is today (decision 8b): the magnitude stands, the absolute time does not.
 ## 5. Discovery and pairing (N5)
 
 Browse lists every rig on the network; each is connected and paired on its own, as today.
-The app remembers connected rigs (key, last address, name) and reconnects them at start;
-a rig not found stays as a greyed tab until it answers or is closed. Names come from the
-rig and are display only (`ac2-discovery` already trusts nothing).
+The app remembers rigs by `RigId` in `ui.toml` (`UiPrefs.rigs`: id, name, last address, and
+the pinned CURVE key fingerprint in network mode) and reconnects them at start; the embedded
+rig is remembered by its `app-rig-id` and hosted again. A rig not found stays a greyed tab
+until it answers or is closed. Names come from the rig and are display only
+(`ac2-discovery` already trusts nothing).
 
 ## 6. What stays single
 
@@ -322,14 +337,16 @@ rig and are display only (`ac2-discovery` already trusts nothing).
 1. **Many rigs, tabs, mixed panes**, in four parts that each land green:
    - **1a — wire and files** (no UI behaviour change): `RigIdSource` and its files,
      `Welcome { rig_id, name }`, `--name` in every mode, `LayoutPane.rig` and `check()`'s
-     refusals, PROTO 72 / session format 36 / rig file 8, `FakeOptions`, protocol fixtures
-     and `WIRE_LOCK`.
+     refusals, PROTO 72 / session format 36 / rig file 8, `DaemonConfig.name`, `ac2 daemon`
+     printing name and id, `FakeOptions` and the fake's `Welcome`, protocol fixtures,
+     `WIRE_LOCK` and `docs/protocol.md`.
    - **1b — `App { rigs, active }` with exactly one rig**: every rig field of §1 moved into
      `RigState`, `Conn` per rig, `Msg::Conn(RigId, …)`, `(RigId, Request)`, per-rig
-     `sync_link`, prefs keyed by `(RigId, device)`. Snapshot- and behaviour-neutral: every
+     `sync_link`, prefs keyed by `(RigId, device)`, the rig's name where
+     `ConnState::Connected` is shown (top bar, Connection page). Snapshot- and behaviour-neutral: every
      existing test passes unchanged.
-   - **1c — many rigs**: Connect… adds a rig, the drop-down, remembered rigs and reconnect
-     at start, greyed tabs and panes (*unreachable · retrying*, *not connected*), arm line
+   - **1c — many rigs**: Connect… adds a rig, the drop-down, remembered rigs
+     (`UiPrefs.rigs`) and reconnect at start, greyed tabs and panes (*unreachable · retrying*, *not connected*), arm line
      and banner naming the rig, Shift+Escape fanned out, quit stopping every rig in
      parallel, windows bound to their rig.
    - **1d — cross-rig panes**: `View.rig`, picker and drag across rigs, pane titles naming
