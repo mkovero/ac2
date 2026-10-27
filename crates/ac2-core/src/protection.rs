@@ -16,7 +16,11 @@
 //! dBFS of the absolute sample value (full scale = 1.0).
 //!
 //! Banners report persistent conditions to the operator with hysteresis in both level and
-//! time, so a signal sitting at a threshold does not flicker a banner on and off.
+//! time, so a signal sitting at a threshold does not flicker a banner on and off. The
+//! banners judge levels over spans of at least [`ProtectionConfig::level_span_s`], not per
+//! block: noise read over a few milliseconds swings by several dB (a 256-frame block of
+//! pink noise reads more than 1 dB under its RMS about half the time), so a per-block test
+//! would hold a banner whose level hysteresis the signal's true level clears.
 //! **NO SIGNAL** (measurement channel below its floor while the reference is present) is a
 //! banner only: a silent measurement channel is still a valid measurement of a muted or
 //! disconnected system, and its low coherence already says so on the trace.
@@ -37,6 +41,9 @@ pub struct ProtectionConfig {
     /// Level hysteresis for clearing NO REFERENCE / NO SIGNAL: the level must exceed the
     /// floor by this much, dB.
     pub level_hysteresis_db: f64,
+    /// Shortest span a banner's level is read over, seconds; blocks are pooled until they
+    /// cover it, so the reading does not depend on the device's block size.
+    pub level_span_s: f64,
     /// A level condition must persist this long before its banner is raised, seconds.
     pub raise_after_s: f64,
     /// A level banner clears after its condition has been absent this long, seconds.
@@ -54,6 +61,7 @@ impl Default for ProtectionConfig {
             weak_reference_db: 20.0,
             running_level_tau_s: 2.0,
             level_hysteresis_db: 3.0,
+            level_span_s: 0.125,
             raise_after_s: 0.25,
             clear_after_s: 0.5,
             clip_hold_s: 1.0,
@@ -181,6 +189,17 @@ impl Latch {
     }
 }
 
+/// Mean-square energy of blocks pooled for one banner level reading.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct Span {
+    /// Σ reference mean square × block duration.
+    reference: f64,
+    /// Σ measurement mean square × block duration.
+    measurement: f64,
+    /// Σ block duration, seconds.
+    duration_s: f64,
+}
+
 /// Per-job protection state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Guard {
@@ -191,6 +210,7 @@ pub struct Guard {
     no_reference: Latch,
     no_signal: Latch,
     since_clip: Option<f64>,
+    span: Span,
 }
 
 impl Guard {
@@ -203,6 +223,7 @@ impl Guard {
             no_reference: Latch::default(),
             no_signal: Latch::default(),
             since_clip: None,
+            span: Span::default(),
         }
     }
 
@@ -218,18 +239,9 @@ impl Guard {
         let clipped =
             peak_dbfs(b.reference_peak).max(peak_dbfs(b.measurement_peak)) >= c.clip_threshold_dbfs;
         let ref_db = rms_dbfs(b.reference_rms);
-        let meas_db = rms_dbfs(b.measurement_rms);
         // A NaN level (corrupt samples) counts as missing, never as present.
         let ref_missing = ref_db.is_nan() || ref_db < c.reference_floor_dbfs;
-        let ref_back = ref_db >= c.reference_floor_dbfs + c.level_hysteresis_db;
-
-        self.no_reference
-            .step(ref_missing, ref_back, dt, c.raise_after_s, c.clear_after_s);
-        // NO SIGNAL only makes a statement while the reference is there.
-        let sig_missing = !ref_missing && (meas_db.is_nan() || meas_db < c.signal_floor_dbfs);
-        let sig_back = ref_missing || meas_db >= c.signal_floor_dbfs + c.level_hysteresis_db;
-        self.no_signal
-            .step(sig_missing, sig_back, dt, c.raise_after_s, c.clear_after_s);
+        self.banner_levels(b);
         self.since_clip = if clipped {
             Some(0.0)
         } else {
@@ -269,6 +281,34 @@ impl Guard {
             BlockDecision::HoldWeakReference => self.counters.weak_reference += 1,
         }
         decision
+    }
+
+    /// Pool `b` into the current span; once the span covers [`ProtectionConfig::level_span_s`],
+    /// step the level banners on its levels.
+    fn banner_levels(&mut self, b: &BlockLevels) {
+        let c = self.config;
+        let dt = b.duration_s.max(0.0);
+        let sp = &mut self.span;
+        sp.reference += b.reference_rms * b.reference_rms * dt;
+        sp.measurement += b.measurement_rms * b.measurement_rms * dt;
+        sp.duration_s += dt;
+        if sp.duration_s < c.level_span_s || sp.duration_s <= 0.0 {
+            return;
+        }
+        let span = std::mem::take(sp);
+        let ref_db = rms_dbfs((span.reference / span.duration_s).sqrt());
+        let meas_db = rms_dbfs((span.measurement / span.duration_s).sqrt());
+        let dt = span.duration_s;
+        // A NaN level (corrupt samples) counts as missing, never as present.
+        let ref_missing = ref_db.is_nan() || ref_db < c.reference_floor_dbfs;
+        let ref_back = ref_db >= c.reference_floor_dbfs + c.level_hysteresis_db;
+        self.no_reference
+            .step(ref_missing, ref_back, dt, c.raise_after_s, c.clear_after_s);
+        // NO SIGNAL only makes a statement while the reference is there.
+        let sig_missing = !ref_missing && (meas_db.is_nan() || meas_db < c.signal_floor_dbfs);
+        let sig_back = ref_missing || meas_db >= c.signal_floor_dbfs + c.level_hysteresis_db;
+        self.no_signal
+            .step(sig_missing, sig_back, dt, c.raise_after_s, c.clear_after_s);
     }
 
     /// Counters since construction or [`Guard::reset_counters`].
@@ -413,6 +453,54 @@ mod tests {
         }
         g.process(&block(-30.0, -30.0));
         assert!(!g.banners().no_reference);
+    }
+
+    /// Pink noise 4 dB above the reference floor, in 256-frame blocks: most blocks sit more
+    /// than 1 dB under the noise's RMS, inside the clear hysteresis, yet the reference is
+    /// clearly back and NO REFERENCE clears within a few clear times.
+    #[test]
+    fn no_reference_clears_on_pink_noise_in_short_blocks() {
+        use crate::generator::{BandLimit, Generator, GeneratorConfig, Signal};
+        let fs = 48_000.0;
+        let mut g = Guard::new(ProtectionConfig::default());
+        let silence = vec![0.0f32; 256];
+        for _ in 0..100 {
+            g.process(&BlockLevels::from_samples(&silence, &silence, fs));
+        }
+        assert!(g.banners().no_reference);
+        let mut pink = Generator::new(&GeneratorConfig {
+            signal: Signal::Pink,
+            sample_rate: fs,
+            seed: 7,
+            band: BandLimit::NONE,
+            level_dbfs: -76.0,
+            ceiling_dbfs: 0.0,
+        })
+        .expect("pink");
+        let mut buf = vec![0.0f32; 256];
+        let (mut blocks, mut in_band) = (0usize, 0usize);
+        while g.banners().no_reference && blocks < 375 {
+            pink.fill(&mut buf);
+            let b = BlockLevels::from_samples(&buf, &buf, fs);
+            in_band += usize::from(rms_dbfs(b.reference_rms) < -77.0);
+            g.process(&b);
+            blocks += 1;
+        }
+        assert!(
+            !g.banners().no_reference,
+            "still NO REFERENCE after {:.2} s",
+            blocks as f64 * 256.0 / fs
+        );
+        assert!(
+            in_band * 4 > blocks,
+            "{in_band} of {blocks} blocks inside the hysteresis band"
+        );
+        // The same noise never raises it either: its span levels stay well above the floor.
+        for _ in 0..1000 {
+            pink.fill(&mut buf);
+            g.process(&BlockLevels::from_samples(&buf, &buf, fs));
+            assert!(!g.banners().no_reference);
+        }
     }
 
     #[test]
