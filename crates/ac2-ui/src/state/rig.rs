@@ -127,6 +127,10 @@ pub struct RigState {
     pub input_pick: Option<u16>,
     /// What the link was last asked to receive, and how often ([`crate::link_wants`]).
     pub(crate) link_wants: crate::link_wants::Sent,
+    /// Whether the link was last asked for the input meters (a new link has none): each
+    /// rig's link follows its own session, so it is asked by what it was asked last, never
+    /// by what the shown rig wanted a moment ago.
+    pub(crate) meters_asked: bool,
     /// Spectrum / RTA measurements seen running, so a start is told from a run going on.
     pub(super) spectrum_running: BTreeSet<MeasId>,
     /// `meas.layout` calls in flight and the edits waiting for them.
@@ -232,6 +236,7 @@ impl RigState {
             programme: ProgrammeUi::default(),
             input_pick: None,
             link_wants: crate::link_wants::Sent::default(),
+            meters_asked: false,
             spectrum_running: BTreeSet::new(),
             layout_queue: LayoutQueue::default(),
             own_panes_due: false,

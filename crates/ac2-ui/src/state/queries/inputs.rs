@@ -164,7 +164,9 @@ impl AppState {
         rows
     }
 
-    /// Subscribes, opens, renews and closes what [`Self::meter_wants`] changed to.
+    /// Subscribes, opens, renews and closes what [`Self::meter_wants`] changed to. The
+    /// input meters follow what this rig's link was last asked: a switch changes the rig in
+    /// `rig` between `before` and now.
     /// The preview carries the dialog's kinds and pairs as they stand when it is asked for
     /// (a device change or the renewal), not on every edit: the dialog's rows are the
     /// truth while it is open, the frames' declaration follows at the next renewal.
@@ -178,7 +180,8 @@ impl AppState {
         out: &mut Vec<Request>,
     ) {
         let after = self.meter_wants();
-        if before.0 != after.0 {
+        if self.rig.meters_asked != after.0 {
+            self.rig.meters_asked = after.0;
             out.push(Request::Meters(after.0));
         }
         let renew = tick && self.now_s - self.rig.preview_sent_s >= PREVIEW_RENEW_S;

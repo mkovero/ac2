@@ -257,10 +257,18 @@ impl AppState {
         };
         let mut out: Vec<(u32, Request)> = Vec::new();
         if to == self.rig.id {
+            self.switched_at = None;
+            let reqs = self.update_active(msg, keymap);
+            // A switch midway: what follows it (the meters, the device list, the layout
+            // of the rig now shown) is the new rig's, not the one the message was for.
+            let (at, shown) = match self.switched_at.take() {
+                Some(at) => (at, self.rig.slot),
+                None => (reqs.len(), slot),
+            };
             out.extend(
-                self.update_active(msg, keymap)
-                    .into_iter()
-                    .map(|q| (slot, q)),
+                reqs.into_iter()
+                    .enumerate()
+                    .map(|(i, q)| (if i < at { slot } else { shown }, q)),
             );
         } else if let Some(v) = self.enter(to) {
             out.extend(
@@ -387,6 +395,7 @@ impl AppState {
         );
         std::mem::swap(&mut self.rig, &mut self.background[i]);
         self.view.tf.phase_reference = self.rig.phase_reference.take();
+        self.switched_at = Some(out.len());
         let unpin = |l: &mut Layout| {
             for v in l.views.values_mut() {
                 if v.rig == PaneRig::Rig(to) {

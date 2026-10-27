@@ -163,6 +163,9 @@ pub struct AppState {
     /// While a message for a rig in the background is handled, that rig is swapped in as
     /// `rig` and this is the shown rig's id ([`AppState::visit`]).
     visiting: Option<RigId>,
+    /// Set by a switch during [`AppState::update`]: how many of the requests made so far
+    /// were the rig shown before. Those after it are the newly shown rig's, for its link.
+    switched_at: Option<usize>,
     /// The slot the next rig added takes.
     next_slot: u32,
     /// Rigs closed, whose links the app closes (stopping the stimulus they hold first).
@@ -289,6 +292,7 @@ impl AppState {
             rig: RigState::new(target),
             background: Vec::new(),
             visiting: None,
+            switched_at: None,
             next_slot: 1,
             closing: Vec::new(),
             rig_names: BTreeMap::new(),

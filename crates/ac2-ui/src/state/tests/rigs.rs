@@ -594,3 +594,58 @@ fn a_connected_rig_is_remembered() {
     );
     assert!(t.st.prefs_dirty);
 }
+
+/// Each rig's link is asked for its input meters while that rig's session is open, which
+/// rig is shown or not: the Inputs list shows the shown rig's, and a switch neither turns
+/// another rig's meters off nor asks them of the wrong link.
+#[test]
+fn input_meters_follow_each_rig_through_switches() {
+    const BARE: RigId = RigId(0xba5e);
+    let mut t = T::fresh();
+    t.st.layout = grid();
+    t.st.pane_auto = false;
+    let mut meters: std::collections::HashMap<RigId, bool> = Default::default();
+    fn note(m: &mut std::collections::HashMap<RigId, bool>, r: Vec<(RigId, Request)>) {
+        for (rig, q) in r {
+            if let Request::Meters(on) = q {
+                m.insert(rig, on);
+            }
+        }
+    }
+    for (id, name, state) in [
+        (RIG, "test rig", with_spl()),
+        (PUPU, "pupu", with_spl()),
+        (BARE, "bare", no_session_state()),
+    ] {
+        let slot = if id == RIG {
+            t.st.rig.slot
+        } else {
+            t.st.add_rig(name.into(), None, None)
+        };
+        let hello = ConnEvent::Connected {
+            target: name.into(),
+            server: "ac2d test".into(),
+            client_id: ClientId(name.into()),
+            rig_id: id,
+            name: name.into(),
+        };
+        let now = t.st.rig_in_slot(slot).expect("rig").id;
+        note(&mut meters, to(&mut t, now, hello));
+        note(&mut meters, to(&mut t, id, mirror(state)));
+    }
+    let want = |m: &std::collections::HashMap<RigId, bool>| {
+        let on = |r| m.get(&r).copied().unwrap_or(false);
+        (on(RIG), on(PUPU), on(BARE))
+    };
+    assert_eq!(want(&meters), (true, true, false), "{meters:?}");
+    for to_rig in [PUPU, BARE, RIG, BARE, PUPU, RIG] {
+        let r = pick(&mut t, RigRow::Rig(to_rig));
+        assert_eq!(t.st.active(), to_rig);
+        note(&mut meters, r);
+        assert_eq!(
+            want(&meters),
+            (true, true, false),
+            "after showing {to_rig:?}: {meters:?}"
+        );
+    }
+}

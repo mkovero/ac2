@@ -179,3 +179,53 @@ fn shift_esc_stops_every_rig() {
         stopped(&pupu.fake) && stopped(&kettu.fake)
     });
 }
+
+/// The readout of the shown rig's Inputs-list row for input 1.
+fn in1_reading(a: &App) -> Option<String> {
+    a.state
+        .session_inputs()
+        .into_iter()
+        .find(|r| r.channel == 0)
+        .map(|r| r.reading.text)
+}
+
+/// Both fakes meter their inputs, input 1 peaking at `peak` dBFS (its RMS 3 dB below).
+fn metering(rig: &common::Rig, peak: f32) {
+    let mut s = rig.fake.lock();
+    s.set_input_peak(0, peak);
+    s.meters = true;
+}
+
+/// The Inputs list meters the rig shown, whichever was shown before and however the rig
+/// was added: kettu's once Connect… shows it, pupu's again after the drop-down goes back,
+/// both following their own daemon's levels.
+#[test]
+fn the_inputs_meter_the_rig_shown() {
+    if !have_gpu("the_inputs_meter_the_rig_shown") {
+        return;
+    }
+    let keys = tempfile::tempdir().expect("key directory");
+    let pupu = common::Rig::start_as(PUPU, "pupu");
+    let kettu = common::Rig::start_as(KETTU, "kettu");
+    metering(&pupu, -10.0);
+    metering(&kettu, -20.0);
+    let mut h = on_pupu(&pupu, keys.path());
+    step_until(&mut h, "pupu's in 1 metered", |a| {
+        in1_reading(a).as_deref() == Some("−13.0")
+    });
+    connect_kettu(&mut h, &kettu, Duration::from_secs(10));
+    step_until(&mut h, "kettu's in 1 metered", |a| {
+        in1_reading(a).as_deref() == Some("−23.0")
+    });
+    kettu.fake.lock().set_input_peak(0, -25.0);
+    step_until(&mut h, "kettu's in 1 following it", |a| {
+        in1_reading(a).as_deref() == Some("−28.0")
+    });
+
+    pick_first_rig(&mut h);
+    step_until(&mut h, "pupu shown", |a| a.state.active() == PUPU);
+    pupu.fake.lock().set_input_peak(0, -30.0);
+    step_until(&mut h, "pupu's in 1 following it again", |a| {
+        in1_reading(a).as_deref() == Some("−33.0")
+    });
+}
