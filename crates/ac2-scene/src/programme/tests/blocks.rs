@@ -272,3 +272,26 @@ fn g_steps_only_with_a_pair() {
     assert_eq!(M::Goniometer.prev(false), M::Goniometer);
     assert_eq!(M::default(), M::Meters);
 }
+
+#[test]
+fn a_squeezed_block_writes_its_row_words_once() {
+    let rig = Rig::new();
+    let p = rig.pane(&[2, 3], Ballistic::TruePeak);
+    let words = |w: f32| {
+        texts(&scene(&p, PlotChrome::Full, w, 450.0))
+            .iter()
+            .filter(|t| *t == "max")
+            .count()
+    };
+    assert_eq!(words(1700.0), 2, "room for a word in every column");
+    assert_eq!(
+        words(250.0),
+        1,
+        "squeezed, the second bar's word would run into the first bar's value"
+    );
+    let values = texts(&scene(&p, PlotChrome::Full, 250.0, 450.0));
+    assert!(
+        !values.iter().any(|t| t.ends_with('…')),
+        "the values keep their width: {values:?}"
+    );
+}

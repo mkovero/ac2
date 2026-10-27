@@ -204,12 +204,24 @@ pub(super) fn bars(c: &mut Canvas, p: &ProgrammePane, area: Rect, style: Style) 
         // values right-aligned at one edge (the unit stays put, the digits grow left), the
         // words and the flags from the other, CLIP at the right. A centred readout would
         // shift with every digit the value gains or loses.
-        let block = text_width("max −120.0 dBTP", small).min(col_w - 4.0);
+        //
+        // Neighbouring columns face each other with a right-aligned value and a left-aligned
+        // word; squeezed together they read as one line ("−11.8 dBTP max"). A squeezed block
+        // writes its row words once, in its first column, as a table writes a row heading.
+        let full = text_width("max −120.0 dBTP", small);
+        let squeezed = full + text_width(GUTTER, small) > col_w;
+        let word = !squeezed || k == 0 || k == n_peak;
+        let block = full.min(col_w - 4.0);
         let cols = Columns {
             xl: cx - block / 2.0,
             xr: cx + block / 2.0,
             block,
-            value_w: block - text_width("max ", small),
+            value_w: if word {
+                block - text_width("max ", small)
+            } else {
+                block
+            },
+            word,
             cx,
             col_w,
             line,
@@ -229,12 +241,18 @@ pub(super) fn bars(c: &mut Canvas, p: &ProgrammePane, area: Rect, style: Style) 
     }
 }
 
+/// The least room between two neighbouring columns' readouts.
+const GUTTER: &str = "m";
+
 /// A bar column's text places.
 struct Columns {
     xl: f32,
     xr: f32,
     block: f32,
     value_w: f32,
+    /// This column writes the row words ("max"); a squeezed block's later columns leave
+    /// them to its first.
+    word: bool,
     cx: f32,
     col_w: f32,
     line: f32,
@@ -317,15 +335,17 @@ fn peak_text(
         );
         y += k.line;
     }
-    k.put(
-        c,
-        "max".to_owned(),
-        k.xl,
-        HAlign::Left,
-        theme.text_dim,
-        y,
-        false,
-    );
+    if k.word {
+        k.put(
+            c,
+            "max".to_owned(),
+            k.xl,
+            HAlign::Left,
+            theme.text_dim,
+            y,
+            false,
+        );
+    }
     let max = input.max_text(ballistic);
     let max = max.strip_prefix("max ").unwrap_or(&max);
     k.put(
@@ -484,15 +504,17 @@ fn source_text(c: &mut Canvas, s: &SourceBar, target: f64, k: &Columns, mut y: f
         true,
     );
     y += k.line;
-    k.put(
-        c,
-        "max".to_owned(),
-        k.xl,
-        HAlign::Left,
-        theme.text_dim,
-        y,
-        false,
-    );
+    if k.word {
+        k.put(
+            c,
+            "max".to_owned(),
+            k.xl,
+            HAlign::Left,
+            theme.text_dim,
+            y,
+            false,
+        );
+    }
     k.put(
         c,
         cut_to(&s.max_value_text(), k.value_w, small),
