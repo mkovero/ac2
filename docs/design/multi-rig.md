@@ -63,6 +63,12 @@ pub struct App {
 }
 ```
 
+As built, the app-level struct keeps the name `AppState` (`App` is the eframe app) and holds
+the active rig by value, `rig: RigState`, beside `background: Vec<RigState>`: the
+reducer's methods then borrow a rig's fields next to the app's as they borrow any field,
+where a `Vec` index would borrow every rig at once. `AppState::active()` is the active
+`RigId`, `rigs()` every rig, the active one first; switching the tab swaps a rig in.
+
 `RigId` is a daemon identity the hello reply carries: a random id the daemon makes once and
 keeps. It cannot be the CURVE key: a local (ipc) or embedded daemon runs without CURVE and
 has none (`server.key` is only loaded in network mode). The daemon loads it at every start,

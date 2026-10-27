@@ -31,8 +31,10 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   `docs/design/multi-rig.md`, decisions N1–N6. Stage 1a (wire and files) landed: a daemon
   keeps its identity in `rig-id` (`app-rig-id` for the app's embedded daemon), the hello
   carries `rig_id` and `name` (`ac2d --name` in every mode), every layout pane names its
-  rig (PROTO 72, session format 36, rig file 8). Next: 1b, `App { rigs, active }` with one
-  rig (*Stages*).
+  rig (PROTO 72, session format 36, rig file 8). Stage 1b landed: the app's state is split
+  into one `RigState` per daemon (`AppState.rig` the active one, `background` the others;
+  each owns its link, its events and requests carry its `RigId`, `ui.toml` remembers
+  devices per rig), still with one rig. Next: 1c, many rigs (*Stages*).
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
