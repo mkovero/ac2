@@ -107,6 +107,7 @@ use crate::state::{Axis, PaneId, PaneKind, PaneModes, PaneNode, TransferView};
 
 mod file;
 mod layout;
+mod rig_file;
 #[cfg(test)]
 mod tests;
 
