@@ -1,22 +1,25 @@
-//! The Programme pane under a loudness ballistic, end to end: the scene's loudness bars
-//! (a pair's summed source and a mono one, the dashed target, the max ticks), the true-peak
-//! fallback bar with its reason, and the loudness plate docked beside, above, with dropped
-//! slots, floating see-through and solid, and hidden at *traces only* with its room kept
-//! (docs/design/programme-meter.md §6.2). The values are asserted headless in `ac2-scene`;
+//! The Programme pane end to end: the Meters view of a pair under a loudness ballistic (the
+//! true-peak block, then the LUFS block with its dashed target and max tick, the
+//! correlation strip under the bars, the plate fitted beside or above), a reading below the
+//! floor, a line + mic Inputs pane, the plate floating see-through and solid, the true-peak
+//! fallback at *full* and *no grid*, and the Goniometer view filling its pane
+//! (docs/design/programme-meter.md §6.3). The values are asserted headless in `ac2-scene`;
 //! this checks that the renderer draws what the scene says, and that tabular labels keep
 //! their digits in columns.
 
 use crate::common;
+use crate::embers::{self, Figure};
 
-use ac2_plot::{Anchor, Color, HAlign, Label, Layer, VAlign, Viewport};
+use ac2_plot::{Anchor, Color, HAlign, Label, Layer, VAlign, Viewport, ember_points};
+use ac2_scene::gonio::EMBER_DECAY_DEFAULT_S;
 use ac2_scene::plate::{PlatePlace, SEE_THROUGH_ALPHA};
 use ac2_scene::programme::loudness::{LoudnessReadout, MIC_TEXT};
 use ac2_scene::programme::{
     Ballistic, Correlation, ProgrammeBar, ProgrammeInput, ProgrammePair, ProgrammePane, Scale,
-    ScaleKind, SideFlags, SourceBar, loudness_plate, programme_scene, scale_w,
+    SourceBar, TRUE_PEAK_SHOWN, programme_scene,
 };
 use ac2_scene::theme::Theme;
-use ac2_scene::view::{PlotChrome, Style};
+use ac2_scene::view::{PlotChrome, ProgrammeMode, Style};
 use ac2_testkit::image::{Image, ImageTolerance};
 use common::{golden, gpu, render, render_on, renderer, scene};
 
@@ -24,9 +27,6 @@ const TEXT: ImageTolerance = ImageTolerance {
     channel: 32,
     max_bad_fraction: 0.005,
 };
-
-/// The scene's outer padding around the pane's parts (`programme_scene`).
-const PAD: f32 = 10.0;
 
 fn input(label: &str, scale: Scale, level: f32) -> ProgrammeInput {
     ProgrammeInput {
@@ -42,36 +42,29 @@ fn input(label: &str, scale: Scale, level: f32) -> ProgrammeInput {
     }
 }
 
+/// A true-peak bar under a loudness ballistic: what the input reads, and its reason when it
+/// has no source.
+fn peak(input: ProgrammeInput, reason: Option<&str>) -> ProgrammeBar {
+    ProgrammeBar::Peak {
+        input,
+        note: reason.map(|r| format!("{TRUE_PEAK_SHOWN} · {r}")),
+    }
+}
+
 /// `Main` summed: a reading above target (the warm end of the zone), a max further up.
 fn main_bar() -> SourceBar {
     SourceBar {
         name: "Main".into(),
         reading: Some(-21.4),
         max: Some(-18.2),
-        true_peak: Some(-3.1),
-        sides: vec![
-            SideFlags {
-                overs: 2,
-                clipped: false,
-            },
-            SideFlags {
-                overs: 0,
-                clipped: false,
-            },
-        ],
     }
 }
 
-fn mono_bar() -> SourceBar {
+fn mono_bar(reading: f64, max: f64) -> SourceBar {
     SourceBar {
-        name: "Vox mono".into(),
-        reading: Some(-31.7),
-        max: Some(-26.0),
-        true_peak: Some(-9.4),
-        sides: vec![SideFlags {
-            overs: 0,
-            clipped: false,
-        }],
+        name: "Vox".into(),
+        reading: Some(reading),
+        max: Some(max),
     }
 }
 
@@ -90,14 +83,19 @@ fn readout() -> LoudnessReadout {
     }
 }
 
-/// A Pair pane on `ShortTerm`: one summed bar, the goniometer, the plate where `plate` puts it.
-fn pair_pane(plate: PlatePlace) -> ProgrammePane {
+/// A pair pane on `ShortTerm` in `view`: L and R true peak (one over on L), the summed
+/// LUFS bar, the plate where `plate` puts it.
+fn pair_pane(view: ProgrammeMode, plate: PlatePlace) -> ProgrammePane {
+    let mut l = input("Main L", Scale::Dbfs, -14.0);
+    l.overs = 1;
+    let r = input("Main R", Scale::Dbfs, -16.0);
     ProgrammePane {
-        inputs: vec![
-            input("Main L", Scale::Dbfs, -14.0),
-            input("Main R", Scale::Dbfs, -16.0),
+        inputs: vec![l.clone(), r.clone()],
+        bars: vec![
+            peak(l, None),
+            peak(r, None),
+            ProgrammeBar::Source(main_bar()),
         ],
-        bars: vec![ProgrammeBar::Source(main_bar())],
         pair: Some(ProgrammePair {
             name: "Main".into(),
             correlation: Correlation::Value(0.874),
@@ -108,13 +106,23 @@ fn pair_pane(plate: PlatePlace) -> ProgrammePane {
         loudness: Some(readout()),
         plate,
         plate_hover: None,
+        view,
     }
 }
 
-fn scaled(scale: f32) -> PlatePlace {
-    let mut p = PlatePlace::default();
-    p.set_scale(scale);
-    p
+/// An Inputs pane of `inputs` drawing `bars`.
+fn inputs_pane(bars: Vec<ProgrammeBar>, inputs: Vec<ProgrammeInput>) -> ProgrammePane {
+    ProgrammePane {
+        inputs,
+        bars,
+        pair: None,
+        ballistic: Ballistic::ShortTerm,
+        loudness_target: -23.0,
+        loudness: None,
+        plate: PlatePlace::default(),
+        plate_hover: None,
+        view: ProgrammeMode::Meters,
+    }
 }
 
 fn draw(name: &str, p: &ProgrammePane, theme: &Theme, chrome: PlotChrome, w: f32, h: f32) {
@@ -135,70 +143,85 @@ fn draw(name: &str, p: &ProgrammePane, theme: &Theme, chrome: PlotChrome, w: f32
     golden(name, &img, TEXT);
 }
 
-/// Room for the bar, its LUFS scale and the goniometer beside a plate of `(w, h)`.
-fn beside(plate: (f32, f32)) -> (f32, f32) {
-    let small = Theme::dark().small_font_size;
-    let need = scale_w(ScaleKind::Lufs, small)
-        + ac2_scene::programme::BAR_MIN_W
-        + ac2_scene::programme::GONIO_MIN_W;
-    (
-        need + plate.0 + 40.0 + 2.0 * PAD,
-        plate.1.max(260.0) + 2.0 * PAD,
-    )
-}
-
-/// An Inputs pane of two sources: a pair's summed bar and a mono one, no plate (more than
-/// one source), each with its dashed target and max ticks.
+/// A pair's Meters view on a wide pane: the plate fitted beside the bars at its largest.
 #[test]
-fn programme_bars_pair_and_mono() {
-    let p = ProgrammePane {
-        inputs: vec![
-            input("Main L", Scale::Dbfs, -14.0),
-            input("Main R", Scale::Dbfs, -16.0),
-            input("Vox", Scale::Dbfs, -20.0),
-        ],
-        bars: vec![
-            ProgrammeBar::Source(main_bar()),
-            ProgrammeBar::Source(mono_bar()),
-        ],
-        pair: None,
-        ballistic: Ballistic::ShortTerm,
-        loudness_target: -23.0,
-        loudness: None,
-        plate: PlatePlace::default(),
-        plate_hover: None,
-    };
+fn programme_meters_pair_1700x900() {
+    let p = pair_pane(ProgrammeMode::Meters, PlatePlace::default());
     draw(
-        "programme_bars_pair_and_mono",
+        "programme_meters_pair_1700x900",
         &p,
         &Theme::dark(),
         PlotChrome::Full,
-        300.0,
-        320.0,
+        1700.0,
+        900.0,
     );
 }
 
-/// A line source beside a mic: the mic's bar falls back to the true peak on its own dBFS
-/// ticks with the reason under it; at *no grid* the target label goes, its line stays.
+/// Too narrow for the plate beside the bars: it sits above them at 1×.
+#[test]
+fn programme_meters_pair_600x500() {
+    let p = pair_pane(ProgrammeMode::Meters, PlatePlace::default());
+    draw(
+        "programme_meters_pair_600x500",
+        &p,
+        &Theme::dark(),
+        PlotChrome::Full,
+        600.0,
+        500.0,
+    );
+}
+
+/// A source 22 dB under target: the bar is empty, the floor mark and `below −41` say why.
+#[test]
+fn programme_below_floor() {
+    let vox = input("Vox", Scale::Dbfs, -40.0);
+    let p = inputs_pane(
+        vec![
+            peak(vox.clone(), None),
+            ProgrammeBar::Source(mono_bar(-45.0, -38.0)),
+        ],
+        vec![vox],
+    );
+    draw(
+        "programme_below_floor",
+        &p,
+        &Theme::dark(),
+        PlotChrome::Full,
+        340.0,
+        360.0,
+    );
+}
+
+/// A line input and a mic: both read true peak in the first block, the mic with its reason;
+/// the line's source alone in the LUFS block.
+#[test]
+fn programme_line_and_mic() {
+    let vox = input("Vox", Scale::Dbfs, -20.0);
+    let mic = input("Mic", Scale::Dbfs, -24.0);
+    let p = inputs_pane(
+        vec![
+            peak(vox.clone(), None),
+            peak(mic.clone(), Some(MIC_TEXT)),
+            ProgrammeBar::Source(mono_bar(-31.7, -26.0)),
+        ],
+        vec![vox, mic],
+    );
+    draw(
+        "programme_line_and_mic",
+        &p,
+        &Theme::dark(),
+        PlotChrome::Full,
+        420.0,
+        360.0,
+    );
+}
+
+/// A mic alone falls back to its true peak on its own dBFS ticks with the reason under it;
+/// at *no grid* the scale's labels go, its bar stays.
 #[test]
 fn programme_true_peak_fallback() {
     let mic = input("Mic", Scale::Dbfs, -24.0);
-    let p = ProgrammePane {
-        inputs: vec![input("Vox", Scale::Dbfs, -20.0), mic.clone()],
-        bars: vec![
-            ProgrammeBar::Source(mono_bar()),
-            ProgrammeBar::Peak {
-                input: mic,
-                note: Some(MIC_TEXT.into()),
-            },
-        ],
-        pair: None,
-        ballistic: Ballistic::ShortTerm,
-        loudness_target: -23.0,
-        loudness: None,
-        plate: PlatePlace::default(),
-        plate_hover: None,
-    };
+    let p = inputs_pane(vec![peak(mic.clone(), Some(MIC_TEXT))], vec![mic]);
     let theme = Theme::dark();
     for (name, chrome) in [
         ("programme_true_peak_fallback", PlotChrome::Full),
@@ -208,60 +231,29 @@ fn programme_true_peak_fallback() {
     }
 }
 
-#[test]
-fn programme_plate_beside() {
-    let theme = Theme::dark();
-    let font = theme.small_font_size;
-    for (name, s) in [
-        ("programme_plate_beside_1x", 1.0),
-        ("programme_plate_beside_2x", 2.0),
-    ] {
-        let (w, h) = beside(loudness_plate::size(font, s, 0));
-        draw(name, &pair_pane(scaled(s)), &theme, PlotChrome::Full, w, h);
-    }
-}
-
-/// Too narrow for the plate beside, tall enough for it above the bars.
-#[test]
-fn programme_plate_above() {
-    let theme = Theme::dark();
-    let (pw, ph) = loudness_plate::size(theme.small_font_size, 1.0, 0);
-    let w = pw + 2.0 * PAD + 10.0;
-    let h = ph + ac2_scene::programme::BAR_MIN_H + 2.0 * PAD + 60.0;
-    draw(
-        "programme_plate_above",
-        &pair_pane(PlatePlace::default()),
-        &theme,
-        PlotChrome::Full,
-        w,
-        h,
-    );
-}
-
-/// Wide but short: the plate stays beside and drops its last slots.
+/// Wide but short: the plate stays beside at 1× and drops its last slot; the pair's
+/// strip comes off the height first.
 #[test]
 fn programme_plate_dropped_rows() {
     let theme = Theme::dark();
     let font = theme.small_font_size;
-    let (w, _) = beside(loudness_plate::size(font, 1.0, 0));
-    let (_, h2) = loudness_plate::size(font, 1.0, 2);
+    let (_, h1) = ac2_scene::programme::loudness_plate::size(font, 1.0, 1);
     draw(
         "programme_plate_dropped_rows",
-        &pair_pane(PlatePlace::default()),
+        &pair_pane(ProgrammeMode::Meters, PlatePlace::default()),
         &theme,
         PlotChrome::Full,
-        w,
-        h2 + 2.0 * PAD + 0.5,
+        1100.0,
+        h1 + ac2_scene::programme::CHIP_H + 20.5,
     );
 }
 
-/// Moved over the bars: see-through lets the bar and target show under the fill, solid
-/// covers them.
+/// Moved over the bars: see-through lets the bars show under the fill, solid covers them.
 #[test]
 fn programme_plate_floating() {
     let mut place = PlatePlace::default();
     place.move_to(1.0, 0.3);
-    let p = pair_pane(place);
+    let p = pair_pane(ProgrammeMode::Meters, place);
     for (name, alpha) in [
         ("programme_plate_floating_see_through", SEE_THROUGH_ALPHA),
         ("programme_plate_floating_solid", 1.0),
@@ -270,24 +262,55 @@ fn programme_plate_floating() {
             plate_alpha: alpha,
             ..Theme::dark()
         };
-        draw(name, &p, &theme, PlotChrome::Full, 340.0, 340.0);
+        draw(name, &p, &theme, PlotChrome::Full, 440.0, 360.0);
     }
 }
 
-/// *Traces only*: the plate and the scale's numbers go, their room stays (the bar does not
-/// widen), the bar, target line and max ticks stay.
+/// The Goniometer view on uncorrelated noise: the square fills the pane's height, centred,
+/// the chip under it.
 #[test]
-fn programme_traces_only() {
+fn programme_goniometer() {
     let theme = Theme::dark();
-    let (w, h) = beside(loudness_plate::size(theme.small_font_size, 1.0, 0));
-    draw(
-        "programme_traces_only",
-        &pair_pane(PlatePlace::default()),
-        &theme,
-        PlotChrome::Bare,
-        w,
-        h,
-    );
+    let mut p = pair_pane(ProgrammeMode::Goniometer, PlatePlace::default());
+    if let Some(pair) = p.pair.as_mut() {
+        pair.correlation = Correlation::Value(0.02);
+    }
+    let ring = embers::ring(Figure::Noise, EMBER_DECAY_DEFAULT_S);
+    for (name, w, h) in [
+        ("programme_goniometer_900x900", 900.0, 900.0),
+        ("programme_goniometer_1600x600", 1600.0, 600.0),
+    ] {
+        let Some(gpu) = gpu(name) else {
+            return;
+        };
+        let mut s = programme_scene(
+            &p,
+            Style {
+                chrome: PlotChrome::Full,
+                theme: &theme,
+            },
+            Viewport {
+                width: w,
+                height: h,
+            },
+            None,
+        );
+        assert!(s.plate.is_none(), "the Goniometer view has no plate");
+        let square = s.gonio.expect("the Goniometer view has its square");
+        assert!(
+            (square.x + square.w / 2.0 - w / 2.0).abs() < 1.0,
+            "{name}: the square is centred: {square:?}"
+        );
+        assert!(
+            square.h > h * 0.85,
+            "{name}: the square fills the pane: {square:?}"
+        );
+        let points = ember_points(&ring, embers::NOW, EMBER_DECAY_DEFAULT_S, square);
+        s.scene.layers[0].points.push(points);
+        let mut r = renderer(gpu);
+        let img = render_on(gpu, &mut r, &s.scene, 1.0, theme.background);
+        golden(name, &img, TEXT);
+    }
 }
 
 /// Leftmost column with ink in `x0 … x1` × `y0 … y1` (white text on black).

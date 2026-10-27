@@ -98,19 +98,20 @@ impl AppState {
                 crate::session_dialog::kind_role(kind_of(c))
             }
         };
-        // What a line or digital row reads in: dBFS, or dBu with its calibration's age. A
-        // mic's calibration is the SPL meter's business; its row names the curve instead.
+        // A line row's calibration, dBu with its age; an uncalibrated row's numbers carry
+        // their unit. A mic's calibration is the SPL meter's business; its row names the
+        // curve instead.
         let cal_of = |c: u16| {
             if kind_of(c) == crate::prefs::KindPref::Mic {
                 return None;
             }
             let status = st.map(|s| ac2_proto::cal::state_input_use(s, c).sensitivity.status());
-            Some(match status {
+            match status {
                 Some(ac2_proto::model::CalStatus::Line { .. }) => {
-                    ac2_scene::spl::cal_text(status?, false, now, offset)
+                    Some(ac2_scene::spl::cal_text(status?, false, now, offset))
                 }
-                _ => ac2_scene::meter::DBFS.to_owned(),
-            })
+                _ => None,
+            }
         };
         let reading = |c: u16| meters.get(&c).cloned().unwrap_or_else(MeterReading::none);
         let pairs = st.map(|s| s.pairs.as_slice()).unwrap_or_default();

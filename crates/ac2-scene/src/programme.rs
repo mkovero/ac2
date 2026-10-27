@@ -12,6 +12,7 @@
 use crate::format::{self, NO_VALUE};
 use crate::meter::FLOOR_DBFS;
 use crate::primitives::Rect;
+use crate::view::{PlotChrome, ProgrammeMode};
 
 /// The meter's dynamics, as the rig setting names them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +45,18 @@ impl Ballistic {
     /// A loudness window: the bars are sources, not inputs.
     pub fn is_loudness(self) -> bool {
         matches!(self, Ballistic::Momentary | Ballistic::ShortTerm)
+    }
+
+    /// What an input's own bar reads under this rig ballistic, as the Inputs list's header
+    /// names it: the true peak under a loudness ballistic (loudness is a source's, in the
+    /// Programme pane), else the ballistic. An input that cannot read VU says so on its
+    /// own row.
+    pub fn inputs_read(self) -> Ballistic {
+        if self.is_loudness() {
+            Ballistic::TruePeak
+        } else {
+            self
+        }
     }
 }
 
@@ -180,39 +193,6 @@ impl ProgrammeInput {
         if self.clipped { "CLIP" } else { "" }
     }
 
-    /// The Inputs-list lines under the row's meter, set in a monospace font: every slot
-    /// keeps its width whatever the value, so the row neither shifts nor wraps as levels,
-    /// overs and CLIP come and go. The reading with CLIP's slot, its max with the overs
-    /// slot, then the true peak where the reading is not already it:
-    /// `Type I  −12.3 dBFS CLIP`, `max   −3.1 dBFS    2 overs`, `true peak   −1.2 dBTP`.
-    pub fn row_lines(&self, ballistic: Ballistic) -> Vec<String> {
-        let reads = self.reads(ballistic);
-        let unit = self.unit(ballistic);
-        let slot = |v: Option<String>| number_slot(v.as_deref().unwrap_or(NO_VALUE));
-        let clip = if self.clipped { "CLIP" } else { "    " };
-        let mut lines = vec![
-            format!(
-                "{} {} {unit} {clip}",
-                reads.word(),
-                slot(self.scale.number(self.ppm))
-            ),
-            format!(
-                "max {} {unit} {}",
-                slot(self.scale.number(self.max)),
-                overs_slot(self.overs)
-            ),
-        ];
-        // A true-peak reading already is the dBTP number.
-        if reads != Ballistic::TruePeak {
-            let tp = self
-                .true_peak_dbtp
-                .filter(|v| v.is_finite())
-                .map(|v| format::signed(f64::from(v), 1));
-            lines.push(format!("{} {} dBTP", Ballistic::TruePeak.word(), slot(tp)));
-        }
-        lines
-    }
-
     /// The note under the bar when the rig's `ballistic` is one this input cannot read.
     pub fn note(&self, ballistic: Ballistic) -> Option<&'static str> {
         (ballistic == Ballistic::Vu && !self.offers_vu).then_some(VU_FALLBACK)
@@ -227,7 +207,7 @@ pub const OVERS_SLOT: usize = 10;
 pub const CORRELATION_SLOT: usize = 11;
 
 /// `n` right-aligned in a [`NUMBER_SLOT`] (wider numbers keep every digit).
-fn number_slot(n: &str) -> String {
+pub(crate) fn number_slot(n: &str) -> String {
     format!("{n:>NUMBER_SLOT$}")
 }
 
@@ -391,9 +371,27 @@ pub struct ProgrammePane {
     pub plate: crate::plate::PlatePlace,
     /// The plate under the pointer (lit, its grip bright).
     pub plate_hover: Option<crate::plate::PlateHover>,
+    /// The view the operator stepped the pane to (G); see [`Self::shown_view`].
+    pub view: ProgrammeMode,
 }
 
 impl ProgrammePane {
+    /// The view drawn: the stored one, but the Meters view on a pane that meters no pair,
+    /// where there is no goniometer (the stored view is kept for when it meters one again).
+    pub fn shown_view(&self) -> ProgrammeMode {
+        match self.view {
+            ProgrammeMode::Goniometer if self.pair.is_some() => ProgrammeMode::Goniometer,
+            _ => ProgrammeMode::Meters,
+        }
+    }
+
+    /// Whether any bar reads an input (a peak bar).
+    pub fn has_peak_bar(&self) -> bool {
+        self.bars
+            .iter()
+            .any(|b| matches!(b, ProgrammeBar::Peak { .. }))
+    }
+
     /// Whether any bar reads a loudness source.
     pub fn has_source_bar(&self) -> bool {
         self.bars
@@ -420,10 +418,18 @@ impl ProgrammePane {
         }
     }
 
-    /// The pane's title line: what the bars read, the target after a loudness word, and the
-    /// pair's name with its correlator window: `true peak · Main L + Main R · 0.3 s`,
-    /// `Short loudness · target −23 LUFS · Main · 1 s`.
+    /// The pane's title line. Meters: what the bars read, the target after a loudness
+    /// word, and the pair's name with its correlator window (the Meters view carries the
+    /// chip): `true peak · Main L + Main R · 0.3 s`, `Short loudness · target −23 LUFS ·
+    /// Main · 1 s`. Goniometer: `goniometer · Main · 1 s`, the window being the chip's.
     pub fn title(&self) -> String {
+        let pair = self
+            .pair
+            .as_ref()
+            .map(|p| format!(" · {} · {}", p.name, window_text(p.window_s)));
+        if self.shown_view() == ProgrammeMode::Goniometer {
+            return format!("goniometer{}", pair.unwrap_or_default());
+        }
         let reads = self.reads();
         let mut s = reads.word().to_owned();
         if reads.is_loudness() {
@@ -432,32 +438,41 @@ impl ProgrammePane {
                 rig::target_text(self.loudness_target)
             ));
         }
-        if let Some(p) = &self.pair {
-            s.push_str(&format!(" · {} · {}", p.name, window_text(p.window_s)));
-        }
+        s.push_str(&pair.unwrap_or_default());
         s
     }
 
-    /// The pane's scale column: LUFS iff a bar reads a source.
-    pub fn scale_kind(&self) -> ScaleKind {
-        if self.has_source_bar() {
-            ScaleKind::Lufs
-        } else {
-            ScaleKind::Dbfs
+    /// The scale columns' total width at the plot font `small`: the dBFS column before the
+    /// peak bars (always under a peak ballistic), the LUFS column before the source bars.
+    pub fn scale_cols_w(&self, small: f32) -> f32 {
+        let peak = self.has_peak_bar() || !self.has_source_bar();
+        let mut w = 0.0;
+        if peak {
+            w += scale_w(ScaleKind::Dbfs, small);
         }
+        if self.has_source_bar() {
+            w += scale_w(ScaleKind::Lufs, small);
+        }
+        w
     }
 
-    /// Where the parts go in `rect` at the plot font `small`: the dock ladder when the pane
-    /// has a plate where the pane puts it, else the bars and goniometer on the whole rect
-    /// (a floating plate reserves nothing).
-    pub fn layout(&self, rect: Rect, small: f32) -> ProgrammeLayout {
-        let scale_w = scale_w(self.scale_kind(), small);
+    /// Where the parts go in `rect` at the plot fonts `font` and `small` and the **T** step
+    /// `chrome`. Goniometer: the square and its chip. Meters: the dock when the pane has a
+    /// plate where the pane puts it and the plate shows (at *traces only* it is hidden, and
+    /// its room goes to the bars), else the bars on the whole rect (a floating plate
+    /// reserves nothing).
+    pub fn layout(&self, rect: Rect, font: f32, small: f32, chrome: PlotChrome) -> ProgrammeLayout {
+        if self.shown_view() == ProgrammeMode::Goniometer {
+            return goniometer(rect, chip_min_w(font, small));
+        }
         let has_pair = self.pair.is_some();
-        let bars = self.bars.len();
-        if self.loudness.is_some() && self.plate.at.is_none() {
-            dock(rect, has_pair, bars, scale_w, small, self.plate.scale())
+        let docks =
+            self.loudness.is_some() && self.plate.at.is_none() && chrome != PlotChrome::Bare;
+        if docks {
+            let need = bars_min(self.bars.len(), self.scale_cols_w(small));
+            dock(rect, has_pair, need, small)
         } else {
-            layout(rect, has_pair, bars, scale_w)
+            layout(rect, has_pair)
         }
     }
 }
@@ -496,19 +511,25 @@ pub fn inputs_text(inputs: &[u16]) -> String {
 mod bars;
 mod draw;
 pub mod form;
+mod gonio_view;
 mod layout;
 pub mod loudness;
 pub mod loudness_plate;
+mod meters;
+mod row;
 pub use bars::{
-    LUFS_LOW, LUFS_SPAN, ProgrammeBar, Resolved, SideFlags, SourceBar, TRUE_PEAK_SHOWN, bars_of,
+    LUFS_LOW, LUFS_SPAN, ProgrammeBar, Resolved, SourceBar, TRUE_PEAK_SHOWN, bars_of, floor_text,
     lufs_fill, on_lufs_span, peak_bars, sources,
 };
 pub use draw::{ProgrammeScene, programme_scene};
 pub use layout::{
-    BAR_MIN_H, BAR_MIN_W, CHIP_H, CHIP_W, Docked, GONIO_MIN_W, ProgrammeLayout, SHORT_PANE_H,
-    ScaleKind, dock, layout, scale_w,
+    BAR_MIN_H, BAR_MIN_W, CHIP_H, Docked, FIT_SCALE_MAX, FIT_SCALE_STEP, GONIO_MIN_W,
+    ProgrammeLayout, ScaleKind, bars_min, chip_min_w, dock, fit_scale, goniometer, layout, scale_w,
 };
 pub use loudness::LoudnessReadout;
+pub use row::{
+    INPUTS_LOUDNESS_TIP, RowBlock, RowLine, RowSide, UNIT_SLOT, WORD_SLOT, inputs_header, row_block,
+};
 
 #[cfg(test)]
 mod tests;

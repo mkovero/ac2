@@ -261,10 +261,10 @@ fn plate_fill_honours_plate_alpha_and_hover() {
     }
 }
 
-/// At *traces only* the plate goes, wherever it sits, and cannot be grabbed; its room
-/// stays reserved.
+/// At *traces only* the plate goes, wherever it sits, and cannot be grabbed; a docked
+/// one's room goes to the bars, whose right edge is then the pane's.
 #[test]
-fn t_hides_the_plate_keeping_its_room() {
+fn t_hides_the_plate_and_gives_its_room_to_the_bars() {
     let rig = Rig::new();
     let mut p = rig.pane(&[2, 3], Ballistic::ShortTerm);
     let full = scene_of(&p, PlotChrome::Full, 900.0, 400.0);
@@ -280,7 +280,8 @@ fn t_hides_the_plate_keeping_its_room() {
     assert!(!super::texts(&bare.scene).iter().any(|t| t == "Int"));
     assert_eq!(
         super::bars::bar_rects(&bare.scene),
-        super::bars::bar_rects(&full.scene)
+        super::bars::bar_rects(&scene_of(&p_floating(&p), PlotChrome::Bare, 900.0, 400.0).scene),
+        "laid out as with no docked plate"
     );
     p.plate.move_to(0.0, 0.0);
     assert_eq!(scene_of(&p, PlotChrome::Bare, 900.0, 400.0).plate, None);
@@ -296,6 +297,12 @@ fn t_hides_the_plate_keeping_its_room() {
         PlotChrome::Bare.programme_name(),
         "no grid, target label, scale or loudness plate"
     );
+}
+
+fn p_floating(p: &ProgrammePane) -> ProgrammePane {
+    let mut q = p.clone();
+    q.plate.move_to(0.5, 0.5);
+    q
 }
 
 #[test]

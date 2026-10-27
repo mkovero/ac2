@@ -4,8 +4,8 @@
 use ac2_proto::frame::{LoudnessSource, SourceLoudness};
 use ac2_proto::units::{Db, Dbtp, Lufs, Seconds, WallNs};
 
-use super::super::draw::{TICK_W, above_target};
 use super::super::loudness::{LoudnessFacts, NamedPair, plate_readout};
+use super::super::meters::{TICK_W, above_target};
 use super::super::*;
 use super::{pane_with_pair, texts};
 use crate::primitives::{FillRect, Scene, Viewport};
@@ -120,6 +120,7 @@ impl Rig {
                 loudness: plate_readout(&r, f),
                 plate: crate::plate::PlatePlace::default(),
                 plate_hover: None,
+                view: crate::view::ProgrammeMode::Meters,
             }
         })
     }
@@ -159,7 +160,10 @@ fn loudness_ballistics_read_the_true_peak_per_input() {
         assert_eq!(i.reads(b), Ballistic::TruePeak);
         assert_eq!(i.unit(b), "dBTP");
         assert_eq!(i.note(b), None);
-        assert_eq!(i.row_lines(b), i.row_lines(Ballistic::TruePeak));
+        assert_eq!(
+            row_block(std::slice::from_ref(&i), b, None),
+            row_block(std::slice::from_ref(&i), Ballistic::TruePeak, None)
+        );
         assert_eq!(i.ppm_text(b), "−1.0 dBTP");
     }
     assert_eq!(Ballistic::Momentary.word(), "Mom loudness");
@@ -174,38 +178,41 @@ fn loudness_ballistics_read_the_true_peak_per_input() {
     }
 }
 
-/// A pair reads one bar, both channels summed; the pane's bars are its sources in the
-/// order the pane first names one of their inputs.
+/// A pair reads one LUFS bar, both channels summed, after the true-peak bars of the inputs
+/// the pane names; the LUFS bars are its sources in the order the pane first names one of
+/// their inputs.
 #[test]
 fn a_bar_per_source() {
     let rig = Rig::new();
     let pair = rig.bars(&[2, 3], Ballistic::ShortTerm);
-    assert_eq!(names(&pair), ["source Main"]);
-    let s = source_bar(&pair[0]);
+    assert_eq!(names(&pair), ["peak In 3", "peak In 4", "source Main"]);
+    let s = source_bar(&pair[2]);
     assert_eq!(s.reading, Some(-22.84));
     assert_eq!(s.max, Some(-21.0));
-    assert_eq!(s.true_peak, Some(-3.0), "the higher side's");
-    assert_eq!(s.sides.len(), 2);
     assert_eq!(s.reading_text(), "−22.8 LUFS");
     assert_eq!(s.max_value_text(), "−21.0 LUFS");
-    assert_eq!(s.true_peak_value_text(), "−3.0 dBTP");
     let mom = rig.bars(&[2, 3], Ballistic::Momentary);
-    let m = source_bar(&mom[0]);
+    let m = source_bar(&mom[2]);
     assert_eq!((m.reading, m.max), (Some(-23.06), Some(-20.0)));
     // `1, 5, 2` with `1+2` a pair, here `3, 1, 4` with `3+4` Main: Main where 3 was, then
     // input 1 alone.
     assert_eq!(
         names(&rig.bars(&[2, 0, 3], Ballistic::ShortTerm)),
-        ["source Main", "source In 1 mono"]
+        [
+            "peak In 3",
+            "peak In 1",
+            "peak In 4",
+            "source Main",
+            "source In 1 mono"
+        ]
     );
-    // Half a pair alone reads the pair, both sides' flags.
+    // Half a pair alone reads the pair's loudness and its own true peak.
     let half = rig.bars(&[3], Ballistic::ShortTerm);
-    assert_eq!(names(&half), ["source Main"]);
-    assert_eq!(source_bar(&half[0]).sides.len(), 2);
+    assert_eq!(names(&half), ["peak In 4", "source Main"]);
     // So does one half among other inputs.
     assert_eq!(
         names(&rig.bars(&[2, 0], Ballistic::ShortTerm)),
-        ["source Main", "source In 1 mono"]
+        ["peak In 3", "peak In 1", "source Main", "source In 1 mono"]
     );
     // Under a peak ballistic a pair keeps its L and R.
     assert_eq!(
@@ -216,7 +223,7 @@ fn a_bar_per_source() {
     let mut fresh = Rig::new();
     fresh.sources.clear();
     let b = fresh.bars(&[2, 3], Ballistic::ShortTerm);
-    let s = source_bar(&b[0]);
+    let s = source_bar(&b[2]);
     assert_eq!((s.reading, s.max), (None, None));
     assert_eq!(s.reading_text(), "—");
     assert_eq!(s.max_value_text(), "—");
@@ -290,39 +297,6 @@ fn one_source_one_plate() {
             "Main".into()
         ))
     );
-}
-
-/// A pair's flags named by side, left first, overs before CLIP; a mono source's as a peak
-/// bar's.
-#[test]
-fn flags_name_their_side() {
-    let flags = |sides: &[(u32, bool)]| {
-        SourceBar {
-            name: "Main".into(),
-            reading: None,
-            max: None,
-            true_peak: None,
-            sides: sides
-                .iter()
-                .map(|&(overs, clipped)| SideFlags { overs, clipped })
-                .collect(),
-        }
-        .flags_text()
-    };
-    assert_eq!(flags(&[(0, false), (0, false)]), "");
-    assert_eq!(flags(&[(1, false), (0, false)]), "1 over L");
-    assert_eq!(flags(&[(2, false), (1, false)]), "2 overs L · 1 over R");
-    assert_eq!(flags(&[(0, false), (0, true)]), "CLIP R");
-    assert_eq!(
-        flags(&[(2, true), (0, true)]),
-        "2 overs L · CLIP L · CLIP R"
-    );
-    assert_eq!(
-        flags(&[(1000, true), (5000, true)]),
-        "999+ overs L · 999+ overs R · CLIP L · CLIP R"
-    );
-    assert_eq!(flags(&[(3, true)]), "3 overs");
-    assert_eq!(flags(&[(0, true)]), "");
 }
 
 #[test]
@@ -433,12 +407,12 @@ fn lufs_scale_labels_follow_the_target() {
     assert_eq!(p.title(), "Short loudness · target −14 LUFS");
 }
 
-/// The source bar's fill rects: green below the target, the lighter green above.
-fn fills(s: &Scene) -> Vec<FillRect> {
+/// The fill rects of the bar at `bar`: green below the target, the lighter green above.
+fn fills(s: &Scene, bar: crate::primitives::Rect) -> Vec<FillRect> {
     s.layers[1]
         .rects
         .iter()
-        .filter(|r| r.rect.w > TICK_W + 1.0)
+        .filter(|r| r.rect.w > TICK_W + 1.0 && r.rect.x == bar.x)
         .copied()
         .collect()
 }
@@ -451,8 +425,8 @@ fn zones_split_at_the_target_and_ticks_mark_the_max() {
     rig.sources[1].max_short_term = Lufs(-15.5);
     let p = rig.pane(&[0], Ballistic::ShortTerm);
     let s = scene(&p, PlotChrome::Full, 600.0, 400.0);
-    let bar = bar_rects(&s)[0];
-    let f = fills(&s);
+    let bar = bar_rects(&s)[1];
+    let f = fills(&s, bar);
     assert_eq!(f.len(), 2, "{f:?}");
     let y_of = |v: f64| bar.y + bar.h * (1.0 - lufs_fill(Some(v), -23.0));
     assert_eq!(f[0].color, theme.level_ok);
@@ -489,7 +463,7 @@ fn zones_split_at_the_target_and_ticks_mark_the_max() {
         !s.layers[1]
             .rects
             .iter()
-            .any(|r| r.rect.h == 2.0 && r.rect.w == bar.w)
+            .any(|r| r.rect.h == 2.0 && r.rect.x == bar.x)
     );
     // The target: dashed, 1 px, the text colour, across the bar.
     let line = s.layers[1]
@@ -502,14 +476,7 @@ fn zones_split_at_the_target_and_ticks_mark_the_max() {
     assert!((line.points[0][1] - y_of(-23.0)).abs() < 1e-3);
     assert!(line.points[0][0] < bar.x && line.points[1][0] > bar.right());
     let t = texts(&s);
-    for w in [
-        "−17.0 LUFS",
-        "−15.5 LUFS",
-        "−1.0 dBTP",
-        "In 1 mono",
-        "max",
-        "TP",
-    ] {
+    for w in ["−17.0 LUFS", "−15.5 LUFS", "−1.0 dBTP", "In 1 mono", "max"] {
         assert!(t.iter().any(|x| x == w), "{w} in {t:?}");
     }
     // A max outside the span, or none, draws no tick.
@@ -526,22 +493,29 @@ fn zones_split_at_the_target_and_ticks_mark_the_max() {
     }
 }
 
-/// A line beside a mic under a loudness ballistic: the pane's scale is LUFS, the mic's bar
-/// carries its own dBFS numbers and its reason row; a pane of mics only has the dBFS scale
-/// and no target line.
+/// A line beside a mic under a loudness ballistic: each block after its own scale column,
+/// dBFS before the true-peak bars and LUFS before the source's, the mic's bar with its
+/// reason row; a pane of mics only has the dBFS column and no target line.
 #[test]
-fn a_fallback_bar_carries_its_own_ticks() {
+fn each_block_carries_its_own_scale() {
     let rig = Rig::new();
     let p = rig.pane(&[0, 1], Ballistic::ShortTerm);
-    assert_eq!(p.scale_kind(), ScaleKind::Lufs);
     let s = scene(&p, PlotChrome::Full, 800.0, 400.0);
     let t = texts(&s);
-    for w in ["0", "−20", "−40", "−60", "target −23"] {
+    for w in [
+        "0",
+        "−20",
+        "−40",
+        "−50",
+        "−60",
+        "target −23",
+        "dBTP",
+        "LUFS",
+    ] {
         assert!(t.iter().any(|x| x == w), "{w} in {t:?}");
     }
-    assert!(t.iter().any(|x| x.starts_with("true peak shown")), "{t:?}");
+    assert!(t.iter().any(|x| x.starts_with("true peak sho")), "{t:?}");
     let mics = rig.pane(&[1], Ballistic::ShortTerm);
-    assert_eq!(mics.scale_kind(), ScaleKind::Dbfs);
     let s = scene(&mics, PlotChrome::Full, 800.0, 400.0);
     assert!(
         !s.layers[1]
@@ -551,16 +525,17 @@ fn a_fallback_bar_carries_its_own_ticks() {
     );
     let t = texts(&s);
     assert!(!t.iter().any(|x| x.contains("target")), "{t:?}");
+    assert!(!t.iter().any(|x| x == "LUFS"), "{t:?}");
     assert!(
         t.iter().any(|x| x == "−50"),
         "the pane's own dBFS scale: {t:?}"
     );
 }
 
-/// **T** moves nothing: every bar keeps its rect at every step, the scale its width with
-/// its numbers gone.
+/// **T** moves no bar at *no grid*: every bar keeps its rect, the scale its width with its
+/// numbers gone. At *traces only* the hidden docked plate's room goes to the bars.
 #[test]
-fn t_moves_no_bar() {
+fn t_moves_no_bar_until_the_plate_goes() {
     let rig = Rig::new();
     for (shown, b) in [
         (&[2u16, 3][..], Ballistic::ShortTerm),
@@ -570,15 +545,19 @@ fn t_moves_no_bar() {
         let p = rig.pane(shown, b);
         let full = bar_rects(&scene(&p, PlotChrome::Full, 900.0, 400.0));
         assert!(!full.is_empty());
-        for chrome in [PlotChrome::NoGrid, PlotChrome::Bare] {
-            assert_eq!(
-                bar_rects(&scene(&p, chrome, 900.0, 400.0)),
-                full,
-                "{shown:?} {b:?} {chrome:?}"
-            );
-        }
+        assert_eq!(
+            bar_rects(&scene(&p, PlotChrome::NoGrid, 900.0, 400.0)),
+            full,
+            "{shown:?} {b:?}"
+        );
+        let bare = bar_rects(&scene(&p, PlotChrome::Bare, 900.0, 400.0));
+        assert_eq!(bare.len(), full.len());
+        assert!(
+            bare.last().map(|r| r.right()) > full.last().map(|r| r.right()),
+            "{shown:?} {b:?}: the plate's room went to the bars"
+        );
     }
-    // The pair's L / R bars of a peak pane are the same as before the plate existed.
+    // The pair's L / R bars of a peak pane without a plate.
     let p = pane_with_pair(Correlation::Value(0.5));
     assert_eq!(
         bar_rects(&scene(&p, PlotChrome::Full, 600.0, 400.0)).len(),

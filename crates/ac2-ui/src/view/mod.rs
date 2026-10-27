@@ -7,6 +7,7 @@ mod cal;
 mod chrome;
 mod eq;
 mod help;
+mod inputs_list;
 mod leq;
 mod overlays;
 mod panes;

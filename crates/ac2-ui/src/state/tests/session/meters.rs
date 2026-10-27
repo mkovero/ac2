@@ -554,9 +554,9 @@ fn sidebar_meters_show_a_pair_as_one_row_and_line_inputs_in_dbfs_or_dbu() {
             "Line 3 + Line 4 · line · pair (in 3, 4)",
         ]
     );
-    assert_eq!(rows[0].cal.as_deref(), Some(ac2_scene::meter::DBFS));
+    assert_eq!(rows[0].cal, None);
     assert_eq!(rows[1].cal, None);
-    assert_eq!(rows[2].cal.as_deref(), Some(ac2_scene::meter::DBFS));
+    assert_eq!(rows[2].cal, None);
     assert_eq!(rows[2].right.as_ref().map(|(c, _)| *c), Some(3));
     assert!(rows[0].right.is_none() && rows[1].right.is_none());
     // The pair's name stands for both inputs' names.

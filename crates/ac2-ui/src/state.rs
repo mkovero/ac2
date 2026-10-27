@@ -71,7 +71,7 @@ use link::Pending;
 use panes::meas_layout::LayoutQueue;
 mod drop_math;
 mod programme;
-pub use programme::{MAX_METERED, Metered, ProgrammeUi};
+pub use programme::{MAX_METERED, Metered, ProgrammeUi, ballistic};
 mod meter_form;
 mod new_meas;
 mod panes;

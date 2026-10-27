@@ -1,8 +1,9 @@
 //! What a Programme pane's bars read (docs/design/programme-meter.md §6.2 *What a bar
 //! reads*): under a peak ballistic one bar per input; under a loudness ballistic one bar
-//! per loudness source, a pair's being both channels summed (BS.1770 defines loudness of a
-//! programme, one figure for all its channels: a side K-weighted alone is not the loudness
-//! of anything delivered), and the true peak, with its reason, for an input without one.
+//! per input reading its true peak, then one per loudness source, a pair's being both
+//! channels summed (BS.1770 defines loudness of a programme, one figure for all its
+//! channels: a side K-weighted alone is not the loudness of anything delivered); an input
+//! without a source says why under its true-peak bar (§6.3 *The Meters view*).
 
 use ac2_proto::frame::LoudnessSource;
 
@@ -75,14 +76,8 @@ pub fn sources(shown: &[u16], f: &LoudnessFacts<'_>) -> Vec<Resolved> {
         .collect()
 }
 
-/// One side of a source bar's flags.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SideFlags {
-    pub overs: u32,
-    pub clipped: bool,
-}
-
-/// A loudness source's bar.
+/// A loudness source's bar. Its sides' true peak, overs and CLIP are their own bars' (the
+/// true-peak block), and the plate's TP max covers the whole source.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceBar {
     /// `Main`, `Vox mono`.
@@ -91,10 +86,6 @@ pub struct SourceBar {
     pub reading: Option<f64>,
     /// The window's max since the reset; `None` before one.
     pub max: Option<f64>,
-    /// dBTP, the higher of the source's inputs this frame.
-    pub true_peak: Option<f64>,
-    /// Per input, left first.
-    pub sides: Vec<SideFlags>,
 }
 
 impl SourceBar {
@@ -108,50 +99,19 @@ impl SourceBar {
         lufs_text(self.max)
     }
 
-    /// `−1.2 dBTP` (the `TP` word sits apart), `—`.
-    pub fn true_peak_value_text(&self) -> String {
-        match self.true_peak.filter(|v| v.is_finite()) {
-            Some(v) => format!("{} dBTP", format::signed(v, 1)),
-            None => NO_VALUE.to_owned(),
-        }
+    /// Whether the reading lies under the span's floor at `target`, where the bar is
+    /// empty although the programme is not silent. A reading of none (no window yet) is
+    /// not: `—` already says *nothing yet*.
+    pub fn below_floor(&self, target: f64) -> bool {
+        self.reading
+            .is_some_and(|v| v.is_finite() && v < target + LUFS_LOW)
     }
+}
 
-    /// Whether any side holds samples at full scale.
-    pub fn clipped(&self) -> bool {
-        self.sides.iter().any(|s| s.clipped)
-    }
-
-    /// A pair's flags named by side, left first, the overs before CLIP: `1 over L`,
-    /// `2 overs L · 1 over R`, `2 overs L · CLIP L · CLIP R`; counts past 999 read `999+`.
-    /// A mono source's are its input's own (`2 overs`, with CLIP apart).
-    pub fn flags_text(&self) -> String {
-        let count = |n: u32| match n {
-            1 => "1 over".to_owned(),
-            2..=999 => format!("{n} overs"),
-            _ => "999+ overs".to_owned(),
-        };
-        if let [one] = self.sides.as_slice() {
-            return if one.overs == 0 {
-                String::new()
-            } else {
-                count(one.overs)
-            };
-        }
-        let side = |k: usize| if k == 0 { "L" } else { "R" };
-        let overs = self
-            .sides
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.overs > 0)
-            .map(|(k, s)| format!("{} {}", count(s.overs), side(k)));
-        let clips = self
-            .sides
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.clipped)
-            .map(|(k, _)| format!("CLIP {}", side(k)));
-        overs.chain(clips).collect::<Vec<_>>().join(" · ")
-    }
+/// `below −41`: what an empty LUFS bar says when its reading lies under the floor of the
+/// span at `target`.
+pub fn floor_text(target: f64) -> String {
+    format!("below {}", format::fixed(target + LUFS_LOW, 0))
 }
 
 fn lufs_text(v: Option<f64>) -> String {
@@ -212,8 +172,11 @@ pub fn peak_bars(inputs: &[ProgrammeInput], ballistic: Ballistic) -> Vec<Program
 }
 
 /// The bars of a pane whose inputs resolved to `resolved`: under a peak ballistic one per
-/// input (a pair pane keeps its L and R); under a loudness one, a bar per distinct source
-/// at its first input and the true peak with its reason for an input without one.
+/// input (a pair pane keeps its L and R). Under a loudness one, the true-peak block (a bar
+/// per input the pane names, in its order, a sourceless one with its reason) and then the
+/// LUFS block (a bar per distinct source, in the order the pane first names one of its
+/// inputs): the inputs read their true peak, which each one has, and loudness belongs to a
+/// source, never to one side of it.
 pub fn bars_of(
     resolved: &[Resolved],
     ballistic: Ballistic,
@@ -224,29 +187,27 @@ pub fn bars_of(
         let inputs: Vec<ProgrammeInput> = resolved.iter().map(|r| input(r.input())).collect();
         return peak_bars(&inputs, ballistic);
     }
+    let mut bars: Vec<ProgrammeBar> = resolved
+        .iter()
+        .map(|r| ProgrammeBar::Peak {
+            input: input(r.input()),
+            note: match r {
+                Resolved::Reason { reason, .. } => Some(format!("{TRUE_PEAK_SHOWN} · {reason}")),
+                Resolved::Source { .. } => None,
+            },
+        })
+        .collect();
     let mut seen: Vec<LoudnessSource> = Vec::new();
-    let mut bars = Vec::new();
-    for r in resolved {
-        match r {
-            Resolved::Reason { input: c, reason } => bars.push(ProgrammeBar::Peak {
-                input: input(*c),
-                note: Some(format!("{TRUE_PEAK_SHOWN} · {reason}")),
-            }),
-            Resolved::Source { source, .. } if seen.contains(source) => {}
-            Resolved::Source { source, .. } => {
-                seen.push(*source);
-                bars.push(ProgrammeBar::Source(source_bar(*source, ballistic, f)));
-            }
+    for source in resolved.iter().filter_map(Resolved::source) {
+        if !seen.contains(&source) {
+            seen.push(source);
+            bars.push(ProgrammeBar::Source(source_bar(source, ballistic, f)));
         }
     }
     bars
 }
 
 fn source_bar(source: LoudnessSource, ballistic: Ballistic, f: &LoudnessFacts<'_>) -> SourceBar {
-    let sides: Vec<Option<ProgrammeInput>> = match source {
-        LoudnessSource::Pair { left, right } => vec![(f.input)(left), (f.input)(right)],
-        LoudnessSource::Input { channel } => vec![(f.input)(channel)],
-    };
     let finite = |v: f64| Some(v).filter(|v| v.is_finite());
     let (reading, max) = match f.sources.iter().find(|l| l.source == source) {
         Some(l) if ballistic == Ballistic::Momentary => {
@@ -259,21 +220,6 @@ fn source_bar(source: LoudnessSource, ballistic: Ballistic, f: &LoudnessFacts<'_
         name: source_name(source, f),
         reading,
         max,
-        true_peak: sides
-            .iter()
-            .flatten()
-            .filter_map(|i| i.true_peak_dbtp.filter(|v| v.is_finite()))
-            .map(f64::from)
-            .reduce(f64::max),
-        sides: sides
-            .iter()
-            .map(|i| {
-                i.as_ref().map_or_else(SideFlags::default, |i| SideFlags {
-                    overs: i.overs,
-                    clipped: i.clipped,
-                })
-            })
-            .collect(),
     }
 }
 

@@ -6,19 +6,24 @@ pub const NEW_TITLE: &str = "New programme meter";
 pub const EDIT_TITLE: &str = "Edit programme meter";
 
 /// What Enter does in each.
-pub const NEW_SUBMIT: &str = "Enter opens it in a new pane beside the focused one";
+pub const NEW_SUBMIT: &str =
+    "Enter opens it beside the focused one: meters, and a goniometer pane for a pair";
 pub const EDIT_SUBMIT: &str = "Enter applies to this pane";
 
 /// The heading over what the pane meters: the pane's own.
 pub const WHAT_HEADING: &str = "What to meter";
 /// The heading over the rig's settings (the whose words follow it).
 pub const HOW_HEADING: &str = "How it reads";
+/// The heading over the app's own display settings: the Settings page's name, since the
+/// goniometer's fade is this app's and not the rig's.
+pub const DISPLAY_HEADING: &str = "Display";
 
 /// The field that picks a pair or the inputs.
 pub const METER: &str = "Meter";
 /// The option of that field that meters inputs side by side.
 pub const INPUTS_OPTION: &str = "inputs side by side";
-pub const PAIR_HINT: &str = "L and R, goniometer, correlation, loudness";
+pub const PAIR_HINT: &str =
+    "L and R, loudness (line or digital); goniometer and correlation in their own pane";
 pub const INPUTS_HINT: &str = "one row per input, up to 8";
 
 /// A row of the inputs: `Input 1`.

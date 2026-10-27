@@ -373,10 +373,11 @@ fn mom_loudness_reads_lufs_bars() {
     step_until(&mut h, "Settings closed", |a| {
         a.state.overlay == Overlay::None
     });
+    // The pair's two true-peak bars, then its one LUFS bar.
     step_until(&mut h, "one LUFS bar of the pair", |a| {
         a.state.programme_pane(pane).is_some_and(|(p, _)| {
-            matches!(p.bars.as_slice(), [ProgrammeBar::Source(b)] if b.name == "Main"
-                && b.reading.is_some())
+            matches!(p.bars.as_slice(), [ProgrammeBar::Peak { .. }, ProgrammeBar::Peak { .. },
+                ProgrammeBar::Source(b)] if b.name == "Main" && b.reading.is_some())
         })
     });
     let st = &h.state().state;

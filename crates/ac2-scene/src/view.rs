@@ -698,6 +698,32 @@ impl SplMode {
     }
 }
 
+/// What a Programme pane shows: its bars and loudness plate, or its pair's goniometer
+/// filling the pane. Separate views, not one split pane, so either can be maximised alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ProgrammeMode {
+    #[default]
+    Meters,
+    Goniometer,
+}
+
+impl ProgrammeMode {
+    /// G: meters ↔ goniometer on a pane that meters a pair; `self` otherwise, so a stored
+    /// view is never overwritten by a step that has nothing to step to.
+    pub fn next(self, has_pair: bool) -> Self {
+        match self {
+            _ if !has_pair => self,
+            ProgrammeMode::Meters => ProgrammeMode::Goniometer,
+            ProgrammeMode::Goniometer => ProgrammeMode::Meters,
+        }
+    }
+
+    /// Shift+G: [`Self::next`] backwards (two views: the same step).
+    pub fn prev(self, has_pair: bool) -> Self {
+        self.next(has_pair)
+    }
+}
+
 /// The SPL pane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct SplView {

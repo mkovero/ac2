@@ -1,8 +1,10 @@
 use super::*;
 
 mod bars;
+mod blocks;
 mod dock;
 mod plate;
+mod rows;
 
 /// A pane of peak bars, one per input, as the UI fills it with no loudness source.
 pub(super) fn pane_of(
@@ -19,6 +21,7 @@ pub(super) fn pane_of(
         loudness: None,
         plate: crate::plate::PlatePlace::default(),
         plate_hover: None,
+        view: crate::view::ProgrammeMode::Meters,
     }
 }
 
@@ -110,92 +113,7 @@ fn overs_clip_and_notes_keep_their_words() {
 }
 
 #[test]
-fn inputs_row_lines_read_in_fixed_slots() {
-    let mut i = input(Scale::Dbfs);
-    assert_eq!(
-        i.row_lines(Ballistic::Type1),
-        [
-            "Type I  −12.3 dBFS     ",
-            "max   −3.1 dBFS           ",
-            "true peak   −1.2 dBTP",
-        ]
-    );
-    assert_eq!(
-        i.row_lines(Ballistic::TruePeak),
-        ["true peak  −12.3 dBTP     ", "max   −3.1 dBTP           "]
-    );
-    // VU on an uncalibrated input reads the true peak, and says so.
-    assert_eq!(i.row_lines(Ballistic::Vu), i.row_lines(Ballistic::TruePeak));
-    let line = input(Scale::Dbu { fs_dbu: 16.3 });
-    assert_eq!(
-        line.row_lines(Ballistic::Type2),
-        [
-            "Type II   +4.0 dBu     ",
-            "max  +13.2 dBu           ",
-            "true peak   −1.2 dBTP",
-        ]
-    );
-    i.ppm = None;
-    i.max = None;
-    i.overs = 2;
-    i.clipped = true;
-    assert_eq!(
-        i.row_lines(Ballistic::TruePeak),
-        ["true peak      — dBTP CLIP", "max      — dBTP    2 overs"]
-    );
-    i.overs = 1;
-    assert_eq!(
-        i.row_lines(Ballistic::TruePeak)[1],
-        "max      — dBTP    1 over "
-    );
-}
-
-/// Every line keeps its character count (the Inputs list sets it in a monospace font)
-/// whatever the levels, the overs count and CLIP: the row never shifts or wraps.
-#[test]
-fn inputs_row_lines_keep_their_width() {
-    for scale in [
-        Scale::Dbfs,
-        Scale::Dbu { fs_dbu: 16.3 },
-        Scale::DbSpl { fs_db_spl: 120.5 },
-    ] {
-        for ballistic in [
-            Ballistic::TruePeak,
-            Ballistic::Type1,
-            Ballistic::Vu,
-            Ballistic::ShortTerm,
-        ] {
-            let mut widths = None;
-            for level in [
-                None,
-                Some(f32::NEG_INFINITY),
-                Some(-0.1),
-                Some(-60.0),
-                Some(-120.0),
-                Some(3.0),
-            ] {
-                for overs in [0, 1, 12, 999, 9999, 123_456, u32::MAX] {
-                    for clipped in [false, true] {
-                        let mut i = input(scale);
-                        i.offers_vu = matches!(scale, Scale::Dbu { .. });
-                        (i.ppm, i.max, i.true_peak_dbtp) = (level, level, level);
-                        i.overs = overs;
-                        i.clipped = clipped;
-                        let w: Vec<usize> = i
-                            .row_lines(ballistic)
-                            .iter()
-                            .map(|l| l.chars().count())
-                            .collect();
-                        let first = widths.get_or_insert_with(|| w.clone());
-                        assert_eq!(
-                            *first, w,
-                            "{scale:?} {ballistic:?} {level:?} {overs} {clipped}"
-                        );
-                    }
-                }
-            }
-        }
-    }
+fn overs_slots_keep_their_width() {
     assert_eq!(overs_slot(0).chars().count(), OVERS_SLOT);
     assert_eq!(overs_slot(123_456), "123k overs");
     assert_eq!(overs_slot(u32::MAX), " 1M+ overs");
@@ -312,42 +230,23 @@ fn flying_peak_holds_a_second_then_falls_20_db_a_second() {
 #[test]
 fn layout_cases() {
     let rect = Rect::new(10.0, 20.0, 600.0, 300.0);
-    let sw = scale_w(ScaleKind::Dbfs, 11.0);
-    let bars_only = layout(rect, false, 2, sw);
+    let bars_only = layout(rect, false);
     assert_eq!(bars_only.gonio, None);
     assert_eq!(bars_only.correlation, None);
     assert_eq!(bars_only.bars, rect);
-
-    let full = layout(rect, true, 2, sw);
+    // A pair's Meters view: the strip under the bars, as wide as they are.
+    let pair = layout(rect, true);
+    assert_eq!(pair.gonio, None);
+    assert_eq!(pair.bars, Rect::new(10.0, 20.0, 600.0, 300.0 - CHIP_H));
     assert_eq!(
-        full.gonio,
-        Some(Rect::new(10.0, 20.0, 300.0, 300.0 - CHIP_H))
-    );
-    assert_eq!(
-        full.correlation,
-        Some(Rect::new(10.0, 320.0 - CHIP_H, 300.0, CHIP_H))
-    );
-    assert_eq!(full.bars, Rect::new(310.0, 20.0, 300.0, 300.0));
-    // Narrower: the goniometer gives way so the bars keep their readouts, down to its
-    // least width.
-    let mid = layout(Rect::new(0.0, 0.0, 400.0, 300.0), true, 2, sw);
-    assert_eq!(mid.bars.w, sw + 2.0 * BAR_MIN_W);
-    let tight = layout(Rect::new(0.0, 0.0, 300.0, 300.0), true, 2, sw);
-    assert_eq!(tight.gonio.expect("a goniometer").w, GONIO_MIN_W);
-
-    let short = layout(Rect::new(0.0, 0.0, 400.0, 100.0), true, 2, sw);
-    assert_eq!(short.gonio, None);
-    assert_eq!(short.correlation, Some(Rect::new(0.0, 0.0, CHIP_W, 100.0)));
-    assert_eq!(short.bars, Rect::new(CHIP_W, 0.0, 400.0 - CHIP_W, 100.0));
-
-    let narrow = layout(Rect::new(0.0, 0.0, 100.0, 100.0), true, 2, sw);
-    assert_eq!(
-        narrow.correlation.expect("a chip").w,
-        50.0,
-        "the chip never crowds the bars out"
+        pair.correlation,
+        Some(Rect::new(10.0, 320.0 - CHIP_H, 600.0, CHIP_H))
     );
     let pane = pane_of(vec![], None, Ballistic::TruePeak);
-    assert_eq!(pane.layout(rect, 11.0), bars_only);
+    assert_eq!(
+        pane.layout(rect, 13.0, 11.0, crate::view::PlotChrome::Full),
+        bars_only
+    );
 }
 
 pub(super) fn pane_with_pair(correlation: Correlation) -> ProgrammePane {
@@ -400,9 +299,11 @@ fn scene_draws_bars_readouts_chip_and_field() {
         None,
     );
     let t = texts(&full.scene);
-    for want in ["Main L", "Main R", "right quiet", "correlation", "L", "R"] {
+    // The Meters view of a pair: its bars and the chip's strip under them.
+    for want in ["Main L", "Main R", "right quiet", "correlation"] {
         assert!(t.iter().any(|x| x == want), "{want} in {t:?}");
     }
+    assert_eq!(full.gonio, None);
     // A true-peak bar reads dBTP, its max too, and no second true-peak line repeats it.
     assert!(t.iter().any(|x| x == "−12.3 dBTP"), "{t:?}");
     assert!(t.iter().any(|x| x == "max"), "{t:?}");
@@ -418,11 +319,18 @@ fn scene_draws_bars_readouts_chip_and_field() {
     for want in ["−12.3 dBFS", "−1.2 dBTP", "max", "−3.1 dBFS"] {
         assert!(t1.iter().any(|x| x == want), "{want} in {t1:?}");
     }
-    let sq = full.gonio.expect("a pair on a tall pane has a goniometer");
+    let mut g = p.clone();
+    g.view = crate::view::ProgrammeMode::Goniometer;
+    let full = programme_scene(&g, style, size, None);
+    let t = texts(&full.scene);
+    for want in ["right quiet", "correlation", "L", "R"] {
+        assert!(t.iter().any(|x| x == want), "{want} in {t:?}");
+    }
+    let sq = full.gonio.expect("a pair's Goniometer view");
     assert_eq!(sq.w, sq.h);
     let grid = |s: &ProgrammeScene| s.scene.layers[0].polylines.len();
     let bare = programme_scene(
-        &p,
+        &g,
         Style {
             chrome: PlotChrome::Bare,
             theme: &theme,
@@ -430,7 +338,7 @@ fn scene_draws_bars_readouts_chip_and_field() {
         size,
         None,
     );
-    assert!(grid(&full) > 3);
+    assert_eq!(grid(&full), 3, "the outline and the two axes");
     assert_eq!(grid(&bare), 0, "T hides the grid");
     let gone = programme_scene(
         &p,

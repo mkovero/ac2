@@ -60,9 +60,9 @@ pub struct LoudnessFacts<'a> {
     pub is_mic: &'a dyn Fn(u16) -> bool,
     /// What a captured input is called in the pane (its bar's label).
     pub label: &'a dyn Fn(u16) -> String,
-    /// Every captured input's peak readings as the frame carries them: a source bar takes
-    /// its sides' true peak, overs and CLIP from here even when the pane does not name a
-    /// side.
+    /// Every captured input's peak readings as the frame carries them, for the bar of each
+    /// input the pane names. A side the pane does not name has no bar, so its overs and
+    /// CLIP are not on this pane: the plate's TP max is all the pane keeps of it.
     pub input: &'a dyn Fn(u16) -> Option<ProgrammeInput>,
     /// The name of an input that may not be captured, `None` when it has none of its own.
     pub own_name: &'a dyn Fn(u16) -> Option<String>,

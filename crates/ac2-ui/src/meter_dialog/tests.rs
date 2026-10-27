@@ -59,7 +59,7 @@ fn a_new_meter_starts_on_the_first_pair_and_shows_the_rigs_settings() {
     assert_eq!(metered(&f), Ok(Metered::Pair { left: 2, right: 3 }));
     assert_eq!(
         f.keys_hint(),
-        "Enter opens it in a new pane beside the focused one · ↑↓ field · ←→ choose · Esc closes"
+        "Enter opens it beside the focused one: meters, and a goniometer pane for a pair · ↑↓ field · ←→ choose · Esc closes"
     );
 }
 

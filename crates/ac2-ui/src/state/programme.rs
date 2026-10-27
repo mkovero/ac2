@@ -253,7 +253,8 @@ impl AppState {
             .data
             .as_ref()
             .and_then(|d| d.latest.get(&Topic::SessionLevels))
-            .filter(|f| !f.stale);
+            // The session dialog's meters may be another device's preview.
+            .filter(|f| !f.stale && self.overlay.session().is_none());
         let frame = latest.and_then(|f| match &f.frame.data {
             FrameData::SessionLevels(l) => Some(l),
             _ => None,
@@ -369,6 +370,7 @@ impl AppState {
             loudness,
             plate: ac2_scene::plate::PlatePlace::default(),
             plate_hover: None,
+            view: ac2_scene::view::ProgrammeMode::Meters,
         }
     }
 

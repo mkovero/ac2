@@ -183,12 +183,23 @@ pub struct InputRow {
     pub used: Option<InputUse>,
     /// The input's reading, or the pair's left reading.
     pub reading: MeterReading,
-    /// What the readout rests on, for a row whose level is not dB SPL: `dBFS`, or a line
-    /// calibration's `dBu · full scale +13.0 dBu · 3 h ago`. A mic row names its curve in
-    /// the label instead.
+    /// A line calibration's `dBu · full scale +13.0 dBu · 3 h ago`; `None` for an
+    /// uncalibrated line or digital input, whose numbers carry their unit, and for a mic,
+    /// whose label names its curve.
     pub cal: Option<String>,
     /// A pair's right input and its reading: the row then draws two meters, `L` and `R`.
     pub right: Option<(u16, MeterReading)>,
+}
+
+impl InputRow {
+    /// The row's label line: the label, then the line calibration it reads by, where the
+    /// mic's curve already is for a mic.
+    pub fn label_line(&self) -> String {
+        match &self.cal {
+            Some(c) => format!("{} · {c}", self.label),
+            None => self.label.clone(),
+        }
+    }
 }
 
 /// The mark beside a pair's meter.

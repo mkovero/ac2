@@ -1,6 +1,7 @@
 //! The goniometer's embers: the five figures of the design (left only, right only, mono,
 //! reversed, uncorrelated noise) from synthetic rings built as the core would (45° rotation,
-//! auto gain, `i8`), at two cooling settings. Blessed on lavapipe (`AC2_BLESS=1`).
+//! auto gain, `i8`), at two cooling settings, each ring sized by `gonio::ring_capacity` as
+//! the app sizes it. Blessed on lavapipe (`AC2_BLESS=1`).
 
 use crate::common;
 
@@ -19,13 +20,14 @@ const EMBERS: ImageTolerance = ImageTolerance {
 
 const PANEL: f32 = 120.0;
 const GAP: f32 = 8.0;
-const FRAMES: usize = 32;
 const POINTS: usize = 256;
+/// Frames pushed: 10 s at 30 fps, more than the slowest ring keeps.
+const PUSHED: usize = 301;
 const FRAME_S: f64 = 1.0 / 30.0;
-const NOW: f64 = 100.0;
+pub(crate) const NOW: f64 = 100.0;
 
 #[derive(Clone, Copy, Debug)]
-enum Figure {
+pub(crate) enum Figure {
     LeftOnly,
     RightOnly,
     Mono,
@@ -76,12 +78,13 @@ fn frame(fig: Figure, start_s: f64, rng: &mut u32) -> Vec<WirePoint> {
         .collect()
 }
 
-/// A ring holding the last second of `fig`: 32 frames whose ages at [`NOW`] run 0 … 1 s.
-fn ring(fig: Figure) -> EmberRing {
+/// The ring the app keeps at `decay_s` after ten seconds of `fig` at 30 frames a second,
+/// the newest landing at [`NOW`]: whatever its capacity holds of them.
+pub(crate) fn ring(fig: Figure, decay_s: f32) -> EmberRing {
     let mut rng = 0x5eed_1234 ^ fig as u32;
-    let mut ring = EmberRing::new(POINTS * FRAMES);
-    for f in 0..FRAMES {
-        let landed = NOW - 1.0 + f as f64 / (FRAMES - 1) as f64;
+    let mut ring = EmberRing::new(gonio::ring_capacity(decay_s));
+    for f in 0..PUSHED {
+        let landed = NOW - (PUSHED - 1 - f) as f64 * FRAME_S;
         ring.push_frame(landed, &frame(fig, landed, &mut rng));
     }
     ring
@@ -109,7 +112,7 @@ fn five_figures(decay_s: f32) -> ac2_plot::Scene {
     let layers = FIGURES
         .iter()
         .enumerate()
-        .map(|(i, &fig)| gonio_layer(&ring(fig), decay_s, panel_rect(i), true))
+        .map(|(i, &fig)| gonio_layer(&ring(fig, decay_s), decay_s, panel_rect(i), true))
         .collect();
     scene(
         GAP + (PANEL + GAP) * FIGURES.len() as f32,
@@ -227,9 +230,21 @@ fn long_decay_keeps_more_light() {
     );
 }
 
+/// The 2 s ring still holds embers landed 1.5 s ago and more, which glow as ash; a ring of
+/// one second would have pushed them out.
+#[test]
+fn the_slow_ring_keeps_its_tail() {
+    let slow = ring(Figure::Noise, 2.0);
+    let tail = slow.age(NOW).filter(|e| e.age_s >= 1.5).count();
+    assert!(tail >= POINTS * 30, "{tail} points of 1.5 s and older");
+    assert!(gonio::brightness(1.5, 2.0, 1.0) > 0.0);
+    let fast = ring(Figure::Noise, 0.4);
+    assert_eq!(fast.len(), POINTS * 60);
+}
+
 #[test]
 fn chrome_flag_hides_the_grid() {
-    let ring = ring(Figure::Mono);
+    let ring = ring(Figure::Mono, 0.4);
     let rect = panel_rect(0);
     let shown = gonio_layer(&ring, 0.4, rect, true);
     let hidden = gonio_layer(&ring, 0.4, rect, false);
@@ -237,5 +252,5 @@ fn chrome_flag_hides_the_grid() {
     assert!(hidden.polylines.is_empty());
     assert_eq!(shown.points, hidden.points);
     assert_eq!(shown.points[0].blend, Blend::Additive);
-    assert_eq!(shown.points[0].points.len(), POINTS * FRAMES);
+    assert_eq!(shown.points[0].points.len(), gonio::ring_capacity(0.4));
 }

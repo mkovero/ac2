@@ -235,6 +235,9 @@ pub struct PlateBox {
     pub grip: Rect,
     /// Its text scale as drawn.
     pub scale: f32,
+    /// Placed and sized by its pane (a docked loudness plate), not by the operator: a drag
+    /// of it floats it first where it stands, at the scale it is drawn at.
+    pub docked: bool,
 }
 
 impl PlateBox {
@@ -245,6 +248,7 @@ impl PlateBox {
             rect,
             grip: grip_rect(rect),
             scale,
+            docked: false,
         }
     }
 

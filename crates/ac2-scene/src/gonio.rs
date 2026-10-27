@@ -3,12 +3,14 @@
 //!
 //! The daemon sends, per meter frame, a batch of points already rotated 45° (`x = (r − l)/√2`,
 //! `y = (l + r)/√2`), auto-gained and quantised to `i8`, each with the sample's level within
-//! the auto-gain window as an `i8` in `0 … 127`. The ring keeps the last ~1 s of them with
-//! the display time they landed at. What the renderer needs per ember is here: position,
+//! the auto-gain window as an `i8` in `0 … 127`. The ring keeps the points of the last five
+//! decays ([`ring_capacity`]) with the display time they landed at. What the renderer needs per ember is here: position,
 //! age and landing intensity; the colours of the ramp are `ac2-plot`'s. A stage is named
 //! ([`AshStage`]) so tests assert *orange*, not a colour triple.
 
 use std::collections::VecDeque;
+
+use ac2_proto::frame::{GONIO_POINTS, METER_FPS};
 
 use crate::primitives::{Polyline, Rect, Stroke};
 
@@ -74,9 +76,19 @@ pub struct EmberAge {
     pub intensity: f32,
 }
 
-/// Fixed-capacity ring of the most recent embers, oldest first. Allocates once; when full,
-/// a new frame pushes the oldest points out, so the capacity bounds both memory and how far
-/// back the field remembers (256 points × 32 frames ≈ 1 s at 30 frames a second).
+/// Points a ring keeps at the cooling time `decay_s`: every frame of the last
+/// [`GONE_DECAYS`] decays at the daemon's frame rate, so an ember lives its whole ramp down
+/// to ash before a newer frame pushes it out (60 frames at the 0.4 s default, 300 at 2 s).
+pub fn ring_capacity(decay_s: f32) -> usize {
+    let frames = f64::from(METER_FPS) * f64::from(GONE_DECAYS) * f64::from(clamp_decay(decay_s));
+    // The decay is an f32 on a 0.1 s grid: 0.4 is 0.4000000059…, whose last bit would
+    // otherwise round a whole frame up.
+    GONIO_POINTS * (frames - 1e-4).ceil().max(1.0) as usize
+}
+
+/// Fixed-capacity ring of the most recent embers, oldest first. Allocates on a capacity
+/// change only; when full, a new frame pushes the oldest points out, so the capacity bounds
+/// both memory and how far back the field remembers ([`ring_capacity`]).
 #[derive(Clone, Debug)]
 pub struct EmberRing {
     embers: VecDeque<Ember>,
@@ -93,6 +105,19 @@ impl EmberRing {
 
     pub fn capacity(&self) -> usize {
         self.capacity
+    }
+
+    /// Resizes the ring to `n` points; shrinking drops the oldest, so the newest stay.
+    pub fn set_capacity(&mut self, n: usize) {
+        while self.embers.len() > n {
+            self.embers.pop_front();
+        }
+        if n > self.embers.capacity() {
+            self.embers.reserve_exact(n - self.embers.len());
+        } else {
+            self.embers.shrink_to(n);
+        }
+        self.capacity = n;
     }
 
     pub fn len(&self) -> usize {
@@ -342,5 +367,57 @@ mod tests {
         assert_eq!(g.len(), 3);
         assert_eq!(g[0].points.len(), 5);
         assert_eq!(g[1].points, vec![[60.0, 20.0], [160.0, 120.0]]);
+    }
+
+    #[test]
+    fn the_ring_holds_five_decays_of_frames() {
+        assert_eq!(ring_capacity(0.4), GONIO_POINTS * 60);
+        assert_eq!(ring_capacity(2.0), GONIO_POINTS * 300);
+        assert_eq!(ring_capacity(0.1), GONIO_POINTS * 15);
+        assert_eq!(
+            ring_capacity(9.0),
+            ring_capacity(2.0),
+            "clamped to the range"
+        );
+    }
+
+    #[test]
+    fn a_smaller_ring_keeps_the_newest_points() {
+        let mut r = EmberRing::new(8);
+        for k in 0..8i8 {
+            r.push_points(f64::from(k), &[[k, 0]]);
+        }
+        r.set_capacity(3);
+        assert_eq!(r.capacity(), 3);
+        let xs: Vec<f32> = r.age(10.0).map(|e| e.x * 127.0).collect();
+        assert_eq!(xs, vec![5.0, 6.0, 7.0]);
+        r.push_points(11.0, &[[9, 0]]);
+        assert_eq!(r.len(), 3, "the new capacity bounds it");
+        r.set_capacity(10);
+        r.push_points(12.0, &[[10, 0]]);
+        assert_eq!(r.len(), 4);
+    }
+
+    #[test]
+    fn an_ember_at_two_seconds_lives_its_whole_ramp() {
+        let decay = 2.0;
+        let mut r = EmberRing::new(ring_capacity(decay));
+        let frame = [[100i8, 0]; GONIO_POINTS];
+        let first = [[1i8, 0]; GONIO_POINTS];
+        r.push_points(0.0, &first);
+        let dt = 1.0 / f64::from(METER_FPS);
+        let mut t = dt;
+        while t <= 9.0 {
+            r.push_points(t, &frame);
+            r.retire(t, decay);
+            t += dt;
+        }
+        let oldest = r.age(t).next().expect("embers");
+        assert_eq!(oldest.x * 127.0, 1.0, "the first frame's points at 9 s");
+        r.retire(10.01, decay);
+        assert!(
+            r.age(10.01).all(|e| e.x * 127.0 != 1.0),
+            "retired after five decays"
+        );
     }
 }
