@@ -74,6 +74,11 @@ pub struct FakeOptions {
     pub lease_expiry: Duration,
     /// `welcome.server`.
     pub server: String,
+    /// `welcome.rig_id`; kept across [`Shared::restart`], as a daemon keeps its file. Two
+    /// fakes with different ids are two rigs.
+    pub rig_id: RigId,
+    /// `welcome.name`.
+    pub name: String,
     /// Added to the daemon's wall clock (tests the client's offset estimate).
     pub clock_skew_ns: i64,
     /// Session directory for `file.*`; `None` answers them `unsupported`.
@@ -86,6 +91,8 @@ impl Default for FakeOptions {
             ka_interval: Duration::from_millis(100),
             lease_expiry: Duration::from_millis(1500),
             server: "ac2d 0.0.0 (build fake)".into(),
+            rig_id: RigId(0xfa4e),
+            name: "fake rig".into(),
             clock_skew_ns: 0,
             session_dir: None,
         }

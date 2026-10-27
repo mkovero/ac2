@@ -20,6 +20,8 @@ impl Shared {
                 daemon_incarnation: self.incarnation,
                 session_epoch: self.state.session.epoch,
                 rev: self.rev,
+                rig_id: self.opts.rig_id,
+                name: self.opts.name.clone(),
             }),
             C::SessionDevices => ReplyBody::Backends(self.backends.clone()),
             C::SessionPreview {

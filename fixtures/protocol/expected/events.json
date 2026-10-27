@@ -167,6 +167,9 @@
          "at": null,
          "scale": 1.0
         }
+       },
+       "rig": {
+        "type": "this_rig"
        }
       }
      },
@@ -215,6 +218,11 @@
           "at": null,
           "scale": 1.0
          }
+        },
+        "rig": {
+         "type": "rig",
+         "id": 1147797409030816545,
+         "name": "ketunkolo"
         }
        }
       },
@@ -260,6 +268,9 @@
           "at": null,
           "scale": 1.0
          }
+        },
+        "rig": {
+         "type": "this_rig"
         }
        }
       }

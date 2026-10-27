@@ -176,6 +176,7 @@ pub fn state_file_name(k: StateFile) -> &'static str {
         StateFile::Calibrations => "calibrations",
         StateFile::ServerKey => "server key",
         StateFile::AuthorizedClients => "authorized clients",
+        StateFile::RigId => "rig id",
     }
 }
 

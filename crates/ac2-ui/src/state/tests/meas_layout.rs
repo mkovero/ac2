@@ -18,6 +18,7 @@ fn two_transfer() -> PaneLayout {
             content: None,
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
+            rig: wire::RigRef::ThisRig,
         }),
     };
     PaneLayout::Split {
@@ -400,6 +401,7 @@ fn three_transfer() -> PaneLayout {
             content: None,
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
+            rig: wire::RigRef::ThisRig,
         }),
     };
     PaneLayout::Split {
@@ -601,6 +603,7 @@ fn three_spectrum() -> PaneLayout {
             content: None,
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
+            rig: wire::RigRef::ThisRig,
         }),
     };
     PaneLayout::Split {

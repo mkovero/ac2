@@ -93,6 +93,29 @@ fn every_reply_roundtrips() {
     }
 }
 
+/// The welcome names the rig: its id is a plain integer on the wire (as
+/// `daemon_incarnation`), its name a string, and both come back exactly.
+#[test]
+fn welcome_carries_the_rig_id_and_name() {
+    let w = samples::replies()
+        .into_iter()
+        .find_map(|r| match r {
+            Ok(ReplyBody::Welcome(w)) => Some(w),
+            _ => None,
+        })
+        .expect("a welcome sample");
+    #[derive(serde::Deserialize)]
+    struct Peek {
+        rig_id: u64,
+        name: String,
+    }
+    let b = rmp_serde::to_vec_named(&w).expect("sample message");
+    let p: Peek = rmp_serde::from_slice(&b).expect("sample message");
+    assert_eq!((p.rig_id, p.name.as_str()), (w.rig_id.0, w.name.as_str()));
+    let back: Welcome = rmp_serde::from_slice(&b).expect("sample message");
+    assert_eq!(back, w);
+}
+
 #[test]
 fn every_event_roundtrips() {
     let mut kinds = BTreeSet::new();

@@ -51,8 +51,13 @@ pub struct DaemonConfig {
     /// (`session.replay`); unfinished ones found there at start are finished as
     /// interrupted. `None`: this daemon does not record.
     pub recording_dir: Option<PathBuf>,
-    /// mDNS advert of a network-mode daemon (`_ac2._tcp`); ignored in local modes, which
-    /// are not reachable from the network. `None` advertises nothing.
+    /// The rig's name, told every client at hello and advertised in network mode; display
+    /// only (default *ac2 on <hostname>*).
+    pub name: String,
+    /// Where the daemon's identity comes from, loaded at every start in every mode.
+    pub rig_id: RigIdSource,
+    /// mDNS advert of a network-mode daemon (`_ac2._tcp`) under [`Self::name`]; ignored in
+    /// local modes, which are not reachable from the network. `None` advertises nothing.
     pub advertise: Option<Advertise>,
     /// Local time of day, which decides each band-meter second's day or night limits.
     pub local_clock: LocalClock,
@@ -111,13 +116,22 @@ pub struct AutosaveConfig {
     pub restore: bool,
 }
 
-/// What a network-mode daemon advertises over mDNS. The advert names the rig and its key
-/// fingerprint; it never grants anything (clients still need a pinned key and an entry in
-/// the authorized-clients file).
+/// Where a daemon's [`RigId`](ac2_proto::units::RigId) comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RigIdSource {
+    /// Kept in this file (`ac2_paths::rig_id`, or `ac2_paths::app_rig_id` for the app's
+    /// embedded daemon on real audio, so the two on one machine never share an id): made
+    /// if absent, set aside and made anew if unreadable.
+    File(PathBuf),
+    /// Random per start: a daemon of which nothing persists (the simulated rig, tests).
+    Ephemeral,
+}
+
+/// What a network-mode daemon advertises over mDNS. The advert names the rig
+/// ([`DaemonConfig::name`]) and its key fingerprint; it never grants anything (clients
+/// still need a pinned key and an entry in the authorized-clients file).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Advertise {
-    /// Rig name shown by `ac2 discover` and the UI.
-    pub name: String,
     /// mDNS port and interfaces (tests confine it to loopback).
     pub mdns: ac2_discovery::Options,
 }
@@ -142,6 +156,8 @@ impl fmt::Debug for DaemonConfig {
             .field("cal_store", &self.cal_store)
             .field("autosave", &self.autosave)
             .field("recording_dir", &self.recording_dir)
+            .field("name", &self.name)
+            .field("rig_id", &self.rig_id)
             .field("advertise", &self.advertise)
             .field("local_clock", &self.local_clock)
             .field("systemd_notify", &self.systemd_notify)
@@ -154,7 +170,8 @@ impl DaemonConfig {
     pub const PUBLISH_FPS: u32 = 60;
 
     /// Default limits (Q2/Q5/Q6) for `backend` (the only one offered) listening on
-    /// `listen`, with a global maximum of `max_level_dbfs`.
+    /// `listen`, with a global maximum of `max_level_dbfs`; an [`RigIdSource::Ephemeral`]
+    /// id, which a daemon that keeps state sets to its file.
     pub fn new(backend: Arc<dyn Backend>, listen: Listen, max_level_dbfs: f64) -> Self {
         Self {
             backends: vec![backend],
@@ -171,6 +188,8 @@ impl DaemonConfig {
             cal_store: None,
             autosave: None,
             recording_dir: None,
+            name: ac2_discovery::default_rig_name(),
+            rig_id: RigIdSource::Ephemeral,
             advertise: None,
             local_clock: LocalClock::Host,
             systemd_notify: false,

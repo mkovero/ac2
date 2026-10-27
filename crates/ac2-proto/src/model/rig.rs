@@ -95,6 +95,8 @@ pub enum StateFile {
     ServerKey,
     /// The clients allowed to connect (network mode).
     AuthorizedClients,
+    /// The daemon's identity (`rig-id`).
+    RigId,
 }
 
 /// `Option<SocketAddr>` as `"ip:port"` text: msgpack has no address type, and the text

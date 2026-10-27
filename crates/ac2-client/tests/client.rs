@@ -956,3 +956,26 @@ async fn band_transfer_from_typed_levels() -> R {
     assert!(matches!(c.call(span).await, Err(ClientError::Daemon(_))));
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_fakes_are_two_rigs_by_id_and_name() -> R {
+    let rig = |id: u64, name: &str| FakeOptions {
+        rig_id: RigId(id),
+        name: name.into(),
+        ..FakeOptions::default()
+    };
+    let a = FakeDaemon::start(rig(0xa, "pupu"))?;
+    let b = FakeDaemon::start(rig(0xb, "ketunkolo"))?;
+    let (ca, cb) = (connect(&a).await?, connect(&b).await?);
+    let (wa, wb) = (ca.welcome(), cb.welcome());
+    assert_eq!((wa.rig_id, wa.name.as_str()), (RigId(0xa), "pupu"));
+    assert_eq!((wb.rig_id, wb.name.as_str()), (RigId(0xb), "ketunkolo"));
+    // A restart keeps the rig: the id is the daemon's, the incarnation the process's.
+    a.lock().restart(0xbeef);
+    until("welcome refreshed", || async {
+        ca.welcome().daemon_incarnation == DaemonIncarnation(0xbeef)
+    })
+    .await?;
+    assert_eq!(ca.welcome().rig_id, RigId(0xa));
+    Ok(())
+}

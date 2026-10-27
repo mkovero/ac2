@@ -44,6 +44,8 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             daemon_incarnation: DaemonIncarnation(0x5eed_5eed_5eed_5eed),
             session_epoch: SessionEpoch(2),
             rev: Rev(42),
+            rig_id: RigId(0x0123_4567_89ab_cdef),
+            name: "ac2 on pupu".into(),
         })),
         Ok(ReplyBody::Backends(vec![
             BackendInfo {

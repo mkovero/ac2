@@ -32,10 +32,8 @@ fn network_mode_advertises_fingerprint_local_mode_does_not() {
         data: "tcp://127.0.0.1:0".into(),
     };
     let mut cfg = config(manual_rig(), local);
-    cfg.advertise = Some(Advertise {
-        name: "local rig".into(),
-        mdns: mdns.clone(),
-    });
+    cfg.name = "local rig".into();
+    cfg.advertise = Some(Advertise { mdns: mdns.clone() });
     let hl = Daemon::start(cfg).unwrap();
     assert_eq!(hl.advertised_as(), None, "local mode is not on the network");
 
@@ -48,10 +46,8 @@ fn network_mode_advertises_fingerprint_local_mode_does_not() {
         },
     };
     let mut cfg = config(manual_rig(), listen);
-    cfg.advertise = Some(Advertise {
-        name: "stage.rig".into(),
-        mdns: mdns.clone(),
-    });
+    cfg.name = "stage.rig".into();
+    cfg.advertise = Some(Advertise { mdns: mdns.clone() });
     let h = Daemon::start(cfg).unwrap();
     let fullname = h.advertised_as().expect("advert registered").to_owned();
     let port: u16 = h

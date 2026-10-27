@@ -44,6 +44,8 @@ fn status_json(
     let matches = build.map(|b| b == BUILD_ID);
     json!({
         "server": w.server,
+        "name": w.name,
+        "rig_id": w.rig_id.to_string(),
         "build_id": build,
         "client_build_id": BUILD_ID,
         "build_matches": matches,
@@ -67,7 +69,10 @@ fn status_text(
     local: bool,
 ) -> String {
     let w = c.welcome();
-    let mut s = format!("daemon       {}", w.server);
+    let mut s = format!(
+        "daemon       {}\nrig          {}   id {}",
+        w.server, w.name, w.rig_id
+    );
     match parse_build_id(&w.server) {
         Some(b) if b != BUILD_ID && local => s.push_str(&format!(
             "\nSTALE        daemon build {b}, this ac2 is {BUILD_ID}; restart it: `ac2 daemon stop && ac2 daemon start`"

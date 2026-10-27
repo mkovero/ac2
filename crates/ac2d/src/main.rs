@@ -8,6 +8,7 @@ use clap::Parser;
 
 use ac2d::{
     Advertise, AutosaveConfig, BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecurity,
+    RigIdSource,
 };
 
 /// The ac2 daemon.
@@ -45,8 +46,9 @@ struct Args {
     /// Authorized clients (network mode; created empty if missing).
     #[arg(long, value_name = "PATH")]
     authorized: Option<PathBuf>,
-    /// Rig name advertised over mDNS in network mode (default: ac2 on <hostname>).
-    #[arg(long, value_name = "TEXT", requires = "listen")]
+    /// Rig name, shown by every client and advertised over mDNS in network mode (default:
+    /// ac2 on <hostname>).
+    #[arg(long, value_name = "TEXT")]
     name: Option<String>,
     /// Network mode without the mDNS advert (clients then need the address; pairing is
     /// required either way).
@@ -145,14 +147,14 @@ fn main() -> ExitCode {
         }
     };
     let advertise = (listen.is_network() && !args.no_mdns).then(|| Advertise {
-        name: args
-            .name
-            .clone()
-            .unwrap_or_else(ac2_discovery::default_rig_name),
         mdns: ac2_discovery::Options::default(),
     });
     let mut config = DaemonConfig::new(Arc::clone(&backends[0]), listen, args.max_level);
     config.backends = backends;
+    if let Some(name) = &args.name {
+        config.name.clone_from(name);
+    }
+    config.rig_id = RigIdSource::File(ac2_paths::rig_id());
     config.systemd_notify = true;
     config.advertise = advertise;
     config.cal_store = Some(args.cal_store.clone().unwrap_or_else(ac2_paths::cal_store));

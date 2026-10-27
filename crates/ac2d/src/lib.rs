@@ -56,6 +56,7 @@ mod osc;
 mod outbox;
 mod preview;
 mod rig;
+mod rig_id;
 mod session;
 mod state;
 mod stimulus;
@@ -73,7 +74,7 @@ use ac2_zmq::{Context, PublicKey, SecureContext, Socket, SocketType, TcpLiveness
 
 pub use config::{
     Advertise, AutosaveConfig, DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError,
-    LocalClock, NetworkSecurity, ReplayLimits, pid_file, runtime_dir,
+    LocalClock, NetworkSecurity, ReplayLimits, RigIdSource, pid_file, runtime_dir,
 };
 
 pub use backend::{
@@ -317,7 +318,8 @@ impl Daemon {
 
         // Network mode: what `server.*` reports and changes while the daemon runs.
         let mut network_parts = None;
-        let mut key_damage = Vec::new();
+        let (rig_id, rig_id_damage) = rig_id::load(&config.rig_id);
+        let mut key_damage: Vec<_> = rig_id_damage.into_iter().collect();
         let (ctx, secure, router, xpub, server_key) = match &config.listen {
             Listen::Inproc { name } => {
                 let ctx = Context::new().map_err(zerr("context"))?;
@@ -440,6 +442,8 @@ impl Daemon {
         let control = Control::new(Setup {
             backends: config.backends.clone(),
             incarnation,
+            rig_id,
+            name: config.name.clone(),
             ceiling_dbfs: config.max_level_dbfs,
             max_level: bound_level,
             ceiling_bound: config.max_level_dbfs,
@@ -471,7 +475,7 @@ impl Daemon {
             .spawn(move || control.run(&rx))
             .map_err(StartError::Io)?;
         let advert = match (&config.advertise, server_key) {
-            (Some(a), Some(key)) => advertise(a, &key, &ctrl),
+            (Some(a), Some(key)) => advertise(&config.name, a, &key, &ctrl),
             _ => None,
         };
         if let Some(a) = &advert {
@@ -480,8 +484,10 @@ impl Daemon {
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(a.fullname().to_owned());
         }
         tracing::info!(
-            "ac2d {} up: ctrl {ctrl}, data {data}, backends {:?}, incarnation {:016x}",
+            "ac2d {} up: {:?} (rig id {rig_id}), ctrl {ctrl}, data {data}, backends {:?}, \
+             incarnation {:016x}",
             env!("CARGO_PKG_VERSION"),
+            config.name,
             config.backends.iter().map(|b| b.kind()).collect::<Vec<_>>(),
             incarnation.0
         );
@@ -510,13 +516,18 @@ impl Daemon {
 /// Registers the mDNS advert of a network-mode daemon bound at `ctrl`. A failure is logged
 /// and otherwise ignored: discovery is a convenience, the daemon serves paired clients
 /// without it.
-fn advertise(a: &Advertise, key: &PublicKey, ctrl: &str) -> Option<ac2_discovery::Advertiser> {
+fn advertise(
+    name: &str,
+    a: &Advertise,
+    key: &PublicKey,
+    ctrl: &str,
+) -> Option<ac2_discovery::Advertiser> {
     let (host, port) = ctrl
         .strip_prefix("tcp://")
         .and_then(|r| r.rsplit_once(':'))
         .and_then(|(h, p)| Some((h, p.parse::<u16>().ok()?)))?;
     let advert = ac2_discovery::Advert {
-        name: ac2_discovery::instance_name(&a.name),
+        name: ac2_discovery::instance_name(name),
         version: env!("CARGO_PKG_VERSION").to_owned(),
         proto: ac2_proto::PROTO_VERSION,
         fingerprint: key.fingerprint(),

@@ -530,6 +530,8 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
         },
         levels,
         plates: super::plates::wire_plates(&v.plates),
+        // The one rig the app holds is the one whose measurement this layout is.
+        rig: wire::RigRef::ThisRig,
     }
 }
 

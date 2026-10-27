@@ -91,6 +91,17 @@ pub fn cal_store() -> PathBuf {
     config_dir().join("calibrations.json")
 }
 
+/// The daemon's identity, which apps key a rig by: `<config>/rig-id`.
+pub fn rig_id() -> PathBuf {
+    config_dir().join("rig-id")
+}
+
+/// The identity of the app's embedded daemon (real audio): `<config>/app-rig-id`, apart
+/// from a stand-alone daemon's on the same machine, as both can be connected at once.
+pub fn app_rig_id() -> PathBuf {
+    config_dir().join("app-rig-id")
+}
+
 /// The daemon's rig settings (system max level, output labels): `<config>/rig.json`.
 pub fn rig_settings() -> PathBuf {
     config_dir().join("rig.json")

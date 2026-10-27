@@ -204,6 +204,9 @@ pub(crate) struct Setup {
     /// Offered backends, the default first.
     pub(crate) backends: Vec<Arc<dyn Backend>>,
     pub(crate) incarnation: DaemonIncarnation,
+    /// This daemon's identity (`DaemonConfig::rig_id`) and name, told every client at hello.
+    pub(crate) rig_id: ac2_proto::units::RigId,
+    pub(crate) name: String,
     /// The system max level in force, dBFS RMS, and its sample-peak limit: start values
     /// (the bound); [`Control::new`] takes the rig settings' value.
     pub(crate) ceiling_dbfs: f64,

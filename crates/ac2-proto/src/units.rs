@@ -118,6 +118,21 @@ id_type!(
     /// Random per daemon process start.
     DaemonIncarnation(u64)
 );
+/// A daemon's identity: random (never 0), made once and kept across restarts, renames,
+/// address changes and a move between local and network mode, so that an app holding
+/// several rigs tells them apart by this and not by where they are reached. It cannot be
+/// the CURVE key, which a local or embedded daemon does not have. Shown as 16 lowercase
+/// hex digits, the form of its file (`<config>/rig-id`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RigId(pub u64);
+
+impl fmt::Display for RigId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
+}
+
 id_type!(
     /// Per incarnation; changes on session open/close, device, rate or buffer change.
     SessionEpoch(u32)

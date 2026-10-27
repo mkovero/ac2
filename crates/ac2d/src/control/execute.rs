@@ -37,6 +37,8 @@ impl Control {
                     daemon_incarnation: self.s.incarnation,
                     session_epoch: self.epoch(),
                     rev: self.store.rev(),
+                    rig_id: self.s.rig_id,
+                    name: self.s.name.clone(),
                 }))
             }
             Command::SessionDevices => Ok(ReplyBody::Backends(self.backend_infos())),

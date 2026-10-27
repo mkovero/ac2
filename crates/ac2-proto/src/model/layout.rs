@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::MeasId;
+use crate::units::{MeasId, RigId};
 
 /// The pane tree: a leaf is a pane, a split shares its rectangle between two subtrees.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -139,6 +139,30 @@ pub struct LayoutPane {
     /// Where the operator dropped the plates over the plot and their text size.
     #[serde(default)]
     pub plates: LayoutPlates,
+    /// Which rig the pane shows. Required: what a pane shows is one daemon's ids, so a
+    /// pane that does not say whose they are cannot be read right.
+    pub rig: RigRef,
+}
+
+/// The rig a pane shows. A session is one daemon's, so a measurement's layout (and a rig
+/// meter's) names [`RigRef::ThisRig`] or a pinned [`RigRef::Rig`], never
+/// [`RigRef::Active`]: the tab active when it is loaded may be another rig's, whose ids
+/// would be misread as this one's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RigRef {
+    /// App prefs only: the pane follows the active tab.
+    Active,
+    /// Session files only: the rig the session belongs to, whatever tab is active at load.
+    ThisRig,
+    /// A pinned rig, by its id (never the CURVE key, which a local rig lacks and a rig
+    /// moving to network mode gains); the name is for the operator when it is absent.
+    Rig {
+        /// The pinned rig.
+        id: RigId,
+        /// Its name when pinned.
+        name: String,
+    },
 }
 
 /// A pane's five plates: the legend, the cursor values, the mark's readout, the
@@ -344,8 +368,10 @@ impl PaneLayout {
     /// and 1 leaves one side no room, more than [`Self::MAX_PANES`] panes, a level range
     /// not finite with its top above its bottom (no axis can be drawn on it), and a plate
     /// placed outside 0 … 1 or with a text scale not finite and above 0, a Programme pane
-    /// without inputs (or another kind with them), and content [`PaneContent::check`]
-    /// refuses.
+    /// without inputs (or another kind with them), content [`PaneContent::check`]
+    /// refuses, a pane following the active tab ([`RigRef::Active`]: a layout is one
+    /// daemon's, the active tab at load may be another's) and another rig's pane without
+    /// content (this layout's own measurement is no other rig's).
     pub fn check(&self) -> Result<(), String> {
         let n = self.panes().len();
         if n > Self::MAX_PANES {
@@ -377,6 +403,17 @@ impl PaneLayout {
                     PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Spl | PaneKind::Distortion,
                     Some(PaneContent::Inputs { .. } | PaneContent::Pair { .. }),
                 ) => return Err("only a Programme pane meters inputs".into()),
+                _ => {}
+            }
+            match (&p.rig, &p.content) {
+                (RigRef::Active, _) => {
+                    return Err("a measurement's layout names its own rig or another, \
+                                never the active tab"
+                        .into());
+                }
+                (RigRef::Rig { .. }, None) => {
+                    return Err("another rig's pane names what it shows".into());
+                }
                 _ => {}
             }
             if let Some(c) = &p.content {
@@ -456,5 +493,32 @@ mod tests {
         let p = PaneContent::Pair { left: 2, right: 3 };
         assert_eq!(p.inputs(), vec![2, 3]);
         assert_eq!(p.meas(), None);
+    }
+
+    #[test]
+    fn a_layout_never_follows_the_active_tab() {
+        let mut l = crate::samples::pane_layout();
+        l.panes_mut()[0].rig = RigRef::Active;
+        assert_eq!(
+            l.check(),
+            Err("a measurement's layout names its own rig or another, never the active tab".into())
+        );
+    }
+
+    #[test]
+    fn another_rigs_pane_names_what_it_shows() {
+        let mut l = crate::samples::pane_layout();
+        let p = &mut l.panes_mut()[0];
+        assert_eq!(p.content, None);
+        p.rig = RigRef::Rig {
+            id: RigId(7),
+            name: "ketunkolo".into(),
+        };
+        assert_eq!(
+            l.check(),
+            Err("another rig's pane names what it shows".into())
+        );
+        l.panes_mut()[0].content = Some(PaneContent::Meas { meas: MeasId(3) });
+        assert_eq!(l.check(), Ok(()));
     }
 }

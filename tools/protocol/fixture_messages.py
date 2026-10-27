@@ -310,6 +310,7 @@ def _layout_pane(
     transfer_levels=None,
     readout=None,
     programme_view="meters",
+    rig=None,
 ):
     return {
         "kind": kind,
@@ -333,12 +334,14 @@ def _layout_pane(
             "peaks": _plate(),
             "loudness": _plate(),
         },
+        "rig": rig or {"type": "this_rig"},
     }
 
 
 # samples::pane_layout(): a transfer pane (level axis zoomed, cursor values dragged to the
 # bottom-left at twice the text size) beside an SPL meter picked for measurement 2 over a
-# Programme pane metering the pair of inputs 3 and 4 in its goniometer view.
+# Programme pane metering the pair of inputs 3 and 4 in its goniometer view. The meter is
+# pinned to another rig; the other two show this session's.
 PANE_LAYOUT = {
     "type": "split",
     "axis": "row",
@@ -359,7 +362,11 @@ PANE_LAYOUT = {
         "a": {
             "type": "pane",
             "pane": _layout_pane(
-                "spl", "magnitude", "no_grid", content={"type": "meas", "meas": 2}
+                "spl",
+                "magnitude",
+                "no_grid",
+                content={"type": "meas", "meas": 2},
+                rig={"type": "rig", "id": 0x0FEDCBA987654321, "name": "ketunkolo"},
             ),
         },
         "b": {

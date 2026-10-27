@@ -13,6 +13,9 @@
 //! - Before the Programme pane had a meters and a goniometer view a pane carried no
 //!   `programme_view`, and a pair's pane drew both: session format 34 and rig settings
 //!   version 6 ([`programme_views`]). Every caller runs it after [`plates_add_loudness`].
+//! - Before a pane named the rig it shows a layout was one daemon's by being in its file:
+//!   session format 35 and rig settings version 7 ([`panes_this_rig`]). Runs last, on the
+//!   panes the earlier steps leave.
 
 use ac2_proto::model::layout::PaneLayout;
 use serde_json::{Map, Value};
@@ -96,6 +99,24 @@ fn plates_add(v: &mut Value, plate: &str) {
 pub fn programme_views(v: &mut Value) {
     let mut panes = count_panes(v);
     add_views(v, &mut panes);
+}
+
+/// Gives every pane in the layout tree `v` without a `rig` the rig of the file it is in
+/// (`{"type": "this_rig"}`): every pane of such a file showed that file's daemon. A pane
+/// is an object holding both `kind` and `chrome`; anything else is walked through.
+pub fn panes_this_rig(v: &mut Value) {
+    match v {
+        Value::Object(obj) if is_pane(obj) => {
+            obj.entry("rig").or_insert_with(|| {
+                let mut r = Map::new();
+                r.insert("type".into(), Value::from("this_rig"));
+                Value::Object(r)
+            });
+        }
+        Value::Object(obj) => obj.values_mut().for_each(panes_this_rig),
+        Value::Array(items) => items.iter_mut().for_each(panes_this_rig),
+        _ => {}
+    }
 }
 
 fn is_pane(obj: &Map<String, Value>) -> bool {
@@ -327,12 +348,29 @@ mod tests {
     fn pair_panes_split_only_while_the_tree_stays_within_its_pane_limit() {
         let mut v = row(15, &[3, 9]);
         programme_views(&mut v);
+        panes_this_rig(&mut v);
         assert_eq!(count_panes(&v), PaneLayout::MAX_PANES);
         let text = v.to_string();
         assert_eq!(text.matches("\"goniometer\"").count(), 1, "{text}");
         assert_eq!(text.matches("\"meters\"").count(), 15, "{text}");
         let layout: PaneLayout = serde_json::from_value(strip_for_wire(v)).expect("a wire layout");
         layout.check().expect("within the pane limit");
+    }
+
+    #[test]
+    fn every_pane_gains_the_rig_of_its_file() {
+        let pinned = json!({"type": "rig", "id": 7, "name": "ketunkolo"});
+        let mut v = json!({"type": "split", "a": {"type": "pane", "pane": {
+            "kind": "spl", "chrome": "full"
+        }}, "b": {"type": "pane", "pane": {
+            "kind": "transfer", "chrome": "full", "rig": pinned.clone()
+        }}});
+        panes_this_rig(&mut v);
+        assert_eq!(v["a"]["pane"]["rig"], json!({"type": "this_rig"}));
+        assert_eq!(
+            v["b"]["pane"]["rig"], pinned,
+            "a pane naming its rig keeps it"
+        );
     }
 
     /// The test panes carry only the keys the walk reads; fill the rest the wire requires.

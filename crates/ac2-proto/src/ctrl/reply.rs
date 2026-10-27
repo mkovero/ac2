@@ -11,7 +11,7 @@ use crate::model::{
     LoopbackDetection, Measurement, Mic, OutputSetup, Preview, RecordingFile, RecordingRun,
     ServerInfo, Session, SessionFile, SplHistory, SplLogPage, SweepRun, TraceData, TraceMeta,
 };
-use crate::units::{Blob, ClientId, DaemonIncarnation, RequestId, Rev, SessionEpoch};
+use crate::units::{Blob, ClientId, DaemonIncarnation, RequestId, Rev, RigId, SessionEpoch};
 
 /// Reply to `hello`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +27,10 @@ pub struct Welcome {
     pub session_epoch: SessionEpoch,
     /// Current rev.
     pub rev: Rev,
+    /// The daemon's identity, the same on every connect and after every restart.
+    pub rig_id: RigId,
+    /// The rig's name (`ac2d --name`, default *ac2 on <hostname>*), for display only.
+    pub name: String,
 }
 
 /// Successful reply payloads. Wire: `{"type": "<name>", "value": …}`.

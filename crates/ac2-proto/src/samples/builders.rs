@@ -175,7 +175,8 @@ pub(super) fn sweep_config() -> SweepConfig {
 /// A transfer pane beside an SPL meter over a Programme pane, the transfer one in its phase
 /// view with its level axis zoomed and its cursor values dragged to the bottom-left at twice
 /// the text size, the meter picked for measurement 2, the Programme pane metering the pair
-/// of inputs 3 and 4 in its goniometer view.
+/// of inputs 3 and 4 in its goniometer view. The meter is pinned to another rig; the other
+/// two show this session's.
 pub fn pane_layout() -> PaneLayout {
     use crate::model::layout::*;
     let pane = |kind, transfer_view| LayoutPane {
@@ -189,6 +190,7 @@ pub fn pane_layout() -> PaneLayout {
         content: None,
         levels: LayoutLevels::default(),
         plates: LayoutPlates::default(),
+        rig: RigRef::ThisRig,
     };
     PaneLayout::Split {
         axis: SplitAxis::Row,
@@ -219,6 +221,10 @@ pub fn pane_layout() -> PaneLayout {
                 pane: Box::new(LayoutPane {
                     chrome: PlotChrome::NoGrid,
                     content: Some(PaneContent::Meas { meas: MeasId(2) }),
+                    rig: RigRef::Rig {
+                        id: RigId(0x0fed_cba9_8765_4321),
+                        name: "ketunkolo".into(),
+                    },
                     ..pane(PaneKind::Spl, TransferView::Magnitude)
                 }),
             }),

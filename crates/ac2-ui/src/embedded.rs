@@ -205,6 +205,8 @@ pub fn start_embedded_with(
     // The same global maximum as a stand-alone `ac2d` without `--max-level`.
     let mut config = DaemonConfig::new(std::sync::Arc::clone(&audio[0]), listen, -10.0);
     config.backends = audio;
+    config.name = "this computer".into();
+    config.rig_id = rig_id_source(backend);
     // Calibrations of real devices persist in the same store a stand-alone `ac2d` uses; a
     // simulated rig's stay in memory.
     config.cal_store = (backend != EmbeddedBackend::Fake).then(ac2_paths::cal_store);
@@ -230,6 +232,18 @@ pub fn start_embedded_with(
         set_up_demo(e.client_config("ac2-ui embedded setup"))?;
     }
     Ok(e)
+}
+
+/// The simulated rig keeps nothing, its identity included; real audio keeps its own,
+/// apart from a stand-alone daemon's on this machine, which may be connected beside it.
+#[cfg(feature = "embedded")]
+fn rig_id_source(backend: EmbeddedBackend) -> ac2d::RigIdSource {
+    match backend {
+        EmbeddedBackend::Fake => ac2d::RigIdSource::Ephemeral,
+        EmbeddedBackend::CoreAudio | EmbeddedBackend::Jack | EmbeddedBackend::Asio => {
+            ac2d::RigIdSource::File(ac2_paths::app_rig_id())
+        }
+    }
 }
 
 /// Opens the simulated rig's session and starts "demo", as a client of the daemon. Runs on
@@ -294,4 +308,28 @@ pub fn start_embedded_with(
 ) -> Result<Embedded, EmbeddedError> {
     let _ = (backend, setup);
     Err(EmbeddedError::Unavailable)
+}
+
+#[cfg(all(test, feature = "embedded"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_simulated_rig_keeps_no_identity_and_real_audio_its_own() {
+        assert_eq!(
+            rig_id_source(EmbeddedBackend::Fake),
+            ac2d::RigIdSource::Ephemeral
+        );
+        for b in [
+            EmbeddedBackend::Jack,
+            EmbeddedBackend::CoreAudio,
+            EmbeddedBackend::Asio,
+        ] {
+            assert_eq!(
+                rig_id_source(b),
+                ac2d::RigIdSource::File(ac2_paths::app_rig_id())
+            );
+            assert_ne!(ac2_paths::app_rig_id(), ac2_paths::rig_id());
+        }
+    }
 }

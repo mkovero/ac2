@@ -232,6 +232,7 @@ fn old_meas(v: &Value) -> Result<OldMeas, String> {
         ac2_traces::old_layout::plates_add_peaks(&mut d);
         ac2_traces::old_layout::plates_add_loudness(&mut d);
         ac2_traces::old_layout::programme_views(&mut d);
+        ac2_traces::old_layout::panes_this_rig(&mut d);
         d
     });
     let layout = old_layout

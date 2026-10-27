@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 71`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 72`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -42,7 +42,18 @@ fields first:
 
 The first request on a connection is `hello`; its reply `welcome` carries `server`
 (`ac2d <version> (build <id>)`), `client_id` (the identity the daemon bound to the connection: the ZAP User-Id under CURVE, otherwise a
-daemon-assigned id), `daemon_incarnation`, `session_epoch` and `rev`.
+daemon-assigned id), `daemon_incarnation`, `session_epoch`, `rev`, `rig_id` and `name`.
+
+`rig_id` (u64, never 0) is the daemon's identity: random, made once and kept in a file
+(`rig-id` in the ac2 config directory, 16 lowercase hex digits and a newline; the app's
+embedded daemon on real audio keeps `app-rig-id` beside it), the same across reconnects,
+restarts, renames, address changes and a move between local and network mode, in every
+mode. It is not the CURVE key, which a local daemon does not have. A file that cannot be
+read is set aside (`damaged_files`, kind `rig_id`) and a new id made, so a client sees a
+new rig, never takes it for another. An embedded simulated rig has a new id every start.
+`name` is the rig's name (`ac2d --name`, default `ac2 on <hostname>`; `this computer` for
+the app's embedded daemon), display only and read anew on each connect; a network-mode
+daemon advertises it over mDNS.
 
 Frame headers carry `v` too; a frame at another version is refused.
 
@@ -226,7 +237,7 @@ set), `cues` ([`RigCue`] {`meas`, `subject`:
 `reason`, `at`: `WallNs`}: state files found damaged at this start, set aside and replaced
 by their previous copy or a default; empty on a sound start, kept until the daemon restarts).
 `StateFile` is `autosave`, `trace`, `spl_log`, `band_log`, `working`, `rig_settings`,
-`rig_logs`, `calibrations`, `server_key` or `authorized_clients`. `CueSubject` is
+`rig_logs`, `calibrations`, `server_key`, `authorized_clients` or `rig_id`. `CueSubject` is
 tagged by `type`: `meter` (the whole meter: the worst state of its limits), `window`
 {duration, weighting}, `peak` {quantity}, `band` {duration, weighting, nominal},
 `predicted`. `CueState` is `ok` (under the limit, or none), `near`, `over` or `fault` (the rig
@@ -374,7 +385,7 @@ A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axi
 column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
 `ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is {`kind`,
 `transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `programme_view`, `chrome`,
-`content`, `levels`, `plates`}
+`content`, `levels`, `plates`, `rig`}
 (snake_case enums, `ac2_proto::model::layout`): its kind (`transfer`, `spectrum`, `spl`,
 `distortion`, `programme`), the view of each kind it may be turned into (`programme_view`:
 `meters` or `goniometer`; a goniometer on a pane that meters no pair draws its meters), what it was picked
@@ -393,7 +404,12 @@ readout, docked beside or above the bars and sized from the room it gets while `
 (its `scale` then only sizes it once floated): `at` nil for the client's own placement or
 [x, y], each in 0 … 1, the plate's top-left corner as a fraction of the room the plot leaves
 around the plate, so a dropped plate stays inside its plot at any pane size; `scale` the
-plate's text size, 1 being the theme's; missing = all nil at 1). The focused pane, a
+plate's text size, 1 being the theme's; missing = all nil at 1) and the rig it shows
+(`rig`, required: `{type: this_rig}`, the daemon whose measurement this is, or `{type: rig,
+id: RigId, name}`, a pane pinned to another rig, whose `content` is that daemon's ids, kept
+opaque here and resolved by the client; `{type: active}`, following a client's active
+tab, is refused `invalid` in a layout, and so is a `rig` pane without `content`, since the
+layout's own measurement is no other rig's). The focused pane, a
 maximised or full-screen pane and the window are each client's. `invalid` for a ratio out
 of range, for more than 16 panes, for a level range not finite with `hi` above `lo` and for
 a plate `at` outside 0 … 1 or a `scale` not finite and positive; a session file's layout

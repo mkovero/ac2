@@ -419,3 +419,57 @@ fn keepalives_carry_the_host_the_callback_load_and_the_xruns() {
     }
     h.shutdown();
 }
+
+fn welcome(h: &ac2d::Handle) -> ac2_proto::Welcome {
+    let (mut c, _s) = connect(h, &[]);
+    match c.ok(Command::Hello {
+        client: "test".into(),
+    }) {
+        ReplyBody::Welcome(w) => w,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The hello tells the rig's name and id; an id kept in its file is the same after a
+/// restart, one set aside as damaged is replaced and reported, and an ephemeral one is new
+/// every start.
+#[test]
+fn the_rig_id_outlives_a_restart_and_the_name_is_told() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("rig-id");
+    let start = |name: &str| {
+        let mut cfg = config(manual_rig(), inproc(&unique(name)));
+        cfg.name = "FOH rack".into();
+        cfg.rig_id = ac2d::RigIdSource::File(file.clone());
+        Daemon::start(cfg).unwrap()
+    };
+    let h = start("rig-id-a");
+    let first = welcome(&h);
+    assert_eq!(first.name, "FOH rack");
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        format!("{}\n", first.rig_id)
+    );
+    h.shutdown();
+    let h = start("rig-id-b");
+    assert_eq!(welcome(&h).rig_id, first.rig_id);
+    h.shutdown();
+
+    std::fs::write(&file, b"torn").unwrap();
+    let h = start("rig-id-c");
+    let fresh = welcome(&h).rig_id;
+    assert_ne!(fresh, first.rig_id);
+    let (st, _, _) = snapshot(&mut connect(&h, &[]).0);
+    let d = &st.rig.damaged_files;
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].kind, ac2_proto::model::StateFile::RigId);
+    assert!(d[0].set_aside_as.is_some());
+    h.shutdown();
+
+    let a = Daemon::start(config(manual_rig(), inproc(&unique("rig-id-e1")))).unwrap();
+    let b = Daemon::start(config(manual_rig(), inproc(&unique("rig-id-e2")))).unwrap();
+    assert_ne!(welcome(&a).rig_id, welcome(&b).rig_id);
+    a.shutdown();
+    b.shutdown();
+}

@@ -62,6 +62,7 @@ fn kind_name(k: StateFile) -> &'static str {
         StateFile::Calibrations => "calibration store",
         StateFile::ServerKey => "server key",
         StateFile::AuthorizedClients => "authorized clients",
+        StateFile::RigId => "rig id",
     }
 }
 
